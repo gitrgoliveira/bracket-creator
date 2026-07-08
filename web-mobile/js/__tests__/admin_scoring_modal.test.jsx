@@ -1281,6 +1281,23 @@ describe('item 7: non-points decisions advance to next match', () => {
       expect(onClose).not.toHaveBeenCalled();
     });
 
+    // mp-y3nk: onAfterDecision must receive the resolved result (winner/status),
+    // so an offline shiaijo host can advance the LOCAL bracket for a decision-
+    // completed bout the same way the score path does. Passing no args left a
+    // decision-completed final stuck on placeholders until Refresh/SSE.
+    it('passes the resolved decision result to onAfterDecision (winner)', async () => {
+      const onAfterDecision = vi.fn().mockResolvedValue(undefined);
+      const submit = makeSubmitDecision({
+        match: makeMatch('m1b'), enchoPeriodCount: 0, password: 'pw',
+        ...makeSetters(), onClose: vi.fn(), onAfterDecision, isComplete: false,
+        entityLabel: 'competitors',
+      });
+      await submit('fusenpai', { decisionBy: 'aka', decisionReason: '' });
+      expect(onAfterDecision).toHaveBeenCalledWith(
+        expect.objectContaining({ winner: 'Shiro Fighter' }),
+      );
+    });
+
     it('falls back to onClose for fusenpai when onAfterDecision is not set', async () => {
       const onClose = vi.fn();
       const submit = makeSubmitDecision({

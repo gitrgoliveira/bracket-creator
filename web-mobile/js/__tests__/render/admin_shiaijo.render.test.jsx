@@ -1,5 +1,5 @@
 import React from 'react';
-import { render } from '@testing-library/react';
+import { render, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest';
 
 // Window globals required by admin_shiaijo.jsx.
@@ -13,7 +13,10 @@ const STUBBED_GLOBALS = {
   CourtPicker: () => null,
   BracketTree: () => null,
   Icon: ({ name }) => <span>{name}</span>,
-  hasBothSides: () => true,
+  // hasBothSides / isPendingBracketMatch are the REAL implementations published
+  // on window by vitest.setup.render.js (import of admin_helpers.jsx). We
+  // deliberately do NOT stub them: the shiaijo queue's split between actionable
+  // rows and pending placeholder finals (mp-y3nk) depends on their real logic.
   // LAZY: only called in event handlers or guarded effects
   filterMatchesByCourt: (matches, _court) => matches,
   tournamentMatches: () => [],
@@ -116,6 +119,158 @@ describe('AdminShiaijoPage render-smoke', () => {
     window.tournamentMatches = () => [runningTeamMatch];
     window.filterMatchesByCourt = (matches) => matches;
     expect(() => renderPage(makeMinimalTournament())).not.toThrow();
+  });
+
+  // mp-y3nk: a scheduled knockout final whose sides are still "Winner of rX-mY"
+  // feeders must appear in the queue as a non-actionable "Later" row (so a court
+  // whose only remaining bout is a downstream final is not shown as empty/done),
+  // and must NEVER become the startable Up Next card.
+  it('shows a pending placeholder final as a non-actionable "Later" row, never as Up Next', () => {
+    const completedFeeder = {
+      id: 'r2-m0', compId: 'c1', compName: 'Cup', status: 'completed',
+      phase: 'bracket', matchNumber: 1, court: 'A',
+      sideA: { id: 'p1', name: 'Yamada' }, sideB: { id: 'p2', name: 'Tanaka' },
+      winner: { id: 'p1', name: 'Yamada' },
+    };
+    const pendingFinal = {
+      id: 'r3-m0', compId: 'c1', compName: 'Cup', status: 'scheduled',
+      phase: 'bracket', matchNumber: 3, court: 'A',
+      sideA: { id: '', name: 'Winner of r2-m0' },
+      sideB: { id: '', name: 'Winner of r2-m1' },
+    };
+    window.tournamentMatches = () => [completedFeeder, pendingFinal];
+    window.filterMatchesByCourt = (matches) => matches;
+
+    const { getByText, queryByText } = renderPage(makeMinimalTournament());
+
+    // The placeholder text renders (the "Later" row is the visible signal).
+    expect(getByText('Winner of r2-m0')).toBeTruthy();
+    expect(getByText('Winner of r2-m1')).toBeTruthy();
+    // It is flagged as waiting, not actionable.
+    expect(getByText('Waiting')).toBeTruthy();
+    // Crucially: it never surfaces a Start button (no real Up Next exists here).
+    expect(queryByText('Start match')).toBeNull();
+  });
+
+  // mp-y3nk Phase 2: the manual "Refresh" button re-pulls the court feed on
+  // demand, the operator's recovery when the queue looks stale after a dropped
+  // connection. It must call fetchCourtMatches again beyond the mount fetch.
+  it('Refresh button re-pulls the court feed on click', async () => {
+    const fetchCourtMatches = vi.fn().mockResolvedValue([]);
+    const prevFetch = window.API.fetchCourtMatches;
+    const prevSub = window.API.subscribeToEvents;
+    window.API.fetchCourtMatches = fetchCourtMatches;
+    window.API.subscribeToEvents = () => () => {};
+    window.tournamentMatches = () => [];
+    window.filterMatchesByCourt = (matches) => matches;
+    try {
+      let utils;
+      // act() wraps the async setCourtComps/setRefreshing updates the mount
+      // fetch and the click trigger.
+      await act(async () => { utils = renderPage(makeMinimalTournament()); });
+      const callsAfterMount = fetchCourtMatches.mock.calls.length;
+      expect(callsAfterMount).toBeGreaterThanOrEqual(1);
+      await act(async () => { utils.getByRole('button', { name: /refresh/i }).click(); });
+      expect(fetchCourtMatches.mock.calls.length).toBeGreaterThan(callsAfterMount);
+    } finally {
+      window.API.fetchCourtMatches = prevFetch;
+      window.API.subscribeToEvents = prevSub;
+    }
+  });
+
+  // mp-y3nk Phase 3: "Run now" on a pending final opens the resolve-feeders
+  // modal; recording each feeder's winner calls overrideBracketWinner (which
+  // server-side propagates to resolve the final) and then refetches the court.
+  it('Run now → recording feeder winners calls overrideBracketWinner per feeder', async () => {
+    const rounds = [
+      [
+        { id: 'm-r2-0', status: 'scheduled', sideA: { id: 'a', name: 'Alice' }, sideB: { id: 'b', name: 'Bob' } },
+        { id: 'm-r2-1', status: 'scheduled', sideA: { id: 'c', name: 'Carol' }, sideB: { id: 'd', name: 'Dan' } },
+      ],
+      [
+        { id: 'm-r1-0', status: 'scheduled', sideA: { id: '', name: 'Winner of r2-m0' }, sideB: { id: '', name: 'Winner of r2-m1' } },
+      ],
+    ];
+    const comp = { id: 'c1', name: 'Cup', bracket: { rounds } };
+    const pendingFinal = {
+      id: 'm-r1-0', compId: 'c1', compName: 'Cup', status: 'scheduled',
+      phase: 'bracket', matchNumber: 3, court: 'A',
+      sideA: { id: '', name: 'Winner of r2-m0' }, sideB: { id: '', name: 'Winner of r2-m1' },
+    };
+    const overrideBracketWinner = vi.fn().mockResolvedValue(true);
+    const prevOverride = window.API.overrideBracketWinner;
+    window.API.overrideBracketWinner = overrideBracketWinner;
+    window.tournamentMatches = () => [pendingFinal];
+    window.filterMatchesByCourt = (matches) => matches;
+    try {
+      let utils;
+      await act(async () => { utils = renderPage(makeMinimalTournament({ competitions: [comp] })); });
+      await act(async () => { utils.getByRole('button', { name: /run now/i }).click(); });
+      // Pick a winner for each feeder, then confirm.
+      await act(async () => { utils.getByRole('button', { name: 'Alice' }).click(); });
+      await act(async () => { utils.getByRole('button', { name: 'Carol' }).click(); });
+      await act(async () => { utils.getByRole('button', { name: /record & make startable/i }).click(); });
+      expect(overrideBracketWinner).toHaveBeenCalledTimes(2);
+      expect(overrideBracketWinner).toHaveBeenCalledWith('c1', 'm-r2-0', 'Alice', expect.anything());
+      expect(overrideBracketWinner).toHaveBeenCalledWith('c1', 'm-r2-1', 'Carol', expect.anything());
+    } finally {
+      window.API.overrideBracketWinner = prevOverride;
+    }
+  });
+
+  // mp-y3nk offline console: when the override write is only QUEUED (offline),
+  // resolving feeders must still optimistically advance the LOCAL bracket so the
+  // final becomes a startable Up Next immediately (not stuck in "Later"). This is
+  // the "run the competition offline" path.
+  it('offline resolve (queued write) advances the local bracket so the final is startable', async () => {
+    const rounds = [
+      [
+        { id: 'm-r2-0', status: 'scheduled', sideA: { id: 'a', name: 'Alice' }, sideB: { id: 'b', name: 'Bob' } },
+        { id: 'm-r2-1', status: 'scheduled', sideA: { id: 'c', name: 'Carol' }, sideB: { id: 'd', name: 'Dan' } },
+      ],
+      [
+        { id: 'm-r1-0', status: 'scheduled', sideA: { id: '', name: 'Winner of r2-m0' }, sideB: { id: '', name: 'Winner of r2-m1' } },
+      ],
+    ];
+    const comp = { id: 'c1', name: 'Cup', bracket: { rounds } };
+    const pendingFinal = {
+      id: 'm-r1-0', compId: 'c1', compName: 'Cup', status: 'scheduled',
+      phase: 'bracket', matchNumber: 3, court: 'A',
+      sideA: { id: '', name: 'Winner of r2-m0' }, sideB: { id: '', name: 'Winner of r2-m1' },
+    };
+    // OFFLINE: override returns a queued discriminator instead of confirming.
+    const overrideBracketWinner = vi.fn().mockResolvedValue({ queued: true });
+    const prevOverride = window.API.overrideBracketWinner;
+    window.API.overrideBracketWinner = overrideBracketWinner;
+    // tournamentMatches re-derives queue rows from each comp's bracket.rounds, so
+    // an optimistic advance to the bracket surfaces the resolved final.
+    window.tournamentMatches = (t) => {
+      const c = (t.competitions || []).find((x) => x.id === 'c1');
+      const r = c && c.bracket && c.bracket.rounds;
+      const out = [];
+      if (r) {
+        r[0].forEach((m) => out.push({ ...m, compId: 'c1', compName: 'Cup', phase: 'bracket', court: 'A' }));
+        r[1].forEach((m, i) => out.push({ ...m, id: 'm-r1-' + i, compId: 'c1', compName: 'Cup', phase: 'bracket', matchNumber: 3, court: 'A' }));
+      }
+      return out.length ? out : [pendingFinal];
+    };
+    window.filterMatchesByCourt = (matches) => matches;
+    try {
+      let utils;
+      await act(async () => { utils = renderPage(makeMinimalTournament({ competitions: [comp] })); });
+      await act(async () => { utils.getByRole('button', { name: /run now/i }).click(); });
+      await act(async () => { utils.getByRole('button', { name: 'Alice' }).click(); });
+      await act(async () => { utils.getByRole('button', { name: 'Carol' }).click(); });
+      await act(async () => { utils.getByRole('button', { name: /record & make startable/i }).click(); });
+      // The final now shows resolved competitors (no placeholder) and is startable
+      // even though the override only queued (offline).
+      expect(utils.queryByText(/Winner of r2/)).toBeNull(); // no placeholder left anywhere
+      expect(utils.getAllByText('Alice').length).toBeGreaterThan(0);
+      expect(utils.getAllByText('Carol').length).toBeGreaterThan(0);
+      expect(utils.getByRole('button', { name: /start match/i })).toBeTruthy();
+    } finally {
+      window.API.overrideBracketWinner = prevOverride;
+    }
   });
 
   // Guard: verify that a missing window scope reference causes a render failure.

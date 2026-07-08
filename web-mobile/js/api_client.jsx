@@ -15,7 +15,11 @@
 // where `msg` is the server-reported `error` field if present, else a
 // per-method default string. Callers decide whether to .catch and toast.
 //
-// Empty-body methods (overridePoolRank, overrideBracketWinner,
+// overrideBracketWinner is the exception: it returns { applied } parsed from
+// the 200 body (mp-y3nk), so the caller can tell a landed write from a stale
+// reconnect replay the server dropped.
+//
+// Empty-body methods (overridePoolRank,
 // resetOverrides, updateMatchTime, moveMatchCourt, updateSchedule,
 // deleteCompetition) deliberately return `true`
 // rather than `res.json()`: calling res.json() on a 200/204 with no
@@ -84,6 +88,38 @@ function normalizeViewerCompItem(item) {
 /** Composite key for per-(compID, matchID) maps. Prevents collisions across competitions. */
 function _revKey(compID, matchID) { return `${compID}:${matchID}`; }
 
+// ---------------------------------------------------------------------------
+// mp-y3nk: server-clock offset for timestamp reconciliation.
+//
+// Writes (score / override-winner) are stamped in SERVER-RELATIVE time so an
+// offline court's changes reconcile against other courts by ONE clock, not each
+// tablet's local clock. The offset is learned from GET /api/time and refreshed
+// on reconnect. Until the first successful learn, the offset is 0 (writes carry
+// approximately local time); the server treats an unstamped/legacy 0 as
+// arrival-order, and a small offset error only matters for genuinely concurrent
+// same-field edits, so the degradation is graceful.
+// ---------------------------------------------------------------------------
+let _serverClockOffsetMs = 0;
+async function _learnServerClockOffset() {
+    try {
+        const t0 = Date.now();
+        const res = await fetchWithTimeout('/api/time', {}, 5000);
+        if (!res.ok) return;
+        const body = await res.json();
+        const t1 = Date.now();
+        if (typeof body.nowMs !== 'number') return;
+        // Net out the round-trip: estimate the server clock at the response
+        // arrival by adding half the RTT to the reported time.
+        _serverClockOffsetMs = (body.nowMs + Math.round((t1 - t0) / 2)) - t1;
+    } catch (_e) {
+        // Offline / timeout: keep the last known offset (0 on first ever call).
+    }
+}
+// _serverNowMs returns the current time in the server's clock frame. Never
+// negative-guarded: callers only compare relative order, so a monotonic-ish
+// value is what matters.
+function _serverNowMs() { return Date.now() + _serverClockOffsetMs; }
+
 const _matchRevCounters = new Map(); // compID:matchID → int
 function _nextRev(compID, matchID) {
     const key = _revKey(compID, matchID);
@@ -125,7 +161,7 @@ const _revSession = (typeof crypto !== 'undefined' && crypto.randomUUID)
  */
 
 /**
- * @typedef {'score'|'decision'|'lineup'} WriteKind
+ * @typedef {'score'|'decision'|'lineup'|'override'} WriteKind
  */
 
 /**
@@ -245,6 +281,23 @@ function _notifyTerminalWriteFailed(info) {
     }
 }
 
+// Bracket-resync channel. When a queued override-winner assertion the server
+// LWW-dropped returns 200 {"applied": false} and emits NO SSE broadcast, any
+// optimistic local bracket advance from it is stale. This channel asks listeners
+// (e.g. AdminShiaijo) to refetch. This is a BENIGN supersede: do NOT reuse
+// _terminalFailListeners, which surfaces a "not saved" ERROR state. Payload:
+// {compID, matchID, reason}.
+const _bracketResyncListeners = new Set();
+function subscribeBracketResync(fn) {
+    _bracketResyncListeners.add(fn);
+    return () => _bracketResyncListeners.delete(fn);
+}
+function _notifyBracketResync(info) {
+    for (const fn of _bracketResyncListeners) {
+        try { fn(info); } catch (_e) { /* swallow */ }
+    }
+}
+
 /**
  * Recompute and publish the correct sync status from current state:
  *   offline  : _offlineFlag is set and the queue still has entries
@@ -346,6 +399,17 @@ async function _flushQueue() {
                     if (res.ok) {
                         // Success (HTTP 200/201, including a stale {stale:true} no-op): remove
                         // from queue only if no newer write has replaced this descriptor.
+                        if (terminal && kind === 'override') {
+                            // A queued feeder-winner assertion the server LWW-dropped returns
+                            // 200 {"applied": false} and emits NO broadcast, so any optimistic
+                            // local advance from it is stale. Ask listeners to refetch. This is a
+                            // benign supersede, NOT a write failure, so do NOT use the terminal-fail
+                            // channel (which surfaces a "not saved" error).
+                            const body = await res.json().catch(() => ({}));
+                            if (body && body.applied === false) {
+                                _notifyBracketResync({ compID, matchID, reason: 'lww_dropped' });
+                            }
+                        }
                         if (_writeQueue.get(key) === descriptor) {
                             _writeQueue.delete(key);
                             // A confirmed terminal score write needs no further rev
@@ -506,6 +570,11 @@ if (typeof window !== 'undefined') {
 // has network. All localStorage access is wrapped in try/catch for
 // private-browsing / quota safety.
 // ---------------------------------------------------------------------------
+
+// mp-y3nk: learn the server-clock offset at load so the first writes are already
+// stamped in the server's frame (refreshed again on each SSE (re)connect).
+if (typeof fetch === 'function') { _learnServerClockOffset(); }
+
 ;(function _rehydrateQueue() {
     try {
         const raw = localStorage.getItem(QUEUE_STORAGE_KEY);
@@ -664,6 +733,9 @@ function _ensureConnected() {
         // F3: a successful open resets the backoff counter so the next error
         // reconnects fast (starting from 1 s) rather than inheriting a long delay.
         _reconnectAttempt = 0;
+        // mp-y3nk: (re)learn the server-clock offset on every connect so writes
+        // stamped after a reconnect stay in the server's frame.
+        _learnServerClockOffset();
         _fanOutStatus('open');
     };
 
@@ -1079,6 +1151,8 @@ const API = {
     },
     async recordScore(compID, matchID, result, password, match) {
         const payload = toBackendMatchResult(result, match || result);
+        // mp-y3nk: stamp in server-relative time for last-write-wins reconciliation.
+        payload.modifiedAt = _serverNowMs();
 
         // C2: stamp monotonic rev on running-status writes so the server's
         // rev-guard can drop out-of-order deliveries (e.g. from reconnect flush).
@@ -1334,20 +1408,47 @@ const API = {
         return true;
     },
     async overrideBracketWinner(compID, matchID, winnerName, password) {
-        const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/override-winner`, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Tournament-Password': password
-            },
-            body: JSON.stringify({ winnerName })
-        });
+        const url = `/api/competitions/${compID}/matches/${matchID}/override-winner`;
+        // mp-y3nk: stamp in server-relative time for last-write-wins reconciliation.
+        const payload = { winnerName, modifiedAt: _serverNowMs() };
+        let res;
+        try {
+            // fetchWithTimeout so a stalled request is treated as offline rather
+            // than hanging the "Run now" flow.
+            res = await fetchWithTimeout(url, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Tournament-Password': password
+                },
+                body: JSON.stringify(payload)
+            });
+        } catch (_networkErr) {
+            // mp-y3nk Phase 4: offline / timeout. An operator's feeder-winner
+            // assertion (the "Run now" recovery) must survive an update outage
+            // like a score does, so queue it as a terminal write. It replays on
+            // reconnect; the server then propagates it into the dependent final's
+            // sides. Keyed distinctly from score writes ("override:…") so an
+            // assertion and a score for the same match id never collide under the
+            // queue's last-write-wins-per-key rule. On a later non-retryable 4xx
+            // (e.g. the feeder resolved differently server-side) _flushQueue
+            // surfaces it via the terminal-write-failed channel rather than
+            // silently applying, preserving bracket integrity.
+            _enqueueTerminalWrite(`override:${compID}:${matchID}`, 'override', 'PUT', url, payload, password, compID, matchID);
+            return { queued: true };
+        }
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || "Failed to override winner");
         }
-        // Backend returns 200 with empty body: see overridePoolRank.
-        return true;
+        // Backend replies 200 {"applied": <bool>} (mp-y3nk). applied=false means
+        // the timestamp guard dropped this assertion because a newer/equal result
+        // already exists for the feeder, so the server kept a different outcome and
+        // the caller must NOT trust its optimistic pick. An older server (or any
+        // absent body) yields {} here; default applied=true so back-compat callers
+        // keep advancing exactly as before.
+        const body = await res.json().catch(() => ({}));
+        return { applied: body.applied !== false };
     },
     async resetOverrides(compID, password, adminPassword) {
         const res = await fetch(`/api/competitions/${compID}/overrides`, {
@@ -2014,7 +2115,7 @@ const API = {
     },
 };
 
-export { API, subscribeSyncStatus, subscribeTerminalWriteFailed, enqueueRunningWrite };
+export { API, subscribeSyncStatus, subscribeTerminalWriteFailed, subscribeBracketResync, enqueueRunningWrite };
 
 if (typeof window !== 'undefined') {
     window.API = API;
@@ -2024,6 +2125,9 @@ if (typeof window !== 'undefined') {
     // mp-gpra: terminal-write failure pub/sub: lets the score editor show an
     // explicit "not saved" state when a queued terminal write is permanently dropped.
     window.subscribeTerminalWriteFailed = subscribeTerminalWriteFailed;
+    // mp-y3nk: bracket-resync pub/sub: signals AdminShiaijo to refetch when a
+    // queued override the server LWW-dropped leaves stale optimistic bracket state.
+    window.subscribeBracketResync = subscribeBracketResync;
     // mp-gpra: reconnectEvents and hasPendingTerminalWrite are on window.API
     // (via the API object above): no separate window assignments needed.
 }

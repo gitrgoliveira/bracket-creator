@@ -814,6 +814,45 @@ func TestMatchHandlers_Extended(t *testing.T) {
 	})
 }
 
+// TestOverrideWinner_ErrorStatusMapping pins that the override-winner handler
+// maps engine CLIENT errors to their proper status instead of a blanket 500
+// (Copilot mp-y3nk): an unknown match id -> 404 (engine.NotFoundError) and a
+// not-yet-ready match (unresolved feeder side) -> 400 (engine.ValidationError).
+// Before the mapping both returned 500, which made the offline terminal-write
+// replay treat a permanent client error as retryable and wedge sync status.
+func TestOverrideWinner_ErrorStatusMapping(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	comp := state.Competition{ID: "ovm", Status: "setup", Courts: []string{"A"}}
+	require.NoError(t, store.SaveCompetition(&comp))
+	// b-ready is playable; b-notready has an unresolved (empty) side so
+	// bracketMatchPlayable is false and the engine returns a ValidationError.
+	require.NoError(t, store.SaveBracket("ovm", &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{{ID: "b-notready", SideA: "P1", SideB: ""}},
+		},
+	}))
+
+	t.Run("unknown match returns 404", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]string{"winnerName": "P1"})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/ovm/matches/does-not-exist/override-winner", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code, "unknown match must be 404, not 500; body: %s", w.Body.String())
+	})
+
+	t.Run("not-ready match returns 400", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]string{"winnerName": "P1"})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/ovm/matches/b-notready/override-winner", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code, "not-ready match must be 400, not 500; body: %s", w.Body.String())
+	})
+}
+
 func TestRevertMatchToQueueHandler(t *testing.T) {
 	r, store, _, hub, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
@@ -2428,4 +2467,24 @@ func TestSelfRunPolicy_NoRevMetadata(t *testing.T) {
 		assert.Empty(t, stored.Session, "self-run write must not populate runningRevStore with attacker session")
 	}
 	// (If not present at all, the guard skipped storage, also correct.)
+}
+
+// TestClampClientModifiedAt verifies that clampClientModifiedAt rejects
+// hostile/buggy client timestamps that would otherwise freeze a match against
+// later legitimate writes (mp-y3nk, tri-review finding 3). Negative and
+// far-future values fall back to 0 (unstamped -> arrival-order); a plausible
+// value passes through unchanged. The 2s skew window is narrow by design:
+// clients stamp in server-relative time, so only genuine jitter from
+// stamp-to-evaluate latency is allowed.
+func TestClampClientModifiedAt(t *testing.T) {
+	now := time.Now().UnixMilli()
+	assert.Equal(t, int64(0), clampClientModifiedAt(-1), "negative must clamp to 0")
+	assert.Equal(t, int64(0), clampClientModifiedAt(now+modifiedAtMaxSkewMs+60_000), "far-future must clamp to 0")
+	assert.Equal(t, int64(0), clampClientModifiedAt(0), "zero (unstamped) passes through as 0")
+	assert.Equal(t, now-1000, clampClientModifiedAt(now-1000), "a recent past timestamp passes through")
+	// A value inside the 2s skew window is trusted (genuine stamp-to-evaluate jitter).
+	assert.Equal(t, now+1000, clampClientModifiedAt(now+1000), "a slightly-future value inside the skew window passes through")
+	// 60s into the future is far beyond the 2s jitter window: must clamp to 0.
+	// (Bug: old 5-minute window accepted this, allowing match-freeze attacks.)
+	assert.Equal(t, int64(0), clampClientModifiedAt(now+60_000), "60s future is outside 2s skew window: must clamp to 0")
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sideName, hasBothSides, hasPoolOriginPlaceholder, compMatchStats, bracketFullyComplete, normalizeDate, dmyToIso, isoToDmy, compareDmy, isValidDate, validateAndNormalizeDate, decideNumericUpdate, getScoreBtnClass, deriveTournamentDays, normalizeCourts, courtCount, resolveRoundIndex, DATE_ERR_INVALID_FORMAT, DATE_ERR_YEAR_RANGE, MIN_YEAR, MAX_YEAR, MAX_TEAM_SIZE, MAX_COURTS, MAX_RANK, MAX_TOURNAMENT_DURATION_DAYS } from '../admin_helpers.jsx';
+import { sideName, hasBothSides, hasPoolOriginPlaceholder, isPendingBracketMatch, compMatchStats, bracketFullyComplete, normalizeDate, dmyToIso, isoToDmy, compareDmy, isValidDate, validateAndNormalizeDate, decideNumericUpdate, getScoreBtnClass, deriveTournamentDays, normalizeCourts, courtCount, resolveRoundIndex, DATE_ERR_INVALID_FORMAT, DATE_ERR_YEAR_RANGE, MIN_YEAR, MAX_YEAR, MAX_TEAM_SIZE, MAX_COURTS, MAX_RANK, MAX_TOURNAMENT_DURATION_DAYS } from '../admin_helpers.jsx';
 
 describe('sideName', () => {
   it('returns "" for null / undefined', () => {
@@ -155,6 +155,42 @@ describe('hasPoolOriginPlaceholder', () => {
 
   it('returns false for a real participant whose name merely contains "Pool"', () => {
     expect(hasPoolOriginPlaceholder({ sideA: "Liverpool FC", sideB: "Bob" })).toBe(false);
+  });
+});
+
+// isPendingBracketMatch identifies a scheduled knockout match still waiting on a
+// "Winner of rX-mY" feeder. The shiaijo queue shows these as non-actionable
+// "later" rows (mp-y3nk) so a court whose only remaining bout is a downstream
+// final does not read as an empty/finished queue. It is DELIBERATELY narrow:
+// only scheduled bracket-feeder placeholders, never pool-origin placeholders
+// (those belong to the mixed-comp "Knockout filling in" seeding path).
+describe('isPendingBracketMatch', () => {
+  it('is true for a scheduled final with both sides still "Winner of" feeders', () => {
+    expect(isPendingBracketMatch({ status: "scheduled", sideA: "Winner of r2-m0", sideB: "Winner of r2-m1" })).toBe(true);
+  });
+
+  it('is true when only one side is still a "Winner of" feeder (half-resolved final)', () => {
+    expect(isPendingBracketMatch({ status: "scheduled", sideA: "Alice", sideB: "Winner of r2-m1" })).toBe(true);
+    expect(isPendingBracketMatch({ status: "scheduled", sideA: { id: "", name: "Winner of r2-m0" }, sideB: { id: "b", name: "Bob" } })).toBe(true);
+  });
+
+  it('is false once both sides are resolved (it becomes a normal actionable row)', () => {
+    expect(isPendingBracketMatch({ status: "scheduled", sideA: "Alice", sideB: "Bob" })).toBe(false);
+  });
+
+  it('is false for pool-origin placeholders (mixed-comp seeding path, not ours)', () => {
+    expect(isPendingBracketMatch({ status: "scheduled", sideA: "Pool A-1st", sideB: "Pool B-2nd" })).toBe(false);
+    expect(isPendingBracketMatch({ status: "scheduled", sideA: "Pool A-1st", sideB: "Winner of r2-m1" })).toBe(false);
+  });
+
+  it('is false unless the match is scheduled (running/completed are handled elsewhere)', () => {
+    expect(isPendingBracketMatch({ status: "running", sideA: "Winner of r2-m0", sideB: "Winner of r2-m1" })).toBe(false);
+    expect(isPendingBracketMatch({ status: "completed", sideA: "Winner of r2-m0", sideB: "Winner of r2-m1" })).toBe(false);
+  });
+
+  it('is false for structural byes and null', () => {
+    expect(isPendingBracketMatch({ status: "scheduled", sideA: "Alice", sideB: "" })).toBe(false);
+    expect(isPendingBracketMatch(null)).toBe(false);
   });
 });
 

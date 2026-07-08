@@ -701,6 +701,23 @@ type MatchResult struct {
 	// over rather than being dropped as stale against a high-water mark left
 	// by a prior session. Same wire-only persistence guarantees as Rev.
 	RevSession string `json:"revSession,omitempty" yaml:"-"`
+	// ModifiedAt is the SERVER-RELATIVE unix-millis timestamp of the last change
+	// to this match's result-bearing fields (mp-y3nk timestamp reconciliation).
+	// Clients stamp each score/override write with server-relative time (learned
+	// via GET /api/time). Timestamp last-write-wins currently applies to the
+	// BRACKET write path only: for a bracket match the handler drops a write
+	// whose ModifiedAt is older than the stored value (so a reconnecting offline
+	// court's stale change never overwrites a newer one), and it is persisted in
+	// bracket.json (see BracketMatch.ModifiedAt) so the comparison survives a
+	// restart. For POOL matches this field is wire-only: it is NOT written to
+	// pool-matches.csv and NOT yet used for reconciliation (a scoped follow-up),
+	// so it resets to 0 on restart and pool writes keep arrival-order behavior.
+	// The completed-never-reverted guard stays on top regardless. 0
+	// (absent/legacy) means "unstamped": it is treated as arrival-order and still
+	// APPLIES (it does NOT lose to a stamped write), so old files and un-stamped
+	// clients behave exactly as before rather than having a legitimate change
+	// silently dropped. See domain.ApplyByTimestamp.
+	ModifiedAt int64 `json:"modifiedAt,omitempty" yaml:"-"`
 }
 
 // HanteiPtr returns &b when b is true, nil otherwise. Use on READ paths
@@ -846,6 +863,12 @@ type BracketMatch struct {
 	DisplayRound int      `json:"displayRound,omitempty"`
 	Hidden       bool     `json:"hidden,omitempty"`
 	Feeders      []string `json:"feeders,omitempty"`
+	// ModifiedAt mirrors MatchResult.ModifiedAt (mp-y3nk): the server-relative
+	// unix-millis timestamp of the last change to this bracket match's result,
+	// persisted in bracket.json so timestamp reconciliation survives a restart.
+	// 0 = unstamped/legacy: arrival-order, still applies (never dropped). See
+	// domain.ApplyByTimestamp.
+	ModifiedAt int64 `json:"modifiedAt,omitempty"`
 }
 
 type Bracket struct {

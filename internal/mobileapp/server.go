@@ -138,6 +138,8 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	api := r.Group("/api")
 	RegisterScheduleHandlers(api)
 	RegisterVersionHandlers(api)
+	// GET /api/time: server clock for offset learning (timestamp reconciliation).
+	RegisterTimeHandlers(api)
 
 	// Public read-only endpoints for resources whose GET is unauthenticated
 	// (same contract as /api/viewer/*). The write paths for each are on the

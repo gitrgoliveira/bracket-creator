@@ -827,7 +827,9 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   const downloadTemplate = () => {
     const content = participantTemplateCSV(c);
     const blob = new Blob([content], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
+    // Create and revoke both via window.URL, consistent with admin_shell.jsx /
+    // admin_schedule_export.jsx and the unit-test mocks on window.URL.
+    const url = window.URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
     a.download = "participants_template.csv";

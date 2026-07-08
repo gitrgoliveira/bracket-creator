@@ -73,7 +73,7 @@ func RegisterAdminPasswordHandler(r *gin.RouterGroup, store *state.Store, ev Ele
 		// record (and the bulk PUT/POST guards require a name anyway).
 		t, err := store.LoadTournament()
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		if t == nil {
@@ -110,7 +110,7 @@ func RegisterAdminPasswordHandler(r *gin.RouterGroup, store *state.Store, ev Ele
 			return nil
 		})
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 

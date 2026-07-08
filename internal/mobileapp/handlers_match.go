@@ -448,7 +448,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		// engi dispatch and would corrupt standings for flag-scored bouts.
 		comp, err := store.LoadCompetition(id)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		if comp != nil && comp.Engi {
@@ -509,7 +509,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 
@@ -555,7 +555,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		}
 
 		if err := eng.UpdateMatchCourt(id, mid, req.Court); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 
@@ -598,7 +598,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 
@@ -660,7 +660,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		// not let an engi override slip through into inconsistent state.
 		comp, loadErr := store.LoadCompetition(id)
 		if loadErr != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": loadErr.Error()})
+			internalError(c, loadErr)
 			return
 		}
 		if comp != nil && comp.Engi {
@@ -682,7 +682,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			case errors.As(err, &validationErr):
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			default:
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				internalError(c, err)
 			}
 			return
 		}
@@ -712,7 +712,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		}
 
 		if err := eng.UpdateMatchTime(id, mid, req.ScheduledAt); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 
@@ -1179,7 +1179,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				c.JSON(http.StatusNotFound, gin.H{"error": txErr.Error()})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": txErr.Error()})
+			internalError(c, txErr)
 			return
 		}
 		if staleAfterComplete {
@@ -1272,7 +1272,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				c.JSON(http.StatusBadRequest, gin.H{"error": valErr.Error()})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": engErr.Error()})
+			internalError(c, engErr)
 			return
 		}
 

@@ -71,7 +71,7 @@ func RegisterPublicEligibilityHandlers(r *gin.RouterGroup, store CompetitorStatu
 		}
 		statuses, err := store.LoadCompetitorStatus(id)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		// Return as a slice so the response shape is stable / orderable
@@ -119,7 +119,7 @@ func RegisterEligibilityHandlers(r *gin.RouterGroup, store CompetitorStatusStore
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		// Reload after write so the broadcast carries the persisted
@@ -162,7 +162,7 @@ func RegisterReinstateHandler(r *gin.RouterGroup, eng EligibilityEngine, hub Bro
 				c.JSON(http.StatusConflict, gin.H{"error": engValErr.Error()})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 

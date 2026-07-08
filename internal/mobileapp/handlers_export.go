@@ -42,7 +42,7 @@ func RegisterExportResultsHandlers(r *gin.RouterGroup, store *state.Store, eng *
 				c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 

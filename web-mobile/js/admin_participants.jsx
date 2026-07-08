@@ -834,7 +834,9 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     document.body.appendChild(a);
     a.click();
     a.remove();
-    URL.revokeObjectURL(url);
+    // Delay revoke so the browser initiates the download before the blob URL is
+    // torn down (matches admin_shell.jsx); guard the timer against jsdom teardown.
+    setTimeout(() => { if (typeof window !== "undefined" && window.URL) window.URL.revokeObjectURL(url); }, 100);
   };
 
   const isSetup = !c.status || c.status === "setup";

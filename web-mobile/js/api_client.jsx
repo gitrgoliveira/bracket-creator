@@ -15,7 +15,11 @@
 // where `msg` is the server-reported `error` field if present, else a
 // per-method default string. Callers decide whether to .catch and toast.
 //
-// Empty-body methods (overridePoolRank, overrideBracketWinner,
+// overrideBracketWinner is the exception: it returns { applied } parsed from
+// the 200 body (mp-y3nk), so the caller can tell a landed write from a stale
+// reconnect replay the server dropped.
+//
+// Empty-body methods (overridePoolRank,
 // resetOverrides, updateMatchTime, moveMatchCourt, updateSchedule,
 // deleteCompetition) deliberately return `true`
 // rather than `res.json()`: calling res.json() on a 200/204 with no
@@ -1392,8 +1396,14 @@ const API = {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || "Failed to override winner");
         }
-        // Backend returns 200 with empty body: see overridePoolRank.
-        return true;
+        // Backend replies 200 {"applied": <bool>} (mp-y3nk). applied=false means
+        // the timestamp guard dropped this assertion because a newer/equal result
+        // already exists for the feeder, so the server kept a different outcome and
+        // the caller must NOT trust its optimistic pick. An older server (or any
+        // absent body) yields {} here; default applied=true so back-compat callers
+        // keep advancing exactly as before.
+        const body = await res.json().catch(() => ({}));
+        return { applied: body.applied !== false };
     },
     async resetOverrides(compID, password, adminPassword) {
         const res = await fetch(`/api/competitions/${compID}/overrides`, {

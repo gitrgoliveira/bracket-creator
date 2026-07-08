@@ -274,9 +274,18 @@ function ResolveFeedersModal({ match, comp, password, onClose, onResolved, onOpt
             // serialising keeps a mid-way failure's partial state easy to reason
             // about (some feeders resolved, the operator retries the rest).
             let anyQueued = false;
+            let anyDropped = false;
             for (const s of resolvable) {
                 const winner = picks[s.feeder.id];
                 const r = await window.API.overrideBracketWinner(comp.id, s.feeder.id, winner, password);
+                if (r && r.applied === false) {
+                    // The server dropped this assertion (a newer/equal result
+                    // already exists for the feeder), so our pick is NOT the
+                    // authoritative winner. Skip the optimistic advance and let
+                    // onResolved() (refreshCourt) pull the real server tree.
+                    anyDropped = true;
+                    continue;
+                }
                 // Optimistically advance the LOCAL bracket so the final becomes
                 // startable immediately: even offline, where { queued: true } means
                 // the server has not confirmed yet. The queued write reconciles the
@@ -287,7 +296,9 @@ function ResolveFeedersModal({ match, comp, password, onClose, onResolved, onOpt
             if (showToast) {
                 showToast(anyQueued
                     ? "Recorded offline. This match is ready to run now and will sync when the court reconnects."
-                    : "Feeders resolved. The match is ready to start.");
+                    : anyDropped
+                        ? "Some results were already recorded elsewhere. Refreshing this court to show the current state."
+                        : "Feeders resolved. The match is ready to start.");
             }
             if (onResolved) onResolved();
             onClose();

@@ -431,6 +431,34 @@ describe('overrideBracketWinner: offline durability (Phase 4)', () => {
             API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw')
         ).rejects.toThrow('not ready to override');
     });
+
+    // mp-y3nk: the backend replies 200 {"applied": <bool>}. The client must
+    // surface that signal (not discard it and always return true), so the
+    // "Run now" flow can tell a landed assertion from a stale reconnect replay
+    // the server dropped.
+    it('returns { applied: false } when the server drops the assertion (LWW)', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+            ok: true, status: 200, json: () => Promise.resolve({ applied: false }),
+        });
+        const r = await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw');
+        expect(r).toEqual({ applied: false });
+    });
+
+    it('returns { applied: true } when the server applies the assertion', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+            ok: true, status: 200, json: () => Promise.resolve({ applied: true }),
+        });
+        const r = await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw');
+        expect(r).toEqual({ applied: true });
+    });
+
+    it('defaults to { applied: true } for a legacy empty-body 200 (back-compat)', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+            ok: true, status: 200, json: () => Promise.reject(new SyntaxError('Unexpected end of JSON input')),
+        });
+        const r = await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw');
+        expect(r).toEqual({ applied: true });
+    });
 });
 
 // mp-y3nk Phase C: writes carry a server-relative modifiedAt so the backend can

@@ -1,6 +1,8 @@
 // AdminExport card extracted from admin_schedule.jsx (mp-d7tl).
 
-export function AdminExport({ c, t }) {
+const { useState: useStateA } = React;
+
+export function AdminExport({ c, t, password, showToast }) {
   // The competition detail nests its real fields (roster, format, courts,
   // pool settings) under `c.config`; some other call sites pass an already
   // flattened object. Read from `c.config` when present, else from `c`, so
@@ -8,6 +10,40 @@ export function AdminExport({ c, t }) {
   const cfg = c.config || c;
   const cid = c.id || cfg.id;
   const url = `${(window.linkBase || (() => window.location.origin))(t)}/viewer.html?id=${t.id}#comp-${cid}`;
+
+  const [resultsBusy, setResultsBusy] = useStateA(false);
+
+  const notify = (msg, kind) => {
+    if (showToast) showToast(msg, kind);
+    else if (kind === "error") alert(msg);
+  };
+
+  // downloadResults pulls the RESULTS-populated workbook (played scores,
+  // standings, winners, decisions) from the admin-gated export-results
+  // endpoint. Unlike downloadXlsx below (the public blank template), this
+  // reflects what actually happened in the live app.
+  const downloadResults = async () => {
+    if (resultsBusy) return;
+    setResultsBusy(true);
+    try {
+      const blob = await window.API.exportResults(cid, password);
+      const dlUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = dlUrl;
+      a.download = `results-${cid}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      // Delay revoke so the browser initiates the download before the blob URL is
+      // torn down (matches admin_shell.jsx); guard the timer against jsdom teardown.
+      setTimeout(() => { if (typeof window !== "undefined" && window.URL) window.URL.revokeObjectURL(dlUrl); }, 100);
+      notify("Results workbook downloaded.");
+    } catch (err) {
+      notify("Results export failed: " + (err?.message || err), "error");
+    } finally {
+      setResultsBusy(false);
+    }
+  };
 
   const downloadXlsx = async () => {
     try {
@@ -87,7 +123,9 @@ export function AdminExport({ c, t }) {
       document.body.appendChild(a);
       a.click();
       a.remove();
-      window.URL.revokeObjectURL(dlUrl);
+      // Delay revoke so the browser initiates the download before the blob URL is
+      // torn down (matches admin_shell.jsx); guard the timer against jsdom teardown.
+      setTimeout(() => { if (typeof window !== "undefined" && window.URL) window.URL.revokeObjectURL(dlUrl); }, 100);
     } catch (err) {
       alert("Export failed: " + err.message);
     }
@@ -106,9 +144,13 @@ export function AdminExport({ c, t }) {
     <div className="row">
       <div className="card">
         <div className="card__title" style={{ marginBottom: 8 }}>Export {c.name}</div>
-        <div className="card__sub" style={{ marginBottom: 14 }}>Generate the official Excel workbook used during the day.</div>
-        <button type="button" className="btn btn--primary btn--full" onClick={downloadXlsx}>Download .xlsx</button>
-        <div className="field__hint" style={{ marginTop: 10 }}>Includes pool draws, pool matches, and elimination brackets with linked formulas.</div>
+        <div className="card__sub" style={{ marginBottom: 14 }}>Download this competition as an Excel workbook.</div>
+        <button type="button" className="btn btn--primary btn--full" onClick={downloadResults} disabled={resultsBusy}>
+          {resultsBusy ? "Preparing…" : "Download results (.xlsx)"}
+        </button>
+        <div className="field__hint" style={{ marginTop: 8, marginBottom: 14 }}>Pool standings and brackets with the played scores, winners, and decisions (Kiken / Fus. / DH / Ht) filled in.</div>
+        <button type="button" className="btn btn--full" onClick={downloadXlsx}>Download blank template (.xlsx)</button>
+        <div className="field__hint" style={{ marginTop: 8 }}>Empty pool draws, matches, and brackets with linked formulas, for scoring by hand.</div>
       </div>
       <div className="card">
         <div className="card__title" style={{ marginBottom: 8 }}>Public viewer link</div>

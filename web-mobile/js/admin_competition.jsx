@@ -408,7 +408,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
             {section === "pools" && <AdminPools c={c} pools={pools} poolMatches={poolMatches} standings={standings} tweaks={tweaks} onEditScore={onEditScore} password={password} />}
             {section === "bracket" && <AdminBracket c={c} t={t} bracket={bracket} onMoveCourt={onMoveCourt} onEditScore={onEditScore} tweaks={tweaks} password={password} />}
             {section === "scores" && !isDrawReady && <AdminScoreEditor c={c} t={t} onEditScore={onEditScore} onMoveCourt={onMoveCourt} restrictToCompId={c.id} password={password} />}
-            {section === "export" && <AdminExport c={c} t={t} />}
+            {section === "export" && <AdminExport c={c} t={t} password={password} showToast={showToast} />}
           </div>
         </div>
       </div>

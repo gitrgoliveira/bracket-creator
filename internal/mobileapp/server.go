@@ -201,6 +201,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	// PDF export, POST body is effectively empty (type in URL param only);
 	// uses DefaultMaxBodyBytes for consistency with the other admin JSON tier.
 	RegisterPrintHandlers(adminSmallBody, eng)
+	RegisterExportResultsHandlers(adminSmallBody, store, eng)
 
 	adminLargeBody := adminGroup(r, MaxImportBodyBytes, verifier, store)
 	RegisterImportHandlers(adminLargeBody, store, hub, elevated)

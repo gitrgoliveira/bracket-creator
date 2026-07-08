@@ -53,6 +53,12 @@ func slugifyID(name string) string {
 	return result
 }
 
+// errSaveParticipants marks a participants-save failure from
+// saveCompetitionWithPlayers, so the POST handler can surface the safe
+// "failed to save participants" label to the client (the wrapped cause, which
+// may include a filesystem path, is logged, not returned).
+var errSaveParticipants = errors.New("failed to save participants")
+
 // saveCompetitionWithPlayers persists the competition config and, when players
 // are present, saves participants and extracts seed assignments.
 // Returns (true, nil) when the on-disk content changed, so callers can decide
@@ -87,7 +93,7 @@ func saveCompetitionWithPlayers(comp *state.Competition, store *state.Store) (bo
 		// exists" even though the prior attempt failed. Mirror the
 		// import handler's rollback pattern (handlers_import.go).
 		_ = store.DeleteCompetition(comp.ID) // best-effort rollback
-		return false, fmt.Errorf("failed to save participants: %w", err)
+		return false, fmt.Errorf("%w: %w", errSaveParticipants, err)
 	}
 	assignments := extractSeeds(comp.Players)
 	if err := store.SaveSeeds(comp.ID, assignments); err != nil {
@@ -277,7 +283,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 	r.GET("/competitions", func(c *gin.Context) {
 		ids, err := store.ListCompetitions()
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 
@@ -379,7 +385,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// skip gracefully in that case.
 		createTourn, err := store.LoadTournament()
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		// Default the competition date to the tournament's Day 1 when the
@@ -528,7 +534,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			if errors.Is(err, errSaveParticipants) {
+				// Safe label to the client; the wrapped cause is logged, not returned.
+				internalError(c, err, "failed to save participants")
+				return
+			}
+			internalError(c, err)
 			return
 		}
 
@@ -543,7 +554,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		comp, err := store.LoadCompetition(id)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		if comp == nil {
@@ -575,7 +586,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, estimate)
@@ -599,7 +610,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, clashes)
@@ -720,7 +731,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// deadlock is the right trade-off).
 			putTourn, putTournErr := store.LoadTournament()
 			if putTournErr != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": putTournErr.Error()})
+				internalError(c, putTournErr)
 				return
 			}
 			if err := validateCompetitionDateInTournament(&comp, putTourn); err != nil {
@@ -1056,7 +1067,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		// Participants/seeds save (separate file), runs whenever the
@@ -1098,7 +1109,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 					return
 				}
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save participants: " + err.Error()})
+				internalError(c, err, "failed to save participants")
 				return
 			}
 			assignments := extractSeeds(comp.Players)
@@ -1129,10 +1140,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// flip).
 			if len(comp.Players) > 0 {
 				if fierr := flipHasParticipantIDs(store, id); fierr != nil {
-					fmt.Printf("Warning: PUT /api/competitions/%s, failed to flip HasParticipantIDs after SaveParticipants: %v\n", id, fierr)
-					c.JSON(http.StatusInternalServerError, gin.H{
-						"error": "roster saved but failed to update HasParticipantIDs flag; retry the request (idempotent): " + fierr.Error(),
-					})
+					internalError(c, fierr, "roster saved but failed to update HasParticipantIDs flag; retry the request (idempotent)")
 					return
 				}
 			}
@@ -1230,7 +1238,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			}
 		}
 		if err := store.DeleteCompetition(id); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 
@@ -1276,7 +1284,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		if changed {
@@ -1299,14 +1307,14 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			case errors.As(err, &validation):
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			default:
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				internalError(c, err)
 			}
 			return
 		}
 
 		comp, err := store.LoadCompetition(id)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "competition started but failed to load updated state: " + err.Error()})
+			internalError(c, err, "competition started but failed to load updated state")
 			return
 		}
 
@@ -1344,13 +1352,13 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			case errors.As(err, &validation):
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			default:
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				internalError(c, err)
 			}
 			return
 		}
 		comp, err := store.LoadCompetition(id)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "draw generated but failed to load updated state: " + err.Error()})
+			internalError(c, err, "draw generated but failed to load updated state")
 			return
 		}
 		if comp == nil {
@@ -1375,7 +1383,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			case errors.As(err, &validation):
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			default:
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				internalError(c, err)
 			}
 			return
 		}
@@ -1455,7 +1463,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 		if txErr != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": txErr.Error()})
+			internalError(c, txErr)
 			return
 		}
 		// Reaching here means the status transitioned (pools/playoffs -> complete),
@@ -1471,7 +1479,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		data, err := eng.ExportCompetitionXlsx(id)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 
@@ -1522,7 +1530,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		comp, err := store.LoadCompetition(id)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load competition: " + err.Error()})
+			internalError(c, err, "failed to load competition")
 			return
 		}
 		if comp == nil {
@@ -1544,7 +1552,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// the extra read is negligible.
 		pools, err := store.LoadPools(id)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load pools: " + err.Error()})
+			internalError(c, err, "failed to load pools")
 			return
 		}
 		var targetPool *helper.Pool
@@ -1566,7 +1574,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 
 		changed, err := store.SaveRankOverrideChanged(id, poolId, playerName, req.Rank)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		if changed {
@@ -1624,7 +1632,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 
 		changed, err := store.SaveScheduleChanged(id, entries)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		if changed {
@@ -1640,7 +1648,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		changed, err := store.ResetOverridesChanged(id)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		if changed {
@@ -1727,7 +1735,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		if changed {

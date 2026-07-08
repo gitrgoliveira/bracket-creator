@@ -34,7 +34,7 @@ func RegisterPublicBrandingHandlers(r *gin.RouterGroup, store *state.Store) {
 		c.Header("Cache-Control", "no-cache")
 		t, err := store.LoadTournament()
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		if t == nil || t.Theme == nil || t.Theme.LogoPath == "" {
@@ -95,7 +95,7 @@ func handleBrandingLogoUpload(store *state.Store) gin.HandlerFunc {
 
 		src, err := fh.Open()
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		defer func() { _ = src.Close() }()
@@ -113,13 +113,13 @@ func handleBrandingLogoUpload(store *state.Store) gin.HandlerFunc {
 			return
 		}
 		if _, err := src.Seek(0, io.SeekStart); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 
 		brandingDir := filepath.Join(store.GetFolder(), brandingDirName)
 		if err := os.MkdirAll(brandingDir, 0o700); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		fullPath := filepath.Join(brandingDir, fileName)
@@ -129,7 +129,7 @@ func handleBrandingLogoUpload(store *state.Store) gin.HandlerFunc {
 		// same filesystem and remains atomic. // #nosec G304
 		dst, err := os.CreateTemp(brandingDir, "logo-*.tmp")
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		tmpPath := dst.Name()
@@ -137,7 +137,7 @@ func handleBrandingLogoUpload(store *state.Store) gin.HandlerFunc {
 		cerr := dst.Close()
 		if copyErr != nil || cerr != nil {
 			_ = os.Remove(tmpPath)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": errors.Join(copyErr, cerr).Error()})
+			internalError(c, errors.Join(copyErr, cerr))
 			return
 		}
 		if written > BrandingMaxFileBytes {
@@ -154,7 +154,7 @@ func handleBrandingLogoUpload(store *state.Store) gin.HandlerFunc {
 			}
 			if err != nil {
 				_ = os.Remove(tmpPath)
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				internalError(c, err)
 				return
 			}
 		}
@@ -182,7 +182,7 @@ func handleBrandingLogoUpload(store *state.Store) gin.HandlerFunc {
 			if errors.Is(err, errNotInit) {
 				_ = os.Remove(fullPath)
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 

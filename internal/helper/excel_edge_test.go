@@ -205,8 +205,11 @@ func TestPrintPoolMatchesMirroring(t *testing.T) {
 }
 
 func TestPrintTeamEliminationMatchesMirroring(t *testing.T) {
-	nodeA := &Node{LeafVal: "Pool A", matchNum: 1}
-	nodeB := &Node{LeafVal: "Pool B", matchNum: 1}
+	// LeafNode: true mirrors real construction (CreateBalancedTree always sets it
+	// for true leaves); printSingleEliminationMatch now branches on this field
+	// rather than parsing LeafVal as a cell reference (mp-uagg).
+	nodeA := &Node{LeafNode: true, LeafVal: "Pool A", matchNum: 1}
+	nodeB := &Node{LeafNode: true, LeafVal: "Pool B", matchNum: 1}
 	eliminationMatchRounds := [][]*Node{
 		{{Left: nodeA, Right: nodeB, matchNum: 1}},
 	}
@@ -457,4 +460,56 @@ func TestPoolWinnerFormulaReferences(t *testing.T) {
 		assert.NotContains(t, formula, "''!",
 			"formula in Elimination Matches %s has empty sheet reference: %s", cell, formula)
 	}
+}
+
+// TestPrintTeamEliminationMatches_CellRefLikeLeafNames is a regression test for
+// mp-uagg: printSingleEliminationMatch used to decide leaf- vs match-feeder
+// nodes by asking whether Node.LeafVal parsed as an Excel cell reference
+// (excelize.SplitCellName). A no-pools playoffs bracket (the blank-template CLI
+// export, cmd/create-playoffs.go) renders raw participant names as leaves via
+// ConvertPlayersToWinners, so a competitor named like a cell coordinate
+// ("P1" = column P row 1, "M3", "A4") was misclassified as a match-feeder,
+// producing a broken CONCATENATE(...,”!) formula. Fixed by checking the
+// structural Node.LeafNode flag instead of parsing LeafVal.
+func TestPrintTeamEliminationMatches_CellRefLikeLeafNames(t *testing.T) {
+	names := []string{"P1", "M3", "A4", "Z9"}
+	players := make([]Player, len(names))
+	pCoords := make(map[string]playerCellCoord, len(names))
+	for i, name := range names {
+		players[i] = Player{Name: name}
+		cell, _ := excelize.CoordinatesToCellName(1, i+1)
+		pCoords[playerCoordKey(players[i])] = playerCellCoord{cellCoord: cellCoord{sheetName: SheetData, cell: cell}}
+	}
+
+	f := excelize.NewFile()
+	defer f.Close()
+	f.NewSheet(SheetData)
+	f.NewSheet(SheetEliminationMatches)
+
+	tree := CreateBalancedTree(names)
+	depth := CalculateDepth(tree)
+	eliminationMatchRounds := make([][]*Node, depth-1)
+	for i := depth; i > 1; i-- {
+		eliminationMatchRounds[depth-i] = TraverseRounds(tree, 1, i-1)
+	}
+
+	matchWinners := ConvertPlayersToWinners(players, false, pCoords)
+	PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, 0, 1, false)
+
+	rows, err := f.GetRows(SheetEliminationMatches)
+	require.NoError(t, err)
+	foundFormula := false
+	for rowIdx, row := range rows {
+		for colIdx := range row {
+			cellName, _ := excelize.CoordinatesToCellName(colIdx+1, rowIdx+1)
+			formula, ferr := f.GetCellFormula(SheetEliminationMatches, cellName)
+			if ferr != nil || formula == "" {
+				continue
+			}
+			foundFormula = true
+			assert.NotContains(t, formula, "''!",
+				"cell-ref-like entrant name produced a broken empty-sheet reference in %s: %s", cellName, formula)
+		}
+	}
+	assert.True(t, foundFormula, "expected at least one formula cell in the elimination sheet")
 }

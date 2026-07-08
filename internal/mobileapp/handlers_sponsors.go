@@ -114,7 +114,7 @@ func handleSponsorUpload(store *state.Store) gin.HandlerFunc {
 
 		src, err := fileHeader.Open()
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		defer func() { _ = src.Close() }()
@@ -139,7 +139,7 @@ func handleSponsorUpload(store *state.Store) gin.HandlerFunc {
 			return
 		}
 		if _, err := src.Seek(0, io.SeekStart); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 
@@ -147,14 +147,14 @@ func handleSponsorUpload(store *state.Store) gin.HandlerFunc {
 		// Each upload gets a unique URL, see mp-c38 plan §2.
 		nameBytes := make([]byte, 8)
 		if _, err := rand.Read(nameBytes); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		fileName := hex.EncodeToString(nameBytes) + ext
 
 		sponsorsDir := filepath.Join(store.GetFolder(), sponsorsDirName)
 		if err := os.MkdirAll(sponsorsDir, 0o700); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		fullPath := filepath.Join(sponsorsDir, fileName)
@@ -165,7 +165,7 @@ func handleSponsorUpload(store *state.Store) gin.HandlerFunc {
 		// #nosec G304 -- filename is server-generated, not from user input
 		dst, err := os.OpenFile(fullPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		// LimitReader+1 catches an envelope that lied about its size.
@@ -173,7 +173,7 @@ func handleSponsorUpload(store *state.Store) gin.HandlerFunc {
 		cerr := dst.Close()
 		if copyErr != nil || cerr != nil {
 			_ = os.Remove(fullPath)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": errors.Join(copyErr, cerr).Error()})
+			internalError(c, errors.Join(copyErr, cerr))
 			return
 		}
 		if written > SponsorMaxFileBytes {
@@ -213,7 +213,7 @@ func handleSponsorUpload(store *state.Store) gin.HandlerFunc {
 					"error": "maximum " + strconv.Itoa(state.MaxSponsors) + " sponsors per tournament",
 				})
 			default:
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				internalError(c, err)
 			}
 			return
 		}
@@ -246,7 +246,7 @@ func handleSponsorDelete(store *state.Store) gin.HandlerFunc {
 				c.JSON(http.StatusNotFound, gin.H{"error": "sponsor not found"})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		// Best-effort unlink. Random filenames make collisions effectively

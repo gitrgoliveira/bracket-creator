@@ -293,7 +293,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 	r.GET("/tournament", func(c *gin.Context) {
 		t, err := store.LoadTournament()
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		if t == nil {
@@ -565,7 +565,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			return
 		}
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		if changed {
@@ -726,7 +726,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		//      EventPasswordReset and clear stale admin sessions.
 		existingForPost, loadErrPost := store.LoadTournament()
 		if loadErrPost != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": loadErrPost.Error()})
+			internalError(c, loadErrPost)
 			return
 		}
 
@@ -825,7 +825,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		}
 
 		if _, err := store.SaveTournamentChanged(&t); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 

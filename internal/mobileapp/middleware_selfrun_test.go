@@ -253,6 +253,10 @@ func TestSelfRun_SelfRunMode_CompetitionConfigRoutes_RequireMainPassword(t *test
 	configRoutes := []struct{ method, path string }{
 		{http.MethodPost, "/api/competitions"},
 		{http.MethodPut, "/api/competitions/some-id"},
+		// Both xlsx exports are admin/CPU-heavy config routes, not operational
+		// play, so they stay main-password gated even in self-run mode (mp-i96p).
+		{http.MethodGet, "/api/competitions/some-id/export"},
+		{http.MethodGet, "/api/competitions/some-id/export-results"},
 	}
 
 	for _, tc := range configRoutes {

@@ -827,14 +827,18 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   const downloadTemplate = () => {
     const content = participantTemplateCSV(c);
     const blob = new Blob([content], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
+    // Create and revoke both via window.URL, consistent with admin_shell.jsx /
+    // admin_schedule_export.jsx and the unit-test mocks on window.URL.
+    const url = window.URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
     a.download = "participants_template.csv";
     document.body.appendChild(a);
     a.click();
     a.remove();
-    URL.revokeObjectURL(url);
+    // Delay revoke so the browser initiates the download before the blob URL is
+    // torn down (matches admin_shell.jsx); guard the timer against jsdom teardown.
+    setTimeout(() => { if (typeof window !== "undefined" && window.URL) window.URL.revokeObjectURL(url); }, 100);
   };
 
   const isSetup = !c.status || c.status === "setup";

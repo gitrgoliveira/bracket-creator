@@ -27,7 +27,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 
 		players, err := store.LoadParticipants(id, comp.WithZekkenName)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, players)
@@ -155,7 +155,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					c.JSON(http.StatusConflict, gin.H{"error": msg})
 					return
 				}
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to add participant: " + err.Error()})
+				internalError(c, err, "failed to add participant")
 				return
 			}
 
@@ -207,7 +207,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// check-ins that were already recorded.
 		existing, err := store.LoadParticipants(id, comp.WithZekkenName)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load participants: " + err.Error()})
+			internalError(c, err, "failed to load participants")
 			return
 		}
 		// Key by (normalizedName, normalizedDojo), NOT name alone. Tier-1
@@ -254,7 +254,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save participants: " + err.Error()})
+			internalError(c, err, "failed to save participants")
 			return
 		}
 
@@ -264,7 +264,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// clients to round-trip GET /participants to learn them.
 		saved, err := store.LoadParticipants(id, comp.WithZekkenName)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to reload participants: " + err.Error()})
+			internalError(c, err, "failed to reload participants")
 			return
 		}
 
@@ -400,6 +400,15 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return nil
 		})
 		if txErr != nil {
+			// The 4xx branches above carry a curated, user-actionable message;
+			// preserve those verbatim. The 500 default is an unexpected error
+			// (LoadCompetition failure, an unmatched UpdateParticipant error) -
+			// route it through internalError so it is logged server-side and the
+			// client body stays generic instead of leaking raw error text.
+			if httpStatus == http.StatusInternalServerError {
+				internalError(c, txErr)
+				return
+			}
 			msg := httpMsg
 			if msg == "" {
 				msg = txErr.Error()
@@ -466,7 +475,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		seeds, err := store.LoadSeeds(id)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, seeds)
@@ -502,7 +511,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 
 		if err := store.SaveSeeds(id, assignments); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, assignments)
@@ -527,11 +536,11 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		})
 
 		if err != nil {
-			status := http.StatusInternalServerError
 			if errors.Is(err, state.ErrParticipantNotFound) {
-				status = http.StatusNotFound
+				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+				return
 			}
-			c.JSON(status, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 
@@ -572,7 +581,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 
 		result, err := store.BulkCheckIn(id, req.ParticipantIDs)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 
@@ -602,11 +611,11 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		})
 
 		if err != nil {
-			status := http.StatusInternalServerError
 			if errors.Is(err, state.ErrParticipantNotFound) {
-				status = http.StatusNotFound
+				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+				return
 			}
-			c.JSON(status, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 

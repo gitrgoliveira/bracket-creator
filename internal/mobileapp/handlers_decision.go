@@ -117,7 +117,7 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 		// gets a clear error instead of a silent no-op (Finding 9).
 		comp, loadErr := store.LoadCompetition(id)
 		if loadErr != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": loadErr.Error()})
+			internalError(c, loadErr)
 			return
 		}
 		if comp != nil && comp.Engi {
@@ -153,7 +153,7 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			return nil
 		})
 		if txErr != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": txErr.Error()})
+			internalError(c, txErr)
 			return
 		}
 		if engErr != nil {
@@ -194,7 +194,7 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			case errors.As(engErr, &engNotFoundErr):
 				c.JSON(http.StatusNotFound, gin.H{"error": engNotFoundErr.Error()})
 			default:
-				c.JSON(http.StatusInternalServerError, gin.H{"error": engErr.Error()})
+				internalError(c, engErr)
 			}
 			return
 		}

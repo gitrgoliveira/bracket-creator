@@ -194,7 +194,7 @@ func RegisterResetHandlers(r *gin.RouterGroup, store *state.Store, verifier Pass
 		// admin from ever resetting via this endpoint.
 		t, err := store.LoadTournament()
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		if t == nil || (t.Name == "New Tournament" && t.Password == "") {
@@ -218,7 +218,7 @@ func RegisterResetHandlers(r *gin.RouterGroup, store *state.Store, verifier Pass
 			return nil
 		})
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		if changed {

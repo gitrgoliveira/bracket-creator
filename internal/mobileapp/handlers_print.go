@@ -70,14 +70,14 @@ func RegisterPrintHandlers(r *gin.RouterGroup, eng *engine.Engine) {
 				})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("initialise PDF generator: %s", err.Error())})
+			internalError(c, err, "initialise PDF generator")
 			return
 		}
 
 		// Create a temporary working directory for XLSX exports and PDF output.
 		workDir, err := os.MkdirTemp("", "bracket-print-*")
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("create work dir: %s", err.Error())})
+			internalError(c, err, "create work dir")
 			return
 		}
 		defer func() { _ = os.RemoveAll(workDir) }()
@@ -85,7 +85,7 @@ func RegisterPrintHandlers(r *gin.RouterGroup, eng *engine.Engine) {
 		// Export all competitions to XLSX workbooks.
 		sources, err := eng.ExportTournamentWorkbooks(workDir)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("export workbooks: %s", err.Error())})
+			internalError(c, err, "export workbooks")
 			return
 		}
 
@@ -97,7 +97,7 @@ func RegisterPrintHandlers(r *gin.RouterGroup, eng *engine.Engine) {
 			produced, err = gen.GenerateGroups(c.Request.Context(), []string{printType}, sources, workDir)
 		}
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("generate PDFs: %s", err.Error())})
+			internalError(c, err, "generate PDFs")
 			return
 		}
 

@@ -1024,6 +1024,23 @@ const API = {
         }
         return res.blob();
     },
+    // exportResults GETs the RESULTS-populated workbook (played scores,
+    // standings, winners, and decision suffixes written as literal values)
+    // from the admin-gated /api/competitions/:id/export-results endpoint. This
+    // is distinct from AdminExport's "Download .xlsx", which posts to the public
+    // /create path and yields a BLANK formula template. Returns an .xlsx Blob;
+    // throws the server's error message on non-2xx.
+    async exportResults(compID, password) {
+        const res = await fetch(`/api/competitions/${compID}/export-results`, {
+            method: 'GET',
+            headers: password ? { 'X-Tournament-Password': password } : {}
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to export results");
+        }
+        return res.blob();
+    },
     async startCompetition(id, password) {
         const res = await fetch(`/api/competitions/${id}/start`, {
             method: 'POST',

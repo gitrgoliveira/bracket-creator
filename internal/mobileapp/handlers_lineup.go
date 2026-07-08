@@ -15,6 +15,7 @@ package mobileapp
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -87,7 +88,7 @@ func RegisterPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore) {
 		}
 		lineups, err := store.LoadTeamLineups(compID)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		key := fmt.Sprintf("%s-%d", teamID, round)
@@ -108,7 +109,7 @@ func RegisterPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore) {
 		}
 		lineups, err := store.LoadTeamLineups(compID)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		lineup, found := findMatchLineup(lineups, teamID, matchID)
@@ -192,7 +193,8 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			// is a 404.
 			comp, err := stx.LoadCompetition(compID)
 			if err != nil {
-				respErr = &httpErr{status: http.StatusInternalServerError, body: gin.H{"error": err.Error()}}
+				log.Printf("mobileapp: PUT /competitions/%s/teams/%s/lineups: LoadCompetition: %v", compID, teamID, err)
+				respErr = &httpErr{status: http.StatusInternalServerError, body: gin.H{"error": "internal error"}}
 				return nil
 			}
 			if comp == nil {
@@ -221,7 +223,8 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			// have taken the per-comp lock between them.
 			lineups, err := stx.LoadTeamLineups(compID)
 			if err != nil {
-				respErr = &httpErr{status: http.StatusInternalServerError, body: gin.H{"error": err.Error()}}
+				log.Printf("mobileapp: PUT /competitions/%s/teams/%s/lineups: LoadTeamLineups: %v", compID, teamID, err)
+				respErr = &httpErr{status: http.StatusInternalServerError, body: gin.H{"error": "internal error"}}
 				return nil
 			}
 			key := fmt.Sprintf("%s-%d", teamID, round)
@@ -237,7 +240,7 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			return nil
 		})
 		if txErr != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": txErr.Error()})
+			internalError(c, txErr)
 			return
 		}
 		if respErr != nil {
@@ -254,7 +257,7 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			return
 		}
 		if err := store.DeleteTeamLineup(compID, teamID, round); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.Status(http.StatusNoContent)
@@ -291,7 +294,8 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 		txErr := tx.WithTransaction(compID, func(stx state.StoreTx) error {
 			comp, err := stx.LoadCompetition(compID)
 			if err != nil {
-				respErr = &httpErr{status: http.StatusInternalServerError, body: gin.H{"error": err.Error()}}
+				log.Printf("mobileapp: PUT /competitions/%s/teams/%s/match-lineups/%s: LoadCompetition: %v", compID, teamID, matchID, err)
+				respErr = &httpErr{status: http.StatusInternalServerError, body: gin.H{"error": "internal error"}}
 				return nil
 			}
 			if comp == nil {
@@ -314,7 +318,8 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			}
 			lineups, err := stx.LoadTeamLineups(compID)
 			if err != nil {
-				respErr = &httpErr{status: http.StatusInternalServerError, body: gin.H{"error": err.Error()}}
+				log.Printf("mobileapp: PUT /competitions/%s/teams/%s/match-lineups/%s: LoadTeamLineups: %v", compID, teamID, matchID, err)
+				respErr = &httpErr{status: http.StatusInternalServerError, body: gin.H{"error": "internal error"}}
 				return nil
 			}
 			if persisted, found := findMatchLineup(lineups, teamID, matchID); found {
@@ -327,7 +332,7 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			return nil
 		})
 		if txErr != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": txErr.Error()})
+			internalError(c, txErr)
 			return
 		}
 		if respErr != nil {
@@ -344,7 +349,7 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			return
 		}
 		if err := store.DeleteTeamLineupForMatch(compID, teamID, matchID); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.Status(http.StatusNoContent)

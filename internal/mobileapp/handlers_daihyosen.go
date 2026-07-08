@@ -155,7 +155,7 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			return nil
 		})
 		if txErr != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": txErr.Error()})
+			internalError(c, txErr)
 			return
 		}
 		switch {
@@ -272,7 +272,7 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			return nil
 		})
 		if txErr != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": txErr.Error()})
+			internalError(c, txErr)
 			return
 		}
 		if notFound {

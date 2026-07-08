@@ -8,12 +8,34 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
+
+// modifiedAtMaxSkewMs bounds how far into the future a client-supplied
+// server-relative ModifiedAt may be before it is clamped to 0. A legitimate
+// write is stamped at action time (at or before "now" in the server frame), so
+// 2 seconds covers normal stamp-to-evaluate network jitter while still
+// rejecting a buggy or hostile far-future value that would freeze a match by
+// making every subsequent legitimate write look "older" and be dropped.
+const modifiedAtMaxSkewMs = 2 * 1000
+
+// clampClientModifiedAt sanitises a client-supplied ModifiedAt for the
+// timestamp last-write-wins guard (mp-y3nk). A negative value, or one more
+// than modifiedAtMaxSkewMs into the future, is untrustworthy: honouring it
+// would let a client FREEZE a match by making every subsequent legitimate
+// write look "older" and be dropped. Such values fall back to 0, which the
+// guard treats as unstamped (arrival-order) and is always safe.
+func clampClientModifiedAt(v int64) int64 {
+	if v < 0 || v > time.Now().UnixMilli()+modifiedAtMaxSkewMs {
+		return 0
+	}
+	return v
+}
 
 // annotateQueuePositions fills in MatchResult.QueuePosition for each
 // element of matches in-place, delegating to state.DeriveQueuePositions
@@ -300,6 +322,9 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		force := c.Query("force") == "true"
 
 		for i := range results {
+			// Reject a hostile/buggy far-future or negative client timestamp so
+			// it cannot freeze the match against later legitimate writes (mp-y3nk).
+			results[i].ModifiedAt = clampClientModifiedAt(results[i].ModifiedAt)
 			// T104/CHK029: enforce MaxEnchoPeriods cap on bulk-score payload
 			// (top-level and each sub-bout independently).
 			if enchoExceedsCap(results[i].Encho, comp, force) || anySubBoutEnchoExceedsCap(results[i].SubResults, comp, force) {
@@ -600,6 +625,9 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		mid := c.Param("mid")
 		var req struct {
 			WinnerName string `json:"winnerName"`
+			// ModifiedAt is the client's server-relative timestamp for
+			// last-write-wins reconciliation (mp-y3nk); 0 when unstamped.
+			ModifiedAt int64 `json:"modifiedAt"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -640,13 +668,29 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			return
 		}
 
-		if err := eng.OverrideBracketWinner(id, mid, winnerName); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		applied, err := eng.OverrideBracketWinner(id, mid, winnerName, clampClientModifiedAt(req.ModifiedAt))
+		if err != nil {
+			// Map engine client-errors to their proper status so the offline
+			// terminal-write replay never treats a permanent 4xx (unknown match,
+			// or a feeder not yet finished) as a retryable failure and wedge sync
+			// (mp-y3nk). Mirrors the RevertMatchToQueue mapping above.
+			var notFoundErr *engine.NotFoundError
+			var validationErr *engine.ValidationError
+			switch {
+			case errors.As(err, &notFoundErr):
+				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			case errors.As(err, &validationErr):
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			default:
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			}
 			return
 		}
 
-		hub.Broadcast(EventTournamentUpdated, nil)
-		c.Status(http.StatusOK)
+		if applied {
+			hub.Broadcast(EventTournamentUpdated, nil)
+		}
+		c.JSON(http.StatusOK, gin.H{"applied": applied})
 	})
 
 	r.PUT("/competitions/:id/matches/:mid/time", func(c *gin.Context) {
@@ -956,6 +1000,9 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		}
 
 		result := req.AsMatchResult()
+		// Reject a hostile/buggy far-future or negative client timestamp so it
+		// cannot freeze the match against later legitimate writes (mp-y3nk).
+		result.ModifiedAt = clampClientModifiedAt(result.ModifiedAt)
 		result.ResultSource = resultSource
 		// Normalize the audit reason once, before validation and the engine
 		// write, so a whitespace-only reason can't satisfy the correction gate

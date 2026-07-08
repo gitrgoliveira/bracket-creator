@@ -224,6 +224,22 @@ The **Registration desk** (opened from the dashboard) is a cross-competition che
 
 Each court has a dedicated operator console at `/admin/shiaijo/<court>` (linked from the dashboard's **Shiaijo operator views**). It shows that court's current and upcoming matches with their match numbers, keeps the scoring flow chained to the same court, and nudges the operator to switch to whichever competition next needs the court. If you start the wrong bout, use **Send back to queue** on the running match to return it to the Upcoming list; it clears any partial score and drops the match from the live view so the correct one can start (a completed, scored match is not affected, correct that from its competition view instead).
 
+#### Matches waiting on earlier results
+
+A knockout final cannot be called until the earlier bouts that feed it have been scored. While it is still waiting, it appears in the queue under a **Later** heading with a **Waiting** tag, and its competitors read "Winner of ..." until they are known. This is informational: you cannot start or call a match that has no competitors yet, but you can see it is scheduled for this court, so the queue never looks empty when more play is still to come.
+
+#### Refresh this court
+
+If the console looks out of date (for example a bout that finished on another court has not appeared here yet), use **Refresh** in the header to re-pull this court's matches from the server. The console also refreshes on its own whenever it reconnects after a network drop.
+
+#### Run a match before its results have synced
+
+At a large event the bouts that feed a final may run on other courts, and their results can take a moment to reach this court. If you already know who won those earlier bouts, open the waiting match's **Run now** action and record each winner. The match then becomes startable and you can run it immediately. Recording a winner this way is provisional: if the official result arrives later and differs, the later result takes over.
+
+#### Running without a connection
+
+The court console keeps working if it loses its connection to the server. You can finish scoring the bout in progress, and with **Run now** you can resolve and start the next match, all while offline. Everything you enter is saved on the device and sent to the server automatically when the connection returns. If two courts recorded different results for the same match while one was offline, the more recent change wins once they reconcile.
+
 ### Set up a competition
 
 Each competition goes through a **Setup → Draw Preview (status `draw-ready`) → Live play (status `pools` or `playoffs`)** lifecycle. "Swiss" is a *format*, not a separate status; Swiss-format competitions run live under the `pools` status.

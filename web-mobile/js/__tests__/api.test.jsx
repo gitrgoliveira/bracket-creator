@@ -635,20 +635,26 @@ describe('API Utils', () => {
       });
     });
 
-    describe('overrideBracketWinner (empty-body success)', () => {
-      it('resolves to true on 200 with no body', async () => {
-        global.fetch = vi.fn().mockResolvedValue({ ok: true, status: 200 });
-        await expect(API.overrideBracketWinner('c1', 'm1', 'Alice', 'pw'))
-          .resolves.toBe(true);
-      });
-
-      it('does not call res.json() on the success path', async () => {
+    describe('overrideBracketWinner (applied signal)', () => {
+      // mp-y3nk: the backend now replies 200 {"applied": <bool>}; the client
+      // surfaces it so the "Run now" flow distinguishes a landed assertion from
+      // a stale reconnect replay the server dropped. A legacy empty-body 200
+      // defaults to applied:true so old servers behave exactly as before.
+      it('resolves to { applied: true } on a legacy empty-body 200 (back-compat)', async () => {
         global.fetch = vi.fn().mockResolvedValue({
-          ok: true,
+          ok: true, status: 200,
           json: async () => { throw new SyntaxError('Unexpected end of JSON input'); },
         });
         await expect(API.overrideBracketWinner('c1', 'm1', 'Alice', 'pw'))
-          .resolves.toBe(true);
+          .resolves.toEqual({ applied: true });
+      });
+
+      it('surfaces { applied: false } when the server drops a stale replay', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true, status: 200, json: async () => ({ applied: false }),
+        });
+        await expect(API.overrideBracketWinner('c1', 'm1', 'Alice', 'pw'))
+          .resolves.toEqual({ applied: false });
       });
 
       it('throws with server error message on failure', async () => {

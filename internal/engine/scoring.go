@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
@@ -31,6 +32,14 @@ var ErrMatchSideMismatch = errors.New("match side mismatch: score payload compet
 // that the operator must correct via the score editor, not discarded by a
 // revert. Handlers map this to HTTP 409.
 var ErrMatchAlreadyCompleted = errors.New("match already completed: use the score editor to correct a completed bout")
+
+// errLWWDropped is a package-internal sentinel returned by the mutate callback
+// inside OverrideBracketWinner when a timestamp last-write-wins check drops a
+// stale incoming write. Returning this error (rather than nil) causes
+// UpdateBracket to skip the disk save, avoiding a spurious write of an
+// unchanged bracket (finding 8). The caller converts it to (false, nil) so
+// the handler can respond 200 with applied=false without broadcasting (finding 7).
+var errLWWDropped = errors.New("lww_dropped")
 
 // reconcileSides folds the stored pairing into a score payload's result.
 // An empty payload side is backfilled from the stored side (e.g. a payload
@@ -873,6 +882,17 @@ func (e *Engine) recordBracketMatchResult(compId string, matchId string, result 
 					if reconcileSides(result, m.SideA, m.SideB) {
 						return ErrMatchSideMismatch
 					}
+					// Timestamp last-write-wins (mp-y3nk): drop a write that is
+					// strictly older than the stored result (both stamped in
+					// server-relative time), so a reconnecting offline court's
+					// stale change loses to a newer one recorded elsewhere.
+					// Unstamped writes bypass it (arrival-order, as before) and a
+					// deliberate correction always applies (applyBracketWrite); the
+					// completed-never-reverted guard stays on top.
+					if !applyBracketWrite(result, m.ModifiedAt) {
+						found = true
+						break
+					}
 					deriveDaihyosenWinner(result)
 					bracket.Rounds[rIdx][mIdx].Winner = result.Winner
 					// Preserve incoming Status, pre-fix this was
@@ -889,6 +909,13 @@ func (e *Engine) recordBracketMatchResult(compId string, matchId string, result 
 						status = state.MatchStatusCompleted
 					}
 					bracket.Rounds[rIdx][mIdx].Status = status
+					// Stamp the applied write's server-relative time so the next
+					// write is compared against it (mp-y3nk). Preserve a prior stamp
+					// when this write is unstamped, so an un-stamped correction does
+					// not reset the field to 0 and reopen the match to stale writes.
+					if result.ModifiedAt != 0 {
+						bracket.Rounds[rIdx][mIdx].ModifiedAt = result.ModifiedAt
+					}
 					bracket.Rounds[rIdx][mIdx].ScoreA = formatScore(result.IpponsA, result.HansokuA)
 					bracket.Rounds[rIdx][mIdx].ScoreB = formatScore(result.IpponsB, result.HansokuB)
 					bracket.Rounds[rIdx][mIdx].Decision = result.Decision
@@ -974,6 +1001,18 @@ func (e *Engine) recordBracketMatchResult(compId string, matchId string, result 
 	})
 }
 
+// applyBracketWrite reports whether a bracket write should apply under the
+// timestamp last-write-wins guard (mp-y3nk). A deliberate operator CORRECTION
+// (CorrectionReason set) always applies: it is an explicit decision made under
+// the handler's correction-audit lock, not a reconnect replay, so it must never
+// be dropped as "stale". Otherwise it is pure timestamp LWW.
+func applyBracketWrite(result *state.MatchResult, storedModifiedAt int64) bool {
+	if result.CorrectionReason != "" {
+		return true
+	}
+	return domain.ApplyByTimestamp(result.ModifiedAt, storedModifiedAt)
+}
+
 // applyBronzeMatchResult writes result into the bronze (3rd-place) playoff
 // match, mirroring the per-round bracket-match write in recordBracketMatchResult
 // but without any downstream propagation (the bronze match has no next round).
@@ -985,6 +1024,12 @@ func applyBronzeMatchResult(bm *state.BracketMatch, result *state.MatchResult) e
 	if reconcileSides(result, bm.SideA, bm.SideB) {
 		return ErrMatchSideMismatch
 	}
+	// Timestamp last-write-wins (mp-y3nk): mirror the per-round write path so the
+	// bronze (3rd-place) match is not left unprotected. A stale reconnect replay
+	// is dropped; a correction always applies.
+	if !applyBracketWrite(result, bm.ModifiedAt) {
+		return nil
+	}
 	deriveDaihyosenWinner(result)
 	status := result.Status
 	if status == "" {
@@ -992,6 +1037,9 @@ func applyBronzeMatchResult(bm *state.BracketMatch, result *state.MatchResult) e
 	}
 	bm.Winner = result.Winner
 	bm.Status = status
+	if result.ModifiedAt != 0 {
+		bm.ModifiedAt = result.ModifiedAt
+	}
 	bm.ScoreA = formatScore(result.IpponsA, result.HansokuA)
 	bm.ScoreB = formatScore(result.IpponsB, result.HansokuB)
 	bm.Decision = result.Decision
@@ -1179,7 +1227,13 @@ func (e *Engine) UpdateMatchCourt(compId string, matchId string, newCourt string
 //
 // Uses the same UpdateBracket atomic primitive as the rest of the
 // scoring path to avoid the LoadBracket + mutate + Save TOCTOU window.
-func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName string) error {
+// Returns (applied bool, err error). applied is true when the write landed;
+// false when it was dropped by the timestamp LWW guard (stale reconnect
+// replay). A false return still carries nil err so the caller can respond
+// 200 with {"applied":false} without broadcasting (finding 7).
+// Returning errLWWDropped from the mutate callback causes UpdateBracket to
+// skip the disk save, avoiding a spurious write of an unchanged bracket (finding 8).
+func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName string, modifiedAt int64) (bool, error) {
 	err := e.store.UpdateBracket(compId, func(bracket *state.Bracket) error {
 		if bracket == nil {
 			return notFoundErrorf("bracket not found for competition %s", compId)
@@ -1191,9 +1245,18 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 					if !bracketMatchPlayable(m) {
 						return validationErrorf("knockout match %s is not ready to override: a feeder pool or match has not finished", matchId)
 					}
+					// Timestamp last-write-wins (mp-y3nk): a reconnecting offline
+					// feeder assertion older than a newer stored result is dropped.
+					// Return errLWWDropped (not nil) so UpdateBracket skips the save.
+					if !domain.ApplyByTimestamp(modifiedAt, m.ModifiedAt) {
+						return errLWWDropped
+					}
 					m.Winner = winnerName
 					m.IsOverridden = true
 					m.Status = state.MatchStatusCompleted
+					if modifiedAt != 0 {
+						m.ModifiedAt = modifiedAt
+					}
 					e.propagateBracketWinner(bracket, rIdx, mIdx)
 					return nil
 				}
@@ -1206,15 +1269,25 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 			if !bracketMatchPlayable(bm) {
 				return validationErrorf("knockout match %s is not ready to override: a feeder pool or match has not finished", matchId)
 			}
+			// Same errLWWDropped mechanism as above.
+			if !domain.ApplyByTimestamp(modifiedAt, bm.ModifiedAt) {
+				return errLWWDropped
+			}
 			bm.Winner = winnerName
 			bm.IsOverridden = true
 			bm.Status = state.MatchStatusCompleted
+			if modifiedAt != 0 {
+				bm.ModifiedAt = modifiedAt
+			}
 			return nil
 		}
 		return notFoundErrorf("bracket match %s not found", matchId)
 	})
+	if errors.Is(err, errLWWDropped) {
+		return false, nil
+	}
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	// Record the override for auditing. A failure here leaves the bracket
@@ -1224,7 +1297,7 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 		fmt.Printf("warning: failed to persist winner override audit record for %s: %v\n", matchId, err)
 	}
 
-	return nil
+	return true, nil
 }
 
 func (e *Engine) UpdateMatchTime(compId string, matchId string, scheduledAt string) error {
@@ -1321,6 +1394,10 @@ func (e *Engine) RevertMatchToQueue(compId, matchId string) error {
 		m.IsOverridden = false
 		m.ResultSource = ""
 		m.CorrectionReason = ""
+		// Revert fence (mp-y3nk): stamp now() so any pre-revert offline write
+		// (T_stale < T_revert) is dropped by ApplyByTimestamp on replay.
+		// Using 0 would make ApplyByTimestamp always return true (weaker).
+		m.ModifiedAt = time.Now().UnixMilli()
 	}); err != nil {
 		// Neither pool nor bracket holds this match: surface a typed
 		// NotFoundError so the handler can answer 404 (a fabricated match id

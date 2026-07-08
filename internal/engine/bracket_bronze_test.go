@@ -401,7 +401,8 @@ func TestBronze_OverrideBracketWinnerOnBronze(t *testing.T) {
 	bronzeWinner := bracket.ThirdPlaceMatch.SideA
 
 	// Override the bronze match winner.
-	require.NoError(t, eng.OverrideBracketWinner(compID, "m-bronze", bronzeWinner))
+	_, err = eng.OverrideBracketWinner(compID, "m-bronze", bronzeWinner, 0)
+	require.NoError(t, err)
 
 	bracket, err = store.LoadBracket(compID)
 	require.NoError(t, err)
@@ -409,6 +410,54 @@ func TestBronze_OverrideBracketWinnerOnBronze(t *testing.T) {
 	assert.Equal(t, bronzeWinner, bracket.ThirdPlaceMatch.Winner, "OverrideBracketWinner must set bronze winner")
 	assert.True(t, bracket.ThirdPlaceMatch.IsOverridden, "OverrideBracketWinner must set IsOverridden on bronze")
 	assert.Equal(t, state.MatchStatusCompleted, bracket.ThirdPlaceMatch.Status, "OverrideBracketWinner must complete bronze")
+}
+
+// tri-review findings 1/3/5: the bronze (3rd-place) match write path
+// (applyBronzeMatchResult) must honour the timestamp last-write-wins guard just
+// like the per-round path, so a stale offline replay of a bronze score cannot
+// clobber a newer result.
+func TestBronze_RecordResultTimestampLWW(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "bronze-ts"
+
+	createBronzeTestCompetition(t, store, compID, true)
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
+	require.NoError(t, eng.StartCompetition(compID))
+
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	sfIdx := len(bracket.Rounds) - 2
+	sf := bracket.Rounds[sfIdx]
+	// Score both semifinals so the bronze match's two SF-loser sides resolve.
+	require.NoError(t, eng.RecordMatchResult(compID, sf[0].ID, &state.MatchResult{Winner: sf[0].SideA, Status: state.MatchStatusCompleted}))
+	require.NoError(t, eng.RecordMatchResult(compID, sf[1].ID, &state.MatchResult{Winner: sf[1].SideB, Status: state.MatchStatusCompleted}))
+
+	bracket, err = store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.NotNil(t, bracket.ThirdPlaceMatch)
+	winnerA := bracket.ThirdPlaceMatch.SideA
+	winnerB := bracket.ThirdPlaceMatch.SideB
+
+	// Record bronze winner=A at t=200.
+	require.NoError(t, eng.RecordMatchResult(compID, "m-bronze", &state.MatchResult{ID: "m-bronze", Winner: winnerA, Status: state.MatchStatusCompleted, ModifiedAt: 200}))
+	reloaded, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, winnerA, reloaded.ThirdPlaceMatch.Winner)
+	assert.Equal(t, int64(200), reloaded.ThirdPlaceMatch.ModifiedAt, "bronze write must stamp ModifiedAt")
+
+	// A STALE write at t=100 must be dropped.
+	require.NoError(t, eng.RecordMatchResult(compID, "m-bronze", &state.MatchResult{ID: "m-bronze", Winner: winnerB, Status: state.MatchStatusCompleted, ModifiedAt: 100}))
+	reloaded, err = store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, winnerA, reloaded.ThirdPlaceMatch.Winner, "stale bronze write must be dropped")
+	assert.Equal(t, int64(200), reloaded.ThirdPlaceMatch.ModifiedAt)
+
+	// A NEWER write at t=300 applies.
+	require.NoError(t, eng.RecordMatchResult(compID, "m-bronze", &state.MatchResult{ID: "m-bronze", Winner: winnerB, Status: state.MatchStatusCompleted, ModifiedAt: 300}))
+	reloaded, err = store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, winnerB, reloaded.ThirdPlaceMatch.Winner, "newer bronze write must apply")
+	assert.Equal(t, int64(300), reloaded.ThirdPlaceMatch.ModifiedAt)
 }
 
 // TestBronze_OverrideBracketWinnerNotReadyRejected verifies that overriding the
@@ -432,6 +481,6 @@ func TestBronze_OverrideBracketWinnerNotReadyRejected(t *testing.T) {
 	}
 	require.NoError(t, store.SaveBracket(compID, b))
 
-	err := eng.OverrideBracketWinner(compID, "m-bronze", "Alice")
+	_, err := eng.OverrideBracketWinner(compID, "m-bronze", "Alice", 0)
 	assert.Error(t, err, "overriding an unresolved bronze match must return an error")
 }

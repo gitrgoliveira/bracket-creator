@@ -400,6 +400,15 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return nil
 		})
 		if txErr != nil {
+			// The 4xx branches above carry a curated, user-actionable message;
+			// preserve those verbatim. The 500 default is an unexpected error
+			// (LoadCompetition failure, an unmatched UpdateParticipant error) -
+			// route it through internalError so it is logged server-side and the
+			// client body stays generic instead of leaking raw error text.
+			if httpStatus == http.StatusInternalServerError {
+				internalError(c, txErr)
+				return
+			}
 			msg := httpMsg
 			if msg == "" {
 				msg = txErr.Error()
@@ -527,11 +536,11 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		})
 
 		if err != nil {
-			status := http.StatusInternalServerError
 			if errors.Is(err, state.ErrParticipantNotFound) {
-				status = http.StatusNotFound
+				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+				return
 			}
-			c.JSON(status, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 
@@ -602,11 +611,11 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		})
 
 		if err != nil {
-			status := http.StatusInternalServerError
 			if errors.Is(err, state.ErrParticipantNotFound) {
-				status = http.StatusNotFound
+				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+				return
 			}
-			c.JSON(status, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 

@@ -1202,3 +1202,62 @@ func TestEngiParticipantAddPreservesMemberTwo(t *testing.T) {
 	assert.Equal(t, "Ren Fujita", stored[0].DisplayName, "engi member 2 must round-trip")
 	assert.Equal(t, "Getsurin Dojo", stored[0].Dojo)
 }
+
+// TestParticipant500ErrorsAreSanitized pins the mp-i96p HTTP 500 sanitization
+// sweep's coverage of the three participant handlers whose 500 branch used to
+// return the raw error text: PUT /participants/:pid, PUT /participants/:pid/checkin,
+// and DELETE /participants/:pid/checkin. A raw err.Error() there leaks the
+// server's filesystem paths / OS error strings. Each now routes an unexpected
+// (non-sentinel) error through internalError, which logs server-side and returns
+// a generic body.
+//
+// Forces a deterministic non-sentinel I/O failure with the same planted-directory
+// trick as TestPOSTCompetition_RollbackOnSaveParticipantsFailure: replacing
+// participants.csv with a directory makes every load/save inside UpdateParticipant
+// fail, driving each handler down its 500 branch. Asserting the body is generic
+// (and does NOT echo the path / OS error) is discriminating: against the pre-fix
+// code (c.JSON(500, err.Error())) the NotContains assertions would fail.
+func TestParticipant500ErrorsAreSanitized(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	const compID = "sanitize-500-test"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "Sanitize 500", Status: state.CompStatusSetup,
+	}))
+	// Seed one participant while participants.csv is still a real file.
+	p, err := store.AddParticipant(compID, domain.Player{Name: "Alice", Dojo: "Dojo"}, false)
+	require.NoError(t, err)
+
+	// Replace participants.csv with a directory so every load/save inside
+	// UpdateParticipant fails with a non-sentinel I/O error (EISDIR).
+	participantsPath := filepath.Join(tempDir, "competitions", compID, "participants.csv")
+	require.NoError(t, os.Remove(participantsPath))
+	require.NoError(t, os.MkdirAll(participantsPath, 0o700))
+
+	cases := []struct {
+		name, method, path, body string
+	}{
+		{"PUT participant", http.MethodPut, "/api/competitions/" + compID + "/participants/" + p.ID, `{"name":"Bob","dojo":"Dojo"}`},
+		{"PUT checkin", http.MethodPut, "/api/competitions/" + compID + "/participants/" + p.ID + "/checkin", ""},
+		{"DELETE checkin", http.MethodDelete, "/api/competitions/" + compID + "/participants/" + p.ID + "/checkin", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest(tc.method, tc.path, bytes.NewBufferString(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+
+			require.Equal(t, http.StatusInternalServerError, w.Code,
+				"forced I/O failure must surface as 500")
+			body := w.Body.String()
+			assert.Contains(t, body, "internal error",
+				"500 body must be the generic sanitized message")
+			assert.NotContains(t, body, participantsPath,
+				"500 body must not leak the server filesystem path")
+			assert.NotContains(t, body, "directory",
+				"500 body must not leak the raw OS error text (EISDIR mentions 'directory')")
+		})
+	}
+}

@@ -704,15 +704,19 @@ type MatchResult struct {
 	// ModifiedAt is the SERVER-RELATIVE unix-millis timestamp of the last change
 	// to this match's result-bearing fields (mp-y3nk timestamp reconciliation).
 	// Clients stamp each score/override write with server-relative time (learned
-	// via GET /api/time). The write handler drops a write whose ModifiedAt is
-	// older than the stored value, so a reconnecting offline court's stale change
-	// never overwrites a newer one (timestamp last-write-wins); the
-	// completed-never-reverted guard stays on top. Unlike Rev (wire-only), this
-	// IS persisted (append-only pool-matches.csv column + bracket.json) so the
-	// comparison survives a restart. 0 (absent/legacy) means "unstamped": it is
-	// treated as arrival-order and still APPLIES (it does NOT lose to a stamped
-	// write), so old files and un-stamped clients behave exactly as before rather
-	// than having a legitimate change silently dropped. See domain.ApplyByTimestamp.
+	// via GET /api/time). Timestamp last-write-wins currently applies to the
+	// BRACKET write path only: for a bracket match the handler drops a write
+	// whose ModifiedAt is older than the stored value (so a reconnecting offline
+	// court's stale change never overwrites a newer one), and it is persisted in
+	// bracket.json (see BracketMatch.ModifiedAt) so the comparison survives a
+	// restart. For POOL matches this field is wire-only: it is NOT written to
+	// pool-matches.csv and NOT yet used for reconciliation (a scoped follow-up),
+	// so it resets to 0 on restart and pool writes keep arrival-order behavior.
+	// The completed-never-reverted guard stays on top regardless. 0
+	// (absent/legacy) means "unstamped": it is treated as arrival-order and still
+	// APPLIES (it does NOT lose to a stamped write), so old files and un-stamped
+	// clients behave exactly as before rather than having a legitimate change
+	// silently dropped. See domain.ApplyByTimestamp.
 	ModifiedAt int64 `json:"modifiedAt,omitempty" yaml:"-"`
 }
 

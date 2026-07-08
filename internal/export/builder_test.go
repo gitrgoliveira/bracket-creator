@@ -506,20 +506,6 @@ func TestBuildBracketMatchIndex(t *testing.T) {
 	assert.NotContains(t, idx, 0)
 }
 
-func TestFindBracketMatchByNumber(t *testing.T) {
-	t.Parallel()
-	idx := map[int]state.BracketMatch{
-		1: {ID: "M1", MatchNumber: 1},
-		2: {ID: "M2", MatchNumber: 2},
-	}
-	bm := findBracketMatchByNumber(idx, 2)
-	require.NotNil(t, bm)
-	assert.Equal(t, "M2", bm.ID)
-
-	missing := findBracketMatchByNumber(idx, 99)
-	assert.Nil(t, missing)
-}
-
 func TestStandingMap(t *testing.T) {
 	t.Parallel()
 	// Legacy state without UUIDs: keyed by name.
@@ -569,13 +555,77 @@ func TestAttachPoolMatches_SkipsUnresolvableSide(t *testing.T) {
 		{ID: "Pool A-1", SideA: "Ann", SideAID: "id-1", SideB: "Ghost", SideBID: "id-gone"}, // SideB gone
 	}
 
-	attachPoolMatches(pools, results)
+	ordinals := attachPoolMatches(pools, results)
 
 	require.Len(t, pools[0].Matches, 1, "the match with an unresolvable side must be skipped")
 	require.NotNil(t, pools[0].Matches[0].SideA)
 	require.NotNil(t, pools[0].Matches[0].SideB)
 	assert.Equal(t, "Ann", pools[0].Matches[0].SideA.Name)
 	assert.Equal(t, "Bea", pools[0].Matches[0].SideB.Name)
+	// The kept match retains its ORIGINAL suffix (0), not a compacted index.
+	assert.Equal(t, []int{0}, ordinals["Pool A"])
+}
+
+// TestAttachPoolMatches_MiddleSkipPreservesOrdinals is the regression test for the
+// ordinal-shift desync: when a MIDDLE match is skipped (unresolvable side), the
+// surviving matches must keep their original suffixes so later grid rows don't
+// look up the wrong stored result.
+func TestAttachPoolMatches_MiddleSkipPreservesOrdinals(t *testing.T) {
+	t.Parallel()
+	pools := []helper.Pool{{
+		PoolName: "Pool A",
+		Players: []helper.Player{
+			{ID: "id-1", Name: "Ann"}, {ID: "id-2", Name: "Bea"}, {ID: "id-3", Name: "Cid"},
+		},
+	}}
+	results := []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Ann", SideAID: "id-1", SideB: "Bea", SideBID: "id-2"},
+		{ID: "Pool A-1", SideA: "Ann", SideAID: "id-1", SideB: "Ghost", SideBID: "id-gone"}, // MIDDLE skip
+		{ID: "Pool A-2", SideA: "Bea", SideBID: "id-2", SideB: "Cid"},                       // resolvable by name/id
+	}
+	// Give Pool A-2 a resolvable SideAID too.
+	results[2].SideAID = "id-2"
+	results[2].SideBID = "id-3"
+
+	ordinals := attachPoolMatches(pools, results)
+
+	require.Len(t, pools[0].Matches, 2)
+	// Kept matches are 0 and 2 (1 was skipped); the ordinals slice preserves that,
+	// so grid row 1 maps to suffix 2, NOT compacted index 1.
+	assert.Equal(t, []int{0, 2}, ordinals["Pool A"])
+}
+
+// TestBuildResultsWorkbook_MiddleSkipScorePlacement drives the ordinal desync end
+// to end: with a middle match skipped (references a removed participant), the
+// third match's unique score must still appear in the grid. Under the bug, grid
+// row 1 looked up "Pool A-1" (the skipped ghost match) instead of "Pool A-2", so
+// the third match's score was never rendered.
+func TestBuildResultsWorkbook_MiddleSkipScorePlacement(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	al, bo, ca := makePlayer("Alice"), makePlayer("Bob"), makePlayer("Carol")
+	pools := []helper.Pool{{PoolName: "Pool A", Players: []helper.Player{al, bo, ca}}}
+	require.NoError(t, store.SavePools(compID, pools))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideAID: "Alice", SideB: "Bob", SideBID: "Bob", Winner: "Alice", IpponsA: []string{"M"}, Decision: "fought", Status: state.MatchStatusCompleted},
+		// Middle match references a participant no longer in the pool -> skipped.
+		{ID: "Pool A-1", SideA: "Alice", SideAID: "Alice", SideB: "Ghost", SideBID: "ghost-id", Winner: "Alice", IpponsA: []string{"T"}, Decision: "fought", Status: state.MatchStatusCompleted},
+		{ID: "Pool A-2", SideA: "Bob", SideAID: "Bob", SideB: "Carol", SideBID: "Carol", Winner: "Bob", IpponsA: []string{"K", "K", "K"}, Decision: "fought", Status: state.MatchStatusCompleted},
+	}))
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer f.Close()
+	rows, err := f.GetRows(helper.SheetPoolMatches)
+	require.NoError(t, err)
+
+	assert.True(t, sheetContainsCell(rows, "M"), "match 0's score must render")
+	assert.True(t, sheetContainsCell(rows, "KKK"),
+		"match 2's unique score must render in the grid despite the middle match being skipped")
 }
 
 func TestSetIntCell_MissingKey(t *testing.T) {

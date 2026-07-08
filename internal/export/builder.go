@@ -68,7 +68,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	// (pool-matches.csv). PrintPoolMatches renders the per-match grid from
 	// pool.Matches, so reconstruct it from the stored results before rendering,
 	// otherwise the grid (and the scores overlaid onto it) is empty.
-	attachPoolMatches(pools, matchResults)
+	poolOrdinals := attachPoolMatches(pools, matchResults)
 
 	standings, err := eng.CalculatePoolStandings(compID)
 	if err != nil {
@@ -115,7 +115,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 		f, pools, comp.TeamSize, comp.EffectivePoolWinners(),
 		numCourts, comp.Mirror, poolCoords, playerCoords,
 	)
-	if err := overlayPoolScores(f, pools, matchResultByID, comp.TeamSize, comp.Mirror, numCourts); err != nil {
+	if err := overlayPoolScores(f, pools, matchResultByID, poolOrdinals, comp.TeamSize, comp.Mirror, numCourts); err != nil {
 		return nil, fmt.Errorf("export: overlay pool scores: %w", err)
 	}
 	if err := overlayPoolStandings(f, pools, standings, comp.TeamSize, numCourts); err != nil {
@@ -230,16 +230,22 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 // results. LoadPools restores only pool membership; the matches live in
 // pool-matches.csv (loaded separately). PrintPoolMatches renders its per-match
 // grid from pool.Matches, and the ordinal overlay in overlayPoolScores /
-// overlayTeamPoolScores maps the N-th grid match to result ID "<Pool>-<N>", so
-// matches are ordered by the numeric suffix of that ID to keep both in lockstep.
-// Tiebreak/daihyosen results (non-numeric suffix, e.g. "Pool A-DH-0") are skipped.
+// overlayTeamPoolScores maps the N-th grid row back to its result.
+//
+// Because an unresolvable match is SKIPPED (see below), pool.Matches can be
+// non-contiguous relative to the stored "<Pool>-<suffix>" IDs, so this returns
+// poolOrdinals: poolName -> the original numeric suffix of each KEPT match, in
+// grid order. The overlays use poolOrdinals[pool][i] to rebuild the result ID for
+// grid row i, rather than assuming row i == suffix i. Tiebreak/daihyosen results
+// (non-numeric suffix, e.g. "Pool A-DH-0") are skipped.
 //
 // Each side is resolved to its pool Player by the authoritative SideAID/SideBID
 // UUID first, which disambiguates same-name-different-dojo participants. Legacy
 // results written before side UUIDs existed fall back to name matching (last
 // write wins in the name map), so exact-duplicate names in such old data can
 // still be conflated; current data always carries the UUIDs.
-func attachPoolMatches(pools []helper.Pool, matchResults []state.MatchResult) {
+func attachPoolMatches(pools []helper.Pool, matchResults []state.MatchResult) map[string][]int {
+	poolOrdinals := make(map[string][]int, len(pools))
 	for pi := range pools {
 		p := &pools[pi]
 		prefix := p.PoolName + "-"
@@ -284,6 +290,7 @@ func attachPoolMatches(pools []helper.Pool, matchResults []state.MatchResult) {
 		}
 
 		p.Matches = make([]helper.Match, 0, len(mine))
+		ords := make([]int, 0, len(mine))
 		for _, ir := range mine {
 			sideA := resolve(ir.mr.SideAID, ir.mr.SideA)
 			sideB := resolve(ir.mr.SideBID, ir.mr.SideB)
@@ -292,12 +299,16 @@ func attachPoolMatches(pools []helper.Pool, matchResults []state.MatchResult) {
 			// nil *Player, which PrintPoolMatches dereferences unconditionally and
 			// panics on. Skip the unresolvable match: the skeleton row is simply left
 			// without an overlaid score, consistent with the frozen-snapshot semantics.
+			// The skip is why we track the original ordinal separately below.
 			if sideA == nil || sideB == nil {
 				continue
 			}
 			p.Matches = append(p.Matches, helper.Match{SideA: sideA, SideB: sideB})
+			ords = append(ords, ir.idx)
 		}
+		poolOrdinals[p.PoolName] = ords
 	}
+	return poolOrdinals
 }
 
 // playoffLeavesFromBracket reconstructs the pow2 leaf ordering the engine used to
@@ -364,12 +375,12 @@ func playoffFinalsFromParticipants(store *state.Store, comp *state.Competition) 
 // order). So the N-th header in a court column is the N-th pool assigned to that
 // court, and match i sits at header row + 1 + i. By default SideA (Red) is the
 // left column and SideB (White) the right; mirror swaps the two score columns.
-func overlayPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[string]state.MatchResult, teamSize int, mirror bool, numCourts int) error {
+func overlayPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[string]state.MatchResult, poolOrdinals map[string][]int, teamSize int, mirror bool, numCourts int) error {
 	if len(pools) == 0 {
 		return nil
 	}
 	if teamSize != 0 {
-		return overlayTeamPoolScores(f, pools, resultByID, teamSize, mirror, numCourts)
+		return overlayTeamPoolScores(f, pools, resultByID, poolOrdinals, teamSize, mirror, numCourts)
 	}
 
 	sheetName := helper.SheetPoolMatches
@@ -411,13 +422,16 @@ func overlayPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[str
 			middleCol := colNum(courtStartCol + 3)
 			rVCol := colNum(courtStartCol + 5)
 
+			ords := poolOrdinals[pool.PoolName]
 			for i := range pool.Matches {
-				// The N-th grid match maps to result ID "<Pool>-<N>". This relies on
-				// numeric pool-match suffixes being contiguous 0..N-1, which
-				// engine.generatePools guarantees (it stamps the loop index) and
-				// attachPoolMatches preserves (it sorts by suffix and skips the
-				// non-numeric -DH-/-TB- IDs). A missing result is simply left blank.
-				matchID := fmt.Sprintf("%s-%d", pool.PoolName, i)
+				// Grid row i maps back to its stored result via the ORIGINAL numeric
+				// suffix recorded by attachPoolMatches (row i is NOT necessarily suffix
+				// i once an unresolvable match has been skipped). A missing result is
+				// simply left blank.
+				if i >= len(ords) {
+					break
+				}
+				matchID := fmt.Sprintf("%s-%d", pool.PoolName, ords[i])
 				mr, found := resultByID[matchID]
 				if !found || mr.Status != state.MatchStatusCompleted {
 					continue
@@ -457,10 +471,10 @@ func overlayPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[str
 // It uses the same ordinal-position matching as the individual path: the N-th
 // "Red" header in a court's column band corresponds to the N-th match across
 // that court's pools, in pool order.
-func overlayTeamPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[string]state.MatchResult, teamSize int, mirror bool, numCourts int) error {
+func overlayTeamPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[string]state.MatchResult, poolOrdinals map[string][]int, teamSize int, mirror bool, numCourts int) error {
 	sheetName := helper.SheetPoolMatches
 
-	courtMatches := buildCourtMatchJobs(pools, numCourts)
+	courtMatches := buildCourtMatchJobs(pools, numCourts, poolOrdinals)
 
 	rows, err := f.GetRows(sheetName)
 	if err != nil {
@@ -487,10 +501,10 @@ func overlayTeamPoolScores(f *excelize.File, pools []helper.Pool, resultByID map
 			courtMatchIdx[c]++
 
 			pool := pools[job.poolIdx]
-			// job.matchIdx is the ordinal into pool.Matches, which equals the numeric
-			// suffix of result ID "<Pool>-<N>" because engine.generatePools writes
-			// those suffixes contiguously (see the note in overlayPoolScores).
-			matchID := fmt.Sprintf("%s-%d", pool.PoolName, job.matchIdx)
+			// job.ordinal is the ORIGINAL numeric suffix of this match's stored result
+			// ID (buildCourtMatchJobs threads it through poolOrdinals), so a skipped
+			// unresolvable match doesn't shift the lookup for the matches after it.
+			matchID := fmt.Sprintf("%s-%d", pool.PoolName, job.ordinal)
 			mr, found := resultByID[matchID]
 			if !found || mr.Status != state.MatchStatusCompleted {
 				continue
@@ -522,16 +536,23 @@ func computePoolsByCourt(pools []helper.Pool, numCourts int) [][]int {
 	return poolsByCourt
 }
 
-// buildCourtMatchJobs returns, per court, the ordered list of (poolIdx, matchIdx)
-// jobs in the row order PrintPoolMatches lays them out (pool 0 matches, then pool
-// 1 matches, ...). Shared by the individual and team pool-score overlays.
-func buildCourtMatchJobs(pools []helper.Pool, numCourts int) [][]matchJob {
+// buildCourtMatchJobs returns, per court, the ordered list of match jobs in the
+// row order PrintPoolMatches lays them out (pool 0 matches, then pool 1 matches,
+// ...). Each job carries the pool index and the match's ORIGINAL numeric suffix
+// (from poolOrdinals), so the team overlay rebuilds the correct result ID even
+// when an unresolvable match was skipped. Shared by the individual and team
+// pool-score overlays.
+func buildCourtMatchJobs(pools []helper.Pool, numCourts int, poolOrdinals map[string][]int) [][]matchJob {
 	poolsByCourt := computePoolsByCourt(pools, numCourts)
 	courtMatches := make([][]matchJob, numCourts)
 	for c := 0; c < numCourts; c++ {
 		for _, pi := range poolsByCourt[c] {
+			ords := poolOrdinals[pools[pi].PoolName]
 			for mi := range pools[pi].Matches {
-				courtMatches[c] = append(courtMatches[c], matchJob{pi, mi})
+				if mi >= len(ords) {
+					break
+				}
+				courtMatches[c] = append(courtMatches[c], matchJob{poolIdx: pi, ordinal: ords[mi]})
 			}
 		}
 	}
@@ -699,13 +720,12 @@ func overlayPoolStandings(f *excelize.File, pools []helper.Pool, standings map[s
 	}
 
 	// Overlay Ranking sections.
-	return overlayRankingSections(f, sheetName, rows, pools, standings, numCourts)
+	return overlayRankingSections(f, sheetName, rows, pools, standings, numCourts, poolsByCourt)
 }
 
 // overlayRankingSections replaces the IFERROR/INDEX/MATCH formula cells in the
 // "Ranking" sections with literal player names from the engine-ordered standings.
-func overlayRankingSections(f *excelize.File, sheetName string, rows [][]string, pools []helper.Pool, standings map[string][]state.PlayerStanding, numCourts int) error {
-	poolsByCourt := computePoolsByCourt(pools, numCourts)
+func overlayRankingSections(f *excelize.File, sheetName string, rows [][]string, pools []helper.Pool, standings map[string][]state.PlayerStanding, numCourts int, poolsByCourt [][]int) error {
 
 	courtRankIdx := make([]int, numCourts)
 
@@ -840,7 +860,7 @@ func overlayTeamPoolStandings(f *excelize.File, pools []helper.Pool, standings m
 		}
 	}
 
-	return overlayRankingSections(f, sheetName, rows, pools, standings, numCourts)
+	return overlayRankingSections(f, sheetName, rows, pools, standings, numCourts, poolsByCourt)
 }
 
 // ---------- bracket score overlay ----------
@@ -870,8 +890,8 @@ func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMa
 				continue
 			}
 
-			bm := findBracketMatchByNumber(bracketByNum, matchNum)
-			if bm == nil || bm.Status != state.MatchStatusCompleted {
+			bm, ok := bracketByNum[matchNum]
+			if !ok || bm.Status != state.MatchStatusCompleted {
 				continue
 			}
 
@@ -944,8 +964,8 @@ func overlayTeamBracketScores(f *excelize.File, bracketByNum map[int]state.Brack
 				continue
 			}
 
-			bm := findBracketMatchByNumber(bracketByNum, matchNum)
-			if bm == nil || bm.Status != state.MatchStatusCompleted {
+			bm, ok := bracketByNum[matchNum]
+			if !ok || bm.Status != state.MatchStatusCompleted {
 				continue
 			}
 
@@ -1032,8 +1052,8 @@ func overlayPlayoffBracketNames(f *excelize.File, bracketByNum map[int]state.Bra
 			if matchNum <= 0 {
 				continue
 			}
-			bm := findBracketMatchByNumber(bracketByNum, matchNum)
-			if bm == nil {
+			bm, ok := bracketByNum[matchNum]
+			if !ok {
 				continue
 			}
 
@@ -1102,11 +1122,13 @@ func setIntCellDirect(f *excelize.File, sheet, col string, row, value int) {
 	}
 }
 
-// matchJob identifies one pool match by its pool index and match index within
-// that pool, in the row order PrintPoolMatches lays matches out.
+// matchJob identifies one pool match by its pool index and its ORIGINAL numeric
+// suffix (the N in result ID "<Pool>-<N>"), in the row order PrintPoolMatches lays
+// matches out. The suffix, not the grid position, is used to look up the result so
+// a skipped unresolvable match doesn't shift subsequent lookups.
 type matchJob struct {
-	poolIdx  int
-	matchIdx int
+	poolIdx int
+	ordinal int
 }
 
 // buildCourtColumnMap returns header label -> 0-based ABSOLUTE column index,
@@ -1171,14 +1193,6 @@ func buildBracketMatchIndex(bracket *state.Bracket) map[int]state.BracketMatch {
 		add(*bracket.ThirdPlaceMatch)
 	}
 	return idx
-}
-
-func findBracketMatchByNumber(idx map[int]state.BracketMatch, matchNum int) *state.BracketMatch {
-	bm, ok := idx[matchNum]
-	if !ok {
-		return nil
-	}
-	return &bm
 }
 
 // parseRoundMatchLabel parses "Round R - Match M" and returns the match number M

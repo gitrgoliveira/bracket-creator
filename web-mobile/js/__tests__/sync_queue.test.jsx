@@ -896,3 +896,69 @@ describe('subscribeTerminalWriteFailed: permanent terminal-write rejection is su
         expect(API.hasPendingTerminalWrite('c1', 'mfail')).toBe(false);
     });
 });
+
+// mp-y3nk: a queued override the server LWW-dropped (applied:false) must trigger
+// a bracketResync notification so stale optimistic local bracket state is replaced.
+// The queue entry is drained regardless (retry cannot change the outcome).
+describe('_flushQueue: LWW-dropped queued override triggers bracketResync (mp-y3nk)', () => {
+    it('subscribeBracketResync listener is called with reason lww_dropped when server drops the queued override', async () => {
+        // PRE-FIX: mod.subscribeBracketResync is undefined → expect below fails RED.
+        // POST-FIX: it is a function and the listener fires when applied:false.
+        const subscribeBracketResync = mod.subscribeBracketResync;
+        expect(typeof subscribeBracketResync).toBe('function'); // RED before fix
+
+        const resyncCalls = [];
+        const unsub = subscribeBracketResync((info) => resyncCalls.push(info));
+
+        // Enqueue an override while offline.
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('network error'));
+        const queued = await API.overrideBracketWinner('c1', 'm-f1-0', 'Alice', 'pw');
+        expect(queued).toMatchObject({ queued: true });
+        await flushMicrotasks();
+
+        // Reconnect: server LWW-drops the write (applied: false).
+        global.fetch = vi.fn().mockResolvedValue({
+            ok: true, status: 200,
+            json: () => Promise.resolve({ applied: false }),
+        });
+        window.dispatchEvent(new Event('online'));
+        await tick(50);
+        unsub();
+
+        // The resync listener must have been called with reason 'lww_dropped'.
+        expect(resyncCalls.length).toBeGreaterThanOrEqual(1);
+        expect(resyncCalls[0]).toMatchObject({ reason: 'lww_dropped' });
+
+        // Queue must be drained: a second flush sends no additional requests.
+        const callsBefore = global.fetch.mock.calls.length;
+        window.dispatchEvent(new Event('online'));
+        await tick(50);
+        expect(global.fetch.mock.calls.length).toBe(callsBefore);
+    });
+
+    it('subscribeBracketResync listener is NOT called when server applies the queued override (applied: true)', async () => {
+        // PRE-FIX: mod.subscribeBracketResync is undefined → TypeError when called
+        // below, failing RED. POST-FIX: passes (listener not called for applied:true).
+        const subscribeBracketResync = mod.subscribeBracketResync;
+        const resyncCalls = [];
+        // Will throw TypeError pre-fix (subscribeBracketResync is undefined):
+        const unsub = subscribeBracketResync((info) => resyncCalls.push(info));
+
+        // Enqueue an offline override.
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('network error'));
+        await API.overrideBracketWinner('c1', 'm-f2-0', 'Bob', 'pw');
+        await flushMicrotasks();
+
+        // Reconnect: server APPLIES the write (applied: true).
+        global.fetch = vi.fn().mockResolvedValue({
+            ok: true, status: 200,
+            json: () => Promise.resolve({ applied: true }),
+        });
+        window.dispatchEvent(new Event('online'));
+        await tick(50);
+        unsub();
+
+        // Resync listener must NOT be called (applied:true is success, no stale state).
+        expect(resyncCalls.length).toBe(0);
+    });
+});

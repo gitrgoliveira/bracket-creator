@@ -1227,17 +1227,13 @@ func (e *Engine) UpdateMatchCourt(compId string, matchId string, newCourt string
 //
 // Uses the same UpdateBracket atomic primitive as the rest of the
 // scoring path to avoid the LoadBracket + mutate + Save TOCTOU window.
-// OverrideBracketWinner returns (applied bool, err error). applied is true
-// when the write landed; false when it was dropped by the timestamp LWW guard
-// (stale reconnect replay). A false return still carries nil err so the caller
-// can respond 200 with {"applied":false} without broadcasting (finding 7).
+// Returns (applied bool, err error). applied is true when the write landed;
+// false when it was dropped by the timestamp LWW guard (stale reconnect
+// replay). A false return still carries nil err so the caller can respond
+// 200 with {"applied":false} without broadcasting (finding 7).
 // Returning errLWWDropped from the mutate callback causes UpdateBracket to
 // skip the disk save, avoiding a spurious write of an unchanged bracket (finding 8).
 func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName string, modifiedAt int64) (bool, error) {
-	// applied tracks whether the override actually mutated the bracket, so the
-	// audit record below is written only for writes that landed. A timestamp-LWW
-	// drop leaves it false, avoiding a phantom overrides.json entry (mp-y3nk).
-	applied := false
 	err := e.store.UpdateBracket(compId, func(bracket *state.Bracket) error {
 		if bracket == nil {
 			return notFoundErrorf("bracket not found for competition %s", compId)
@@ -1261,7 +1257,6 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 					if modifiedAt != 0 {
 						m.ModifiedAt = modifiedAt
 					}
-					applied = true
 					e.propagateBracketWinner(bracket, rIdx, mIdx)
 					return nil
 				}
@@ -1284,7 +1279,6 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 			if modifiedAt != 0 {
 				bm.ModifiedAt = modifiedAt
 			}
-			applied = true
 			return nil
 		}
 		return notFoundErrorf("bracket match %s not found", matchId)
@@ -1294,11 +1288,6 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 	}
 	if err != nil {
 		return false, err
-	}
-	// Defensive: if UpdateBracket succeeded but applied is somehow false (should
-	// not happen after the errLWWDropped path above), skip the audit record.
-	if !applied {
-		return false, nil
 	}
 
 	// Record the override for auditing. A failure here leaves the bracket

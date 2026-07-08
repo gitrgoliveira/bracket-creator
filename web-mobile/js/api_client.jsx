@@ -281,6 +281,23 @@ function _notifyTerminalWriteFailed(info) {
     }
 }
 
+// Bracket-resync channel. When a queued override-winner assertion the server
+// LWW-dropped returns 200 {"applied": false} and emits NO SSE broadcast, any
+// optimistic local bracket advance from it is stale. This channel asks listeners
+// (e.g. AdminShiaijo) to refetch. This is a BENIGN supersede: do NOT reuse
+// _terminalFailListeners, which surfaces a "not saved" ERROR state. Payload:
+// {compID, matchID, reason}.
+const _bracketResyncListeners = new Set();
+function subscribeBracketResync(fn) {
+    _bracketResyncListeners.add(fn);
+    return () => _bracketResyncListeners.delete(fn);
+}
+function _notifyBracketResync(info) {
+    for (const fn of _bracketResyncListeners) {
+        try { fn(info); } catch (_e) { /* swallow */ }
+    }
+}
+
 /**
  * Recompute and publish the correct sync status from current state:
  *   offline  : _offlineFlag is set and the queue still has entries
@@ -382,6 +399,17 @@ async function _flushQueue() {
                     if (res.ok) {
                         // Success (HTTP 200/201, including a stale {stale:true} no-op): remove
                         // from queue only if no newer write has replaced this descriptor.
+                        if (terminal && kind === 'override') {
+                            // A queued feeder-winner assertion the server LWW-dropped returns
+                            // 200 {"applied": false} and emits NO broadcast, so any optimistic
+                            // local advance from it is stale. Ask listeners to refetch. This is a
+                            // benign supersede, NOT a write failure, so do NOT use the terminal-fail
+                            // channel (which surfaces a "not saved" error).
+                            const body = await res.json().catch(() => ({}));
+                            if (body && body.applied === false) {
+                                _notifyBracketResync({ compID, matchID, reason: 'lww_dropped' });
+                            }
+                        }
                         if (_writeQueue.get(key) === descriptor) {
                             _writeQueue.delete(key);
                             // A confirmed terminal score write needs no further rev
@@ -2070,7 +2098,7 @@ const API = {
     },
 };
 
-export { API, subscribeSyncStatus, subscribeTerminalWriteFailed, enqueueRunningWrite };
+export { API, subscribeSyncStatus, subscribeTerminalWriteFailed, subscribeBracketResync, enqueueRunningWrite };
 
 if (typeof window !== 'undefined') {
     window.API = API;
@@ -2080,6 +2108,9 @@ if (typeof window !== 'undefined') {
     // mp-gpra: terminal-write failure pub/sub: lets the score editor show an
     // explicit "not saved" state when a queued terminal write is permanently dropped.
     window.subscribeTerminalWriteFailed = subscribeTerminalWriteFailed;
+    // mp-y3nk: bracket-resync pub/sub: signals AdminShiaijo to refetch when a
+    // queued override the server LWW-dropped leaves stale optimistic bracket state.
+    window.subscribeBracketResync = subscribeBracketResync;
     // mp-gpra: reconnectEvents and hasPendingTerminalWrite are on window.API
     // (via the API object above): no separate window assignments needed.
 }

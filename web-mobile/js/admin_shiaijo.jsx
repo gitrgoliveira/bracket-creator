@@ -100,6 +100,17 @@ export function pendingFeederSlots(finalMatch, rounds) {
     return slots;
 }
 
+// _findMatchInRounds locates a match by id, returning its {R (round), M (index)}
+// position, or {R:-1, M:-1} if absent. Shared by propagateBracketWinnerLocal and
+// applyBronzeLoserLocal so the search logic can't drift between them.
+function _findMatchInRounds(rounds, matchId) {
+    for (let r = 0; r < rounds.length; r++) {
+        const idx = (rounds[r] || []).findIndex((x) => x && x.id === matchId);
+        if (idx >= 0) return { R: r, M: idx };
+    }
+    return { R: -1, M: -1 };
+}
+
 // propagateBracketWinnerLocal advances a winner into the next round's placeholder
 // side on the CLIENT (mp-y3nk offline console), so a court running fully offline
 // can complete a bout and have the next match: including the final: become
@@ -112,11 +123,7 @@ export function pendingFeederSlots(finalMatch, rounds) {
 // reconnect a refetch replaces this optimistic tree with the real one.
 export function propagateBracketWinnerLocal(rounds, matchId, winnerName) {
     if (!Array.isArray(rounds) || !matchId) return rounds;
-    let R = -1, M = -1;
-    for (let r = 0; r < rounds.length; r++) {
-        const idx = (rounds[r] || []).findIndex((x) => x && x.id === matchId);
-        if (idx >= 0) { R = r; M = idx; break; }
-    }
+    const { R, M } = _findMatchInRounds(rounds, matchId);
     if (R < 0) return rounds; // unknown id → no-op (identity preserved)
 
     const match = rounds[R][M];
@@ -160,11 +167,7 @@ export function propagateBracketWinnerLocal(rounds, matchId, winnerName) {
 // caller merges the result into the bracket; this function never mutates inputs.
 export function applyBronzeLoserLocal(rounds, matchId, winnerName, thirdPlaceMatch) {
     if (!thirdPlaceMatch || !Array.isArray(rounds) || !matchId) return null;
-    let R = -1, M = -1;
-    for (let r = 0; r < rounds.length; r++) {
-        const idx = (rounds[r] || []).findIndex((x) => x && x.id === matchId);
-        if (idx >= 0) { R = r; M = idx; break; }
-    }
+    const { R, M } = _findMatchInRounds(rounds, matchId);
     // Only act for the semifinal round (one step before the final).
     if (R < 0 || R !== rounds.length - 2) return null;
     const match = rounds[R][M];
@@ -483,7 +486,13 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             );
             unsub = () => { if (typeof off === "function") off(); };
         }
-        return () => { cancelled = true; timerPool.clearAll(); unsub(); };
+        let unsubResync = () => {};
+        if (typeof window.subscribeBracketResync === "function") {
+            // A queued override the server LWW-dropped emits no SSE broadcast, so
+            // refetch to replace any stale optimistic bracket state (mp-y3nk).
+            unsubResync = window.subscribeBracketResync(() => { if (!cancelled) scheduleRefresh(); });
+        }
+        return () => { cancelled = true; timerPool.clearAll(); unsub(); unsubResync(); };
     }, [court, refreshCourt]);
 
     // Court-scoped competitions: the live feed once loaded, else the prop

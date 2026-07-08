@@ -1267,10 +1267,18 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                             }
                                         } catch (_e) { /* keep panel */ }
                                     }}
-                                    onAfterDecision={async () => {
-                                        // A kiken/fusenpai decision already persisted the bout via
-                                        // the /decision POST: no score PUT here. Just start the next
-                                        // scheduled match so the panel advances (mirrors onSubmitAndNext).
+                                    onAfterDecision={async (result) => {
+                                        // A fusenpai/hantei decision already persisted the bout via
+                                        // the /decision POST: no score PUT here. It still resolves a
+                                        // winner, so offline we must advance the LOCAL bracket the same
+                                        // way the score path does (mp-y3nk), else a decision-completed
+                                        // bout leaves the next match on placeholders until Refresh/SSE.
+                                        const winnerName = _bracketSideName(result && result.winner);
+                                        if (selectedMatch && selectedMatch.phase === "bracket" && winnerName) {
+                                            applyLocalBracketWin(selectedMatch.compId, selectedMatch.id, winnerName);
+                                        }
+                                        // Then start the next scheduled match so the panel advances
+                                        // (mirrors onSubmitAndNext).
                                         const next = nextActiveAfter(selectedMatch);
                                         if (next && next.status === "scheduled") {
                                             try { await onEditScore(next.compId, next.id, startPatch(), next); } catch (_s) { /* gate */ }

@@ -19,6 +19,9 @@ import (
 // contract, so it serves both `make run` and `make run-mobile` frontends.
 func RegisterTimeHandlers(r *gin.RouterGroup) {
 	r.GET("/time", func(c *gin.Context) {
+		// no-store: clients derive a clock offset from this, so a cached (stale)
+		// nowMs would skew every modifiedAt stamp. Mirrors /api/version.
+		c.Header("Cache-Control", "no-store")
 		c.JSON(http.StatusOK, gin.H{"nowMs": time.Now().UnixMilli()})
 	})
 }

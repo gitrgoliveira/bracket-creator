@@ -328,7 +328,10 @@ function makeSubmitDecision({
         // Item 7: fusenpai (and any future non-kiken decision) advances to the
         // next match on the same court. The decision was already persisted via
         // /decision POST so we do NOT issue another score PUT: just advance.
-        await onAfterDecision();
+        // Pass the resolved result (winner/status) so an offline host can also
+        // advance the LOCAL bracket for a decision-completed bout (mp-y3nk),
+        // matching the score path's maybeAdvanceLocal.
+        await onAfterDecision(updated);
       } else {
         onClose();
       }

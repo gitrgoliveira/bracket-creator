@@ -35,4 +35,6 @@ func TestTimeHandler_ReturnsServerNowMillis(t *testing.T) {
 	// The reported time must fall within the window the request was served in.
 	assert.GreaterOrEqual(t, resp.NowMs, before, "nowMs must be >= the time just before the request")
 	assert.LessOrEqual(t, resp.NowMs, after, "nowMs must be <= the time just after the request")
+	// no-store: a cached nowMs would skew every derived clock offset (mp-y3nk).
+	assert.Equal(t, "no-store", w.Header().Get("Cache-Control"), "/api/time must be non-cacheable")
 }

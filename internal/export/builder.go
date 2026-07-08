@@ -1172,7 +1172,6 @@ func standingKey(p helper.Player) string {
 	return p.Name
 }
 
-// buildBracketMatchIndex indexes all bracket matches by ID.
 // buildBracketMatchIndex maps MatchNumber -> match for O(1) lookup by the printed
 // "Round N - Match N" number (the only way the overlays query it). Byes and other
 // unnumbered matches (MatchNumber 0) are skipped, both because overlays never look

@@ -1478,8 +1478,9 @@ func assertNoBrokenFormulas(t *testing.T, f *excelize.File, sheet string) {
 	t.Helper()
 	rows, err := f.GetRows(sheet)
 	require.NoError(t, err)
+	width := maxRowWidth(rows)
 	for r := range rows {
-		for c := 0; c < 24; c++ {
+		for c := 0; c < width; c++ {
 			col, _ := excelize.ColumnNumberToName(c + 1)
 			ref := fmt.Sprintf("%s%d", col, r+1)
 			fm, _ := f.GetCellFormula(sheet, ref)
@@ -1491,6 +1492,21 @@ func assertNoBrokenFormulas(t *testing.T, f *excelize.File, sheet string) {
 			assert.NotContainsf(t, v, "#", "%s!%s formula %q resolved to an Excel error %q", sheet, ref, fm, v)
 		}
 	}
+}
+
+// maxRowWidth returns the widest row's column count. Courts are laid out in
+// side-by-side 8-column bands, and every band's header row ("Red"/"White"/
+// "Round N") populates its columns, so the widest row spans ALL court bands.
+// Scanning up to this width covers every formula cell regardless of court count,
+// unlike a fixed 24-column (A-X, ~3 court) bound.
+func maxRowWidth(rows [][]string) int {
+	w := 0
+	for _, r := range rows {
+		if len(r) > w {
+			w = len(r)
+		}
+	}
+	return w
 }
 
 // TestBuildResultsWorkbook_IncompleteAllFormats exports every format immediately
@@ -1886,9 +1902,10 @@ func formulaCellCount(t *testing.T, f *excelize.File, sheet string) int {
 	t.Helper()
 	rows, err := f.GetRows(sheet)
 	require.NoError(t, err)
+	width := maxRowWidth(rows)
 	count := 0
 	for r := range rows {
-		for c := 0; c < 24; c++ {
+		for c := 0; c < width; c++ {
 			col, _ := excelize.ColumnNumberToName(c + 1)
 			fm, _ := f.GetCellFormula(sheet, fmt.Sprintf("%s%d", col, r+1))
 			if fm != "" {

@@ -44,7 +44,7 @@ const (
 	MaxLenVenueAddress    = 300
 	MaxLenVenueMapURL     = 500
 	MaxLenDisplayTime     = 8 // "HH:MM" or "HH:MM:SS"
-	MaxLenRulesURL        = 500
+	MaxLenWebsiteURL      = 500
 	MaxLenAwardsNote      = 500
 	MaxLenInfoNotes       = 2000
 	MaxLenContactLabel    = 50

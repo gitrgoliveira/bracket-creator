@@ -629,17 +629,17 @@ describe('TournamentInfo', () => {
     expect(text).toContain('Bring your shinai');
   });
 
-  it('creates an anchor for http(s) rulesURL but renders plain text for non-http', () => {
+  it('creates an anchor for http(s) websiteURL but renders plain text for non-http', () => {
     // http URL → anchor element
     const treeHttp = runtime.mount(TournamentInfo, {
-      tournament: { rulesURL: 'https://example.com/rules.pdf' },
+      tournament: { websiteURL: 'https://example.com/rules.pdf' },
     });
     const anchor = findInTree(treeHttp, n => n.type === 'a');
     expect(anchor).not.toBeNull();
 
     // Non-http value → plain text, no anchor
     const treePlain = runtime.mount(TournamentInfo, {
-      tournament: { rulesURL: 'See the notice board' },
+      tournament: { websiteURL: 'See the notice board' },
     });
     const anchorPlain = findInTree(treePlain, n => n.type === 'a');
     expect(anchorPlain).toBeNull();

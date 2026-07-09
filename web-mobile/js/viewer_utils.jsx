@@ -226,7 +226,7 @@ export const isNonPublicOrigin = (origin) => {
 // are set so the card is invisible for tournaments that haven't filled them in.
 export function TournamentInfo({ tournament }) {
   const t = tournament;
-  if (!t.venueAddress && !t.venueMapURL && !t.openingTime && !t.closingTime && !t.awardsNote && !t.rulesURL && !t.infoNotes && !(t.contacts && t.contacts.length > 0)) return null;
+  if (!t.venueAddress && !t.venueMapURL && !t.openingTime && !t.closingTime && !t.awardsNote && !t.websiteURL && !t.infoNotes && !(t.contacts && t.contacts.length > 0)) return null;
 
   const contactLink = (value) => {
     if (!value) return value;
@@ -264,9 +264,9 @@ export function TournamentInfo({ tournament }) {
           <dt className="tournament-info__label">Awards</dt>
           <dd className="tournament-info__value">{t.awardsNote}</dd>
         </>}
-        {t.rulesURL && <>
-          <dt className="tournament-info__label">Rules</dt>
-          <dd className="tournament-info__value">{isHttpURL(t.rulesURL) ? <a href={t.rulesURL} className="tournament-info__link" target="_blank" rel="noopener noreferrer">{t.rulesURL.replace(/^https?:\/\//i, "")}</a>: t.rulesURL}</dd>
+        {t.websiteURL && <>
+          <dt className="tournament-info__label">Website</dt>
+          <dd className="tournament-info__value">{isHttpURL(t.websiteURL) ? <a href={t.websiteURL} className="tournament-info__link" target="_blank" rel="noopener noreferrer">{t.websiteURL.replace(/^https?:\/\//i, "")}</a>: t.websiteURL}</dd>
         </>}
         {t.infoNotes && <>
           <dt className="tournament-info__label">Notes</dt>

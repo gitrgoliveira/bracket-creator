@@ -86,15 +86,24 @@ type Tournament struct {
 	VenueMapURL  string              `yaml:"venue_map_url,omitempty" json:"venueMapURL,omitempty"`
 	OpeningTime  string              `yaml:"opening_time,omitempty" json:"openingTime,omitempty"`
 	ClosingTime  string              `yaml:"closing_time,omitempty" json:"closingTime,omitempty"`
-	RulesURL     string              `yaml:"rules_url,omitempty" json:"rulesURL,omitempty"`
+	WebsiteURL   string              `yaml:"website_url,omitempty" json:"websiteURL,omitempty"`
 	AwardsNote   string              `yaml:"awards_note,omitempty" json:"awardsNote,omitempty"`
 	InfoNotes    string              `yaml:"info_notes,omitempty" json:"infoNotes,omitempty"`
 	Contacts     []TournamentContact `yaml:"contacts,omitempty" json:"contacts,omitempty"`
 
-	// Sponsors is the ordered list of sponsor logos to display on the
-	// public viewer home and the /display TV/lobby surfaces (mp-c38).
-	// Stored as omitempty so legacy tournament.md files without sponsors
-	// round-trip cleanly (no `sponsors: []` key emitted).
+	// RulesURLLegacy captures the pre-rename `rules_url` YAML key from
+	// tournament.md files written before the field was renamed to
+	// website_url. It is migrated into WebsiteURL by ApplyTournamentDefaults
+	// and is never emitted on the wire (json:"-") nor re-persisted (the
+	// migration clears it, so omitempty drops the old key on the next save).
+	// Field-based capture + migrate keeps the change additive: no custom
+	// Tournament.UnmarshalYAML that would have to enumerate every field.
+	RulesURLLegacy string `yaml:"rules_url,omitempty" json:"-"`
+
+	// Sponsors is the ordered list of sponsor banners shown on the public
+	// viewer home page only (the /display TV/lobby surfaces intentionally
+	// omit them; mp-c38/mp-vb3u). Stored as omitempty so legacy tournament.md
+	// files without sponsors round-trip cleanly (no `sponsors: []` key emitted).
 	Sponsors []Sponsor `yaml:"sponsors,omitempty" json:"sponsors,omitempty"`
 
 	// Theme holds optional branding overrides: custom accent colors and a
@@ -246,6 +255,14 @@ func ApplyTournamentDefaults(t *Tournament) {
 		// Default to at least one court ("A") for legacy or malformed configs
 		t.Courts = []string{"A"}
 	}
+	// Migrate the pre-rename rules_url key into website_url. Only fill when
+	// website_url is absent so a file carrying both keys prefers the new one.
+	// Clearing the legacy field means the next save writes only website_url,
+	// completing the migration on disk. Idempotent: a no-op once migrated.
+	if t.WebsiteURL == "" && t.RulesURLLegacy != "" {
+		t.WebsiteURL = t.RulesURLLegacy
+	}
+	t.RulesURLLegacy = ""
 }
 
 // Days returns the ordered list of DD-MM-YYYY calendar day strings

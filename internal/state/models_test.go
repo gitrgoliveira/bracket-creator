@@ -2,6 +2,8 @@ package state
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -9,6 +11,49 @@ import (
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 )
+
+// TestApplyTournamentDefaults_MigratesLegacyRulesURL covers the field-rename
+// migration: a tournament.md written before the rename carries the old
+// `rules_url` key, which deserialises into RulesURLLegacy and must land in
+// WebsiteURL (and never be re-persisted).
+func TestApplyTournamentDefaults_MigratesLegacyRulesURL(t *testing.T) {
+	legacyOnly := &Tournament{RulesURLLegacy: "https://old.example/rules.pdf"}
+	ApplyTournamentDefaults(legacyOnly)
+	assert.Equal(t, "https://old.example/rules.pdf", legacyOnly.WebsiteURL)
+	assert.Empty(t, legacyOnly.RulesURLLegacy, "legacy field cleared so save drops the old key")
+
+	// A file carrying BOTH keys prefers the new website_url.
+	both := &Tournament{WebsiteURL: "https://new.example", RulesURLLegacy: "https://old.example"}
+	ApplyTournamentDefaults(both)
+	assert.Equal(t, "https://new.example", both.WebsiteURL)
+	assert.Empty(t, both.RulesURLLegacy)
+}
+
+// TestLoadTournament_MigratesRulesURLToWebsiteURL is the end-to-end migration:
+// a legacy tournament.md on disk loads with WebsiteURL populated, and the next
+// save rewrites the file with website_url and no rules_url.
+func TestLoadTournament_MigratesRulesURLToWebsiteURL(t *testing.T) {
+	dir := t.TempDir()
+	legacy := "---\nname: Legacy Cup\ndate: 01-06-2026\nvenue: Dojo\nrules_url: https://old.example/rules.pdf\n---\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "tournament.md"), []byte(legacy), 0o600))
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	got, err := store.LoadTournament()
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, "https://old.example/rules.pdf", got.WebsiteURL, "legacy rules_url migrated on load")
+	assert.Empty(t, got.RulesURLLegacy)
+
+	// Persisting the migrated record drops the legacy key on disk.
+	require.NoError(t, store.SaveTournament(got))
+	raw, err := os.ReadFile(filepath.Join(dir, "tournament.md"))
+	require.NoError(t, err)
+	assert.Contains(t, string(raw), "website_url:")
+	assert.Contains(t, string(raw), "old.example/rules.pdf")
+	assert.NotContains(t, string(raw), "rules_url", "old key must not be re-persisted")
+}
 
 func TestApplyTournamentDefaults_ZeroValues(t *testing.T) {
 	tour := &Tournament{}

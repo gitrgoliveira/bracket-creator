@@ -76,12 +76,16 @@ func RegisterPublicBrandingHandlers(r *gin.RouterGroup, store *state.Store) {
 
 // RegisterBrandingHandlers wires admin-gated mutation endpoints. The caller
 // must use a group whose body cap is at least BrandingMaxBodyBytes (2 MB).
-func RegisterBrandingHandlers(r *gin.RouterGroup, store *state.Store) {
-	r.POST("/branding/logo", handleBrandingLogoUpload(store))
-	r.DELETE("/branding/logo", handleBrandingLogoDelete(store))
+//
+// hub broadcasts EventTournamentUpdated after a successful logo upload/delete
+// so open viewer and display surfaces re-fetch and re-apply branding live,
+// matching PUT /tournament (same live-update gap as sponsors, mp-scf).
+func RegisterBrandingHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub) {
+	r.POST("/branding/logo", handleBrandingLogoUpload(store, hub))
+	r.DELETE("/branding/logo", handleBrandingLogoDelete(store, hub))
 }
 
-func handleBrandingLogoUpload(store *state.Store) gin.HandlerFunc {
+func handleBrandingLogoUpload(store *state.Store, hub *Hub) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		fh, err := c.FormFile("file")
 		if err != nil {
@@ -193,11 +197,14 @@ func handleBrandingLogoUpload(store *state.Store) gin.HandlerFunc {
 		}
 		_ = os.Remove(filepath.Join(brandingDir, other))
 
+		if hub != nil {
+			hub.Broadcast(EventTournamentUpdated, nil)
+		}
 		c.JSON(http.StatusOK, gin.H{"logoPath": fileName})
 	}
 }
 
-func handleBrandingLogoDelete(store *state.Store) gin.HandlerFunc {
+func handleBrandingLogoDelete(store *state.Store, hub *Hub) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var removed string
 		_, err := store.UpdateTournamentChanged(&state.Tournament{}, func(current, desired *state.Tournament) error {
@@ -222,6 +229,9 @@ func handleBrandingLogoDelete(store *state.Store) gin.HandlerFunc {
 		}
 		if removed == "logo.png" || removed == "logo.jpg" {
 			_ = os.Remove(filepath.Join(store.GetFolder(), brandingDirName, removed))
+		}
+		if hub != nil {
+			hub.Broadcast(EventTournamentUpdated, nil)
 		}
 		c.JSON(http.StatusOK, gin.H{"removed": removed})
 	}

@@ -186,7 +186,7 @@ func trimPublicInfoFields(t *state.Tournament) {
 	t.VenueMapURL = strings.TrimSpace(t.VenueMapURL)
 	t.OpeningTime = strings.TrimSpace(t.OpeningTime)
 	t.ClosingTime = strings.TrimSpace(t.ClosingTime)
-	t.RulesURL = strings.TrimSpace(t.RulesURL)
+	t.WebsiteURL = strings.TrimSpace(t.WebsiteURL)
 	t.AwardsNote = strings.TrimSpace(t.AwardsNote)
 	t.InfoNotes = strings.TrimSpace(t.InfoNotes)
 	if len(t.Contacts) > 0 {
@@ -259,10 +259,10 @@ func validateTournamentLengths(t *state.Tournament) error {
 	if err := validateMaxLen("closingTime", t.ClosingTime, MaxLenDisplayTime); err != nil {
 		return err
 	}
-	if err := validateMaxLen("rulesURL", t.RulesURL, MaxLenRulesURL); err != nil {
+	if err := validateMaxLen("websiteURL", t.WebsiteURL, MaxLenWebsiteURL); err != nil {
 		return err
 	}
-	if err := validateHTTPURL("rulesURL", t.RulesURL); err != nil {
+	if err := validateHTTPURL("websiteURL", t.WebsiteURL); err != nil {
 		return err
 	}
 	if err := validateMaxLen("awardsNote", t.AwardsNote, MaxLenAwardsNote); err != nil {

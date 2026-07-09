@@ -417,8 +417,8 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
             </>
           )}
 
-          {/* mp-c38: sponsor logos. Hidden when none configured. */}
-          {window.SponsorStrip && <window.SponsorStrip sponsors={t && t.sponsors} variant="viewer" />}
+          {/* mp-c38: sponsor logos, viewer page only. Hidden when none configured. */}
+          {window.SponsorStrip && <window.SponsorStrip sponsors={t && t.sponsors} />}
 
           {/* U1: link to the kendo glossary so volunteers (and
               spectators new to kendo) can browse the term register

@@ -153,7 +153,6 @@ function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, is
                     </span>
                 </div>
             )}
-            {window.SponsorStrip && <window.SponsorStrip sponsors={tournament && tournament.sponsors} variant="tv" />}
         </div>
     );
 }
@@ -472,7 +471,6 @@ function TvIndividualBoard({ tournament, court, linkState = 'connected', promote
                     </span>
                 </div>
             )}
-            {window.SponsorStrip && <window.SponsorStrip sponsors={tournament && tournament.sponsors} variant="tv" />}
         </div>
     );
 }
@@ -739,8 +737,6 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, linkState 
                     </div>
                 )}
             </div>
-
-            {window.SponsorStrip && <window.SponsorStrip sponsors={tournament && tournament.sponsors} variant="tv" />}
         </div>
     );
 }

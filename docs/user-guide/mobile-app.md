@@ -206,11 +206,11 @@ The dashboard lists all competitions. Each card shows the competition type, numb
 
 ### Tournament details and the public info page
 
-Edit the tournament details from **Admin** to set the public-facing information attendees see: the venue address and a map link, opening and closing times, a link to the rules, an awards note, free-form info notes, and contact people. Setting the **public URL** here also enables the [QR codes on tags](#export-print) and shareable links. These fields populate a public **info page** in the viewer, so spectators have one place for the practical details of the day.
+Edit the tournament details from **Admin** to set the public-facing information attendees see: the venue address and a map link, opening and closing times, a link to the tournament website, an awards note, free-form info notes, and contact people. Setting the **public URL** here also enables the [QR codes on tags](#export-print) and shareable links. These fields populate a public **info page** in the viewer, so spectators have one place for the practical details of the day.
 
 ### Branding and sponsors
 
-The same details screen lets you brand the tournament: upload a **logo** and set the **primary and accent colours**, and the public viewer and displays adopt them. You can also add an ordered list of **sponsor logos** that appear on the public tournament page. All of these are optional; with nothing set, the app uses its default kendo theme.
+The same details screen lets you brand the tournament: upload a **logo** and set the **primary and accent colours**, and the public viewer and displays adopt them. You can also add **sponsor banners** that appear as full-width images on the public viewer page (they are not shown on the TV and lobby display boards, which stay focused on match information). All of these are optional; with nothing set, the app uses its default kendo theme.
 
 ### Announcements
 

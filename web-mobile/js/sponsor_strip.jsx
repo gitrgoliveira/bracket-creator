@@ -1,25 +1,32 @@
-// SponsorStrip: renders a horizontal row of sponsor logos. Used on the
-// viewer home and on the /display TV / lobby surfaces. See mp-c38.
+// SponsorStrip: renders a vertical stack of full-width sponsor banners on the
+// viewer home page ONLY. See mp-c38. The /display TV and lobby surfaces
+// intentionally do NOT show sponsors (organiser decision: keep the wall
+// boards focused on match info), so there is no variant prop. Banner footprint
+// (max width + max height) is capped responsively in CSS so an arbitrary
+// user-uploaded image can never dominate the viewer page.
 //
 // Props:
 //   sponsors  Array<{name, file, link?}> from tournament.sponsors
-//   variant   "viewer" | "lobby" | "tv"
 //
-// The viewer variant wraps logos with a link in <a target="_blank"
-// rel="noopener noreferrer">. The lobby and tv variants are passive
-// (TVs have no mouse; lobby touch installs shouldn't focus-trap on a
-// sponsor logo): they always render a bare <img>.
+// A sponsor with a link is wrapped in <a target="_blank"
+// rel="noopener noreferrer">; without one it renders a bare <img>.
 //
 // Hidden when sponsors is empty or undefined.
 
-function SponsorStrip({ sponsors, variant }) {
+function SponsorStrip({ sponsors }) {
   if (!sponsors || sponsors.length === 0) return null;
-  const v = variant || "viewer";
-  const interactive = v === "viewer";
 
+  // Key the root on the sponsor file list. handleError below hides the strip
+  // imperatively (strip.style.display = "none") when the last image fails, but
+  // preact never owns that inline style, so a plain re-render would NOT clear
+  // it: after an upload/delete the list changes yet the strip could stay
+  // permanently hidden even with valid new images. Keying by the file list
+  // forces a full remount on any sponsor mutation, discarding the stale inline
+  // display and re-attempting every image from a clean element.
   return (
     <div
-      className={"sponsor-strip sponsor-strip--" + v}
+      key={sponsors.map((s) => s.file).join("|")}
+      className="sponsor-strip sponsor-strip--viewer"
       role="complementary"
       aria-label="Sponsors"
     >
@@ -33,19 +40,28 @@ function SponsorStrip({ sponsors, variant }) {
         // img. Hiding only the img leaves the wrapper as an empty flex
         // item that still occupies a gap in the row layout. Climbing to
         // the parentElement removes both the gap and the broken image.
+        // If that was the LAST visible banner, collapse the whole strip too,
+        // otherwise the container's border-top + padding render as a
+        // mysterious empty band when every sponsor image fails to load.
         const handleError = (e) => {
           const wrapper = e.currentTarget.parentElement;
-          if (wrapper) wrapper.style.display = "none";
+          if (!wrapper) return;
+          wrapper.style.display = "none";
+          const strip = wrapper.parentElement;
+          if (strip && ![...strip.children].some((c) => c.style.display !== "none")) {
+            strip.style.display = "none";
+          }
         };
         const img = (
           <img
             src={"/api/sponsors/" + s.file}
             alt={s.name || "Sponsor"}
             className="sponsor-strip__logo"
+            loading="lazy"
             onError={handleError}
           />
         );
-        if (interactive && s.link) {
+        if (s.link) {
           return (
             <a
               key={s.file}

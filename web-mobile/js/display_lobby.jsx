@@ -411,10 +411,6 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                 }
             </div>
 
-            {/* mp-c38: sponsor strip: non-interactive on lobby (no input
-                hardware to click; touchscreen lobbies should not focus-trap). */}
-            {window.SponsorStrip && <window.SponsorStrip sponsors={tournament && tournament.sponsors} variant="lobby" />}
-
             {/* Keyframe for the cycle progress bar animation. Injected via a
                 <style> tag because inline styles cannot express @keyframes.
                 Re-rendered with the component but content is static/idempotent. */}

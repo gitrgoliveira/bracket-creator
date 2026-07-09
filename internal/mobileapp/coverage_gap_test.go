@@ -266,13 +266,13 @@ func TestValidateTournamentLengths_ErrorCases(t *testing.T) {
 		ClosingTime: strings.Repeat("x", MaxLenDisplayTime+1),
 	}))
 
-	// RulesURL invalid scheme.
+	// WebsiteURL invalid scheme.
 	require.Error(t, validateTournamentLengths(&state.Tournament{
-		Name:     base.Name,
-		Venue:    base.Venue,
-		Date:     base.Date,
-		Password: base.Password,
-		RulesURL: "ftp://example.com",
+		Name:       base.Name,
+		Venue:      base.Venue,
+		Date:       base.Date,
+		Password:   base.Password,
+		WebsiteURL: "ftp://example.com",
 	}))
 
 	// VenueMapURL too long.
@@ -284,13 +284,13 @@ func TestValidateTournamentLengths_ErrorCases(t *testing.T) {
 		VenueMapURL: strings.Repeat("x", MaxLenVenueMapURL+1),
 	}))
 
-	// RulesURL too long.
+	// WebsiteURL too long.
 	require.Error(t, validateTournamentLengths(&state.Tournament{
-		Name:     base.Name,
-		Venue:    base.Venue,
-		Date:     base.Date,
-		Password: base.Password,
-		RulesURL: strings.Repeat("x", MaxLenRulesURL+1),
+		Name:       base.Name,
+		Venue:      base.Venue,
+		Date:       base.Date,
+		Password:   base.Password,
+		WebsiteURL: strings.Repeat("x", MaxLenWebsiteURL+1),
 	}))
 
 	// AwardsNote too long.

@@ -86,12 +86,19 @@ func RegisterPublicSponsorHandlers(r *gin.RouterGroup, store *state.Store) {
 // middleware). The caller must use a group whose body cap is at least
 // SponsorMaxBodyBytes (2 MB), the in-handler file size check at
 // SponsorMaxFileBytes still applies separately.
-func RegisterSponsorHandlers(r *gin.RouterGroup, store *state.Store) {
-	r.POST("/sponsors", handleSponsorUpload(store))
-	r.DELETE("/sponsors/:index", handleSponsorDelete(store))
+//
+// hub is used to broadcast EventTournamentUpdated after a successful
+// upload/delete so that already-open viewer and display (TV/lobby) surfaces
+// re-fetch the tournament and show the sponsor change live, matching the
+// behaviour of PUT /tournament. Without this, a sponsor uploaded on the admin
+// device stays invisible on a display wall until a manual page reload (mp-c38
+// gap surfaced during UAT).
+func RegisterSponsorHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub) {
+	r.POST("/sponsors", handleSponsorUpload(store, hub))
+	r.DELETE("/sponsors/:index", handleSponsorDelete(store, hub))
 }
 
-func handleSponsorUpload(store *state.Store) gin.HandlerFunc {
+func handleSponsorUpload(store *state.Store, hub *Hub) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		candidate := state.Sponsor{
 			Name: strings.TrimSpace(c.PostForm("name")),
@@ -217,11 +224,16 @@ func handleSponsorUpload(store *state.Store) gin.HandlerFunc {
 			}
 			return
 		}
+		// Notify open viewer/display surfaces to re-fetch (see
+		// RegisterSponsorHandlers doc). Broadcast is a no-op if hub is nil.
+		if hub != nil {
+			hub.Broadcast(EventTournamentUpdated, nil)
+		}
 		c.JSON(http.StatusCreated, candidate)
 	}
 }
 
-func handleSponsorDelete(store *state.Store) gin.HandlerFunc {
+func handleSponsorDelete(store *state.Store, hub *Hub) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		idx, err := strconv.Atoi(c.Param("index"))
 		if err != nil || idx < 0 {
@@ -262,6 +274,9 @@ func handleSponsorDelete(store *state.Store) gin.HandlerFunc {
 		// already removed.
 		if sponsorFilePattern.MatchString(removed.File) {
 			_ = os.Remove(filepath.Join(store.GetFolder(), sponsorsDirName, removed.File))
+		}
+		if hub != nil {
+			hub.Broadcast(EventTournamentUpdated, nil)
 		}
 		c.JSON(http.StatusOK, gin.H{"removed": removed})
 	}

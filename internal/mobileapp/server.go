@@ -211,11 +211,11 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	// its own 2 MB group separate from the 1 MB JSON tier. DELETE rides
 	// on the same group (DELETE skips the cap by method anyway).
 	adminSponsorBody := adminGroup(r, SponsorMaxBodyBytes, verifier, store)
-	RegisterSponsorHandlers(adminSponsorBody, store)
+	RegisterSponsorHandlers(adminSponsorBody, store, hub)
 
 	// Tournament branding logo (mp-scf), same 2 MB envelope as sponsors.
 	adminBrandingBody := adminGroup(r, BrandingMaxBodyBytes, verifier, store)
-	RegisterBrandingHandlers(adminBrandingBody, store)
+	RegisterBrandingHandlers(adminBrandingBody, store, hub)
 
 	// Static files & SPA Fallback
 	mobileFS := res.GetMobileWebFS()
@@ -237,6 +237,16 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 			filePath := strings.TrimPrefix(path, "/")
 			if filePath == "" {
 				filePath = "index.html"
+			}
+
+			// index.html gets server-rendered link-preview meta tags injected
+			// from live tournament state (mp-p9o8). Handle it before the generic
+			// file server so the static bytes are never served bare.
+			if filePath == "index.html" {
+				if data, rerr := fs.ReadFile(subFS, "index.html"); rerr == nil {
+					serveIndexHTML(c, data, store)
+					return
+				}
 			}
 
 			// Check if file exists in FS
@@ -272,7 +282,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 			if ext == "" || ext == ".html" {
 				data, err := fs.ReadFile(subFS, "index.html")
 				if err == nil {
-					c.Data(http.StatusOK, "text/html; charset=utf-8", data)
+					serveIndexHTML(c, data, store)
 					return
 				}
 			}

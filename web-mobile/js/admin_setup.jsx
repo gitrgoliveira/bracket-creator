@@ -139,7 +139,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   const [venueMapURL, setVenueMapURL] = useStateA(tournament.venueMapURL || "");
   const [openingTime, setOpeningTime] = useStateA(tournament.openingTime || "");
   const [closingTime, setClosingTime] = useStateA(tournament.closingTime || "");
-  const [rulesURL, setRulesURL] = useStateA(tournament.rulesURL || "");
+  const [websiteURL, setWebsiteURL] = useStateA(tournament.websiteURL || "");
   const [awardsNote, setAwardsNote] = useStateA(tournament.awardsNote || "");
   const [infoNotes, setInfoNotes] = useStateA(tournament.infoNotes || "");
   const [contacts, setContacts] = useStateA((tournament.contacts || []).map((ct, i) => ({ ...ct, _key: i })));
@@ -186,7 +186,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   // Open by default only when the tournament already has public data, so
   // existing values are never hidden behind a collapsed section.
   const hasPublicInfo = !!(publicURL || venueAddress || venueMapURL || openingTime ||
-    closingTime || rulesURL || awardsNote || infoNotes || (contacts && contacts.length));
+    closingTime || websiteURL || awardsNote || infoNotes || (contacts && contacts.length));
   const [publicOpen, setPublicOpen] = useStateA(hasPublicInfo);
 
   // mp-sspn: dirty tracking for the unsaved-changes cue + cancel guard.
@@ -202,7 +202,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   useEffectA(() => {
     const snap = JSON.stringify({
       name, venue, date, durationDays, courts, openingBlock, lunchBlock, closingBlock,
-      publicURL, venueAddress, venueMapURL, openingTime, closingTime, rulesURL,
+      publicURL, venueAddress, venueMapURL, openingTime, closingTime, websiteURL,
       awardsNote, infoNotes, pass,
       contacts: contacts.map(c => ({ label: c.label || "", value: c.value || "" })),
       theme: normalizeTheme(theme),
@@ -210,7 +210,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
     if (initialSnapRef.current === null) { initialSnapRef.current = snap; return; }
     setDirty(snap !== initialSnapRef.current);
   }, [name, venue, date, durationDays, courts, openingBlock, lunchBlock, closingBlock,
-    publicURL, venueAddress, venueMapURL, openingTime, closingTime, rulesURL,
+    publicURL, venueAddress, venueMapURL, openingTime, closingTime, websiteURL,
     awardsNote, infoNotes, pass, contacts, theme]);
 
   // Elevated (destructive-ops) password: spec 004 / mp-e21. File mode only;
@@ -297,7 +297,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
         venueMapURL: venueMapURL.trim() || undefined,
         openingTime: openingTime.trim() || undefined,
         closingTime: closingTime.trim() || undefined,
-        rulesURL: rulesURL.trim() || undefined,
+        websiteURL: websiteURL.trim() || undefined,
         awardsNote: awardsNote.trim() || undefined,
         infoNotes: infoNotes.trim() || undefined,
         contacts: contacts.filter(c => (c.value || "").trim()).map(c => ({ label: (c.label || "").trim(), value: (c.value || "").trim() })),
@@ -530,9 +530,9 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
               </div>
             </div>
             <div className="field">
-              <label className="field__label">Rules link</label>
-              <input className="input" value={rulesURL} onChange={(e) => setRulesURL(e.target.value)} placeholder="https://..." />
-              <div className="field__hint">Link to tournament rules document or PDF.</div>
+              <label className="field__label">Website link</label>
+              <input className="input" value={websiteURL} onChange={(e) => setWebsiteURL(e.target.value)} placeholder="https://..." />
+              <div className="field__hint">Link to the tournament website.</div>
             </div>
             <div className="field">
               <label className="field__label">Awards</label>

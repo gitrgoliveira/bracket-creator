@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
@@ -110,6 +111,54 @@ func TestPostSponsor_HappyPath_PNG(t *testing.T) {
 	on, err := os.ReadFile(filepath.Join(tempDir, "sponsors", got.File))
 	require.NoError(t, err)
 	assert.Equal(t, tinyPNG, on)
+}
+
+// TestSponsor_MutationsBroadcastTournamentUpdated locks in the live-update
+// fix: uploading or deleting a sponsor must broadcast EventTournamentUpdated
+// so already-open viewer surfaces refetch and show the change without a manual
+// reload. Before this, a sponsor uploaded on the admin device stayed invisible
+// on an open viewer/display until refresh (the reported UAT bug).
+func TestSponsor_MutationsBroadcastTournamentUpdated(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "sponsor-sse-*")
+	require.NoError(t, err)
+	defer func() { _ = os.RemoveAll(tempDir) }()
+	store, err := state.NewStore(tempDir)
+	require.NoError(t, err)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "SSE Cup", Password: "secret"}))
+	eng := engine.New(store)
+	res := resources.NewResources(nil, fstest.MapFS{"web-mobile/index.html": {Data: []byte("<html/>")}})
+	router, hub, limiter := NewRouter(store, eng, res, NewFileVerifier(store))
+	defer limiter.Close()
+
+	ch := hub.Subscribe()
+	defer hub.Unsubscribe(ch)
+
+	expectEvent := func(action string) {
+		t.Helper()
+		select {
+		case msg := <-ch:
+			var env SSEEvent
+			require.NoError(t, json.Unmarshal([]byte(msg), &env))
+			assert.Equalf(t, EventTournamentUpdated, env.Type,
+				"%s must broadcast tournament_updated so open viewers refetch", action)
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for tournament_updated broadcast after %s", action)
+		}
+	}
+
+	// Upload.
+	body, ct := buildSponsorUpload(t, "Acme", "", "acme.png", tinyPNG)
+	w := postSponsor(t, router, body, ct, "secret")
+	require.Equalf(t, http.StatusCreated, w.Code, "body: %s", w.Body.String())
+	expectEvent("sponsor upload")
+
+	// Delete index 0.
+	dw := httptest.NewRecorder()
+	dreq, _ := http.NewRequest(http.MethodDelete, "/api/sponsors/0", nil)
+	dreq.Header.Set("X-Tournament-Password", "secret")
+	router.ServeHTTP(dw, dreq)
+	require.Equalf(t, http.StatusOK, dw.Code, "body: %s", dw.Body.String())
+	expectEvent("sponsor delete")
 }
 
 func TestPostSponsor_HappyPath_JPEG(t *testing.T) {

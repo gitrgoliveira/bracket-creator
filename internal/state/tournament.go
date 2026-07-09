@@ -215,6 +215,13 @@ func (s *Store) UpdateTournamentChanged(desired *Tournament, transform func(curr
 				// deserialises to the zero value (0), treat as 1.
 				t.DurationDays = 1
 			}
+			// Migrate the pre-rename rules_url key into website_url (mirrors
+			// ApplyTournamentDefaults) so an edit through this path never
+			// re-persists the legacy key or drops the value.
+			if t.WebsiteURL == "" && t.RulesURLLegacy != "" {
+				t.WebsiteURL = t.RulesURLLegacy
+			}
+			t.RulesURLLegacy = ""
 			current = &t
 		} else {
 			// Parse failure: fall back to the same default record

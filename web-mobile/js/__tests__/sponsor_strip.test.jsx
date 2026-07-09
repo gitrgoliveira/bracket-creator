@@ -88,6 +88,36 @@ describe('SponsorStrip', () => {
     });
   });
 
+  it('onError collapses the whole strip when the LAST visible banner fails', () => {
+    // When every wrapper is hidden, the .sponsor-strip container's border-top
+    // + padding would otherwise render as a mysterious empty band. The handler
+    // must hide the strip once no visible children remain.
+    const img = findAll(SponsorStrip({ sponsors: sponsorsWithLink }), (n) => n.type === 'img')[0];
+    const wrapper = { style: {} };
+    const strip = { style: {}, children: [wrapper] }; // only this one banner
+    wrapper.parentElement = strip;
+    img.props.onError({ currentTarget: { parentElement: wrapper } });
+    expect(wrapper.style.display).toBe('none');
+    expect(strip.style.display).toBe('none'); // last one failed -> collapse
+  });
+
+  it('onError does NOT collapse the strip while another banner is still visible', () => {
+    const img = findAll(SponsorStrip({ sponsors: sponsorsWithLink }), (n) => n.type === 'img')[0];
+    const wrapper = { style: {} };
+    const stillVisible = { style: { display: '' } }; // sibling not hidden
+    const strip = { style: {}, children: [wrapper, stillVisible] };
+    wrapper.parentElement = strip;
+    img.props.onError({ currentTarget: { parentElement: wrapper } });
+    expect(wrapper.style.display).toBe('none');
+    expect(strip.style.display).toBeUndefined(); // strip stays visible
+  });
+
+  it('onError is a no-op when the wrapper has no parent (defensive guard)', () => {
+    const img = findAll(SponsorStrip({ sponsors: sponsorsWithLink }), (n) => n.type === 'img')[0];
+    // currentTarget with no parentElement must not throw.
+    expect(() => img.props.onError({ currentTarget: {} })).not.toThrow();
+  });
+
   it('root div has role=complementary and aria-label=Sponsors', () => {
     const tree = SponsorStrip({ sponsors: sponsorsWithLink });
     expect(tree.props.role).toBe('complementary');

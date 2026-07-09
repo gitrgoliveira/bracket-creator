@@ -28,7 +28,10 @@ const defaultAppTitle = "Bracket Creator Mobile"
 // keep surfacing a stale preview.
 func serveIndexHTML(c *gin.Context, indexHTML []byte, store *state.Store) {
 	page := injectPreviewMeta(string(indexHTML), store, requestBaseURL(c))
-	c.Header("Cache-Control", "no-cache")
+	// no-store (not no-cache): the injected tags depend on mutable tournament
+	// state, so no intermediary should store this response at all, not merely
+	// revalidate it, or a crawler could be served a stale preview from a proxy.
+	c.Header("Cache-Control", "no-store")
 	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(page))
 }
 

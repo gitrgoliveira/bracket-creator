@@ -7638,12 +7638,11 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .tvd-upnext-note { font: 700 2.2vh/1 var(--font-strong); letter-spacing: 0.16em; text-transform: uppercase; color: rgba(255,209,102,0.85); }
 
 /* ---------- Sponsor strip (mp-c38) ----------
-   Used on viewer home, LobbyDisplay, and TvDisplay. Three variants
-   share the base styles; per-variant overrides handle the different
-   backdrops and logo heights of each surface. */
-/* Sponsors render as full-width banners stacked vertically: each uploaded
-   image fills the viewer column up to a responsive cap (a landscape banner,
-   not a small centred logo). Multiple sponsors stack with a gap. */
+   Viewer home ONLY (the TV/lobby display surfaces intentionally omit
+   sponsors), so there is a single viewer variant, no per-surface overrides.
+   Sponsors render as full-width banners stacked vertically: each uploaded
+   image fills the viewer column up to a responsive height cap (a landscape
+   banner, not a small centred logo). Multiple sponsors stack with a gap. */
 .sponsor-strip {
   display: flex;
   flex-direction: column;

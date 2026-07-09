@@ -152,7 +152,8 @@ function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, is
                         <span style={{ color: "#b91c1c", fontWeight: 600 }}>{sideLabel(next.sideA, next._comp?.withZekkenName)}</span>
                     </span>
                 </div>
-            )}        </div>
+            )}
+        </div>
     );
 }
 
@@ -469,7 +470,8 @@ function TvIndividualBoard({ tournament, court, linkState = 'connected', promote
                         <span style={{ color: "#b91c1c", fontWeight: 600 }}>{sideLabel(next.sideA, next._comp?.withZekkenName ?? zekken)}</span>
                     </span>
                 </div>
-            )}        </div>
+            )}
+        </div>
     );
 }
 

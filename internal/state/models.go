@@ -100,10 +100,10 @@ type Tournament struct {
 	// Tournament.UnmarshalYAML that would have to enumerate every field.
 	RulesURLLegacy string `yaml:"rules_url,omitempty" json:"-"`
 
-	// Sponsors is the ordered list of sponsor logos to display on the
-	// public viewer home and the /display TV/lobby surfaces (mp-c38).
-	// Stored as omitempty so legacy tournament.md files without sponsors
-	// round-trip cleanly (no `sponsors: []` key emitted).
+	// Sponsors is the ordered list of sponsor banners shown on the public
+	// viewer home page only (the /display TV/lobby surfaces intentionally
+	// omit them; mp-c38/mp-vb3u). Stored as omitempty so legacy tournament.md
+	// files without sponsors round-trip cleanly (no `sponsors: []` key emitted).
 	Sponsors []Sponsor `yaml:"sponsors,omitempty" json:"sponsors,omitempty"`
 
 	// Theme holds optional branding overrides: custom accent colors and a

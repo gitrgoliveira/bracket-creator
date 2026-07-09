@@ -7641,75 +7641,85 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
    Used on viewer home, LobbyDisplay, and TvDisplay. Three variants
    share the base styles; per-variant overrides handle the different
    backdrops and logo heights of each surface. */
+/* Sponsors render as full-width banners stacked vertically: each uploaded
+   image fills the viewer column up to a responsive cap (a landscape banner,
+   not a small centred logo). Multiple sponsors stack with a gap. */
 .sponsor-strip {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  gap: 20px;
-  padding: 16px 12px;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 0;
   margin-top: 16px;
 }
+/* Footprint is bounded on BOTH axes so an arbitrary user upload (portrait,
+   square, or many stacked banners) can never dominate the viewer page.
+   Mobile-first caps; widened per device below. object-fit:contain + centring
+   letterbox a non-landscape image inside the capped box instead of blowing up
+   the page. */
 .sponsor-strip__logo {
-  height: 40px;
-  width: auto;
-  max-width: 160px;
-  object-fit: contain;
   display: block;
+  width: 100%;
+  height: auto;
+  max-height: 96px;
+  object-fit: contain;
+  object-position: center;
+  border-radius: var(--r);
 }
+@media (min-width: 768px) {
+  .sponsor-strip__logo { max-height: 120px; }
+}
+@media (min-width: 1024px) {
+  .sponsor-strip__logo { max-height: 140px; }
+}
+/* Banners span the full viewer column; only the height is capped (above), so
+   a landscape banner fills the width edge-to-edge while a tall/square upload
+   is bounded by max-height + object-fit:contain. The full-width wrapper also
+   keeps the linked banner's ↗ badge on the banner's own (== column) corner. */
 .sponsor-strip__link,
 .sponsor-strip__item {
-  display: inline-flex;
-  align-items: center;
+  display: block;
+  width: 100%;
   text-decoration: none;
 }
+/* Linked banners carry a persistent "opens externally" cue: without it a
+   linked and non-linked banner are pixel-identical and the tap target is
+   undiscoverable on touch (hover doesn't exist on mobile). */
+.sponsor-strip__link {
+  position: relative;
+}
+.sponsor-strip__link::after {
+  content: "\2197"; /* ↗ */
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--accent-fg);
+  background: var(--accent);
+  border-radius: 999px;
+  pointer-events: none;
+}
 .sponsor-strip__link:hover .sponsor-strip__logo {
-  filter: brightness(1.05);
+  box-shadow: var(--shadow);
+}
+/* Keyboard focus: banners are links, so they must show a visible focus ring
+   (WCAG 2.4.7). Matches the button outline convention, not the input ring. */
+.sponsor-strip__link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--r);
 }
 
-/* Viewer variant, sits in the white viewer body, neutral framing. */
+/* Viewer variant, sits in the white viewer body, neutral framing. The
+   sponsor strip renders ONLY on the viewer page; the TV/lobby display
+   surfaces intentionally omit it, so there are no lobby/tv variants. */
 .sponsor-strip--viewer {
   border-top: 1px solid var(--line);
   background: var(--surface);
-}
-
-/* Lobby variant, dark lobby board; logos need a touch more breathing
-   room and a subtle backdrop so they remain legible against the dark
-   gradient behind them. */
-.sponsor-strip--lobby {
-  background: rgba(255, 255, 255, 0.04);
-  padding: 14px 24px;
-  margin-top: 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-}
-.sponsor-strip--lobby .sponsor-strip__logo {
-  height: 48px;
-  filter: brightness(1.1);
-}
-
-/* TV variant, fullscreen per-court board; smaller strip so it stays
-   subordinate to match info. */
-.sponsor-strip--tv {
-  /* Normal flow, not absolute. position: absolute would take the strip
-     out of flow and overlay the upcoming-matches list below it (the tvd
-     container only has 4vh bottom padding, but the strip is ~6vh tall).
-     Keeping it in flow lets the flex column stack sponsor strip under the
-     queue cards without overlap. */
-  padding: 1vh 2vw;
-  margin-top: auto; /* push to bottom of the flex column when there's space */
-  background: rgba(0, 0, 0, 0.35);
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  gap: 2vw;
-}
-.sponsor-strip--tv .sponsor-strip__logo {
-  height: 5vh;
-  max-width: 12vw;
-  filter: brightness(1.05);
-}
-
-@media (max-width: 480px) {
-  .sponsor-strip__logo { height: 32px; max-width: 120px; }
-  .sponsor-strip { gap: 12px; padding: 12px 8px; }
 }
 
 /* mp-dm5e: tied standings row, amber caution highlight. Background-only,

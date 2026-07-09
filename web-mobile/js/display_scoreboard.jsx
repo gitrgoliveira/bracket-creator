@@ -152,9 +152,7 @@ function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, is
                         <span style={{ color: "#b91c1c", fontWeight: 600 }}>{sideLabel(next.sideA, next._comp?.withZekkenName)}</span>
                     </span>
                 </div>
-            )}
-            {window.SponsorStrip && <window.SponsorStrip sponsors={tournament && tournament.sponsors} variant="tv" />}
-        </div>
+            )}        </div>
     );
 }
 
@@ -471,9 +469,7 @@ function TvIndividualBoard({ tournament, court, linkState = 'connected', promote
                         <span style={{ color: "#b91c1c", fontWeight: 600 }}>{sideLabel(next.sideA, next._comp?.withZekkenName ?? zekken)}</span>
                     </span>
                 </div>
-            )}
-            {window.SponsorStrip && <window.SponsorStrip sponsors={tournament && tournament.sponsors} variant="tv" />}
-        </div>
+            )}        </div>
     );
 }
 
@@ -739,8 +735,6 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, linkState 
                     </div>
                 )}
             </div>
-
-            {window.SponsorStrip && <window.SponsorStrip sponsors={tournament && tournament.sponsors} variant="tv" />}
         </div>
     );
 }

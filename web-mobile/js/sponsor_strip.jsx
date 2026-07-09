@@ -16,8 +16,16 @@
 function SponsorStrip({ sponsors }) {
   if (!sponsors || sponsors.length === 0) return null;
 
+  // Key the root on the sponsor file list. handleError below hides the strip
+  // imperatively (strip.style.display = "none") when the last image fails, but
+  // preact never owns that inline style, so a plain re-render would NOT clear
+  // it: after an upload/delete the list changes yet the strip could stay
+  // permanently hidden even with valid new images. Keying by the file list
+  // forces a full remount on any sponsor mutation, discarding the stale inline
+  // display and re-attempting every image from a clean element.
   return (
     <div
+      key={sponsors.map((s) => s.file).join("|")}
       className="sponsor-strip sponsor-strip--viewer"
       role="complementary"
       aria-label="Sponsors"

@@ -118,6 +118,20 @@ describe('SponsorStrip', () => {
     expect(() => img.props.onError({ currentTarget: {} })).not.toThrow();
   });
 
+  it('keys the root on the sponsor file list so a mutation forces a remount', () => {
+    // handleError hides the strip imperatively; preact will not clear that
+    // inline display on a plain re-render. Keying by the file list makes any
+    // upload/delete change the key, forcing a remount that drops the stale
+    // hidden state so valid new banners show.
+    const a = SponsorStrip({ sponsors: [{ name: 'A', file: 'aa.png' }] });
+    const b = SponsorStrip({ sponsors: [{ name: 'B', file: 'bb.png' }] });
+    const ab = SponsorStrip({ sponsors: [{ name: 'A', file: 'aa.png' }, { name: 'B', file: 'bb.png' }] });
+    expect(a.props.key).toBe('aa.png');
+    expect(a.props.key).not.toBe(b.props.key);       // delete/replace changes the key
+    expect(ab.props.key).toBe('aa.png|bb.png');       // add changes the key
+    expect(ab.props.key).not.toBe(a.props.key);
+  });
+
   it('root div has role=complementary and aria-label=Sponsors', () => {
     const tree = SponsorStrip({ sponsors: sponsorsWithLink });
     expect(tree.props.role).toBe('complementary');

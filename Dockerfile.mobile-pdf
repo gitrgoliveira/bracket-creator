@@ -11,7 +11,7 @@
 # libreoffice-nogui). The Go binary's LocateSoffice() probes $PATH first, so no
 # additional env vars are required.
 
-ARG GO_VERSION=1.26.4
+ARG GO_VERSION=1.26.5
 
 # ---------------------------------------------------------------------------
 # Build stage, identical to Dockerfile.mobile

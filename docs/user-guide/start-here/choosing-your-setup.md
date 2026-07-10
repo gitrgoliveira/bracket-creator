@@ -16,7 +16,7 @@ The operating model controls who can record scores and advance matches. In **off
 
 ## Choose by how you run the day
 
-The table below maps common event configurations to the right starting point.
+The following table maps common event configurations to the right starting point.
 
 | Scenario | Digitization | Who scores | Start here |
 |---|---|---|---|
@@ -26,7 +26,7 @@ The table below maps common event configurations to the right starting point.
 
 ## Choose by your role
 
-If you know your role at the event, the table below takes you directly to the guide written for you.
+If you know your role at the event, the following table takes you directly to the guide written for you.
 
 | Role | What you do | Start here |
 |---|---|---|

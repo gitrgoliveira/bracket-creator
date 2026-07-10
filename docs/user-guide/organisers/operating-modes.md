@@ -42,7 +42,7 @@ Locked mode is recommended for any deployment reachable from the internet. Inste
 
 To set up locked mode:
 
-1. Generate the hash with the `hash-password` command. The command reads the password from standard input with no prompt and no echo, so pipe it in from a secrets manager or a here-doc rather than typing it interactively:
+1. Generate the hash with the `hash-password` command. The command reads the password from standard input with no prompt, and the terminal does not hide what you type, so pipe it in from a secrets manager or a here-doc rather than typing it interactively:
 
     ```
     printf '%s' "$MY_ADMIN_SECRET" | bracket-creator hash-password

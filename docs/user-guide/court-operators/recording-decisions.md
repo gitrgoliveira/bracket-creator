@@ -1,6 +1,6 @@
 # Record match decisions
 
-Not every bout is decided on points. The score editor records the kendo outcomes described below. Open the score editor from the **Scores** tab or from a match card in the court console (see [Score a match](scoring-a-match.md)).
+Not every bout is decided on points. The score editor records the kendo outcomes described here. Open the score editor from the **Scores** tab or from a match card in the court console (see [Score a match](scoring-a-match.md)).
 
 ## Kiken (withdrawal)
 
@@ -39,7 +39,7 @@ The bout is a single-point ippon-shobu with no time limit, between one represent
 
 ## Chusen (drawing lots)
 
-Chusen is the last resort when three or more tied teams have played a round of daihyosen and the bouts still do not produce a strict order (for example a cycle where each team beats another, an all-drawn round, or two teams finishing level on daihyosen wins).
+Chusen is the last resort when two or more tied teams have played a round of daihyosen and the bouts still do not produce a strict order (for example a cycle where each team beats another, an all-drawn round, or two teams finishing level on daihyosen wins).
 
 When chusen is required, the **Pools** tab shows a **"Chusen (drawing lots) required"** panel listing the tied teams. Draw lots offline, enter each team's finishing position in the panel, and record it to settle the order and let the competition advance.
 

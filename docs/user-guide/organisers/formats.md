@@ -4,7 +4,7 @@ bracket-creator supports four competition formats. The format determines how com
 
 ## Choosing a format
 
-The table below summarises when each format fits best.
+The following table summarises when each format fits best.
 
 | Format | Best for |
 |--------|----------|

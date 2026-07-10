@@ -25,7 +25,7 @@ else
 endif
 
 # Define phony targets
-.PHONY: default help clean local/deps hooks/install go/fmt go/test go/build go/lint go/sec go/vuln go/security js/lint js/sec js/outdated js/security js/check-imports js/validate examples docker/build docker/run pre-commit docs/deps docs/serve docs/open docs/build docs/clean run run-mobile esbuild-jsx goreleaser/test release version
+.PHONY: default help clean local/deps hooks/install go/fmt go/test go/build go/lint go/sec go/vuln go/security js/lint js/sec js/outdated js/security js/check-imports js/validate examples docker/build docker/run pre-commit docs/deps docs/serve docs/open docs/build docs/linkcheck docs/clean run run-mobile esbuild-jsx goreleaser/test release version
 
 default: help ## Show help information (default)
 
@@ -206,6 +206,10 @@ docs/open: $(DOCS_STAMP) ## Serve the documentation and open it in a browser
 docs/build: $(DOCS_STAMP) ## Build static documentation site (output: site/)
 	@echo "Building documentation..."
 	$(DOCS_BIN)/mkdocs build -f mkdocs.yaml --strict
+
+docs/linkcheck: docs/build ## Build docs, then check the built site for broken links/anchors
+	@echo "Checking internal documentation links..."
+	python3 docs/check_links.py site
 
 docs/clean: ## Remove the docs venv and the built site
 	@echo "Removing $(DOCS_VENV) and site/..."

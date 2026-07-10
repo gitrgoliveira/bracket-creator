@@ -164,7 +164,7 @@ Operators see an all-competition winners view from the dashboard. You can also r
 
 **League competitions** derive the podium from final standings. When scores are tied for third, a short ippon-shobu tie-breaker decides placement before the competition closes. The **Award two joint 3rd places** option (enabled by default for kendo) lets two competitors share third with no decider.
 
-Set the **Award two joint 3rd places** option when creating the competition, or any time before it starts.
+Set the **Award two joint 3rd places** option during setup, before you generate the draw. Once the draw exists, the option is locked; discard the draw to change it.
 
 ## Export and print
 

@@ -42,7 +42,7 @@ Use Swiss for large individual fields where a full round-robin would require too
 
 ### Swiss round flow
 
-Before play begins, set the number of rounds at competition creation. Then follow these steps for each round:
+Before play begins, set the number of rounds in the competition settings, any time before you start the competition. Then follow these steps for each round:
 
 1. **Start the competition.** Round 1 pairings are generated automatically. If seeds are set, round 1 uses fold pairing (1 vs N, 2 vs N-1, and so on). Without seeds, the pairing is deterministic-random. From round 2 onward, players with similar win records face each other.
 

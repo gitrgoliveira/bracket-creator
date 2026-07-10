@@ -42,7 +42,7 @@ Two environment variables tune the API rate limiter for large events:
 
 ## The admin console
 
-Click **Admin** in the navigation bar and enter the tournament password. The rules for who can access which features depend on your tournament's operating mode. See [Operating modes](operating-modes.md) for the full access-control rules.
+Click **Admin** in the navigation bar and enter the admin password. The rules for who can access which features depend on your tournament's operating mode. See [Operating modes](operating-modes.md) for the full access-control rules.
 
 ## Dashboard
 
@@ -154,11 +154,11 @@ For naginata and Engi-kyogi divisions, see [Naginata](naginata.md).
 
 ## Results and awards
 
-When a competition finishes, the public viewer automatically shows the podium:
+The public viewer shows a competition's podium when it finishes, and a provisional ranking while it is still in progress:
 
 - **Kendo knockout** (default): 1st place, 2nd place, and two equal 3rd places. There is no bronze match; both semi-final losers share third.
 - **Naginata**: a single 3rd place is decided by a playoff. See [Naginata](naginata.md) for naginata-specific configuration.
-- **Mixed format** (still in pools): a provisional cross-pool ranking is shown.
+- **Mixed format** (still in its pool phase): the viewer shows a provisional cross-pool ranking until the knockout decides the final places.
 
 Operators see an all-competition winners view from the dashboard. You can also record optional **fighting-spirit** (敢闘賞) awards as free text; these appear on the viewer for all spectators.
 
@@ -190,7 +190,7 @@ When the **Public URL** is set and competitors have assigned numbers, each print
 
 Tournament state is stored as plain files inside the data folder you specified with `--folder`. You can hand-edit these files between rounds when a correction is needed:
 
-- `tournament.md`: YAML front-matter with the tournament name, date, venue, court count, and tournament and admin passwords.
+- `tournament.md`: YAML front-matter with the tournament name, date, venue, court count, and the admin password and destructive-ops password.
 - `competitions/<id>/config.md`: YAML front-matter with competition kind, format, pool settings, and courts.
 - `competitions/<id>/participants.csv`: one participant per line with name, optional display name (zekken), dojo, and optional dan grade.
 

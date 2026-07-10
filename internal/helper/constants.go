@@ -100,6 +100,13 @@ const (
 	matchSpacerColWidth = 5
 )
 
+// ColHeaderFlags is the single-source column header label for the engi
+// referee flag count in the Pool Matches standings table. Used by both the
+// writer (printIndividualResultsTableSection) and the overlay reader
+// (overlayPoolStandings / buildCourtColumnMap) so the header and the overlay
+// can never drift independently.
+const ColHeaderFlags = "Flags"
+
 // Sheet names for every tab in the workbook. Use these constants wherever a
 // sheet name is needed so that a rename only requires one edit here.
 //

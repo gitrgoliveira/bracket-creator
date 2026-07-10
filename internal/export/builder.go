@@ -96,7 +96,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 
 	// 1. Data sheet + coordinate maps. Helper formula references in other
 	//    sheets that point here (player names, etc.) still resolve correctly.
-	poolCoords, playerCoords := helper.AddPoolDataToSheet(f, pools, comp.WithZekkenName, comp.Name)
+	poolCoords, playerCoords := helper.AddPoolDataToSheet(f, pools, comp.EffectiveWithZekkenName(), comp.Name)
 
 	// 2. Pool Draw sheet (formula refs to data sheet survive store round-trips).
 	if err := helper.AddPoolsToSheet(f, pools, poolCoords, playerCoords); err != nil {
@@ -113,12 +113,12 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	}
 	matchWinners := helper.PrintPoolMatches(
 		f, pools, comp.TeamSize, comp.EffectivePoolWinners(),
-		numCourts, comp.Mirror, poolCoords, playerCoords,
+		numCourts, comp.Mirror, poolCoords, playerCoords, comp.Engi,
 	)
-	if err := overlayPoolScores(f, pools, matchResultByID, poolOrdinals, comp.TeamSize, comp.Mirror, numCourts); err != nil {
+	if err := overlayPoolScores(f, pools, matchResultByID, poolOrdinals, comp.TeamSize, comp.Mirror, numCourts, comp.Engi); err != nil {
 		return nil, fmt.Errorf("export: overlay pool scores: %w", err)
 	}
-	if err := overlayPoolStandings(f, pools, standings, comp.TeamSize, numCourts); err != nil {
+	if err := overlayPoolStandings(f, pools, standings, comp.TeamSize, numCourts, comp.Engi); err != nil {
 		return nil, fmt.Errorf("export: overlay standings: %w", err)
 	}
 
@@ -164,7 +164,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 		// Overlay literal scores from the live bracket state.
 		if bracket != nil {
 			bracketByNum := buildBracketMatchIndex(bracket)
-			if err := overlayBracketScores(f, bracketByNum, comp.TeamSize, comp.Mirror); err != nil {
+			if err := overlayBracketScores(f, bracketByNum, comp.TeamSize, comp.Mirror, comp.Engi); err != nil {
 				return nil, fmt.Errorf("export: overlay bracket scores: %w", err)
 			}
 			// Playoffs have no pool data sheet, so the pool-oriented renderer emits
@@ -217,7 +217,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	}
 
 	// 5. Names to Print sheet (identical to blank-template export).
-	helper.CreateNamesWithPoolToPrint(f, pools, comp.WithZekkenName, numCourts, playerCoords)
+	helper.CreateNamesWithPoolToPrint(f, pools, comp.EffectiveWithZekkenName(), numCourts, playerCoords)
 
 	var buf bytes.Buffer
 	if err := f.Write(&buf); err != nil {
@@ -341,7 +341,7 @@ func playoffLeavesFromBracket(bracket *state.Bracket) []string {
 // acceptable. Returns nil when participants can't be loaded, in which case no
 // elimination sheet is rendered.
 func playoffFinalsFromParticipants(store *state.Store, comp *state.Competition) []string {
-	players, err := store.LoadParticipants(comp.ID, comp.WithZekkenName)
+	players, err := store.LoadParticipants(comp.ID, comp.EffectiveWithZekkenName())
 	if err != nil || len(players) == 0 {
 		return nil
 	}
@@ -375,7 +375,7 @@ func playoffFinalsFromParticipants(store *state.Store, comp *state.Competition) 
 // order). So the N-th header in a court column is the N-th pool assigned to that
 // court, and match i sits at header row + 1 + i. By default SideA (Red) is the
 // left column and SideB (White) the right; mirror swaps the two score columns.
-func overlayPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[string]state.MatchResult, poolOrdinals map[string][]int, teamSize int, mirror bool, numCourts int) error {
+func overlayPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[string]state.MatchResult, poolOrdinals map[string][]int, teamSize int, mirror bool, numCourts int, engi bool) error {
 	if len(pools) == 0 {
 		return nil
 	}
@@ -441,15 +441,17 @@ func overlayPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[str
 
 				leftIppons := mr.IpponsA
 				rightIppons := mr.IpponsB
+				leftFlags, rightFlags := mr.FlagsA, mr.FlagsB
 				if mirror {
 					leftIppons, rightIppons = mr.IpponsB, mr.IpponsA
+					leftFlags, rightFlags = mr.FlagsB, mr.FlagsA
 				}
 
 				hantei := mr.DecidedByHantei != nil && *mr.DecidedByHantei
 				sfx := DecisionSuffix(mr.Decision, mr.Encho, hantei)
 
-				setCellStr(f, sheetName, lVCol, excelRow, IpponsScore(leftIppons))
-				setCellStr(f, sheetName, rVCol, excelRow, IpponsScore(rightIppons))
+				setCellStr(f, sheetName, lVCol, excelRow, ScoreCellText(engi, leftIppons, leftFlags))
+				setCellStr(f, sheetName, rVCol, excelRow, ScoreCellText(engi, rightIppons, rightFlags))
 				if mid := MiddleCellText(mr.Decision, sfx); mid != "" {
 					setCellStr(f, sheetName, middleCol, excelRow, mid)
 				}
@@ -646,7 +648,7 @@ func writeTeamSubMatchScores(f *excelize.File, sheetName string, courtStartCol, 
 // Strategy: the N-th "Results" header row in each court column corresponds to the
 // N-th pool assigned to that court. We match by ordinal position, not by
 // resolved formula values (which are not evaluated by excelize's GetRows).
-func overlayPoolStandings(f *excelize.File, pools []helper.Pool, standings map[string][]state.PlayerStanding, teamSize int, numCourts int) error {
+func overlayPoolStandings(f *excelize.File, pools []helper.Pool, standings map[string][]state.PlayerStanding, teamSize int, numCourts int, engi bool) error {
 	if len(pools) == 0 {
 		return nil
 	}
@@ -711,9 +713,14 @@ func overlayPoolStandings(f *excelize.File, pools []helper.Pool, standings map[s
 				// teamSize == 0 is guaranteed here (we returned early above for team competitions).
 				setIntCell(f, sheetName, excelRow, colMap, "W", ps.Wins)
 				setIntCell(f, sheetName, excelRow, colMap, "L", ps.Losses)
-				setIntCell(f, sheetName, excelRow, colMap, "T", ps.Draws)
-				setIntCell(f, sheetName, excelRow, colMap, "PW", ps.IpponsGiven)
-				setIntCell(f, sheetName, excelRow, colMap, "PL", ps.IpponsTaken)
+				if engi {
+					// Engi standings: W / L / Flags / Rank only (no T, PW, PL).
+					setIntCell(f, sheetName, excelRow, colMap, helper.ColHeaderFlags, ps.Flags)
+				} else {
+					setIntCell(f, sheetName, excelRow, colMap, "T", ps.Draws)
+					setIntCell(f, sheetName, excelRow, colMap, "PW", ps.IpponsGiven)
+					setIntCell(f, sheetName, excelRow, colMap, "PL", ps.IpponsTaken)
+				}
 				setIntCell(f, sheetName, excelRow, colMap, "Rank", ps.Rank)
 			}
 		}
@@ -869,7 +876,7 @@ func overlayTeamPoolStandings(f *excelize.File, pools []helper.Pool, standings m
 // sheet by scanning for "Round N - Match N" header cells. For each completed
 // match found, the score cells in the row two rows below are overwritten with
 // literal values (ScoreA/ScoreB from the bracket JSON survive the round-trip).
-func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMatch, teamSize int, mirror bool) error {
+func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMatch, teamSize int, mirror bool, engi bool) error {
 	if teamSize != 0 {
 		return overlayTeamBracketScores(f, bracketByNum, teamSize, mirror)
 	}
@@ -911,10 +918,23 @@ func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMa
 			middleCol := colNum(courtStartCol + 3)
 			rVCol := colNum(courtStartCol + 5)
 
-			leftScore := bm.ScoreA
-			rightScore := bm.ScoreB
-			if mirror {
-				leftScore, rightScore = rightScore, leftScore
+			// For engi, the bracket stores flag counts in FlagsA/FlagsB;
+			// ScoreA/ScoreB hold ippon letters that do not apply. Use FlagsScore
+			// via ScoreCellText to write the correct flag count.
+			var leftScore, rightScore string
+			if engi {
+				leftFlagsA, rightFlagsB := bm.FlagsA, bm.FlagsB
+				if mirror {
+					leftFlagsA, rightFlagsB = bm.FlagsB, bm.FlagsA
+				}
+				leftScore = FlagsScore(leftFlagsA)
+				rightScore = FlagsScore(rightFlagsB)
+			} else {
+				leftScore = bm.ScoreA
+				rightScore = bm.ScoreB
+				if mirror {
+					leftScore, rightScore = rightScore, leftScore
+				}
 			}
 
 			sfx := DecisionSuffix(bm.Decision, bm.Encho, bm.DecidedByHantei)

@@ -218,7 +218,7 @@ func buildTeamPointsFormula(lVCol, lPCol, rVCol, rPCol string, startRow, endRow 
 	return strings.Join(parts, "+")
 }
 
-func printSinglePool(f *excelize.File, sheetName string, pool Pool, startCol int, startRow int, teamMatches int, numWinners int, maxBlocks []int, colNames matchColumnNames, styles matchStyles, matchWinners map[string]MatchWinner, mirror bool, poolCoords map[string]cellCoord, pCoords map[string]playerCellCoord) {
+func printSinglePool(f *excelize.File, sheetName string, pool Pool, startCol int, startRow int, teamMatches int, numWinners int, maxBlocks []int, colNames matchColumnNames, styles matchStyles, matchWinners map[string]MatchWinner, mirror bool, poolCoords map[string]cellCoord, pCoords map[string]playerCellCoord, engi bool) {
 	poolRow := startRow
 
 	startColName := colNames.startColName
@@ -323,7 +323,7 @@ func printSinglePool(f *excelize.File, sheetName string, pool Pool, startCol int
 	poolRow++ // Add a single row of space between the pool and the pool results
 
 	resultsTableStart := poolRow
-	poolRow = printPoolResultsTable(f, sheetName, pool, resultsTableStart, colNames, playerMatchRows, styles, mirror, teamMatches, pCoords)
+	poolRow = printPoolResultsTable(f, sheetName, pool, resultsTableStart, colNames, playerMatchRows, styles, mirror, teamMatches, pCoords, engi)
 	poolRow++
 
 	resLabelColName := mustColumnName(colNames.startCol + 5) // F
@@ -383,6 +383,7 @@ type poolResultsCtx struct {
 	scoreCol        string
 	joinFormulas    func([]string) string
 	pCoords         map[string]playerCellCoord
+	engi            bool
 }
 
 // printTeamResultsTableSection writes the "Team Results" W/L/T table header and
@@ -569,9 +570,14 @@ func printIndividualResultsTableSection(ctx poolResultsCtx, headerRow int, teamM
 	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", startColName, headerRow), "Results"))
 	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", lVCol, headerRow), "W"))
 	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", lPCol, headerRow), "L"))
-	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", middleColName, headerRow), "T"))
-	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", rPCol, headerRow), "PW"))
-	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", rVCol, headerRow), "PL"))
+	if ctx.engi {
+		// Engi standings: W / L / Flags / Rank only (no T, PW, PL).
+		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", middleColName, headerRow), ColHeaderFlags))
+	} else {
+		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", middleColName, headerRow), "T"))
+		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", rPCol, headerRow), "PW"))
+		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", rVCol, headerRow), "PL"))
+	}
 	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", rankCol, headerRow), "Rank"))
 	handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", startColName, headerRow), fmt.Sprintf("%s%d", rankCol, headerRow), styles.poolHeader))
 
@@ -588,6 +594,36 @@ func printIndividualResultsTableSection(ctx poolResultsCtx, headerRow int, teamM
 			var leftTotal, rightTotal, played string
 			if teamMatches > 0 && rec.endRow > 0 {
 				continue
+			}
+			if ctx.engi {
+				// Engi: referee flag totals are integers; ties are impossible
+				// (flag counts are always odd). played is true when either
+				// input cell holds a number.
+				//
+				// We coerce every operand with N() rather than comparing raw
+				// cells or wrapping in IF(ISNUMBER(...),cell,0). Two reasons,
+				// both verified against excelize CalcCellValue:
+				//   1. Robustness: a raw cell comparison lets stray text
+				//      compare greater-than a number (Excel orders text above
+				//      numbers), so N(B)>N(F) is needed to treat non-numeric
+				//      cells as 0 flags. N(number)=number, N(text)=0, N(empty)=0.
+				//   2. Evaluability: excelize returns 0 for the specific
+				//      nesting IF(OR(...),(IF(...)>IF(...))*1,0), so the
+				//      IF(ISNUMBER(...)) wrapper form mis-evaluates here.
+				//      N() coercion inside the guarded comparison evaluates
+				//      correctly. N() is ISO-standard and portable to
+				//      Excel/LibreOffice/Sheets/Numbers.
+				var myCol, oppCol string
+				if rec.side == "left" {
+					myCol, oppCol = lVCol, rVCol
+				} else {
+					myCol, oppCol = rVCol, lVCol
+				}
+				engiPlayed := fmt.Sprintf("OR(ISNUMBER(%s%d),ISNUMBER(%s%d))", lVCol, rec.row, rVCol, rec.row)
+				wFormulas = append(wFormulas, fmt.Sprintf("IF(%s,(N(%s%d)>N(%s%d))*1,0)", engiPlayed, myCol, rec.row, oppCol, rec.row))
+				lFormulas = append(lFormulas, fmt.Sprintf("IF(%s,(N(%s%d)<N(%s%d))*1,0)", engiPlayed, myCol, rec.row, oppCol, rec.row))
+				tFormulas = append(tFormulas, fmt.Sprintf("N(%s%d)", myCol, rec.row)) // tFormulas = Flags column for engi
+				continue                                                              // pwFormulas and plFormulas remain empty for engi
 			}
 			if teamMatches == 0 {
 				lc := func(col string, r int) string {
@@ -625,15 +661,24 @@ func printIndividualResultsTableSection(ctx poolResultsCtx, headerRow int, teamM
 		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", lVCol, row), joinFormulas(wFormulas)))
 		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", lPCol, row), joinFormulas(lFormulas)))
 		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", middleColName, row), joinFormulas(tFormulas)))
-		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", rPCol, row), joinFormulas(pwFormulas)))
-		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", rVCol, row), joinFormulas(plFormulas)))
+		if !ctx.engi {
+			// Engi has no PW/PL concept; leave those cells blank.
+			handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", rPCol, row), joinFormulas(pwFormulas)))
+			handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", rVCol, row), joinFormulas(plFormulas)))
+		}
 
-		// Weighted Score formula
+		// Weighted Score formula.
 		// No leading '=', see the matching note in the team-results
 		// scoreFormula above. Google Sheets and Apple Numbers reject
 		// OOXML <f> bodies that begin with '='.
-		scoreFormula := fmt.Sprintf("(%s%d*1000000)-(%s%d*10000)+(%s%d*100)+(%s%d*1)-(%s%d*0.01)",
-			lVCol, row, lPCol, row, middleColName, row, rPCol, row, rVCol, row)
+		var scoreFormula string
+		if ctx.engi {
+			// Engi: rank by wins first, then accumulated flag total.
+			scoreFormula = fmt.Sprintf("(%s%d*1000000)+(%s%d)", lVCol, row, middleColName, row)
+		} else {
+			scoreFormula = fmt.Sprintf("(%s%d*1000000)-(%s%d*10000)+(%s%d*100)+(%s%d*1)-(%s%d*0.01)",
+				lVCol, row, lPCol, row, middleColName, row, rPCol, row, rVCol, row)
+		}
 		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", scoreCol, row), scoreFormula))
 
 		// Rank formula
@@ -647,7 +692,7 @@ func printIndividualResultsTableSection(ctx poolResultsCtx, headerRow int, teamM
 	return headerRow + len(pool.Players)
 }
 
-func printPoolResultsTable(f *excelize.File, sheetName string, pool Pool, startRow int, colNames matchColumnNames, playerMatchRows map[*Player][]playerMatchRecord, styles matchStyles, mirror bool, teamMatches int, pCoords map[string]playerCellCoord) int {
+func printPoolResultsTable(f *excelize.File, sheetName string, pool Pool, startRow int, colNames matchColumnNames, playerMatchRows map[*Player][]playerMatchRecord, styles matchStyles, mirror bool, teamMatches int, pCoords map[string]playerCellCoord, engi bool) int {
 	lVCol, lPCol, rVCol, rPCol := getMatchWinnerColumns(colNames)
 	scoreCol := mustColumnName(colNames.startCol + 20)
 	rankCol := mustColumnName(colNames.startCol + 6)
@@ -677,6 +722,7 @@ func printPoolResultsTable(f *excelize.File, sheetName string, pool Pool, startR
 		scoreCol:        scoreCol,
 		joinFormulas:    joinFormulas,
 		pCoords:         pCoords,
+		engi:            engi,
 	}
 
 	headerRow := startRow
@@ -693,7 +739,7 @@ func printPoolResultsTable(f *excelize.File, sheetName string, pool Pool, startR
 	return printIndividualResultsTableSection(ctx, headerRow, teamMatches)
 }
 
-func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinners int, numCourts int, mirror bool, poolCoords map[string]cellCoord, pCoords map[string]playerCellCoord) map[string]MatchWinner {
+func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinners int, numCourts int, mirror bool, poolCoords map[string]cellCoord, pCoords map[string]playerCellCoord, engi bool) map[string]MatchWinner {
 	numCourts = clampCourts(numCourts)
 
 	matchWinners := make(map[string]MatchWinner)
@@ -859,7 +905,7 @@ func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinner
 					colNamesByStartCol[startCol] = colNames
 				}
 
-				printSinglePool(f, sheetName, pools[poolIdx], startCol, poolRow, teamMatches, numWinners, maxBlocks, colNames, styles, matchWinners, mirror, poolCoords, pCoords)
+				printSinglePool(f, sheetName, pools[poolIdx], startCol, poolRow, teamMatches, numWinners, maxBlocks, colNames, styles, matchWinners, mirror, poolCoords, pCoords, engi)
 			}
 		}
 

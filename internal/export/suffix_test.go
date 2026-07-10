@@ -1,6 +1,7 @@
 package export
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -108,6 +109,27 @@ func TestMiddleCellText(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			assert.Equal(t, tc.want, MiddleCellText(tc.decision, tc.suffix))
+		})
+	}
+}
+
+func TestFlagsScore(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		n    int
+		want string
+	}{
+		{0, ""},
+		{1, "1"},
+		{3, "3"},
+		{5, "5"},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(fmt.Sprintf("flags_%d", tc.n), func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tc.want, FlagsScore(tc.n))
 		})
 	}
 }

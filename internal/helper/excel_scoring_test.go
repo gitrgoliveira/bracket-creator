@@ -65,7 +65,7 @@ func scoringSetup2Players(t *testing.T, teamMatches int) *excelize.File {
 	t.Cleanup(func() { f.Close() })
 	f.NewSheet(SheetPoolMatches)
 	f.NewSheet(SheetPoolDraw)
-	PrintPoolMatches(f, []Pool{pool}, teamMatches, 1, 1, false, poolCoords, pCoords)
+	PrintPoolMatches(f, []Pool{pool}, teamMatches, 1, 1, false, poolCoords, pCoords, false)
 	return f
 }
 
@@ -100,7 +100,7 @@ func scoringSetup3PlayerRoundRobin(t *testing.T) *excelize.File {
 	t.Cleanup(func() { f.Close() })
 	f.NewSheet(SheetPoolMatches)
 	f.NewSheet(SheetPoolDraw)
-	PrintPoolMatches(f, []Pool{pool}, 0, 1, 1, false, poolCoords, pCoords)
+	PrintPoolMatches(f, []Pool{pool}, 0, 1, 1, false, poolCoords, pCoords, false)
 	return f
 }
 
@@ -229,6 +229,113 @@ func TestIndividualPoolScoringFormulas(t *testing.T) {
 			assert.Equal(t, c.bob.t, calcScore(t, f, "D8"), "Bob T")
 			assert.Equal(t, c.bob.pw, calcScore(t, f, "E8"), "Bob PW")
 			assert.Equal(t, c.bob.pl, calcScore(t, f, "F8"), "Bob PL")
+		})
+	}
+}
+
+// scoringSetup2PlayersEngi creates a 2-player, 1-match pool and calls
+// PrintPoolMatches with engi=true. The cell geometry is identical to
+// scoringSetup2Players: score inputs at B4 (left flags) and F4 (right
+// flags); standings header at row 6; Alice at row 7, Bob at row 8.
+func scoringSetup2PlayersEngi(t *testing.T) *excelize.File {
+	t.Helper()
+	pool := Pool{
+		PoolName: "Pool A",
+		Players: []Player{
+			{Name: "Alice"},
+			{Name: "Bob"},
+		},
+	}
+	pool.Matches = []Match{{SideA: &pool.Players[0], SideB: &pool.Players[1]}}
+
+	poolCoords := map[string]cellCoord{
+		"Pool A": {sheetName: SheetPoolDraw, cell: "B1"},
+	}
+	pCoords := map[string]playerCellCoord{
+		playerCoordKey(pool.Players[0]): {cellCoord: cellCoord{sheetName: SheetPoolDraw, cell: "A1"}},
+		playerCoordKey(pool.Players[1]): {cellCoord: cellCoord{sheetName: SheetPoolDraw, cell: "A2"}},
+	}
+
+	f := excelize.NewFile()
+	t.Cleanup(func() { f.Close() })
+	f.NewSheet(SheetPoolMatches)
+	f.NewSheet(SheetPoolDraw)
+	PrintPoolMatches(f, []Pool{pool}, 0, 1, 1, false, poolCoords, pCoords, true)
+	return f
+}
+
+// TestEngiPoolScoringFormulas verifies that the W/L/Flags formula cells in
+// the pool results table compute correct values when engi=true.
+// Engi scores are integer flag counts (not ippon letters), so the formulas
+// must use ISNUMBER-based numeric comparison, not LEN/SUBSTITUTE character
+// counting. Ties are impossible in engi (flag totals are always odd).
+//
+// Cell layout (same as non-engi, 2-player pool):
+//
+//	Row 4: score input  B4=left-flags  F4=right-flags
+//	Row 6: results header (W / L / Flags / Rank)
+//	Row 7: Alice (SideA, left)  B7=W  C7=L  D7=Flags
+//	Row 8: Bob   (SideB, right) B8=W  C8=L  D8=Flags
+func TestEngiPoolScoringFormulas(t *testing.T) {
+	type expect struct{ w, l, flags string }
+	type tc struct {
+		name  string
+		setup func(*excelize.File)
+		alice expect
+		bob   expect
+	}
+
+	cases := []tc{
+		{
+			name: "left wins 3-2",
+			setup: func(f *excelize.File) {
+				f.SetCellValue(SheetPoolMatches, "B4", 3)
+				f.SetCellValue(SheetPoolMatches, "F4", 2)
+			},
+			alice: expect{"1", "0", "3"},
+			bob:   expect{"0", "1", "2"},
+		},
+		{
+			name: "left wins 5-0",
+			setup: func(f *excelize.File) {
+				f.SetCellValue(SheetPoolMatches, "B4", 5)
+				f.SetCellValue(SheetPoolMatches, "F4", 0)
+			},
+			alice: expect{"1", "0", "5"},
+			bob:   expect{"0", "1", "0"},
+		},
+		{
+			// Robustness: a played bout where one side holds a non-numeric
+			// string must treat that side as 0 flags. N() coercion guarantees
+			// N("x")=0, so Alice's 3 still beats Bob's stray text.
+			name: "non-numeric opponent cell treated as zero flags",
+			setup: func(f *excelize.File) {
+				f.SetCellValue(SheetPoolMatches, "B4", 3)
+				f.SetCellValue(SheetPoolMatches, "F4", "x")
+			},
+			alice: expect{"1", "0", "3"},
+			bob:   expect{"0", "1", "0"},
+		},
+		{
+			name:  "unplayed returns all zeros",
+			setup: func(*excelize.File) {},
+			alice: expect{"0", "0", "0"},
+			bob:   expect{"0", "0", "0"},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := scoringSetup2PlayersEngi(t)
+			c.setup(f)
+
+			assert.Equal(t, c.alice.w, calcScore(t, f, "B7"), "Alice W")
+			assert.Equal(t, c.alice.l, calcScore(t, f, "C7"), "Alice L")
+			assert.Equal(t, c.alice.flags, calcScore(t, f, "D7"), "Alice Flags")
+
+			assert.Equal(t, c.bob.w, calcScore(t, f, "B8"), "Bob W")
+			assert.Equal(t, c.bob.l, calcScore(t, f, "C8"), "Bob L")
+			assert.Equal(t, c.bob.flags, calcScore(t, f, "D8"), "Bob Flags")
 		})
 	}
 }

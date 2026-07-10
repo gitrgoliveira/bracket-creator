@@ -31,7 +31,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	}()
 
 	// 1. Data sheet (Player Name, Dojo, Display Name)
-	poolCoords, playerCoords := helper.AddPoolDataToSheet(f, pools, comp.WithZekkenName, comp.Name)
+	poolCoords, playerCoords := helper.AddPoolDataToSheet(f, pools, comp.EffectiveWithZekkenName(), comp.Name)
 
 	// 2. Pool Draw sheet (reactive formula references to data sheet)
 	if err := helper.AddPoolsToSheet(f, pools, poolCoords, playerCoords); err != nil {
@@ -39,7 +39,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	}
 
 	// 3. Pool Matches sheet (red/white, scoring formulas, reactive name references)
-	matchWinners := helper.PrintPoolMatches(f, pools, comp.TeamSize, comp.PoolWinners, len(comp.Courts), comp.Mirror, poolCoords, playerCoords)
+	matchWinners := helper.PrintPoolMatches(f, pools, comp.TeamSize, comp.PoolWinners, len(comp.Courts), comp.Mirror, poolCoords, playerCoords, comp.Engi)
 
 	// 4. Tree sheets
 	finals := helper.GenerateFinals(pools, comp.PoolWinners)
@@ -67,7 +67,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	}
 
 	// 5. Names to Print sheet
-	helper.CreateNamesWithPoolToPrint(f, pools, comp.WithZekkenName, len(comp.Courts), playerCoords)
+	helper.CreateNamesWithPoolToPrint(f, pools, comp.EffectiveWithZekkenName(), len(comp.Courts), playerCoords)
 
 	// 6. Tags sheet, pass publicURL so numbered tags get an embedded QR code.
 	// LoadTournament errors are silently ignored: a missing publicURL simply

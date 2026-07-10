@@ -53,7 +53,7 @@ func TestPrintPoolMatchesAlignment(t *testing.T) {
 		pools := []Pool{poolA, poolB}
 		numCourts := 2
 
-		matchWinners := PrintPoolMatches(f, pools, 0, 1, numCourts, false, poolCoords, pCoords)
+		matchWinners := PrintPoolMatches(f, pools, 0, 1, numCourts, false, poolCoords, pCoords, false)
 		if len(matchWinners) != 2 {
 			t.Errorf("expected 2 matchWinners, got %d", len(matchWinners))
 		}
@@ -95,7 +95,7 @@ func TestPrintPoolMatchesTeamAlignment(t *testing.T) {
 		f.NewSheet(SheetPoolDraw)
 
 		// teamMatches = 3
-		PrintPoolMatches(f, pools, 3, 1, 1, false, poolCoords, pCoords)
+		PrintPoolMatches(f, pools, 3, 1, 1, false, poolCoords, pCoords, false)
 
 		// Header(1) + Match(1+2+3+2+1+2=11) = 12. Result 1 at 13.
 		// Wait, startRow=2. PoolHeader=2. poolRow=3. Match1 starts at 3. Height 9.

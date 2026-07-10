@@ -33,7 +33,7 @@ func TestPrintPoolMatchesEdgeCourts(t *testing.T) {
 		f.NewSheet(SheetPoolDraw)
 
 		pools := []Pool{poolA}
-		matchWinners := PrintPoolMatches(f, pools, 0, 1, 0, false, poolCoords, pCoords)
+		matchWinners := PrintPoolMatches(f, pools, 0, 1, 0, false, poolCoords, pCoords, false)
 		if len(matchWinners) == 0 {
 			t.Errorf("expected match winners even with 0 courts, got %d", len(matchWinners))
 		}
@@ -47,7 +47,7 @@ func TestPrintPoolMatchesEdgeCourts(t *testing.T) {
 
 		pools := []Pool{poolA}
 		numCourts := 5
-		matchWinners := PrintPoolMatches(f, pools, 0, 1, numCourts, false, poolCoords, pCoords)
+		matchWinners := PrintPoolMatches(f, pools, 0, 1, numCourts, false, poolCoords, pCoords, false)
 		if len(matchWinners) != 1 {
 			t.Errorf("expected 1 match winner, got %d", len(matchWinners))
 		}
@@ -80,7 +80,7 @@ func TestPrintPoolMatchesEdgeTournament(t *testing.T) {
 			playerCoordKey(*playerA1): {cellCoord: cellCoord{sheetName: SheetPoolDraw, cell: "A1"}},
 		}
 		pools := []Pool{poolA}
-		matchWinners := PrintPoolMatches(f, pools, 0, 1, 1, false, poolCoords, pCoords)
+		matchWinners := PrintPoolMatches(f, pools, 0, 1, 1, false, poolCoords, pCoords, false)
 		if len(matchWinners) != 1 {
 			t.Errorf("expected 1 match winner, got %d", len(matchWinners))
 		}
@@ -97,7 +97,7 @@ func TestPrintPoolMatchesEdgeTournament(t *testing.T) {
 		f.NewSheet(SheetPoolDraw)
 
 		var pools []Pool
-		matchWinners := PrintPoolMatches(f, pools, 0, 1, 1, false, nil, nil)
+		matchWinners := PrintPoolMatches(f, pools, 0, 1, 1, false, nil, nil, false)
 		if len(matchWinners) != 0 {
 			t.Errorf("expected 0 match winners, got %d", len(matchWinners))
 		}
@@ -126,7 +126,7 @@ func TestPrintPoolMatchesEdgeTeamMatches(t *testing.T) {
 		f.NewSheet(SheetPoolMatches)
 		f.NewSheet(SheetPoolDraw)
 
-		PrintPoolMatches(f, pools, 1, 1, 1, false, poolCoords, pCoords)
+		PrintPoolMatches(f, pools, 1, 1, 1, false, poolCoords, pCoords, false)
 		val, _ := f.GetCellValue(SheetPoolMatches, "F18")
 		assert.Equalf(t, "1.", val, "expected result 1. at F18 for teamMatches=1, got '%s'", val)
 	})
@@ -152,7 +152,7 @@ func TestPrintPoolMatchesEdgeTeamMatches(t *testing.T) {
 		f.NewSheet(SheetPoolMatches)
 		f.NewSheet(SheetPoolDraw)
 
-		PrintPoolMatches(f, pools, 10, 1, 1, false, poolCoords, pCoords)
+		PrintPoolMatches(f, pools, 10, 1, 1, false, poolCoords, pCoords, false)
 		val, _ := f.GetCellValue(SheetPoolMatches, "F27")
 		assert.Equalf(t, "1.", val, "expected result 1. at F27 for teamMatches=10, got '%s'", val)
 	})
@@ -181,7 +181,7 @@ func TestPrintPoolMatchesMirroring(t *testing.T) {
 		f.NewSheet(SheetPoolMatches)
 		f.NewSheet(SheetPoolDraw)
 
-		PrintPoolMatches(f, pools, 0, 1, 1, true, poolCoords, pCoords)
+		PrintPoolMatches(f, pools, 0, 1, 1, true, poolCoords, pCoords, false)
 		// Header row should be White vs Red
 		val, _ := f.GetCellValue(SheetPoolMatches, "A3")
 		assert.Equal(t, "White", val, "expected White on left (mirror=true)")
@@ -195,7 +195,7 @@ func TestPrintPoolMatchesMirroring(t *testing.T) {
 		f.NewSheet(SheetPoolMatches)
 		f.NewSheet(SheetPoolDraw)
 
-		PrintPoolMatches(f, pools, 0, 1, 1, false, poolCoords, pCoords)
+		PrintPoolMatches(f, pools, 0, 1, 1, false, poolCoords, pCoords, false)
 		// Header row should be Red vs White
 		val, _ := f.GetCellValue(SheetPoolMatches, "A3")
 		assert.Equal(t, "Red", val, "expected Red on left (mirror=false)")
@@ -354,7 +354,7 @@ func TestEliminationMatchSameSheetFormulas(t *testing.T) {
 	f.NewSheet(SheetEliminationMatches)
 
 	poolWinners := 2
-	matchWinners := PrintPoolMatches(f, pools, 0, poolWinners, 1, false, poolCoords, pCoords)
+	matchWinners := PrintPoolMatches(f, pools, 0, poolWinners, 1, false, poolCoords, pCoords, false)
 
 	finalists := GenerateFinals(pools, poolWinners)
 	tree := CreateBalancedTree(finalists)
@@ -434,7 +434,7 @@ func TestPoolWinnerFormulaReferences(t *testing.T) {
 	f.NewSheet(SheetEliminationMatches)
 
 	poolWinners := 2
-	matchWinners := PrintPoolMatches(f, pools, 0, poolWinners, 1, false, poolCoords, pCoords)
+	matchWinners := PrintPoolMatches(f, pools, 0, poolWinners, 1, false, poolCoords, pCoords, false)
 
 	// Build elimination tree using the same LeafVal format as in production.
 	finalists := GenerateFinals(pools, poolWinners)

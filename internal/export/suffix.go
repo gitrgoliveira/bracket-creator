@@ -8,6 +8,8 @@
 package export
 
 import (
+	"strconv"
+
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
@@ -83,6 +85,28 @@ func MiddleCellText(decision, suffix string) string {
 	default:
 		return suffix
 	}
+}
+
+// FlagsScore formats an engi referee flag count as a string for an Excel
+// score cell: 0 -> "" (leave the cell blank), any positive n -> strconv.Itoa(n).
+// Mirrors the IpponsScore convention of returning "" for "no score recorded".
+func FlagsScore(n int) string {
+	if n == 0 {
+		return ""
+	}
+	return strconv.Itoa(n)
+}
+
+// ScoreCellText returns the value to write into an individual score cell.
+// For engi competitions it uses the referee flag count (FlagsScore); for all
+// other competitions it joins the ippon slice (IpponsScore). This single helper
+// removes parallel if/else branches in both overlayPoolScores and
+// overlayBracketScores.
+func ScoreCellText(engi bool, ippons []string, flags int) string {
+	if engi {
+		return FlagsScore(flags)
+	}
+	return IpponsScore(ippons)
 }
 
 // IpponsScore formats an ippon slice as a readable score string: ["M","K"] ->

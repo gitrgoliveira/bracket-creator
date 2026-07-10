@@ -36,7 +36,7 @@ The same toolkit scales from a fully printed event to a fully online one. Pick t
 
     *Needs:* an A4/A3 printer.
 
-    [Generate a bracket](user-guide/web-ui.md)
+    [Generate a bracket](user-guide/organisers/web-ui.md)
 
 -   **Partially connected**
 
@@ -46,7 +46,7 @@ The same toolkit scales from a fully printed event to a fully online one. Pick t
 
     *Needs:* one device per shiai-jo.
 
-    [Live tournament app](user-guide/mobile-app.md)
+    [Live tournament app](user-guide/organisers/run-live.md)
 
 -   **Fully digital**
 
@@ -56,7 +56,7 @@ The same toolkit scales from a fully printed event to a fully online one. Pick t
 
     *Needs:* a device and monitor per court, plus network access for competitors.
 
-    [Host it online](user-guide/hosting.md)
+    [Host it online](user-guide/install/hosting.md)
 
 </div>
 
@@ -82,7 +82,7 @@ The same toolkit scales from a fully printed event to a fully online one. Pick t
 
     `serve`
 
-    [Web UI guide](user-guide/web-ui.md)
+    [Web UI guide](user-guide/organisers/web-ui.md)
 
 -   **Live tournament app**
 
@@ -92,7 +92,7 @@ The same toolkit scales from a fully printed event to a fully online one. Pick t
 
     `mobile-app`
 
-    [Mobile app guide](user-guide/mobile-app.md)
+    [Mobile app guide](user-guide/organisers/run-live.md)
 
 </div>
 
@@ -107,9 +107,9 @@ The simplest way to run the live tournament app, no Go toolchain needed:
     bracket-creator mobile-app --folder ./tournament-data
     ```
 
-3. Open [http://localhost:8080](http://localhost:8080) and follow the setup in the [mobile app guide](user-guide/mobile-app.md).
+3. Open [http://localhost:8080](http://localhost:8080) and follow the setup in the [mobile app guide](user-guide/organisers/run-live.md).
 
-Prefer Go or Docker? See the [install options](user-guide/getting-started.md).
+Prefer Go or Docker? See the [install options](user-guide/install/install.md).
 
 ## What you need on tournament day
 
@@ -123,11 +123,11 @@ If you have multiple shiai-jo, upload the Excel file to Google Drive (or similar
 
 ## Before the tournament
 
-1. **Collect participants**: one name per line in a CSV file ([input format](user-guide/input-format.md))
+1. **Collect participants**: one name per line in a CSV file ([input format](user-guide/organisers/input-format.md))
 2. **Generate the bracket**: run `create-pools` or `create-playoffs` ([commands](user-guide/commands/create-pools.md))
 3. **Optionally seed** top competitors so they land in separate pools/sides of the bracket ([seeding](user-guide/commands/create-pools.md#seeding))
 4. **Print**: the Excel file is laid out to print cleanly on A4/A3
 
 ## On the day
 
-Use the **live tournament app** to manage pools and scores in real time across all devices on your network (no Excel required on the day). See the [mobile app guide](user-guide/mobile-app.md).
+Use the **live tournament app** to manage pools and scores in real time across all devices on your network (no Excel required on the day). See the [mobile app guide](user-guide/organisers/run-live.md).

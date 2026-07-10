@@ -52,7 +52,7 @@ it like any other bout:
 - The loser finishes 4th and does not appear on the awards podium.
 
 The public podium reflects this automatically: a naginata competition shows a
-single 3rd place. Refer to [Awards and winners](mobile-app.md#awards-and-winners)
+single 3rd place. Refer to [Awards and winners](run-live.md#results-and-awards)
 for the full podium behaviour.
 
 ## Engi-kyogi (kata competition)

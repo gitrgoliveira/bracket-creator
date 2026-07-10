@@ -177,7 +177,7 @@ scoreboard freezes during a Wi-Fi outage:
   on the machine, with no network hop**. If the venue Wi-Fi drops mid-match, that court's
   scoreboard keeps updating from the operator's entries for as long as the scoring tab stays
   open. The board shows a small amber dot while it is running on this local feed (see
-  [the scoreboard status dot](../user-guide/mobile-app.md#scoreboards-and-court-displays)).
+  [the scoreboard status dot](../user-guide/spectators/following.md#scoreboards-and-court-displays)).
 - **Separate device (a smart-TV browser, or the display on its own mini-PC).** Simpler cabling,
   but the board only ever updates over the network, so a Wi-Fi outage freezes it until the link
   returns (the board then shows a red dot).

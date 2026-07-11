@@ -450,8 +450,15 @@ func overlayPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[str
 				hantei := mr.DecidedByHantei != nil && *mr.DecidedByHantei
 				sfx := DecisionSuffix(mr.Decision, mr.Encho, hantei)
 
-				setCellStr(f, sheetName, lVCol, excelRow, ScoreCellText(engi, leftIppons, leftFlags))
-				setCellStr(f, sheetName, rVCol, excelRow, ScoreCellText(engi, rightIppons, rightFlags))
+				var leftScore, rightScore string
+				if engi {
+					leftScore, rightScore = FlagsScorePair(leftFlags, rightFlags)
+				} else {
+					leftScore = IpponsScore(leftIppons)
+					rightScore = IpponsScore(rightIppons)
+				}
+				setCellStr(f, sheetName, lVCol, excelRow, leftScore)
+				setCellStr(f, sheetName, rVCol, excelRow, rightScore)
 				if mid := MiddleCellText(mr.Decision, sfx); mid != "" {
 					setCellStr(f, sheetName, middleCol, excelRow, mid)
 				}
@@ -928,8 +935,7 @@ func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMa
 				if mirror {
 					leftFlags, rightFlags = bm.FlagsB, bm.FlagsA
 				}
-				leftScore = FlagsScore(leftFlags)
-				rightScore = FlagsScore(rightFlags)
+				leftScore, rightScore = FlagsScorePair(leftFlags, rightFlags)
 			} else {
 				leftScore = bm.ScoreA
 				rightScore = bm.ScoreB

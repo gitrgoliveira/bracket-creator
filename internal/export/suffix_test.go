@@ -113,27 +113,31 @@ func TestMiddleCellText(t *testing.T) {
 	}
 }
 
-func TestFlagsScore(t *testing.T) {
+func TestFlagsScorePair(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		n    int
-		want string
+		a, b  int
+		wantA string
+		wantB string
 	}{
-		{0, ""},
-		{1, "1"},
-		{3, "3"},
-		{5, "5"},
-		// Negative counts are impossible in real data but the contract treats
-		// any non-positive value as "no score recorded" (blank cell).
-		{-1, ""},
-		{-5, ""},
+		// Both <=0: neither side had flags (kiken/fusenpai with no scoring) -> blank both.
+		{0, 0, "", ""},
+		{-1, -2, "", ""},
+		// One side positive: real flag-decided score -> write both (clamp negatives to "0").
+		{5, 0, "5", "0"},
+		{0, 3, "0", "3"},
+		{-1, 3, "0", "3"},
+		// Both positive.
+		{3, 2, "3", "2"},
 	}
 	for _, tc := range tests {
 		tc := tc
-		t.Run(fmt.Sprintf("flags_%d", tc.n), func(t *testing.T) {
+		t.Run(fmt.Sprintf("flags_%d_%d", tc.a, tc.b), func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, tc.want, FlagsScore(tc.n))
+			gotA, gotB := FlagsScorePair(tc.a, tc.b)
+			assert.Equal(t, tc.wantA, gotA, "FlagsScorePair(%d,%d) left", tc.a, tc.b)
+			assert.Equal(t, tc.wantB, gotB, "FlagsScorePair(%d,%d) right", tc.a, tc.b)
 		})
 	}
 }

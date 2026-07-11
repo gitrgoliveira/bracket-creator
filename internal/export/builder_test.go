@@ -2245,6 +2245,61 @@ func TestBuildResultsWorkbook_EngiPoolFlagScoreCells(t *testing.T) {
 		"Pool Matches 'Flags' standings column must carry '3' for the engi winner")
 }
 
+// TestBuildResultsWorkbook_EngiPoolFlagScoreCells_FiveZero verifies the pairwise
+// rule: when one side has a positive flag count and the other has zero, BOTH cells
+// must be written (the loser's "0" is a real score, distinguishing a 5-0 flag win
+// from a kiken/fusenpai where no flags were recorded). Regression for the
+// Copilot review finding on PR #351: the old per-side formatting (blank for 0) was masking the loser's score.
+func TestBuildResultsWorkbook_EngiPoolFlagScoreCells_FiveZero(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	comp.Engi = true
+	require.NoError(t, store.SaveCompetition(comp))
+
+	pools := makeEngiPools()
+	require.NoError(t, store.SavePools(compID, pools))
+
+	// Engi match: pair1 wins 5-0 on referee flags; loser has zero flags (a real score).
+	results := []state.MatchResult{
+		{
+			ID:       "Pool A-0",
+			SideA:    "Member One A",
+			SideAID:  "pair1",
+			SideB:    "Member One B",
+			SideBID:  "pair2",
+			FlagsA:   5,
+			FlagsB:   0,
+			Decision: "fought",
+			Status:   state.MatchStatusCompleted,
+			Winner:   "Member One A",
+			WinnerID: "pair1",
+		},
+	}
+	require.NoError(t, store.SavePoolMatches(compID, results))
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer f.Close()
+
+	rows, err := f.GetRows(helper.SheetPoolMatches)
+	require.NoError(t, err)
+
+	matchRow := firstPoolMatchScoreRow(rows, 0)
+	require.NotNil(t, matchRow, "match score row must exist")
+	require.Greater(t, len(matchRow), 5, "match score row must have at least 6 columns")
+	assert.Equal(t, "5", matchRow[1],
+		"left score cell must be '5' (FlagsA=5)")
+	assert.Equal(t, "0", matchRow[5],
+		"right score cell must be '0' (FlagsB=0, real score in a 5-0 bout)")
+}
+
 // TestBuildResultsWorkbook_EngiNonEngiPoolScoreUnchanged verifies that a non-engi
 // pool match still renders ippon letters (not flag counts) after the engi fix.
 func TestBuildResultsWorkbook_EngiNonEngiPoolScoreUnchanged(t *testing.T) {
@@ -2412,6 +2467,64 @@ func TestBuildResultsWorkbook_EngiBracketFlagScoreCells(t *testing.T) {
 	}
 }
 
+// TestBuildResultsWorkbook_EngiBracketFlagScoreCells_FiveZero verifies the
+// pairwise rule for elimination brackets: when FlagsA=5 and FlagsB=0, the loser's
+// cell must contain "0" (not be blank). Regression for PR #351 Copilot finding.
+func TestBuildResultsWorkbook_EngiBracketFlagScoreCells_FiveZero(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	comp.Format = state.CompFormatMixed
+	comp.Engi = true
+	comp.Mirror = false
+	require.NoError(t, store.SaveCompetition(comp))
+
+	pools := makeEngiPools()
+	require.NoError(t, store.SavePools(compID, pools))
+	require.NoError(t, store.SavePoolMatches(compID, nil))
+
+	// Engi bracket match: pair1 wins 5-0 on referee flags.
+	bracket := &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				{
+					ID:          "B1",
+					SideA:       "Member One A",
+					SideB:       "Member One B",
+					Winner:      "Member One A",
+					Status:      state.MatchStatusCompleted,
+					FlagsA:      5,
+					FlagsB:      0,
+					ScoreA:      "MK",
+					ScoreB:      "",
+					Decision:    "fought",
+					MatchNumber: 1,
+				},
+			},
+		},
+	}
+	require.NoError(t, store.SaveBracket(compID, bracket))
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer f.Close()
+
+	rows, err := f.GetRows(helper.SheetEliminationMatches)
+	require.NoError(t, err)
+
+	left, right := bracketVictoryCells(t, rows, "Round 1 - Match 1")
+	assert.Equal(t, "5", left,
+		"left victory cell must be '5' (FlagsA=5)")
+	assert.Equal(t, "0", right,
+		"right victory cell must be '0' (FlagsB=0, real score in a 5-0 bout, not blank)")
+}
+
 // ------------------------------------------------------------
 // TDD-4: Standings headers relabeled for engi (W/L/Flags/Rank)
 // ------------------------------------------------------------
@@ -2540,7 +2653,7 @@ func TestBuildResultsWorkbook_NonEngiStandingsHeadersUnchanged(t *testing.T) {
 // TestBuildResultsWorkbook_EngiDecisionSuffix characterizes the vs-cell text for
 // a kiken-voluntary engi match: the middle cell must carry "Kiken" and both
 // adjacent score cells (at column offsets -2 and +2 from the vs cell) must be
-// blank because FlagsScore(0) = "".
+// blank because FlagsScorePair returns ("", "") when neither side scored flags.
 func TestBuildResultsWorkbook_EngiDecisionSuffix(t *testing.T) {
 	t.Parallel()
 	dir, store, eng, compID := testSetup(t)
@@ -2554,7 +2667,7 @@ func TestBuildResultsWorkbook_EngiDecisionSuffix(t *testing.T) {
 	pools := makeEngiPools()
 	require.NoError(t, store.SavePools(compID, pools))
 
-	// kiken-voluntary: pair1 wins; no flag score is recorded (FlagsScore(0) = "").
+	// kiken-voluntary: pair1 wins; no flag score is recorded (FlagsScorePair -> "", "").
 	results := []state.MatchResult{
 		{
 			ID:       "Pool A-0",
@@ -2586,7 +2699,7 @@ func TestBuildResultsWorkbook_EngiDecisionSuffix(t *testing.T) {
 	assert.True(t, containsCell(rows, "Kiken"),
 		"Pool Matches vs-cell must render 'Kiken' for a kiken-voluntary engi match")
 
-	// Score cells flanking the vs column must be blank: FlagsScore(0) = "".
+	// Score cells flanking the vs column must be blank: FlagsScorePair returns ("", "") for a no-flag decision.
 	// The vs cell sits at column offset 3 from the court band start; score cells
 	// are at offsets 1 (left) and 5 (right), so -2 and +2 from the vs index.
 	for _, row := range rows {

@@ -87,30 +87,31 @@ func MiddleCellText(decision, suffix string) string {
 	}
 }
 
-// FlagsScore formats an engi referee flag count as a string for an Excel
-// score cell: <=0 -> "" (leave the cell blank), any positive n -> strconv.Itoa(n).
-// Mirrors the IpponsScore convention of returning "" for "no score recorded".
-// Non-positive counts are impossible in real data (guarded at the pools,
-// bracket, and engine boundaries) but are treated as "no score" defensively so
-// the contract holds for any in-memory caller.
-func FlagsScore(n int) string {
-	if n <= 0 {
-		return ""
+// FlagsScorePair returns the display strings for both sides of an engi bout.
+//
+// Pairwise rule: when EITHER side has a positive flag count, write BOTH counts
+// numerically (clamping any negative to 0). When both counts are <=0, return
+// ("", "") to leave both cells blank.
+//
+// Why pairwise? A flag-decided bout (e.g. 5-0) means the losing side genuinely
+// scored zero flags - that "0" is a real score and must appear so the operator
+// can tell "bout was fought and decided 5-0" from "bout was kiken/fusenpai with
+// no flags recorded at all (0-0 but decided without scoring)". By contrast, a
+// kiken/fusenpai decision with no flags on either side has nothing to display,
+// so both cells stay blank.
+func FlagsScorePair(a, b int) (string, string) {
+	if a <= 0 && b <= 0 {
+		return "", ""
 	}
-	return strconv.Itoa(n)
-}
-
-// ScoreCellText returns the value to write into an individual score cell.
-// For engi competitions it uses the referee flag count (FlagsScore); for all
-// other competitions it joins the ippon slice (IpponsScore). Used by
-// overlayPoolScores. overlayBracketScores does NOT call this: bracket state
-// stores a pre-joined ScoreA/ScoreB string rather than an ippon slice, so it
-// formats its own non-engi branch and calls FlagsScore directly for engi.
-func ScoreCellText(engi bool, ippons []string, flags int) string {
-	if engi {
-		return FlagsScore(flags)
+	aStr := strconv.Itoa(a)
+	if a < 0 {
+		aStr = "0"
 	}
-	return IpponsScore(ippons)
+	bStr := strconv.Itoa(b)
+	if b < 0 {
+		bStr = "0"
+	}
+	return aStr, bStr
 }
 
 // IpponsScore formats an ippon slice as a readable score string: ["M","K"] ->

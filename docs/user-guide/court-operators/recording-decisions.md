@@ -24,7 +24,7 @@ An injury kiken can be reinstated later by the operator if the competitor recove
 
 ## Hikiwake
 
-A hikiwake is a draw. It applies in pool matches and contributes to pool standings separately from wins and losses.
+A hikiwake is a draw. It applies in pool, league, and Swiss matches (not in the knockout phase) and contributes to the standings separately from wins and losses.
 
 ## Daihyosen
 

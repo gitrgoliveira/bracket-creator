@@ -424,7 +424,7 @@ OS=linux
 ARCH=x86_64
 TAR_FILE=bracket-creator_${OS}_${ARCH}.tar.gz
 wget https://github.com/gitrgoliveira/bracket-creator/releases/latest/download/${TAR_FILE}
-sudo tar xvf ${TAR_FILE} -C /usr/local/bin bracket-creator
+sudo tar xzvf ${TAR_FILE} -C /usr/local/bin bracket-creator
 rm -f ${TAR_FILE}
 ```
 

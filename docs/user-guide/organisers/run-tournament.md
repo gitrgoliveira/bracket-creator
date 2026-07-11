@@ -136,7 +136,7 @@ When the preview looks correct, click **Start competition** to move to match pla
 
 ## Pools and bracket
 
-The **Pools** tab shows standings for every pool. Ranks are computed automatically from match results; there is no manual editing. When a tie that determines pool advancement is settled by a daihyosen bout, the winning side carries a **DH** badge in the standings.
+The **Pools** tab shows standings for every pool. Ranks are computed automatically from match results; operators do not edit them by hand, with one exception: chusen (drawing lots), the last-resort tie-break for a consequential team-pool tie that a daihyosen cannot settle (see [Recording decisions](../court-operators/recording-decisions.md)). When a daihyosen settles a tie that determines pool advancement, the winning side carries a **DH** badge in the standings.
 
 After all pool matches are complete, advance pool winners to the elimination bracket from the Pools tab. The bracket updates in real time as results come in.
 

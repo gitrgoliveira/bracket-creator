@@ -221,6 +221,40 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 		return nil, notFoundErrorf("competition %s not found", compID)
 	}
 
+	// Engi (kata competition) ranks by wins then accumulated flags (naginata.md);
+	// Points is left at zero for all engi standings (no points metric), so
+	// detectPoolTies would see every pool as fully tied and inject spurious
+	// ippon-shobu bouts. Supplementary bouts are never held for engi.
+	// Self-heal: remove any winnerless non-completed (scheduled or running) TB
+	// rows written by a pre-fix engine; left in place they block pool completion
+	// forever (the completion guards treat a winnerless TB row as unresolved).
+	// Completed TB rows are preserved (their results are harmless and recorded
+	// results are never deleted).
+	if comp.Engi {
+		allMatches, loadErr := e.store.LoadPoolMatches(compID)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		var kept []state.MatchResult
+		removed := 0
+		for _, m := range allMatches {
+			if IsTiebreakerMatchID(m.ID) && m.Status != state.MatchStatusCompleted && m.Winner == "" {
+				removed++
+				continue
+			}
+			kept = append(kept, m)
+		}
+		if removed > 0 {
+			if saveErr := e.store.SavePoolMatches(compID, kept); saveErr != nil {
+				return nil, saveErr
+			}
+			e.standingsCache.Delete(compID)
+			e.standingsFlight.Delete(compID)
+			return nil, e.GenerateSchedule(compID)
+		}
+		return nil, nil
+	}
+
 	// Supplementary ippon-shobu bouts are held only where the tie affects
 	// advancement/seeding (see tieAffectsAdvancement): top poolWinners advance.
 	poolWinners := comp.EffectivePoolWinners()

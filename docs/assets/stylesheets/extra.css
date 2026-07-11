@@ -380,14 +380,47 @@ html, body { overflow-x: clip; }
  * content column and read as a wall. Tag them `{ .bc-phone }` (attr_list) to
  * cap them near a real phone's logical width, centred, with a hairline frame
  * so light UI chrome doesn't dissolve into the page surface. */
-.md-typeset img.bc-phone {
+.md-typeset img.bc-phone,
+.md-typeset video.bc-phone {
 	display: block;
 	/* Material's root font-size is 125% (1rem = 20px), so 20rem = 400px:
 	 * a large phone's logical width. */
 	max-width: min(20rem, 100%);
+	height: auto;
 	margin: 1em auto;
 	border: 1px solid var(--bc-line);
 	border-radius: var(--bc-radius);
+}
+
+/* On slate the hairline is invisible against a light capture and the white
+ * screenshot glares on the near-black page; drop the dead border and take
+ * the capture down a notch instead. */
+[data-md-color-scheme="slate"] .md-typeset img.bc-phone,
+[data-md-color-scheme="slate"] .md-typeset video.bc-phone {
+	border-color: transparent;
+	filter: brightness(0.92);
+}
+
+/* Any embedded video stays inside the content column (Material has no
+ * default video sizing). */
+.md-typeset video {
+	max-width: 100%;
+	height: auto;
+}
+
+/* Figure + caption around framed captures: the caption names which app
+ * screen the reader is looking at, so stacked screenshots stay skimmable. */
+.md-typeset figure.bc-fig {
+	display: block;
+	margin: 1.2em auto;
+	text-align: center;
+}
+.md-typeset figure.bc-fig > figcaption {
+	margin: 0.55em auto 0;
+	max-width: 26rem;
+	font-size: 0.72rem;
+	color: var(--md-default-fg-color--light);
+	text-wrap: pretty;
 }
 
 /* ===== Tabbed content: heavier labels. Material already colours the active

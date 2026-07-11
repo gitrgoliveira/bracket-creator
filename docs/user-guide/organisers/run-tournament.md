@@ -132,7 +132,12 @@ You can still toggle individual check-in status during `draw-ready`, but roster 
 
 When the preview looks correct, click **Start competition** to move to match play. To make roster changes instead, click **Discard draw** to delete the draft and return to setup.
 
-![Generating the draw](../../screenshots/draw-generation.gif)
+<figure class="bc-fig">
+  <video controls loop muted playsinline preload="metadata" width="900" height="580" aria-label="Generating the draw: the pools preview appears after clicking Generate draw.">
+    <source src="../../../screenshots/draw-generation.mp4" type="video/mp4">
+  </video>
+  <figcaption>Generating the draw. Press play to watch.</figcaption>
+</figure>
 
 ## Pools and bracket
 

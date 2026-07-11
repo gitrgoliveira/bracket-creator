@@ -13,11 +13,17 @@ The viewer brings together everything you need to follow the day in one place:
 - Pool standings that update as scores are entered, with no page refresh needed.
 - The elimination bracket filling in as matches are completed.
 
+<figure class="bc-fig" markdown="span">
+  ![Public viewer on a phone: tournament header, a watchlist, the full schedule, and a card per competition tagged with its status.](../../screenshots/viewer-home.png){ .bc-phone }
+  <figcaption>The public home: the watchlist, the full schedule, and one card per competition.</figcaption>
+</figure>
+
 Tap a competition to drill into its schedule, standings, and bracket. Aka (red) and Shiro (white) sides are colour-coded throughout.
 
-![Public viewer on a phone: tournament header, a watchlist, the full schedule, and a card per competition tagged with its status.](../../screenshots/viewer-home.png){ .bc-phone }
-
-![A competition's public page: upcoming matches and recent results with waza-level scores.](../../screenshots/viewer-competition.png){ .bc-phone }
+<figure class="bc-fig" markdown="span">
+  ![A competition's public page: upcoming matches and recent results with waza-level scores.](../../screenshots/viewer-competition.png){ .bc-phone }
+  <figcaption>A competition's page: upcoming matches and recent results with waza-level scores.</figcaption>
+</figure>
 
 ## Scoreboards and court displays
 
@@ -46,7 +52,12 @@ When everything is healthy, no dot appears.
 
 Scores entered by the operator appear on the viewer immediately, across every connected device.
 
-![A scorer's result appears on the viewer in real time, with no refresh.](../../screenshots/realtime-update.gif){ .bc-phone }
+<figure class="bc-fig">
+  <video class="bc-phone" controls loop muted playsinline preload="metadata" width="440" height="900" aria-label="A scorer's result appears on the viewer in real time, with no refresh.">
+    <source src="../../../screenshots/realtime-update.mp4" type="video/mp4">
+  </video>
+  <figcaption>A scorer's result appearing on the viewer in real time, with no refresh. Press play to watch.</figcaption>
+</figure>
 
 ## QR codes on competitor tags
 

@@ -4,7 +4,7 @@ The court console at `/admin/shiaijo/<court>` (linked from the dashboard under *
 
 ## Enter scores
 
-Open a match from the Upcoming list to start scoring it. Record results from the **Scores** tab or the dedicated score editor. For outcomes that are not decided on points (withdrawals, no-shows, draws, and representative bouts), see [Record match decisions](recording-decisions.md).
+Open a match from the Upcoming list to start scoring it; the score editor opens inline within the court console. For outcomes that are not decided on points (withdrawals, no-shows, draws, and representative bouts), see [Record match decisions](recording-decisions.md).
 
 !!! tip
     In self-run events, competitors or table helpers can record their own scores without the admin password. See the [Competitor self-run guide](../competitors/self-run.md) and [Operating modes and access control](../organisers/operating-modes.md) for how that works.

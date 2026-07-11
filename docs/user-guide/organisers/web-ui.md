@@ -12,7 +12,7 @@ Then open [http://localhost:8080](http://localhost:8080) in your browser.
 
 ## Main screen
 
-Configure the tournament on the main screen: choose the format (Pools & Playoffs or Playoffs Only), set the number of courts, pool sizes, and other options. Upload your participant CSV directly from the browser.
+Configure the tournament on the main screen. Choose the format, either Pools and Playoffs or Playoffs (Knockout Tournament), then set the number of courts, pool sizes, and other options. Upload your participant CSV directly from the browser.
 
 ![Web UI main screen](../../screenshots/webui-main.png)
 
@@ -24,7 +24,7 @@ After uploading a CSV the participant list is shown for review before generating
 
 ## Seeding
 
-Click **Assign Seeds** to open the seeding modal. Drag competitors into ranked positions or type seed numbers directly. Seeds control which players are kept apart in the early rounds.
+Click **Seed Participants** to open the seeding modal. Type a seed number into each participant's rank field. Seeds control which players are kept apart in the early rounds.
 
 ![Seeding modal](../../screenshots/webui-seeding-modal.png)
 
@@ -34,4 +34,4 @@ After confirming, the assigned seeds are shown inline next to each participant n
 
 ## Download the bracket
 
-Click **Generate** to produce the Excel file. The browser downloads the `.xlsx` directly (no server-side storage, no account needed).
+Click **Create Tournament** to produce the Excel file. The browser downloads the `.xlsx` directly (no server-side storage, no account needed).

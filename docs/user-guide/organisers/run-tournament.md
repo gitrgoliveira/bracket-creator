@@ -69,9 +69,9 @@ Set the **Public URL** field to the externally reachable address of your app (fo
 
 The same **Edit details** page also has branding and sponsor fields, below tournament details. All fields are optional; the default kendo theme applies when nothing is configured.
 
-- **Logo**: upload an image file to display in the viewer header.
-- **Primary and accent colours**: the viewer and display screens adopt these colours across the whole site.
-- **Sponsor banners**: upload full-width images that appear on the public viewer page only. Sponsor banners do not appear on the TV lobby boards or scoring displays.
+- **Logo**: upload an image file shown on the viewer, the lobby displays, and the admin screens.
+- **Accent colours**: set a primary accent colour and a soft background tint; the viewer and display screens adopt them across the whole site.
+- **Sponsors**: upload full-width images that appear on the public viewer page only. Sponsor images do not appear on the TV lobby boards or scoring displays.
 
 ## Announcements
 
@@ -104,7 +104,7 @@ Click **Paste clipboard** to read a tab-separated selection from the clipboard a
 
 ![Participant setup panels](../../screenshots/mobile-participant-setup.png)
 
-The **Check-in and Seeding** panel (labelled **Seeding** when check-in is disabled) shows the working roster. From here you can:
+The **Check-in & Seeding** panel (labelled **Seeding** when check-in is disabled) shows the working roster. From here you can:
 
 - Drag rows to assign seeds, or type a rank number directly.
 - Click **Shuffle unseeded** to randomise unranked positions.
@@ -172,8 +172,8 @@ Set the **Award two joint 3rd places** option during setup, before you generate 
 
 Two Excel downloads are available from the competition page:
 
-- **Download results**: a workbook with played scores, pool standings, winners, and decisions filled in. Covers pools, league, and knockout formats. Swiss competitions have no static bracket; follow the current standings instead.
-- **Download blank template**: an empty bracket workbook with linked formulas for hand scoring at events without a network connection.
+- **Download results (.xlsx)**: a workbook with played scores, pool standings, winners, and decisions filled in. Covers pools, league, and knockout formats. Swiss competitions have no static bracket; follow the current standings instead.
+- **Download blank template (.xlsx)**: an empty bracket workbook with linked formulas for hand scoring at events without a network connection.
 
 ### PDF
 

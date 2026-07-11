@@ -375,6 +375,21 @@ html, body { overflow-x: clip; }
 	overflow-x: auto;
 }
 
+/* ===== Phone screenshots: render at device scale, not column width ===== */
+/* Portrait phone captures are saved at 2x; unconstrained they fill the whole
+ * content column and read as a wall. Tag them `{ .bc-phone }` (attr_list) to
+ * cap them near a real phone's logical width, centred, with a hairline frame
+ * so light UI chrome doesn't dissolve into the page surface. */
+.md-typeset img.bc-phone {
+	display: block;
+	/* Material's root font-size is 125% (1rem = 20px), so 20rem = 400px:
+	 * a large phone's logical width. */
+	max-width: min(20rem, 100%);
+	margin: 1em auto;
+	border: 1px solid var(--bc-line);
+	border-radius: var(--bc-radius);
+}
+
 /* ===== Tabbed content: heavier labels. Material already colours the active
  * tab + its underline with --md-accent-fg-color (navy), so no active-state
  * rule is needed here. ===== */

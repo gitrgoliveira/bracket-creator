@@ -15,9 +15,9 @@ The viewer brings together everything you need to follow the day in one place:
 
 Tap a competition to drill into its schedule, standings, and bracket. Aka (red) and Shiro (white) sides are colour-coded throughout.
 
-![Public viewer on a phone: tournament header, a watchlist, the full schedule, and a card per competition tagged with its status.](../../screenshots/viewer-home.png)
+![Public viewer on a phone: tournament header, a watchlist, the full schedule, and a card per competition tagged with its status.](../../screenshots/viewer-home.png){ .bc-phone }
 
-![A competition's public page: upcoming matches and recent results with waza-level scores.](../../screenshots/viewer-competition.png)
+![A competition's public page: upcoming matches and recent results with waza-level scores.](../../screenshots/viewer-competition.png){ .bc-phone }
 
 ## Scoreboards and court displays
 
@@ -46,7 +46,7 @@ When everything is healthy, no dot appears.
 
 Scores entered by the operator appear on the viewer immediately, across every connected device.
 
-![A scorer's result appears on the viewer in real time, with no refresh.](../../screenshots/realtime-update.gif)
+![A scorer's result appears on the viewer in real time, with no refresh.](../../screenshots/realtime-update.gif){ .bc-phone }
 
 ## QR codes on competitor tags
 

@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -109,6 +110,24 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 	matches, err := e.store.LoadPoolMatches(compID)
 	if err != nil {
 		return AutoCompleteNoChange, err
+	}
+
+	// Engi pre-heal: a pre-fix engine may have injected spurious TB rows into
+	// an engi competition (engi standings all have Points=0, so detectPoolTies
+	// saw every pool as tied). Any TB row that is not completed with a
+	// recorded winner would set hasIncompleteTB below, and the early return at
+	// that guard would leave the competition stuck forever, never reaching the
+	// injection block whose engi guard performs the heal. Heal first, then
+	// partition the healed slice. Gated on a ContainsFunc scan so clean engi
+	// comps pay nothing extra.
+	if comp != nil && comp.Engi && slices.ContainsFunc(matches, isBlockingEngiTBRow) {
+		if _, healErr := e.InjectTiebreakerMatches(compID); healErr != nil {
+			return AutoCompleteNoChange, healErr
+		}
+		matches, err = e.store.LoadPoolMatches(compID)
+		if err != nil {
+			return AutoCompleteNoChange, err
+		}
 	}
 
 	isTeamComp := comp != nil && comp.TeamSize > 0

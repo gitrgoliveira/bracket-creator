@@ -206,6 +206,18 @@ func generateTiebreakerMatches(poolName string, tiedGroup []state.PlayerStanding
 	return results
 }
 
+// isBlockingEngiTBRow reports whether m is a tiebreaker row that would block
+// pool completion of an engi competition. A TB row blocks unless it is
+// completed with a recorded winner (the completion guards treat
+// Status != completed OR Winner == "" as unresolved). Engi never holds TB
+// bouts, so every blocking TB row is a pre-fix leftover with no ranking
+// information (engi standings and applyTiebreakSort both ignore winnerless
+// TB rows) and is safe to remove. Completed TB rows with a Winner are
+// preserved: recorded results are never deleted.
+func isBlockingEngiTBRow(m state.MatchResult) bool {
+	return IsTiebreakerMatchID(m.ID) && (m.Status != state.MatchStatusCompleted || m.Winner == "")
+}
+
 // InjectTiebreakerMatches inspects all pool standings for compID after
 // regular pool matches are complete. For every tied group (same Points
 // after the full cascade), it generates a round-robin of ippon-shobu
@@ -225,11 +237,11 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 	// Points is left at zero for all engi standings (no points metric), so
 	// detectPoolTies would see every pool as fully tied and inject spurious
 	// ippon-shobu bouts. Supplementary bouts are never held for engi.
-	// Self-heal: remove any winnerless non-completed (scheduled or running) TB
-	// rows written by a pre-fix engine; left in place they block pool completion
-	// forever (the completion guards treat a winnerless TB row as unresolved).
-	// Completed TB rows are preserved (their results are harmless and recorded
-	// results are never deleted).
+	// Self-heal: remove any TB row a pre-fix engine left behind that would
+	// block pool completion (Status != completed OR Winner == "", including a
+	// bogus bout finalized as hikiwake via the decision endpoint); left in
+	// place such rows block completion forever. Only completed TB rows with a
+	// recorded winner are preserved: recorded results are never deleted.
 	if comp.Engi {
 		allMatches, loadErr := e.store.LoadPoolMatches(compID)
 		if loadErr != nil {
@@ -238,7 +250,7 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 		var kept []state.MatchResult
 		removed := 0
 		for _, m := range allMatches {
-			if IsTiebreakerMatchID(m.ID) && m.Status != state.MatchStatusCompleted && m.Winner == "" {
+			if isBlockingEngiTBRow(m) {
 				removed++
 				continue
 			}

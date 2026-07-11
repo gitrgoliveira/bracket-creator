@@ -49,6 +49,14 @@ func createTournamentHandler(c *gin.Context) {
 	// Parse form values
 	singleTree := c.PostForm("singleTree") == "on"
 	withZekkenName := c.PostForm("withZekkenName") == "on"
+	engi := c.PostForm("engi") == "on"
+	naginata := c.PostForm("naginata") == "on"
+	// Engi pairs always use the 3-column zekken layout (Name, DisplayName, Dojo).
+	// Force the effective flag so a roster posted without withZekkenName=on still
+	// parses correctly when engi=on is set.
+	if engi {
+		withZekkenName = true
+	}
 	determined := c.PostForm("determined") == "on"
 	titlePrefix := c.PostForm("titlePrefix")
 	numberPrefix := c.PostForm("numberPrefix")
@@ -152,6 +160,8 @@ func createTournamentHandler(c *gin.Context) {
 		o := &poolOptions{
 			singleTree:      singleTree,
 			withZekkenName:  withZekkenName,
+			engi:            engi,
+			naginata:        naginata,
 			determined:      determined,
 			teamMatches:     teamMatches,
 			roundRobin:      roundRobin,
@@ -183,6 +193,7 @@ func createTournamentHandler(c *gin.Context) {
 		o := &playoffOptions{
 			singleTree:      singleTree,
 			withZekkenName:  withZekkenName,
+			naginata:        naginata,
 			determined:      determined,
 			teamMatches:     teamMatches,
 			courts:          courts,

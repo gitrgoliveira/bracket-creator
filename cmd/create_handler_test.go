@@ -176,3 +176,156 @@ func TestCreateHandler_CRLFRoster_Normalized(t *testing.T) {
 		}
 	}
 }
+
+// engiPoolForm builds the POST /create body for an engi pools competition.
+// Players are 3-column pairs: "Member1, Member2, Dojo".
+func engiPoolForm(playerList string) url.Values {
+	return url.Values{
+		"tournamentType": {"pools"},
+		"playerList":     {playerList},
+		"courts":         {"1"},
+		"winnersPerPool": {"2"},
+		"playersPerPool": {"3"},
+		"poolSizeMode":   {"min"},
+		"teamMatches":    {"0"},
+		"roundRobin":     {"on"},
+		"determined":     {"on"},
+		"withZekkenName": {"on"},
+		"engi":           {"on"},
+	}
+}
+
+// TestCreateHandler_EngiPools_FlagsHeader asserts that POST /create with
+// engi=on routes to the engi formula path: the Pool Matches sheet uses
+// "Flags" as the standings column header instead of "T" (and has no "PW"/"PL"),
+// and the W-cell formula contains the N() coercion idiom specific to engi.
+func TestCreateHandler_EngiPools_FlagsHeader(t *testing.T) {
+	// 4 pairs (each "Name1, Name2, Dojo") → 1 pool of 4
+	const roster = "Aoi, Haru, DojoA\nBo, Cho, DojoB\nDai, Ebi, DojoC\nFu, Go, DojoD"
+	f := postCreate(t, engiPoolForm(roster))
+
+	rows, err := f.GetRows("Pool Matches")
+	require.NoError(t, err)
+
+	// Locate the Results header row; it carries W / L / Flags / Rank.
+	resultsRow := -1
+	for i, row := range rows {
+		if len(row) > 0 && row[0] == "Results" {
+			resultsRow = i + 1 // 1-based
+			break
+		}
+	}
+	require.Positive(t, resultsRow, "Results block not found on Pool Matches sheet")
+
+	// The Results header row must contain "Flags" and must NOT contain "PW" or "PL".
+	hRow := rows[resultsRow-1]
+	found := false
+	for _, cell := range hRow {
+		if cell == "Flags" {
+			found = true
+		}
+		require.NotEqual(t, "PW", cell, "engi Pool Matches must not have a PW column")
+		require.NotEqual(t, "PL", cell, "engi Pool Matches must not have a PL column")
+	}
+	require.True(t, found, "engi Pool Matches must have a Flags column header")
+
+	// The W formula for each player must use N() coercion (engi path).
+	sawEngiFormula := false
+	for r := resultsRow + 1; r <= resultsRow+4; r++ {
+		cell, _ := excelize.CoordinatesToCellName(2, r) // column B == W
+		formula, ferr := f.GetCellFormula("Pool Matches", cell)
+		require.NoError(t, ferr)
+		if strings.Contains(formula, "N(") && strings.Contains(formula, "ISNUMBER") {
+			sawEngiFormula = true
+		}
+	}
+	require.True(t, sawEngiFormula, "at least one W cell must use N()-coercion + ISNUMBER (engi formula path)")
+}
+
+// TestCreateHandler_NoEngi_PWHeaderPresent is the regression guard for the
+// non-engi path: without engi=on the Pool Matches sheet must still carry the
+// kendo "PW" header and must NOT have a "Flags" header.
+func TestCreateHandler_NoEngi_PWHeaderPresent(t *testing.T) {
+	const roster = "Alice, DA\nBob, DB\nCharlie, DC"
+	f := postCreate(t, leagueForm("Alice, DA\nBob, DB\nCharlie, DC\nDave, DD\nEve, DE\nFrank, DF"))
+
+	rows, err := f.GetRows("Pool Matches")
+	require.NoError(t, err)
+
+	resultsRow := -1
+	for i, row := range rows {
+		if len(row) > 0 && row[0] == "Results" {
+			resultsRow = i + 1
+			break
+		}
+	}
+	require.Positive(t, resultsRow, "Results block not found on Pool Matches sheet")
+
+	_ = roster // used for documentation
+	hRow := rows[resultsRow-1]
+	hasPW := false
+	for _, cell := range hRow {
+		require.NotEqual(t, "Flags", cell, "non-engi Pool Matches must not have a Flags column")
+		if cell == "PW" {
+			hasPW = true
+		}
+	}
+	require.True(t, hasPW, "non-engi Pool Matches must have a PW column")
+}
+
+// naginataPlayoffForm builds the POST /create body for a naginata playoffs
+// competition.
+func naginataPlayoffForm(playerList string) url.Values {
+	return url.Values{
+		"tournamentType": {"playoffs"},
+		"playerList":     {playerList},
+		"courts":         {"1"},
+		"teamMatches":    {"0"},
+		"determined":     {"on"},
+		"naginata":       {"on"},
+	}
+}
+
+// TestCreateHandler_NaginataPlayoffs_ThirdPlaceBlock asserts that POST /create
+// with naginata=on and at least 4 players (so a semfinal round exists) produces
+// a "3rd Place" block on the Elimination Matches sheet.
+func TestCreateHandler_NaginataPlayoffs_ThirdPlaceBlock(t *testing.T) {
+	const roster = "Alice, DA\nBob, DB\nCharlie, DC\nDave, DD"
+	f := postCreate(t, naginataPlayoffForm(roster))
+
+	rows, err := f.GetRows("Elimination Matches")
+	require.NoError(t, err)
+
+	found := false
+	for _, row := range rows {
+		for _, cell := range row {
+			if cell == "3rd Place" {
+				found = true
+			}
+		}
+	}
+	require.True(t, found, "naginata playoffs with 4 players must have a '3rd Place' block on Elimination Matches")
+}
+
+// TestCreateHandler_NoNaginata_NoThirdPlaceBlock is the regression guard:
+// without naginata=on the "3rd Place" block must NOT appear.
+func TestCreateHandler_NoNaginata_NoThirdPlaceBlock(t *testing.T) {
+	const roster = "Alice, DA\nBob, DB\nCharlie, DC\nDave, DD"
+	v := url.Values{
+		"tournamentType": {"playoffs"},
+		"playerList":     {roster},
+		"courts":         {"1"},
+		"teamMatches":    {"0"},
+		"determined":     {"on"},
+	}
+	f := postCreate(t, v)
+
+	rows, err := f.GetRows("Elimination Matches")
+	require.NoError(t, err)
+
+	for _, row := range rows {
+		for _, cell := range row {
+			require.NotEqual(t, "3rd Place", cell, "non-naginata playoffs must not have a '3rd Place' block")
+		}
+	}
+}

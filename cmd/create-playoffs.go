@@ -22,6 +22,7 @@ type playoffOptions struct {
 	withZekkenName  bool
 	singleTree      bool
 	determined      bool
+	naginata        bool // naginata: adds a 3rd-place bronze block after elimination matches
 	titlePrefix     string
 	numberPrefix    string
 	SeedAssignments []domain.SeedAssignment
@@ -49,6 +50,7 @@ func newCreatePlayoffCmd() *cobra.Command {
 	cmd.Flags().IntVarP(&o.courts, "courts", "c", 2, "number of Shiaijo (courts) to distribute tree pages across (default 2)")
 	cmd.Flags().StringVarP(&o.titlePrefix, "title-prefix", "", "", "title prefix for the tournament (default \"\")")
 	cmd.Flags().StringVarP(&o.numberPrefix, "number-prefix", "n", "", "Assign consecutive numbers with this letter prefix (e.g. 'K' produces K1, K2, ...)")
+	cmd.Flags().BoolVarP(&o.naginata, "naginata", "", false, "Naginata: add a 3rd-place bronze match block after elimination matches")
 
 	if err := cmd.MarkPersistentFlagRequired("file"); err != nil {
 		fmt.Fprintf(os.Stderr, "Error marking file flag as required: %v\n", err)
@@ -236,7 +238,14 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	matchWinners = helper.ConvertPlayersToWinners(players, o.withZekkenName, playerCoords)
 	helper.CreateNamesToPrint(f, players, o.withZekkenName, o.courts, playerCoords)
 
-	helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, o.teamMatches, o.courts, true)
+	nextRow := helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, o.teamMatches, o.courts, true)
+	// Bronze (3rd-place) playoff: naginata only, and only when a real semifinal
+	// exists (len(eliminationMatchRounds) >= 2; a 2-player bracket has a single
+	// round and no semifinal, so no bronze). Matches the engine guard in
+	// internal/engine/bracket.go: comp.Naginata && len(bracket.Rounds) >= 2.
+	if o.naginata && len(eliminationMatchRounds) >= 2 {
+		helper.PrintThirdPlaceBlock(f, 1, nextRow, o.teamMatches, true)
+	}
 	helper.FillEstimations(f, 0, 0, int64(o.teamMatches), int64(len(names)-1), o.courts)
 
 	// Apply sheet protection to all sheets except data and Time Estimator

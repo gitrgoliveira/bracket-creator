@@ -787,6 +787,13 @@ function adminHdr(adminPassword) {
 const API = {
     async fetchTournament() {
         const res = await fetch('/api/viewer/tournament');
+        // 404 is the expected "no tournament configured yet" bootstrap state,
+        // not an error: return null so callers open the create-tournament gate
+        // quietly instead of logging a console error. Genuine failures (5xx,
+        // network) still throw below.
+        if (res.status === 404) {
+            return null;
+        }
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || `Failed to fetch tournament (Status ${res.status})`);

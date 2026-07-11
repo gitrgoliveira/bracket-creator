@@ -24,13 +24,18 @@ var validBrandingContentTypes = map[string]string{
 }
 
 // RegisterPublicBrandingHandlers wires the unauthenticated GET and HEAD routes
-// that serve the tournament logo bytes. Returns 404 when no logo is configured.
-// HEAD is registered explicitly because Gin does not auto-route HEAD to GET.
-// The BrandingManager component uses HEAD to probe logo existence on mount.
+// that serve the tournament logo bytes. When no custom logo is configured, GET
+// redirects to the bundled default (/logo.jpeg) so image consumers never see a
+// 404, while HEAD returns 404 so BrandingManager can probe whether a custom
+// logo is set. HEAD is registered explicitly because Gin does not auto-route
+// HEAD to GET.
 func RegisterPublicBrandingHandlers(r *gin.RouterGroup, store *state.Store) {
-	brandingLogoHandler := func(c *gin.Context) {
-		// Prevent browsers/proxies from caching 404s, a newly uploaded logo
-		// would otherwise stay "missing" until a hard refresh.
+	// serveLogo serves the custom logo when one is configured; otherwise it
+	// calls onMissing, which differs by method (GET redirects to the default,
+	// HEAD 404s for the existence probe).
+	serveLogo := func(c *gin.Context, onMissing func(*gin.Context)) {
+		// Prevent browsers/proxies from caching the miss/redirect: a newly
+		// uploaded logo would otherwise stay "missing" until a hard refresh.
 		c.Header("Cache-Control", "no-cache")
 		t, err := store.LoadTournament()
 		if err != nil {
@@ -38,19 +43,19 @@ func RegisterPublicBrandingHandlers(r *gin.RouterGroup, store *state.Store) {
 			return
 		}
 		if t == nil || t.Theme == nil || t.Theme.LogoPath == "" {
-			c.JSON(http.StatusNotFound, gin.H{"error": "no logo configured"})
+			onMissing(c)
 			return
 		}
 		name := t.Theme.LogoPath
 		// Only allow the two known filenames, never serve arbitrary paths.
 		if name != "logo.png" && name != "logo.jpg" {
-			c.JSON(http.StatusNotFound, gin.H{"error": "no logo configured"})
+			onMissing(c)
 			return
 		}
 		path := filepath.Join(store.GetFolder(), brandingDirName, name)
 		info, err := os.Lstat(path)
 		if err != nil || info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-			c.JSON(http.StatusNotFound, gin.H{"error": "logo file not found"})
+			onMissing(c)
 			return
 		}
 		ext := strings.ToLower(filepath.Ext(name))
@@ -60,18 +65,20 @@ func RegisterPublicBrandingHandlers(r *gin.RouterGroup, store *state.Store) {
 		case ".jpg":
 			c.Header("Content-Type", "image/jpeg")
 		}
-		// Logo filename changes on each upload (png vs jpg could flip), so
-		// use no-cache to ensure browsers don't serve a stale type. The
-		// admin upload flow is infrequent, so this is acceptable.
-		c.Header("Cache-Control", "no-cache")
 		c.File(path)
 	}
-	r.GET("/branding/logo", brandingLogoHandler)
-	// HEAD is used by BrandingManager to probe logo existence without
-	// fetching the full image payload. Gin does not auto-route HEAD to GET,
-	// so we register it explicitly with the same handler (c.File/ServeContent
-	// strips the body for HEAD requests automatically).
-	r.HEAD("/branding/logo", brandingLogoHandler)
+	// GET: fall back to the bundled default logo so the topbar/auth <img>
+	// never logs a console 404 (it would otherwise swap to /logo.jpeg via its
+	// onError handler anyway). Redirecting keeps that outcome without the noise.
+	r.GET("/branding/logo", func(c *gin.Context) {
+		serveLogo(c, func(c *gin.Context) { c.Redirect(http.StatusFound, "/logo.jpeg") })
+	})
+	// HEAD is used by BrandingManager to probe custom-logo existence without
+	// fetching the payload, so it must keep returning 404 when none is set.
+	// Gin does not auto-route HEAD to GET, so register it explicitly.
+	r.HEAD("/branding/logo", func(c *gin.Context) {
+		serveLogo(c, func(c *gin.Context) { c.JSON(http.StatusNotFound, gin.H{"error": "no logo configured"}) })
+	})
 }
 
 // RegisterBrandingHandlers wires admin-gated mutation endpoints. The caller

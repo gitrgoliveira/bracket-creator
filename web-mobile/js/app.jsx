@@ -576,7 +576,9 @@ function App() {
   const load = async () => {
     try {
       const t = await window.API.fetchTournament();
-      if (t && t.error) {
+      if (!t || t.error) {
+        // null = no tournament configured yet (fetchTournament returns null on
+        // 404); open the create-tournament gate without logging an error.
         setTournament(null);
       } else {
         const comps = await window.API.fetchCompetitions();

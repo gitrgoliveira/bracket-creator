@@ -88,7 +88,12 @@ def wait_for_server():
 
 def setup_tournament():
     resp = requests.get(f"{BASE_URL}/api/viewer/tournament")
-    if resp.status_code == 404:
+    # "No tournament configured yet" bootstrap state: newer servers return 200
+    # with a null JSON body; older servers return 404. Treat both as "create it".
+    existing = None
+    if resp.status_code == 200 and resp.text.strip():
+        existing = resp.json()  # None when the body is JSON null
+    if resp.status_code == 404 or existing is None:
         print("Creating tournament...")
         payload = {
             "name": "London Cup Demo",

@@ -577,8 +577,9 @@ function App() {
     try {
       const t = await window.API.fetchTournament();
       if (!t || t.error) {
-        // null = no tournament configured yet (fetchTournament returns null on
-        // 404); open the create-tournament gate without logging an error.
+        // null = no tournament configured yet: fetchTournament returns null for
+        // the bootstrap state (a 200 with a null body on newer servers, or a 404
+        // on older ones). Open the create-tournament gate without logging an error.
         setTournament(null);
       } else {
         const comps = await window.API.fetchCompetitions();

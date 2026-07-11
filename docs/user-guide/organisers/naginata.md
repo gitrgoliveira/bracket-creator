@@ -104,6 +104,12 @@ In Engi pools and leagues, pairs are ranked by the following criteria, in order:
 
 1. Total wins.
 2. Total flags accumulated across all bouts, as the tie-break when wins are equal.
+3. Name order (alphabetical by the pair's first listed member), when wins and
+   accumulated flags are both equal.
 
 Both the winning and the losing side's flags count toward that side's own tally,
 so a pair that loses by three flags to two still keeps its two flags.
+
+Engi never holds a supplementary tie-break bout (no ippon-shobu, no daihyosen):
+a ranking that is still tied after wins and flags is settled by the name-order
+fallback above.

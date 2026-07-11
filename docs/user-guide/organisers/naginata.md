@@ -1,7 +1,7 @@
 # Naginata competitions
 
 Naginata competitions run on the same tools as kendo (pools, brackets, Swiss, and
-the live scoring console), with naginata-specific rules the app handles for you.
+the scoring console), with naginata-specific rules the app handles for you.
 Naginata has two competition forms:
 
 - **Combat** (shiai): armoured matches scored by ippon, with one extra target,
@@ -52,7 +52,7 @@ it like any other bout:
 - The loser finishes 4th and does not appear on the awards podium.
 
 The public podium reflects this automatically: a naginata competition shows a
-single 3rd place. Refer to [Awards and winners](mobile-app.md#awards-and-winners)
+single 3rd place. Refer to [Awards and winners](run-tournament.md#results-and-awards)
 for the full podium behaviour.
 
 ## Engi-kyogi (kata competition)

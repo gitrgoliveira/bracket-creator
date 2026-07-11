@@ -145,7 +145,7 @@ flowchart TB
 
 **Per-client load.** Every console, display, and phone holds **one SSE stream** plus its REST
 calls. A four-court event is roughly 4 operators + 4 displays + N spectators of concurrent SSE
-clients, comfortably within `SSE_MAX_CLIENTS`, but every live update fans out to all of them
+clients, comfortably within `SSE_MAX_CLIENTS`, but every real-time update fans out to all of them
 (see [Capacity & scaling](#5-capacity-scaling)).
 
 **Two venue patterns:**
@@ -177,7 +177,7 @@ scoreboard freezes during a Wi-Fi outage:
   on the machine, with no network hop**. If the venue Wi-Fi drops mid-match, that court's
   scoreboard keeps updating from the operator's entries for as long as the scoring tab stays
   open. The board shows a small amber dot while it is running on this local feed (see
-  [the scoreboard status dot](../user-guide/mobile-app.md#scoreboards-and-court-displays)).
+  [the scoreboard status dot](../user-guide/spectators/following.md#scoreboards-and-court-displays)).
 - **Separate device (a smart-TV browser, or the display on its own mini-PC).** Simpler cabling,
   but the board only ever updates over the network, so a Wi-Fi outage freezes it until the link
   returns (the board then shows a red dot).
@@ -226,7 +226,7 @@ flowchart LR
 
 ## 5. Capacity & scaling
 
-Live updates fan out to every viewer, so **egress is the limit**, not CPU/RAM.
+Real-time updates fan out to every viewer, so **egress is the limit**, not CPU/RAM.
 
 ```mermaid
 flowchart LR

@@ -6,7 +6,7 @@ Starts the tournament management server (Preact UI + REST/SSE backend). Used **o
 bracket-creator mobile-app [flags]
 ```
 
-See the [Mobile Tournament App guide](../mobile-app.md) for a full walkthrough of the UI.
+See the [Tournament app guide](../organisers/run-tournament.md) for a full walkthrough of the UI.
 
 ## Flags
 

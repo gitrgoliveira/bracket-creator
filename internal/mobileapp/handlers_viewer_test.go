@@ -131,11 +131,14 @@ func TestViewerHandlers_Standalone(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
 
-	// 1. GET /api/viewer/tournament - No tournament case
+	// 1. GET /api/viewer/tournament - No tournament case: 200 with a null
+	// body (a normal bootstrap state, not a 404, so the SPA doesn't log a
+	// console error).
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/api/viewer/tournament", nil)
 	r.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusNotFound, w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "null", w.Body.String())
 
 	// 2. GET /api/viewer/tournament - With tournament
 	tourney := state.Tournament{Name: "Test Tourney", Password: "secret"}

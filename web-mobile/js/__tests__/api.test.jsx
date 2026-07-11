@@ -480,6 +480,24 @@ describe('API Utils', () => {
       expect(data.name).toBe('London Cup');
     });
 
+    it('fetchTournament should return null on 404 (older-server bootstrap state)', async () => {
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' })
+      });
+      expect(await API.fetchTournament()).toBeNull();
+    });
+
+    it('fetchTournament should return null on a 200 null body (newer-server bootstrap state)', async () => {
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => null
+      });
+      expect(await API.fetchTournament()).toBeNull();
+    });
+
     it('startCompetition should normalize result', async () => {
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,

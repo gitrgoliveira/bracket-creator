@@ -2491,16 +2491,19 @@ paths:
     get:
       tags: [viewer]
       summary: Get public tournament info
-      description: Returns tournament details with password field redacted.
+      description: |
+        Returns tournament details with the password field redacted, or `null`
+        when no tournament is configured yet (a normal bootstrap state, so the
+        response is `200` with a null body rather than a `404`).
       responses:
         '200':
-          description: Public tournament info.
+          description: Public tournament info, or null when no tournament is configured yet.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Tournament'
-        '404':
-          $ref: '#/components/responses/NotFound'
+                oneOf:
+                  - $ref: '#/components/schemas/Tournament'
+                  - type: 'null'
 
   /api/viewer/competitions:
     get:

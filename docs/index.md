@@ -20,7 +20,10 @@ template: home.html
   </a>
 </p>
 
-**bracket-creator** lets any club or organisation run kendo tournaments at whatever level of digitization fits the venue. Give it a CSV of participants and it produces fully formatted, print-ready Excel brackets (pool draws, match schedules, and elimination trees), and it can run live pools and scores on the day. Choose how digital you go.
+**bracket-creator** lets any club or organisation run kendo tournaments at whatever level of digitization fits the venue. Give it a CSV of participants and it produces fully formatted, print-ready Excel brackets (pool draws, match schedules, and elimination trees), and it can run pools and scores on the day. Choose how digital you go.
+
+!!! tip "New here? Start with these"
+    Not sure where to begin? [Choosing your setup](user-guide/start-here/choosing-your-setup.md) narrows it down in two questions, and [Your first tournament](user-guide/start-here/first-tournament.md) walks you from an empty folder to results on a screen.
 
 ## Three ways to run a tournament
 
@@ -36,17 +39,17 @@ The same toolkit scales from a fully printed event to a fully online one. Pick t
 
     *Needs:* an A4/A3 printer.
 
-    [Generate a bracket](user-guide/web-ui.md)
+    [Generate a bracket](user-guide/organisers/web-ui.md)
 
 -   **Partially connected**
 
     ---
 
-    Internet is available but there are no display screens. Keep every shiai-jo in sync through a shared Google Sheet or the live app, with one device per court. Some printed material is still needed for scoreboards and competitors.
+    Internet is available but there are no display screens. Keep every shiai-jo in sync through a shared Google Sheet or the tournament app, with one device per court. Some printed material is still needed for scoreboards and competitors.
 
     *Needs:* one device per shiai-jo.
 
-    [Live tournament app](user-guide/mobile-app.md)
+    [Tournament app](user-guide/organisers/run-tournament.md)
 
 -   **Fully digital**
 
@@ -56,11 +59,13 @@ The same toolkit scales from a fully printed event to a fully online one. Pick t
 
     *Needs:* a device and monitor per court, plus network access for competitors.
 
-    [Host it online](user-guide/hosting.md)
+    [Host it online](user-guide/install/hosting.md)
 
 </div>
 
 ## Tools
+
+Three programs ship in the single binary. The three ways to run a tournament decide how digital your event is; these tools are what you actually run to do it.
 
 <div class="grid cards" markdown>
 
@@ -82,23 +87,23 @@ The same toolkit scales from a fully printed event to a fully online one. Pick t
 
     `serve`
 
-    [Web UI guide](user-guide/web-ui.md)
+    [Web UI guide](user-guide/organisers/web-ui.md)
 
--   **Live tournament app**
+-   **Tournament app**
 
     ---
 
-    Run pools and scores on the day, live on any device.
+    Run pools and scores on the day, in real time on any device.
 
     `mobile-app`
 
-    [Mobile app guide](user-guide/mobile-app.md)
+    [Tournament app guide](user-guide/organisers/run-tournament.md)
 
 </div>
 
 ## Quick start
 
-The simplest way to run the live tournament app, no Go toolchain needed:
+The simplest way to run the tournament app, no Go toolchain needed:
 
 1. Download the binary for your platform from the [releases page](https://github.com/gitrgoliveira/bracket-creator/releases).
 2. Start the app:
@@ -107,9 +112,9 @@ The simplest way to run the live tournament app, no Go toolchain needed:
     bracket-creator mobile-app --folder ./tournament-data
     ```
 
-3. Open [http://localhost:8080](http://localhost:8080) and follow the setup in the [mobile app guide](user-guide/mobile-app.md).
+3. Open [http://localhost:8080](http://localhost:8080) and follow the setup in the [tournament app guide](user-guide/organisers/run-tournament.md).
 
-Prefer Go or Docker? See the [install options](user-guide/getting-started.md).
+Prefer Go or Docker? See the [install options](user-guide/install/install.md).
 
 ## What you need on tournament day
 
@@ -119,15 +124,15 @@ Prefer Go or Docker? See the [install options](user-guide/getting-started.md).
 
 ### Keep courts in sync
 
-If you have multiple shiai-jo, upload the Excel file to Google Drive (or similar) so all tables share one live document.
+If you have multiple shiai-jo, upload the Excel file to Google Drive (or similar) so every table works from the same document.
 
 ## Before the tournament
 
-1. **Collect participants**: one name per line in a CSV file ([input format](user-guide/input-format.md))
+1. **Collect participants**: one name per line in a CSV file ([input format](user-guide/organisers/input-format.md))
 2. **Generate the bracket**: run `create-pools` or `create-playoffs` ([commands](user-guide/commands/create-pools.md))
 3. **Optionally seed** top competitors so they land in separate pools/sides of the bracket ([seeding](user-guide/commands/create-pools.md#seeding))
 4. **Print**: the Excel file is laid out to print cleanly on A4/A3
 
 ## On the day
 
-Use the **live tournament app** to manage pools and scores in real time across all devices on your network (no Excel required on the day). See the [mobile app guide](user-guide/mobile-app.md).
+Use the **tournament app** to manage pools and scores in real time across all devices on your network (no Excel required on the day). See the [tournament app guide](user-guide/organisers/run-tournament.md).

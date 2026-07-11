@@ -84,6 +84,12 @@ class Page(HTMLParser):
             self.links.append(a["href"])
         elif tag in ("img", "script") and a.get("src") is not None:
             self.links.append(a["src"])
+        if tag in ("img", "source") and a.get("srcset"):
+            # srcset is a comma-separated list of "url [descriptor]" pairs.
+            for entry in a["srcset"].split(","):
+                token = entry.strip().split(" ", 1)[0] if entry.strip() else ""
+                if token:
+                    self.links.append(token)
 
     handle_startendtag = handle_starttag
 
@@ -153,6 +159,14 @@ def main() -> int:
             if not h or h == "#" or is_external(h):
                 continue
             checked += 1
+            # A root-absolute link must carry the site base path (e.g. /bracket-creator)
+            # or it 404s in production even though it resolves on disk locally. (// was
+            # already treated as external above, so this is a genuine absolute path.)
+            if base_path and h.startswith("/"):
+                p = re.sub(r"/{2,}", "/", h.split("#", 1)[0].split("?", 1)[0])
+                if p != base_path and not p.startswith(base_path + "/"):
+                    broken.append((src, href, f"root-absolute link missing site base path {base_path}"))
+                    continue
             target, frag = resolve(h, fp, site, base_path)
 
             if target is not None:

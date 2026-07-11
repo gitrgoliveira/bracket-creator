@@ -14,7 +14,7 @@ Officiated mode is the default. Every action (scoring, check-in, starting and co
 
 In self-run mode, scoring, check-in, and starting competitions are open to anyone without a password, so competitors or table helpers can run and score their own matches. Completing a competition is irreversible, so it stays behind the destructive-ops password (see [Destructive-ops password](#destructive-ops-password)). A public self-registration page also becomes available for competitors to sign themselves up.
 
-Only destructive actions remain gated: deleting a competition, editing the roster, discarding a generated draw, and similar operations that are difficult to reverse. These require the destructive-ops password (see [Destructive-ops password](#destructive-ops-password)).
+Two kinds of action stay gated in self-run mode. Organiser setup (creating and editing competitions, tournament settings, seeds, scheduling, team lineups, match decisions such as kiken, and exports) still requires the admin password. Destructive actions (deleting a competition, discarding a draw, editing the roster, and completing a competition) require the destructive-ops password (see [Destructive-ops password](#destructive-ops-password)).
 
 Results in self-run mode carry a provenance label. A score entered without a password is tagged "self-reported"; a score entered by an authenticated operator is tagged "admin". Officiated mode always produces "admin" results.
 
@@ -96,7 +96,7 @@ TOURNAMENT_PASSWORD_HASH='$2a$10$...main...' \
   bracket-creator mobile-app --lock-password -f ./tournament-data
 ```
 
-In locked mode the destructive-ops gate is always active. If `TOURNAMENT_ADMIN_PASSWORD_HASH` is unset or malformed, the gated actions are refused regardless of the main password supplied. A malformed hash does not prevent the server from starting, but no destructive action can be completed until a valid hash is provided.
+In locked mode the destructive-ops gate is always active. If `TOURNAMENT_ADMIN_PASSWORD_HASH` is unset or malformed, the gated actions are refused regardless of the admin password supplied. A malformed hash does not prevent the server from starting, but no destructive action can be completed until a valid hash is provided.
 
 ## Security notes
 

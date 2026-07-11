@@ -47,4 +47,4 @@ In pools and league, team standings are resolved in this order:
 8. Points lost (fewer is better)
 
 !!! note
-    When two or more teams remain tied after all eight criteria, the tie goes to a daihyosen. If that still cannot separate the teams, it goes to chusen (drawing lots). See [Recording decisions](../court-operators/recording-decisions.md) for the procedures for both.
+    When two or more teams remain tied after all eight criteria and the tie is consequential (it decides who advances or their seeding), the app plays a daihyosen to break it. A tie that does not affect advancement is left as a shared rank with no extra bout. If the daihyosen still cannot separate the teams, it goes to chusen (drawing lots). See [Recording decisions](../court-operators/recording-decisions.md) for the procedures for both.

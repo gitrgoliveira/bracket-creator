@@ -46,7 +46,7 @@ When everything is healthy, no dot appears.
 
 Scores entered by the operator appear on the viewer immediately, across every connected device.
 
-![A scorer's result appears on the viewer live, with no refresh.](../../screenshots/live-update.gif)
+![A scorer's result appears on the viewer in real time, with no refresh.](../../screenshots/live-update.gif)
 
 ## QR codes on competitor tags
 

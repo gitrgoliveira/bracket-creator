@@ -8,6 +8,8 @@ The steps on this page apply only to a self-run tournament. In an officiated tou
 
 When the tournament is self-run, a public self-registration page is open for individual competitions while they are still in setup, before the organiser generates the draw. Open the registration page on your own device and enter your details to join a competition.
 
+![The self-registration form on a phone: full name, dojo, and an optional dan grade, with a Register button.](../../screenshots/selfrun-register.png)
+
 !!! note
     Self-registration is not available for team competitions; the organiser adds the team roster directly. It also closes once the draw is generated. In an officiated tournament, the registration page is not available at all, and the organiser adds you to the competition directly.
 
@@ -24,3 +26,5 @@ Only everyday match outcomes are available to self-reporters. Decisions that req
 ## Follow your matches and standings
 
 To track your progress, view the draw, and see standings, see [Following a tournament](../spectators/following.md).
+
+![The public home on a phone: the tournament header, a watchlist, the schedule, and a competition card with a Register for this competition button.](../../screenshots/selfrun-viewer-home.png)

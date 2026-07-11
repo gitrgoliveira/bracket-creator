@@ -192,7 +192,12 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			publicT.Password = ""
 			c.JSON(http.StatusOK, publicT)
 		} else {
-			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			// No tournament configured yet is a normal bootstrap state, not an
+			// error: return 200 with a null body so the SPA opens the create-
+			// tournament gate without the browser logging a console 404.
+			// fetchTournament (api_client.jsx) treats a null payload as "no
+			// tournament" exactly like it did the old 404.
+			c.JSON(http.StatusOK, nil)
 		}
 	})
 

@@ -7,8 +7,8 @@
  *
  * Colour is scoped PER SCHEME. Material derives link/interactive colours from
  * the --md-* tokens; an unscoped :root override forces one value into both
- * light and dark (which made dark links invisible). Brand anchors and their
- * derived tints all live as named tokens in the :root block below; every
+ * light and dark (which made dark links invisible). The :root block below
+ * defines every brand anchor and derived tint as a named token; every
  * colour at a use site references a token, nothing is improvised inline.
  * ------------------------------------------------------------------------- */
 
@@ -179,9 +179,8 @@ html, body { overflow-x: clip; }
 
 /* ===== Home hero (rendered by overrides/home.html) ===== */
 .bc-hero {
-	background:
-		radial-gradient(120% 140% at 85% -10%, var(--bc-navy-700) 0%, transparent 55%),
-		linear-gradient(160deg, var(--bc-navy) 0%, var(--bc-navy-deep) 100%);
+	/* Clean directional navy field (no corner glow, no decorative lines). */
+	background: linear-gradient(158deg, var(--bc-navy-700) 0%, var(--bc-navy) 46%, var(--bc-navy-deep) 100%);
 	color: var(--bc-ice);
 	position: relative;
 	overflow: hidden;
@@ -208,7 +207,7 @@ html, body { overflow-x: clip; }
 .bc-hero__kicker {
 	font-size: 0.72rem;
 	font-weight: 800;
-	letter-spacing: 0.22em;
+	letter-spacing: 0.2em;
 	text-transform: uppercase;
 	color: var(--bc-sky);
 	margin: 0 0 0.9rem;
@@ -321,6 +320,9 @@ html, body { overflow-x: clip; }
  * rule instead of the top rule, so the modes read as a distinct band from the
  * Tools cards rather than a second identical wall. */
 .md-typeset .bc-modes.cards > ul > li {
+	/* Wash fill (vs the Tools cards' plain surface) so the two card grids on the
+	 * home page read as separate bands rather than one repeated wall. */
+	background: var(--bc-wash);
 	border-top: 1px solid var(--bc-line);
 	border-left: var(--bc-rule) solid var(--bc-navy);
 }

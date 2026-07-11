@@ -47,7 +47,7 @@ bracket-creator create-playoffs \
 
 ## Seeding
 
-Works the same as `create-pools`; top seeds are placed on opposite sides of the bracket so they can only meet in the final. See the [input format](../input-format.md#seeds-file) for the seeds CSV layout.
+Works the same as `create-pools`; top seeds are placed on opposite sides of the bracket so they can only meet in the final. See the [input format](../organisers/input-format.md#seeds-file) for the seeds CSV layout.
 
 ## Output sheets
 

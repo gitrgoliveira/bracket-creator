@@ -1,7 +1,7 @@
 # Software architecture
 
 How the bracket-creator codebase is organised: a single Go binary that is both a **CLI**
-(Excel bracket generator) and a **live tournament web app** (the `mobile-app` server), plus a
+(Excel bracket generator) and a **tournament web app** (the `mobile-app` server), plus a
 Preact frontend compiled into the binary.
 
 > Related: [Network architecture](network-architecture.md) · [Infrastructure architecture](infrastructure-architecture.md)
@@ -17,7 +17,7 @@ flowchart TB
     subgraph bin["bracket-creator (single Go binary)"]
         cliCmds["CLI commands<br/>create-pools · create-playoffs · print"]
         serveCmd["serve<br/>(one-shot Excel web form)"]
-        mobile["mobile-app<br/>(live tournament server)"]
+        mobile["mobile-app<br/>(tournament server)"]
     end
 
     excel["Excel .xlsx<br/>(formula-linked brackets)"]
@@ -44,7 +44,7 @@ flowchart LR
     root --> cp["create-pools"]
     root --> cpp["create-playoffs"]
     root --> srv["serve (Excel web form :8080)"]
-    root --> ma["mobile-app (live server :8080)"]
+    root --> ma["mobile-app (server :8080)"]
     root --> hp["hash-password (bcrypt for locked mode)"]
     root --> pr["print (PDF generation)"]
     root --> mn["man / version"]
@@ -89,7 +89,7 @@ flowchart TD
     cmd --> pdf
 ```
 
-**Dual domain model (in transition).** `internal/helper` is where the real algorithms live.
+**Dual domain model (in transition).** `internal/helper` is where the real algorithms are implemented.
 Its types carry Excel coordinates (`sheetName`, `cell`) tightly coupled to output generation.
 `internal/domain` holds clean models being phased in gradually. Don't confuse the two.
 

@@ -30,7 +30,7 @@ For team tournaments (`--team-matches N`), each row still represents an individu
 ## Constraints
 
 - Names must be **unique**: duplicate entries are rejected before any bracket is generated.
-- Names in a [seeds file](commands/create-pools.md#seeding) must match the CSV exactly (case-sensitive).
+- Names in a [seeds file](../commands/create-pools.md#seeding) must match the CSV exactly (case-sensitive).
 
 ## Seeds file
 

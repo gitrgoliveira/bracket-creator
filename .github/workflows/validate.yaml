@@ -204,3 +204,35 @@ jobs:
           flags: pdf
           fail_ci_if_error: true
           use_oidc: true
+
+  #   ____                     _____         _
+  #  |  _ \  ___   ___ ___    |_   _|__  ___| |_
+  #  | | | |/ _ \ / __/ __|     | |/ _ \/ __| __|
+  #  | |_| | (_) | (__\__ \     | |  __/\__ \ |_
+  #  |____/ \___/ \___|___/     |_|\___||___/\__|
+  #
+  # Strict docs build + internal link/anchor check. The strict build fails on
+  # broken cross-file links; docs/check_links.py additionally validates the
+  # BUILT site, catching same-page anchors (strict only logs those) and links
+  # emitted by the home/404 page templates (strict does not validate those).
+  docs:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install docs toolchain
+        run: pip install -r docs/requirements.txt
+
+      - name: Build docs (strict)
+        run: mkdocs build -f mkdocs.yaml --strict
+
+      - name: Check internal links and anchors
+        run: python3 docs/check_links.py site

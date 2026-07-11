@@ -119,8 +119,9 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 	// that guard would leave the competition stuck forever, never reaching the
 	// injection block whose engi guard performs the heal. Heal first, then
 	// partition the healed slice. The ContainsFunc pre-scan is a cheap
-	// in-memory pass; it exists so clean engi comps skip the injector call,
-	// the disk writes, the reload, and the schedule regeneration.
+	// in-memory pass; it exists so clean engi comps skip the injector call
+	// and its two extra disk reads plus the reload below (the injector's
+	// writes and schedule regeneration only run when rows are removed).
 	if comp != nil && comp.Engi && slices.ContainsFunc(matches, isBlockingEngiTBRow) {
 		if _, healErr := e.InjectTiebreakerMatches(compID); healErr != nil {
 			return AutoCompleteNoChange, healErr

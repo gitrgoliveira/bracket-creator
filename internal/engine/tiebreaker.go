@@ -248,15 +248,13 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 			return nil, loadErr
 		}
 		var kept []state.MatchResult
-		removed := 0
 		for _, m := range allMatches {
 			if isBlockingEngiTBRow(m) {
-				removed++
 				continue
 			}
 			kept = append(kept, m)
 		}
-		if removed > 0 {
+		if len(kept) < len(allMatches) {
 			if saveErr := e.store.SavePoolMatches(compID, kept); saveErr != nil {
 				return nil, saveErr
 			}

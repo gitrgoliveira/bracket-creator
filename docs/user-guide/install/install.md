@@ -22,11 +22,11 @@ Download the pre-compiled binaries from the [release page](https://github.com/gi
 
 ```bash
 $ VERSION=v1.0.0
-$ OS=Linux
+$ OS=linux
 $ ARCH=x86_64
 $ TAR_FILE=bracket-creator_${OS}_${ARCH}.tar.gz
 $ wget https://github.com/gitrgoliveira/bracket-creator/releases/download/${VERSION}/${TAR_FILE}
-$ sudo tar xvf ${TAR_FILE} bracket-creator -C /usr/local/bin
+$ sudo tar xvf ${TAR_FILE} -C /usr/local/bin bracket-creator
 $ rm -f ${TAR_FILE}
 ```
 

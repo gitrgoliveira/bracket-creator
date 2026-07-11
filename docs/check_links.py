@@ -9,8 +9,10 @@ it validates exactly what ships. That catches two whole classes of breakage that
   ``overrides/404.html``) that strict-mode never validates, and
 * same-page ``#anchor`` links, which strict mode only logs as INFO.
 
-Every internal ``<a href>``, ``<img src>``, ``<script src>`` and ``<link href>``
-is resolved against the built tree and, when it carries a ``#fragment``, checked
+Every internal ``<a href>``, ``<img src>``, ``<script src>``, ``<link href>``,
+and media ``src`` (``<video>``, ``<audio>``, ``<source>``: raw-HTML embeds that
+MkDocs copies verbatim without path rewriting, so a wrong relative depth only
+shows up in the built tree) is resolved against the built tree and, when it carries a ``#fragment``, checked
 against the ``id`` attributes on the target page. External links
 (http, https, mailto, tel, ...) are deliberately not checked: network probes are
 flaky and do not belong in a build gate.
@@ -84,7 +86,7 @@ class Page(HTMLParser):
             self.ids.add(a["name"])
         if tag in ("a", "link") and a.get("href") is not None:
             self.links.append(a["href"])
-        elif tag in ("img", "script") and a.get("src") is not None:
+        elif tag in ("img", "script", "video", "audio", "source") and a.get("src") is not None:
             self.links.append(a["src"])
         if tag in ("img", "source") and a.get("srcset"):
             # srcset is a comma-separated list of "url [descriptor]" pairs.

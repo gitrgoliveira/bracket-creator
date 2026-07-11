@@ -13,7 +13,7 @@ When the tournament is self-run, a public self-registration page is open for ind
 
 ## Check in on the day
 
-If the competition uses check-in, mark yourself present before the organiser generates the draw. Open the public check-in page and confirm your attendance. Competitors who have not checked in are excluded from the draw.
+If the competition uses check-in, mark yourself present before the organiser generates the draw. Self-run mode does not require a password for this: open the competition from the dashboard and mark yourself present in the participant list. Competitors who have not checked in are excluded from the draw.
 
 ## Report your own score
 

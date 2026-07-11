@@ -21,12 +21,12 @@ The single binary bundles every subcommand, including `bracket-creator serve` (w
 Download the pre-compiled binaries from the [release page](https://github.com/gitrgoliveira/bracket-creator/releases) and extract them to your desired location.
 
 ```bash
-$ OS=linux
-$ ARCH=x86_64
-$ TAR_FILE=bracket-creator_${OS}_${ARCH}.tar.gz
-$ wget https://github.com/gitrgoliveira/bracket-creator/releases/latest/download/${TAR_FILE}
-$ sudo tar xvf ${TAR_FILE} -C /usr/local/bin bracket-creator
-$ rm -f ${TAR_FILE}
+OS=linux
+ARCH=x86_64
+TAR_FILE=bracket-creator_${OS}_${ARCH}.tar.gz
+wget https://github.com/gitrgoliveira/bracket-creator/releases/latest/download/${TAR_FILE}
+sudo tar xvf ${TAR_FILE} -C /usr/local/bin bracket-creator
+rm -f ${TAR_FILE}
 ```
 
 ## Go install

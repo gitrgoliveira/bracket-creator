@@ -18,27 +18,25 @@ The single binary bundles every subcommand, including `bracket-creator serve` (w
 
 ## Pre-compiled binaries
 
-=== "go install"
+Download the pre-compiled binaries from the [release page](https://github.com/gitrgoliveira/bracket-creator/releases) and extract them to your desired location.
 
-    ```bash
-    go install github.com/gitrgoliveira/bracket-creator@latest
-    ```
+```bash
+$ VERSION=v1.0.0
+$ OS=Linux
+$ ARCH=x86_64
+$ TAR_FILE=bracket-creator_${OS}_${ARCH}.tar.gz
+$ wget https://github.com/gitrgoliveira/bracket-creator/releases/download/${VERSION}/${TAR_FILE}
+$ sudo tar xvf ${TAR_FILE} bracket-creator -C /usr/local/bin
+$ rm -f ${TAR_FILE}
+```
 
-    Note that `go install` compiles from source rather than downloading a prebuilt binary. It builds the full binary, including the `serve` and `mobile-app` subcommands, but the embedded web assets are not part of the Go module, so those web UIs render blank. The Excel-generating CLI commands work normally. Use Homebrew or a release binary if you need the web UI.
+## Go install
 
-=== "Released tar file"
+```bash
+go install github.com/gitrgoliveira/bracket-creator@latest
+```
 
-    Download the pre-compiled binaries from the [release page](https://github.com/gitrgoliveira/bracket-creator/releases) and extract them to your desired location.
-
-    ```bash
-    $ VERSION=v1.0.0
-    $ OS=Linux
-    $ ARCH=x86_64
-    $ TAR_FILE=bracket-creator_${OS}_${ARCH}.tar.gz
-    $ wget https://github.com/gitrgoliveira/bracket-creator/releases/download/${VERSION}/${TAR_FILE}
-    $ sudo tar xvf ${TAR_FILE} bracket-creator -C /usr/local/bin
-    $ rm -f ${TAR_FILE}
-    ```
+`go install` compiles from source rather than downloading a prebuilt binary. It builds the full binary, including the `serve` and `mobile-app` subcommands, but the embedded web assets are not part of the Go module, so those web UIs render blank. The Excel-generating CLI commands work normally. Use Homebrew or a release binary if you need the web UI.
 
 ## Build from source
 

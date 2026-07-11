@@ -37,6 +37,21 @@ markdown_extensions:
   - pymdownx.tabbed:
       alternate_style: true
 
+plugins:
+  # Defining a plugins block suppresses the implicit default, so `search`
+  # must be listed explicitly to keep the search box working.
+  - search
+  # Forward the pre-restructure user-guide URLs (published for a long time,
+  # so linked externally and indexed by search engines) to their new homes.
+  - redirects:
+      redirect_maps:
+        'user-guide/getting-started.md': 'user-guide/install/install.md'
+        'user-guide/hosting.md': 'user-guide/install/hosting.md'
+        'user-guide/input-format.md': 'user-guide/organisers/input-format.md'
+        'user-guide/mobile-app.md': 'user-guide/organisers/run-tournament.md'
+        'user-guide/naginata.md': 'user-guide/organisers/naginata.md'
+        'user-guide/web-ui.md': 'user-guide/organisers/web-ui.md'
+
 theme:
   name: material
   custom_dir: overrides

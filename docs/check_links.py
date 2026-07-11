@@ -96,8 +96,9 @@ def is_external(href: str) -> bool:
 def resolve(href: str, page_path: str, site: str, base_path: str):
     """Resolve an internal href to (target_html_path, fragment).
 
-    Returns (None, fragment) for a same-page anchor. target_html_path is the
-    absolute path we expect on disk (a directory URL maps to its index.html).
+    target_html_path is the absolute path we expect on disk (a directory URL
+    maps to its index.html). For a same-page anchor (href="#frag") the target
+    is page_path itself, so the fragment is checked against the current page.
     """
     base, _, frag = href.partition("#")
     base = base.split("?", 1)[0]
@@ -154,9 +155,20 @@ def main() -> int:
             checked += 1
             target, frag = resolve(h, fp, site, base_path)
 
-            if target is not None and not os.path.exists(target):
-                broken.append((src, href, f"target not found: {os.path.relpath(target, site)}"))
-                continue
+            if target is not None:
+                # Reject anything that escapes the built tree (e.g. "/../..").
+                # Otherwise a link could resolve to a real file outside site/
+                # (hiding a broken link) or probe arbitrary paths on the runner.
+                try:
+                    inside = os.path.commonpath([site, target]) == site
+                except ValueError:
+                    inside = False
+                if not inside:
+                    broken.append((src, href, "link escapes the site root"))
+                    continue
+                if not os.path.exists(target):
+                    broken.append((src, href, f"target not found: {os.path.relpath(target, site)}"))
+                    continue
 
             if frag:
                 tgt = target if target is not None else fp

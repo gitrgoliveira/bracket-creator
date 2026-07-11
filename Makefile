@@ -209,7 +209,7 @@ docs/build: $(DOCS_STAMP) ## Build static documentation site (output: site/)
 
 docs/linkcheck: docs/build ## Build docs, then check the built site for broken links/anchors
 	@echo "Checking internal documentation links..."
-	python3 docs/check_links.py site
+	$(DOCS_BIN)/python docs/check_links.py site
 
 docs/clean: ## Remove the docs venv and the built site
 	@echo "Removing $(DOCS_VENV) and site/..."

@@ -108,4 +108,4 @@ For a real security boundary:
 
 - Run the server behind TLS. See [Hosting](../install/hosting.md) for guidance.
 - Use locked mode for any deployment reachable from the internet.
-- Be aware that in file mode the `/reset` path is unauthenticated and unthrottled. Locked mode disables it entirely. Any internet-exposed deployment should use locked mode.
+- Be aware that in file mode the password reset is unauthenticated: anyone who can reach the server can set a new admin password without knowing the current one, which locks out the operator or takes over the tournament. Locked mode disables reset entirely, so any internet-exposed deployment should use locked mode.

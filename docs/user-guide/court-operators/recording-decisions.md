@@ -8,7 +8,7 @@ Kiken covers two distinct situations with different consequences.
 
 ### Voluntary withdrawal (FIK Article 31)
 
-A voluntary kiken is permanent. The competitor takes no further matches in this competition. The result cannot be reinstated.
+A voluntary kiken is permanent. The competitor takes no further matches in this competition and cannot be reinstated.
 
 ### Injury withdrawal (FIK Article 30)
 
@@ -35,7 +35,7 @@ It applies in two situations:
 
 A tie that does not affect advancement is left as a shared rank with no extra bout.
 
-The bout is a single-point ippon-shobu with no time limit, between one representative from each tied team. The score editor lets you pick each team's representative from its roster. On the court console the bout appears with a **DH** tag. In pool and league standings, the team that won its daihyosen carries a **DH** badge.
+The bout is a single-point ippon-shobu with no time limit, between one representative from each tied team. The score editor lets you pick each team's representative from its roster. On the court console, the bout appears with a **DH** tag. In pool and league standings, the team that won its daihyosen carries a **DH** badge.
 
 ## Chusen (drawing lots)
 

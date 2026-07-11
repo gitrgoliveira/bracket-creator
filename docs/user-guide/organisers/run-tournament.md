@@ -112,7 +112,7 @@ The **Check-in and Seeding** panel (labelled **Seeding** when check-in is disabl
 
 #### Editing a single competitor
 
-Click the pencil icon on any row to open the edit modal for that competitor. You can change the name, dojo, dan grade, and display name during setup. Once the draw is generated the pencil icon is disabled; discard the draw to re-enable editing.
+Click the pencil icon on any row to open the edit modal for that competitor. You can change the name, dojo, dan grade, and display name during setup. Once the draw is generated, the pencil icon is disabled; discard the draw to re-enable editing.
 
 ### Check-in workflow
 

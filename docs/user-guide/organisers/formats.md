@@ -38,7 +38,7 @@ Swiss is a tournament system that runs over a fixed number of rounds. No one is 
 Use Swiss for large individual fields where a full round-robin would require too many rounds but you still want every competitor to play multiple well-matched bouts.
 
 !!! note
-    Swiss is a format, not a status. Swiss competitions run under the same pools phase as mixed and league; the difference is that rounds are generated one at a time rather than all at once.
+    Swiss is a format, not a status. A Swiss competition runs through the same lifecycle as mixed and league, but its rounds are generated one at a time rather than all at once.
 
 ### Swiss round flow
 

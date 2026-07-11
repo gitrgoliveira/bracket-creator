@@ -10,7 +10,7 @@ Install the binary by following [Installation](../install/install.md), then star
 bracket-creator mobile-app --folder ./tournament-data
 ```
 
-Open `http://localhost:8080` in a browser. On an empty data folder, the app prompts you to create a tournament. Fill in the name, date, venue, number of shiai-jo, and the admin password. Before you set the password, read [Operating modes](../organisers/operating-modes.md) to choose between officiated and self-run.
+Open `http://localhost:8080` in a browser. When the data folder is empty, the app prompts you to create a tournament. Fill in the name, date, venue, number of shiai-jo, and the admin password. Before you set the password, read [Operating modes](../organisers/operating-modes.md) to choose between officiated and self-run.
 
 ## 2. Create a competition
 

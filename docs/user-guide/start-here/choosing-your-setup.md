@@ -1,6 +1,6 @@
 # Choosing your setup
 
-Two independent questions shape every tournament you run with bracket-creator. First, how digital is your venue: whether you print and score on paper, keep one device per shiai-jo, or run fully on-screen scoreboards with real-time mobile pages. Second, who runs and scores the matches: trained staff behind an admin password (officiated) or competitors scoring their own bouts with no password required (self-run). Because these questions are independent, you choose each one separately and combine them however suits your event.
+Two independent questions shape every tournament you run with bracket-creator. First, how digital your venue is: whether you print and score on paper, keep one device per shiai-jo, or run fully on-screen scoreboards with real-time mobile pages. Second, who runs and scores the matches: trained staff behind an admin password (officiated) or competitors scoring their own bouts with no password required (self-run). Because these questions are independent, you choose each one separately and combine them however suits your event.
 
 ## Digitization level
 

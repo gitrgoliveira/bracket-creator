@@ -20,7 +20,7 @@ If you start the wrong bout, use **Send back to queue** on the running match. Th
 
 A knockout final cannot be called until the earlier bouts that feed it are scored. While it is still waiting, it appears under a **Later** heading with a **Waiting** tag. Its competitors read "Winner of ..." until the feeding bouts are known.
 
-You cannot start a match that has no confirmed competitors. The Later heading lets you see that more play is scheduled for your court so the queue never appears empty when further matches are still pending.
+You cannot start a match that has no confirmed competitors. The Later heading lets you see that more play is scheduled for your court, so the queue never appears empty when further matches are still pending.
 
 ## Refresh the court view
 

@@ -29,7 +29,7 @@ Authentication mode controls how the admin password is stored and verified. Ther
 
 ### File mode
 
-In file mode the admin password is stored in plain text in the `tournament.md` data file. You set it during tournament creation, or you can edit the file directly.
+In file mode, the admin password is stored in plain text in the `tournament.md` data file. You set it during tournament creation, or you can edit the file directly.
 
 If you forget the password, browse to `http://<host>/reset` from the same network and choose a new one. No old password is required. The reset path is intentionally unauthenticated, which is acceptable on a trusted private network but is a security risk on the public internet.
 
@@ -96,7 +96,7 @@ TOURNAMENT_PASSWORD_HASH='$2a$10$...main...' \
   bracket-creator mobile-app --lock-password -f ./tournament-data
 ```
 
-In locked mode the destructive-ops gate is always active. If `TOURNAMENT_ADMIN_PASSWORD_HASH` is unset or malformed, the gated actions are refused regardless of the admin password supplied. A malformed hash does not prevent the server from starting, but no destructive action can be completed until a valid hash is provided.
+In locked mode, the destructive-ops gate is always active. If `TOURNAMENT_ADMIN_PASSWORD_HASH` is unset or malformed, the gated actions are refused regardless of the admin password supplied. A malformed hash does not prevent the server from starting, but no destructive action can be completed until a valid hash is provided.
 
 ## Security notes
 

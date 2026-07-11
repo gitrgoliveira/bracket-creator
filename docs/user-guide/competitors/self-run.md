@@ -2,14 +2,14 @@
 
 A self-run tournament lets competitors and table helpers run and score their own matches with no admin password; the organiser turns this on when creating the tournament. For the full rules of self-run and officiated modes, see [Operating modes](../organisers/operating-modes.md).
 
-The steps on this page apply only to a self-run tournament. In an officiated tournament an operator carries out these actions for you.
+The steps on this page apply only to a self-run tournament. In an officiated tournament, an operator carries out these actions for you.
 
 ## Register yourself
 
 When the tournament is self-run, a public self-registration page is open. Open the registration page on your own device and enter your details to join a competition.
 
 !!! note
-    In an officiated tournament the registration page is not available. The organiser adds you to the competition directly.
+    In an officiated tournament, the registration page is not available. The organiser adds you to the competition directly.
 
 ## Check in on the day
 

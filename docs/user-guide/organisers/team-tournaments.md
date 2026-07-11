@@ -6,7 +6,7 @@ Team tournaments work with any of the four formats described in [Tournament form
 
 Before each team encounter, set the fighting order for each team across the five positions: Senpo, Jiho, Chuken, Fukusho, and Taisho. Smaller teams use fewer positions.
 
-A lineup is per team encounter. To carry over the same order from the previous encounter, use **Copy from previous match** at the top of the lineup panel.
+Each team encounter has its own lineup. To carry over the same order from the previous encounter, use **Copy from previous match** at the top of the lineup panel.
 
 ### FIK incomplete-team rules
 
@@ -27,7 +27,7 @@ Individual bouts are scored first. Once all bouts are done, the encounter result
 
 1. The team with the highest number of individual wins (victories) wins the encounter.
 2. If wins are equal, the team with the highest points scored wins.
-3. If both wins and points are equal, the encounter is a draw in pools or league. In a knockout stage the encounter goes to a representative bout (daihyosen). See [Recording decisions](../court-operators/recording-decisions.md) for how daihyosen is handled.
+3. If both wins and points are equal, the encounter is a draw in pools or league. In a knockout stage, the encounter goes to a representative bout (daihyosen). See [Recording decisions](../court-operators/recording-decisions.md) for how daihyosen is handled.
 
 ## Kachinuki (winner-stays-on)
 

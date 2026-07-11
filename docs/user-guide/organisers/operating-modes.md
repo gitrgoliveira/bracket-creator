@@ -18,8 +18,8 @@ Two kinds of action stay gated in self-run mode. Organiser setup (creating and e
 
 Results in self-run mode carry a provenance label. A score entered without a password is tagged "self-reported"; a score entered by an authenticated operator is tagged "admin". Officiated mode always produces "admin" results.
 
-!!! warning
-    In file mode, a self-run tournament with no destructive-ops password set leaves destructive actions completely unprotected. Set the destructive-ops password before opening the event to competitors.
+!!! note
+    In file mode, self-run requires a destructive-ops password. Without one, destructive actions would be completely unprotected, so the app refuses to create or save a self-run tournament until a destructive-ops password is set (you can set it in the same step).
 
 See the [Competitor self-run guide](../competitors/self-run.md) for the attendee-facing workflow.
 

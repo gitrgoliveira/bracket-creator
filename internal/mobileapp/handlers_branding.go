@@ -34,8 +34,11 @@ func RegisterPublicBrandingHandlers(r *gin.RouterGroup, store *state.Store) {
 	// calls onMissing, which differs by method (GET redirects to the default,
 	// HEAD 404s for the existence probe).
 	serveLogo := func(c *gin.Context, onMissing func(*gin.Context)) {
-		// Prevent browsers/proxies from caching the miss/redirect: a newly
-		// uploaded logo would otherwise stay "missing" until a hard refresh.
+		// /branding/logo is a stable URL whose bytes change when the operator
+		// uploads, replaces, or removes a logo, so mark EVERY response (the
+		// served logo, and the missing-logo redirect/404 alike) no-cache: a
+		// browser/proxy must revalidate rather than keep serving a stale logo
+		// or a stale "missing" redirect after the logo changes.
 		c.Header("Cache-Control", "no-cache")
 		t, err := store.LoadTournament()
 		if err != nil {

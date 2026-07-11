@@ -8,7 +8,7 @@
  * Colour is scoped PER SCHEME. Material derives link/interactive colours from
  * the --md-* tokens; an unscoped :root override forces one value into both
  * light and dark (which made dark links invisible). Brand anchors and their
- * derived tints all live as named tokens in the :root block below; every
+ * derived tints are all named tokens in the :root block below; every
  * colour at a use site references a token, nothing is improvised inline.
  * ------------------------------------------------------------------------- */
 

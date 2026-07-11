@@ -57,7 +57,7 @@ PORT=8081 make run
 
 Open the browser and walk through bracket generation manually. Type checking and unit tests do not exercise the UI rendering path.
 
-### Testing the mobile / live tournament app
+### Testing the mobile / tournament app
 
 ```sh
 make run-mobile                                     # localhost:8080, data dir ./tournament-data

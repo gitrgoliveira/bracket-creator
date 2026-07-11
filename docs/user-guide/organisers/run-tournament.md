@@ -1,6 +1,6 @@
-# Run a live tournament
+# Run a tournament on the day
 
-This page is the operational hub for tournament day: start the live app, manage competitions, score matches, and export results. If you have not set up your tournament data yet, follow the quickstart at [First tournament](../start-here/first-tournament.md) before continuing here.
+This page is the operational hub for tournament day: start the tournament app, manage competitions, score matches, and export results. If you have not set up your tournament data yet, follow the quickstart at [First tournament](../start-here/first-tournament.md) before continuing here.
 
 ## Start the server
 
@@ -10,7 +10,7 @@ Run the following command from your terminal:
 bracket-creator mobile-app --folder ./tournament-data
 ```
 
-Then open `http://localhost:8080` in a browser. To share the app with helpers on the same network, replace `localhost` with your machine's LAN IP address (for example, `http://192.168.1.10:8080`).
+Then open `http://localhost:8080` in a browser. The server binds to `localhost` by default, so other devices cannot reach it yet. To let helpers on the same network connect, start the server with `--bind 0.0.0.0` (or a specific LAN interface), then share your machine's LAN address, for example `http://192.168.1.10:8080`.
 
 The following flags and environment variables control the server:
 
@@ -87,7 +87,7 @@ A competition moves through three phases:
 
 1. **Setup**: configure participants, seeding, and optional check-in.
 2. **Draw preview** (`draw-ready`): review the generated pools, bracket, or first Swiss round. The roster is locked during this phase.
-3. **Live play**: competitions with a pool phase start in `pools` status; knockout-only formats start in `playoffs`.
+3. **Match play**: competitions with a pool phase start in `pools` status; knockout-only formats start in `playoffs`.
 
 ![Competition setup overview](../../screenshots/mobile-participants.png)
 
@@ -130,7 +130,7 @@ Click **Generate draw** to produce the bracket. The competition enters `draw-rea
 
 You can still toggle individual check-in status during `draw-ready`, but roster edits (add, remove, reorder) are locked.
 
-When the preview looks correct, click **Start competition** to move to live play. To make roster changes instead, click **Discard draw** to delete the draft and return to setup.
+When the preview looks correct, click **Start competition** to move to match play. To make roster changes instead, click **Discard draw** to delete the draft and return to setup.
 
 ![Generating the draw](../../screenshots/draw-generation.gif)
 
@@ -138,7 +138,7 @@ When the preview looks correct, click **Start competition** to move to live play
 
 The **Pools** tab shows standings for every pool. Ranks are computed automatically from match results; there is no manual editing. When a tie that determines pool advancement is settled by a daihyosen bout, the winning side carries a **DH** badge in the standings.
 
-After all pool matches are complete, advance pool winners to the elimination bracket from the Pools tab. The bracket updates live as results come in.
+After all pool matches are complete, advance pool winners to the elimination bracket from the Pools tab. The bracket updates in real time as results come in.
 
 ![Pools view](../../screenshots/mobile-pool-standings.png)
 
@@ -172,7 +172,7 @@ Set the **Award two joint 3rd places** option during setup, before you generate 
 
 Two Excel downloads are available from the competition page:
 
-- **Download results**: a workbook with played scores, pool standings, winners, and decisions filled in. Covers pools, league, and knockout formats. Swiss competitions have no static bracket; follow the live standings instead.
+- **Download results**: a workbook with played scores, pool standings, winners, and decisions filled in. Covers pools, league, and knockout formats. Swiss competitions have no static bracket; follow the current standings instead.
 - **Download blank template**: an empty bracket workbook with linked formulas for hand scoring at events without a network connection.
 
 ### PDF

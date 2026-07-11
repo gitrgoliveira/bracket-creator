@@ -38,7 +38,7 @@ flowchart LR
 | 22 | host (optional) | SSH (restrict to your IP) |
 
 > **Proxy must stream, not buffer.** SSE is a long-lived response; the Caddyfiles deliberately
-> avoid `flush_interval` / response-buffering directives, which would break the live event stream.
+> avoid `flush_interval` / response-buffering directives, which would break the real-time event stream.
 > (In production HTTPS comes from the proxy, so browser secure-context features work even though
 > the app itself serves plain HTTP.)
 
@@ -79,7 +79,7 @@ sequenceDiagram
 
     B->>C: GET /api/events
     C->>H: proxied (unbuffered)
-    H-->>B: id: N · data: event   (live, as matches change)
+    H-->>B: id: N · data: event   (real-time, as matches change)
     Note over H: each event stamped seq=N,<br/>retained in a 100-event ring
     B--xH: Wi-Fi blip, connection drops
     B->>C: auto-reconnect, Last-Event-ID: N
@@ -171,6 +171,6 @@ flowchart TD
 
 ## 7. Scale limit = egress
 
-Because every live update is fanned out to **every** connected viewer, **network egress is the
+Because every real-time update is fanned out to **every** connected viewer, **network egress is the
 practical ceiling**, not CPU/RAM. See [Infrastructure architecture](infrastructure-architecture.md#5-capacity-scaling)
 for per-tier audience guidance (for example, GCP free tier compared with Oracle for 1000+ viewers).

@@ -145,7 +145,7 @@ flowchart TB
 
 **Per-client load.** Every console, display, and phone holds **one SSE stream** plus its REST
 calls. A four-court event is roughly 4 operators + 4 displays + N spectators of concurrent SSE
-clients, comfortably within `SSE_MAX_CLIENTS`, but every live update fans out to all of them
+clients, comfortably within `SSE_MAX_CLIENTS`, but every real-time update fans out to all of them
 (see [Capacity & scaling](#5-capacity-scaling)).
 
 **Two venue patterns:**
@@ -226,7 +226,7 @@ flowchart LR
 
 ## 5. Capacity & scaling
 
-Live updates fan out to every viewer, so **egress is the limit**, not CPU/RAM.
+Real-time updates fan out to every viewer, so **egress is the limit**, not CPU/RAM.
 
 ```mermaid
 flowchart LR

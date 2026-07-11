@@ -11,7 +11,7 @@ Open a match from the Upcoming list to start scoring it. Record results from the
 
 ## Send a match back to the queue
 
-If you start the wrong bout, use **Send back to queue** on the running match. The action clears any partial score, removes the match from the live view, and returns it to the Upcoming list so the correct match can start.
+If you start the wrong bout, use **Send back to queue** on the running match. The action clears any partial score, removes the match from the active view, and returns it to the Upcoming list so the correct match can start.
 
 !!! note
     Send back to queue only works on a running, unfinished match. A completed, scored match is not affected. To correct a result that has already been recorded, go to the competition view and edit the match there.

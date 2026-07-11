@@ -1,6 +1,6 @@
 # Follow the tournament
 
-The public viewer needs no password. It is the shared screen for competitors, coaches, and spectators. Open the tournament URL on any device on the same network and you see live results, standings, and the bracket as the day unfolds.
+The public viewer needs no password. It is the shared screen for competitors, coaches, and spectators. Open the tournament URL on any device on the same network and you see results as they happen, the standings, and the bracket as the day unfolds.
 
 Not sure which role fits you? See [Choosing your setup](../start-here/choosing-your-setup.md) for a full guide.
 
@@ -10,7 +10,7 @@ The viewer brings together everything you need to follow the day in one place:
 
 - A personal **Watchlist** so you can track yourself, specific competitors, or a whole dojo. As a watched match approaches, the viewer nudges you so players know when to warm up and coaches know when to be matside.
 - The full match schedule across all shiai-jo, filterable by player or team. The free-text filter matches a competitor's name, their assigned number, or their tag (for example "A1"), so you can jump straight to their bouts.
-- Pool standings that update live as scores are entered, with no page refresh needed.
+- Pool standings that update as scores are entered, with no page refresh needed.
 - The elimination bracket filling in as matches are completed.
 
 Tap a competition to drill into its schedule, standings, and bracket. Aka (red) and Shiro (white) sides are colour-coded throughout.
@@ -21,13 +21,13 @@ Tap a competition to drill into its schedule, standings, and bracket. Aka (red) 
 
 ## Scoreboards and court displays
 
-Each shiai-jo runs one digital scoreboard on a TV or projector: a court-scoped display with no password showing the live score for the current bout. Referees, the two competitors, the scoring operator, and spectators at that court all read from the same screen.
+Each shiai-jo runs one digital scoreboard on a TV or projector: a court-scoped display with no password showing the score for the bout in progress. Referees, the two competitors, the scoring operator, and spectators at that court all read from the same screen.
 
 The app provides three display URLs:
 
 - `/display?court=A` shows a single court's current match, upcoming queue, and recent results.
 - `/display?court=all` shows every court at once, for a lobby or overview screen.
-- Add `&overlay=true` to either URL for a transparent variant you key into a live stream as a browser source (for example OBS or vMix), so online viewers see player names and the live score over the video.
+- Add `&overlay=true` to either URL for a transparent variant you key into a video stream as a browser source (for example OBS or vMix), so online viewers see player names and the current score over the video.
 
 ![Single-court scoreboard for shiai-jo A: the current match with Shiro on the left and Aka in red on the right, and the next match below.](../../screenshots/display-scoreboard.png)
 
@@ -42,7 +42,7 @@ A small status dot appears only when the connection is degraded:
 
 When everything is healthy, no dot appears.
 
-## Live updates
+## Real-time updates
 
 Scores entered by the operator appear on the viewer immediately, across every connected device.
 

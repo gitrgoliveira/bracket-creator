@@ -38,7 +38,7 @@ Swiss is a tournament system that runs over a fixed number of rounds. No one is 
 Use Swiss for large individual fields where a full round-robin would require too many rounds but you still want every competitor to play multiple well-matched bouts.
 
 !!! note
-    Swiss is a format, not a status. Swiss competitions run live under the same pools phase as mixed and league; the difference is that rounds are generated one at a time rather than all at once.
+    Swiss is a format, not a status. Swiss competitions run under the same pools phase as mixed and league; the difference is that rounds are generated one at a time rather than all at once.
 
 ### Swiss round flow
 
@@ -46,9 +46,9 @@ Before play begins, set the number of rounds in the competition settings. You ca
 
 1. **Start the competition.** Round 1 pairings are generated automatically. If seeds are set, round 1 uses fold pairing (1 vs N, 2 vs N-1, and so on). Without seeds, the pairing is deterministic-random. From round 2 onward, players with similar win records face each other.
 
-2. **Record match results.** Scorers enter results in the live app. All matches in the current round must be completed before you can advance.
+2. **Record match results.** Scorers enter results in the tournament app. All matches in the current round must be completed before you can advance.
 
-3. **Review the standings.** Standings update live from wins, points scored, and head-to-head records. The standings page is public and visible to competitors and spectators.
+3. **Review the standings.** Standings update in real time from wins, points scored, and head-to-head records. The standings page is public and visible to competitors and spectators.
 
 4. **Generate the next round.** Once all matches in the current round are complete, use the admin panel to generate the next round's pairings.
 
@@ -56,4 +56,4 @@ Repeat steps 2 through 4 until all rounds are done.
 
 ## Competition lifecycle
 
-All formats share the same competition lifecycle: setup, draw preview, and live play. See [Running a live competition](run-live.md) for the full setup and draw-preview steps.
+All formats share the same competition lifecycle: setup, draw preview, and match play. See [Running a tournament](run-tournament.md) for the full setup and draw-preview steps.

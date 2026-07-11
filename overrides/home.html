@@ -4,7 +4,7 @@
   Home-page hero. Used ONLY by docs/index.md (via `template: home.html` in its
   front matter); every other page keeps the default Material layout. The hero
   is injected into the `tabs` block so it sits directly under the header and
-  above the page content. Styling lives in assets/stylesheets/extra.css
+  above the page content. Styling is in assets/stylesheets/extra.css
   (.bc-hero*). Links use base_url so they resolve under the GitHub Pages
   subpath, matching overrides/404.html.
 -->
@@ -18,12 +18,12 @@
       <h1 class="bc-hero__title">bracket-creator</h1>
       <p class="bc-hero__lede">
         Run a kendo tournament at any level of digitization, from fully printed
-        brackets to live on-screen scoreboards. Pick the mode that matches your
+        brackets to on-screen scoreboards. Pick the mode that matches your
         venue and kit.
       </p>
       <div class="bc-hero__actions">
         <a href="{{ base_url }}/user-guide/start-here/first-tournament/" class="md-button md-button--primary">Get started</a>
-        <a href="{{ base_url }}/user-guide/organisers/run-live/" class="md-button">Live tournament app</a>
+        <a href="{{ base_url }}/user-guide/organisers/run-tournament/" class="md-button">Tournament app</a>
       </div>
     </div>
   </section>

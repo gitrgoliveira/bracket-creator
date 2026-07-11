@@ -14,7 +14,7 @@ brew install bracket-creator
 
 `brew trust` marks the tap as trusted, which Homebrew requires before installing from a third-party tap. Update later with `brew upgrade bracket-creator`. The formula (in the [gitrgoliveira/homebrew-tap](https://github.com/gitrgoliveira/homebrew-tap) repository) builds from source, so it needs a C toolchain (the Xcode Command Line Tools on macOS or `build-essential` on Linux) and network access for Go module downloads.
 
-The single binary bundles every subcommand, including `bracket-creator serve` (web UI) and `bracket-creator mobile-app` (live-tournament app).
+The single binary bundles every subcommand, including `bracket-creator serve` (web UI) and `bracket-creator mobile-app` (tournament app).
 
 ## Pre-compiled binaries
 

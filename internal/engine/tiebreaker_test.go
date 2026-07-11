@@ -834,3 +834,289 @@ func TestInjectTiebreaker_ConsequentialWhenAllAdvance(t *testing.T) {
 	require.Len(t, injected, 1, "with all players advancing, the 3rd/4th seed tie needs one tiebreaker")
 	assert.True(t, IsTiebreakerMatchID(injected[0].ID))
 }
+
+// setupEngiComp builds a minimal saved engi competition in pools status.
+func setupEngiComp(t *testing.T, store *state.Store, id, format string) {
+	t.Helper()
+	comp := &state.Competition{
+		ID:           id,
+		Name:         "Engi Test",
+		Kind:         "individual",
+		Format:       format,
+		PoolSize:     2,
+		PoolSizeMode: "min",
+		PoolWinners:  1,
+		RoundRobin:   true,
+		Courts:       []string{"A"},
+		StartTime:    "09:00",
+		Status:       state.CompStatusPools,
+		Engi:         true,
+	}
+	require.NoError(t, store.SaveCompetition(comp))
+}
+
+// TestInjectTiebreakerMatches_Engi_DecisiveResult verifies that engi
+// competitions never get ippon-shobu tiebreaker injection, regardless of
+// how many pools have recorded matches. Engi ranks by wins then flags;
+// Points is always 0 for engi standings, so without the guard
+// detectPoolTies would see every pool as fully tied.
+func TestInjectTiebreakerMatches_Engi_DecisiveResult(t *testing.T) {
+	tests := []struct {
+		name    string
+		compID  string
+		matches []state.MatchResult
+	}{
+		{
+			name:   "single pool decisive",
+			compID: "engi-decisive-single",
+			matches: []state.MatchResult{
+				{
+					ID: "Pool A-0", SideA: "Alice", SideB: "Bob",
+					Status: state.MatchStatusCompleted, Winner: "Alice",
+					FlagsA: 3, FlagsB: 2, Court: "A",
+				},
+			},
+		},
+		{
+			name:   "two pools both decisive",
+			compID: "engi-decisive-two",
+			matches: []state.MatchResult{
+				{
+					ID: "Pool A-0", SideA: "Alice", SideB: "Bob",
+					Status: state.MatchStatusCompleted, Winner: "Alice",
+					FlagsA: 3, FlagsB: 2, Court: "A",
+				},
+				{
+					ID: "Pool B-0", SideA: "Carol", SideB: "Dave",
+					Status: state.MatchStatusCompleted, Winner: "Carol",
+					FlagsA: 5, FlagsB: 0, Court: "A",
+				},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			eng, store, _ := setupTestEngine(t)
+			compID := tc.compID
+
+			setupEngiComp(t, store, compID, state.CompFormatMixed)
+			require.NoError(t, store.SavePools(compID, []helper.Pool{
+				{PoolName: "Pool A", Players: []helper.Player{
+					{Name: "Alice"}, {Name: "Bob"},
+				}},
+				{PoolName: "Pool B", Players: []helper.Player{
+					{Name: "Carol"}, {Name: "Dave"},
+				}},
+			}))
+			require.NoError(t, store.SavePoolMatches(compID, tc.matches))
+
+			injected, err := eng.InjectTiebreakerMatches(compID)
+			require.NoError(t, err)
+			assert.Nil(t, injected, "no tiebreaker injection for engi competitions")
+
+			all, err := store.LoadPoolMatches(compID)
+			require.NoError(t, err)
+			for _, m := range all {
+				assert.False(t, IsTiebreakerMatchID(m.ID),
+					"no TB rows expected on disk for engi comp")
+			}
+		})
+	}
+}
+
+// TestInjectTiebreakerMatches_Engi_FullCycleTie verifies that even a genuine
+// 3-player cycle (A beats B, B beats C, C beats A: all players 1W-1L) produces
+// no tiebreaker injection for an engi competition. Engi uses wins then flags for
+// ranking; ippon-shobu supplementary bouts are never held.
+func TestInjectTiebreakerMatches_Engi_FullCycleTie(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "engi-cycle-tie"
+
+	setupEngiComp(t, store, compID, state.CompFormatLeague)
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{
+			{Name: "Alice"}, {Name: "Bob"}, {Name: "Charlie"},
+		}},
+	}))
+	// Cycle: Alice beats Bob (3-2), Bob beats Charlie (3-2), Charlie beats Alice (3-2).
+	// All players: 1 win, 1 loss, same flag total (5 own-side flags). Engi Points=0 for all.
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob",
+			Status: state.MatchStatusCompleted, Winner: "Alice", FlagsA: 3, FlagsB: 2, Court: "A"},
+		{ID: "Pool A-1", SideA: "Bob", SideB: "Charlie",
+			Status: state.MatchStatusCompleted, Winner: "Bob", FlagsA: 3, FlagsB: 2, Court: "A"},
+		{ID: "Pool A-2", SideA: "Charlie", SideB: "Alice",
+			Status: state.MatchStatusCompleted, Winner: "Charlie", FlagsA: 3, FlagsB: 2, Court: "A"},
+	}))
+
+	injected, err := eng.InjectTiebreakerMatches(compID)
+	require.NoError(t, err)
+	assert.Nil(t, injected, "engi: no injection even when all pools are Points-tied")
+
+	all, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	tbCount := 0
+	for _, m := range all {
+		if IsTiebreakerMatchID(m.ID) {
+			tbCount++
+		}
+	}
+	assert.Equal(t, 0, tbCount, "no TB rows expected for engi comp")
+}
+
+// TestInjectTiebreakerMatches_Engi_SelfHeal verifies the self-heal path:
+// every TB row that would block completion (scheduled, running, or completed
+// without a recorded winner, e.g. finalized as hikiwake via the decision
+// endpoint) is removed, while a completed TB row with a Winner is preserved.
+func TestInjectTiebreakerMatches_Engi_SelfHeal(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "engi-self-heal"
+
+	setupEngiComp(t, store, compID, state.CompFormatLeague)
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{
+			{Name: "Alice"}, {Name: "Bob"},
+		}},
+	}))
+
+	// Pre-seed the state a pre-fix engine would have left: one regular
+	// completed match, one spurious scheduled TB row (winnerless), one
+	// spurious running TB row (winnerless, opened for scoring pre-fix), one
+	// spurious COMPLETED winnerless TB row (bogus bout finalized as hikiwake
+	// via the decision endpoint; still blocks completion), and one
+	// already-completed TB row with a Winner whose result we must preserve.
+	const spuriousTB = "Pool A-TB-0"
+	const completedTB = "Pool A-TB-1"
+	const runningTB = "Pool A-TB-2"
+	const hikiwakeTB = "Pool A-TB-3"
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{
+			ID: "Pool A-0", SideA: "Alice", SideB: "Bob",
+			Status: state.MatchStatusCompleted, Winner: "Alice",
+			FlagsA: 3, FlagsB: 2, Court: "A",
+		},
+		{
+			// Spurious scheduled TB row: no Winner, no Decision.
+			ID: spuriousTB, SideA: "Alice", SideB: "Bob",
+			Status: state.MatchStatusScheduled, Court: "A",
+		},
+		{
+			// Completed TB row with a Winner: must be kept even for engi.
+			ID: completedTB, SideA: "Alice", SideB: "Bob",
+			Status: state.MatchStatusCompleted, Winner: "Alice", Court: "A",
+		},
+		{
+			// Spurious running TB row: winnerless, must also be removed.
+			ID: runningTB, SideA: "Alice", SideB: "Bob",
+			Status: state.MatchStatusRunning, Court: "A",
+		},
+		{
+			// Spurious completed winnerless TB row (hikiwake-finalized):
+			// still blocks completion, must also be removed.
+			ID: hikiwakeTB, SideA: "Alice", SideB: "Bob",
+			Status:   state.MatchStatusCompleted,
+			Decision: string(domain.DecisionHikiwake), Court: "A",
+		},
+	}))
+
+	injected, err := eng.InjectTiebreakerMatches(compID)
+	require.NoError(t, err)
+	assert.Nil(t, injected, "self-heal returns nil injected (nothing new was added)")
+
+	all, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+
+	var ids []string
+	for _, m := range all {
+		ids = append(ids, m.ID)
+	}
+	assert.NotContains(t, ids, spuriousTB, "spurious scheduled TB row must be removed")
+	assert.NotContains(t, ids, runningTB, "spurious running winnerless TB row must be removed")
+	assert.NotContains(t, ids, hikiwakeTB, "completed winnerless TB row must be removed")
+	assert.Contains(t, ids, "Pool A-0", "regular match must be preserved")
+	assert.Contains(t, ids, completedTB, "completed TB row with a winner must be preserved")
+}
+
+// TestMaybeAutoCompletePools_Engi_NoTiebreakInjection verifies that an engi
+// competition with all regular matches complete transitions normally to
+// CompStatusComplete without triggering AutoCompleteTiebreakInjected.
+// Without the engi guard, detectPoolTies sees all Points=0 and injects
+// spurious ippon-shobu bouts that block completion.
+func TestMaybeAutoCompletePools_Engi_NoTiebreakInjection(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "engi-auto-complete"
+
+	// League format: auto-completes once all pool matches are done.
+	setupEngiComp(t, store, compID, state.CompFormatLeague)
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{
+			{Name: "Alice"}, {Name: "Bob"},
+		}},
+	}))
+	// One decisive flag-scored match. Points=0 for all engi standings, so
+	// without the guard this would inject a spurious TB bout.
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{
+			ID: "Pool A-0", SideA: "Alice", SideB: "Bob",
+			Status: state.MatchStatusCompleted, Winner: "Alice",
+			FlagsA: 3, FlagsB: 2, Court: "A",
+		},
+	}))
+
+	outcome, err := eng.MaybeAutoCompletePools(compID)
+	require.NoError(t, err)
+	assert.Equal(t, AutoCompleteTransitioned, outcome,
+		"engi league with all matches done must complete, not inject tiebreakers")
+
+	// No spurious TB rows on disk.
+	all, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	for _, m := range all {
+		assert.False(t, IsTiebreakerMatchID(m.ID),
+			"no TB rows expected on disk for engi comp after MaybeAutoCompletePools")
+	}
+}
+
+// TestMaybeAutoCompletePools_Engi_League_SelfHeal verifies that an engi
+// league competition poisoned by a pre-fix engine (winnerless scheduled TB
+// rows on disk) is healed and completes. Without the pre-heal in
+// MaybeAutoCompletePools, the hasIncompleteTB early return fires before the
+// injection block that hosts the engi self-heal, leaving the competition
+// stuck at AutoCompleteNoChange forever.
+func TestMaybeAutoCompletePools_Engi_League_SelfHeal(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "engi-league-self-heal"
+
+	setupEngiComp(t, store, compID, state.CompFormatLeague)
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{
+			{Name: "Alice"}, {Name: "Bob"},
+		}},
+	}))
+	// One decisive completed flag match plus the spurious winnerless
+	// scheduled TB row a pre-fix engine would have injected.
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{
+			ID: "Pool A-0", SideA: "Alice", SideB: "Bob",
+			Status: state.MatchStatusCompleted, Winner: "Alice",
+			FlagsA: 3, FlagsB: 2, Court: "A",
+		},
+		{
+			ID: "Pool A-TB-0", SideA: "Alice", SideB: "Bob",
+			Status: state.MatchStatusScheduled, Court: "A",
+		},
+	}))
+
+	outcome, err := eng.MaybeAutoCompletePools(compID)
+	require.NoError(t, err)
+	assert.Equal(t, AutoCompleteTransitioned, outcome,
+		"poisoned engi league must self-heal and complete, not stay stuck")
+
+	all, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	for _, m := range all {
+		assert.False(t, IsTiebreakerMatchID(m.ID),
+			"spurious TB rows must be healed away by MaybeAutoCompletePools")
+	}
+}

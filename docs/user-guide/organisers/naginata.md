@@ -107,3 +107,20 @@ In Engi pools and leagues, pairs are ranked by the following criteria, in order:
 
 Both the winning and the losing side's flags count toward that side's own tally,
 so a pair that loses by three flags to two still keeps its two flags.
+
+### Excel exports
+
+Both Excel downloads on the competition page (see
+[Export and print](run-tournament.md#export-and-print)) understand Engi:
+
+- Each pair is a single competitor throughout both workbooks. The data sheet
+  lists member 1 under **Player Name** and member 2 under **Display Name**,
+  with the shared dojo; the match grids and standings identify the pair by
+  member 1's name, and the printable name sheets by member 2's.
+- Pool standings in both workbooks use the Engi columns: **W** (wins),
+  **L** (losses), **Flags** (total flags), and **Rank**. The kendo points
+  columns do not appear.
+- The results workbook records each side's referee flag count in the score
+  cells instead of ippon letters, and a bout decided without flags (for
+  example a kiken withdrawal) leaves the score cells blank with the decision
+  marked in the centre column.

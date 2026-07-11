@@ -42,7 +42,23 @@ import (
 // scoringSetup2Players creates a 2-player, 1-match pool and calls PrintPoolMatches.
 // SideA/SideB point to &pool.Players[0/1], the same backing array used for the
 // player→match-record map lookup, so all formula cells are populated correctly.
-func scoringSetup2Players(t *testing.T, teamMatches int) *excelize.File {
+// Pass engi=true to exercise the engi flag-scoring column layout (same cell geometry
+// as engi=false; only standings columns differ: W/L/Flags/Rank instead of W/L/T/PW/PL/Rank).
+//
+// Individual (teamMatches=0), engi=false, 2-player pool (1 match):
+//
+//	Row 4: score input  B4=lV(Victories)  C4=lP(Points)  D4=vs  E4=rP  F4=rV
+//	Row 6: results header
+//	Row 7: Alice (SideA, left)  B7=W  C7=L  D7=T  E7=PW  F7=PL
+//	Row 8: Bob   (SideB, right) B8=W  C8=L  D8=T  E8=PW  F8=PL
+//
+// Individual (teamMatches=0), engi=true:
+//
+//	Row 4: score input  B4=lFlags  D4=vs  F4=rFlags  (C, E blank)
+//	Row 6: results header (W / L / Flags / Rank)
+//	Row 7: Alice  B7=W  C7=L  D7=Flags  G7=Rank
+//	Row 8: Bob    B8=W  C8=L  D8=Flags  G8=Rank
+func scoringSetup2Players(t *testing.T, teamMatches int, engi bool) *excelize.File {
 	t.Helper()
 	pool := Pool{
 		PoolName: "Pool A",
@@ -65,58 +81,22 @@ func scoringSetup2Players(t *testing.T, teamMatches int) *excelize.File {
 	t.Cleanup(func() { f.Close() })
 	f.NewSheet(SheetPoolMatches)
 	f.NewSheet(SheetPoolDraw)
-	PrintPoolMatches(f, []Pool{pool}, teamMatches, 1, 1, false, poolCoords, pCoords, false)
-	return f
-}
-
-// scoringSetup3PlayerRoundRobinEngi creates a 3-player round-robin pool with
-// engi=true. The match order and geometry are identical to
-// scoringSetup3PlayerRoundRobin:
-//
-//	Row 4: Match 0 Alice vs Bob   (Alice=SideA/left, Bob=SideB/right)
-//	Row 5: Match 1 Bob vs Carol   (Bob=SideA/left, Carol=SideB/right)
-//	Row 6: Match 2 Alice vs Carol (Alice=SideA/left, Carol=SideB/right)
-//	Row 8: results header (W / L / Flags / Rank)
-//	Row 9: Alice, Row 10: Bob, Row 11: Carol
-//
-// Engi standings columns: B=W, C=L, D=Flags, G=Rank, U=hidden Score.
-// PW/PL columns (E, F) are intentionally left blank in engi mode.
-func scoringSetup3PlayerRoundRobinEngi(t *testing.T) *excelize.File {
-	t.Helper()
-	pool := Pool{
-		PoolName: "Pool A",
-		Players: []Player{
-			{Name: "Alice"},
-			{Name: "Bob"},
-			{Name: "Carol"},
-		},
-	}
-	pool.Matches = []Match{
-		{SideA: &pool.Players[0], SideB: &pool.Players[1]},
-		{SideA: &pool.Players[1], SideB: &pool.Players[2]},
-		{SideA: &pool.Players[0], SideB: &pool.Players[2]},
-	}
-
-	poolCoords := map[string]cellCoord{
-		"Pool A": {sheetName: SheetPoolDraw, cell: "B1"},
-	}
-	pCoords := map[string]playerCellCoord{
-		playerCoordKey(pool.Players[0]): {cellCoord: cellCoord{sheetName: SheetPoolDraw, cell: "A1"}},
-		playerCoordKey(pool.Players[1]): {cellCoord: cellCoord{sheetName: SheetPoolDraw, cell: "A2"}},
-		playerCoordKey(pool.Players[2]): {cellCoord: cellCoord{sheetName: SheetPoolDraw, cell: "A3"}},
-	}
-
-	f := excelize.NewFile()
-	t.Cleanup(func() { f.Close() })
-	f.NewSheet(SheetPoolMatches)
-	f.NewSheet(SheetPoolDraw)
-	PrintPoolMatches(f, []Pool{pool}, 0, 1, 1, false, poolCoords, pCoords, true)
+	PrintPoolMatches(f, []Pool{pool}, teamMatches, 1, 1, false, poolCoords, pCoords, engi)
 	return f
 }
 
 // scoringSetup3PlayerRoundRobin creates a 3-player round-robin pool.
+// Pass engi=true to exercise the engi flag-scoring column layout.
 // Match order: Alice vs Bob (row 4), Bob vs Carol (row 5), Alice vs Carol (row 6).
-func scoringSetup3PlayerRoundRobin(t *testing.T) *excelize.File {
+//
+// Non-engi standings (engi=false):
+//
+//	Row 8: results header (W / L / T / PW / PL / Rank)
+//	Row 9: Alice, Row 10: Bob, Row 11: Carol
+//
+// Engi standings (engi=true): B=W, C=L, D=Flags, G=Rank, U=hidden Score.
+// PW/PL columns (E, F) are intentionally left blank in engi mode.
+func scoringSetup3PlayerRoundRobin(t *testing.T, engi bool) *excelize.File {
 	t.Helper()
 	pool := Pool{
 		PoolName: "Pool A",
@@ -145,7 +125,7 @@ func scoringSetup3PlayerRoundRobin(t *testing.T) *excelize.File {
 	t.Cleanup(func() { f.Close() })
 	f.NewSheet(SheetPoolMatches)
 	f.NewSheet(SheetPoolDraw)
-	PrintPoolMatches(f, []Pool{pool}, 0, 1, 1, false, poolCoords, pCoords, false)
+	PrintPoolMatches(f, []Pool{pool}, 0, 1, 1, false, poolCoords, pCoords, engi)
 	return f
 }
 
@@ -260,7 +240,7 @@ func TestIndividualPoolScoringFormulas(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			f := scoringSetup2Players(t, 0)
+			f := scoringSetup2Players(t, 0, false)
 			c.setup(f)
 
 			assert.Equal(t, c.alice.w, calcScore(t, f, "B7"), "Alice W")
@@ -276,37 +256,6 @@ func TestIndividualPoolScoringFormulas(t *testing.T) {
 			assert.Equal(t, c.bob.pl, calcScore(t, f, "F8"), "Bob PL")
 		})
 	}
-}
-
-// scoringSetup2PlayersEngi creates a 2-player, 1-match pool and calls
-// PrintPoolMatches with engi=true. The cell geometry is identical to
-// scoringSetup2Players: score inputs at B4 (left flags) and F4 (right
-// flags); standings header at row 6; Alice at row 7, Bob at row 8.
-func scoringSetup2PlayersEngi(t *testing.T) *excelize.File {
-	t.Helper()
-	pool := Pool{
-		PoolName: "Pool A",
-		Players: []Player{
-			{Name: "Alice"},
-			{Name: "Bob"},
-		},
-	}
-	pool.Matches = []Match{{SideA: &pool.Players[0], SideB: &pool.Players[1]}}
-
-	poolCoords := map[string]cellCoord{
-		"Pool A": {sheetName: SheetPoolDraw, cell: "B1"},
-	}
-	pCoords := map[string]playerCellCoord{
-		playerCoordKey(pool.Players[0]): {cellCoord: cellCoord{sheetName: SheetPoolDraw, cell: "A1"}},
-		playerCoordKey(pool.Players[1]): {cellCoord: cellCoord{sheetName: SheetPoolDraw, cell: "A2"}},
-	}
-
-	f := excelize.NewFile()
-	t.Cleanup(func() { f.Close() })
-	f.NewSheet(SheetPoolMatches)
-	f.NewSheet(SheetPoolDraw)
-	PrintPoolMatches(f, []Pool{pool}, 0, 1, 1, false, poolCoords, pCoords, true)
-	return f
 }
 
 // TestEngiPoolScoringFormulas verifies that the W/L/Flags formula cells in
@@ -371,7 +320,7 @@ func TestEngiPoolScoringFormulas(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			f := scoringSetup2PlayersEngi(t)
+			f := scoringSetup2Players(t, 0, true)
 			c.setup(f)
 
 			assert.Equal(t, c.alice.w, calcScore(t, f, "B7"), "Alice W")
@@ -396,7 +345,7 @@ func TestIndividualPoolScoringFormulas_MultiMatch(t *testing.T) {
 	// Results header: row 8
 	// Alice row 9, Bob row 10, Carol row 11
 
-	f := scoringSetup3PlayerRoundRobin(t)
+	f := scoringSetup3PlayerRoundRobin(t, false)
 
 	// Alice wins both her matches; Bob beats Carol.
 	setScore(f, "B4", "M") // Alice beats Bob (Alice on left, B=lV)
@@ -483,7 +432,7 @@ func TestTeamSummaryRowFormulas(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			f := scoringSetup2Players(t, 1)
+			f := scoringSetup2Players(t, 1, false)
 			c.setup(f)
 
 			assert.Equal(t, c.exp.ivLeft, calcScore(t, f, "B4"), "IV_left (B4)")
@@ -581,7 +530,7 @@ func TestTeamWLTTableFormulas(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			f := scoringSetup2Players(t, 1)
+			f := scoringSetup2Players(t, 1, false)
 			c.setup(f)
 
 			assert.Equal(t, c.alice.w, calcScore(t, f, "B9"), "Alice W")
@@ -669,7 +618,7 @@ func TestTeamIVILITPWPLTableFormulas(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			f := scoringSetup2Players(t, 1)
+			f := scoringSetup2Players(t, 1, false)
 			c.setup(f)
 
 			assert.Equal(t, c.alice.iv, calcScore(t, f, "B13"), "Alice IV")
@@ -701,7 +650,7 @@ func TestTeamIVILITPWPLTableFormulas(t *testing.T) {
 // Standings: Row 8 header; Row 9=Alice, Row 10=Bob, Row 11=Carol.
 // Columns: B=W, C=L, D=Flags.
 func TestEngiPoolScoringFormulas_MultiMatch(t *testing.T) {
-	f := scoringSetup3PlayerRoundRobinEngi(t)
+	f := scoringSetup3PlayerRoundRobin(t, true)
 
 	// Alice beats Bob 3-2.
 	f.SetCellValue(SheetPoolMatches, "B4", 3) // Alice (left) flags
@@ -744,7 +693,7 @@ func TestEngiPoolScoringFormulas_MultiMatch(t *testing.T) {
 // Expected scores: Alice=2000008, Carol=1000004, Bob=3.
 // Expected ranks:  Alice=1, Carol=2, Bob=3.
 func TestEngiScoreAndRankFormulas(t *testing.T) {
-	f := scoringSetup3PlayerRoundRobinEngi(t)
+	f := scoringSetup3PlayerRoundRobin(t, true)
 
 	f.SetCellValue(SheetPoolMatches, "B4", 3)
 	f.SetCellValue(SheetPoolMatches, "F4", 2)
@@ -779,7 +728,7 @@ func TestEngiScoreAndRankFormulas(t *testing.T) {
 // (row 8) sees one prior occurrence of score=3 in the COUNTIF range, so
 // his rank resolves to 1+1=2.
 func TestEngiPoolScoringFormulas_EqualFlagsDefensive(t *testing.T) {
-	f := scoringSetup2PlayersEngi(t)
+	f := scoringSetup2Players(t, 0, true)
 
 	// Equal flags on both sides — unreachable in real engi data.
 	f.SetCellValue(SheetPoolMatches, "B4", 3)
@@ -823,7 +772,7 @@ func TestEngiPoolScoringFormulas_EqualFlagsDefensive(t *testing.T) {
 // formula. The flags column uses N(), which returns 0 for text, so it never
 // contributes to a player's accumulated flag total.
 func TestEngiPoolScoringFormulas_BothCellsText(t *testing.T) {
-	f := scoringSetup2PlayersEngi(t)
+	f := scoringSetup2Players(t, 0, true)
 
 	// Both cells are non-numeric text: OR(ISNUMBER(...)) = FALSE → unplayed.
 	f.SetCellValue(SheetPoolMatches, "B4", "x")
@@ -857,7 +806,7 @@ func TestEngiPoolScoringFormulas_BothCellsText(t *testing.T) {
 // behavior. Operators must enter actual numeric values — not text — to
 // guarantee correct results in the Excel file itself.
 func TestEngiPoolScoringFormulas_NumericTextInput(t *testing.T) {
-	f := scoringSetup2PlayersEngi(t)
+	f := scoringSetup2Players(t, 0, true)
 
 	// B4 stored as text string "3"; F4 stored as numeric 2.
 	// In real Excel: N("3")=0, so Alice would lose 0-2.
@@ -889,7 +838,7 @@ func TestEngiPoolScoringFormulas_NumericTextInput(t *testing.T) {
 // cells blank avoids misleading operators who open the spreadsheet.
 func TestEngiPoolStandings_NoPWPLCells(t *testing.T) {
 	t.Run("engi PW/PL cells have no formula and no value", func(t *testing.T) {
-		f := scoringSetup2PlayersEngi(t)
+		f := scoringSetup2Players(t, 0, true)
 
 		pwPlCells := []string{"E7", "F7", "E8", "F8"}
 		for _, cell := range pwPlCells {
@@ -904,7 +853,7 @@ func TestEngiPoolStandings_NoPWPLCells(t *testing.T) {
 	})
 
 	t.Run("non-engi PW cell E7 has a formula", func(t *testing.T) {
-		f := scoringSetup2Players(t, 0)
+		f := scoringSetup2Players(t, 0, false)
 
 		formula, err := f.GetCellFormula(SheetPoolMatches, "E7")
 		require.NoError(t, err, "GetCellFormula(E7)")

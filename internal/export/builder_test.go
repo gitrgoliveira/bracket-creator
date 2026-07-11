@@ -55,26 +55,21 @@ func setCompFormat(t *testing.T, store *state.Store, compID, format string) {
 }
 
 // makePools builds two pools of two players each with one match.
+// SideA/SideB point into pool.Players so the playerMatchRows map in
+// PrintPoolMatches resolves correctly (pointers must match &pool.Players[i]).
 func makePools() []helper.Pool {
-	p1 := makePlayer("Alice")
-	p2 := makePlayer("Bob")
-	p3 := makePlayer("Charlie")
-	p4 := makePlayer("Dave")
-
 	pool1 := helper.Pool{
 		PoolName: "Pool A",
-		Players:  []helper.Player{p1, p2},
-		Matches: []helper.Match{
-			{SideA: &p1, SideB: &p2},
-		},
+		Players:  []helper.Player{makePlayer("Alice"), makePlayer("Bob")},
 	}
+	pool1.Matches = []helper.Match{{SideA: &pool1.Players[0], SideB: &pool1.Players[1]}}
+
 	pool2 := helper.Pool{
 		PoolName: "Pool B",
-		Players:  []helper.Player{p3, p4},
-		Matches: []helper.Match{
-			{SideA: &p3, SideB: &p4},
-		},
+		Players:  []helper.Player{makePlayer("Charlie"), makePlayer("Dave")},
 	}
+	pool2.Matches = []helper.Match{{SideA: &pool2.Players[0], SideB: &pool2.Players[1]}}
+
 	return []helper.Pool{pool1, pool2}
 }
 
@@ -665,14 +660,11 @@ func TestBuildResultsWorkbook_TwoCourts(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(comp))
 
 	// Four pools across two courts.
+	// SideA/SideB point into pool.Players so the playerMatchRows map resolves correctly.
 	makeP := func(name string, p1, p2 string) helper.Pool {
-		pl1 := makePlayer(p1)
-		pl2 := makePlayer(p2)
-		return helper.Pool{
-			PoolName: name,
-			Players:  []helper.Player{pl1, pl2},
-			Matches:  []helper.Match{{SideA: &pl1, SideB: &pl2}},
-		}
+		p := helper.Pool{PoolName: name, Players: []helper.Player{makePlayer(p1), makePlayer(p2)}}
+		p.Matches = []helper.Match{{SideA: &p.Players[0], SideB: &p.Players[1]}}
+		return p
 	}
 	pools := []helper.Pool{
 		makeP("Pool A", "Alice", "Bob"),
@@ -724,12 +716,14 @@ func TestBuildResultsWorkbook_TwoCourts(t *testing.T) {
 	assert.True(t, foundM, "Pool C ippon 'M' must be present in two-court workbook")
 }
 
-// wColInBand returns the 0-based column index of the "W" standings header found
-// within the [bandStart, bandEnd) column range, or -1 if absent.
-func wColInBand(rows [][]string, bandStart, bandEnd int) int {
+// headerColInBand returns the 0-based column index of the first cell equal to
+// header within the [bandStart, bandEnd) column range, or -1 if absent.
+// Use it to locate standings headers like "W" or helper.ColHeaderFlags in a
+// specific court band without hard-coding column offsets.
+func headerColInBand(rows [][]string, header string, bandStart, bandEnd int) int {
 	for _, row := range rows {
 		for c := bandStart; c < bandEnd && c < len(row); c++ {
-			if row[c] == "W" {
+			if row[c] == header {
 				return c
 			}
 		}
@@ -812,16 +806,18 @@ func TestBuildResultsWorkbook_MultiCourtStandingsColumns(t *testing.T) {
 	comp := &state.Competition{ID: compID, Name: "MC Standings", Courts: []string{"A", "B"}}
 	require.NoError(t, store.SaveCompetition(comp))
 
-	makeP := func(name, a, b string) helper.Pool {
-		pl1, pl2 := makePlayer(a), makePlayer(b)
-		return helper.Pool{PoolName: name, Players: []helper.Player{pl1, pl2}, Matches: []helper.Match{{SideA: &pl1, SideB: &pl2}}}
+	// makePFixed creates a pool with SideA/SideB pointing into pool.Players, not local copies.
+	makePFixed := func(name, a, b string) helper.Pool {
+		p := helper.Pool{PoolName: name, Players: []helper.Player{makePlayer(a), makePlayer(b)}}
+		p.Matches = []helper.Match{{SideA: &p.Players[0], SideB: &p.Players[1]}}
+		return p
 	}
 	// Pools 0,1 -> court A; pools 2,3 -> court B (contiguous assignment).
 	pools := []helper.Pool{
-		makeP("Pool A", "Alice", "Bob"),
-		makeP("Pool B", "Charlie", "Dave"),
-		makeP("Pool C", "Eve", "Frank"),
-		makeP("Pool D", "Grace", "Hank"),
+		makePFixed("Pool A", "Alice", "Bob"),
+		makePFixed("Pool B", "Charlie", "Dave"),
+		makePFixed("Pool C", "Eve", "Frank"),
+		makePFixed("Pool D", "Grace", "Hank"),
 	}
 	require.NoError(t, store.SavePools(compID, pools))
 
@@ -838,8 +834,8 @@ func TestBuildResultsWorkbook_MultiCourtStandingsColumns(t *testing.T) {
 	rows, err := f.GetRows(helper.SheetPoolMatches)
 	require.NoError(t, err)
 
-	courtAW := wColInBand(rows, 0, helper.CourtsColumnsPerCourt)
-	courtBW := wColInBand(rows, helper.CourtsColumnsPerCourt, 2*helper.CourtsColumnsPerCourt)
+	courtAW := headerColInBand(rows, "W", 0, helper.CourtsColumnsPerCourt)
+	courtBW := headerColInBand(rows, "W", helper.CourtsColumnsPerCourt, 2*helper.CourtsColumnsPerCourt)
 	require.GreaterOrEqual(t, courtAW, 0, "court A W header must exist")
 	require.GreaterOrEqual(t, courtBW, 0, "court B W header must exist")
 
@@ -866,8 +862,9 @@ func TestBuildResultsWorkbook_BracketTwoCourts(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(comp))
 
 	makeP := func(name, a, b string) helper.Pool {
-		p1, p2 := makePlayer(a), makePlayer(b)
-		return helper.Pool{PoolName: name, Players: []helper.Player{p1, p2}, Matches: []helper.Match{{SideA: &p1, SideB: &p2}}}
+		p := helper.Pool{PoolName: name, Players: []helper.Player{makePlayer(a), makePlayer(b)}}
+		p.Matches = []helper.Match{{SideA: &p.Players[0], SideB: &p.Players[1]}}
+		return p
 	}
 	// 4 pools (2 per court) → 4 finalists → a semifinal round of 2 matches, one
 	// per court, rendered side-by-side on the same rows.
@@ -1124,10 +1121,9 @@ func TestBuildResultsWorkbook_OverlaidCellsAreLiteral(t *testing.T) {
 
 	// The winner's standings W = 1 is overlaid onto a formerly formula-driven cell.
 	winRef := cellRefWithValue(t, rows, "1")
-	if winRef != "" { // "1" appears in the W column for Alice's single win
-		wf, _ := f.GetCellFormula(helper.SheetPoolMatches, winRef)
-		assert.Empty(t, wf, "overlaid standings cell %s must be a literal, not a formula", winRef)
-	}
+	require.NotEmpty(t, winRef, "overlaid W=1 must be present in Pool Matches sheet")
+	wf, _ := f.GetCellFormula(helper.SheetPoolMatches, winRef)
+	assert.Empty(t, wf, "overlaid standings cell %s must be a literal, not a formula", winRef)
 }
 
 // columnHasValueUnderHeader reports whether any data row below a cell equal to
@@ -1745,15 +1741,21 @@ func TestBuildResultsWorkbook_TeamPlayoffsNames(t *testing.T) {
 }
 
 // makeTeamPools builds two team pools of two teams each, one team encounter per pool.
+// SideA/SideB point into pool.Players so the playerMatchRows map resolves correctly.
 func makeTeamPools() []helper.Pool {
-	rA := makePlayer("Red A")
-	bA := makePlayer("Blue A")
-	rB := makePlayer("Red B")
-	bB := makePlayer("Blue B")
-	return []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{rA, bA}, Matches: []helper.Match{{SideA: &rA, SideB: &bA}}},
-		{PoolName: "Pool B", Players: []helper.Player{rB, bB}, Matches: []helper.Match{{SideA: &rB, SideB: &bB}}},
+	poolA := helper.Pool{
+		PoolName: "Pool A",
+		Players:  []helper.Player{makePlayer("Red A"), makePlayer("Blue A")},
 	}
+	poolA.Matches = []helper.Match{{SideA: &poolA.Players[0], SideB: &poolA.Players[1]}}
+
+	poolB := helper.Pool{
+		PoolName: "Pool B",
+		Players:  []helper.Player{makePlayer("Red B"), makePlayer("Blue B")},
+	}
+	poolB.Matches = []helper.Match{{SideA: &poolB.Players[0], SideB: &poolB.Players[1]}}
+
+	return []helper.Pool{poolA, poolB}
 }
 
 // sheetContainsCell reports whether any cell in rows equals val.
@@ -2053,25 +2055,23 @@ func TestAttachPoolMatches_FallsBackToName(t *testing.T) {
 
 // makeEngiPools builds two engi pairs with DisplayName set (member 2).
 // Each pair is ONE participant whose member1=Name and member2=DisplayName.
+// SideA/SideB point into pool.Players so the playerMatchRows map resolves correctly.
 func makeEngiPools() []helper.Pool {
-	pair1 := helper.Player{ID: "pair1", Name: "Member One A", DisplayName: "Member Two A", Dojo: "DojoA"}
-	pair2 := helper.Player{ID: "pair2", Name: "Member One B", DisplayName: "Member Two B", Dojo: "DojoB"}
-
-	return []helper.Pool{
-		{
-			PoolName: "Pool A",
-			Players:  []helper.Player{pair1, pair2},
-			Matches: []helper.Match{
-				{SideA: &pair1, SideB: &pair2},
-			},
+	pool := helper.Pool{
+		PoolName: "Pool A",
+		Players: []helper.Player{
+			{ID: "pair1", Name: "Member One A", DisplayName: "Member Two A", Dojo: "DojoA"},
+			{ID: "pair2", Name: "Member One B", DisplayName: "Member Two B", Dojo: "DojoB"},
 		},
 	}
+	pool.Matches = []helper.Match{{SideA: &pool.Players[0], SideB: &pool.Players[1]}}
+	return []helper.Pool{pool}
 }
 
 // TestBuildResultsWorkbook_EngiPairedNameInDataSheet verifies that for an engi
 // competition (Engi=true, WithZekkenName=false) the second member name
 // (player.DisplayName) is written to column D of the Data sheet.
-// This fails today because builder.go passes comp.WithZekkenName (false)
+// Previously broken because builder.go passed comp.WithZekkenName (false)
 // instead of comp.EffectiveWithZekkenName() (true for engi).
 func TestBuildResultsWorkbook_EngiPairedNameInDataSheet(t *testing.T) {
 	t.Parallel()
@@ -2099,15 +2099,8 @@ func TestBuildResultsWorkbook_EngiPairedNameInDataSheet(t *testing.T) {
 	rows, err := f.GetRows(helper.SheetData)
 	require.NoError(t, err)
 
-	foundMember2 := false
-	for _, row := range rows {
-		// col D is index 3 (0-based).
-		if len(row) > 3 && row[3] == "Member Two A" {
-			foundMember2 = true
-			break
-		}
-	}
-	assert.True(t, foundMember2,
+	// col D is index 3 (0-based).
+	assert.True(t, columnContains(rows, 3, "Member Two A"),
 		"Data sheet col D must contain 'Member Two A' for an engi competition (EffectiveWithZekkenName=true)")
 }
 
@@ -2125,15 +2118,16 @@ func TestBuildResultsWorkbook_NonEngiWithZekkenStillWorks(t *testing.T) {
 	comp.WithZekkenName = true
 	require.NoError(t, store.SaveCompetition(comp))
 
-	pair1 := helper.Player{ID: "p1", Name: "Name One", DisplayName: "Zekken One", Dojo: "DojoX"}
-	pair2 := helper.Player{ID: "p2", Name: "Name Two", DisplayName: "Zekken Two", Dojo: "DojoY"}
-	pools := []helper.Pool{
-		{
-			PoolName: "Pool A",
-			Players:  []helper.Player{pair1, pair2},
-			Matches:  []helper.Match{{SideA: &pair1, SideB: &pair2}},
+	// SideA/SideB point into pool.Players so the playerMatchRows map resolves correctly.
+	zekkenPool := helper.Pool{
+		PoolName: "Pool A",
+		Players: []helper.Player{
+			{ID: "p1", Name: "Name One", DisplayName: "Zekken One", Dojo: "DojoX"},
+			{ID: "p2", Name: "Name Two", DisplayName: "Zekken Two", Dojo: "DojoY"},
 		},
 	}
+	zekkenPool.Matches = []helper.Match{{SideA: &zekkenPool.Players[0], SideB: &zekkenPool.Players[1]}}
+	pools := []helper.Pool{zekkenPool}
 	require.NoError(t, store.SavePools(compID, pools))
 	require.NoError(t, store.SavePoolMatches(compID, nil))
 
@@ -2147,14 +2141,7 @@ func TestBuildResultsWorkbook_NonEngiWithZekkenStillWorks(t *testing.T) {
 	rows, err := f.GetRows(helper.SheetData)
 	require.NoError(t, err)
 
-	foundZekken := false
-	for _, row := range rows {
-		if len(row) > 3 && row[3] == "Zekken One" {
-			foundZekken = true
-			break
-		}
-	}
-	assert.True(t, foundZekken,
+	assert.True(t, columnContains(rows, 3, "Zekken One"),
 		"Data sheet col D must contain 'Zekken One' for WithZekkenName=true competition")
 }
 
@@ -2174,11 +2161,31 @@ func containsCell(rows [][]string, value string) bool {
 	return false
 }
 
+// firstPoolMatchScoreRow returns the row from `rows` that holds the first match's
+// score cells for the pool assigned to the court band starting at 0-based column
+// `bandStart` ("Red" or "White" marks that column). The match row is one row below
+// the Red/White header. Returns nil if no such header exists.
+// Column layout within the band (0-based absolute): bandStart+1 = left score,
+// bandStart+3 = vs/middle, bandStart+5 = right score.
+func firstPoolMatchScoreRow(rows [][]string, bandStart int) []string {
+	for ri, row := range rows {
+		if bandStart >= len(row) {
+			continue
+		}
+		if row[bandStart] == "Red" || row[bandStart] == "White" {
+			if ri+1 < len(rows) {
+				return rows[ri+1]
+			}
+		}
+	}
+	return nil
+}
+
 // TestBuildResultsWorkbook_EngiPoolFlagScoreCells verifies that for an engi pool
 // match with FlagsA=3 and FlagsB=2, the Pool Matches sheet contains "3" and "2"
 // as literal flag counts, not ippon letters.
-// Fails today because overlayPoolScores calls IpponsScore(mr.IpponsA) which
-// returns "" (engi matches have no ippons).
+// Previously broken because overlayPoolScores called IpponsScore(mr.IpponsA) which
+// returned "" (engi matches have no ippons).
 func TestBuildResultsWorkbook_EngiPoolFlagScoreCells(t *testing.T) {
 	t.Parallel()
 	dir, store, eng, compID := testSetup(t)
@@ -2193,16 +2200,21 @@ func TestBuildResultsWorkbook_EngiPoolFlagScoreCells(t *testing.T) {
 	require.NoError(t, store.SavePools(compID, pools))
 
 	// Engi match: pair1 wins 3-2 on referee flags.
+	// SideAID/SideBID/WinnerID are required for computeEngiStandings so the
+	// standings overlay can also write the accumulated flag total.
 	results := []state.MatchResult{
 		{
 			ID:       "Pool A-0",
 			SideA:    "Member One A",
+			SideAID:  "pair1",
 			SideB:    "Member One B",
+			SideBID:  "pair2",
 			FlagsA:   3,
 			FlagsB:   2,
 			Decision: "fought",
 			Status:   state.MatchStatusCompleted,
 			Winner:   "Member One A",
+			WinnerID: "pair1",
 		},
 	}
 	require.NoError(t, store.SavePoolMatches(compID, results))
@@ -2217,10 +2229,20 @@ func TestBuildResultsWorkbook_EngiPoolFlagScoreCells(t *testing.T) {
 	rows, err := f.GetRows(helper.SheetPoolMatches)
 	require.NoError(t, err)
 
-	assert.True(t, containsCell(rows, "3"),
-		"Pool Matches sheet must contain '3' (FlagsA=3) for an engi match")
-	assert.True(t, containsCell(rows, "2"),
-		"Pool Matches sheet must contain '2' (FlagsB=2) for an engi match")
+	// Assert the MATCH ROW score cells specifically: left score (FlagsA) at
+	// bandStart+1 and right score (FlagsB) at bandStart+5 (vs is at bandStart+3).
+	// Using containsCell alone would be satisfied by the standings overlay alone.
+	matchRow := firstPoolMatchScoreRow(rows, 0)
+	require.NotNil(t, matchRow, "match score row must exist (Red/White header must be present)")
+	require.Greater(t, len(matchRow), 5, "match score row must have at least 6 columns")
+	assert.Equal(t, "3", matchRow[1],
+		"left score cell (2 before vs at col 3) must be '3' (FlagsA=3)")
+	assert.Equal(t, "2", matchRow[5],
+		"right score cell (2 after vs at col 3) must be '2' (FlagsB=2)")
+
+	// The winner's accumulated flag total also appears in the standings column (separate concern).
+	assert.True(t, columnHasValueUnderHeader(rows, helper.ColHeaderFlags, "3"),
+		"Pool Matches 'Flags' standings column must carry '3' for the engi winner")
 }
 
 // TestBuildResultsWorkbook_EngiNonEngiPoolScoreUnchanged verifies that a non-engi
@@ -2302,7 +2324,7 @@ func bracketVictoryCells(t *testing.T, rows [][]string, label string) (left, rig
 // (non-mirror) and mirror layouts are exercised: mirror swaps which victory
 // column carries FlagsA vs FlagsB, so the two cases must be column-mirror images.
 //
-// Fails before the fix because overlayBracketScores used ScoreA/ScoreB directly,
+// Previously broken because overlayBracketScores used ScoreA/ScoreB directly,
 // which for engi are the (inapplicable) ippon letters, and never consulted
 // FlagsA/FlagsB.
 func TestBuildResultsWorkbook_EngiBracketFlagScoreCells(t *testing.T) {
@@ -2399,9 +2421,9 @@ func TestBuildResultsWorkbook_EngiBracketFlagScoreCells(t *testing.T) {
 // (not W/L/T/PW/PL/Rank) and that the accumulated own-side flag count is overlaid
 // as a literal value under the "Flags" header.
 //
-// Fails today because PrintPoolMatches has no engi parameter and
-// printIndividualResultsTableSection always writes "T"/"PW"/"PL" headers, and
-// overlayPoolStandings writes to those non-existent-for-engi columns.
+// Previously broken because PrintPoolMatches had no engi parameter and
+// printIndividualResultsTableSection always wrote "T"/"PW"/"PL" headers, and
+// overlayPoolStandings wrote to those non-existent-for-engi columns.
 func TestBuildResultsWorkbook_EngiStandingsHeadersRelabeled(t *testing.T) {
 	t.Parallel()
 	dir, store, eng, compID := testSetup(t)
@@ -2515,20 +2537,6 @@ func TestBuildResultsWorkbook_NonEngiStandingsHeadersUnchanged(t *testing.T) {
 // TDD-5: Engi special-case characterization tests
 // ------------------------------------------------------------
 
-// flagsColInBand returns the 0-based column index of the "Flags" standings
-// header found within the [bandStart, bandEnd) column range, or -1 if absent.
-// It is the engi analog of wColInBand.
-func flagsColInBand(rows [][]string, bandStart, bandEnd int) int {
-	for _, row := range rows {
-		for c := bandStart; c < bandEnd && c < len(row); c++ {
-			if row[c] == helper.ColHeaderFlags {
-				return c
-			}
-		}
-	}
-	return -1
-}
-
 // TestBuildResultsWorkbook_EngiDecisionSuffix characterizes the vs-cell text for
 // a kiken-voluntary engi match: the middle cell must carry "Kiken" and both
 // adjacent score cells (at column offsets -2 and +2 from the vs cell) must be
@@ -2586,10 +2594,10 @@ func TestBuildResultsWorkbook_EngiDecisionSuffix(t *testing.T) {
 			if cell != "Kiken" {
 				continue
 			}
-			if j >= 2 {
-				assert.Equal(t, "", row[j-2],
-					"left score cell (col offset -2 from vs) must be blank for kiken with FlagsA=0")
-			}
+			require.GreaterOrEqual(t, j, 2,
+				"Kiken vs-cell must not appear in the first two columns")
+			assert.Equal(t, "", row[j-2],
+				"left score cell (col offset -2 from vs) must be blank for kiken with FlagsA=0")
 			if j+2 < len(row) {
 				assert.Equal(t, "", row[j+2],
 					"right score cell (col offset +2 from vs) must be blank for kiken with FlagsB=0")
@@ -2613,14 +2621,26 @@ func TestBuildResultsWorkbook_EngiPartialPoolScoring(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(comp))
 
 	// Two engi pools of two pairs each; pool B is unscored.
-	p1 := helper.Player{ID: "ep1", Name: "Spark A", DisplayName: "Spark B", Dojo: "DojoA"}
-	p2 := helper.Player{ID: "ep2", Name: "Flame A", DisplayName: "Flame B", Dojo: "DojoB"}
-	p3 := helper.Player{ID: "ep3", Name: "Wave A", DisplayName: "Wave B", Dojo: "DojoC"}
-	p4 := helper.Player{ID: "ep4", Name: "Stone A", DisplayName: "Stone B", Dojo: "DojoD"}
-	pools := []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{p1, p2}, Matches: []helper.Match{{SideA: &p1, SideB: &p2}}},
-		{PoolName: "Pool B", Players: []helper.Player{p3, p4}, Matches: []helper.Match{{SideA: &p3, SideB: &p4}}},
+	// SideA/SideB point into pool.Players so the playerMatchRows map resolves correctly.
+	partialPoolA := helper.Pool{
+		PoolName: "Pool A",
+		Players: []helper.Player{
+			{ID: "ep1", Name: "Spark A", DisplayName: "Spark B", Dojo: "DojoA"},
+			{ID: "ep2", Name: "Flame A", DisplayName: "Flame B", Dojo: "DojoB"},
+		},
 	}
+	partialPoolA.Matches = []helper.Match{{SideA: &partialPoolA.Players[0], SideB: &partialPoolA.Players[1]}}
+
+	partialPoolB := helper.Pool{
+		PoolName: "Pool B",
+		Players: []helper.Player{
+			{ID: "ep3", Name: "Wave A", DisplayName: "Wave B", Dojo: "DojoC"},
+			{ID: "ep4", Name: "Stone A", DisplayName: "Stone B", Dojo: "DojoD"},
+		},
+	}
+	partialPoolB.Matches = []helper.Match{{SideA: &partialPoolB.Players[0], SideB: &partialPoolB.Players[1]}}
+
+	pools := []helper.Pool{partialPoolA, partialPoolB}
 	require.NoError(t, store.SavePools(compID, pools))
 
 	// Score pool A only; pool B has no result entry (partial scoring).
@@ -2651,11 +2671,16 @@ func TestBuildResultsWorkbook_EngiPartialPoolScoring(t *testing.T) {
 	rows, err := f.GetRows(helper.SheetPoolMatches)
 	require.NoError(t, err)
 
-	// Score cells must carry the flag counts.
-	assert.True(t, containsCell(rows, "3"),
-		"Pool Matches must contain '3' (FlagsA for pool A match)")
-	assert.True(t, containsCell(rows, "2"),
-		"Pool Matches must contain '2' (FlagsB for pool A match)")
+	// Assert the pool A MATCH ROW score cells specifically: left score (FlagsA) at
+	// bandStart+1 and right score (FlagsB) at bandStart+5 (vs is at bandStart+3).
+	// containsCell alone is vacuous: it would be satisfied by the standings overlay.
+	matchRow := firstPoolMatchScoreRow(rows, 0)
+	require.NotNil(t, matchRow, "pool A match score row must exist (Red/White header must be present)")
+	require.Greater(t, len(matchRow), 5, "match score row must have at least 6 columns")
+	assert.Equal(t, "3", matchRow[1],
+		"left score cell (2 before vs) must be '3' (FlagsA=3 for pool A)")
+	assert.Equal(t, "2", matchRow[5],
+		"right score cell (2 after vs) must be '2' (FlagsB=2 for pool A)")
 
 	// The winner's accumulated flag total must appear under the "Flags" standings header.
 	assert.True(t, columnHasValueUnderHeader(rows, helper.ColHeaderFlags, "3"),
@@ -2685,21 +2710,19 @@ func TestBuildResultsWorkbook_EngiMultiCourtStandingsColumns(t *testing.T) {
 		return helper.Player{ID: id, Name: n1, DisplayName: n2, Dojo: dojo}
 	}
 
-	pa1 := makePair("pa1", "AOne-A", "AOne-B", "DojoPA")
-	pa2 := makePair("pa2", "ATwo-A", "ATwo-B", "DojoPA")
-	pb1 := makePair("pb1", "BOne-A", "BOne-B", "DojoPB")
-	pb2 := makePair("pb2", "BTwo-A", "BTwo-B", "DojoPB")
-	pc1 := makePair("pc1", "COne-A", "COne-B", "DojoPC")
-	pc2 := makePair("pc2", "CTwo-A", "CTwo-B", "DojoPC")
-	pd1 := makePair("pd1", "DOne-A", "DOne-B", "DojoPD")
-	pd2 := makePair("pd2", "DTwo-A", "DTwo-B", "DojoPD")
+	// makeEngiPool creates a pool with SideA/SideB pointing into pool.Players.
+	makeEngiPool := func(name string, p1, p2 helper.Player) helper.Pool {
+		pool := helper.Pool{PoolName: name, Players: []helper.Player{p1, p2}}
+		pool.Matches = []helper.Match{{SideA: &pool.Players[0], SideB: &pool.Players[1]}}
+		return pool
+	}
 
 	// Four pools: [A,B] -> court A; [C,D] -> court B (contiguous assignment).
 	pools := []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{pa1, pa2}, Matches: []helper.Match{{SideA: &pa1, SideB: &pa2}}},
-		{PoolName: "Pool B", Players: []helper.Player{pb1, pb2}, Matches: []helper.Match{{SideA: &pb1, SideB: &pb2}}},
-		{PoolName: "Pool C", Players: []helper.Player{pc1, pc2}, Matches: []helper.Match{{SideA: &pc1, SideB: &pc2}}},
-		{PoolName: "Pool D", Players: []helper.Player{pd1, pd2}, Matches: []helper.Match{{SideA: &pd1, SideB: &pd2}}},
+		makeEngiPool("Pool A", makePair("pa1", "AOne-A", "AOne-B", "DojoPA"), makePair("pa2", "ATwo-A", "ATwo-B", "DojoPA")),
+		makeEngiPool("Pool B", makePair("pb1", "BOne-A", "BOne-B", "DojoPB"), makePair("pb2", "BTwo-A", "BTwo-B", "DojoPB")),
+		makeEngiPool("Pool C", makePair("pc1", "COne-A", "COne-B", "DojoPC"), makePair("pc2", "CTwo-A", "CTwo-B", "DojoPC")),
+		makeEngiPool("Pool D", makePair("pd1", "DOne-A", "DOne-B", "DojoPD"), makePair("pd2", "DTwo-A", "DTwo-B", "DojoPD")),
 	}
 	require.NoError(t, store.SavePools(compID, pools))
 
@@ -2723,8 +2746,8 @@ func TestBuildResultsWorkbook_EngiMultiCourtStandingsColumns(t *testing.T) {
 	rows, err := f.GetRows(helper.SheetPoolMatches)
 	require.NoError(t, err)
 
-	courtAFlags := flagsColInBand(rows, 0, helper.CourtsColumnsPerCourt)
-	courtBFlags := flagsColInBand(rows, helper.CourtsColumnsPerCourt, 2*helper.CourtsColumnsPerCourt)
+	courtAFlags := headerColInBand(rows, helper.ColHeaderFlags, 0, helper.CourtsColumnsPerCourt)
+	courtBFlags := headerColInBand(rows, helper.ColHeaderFlags, helper.CourtsColumnsPerCourt, 2*helper.CourtsColumnsPerCourt)
 	require.GreaterOrEqual(t, courtAFlags, 0, "court A 'Flags' header must exist in pool matches for an engi competition")
 	require.GreaterOrEqual(t, courtBFlags, 0, "court B 'Flags' header must exist in pool matches for an engi competition")
 
@@ -2749,15 +2772,19 @@ func TestBuildResultsWorkbook_EngiUnicodeAndCommaNames(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(comp))
 
 	// Unicode names (Japanese) and names containing commas.
-	uniPair := helper.Player{ID: "uni1", Name: "結城 由紀", DisplayName: "田中 花子", Dojo: "東京道場"}
-	comPair := helper.Player{ID: "com1", Name: "O'Brien, Sean", DisplayName: "Smith, Jane", Dojo: "New York, NY"}
-	pools := []helper.Pool{
-		{
-			PoolName: "Pool A",
-			Players:  []helper.Player{uniPair, comPair},
-			Matches:  []helper.Match{{SideA: &uniPair, SideB: &comPair}},
+	// SideA/SideB point into pool.Players so the playerMatchRows map resolves correctly.
+	unicodePool := helper.Pool{
+		PoolName: "Pool A",
+		Players: []helper.Player{
+			{ID: "uni1", Name: "結城 由紀", DisplayName: "田中 花子", Dojo: "東京道場"},
+			{ID: "com1", Name: "O'Brien, Sean", DisplayName: "Smith, Jane", Dojo: "New York, NY"},
 		},
 	}
+	unicodePool.Matches = []helper.Match{{SideA: &unicodePool.Players[0], SideB: &unicodePool.Players[1]}}
+	// Keep local variable aliases for name assertions below.
+	uniPair := unicodePool.Players[0]
+	comPair := unicodePool.Players[1]
+	pools := []helper.Pool{unicodePool}
 	require.NoError(t, store.SavePools(compID, pools))
 	// No match results; we are only verifying Data-sheet name rendering.
 	require.NoError(t, store.SavePoolMatches(compID, nil))

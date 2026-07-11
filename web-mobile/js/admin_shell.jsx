@@ -357,7 +357,11 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
           window.API.fetchTournament(),
           window.API.fetchCompetitions()
         ]).then(([tourney, competitions]) => {
-          onUpdate({ ...tourney, competitions });
+          // fetchTournament returns null when no tournament is configured
+          // (e.g. it was reset while the dashboard is open). Fall back to the
+          // current tournament (as admin.jsx's refresh does) rather than
+          // spreading null into a malformed { competitions } object.
+          onUpdate({ ...(tourney || t), competitions });
         }).catch(err => console.error("Dashboard refresh failed", err))
           .finally(() => {
             fetching = false;

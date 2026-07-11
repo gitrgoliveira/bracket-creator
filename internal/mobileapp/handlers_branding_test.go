@@ -50,10 +50,24 @@ func buildBrandingUpload(t *testing.T, filename string, content []byte) (*bytes.
 	return body, mw.FormDataContentType()
 }
 
-func TestGetBrandingLogo_NotFound(t *testing.T) {
+func TestGetBrandingLogo_NoLogo_RedirectsToDefault(t *testing.T) {
+	// With no custom logo, GET redirects to the bundled default so image
+	// consumers never see a 404 (see RegisterPublicBrandingHandlers).
 	h, _, cleanup := brandingTestSetup(t)
 	defer cleanup()
 	req := httptest.NewRequest(http.MethodGet, "/api/branding/logo", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusFound, w.Code)
+	assert.Equal(t, "/logo.jpeg", w.Header().Get("Location"))
+}
+
+func TestHeadBrandingLogo_NoLogo_NotFound(t *testing.T) {
+	// HEAD keeps 404 as the existence probe used by BrandingManager, even
+	// though GET now redirects to the default.
+	h, _, cleanup := brandingTestSetup(t)
+	defer cleanup()
+	req := httptest.NewRequest(http.MethodHead, "/api/branding/logo", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusNotFound, w.Code)
@@ -176,11 +190,12 @@ func TestDeleteBrandingLogo_RemovesFile(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.NoFileExists(t, filepath.Join(dir, brandingDirName, "logo.png"))
 
-	// GET should now return 404.
+	// GET should now redirect to the bundled default logo.
 	req = httptest.NewRequest(http.MethodGet, "/api/branding/logo", nil)
 	w = httptest.NewRecorder()
 	h.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusNotFound, w.Code)
+	assert.Equal(t, http.StatusFound, w.Code)
+	assert.Equal(t, "/logo.jpeg", w.Header().Get("Location"))
 }
 
 // TestDeleteBrandingLogo_PreservesWindowTitle verifies that deleting the logo

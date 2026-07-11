@@ -6,7 +6,7 @@ Team tournaments work with any of the four formats described in [Tournament form
 
 Before each team encounter, set the fighting order for each team across the five positions: Senpo, Jiho, Chuken, Fukusho, and Taisho. Smaller teams use fewer positions.
 
-![The Lineups tab: a team and round selector, with a name field for each of the five positions (Senpo, Jiho, Chuken, Fukusho, Taisho) and a Save lineup button.](../../screenshots/team-lineup.png)
+![The Lineups tab: a team and round selector above a completed fighting order, with a competitor assigned to each of the five positions (Senpo, Jiho, Chuken, Fukusho, Taisho) and a Save lineup button.](../../screenshots/team-lineup.png)
 
 Each team encounter has its own lineup. To carry over the same order from the previous encounter, use **Copy from previous match** at the top of the lineup panel.
 

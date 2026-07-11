@@ -2145,12 +2145,14 @@ func TestViewerHandlers(t *testing.T) {
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	// GET /api/viewer/tournament (not found)
+	// GET /api/viewer/tournament (no tournament: 200 with a null body, not a
+	// 404, so the SPA bootstrap doesn't log a console error)
 	os.Remove(filepath.Join(tempDir, "tournament.md"))
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("GET", "/api/viewer/tournament", nil)
 	r.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusNotFound, w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "null", w.Body.String())
 	// Restore
 	store.SaveTournament(&state.Tournament{Name: "Test"})
 

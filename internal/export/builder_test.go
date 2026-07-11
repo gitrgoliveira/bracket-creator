@@ -2510,3 +2510,272 @@ func TestBuildResultsWorkbook_NonEngiStandingsHeadersUnchanged(t *testing.T) {
 	assert.False(t, containsCell(rows, "Flags"),
 		"Non-engi Pool Matches must NOT contain 'Flags' header")
 }
+
+// ------------------------------------------------------------
+// TDD-5: Engi special-case characterization tests
+// ------------------------------------------------------------
+
+// flagsColInBand returns the 0-based column index of the "Flags" standings
+// header found within the [bandStart, bandEnd) column range, or -1 if absent.
+// It is the engi analog of wColInBand.
+func flagsColInBand(rows [][]string, bandStart, bandEnd int) int {
+	for _, row := range rows {
+		for c := bandStart; c < bandEnd && c < len(row); c++ {
+			if row[c] == helper.ColHeaderFlags {
+				return c
+			}
+		}
+	}
+	return -1
+}
+
+// TestBuildResultsWorkbook_EngiDecisionSuffix characterizes the vs-cell text for
+// a kiken-voluntary engi match: the middle cell must carry "Kiken" and both
+// adjacent score cells (at column offsets -2 and +2 from the vs cell) must be
+// blank because FlagsScore(0) = "".
+func TestBuildResultsWorkbook_EngiDecisionSuffix(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	comp.Engi = true
+	require.NoError(t, store.SaveCompetition(comp))
+
+	pools := makeEngiPools()
+	require.NoError(t, store.SavePools(compID, pools))
+
+	// kiken-voluntary: pair1 wins; no flag score is recorded (FlagsScore(0) = "").
+	results := []state.MatchResult{
+		{
+			ID:       "Pool A-0",
+			SideA:    "Member One A",
+			SideAID:  "pair1",
+			SideB:    "Member One B",
+			SideBID:  "pair2",
+			FlagsA:   0,
+			FlagsB:   0,
+			Decision: "kiken-voluntary",
+			Status:   state.MatchStatusCompleted,
+			Winner:   "Member One A",
+			WinnerID: "pair1",
+		},
+	}
+	require.NoError(t, store.SavePoolMatches(compID, results))
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer f.Close()
+
+	rows, err := f.GetRows(helper.SheetPoolMatches)
+	require.NoError(t, err)
+
+	// The vs/middle cell must carry "Kiken" for a kiken-voluntary engi match.
+	assert.True(t, containsCell(rows, "Kiken"),
+		"Pool Matches vs-cell must render 'Kiken' for a kiken-voluntary engi match")
+
+	// Score cells flanking the vs column must be blank: FlagsScore(0) = "".
+	// The vs cell sits at column offset 3 from the court band start; score cells
+	// are at offsets 1 (left) and 5 (right), so -2 and +2 from the vs index.
+	for _, row := range rows {
+		for j, cell := range row {
+			if cell != "Kiken" {
+				continue
+			}
+			if j >= 2 {
+				assert.Equal(t, "", row[j-2],
+					"left score cell (col offset -2 from vs) must be blank for kiken with FlagsA=0")
+			}
+			if j+2 < len(row) {
+				assert.Equal(t, "", row[j+2],
+					"right score cell (col offset +2 from vs) must be blank for kiken with FlagsB=0")
+			}
+		}
+	}
+}
+
+// TestBuildResultsWorkbook_EngiPartialPoolScoring characterizes partial scoring:
+// two engi pools, only pool A is scored (FlagsA=3, FlagsB=2). Pool B is left
+// untouched. The export must succeed and the scored flags must appear in the Pool
+// Matches sheet under the "Flags" standings column.
+func TestBuildResultsWorkbook_EngiPartialPoolScoring(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	comp.Engi = true
+	require.NoError(t, store.SaveCompetition(comp))
+
+	// Two engi pools of two pairs each; pool B is unscored.
+	p1 := helper.Player{ID: "ep1", Name: "Spark A", DisplayName: "Spark B", Dojo: "DojoA"}
+	p2 := helper.Player{ID: "ep2", Name: "Flame A", DisplayName: "Flame B", Dojo: "DojoB"}
+	p3 := helper.Player{ID: "ep3", Name: "Wave A", DisplayName: "Wave B", Dojo: "DojoC"}
+	p4 := helper.Player{ID: "ep4", Name: "Stone A", DisplayName: "Stone B", Dojo: "DojoD"}
+	pools := []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{p1, p2}, Matches: []helper.Match{{SideA: &p1, SideB: &p2}}},
+		{PoolName: "Pool B", Players: []helper.Player{p3, p4}, Matches: []helper.Match{{SideA: &p3, SideB: &p4}}},
+	}
+	require.NoError(t, store.SavePools(compID, pools))
+
+	// Score pool A only; pool B has no result entry (partial scoring).
+	results := []state.MatchResult{
+		{
+			ID:       "Pool A-0",
+			SideA:    "Spark A",
+			SideAID:  "ep1",
+			SideB:    "Flame A",
+			SideBID:  "ep2",
+			FlagsA:   3,
+			FlagsB:   2,
+			Decision: "fought",
+			Status:   state.MatchStatusCompleted,
+			Winner:   "Spark A",
+			WinnerID: "ep1",
+		},
+	}
+	require.NoError(t, store.SavePoolMatches(compID, results))
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer f.Close()
+
+	rows, err := f.GetRows(helper.SheetPoolMatches)
+	require.NoError(t, err)
+
+	// Score cells must carry the flag counts.
+	assert.True(t, containsCell(rows, "3"),
+		"Pool Matches must contain '3' (FlagsA for pool A match)")
+	assert.True(t, containsCell(rows, "2"),
+		"Pool Matches must contain '2' (FlagsB for pool A match)")
+
+	// The winner's accumulated flag total must appear under the "Flags" standings header.
+	assert.True(t, columnHasValueUnderHeader(rows, helper.ColHeaderFlags, "3"),
+		"Pool Matches 'Flags' standings column must carry '3' for the pool A winner")
+}
+
+// TestBuildResultsWorkbook_EngiMultiCourtStandingsColumns is the engi analog of
+// TestBuildResultsWorkbook_MultiCourtStandingsColumns: four engi pools across two
+// courts; only the court-B pool is scored. The "Flags" header appears once per
+// court band; the court-B Flags column must hold the scored value while the
+// court-A Flags column must remain clean (no cross-band bleed).
+func TestBuildResultsWorkbook_EngiMultiCourtStandingsColumns(t *testing.T) {
+	t.Parallel()
+	dir, err := os.MkdirTemp("", "export-test-mc-engi-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	eng := engine.New(store)
+
+	compID := "mc-engi"
+	comp := &state.Competition{ID: compID, Name: "MC Engi", Courts: []string{"A", "B"}, Engi: true}
+	require.NoError(t, store.SaveCompetition(comp))
+
+	makePair := func(id, n1, n2, dojo string) helper.Player {
+		return helper.Player{ID: id, Name: n1, DisplayName: n2, Dojo: dojo}
+	}
+
+	pa1 := makePair("pa1", "AOne-A", "AOne-B", "DojoPA")
+	pa2 := makePair("pa2", "ATwo-A", "ATwo-B", "DojoPA")
+	pb1 := makePair("pb1", "BOne-A", "BOne-B", "DojoPB")
+	pb2 := makePair("pb2", "BTwo-A", "BTwo-B", "DojoPB")
+	pc1 := makePair("pc1", "COne-A", "COne-B", "DojoPC")
+	pc2 := makePair("pc2", "CTwo-A", "CTwo-B", "DojoPC")
+	pd1 := makePair("pd1", "DOne-A", "DOne-B", "DojoPD")
+	pd2 := makePair("pd2", "DTwo-A", "DTwo-B", "DojoPD")
+
+	// Four pools: [A,B] -> court A; [C,D] -> court B (contiguous assignment).
+	pools := []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{pa1, pa2}, Matches: []helper.Match{{SideA: &pa1, SideB: &pa2}}},
+		{PoolName: "Pool B", Players: []helper.Player{pb1, pb2}, Matches: []helper.Match{{SideA: &pb1, SideB: &pb2}}},
+		{PoolName: "Pool C", Players: []helper.Player{pc1, pc2}, Matches: []helper.Match{{SideA: &pc1, SideB: &pc2}}},
+		{PoolName: "Pool D", Players: []helper.Player{pd1, pd2}, Matches: []helper.Match{{SideA: &pd1, SideB: &pd2}}},
+	}
+	require.NoError(t, store.SavePools(compID, pools))
+
+	// Score only Pool C (court B): pc1 wins 3-2 on flags.
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{
+			ID: "Pool C-0", SideA: "COne-A", SideAID: "pc1",
+			SideB: "CTwo-A", SideBID: "pc2",
+			FlagsA: 3, FlagsB: 2,
+			Decision: "fought", Status: state.MatchStatusCompleted,
+			Winner: "COne-A", WinnerID: "pc1",
+		},
+	}))
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer f.Close()
+
+	rows, err := f.GetRows(helper.SheetPoolMatches)
+	require.NoError(t, err)
+
+	courtAFlags := flagsColInBand(rows, 0, helper.CourtsColumnsPerCourt)
+	courtBFlags := flagsColInBand(rows, helper.CourtsColumnsPerCourt, 2*helper.CourtsColumnsPerCourt)
+	require.GreaterOrEqual(t, courtAFlags, 0, "court A 'Flags' header must exist in pool matches for an engi competition")
+	require.GreaterOrEqual(t, courtBFlags, 0, "court B 'Flags' header must exist in pool matches for an engi competition")
+
+	assert.True(t, columnContains(rows, courtBFlags, "3"),
+		"court B's Flags column must carry the winner's accumulated flag count (=3)")
+	assert.False(t, columnContains(rows, courtAFlags, "3"),
+		"court A pools are unscored: '3' in court A's Flags column means court B's score leaked (multi-court colMap bug)")
+}
+
+// TestBuildResultsWorkbook_EngiUnicodeAndCommaNames characterizes that the export
+// correctly handles engi pair names containing unicode characters and commas.
+// Both member names (Name and DisplayName) for each pair must appear in the Data
+// sheet exactly, without corruption or splitting on comma or multibyte boundaries.
+func TestBuildResultsWorkbook_EngiUnicodeAndCommaNames(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	comp.Engi = true
+	require.NoError(t, store.SaveCompetition(comp))
+
+	// Unicode names (Japanese) and names containing commas.
+	uniPair := helper.Player{ID: "uni1", Name: "結城 由紀", DisplayName: "田中 花子", Dojo: "東京道場"}
+	comPair := helper.Player{ID: "com1", Name: "O'Brien, Sean", DisplayName: "Smith, Jane", Dojo: "New York, NY"}
+	pools := []helper.Pool{
+		{
+			PoolName: "Pool A",
+			Players:  []helper.Player{uniPair, comPair},
+			Matches:  []helper.Match{{SideA: &uniPair, SideB: &comPair}},
+		},
+	}
+	require.NoError(t, store.SavePools(compID, pools))
+	// No match results; we are only verifying Data-sheet name rendering.
+	require.NoError(t, store.SavePoolMatches(compID, nil))
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer f.Close()
+
+	dataRows, err := f.GetRows(helper.SheetData)
+	require.NoError(t, err)
+
+	// All four member names must appear as exact cell values in the Data sheet.
+	names := []string{uniPair.Name, uniPair.DisplayName, comPair.Name, comPair.DisplayName}
+	for _, name := range names {
+		assert.True(t, containsCell(dataRows, name),
+			"Data sheet must contain member name %q exactly (unicode/comma safe)", name)
+	}
+}

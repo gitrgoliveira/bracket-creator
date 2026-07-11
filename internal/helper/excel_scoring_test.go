@@ -69,6 +69,51 @@ func scoringSetup2Players(t *testing.T, teamMatches int) *excelize.File {
 	return f
 }
 
+// scoringSetup3PlayerRoundRobinEngi creates a 3-player round-robin pool with
+// engi=true. The match order and geometry are identical to
+// scoringSetup3PlayerRoundRobin:
+//
+//	Row 4: Match 0 Alice vs Bob   (Alice=SideA/left, Bob=SideB/right)
+//	Row 5: Match 1 Bob vs Carol   (Bob=SideA/left, Carol=SideB/right)
+//	Row 6: Match 2 Alice vs Carol (Alice=SideA/left, Carol=SideB/right)
+//	Row 8: results header (W / L / Flags / Rank)
+//	Row 9: Alice, Row 10: Bob, Row 11: Carol
+//
+// Engi standings columns: B=W, C=L, D=Flags, G=Rank, U=hidden Score.
+// PW/PL columns (E, F) are intentionally left blank in engi mode.
+func scoringSetup3PlayerRoundRobinEngi(t *testing.T) *excelize.File {
+	t.Helper()
+	pool := Pool{
+		PoolName: "Pool A",
+		Players: []Player{
+			{Name: "Alice"},
+			{Name: "Bob"},
+			{Name: "Carol"},
+		},
+	}
+	pool.Matches = []Match{
+		{SideA: &pool.Players[0], SideB: &pool.Players[1]},
+		{SideA: &pool.Players[1], SideB: &pool.Players[2]},
+		{SideA: &pool.Players[0], SideB: &pool.Players[2]},
+	}
+
+	poolCoords := map[string]cellCoord{
+		"Pool A": {sheetName: SheetPoolDraw, cell: "B1"},
+	}
+	pCoords := map[string]playerCellCoord{
+		playerCoordKey(pool.Players[0]): {cellCoord: cellCoord{sheetName: SheetPoolDraw, cell: "A1"}},
+		playerCoordKey(pool.Players[1]): {cellCoord: cellCoord{sheetName: SheetPoolDraw, cell: "A2"}},
+		playerCoordKey(pool.Players[2]): {cellCoord: cellCoord{sheetName: SheetPoolDraw, cell: "A3"}},
+	}
+
+	f := excelize.NewFile()
+	t.Cleanup(func() { f.Close() })
+	f.NewSheet(SheetPoolMatches)
+	f.NewSheet(SheetPoolDraw)
+	PrintPoolMatches(f, []Pool{pool}, 0, 1, 1, false, poolCoords, pCoords, true)
+	return f
+}
+
 // scoringSetup3PlayerRoundRobin creates a 3-player round-robin pool.
 // Match order: Alice vs Bob (row 4), Bob vs Carol (row 5), Alice vs Carol (row 6).
 func scoringSetup3PlayerRoundRobin(t *testing.T) *excelize.File {
@@ -640,4 +685,229 @@ func TestTeamIVILITPWPLTableFormulas(t *testing.T) {
 			assert.Equal(t, c.bob.pl, calcScore(t, f, "F14"), "Bob PL")
 		})
 	}
+}
+
+// TestEngiPoolScoringFormulas_MultiMatch verifies that the W/L/Flags formula
+// cells accumulate correctly across multiple matches per player in a 3-player
+// engi round-robin pool. Each player appears in two matches; the formulas must
+// correctly sum wins and flag totals from both records.
+//
+// Match setup (Alice beats Bob 3-2; Carol beats Bob 4-1; Alice beats Carol 5-0):
+//
+//	Row 4: Alice (left, B4=3) vs Bob  (right, F4=2)
+//	Row 5: Bob   (left, B5=1) vs Carol(right, F5=4)
+//	Row 6: Alice (left, B6=5) vs Carol(right, F6=0)
+//
+// Standings: Row 8 header; Row 9=Alice, Row 10=Bob, Row 11=Carol.
+// Columns: B=W, C=L, D=Flags.
+func TestEngiPoolScoringFormulas_MultiMatch(t *testing.T) {
+	f := scoringSetup3PlayerRoundRobinEngi(t)
+
+	// Alice beats Bob 3-2.
+	f.SetCellValue(SheetPoolMatches, "B4", 3) // Alice (left) flags
+	f.SetCellValue(SheetPoolMatches, "F4", 2) // Bob   (right) flags
+	// Carol beats Bob 4-1: Match 1 row is Bob (left) vs Carol (right).
+	f.SetCellValue(SheetPoolMatches, "B5", 1) // Bob   (left) flags
+	f.SetCellValue(SheetPoolMatches, "F5", 4) // Carol (right) flags
+	// Alice beats Carol 5-0: Match 2 row is Alice (left) vs Carol (right).
+	f.SetCellValue(SheetPoolMatches, "B6", 5) // Alice (left) flags
+	f.SetCellValue(SheetPoolMatches, "F6", 0) // Carol (right) flags
+
+	t.Run("Alice wins both accumulates W=2 Flags=8", func(t *testing.T) {
+		assert.Equal(t, "2", calcScore(t, f, "B9"), "Alice W")
+		assert.Equal(t, "0", calcScore(t, f, "C9"), "Alice L")
+		assert.Equal(t, "8", calcScore(t, f, "D9"), "Alice Flags (3+5)")
+	})
+
+	t.Run("Bob loses both accumulates W=0 Flags=3", func(t *testing.T) {
+		assert.Equal(t, "0", calcScore(t, f, "B10"), "Bob W")
+		assert.Equal(t, "2", calcScore(t, f, "C10"), "Bob L")
+		assert.Equal(t, "3", calcScore(t, f, "D10"), "Bob Flags (2+1)")
+	})
+
+	t.Run("Carol one win one loss Flags=4", func(t *testing.T) {
+		assert.Equal(t, "1", calcScore(t, f, "B11"), "Carol W")
+		assert.Equal(t, "1", calcScore(t, f, "C11"), "Carol L")
+		assert.Equal(t, "4", calcScore(t, f, "D11"), "Carol Flags (4+0)")
+	})
+}
+
+// TestEngiScoreAndRankFormulas verifies that the hidden Score cell (column U)
+// and the visible Rank cell (column G) compute correct values in a 3-player
+// engi round-robin pool.
+//
+// Score formula: (W*1000000)+(Flags). Rank formula: RANK+COUNTIF breaking
+// ties by row order (first occurrence gets the lower rank number).
+//
+// Using the same match setup as TestEngiPoolScoringFormulas_MultiMatch:
+// Alice W=2 Flags=8, Carol W=1 Flags=4, Bob W=0 Flags=3.
+// Expected scores: Alice=2000008, Carol=1000004, Bob=3.
+// Expected ranks:  Alice=1, Carol=2, Bob=3.
+func TestEngiScoreAndRankFormulas(t *testing.T) {
+	f := scoringSetup3PlayerRoundRobinEngi(t)
+
+	f.SetCellValue(SheetPoolMatches, "B4", 3)
+	f.SetCellValue(SheetPoolMatches, "F4", 2)
+	f.SetCellValue(SheetPoolMatches, "B5", 1)
+	f.SetCellValue(SheetPoolMatches, "F5", 4)
+	f.SetCellValue(SheetPoolMatches, "B6", 5)
+	f.SetCellValue(SheetPoolMatches, "F6", 0)
+
+	t.Run("hidden Score cells", func(t *testing.T) {
+		assert.Equal(t, "2000008", calcScore(t, f, "U9"), "Alice Score (2*1000000+8)")
+		assert.Equal(t, "1000004", calcScore(t, f, "U11"), "Carol Score (1*1000000+4)")
+		assert.Equal(t, "3", calcScore(t, f, "U10"), "Bob Score (0*1000000+3)")
+	})
+
+	t.Run("Rank cells reflect win-then-flag ordering", func(t *testing.T) {
+		assert.Equal(t, "1", calcScore(t, f, "G9"), "Alice Rank")
+		assert.Equal(t, "2", calcScore(t, f, "G11"), "Carol Rank")
+		assert.Equal(t, "3", calcScore(t, f, "G10"), "Bob Rank")
+	})
+}
+
+// TestEngiPoolScoringFormulas_EqualFlagsDefensive exercises the equal-flags
+// edge case (B4=3, F4=3) to verify the formula degrades sanely.
+//
+// Equal flag totals are unreachable in a real engi bout: the referee awards
+// an odd number of flags to exactly one pair per match, so a draw is
+// structurally impossible. The formulas must still produce defined output:
+// W=L=0 for both sides, Flags=3 for each, Score=3 for each.
+//
+// Rank tie-breaking: RANK+COUNTIF assigns sequential ranks by row position
+// when scores are equal. Alice (row 7, first in range) gets rank 1; Bob
+// (row 8) sees one prior occurrence of score=3 in the COUNTIF range, so
+// his rank resolves to 1+1=2.
+func TestEngiPoolScoringFormulas_EqualFlagsDefensive(t *testing.T) {
+	f := scoringSetup2PlayersEngi(t)
+
+	// Equal flags on both sides — unreachable in real engi data.
+	f.SetCellValue(SheetPoolMatches, "B4", 3)
+	f.SetCellValue(SheetPoolMatches, "F4", 3)
+
+	t.Run("both W=0 L=0", func(t *testing.T) {
+		assert.Equal(t, "0", calcScore(t, f, "B7"), "Alice W")
+		assert.Equal(t, "0", calcScore(t, f, "C7"), "Alice L")
+		assert.Equal(t, "0", calcScore(t, f, "B8"), "Bob W")
+		assert.Equal(t, "0", calcScore(t, f, "C8"), "Bob L")
+	})
+
+	t.Run("Flags accumulate correctly", func(t *testing.T) {
+		assert.Equal(t, "3", calcScore(t, f, "D7"), "Alice Flags")
+		assert.Equal(t, "3", calcScore(t, f, "D8"), "Bob Flags")
+	})
+
+	t.Run("Score cells are equal", func(t *testing.T) {
+		aliceScore := calcScore(t, f, "U7")
+		bobScore := calcScore(t, f, "U8")
+		assert.Equal(t, "3", aliceScore, "Alice Score (0+3)")
+		assert.Equal(t, aliceScore, bobScore, "tied scores are equal")
+	})
+
+	// RANK+COUNTIF breaks ties by position: first player in the range gets rank 1,
+	// the second sees one prior occurrence in the COUNTIF window and gets rank 2.
+	// This state is unreachable in real engi data (flag totals are always odd,
+	// so equal flags between two players is impossible), but the formula still
+	// produces a defined, stable result.
+	t.Run("Rank breaks tie by row position", func(t *testing.T) {
+		assert.Equal(t, "1", calcScore(t, f, "G7"), "Alice Rank (first in range)")
+		assert.Equal(t, "2", calcScore(t, f, "G8"), "Bob Rank (second in range)")
+	})
+}
+
+// TestEngiPoolScoringFormulas_BothCellsText verifies that when both input
+// cells hold non-numeric text, the OR(ISNUMBER(...)) gate evaluates to FALSE
+// and the entire bout is treated as unplayed: W=L=0, Flags=0 for both sides.
+//
+// This exercises the boundary between "played" and "unplayed" in the engi
+// formula. The flags column uses N(), which returns 0 for text, so it never
+// contributes to a player's accumulated flag total.
+func TestEngiPoolScoringFormulas_BothCellsText(t *testing.T) {
+	f := scoringSetup2PlayersEngi(t)
+
+	// Both cells are non-numeric text: OR(ISNUMBER(...)) = FALSE → unplayed.
+	f.SetCellValue(SheetPoolMatches, "B4", "x")
+	f.SetCellValue(SheetPoolMatches, "F4", "y")
+
+	t.Run("Alice all zeros", func(t *testing.T) {
+		assert.Equal(t, "0", calcScore(t, f, "B7"), "Alice W")
+		assert.Equal(t, "0", calcScore(t, f, "C7"), "Alice L")
+		assert.Equal(t, "0", calcScore(t, f, "D7"), "Alice Flags")
+	})
+
+	t.Run("Bob all zeros", func(t *testing.T) {
+		assert.Equal(t, "0", calcScore(t, f, "B8"), "Bob W")
+		assert.Equal(t, "0", calcScore(t, f, "C8"), "Bob L")
+		assert.Equal(t, "0", calcScore(t, f, "D8"), "Bob Flags")
+	})
+}
+
+// TestEngiPoolScoringFormulas_NumericTextInput pins the behavior when one
+// score cell is stored as a text string "3" (via SetCellStr) and the other
+// as a numeric 2 (via SetCellValue).
+//
+// EXCELIZE EVALUATOR NOTE: In real Excel/LibreOffice/Sheets, N(textCell)=0
+// even for numeric-looking strings like "3". The intended production behavior
+// is therefore: text side = 0 flags, opponent's numeric 2 wins.
+//
+// excelize's CalcCellValue evaluator differs: it converts numeric-looking
+// text strings to numbers, yielding N("3")=3. As a result, the text side
+// appears to WIN in unit tests even though it would lose in a real
+// spreadsheet application. These assertions document the excelize evaluator
+// behavior. Operators must enter actual numeric values — not text — to
+// guarantee correct results in the Excel file itself.
+func TestEngiPoolScoringFormulas_NumericTextInput(t *testing.T) {
+	f := scoringSetup2PlayersEngi(t)
+
+	// B4 stored as text string "3"; F4 stored as numeric 2.
+	// In real Excel: N("3")=0, so Alice would lose 0-2.
+	// In excelize's evaluator: N("3")=3, so Alice appears to win 3-2.
+	require.NoError(t, f.SetCellStr(SheetPoolMatches, "B4", "3"))
+	f.SetCellValue(SheetPoolMatches, "F4", 2)
+
+	// ISNUMBER(F4)=TRUE → played=TRUE (OR gate). Both sides are evaluated.
+	// excelize evaluator: N("3")=3, N(2)=2 → Alice "wins" 3-2.
+	t.Run("Alice W=1 Flags=3 (excelize evaluator quirk: N(text)=number)", func(t *testing.T) {
+		assert.Equal(t, "1", calcScore(t, f, "B7"), "Alice W")
+		assert.Equal(t, "0", calcScore(t, f, "C7"), "Alice L")
+		assert.Equal(t, "3", calcScore(t, f, "D7"), "Alice Flags (N(\"3\")=3 in excelize)")
+	})
+
+	t.Run("Bob W=0 Flags=2", func(t *testing.T) {
+		assert.Equal(t, "0", calcScore(t, f, "B8"), "Bob W")
+		assert.Equal(t, "1", calcScore(t, f, "C8"), "Bob L")
+		assert.Equal(t, "2", calcScore(t, f, "D8"), "Bob Flags")
+	})
+}
+
+// TestEngiPoolStandings_NoPWPLCells is a regression guard for the
+// `if !ctx.engi` gate in printIndividualResultsTableSection that prevents
+// PW/PL formula cells from being written in engi mode.
+//
+// Engi standings only use W, L, Flags, and Rank; PW/PL have no meaning
+// because there are no individual "points" in kata competition. Leaving those
+// cells blank avoids misleading operators who open the spreadsheet.
+func TestEngiPoolStandings_NoPWPLCells(t *testing.T) {
+	t.Run("engi PW/PL cells have no formula and no value", func(t *testing.T) {
+		f := scoringSetup2PlayersEngi(t)
+
+		pwPlCells := []string{"E7", "F7", "E8", "F8"}
+		for _, cell := range pwPlCells {
+			formula, err := f.GetCellFormula(SheetPoolMatches, cell)
+			require.NoErrorf(t, err, "GetCellFormula(%s)", cell)
+			assert.Equal(t, "", formula, "engi cell %s must have no formula", cell)
+
+			value, err := f.CalcCellValue(SheetPoolMatches, cell)
+			require.NoErrorf(t, err, "CalcCellValue(%s)", cell)
+			assert.Equal(t, "", value, "engi cell %s must have empty value", cell)
+		}
+	})
+
+	t.Run("non-engi PW cell E7 has a formula", func(t *testing.T) {
+		f := scoringSetup2Players(t, 0)
+
+		formula, err := f.GetCellFormula(SheetPoolMatches, "E7")
+		require.NoError(t, err, "GetCellFormula(E7)")
+		assert.NotEqual(t, "", formula, "non-engi E7 must contain a PW formula")
+	})
 }

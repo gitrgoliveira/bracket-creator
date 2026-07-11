@@ -420,12 +420,12 @@ This builds the full binary, including the `serve` and `mobile-app` subcommands.
 Download the pre-compiled binaries from the [release page](https://github.com/gitrgoliveira/bracket-creator/releases) and copy them to the desired location.
 
 ```bash
-$ OS=linux
-$ ARCH=x86_64
-$ TAR_FILE=bracket-creator_${OS}_${ARCH}.tar.gz
-$ wget https://github.com/gitrgoliveira/bracket-creator/releases/latest/download/${TAR_FILE}
-$ sudo tar xvf ${TAR_FILE} -C /usr/local/bin bracket-creator
-$ rm -f ${TAR_FILE}
+OS=linux
+ARCH=x86_64
+TAR_FILE=bracket-creator_${OS}_${ARCH}.tar.gz
+wget https://github.com/gitrgoliveira/bracket-creator/releases/latest/download/${TAR_FILE}
+sudo tar xvf ${TAR_FILE} -C /usr/local/bin bracket-creator
+rm -f ${TAR_FILE}
 ```
 
 </details>
@@ -434,10 +434,10 @@ $ rm -f ${TAR_FILE}
   <summary><h3>manually</h3></summary>
 
 ```bash
-$ git clone github.com/gitrgoliveira/bracket-creator
-$ cd bracket-creator
-$ go generate ./...
-$ go install
+git clone github.com/gitrgoliveira/bracket-creator
+cd bracket-creator
+go generate ./...
+go install
 ```
 
 </details>

@@ -14,7 +14,7 @@ Open `http://localhost:8080` in a browser. When the data folder is empty, the ap
 
 ## 2. Create a competition
 
-From the dashboard, click **New competition**. Choose individual or team, then select a format: playoffs, mixed, league, or Swiss. See [Formats](../organisers/formats.md) for a description of each format and when to use it.
+From the dashboard, click **+ Add competition**. Choose individual or team, then select a format: playoffs, mixed, league, or Swiss. See [Formats](../organisers/formats.md) for a description of each format and when to use it.
 
 ## 3. Add competitors
 

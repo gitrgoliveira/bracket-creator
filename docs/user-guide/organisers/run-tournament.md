@@ -52,7 +52,7 @@ The dashboard lists all competitions for the tournament. Each card shows the com
 
 ## Tournament details and the public info page
 
-Open **Tournament Details** from the dashboard to fill in the public information your attendees see:
+Open **Edit details** from the dashboard to fill in the public information your attendees see:
 
 - Venue address and a map link
 - Opening and closing times
@@ -67,7 +67,7 @@ Set the **Public URL** field to the externally reachable address of your app (fo
 
 ## Branding and sponsors
 
-Open **Branding** from the dashboard. All fields are optional; the default kendo theme applies when nothing is configured.
+The same **Edit details** page also has branding and sponsor fields, below tournament details. All fields are optional; the default kendo theme applies when nothing is configured.
 
 - **Logo**: upload an image file to display in the viewer header.
 - **Primary and accent colours**: the viewer and display screens adopt these colours across the whole site.
@@ -75,11 +75,11 @@ Open **Branding** from the dashboard. All fields are optional; the default kendo
 
 ## Announcements
 
-Open **Announcements** from the dashboard to broadcast a short message to every viewer. Choose a duration of 5, 10, 15, or 30 minutes; the message clears itself automatically when the time expires. It appears as an overlay on the viewer and display screens. Spectators who allow browser notifications can receive it in the background.
+Click **Announce** from the dashboard to broadcast a short message to every viewer. Choose a duration of 5, 10, 15, or 30 minutes; the message clears itself automatically when the time expires. It appears as an overlay on the viewer and display screens. Spectators who allow browser notifications can receive it in the background.
 
 ## Registration desk
 
-Open **Registration** from the dashboard to access the cross-competition check-in surface for the welcome table. This view lists every competitor across all competitions so a registration helper can mark participants present as they arrive. It complements the per-competition check-in described in [Set up a competition](#set-up-a-competition).
+Open **Registration desk** from the dashboard to access the cross-competition check-in surface for the welcome table. This view lists every competitor across all competitions so a registration helper can mark participants present as they arrive. It complements the per-competition check-in described in [Set up a competition](#set-up-a-competition).
 
 ## Set up a competition
 
@@ -162,7 +162,7 @@ The public viewer shows a competition's podium when it finishes, and a provision
 
 Operators see an all-competition winners view from the dashboard. You can also record optional **fighting-spirit** (敢闘賞) awards as free text; these appear on the viewer for all spectators. Saving awards requires the destructive-ops password in self-run mode; see [Operating modes](operating-modes.md#destructive-ops-password).
 
-**League competitions** derive the podium from final standings. In an individual league, when scores are tied for third, a short ippon-shobu tie-breaker decides placement before the competition closes. The **Award two joint 3rd places** option (enabled by default for kendo) lets two competitors share third with no decider. In a team league, the operator chooses whether to run a tie-breaker or accept a tie at any position; see [Team standings and tie-breaks](team-tournaments.md#team-standings-and-tie-breaks).
+**League competitions** derive the podium from final standings. In an individual league, any tie within the top three places triggers a short ippon-shobu tie-breaker automatically, so the competition never closes with an unearned tie. The one exception is 3rd place: with the **Award two joint 3rd places** option enabled (the default for kendo), competitors tied entirely for third share the position instead, with no decider. In a team league, the operator chooses whether to run a tie-breaker or accept a tie at any position; see [Team standings and tie-breaks](team-tournaments.md#team-standings-and-tie-breaks).
 
 Set the **Award two joint 3rd places** option during setup, before you generate the draw. Once the draw exists, the option is locked; discard the draw to change it.
 
@@ -199,4 +199,4 @@ Tournament state is stored as plain files inside the data folder you specified w
 
 ## Tournament schedule
 
-Open **Schedule** from the dashboard to configure timing for each competition. Set start times and minutes-per-match per competition, then click **Auto-schedule** to distribute all pool matches across the assigned shiai-jo automatically. The view shows an estimated end time per court based on match duration and the number of assigned matches.
+Open **Tournament schedule** from the dashboard to configure timing for each competition. Set start times and minutes-per-match per competition, then click **Auto-schedule competition** to distribute all pool matches across the assigned shiai-jo automatically. The view shows an estimated end time per court based on match duration and the number of assigned matches.

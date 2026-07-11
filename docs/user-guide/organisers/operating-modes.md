@@ -8,7 +8,7 @@ Tournament mode controls who can score matches and manage competitions. You choo
 
 ### Officiated mode
 
-Officiated mode is the default. Every action (scoring, check-in, starting and completing competitions) requires the admin password. All recorded results carry the label "admin" to show they were entered by an operator.
+Officiated mode is the default. Every action (scoring, check-in, starting, and completing competitions) requires the admin password. All recorded results carry the label "admin" to show they were entered by an operator.
 
 ### Self-run mode
 

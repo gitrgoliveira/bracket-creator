@@ -19,7 +19,7 @@ If the competition uses check-in, mark yourself present before the organiser gen
 
 You can record your match result directly from the public viewer, without the admin password. A result you enter is tagged as self-reported; a result entered by an operator is tagged as admin.
 
-Only everyday match outcomes are available to self-reporters. Decisions that require an official and destructive actions such as editing the roster remain with the operator. For a full list of outcomes and what they mean, see [Recording decisions](../court-operators/recording-decisions.md).
+Only everyday match outcomes are available to self-reporters. Decisions that require an official ruling remain with the operator, and so do destructive actions such as editing the roster. For a full list of outcomes and what they mean, see [Recording decisions](../court-operators/recording-decisions.md).
 
 ## Follow your matches and standings
 

@@ -31,7 +31,7 @@ Individual bouts are scored first. Once all bouts are done, the encounter result
 
 ## Kachinuki (winner-stays-on)
 
-In kachinuki format, the winner of each bout remains on the court to face the next opponent from the opposing team. Bouts continue in succession until one team has no remaining fighters. The team that exhausts the other team wins the encounter.
+In kachinuki format, the winner of each bout remains on the court to face the next opponent from the opposing team. If a bout ends in a hikiwake (draw), both fighters retire instead of one continuing; the next pair, one from each team's remaining roster, takes the court. Bouts continue in succession until one team has no remaining fighters. The team that exhausts the other team wins the encounter.
 
 ## Team standings and tie-breaks
 
@@ -47,7 +47,7 @@ In pools and league, team standings are resolved in this order:
 8. Points lost (fewer is better)
 
 !!! note
-    When two or more teams remain tied after all eight criteria and the tie is consequential (it decides who advances or their seeding), what happens next depends on format:
+    When two or more teams remain tied after all eight criteria and the tie is consequential (it decides who advances or how they are seeded), what happens next depends on format:
 
     - **Mixed-format pools**: the app schedules a daihyosen automatically to break the tie.
     - **League**: the operator decides. From the Pools tab, either run a daihyosen among the tied teams or accept the shared ranks to finalise standings with the tie left in place. This choice is available for any tied position, including joint first, once every regular league match is complete.

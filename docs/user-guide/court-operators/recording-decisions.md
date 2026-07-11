@@ -31,9 +31,9 @@ A daihyosen is a representative bout used to break a tie when points and ranking
 It applies in two situations:
 
 - In the knockout phase, when a team encounter finishes level.
-- In team pool or league play, when two teams finish equal on every ranking criterion and the tie decides who advances or their seed.
+- In team pool or league play, when two teams finish equal on every ranking criterion and the tie decides who advances or how they are seeded.
 
-A tie that does not affect advancement is left as a shared rank with no extra bout. In league play, running the daihyosen is the operator's choice rather than automatic; see [Team standings and tie-breaks](../organisers/team-tournaments.md#team-standings-and-tie-breaks) for both options.
+A tie that does not affect advancement is left as a shared rank with no extra bout. In league play, running the daihyosen is the operator's choice rather than an automatic step; see [Team standings and tie-breaks](../organisers/team-tournaments.md#team-standings-and-tie-breaks) for both options.
 
 The bout is a single-point ippon-shobu with no time limit, between one representative from each tied team. The score editor lets you pick each team's representative from its roster. On the court console, the bout appears with a **DH** tag. In pool and league standings, the team that won its daihyosen carries a **DH** badge.
 

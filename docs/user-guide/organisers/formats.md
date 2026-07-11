@@ -33,9 +33,9 @@ Use league for small fields (typically eight or fewer competitors) where you wan
 
 ## Swiss
 
-Swiss is a tournament system that runs over a fixed number of rounds. No one is eliminated; instead, each round pairs competitors with similar win records against each other, so results stay competitive throughout.
+Swiss is a tournament system that runs over a fixed number of rounds. No one is eliminated; instead, each round pairs competitors with similar win records, so results stay competitive throughout.
 
-Use Swiss for large individual fields where a full round-robin would require too many rounds but you still want every competitor to play multiple well-matched bouts.
+Use Swiss for large individual fields where a full round-robin would require too many rounds, but you still want every competitor to play multiple well-matched bouts.
 
 !!! note
     Swiss is a format, not a status. A Swiss competition runs through the same lifecycle as mixed and league, but its rounds are generated one at a time rather than all at once.

@@ -12,7 +12,7 @@ Officiated mode is the default. Every action (scoring, check-in, starting and co
 
 ### Self-run mode
 
-In self-run mode, scoring, check-in, and starting competitions are open to anyone without a password, so competitors or table helpers can run and score their own matches. Completing a competition is irreversible, so it stays behind the destructive-ops password (see [Destructive-ops password](#destructive-ops-password)). A public self-registration page also becomes available for competitors to sign themselves up.
+In self-run mode, scoring, check-in, and starting competitions are open to anyone without a password, so competitors or table helpers can run and score their own matches. Completing a competition is irreversible, so it stays behind the destructive-ops password (see [Destructive-ops password](#destructive-ops-password)). A public self-registration page also becomes available for competitors to sign themselves up, for individual competitions only and only while the competition is still in setup, before the draw is generated.
 
 Two kinds of action stay gated in self-run mode. Organiser setup (creating and editing competitions, tournament settings, seeds, scheduling, team lineups, match decisions such as kiken, and exports) still requires the admin password. Destructive actions (deleting a competition, discarding a draw, editing the roster, and completing a competition) require the destructive-ops password (see [Destructive-ops password](#destructive-ops-password)).
 
@@ -74,6 +74,7 @@ Actions gated by the destructive-ops password include:
 - Resetting manual overrides for a competition
 - Adding, editing, or replacing participants
 - Importing competitions
+- Recording or editing fighting-spirit awards
 - Completing a competition (completing is irreversible)
 
 The following are NOT gated by the destructive-ops password: scoring, match decisions, check-in, starting a competition, lineup management, or the `/reset` path.

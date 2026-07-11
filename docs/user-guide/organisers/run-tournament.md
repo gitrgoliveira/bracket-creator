@@ -10,7 +10,7 @@ Run the following command from your terminal:
 bracket-creator mobile-app --folder ./tournament-data
 ```
 
-Then open `http://localhost:8080` in a browser. The server binds to `localhost` by default, so other devices cannot reach it yet. To let helpers on the same network connect, start the server with `--bind 0.0.0.0` (or a specific LAN interface), then share your machine's LAN address, for example `http://192.168.1.10:8080`.
+Then open `http://localhost:8080` in a browser. The server binds to `localhost` by default, so other devices cannot reach it yet. To let helpers on the same network connect, start the server with `--bind 0.0.0.0` (or a specific LAN interface), then share your machine's LAN address, for example, `http://192.168.1.10:8080`.
 
 The following flags and environment variables control the server:
 
@@ -160,9 +160,9 @@ The public viewer shows a competition's podium when it finishes, and a provision
 - **Naginata**: a single 3rd place is decided by a playoff. See [Naginata](naginata.md) for naginata-specific configuration.
 - **Mixed format** (still in its pool phase): the viewer shows a provisional cross-pool ranking until the knockout decides the final places.
 
-Operators see an all-competition winners view from the dashboard. You can also record optional **fighting-spirit** (敢闘賞) awards as free text; these appear on the viewer for all spectators.
+Operators see an all-competition winners view from the dashboard. You can also record optional **fighting-spirit** (敢闘賞) awards as free text; these appear on the viewer for all spectators. Saving awards requires the destructive-ops password in self-run mode; see [Operating modes](operating-modes.md#destructive-ops-password).
 
-**League competitions** derive the podium from final standings. When scores are tied for third, a short ippon-shobu tie-breaker decides placement before the competition closes. The **Award two joint 3rd places** option (enabled by default for kendo) lets two competitors share third with no decider.
+**League competitions** derive the podium from final standings. In an individual league, when scores are tied for third, a short ippon-shobu tie-breaker decides placement before the competition closes. The **Award two joint 3rd places** option (enabled by default for kendo) lets two competitors share third with no decider. In a team league, the operator chooses whether to run a tie-breaker or accept a tie at any position; see [Team standings and tie-breaks](team-tournaments.md#team-standings-and-tie-breaks).
 
 Set the **Award two joint 3rd places** option during setup, before you generate the draw. Once the draw exists, the option is locked; discard the draw to change it.
 

@@ -59,8 +59,10 @@ def site_base_path(repo_root: str) -> str:
                 m = re.match(r"\s*site_url:\s*(\S+)", line)
                 if m:
                     # https://host/bracket-creator/ -> /bracket-creator
+                    # https://host/ (domain root) -> "" (no prefix to strip)
                     path = re.sub(r"^https?://[^/]+", "", m.group(1).strip())
-                    return "/" + path.strip("/")
+                    stripped = path.strip("/")
+                    return "/" + stripped if stripped else ""
     except OSError:
         pass
     return ""

@@ -6,10 +6,10 @@ The steps on this page apply only to a self-run tournament. In an officiated tou
 
 ## Register yourself
 
-When the tournament is self-run, a public self-registration page is open. Open the registration page on your own device and enter your details to join a competition.
+When the tournament is self-run, a public self-registration page is open for individual competitions while they are still in setup, before the organiser generates the draw. Open the registration page on your own device and enter your details to join a competition.
 
 !!! note
-    In an officiated tournament, the registration page is not available. The organiser adds you to the competition directly.
+    Self-registration is not available for team competitions; the organiser adds the team roster directly. It also closes once the draw is generated. In an officiated tournament, the registration page is not available at all, and the organiser adds you to the competition directly.
 
 ## Check in on the day
 
@@ -19,7 +19,7 @@ If the competition uses check-in, mark yourself present before the organiser gen
 
 You can record your match result directly from the public viewer, without the admin password. A result you enter is tagged as self-reported; a result entered by an operator is tagged as admin.
 
-Only everyday match outcomes are available to self-reporters. Decisions that require an official, and destructive actions such as editing the roster, remain with the operator. For a full list of outcomes and what they mean, see [Recording decisions](../court-operators/recording-decisions.md).
+Only everyday match outcomes are available to self-reporters. Decisions that require an official and destructive actions such as editing the roster remain with the operator. For a full list of outcomes and what they mean, see [Recording decisions](../court-operators/recording-decisions.md).
 
 ## Follow your matches and standings
 

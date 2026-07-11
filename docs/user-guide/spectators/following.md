@@ -9,7 +9,7 @@ Not sure which role fits you? See [Choosing your setup](../start-here/choosing-y
 The viewer brings together everything you need to follow the day in one place:
 
 - A personal **Watchlist** so you can track yourself, specific competitors, or a whole dojo. As a watched match approaches, the viewer nudges you so players know when to warm up and coaches know when to be matside.
-- The full match schedule across all shiai-jo, filterable by player or team. The free-text filter matches a competitor's name, their assigned number, or their tag (for example "A1"), so you can jump straight to their bouts.
+- The full match schedule across all shiai-jo, filterable by player or team. The free-text filter matches a competitor's name, their assigned number, or their tag (for example, "A1"), so you can jump straight to their bouts.
 - Pool standings that update as scores are entered, with no page refresh needed.
 - The elimination bracket filling in as matches are completed.
 
@@ -27,7 +27,7 @@ The app provides three display URLs:
 
 - `/display?court=A` shows a single court's current match, upcoming queue, and recent results.
 - `/display?court=all` shows every court at once, for a lobby or overview screen.
-- Add `&overlay=true` to either URL for a transparent variant you key into a video stream as a browser source (for example OBS or vMix), so online viewers see player names and the current score over the video.
+- Add `&overlay=true` to either URL for a transparent variant you key into a video stream as a browser source (for example, OBS or vMix), so online viewers see player names and the current score over the video.
 
 ![Single-court scoreboard for shiai-jo A: the current match with Shiro on the left and Aka in red on the right, and the next match below.](../../screenshots/display-scoreboard.png)
 
@@ -46,7 +46,7 @@ When everything is healthy, no dot appears.
 
 Scores entered by the operator appear on the viewer immediately, across every connected device.
 
-![A scorer's result appears on the viewer in real time, with no refresh.](../../screenshots/live-update.gif)
+![A scorer's result appears on the viewer in real time, with no refresh.](../../screenshots/realtime-update.gif)
 
 ## QR codes on competitor tags
 

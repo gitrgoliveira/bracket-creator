@@ -2919,3 +2919,220 @@ func TestBuildResultsWorkbook_EngiUnicodeAndCommaNames(t *testing.T) {
 			"Data sheet must contain member name %q exactly (unicode/comma safe)", name)
 	}
 }
+
+// ============================================================
+// TDD-bronze: Naginata 3rd-place block rendering (mp-wvba)
+// ============================================================
+
+// setNaginataPlayoffs configures the loaded competition as a naginata playoffs
+// competition (individual, 4 players, single court).
+func setNaginataPlayoffs(t *testing.T, store *state.Store, compID string, engi bool) {
+	t.Helper()
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	comp.Format = state.CompFormatPlayoffs
+	comp.Naginata = true
+	comp.Engi = engi
+	comp.Kind = "individual"
+	comp.PoolSize = 3
+	comp.PoolSizeMode = "min"
+	comp.PoolWinners = 2
+	comp.Status = "setup"
+	require.NoError(t, store.SaveCompetition(comp))
+}
+
+// startNaginataWith4Players saves 4 participants, starts the competition, and
+// returns the bracket. The caller must have called setNaginataPlayoffs first.
+func startNaginataWith4Players(t *testing.T, store *state.Store, eng *engine.Engine, compID string, engi bool) *state.Bracket {
+	t.Helper()
+	var players []domain.Player
+	if engi {
+		players = []domain.Player{
+			{Name: "Pair1A", DisplayName: "Pair1B", Dojo: "DojoA"},
+			{Name: "Pair2A", DisplayName: "Pair2B", Dojo: "DojoB"},
+			{Name: "Pair3A", DisplayName: "Pair3B", Dojo: "DojoC"},
+			{Name: "Pair4A", DisplayName: "Pair4B", Dojo: "DojoD"},
+		}
+	} else {
+		players = []domain.Player{
+			{Name: "Alice", Dojo: "DojoA"},
+			{Name: "Bob", Dojo: "DojoB"},
+			{Name: "Charlie", Dojo: "DojoC"},
+			{Name: "Dave", Dojo: "DojoD"},
+		}
+	}
+	require.NoError(t, store.SaveParticipants(compID, players))
+	require.NoError(t, eng.StartCompetition(compID))
+
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.NotNil(t, bracket.ThirdPlaceMatch, "naginata 4-player bracket must have ThirdPlaceMatch")
+	return bracket
+}
+
+// TestBuildResultsWorkbook_NaginataThirdPlaceRendered verifies that a scored
+// naginata bronze match appears as a "3rd Place" block on the Elimination
+// Matches sheet with the winner's ippon letter in the score row.
+func TestBuildResultsWorkbook_NaginataThirdPlaceRendered(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	setNaginataPlayoffs(t, store, compID, false)
+	bracket := startNaginataWith4Players(t, store, eng, compID, false)
+
+	sfIdx := len(bracket.Rounds) - 2
+	sf := bracket.Rounds[sfIdx]
+	require.Len(t, sf, 2, "expected 2 semifinals for 4 players")
+
+	// Score both SFs.
+	require.NoError(t, eng.RecordMatchResult(compID, sf[0].ID, &state.MatchResult{
+		Winner:  sf[0].SideA,
+		IpponsA: []string{"M"},
+		Status:  state.MatchStatusCompleted,
+	}))
+	require.NoError(t, eng.RecordMatchResult(compID, sf[1].ID, &state.MatchResult{
+		Winner:  sf[1].SideB,
+		IpponsB: []string{"K"},
+		Status:  state.MatchStatusCompleted,
+	}))
+
+	// Reload bracket to get the bronze sides populated by the engine.
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	bronzeWinner := bracket.ThirdPlaceMatch.SideA
+
+	// Score bronze with "D" ippon (distinctive; SFs used "M" and "K").
+	require.NoError(t, eng.RecordMatchResult(compID, "m-bronze", &state.MatchResult{
+		Winner:  bronzeWinner,
+		IpponsA: []string{"D"},
+		Status:  state.MatchStatusCompleted,
+	}))
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer f.Close()
+
+	rows, err := f.GetRows(helper.SheetEliminationMatches)
+	require.NoError(t, err)
+
+	assert.True(t, containsCell(rows, "3rd Place"),
+		"Elimination Matches sheet must have a '3rd Place' header block for naginata")
+	assert.True(t, containsCell(rows, "D"),
+		"Elimination Matches sheet must show the bronze score 'D' (kendo ippon, only in bronze)")
+}
+
+// TestBuildResultsWorkbook_EngiNaginataThirdPlaceFlags verifies that an engi
+// naginata bronze match renders on the Elimination Matches sheet with flag counts.
+func TestBuildResultsWorkbook_EngiNaginataThirdPlaceFlags(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	setNaginataPlayoffs(t, store, compID, true)
+	bracket := startNaginataWith4Players(t, store, eng, compID, true)
+
+	sfIdx := len(bracket.Rounds) - 2
+	sf := bracket.Rounds[sfIdx]
+	require.Len(t, sf, 2)
+
+	// Score both SFs via the engi (flag) path.
+	_, err := eng.RecordMatchResultWithIneligibility(compID, sf[0].ID, &state.MatchResult{
+		FlagsA: 3, FlagsB: 2, Status: state.MatchStatusCompleted,
+	})
+	require.NoError(t, err)
+	_, err = eng.RecordMatchResultWithIneligibility(compID, sf[1].ID, &state.MatchResult{
+		FlagsA: 3, FlagsB: 2, Status: state.MatchStatusCompleted,
+	})
+	require.NoError(t, err)
+
+	// Score bronze 5-0 (distinctive flag counts not used in the SFs).
+	_, err = eng.RecordMatchResultWithIneligibility(compID, "m-bronze", &state.MatchResult{
+		FlagsA: 5, FlagsB: 0, Status: state.MatchStatusCompleted,
+	})
+	require.NoError(t, err)
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer f.Close()
+
+	rows, err := f.GetRows(helper.SheetEliminationMatches)
+	require.NoError(t, err)
+
+	assert.True(t, containsCell(rows, "3rd Place"),
+		"Elimination Matches sheet must have a '3rd Place' header for engi naginata")
+
+	// Find the "3rd Place" row and verify the score row (header+2) carries "5".
+	thirdPlaceRow := -1
+	for i, row := range rows {
+		for _, cell := range row {
+			if cell == "3rd Place" {
+				thirdPlaceRow = i
+				break
+			}
+		}
+		if thirdPlaceRow >= 0 {
+			break
+		}
+	}
+	require.GreaterOrEqual(t, thirdPlaceRow, 0, "'3rd Place' header row must be found")
+	scoreRowIdx := thirdPlaceRow + 2
+	require.Less(t, scoreRowIdx, len(rows), "bronze score row (header+2) must exist")
+	found5 := false
+	for _, cell := range rows[scoreRowIdx] {
+		if cell == "5" {
+			found5 = true
+			break
+		}
+	}
+	assert.True(t, found5, "bronze score row must contain '5' (FlagsA=5 winner count)")
+}
+
+// TestBuildResultsWorkbook_NonNaginataNoThirdPlace verifies that a standard
+// kendo (non-naginata) playoffs export does NOT emit a "3rd Place" block,
+// preserving byte-identical output for non-naginata competitions.
+func TestBuildResultsWorkbook_NonNaginataNoThirdPlace(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	// Kendo playoffs (Naginata=false).
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	comp.Format = state.CompFormatPlayoffs
+	comp.Naginata = false
+	comp.Kind = "individual"
+	comp.PoolSize = 3
+	comp.PoolSizeMode = "min"
+	comp.PoolWinners = 2
+	comp.Status = "setup"
+	require.NoError(t, store.SaveCompetition(comp))
+
+	players := []domain.Player{
+		{Name: "Alice", Dojo: "DojoA"},
+		{Name: "Bob", Dojo: "DojoB"},
+		{Name: "Charlie", Dojo: "DojoC"},
+		{Name: "Dave", Dojo: "DojoD"},
+	}
+	require.NoError(t, store.SaveParticipants(compID, players))
+	require.NoError(t, eng.StartCompetition(compID))
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer f.Close()
+
+	rows, err := f.GetRows(helper.SheetEliminationMatches)
+	require.NoError(t, err)
+
+	assert.False(t, containsCell(rows, "3rd Place"),
+		"non-naginata (kendo) export must NOT contain a '3rd Place' block")
+}

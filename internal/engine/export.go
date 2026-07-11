@@ -66,6 +66,14 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		}
 	}
 
+	// 4b. Naginata: add a "3rd Place" slot on the Elimination Matches sheet so
+	// the operator can hand-score the bronze bout on the blank template.
+	if comp.Naginata {
+		if b, bErr := e.store.LoadBracket(id); bErr == nil && b != nil && b.ThirdPlaceMatch != nil {
+			helper.PrintThirdPlaceBlock(f, 1, 2, comp.TeamSize, comp.Mirror)
+		}
+	}
+
 	// 5. Names to Print sheet
 	helper.CreateNamesWithPoolToPrint(f, pools, comp.EffectiveWithZekkenName(), len(comp.Courts), playerCoords)
 

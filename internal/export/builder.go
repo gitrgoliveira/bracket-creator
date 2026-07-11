@@ -159,12 +159,22 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 		// Populate the Elimination Matches sheet skeleton so overlayBracketScores
 		// has "Round N - Match N" headers to scan.
 		helper.FillInMatches(f, eliminationMatchRounds)
-		helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, comp.TeamSize, numCourts, comp.Mirror)
+		nextRow := helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, comp.TeamSize, numCourts, comp.Mirror)
+
+		// Naginata competitions have a bronze (3rd-place) match: render it as a
+		// separate block immediately after the last elimination round.
+		if bracket != nil && bracket.ThirdPlaceMatch != nil {
+			helper.PrintThirdPlaceBlock(f, 1, nextRow, comp.TeamSize, comp.Mirror)
+		}
 
 		// Overlay literal scores from the live bracket state.
 		if bracket != nil {
 			bracketByNum := buildBracketMatchIndex(bracket)
-			if err := overlayBracketScores(f, bracketByNum, comp.TeamSize, comp.Mirror, comp.Engi); err != nil {
+			var thirdPlaceMatch *state.BracketMatch
+			if bracket.ThirdPlaceMatch != nil {
+				thirdPlaceMatch = bracket.ThirdPlaceMatch
+			}
+			if err := overlayBracketScores(f, bracketByNum, comp.TeamSize, comp.Mirror, comp.Engi, thirdPlaceMatch); err != nil {
 				return nil, fmt.Errorf("export: overlay bracket scores: %w", err)
 			}
 			// Playoffs have no pool data sheet, so the pool-oriented renderer emits
@@ -880,12 +890,13 @@ func overlayTeamPoolStandings(f *excelize.File, pools []helper.Pool, standings m
 // ---------- bracket score overlay ----------
 
 // overlayBracketScores writes literal score values into the Elimination Matches
-// sheet by scanning for "Round N - Match N" header cells. For each completed
-// match found, the score cells in the row two rows below are overwritten with
-// literal values (ScoreA/ScoreB from the bracket JSON survive the round-trip).
-func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMatch, teamSize int, mirror bool, engi bool) error {
+// sheet by scanning for "Round N - Match N" header cells and, when present, a
+// "3rd Place" header cell. For each completed match found, the score cells in
+// the row two rows below the header are overwritten with literal values.
+// thirdPlaceMatch is the bracket's bronze match (nil when absent/not naginata).
+func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMatch, teamSize int, mirror bool, engi bool, thirdPlaceMatch *state.BracketMatch) error {
 	if teamSize != 0 {
-		return overlayTeamBracketScores(f, bracketByNum, teamSize, mirror)
+		return overlayTeamBracketScores(f, bracketByNum, teamSize, mirror, thirdPlaceMatch)
 	}
 	sheetName := helper.SheetEliminationMatches
 
@@ -896,16 +907,24 @@ func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMa
 
 	// Courts are laid out side-by-side (one 8-column band each), so a single row
 	// can carry a "Round N - Match N" header at EACH court's start column. Process
-	// every header in the row, not just the first.
+	// every header in the row, not just the first. Also handle the "3rd Place"
+	// bronze header when thirdPlaceMatch is present.
 	for rowIdx, row := range rows {
 		for headerCol, cell := range row {
+			// Resolve the match to overlay. Regular rounds go through the
+			// bracketByNum index; the bronze match uses the pointer directly
+			// because ThirdPlaceMatch.MatchNumber is 0 (not indexed).
+			var bm state.BracketMatch
 			matchNum := parseRoundMatchLabel(cell)
-			if matchNum <= 0 {
-				continue
-			}
-
-			bm, ok := bracketByNum[matchNum]
-			if !ok || bm.Status != state.MatchStatusCompleted {
+			if matchNum > 0 {
+				var ok bool
+				bm, ok = bracketByNum[matchNum]
+				if !ok || bm.Status != state.MatchStatusCompleted {
+					continue
+				}
+			} else if cell == "3rd Place" && thirdPlaceMatch != nil && thirdPlaceMatch.Status == state.MatchStatusCompleted {
+				bm = *thirdPlaceMatch
+			} else {
 				continue
 			}
 
@@ -973,7 +992,7 @@ func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMa
 // left PW=startCol+2, right IV=startCol+5, right PW=startCol+4. The summary IV/PW
 // cells and per-player W/L/T standings are formula-driven (they tally the sub-match
 // rows) and collapse after a store round-trip, so we overwrite them with literals.
-func overlayTeamBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMatch, teamSize int, mirror bool) error {
+func overlayTeamBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMatch, teamSize int, mirror bool, thirdPlaceMatch *state.BracketMatch) error {
 	sheetName := helper.SheetEliminationMatches
 
 	rows, err := f.GetRows(sheetName)
@@ -983,16 +1002,24 @@ func overlayTeamBracketScores(f *excelize.File, bracketByNum map[int]state.Brack
 
 	// Courts are laid out side-by-side (one 8-column band each), so a single row
 	// can carry a "Round N - Match N" header at EACH court's start column. Process
-	// every header in the row, not just the first.
+	// every header in the row, not just the first. Also handle the "3rd Place"
+	// bronze header when thirdPlaceMatch is present.
 	for rowIdx, row := range rows {
 		for headerCol, cell := range row {
+			// Resolve the match to overlay. Regular rounds go through the
+			// bracketByNum index; the bronze match uses the pointer directly
+			// because ThirdPlaceMatch.MatchNumber is 0 (not indexed).
+			var bm state.BracketMatch
 			matchNum := parseRoundMatchLabel(cell)
-			if matchNum <= 0 {
-				continue
-			}
-
-			bm, ok := bracketByNum[matchNum]
-			if !ok || bm.Status != state.MatchStatusCompleted {
+			if matchNum > 0 {
+				var ok bool
+				bm, ok = bracketByNum[matchNum]
+				if !ok || bm.Status != state.MatchStatusCompleted {
+					continue
+				}
+			} else if cell == "3rd Place" && thirdPlaceMatch != nil && thirdPlaceMatch.Status == state.MatchStatusCompleted {
+				bm = *thirdPlaceMatch
+			} else {
 				continue
 			}
 

@@ -33,6 +33,70 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestExportCompetitionXlsx_NaginataThirdPlaceSlot verifies that the blank-
+// template export for a naginata playoffs competition includes a "3rd Place"
+// slot on the Elimination Matches sheet so the operator can hand-score it.
+func TestExportCompetitionXlsx_NaginataThirdPlaceSlot(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "naginata-export"
+
+	comp := &state.Competition{
+		ID:           compID,
+		Name:         "Naginata Export Test",
+		Kind:         "individual",
+		Format:       state.CompFormatPlayoffs,
+		PoolSize:     3,
+		PoolSizeMode: "min",
+		PoolWinners:  2,
+		Courts:       []string{"A"},
+		StartTime:    "09:00",
+		Status:       "setup",
+		Naginata:     true,
+	}
+	require.NoError(t, store.SaveCompetition(comp))
+
+	players := []domain.Player{
+		{Name: "Alice", Dojo: "DojoA"},
+		{Name: "Bob", Dojo: "DojoB"},
+		{Name: "Charlie", Dojo: "DojoC"},
+		{Name: "Dave", Dojo: "DojoD"},
+	}
+	require.NoError(t, store.SaveParticipants(compID, players))
+	require.NoError(t, eng.StartCompetition(compID))
+
+	// Verify the bracket has a ThirdPlaceMatch before testing the export.
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.NotNil(t, bracket.ThirdPlaceMatch,
+		"naginata 4-player bracket must have ThirdPlaceMatch before testing export")
+
+	data, err := eng.ExportCompetitionXlsx(compID)
+	require.NoError(t, err)
+	require.NotEmpty(t, data)
+
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+
+	rows, err := f.GetRows(helper.SheetEliminationMatches)
+	require.NoError(t, err)
+
+	found := false
+	for _, row := range rows {
+		for _, cell := range row {
+			if cell == "3rd Place" {
+				found = true
+				break
+			}
+		}
+		if found {
+			break
+		}
+	}
+	assert.True(t, found,
+		"blank-template export for a naginata competition must have a '3rd Place' slot on the Elimination Matches sheet")
+}
+
 func TestExportCompetitionXlsx_Engi(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "engi-export"

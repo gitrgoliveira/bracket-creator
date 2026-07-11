@@ -305,13 +305,25 @@ func (o *poolOptions) createPools(entries []string) error {
 		totalPoolMatches += len(p.Matches)
 	}
 
-	nextRow := helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, o.teamMatches, o.courts, true)
+	nextRow, elimMatchWinners := helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, o.teamMatches, o.courts, true)
 	// Bronze (3rd-place) playoff: naginata only, and only when a real semifinal
 	// exists (len(eliminationMatchRounds) >= 2; a 2-player bracket has a single
 	// round and no semifinal, so no bronze). Matches the engine guard in
 	// internal/engine/bracket.go: comp.Naginata && len(bracket.Rounds) >= 2.
 	if o.naginata && len(eliminationMatchRounds) >= 2 {
-		helper.PrintThirdPlaceBlock(f, 1, nextRow, o.teamMatches, true)
+		// Derive the two semifinal match numbers from the final's children so the
+		// bronze block can reference the "2." loser lines via CONCATENATE formulas.
+		var semiA, semiB int
+		lastRound := eliminationMatchRounds[len(eliminationMatchRounds)-1]
+		if len(lastRound) > 0 && lastRound[0] != nil {
+			if lastRound[0].Left != nil {
+				semiA = int(lastRound[0].Left.MatchNum())
+			}
+			if lastRound[0].Right != nil {
+				semiB = int(lastRound[0].Right.MatchNum())
+			}
+		}
+		helper.PrintThirdPlaceBlock(f, 1, nextRow, o.teamMatches, true, semiA, semiB, elimMatchWinners)
 	}
 	helper.FillEstimations(f, int64(len(pools)), int64(totalPoolMatches), int64(o.teamMatches), int64(len(finals)-1), o.courts)
 

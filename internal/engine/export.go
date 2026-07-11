@@ -68,9 +68,12 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 
 	// 4b. Naginata: add a "3rd Place" slot on the Elimination Matches sheet so
 	// the operator can hand-score the bronze bout on the blank template.
+	// This path renders Tree sheets via PrintLeafNodes and does not call
+	// PrintTeamEliminationMatches, so no "M N" matchWinners entries exist.
+	// Pass zero semi numbers so the entrant slots remain hand-fillable.
 	if comp.Naginata {
 		if b, bErr := e.store.LoadBracket(id); bErr == nil && b != nil && b.ThirdPlaceMatch != nil {
-			helper.PrintThirdPlaceBlock(f, 1, 2, comp.TeamSize, comp.Mirror)
+			helper.PrintThirdPlaceBlock(f, 1, 2, comp.TeamSize, comp.Mirror, 0, 0, nil)
 		}
 	}
 

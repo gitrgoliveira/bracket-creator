@@ -159,12 +159,26 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 		// Populate the Elimination Matches sheet skeleton so overlayBracketScores
 		// has "Round N - Match N" headers to scan.
 		helper.FillInMatches(f, eliminationMatchRounds)
-		nextRow := helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, comp.TeamSize, numCourts, comp.Mirror)
+		nextRow, elimMatchWinners := helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, comp.TeamSize, numCourts, comp.Mirror)
 
 		// Naginata competitions have a bronze (3rd-place) match: render it as a
 		// separate block immediately after the last elimination round.
 		if bracket != nil && bracket.ThirdPlaceMatch != nil {
-			helper.PrintThirdPlaceBlock(f, 1, nextRow, comp.TeamSize, comp.Mirror)
+			// Derive the two semifinal match numbers from the final's children so the
+			// bronze block can reference the "2." loser lines via CONCATENATE formulas.
+			var semiA, semiB int
+			if len(eliminationMatchRounds) >= 2 {
+				lastRound := eliminationMatchRounds[len(eliminationMatchRounds)-1]
+				if len(lastRound) > 0 && lastRound[0] != nil {
+					if lastRound[0].Left != nil {
+						semiA = int(lastRound[0].Left.MatchNum())
+					}
+					if lastRound[0].Right != nil {
+						semiB = int(lastRound[0].Right.MatchNum())
+					}
+				}
+			}
+			helper.PrintThirdPlaceBlock(f, 1, nextRow, comp.TeamSize, comp.Mirror, semiA, semiB, elimMatchWinners)
 		}
 
 		// Overlay literal scores from the live bracket state.

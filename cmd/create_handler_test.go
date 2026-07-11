@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/xuri/excelize/v2"
 )
@@ -326,4 +328,50 @@ func TestCreateHandler_NoNaginata_NoThirdPlaceBlock(t *testing.T) {
 			require.NotEqual(t, "3rd Place", cell, "non-naginata playoffs must not have a '3rd Place' block")
 		}
 	}
+}
+
+// TestCreateHandler_NaginataPlayoffs_ThirdPlaceBlock_EntrantFormulas verifies
+// that the blank template's bronze entrant cells (the hand-scoring surface) carry
+// CONCATENATE formulas that reference the losers of the two semifinals. The
+// operator writes ippon letters in the semifinal winner cells; the bronze name
+// cells then self-populate via "M <n> <winner text>" so the referees can see
+// who is competing without manual re-entry.
+func TestCreateHandler_NaginataPlayoffs_ThirdPlaceBlock_EntrantFormulas(t *testing.T) {
+	const roster = "Alice, DA\nBob, DB\nCharlie, DC\nDave, DD"
+	f := postCreate(t, naginataPlayoffForm(roster))
+
+	rows, err := f.GetRows("Elimination Matches")
+	require.NoError(t, err)
+
+	// Locate the "3rd Place" header row (0-based index into rows).
+	thirdPlaceRowIdx := -1
+	for i, row := range rows {
+		for _, cell := range row {
+			if cell == "3rd Place" {
+				thirdPlaceRowIdx = i
+				break
+			}
+		}
+		if thirdPlaceRowIdx >= 0 {
+			break
+		}
+	}
+	require.GreaterOrEqual(t, thirdPlaceRowIdx, 0, "must find '3rd Place' header before checking formulas")
+
+	// Score row is header+2: 1-based Excel row = (0-based idx + 1) + 2.
+	scoreExcelRow := thirdPlaceRowIdx + 3
+
+	leftFormula, err := f.GetCellFormula("Elimination Matches", fmt.Sprintf("A%d", scoreExcelRow))
+	require.NoError(t, err)
+	rightFormula, err := f.GetCellFormula("Elimination Matches", fmt.Sprintf("G%d", scoreExcelRow))
+	require.NoError(t, err)
+
+	// Both cells together must reference both semifinal match numbers ("M 1" and
+	// "M 2" for a 4-player bracket) via CONCATENATE formulas. With mirror=true
+	// (hardcoded for the playoffs web handler) the two formulas swap sides, so we
+	// assert the pair rather than a specific cell.
+	combined := leftFormula + " " + rightFormula
+	assert.Contains(t, combined, "CONCATENATE", "bronze entrant cells must carry CONCATENATE formulas referencing semifinal losers")
+	assert.Contains(t, combined, "M 1", "bronze entrant formulas must reference semifinal M 1")
+	assert.Contains(t, combined, "M 2", "bronze entrant formulas must reference semifinal M 2")
 }

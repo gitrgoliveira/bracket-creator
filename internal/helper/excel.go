@@ -970,7 +970,7 @@ func matchHeaderWithStyles(f *excelize.File, sheetName string, startColName stri
 // Elimination Matches sheet and returns the next available start row (the row
 // immediately after the last rendered block plus any trailing space lines).
 // Callers that do not need the return value may ignore it.
-func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]MatchWinner, eliminationMatchRounds [][]*Node, numTeamMatches int, numCourts int, mirror bool) int {
+func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]MatchWinner, eliminationMatchRounds [][]*Node, numTeamMatches int, numCourts int, mirror bool) (int, map[string]MatchWinner) {
 	numCourts = clampCourts(numCourts)
 
 	sheetName := SheetEliminationMatches
@@ -1081,15 +1081,55 @@ func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]M
 	}
 
 	SetSheetLayoutPortraitA4DownThenOver(f, sheetName, numCourts)
-	return startRow
+	return startRow, matchWinners
+}
+
+// loserCellOf returns the Excel cell address one row below the given "1." winner
+// cell, which is the "2." loser line of a single-elimination match block.
+func loserCellOf(winnerCell string) (string, error) {
+	col, row, err := excelize.SplitCellName(winnerCell)
+	if err != nil {
+		return "", err
+	}
+	return excelize.JoinCellName(col, row+1)
+}
+
+// bronzeEntrantFormulas derives CONCATENATE formula strings for the two bronze
+// entrant cells from the recorded matchWinners. semiA/semiB are the match numbers
+// of the two semifinals (0 = absent/bye, skipped). Returns empty strings for any
+// entry that cannot be resolved; callers guard with a non-empty check before
+// calling SetCellFormula.
+func bronzeEntrantFormulas(sheetName string, semiA, semiB int, matchWinners map[string]MatchWinner) (sideAFormula, sideBFormula string) {
+	build := func(semiN int) string {
+		if semiN == 0 || matchWinners == nil {
+			return ""
+		}
+		key := fmt.Sprintf("M %d", semiN)
+		mw, ok := matchWinners[key]
+		if !ok || mw.cell == "" {
+			return ""
+		}
+		loserCell, err := loserCellOf(mw.cell)
+		if err != nil {
+			return ""
+		}
+		if mw.sheetName == sheetName || mw.sheetName == "" {
+			return fmt.Sprintf("CONCATENATE(\"%s \",%s)", key, loserCell)
+		}
+		return fmt.Sprintf("CONCATENATE(\"%s \",'%s'!%s)", key, mw.sheetName, loserCell)
+	}
+	return build(semiA), build(semiB)
 }
 
 // PrintThirdPlaceBlock renders a single "3rd Place" elimination-match block
 // (identical layout to a regular match block but with the fixed header label
 // "3rd Place") starting at startRow on the SheetEliminationMatches sheet.
-// courtStartCol is 1-based (use 1 for the first/only court). Returns the next
-// available start row after the block.
-func PrintThirdPlaceBlock(f *excelize.File, courtStartCol, startRow, numTeamMatches int, mirror bool) int {
+// courtStartCol is 1-based (use 1 for the first/only court). semiA and semiB
+// are the match numbers of the two semifinals whose losers compete in the bronze
+// (0 means absent/bye; that entrant cell is left empty). matchWinners is the map
+// returned by PrintTeamEliminationMatches so the loser-cell refs can be derived
+// from the "2." row of each semi's block. Returns the next available start row.
+func PrintThirdPlaceBlock(f *excelize.File, courtStartCol, startRow, numTeamMatches int, mirror bool, semiA, semiB int, matchWinners map[string]MatchWinner) int {
 	sheetName := SheetEliminationMatches
 	colNames := buildMatchColumnNames(courtStartCol)
 
@@ -1137,6 +1177,20 @@ func PrintThirdPlaceBlock(f *excelize.File, courtStartCol, startRow, numTeamMatc
 		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, middleColName+fmt.Sprint(matchRow), middleColName+fmt.Sprint(matchRow), styles.unlockedText))
 	} else {
 		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, colNames.leftVictoriesColName+fmt.Sprint(matchRow), colNames.rightVictoriesColName+fmt.Sprint(matchRow), styles.unlockedText))
+	}
+
+	// Write CONCATENATE formulas for the entrant name cells so the bronze block
+	// self-populates when the workbook is hand-scored. The "2." (loser) line of
+	// each semifinal block is one row below the "1." winner line recorded in
+	// matchWinners. When semiA or semiB is 0 (bye or engine path without match
+	// numbers), that cell is left blank and must be filled manually.
+	sideAFormula, sideBFormula := bronzeEntrantFormulas(sheetName, semiA, semiB, matchWinners)
+	leftFormula, rightFormula := getMatchSides(sideAFormula, sideBFormula, mirror)
+	if leftFormula != "" {
+		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, scoreStart, leftFormula))
+	}
+	if rightFormula != "" {
+		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, scoreEnd, rightFormula))
 	}
 
 	// Team sub-match rows (individual: 0 iterations).

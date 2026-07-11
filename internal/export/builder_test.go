@@ -3267,3 +3267,64 @@ func TestBuildResultsWorkbook_NonNaginataNoThirdPlace(t *testing.T) {
 	assert.False(t, containsCell(rows, "3rd Place"),
 		"non-naginata (kendo) export must NOT contain a '3rd Place' block")
 }
+
+// TestBuildResultsWorkbook_NaginataThirdPlaceEntrantFormulas verifies that the
+// bronze block's entrant cells carry CONCATENATE formulas referencing the "2."
+// (loser) lines of the two semifinals. This covers the workbook state BEFORE any
+// matches are scored: the overlay writes no literals, so the formula skeleton must
+// self-document who belongs in the bronze.
+func TestBuildResultsWorkbook_NaginataThirdPlaceEntrantFormulas(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	setNaginataPlayoffs(t, store, compID, false)
+	// startNaginataWith4Players starts the competition without scoring any matches.
+	// ThirdPlaceMatch exists but SideA/SideB are empty, so overlayBracketScores
+	// writes no literal names and the skeleton formulas remain visible.
+	startNaginataWith4Players(t, store, eng, compID, false)
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer f.Close()
+
+	rows, err := f.GetRows(helper.SheetEliminationMatches)
+	require.NoError(t, err)
+
+	// Locate the "3rd Place" header row (0-based index).
+	thirdPlaceRowIdx := -1
+	for i, row := range rows {
+		for _, cell := range row {
+			if cell == "3rd Place" {
+				thirdPlaceRowIdx = i
+				break
+			}
+		}
+		if thirdPlaceRowIdx >= 0 {
+			break
+		}
+	}
+	require.GreaterOrEqual(t, thirdPlaceRowIdx, 0, "'3rd Place' header must be present")
+
+	// Score row: 1-based Excel row = (0-based idx + 1) + 2.
+	scoreExcelRow := thirdPlaceRowIdx + 3
+
+	leftFormula, err := f.GetCellFormula(helper.SheetEliminationMatches, fmt.Sprintf("A%d", scoreExcelRow))
+	require.NoError(t, err)
+	rightFormula, err := f.GetCellFormula(helper.SheetEliminationMatches, fmt.Sprintf("G%d", scoreExcelRow))
+	require.NoError(t, err)
+
+	// Both cells together must hold CONCATENATE formulas referencing the two
+	// semifinal losers. For a 4-player bracket the semis are M 1 and M 2;
+	// the pair covers both because mirror may swap which cell holds which.
+	combined := leftFormula + " " + rightFormula
+	assert.Contains(t, combined, "CONCATENATE",
+		"bronze entrant cells must carry CONCATENATE formulas (no scoring yet, no literal names)")
+	assert.Contains(t, combined, "M 1",
+		"bronze entrant formulas must reference the loser of semifinal M 1")
+	assert.Contains(t, combined, "M 2",
+		"bronze entrant formulas must reference the loser of semifinal M 2")
+}

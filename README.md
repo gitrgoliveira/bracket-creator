@@ -434,7 +434,7 @@ rm -f ${TAR_FILE}
   <summary><h3>manually</h3></summary>
 
 ```bash
-git clone github.com/gitrgoliveira/bracket-creator
+git clone https://github.com/gitrgoliveira/bracket-creator.git
 cd bracket-creator
 go generate ./...
 go install

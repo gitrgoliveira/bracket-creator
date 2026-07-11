@@ -13,6 +13,9 @@ The following table summarises when each format fits best.
 | League | Small fields where every match matters and standings tell the full story |
 | Swiss | Large individual fields where you want many rounds but a full round-robin is impractical |
 
+!!! note
+    In the tournament app's competition setup, these formats are labelled **Knockout only** (Playoffs), **Pools + Knockout** (Mixed), **League**, and **Swiss**.
+
 ## Playoffs
 
 Playoffs is a direct single-elimination (knockout) format. Each match eliminates one competitor; the winner advances until one remains. There are no pools and no preliminary phase.

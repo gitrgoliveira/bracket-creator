@@ -2,6 +2,8 @@
 
 Not every bout is decided on points. The score editor records the kendo outcomes described here. Open the score editor from the **Scores** tab on a competition page, or from a match card in the court console (see [Score a match](scoring-a-match.md)).
 
+![The score editor's decision controls: Decide by hantei, Kiken (Voluntary and Injury), Fusenpai, and Fusensho (team only).](../../screenshots/mobile-score-editor.png)
+
 ## Kiken (withdrawal)
 
 Kiken covers two distinct situations with different consequences.

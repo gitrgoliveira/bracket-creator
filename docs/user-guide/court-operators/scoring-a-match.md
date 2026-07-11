@@ -6,6 +6,8 @@ The court console at `/admin/shiaijo/<court>` (linked from the dashboard under *
 
 Open a match from the Upcoming list to start scoring it; the score editor opens inline within the court console. For outcomes that are not decided on points (withdrawals, no-shows, draws, and representative bouts), see [Record match decisions](recording-decisions.md).
 
+![The score editor: Shiro on the left and Aka on the right, each with ippon buttons (men, kote, do, tsuki), a Mark draw control, foul counters, and an overtime toggle.](../../screenshots/mobile-score-editor.png)
+
 !!! tip
     In self-run events, competitors or table helpers can record their own scores without the admin password. See the [Competitor self-run guide](../competitors/self-run.md) and [Operating modes and access control](../organisers/operating-modes.md) for how that works.
 

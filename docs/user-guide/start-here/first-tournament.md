@@ -14,19 +14,27 @@ Open `http://localhost:8080` in a browser. When the data folder is empty, the ap
 
 ## 2. Create a competition
 
-From the dashboard, click **+ Add competition**. Choose individual or team, then select a format: playoffs, mixed, league, or Swiss. See [Formats](../organisers/formats.md) for a description of each format and when to use it.
+From the dashboard, click **+ Add competition**. Choose Individual or Team, then pick a format: **Knockout only**, **Pools + Knockout**, **League**, or **Swiss**. See [Formats](../organisers/formats.md) for a description of each format and when to use it.
+
+![Creating a competition: the type, format, court, and pool-size options on the setup form.](../../screenshots/mobile-create-competition.png)
 
 ## 3. Add competitors
 
 Open the competition setup and paste a newline-separated roster into the participant panel, then click **Apply changes**. The [Run a tournament](../organisers/run-tournament.md) guide covers import options and roster management in full.
 
+![The participant panel: a line-numbered paste box holding a roster of names and dojos, with a CSV import area above it.](../../screenshots/mobile-add-participants.png)
+
 ## 4. Generate the draw and start
 
 Click **Generate draw** to build the pools and bracket. Review the preview, then click **Start competition**. Matches now appear to scorers and to the public viewer page.
 
+![The draw preview: pools of players with their result grids, ready to start or discard.](../../screenshots/mobile-draw-preview.png)
+
 ## 5. Enter a score
 
 Go to the **Scores** tab, open a match, and record the result. See [Scoring a match](../court-operators/scoring-a-match.md) for the full scoring workflow, including points, decisions, and team bouts.
+
+![The score editor: Shiro and Aka fighters with ippon buttons, foul counters, and decision controls.](../../screenshots/mobile-score-editor.png)
 
 !!! tip
     Open `http://localhost:8080` on a second screen (a scoreboard TV or a phone) with no password. Standings and brackets update in real time as a scorer records each result. See [Following a tournament](../spectators/following.md) for the full viewer experience.

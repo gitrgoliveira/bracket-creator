@@ -27,8 +27,8 @@ type poolOptions struct {
 	withZekkenName  bool
 	singleTree      bool
 	determined      bool
-	engi            bool // engi (kata) competition: pair rosters + engi standings formulas
-	naginata        bool // naginata: adds a 3rd-place bronze block after elimination matches
+	engi            bool // engi (kata) competition: pair rosters + engi standings formulas. Set ONLY by the web /create handler (mobile-app blank-template download); deliberately NOT a CLI flag (owner decision: no new CLI options).
+	naginata        bool // naginata: adds a 3rd-place bronze block after elimination matches. Web-handler-only, same as engi.
 	titlePrefix     string
 	numberPrefix    string
 	SeedAssignments []domain.SeedAssignment
@@ -60,8 +60,6 @@ func newCreatePoolCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&o.titlePrefix, "title-prefix", "", "", "title prefix for the tournament (default \"\")")
 	cmd.Flags().StringVarP(&o.seedsPath, "seeds", "", "", "CSV file mapping exact participant names to their initial seed rank")
 	cmd.Flags().StringVarP(&o.numberPrefix, "number-prefix", "n", "", "Assign consecutive numbers with this letter prefix (e.g. 'K' produces K1, K2, ...)")
-	cmd.Flags().BoolVarP(&o.engi, "engi", "", false, "Engi (kata) competition: 3-column pair roster with engi standings formulas (W/L/Flags/Rank)")
-	cmd.Flags().BoolVarP(&o.naginata, "naginata", "", false, "Naginata: add a 3rd-place bronze match block after elimination matches")
 
 	cmd.MarkFlagsMutuallyExclusive("players", "max-players")
 

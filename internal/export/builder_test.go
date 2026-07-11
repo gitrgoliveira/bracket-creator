@@ -3023,6 +3023,126 @@ func TestBuildResultsWorkbook_NaginataThirdPlaceRendered(t *testing.T) {
 		"Elimination Matches sheet must have a '3rd Place' header block for naginata")
 	assert.True(t, containsCell(rows, "D"),
 		"Elimination Matches sheet must show the bronze score 'D' (kendo ippon, only in bronze)")
+
+	// Also assert that both semifinal losers' names appear in the bronze score row.
+	// The "3rd Place" header row is at thirdPlaceRow (0-based); the score row is
+	// at thirdPlaceRow+2. Court 1 name cells: left=col A (0-based index 0),
+	// right=col G (0-based index 6).
+	bronzeThirdPlaceRow := -1
+	for i, row := range rows {
+		for _, cell := range row {
+			if cell == "3rd Place" {
+				bronzeThirdPlaceRow = i
+				break
+			}
+		}
+		if bronzeThirdPlaceRow >= 0 {
+			break
+		}
+	}
+	require.GreaterOrEqual(t, bronzeThirdPlaceRow, 0, "'3rd Place' header must be found in rows")
+	bronzeScoreRowIdx := bronzeThirdPlaceRow + 2
+	require.Less(t, bronzeScoreRowIdx, len(rows), "bronze score row must exist")
+	bronzeScoreRow := rows[bronzeScoreRowIdx]
+	var bronzeLeftName, bronzeRightName string
+	if len(bronzeScoreRow) > 0 {
+		bronzeLeftName = bronzeScoreRow[0]
+	}
+	if len(bronzeScoreRow) > 6 {
+		bronzeRightName = bronzeScoreRow[6]
+	}
+	assert.NotEmpty(t, bronzeLeftName,
+		"3rd Place score row: left name cell (col A) must be populated with a semifinal loser")
+	assert.NotEmpty(t, bronzeRightName,
+		"3rd Place score row: right name cell (col G) must be populated with a semifinal loser")
+}
+
+// TestBuildResultsWorkbook_NaginataThirdPlaceNamesBeforeBronze verifies that
+// the bronze entrant names appear in the 3rd Place score row even when the
+// bronze match has not yet been played (semis scored, bronze open).
+func TestBuildResultsWorkbook_NaginataThirdPlaceNamesBeforeBronze(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	setNaginataPlayoffs(t, store, compID, false)
+	bracket := startNaginataWith4Players(t, store, eng, compID, false)
+
+	sfIdx := len(bracket.Rounds) - 2
+	sf := bracket.Rounds[sfIdx]
+	require.Len(t, sf, 2, "expected 2 semifinals for 4 players")
+
+	// Score both SFs so the engine populates ThirdPlaceMatch.SideA/SideB.
+	require.NoError(t, eng.RecordMatchResult(compID, sf[0].ID, &state.MatchResult{
+		Winner:  sf[0].SideA,
+		IpponsA: []string{"M"},
+		Status:  state.MatchStatusCompleted,
+	}))
+	require.NoError(t, eng.RecordMatchResult(compID, sf[1].ID, &state.MatchResult{
+		Winner:  sf[1].SideB,
+		IpponsB: []string{"K"},
+		Status:  state.MatchStatusCompleted,
+	}))
+
+	// Verify the engine populated the bronze sides before export.
+	b2, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.NotEmpty(t, b2.ThirdPlaceMatch.SideA, "engine must populate ThirdPlaceMatch.SideA after SFs")
+	require.NotEmpty(t, b2.ThirdPlaceMatch.SideB, "engine must populate ThirdPlaceMatch.SideB after SFs")
+
+	// Export WITHOUT scoring bronze.
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer f.Close()
+
+	rows, err := f.GetRows(helper.SheetEliminationMatches)
+	require.NoError(t, err)
+
+	// Find "3rd Place" header row.
+	thirdPlaceRow := -1
+	for i, row := range rows {
+		for _, cell := range row {
+			if cell == "3rd Place" {
+				thirdPlaceRow = i
+				break
+			}
+		}
+		if thirdPlaceRow >= 0 {
+			break
+		}
+	}
+	require.GreaterOrEqual(t, thirdPlaceRow, 0, "'3rd Place' header must appear even before bronze is played")
+
+	scoreRowIdx := thirdPlaceRow + 2
+	require.Less(t, scoreRowIdx, len(rows), "bronze score row must exist")
+	scoreRow := rows[scoreRowIdx]
+
+	// Names must appear even though the bronze has not been played.
+	var leftName, rightName string
+	if len(scoreRow) > 0 {
+		leftName = scoreRow[0]
+	}
+	if len(scoreRow) > 6 {
+		rightName = scoreRow[6]
+	}
+	assert.NotEmpty(t, leftName,
+		"3rd Place score row col A must show a semifinal loser name before bronze is played")
+	assert.NotEmpty(t, rightName,
+		"3rd Place score row col G must show a semifinal loser name before bronze is played")
+
+	// Score cells (lVCol = col B / index 1, rVCol = col F / index 5) must be empty.
+	var leftScore, rightScore string
+	if len(scoreRow) > 1 {
+		leftScore = scoreRow[1]
+	}
+	if len(scoreRow) > 5 {
+		rightScore = scoreRow[5]
+	}
+	assert.Empty(t, leftScore, "bronze score cell (col B) must be empty before bronze is played")
+	assert.Empty(t, rightScore, "bronze score cell (col F) must be empty before bronze is played")
 }
 
 // TestBuildResultsWorkbook_EngiNaginataThirdPlaceFlags verifies that an engi
@@ -3092,6 +3212,17 @@ func TestBuildResultsWorkbook_EngiNaginataThirdPlaceFlags(t *testing.T) {
 		}
 	}
 	assert.True(t, found5, "bronze score row must contain '5' (FlagsA=5 winner count)")
+
+	// Also assert entrant names appear in the bronze score row.
+	var engiLeftName, engiRightName string
+	if len(rows[scoreRowIdx]) > 0 {
+		engiLeftName = rows[scoreRowIdx][0]
+	}
+	if len(rows[scoreRowIdx]) > 6 {
+		engiRightName = rows[scoreRowIdx][6]
+	}
+	assert.NotEmpty(t, engiLeftName, "engi bronze score row: left name cell (col A) must be populated")
+	assert.NotEmpty(t, engiRightName, "engi bronze score row: right name cell (col G) must be populated")
 }
 
 // TestBuildResultsWorkbook_NonNaginataNoThirdPlace verifies that a standard

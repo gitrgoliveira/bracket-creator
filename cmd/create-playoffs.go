@@ -22,7 +22,7 @@ type playoffOptions struct {
 	withZekkenName  bool
 	singleTree      bool
 	determined      bool
-	naginata        bool // naginata: adds a 3rd-place bronze block after elimination matches
+	naginata        bool // naginata: adds a 3rd-place bronze block after elimination matches. Set ONLY by the web /create handler; deliberately NOT a CLI flag (owner decision: no new CLI options).
 	titlePrefix     string
 	numberPrefix    string
 	SeedAssignments []domain.SeedAssignment
@@ -50,7 +50,6 @@ func newCreatePlayoffCmd() *cobra.Command {
 	cmd.Flags().IntVarP(&o.courts, "courts", "c", 2, "number of Shiaijo (courts) to distribute tree pages across (default 2)")
 	cmd.Flags().StringVarP(&o.titlePrefix, "title-prefix", "", "", "title prefix for the tournament (default \"\")")
 	cmd.Flags().StringVarP(&o.numberPrefix, "number-prefix", "n", "", "Assign consecutive numbers with this letter prefix (e.g. 'K' produces K1, K2, ...)")
-	cmd.Flags().BoolVarP(&o.naginata, "naginata", "", false, "Naginata: add a 3rd-place bronze match block after elimination matches")
 
 	if err := cmd.MarkPersistentFlagRequired("file"); err != nil {
 		fmt.Fprintf(os.Stderr, "Error marking file flag as required: %v\n", err)

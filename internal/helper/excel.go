@@ -1128,7 +1128,8 @@ func PrintThirdPlaceBlock(f *excelize.File, courtStartCol, startRow, numTeamMatc
 		styles.redHeader, styles.text, styles.whiteHeader, mirror)
 	matchRow++
 
-	// Score row: names left empty (overlay fills them); unlock score cells.
+	// Score row: overlay writes name cells (always) and score cells (when the
+	// match is completed); only the score cells are unlocked here.
 	scoreStart := startColName + fmt.Sprint(matchRow)
 	scoreEnd := endColName + fmt.Sprint(matchRow)
 	handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, scoreStart, scoreEnd, styles.text))

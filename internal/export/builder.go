@@ -922,7 +922,7 @@ func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMa
 				if !ok || bm.Status != state.MatchStatusCompleted {
 					continue
 				}
-			} else if cell == "3rd Place" && thirdPlaceMatch != nil && thirdPlaceMatch.Status == state.MatchStatusCompleted {
+			} else if cell == "3rd Place" && thirdPlaceMatch != nil {
 				bm = *thirdPlaceMatch
 			} else {
 				continue
@@ -940,6 +940,29 @@ func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMa
 
 			// headerCol is 0-based. The court start col (1-based) = headerCol+1.
 			courtStartCol := headerCol + 1
+
+			// For the 3rd Place block write entrant names unconditionally so they
+			// appear even when the bronze match is not yet played. Scores, the
+			// middle cell, and the winner marker remain gated on
+			// MatchStatusCompleted below.
+			if cell == "3rd Place" {
+				leftNameCol := colNum(courtStartCol)
+				rightNameCol := colNum(courtStartCol + 6)
+				sideA, sideB := bm.SideA, bm.SideB
+				if mirror {
+					sideA, sideB = sideB, sideA
+				}
+				if sideA != "" {
+					setCellStr(f, sheetName, leftNameCol, excelRow, sideA)
+				}
+				if sideB != "" {
+					setCellStr(f, sheetName, rightNameCol, excelRow, sideB)
+				}
+				if bm.Status != state.MatchStatusCompleted {
+					continue
+				}
+			}
+
 			lVCol := colNum(courtStartCol + 1)
 			middleCol := colNum(courtStartCol + 3)
 			rVCol := colNum(courtStartCol + 5)
@@ -1017,7 +1040,7 @@ func overlayTeamBracketScores(f *excelize.File, bracketByNum map[int]state.Brack
 				if !ok || bm.Status != state.MatchStatusCompleted {
 					continue
 				}
-			} else if cell == "3rd Place" && thirdPlaceMatch != nil && thirdPlaceMatch.Status == state.MatchStatusCompleted {
+			} else if cell == "3rd Place" && thirdPlaceMatch != nil {
 				bm = *thirdPlaceMatch
 			} else {
 				continue
@@ -1031,6 +1054,29 @@ func overlayTeamBracketScores(f *excelize.File, bracketByNum map[int]state.Brack
 			rVCol := colNum(courtStartCol + 5)
 
 			headerExcelRow := rowIdx + 1 // H (1-based)
+
+			// For the 3rd Place block write entrant names unconditionally so they
+			// appear even when the bronze match is not yet played. Sub-match rows,
+			// IV/PW summary, and the winner marker remain gated on
+			// MatchStatusCompleted below.
+			if cell == "3rd Place" {
+				leftNameCol := colNum(courtStartCol)
+				rightNameCol := colNum(courtStartCol + 6)
+				entrantRow := headerExcelRow + 2
+				sideA, sideB := bm.SideA, bm.SideB
+				if mirror {
+					sideA, sideB = sideB, sideA
+				}
+				if sideA != "" {
+					setCellStr(f, sheetName, leftNameCol, entrantRow, sideA)
+				}
+				if sideB != "" {
+					setCellStr(f, sheetName, rightNameCol, entrantRow, sideB)
+				}
+				if bm.Status != state.MatchStatusCompleted {
+					continue
+				}
+			}
 
 			// Sub-match ippon letters: Position p sits at H+2+p.
 			for _, sub := range bm.SubResults {

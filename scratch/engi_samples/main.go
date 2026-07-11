@@ -46,12 +46,14 @@ func recordFlags(eng *engine.Engine, compID, matchID string, a, b int) {
 	}
 }
 
-func newEngine() (*state.Store, *engine.Engine) {
+func newEngine() (cleanup func(), store *state.Store, eng *engine.Engine) {
 	dir, err := os.MkdirTemp("", "engi-sample-*")
 	check(err, "mkdtemp")
-	store, err := state.NewStore(dir)
+	store, err = state.NewStore(dir)
 	check(err, "new store")
-	return store, engine.New(store)
+	eng = engine.New(store)
+	cleanup = func() { check(os.RemoveAll(dir), "cleanup "+dir) }
+	return
 }
 
 // engiPairs builds n engi competitors. Each is ONE participant: member 1 in
@@ -153,25 +155,26 @@ func scoreBracket(eng *engine.Engine, store *state.Store, compID string, scoreFi
 func writeResults(store *state.Store, eng *engine.Engine, compID, path string) {
 	data, err := export.BuildResultsWorkbook(store, eng, compID)
 	check(err, "build results "+compID)
-	check(os.WriteFile(path, data, 0o644), "write "+path)
+	check(os.WriteFile(path, data, 0o600), "write "+path)
 	fmt.Printf("  wrote %s (%d KB)\n", filepath.Base(path), len(data)/1024)
 }
 
 func writeBlank(eng *engine.Engine, compID, path string) {
 	data, err := eng.ExportCompetitionXlsx(compID)
 	check(err, "export blank "+compID)
-	check(os.WriteFile(path, data, 0o644), "write "+path)
+	check(os.WriteFile(path, data, 0o600), "write "+path)
 	fmt.Printf("  wrote %s (%d KB)\n", filepath.Base(path), len(data)/1024)
 }
 
 func main() {
 	outDir := "engi-samples"
-	check(os.MkdirAll(outDir, 0o755), "mkdir out")
+	check(os.MkdirAll(outDir, 0o750), "mkdir out")
 
 	// 1. BLANK TEMPLATE — mixed engi, draw-ready, unscored.
 	fmt.Println("1. blank template (mixed)")
 	{
-		store, eng := newEngine()
+		cleanup, store, eng := newEngine()
+		defer cleanup()
 		id := "blank-mixed"
 		check(store.SaveCompetition(engiComp(id, state.CompFormatMixed, 4, 2, []string{"A"})), "save comp")
 		check(store.SaveParticipants(id, engiPairs(8)), "save participants")
@@ -183,7 +186,8 @@ func main() {
 	//    FINAL deliberately left open.
 	fmt.Println("2. part-full results (mixed, 3rd-place scored, final open)")
 	{
-		store, eng := newEngine()
+		cleanup, store, eng := newEngine()
+		defer cleanup()
 		id := "partial-mixed"
 		check(store.SaveCompetition(engiComp(id, state.CompFormatMixed, 4, 2, []string{"A"})), "save comp")
 		check(store.SaveParticipants(id, engiPairs(8)), "save participants")
@@ -196,7 +200,8 @@ func main() {
 	// 3. MIXED COMPLETE — pools + full bracket + 3rd-place + final.
 	fmt.Println("3. complete results (mixed = pools + playoffs)")
 	{
-		store, eng := newEngine()
+		cleanup, store, eng := newEngine()
+		defer cleanup()
 		id := "mixed-full"
 		check(store.SaveCompetition(engiComp(id, state.CompFormatMixed, 4, 2, []string{"A"})), "save comp")
 		check(store.SaveParticipants(id, engiPairs(8)), "save participants")
@@ -209,7 +214,8 @@ func main() {
 	// 4. LEAGUE COMPLETE — single round-robin, fully scored.
 	fmt.Println("4. complete results (league round-robin)")
 	{
-		store, eng := newEngine()
+		cleanup, store, eng := newEngine()
+		defer cleanup()
 		id := "league-full"
 		check(store.SaveCompetition(engiComp(id, state.CompFormatLeague, 6, 1, []string{"A"})), "save comp")
 		check(store.SaveParticipants(id, engiPairs(6)), "save participants")

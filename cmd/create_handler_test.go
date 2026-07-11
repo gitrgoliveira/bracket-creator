@@ -246,7 +246,6 @@ func TestCreateHandler_EngiPools_FlagsHeader(t *testing.T) {
 // non-engi path: without engi=on the Pool Matches sheet must still carry the
 // kendo "PW" header and must NOT have a "Flags" header.
 func TestCreateHandler_NoEngi_PWHeaderPresent(t *testing.T) {
-	const roster = "Alice, DA\nBob, DB\nCharlie, DC"
 	f := postCreate(t, leagueForm("Alice, DA\nBob, DB\nCharlie, DC\nDave, DD\nEve, DE\nFrank, DF"))
 
 	rows, err := f.GetRows("Pool Matches")
@@ -261,7 +260,6 @@ func TestCreateHandler_NoEngi_PWHeaderPresent(t *testing.T) {
 	}
 	require.Positive(t, resultsRow, "Results block not found on Pool Matches sheet")
 
-	_ = roster // used for documentation
 	hRow := rows[resultsRow-1]
 	hasPW := false
 	for _, cell := range hRow {

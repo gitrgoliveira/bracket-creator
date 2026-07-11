@@ -124,6 +124,10 @@ func TestFlagsScore(t *testing.T) {
 		{1, "1"},
 		{3, "3"},
 		{5, "5"},
+		// Negative counts are impossible in real data but the contract treats
+		// any non-positive value as "no score recorded" (blank cell).
+		{-1, ""},
+		{-5, ""},
 	}
 	for _, tc := range tests {
 		tc := tc

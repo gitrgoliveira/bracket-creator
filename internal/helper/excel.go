@@ -589,7 +589,7 @@ func printIndividualResultsTableSection(ctx poolResultsCtx, headerRow int, teamM
 		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", startColName, row), leftSide))
 
 		records := playerMatchRows[&pool.Players[i]]
-		var wFormulas, tFormulas, lFormulas, pwFormulas, plFormulas []string
+		var wFormulas, middleColFormulas, lFormulas, pwFormulas, plFormulas []string
 		for _, rec := range records {
 			var leftTotal, rightTotal, played string
 			if teamMatches > 0 && rec.endRow > 0 {
@@ -622,8 +622,8 @@ func printIndividualResultsTableSection(ctx poolResultsCtx, headerRow int, teamM
 				engiPlayed := fmt.Sprintf("OR(ISNUMBER(%s%d),ISNUMBER(%s%d))", lVCol, rec.row, rVCol, rec.row)
 				wFormulas = append(wFormulas, fmt.Sprintf("IF(%s,(N(%s%d)>N(%s%d))*1,0)", engiPlayed, myCol, rec.row, oppCol, rec.row))
 				lFormulas = append(lFormulas, fmt.Sprintf("IF(%s,(N(%s%d)<N(%s%d))*1,0)", engiPlayed, myCol, rec.row, oppCol, rec.row))
-				tFormulas = append(tFormulas, fmt.Sprintf("N(%s%d)", myCol, rec.row)) // tFormulas = Flags column for engi
-				continue                                                              // pwFormulas and plFormulas remain empty for engi
+				middleColFormulas = append(middleColFormulas, fmt.Sprintf("N(%s%d)", myCol, rec.row)) // middleColFormulas = Flags column for engi
+				continue                                                                              // pwFormulas and plFormulas remain empty for engi
 			}
 			if teamMatches == 0 {
 				lc := func(col string, r int) string {
@@ -646,13 +646,13 @@ func printIndividualResultsTableSection(ctx poolResultsCtx, headerRow int, teamM
 				middleColName, rec.row, middleColName, rec.row, played, leftTotal, rightTotal)
 			if rec.side == "left" {
 				wFormulas = append(wFormulas, fmt.Sprintf("IF(%s,IF(%s,0,(%s>%s)*1),0)", played, isTie, leftTotal, rightTotal))
-				tFormulas = append(tFormulas, fmt.Sprintf("IF(%s,IF(%s,1,0),0)", played, isTie))
+				middleColFormulas = append(middleColFormulas, fmt.Sprintf("IF(%s,IF(%s,1,0),0)", played, isTie))
 				lFormulas = append(lFormulas, fmt.Sprintf("IF(%s,IF(%s,0,(%s<%s)*1),0)", played, isTie, leftTotal, rightTotal))
 				pwFormulas = append(pwFormulas, leftTotal)
 				plFormulas = append(plFormulas, rightTotal)
 			} else {
 				wFormulas = append(wFormulas, fmt.Sprintf("IF(%s,IF(%s,0,(%s>%s)*1),0)", played, isTie, rightTotal, leftTotal))
-				tFormulas = append(tFormulas, fmt.Sprintf("IF(%s,IF(%s,1,0),0)", played, isTie))
+				middleColFormulas = append(middleColFormulas, fmt.Sprintf("IF(%s,IF(%s,1,0),0)", played, isTie))
 				lFormulas = append(lFormulas, fmt.Sprintf("IF(%s,IF(%s,0,(%s<%s)*1),0)", played, isTie, rightTotal, leftTotal))
 				pwFormulas = append(pwFormulas, rightTotal)
 				plFormulas = append(plFormulas, leftTotal)
@@ -660,7 +660,7 @@ func printIndividualResultsTableSection(ctx poolResultsCtx, headerRow int, teamM
 		}
 		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", lVCol, row), joinFormulas(wFormulas)))
 		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", lPCol, row), joinFormulas(lFormulas)))
-		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", middleColName, row), joinFormulas(tFormulas)))
+		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", middleColName, row), joinFormulas(middleColFormulas)))
 		if !ctx.engi {
 			// Engi has no PW/PL concept; leave those cells blank.
 			handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", rPCol, row), joinFormulas(pwFormulas)))

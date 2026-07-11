@@ -88,10 +88,13 @@ func MiddleCellText(decision, suffix string) string {
 }
 
 // FlagsScore formats an engi referee flag count as a string for an Excel
-// score cell: 0 -> "" (leave the cell blank), any positive n -> strconv.Itoa(n).
+// score cell: <=0 -> "" (leave the cell blank), any positive n -> strconv.Itoa(n).
 // Mirrors the IpponsScore convention of returning "" for "no score recorded".
+// Non-positive counts are impossible in real data (guarded at the pools,
+// bracket, and engine boundaries) but are treated as "no score" defensively so
+// the contract holds for any in-memory caller.
 func FlagsScore(n int) string {
-	if n == 0 {
+	if n <= 0 {
 		return ""
 	}
 	return strconv.Itoa(n)
@@ -99,9 +102,10 @@ func FlagsScore(n int) string {
 
 // ScoreCellText returns the value to write into an individual score cell.
 // For engi competitions it uses the referee flag count (FlagsScore); for all
-// other competitions it joins the ippon slice (IpponsScore). This single helper
-// removes parallel if/else branches in both overlayPoolScores and
-// overlayBracketScores.
+// other competitions it joins the ippon slice (IpponsScore). Used by
+// overlayPoolScores. overlayBracketScores does NOT call this: bracket state
+// stores a pre-joined ScoreA/ScoreB string rather than an ippon slice, so it
+// formats its own non-engi branch and calls FlagsScore directly for engi.
 func ScoreCellText(engi bool, ippons []string, flags int) string {
 	if engi {
 		return FlagsScore(flags)

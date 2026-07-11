@@ -919,16 +919,17 @@ func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMa
 			rVCol := colNum(courtStartCol + 5)
 
 			// For engi, the bracket stores flag counts in FlagsA/FlagsB;
-			// ScoreA/ScoreB hold ippon letters that do not apply. Use FlagsScore
-			// via ScoreCellText to write the correct flag count.
+			// ScoreA/ScoreB hold ippon letters that do not apply. Render the
+			// flag count via FlagsScore instead. leftFlags/rightFlags are named
+			// by display position (post-mirror), matching overlayPoolScores.
 			var leftScore, rightScore string
 			if engi {
-				leftFlagsA, rightFlagsB := bm.FlagsA, bm.FlagsB
+				leftFlags, rightFlags := bm.FlagsA, bm.FlagsB
 				if mirror {
-					leftFlagsA, rightFlagsB = bm.FlagsB, bm.FlagsA
+					leftFlags, rightFlags = bm.FlagsB, bm.FlagsA
 				}
-				leftScore = FlagsScore(leftFlagsA)
-				rightScore = FlagsScore(rightFlagsB)
+				leftScore = FlagsScore(leftFlags)
+				rightScore = FlagsScore(rightFlags)
 			} else {
 				leftScore = bm.ScoreA
 				rightScore = bm.ScoreB

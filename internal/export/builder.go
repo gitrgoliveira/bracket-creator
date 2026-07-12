@@ -1289,11 +1289,13 @@ func buildBracketMatchIndex(bracket *state.Bracket) map[int]state.BracketMatch {
 	return idx
 }
 
-// resolveBracketMatch resolves a cell label to the completed BracketMatch it
-// describes. Regular rounds use the bracketByNum index (via parseRoundMatchLabel);
-// the bronze block uses the thirdPlaceMatch pointer directly because
-// ThirdPlaceMatch.MatchNumber is 0 and is not indexed. Returns (zero, false) for
-// any cell that does not correspond to a completed match.
+// resolveBracketMatch resolves a cell label to the BracketMatch it describes.
+// Regular rounds use the bracketByNum index (via parseRoundMatchLabel) and are
+// returned only when completed. The bronze block uses the thirdPlaceMatch
+// pointer directly (ThirdPlaceMatch.MatchNumber is 0 and is not indexed) and is
+// returned whenever present, regardless of status, so the overlay can still
+// write its self-populating entrant formulas before the bout is played.
+// Returns (zero, false) when the cell matches no such match.
 func resolveBracketMatch(cell string, bracketByNum map[int]state.BracketMatch, thirdPlaceMatch *state.BracketMatch) (state.BracketMatch, bool) {
 	matchNum := parseRoundMatchLabel(cell)
 	if matchNum > 0 {

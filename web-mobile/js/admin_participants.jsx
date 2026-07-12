@@ -994,7 +994,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
               ) : (
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
                   <div>
-                    <div className="field__label" style={{ fontSize: 11 }}>{c.engi ? "Name 1 *" : "Name *"}</div>
+                    <div className="field__label" style={{ fontSize: 11 }}>{c.engi ? "Pair (Name 1 - Name 2) *" : "Name *"}</div>
                     <input className="input" style={{ width: 160 }} value={addName} onChange={e => setAddName(e.target.value)} placeholder={c.engi ? "Member 1 - Member 2" : "Full name"} />
                   </div>
                   {withZekken && (
@@ -1169,7 +1169,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
             <div>
               <div className="card__title">{c.kind === "team" ? "Team list" : "Participant list"}</div>
               <div className="card__sub">
-                {lines.length} entries · One per line · <span style={{ color: "var(--ink-2)", fontWeight: 600 }}>Example: Alice Smith, Gyokusen, 3</span>
+                {lines.length} entries · One per line · <span style={{ color: "var(--ink-2)", fontWeight: 600 }}>Example: {c.kind === "team" ? "Tora A, Tora Dojo London" : c.engi ? (c.withZekkenName ? "Emi Sasaki - Ren Fujita, SASAKI - FUJITA, Getsurin, 3" : "Emi Sasaki - Ren Fujita, Getsurin, 3") : c.withZekkenName ? "Alice Smith, SMITH, Gyokusen, 3" : "Alice Smith, Gyokusen, 3"}</span>
               </div>
               <div className="field__hint" style={{ marginTop: 2, fontSize: 11 }}>
                 Format: "{c.kind === "team" ? "Team name, Dojo" : c.engi ? (c.withZekkenName ? "Name 1 - Name 2, Zekken, Dojo[, Dan]" : "Name 1 - Name 2, Dojo[, Dan]") : c.withZekkenName ? "Name, Zekken, Dojo[, Dan]" : "Name, Dojo[, Dan grade]"}"

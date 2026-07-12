@@ -1699,6 +1699,14 @@ function ShiaijoContext({ match, competitions, court, nextPoolName, tweaks, open
         ? detail.pools.find((p) => p.poolName === match.poolName)
         : null;
 
+    // Shared loading placeholder for the self-fetching standings viewers
+    // (swiss + league branches below).
+    const standingsLoader = (
+        <p style={{ fontSize: 12, color: "var(--ink-3)", margin: 0 }}>
+            Loading standings…
+        </p>
+    );
+
     return (
         <div className="shiaijo-context">
             <button type="button" className="section-title shiaijo-context__toggle" aria-expanded={open} onClick={onToggle}>
@@ -1727,11 +1735,7 @@ function ShiaijoContext({ match, competitions, court, nextPoolName, tweaks, open
                                         tweaks={tweaks || { showDojo: true }}
                                     />
                                 </div>
-                            ) : (
-                                <p style={{ fontSize: 12, color: "var(--ink-3)", margin: 0 }}>
-                                    Loading standings…
-                                </p>
-                            )
+                            ) : standingsLoader
                         ) : isLeagueComp ? (
                             // Leagues are always RANK-ordered (mp-ahu6): never fall
                             // through to the draw-order PoolsViewer here. Renders off
@@ -1747,11 +1751,7 @@ function ShiaijoContext({ match, competitions, court, nextPoolName, tweaks, open
                                         highlightPlayers={[]}
                                     />
                                 </div>
-                            ) : (
-                                <p style={{ fontSize: 12, color: "var(--ink-3)", margin: 0 }}>
-                                    Loading standings…
-                                </p>
-                            )
+                            ) : standingsLoader
                         ) : (
                             <>
                                 <div className="shiaijo-context__next">

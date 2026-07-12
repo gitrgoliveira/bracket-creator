@@ -749,6 +749,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                     s && s.tied ? "pool__row--tied" : "",
                   ].filter(Boolean).join(" ");
 
+                  const [pMember1, pMember2] = isEngi ? window.engiPairParts(p.name) : [p.name, ""];
                   return (
                     <tr key={p.id || `${p.name}||${p.dojo || ""}` || drawPos} className={rowClasses || undefined}>
                       <td className="pool-standings__draw-pos">
@@ -757,7 +758,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                       <td>
                         <div className="pool__player-name">
                           {p.number ? <span className="num-prefix">{p.number}</span> : null}
-                          {isEngi ? window.engiPairParts(p.name)[0] : p.name}
+                          {pMember1}
                           {isTeam && dhWinnerNames.has(p.name) && (
                             <DHBadge />
                           )}
@@ -768,7 +769,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                           ) : null}
                         </div>
                         {/* Engi pair: member 2 (from the combined name) stacked below member 1. */}
-                        {isEngi && window.engiPairParts(p.name)[1] ? <div className="pool__player-name">{window.engiPairParts(p.name)[1]}</div> : null}
+                        {isEngi && pMember2 ? <div className="pool__player-name">{pMember2}</div> : null}
                         {tweaks.showDojo ? <div className="pool__dojo-name">{p.dojo}</div> : null}
                       </td>
                       {s ? (

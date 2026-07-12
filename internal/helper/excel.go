@@ -387,8 +387,6 @@ type poolResultsCtx struct {
 	engi            bool
 }
 
-// printTeamResultsTableSection writes the "Team Results" W/L/T table header and
-// per-player win/loss/tie formulas starting at headerRow.
 // playerNameFormulaFor returns the name-cell formula for a results-table row.
 // Engi pair names need no special handling: both member names live combined in
 // Player.Name ("Name 1 - Name 2"), so the plain reference shows the full pair.
@@ -397,6 +395,8 @@ func (ctx poolResultsCtx) playerNameFormulaFor(player Player) string {
 	return left
 }
 
+// printTeamResultsTableSection writes the "Team Results" W/L/T table header and
+// per-player win/loss/tie formulas starting at headerRow.
 func printTeamResultsTableSection(ctx poolResultsCtx, headerRow int, cols []string) {
 	f, sheetName := ctx.f, ctx.sheetName
 	startColName, rankCol := ctx.startColName, ctx.rankCol
@@ -490,8 +490,8 @@ func printTeamIndividualStatsSection(ctx poolResultsCtx, headerRow int, headerRo
 	for i, player := range pool.Players {
 		row := headerRow + 1 + i
 		row2 := headerRow2 + 1 + i
-		playerNameFormula2 := ctx.playerNameFormulaFor(player)
-		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", startColName, row2), playerNameFormula2))
+		playerNameFormula := ctx.playerNameFormulaFor(player)
+		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", startColName, row2), playerNameFormula))
 
 		records := playerMatchRows[&pool.Players[i]]
 		var ivF, ilF, itF, pwF, plF []string
@@ -578,14 +578,11 @@ func printIndividualResultsTableSection(ctx poolResultsCtx, headerRow int, teamM
 
 	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", startColName, headerRow), "Results"))
 	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", lVCol, headerRow), "W"))
-	if !ctx.engi {
-		// Non-engi: write the L header. Engi omits the L column entirely (losses are not recorded).
-		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", lPCol, headerRow), "L"))
-	}
 	if ctx.engi {
 		// Engi standings: W / Flags / Rank only (no L, T, PW, PL).
 		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", middleColName, headerRow), ColHeaderFlags))
 	} else {
+		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", lPCol, headerRow), "L"))
 		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", middleColName, headerRow), "T"))
 		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", rPCol, headerRow), "PW"))
 		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", rVCol, headerRow), "PL"))
@@ -597,8 +594,8 @@ func printIndividualResultsTableSection(ctx poolResultsCtx, headerRow int, teamM
 
 	for i, player := range pool.Players {
 		row := headerRow + 1 + i
-		playerNameFormula3 := ctx.playerNameFormulaFor(player)
-		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", startColName, row), playerNameFormula3))
+		playerNameFormula := ctx.playerNameFormulaFor(player)
+		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", startColName, row), playerNameFormula))
 
 		records := playerMatchRows[&pool.Players[i]]
 		var wFormulas, middleColFormulas, lFormulas, pwFormulas, plFormulas []string

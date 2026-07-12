@@ -934,20 +934,8 @@ func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMa
 	// bronze header when thirdPlaceMatch is present.
 	for rowIdx, row := range rows {
 		for headerCol, cell := range row {
-			// Resolve the match to overlay. Regular rounds go through the
-			// bracketByNum index; the bronze match uses the pointer directly
-			// because ThirdPlaceMatch.MatchNumber is 0 (not indexed).
-			var bm state.BracketMatch
-			matchNum := parseRoundMatchLabel(cell)
-			if matchNum > 0 {
-				var ok bool
-				bm, ok = bracketByNum[matchNum]
-				if !ok || bm.Status != state.MatchStatusCompleted {
-					continue
-				}
-			} else if cell == helper.ThirdPlaceLabel && thirdPlaceMatch != nil {
-				bm = *thirdPlaceMatch
-			} else {
+			bm, ok := resolveBracketMatch(cell, bracketByNum, thirdPlaceMatch)
+			if !ok {
 				continue
 			}
 
@@ -1040,20 +1028,8 @@ func overlayTeamBracketScores(f *excelize.File, bracketByNum map[int]state.Brack
 	// bronze header when thirdPlaceMatch is present.
 	for rowIdx, row := range rows {
 		for headerCol, cell := range row {
-			// Resolve the match to overlay. Regular rounds go through the
-			// bracketByNum index; the bronze match uses the pointer directly
-			// because ThirdPlaceMatch.MatchNumber is 0 (not indexed).
-			var bm state.BracketMatch
-			matchNum := parseRoundMatchLabel(cell)
-			if matchNum > 0 {
-				var ok bool
-				bm, ok = bracketByNum[matchNum]
-				if !ok || bm.Status != state.MatchStatusCompleted {
-					continue
-				}
-			} else if cell == helper.ThirdPlaceLabel && thirdPlaceMatch != nil {
-				bm = *thirdPlaceMatch
-			} else {
+			bm, ok := resolveBracketMatch(cell, bracketByNum, thirdPlaceMatch)
+			if !ok {
 				continue
 			}
 
@@ -1311,6 +1287,26 @@ func buildBracketMatchIndex(bracket *state.Bracket) map[int]state.BracketMatch {
 		add(*bracket.ThirdPlaceMatch)
 	}
 	return idx
+}
+
+// resolveBracketMatch resolves a cell label to the completed BracketMatch it
+// describes. Regular rounds use the bracketByNum index (via parseRoundMatchLabel);
+// the bronze block uses the thirdPlaceMatch pointer directly because
+// ThirdPlaceMatch.MatchNumber is 0 and is not indexed. Returns (zero, false) for
+// any cell that does not correspond to a completed match.
+func resolveBracketMatch(cell string, bracketByNum map[int]state.BracketMatch, thirdPlaceMatch *state.BracketMatch) (state.BracketMatch, bool) {
+	matchNum := parseRoundMatchLabel(cell)
+	if matchNum > 0 {
+		bm, ok := bracketByNum[matchNum]
+		if !ok || bm.Status != state.MatchStatusCompleted {
+			return state.BracketMatch{}, false
+		}
+		return bm, true
+	}
+	if cell == helper.ThirdPlaceLabel && thirdPlaceMatch != nil {
+		return *thirdPlaceMatch, true
+	}
+	return state.BracketMatch{}, false
 }
 
 // parseRoundMatchLabel parses "Round R - Match M" and returns the match number M

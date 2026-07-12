@@ -109,12 +109,11 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				source = "manual"
 			}
 
-			// Strip displayName unless the EFFECTIVE layout is zekken
-			// (WithZekkenName || Engi). For a plain non-zekken comp a non-empty
-			// DisplayName would make saveParticipantsNoLock write a 3-column row
-			// that LoadParticipants mis-parses; engi comps keep it (it holds
-			// pair member 2). Using the raw WithZekkenName here would drop an
-			// engi pair's member 2 for a comp with WithZekkenName=false.
+			// Strip displayName when the zekken column is not enabled. A non-empty
+			// DisplayName in a non-zekken comp would cause saveParticipantsNoLock to
+			// write a 3-column row that LoadParticipants mis-parses. Engi pairs store
+			// both member names combined in Player.Name; DisplayName is only relevant
+			// for the zekken column (combined pair zekken when WithZekkenName is set).
 			// Store.AddParticipant re-derives via SanitizeName(Name) when empty.
 			displayName := req.DisplayName
 			if !comp.EffectiveWithZekkenName() {

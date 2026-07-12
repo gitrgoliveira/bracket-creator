@@ -103,15 +103,7 @@ func FlagsScorePair(a, b int) (string, string) {
 	if a <= 0 && b <= 0 {
 		return "", ""
 	}
-	aStr := strconv.Itoa(a)
-	if a < 0 {
-		aStr = "0"
-	}
-	bStr := strconv.Itoa(b)
-	if b < 0 {
-		bStr = "0"
-	}
-	return aStr, bStr
+	return strconv.Itoa(max(0, a)), strconv.Itoa(max(0, b))
 }
 
 // IpponsScore formats an ippon slice as a readable score string: ["M","K"] ->

@@ -3538,3 +3538,63 @@ func TestBuildResultsWorkbook_PlayoffsTreePageNoPoolRosters(t *testing.T) {
 			"playoffs tree page %s must not have a pool roster formula in A4", sheet)
 	}
 }
+
+// TestBuildResultsWorkbook_EngiPairLabelsInBracketEntrants verifies that engi
+// bracket entrant name cells render the full pair as "Member1 - Member2".
+// The stored bracket sides hold only member 1's name, so the overlay must
+// resolve member 2 (DisplayName) via the roster. Covers both the playoffs
+// entrant overwrite (overlayPlayoffBracketNames) and the 3rd Place block
+// entrant writes (overlayBracketScores).
+func TestBuildResultsWorkbook_EngiPairLabelsInBracketEntrants(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	setNaginataPlayoffs(t, store, compID, true)
+	bracket := startNaginataWith4Players(t, store, eng, compID, true)
+
+	sfIdx := len(bracket.Rounds) - 2
+	sf := bracket.Rounds[sfIdx]
+	require.Len(t, sf, 2)
+	for _, m := range sf {
+		_, err := eng.RecordMatchResultWithIneligibility(compID, m.ID, &state.MatchResult{
+			FlagsA: 3, FlagsB: 2, Status: state.MatchStatusCompleted,
+		})
+		require.NoError(t, err)
+	}
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer f.Close()
+
+	rows, err := f.GetRows(helper.SheetEliminationMatches)
+	require.NoError(t, err)
+
+	// Collect every non-empty name cell (court cols A and G) below a match or
+	// 3rd Place header. Each populated entrant must carry the dash pair label.
+	var entrants []string
+	for i, row := range rows {
+		for _, cell := range row {
+			if cell != "3rd Place" && parseRoundMatchLabel(cell) <= 0 {
+				continue
+			}
+			if i+2 >= len(rows) {
+				continue
+			}
+			nameRow := rows[i+2]
+			for _, col := range []int{0, 6} {
+				if col < len(nameRow) && strings.HasPrefix(nameRow[col], "Pair") {
+					entrants = append(entrants, nameRow[col])
+				}
+			}
+		}
+	}
+	require.NotEmpty(t, entrants, "expected populated bracket entrant name cells")
+	for _, name := range entrants {
+		assert.Regexp(t, `^Pair\dA - Pair\dB$`, name,
+			"engi entrant must render as 'Member1 - Member2', got %q", name)
+	}
+}

@@ -185,23 +185,30 @@ describe('buildXlsxBody effectiveZekken from withZekkenName', () => {
   });
 });
 
-// ── csvField quoting via roster lines (CR/LF and non-string coercion) ────────
+// ── csvField sanitizing via roster lines (CR/LF collapse, quoting, coercion) ─
 
-describe('buildXlsxBody roster field quoting', () => {
+describe('buildXlsxBody roster field sanitizing', () => {
   const cfg = { format: 'pools', poolSize: 3, poolWinners: 2, courts: ['A'] };
 
-  it('quotes a field containing a carriage return', () => {
+  it('collapses an embedded carriage return to a space (server splits on newlines pre-CSV)', () => {
     const body = buildXlsxBody(cfg, 'Test', [player('Yama\rda', 'Dojo1')]);
     const lines = body.get('playerList').split('\n');
-    expect(lines[0]).toBe('"Yama\rda", Dojo1');
+    expect(lines[0]).toBe('Yama da, Dojo1');
   });
 
-  it('quotes a field containing a line feed', () => {
-    const body = buildXlsxBody(cfg, 'Test', [player('Yama\nda', 'Dojo1')]);
-    expect(body.get('playerList').startsWith('"Yama\nda", Dojo1')).toBe(true);
+  it('collapses an embedded CRLF run to a single space', () => {
+    const body = buildXlsxBody(cfg, 'Test', [player('Yama\r\n\nda', 'Dojo1')]);
+    const lines = body.get('playerList').split('\n');
+    expect(lines[0]).toBe('Yama da, Dojo1');
   });
 
-  it('string-coerces non-string field values in the unquoted branch', () => {
+  it('still RFC-4180-quotes commas and double-quotes', () => {
+    const body = buildXlsxBody(cfg, 'Test', [player('Yamada, Taro', 'Do"jo')]);
+    const lines = body.get('playerList').split('\n');
+    expect(lines[0]).toBe('"Yamada, Taro", "Do""jo"');
+  });
+
+  it('string-coerces non-string field values', () => {
     const body = buildXlsxBody(cfg, 'Test', [player(42, 'Dojo1')]);
     const lines = body.get('playerList').split('\n');
     expect(lines[0]).toBe('42, Dojo1');

@@ -121,8 +121,9 @@ Both Excel downloads on the competition page (see
 
 - Each pair is a single competitor throughout both workbooks. The data sheet
   lists member 1 under **Player Name** and member 2 under **Display Name**,
-  with the shared dojo; the match grids and standings identify the pair by
-  member 1's name, and the printable name sheets by member 2's.
+  with the shared dojo. Everywhere else the pair appears (pool draw, match
+  grids, standings, bracket pages, and the printable name sheets) both members
+  are shown together on one line as "Member 1 - Member 2".
 - Pool standings in both workbooks use the Engi columns: **W** (wins),
   **Flags** (total flags), and **Rank**. Losses are not recorded because
   ranking is determined by wins then accumulated own-side flags. The kendo

@@ -2,12 +2,14 @@
 
 const { useState: useStateA } = React;
 
-// RFC-4180-quote a CSV field that contains a comma, double-quote, or newline
-// (LF or CR, so stray Windows carriage returns are quoted too).
+// Prepare a roster CSV field: collapse embedded CR/LF runs to a single space
+// (the /create handler splits the roster on newlines BEFORE CSV parsing, so a
+// quoted newline would still break a record apart), then RFC-4180-quote if the
+// field contains a comma or double-quote.
 // Used by buildXlsxBody (including its rosterLine roster helper).
 const csvField = (s) => {
-  const str = String(s);
-  return /[",\n\r]/.test(str) ? '"' + str.replace(/"/g, '""') + '"' : str;
+  const str = String(s).replace(/[\r\n]+/g, " ").trim();
+  return /[",]/.test(str) ? '"' + str.replace(/"/g, '""') + '"' : str;
 };
 
 // buildXlsxBody constructs the URLSearchParams body for POST /create from a

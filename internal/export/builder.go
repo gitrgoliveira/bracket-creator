@@ -80,6 +80,11 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 		return nil, fmt.Errorf("export: load bracket: %w", err)
 	}
 
+	// Engi pair label resolver: bracket sides store only member 1's name, but an
+	// engi competitor is a pair, so literal name overlays render "Member1 - Member2".
+	// Resolves via the participant roster; unknown names pass through unchanged.
+	pairLabel := engiPairLabeler(store, comp, pools)
+
 	// Index match results by ID for O(1) lookup.
 	matchResultByID := make(map[string]state.MatchResult, len(matchResults))
 	for _, mr := range matchResults {
@@ -99,7 +104,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	poolCoords, playerCoords := helper.AddPoolDataToSheet(f, pools, comp.EffectiveWithZekkenName(), comp.Name)
 
 	// 2. Pool Draw sheet (formula refs to data sheet survive store round-trips).
-	if err := helper.AddPoolsToSheet(f, pools, poolCoords, playerCoords); err != nil {
+	if err := helper.AddPoolsToSheet(f, pools, poolCoords, playerCoords, comp.Engi); err != nil {
 		return nil, fmt.Errorf("export: add pools to sheet: %w", err)
 	}
 
@@ -189,7 +194,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 			if bracket.ThirdPlaceMatch != nil {
 				thirdPlaceMatch = bracket.ThirdPlaceMatch
 			}
-			if err := overlayBracketScores(f, bracketByNum, comp.TeamSize, comp.Mirror, comp.Engi, thirdPlaceMatch); err != nil {
+			if err := overlayBracketScores(f, bracketByNum, comp.TeamSize, comp.Mirror, comp.Engi, thirdPlaceMatch, pairLabel); err != nil {
 				return nil, fmt.Errorf("export: overlay bracket scores: %w", err)
 			}
 			// Playoffs have no pool data sheet, so the pool-oriented renderer emits
@@ -197,7 +202,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 			// the stored bracket's literal names (empty for unresolved slots) so the
 			// sheet is a valid literal snapshot with no broken formulas.
 			if len(pools) == 0 && comp.Format == state.CompFormatPlayoffs {
-				if err := overlayPlayoffBracketNames(f, bracketByNum, comp.TeamSize, comp.Mirror); err != nil {
+				if err := overlayPlayoffBracketNames(f, bracketByNum, comp.TeamSize, comp.Mirror, pairLabel); err != nil {
 					return nil, fmt.Errorf("export: overlay playoff names: %w", err)
 				}
 			}
@@ -241,7 +246,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 			helper.SetTreeSheetTitle(f, pageSheet, "Shiaijo "+courtLabel)
 			if len(pools) > 0 {
 				poolStart, poolEnd := helper.PoolBoundsForSubtree(len(pools), numCourts, len(subtrees), i)
-				helper.AddPoolsToTree(f, pageSheet, pools[poolStart:poolEnd], poolCoords, playerCoords)
+				helper.AddPoolsToTree(f, pageSheet, pools[poolStart:poolEnd], poolCoords, playerCoords, comp.Engi)
 			}
 		}
 		if derr := f.DeleteSheet(helper.SheetTree); derr != nil {
@@ -250,7 +255,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	}
 
 	// 5. Names to Print sheet (identical to blank-template export).
-	helper.CreateNamesWithPoolToPrint(f, pools, comp.EffectiveWithZekkenName(), numCourts, playerCoords)
+	helper.CreateNamesWithPoolToPrint(f, pools, comp.EffectiveWithZekkenName(), numCourts, playerCoords, comp.Engi)
 
 	var buf bytes.Buffer
 	if err := f.Write(&buf); err != nil {
@@ -770,12 +775,14 @@ func overlayPoolStandings(f *excelize.File, pools []helper.Pool, standings map[s
 	}
 
 	// Overlay Ranking sections.
-	return overlayRankingSections(f, sheetName, rows, pools, standings, numCourts, poolsByCourt)
+	return overlayRankingSections(f, sheetName, rows, pools, standings, numCourts, poolsByCourt, engi)
 }
 
 // overlayRankingSections replaces the IFERROR/INDEX/MATCH formula cells in the
 // "Ranking" sections with literal player names from the engine-ordered standings.
-func overlayRankingSections(f *excelize.File, sheetName string, rows [][]string, pools []helper.Pool, standings map[string][]state.PlayerStanding, numCourts int, poolsByCourt [][]int) error {
+// For engi competitions, both pair members are written as "Member1 - Member2"
+// on one line (in-cell newlines render poorly in Excel).
+func overlayRankingSections(f *excelize.File, sheetName string, rows [][]string, pools []helper.Pool, standings map[string][]state.PlayerStanding, numCourts int, poolsByCourt [][]int, engi bool) error {
 
 	courtRankIdx := make([]int, numCourts)
 
@@ -820,7 +827,11 @@ func overlayRankingSections(f *excelize.File, sheetName string, rows [][]string,
 				}
 				excelRow := dataRowIdx + 1
 				cellRef := fmt.Sprintf("%s%d", nameCol, excelRow)
-				if err := f.SetCellValue(sheetName, cellRef, ps.Player.Name); err != nil {
+				name := ps.Player.Name
+				if engi && ps.Player.DisplayName != "" {
+					name = ps.Player.Name + " - " + ps.Player.DisplayName
+				}
+				if err := f.SetCellValue(sheetName, cellRef, name); err != nil {
 					return fmt.Errorf("overlayRankingSections: %w", err)
 				}
 			}
@@ -910,7 +921,7 @@ func overlayTeamPoolStandings(f *excelize.File, pools []helper.Pool, standings m
 		}
 	}
 
-	return overlayRankingSections(f, sheetName, rows, pools, standings, numCourts, poolsByCourt)
+	return overlayRankingSections(f, sheetName, rows, pools, standings, numCourts, poolsByCourt, false /* team pools are never engi */)
 }
 
 // ---------- bracket score overlay ----------
@@ -920,7 +931,7 @@ func overlayTeamPoolStandings(f *excelize.File, pools []helper.Pool, standings m
 // "3rd Place" header cell. For each completed match found, the score cells in
 // the row two rows below the header are overwritten with literal values.
 // thirdPlaceMatch is the bracket's bronze match (nil when absent/not naginata).
-func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMatch, teamSize int, mirror bool, engi bool, thirdPlaceMatch *state.BracketMatch) error {
+func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMatch, teamSize int, mirror bool, engi bool, thirdPlaceMatch *state.BracketMatch, pairLabel func(string) string) error {
 	if teamSize != 0 {
 		return overlayTeamBracketScores(f, bracketByNum, teamSize, mirror, thirdPlaceMatch)
 	}
@@ -979,10 +990,10 @@ func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMa
 					sideA, sideB = sideB, sideA
 				}
 				if sideA != "" {
-					setCellStr(f, sheetName, leftNameCol, excelRow, sideA)
+					setCellStr(f, sheetName, leftNameCol, excelRow, pairLabel(sideA))
 				}
 				if sideB != "" {
-					setCellStr(f, sheetName, rightNameCol, excelRow, sideB)
+					setCellStr(f, sheetName, rightNameCol, excelRow, pairLabel(sideB))
 				}
 				if bm.Status != state.MatchStatusCompleted {
 					continue
@@ -1165,7 +1176,7 @@ func overlayTeamBracketScores(f *excelize.File, bracketByNum map[int]state.Brack
 // entrant row (header + 2). Team brackets repeat the entrant name formulas on the
 // summary row (header + 4 + teamSize, just above the "Victories / Points" row), so
 // those are overwritten too.
-func overlayPlayoffBracketNames(f *excelize.File, bracketByNum map[int]state.BracketMatch, teamSize int, mirror bool) error {
+func overlayPlayoffBracketNames(f *excelize.File, bracketByNum map[int]state.BracketMatch, teamSize int, mirror bool, pairLabel func(string) string) error {
 	sheetName := helper.SheetEliminationMatches
 	rows, err := f.GetRows(sheetName)
 	if err != nil {
@@ -1183,7 +1194,7 @@ func overlayPlayoffBracketNames(f *excelize.File, bracketByNum map[int]state.Bra
 				continue
 			}
 
-			leftName, rightName := bm.SideA, bm.SideB
+			leftName, rightName := pairLabel(bm.SideA), pairLabel(bm.SideB)
 			if mirror {
 				leftName, rightName = rightName, leftName
 			}
@@ -1286,6 +1297,42 @@ func standingMap(standings []state.PlayerStanding) map[string]state.PlayerStandi
 		m[standingKey(ps.Player)] = ps
 	}
 	return m
+}
+
+// engiPairLabeler returns a resolver that maps a stored side name (member 1)
+// to the "Member1 - Member2" pair label for engi competitions. For non-engi
+// competitions, or names not found in the roster, it returns the name as-is.
+// The roster is taken from the pools when present (mixed format) and from the
+// participant store otherwise (pure playoffs).
+func engiPairLabeler(store *state.Store, comp *state.Competition, pools []helper.Pool) func(string) string {
+	identity := func(name string) string { return name }
+	if comp == nil || !comp.Engi {
+		return identity
+	}
+	byName := make(map[string]string)
+	add := func(pl helper.Player) {
+		if pl.DisplayName != "" && pl.DisplayName != pl.Name {
+			byName[pl.Name] = pl.Name + " - " + pl.DisplayName
+		}
+	}
+	for _, pool := range pools {
+		for _, pl := range pool.Players {
+			add(pl)
+		}
+	}
+	if len(pools) == 0 {
+		if players, err := store.LoadParticipants(comp.ID, comp.EffectiveWithZekkenName()); err == nil {
+			for _, pl := range players {
+				add(pl)
+			}
+		}
+	}
+	return func(name string) string {
+		if label, ok := byName[name]; ok {
+			return label
+		}
+		return name
+	}
 }
 
 // standingKey returns the lookup key for standingMap: the player's UUID when

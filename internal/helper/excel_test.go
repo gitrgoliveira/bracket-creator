@@ -328,7 +328,7 @@ func TestAddPoolsToTreeTable(t *testing.T) {
 			f.NewSheet(sheet)
 
 			pools, poolCoords, pCoords := tt.setupPools()
-			AddPoolsToTree(f, sheet, pools, poolCoords, pCoords)
+			AddPoolsToTree(f, sheet, pools, poolCoords, pCoords, false)
 
 			rows, err := f.GetRows(sheet)
 			if err != nil {
@@ -760,7 +760,7 @@ func TestCreateNamesToPrint(t *testing.T) {
 		playerCoordKey(players[1]): {cellCoord: cellCoord{sheetName: "Pool1", cell: "B3"}},
 	}
 
-	CreateNamesToPrint(f, players, false, 1, pCoords)
+	CreateNamesToPrint(f, players, false, 1, pCoords, false)
 
 	sheet := "Names to Print A"
 	valA1, _ := f.GetCellValue(sheet, "A1")
@@ -789,7 +789,7 @@ func TestCreateNamesToPrint_MultiCourt(t *testing.T) {
 		pCoords[playerCoordKey(players[i])] = playerCellCoord{cellCoord: cellCoord{sheetName: "data", cell: fmt.Sprintf("B%d", i+2)}}
 	}
 
-	CreateNamesToPrint(f, players, false, 2, pCoords)
+	CreateNamesToPrint(f, players, false, 2, pCoords, false)
 
 	rowsA, err := f.GetRows("Names to Print A")
 	assert.NoError(t, err)
@@ -823,7 +823,7 @@ func TestCreateNamesWithPoolToPrint(t *testing.T) {
 		playerCoordKey(pools[0].Players[1]): {cellCoord: cellCoord{sheetName: "Pool1", cell: "B3"}},
 	}
 
-	CreateNamesWithPoolToPrint(f, pools, false, 1, pCoords)
+	CreateNamesWithPoolToPrint(f, pools, false, 1, pCoords, false)
 
 	sheet := "Names to Print A"
 	valA1, _ := f.GetCellValue(sheet, "A1")
@@ -873,7 +873,7 @@ func TestCreateNamesWithPoolToPrint_MultiCourt(t *testing.T) {
 		pCoords[playerCoordKey(p)] = playerCellCoord{cellCoord: cellCoord{sheetName: "data", cell: cells[i]}}
 	}
 
-	CreateNamesWithPoolToPrint(f, pools, false, 2, pCoords)
+	CreateNamesWithPoolToPrint(f, pools, false, 2, pCoords, false)
 
 	rowsA, err := f.GetRows("Names to Print A")
 	assert.NoError(t, err)

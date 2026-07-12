@@ -3,6 +3,7 @@ package helper
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	excelize "github.com/xuri/excelize/v2"
 )
@@ -129,7 +130,7 @@ func AddPlayerDataToSheet(f *excelize.File, players []Player, sanitize bool, tit
 // Columns B, D, F (indices 2, 4, 6) are the three pool columns.
 const poolDrawColumnCount = 3
 
-func AddPoolsToSheet(f *excelize.File, pools []Pool, poolCoords map[string]cellCoord, playerCoords map[string]playerCellCoord) error {
+func AddPoolsToSheet(f *excelize.File, pools []Pool, poolCoords map[string]cellCoord, playerCoords map[string]playerCellCoord, engi bool) error {
 	sheetName := SheetPoolDraw
 	SetSheetLayoutPortraitA4(f, sheetName)
 
@@ -263,7 +264,16 @@ func AddPoolsToSheet(f *excelize.File, pools []Pool, poolCoords map[string]cellC
 			cell := colName + fmt.Sprint(row)
 			coord := playerCoords[playerCoordKey(player)]
 			var formula string
-			if coord.numberCell != "" {
+			if engi {
+				// Engi pairs: member-1 (col B) and member-2 (col D) joined by " - ".
+				if coord.numberCell != "" {
+					formula = engiPlayerRef(coord)
+				} else {
+					dCell := strings.Replace(coord.cell, "$B$", "$D$", 1)
+					formula = fmt.Sprintf("\"%d. \" & %s!%s&\" - \"&%s!%s",
+						player.PoolPosition, coord.sheetName, coord.cell, coord.sheetName, dCell)
+				}
+			} else if coord.numberCell != "" {
 				formula = playerRef(player.Name, coord)
 			} else {
 				formula = fmt.Sprintf("\"%d. \" & %s!%s", player.PoolPosition, coord.sheetName, coord.cell)

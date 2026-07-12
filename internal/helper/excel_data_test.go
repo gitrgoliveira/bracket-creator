@@ -435,7 +435,7 @@ func TestAddPoolsToSheet(t *testing.T) {
 			err = f.SetCellValue(SheetPoolDraw, "B6", "Player 1")
 			require.NoError(t, err)
 
-			err = AddPoolsToSheet(f, pools, poolCoords, playerCoords)
+			err = AddPoolsToSheet(f, pools, poolCoords, playerCoords, false)
 
 			if tt.wantErr {
 				require.Error(t, err)

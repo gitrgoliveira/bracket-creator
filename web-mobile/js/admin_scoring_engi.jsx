@@ -133,10 +133,12 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   const nameOf = (side) => side && typeof side === "object" ? side.name || "" : side || "";
   const dojoOf = (side) => side && typeof side === "object" ? side.dojo || "" : "";
 
-  // sideB = Shiro, sideA = Aka (see file header).
-  const [shiroName, shiroDN] = window.engiPairParts(nameOf(m.sideB));
+  // sideB = Shiro, sideA = Aka (see file header). Guard on the helper's presence
+  // for consistency with bracket.jsx, so a non-browser/ui.jsx-less context can't
+  // throw at render time.
+  const [shiroName, shiroDN] = window.engiPairParts ? window.engiPairParts(nameOf(m.sideB)) : [nameOf(m.sideB), ""];
   const shiroDojo = dojoOf(m.sideB);
-  const [akaName, akaDN] = window.engiPairParts(nameOf(m.sideA));
+  const [akaName, akaDN] = window.engiPairParts ? window.engiPairParts(nameOf(m.sideA)) : [nameOf(m.sideA), ""];
   const akaDojo   = dojoOf(m.sideA);
 
   const clamp = (n) => Math.max(0, Math.min(MAX_FLAGS, n));

@@ -594,8 +594,8 @@ export const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick, isEngi }
   const bFull = typeof m.sideB === "object" ? withNumber(m.sideB) : m.sideB;
   // Engi pair: the name holds both members combined ("Name 1 - Name 2");
   // split so member 2 stacks under member 1 (the number prefix stays on line 1).
-  const [aName, aDN] = isEngi ? window.engiPairParts(aFull) : [aFull, ""];
-  const [bName, bDN] = isEngi ? window.engiPairParts(bFull) : [bFull, ""];
+  const [aName, aDN] = isEngi && window.engiPairParts ? window.engiPairParts(aFull) : [aFull, ""];
+  const [bName, bDN] = isEngi && window.engiPairParts ? window.engiPairParts(bFull) : [bFull, ""];
 
   // DH badge: show which side won a completed daihyosen bout.
   const isDH = isPoolDaihyosenBout(m.id) && m.status === "completed";
@@ -749,7 +749,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                     s && s.tied ? "pool__row--tied" : "",
                   ].filter(Boolean).join(" ");
 
-                  const [pMember1, pMember2] = isEngi ? window.engiPairParts(p.name) : [p.name, ""];
+                  const [pMember1, pMember2] = isEngi && window.engiPairParts ? window.engiPairParts(p.name) : [p.name, ""];
                   return (
                     <tr key={p.id || `${p.name}||${p.dojo || ""}` || drawPos} className={rowClasses || undefined}>
                       <td className="pool-standings__draw-pos">

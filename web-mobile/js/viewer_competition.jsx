@@ -515,7 +515,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
             </thead>
             <tbody>
               {leagueStandings.slice(0, 5).map((s, i) => {
-                const [sMember1, sMember2] = isEngi ? window.engiPairParts(s.player?.name || "") : [s.player?.name || "", ""];
+                const [sMember1, sMember2] = isEngi && window.engiPairParts ? window.engiPairParts(s.player?.name || "") : [s.player?.name || "", ""];
                 return (
                 <tr key={s.player?.id || s.player?.name || i} className={s.tied ? "pool__row--tied" : undefined}>
                   {/* Rank-ordered summary: "#" is the authoritative standing rank

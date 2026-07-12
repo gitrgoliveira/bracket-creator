@@ -224,7 +224,7 @@ func TestPrintTeamEliminationMatchesMirroring(t *testing.T) {
 		f.NewSheet(SheetEliminationMatches)
 		f.NewSheet("Pool Results")
 
-		PrintTeamEliminationMatches(f, poolMatchWinners, eliminationMatchRounds, 3, 2, true)
+		PrintTeamEliminationMatches(f, poolMatchWinners, eliminationMatchRounds, 3, 2, true, false)
 		// Match header row (Red/White labels) should be swapped: White vs Red
 		// Round header was removed, first match header at row 3
 		val, _ := f.GetCellValue(SheetEliminationMatches, "A3")
@@ -239,7 +239,7 @@ func TestPrintTeamEliminationMatchesMirroring(t *testing.T) {
 		f.NewSheet(SheetEliminationMatches)
 		f.NewSheet("Pool Results")
 
-		PrintTeamEliminationMatches(f, poolMatchWinners, eliminationMatchRounds, 3, 2, false)
+		PrintTeamEliminationMatches(f, poolMatchWinners, eliminationMatchRounds, 3, 2, false, false)
 		// Match header row should be Red vs White
 		val, _ := f.GetCellValue(SheetEliminationMatches, "A3")
 		assert.Equal(t, "Red", val, "expected Red on left (mirror=false)")
@@ -262,7 +262,7 @@ func TestPrintTeamEliminationMatchesMirroring(t *testing.T) {
 			},
 		}
 
-		PrintTeamEliminationMatches(f, poolMatchWinners, eliminationMatchRoundsMulti, 0, 2, false)
+		PrintTeamEliminationMatches(f, poolMatchWinners, eliminationMatchRoundsMulti, 0, 2, false, false)
 
 		// Match 1 (Shiaijo A) should be at column 1
 		val, _ := f.GetCellValue(SheetEliminationMatches, "A2") // Match 1 title row
@@ -364,7 +364,7 @@ func TestEliminationMatchSameSheetFormulas(t *testing.T) {
 		rounds[depth-i] = TraverseRounds(tree, 1, i-1)
 	}
 
-	PrintTeamEliminationMatches(f, matchWinners, rounds, 0, 1, false)
+	PrintTeamEliminationMatches(f, matchWinners, rounds, 0, 1, false, false)
 
 	// Collect all formula cells in the Elimination Matches sheet.
 	rows, err := f.GetRows(SheetEliminationMatches)
@@ -445,7 +445,7 @@ func TestPoolWinnerFormulaReferences(t *testing.T) {
 		eliminationMatchRounds[depth-i] = TraverseRounds(tree, 1, i-1)
 	}
 
-	PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, 0, 1, false)
+	PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, 0, 1, false, false)
 
 	// The first round has 2 matches; each match's player row is at startRow+2=4.
 	// Left player is in column A (col 1), right player in column G (col 7).
@@ -494,7 +494,7 @@ func TestPrintTeamEliminationMatches_CellRefLikeLeafNames(t *testing.T) {
 	}
 
 	matchWinners := ConvertPlayersToWinners(players, false, pCoords)
-	PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, 0, 1, false)
+	PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, 0, 1, false, false)
 
 	rows, err := f.GetRows(SheetEliminationMatches)
 	require.NoError(t, err)

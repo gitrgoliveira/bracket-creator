@@ -159,7 +159,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 		// Populate the Elimination Matches sheet skeleton so overlayBracketScores
 		// has "Round N - Match N" headers to scan.
 		helper.FillInMatches(f, eliminationMatchRounds)
-		nextRow, elimMatchWinners := helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, comp.TeamSize, numCourts, comp.Mirror)
+		nextRow, elimMatchWinners := helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, comp.TeamSize, numCourts, comp.Mirror, comp.Engi)
 
 		// Naginata competitions have a bronze (3rd-place) match: render it as a
 		// separate block immediately after the last elimination round.
@@ -178,7 +178,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 					}
 				}
 			}
-			helper.PrintThirdPlaceBlock(f, 1, nextRow, comp.TeamSize, comp.Mirror, semiA, semiB, elimMatchWinners)
+			helper.PrintThirdPlaceBlock(f, 1, nextRow, comp.TeamSize, comp.Mirror, comp.Engi, semiA, semiB, elimMatchWinners)
 		}
 
 		// Overlay literal scores from the live bracket state.
@@ -234,6 +234,10 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 			d := helper.CalculateDepth(subtree)
 			helper.PrintLeafNodes(subtree, f, pageSheet, 2*d, helper.TreeTitleRows+1, d, true, matchWinners)
 			helper.SetTreeSheetTitle(f, pageSheet, comp.Name)
+			if len(pools) > 0 {
+				poolStart, poolEnd := helper.PoolBoundsForSubtree(len(pools), numCourts, len(subtrees), i)
+				helper.AddPoolsToTree(f, pageSheet, pools[poolStart:poolEnd], poolCoords, playerCoords)
+			}
 		}
 		if derr := f.DeleteSheet(helper.SheetTree); derr != nil {
 			return nil, fmt.Errorf("export: delete tree template sheet: %w", derr)

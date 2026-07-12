@@ -3328,3 +3328,122 @@ func TestBuildResultsWorkbook_NaginataThirdPlaceEntrantFormulas(t *testing.T) {
 	assert.Contains(t, combined, "M 2",
 		"bronze entrant formulas must reference the loser of semifinal M 2")
 }
+
+// TestBuildResultsWorkbook_EngiEliminationHeaderFlags verifies that when a
+// competition has Engi=true, BuildResultsWorkbook writes "Fl" in the lV/rV
+// columns of the Elimination Matches header row. The lV column for court 1 is
+// B (startCol+1); rV is F (startCol+5). The first match title is at row 2, so
+// the header row is at row 3.
+func TestBuildResultsWorkbook_EngiEliminationHeaderFlags(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	comp.Kind = "individual"
+	comp.Format = state.CompFormatMixed
+	comp.PoolSize = 3
+	comp.PoolSizeMode = "min"
+	comp.PoolWinners = 1
+	comp.Engi = true
+	comp.Status = "setup"
+	require.NoError(t, store.SaveCompetition(comp))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "M1", Dojo: "D"}, {Name: "M2", Dojo: "D"}, {Name: "M3", Dojo: "D"},
+		{Name: "M4", Dojo: "D"}, {Name: "M5", Dojo: "D"}, {Name: "M6", Dojo: "D"},
+	}))
+	require.NoError(t, eng.StartCompetition(compID))
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer f.Close()
+
+	// Match title at row 2, header row at row 3. lV=B, rV=F for court 1.
+	lV, err := f.GetCellValue(helper.SheetEliminationMatches, "B3")
+	require.NoError(t, err)
+	rV, err := f.GetCellValue(helper.SheetEliminationMatches, "F3")
+	require.NoError(t, err)
+	assert.Equal(t, "Fl", lV, "engi elimination match header lV cell (B3) must be 'Fl'")
+	assert.Equal(t, "Fl", rV, "engi elimination match header rV cell (F3) must be 'Fl'")
+}
+
+// TestBuildResultsWorkbook_MixedTreePageHasPoolRosters verifies that for a
+// Mixed format competition (pools + knockout), the exported workbook's "Tree 1"
+// sheet carries pool roster formula entries in column A. AddPoolsToTree writes
+// the first pool name formula at row TreeTitleRows+1 = 4, followed by one row
+// per player. A non-empty formula in A4 confirms rosters were populated.
+func TestBuildResultsWorkbook_MixedTreePageHasPoolRosters(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	comp.Kind = "individual"
+	comp.Format = state.CompFormatMixed
+	comp.PoolSize = 3
+	comp.PoolSizeMode = "min"
+	comp.PoolWinners = 1
+	comp.Status = "setup"
+	require.NoError(t, store.SaveCompetition(comp))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "P1", Dojo: "D"}, {Name: "P2", Dojo: "D"}, {Name: "P3", Dojo: "D"},
+		{Name: "P4", Dojo: "D"}, {Name: "P5", Dojo: "D"}, {Name: "P6", Dojo: "D"},
+	}))
+	require.NoError(t, eng.StartCompetition(compID))
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer f.Close()
+
+	sheets := f.GetSheetList()
+	assert.Contains(t, sheets, "Tree 1", "Mixed export must produce a 'Tree 1' sheet")
+
+	// Row 4 = TreeTitleRows+1 is where AddPoolsToTree writes the first pool name formula.
+	formulaA4, err := f.GetCellFormula("Tree 1", "A4")
+	require.NoError(t, err)
+	assert.NotEmpty(t, formulaA4, "'Tree 1' A4 must contain a pool roster formula")
+}
+
+// TestBuildResultsWorkbook_PlayoffsTreePageNoPoolRosters verifies that for a
+// pure Playoffs competition (no pool phase), the tree pages do NOT receive pool
+// roster entries in column A (there are no pools to list).
+func TestBuildResultsWorkbook_PlayoffsTreePageNoPoolRosters(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	comp.Kind = "individual"
+	comp.Format = state.CompFormatPlayoffs
+	comp.Status = "setup"
+	require.NoError(t, store.SaveCompetition(comp))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "Q1", Dojo: "D"}, {Name: "Q2", Dojo: "D"},
+		{Name: "Q3", Dojo: "D"}, {Name: "Q4", Dojo: "D"},
+	}))
+	require.NoError(t, eng.StartCompetition(compID))
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer f.Close()
+
+	// Find any tree page and assert column A row 4 has no pool roster formula.
+	for _, sheet := range f.GetSheetList() {
+		if len(sheet) < 4 || sheet[:4] != "Tree" {
+			continue
+		}
+		formulaA4, err := f.GetCellFormula(sheet, "A4")
+		require.NoError(t, err)
+		assert.Empty(t, formulaA4,
+			"playoffs tree page %s must not have a pool roster formula in A4", sheet)
+	}
+}

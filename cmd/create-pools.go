@@ -305,7 +305,7 @@ func (o *poolOptions) createPools(entries []string) error {
 		totalPoolMatches += len(p.Matches)
 	}
 
-	nextRow, elimMatchWinners := helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, o.teamMatches, o.courts, true)
+	nextRow, elimMatchWinners := helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, o.teamMatches, o.courts, true, o.engi)
 	// Bronze (3rd-place) playoff: naginata only, and only when a real semifinal
 	// exists (len(eliminationMatchRounds) >= 2; a 2-player bracket has a single
 	// round and no semifinal, so no bronze). Matches the engine guard in
@@ -323,7 +323,7 @@ func (o *poolOptions) createPools(entries []string) error {
 				semiB = int(lastRound[0].Right.MatchNum())
 			}
 		}
-		helper.PrintThirdPlaceBlock(f, 1, nextRow, o.teamMatches, true, semiA, semiB, elimMatchWinners)
+		helper.PrintThirdPlaceBlock(f, 1, nextRow, o.teamMatches, true, o.engi, semiA, semiB, elimMatchWinners)
 	}
 	helper.FillEstimations(f, int64(len(pools)), int64(totalPoolMatches), int64(o.teamMatches), int64(len(finals)-1), o.courts)
 
@@ -339,43 +339,10 @@ func (o *poolOptions) createPools(entries []string) error {
 	return nil
 }
 
-// poolBoundsForSubtree returns the [start, end) slice into the pool list for
-// the given subtree. After ReorderPoolsForCourts the pool list is laid out in
-// contiguous per-court blocks; this function respects those boundaries so that
-// no subtree page ever references pools from more than one court.
-// Uses the same AssignPoolsToCourts logic as PrintPoolMatches so both views
-// are always consistent.
+// poolBoundsForSubtree delegates to helper.PoolBoundsForSubtree.
+// The logic lives in the helper package so it can be reused by the export builder.
 func poolBoundsForSubtree(numPools, numCourts, numSubtrees, subtreeIdx int) (start, end int) {
-	if numCourts < 1 || numSubtrees < 1 {
-		return 0, 0
-	}
-	pagesPerCourt := numSubtrees / numCourts
-	if pagesPerCourt < 1 {
-		pagesPerCourt = 1
-	}
-	courtIdx := helper.SubtreeCourtIndex(numSubtrees, numCourts, subtreeIdx)
-	pageWithinCourt := subtreeIdx % pagesPerCourt
-
-	// Derive court block boundaries from the same assignment used by Pool Matches.
-	assignments, _ := helper.AssignPoolsToCourts(numPools, numCourts)
-	courtStart, courtEnd := -1, 0
-	for i, c := range assignments {
-		if c == courtIdx {
-			if courtStart < 0 {
-				courtStart = i
-			}
-			courtEnd = i + 1
-		}
-	}
-	if courtStart < 0 {
-		return 0, 0
-	}
-
-	courtSize := courtEnd - courtStart
-	poolsPerPage := (courtSize + pagesPerCourt - 1) / pagesPerCourt
-	start = courtStart + pageWithinCourt*poolsPerPage
-	end = min(start+poolsPerPage, courtEnd)
-	return
+	return helper.PoolBoundsForSubtree(numPools, numCourts, numSubtrees, subtreeIdx)
 }
 
 func init() {

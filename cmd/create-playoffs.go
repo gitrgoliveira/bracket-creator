@@ -237,7 +237,7 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	matchWinners = helper.ConvertPlayersToWinners(players, o.withZekkenName, playerCoords)
 	helper.CreateNamesToPrint(f, players, o.withZekkenName, o.courts, playerCoords)
 
-	nextRow, elimMatchWinners := helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, o.teamMatches, o.courts, true)
+	nextRow, elimMatchWinners := helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, o.teamMatches, o.courts, true, false)
 	// Bronze (3rd-place) playoff: naginata only, and only when a real semifinal
 	// exists (len(eliminationMatchRounds) >= 2; a 2-player bracket has a single
 	// round and no semifinal, so no bronze). Matches the engine guard in
@@ -255,7 +255,7 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 				semiB = int(lastRound[0].Right.MatchNum())
 			}
 		}
-		helper.PrintThirdPlaceBlock(f, 1, nextRow, o.teamMatches, true, semiA, semiB, elimMatchWinners)
+		helper.PrintThirdPlaceBlock(f, 1, nextRow, o.teamMatches, true, false, semiA, semiB, elimMatchWinners)
 	}
 	helper.FillEstimations(f, 0, 0, int64(o.teamMatches), int64(len(names)-1), o.courts)
 

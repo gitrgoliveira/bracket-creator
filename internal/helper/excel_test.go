@@ -705,7 +705,7 @@ func TestMatchHeader(t *testing.T) {
 	f.NewSheet(sheet)
 
 	// test no mirror
-	MatchHeader(f, sheet, "A", 1, "D", "G", false)
+	MatchHeader(f, sheet, "A", 1, "D", "G", false, false)
 	val1, _ := f.GetCellValue(sheet, "A1")
 	if val1 != "Red" {
 		t.Errorf("Expected 'Red', got '%s'", val1)
@@ -716,7 +716,7 @@ func TestMatchHeader(t *testing.T) {
 	}
 
 	// test mirror
-	MatchHeader(f, sheet, "A", 2, "D", "G", true)
+	MatchHeader(f, sheet, "A", 2, "D", "G", true, false)
 	val3, _ := f.GetCellValue(sheet, "A2")
 	if val3 != "White" {
 		t.Errorf("Expected 'White', got '%s'", val3)

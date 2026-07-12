@@ -860,3 +860,114 @@ func TestEngiPoolStandings_NoPWPLCells(t *testing.T) {
 		assert.NotEqual(t, "", formula, "non-engi E7 must contain a PW formula")
 	})
 }
+
+// TestEngiMatchHeaderFlags_Pool asserts that for engi=true the match header row
+// in the Pool Matches sheet writes "Flags" in the lV (B) and rV (F) cells so
+// referees know which column to fill in during a kata bout. The non-engi path
+// must leave those cells empty.
+//
+// Layout (court 1, 2-player pool, individual):
+//
+//	Row 2: Pool A name header
+//	Row 3: Red (A) | vs (D) | White (G) header; B3=lV, F3=rV
+//	Row 4: score row (Alice left, Bob right)
+func TestEngiMatchHeaderFlags_Pool(t *testing.T) {
+	t.Run("engi=true writes Flags in lV and rV of pool match header", func(t *testing.T) {
+		f := scoringSetup2Players(t, 0, true)
+		lV, _ := f.GetCellValue(SheetPoolMatches, "B3")
+		rV, _ := f.GetCellValue(SheetPoolMatches, "F3")
+		assert.Equal(t, "Fl", lV, "engi pool match header lV cell (B3) must be 'Fl'")
+		assert.Equal(t, "Fl", rV, "engi pool match header rV cell (F3) must be 'Fl'")
+	})
+
+	t.Run("engi=false leaves lV and rV of pool match header empty", func(t *testing.T) {
+		f := scoringSetup2Players(t, 0, false)
+		lV, _ := f.GetCellValue(SheetPoolMatches, "B3")
+		rV, _ := f.GetCellValue(SheetPoolMatches, "F3")
+		assert.Empty(t, lV, "non-engi pool match header lV cell (B3) must be empty")
+		assert.Empty(t, rV, "non-engi pool match header rV cell (F3) must be empty")
+	})
+}
+
+// TestEngiMatchHeaderFlags_Elimination asserts that PrintTeamEliminationMatches
+// writes "Flags" in lV/rV of the match header row for each elimination match
+// when engi=true, and leaves them empty when false.
+//
+// A 1-match, 1-court elimination (startRow=2):
+//
+//	Row 2: "Round 1 - Match 1" title
+//	Row 3: Red/White header; B3=lV, F3=rV
+func TestEngiMatchHeaderFlags_Elimination(t *testing.T) {
+	nodeA := &Node{LeafNode: true, LeafVal: "Pool A", matchNum: 1}
+	nodeB := &Node{LeafNode: true, LeafVal: "Pool B", matchNum: 1}
+	eliminationMatchRounds := [][]*Node{
+		{{Left: nodeA, Right: nodeB, matchNum: 1}},
+	}
+	poolMatchWinners := map[string]MatchWinner{
+		"Pool A": {cellCoord: cellCoord{sheetName: "Pool Results", cell: "A1"}},
+		"Pool B": {cellCoord: cellCoord{sheetName: "Pool Results", cell: "B1"}},
+	}
+
+	t.Run("engi=true writes Flags in lV and rV of elimination match header", func(t *testing.T) {
+		f := excelize.NewFile()
+		t.Cleanup(func() { f.Close() })
+		f.NewSheet(SheetEliminationMatches)
+		f.NewSheet("Pool Results")
+
+		PrintTeamEliminationMatches(f, poolMatchWinners, eliminationMatchRounds, 0, 1, false, true)
+
+		lV, _ := f.GetCellValue(SheetEliminationMatches, "B3")
+		rV, _ := f.GetCellValue(SheetEliminationMatches, "F3")
+		assert.Equal(t, "Fl", lV, "engi elimination match header lV (B3) must be 'Fl'")
+		assert.Equal(t, "Fl", rV, "engi elimination match header rV (F3) must be 'Fl'")
+	})
+
+	t.Run("engi=false leaves lV and rV of elimination match header empty", func(t *testing.T) {
+		f := excelize.NewFile()
+		t.Cleanup(func() { f.Close() })
+		f.NewSheet(SheetEliminationMatches)
+		f.NewSheet("Pool Results")
+
+		PrintTeamEliminationMatches(f, poolMatchWinners, eliminationMatchRounds, 0, 1, false, false)
+
+		lV, _ := f.GetCellValue(SheetEliminationMatches, "B3")
+		rV, _ := f.GetCellValue(SheetEliminationMatches, "F3")
+		assert.Empty(t, lV, "non-engi elimination match header lV (B3) must be empty")
+		assert.Empty(t, rV, "non-engi elimination match header rV (F3) must be empty")
+	})
+}
+
+// TestEngiMatchHeaderFlags_ThirdPlace asserts that PrintThirdPlaceBlock writes
+// "Flags" in lV/rV of the match header row when engi=true.
+//
+// Block at startRow=2:
+//
+//	Row 2: "3rd Place" title
+//	Row 3: Red/White header; B3=lV, F3=rV
+func TestEngiMatchHeaderFlags_ThirdPlace(t *testing.T) {
+	t.Run("engi=true writes Flags in lV and rV of 3rd place header", func(t *testing.T) {
+		f := excelize.NewFile()
+		t.Cleanup(func() { f.Close() })
+		f.NewSheet(SheetEliminationMatches)
+
+		PrintThirdPlaceBlock(f, 1, 2, 0, false, true, 0, 0, nil)
+
+		lV, _ := f.GetCellValue(SheetEliminationMatches, "B3")
+		rV, _ := f.GetCellValue(SheetEliminationMatches, "F3")
+		assert.Equal(t, "Fl", lV, "engi 3rd place header lV (B3) must be 'Fl'")
+		assert.Equal(t, "Fl", rV, "engi 3rd place header rV (F3) must be 'Fl'")
+	})
+
+	t.Run("engi=false leaves lV and rV of 3rd place header empty", func(t *testing.T) {
+		f := excelize.NewFile()
+		t.Cleanup(func() { f.Close() })
+		f.NewSheet(SheetEliminationMatches)
+
+		PrintThirdPlaceBlock(f, 1, 2, 0, false, false, 0, 0, nil)
+
+		lV, _ := f.GetCellValue(SheetEliminationMatches, "B3")
+		rV, _ := f.GetCellValue(SheetEliminationMatches, "F3")
+		assert.Empty(t, lV, "non-engi 3rd place header lV (B3) must be empty")
+		assert.Empty(t, rV, "non-engi 3rd place header rV (F3) must be empty")
+	})
+}

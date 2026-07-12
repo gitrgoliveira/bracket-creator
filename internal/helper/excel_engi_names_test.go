@@ -1,7 +1,6 @@
 package helper
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -318,6 +317,3 @@ func TestNonEngi_CreateNamesToPrint_NoChar10(t *testing.T) {
 	assert.NotContains(t, (aliceFormula), `&" - "&`,
 		"non-engi CreateNamesToPrint must not produce the dash join")
 }
-
-// Unused import guard.
-var _ = fmt.Sprintf

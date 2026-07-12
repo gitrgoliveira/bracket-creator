@@ -912,9 +912,9 @@ func TestEngiPoolStandings_NoPWPLCells(t *testing.T) {
 }
 
 // TestEngiMatchHeaderFlags_Pool asserts that for engi=true the match header row
-// in the Pool Matches sheet writes "Flags" in the lV (B) and rV (F) cells so
-// referees know which column to fill in during a kata bout. The non-engi path
-// must leave those cells empty.
+// in the Pool Matches sheet writes the "Fl" caption in the lV (B) and rV (F)
+// cells so referees know which column to fill in during a kata bout. The
+// non-engi path must leave those cells empty.
 //
 // Layout (court 1, 2-player pool, individual):
 //
@@ -922,7 +922,7 @@ func TestEngiPoolStandings_NoPWPLCells(t *testing.T) {
 //	Row 3: Red (A) | vs (D) | White (G) header; B3=lV, F3=rV
 //	Row 4: score row (Alice left, Bob right)
 func TestEngiMatchHeaderFlags_Pool(t *testing.T) {
-	t.Run("engi=true writes Flags in lV and rV of pool match header", func(t *testing.T) {
+	t.Run("engi=true writes the Fl caption in lV and rV of pool match header", func(t *testing.T) {
 		f := scoringSetup2Players(t, 0, true)
 		lV, _ := f.GetCellValue(SheetPoolMatches, "B3")
 		rV, _ := f.GetCellValue(SheetPoolMatches, "F3")
@@ -940,8 +940,8 @@ func TestEngiMatchHeaderFlags_Pool(t *testing.T) {
 }
 
 // TestEngiMatchHeaderFlags_Elimination asserts that PrintTeamEliminationMatches
-// writes "Flags" in lV/rV of the match header row for each elimination match
-// when engi=true, and leaves them empty when false.
+// writes the "Fl" caption in lV/rV of the match header row for each elimination
+// match when engi=true, and leaves them empty when false.
 //
 // A 1-match, 1-court elimination (startRow=2):
 //
@@ -958,7 +958,7 @@ func TestEngiMatchHeaderFlags_Elimination(t *testing.T) {
 		"Pool B": {cellCoord: cellCoord{sheetName: "Pool Results", cell: "B1"}},
 	}
 
-	t.Run("engi=true writes Flags in lV and rV of elimination match header", func(t *testing.T) {
+	t.Run("engi=true writes the Fl caption in lV and rV of elimination match header", func(t *testing.T) {
 		f := excelize.NewFile()
 		t.Cleanup(func() { f.Close() })
 		f.NewSheet(SheetEliminationMatches)
@@ -988,14 +988,14 @@ func TestEngiMatchHeaderFlags_Elimination(t *testing.T) {
 }
 
 // TestEngiMatchHeaderFlags_ThirdPlace asserts that PrintThirdPlaceBlock writes
-// "Flags" in lV/rV of the match header row when engi=true.
+// the "Fl" caption in lV/rV of the match header row when engi=true.
 //
 // Block at startRow=2:
 //
 //	Row 2: "3rd Place" title
 //	Row 3: Red/White header; B3=lV, F3=rV
 func TestEngiMatchHeaderFlags_ThirdPlace(t *testing.T) {
-	t.Run("engi=true writes Flags in lV and rV of 3rd place header", func(t *testing.T) {
+	t.Run("engi=true writes the Fl caption in lV and rV of 3rd place header", func(t *testing.T) {
 		f := excelize.NewFile()
 		t.Cleanup(func() { f.Close() })
 		f.NewSheet(SheetEliminationMatches)

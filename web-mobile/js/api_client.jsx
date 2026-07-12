@@ -174,6 +174,9 @@ const _revSession = (typeof crypto !== 'undefined' && crypto.randomUUID)
  *   method          : HTTP method string ('PUT' | 'POST')
  *   url             : same-origin request path, e.g. /api/competitions/… (for replay in _flushQueue)
  *   enqueuedAt      : Date.now() at enqueue time (for TTL eviction on reload)
+ *   attempts        : count of server 5xx/429 rejections on flush retries (mp-q8c6
+ *                     retry cap); absent until the first rejection. Network
+ *                     failures never increment it.
  *
  * Running score descriptors set terminal=false and do not use method/url
  * (they are always PUT to the score endpoint: _flushQueue hard-codes that
@@ -189,6 +192,7 @@ const _revSession = (typeof crypto !== 'undefined' && crypto.randomUUID)
  *   method?: string,
  *   url?: string,
  *   enqueuedAt: number,
+ *   attempts?: number,
  * }} WriteDescriptor
  * `method`/`url` are present only on terminal entries; running entries omit them.
  */
@@ -266,8 +270,9 @@ function _setSyncStatus(s) {
 
 // Terminal-write FAILURE channel. When a queued terminal write (completed score /
 // decision / lineup) is permanently discarded: a non-retryable 4xx on retry
-// (409 conflict, 400 validation, 401/403 auth) or a corrupt entry: the write
-// never landed. Sync status alone returns to 'synced', which would let the editor
+// (409 conflict, 400 validation, 401/403 auth), a corrupt entry, or the mp-q8c6
+// server-rejection cap (also applied to running writes): the write never landed.
+// Sync status alone returns to 'synced', which would let the editor
 // clear its pending banner and look "saved". This channel lets surfaces show an
 // explicit "not saved" state instead. Payload: {compID, matchID, kind, status, reason}.
 const _terminalFailListeners = new Set();
@@ -324,6 +329,19 @@ function subscribeSyncStatus(fn) {
 let _flushTimer = null;
 const FLUSH_BACKOFF_MS = [500, 1000, 2000, 4000, 8000];
 let _flushAttempt = 0;
+// mp-q8c6: per-entry cap on SERVER rejections (5xx/429). A deterministic 5xx
+// (e.g. a validation bug surfaced as HTTP 500, observed with an engi flag
+// check during mp-n19y UAT) would otherwise retry forever: the entry poisons
+// the queue for the rest of the session, the pill wedges on "Syncing…", and
+// the operator gets no signal short of clearing localStorage. After this many
+// consecutive server rejections the entry is dropped and surfaced through the
+// write-failed channel instead. Network failures (fetch rejected: connection
+// down / timeout) deliberately do NOT count: a real offline period must keep
+// writes queued for the full QUEUE_TTL_MS, not silently shed them. At the 8s
+// max backoff, 10 rejections ≈ 1 minute of a persistently-erroring server:
+// long enough to ride out a restart behind the TLS proxy (transient 502/503),
+// short enough that a poisoned write can't wedge the queue for hours.
+const MAX_QUEUE_SERVER_REJECTIONS = 10;
 // Single-in-flight guard. _flushQueue's body awaits network I/O, so without a
 // lock a second trigger (a rapid enqueue, an `online` event, or a backoff timer
 // firing mid-flush) would start an OVERLAPPING loop iterating the same snapshot:
@@ -421,7 +439,23 @@ async function _flushQueue() {
                     } else if (res.status >= 500 || res.status === 429) {
                         // Transient server error: server is up but erroring; keep in
                         // queue and retry with backoff, but this is NOT "offline".
-                        anyFailed = true;
+                        // Bounded (mp-q8c6): a DETERMINISTIC rejection (a server bug
+                        // answering 500 to a write it will never accept) must not
+                        // retry forever. Count server rejections on the descriptor
+                        // (persisted with it) and drop + surface once the cap is hit.
+                        // The identity checks above compare object references, so
+                        // mutating the live descriptor is safe: a superseding write
+                        // installs a fresh object and naturally resets the count.
+                        const rejections = (Number(descriptor.attempts) || 0) + 1;
+                        if (rejections >= MAX_QUEUE_SERVER_REJECTIONS) {
+                            const body = await res.json().catch(() => ({}));
+                            console.warn(`[sync] dropping queued ${kind || 'running'} write after ${rejections} server rejections (${res.status}):`, body);
+                            _notifyTerminalWriteFailed({ compID, matchID, kind, status: res.status, reason: body.reasonHuman || body.error || `HTTP ${res.status} (gave up after ${rejections} attempts)` });
+                            if (_writeQueue.get(key) === descriptor) _writeQueue.delete(key);
+                        } else {
+                            descriptor.attempts = rejections;
+                            anyFailed = true;
+                        }
                     } else if (terminal && kind === 'decision' && res.status === 409) {
                         // F5: decision-locked-as-success for queued terminal decision entries.
                         //

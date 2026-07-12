@@ -3408,6 +3408,16 @@ func TestBuildResultsWorkbook_MixedTreePageHasPoolRosters(t *testing.T) {
 	formulaA4, err := f.GetCellFormula("Tree 1", "A4")
 	require.NoError(t, err)
 	assert.NotEmpty(t, formulaA4, "'Tree 1' A4 must contain a pool roster formula")
+
+	// Title regression: the A1 title formula prepends data!$B$1 (already the
+	// competition name), so the page title passed to SetTreeSheetTitle must be
+	// the shiaijo label, not the competition name again, which rendered a
+	// duplicated "Name - Name" heading.
+	titleFormula, err := f.GetCellFormula("Tree 1", "A1")
+	require.NoError(t, err)
+	assert.Contains(t, titleFormula, "Shiaijo A", "'Tree 1' title must be the shiaijo label")
+	assert.NotContains(t, titleFormula, comp.Name,
+		"'Tree 1' title formula must not embed the competition name (data!$B$1 already prepends it)")
 }
 
 // TestBuildResultsWorkbook_PlayoffsTreePageNoPoolRosters verifies that for a

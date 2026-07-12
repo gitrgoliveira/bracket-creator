@@ -233,7 +233,11 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 			}
 			d := helper.CalculateDepth(subtree)
 			helper.PrintLeafNodes(subtree, f, pageSheet, 2*d, helper.TreeTitleRows+1, d, true, matchWinners)
-			helper.SetTreeSheetTitle(f, pageSheet, comp.Name)
+			// Title the page by its shiaijo, like the blank-template export. The
+			// title formula prepends data!$B$1 (already the competition name), so
+			// passing comp.Name here would render "Name - Name" duplicated.
+			courtLabel := helper.CourtLabel(helper.SubtreeCourtIndex(len(subtrees), numCourts, i))
+			helper.SetTreeSheetTitle(f, pageSheet, "Shiaijo "+courtLabel)
 			if len(pools) > 0 {
 				poolStart, poolEnd := helper.PoolBoundsForSubtree(len(pools), numCourts, len(subtrees), i)
 				helper.AddPoolsToTree(f, pageSheet, pools[poolStart:poolEnd], poolCoords, playerCoords)

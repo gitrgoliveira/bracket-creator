@@ -1436,7 +1436,11 @@ export function groupQueueMatches(matches) {
             label = m.round || "Playoffs";
         } else if (m.phase === "pool") {
             key = "pool:" + (m.poolName || "");
-            label = m.poolName || "Pool";
+            // Swiss rounds piggyback on the pool pipeline with a synthetic
+            // "Swiss-RN" pool name (mp-pglr); show the operator "Round N".
+            label = m.compFormat === "swiss"
+                ? swissRoundLabel(m.poolName)
+                : (m.poolName || "Pool");
         } else {
             key = "other";
             label = null;
@@ -1614,13 +1618,28 @@ function MatchSides({ m, large }) {
 }
 
 // Standings ordering is decided by competition FORMAT, not by surface
-// (mp-ahu6): leagues are always rank-ordered (window.LeagueStandingsViewer),
-// pools are always draw-ordered with rank as a badge (window.PoolsViewer) -
-// same split as the public viewer and admin Pools tab. Exported so the
-// format->viewer decision is independently testable and this invariant
-// cannot silently regress again.
+// (mp-ahu6/mp-pglr): swiss renders cumulative standings from the dedicated
+// /swiss/standings endpoint (window.SwissStandingsViewer), leagues are always
+// rank-ordered (window.LeagueStandingsViewer), pools are always draw-ordered
+// with rank as a badge (window.PoolsViewer) - the same three-way split as the
+// public viewer (viewer_competition.jsx) and admin Pools tab. Swiss must NOT
+// fall through to the pool path: Swiss piggybacks on pool-matches.csv with a
+// synthetic pool name ("Swiss-R1") but never writes pools.csv, so the pool
+// path's detail.pools lookup finds nothing and the panel sticks on "Loading
+// standings…" forever. Exported so the format->viewer decision is
+// independently testable and this invariant cannot silently regress again.
 export function shiaijoStandingsKind(match) {
-    return match && match.compFormat === "league" ? "league" : "pool";
+    if (!match) return "pool";
+    if (match.compFormat === "swiss") return "swiss";
+    return match.compFormat === "league" ? "league" : "pool";
+}
+
+// "Swiss-R3" (the synthetic engine pool name, see engine/swiss.go
+// swissPoolName) → "Round 3" for the panel header; any other shape is
+// returned unchanged.
+export function swissRoundLabel(poolName) {
+    const m = /^Swiss-R(\d+)$/.exec(poolName || "");
+    return m ? `Round ${m[1]}` : (poolName || "");
 }
 
 // Collapsible context for the match being scored:
@@ -1632,12 +1651,17 @@ function ShiaijoContext({ match, competitions, court, nextPoolName, tweaks, open
     const comp = (competitions || []).find((c) => c.id === match.compId);
     const bracket = comp && (comp.bracket || (Array.isArray(comp.rounds) ? { rounds: comp.rounds } : null));
     const isPool = match.phase === "pool";
-    const isLeagueComp = shiaijoStandingsKind(match) === "league";
+    const standingsKind = shiaijoStandingsKind(match);
+    const isLeagueComp = standingsKind === "league";
+    const isSwissComp = standingsKind === "swiss";
     const phaseLabel = isPool
-        ? window.leagueAwareLabel(match.compFormat, match.poolName, "Pool")
+        ? (isSwissComp
+            ? swissRoundLabel(match.poolName)
+            : window.leagueAwareLabel(match.compFormat, match.poolName, "Pool"))
         : (match.round || "Elimination");
     const PoolsViewer = window.PoolsViewer;
     const LeagueStandingsViewer = window.LeagueStandingsViewer;
+    const SwissStandingsViewer = window.SwissStandingsViewer;
 
     // Pools/standings aren't on the console's competition list payload: fetch
     // the competition detail on demand. Refetch whenever this comp's pool
@@ -1656,7 +1680,10 @@ function ShiaijoContext({ match, competitions, court, nextPoolName, tweaks, open
     const [detail, setDetail] = useStateSh(null);
     const [detailErr, setDetailErr] = useStateSh(false);
     useEffectSh(() => {
-        if (!isPool || isLeagueComp || !match.compId || !window.API || typeof window.API.fetchCompetitionDetails !== "function") {
+        // Swiss and league both render self-fetching viewers off `comp` alone
+        // (dedicated standings endpoints), so the competition-detail fetch is
+        // only needed for the pool path.
+        if (!isPool || isLeagueComp || isSwissComp || !match.compId || !window.API || typeof window.API.fetchCompetitionDetails !== "function") {
             setDetail(null);
             return;
         }
@@ -1666,11 +1693,19 @@ function ShiaijoContext({ match, competitions, court, nextPoolName, tweaks, open
             .then((d) => { if (!cancelled) setDetail(d); })
             .catch(() => { if (!cancelled) { setDetail(null); setDetailErr(true); } });
         return () => { cancelled = true; };
-    }, [match.compId, isPool, isLeagueComp, poolSig]);
+    }, [match.compId, isPool, isLeagueComp, isSwissComp, poolSig]);
 
     const currentPool = detail && Array.isArray(detail.pools)
         ? detail.pools.find((p) => p.poolName === match.poolName)
         : null;
+
+    // Shared loading placeholder for the self-fetching standings viewers
+    // (swiss + league branches below).
+    const standingsLoader = (
+        <p style={{ fontSize: 12, color: "var(--ink-3)", margin: 0 }}>
+            Loading standings…
+        </p>
+    );
 
     return (
         <div className="shiaijo-context">
@@ -1680,7 +1715,28 @@ function ShiaijoContext({ match, competitions, court, nextPoolName, tweaks, open
             {open && (
                 <div className="shiaijo-context__body">
                     {isPool ? (
-                        isLeagueComp ? (
+                        isSwissComp ? (
+                            // Swiss standings come from the dedicated
+                            // /swiss/standings endpoint; SwissStandingsViewer
+                            // fetches its own data (like LeagueStandingsViewer)
+                            // and needs only `comp` from the court feed. The
+                            // poolSig key remounts it after any scored bout so
+                            // the cumulative table stays current mid-round
+                            // (its own refetch deps only cover round changes).
+                            // No "next pool" banner: Swiss rounds are not
+                            // pools, the next round doesn't exist until the
+                            // operator generates it.
+                            SwissStandingsViewer && comp ? (
+                                <div className="shiaijo-context__pools">
+                                    <SwissStandingsViewer
+                                        key={poolSig}
+                                        competition={comp}
+                                        poolMatches={comp.poolMatches}
+                                        tweaks={tweaks || { showDojo: true }}
+                                    />
+                                </div>
+                            ) : standingsLoader
+                        ) : isLeagueComp ? (
                             // Leagues are always RANK-ordered (mp-ahu6): never fall
                             // through to the draw-order PoolsViewer here. Renders off
                             // `comp` alone (see the poolSig effect above for why) -
@@ -1695,11 +1751,7 @@ function ShiaijoContext({ match, competitions, court, nextPoolName, tweaks, open
                                         highlightPlayers={[]}
                                     />
                                 </div>
-                            ) : (
-                                <p style={{ fontSize: 12, color: "var(--ink-3)", margin: 0 }}>
-                                    Loading standings…
-                                </p>
-                            )
+                            ) : standingsLoader
                         ) : (
                             <>
                                 <div className="shiaijo-context__next">

@@ -277,6 +277,104 @@ describe('_flushQueue: non-retryable 4xx discards, 5xx/429/network retries', () 
     });
 });
 
+// 3a. mp-q8c6: a DETERMINISTIC 5xx (server bug answering 500 to a write it
+//     will never accept) must not poison the queue forever. After
+//     MAX_QUEUE_SERVER_REJECTIONS the entry is dropped and surfaced through
+//     the write-failed channel. Network failures never count toward the cap.
+
+describe('_flushQueue: server-rejection cap (mp-q8c6)', () => {
+    it('drops a persistently-500ing write after the rejection cap and surfaces it', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const failures = [];
+        const unsub = mod.subscribeTerminalWriteFailed((info) => failures.push(info));
+
+        let attempt = 0;
+        global.fetch = vi.fn().mockImplementation(() => {
+            attempt++;
+            // Deterministic rejection: the observed mp-n19y poison was an engi
+            // flag validation error surfaced as HTTP 500 on every retry.
+            return Promise.resolve({
+                ok: false,
+                status: 500,
+                json: () => Promise.resolve({ error: 'flag total 0+0=0 is invalid' }),
+            });
+        });
+
+        enqueueRunningWrite('c1', 'm1', { status: 'running', rev: 1 }, 'pw');
+        await flushMicrotasks(); // immediate flush: rejection 1
+
+        // Ride out every backoff step (500+1000+2000+4000+8000×6 ≈ 55s for
+        // 10 rejections); the cap must fire well within this window.
+        await tick(120000);
+
+        // 10 rejections total, then the entry is gone: no further fetches.
+        expect(attempt).toBe(10);
+        const callsAtCap = global.fetch.mock.calls.length;
+        await tick(60000);
+        expect(global.fetch).toHaveBeenCalledTimes(callsAtCap);
+
+        // Surfaced to the operator through the write-failed channel.
+        expect(failures.length).toBe(1);
+        expect(failures[0]).toMatchObject({ compID: 'c1', matchID: 'm1', kind: 'score', status: 500 });
+        expect(failures[0].reason).toBe('flag total 0+0=0 is invalid');
+
+        unsub();
+        warnSpy.mockRestore();
+    });
+
+    it('does NOT count network failures toward the cap (offline periods keep writes queued)', async () => {
+        const failures = [];
+        const unsub = mod.subscribeTerminalWriteFailed((info) => failures.push(info));
+
+        let attempt = 0;
+        global.fetch = vi.fn().mockImplementation(() => {
+            attempt++;
+            // Far more network failures than the rejection cap, then recovery.
+            if (attempt <= 15) return Promise.reject(new TypeError('network error'));
+            return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+        });
+
+        enqueueRunningWrite('c1', 'm1', { status: 'running', rev: 1 }, 'pw');
+        await flushMicrotasks();
+
+        // Enough time for all 15 failed attempts plus the successful one.
+        await tick(200000);
+
+        // The write survived every network failure and eventually landed.
+        expect(attempt).toBeGreaterThanOrEqual(16);
+        expect(failures.length).toBe(0);
+
+        unsub();
+    });
+
+    it('a superseding write resets the rejection count (fresh descriptor)', async () => {
+        let attempt = 0;
+        const sentRevs = [];
+        global.fetch = vi.fn().mockImplementation((_url, opts) => {
+            attempt++;
+            // First 9 attempts: one shy of the cap.
+            if (attempt <= 9) {
+                return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) });
+            }
+            sentRevs.push(JSON.parse(opts.body).rev);
+            return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+        });
+
+        enqueueRunningWrite('c1', 'm1', { status: 'running', rev: 1 }, 'pw');
+        await flushMicrotasks();
+        // 9 rejections: entry still queued (cap is 10).
+        await tick(40000);
+        expect(attempt).toBe(9);
+
+        // A newer operator write replaces the descriptor: count starts fresh,
+        // and the write goes through on the recovered server.
+        enqueueRunningWrite('c1', 'm1', { status: 'running', rev: 2 }, 'pw');
+        await flushMicrotasks();
+        await tick(1000);
+        expect(sentRevs).toEqual([2]);
+    });
+});
+
 // 3b. Single-in-flight serialization: overlapping triggers must not start a
 //     second concurrent flush loop or duplicate PUTs.
 

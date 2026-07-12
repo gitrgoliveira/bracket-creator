@@ -15,7 +15,7 @@ import { matchParticipantIds, isFollowedPlayer, isPlayerWatched, WATCHLIST_MAX, 
 import { computeSecondaryAlert, MyMatchAlertBanner } from './viewer_alerts.jsx';
 import { AnnouncementCard, AnnouncementBanner } from './viewer_notifications.jsx';
 import { mymatchQueueLabel, MatchDetailCard, VSchedItem, MatchViewerModal } from './viewer_match.jsx';
-import { isSwissFinalStandings, swissStandingsHeading, LeagueMatrix, PoolNumberedMatchRow, PoolsViewer, LeagueStandingsViewer } from './viewer_standings.jsx';
+import { isSwissFinalStandings, swissStandingsHeading, LeagueMatrix, PoolNumberedMatchRow, PoolsViewer, LeagueStandingsViewer, SwissStandingsViewer } from './viewer_standings.jsx';
 import { deriveAwards, bracketHasDecidedFinal, resolveCompetitionAwards, AwardsView, FightingSpiritSection } from './viewer_awards.jsx';
 import { PlayerMultiFilter, applyFilters, matchHighlightedBy, buildPlayerMatchHighlight, buildWatchlistUpcoming } from './viewer_schedule.jsx';
 import { ViewerCompetition, ViewerOverview } from './viewer_competition.jsx';
@@ -53,6 +53,9 @@ if (typeof window !== 'undefined') {
     // Reused read-only on the shiaijo operator console (pool standings + results).
     window.PoolsViewer = PoolsViewer;
     window.LeagueStandingsViewer = LeagueStandingsViewer;
+    // mp-pglr: the shiaijo console's Swiss standings panel reads this off
+    // window, same pattern as the two viewers above.
+    window.SwissStandingsViewer = SwissStandingsViewer;
 
     // Helpers consumed by viewer_watchlist.jsx (WatchlistPanel/BellIcon) at
     // render time. poolLabel is already exposed by viewer_utils.jsx.

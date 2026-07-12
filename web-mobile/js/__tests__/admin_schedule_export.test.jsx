@@ -184,3 +184,26 @@ describe('buildXlsxBody effectiveZekken from withZekkenName', () => {
     expect(body.get('engi')).toBeNull();
   });
 });
+
+// ── csvField quoting via roster lines (CR/LF and non-string coercion) ────────
+
+describe('buildXlsxBody roster field quoting', () => {
+  const cfg = { format: 'pools', poolSize: 3, poolWinners: 2, courts: ['A'] };
+
+  it('quotes a field containing a carriage return', () => {
+    const body = buildXlsxBody(cfg, 'Test', [player('Yama\rda', 'Dojo1')]);
+    const lines = body.get('playerList').split('\n');
+    expect(lines[0]).toBe('"Yama\rda", Dojo1');
+  });
+
+  it('quotes a field containing a line feed', () => {
+    const body = buildXlsxBody(cfg, 'Test', [player('Yama\nda', 'Dojo1')]);
+    expect(body.get('playerList').startsWith('"Yama\nda", Dojo1')).toBe(true);
+  });
+
+  it('string-coerces non-string field values in the unquoted branch', () => {
+    const body = buildXlsxBody(cfg, 'Test', [player(42, 'Dojo1')]);
+    const lines = body.get('playerList').split('\n');
+    expect(lines[0]).toBe('42, Dojo1');
+  });
+});

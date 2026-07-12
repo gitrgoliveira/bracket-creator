@@ -573,13 +573,13 @@ if (typeof window !== "undefined") {
   window.LoadingSpinner = LoadingSpinner;
   window.EmptyState = EmptyState;
   window.Modal = Modal;
-}
 
-// Split a combined engi pair name ("Name 1 - Name 2") into [member1, member2].
-// member2 is "" when the name carries no pair separator. Splits on the FIRST
-// " - " so a member name containing a plain hyphen is unaffected.
-window.engiPairParts = (name) => {
-  const s = String(name || "");
-  const i = s.indexOf(" - ");
-  return i < 0 ? [s, ""] : [s.slice(0, i), s.slice(i + 3)];
-};
+  // Split a combined engi pair name ("Name 1 - Name 2") into [member1, member2].
+  // member2 is "" when the name carries no pair separator. Splits on the FIRST
+  // " - " so a member name containing a plain hyphen is unaffected.
+  window.engiPairParts = (name) => {
+    const s = String(name || "");
+    const i = s.indexOf(" - ");
+    return i < 0 ? [s, ""] : [s.slice(0, i), s.slice(i + 3)];
+  };
+}

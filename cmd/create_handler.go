@@ -188,6 +188,7 @@ func createTournamentHandler(c *gin.Context) {
 			singleTree:      singleTree,
 			withZekkenName:  withZekkenName,
 			naginata:        naginata,
+			engi:            engi,
 			determined:      determined,
 			teamMatches:     teamMatches,
 			courts:          courts,

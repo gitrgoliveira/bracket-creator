@@ -10,7 +10,8 @@ package engine
 //     "Flags" is stored in the shared strings table and resolved by GetRows, so
 //     the check reads through excelize's normal cell-value API.
 //   - The combined pair name ("Name 1 - Name 2") appears in the Data sheet
-//     (EffectiveWithZekkenName() is active for engi, even when WithZekkenName=false).
+//     name column (engi stores both members in Player.Name; the CSV layout is
+//     unchanged, so WithZekkenName=false engi comps use the plain layout).
 //
 // Note on formulas: the blank-template path loads pools from CSV (which does not
 // persist match pairings). As a result the match grid has no match rows and the

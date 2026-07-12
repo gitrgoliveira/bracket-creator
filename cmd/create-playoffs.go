@@ -23,6 +23,7 @@ type playoffOptions struct {
 	singleTree      bool
 	determined      bool
 	naginata        bool // naginata: adds a 3rd-place bronze block after elimination matches. Set ONLY by the web /create handler; deliberately NOT a CLI flag (owner decision: no new CLI options).
+	engi            bool // engi: flag-count scoring captions on elimination blocks. Set ONLY by the web /create handler; deliberately NOT a CLI flag (owner decision: no new CLI options).
 	titlePrefix     string
 	numberPrefix    string
 	SeedAssignments []domain.SeedAssignment
@@ -237,7 +238,7 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	matchWinners = helper.ConvertPlayersToWinners(players, o.withZekkenName, playerCoords)
 	helper.CreateNamesToPrint(f, players, o.withZekkenName, o.courts, playerCoords)
 
-	nextRow, elimMatchWinners := helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, o.teamMatches, o.courts, true, false)
+	nextRow, elimMatchWinners := helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, o.teamMatches, o.courts, true, o.engi)
 	// Bronze (3rd-place) playoff: naginata only, and only when a real semifinal
 	// exists (len(eliminationMatchRounds) >= 2; a 2-player bracket has a single
 	// round and no semifinal, so no bronze). Matches the engine guard in
@@ -255,7 +256,7 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 				semiB = int(lastRound[0].Right.MatchNum())
 			}
 		}
-		bronzeEndRow := helper.PrintThirdPlaceBlock(f, 1, nextRow, o.teamMatches, true, false, semiA, semiB, elimMatchWinners)
+		bronzeEndRow := helper.PrintThirdPlaceBlock(f, 1, nextRow, o.teamMatches, true, o.engi, semiA, semiB, elimMatchWinners)
 		helper.SetEliminationPrintArea(f, helper.SheetEliminationMatches, o.courts, bronzeEndRow-1)
 	}
 	helper.FillEstimations(f, 0, 0, int64(o.teamMatches), int64(len(names)-1), o.courts)

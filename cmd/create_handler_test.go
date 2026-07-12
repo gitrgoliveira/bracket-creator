@@ -434,3 +434,40 @@ func TestCreateHandler_NaginataPlayoffs_PrintAreaCoversThirdPlace(t *testing.T) 
 		"Print_Area last row (%d) must cover at least the '3rd Place' header row (%d)",
 		printAreaLastRow, thirdPlaceExcelRow)
 }
+
+// engiPlayoffForm builds the POST /create body for an engi knockout-only
+// competition: combined pair names, engi=on, naginata=on (bronze block).
+func engiPlayoffForm(playerList string) url.Values {
+	return url.Values{
+		"tournamentType": {"playoffs"},
+		"playerList":     {playerList},
+		"courts":         {"1"},
+		"teamMatches":    {"0"},
+		"determined":     {"on"},
+		"naginata":       {"on"},
+		"engi":           {"on"},
+	}
+}
+
+// TestCreateHandler_EngiPlayoffs_FlagsCaptions asserts that POST /create with
+// tournamentType=playoffs&engi=on routes the elimination blocks through the
+// engi rendering path: the match headers carry the "Fl" flag-count captions
+// (kendo playoffs have no such captions).
+func TestCreateHandler_EngiPlayoffs_FlagsCaptions(t *testing.T) {
+	const roster = "Aoi - Haru, DojoA\nBo - Cho, DojoB\nDai - Ebi, DojoC\nFu - Go, DojoD"
+	f := postCreate(t, engiPlayoffForm(roster))
+
+	rows, err := f.GetRows("Elimination Matches")
+	require.NoError(t, err)
+
+	found := 0
+	for _, row := range rows {
+		for _, cell := range row {
+			if cell == "Fl" {
+				found++
+			}
+		}
+	}
+	assert.Greater(t, found, 0,
+		"engi playoffs elimination blocks must carry 'Fl' flag captions")
+}

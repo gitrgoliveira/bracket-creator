@@ -52,7 +52,11 @@ func PoolBoundsForSubtree(numPools, numCourts, numSubtrees, subtreeIdx int) (sta
 
 	courtSize := courtEnd - courtStart
 	poolsPerPage := (courtSize + pagesInCourt - 1) / pagesInCourt
-	start = courtStart + pageWithinCourt*poolsPerPage
+	// Clamp start to courtEnd: when a court has more pages than pools (e.g. 2
+	// pools across 4 pages), later pages have no pools left and must yield an
+	// empty range rather than an inverted one (start > end would make callers
+	// slicing pools[start:end] panic).
+	start = min(courtStart+pageWithinCourt*poolsPerPage, courtEnd)
 	end = min(start+poolsPerPage, courtEnd)
 	return
 }

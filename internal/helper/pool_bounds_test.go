@@ -63,3 +63,22 @@ func TestPoolBoundsForSubtree_EvenDivision(t *testing.T) {
 		assert.True(t, seen[p], "pool %d is not covered by any page", p)
 	}
 }
+
+// TestPoolBoundsForSubtree_MorePagesThanPools guards against inverted ranges:
+// when a court has more tree pages than pools (e.g. 2 pools split across 4
+// pages), the overflow pages must yield an empty range (start == end), never
+// start > end, which would make pools[start:end] slicing panic.
+func TestPoolBoundsForSubtree_MorePagesThanPools(t *testing.T) {
+	numPools, numCourts, numSubtrees := 2, 1, 4
+	covered := 0
+	for i := range numSubtrees {
+		start, end := PoolBoundsForSubtree(numPools, numCourts, numSubtrees, i)
+		if start > end {
+			t.Fatalf("page %d: inverted range start=%d > end=%d", i, start, end)
+		}
+		covered += end - start
+	}
+	if covered != numPools {
+		t.Fatalf("pages must cover every pool exactly once: covered %d of %d", covered, numPools)
+	}
+}

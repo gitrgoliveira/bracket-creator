@@ -72,7 +72,11 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	// PrintTeamEliminationMatches, so no "M N" matchWinners entries exist.
 	// Pass zero semi numbers so the entrant slots remain hand-fillable.
 	if comp.Naginata {
-		if b, bErr := e.store.LoadBracket(id); bErr == nil && b != nil && b.ThirdPlaceMatch != nil {
+		b, bErr := e.store.LoadBracket(id)
+		if bErr != nil {
+			return nil, bErr
+		}
+		if b != nil && b.ThirdPlaceMatch != nil {
 			bronzeEndRow := helper.PrintThirdPlaceBlock(f, 1, 2, comp.TeamSize, comp.Mirror, comp.Engi, 0, 0, nil)
 			helper.SetEliminationPrintArea(f, helper.SheetEliminationMatches, 1, bronzeEndRow-1)
 			helper.SetSheetLayoutPortraitA4DownThenOver(f, helper.SheetEliminationMatches, 1)

@@ -107,6 +107,11 @@ const (
 // can never drift independently.
 const ColHeaderFlags = "Flags"
 
+// ThirdPlaceLabel is the header text written by PrintThirdPlaceBlock and
+// detected by the results overlays to locate the bronze match block, so
+// writer and reader cannot drift independently.
+const ThirdPlaceLabel = "3rd Place"
+
 // Sheet names for every tab in the workbook. Use these constants wherever a
 // sheet name is needed so that a rename only requires one edit here.
 //

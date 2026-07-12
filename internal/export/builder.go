@@ -190,10 +190,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 		// Overlay literal scores from the live bracket state.
 		if bracket != nil {
 			bracketByNum := buildBracketMatchIndex(bracket)
-			var thirdPlaceMatch *state.BracketMatch
-			if bracket.ThirdPlaceMatch != nil {
-				thirdPlaceMatch = bracket.ThirdPlaceMatch
-			}
+			thirdPlaceMatch := bracket.ThirdPlaceMatch
 			if err := overlayBracketScores(f, bracketByNum, comp.TeamSize, comp.Mirror, comp.Engi, thirdPlaceMatch, pairLabel); err != nil {
 				return nil, fmt.Errorf("export: overlay bracket scores: %w", err)
 			}
@@ -959,7 +956,7 @@ func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMa
 				if !ok || bm.Status != state.MatchStatusCompleted {
 					continue
 				}
-			} else if cell == "3rd Place" && thirdPlaceMatch != nil {
+			} else if cell == helper.ThirdPlaceLabel && thirdPlaceMatch != nil {
 				bm = *thirdPlaceMatch
 			} else {
 				continue
@@ -982,20 +979,8 @@ func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMa
 			// appear even when the bronze match is not yet played. Scores, the
 			// middle cell, and the winner marker remain gated on
 			// MatchStatusCompleted below.
-			if cell == "3rd Place" {
-				leftNameCol := colNum(courtStartCol)
-				rightNameCol := colNum(courtStartCol + 6)
-				sideA, sideB := bm.SideA, bm.SideB
-				if mirror {
-					sideA, sideB = sideB, sideA
-				}
-				if sideA != "" {
-					setCellStr(f, sheetName, leftNameCol, excelRow, pairLabel(sideA))
-				}
-				if sideB != "" {
-					setCellStr(f, sheetName, rightNameCol, excelRow, pairLabel(sideB))
-				}
-				if bm.Status != state.MatchStatusCompleted {
+			if cell == helper.ThirdPlaceLabel {
+				if !writeThirdPlaceEntrants(f, sheetName, bm, courtStartCol, excelRow, mirror, pairLabel) {
 					continue
 				}
 			}
@@ -1077,7 +1062,7 @@ func overlayTeamBracketScores(f *excelize.File, bracketByNum map[int]state.Brack
 				if !ok || bm.Status != state.MatchStatusCompleted {
 					continue
 				}
-			} else if cell == "3rd Place" && thirdPlaceMatch != nil {
+			} else if cell == helper.ThirdPlaceLabel && thirdPlaceMatch != nil {
 				bm = *thirdPlaceMatch
 			} else {
 				continue
@@ -1096,21 +1081,10 @@ func overlayTeamBracketScores(f *excelize.File, bracketByNum map[int]state.Brack
 			// appear even when the bronze match is not yet played. Sub-match rows,
 			// IV/PW summary, and the winner marker remain gated on
 			// MatchStatusCompleted below.
-			if cell == "3rd Place" {
-				leftNameCol := colNum(courtStartCol)
-				rightNameCol := colNum(courtStartCol + 6)
-				entrantRow := headerExcelRow + 2
-				sideA, sideB := bm.SideA, bm.SideB
-				if mirror {
-					sideA, sideB = sideB, sideA
-				}
-				if sideA != "" {
-					setCellStr(f, sheetName, leftNameCol, entrantRow, sideA)
-				}
-				if sideB != "" {
-					setCellStr(f, sheetName, rightNameCol, entrantRow, sideB)
-				}
-				if bm.Status != state.MatchStatusCompleted {
+			if cell == helper.ThirdPlaceLabel {
+				// Teams are never engi, so no pair label transform applies.
+				identity := func(name string) string { return name }
+				if !writeThirdPlaceEntrants(f, sheetName, bm, courtStartCol, headerExcelRow+2, mirror, identity) {
 					continue
 				}
 			}
@@ -1164,6 +1138,28 @@ func overlayTeamBracketScores(f *excelize.File, bracketByNum map[int]state.Brack
 		}
 	}
 	return nil
+}
+
+// writeThirdPlaceEntrants writes the bronze-match entrant names into the name
+// cells (court start column and start+6) on entrantRow, applying nameLabel to
+// each side (the engi pair label for individual brackets, identity for teams).
+// Names are written unconditionally so they appear even before the bronze bout
+// is played; the return value reports whether the match is completed so the
+// caller can skip the score overlay for an unplayed match.
+func writeThirdPlaceEntrants(f *excelize.File, sheetName string, bm state.BracketMatch, courtStartCol, entrantRow int, mirror bool, nameLabel func(string) string) bool {
+	leftNameCol := colNum(courtStartCol)
+	rightNameCol := colNum(courtStartCol + 6)
+	sideA, sideB := bm.SideA, bm.SideB
+	if mirror {
+		sideA, sideB = sideB, sideA
+	}
+	if sideA != "" {
+		setCellStr(f, sheetName, leftNameCol, entrantRow, nameLabel(sideA))
+	}
+	if sideB != "" {
+		setCellStr(f, sheetName, rightNameCol, entrantRow, nameLabel(sideB))
+	}
+	return bm.Status == state.MatchStatusCompleted
 }
 
 // overlayPlayoffBracketNames overwrites the elimination entrant name cells with

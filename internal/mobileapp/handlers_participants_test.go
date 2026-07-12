@@ -1160,13 +1160,14 @@ func TestPutParticipant_DrawReady_DojoConflictWarning(t *testing.T) {
 	assert.True(t, graceFound, "Grace must appear in pools after cascade")
 }
 
-// TestEngiParticipantAddPreservesMemberTwo is a regression for Copilot PR #326
-// round 3 (backend sibling of the frontend fix): the add handler stripped
-// displayName based on the raw comp.WithZekkenName, so an Engi comp
-// (WithZekkenName=false, effective layout = WithZekkenName||Engi) dropped the
-// pair's member 2 (DisplayName), which then auto-derived from Name 1. Now keyed
-// off EffectiveWithZekkenName().
-func TestEngiParticipantAddPreservesMemberTwo(t *testing.T) {
+// TestEngiParticipantAddRoundTripsCombinedName pins the combined-name engi
+// model: a pair is ONE participant with both member names combined in Name
+// ("Name 1 - Name 2") and the shared dojo in Dojo. Engi no longer forces the
+// zekken layout (EffectiveWithZekkenName == WithZekkenName), so a non-zekken
+// engi comp stores the pair with the identical column layout as any other
+// non-zekken competition. The add handler must round-trip the combined name
+// verbatim (no split into DisplayName, no re-derivation from a first member).
+func TestEngiParticipantAddRoundTripsCombinedName(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
 

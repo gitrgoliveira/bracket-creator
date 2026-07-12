@@ -180,6 +180,18 @@ function generateRosterText(playersList, withZekkenName) {
   }).join("\n");
 }
 
+// engiPairComplete reports whether a combined engi name ("Name 1 - Name 2")
+// carries BOTH member names: the " - " separator is present AND neither half
+// is empty after trimming. Splits on the FIRST separator to match
+// window.engiPairParts, so " - Bob" (empty member 1) and "Alice - " (empty
+// member 2) are both rejected. Exported for tests.
+function engiPairComplete(name) {
+  const s = String(name || "");
+  const i = s.indexOf(" - ");
+  if (i < 0) return false;
+  return s.slice(0, i).trim() !== "" && s.slice(i + 3).trim() !== "";
+}
+
 // validateRosterRows checks parsed roster rows for the required columns
 // before they are sent to the server. Name and dojo are mandatory for every
 // competition. Note that an EMPTY zekken is NOT enforced here: only name + dojo
@@ -201,7 +213,7 @@ function validateRosterRows(parsed, withZekkenName, engi) {
       problems.push({ index: i, name, reason: "missing name" });
       return;
     }
-    if (engi && !name.includes(" - ")) {
+    if (engi && !engiPairComplete(name)) {
       problems.push({ index: i, name, reason: 'engi pairs need both member names as "Name 1 - Name 2"' });
       return;
     }
@@ -234,7 +246,7 @@ function participantTemplateCSV(c) {
 // Exported for tests.
 function participantFormError({ name, dojo, engi }) {
   if (!name || !dojo) return "Name and dojo are required";
-  if (engi && !String(name).includes(" - ")) return 'Enter both member names as "Name 1 - Name 2"';
+  if (engi && !engiPairComplete(name)) return 'Enter both member names as "Name 1 - Name 2"';
   return null;
 }
 
@@ -1293,4 +1305,4 @@ window.AdminParticipants = AdminParticipants;
 
 // ES export for the vitest suite: pure helpers only. Components remain
 // behind the window.* global pattern to match the rest of admin_*.jsx.
-export { mintParticipantIds, findSeedMatchIndex, participantSearchTarget, generateRosterText, validateRosterRows, participantTemplateCSV, participantFormError };
+export { mintParticipantIds, findSeedMatchIndex, participantSearchTarget, generateRosterText, validateRosterRows, participantTemplateCSV, participantFormError, engiPairComplete };

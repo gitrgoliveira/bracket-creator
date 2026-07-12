@@ -168,6 +168,16 @@ func TestScoreHandler_C3Coalescer(t *testing.T) {
 	r, store, _, hub, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
 
+	// Pin the coalescer clock to a fixed instant so both running writes land
+	// at the same coalescer-time and the second is ALWAYS inside the 250ms
+	// window. Without this, >250ms of wall time between the two ServeHTTP
+	// calls on a contended CI runner lets the window lapse, the second write
+	// legitimately broadcasts, and the count==1 assertion can never pass
+	// (observed twice on CI; second flake on PR #349 run 29166974332).
+	frozen := time.Now()
+	coalescerNow = func() time.Time { return frozen }
+	defer func() { coalescerNow = time.Now }()
+
 	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "", Courts: []string{"A"}}))
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c3", Courts: []string{"A"}}))
 	require.NoError(t, store.SavePoolMatches("c3", []state.MatchResult{

@@ -34,6 +34,11 @@ type matchBroadcastCoalescer struct {
 
 const matchCoalesceWindow = 250 * time.Millisecond
 
+// coalescerNow is a test seam: TestScoreHandler_C3Coalescer pins it to a
+// fixed instant so the 250ms window cannot lapse between two writes on a
+// contended CI runner. Production code never reassigns it.
+var coalescerNow = time.Now
+
 func newMatchBroadcastCoalescer() *matchBroadcastCoalescer {
 	return &matchBroadcastCoalescer{last: make(map[string]time.Time)}
 }
@@ -56,7 +61,7 @@ func (c *matchBroadcastCoalescer) Allow(matchKey string, isRunning bool) bool {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	now := time.Now()
+	now := coalescerNow()
 	if t, ok := c.last[matchKey]; ok && now.Sub(t) < matchCoalesceWindow {
 		return false
 	}

@@ -43,7 +43,7 @@ import (
 // SideA/SideB point to &pool.Players[0/1], the same backing array used for the
 // player→match-record map lookup, so all formula cells are populated correctly.
 // Pass engi=true to exercise the engi flag-scoring column layout (same cell geometry
-// as engi=false; only standings columns differ: W/L/Flags/Rank instead of W/L/T/PW/PL/Rank).
+// as engi=false; only standings columns differ: W/Flags/Rank instead of W/L/T/PW/PL/Rank).
 //
 // Individual (teamMatches=0), engi=false, 2-player pool (1 match):
 //
@@ -55,9 +55,10 @@ import (
 // Individual (teamMatches=0), engi=true:
 //
 //	Row 4: score input  B4=lFlags  D4=vs  F4=rFlags  (C, E blank)
-//	Row 6: results header (W / L / Flags / Rank)
-//	Row 7: Alice  B7=W  C7=L  D7=Flags  G7=Rank
-//	Row 8: Bob    B8=W  C8=L  D8=Flags  G8=Rank
+//	Row 6: results header (W / Flags / Rank)
+//	Row 7: Alice  B7=W  C7=blank  D7=Flags  G7=Rank
+//	Row 8: Bob    B8=W  C8=blank  D8=Flags  G8=Rank
+//	(L column C is intentionally empty for engi; losses are not recorded)
 func scoringSetup2Players(t *testing.T, teamMatches int, engi bool) *excelize.File {
 	t.Helper()
 	pool := Pool{
@@ -94,8 +95,8 @@ func scoringSetup2Players(t *testing.T, teamMatches int, engi bool) *excelize.Fi
 //	Row 8: results header (W / L / T / PW / PL / Rank)
 //	Row 9: Alice, Row 10: Bob, Row 11: Carol
 //
-// Engi standings (engi=true): B=W, C=L, D=Flags, G=Rank, U=hidden Score.
-// PW/PL columns (E, F) are intentionally left blank in engi mode.
+// Engi standings (engi=true): B=W, D=Flags, G=Rank, U=hidden Score.
+// L column (C) and PW/PL columns (E, F) are intentionally left blank in engi mode.
 func scoringSetup3PlayerRoundRobin(t *testing.T, engi bool) *excelize.File {
 	t.Helper()
 	pool := Pool{
@@ -258,20 +259,21 @@ func TestIndividualPoolScoringFormulas(t *testing.T) {
 	}
 }
 
-// TestEngiPoolScoringFormulas verifies that the W/L/Flags formula cells in
+// TestEngiPoolScoringFormulas verifies that the W/Flags formula cells in
 // the pool results table compute correct values when engi=true.
 // Engi scores are integer flag counts (not ippon letters), so the formulas
 // must use ISNUMBER-based numeric comparison, not LEN/SUBSTITUTE character
 // counting. Ties are impossible in engi (flag totals are always odd).
+// The L column (C) must be empty for engi: losses are not recorded.
 //
 // Cell layout (same as non-engi, 2-player pool):
 //
 //	Row 4: score input  B4=left-flags  F4=right-flags
-//	Row 6: results header (W / L / Flags / Rank)
-//	Row 7: Alice (SideA, left)  B7=W  C7=L  D7=Flags
-//	Row 8: Bob   (SideB, right) B8=W  C8=L  D8=Flags
+//	Row 6: results header (W / Flags / Rank)
+//	Row 7: Alice (SideA, left)  B7=W  C7=blank  D7=Flags
+//	Row 8: Bob   (SideB, right) B8=W  C8=blank  D8=Flags
 func TestEngiPoolScoringFormulas(t *testing.T) {
-	type expect struct{ w, l, flags string }
+	type expect struct{ w, flags string }
 	type tc struct {
 		name  string
 		setup func(*excelize.File)
@@ -286,8 +288,8 @@ func TestEngiPoolScoringFormulas(t *testing.T) {
 				f.SetCellValue(SheetPoolMatches, "B4", 3)
 				f.SetCellValue(SheetPoolMatches, "F4", 2)
 			},
-			alice: expect{"1", "0", "3"},
-			bob:   expect{"0", "1", "2"},
+			alice: expect{"1", "3"},
+			bob:   expect{"0", "2"},
 		},
 		{
 			name: "left wins 5-0",
@@ -295,8 +297,8 @@ func TestEngiPoolScoringFormulas(t *testing.T) {
 				f.SetCellValue(SheetPoolMatches, "B4", 5)
 				f.SetCellValue(SheetPoolMatches, "F4", 0)
 			},
-			alice: expect{"1", "0", "5"},
-			bob:   expect{"0", "1", "0"},
+			alice: expect{"1", "5"},
+			bob:   expect{"0", "0"},
 		},
 		{
 			// Robustness: a played bout where one side holds a non-numeric
@@ -307,14 +309,14 @@ func TestEngiPoolScoringFormulas(t *testing.T) {
 				f.SetCellValue(SheetPoolMatches, "B4", 3)
 				f.SetCellValue(SheetPoolMatches, "F4", "x")
 			},
-			alice: expect{"1", "0", "3"},
-			bob:   expect{"0", "1", "0"},
+			alice: expect{"1", "3"},
+			bob:   expect{"0", "0"},
 		},
 		{
 			name:  "unplayed returns all zeros",
 			setup: func(*excelize.File) {},
-			alice: expect{"0", "0", "0"},
-			bob:   expect{"0", "0", "0"},
+			alice: expect{"0", "0"},
+			bob:   expect{"0", "0"},
 		},
 	}
 
@@ -324,12 +326,25 @@ func TestEngiPoolScoringFormulas(t *testing.T) {
 			c.setup(f)
 
 			assert.Equal(t, c.alice.w, calcScore(t, f, "B7"), "Alice W")
-			assert.Equal(t, c.alice.l, calcScore(t, f, "C7"), "Alice L")
 			assert.Equal(t, c.alice.flags, calcScore(t, f, "D7"), "Alice Flags")
 
 			assert.Equal(t, c.bob.w, calcScore(t, f, "B8"), "Bob W")
-			assert.Equal(t, c.bob.l, calcScore(t, f, "C8"), "Bob L")
 			assert.Equal(t, c.bob.flags, calcScore(t, f, "D8"), "Bob Flags")
+
+			// L column (C) must be empty for engi: losses are not recorded.
+			aliceLFormula, err := f.GetCellFormula(SheetPoolMatches, "C7")
+			require.NoError(t, err, "GetCellFormula C7")
+			assert.Equal(t, "", aliceLFormula, "engi Alice L cell C7 must have no formula")
+			aliceLValue, err := f.GetCellValue(SheetPoolMatches, "C7")
+			require.NoError(t, err, "GetCellValue C7")
+			assert.Equal(t, "", aliceLValue, "engi Alice L cell C7 must have no value")
+
+			bobLFormula, err := f.GetCellFormula(SheetPoolMatches, "C8")
+			require.NoError(t, err, "GetCellFormula C8")
+			assert.Equal(t, "", bobLFormula, "engi Bob L cell C8 must have no formula")
+			bobLValue, err := f.GetCellValue(SheetPoolMatches, "C8")
+			require.NoError(t, err, "GetCellValue C8")
+			assert.Equal(t, "", bobLValue, "engi Bob L cell C8 must have no value")
 		})
 	}
 }
@@ -636,10 +651,11 @@ func TestTeamIVILITPWPLTableFormulas(t *testing.T) {
 	}
 }
 
-// TestEngiPoolScoringFormulas_MultiMatch verifies that the W/L/Flags formula
+// TestEngiPoolScoringFormulas_MultiMatch verifies that the W/Flags formula
 // cells accumulate correctly across multiple matches per player in a 3-player
 // engi round-robin pool. Each player appears in two matches; the formulas must
 // correctly sum wins and flag totals from both records.
+// The L column (C) must be empty for all rows: losses are not recorded in engi.
 //
 // Match setup (Alice beats Bob 3-2; Carol beats Bob 4-1; Alice beats Carol 5-0):
 //
@@ -648,7 +664,7 @@ func TestTeamIVILITPWPLTableFormulas(t *testing.T) {
 //	Row 6: Alice (left, B6=5) vs Carol(right, F6=0)
 //
 // Standings: Row 8 header; Row 9=Alice, Row 10=Bob, Row 11=Carol.
-// Columns: B=W, C=L, D=Flags.
+// Columns: B=W, C=blank, D=Flags.
 func TestEngiPoolScoringFormulas_MultiMatch(t *testing.T) {
 	f := scoringSetup3PlayerRoundRobin(t, true)
 
@@ -664,20 +680,23 @@ func TestEngiPoolScoringFormulas_MultiMatch(t *testing.T) {
 
 	t.Run("Alice wins both accumulates W=2 Flags=8", func(t *testing.T) {
 		assert.Equal(t, "2", calcScore(t, f, "B9"), "Alice W")
-		assert.Equal(t, "0", calcScore(t, f, "C9"), "Alice L")
 		assert.Equal(t, "8", calcScore(t, f, "D9"), "Alice Flags (3+5)")
+		lv, _ := f.GetCellValue(SheetPoolMatches, "C9")
+		assert.Equal(t, "", lv, "Alice engi L cell C9 must be empty")
 	})
 
 	t.Run("Bob loses both accumulates W=0 Flags=3", func(t *testing.T) {
 		assert.Equal(t, "0", calcScore(t, f, "B10"), "Bob W")
-		assert.Equal(t, "2", calcScore(t, f, "C10"), "Bob L")
 		assert.Equal(t, "3", calcScore(t, f, "D10"), "Bob Flags (2+1)")
+		lv, _ := f.GetCellValue(SheetPoolMatches, "C10")
+		assert.Equal(t, "", lv, "Bob engi L cell C10 must be empty")
 	})
 
 	t.Run("Carol one win one loss Flags=4", func(t *testing.T) {
 		assert.Equal(t, "1", calcScore(t, f, "B11"), "Carol W")
-		assert.Equal(t, "1", calcScore(t, f, "C11"), "Carol L")
 		assert.Equal(t, "4", calcScore(t, f, "D11"), "Carol Flags (4+0)")
+		lv, _ := f.GetCellValue(SheetPoolMatches, "C11")
+		assert.Equal(t, "", lv, "Carol engi L cell C11 must be empty")
 	})
 }
 
@@ -734,11 +753,14 @@ func TestEngiPoolScoringFormulas_EqualFlagsDefensive(t *testing.T) {
 	f.SetCellValue(SheetPoolMatches, "B4", 3)
 	f.SetCellValue(SheetPoolMatches, "F4", 3)
 
-	t.Run("both W=0 L=0", func(t *testing.T) {
+	t.Run("both W=0, L cells blank", func(t *testing.T) {
 		assert.Equal(t, "0", calcScore(t, f, "B7"), "Alice W")
-		assert.Equal(t, "0", calcScore(t, f, "C7"), "Alice L")
 		assert.Equal(t, "0", calcScore(t, f, "B8"), "Bob W")
-		assert.Equal(t, "0", calcScore(t, f, "C8"), "Bob L")
+		// L column (C) must be blank for engi: losses are not recorded.
+		aliceLV, _ := f.GetCellValue(SheetPoolMatches, "C7")
+		assert.Equal(t, "", aliceLV, "engi Alice L cell C7 must be empty")
+		bobLV, _ := f.GetCellValue(SheetPoolMatches, "C8")
+		assert.Equal(t, "", bobLV, "engi Bob L cell C8 must be empty")
 	})
 
 	t.Run("Flags accumulate correctly", func(t *testing.T) {
@@ -778,16 +800,18 @@ func TestEngiPoolScoringFormulas_BothCellsText(t *testing.T) {
 	f.SetCellValue(SheetPoolMatches, "B4", "x")
 	f.SetCellValue(SheetPoolMatches, "F4", "y")
 
-	t.Run("Alice all zeros", func(t *testing.T) {
+	t.Run("Alice W=0 Flags=0, L blank", func(t *testing.T) {
 		assert.Equal(t, "0", calcScore(t, f, "B7"), "Alice W")
-		assert.Equal(t, "0", calcScore(t, f, "C7"), "Alice L")
 		assert.Equal(t, "0", calcScore(t, f, "D7"), "Alice Flags")
+		lv, _ := f.GetCellValue(SheetPoolMatches, "C7")
+		assert.Equal(t, "", lv, "engi Alice L cell C7 must be empty")
 	})
 
-	t.Run("Bob all zeros", func(t *testing.T) {
+	t.Run("Bob W=0 Flags=0, L blank", func(t *testing.T) {
 		assert.Equal(t, "0", calcScore(t, f, "B8"), "Bob W")
-		assert.Equal(t, "0", calcScore(t, f, "C8"), "Bob L")
 		assert.Equal(t, "0", calcScore(t, f, "D8"), "Bob Flags")
+		lv, _ := f.GetCellValue(SheetPoolMatches, "C8")
+		assert.Equal(t, "", lv, "engi Bob L cell C8 must be empty")
 	})
 }
 
@@ -816,26 +840,28 @@ func TestEngiPoolScoringFormulas_NumericTextInput(t *testing.T) {
 
 	// ISNUMBER(F4)=TRUE → played=TRUE (OR gate). Both sides are evaluated.
 	// excelize evaluator: N("3")=3, N(2)=2 → Alice "wins" 3-2.
-	t.Run("Alice W=1 Flags=3 (excelize evaluator quirk: N(text)=number)", func(t *testing.T) {
+	t.Run("Alice W=1 Flags=3 (excelize evaluator quirk: N(text)=number), L blank", func(t *testing.T) {
 		assert.Equal(t, "1", calcScore(t, f, "B7"), "Alice W")
-		assert.Equal(t, "0", calcScore(t, f, "C7"), "Alice L")
 		assert.Equal(t, "3", calcScore(t, f, "D7"), "Alice Flags (N(\"3\")=3 in excelize)")
+		lv, _ := f.GetCellValue(SheetPoolMatches, "C7")
+		assert.Equal(t, "", lv, "engi Alice L cell C7 must be empty")
 	})
 
-	t.Run("Bob W=0 Flags=2", func(t *testing.T) {
+	t.Run("Bob W=0 Flags=2, L blank", func(t *testing.T) {
 		assert.Equal(t, "0", calcScore(t, f, "B8"), "Bob W")
-		assert.Equal(t, "1", calcScore(t, f, "C8"), "Bob L")
 		assert.Equal(t, "2", calcScore(t, f, "D8"), "Bob Flags")
+		lv, _ := f.GetCellValue(SheetPoolMatches, "C8")
+		assert.Equal(t, "", lv, "engi Bob L cell C8 must be empty")
 	})
 }
 
 // TestEngiPoolStandings_NoPWPLCells is a regression guard for the
 // `if !ctx.engi` gate in printIndividualResultsTableSection that prevents
-// PW/PL formula cells from being written in engi mode.
+// PW/PL formula cells from being written in engi mode. It also guards that
+// the L (losses) column is left blank: engi rankings do not record losses.
 //
-// Engi standings only use W, L, Flags, and Rank; PW/PL have no meaning
-// because there are no individual "points" in kata competition. Leaving those
-// cells blank avoids misleading operators who open the spreadsheet.
+// Engi standings only use W, Flags, and Rank; L/PW/PL have no meaning
+// in kata competition. Leaving those cells blank avoids misleading operators.
 func TestEngiPoolStandings_NoPWPLCells(t *testing.T) {
 	t.Run("engi PW/PL cells have no formula and no value", func(t *testing.T) {
 		f := scoringSetup2Players(t, 0, true)
@@ -852,12 +878,36 @@ func TestEngiPoolStandings_NoPWPLCells(t *testing.T) {
 		}
 	})
 
+	t.Run("engi L cells have no formula and no value", func(t *testing.T) {
+		f := scoringSetup2Players(t, 0, true)
+
+		// C7=Alice L, C8=Bob L -- losses must not be recorded in engi.
+		lCells := []string{"C7", "C8"}
+		for _, cell := range lCells {
+			formula, err := f.GetCellFormula(SheetPoolMatches, cell)
+			require.NoErrorf(t, err, "GetCellFormula(%s)", cell)
+			assert.Equal(t, "", formula, "engi cell %s must have no formula (losses not recorded)", cell)
+
+			value, err := f.GetCellValue(SheetPoolMatches, cell)
+			require.NoErrorf(t, err, "GetCellValue(%s)", cell)
+			assert.Equal(t, "", value, "engi cell %s must be empty (losses not recorded)", cell)
+		}
+	})
+
 	t.Run("non-engi PW cell E7 has a formula", func(t *testing.T) {
 		f := scoringSetup2Players(t, 0, false)
 
 		formula, err := f.GetCellFormula(SheetPoolMatches, "E7")
 		require.NoError(t, err, "GetCellFormula(E7)")
 		assert.NotEqual(t, "", formula, "non-engi E7 must contain a PW formula")
+	})
+
+	t.Run("non-engi L cell C7 has a formula", func(t *testing.T) {
+		f := scoringSetup2Players(t, 0, false)
+
+		formula, err := f.GetCellFormula(SheetPoolMatches, "C7")
+		require.NoError(t, err, "GetCellFormula(C7)")
+		assert.NotEqual(t, "", formula, "non-engi C7 must contain an L formula")
 	})
 }
 

@@ -289,7 +289,8 @@ func (e *Engine) computeEngiStandings(loader poolStandingsLoader, compID string)
 			if sA == nil || sB == nil {
 				continue
 			}
-			// Win/loss by flag majority. Engi has no draws (odd flag total).
+			// Win by flag majority. Engi has no draws (odd flag total) and does
+			// not record losses: ranking is Wins then accumulated own-side Flags.
 			// Resolve the winning side by WinnerID when available (unambiguous
 			// even when both sides share a display name); fall back to the
 			// Winner name for legacy data recorded before WinnerID was set.
@@ -298,10 +299,8 @@ func (e *Engine) computeEngiStandings(loader poolStandingsLoader, compID string)
 			switch {
 			case winnerIsA:
 				sA.Wins++
-				sB.Losses++
 			case winnerIsB:
 				sB.Wins++
-				sA.Losses++
 			}
 			// Own-side flag accrual: winner AND loser both accumulate the flags
 			// raised for their own side.

@@ -751,11 +751,14 @@ func overlayPoolStandings(f *excelize.File, pools []helper.Pool, standings map[s
 				excelRow := dataRowIdx + 1
 				// teamSize == 0 is guaranteed here (we returned early above for team competitions).
 				setIntCell(f, sheetName, excelRow, colMap, "W", ps.Wins)
-				setIntCell(f, sheetName, excelRow, colMap, "L", ps.Losses)
 				if engi {
-					// Engi standings: W / L / Flags / Rank only (no T, PW, PL).
+					// Engi standings: W / Flags / Rank only (no L, T, PW, PL).
+					// Losses are not recorded in engi; skipping "L" here keeps
+					// that cell blank (matching the formula sheet which also
+					// omits the L column for engi).
 					setIntCell(f, sheetName, excelRow, colMap, helper.ColHeaderFlags, ps.Flags)
 				} else {
+					setIntCell(f, sheetName, excelRow, colMap, "L", ps.Losses)
 					setIntCell(f, sheetName, excelRow, colMap, "T", ps.Draws)
 					setIntCell(f, sheetName, excelRow, colMap, "PW", ps.IpponsGiven)
 					setIntCell(f, sheetName, excelRow, colMap, "PL", ps.IpponsTaken)

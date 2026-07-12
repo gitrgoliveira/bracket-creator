@@ -569,9 +569,12 @@ func printIndividualResultsTableSection(ctx poolResultsCtx, headerRow int, teamM
 
 	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", startColName, headerRow), "Results"))
 	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", lVCol, headerRow), "W"))
-	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", lPCol, headerRow), "L"))
+	if !ctx.engi {
+		// Engi does not record losses; leave the L column header blank.
+		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", lPCol, headerRow), "L"))
+	}
 	if ctx.engi {
-		// Engi standings: W / L / Flags / Rank only (no T, PW, PL).
+		// Engi standings: W / Flags / Rank only (no L, T, PW, PL).
 		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", middleColName, headerRow), ColHeaderFlags))
 	} else {
 		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", middleColName, headerRow), "T"))
@@ -621,9 +624,9 @@ func printIndividualResultsTableSection(ctx poolResultsCtx, headerRow int, teamM
 				}
 				engiPlayed := fmt.Sprintf("OR(ISNUMBER(%s%d),ISNUMBER(%s%d))", lVCol, rec.row, rVCol, rec.row)
 				wFormulas = append(wFormulas, fmt.Sprintf("IF(%s,(N(%s%d)>N(%s%d))*1,0)", engiPlayed, myCol, rec.row, oppCol, rec.row))
-				lFormulas = append(lFormulas, fmt.Sprintf("IF(%s,(N(%s%d)<N(%s%d))*1,0)", engiPlayed, myCol, rec.row, oppCol, rec.row))
+				// Losses are not recorded for engi: lFormulas intentionally left empty.
 				middleColFormulas = append(middleColFormulas, fmt.Sprintf("N(%s%d)", myCol, rec.row)) // middleColFormulas = Flags column for engi
-				continue                                                                              // pwFormulas and plFormulas remain empty for engi
+				continue                                                                              // lFormulas, pwFormulas and plFormulas remain empty for engi
 			}
 			if teamMatches == 0 {
 				lc := func(col string, r int) string {
@@ -659,7 +662,10 @@ func printIndividualResultsTableSection(ctx poolResultsCtx, headerRow int, teamM
 			}
 		}
 		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", lVCol, row), joinFormulas(wFormulas)))
-		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", lPCol, row), joinFormulas(lFormulas)))
+		if !ctx.engi {
+			// Engi does not record losses; leave the L cell blank.
+			handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", lPCol, row), joinFormulas(lFormulas)))
+		}
 		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", middleColName, row), joinFormulas(middleColFormulas)))
 		if !ctx.engi {
 			// Engi has no PW/PL concept; leave those cells blank.

@@ -2597,6 +2597,11 @@ func TestBuildResultsWorkbook_EngiStandingsHeadersRelabeled(t *testing.T) {
 		"Pool Matches must NOT contain 'PW' header for an engi competition")
 	assert.False(t, containsCell(rows, "PL"),
 		"Pool Matches must NOT contain 'PL' header for an engi competition")
+
+	// "L" must NOT appear in the standings header for engi:
+	// engi rankings do not record losses, only wins and flags.
+	assert.False(t, containsCell(rows, "L"),
+		"Pool Matches must NOT contain 'L' header for an engi competition")
 }
 
 // TestBuildResultsWorkbook_NonEngiStandingsHeadersUnchanged proves additivity:

@@ -219,13 +219,14 @@ func TestCreateHandler_EngiPools_FlagsHeader(t *testing.T) {
 	}
 	require.Positive(t, resultsRow, "Results block not found on Pool Matches sheet")
 
-	// The Results header row must contain "Flags" and must NOT contain "PW" or "PL".
+	// The Results header row must contain "Flags" and must NOT contain "L", "PW", or "PL".
 	hRow := rows[resultsRow-1]
 	found := false
 	for _, cell := range hRow {
 		if cell == "Flags" {
 			found = true
 		}
+		require.NotEqual(t, "L", cell, "engi Pool Matches must not have an L column (losses not recorded)")
 		require.NotEqual(t, "PW", cell, "engi Pool Matches must not have a PW column")
 		require.NotEqual(t, "PL", cell, "engi Pool Matches must not have a PL column")
 	}

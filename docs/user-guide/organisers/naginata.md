@@ -124,8 +124,9 @@ Both Excel downloads on the competition page (see
   with the shared dojo; the match grids and standings identify the pair by
   member 1's name, and the printable name sheets by member 2's.
 - Pool standings in both workbooks use the Engi columns: **W** (wins),
-  **L** (losses), **Flags** (total flags), and **Rank**. The kendo points
-  columns do not appear.
+  **Flags** (total flags), and **Rank**. Losses are not recorded because
+  ranking is determined by wins then accumulated own-side flags. The kendo
+  points columns do not appear.
 - The results workbook records each side's referee flag count in the score
   cells instead of ippon letters, and a bout decided without flags (for
   example a kiken withdrawal) leaves the score cells blank with the decision

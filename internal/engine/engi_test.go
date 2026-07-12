@@ -370,9 +370,9 @@ func TestComputeEngiStandings_SameNameDifferentDojo(t *testing.T) {
 	require.NotNil(t, osakaRow, "Osaka Tanaka must have her own standings row")
 
 	assert.Equal(t, 3, osakaRow.Wins, "Osaka Tanaka should have 3 wins")
-	assert.Equal(t, 0, osakaRow.Losses, "Osaka Tanaka should have 0 losses")
+	assert.Equal(t, 0, osakaRow.Losses, "engi does not record losses; Osaka Tanaka stays at 0")
 	assert.Equal(t, 0, tokyoRow.Wins, "Tokyo Tanaka should have 0 wins")
-	assert.Equal(t, 3, tokyoRow.Losses, "Tokyo Tanaka should have 3 losses")
+	assert.Equal(t, 0, tokyoRow.Losses, "engi does not record losses; Tokyo Tanaka stays at 0")
 }
 
 // --- Regression: kendo path unchanged --------------------------------------

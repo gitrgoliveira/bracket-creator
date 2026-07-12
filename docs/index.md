@@ -15,9 +15,6 @@ template: home.html
   <a href="https://pkg.go.dev/github.com/gitrgoliveira/bracket-creator">
     <img src="https://pkg.go.dev/badge/github.com/gitrgoliveira/bracket-creator.svg" alt="Go reference">
   </a>
-  <a href="https://goreportcard.com/report/github.com/gitrgoliveira/bracket-creator">
-    <img src="https://goreportcard.com/badge/github.com/gitrgoliveira/bracket-creator" alt="Go report card">
-  </a>
 </p>
 
 **bracket-creator** lets any club or organisation run kendo tournaments at whatever level of digitization fits the venue. Give it a CSV of participants and it produces fully formatted, print-ready Excel brackets (pool draws, match schedules, and elimination trees), and it can run pools and scores on the day. Choose how digital you go.

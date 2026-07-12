@@ -1176,13 +1176,13 @@ func TestEngiParticipantAddPreservesMemberTwo(t *testing.T) {
 		Name:           "Engi Add Handler",
 		Status:         state.CompStatusSetup,
 		Engi:           true,
-		WithZekkenName: false, // effective layout is still zekken via Engi
+		WithZekkenName: false, // engi does not alter the roster layout
 	}))
 
+	// An engi pair is ONE participant with both member names combined.
 	payload := map[string]interface{}{
-		"name":        "Emi Sasaki",
-		"displayName": "Ren Fujita", // pair member 2
-		"dojo":        "Getsurin Dojo",
+		"name": "Emi Sasaki - Ren Fujita",
+		"dojo": "Getsurin Dojo",
 	}
 	bodyBytes, _ := json.Marshal(payload)
 	w := httptest.NewRecorder()
@@ -1193,13 +1193,12 @@ func TestEngiParticipantAddPreservesMemberTwo(t *testing.T) {
 
 	var added domain.Player
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &added))
-	assert.Equal(t, "Ren Fujita", added.DisplayName, "engi member 2 must not be stripped/auto-derived on add")
+	assert.Equal(t, "Emi Sasaki - Ren Fujita", added.Name, "combined pair name must round-trip on add")
 
-	// Persisted: reload with the effective flag (engi forces the 4-col layout).
 	stored, err := store.LoadParticipants(compID, false)
 	require.NoError(t, err)
 	require.Len(t, stored, 1)
-	assert.Equal(t, "Ren Fujita", stored[0].DisplayName, "engi member 2 must round-trip")
+	assert.Equal(t, "Emi Sasaki - Ren Fujita", stored[0].Name, "combined pair name must round-trip")
 	assert.Equal(t, "Getsurin Dojo", stored[0].Dojo)
 }
 

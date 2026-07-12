@@ -27,11 +27,10 @@ export function buildXlsxBody(cfg, cName, players) {
   let winnersPerPool = cfg.poolWinners || 2;
   if (winnersPerPool >= playersPerPool) winnersPerPool = Math.max(1, playersPerPool - 1);
 
-  // Engi pairs always use the 3-column layout (Name=member1,
-  // DisplayName=member2, Dojo=shared). The effective zekken flag covers both
-  // withZekkenName=true competitions and engi competitions, so roster lines are
-  // always 3-column for pairs even when withZekkenName is not explicitly set.
-  const effectiveZekken = !!(cfg.withZekkenName || cfg.engi);
+  // Engi pairs store both member names combined in the name field
+  // ("Name 1 - Name 2"), so they use whatever zekken layout the competition
+  // itself is configured with, same as any other competition.
+  const effectiveZekken = !!cfg.withZekkenName;
 
   // Roster lines match the canonical participant CSV the generator parses:
   // with effective zekken → "Name, DisplayName, Dojo"; otherwise → "Name, Dojo".

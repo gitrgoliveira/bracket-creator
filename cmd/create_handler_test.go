@@ -183,7 +183,8 @@ func TestCreateHandler_CRLFRoster_Normalized(t *testing.T) {
 }
 
 // engiPoolForm builds the POST /create body for an engi pools competition.
-// Players are 3-column pairs: "Member1, Member2, Dojo".
+// Players are standard 2-column rows with the pair combined in the name:
+// "Member1 - Member2, Dojo".
 func engiPoolForm(playerList string) url.Values {
 	return url.Values{
 		"tournamentType": {"pools"},
@@ -195,7 +196,6 @@ func engiPoolForm(playerList string) url.Values {
 		"teamMatches":    {"0"},
 		"roundRobin":     {"on"},
 		"determined":     {"on"},
-		"withZekkenName": {"on"},
 		"engi":           {"on"},
 	}
 }
@@ -205,8 +205,8 @@ func engiPoolForm(playerList string) url.Values {
 // "Flags" as the standings column header instead of "T" (and has no "PW"/"PL"),
 // and the W-cell formula contains the N() coercion idiom specific to engi.
 func TestCreateHandler_EngiPools_FlagsHeader(t *testing.T) {
-	// 4 pairs (each "Name1, Name2, Dojo") → 1 pool of 4
-	const roster = "Aoi, Haru, DojoA\nBo, Cho, DojoB\nDai, Ebi, DojoC\nFu, Go, DojoD"
+	// 4 pairs (each "Name1 - Name2, Dojo") → 1 pool of 4
+	const roster = "Aoi - Haru, DojoA\nBo - Cho, DojoB\nDai - Ebi, DojoC\nFu - Go, DojoD"
 	f := postCreate(t, engiPoolForm(roster))
 
 	rows, err := f.GetRows("Pool Matches")

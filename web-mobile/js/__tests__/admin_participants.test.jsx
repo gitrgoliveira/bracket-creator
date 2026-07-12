@@ -422,16 +422,20 @@ describe('validateRosterRows', () => {
   });
 });
 
-// Copilot PR #326 round 3: Engi competitions may carry withZekkenName=false
-// (the effective flag is withZekkenName||engi), so template selection and the
-// add/replace required-field check must branch on c.engi, not raw
-// c.withZekkenName. Otherwise an Engi comp gets a non-pair template and the
-// form drops member 2 (displayName), corrupting the pair.
+// Engi pairs are entered with both member names combined in the name field
+// ("Name 1 - Name 2"), so template selection shows pair-shaped examples while
+// the column layout stays identical to a non-engi competition of the same
+// zekken setting.
 describe('participantTemplateCSV', () => {
-  it('offers the pair template for engi even when withZekkenName is false', () => {
+  it('offers the combined pair template for engi without zekken', () => {
     const csv = participantTemplateCSV({ kind: 'individual', engi: true, withZekkenName: false });
-    expect(csv).toContain('Name 1, Name 2, Dojo');
-    expect(csv).toContain('Emi Sasaki, Ren Fujita');
+    expect(csv).toContain('Name 1 - Name 2, Dojo');
+    expect(csv).toContain('Emi Sasaki - Ren Fujita, Getsurin Dojo');
+  });
+  it('offers the combined pair + zekken template for engi with zekken', () => {
+    const csv = participantTemplateCSV({ kind: 'individual', engi: true, withZekkenName: true });
+    expect(csv).toContain('Name 1 - Name 2, Zekken 1 - Zekken 2, Dojo');
+    expect(csv).toContain('Emi Sasaki - Ren Fujita, SASAKI - FUJITA, Getsurin Dojo');
   });
   it('offers the zekken template for a non-engi zekken comp', () => {
     expect(participantTemplateCSV({ kind: 'individual', withZekkenName: true })).toContain('Name, Zekken, Dojo');
@@ -452,11 +456,11 @@ describe('participantFormError', () => {
     expect(participantFormError({ name: '', dojo: 'D', zekken: '', engi: false })).toMatch(/Name and dojo/);
     expect(participantFormError({ name: 'N', dojo: '', zekken: '', engi: false })).toMatch(/Name and dojo/);
   });
-  it('requires member 2 (zekken) for engi pairs', () => {
-    expect(participantFormError({ name: 'Emi Sasaki', dojo: 'Getsurin', zekken: '', engi: true })).toMatch(/Both member names/);
+  it('requires both member names combined for engi pairs', () => {
+    expect(participantFormError({ name: 'Emi Sasaki', dojo: 'Getsurin', engi: true })).toMatch(/Name 1 - Name 2/);
   });
   it('accepts a complete engi pair', () => {
-    expect(participantFormError({ name: 'Emi Sasaki', dojo: 'Getsurin', zekken: 'Ren Fujita', engi: true })).toBeNull();
+    expect(participantFormError({ name: 'Emi Sasaki - Ren Fujita', dojo: 'Getsurin', engi: true })).toBeNull();
   });
   it('does not require a zekken for a non-engi comp (member 2 is optional)', () => {
     expect(participantFormError({ name: 'Alice', dojo: 'DojoA', zekken: '', engi: false })).toBeNull();

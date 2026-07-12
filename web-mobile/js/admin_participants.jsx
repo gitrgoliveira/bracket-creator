@@ -192,13 +192,17 @@ function generateRosterText(playersList, withZekkenName) {
 // when the roster is valid). The stored `name` is the TRIMMED value (not the
 // raw input), so whitespace-only names render as the falsy "line N" branch in
 // the apply() toast rather than a literal "   " label.
-function validateRosterRows(parsed, withZekkenName) {
+function validateRosterRows(parsed, withZekkenName, engi) {
   const problems = [];
   (parsed || []).forEach((p, i) => {
     const name = (p.name || "").trim();
     const dojo = (p.dojo || "").trim();
     if (!name) {
       problems.push({ index: i, name, reason: "missing name" });
+      return;
+    }
+    if (engi && !name.includes(" - ")) {
+      problems.push({ index: i, name, reason: 'engi pairs need both member names as "Name 1 - Name 2"' });
       return;
     }
     if (!dojo) {
@@ -213,34 +217,31 @@ function validateRosterRows(parsed, withZekkenName) {
 
 // participantTemplateCSV returns the sample CSV bytes a competition's roster
 // template should offer, keyed off kind → engi → zekken. Engi comps are PAIRS
-// ("Name 1, Name 2, Dojo"), and may carry withZekkenName=false, so engi is
-// checked before the zekken branch. Exported for tests.
+// ("Name 1 - Name 2" combined in the name field), so engi is checked before
+// the zekken branch only to show pair-shaped examples. Exported for tests.
 function participantTemplateCSV(c) {
   if (c.kind === "team") return "Team Name, Dojo\nTora A, Tora Dojo London\n";
-  if (c.engi) return "Name 1, Name 2, Dojo, Dan\nEmi Sasaki, Ren Fujita, Getsurin Dojo, 3\n";
+  if (c.engi && c.withZekkenName) return "Name 1 - Name 2, Zekken 1 - Zekken 2, Dojo, Dan\nEmi Sasaki - Ren Fujita, SASAKI - FUJITA, Getsurin Dojo, 3\n";
+  if (c.engi) return "Name 1 - Name 2, Dojo, Dan\nEmi Sasaki - Ren Fujita, Getsurin Dojo, 3\n";
   if (c.withZekkenName) return "Name, Zekken, Dojo, Dan\nAkira Tanaka, TANAKA, Gyokusen, 3\n";
   return "Name, Dojo, Dan\nAkira Tanaka, Gyokusen, 3\n";
 }
 
 // participantFormError validates the add/replace form inputs, returning a
 // user-facing error string or null when valid. Name + dojo are always
-// required; engi competitions additionally require member 2 (the displayName /
-// "Name 2" slot), since a blank one would let the backend auto-derive it from
-// Name 1 and corrupt the pair. Exported for tests.
-function participantFormError({ name, dojo, zekken, engi }) {
+// required; engi competitions require BOTH member names combined in the name
+// field ("Name 1 - Name 2"), since a pair with a single name is incomplete.
+// Exported for tests.
+function participantFormError({ name, dojo, engi }) {
   if (!name || !dojo) return "Name and dojo are required";
-  if (engi && !zekken) return "Both member names are required for an Engi pair";
+  if (engi && !String(name).includes(" - ")) return 'Enter both member names as "Name 1 - Name 2"';
   return null;
 }
 
 function AdminParticipants({ c, tournament: _tournament, onUpdate, password, showToast, onSection, onBack }) {
-  // Effective zekken-column flag (EffectiveWithZekkenName on the Go side):
-  // engi competitors are PAIRS stored with member 2 in the displayName column,
-  // so they use the 4-column layout even when the stored withZekkenName is
-  // false. Hoisted to the top so roster GENERATION and PARSING share one flag;
-  // using raw c.withZekkenName for engi would render/save the roster without
-  // member 2 and drop it.
-  const withZekken = c.withZekkenName || c.engi;
+  // Zekken-column flag. Engi pairs store both member names combined in the
+  // name field ("Name 1 - Name 2"), so engi does not alter the roster layout.
+  const withZekken = !!c.withZekkenName;
   const [showOnlyUnchecked, setShowOnlyUnchecked] = useStateA(false);
   const [replaceTarget, setReplaceTarget] = useStateA(null);
   const [showAddForm, setShowAddForm] = useStateA(false);
@@ -617,10 +618,9 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   const handleAddParticipant = async () => {
     const name = addName.trim(), dojo = addDojo.trim(), danGrade = addDanGrade.trim();
     const zekken = addZekken.trim();
-    // Name + dojo always required; engi additionally requires member 2 (the
-    // "Name 2 *" slot) so a blank one can't be auto-derived from Name 1 and
-    // corrupt the pair (see participantFormError).
-    const formErr = participantFormError({ name, dojo, zekken, engi: c.engi });
+    // Name + dojo always required; engi requires both member names combined
+    // in the name field ("Name 1 - Name 2"), see participantFormError.
+    const formErr = participantFormError({ name, dojo, engi: c.engi });
     if (formErr) { showToast(formErr, "error"); return; }
     const admin = await window.promptAdminPassword();
     if (admin === null) return;
@@ -648,9 +648,9 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     if (!replaceTarget) return;
     const name = replaceName.trim(), dojo = replaceDojo.trim(), danGrade = replaceDanGrade.trim();
     const zekken = replaceZekken.trim();
-    // Same validation as add: engi pairs need member 2 on edit too, else
-    // clearing it drops the pair's second name.
-    const formErr = participantFormError({ name, dojo, zekken, engi: c.engi });
+    // Same validation as add: an engi pair must keep both member names in
+    // the combined name on edit too.
+    const formErr = participantFormError({ name, dojo, engi: c.engi });
     if (formErr) { showToast(formErr, "error"); return; }
     // Capture the old name before the await so the success toast is accurate
     // even if replaceTarget has changed by the time the response arrives.
@@ -710,7 +710,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
       // misformatted paste (e.g. a two-column "Name, Dojo" line in a zekken
       // competition, parsed as {displayName: dojo, dojo: ""}) up front with an
       // actionable message, instead of relying on the server 400 round-trip.
-      const rowProblems = validateRosterRows(parsed, withZekken);
+      const rowProblems = validateRosterRows(parsed, withZekken, !!c.engi);
       if (rowProblems.length > 0) {
         const first = rowProblems[0];
         const label = first.name ? `"${first.name}"` : `line ${first.index + 1}`;
@@ -983,12 +983,12 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
                   <div>
                     <div className="field__label" style={{ fontSize: 11 }}>{c.engi ? "Name 1 *" : "Name *"}</div>
-                    <input className="input" style={{ width: 160 }} value={addName} onChange={e => setAddName(e.target.value)} placeholder={c.engi ? "Member 1" : "Full name"} />
+                    <input className="input" style={{ width: 160 }} value={addName} onChange={e => setAddName(e.target.value)} placeholder={c.engi ? "Member 1 - Member 2" : "Full name"} />
                   </div>
                   {withZekken && (
                     <div>
-                      <div className="field__label" style={{ fontSize: 11 }}>{c.engi ? "Name 2 *" : "Zekken"}</div>
-                      <input className="input" style={{ width: 120 }} value={addZekken} onChange={e => setAddZekken(e.target.value)} placeholder={c.engi ? "Member 2" : "Auto if blank"} />
+                      <div className="field__label" style={{ fontSize: 11 }}>Zekken</div>
+                      <input className="input" style={{ width: 120 }} value={addZekken} onChange={e => setAddZekken(e.target.value)} placeholder="Auto if blank" />
                     </div>
                   )}
                   <div>
@@ -1019,8 +1019,8 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                   </div>
                   {withZekken && (
                     <div>
-                      <div className="field__label">{c.engi ? "Name 2 *" : "Zekken"}</div>
-                      <input className="input" value={replaceZekken} onChange={e => setReplaceZekken(e.target.value)} placeholder={c.engi ? "Member 2" : "Auto-derived if blank"} />
+                      <div className="field__label">Zekken</div>
+                      <input className="input" value={replaceZekken} onChange={e => setReplaceZekken(e.target.value)} placeholder="Auto-derived if blank" />
                     </div>
                   )}
                   <div>
@@ -1160,7 +1160,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                 {lines.length} entries · One per line · <span style={{ color: "var(--ink-2)", fontWeight: 600 }}>Example: Alice Smith, Gyokusen, 3</span>
               </div>
               <div className="field__hint" style={{ marginTop: 2, fontSize: 11 }}>
-                Format: "{c.kind === "team" ? "Team name, Dojo" : c.engi ? "Name 1, Name 2, Dojo[, Dan]" : c.withZekkenName ? "Name, Zekken, Dojo[, Dan]" : "Name, Dojo[, Dan grade]"}"
+                Format: "{c.kind === "team" ? "Team name, Dojo" : c.engi ? (c.withZekkenName ? "Name 1 - Name 2, Zekken, Dojo[, Dan]" : "Name 1 - Name 2, Dojo[, Dan]") : c.withZekkenName ? "Name, Zekken, Dojo[, Dan]" : "Name, Dojo[, Dan grade]"}"
                 <br />* Dan = kendo grade (optional)
                 <br /><button type="button" className="btn--link" style={{ padding: 0, fontSize: 11, fontWeight: 600 }} onClick={downloadTemplate}>Download CSV template</button>
               </div>
@@ -1186,7 +1186,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
               <div>
                 <div className="dropzone__title">{dragOver ? "Drop CSV to import" : "Click or drop CSV to import participants"}</div>
                 <div className="dropzone__sub">
-                  {c.engi ? "Name 1, Name 2, Dojo[, Dan]" : c.withZekkenName ? "Name, Zekken, Dojo[, Dan]" : "Name, Dojo[, Dan grade] (e.g. Alice Smith, Gyokusen, 3)"}
+                  {c.engi ? (c.withZekkenName ? "Name 1 - Name 2, Zekken, Dojo[, Dan]" : "Name 1 - Name 2, Dojo[, Dan]") : c.withZekkenName ? "Name, Zekken, Dojo[, Dan]" : "Name, Dojo[, Dan grade] (e.g. Alice Smith, Gyokusen, 3)"}
                 </div>
               </div>
               <input ref={fileRef} type="file" accept=".csv,.txt,text/csv,text/plain" style={{ display: "none" }} onChange={(e) => handleFile(e.target.files[0])} />
@@ -1239,13 +1239,13 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
             onFocus={() => { textFocusRef.current = true; }}
             onBlur={() => { textFocusRef.current = false; }}
             rows={14}
-            placeholder={c.kind === "team" ? "Tora A, Tora Dojo London" : c.engi ? "Akira Tanaka, Yuki Tanaka, Gyokusen" : c.withZekkenName ? "Akira Tanaka, TANAKA, Gyokusen" : "Akira Tanaka, Gyokusen"}
+            placeholder={c.kind === "team" ? "Tora A, Tora Dojo London" : c.engi ? "Akira Tanaka - Yuki Tanaka, Gyokusen" : c.withZekkenName ? "Akira Tanaka, TANAKA, Gyokusen" : "Akira Tanaka, Gyokusen"}
           />
           <div className="field__hint" style={{ marginTop: 6 }}>Click "Apply" to save the participant list. Existing seeds are preserved by name match (case-insensitive), so you can reorder rows freely.</div>
           {lines.length > 0 && (() => {
             const previewLimit = showAllPreview ? lines.length : 10;
             const preview = window.parseParticipantLines(lines.slice(0, previewLimit), withZekken);
-            const cols = c.engi ? ["Name 1", "Name 2", "Dojo", "Dan"] : c.withZekkenName ? ["Name", "Zekken", "Dojo", "Dan"] : ["Name", "Dojo", "Dan"];
+            const cols = c.withZekkenName ? [c.engi ? "Name 1 - Name 2" : "Name", "Zekken", "Dojo", "Dan"] : [c.engi ? "Name 1 - Name 2" : "Name", "Dojo", "Dan"];
             return (
               <div style={{ marginTop: 8, overflowX: "auto" }}>
                 <table className="parse-preview">

@@ -45,7 +45,7 @@ func TestAddPoolsToTreeCellContent(t *testing.T) {
 		playerCoordKey(players[2]): {cellCoord: cellCoord{sheetName: SheetData, cell: "$B$4"}},
 	}
 
-	AddPoolsToTree(f, sheetName, pools, poolCoords, pCoords, false)
+	AddPoolsToTree(f, sheetName, pools, poolCoords, pCoords)
 
 	startRow := TreeTitleRows + 1 // first content row in column A
 

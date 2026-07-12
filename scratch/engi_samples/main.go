@@ -57,7 +57,7 @@ func newEngine() (cleanup func(), store *state.Store, eng *engine.Engine) {
 }
 
 // engiPairs builds n engi competitors. Each is ONE participant: member 1 in
-// Name, member 2 in DisplayName, with a shared dojo.
+// the combined "Name 1 - Name 2" form, with a shared dojo.
 func engiPairs(n int) []domain.Player {
 	m1first := []string{"Yuki", "Haru", "Ren", "Aoi", "Sora", "Kai", "Rin", "Mei"}
 	m2first := []string{"Jun", "Nao", "Emi", "Taro", "Hana", "Ken", "Yui", "Dai"}
@@ -66,9 +66,10 @@ func engiPairs(n int) []domain.Player {
 	ps := make([]domain.Player, n)
 	for i := 0; i < n; i++ {
 		ps[i] = domain.Player{
-			Name:        fmt.Sprintf("%s %s", m1first[i%len(m1first)], last[i%len(last)]),
-			DisplayName: fmt.Sprintf("%s %s", m2first[i%len(m2first)], last[(i+3)%len(last)]),
-			Dojo:        dojos[i%len(dojos)],
+			Name: fmt.Sprintf("%s %s - %s %s",
+				m1first[i%len(m1first)], last[i%len(last)],
+				m2first[i%len(m2first)], last[(i+3)%len(last)]),
+			Dojo: dojos[i%len(dojos)],
 		}
 	}
 	return ps

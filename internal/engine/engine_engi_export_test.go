@@ -9,7 +9,7 @@ package engine
 //   - The Pool Matches sheet carries the "Flags" standings header (not "PW"/"PL").
 //     "Flags" is stored in the shared strings table and resolved by GetRows, so
 //     the check reads through excelize's normal cell-value API.
-//   - Both member names (Name and DisplayName of each pair) appear in the Data sheet
+//   - The combined pair name ("Name 1 - Name 2") appears in the Data sheet
 //     (EffectiveWithZekkenName() is active for engi, even when WithZekkenName=false).
 //
 // Note on formulas: the blank-template path loads pools from CSV (which does not
@@ -193,12 +193,13 @@ func TestExportCompetitionXlsx_Engi(t *testing.T) {
 
 	createEngiCompetition(t, store, compID, state.CompFormatLeague, 4)
 
-	// Four engi pairs: each participant is one pair; member1 = Name, member2 = DisplayName.
+	// Four engi pairs: each participant is one pair with both member names
+	// combined in the Name field ("Name 1 - Name 2").
 	pairs := []domain.Player{
-		{Name: "Pair1 A", DisplayName: "Pair1 B", Dojo: "DojoA"},
-		{Name: "Pair2 A", DisplayName: "Pair2 B", Dojo: "DojoB"},
-		{Name: "Pair3 A", DisplayName: "Pair3 B", Dojo: "DojoC"},
-		{Name: "Pair4 A", DisplayName: "Pair4 B", Dojo: "DojoD"},
+		{Name: "Pair1 A - Pair1 B", Dojo: "DojoA"},
+		{Name: "Pair2 A - Pair2 B", Dojo: "DojoB"},
+		{Name: "Pair3 A - Pair3 B", Dojo: "DojoC"},
+		{Name: "Pair4 A - Pair4 B", Dojo: "DojoD"},
 	}
 	require.NoError(t, store.SaveParticipants(compID, pairs))
 	require.NoError(t, eng.StartCompetition(compID))
@@ -241,9 +242,7 @@ func TestExportCompetitionXlsx_Engi(t *testing.T) {
 	assert.False(t, hasCellValue(pmRows, "PL"),
 		"Pool Matches standings must NOT carry 'PL' header for an engi competition")
 
-	// --- Data sheet: both member names appear (EffectiveWithZekkenName = true) ---
-	// The data sheet writes Name to column B and DisplayName to column D.
-	// Both columns are populated when the competition is engi (or WithZekkenName=true).
+	// --- Data sheet: the combined pair name appears in the Name column ---
 	dataRows, err := f.GetRows(helper.SheetData)
 	require.NoError(t, err)
 
@@ -258,8 +257,6 @@ func TestExportCompetitionXlsx_Engi(t *testing.T) {
 
 	for _, p := range pairs {
 		assert.True(t, strings.Contains(allDataStr, p.Name),
-			"Data sheet must contain member1 name %q", p.Name)
-		assert.True(t, strings.Contains(allDataStr, p.DisplayName),
-			"Data sheet must contain member2 name %q (DisplayName/zekken column)", p.DisplayName)
+			"Data sheet must contain the combined pair name %q", p.Name)
 	}
 }

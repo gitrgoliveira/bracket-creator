@@ -235,7 +235,7 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 
 	// Convert all players for match-winner processing
 	matchWinners = helper.ConvertPlayersToWinners(players, o.withZekkenName, playerCoords)
-	helper.CreateNamesToPrint(f, players, o.withZekkenName, o.courts, playerCoords, false)
+	helper.CreateNamesToPrint(f, players, o.withZekkenName, o.courts, playerCoords)
 
 	nextRow, elimMatchWinners := helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, o.teamMatches, o.courts, true, false)
 	// Bronze (3rd-place) playoff: naginata only, and only when a real semifinal

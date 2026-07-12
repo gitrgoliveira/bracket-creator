@@ -2,7 +2,6 @@ package helper
 
 import (
 	"fmt"
-	"strings"
 
 	excelize "github.com/xuri/excelize/v2"
 )
@@ -80,7 +79,7 @@ func writeTreeValue(f *excelize.File, sheet string, col int, startRow int, value
 
 }
 
-func AddPoolsToTree(f *excelize.File, sheetName string, pools []Pool, poolCoords map[string]cellCoord, pCoords map[string]playerCellCoord, engi bool) {
+func AddPoolsToTree(f *excelize.File, sheetName string, pools []Pool, poolCoords map[string]cellCoord, pCoords map[string]playerCellCoord) {
 	SetSheetLayoutPortraitA4Centered(f, sheetName)
 	treeHeaderStyle := getTreeHeaderStyle(f)
 	treeTopStyle := getTreeTopStyle(f)
@@ -108,16 +107,7 @@ func AddPoolsToTree(f *excelize.File, sheetName string, pools []Pool, poolCoords
 		for _, player := range pool.Players {
 			coord := pCoords[playerCoordKey(player)]
 			var formula string
-			if engi {
-				// Engi pairs: member-1 (col B) and member-2 (col D) joined by " - ".
-				if coord.numberCell != "" {
-					formula = engiPlayerRef(coord)
-				} else {
-					dCell := strings.Replace(coord.cell, "$B$", "$D$", 1)
-					formula = fmt.Sprintf("\"%d. \" & %s!%s&\" - \"&%s!%s",
-						player.PoolPosition, coord.sheetName, coord.cell, coord.sheetName, dCell)
-				}
-			} else if coord.numberCell != "" {
+			if coord.numberCell != "" {
 				formula = playerRef(player.Name, coord)
 			} else {
 				formula = fmt.Sprintf("\"%d. \" & %s!%s", player.PoolPosition, coord.sheetName, coord.cell)

@@ -22,24 +22,20 @@ describe('buildXlsxBody engi roster lines', () => {
     courts: ['A'],
   };
 
+  // Pairs carry both member names combined in the name field.
   const pairs = [
-    pair('Aoi', 'Haru', 'DojoA'),
-    pair('Bo', 'Cho', 'DojoB'),
-    pair('Dai', 'Ebi', 'DojoC'),
+    player('Aoi - Haru', 'DojoA'),
+    player('Bo - Cho', 'DojoB'),
+    player('Dai - Ebi', 'DojoC'),
   ];
 
-  it('produces 3-column roster lines for engi competitions', () => {
+  it('produces standard 2-column roster lines for engi competitions', () => {
     const body = buildXlsxBody(engiCfg, 'Test', pairs);
     const lines = body.get('playerList').split('\n');
     expect(lines).toHaveLength(3);
-    // Each line must have exactly 3 comma-separated columns.
-    for (const line of lines) {
-      const cols = line.split(', ');
-      expect(cols).toHaveLength(3);
-    }
-    // First pair: member1, member2, dojo.
-    expect(lines[0]).toBe('Aoi, Haru, DojoA');
-    expect(lines[1]).toBe('Bo, Cho, DojoB');
+    // Combined pair name + dojo: same layout as any non-zekken competition.
+    expect(lines[0]).toBe('Aoi - Haru, DojoA');
+    expect(lines[1]).toBe('Bo - Cho, DojoB');
   });
 
   it('sends engi=on in the POST body', () => {
@@ -47,9 +43,9 @@ describe('buildXlsxBody engi roster lines', () => {
     expect(body.get('engi')).toBe('on');
   });
 
-  it('sends withZekkenName=on in the POST body when engi=true', () => {
+  it('does NOT force withZekkenName for engi', () => {
     const body = buildXlsxBody(engiCfg, 'Test', pairs);
-    expect(body.get('withZekkenName')).toBe('on');
+    expect(body.get('withZekkenName')).toBeNull();
   });
 
   it('does NOT send naginata when cfg.naginata is absent', () => {

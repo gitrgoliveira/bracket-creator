@@ -2062,8 +2062,8 @@ func makeEngiPools() []helper.Pool {
 	pool := helper.Pool{
 		PoolName: "Pool A",
 		Players: []helper.Player{
-			{ID: "pair1", Name: "Member One A", DisplayName: "Member Two A", Dojo: "DojoA"},
-			{ID: "pair2", Name: "Member One B", DisplayName: "Member Two B", Dojo: "DojoB"},
+			{ID: "pair1", Name: "Member One A - Member Two A", Dojo: "DojoA"},
+			{ID: "pair2", Name: "Member One B - Member Two B", Dojo: "DojoB"},
 		},
 	}
 	pool.Matches = []helper.Match{{SideA: &pool.Players[0], SideB: &pool.Players[1]}}
@@ -2071,10 +2071,9 @@ func makeEngiPools() []helper.Pool {
 }
 
 // TestBuildResultsWorkbook_EngiPairedNameInDataSheet verifies that for an engi
-// competition (Engi=true, WithZekkenName=false) the second member name
-// (player.DisplayName) is written to column D of the Data sheet.
-// Previously broken because builder.go passed comp.WithZekkenName (false)
-// instead of comp.EffectiveWithZekkenName() (true for engi).
+// competition (Engi=true, WithZekkenName=false) the combined pair name
+// ("Name 1 - Name 2") is written to the Data sheet name column; engi does not
+// alter the CSV/data-sheet layout.
 func TestBuildResultsWorkbook_EngiPairedNameInDataSheet(t *testing.T) {
 	t.Parallel()
 	dir, store, eng, compID := testSetup(t)
@@ -2097,13 +2096,13 @@ func TestBuildResultsWorkbook_EngiPairedNameInDataSheet(t *testing.T) {
 	require.NoError(t, err)
 	defer f.Close()
 
-	// Column D of the Data sheet must contain at least one of the member2 names.
+	// The Name column (B, index 1) must carry the combined pair name; engi does
+	// not populate the zekken column (WithZekkenName stays false).
 	rows, err := f.GetRows(helper.SheetData)
 	require.NoError(t, err)
 
-	// col D is index 3 (0-based).
-	assert.True(t, columnContains(rows, 3, "Member Two A"),
-		"Data sheet col D must contain 'Member Two A' for an engi competition (EffectiveWithZekkenName=true)")
+	assert.True(t, columnContains(rows, 1, "Member One A - Member Two A"),
+		"Data sheet col B must contain the combined pair name for an engi competition")
 }
 
 // TestBuildResultsWorkbook_NonEngiWithZekkenStillWorks verifies additivity:
@@ -2896,8 +2895,8 @@ func TestBuildResultsWorkbook_EngiUnicodeAndCommaNames(t *testing.T) {
 	unicodePool := helper.Pool{
 		PoolName: "Pool A",
 		Players: []helper.Player{
-			{ID: "uni1", Name: "結城 由紀", DisplayName: "田中 花子", Dojo: "東京道場"},
-			{ID: "com1", Name: "O'Brien, Sean", DisplayName: "Smith, Jane", Dojo: "New York, NY"},
+			{ID: "uni1", Name: "結城 由紀 - 田中 花子", Dojo: "東京道場"},
+			{ID: "com1", Name: "O'Brien, Sean - Smith, Jane", Dojo: "New York, NY"},
 		},
 	}
 	unicodePool.Matches = []helper.Match{{SideA: &unicodePool.Players[0], SideB: &unicodePool.Players[1]}}
@@ -2919,8 +2918,8 @@ func TestBuildResultsWorkbook_EngiUnicodeAndCommaNames(t *testing.T) {
 	dataRows, err := f.GetRows(helper.SheetData)
 	require.NoError(t, err)
 
-	// All four member names must appear as exact cell values in the Data sheet.
-	names := []string{uniPair.Name, uniPair.DisplayName, comPair.Name, comPair.DisplayName}
+	// Both combined pair names must appear as exact cell values in the Data sheet.
+	names := []string{uniPair.Name, comPair.Name}
 	for _, name := range names {
 		assert.True(t, containsCell(dataRows, name),
 			"Data sheet must contain member name %q exactly (unicode/comma safe)", name)
@@ -2955,10 +2954,10 @@ func startNaginataWith4Players(t *testing.T, store *state.Store, eng *engine.Eng
 	var players []domain.Player
 	if engi {
 		players = []domain.Player{
-			{Name: "Pair1A", DisplayName: "Pair1B", Dojo: "DojoA"},
-			{Name: "Pair2A", DisplayName: "Pair2B", Dojo: "DojoB"},
-			{Name: "Pair3A", DisplayName: "Pair3B", Dojo: "DojoC"},
-			{Name: "Pair4A", DisplayName: "Pair4B", Dojo: "DojoD"},
+			{Name: "Pair1A - Pair1B", Dojo: "DojoA"},
+			{Name: "Pair2A - Pair2B", Dojo: "DojoB"},
+			{Name: "Pair3A - Pair3B", Dojo: "DojoC"},
+			{Name: "Pair4A - Pair4B", Dojo: "DojoD"},
 		}
 	} else {
 		players = []domain.Player{

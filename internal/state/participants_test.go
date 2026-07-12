@@ -286,34 +286,51 @@ func TestParticipantsDistinctDisplayNameRoundTrip(t *testing.T) {
 	assert.Equal(t, "Dojo C", loaded[0].Dojo)
 }
 
-// Regression (Copilot PR #326 round 2): the participant WRITE core must force
-// the Engi 4-column zekken layout too, not just the read core. An Engi comp
-// keeps WithZekkenName=false (the effective flag is WithZekkenName||Engi), and
-// handlers call AddParticipant with the RAW comp.WithZekkenName. Before the fix
-// that write mismatched the forced-zekken read, corrupting the pair's member 2
-// (DisplayName) on add. saveParticipantsNoLock now forces the engi layout on
-// write, symmetric with loadParticipantsNoLock.
-func TestEngiAddParticipantPreservesMemberTwo(t *testing.T) {
+// An engi pair is stored as ONE participant whose Name field holds both member
+// names combined ("Name 1 - Name 2"). Engi does NOT alter the CSV layout: the
+// zekken/DisplayName column keeps its normal semantics ("ZEKKEN1 - ZEKKEN2"
+// when the competition uses zekken names, absent otherwise), so engi rosters
+// parse byte-identically to any other competition of the same zekken setting.
+func TestEngiPairStoredAsCombinedName(t *testing.T) {
 	dir := t.TempDir()
 	store, err := NewStore(dir)
 	require.NoError(t, err)
-	compID := "engi-add-rt"
-	// Engi=true but WithZekkenName=false: the stored flag is NOT forced true.
-	require.NoError(t, store.SaveCompetition(&Competition{
-		ID: compID, Name: "Engi Add", Engi: true, WithZekkenName: false,
-	}))
 
-	// Handlers pass the raw comp.WithZekkenName (false); member 2 = DisplayName.
-	pair := domain.Player{Name: "Emi Sasaki", DisplayName: "Ren Fujita", Dojo: "Getsurin Dojo"}
-	_, err = store.AddParticipant(compID, pair, false)
-	require.NoError(t, err)
+	t.Run("without zekken", func(t *testing.T) {
+		compID := "engi-plain"
+		require.NoError(t, store.SaveCompetition(&Competition{
+			ID: compID, Name: "Engi Plain", Engi: true, WithZekkenName: false,
+		}))
+		pair := domain.Player{Name: "Emi Sasaki - Ren Fujita", Dojo: "Getsurin Dojo"}
+		_, err = store.AddParticipant(compID, pair, false)
+		require.NoError(t, err)
 
-	// Member 2 (DisplayName) and the shared dojo must round-trip intact.
-	loaded, err := store.LoadParticipants(compID, false)
-	require.NoError(t, err)
-	require.Len(t, loaded, 1)
-	assert.Equal(t, "Ren Fujita", loaded[0].DisplayName, "engi member-2 must round-trip after AddParticipant")
-	assert.Equal(t, "Getsurin Dojo", loaded[0].Dojo, "engi dojo must round-trip")
+		loaded, err := store.LoadParticipants(compID, false)
+		require.NoError(t, err)
+		require.Len(t, loaded, 1)
+		assert.Equal(t, "Emi Sasaki - Ren Fujita", loaded[0].Name, "combined pair name must round-trip")
+		// DisplayName is the standard auto-derived print name every non-zekken
+		// participant gets (SanitizeName), NOT a stored member-2 name.
+		assert.Equal(t, helper.SanitizeName("Emi Sasaki - Ren Fujita"), loaded[0].DisplayName,
+			"engi must get the standard derived print name, not a forced zekken column")
+		assert.Equal(t, "Getsurin Dojo", loaded[0].Dojo)
+	})
+
+	t.Run("with zekken", func(t *testing.T) {
+		compID := "engi-zekken"
+		require.NoError(t, store.SaveCompetition(&Competition{
+			ID: compID, Name: "Engi Zekken", Engi: true, WithZekkenName: true,
+		}))
+		pair := domain.Player{Name: "Emi Sasaki - Ren Fujita", DisplayName: "SASAKI - FUJITA", Dojo: "Getsurin Dojo"}
+		_, err = store.AddParticipant(compID, pair, true)
+		require.NoError(t, err)
+
+		loaded, err := store.LoadParticipants(compID, true)
+		require.NoError(t, err)
+		require.Len(t, loaded, 1)
+		assert.Equal(t, "Emi Sasaki - Ren Fujita", loaded[0].Name)
+		assert.Equal(t, "SASAKI - FUJITA", loaded[0].DisplayName, "combined pair zekken must round-trip")
+	})
 }
 
 func TestMetadataRoundTrip(t *testing.T) {

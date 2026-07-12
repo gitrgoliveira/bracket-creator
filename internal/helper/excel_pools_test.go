@@ -45,7 +45,7 @@ func TestAddPoolsToSheetCellContent(t *testing.T) {
 		playerCoordKey(players[1]): {cellCoord: cellCoord{sheetName: SheetData, cell: "$B$3"}},
 	}
 
-	require.NoError(t, AddPoolsToSheet(f, pools, poolCoords, playerCoords, false))
+	require.NoError(t, AddPoolsToSheet(f, pools, poolCoords, playerCoords))
 
 	t.Run("title formula at B2", func(t *testing.T) {
 		got, err := f.GetCellFormula(SheetPoolDraw, "B2")

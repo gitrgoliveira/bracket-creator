@@ -521,7 +521,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
                   <td>
                     <div className="pool__player-name">
                       {s.player?.number ? <span className="num-prefix">{s.player.number}</span> : null}
-                      {s.player?.name || ""}
+                      {isEngi ? window.engiPairParts(s.player?.name)[0] : (s.player?.name || "")}
                       {/* DH badge for any daihyosen winner, matching PoolsViewer.
                           The backend already gates daihyosen bouts to ties that
                           affect advancement (tieAffectsAdvancement), so the badge
@@ -533,7 +533,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
                           it. The rank badge only carries information when rows are
                           in draw order (non-league pools), where rank ≠ position. */}
                     </div>
-                    {isEngi && s.player?.displayName ? <div className="pool__player-name">{s.player.displayName}</div> : null}
+                    {isEngi && window.engiPairParts(s.player?.name)[1] ? <div className="pool__player-name">{window.engiPairParts(s.player?.name)[1]}</div> : null}
                     {tweaks?.showDojo ? <div className="pool__dojo-name">{s.player?.dojo || ""}</div> : null}
                   </td>
                   {isEngi ? (

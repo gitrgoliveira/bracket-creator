@@ -90,31 +90,11 @@ func playerRef(name string, coord playerCellCoord) string {
 	return sheetRef(coord.sheetName, coord.cell)
 }
 
-// engiPlayerRef builds an Excel formula that joins both engi pair member names
-// in one cell separated by " - " (in-cell newlines render poorly in Excel
-// formula results, so the pair stays on one line). coord.cell must be in
-// $B$N format; the D-column counterpart is derived by replacing "$B$" with "$D$".
-// Engi competitions always use the withZekkenName column layout, so member 1 is
-// in column B and member 2 is in column D of the data sheet.
-func engiPlayerRef(coord playerCellCoord) string {
-	dCell := strings.Replace(coord.cell, "$B$", "$D$", 1)
-	member1 := sheetRef(coord.sheetName, coord.cell)
-	member2 := sheetRef(coord.sheetName, dCell)
-	stacked := member1 + "&\" - \"&" + member2
-	if coord.numberCell != "" {
-		return fmt.Sprintf("%s!%s&\" \"&%s", coord.sheetName, coord.numberCell, stacked)
-	}
-	return stacked
-}
-
 func sheetRef(sheet, cell string) string {
 	return fmt.Sprintf("'%s'!%s", sheet, cell)
 }
 
-func buildNameFormula(playerName string, sanitized bool, engi bool, coord playerCellCoord) string {
-	if engi {
-		return engiPlayerRef(coord)
-	}
+func buildNameFormula(playerName string, sanitized bool, coord playerCellCoord) string {
 	if sanitized {
 		_, rowNum, err := excelize.SplitCellName(coord.cell)
 		if err != nil {
@@ -275,13 +255,7 @@ func printSinglePool(f *excelize.File, sheetName string, pool Pool, startCol int
 				poolRow++
 			}
 
-			nameRef := func(p Player) string {
-				if engi {
-					return engiPlayerRef(pCoords[playerCoordKey(p)])
-				}
-				return playerRef(p.Name, pCoords[playerCoordKey(p)])
-			}
-			leftSide, rightSide := getMatchSides(nameRef(*match.SideA), nameRef(*match.SideB), mirror)
+			leftSide, rightSide := getMatchSides(playerRef(match.SideA.Name, pCoords[playerCoordKey(*match.SideA)]), playerRef(match.SideB.Name, pCoords[playerCoordKey(*match.SideB)]), mirror)
 
 			poolEntryWithStyle(startColName, poolRow, endColName, f, sheetName,
 				leftSide,
@@ -415,12 +389,10 @@ type poolResultsCtx struct {
 
 // printTeamResultsTableSection writes the "Team Results" W/L/T table header and
 // per-player win/loss/tie formulas starting at headerRow.
-// playerNameFormulaFor returns the name-cell formula for a results-table row:
-// the dash-joined pair reference for engi, else the plain player reference.
+// playerNameFormulaFor returns the name-cell formula for a results-table row.
+// Engi pair names need no special handling: both member names live combined in
+// Player.Name ("Name 1 - Name 2"), so the plain reference shows the full pair.
 func (ctx poolResultsCtx) playerNameFormulaFor(player Player) string {
-	if ctx.engi {
-		return engiPlayerRef(ctx.pCoords[playerCoordKey(player)])
-	}
 	left, _ := getMatchSides(playerRef(player.Name, ctx.pCoords[playerCoordKey(player)]), "", false)
 	return left
 }
@@ -1482,7 +1454,7 @@ func courtSheetName(courtIdx int) string {
 	return fmt.Sprintf("%s %s", SheetNamesToPrint, CourtLabel(courtIdx))
 }
 
-func CreateNamesToPrint(f *excelize.File, players []Player, sanitized bool, numCourts int, pCoords map[string]playerCellCoord, engi bool) {
+func CreateNamesToPrint(f *excelize.File, players []Player, sanitized bool, numCourts int, pCoords map[string]playerCellCoord) {
 	numCourts = clampCourts(numCourts)
 
 	base := len(players) / numCourts
@@ -1510,7 +1482,7 @@ func CreateNamesToPrint(f *excelize.File, players []Player, sanitized bool, numC
 		if _, err := f.NewSheet(sheetName); err != nil {
 			handleExcelError("NewSheet", err)
 		}
-		printNameEntries(f, sheetName, entries, sanitized, pCoords, engi)
+		printNameEntries(f, sheetName, entries, sanitized, pCoords)
 	}
 
 	if err := f.DeleteSheet(SheetNamesToPrint); err != nil {
@@ -1518,7 +1490,7 @@ func CreateNamesToPrint(f *excelize.File, players []Player, sanitized bool, numC
 	}
 }
 
-func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanitized bool, numCourts int, pCoords map[string]playerCellCoord, engi bool) {
+func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanitized bool, numCourts int, pCoords map[string]playerCellCoord) {
 	numCourts = clampCourts(numCourts)
 	courtAssignments, _ := AssignPoolsToCourts(len(pools), numCourts)
 
@@ -1542,7 +1514,7 @@ func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanitized bool, 
 		if _, err := f.NewSheet(sheetName); err != nil {
 			handleExcelError("NewSheet", err)
 		}
-		printNameEntries(f, sheetName, entriesByCourt[c], sanitized, pCoords, engi)
+		printNameEntries(f, sheetName, entriesByCourt[c], sanitized, pCoords)
 	}
 
 	if err := f.DeleteSheet(SheetNamesToPrint); err != nil {
@@ -1550,7 +1522,7 @@ func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanitized bool, 
 	}
 }
 
-func printNameEntries(f *excelize.File, sheetName string, entries []nameEntry, sanitized bool, pCoords map[string]playerCellCoord, engi bool) {
+func printNameEntries(f *excelize.File, sheetName string, entries []nameEntry, sanitized bool, pCoords map[string]playerCellCoord) {
 	setupNamesToPrintLayout(f, sheetName)
 	nameIDPositionStyle := getNameIDPositionStyle(f)
 	nameIDStyle := getNameIDStyle(f)
@@ -1569,7 +1541,7 @@ func printNameEntries(f *excelize.File, sheetName string, entries []nameEntry, s
 		}
 		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, positionCell, positionCell, nameIDPositionStyle))
 
-		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, nameCell, buildNameFormula(entry.player.Name, sanitized, engi, coord)))
+		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, nameCell, buildNameFormula(entry.player.Name, sanitized, coord)))
 		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, nameCell, nameCell, nameIDStyle))
 
 		if row%3 == 0 {

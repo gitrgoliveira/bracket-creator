@@ -299,6 +299,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
           <div className="bracket-canvas__inner">
             <window.BracketTree
               rounds={bracket.rounds}
+              isEngi={!!c.engi}
               variant={tweaks.cardVariant}
               showDojo={tweaks.showDojo}
               onMatchClick={(m, ri, mi) => { if (hasBothSides(m)) select(m, ri, mi); }}
@@ -322,6 +323,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
                   </div>
                   <window.MatchCard
                     match={bm}
+                    isEngi={!!c.engi}
                     variant={tweaks.cardVariant}
                     showDojo={tweaks.showDojo}
                     highlighted={isHighlighted}

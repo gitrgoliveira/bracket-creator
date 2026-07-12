@@ -318,6 +318,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
                 <div className="bracket-canvas__inner" style={{ padding: 18 }}>
                   <window.BracketTree
                     rounds={derivedBracket.rounds}
+                    isEngi={!!(competition && competition.engi)}
                     variant={tweaks.cardVariant}
                     showDojo={tweaks.showDojo}
                     highlightedMatchId={currentMatch?.id}
@@ -346,6 +347,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
                         </div>
                         <window.MatchCard
                           match={bm}
+                          isEngi={!!(competition && competition.engi)}
                           variant={tweaks.cardVariant ?? 1}
                           showDojo={tweaks.showDojo ?? true}
                           highlighted={currentMatch?.id === bm.id}

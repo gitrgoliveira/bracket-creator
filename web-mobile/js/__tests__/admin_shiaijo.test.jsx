@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
 import { parsePath, pathFromState } from '../app.jsx';
-import { sortShiaijoMatches, partitionShiaijoMatches, shiaijoScoreCell, isTeamMatch, groupQueueMatches, shiaijoStandingsKind, makeReconnectRefetcher, pendingFeederSlots, propagateBracketWinnerLocal, applyBronzeLoserLocal } from '../admin_shiaijo.jsx';
+import { sortShiaijoMatches, partitionShiaijoMatches, shiaijoScoreCell, isTeamMatch, groupQueueMatches, shiaijoStandingsKind, swissRoundLabel, makeReconnectRefetcher, pendingFeederSlots, propagateBracketWinnerLocal, applyBronzeLoserLocal } from '../admin_shiaijo.jsx';
 
 // A team encounter's score must never be shown as a bare number; it always
 // carries an IV (Individual Victories) label, since a raw figure could read as
@@ -56,9 +56,16 @@ describe('shiaijoScoreCell; team and engi numbers are never context-free', () =>
 // court-side standings must render through the rank-ordered viewer, exactly
 // like the public viewer and admin Pools tab, never the draw-order pool
 // viewer. This pins the routing decision so it cannot silently regress.
-describe('shiaijoStandingsKind; standings viewer routing follows format (mp-ahu6)', () => {
+describe('shiaijoStandingsKind; standings viewer routing follows format (mp-ahu6/mp-pglr)', () => {
   it('routes a league match to the rank-ordered viewer', () => {
     expect(shiaijoStandingsKind({ compFormat: 'league' })).toBe('league');
+  });
+
+  it('routes a swiss match to the swiss standings viewer (mp-pglr)', () => {
+    // Swiss matches piggyback on the pool pipeline with a synthetic pool
+    // name but never write pools.csv; the pool path would spin on
+    // "Loading standings…" forever.
+    expect(shiaijoStandingsKind({ compFormat: 'swiss' })).toBe('swiss');
   });
 
   it('routes mixed and playoffs matches to the draw-order viewer', () => {
@@ -69,6 +76,27 @@ describe('shiaijoStandingsKind; standings viewer routing follows format (mp-ahu6
   it('defaults to the draw-order viewer for a missing/unknown format', () => {
     expect(shiaijoStandingsKind({})).toBe('pool');
     expect(shiaijoStandingsKind(null)).toBe('pool');
+  });
+});
+
+describe('swissRoundLabel; synthetic engine pool name → operator-facing label', () => {
+  it('converts the canonical Swiss-RN shape to "Round N"', () => {
+    expect(swissRoundLabel('Swiss-R1')).toBe('Round 1');
+    expect(swissRoundLabel('Swiss-R12')).toBe('Round 12');
+  });
+
+  it('passes through non-canonical values unchanged', () => {
+    expect(swissRoundLabel('Pool A')).toBe('Pool A');
+    expect(swissRoundLabel('')).toBe('');
+    expect(swissRoundLabel(null)).toBe('');
+  });
+
+  it('groupQueueMatches labels a swiss round group "Round N", not the synthetic pool name', () => {
+    const groups = groupQueueMatches([
+      { phase: 'pool', poolName: 'Swiss-R2', compFormat: 'swiss' },
+      { phase: 'pool', poolName: 'Pool A', compFormat: 'mixed' },
+    ]);
+    expect(groups.map((g) => g.label)).toEqual(['Round 2', 'Pool A']);
   });
 });
 

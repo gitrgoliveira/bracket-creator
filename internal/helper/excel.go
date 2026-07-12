@@ -39,6 +39,7 @@
 package helper
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -570,7 +571,7 @@ func printIndividualResultsTableSection(ctx poolResultsCtx, headerRow int, teamM
 	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", startColName, headerRow), "Results"))
 	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", lVCol, headerRow), "W"))
 	if !ctx.engi {
-		// Engi does not record losses; leave the L column header blank.
+		// Non-engi: write the L header. Engi omits the L column entirely (losses are not recorded).
 		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", lPCol, headerRow), "L"))
 	}
 	if ctx.engi {
@@ -663,7 +664,7 @@ func printIndividualResultsTableSection(ctx poolResultsCtx, headerRow int, teamM
 		}
 		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", lVCol, row), joinFormulas(wFormulas)))
 		if !ctx.engi {
-			// Engi does not record losses; leave the L cell blank.
+			// Non-engi: write the L formula. Engi omits the L column entirely (losses are not recorded).
 			handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", lPCol, row), joinFormulas(lFormulas)))
 		}
 		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", middleColName, row), joinFormulas(middleColFormulas)))
@@ -982,10 +983,39 @@ func matchHeaderWithStyles(f *excelize.File, sheetName string, startColName stri
 	}
 }
 
+// SetEliminationPrintArea sets (or updates) the _xlnm.Print_Area defined name
+// for sheetName so that the printed range is $A$1:$<maxCol>$lastRow, where
+// maxCol is derived from numCourts using the same formula as
+// PrintTeamEliminationMatches. It is idempotent: if the defined name already
+// exists for the sheet it is deleted first, so it can be called after
+// PrintThirdPlaceBlock to extend the print area to include the bronze block.
+func SetEliminationPrintArea(f *excelize.File, sheetName string, numCourts, lastRow int) {
+	numCourts = clampCourts(numCourts)
+	lastCourtStartCol := 1 + (numCourts-1)*CourtsColumnsPerCourt
+	maxColNum := lastCourtStartCol + 7
+	maxColName := mustColumnName(maxColNum)
+
+	// DeleteDefinedName returns ErrDefinedNameScope when the name is not found;
+	// that is expected on the first call, so only surface other errors.
+	if err := f.DeleteDefinedName(&excelize.DefinedName{
+		Name:  "_xlnm.Print_Area",
+		Scope: sheetName,
+	}); err != nil && !errors.Is(err, excelize.ErrDefinedNameScope) {
+		handleExcelError("DeleteDefinedName", err)
+	}
+
+	printArea := fmt.Sprintf("'%s'!$A$1:$%s$%d", sheetName, maxColName, lastRow)
+	handleExcelError("SetDefinedName", f.SetDefinedName(&excelize.DefinedName{
+		Name:     "_xlnm.Print_Area",
+		RefersTo: printArea,
+		Scope:    sheetName,
+	}))
+}
+
 // PrintTeamEliminationMatches renders all elimination match blocks onto the
 // Elimination Matches sheet and returns the next available start row (the row
 // immediately after the last rendered block plus any trailing space lines).
-// Callers that do not need the return value may ignore it.
+// Callers that do not need the return values may ignore them.
 func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]MatchWinner, eliminationMatchRounds [][]*Node, numTeamMatches int, numCourts int, mirror bool, engi bool) (int, map[string]MatchWinner) {
 	numCourts = clampCourts(numCourts)
 
@@ -1078,16 +1108,7 @@ func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]M
 		rowsSinceLastPageBreak += spaceLines
 	}
 
-	lastCourtStartCol := 1 + (numCourts-1)*CourtsColumnsPerCourt
-	maxColNum := lastCourtStartCol + 7
-	maxColName := mustColumnName(maxColNum)
-
-	printArea := fmt.Sprintf("'%s'!$A$1:$%s$%d", sheetName, maxColName, startRow-1)
-	handleExcelError("SetDefinedName", f.SetDefinedName(&excelize.DefinedName{
-		Name:     "_xlnm.Print_Area",
-		RefersTo: printArea,
-		Scope:    sheetName,
-	}))
+	SetEliminationPrintArea(f, sheetName, numCourts, startRow-1)
 
 	// Vertical page breaks before each court except the first
 	for c := 1; c < numCourts; c++ {

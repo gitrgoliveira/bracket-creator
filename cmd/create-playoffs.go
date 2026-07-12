@@ -255,7 +255,8 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 				semiB = int(lastRound[0].Right.MatchNum())
 			}
 		}
-		helper.PrintThirdPlaceBlock(f, 1, nextRow, o.teamMatches, true, false, semiA, semiB, elimMatchWinners)
+		bronzeEndRow := helper.PrintThirdPlaceBlock(f, 1, nextRow, o.teamMatches, true, false, semiA, semiB, elimMatchWinners)
+		helper.SetEliminationPrintArea(f, helper.SheetEliminationMatches, o.courts, bronzeEndRow-1)
 	}
 	helper.FillEstimations(f, 0, 0, int64(o.teamMatches), int64(len(names)-1), o.courts)
 

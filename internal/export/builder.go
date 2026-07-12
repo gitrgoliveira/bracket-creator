@@ -178,7 +178,8 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 					}
 				}
 			}
-			helper.PrintThirdPlaceBlock(f, 1, nextRow, comp.TeamSize, comp.Mirror, comp.Engi, semiA, semiB, elimMatchWinners)
+			bronzeEndRow := helper.PrintThirdPlaceBlock(f, 1, nextRow, comp.TeamSize, comp.Mirror, comp.Engi, semiA, semiB, elimMatchWinners)
+			helper.SetEliminationPrintArea(f, helper.SheetEliminationMatches, numCourts, bronzeEndRow-1)
 		}
 
 		// Overlay literal scores from the live bracket state.
@@ -994,7 +995,7 @@ func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMa
 
 			// For engi, the bracket stores flag counts in FlagsA/FlagsB;
 			// ScoreA/ScoreB hold ippon letters that do not apply. Render the
-			// flag count via FlagsScore instead. leftFlags/rightFlags are named
+			// flag count via FlagsScorePair instead. leftFlags/rightFlags are named
 			// by display position (post-mirror), matching overlayPoolScores.
 			var leftScore, rightScore string
 			if engi {

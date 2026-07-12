@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -13,6 +14,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/xuri/excelize/v2"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 )
 
 // postCreate drives createTournamentHandler exactly as cmd/mobile_app.go wires
@@ -288,7 +291,7 @@ func naginataPlayoffForm(playerList string) url.Values {
 }
 
 // TestCreateHandler_NaginataPlayoffs_ThirdPlaceBlock asserts that POST /create
-// with naginata=on and at least 4 players (so a semfinal round exists) produces
+// with naginata=on and at least 4 players (so a semifinal round exists) produces
 // a "3rd Place" block on the Elimination Matches sheet.
 func TestCreateHandler_NaginataPlayoffs_ThirdPlaceBlock(t *testing.T) {
 	const roster = "Alice, DA\nBob, DB\nCharlie, DC\nDave, DD"
@@ -375,4 +378,59 @@ func TestCreateHandler_NaginataPlayoffs_ThirdPlaceBlock_EntrantFormulas(t *testi
 	assert.Contains(t, combined, "CONCATENATE", "bronze entrant cells must carry CONCATENATE formulas referencing semifinal losers")
 	assert.Contains(t, combined, "M 1", "bronze entrant formulas must reference semifinal M 1")
 	assert.Contains(t, combined, "M 2", "bronze entrant formulas must reference semifinal M 2")
+}
+
+// cmdParsePrintAreaLastRow extracts the last-row number from a Print_Area
+// RefersTo string such as "'Elimination Matches'!$A$1:$H$35". Returns -1 on
+// any parse error.
+func cmdParsePrintAreaLastRow(refersTo string) int {
+	lastDollar := strings.LastIndex(refersTo, "$")
+	if lastDollar < 0 {
+		return -1
+	}
+	row, err := strconv.Atoi(refersTo[lastDollar+1:])
+	if err != nil {
+		return -1
+	}
+	return row
+}
+
+// TestCreateHandler_NaginataPlayoffs_PrintAreaCoversThirdPlace verifies that the
+// POST /create response for a naginata playoffs bracket has a _xlnm.Print_Area
+// defined name on the Elimination Matches sheet that covers the "3rd Place" block.
+// This exercises the create-playoffs code path (tournamentType=playoffs, naginata=on).
+func TestCreateHandler_NaginataPlayoffs_PrintAreaCoversThirdPlace(t *testing.T) {
+	const roster = "Alice, DA\nBob, DB\nCharlie, DC\nDave, DD"
+	f := postCreate(t, naginataPlayoffForm(roster))
+
+	rows, err := f.GetRows(helper.SheetEliminationMatches)
+	require.NoError(t, err)
+
+	thirdPlaceExcelRow := -1
+	for i, row := range rows {
+		for _, cell := range row {
+			if cell == "3rd Place" {
+				thirdPlaceExcelRow = i + 1
+				break
+			}
+		}
+		if thirdPlaceExcelRow >= 0 {
+			break
+		}
+	}
+	require.GreaterOrEqual(t, thirdPlaceExcelRow, 1,
+		"'3rd Place' header must be present in Elimination Matches")
+
+	var printAreaLastRow int
+	for _, dn := range f.GetDefinedName() {
+		if dn.Name == "_xlnm.Print_Area" && dn.Scope == helper.SheetEliminationMatches {
+			printAreaLastRow = cmdParsePrintAreaLastRow(dn.RefersTo)
+			break
+		}
+	}
+	require.Greater(t, printAreaLastRow, 0,
+		"_xlnm.Print_Area for Elimination Matches must exist and be parseable")
+	assert.GreaterOrEqual(t, printAreaLastRow, thirdPlaceExcelRow,
+		"Print_Area last row (%d) must cover at least the '3rd Place' header row (%d)",
+		printAreaLastRow, thirdPlaceExcelRow)
 }

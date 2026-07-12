@@ -323,7 +323,8 @@ func (o *poolOptions) createPools(entries []string) error {
 				semiB = int(lastRound[0].Right.MatchNum())
 			}
 		}
-		helper.PrintThirdPlaceBlock(f, 1, nextRow, o.teamMatches, true, o.engi, semiA, semiB, elimMatchWinners)
+		bronzeEndRow := helper.PrintThirdPlaceBlock(f, 1, nextRow, o.teamMatches, true, o.engi, semiA, semiB, elimMatchWinners)
+		helper.SetEliminationPrintArea(f, helper.SheetEliminationMatches, o.courts, bronzeEndRow-1)
 	}
 	helper.FillEstimations(f, int64(len(pools)), int64(totalPoolMatches), int64(o.teamMatches), int64(len(finals)-1), o.courts)
 

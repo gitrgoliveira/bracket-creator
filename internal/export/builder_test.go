@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -3423,6 +3425,80 @@ func TestBuildResultsWorkbook_MixedTreePageHasPoolRosters(t *testing.T) {
 	assert.Contains(t, titleFormula, "Shiaijo A", "'Tree 1' title must be the shiaijo label")
 	assert.NotContains(t, titleFormula, comp.Name,
 		"'Tree 1' title formula must not embed the competition name (data!$B$1 already prepends it)")
+}
+
+// parsePrintAreaLastRow extracts the last-row number from a Print_Area RefersTo
+// string such as "'Elimination Matches'!$A$1:$H$35". Returns -1 on any parse error.
+func parsePrintAreaLastRow(refersTo string) int {
+	lastDollar := strings.LastIndex(refersTo, "$")
+	if lastDollar < 0 {
+		return -1
+	}
+	row, err := strconv.Atoi(refersTo[lastDollar+1:])
+	if err != nil {
+		return -1
+	}
+	return row
+}
+
+// findEliminationPrintAreaLastRow reads the workbook's defined names and returns
+// the last-row number of the _xlnm.Print_Area name scoped to SheetEliminationMatches.
+// Returns -1 if not found or unparseable.
+func findEliminationPrintAreaLastRow(f *excelize.File) int {
+	for _, dn := range f.GetDefinedName() {
+		if dn.Name == "_xlnm.Print_Area" && dn.Scope == helper.SheetEliminationMatches {
+			return parsePrintAreaLastRow(dn.RefersTo)
+		}
+	}
+	return -1
+}
+
+// TestBuildResultsWorkbook_NaginataThirdPlacePrintAreaCoversBlock verifies that
+// after BuildResultsWorkbook renders a naginata 4-player bracket (with a bronze
+// block), the _xlnm.Print_Area defined name for the Elimination Matches sheet
+// includes at least the row where the "3rd Place" header appears. Before the fix
+// the print area was set before the bronze block, leaving the bronze block outside
+// the print area and invisible when printing or PDF-exporting.
+func TestBuildResultsWorkbook_NaginataThirdPlacePrintAreaCoversBlock(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	setNaginataPlayoffs(t, store, compID, false)
+	startNaginataWith4Players(t, store, eng, compID, false)
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer f.Close()
+
+	rows, err := f.GetRows(helper.SheetEliminationMatches)
+	require.NoError(t, err)
+
+	// Locate the "3rd Place" header row (1-based Excel row).
+	thirdPlaceExcelRow := -1
+	for i, row := range rows {
+		for _, cell := range row {
+			if cell == "3rd Place" {
+				thirdPlaceExcelRow = i + 1
+				break
+			}
+		}
+		if thirdPlaceExcelRow >= 0 {
+			break
+		}
+	}
+	require.GreaterOrEqual(t, thirdPlaceExcelRow, 1,
+		"'3rd Place' header row must be present in Elimination Matches")
+
+	printAreaLastRow := findEliminationPrintAreaLastRow(f)
+	require.Greater(t, printAreaLastRow, 0,
+		"_xlnm.Print_Area for Elimination Matches must exist and be parseable")
+	assert.GreaterOrEqual(t, printAreaLastRow, thirdPlaceExcelRow,
+		"Print_Area last row (%d) must cover at least the '3rd Place' header row (%d); bronze block falls outside the print area",
+		printAreaLastRow, thirdPlaceExcelRow)
 }
 
 // TestBuildResultsWorkbook_PlayoffsTreePageNoPoolRosters verifies that for a

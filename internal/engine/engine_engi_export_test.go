@@ -21,6 +21,7 @@ package engine
 
 import (
 	"bytes"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -95,6 +96,95 @@ func TestExportCompetitionXlsx_NaginataThirdPlaceSlot(t *testing.T) {
 	}
 	assert.True(t, found,
 		"blank-template export for a naginata competition must have a '3rd Place' slot on the Elimination Matches sheet")
+}
+
+// engineParsePrintAreaLastRow extracts the last-row number from a Print_Area
+// RefersTo string such as "'Elimination Matches'!$A$1:$H$35". Returns -1 on
+// any parse error.
+func engineParsePrintAreaLastRow(refersTo string) int {
+	lastDollar := strings.LastIndex(refersTo, "$")
+	if lastDollar < 0 {
+		return -1
+	}
+	row, err := strconv.Atoi(refersTo[lastDollar+1:])
+	if err != nil {
+		return -1
+	}
+	return row
+}
+
+// TestExportCompetitionXlsx_NaginataThirdPlacePrintAreaAndLayout verifies that
+// the blank-template export path (Engine.ExportCompetitionXlsx) sets the
+// _xlnm.Print_Area defined name for the Elimination Matches sheet to cover the
+// "3rd Place" block AND applies a sheet page layout for that sheet.
+// Before Fix C, the blank-template path called PrintThirdPlaceBlock without
+// then calling SetEliminationPrintArea or SetSheetLayoutPortraitA4DownThenOver,
+// so the sheet had no print area and no page layout.
+func TestExportCompetitionXlsx_NaginataThirdPlacePrintAreaAndLayout(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "naginata-print-area"
+
+	comp := &state.Competition{
+		ID:           compID,
+		Name:         "Naginata Print Area Test",
+		Kind:         "individual",
+		Format:       state.CompFormatPlayoffs,
+		PoolSize:     3,
+		PoolSizeMode: "min",
+		PoolWinners:  2,
+		Courts:       []string{"A"},
+		StartTime:    "09:00",
+		Status:       "setup",
+		Naginata:     true,
+	}
+	require.NoError(t, store.SaveCompetition(comp))
+
+	players := []domain.Player{
+		{Name: "Alice", Dojo: "DojoA"},
+		{Name: "Bob", Dojo: "DojoB"},
+		{Name: "Charlie", Dojo: "DojoC"},
+		{Name: "Dave", Dojo: "DojoD"},
+	}
+	require.NoError(t, store.SaveParticipants(compID, players))
+	require.NoError(t, eng.StartCompetition(compID))
+
+	data, err := eng.ExportCompetitionXlsx(compID)
+	require.NoError(t, err)
+	require.NotEmpty(t, data)
+
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+
+	// Find the "3rd Place" row (1-based Excel row).
+	rows, err := f.GetRows(helper.SheetEliminationMatches)
+	require.NoError(t, err)
+	thirdPlaceExcelRow := -1
+	for i, row := range rows {
+		for _, cell := range row {
+			if cell == "3rd Place" {
+				thirdPlaceExcelRow = i + 1
+				break
+			}
+		}
+		if thirdPlaceExcelRow >= 0 {
+			break
+		}
+	}
+	require.GreaterOrEqual(t, thirdPlaceExcelRow, 1,
+		"blank-template naginata export must have a '3rd Place' row")
+
+	// Check the Print_Area defined name covers the bronze block.
+	printAreaLastRow := -1
+	for _, dn := range f.GetDefinedName() {
+		if dn.Name == "_xlnm.Print_Area" && dn.Scope == helper.SheetEliminationMatches {
+			printAreaLastRow = engineParsePrintAreaLastRow(dn.RefersTo)
+			break
+		}
+	}
+	assert.GreaterOrEqual(t, printAreaLastRow, thirdPlaceExcelRow,
+		"_xlnm.Print_Area last row (%d) must cover the '3rd Place' row (%d) on the blank-template export path",
+		printAreaLastRow, thirdPlaceExcelRow)
 }
 
 func TestExportCompetitionXlsx_Engi(t *testing.T) {

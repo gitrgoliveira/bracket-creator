@@ -19,7 +19,21 @@ func PoolBoundsForSubtree(numPools, numCourts, numSubtrees, subtreeIdx int) (sta
 		pagesPerCourt = 1
 	}
 	courtIdx := SubtreeCourtIndex(numSubtrees, numCourts, subtreeIdx)
-	pageWithinCourt := subtreeIdx % pagesPerCourt
+
+	// Compute the first page index assigned to this court and derive the
+	// page's position within that court's block. When numSubtrees is not
+	// divisible by numCourts, SubtreeCourtIndex clamps the overflow pages onto
+	// the last court, giving that court more pages than pagesPerCourt. Using
+	// subtreeIdx % pagesPerCourt would map all overflow pages to position 0,
+	// causing them to render the same pool slice. Instead we compute the
+	// position relative to the actual first page of this court's block.
+	firstPage := courtIdx * pagesPerCourt
+	pageWithinCourt := subtreeIdx - firstPage
+	// The last court absorbs all remaining pages beyond the even distribution.
+	pagesInCourt := pagesPerCourt
+	if courtIdx == numCourts-1 {
+		pagesInCourt = numSubtrees - firstPage
+	}
 
 	// Derive court block boundaries from the same assignment used by Pool Matches.
 	assignments, _ := AssignPoolsToCourts(numPools, numCourts)
@@ -37,7 +51,7 @@ func PoolBoundsForSubtree(numPools, numCourts, numSubtrees, subtreeIdx int) (sta
 	}
 
 	courtSize := courtEnd - courtStart
-	poolsPerPage := (courtSize + pagesPerCourt - 1) / pagesPerCourt
+	poolsPerPage := (courtSize + pagesInCourt - 1) / pagesInCourt
 	start = courtStart + pageWithinCourt*poolsPerPage
 	end = min(start+poolsPerPage, courtEnd)
 	return

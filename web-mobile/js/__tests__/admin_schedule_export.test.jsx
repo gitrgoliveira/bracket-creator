@@ -123,6 +123,38 @@ describe('buildXlsxBody non-engi roster lines', () => {
   });
 });
 
+// ── Fix D: cfg.courts guard (Array.isArray) ──────────────────────────────────
+
+describe('buildXlsxBody courts guard', () => {
+  const baseCfg = {
+    format: 'playoffs',
+  };
+
+  const four = [
+    { name: 'Alice', dojo: 'DA' },
+    { name: 'Bob', dojo: 'DB' },
+    { name: 'Charlie', dojo: 'DC' },
+    { name: 'Dave', dojo: 'DD' },
+  ];
+
+  it('uses courts=1 when cfg.courts is undefined', () => {
+    const body = buildXlsxBody({ ...baseCfg }, 'Test', four);
+    expect(() => buildXlsxBody({ ...baseCfg }, 'Test', four)).not.toThrow();
+    expect(body.get('courts')).toBe('1');
+  });
+
+  it('uses courts=1 when cfg.courts is a string (not an array)', () => {
+    const body = buildXlsxBody({ ...baseCfg, courts: 'A' }, 'Test', four);
+    expect(() => buildXlsxBody({ ...baseCfg, courts: 'A' }, 'Test', four)).not.toThrow();
+    expect(body.get('courts')).toBe('1');
+  });
+
+  it('uses the array length when cfg.courts is a valid array', () => {
+    const body = buildXlsxBody({ ...baseCfg, courts: ['A', 'B'] }, 'Test', four);
+    expect(body.get('courts')).toBe('2');
+  });
+});
+
 // ── effectiveZekken: withZekkenName alone also triggers 3-column ─────────────
 
 describe('buildXlsxBody effectiveZekken from withZekkenName', () => {

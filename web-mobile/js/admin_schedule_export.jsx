@@ -3,7 +3,7 @@
 const { useState: useStateA } = React;
 
 // RFC-4180-quote a CSV field that contains a comma, double-quote, or newline.
-// Used by buildXlsxBody and the rosterLine helper in AdminExport.
+// Used by buildXlsxBody (including its rosterLine roster helper).
 const csvField = (s) =>
   /[",\n]/.test(s) ? '"' + String(s).replace(/"/g, '""') + '"' : s;
 
@@ -39,10 +39,11 @@ export function buildXlsxBody(cfg, cName, players) {
     .filter((p) => p.seed && p.seed > 0)
     .map((p) => ({ name: p.name, seedRank: p.seed }));
 
+  const courtsCount = Array.isArray(cfg.courts) ? cfg.courts.length : 0;
   const body = new URLSearchParams({
     tournamentType: isPlayoffs ? "playoffs" : "pools",
     playerList,
-    courts: String((cfg.courts && cfg.courts.length) || 1),
+    courts: String(courtsCount || 1),
     winnersPerPool: String(winnersPerPool),
     playersPerPool: String(playersPerPool),
     poolSizeMode: cfg.poolSizeMode || "min",

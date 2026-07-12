@@ -66,15 +66,15 @@ Three programs ship in the single binary. The three ways to run a tournament dec
 
 <div class="grid cards" markdown>
 
--   **CLI**
+-   **Tournament app**
 
     ---
 
-    Generate print-ready Excel brackets from the command line.
+    Run pools and scores on the day, in real time on any device.
 
-    `create-pools` (pools + knockout) · `create-playoffs` (straight knockout)
+    `mobile-app`
 
-    [Command reference](user-guide/commands/create-pools.md)
+    [Tournament app guide](user-guide/organisers/run-tournament.md)
 
 -   **Bracket generator web UI**
 
@@ -86,15 +86,15 @@ Three programs ship in the single binary. The three ways to run a tournament dec
 
     [Web UI guide](user-guide/organisers/web-ui.md)
 
--   **Tournament app**
+-   **CLI**
 
     ---
 
-    Run pools and scores on the day, in real time on any device.
+    Generate print-ready Excel brackets from the command line.
 
-    `mobile-app`
+    `create-pools` (pools + knockout) · `create-playoffs` (straight knockout)
 
-    [Tournament app guide](user-guide/organisers/run-tournament.md)
+    [Command reference](user-guide/commands/create-pools.md)
 
 </div>
 

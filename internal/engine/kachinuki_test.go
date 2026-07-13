@@ -118,9 +118,10 @@ func TestKachinukiExhaustionEndsMatch(t *testing.T) {
 
 // TestKachinukiHikiwakeExhaustsLast covers the edge case where a
 // hikiwake retires the last player on each side simultaneously. The
-// engine returns a no-op (MatchEnded=false) so the match stays running;
-// the operator must resolve via daihyosen rather than the engine
-// arbitrarily assigning a winner. GAP 2b.
+// engine returns BothExhausted=true (MatchEnded=false) so the caller
+// can decide by phase: a pool encounter is finalized as a draw, a
+// bracket encounter stays running until the operator adds a daihyosen.
+// GAP 2b.
 func TestKachinukiHikiwakeExhaustsLast(t *testing.T) {
 	bout := state.SubMatchResult{
 		Position: 5,
@@ -134,16 +135,18 @@ func TestKachinukiHikiwakeExhaustsLast(t *testing.T) {
 		SideB:    []string{},
 	})
 
-	assert.False(t, res.MatchEnded, "simultaneous exhaustion must not end the match")
-	assert.Equal(t, "", res.WinningSide, "no default winner; operator resolves via daihyosen")
+	assert.True(t, res.BothExhausted, "simultaneous exhaustion must set BothExhausted")
+	assert.False(t, res.MatchEnded, "MatchEnded must remain false; caller decides by phase")
+	assert.Equal(t, "", res.WinningSide, "no winner when both sides exhaust simultaneously")
 	assert.Nil(t, res.Next, "no next bout")
 }
 
 // TestAdvanceKachinuki_SimultaneousExhaustionNoOp verifies that when both
 // teams run out of players simultaneously after a hikiwake, the pure
-// AdvanceKachinuki function returns a no-op result (MatchEnded=false,
-// WinningSide="", Next=nil) so the match stays running until the operator
-// resolves it manually (e.g. via daihyosen). GAP 2b.
+// AdvanceKachinuki function returns BothExhausted=true with MatchEnded=false
+// and Next=nil. The caller (MaybeAdvanceKachinuki) decides the outcome by
+// phase: pool/league finalizes as a draw, bracket stays running for daihyosen.
+// GAP 2b.
 func TestAdvanceKachinuki_SimultaneousExhaustionNoOp(t *testing.T) {
 	bout := state.SubMatchResult{
 		Position: 5,
@@ -157,9 +160,10 @@ func TestAdvanceKachinuki_SimultaneousExhaustionNoOp(t *testing.T) {
 		SideB:    []string{},
 	})
 
-	assert.False(t, res.MatchEnded, "simultaneous exhaustion must not end the match; operator resolves via daihyosen")
+	assert.True(t, res.BothExhausted, "simultaneous exhaustion must set BothExhausted=true")
+	assert.False(t, res.MatchEnded, "MatchEnded must be false; caller decides by phase")
 	assert.Equal(t, "", res.WinningSide, "no default winner when both sides exhaust simultaneously")
-	assert.Nil(t, res.Next, "no next bout scheduled; match is stalled pending operator decision")
+	assert.Nil(t, res.Next, "no next bout scheduled")
 }
 
 // TestRetiredPlayersFromBoutLog verifies the helper that callers use
@@ -925,9 +929,10 @@ func TestMaybeAdvanceKachinuki_NoOutcome(t *testing.T) {
 }
 
 // TestMaybeAdvanceKachinuki_HikiwakeBothExhausted verifies that when both
-// sides are exhausted after a hikiwake (empty remaining rosters),
-// MaybeAdvanceKachinuki returns (false, nil): the match stays running so the
-// operator can resolve via daihyosen. GAP 2b.
+// sides of a POOL match are exhausted simultaneously after a hikiwake,
+// MaybeAdvanceKachinuki finalizes the encounter as a draw (Status=Completed,
+// Decision="hikiwake", Winner=""). Daihyosen is knockout-only; pool encounters
+// are legitimately drawn. GAP 2b.
 func TestMaybeAdvanceKachinuki_HikiwakeBothExhausted(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "kachinuki-hikiwake-exhausted"
@@ -957,13 +962,22 @@ func TestMaybeAdvanceKachinuki_HikiwakeBothExhausted(t *testing.T) {
 
 	changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
 	require.NoError(t, err)
-	assert.False(t, changed, "both exhausted simultaneously is a no-op; match stays running for operator to resolve via daihyosen")
+	assert.True(t, changed, "pool simultaneous exhaustion must finalize the encounter as a draw")
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	assert.Equal(t, state.MatchStatusCompleted, matches[0].Status, "pool match must be completed as a draw")
+	assert.Equal(t, state.DecisionDraw, matches[0].Decision, "decision must be hikiwake (draw)")
+	assert.Empty(t, matches[0].Winner, "no winner on a drawn encounter")
 }
 
 // TestMaybeAdvanceKachinuki_SimultaneousExhaustionStaysRunning verifies that
-// when both teams are exhausted simultaneously after a hikiwake,
-// MaybeAdvanceKachinuki returns (false, nil): the match stays running so the
-// operator can resolve via daihyosen. GAP 2b.
+// when both teams of a POOL match are exhausted simultaneously after a hikiwake,
+// MaybeAdvanceKachinuki finalizes the pool encounter as a draw (changed=true,
+// Status=Completed, Decision="hikiwake", Winner=""). The name is preserved for
+// historical context; see also TestMaybeAdvanceKachinuki_BracketSimultaneousExhaustionStaysRunning
+// for the bracket path that does leave the match running. GAP 2b.
 func TestMaybeAdvanceKachinuki_SimultaneousExhaustionStaysRunning(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "kachinuki-simultaneous-exhaustion"
@@ -993,7 +1007,14 @@ func TestMaybeAdvanceKachinuki_SimultaneousExhaustionStaysRunning(t *testing.T) 
 
 	changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
 	require.NoError(t, err)
-	assert.False(t, changed, "simultaneous exhaustion is a no-op; match must stay running for operator to resolve")
+	assert.True(t, changed, "pool simultaneous exhaustion must finalize the encounter as a draw")
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	assert.Equal(t, state.MatchStatusCompleted, matches[0].Status, "pool draw must be completed")
+	assert.Equal(t, state.DecisionDraw, matches[0].Decision, "decision must be hikiwake")
+	assert.Empty(t, matches[0].Winner, "no winner on a drawn pool encounter")
 }
 
 // TestMaybeAdvanceKachinuki_MatchEndedPoolUpdate verifies that when one side
@@ -1600,4 +1621,111 @@ func TestCheckKachinukiPrematureCompletion_EmptyDaihyosenRejected(t *testing.T) 
 		assert.NoError(t, err,
 			"a winner-carrying daihyosen sub-result must still allow the completion")
 	})
+}
+
+// TestMaybeAdvanceKachinuki_PoolSimultaneousExhaustionDraw is the primary
+// regression test for the pool/league draw finalization fix. A hikiwake that
+// retires the last player on both sides in a POOL match must produce a
+// completed, winner-less encounter (Status=Completed, Decision="hikiwake",
+// Winner=""). Daihyosen is knockout-only; pool encounters are legitimately
+// drawn. GAP 2b.
+func TestMaybeAdvanceKachinuki_PoolSimultaneousExhaustionDraw(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "kachinuki-pool-draw-finalize"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:            compID,
+		TeamMatchType: state.TeamMatchTypeKachinuki,
+		TeamSize:      3,
+		Format:        state.CompFormatMixed,
+	}))
+	// Lineups: 3-person rosters. Bouts 1 and 2 produce hikiwake,
+	// both sides retire their last player in bout 3 simultaneously.
+	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
+		TeamID: "RedTeam", Round: 0,
+		Positions: map[domain.Position]string{
+			domain.PositionNumbered(1): "R-1",
+			domain.PositionNumbered(2): "R-2",
+			domain.PositionNumbered(3): "R-3",
+		},
+	}, 3))
+	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
+		TeamID: "WhiteTeam", Round: 0,
+		Positions: map[domain.Position]string{
+			domain.PositionNumbered(1): "W-1",
+			domain.PositionNumbered(2): "W-2",
+			domain.PositionNumbered(3): "W-3",
+		},
+	}, 3))
+	// Bout 3 is the last for both teams (R-3 vs W-3) and ends in hikiwake.
+	// After bout 3: remainingA=[], remainingB=[] → BothExhausted → pool draw.
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{
+			ID:    "P1-0",
+			SideA: "RedTeam",
+			SideB: "WhiteTeam",
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "R-1", SideB: "W-1", Decision: state.DecisionDraw},
+				{Position: 2, SideA: "R-2", SideB: "W-2", Decision: state.DecisionDraw},
+				{Position: 3, SideA: "R-3", SideB: "W-3", Decision: state.DecisionDraw},
+			},
+		},
+	}))
+
+	changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
+	require.NoError(t, err)
+	assert.True(t, changed, "pool simultaneous exhaustion must finalize the encounter as a draw")
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	assert.Equal(t, state.MatchStatusCompleted, matches[0].Status, "pool match must be completed")
+	assert.Equal(t, state.DecisionDraw, matches[0].Decision, "decision must be hikiwake (draw)")
+	assert.Empty(t, matches[0].Winner, "no winner on a drawn pool encounter")
+}
+
+// TestMaybeAdvanceKachinuki_BracketSimultaneousExhaustionStaysRunning verifies
+// that a BRACKET kachinuki match where a hikiwake retires both teams' last
+// players simultaneously is left RUNNING (changed=false). Daihyosen is the
+// operator-driven resolution path for bracket ties; the engine must not
+// finalize the bracket match automatically. GAP 2b.
+func TestMaybeAdvanceKachinuki_BracketSimultaneousExhaustionStaysRunning(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "kachinuki-bracket-simultaneous-exhaustion"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:            compID,
+		TeamMatchType: state.TeamMatchTypeKachinuki,
+		TeamSize:      3,
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{}))
+
+	// Single-round bracket final: bout 3 ends in hikiwake exhausting both sides.
+	// remainingA=[], remainingB=[] → BothExhausted → bracket stays running.
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				{
+					ID:    "B-Final",
+					SideA: "RedTeam",
+					SideB: "WhiteTeam",
+					SubResults: []state.SubMatchResult{
+						{Position: 1, SideA: "R-1", SideB: "W-1", Decision: state.DecisionDraw},
+						{Position: 2, SideA: "R-2", SideB: "W-2", Decision: state.DecisionDraw},
+						{Position: 3, SideA: "R-3", SideB: "W-3", Decision: state.DecisionDraw},
+					},
+				},
+			},
+		},
+	}))
+
+	changed, err := eng.MaybeAdvanceKachinuki(compID, "B-Final")
+	require.NoError(t, err)
+	assert.False(t, changed, "bracket simultaneous exhaustion must leave the match running; operator resolves via daihyosen")
+
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.Len(t, bracket.Rounds[0], 1)
+	assert.NotEqual(t, state.MatchStatusCompleted, bracket.Rounds[0][0].Status, "bracket match must not be completed")
+	assert.Empty(t, bracket.Rounds[0][0].Winner, "no winner assigned by the engine for bracket simultaneous exhaustion")
 }

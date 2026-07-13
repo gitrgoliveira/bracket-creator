@@ -33,9 +33,9 @@ import { useDebouncedRunningWrite, SyncStatusPill } from './admin_scoring_autosa
 
 // mp-bkg / mp-13y: resolveMatchLineup and resolveLineupTeamId are now shared
 // across all consumer surfaces (admin scoring modal, viewer, TvDisplay,
-// StreamingOverlay). The implementations live in lineup_resolver.js;
-// re-exported here so existing imports from admin_scoring_modal.jsx continue
-// to work (scoring_modal_match_lineup.test.jsx imports directly from here).
+// StreamingOverlay). The implementations live in lineup_resolver.jsx;
+// re-exported here so existing imports from admin_scoring_modal.jsx (which
+// re-exports them onward) continue to work.
 import { resolveMatchLineup, resolveLineupTeamId, resolveBoutSideName } from './lineup_resolver.jsx';
 
 // Position keys are generated inline in TeamScoreEditorModal (numbered "1".."N")
@@ -861,9 +861,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
           )}
 
           {/* Individual match rows. T136: in kachinuki mode only the
-              CURRENT bout is rendered (positions.slice(kachinukiIdx,
-              kachinukiIdx+1)): the last row that has any data, or row 0
-              if nothing has been scored yet. The server appends new bouts
+              current bout is rendered (see visiblePositions /
+              kachinukiVisiblePositions above). The server appends new bouts
               via engine.MaybeAdvanceKachinuki after each score record, so
               the operator re-opens the modal to score the next bout.
               The .team-bouts-scroll wrapper gives the roomy (non-compact)

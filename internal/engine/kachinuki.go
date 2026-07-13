@@ -283,13 +283,10 @@ func appendNextKachinukiBout(bm *state.BracketMatch, next state.SubMatchResult) 
 //     team competition.
 //  2. Load the just-recorded MatchResult; bail if its last SubResults
 //     entry has no final outcome (still in progress).
-//  3. Build the remaining-roster snapshot per side. The Slice-7.C
-//     first-cut leaves the FULL roster lookup to the lineup slice,
-//     for now we treat the (currently-unset) Player.Side rosters as
-//     unavailable and only act on the per-player winner path that
-//     keeps the previous bout's stayer on for the next position. The
-//     exhaustion-end and hikiwake-after-empty-queue cases need real
-//     roster data and short-circuit with a no-op + log line.
+//  3. Build the remaining-roster snapshot per side from the saved
+//     TeamLineup (GAP 1/2a), falling back to the unique player names
+//     seen in the bout log when no lineup is saved. The exhaustion-end
+//     and hikiwake-after-empty-queue cases run off this roster data.
 //  4. Pass to AdvanceKachinuki. When it returns Next, append the bout
 //     to SubResults and persist (status stays Running). When it returns
 //     MatchEnded, finalize the parent match (Status=Completed,
@@ -300,9 +297,6 @@ func appendNextKachinukiBout(bm *state.BracketMatch, next state.SubMatchResult) 
 // emit an additional match-updated SSE event with the freshly-derived
 // bout list.
 //
-// TODO(slice-7.B/D): once team-lineup persistence (state/team_lineup.go)
-// + scheduling lands, replace the roster shortcut with a real lookup
-// so the exhaustion-end branch works without operator intervention.
 // FR-044, T135, T137.
 func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, error) {
 	comp, err := e.store.LoadCompetition(compID)
@@ -313,10 +307,10 @@ func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, error) {
 		return false, nil
 	}
 
-	// Locate the parent match. Kachinuki is currently only meaningful
-	// for pool matches (round-robin team matches), but check the
-	// bracket too so a future playoffs integration doesn't silently
-	// skip, the lookup is cheap.
+	// Locate the parent match in either the pool or bracket store:
+	// advancement runs in both (bracket bouts append via
+	// appendNextKachinukiBout, with propagateBracketWinner on
+	// exhaustion).
 	parent, isBracket, roundIdx, err := e.findTeamMatch(compID, matchID)
 	if err != nil {
 		return false, err

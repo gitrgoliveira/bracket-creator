@@ -114,7 +114,7 @@ nav:
           - Self-run tournaments: user-guide/competitors/self-run.md
       - For spectators:
           - Follow the tournament: user-guide/spectators/following.md
-      - Commands:
+      - Command line:
           - create-pools: user-guide/commands/create-pools.md
           - create-playoffs: user-guide/commands/create-playoffs.md
           - mobile-app: user-guide/commands/mobile-app.md

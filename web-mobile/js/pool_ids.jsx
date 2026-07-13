@@ -60,13 +60,24 @@ export function isPoolDaihyosenBout(id) {
 // comp, or a team comp whose teamMatchType was omitted or is a legacy empty
 // value. Callers must treat "" as "not kachinuki" (fixed-order is the
 // default behaviour), never as specifically "individual". Supplementary rep
-// bouts (-DH-/-TB-) are fought as individual ippon-shobu even in a team comp,
-// so isRepBout forces "". Reads both the flat viewer competition shape
+// bouts (-DH-/-TB-) are fought as individual ippon-shobu even in a team comp;
+// callers suppress the format for those at the stamping site
+// (`isRepBout ? "" : teamMatchTypeFor(c)`). Reads both the flat viewer competition shape
 // (c.teamMatchType) and the admin detail shape where the value nests under
 // c.config. Lives here so every consumer (viewer, admin, display, overlay)
 // shares one definition without adding import edges: this file is the leaf
 // module they all already import.
-export function teamMatchTypeFor(comp, isRepBout) {
-    if (isRepBout || !comp) return "";
+export function teamMatchTypeFor(comp) {
+    if (!comp) return "";
     return comp.teamMatchType || (comp.config && comp.config.teamMatchType) || "";
+}
+
+// teamMatchTypeHint: the one-line explanatory hint rendered under the "Team
+// match format" selector on the create (admin_setup) and settings
+// (admin_competition_settings) forms. Shared so the two admin surfaces cannot
+// drift. isKachinuki picks the winner-stays copy; otherwise the fixed-order copy.
+export function teamMatchTypeHint(isKachinuki) {
+    return isKachinuki
+        ? "The winner of each bout stays on to face the next opponent. Bouts are scored one at a time."
+        : "All bouts are scheduled up-front by position. Senpo fights Senpo, Jiho fights Jiho, and so on.";
 }

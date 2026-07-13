@@ -1,9 +1,10 @@
 // teamMatchTypeFor (pool_ids.jsx): resolves the competition-level team match
 // format from either the flat viewer shape (c.teamMatchType) or the admin
-// detail shape (c.config.teamMatchType). Supplementary rep bouts force "".
+// detail shape (c.config.teamMatchType). Callers suppress the format for
+// supplementary rep bouts at the stamping site.
 
 import { describe, it, expect } from 'vitest';
-import { teamMatchTypeFor } from '../pool_ids.jsx';
+import { teamMatchTypeFor, teamMatchTypeHint } from '../pool_ids.jsx';
 
 describe('teamMatchTypeFor', () => {
   it('reads the flat viewer shape', () => {
@@ -18,10 +19,6 @@ describe('teamMatchTypeFor', () => {
     expect(teamMatchTypeFor({ teamMatchType: "fixed", config: { teamMatchType: "kachinuki" } })).toBe("fixed");
   });
 
-  it('rep bout flag forces "" even when the comp has a type', () => {
-    expect(teamMatchTypeFor({ teamMatchType: "kachinuki" }, true)).toBe("");
-  });
-
   it('returns "" for null comp', () => {
     expect(teamMatchTypeFor(null)).toBe("");
   });
@@ -32,5 +29,14 @@ describe('teamMatchTypeFor', () => {
 
   it('returns "" for an individual comp with no teamMatchType field', () => {
     expect(teamMatchTypeFor({ id: "comp-1", kind: "individual" })).toBe("");
+  });
+});
+
+describe('teamMatchTypeHint', () => {
+  it('returns the winner-stays copy for kachinuki', () => {
+    expect(teamMatchTypeHint(true)).toMatch(/winner of each bout stays/);
+  });
+  it('returns the fixed-order copy otherwise', () => {
+    expect(teamMatchTypeHint(false)).toMatch(/scheduled up-front by position/);
   });
 });

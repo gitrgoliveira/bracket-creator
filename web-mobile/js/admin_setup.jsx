@@ -108,6 +108,7 @@ function validateSwissSettings(format, swissRounds) {
 // (mp-sspn). Importing keeps the defaults in one place.
 import { normalizeTheme } from './admin_branding.jsx';
 import { timeToMinutes } from './admin_schedule_utils.jsx';
+import { teamMatchTypeHint } from './pool_ids.jsx';
 
 function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerMode, authConfig, password, showToast }) {
   // In locked mode the on-disk Password is irrelevant: auth comes
@@ -1077,9 +1078,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
                 <button className={`radio-pill ${teamMatchType === "kachinuki" ? "is-active" : ""}`} type="button" onClick={() => setTeamMatchType("kachinuki")}>Kachinuki (winner-stays)</button>
               </div>
               <div className="field__hint">
-                {teamMatchType === "kachinuki"
-                  ? "The winner of each bout stays on to face the next opponent. Bouts are scored one at a time."
-                  : "All bouts are scheduled up-front by position. Senpo fights Senpo, Jiho fights Jiho, and so on."}
+                {teamMatchTypeHint(teamMatchType === "kachinuki")}
               </div>
             </div>
           )}

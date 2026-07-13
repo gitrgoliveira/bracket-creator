@@ -3,6 +3,8 @@
 // formatCompMinutes is ES-exported and re-exported by the admin_competition.jsx
 // entry for the vitest suite.
 
+import { teamMatchTypeHint } from './pool_ids.jsx';
+
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
 // Default on-clock minutes per match when a duration field is left blank.
@@ -571,9 +573,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             >Kachinuki (winner-stays)</button>
           </div>
           <div className="field__hint">
-            {local.teamMatchType === "kachinuki"
-              ? "The winner of each bout stays on to face the next opponent. Bouts are scored one at a time."
-              : "All bouts are scheduled up-front by position. Senpo fights Senpo, Jiho fights Jiho, and so on."}{(isDrawReady || isStarted) ? " Locked after draw." : ""}
+            {teamMatchTypeHint(local.teamMatchType === "kachinuki")}{(isDrawReady || isStarted) ? " Locked after draw." : ""}
           </div>
         </div>
       )}

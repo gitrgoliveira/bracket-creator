@@ -726,6 +726,9 @@ function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color }
   const [open, setOpen] = useStateA(false);
   const [active, setActive] = useStateA(-1); // -1 = no explicit selection yet
   const ref = useRefA(null);
+  // Guards against double-commit when click-outside fires first and the blur
+  // event arrives immediately after (mousedown precedes blur in browser order).
+  const skipBlurRef = useRefA(false);
   const q = query.trim();
   const ql = q.toLowerCase();
   const matches = (roster || []).filter(n => !ql || n.toLowerCase().includes(ql)).slice(0, 12);
@@ -733,7 +736,19 @@ function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color }
   const canAddNew = q.length > 0 && !exact;
   const optionCount = matches.length + (canAddNew ? 1 : 0);
 
-  window.useClickOutside(ref, () => { setOpen(false); setQuery(""); }, open);
+  // On click-outside: commit a typed but un-submitted name rather than
+  // discarding it. Without this, tabbing quickly between slots loses names.
+  // Note: option onMouseDown uses preventDefault so the outside mousedown only
+  // fires when clicking a genuinely external target (q is already "" after commit).
+  window.useClickOutside(ref, () => {
+    if (q) {
+      skipBlurRef.current = true;
+      commit(q);
+    } else {
+      setOpen(false);
+      setQuery("");
+    }
+  }, open);
 
   const commit = (name) => { onSelect(name); setOpen(false); setQuery(""); setActive(-1); };
   const onKeyDown = (e) => {
@@ -770,6 +785,19 @@ function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color }
           onChange={(e) => { setQuery(e.target.value); setOpen(true); setActive(-1); }}
           onFocus={() => { setOpen(true); setQuery(""); setActive(-1); }}
           onKeyDown={onKeyDown}
+          onBlur={(e) => {
+            // Do not close if focus moved to something inside the wrapper
+            // (e.g. a dropdown option button).
+            if (ref.current && ref.current.contains(e.relatedTarget)) return;
+            // Skip if the click-outside path already committed (it fires on
+            // mousedown, before blur; it sets skipBlurRef to prevent a double
+            // onSelect call).
+            if (skipBlurRef.current) { skipBlurRef.current = false; return; }
+            // Tab-away with a typed name: commit it so the operator does not
+            // lose a batch-entry value.
+            if (q) commit(q);
+            else if (open) { setOpen(false); setQuery(""); }
+          }}
         />
         {value && !disabled && (
           <button type="button" className="lineup-name__clear" title="Clear player" aria-label="Clear player"

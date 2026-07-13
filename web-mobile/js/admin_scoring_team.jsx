@@ -1103,9 +1103,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                                 ? `Click to undo fusensho: restores the previous score`
                                 : `Mark bout as fusensho: default win 2-0 to ${rs.label}`}
                             >
-                              {s.fusensho === rs.key
-                                ? <>✓ <TermAS name="fusensho">Fusensho</TermAS></>
-                                : <TermAS name="fusensho">Fusensho</TermAS>}
+                              {s.fusensho === rs.key ? "✓ Fusensho" : "Fusensho"}
                             </button>
                           </div>
                         </div>
@@ -1157,7 +1155,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                                 onClick={() => setDrawFor(idx)}
                                 title={s.draw ? "Undo tie" : "Mark this bout a draw (hikiwake)"}
                               >
-                                {s.draw ? <>✓ Tie (<TermAS name="hikiwake">hikiwake</TermAS>)</> : <>Tie (<TermAS name="hikiwake">hikiwake</TermAS>)</>}
+                                {s.draw ? "✓ Tie (hikiwake)" : "Tie (hikiwake)"}
                               </button>
                             </div>
                           )}

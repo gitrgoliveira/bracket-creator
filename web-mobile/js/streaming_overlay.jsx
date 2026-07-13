@@ -138,14 +138,29 @@ function StreamingOverlay({ court, position, competitions }) {
     // competitor stored on the sub (kachinuki), else the FIK POSITION label
     // (Senpo/Jiho/...), else "Daihyosen" when the rep bout is pending; never
     // the team name (that flanks the QR above).
+    //
+    // Kachinuki (winner-stays): flip to server-bout-first. Lineup is only a
+    // bootstrap fallback for the very first bout (index 0); later bouts must
+    // use the server-recorded names or the plain bout number.
+    const isKachinukiOvl = (comp?.teamMatchType || comp?.config?.teamMatchType) === "kachinuki";
     const subSideName = (v) => (v && v.name) || (typeof v === "string" ? v : "");
     const boutPosLabel = currentSub ? overlayPositionLabel(teamSizeOvl, currentBoutIdx, currentSub) : (dhPending ? 'Daihyosen' : '');
-    const boutShiroName = isTeamMatch && currentSub
-        ? (pickFromLineup(ovlLineupB, currentBoutIdx, teamSizeOvl) || subSideName(currentSub.sideB) || boutPosLabel)
-        : (dhPending ? boutPosLabel : '');
-    const boutAkaName = isTeamMatch && currentSub
-        ? (pickFromLineup(ovlLineupA, currentBoutIdx, teamSizeOvl) || subSideName(currentSub.sideA) || boutPosLabel)
-        : (dhPending ? boutPosLabel : '');
+    let boutShiroName, boutAkaName;
+    if (isTeamMatch && currentSub) {
+        if (isKachinukiOvl) {
+            const lineupFallbackB = currentBoutIdx === 0 ? pickFromLineup(ovlLineupB, 0, teamSizeOvl) : "";
+            const lineupFallbackA = currentBoutIdx === 0 ? pickFromLineup(ovlLineupA, 0, teamSizeOvl) : "";
+            const boutNum = String(currentBoutIdx + 1);
+            boutShiroName = subSideName(currentSub.sideB) || lineupFallbackB || boutNum;
+            boutAkaName   = subSideName(currentSub.sideA) || lineupFallbackA || boutNum;
+        } else {
+            boutShiroName = pickFromLineup(ovlLineupB, currentBoutIdx, teamSizeOvl) || subSideName(currentSub.sideB) || boutPosLabel;
+            boutAkaName   = pickFromLineup(ovlLineupA, currentBoutIdx, teamSizeOvl) || subSideName(currentSub.sideA) || boutPosLabel;
+        }
+    } else {
+        boutShiroName = dhPending ? boutPosLabel : '';
+        boutAkaName   = dhPending ? boutPosLabel : '';
+    }
 
     // Bout score for the current sub: ippon letters, "-" (not "0") for an
     // empty side so a kendo score never reads "M – 0".

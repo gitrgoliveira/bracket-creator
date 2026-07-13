@@ -132,7 +132,8 @@ function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, is
                         isRunning={promoted.match?.status === "running"}
                         shiroName={shiroTeam} akaName={akaTeam}
                         matchSideA={promoted.match.sideA?.name || (typeof promoted.match.sideA === "string" ? promoted.match.sideA : "")}
-                        matchSideB={promoted.match.sideB?.name || (typeof promoted.match.sideB === "string" ? promoted.match.sideB : "")} />
+                        matchSideB={promoted.match.sideB?.name || (typeof promoted.match.sideB === "string" ? promoted.match.sideB : "")}
+                        kachinuki={(promoted.competition?.teamMatchType || promoted.competition?.config?.teamMatchType) === "kachinuki"} />
                 </div>
             ) : (
                 <div style={{ flex: 1, display: "flex", alignItems: "flex-start", justifyContent: "center", paddingTop: "2vh" }}>

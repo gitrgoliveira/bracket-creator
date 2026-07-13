@@ -225,7 +225,12 @@ function centreMarks(sub, matchSideA, matchSideB) {
 // pinned lineup, else the per-bout competitor stored on the sub (kachinuki
 // matches carry sub.sideA/sub.sideB), else the bout number: never the team
 // name (it would repeat on every row).
-export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state, matchSideA, matchSideB }) {
+//
+// kachinuki (boolean): when true, flip resolution to server-bout-first.
+// Lineup fallback is used ONLY for the index-0 bootstrap (the initial
+// senpo-vs-senpo pairing); later rows must never show position-N lineup
+// names because kachinuki bouts are winner-stays, not position-keyed.
+export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state, matchSideA, matchSideB, kachinuki }) {
   const subSideName = (v) => {
     const n = (v && v.name) || (typeof v === "string" ? v : "");
     if (!n) return "";
@@ -236,8 +241,19 @@ export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state
     return n;
   };
   const boutNum = isDH ? "DH" : "#" + (sub && sub.position > 0 ? sub.position : index + 1);
-  const shiroName = (lineupB ? pickFromLineup(lineupB, index, teamSize) : "") || subSideName(sub && sub.sideB) || boutNum;
-  const akaName = (lineupA ? pickFromLineup(lineupA, index, teamSize) : "") || subSideName(sub && sub.sideA) || boutNum;
+  let shiroName, akaName;
+  if (kachinuki) {
+    // Kachinuki (winner-stays): server-bout side is authoritative; lineup is
+    // only a bootstrap for the very first bout (senpo-vs-senpo). All later
+    // rows must use the server-recorded names or the bout number.
+    const lineupFallbackB = index === 0 ? (lineupB ? pickFromLineup(lineupB, 0, teamSize) : "") : "";
+    const lineupFallbackA = index === 0 ? (lineupA ? pickFromLineup(lineupA, 0, teamSize) : "") : "";
+    shiroName = subSideName(sub && sub.sideB) || lineupFallbackB || boutNum;
+    akaName   = subSideName(sub && sub.sideA) || lineupFallbackA || boutNum;
+  } else {
+    shiroName = (lineupB ? pickFromLineup(lineupB, index, teamSize) : "") || subSideName(sub && sub.sideB) || boutNum;
+    akaName = (lineupA ? pickFromLineup(lineupA, index, teamSize) : "") || subSideName(sub && sub.sideA) || boutNum;
+  }
   // TV sizing comes from the parent `.msb--tv .msb-row` selector, so no
   // per-row --tv modifier is needed here.
   const cls = "msb-row"
@@ -335,7 +351,10 @@ export function IndividualScore({ match, variant, showNames, withZekkenName }) {
 // TeamScoreboard: §277 team table: an IV/PW summary row (labeled, per side) +
 // one BoutSubRow per regular bout + the Daihyosen banner + rep-bout row when
 // `showDH`. Shiro left/dark, Aka right/red.
-export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH, variant, shiroName, akaName, matchSideA, matchSideB, isRunning }) {
+// kachinuki (boolean, default false): when true the match uses winner-stays
+// ordering. Row count is driven by recorded bouts (never padded to teamSize)
+// and name resolution is server-bout-first (see BoutSubRow).
+export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH, variant, shiroName, akaName, matchSideA, matchSideB, isRunning, kachinuki }) {
   const regular = (subResults || []).filter(s => s.position !== -1);
   const { ivShiro, ivAka, pwShiro, pwAka } = teamIVPW(subResults, matchSideA, matchSideB);
   // FIK: a Daihyosen (representative bout) only happens when the team match is
@@ -364,11 +383,12 @@ export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH,
       !!s.winner || (typeof s.decision === "string" && s.decision !== "") ||
       (typeof window.isHikiwake === "function" && (window.isHikiwake(s.score?.type) || window.isHikiwake(s.decision)));
   };
-  // Render one row PER LINEUP POSITION (teamSize), padding past the recorded
-  // subResults so a running encounter shows all bouts: completed, the live one,
-  // and the still-to-come positions: not just the scored ones. Kachinuki can
-  // exceed teamSize, so never shrink below regular.length.
-  const rowCount = Math.max(regular.length, teamSize || 0);
+  // Kachinuki: row count = recorded bouts only (no teamSize padding).
+  // Show at least 1 row so the bootstrap senpo-vs-senpo bout is always visible.
+  // Fixed-order: render one row per lineup position (teamSize), padding past
+  // recorded subResults so a running encounter shows all bouts: completed,
+  // the current one, and still-to-come positions.
+  const rowCount = kachinuki ? Math.max(regular.length, 1) : Math.max(regular.length, teamSize || 0);
   const scoredAt = (i) => i < regular.length && isScored(regular[i]);
   // Per-row state: a scored bout is "done"; the first unscored bout is "now"
   // ONLY when the match is RUNNING (so a 0–0 running board highlights bout 1);
@@ -410,7 +430,7 @@ export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH,
           lineup name when present, else the bout number (mp-13y #4/#6). */}
       {Array.from({ length: rowCount }, (_, i) => (
         <BoutSubRow key={i} sub={regular[i] || {}} index={i} lineupA={lineupA} lineupB={lineupB}
-          teamSize={teamSize} isDH={false} state={rowState(i)} matchSideA={matchSideA} matchSideB={matchSideB} />
+          teamSize={teamSize} isDH={false} state={rowState(i)} matchSideA={matchSideA} matchSideB={matchSideB} kachinuki={!!kachinuki} />
       ))}
 
       {/* Daihyosen banner + rep bout (knockout tie only). The DH sub is

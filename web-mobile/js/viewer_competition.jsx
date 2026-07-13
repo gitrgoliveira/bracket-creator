@@ -43,7 +43,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
                 // so isTeam checks route it to the individual editor (mirrors
                 // enrichPoolMatchWithComp in admin_pools.jsx).
                 const isRepBout = isSupplementaryBout(m.id || "");
-                out.push({ ...m, phase: "pool", phaseName: p.poolName, poolName: p.poolName, compFormat: c.format, compId: c.id, compName: c.name, compKind: isRepBout ? "" : c.kind, teamSize: isRepBout ? 0 : c.teamSize });
+                out.push({ ...m, phase: "pool", phaseName: p.poolName, poolName: p.poolName, compFormat: c.format, compId: c.id, compName: c.name, compKind: isRepBout ? "" : c.kind, teamSize: isRepBout ? 0 : c.teamSize, teamMatchType: isRepBout ? "" : (c.teamMatchType || "") });
             });
         });
     }
@@ -55,7 +55,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
     // renders `bracket`/`derivedBracket` directly and is NOT affected.
     if (bracket && bracket.rounds && !bracket.preview) {
         bracket.rounds.forEach((round, ri) => {
-            round.forEach((m) => out.push({ ...m, phase: "bracket", round: window.roundLabel(ri, bracket.rounds.length), phaseName: window.roundLabel(ri, bracket.rounds.length), roundIndex: ri, compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize }));
+            round.forEach((m) => out.push({ ...m, phase: "bracket", round: window.roundLabel(ri, bracket.rounds.length), phaseName: window.roundLabel(ri, bracket.rounds.length), roundIndex: ri, compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize, teamMatchType: c.teamMatchType || "" }));
         });
     }
     return out;
@@ -331,7 +331,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
                       // (legacy mode where ri equals the backend index). Prefer it
                       // over the display-column index so lineup fetches use the right
                       // round when phantom leading rounds shift the display column.
-                      setSelectedMatch({ ...m, phase: "bracket", round: label, phaseName: label, roundIndex: m.roundIndex ?? ri, compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize });
+                      setSelectedMatch({ ...m, phase: "bracket", round: label, phaseName: label, roundIndex: m.roundIndex ?? ri, compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize, teamMatchType: c.teamMatchType || "" });
                     }}
                   />
                   {derivedBracket.thirdPlaceMatch && (() => {
@@ -350,7 +350,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
                           showDojo={tweaks.showDojo ?? true}
                           highlighted={currentMatch?.id === bm.id}
                           highlightPlayers={highlightPlayers}
-                          onClick={() => setSelectedMatch({ ...bm, phase: "bracket", round: "3rd Place", phaseName: "3rd Place", roundIndex: derivedBracket.rounds.length, compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize })}
+                          onClick={() => setSelectedMatch({ ...bm, phase: "bracket", round: "3rd Place", phaseName: "3rd Place", roundIndex: derivedBracket.rounds.length, compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize, teamMatchType: c.teamMatchType || "" })}
                         />
                       </div>
                     );

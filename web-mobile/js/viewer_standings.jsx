@@ -321,7 +321,7 @@ export function LeagueStandingsViewer({ competition, poolMatches, tweaks, onMatc
               {(poolMatches || []).map((m, idx) => {
                 if (isTeam) {
                   const isRepBout = isSupplementaryBout(m.id || "");
-                  const enriched = { ...m, phase: "pool", poolName: m.poolName || "", phaseName: m.poolName || "", compFormat: competition.format, compId: competition.id, compName: competition.name, compKind: isRepBout ? "" : competition.kind, teamSize: isRepBout ? 0 : competition.teamSize };
+                  const enriched = { ...m, phase: "pool", poolName: m.poolName || "", phaseName: m.poolName || "", compFormat: competition.format, compId: competition.id, compName: competition.name, compKind: isRepBout ? "" : competition.kind, teamSize: isRepBout ? 0 : competition.teamSize, teamMatchType: isRepBout ? "" : (competition.teamMatchType || "") };
                   return (
                     <PoolNumberedMatchRow
                       key={m.id}
@@ -811,7 +811,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                       // bout even in a team comp, so force compKind/teamSize to route
                       // it to the individual editor (matches enrichPoolMatchWithComp).
                       const isRepBout = isSupplementaryBout(m.id || "");
-                      const enriched = { ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compFormat: competition.format, compId: competition.id, compName: competition.name, compKind: isRepBout ? "" : competition.kind, teamSize: isRepBout ? 0 : competition.teamSize };
+                      const enriched = { ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compFormat: competition.format, compId: competition.id, compName: competition.name, compKind: isRepBout ? "" : competition.kind, teamSize: isRepBout ? 0 : competition.teamSize, teamMatchType: isRepBout ? "" : (competition.teamMatchType || "") };
                       return (
                         <PoolNumberedMatchRow
                           key={m.id}

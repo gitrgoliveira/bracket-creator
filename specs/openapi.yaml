@@ -2096,11 +2096,25 @@ paths:
         required: true
         schema:
           type: integer
-        description: Tournament round number.
+        description: "Tournament round index, 0-based. The admin UI displays round 0 as Round 1."
     get:
       tags: [competitions]
       summary: Get team lineup for round
       security: []
+      parameters:
+        - in: query
+          name: fallback
+          required: false
+          schema:
+            type: string
+            enum: [best]
+          description: >
+            When fallback=best the server resolves the best available lineup when none
+            exists for the exact round (match-scoped first, then the highest round at or
+            below the requested one, then the team's latest lineup) and only 404s when
+            the team has no lineups at all. Without this parameter the endpoint keeps
+            exact-round semantics (404 when that round has no lineup). PUT and DELETE are
+            unaffected.
       responses:
         '200':
           description: Team lineup.
@@ -3359,6 +3373,15 @@ components:
             taken straight to a judges' decision. On a bracket-match score request,
             omitting the field preserves the stored value; sending an explicit
             true/false applies it.
+        kachinukiBoutFinal:
+          type: boolean
+          writeOnly: true
+          description: >
+            Transient flag, never persisted. Marks the current kachinuki bout as final
+            so the server advances the winner-stays sequence (appends the next bout or
+            completes the match when one side is exhausted). Without this flag a
+            kachinuki score write only saves the bout result and does not advance the
+            sequence.
 
     SubMatchResult:
       type: object

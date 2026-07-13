@@ -1487,6 +1487,25 @@ function AuthModal({ onClose, onSuccess, onForgotPassword, resetEnabled }) {
   );
 }
 
+// validateCreateTournament: pure validation for the CreateTournament form.
+// Returns "" when all fields are valid, or the first error message string.
+// Extracted so it can be unit-tested without mounting the full component.
+export function validateCreateTournament({ name, pass, date, courts, isSelfRun, locked, adminPass, maxCourts }) {
+  const trimmedName = typeof name === "string" ? name.trim() : "";
+  if (!trimmedName) return "Tournament Name is required.";
+  if (!pass) return "Admin Password is required.";
+  if (!date || (typeof window.dmyToIso === "function" && !window.dmyToIso(date))) {
+    return "Date is required.";
+  }
+  if (isSelfRun && !locked && !adminPass) {
+    return "Self-run tournaments require a Destructive-ops password to protect delete and import actions.";
+  }
+  if (!Number.isInteger(courts) || courts < 1 || courts > (maxCourts || window.MAX_COURTS)) {
+    return `Number of courts must be a whole number between 1 and ${maxCourts || window.MAX_COURTS}.`;
+  }
+  return "";
+}
+
 function CreateTournament({ onCreated, authConfig }) {
   // In locked mode the server requires X-Tournament-Password on the
   // bootstrap POST and discards the body's `password` field. The form's
@@ -1527,6 +1546,7 @@ function CreateTournament({ onCreated, authConfig }) {
   // Not shown in locked mode (the env-var hash is the credential).
   const [adminPass, setAdminPass] = useS("");
   const [saving, setSaving] = useS(false);
+  const [error, setError] = useS("");
   // submit's catch sets setSaving(false) post-await; on success the
   // parent calls onCreated which unmounts CreateTournament. The catch
   // branch only fires on error, so the unmount race is narrow but real
@@ -1539,6 +1559,7 @@ function CreateTournament({ onCreated, authConfig }) {
 
   const submit = async (e) => {
     e.preventDefault();
+    setError("");
     // Trim before the empty-check so whitespace-only ("   ") doesn't
     // pass the truthy gate. The backend POST /tournament now trims too
     // (handlers_tournament.go), but trimming here avoids the
@@ -1546,30 +1567,12 @@ function CreateTournament({ onCreated, authConfig }) {
     // diverges from what the user just typed.
     const trimmedName = name.trim();
     const trimmedVenue = venue.trim();
-    if (!trimmedName || !pass) {
-      alert("Name and Password are required.");
-      return;
-    }
-    // Self-run in file mode requires a destructive-ops (admin) password
-    // so that destructive routes (delete, invalidate, etc.) are not
-    // left fully public. The backend enforces the same rule: this is
-    // client-side feedback only.
-    if (isSelfRun && !locked && !adminPass) {
-      alert("Self-run tournaments require a Destructive-ops password to protect delete and import actions.");
-      return;
-    }
-    // Match the admin-side handleSave guard from admin_setup.jsx.
-    // Browser number inputs accept fractional values unless explicitly
-    // guarded; Array.from({length:2.5}) silently truncates to 2. This
-    // client-side guard provides immediate feedback before submit.
-    // The POST /tournament handler now calls validateCourts (which
-    // wraps helper.ValidateCourts + per-label single-character check),
-    // so a hand-crafted request bypassing this guard is still rejected
-    // server-side with a 400: the two checks are defensive duplicates
-    // for the same invariant rather than the client-side being the
-    // sole defense.
-    if (!Number.isInteger(courts) || courts < 1 || courts > window.MAX_COURTS) {
-      alert(`Number of courts must be a whole number between 1 and ${window.MAX_COURTS}.`);
+    // Explicit validation now that noValidate disables native HTML5
+    // browser blocking. validateCreateTournament covers name, password,
+    // self-run adminPass, and courts range in one pass.
+    const validationErr = validateCreateTournament({ name, pass, date, courts, isSelfRun, locked, adminPass, maxCourts: window.MAX_COURTS });
+    if (validationErr) {
+      setError(validationErr);
       return;
     }
     setSaving(true);
@@ -1616,8 +1619,10 @@ function CreateTournament({ onCreated, authConfig }) {
       if (!mountedRef.current) return;
       onCreated(t, pass);
     } catch (err) {
-      alert(err.message);
-      if (mountedRef.current) setSaving(false);
+      if (mountedRef.current) {
+        setError(err.message || "Failed to create tournament");
+        setSaving(false);
+      }
     }
   };
 
@@ -1636,9 +1641,11 @@ function CreateTournament({ onCreated, authConfig }) {
       <div className="card card--pad-lg">
         <h2 style={{ marginBottom: 8 }}>Welcome to Bracket Creator</h2>
         <p style={{ color: "var(--ink-3)", marginBottom: 24 }}>Set up your new tournament to get started.</p>
-        <form onSubmit={submit}>
+        <form onSubmit={submit} noValidate>
           <div className="field">
             <label className="field__label">Tournament Name</label>
+            {/* The form is noValidate (inline banner reports errors instead of
+                native tooltips); `required` stays for assistive-tech semantics. */}
             <input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. London Cup 2026" required />
           </div>
           <div className="row">
@@ -1733,7 +1740,15 @@ function CreateTournament({ onCreated, authConfig }) {
               </div>
             </div>
           )}
-          <button type="submit" className="btn btn--primary btn--lg btn--full" style={{ marginTop: 16 }}>
+          {error && (
+            <div
+              data-testid="create-tournament-error"
+              style={{ color: "var(--danger, #c00)", fontSize: 12, marginBottom: 8, marginTop: 12, padding: 8, border: "1px solid var(--danger, #c00)", borderRadius: 4, background: "rgba(204,0,0,0.05)" }}
+            >
+              {error}
+            </div>
+          )}
+          <button type="submit" className="btn btn--primary btn--lg btn--full" style={{ marginTop: 8 }}>
             Create Tournament
           </button>
         </form>

@@ -68,19 +68,19 @@ From the next release onwards, `.deb`, `.rpm`, and `.apk` packages for amd64/x86
 === "Debian/Ubuntu"
 
     ```bash
-    sudo apt install ./bracket-creator_*_amd64.deb
+    sudo apt install ./bracket-creator_*_$(dpkg --print-architecture).deb
     ```
 
 === "Fedora/RHEL"
 
     ```bash
-    sudo dnf install ./bracket-creator-*.x86_64.rpm
+    sudo dnf install ./bracket-creator-*.$(uname -m).rpm
     ```
 
 === "Alpine"
 
     ```bash
-    apk add --allow-untrusted ./bracket-creator_*_x86_64.apk
+    apk add --allow-untrusted ./bracket-creator_*_$(apk --print-arch).apk
     ```
 
     The package is not signed with an Alpine key, hence `--allow-untrusted`.
@@ -129,7 +129,7 @@ The binary is at `./bin/bracket-creator`.
 
 ## Upgrading
 
-* **Docker**: pull the image again and recreate the container: `docker pull ghcr.io/gitrgoliveira/bracket-creator-mobile:latest`.
+* **Docker**: `docker pull ghcr.io/gitrgoliveira/bracket-creator-mobile:latest` to fetch the newer image, then stop the running container and start it again with the same `docker run` command.
 * **Homebrew**: `brew upgrade bracket-creator`.
 * **Linux packages**: there is no hosted package repository, so upgrades are not automatic. Download the new release's package and install it the same way.
 * **Pre-compiled binaries**: download and extract the new release's archive over the old binary.

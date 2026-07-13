@@ -48,7 +48,7 @@ For the kendo tournament guidelines this application is based on, see [running_a
 
 The `mobile-app` command starts the tournament app server: create competitions, import participants, draw pools and brackets, schedule matches across courts, score in real time, and show results on any device (phone, tablet, laptop, or a TV by the court).
 
-[Install](#install) bracket-creator first (the Docker image starts the server for you), then with a binary install start the server:
+[Install](#install) bracket-creator first. The Docker image starts the server automatically; with a binary install, start it yourself:
 
 ```bash
 bracket-creator mobile-app --folder ./tournament-data

@@ -1502,6 +1502,26 @@ func TestTreeAdjustmentByeAllocation(t *testing.T) {
 	}
 }
 
+func TestNeedsBronzeBlock(t *testing.T) {
+	cases := []struct {
+		name     string
+		naginata bool
+		rounds   int
+		want     bool
+	}{
+		{"naginata with semifinal", true, 2, true},
+		{"naginata with many rounds", true, 4, true},
+		{"naginata single round (no semifinal)", true, 1, false},
+		{"naginata zero rounds", true, 0, false},
+		{"non-naginata with rounds", false, 4, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, NeedsBronzeBlock(tc.naginata, tc.rounds))
+		})
+	}
+}
+
 func TestTreeAdjustmentSwapsBothLeaves(t *testing.T) {
 	// Direct test: when both children are leaves with 2nd on left and 1st on right,
 	// treeAdjustment should swap them.

@@ -238,14 +238,7 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	matchWinners = helper.ConvertPlayersToWinners(players, o.withZekkenName, playerCoords)
 	helper.CreateNamesToPrint(f, players, o.withZekkenName, o.courts, playerCoords)
 
-	nextRow, elimMatchWinners := helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, o.teamMatches, o.courts, true, o.engi)
-	// Bronze (3rd-place) playoff: naginata only, and only when a real semifinal
-	// exists (len(eliminationMatchRounds) >= 2; a 2-player bracket has a single
-	// round and no semifinal, so no bronze). Matches the engine guard in
-	// internal/engine/bracket.go: comp.Naginata && len(bracket.Rounds) >= 2.
-	if o.naginata && len(eliminationMatchRounds) >= 2 {
-		helper.PrintBronzeBlockWithPrintArea(f, nextRow, o.teamMatches, true, o.engi, o.courts, eliminationMatchRounds, elimMatchWinners)
-	}
+	printEliminationWithBronze(f, matchWinners, eliminationMatchRounds, o.teamMatches, o.courts, o.engi, o.naginata)
 	helper.FillEstimations(f, 0, 0, int64(o.teamMatches), int64(len(names)-1), o.courts)
 
 	// Apply sheet protection to all sheets except data and Time Estimator

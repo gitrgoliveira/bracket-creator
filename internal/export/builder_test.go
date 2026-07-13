@@ -65,6 +65,15 @@ func setCompFormat(t *testing.T, store *state.Store, compID, format string) {
 	require.NoError(t, store.SaveCompetition(comp))
 }
 
+// markCompAsEngi loads the competition, sets Engi=true, and saves it.
+func markCompAsEngi(t *testing.T, store *state.Store, compID string) {
+	t.Helper()
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	comp.Engi = true
+	require.NoError(t, store.SaveCompetition(comp))
+}
+
 // makePools builds two pools of two players each with one match.
 // SideA/SideB point into pool.Players so the playerMatchRows map in
 // PrintPoolMatches resolves correctly (pointers must match &pool.Players[i]).
@@ -2073,10 +2082,7 @@ func TestBuildResultsWorkbook_EngiPairedNameInDataSheet(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	// Mark competition as engi (WithZekkenName remains false).
-	comp, err := store.LoadCompetition(compID)
-	require.NoError(t, err)
-	comp.Engi = true
-	require.NoError(t, store.SaveCompetition(comp))
+	markCompAsEngi(t, store, compID)
 
 	pools := makeEngiPools()
 	require.NoError(t, store.SavePools(compID, pools))
@@ -2199,10 +2205,7 @@ func TestBuildResultsWorkbook_EngiPoolFlagScoreCells(t *testing.T) {
 			dir, store, eng, compID := testSetup(t)
 			defer os.RemoveAll(dir)
 
-			comp, err := store.LoadCompetition(compID)
-			require.NoError(t, err)
-			comp.Engi = true
-			require.NoError(t, store.SaveCompetition(comp))
+			markCompAsEngi(t, store, compID)
 
 			pools := makeEngiPools()
 			require.NoError(t, store.SavePools(compID, pools))
@@ -2445,10 +2448,7 @@ func TestBuildResultsWorkbook_EngiStandingsHeadersRelabeled(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	// Mark competition as engi (WithZekkenName remains false; EffectiveWithZekkenName() handles it).
-	comp, err := store.LoadCompetition(compID)
-	require.NoError(t, err)
-	comp.Engi = true
-	require.NoError(t, store.SaveCompetition(comp))
+	markCompAsEngi(t, store, compID)
 
 	// Two engi pairs in one pool.
 	pools := makeEngiPools()
@@ -2566,10 +2566,7 @@ func TestBuildResultsWorkbook_EngiDecisionSuffix(t *testing.T) {
 	dir, store, eng, compID := testSetup(t)
 	defer os.RemoveAll(dir)
 
-	comp, err := store.LoadCompetition(compID)
-	require.NoError(t, err)
-	comp.Engi = true
-	require.NoError(t, store.SaveCompetition(comp))
+	markCompAsEngi(t, store, compID)
 
 	pools := makeEngiPools()
 	require.NoError(t, store.SavePools(compID, pools))
@@ -2635,10 +2632,7 @@ func TestBuildResultsWorkbook_EngiPartialPoolScoring(t *testing.T) {
 	dir, store, eng, compID := testSetup(t)
 	defer os.RemoveAll(dir)
 
-	comp, err := store.LoadCompetition(compID)
-	require.NoError(t, err)
-	comp.Engi = true
-	require.NoError(t, store.SaveCompetition(comp))
+	markCompAsEngi(t, store, compID)
 
 	// Two engi pools of two pairs each; pool B is unscored. Each pair carries
 	// both member names combined in Name (the canonical engi model).
@@ -2790,10 +2784,7 @@ func TestBuildResultsWorkbook_EngiUnicodeAndCommaNames(t *testing.T) {
 	dir, store, eng, compID := testSetup(t)
 	defer os.RemoveAll(dir)
 
-	comp, err := store.LoadCompetition(compID)
-	require.NoError(t, err)
-	comp.Engi = true
-	require.NoError(t, store.SaveCompetition(comp))
+	markCompAsEngi(t, store, compID)
 
 	// Unicode names (Japanese) and names containing commas.
 	// SideA/SideB point into pool.Players so the playerMatchRows map resolves correctly.
@@ -2834,6 +2825,20 @@ func TestBuildResultsWorkbook_EngiUnicodeAndCommaNames(t *testing.T) {
 // ============================================================
 // TDD-bronze: Naginata 3rd-place block rendering (mp-wvba)
 // ============================================================
+
+// assertBronzeEntrantsPopulated finds the "3rd Place" header, steps to the score
+// row (header+2), and asserts the left (col A) and right (col G) name cells are set.
+func assertBronzeEntrantsPopulated(t *testing.T, rows [][]string) {
+	t.Helper()
+	thirdRow := bctest.FindCellRow(rows, helper.ThirdPlaceLabel)
+	require.GreaterOrEqual(t, thirdRow, 0, "'3rd Place' header must be present")
+	scoreIdx := thirdRow + 2
+	require.Less(t, scoreIdx, len(rows), "bronze score row (header+2) must exist")
+	r := rows[scoreIdx]
+	require.Greater(t, len(r), 6, "bronze score row must have at least 7 columns")
+	assert.NotEmpty(t, r[0], "bronze score row: left name cell (col A) must be populated")
+	assert.NotEmpty(t, r[6], "bronze score row: right name cell (col G) must be populated")
+}
 
 // setNaginataPlayoffs configures the loaded competition as a naginata playoffs
 // competition (individual, 4 players, single court).
@@ -2936,25 +2941,7 @@ func TestBuildResultsWorkbook_NaginataThirdPlaceRendered(t *testing.T) {
 		"Elimination Matches sheet must show the bronze score 'D' (kendo ippon, only in bronze)")
 
 	// Also assert that both semifinal losers' names appear in the bronze score row.
-	// The "3rd Place" header row is at thirdPlaceRow (0-based); the score row is
-	// at thirdPlaceRow+2. Court 1 name cells: left=col A (0-based index 0),
-	// right=col G (0-based index 6).
-	bronzeThirdPlaceRow := bctest.FindCellRow(rows, helper.ThirdPlaceLabel)
-	require.GreaterOrEqual(t, bronzeThirdPlaceRow, 0, "'3rd Place' header must be found in rows")
-	bronzeScoreRowIdx := bronzeThirdPlaceRow + 2
-	require.Less(t, bronzeScoreRowIdx, len(rows), "bronze score row must exist")
-	bronzeScoreRow := rows[bronzeScoreRowIdx]
-	var bronzeLeftName, bronzeRightName string
-	if len(bronzeScoreRow) > 0 {
-		bronzeLeftName = bronzeScoreRow[0]
-	}
-	if len(bronzeScoreRow) > 6 {
-		bronzeRightName = bronzeScoreRow[6]
-	}
-	assert.NotEmpty(t, bronzeLeftName,
-		"3rd Place score row: left name cell (col A) must be populated with a semifinal loser")
-	assert.NotEmpty(t, bronzeRightName,
-		"3rd Place score row: right name cell (col G) must be populated with a semifinal loser")
+	assertBronzeEntrantsPopulated(t, rows)
 }
 
 // TestBuildResultsWorkbook_NaginataThirdPlaceNamesBeforeBronze verifies that
@@ -3001,28 +2988,13 @@ func TestBuildResultsWorkbook_NaginataThirdPlaceNamesBeforeBronze(t *testing.T) 
 	rows, err := f.GetRows(helper.SheetEliminationMatches)
 	require.NoError(t, err)
 
-	// Find "3rd Place" header row.
-	thirdPlaceRow := bctest.FindCellRow(rows, helper.ThirdPlaceLabel)
-	require.GreaterOrEqual(t, thirdPlaceRow, 0, "'3rd Place' header must appear even before bronze is played")
-
-	scoreRowIdx := thirdPlaceRow + 2
-	require.Less(t, scoreRowIdx, len(rows), "bronze score row must exist")
-	scoreRow := rows[scoreRowIdx]
-
 	// Names must appear even though the bronze has not been played.
-	var leftName, rightName string
-	if len(scoreRow) > 0 {
-		leftName = scoreRow[0]
-	}
-	if len(scoreRow) > 6 {
-		rightName = scoreRow[6]
-	}
-	assert.NotEmpty(t, leftName,
-		"3rd Place score row col A must show a semifinal loser name before bronze is played")
-	assert.NotEmpty(t, rightName,
-		"3rd Place score row col G must show a semifinal loser name before bronze is played")
+	assertBronzeEntrantsPopulated(t, rows)
 
 	// Score cells (lVCol = col B / index 1, rVCol = col F / index 5) must be empty.
+	thirdPlaceRow := bctest.FindCellRow(rows, helper.ThirdPlaceLabel)
+	scoreRowIdx := thirdPlaceRow + 2
+	scoreRow := rows[scoreRowIdx]
 	var leftScore, rightScore string
 	if len(scoreRow) > 1 {
 		leftScore = scoreRow[1]
@@ -3086,15 +3058,7 @@ func TestBuildResultsWorkbook_EngiNaginataThirdPlaceFlags(t *testing.T) {
 		"bronze score row must contain '5' (FlagsA=5 winner count)")
 
 	// Also assert entrant names appear in the bronze score row.
-	var engiLeftName, engiRightName string
-	if len(rows[scoreRowIdx]) > 0 {
-		engiLeftName = rows[scoreRowIdx][0]
-	}
-	if len(rows[scoreRowIdx]) > 6 {
-		engiRightName = rows[scoreRowIdx][6]
-	}
-	assert.NotEmpty(t, engiLeftName, "engi bronze score row: left name cell (col A) must be populated")
-	assert.NotEmpty(t, engiRightName, "engi bronze score row: right name cell (col G) must be populated")
+	assertBronzeEntrantsPopulated(t, rows)
 }
 
 // TestBuildResultsWorkbook_NonNaginataNoThirdPlace verifies that a standard

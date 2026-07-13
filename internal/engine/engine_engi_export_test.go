@@ -35,16 +35,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestExportCompetitionXlsx_NaginataThirdPlaceSlot verifies that the blank-
-// template export for a naginata playoffs competition includes a "3rd Place"
-// slot on the Elimination Matches sheet so the operator can hand-score it.
-func TestExportCompetitionXlsx_NaginataThirdPlaceSlot(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "naginata-export"
-
+// startNaginata4PlayerXlsx saves a 4-player naginata playoffs competition,
+// starts it, and leaves the bracket ready for export or further assertions.
+// The competition ID, name, kind, format, pool size, courts, etc. match what
+// both NaginataThirdPlaceSlot and NaginataThirdPlacePrintAreaAndLayout need.
+func startNaginata4PlayerXlsx(t *testing.T, eng *Engine, store *state.Store, compID string) {
+	t.Helper()
 	comp := &state.Competition{
 		ID:           compID,
-		Name:         "Naginata Export Test",
+		Name:         "Naginata " + compID,
 		Kind:         "individual",
 		Format:       state.CompFormatPlayoffs,
 		PoolSize:     3,
@@ -56,15 +55,23 @@ func TestExportCompetitionXlsx_NaginataThirdPlaceSlot(t *testing.T) {
 		Naginata:     true,
 	}
 	require.NoError(t, store.SaveCompetition(comp))
-
-	players := []domain.Player{
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
 		{Name: "Alice", Dojo: "DojoA"},
 		{Name: "Bob", Dojo: "DojoB"},
 		{Name: "Charlie", Dojo: "DojoC"},
 		{Name: "Dave", Dojo: "DojoD"},
-	}
-	require.NoError(t, store.SaveParticipants(compID, players))
+	}))
 	require.NoError(t, eng.StartCompetition(compID))
+}
+
+// TestExportCompetitionXlsx_NaginataThirdPlaceSlot verifies that the blank-
+// template export for a naginata playoffs competition includes a "3rd Place"
+// slot on the Elimination Matches sheet so the operator can hand-score it.
+func TestExportCompetitionXlsx_NaginataThirdPlaceSlot(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "naginata-export"
+
+	startNaginata4PlayerXlsx(t, eng, store, compID)
 
 	// Verify the bracket has a ThirdPlaceMatch before testing the export.
 	bracket, err := store.LoadBracket(compID)
@@ -98,29 +105,7 @@ func TestExportCompetitionXlsx_NaginataThirdPlacePrintAreaAndLayout(t *testing.T
 	eng, store, _ := setupTestEngine(t)
 	compID := "naginata-print-area"
 
-	comp := &state.Competition{
-		ID:           compID,
-		Name:         "Naginata Print Area Test",
-		Kind:         "individual",
-		Format:       state.CompFormatPlayoffs,
-		PoolSize:     3,
-		PoolSizeMode: "min",
-		PoolWinners:  2,
-		Courts:       []string{"A"},
-		StartTime:    "09:00",
-		Status:       "setup",
-		Naginata:     true,
-	}
-	require.NoError(t, store.SaveCompetition(comp))
-
-	players := []domain.Player{
-		{Name: "Alice", Dojo: "DojoA"},
-		{Name: "Bob", Dojo: "DojoB"},
-		{Name: "Charlie", Dojo: "DojoC"},
-		{Name: "Dave", Dojo: "DojoD"},
-	}
-	require.NoError(t, store.SaveParticipants(compID, players))
-	require.NoError(t, eng.StartCompetition(compID))
+	startNaginata4PlayerXlsx(t, eng, store, compID)
 
 	data, err := eng.ExportCompetitionXlsx(compID)
 	require.NoError(t, err)

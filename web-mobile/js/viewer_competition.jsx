@@ -28,6 +28,7 @@ const hasBothSides = (m) => window.hasBothSides(m);
 // history push in the URL-sync effect). Do not add internal tab state here.
 export function ViewerCompetition({ tournament, competition, pools, poolMatches, standings, bracket, onBack, authed, onEditCompetition, tweaks, activeTab, onTabChange }) {
   const c = competition;
+  const isEngi = !!(c && c.engi);
 
   const allMatches = useMemo(() => {
     const out = [];
@@ -318,7 +319,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
                 <div className="bracket-canvas__inner" style={{ padding: 18 }}>
                   <window.BracketTree
                     rounds={derivedBracket.rounds}
-                    isEngi={!!(competition && competition.engi)}
+                    isEngi={isEngi}
                     variant={tweaks.cardVariant}
                     showDojo={tweaks.showDojo}
                     highlightedMatchId={currentMatch?.id}
@@ -347,7 +348,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
                         </div>
                         <window.MatchCard
                           match={bm}
-                          isEngi={!!(competition && competition.engi)}
+                          isEngi={isEngi}
                           variant={tweaks.cardVariant ?? 1}
                           showDojo={tweaks.showDojo ?? true}
                           highlighted={currentMatch?.id === bm.id}

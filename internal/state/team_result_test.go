@@ -109,3 +109,67 @@ func TestMatchResultMarshalJSON_TeamResult(t *testing.T) {
 		assert.Contains(t, out, "ipponsA")
 	})
 }
+
+func TestBracketMatchMarshalJSON_TeamResult(t *testing.T) {
+	t.Run("team bracket match carries teamResult", func(t *testing.T) {
+		m := BracketMatch{
+			ID: "m-r1-0", SideA: "Ryu", SideB: "Tora", Winner: "Ryu", Status: MatchStatusCompleted,
+			SubResults: []SubMatchResult{
+				{Position: 1, SideA: "Ryu Ichiro", SideB: "Tora Ichiro", Winner: "Ryu Ichiro", IpponsA: []string{"M"}},
+				{Position: 2, SideA: "Ryu Ichiro", SideB: "Tora Jiro", Winner: "Ryu Ichiro", IpponsA: []string{"K"}},
+			},
+		}
+		b, err := json.Marshal(m)
+		require.NoError(t, err)
+		var out map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(b, &out))
+		require.Contains(t, out, "teamResult")
+		var tr TeamResultLine
+		require.NoError(t, json.Unmarshal(out["teamResult"], &tr))
+		assert.Equal(t, TeamResultLine{ShiroIV: 0, AkaIV: 2, ShiroPW: 0, AkaPW: 2}, tr)
+	})
+
+	t.Run("daihyosen-decided tie reports zero IV and PW", func(t *testing.T) {
+		m := BracketMatch{
+			ID: "m-r2-0", SideA: "Ryu", SideB: "Kaze", Winner: "Ryu", Status: MatchStatusCompleted,
+			Decision: "daihyosen",
+			SubResults: []SubMatchResult{
+				{Position: 1, SideA: "Ryu Ichiro", SideB: "Kaze Ichiro", Decision: DecisionDraw},
+				{Position: -1, SideA: "Ryu", SideB: "Kaze", Winner: "Ryu", IpponsA: []string{"M"}},
+			},
+		}
+		b, err := json.Marshal(m)
+		require.NoError(t, err)
+		var out map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(b, &out))
+		require.Contains(t, out, "teamResult")
+		var tr TeamResultLine
+		require.NoError(t, json.Unmarshal(out["teamResult"], &tr))
+		assert.Equal(t, TeamResultLine{}, tr)
+	})
+
+	t.Run("individual bracket match omits teamResult", func(t *testing.T) {
+		m := BracketMatch{ID: "m-r1-1", SideA: "P1", SideB: "P2", Status: MatchStatusCompleted, ScoreA: "MM"}
+		b, err := json.Marshal(m)
+		require.NoError(t, err)
+		var out map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(b, &out))
+		assert.NotContains(t, out, "teamResult")
+		assert.Contains(t, out, "id")
+		assert.Contains(t, out, "scoreA")
+	})
+
+	t.Run("unmarshal ignores a serialized teamResult", func(t *testing.T) {
+		m := BracketMatch{
+			ID: "m-r1-0", SideA: "Ryu", SideB: "Tora", Status: MatchStatusCompleted,
+			SubResults: []SubMatchResult{{Position: 1, Winner: "Ryu", IpponsA: []string{"M"}}},
+		}
+		b, err := json.Marshal(m)
+		require.NoError(t, err)
+		var back BracketMatch
+		require.NoError(t, json.Unmarshal(b, &back))
+		assert.Equal(t, m.ID, back.ID)
+		assert.Equal(t, m.SideA, back.SideA)
+		assert.Len(t, back.SubResults, 1)
+	})
+}

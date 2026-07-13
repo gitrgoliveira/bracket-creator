@@ -90,3 +90,29 @@ func (m MatchResult) MarshalJSON() ([]byte, error) {
 		TeamResult *TeamResultLine `json:"teamResult,omitempty"`
 	}{alias: alias(m), TeamResult: m.TeamResult()})
 }
+
+// TeamResult returns the team-match summary for this bracket match, or nil
+// for an individual match. See TeamResultFrom.
+func (m *BracketMatch) TeamResult() *TeamResultLine {
+	if m == nil {
+		return nil
+	}
+	return TeamResultFrom(m.SubResults, m.SideA, m.SideB)
+}
+
+// MarshalJSON mirrors MatchResult.MarshalJSON for bracket (elimination)
+// matches: without it, knockout team matches reached the frontend with no
+// teamResult and every score surface fell back to the legacy IV-only string
+// while pool matches showed IV and PW (bead mp-8b1b). Unlike MatchResult,
+// BracketMatch also persists to bracket.json through this same marshal, so
+// the derived teamResult lands on disk too; that is deliberate (one choke
+// point, no wire-vs-disk type to drift) and safe: the struct has no
+// TeamResult field, so loading ignores it and every save recomputes it from
+// SubResults.
+func (m BracketMatch) MarshalJSON() ([]byte, error) {
+	type alias BracketMatch
+	return json.Marshal(struct {
+		alias
+		TeamResult *TeamResultLine `json:"teamResult,omitempty"`
+	}{alias: alias(m), TeamResult: m.TeamResult()})
+}

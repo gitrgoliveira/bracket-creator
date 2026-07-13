@@ -3382,6 +3382,29 @@ components:
             completes the match when one side is exhausted). Without this flag a
             kachinuki score write only saves the bout result and does not advance the
             sequence.
+        teamResult:
+          $ref: '#/components/schemas/TeamResultLine'
+
+    TeamResultLine:
+      type: object
+      readOnly: true
+      description: >
+        Server-computed team-match summary attached to every team match on read
+        paths (pool matches, bracket matches, schedule, SSE match_updated):
+        individual victories (IV) and points won (PW) per side. Shiro is sideB
+        (rendered left), Aka is sideA (rendered right). The daihyosen
+        (position -1) sub-bout is excluded, so a representative-bout-decided
+        tie reports the tied totals (for example IV 0-0). Absent on individual
+        matches. Never sent by clients.
+      properties:
+        shiroIV:
+          type: integer
+        akaIV:
+          type: integer
+        shiroPW:
+          type: integer
+        akaPW:
+          type: integer
 
     SubMatchResult:
       type: object
@@ -3492,6 +3515,8 @@ components:
             can restore hantei state and bout-level detail on re-open.
           items:
             $ref: '#/components/schemas/SubMatchResult'
+        teamResult:
+          $ref: '#/components/schemas/TeamResultLine'
 
     CourtMatchSide:
       type: object

@@ -274,7 +274,10 @@ export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state
 // regular (non-DH) bouts. sideB = shiro/left, sideA = aka/right.
 export function teamIVPW(subResults, matchSideA, matchSideB) {
   let ivShiro = 0, ivAka = 0, pwShiro = 0, pwAka = 0;
-  for (const s of (subResults || []).filter(x => x.position !== DAIHYOSEN_POSITION)) {
+  // Count only real numbered bouts: skip the daihyosen sentinel AND any
+  // malformed negative position, mirroring the Go-side defensive skip
+  // (state.TeamResultFrom: Position <= DaihyosenSubPosition).
+  for (const s of (subResults || []).filter(x => x.position > DAIHYOSEN_POSITION)) {
     const a = ipponLetters(s.ipponsA).filter(Boolean).length;
     const b = ipponLetters(s.ipponsB).filter(Boolean).length;
     pwShiro += b; pwAka += a;
@@ -356,7 +359,9 @@ export function IndividualScore({ match, variant, showNames, withZekkenName }) {
 // ordering. Row count is driven by recorded bouts (never padded to teamSize)
 // and name resolution is server-bout-first (see BoutSubRow).
 export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH, variant, shiroName, akaName, matchSideA, matchSideB, isRunning, kachinuki }) {
-  const regular = (subResults || []).filter(s => s.position !== DAIHYOSEN_POSITION);
+  // Real numbered bouts only: exclude the daihyosen sentinel and any malformed
+  // negative position (mirrors the Go-side defensive skip).
+  const regular = (subResults || []).filter(s => s.position > DAIHYOSEN_POSITION);
   const { ivShiro, ivAka, pwShiro, pwAka } = teamIVPW(subResults, matchSideA, matchSideB);
   // FIK: a Daihyosen (representative bout) only happens when the team match is
   // TIED after the regular bouts: equal individual victories AND equal points.

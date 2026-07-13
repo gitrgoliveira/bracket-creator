@@ -149,7 +149,7 @@ function engiFlagScore(m) {
 
 // teamIVScore: derive a team match's individual-victories aggregate ("shiroIV–akaIV")
 // from persisted subResults. Mirrors Go engine.ComputeTeamSummary: skip the daihyosen
-// sentinel (position === DAIHYOSEN_POSITION); award IV to whichever match-level side won each bout (winner
+// sentinel and any malformed negative position (position <= DAIHYOSEN_POSITION); award IV to whichever match-level side won each bout (winner
 // matches the match-level OR sub-level side name); empty winner = hikiwake (no IV).
 // Orientation: sideB = Shiro (left), sideA = Aka (right): matches the (ipponsB, ipponsA)
 // call order used everywhere. Returns null when there are no subResults (individual

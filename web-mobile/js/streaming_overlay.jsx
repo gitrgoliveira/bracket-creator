@@ -36,7 +36,7 @@ function findCurrentBoutIndex(subResults) {
     // TeamScoreboard's isScored logic. When all regular bouts are complete,
     // returns regular.length (= subResults.length excluding any DH row at
     // position -1): the caller treats that as the "DH/done" signal.
-    const regular = subResults.filter(s => s.position !== DAIHYOSEN_POSITION);
+    const regular = subResults.filter(s => s.position > DAIHYOSEN_POSITION);
     for (let i = 0; i < regular.length; i++) {
         const s = regular[i];
         const hasIppon = (s.ipponsA && s.ipponsA.some(x => x && x !== "•")) ||
@@ -115,7 +115,7 @@ function StreamingOverlay({ court, position, competitions }) {
     // findCurrentBoutIndex returns subResults.length and currentSub is null;
     // the overlay would otherwise read blank. Show "Daihyosen" on both sides
     // so spectators know the rep bout is about to start.
-    const regularSubsOvl = ovlSubResults.filter(s => s.position !== DAIHYOSEN_POSITION);
+    const regularSubsOvl = ovlSubResults.filter(s => s.position > DAIHYOSEN_POSITION);
     const dhPending = isTeamMatch && !currentSub && regularSubsOvl.length > 0
         && ovlIV.ivShiro === ovlIV.ivAka && ovlIV.pwShiro === ovlIV.pwAka
         && !ovlSubResults.some(s => s.position === DAIHYOSEN_POSITION);

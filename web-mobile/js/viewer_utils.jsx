@@ -58,6 +58,7 @@ export function compMatches(c) {
   // spectators can see the pool draw before the first match is called.
   if (!c.status || c.status === "setup") return out;
 
+  const compTMT = teamMatchTypeFor(c);
   const POOL_ID_RE = /^(.+?)(?:-DH-\d+|-TB-\d+|-\d+)$/;
   const rawPoolMatches = c.poolMatches || (c.pools ? c.pools.flatMap(p => (p.matches || []).map(m => ({ ...m, phase: "pool", poolName: p.poolName || p.name, phaseName: p.poolName || p.name }))) : []);
   // Pool supplementary bouts (daihyosen "Pool X-DH-N" and tiebreaker
@@ -74,7 +75,7 @@ export function compMatches(c) {
     // omit (or null) phase/poolName/phaseName, so if `...m` came last it would
     // clobber the derived pool name with undefined. derivedPool already prefers
     // m.poolName when present, so putting it last is both safe and authoritative.
-    out.push({ ...m, phase: "pool", poolName: derivedPool, phaseName: derivedPool, compId: c.id, compName: c.name, compFormat: c.format, compKind: isRepBout ? "" : c.kind, teamSize: isRepBout ? 0 : c.teamSize, compEngi: isRepBout ? false : !!c.engi, teamMatchType: teamMatchTypeFor(c, isRepBout) });
+    out.push({ ...m, phase: "pool", poolName: derivedPool, phaseName: derivedPool, compId: c.id, compName: c.name, compFormat: c.format, compKind: isRepBout ? "" : c.kind, teamSize: isRepBout ? 0 : c.teamSize, compEngi: isRepBout ? false : !!c.engi, teamMatchType: isRepBout ? "" : compTMT });
   });
 
   // mp-9dz: a preview bracket on a mixed source carries pool-origin
@@ -101,7 +102,7 @@ export function compMatches(c) {
     compKind: c.kind,
     teamSize: c.teamSize,
     compEngi: !!c.engi,
-    teamMatchType: teamMatchTypeFor(c),
+    teamMatchType: compTMT,
   })));
 
   // Bronze (3rd-place) playoff: a sibling of bracket.rounds (naginata only),
@@ -124,7 +125,7 @@ export function compMatches(c) {
       compKind: c.kind,
       teamSize: c.teamSize,
       compEngi: !!c.engi,
-      teamMatchType: teamMatchTypeFor(c),
+      teamMatchType: compTMT,
     });
   }
 

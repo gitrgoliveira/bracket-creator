@@ -3,23 +3,9 @@
 // operator clicks another field or tabs away mid-entry.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
+import { findInTree } from './helpers/vdom.js';
 
 const realReact = global.React;
-
-function walk(node, visit) {
-  if (node == null || typeof node !== 'object') return;
-  if (Array.isArray(node)) { node.forEach(n => walk(n, visit)); return; }
-  visit(node);
-  const kids = node.children ?? node.props?.children;
-  if (kids != null) walk(kids, visit);
-}
-function findHost(tree, type, predicate) {
-  let found = null;
-  walk(tree, n => {
-    if (!found && n?.type === type && (!predicate || predicate(n))) found = n;
-  });
-  return found;
-}
 
 describe('LineupNameInput click-outside / blur commit', () => {
   let runtime, LineupNameInput;
@@ -53,7 +39,7 @@ describe('LineupNameInput click-outside / blur commit', () => {
     const roster = ['Tanaka', 'Suzuki'];
     // Mount then get the input node from the initial tree.
     let tree = runtime.mount(LineupNameInput, { value: '', roster, onSelect, ariaLabel: 'pos', color: 'shiro' });
-    const inputNode = findHost(tree, 'input');
+    const inputNode = findInTree(tree, n => n?.type === 'input');
     expect(inputNode).toBeTruthy();
 
     // Simulate typing "New Player": onChange opens the list and sets query.
@@ -81,7 +67,7 @@ describe('LineupNameInput click-outside / blur commit', () => {
   it('whitespace-only query on click-outside does not commit', () => {
     const onSelect = vi.fn();
     let tree = runtime.mount(LineupNameInput, { value: '', roster: ['Tanaka'], onSelect, ariaLabel: 'pos', color: 'shiro' });
-    const inputNode = findHost(tree, 'input');
+    const inputNode = findInTree(tree, n => n?.type === 'input');
     inputNode.props.onChange({ target: { value: '   ' } });
     clickOutsideCb();
     expect(onSelect).not.toHaveBeenCalled();
@@ -91,13 +77,13 @@ describe('LineupNameInput click-outside / blur commit', () => {
     const onSelect = vi.fn();
     const roster = ['Tanaka', 'Suzuki'];
     let tree = runtime.mount(LineupNameInput, { value: '', roster, onSelect, ariaLabel: 'pos', color: 'shiro' });
-    const inputNode = findHost(tree, 'input');
+    const inputNode = findInTree(tree, n => n?.type === 'input');
     // Type to open the dropdown.
     inputNode.props.onChange({ target: { value: 'Tan' } });
     tree = runtime.currentTree();
 
     // Find the first dropdown option button (inside the dropdown).
-    const optionBtn = findHost(tree, 'button', n => !!n?.props?.onMouseDown);
+    const optionBtn = findInTree(tree, n => n?.type === 'button' && !!n?.props?.onMouseDown);
     expect(optionBtn).toBeTruthy();
 
     // Fire option mousedown (preventDefault + commit option name).

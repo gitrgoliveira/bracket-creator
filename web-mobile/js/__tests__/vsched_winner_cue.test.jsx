@@ -12,23 +12,9 @@
 // serves as a regression pin.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
+import { findAll, hasClass } from './helpers/vdom.js';
 
 const realReact = global.React;
-
-// Walk the vdom tree and collect all nodes matching pred.
-function findAll(node, pred, out = []) {
-  if (!node || typeof node !== 'object') return out;
-  if (Array.isArray(node)) { node.forEach(n => findAll(n, pred, out)); return out; }
-  if (pred(node)) out.push(node);
-  const kids = node.children || node.props?.children || [];
-  [].concat(kids).forEach(k => findAll(k, pred, out));
-  return out;
-}
-
-// Does a className string contain the given class token?
-function hasClass(node, cls) {
-  return String(node?.props?.className || '').split(' ').includes(cls);
-}
 
 describe('T5: VSchedItem winner cue - completed team match', () => {
   let runtime, VSchedItem, normalizeMatch;

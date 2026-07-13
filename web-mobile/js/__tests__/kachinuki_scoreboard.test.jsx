@@ -16,6 +16,28 @@ import { boutRows, findInTree, collectText } from './helpers/vdom.js';
 
 const realReact = global.React;
 
+// Shared setup/teardown for both describe blocks: same globals, same module,
+// only the exported symbol consumed differs per block.
+async function setupSuite() {
+  const runtime = makeReactive();
+  global.React = runtime.React;
+  global.window = global.window || {};
+  global.window.isHikiwake = vi.fn((t) => t === 'hikiwake');
+  global.window.ipponsFromScore = vi.fn(() => []);
+  vi.resetModules();
+  const mod = await import('../match_scoreboard.jsx');
+  return { runtime, mod };
+}
+
+function teardownSuite(runtime) {
+  runtime.unmount();
+  global.React = realReact;
+  delete global.window.isHikiwake;
+  delete global.window.ipponsFromScore;
+  vi.restoreAllMocks();
+  vi.resetModules();
+}
+
 // Minimal lineup shape for teamSize=5. pickFromLineup uses POS_LABELS_5
 // position keys (lowercase: "senpo", "jiho", ...) for a 5-person team.
 const linupA = { positions: { senpo: 'AkaSenpo', jiho: 'AkaJiho', chuken: 'AkaChuken', fukusho: 'AkaFukusho', taisho: 'AkaTaisho' } };
@@ -25,22 +47,11 @@ describe('T4 kachinuki: TeamScoreboard row count', () => {
   let runtime, TeamScoreboard;
 
   beforeEach(async () => {
-    runtime = makeReactive();
-    global.React = runtime.React;
-    global.window = global.window || {};
-    global.window.isHikiwake = vi.fn((t) => t === 'hikiwake');
-    global.window.ipponsFromScore = vi.fn(() => []);
-    vi.resetModules();
-    ({ TeamScoreboard } = await import('../match_scoreboard.jsx'));
+    let mod;
+    ({ runtime, mod } = await setupSuite());
+    TeamScoreboard = mod.TeamScoreboard;
   });
-  afterEach(() => {
-    runtime.unmount();
-    global.React = realReact;
-    delete global.window.isHikiwake;
-    delete global.window.ipponsFromScore;
-    vi.restoreAllMocks();
-    vi.resetModules();
-  });
+  afterEach(() => teardownSuite(runtime));
 
   it('kachinuki + 0 bouts: exactly 1 row (senpo bootstrap), kachinuki=true passed to BoutSubRow', () => {
     const tree = runtime.mount(TeamScoreboard, {
@@ -99,22 +110,11 @@ describe('T4 kachinuki: BoutSubRow name resolution', () => {
   let runtime, BoutSubRow;
 
   beforeEach(async () => {
-    runtime = makeReactive();
-    global.React = runtime.React;
-    global.window = global.window || {};
-    global.window.isHikiwake = vi.fn((t) => t === 'hikiwake');
-    global.window.ipponsFromScore = vi.fn(() => []);
-    vi.resetModules();
-    ({ BoutSubRow } = await import('../match_scoreboard.jsx'));
+    let mod;
+    ({ runtime, mod } = await setupSuite());
+    BoutSubRow = mod.BoutSubRow;
   });
-  afterEach(() => {
-    runtime.unmount();
-    global.React = realReact;
-    delete global.window.isHikiwake;
-    delete global.window.ipponsFromScore;
-    vi.restoreAllMocks();
-    vi.resetModules();
-  });
+  afterEach(() => teardownSuite(runtime));
 
   it('kachinuki bout index 0 with server names: uses server names, not lineup', () => {
     // Even at index 0, if the server recorded per-bout sides, use those.

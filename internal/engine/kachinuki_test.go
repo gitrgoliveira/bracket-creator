@@ -10,6 +10,26 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// setupKachinukiComp builds an engine + store and saves a kachinuki
+// competition with an empty pool-matches file, the setup every kachinuki
+// advancement/export test shares. opts mutate the competition before it is
+// saved (e.g. teamSize, Naginata, Format).
+func setupKachinukiComp(t *testing.T, id string, teamSize int, opts ...func(*state.Competition)) (*Engine, *state.Store, *state.Competition) {
+	t.Helper()
+	eng, store, _ := setupTestEngine(t)
+	comp := &state.Competition{
+		ID:            id,
+		TeamMatchType: state.TeamMatchTypeKachinuki,
+		TeamSize:      teamSize,
+	}
+	for _, o := range opts {
+		o(comp)
+	}
+	require.NoError(t, store.SaveCompetition(comp))
+	require.NoError(t, store.SavePoolMatches(id, []state.MatchResult{}))
+	return eng, store, comp
+}
+
 // TestKachinukiWinnerAdvances covers the FR-044 happy path: when one
 // side's player wins a bout, that player stays on and faces the head
 // of the opposing side's remaining queue.
@@ -305,17 +325,8 @@ func TestMaybeAdvanceKachinuki_AppendsBout(t *testing.T) {
 // TestMaybeAdvanceKachinuki_MatchNotFound verifies that requesting
 // advancement for an unknown match ID returns (false, nil).
 func TestMaybeAdvanceKachinuki_MatchNotFound(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
 	compID := "advance-not-found"
-
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:            compID,
-		TeamMatchType: state.TeamMatchTypeKachinuki,
-		TeamSize:      5,
-	}))
-
-	// Save empty pool, no matches.
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{}))
+	eng, _, _ := setupKachinukiComp(t, compID, 5)
 
 	changed, err := eng.MaybeAdvanceKachinuki(compID, "nonexistent")
 	assert.NoError(t, err)
@@ -1068,15 +1079,8 @@ func TestMaybeAdvanceKachinuki_MatchEndedPoolUpdate(t *testing.T) {
 // kachinuki match ends, propagateBracketWinner is called so the winning team
 // advances to the next round. GAP 4 (A4).
 func TestMaybeAdvanceKachinuki_BracketPropagatesWinner(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
 	compID := "kachinuki-bracket-propagates-winner"
-
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:            compID,
-		TeamMatchType: state.TeamMatchTypeKachinuki,
-		TeamSize:      5,
-	}))
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{}))
+	eng, store, _ := setupKachinukiComp(t, compID, 5)
 
 	// 2-round bracket: Round 0 = [SF1, SF2], Round 1 = [Final].
 	// SF1: TeamA vs TeamB. Bout 1: A-Senpo beats B-Senpo.
@@ -1122,15 +1126,8 @@ func TestMaybeAdvanceKachinuki_BracketPropagatesWinner(t *testing.T) {
 // kachinuki match is still running (not exhausted), the next bout is appended
 // to BracketMatch.SubResults. GAP 4 (A4).
 func TestMaybeAdvanceKachinuki_BracketAppendsBout(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
 	compID := "kachinuki-bracket-appends-bout"
-
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:            compID,
-		TeamMatchType: state.TeamMatchTypeKachinuki,
-		TeamSize:      5,
-	}))
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{}))
+	eng, store, _ := setupKachinukiComp(t, compID, 5)
 
 	// Single-round bracket (the final). After bout 2 both sides still have
 	// players: remainingA=[A-Jiho], remainingB=[B-Senpo] → Next (bout 3 pairing).
@@ -1169,16 +1166,8 @@ func TestMaybeAdvanceKachinuki_BracketAppendsBout(t *testing.T) {
 // (bronze) bout-append path mirrors the Rounds path: next bout is appended to
 // ThirdPlaceMatch.SubResults when the match is still running. GAP 4 (A4).
 func TestMaybeAdvanceKachinuki_BronzeAppendsBout(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
 	compID := "kachinuki-bronze-appends-bout"
-
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:            compID,
-		TeamMatchType: state.TeamMatchTypeKachinuki,
-		TeamSize:      5,
-		Naginata:      true,
-	}))
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{}))
+	eng, store, _ := setupKachinukiComp(t, compID, 5, func(c *state.Competition) { c.Naginata = true })
 
 	// Bronze match has 2 bouts; both sides still have remaining players after bout 2.
 	// Same bout-log-only scenario as BracketAppendsBout above.
@@ -1690,15 +1679,8 @@ func TestMaybeAdvanceKachinuki_PoolSimultaneousExhaustionDraw(t *testing.T) {
 // operator-driven resolution path for bracket ties; the engine must not
 // finalize the bracket match automatically. GAP 2b.
 func TestMaybeAdvanceKachinuki_BracketSimultaneousExhaustionStaysRunning(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
 	compID := "kachinuki-bracket-simultaneous-exhaustion"
-
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:            compID,
-		TeamMatchType: state.TeamMatchTypeKachinuki,
-		TeamSize:      3,
-	}))
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{}))
+	eng, store, _ := setupKachinukiComp(t, compID, 3)
 
 	// Single-round bracket final: bout 3 ends in hikiwake exhausting both sides.
 	// remainingA=[], remainingB=[] → BothExhausted → bracket stays running.

@@ -31,6 +31,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
 
   const allMatches = useMemo(() => {
     const out = [];
+    const compTMT = teamMatchTypeFor(c);
     if (pools) {
         pools.forEach((p) => {
             // Exact parsed pool name, not a raw prefix: startsWith("Pool A-")
@@ -43,7 +44,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
                 // so isTeam checks route it to the individual editor (mirrors
                 // enrichPoolMatchWithComp in admin_pools.jsx).
                 const isRepBout = isSupplementaryBout(m.id || "");
-                out.push({ ...m, phase: "pool", phaseName: p.poolName, poolName: p.poolName, compFormat: c.format, compId: c.id, compName: c.name, compKind: isRepBout ? "" : c.kind, teamSize: isRepBout ? 0 : c.teamSize, teamMatchType: teamMatchTypeFor(c, isRepBout) });
+                out.push({ ...m, phase: "pool", phaseName: p.poolName, poolName: p.poolName, compFormat: c.format, compId: c.id, compName: c.name, compKind: isRepBout ? "" : c.kind, teamSize: isRepBout ? 0 : c.teamSize, teamMatchType: isRepBout ? "" : compTMT });
             });
         });
     }
@@ -55,7 +56,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
     // renders `bracket`/`derivedBracket` directly and is NOT affected.
     if (bracket && bracket.rounds && !bracket.preview) {
         bracket.rounds.forEach((round, ri) => {
-            round.forEach((m) => out.push({ ...m, phase: "bracket", round: window.roundLabel(ri, bracket.rounds.length), phaseName: window.roundLabel(ri, bracket.rounds.length), roundIndex: ri, compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize, teamMatchType: teamMatchTypeFor(c) }));
+            round.forEach((m) => out.push({ ...m, phase: "bracket", round: window.roundLabel(ri, bracket.rounds.length), phaseName: window.roundLabel(ri, bracket.rounds.length), roundIndex: ri, compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize, teamMatchType: compTMT }));
         });
     }
     return out;

@@ -27,3 +27,19 @@ export function collectText(node) {
   if (node.props?.children) return collectText(node.props.children);
   return '';
 }
+
+// findAll: collect-all variant of findInTree (every node matching pred, not
+// just the first), depth-first over the same vnode shape.
+export function findAll(node, pred, out = []) {
+  if (!node || typeof node !== 'object') return out;
+  if (Array.isArray(node)) { node.forEach(n => findAll(n, pred, out)); return out; }
+  if (pred(node)) out.push(node);
+  const kids = node.children || node.props?.children || [];
+  [].concat(kids).forEach(k => findAll(k, pred, out));
+  return out;
+}
+
+// hasClass: true when a vnode's className prop contains cls as a token.
+export function hasClass(node, cls) {
+  return String(node?.props?.className || '').split(' ').includes(cls);
+}

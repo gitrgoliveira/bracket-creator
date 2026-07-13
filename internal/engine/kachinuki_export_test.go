@@ -310,16 +310,8 @@ func TestBuildKachinukiPositionMap_NilComp(t *testing.T) {
 // TestCollectKachinukiMatches_WithBracketStub verifies that a bracket match
 // with no SubResults is skipped even if it has a kachinuki-exhaustion decision.
 func TestCollectKachinukiMatches_WithBracketStub(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
 	compID := "kachinuki-bracket-stub"
-
-	comp := &state.Competition{
-		ID:            compID,
-		TeamMatchType: state.TeamMatchTypeKachinuki,
-		TeamSize:      5,
-	}
-	require.NoError(t, store.SaveCompetition(comp))
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{}))
+	eng, store, comp := setupKachinukiComp(t, compID, 5)
 
 	// Bracket match with kachinuki-exhaustion decision but no SubResults:
 	// the export skips any bracket match where len(bm.SubResults) == 0.
@@ -346,16 +338,8 @@ func TestCollectKachinukiMatches_WithBracketStub(t *testing.T) {
 // match carrying real SubResults (from MaybeAdvanceKachinuki) produces a
 // full detail entry with per-bout rows, not a stub.
 func TestCollectKachinukiMatches_BracketWithSubResults(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
 	compID := "kachinuki-bracket-subs"
-
-	comp := &state.Competition{
-		ID:            compID,
-		TeamMatchType: state.TeamMatchTypeKachinuki,
-		TeamSize:      5,
-	}
-	require.NoError(t, store.SaveCompetition(comp))
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{}))
+	eng, store, comp := setupKachinukiComp(t, compID, 5)
 
 	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
 		Rounds: [][]state.BracketMatch{
@@ -395,17 +379,8 @@ func TestCollectKachinukiMatches_BracketWithSubResults(t *testing.T) {
 // ThirdPlaceMatch sibling of bracket.Rounds is collected when it carries
 // real SubResults.
 func TestCollectKachinukiMatches_BronzeWithSubResults(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
 	compID := "kachinuki-bronze-subs"
-
-	comp := &state.Competition{
-		ID:            compID,
-		TeamMatchType: state.TeamMatchTypeKachinuki,
-		TeamSize:      5,
-		Naginata:      true,
-	}
-	require.NoError(t, store.SaveCompetition(comp))
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{}))
+	eng, store, comp := setupKachinukiComp(t, compID, 5, func(c *state.Competition) { c.Naginata = true })
 
 	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
 		Rounds: [][]state.BracketMatch{},
@@ -436,17 +411,8 @@ func TestCollectKachinukiMatches_BronzeWithSubResults(t *testing.T) {
 // at parity with Rounds matches (kachinuki-exhaustion stub, skipped when it
 // has no bouts).
 func TestCollectKachinukiMatches_BronzeStub(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
 	compID := "kachinuki-bronze-stub"
-
-	comp := &state.Competition{
-		ID:            compID,
-		TeamMatchType: state.TeamMatchTypeKachinuki,
-		TeamSize:      5,
-		Naginata:      true,
-	}
-	require.NoError(t, store.SaveCompetition(comp))
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{}))
+	eng, store, comp := setupKachinukiComp(t, compID, 5, func(c *state.Competition) { c.Naginata = true })
 
 	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
 		Rounds: [][]state.BracketMatch{},

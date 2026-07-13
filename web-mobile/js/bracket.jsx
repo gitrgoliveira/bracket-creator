@@ -198,26 +198,20 @@ const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD,
       </div>
     );
   }
+  // Engi pair: split the combined name so member 2 stacks under member 1
+  // instead of truncating on narrow bracket cards.
+  const [m1, m2] = isEngi && window.engiPairParts ? window.engiPairParts(player.name) : [player.name, ""];
   return (
     <div className={`bc-side bc-side--${side} ${isWinner ? "bc-side--winner" : ""}`}>
       <span className={`bc-color-badge bc-color-badge--${isAka ? "aka" : "shiro"}`}>{isAka ? "AKA" : "SHIRO"}</span>
 
       <div className="bc-name-wrap">
-        {/* Engi pair: split the combined name so member 2 stacks under
-            member 1 instead of truncating on narrow bracket cards. */}
-        {(() => {
-          const [m1, m2] = isEngi && window.engiPairParts ? window.engiPairParts(player.name) : [player.name, ""];
-          return (
-            <>
-              <span className="bc-name">
-                {isWinner ? <span className="bc-winner-tick" aria-label="Winner" title="Winner">✓</span> : null}
-                {player.number ? <span className="num-prefix">{player.number}</span> : null}
-                {m1}
-              </span>
-              {m2 ? <span className="bc-name">{m2}</span> : null}
-            </>
-          );
-        })()}
+        <span className="bc-name">
+          {isWinner ? <span className="bc-winner-tick" aria-label="Winner" title="Winner">✓</span> : null}
+          {player.number ? <span className="num-prefix">{player.number}</span> : null}
+          {m1}
+        </span>
+        {m2 ? <span className="bc-name">{m2}</span> : null}
         {/* Reserve the dojo line on every side when dojos are shown: a real
             player without a dojo, or a "Winner of…" placeholder, gets an
             invisible spacer line so all sides (and thus all bracket cards) keep
@@ -886,7 +880,6 @@ function bronzeUnderFinalStyle(rounds) {
 
 window.BracketTree = BracketTree;
 window.MatchCard = MatchCard;
-window.PlayerLine = PlayerLine;
 window.bronzeUnderFinalStyle = bronzeUnderFinalStyle;
 window.roundLabel = roundLabel;
 // Exposed so the bracket winner-picker panel can label a selected match with
@@ -902,4 +895,4 @@ window.decisionSuffix = decisionSuffix;
 window.sideLabel = sideLabel;
 window.ipponsFromScore = ipponsFromScore;
 
-export { formatIpponsScore, decisionSuffix, sideLabel, roundLabel, ipponsFromScore, teamIVScore, teamIVPWScore, engiFlagScore, matchScoreStr, matchStateCell, buildDisplayModel, computeMetaTops, bronzeUnderFinalStyle };
+export { formatIpponsScore, decisionSuffix, sideLabel, roundLabel, ipponsFromScore, teamIVScore, teamIVPWScore, engiFlagScore, matchScoreStr, matchStateCell, buildDisplayModel, computeMetaTops, bronzeUnderFinalStyle, PlayerLine };

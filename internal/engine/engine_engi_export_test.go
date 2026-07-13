@@ -83,20 +83,26 @@ func TestExportCompetitionXlsx_NaginataThirdPlaceSlot(t *testing.T) {
 	rows, err := f.GetRows(helper.SheetEliminationMatches)
 	require.NoError(t, err)
 
-	found := false
-	for _, row := range rows {
+	assert.True(t, hasCellValue(rows, helper.ThirdPlaceLabel),
+		"blank-template export for a naginata competition must have a '3rd Place' slot on the Elimination Matches sheet")
+}
+
+// findCellRow returns the 0-based index of the first row containing a cell
+// equal to val, or -1 when absent.
+func findCellRow(rows [][]string, val string) int {
+	for i, row := range rows {
 		for _, cell := range row {
-			if cell == "3rd Place" {
-				found = true
-				break
+			if cell == val {
+				return i
 			}
 		}
-		if found {
-			break
-		}
 	}
-	assert.True(t, found,
-		"blank-template export for a naginata competition must have a '3rd Place' slot on the Elimination Matches sheet")
+	return -1
+}
+
+// hasCellValue reports whether any cell in rows equals val.
+func hasCellValue(rows [][]string, val string) bool {
+	return findCellRow(rows, val) >= 0
 }
 
 // engineParsePrintAreaLastRow extracts the last-row number from a Print_Area
@@ -160,18 +166,7 @@ func TestExportCompetitionXlsx_NaginataThirdPlacePrintAreaAndLayout(t *testing.T
 	// Find the "3rd Place" row (1-based Excel row).
 	rows, err := f.GetRows(helper.SheetEliminationMatches)
 	require.NoError(t, err)
-	thirdPlaceExcelRow := -1
-	for i, row := range rows {
-		for _, cell := range row {
-			if cell == "3rd Place" {
-				thirdPlaceExcelRow = i + 1
-				break
-			}
-		}
-		if thirdPlaceExcelRow >= 0 {
-			break
-		}
-	}
+	thirdPlaceExcelRow := findCellRow(rows, helper.ThirdPlaceLabel) + 1
 	require.GreaterOrEqual(t, thirdPlaceExcelRow, 1,
 		"blank-template naginata export must have a '3rd Place' row")
 
@@ -217,17 +212,6 @@ func TestExportCompetitionXlsx_Engi(t *testing.T) {
 	f, err := excelize.OpenReader(bytes.NewReader(data))
 	require.NoError(t, err)
 	defer func() { _ = f.Close() }()
-
-	hasCellValue := func(rows [][]string, val string) bool {
-		for _, row := range rows {
-			for _, cell := range row {
-				if cell == val {
-					return true
-				}
-			}
-		}
-		return false
-	}
 
 	// --- Pool Matches sheet: engi standings headers ---
 	// GetRows resolves shared string table references, so literal header values

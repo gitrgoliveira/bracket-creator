@@ -41,8 +41,7 @@ describe('bracket MatchCard engi pair stacking', () => {
       return i < 0 ? [s, ''] : [s.slice(0, i), s.slice(i + 3)];
     };
     vi.resetModules();
-    await import('../bracket.jsx');
-    PlayerLine = window.PlayerLine;
+    ({ PlayerLine } = await import('../bracket.jsx'));
   });
 
   afterEach(() => {

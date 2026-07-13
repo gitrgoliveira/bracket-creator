@@ -2052,12 +2052,13 @@ func TestAttachPoolMatches_FallsBackToName(t *testing.T) {
 }
 
 // ------------------------------------------------------------
-// TDD-2: Paired-name rendering (engi member 2 in Data sheet col D)
+// TDD-2: Paired-name rendering (combined pair name in the Data sheet)
 // ------------------------------------------------------------
 
-// makeEngiPools builds two engi pairs with DisplayName set (member 2).
-// Each pair is ONE participant whose member1=Name and member2=DisplayName.
-// SideA/SideB point into pool.Players so the playerMatchRows map resolves correctly.
+// makeEngiPools builds two engi pairs. Each pair is ONE participant with both
+// member names combined in Name ("Member 1 - Member 2"); DisplayName is not
+// used for engi. SideA/SideB point into pool.Players so the playerMatchRows
+// map resolves correctly.
 func makeEngiPools() []helper.Pool {
 	pool := helper.Pool{
 		PoolName: "Pool A",
@@ -2149,18 +2150,6 @@ func TestBuildResultsWorkbook_NonEngiWithZekkenStillWorks(t *testing.T) {
 // ------------------------------------------------------------
 // TDD-3: Flag score cells in pool and bracket overlays
 // ------------------------------------------------------------
-
-// containsCell returns true if any row in rows contains the exact string value.
-func containsCell(rows [][]string, value string) bool {
-	for _, row := range rows {
-		for _, cell := range row {
-			if cell == value {
-				return true
-			}
-		}
-	}
-	return false
-}
 
 // firstPoolMatchScoreRow returns the row from `rows` that holds the first match's
 // score cells for the pool assigned to the court band starting at 0-based column
@@ -2336,7 +2325,7 @@ func TestBuildResultsWorkbook_EngiNonEngiPoolScoreUnchanged(t *testing.T) {
 	rows, err := f.GetRows(helper.SheetPoolMatches)
 	require.NoError(t, err)
 
-	assert.True(t, containsCell(rows, "M"),
+	assert.True(t, sheetContainsCell(rows, "M"),
 		"Pool Matches sheet must still contain 'M' (ippon) for a non-engi match")
 }
 
@@ -2462,7 +2451,7 @@ func TestBuildResultsWorkbook_EngiBracketFlagScoreCells(t *testing.T) {
 
 			// The ippon-letter score (ScoreA="MK") must never leak into any cell:
 			// engi is flag-scored, so the ippon path must be fully bypassed.
-			assert.False(t, containsCell(rows, tc.forbiddenIpponVal),
+			assert.False(t, sheetContainsCell(rows, tc.forbiddenIpponVal),
 				"elimination sheet must NOT contain ippon letters (%q) for an engi bracket", tc.forbiddenIpponVal)
 		})
 	}
@@ -2584,7 +2573,7 @@ func TestBuildResultsWorkbook_EngiStandingsHeadersRelabeled(t *testing.T) {
 	require.NoError(t, err)
 
 	// The standings table must have a "Flags" header.
-	assert.True(t, containsCell(rows, "Flags"),
+	assert.True(t, sheetContainsCell(rows, "Flags"),
 		"Pool Matches standings header must be 'Flags' for an engi competition")
 
 	// The winner's accumulated flag count (3) must be overlaid as a literal
@@ -2594,14 +2583,14 @@ func TestBuildResultsWorkbook_EngiStandingsHeadersRelabeled(t *testing.T) {
 
 	// "PW" and "PL" must NOT appear in the standings header for engi
 	// (they are kendo-specific ippon-count columns).
-	assert.False(t, containsCell(rows, "PW"),
+	assert.False(t, sheetContainsCell(rows, "PW"),
 		"Pool Matches must NOT contain 'PW' header for an engi competition")
-	assert.False(t, containsCell(rows, "PL"),
+	assert.False(t, sheetContainsCell(rows, "PL"),
 		"Pool Matches must NOT contain 'PL' header for an engi competition")
 
 	// "L" must NOT appear in the standings header for engi:
 	// engi rankings do not record losses, only wins and flags.
-	assert.False(t, containsCell(rows, "L"),
+	assert.False(t, sheetContainsCell(rows, "L"),
 		"Pool Matches must NOT contain 'L' header for an engi competition")
 }
 
@@ -2641,14 +2630,14 @@ func TestBuildResultsWorkbook_NonEngiStandingsHeadersUnchanged(t *testing.T) {
 	require.NoError(t, err)
 
 	// Non-engi must still have the classic kendo standings headers.
-	assert.True(t, containsCell(rows, "PW"),
+	assert.True(t, sheetContainsCell(rows, "PW"),
 		"Non-engi Pool Matches must still contain 'PW' header")
-	assert.True(t, containsCell(rows, "PL"),
+	assert.True(t, sheetContainsCell(rows, "PL"),
 		"Non-engi Pool Matches must still contain 'PL' header")
-	assert.True(t, containsCell(rows, "T"),
+	assert.True(t, sheetContainsCell(rows, "T"),
 		"Non-engi Pool Matches must still contain 'T' header")
 	// "Flags" must NOT appear in the non-engi standings.
-	assert.False(t, containsCell(rows, "Flags"),
+	assert.False(t, sheetContainsCell(rows, "Flags"),
 		"Non-engi Pool Matches must NOT contain 'Flags' header")
 }
 
@@ -2702,7 +2691,7 @@ func TestBuildResultsWorkbook_EngiDecisionSuffix(t *testing.T) {
 	require.NoError(t, err)
 
 	// The vs/middle cell must carry "Kiken" for a kiken-voluntary engi match.
-	assert.True(t, containsCell(rows, "Kiken"),
+	assert.True(t, sheetContainsCell(rows, "Kiken"),
 		"Pool Matches vs-cell must render 'Kiken' for a kiken-voluntary engi match")
 
 	// Score cells flanking the vs column must be blank: FlagsScorePair returns ("", "") for a no-flag decision.
@@ -2739,13 +2728,14 @@ func TestBuildResultsWorkbook_EngiPartialPoolScoring(t *testing.T) {
 	comp.Engi = true
 	require.NoError(t, store.SaveCompetition(comp))
 
-	// Two engi pools of two pairs each; pool B is unscored.
+	// Two engi pools of two pairs each; pool B is unscored. Each pair carries
+	// both member names combined in Name (the canonical engi model).
 	// SideA/SideB point into pool.Players so the playerMatchRows map resolves correctly.
 	partialPoolA := helper.Pool{
 		PoolName: "Pool A",
 		Players: []helper.Player{
-			{ID: "ep1", Name: "Spark A", DisplayName: "Spark B", Dojo: "DojoA"},
-			{ID: "ep2", Name: "Flame A", DisplayName: "Flame B", Dojo: "DojoB"},
+			{ID: "ep1", Name: "Spark A - Spark B", Dojo: "DojoA"},
+			{ID: "ep2", Name: "Flame A - Flame B", Dojo: "DojoB"},
 		},
 	}
 	partialPoolA.Matches = []helper.Match{{SideA: &partialPoolA.Players[0], SideB: &partialPoolA.Players[1]}}
@@ -2753,8 +2743,8 @@ func TestBuildResultsWorkbook_EngiPartialPoolScoring(t *testing.T) {
 	partialPoolB := helper.Pool{
 		PoolName: "Pool B",
 		Players: []helper.Player{
-			{ID: "ep3", Name: "Wave A", DisplayName: "Wave B", Dojo: "DojoC"},
-			{ID: "ep4", Name: "Stone A", DisplayName: "Stone B", Dojo: "DojoD"},
+			{ID: "ep3", Name: "Wave A - Wave B", Dojo: "DojoC"},
+			{ID: "ep4", Name: "Stone A - Stone B", Dojo: "DojoD"},
 		},
 	}
 	partialPoolB.Matches = []helper.Match{{SideA: &partialPoolB.Players[0], SideB: &partialPoolB.Players[1]}}
@@ -2766,15 +2756,15 @@ func TestBuildResultsWorkbook_EngiPartialPoolScoring(t *testing.T) {
 	results := []state.MatchResult{
 		{
 			ID:       "Pool A-0",
-			SideA:    "Spark A",
+			SideA:    "Spark A - Spark B",
 			SideAID:  "ep1",
-			SideB:    "Flame A",
+			SideB:    "Flame A - Flame B",
 			SideBID:  "ep2",
 			FlagsA:   3,
 			FlagsB:   2,
 			Decision: "fought",
 			Status:   state.MatchStatusCompleted,
-			Winner:   "Spark A",
+			Winner:   "Spark A - Spark B",
 			WinnerID: "ep1",
 		},
 	}
@@ -2825,8 +2815,10 @@ func TestBuildResultsWorkbook_EngiMultiCourtStandingsColumns(t *testing.T) {
 	comp := &state.Competition{ID: compID, Name: "MC Engi", Courts: []string{"A", "B"}, Engi: true}
 	require.NoError(t, store.SaveCompetition(comp))
 
+	// makePair builds an engi pair: both member names combined in Name (the
+	// canonical model); DisplayName is not used for engi.
 	makePair := func(id, n1, n2, dojo string) helper.Player {
-		return helper.Player{ID: id, Name: n1, DisplayName: n2, Dojo: dojo}
+		return helper.Player{ID: id, Name: n1 + " - " + n2, Dojo: dojo}
 	}
 
 	// makeEngiPool creates a pool with SideA/SideB pointing into pool.Players.
@@ -2848,11 +2840,11 @@ func TestBuildResultsWorkbook_EngiMultiCourtStandingsColumns(t *testing.T) {
 	// Score only Pool C (court B): pc1 wins 3-2 on flags.
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{
-			ID: "Pool C-0", SideA: "COne-A", SideAID: "pc1",
-			SideB: "CTwo-A", SideBID: "pc2",
+			ID: "Pool C-0", SideA: "COne-A - COne-B", SideAID: "pc1",
+			SideB: "CTwo-A - CTwo-B", SideBID: "pc2",
 			FlagsA: 3, FlagsB: 2,
 			Decision: "fought", Status: state.MatchStatusCompleted,
-			Winner: "COne-A", WinnerID: "pc1",
+			Winner: "COne-A - COne-B", WinnerID: "pc1",
 		},
 	}))
 
@@ -2878,8 +2870,9 @@ func TestBuildResultsWorkbook_EngiMultiCourtStandingsColumns(t *testing.T) {
 
 // TestBuildResultsWorkbook_EngiUnicodeAndCommaNames characterizes that the export
 // correctly handles engi pair names containing unicode characters and commas.
-// Both member names (Name and DisplayName) for each pair must appear in the Data
-// sheet exactly, without corruption or splitting on comma or multibyte boundaries.
+// The combined pair name (both members joined in the Name field) must appear in
+// the Data sheet exactly, without corruption or splitting on comma or multibyte
+// boundaries.
 func TestBuildResultsWorkbook_EngiUnicodeAndCommaNames(t *testing.T) {
 	t.Parallel()
 	dir, store, eng, compID := testSetup(t)
@@ -2921,7 +2914,7 @@ func TestBuildResultsWorkbook_EngiUnicodeAndCommaNames(t *testing.T) {
 	// Both combined pair names must appear as exact cell values in the Data sheet.
 	names := []string{uniPair.Name, comPair.Name}
 	for _, name := range names {
-		assert.True(t, containsCell(dataRows, name),
+		assert.True(t, sheetContainsCell(dataRows, name),
 			"Data sheet must contain member name %q exactly (unicode/comma safe)", name)
 	}
 }
@@ -3025,9 +3018,9 @@ func TestBuildResultsWorkbook_NaginataThirdPlaceRendered(t *testing.T) {
 	rows, err := f.GetRows(helper.SheetEliminationMatches)
 	require.NoError(t, err)
 
-	assert.True(t, containsCell(rows, "3rd Place"),
+	assert.True(t, sheetContainsCell(rows, helper.ThirdPlaceLabel),
 		"Elimination Matches sheet must have a '3rd Place' header block for naginata")
-	assert.True(t, containsCell(rows, "D"),
+	assert.True(t, sheetContainsCell(rows, "D"),
 		"Elimination Matches sheet must show the bronze score 'D' (kendo ippon, only in bronze)")
 
 	// Also assert that both semifinal losers' names appear in the bronze score row.
@@ -3037,7 +3030,7 @@ func TestBuildResultsWorkbook_NaginataThirdPlaceRendered(t *testing.T) {
 	bronzeThirdPlaceRow := -1
 	for i, row := range rows {
 		for _, cell := range row {
-			if cell == "3rd Place" {
+			if cell == helper.ThirdPlaceLabel {
 				bronzeThirdPlaceRow = i
 				break
 			}
@@ -3111,7 +3104,7 @@ func TestBuildResultsWorkbook_NaginataThirdPlaceNamesBeforeBronze(t *testing.T) 
 	thirdPlaceRow := -1
 	for i, row := range rows {
 		for _, cell := range row {
-			if cell == "3rd Place" {
+			if cell == helper.ThirdPlaceLabel {
 				thirdPlaceRow = i
 				break
 			}
@@ -3191,14 +3184,14 @@ func TestBuildResultsWorkbook_EngiNaginataThirdPlaceFlags(t *testing.T) {
 	rows, err := f.GetRows(helper.SheetEliminationMatches)
 	require.NoError(t, err)
 
-	assert.True(t, containsCell(rows, "3rd Place"),
+	assert.True(t, sheetContainsCell(rows, helper.ThirdPlaceLabel),
 		"Elimination Matches sheet must have a '3rd Place' header for engi naginata")
 
 	// Find the "3rd Place" row and verify the score row (header+2) carries "5".
 	thirdPlaceRow := -1
 	for i, row := range rows {
 		for _, cell := range row {
-			if cell == "3rd Place" {
+			if cell == helper.ThirdPlaceLabel {
 				thirdPlaceRow = i
 				break
 			}
@@ -3270,7 +3263,7 @@ func TestBuildResultsWorkbook_NonNaginataNoThirdPlace(t *testing.T) {
 	rows, err := f.GetRows(helper.SheetEliminationMatches)
 	require.NoError(t, err)
 
-	assert.False(t, containsCell(rows, "3rd Place"),
+	assert.False(t, sheetContainsCell(rows, helper.ThirdPlaceLabel),
 		"non-naginata (kendo) export must NOT contain a '3rd Place' block")
 }
 
@@ -3304,7 +3297,7 @@ func TestBuildResultsWorkbook_NaginataThirdPlaceEntrantFormulas(t *testing.T) {
 	thirdPlaceRowIdx := -1
 	for i, row := range rows {
 		for _, cell := range row {
-			if cell == "3rd Place" {
+			if cell == helper.ThirdPlaceLabel {
 				thirdPlaceRowIdx = i
 				break
 			}
@@ -3480,7 +3473,7 @@ func TestBuildResultsWorkbook_NaginataThirdPlacePrintAreaCoversBlock(t *testing.
 	thirdPlaceExcelRow := -1
 	for i, row := range rows {
 		for _, cell := range row {
-			if cell == "3rd Place" {
+			if cell == helper.ThirdPlaceLabel {
 				thirdPlaceExcelRow = i + 1
 				break
 			}
@@ -3577,7 +3570,7 @@ func TestBuildResultsWorkbook_EngiPairLabelsInBracketEntrants(t *testing.T) {
 	var entrants []string
 	for i, row := range rows {
 		for _, cell := range row {
-			if cell != "3rd Place" && parseRoundMatchLabel(cell) <= 0 {
+			if cell != helper.ThirdPlaceLabel && parseRoundMatchLabel(cell) <= 0 {
 				continue
 			}
 			if i+2 >= len(rows) {

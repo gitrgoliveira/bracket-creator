@@ -471,10 +471,8 @@ func overlayPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[str
 
 				leftIppons := mr.IpponsA
 				rightIppons := mr.IpponsB
-				leftFlags, rightFlags := mr.FlagsA, mr.FlagsB
 				if mirror {
 					leftIppons, rightIppons = mr.IpponsB, mr.IpponsA
-					leftFlags, rightFlags = mr.FlagsB, mr.FlagsA
 				}
 
 				hantei := mr.DecidedByHantei != nil && *mr.DecidedByHantei
@@ -482,7 +480,7 @@ func overlayPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[str
 
 				var leftScore, rightScore string
 				if engi {
-					leftScore, rightScore = FlagsScorePair(leftFlags, rightFlags)
+					leftScore, rightScore = mirroredFlagsScore(mr.FlagsA, mr.FlagsB, mirror)
 				} else {
 					leftScore = IpponsScore(leftIppons)
 					rightScore = IpponsScore(rightIppons)
@@ -919,6 +917,11 @@ func overlayTeamPoolStandings(f *excelize.File, pools []helper.Pool, standings m
 // thirdPlaceMatch is the bracket's bronze match (nil when absent/not naginata).
 func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMatch, teamSize int, mirror bool, engi bool, thirdPlaceMatch *state.BracketMatch) error {
 	if teamSize != 0 {
+		// Engi is individual-only; the team overlay renders ippon strings and
+		// would silently drop flag scores. Fail loudly if the invariant breaks.
+		if engi {
+			return fmt.Errorf("overlayBracketScores: engi is individual-only (teamSize=%d)", teamSize)
+		}
 		return overlayTeamBracketScores(f, bracketByNum, teamSize, mirror, thirdPlaceMatch)
 	}
 	sheetName := helper.SheetEliminationMatches
@@ -968,15 +971,11 @@ func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMa
 
 			// For engi, the bracket stores flag counts in FlagsA/FlagsB;
 			// ScoreA/ScoreB hold ippon letters that do not apply. Render the
-			// flag count via FlagsScorePair instead. leftFlags/rightFlags are named
-			// by display position (post-mirror), matching overlayPoolScores.
+			// flag count via mirroredFlagsScore instead, matching
+			// overlayPoolScores.
 			var leftScore, rightScore string
 			if engi {
-				leftFlags, rightFlags := bm.FlagsA, bm.FlagsB
-				if mirror {
-					leftFlags, rightFlags = bm.FlagsB, bm.FlagsA
-				}
-				leftScore, rightScore = FlagsScorePair(leftFlags, rightFlags)
+				leftScore, rightScore = mirroredFlagsScore(bm.FlagsA, bm.FlagsB, mirror)
 			} else {
 				leftScore = bm.ScoreA
 				rightScore = bm.ScoreB

@@ -106,6 +106,17 @@ func FlagsScorePair(a, b int) (string, string) {
 	return strconv.Itoa(max(0, a)), strconv.Itoa(max(0, b))
 }
 
+// mirroredFlagsScore is FlagsScorePair with the display-position swap applied:
+// a/b are the stored SideA/SideB flag counts, and mirror flips them so the
+// returned pair is (left, right) in on-sheet order. Shared by the pool and
+// bracket overlays so the swap-then-format sequence lives in one place.
+func mirroredFlagsScore(a, b int, mirror bool) (string, string) {
+	if mirror {
+		a, b = b, a
+	}
+	return FlagsScorePair(a, b)
+}
+
 // IpponsScore formats an ippon slice as a readable score string: ["M","K"] ->
 // "MK", nil/empty -> "". Mirrors the character-join behaviour in
 // formatIpponsScore (bracket.jsx) without the full display logic (bye/hikiwake

@@ -209,4 +209,13 @@ describe('buildXlsxBody roster field sanitizing', () => {
     const lines = body.get('playerList').split('\n');
     expect(lines[0]).toBe('42, Dojo1');
   });
+
+  it('coerces nullish field values to an empty field, not "undefined"/"null"', () => {
+    // Copilot round: String(undefined) exported the literal text "undefined";
+    // an empty field lets the server reject the missing name instead.
+    const body = buildXlsxBody(cfg, 'Test', [player(undefined, 'Dojo1'), player(null, 'Dojo2')]);
+    const lines = body.get('playerList').split('\n');
+    expect(lines[0]).toBe(', Dojo1');
+    expect(lines[1]).toBe(', Dojo2');
+  });
 });

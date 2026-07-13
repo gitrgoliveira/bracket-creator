@@ -77,6 +77,11 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 			return nil, bErr
 		}
 		if b != nil && b.ThirdPlaceMatch != nil {
+			// The bronze block is the ONLY content on this sheet on the blank
+			// path (see comment above), and it is rendered at court band 1
+			// (courtStartCol=1). numCourts=1 therefore covers all content
+			// exactly; the competition's court count would only widen the
+			// print area with empty columns.
 			bronzeEndRow := helper.PrintThirdPlaceBlock(f, 1, 2, comp.TeamSize, comp.Mirror, comp.Engi, 0, 0, nil)
 			helper.SetEliminationPrintArea(f, helper.SheetEliminationMatches, 1, bronzeEndRow-1)
 			helper.SetSheetLayoutPortraitA4DownThenOver(f, helper.SheetEliminationMatches, 1)

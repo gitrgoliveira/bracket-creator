@@ -2,13 +2,14 @@
 
 const { useState: useStateA } = React;
 
-// Prepare a roster CSV field: collapse embedded CR/LF runs to a single space
-// (the /create handler splits the roster on newlines BEFORE CSV parsing, so a
-// quoted newline would still break a record apart), then RFC-4180-quote if the
-// field contains a comma or double-quote.
+// Prepare a roster CSV field: coerce nullish to "" (String(undefined) would
+// export the literal text "undefined"), collapse embedded CR/LF runs to a
+// single space (the /create handler splits the roster on newlines BEFORE CSV
+// parsing, so a quoted newline would still break a record apart), then
+// RFC-4180-quote if the field contains a comma or double-quote.
 // Used by buildXlsxBody (including its rosterLine roster helper).
 const csvField = (s) => {
-  const str = String(s).replace(/[\r\n]+/g, " ").trim();
+  const str = (s == null ? "" : String(s)).replace(/[\r\n]+/g, " ").trim();
   return /[",]/.test(str) ? '"' + str.replace(/"/g, '""') + '"' : str;
 };
 

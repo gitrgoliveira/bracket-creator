@@ -366,13 +366,11 @@ type Competition struct {
 	// mixed). Locked after draw like Naginata. Default false = ippon-scored.
 	//
 	// Engi competitors are PAIRS (two member names, one shared dojo). On the Go
-	// side a pair is a single competitor stored in the WithZekkenName column
-	// layout: Player.Name holds member 1, Player.DisplayName holds member 2,
-	// Player.Dojo holds the shared dojo. The stored WithZekkenName flag is NOT
-	// forced true for engi; instead the participant CSV reader/writer derive the
-	// effective layout via EffectiveWithZekkenName() (WithZekkenName || Engi), so
-	// an engi roster always uses the 4-column [id, Name, DisplayName, Dojo] form
-	// whether or not WithZekkenName itself is set.
+	// side a pair is a single competitor whose Player.Name holds BOTH member
+	// names combined as "Name 1 - Name 2"; Player.Dojo holds the shared dojo.
+	// Engi does not alter the participant CSV layout: when WithZekkenName is
+	// set, Player.DisplayName carries the combined pair zekken
+	// ("ZEKKEN1 - ZEKKEN2") exactly like any other competition.
 	Engi bool `yaml:"engi,omitempty" json:"engi"`
 
 	CheckInEnabled bool `yaml:"check_in_enabled,omitempty" json:"checkInEnabled,omitempty"`
@@ -437,11 +435,12 @@ type Competition struct {
 }
 
 // EffectiveWithZekkenName reports whether the participant CSV reader/writer
-// must use the 4-column [id, Name, DisplayName, Dojo] layout. Engi (kata-pair)
-// competitions always carry a second member name in the DisplayName column, so
-// they force the zekken layout regardless of the explicit WithZekkenName flag.
+// must use the 4-column [id, Name, DisplayName, Dojo] layout. It is currently
+// identical to WithZekkenName (engi pairs store both member names combined in
+// the Name field, so they no longer force the zekken layout); kept as a method
+// so any future layout modifier has a single seam.
 func (c *Competition) EffectiveWithZekkenName() bool {
-	return c.WithZekkenName || c.Engi
+	return c.WithZekkenName
 }
 
 // ApplyCompetitionDefaults fills zero-valued per-phase durations from the

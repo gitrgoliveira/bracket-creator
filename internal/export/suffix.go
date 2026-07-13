@@ -8,6 +8,8 @@
 package export
 
 import (
+	"strconv"
+
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
@@ -83,6 +85,36 @@ func MiddleCellText(decision, suffix string) string {
 	default:
 		return suffix
 	}
+}
+
+// FlagsScorePair returns the display strings for both sides of an engi bout.
+//
+// Pairwise rule: when EITHER side has a positive flag count, write BOTH counts
+// numerically (clamping any negative to 0). When both counts are <=0, return
+// ("", "") to leave both cells blank.
+//
+// Why pairwise? A flag-decided bout (e.g. 5-0) means the losing side genuinely
+// scored zero flags - that "0" is a real score and must appear so the operator
+// can tell "bout was fought and decided 5-0" from "bout was kiken/fusenpai with
+// no flags recorded at all (0-0 but decided without scoring)". By contrast, a
+// kiken/fusenpai decision with no flags on either side has nothing to display,
+// so both cells stay blank.
+func FlagsScorePair(a, b int) (string, string) {
+	if a <= 0 && b <= 0 {
+		return "", ""
+	}
+	return strconv.Itoa(max(0, a)), strconv.Itoa(max(0, b))
+}
+
+// mirroredFlagsScore is FlagsScorePair with the display-position swap applied:
+// a/b are the stored SideA/SideB flag counts, and mirror flips them so the
+// returned pair is (left, right) in on-sheet order. Shared by the pool and
+// bracket overlays so the swap-then-format sequence lives in one place.
+func mirroredFlagsScore(a, b int, mirror bool) (string, string) {
+	if mirror {
+		a, b = b, a
+	}
+	return FlagsScorePair(a, b)
 }
 
 // IpponsScore formats an ippon slice as a readable score string: ["M","K"] ->

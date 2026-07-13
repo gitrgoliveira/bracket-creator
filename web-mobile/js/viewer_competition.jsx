@@ -28,6 +28,7 @@ const hasBothSides = (m) => window.hasBothSides(m);
 // history push in the URL-sync effect). Do not add internal tab state here.
 export function ViewerCompetition({ tournament, competition, pools, poolMatches, standings, bracket, onBack, authed, onEditCompetition, tweaks, activeTab, onTabChange }) {
   const c = competition;
+  const isEngi = !!(c && c.engi);
 
   const allMatches = useMemo(() => {
     const out = [];
@@ -318,6 +319,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
                 <div className="bracket-canvas__inner" style={{ padding: 18 }}>
                   <window.BracketTree
                     rounds={derivedBracket.rounds}
+                    isEngi={isEngi}
                     variant={tweaks.cardVariant}
                     showDojo={tweaks.showDojo}
                     highlightedMatchId={currentMatch?.id}
@@ -346,6 +348,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
                         </div>
                         <window.MatchCard
                           match={bm}
+                          isEngi={isEngi}
                           variant={tweaks.cardVariant ?? 1}
                           showDojo={tweaks.showDojo ?? true}
                           highlighted={currentMatch?.id === bm.id}
@@ -512,7 +515,9 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
               )}
             </thead>
             <tbody>
-              {leagueStandings.slice(0, 5).map((s, i) => (
+              {leagueStandings.slice(0, 5).map((s, i) => {
+                const [sMember1, sMember2] = isEngi && window.engiPairParts ? window.engiPairParts(s.player?.name || "") : [s.player?.name || "", ""];
+                return (
                 <tr key={s.player?.id || s.player?.name || i} className={s.tied ? "pool__row--tied" : undefined}>
                   {/* Rank-ordered summary: "#" is the authoritative standing rank
                       (s.rank), not the row index: DRY with the full standings and
@@ -521,7 +526,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
                   <td>
                     <div className="pool__player-name">
                       {s.player?.number ? <span className="num-prefix">{s.player.number}</span> : null}
-                      {s.player?.name || ""}
+                      {sMember1}
                       {/* DH badge for any daihyosen winner, matching PoolsViewer.
                           The backend already gates daihyosen bouts to ties that
                           affect advancement (tieAffectsAdvancement), so the badge
@@ -533,7 +538,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
                           it. The rank badge only carries information when rows are
                           in draw order (non-league pools), where rank ≠ position. */}
                     </div>
-                    {isEngi && s.player?.displayName ? <div className="pool__player-name">{s.player.displayName}</div> : null}
+                    {isEngi && sMember2 ? <div className="pool__player-name">{sMember2}</div> : null}
                     {tweaks?.showDojo ? <div className="pool__dojo-name">{s.player?.dojo || ""}</div> : null}
                   </td>
                   {isEngi ? (
@@ -553,7 +558,8 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
                     </>
                   )}
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
           {leagueStandings.length > 5 && (

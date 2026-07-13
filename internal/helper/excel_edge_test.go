@@ -33,7 +33,7 @@ func TestPrintPoolMatchesEdgeCourts(t *testing.T) {
 		f.NewSheet(SheetPoolDraw)
 
 		pools := []Pool{poolA}
-		matchWinners := PrintPoolMatches(f, pools, 0, 1, 0, false, poolCoords, pCoords)
+		matchWinners := PrintPoolMatches(f, pools, 0, 1, 0, false, poolCoords, pCoords, false)
 		if len(matchWinners) == 0 {
 			t.Errorf("expected match winners even with 0 courts, got %d", len(matchWinners))
 		}
@@ -47,7 +47,7 @@ func TestPrintPoolMatchesEdgeCourts(t *testing.T) {
 
 		pools := []Pool{poolA}
 		numCourts := 5
-		matchWinners := PrintPoolMatches(f, pools, 0, 1, numCourts, false, poolCoords, pCoords)
+		matchWinners := PrintPoolMatches(f, pools, 0, 1, numCourts, false, poolCoords, pCoords, false)
 		if len(matchWinners) != 1 {
 			t.Errorf("expected 1 match winner, got %d", len(matchWinners))
 		}
@@ -80,7 +80,7 @@ func TestPrintPoolMatchesEdgeTournament(t *testing.T) {
 			playerCoordKey(*playerA1): {cellCoord: cellCoord{sheetName: SheetPoolDraw, cell: "A1"}},
 		}
 		pools := []Pool{poolA}
-		matchWinners := PrintPoolMatches(f, pools, 0, 1, 1, false, poolCoords, pCoords)
+		matchWinners := PrintPoolMatches(f, pools, 0, 1, 1, false, poolCoords, pCoords, false)
 		if len(matchWinners) != 1 {
 			t.Errorf("expected 1 match winner, got %d", len(matchWinners))
 		}
@@ -97,7 +97,7 @@ func TestPrintPoolMatchesEdgeTournament(t *testing.T) {
 		f.NewSheet(SheetPoolDraw)
 
 		var pools []Pool
-		matchWinners := PrintPoolMatches(f, pools, 0, 1, 1, false, nil, nil)
+		matchWinners := PrintPoolMatches(f, pools, 0, 1, 1, false, nil, nil, false)
 		if len(matchWinners) != 0 {
 			t.Errorf("expected 0 match winners, got %d", len(matchWinners))
 		}
@@ -126,7 +126,7 @@ func TestPrintPoolMatchesEdgeTeamMatches(t *testing.T) {
 		f.NewSheet(SheetPoolMatches)
 		f.NewSheet(SheetPoolDraw)
 
-		PrintPoolMatches(f, pools, 1, 1, 1, false, poolCoords, pCoords)
+		PrintPoolMatches(f, pools, 1, 1, 1, false, poolCoords, pCoords, false)
 		val, _ := f.GetCellValue(SheetPoolMatches, "F18")
 		assert.Equalf(t, "1.", val, "expected result 1. at F18 for teamMatches=1, got '%s'", val)
 	})
@@ -152,7 +152,7 @@ func TestPrintPoolMatchesEdgeTeamMatches(t *testing.T) {
 		f.NewSheet(SheetPoolMatches)
 		f.NewSheet(SheetPoolDraw)
 
-		PrintPoolMatches(f, pools, 10, 1, 1, false, poolCoords, pCoords)
+		PrintPoolMatches(f, pools, 10, 1, 1, false, poolCoords, pCoords, false)
 		val, _ := f.GetCellValue(SheetPoolMatches, "F27")
 		assert.Equalf(t, "1.", val, "expected result 1. at F27 for teamMatches=10, got '%s'", val)
 	})
@@ -181,7 +181,7 @@ func TestPrintPoolMatchesMirroring(t *testing.T) {
 		f.NewSheet(SheetPoolMatches)
 		f.NewSheet(SheetPoolDraw)
 
-		PrintPoolMatches(f, pools, 0, 1, 1, true, poolCoords, pCoords)
+		PrintPoolMatches(f, pools, 0, 1, 1, true, poolCoords, pCoords, false)
 		// Header row should be White vs Red
 		val, _ := f.GetCellValue(SheetPoolMatches, "A3")
 		assert.Equal(t, "White", val, "expected White on left (mirror=true)")
@@ -195,7 +195,7 @@ func TestPrintPoolMatchesMirroring(t *testing.T) {
 		f.NewSheet(SheetPoolMatches)
 		f.NewSheet(SheetPoolDraw)
 
-		PrintPoolMatches(f, pools, 0, 1, 1, false, poolCoords, pCoords)
+		PrintPoolMatches(f, pools, 0, 1, 1, false, poolCoords, pCoords, false)
 		// Header row should be Red vs White
 		val, _ := f.GetCellValue(SheetPoolMatches, "A3")
 		assert.Equal(t, "Red", val, "expected Red on left (mirror=false)")
@@ -224,7 +224,7 @@ func TestPrintTeamEliminationMatchesMirroring(t *testing.T) {
 		f.NewSheet(SheetEliminationMatches)
 		f.NewSheet("Pool Results")
 
-		PrintTeamEliminationMatches(f, poolMatchWinners, eliminationMatchRounds, 3, 2, true)
+		PrintTeamEliminationMatches(f, poolMatchWinners, eliminationMatchRounds, 3, 2, true, false)
 		// Match header row (Red/White labels) should be swapped: White vs Red
 		// Round header was removed, first match header at row 3
 		val, _ := f.GetCellValue(SheetEliminationMatches, "A3")
@@ -239,7 +239,7 @@ func TestPrintTeamEliminationMatchesMirroring(t *testing.T) {
 		f.NewSheet(SheetEliminationMatches)
 		f.NewSheet("Pool Results")
 
-		PrintTeamEliminationMatches(f, poolMatchWinners, eliminationMatchRounds, 3, 2, false)
+		PrintTeamEliminationMatches(f, poolMatchWinners, eliminationMatchRounds, 3, 2, false, false)
 		// Match header row should be Red vs White
 		val, _ := f.GetCellValue(SheetEliminationMatches, "A3")
 		assert.Equal(t, "Red", val, "expected Red on left (mirror=false)")
@@ -262,7 +262,7 @@ func TestPrintTeamEliminationMatchesMirroring(t *testing.T) {
 			},
 		}
 
-		PrintTeamEliminationMatches(f, poolMatchWinners, eliminationMatchRoundsMulti, 0, 2, false)
+		PrintTeamEliminationMatches(f, poolMatchWinners, eliminationMatchRoundsMulti, 0, 2, false, false)
 
 		// Match 1 (Shiaijo A) should be at column 1
 		val, _ := f.GetCellValue(SheetEliminationMatches, "A2") // Match 1 title row
@@ -354,7 +354,7 @@ func TestEliminationMatchSameSheetFormulas(t *testing.T) {
 	f.NewSheet(SheetEliminationMatches)
 
 	poolWinners := 2
-	matchWinners := PrintPoolMatches(f, pools, 0, poolWinners, 1, false, poolCoords, pCoords)
+	matchWinners := PrintPoolMatches(f, pools, 0, poolWinners, 1, false, poolCoords, pCoords, false)
 
 	finalists := GenerateFinals(pools, poolWinners)
 	tree := CreateBalancedTree(finalists)
@@ -364,7 +364,7 @@ func TestEliminationMatchSameSheetFormulas(t *testing.T) {
 		rounds[depth-i] = TraverseRounds(tree, 1, i-1)
 	}
 
-	PrintTeamEliminationMatches(f, matchWinners, rounds, 0, 1, false)
+	PrintTeamEliminationMatches(f, matchWinners, rounds, 0, 1, false, false)
 
 	// Collect all formula cells in the Elimination Matches sheet.
 	rows, err := f.GetRows(SheetEliminationMatches)
@@ -434,7 +434,7 @@ func TestPoolWinnerFormulaReferences(t *testing.T) {
 	f.NewSheet(SheetEliminationMatches)
 
 	poolWinners := 2
-	matchWinners := PrintPoolMatches(f, pools, 0, poolWinners, 1, false, poolCoords, pCoords)
+	matchWinners := PrintPoolMatches(f, pools, 0, poolWinners, 1, false, poolCoords, pCoords, false)
 
 	// Build elimination tree using the same LeafVal format as in production.
 	finalists := GenerateFinals(pools, poolWinners)
@@ -445,7 +445,7 @@ func TestPoolWinnerFormulaReferences(t *testing.T) {
 		eliminationMatchRounds[depth-i] = TraverseRounds(tree, 1, i-1)
 	}
 
-	PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, 0, 1, false)
+	PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, 0, 1, false, false)
 
 	// The first round has 2 matches; each match's player row is at startRow+2=4.
 	// Left player is in column A (col 1), right player in column G (col 7).
@@ -494,7 +494,7 @@ func TestPrintTeamEliminationMatches_CellRefLikeLeafNames(t *testing.T) {
 	}
 
 	matchWinners := ConvertPlayersToWinners(players, false, pCoords)
-	PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, 0, 1, false)
+	PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, 0, 1, false, false)
 
 	rows, err := f.GetRows(SheetEliminationMatches)
 	require.NoError(t, err)

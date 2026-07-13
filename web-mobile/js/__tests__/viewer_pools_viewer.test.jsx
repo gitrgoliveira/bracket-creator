@@ -494,26 +494,24 @@ describe('PoolNumberedMatchRow engi stacked pair names (mp-gy6g)', () => {
     vi.resetModules();
   });
 
-  it('renders both member names (name + displayName) for each side when isEngi=true', () => {
+  it('renders both members split from the combined name for each side when isEngi=true', () => {
     const m = {
       id: 'Pool A-0',
-      sideA: { name: 'Yamada Hanako', displayName: 'Suzuki Yuki', dojo: 'Dojo A' },
-      sideB: { name: 'Tanaka Hiroshi', displayName: 'Ito Keiko', dojo: 'Dojo B' },
+      sideA: { name: 'Yamada Hanako - Suzuki Yuki', dojo: 'Dojo A' },
+      sideB: { name: 'Tanaka Hiroshi - Ito Keiko', dojo: 'Dojo B' },
       status: 'scheduled',
     };
 
     const tree = runtime.mount(PoolNumberedMatchRow, { m, num: 1, isEngi: true });
     const text = collectText(tree);
-    // Both members of Shiro pair (sideA in a match = Aka in engi pool, but
-    // name/displayName both render)
+    // Both members of each pair render (member 2 stacked below member 1).
     expect(text).toContain('Yamada Hanako');
     expect(text).toContain('Suzuki Yuki');
-    // Both members of Aka pair
     expect(text).toContain('Tanaka Hiroshi');
     expect(text).toContain('Ito Keiko');
   });
 
-  it('does NOT render displayName text when isEngi=false (non-engi match)', () => {
+  it('does NOT split names when isEngi=false (non-engi match)', () => {
     const m = {
       id: 'Pool A-1',
       sideA: { name: 'Watanabe', displayName: 'ZEKKEN-W', dojo: 'Dojo A' },
@@ -530,7 +528,7 @@ describe('PoolNumberedMatchRow engi stacked pair names (mp-gy6g)', () => {
     expect(text).not.toContain('ZEKKEN-F');
   });
 
-  it('renders only member1 when member2 (displayName) is absent even with isEngi=true', () => {
+  it('renders the plain name when it has no pair separator even with isEngi=true', () => {
     const m = {
       id: 'Pool B-0',
       sideA: { name: 'Solo Shiro', dojo: 'Dojo S' },
@@ -563,15 +561,15 @@ describe('PoolsViewer engi stacked pair names in standings (mp-gy6g)', () => {
   const engiPool = {
     poolName: 'Pool A',
     players: [
-      { name: 'Pair1-Member1', displayName: 'Pair1-Member2', dojo: 'Dojo A' },
-      { name: 'Pair2-Member1', displayName: 'Pair2-Member2', dojo: 'Dojo B' },
+      { name: 'Pair1-Member1 - Pair1-Member2', dojo: 'Dojo A' },
+      { name: 'Pair2-Member1 - Pair2-Member2', dojo: 'Dojo B' },
     ],
   };
 
   const engiStandings = {
     'Pool A': [
-      { player: { name: 'Pair1-Member1', displayName: 'Pair1-Member2', dojo: 'Dojo A' }, wins: 1, losses: 0, draws: 0, flags: 7 },
-      { player: { name: 'Pair2-Member1', displayName: 'Pair2-Member2', dojo: 'Dojo B' }, wins: 0, losses: 1, draws: 0, flags: 3 },
+      { player: { name: 'Pair1-Member1 - Pair1-Member2', dojo: 'Dojo A' }, wins: 1, losses: 0, draws: 0, flags: 7 },
+      { player: { name: 'Pair2-Member1 - Pair2-Member2', dojo: 'Dojo B' }, wins: 0, losses: 1, draws: 0, flags: 3 },
     ],
   };
 
@@ -627,7 +625,7 @@ describe('PoolsViewer engi stacked pair names in standings (mp-gy6g)', () => {
     expect(text).toContain('Pair2-Member2');
   });
 
-  it('does NOT render displayName in standings when engi=false', () => {
+  it('does NOT split names in standings when engi=false', () => {
     const pool = {
       poolName: 'Pool A',
       players: [

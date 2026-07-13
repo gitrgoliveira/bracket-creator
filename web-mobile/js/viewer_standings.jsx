@@ -586,15 +586,16 @@ function rankOrdinal(rank) {
 // PoolNumberedMatchRow renders a single numbered pool match with Shiro/Aka
 // sides and the formatted score string (via formatIpponsScore when completed).
 // sideB = Shiro (left), sideA = Aka (right): matches PoolMatchRow convention.
-// isEngi: when true, each side is an engi pair — render member1 (name) over
-// member2 (displayName) stacked, matching the engi score editor layout.
+// isEngi: when true, each side is an engi pair (combined "Name 1 - Name 2") —
+// render member1 over member2 stacked, matching the engi score editor layout.
 export const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick, isEngi }) => {
   // withNumber prepends the assigned competitor number (e.g. "K1") when present.
-  const aName = typeof m.sideA === "object" ? withNumber(m.sideA) : m.sideA;
-  const bName = typeof m.sideB === "object" ? withNumber(m.sideB) : m.sideB;
-  // Engi pair: member2 lives in displayName.
-  const aDN = isEngi && typeof m.sideA === "object" ? (m.sideA.displayName || "") : "";
-  const bDN = isEngi && typeof m.sideB === "object" ? (m.sideB.displayName || "") : "";
+  const aFull = typeof m.sideA === "object" ? withNumber(m.sideA) : m.sideA;
+  const bFull = typeof m.sideB === "object" ? withNumber(m.sideB) : m.sideB;
+  // Engi pair: the name holds both members combined ("Name 1 - Name 2");
+  // split so member 2 stacks under member 1 (the number prefix stays on line 1).
+  const [aName, aDN] = isEngi && window.engiPairParts ? window.engiPairParts(aFull) : [aFull, ""];
+  const [bName, bDN] = isEngi && window.engiPairParts ? window.engiPairParts(bFull) : [bFull, ""];
 
   // DH badge: show which side won a completed daihyosen bout.
   const isDH = isPoolDaihyosenBout(m.id) && m.status === "completed";
@@ -748,6 +749,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                     s && s.tied ? "pool__row--tied" : "",
                   ].filter(Boolean).join(" ");
 
+                  const [pMember1, pMember2] = isEngi && window.engiPairParts ? window.engiPairParts(p.name) : [p.name, ""];
                   return (
                     <tr key={p.id || `${p.name}||${p.dojo || ""}` || drawPos} className={rowClasses || undefined}>
                       <td className="pool-standings__draw-pos">
@@ -756,7 +758,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                       <td>
                         <div className="pool__player-name">
                           {p.number ? <span className="num-prefix">{p.number}</span> : null}
-                          {p.name}
+                          {pMember1}
                           {isTeam && dhWinnerNames.has(p.name) && (
                             <DHBadge />
                           )}
@@ -766,8 +768,8 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                             </span>
                           ) : null}
                         </div>
-                        {/* Engi pair: member2 (displayName) stacked below member1. */}
-                        {isEngi && p.displayName ? <div className="pool__player-name">{p.displayName}</div> : null}
+                        {/* Engi pair: member 2 (from the combined name) stacked below member 1. */}
+                        {isEngi && pMember2 ? <div className="pool__player-name">{pMember2}</div> : null}
                         {tweaks.showDojo ? <div className="pool__dojo-name">{p.dojo}</div> : null}
                       </td>
                       {s ? (

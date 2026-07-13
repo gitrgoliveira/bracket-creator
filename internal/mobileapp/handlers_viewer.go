@@ -136,7 +136,7 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 		t := true
 		hasIDsHint = &t
 	}
-	players, _ := store.LoadParticipantsOpt(compID, comp.WithZekkenName, state.LoadParticipantsOpts{WithSeeds: false, HasIDs: hasIDsHint})
+	players, _ := store.LoadParticipantsOpt(compID, comp.EffectiveWithZekkenName(), state.LoadParticipantsOpts{WithSeeds: false, HasIDs: hasIDsHint})
 	comp.Players = players
 	// mp-13y: merge numberPrefix-derived numbers from pools.csv. Skip the
 	// pools.csv read entirely when no prefix is configured (the common case).
@@ -302,7 +302,7 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 					t := true
 					hasIDsHint = &t
 				}
-				p, e := store.LoadParticipantsOpt(id, comp.WithZekkenName, state.LoadParticipantsOpts{
+				p, e := store.LoadParticipantsOpt(id, comp.EffectiveWithZekkenName(), state.LoadParticipantsOpts{
 					WithSeeds: true,
 					HasIDs:    hasIDsHint,
 				})

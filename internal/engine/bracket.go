@@ -261,7 +261,7 @@ func (e *Engine) buildBracketFromLeaves(comp *state.Competition, leaves []string
 	// state.Bracket.ThirdPlaceMatch). Sides start empty and are filled from the
 	// two semifinal losers by propagateBracketWinner. DisplayRound -1 is a
 	// sentinel telling renderers to label this "3rd Place".
-	if comp.Naginata && len(bracket.Rounds) >= 2 {
+	if helper.NeedsBronzeBlock(comp.Naginata, len(bracket.Rounds)) {
 		// Default the bronze to the FINAL's court: the final and the 3rd-place
 		// playoff are conventionally run on the same shiaijo, so the bronze
 		// shows up in that court's queue out of the box. The final is the sole

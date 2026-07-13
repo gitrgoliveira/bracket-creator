@@ -248,6 +248,38 @@ func TraverseRounds(node *Node, depth int, maxDepth int) []*Node {
 
 }
 
+// SemifinalMatchNumbers derives the two semifinal match numbers from the
+// final's children so a bronze (3rd-place) block can reference the "2."
+// loser lines via CONCATENATE formulas. Returns (0, 0) when the bracket has
+// no real semifinal (fewer than two rounds, e.g. a 2-player bracket) or the
+// final's child slots are absent; a zero keeps the corresponding entrant
+// slot hand-fillable.
+func SemifinalMatchNumbers(rounds [][]*Node) (semiA, semiB int) {
+	if len(rounds) < 2 {
+		return 0, 0
+	}
+	lastRound := rounds[len(rounds)-1]
+	if len(lastRound) == 0 || lastRound[0] == nil {
+		return 0, 0
+	}
+	if lastRound[0].Left != nil {
+		semiA = int(lastRound[0].Left.MatchNum())
+	}
+	if lastRound[0].Right != nil {
+		semiB = int(lastRound[0].Right.MatchNum())
+	}
+	return semiA, semiB
+}
+
+// NeedsBronzeBlock reports whether a naginata playoffs bracket should carry a
+// bronze (3rd-place) block: naginata only, and only when a real semifinal round
+// exists (a 2-player bracket is a single round with no semifinal, so no bronze).
+// This is the single source of truth for the rule expressed at every render/build
+// site (cmd create-pools/playoffs, internal/engine/bracket.go).
+func NeedsBronzeBlock(naginata bool, numRounds int) bool {
+	return naginata && numRounds >= 2
+}
+
 // function that subdivides a tree into a specified number of subtrees
 func SubdivideTree(node *Node, numSubtrees int) []*Node {
 	if node == nil || numSubtrees <= 0 {

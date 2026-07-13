@@ -2,6 +2,73 @@
 
 const { useState: useStateA } = React;
 
+// Prepare a roster CSV field: coerce nullish to "" (String(undefined) would
+// export the literal text "undefined"), collapse embedded CR/LF runs to a
+// single space (the /create handler splits the roster on newlines BEFORE CSV
+// parsing, so a quoted newline would still break a record apart), then
+// RFC-4180-quote if the field contains a comma or double-quote.
+// Used by buildXlsxBody (including its rosterLine roster helper).
+const csvField = (s) => {
+  const str = (s == null ? "" : String(s)).replace(/[\r\n]+/g, " ").trim();
+  return /[",]/.test(str) ? '"' + str.replace(/"/g, '""') + '"' : str;
+};
+
+// buildXlsxBody constructs the URLSearchParams body for POST /create from a
+// competition config object (cfg) and a player list. Extracted for testing.
+// cfg fields used: format, poolSize, poolWinners, poolSizeMode, courts,
+//   teamSize, name, numberPrefix, roundRobin, poolFormat, withZekkenName,
+//   engi, naginata.
+// cName is the display name for the competition (used as titlePrefix).
+export function buildXlsxBody(cfg, cName, players) {
+  const isPlayoffs = cfg.format === "playoffs";
+  const singlePool = cfg.format === "league";
+  const playersPerPool = singlePool ? players.length : (cfg.poolSize || players.length);
+
+  // /create requires 1 <= winnersPerPool < playersPerPool for pools.
+  let winnersPerPool = cfg.poolWinners || 2;
+  if (winnersPerPool >= playersPerPool) winnersPerPool = Math.max(1, playersPerPool - 1);
+
+  // Engi pairs store both member names combined in the name field
+  // ("Name 1 - Name 2"), so they use whatever zekken layout the competition
+  // itself is configured with, same as any other competition.
+  const effectiveZekken = !!cfg.withZekkenName;
+
+  // Roster lines match the canonical participant CSV the generator parses:
+  // with effective zekken → "Name, DisplayName, Dojo"; otherwise → "Name, Dojo".
+  const rosterLine = (p) => effectiveZekken
+    ? [csvField(p.name), csvField(p.displayName || p.name), csvField(p.dojo || "NA")].join(", ")
+    : [csvField(p.name), csvField(p.dojo || "NA")].join(", ");
+  const playerList = players.map(rosterLine).join("\n");
+
+  const seeded = players
+    .filter((p) => p.seed && p.seed > 0)
+    .map((p) => ({ name: p.name, seedRank: p.seed }));
+
+  const courtsCount = Array.isArray(cfg.courts) ? cfg.courts.length : 0;
+  const body = new URLSearchParams({
+    tournamentType: isPlayoffs ? "playoffs" : "pools",
+    playerList,
+    courts: String(courtsCount || 1),
+    winnersPerPool: String(winnersPerPool),
+    playersPerPool: String(playersPerPool),
+    poolSizeMode: cfg.poolSizeMode || "min",
+    teamMatches: String(cfg.teamSize || 0),
+    titlePrefix: cName || "",
+    numberPrefix: cfg.numberPrefix || "",
+    determined: "on", // preserve the registered participant order (no shuffle)
+  });
+  if (singlePool || cfg.roundRobin) body.set("roundRobin", "on");
+  // Honour the competition's pool format: "partial" → path-graph match set
+  // (the generator otherwise defaults to full round-robin). Mirrors the
+  // engine's PoolFormat switch (internal/engine/pools.go).
+  if (cfg.poolFormat === "partial") body.set("poolFormat", "partial");
+  if (effectiveZekken) body.set("withZekkenName", "on");
+  if (cfg.engi) body.set("engi", "on");
+  if (cfg.naginata) body.set("naginata", "on");
+  if (seeded.length) body.set("seeds", JSON.stringify(seeded));
+  return body;
+}
+
 export function AdminExport({ c, t, password, showToast }) {
   // The competition detail nests its real fields (roster, format, courts,
   // pool settings) under `c.config`; some other call sites pass an already
@@ -63,51 +130,7 @@ export function AdminExport({ c, t, password, showToast }) {
       const players = cfg.players || [];
       if (players.length < 2) throw new Error("competition has no participants to export");
 
-      const isPlayoffs = cfg.format === "playoffs";
-      const singlePool = cfg.format === "league";
-      const playersPerPool = singlePool ? players.length : (cfg.poolSize || players.length);
-
-      // /create requires 1 <= winnersPerPool < playersPerPool for pools.
-      let winnersPerPool = cfg.poolWinners || 2;
-      if (winnersPerPool >= playersPerPool) winnersPerPool = Math.max(1, playersPerPool - 1);
-
-      // RFC-4180-quote any field containing a comma/quote/newline so the Go
-      // parser (helper.CreatePlayers) routes the line through encoding/csv
-      // instead of a naive strings.Split: otherwise a name or dojo with a
-      // comma (e.g. "Smith, Jr") silently corrupts the roster.
-      const csvField = (s) =>
-        /[",\n]/.test(s) ? '"' + String(s).replace(/"/g, '""') + '"' : s;
-
-      // Roster lines match the canonical participant CSV the generator parses:
-      // with zekken → "Name, DisplayName, Dojo"; otherwise → "Name, Dojo".
-      const rosterLine = (p) => cfg.withZekkenName
-        ? [csvField(p.name), csvField(p.displayName || p.name), csvField(p.dojo || "NA")].join(", ")
-        : [csvField(p.name), csvField(p.dojo || "NA")].join(", ");
-      const playerList = players.map(rosterLine).join("\n");
-
-      const seeded = players
-        .filter((p) => p.seed && p.seed > 0)
-        .map((p) => ({ name: p.name, seedRank: p.seed }));
-
-      const body = new URLSearchParams({
-        tournamentType: isPlayoffs ? "playoffs" : "pools",
-        playerList,
-        courts: String((cfg.courts && cfg.courts.length) || 1),
-        winnersPerPool: String(winnersPerPool),
-        playersPerPool: String(playersPerPool),
-        poolSizeMode: cfg.poolSizeMode || "min",
-        teamMatches: String(cfg.teamSize || 0),
-        titlePrefix: cfg.name || c.name || "",
-        numberPrefix: cfg.numberPrefix || "",
-        determined: "on", // preserve the registered participant order (no shuffle)
-      });
-      if (singlePool || cfg.roundRobin) body.set("roundRobin", "on");
-      // Honour the competition's pool format: "partial" → path-graph match set
-      // (the generator otherwise defaults to full round-robin). Mirrors the
-      // engine's PoolFormat switch (internal/engine/pools.go).
-      if (cfg.poolFormat === "partial") body.set("poolFormat", "partial");
-      if (cfg.withZekkenName) body.set("withZekkenName", "on");
-      if (seeded.length) body.set("seeds", JSON.stringify(seeded));
+      const body = buildXlsxBody(cfg, cfg.name || c.name, players);
 
       const resp = await fetch(`/create`, { method: "POST", body });
       if (!resp.ok) {

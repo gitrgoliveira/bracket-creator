@@ -76,10 +76,18 @@ competition** so the kata division also gets the single 3rd-place playoff.
 
 An Engi competitor is a pair: two people from the same dojo or team, scored
 together as one unit. There are no individual bouts inside a pair. Enter each
-pair as a single participant row with both member names and the shared dojo:
+pair as a single participant row with both member names combined in the name
+field, joined by a dash, and the shared dojo:
 
 ```
-Name 1, Name 2, Dojo
+Name 1 - Name 2, Dojo
+```
+
+When the competition uses zekken names, the zekken column holds the pair's
+combined zekken the same way:
+
+```
+Name 1 - Name 2, ZEKKEN1 - ZEKKEN2, Dojo
 ```
 
 The two names display stacked on one side of the match, and the pair counts as
@@ -113,3 +121,22 @@ so a pair that loses by three flags to two still keeps its two flags.
 Engi never holds a supplementary tie-break bout (no ippon-shobu, no daihyosen):
 a ranking that is still tied after wins and flags is settled by the name-order
 fallback above.
+
+### Excel exports
+
+Both Excel downloads on the competition page (see
+[Export and print](run-tournament.md#export-and-print)) understand Engi:
+
+- Each pair is a single competitor throughout both workbooks. The data sheet
+  lists the combined pair name under **Player Name** with the shared dojo, and
+  every sheet that shows the pair (pool draw, match grids, standings, bracket
+  pages, and the printable name sheets) shows both members together on one
+  line as "Member 1 - Member 2".
+- Pool standings in both workbooks use the Engi columns: **W** (wins),
+  **Flags** (total flags), and **Rank**. Losses are not recorded because
+  ranking is determined by wins then accumulated own-side flags. The kendo
+  points columns do not appear.
+- The results workbook records each side's referee flag count in the score
+  cells instead of ippon letters, and a bout decided without flags (for
+  example a kiken withdrawal) leaves the score cells blank with the decision
+  marked in the centre column.

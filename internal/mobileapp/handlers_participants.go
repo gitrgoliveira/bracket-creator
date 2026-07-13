@@ -25,7 +25,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		players, err := store.LoadParticipants(id, comp.WithZekkenName)
+		players, err := store.LoadParticipants(id, comp.EffectiveWithZekkenName())
 		if err != nil {
 			internalError(c, err)
 			return
@@ -109,12 +109,11 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				source = "manual"
 			}
 
-			// Strip displayName unless the EFFECTIVE layout is zekken
-			// (WithZekkenName || Engi). For a plain non-zekken comp a non-empty
-			// DisplayName would make saveParticipantsNoLock write a 3-column row
-			// that LoadParticipants mis-parses; engi comps keep it (it holds
-			// pair member 2). Using the raw WithZekkenName here would drop an
-			// engi pair's member 2 for a comp with WithZekkenName=false.
+			// Strip displayName when the zekken column is not enabled. A non-empty
+			// DisplayName in a non-zekken comp would cause saveParticipantsNoLock to
+			// write a 3-column row that LoadParticipants mis-parses. Engi pairs store
+			// both member names combined in Player.Name; DisplayName is only relevant
+			// for the zekken column (combined pair zekken when WithZekkenName is set).
 			// Store.AddParticipant re-derives via SanitizeName(Name) when empty.
 			displayName := req.DisplayName
 			if !comp.EffectiveWithZekkenName() {
@@ -134,7 +133,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				Source:      source,
 			}
 
-			addedPlayer, err := store.AddParticipant(id, player, comp.WithZekkenName)
+			addedPlayer, err := store.AddParticipant(id, player, comp.EffectiveWithZekkenName())
 			if err != nil {
 				if errors.Is(err, state.ErrDuplicateName) {
 					c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
@@ -205,7 +204,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// players that survive the edit (matched by normalizedName+normalizedDojo).
 		// A full roster replacement via this endpoint must not silently clear
 		// check-ins that were already recorded.
-		existing, err := store.LoadParticipants(id, comp.WithZekkenName)
+		existing, err := store.LoadParticipants(id, comp.EffectiveWithZekkenName())
 		if err != nil {
 			internalError(c, err, "failed to load participants")
 			return
@@ -223,10 +222,11 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 
 		players := make([]domain.Player, 0, len(req.Players))
 		for i, p := range req.Players {
-			// Mirror the single-add/replace strip, keyed off the EFFECTIVE
-			// layout (WithZekkenName || Engi): a non-empty DisplayName on a
-			// plain non-zekken comp produces a 3-column CSV row that
-			// LoadParticipants(_, false) mis-parses; engi comps keep member 2.
+			// Mirror the single-add/replace strip: a non-empty DisplayName on a
+			// non-zekken comp produces a 3-column CSV row that
+			// LoadParticipants(_, false) mis-parses. Engi pairs store both
+			// member names combined in Player.Name, so DisplayName is only the
+			// zekken column value when WithZekkenName is set.
 			displayName := p.DisplayName
 			if !comp.EffectiveWithZekkenName() {
 				displayName = ""
@@ -262,7 +262,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// SaveParticipants mints UUID IDs when p.ID is empty, so the request-
 		// derived `players` slice lacks the persisted IDs and would force
 		// clients to round-trip GET /participants to learn them.
-		saved, err := store.LoadParticipants(id, comp.WithZekkenName)
+		saved, err := store.LoadParticipants(id, comp.EffectiveWithZekkenName())
 		if err != nil {
 			internalError(c, err, "failed to reload participants")
 			return
@@ -350,11 +350,12 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				return state.ErrCompetitionNotInSetup
 			}
 
-			// Strip displayName unless the EFFECTIVE layout is zekken
-			// (WithZekkenName || Engi), same CSV-corruption guard as the
-			// single-add path: a 3-column row written for a plain non-zekken
-			// comp is mis-parsed on the next LoadParticipants read; engi comps
-			// keep member 2. Empty DisplayName triggers SanitizeName
+			// Strip displayName unless the zekken column is enabled, same
+			// CSV-corruption guard as the single-add path: a 3-column row
+			// written for a non-zekken comp is mis-parsed on the next
+			// LoadParticipants read. Engi pairs store both member names
+			// combined in Player.Name, so DisplayName is only the zekken
+			// column value. Empty DisplayName triggers SanitizeName
 			// re-derivation in saveParticipantsNoLock.
 			displayName := req.DisplayName
 			if !comp.EffectiveWithZekkenName() {
@@ -367,7 +368,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				return err
 			}
 
-			p, err := tx.UpdateParticipant(id, pid, comp.WithZekkenName, func(p *domain.Player) error {
+			p, err := tx.UpdateParticipant(id, pid, comp.EffectiveWithZekkenName(), func(p *domain.Player) error {
 				// Capture old values before mutation for draw cascade.
 				// The transform callback receives the pre-mutation player,
 				// so this avoids a separate LoadParticipants scan.
@@ -530,7 +531,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		updatedPlayer, err := store.UpdateParticipant(id, pid, comp.WithZekkenName, func(p *domain.Player) error {
+		updatedPlayer, err := store.UpdateParticipant(id, pid, comp.EffectiveWithZekkenName(), func(p *domain.Player) error {
 			p.CheckedIn = true
 			return nil
 		})
@@ -605,7 +606,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		updatedPlayer, err := store.UpdateParticipant(id, pid, comp.WithZekkenName, func(p *domain.Player) error {
+		updatedPlayer, err := store.UpdateParticipant(id, pid, comp.EffectiveWithZekkenName(), func(p *domain.Player) error {
 			p.CheckedIn = false
 			return nil
 		})

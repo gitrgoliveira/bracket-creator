@@ -262,7 +262,7 @@ func currentMatchPlayers(store *state.Store, comp *state.Competition) []domain.P
 		t := true
 		hasIDsHint = &t
 	}
-	players, _ := store.LoadParticipantsOpt(comp.ID, comp.WithZekkenName, state.LoadParticipantsOpts{WithSeeds: false, HasIDs: hasIDsHint})
+	players, _ := store.LoadParticipantsOpt(comp.ID, comp.EffectiveWithZekkenName(), state.LoadParticipantsOpts{WithSeeds: false, HasIDs: hasIDsHint})
 	if comp.NumberPrefix != "" {
 		pools, _ := store.LoadPools(comp.ID)
 		mergePoolNumbersIntoPlayersSlice(comp.NumberPrefix, players, pools, comp.Format)
@@ -284,8 +284,8 @@ func currentMatchPayload(court string, comp *state.Competition, players []domain
 			"name": comp.Name,
 		},
 		"phase": phase,
-		"sideA": buildSide(sideAName, players, comp.WithZekkenName),
-		"sideB": buildSide(sideBName, players, comp.WithZekkenName),
+		"sideA": buildSide(sideAName, players, comp.EffectiveWithZekkenName()),
+		"sideB": buildSide(sideBName, players, comp.EffectiveWithZekkenName()),
 		// Normalize nil → [] so the JSON encodes empty arrays, not null: the
 		// contract models ipponsA/ipponsB as arrays and overlay clients assume
 		// []. A nil slice reaches here from an unscored pool match or a bracket

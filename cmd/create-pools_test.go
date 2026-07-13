@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	excelize "github.com/xuri/excelize/v2"
@@ -1022,7 +1023,7 @@ func TestPoolBoundsForSubtree(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			gotStart, gotEnd := poolBoundsForSubtree(tt.numPools, tt.numCourts, tt.numSubtrees, tt.subtreeIdx)
+			gotStart, gotEnd := helper.PoolBoundsForSubtree(tt.numPools, tt.numCourts, tt.numSubtrees, tt.subtreeIdx)
 			assert.Equal(t, tt.wantStart, gotStart, "start")
 			assert.Equal(t, tt.wantEnd, gotEnd, "end")
 
@@ -1052,12 +1053,12 @@ func TestPoolBoundsForSubtree_DegenerateInputs(t *testing.T) {
 	t.Parallel()
 
 	// numSubtrees < numCourts: pagesPerCourt would be 0, must not panic.
-	start, end := poolBoundsForSubtree(2, 4, 1, 0)
+	start, end := helper.PoolBoundsForSubtree(2, 4, 1, 0)
 	assert.GreaterOrEqual(t, start, 0)
 	assert.GreaterOrEqual(t, end, start)
 
 	// Zero courts/subtrees: should return (0, 0) without panicking.
-	s, e := poolBoundsForSubtree(0, 0, 0, 0)
+	s, e := helper.PoolBoundsForSubtree(0, 0, 0, 0)
 	assert.Equal(t, 0, s)
 	assert.Equal(t, 0, e)
 }

@@ -203,4 +203,19 @@ describe('UI Components', () => {
       });
     });
   });
+
+  describe('engiPairParts', () => {
+    it('splits a combined pair name on the first separator', () => {
+      expect(window.engiPairParts('Alice - Bob')).toEqual(['Alice', 'Bob']);
+    });
+
+    it('trims incidental whitespace around the separator (Copilot PR #351)', () => {
+      expect(window.engiPairParts('Alice -  Bob')).toEqual(['Alice', 'Bob']);
+      expect(window.engiPairParts('  Alice   -   Bob  ')).toEqual(['Alice', 'Bob']);
+    });
+
+    it('preserves the trimmed name as member1 with an empty member2 when there is no separator', () => {
+      expect(window.engiPairParts('  Solo  ')).toEqual(['Solo', '']);
+    });
+  });
 });

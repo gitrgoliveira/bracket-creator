@@ -27,6 +27,8 @@ type poolOptions struct {
 	withZekkenName  bool
 	singleTree      bool
 	determined      bool
+	engi            bool // engi (kata) competition: pair rosters + engi standings formulas. Set ONLY by the web /create handler (mobile-app blank-template download); deliberately NOT a CLI flag (owner decision: no new CLI options).
+	naginata        bool // naginata: adds a 3rd-place bronze block after elimination matches. Web-handler-only, same as engi.
 	titlePrefix     string
 	numberPrefix    string
 	SeedAssignments []domain.SeedAssignment
@@ -247,7 +249,7 @@ func (o *poolOptions) createPools(entries []string) error {
 	} else {
 		helper.CreatePoolMatches(pools)
 	}
-	matchWinners := helper.PrintPoolMatches(f, pools, o.teamMatches, o.poolWinners, o.courts, true, poolCoords, playerCoords)
+	matchWinners := helper.PrintPoolMatches(f, pools, o.teamMatches, o.poolWinners, o.courts, true, poolCoords, playerCoords, o.engi)
 
 	treeSheet, err := f.GetSheetIndex(helper.SheetTree)
 	if err != nil {
@@ -274,7 +276,7 @@ func (o *poolOptions) createPools(entries []string) error {
 		helper.SetTreeSheetTitle(f, subtreeSheet, "Shiaijo "+courtLabel)
 		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, startRow, depth, true, matchWinners)
 
-		poolStart, poolEnd := poolBoundsForSubtree(len(pools), o.courts, len(subtrees), i)
+		poolStart, poolEnd := helper.PoolBoundsForSubtree(len(pools), o.courts, len(subtrees), i)
 		helper.AddPoolsToTree(f, subtreeSheet, pools[poolStart:poolEnd], poolCoords, playerCoords)
 	}
 	if err := f.DeleteSheet(helper.SheetTree); err != nil {
@@ -303,7 +305,7 @@ func (o *poolOptions) createPools(entries []string) error {
 		totalPoolMatches += len(p.Matches)
 	}
 
-	helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, o.teamMatches, o.courts, true)
+	printEliminationWithBronze(f, matchWinners, eliminationMatchRounds, o.teamMatches, o.courts, o.engi, o.naginata)
 	helper.FillEstimations(f, int64(len(pools)), int64(totalPoolMatches), int64(o.teamMatches), int64(len(finals)-1), o.courts)
 
 	// Apply sheet protection to all sheets except data and Time Estimator
@@ -316,45 +318,6 @@ func (o *poolOptions) createPools(entries []string) error {
 	}
 
 	return nil
-}
-
-// poolBoundsForSubtree returns the [start, end) slice into the pool list for
-// the given subtree. After ReorderPoolsForCourts the pool list is laid out in
-// contiguous per-court blocks; this function respects those boundaries so that
-// no subtree page ever references pools from more than one court.
-// Uses the same AssignPoolsToCourts logic as PrintPoolMatches so both views
-// are always consistent.
-func poolBoundsForSubtree(numPools, numCourts, numSubtrees, subtreeIdx int) (start, end int) {
-	if numCourts < 1 || numSubtrees < 1 {
-		return 0, 0
-	}
-	pagesPerCourt := numSubtrees / numCourts
-	if pagesPerCourt < 1 {
-		pagesPerCourt = 1
-	}
-	courtIdx := helper.SubtreeCourtIndex(numSubtrees, numCourts, subtreeIdx)
-	pageWithinCourt := subtreeIdx % pagesPerCourt
-
-	// Derive court block boundaries from the same assignment used by Pool Matches.
-	assignments, _ := helper.AssignPoolsToCourts(numPools, numCourts)
-	courtStart, courtEnd := -1, 0
-	for i, c := range assignments {
-		if c == courtIdx {
-			if courtStart < 0 {
-				courtStart = i
-			}
-			courtEnd = i + 1
-		}
-	}
-	if courtStart < 0 {
-		return 0, 0
-	}
-
-	courtSize := courtEnd - courtStart
-	poolsPerPage := (courtSize + pagesPerCourt - 1) / pagesPerCourt
-	start = courtStart + pageWithinCourt*poolsPerPage
-	end = min(start+poolsPerPage, courtEnd)
-	return
 }
 
 func init() {

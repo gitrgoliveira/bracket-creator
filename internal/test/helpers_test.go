@@ -50,3 +50,46 @@ func TestCreateTestTournament(t *testing.T) {
 	// Check that we have elimination matches
 	require.NotEmpty(t, tournament.EliminationMatches)
 }
+
+func TestParsePrintAreaLastRow(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  int
+	}{
+		{"valid range", "'Elimination Matches'!$A$1:$H$35", 35},
+		{"simple", "$A$1:$H$42", 42},
+		{"no dollar", "invalid", -1},
+		{"empty", "", -1},
+		{"non-numeric suffix", "$A$1:$H$abc", -1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, ParsePrintAreaLastRow(tc.input))
+		})
+	}
+}
+
+func TestFindCellRow(t *testing.T) {
+	rows := [][]string{
+		{"a", "b"},
+		{"", "3rd Place", "x"},
+		{"3rd Place"},
+	}
+	cases := []struct {
+		name string
+		val  string
+		want int
+	}{
+		{"first matching row wins", "3rd Place", 1},
+		{"first cell of first row", "a", 0},
+		{"absent value", "nope", -1},
+		{"empty needle matches empty cell", "", 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, FindCellRow(rows, tc.val))
+		})
+	}
+	assert.Equal(t, -1, FindCellRow(nil, "a"), "nil rows")
+}

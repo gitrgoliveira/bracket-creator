@@ -73,7 +73,7 @@ func TestIndividualRanking(t *testing.T) {
 				}
 			}
 
-			printSinglePool(f, sheet, pool, 1, 2, 0, 2, maxBlocks, colNames, styles, matchWinners, false, poolCoords, pCoords)
+			printSinglePool(f, sheet, pool, 1, 2, 0, 2, maxBlocks, colNames, styles, matchWinners, false, poolCoords, pCoords, false)
 
 			headerRow, err := findResultsHeader(f, sheet, 0)
 			require.NoError(t, err)
@@ -155,7 +155,7 @@ func TestTeamRanking(t *testing.T) {
 				}
 			}
 
-			printSinglePool(f, sheet, pool, 1, 2, size, 2, maxBlocks, colNames, styles, matchWinners, false, poolCoords, pCoords)
+			printSinglePool(f, sheet, pool, 1, 2, size, 2, maxBlocks, colNames, styles, matchWinners, false, poolCoords, pCoords, false)
 
 			headerRow, err := findResultsHeader(f, sheet, 0)
 			require.NoError(t, err)
@@ -222,7 +222,7 @@ func TestPoolWinnerCellsPointToRankingFormulas(t *testing.T) {
 			}
 
 			numWinners := 2
-			printSinglePool(f, sheet, pool, 1, 2, 0, numWinners, maxBlocks, colNames, styles, matchWinners, false, poolCoords, pCoords)
+			printSinglePool(f, sheet, pool, 1, 2, 0, numWinners, maxBlocks, colNames, styles, matchWinners, false, poolCoords, pCoords, false)
 
 			// Locate the "Ranking" header row.
 			var rankingHeaderRow int
@@ -285,7 +285,7 @@ func TestManualRankingOverride(t *testing.T) {
 		playerCoordKey(players[0]): {cellCoord: cellCoord{sheetName: "Pool Draw", cell: "A1"}},
 		playerCoordKey(players[1]): {cellCoord: cellCoord{sheetName: "Pool Draw", cell: "A2"}},
 	}
-	printSinglePool(f, sheet, pool, 1, 2, 0, 2, []int{5, 10}, colNames, styles, matchWinners, false, poolCoords, pCoords)
+	printSinglePool(f, sheet, pool, 1, 2, 0, 2, []int{5, 10}, colNames, styles, matchWinners, false, poolCoords, pCoords, false)
 
 	headerRow, _ := findResultsHeader(f, sheet, 0)
 

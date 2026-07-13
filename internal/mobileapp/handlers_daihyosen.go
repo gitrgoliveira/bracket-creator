@@ -415,7 +415,7 @@ func countEligibleForSidesTx(tx state.StoreTx, compID, sideAName, sideBName stri
 	}
 	withZekken := false
 	if comp != nil {
-		withZekken = comp.WithZekkenName
+		withZekken = comp.EffectiveWithZekkenName()
 	}
 	participants, err := tx.LoadParticipants(compID, withZekken)
 	if err != nil {

@@ -574,11 +574,15 @@ func (e *Engine) CheckKachinukiPrematureCompletion(compID, matchID string, resul
 	if parent.Status == state.MatchStatusCompleted {
 		return nil // correction of a finished result
 	}
-	// Judge exhaustion from the INCOMING bout log (the operator's latest
-	// bout states) overlaid on the stored match record.
+	// Judge exhaustion from the MERGED bout log, mirroring the write path
+	// (applyKachinukiMerge): the incoming bouts are overlaid onto the stored
+	// log BY POSITION, so a partial or stale client log (one that omits
+	// earlier server-appended bouts) cannot make this pre-check see fewer
+	// retirements than the committed result will, and thus cannot falsely
+	// 409 a legitimate exhaustion completion.
 	probe := *parent
-	if result.SubResults != nil {
-		probe.SubResults = result.SubResults
+	if len(result.SubResults) > 0 {
+		probe.SubResults = mergeKachinukiSubResults(parent.SubResults, result.SubResults)
 	}
 	remainingA, remainingB, _ := e.kachinukiRemainingRoster(compID, matchID, comp, &probe, roundIdx)
 	if len(remainingA) == 0 || len(remainingB) == 0 {

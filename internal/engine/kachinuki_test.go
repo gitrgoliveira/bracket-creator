@@ -1489,6 +1489,51 @@ func TestCheckKachinukiPrematureCompletion(t *testing.T) {
 	})
 }
 
+// TestCheckKachinukiPrematureCompletion_MergesPartialIncoming guards the
+// pre-check against a partial or stale client log on a completed write. The
+// write path merges sub-results by position, so exhaustion must be judged on
+// the MERGED log, not the incoming log alone: a client that omits earlier
+// server-appended bouts must not trip a false 409 when the committed (merged)
+// log would show exhaustion.
+func TestCheckKachinukiPrematureCompletion_MergesPartialIncoming(t *testing.T) {
+	eng, store, comp := setupKachinukiComp(t, "premature-merge", 3, func(c *state.Competition) { c.Format = state.CompFormatMixed })
+	require.NoError(t, store.SetTeamLineup(comp.ID, domain.TeamLineup{
+		TeamID: "RedTeam", Round: 0,
+		Positions: map[domain.Position]string{
+			domain.PositionNumbered(1): "R-1", domain.PositionNumbered(2): "R-2", domain.PositionNumbered(3): "R-3",
+		},
+	}, 3))
+	require.NoError(t, store.SetTeamLineup(comp.ID, domain.TeamLineup{
+		TeamID: "WhiteTeam", Round: 0,
+		Positions: map[domain.Position]string{
+			domain.PositionNumbered(1): "W-1", domain.PositionNumbered(2): "W-2", domain.PositionNumbered(3): "W-3",
+		},
+	}, 3))
+	// Server already holds the FULL exhausting log: R-1 beat W-1..W-3, so
+	// WhiteTeam is fully retired and completion is legitimate.
+	require.NoError(t, store.SavePoolMatches(comp.ID, []state.MatchResult{
+		{
+			ID: "P1-0", SideA: "RedTeam", SideB: "WhiteTeam", Status: state.MatchStatusRunning,
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "R-1", SideB: "W-1", Winner: "R-1", Decision: "fought"},
+				{Position: 2, SideA: "R-1", SideB: "W-2", Winner: "R-1", Decision: "fought"},
+				{Position: 3, SideA: "R-1", SideB: "W-3", Winner: "R-1", Decision: "fought"},
+			},
+		},
+	}))
+
+	// The client submits a PARTIAL completed write carrying only the last
+	// bout (a stale/short log). Judged alone this looks like W-1/W-2 remain
+	// (a false 409); merged with the stored log WhiteTeam is exhausted.
+	err := eng.CheckKachinukiPrematureCompletion(comp.ID, "P1-0", &state.MatchResult{
+		Status: state.MatchStatusCompleted, Winner: "RedTeam",
+		SubResults: []state.SubMatchResult{
+			{Position: 3, SideA: "R-1", SideB: "W-3", Winner: "R-1", Decision: "fought"},
+		},
+	})
+	assert.NoError(t, err, "merged log shows WhiteTeam exhausted; completion must be allowed, not falsely rejected")
+}
+
 // TestMaybeAdvanceKachinuki_NamelessBoutNoOp: identity is required for
 // retirement math. A bout that carries an outcome but EMPTY side names
 // (UAT: the final's bootstrapped bout 1 was submitted as a nameless

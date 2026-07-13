@@ -870,30 +870,28 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               layout an independent scroll region for the bout list so the
               team header / summary / decision / footer stay anchored. */}
           <div className="team-bouts-scroll">
-          {(() => {
+          {[
             // T136: kachinukiExhausted (hoisted above) surfaces the end
             // banner instead of more bout rows when the backend has
             // already decided the match.
-            return [
-              isKachinuki && (
-                <div key="kachinuki-banner" style={{ background: "var(--bg-2, #fafafa)", border: "1px solid var(--accent, #ddd)", borderRadius: 4, padding: "8px 12px", marginBottom: 12, fontSize: 12, display: "flex", flexDirection: "column", gap: 4 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ fontWeight: 700 }}><TermAS name="kachinuki">Kachinuki</TermAS> (winner-stays)</span>
-                    <span style={{ color: "var(--ink-3)" }}>
-                      {kachinukiExhausted
-                        ? "One team exhausted: match ended."
-                        : "Score the current bout, then tap Record bout. The next bout is added automatically; the match ends when one team runs out of players."}
-                    </span>
-                  </div>
-                  {/* TODO(T136): inline auto-refresh after each score so
-                      operators don't have to close+reopen the modal: 
-                      requires hooking the onSubmit response (current
-                      flow forwards through parent + closes the modal). */}
+            isKachinuki && (
+              <div key="kachinuki-banner" style={{ background: "var(--bg-2, #fafafa)", border: "1px solid var(--accent, #ddd)", borderRadius: 4, padding: "8px 12px", marginBottom: 12, fontSize: 12, display: "flex", flexDirection: "column", gap: 4 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontWeight: 700 }}><TermAS name="kachinuki">Kachinuki</TermAS> (winner-stays)</span>
+                  <span style={{ color: "var(--ink-3)" }}>
+                    {kachinukiExhausted
+                      ? "One team exhausted: match ended."
+                      : "Score the current bout, then tap Record bout. The next bout is added automatically; the match ends when one team runs out of players."}
+                  </span>
                 </div>
-              ),
-              ...visiblePositions
-            ];
-          })().filter(Boolean).map((pos, _displayIdx) => {
+                {/* TODO(T136): inline auto-refresh after each score so
+                    operators don't have to close+reopen the modal:
+                    requires hooking the onSubmit response (current
+                    flow forwards through parent + closes the modal). */}
+              </div>
+            ),
+            ...visiblePositions,
+          ].filter(Boolean).map((pos, _displayIdx) => {
             // Kachinuki returns a banner element as the first item; pass
             // it through unchanged. Other items are position strings: 
             // map them back to their canonical index in `positions`.

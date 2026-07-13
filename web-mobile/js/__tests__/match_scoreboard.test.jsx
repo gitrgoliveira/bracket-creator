@@ -3,33 +3,7 @@
 // delegation tests in viewer.test.jsx / display_white_board.test.jsx don't see.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
-
-function collectText(node) {
-  if (node == null) return '';
-  if (typeof node === 'string' || typeof node === 'number') return String(node);
-  if (Array.isArray(node)) return node.map(collectText).join('');
-  if (node.children) return collectText(node.children);
-  if (node.props?.children) return collectText(node.props.children);
-  return '';
-}
-function findInTree(node, pred) {
-  if (!node || typeof node !== 'object') return null;
-  if (Array.isArray(node)) { for (const k of node) { const f = findInTree(k, pred); if (f) return f; } return null; }
-  if (pred(node)) return node;
-  const kids = node.children || node.props?.children || [];
-  for (const k of [].concat(kids)) { const f = findInTree(k, pred); if (f) return f; }
-  return null;
-}
-// BoutSubRow children of TeamScoreboard are component vnodes (not expanded):
-// identify them by their `sub` prop.
-function boutRows(node, out = []) {
-  if (!node || typeof node !== 'object') return out;
-  if (Array.isArray(node)) { node.forEach(n => boutRows(n, out)); return out; }
-  const p = node.props || {};
-  if (p.sub && typeof p.index === 'number') out.push(p);
-  boutRows(node.children || p.children, out);
-  return out;
-}
+import { boutRows, findInTree, collectText } from './helpers/vdom.js';
 
 describe('match_scoreboard: withNumber', () => {
   let withNumber;

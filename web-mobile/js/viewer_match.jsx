@@ -48,7 +48,7 @@ export function mymatchQueueLabel(m) {
 }
 
 // subBoutLabel: center label for a team sub-bout row. The daihyosen
-// (representative bout) is stored with the sentinel position -1 (see
+// (representative bout) is stored with the sentinel DAIHYOSEN_POSITION (see
 // admin_scoring_modal.jsx buildPatch); render it as "Daihyosen" (matching
 // admin_pools.jsx wording) rather than the literal "Match -1" the
 // `position || index+1` fallback would otherwise produce. Shared by both
@@ -94,7 +94,7 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true }) {
   // mp-13y: fetch per-match lineups for team matches so bout rows show
   // competitor names instead of bout numbers.
   const { lineupA, lineupB } = useTeamLineups(isTeam ? match : null, undefined, isTeam ? match.roundIndex : undefined);
-  // Show the Daihyosen row when a rep-bout subResult exists (position -1);
+  // Show the Daihyosen row when a rep-bout subResult exists (position DAIHYOSEN_POSITION);
   // TeamScoreboard additionally gates it on the match actually being tied.
   const showDH = isTeam && (match.subResults || []).some(s => s.position === DAIHYOSEN_POSITION);
 

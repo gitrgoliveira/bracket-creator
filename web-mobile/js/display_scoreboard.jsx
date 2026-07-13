@@ -580,8 +580,8 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, linkState 
     //   2. IV (Individual Victories) are tied.
     //   3. PW (Points Won) are also tied.
     //   4. It is a knockout phase (not a pool match).
-    // The DH sub-result (position === -1) may or may not exist yet; when absent,
-    // TeamScoreboard renders a "Daihyosen pending" placeholder.
+    // The DH sub-result (position === DAIHYOSEN_POSITION) may or may not exist
+    // yet; when absent, TeamScoreboard renders a "Daihyosen pending" placeholder.
     const subResults = (promoted && promoted.match && promoted.match.subResults) || [];
     const isKnockoutPhase = !!(promoted && promoted.isBracket) ||
         !!(promoted && promoted.match && promoted.match.phase === "bracket");

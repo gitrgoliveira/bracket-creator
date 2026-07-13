@@ -11,8 +11,8 @@ const { useEffect: useED, useMemo: useMD } = React;
 // overlayPositionLabel: FIK position label for the current bout, used as the
 // fallback when no per-match lineup pins a player name. Uses POS_LABELS_5
 // from lineup_resolver.jsx (single source of truth). Senpo/Jiho/... for
-// 5-person teams, "Daihyosen" for the rep bout (position === -1), else the
-// bare bout number ("1", "2", …). NEVER the team name.
+// 5-person teams, "Daihyosen" for the rep bout (position === DAIHYOSEN_POSITION),
+// else the bare bout number ("1", "2", …). NEVER the team name.
 function overlayPositionLabel(teamSize, index, sub) {
     if (sub && sub.position === DAIHYOSEN_POSITION) return "Daihyosen";
     if (sub && typeof sub.position === "string" && sub.position.length > 0 && /[a-z]/i.test(sub.position)) return sub.position;
@@ -25,17 +25,18 @@ function overlayPositionLabel(teamSize, index, sub) {
 }
 
 // findCurrentBoutIndex: returns the 0-based index of the bout that is
-// currently being fought (the first UNSCORED regular bout, position != -1).
-// Falls back to 0 on an empty subResults. Used by StreamingOverlay to pick
-// which bout names and score to show.
+// currently being fought (the first UNSCORED numbered bout, position >
+// DAIHYOSEN_POSITION). Falls back to 0 on an empty subResults. Used by
+// StreamingOverlay to pick which bout names and score to show.
 function findCurrentBoutIndex(subResults) {
     if (!subResults || !subResults.length) return 0;
     // A bout is scored if it has real ippons, a hansoku, a hantei decision, an
     // explicit winner/decision (quick-score and forfeit-style outcomes set
     // these without ippon letters), or a hikiwake. This aligns with
     // TeamScoreboard's isScored logic. When all regular bouts are complete,
-    // returns regular.length (= subResults.length excluding any DH row at
-    // position -1): the caller treats that as the "DH/done" signal.
+    // returns regular.length (= subResults.length excluding the DH row and
+    // any malformed negative, position <= DAIHYOSEN_POSITION): the caller
+    // treats that as the "DH/done" signal.
     const regular = subResults.filter(s => s.position > DAIHYOSEN_POSITION);
     for (let i = 0; i < regular.length; i++) {
         const s = regular[i];
@@ -104,8 +105,8 @@ function StreamingOverlay({ court, position, competitions }) {
     const currentBoutIdx = useMD(() => findCurrentBoutIndex(ovlSubResults), [ovlSubResults]);
     const currentSub = ovlSubResults[currentBoutIdx] || null;
 
-    // mp-13y #10: running IV/PW aggregate per side. teamIVPW excludes the
-    // Daihyosen (position -1) row. sideB = shiro, sideA = aka.
+    // mp-13y #10: running IV/PW aggregate per side. teamIVPW counts only
+    // numbered bouts (position > DAIHYOSEN_POSITION). sideB = shiro, sideA = aka.
     const ovlSideA = hasRunning ? (running.match.sideA?.name || (typeof running.match.sideA === "string" ? running.match.sideA : "")) : "";
     const ovlSideB = hasRunning ? (running.match.sideB?.name || (typeof running.match.sideB === "string" ? running.match.sideB : "")) : "";
     const ovlIV = isTeamMatch ? teamIVPW(ovlSubResults, ovlSideA, ovlSideB) : { ivShiro: 0, ivAka: 0, pwShiro: 0, pwAka: 0 };
@@ -122,7 +123,7 @@ function StreamingOverlay({ court, position, competitions }) {
 
     // DH signal for the broadcast lower-third: the running match IS a daihyosen
     // rep bout (a pool/league "…-DH-N" match), the team match is currently on
-    // its daihyosen sub-bout (position -1), or a daihyosen is pending (tied
+    // its daihyosen sub-bout (position DAIHYOSEN_POSITION), or a daihyosen is pending (tied
     // team match about to send its reps). Surfaced as a "DAIHYOSEN" chip so
     // stream viewers know the tie-break bout is what's on court.
     const runId = hasRunning ? (running.match.id || "") : "";
@@ -145,7 +146,7 @@ function StreamingOverlay({ court, position, competitions }) {
         // numbered bouts are server-bout-first with the lineup only seeding the
         // index-0 bootstrap (fallback label: plain bout number); fixed format
         // and the daihyosen row stay lineup-first (fallback label: FIK
-        // position). The daihyosen (position -1) is an operator-chosen rep bout,
+        // position). The daihyosen (position DAIHYOSEN_POSITION) is an operator-chosen rep bout,
         // so it must resolve lineup-first even in kachinuki, else a stale
         // persisted name would win over the current rep pick.
         const isDaihyosenBout = currentSub.position === DAIHYOSEN_POSITION;

@@ -111,7 +111,7 @@ export function isKachinukiBoutMode({ isKachinuki, isComplete, exhausted, hasDai
 //     only APPENDS bouts 2+ after the first recorded bout), so a fresh
 //     match with no positive-position entries shows position 1: the
 //     senpo pairing resolves from the lineup.
-//   - Daihyosen: the position -1 rep bout is a server row and the
+//   - Daihyosen: the position DAIHYOSEN_POSITION rep bout is a server row and the
 //     actionable slot for a tied encounter; it is always visible when
 //     present.
 //
@@ -191,11 +191,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const positionCount = Math.min(Math.max(teamSize, maxSubPos), 2 * window.MAX_TEAM_SIZE - 1);
   const numberedPositions = Array.from({ length: positionCount }, (_, i) => String(i + 1));
   // mp-4pc: a persisted daihyosen (representative bout) lives in
-  // SubResults at wire position -1. It is scored "like any other
+  // SubResults at wire position DAIHYOSEN_POSITION. It is scored "like any other
   // sub-match" (handlers_daihyosen.go) but is NOT an individual victory: 
   // it breaks an IV/PW tie. Render it as a trailing scoreable row,
   // exclude it from the IV/PW tally, and let its winner decide the
-  // encounter. The "daihyosen" slot sentinel maps to position -1 in
+  // encounter. The "daihyosen" slot sentinel maps to DAIHYOSEN_POSITION in
   // buildPatch. It is the ONLY team sub-bout that may carry encho/hantei
   // (validation.go validateSubBout).
   const existingDaihyosen = (m.subResults || []).find(s => s.position === DAIHYOSEN_POSITION);
@@ -239,7 +239,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // mp-4pc: the daihyosen is the only team sub-bout that may be decided
   // by hantei (judges' decision on a tied bout, FIK 7-5 / 29-6: encho
   // optional). Mirrors the individual ScoreEditorModal hantei flow but scoped to the
-  // position -1 row. "" = score-decided; "a"/"b" = hantei winner side.
+  // position DAIHYOSEN_POSITION row. "" = score-decided; "a"/"b" = hantei winner side.
   const initialDaihyosenHantei = existingDaihyosen?.decidedByHantei
     ? (existingDaihyosen.winner === (typeof m.sideA === "object" ? m.sideA?.name : m.sideA) ? "a" : "b")
     : "";
@@ -1174,7 +1174,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               29-6). Encho is optional: a tied daihyosen may be taken straight
               to a judges' decision. Mounts whenever a daihyosen exists;
               arming requires a tied scoreline. The chosen winner rides onto
-              the position -1 sub (decidedByHantei) when the operator saves. */}
+              the position DAIHYOSEN_POSITION sub (decidedByHantei) when the operator saves. */}
           {hasDaihyosen && (() => {
             const dt = subTotals[daihyosenIdx];
             const tiedScore = dt.aTotal === dt.bTotal;

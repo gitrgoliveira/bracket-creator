@@ -399,7 +399,7 @@ function prevEnchoPeriod(current) {
   return Math.max(1, current - 1);
 }
 
-// mp-4pc: once a daihyosen (rep bout, wire position -1) exists, the encho
+// mp-4pc: once a daihyosen (rep bout, wire position DAIHYOSEN_POSITION) exists, the encho
 // rides on that sub, not the top-level match (enchoBlock suppresses the
 // match-level encho when hasDaihyosen). On re-open we must restore the
 // period count from the sub: else a persisted decidedByHantei replays
@@ -412,7 +412,7 @@ function initialEnchoPeriodsForMatch(m) {
 }
 
 // daihyosenEnchoFields: pure builder for the encho/decidedByHantei wire
-// fields on the daihyosen representative bout (position -1). The backend
+// fields on the daihyosen representative bout (position DAIHYOSEN_POSITION). The backend
 // invariant (validation.go validateSubBout) is: encho and hantei are valid
 // ONLY on the daihyosen. Encho is OPTIONAL for hantei: a tied daihyosen may
 // be taken straight to a judges' decision without overtime: so the two

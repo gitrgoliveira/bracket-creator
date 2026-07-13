@@ -38,8 +38,9 @@ function teardownSuite(runtime) {
   vi.resetModules();
 }
 
-// Minimal lineup shape for teamSize=5. pickFromLineup uses POS_LABELS_5
-// position keys (lowercase: "senpo", "jiho", ...) for a 5-person team.
+// Minimal lineup shape for teamSize=5. pickFromLineup looks positions up by
+// POS_KEYS_5 (lowercase: "senpo", "jiho", ...) for a 5-person team;
+// POS_LABELS_5 is only the Title-case display derivation.
 const linupA = { positions: { senpo: 'AkaSenpo', jiho: 'AkaJiho', chuken: 'AkaChuken', fukusho: 'AkaFukusho', taisho: 'AkaTaisho' } };
 const linupB = { positions: { senpo: 'ShiroSenpo', jiho: 'ShiroJiho', chuken: 'ShiroChuken', fukusho: 'ShiroFukusho', taisho: 'ShiroTaisho' } };
 

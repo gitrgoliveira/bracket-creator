@@ -1175,7 +1175,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                 {lines.length} entries · One per line · <span style={{ color: "var(--ink-2)", fontWeight: 600 }}>Example: {c.kind === "team" ? "Tora A, Tora Dojo London" : c.engi ? (c.withZekkenName ? "Emi Sasaki - Ren Fujita, SASAKI - FUJITA, Getsurin, 3" : "Emi Sasaki - Ren Fujita, Getsurin, 3") : c.withZekkenName ? "Alice Smith, SMITH, Gyokusen, 3" : "Alice Smith, Gyokusen, 3"}</span>
               </div>
               <div className="field__hint" style={{ marginTop: 2, fontSize: 11 }}>
-                Format: "{c.kind === "team" ? "Team name, Dojo" : c.engi ? (c.withZekkenName ? "Name 1 - Name 2, Zekken, Dojo[, Dan]" : "Name 1 - Name 2, Dojo[, Dan]") : c.withZekkenName ? "Name, Zekken, Dojo[, Dan]" : "Name, Dojo[, Dan grade]"}"
+                Format: "{c.kind === "team" ? "Team name, Dojo" : c.engi ? (c.withZekkenName ? "Name 1 - Name 2, Zekken 1 - Zekken 2, Dojo[, Dan]" : "Name 1 - Name 2, Dojo[, Dan]") : c.withZekkenName ? "Name, Zekken, Dojo[, Dan]" : "Name, Dojo[, Dan grade]"}"
                 <br />* Dan = kendo grade (optional)
                 <br /><button type="button" className="btn--link" style={{ padding: 0, fontSize: 11, fontWeight: 600 }} onClick={downloadTemplate}>Download CSV template</button>
               </div>
@@ -1201,7 +1201,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
               <div>
                 <div className="dropzone__title">{dragOver ? "Drop CSV to import" : "Click or drop CSV to import participants"}</div>
                 <div className="dropzone__sub">
-                  {c.engi ? (c.withZekkenName ? "Name 1 - Name 2, Zekken, Dojo[, Dan]" : "Name 1 - Name 2, Dojo[, Dan]") : c.withZekkenName ? "Name, Zekken, Dojo[, Dan]" : "Name, Dojo[, Dan grade] (e.g. Alice Smith, Gyokusen, 3)"}
+                  {c.engi ? (c.withZekkenName ? "Name 1 - Name 2, Zekken 1 - Zekken 2, Dojo[, Dan]" : "Name 1 - Name 2, Dojo[, Dan]") : c.withZekkenName ? "Name, Zekken, Dojo[, Dan]" : "Name, Dojo[, Dan grade] (e.g. Alice Smith, Gyokusen, 3)"}
                 </div>
               </div>
               <input ref={fileRef} type="file" accept=".csv,.txt,text/csv,text/plain" style={{ display: "none" }} onChange={(e) => handleFile(e.target.files[0])} />

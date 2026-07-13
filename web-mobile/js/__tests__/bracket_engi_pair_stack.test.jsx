@@ -38,7 +38,7 @@ describe('bracket MatchCard engi pair stacking', () => {
     window.engiPairParts = (name) => {
       const s = String(name || '');
       const i = s.indexOf(' - ');
-      return i < 0 ? [s, ''] : [s.slice(0, i), s.slice(i + 3)];
+      return i < 0 ? [s.trim(), ''] : [s.slice(0, i).trim(), s.slice(i + 3).trim()];
     };
     vi.resetModules();
     ({ PlayerLine } = await import('../bracket.jsx'));

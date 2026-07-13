@@ -576,10 +576,12 @@ if (typeof window !== "undefined") {
 
   // Split a combined engi pair name ("Name 1 - Name 2") into [member1, member2].
   // member2 is "" when the name carries no pair separator. Splits on the FIRST
-  // " - " so a member name containing a plain hyphen is unaffected.
+  // " - " so a member name containing a plain hyphen is unaffected. Each half is
+  // trimmed so incidental whitespace around the separator ("Alice -  Bob") does
+  // not leak into display, matching engiPairComplete's whitespace-insensitivity.
   window.engiPairParts = (name) => {
     const s = String(name || "");
     const i = s.indexOf(" - ");
-    return i < 0 ? [s, ""] : [s.slice(0, i), s.slice(i + 3)];
+    return i < 0 ? [s.trim(), ""] : [s.slice(0, i).trim(), s.slice(i + 3).trim()];
   };
 }

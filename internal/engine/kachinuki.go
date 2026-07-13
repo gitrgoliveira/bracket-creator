@@ -516,7 +516,7 @@ func mergeKachinukiSubResults(stored, incoming []state.SubMatchResult) []state.S
 		out = append(out, byPos[p])
 	}
 	if hasDaihyosen {
-		out = append(out, byPos[-1])
+		out = append(out, byPos[state.DaihyosenSubPosition])
 	}
 	return out
 }

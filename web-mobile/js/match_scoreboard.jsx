@@ -13,7 +13,7 @@
 // `variant` ("card" | "tv") only changes sizing via a CSS modifier: the markup
 // and data-testids are identical across surfaces.
 
-import { resolveMatchLineup, resolveLineupTeamId, pickFromLineup } from './lineup_resolver.jsx';
+import { resolveMatchLineup, resolveLineupTeamId, pickFromLineup, resolveBoutSideName } from './lineup_resolver.jsx';
 
 const { useState: useSB, useEffect: useEB } = React;
 
@@ -241,19 +241,13 @@ export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state
     return n;
   };
   const boutNum = isDH ? "DH" : "#" + (sub && sub.position > 0 ? sub.position : index + 1);
-  let shiroName, akaName;
-  if (kachinuki) {
-    // Kachinuki (winner-stays): server-bout side is authoritative; lineup is
-    // only a bootstrap for the very first bout (senpo-vs-senpo). All later
-    // rows must use the server-recorded names or the bout number.
-    const lineupFallbackB = index === 0 ? (lineupB ? pickFromLineup(lineupB, 0, teamSize) : "") : "";
-    const lineupFallbackA = index === 0 ? (lineupA ? pickFromLineup(lineupA, 0, teamSize) : "") : "";
-    shiroName = subSideName(sub && sub.sideB) || lineupFallbackB || boutNum;
-    akaName   = subSideName(sub && sub.sideA) || lineupFallbackA || boutNum;
-  } else {
-    shiroName = (lineupB ? pickFromLineup(lineupB, index, teamSize) : "") || subSideName(sub && sub.sideB) || boutNum;
-    akaName = (lineupA ? pickFromLineup(lineupA, index, teamSize) : "") || subSideName(sub && sub.sideA) || boutNum;
-  }
+  // Name priority is resolveBoutSideName (lineup_resolver.jsx): kachinuki is
+  // server-bout-first with the lineup only seeding the index-0 bootstrap;
+  // fixed format is lineup-first.
+  const lineupNameFor = (lu) =>
+    (kachinuki && index !== 0) ? "" : (lu ? pickFromLineup(lu, index, teamSize) : "");
+  const shiroName = resolveBoutSideName({ isKachinuki: kachinuki, isDaihyosen: isDH, existingName: subSideName(sub && sub.sideB), lineupName: lineupNameFor(lineupB) }) || boutNum;
+  const akaName = resolveBoutSideName({ isKachinuki: kachinuki, isDaihyosen: isDH, existingName: subSideName(sub && sub.sideA), lineupName: lineupNameFor(lineupA) }) || boutNum;
   // TV sizing comes from the parent `.msb--tv .msb-row` selector, so no
   // per-row --tv modifier is needed here.
   const cls = "msb-row"

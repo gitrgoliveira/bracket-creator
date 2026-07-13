@@ -1,14 +1,14 @@
-// resolveBoutSideName: format-aware priority for a sub-bout side name.
-// Regression guard for the UAT bug where the modal rewrote the server's
-// winner-stays pairings: playerNamesForBout resolved lineup-position
-// FIRST, so the engine's appended bout 5 "Ryu Shiro vs Tora Goro"
-// persisted as "Ryu Goro vs Tora Goro" (taisho vs taisho). Kachinuki
-// numbered bouts must be server-bout-log first; the lineup only seeds
-// the bootstrapped bout 1. Fixed-format matches and the daihyosen row
-// keep lineup-first.
+// resolveBoutSideName (lineup_resolver.jsx): format-aware priority for a
+// sub-bout side name. Regression guard for the UAT bug where the modal
+// rewrote the server's winner-stays pairings: playerNamesForBout resolved
+// lineup-position FIRST, so the engine's appended bout 5 "Ryu Shiro vs
+// Tora Goro" persisted as "Ryu Goro vs Tora Goro" (taisho vs taisho).
+// Kachinuki numbered bouts must be server-bout-log first; the lineup only
+// seeds the bootstrapped bout 1. Fixed-format matches and the daihyosen
+// row keep lineup-first.
 
 import { describe, it, expect } from 'vitest';
-import { resolveBoutSideName } from '../admin_scoring_team.jsx';
+import { resolveBoutSideName } from '../lineup_resolver.jsx';
 
 describe('resolveBoutSideName', () => {
   it('kachinuki bout: the existing server name wins over the lineup position', () => {

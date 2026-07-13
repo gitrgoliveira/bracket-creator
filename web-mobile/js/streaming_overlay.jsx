@@ -3,7 +3,7 @@
 
 import { findRunningOnCourt, sideLabel, TermD, StreamingQR } from './display_helpers.jsx';
 import { useTeamLineups, teamIVPW } from './match_scoreboard.jsx';
-import { pickFromLineup } from './lineup_resolver.jsx';
+import { pickFromLineup, resolveBoutSideName } from './lineup_resolver.jsx';
 import { isPoolDaihyosenBout } from './pool_ids.jsx';
 
 const { useEffect: useED, useMemo: useMD } = React;
@@ -138,25 +138,20 @@ function StreamingOverlay({ court, position, competitions }) {
     // competitor stored on the sub (kachinuki), else the FIK POSITION label
     // (Senpo/Jiho/...), else "Daihyosen" when the rep bout is pending; never
     // the team name (that flanks the QR above).
-    //
-    // Kachinuki (winner-stays): flip to server-bout-first. Lineup is only a
-    // bootstrap fallback for the very first bout (index 0); later bouts must
-    // use the server-recorded names or the plain bout number.
     const isKachinukiOvl = (comp?.teamMatchType || comp?.config?.teamMatchType) === "kachinuki";
     const subSideName = (v) => (v && v.name) || (typeof v === "string" ? v : "");
     const boutPosLabel = currentSub ? overlayPositionLabel(teamSizeOvl, currentBoutIdx, currentSub) : (dhPending ? 'Daihyosen' : '');
     let boutShiroName, boutAkaName;
     if (isTeamMatch && currentSub) {
-        if (isKachinukiOvl) {
-            const lineupFallbackB = currentBoutIdx === 0 ? pickFromLineup(ovlLineupB, 0, teamSizeOvl) : "";
-            const lineupFallbackA = currentBoutIdx === 0 ? pickFromLineup(ovlLineupA, 0, teamSizeOvl) : "";
-            const boutNum = String(currentBoutIdx + 1);
-            boutShiroName = subSideName(currentSub.sideB) || lineupFallbackB || boutNum;
-            boutAkaName   = subSideName(currentSub.sideA) || lineupFallbackA || boutNum;
-        } else {
-            boutShiroName = pickFromLineup(ovlLineupB, currentBoutIdx, teamSizeOvl) || subSideName(currentSub.sideB) || boutPosLabel;
-            boutAkaName   = pickFromLineup(ovlLineupA, currentBoutIdx, teamSizeOvl) || subSideName(currentSub.sideA) || boutPosLabel;
-        }
+        // Name priority is resolveBoutSideName (lineup_resolver.jsx): kachinuki
+        // is server-bout-first with the lineup only seeding the index-0
+        // bootstrap (fallback label: plain bout number); fixed format is
+        // lineup-first (fallback label: FIK position).
+        const ovlLineupName = (lu) =>
+            (isKachinukiOvl && currentBoutIdx !== 0) ? "" : pickFromLineup(lu, currentBoutIdx, teamSizeOvl);
+        const ovlFallback = isKachinukiOvl ? String(currentBoutIdx + 1) : boutPosLabel;
+        boutShiroName = resolveBoutSideName({ isKachinuki: isKachinukiOvl, isDaihyosen: false, existingName: subSideName(currentSub.sideB), lineupName: ovlLineupName(ovlLineupB) }) || ovlFallback;
+        boutAkaName   = resolveBoutSideName({ isKachinuki: isKachinukiOvl, isDaihyosen: false, existingName: subSideName(currentSub.sideA), lineupName: ovlLineupName(ovlLineupA) }) || ovlFallback;
     } else {
         boutShiroName = dhPending ? boutPosLabel : '';
         boutAkaName   = dhPending ? boutPosLabel : '';

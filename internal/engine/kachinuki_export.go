@@ -76,16 +76,7 @@ func (e *Engine) collectKachinukiMatches(compID string, comp *state.Competition)
 				if len(bm.SubResults) == 0 {
 					continue
 				}
-				mr := state.MatchResult{
-					ID:         bm.ID,
-					SideA:      bm.SideA,
-					SideB:      bm.SideB,
-					Winner:     bm.Winner,
-					Status:     bm.Status,
-					Decision:   bm.Decision,
-					SubResults: bm.SubResults,
-				}
-				detail := buildKachinukiDetail(&mr, fmt.Sprintf("Bracket R%d-M%d", rIdx+1, mIdx+1), positionByPlayer)
+				detail := buildKachinukiDetail(bracketMatchToTeamResult(bm), fmt.Sprintf("Bracket R%d-M%d", rIdx+1, mIdx+1), positionByPlayer)
 				if len(detail.Bouts) > 0 {
 					out = append(out, detail)
 				}
@@ -93,16 +84,7 @@ func (e *Engine) collectKachinukiMatches(compID string, comp *state.Competition)
 		}
 		// The 3rd-place match is a sibling of bracket.Rounds; same treatment.
 		if bm := bracket.ThirdPlaceMatch; bm != nil && len(bm.SubResults) > 0 {
-			mr := state.MatchResult{
-				ID:         bm.ID,
-				SideA:      bm.SideA,
-				SideB:      bm.SideB,
-				Winner:     bm.Winner,
-				Status:     bm.Status,
-				Decision:   bm.Decision,
-				SubResults: bm.SubResults,
-			}
-			detail := buildKachinukiDetail(&mr, "3rd Place Match", positionByPlayer)
+			detail := buildKachinukiDetail(bracketMatchToTeamResult(*bm), "3rd Place Match", positionByPlayer)
 			if len(detail.Bouts) > 0 {
 				out = append(out, detail)
 			}

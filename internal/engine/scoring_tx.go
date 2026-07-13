@@ -259,13 +259,7 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	// BEFORE the pool/bracket write primitives, so the rollback path
 	// below (which replays `prior` through those primitives) still
 	// restores the pre-write state exactly.
-	if comp != nil && comp.TeamSize >= 2 && comp.TeamMatchType == state.TeamMatchTypeKachinuki {
-		var stored []state.SubMatchResult
-		if prior != nil {
-			stored = prior.SubResults
-		}
-		result.SubResults = mergeKachinukiSubResults(stored, result.SubResults)
-	}
+	applyKachinukiMerge(comp, prior, result)
 
 	// mp-e2k1: For mixed competitions, capture the pre-write standings for
 	// the match's pool so we can compare after the write and detect whether

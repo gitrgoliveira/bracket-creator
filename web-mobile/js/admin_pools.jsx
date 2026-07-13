@@ -95,6 +95,7 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
     compFormat: m.compFormat || (comp && comp.format) || "",
     compKind: isSupplementary ? "" : (m.compKind || (comp && comp.kind) || ""),
     teamSize: isSupplementary ? 0 : (m.teamSize ?? (comp && comp.teamSize) ?? 0),
+    teamMatchType: isSupplementary ? "" : (m.teamMatchType || (comp && (comp.teamMatchType || (comp.config && comp.config.teamMatchType))) || ""),
     compEngi: isSupplementary ? false : !!(m.compEngi ?? (comp && comp.engi)),
     phase: m.phase || "pool",
     poolName: m.poolName || derivedPoolName,

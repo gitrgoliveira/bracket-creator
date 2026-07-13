@@ -362,13 +362,7 @@ func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId strin
 	// BEFORE the pool/bracket write primitives, so the rollback path
 	// below (which replays `prior` through those primitives) still
 	// restores the pre-write state exactly.
-	if comp != nil && comp.TeamSize >= 2 && comp.TeamMatchType == state.TeamMatchTypeKachinuki {
-		var stored []state.SubMatchResult
-		if prior != nil {
-			stored = prior.SubResults
-		}
-		result.SubResults = mergeKachinukiSubResults(stored, result.SubResults)
-	}
+	applyKachinukiMerge(comp, prior, result)
 
 	var sideMismatch bool
 	err := e.withPoolMatch(compId, matchId, func(r *state.MatchResult) {

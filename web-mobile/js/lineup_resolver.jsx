@@ -62,6 +62,19 @@ export function resolveLineupTeamId(sideKey, players) {
 // Mirrors POS_LABELS_BY_INDEX_5 in admin_scoring_modal.jsx.
 const POS_LABELS_5 = ["senpo", "jiho", "chuken", "fukusho", "taisho"];
 
+// resolveBoutSideName: which name identifies one side of a sub-bout row.
+// KACHINUKI numbered bouts are SERVER-FIRST: the engine appended the
+// pairing via winner-stays advancement (bout 5 is "winner of bout 4 vs
+// next in queue", NOT "taisho vs taisho"), so an existing SubResult name
+// must never be overwritten by a lineup-position lookup. The lineup only
+// seeds the bootstrapped bout 1 before the first submit. Fixed-format
+// matches and the daihyosen row stay LINEUP-FIRST: lineups are always
+// editable and drive fixed position-vs-position pairings.
+export function resolveBoutSideName({ isKachinuki, isDaihyosen, existingName, lineupName }) {
+  if (isKachinuki && !isDaihyosen) return existingName || lineupName || "";
+  return lineupName || existingName || "";
+}
+
 // pickFromLineup: resolves the player name at a given bout index from a
 // lineup object. 5-person teams use named position keys; other sizes use
 // the numeric string "1".."N". Returns "" when the lineup has no entry for

@@ -36,7 +36,7 @@ import { useDebouncedRunningWrite, SyncStatusPill } from './admin_scoring_autosa
 // StreamingOverlay). The implementations live in lineup_resolver.js;
 // re-exported here so existing imports from admin_scoring_modal.jsx continue
 // to work (scoring_modal_match_lineup.test.jsx imports directly from here).
-import { resolveMatchLineup, resolveLineupTeamId } from './lineup_resolver.jsx';
+import { resolveMatchLineup, resolveLineupTeamId, resolveBoutSideName } from './lineup_resolver.jsx';
 
 // Position keys are generated inline in TeamScoreEditorModal (numbered "1".."N")
 // from teamSize and any persisted kachinuki bouts; the upper bound everywhere is
@@ -165,19 +165,6 @@ export function resolveKachinukiBoutSides({ aName, bName, wKey, teamWinnerName }
   if (wKey === "a") winner = aName || teamWinnerName || "";
   else if (wKey === "b") winner = bName || teamWinnerName || "";
   return { sideA, sideB, winner };
-}
-
-// resolveBoutSideName: which name identifies one side of a sub-bout row.
-// KACHINUKI numbered bouts are SERVER-FIRST: the engine appended the
-// pairing via winner-stays advancement (bout 5 is "winner of bout 4 vs
-// next in queue", NOT "taisho vs taisho"), so an existing SubResult name
-// must never be overwritten by a lineup-position lookup. The lineup only
-// seeds the bootstrapped bout 1 before the first submit. Fixed-format
-// matches and the daihyosen row stay LINEUP-FIRST: lineups are always
-// editable and drive fixed position-vs-position pairings.
-export function resolveBoutSideName({ isKachinuki, isDaihyosen, existingName, lineupName }) {
-  if (isKachinuki && !isDaihyosen) return existingName || lineupName || "";
-  return lineupName || existingName || "";
 }
 
 // subBoutHasBeenPlayed: true once a sub-bout carries any operator input
@@ -582,17 +569,25 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // by exhaustion. koTieBlocked does NOT apply to a bout submit (a bout
   // hikiwake is legitimate; the match is not being completed).
   const kachinukiBoutMode = isKachinukiBoutMode({ isKachinuki, isComplete, exhausted: kachinukiExhausted, hasDaihyosen });
+  // Rows to render: kachinuki shows only bouts that exist in the server log
+  // (kachinukiVisiblePositions handles the bout-1 bootstrap, the running
+  // current-bout selection, the correction show-all branch, and the
+  // always-visible daihyosen slot); fixed-format matches keep all positions.
+  // Computed once here and shared by the Record-bout guard below and the
+  // render body.
+  const visiblePositions = isKachinuki
+    ? kachinukiVisiblePositions({
+        positions, daihyosenIdx, subResults: m.subResults, isComplete,
+        isPlayedAt: (idx) => subBoutHasBeenPlayed(subs[idx]),
+      })
+    : positions;
   // UX guard: Record bout with nothing entered for the current bout would
   // submit a silent no-op (known quirk Q4: the glossary term inside the
   // Tie button swallows taps, and that chain used to end in a silent 200).
   // Disable the button until the CURRENT visible bout carries operator
   // input (points, fouls, fusensho, or an explicit draw).
   const kachinukiCurrentBoutPlayed = kachinukiBoutMode ? (() => {
-    const visible = kachinukiVisiblePositions({
-      positions, daihyosenIdx, subResults: m.subResults, isComplete,
-      isPlayedAt: (idx) => subBoutHasBeenPlayed(subs[idx]),
-    });
-    const cur = visible.find(p => p !== "daihyosen");
+    const cur = visiblePositions.find(p => p !== "daihyosen");
     return cur != null && subBoutHasBeenPlayed(subs[positions.indexOf(cur)]);
   })() : true;
   const finishSummary = `${teamVerdictText} · IV ${ivB}–${ivA} · PW ${pwB}–${pwA}`;
@@ -876,32 +871,16 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               team header / summary / decision / footer stay anchored. */}
           <div className="team-bouts-scroll">
           {(() => {
-            // T136: for kachinuki the server is the single source of truth
-            // for which bouts exist; kachinukiVisiblePositions handles the
-            // bout-1 bootstrap (the server only appends bouts 2+), the
-            // running current-bout selection, the correction show-all
-            // branch, and the always-visible daihyosen slot. Fixed-format
-            // matches keep all positions as before.
-            const visiblePositions = isKachinuki
-              ? kachinukiVisiblePositions({
-                  positions,
-                  daihyosenIdx,
-                  subResults: m.subResults,
-                  isComplete,
-                  isPlayedAt: (idx) => subBoutHasBeenPlayed(subs[idx]),
-                })
-              : positions;
             // T136: kachinukiExhausted (hoisted above) surfaces the end
             // banner instead of more bout rows when the backend has
             // already decided the match.
-            const exhausted = kachinukiExhausted;
             return [
               isKachinuki && (
                 <div key="kachinuki-banner" style={{ background: "var(--bg-2, #fafafa)", border: "1px solid var(--accent, #ddd)", borderRadius: 4, padding: "8px 12px", marginBottom: 12, fontSize: 12, display: "flex", flexDirection: "column", gap: 4 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <span style={{ fontWeight: 700 }}><TermAS name="kachinuki">Kachinuki</TermAS> (winner-stays)</span>
                     <span style={{ color: "var(--ink-3)" }}>
-                      {exhausted
+                      {kachinukiExhausted
                         ? "One team exhausted: match ended."
                         : "Score the current bout, then tap Record bout. The next bout is added automatically; the match ends when one team runs out of players."}
                     </span>

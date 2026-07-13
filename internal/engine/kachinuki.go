@@ -454,6 +454,21 @@ func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, error) {
 	return true, nil
 }
 
+// applyKachinukiMerge merges an incoming kachinuki bout log into the stored
+// prior log by position via mergeKachinukiSubResults. No-op for individual,
+// fixed-format, or missing competitions. Shared by the locked and tx scoring
+// paths so the merge guard cannot drift between them.
+func applyKachinukiMerge(comp *state.Competition, prior, result *state.MatchResult) {
+	if comp == nil || comp.TeamSize < 2 || comp.TeamMatchType != state.TeamMatchTypeKachinuki {
+		return
+	}
+	var stored []state.SubMatchResult
+	if prior != nil {
+		stored = prior.SubResults
+	}
+	result.SubResults = mergeKachinukiSubResults(stored, result.SubResults)
+}
+
 // mergeKachinukiSubResults merges an incoming kachinuki bout log into
 // the stored one BY POSITION (ACID: a client whose local log is behind
 // the server, a stale modal, a debounced autosave, or a second operator,

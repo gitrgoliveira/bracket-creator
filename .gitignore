@@ -118,7 +118,3 @@ mp-*/
 .github/skills
 
 *.pdf
-engi-samples/
-engi-samples-ui/
-# compiled binary of scratch/engi_samples (go build drops it at the repo root)
-engi_samples

@@ -578,6 +578,12 @@ func ValidateCompetitionTeamSize(kind string, teamSize int) error {
 // DecisionDraw is the canonical value for a tied (hikiwake) match.
 const DecisionDraw = "hikiwake"
 
+// DaihyosenSubPosition is the sentinel Position value marking a
+// SubMatchResult as the daihyosen (representative bout) rather than a
+// numbered roster bout (positions 1..N). It is negative so it never
+// collides with a real bout index. Use this constant instead of a bare -1.
+const DaihyosenSubPosition = -1
+
 // IsDraw reports whether a match decision string represents a draw.
 func IsDraw(decision string) bool {
 	return decision == DecisionDraw

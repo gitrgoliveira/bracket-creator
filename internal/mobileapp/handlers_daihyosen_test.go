@@ -323,7 +323,7 @@ func TestRemoveDaihyosen(t *testing.T) {
 						Status: state.MatchStatusRunning,
 						SubResults: []state.SubMatchResult{
 							{Position: 1, SideA: "Alice", SideB: "Bob", Winner: "Alice"},
-							{Position: -1, SideA: "RepA", SideB: "RepB", Decision: "daihyosen"},
+							{Position: state.DaihyosenSubPosition, SideA: "RepA", SideB: "RepB", Decision: "daihyosen"},
 						},
 					},
 				},
@@ -384,7 +384,7 @@ func TestRemoveDaihyosen(t *testing.T) {
 						ID: "B3", SideA: "TeamA", SideB: "TeamB",
 						Status: state.MatchStatusRunning,
 						SubResults: []state.SubMatchResult{
-							{Position: -1, SideA: "RepA", SideB: "RepB", IpponsA: []string{"M"}, Decision: "daihyosen"},
+							{Position: state.DaihyosenSubPosition, SideA: "RepA", SideB: "RepB", IpponsA: []string{"M"}, Decision: "daihyosen"},
 						},
 					},
 				},
@@ -412,9 +412,9 @@ func TestRemoveDaihyosen(t *testing.T) {
 			id   string
 			sub  state.SubMatchResult
 		}{
-			{"hansoku on side A", "rm-dh-hansokuA", state.SubMatchResult{Position: -1, SideA: "RepA", SideB: "RepB", HansokuA: 1, Decision: "daihyosen"}},
-			{"hansoku on side B", "rm-dh-hansokuB", state.SubMatchResult{Position: -1, SideA: "RepA", SideB: "RepB", HansokuB: 1, Decision: "daihyosen"}},
-			{"withdrawal decision, no winner", "rm-dh-withdrawal", state.SubMatchResult{Position: -1, SideA: "RepA", SideB: "RepB", Decision: "kiken-voluntary"}},
+			{"hansoku on side A", "rm-dh-hansokuA", state.SubMatchResult{Position: state.DaihyosenSubPosition, SideA: "RepA", SideB: "RepB", HansokuA: 1, Decision: "daihyosen"}},
+			{"hansoku on side B", "rm-dh-hansokuB", state.SubMatchResult{Position: state.DaihyosenSubPosition, SideA: "RepA", SideB: "RepB", HansokuB: 1, Decision: "daihyosen"}},
+			{"withdrawal decision, no winner", "rm-dh-withdrawal", state.SubMatchResult{Position: state.DaihyosenSubPosition, SideA: "RepA", SideB: "RepB", Decision: "kiken-voluntary"}},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {

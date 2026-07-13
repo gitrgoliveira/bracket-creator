@@ -15,6 +15,12 @@
 // truthy poolNameOf() result alone (see findNextPoolOnCourt's "mixed" gate).
 // This regex constant is intentionally module-private: callers use the
 // exported poolNameOf() wrapper below, never the raw pattern.
+// DAIHYOSEN_POSITION is the sentinel `position` value marking a sub-bout as
+// the daihyosen (representative bout) rather than a numbered roster bout
+// (positions 1..N). Negative so it never collides with a real bout index.
+// Mirrors state.DaihyosenSubPosition on the Go side. Use this instead of -1.
+export const DAIHYOSEN_POSITION = -1;
+
 const POOL_MATCH_ID_RE = /^(.*?)-(?:DH-|TB-)?\d+$/;
 
 // poolNameOf: derive the pool name from a pool-match id (incl. DH/TB

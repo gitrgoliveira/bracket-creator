@@ -14,6 +14,7 @@
 // and data-testids are identical across surfaces.
 
 import { resolveMatchLineup, resolveLineupTeamId, pickFromLineup, resolveBoutSideName } from './lineup_resolver.jsx';
+import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 
 const { useState: useSB, useEffect: useEB } = React;
 
@@ -267,7 +268,7 @@ export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state
 // regular (non-DH) bouts. sideB = shiro/left, sideA = aka/right.
 export function teamIVPW(subResults, matchSideA, matchSideB) {
   let ivShiro = 0, ivAka = 0, pwShiro = 0, pwAka = 0;
-  for (const s of (subResults || []).filter(x => x.position !== -1)) {
+  for (const s of (subResults || []).filter(x => x.position !== DAIHYOSEN_POSITION)) {
     const a = ipponLetters(s.ipponsA).filter(Boolean).length;
     const b = ipponLetters(s.ipponsB).filter(Boolean).length;
     pwShiro += b; pwAka += a;
@@ -349,7 +350,7 @@ export function IndividualScore({ match, variant, showNames, withZekkenName }) {
 // ordering. Row count is driven by recorded bouts (never padded to teamSize)
 // and name resolution is server-bout-first (see BoutSubRow).
 export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH, variant, shiroName, akaName, matchSideA, matchSideB, isRunning, kachinuki }) {
-  const regular = (subResults || []).filter(s => s.position !== -1);
+  const regular = (subResults || []).filter(s => s.position !== DAIHYOSEN_POSITION);
   const { ivShiro, ivAka, pwShiro, pwAka } = teamIVPW(subResults, matchSideA, matchSideB);
   // FIK: a Daihyosen (representative bout) only happens when the team match is
   // TIED after the regular bouts: equal individual victories AND equal points.
@@ -357,7 +358,7 @@ export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH,
   // Daihyosen on an already-decided match (mp-13y #12).
   const tied = ivShiro === ivAka && pwShiro === pwAka;
   const renderDH = !!showDH && tied;
-  const dhSub = renderDH ? (subResults || []).find(s => s.position === -1) : null;
+  const dhSub = renderDH ? (subResults || []).find(s => s.position === DAIHYOSEN_POSITION) : null;
   const tv = variant === "tv";
   // The current bout = first unscored regular bout (navy "now" highlight via
   // var(--accent-soft): the running signal), but only while the match is

@@ -98,7 +98,7 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			// Locate the daihyosen sub (Position == -1).
 			dhIdx := -1
 			for i := range match.SubResults {
-				if match.SubResults[i].Position == -1 {
+				if match.SubResults[i].Position == state.DaihyosenSubPosition {
 					dhIdx = i
 					break
 				}

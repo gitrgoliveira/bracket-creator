@@ -5,6 +5,8 @@
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
+import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
+
 // Kendo best-of-3 cap. Mirrors the server-side `maxIpponsPerSide` in
 // internal/mobileapp/validation.go: the bout ends when one side reaches
 // 2 ippons, so 2-2 is an impossible scoreline. Used to gate the M/K/D/T/H
@@ -404,7 +406,7 @@ function prevEnchoPeriod(current) {
 // without encho and the backend rejects the next save
 // ("requires encho with at least one period"). Exported for vitest.
 function initialEnchoPeriodsForMatch(m) {
-  const daihyosen = (m.subResults || []).find(s => s.position === -1);
+  const daihyosen = (m.subResults || []).find(s => s.position === DAIHYOSEN_POSITION);
   if (daihyosen) return daihyosen.encho?.periodCount || 0;
   return m.encho?.periodCount || 0;
 }

@@ -3,7 +3,7 @@
 // T061, T062, T063, mp-13y.
 
 import { findRunningOnCourt, findUpcomingOnCourt, countCourtMatches, sideLabel, phaseLabel, TermD, poolNameOf, isSupplementaryBout, phaseProgressOnCourt, StreamingQR } from './display_helpers.jsx';
-import { teamMatchTypeFor } from './pool_ids.jsx';
+import { teamMatchTypeFor, DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import { TeamScoreboard, IndividualScore, useTeamLineups, teamIVPW } from './match_scoreboard.jsx';
 
 const { useMemo: useMD } = React;
@@ -592,7 +592,7 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, linkState 
     const promotedSideB = promoted?.match?.sideB?.name || (typeof promoted?.match?.sideB === "string" ? promoted.match.sideB : "");
     const showDH = useMD(() => {
         if (!isTeamMatch || !isKnockoutPhase) return false;
-        const regularSubs = subResults.filter(s => s.position !== -1);
+        const regularSubs = subResults.filter(s => s.position !== DAIHYOSEN_POSITION);
         if (regularSubs.length === 0) return false;
         const allDone = regularSubs.every(s => {
             const aIp = (s.ipponsA || []).filter(x => x && x !== "•");

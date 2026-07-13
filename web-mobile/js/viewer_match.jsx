@@ -14,6 +14,7 @@
 
 import { useTeamLineups, TeamScoreboard, IndividualScore, withNumber } from './match_scoreboard.jsx';
 import { TermV, poolLabel } from './viewer_utils.jsx';
+import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 
 const { useState, useRef: useRefV, useCallback } = React;
 
@@ -54,7 +55,7 @@ export function mymatchQueueLabel(m) {
 // viewer sub-row sites (MatchDetailCard, MatchViewerModal). Exported for
 // unit-testing.
 export function subBoutLabel(sub, index) {
-  if (sub && sub.position === -1) return "Daihyosen";
+  if (sub && sub.position === DAIHYOSEN_POSITION) return "Daihyosen";
   return `Match ${(sub && sub.position) || index + 1}`;
 }
 
@@ -95,7 +96,7 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true }) {
   const { lineupA, lineupB } = useTeamLineups(isTeam ? match : null, undefined, isTeam ? match.roundIndex : undefined);
   // Show the Daihyosen row when a rep-bout subResult exists (position -1);
   // TeamScoreboard additionally gates it on the match actually being tied.
-  const showDH = isTeam && (match.subResults || []).some(s => s.position === -1);
+  const showDH = isTeam && (match.subResults || []).some(s => s.position === DAIHYOSEN_POSITION);
 
   return (
     <div className="match-detail-card">

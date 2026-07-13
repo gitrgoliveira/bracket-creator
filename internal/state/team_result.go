@@ -31,15 +31,15 @@ func countScoringIppons(ippons []string) int {
 
 // TeamResultFrom aggregates sub-bouts into IV and PW per side. It is the single
 // source of truth for the team-match summary: the daihyosen placeholder
-// (Position < 0) is skipped so a re-validated tie does not double-count, IV
-// counts sub-bout winners via the same side-matching fallback as scoring
-// (winner may carry the match-level or sub-level side name), and PW counts every
-// scored ippon regardless of bout outcome (a drawn bout where both sides
-// scored still contributes), skipping unfilled "•" placeholder slots via
-// countScoringIppons. SideA is Aka, SideB is Shiro. Returns nil when there
+// (Position == DaihyosenSubPosition (-1)) is skipped so a re-validated tie does
+// not double-count, IV counts sub-bout winners via the same side-matching
+// fallback as scoring (winner may carry the match-level or sub-level side name),
+// and PW counts every scored ippon regardless of bout outcome (a drawn bout where
+// both sides scored still contributes), skipping unfilled "•" placeholder slots
+// via countScoringIppons. SideA is Aka, SideB is Shiro. Returns nil when there
 // are no countable sub-bouts (an individual match, or a slice containing
-// only the daihyosen placeholder with Position < 0). engine.ComputeTeamSummary
-// delegates here.
+// only the daihyosen placeholder with Position == DaihyosenSubPosition (-1)).
+// engine.ComputeTeamSummary delegates here.
 func TeamResultFrom(subResults []SubMatchResult, sideAName, sideBName string) *TeamResultLine {
 	if len(subResults) == 0 {
 		return nil
@@ -47,7 +47,7 @@ func TeamResultFrom(subResults []SubMatchResult, sideAName, sideBName string) *T
 	line := &TeamResultLine{}
 	hasBout := false
 	for _, sub := range subResults {
-		if sub.Position < 0 {
+		if sub.Position == DaihyosenSubPosition {
 			continue // skip the daihyosen placeholder itself
 		}
 		hasBout = true

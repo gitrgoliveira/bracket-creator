@@ -4,7 +4,7 @@
 import { findRunningOnCourt, sideLabel, TermD, StreamingQR } from './display_helpers.jsx';
 import { useTeamLineups, teamIVPW } from './match_scoreboard.jsx';
 import { pickFromLineup, resolveBoutSideName } from './lineup_resolver.jsx';
-import { isPoolDaihyosenBout, teamMatchTypeFor } from './pool_ids.jsx';
+import { isPoolDaihyosenBout, teamMatchTypeFor, DAIHYOSEN_POSITION } from './pool_ids.jsx';
 
 const { useEffect: useED, useMemo: useMD } = React;
 
@@ -16,7 +16,7 @@ const { useEffect: useED, useMemo: useMD } = React;
 // NEVER the team name.
 const OVL_POS_LABELS_5 = ["Senpo", "Jiho", "Chuken", "Fukusho", "Taisho"];
 function overlayPositionLabel(teamSize, index, sub) {
-    if (sub && sub.position === -1) return "Daihyosen";
+    if (sub && sub.position === DAIHYOSEN_POSITION) return "Daihyosen";
     if (sub && typeof sub.position === "string" && sub.position.length > 0 && /[a-z]/i.test(sub.position)) return sub.position;
     // FIK named positions exist ONLY for 5-person teams. For 3/7/11/13/15 and
     // kachinuki the app uses numeric positions "1".."N" everywhere
@@ -38,7 +38,7 @@ function findCurrentBoutIndex(subResults) {
     // TeamScoreboard's isScored logic. When all regular bouts are complete,
     // returns regular.length (= subResults.length excluding any DH row at
     // position -1): the caller treats that as the "DH/done" signal.
-    const regular = subResults.filter(s => s.position !== -1);
+    const regular = subResults.filter(s => s.position !== DAIHYOSEN_POSITION);
     for (let i = 0; i < regular.length; i++) {
         const s = regular[i];
         const hasIppon = (s.ipponsA && s.ipponsA.some(x => x && x !== "•")) ||
@@ -117,10 +117,10 @@ function StreamingOverlay({ court, position, competitions }) {
     // findCurrentBoutIndex returns subResults.length and currentSub is null;
     // the overlay would otherwise read blank. Show "Daihyosen" on both sides
     // so spectators know the rep bout is about to start.
-    const regularSubsOvl = ovlSubResults.filter(s => s.position !== -1);
+    const regularSubsOvl = ovlSubResults.filter(s => s.position !== DAIHYOSEN_POSITION);
     const dhPending = isTeamMatch && !currentSub && regularSubsOvl.length > 0
         && ovlIV.ivShiro === ovlIV.ivAka && ovlIV.pwShiro === ovlIV.pwAka
-        && !ovlSubResults.some(s => s.position === -1);
+        && !ovlSubResults.some(s => s.position === DAIHYOSEN_POSITION);
 
     // DH signal for the broadcast lower-third: the running match IS a daihyosen
     // rep bout (a pool/league "…-DH-N" match), the team match is currently on
@@ -131,7 +131,7 @@ function StreamingOverlay({ court, position, competitions }) {
     const isDHMatch = hasRunning && (
         isPoolDaihyosenBout(runId)
         || dhPending
-        || (currentSub && currentSub.position === -1)
+        || (currentSub && currentSub.position === DAIHYOSEN_POSITION)
     );
 
     // Competitor for the current bout: pinned lineup name, else the per-bout
@@ -150,7 +150,7 @@ function StreamingOverlay({ court, position, competitions }) {
         // position). The daihyosen (position -1) is an operator-chosen rep bout,
         // so it must resolve lineup-first even in kachinuki, else a stale
         // persisted name would win over the current rep pick.
-        const isDaihyosenBout = currentSub.position === -1;
+        const isDaihyosenBout = currentSub.position === DAIHYOSEN_POSITION;
         const ovlLineupName = (lu) =>
             (isKachinukiOvl && !isDaihyosenBout && currentBoutIdx !== 0) ? "" : pickFromLineup(lu, currentBoutIdx, teamSizeOvl);
         const ovlFallback = (isKachinukiOvl && !isDaihyosenBout) ? String(currentBoutIdx + 1) : boutPosLabel;

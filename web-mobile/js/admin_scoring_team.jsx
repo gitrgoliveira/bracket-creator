@@ -37,6 +37,7 @@ import { useDebouncedRunningWrite, SyncStatusPill } from './admin_scoring_autosa
 // re-exported here so existing imports from admin_scoring_modal.jsx (which
 // re-exports them onward) continue to work.
 import { resolveMatchLineup, resolveLineupTeamId, resolveBoutSideName } from './lineup_resolver.jsx';
+import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 
 // Position keys are generated inline in TeamScoreEditorModal (numbered "1".."N")
 // from teamSize and any persisted kachinuki bouts; the upper bound everywhere is
@@ -200,7 +201,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // encounter. The "daihyosen" slot sentinel maps to position -1 in
   // buildPatch. It is the ONLY team sub-bout that may carry encho/hantei
   // (validation.go validateSubBout).
-  const existingDaihyosen = (m.subResults || []).find(s => s.position === -1);
+  const existingDaihyosen = (m.subResults || []).find(s => s.position === DAIHYOSEN_POSITION);
   const hasDaihyosen = !!existingDaihyosen;
   const positions = hasDaihyosen ? [...numberedPositions, "daihyosen"] : numberedPositions;
   const daihyosenIdx = hasDaihyosen ? numberedPositions.length : -1;

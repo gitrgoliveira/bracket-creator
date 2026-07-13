@@ -504,7 +504,7 @@ func mergeKachinukiSubResults(stored, incoming []state.SubMatchResult) []state.S
 	numbered := make([]int, 0, len(byPos))
 	hasDaihyosen := false
 	for p := range byPos {
-		if p == -1 {
+		if p == state.DaihyosenSubPosition {
 			hasDaihyosen = true
 			continue
 		}
@@ -560,7 +560,7 @@ func (e *Engine) CheckKachinukiPrematureCompletion(compID, matchID string, resul
 	// let a premature completion (players still remaining) slip past. This
 	// mirrors deriveDaihyosenWinner, which also requires sub.Winner != "".
 	for _, sub := range result.SubResults {
-		if sub.Position == -1 && sub.Winner != "" {
+		if sub.Position == state.DaihyosenSubPosition && sub.Winner != "" {
 			return nil
 		}
 	}

@@ -4,6 +4,8 @@
 
 const { useRef, useLayoutEffect: useLayoutEffectBC, useState: useStateBC, useEffect: useEffectBC } = React;
 
+import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
+
 // TermBC: kendo-glossary tooltip wrapper. Lazy lookup so the script
 // load order between glossary.jsx and this module doesn't matter.
 function TermBC(props) {
@@ -147,7 +149,7 @@ function engiFlagScore(m) {
 
 // teamIVScore: derive a team match's individual-victories aggregate ("shiroIV–akaIV")
 // from persisted subResults. Mirrors Go engine.ComputeTeamSummary: skip the daihyosen
-// sentinel (position < 0); award IV to whichever match-level side won each bout (winner
+// sentinel (position === DAIHYOSEN_POSITION); award IV to whichever match-level side won each bout (winner
 // matches the match-level OR sub-level side name); empty winner = hikiwake (no IV).
 // Orientation: sideB = Shiro (left), sideA = Aka (right): matches the (ipponsB, ipponsA)
 // call order used everywhere. Returns null when there are no subResults (individual
@@ -159,7 +161,7 @@ function teamIVScore(m) {
   const bName = typeof m.sideB === "object" ? m.sideB?.name : m.sideB;
   let ivA = 0, ivB = 0;
   for (const sub of subs) {
-    if (!sub || sub.position < 0) continue; // skip daihyosen sentinel
+    if (!sub || sub.position === DAIHYOSEN_POSITION) continue; // skip daihyosen sentinel
     const w = sub.winner;
     if (!w) continue;                        // hikiwake / undecided → no IV
     if (w === aName || w === sub.sideA) ivA++;

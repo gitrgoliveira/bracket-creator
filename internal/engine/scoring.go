@@ -181,7 +181,7 @@ func deriveDaihyosenWinner(result *state.MatchResult) {
 		return
 	}
 	for _, sub := range result.SubResults {
-		if sub.Position != -1 || sub.Winner == "" {
+		if sub.Position != state.DaihyosenSubPosition || sub.Winner == "" {
 			continue
 		}
 		sideAWin := isWinForSide(sub.Winner, result.SideA, sub.SideA)

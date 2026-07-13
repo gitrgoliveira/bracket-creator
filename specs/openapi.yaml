@@ -3383,7 +3383,9 @@ components:
             kachinuki score write only saves the bout result and does not advance the
             sequence.
         teamResult:
-          $ref: '#/components/schemas/TeamResultLine'
+          readOnly: true
+          allOf:
+            - $ref: '#/components/schemas/TeamResultLine'
 
     TeamResultLine:
       type: object
@@ -3516,7 +3518,9 @@ components:
           items:
             $ref: '#/components/schemas/SubMatchResult'
         teamResult:
-          $ref: '#/components/schemas/TeamResultLine'
+          readOnly: true
+          allOf:
+            - $ref: '#/components/schemas/TeamResultLine'
 
     CourtMatchSide:
       type: object

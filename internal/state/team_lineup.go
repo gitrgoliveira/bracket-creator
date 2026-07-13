@@ -282,23 +282,27 @@ func FindBestLineupAny(lineups map[string]domain.TeamLineup, teamIDs []string, m
 	}
 	// 2. Round-scoped: highest round <= maxRound.
 	// 3. Round-scoped: highest round overall (AMENDMENT 1 fallback).
-	var best domain.TeamLineup
-	hasBest := false
-	var fallback domain.TeamLineup
-	hasFallback := false
+	// Map iteration order is nondeterministic, so ties on Round are broken
+	// by the teamID's position in teamIDs (the documented "first key wins"
+	// priority), keeping selection stable across calls.
+	var best, fallback domain.TeamLineup
+	bestRank, fallbackRank := -1, -1
+	hasBest, hasFallback := false, false
 	for _, l := range lineups {
-		if l.MatchID != "" || !slices.Contains(teamIDs, l.TeamID) {
-			continue // skip wrong team or match-scoped entries
+		if l.MatchID != "" {
+			continue // skip match-scoped entries
+		}
+		rank := slices.Index(teamIDs, l.TeamID)
+		if rank < 0 {
+			continue // wrong team
 		}
 		if l.Round <= maxRound {
-			if !hasBest || l.Round > best.Round {
-				best = l
-				hasBest = true
+			if !hasBest || l.Round > best.Round || (l.Round == best.Round && rank < bestRank) {
+				best, bestRank, hasBest = l, rank, true
 			}
 		}
-		if !hasFallback || l.Round > fallback.Round {
-			fallback = l
-			hasFallback = true
+		if !hasFallback || l.Round > fallback.Round || (l.Round == fallback.Round && rank < fallbackRank) {
+			fallback, fallbackRank, hasFallback = l, rank, true
 		}
 	}
 	if hasBest {

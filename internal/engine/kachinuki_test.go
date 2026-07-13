@@ -1463,3 +1463,141 @@ func TestMaybeAdvanceKachinuki_NamelessBoutNoOp(t *testing.T) {
 	assert.NotEqual(t, state.MatchStatusCompleted, matches[0].Status)
 	assert.Empty(t, matches[0].Winner)
 }
+
+// TestMaybeAdvanceKachinuki_FallbackRosterFirstAppearanceOrder verifies that
+// the bout-log fallback returns the remaining roster in first-appearance order
+// rather than nondeterministic map-iteration order (Fix 2). The last bout is
+// a hikiwake, so advanceAfterHikiwake picks the HEAD of each remaining queue:
+// the SideA head reveals which player was ordered first.
+//
+// Setup: WHITE has a saved lineup (deterministic queue). RED has NO lineup, so
+// it falls back to the bout log. Bouts 1 and 2 each have a different RED
+// player as SideA winning (contrived, to make both non-retired and produce a
+// 2-element fallback queue). Bout 3 is a hikiwake that retires R-X. After the
+// hikiwake, RED fallback remaining must be [R-B, R-A] (R-B appeared first in
+// bout 1). Running 20 iterations guards against accidentally passing due to
+// lucky Go map-iteration order.
+func TestMaybeAdvanceKachinuki_FallbackRosterFirstAppearanceOrder(t *testing.T) {
+	for i := range 20 {
+		eng, store, _ := setupTestEngine(t)
+		const compID = "kachinuki-fallback-order"
+
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID:            compID,
+			TeamMatchType: state.TeamMatchTypeKachinuki,
+			TeamSize:      3,
+			Format:        state.CompFormatMixed,
+		}))
+		// Lineup saved only for WHITE; RED falls back to the bout log.
+		require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
+			TeamID: "WhiteTeam", Round: 0,
+			Positions: map[domain.Position]string{
+				domain.PositionNumbered(1): "W-1",
+				domain.PositionNumbered(2): "W-2",
+				domain.PositionNumbered(3): "W-3",
+			},
+		}, 3))
+		// SubResults: bouts 1 and 2 are contrived (two different RED players win
+		// against stub WHITE names not in the saved lineup) so R-B and R-A both
+		// appear non-retired, with R-B first in bout-log order. Bout 3 is a
+		// hikiwake that retires R-X (third RED player). The retirement map for RED
+		// after RetiredPlayersFromBoutLog is {R-X}, leaving [R-B, R-A] as the
+		// first-appearance-ordered remaining fallback queue.
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{
+				ID: "P1-0", SideA: "RedTeam", SideB: "WhiteTeam",
+				Status: state.MatchStatusRunning,
+				SubResults: []state.SubMatchResult{
+					{Position: 1, SideA: "R-B", SideB: "W-stub1", Winner: "R-B", Decision: "fought"},
+					{Position: 2, SideA: "R-A", SideB: "W-stub2", Winner: "R-A", Decision: "fought"},
+					{Position: 3, SideA: "R-X", SideB: "W-stub3", Decision: string(domain.DecisionHikiwake)},
+				},
+			},
+		}))
+
+		changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
+		require.NoError(t, err, "iteration %d", i)
+		require.True(t, changed, "iteration %d: hikiwake must advance the sequence", i)
+
+		matches, err := store.LoadPoolMatches(compID)
+		require.NoError(t, err)
+		require.Len(t, matches[0].SubResults, 4, "iteration %d: next bout must be appended", i)
+		next := matches[0].SubResults[3]
+		assert.Equal(t, "R-B", next.SideA,
+			"iteration %d: R-B (first appearance in bout log) must be chosen as the next RED fighter; got %q", i, next.SideA)
+		assert.Equal(t, "W-1", next.SideB,
+			"iteration %d: W-1 must be chosen as the next WHITE fighter (head of saved lineup)", i)
+	}
+}
+
+// TestCheckKachinukiPrematureCompletion_EmptyDaihyosenRejected is the
+// regression test for Fix 4: a completed kachinuki write whose only
+// daihyosen sub-result carries NO winner (an unscored placeholder) must
+// still be rejected when both teams still have players remaining. The old
+// code bypassed the guard on ANY Position=-1 sub-result regardless of
+// whether a winner had been recorded.
+func TestCheckKachinukiPrematureCompletion_EmptyDaihyosenRejected(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	const compID = "premature-daihyosen-no-winner"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:            compID,
+		TeamMatchType: state.TeamMatchTypeKachinuki,
+		TeamSize:      3,
+		Format:        state.CompFormatMixed,
+	}))
+	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
+		TeamID: "RedTeam", Round: 0,
+		Positions: map[domain.Position]string{
+			domain.PositionNumbered(1): "R-1",
+			domain.PositionNumbered(2): "R-2",
+			domain.PositionNumbered(3): "R-3",
+		},
+	}, 3))
+	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
+		TeamID: "WhiteTeam", Round: 0,
+		Positions: map[domain.Position]string{
+			domain.PositionNumbered(1): "W-1",
+			domain.PositionNumbered(2): "W-2",
+			domain.PositionNumbered(3): "W-3",
+		},
+	}, 3))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{
+			ID: "P1-0", SideA: "RedTeam", SideB: "WhiteTeam",
+			Status: state.MatchStatusRunning,
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "R-1", SideB: "W-1", Winner: "R-1", Decision: "fought"},
+			},
+		},
+	}))
+
+	t.Run("unscored daihyosen placeholder is rejected", func(t *testing.T) {
+		// Position=-1 sub-result but Winner="" means the daihyosen has not yet
+		// been played. Both teams still have R-2/R-3 and W-2/W-3 remaining, so
+		// this must be rejected as a premature completion.
+		err := eng.CheckKachinukiPrematureCompletion(compID, "P1-0", &state.MatchResult{
+			Status: state.MatchStatusCompleted, Winner: "RedTeam",
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "R-1", SideB: "W-1", Winner: "R-1", Decision: "fought"},
+				{Position: -1, SideA: "RedTeam", SideB: "WhiteTeam", Winner: "", Decision: "daihyosen"},
+			},
+		})
+		assert.ErrorIs(t, err, ErrKachinukiPrematureCompletion,
+			"an unscored daihyosen placeholder must not bypass the premature-completion guard")
+	})
+
+	t.Run("winner-carrying daihyosen still passes", func(t *testing.T) {
+		// Sanity-check: a Position=-1 sub-result WITH a winner is the legitimate
+		// completion path and must still return nil.
+		err := eng.CheckKachinukiPrematureCompletion(compID, "P1-0", &state.MatchResult{
+			Status: state.MatchStatusCompleted, Winner: "RedTeam",
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "R-1", SideB: "W-1", Winner: "R-1", Decision: "fought"},
+				{Position: -1, SideA: "RedTeam", SideB: "WhiteTeam", Winner: "RedTeam", Decision: "daihyosen"},
+			},
+		})
+		assert.NoError(t, err,
+			"a winner-carrying daihyosen sub-result must still allow the completion")
+	})
+}

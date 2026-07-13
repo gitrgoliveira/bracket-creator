@@ -1727,7 +1727,7 @@ func TestRecordMatchResult_BracketCompletedWithNoWinnerRejected(t *testing.T) {
 	})
 	require.Error(t, err, "completing a bracket match with no winner must be rejected")
 	var valErr *ValidationError
-	require.ErrorAs(t, err, &valErr, "error must be a ValidationError (HTTP 409 in handler)")
+	require.ErrorAs(t, err, &valErr, "error must be a ValidationError (HTTP 400 in handler)")
 
 	// Match must remain in its prior state.
 	stored, err2 := store.LoadBracket(compID)

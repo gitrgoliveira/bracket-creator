@@ -536,9 +536,12 @@ func (e *Engine) CheckKachinukiPrematureCompletion(compID, matchID string, resul
 	if domain.IsKikenDecisionStr(result.Decision) || result.Decision == string(domain.DecisionFusenpai) || result.Decision == string(domain.DecisionFusensho) {
 		return nil
 	}
-	// A daihyosen sub-result is the sanctioned tie resolution.
+	// A daihyosen sub-result is the sanctioned tie resolution, but only once
+	// it carries a winner: an empty/unscored Position=-1 placeholder must not
+	// let a premature completion (players still remaining) slip past. This
+	// mirrors deriveDaihyosenWinner, which also requires sub.Winner != "".
 	for _, sub := range result.SubResults {
-		if sub.Position == -1 {
+		if sub.Position == -1 && sub.Winner != "" {
 			return nil
 		}
 	}
@@ -683,23 +686,29 @@ func (e *Engine) kachinukiRemainingRoster(compID, matchID string, comp *state.Co
 				return FilterRemaining(full, retired), true
 			}
 		}
-		// Bout-log-only fallback: enumerate unique player names seen in bouts.
-		known := map[string]struct{}{}
+		// Preserve first-appearance order from the bout log: AdvanceKachinuki
+		// treats this slice as an ordered queue (index 0 is the next fighter
+		// in), so a map-iteration order would make the next pairing
+		// nondeterministic when a kachinuki match runs without saved lineups.
+		seen := map[string]struct{}{}
+		out := make([]string, 0)
 		isA := teamName == parent.SideA
 		for _, b := range parent.SubResults {
 			name := b.SideB
 			if isA {
 				name = b.SideA
 			}
-			if name != "" {
-				known[name] = struct{}{}
+			if name == "" {
+				continue
 			}
-		}
-		out := make([]string, 0, len(known))
-		for name := range known {
-			if _, gone := retired[name]; !gone {
-				out = append(out, name)
+			if _, dup := seen[name]; dup {
+				continue
 			}
+			seen[name] = struct{}{}
+			if _, gone := retired[name]; gone {
+				continue
+			}
+			out = append(out, name)
 		}
 		return out, false
 	}

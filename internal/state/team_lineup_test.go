@@ -358,3 +358,52 @@ func TestFindBestLineupAny(t *testing.T) {
 		assert.False(t, found)
 	})
 }
+
+// TestFindBestLineupAny_TieBreakDeterminism verifies that when two entries
+// have the SAME round, the teamID whose position in the teamIDs slice is
+// lower wins deterministically across repeated calls (Fix 1: the previous
+// map-iteration implementation was nondeterministic under tie).
+//
+// Two different TeamID values ("id-key" and "name-key") both appear in the
+// teamIDs slice at different positions. Their lineups carry the same Round so
+// neither outranks the other by round. The test asserts that:
+//   - teamIDs=[idKey, nameKey] always returns the idKey lineup.
+//   - teamIDs=[nameKey, idKey] always returns the nameKey lineup.
+//
+// Running 20 iterations per order guards against accidentally passing due to
+// lucky map iteration.
+func TestFindBestLineupAny_TieBreakDeterminism(t *testing.T) {
+	const idKey = "8d5a1b1e-0000-4000-8000-000000000001"
+	const nameKey = "RedTeam"
+
+	idLineup := domain.TeamLineup{
+		TeamID: idKey, Round: 0,
+		Positions: map[domain.Position]string{domain.PosSenpo: "by-id"},
+	}
+	nameLineup := domain.TeamLineup{
+		TeamID: nameKey, Round: 0,
+		Positions: map[domain.Position]string{domain.PosSenpo: "by-name"},
+	}
+	lineups := map[string]domain.TeamLineup{
+		lineupStorageKey(idLineup):   idLineup,
+		lineupStorageKey(nameLineup): nameLineup,
+	}
+
+	t.Run("idKey first in slice wins", func(t *testing.T) {
+		for i := range 20 {
+			got, found := FindBestLineupAny(lineups, []string{idKey, nameKey}, "", 0)
+			require.True(t, found, "iteration %d: must find a lineup", i)
+			assert.Equal(t, "by-id", got.Positions[domain.PosSenpo],
+				"iteration %d: idKey must win when it comes first in teamIDs", i)
+		}
+	})
+
+	t.Run("nameKey first in slice wins", func(t *testing.T) {
+		for i := range 20 {
+			got, found := FindBestLineupAny(lineups, []string{nameKey, idKey}, "", 0)
+			require.True(t, found, "iteration %d: must find a lineup", i)
+			assert.Equal(t, "by-name", got.Positions[domain.PosSenpo],
+				"iteration %d: nameKey must win when it comes first in teamIDs", i)
+		}
+	})
+}

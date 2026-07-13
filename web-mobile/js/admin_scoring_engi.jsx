@@ -134,8 +134,9 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   const dojoOf = (side) => side && typeof side === "object" ? side.dojo || "" : "";
 
   // sideB = Shiro, sideA = Aka (see file header). Guard on the helper's presence
-  // for consistency with bracket.jsx, so a non-browser/ui.jsx-less context can't
-  // throw at render time.
+  // for consistency with bracket.jsx: if ui.jsx has not defined
+  // window.engiPairParts yet, fall back to the unsplit name instead of throwing.
+  // These lines run only at render time, where window is always present.
   const [shiroName, shiroDN] = window.engiPairParts ? window.engiPairParts(nameOf(m.sideB)) : [nameOf(m.sideB), ""];
   const shiroDojo = dojoOf(m.sideB);
   const [akaName, akaDN] = window.engiPairParts ? window.engiPairParts(nameOf(m.sideA)) : [nameOf(m.sideA), ""];

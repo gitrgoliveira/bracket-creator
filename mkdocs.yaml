@@ -57,7 +57,9 @@ theme:
   custom_dir: overrides
   features:
     - navigation.indexes
-    - navigation.sections
+    # navigation.sections is intentionally OFF: with it, every group renders
+    # permanently expanded (~30 sidebar rows, overflowing the viewport).
+    # Without it, groups are collapsible and only the active path expands.
     - navigation.instant
     - navigation.tabs
     - navigation.tabs.sticky

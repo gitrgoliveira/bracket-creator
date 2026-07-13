@@ -35,18 +35,18 @@
 This project lets any club or organisation run kendo and naginata tournaments at whatever level of digitization fits the venue, from fully printed to fully online. Pick the mode that matches your equipment:
 
 * **Offline.** No internet required. Runs entirely on printed brackets and score sheets generated as Excel files.
-* **Partially connected.** Internet is available but there are no display screens. Some printed material is still needed for scoreboards and competitors. Keep every shiai-jo in sync either by sharing the Excel file through Google Sheets, or by running the live tournament app, with one device per shiai-jo.
+* **Partially connected.** Internet is available but there are no display screens. Some printed material is still needed for scoreboards and competitors. Keep every shiai-jo in sync either by sharing the Excel file through Google Sheets, or by running the tournament app, with one device per shiai-jo.
 * **Fully digital.** A complete online setup with on-screen scoreboards and mobile result pages. Needs one device per shiai-jo table, a monitor for each court, and network access for competitors. Organisers still print player tags and numbers.
 
 I've been using this application to organise the London Cup since ~2023. It reflects everything I've learned from running real tournaments and the feedback I've received.
 
-For the guidelines this application is based on, see [running_a_kendo_tournament.md](running_a_kendo_tournament.md).
+For the kendo tournament guidelines this application is based on, see [running_a_kendo_tournament.md](running_a_kendo_tournament.md). Naginata and Engi-kyogi specifics are covered in the [Naginata competitions guide](https://gitrgoliveira.github.io/bracket-creator/user-guide/organisers/naginata/).
 
 **Full documentation lives on the [documentation website](https://gitrgoliveira.github.io/bracket-creator/).** This README is only a quick overview.
 
 ## The tournament app
 
-The `mobile-app` command starts the live tournament server: create competitions, import participants, draw pools and brackets, schedule matches across courts, score in real time, and show results on any device (phone, tablet, laptop, or a TV by the court).
+The `mobile-app` command starts the tournament app server: create competitions, import participants, draw pools and brackets, schedule matches across courts, score in real time, and show results on any device (phone, tablet, laptop, or a TV by the court).
 
 [Install](#install) the binary first (Homebrew or a release binary), then start the server:
 
@@ -117,7 +117,7 @@ brew install bracket-creator
 
 `brew trust` marks the tap as trusted, which Homebrew requires before installing from a third-party tap. Update later with `brew upgrade bracket-creator`. The formula (in the [gitrgoliveira/homebrew-tap](https://github.com/gitrgoliveira/homebrew-tap) repository) builds from source, so it needs a C toolchain (the Xcode Command Line Tools on macOS or `build-essential` on Linux) and network access for Go module downloads.
 
-The single binary bundles every subcommand, including `bracket-creator serve` (web UI) and `bracket-creator mobile-app` (live-tournament app).
+The single binary bundles every subcommand, including `bracket-creator serve` (web UI) and `bracket-creator mobile-app` (tournament app).
 
 </details>
 

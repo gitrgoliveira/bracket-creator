@@ -106,9 +106,12 @@ See the docs for the full command references and the input format:
 Pull and run the tournament app image; tournament state lives in the mounted folder:
 
 ```bash
+mkdir -p tournament-data
 docker run -p 8080:8080 -v "$PWD/tournament-data:/tournament-data" \
   ghcr.io/gitrgoliveira/bracket-creator-mobile:latest
 ```
+
+On Linux, also make the folder writable by the container's non-root user before the first run: `sudo chown 65534 tournament-data`. (Docker Desktop on macOS/Windows handles this automatically.)
 
 Then open [http://localhost:8080](http://localhost:8080).
 

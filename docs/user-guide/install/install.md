@@ -15,13 +15,14 @@ Three multi-architecture (amd64 and arm64) images are published to the GitHub Co
 Run the tournament app; tournament state is stored in the mounted folder:
 
 ```bash
+mkdir -p tournament-data
 docker run -p 8080:8080 -v "$PWD/tournament-data:/tournament-data" \
   ghcr.io/gitrgoliveira/bracket-creator-mobile:latest
 ```
 
 The app is available at `http://localhost:8080`.
 
-The container runs as a non-root user (UID 65534). On Linux hosts, make sure the mounted folder is writable by that UID (for example `sudo chown 65534 tournament-data`).
+The container runs as a non-root user (UID 65534). On Linux hosts, create the folder and make it writable by that UID before the first run: `mkdir -p tournament-data && sudo chown 65534 tournament-data`. Without this, Docker creates a missing bind-mount directory owned by root, and neither a root-owned nor a regular-user-owned folder is writable by the container. Docker Desktop on macOS and Windows handles the permissions automatically.
 
 See the [hosting guide](hosting.md) for production deployments, and [operating modes](../organisers/operating-modes.md) for access control.
 

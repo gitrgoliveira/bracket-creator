@@ -455,7 +455,7 @@ describe('PoolNumberedMatchRow engi stacked pair names (mp-gy6g)', () => {
   let runtime;
   let PoolNumberedMatchRow;
   const savedGlobals = {};
-  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'teamIVScore', 'matchScoreStr', 'matchStateCell', 'ipponsFromScore', 'queueLabel', 'queueLabelCompact'];
+  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'teamIVScore', 'matchScoreStr', 'matchStateCell', 'ipponsFromScore', 'queueLabel', 'queueLabelCompact', 'engiPairParts'];
 
   beforeEach(async () => {
     runtime = makeReactive();
@@ -479,6 +479,14 @@ describe('PoolNumberedMatchRow engi stacked pair names (mp-gy6g)', () => {
     global.window.ipponsFromScore = () => [];
     global.window.queueLabel = () => '';
     global.window.queueLabelCompact = () => null;
+    // Stub the engi pair-name splitter (real impl lives in ui.jsx, not imported
+    // here). Without it PoolNumberedMatchRow falls back to unsplit names, so the
+    // stacked-member assertions would be order-dependent on ui.jsx loading first.
+    global.window.engiPairParts = (name) => {
+      const s = String(name || '');
+      const i = s.indexOf(' - ');
+      return i < 0 ? [s.trim(), ''] : [s.slice(0, i).trim(), s.slice(i + 3).trim()];
+    };
     vi.resetModules();
     ({ PoolNumberedMatchRow } = await import('../viewer.jsx'));
   });
@@ -552,7 +560,7 @@ describe('PoolsViewer engi stacked pair names in standings (mp-gy6g)', () => {
   let runtime;
   let PoolsViewer;
   const savedGlobals = {};
-  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'teamIVScore', 'matchScoreStr', 'matchStateCell', 'ipponsFromScore', 'queueLabel', 'queueLabelCompact'];
+  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'teamIVScore', 'matchScoreStr', 'matchStateCell', 'ipponsFromScore', 'queueLabel', 'queueLabelCompact', 'engiPairParts'];
 
   const tweaks = { showDojo: false };
   const engiComp = { format: 'league', kind: 'individual', teamSize: 0, engi: true, poolWinners: 2 };
@@ -595,6 +603,14 @@ describe('PoolsViewer engi stacked pair names in standings (mp-gy6g)', () => {
     global.window.ipponsFromScore = () => [];
     global.window.queueLabel = () => '';
     global.window.queueLabelCompact = () => null;
+    // Stub the engi pair-name splitter (real impl lives in ui.jsx, not imported
+    // here). Without it PoolsViewer falls back to unsplit names, so the stacked-
+    // member assertions would be order-dependent on ui.jsx loading first.
+    global.window.engiPairParts = (name) => {
+      const s = String(name || '');
+      const i = s.indexOf(' - ');
+      return i < 0 ? [s.trim(), ''] : [s.slice(0, i).trim(), s.slice(i + 3).trim()];
+    };
     vi.resetModules();
     ({ PoolsViewer } = await import('../viewer.jsx'));
   });

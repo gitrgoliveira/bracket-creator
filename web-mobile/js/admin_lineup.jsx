@@ -193,7 +193,7 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
           </h2>
           <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 4 }}>
             {teamSize}-person team
-            {comp?.teamMatchType === "kachinuki" && <span style={{ marginLeft: 8, color: "var(--accent)", fontWeight: 700 }}>· <TermAL name="kachinuki">Kachinuki</TermAL> (winner-stays)</span>}
+            {comp?.teamMatchType === "kachinuki" && <span style={{ marginLeft: 8, color: "var(--accent)", fontWeight: 700 }}>· <TermAL name="kachinuki">Kachinuki</TermAL> (winner stays on)</span>}
           </div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>

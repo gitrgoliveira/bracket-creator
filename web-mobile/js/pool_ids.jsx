@@ -15,6 +15,13 @@
 // truthy poolNameOf() result alone (see findNextPoolOnCourt's "mixed" gate).
 // This regex constant is intentionally module-private: callers use the
 // exported poolNameOf() wrapper below, never the raw pattern.
+// DAIHYOSEN_POSITION is the sentinel `position` value marking a sub-bout as
+// the daihyosen (representative bout) rather than a numbered roster bout
+// (real bouts use a non-negative position: fixed-format 0-based, kachinuki
+// 1-based). Negative so it never collides with a real bout index.
+// Mirrors state.DaihyosenSubPosition on the Go side. Use this instead of -1.
+export const DAIHYOSEN_POSITION = -1;
+
 const POOL_MATCH_ID_RE = /^(.*?)-(?:DH-|TB-)?\d+$/;
 
 // poolNameOf: derive the pool name from a pool-match id (incl. DH/TB
@@ -45,4 +52,32 @@ const DAIHYOSEN_BOUT_RE = /-DH-\d+$/;
 // daihyosen-specific, since a tiebreaker is not a daihyosen.
 export function isPoolDaihyosenBout(id) {
     return typeof id === "string" && DAIHYOSEN_BOUT_RE.test(id);
+}
+
+// teamMatchTypeFor: the competition-level team match format ("kachinuki",
+// "fixed", or "" when unset) as stamped onto enriched match objects and read
+// by the display surfaces. "" means the format is unspecified: an individual
+// comp, or a team comp whose teamMatchType was omitted or is a legacy empty
+// value. Callers must treat "" as "not kachinuki" (fixed-order is the
+// default behaviour), never as specifically "individual". Supplementary rep
+// bouts (-DH-/-TB-) are fought as individual ippon-shobu even in a team comp;
+// callers suppress the format for those at the stamping site
+// (`isRepBout ? "" : teamMatchTypeFor(c)`). Reads both the flat viewer competition shape
+// (c.teamMatchType) and the admin detail shape where the value nests under
+// c.config. Lives here so every consumer (viewer, admin, display, overlay)
+// shares one definition without adding import edges: this file is the leaf
+// module they all already import.
+export function teamMatchTypeFor(comp) {
+    if (!comp) return "";
+    return comp.teamMatchType || (comp.config && comp.config.teamMatchType) || "";
+}
+
+// teamMatchTypeHint: the one-line explanatory hint rendered under the "Team
+// match format" selector on the create (admin_setup) and settings
+// (admin_competition_settings) forms. Shared so the two admin surfaces cannot
+// drift. isKachinuki picks the winner-stays copy; otherwise the fixed-order copy.
+export function teamMatchTypeHint(isKachinuki) {
+    return isKachinuki
+        ? "The winner of each bout stays on to face the next opponent. Bouts are scored one at a time."
+        : "All bouts are scheduled up-front by lineup position: each fighter faces the opponent in the same position.";
 }

@@ -253,3 +253,157 @@ func TestDeleteTeamLineup_WhileLive(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, got, "lineup must be gone after delete")
 }
+
+// TestLoadTeamLineups_ReturnsDeepCopy confirms that the map returned by
+// LoadTeamLineups is a distinct copy: mutating the returned map or the
+// Positions inside it must not affect a subsequent load, guarding against
+// cache aliasing (the cache stores its own copy after B3/B4).
+func TestLoadTeamLineups_ReturnsDeepCopy(t *testing.T) {
+	store, cleanup := newTestStore(t)
+	defer cleanup()
+
+	const compID = "team-deepcopy"
+	require.NoError(t, store.SetTeamLineup(compID, fiveStarter("team-alpha", 0), 5))
+
+	// First load: mutate both the returned map and a Positions entry inside it.
+	got1, err := store.LoadTeamLineups(compID)
+	require.NoError(t, err)
+	key := teamLineupKey("team-alpha", 0)
+	got1[key].Positions[domain.PosSenpo] = "mutated"
+	got1["injected"] = domain.TeamLineup{TeamID: "ghost"}
+
+	// Second load must not reflect either mutation.
+	got2, err := store.LoadTeamLineups(compID)
+	require.NoError(t, err)
+	assert.NotContains(t, got2, "injected", "injected key must not appear in second load")
+	persisted, ok := got2[key]
+	require.True(t, ok)
+	assert.Equal(t, "p1", persisted.Positions[domain.PosSenpo],
+		"Positions mutation in first load must not affect second load")
+}
+
+// TestLoadTeamLineups_CacheRefreshedOnSave confirms that a SetTeamLineup call
+// that follows a LoadTeamLineups (which warms the cache) is visible on the
+// next LoadTeamLineups, guarding against a stale-cache regression.
+func TestLoadTeamLineups_CacheRefreshedOnSave(t *testing.T) {
+	store, cleanup := newTestStore(t)
+	defer cleanup()
+
+	const compID = "team-cache-refresh"
+	require.NoError(t, store.SetTeamLineup(compID, fiveStarter("team-alpha", 0), 5))
+
+	// Warm the cache.
+	got1, err := store.LoadTeamLineups(compID)
+	require.NoError(t, err)
+	require.Len(t, got1, 1, "one lineup after initial save")
+
+	// Add a second lineup; saveTeamLineupsLocked must refresh the cache.
+	require.NoError(t, store.SetTeamLineup(compID, fiveStarter("team-beta", 0), 5))
+
+	// The new entry must be visible without any file-mtime tricks.
+	got2, err := store.LoadTeamLineups(compID)
+	require.NoError(t, err)
+	assert.Len(t, got2, 2, "both lineups must be visible after cache refresh")
+	assert.Contains(t, got2, teamLineupKey("team-beta", 0),
+		"newly added lineup must appear in the second load")
+}
+
+// TestFindBestLineupAny covers the multi-key lookup used when a match
+// side name must also be tried as the team's participant ID ("match on
+// id OR name"): the priority tiers apply across the whole key set, and
+// within a tier the first key in the slice wins.
+func TestFindBestLineupAny(t *testing.T) {
+	pid := "8d5a1b1e-1111-4222-8333-444455556666"
+	name := "RedTeam"
+
+	matchScoped := domain.TeamLineup{
+		TeamID: pid, MatchID: "SF-1",
+		Positions: map[domain.Position]string{domain.PosSenpo: "MatchScoped"},
+	}
+	roundScopedName := domain.TeamLineup{
+		TeamID: name, Round: 0,
+		Positions: map[domain.Position]string{domain.PosSenpo: "RoundName"},
+	}
+	roundScopedPid := domain.TeamLineup{
+		TeamID: pid, Round: 1,
+		Positions: map[domain.Position]string{domain.PosSenpo: "RoundPid"},
+	}
+	lineups := map[string]domain.TeamLineup{
+		lineupStorageKey(matchScoped):     matchScoped,
+		lineupStorageKey(roundScopedName): roundScopedName,
+		lineupStorageKey(roundScopedPid):  roundScopedPid,
+	}
+
+	t.Run("match-scoped under id beats round-scoped under name", func(t *testing.T) {
+		got, found := FindBestLineupAny(lineups, []string{name, pid}, "SF-1", 1)
+		require.True(t, found)
+		assert.Equal(t, "MatchScoped", got.Positions[domain.PosSenpo])
+	})
+
+	t.Run("round tier picks highest round <= maxRound across keys", func(t *testing.T) {
+		got, found := FindBestLineupAny(lineups, []string{name, pid}, "other-match", 1)
+		require.True(t, found)
+		assert.Equal(t, "RoundPid", got.Positions[domain.PosSenpo],
+			"round 1 pid-keyed entry outranks round 0 name-keyed entry")
+	})
+
+	t.Run("single name key still resolves", func(t *testing.T) {
+		got, found := FindBestLineupAny(lineups, []string{name}, "", 0)
+		require.True(t, found)
+		assert.Equal(t, "RoundName", got.Positions[domain.PosSenpo])
+	})
+
+	t.Run("no candidate keys match", func(t *testing.T) {
+		_, found := FindBestLineupAny(lineups, []string{"UnknownTeam"}, "", 5)
+		assert.False(t, found)
+	})
+}
+
+// TestFindBestLineupAny_TieBreakDeterminism verifies that when two entries
+// have the SAME round, the teamID whose position in the teamIDs slice is
+// lower wins deterministically across repeated calls (Fix 1: the previous
+// map-iteration implementation was nondeterministic under tie).
+//
+// Two different TeamID values ("id-key" and "name-key") both appear in the
+// teamIDs slice at different positions. Their lineups carry the same Round so
+// neither outranks the other by round. The test asserts that:
+//   - teamIDs=[idKey, nameKey] always returns the idKey lineup.
+//   - teamIDs=[nameKey, idKey] always returns the nameKey lineup.
+//
+// Running 20 iterations per order guards against accidentally passing due to
+// lucky map iteration.
+func TestFindBestLineupAny_TieBreakDeterminism(t *testing.T) {
+	const idKey = "8d5a1b1e-0000-4000-8000-000000000001"
+	const nameKey = "RedTeam"
+
+	idLineup := domain.TeamLineup{
+		TeamID: idKey, Round: 0,
+		Positions: map[domain.Position]string{domain.PosSenpo: "by-id"},
+	}
+	nameLineup := domain.TeamLineup{
+		TeamID: nameKey, Round: 0,
+		Positions: map[domain.Position]string{domain.PosSenpo: "by-name"},
+	}
+	lineups := map[string]domain.TeamLineup{
+		lineupStorageKey(idLineup):   idLineup,
+		lineupStorageKey(nameLineup): nameLineup,
+	}
+
+	t.Run("idKey first in slice wins", func(t *testing.T) {
+		for i := range 20 {
+			got, found := FindBestLineupAny(lineups, []string{idKey, nameKey}, "", 0)
+			require.True(t, found, "iteration %d: must find a lineup", i)
+			assert.Equal(t, "by-id", got.Positions[domain.PosSenpo],
+				"iteration %d: idKey must win when it comes first in teamIDs", i)
+		}
+	})
+
+	t.Run("nameKey first in slice wins", func(t *testing.T) {
+		for i := range 20 {
+			got, found := FindBestLineupAny(lineups, []string{nameKey, idKey}, "", 0)
+			require.True(t, found, "iteration %d: must find a lineup", i)
+			assert.Equal(t, "by-name", got.Positions[domain.PosSenpo],
+				"iteration %d: nameKey must win when it comes first in teamIDs", i)
+		}
+	})
+}

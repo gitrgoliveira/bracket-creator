@@ -108,6 +108,7 @@ function validateSwissSettings(format, swissRounds) {
 // (mp-sspn). Importing keeps the defaults in one place.
 import { normalizeTheme } from './admin_branding.jsx';
 import { timeToMinutes } from './admin_schedule_utils.jsx';
+import { teamMatchTypeHint } from './pool_ids.jsx';
 
 function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerMode, authConfig, password, showToast }) {
   // In locked mode the on-disk Password is irrelevant: auth comes
@@ -679,6 +680,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   const startTimeEditedRef = useRefA(false);
   const [date, setDate] = useStateA(tournament.date);
   const [teamSize, setTeamSize] = useStateA(5);
+  const [teamMatchType, setTeamMatchType] = useStateA("fixed");
   const [numberPrefix, setNumberPrefix] = useStateA("");
   const [withZekken, setWithZekken] = useStateA(false);
   const [naginata, setNaginata] = useStateA(false);
@@ -858,6 +860,11 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     // kinds even if the state lingered from a kind switch, so a team comp can't
     // be created with engi=true. The checkbox is also hidden unless individual.
     c.engi = kind === "individual" ? engi : false;
+    // FR-044: team match format. Only meaningful for team competitions; sending
+    // it for individual comps is harmless but omitting it keeps the payload clean.
+    if (kind === "team") {
+      c.teamMatchType = teamMatchType;
+    }
     onCreate(c);
   };
 
@@ -1060,6 +1067,19 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
                 onChange={(e) => setTeamSize(decideNumericUpdate(e.target.value, 1).value)}
               />
               <div className="field__hint">Standard kendo team is 5 (Senpou, Jihou, Chuken, Fukushou, Taishou).</div>
+            </div>
+          )}
+
+          {kind === "team" && (
+            <div className="field">
+              <label className="field__label">Team match format</label>
+              <div className="radio-group">
+                <button className={`radio-pill ${teamMatchType === "fixed" ? "is-active" : ""}`} type="button" onClick={() => setTeamMatchType("fixed")}>Regular</button>
+                <button className={`radio-pill ${teamMatchType === "kachinuki" ? "is-active" : ""}`} type="button" onClick={() => setTeamMatchType("kachinuki")}>Kachinuki (winner stays on)</button>
+              </div>
+              <div className="field__hint">
+                {teamMatchTypeHint(teamMatchType === "kachinuki")}
+              </div>
             </div>
           )}
 

@@ -181,7 +181,7 @@ func deriveDaihyosenWinner(result *state.MatchResult) {
 		return
 	}
 	for _, sub := range result.SubResults {
-		if sub.Position != -1 || sub.Winner == "" {
+		if sub.Position != state.DaihyosenSubPosition || sub.Winner == "" {
 			continue
 		}
 		sideAWin := isWinForSide(sub.Winner, result.SideA, sub.SideA)
@@ -355,6 +355,14 @@ func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId strin
 	// T105/CHK047: capture the prior result so we can rollback if the atomic
 	// ineligibility write below fails with AlreadyIneligibleError.
 	prior, _ := e.lookupExistingResult(compId, matchId)
+
+	// Kachinuki bout logs merge BY POSITION rather than replace wholesale
+	// (ACID: a client whose local log is behind the server must never
+	// destroy server-appended bouts). Applied here at the entry point,
+	// BEFORE the pool/bracket write primitives, so the rollback path
+	// below (which replays `prior` through those primitives) still
+	// restores the pre-write state exactly.
+	applyKachinukiMerge(comp, prior, result)
 
 	var sideMismatch bool
 	err := e.withPoolMatch(compId, matchId, func(r *state.MatchResult) {
@@ -908,6 +916,9 @@ func (e *Engine) recordBracketMatchResult(compId string, matchId string, result 
 					if status == "" {
 						status = state.MatchStatusCompleted
 					}
+					if err := validateBracketCompletion(matchId, status, result.Winner); err != nil {
+						return err
+					}
 					bracket.Rounds[rIdx][mIdx].Status = status
 					// Stamp the applied write's server-relative time so the next
 					// write is compared against it (mp-y3nk). Preserve a prior stamp
@@ -1013,6 +1024,20 @@ func applyBracketWrite(result *state.MatchResult, storedModifiedAt int64) bool {
 	return domain.ApplyByTimestamp(result.ModifiedAt, storedModifiedAt)
 }
 
+// validateBracketCompletion rejects a Completed bracket-family write with no
+// winner. For kachinuki this happens when both sides exhaust simultaneously
+// (simultaneous hikiwake exhaustion); the operator must resolve via daihyosen
+// before marking the match Completed. Applies to all bracket match types (an
+// elimination result must never be indeterminate) and is the single AMENDMENT 2
+// choke point shared by recordBracketMatchResult, recordBracketMatchResultTx,
+// and applyBronzeMatchResult so the twins cannot drift.
+func validateBracketCompletion(matchID string, status state.MatchStatus, winner string) error {
+	if status == state.MatchStatusCompleted && winner == "" {
+		return validationErrorf("bracket match %s: cannot mark completed with no winner; resolve via daihyosen first", matchID)
+	}
+	return nil
+}
+
 // applyBronzeMatchResult writes result into the bronze (3rd-place) playoff
 // match, mirroring the per-round bracket-match write in recordBracketMatchResult
 // but without any downstream propagation (the bronze match has no next round).
@@ -1034,6 +1059,9 @@ func applyBronzeMatchResult(bm *state.BracketMatch, result *state.MatchResult) e
 	status := result.Status
 	if status == "" {
 		status = state.MatchStatusCompleted
+	}
+	if err := validateBracketCompletion(bm.ID, status, result.Winner); err != nil {
+		return err
 	}
 	bm.Winner = result.Winner
 	bm.Status = status

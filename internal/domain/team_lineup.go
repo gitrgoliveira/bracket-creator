@@ -138,6 +138,34 @@ func (t TeamLineup) ValidatePositions(teamSize int) error {
 	return nil
 }
 
+// OrderedRoster returns the player names for this lineup in position order,
+// skipping vacancies (empty strings). For 5-person teams the canonical
+// Senpo/Jiho/Chuken/Fukusho/Taisho order is used; for other sizes
+// positions are iterated 1..teamSize numerically.
+//
+// The returned slice is always non-nil. Its length equals the number of
+// non-empty positions. Callers (e.g. kachinuki roster resolution) use
+// this to get the full ordered queue before filtering out retired players.
+func (t TeamLineup) OrderedRoster(teamSize int) []string {
+	if teamSize == 5 {
+		order := []Position{PosSenpo, PosJiho, PosChuken, PosFukusho, PosTaisho}
+		out := make([]string, 0, 5)
+		for _, pos := range order {
+			if name := t.Positions[pos]; name != "" {
+				out = append(out, name)
+			}
+		}
+		return out
+	}
+	out := make([]string, 0, teamSize)
+	for i := 1; i <= teamSize; i++ {
+		if name := t.Positions[PositionNumbered(i)]; name != "" {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
 // allowedPositionSet returns the valid position keys for a team size: the five
 // FIK names for 5-person teams, else numbered positions 1..teamSize.
 func allowedPositionSet(teamSize int) map[Position]struct{} {

@@ -80,6 +80,12 @@ func (e *Engine) recordBracketMatchResultTx(tx state.StoreTx, compID, matchID st
 					if status == "" {
 						status = state.MatchStatusCompleted
 					}
+					// AMENDMENT 2 twin parity with recordBracketMatchResult
+					// (scoring.go): the production score handler routes through
+					// this tx twin, so the guard must live on both paths.
+					if err := validateBracketCompletion(matchID, status, result.Winner); err != nil {
+						return err
+					}
 					bracket.Rounds[rIdx][mIdx].Status = status
 					if result.ModifiedAt != 0 {
 						bracket.Rounds[rIdx][mIdx].ModifiedAt = result.ModifiedAt
@@ -252,6 +258,14 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	// the tx so it sees the state INSIDE the lock (the on-disk state
 	// hasn't moved under us, we hold the lock).
 	prior, _ := e.lookupExistingResultTx(tx, compID, matchID)
+
+	// Kachinuki bout logs merge BY POSITION rather than replace wholesale
+	// (ACID: a client whose local log is behind the server must never
+	// destroy server-appended bouts). Applied here at the entry point,
+	// BEFORE the pool/bracket write primitives, so the rollback path
+	// below (which replays `prior` through those primitives) still
+	// restores the pre-write state exactly.
+	applyKachinukiMerge(comp, prior, result)
 
 	// mp-e2k1: For mixed competitions, capture the pre-write standings for
 	// the match's pool so we can compare after the write and detect whether

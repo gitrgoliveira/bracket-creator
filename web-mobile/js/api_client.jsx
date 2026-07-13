@@ -543,9 +543,26 @@ function _commitEnqueue(key, descriptor) {
  * Enqueue a running-status write for offline-resilient delivery.
  * Last-write-wins per matchId. Running writes always PUT to the score endpoint,
  * so method/url are omitted: _flushQueue reconstructs that path for terminal=false.
+ *
+ * kachinukiBoutFinal is an edge-triggered COMMAND (the operator pressed
+ * "Record bout": the server must run kachinuki advancement once), while the
+ * rest of the payload is level-triggered state that LWW may coalesce freely.
+ * If the queued entry for this match carries the flag and the superseding
+ * write does not (a later autosave while still offline), carry the flag
+ * forward, otherwise the reconnect flush would deliver the score but silently
+ * skip advancement and the winner-stays sequence would stall until the
+ * operator pressed Record bout again. Safe to re-deliver: MaybeAdvanceKachinuki
+ * bails when the last numbered bout has no outcome or the match is completed.
  */
 function enqueueRunningWrite(compID, matchID, payload, password) {
-    _commitEnqueue(_revKey(compID, matchID), {
+    const key = _revKey(compID, matchID);
+    const prev = _writeQueue.get(key);
+    if (prev && !prev.terminal && prev.kind === 'score'
+        && prev.payload && prev.payload.kachinukiBoutFinal
+        && payload && !payload.kachinukiBoutFinal) {
+        payload = { ...payload, kachinukiBoutFinal: true };
+    }
+    _commitEnqueue(key, {
         compID, matchID, payload, password,
         kind: 'score', terminal: false,
         enqueuedAt: Date.now(),
@@ -1202,6 +1219,20 @@ const API = {
         // Completed writes do not need a rev: the guard is gated on status=running.
         const isRunning = payload?.status === 'running';
         if (isRunning) {
+            // Absorb a pending kachinukiBoutFinal from a QUEUED flagged running
+            // write for this match: when connectivity returns mid-backoff, this
+            // direct write succeeds with a newer rev, and the queued flagged
+            // entry would later be rev-guard dropped as stale, silently losing
+            // the advancement command (the queue-to-queue carry in
+            // enqueueRunningWrite cannot see direct sends). Safe to re-deliver:
+            // MaybeAdvanceKachinuki bails without a scored last bout or on a
+            // completed match.
+            const queued = _writeQueue.get(_revKey(compID, matchID));
+            if (queued && !queued.terminal && queued.kind === 'score'
+                && queued.payload && queued.payload.kachinukiBoutFinal
+                && !payload.kachinukiBoutFinal) {
+                payload.kachinukiBoutFinal = true;
+            }
             payload.rev = _nextRev(compID, matchID);
             payload.revSession = _revSession;
             _inflightRunning++;
@@ -1665,8 +1696,13 @@ const API = {
     // TeamLineup for (compId, teamId, round): 404 when no lineup has been
     // submitted yet, which the form treats as "blank, editable". PUT replaces
     // the lineup. DELETE clears it so an operator can revise.
-    async fetchTeamLineup(compID, teamId, round) {
-        const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/lineups/${round}`);
+    // opts.fallback: best-effort resolution for match-scoring surfaces: when
+    // the exact round has no lineup the server falls back to the closest
+    // saved round (highest <= requested, else highest overall) instead of
+    // 404. The lineup EDITOR must NOT pass this: 404 means "blank, editable".
+    async fetchTeamLineup(compID, teamId, round, opts) {
+        const qs = opts && opts.fallback ? "?fallback=best" : "";
+        const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/lineups/${round}${qs}`);
         if (res.status === 404) return null;
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));

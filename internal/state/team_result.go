@@ -31,15 +31,15 @@ func countScoringIppons(ippons []string) int {
 
 // TeamResultFrom aggregates sub-bouts into IV and PW per side. It is the single
 // source of truth for the team-match summary: the daihyosen placeholder
-// (Position < 0) is skipped so a re-validated tie does not double-count, IV
-// counts sub-bout winners via the same side-matching fallback as scoring
-// (winner may carry the match-level or sub-level side name), and PW counts every
-// scored ippon regardless of bout outcome (a drawn bout where both sides
-// scored still contributes), skipping unfilled "•" placeholder slots via
-// countScoringIppons. SideA is Aka, SideB is Shiro. Returns nil when there
+// (Position <= DaihyosenSubPosition, the -1 daihyosen or any negative) is skipped so a re-validated tie does
+// not double-count, IV counts sub-bout winners via the same side-matching
+// fallback as scoring (winner may carry the match-level or sub-level side name),
+// and PW counts every scored ippon regardless of bout outcome (a drawn bout where
+// both sides scored still contributes), skipping unfilled "•" placeholder slots
+// via countScoringIppons. SideA is Aka, SideB is Shiro. Returns nil when there
 // are no countable sub-bouts (an individual match, or a slice containing
-// only the daihyosen placeholder with Position < 0). engine.ComputeTeamSummary
-// delegates here.
+// only the daihyosen placeholder with Position == DaihyosenSubPosition (-1)).
+// engine.ComputeTeamSummary delegates here.
 func TeamResultFrom(subResults []SubMatchResult, sideAName, sideBName string) *TeamResultLine {
 	if len(subResults) == 0 {
 		return nil
@@ -47,8 +47,13 @@ func TeamResultFrom(subResults []SubMatchResult, sideAName, sideBName string) *T
 	line := &TeamResultLine{}
 	hasBout := false
 	for _, sub := range subResults {
-		if sub.Position < 0 {
-			continue // skip the daihyosen placeholder itself
+		if sub.Position <= DaihyosenSubPosition {
+			// Skip the daihyosen placeholder (DaihyosenSubPosition, -1) and,
+			// defensively, any other negative position: real bouts have a
+			// non-negative Position (fixed-format 0-based, kachinuki 1-based),
+			// so a Position < -1 is malformed input and must not count into
+			// IV/PW.
+			continue
 		}
 		hasBout = true
 		switch {
@@ -85,6 +90,32 @@ func (m *MatchResult) TeamResult() *TeamResultLine {
 // BracketMatch), so this does not affect on-disk state.
 func (m MatchResult) MarshalJSON() ([]byte, error) {
 	type alias MatchResult
+	return json.Marshal(struct {
+		alias
+		TeamResult *TeamResultLine `json:"teamResult,omitempty"`
+	}{alias: alias(m), TeamResult: m.TeamResult()})
+}
+
+// TeamResult returns the team-match summary for this bracket match, or nil
+// for an individual match. See TeamResultFrom.
+func (m *BracketMatch) TeamResult() *TeamResultLine {
+	if m == nil {
+		return nil
+	}
+	return TeamResultFrom(m.SubResults, m.SideA, m.SideB)
+}
+
+// MarshalJSON mirrors MatchResult.MarshalJSON for bracket (elimination)
+// matches: without it, knockout team matches reached the frontend with no
+// teamResult and every score surface fell back to the legacy IV-only string
+// while pool matches showed IV and PW (bead mp-8b1b). Unlike MatchResult,
+// BracketMatch also persists to bracket.json through this same marshal, so
+// the derived teamResult lands on disk too; that is deliberate (one choke
+// point, no wire-vs-disk type to drift) and safe: the struct has no
+// TeamResult field, so loading ignores it and every save recomputes it from
+// SubResults.
+func (m BracketMatch) MarshalJSON() ([]byte, error) {
+	type alias BracketMatch
 	return json.Marshal(struct {
 		alias
 		TeamResult *TeamResultLine `json:"teamResult,omitempty"`

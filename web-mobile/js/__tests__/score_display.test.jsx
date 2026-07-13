@@ -274,3 +274,30 @@ describe('ipponsFromScore', () => {
     expect(ipponsFromScore(undefined)).toEqual([]);
   });
 });
+
+// Bracket (knockout) team matches must render BOTH IV and PW, exactly like
+// pool team matches. The server attaches teamResult to bracket matches via
+// BracketMatch.MarshalJSON (internal/state/team_result.go); the pre-fix wire
+// had no teamResult on bracket matches, so matchScoreStr fell back to the
+// legacy IV-only aggregate (bead mp-8b1b).
+describe('team score string carries IV and PW', () => {
+  it('renders IV and PW from a bracket-shaped match with teamResult', () => {
+    const m = {
+      status: 'completed', sideA: 'Ryu', sideB: 'Tora', winner: 'Ryu',
+      teamResult: { shiroIV: 0, akaIV: 5, shiroPW: 0, akaPW: 5 },
+      subResults: [
+        { position: 1, sideA: 'Ryu Ichiro', sideB: 'Tora Ichiro', winner: 'Ryu Ichiro', ipponsA: ['M'] },
+      ],
+    };
+    expect(matchStateCell(m, [], [])).toBe('IV 0–5\nPW 0–5');
+  });
+
+  it('renders the tied IV and PW for a daihyosen-decided final', () => {
+    const m = {
+      status: 'completed', sideA: 'Ryu', sideB: 'Kaze', winner: 'Ryu',
+      teamResult: { shiroIV: 0, akaIV: 0, shiroPW: 0, akaPW: 0 },
+      subResults: [{ position: -1, sideA: 'Ryu', sideB: 'Kaze', winner: 'Ryu', ipponsA: ['M'] }],
+    };
+    expect(matchStateCell(m, [], [])).toBe('IV 0–0\nPW 0–0');
+  });
+});

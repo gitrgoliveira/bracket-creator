@@ -43,7 +43,11 @@ describe('resolveMatchLineup (mp-bkg regression guard)', () => {
     const result = await resolveMatchLineup(COMP_ID, TEAM_ID, MATCH_ID, ROUND, api);
     expect(result).toEqual(roundLineup);
     expect(api.fetchMatchLineup).toHaveBeenCalledWith(COMP_ID, TEAM_ID, MATCH_ID);
-    expect(api.fetchTeamLineup).toHaveBeenCalledWith(COMP_ID, TEAM_ID, ROUND);
+    // The round step asks the server for best-effort resolution: operators
+    // typically save one round-0 lineup for the whole day, so an exact-only
+    // GET would 404 for every round after the first (UAT: the final's
+    // kachinuki bout 1 was submitted with empty side names).
+    expect(api.fetchTeamLineup).toHaveBeenCalledWith(COMP_ID, TEAM_ID, ROUND, { fallback: true });
   });
 
   it('falls back to round lineup when per-match GET throws (network error)', async () => {
@@ -74,7 +78,7 @@ describe('resolveMatchLineup (mp-bkg regression guard)', () => {
     const api = makeAPI({ matchResult: null, roundResult: null });
     await resolveMatchLineup('cX', 'tY', 'mZ', 3, api);
     expect(api.fetchMatchLineup).toHaveBeenCalledWith('cX', 'tY', 'mZ');
-    expect(api.fetchTeamLineup).toHaveBeenCalledWith('cX', 'tY', 3);
+    expect(api.fetchTeamLineup).toHaveBeenCalledWith('cX', 'tY', 3, { fallback: true });
   });
 
   it('REGRESSION: per-match entry is preferred over round (the whole point of mp-bkg)', async () => {

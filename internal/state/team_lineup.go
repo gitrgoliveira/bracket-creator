@@ -17,6 +17,7 @@ package state
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"sort"
 
@@ -67,24 +68,9 @@ func lineupStorageKey(l domain.TeamLineup) string {
 	return teamLineupKey(l.TeamID, l.Round)
 }
 
-// LoadTeamLineups returns every lineup persisted for compID, keyed by
-// "<teamID>-<round>". A missing file is treated as "no lineups yet"
-// and returns an empty map (consistent with LoadCompetitorStatus).
-//
-// Uses the per-competition read lock so concurrent writes for the
-// same competition can't race with this read.
-func (s *Store) LoadTeamLineups(compID string) (map[string]domain.TeamLineup, error) {
-	if err := ValidateCompetitionID(compID); err != nil {
-		return nil, err
-	}
-	mu := s.getCompLock(compID)
-	mu.RLock()
-	defer mu.RUnlock()
-	return s.loadTeamLineupsLocked(compID)
-}
-
-func (s *Store) loadTeamLineupsLocked(compID string) (map[string]domain.TeamLineup, error) {
-	path := s.compPath(compID, teamLineupFilename)
+// parseTeamLineupsFile reads and parses lineups.yaml at path. A missing
+// file is "no lineups yet" and returns an empty map.
+func parseTeamLineupsFile(path string) (map[string]domain.TeamLineup, error) {
 	data, err := os.ReadFile(path) // #nosec G304, compPath cleans the path.
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -93,6 +79,47 @@ func (s *Store) loadTeamLineupsLocked(compID string) (map[string]domain.TeamLine
 		return nil, err
 	}
 	return parseTeamLineupsBytes(data)
+}
+
+// LoadTeamLineups returns every lineup persisted for compID, keyed by
+// "<teamID>-<round>". A missing file is treated as "no lineups yet"
+// and returns an empty map (consistent with LoadCompetitorStatus).
+//
+// Cache-aware (mtime-keyed via loadCached, same as LoadBracket): repeated
+// reads within the same mtime are served from memory. loadCached itself
+// takes the per-competition read lock, so the explicit RLock in the old body
+// is not lost, just moved. loadCached also validates compID, so no separate
+// ValidateCompetitionID call is needed here (mirrors LoadBracket).
+// Returns a deep copy so callers can mutate the map freely.
+func (s *Store) LoadTeamLineups(compID string) (map[string]domain.TeamLineup, error) {
+	data, err := s.loadCached(compID, teamLineupFilename, func(path string) (any, error) {
+		return parseTeamLineupsFile(path)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return copyTeamLineups(data.(map[string]domain.TeamLineup)), nil
+}
+
+// loadTeamLineupsLocked reads the lineup file directly from disk WITHOUT
+// acquiring the per-competition lock. Caller MUST already hold the lock
+// (typically via WithTransaction or setTeamLineupLocked). Bypasses the cache:
+// locked callers are usually about to mutate and need a fresh private map,
+// mirroring the same pattern in loadBracketLocked.
+func (s *Store) loadTeamLineupsLocked(compID string) (map[string]domain.TeamLineup, error) {
+	return parseTeamLineupsFile(s.compPath(compID, teamLineupFilename))
+}
+
+// copyTeamLineups deep-copies a lineups map so cached data is never
+// aliased to a caller (callers mutate the returned map in
+// load-mutate-save flows, see setTeamLineupLocked).
+func copyTeamLineups(in map[string]domain.TeamLineup) map[string]domain.TeamLineup {
+	out := make(map[string]domain.TeamLineup, len(in))
+	for k, l := range in {
+		l.Positions = maps.Clone(l.Positions)
+		out[k] = l
+	}
+	return out
 }
 
 // parseTeamLineupsBytes parses lineups.yaml from in-memory bytes.
@@ -134,7 +161,22 @@ func (s *Store) saveTeamLineupsLocked(compID string, lineups map[string]domain.T
 	if err != nil {
 		return err
 	}
-	return write(s.compPath(compID, teamLineupFilename), data, 0600)
+	// Refresh the cache after a successful write, mirroring saveBracketLocked
+	// (T211/T212). The refresh runs in both direct-write and WAL-write modes:
+	// in WAL mode the on-disk file hasn't moved yet, but readers within the
+	// same transaction see the staged data via the cache; a follow-up
+	// cache-aware Load will re-parse from the cached copy rather than going to
+	// disk. This is what makes the teamLineupFilename entries in
+	// transactions.go's invalidate/refresh switches effective.
+	if err := write(s.compPath(compID, teamLineupFilename), data, 0600); err != nil {
+		return err
+	}
+	cache := s.getFileCache(compID, teamLineupFilename)
+	cache.mu.Lock()
+	cache.data = copyTeamLineups(lineups)
+	cache.mtime = s.FileMtime(compID, teamLineupFilename)
+	cache.mu.Unlock()
+	return nil
 }
 
 // SetTeamLineup validates and persists a lineup, replacing any prior
@@ -202,6 +244,81 @@ func (s *Store) DeleteTeamLineup(compID, teamID string, round int) error {
 	}
 	delete(current, key)
 	return s.saveTeamLineupsLocked(compID, current, s.directWrite)
+}
+
+// FindBestLineup returns the most relevant lineup for teamID from a pre-loaded
+// lineups map, following the AMENDMENT 1 priority order:
+//  1. Match-scoped entry keyed by matchID (exact match for the specific bout).
+//  2. Round-scoped: the highest round <= maxRound (the current match's round,
+//     e.g. 0 for pool matches, bracket round index for knockout matches).
+//  3. Round-scoped: the highest round overall (fallback when no saved lineup
+//     has round <= maxRound, e.g. operator saved a bracket-phase lineup but the
+//     current match is a pool match, or vice versa).
+//
+// Returns the lineup and true when found, the zero value and false otherwise.
+// Callers should use LoadTeamLineups to obtain the map before calling this.
+func FindBestLineup(lineups map[string]domain.TeamLineup, teamID, matchID string, maxRound int) (domain.TeamLineup, bool) {
+	return FindBestLineupAny(lineups, []string{teamID}, matchID, maxRound)
+}
+
+// FindBestLineupAny is FindBestLineup for a set of candidate team keys.
+// The lineup editor keys lineups by the team PARTICIPANT ID (player.id)
+// while match sides carry the team display NAME, so callers resolving a
+// lineup for a match side must try both keys ("match on id OR name").
+// The AMENDMENT 1 priority tiers apply ACROSS the whole key set: a
+// match-scoped entry under any key beats a round-scoped entry under any
+// key. Within a tier, ties between keys resolve to the first teamID in
+// the slice that has an entry.
+func FindBestLineupAny(lineups map[string]domain.TeamLineup, teamIDs []string, matchID string, maxRound int) (domain.TeamLineup, bool) {
+	// 1. Match-scoped (exact), first key wins.
+	if matchID != "" {
+		for _, teamID := range teamIDs {
+			key := teamLineupMatchKey(teamID, matchID)
+			if l, ok := lineups[key]; ok {
+				return l, true
+			}
+		}
+	}
+	// 2. Round-scoped: highest round <= maxRound.
+	// 3. Round-scoped: highest round overall (AMENDMENT 1 fallback).
+	// Map iteration order is nondeterministic, so ties on Round are broken
+	// by the teamID's position in teamIDs (the documented "first key wins"
+	// priority), keeping selection stable across calls.
+	// Precompute teamID -> rank once (first occurrence wins, matching
+	// slices.Index) so the per-entry rank lookup below is O(1).
+	rankByID := make(map[string]int, len(teamIDs))
+	for i, id := range teamIDs {
+		if _, seen := rankByID[id]; !seen {
+			rankByID[id] = i
+		}
+	}
+	var best, fallback domain.TeamLineup
+	bestRank, fallbackRank := -1, -1
+	hasBest, hasFallback := false, false
+	for _, l := range lineups {
+		if l.MatchID != "" {
+			continue // skip match-scoped entries
+		}
+		rank, ok := rankByID[l.TeamID]
+		if !ok {
+			continue // wrong team
+		}
+		if l.Round <= maxRound {
+			if !hasBest || l.Round > best.Round || (l.Round == best.Round && rank < bestRank) {
+				best, bestRank, hasBest = l, rank, true
+			}
+		}
+		if !hasFallback || l.Round > fallback.Round || (l.Round == fallback.Round && rank < fallbackRank) {
+			fallback, fallbackRank, hasFallback = l, rank, true
+		}
+	}
+	if hasBest {
+		return best, true
+	}
+	if hasFallback {
+		return fallback, true
+	}
+	return domain.TeamLineup{}, false
 }
 
 // DeleteTeamLineupForMatch removes the match-scoped lineup for

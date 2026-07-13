@@ -956,7 +956,7 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 		req := ScoreRequest{
 			SubResults: []state.SubMatchResult{
 				{
-					Position: -1, SideA: "TeamA", SideB: "TeamB",
+					Position: state.DaihyosenSubPosition, SideA: "TeamA", SideB: "TeamB",
 					IpponsA: []string{"M"}, IpponsB: []string{"K"},
 					Winner: "TeamA", Encho: &state.EnchoMetadata{PeriodCount: -3},
 				},
@@ -985,7 +985,7 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 		req := ScoreRequest{
 			SubResults: []state.SubMatchResult{
 				{
-					Position: -1, SideA: "TeamA", SideB: "TeamB",
+					Position: state.DaihyosenSubPosition, SideA: "TeamA", SideB: "TeamB",
 					IpponsA: []string{"M"}, IpponsB: []string{"K"},
 					Winner: "TeamA", DecidedByHantei: true, Encho: enchoOne,
 				},
@@ -998,7 +998,7 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 		req := ScoreRequest{
 			SubResults: []state.SubMatchResult{
 				{
-					Position: -1, SideA: "TeamA", SideB: "TeamB",
+					Position: state.DaihyosenSubPosition, SideA: "TeamA", SideB: "TeamB",
 					IpponsA: []string{"M"}, IpponsB: []string{"K"},
 					Winner: "", DecidedByHantei: true, Encho: enchoOne,
 				},

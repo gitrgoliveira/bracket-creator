@@ -31,9 +31,21 @@ Individual bouts are scored first. Once all bouts are done, the encounter result
 2. If wins are equal, the team with the highest points scored wins.
 3. If both wins and points are equal, the encounter is a draw in pools or league. In a knockout stage, the encounter goes to a representative bout (daihyosen). See [Recording decisions](../court-operators/recording-decisions.md) for how daihyosen is handled.
 
-## Kachinuki (winner-stays-on)
+## Kachinuki (winner stays on)
 
 In kachinuki format, the winner of each bout remains on the court to face the next opponent from the opposing team. If a bout ends in a hikiwake (draw), both fighters retire instead of one continuing; the next pair, one from each team's remaining roster, takes the court. Bouts continue in succession until one team has no remaining fighters. The team that exhausts the other team wins the encounter.
+
+### Choosing the team match format
+
+When you create a team competition, pick the format under **Team match format**: **Regular** (every position plays its opposite number, the default) or **Kachinuki (winner stays on)**. The same control appears in the competition's **Settings** tab. It locks once the draw is generated: discard the draw to change it. Once the competition has started, the format can no longer be changed.
+
+### Scoring a kachinuki encounter
+
+Kachinuki encounters are scored one bout at a time. The first bout pairs the two Senpo from the saved lineups. Score the bout (or mark it a tie), then tap **Record bout**: the app works out who fights next from the result and the remaining rosters, and adds the next bout automatically. The encounter ends on its own when one team runs out of fighters.
+
+If both teams run out at the same time (the last pair draws), a knockout encounter stays open and must be decided by a representative bout: add and score the daihyosen from the same score editor. In pools, a simultaneous exhaustion is recorded as a drawn encounter.
+
+The results workbook (**Export & print**, then **Download results (.xlsx)**) includes a **Kachinuki Detail** sheet with the bout-by-bout record for every kachinuki encounter: who fought whom, scores, draws, and each fighter's lineup position.
 
 ## Team standings and tie-breaks
 

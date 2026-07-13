@@ -8,6 +8,63 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestTeamLineup_OrderedRoster_FivePerson verifies that a fully-filled
+// 5-person lineup returns player names in the canonical Senpo-to-Taisho
+// order regardless of the map iteration order.
+func TestTeamLineup_OrderedRoster_FivePerson(t *testing.T) {
+	l := domain.TeamLineup{
+		Positions: map[domain.Position]string{
+			domain.PosSenpo:   "S",
+			domain.PosJiho:    "J",
+			domain.PosChuken:  "C",
+			domain.PosFukusho: "F",
+			domain.PosTaisho:  "T",
+		},
+	}
+	got := l.OrderedRoster(5)
+	assert.Equal(t, []string{"S", "J", "C", "F", "T"}, got)
+}
+
+// TestTeamLineup_OrderedRoster_FivePersonWithVacancy verifies that a
+// vacant position (empty string) is skipped; the result carries only
+// the four filled names in canonical order.
+func TestTeamLineup_OrderedRoster_FivePersonWithVacancy(t *testing.T) {
+	l := domain.TeamLineup{
+		Positions: map[domain.Position]string{
+			domain.PosSenpo:   "S",
+			domain.PosJiho:    "", // vacant
+			domain.PosChuken:  "C",
+			domain.PosFukusho: "F",
+			domain.PosTaisho:  "T",
+		},
+	}
+	got := l.OrderedRoster(5)
+	assert.Equal(t, []string{"S", "C", "F", "T"}, got)
+}
+
+// TestTeamLineup_OrderedRoster_ThreePerson verifies the numeric-position
+// path: positions "1", "2", "3" are returned in ascending numeric order.
+func TestTeamLineup_OrderedRoster_ThreePerson(t *testing.T) {
+	l := domain.TeamLineup{
+		Positions: map[domain.Position]string{
+			domain.PositionNumbered(3): "Three",
+			domain.PositionNumbered(1): "One",
+			domain.PositionNumbered(2): "Two",
+		},
+	}
+	got := l.OrderedRoster(3)
+	assert.Equal(t, []string{"One", "Two", "Three"}, got)
+}
+
+// TestTeamLineup_OrderedRoster_Empty verifies that a lineup with no
+// filled positions returns an empty (non-nil) slice.
+func TestTeamLineup_OrderedRoster_Empty(t *testing.T) {
+	l := domain.TeamLineup{Positions: map[domain.Position]string{}}
+	got := l.OrderedRoster(5)
+	require.NotNil(t, got)
+	assert.Empty(t, got)
+}
+
 // TestTeamLineupValidate exercises FR-037/FR-041/R4/CHK012: the
 // FIK 5-person back-fill rule (Senpo + Taisho mandatory; 1 vacancy
 // must be Jiho; 2 vacancies must be Jiho+Fukusho; 3+ vacancies

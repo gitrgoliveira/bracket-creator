@@ -3,6 +3,7 @@
 // T061, T062, T063, mp-13y.
 
 import { findRunningOnCourt, findUpcomingOnCourt, countCourtMatches, sideLabel, phaseLabel, TermD, poolNameOf, isSupplementaryBout, phaseProgressOnCourt, StreamingQR } from './display_helpers.jsx';
+import { teamMatchTypeFor, DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import { TeamScoreboard, IndividualScore, useTeamLineups, teamIVPW } from './match_scoreboard.jsx';
 
 const { useMemo: useMD } = React;
@@ -132,7 +133,8 @@ function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, is
                         isRunning={promoted.match?.status === "running"}
                         shiroName={shiroTeam} akaName={akaTeam}
                         matchSideA={promoted.match.sideA?.name || (typeof promoted.match.sideA === "string" ? promoted.match.sideA : "")}
-                        matchSideB={promoted.match.sideB?.name || (typeof promoted.match.sideB === "string" ? promoted.match.sideB : "")} />
+                        matchSideB={promoted.match.sideB?.name || (typeof promoted.match.sideB === "string" ? promoted.match.sideB : "")}
+                        kachinuki={teamMatchTypeFor(promoted.competition) === "kachinuki"} />
                 </div>
             ) : (
                 <div style={{ flex: 1, display: "flex", alignItems: "flex-start", justifyContent: "center", paddingTop: "2vh" }}>
@@ -578,8 +580,8 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, linkState 
     //   2. IV (Individual Victories) are tied.
     //   3. PW (Points Won) are also tied.
     //   4. It is a knockout phase (not a pool match).
-    // The DH sub-result (position === -1) may or may not exist yet; when absent,
-    // TeamScoreboard renders a "Daihyosen pending" placeholder.
+    // The DH sub-result (position === DAIHYOSEN_POSITION) may or may not exist
+    // yet; when absent, TeamScoreboard renders a "Daihyosen pending" placeholder.
     const subResults = (promoted && promoted.match && promoted.match.subResults) || [];
     const isKnockoutPhase = !!(promoted && promoted.isBracket) ||
         !!(promoted && promoted.match && promoted.match.phase === "bracket");
@@ -590,7 +592,7 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, linkState 
     const promotedSideB = promoted?.match?.sideB?.name || (typeof promoted?.match?.sideB === "string" ? promoted.match.sideB : "");
     const showDH = useMD(() => {
         if (!isTeamMatch || !isKnockoutPhase) return false;
-        const regularSubs = subResults.filter(s => s.position !== -1);
+        const regularSubs = subResults.filter(s => s.position > DAIHYOSEN_POSITION);
         if (regularSubs.length === 0) return false;
         const allDone = regularSubs.every(s => {
             const aIp = (s.ipponsA || []).filter(x => x && x !== "•");

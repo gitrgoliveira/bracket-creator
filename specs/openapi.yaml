@@ -2096,11 +2096,25 @@ paths:
         required: true
         schema:
           type: integer
-        description: Tournament round number.
+        description: "Tournament round index, 0-based. The admin UI displays round 0 as Round 1."
     get:
       tags: [competitions]
       summary: Get team lineup for round
       security: []
+      parameters:
+        - in: query
+          name: fallback
+          required: false
+          schema:
+            type: string
+            enum: [best]
+          description: >
+            When fallback=best the server resolves the best available lineup when none
+            exists for the exact round (the highest round at or below the requested one,
+            then the team's latest lineup) and only 404s when the team has no lineups at
+            all. This round-scoped endpoint has no matchId, so match-scoped lineups are
+            not consulted. Without this parameter the endpoint keeps exact-round semantics
+            (404 when that round has no lineup). PUT and DELETE are unaffected.
       responses:
         '200':
           description: Team lineup.
@@ -3084,7 +3098,7 @@ components:
           type: boolean
         teamMatchType:
           type: string
-          description: Team-match scoring model; `fixed` (positions) or `kachinuki` (winner-stays).
+          description: Team-match scoring model; `fixed` (regular position-by-position order, shown as "Regular" in the UI) or `kachinuki` (winner stays on).
           enum: [fixed, kachinuki]
         maxEnchoPeriods:
           type: integer
@@ -3359,6 +3373,40 @@ components:
             taken straight to a judges' decision. On a bracket-match score request,
             omitting the field preserves the stored value; sending an explicit
             true/false applies it.
+        kachinukiBoutFinal:
+          type: boolean
+          writeOnly: true
+          description: >
+            Transient flag, never persisted. Marks the current kachinuki bout as final
+            so the server advances the winner-stays sequence (appends the next bout or
+            completes the match when one side is exhausted). Without this flag a
+            kachinuki score write only saves the bout result and does not advance the
+            sequence.
+        teamResult:
+          readOnly: true
+          allOf:
+            - $ref: '#/components/schemas/TeamResultLine'
+
+    TeamResultLine:
+      type: object
+      readOnly: true
+      description: >
+        Server-computed team-match summary attached to every team match on read
+        paths (pool matches, bracket matches, schedule, SSE match_updated):
+        individual victories (IV) and points won (PW) per side. Shiro is sideB
+        (rendered left), Aka is sideA (rendered right). The daihyosen
+        (position -1) sub-bout is excluded, so a representative-bout-decided
+        tie reports the tied totals (for example IV 0-0). Absent on individual
+        matches. Never sent by clients.
+      properties:
+        shiroIV:
+          type: integer
+        akaIV:
+          type: integer
+        shiroPW:
+          type: integer
+        akaPW:
+          type: integer
 
     SubMatchResult:
       type: object
@@ -3469,6 +3517,10 @@ components:
             can restore hantei state and bout-level detail on re-open.
           items:
             $ref: '#/components/schemas/SubMatchResult'
+        teamResult:
+          readOnly: true
+          allOf:
+            - $ref: '#/components/schemas/TeamResultLine'
 
     CourtMatchSide:
       type: object

@@ -14,6 +14,7 @@
 
 import { useTeamLineups, TeamScoreboard, IndividualScore, withNumber } from './match_scoreboard.jsx';
 import { TermV, poolLabel } from './viewer_utils.jsx';
+import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 
 const { useState, useRef: useRefV, useCallback } = React;
 
@@ -47,14 +48,14 @@ export function mymatchQueueLabel(m) {
 }
 
 // subBoutLabel: center label for a team sub-bout row. The daihyosen
-// (representative bout) is stored with the sentinel position -1 (see
+// (representative bout) is stored with the sentinel DAIHYOSEN_POSITION (see
 // admin_scoring_modal.jsx buildPatch); render it as "Daihyosen" (matching
 // admin_pools.jsx wording) rather than the literal "Match -1" the
 // `position || index+1` fallback would otherwise produce. Shared by both
 // viewer sub-row sites (MatchDetailCard, MatchViewerModal). Exported for
 // unit-testing.
 export function subBoutLabel(sub, index) {
-  if (sub && sub.position === -1) return "Daihyosen";
+  if (sub && sub.position === DAIHYOSEN_POSITION) return "Daihyosen";
   return `Match ${(sub && sub.position) || index + 1}`;
 }
 
@@ -93,9 +94,9 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true }) {
   // mp-13y: fetch per-match lineups for team matches so bout rows show
   // competitor names instead of bout numbers.
   const { lineupA, lineupB } = useTeamLineups(isTeam ? match : null, undefined, isTeam ? match.roundIndex : undefined);
-  // Show the Daihyosen row when a rep-bout subResult exists (position -1);
+  // Show the Daihyosen row when a rep-bout subResult exists (position DAIHYOSEN_POSITION);
   // TeamScoreboard additionally gates it on the match actually being tied.
-  const showDH = isTeam && (match.subResults || []).some(s => s.position === -1);
+  const showDH = isTeam && (match.subResults || []).some(s => s.position === DAIHYOSEN_POSITION);
 
   return (
     <div className="match-detail-card">
@@ -138,7 +139,8 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true }) {
         ? <TeamScoreboard subResults={match.subResults || []} lineupA={lineupA} lineupB={lineupB}
             teamSize={teamSize} showDH={showDH} variant="card" isRunning={isRunning} shiroName={bName} akaName={aName}
             matchSideA={match.sideA?.name || (typeof match.sideA === "string" ? match.sideA : "")}
-            matchSideB={match.sideB?.name || (typeof match.sideB === "string" ? match.sideB : "")} />
+            matchSideB={match.sideB?.name || (typeof match.sideB === "string" ? match.sideB : "")}
+            kachinuki={match.teamMatchType === "kachinuki"} />
         : (isDone || isRunning) && <IndividualScore match={match} variant="card" />}
     </div>
   );

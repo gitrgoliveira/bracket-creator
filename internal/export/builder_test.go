@@ -3393,3 +3393,81 @@ func TestBuildResultsWorkbook_EngiPairLabelsInBracketEntrants(t *testing.T) {
 			"engi entrant must render as 'Member1 - Member2', got %q", name)
 	}
 }
+
+func TestBuildResultsWorkbook_KachinukiDetailSheet(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	comp.Format = state.CompFormatMixed
+	comp.TeamMatchType = state.TeamMatchTypeKachinuki
+	comp.TeamSize = 3
+	require.NoError(t, store.SaveCompetition(comp))
+
+	require.NoError(t, store.SavePools(compID, []helper.Pool{}))
+	require.NoError(t, store.SavePoolMatches(compID, nil))
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				{
+					ID: "R1M0", SideA: "Ryu", SideB: "Tora",
+					Winner: "Tora", Status: state.MatchStatusCompleted,
+					Decision: "kachinuki-exhaustion", MatchNumber: 1,
+					SubResults: []state.SubMatchResult{
+						{Position: 1, SideA: "Ryu Ichiro", SideB: "Tora Taro", Winner: "Ryu Ichiro", Decision: "fought"},
+						{Position: 2, SideA: "Ryu Ichiro", SideB: "Tora Jiro", Winner: "Tora Jiro", Decision: "fought"},
+					},
+				},
+			},
+		},
+	}))
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer f.Close()
+
+	sheets := f.GetSheetList()
+	require.Contains(t, sheets, helper.SheetKachinukiDetail,
+		"results workbook must contain the Kachinuki Detail sheet for a kachinuki comp")
+
+	rows, err := f.GetRows(helper.SheetKachinukiDetail)
+	require.NoError(t, err)
+	var flat string
+	for _, row := range rows {
+		for _, cell := range row {
+			flat += cell + "|"
+		}
+	}
+	assert.Contains(t, flat, "Ryu Ichiro", "bout player names must be in the sheet")
+	assert.Contains(t, flat, "Tora Jiro", "bout player names must be in the sheet")
+}
+
+func TestBuildResultsWorkbook_FixedFormatNoKachinukiSheet(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	comp.TeamMatchType = state.TeamMatchTypeFixed
+	comp.TeamSize = 3
+	require.NoError(t, store.SaveCompetition(comp))
+
+	require.NoError(t, store.SavePools(compID, []helper.Pool{}))
+	require.NoError(t, store.SavePoolMatches(compID, nil))
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer f.Close()
+
+	assert.NotContains(t, f.GetSheetList(), helper.SheetKachinukiDetail,
+		"fixed-format comps must not emit a Kachinuki Detail sheet")
+}

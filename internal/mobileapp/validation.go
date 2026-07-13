@@ -178,7 +178,7 @@ func validateSubBout(prefix string, sr *state.SubMatchResult) error {
 				Message: "encho period count must not be negative",
 			}
 		}
-		if sr.Position != -1 && sr.Encho.PeriodCount != 0 {
+		if sr.Position != state.DaihyosenSubPosition && sr.Encho.PeriodCount != 0 {
 			return &ValidationError{
 				Field:   prefix + "encho",
 				Message: "encho is only valid for the daihyosen representative bout (position -1)",
@@ -188,7 +188,7 @@ func validateSubBout(prefix string, sr *state.SubMatchResult) error {
 	if !sr.DecidedByHantei {
 		return nil
 	}
-	if sr.Position != -1 {
+	if sr.Position != state.DaihyosenSubPosition {
 		return &ValidationError{
 			Field:   prefix + "decidedByHantei",
 			Message: "hantei is only valid for the daihyosen representative bout (position -1)",
@@ -702,7 +702,7 @@ func IsSelfRunReportableDecision(decision string, decidedByHantei *bool) bool {
 // fusenpai, daihyosen, kachinuki-exhaustion, decidedByHantei=true. Also
 // rejects position == -1 (daihyosen representative bout placeholder).
 func IsSelfRunReportableSubDecision(decision string, decidedByHantei bool, position int) bool {
-	if position == -1 {
+	if position == state.DaihyosenSubPosition {
 		return false
 	}
 	if decidedByHantei {

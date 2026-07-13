@@ -5,6 +5,8 @@
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
+import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
+
 // Kendo best-of-3 cap. Mirrors the server-side `maxIpponsPerSide` in
 // internal/mobileapp/validation.go: the bout ends when one side reaches
 // 2 ippons, so 2-2 is an impossible scoreline. Used to gate the M/K/D/T/H
@@ -397,20 +399,20 @@ function prevEnchoPeriod(current) {
   return Math.max(1, current - 1);
 }
 
-// mp-4pc: once a daihyosen (rep bout, wire position -1) exists, the encho
+// mp-4pc: once a daihyosen (rep bout, wire position DAIHYOSEN_POSITION) exists, the encho
 // rides on that sub, not the top-level match (enchoBlock suppresses the
 // match-level encho when hasDaihyosen). On re-open we must restore the
 // period count from the sub: else a persisted decidedByHantei replays
 // without encho and the backend rejects the next save
 // ("requires encho with at least one period"). Exported for vitest.
 function initialEnchoPeriodsForMatch(m) {
-  const daihyosen = (m.subResults || []).find(s => s.position === -1);
+  const daihyosen = (m.subResults || []).find(s => s.position === DAIHYOSEN_POSITION);
   if (daihyosen) return daihyosen.encho?.periodCount || 0;
   return m.encho?.periodCount || 0;
 }
 
 // daihyosenEnchoFields: pure builder for the encho/decidedByHantei wire
-// fields on the daihyosen representative bout (position -1). The backend
+// fields on the daihyosen representative bout (position DAIHYOSEN_POSITION). The backend
 // invariant (validation.go validateSubBout) is: encho and hantei are valid
 // ONLY on the daihyosen. Encho is OPTIONAL for hantei: a tied daihyosen may
 // be taken straight to a judges' decision without overtime: so the two
@@ -726,6 +728,9 @@ function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color }
   const [open, setOpen] = useStateA(false);
   const [active, setActive] = useStateA(-1); // -1 = no explicit selection yet
   const ref = useRefA(null);
+  // Guards against double-commit when click-outside fires first and the blur
+  // event arrives immediately after (mousedown precedes blur in browser order).
+  const skipBlurRef = useRefA(false);
   const q = query.trim();
   const ql = q.toLowerCase();
   const matches = (roster || []).filter(n => !ql || n.toLowerCase().includes(ql)).slice(0, 12);
@@ -733,7 +738,19 @@ function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color }
   const canAddNew = q.length > 0 && !exact;
   const optionCount = matches.length + (canAddNew ? 1 : 0);
 
-  window.useClickOutside(ref, () => { setOpen(false); setQuery(""); }, open);
+  // On click-outside: commit a typed but un-submitted name rather than
+  // discarding it. Without this, tabbing quickly between slots loses names.
+  // Note: option onMouseDown uses preventDefault so the outside mousedown only
+  // fires when clicking a genuinely external target (q is already "" after commit).
+  window.useClickOutside(ref, () => {
+    if (q) {
+      skipBlurRef.current = true;
+      commit(q);
+    } else {
+      setOpen(false);
+      setQuery("");
+    }
+  }, open);
 
   const commit = (name) => { onSelect(name); setOpen(false); setQuery(""); setActive(-1); };
   const onKeyDown = (e) => {
@@ -770,6 +787,19 @@ function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color }
           onChange={(e) => { setQuery(e.target.value); setOpen(true); setActive(-1); }}
           onFocus={() => { setOpen(true); setQuery(""); setActive(-1); }}
           onKeyDown={onKeyDown}
+          onBlur={(e) => {
+            // Do not close if focus moved to something inside the wrapper
+            // (e.g. a dropdown option button).
+            if (ref.current && ref.current.contains(e.relatedTarget)) return;
+            // Skip if the click-outside path already committed (it fires on
+            // mousedown, before blur; it sets skipBlurRef to prevent a double
+            // onSelect call).
+            if (skipBlurRef.current) { skipBlurRef.current = false; return; }
+            // Tab-away with a typed name: commit it so the operator does not
+            // lose a batch-entry value.
+            if (q) commit(q);
+            else if (open) { setOpen(false); setQuery(""); }
+          }}
         />
         {value && !disabled && (
           <button type="button" className="lineup-name__clear" title="Clear player" aria-label="Clear player"

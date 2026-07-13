@@ -3,6 +3,8 @@
 // formatCompMinutes is ES-exported and re-exported by the admin_competition.jsx
 // entry for the vitest suite.
 
+import { teamMatchTypeHint } from './pool_ids.jsx';
+
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
 // Default on-clock minutes per match when a duration field is left blank.
@@ -289,7 +291,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       // the backend's PUT allowlist ignores unknown fields.
       leagueTiebreakTopN: safeInt(effective.leagueTiebreakTopN, latestC.leagueTiebreakTopN || 0),
       leagueTwoThirdPlaces: !!effective.leagueTwoThirdPlaces,
-      // teamMatchType has no editable control in this form, but the settings
+      // teamMatchType is edited via the Team match format pills above; the
       // merge is a full replace: omitting it would clobber a kachinuki
       // competition's value to "" (fixed) on any save. Round-trip it like
       // `mirror` above to preserve the stored value.
@@ -547,6 +549,32 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             onChange={(e) => updateNumber("teamSize", e.target.value, 1)}
             disabled={isDrawReady}
           />
+        </div>
+      )}
+      {local.kind === "team" && (
+        <div className="field">
+          <label className="field__label">Team match format</label>
+          {/* draw-ready + started lock: teamMatchType selects fixed vs kachinuki
+              bout sequencing; changing it after draw-ready would desync the match
+              structure from config, and flipping it on a STARTED comp would
+              desync recorded bouts from the scoring paradigm (server 409s). */}
+          <div className="radio-group">
+            <button
+              className={`radio-pill ${local.teamMatchType !== "kachinuki" ? "is-active" : ""}`}
+              type="button"
+              onClick={() => update("teamMatchType", "fixed")}
+              disabled={isDrawReady || isStarted}
+            >Regular</button>
+            <button
+              className={`radio-pill ${local.teamMatchType === "kachinuki" ? "is-active" : ""}`}
+              type="button"
+              onClick={() => update("teamMatchType", "kachinuki")}
+              disabled={isDrawReady || isStarted}
+            >Kachinuki (winner stays on)</button>
+          </div>
+          <div className="field__hint">
+            {teamMatchTypeHint(local.teamMatchType === "kachinuki")}{(isDrawReady || isStarted) ? " Locked after draw." : ""}
+          </div>
         </div>
       )}
       <div className="field">

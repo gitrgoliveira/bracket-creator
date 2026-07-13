@@ -14,7 +14,6 @@
 package mobileapp
 
 import (
-	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -91,8 +90,20 @@ func RegisterPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore) {
 			internalError(c, err)
 			return
 		}
-		key := fmt.Sprintf("%s-%d", teamID, round)
-		lineup, found := lineups[key]
+		lineup, found := findRoundLineup(lineups, teamID, round)
+		if !found && c.Query("fallback") == "best" {
+			// Best-effort mode, the client-side twin of AMENDMENT 1: the
+			// scoring modal asks for the match's own round index, but
+			// operators typically save one round-0 lineup for the whole
+			// day, so a knockout final (round 1+) would 404 and leave the
+			// modal without names. Resolve via the FindBestLineup round
+			// tiers (highest round <= requested, else highest overall;
+			// match-scoped entries are skipped by passing an empty
+			// matchID). Default behavior without the param stays exact +
+			// 404 so the lineup editor's "no lineup submitted for THIS
+			// round" semantics are untouched.
+			lineup, found = state.FindBestLineup(lineups, teamID, "", round)
+		}
 		if !found {
 			c.JSON(http.StatusNotFound, gin.H{"error": "no lineup submitted for this team and round"})
 			return
@@ -127,6 +138,19 @@ func RegisterPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore) {
 func findMatchLineup(lineups map[string]domain.TeamLineup, teamID, matchID string) (domain.TeamLineup, bool) {
 	for _, l := range lineups {
 		if l.MatchID == matchID && l.TeamID == teamID {
+			return l, true
+		}
+	}
+	return domain.TeamLineup{}, false
+}
+
+// findRoundLineup is the round-scoped sibling of findMatchLineup: it scans the
+// loaded map by fields for the (teamID, round) entry that is NOT match-scoped
+// (MatchID == ""), so the handlers don't replicate state's internal
+// "<teamID>-<round>" key format. Returns the lineup and whether it was found.
+func findRoundLineup(lineups map[string]domain.TeamLineup, teamID string, round int) (domain.TeamLineup, bool) {
+	for _, l := range lineups {
+		if l.MatchID == "" && l.TeamID == teamID && l.Round == round {
 			return l, true
 		}
 	}
@@ -227,8 +251,7 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 				respErr = &httpErr{status: http.StatusInternalServerError, body: gin.H{"error": "internal error"}}
 				return nil
 			}
-			key := fmt.Sprintf("%s-%d", teamID, round)
-			if persisted, ok := lineups[key]; ok {
+			if persisted, ok := findRoundLineup(lineups, teamID, round); ok {
 				persistedLineup = persisted
 			} else {
 				// Defensive: SetTeamLineup just succeeded, so the entry

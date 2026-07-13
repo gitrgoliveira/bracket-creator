@@ -135,7 +135,7 @@ describe('lineup_resolver: resolveMatchLineup', () => {
     };
     const result = await resolveMatchLineup('c1', 't1', 'm1', 2, fetchers);
     expect(result).toBe(roundLineup);
-    expect(fetchers.fetchTeamLineup).toHaveBeenCalledWith('c1', 't1', 2);
+    expect(fetchers.fetchTeamLineup).toHaveBeenCalledWith('c1', 't1', 2, { fallback: true });
   });
 
   it('returns null when both fetchers throw/reject', async () => {

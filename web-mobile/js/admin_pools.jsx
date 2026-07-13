@@ -3,7 +3,7 @@
 
 // Canonical pool-id parser shared with the display surfaces (single source of
 // truth: ./pool_ids.jsx is a leaf module with no import chain).
-import { poolNameOf, isSupplementaryBout, isPoolDaihyosenBout } from './pool_ids.jsx';
+import { poolNameOf, isSupplementaryBout, isPoolDaihyosenBout, teamMatchTypeFor } from './pool_ids.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA } = React;
 const EmptyState = window.EmptyState;
@@ -95,6 +95,7 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
     compFormat: m.compFormat || (comp && comp.format) || "",
     compKind: isSupplementary ? "" : (m.compKind || (comp && comp.kind) || ""),
     teamSize: isSupplementary ? 0 : (m.teamSize ?? (comp && comp.teamSize) ?? 0),
+    teamMatchType: isSupplementary ? "" : (m.teamMatchType || teamMatchTypeFor(comp)),
     compEngi: isSupplementary ? false : !!(m.compEngi ?? (comp && comp.engi)),
     phase: m.phase || "pool",
     poolName: m.poolName || derivedPoolName,

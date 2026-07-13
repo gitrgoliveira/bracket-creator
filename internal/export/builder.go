@@ -234,6 +234,20 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	// 5. Names to Print sheet (identical to blank-template export).
 	helper.CreateNamesWithPoolToPrint(f, pools, comp.EffectiveWithZekkenName(), numCourts, playerCoords)
 
+	// 6. Kachinuki Detail sheet: bout-by-bout log for kachinuki team
+	//    competitions (GAP 6). Same opt-in semantics as the blank-template
+	//    export (Engine.ExportCompetitionXlsx step 7): the renderer is a
+	//    no-op for empty input, so fixed-format and individual comps are
+	//    unaffected. Without this, the admin "Download results" workbook
+	//    (which builds HERE, not via ExportCompetitionXlsx) had no bout log.
+	kachinukiMatches, err := eng.KachinukiDetailMatches(compID)
+	if err != nil {
+		return nil, fmt.Errorf("export: collect kachinuki detail: %w", err)
+	}
+	if err := helper.WriteKachinukiDetailSheet(f, kachinukiMatches); err != nil {
+		return nil, fmt.Errorf("export: write kachinuki detail sheet: %w", err)
+	}
+
 	var buf bytes.Buffer
 	if err := f.Write(&buf); err != nil {
 		return nil, fmt.Errorf("export: write workbook: %w", err)

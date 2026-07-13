@@ -2624,6 +2624,193 @@ func TestPUTCompetition_DrawReadyOutputAffectingGate(t *testing.T) {
 	})
 }
 
+// TestUpdateCompetition_TeamMatchTypeLockedDrawReady verifies that changing
+// teamMatchType while the competition is draw-ready returns 409 (A5, GAP 1).
+// Changing this field after the draw is generated would make the running
+// format inconsistent with the persisted bracket/pool structure.
+func TestUpdateCompetition_TeamMatchTypeLockedDrawReady(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+
+	const cid = "team-match-type-lock"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:            cid,
+		Name:          "Team Match Type Lock",
+		Format:        state.CompFormatMixed,
+		Kind:          "team",
+		TeamSize:      5,
+		TeamMatchType: state.TeamMatchTypeFixed,
+		Courts:        []string{"A"},
+		PoolSize:      4,
+		PoolWinners:   2,
+		Status:        state.CompStatusDrawReady,
+	}))
+
+	t.Run("REJECT teamMatchType change from fixed to kachinuki while draw-ready", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"id":            cid,
+			"name":          "Team Match Type Lock",
+			"format":        state.CompFormatMixed,
+			"kind":          "team",
+			"teamSize":      5,
+			"teamMatchType": state.TeamMatchTypeKachinuki, // changed from "fixed", output-affecting
+			"courts":        []string{"A"},
+			"poolSize":      4,
+			"poolWinners":   2,
+			"roundRobin":    false,
+			"mirror":        false,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusConflict, w.Code,
+			"changing teamMatchType while draw-ready must return 409: %s", w.Body.String())
+
+		// TeamMatchType must remain "fixed"; draw-ready gate must not mutate state.
+		stored, err := store.LoadCompetition(cid)
+		require.NoError(t, err)
+		assert.Equal(t, state.TeamMatchTypeFixed, stored.TeamMatchType,
+			"teamMatchType must not change after 409 rejection")
+		assert.Equal(t, state.CompStatusDrawReady, stored.Status,
+			"status must remain draw-ready after 409 rejection")
+	})
+
+	t.Run("ALLOW teamMatchType unchanged while draw-ready", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"id":            cid,
+			"name":          "Team Match Type Lock",
+			"format":        state.CompFormatMixed,
+			"kind":          "team",
+			"teamSize":      5,
+			"teamMatchType": state.TeamMatchTypeFixed, // same as stored, no change
+			"courts":        []string{"A"},
+			"poolSize":      4,
+			"poolWinners":   2,
+			"roundRobin":    false,
+			"mirror":        false,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code,
+			"no output-affecting change must be allowed while draw-ready: %s", w.Body.String())
+		stored, err := store.LoadCompetition(cid)
+		require.NoError(t, err)
+		assert.Equal(t, state.CompStatusDrawReady, stored.Status,
+			"status must remain draw-ready after allowed PUT")
+	})
+}
+
+// TestUpdateCompetition_TeamMatchTypeDrawReadyOmittedAndLegacy verifies that
+// the draw-ready teamMatchType guard uses effective-value comparison rather than
+// raw wire comparison (Fix 5 regression coverage):
+//   - PUT omitting teamMatchType on a draw-ready kachinuki competition must
+//     succeed (omitted wire "" means "keep stored", not "change to fixed").
+//   - PUT sending "fixed" against a stored legacy "" TeamMatchType on a
+//     draw-ready competition must succeed (both represent the same effective
+//     type: fixed).
+//
+// The guard-still-works case (explicit kachinuki against stored fixed returns
+// 409) is already covered by TestUpdateCompetition_TeamMatchTypeLockedDrawReady
+// and is not duplicated here.
+func TestUpdateCompetition_TeamMatchTypeDrawReadyOmittedAndLegacy(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+
+	// Subtest 1: omitting teamMatchType on a draw-ready kachinuki competition
+	// must not trigger a 409 (false positive from raw "" != "kachinuki").
+	t.Run("ALLOW omitted teamMatchType on draw-ready kachinuki competition", func(t *testing.T) {
+		const cid = "draw-ready-kachinuki-omit"
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID:            cid,
+			Name:          "Draw Ready Kachinuki",
+			Format:        state.CompFormatMixed,
+			Kind:          "team",
+			TeamSize:      5,
+			TeamMatchType: state.TeamMatchTypeKachinuki,
+			Courts:        []string{"A"},
+			PoolSize:      4,
+			PoolWinners:   2,
+			Status:        state.CompStatusDrawReady,
+		}))
+
+		// teamMatchType intentionally omitted so the wire value decodes to ""
+		// (json omitempty). The effective meaning is "keep the stored value".
+		body, _ := json.Marshal(map[string]any{
+			"id":          cid,
+			"name":        "Draw Ready Kachinuki",
+			"format":      state.CompFormatMixed,
+			"kind":        "team",
+			"teamSize":    5,
+			"courts":      []string{"A"},
+			"poolSize":    4,
+			"poolWinners": 2,
+			"roundRobin":  false,
+			"mirror":      false,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code,
+			"omitted teamMatchType on a draw-ready kachinuki competition must not return 409: %s", w.Body.String())
+		stored, err := store.LoadCompetition(cid)
+		require.NoError(t, err)
+		assert.Equal(t, state.TeamMatchTypeKachinuki, stored.TeamMatchType,
+			"TeamMatchType must remain kachinuki when the field was omitted from the PUT body")
+		assert.Equal(t, state.CompStatusDrawReady, stored.Status,
+			"status must remain draw-ready after the allowed PUT")
+	})
+
+	// Subtest 2: sending "fixed" against a stored legacy "" TeamMatchType on a
+	// draw-ready competition must not 409 (both are the same effective type).
+	t.Run("ALLOW explicit fixed against stored legacy empty TeamMatchType while draw-ready", func(t *testing.T) {
+		const cid = "draw-ready-legacy-empty"
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID:            cid,
+			Name:          "Draw Ready Legacy Empty",
+			Format:        state.CompFormatMixed,
+			Kind:          "team",
+			TeamSize:      5,
+			TeamMatchType: "", // legacy on-disk empty == fixed
+			Courts:        []string{"A"},
+			PoolSize:      4,
+			PoolWinners:   2,
+			Status:        state.CompStatusDrawReady,
+		}))
+
+		body, _ := json.Marshal(map[string]any{
+			"id":            cid,
+			"name":          "Draw Ready Legacy Empty",
+			"format":        state.CompFormatMixed,
+			"kind":          "team",
+			"teamSize":      5,
+			"teamMatchType": state.TeamMatchTypeFixed, // "fixed" is semantically equal to legacy ""
+			"courts":        []string{"A"},
+			"poolSize":      4,
+			"poolWinners":   2,
+			"roundRobin":    false,
+			"mirror":        false,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code,
+			"explicit fixed against stored legacy empty must not return 409 while draw-ready: %s", w.Body.String())
+		stored, err := store.LoadCompetition(cid)
+		require.NoError(t, err)
+		assert.Equal(t, state.TeamMatchTypeFixed, stored.TeamMatchType,
+			"TeamMatchType must be persisted as fixed after a successful PUT")
+		assert.Equal(t, state.CompStatusDrawReady, stored.Status,
+			"status must remain draw-ready after the allowed PUT")
+	})
+}
+
 // ---------------------------------------------------------------------------
 // GET /competitions/:id/chusen-candidates
 // ---------------------------------------------------------------------------
@@ -2665,4 +2852,80 @@ func TestChusenCandidates_NotFound(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+// TestUpdateCompetition_TeamMatchTypeLockedWhenStarted verifies that changing
+// teamMatchType on a STARTED competition (status past setup, e.g. playoffs)
+// returns 409. Flipping fixed <-> kachinuki mid-tournament would desync the
+// recorded bout structure from the scoring/advancement paradigm. Sibling of
+// the Naginata/Engi started-guards; the draw-ready lock alone left started
+// comps editable (UAT finding).
+func TestUpdateCompetition_TeamMatchTypeLockedWhenStarted(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+
+	const cid = "team-match-type-started-lock"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:            cid,
+		Name:          "Team Match Type Started Lock",
+		Format:        state.CompFormatMixed,
+		Kind:          "team",
+		TeamSize:      5,
+		TeamMatchType: state.TeamMatchTypeKachinuki,
+		Courts:        []string{"A"},
+		PoolSize:      4,
+		PoolWinners:   2,
+		Status:        state.CompStatusPlayoffs,
+	}))
+
+	basePayload := func(tmt state.TeamMatchType) map[string]any {
+		return map[string]any{
+			"id":            cid,
+			"name":          "Team Match Type Started Lock",
+			"format":        state.CompFormatMixed,
+			"kind":          "team",
+			"teamSize":      5,
+			"teamMatchType": tmt,
+			"courts":        []string{"A"},
+			"poolSize":      4,
+			"poolWinners":   2,
+			"roundRobin":    false,
+			"mirror":        false,
+		}
+	}
+	put := func(payload map[string]any) *httptest.ResponseRecorder {
+		body, _ := json.Marshal(payload)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	t.Run("REJECT kachinuki to fixed flip on a started comp", func(t *testing.T) {
+		w := put(basePayload(state.TeamMatchTypeFixed))
+		assert.Equal(t, http.StatusConflict, w.Code,
+			"changing teamMatchType on a started comp must return 409: %s", w.Body.String())
+
+		stored, err := store.LoadCompetition(cid)
+		require.NoError(t, err)
+		assert.Equal(t, state.TeamMatchTypeKachinuki, stored.TeamMatchType,
+			"teamMatchType must not change after 409 rejection")
+	})
+
+	t.Run("ALLOW save with unchanged teamMatchType on a started comp", func(t *testing.T) {
+		w := put(basePayload(state.TeamMatchTypeKachinuki))
+		assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	})
+
+	t.Run("ALLOW save that omits teamMatchType (keep stored value)", func(t *testing.T) {
+		payload := basePayload("")
+		delete(payload, "teamMatchType")
+		w := put(payload)
+		assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+		stored, err := store.LoadCompetition(cid)
+		require.NoError(t, err)
+		assert.Equal(t, state.TeamMatchTypeKachinuki, stored.TeamMatchType,
+			"an omitted teamMatchType must keep the stored value, never reset it")
+	})
 }

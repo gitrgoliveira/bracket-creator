@@ -844,6 +844,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		var validationErr error
 		var notFoundFlag bool
 		var drawReadyFlag bool
+		var teamMatchTypeStartedFlag bool
 		var changed bool
 		err := store.WithCompetitionRenameLock(func() error {
 			var updateErr error
@@ -893,6 +894,20 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				}
 
 				// Settings-only PUT (Players field absent in body).
+				// Team match format (FR-044) wire contract, applied BEFORE the
+				// draw-ready guard below so both it and the started guard
+				// compare the same EFFECTIVE value: an omitted value ("" on
+				// the wire, json omitempty) means "keep the stored value",
+				// never "reset to fixed", and a stored legacy "" is
+				// equivalent to "fixed". Without this a client omitting the
+				// field on a draw-ready kachinuki competition trips a false
+				// 409 (the draw-ready comment promises effective-value
+				// comparison; "" is an omission, not a value).
+				if comp.TeamMatchType == "" {
+					comp.TeamMatchType = current.TeamMatchType
+				}
+				sameTeamMatchType := comp.TeamMatchType == current.TeamMatchType ||
+					(comp.TeamMatchType == state.TeamMatchTypeFixed && current.TeamMatchType == "")
 				// Draw-ready gate: the draw artifacts (pools.csv /
 				// bracket.json) were generated from the current config.
 				// Mutating output-affecting fields while draw-ready would
@@ -932,6 +947,11 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 							comp.Mirror != current.Mirror ||
 							comp.TeamSize != current.TeamSize ||
 							comp.Kind != current.Kind ||
+							// TeamMatchType selects fixed vs kachinuki bout sequencing; changing
+							// it after draw-ready desyncs the match structure from config.
+							// sameTeamMatchType is the normalized effective-value comparison
+							// computed above (omitted keeps stored; legacy "" equals fixed).
+							!sameTeamMatchType ||
 							// NumberPrefix and WithZekkenName reach the Excel generator
 							// (POST /create: numberPrefix → player numbers, withZekkenName
 							// → name columns), so changing them while draw-ready desyncs
@@ -996,7 +1016,6 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				current.PoolMatchDuration = comp.PoolMatchDuration
 				current.PlayoffMatchDuration = comp.PlayoffMatchDuration
 				current.MatchDuration = comp.MatchDuration
-				current.TeamMatchType = comp.TeamMatchType
 				// FR-050a: swiss round budget is admin-editable from
 				// settings until the competition starts (the engine
 				// gates StartCompetition on Status=setup). After start,
@@ -1029,6 +1048,19 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					return nil, nil
 				}
 				current.Engi = comp.Engi
+				// Team match format (FR-044) is only settable before the
+				// competition starts (sibling of the Naginata/Engi guards):
+				// flipping fixed <-> kachinuki mid-tournament would desync the
+				// recorded bout structure from the scoring/advancement paradigm.
+				// Surfaced as 409 (started-state conflict), matching the
+				// draw-ready lock the settings UI pairs this control with.
+				// comp.TeamMatchType was normalized and sameTeamMatchType
+				// computed before the draw-ready guard above.
+				if started && !sameTeamMatchType {
+					teamMatchTypeStartedFlag = true
+					return nil, nil
+				}
+				current.TeamMatchType = comp.TeamMatchType
 				current.CheckInEnabled = comp.CheckInEnabled
 				// League tie-breaker config (Phase 3b) is only settable pre-start.
 				// Once the competition has started (status past setup) the
@@ -1060,6 +1092,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		if drawReadyFlag {
 			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify output-affecting settings (format, courts, pool size/winners/mode, pool format, round-robin, mirror, team size, kind, number prefix, zekken display) while a draw is pending; discard the draw first"})
+			return
+		}
+		if teamMatchTypeStartedFlag {
+			c.JSON(http.StatusConflict, gin.H{"error": "teamMatchType can only be changed before the competition starts"})
 			return
 		}
 		if validationErr != nil {

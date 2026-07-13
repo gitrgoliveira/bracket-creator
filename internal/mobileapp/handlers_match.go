@@ -455,6 +455,16 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			c.JSON(http.StatusBadRequest, gin.H{"error": "quick-score is not supported for engi competitions"})
 			return
 		}
+		// Kachinuki matches are scored one bout at a time via the score
+		// endpoint (server-appended winner-stays bout log). Quick-score
+		// synthesises a positional log and writes it wholesale through the
+		// plain RecordMatchResult path, which has no kachinuki merge and no
+		// premature-completion check, so a single call would destroy a live
+		// winner-stays sequence. Same incompatibility class as engi: reject.
+		if comp != nil && comp.TeamMatchType == state.TeamMatchTypeKachinuki {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "quick-score is not supported for kachinuki competitions; score bouts individually"})
+			return
+		}
 
 		// Determine team winner per kendo rules: most individual wins wins.
 		// winnerSide records the WINNING SIDE (not just the name) so the
@@ -507,6 +517,15 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 					"error":   "side_mismatch",
 					"message": "The submitted competitors don't match this match's pairing. Reload and try again.",
 				})
+				return
+			}
+			// A tied quick-score on a bracket team match produces a
+			// Completed write with no winner, which validateBracketCompletion
+			// rejects as *engine.ValidationError; map it to 400 so the caller
+			// sees "resolve via daihyosen first" instead of a generic 500.
+			var engValErr *engine.ValidationError
+			if errors.As(err, &engValErr) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": engValErr.Error()})
 				return
 			}
 			internalError(c, err)
@@ -933,6 +952,20 @@ type runningRev struct {
 // Finish is the authoritative write and carries no rev constraint.
 var runningRevStore sync.Map
 
+// scoreRequestBody wraps ScoreRequest with transient, request-only
+// fields. These bind from the JSON body but are NOT part of
+// state.MatchResult, so they can never be persisted.
+type scoreRequestBody struct {
+	ScoreRequest
+	// KachinukiBoutFinal marks an explicit operator "record bout" submit
+	// on a kachinuki team match. Only a flagged write triggers
+	// MaybeAdvanceKachinuki; unflagged running writes (autosave fires
+	// mid-bout, where a 1-0 lead already sets the sub winner) and
+	// completed writes (corrections, daihyosen finishes) skip
+	// advancement entirely.
+	KachinukiBoutFinal bool `json:"kachinukiBoutFinal"`
+}
+
 func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store CompetitionStore, tx CompetitionTransactor, hub Broadcaster, verifier PasswordVerifier, tl TournamentLoader) {
 	// C3: coalesce high-frequency "running" match_updated broadcasts to ≤4/s
 	// per match. Completed writes always proceed (isRunning=false).
@@ -955,11 +988,12 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		// here so all four use-sites share a single allocation (FINDING 3).
 		matchKey := id + ":" + mid
 
-		var req ScoreRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
+		var body scoreRequestBody
+		if err := c.ShouldBindJSON(&body); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		req := body.ScoreRequest
 		if err := req.Validate(); err != nil {
 			// Map ValidationError → 400 with the validator's message.
 			// Engine errors below remain 500 (they surface I/O / state
@@ -1013,6 +1047,24 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		// so don't persist a client-supplied reason there.
 		if result.Status != state.MatchStatusCompleted {
 			result.CorrectionReason = ""
+		}
+
+		// Kachinuki safety net (ACID, no silent drops): a completed write
+		// on a kachinuki match whose roster snapshot is not exhausted and
+		// whose patch carries no daihyosen sub-result is rejected loudly,
+		// never silently accepted. Runs OUTSIDE the transaction because the
+		// engine's store loads acquire the per-comp lock themselves; the
+		// tiny TOCTOU window mirrors CheckCrossCompCourtBusy below.
+		if err := eng.CheckKachinukiPrematureCompletion(id, mid, result); err != nil {
+			if errors.Is(err, engine.ErrKachinukiPrematureCompletion) {
+				c.JSON(http.StatusConflict, gin.H{
+					"error":   "kachinuki_premature_completion",
+					"message": "This kachinuki match still has players remaining on both teams. Record the remaining bouts (the match completes automatically when one team is exhausted), or add a daihyosen to resolve a tie.",
+				})
+				return
+			}
+			internalError(c, err)
+			return
 		}
 
 		// C2 rev-guard: drop stale "running" autosave writes that arrive
@@ -1272,6 +1324,17 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				c.JSON(http.StatusBadRequest, gin.H{"error": valErr.Error()})
 				return
 			}
+			// engine.ValidationError is a DISTINCT type from the handler-layer
+			// ValidationError above; without this mapping an engine precondition
+			// rejection (e.g. validateBracketCompletion's "cannot mark completed
+			// with no winner; resolve via daihyosen first") surfaced as a 500,
+			// which the client write-queue treats as transient and retries
+			// (mp-q8c6 poisoned-queue pattern) instead of showing the message.
+			var engValErr *engine.ValidationError
+			if errors.As(engErr, &engValErr) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": engValErr.Error()})
+				return
+			}
 			internalError(c, engErr)
 			return
 		}
@@ -1305,21 +1368,28 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				"status":        engStatus,
 			})
 		}
-		// T135, kachinuki post-score advancement. Runs OUTSIDE the tx
-		// because MaybeAdvanceKachinuki calls UpdatePoolMatchByID /
-		// UpdateBracket which acquire the per-comp lock themselves;
-		// nesting under our tx would deadlock. A non-fatal error here
-		// doesn't fail the request: the operator's bout score is
-		// already on disk; surfacing a 500 would lead them to retry
-		// and double-record. Mirrors the recordIneligibility non-fatal
-		// pattern.
-		if advanced, kerr := eng.MaybeAdvanceKachinuki(id, mid); kerr != nil {
-			log.Printf("engine.MaybeAdvanceKachinuki(%s, %s): %v", id, mid, kerr)
-		} else if advanced {
-			hub.Broadcast(EventMatchUpdated, gin.H{
-				"competitionId": id,
-				"matchId":       mid,
-			})
+		// T135, kachinuki post-score advancement. Gated on the transient
+		// kachinukiBoutFinal request flag: only an explicit operator
+		// "record bout" submit may advance. Unflagged running writes are
+		// mid-bout autosaves (a 1-0 lead already sets the sub winner, so
+		// advancing on them would fire while the bout is still being
+		// fought) and completed writes are corrections/daihyosen finishes.
+		// Runs OUTSIDE the tx because MaybeAdvanceKachinuki calls
+		// UpdatePoolMatchByID / UpdateBracket which acquire the per-comp
+		// lock themselves; nesting under our tx would deadlock. A
+		// non-fatal error here doesn't fail the request: the operator's
+		// bout score is already on disk; surfacing a 500 would lead them
+		// to retry and double-record. Mirrors the recordIneligibility
+		// non-fatal pattern.
+		if body.KachinukiBoutFinal {
+			if advanced, kerr := eng.MaybeAdvanceKachinuki(id, mid); kerr != nil {
+				log.Printf("engine.MaybeAdvanceKachinuki(%s, %s): %v", id, mid, kerr)
+			} else if advanced {
+				hub.Broadcast(EventMatchUpdated, gin.H{
+					"competitionId": id,
+					"matchId":       mid,
+				})
+			}
 		}
 		tryAutoCompletePools(c, eng, hub, id)
 

@@ -1698,3 +1698,118 @@ func TestRevertBracketMatch_StaleWriteFenced(t *testing.T) {
 	assert.Empty(t, b.Rounds[0][0].Winner,
 		"revert fence: stale replay must NOT set a winner")
 }
+
+// TestRecordMatchResult_BracketCompletedWithNoWinnerRejected pins
+// AMENDMENT 2: the server must reject a Completed bracket (elimination)
+// match when the Winner field is empty. This guards against an operator
+// accidentally finishing a kachinuki simultaneous-exhaustion match before
+// the daihyosen has resolved it.
+func TestRecordMatchResult_BracketCompletedWithNoWinnerRejected(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+
+	compID := "bracket-no-winner"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:            compID,
+		Name:          "Kachinuki No Winner",
+		TeamMatchType: state.TeamMatchTypeKachinuki,
+		TeamSize:      5,
+		Format:        state.CompFormatMixed,
+	}))
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{{ID: "SF1", SideA: "TeamA", SideB: "TeamB", Status: state.MatchStatusRunning}},
+		},
+	}))
+
+	err := eng.RecordMatchResult(compID, "SF1", &state.MatchResult{
+		Winner: "", // no winner yet; daihyosen pending
+		Status: state.MatchStatusCompleted,
+	})
+	require.Error(t, err, "completing a bracket match with no winner must be rejected")
+	var valErr *ValidationError
+	require.ErrorAs(t, err, &valErr, "error must be a ValidationError (HTTP 400 in handler)")
+
+	// Match must remain in its prior state.
+	stored, err2 := store.LoadBracket(compID)
+	require.NoError(t, err2)
+	assert.Equal(t, state.MatchStatusRunning, stored.Rounds[0][0].Status, "status must not change")
+	assert.Empty(t, stored.Rounds[0][0].Winner, "winner must still be empty")
+}
+
+// TestRecordMatchResultTx_BracketCompletedWithNoWinnerRejected is the tx-aware
+// twin of the test above. The production score handler routes through
+// RecordMatchResultWithIneligibilityTx -> recordBracketMatchResultTx, so the
+// AMENDMENT 2 guard must hold on this path too: pre-fix, only the non-tx twin
+// carried it and the operator-facing route could complete a bracket match with
+// no winner (validateBracketCompletion is the shared choke point).
+func TestRecordMatchResultTx_BracketCompletedWithNoWinnerRejected(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+
+	compID := "bracket-no-winner-tx"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:            compID,
+		Name:          "Kachinuki No Winner Tx",
+		TeamMatchType: state.TeamMatchTypeKachinuki,
+		TeamSize:      5,
+		Format:        state.CompFormatMixed,
+	}))
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{{ID: "SF1", SideA: "TeamA", SideB: "TeamB", Status: state.MatchStatusRunning}},
+		},
+	}))
+
+	var txErr error
+	require.NoError(t, store.WithTransaction(compID, func(tx state.StoreTx) error {
+		_, txErr = eng.RecordMatchResultWithIneligibilityTx(tx, compID, "SF1", &state.MatchResult{
+			Winner: "", // no winner yet; daihyosen pending
+			Status: state.MatchStatusCompleted,
+		})
+		return nil
+	}))
+	require.Error(t, txErr, "tx path must also reject a winnerless bracket completion")
+	var valErr *ValidationError
+	require.ErrorAs(t, txErr, &valErr, "error must be a ValidationError (HTTP 400 in handler)")
+
+	stored, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, state.MatchStatusRunning, stored.Rounds[0][0].Status, "status must not change")
+	assert.Empty(t, stored.Rounds[0][0].Winner, "winner must still be empty")
+}
+
+// TestRecordMatchResult_BronzeCompletedWithNoWinnerRejected covers the third
+// write site sharing validateBracketCompletion: the bronze (3rd-place) match
+// goes through applyBronzeMatchResult on both the tx and non-tx paths.
+func TestRecordMatchResult_BronzeCompletedWithNoWinnerRejected(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+
+	compID := "bronze-no-winner"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:            compID,
+		Name:          "Bronze No Winner",
+		TeamMatchType: state.TeamMatchTypeKachinuki,
+		TeamSize:      5,
+		Format:        state.CompFormatMixed,
+	}))
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{{ID: "F1", SideA: "TeamA", SideB: "TeamB", Status: state.MatchStatusRunning}},
+		},
+		ThirdPlaceMatch: &state.BracketMatch{
+			ID: "BRONZE", SideA: "TeamC", SideB: "TeamD", Status: state.MatchStatusRunning,
+		},
+	}))
+
+	err := eng.RecordMatchResult(compID, "BRONZE", &state.MatchResult{
+		Winner: "",
+		Status: state.MatchStatusCompleted,
+	})
+	require.Error(t, err, "completing the bronze match with no winner must be rejected")
+	var valErr *ValidationError
+	require.ErrorAs(t, err, &valErr)
+
+	stored, err2 := store.LoadBracket(compID)
+	require.NoError(t, err2)
+	assert.Equal(t, state.MatchStatusRunning, stored.ThirdPlaceMatch.Status, "bronze status must not change")
+	assert.Empty(t, stored.ThirdPlaceMatch.Winner, "bronze winner must still be empty")
+}

@@ -625,6 +625,48 @@ func TestMaybeAdvanceKachinuki_RosterFromLineup_ParticipantIDKeyed(t *testing.T)
 	assert.NotEqual(t, state.MatchStatusCompleted, matches[0].Status, "match must not be completed yet")
 }
 
+// TestKachinukiRemainingRoster_IDKeyBeatsNameKey pins that when a team has BOTH
+// an id-keyed and a name-keyed lineup at the same round, the participant-id
+// lineup (the UI's storage key) wins. This guards the teamKeys id-first
+// ordering against FindBestLineupAny's deterministic slice-order tie-break: a
+// name-first order would let a legacy name-keyed lineup override the current
+// id-keyed one and select the wrong roster.
+func TestKachinukiRemainingRoster_IDKeyBeatsNameKey(t *testing.T) {
+	eng, store, comp := setupKachinukiComp(t, "kachinuki-idkey-wins", 3, func(c *state.Competition) { c.Format = state.CompFormatMixed })
+
+	ryuID := helper.NewUUID4()
+	toraID := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(comp.ID, []domain.Player{
+		{ID: ryuID, Name: "Ryu", Dojo: "DojoR"},
+		{ID: toraID, Name: "Tora", Dojo: "DojoT"},
+	}))
+
+	// Authoritative id-keyed lineup for Ryu at round 0.
+	require.NoError(t, store.SetTeamLineup(comp.ID, domain.TeamLineup{
+		TeamID: ryuID, Round: 0,
+		Positions: map[domain.Position]string{
+			domain.PositionNumbered(1): "R-1",
+			domain.PositionNumbered(2): "R-2",
+			domain.PositionNumbered(3): "R-3",
+		},
+	}, 3))
+	// Legacy name-keyed lineup for the SAME team + round, different roster.
+	require.NoError(t, store.SetTeamLineup(comp.ID, domain.TeamLineup{
+		TeamID: "Ryu", Round: 0,
+		Positions: map[domain.Position]string{
+			domain.PositionNumbered(1): "X-1",
+			domain.PositionNumbered(2): "X-2",
+			domain.PositionNumbered(3): "X-3",
+		},
+	}, 3))
+
+	parent := &state.MatchResult{ID: "P1-0", SideA: "Ryu", SideB: "Tora"}
+	remainingA, _, ok := eng.kachinukiRemainingRoster(comp.ID, "P1-0", comp, parent, 0)
+	require.True(t, ok, "lineup roster must resolve")
+	assert.Equal(t, []string{"R-1", "R-2", "R-3"}, remainingA,
+		"the participant-id-keyed lineup must win the same-round tie over the legacy name-keyed one")
+}
+
 // TestMaybeAdvanceKachinuki_CompletedMatchNoOp: a match that is already
 // completed must never be advanced again. Corrections re-submit the
 // bout log of a finished match; without this guard the engine would

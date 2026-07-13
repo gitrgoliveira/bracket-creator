@@ -695,13 +695,20 @@ func (e *Engine) kachinukiRemainingRoster(compID, matchID string, comp *state.Co
 		}
 	}
 	teamKeys := func(teamName string) []string {
-		keys := []string{teamName}
+		// Participant ID FIRST, then the display name. The lineup editor's
+		// current storage key is the participant ID, so an id-keyed lineup
+		// must win a same-round tie over a legacy name-keyed one:
+		// FindBestLineupAny resolves same-tier ties by slice order. The name
+		// stays as a fallback for lineups saved under it (older data, or a
+		// team name that is not a participant id). Mirrors the id-first order
+		// in kachinuki_export.go's teamKeys.
+		var keys []string
 		for _, p := range participants {
 			if p.Name == teamName && p.ID != "" && p.ID != teamName {
 				keys = append(keys, p.ID)
 			}
 		}
-		return keys
+		return append(keys, teamName)
 	}
 
 	resolveRoster := func(teamName string, retired map[string]struct{}) ([]string, bool) {

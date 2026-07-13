@@ -2110,11 +2110,11 @@ paths:
             enum: [best]
           description: >
             When fallback=best the server resolves the best available lineup when none
-            exists for the exact round (match-scoped first, then the highest round at or
-            below the requested one, then the team's latest lineup) and only 404s when
-            the team has no lineups at all. Without this parameter the endpoint keeps
-            exact-round semantics (404 when that round has no lineup). PUT and DELETE are
-            unaffected.
+            exists for the exact round (the highest round at or below the requested one,
+            then the team's latest lineup) and only 404s when the team has no lineups at
+            all. This round-scoped endpoint has no matchId, so match-scoped lineups are
+            not consulted. Without this parameter the endpoint keeps exact-round semantics
+            (404 when that round has no lineup). PUT and DELETE are unaffected.
       responses:
         '200':
           description: Team lineup.

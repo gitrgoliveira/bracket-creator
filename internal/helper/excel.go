@@ -1163,14 +1163,6 @@ func bronzeEntrantFormulas(sheetName string, semiA, semiB int, matchWinners map[
 	return build(semiA), build(semiB)
 }
 
-// PrintThirdPlaceBlock renders a single "3rd Place" elimination-match block
-// (identical layout to a regular match block but with the fixed header label
-// "3rd Place") starting at startRow on the SheetEliminationMatches sheet.
-// courtStartCol is 1-based (use 1 for the first/only court). semiA and semiB
-// are the match numbers of the two semifinals whose losers compete in the bronze
-// (0 means absent/bye; that entrant cell is left empty). matchWinners is the map
-// returned by PrintTeamEliminationMatches so the loser-cell refs can be derived
-// from the "2." row of each semi's block. Returns the next available start row.
 // printTeamMatchBlock writes the numbered team sub-match rows and, when
 // numTeamMatches > 0, the IV/PW team summary rows. Shared by regular
 // elimination matches and the bronze (3rd place) block so the team layout has
@@ -1249,6 +1241,14 @@ func printOrdinalMarkerRows(f *excelize.File, sheetName string, colNames matchCo
 	return winnerRow
 }
 
+// PrintThirdPlaceBlock renders a single "3rd Place" elimination-match block
+// (identical layout to a regular match block but with the fixed header label
+// "3rd Place") starting at startRow on the SheetEliminationMatches sheet.
+// courtStartCol is 1-based (use 1 for the first/only court). semiA and semiB
+// are the match numbers of the two semifinals whose losers compete in the bronze
+// (0 means absent/bye; that entrant cell is left empty). matchWinners is the map
+// returned by PrintTeamEliminationMatches so the loser-cell refs can be derived
+// from the "2." row of each semi's block. Returns the next available start row.
 func PrintThirdPlaceBlock(f *excelize.File, courtStartCol, startRow, numTeamMatches int, mirror bool, engi bool, semiA, semiB int, matchWinners map[string]MatchWinner) int {
 	sheetName := SheetEliminationMatches
 	colNames := buildMatchColumnNames(courtStartCol)

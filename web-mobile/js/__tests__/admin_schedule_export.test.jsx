@@ -135,13 +135,11 @@ describe('buildXlsxBody courts guard', () => {
 
   it('uses courts=1 when cfg.courts is undefined', () => {
     const body = buildXlsxBody({ ...baseCfg }, 'Test', four);
-    expect(() => buildXlsxBody({ ...baseCfg }, 'Test', four)).not.toThrow();
     expect(body.get('courts')).toBe('1');
   });
 
   it('uses courts=1 when cfg.courts is a string (not an array)', () => {
     const body = buildXlsxBody({ ...baseCfg, courts: 'A' }, 'Test', four);
-    expect(() => buildXlsxBody({ ...baseCfg, courts: 'A' }, 'Test', four)).not.toThrow();
     expect(body.get('courts')).toBe('1');
   });
 

@@ -282,15 +282,8 @@ func TestCreateHandler_NaginataPlayoffs_ThirdPlaceBlock(t *testing.T) {
 	rows, err := f.GetRows("Elimination Matches")
 	require.NoError(t, err)
 
-	found := false
-	for _, row := range rows {
-		for _, cell := range row {
-			if cell == helper.ThirdPlaceLabel {
-				found = true
-			}
-		}
-	}
-	require.True(t, found, "naginata playoffs with 4 players must have a '3rd Place' block on Elimination Matches")
+	require.GreaterOrEqual(t, bctest.FindCellRow(rows, helper.ThirdPlaceLabel), 0,
+		"naginata playoffs with 4 players must have a '3rd Place' block on Elimination Matches")
 }
 
 // TestCreateHandler_NoNaginata_NoThirdPlaceBlock is the regression guard:
@@ -309,11 +302,8 @@ func TestCreateHandler_NoNaginata_NoThirdPlaceBlock(t *testing.T) {
 	rows, err := f.GetRows("Elimination Matches")
 	require.NoError(t, err)
 
-	for _, row := range rows {
-		for _, cell := range row {
-			require.NotEqual(t, helper.ThirdPlaceLabel, cell, "non-naginata playoffs must not have a '3rd Place' block")
-		}
-	}
+	require.Equal(t, -1, bctest.FindCellRow(rows, helper.ThirdPlaceLabel),
+		"non-naginata playoffs must not have a '3rd Place' block")
 }
 
 // TestCreateHandler_NaginataPlayoffs_ThirdPlaceBlock_EntrantFormulas verifies
@@ -330,18 +320,7 @@ func TestCreateHandler_NaginataPlayoffs_ThirdPlaceBlock_EntrantFormulas(t *testi
 	require.NoError(t, err)
 
 	// Locate the "3rd Place" header row (0-based index into rows).
-	thirdPlaceRowIdx := -1
-	for i, row := range rows {
-		for _, cell := range row {
-			if cell == helper.ThirdPlaceLabel {
-				thirdPlaceRowIdx = i
-				break
-			}
-		}
-		if thirdPlaceRowIdx >= 0 {
-			break
-		}
-	}
+	thirdPlaceRowIdx := bctest.FindCellRow(rows, helper.ThirdPlaceLabel)
 	require.GreaterOrEqual(t, thirdPlaceRowIdx, 0, "must find '3rd Place' header before checking formulas")
 
 	// Score row is header+2: 1-based Excel row = (0-based idx + 1) + 2.
@@ -384,18 +363,7 @@ func TestCreateHandler_NaginataPlayoffs_PrintAreaCoversThirdPlace(t *testing.T) 
 	rows, err := f.GetRows(helper.SheetEliminationMatches)
 	require.NoError(t, err)
 
-	thirdPlaceExcelRow := -1
-	for i, row := range rows {
-		for _, cell := range row {
-			if cell == helper.ThirdPlaceLabel {
-				thirdPlaceExcelRow = i + 1
-				break
-			}
-		}
-		if thirdPlaceExcelRow >= 0 {
-			break
-		}
-	}
+	thirdPlaceExcelRow := bctest.FindCellRow(rows, helper.ThirdPlaceLabel) + 1
 	require.GreaterOrEqual(t, thirdPlaceExcelRow, 1,
 		"'3rd Place' header must be present in Elimination Matches")
 

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -16,6 +15,7 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 )
 
 // makePlayer creates a domain.Player for tests.
@@ -2172,122 +2172,94 @@ func firstPoolMatchScoreRow(rows [][]string, bandStart int) []string {
 }
 
 // TestBuildResultsWorkbook_EngiPoolFlagScoreCells verifies that for an engi pool
-// match with FlagsA=3 and FlagsB=2, the Pool Matches sheet contains "3" and "2"
-// as literal flag counts, not ippon letters.
-// Previously broken because overlayPoolScores called IpponsScore(mr.IpponsA) which
-// returned "" (engi matches have no ippons).
+// match, the Pool Matches sheet renders the referee flag counts as literal numbers,
+// not ippon letters. Previously broken because overlayPoolScores called
+// IpponsScore(mr.IpponsA) which returned "" (engi matches have no ippons).
+// Both the 3-2 case and the 5-0 shutout are exercised: the loser's "0" must be
+// written explicitly to distinguish a clean shutout from a kiken/fusenpai.
 func TestBuildResultsWorkbook_EngiPoolFlagScoreCells(t *testing.T) {
 	t.Parallel()
-	dir, store, eng, compID := testSetup(t)
-	defer os.RemoveAll(dir)
 
-	comp, err := store.LoadCompetition(compID)
-	require.NoError(t, err)
-	comp.Engi = true
-	require.NoError(t, store.SaveCompetition(comp))
-
-	pools := makeEngiPools()
-	require.NoError(t, store.SavePools(compID, pools))
-
-	// Engi match: pair1 wins 3-2 on referee flags.
-	// SideAID/SideBID/WinnerID are required for computeEngiStandings so the
-	// standings overlay can also write the accumulated flag total.
-	results := []state.MatchResult{
+	cases := []struct {
+		name       string
+		flagsA     int
+		flagsB     int
+		wantLeft   string
+		wantRight  string
+		wantStands string // expected value in the Flags standings column
+	}{
 		{
-			ID:       "Pool A-0",
-			SideA:    "Member One A",
-			SideAID:  "pair1",
-			SideB:    "Member One B",
-			SideBID:  "pair2",
-			FlagsA:   3,
-			FlagsB:   2,
-			Decision: "fought",
-			Status:   state.MatchStatusCompleted,
-			Winner:   "Member One A",
-			WinnerID: "pair1",
+			name: "3-2", flagsA: 3, flagsB: 2,
+			wantLeft: "3", wantRight: "2", wantStands: "3",
+		},
+		{
+			// 5-0 shutout: the loser's "0" is a real score, distinguishing it from
+			// a kiken/fusenpai where no flags were recorded.
+			name: "5-0 shutout", flagsA: 5, flagsB: 0,
+			wantLeft: "5", wantRight: "0", wantStands: "5",
 		},
 	}
-	require.NoError(t, store.SavePoolMatches(compID, results))
 
-	data, err := BuildResultsWorkbook(store, eng, compID)
-	require.NoError(t, err)
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir, store, eng, compID := testSetup(t)
+			defer os.RemoveAll(dir)
 
-	f, err := excelize.OpenReader(bytes.NewReader(data))
-	require.NoError(t, err)
-	defer f.Close()
+			comp, err := store.LoadCompetition(compID)
+			require.NoError(t, err)
+			comp.Engi = true
+			require.NoError(t, store.SaveCompetition(comp))
 
-	rows, err := f.GetRows(helper.SheetPoolMatches)
-	require.NoError(t, err)
+			pools := makeEngiPools()
+			require.NoError(t, store.SavePools(compID, pools))
 
-	// Assert the MATCH ROW score cells specifically: left score (FlagsA) at
-	// bandStart+1 and right score (FlagsB) at bandStart+5 (vs is at bandStart+3).
-	// Using containsCell alone would be satisfied by the standings overlay alone.
-	matchRow := firstPoolMatchScoreRow(rows, 0)
-	require.NotNil(t, matchRow, "match score row must exist (Red/White header must be present)")
-	require.Greater(t, len(matchRow), 5, "match score row must have at least 6 columns")
-	assert.Equal(t, "3", matchRow[1],
-		"left score cell (2 before vs at col 3) must be '3' (FlagsA=3)")
-	assert.Equal(t, "2", matchRow[5],
-		"right score cell (2 after vs at col 3) must be '2' (FlagsB=2)")
+			// SideAID/SideBID/WinnerID are required for computeEngiStandings so the
+			// standings overlay can also write the accumulated flag total.
+			results := []state.MatchResult{
+				{
+					ID:       "Pool A-0",
+					SideA:    "Member One A",
+					SideAID:  "pair1",
+					SideB:    "Member One B",
+					SideBID:  "pair2",
+					FlagsA:   tc.flagsA,
+					FlagsB:   tc.flagsB,
+					Decision: "fought",
+					Status:   state.MatchStatusCompleted,
+					Winner:   "Member One A",
+					WinnerID: "pair1",
+				},
+			}
+			require.NoError(t, store.SavePoolMatches(compID, results))
 
-	// The winner's accumulated flag total also appears in the standings column (separate concern).
-	assert.True(t, columnHasValueUnderHeader(rows, helper.ColHeaderFlags, "3"),
-		"Pool Matches 'Flags' standings column must carry '3' for the engi winner")
-}
+			data, err := BuildResultsWorkbook(store, eng, compID)
+			require.NoError(t, err)
 
-// TestBuildResultsWorkbook_EngiPoolFlagScoreCells_FiveZero verifies the pairwise
-// rule: when one side has a positive flag count and the other has zero, BOTH cells
-// must be written (the loser's "0" is a real score, distinguishing a 5-0 flag win
-// from a kiken/fusenpai where no flags were recorded). Regression for the
-// Copilot review finding on PR #351: the old per-side formatting (blank for 0) was masking the loser's score.
-func TestBuildResultsWorkbook_EngiPoolFlagScoreCells_FiveZero(t *testing.T) {
-	t.Parallel()
-	dir, store, eng, compID := testSetup(t)
-	defer os.RemoveAll(dir)
+			f, err := excelize.OpenReader(bytes.NewReader(data))
+			require.NoError(t, err)
+			defer f.Close()
 
-	comp, err := store.LoadCompetition(compID)
-	require.NoError(t, err)
-	comp.Engi = true
-	require.NoError(t, store.SaveCompetition(comp))
+			rows, err := f.GetRows(helper.SheetPoolMatches)
+			require.NoError(t, err)
 
-	pools := makeEngiPools()
-	require.NoError(t, store.SavePools(compID, pools))
+			// Assert the MATCH ROW score cells specifically: left score (FlagsA) at
+			// bandStart+1 and right score (FlagsB) at bandStart+5 (vs is at bandStart+3).
+			// Using containsCell alone would be satisfied by the standings overlay alone.
+			matchRow := firstPoolMatchScoreRow(rows, 0)
+			require.NotNil(t, matchRow, "match score row must exist (Red/White header must be present)")
+			require.Greater(t, len(matchRow), 5, "match score row must have at least 6 columns")
+			assert.Equal(t, tc.wantLeft, matchRow[1],
+				"left score cell (2 before vs at col 3) must be %q", tc.wantLeft)
+			assert.Equal(t, tc.wantRight, matchRow[5],
+				"right score cell (2 after vs at col 3) must be %q", tc.wantRight)
 
-	// Engi match: pair1 wins 5-0 on referee flags; loser has zero flags (a real score).
-	results := []state.MatchResult{
-		{
-			ID:       "Pool A-0",
-			SideA:    "Member One A",
-			SideAID:  "pair1",
-			SideB:    "Member One B",
-			SideBID:  "pair2",
-			FlagsA:   5,
-			FlagsB:   0,
-			Decision: "fought",
-			Status:   state.MatchStatusCompleted,
-			Winner:   "Member One A",
-			WinnerID: "pair1",
-		},
+			// The winner's accumulated flag total also appears in the standings column.
+			assert.True(t, columnHasValueUnderHeader(rows, helper.ColHeaderFlags, tc.wantStands),
+				"Pool Matches 'Flags' standings column must carry %q for the engi winner", tc.wantStands)
+		})
 	}
-	require.NoError(t, store.SavePoolMatches(compID, results))
-
-	data, err := BuildResultsWorkbook(store, eng, compID)
-	require.NoError(t, err)
-
-	f, err := excelize.OpenReader(bytes.NewReader(data))
-	require.NoError(t, err)
-	defer f.Close()
-
-	rows, err := f.GetRows(helper.SheetPoolMatches)
-	require.NoError(t, err)
-
-	matchRow := firstPoolMatchScoreRow(rows, 0)
-	require.NotNil(t, matchRow, "match score row must exist")
-	require.Greater(t, len(matchRow), 5, "match score row must have at least 6 columns")
-	assert.Equal(t, "5", matchRow[1],
-		"left score cell must be '5' (FlagsA=5)")
-	assert.Equal(t, "0", matchRow[5],
-		"right score cell must be '0' (FlagsB=0, real score in a 5-0 bout)")
 }
 
 // TestBuildResultsWorkbook_EngiNonEngiPoolScoreUnchanged verifies that a non-engi
@@ -2378,16 +2350,22 @@ func TestBuildResultsWorkbook_EngiBracketFlagScoreCells(t *testing.T) {
 	cases := []struct {
 		name              string
 		mirror            bool
+		flagsA            int
+		flagsB            int
+		scoreA            string
+		scoreB            string
 		wantLeft          string
 		wantRight         string
 		forbiddenIpponVal string
 	}{
 		// Default (non-mirror): left column (Red/SideA) carries FlagsA=3, right
 		// column (White/SideB) carries FlagsB=2.
-		{name: "default", mirror: false, wantLeft: "3", wantRight: "2", forbiddenIpponVal: "MK"},
+		{name: "default", mirror: false, flagsA: 3, flagsB: 2, scoreA: "MK", scoreB: "M", wantLeft: "3", wantRight: "2", forbiddenIpponVal: "MK"},
 		// Mirror: the two victory columns are swapped, so left carries FlagsB=2
 		// and right carries FlagsA=3.
-		{name: "mirror", mirror: true, wantLeft: "2", wantRight: "3", forbiddenIpponVal: "MK"},
+		{name: "mirror", mirror: true, flagsA: 3, flagsB: 2, scoreA: "MK", scoreB: "M", wantLeft: "2", wantRight: "3", forbiddenIpponVal: "MK"},
+		// 5-0 shutout: the loser's cell must be "0", not blank (pairwise write rule).
+		{name: "5-0 shutout", mirror: false, flagsA: 5, flagsB: 0, scoreA: "MK", scoreB: "", wantLeft: "5", wantRight: "0", forbiddenIpponVal: "MK"},
 	}
 
 	for _, tc := range cases {
@@ -2409,9 +2387,9 @@ func TestBuildResultsWorkbook_EngiBracketFlagScoreCells(t *testing.T) {
 			require.NoError(t, store.SavePools(compID, pools))
 			require.NoError(t, store.SavePoolMatches(compID, nil))
 
-			// Engi bracket match: pair1 beats pair2 on referee flags 3-2. ScoreA/
-			// ScoreB carry ippon letters that MUST NOT render for engi; if the engi
-			// branch is skipped, "MK" would leak into the left victory cell.
+			// Engi bracket match: pair1 beats pair2 on referee flags. ScoreA/ScoreB
+			// carry ippon letters that MUST NOT render for engi; if the engi branch
+			// is skipped, the ippon value would leak into the left victory cell.
 			bracket := &state.Bracket{
 				Rounds: [][]state.BracketMatch{
 					{
@@ -2421,10 +2399,10 @@ func TestBuildResultsWorkbook_EngiBracketFlagScoreCells(t *testing.T) {
 							SideB:       "Member One B",
 							Winner:      "Member One A",
 							Status:      state.MatchStatusCompleted,
-							FlagsA:      3,
-							FlagsB:      2,
-							ScoreA:      "MK",
-							ScoreB:      "M",
+							FlagsA:      tc.flagsA,
+							FlagsB:      tc.flagsB,
+							ScoreA:      tc.scoreA,
+							ScoreB:      tc.scoreB,
 							Decision:    "fought",
 							MatchNumber: 1,
 						},
@@ -2455,64 +2433,6 @@ func TestBuildResultsWorkbook_EngiBracketFlagScoreCells(t *testing.T) {
 				"elimination sheet must NOT contain ippon letters (%q) for an engi bracket", tc.forbiddenIpponVal)
 		})
 	}
-}
-
-// TestBuildResultsWorkbook_EngiBracketFlagScoreCells_FiveZero verifies the
-// pairwise rule for elimination brackets: when FlagsA=5 and FlagsB=0, the loser's
-// cell must contain "0" (not be blank). Regression for PR #351 Copilot finding.
-func TestBuildResultsWorkbook_EngiBracketFlagScoreCells_FiveZero(t *testing.T) {
-	t.Parallel()
-	dir, store, eng, compID := testSetup(t)
-	defer os.RemoveAll(dir)
-
-	comp, err := store.LoadCompetition(compID)
-	require.NoError(t, err)
-	comp.Format = state.CompFormatMixed
-	comp.Engi = true
-	comp.Mirror = false
-	require.NoError(t, store.SaveCompetition(comp))
-
-	pools := makeEngiPools()
-	require.NoError(t, store.SavePools(compID, pools))
-	require.NoError(t, store.SavePoolMatches(compID, nil))
-
-	// Engi bracket match: pair1 wins 5-0 on referee flags.
-	bracket := &state.Bracket{
-		Rounds: [][]state.BracketMatch{
-			{
-				{
-					ID:          "B1",
-					SideA:       "Member One A",
-					SideB:       "Member One B",
-					Winner:      "Member One A",
-					Status:      state.MatchStatusCompleted,
-					FlagsA:      5,
-					FlagsB:      0,
-					ScoreA:      "MK",
-					ScoreB:      "",
-					Decision:    "fought",
-					MatchNumber: 1,
-				},
-			},
-		},
-	}
-	require.NoError(t, store.SaveBracket(compID, bracket))
-
-	data, err := BuildResultsWorkbook(store, eng, compID)
-	require.NoError(t, err)
-
-	f, err := excelize.OpenReader(bytes.NewReader(data))
-	require.NoError(t, err)
-	defer f.Close()
-
-	rows, err := f.GetRows(helper.SheetEliminationMatches)
-	require.NoError(t, err)
-
-	left, right := bracketVictoryCells(t, rows, "Round 1 - Match 1")
-	assert.Equal(t, "5", left,
-		"left victory cell must be '5' (FlagsA=5)")
-	assert.Equal(t, "0", right,
-		"right victory cell must be '0' (FlagsB=0, real score in a 5-0 bout, not blank)")
 }
 
 // ------------------------------------------------------------
@@ -3027,18 +2947,7 @@ func TestBuildResultsWorkbook_NaginataThirdPlaceRendered(t *testing.T) {
 	// The "3rd Place" header row is at thirdPlaceRow (0-based); the score row is
 	// at thirdPlaceRow+2. Court 1 name cells: left=col A (0-based index 0),
 	// right=col G (0-based index 6).
-	bronzeThirdPlaceRow := -1
-	for i, row := range rows {
-		for _, cell := range row {
-			if cell == helper.ThirdPlaceLabel {
-				bronzeThirdPlaceRow = i
-				break
-			}
-		}
-		if bronzeThirdPlaceRow >= 0 {
-			break
-		}
-	}
+	bronzeThirdPlaceRow := findCellRow(rows, helper.ThirdPlaceLabel)
 	require.GreaterOrEqual(t, bronzeThirdPlaceRow, 0, "'3rd Place' header must be found in rows")
 	bronzeScoreRowIdx := bronzeThirdPlaceRow + 2
 	require.Less(t, bronzeScoreRowIdx, len(rows), "bronze score row must exist")
@@ -3101,18 +3010,7 @@ func TestBuildResultsWorkbook_NaginataThirdPlaceNamesBeforeBronze(t *testing.T) 
 	require.NoError(t, err)
 
 	// Find "3rd Place" header row.
-	thirdPlaceRow := -1
-	for i, row := range rows {
-		for _, cell := range row {
-			if cell == helper.ThirdPlaceLabel {
-				thirdPlaceRow = i
-				break
-			}
-		}
-		if thirdPlaceRow >= 0 {
-			break
-		}
-	}
+	thirdPlaceRow := findCellRow(rows, helper.ThirdPlaceLabel)
 	require.GreaterOrEqual(t, thirdPlaceRow, 0, "'3rd Place' header must appear even before bronze is played")
 
 	scoreRowIdx := thirdPlaceRow + 2
@@ -3188,18 +3086,7 @@ func TestBuildResultsWorkbook_EngiNaginataThirdPlaceFlags(t *testing.T) {
 		"Elimination Matches sheet must have a '3rd Place' header for engi naginata")
 
 	// Find the "3rd Place" row and verify the score row (header+2) carries "5".
-	thirdPlaceRow := -1
-	for i, row := range rows {
-		for _, cell := range row {
-			if cell == helper.ThirdPlaceLabel {
-				thirdPlaceRow = i
-				break
-			}
-		}
-		if thirdPlaceRow >= 0 {
-			break
-		}
-	}
+	thirdPlaceRow := findCellRow(rows, helper.ThirdPlaceLabel)
 	require.GreaterOrEqual(t, thirdPlaceRow, 0, "'3rd Place' header row must be found")
 	scoreRowIdx := thirdPlaceRow + 2
 	require.Less(t, scoreRowIdx, len(rows), "bronze score row (header+2) must exist")
@@ -3294,18 +3181,7 @@ func TestBuildResultsWorkbook_NaginataThirdPlaceEntrantFormulas(t *testing.T) {
 	require.NoError(t, err)
 
 	// Locate the "3rd Place" header row (0-based index).
-	thirdPlaceRowIdx := -1
-	for i, row := range rows {
-		for _, cell := range row {
-			if cell == helper.ThirdPlaceLabel {
-				thirdPlaceRowIdx = i
-				break
-			}
-		}
-		if thirdPlaceRowIdx >= 0 {
-			break
-		}
-	}
+	thirdPlaceRowIdx := findCellRow(rows, helper.ThirdPlaceLabel)
 	require.GreaterOrEqual(t, thirdPlaceRowIdx, 0, "'3rd Place' header must be present")
 
 	// Score row: 1-based Excel row = (0-based idx + 1) + 2.
@@ -3419,18 +3295,17 @@ func TestBuildResultsWorkbook_MixedTreePageHasPoolRosters(t *testing.T) {
 		"'Tree 1' title formula must not embed the competition name (data!$B$1 already prepends it)")
 }
 
-// parsePrintAreaLastRow extracts the last-row number from a Print_Area RefersTo
-// string such as "'Elimination Matches'!$A$1:$H$35". Returns -1 on any parse error.
-func parsePrintAreaLastRow(refersTo string) int {
-	lastDollar := strings.LastIndex(refersTo, "$")
-	if lastDollar < 0 {
-		return -1
+// findCellRow returns the 0-based index of the first row containing a cell
+// equal to val, or -1 when absent.
+func findCellRow(rows [][]string, val string) int {
+	for i, row := range rows {
+		for _, cell := range row {
+			if cell == val {
+				return i
+			}
+		}
 	}
-	row, err := strconv.Atoi(refersTo[lastDollar+1:])
-	if err != nil {
-		return -1
-	}
-	return row
+	return -1
 }
 
 // findEliminationPrintAreaLastRow reads the workbook's defined names and returns
@@ -3439,7 +3314,7 @@ func parsePrintAreaLastRow(refersTo string) int {
 func findEliminationPrintAreaLastRow(f *excelize.File) int {
 	for _, dn := range f.GetDefinedName() {
 		if dn.Name == "_xlnm.Print_Area" && dn.Scope == helper.SheetEliminationMatches {
-			return parsePrintAreaLastRow(dn.RefersTo)
+			return bctest.ParsePrintAreaLastRow(dn.RefersTo)
 		}
 	}
 	return -1
@@ -3470,18 +3345,7 @@ func TestBuildResultsWorkbook_NaginataThirdPlacePrintAreaCoversBlock(t *testing.
 	require.NoError(t, err)
 
 	// Locate the "3rd Place" header row (1-based Excel row).
-	thirdPlaceExcelRow := -1
-	for i, row := range rows {
-		for _, cell := range row {
-			if cell == helper.ThirdPlaceLabel {
-				thirdPlaceExcelRow = i + 1
-				break
-			}
-		}
-		if thirdPlaceExcelRow >= 0 {
-			break
-		}
-	}
+	thirdPlaceExcelRow := findCellRow(rows, helper.ThirdPlaceLabel) + 1
 	require.GreaterOrEqual(t, thirdPlaceExcelRow, 1,
 		"'3rd Place' header row must be present in Elimination Matches")
 
@@ -3533,10 +3397,12 @@ func TestBuildResultsWorkbook_PlayoffsTreePageNoPoolRosters(t *testing.T) {
 
 // TestBuildResultsWorkbook_EngiPairLabelsInBracketEntrants verifies that engi
 // bracket entrant name cells render the full pair as "Member1 - Member2".
-// The stored bracket sides hold only member 1's name, so the overlay must
-// resolve member 2 (DisplayName) via the roster. Covers both the playoffs
-// entrant overwrite (overlayPlayoffBracketNames) and the 3rd Place block
-// entrant writes (overlayBracketScores).
+// Under the combined-name model the bracket match SideA/SideB fields hold the
+// full "Pair1A - Pair1B" string (both members are joined in Player.Name at
+// registration). overlayPlayoffBracketNames writes these directly into the
+// entrant cells; no DisplayName or roster lookup occurs. Covers both the
+// playoffs entrant overwrite (overlayPlayoffBracketNames) and the 3rd Place
+// block entrant writes (overlayBracketScores).
 func TestBuildResultsWorkbook_EngiPairLabelsInBracketEntrants(t *testing.T) {
 	t.Parallel()
 	dir, store, eng, compID := testSetup(t)

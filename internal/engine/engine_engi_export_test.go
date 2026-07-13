@@ -22,7 +22,6 @@ package engine
 
 import (
 	"bytes"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -31,6 +30,7 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -105,21 +105,6 @@ func hasCellValue(rows [][]string, val string) bool {
 	return findCellRow(rows, val) >= 0
 }
 
-// engineParsePrintAreaLastRow extracts the last-row number from a Print_Area
-// RefersTo string such as "'Elimination Matches'!$A$1:$H$35". Returns -1 on
-// any parse error.
-func engineParsePrintAreaLastRow(refersTo string) int {
-	lastDollar := strings.LastIndex(refersTo, "$")
-	if lastDollar < 0 {
-		return -1
-	}
-	row, err := strconv.Atoi(refersTo[lastDollar+1:])
-	if err != nil {
-		return -1
-	}
-	return row
-}
-
 // TestExportCompetitionXlsx_NaginataThirdPlacePrintAreaAndLayout verifies that
 // the blank-template export path (Engine.ExportCompetitionXlsx) sets the
 // _xlnm.Print_Area defined name for the Elimination Matches sheet to cover the
@@ -174,7 +159,7 @@ func TestExportCompetitionXlsx_NaginataThirdPlacePrintAreaAndLayout(t *testing.T
 	printAreaLastRow := -1
 	for _, dn := range f.GetDefinedName() {
 		if dn.Name == "_xlnm.Print_Area" && dn.Scope == helper.SheetEliminationMatches {
-			printAreaLastRow = engineParsePrintAreaLastRow(dn.RefersTo)
+			printAreaLastRow = bctest.ParsePrintAreaLastRow(dn.RefersTo)
 			break
 		}
 	}

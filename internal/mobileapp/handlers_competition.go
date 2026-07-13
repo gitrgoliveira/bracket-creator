@@ -1194,7 +1194,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				trueP := true
 				loadOpts.HasIDs = &trueP
 			}
-			if players, lerr := store.LoadParticipantsOpt(id, updated.WithZekkenName, loadOpts); lerr == nil {
+			if players, lerr := store.LoadParticipantsOpt(id, updated.EffectiveWithZekkenName(), loadOpts); lerr == nil {
 				updated.Players = players
 			} else {
 				fmt.Printf("Warning: PUT /api/competitions/%s, failed to re-load participants for roster-PUT response (falling back to request body): %v\n", id, lerr)
@@ -1205,7 +1205,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// response so the merge doesn't push null into local state.
 			// Falling back to an empty slice on load failure is safer
 			// than nil (which JSON-encodes as null).
-			if players, lerr := store.LoadParticipants(id, updated.WithZekkenName); lerr == nil {
+			if players, lerr := store.LoadParticipants(id, updated.EffectiveWithZekkenName()); lerr == nil {
 				updated.Players = players
 			} else {
 				fmt.Printf("Warning: failed to load participants for settings-PUT response: %v\n", lerr)

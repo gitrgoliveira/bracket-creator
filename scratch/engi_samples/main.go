@@ -89,7 +89,7 @@ func engiComp(id, format string, poolSize, poolWinners int, courts []string) *st
 		StartTime:    "09:00",
 		Status:       "setup",
 		Engi:         true,
-		Naginata:     true, // enables the single 3rd-place playoff on the bracket
+		Naginata:     true, // enables the 3rd-place playoff for bracket formats; ignored for league (no bracket)
 	}
 }
 

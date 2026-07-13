@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -16,6 +15,7 @@ import (
 	"github.com/xuri/excelize/v2"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 )
 
 // postCreate drives createTournamentHandler exactly as cmd/mobile_app.go wires
@@ -71,13 +71,7 @@ func TestCreateHandler_LeagueWLAreCountingFormulas(t *testing.T) {
 	rows, err := f.GetRows("Pool Matches")
 	require.NoError(t, err)
 
-	resultsRow := -1
-	for i, row := range rows {
-		if len(row) > 0 && row[0] == "Results" {
-			resultsRow = i + 1 // 1-based
-			break
-		}
-	}
+	resultsRow := findResultsRow(rows)
 	require.Positive(t, resultsRow, "Results block not found on Pool Matches sheet")
 
 	sawCountingFormula := false
@@ -213,13 +207,7 @@ func TestCreateHandler_EngiPools_FlagsHeader(t *testing.T) {
 	require.NoError(t, err)
 
 	// Locate the Results header row; it carries W / L / Flags / Rank.
-	resultsRow := -1
-	for i, row := range rows {
-		if len(row) > 0 && row[0] == "Results" {
-			resultsRow = i + 1 // 1-based
-			break
-		}
-	}
+	resultsRow := findResultsRow(rows)
 	require.Positive(t, resultsRow, "Results block not found on Pool Matches sheet")
 
 	// The Results header row must contain "Flags" and must NOT contain "L", "PW", or "PL".
@@ -257,13 +245,7 @@ func TestCreateHandler_NoEngi_PWHeaderPresent(t *testing.T) {
 	rows, err := f.GetRows("Pool Matches")
 	require.NoError(t, err)
 
-	resultsRow := -1
-	for i, row := range rows {
-		if len(row) > 0 && row[0] == "Results" {
-			resultsRow = i + 1
-			break
-		}
-	}
+	resultsRow := findResultsRow(rows)
 	require.Positive(t, resultsRow, "Results block not found on Pool Matches sheet")
 
 	hRow := rows[resultsRow-1]
@@ -303,7 +285,7 @@ func TestCreateHandler_NaginataPlayoffs_ThirdPlaceBlock(t *testing.T) {
 	found := false
 	for _, row := range rows {
 		for _, cell := range row {
-			if cell == "3rd Place" {
+			if cell == helper.ThirdPlaceLabel {
 				found = true
 			}
 		}
@@ -329,7 +311,7 @@ func TestCreateHandler_NoNaginata_NoThirdPlaceBlock(t *testing.T) {
 
 	for _, row := range rows {
 		for _, cell := range row {
-			require.NotEqual(t, "3rd Place", cell, "non-naginata playoffs must not have a '3rd Place' block")
+			require.NotEqual(t, helper.ThirdPlaceLabel, cell, "non-naginata playoffs must not have a '3rd Place' block")
 		}
 	}
 }
@@ -351,7 +333,7 @@ func TestCreateHandler_NaginataPlayoffs_ThirdPlaceBlock_EntrantFormulas(t *testi
 	thirdPlaceRowIdx := -1
 	for i, row := range rows {
 		for _, cell := range row {
-			if cell == "3rd Place" {
+			if cell == helper.ThirdPlaceLabel {
 				thirdPlaceRowIdx = i
 				break
 			}
@@ -380,19 +362,15 @@ func TestCreateHandler_NaginataPlayoffs_ThirdPlaceBlock_EntrantFormulas(t *testi
 	assert.Contains(t, combined, "M 2", "bronze entrant formulas must reference semifinal M 2")
 }
 
-// cmdParsePrintAreaLastRow extracts the last-row number from a Print_Area
-// RefersTo string such as "'Elimination Matches'!$A$1:$H$35". Returns -1 on
-// any parse error.
-func cmdParsePrintAreaLastRow(refersTo string) int {
-	lastDollar := strings.LastIndex(refersTo, "$")
-	if lastDollar < 0 {
-		return -1
+// findResultsRow returns the 1-based Excel row index of the first row whose
+// first cell equals "Results", or -1 when absent.
+func findResultsRow(rows [][]string) int {
+	for i, row := range rows {
+		if len(row) > 0 && row[0] == "Results" {
+			return i + 1 // 1-based
+		}
 	}
-	row, err := strconv.Atoi(refersTo[lastDollar+1:])
-	if err != nil {
-		return -1
-	}
-	return row
+	return -1
 }
 
 // TestCreateHandler_NaginataPlayoffs_PrintAreaCoversThirdPlace verifies that the
@@ -409,7 +387,7 @@ func TestCreateHandler_NaginataPlayoffs_PrintAreaCoversThirdPlace(t *testing.T) 
 	thirdPlaceExcelRow := -1
 	for i, row := range rows {
 		for _, cell := range row {
-			if cell == "3rd Place" {
+			if cell == helper.ThirdPlaceLabel {
 				thirdPlaceExcelRow = i + 1
 				break
 			}
@@ -424,7 +402,7 @@ func TestCreateHandler_NaginataPlayoffs_PrintAreaCoversThirdPlace(t *testing.T) 
 	var printAreaLastRow int
 	for _, dn := range f.GetDefinedName() {
 		if dn.Name == "_xlnm.Print_Area" && dn.Scope == helper.SheetEliminationMatches {
-			printAreaLastRow = cmdParsePrintAreaLastRow(dn.RefersTo)
+			printAreaLastRow = bctest.ParsePrintAreaLastRow(dn.RefersTo)
 			break
 		}
 	}

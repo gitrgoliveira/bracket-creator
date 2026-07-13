@@ -136,7 +136,7 @@ func RegisterPublicRegistrationHandlers(r *gin.RouterGroup, store *state.Store, 
 			Source:      "registered",
 		}
 
-		addedPlayer, err := store.AddParticipant(id, player, comp.WithZekkenName)
+		addedPlayer, err := store.AddParticipant(id, player, comp.EffectiveWithZekkenName())
 		if err != nil {
 			if errors.Is(err, state.ErrDuplicateName) {
 				c.JSON(http.StatusConflict, gin.H{"error": "A participant with this name is already registered. If this is you, no action needed. If not, try including your dojo name."})

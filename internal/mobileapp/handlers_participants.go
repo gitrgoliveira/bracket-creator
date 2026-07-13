@@ -25,7 +25,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		players, err := store.LoadParticipants(id, comp.WithZekkenName)
+		players, err := store.LoadParticipants(id, comp.EffectiveWithZekkenName())
 		if err != nil {
 			internalError(c, err)
 			return
@@ -133,7 +133,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				Source:      source,
 			}
 
-			addedPlayer, err := store.AddParticipant(id, player, comp.WithZekkenName)
+			addedPlayer, err := store.AddParticipant(id, player, comp.EffectiveWithZekkenName())
 			if err != nil {
 				if errors.Is(err, state.ErrDuplicateName) {
 					c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
@@ -204,7 +204,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// players that survive the edit (matched by normalizedName+normalizedDojo).
 		// A full roster replacement via this endpoint must not silently clear
 		// check-ins that were already recorded.
-		existing, err := store.LoadParticipants(id, comp.WithZekkenName)
+		existing, err := store.LoadParticipants(id, comp.EffectiveWithZekkenName())
 		if err != nil {
 			internalError(c, err, "failed to load participants")
 			return
@@ -262,7 +262,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// SaveParticipants mints UUID IDs when p.ID is empty, so the request-
 		// derived `players` slice lacks the persisted IDs and would force
 		// clients to round-trip GET /participants to learn them.
-		saved, err := store.LoadParticipants(id, comp.WithZekkenName)
+		saved, err := store.LoadParticipants(id, comp.EffectiveWithZekkenName())
 		if err != nil {
 			internalError(c, err, "failed to reload participants")
 			return
@@ -368,7 +368,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				return err
 			}
 
-			p, err := tx.UpdateParticipant(id, pid, comp.WithZekkenName, func(p *domain.Player) error {
+			p, err := tx.UpdateParticipant(id, pid, comp.EffectiveWithZekkenName(), func(p *domain.Player) error {
 				// Capture old values before mutation for draw cascade.
 				// The transform callback receives the pre-mutation player,
 				// so this avoids a separate LoadParticipants scan.
@@ -531,7 +531,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		updatedPlayer, err := store.UpdateParticipant(id, pid, comp.WithZekkenName, func(p *domain.Player) error {
+		updatedPlayer, err := store.UpdateParticipant(id, pid, comp.EffectiveWithZekkenName(), func(p *domain.Player) error {
 			p.CheckedIn = true
 			return nil
 		})
@@ -606,7 +606,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		updatedPlayer, err := store.UpdateParticipant(id, pid, comp.WithZekkenName, func(p *domain.Player) error {
+		updatedPlayer, err := store.UpdateParticipant(id, pid, comp.EffectiveWithZekkenName(), func(p *domain.Player) error {
 			p.CheckedIn = false
 			return nil
 		})

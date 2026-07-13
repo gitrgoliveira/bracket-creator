@@ -1,8 +1,25 @@
 package test
 
 import (
+	"strconv"
+	"strings"
+
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 )
+
+// ParsePrintAreaLastRow extracts the last-row number from a Print_Area RefersTo
+// string such as "'Elimination Matches'!$A$1:$H$35". Returns -1 on any parse error.
+func ParsePrintAreaLastRow(refersTo string) int {
+	lastDollar := strings.LastIndex(refersTo, "$")
+	if lastDollar < 0 {
+		return -1
+	}
+	row, err := strconv.Atoi(refersTo[lastDollar+1:])
+	if err != nil {
+		return -1
+	}
+	return row
+}
 
 // CreateTestPlayers returns a slice of players for testing
 func CreateTestPlayers() []domain.Player {

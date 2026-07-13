@@ -320,6 +320,26 @@ func TestEngiPoolScoringFormulas(t *testing.T) {
 		},
 	}
 
+	// assertNoLossCells verifies that C7 (Alice L) and C8 (Bob L) are completely
+	// empty for engi: losses are not recorded, so the L column must hold neither a
+	// formula nor a value.
+	assertNoLossCells := func(t *testing.T, f *excelize.File) {
+		t.Helper()
+		aliceLFormula, err := f.GetCellFormula(SheetPoolMatches, "C7")
+		require.NoError(t, err, "GetCellFormula C7")
+		assert.Equal(t, "", aliceLFormula, "engi Alice L cell C7 must have no formula")
+		aliceLValue, err := f.GetCellValue(SheetPoolMatches, "C7")
+		require.NoError(t, err, "GetCellValue C7")
+		assert.Equal(t, "", aliceLValue, "engi Alice L cell C7 must have no value")
+
+		bobLFormula, err := f.GetCellFormula(SheetPoolMatches, "C8")
+		require.NoError(t, err, "GetCellFormula C8")
+		assert.Equal(t, "", bobLFormula, "engi Bob L cell C8 must have no formula")
+		bobLValue, err := f.GetCellValue(SheetPoolMatches, "C8")
+		require.NoError(t, err, "GetCellValue C8")
+		assert.Equal(t, "", bobLValue, "engi Bob L cell C8 must have no value")
+	}
+
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			f := scoringSetup2Players(t, 0, true)
@@ -332,19 +352,7 @@ func TestEngiPoolScoringFormulas(t *testing.T) {
 			assert.Equal(t, c.bob.flags, calcScore(t, f, "D8"), "Bob Flags")
 
 			// L column (C) must be empty for engi: losses are not recorded.
-			aliceLFormula, err := f.GetCellFormula(SheetPoolMatches, "C7")
-			require.NoError(t, err, "GetCellFormula C7")
-			assert.Equal(t, "", aliceLFormula, "engi Alice L cell C7 must have no formula")
-			aliceLValue, err := f.GetCellValue(SheetPoolMatches, "C7")
-			require.NoError(t, err, "GetCellValue C7")
-			assert.Equal(t, "", aliceLValue, "engi Alice L cell C7 must have no value")
-
-			bobLFormula, err := f.GetCellFormula(SheetPoolMatches, "C8")
-			require.NoError(t, err, "GetCellFormula C8")
-			assert.Equal(t, "", bobLFormula, "engi Bob L cell C8 must have no formula")
-			bobLValue, err := f.GetCellValue(SheetPoolMatches, "C8")
-			require.NoError(t, err, "GetCellValue C8")
-			assert.Equal(t, "", bobLValue, "engi Bob L cell C8 must have no value")
+			assertNoLossCells(t, f)
 		})
 	}
 }

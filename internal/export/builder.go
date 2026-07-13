@@ -1103,10 +1103,16 @@ func overlayTeamBracketScores(f *excelize.File, bracketByNum map[int]state.Brack
 }
 
 // writeThirdPlaceEntrants writes the bronze-match entrant names into the name
-// cells (court start column and start+6) on entrantRow. Names are written
-// unconditionally so they appear even before the bronze bout is played; the
-// return value reports whether the match is completed so the caller can skip
-// the score overlay for an unplayed match.
+// cells (court start column and start+6) on entrantRow. A side is written
+// whenever the app knows it (non-empty), even before the bronze bout is
+// played, because the app's semifinal loser is authoritative (it accounts for
+// kiken/decision outcomes the sheet formulas cannot derive); this matches the
+// literal-name snapshot semantics overlayPlayoffBracketNames applies to every
+// other match. An EMPTY side is skipped so the cell keeps the self-populating
+// CONCATENATE formula written by PrintThirdPlaceBlock (pinned by the
+// no-scoring-yet formulas test in builder_test.go). The return value reports
+// whether the match is completed so the caller can skip the score overlay for
+// an unplayed match.
 func writeThirdPlaceEntrants(f *excelize.File, sheetName string, bm state.BracketMatch, courtStartCol, entrantRow int, mirror bool) bool {
 	leftNameCol := colNum(courtStartCol)
 	rightNameCol := colNum(courtStartCol + 6)

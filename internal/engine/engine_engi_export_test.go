@@ -87,22 +87,9 @@ func TestExportCompetitionXlsx_NaginataThirdPlaceSlot(t *testing.T) {
 		"blank-template export for a naginata competition must have a '3rd Place' slot on the Elimination Matches sheet")
 }
 
-// findCellRow returns the 0-based index of the first row containing a cell
-// equal to val, or -1 when absent.
-func findCellRow(rows [][]string, val string) int {
-	for i, row := range rows {
-		for _, cell := range row {
-			if cell == val {
-				return i
-			}
-		}
-	}
-	return -1
-}
-
 // hasCellValue reports whether any cell in rows equals val.
 func hasCellValue(rows [][]string, val string) bool {
-	return findCellRow(rows, val) >= 0
+	return bctest.FindCellRow(rows, val) >= 0
 }
 
 // TestExportCompetitionXlsx_NaginataThirdPlacePrintAreaAndLayout verifies that
@@ -151,7 +138,7 @@ func TestExportCompetitionXlsx_NaginataThirdPlacePrintAreaAndLayout(t *testing.T
 	// Find the "3rd Place" row (1-based Excel row).
 	rows, err := f.GetRows(helper.SheetEliminationMatches)
 	require.NoError(t, err)
-	thirdPlaceExcelRow := findCellRow(rows, helper.ThirdPlaceLabel) + 1
+	thirdPlaceExcelRow := bctest.FindCellRow(rows, helper.ThirdPlaceLabel) + 1
 	require.GreaterOrEqual(t, thirdPlaceExcelRow, 1,
 		"blank-template naginata export must have a '3rd Place' row")
 

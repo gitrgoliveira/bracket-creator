@@ -1,6 +1,7 @@
 package test
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 
@@ -19,6 +20,17 @@ func ParsePrintAreaLastRow(refersTo string) int {
 		return -1
 	}
 	return row
+}
+
+// FindCellRow returns the 0-based index of the first sheet row containing a
+// cell equal to val, or -1 when absent. rows is the excelize GetRows shape.
+func FindCellRow(rows [][]string, val string) int {
+	for i, row := range rows {
+		if slices.Contains(row, val) {
+			return i
+		}
+	}
+	return -1
 }
 
 // CreateTestPlayers returns a slice of players for testing

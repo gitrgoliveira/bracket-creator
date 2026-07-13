@@ -2947,7 +2947,7 @@ func TestBuildResultsWorkbook_NaginataThirdPlaceRendered(t *testing.T) {
 	// The "3rd Place" header row is at thirdPlaceRow (0-based); the score row is
 	// at thirdPlaceRow+2. Court 1 name cells: left=col A (0-based index 0),
 	// right=col G (0-based index 6).
-	bronzeThirdPlaceRow := findCellRow(rows, helper.ThirdPlaceLabel)
+	bronzeThirdPlaceRow := bctest.FindCellRow(rows, helper.ThirdPlaceLabel)
 	require.GreaterOrEqual(t, bronzeThirdPlaceRow, 0, "'3rd Place' header must be found in rows")
 	bronzeScoreRowIdx := bronzeThirdPlaceRow + 2
 	require.Less(t, bronzeScoreRowIdx, len(rows), "bronze score row must exist")
@@ -3010,7 +3010,7 @@ func TestBuildResultsWorkbook_NaginataThirdPlaceNamesBeforeBronze(t *testing.T) 
 	require.NoError(t, err)
 
 	// Find "3rd Place" header row.
-	thirdPlaceRow := findCellRow(rows, helper.ThirdPlaceLabel)
+	thirdPlaceRow := bctest.FindCellRow(rows, helper.ThirdPlaceLabel)
 	require.GreaterOrEqual(t, thirdPlaceRow, 0, "'3rd Place' header must appear even before bronze is played")
 
 	scoreRowIdx := thirdPlaceRow + 2
@@ -3086,7 +3086,7 @@ func TestBuildResultsWorkbook_EngiNaginataThirdPlaceFlags(t *testing.T) {
 		"Elimination Matches sheet must have a '3rd Place' header for engi naginata")
 
 	// Find the "3rd Place" row and verify the score row (header+2) carries "5".
-	thirdPlaceRow := findCellRow(rows, helper.ThirdPlaceLabel)
+	thirdPlaceRow := bctest.FindCellRow(rows, helper.ThirdPlaceLabel)
 	require.GreaterOrEqual(t, thirdPlaceRow, 0, "'3rd Place' header row must be found")
 	scoreRowIdx := thirdPlaceRow + 2
 	require.Less(t, scoreRowIdx, len(rows), "bronze score row (header+2) must exist")
@@ -3181,7 +3181,7 @@ func TestBuildResultsWorkbook_NaginataThirdPlaceEntrantFormulas(t *testing.T) {
 	require.NoError(t, err)
 
 	// Locate the "3rd Place" header row (0-based index).
-	thirdPlaceRowIdx := findCellRow(rows, helper.ThirdPlaceLabel)
+	thirdPlaceRowIdx := bctest.FindCellRow(rows, helper.ThirdPlaceLabel)
 	require.GreaterOrEqual(t, thirdPlaceRowIdx, 0, "'3rd Place' header must be present")
 
 	// Score row: 1-based Excel row = (0-based idx + 1) + 2.
@@ -3295,19 +3295,6 @@ func TestBuildResultsWorkbook_MixedTreePageHasPoolRosters(t *testing.T) {
 		"'Tree 1' title formula must not embed the competition name (data!$B$1 already prepends it)")
 }
 
-// findCellRow returns the 0-based index of the first row containing a cell
-// equal to val, or -1 when absent.
-func findCellRow(rows [][]string, val string) int {
-	for i, row := range rows {
-		for _, cell := range row {
-			if cell == val {
-				return i
-			}
-		}
-	}
-	return -1
-}
-
 // findEliminationPrintAreaLastRow reads the workbook's defined names and returns
 // the last-row number of the _xlnm.Print_Area name scoped to SheetEliminationMatches.
 // Returns -1 if not found or unparseable.
@@ -3345,7 +3332,7 @@ func TestBuildResultsWorkbook_NaginataThirdPlacePrintAreaCoversBlock(t *testing.
 	require.NoError(t, err)
 
 	// Locate the "3rd Place" header row (1-based Excel row).
-	thirdPlaceExcelRow := findCellRow(rows, helper.ThirdPlaceLabel) + 1
+	thirdPlaceExcelRow := bctest.FindCellRow(rows, helper.ThirdPlaceLabel) + 1
 	require.GreaterOrEqual(t, thirdPlaceExcelRow, 1,
 		"'3rd Place' header row must be present in Elimination Matches")
 

@@ -49,7 +49,8 @@ func TeamResultFrom(subResults []SubMatchResult, sideAName, sideBName string) *T
 	for _, sub := range subResults {
 		if sub.Position <= DaihyosenSubPosition {
 			// Skip the daihyosen placeholder (DaihyosenSubPosition, -1) and,
-			// defensively, any other negative position: real bouts are 1..N,
+			// defensively, any other negative position: real bouts have a
+			// non-negative Position (fixed-format 0-based, kachinuki 1-based),
 			// so a Position < -1 is malformed input and must not count into
 			// IV/PW.
 			continue

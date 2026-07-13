@@ -37,9 +37,11 @@ func TestTeamResultFrom(t *testing.T) {
 	})
 
 	t.Run("malformed negative position (< -1) defensively excluded", func(t *testing.T) {
-		// Real bouts are 1..N and the daihyosen is -1; any Position < -1 is
+		// Real bouts have a non-negative Position (fixed-format is 0-based,
+		// kachinuki 1-based); the daihyosen is -1. Any Position < -1 is
 		// malformed input and must not be counted into IV/PW (guards a
-		// stale/malicious payload).
+		// stale/malicious payload). Position 0 below is a legitimate,
+		// countable bout.
 		subs := []SubMatchResult{
 			{Position: 0, Winner: "TeamB", SideA: "P1", SideB: "P2", IpponsA: []string{"M"}, IpponsB: []string{"M"}},
 			{Position: -2, Winner: "TeamA", SideA: "P3", SideB: "P4", IpponsA: []string{"M", "K"}, IpponsB: []string{"K"}},

@@ -245,8 +245,12 @@ export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state
   // Name priority is resolveBoutSideName (lineup_resolver.jsx): kachinuki is
   // server-bout-first with the lineup only seeding the index-0 bootstrap;
   // fixed format is lineup-first.
+  // Daihyosen (isDH) is lineup-first even in kachinuki: the rep bout is not a
+  // server-driven kachinuki bout, so never blank its lineup pick (the DH row is
+  // rendered without the kachinuki prop today, but !isDH keeps this correct if
+  // a caller ever passes it).
   const lineupNameFor = (lu) =>
-    (kachinuki && index !== 0) ? "" : (lu ? pickFromLineup(lu, index, teamSize) : "");
+    (kachinuki && !isDH && index !== 0) ? "" : (lu ? pickFromLineup(lu, index, teamSize) : "");
   const resolveSide = (subSide, lu) =>
     resolveBoutSideName({ isKachinuki: kachinuki, isDaihyosen: isDH, existingName: subSideName(sub && subSide), lineupName: lineupNameFor(lu) }) || boutNum;
   const shiroName = resolveSide(sub && sub.sideB, lineupB);

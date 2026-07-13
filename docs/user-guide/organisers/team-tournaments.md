@@ -37,7 +37,7 @@ In kachinuki format, the winner of each bout remains on the court to face the ne
 
 ### Choosing the team match format
 
-When you create a team competition, pick the format under **Team match format**: **Fixed order** (every position plays its opposite number, the default) or **Kachinuki (winner-stays)**. The same control appears in the competition's **Settings** tab. It locks once the draw is generated: discard the draw to change it.
+When you create a team competition, pick the format under **Team match format**: **Fixed order** (every position plays its opposite number, the default) or **Kachinuki (winner-stays)**. The same control appears in the competition's **Settings** tab. It locks once the draw is generated: discard the draw to change it. Once the competition has started, the format can no longer be changed.
 
 ### Scoring a kachinuki encounter
 

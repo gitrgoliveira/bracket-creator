@@ -579,7 +579,8 @@ const DecisionDraw = "hikiwake"
 
 // DaihyosenSubPosition is the sentinel Position value marking a
 // SubMatchResult as the daihyosen (representative bout) rather than a
-// numbered roster bout (positions 1..N). It is negative so it never
+// numbered roster bout (real bouts have a non-negative Position:
+// fixed-format is 0-based, kachinuki 1-based). It is negative so it never
 // collides with a real bout index. Use this constant instead of a bare -1.
 const DaihyosenSubPosition = -1
 

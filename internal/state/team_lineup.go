@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"maps"
 	"os"
-	"slices"
 	"sort"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -285,6 +284,14 @@ func FindBestLineupAny(lineups map[string]domain.TeamLineup, teamIDs []string, m
 	// Map iteration order is nondeterministic, so ties on Round are broken
 	// by the teamID's position in teamIDs (the documented "first key wins"
 	// priority), keeping selection stable across calls.
+	// Precompute teamID -> rank once (first occurrence wins, matching
+	// slices.Index) so the per-entry rank lookup below is O(1).
+	rankByID := make(map[string]int, len(teamIDs))
+	for i, id := range teamIDs {
+		if _, seen := rankByID[id]; !seen {
+			rankByID[id] = i
+		}
+	}
 	var best, fallback domain.TeamLineup
 	bestRank, fallbackRank := -1, -1
 	hasBest, hasFallback := false, false
@@ -292,8 +299,8 @@ func FindBestLineupAny(lineups map[string]domain.TeamLineup, teamIDs []string, m
 		if l.MatchID != "" {
 			continue // skip match-scoped entries
 		}
-		rank := slices.Index(teamIDs, l.TeamID)
-		if rank < 0 {
+		rank, ok := rankByID[l.TeamID]
+		if !ok {
 			continue // wrong team
 		}
 		if l.Round <= maxRound {

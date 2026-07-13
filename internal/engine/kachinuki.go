@@ -215,6 +215,12 @@ func RetiredPlayersFromBoutLog(boutLog []state.SubMatchResult, teamAName, teamBN
 	retiredA = map[string]struct{}{}
 	retiredB = map[string]struct{}{}
 	for _, b := range boutLog {
+		if b.Position == state.DaihyosenSubPosition {
+			// The daihyosen (rep bout) is not a kachinuki bout: its side
+			// names are the representatives (often the team names), not
+			// roster players, so it must not retire anyone.
+			continue
+		}
 		hikiwake := state.IsDraw(b.Decision)
 		if hikiwake {
 			if b.SideA != "" {
@@ -336,7 +342,24 @@ func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, error) {
 		return false, nil
 	}
 
-	last := parent.SubResults[len(parent.SubResults)-1]
+	// Advancement is driven by the last NUMBERED bout. A daihyosen sub-result
+	// (Position == DaihyosenSubPosition) is not a kachinuki bout: a bracket
+	// encounter that reaches simultaneous exhaustion stays open until the
+	// operator adds a daihyosen, and mergeKachinukiSubResults orders that row
+	// last, so keying off the final slice element would advance off the rep
+	// bout. Scan from the end past any daihyosen placeholder to the real bout.
+	lastIdx := -1
+	for i := len(parent.SubResults) - 1; i >= 0; i-- {
+		if parent.SubResults[i].Position != state.DaihyosenSubPosition {
+			lastIdx = i
+			break
+		}
+	}
+	if lastIdx < 0 {
+		// Only the daihyosen placeholder is present: nothing to advance off.
+		return false, nil
+	}
+	last := parent.SubResults[lastIdx]
 	// Only act when the last bout has a final outcome. A bout written
 	// with no Winner AND no Decision is still being scored; bail.
 	hasOutcome := last.Winner != "" || last.Decision != ""
@@ -730,6 +753,9 @@ func (e *Engine) kachinukiRemainingRoster(compID, matchID string, comp *state.Co
 		out := make([]string, 0)
 		isA := teamName == parent.SideA
 		for _, b := range parent.SubResults {
+			if b.Position == state.DaihyosenSubPosition {
+				continue // rep bout, not a roster player (see RetiredPlayersFromBoutLog)
+			}
 			name := b.SideB
 			if isA {
 				name = b.SideA

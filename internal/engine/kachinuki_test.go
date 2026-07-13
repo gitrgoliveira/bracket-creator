@@ -322,6 +322,48 @@ func TestMaybeAdvanceKachinuki_AppendsBout(t *testing.T) {
 		"match should be completed when SideB queue is exhausted")
 }
 
+// TestMaybeAdvanceKachinuki_IgnoresTrailingDaihyosen verifies advancement is
+// driven by the last NUMBERED bout, not by a trailing daihyosen placeholder.
+// mergeKachinukiSubResults orders the daihyosen (Position -1) row last; keying
+// off the final slice element would advance off the rep bout (which is not a
+// kachinuki bout) instead of the real numbered result.
+func TestMaybeAdvanceKachinuki_IgnoresTrailingDaihyosen(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "advance-skip-daihyosen"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:            compID,
+		TeamMatchType: state.TeamMatchTypeKachinuki,
+		TeamSize:      5,
+	}))
+
+	// Bout 1 (numbered) has a decisive outcome that should drive advancement.
+	// A trailing daihyosen placeholder (Position -1) is unscored: if selection
+	// keyed off the final slice element it would read the outcome-less rep row
+	// and bail (false), leaving the numbered result unprocessed.
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{
+			ID:    "P1-0",
+			SideA: "RedTeam",
+			SideB: "WhiteTeam",
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "R-Senpo", SideB: "W-Senpo", Winner: "R-Senpo", Decision: "fought"},
+				{Position: state.DaihyosenSubPosition, SideA: "RedTeam", SideB: "WhiteTeam"},
+			},
+		},
+	}))
+
+	changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
+	require.NoError(t, err)
+	assert.True(t, changed, "advancement must run off the numbered bout, not the trailing daihyosen row")
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	assert.Equal(t, state.MatchStatusCompleted, matches[0].Status,
+		"WhiteTeam is exhausted after bout 1, so the match completes")
+}
+
 // TestMaybeAdvanceKachinuki_MatchNotFound verifies that requesting
 // advancement for an unknown match ID returns (false, nil).
 func TestMaybeAdvanceKachinuki_MatchNotFound(t *testing.T) {

@@ -144,14 +144,18 @@ function StreamingOverlay({ court, position, competitions }) {
     let boutShiroName, boutAkaName;
     if (isTeamMatch && currentSub) {
         // Name priority is resolveBoutSideName (lineup_resolver.jsx): kachinuki
-        // is server-bout-first with the lineup only seeding the index-0
-        // bootstrap (fallback label: plain bout number); fixed format is
-        // lineup-first (fallback label: FIK position).
+        // numbered bouts are server-bout-first with the lineup only seeding the
+        // index-0 bootstrap (fallback label: plain bout number); fixed format
+        // and the daihyosen row stay lineup-first (fallback label: FIK
+        // position). The daihyosen (position -1) is an operator-chosen rep bout,
+        // so it must resolve lineup-first even in kachinuki, else a stale
+        // persisted name would win over the current rep pick.
+        const isDaihyosenBout = currentSub.position === -1;
         const ovlLineupName = (lu) =>
-            (isKachinukiOvl && currentBoutIdx !== 0) ? "" : pickFromLineup(lu, currentBoutIdx, teamSizeOvl);
-        const ovlFallback = isKachinukiOvl ? String(currentBoutIdx + 1) : boutPosLabel;
-        boutShiroName = resolveBoutSideName({ isKachinuki: isKachinukiOvl, isDaihyosen: false, existingName: subSideName(currentSub.sideB), lineupName: ovlLineupName(ovlLineupB) }) || ovlFallback;
-        boutAkaName   = resolveBoutSideName({ isKachinuki: isKachinukiOvl, isDaihyosen: false, existingName: subSideName(currentSub.sideA), lineupName: ovlLineupName(ovlLineupA) }) || ovlFallback;
+            (isKachinukiOvl && !isDaihyosenBout && currentBoutIdx !== 0) ? "" : pickFromLineup(lu, currentBoutIdx, teamSizeOvl);
+        const ovlFallback = (isKachinukiOvl && !isDaihyosenBout) ? String(currentBoutIdx + 1) : boutPosLabel;
+        boutShiroName = resolveBoutSideName({ isKachinuki: isKachinukiOvl, isDaihyosen: isDaihyosenBout, existingName: subSideName(currentSub.sideB), lineupName: ovlLineupName(ovlLineupB) }) || ovlFallback;
+        boutAkaName   = resolveBoutSideName({ isKachinuki: isKachinukiOvl, isDaihyosen: isDaihyosenBout, existingName: subSideName(currentSub.sideA), lineupName: ovlLineupName(ovlLineupA) }) || ovlFallback;
     } else {
         boutShiroName = dhPending ? boutPosLabel : '';
         boutAkaName   = dhPending ? boutPosLabel : '';

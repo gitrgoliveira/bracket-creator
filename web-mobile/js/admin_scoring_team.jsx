@@ -878,7 +878,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             isKachinuki && (
               <div key="kachinuki-banner" style={{ background: "var(--bg-2, #fafafa)", border: "1px solid var(--accent, #ddd)", borderRadius: 4, padding: "8px 12px", marginBottom: 12, fontSize: 12, display: "flex", flexDirection: "column", gap: 4 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontWeight: 700 }}><TermAS name="kachinuki">Kachinuki</TermAS> (winner-stays)</span>
+                  <span style={{ fontWeight: 700 }}><TermAS name="kachinuki">Kachinuki</TermAS> (winner stays on)</span>
                   <span style={{ color: "var(--ink-3)" }}>
                     {kachinukiExhausted
                       ? "One team exhausted: match ended."

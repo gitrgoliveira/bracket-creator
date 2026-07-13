@@ -564,13 +564,13 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
               type="button"
               onClick={() => update("teamMatchType", "fixed")}
               disabled={isDrawReady || isStarted}
-            >Fixed order</button>
+            >Regular</button>
             <button
               className={`radio-pill ${local.teamMatchType === "kachinuki" ? "is-active" : ""}`}
               type="button"
               onClick={() => update("teamMatchType", "kachinuki")}
               disabled={isDrawReady || isStarted}
-            >Kachinuki (winner-stays)</button>
+            >Kachinuki (winner stays on)</button>
           </div>
           <div className="field__hint">
             {teamMatchTypeHint(local.teamMatchType === "kachinuki")}{(isDrawReady || isStarted) ? " Locked after draw." : ""}

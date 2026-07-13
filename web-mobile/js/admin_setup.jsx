@@ -1074,8 +1074,8 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
             <div className="field">
               <label className="field__label">Team match format</label>
               <div className="radio-group">
-                <button className={`radio-pill ${teamMatchType === "fixed" ? "is-active" : ""}`} type="button" onClick={() => setTeamMatchType("fixed")}>Fixed order</button>
-                <button className={`radio-pill ${teamMatchType === "kachinuki" ? "is-active" : ""}`} type="button" onClick={() => setTeamMatchType("kachinuki")}>Kachinuki (winner-stays)</button>
+                <button className={`radio-pill ${teamMatchType === "fixed" ? "is-active" : ""}`} type="button" onClick={() => setTeamMatchType("fixed")}>Regular</button>
+                <button className={`radio-pill ${teamMatchType === "kachinuki" ? "is-active" : ""}`} type="button" onClick={() => setTeamMatchType("kachinuki")}>Kachinuki (winner stays on)</button>
               </div>
               <div className="field__hint">
                 {teamMatchTypeHint(teamMatchType === "kachinuki")}

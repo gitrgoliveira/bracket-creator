@@ -3098,7 +3098,7 @@ components:
           type: boolean
         teamMatchType:
           type: string
-          description: Team-match scoring model; `fixed` (positions) or `kachinuki` (winner-stays).
+          description: Team-match scoring model; `fixed` (regular position-by-position order, shown as "Regular" in the UI) or `kachinuki` (winner stays on).
           enum: [fixed, kachinuki]
         maxEnchoPeriods:
           type: integer

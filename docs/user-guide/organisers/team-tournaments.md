@@ -31,13 +31,13 @@ Individual bouts are scored first. Once all bouts are done, the encounter result
 2. If wins are equal, the team with the highest points scored wins.
 3. If both wins and points are equal, the encounter is a draw in pools or league. In a knockout stage, the encounter goes to a representative bout (daihyosen). See [Recording decisions](../court-operators/recording-decisions.md) for how daihyosen is handled.
 
-## Kachinuki (winner-stays-on)
+## Kachinuki (winner stays on)
 
 In kachinuki format, the winner of each bout remains on the court to face the next opponent from the opposing team. If a bout ends in a hikiwake (draw), both fighters retire instead of one continuing; the next pair, one from each team's remaining roster, takes the court. Bouts continue in succession until one team has no remaining fighters. The team that exhausts the other team wins the encounter.
 
 ### Choosing the team match format
 
-When you create a team competition, pick the format under **Team match format**: **Fixed order** (every position plays its opposite number, the default) or **Kachinuki (winner-stays)**. The same control appears in the competition's **Settings** tab. It locks once the draw is generated: discard the draw to change it. Once the competition has started, the format can no longer be changed.
+When you create a team competition, pick the format under **Team match format**: **Regular** (every position plays its opposite number, the default) or **Kachinuki (winner stays on)**. The same control appears in the competition's **Settings** tab. It locks once the draw is generated: discard the draw to change it. Once the competition has started, the format can no longer be changed.
 
 ### Scoring a kachinuki encounter
 

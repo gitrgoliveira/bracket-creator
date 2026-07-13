@@ -140,7 +140,7 @@ var Glossary = map[string]Term{
 	"kachinuki": {
 		ID:      "kachinuki",
 		Kanji:   "勝ち抜き",
-		Short:   "Winner-stays-on",
+		Short:   "Winner stays on",
 		Tooltip: "A team format where the winner of each bout stays on to face the next opponent. A draw retires both. The match ends when one team has no more players left.",
 	},
 	"senpo": {

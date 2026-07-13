@@ -164,20 +164,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 		// Naginata competitions have a bronze (3rd-place) match: render it as a
 		// separate block immediately after the last elimination round.
 		if bracket != nil && bracket.ThirdPlaceMatch != nil {
-			// Derive the two semifinal match numbers from the final's children so the
-			// bronze block can reference the "2." loser lines via CONCATENATE formulas.
-			var semiA, semiB int
-			if len(eliminationMatchRounds) >= 2 {
-				lastRound := eliminationMatchRounds[len(eliminationMatchRounds)-1]
-				if len(lastRound) > 0 && lastRound[0] != nil {
-					if lastRound[0].Left != nil {
-						semiA = int(lastRound[0].Left.MatchNum())
-					}
-					if lastRound[0].Right != nil {
-						semiB = int(lastRound[0].Right.MatchNum())
-					}
-				}
-			}
+			semiA, semiB := helper.SemifinalMatchNumbers(eliminationMatchRounds)
 			bronzeEndRow := helper.PrintThirdPlaceBlock(f, 1, nextRow, comp.TeamSize, comp.Mirror, comp.Engi, semiA, semiB, elimMatchWinners)
 			helper.SetEliminationPrintArea(f, helper.SheetEliminationMatches, numCourts, bronzeEndRow-1)
 		}

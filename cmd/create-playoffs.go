@@ -244,18 +244,7 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	// round and no semifinal, so no bronze). Matches the engine guard in
 	// internal/engine/bracket.go: comp.Naginata && len(bracket.Rounds) >= 2.
 	if o.naginata && len(eliminationMatchRounds) >= 2 {
-		// Derive the two semifinal match numbers from the final's children so the
-		// bronze block can reference the "2." loser lines via CONCATENATE formulas.
-		var semiA, semiB int
-		lastRound := eliminationMatchRounds[len(eliminationMatchRounds)-1]
-		if len(lastRound) > 0 && lastRound[0] != nil {
-			if lastRound[0].Left != nil {
-				semiA = int(lastRound[0].Left.MatchNum())
-			}
-			if lastRound[0].Right != nil {
-				semiB = int(lastRound[0].Right.MatchNum())
-			}
-		}
+		semiA, semiB := helper.SemifinalMatchNumbers(eliminationMatchRounds)
 		bronzeEndRow := helper.PrintThirdPlaceBlock(f, 1, nextRow, o.teamMatches, true, o.engi, semiA, semiB, elimMatchWinners)
 		helper.SetEliminationPrintArea(f, helper.SheetEliminationMatches, o.courts, bronzeEndRow-1)
 	}

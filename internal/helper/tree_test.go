@@ -1552,3 +1552,34 @@ func TestTreeAdjustmentByeNoSwapWhenCorrect(t *testing.T) {
 	assert.Equal(t, "Pool A-1st", node.Left.LeafVal, "1st-place already in bye position, no swap")
 	assert.Equal(t, "Pool B-2nd", node.Right.Left.LeafVal)
 }
+
+// TestSemifinalMatchNumbers pins the semifinal derivation shared by the two
+// cmd generators and the results-export builder (bronze-block loser-line
+// CONCATENATE formulas reference these match numbers).
+func TestSemifinalMatchNumbers(t *testing.T) {
+	semi1 := &Node{matchNum: 5}
+	semi2 := &Node{matchNum: 6}
+	final := &Node{Left: semi1, Right: semi2, matchNum: 7}
+
+	tests := []struct {
+		name   string
+		rounds [][]*Node
+		wantA  int
+		wantB  int
+	}{
+		{"nil rounds", nil, 0, 0},
+		{"single round (2-player bracket, no semifinal)", [][]*Node{{final}}, 0, 0},
+		{"empty last round", [][]*Node{{semi1, semi2}, {}}, 0, 0},
+		{"nil final node", [][]*Node{{semi1, semi2}, {nil}}, 0, 0},
+		{"both semifinals present", [][]*Node{{semi1, semi2}, {final}}, 5, 6},
+		{"missing right child (bye)", [][]*Node{{semi1}, {{Left: semi1, matchNum: 7}}}, 5, 0},
+		{"missing left child (bye)", [][]*Node{{semi2}, {{Right: semi2, matchNum: 7}}}, 0, 6},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotA, gotB := SemifinalMatchNumbers(tt.rounds)
+			assert.Equal(t, tt.wantA, gotA, "semiA")
+			assert.Equal(t, tt.wantB, gotB, "semiB")
+		})
+	}
+}

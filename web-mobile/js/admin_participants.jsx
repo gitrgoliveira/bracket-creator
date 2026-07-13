@@ -257,6 +257,11 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // Zekken-column flag. Engi pairs store both member names combined in the
   // name field ("Name 1 - Name 2"), so engi does not alter the roster layout.
   const withZekken = !!c.withZekkenName;
+  // Roster line format for this competition, shared by the format hint and
+  // the CSV import dropzone so the two can't drift.
+  const rosterFormat = c.kind === "team" ? "Team name, Dojo"
+    : c.engi ? (withZekken ? "Name 1 - Name 2, Zekken 1 - Zekken 2, Dojo[, Dan]" : "Name 1 - Name 2, Dojo[, Dan]")
+      : withZekken ? "Name, Zekken, Dojo[, Dan]" : "Name, Dojo[, Dan grade]";
   const [showOnlyUnchecked, setShowOnlyUnchecked] = useStateA(false);
   const [replaceTarget, setReplaceTarget] = useStateA(null);
   const [showAddForm, setShowAddForm] = useStateA(false);
@@ -1175,7 +1180,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                 {lines.length} entries · One per line · <span style={{ color: "var(--ink-2)", fontWeight: 600 }}>Example: {c.kind === "team" ? "Tora A, Tora Dojo London" : c.engi ? (c.withZekkenName ? "Emi Sasaki - Ren Fujita, SASAKI - FUJITA, Getsurin, 3" : "Emi Sasaki - Ren Fujita, Getsurin, 3") : c.withZekkenName ? "Alice Smith, SMITH, Gyokusen, 3" : "Alice Smith, Gyokusen, 3"}</span>
               </div>
               <div className="field__hint" style={{ marginTop: 2, fontSize: 11 }}>
-                Format: "{c.kind === "team" ? "Team name, Dojo" : c.engi ? (c.withZekkenName ? "Name 1 - Name 2, Zekken 1 - Zekken 2, Dojo[, Dan]" : "Name 1 - Name 2, Dojo[, Dan]") : c.withZekkenName ? "Name, Zekken, Dojo[, Dan]" : "Name, Dojo[, Dan grade]"}"
+                Format: "{rosterFormat}"
                 <br />* Dan = kendo grade (optional)
                 <br /><button type="button" className="btn--link" style={{ padding: 0, fontSize: 11, fontWeight: 600 }} onClick={downloadTemplate}>Download CSV template</button>
               </div>
@@ -1201,7 +1206,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
               <div>
                 <div className="dropzone__title">{dragOver ? "Drop CSV to import" : "Click or drop CSV to import participants"}</div>
                 <div className="dropzone__sub">
-                  {c.engi ? (c.withZekkenName ? "Name 1 - Name 2, Zekken 1 - Zekken 2, Dojo[, Dan]" : "Name 1 - Name 2, Dojo[, Dan]") : c.withZekkenName ? "Name, Zekken, Dojo[, Dan]" : "Name, Dojo[, Dan grade] (e.g. Alice Smith, Gyokusen, 3)"}
+                  {rosterFormat}{!c.engi && !withZekken && c.kind !== "team" ? " (e.g. Alice Smith, Gyokusen, 3)" : ""}
                 </div>
               </div>
               <input ref={fileRef} type="file" accept=".csv,.txt,text/csv,text/plain" style={{ display: "none" }} onChange={(e) => handleFile(e.target.files[0])} />
@@ -1260,7 +1265,8 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
           {lines.length > 0 && (() => {
             const previewLimit = showAllPreview ? lines.length : 10;
             const preview = window.parseParticipantLines(lines.slice(0, previewLimit), withZekken);
-            const cols = c.withZekkenName ? [c.engi ? "Name 1 - Name 2" : "Name", "Zekken", "Dojo", "Dan"] : [c.engi ? "Name 1 - Name 2" : "Name", "Dojo", "Dan"];
+            const nameCol = c.engi ? "Name 1 - Name 2" : "Name";
+            const cols = withZekken ? [nameCol, "Zekken", "Dojo", "Dan"] : [nameCol, "Dojo", "Dan"];
             return (
               <div style={{ marginTop: 8, overflowX: "auto" }}>
                 <table className="parse-preview">

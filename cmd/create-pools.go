@@ -276,7 +276,7 @@ func (o *poolOptions) createPools(entries []string) error {
 		helper.SetTreeSheetTitle(f, subtreeSheet, "Shiaijo "+courtLabel)
 		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, startRow, depth, true, matchWinners)
 
-		poolStart, poolEnd := poolBoundsForSubtree(len(pools), o.courts, len(subtrees), i)
+		poolStart, poolEnd := helper.PoolBoundsForSubtree(len(pools), o.courts, len(subtrees), i)
 		helper.AddPoolsToTree(f, subtreeSheet, pools[poolStart:poolEnd], poolCoords, playerCoords)
 	}
 	if err := f.DeleteSheet(helper.SheetTree); err != nil {
@@ -311,18 +311,7 @@ func (o *poolOptions) createPools(entries []string) error {
 	// round and no semifinal, so no bronze). Matches the engine guard in
 	// internal/engine/bracket.go: comp.Naginata && len(bracket.Rounds) >= 2.
 	if o.naginata && len(eliminationMatchRounds) >= 2 {
-		// Derive the two semifinal match numbers from the final's children so the
-		// bronze block can reference the "2." loser lines via CONCATENATE formulas.
-		var semiA, semiB int
-		lastRound := eliminationMatchRounds[len(eliminationMatchRounds)-1]
-		if len(lastRound) > 0 && lastRound[0] != nil {
-			if lastRound[0].Left != nil {
-				semiA = int(lastRound[0].Left.MatchNum())
-			}
-			if lastRound[0].Right != nil {
-				semiB = int(lastRound[0].Right.MatchNum())
-			}
-		}
+		semiA, semiB := helper.SemifinalMatchNumbers(eliminationMatchRounds)
 		bronzeEndRow := helper.PrintThirdPlaceBlock(f, 1, nextRow, o.teamMatches, true, o.engi, semiA, semiB, elimMatchWinners)
 		helper.SetEliminationPrintArea(f, helper.SheetEliminationMatches, o.courts, bronzeEndRow-1)
 	}
@@ -338,12 +327,6 @@ func (o *poolOptions) createPools(entries []string) error {
 	}
 
 	return nil
-}
-
-// poolBoundsForSubtree delegates to helper.PoolBoundsForSubtree.
-// The logic lives in the helper package so it can be reused by the export builder.
-func poolBoundsForSubtree(numPools, numCourts, numSubtrees, subtreeIdx int) (start, end int) {
-	return helper.PoolBoundsForSubtree(numPools, numCourts, numSubtrees, subtreeIdx)
 }
 
 func init() {

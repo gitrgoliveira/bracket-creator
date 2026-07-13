@@ -57,7 +57,7 @@ bracket-creator print --type=tags --input=./xlsx/ -o ./tags.pdf
 
 The tournament app's in-app export needs LibreOffice **in the running server**. The CLI lets you keep the server on the lean default image (no LibreOffice) and render PDFs elsewhere:
 
-- **Offline / CLI-only events**: you built brackets with `create-pools` or the [web UI](../organisers/web-ui.md) and never ran the tournament app. Only the CLI can render those into PDFs (`--input`).
+- **Offline / CLI-only events**: you built brackets with `create-pools` or the [Legacy Web UI](../organisers/web-ui.md) and never ran the tournament app. Only the CLI can render those into PDFs (`--input`).
 - **Out-of-band generation**: run `print --tournament-data ...` on a LibreOffice-equipped machine instead of bundling LibreOffice into every deployment.
 - **Batch or scripted** PDF generation.
 

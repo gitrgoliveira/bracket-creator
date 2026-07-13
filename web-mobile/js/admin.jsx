@@ -286,6 +286,14 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     // propagate the { queued: true } signal up to the score editor.
     if (saveRes && saveRes.queued) return saveRes;
     await refreshCompsBestEffort("Score");
+    // B3: stale-write surfacing. The server returns { stale: true } (HTTP 200)
+    // when the match was already advanced to a newer state (e.g. kachinuki
+    // exhaustion completed the match between the editor opening and the submit).
+    // The refresh above already resyncs the local state from the server, so the
+    // operator will see the correct match status after this toast is dismissed.
+    if (saveRes && saveRes.stale) {
+      showToast("The server already completed this match. Reopen it to see the current result.", "error");
+    }
     return saveRes;
   };
 

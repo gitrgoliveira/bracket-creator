@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -117,8 +118,9 @@ func TestKachinukiExhaustionEndsMatch(t *testing.T) {
 
 // TestKachinukiHikiwakeExhaustsLast covers the edge case where a
 // hikiwake retires the last player on each side simultaneously. The
-// engine ends the match and logs (default WinningSide=A is a
-// reviewer-flag, admins are expected to override).
+// engine returns a no-op (MatchEnded=false) so the match stays running;
+// the operator must resolve via daihyosen rather than the engine
+// arbitrarily assigning a winner. GAP 2b.
 func TestKachinukiHikiwakeExhaustsLast(t *testing.T) {
 	bout := state.SubMatchResult{
 		Position: 5,
@@ -132,9 +134,32 @@ func TestKachinukiHikiwakeExhaustsLast(t *testing.T) {
 		SideB:    []string{},
 	})
 
-	assert.True(t, res.MatchEnded)
-	assert.Equal(t, string(domain.DecisionKachinukiExhaustion), res.Decision)
-	assert.Equal(t, "A", res.WinningSide, "simultaneous hikiwake exhaustion defaults to A for admin review")
+	assert.False(t, res.MatchEnded, "simultaneous exhaustion must not end the match")
+	assert.Equal(t, "", res.WinningSide, "no default winner; operator resolves via daihyosen")
+	assert.Nil(t, res.Next, "no next bout")
+}
+
+// TestAdvanceKachinuki_SimultaneousExhaustionNoOp verifies that when both
+// teams run out of players simultaneously after a hikiwake, the pure
+// AdvanceKachinuki function returns a no-op result (MatchEnded=false,
+// WinningSide="", Next=nil) so the match stays running until the operator
+// resolves it manually (e.g. via daihyosen). GAP 2b.
+func TestAdvanceKachinuki_SimultaneousExhaustionNoOp(t *testing.T) {
+	bout := state.SubMatchResult{
+		Position: 5,
+		SideA:    "A-Taisho",
+		SideB:    "B-Taisho",
+		Decision: string(domain.DecisionHikiwake),
+	}
+	res := AdvanceKachinuki(AdvanceKachinukiInput{
+		LastBout: bout,
+		SideA:    []string{},
+		SideB:    []string{},
+	})
+
+	assert.False(t, res.MatchEnded, "simultaneous exhaustion must not end the match; operator resolves via daihyosen")
+	assert.Equal(t, "", res.WinningSide, "no default winner when both sides exhaust simultaneously")
+	assert.Nil(t, res.Next, "no next bout scheduled; match is stalled pending operator decision")
 }
 
 // TestRetiredPlayersFromBoutLog verifies the helper that callers use
@@ -448,6 +473,423 @@ func TestMaybeAdvanceKachinuki_AppendsBoutNextRound(t *testing.T) {
 	assert.Equal(t, "B-Senpo", matches[0].SubResults[2].SideB, "B-Senpo is next SideB")
 }
 
+// A2 lineup integration tests -----------------------------------------------
+
+// TestMaybeAdvanceKachinuki_RosterFromLineup verifies that when a round-scoped
+// lineup is saved for both teams, kachinukiRemainingRoster uses it to build
+// the full remaining roster rather than the bout-log-only fallback. This means
+// when SideA-position-1 beats SideB-position-1, SideB still has positions 2+
+// queued, so the engine appends the next bout instead of ending the match.
+func TestMaybeAdvanceKachinuki_RosterFromLineup(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "kachinuki-roster-from-lineup"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:            compID,
+		TeamMatchType: state.TeamMatchTypeKachinuki,
+		TeamSize:      3,
+		Format:        state.CompFormatMixed,
+	}))
+	// Round-scoped lineups at round 0 for both teams.
+	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
+		TeamID: "RedTeam", Round: 0,
+		Positions: map[domain.Position]string{
+			domain.PositionNumbered(1): "R-1",
+			domain.PositionNumbered(2): "R-2",
+			domain.PositionNumbered(3): "R-3",
+		},
+	}, 3))
+	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
+		TeamID: "WhiteTeam", Round: 0,
+		Positions: map[domain.Position]string{
+			domain.PositionNumbered(1): "W-1",
+			domain.PositionNumbered(2): "W-2",
+			domain.PositionNumbered(3): "W-3",
+		},
+	}, 3))
+
+	// Bout 1: R-1 beats W-1. With lineup: remainingA=[R-1], remainingB=[W-2,W-3].
+	// Without lineup: remainingB=[] (bout-log-only) → wrongly ends match.
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{
+			ID:    "P1-0",
+			SideA: "RedTeam",
+			SideB: "WhiteTeam",
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "R-1", SideB: "W-1", Winner: "R-1", Decision: "fought"},
+			},
+		},
+	}))
+
+	changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
+	require.NoError(t, err)
+	assert.True(t, changed, "next bout must be appended (W-2 is in queue from lineup)")
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	require.Len(t, matches[0].SubResults, 2, "bout 2 must be appended")
+	assert.Equal(t, "R-1", matches[0].SubResults[1].SideA, "R-1 stays as winner")
+	assert.Equal(t, "W-2", matches[0].SubResults[1].SideB, "W-2 is next from lineup")
+	assert.NotEqual(t, state.MatchStatusCompleted, matches[0].Status, "match must not be completed yet")
+}
+
+// TestMaybeAdvanceKachinuki_RosterFromLineup_ParticipantIDKeyed reproduces
+// the real UI flow: the lineup editor saves lineups keyed by the team
+// PARTICIPANT ID (teamIdOf(t) resolves to player.id, a UUID assigned by
+// the store), while bracket/pool match sides carry the team NAME. The
+// engine must translate the side name to the matching participant ID
+// when looking up lineups (match on id OR name), otherwise every real
+// lookup misses and the roster silently degrades to the bout-log-only
+// path (GAP 2 stays broken in production).
+func TestMaybeAdvanceKachinuki_RosterFromLineup_ParticipantIDKeyed(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "kachinuki-lineup-pid-keyed"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:            compID,
+		TeamMatchType: state.TeamMatchTypeKachinuki,
+		TeamSize:      3,
+		Format:        state.CompFormatMixed,
+	}))
+
+	// Team participants exactly as the store creates them: UUID id, team
+	// name in Name. (state.LoadParticipants only treats the first CSV
+	// column as an ID when it parses as UUID v4.)
+	ryuID := helper.NewUUID4()
+	toraID := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: ryuID, Name: "Ryu", Dojo: "DojoR"},
+		{ID: toraID, Name: "Tora", Dojo: "DojoT"},
+	}))
+
+	// Lineups keyed by the participant ID, exactly as the UI saves them
+	// (NOT by team name).
+	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
+		TeamID: ryuID, Round: 0,
+		Positions: map[domain.Position]string{
+			domain.PositionNumbered(1): "R-1",
+			domain.PositionNumbered(2): "R-2",
+			domain.PositionNumbered(3): "R-3",
+		},
+	}, 3))
+	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
+		TeamID: toraID, Round: 0,
+		Positions: map[domain.Position]string{
+			domain.PositionNumbered(1): "W-1",
+			domain.PositionNumbered(2): "W-2",
+			domain.PositionNumbered(3): "W-3",
+		},
+	}, 3))
+
+	// Match sides carry the team NAME. Bout 1: R-1 beats W-1. With the
+	// lineup resolved: remainingB=[W-2, W-3], so bout 2 must be appended.
+	// If the id-keyed lineup lookup misses, the bout-log-only fallback
+	// sees remainingB=[] and wrongly ends the match.
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{
+			ID:    "P1-0",
+			SideA: "Ryu",
+			SideB: "Tora",
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "R-1", SideB: "W-1", Winner: "R-1", Decision: "fought"},
+			},
+		},
+	}))
+
+	changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
+	require.NoError(t, err)
+	assert.True(t, changed, "next bout must be appended (W-2 queued in the id-keyed lineup)")
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	require.Len(t, matches[0].SubResults, 2, "lineup must resolve via participant id: bout 2 appended")
+	assert.Equal(t, "R-1", matches[0].SubResults[1].SideA, "R-1 stays as winner")
+	assert.Equal(t, "W-2", matches[0].SubResults[1].SideB, "W-2 is next from the id-keyed lineup")
+	assert.NotEqual(t, state.MatchStatusCompleted, matches[0].Status, "match must not be completed yet")
+}
+
+// TestMaybeAdvanceKachinuki_CompletedMatchNoOp: a match that is already
+// completed must never be advanced again. Corrections re-submit the
+// bout log of a finished match; without this guard the engine would
+// append a phantom next bout onto the completed result (the roster
+// still shows W-2/W-3 remaining here, so advancement WOULD fire).
+func TestMaybeAdvanceKachinuki_CompletedMatchNoOp(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "kachinuki-completed-noop"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:            compID,
+		TeamMatchType: state.TeamMatchTypeKachinuki,
+		TeamSize:      3,
+		Format:        state.CompFormatMixed,
+	}))
+	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
+		TeamID: "RedTeam", Round: 0,
+		Positions: map[domain.Position]string{
+			domain.PositionNumbered(1): "R-1",
+			domain.PositionNumbered(2): "R-2",
+			domain.PositionNumbered(3): "R-3",
+		},
+	}, 3))
+	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
+		TeamID: "WhiteTeam", Round: 0,
+		Positions: map[domain.Position]string{
+			domain.PositionNumbered(1): "W-1",
+			domain.PositionNumbered(2): "W-2",
+			domain.PositionNumbered(3): "W-3",
+		},
+	}, 3))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{
+			ID:       "P1-0",
+			SideA:    "RedTeam",
+			SideB:    "WhiteTeam",
+			Status:   state.MatchStatusCompleted,
+			Winner:   "RedTeam",
+			Decision: "kachinuki-exhaustion",
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "R-1", SideB: "W-1", Winner: "R-1", Decision: "fought"},
+			},
+		},
+	}))
+
+	changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
+	require.NoError(t, err)
+	assert.False(t, changed, "a completed match must never be advanced")
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	assert.Len(t, matches[0].SubResults, 1, "no bout may be appended onto a completed match")
+	assert.Equal(t, state.MatchStatusCompleted, matches[0].Status)
+	assert.Equal(t, "RedTeam", matches[0].Winner)
+}
+
+// TestMaybeAdvanceKachinuki_FullExhaustion5v5 verifies that a full 5-person
+// lineup is used to correctly detect exhaustion after the last player of one
+// side is defeated.
+func TestMaybeAdvanceKachinuki_FullExhaustion5v5(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "kachinuki-5v5-exhaustion"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:            compID,
+		TeamMatchType: state.TeamMatchTypeKachinuki,
+		TeamSize:      5,
+		Format:        state.CompFormatMixed,
+	}))
+	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
+		TeamID: "RedTeam", Round: 0,
+		Positions: map[domain.Position]string{
+			domain.PosSenpo: "R-S", domain.PosJiho: "R-J", domain.PosChuken: "R-C",
+			domain.PosFukusho: "R-F", domain.PosTaisho: "R-T",
+		},
+	}, 5))
+	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
+		TeamID: "WhiteTeam", Round: 0,
+		Positions: map[domain.Position]string{
+			domain.PosSenpo: "W-S", domain.PosJiho: "W-J", domain.PosChuken: "W-C",
+			domain.PosFukusho: "W-F", domain.PosTaisho: "W-T",
+		},
+	}, 5))
+
+	// R-S has beaten W-S, W-J, W-C, W-F. Now beats W-T (last of WhiteTeam).
+	// After this bout: remainingA=[R-S], remainingB=[] → MatchEnded WinningSide=A.
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{
+			ID:    "P1-0",
+			SideA: "RedTeam",
+			SideB: "WhiteTeam",
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "R-S", SideB: "W-S", Winner: "R-S", Decision: "fought"},
+				{Position: 2, SideA: "R-S", SideB: "W-J", Winner: "R-S", Decision: "fought"},
+				{Position: 3, SideA: "R-S", SideB: "W-C", Winner: "R-S", Decision: "fought"},
+				{Position: 4, SideA: "R-S", SideB: "W-F", Winner: "R-S", Decision: "fought"},
+				{Position: 5, SideA: "R-S", SideB: "W-T", Winner: "R-S", Decision: "fought"},
+			},
+		},
+	}))
+
+	changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
+	require.NoError(t, err)
+	assert.True(t, changed, "all WhiteTeam players retired; match must end")
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	assert.Equal(t, state.MatchStatusCompleted, matches[0].Status)
+	assert.Equal(t, "RedTeam", matches[0].Winner, "RedTeam wins by exhausting WhiteTeam")
+}
+
+// TestMaybeAdvanceKachinuki_NoLineupFallback verifies that when no lineup is
+// saved the function falls back to the bout-log-only approach without error.
+func TestMaybeAdvanceKachinuki_NoLineupFallback(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "kachinuki-no-lineup-fallback"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:            compID,
+		TeamMatchType: state.TeamMatchTypeKachinuki,
+		TeamSize:      3,
+		Format:        state.CompFormatMixed,
+	}))
+	// No lineups saved.
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{
+			ID:    "P1-0",
+			SideA: "RedTeam",
+			SideB: "WhiteTeam",
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "R-1", SideB: "W-1", Winner: "R-1", Decision: "fought"},
+			},
+		},
+	}))
+
+	// Without lineup: knownB={W-1}, retiredB={W-1}, remainingB=[] → MatchEnded.
+	changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
+	require.NoError(t, err)
+	assert.True(t, changed, "bout-log-only fallback: W-1 retired, SideB empty → match ended")
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	assert.Equal(t, state.MatchStatusCompleted, matches[0].Status)
+}
+
+// TestMaybeAdvanceKachinuki_MatchScopedLineup verifies that a match-scoped
+// lineup (keyed by matchID) takes precedence over the round-scoped lineup for
+// the same team.
+func TestMaybeAdvanceKachinuki_MatchScopedLineup(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "kachinuki-match-scoped-lineup"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:            compID,
+		TeamMatchType: state.TeamMatchTypeKachinuki,
+		TeamSize:      3,
+		Format:        state.CompFormatMixed,
+	}))
+
+	// Round-scoped lineup (generic): R-1, R-2, R-3.
+	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
+		TeamID: "RedTeam", Round: 0,
+		Positions: map[domain.Position]string{
+			domain.PositionNumbered(1): "R-1",
+			domain.PositionNumbered(2): "R-2",
+			domain.PositionNumbered(3): "R-3",
+		},
+	}, 3))
+	// Match-scoped lineup (specific for "P1-0"): R-A, R-B, R-C.
+	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
+		TeamID: "RedTeam", MatchID: "P1-0",
+		Positions: map[domain.Position]string{
+			domain.PositionNumbered(1): "R-A",
+			domain.PositionNumbered(2): "R-B",
+			domain.PositionNumbered(3): "R-C",
+		},
+	}, 3))
+	// WhiteTeam round-scoped.
+	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
+		TeamID: "WhiteTeam", Round: 0,
+		Positions: map[domain.Position]string{
+			domain.PositionNumbered(1): "W-1",
+			domain.PositionNumbered(2): "W-2",
+			domain.PositionNumbered(3): "W-3",
+		},
+	}, 3))
+
+	// Bout 1: W-1 beats R-A (from match-scoped lineup).
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{
+			ID:    "P1-0",
+			SideA: "RedTeam",
+			SideB: "WhiteTeam",
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "R-A", SideB: "W-1", Winner: "W-1", Decision: "fought"},
+			},
+		},
+	}))
+
+	changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
+	require.NoError(t, err)
+	assert.True(t, changed, "next bout must be appended using match-scoped lineup")
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, matches[0].SubResults, 2)
+	// R-A retired; next from match-scoped roster is R-B (NOT R-2 from round-scoped).
+	assert.Equal(t, "R-B", matches[0].SubResults[1].SideA, "R-B from match-scoped lineup, not R-2 from round-scoped")
+	assert.Equal(t, "W-1", matches[0].SubResults[1].SideB, "W-1 stays as winner")
+}
+
+// TestMaybeAdvanceKachinuki_LatestRoundLineupFallback verifies AMENDMENT 1:
+// when multiple round-scoped lineups exist for a team, the engine picks the
+// highest round <= currentRound. For pool matches (currentRound=0), a round-1
+// lineup must be ignored in favour of round-0.
+func TestMaybeAdvanceKachinuki_LatestRoundLineupFallback(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "kachinuki-latest-round-fallback"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:            compID,
+		TeamMatchType: state.TeamMatchTypeKachinuki,
+		TeamSize:      3,
+		Format:        state.CompFormatMixed,
+	}))
+
+	// Round 0 lineup for RedTeam (pool phase).
+	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
+		TeamID: "RedTeam", Round: 0,
+		Positions: map[domain.Position]string{
+			domain.PositionNumbered(1): "R-Pool-1",
+			domain.PositionNumbered(2): "R-Pool-2",
+			domain.PositionNumbered(3): "R-Pool-3",
+		},
+	}, 3))
+	// Round 1 lineup for RedTeam (bracket phase, should NOT be used for pool match).
+	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
+		TeamID: "RedTeam", Round: 1,
+		Positions: map[domain.Position]string{
+			domain.PositionNumbered(1): "R-Bracket-1",
+			domain.PositionNumbered(2): "R-Bracket-2",
+			domain.PositionNumbered(3): "R-Bracket-3",
+		},
+	}, 3))
+	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
+		TeamID: "WhiteTeam", Round: 0,
+		Positions: map[domain.Position]string{
+			domain.PositionNumbered(1): "W-1",
+			domain.PositionNumbered(2): "W-2",
+			domain.PositionNumbered(3): "W-3",
+		},
+	}, 3))
+
+	// Bout 1: R-Pool-1 beats W-1. With AMENDMENT 1 fallback, round-0 lineup is
+	// used (not round-1) for this pool match → remainingA=[R-Pool-1], remainingB=[W-2,W-3].
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{
+			ID:    "P1-0",
+			SideA: "RedTeam",
+			SideB: "WhiteTeam",
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "R-Pool-1", SideB: "W-1", Winner: "R-Pool-1", Decision: "fought"},
+			},
+		},
+	}))
+
+	changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
+	require.NoError(t, err)
+	assert.True(t, changed, "next bout must be appended (W-2 is in pool-round-0 lineup)")
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, matches[0].SubResults, 2, "bout 2 must be appended")
+	// R-Pool-1 stays; next from round-0 lineup is W-2.
+	assert.Equal(t, "R-Pool-1", matches[0].SubResults[1].SideA)
+	assert.Equal(t, "W-2", matches[0].SubResults[1].SideB, "round-0 lineup used (not bracket round-1 with different names)")
+}
+
 // TestMaybeAdvanceKachinuki_NoOutcome verifies that a SubResult with no
 // Winner and no Decision (bout still in progress) returns (false, nil)
 // immediately without appending anything.
@@ -484,8 +926,8 @@ func TestMaybeAdvanceKachinuki_NoOutcome(t *testing.T) {
 
 // TestMaybeAdvanceKachinuki_HikiwakeBothExhausted verifies that when both
 // sides are exhausted after a hikiwake (empty remaining rosters),
-// MaybeAdvanceKachinuki returns (false, nil), the "no-op" path when
-// AdvanceKachinuki cannot determine a next action.
+// MaybeAdvanceKachinuki returns (false, nil): the match stays running so the
+// operator can resolve via daihyosen. GAP 2b.
 func TestMaybeAdvanceKachinuki_HikiwakeBothExhausted(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "kachinuki-hikiwake-exhausted"
@@ -515,7 +957,43 @@ func TestMaybeAdvanceKachinuki_HikiwakeBothExhausted(t *testing.T) {
 
 	changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
 	require.NoError(t, err)
-	assert.True(t, changed, "both exhausted → match ended (WinningSide=A default) → changed=true")
+	assert.False(t, changed, "both exhausted simultaneously is a no-op; match stays running for operator to resolve via daihyosen")
+}
+
+// TestMaybeAdvanceKachinuki_SimultaneousExhaustionStaysRunning verifies that
+// when both teams are exhausted simultaneously after a hikiwake,
+// MaybeAdvanceKachinuki returns (false, nil): the match stays running so the
+// operator can resolve via daihyosen. GAP 2b.
+func TestMaybeAdvanceKachinuki_SimultaneousExhaustionStaysRunning(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "kachinuki-simultaneous-exhaustion"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:            compID,
+		TeamMatchType: state.TeamMatchTypeKachinuki,
+		TeamSize:      5,
+		Format:        state.CompFormatMixed,
+	}))
+	// Single hikiwake bout, both players are the last on their side.
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{
+			ID:    "P1-0",
+			SideA: "RedTeam",
+			SideB: "WhiteTeam",
+			SubResults: []state.SubMatchResult{
+				{
+					Position: 1,
+					SideA:    "A-Senpo",
+					SideB:    "B-Senpo",
+					Decision: state.DecisionDraw, // hikiwake; both retire
+				},
+			},
+		},
+	}))
+
+	changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
+	require.NoError(t, err)
+	assert.False(t, changed, "simultaneous exhaustion is a no-op; match must stay running for operator to resolve")
 }
 
 // TestMaybeAdvanceKachinuki_MatchEndedPoolUpdate verifies that when one side
@@ -561,4 +1039,427 @@ func TestMaybeAdvanceKachinuki_MatchEndedPoolUpdate(t *testing.T) {
 	require.Len(t, matches, 1)
 	assert.Equal(t, state.MatchStatusCompleted, matches[0].Status)
 	assert.Equal(t, "WhiteTeam", matches[0].Winner)
+}
+
+// A4 bracket bout-append and winner propagation tests -------------------------
+
+// TestMaybeAdvanceKachinuki_BracketPropagatesWinner verifies that when a bracket
+// kachinuki match ends, propagateBracketWinner is called so the winning team
+// advances to the next round. GAP 4 (A4).
+func TestMaybeAdvanceKachinuki_BracketPropagatesWinner(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "kachinuki-bracket-propagates-winner"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:            compID,
+		TeamMatchType: state.TeamMatchTypeKachinuki,
+		TeamSize:      5,
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{}))
+
+	// 2-round bracket: Round 0 = [SF1, SF2], Round 1 = [Final].
+	// SF1: TeamA vs TeamB. Bout 1: A-Senpo beats B-Senpo.
+	// Bout-log-only fallback: knownB={B-Senpo}, retiredB={B-Senpo} → remainingB=[].
+	// AdvanceKachinuki → MatchEnded=true, WinningSide=A → Winner=TeamA.
+	// propagateBracketWinner must feed TeamA into Final.SideA.
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				{
+					ID:    "SF1",
+					SideA: "TeamA",
+					SideB: "TeamB",
+					SubResults: []state.SubMatchResult{
+						{Position: 1, SideA: "A-Senpo", SideB: "B-Senpo", Winner: "A-Senpo", Decision: "fought"},
+					},
+				},
+				{
+					ID:    "SF2",
+					SideA: "TeamC",
+					SideB: "TeamD",
+				},
+			},
+			{
+				{ID: "Final", SideA: "", SideB: ""},
+			},
+		},
+	}))
+
+	changed, err := eng.MaybeAdvanceKachinuki(compID, "SF1")
+	require.NoError(t, err)
+	assert.True(t, changed, "SF1 should have been finalized")
+
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, state.MatchStatusCompleted, bracket.Rounds[0][0].Status, "SF1 marked completed")
+	assert.Equal(t, "TeamA", bracket.Rounds[0][0].Winner, "SF1 winner is TeamA")
+	// propagateBracketWinner must have fed TeamA into the Final's SideA slot.
+	assert.Equal(t, "TeamA", bracket.Rounds[1][0].SideA, "Final SideA must be populated from SF1 winner")
+}
+
+// TestMaybeAdvanceKachinuki_BracketAppendsBout verifies that when a bracket
+// kachinuki match is still running (not exhausted), the next bout is appended
+// to BracketMatch.SubResults. GAP 4 (A4).
+func TestMaybeAdvanceKachinuki_BracketAppendsBout(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "kachinuki-bracket-appends-bout"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:            compID,
+		TeamMatchType: state.TeamMatchTypeKachinuki,
+		TeamSize:      5,
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{}))
+
+	// Single-round bracket (the final). After bout 2 both sides still have
+	// players: remainingA=[A-Jiho], remainingB=[B-Senpo] → Next (bout 3 pairing).
+	// Bout-log-only fallback:
+	//   knownA={A-Senpo,A-Jiho}, retiredA={A-Senpo} → remainingA=[A-Jiho]
+	//   knownB={B-Senpo,B-Chuken}, retiredB={B-Chuken} → remainingB=[B-Senpo]
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				{
+					ID:    "B-Final",
+					SideA: "TeamA",
+					SideB: "TeamB",
+					SubResults: []state.SubMatchResult{
+						{Position: 1, SideA: "A-Senpo", SideB: "B-Senpo", Winner: "B-Senpo", Decision: "fought"},
+						{Position: 2, SideA: "A-Jiho", SideB: "B-Chuken", Winner: "A-Jiho", Decision: "fought"},
+					},
+				},
+			},
+		},
+	}))
+
+	changed, err := eng.MaybeAdvanceKachinuki(compID, "B-Final")
+	require.NoError(t, err)
+	assert.True(t, changed, "next bout must be appended to BracketMatch.SubResults")
+
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.Len(t, bracket.Rounds[0][0].SubResults, 3, "bout 3 must be appended to BracketMatch.SubResults")
+	assert.Equal(t, "A-Jiho", bracket.Rounds[0][0].SubResults[2].SideA, "A-Jiho stays as SideA winner")
+	assert.Equal(t, "B-Senpo", bracket.Rounds[0][0].SubResults[2].SideB, "B-Senpo is next from SideB")
+	assert.Equal(t, 3, bracket.Rounds[0][0].SubResults[2].Position, "position must be 3")
+}
+
+// TestMaybeAdvanceKachinuki_BronzeAppendsBout verifies that the ThirdPlaceMatch
+// (bronze) bout-append path mirrors the Rounds path: next bout is appended to
+// ThirdPlaceMatch.SubResults when the match is still running. GAP 4 (A4).
+func TestMaybeAdvanceKachinuki_BronzeAppendsBout(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "kachinuki-bronze-appends-bout"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:            compID,
+		TeamMatchType: state.TeamMatchTypeKachinuki,
+		TeamSize:      5,
+		Naginata:      true,
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{}))
+
+	// Bronze match has 2 bouts; both sides still have remaining players after bout 2.
+	// Same bout-log-only scenario as BracketAppendsBout above.
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{{ID: "SF1", SideA: "TeamA", SideB: "TeamB", Winner: "TeamA", Status: state.MatchStatusCompleted}},
+		},
+		ThirdPlaceMatch: &state.BracketMatch{
+			ID:    "m-bronze",
+			SideA: "TeamA",
+			SideB: "TeamB",
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "A-Senpo", SideB: "B-Senpo", Winner: "B-Senpo", Decision: "fought"},
+				{Position: 2, SideA: "A-Jiho", SideB: "B-Chuken", Winner: "A-Jiho", Decision: "fought"},
+			},
+		},
+	}))
+
+	changed, err := eng.MaybeAdvanceKachinuki(compID, "m-bronze")
+	require.NoError(t, err)
+	assert.True(t, changed, "next bout must be appended to ThirdPlaceMatch.SubResults")
+
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.NotNil(t, bracket.ThirdPlaceMatch)
+	require.Len(t, bracket.ThirdPlaceMatch.SubResults, 3, "bout 3 must be appended to ThirdPlaceMatch.SubResults")
+	assert.Equal(t, "A-Jiho", bracket.ThirdPlaceMatch.SubResults[2].SideA, "A-Jiho stays as SideA winner")
+	assert.Equal(t, "B-Senpo", bracket.ThirdPlaceMatch.SubResults[2].SideB, "B-Senpo is next from SideB")
+	assert.Equal(t, 3, bracket.ThirdPlaceMatch.SubResults[2].Position, "position must be 3")
+}
+
+// TestMergeKachinukiSubResults pins the by-position merge semantics the
+// score-write entry points rely on (ACID: a partial client log must
+// never destroy server-appended bouts).
+func TestMergeKachinukiSubResults(t *testing.T) {
+	t.Run("incoming overwrites same position, stored extras preserved", func(t *testing.T) {
+		stored := []state.SubMatchResult{
+			{Position: 1, SideA: "R-1", SideB: "W-1", Decision: "hikiwake"},
+			{Position: 2, SideA: "R-2", SideB: "W-2"},
+		}
+		incoming := []state.SubMatchResult{
+			{Position: 1, SideA: "R-1", SideB: "W-1", Winner: "R-1", Decision: "fought"},
+		}
+		out := mergeKachinukiSubResults(stored, incoming)
+		require.Len(t, out, 2)
+		assert.Equal(t, "fought", out[0].Decision, "incoming bout 1 wins")
+		assert.Equal(t, "R-1", out[0].Winner)
+		assert.Equal(t, 2, out[1].Position, "stored placeholder preserved")
+		assert.Equal(t, "R-2", out[1].SideA)
+	})
+
+	t.Run("empty incoming preserves the full stored log", func(t *testing.T) {
+		stored := []state.SubMatchResult{
+			{Position: 1, Winner: "R-1", Decision: "fought"},
+			{Position: 2},
+		}
+		out := mergeKachinukiSubResults(stored, nil)
+		require.Len(t, out, 2)
+		assert.Equal(t, 1, out[0].Position)
+		assert.Equal(t, 2, out[1].Position)
+	})
+
+	t.Run("daihyosen (-1) merges and sorts last", func(t *testing.T) {
+		stored := []state.SubMatchResult{
+			{Position: -1, SideA: "Ryu", SideB: "Tora", Decision: "daihyosen"},
+			{Position: 1, Winner: "R-1", Decision: "fought"},
+		}
+		incoming := []state.SubMatchResult{
+			{Position: 2, SideA: "R-1", SideB: "W-2"},
+			{Position: -1, SideA: "Ryu", SideB: "Tora", Winner: "Ryu", Decision: "daihyosen"},
+		}
+		out := mergeKachinukiSubResults(stored, incoming)
+		require.Len(t, out, 3)
+		assert.Equal(t, 1, out[0].Position)
+		assert.Equal(t, 2, out[1].Position)
+		assert.Equal(t, -1, out[2].Position, "daihyosen sorts last")
+		assert.Equal(t, "Ryu", out[2].Winner, "incoming daihyosen wins")
+	})
+
+	t.Run("full log in the patch behaves like a plain replace (corrections)", func(t *testing.T) {
+		stored := []state.SubMatchResult{
+			{Position: 1, Winner: "R-1", Decision: "fought"},
+			{Position: 2, Winner: "W-2", Decision: "fought"},
+		}
+		incoming := []state.SubMatchResult{
+			{Position: 1, Winner: "W-1", Decision: "fought"},
+			{Position: 2, Winner: "W-2", Decision: "fought"},
+		}
+		out := mergeKachinukiSubResults(stored, incoming)
+		require.Len(t, out, 2)
+		assert.Equal(t, "W-1", out[0].Winner)
+		assert.Equal(t, "W-2", out[1].Winner)
+	})
+}
+
+// TestRecordMatchResultWithIneligibility_KachinukiMerge covers the
+// NON-TX twin's merge block: a partial kachinuki patch must preserve the
+// stored appended placeholder (same contract the tx twin enforces for
+// the live /score path).
+func TestRecordMatchResultWithIneligibility_KachinukiMerge(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "kachinuki-nontx-merge"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:            compID,
+		TeamMatchType: state.TeamMatchTypeKachinuki,
+		TeamSize:      3,
+		Format:        state.CompFormatMixed,
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{
+			ID: "P1-0", SideA: "RedTeam", SideB: "WhiteTeam", Status: state.MatchStatusRunning,
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "R-1", SideB: "W-1", Decision: "hikiwake"},
+				{Position: 2, SideA: "R-2", SideB: "W-2"},
+			},
+		},
+	}))
+
+	result := &state.MatchResult{
+		SideA:  "RedTeam",
+		SideB:  "WhiteTeam",
+		Status: state.MatchStatusRunning,
+		SubResults: []state.SubMatchResult{
+			{Position: 1, SideA: "R-1", SideB: "W-1", IpponsA: []string{"M"}, Winner: "R-1", Decision: "fought"},
+		},
+	}
+	_, err := eng.RecordMatchResultWithIneligibility(compID, "P1-0", result)
+	require.NoError(t, err)
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	require.Len(t, matches[0].SubResults, 2, "stored placeholder must survive the partial write")
+	assert.Equal(t, "fought", matches[0].SubResults[0].Decision)
+	assert.Equal(t, "R-2", matches[0].SubResults[1].SideA)
+}
+
+// TestCheckKachinukiPrematureCompletion pins every bypass branch of the
+// completed-write safety net.
+func TestCheckKachinukiPrematureCompletion(t *testing.T) {
+	setup := func(t *testing.T, compID string, matchStatus state.MatchStatus) (*Engine, *state.Store) {
+		t.Helper()
+		eng, store, _ := setupTestEngine(t)
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID:            compID,
+			TeamMatchType: state.TeamMatchTypeKachinuki,
+			TeamSize:      3,
+			Format:        state.CompFormatMixed,
+		}))
+		require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
+			TeamID: "RedTeam", Round: 0,
+			Positions: map[domain.Position]string{
+				domain.PositionNumbered(1): "R-1",
+				domain.PositionNumbered(2): "R-2",
+				domain.PositionNumbered(3): "R-3",
+			},
+		}, 3))
+		require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
+			TeamID: "WhiteTeam", Round: 0,
+			Positions: map[domain.Position]string{
+				domain.PositionNumbered(1): "W-1",
+				domain.PositionNumbered(2): "W-2",
+				domain.PositionNumbered(3): "W-3",
+			},
+		}, 3))
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{
+				ID: "P1-0", SideA: "RedTeam", SideB: "WhiteTeam", Status: matchStatus,
+				SubResults: []state.SubMatchResult{
+					{Position: 1, SideA: "R-1", SideB: "W-1", Winner: "R-1", Decision: "fought"},
+				},
+			},
+		}))
+		return eng, store
+	}
+
+	t.Run("both rosters remaining rejects", func(t *testing.T) {
+		eng, _ := setup(t, "premature-both-remaining", state.MatchStatusRunning)
+		err := eng.CheckKachinukiPrematureCompletion("premature-both-remaining", "P1-0", &state.MatchResult{
+			Status: state.MatchStatusCompleted, Winner: "RedTeam",
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "R-1", SideB: "W-1", Winner: "R-1", Decision: "fought"},
+			},
+		})
+		assert.ErrorIs(t, err, ErrKachinukiPrematureCompletion)
+	})
+
+	t.Run("non-completed write passes", func(t *testing.T) {
+		eng, _ := setup(t, "premature-running-ok", state.MatchStatusRunning)
+		assert.NoError(t, eng.CheckKachinukiPrematureCompletion("premature-running-ok", "P1-0", &state.MatchResult{
+			Status: state.MatchStatusRunning,
+		}))
+	})
+
+	t.Run("withdrawal decision passes", func(t *testing.T) {
+		eng, _ := setup(t, "premature-kiken-ok", state.MatchStatusRunning)
+		assert.NoError(t, eng.CheckKachinukiPrematureCompletion("premature-kiken-ok", "P1-0", &state.MatchResult{
+			Status: state.MatchStatusCompleted, Winner: "RedTeam", Decision: "kiken-voluntary",
+		}))
+	})
+
+	t.Run("daihyosen sub-result passes", func(t *testing.T) {
+		eng, _ := setup(t, "premature-daihyosen-ok", state.MatchStatusRunning)
+		assert.NoError(t, eng.CheckKachinukiPrematureCompletion("premature-daihyosen-ok", "P1-0", &state.MatchResult{
+			Status: state.MatchStatusCompleted, Winner: "RedTeam",
+			SubResults: []state.SubMatchResult{
+				{Position: -1, SideA: "RedTeam", SideB: "WhiteTeam", Winner: "RedTeam", Decision: "daihyosen"},
+			},
+		}))
+	})
+
+	t.Run("correction of a completed match passes", func(t *testing.T) {
+		eng, _ := setup(t, "premature-correction-ok", state.MatchStatusCompleted)
+		assert.NoError(t, eng.CheckKachinukiPrematureCompletion("premature-correction-ok", "P1-0", &state.MatchResult{
+			Status: state.MatchStatusCompleted, Winner: "RedTeam",
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "R-1", SideB: "W-1", Winner: "R-1", Decision: "fought"},
+			},
+		}))
+	})
+
+	t.Run("exhausted side passes", func(t *testing.T) {
+		eng, _ := setup(t, "premature-exhausted-ok", state.MatchStatusRunning)
+		// Incoming log retires the whole WhiteTeam roster: W-1..W-3 all lost.
+		assert.NoError(t, eng.CheckKachinukiPrematureCompletion("premature-exhausted-ok", "P1-0", &state.MatchResult{
+			Status: state.MatchStatusCompleted, Winner: "RedTeam",
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "R-1", SideB: "W-1", Winner: "R-1", Decision: "fought"},
+				{Position: 2, SideA: "R-1", SideB: "W-2", Winner: "R-1", Decision: "fought"},
+				{Position: 3, SideA: "R-1", SideB: "W-3", Winner: "R-1", Decision: "fought"},
+			},
+		}))
+	})
+
+	t.Run("unknown match passes through to the 404 path", func(t *testing.T) {
+		eng, _ := setup(t, "premature-unknown-match", state.MatchStatusRunning)
+		assert.NoError(t, eng.CheckKachinukiPrematureCompletion("premature-unknown-match", "no-such-match", &state.MatchResult{
+			Status: state.MatchStatusCompleted, Winner: "RedTeam",
+		}))
+	})
+
+	t.Run("non-kachinuki competition passes", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: "premature-fixed-comp", TeamSize: 3, TeamMatchType: state.TeamMatchTypeFixed,
+		}))
+		assert.NoError(t, eng.CheckKachinukiPrematureCompletion("premature-fixed-comp", "P1-0", &state.MatchResult{
+			Status: state.MatchStatusCompleted, Winner: "RedTeam",
+		}))
+	})
+}
+
+// TestMaybeAdvanceKachinuki_NamelessBoutNoOp: identity is required for
+// retirement math. A bout that carries an outcome but EMPTY side names
+// (UAT: the final's bootstrapped bout 1 was submitted as a nameless
+// hikiwake because the round-1 lineup GET 404ed) must NOT advance:
+// pre-fix the engine retired nobody and appended senpo-vs-senpo as
+// bout 2, shifting the whole sequence by one.
+func TestMaybeAdvanceKachinuki_NamelessBoutNoOp(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "kachinuki-nameless-bout"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:            compID,
+		TeamMatchType: state.TeamMatchTypeKachinuki,
+		TeamSize:      3,
+		Format:        state.CompFormatMixed,
+	}))
+	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
+		TeamID: "RedTeam", Round: 0,
+		Positions: map[domain.Position]string{
+			domain.PositionNumbered(1): "R-1",
+			domain.PositionNumbered(2): "R-2",
+			domain.PositionNumbered(3): "R-3",
+		},
+	}, 3))
+	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
+		TeamID: "WhiteTeam", Round: 0,
+		Positions: map[domain.Position]string{
+			domain.PositionNumbered(1): "W-1",
+			domain.PositionNumbered(2): "W-2",
+			domain.PositionNumbered(3): "W-3",
+		},
+	}, 3))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{
+			ID: "P1-0", SideA: "RedTeam", SideB: "WhiteTeam", Status: state.MatchStatusRunning,
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "", SideB: "", Decision: "hikiwake"},
+			},
+		},
+	}))
+
+	changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
+	require.NoError(t, err)
+	assert.False(t, changed, "a nameless bout must not advance the sequence")
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	assert.Len(t, matches[0].SubResults, 1, "no bout may be appended off a nameless outcome")
+	assert.NotEqual(t, state.MatchStatusCompleted, matches[0].Status)
+	assert.Empty(t, matches[0].Winner)
 }

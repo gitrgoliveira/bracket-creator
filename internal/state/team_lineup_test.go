@@ -253,3 +253,54 @@ func TestDeleteTeamLineup_WhileLive(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, got, "lineup must be gone after delete")
 }
+
+// TestFindBestLineupAny covers the multi-key lookup used when a match
+// side name must also be tried as the team's participant ID ("match on
+// id OR name"): the priority tiers apply across the whole key set, and
+// within a tier the first key in the slice wins.
+func TestFindBestLineupAny(t *testing.T) {
+	pid := "8d5a1b1e-1111-4222-8333-444455556666"
+	name := "RedTeam"
+
+	matchScoped := domain.TeamLineup{
+		TeamID: pid, MatchID: "SF-1",
+		Positions: map[domain.Position]string{domain.PosSenpo: "MatchScoped"},
+	}
+	roundScopedName := domain.TeamLineup{
+		TeamID: name, Round: 0,
+		Positions: map[domain.Position]string{domain.PosSenpo: "RoundName"},
+	}
+	roundScopedPid := domain.TeamLineup{
+		TeamID: pid, Round: 1,
+		Positions: map[domain.Position]string{domain.PosSenpo: "RoundPid"},
+	}
+	lineups := map[string]domain.TeamLineup{
+		lineupStorageKey(matchScoped):     matchScoped,
+		lineupStorageKey(roundScopedName): roundScopedName,
+		lineupStorageKey(roundScopedPid):  roundScopedPid,
+	}
+
+	t.Run("match-scoped under id beats round-scoped under name", func(t *testing.T) {
+		got, found := FindBestLineupAny(lineups, []string{name, pid}, "SF-1", 1)
+		require.True(t, found)
+		assert.Equal(t, "MatchScoped", got.Positions[domain.PosSenpo])
+	})
+
+	t.Run("round tier picks highest round <= maxRound across keys", func(t *testing.T) {
+		got, found := FindBestLineupAny(lineups, []string{name, pid}, "other-match", 1)
+		require.True(t, found)
+		assert.Equal(t, "RoundPid", got.Positions[domain.PosSenpo],
+			"round 1 pid-keyed entry outranks round 0 name-keyed entry")
+	})
+
+	t.Run("single name key still resolves", func(t *testing.T) {
+		got, found := FindBestLineupAny(lineups, []string{name}, "", 0)
+		require.True(t, found)
+		assert.Equal(t, "RoundName", got.Positions[domain.PosSenpo])
+	})
+
+	t.Run("no candidate keys match", func(t *testing.T) {
+		_, found := FindBestLineupAny(lineups, []string{"UnknownTeam"}, "", 5)
+		assert.False(t, found)
+	})
+}

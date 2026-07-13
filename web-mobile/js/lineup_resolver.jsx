@@ -19,6 +19,14 @@
 // entry exists (404 → null → round lookup). Network errors on either
 // endpoint are swallowed so the caller degrades gracefully.
 //
+// The round step passes { fallback: true }: match-scoring surfaces are the
+// client-side twin of AMENDMENT 1, so when the match's own round has no
+// saved lineup the server resolves the closest saved round instead of 404
+// (operators typically save one round-0 lineup for the whole day; without
+// this, a knockout final at round index 1 got no names and kachinuki bout 1
+// was submitted with empty sides). The lineup EDITOR calls fetchTeamLineup
+// directly without the flag, so its exact + 404 semantics are unchanged.
+//
 // mp-bkg regression guard: the per-match endpoint must win when it returns a
 // non-null result (the whole point of the per-match API). This function is
 // tested directly in scoring_modal_match_lineup.test.jsx.
@@ -28,7 +36,7 @@ export async function resolveMatchLineup(compId, teamId, matchId, round, { fetch
     if (matchLineup !== null) return matchLineup;
   } catch (_e) { /* network: fall through */ }
   try {
-    return await fetchTeamLineup(compId, teamId, round);
+    return await fetchTeamLineup(compId, teamId, round, { fallback: true });
   } catch (_e) { /* 404 / network: ignore */ }
   return null;
 }

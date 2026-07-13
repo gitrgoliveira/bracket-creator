@@ -289,7 +289,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       // the backend's PUT allowlist ignores unknown fields.
       leagueTiebreakTopN: safeInt(effective.leagueTiebreakTopN, latestC.leagueTiebreakTopN || 0),
       leagueTwoThirdPlaces: !!effective.leagueTwoThirdPlaces,
-      // teamMatchType has no editable control in this form, but the settings
+      // teamMatchType is edited via the Team match format pills above; the
       // merge is a full replace: omitting it would clobber a kachinuki
       // competition's value to "" (fixed) on any save. Round-trip it like
       // `mirror` above to preserve the stored value.
@@ -547,6 +547,34 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             onChange={(e) => updateNumber("teamSize", e.target.value, 1)}
             disabled={isDrawReady}
           />
+        </div>
+      )}
+      {local.kind === "team" && (
+        <div className="field">
+          <label className="field__label">Team match format</label>
+          {/* draw-ready + started lock: teamMatchType selects fixed vs kachinuki
+              bout sequencing; changing it after draw-ready would desync the match
+              structure from config, and flipping it on a STARTED comp would
+              desync recorded bouts from the scoring paradigm (server 409s). */}
+          <div className="radio-group">
+            <button
+              className={`radio-pill ${local.teamMatchType !== "kachinuki" ? "is-active" : ""}`}
+              type="button"
+              onClick={() => update("teamMatchType", "fixed")}
+              disabled={isDrawReady || isStarted}
+            >Fixed order</button>
+            <button
+              className={`radio-pill ${local.teamMatchType === "kachinuki" ? "is-active" : ""}`}
+              type="button"
+              onClick={() => update("teamMatchType", "kachinuki")}
+              disabled={isDrawReady || isStarted}
+            >Kachinuki (winner-stays)</button>
+          </div>
+          <div className="field__hint">
+            {local.teamMatchType === "kachinuki"
+              ? "The winner of each bout stays on to face the next opponent. Bouts are scored one at a time."
+              : "All bouts are scheduled up-front by position. Senpo fights Senpo, Jiho fights Jiho, and so on."}{(isDrawReady || isStarted) ? " Locked after draw." : ""}
+          </div>
         </div>
       )}
       <div className="field">

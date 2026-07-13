@@ -1665,8 +1665,13 @@ const API = {
     // TeamLineup for (compId, teamId, round): 404 when no lineup has been
     // submitted yet, which the form treats as "blank, editable". PUT replaces
     // the lineup. DELETE clears it so an operator can revise.
-    async fetchTeamLineup(compID, teamId, round) {
-        const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/lineups/${round}`);
+    // opts.fallback: best-effort resolution for match-scoring surfaces: when
+    // the exact round has no lineup the server falls back to the closest
+    // saved round (highest <= requested, else highest overall) instead of
+    // 404. The lineup EDITOR must NOT pass this: 404 means "blank, editable".
+    async fetchTeamLineup(compID, teamId, round, opts) {
+        const qs = opts && opts.fallback ? "?fallback=best" : "";
+        const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/lineups/${round}${qs}`);
         if (res.status === 404) return null;
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));

@@ -253,6 +253,20 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	// hasn't moved under us, we hold the lock).
 	prior, _ := e.lookupExistingResultTx(tx, compID, matchID)
 
+	// Kachinuki bout logs merge BY POSITION rather than replace wholesale
+	// (ACID: a client whose local log is behind the server must never
+	// destroy server-appended bouts). Applied here at the entry point,
+	// BEFORE the pool/bracket write primitives, so the rollback path
+	// below (which replays `prior` through those primitives) still
+	// restores the pre-write state exactly.
+	if comp != nil && comp.TeamSize >= 2 && comp.TeamMatchType == state.TeamMatchTypeKachinuki {
+		var stored []state.SubMatchResult
+		if prior != nil {
+			stored = prior.SubResults
+		}
+		result.SubResults = mergeKachinukiSubResults(stored, result.SubResults)
+	}
+
 	// mp-e2k1: For mixed competitions, capture the pre-write standings for
 	// the match's pool so we can compare after the write and detect whether
 	// any qualifying finisher would be displaced from a started knockout match.

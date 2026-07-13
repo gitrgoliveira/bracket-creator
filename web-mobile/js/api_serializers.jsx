@@ -83,6 +83,11 @@ function toBackendMatchResult(patch, match) {
     if (patch.subResults) {
         result.subResults = patch.subResults;
     }
+    // Kachinuki: transient request-only flag marking an explicit operator
+    // "record bout" submit. The server advances the winner-stays sequence
+    // only on flagged writes (handlers_match.go scoreRequestBody); it is
+    // never persisted on the match.
+    if (patch.kachinukiBoutFinal) result.kachinukiBoutFinal = true;
     // mp-62vr: rep-player names for a team daihyosen/tiebreaker rep bout. Only
     // forward non-empty values: the engine preserves a prior pick on empty
     // (backfillMatchIdentity), so omitting an unset side never wipes it.

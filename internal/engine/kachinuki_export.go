@@ -18,6 +18,19 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
+// KachinukiDetailMatches returns the bout-by-bout kachinuki detail for a
+// competition, or an empty slice for fixed-format/individual comps.
+// Exported so sibling workbook builders (internal/export.BuildResultsWorkbook,
+// the "Download results" path) can emit the Kachinuki Detail sheet without
+// duplicating the collection logic that Engine.ExportCompetitionXlsx uses.
+func (e *Engine) KachinukiDetailMatches(id string) ([]helper.KachinukiMatchDetail, error) {
+	comp, err := e.store.LoadCompetition(id)
+	if err != nil {
+		return nil, err
+	}
+	return e.collectKachinukiMatches(id, comp)
+}
+
 // collectKachinukiMatches returns the bout-by-bout detail for every
 // kachinuki match in the competition that has at least one bout. Only
 // invoked for competitions with comp.TeamMatchType == TeamMatchTypeKachinuki;
@@ -52,51 +65,44 @@ func (e *Engine) collectKachinukiMatches(compID string, comp *state.Competition)
 		out = append(out, buildKachinukiDetail(m, fmt.Sprintf("Pool Match %d", i+1), positionByPlayer))
 	}
 
-	// Bracket matches.
+	// Bracket matches: read real SubResults appended by MaybeAdvanceKachinuki.
+	// A bracket match with no SubResults is skipped (renderer guard); one
+	// with SubResults is fed directly to buildKachinukiDetail regardless of
+	// the match decision (exhaustion, daihyosen, fought, etc.).
 	bracket, err := e.store.LoadBracket(compID)
 	if err == nil && bracket != nil {
 		for rIdx, round := range bracket.Rounds {
 			for mIdx, bm := range round {
-				// BracketMatch carries no SubResults; bout logs only
-				// live on pool MatchResults today (see the TODO in
-				// MaybeAdvanceKachinuki). When future work adds bouts to
-				// the bracket store, this loop will pick them up via the
-				// same buildKachinukiDetail helper. For now we render
-				// a single-row section only when the bracket match has
-				// already been finalized via kachinuki-exhaustion, a
-				// summary stub so operators at least see the outcome.
-				if bm.Decision != string(domain.DecisionKachinukiExhaustion) {
+				if len(bm.SubResults) == 0 {
 					continue
 				}
-				stub := state.MatchResult{
-					ID:       bm.ID,
-					SideA:    bm.SideA,
-					SideB:    bm.SideB,
-					Winner:   bm.Winner,
-					Status:   bm.Status,
-					Decision: bm.Decision,
+				mr := state.MatchResult{
+					ID:         bm.ID,
+					SideA:      bm.SideA,
+					SideB:      bm.SideB,
+					Winner:     bm.Winner,
+					Status:     bm.Status,
+					Decision:   bm.Decision,
+					SubResults: bm.SubResults,
 				}
-				detail := buildKachinukiDetail(&stub, fmt.Sprintf("Bracket R%d-M%d", rIdx+1, mIdx+1), positionByPlayer)
-				// No bouts on the bracket stub, skip rather than emit
-				// an empty section (renderer also guards against this).
-				if len(detail.Bouts) == 0 {
-					continue
+				detail := buildKachinukiDetail(&mr, fmt.Sprintf("Bracket R%d-M%d", rIdx+1, mIdx+1), positionByPlayer)
+				if len(detail.Bouts) > 0 {
+					out = append(out, detail)
 				}
-				out = append(out, detail)
 			}
 		}
-		// The bronze (3rd-place) match is a sibling of bracket.Rounds; render
-		// it with the same exhaustion-stub treatment as the Rounds matches.
-		if bm := bracket.ThirdPlaceMatch; bm != nil && bm.Decision == string(domain.DecisionKachinukiExhaustion) {
-			stub := state.MatchResult{
-				ID:       bm.ID,
-				SideA:    bm.SideA,
-				SideB:    bm.SideB,
-				Winner:   bm.Winner,
-				Status:   bm.Status,
-				Decision: bm.Decision,
+		// The 3rd-place match is a sibling of bracket.Rounds; same treatment.
+		if bm := bracket.ThirdPlaceMatch; bm != nil && len(bm.SubResults) > 0 {
+			mr := state.MatchResult{
+				ID:         bm.ID,
+				SideA:      bm.SideA,
+				SideB:      bm.SideB,
+				Winner:     bm.Winner,
+				Status:     bm.Status,
+				Decision:   bm.Decision,
+				SubResults: bm.SubResults,
 			}
-			detail := buildKachinukiDetail(&stub, "3rd Place Match", positionByPlayer)
+			detail := buildKachinukiDetail(&mr, "3rd Place Match", positionByPlayer)
 			if len(detail.Bouts) > 0 {
 				out = append(out, detail)
 			}
@@ -196,20 +202,39 @@ func (e *Engine) buildKachinukiPositionMap(compID string, comp *state.Competitio
 		return out
 	}
 	lineups, err := e.store.LoadTeamLineups(compID)
-	if err != nil || lineups == nil {
+	if err != nil || len(lineups) == 0 {
 		return out
 	}
+	// The lineup editor keys lineups by the team PARTICIPANT ID
+	// (player.id, a UUID) while match sides, and therefore
+	// resolveKachinukiPosition's team argument, carry the team display
+	// NAME. Index every entry under BOTH keys ("match on id OR name") so
+	// UI-saved lineups resolve. A participant load failure only loses the
+	// id-to-name translation; raw TeamID keys are still emitted.
+	idToName := map[string]string{}
+	if participants, perr := e.store.LoadParticipants(compID, comp.EffectiveWithZekkenName()); perr == nil {
+		for _, p := range participants {
+			if p.ID != "" && p.Name != "" {
+				idToName[p.ID] = p.Name
+			}
+		}
+	}
 	for _, lineup := range lineups {
-		teamName := lineup.TeamID
+		teamKeys := []string{lineup.TeamID}
+		if name, ok := idToName[lineup.TeamID]; ok && name != lineup.TeamID {
+			teamKeys = append(teamKeys, name)
+		}
 		for pos, playerName := range lineup.Positions {
 			if playerName == "" {
 				continue
 			}
 			label := formatPositionLabel(pos)
-			if lineup.MatchID != "" {
-				out[matchLineupKey(lineup.MatchID, teamName, playerName)] = label
-			} else {
-				out[lineupKey(teamName, playerName)] = label
+			for _, teamKey := range teamKeys {
+				if lineup.MatchID != "" {
+					out[matchLineupKey(lineup.MatchID, teamKey, playerName)] = label
+				} else {
+					out[lineupKey(teamKey, playerName)] = label
+				}
 			}
 		}
 	}

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -250,6 +251,55 @@ func TestBuildKachinukiPositionMap_WithLineups(t *testing.T) {
 	assert.Equal(t, "Jiho", posMap[lineupKey("RedTeam", "R-Jiho")])
 }
 
+// TestBuildKachinukiPositionMap_ParticipantIDKeyed verifies that lineups
+// saved by the UI (TeamID = team participant id, a UUID) still resolve
+// position labels for match sides that carry the team display NAME.
+// The map must be indexed under both keys so resolveKachinukiPosition,
+// which is called with m.SideA/m.SideB (names), finds the label.
+func TestBuildKachinukiPositionMap_ParticipantIDKeyed(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "pos-map-pid-keyed"
+
+	comp := &state.Competition{
+		ID:            compID,
+		TeamMatchType: state.TeamMatchTypeKachinuki,
+		TeamSize:      5,
+	}
+	require.NoError(t, store.SaveCompetition(comp))
+
+	redID := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: redID, Name: "RedTeam", Dojo: "DojoR"},
+	}))
+
+	// Round-scoped lineup keyed by the participant id (UI shape).
+	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
+		TeamID: redID,
+		Round:  0,
+		Positions: map[domain.Position]string{
+			domain.PosSenpo: "R-Senpo",
+			domain.PosJiho:  "R-Jiho",
+		},
+	}, 5))
+	// Match-scoped lineup keyed by the participant id (mp-825 UI shape).
+	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
+		TeamID:  redID,
+		MatchID: "SF-1",
+		Positions: map[domain.Position]string{
+			domain.PosSenpo: "R-Sub",
+		},
+	}, 5))
+
+	posMap := eng.buildKachinukiPositionMap(compID, comp)
+
+	// Name-keyed lookups: what resolveKachinukiPosition uses with m.SideA/B.
+	assert.Equal(t, "Senpo", posMap[lineupKey("RedTeam", "R-Senpo")])
+	assert.Equal(t, "Jiho", posMap[lineupKey("RedTeam", "R-Jiho")])
+	assert.Equal(t, "Senpo", resolveKachinukiPosition(posMap, "SF-1", "RedTeam", "R-Sub"))
+	// Raw participant-id keys stay available too (match on id OR name).
+	assert.Equal(t, "Senpo", posMap[lineupKey(redID, "R-Senpo")])
+}
+
 // TestBuildKachinukiPositionMap_NilComp verifies the nil guard.
 func TestBuildKachinukiPositionMap_NilComp(t *testing.T) {
 	eng, _, _ := setupTestEngine(t)
@@ -257,8 +307,8 @@ func TestBuildKachinukiPositionMap_NilComp(t *testing.T) {
 	assert.Empty(t, posMap)
 }
 
-// TestCollectKachinukiMatches_WithBracketStub verifies that bracket matches
-// with kachinuki-exhaustion decision are included as stubs in the output.
+// TestCollectKachinukiMatches_WithBracketStub verifies that a bracket match
+// with no SubResults is skipped even if it has a kachinuki-exhaustion decision.
 func TestCollectKachinukiMatches_WithBracketStub(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "kachinuki-bracket-stub"
@@ -269,12 +319,10 @@ func TestCollectKachinukiMatches_WithBracketStub(t *testing.T) {
 		TeamSize:      5,
 	}
 	require.NoError(t, store.SaveCompetition(comp))
-	// No pool matches with sub-results.
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{}))
 
-	// A bracket match with kachinuki-exhaustion decision + sub-results
-	// in the bracket (currently not persisted on BracketMatch, so the
-	// stub has zero bouts and collectKachinukiMatches skips it).
+	// Bracket match with kachinuki-exhaustion decision but no SubResults:
+	// the export skips any bracket match where len(bm.SubResults) == 0.
 	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
 		Rounds: [][]state.BracketMatch{
 			{
@@ -291,8 +339,96 @@ func TestCollectKachinukiMatches_WithBracketStub(t *testing.T) {
 
 	out, err := eng.collectKachinukiMatches(compID, comp)
 	require.NoError(t, err)
-	// BracketMatch has no sub-results → stub has zero bouts → skipped.
-	assert.Empty(t, out, "bracket stub with no bouts should be skipped by the renderer guard")
+	assert.Empty(t, out, "bracket match with no sub-results should be skipped")
+}
+
+// TestCollectKachinukiMatches_BracketWithSubResults verifies that a bracket
+// match carrying real SubResults (from MaybeAdvanceKachinuki) produces a
+// full detail entry with per-bout rows, not a stub.
+func TestCollectKachinukiMatches_BracketWithSubResults(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "kachinuki-bracket-subs"
+
+	comp := &state.Competition{
+		ID:            compID,
+		TeamMatchType: state.TeamMatchTypeKachinuki,
+		TeamSize:      5,
+	}
+	require.NoError(t, store.SaveCompetition(comp))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{}))
+
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				{
+					ID:     "SF1",
+					SideA:  "RedTeam",
+					SideB:  "WhiteTeam",
+					Winner: "RedTeam",
+					Status: state.MatchStatusCompleted,
+					SubResults: []state.SubMatchResult{
+						{Position: 1, SideA: "R-Senpo", SideB: "W-Senpo", Winner: "R-Senpo", Decision: "fought"},
+						{Position: 2, SideA: "R-Senpo", SideB: "W-Jiho", Winner: "W-Jiho", Decision: "fought"},
+						{Position: 3, SideA: "R-Jiho", SideB: "W-Jiho", Winner: "R-Jiho", Decision: "fought"},
+					},
+				},
+			},
+		},
+	}))
+
+	out, err := eng.collectKachinukiMatches(compID, comp)
+	require.NoError(t, err)
+	require.Len(t, out, 1, "bracket match with 3 bouts should produce one detail entry")
+	assert.Equal(t, "Bracket R1-M1", out[0].Label)
+	assert.Equal(t, "RedTeam", out[0].SideATeam)
+	assert.Equal(t, "WhiteTeam", out[0].SideBTeam)
+	assert.Equal(t, "RedTeam", out[0].Winner)
+	require.Len(t, out[0].Bouts, 3, "three bouts should be present")
+	assert.Equal(t, 1, out[0].Bouts[0].Position)
+	assert.Equal(t, "R-Senpo", out[0].Bouts[0].SideAName)
+	assert.Equal(t, "W-Senpo", out[0].Bouts[0].SideBName)
+	assert.Equal(t, "R-Senpo", out[0].Bouts[0].Winner)
+	assert.Equal(t, 3, out[0].Bouts[2].Position)
+}
+
+// TestCollectKachinukiMatches_BronzeWithSubResults verifies that the
+// ThirdPlaceMatch sibling of bracket.Rounds is collected when it carries
+// real SubResults.
+func TestCollectKachinukiMatches_BronzeWithSubResults(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "kachinuki-bronze-subs"
+
+	comp := &state.Competition{
+		ID:            compID,
+		TeamMatchType: state.TeamMatchTypeKachinuki,
+		TeamSize:      5,
+		Naginata:      true,
+	}
+	require.NoError(t, store.SaveCompetition(comp))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{}))
+
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{},
+		ThirdPlaceMatch: &state.BracketMatch{
+			ID:     "m-bronze",
+			SideA:  "RedTeam",
+			SideB:  "BlueTeam",
+			Winner: "BlueTeam",
+			Status: state.MatchStatusCompleted,
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "R1", SideB: "B1", Winner: "B1", Decision: "fought"},
+				{Position: 2, SideA: "R2", SideB: "B1", Winner: "B1", Decision: "fought"},
+			},
+		},
+	}))
+
+	out, err := eng.collectKachinukiMatches(compID, comp)
+	require.NoError(t, err)
+	require.Len(t, out, 1, "bronze match with 2 bouts should produce one detail entry")
+	assert.Equal(t, "3rd Place Match", out[0].Label)
+	assert.Equal(t, "BlueTeam", out[0].Winner)
+	require.Len(t, out[0].Bouts, 2)
+	assert.Equal(t, "B1", out[0].Bouts[0].Winner)
 }
 
 // TestCollectKachinukiMatches_BronzeStub verifies the Naginata 3rd-place

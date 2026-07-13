@@ -120,6 +120,13 @@ type ScoringEngine interface {
 	// competitions. Mirrors engine.Engine.MaybeAdvanceKachinuki.
 	// FR-044, T135.
 	MaybeAdvanceKachinuki(compID, matchID string) (bool, error)
+	// CheckKachinukiPrematureCompletion rejects a completed-status write
+	// that would finalize a kachinuki match while both rosters still
+	// have players and no daihyosen resolves the tie
+	// (engine.ErrKachinukiPrematureCompletion, mapped to 409). No-op for
+	// non-kachinuki competitions and non-completed writes. Mirrors
+	// engine.Engine.CheckKachinukiPrematureCompletion.
+	CheckKachinukiPrematureCompletion(compID, matchID string, result *state.MatchResult) error
 }
 
 // CompetitorStatusStore is the consumer-boundary view of state.Store

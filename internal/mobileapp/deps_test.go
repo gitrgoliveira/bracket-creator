@@ -86,6 +86,10 @@ func (stubScoringEngine) MaybeAdvanceKachinuki(string, string) (bool, error) {
 	return false, nil
 }
 
+func (stubScoringEngine) CheckKachinukiPrematureCompletion(string, string, *state.MatchResult) error {
+	return nil
+}
+
 // stubEligibilityEngine is a controllable implementation of EligibilityEngine
 // for handler tests. Set Err to return an error; Status to return a status.
 type stubEligibilityEngine struct {

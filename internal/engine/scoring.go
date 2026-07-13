@@ -356,6 +356,20 @@ func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId strin
 	// ineligibility write below fails with AlreadyIneligibleError.
 	prior, _ := e.lookupExistingResult(compId, matchId)
 
+	// Kachinuki bout logs merge BY POSITION rather than replace wholesale
+	// (ACID: a client whose local log is behind the server must never
+	// destroy server-appended bouts). Applied here at the entry point,
+	// BEFORE the pool/bracket write primitives, so the rollback path
+	// below (which replays `prior` through those primitives) still
+	// restores the pre-write state exactly.
+	if comp != nil && comp.TeamSize >= 2 && comp.TeamMatchType == state.TeamMatchTypeKachinuki {
+		var stored []state.SubMatchResult
+		if prior != nil {
+			stored = prior.SubResults
+		}
+		result.SubResults = mergeKachinukiSubResults(stored, result.SubResults)
+	}
+
 	var sideMismatch bool
 	err := e.withPoolMatch(compId, matchId, func(r *state.MatchResult) {
 		if reconcileSides(result, r.SideA, r.SideB) {
@@ -907,6 +921,16 @@ func (e *Engine) recordBracketMatchResult(compId string, matchId string, result 
 					status := result.Status
 					if status == "" {
 						status = state.MatchStatusCompleted
+					}
+					// Reject completion of a bracket match when no winner is
+					// recorded. For kachinuki, this happens when both sides
+					// exhaust simultaneously (simultaneous hikiwake exhaustion);
+					// the operator must resolve via daihyosen before marking
+					// the match Completed. Applies to all bracket match types to
+					// prevent an indeterminate result from propagating into the
+					// next round. AMENDMENT 2 guard.
+					if status == state.MatchStatusCompleted && result.Winner == "" {
+						return validationErrorf("bracket match %s: cannot mark completed with no winner; resolve via daihyosen first", matchId)
 					}
 					bracket.Rounds[rIdx][mIdx].Status = status
 					// Stamp the applied write's server-relative time so the next

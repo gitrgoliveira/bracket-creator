@@ -1698,3 +1698,40 @@ func TestRevertBracketMatch_StaleWriteFenced(t *testing.T) {
 	assert.Empty(t, b.Rounds[0][0].Winner,
 		"revert fence: stale replay must NOT set a winner")
 }
+
+// TestRecordMatchResult_BracketCompletedWithNoWinnerRejected pins
+// AMENDMENT 2: the server must reject a Completed bracket (elimination)
+// match when the Winner field is empty. This guards against an operator
+// accidentally finishing a kachinuki simultaneous-exhaustion match before
+// the daihyosen has resolved it.
+func TestRecordMatchResult_BracketCompletedWithNoWinnerRejected(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+
+	compID := "bracket-no-winner"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:            compID,
+		Name:          "Kachinuki No Winner",
+		TeamMatchType: state.TeamMatchTypeKachinuki,
+		TeamSize:      5,
+		Format:        state.CompFormatMixed,
+	}))
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{{ID: "SF1", SideA: "TeamA", SideB: "TeamB", Status: state.MatchStatusRunning}},
+		},
+	}))
+
+	err := eng.RecordMatchResult(compID, "SF1", &state.MatchResult{
+		Winner: "", // no winner yet; daihyosen pending
+		Status: state.MatchStatusCompleted,
+	})
+	require.Error(t, err, "completing a bracket match with no winner must be rejected")
+	var valErr *ValidationError
+	require.ErrorAs(t, err, &valErr, "error must be a ValidationError (HTTP 409 in handler)")
+
+	// Match must remain in its prior state.
+	stored, err2 := store.LoadBracket(compID)
+	require.NoError(t, err2)
+	assert.Equal(t, state.MatchStatusRunning, stored.Rounds[0][0].Status, "status must not change")
+	assert.Empty(t, stored.Rounds[0][0].Winner, "winner must still be empty")
+}

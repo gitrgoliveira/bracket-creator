@@ -204,6 +204,77 @@ func (s *Store) DeleteTeamLineup(compID, teamID string, round int) error {
 	return s.saveTeamLineupsLocked(compID, current, s.directWrite)
 }
 
+// FindBestLineup returns the most relevant lineup for teamID from a pre-loaded
+// lineups map, following the AMENDMENT 1 priority order:
+//  1. Match-scoped entry keyed by matchID (exact match for the specific bout).
+//  2. Round-scoped: the highest round <= maxRound (the current match's round,
+//     e.g. 0 for pool matches, bracket round index for knockout matches).
+//  3. Round-scoped: the highest round overall (fallback when no saved lineup
+//     has round <= maxRound, e.g. operator saved a bracket-phase lineup but the
+//     current match is a pool match, or vice versa).
+//
+// Returns the lineup and true when found, the zero value and false otherwise.
+// Callers should use LoadTeamLineups to obtain the map before calling this.
+func FindBestLineup(lineups map[string]domain.TeamLineup, teamID, matchID string, maxRound int) (domain.TeamLineup, bool) {
+	return FindBestLineupAny(lineups, []string{teamID}, matchID, maxRound)
+}
+
+// FindBestLineupAny is FindBestLineup for a set of candidate team keys.
+// The lineup editor keys lineups by the team PARTICIPANT ID (player.id)
+// while match sides carry the team display NAME, so callers resolving a
+// lineup for a match side must try both keys ("match on id OR name").
+// The AMENDMENT 1 priority tiers apply ACROSS the whole key set: a
+// match-scoped entry under any key beats a round-scoped entry under any
+// key. Within a tier, ties between keys resolve to the first teamID in
+// the slice that has an entry.
+func FindBestLineupAny(lineups map[string]domain.TeamLineup, teamIDs []string, matchID string, maxRound int) (domain.TeamLineup, bool) {
+	// 1. Match-scoped (exact), first key wins.
+	if matchID != "" {
+		for _, teamID := range teamIDs {
+			key := teamLineupMatchKey(teamID, matchID)
+			if l, ok := lineups[key]; ok {
+				return l, true
+			}
+		}
+	}
+	isCandidate := func(id string) bool {
+		for _, teamID := range teamIDs {
+			if id == teamID {
+				return true
+			}
+		}
+		return false
+	}
+	// 2. Round-scoped: highest round <= maxRound.
+	// 3. Round-scoped: highest round overall (AMENDMENT 1 fallback).
+	var best domain.TeamLineup
+	hasBest := false
+	var fallback domain.TeamLineup
+	hasFallback := false
+	for _, l := range lineups {
+		if l.MatchID != "" || !isCandidate(l.TeamID) {
+			continue // skip wrong team or match-scoped entries
+		}
+		if l.Round <= maxRound {
+			if !hasBest || l.Round > best.Round {
+				best = l
+				hasBest = true
+			}
+		}
+		if !hasFallback || l.Round > fallback.Round {
+			fallback = l
+			hasFallback = true
+		}
+	}
+	if hasBest {
+		return best, true
+	}
+	if hasFallback {
+		return fallback, true
+	}
+	return domain.TeamLineup{}, false
+}
+
 // DeleteTeamLineupForMatch removes the match-scoped lineup for
 // (teamID, matchID) if present (mp-825). Lineups are always deletable,
 // including while a match is running.

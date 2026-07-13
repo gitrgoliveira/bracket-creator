@@ -214,7 +214,7 @@ describe('UI Components', () => {
       expect(window.engiPairParts('  Alice   -   Bob  ')).toEqual(['Alice', 'Bob']);
     });
 
-    it('returns ["", ""]-shaped output for a name with no separator', () => {
+    it('preserves the trimmed name as member1 with an empty member2 when there is no separator', () => {
       expect(window.engiPairParts('  Solo  ')).toEqual(['Solo', '']);
     });
   });

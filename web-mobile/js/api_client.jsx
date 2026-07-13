@@ -543,9 +543,26 @@ function _commitEnqueue(key, descriptor) {
  * Enqueue a running-status write for offline-resilient delivery.
  * Last-write-wins per matchId. Running writes always PUT to the score endpoint,
  * so method/url are omitted: _flushQueue reconstructs that path for terminal=false.
+ *
+ * kachinukiBoutFinal is an edge-triggered COMMAND (the operator pressed
+ * "Record bout": the server must run kachinuki advancement once), while the
+ * rest of the payload is level-triggered state that LWW may coalesce freely.
+ * If the queued entry for this match carries the flag and the superseding
+ * write does not (a later autosave while still offline), carry the flag
+ * forward, otherwise the reconnect flush would deliver the score but silently
+ * skip advancement and the winner-stays sequence would stall until the
+ * operator pressed Record bout again. Safe to re-deliver: MaybeAdvanceKachinuki
+ * bails when the last numbered bout has no outcome or the match is completed.
  */
 function enqueueRunningWrite(compID, matchID, payload, password) {
-    _commitEnqueue(_revKey(compID, matchID), {
+    const key = _revKey(compID, matchID);
+    const prev = _writeQueue.get(key);
+    if (prev && !prev.terminal && prev.kind === 'score'
+        && prev.payload && prev.payload.kachinukiBoutFinal
+        && payload && !payload.kachinukiBoutFinal) {
+        payload = { ...payload, kachinukiBoutFinal: true };
+    }
+    _commitEnqueue(key, {
         compID, matchID, payload, password,
         kind: 'score', terminal: false,
         enqueuedAt: Date.now(),

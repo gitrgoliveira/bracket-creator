@@ -916,15 +916,8 @@ func (e *Engine) recordBracketMatchResult(compId string, matchId string, result 
 					if status == "" {
 						status = state.MatchStatusCompleted
 					}
-					// Reject completion of a bracket match when no winner is
-					// recorded. For kachinuki, this happens when both sides
-					// exhaust simultaneously (simultaneous hikiwake exhaustion);
-					// the operator must resolve via daihyosen before marking
-					// the match Completed. Applies to all bracket match types to
-					// prevent an indeterminate result from propagating into the
-					// next round. AMENDMENT 2 guard.
-					if status == state.MatchStatusCompleted && result.Winner == "" {
-						return validationErrorf("bracket match %s: cannot mark completed with no winner; resolve via daihyosen first", matchId)
+					if err := validateBracketCompletion(matchId, status, result.Winner); err != nil {
+						return err
 					}
 					bracket.Rounds[rIdx][mIdx].Status = status
 					// Stamp the applied write's server-relative time so the next
@@ -1031,6 +1024,20 @@ func applyBracketWrite(result *state.MatchResult, storedModifiedAt int64) bool {
 	return domain.ApplyByTimestamp(result.ModifiedAt, storedModifiedAt)
 }
 
+// validateBracketCompletion rejects a Completed bracket-family write with no
+// winner. For kachinuki this happens when both sides exhaust simultaneously
+// (simultaneous hikiwake exhaustion); the operator must resolve via daihyosen
+// before marking the match Completed. Applies to all bracket match types (an
+// elimination result must never be indeterminate) and is the single AMENDMENT 2
+// choke point shared by recordBracketMatchResult, recordBracketMatchResultTx,
+// and applyBronzeMatchResult so the twins cannot drift.
+func validateBracketCompletion(matchID string, status state.MatchStatus, winner string) error {
+	if status == state.MatchStatusCompleted && winner == "" {
+		return validationErrorf("bracket match %s: cannot mark completed with no winner; resolve via daihyosen first", matchID)
+	}
+	return nil
+}
+
 // applyBronzeMatchResult writes result into the bronze (3rd-place) playoff
 // match, mirroring the per-round bracket-match write in recordBracketMatchResult
 // but without any downstream propagation (the bronze match has no next round).
@@ -1052,6 +1059,9 @@ func applyBronzeMatchResult(bm *state.BracketMatch, result *state.MatchResult) e
 	status := result.Status
 	if status == "" {
 		status = state.MatchStatusCompleted
+	}
+	if err := validateBracketCompletion(bm.ID, status, result.Winner); err != nil {
+		return err
 	}
 	bm.Winner = result.Winner
 	bm.Status = status

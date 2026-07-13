@@ -80,6 +80,12 @@ func (e *Engine) recordBracketMatchResultTx(tx state.StoreTx, compID, matchID st
 					if status == "" {
 						status = state.MatchStatusCompleted
 					}
+					// AMENDMENT 2 twin parity with recordBracketMatchResult
+					// (scoring.go): the production score handler routes through
+					// this tx twin, so the guard must live on both paths.
+					if err := validateBracketCompletion(matchID, status, result.Winner); err != nil {
+						return err
+					}
 					bracket.Rounds[rIdx][mIdx].Status = status
 					if result.ModifiedAt != 0 {
 						bracket.Rounds[rIdx][mIdx].ModifiedAt = result.ModifiedAt

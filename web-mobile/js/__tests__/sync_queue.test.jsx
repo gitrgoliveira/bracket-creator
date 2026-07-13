@@ -152,6 +152,59 @@ describe('enqueueRunningWrite: last-write-wins semantics', () => {
         expect(sentPayloads[0].rev).toBe(2);
     });
 
+    it('preserves a queued kachinukiBoutFinal flag when a later unflagged write supersedes it', async () => {
+        // "Record bout" is an edge-triggered command riding the LWW queue: a
+        // later offline autosave for the same match must not silently drop
+        // the pending advancement flag, else the reconnect flush delivers the
+        // score but the winner-stays sequence stalls.
+        let callCount = 0;
+        const sentPayloads = [];
+
+        global.fetch = vi.fn().mockImplementation((_url, opts) => {
+            callCount++;
+            if (callCount <= 2) {
+                // Both immediate flush attempts fail (still offline).
+                return Promise.reject(new TypeError('network error'));
+            }
+            sentPayloads.push(JSON.parse(opts.body));
+            return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+        });
+
+        // Operator presses "Record bout" while offline: flagged write queued.
+        enqueueRunningWrite('c1', 'm1', { status: 'running', rev: 1, kachinukiBoutFinal: true }, 'pw');
+        await flushMicrotasks(); // flush fails, entry retained
+
+        // A later autosave (unflagged) supersedes the queued entry.
+        enqueueRunningWrite('c1', 'm1', { status: 'running', rev: 2, ipponsA: ['M'] }, 'pw');
+        await flushMicrotasks(); // flush fails again
+
+        await tick(600); // reconnect: backoff retry succeeds
+
+        expect(sentPayloads.length).toBe(1);
+        // Newest state wins (LWW) AND the pending advancement flag survives.
+        expect(sentPayloads[0].rev).toBe(2);
+        expect(sentPayloads[0].kachinukiBoutFinal).toBe(true);
+    });
+
+    it('does not fabricate the flag when no flagged write was queued', async () => {
+        let callCount = 0;
+        const sentPayloads = [];
+        global.fetch = vi.fn().mockImplementation((_url, opts) => {
+            callCount++;
+            if (callCount === 1) return Promise.reject(new TypeError('network error'));
+            sentPayloads.push(JSON.parse(opts.body));
+            return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+        });
+
+        enqueueRunningWrite('c1', 'm1', { status: 'running', rev: 1 }, 'pw');
+        await flushMicrotasks();
+        enqueueRunningWrite('c1', 'm1', { status: 'running', rev: 2 }, 'pw');
+        await flushMicrotasks();
+
+        expect(sentPayloads.length).toBe(1);
+        expect(sentPayloads[0].kachinukiBoutFinal).toBeUndefined();
+    });
+
     it('queues different matchIds independently', async () => {
         let attempt = 0;
         const sentPayloads = [];

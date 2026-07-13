@@ -455,6 +455,16 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			c.JSON(http.StatusBadRequest, gin.H{"error": "quick-score is not supported for engi competitions"})
 			return
 		}
+		// Kachinuki matches are scored one bout at a time via the score
+		// endpoint (server-appended winner-stays bout log). Quick-score
+		// synthesises a positional log and writes it wholesale through the
+		// plain RecordMatchResult path, which has no kachinuki merge and no
+		// premature-completion check, so a single call would destroy a live
+		// winner-stays sequence. Same incompatibility class as engi: reject.
+		if comp != nil && comp.TeamMatchType == state.TeamMatchTypeKachinuki {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "quick-score is not supported for kachinuki competitions; score bouts individually"})
+			return
+		}
 
 		// Determine team winner per kendo rules: most individual wins wins.
 		// winnerSide records the WINNING SIDE (not just the name) so the

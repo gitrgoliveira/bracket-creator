@@ -123,7 +123,7 @@ nav:
           - version: user-guide/commands/version.md
       - Legacy Web UI:
           - Overview: user-guide/organisers/web-ui.md
-          - serve command: user-guide/commands/serve.md
+          - serve: user-guide/commands/serve.md
   - Developer guide:
       - Code of conduct: dev-guide/code_of_conduct.md
       - Contributing: dev-guide/contributing.md

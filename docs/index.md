@@ -76,7 +76,7 @@ Three programs ship in the single binary. The three ways to run a tournament dec
 
     [Tournament app guide](user-guide/organisers/run-tournament.md)
 
--   **Legacy web UI**
+-   **Legacy Web UI**
 
     ---
 

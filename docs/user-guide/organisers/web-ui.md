@@ -1,6 +1,6 @@
 # Legacy Web UI
 
-The legacy web UI is the **organiser's** tool for the days before the event: turn a roster into a print-ready bracket, no command line required. It is a standalone one-shot bracket generator, separate from the [tournament app](run-tournament.md), which takes over on the day for scorers, competitors, and spectators.
+The Legacy Web UI is the **organiser's** tool for the days before the event: turn a roster into a print-ready bracket, no command line required. It is a standalone one-shot bracket generator, separate from the [tournament app](run-tournament.md), which takes over on the day for scorers, competitors, and spectators.
 
 Start it with the [`serve` command](../commands/serve.md):
 

@@ -416,6 +416,15 @@ describe('validateRosterRows', () => {
     expect(problems[0].reason).not.toMatch(/\bneed\b/i);
   });
 
+  it('engi+zekken dojo-missing hint names the combined pair + pair-zekken format', () => {
+    // Copilot (PR #351): the zekken hint said "Name, Zekken, Dojo" even for
+    // engi comps, whose roster is "Name 1 - Name 2, Zekken 1 - Zekken 2, Dojo".
+    const parsed = [{ name: 'Emi Sasaki - Ren Fujita', displayName: 'SASAKI - FUJITA', dojo: '' }];
+    const problems = validateRosterRows(parsed, true, true);
+    expect(problems[0].reason).toMatch(/missing dojo/);
+    expect(problems[0].reason).toMatch(/Name 1 - Name 2, Zekken 1 - Zekken 2, Dojo/);
+  });
+
   it('handles null/empty input defensively', () => {
     expect(validateRosterRows(null, true)).toEqual([]);
     expect(validateRosterRows([], false)).toEqual([]);

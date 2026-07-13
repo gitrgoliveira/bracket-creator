@@ -218,9 +218,12 @@ function validateRosterRows(parsed, withZekkenName, engi) {
       return;
     }
     if (!dojo) {
-      const reason = withZekkenName
-        ? "missing dojo (zekken competitions use Name, Zekken, Dojo)"
-        : "missing dojo";
+      let reason = "missing dojo";
+      if (withZekkenName) {
+        reason = engi
+          ? "missing dojo (engi zekken competitions use Name 1 - Name 2, Zekken 1 - Zekken 2, Dojo)"
+          : "missing dojo (zekken competitions use Name, Zekken, Dojo)";
+      }
       problems.push({ index: i, name, reason });
     }
   });

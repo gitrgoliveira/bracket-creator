@@ -311,9 +311,7 @@ func (o *poolOptions) createPools(entries []string) error {
 	// round and no semifinal, so no bronze). Matches the engine guard in
 	// internal/engine/bracket.go: comp.Naginata && len(bracket.Rounds) >= 2.
 	if o.naginata && len(eliminationMatchRounds) >= 2 {
-		semiA, semiB := helper.SemifinalMatchNumbers(eliminationMatchRounds)
-		bronzeEndRow := helper.PrintThirdPlaceBlock(f, 1, nextRow, o.teamMatches, true, o.engi, semiA, semiB, elimMatchWinners)
-		helper.SetEliminationPrintArea(f, helper.SheetEliminationMatches, o.courts, bronzeEndRow-1)
+		helper.PrintBronzeBlockWithPrintArea(f, nextRow, o.teamMatches, true, o.engi, o.courts, eliminationMatchRounds, elimMatchWinners)
 	}
 	helper.FillEstimations(f, int64(len(pools)), int64(totalPoolMatches), int64(o.teamMatches), int64(len(finals)-1), o.courts)
 

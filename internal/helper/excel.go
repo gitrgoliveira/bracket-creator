@@ -1324,6 +1324,16 @@ func PrintThirdPlaceBlock(f *excelize.File, courtStartCol, startRow, numTeamMatc
 	return startRow + matchHeight
 }
 
+// PrintBronzeBlockWithPrintArea renders the naginata 3rd-place block starting at
+// startRow (deriving the two semifinal match numbers from rounds) and extends the
+// Elimination Matches print area to cover it. It bundles the three-call bronze
+// protocol shared by the create-pools, create-playoffs, and results-workbook paths.
+func PrintBronzeBlockWithPrintArea(f *excelize.File, startRow, numTeamMatches int, mirror, engi bool, numCourts int, rounds [][]*Node, matchWinners map[string]MatchWinner) {
+	semiA, semiB := SemifinalMatchNumbers(rounds)
+	bronzeEndRow := PrintThirdPlaceBlock(f, 1, startRow, numTeamMatches, mirror, engi, semiA, semiB, matchWinners)
+	SetEliminationPrintArea(f, SheetEliminationMatches, numCourts, bronzeEndRow-1)
+}
+
 func printSingleEliminationMatch(f *excelize.File, sheetName string, eliminationMatch *Node, poolMatchWinners map[string]MatchWinner, matchWinners map[string]MatchWinner, colNames matchColumnNames, matchRow int, round int, numTeamMatches int, styles matchStyles, mirror bool, engi bool) {
 	startColName := colNames.startColName
 	middleColName := colNames.middleColName

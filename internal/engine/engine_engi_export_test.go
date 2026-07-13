@@ -83,13 +83,8 @@ func TestExportCompetitionXlsx_NaginataThirdPlaceSlot(t *testing.T) {
 	rows, err := f.GetRows(helper.SheetEliminationMatches)
 	require.NoError(t, err)
 
-	assert.True(t, hasCellValue(rows, helper.ThirdPlaceLabel),
+	assert.GreaterOrEqual(t, bctest.FindCellRow(rows, helper.ThirdPlaceLabel), 0,
 		"blank-template export for a naginata competition must have a '3rd Place' slot on the Elimination Matches sheet")
-}
-
-// hasCellValue reports whether any cell in rows equals val.
-func hasCellValue(rows [][]string, val string) bool {
-	return bctest.FindCellRow(rows, val) >= 0
 }
 
 // TestExportCompetitionXlsx_NaginataThirdPlacePrintAreaAndLayout verifies that
@@ -192,11 +187,11 @@ func TestExportCompetitionXlsx_Engi(t *testing.T) {
 	pmRows, err := f.GetRows(helper.SheetPoolMatches)
 	require.NoError(t, err)
 
-	assert.True(t, hasCellValue(pmRows, helper.ColHeaderFlags),
+	assert.GreaterOrEqual(t, bctest.FindCellRow(pmRows, helper.ColHeaderFlags), 0,
 		"Pool Matches standings must carry %q header for an engi competition", helper.ColHeaderFlags)
-	assert.False(t, hasCellValue(pmRows, "PW"),
+	assert.Equal(t, -1, bctest.FindCellRow(pmRows, "PW"),
 		"Pool Matches standings must NOT carry 'PW' header for an engi competition")
-	assert.False(t, hasCellValue(pmRows, "PL"),
+	assert.Equal(t, -1, bctest.FindCellRow(pmRows, "PL"),
 		"Pool Matches standings must NOT carry 'PL' header for an engi competition")
 
 	// --- Data sheet: the combined pair name appears in the Name column ---

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -21,6 +22,14 @@ import (
 // makePlayer creates a domain.Player for tests.
 func makePlayer(name string) domain.Player {
 	return domain.Player{ID: name, Name: name, Dojo: "Dojo"}
+}
+
+// make2PlayerPool builds a pool whose single match's SideA/SideB point into
+// pool.Players (not local copies) so playerMatchRows resolves correctly.
+func make2PlayerPool(name, a, b string) helper.Pool {
+	p := helper.Pool{PoolName: name, Players: []helper.Player{makePlayer(a), makePlayer(b)}}
+	p.Matches = []helper.Match{{SideA: &p.Players[0], SideB: &p.Players[1]}}
+	return p
 }
 
 // testSetup creates a temp store + engine and saves a minimal competition.
@@ -662,17 +671,11 @@ func TestBuildResultsWorkbook_TwoCourts(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(comp))
 
 	// Four pools across two courts.
-	// SideA/SideB point into pool.Players so the playerMatchRows map resolves correctly.
-	makeP := func(name string, p1, p2 string) helper.Pool {
-		p := helper.Pool{PoolName: name, Players: []helper.Player{makePlayer(p1), makePlayer(p2)}}
-		p.Matches = []helper.Match{{SideA: &p.Players[0], SideB: &p.Players[1]}}
-		return p
-	}
 	pools := []helper.Pool{
-		makeP("Pool A", "Alice", "Bob"),
-		makeP("Pool B", "Charlie", "Dave"),
-		makeP("Pool C", "Eve", "Frank"),
-		makeP("Pool D", "Grace", "Hank"),
+		make2PlayerPool("Pool A", "Alice", "Bob"),
+		make2PlayerPool("Pool B", "Charlie", "Dave"),
+		make2PlayerPool("Pool C", "Eve", "Frank"),
+		make2PlayerPool("Pool D", "Grace", "Hank"),
 	}
 	require.NoError(t, store.SavePools(compID, pools))
 
@@ -808,18 +811,12 @@ func TestBuildResultsWorkbook_MultiCourtStandingsColumns(t *testing.T) {
 	comp := &state.Competition{ID: compID, Name: "MC Standings", Courts: []string{"A", "B"}}
 	require.NoError(t, store.SaveCompetition(comp))
 
-	// makePFixed creates a pool with SideA/SideB pointing into pool.Players, not local copies.
-	makePFixed := func(name, a, b string) helper.Pool {
-		p := helper.Pool{PoolName: name, Players: []helper.Player{makePlayer(a), makePlayer(b)}}
-		p.Matches = []helper.Match{{SideA: &p.Players[0], SideB: &p.Players[1]}}
-		return p
-	}
 	// Pools 0,1 -> court A; pools 2,3 -> court B (contiguous assignment).
 	pools := []helper.Pool{
-		makePFixed("Pool A", "Alice", "Bob"),
-		makePFixed("Pool B", "Charlie", "Dave"),
-		makePFixed("Pool C", "Eve", "Frank"),
-		makePFixed("Pool D", "Grace", "Hank"),
+		make2PlayerPool("Pool A", "Alice", "Bob"),
+		make2PlayerPool("Pool B", "Charlie", "Dave"),
+		make2PlayerPool("Pool C", "Eve", "Frank"),
+		make2PlayerPool("Pool D", "Grace", "Hank"),
 	}
 	require.NoError(t, store.SavePools(compID, pools))
 
@@ -863,18 +860,13 @@ func TestBuildResultsWorkbook_BracketTwoCourts(t *testing.T) {
 	comp.Format = state.CompFormatMixed
 	require.NoError(t, store.SaveCompetition(comp))
 
-	makeP := func(name, a, b string) helper.Pool {
-		p := helper.Pool{PoolName: name, Players: []helper.Player{makePlayer(a), makePlayer(b)}}
-		p.Matches = []helper.Match{{SideA: &p.Players[0], SideB: &p.Players[1]}}
-		return p
-	}
 	// 4 pools (2 per court) → 4 finalists → a semifinal round of 2 matches, one
 	// per court, rendered side-by-side on the same rows.
 	pools := []helper.Pool{
-		makeP("Pool A", "Alice", "Bob"),
-		makeP("Pool B", "Charlie", "Dave"),
-		makeP("Pool C", "Eve", "Frank"),
-		makeP("Pool D", "Grace", "Hank"),
+		make2PlayerPool("Pool A", "Alice", "Bob"),
+		make2PlayerPool("Pool B", "Charlie", "Dave"),
+		make2PlayerPool("Pool C", "Eve", "Frank"),
+		make2PlayerPool("Pool D", "Grace", "Hank"),
 	}
 	require.NoError(t, store.SavePools(compID, pools))
 	require.NoError(t, store.SavePoolMatches(compID, nil))
@@ -3090,14 +3082,8 @@ func TestBuildResultsWorkbook_EngiNaginataThirdPlaceFlags(t *testing.T) {
 	require.GreaterOrEqual(t, thirdPlaceRow, 0, "'3rd Place' header row must be found")
 	scoreRowIdx := thirdPlaceRow + 2
 	require.Less(t, scoreRowIdx, len(rows), "bronze score row (header+2) must exist")
-	found5 := false
-	for _, cell := range rows[scoreRowIdx] {
-		if cell == "5" {
-			found5 = true
-			break
-		}
-	}
-	assert.True(t, found5, "bronze score row must contain '5' (FlagsA=5 winner count)")
+	assert.True(t, slices.Contains(rows[scoreRowIdx], "5"),
+		"bronze score row must contain '5' (FlagsA=5 winner count)")
 
 	// Also assert entrant names appear in the bronze score row.
 	var engiLeftName, engiRightName string

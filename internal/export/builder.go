@@ -164,9 +164,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 		// Naginata competitions have a bronze (3rd-place) match: render it as a
 		// separate block immediately after the last elimination round.
 		if bracket != nil && bracket.ThirdPlaceMatch != nil {
-			semiA, semiB := helper.SemifinalMatchNumbers(eliminationMatchRounds)
-			bronzeEndRow := helper.PrintThirdPlaceBlock(f, 1, nextRow, comp.TeamSize, comp.Mirror, comp.Engi, semiA, semiB, elimMatchWinners)
-			helper.SetEliminationPrintArea(f, helper.SheetEliminationMatches, numCourts, bronzeEndRow-1)
+			helper.PrintBronzeBlockWithPrintArea(f, nextRow, comp.TeamSize, comp.Mirror, comp.Engi, numCourts, eliminationMatchRounds, elimMatchWinners)
 		}
 
 		// Overlay literal scores from the live bracket state.

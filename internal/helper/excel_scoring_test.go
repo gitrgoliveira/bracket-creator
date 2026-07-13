@@ -659,6 +659,18 @@ func TestTeamIVILITPWPLTableFormulas(t *testing.T) {
 	}
 }
 
+// setEngi3PlayerMatchScores writes the shared 3-player engi round-robin flag
+// scores (Alice beats Bob 3-2; Carol beats Bob 4-1; Alice beats Carol 5-0) used
+// by the engi pool-scoring formula tests.
+func setEngi3PlayerMatchScores(f *excelize.File) {
+	f.SetCellValue(SheetPoolMatches, "B4", 3)
+	f.SetCellValue(SheetPoolMatches, "F4", 2)
+	f.SetCellValue(SheetPoolMatches, "B5", 1)
+	f.SetCellValue(SheetPoolMatches, "F5", 4)
+	f.SetCellValue(SheetPoolMatches, "B6", 5)
+	f.SetCellValue(SheetPoolMatches, "F6", 0)
+}
+
 // TestEngiPoolScoringFormulas_MultiMatch verifies that the W/Flags formula
 // cells accumulate correctly across multiple matches per player in a 3-player
 // engi round-robin pool. Each player appears in two matches; the formulas must
@@ -676,15 +688,7 @@ func TestTeamIVILITPWPLTableFormulas(t *testing.T) {
 func TestEngiPoolScoringFormulas_MultiMatch(t *testing.T) {
 	f := scoringSetup3PlayerRoundRobin(t, true)
 
-	// Alice beats Bob 3-2.
-	f.SetCellValue(SheetPoolMatches, "B4", 3) // Alice (left) flags
-	f.SetCellValue(SheetPoolMatches, "F4", 2) // Bob   (right) flags
-	// Carol beats Bob 4-1: Match 1 row is Bob (left) vs Carol (right).
-	f.SetCellValue(SheetPoolMatches, "B5", 1) // Bob   (left) flags
-	f.SetCellValue(SheetPoolMatches, "F5", 4) // Carol (right) flags
-	// Alice beats Carol 5-0: Match 2 row is Alice (left) vs Carol (right).
-	f.SetCellValue(SheetPoolMatches, "B6", 5) // Alice (left) flags
-	f.SetCellValue(SheetPoolMatches, "F6", 0) // Carol (right) flags
+	setEngi3PlayerMatchScores(f)
 
 	t.Run("Alice wins both accumulates W=2 Flags=8", func(t *testing.T) {
 		assert.Equal(t, "2", calcScore(t, f, "B9"), "Alice W")
@@ -722,12 +726,7 @@ func TestEngiPoolScoringFormulas_MultiMatch(t *testing.T) {
 func TestEngiScoreAndRankFormulas(t *testing.T) {
 	f := scoringSetup3PlayerRoundRobin(t, true)
 
-	f.SetCellValue(SheetPoolMatches, "B4", 3)
-	f.SetCellValue(SheetPoolMatches, "F4", 2)
-	f.SetCellValue(SheetPoolMatches, "B5", 1)
-	f.SetCellValue(SheetPoolMatches, "F5", 4)
-	f.SetCellValue(SheetPoolMatches, "B6", 5)
-	f.SetCellValue(SheetPoolMatches, "F6", 0)
+	setEngi3PlayerMatchScores(f)
 
 	t.Run("hidden Score cells", func(t *testing.T) {
 		assert.Equal(t, "2000008", calcScore(t, f, "U9"), "Alice Score (2*1000000+8)")

@@ -31,7 +31,7 @@ func countScoringIppons(ippons []string) int {
 
 // TeamResultFrom aggregates sub-bouts into IV and PW per side. It is the single
 // source of truth for the team-match summary: the daihyosen placeholder
-// (Position == DaihyosenSubPosition (-1)) is skipped so a re-validated tie does
+// (Position <= DaihyosenSubPosition, the -1 daihyosen or any negative) is skipped so a re-validated tie does
 // not double-count, IV counts sub-bout winners via the same side-matching
 // fallback as scoring (winner may carry the match-level or sub-level side name),
 // and PW counts every scored ippon regardless of bout outcome (a drawn bout where
@@ -47,8 +47,12 @@ func TeamResultFrom(subResults []SubMatchResult, sideAName, sideBName string) *T
 	line := &TeamResultLine{}
 	hasBout := false
 	for _, sub := range subResults {
-		if sub.Position == DaihyosenSubPosition {
-			continue // skip the daihyosen placeholder itself
+		if sub.Position <= DaihyosenSubPosition {
+			// Skip the daihyosen placeholder (DaihyosenSubPosition, -1) and,
+			// defensively, any other negative position: real bouts are 1..N,
+			// so a Position < -1 is malformed input and must not count into
+			// IV/PW.
+			continue
 		}
 		hasBout = true
 		switch {

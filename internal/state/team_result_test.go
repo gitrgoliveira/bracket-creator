@@ -36,6 +36,19 @@ func TestTeamResultFrom(t *testing.T) {
 		assert.Equal(t, &TeamResultLine{ShiroIV: 1, AkaIV: 0, ShiroPW: 2, AkaPW: 1}, got)
 	})
 
+	t.Run("malformed negative position (< -1) defensively excluded", func(t *testing.T) {
+		// Real bouts are 1..N and the daihyosen is -1; any Position < -1 is
+		// malformed input and must not be counted into IV/PW (guards a
+		// stale/malicious payload).
+		subs := []SubMatchResult{
+			{Position: 0, Winner: "TeamB", SideA: "P1", SideB: "P2", IpponsA: []string{"M"}, IpponsB: []string{"M"}},
+			{Position: -2, Winner: "TeamA", SideA: "P3", SideB: "P4", IpponsA: []string{"M", "K"}, IpponsB: []string{"K"}},
+		}
+		got := TeamResultFrom(subs, "TeamA", "TeamB")
+		// Only position 0 counts; the -2 row is skipped like the daihyosen.
+		assert.Equal(t, &TeamResultLine{ShiroIV: 1, AkaIV: 0, ShiroPW: 1, AkaPW: 1}, got)
+	})
+
 	t.Run("only daihyosen placeholder returns nil", func(t *testing.T) {
 		// A slice containing ONLY the Position:-1 placeholder must return nil (no
 		// countable sub-bouts), not a non-nil all-zero TeamResultLine.

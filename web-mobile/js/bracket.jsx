@@ -161,7 +161,7 @@ function teamIVScore(m) {
   const bName = typeof m.sideB === "object" ? m.sideB?.name : m.sideB;
   let ivA = 0, ivB = 0;
   for (const sub of subs) {
-    if (!sub || sub.position === DAIHYOSEN_POSITION) continue; // skip daihyosen sentinel
+    if (!sub || sub.position <= DAIHYOSEN_POSITION) continue; // skip the daihyosen sentinel (-1) and any malformed negative position
     const w = sub.winner;
     if (!w) continue;                        // hikiwake / undecided → no IV
     if (w === aName || w === sub.sideA) ivA++;

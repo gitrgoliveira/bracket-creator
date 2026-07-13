@@ -258,6 +258,33 @@ func TestQuickScoreHandler(t *testing.T) {
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
 
+	t.Run("tied quick-score on a bracket match is 400 not 500", func(t *testing.T) {
+		// A tie (teamAWins == teamBWins) produces a Completed write with no
+		// winner; on a bracket match validateBracketCompletion rejects it as
+		// *engine.ValidationError. The handler must map that to 400 with the
+		// "resolve via daihyosen" message (pre-fix it fell through to 500).
+		bc := state.Competition{ID: "c1-bracket", TeamSize: 3}
+		require.NoError(t, store.SaveCompetition(&bc))
+		require.NoError(t, store.SaveBracket("c1-bracket", &state.Bracket{
+			Rounds: [][]state.BracketMatch{
+				{{ID: "R1M0", SideA: "TeamA", SideB: "TeamB", Status: state.MatchStatusRunning}},
+			},
+		}))
+		body, _ := json.Marshal(map[string]any{
+			"sideA": "TeamA", "sideB": "TeamB", "teamAWins": 2, "teamBWins": 2, "draws": 1,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/c1-bracket/matches/R1M0/quick-score", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+		assert.Contains(t, w.Body.String(), "daihyosen")
+
+		bracket, err := store.LoadBracket("c1-bracket")
+		require.NoError(t, err)
+		assert.Equal(t, state.MatchStatusRunning, bracket.Rounds[0][0].Status, "match must be untouched")
+	})
+
 	t.Run("kachinuki competition rejected", func(t *testing.T) {
 		// Quick-score writes a synthesised positional log wholesale through
 		// the plain RecordMatchResult path (no kachinuki merge, no

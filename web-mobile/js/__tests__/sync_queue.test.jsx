@@ -186,6 +186,31 @@ describe('enqueueRunningWrite: last-write-wins semantics', () => {
         expect(sentPayloads[0].kachinukiBoutFinal).toBe(true);
     });
 
+    it('absorbs a queued kachinukiBoutFinal into a later DIRECT running write', async () => {
+        // Connectivity can return mid-backoff: the next autosave then goes
+        // DIRECT (not through the queue), succeeds with a newer rev, and the
+        // queued flagged entry would later be rev-guard dropped as stale. The
+        // direct send path must absorb the pending flag so the advancement
+        // command is delivered with the fresh write.
+        let callCount = 0;
+        const sentPayloads = [];
+        global.fetch = vi.fn().mockImplementation((_url, opts) => {
+            callCount++;
+            if (callCount === 1) return Promise.reject(new TypeError('network error'));
+            sentPayloads.push(JSON.parse(opts.body));
+            return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+        });
+
+        // Offline "Record bout": flagged write fails and is queued.
+        await API.recordScore('c1', 'm1', { status: 'running', kachinukiBoutFinal: true }, 'pw', null);
+        // Connectivity back: an unflagged autosave goes direct and succeeds.
+        await API.recordScore('c1', 'm1', { status: 'running' }, 'pw', null);
+
+        const direct = sentPayloads.find(p => p.rev === 2);
+        expect(direct).toBeTruthy();
+        expect(direct.kachinukiBoutFinal).toBe(true);
+    });
+
     it('does not fabricate the flag when no flagged write was queued', async () => {
         let callCount = 0;
         const sentPayloads = [];

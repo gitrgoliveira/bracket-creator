@@ -1219,6 +1219,20 @@ const API = {
         // Completed writes do not need a rev: the guard is gated on status=running.
         const isRunning = payload?.status === 'running';
         if (isRunning) {
+            // Absorb a pending kachinukiBoutFinal from a QUEUED flagged running
+            // write for this match: when connectivity returns mid-backoff, this
+            // direct write succeeds with a newer rev, and the queued flagged
+            // entry would later be rev-guard dropped as stale, silently losing
+            // the advancement command (the queue-to-queue carry in
+            // enqueueRunningWrite cannot see direct sends). Safe to re-deliver:
+            // MaybeAdvanceKachinuki bails without a scored last bout or on a
+            // completed match.
+            const queued = _writeQueue.get(_revKey(compID, matchID));
+            if (queued && !queued.terminal && queued.kind === 'score'
+                && queued.payload && queued.payload.kachinukiBoutFinal
+                && !payload.kachinukiBoutFinal) {
+                payload.kachinukiBoutFinal = true;
+            }
             payload.rev = _nextRev(compID, matchID);
             payload.revSession = _revSession;
             _inflightRunning++;

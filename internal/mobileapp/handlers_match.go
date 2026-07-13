@@ -519,6 +519,15 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				})
 				return
 			}
+			// A tied quick-score on a bracket team match produces a
+			// Completed write with no winner, which validateBracketCompletion
+			// rejects as *engine.ValidationError; map it to 400 so the caller
+			// sees "resolve via daihyosen first" instead of a generic 500.
+			var engValErr *engine.ValidationError
+			if errors.As(err, &engValErr) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": engValErr.Error()})
+				return
+			}
 			internalError(c, err)
 			return
 		}
@@ -1313,6 +1322,17 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			var valErr *ValidationError
 			if errors.As(engErr, &valErr) {
 				c.JSON(http.StatusBadRequest, gin.H{"error": valErr.Error()})
+				return
+			}
+			// engine.ValidationError is a DISTINCT type from the handler-layer
+			// ValidationError above; without this mapping an engine precondition
+			// rejection (e.g. validateBracketCompletion's "cannot mark completed
+			// with no winner; resolve via daihyosen first") surfaced as a 500,
+			// which the client write-queue treats as transient and retries
+			// (mp-q8c6 poisoned-queue pattern) instead of showing the message.
+			var engValErr *engine.ValidationError
+			if errors.As(engErr, &engValErr) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": engValErr.Error()})
 				return
 			}
 			internalError(c, engErr)

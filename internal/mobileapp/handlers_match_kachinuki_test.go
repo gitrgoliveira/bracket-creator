@@ -386,6 +386,54 @@ func TestScoreHandler_KachinukiPrematureCompletionRejected(t *testing.T) {
 	assert.Empty(t, matches[0].Winner)
 }
 
+// TestScoreHandler_KachinukiSimultaneousExhaustionNoWinnerIs400: a
+// completed winnerless write on a bracket kachinuki match whose rosters
+// are BOTH exhausted passes the handler's premature-completion pre-check
+// (nothing premature: everyone has fought) and is rejected by the
+// engine's validateBracketCompletion instead. That rejection is an
+// *engine.ValidationError and must surface as HTTP 400 with the
+// "resolve via daihyosen" message: pre-fix the handler only mapped the
+// handler-layer ValidationError type, so this surfaced as a 500, which
+// the client write-queue treats as transient and retries (mp-q8c6).
+func TestScoreHandler_KachinukiSimultaneousExhaustionNoWinnerIs400(t *testing.T) {
+	compID := "kachinuki-both-exhausted-400"
+	r, store := setupKachinukiScoreServer(t, compID)
+	// Size-3 teams with all three bouts drawn: every fighter on both sides
+	// has retired, so the encounter is tied and only a daihyosen can end it.
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{{
+				ID: "R1M0", SideA: "Ryu", SideB: "Tora", Status: state.MatchStatusRunning,
+				SubResults: []state.SubMatchResult{
+					{Position: 1, SideA: "R-1", SideB: "W-1", Decision: "hikiwake"},
+					{Position: 2, SideA: "R-2", SideB: "W-2", Decision: "hikiwake"},
+					{Position: 3, SideA: "R-3", SideB: "W-3", Decision: "hikiwake"},
+				},
+			}},
+			{{ID: "R2M0"}},
+		},
+	}))
+
+	w := putScore(t, r, compID, "R1M0", map[string]any{
+		"sideA":  "Ryu",
+		"sideB":  "Tora",
+		"status": "completed",
+		"subResults": []map[string]any{
+			kachinukiSub(1, "R-1", "W-1", nil, "", "hikiwake"),
+			kachinukiSub(2, "R-2", "W-2", nil, "", "hikiwake"),
+			kachinukiSub(3, "R-3", "W-3", nil, "", "hikiwake"),
+		},
+	})
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), "daihyosen", "operator must be told to resolve via daihyosen")
+
+	// The match on disk is untouched.
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, state.MatchStatusRunning, bracket.Rounds[0][0].Status)
+	assert.Empty(t, bracket.Rounds[0][0].Winner)
+}
+
 // TestScoreHandler_KachinukiDaihyosenCompletionPropagates: a completed
 // write that carries a daihyosen sub-result (position -1 with a winner)
 // is the sanctioned tie-after-exhaustion resolution. It must complete

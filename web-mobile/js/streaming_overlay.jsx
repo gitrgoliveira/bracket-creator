@@ -100,10 +100,20 @@ function StreamingOverlay({ court, position, competitions }) {
         hasRunning ? running.roundIndex : undefined
     );
 
-    // Current bout for the overlay (last active sub-result, index 0 fallback).
+    // Current bout for the overlay. findCurrentBoutIndex returns an index
+    // into the NUMBERED-bout slice (position > DAIHYOSEN_POSITION), so
+    // dereference that same slice rather than the raw array: with a raw
+    // deref the two index spaces only coincide while the wire order is
+    // canonical (numbered ascending, daihyosen last), and a DH row or
+    // malformed negative earlier in the array would select the wrong bout.
+    // When every numbered bout is scored (idx === regular length) the
+    // current bout is the daihyosen row when one exists, else null (the
+    // dhPending banner below covers the tied-no-DH-yet case).
     const ovlSubResults = (hasRunning && running.match.subResults) || [];
+    const regularSubsOvl = ovlSubResults.filter(s => s.position > DAIHYOSEN_POSITION);
+    const dhSubOvl = ovlSubResults.find(s => s.position === DAIHYOSEN_POSITION) || null;
     const currentBoutIdx = useMD(() => findCurrentBoutIndex(ovlSubResults), [ovlSubResults]);
-    const currentSub = ovlSubResults[currentBoutIdx] || null;
+    const currentSub = currentBoutIdx < regularSubsOvl.length ? regularSubsOvl[currentBoutIdx] : dhSubOvl;
 
     // mp-13y #10: running IV/PW aggregate per side. teamIVPW counts only
     // numbered bouts (position > DAIHYOSEN_POSITION). sideB = shiro, sideA = aka.
@@ -113,13 +123,12 @@ function StreamingOverlay({ court, position, competitions }) {
 
     // DH-pending: all regular bouts are scored, the match is tied (equal IV
     // and PW), but no DH sub-result has been created yet. In that case
-    // findCurrentBoutIndex returns subResults.length and currentSub is null;
-    // the overlay would otherwise read blank. Show "Daihyosen" on both sides
-    // so spectators know the rep bout is about to start.
-    const regularSubsOvl = ovlSubResults.filter(s => s.position > DAIHYOSEN_POSITION);
+    // currentSub is null (no DH row to fall back to); the overlay would
+    // otherwise read blank. Show "Daihyosen" on both sides so spectators
+    // know the rep bout is about to start.
     const dhPending = isTeamMatch && !currentSub && regularSubsOvl.length > 0
         && ovlIV.ivShiro === ovlIV.ivAka && ovlIV.pwShiro === ovlIV.pwAka
-        && !ovlSubResults.some(s => s.position === DAIHYOSEN_POSITION);
+        && !dhSubOvl;
 
     // DH signal for the broadcast lower-third: the running match IS a daihyosen
     // rep bout (a pool/league "…-DH-N" match), the team match is currently on

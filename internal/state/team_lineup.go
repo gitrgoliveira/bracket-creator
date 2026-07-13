@@ -280,9 +280,6 @@ func FindBestLineupAny(lineups map[string]domain.TeamLineup, teamIDs []string, m
 			}
 		}
 	}
-	isCandidate := func(id string) bool {
-		return slices.Contains(teamIDs, id)
-	}
 	// 2. Round-scoped: highest round <= maxRound.
 	// 3. Round-scoped: highest round overall (AMENDMENT 1 fallback).
 	var best domain.TeamLineup
@@ -290,7 +287,7 @@ func FindBestLineupAny(lineups map[string]domain.TeamLineup, teamIDs []string, m
 	var fallback domain.TeamLineup
 	hasFallback := false
 	for _, l := range lineups {
-		if l.MatchID != "" || !isCandidate(l.TeamID) {
+		if l.MatchID != "" || !slices.Contains(teamIDs, l.TeamID) {
 			continue // skip wrong team or match-scoped entries
 		}
 		if l.Round <= maxRound {

@@ -261,6 +261,18 @@ func describeKachinukiResult(r AdvanceKachinukiResult) string {
 	return "no-op"
 }
 
+// appendNextKachinukiBout appends the engine-produced next bout to a
+// bracket match's log, mirroring the pool mutate closure (GAP 4): the
+// encounter stays running with no match-level winner or decision.
+// Shared by the rounds loop and the bronze (3rd-place) branch.
+func appendNextKachinukiBout(bm *state.BracketMatch, next state.SubMatchResult) {
+	next.Position = len(bm.SubResults) + 1
+	bm.SubResults = append(bm.SubResults, next)
+	bm.Status = state.MatchStatusRunning
+	bm.Winner = ""
+	bm.Decision = ""
+}
+
 // MaybeAdvanceKachinuki runs the post-score side effect for a
 // kachinuki team match.
 //
@@ -404,14 +416,7 @@ func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, error) {
 							}
 							e.propagateBracketWinner(bracket, rIdx, mIdx)
 						} else if out.Next != nil {
-							// Append the next bout to the bracket match SubResults,
-							// mirroring the pool mutate closure (GAP 4). The match
-							// stays running with no match-level winner/decision.
-							out.Next.Position = len(bm.SubResults) + 1
-							bm.SubResults = append(bm.SubResults, *out.Next)
-							bm.Status = state.MatchStatusRunning
-							bm.Winner = ""
-							bm.Decision = ""
+							appendNextKachinukiBout(bm, *out.Next)
 						}
 						return nil
 					}
@@ -431,11 +436,7 @@ func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, error) {
 						bm.Winner = bm.SideB
 					}
 				} else if out.Next != nil {
-					out.Next.Position = len(bm.SubResults) + 1
-					bm.SubResults = append(bm.SubResults, *out.Next)
-					bm.Status = state.MatchStatusRunning
-					bm.Winner = ""
-					bm.Decision = ""
+					appendNextKachinukiBout(bm, *out.Next)
 				}
 				return nil
 			}
@@ -538,7 +539,7 @@ func (e *Engine) CheckKachinukiPrematureCompletion(compID, matchID string, resul
 	}
 	// Withdrawals and defaults finalize a match without exhausting the
 	// roster; they are legitimate completions.
-	if domain.IsKikenDecisionStr(result.Decision) || result.Decision == "fusenpai" || result.Decision == "fusensho" {
+	if domain.IsKikenDecisionStr(result.Decision) || result.Decision == string(domain.DecisionFusenpai) || result.Decision == string(domain.DecisionFusensho) {
 		return nil
 	}
 	// A daihyosen sub-result is the sanctioned tie resolution.
@@ -692,14 +693,12 @@ func (e *Engine) kachinukiRemainingRoster(compID, matchID string, comp *state.Co
 		known := map[string]struct{}{}
 		isA := teamName == parent.SideA
 		for _, b := range parent.SubResults {
+			name := b.SideB
 			if isA {
-				if b.SideA != "" {
-					known[b.SideA] = struct{}{}
-				}
-			} else {
-				if b.SideB != "" {
-					known[b.SideB] = struct{}{}
-				}
+				name = b.SideA
+			}
+			if name != "" {
+				known[name] = struct{}{}
 			}
 		}
 		out := make([]string, 0, len(known))

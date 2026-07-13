@@ -2704,6 +2704,113 @@ func TestUpdateCompetition_TeamMatchTypeLockedDrawReady(t *testing.T) {
 	})
 }
 
+// TestUpdateCompetition_TeamMatchTypeDrawReadyOmittedAndLegacy verifies that
+// the draw-ready teamMatchType guard uses effective-value comparison rather than
+// raw wire comparison (Fix 5 regression coverage):
+//   - PUT omitting teamMatchType on a draw-ready kachinuki competition must
+//     succeed (omitted wire "" means "keep stored", not "change to fixed").
+//   - PUT sending "fixed" against a stored legacy "" TeamMatchType on a
+//     draw-ready competition must succeed (both represent the same effective
+//     type: fixed).
+//
+// The guard-still-works case (explicit kachinuki against stored fixed returns
+// 409) is already covered by TestUpdateCompetition_TeamMatchTypeLockedDrawReady
+// and is not duplicated here.
+func TestUpdateCompetition_TeamMatchTypeDrawReadyOmittedAndLegacy(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+
+	// Subtest 1: omitting teamMatchType on a draw-ready kachinuki competition
+	// must not trigger a 409 (false positive from raw "" != "kachinuki").
+	t.Run("ALLOW omitted teamMatchType on draw-ready kachinuki competition", func(t *testing.T) {
+		const cid = "draw-ready-kachinuki-omit"
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID:            cid,
+			Name:          "Draw Ready Kachinuki",
+			Format:        state.CompFormatMixed,
+			Kind:          "team",
+			TeamSize:      5,
+			TeamMatchType: state.TeamMatchTypeKachinuki,
+			Courts:        []string{"A"},
+			PoolSize:      4,
+			PoolWinners:   2,
+			Status:        state.CompStatusDrawReady,
+		}))
+
+		// teamMatchType intentionally omitted so the wire value decodes to ""
+		// (json omitempty). The effective meaning is "keep the stored value".
+		body, _ := json.Marshal(map[string]any{
+			"id":          cid,
+			"name":        "Draw Ready Kachinuki",
+			"format":      state.CompFormatMixed,
+			"kind":        "team",
+			"teamSize":    5,
+			"courts":      []string{"A"},
+			"poolSize":    4,
+			"poolWinners": 2,
+			"roundRobin":  false,
+			"mirror":      false,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code,
+			"omitted teamMatchType on a draw-ready kachinuki competition must not return 409: %s", w.Body.String())
+		stored, err := store.LoadCompetition(cid)
+		require.NoError(t, err)
+		assert.Equal(t, state.TeamMatchTypeKachinuki, stored.TeamMatchType,
+			"TeamMatchType must remain kachinuki when the field was omitted from the PUT body")
+		assert.Equal(t, state.CompStatusDrawReady, stored.Status,
+			"status must remain draw-ready after the allowed PUT")
+	})
+
+	// Subtest 2: sending "fixed" against a stored legacy "" TeamMatchType on a
+	// draw-ready competition must not 409 (both are the same effective type).
+	t.Run("ALLOW explicit fixed against stored legacy empty TeamMatchType while draw-ready", func(t *testing.T) {
+		const cid = "draw-ready-legacy-empty"
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID:            cid,
+			Name:          "Draw Ready Legacy Empty",
+			Format:        state.CompFormatMixed,
+			Kind:          "team",
+			TeamSize:      5,
+			TeamMatchType: "", // legacy on-disk empty == fixed
+			Courts:        []string{"A"},
+			PoolSize:      4,
+			PoolWinners:   2,
+			Status:        state.CompStatusDrawReady,
+		}))
+
+		body, _ := json.Marshal(map[string]any{
+			"id":            cid,
+			"name":          "Draw Ready Legacy Empty",
+			"format":        state.CompFormatMixed,
+			"kind":          "team",
+			"teamSize":      5,
+			"teamMatchType": state.TeamMatchTypeFixed, // "fixed" is semantically equal to legacy ""
+			"courts":        []string{"A"},
+			"poolSize":      4,
+			"poolWinners":   2,
+			"roundRobin":    false,
+			"mirror":        false,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code,
+			"explicit fixed against stored legacy empty must not return 409 while draw-ready: %s", w.Body.String())
+		stored, err := store.LoadCompetition(cid)
+		require.NoError(t, err)
+		assert.Equal(t, state.TeamMatchTypeFixed, stored.TeamMatchType,
+			"TeamMatchType must be persisted as fixed after a successful PUT")
+		assert.Equal(t, state.CompStatusDrawReady, stored.Status,
+			"status must remain draw-ready after the allowed PUT")
+	})
+}
+
 // ---------------------------------------------------------------------------
 // GET /competitions/:id/chusen-candidates
 // ---------------------------------------------------------------------------

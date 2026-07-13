@@ -894,6 +894,20 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				}
 
 				// Settings-only PUT (Players field absent in body).
+				// Team match format (FR-044) wire contract, applied BEFORE the
+				// draw-ready guard below so both it and the started guard
+				// compare the same EFFECTIVE value: an omitted value ("" on
+				// the wire, json omitempty) means "keep the stored value",
+				// never "reset to fixed", and a stored legacy "" is
+				// equivalent to "fixed". Without this a client omitting the
+				// field on a draw-ready kachinuki competition trips a false
+				// 409 (the draw-ready comment promises effective-value
+				// comparison; "" is an omission, not a value).
+				if comp.TeamMatchType == "" {
+					comp.TeamMatchType = current.TeamMatchType
+				}
+				sameTeamMatchType := comp.TeamMatchType == current.TeamMatchType ||
+					(comp.TeamMatchType == state.TeamMatchTypeFixed && current.TeamMatchType == "")
 				// Draw-ready gate: the draw artifacts (pools.csv /
 				// bracket.json) were generated from the current config.
 				// Mutating output-affecting fields while draw-ready would
@@ -935,7 +949,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 							comp.Kind != current.Kind ||
 							// TeamMatchType selects fixed vs kachinuki bout sequencing; changing
 							// it after draw-ready desyncs the match structure from config.
-							comp.TeamMatchType != current.TeamMatchType ||
+							// sameTeamMatchType is the normalized effective-value comparison
+							// computed above (omitted keeps stored; legacy "" equals fixed).
+							!sameTeamMatchType ||
 							// NumberPrefix and WithZekkenName reach the Excel generator
 							// (POST /create: numberPrefix → player numbers, withZekkenName
 							// → name columns), so changing them while draw-ready desyncs
@@ -1035,16 +1051,11 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// Team match format (FR-044) is only settable before the
 				// competition starts (sibling of the Naginata/Engi guards):
 				// flipping fixed <-> kachinuki mid-tournament would desync the
-				// recorded bout structure from the scoring/advancement
-				// paradigm. An omitted value ("" on the wire, json omitempty)
-				// means "keep the stored value", never "reset to fixed".
+				// recorded bout structure from the scoring/advancement paradigm.
 				// Surfaced as 409 (started-state conflict), matching the
 				// draw-ready lock the settings UI pairs this control with.
-				if comp.TeamMatchType == "" {
-					comp.TeamMatchType = current.TeamMatchType
-				}
-				sameTeamMatchType := comp.TeamMatchType == current.TeamMatchType ||
-					(comp.TeamMatchType == state.TeamMatchTypeFixed && current.TeamMatchType == "")
+				// comp.TeamMatchType was normalized and sameTeamMatchType
+				// computed before the draw-ready guard above.
 				if started && !sameTeamMatchType {
 					teamMatchTypeStartedFlag = true
 					return nil, nil

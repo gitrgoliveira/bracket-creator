@@ -3,6 +3,7 @@
 // T061, T062, T063, mp-13y.
 
 import { findRunningOnCourt, findUpcomingOnCourt, countCourtMatches, sideLabel, phaseLabel, TermD, poolNameOf, isSupplementaryBout, phaseProgressOnCourt, StreamingQR } from './display_helpers.jsx';
+import { teamMatchTypeFor } from './pool_ids.jsx';
 import { TeamScoreboard, IndividualScore, useTeamLineups, teamIVPW } from './match_scoreboard.jsx';
 
 const { useMemo: useMD } = React;
@@ -133,7 +134,7 @@ function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, is
                         shiroName={shiroTeam} akaName={akaTeam}
                         matchSideA={promoted.match.sideA?.name || (typeof promoted.match.sideA === "string" ? promoted.match.sideA : "")}
                         matchSideB={promoted.match.sideB?.name || (typeof promoted.match.sideB === "string" ? promoted.match.sideB : "")}
-                        kachinuki={(promoted.competition?.teamMatchType || promoted.competition?.config?.teamMatchType) === "kachinuki"} />
+                        kachinuki={teamMatchTypeFor(promoted.competition) === "kachinuki"} />
                 </div>
             ) : (
                 <div style={{ flex: 1, display: "flex", alignItems: "flex-start", justifyContent: "center", paddingTop: "2vh" }}>

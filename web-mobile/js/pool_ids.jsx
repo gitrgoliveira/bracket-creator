@@ -46,3 +46,17 @@ const DAIHYOSEN_BOUT_RE = /-DH-\d+$/;
 export function isPoolDaihyosenBout(id) {
     return typeof id === "string" && DAIHYOSEN_BOUT_RE.test(id);
 }
+
+// teamMatchTypeFor: the competition-level team match format ("fixed",
+// "kachinuki", or "" for individual comps) as stamped onto enriched match
+// objects and read by the display surfaces. Supplementary rep bouts
+// (-DH-/-TB-) are fought as individual ippon-shobu even in a team comp, so
+// isRepBout forces "". Reads both the flat viewer competition shape
+// (c.teamMatchType) and the admin detail shape where the value nests under
+// c.config. Lives here so every consumer (viewer, admin, display, overlay)
+// shares one definition without adding import edges: this file is the leaf
+// module they all already import.
+export function teamMatchTypeFor(comp, isRepBout) {
+    if (isRepBout || !comp) return "";
+    return comp.teamMatchType || (comp.config && comp.config.teamMatchType) || "";
+}

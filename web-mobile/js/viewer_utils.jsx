@@ -10,7 +10,7 @@
 //
 // pool_ids.jsx is a leaf module (no imports, no side effects), so importing it
 // here does not introduce a load-order dependency or a double-eval risk.
-import { isSupplementaryBout } from './pool_ids.jsx';
+import { isSupplementaryBout, teamMatchTypeFor } from './pool_ids.jsx';
 
 // TermV: kendo-glossary tooltip wrapper. Lazy lookup so the script
 // load order between glossary.jsx and viewer.jsx doesn't matter.
@@ -74,7 +74,7 @@ export function compMatches(c) {
     // omit (or null) phase/poolName/phaseName, so if `...m` came last it would
     // clobber the derived pool name with undefined. derivedPool already prefers
     // m.poolName when present, so putting it last is both safe and authoritative.
-    out.push({ ...m, phase: "pool", poolName: derivedPool, phaseName: derivedPool, compId: c.id, compName: c.name, compFormat: c.format, compKind: isRepBout ? "" : c.kind, teamSize: isRepBout ? 0 : c.teamSize, compEngi: isRepBout ? false : !!c.engi, teamMatchType: isRepBout ? "" : (c.teamMatchType || "") });
+    out.push({ ...m, phase: "pool", poolName: derivedPool, phaseName: derivedPool, compId: c.id, compName: c.name, compFormat: c.format, compKind: isRepBout ? "" : c.kind, teamSize: isRepBout ? 0 : c.teamSize, compEngi: isRepBout ? false : !!c.engi, teamMatchType: teamMatchTypeFor(c, isRepBout) });
   });
 
   // mp-9dz: a preview bracket on a mixed source carries pool-origin
@@ -101,7 +101,7 @@ export function compMatches(c) {
     compKind: c.kind,
     teamSize: c.teamSize,
     compEngi: !!c.engi,
-    teamMatchType: c.teamMatchType || "",
+    teamMatchType: teamMatchTypeFor(c),
   })));
 
   // Bronze (3rd-place) playoff: a sibling of bracket.rounds (naginata only),
@@ -124,7 +124,7 @@ export function compMatches(c) {
       compKind: c.kind,
       teamSize: c.teamSize,
       compEngi: !!c.engi,
-      teamMatchType: c.teamMatchType || "",
+      teamMatchType: teamMatchTypeFor(c),
     });
   }
 

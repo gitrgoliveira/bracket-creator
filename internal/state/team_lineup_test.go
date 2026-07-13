@@ -254,6 +254,60 @@ func TestDeleteTeamLineup_WhileLive(t *testing.T) {
 	assert.Empty(t, got, "lineup must be gone after delete")
 }
 
+// TestLoadTeamLineups_ReturnsDeepCopy confirms that the map returned by
+// LoadTeamLineups is a distinct copy: mutating the returned map or the
+// Positions inside it must not affect a subsequent load, guarding against
+// cache aliasing (the cache stores its own copy after B3/B4).
+func TestLoadTeamLineups_ReturnsDeepCopy(t *testing.T) {
+	store, cleanup := newTestStore(t)
+	defer cleanup()
+
+	const compID = "team-deepcopy"
+	require.NoError(t, store.SetTeamLineup(compID, fiveStarter("team-alpha", 0), 5))
+
+	// First load: mutate both the returned map and a Positions entry inside it.
+	got1, err := store.LoadTeamLineups(compID)
+	require.NoError(t, err)
+	key := teamLineupKey("team-alpha", 0)
+	got1[key].Positions[domain.PosSenpo] = "mutated"
+	got1["injected"] = domain.TeamLineup{TeamID: "ghost"}
+
+	// Second load must not reflect either mutation.
+	got2, err := store.LoadTeamLineups(compID)
+	require.NoError(t, err)
+	assert.NotContains(t, got2, "injected", "injected key must not appear in second load")
+	persisted, ok := got2[key]
+	require.True(t, ok)
+	assert.Equal(t, "p1", persisted.Positions[domain.PosSenpo],
+		"Positions mutation in first load must not affect second load")
+}
+
+// TestLoadTeamLineups_CacheRefreshedOnSave confirms that a SetTeamLineup call
+// that follows a LoadTeamLineups (which warms the cache) is visible on the
+// next LoadTeamLineups, guarding against a stale-cache regression.
+func TestLoadTeamLineups_CacheRefreshedOnSave(t *testing.T) {
+	store, cleanup := newTestStore(t)
+	defer cleanup()
+
+	const compID = "team-cache-refresh"
+	require.NoError(t, store.SetTeamLineup(compID, fiveStarter("team-alpha", 0), 5))
+
+	// Warm the cache.
+	got1, err := store.LoadTeamLineups(compID)
+	require.NoError(t, err)
+	require.Len(t, got1, 1, "one lineup after initial save")
+
+	// Add a second lineup; saveTeamLineupsLocked must refresh the cache.
+	require.NoError(t, store.SetTeamLineup(compID, fiveStarter("team-beta", 0), 5))
+
+	// The new entry must be visible without any file-mtime tricks.
+	got2, err := store.LoadTeamLineups(compID)
+	require.NoError(t, err)
+	assert.Len(t, got2, 2, "both lineups must be visible after cache refresh")
+	assert.Contains(t, got2, teamLineupKey("team-beta", 0),
+		"newly added lineup must appear in the second load")
+}
+
 // TestFindBestLineupAny covers the multi-key lookup used when a match
 // side name must also be tried as the team's participant ID ("match on
 // id OR name"): the priority tiers apply across the whole key set, and

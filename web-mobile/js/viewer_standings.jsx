@@ -15,7 +15,7 @@
 
 import { withNumber } from './match_scoreboard.jsx';
 import { matchParticipantIds, matchParticipantNames, isPlayerWatched } from './viewer_watchlist_core.jsx';
-import { poolNameOf, isSupplementaryBout, isPoolDaihyosenBout } from './pool_ids.jsx';
+import { poolNameOf, isSupplementaryBout, isPoolDaihyosenBout, teamMatchTypeFor } from './pool_ids.jsx';
 
 const { useState, useMemo } = React;
 const EmptyState = window.EmptyState;
@@ -321,7 +321,7 @@ export function LeagueStandingsViewer({ competition, poolMatches, tweaks, onMatc
               {(poolMatches || []).map((m, idx) => {
                 if (isTeam) {
                   const isRepBout = isSupplementaryBout(m.id || "");
-                  const enriched = { ...m, phase: "pool", poolName: m.poolName || "", phaseName: m.poolName || "", compFormat: competition.format, compId: competition.id, compName: competition.name, compKind: isRepBout ? "" : competition.kind, teamSize: isRepBout ? 0 : competition.teamSize, teamMatchType: isRepBout ? "" : (competition.teamMatchType || "") };
+                  const enriched = { ...m, phase: "pool", poolName: m.poolName || "", phaseName: m.poolName || "", compFormat: competition.format, compId: competition.id, compName: competition.name, compKind: isRepBout ? "" : competition.kind, teamSize: isRepBout ? 0 : competition.teamSize, teamMatchType: teamMatchTypeFor(competition, isRepBout) };
                   return (
                     <PoolNumberedMatchRow
                       key={m.id}
@@ -811,7 +811,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                       // bout even in a team comp, so force compKind/teamSize to route
                       // it to the individual editor (matches enrichPoolMatchWithComp).
                       const isRepBout = isSupplementaryBout(m.id || "");
-                      const enriched = { ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compFormat: competition.format, compId: competition.id, compName: competition.name, compKind: isRepBout ? "" : competition.kind, teamSize: isRepBout ? 0 : competition.teamSize, teamMatchType: isRepBout ? "" : (competition.teamMatchType || "") };
+                      const enriched = { ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compFormat: competition.format, compId: competition.id, compName: competition.name, compKind: isRepBout ? "" : competition.kind, teamSize: isRepBout ? 0 : competition.teamSize, teamMatchType: teamMatchTypeFor(competition, isRepBout) };
                       return (
                         <PoolNumberedMatchRow
                           key={m.id}

@@ -4,7 +4,7 @@
 import { findRunningOnCourt, sideLabel, TermD, StreamingQR } from './display_helpers.jsx';
 import { useTeamLineups, teamIVPW } from './match_scoreboard.jsx';
 import { pickFromLineup, resolveBoutSideName } from './lineup_resolver.jsx';
-import { isPoolDaihyosenBout } from './pool_ids.jsx';
+import { isPoolDaihyosenBout, teamMatchTypeFor } from './pool_ids.jsx';
 
 const { useEffect: useED, useMemo: useMD } = React;
 
@@ -138,7 +138,7 @@ function StreamingOverlay({ court, position, competitions }) {
     // competitor stored on the sub (kachinuki), else the FIK POSITION label
     // (Senpo/Jiho/...), else "Daihyosen" when the rep bout is pending; never
     // the team name (that flanks the QR above).
-    const isKachinukiOvl = (comp?.teamMatchType || comp?.config?.teamMatchType) === "kachinuki";
+    const isKachinukiOvl = teamMatchTypeFor(comp) === "kachinuki";
     const subSideName = (v) => (v && v.name) || (typeof v === "string" ? v : "");
     const boutPosLabel = currentSub ? overlayPositionLabel(teamSizeOvl, currentBoutIdx, currentSub) : (dhPending ? 'Daihyosen' : '');
     let boutShiroName, boutAkaName;

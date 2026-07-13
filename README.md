@@ -1,7 +1,7 @@
 <!-- BEGIN __DO_NOT_INCLUDE__ -->
-<p align="center"><img src="https://github.com/gitrgoliveira/bracket-creator/blob/main/logo/bracket-creator.v2.jpeg?raw=true" alt="Logo" height="120" /></p>
+<p align="center"><img src="https://github.com/gitrgoliveira/bracket-creator/blob/main/logo/bracket-creator.v2.jpeg?raw=true" alt="bracket-creator logo" height="120" /></p>
 <!-- END __DO_NOT_INCLUDE__ -->
-<h1 align="center"> bracket-creator</h1>
+<h1 align="center">bracket-creator</h1>
 
 <p align="center">
   <a href="https://github.com/gitrgoliveira/bracket-creator/releases" rel="nofollow">
@@ -48,13 +48,15 @@ For the guidelines this application is based on, see [running_a_kendo_tournament
 
 The `mobile-app` command starts the live tournament server: create competitions, import participants, draw pools and brackets, schedule matches across courts, score in real time, and show results on any device (phone, tablet, laptop, or a TV by the court).
 
+[Install](#install) the binary first (Homebrew or a release binary), then start the server:
+
 ```bash
 bracket-creator mobile-app --folder ./tournament-data
 ```
 
 Then open [http://localhost:8080](http://localhost:8080) in your browser.
 
-![Admin dashboard](docs/screenshots/mobile-dashboard.png)
+<img src="docs/screenshots/mobile-dashboard.png" alt="Admin dashboard" width="720">
 
 Highlights:
 
@@ -96,12 +98,16 @@ See the docs for the full command references and the input format:
 
 ## Install
 
-Homebrew, the pre-compiled binaries on the [release page](https://github.com/gitrgoliveira/bracket-creator/releases), and building from source (`make go/build`) all work today and bundle the web/mobile UI. `go install` builds the full binary, but the embedded web assets (the Preact runtime and compiled JS bundle) are not part of the Go module, so the `serve`/`mobile-app` web UIs render blank; use Homebrew or a release binary if you need them. The `apt`/`yum`/`deb`/`rpm`/`apk` sections below are still a work in progress: the commands shown there are placeholders for the intended experience and do not work yet, because those package repositories are not published.
-
 *You can install via Homebrew, download a pre-compiled binary, use Docker, or compile from source.* Full instructions, including Docker and hosting options, are in the [install guide](https://gitrgoliveira.github.io/bracket-creator/user-guide/install/install/).
 
+Before you pick a method:
+
+* Homebrew, the pre-compiled binaries on the [release page](https://github.com/gitrgoliveira/bracket-creator/releases), and building from source (`make go/build`) all work today and bundle the web/mobile UI.
+* `go install` builds the full binary, but the embedded web assets (the Preact runtime and compiled JS bundle) are not part of the Go module, so the `serve`/`mobile-app` web UIs render blank. Use Homebrew or a release binary if you need them.
+* The `apt`/`yum`/`deb`/`rpm`/`apk` sections below are still a work in progress: those package repositories are not published yet, so the commands shown there do not work.
+
 <details>
-  <summary><h3>homebrew</h3></summary>
+  <summary><b>Homebrew</b></summary>
 
 ```bash
 brew tap gitrgoliveira/tap
@@ -116,7 +122,7 @@ The single binary bundles every subcommand, including `bracket-creator serve` (w
 </details>
 
 <details>
-  <summary><h3>apt</h3></summary>
+  <summary><b><code>apt</code></b></summary>
 
 ```bash
 echo 'deb [trusted=yes] https://apt.fury.io/gitrgoliveira/ /' | sudo tee /etc/apt/sources.list.d/gitrgoliveira.list
@@ -127,7 +133,7 @@ sudo apt install bracket-creator
 </details>
 
 <details>
-  <summary><h3>yum</h3></summary>
+  <summary><b><code>yum</code></b></summary>
 
 ```bash
 echo '[gitrgoliveira]
@@ -141,12 +147,12 @@ sudo yum install bracket-creator
 </details>
 
 <details>
-  <summary><h3>deb, rpm and apk packages</h3></summary>
+  <summary><b>deb, rpm and apk packages</b></summary>
 Download the .deb, .rpm or .apk packages from the [release page](https://github.com/gitrgoliveira/bracket-creator/releases) and install them with the appropriate tools.
 </details>
 
 <details>
-  <summary><h3>go install</h3></summary>
+  <summary><b><code>go install</code></b></summary>
 
 ```bash
 go install github.com/gitrgoliveira/bracket-creator@latest
@@ -157,7 +163,7 @@ This builds the full binary, including the `serve` and `mobile-app` subcommands.
 </details>
 
 <details>
-  <summary><h3>from the GitHub releases</h3></summary>
+  <summary><b>From the GitHub releases</b></summary>
 
 Download the pre-compiled binaries from the [release page](https://github.com/gitrgoliveira/bracket-creator/releases) and copy them to the desired location.
 
@@ -173,7 +179,7 @@ rm -f ${TAR_FILE}
 </details>
 
 <details>
-  <summary><h3>manually</h3></summary>
+  <summary><b>Build from source</b></summary>
 
 ```bash
 git clone https://github.com/gitrgoliveira/bracket-creator.git

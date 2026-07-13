@@ -98,7 +98,7 @@ See the docs for the full command references and the input format:
 
 ## Install
 
-**Docker is the recommended way to run bracket-creator on every platform.** Homebrew, `apt`, and `dnf` are the other main options, shown below. More methods are covered in the [install guide](https://gitrgoliveira.github.io/bracket-creator/user-guide/install/install/).
+**Docker is the recommended way to run bracket-creator on every platform.** Homebrew is the other main option, shown below. Linux packages (`apt`, `dnf`, `apk`), pre-compiled binaries, other methods, and upgrade notes are covered in the [install guide](https://gitrgoliveira.github.io/bracket-creator/user-guide/install/install/).
 
 <details>
   <summary><b>Docker</b> (recommended)</summary>
@@ -130,40 +130,6 @@ brew install bracket-creator
 The single binary bundles every subcommand, including `bracket-creator serve` (web UI) and `bracket-creator mobile-app` (tournament app).
 
 </details>
-
-<details>
-  <summary><b><code>apt</code> (Debian/Ubuntu)</b></summary>
-
-From the next release onwards, `.deb` packages for amd64 and arm64 are attached to the [release page](https://github.com/gitrgoliveira/bracket-creator/releases). Download the one for your architecture and install it (`apt` resolves dependencies for local files):
-
-```bash
-sudo apt install ./bracket-creator_*_amd64.deb
-```
-
-The package installs the binary, the man page, and shell completions.
-
-</details>
-
-<details>
-  <summary><b><code>dnf</code> (Fedora/RHEL)</b></summary>
-
-From the next release onwards, `.rpm` packages for x86_64 and aarch64 are attached to the [release page](https://github.com/gitrgoliveira/bracket-creator/releases). Download the one for your architecture and install it:
-
-```bash
-sudo dnf install ./bracket-creator-*.x86_64.rpm
-```
-
-The package installs the binary, the man page, and shell completions.
-
-</details>
-
-### Upgrading
-
-There is no hosted `apt`/`yum` package repository, so Linux package upgrades are not automatic. To upgrade:
-
-* **Docker**: `docker pull` the image again and recreate the container.
-* **Homebrew**: `brew upgrade bracket-creator`.
-* **`apt`/`dnf`**: download the new release's package and install it the same way.
 
 ## Contribute to this repository
 

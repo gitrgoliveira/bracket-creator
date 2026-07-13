@@ -76,7 +76,7 @@ Three programs ship in the single binary. The three ways to run a tournament dec
 
     [Tournament app guide](user-guide/organisers/run-tournament.md)
 
--   **Bracket generator web UI**
+-   **Legacy web UI**
 
     ---
 
@@ -84,7 +84,7 @@ Three programs ship in the single binary. The three ways to run a tournament dec
 
     `serve`
 
-    [Web UI guide](user-guide/organisers/web-ui.md)
+    [Legacy Web UI guide](user-guide/organisers/web-ui.md)
 
 -   **CLI**
 

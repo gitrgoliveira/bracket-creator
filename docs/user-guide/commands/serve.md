@@ -26,4 +26,4 @@ bracket-creator serve -p 8081
 bracket-creator serve -b 0.0.0.0
 ```
 
-See the [Web UI guide](../organisers/web-ui.md) for a walkthrough of the interface.
+See the [Legacy Web UI guide](../organisers/web-ui.md) for a walkthrough of the interface.

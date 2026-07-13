@@ -41,4 +41,4 @@ Go to the **Scores** tab, open a match, and record the result. See [Scoring a ma
 
 ## Next steps
 
-For the complete organiser workflow, including pools, seeding, and competition settings, see [Run a tournament](../organisers/run-tournament.md). To generate print-ready brackets without the tournament app, see [Web UI](../organisers/web-ui.md) and the [create-pools command](../commands/create-pools.md).
+For the complete organiser workflow, including pools, seeding, and competition settings, see [Run a tournament](../organisers/run-tournament.md). To generate print-ready brackets without the tournament app, see [Legacy Web UI](../organisers/web-ui.md) and the [create-pools command](../commands/create-pools.md).

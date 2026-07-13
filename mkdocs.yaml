@@ -101,7 +101,6 @@ nav:
           - Install: user-guide/install/install.md
           - Host the tournament app: user-guide/install/hosting.md
       - For organisers:
-          - Web UI: user-guide/organisers/web-ui.md
           - Input format: user-guide/organisers/input-format.md
           - Run a tournament on the day: user-guide/organisers/run-tournament.md
           - Operating modes and access control: user-guide/organisers/operating-modes.md
@@ -118,11 +117,13 @@ nav:
       - Commands:
           - create-pools: user-guide/commands/create-pools.md
           - create-playoffs: user-guide/commands/create-playoffs.md
-          - serve: user-guide/commands/serve.md
           - mobile-app: user-guide/commands/mobile-app.md
           - print: user-guide/commands/print.md
           - hash-password: user-guide/commands/hash-password.md
           - version: user-guide/commands/version.md
+      - Legacy Web UI:
+          - Overview: user-guide/organisers/web-ui.md
+          - serve command: user-guide/commands/serve.md
   - Developer guide:
       - Code of conduct: dev-guide/code_of_conduct.md
       - Contributing: dev-guide/contributing.md

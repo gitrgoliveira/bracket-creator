@@ -184,9 +184,11 @@ rm -f ${TAR_FILE}
 ```bash
 git clone https://github.com/gitrgoliveira/bracket-creator.git
 cd bracket-creator
-go generate ./...
-go install
+make go/build
+./bin/bracket-creator --help
 ```
+
+`make go/build` vendors the frontend runtime and compiles the JSX bundle before building, so the resulting binary bundles the full web/mobile UI (unlike plain `go install`; see the note above). It needs Go, plus Node.js and `curl` for the frontend steps.
 
 </details>
 

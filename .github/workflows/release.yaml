@@ -62,8 +62,19 @@ jobs:
           git clone --depth 1 "https://x-access-token:${TAP_TOKEN}@github.com/gitrgoliveira/homebrew-tap.git" tap
           cd tap
           FORMULA=Formula/bracket-creator.rb
-          sed -i -E "s|archive/refs/tags/v[^\"]*\.tar\.gz|archive/refs/tags/${TAG}.tar.gz|" "$FORMULA"
+          # Anchor both edits to their exact lines and verify each landed
+          # before pushing, so a formula-format drift aborts the job instead
+          # of shipping a half-edited formula.
+          sed -i -E "s|^(  url \".*/archive/refs/tags/)v[^\"]*(\.tar\.gz\")$|\1${TAG}\2|" "$FORMULA"
+          if ! grep -Fq "/archive/refs/tags/${TAG}.tar.gz\"" "$FORMULA"; then
+            echo "::error::Formula url line did not match the expected format; aborting before touching sha256. Bump ${FORMULA} manually."
+            exit 1
+          fi
           sed -i -E "0,/^  sha256 \"[0-9a-f]{64}\"/s//  sha256 \"${SHA}\"/" "$FORMULA"
+          if ! grep -Fq "sha256 \"${SHA}\"" "$FORMULA"; then
+            echo "::error::Formula sha256 line did not match the expected format; aborting. Bump ${FORMULA} manually."
+            exit 1
+          fi
           if git diff --quiet; then
             echo "Formula already at ${TAG}; nothing to do."
             exit 0

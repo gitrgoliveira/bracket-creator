@@ -78,6 +78,17 @@ export function resolveBoutSideName({ isKachinuki, isDaihyosen, existingName, li
   return lineupName || existingName || "";
 }
 
+// kachinukiHidesLineupPosition: for a kachinuki NUMBERED bout past the
+// bootstrap (index 0), the lineup position no longer identifies who fights
+// (winner-stays advancement determines the pairing), so display surfaces must
+// suppress the position-lineup name and fall back to the bout number. The
+// daihyosen (isDaihyosen) is an operator-chosen rep bout and stays lineup-first.
+// Shared by the display surfaces (match_scoreboard, streaming_overlay) so the
+// bootstrap rule lives in one place.
+export function kachinukiHidesLineupPosition(isKachinuki, isDaihyosen, index) {
+  return !!isKachinuki && !isDaihyosen && index !== 0;
+}
+
 // pickFromLineup: resolves the player name at a given bout index from a
 // lineup object. 5-person teams use named position keys; other sizes use
 // the numeric string "1".."N". Returns "" when the lineup has no entry for

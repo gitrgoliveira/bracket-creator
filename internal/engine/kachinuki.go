@@ -277,6 +277,22 @@ func describeKachinukiResult(r AdvanceKachinukiResult) string {
 	return "no-op"
 }
 
+// kachinukiMatchEnded computes the terminal (status, winner, decision) for a
+// kachinuki encounter that has ended, resolving AdvanceKachinukiResult.WinningSide
+// ("A"/"B") against the caller's side names. Shared by the pool, bracket-rounds,
+// and bronze finalize sites so the end-state mapping lives in one place. Assign
+// with `x.Status, x.Winner, x.Decision = kachinukiMatchEnded(out, x.SideA, x.SideB)`.
+func kachinukiMatchEnded(out AdvanceKachinukiResult, sideA, sideB string) (state.MatchStatus, string, string) {
+	winner := ""
+	switch out.WinningSide {
+	case "A":
+		winner = sideA
+	case "B":
+		winner = sideB
+	}
+	return state.MatchStatusCompleted, winner, out.Decision
+}
+
 // appendNextKachinukiBout appends the engine-produced next bout to a
 // bracket match's log, mirroring the pool mutate closure (GAP 4): the
 // encounter stays running with no match-level winner or decision.
@@ -408,14 +424,7 @@ func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, error) {
 	// Persist via the matching atomic primitive.
 	mutate := func(parent *state.MatchResult) {
 		if out.MatchEnded {
-			parent.Status = state.MatchStatusCompleted
-			parent.Decision = out.Decision
-			switch out.WinningSide {
-			case "A":
-				parent.Winner = parent.SideA
-			case "B":
-				parent.Winner = parent.SideB
-			}
+			parent.Status, parent.Winner, parent.Decision = kachinukiMatchEnded(out, parent.SideA, parent.SideB)
 			return
 		}
 		// Append the next bout. The handler's broadcast carries the
@@ -442,14 +451,7 @@ func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, error) {
 							// Finalize the bracket match and propagate the winner
 							// to the next round so downstream SideA/SideB slots
 							// are populated without a manual reload (GAP 4).
-							bm.Status = state.MatchStatusCompleted
-							bm.Decision = out.Decision
-							switch out.WinningSide {
-							case "A":
-								bm.Winner = bm.SideA
-							case "B":
-								bm.Winner = bm.SideB
-							}
+							bm.Status, bm.Winner, bm.Decision = kachinukiMatchEnded(out, bm.SideA, bm.SideB)
 							e.propagateBracketWinner(bracket, rIdx, mIdx)
 						} else if out.Next != nil {
 							appendNextKachinukiBout(bm, *out.Next)
@@ -463,14 +465,7 @@ func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, error) {
 			// reaches it. Bronze is a terminal match: no propagation needed.
 			if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID == matchID {
 				if out.MatchEnded {
-					bm.Status = state.MatchStatusCompleted
-					bm.Decision = out.Decision
-					switch out.WinningSide {
-					case "A":
-						bm.Winner = bm.SideA
-					case "B":
-						bm.Winner = bm.SideB
-					}
+					bm.Status, bm.Winner, bm.Decision = kachinukiMatchEnded(out, bm.SideA, bm.SideB)
 				} else if out.Next != nil {
 					appendNextKachinukiBout(bm, *out.Next)
 				}

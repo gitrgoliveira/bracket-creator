@@ -3,7 +3,7 @@
 
 import { findRunningOnCourt, sideLabel, TermD, StreamingQR } from './display_helpers.jsx';
 import { useTeamLineups, teamIVPW } from './match_scoreboard.jsx';
-import { pickFromLineup, resolveBoutSideName, POS_LABELS_5 } from './lineup_resolver.jsx';
+import { pickFromLineup, resolveBoutSideName, POS_LABELS_5, kachinukiHidesLineupPosition } from './lineup_resolver.jsx';
 import { isPoolDaihyosenBout, teamMatchTypeFor, DAIHYOSEN_POSITION } from './pool_ids.jsx';
 
 const { useEffect: useED, useMemo: useMD } = React;
@@ -149,8 +149,9 @@ function StreamingOverlay({ court, position, competitions }) {
         // so it must resolve lineup-first even in kachinuki, else a stale
         // persisted name would win over the current rep pick.
         const isDaihyosenBout = currentSub.position === DAIHYOSEN_POSITION;
+        const ovlHidesLineup = kachinukiHidesLineupPosition(isKachinukiOvl, isDaihyosenBout, currentBoutIdx);
         const ovlLineupName = (lu) =>
-            (isKachinukiOvl && !isDaihyosenBout && currentBoutIdx !== 0) ? "" : pickFromLineup(lu, currentBoutIdx, teamSizeOvl);
+            ovlHidesLineup ? "" : pickFromLineup(lu, currentBoutIdx, teamSizeOvl);
         const ovlFallback = (isKachinukiOvl && !isDaihyosenBout) ? String(currentBoutIdx + 1) : boutPosLabel;
         boutShiroName = resolveBoutSideName({ isKachinuki: isKachinukiOvl, isDaihyosen: isDaihyosenBout, existingName: subSideName(currentSub.sideB), lineupName: ovlLineupName(ovlLineupB) }) || ovlFallback;
         boutAkaName   = resolveBoutSideName({ isKachinuki: isKachinukiOvl, isDaihyosen: isDaihyosenBout, existingName: subSideName(currentSub.sideA), lineupName: ovlLineupName(ovlLineupA) }) || ovlFallback;

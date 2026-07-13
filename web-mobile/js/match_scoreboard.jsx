@@ -13,7 +13,7 @@
 // `variant` ("card" | "tv") only changes sizing via a CSS modifier: the markup
 // and data-testids are identical across surfaces.
 
-import { resolveMatchLineup, resolveLineupTeamId, pickFromLineup, resolveBoutSideName } from './lineup_resolver.jsx';
+import { resolveMatchLineup, resolveLineupTeamId, pickFromLineup, resolveBoutSideName, kachinukiHidesLineupPosition } from './lineup_resolver.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 
 const { useState: useSB, useEffect: useEB } = React;
@@ -250,7 +250,7 @@ export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state
   // rendered without the kachinuki prop today, but !isDH keeps this correct if
   // a caller ever passes it).
   const lineupNameFor = (lu) =>
-    (kachinuki && !isDH && index !== 0) ? "" : (lu ? pickFromLineup(lu, index, teamSize) : "");
+    kachinukiHidesLineupPosition(kachinuki, isDH, index) ? "" : (lu ? pickFromLineup(lu, index, teamSize) : "");
   const resolveSide = (subSide, lu) =>
     resolveBoutSideName({ isKachinuki: kachinuki, isDaihyosen: isDH, existingName: subSideName(sub && subSide), lineupName: lineupNameFor(lu) }) || boutNum;
   const shiroName = resolveSide(sub && sub.sideB, lineupB);

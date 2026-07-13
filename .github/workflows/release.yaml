@@ -27,3 +27,60 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  homebrew:
+    name: Bump Homebrew formula
+    runs-on: ubuntu-latest
+    needs: goreleaser
+    steps:
+      # The tap formula (gitrgoliveira/homebrew-tap) builds from source, so a
+      # release only needs its `url` + top-level `sha256` repointed at the new
+      # tag. GoReleaser's `brews` section is NOT used on purpose: it would
+      # replace the hand-maintained from-source formula (sandbox-safe Preact
+      # resource staging, esbuild JSX compile, embedded-asset test block) with
+      # a generated binary formula. The resource sha256 pins further down the
+      # file only change when the vendor URLs in the Makefile change; this job
+      # never touches them.
+      - name: Push url/sha256 bump to gitrgoliveira/homebrew-tap
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          case "$TAG" in
+            *-*)
+              echo "Prerelease tag ${TAG}; skipping Homebrew bump."
+              exit 0
+              ;;
+          esac
+          if [ -z "${TAP_TOKEN}" ]; then
+            echo "::error::HOMEBREW_TAP_TOKEN secret is not set. Create a fine-grained PAT with contents:write on gitrgoliveira/homebrew-tap and add it as a repo secret, or bump Formula/bracket-creator.rb manually (url + sha256)."
+            exit 1
+          fi
+          curl -fsSL "https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${TAG}.tar.gz" -o src.tar.gz
+          SHA="$(sha256sum src.tar.gz | cut -d' ' -f1)"
+          git clone --depth 1 "https://x-access-token:${TAP_TOKEN}@github.com/gitrgoliveira/homebrew-tap.git" tap
+          cd tap
+          FORMULA=Formula/bracket-creator.rb
+          # Anchor both edits to their exact lines and verify each landed
+          # before pushing, so a formula-format drift aborts the job instead
+          # of shipping a half-edited formula.
+          sed -i -E "s|^(  url \".*/archive/refs/tags/)v[^\"]*(\.tar\.gz\")$|\1${TAG}\2|" "$FORMULA"
+          if ! grep -Fq "/archive/refs/tags/${TAG}.tar.gz\"" "$FORMULA"; then
+            echo "::error::Formula url line did not match the expected format; aborting before touching sha256. Bump ${FORMULA} manually."
+            exit 1
+          fi
+          sed -i -E "0,/^  sha256 \"[0-9a-f]{64}\"/s//  sha256 \"${SHA}\"/" "$FORMULA"
+          if ! grep -Fq "sha256 \"${SHA}\"" "$FORMULA"; then
+            echo "::error::Formula sha256 line did not match the expected format; aborting. Bump ${FORMULA} manually."
+            exit 1
+          fi
+          if git diff --quiet; then
+            echo "Formula already at ${TAG}; nothing to do."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$FORMULA"
+          git commit -m "Bump bracket-creator to ${TAG}"
+          git push origin HEAD:main

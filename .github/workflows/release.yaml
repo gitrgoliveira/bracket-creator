@@ -28,6 +28,32 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # Install each nfpm package in its native distro and run the binary.
+      # Runs after publish, so a failure here flags a broken package on the
+      # release rather than blocking it; the pre-merge gate is the local
+      # `goreleaser release --snapshot --clean` + container install check.
+      - name: Smoke test Linux packages (amd64)
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          deb=(dist/*amd64*.deb) rpm=(dist/*x86_64*.rpm) apk=(dist/*x86_64*.apk)
+          if [ ${#deb[@]} -ne 1 ] || [ ${#rpm[@]} -ne 1 ] || [ ${#apk[@]} -ne 1 ]; then
+            echo "::error::expected exactly one amd64 deb/rpm/apk in dist/, found deb=${#deb[@]} rpm=${#rpm[@]} apk=${#apk[@]}"
+            exit 1
+          fi
+          # The slim image's dpkg path-exclude filter strips manpages/docs at
+          # unpack time; remove it so the test sees the package's real payload.
+          docker run --rm -v "$PWD/dist:/dist:ro" debian:stable-slim bash -c \
+            "rm -f /etc/dpkg/dpkg.cfg.d/docker \
+             && apt-get update -qq >/dev/null && apt-get install -qqy /dist/$(basename "${deb[0]}") >/dev/null \
+             && bracket-creator version \
+             && test -f /usr/share/bash-completion/completions/bracket-creator \
+             && test -f /usr/share/man/man1/bracket-creator.1.gz"
+          docker run --rm -v "$PWD/dist:/dist:ro" fedora:latest bash -c \
+            "dnf install -qy /dist/$(basename "${rpm[0]}") >/dev/null && bracket-creator version"
+          docker run --rm -v "$PWD/dist:/dist:ro" alpine:latest sh -c \
+            "apk add --allow-untrusted -q /dist/$(basename "${apk[0]}") && bracket-creator version"
+
   homebrew:
     name: Bump Homebrew formula
     runs-on: ubuntu-latest

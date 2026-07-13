@@ -61,7 +61,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
         });
     }
     return out;
-  }, [pools, poolMatches, bracket, c.id, c.name, c.kind, c.teamSize, c.format]);
+  }, [pools, poolMatches, bracket, c.id, c.name, c.kind, c.teamSize, c.format, c.teamMatchType, c.config?.teamMatchType]);
 
   // mp-xhaa: the schedule filter and bracket/pool highlight are driven by the
   // unified watchlist (resolved to flat players, so dojo entries expand to

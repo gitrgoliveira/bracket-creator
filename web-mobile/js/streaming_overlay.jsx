@@ -3,18 +3,16 @@
 
 import { findRunningOnCourt, sideLabel, TermD, StreamingQR } from './display_helpers.jsx';
 import { useTeamLineups, teamIVPW } from './match_scoreboard.jsx';
-import { pickFromLineup, resolveBoutSideName } from './lineup_resolver.jsx';
+import { pickFromLineup, resolveBoutSideName, POS_LABELS_5 } from './lineup_resolver.jsx';
 import { isPoolDaihyosenBout, teamMatchTypeFor, DAIHYOSEN_POSITION } from './pool_ids.jsx';
 
 const { useEffect: useED, useMemo: useMD } = React;
 
 // overlayPositionLabel: FIK position label for the current bout, used as the
-// fallback when no per-match lineup pins a player name. Mirrors
-// positionLabelFor in admin_scoring_modal.jsx (module-local copy; display.jsx
-// is a separate ES module). Senpo/Jiho/... for 5-person teams, "Daihyosen"
-// for the rep bout (position === -1), else the bare bout number ("1", "2", …).
-// NEVER the team name.
-const OVL_POS_LABELS_5 = ["Senpo", "Jiho", "Chuken", "Fukusho", "Taisho"];
+// fallback when no per-match lineup pins a player name. Uses POS_LABELS_5
+// from lineup_resolver.jsx (single source of truth). Senpo/Jiho/... for
+// 5-person teams, "Daihyosen" for the rep bout (position === -1), else the
+// bare bout number ("1", "2", …). NEVER the team name.
 function overlayPositionLabel(teamSize, index, sub) {
     if (sub && sub.position === DAIHYOSEN_POSITION) return "Daihyosen";
     if (sub && typeof sub.position === "string" && sub.position.length > 0 && /[a-z]/i.test(sub.position)) return sub.position;
@@ -22,7 +20,7 @@ function overlayPositionLabel(teamSize, index, sub) {
     // kachinuki the app uses numeric positions "1".."N" everywhere
     // (domain.PositionNumbered, admin_lineup positionsForSize): so the
     // overlay falls back to the bare bout number, which scales to any size.
-    if (teamSize === 5 && index >= 0 && index < 5) return OVL_POS_LABELS_5[index];
+    if (teamSize === 5 && index >= 0 && index < 5) return POS_LABELS_5[index];
     return String(index + 1);
 }
 

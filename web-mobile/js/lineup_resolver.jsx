@@ -58,9 +58,12 @@ export function resolveLineupTeamId(sideKey, players) {
   return (p && (p.id || p.ID)) || sideKey;
 }
 
-// FIK named positions for 5-person teams (index 0=senpo … 4=taisho).
-// Mirrors POS_LABELS_BY_INDEX_5 in admin_scoring_modal.jsx.
-const POS_LABELS_5 = ["senpo", "jiho", "chuken", "fukusho", "taisho"];
+// FIK named position KEYS for 5-person teams (index 0=senpo … 4=taisho).
+// Used by pickFromLineup to look up positions[key] in the lineup object.
+export const POS_KEYS_5 = ["senpo", "jiho", "chuken", "fukusho", "taisho"];
+// Title-case labels for display (Senpo, Jiho, ...), derived from POS_KEYS_5.
+// Consumed by admin_scoring_team.jsx and streaming_overlay.jsx (single source).
+export const POS_LABELS_5 = POS_KEYS_5.map((s) => s.charAt(0).toUpperCase() + s.slice(1));
 
 // resolveBoutSideName: which name identifies one side of a sub-bout row.
 // KACHINUKI numbered bouts are SERVER-FIRST: the engine appended the
@@ -82,7 +85,7 @@ export function resolveBoutSideName({ isKachinuki, isDaihyosen, existingName, li
 export function pickFromLineup(lineup, index, teamSize) {
   if (!lineup || !lineup.positions) return "";
   if (teamSize === 5 && index >= 0 && index < 5) {
-    const named = lineup.positions[POS_LABELS_5[index]];
+    const named = lineup.positions[POS_KEYS_5[index]];
     if (named) return named;
   }
   const numeric = lineup.positions[String(index + 1)];

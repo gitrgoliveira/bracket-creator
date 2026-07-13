@@ -98,15 +98,18 @@ func (e *Engine) collectKachinukiMatches(compID string, comp *state.Competition)
 // helper-layer detail struct, including eliminations and the final
 // decision.
 func buildKachinukiDetail(m *state.MatchResult, label string, positions map[string]string) helper.KachinukiMatchDetail {
+	resolvePos := func(team, player string) string {
+		return resolveKachinukiPosition(positions, m.ID, team, player)
+	}
 	bouts := make([]helper.KachinukiBout, 0, len(m.SubResults))
 	for _, sub := range m.SubResults {
 		bouts = append(bouts, helper.KachinukiBout{
 			Position:  sub.Position,
 			SideAName: sub.SideA,
-			SideAPos:  resolveKachinukiPosition(positions, m.ID, m.SideA, sub.SideA),
+			SideAPos:  resolvePos(m.SideA, sub.SideA),
 			ScoreA:    strings.Join(sub.IpponsA, ""),
 			SideBName: sub.SideB,
-			SideBPos:  resolveKachinukiPosition(positions, m.ID, m.SideB, sub.SideB),
+			SideBPos:  resolvePos(m.SideB, sub.SideB),
 			ScoreB:    strings.Join(sub.IpponsB, ""),
 			Winner:    sub.Winner,
 			Decision:  sub.Decision,
@@ -127,33 +130,15 @@ func buildKachinukiDetail(m *state.MatchResult, label string, positions map[stri
 	}
 }
 
-// tallyKachinukiEliminations counts retired players per team based on
-// the bout log. A hikiwake retires both sides; a per-bout winner retires
-// the loser.
+// tallyKachinukiEliminations returns the number of retired (eliminated)
+// players per side. It delegates to RetiredPlayersFromBoutLog so the
+// retirement rule (hikiwake retires both sides, otherwise the loser retires)
+// lives in exactly one place: len of the per-side retired-name set equals the
+// elimination count for valid play (each player retires at most once). `a` is
+// SideA eliminations, `b` is SideB.
 func tallyKachinukiEliminations(m *state.MatchResult) (a, b int) {
-	for _, sub := range m.SubResults {
-		if state.IsDraw(sub.Decision) {
-			if sub.SideA != "" {
-				a++
-			}
-			if sub.SideB != "" {
-				b++
-			}
-			continue
-		}
-		switch sub.Winner {
-		case sub.SideA, m.SideA:
-			// SideA wins → SideB player retired.
-			if sub.SideB != "" {
-				b++
-			}
-		case sub.SideB, m.SideB:
-			if sub.SideA != "" {
-				a++
-			}
-		}
-	}
-	return a, b
+	retiredA, retiredB := RetiredPlayersFromBoutLog(m.SubResults, m.SideA, m.SideB)
+	return len(retiredA), len(retiredB)
 }
 
 // lineupKey is the composite key used to look up a player's lineup

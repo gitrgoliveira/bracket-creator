@@ -36,7 +36,7 @@ import { useDebouncedRunningWrite, SyncStatusPill } from './admin_scoring_autosa
 // StreamingOverlay). The implementations live in lineup_resolver.jsx;
 // re-exported here so existing imports from admin_scoring_modal.jsx (which
 // re-exports them onward) continue to work.
-import { resolveMatchLineup, resolveLineupTeamId, resolveBoutSideName } from './lineup_resolver.jsx';
+import { resolveMatchLineup, resolveLineupTeamId, resolveBoutSideName, POS_KEYS_5, POS_LABELS_5 } from './lineup_resolver.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 
 // Position keys are generated inline in TeamScoreEditorModal (numbered "1".."N")
@@ -45,12 +45,9 @@ import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 // caps in admin_competition.jsx and admin_setup.jsx.
 
 // T131 helper: human-friendly position label for the team-match scoring
-// modal. 5-person teams use the canonical FIK names; non-5 sizes use the
-// position number. Kept inline here so the team modal doesn't have a
-// hard import dependency on admin_lineup.jsx (the two files are loaded
-// independently and admin_lineup.jsx may not be present in older
-// builds). The mapping mirrors POS_LABELS_5 in admin_lineup.jsx.
-const POS_LABELS_BY_INDEX_5 = ["Senpo", "Jiho", "Chuken", "Fukusho", "Taisho"];
+// modal. 5-person teams use the canonical FIK names (POS_LABELS_5 from
+// lineup_resolver.jsx, the single source of truth); non-5 sizes use the
+// position number.
 const POS_ABBREV_BY_INDEX_5 = ["Sen", "Ji", "Chu", "Fuk", "Tai"];
 function positionLabelFor(teamSize, index, sub) {
   if (sub && sub.position && typeof sub.position === "string" && sub.position.length > 0 && /[a-z]/i.test(sub.position)) {
@@ -58,7 +55,7 @@ function positionLabelFor(teamSize, index, sub) {
     // domain.Position is wire-stable. Use it verbatim when present.
     return sub.position;
   }
-  if (teamSize === 5 && index >= 0 && index < 5) return POS_LABELS_BY_INDEX_5[index];
+  if (teamSize === 5 && index >= 0 && index < 5) return POS_LABELS_5[index];
   return `Match ${index + 1}`;
 }
 // Short position handle shown beside the bout number. Operators think in
@@ -455,7 +452,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const initSubsRef = React.useRef(null);
   if (initSubsRef.current === null) {
     initSubsRef.current = positions.map((_, idx) => {
-      const pos = idx === daihyosenIdx ? -1 : idx + 1;
+      const pos = idx === daihyosenIdx ? DAIHYOSEN_POSITION : idx + 1;
       const existing = existingSub.find(s => s.position === pos);
       let fusensho = "";
       if (existing?.decision === "fusensho") {
@@ -525,10 +522,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // mp-4pc: the daihyosen row (when present) is excluded from IV/PW: it
   // is a tiebreaker, not an individual victory. Its own winner (hantei
   // side first, then score) decides the encounter.
-  const ivA = subTotals.filter((s, i) => i !== daihyosenIdx && s.winner === "a").length;
-  const ivB = subTotals.filter((s, i) => i !== daihyosenIdx && s.winner === "b").length;
-  const pwA = subTotals.reduce((sum, s, i) => i === daihyosenIdx ? sum : sum + s.aTotal, 0);
-  const pwB = subTotals.reduce((sum, s, i) => i === daihyosenIdx ? sum : sum + s.bTotal, 0);
+  let ivA = 0, ivB = 0, pwA = 0, pwB = 0;
+  subTotals.forEach((s, i) => {
+    if (i === daihyosenIdx) return;
+    if (s.winner === "a") ivA++;
+    else if (s.winner === "b") ivB++;
+    pwA += s.aTotal;
+    pwB += s.bTotal;
+  });
   // Hantei applies only to a tied daihyosen scoreline (FIK 7-5 / 29-6);
   // otherwise the bout is decided by ippons like any other.
   const daihyosenTied = hasDaihyosen && subTotals[daihyosenIdx].aTotal === subTotals[daihyosenIdx].bTotal;
@@ -608,9 +609,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // are lineup-first as before.
   const playerNamesForBout = (idx) => {
     const isDaihyoRow = idx === daihyosenIdx;
-    const pos = isDaihyoRow ? -1 : idx + 1;
+    const pos = isDaihyoRow ? DAIHYOSEN_POSITION : idx + 1;
     const existing = existingSub.find(s => s.position === pos);
-    const posKey5 = (teamSize === 5 && idx < 5) ? POS_LABELS_BY_INDEX_5[idx].toLowerCase() : null;
+    const posKey5 = (teamSize === 5 && idx < 5) ? POS_KEYS_5[idx] : null;
     const posKeyN = String(positions[idx]);
     const pick = (lineup) => {
       if (!lineup?.positions) return "";
@@ -662,7 +663,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
         winner = teamWinnerName;
       }
       const entry = {
-        position: isDaihyo ? -1 : idx + 1,
+        position: isDaihyo ? DAIHYOSEN_POSITION : idx + 1,
         sideA,
         sideB,
         ipponsA: aAll,
@@ -903,7 +904,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             // (from the match) and lineup data are both consulted so the
             // bout cell shows e.g. "Match 1 (Senpo): A. Tanaka vs B. Sato".
             const isDaihyoRow = idx === daihyosenIdx;
-            const existingSubAtIdx = (m.subResults || []).find(sr => sr.position === (isDaihyoRow ? -1 : idx + 1));
+            const existingSubAtIdx = (m.subResults || []).find(sr => sr.position === (isDaihyoRow ? DAIHYOSEN_POSITION : idx + 1));
             const posLabel = isDaihyoRow ? "Daihyosen" : positionLabelFor(teamSize, idx, existingSubAtIdx);
             const posAbbrev = isDaihyoRow ? "" : positionAbbrevFor(teamSize, idx, existingSubAtIdx);
             // Resolve the player name occupying this position on each
@@ -913,7 +914,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             // 5-person teams use named position keys (senpo, jiho, ...);
             // other sizes use the numeric string "1".."N". Try both
             // shapes so this stays size-agnostic.
-            const posKey5 = (teamSize === 5 && idx < 5) ? POS_LABELS_BY_INDEX_5[idx].toLowerCase() : null;
+            const posKey5 = (teamSize === 5 && idx < 5) ? POS_KEYS_5[idx] : null;
             const posKeyN = String(positions[idx]);
             // Same lineup→competitor resolution buildPatch uses (DRY).
             const { aName: playerAName, bName: playerBName } = playerNamesForBout(idx);

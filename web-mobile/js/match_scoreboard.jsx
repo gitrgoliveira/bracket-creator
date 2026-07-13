@@ -247,8 +247,10 @@ export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state
   // fixed format is lineup-first.
   const lineupNameFor = (lu) =>
     (kachinuki && index !== 0) ? "" : (lu ? pickFromLineup(lu, index, teamSize) : "");
-  const shiroName = resolveBoutSideName({ isKachinuki: kachinuki, isDaihyosen: isDH, existingName: subSideName(sub && sub.sideB), lineupName: lineupNameFor(lineupB) }) || boutNum;
-  const akaName = resolveBoutSideName({ isKachinuki: kachinuki, isDaihyosen: isDH, existingName: subSideName(sub && sub.sideA), lineupName: lineupNameFor(lineupA) }) || boutNum;
+  const resolveSide = (subSide, lu) =>
+    resolveBoutSideName({ isKachinuki: kachinuki, isDaihyosen: isDH, existingName: subSideName(sub && subSide), lineupName: lineupNameFor(lu) }) || boutNum;
+  const shiroName = resolveSide(sub && sub.sideB, lineupB);
+  const akaName = resolveSide(sub && sub.sideA, lineupA);
   // TV sizing comes from the parent `.msb--tv .msb-row` selector, so no
   // per-row --tv modifier is needed here.
   const cls = "msb-row"

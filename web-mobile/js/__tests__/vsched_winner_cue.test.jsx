@@ -42,6 +42,16 @@ describe('T5: VSchedItem winner cue - completed team match', () => {
     vi.resetModules();
   });
 
+  const mountSides = (m) => {
+    const tree = runtime.mount(VSchedItem, { m, tweaks: {} });
+    const sides = findAll(tree, n => hasClass(n, 'vsched-item__side'));
+    return {
+      tree, sides,
+      shiroDivs: sides.filter(n => hasClass(n, 'vsched-item__side--shiro')),
+      akaDivs: sides.filter(n => hasClass(n, 'vsched-item__side--aka')),
+    };
+  };
+
   it('winner string "Ryu" normalises to sideA.id and vsched-item__side--w lands on the aka side', () => {
     // Backend payload: team names as plain strings, winner as string.
     // No playerMap (team names are not in the individual-player map).
@@ -67,12 +77,9 @@ describe('T5: VSchedItem winner cue - completed team match', () => {
     expect(m.winner.id).not.toBe(m.sideB.id);
 
     // Mount VSchedItem and verify the winner CSS class.
-    const tree = runtime.mount(VSchedItem, { m, tweaks: {} });
-    const sides = findAll(tree, n => hasClass(n, 'vsched-item__side'));
+    const { sides, shiroDivs, akaDivs } = mountSides(m);
     // 2 side divs: shiro (sideB/left) and aka (sideA/right).
     expect(sides).toHaveLength(2);
-    const shiroDivs = sides.filter(n => hasClass(n, 'vsched-item__side--shiro'));
-    const akaDivs   = sides.filter(n => hasClass(n, 'vsched-item__side--aka'));
     expect(shiroDivs).toHaveLength(1);
     expect(akaDivs).toHaveLength(1);
     // Aka (sideA = "Ryu") wins: must carry vsched-item__side--w.
@@ -96,10 +103,7 @@ describe('T5: VSchedItem winner cue - completed team match', () => {
     expect(m.winner.id).toBe(m.sideB.id);
     expect(m.winner.id).not.toBe(m.sideA.id);
 
-    const tree = runtime.mount(VSchedItem, { m, tweaks: {} });
-    const sides = findAll(tree, n => hasClass(n, 'vsched-item__side'));
-    const shiroDivs = sides.filter(n => hasClass(n, 'vsched-item__side--shiro'));
-    const akaDivs   = sides.filter(n => hasClass(n, 'vsched-item__side--aka'));
+    const { shiroDivs, akaDivs } = mountSides(m);
     // Shiro (sideB = "Phoenix") wins.
     expect(hasClass(shiroDivs[0], 'vsched-item__side--w')).toBe(true);
     expect(hasClass(akaDivs[0], 'vsched-item__side--w')).toBe(false);
@@ -129,10 +133,7 @@ describe('T5: VSchedItem winner cue - completed team match', () => {
     // but the match-level winner must still resolve correctly.
     expect(m.winner.id).toBe(m.sideA.id);
 
-    const tree = runtime.mount(VSchedItem, { m, tweaks: {} });
-    const sides = findAll(tree, n => hasClass(n, 'vsched-item__side'));
-    const shiroDivs = sides.filter(n => hasClass(n, 'vsched-item__side--shiro'));
-    const akaDivs   = sides.filter(n => hasClass(n, 'vsched-item__side--aka'));
+    const { shiroDivs, akaDivs } = mountSides(m);
     // Daihyosen winner is "Ryu" (sideA = Aka): must carry vsched-item__side--w.
     expect(hasClass(akaDivs[0], 'vsched-item__side--w')).toBe(true);
     expect(hasClass(shiroDivs[0], 'vsched-item__side--w')).toBe(false);

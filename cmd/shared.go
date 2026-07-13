@@ -7,7 +7,19 @@ import (
 	"os"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
+	excelize "github.com/xuri/excelize/v2"
 )
+
+// printEliminationWithBronze renders the team elimination sheet and, for a
+// naginata bracket with a real semifinal round, the bronze (3rd-place) block with
+// its print area. Shared by create-pools and create-playoffs, which both run the
+// bronze on the same court set with mirror=true.
+func printEliminationWithBronze(f *excelize.File, matchWinners map[string]helper.MatchWinner, rounds [][]*helper.Node, teamMatches, courts int, engi, naginata bool) {
+	nextRow, elimMatchWinners := helper.PrintTeamEliminationMatches(f, matchWinners, rounds, teamMatches, courts, true, engi)
+	if helper.NeedsBronzeBlock(naginata, len(rounds)) {
+		helper.PrintBronzeBlockWithPrintArea(f, nextRow, teamMatches, true, engi, courts, rounds, elimMatchWinners)
+	}
+}
 
 // openOutputFile opens (or creates) the file at outputPath for appending and
 // returns the file and a buffered writer over it. The caller must defer

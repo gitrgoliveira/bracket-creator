@@ -190,7 +190,7 @@ function teamIVPWScore(m) {
   return iv == null ? null : `IV ${iv}`;
 }
 
-const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD }) => {
+const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD, isEngi }) => {
   const isAka = side === "a";
   if (!player || isTBD) {
     return (
@@ -200,6 +200,9 @@ const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD 
       </div>
     );
   }
+  // Engi pair: split the combined name so member 2 stacks under member 1
+  // instead of truncating on narrow bracket cards.
+  const [m1, m2] = isEngi && window.engiPairParts ? window.engiPairParts(player.name) : [player.name, ""];
   return (
     <div className={`bc-side bc-side--${side} ${isWinner ? "bc-side--winner" : ""}`}>
       <span className={`bc-color-badge bc-color-badge--${isAka ? "aka" : "shiro"}`}>{isAka ? "AKA" : "SHIRO"}</span>
@@ -208,8 +211,9 @@ const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD 
         <span className="bc-name">
           {isWinner ? <span className="bc-winner-tick" aria-label="Winner" title="Winner">✓</span> : null}
           {player.number ? <span className="num-prefix">{player.number}</span> : null}
-          {player.name}
+          {m1}
         </span>
+        {m2 ? <span className="bc-name">{m2}</span> : null}
         {/* Reserve the dojo line on every side when dojos are shown: a real
             player without a dojo, or a "Winner of…" placeholder, gets an
             invisible spacer line so all sides (and thus all bracket cards) keep
@@ -223,7 +227,7 @@ const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD 
 });
 PlayerLine.displayName = "PlayerLine";
 
-const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, matchRef, highlightPlayers, matchNum }) => {
+const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, matchRef, highlightPlayers, matchNum, isEngi }) => {
   const aWin = match.winner && match.sideA && match.winner.id === match.sideA.id;
   const bWin = match.winner && match.sideB && match.winner.id === match.sideB.id;
   const running = match.status === "running";
@@ -277,9 +281,9 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
           </span>
         ) : null}
       </div>
-      <PlayerLine player={match.sideA} isWinner={aWin} side="a" showDojo={showDojo} score={aScore} isTBD={aTBD} />
+      <PlayerLine player={match.sideA} isWinner={aWin} side="a" showDojo={showDojo} score={aScore} isTBD={aTBD} isEngi={isEngi} />
       <div className="bc-divider"></div>
-      <PlayerLine player={match.sideB} isWinner={bWin} side="b" showDojo={showDojo} score={bScore} isTBD={bTBD} />
+      <PlayerLine player={match.sideB} isWinner={bWin} side="b" showDojo={showDojo} score={bScore} isTBD={bTBD} isEngi={isEngi} />
     </button>
   );
 });
@@ -560,7 +564,7 @@ function BracketConnectorsMeta({ columns, feedersById, treeRef, refMap, version,
 // (hidden) are dropped. All cards are absolutely positioned at the
 // feeder-graph-derived top so parents sit centred on their feeders
 // (see computeMetaTops).
-function BracketTreeMeta({ columns, feedersById, matchNumById, variant = 1, showDojo = true, onMatchClick, highlightedMatchId, autoScrollMatchId, scrollContainerRef, highlightPlayers }) {
+function BracketTreeMeta({ columns, feedersById, matchNumById, variant = 1, showDojo = true, onMatchClick, highlightedMatchId, autoScrollMatchId, scrollContainerRef, highlightPlayers, isEngi }) {
   const treeRef = useRef(null);
   const refMap = useRef({});
   const [version, setVersion] = useStateBC(0);
@@ -677,6 +681,7 @@ function BracketTreeMeta({ columns, feedersById, matchNumById, variant = 1, show
                   onClick={() => onMatchClick && onMatchClick(m, ci, mi, columns.length)}
                   highlightPlayers={highlightPlayers}
                   matchNum={matchNumById[m.id]}
+                  isEngi={isEngi}
                 />
               );
               return (
@@ -705,7 +710,7 @@ function BracketTree(props) {
   return <BracketTreeLegacy {...props} />;
 }
 
-function BracketTreeLegacy({ rounds, variant = 1, showDojo = true, onMatchClick, highlightedMatchId, autoScrollMatchId, scrollContainerRef, highlightPlayers }) {
+function BracketTreeLegacy({ rounds, variant = 1, showDojo = true, onMatchClick, highlightedMatchId, autoScrollMatchId, scrollContainerRef, highlightPlayers, isEngi }) {
   const treeRef = useRef(null);
   const refMap = useRef({});
   const [version, setVersion] = useStateBC(0);
@@ -814,6 +819,7 @@ function BracketTreeLegacy({ rounds, variant = 1, showDojo = true, onMatchClick,
                     matchRef={(el) => { if (el) refMap.current[m.id] = el; }}
                     onClick={() => onMatchClick && onMatchClick(m, ri, mi, rounds.length)}
                     highlightPlayers={highlightPlayers}
+                    isEngi={isEngi}
                   />
                 </div>
                 );
@@ -891,4 +897,4 @@ window.decisionSuffix = decisionSuffix;
 window.sideLabel = sideLabel;
 window.ipponsFromScore = ipponsFromScore;
 
-export { formatIpponsScore, decisionSuffix, sideLabel, roundLabel, ipponsFromScore, teamIVScore, teamIVPWScore, engiFlagScore, matchScoreStr, matchStateCell, buildDisplayModel, computeMetaTops, bronzeUnderFinalStyle };
+export { formatIpponsScore, decisionSuffix, sideLabel, roundLabel, ipponsFromScore, teamIVScore, teamIVPWScore, engiFlagScore, matchScoreStr, matchStateCell, buildDisplayModel, computeMetaTops, bronzeUnderFinalStyle, PlayerLine };

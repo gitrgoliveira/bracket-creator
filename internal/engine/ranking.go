@@ -65,7 +65,7 @@ func (e *Engine) GetBracketRanking(compID string, rank int) (*domain.Player, err
 
 	// Resolve full player record from source participants.
 	srcComp, _ := e.store.LoadCompetition(compID)
-	withZekken := srcComp != nil && srcComp.WithZekkenName
+	withZekken := srcComp != nil && srcComp.EffectiveWithZekkenName()
 	srcPlayers, _ := e.store.LoadParticipants(compID, withZekken)
 	for i := range srcPlayers {
 		if srcPlayers[i].Name == winnerName {

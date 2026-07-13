@@ -370,9 +370,9 @@ func TestComputeEngiStandings_SameNameDifferentDojo(t *testing.T) {
 	require.NotNil(t, osakaRow, "Osaka Tanaka must have her own standings row")
 
 	assert.Equal(t, 3, osakaRow.Wins, "Osaka Tanaka should have 3 wins")
-	assert.Equal(t, 0, osakaRow.Losses, "Osaka Tanaka should have 0 losses")
+	assert.Equal(t, 0, osakaRow.Losses, "engi does not record losses; Osaka Tanaka stays at 0")
 	assert.Equal(t, 0, tokyoRow.Wins, "Tokyo Tanaka should have 0 wins")
-	assert.Equal(t, 3, tokyoRow.Losses, "Tokyo Tanaka should have 3 losses")
+	assert.Equal(t, 0, tokyoRow.Losses, "engi does not record losses; Tokyo Tanaka stays at 0")
 }
 
 // --- Regression: kendo path unchanged --------------------------------------
@@ -416,23 +416,20 @@ func TestEngiDispatch_DoesNotAffectKendo(t *testing.T) {
 }
 
 // TestEngi_PairParticipantRoundTrip verifies an engi-pair participant row
-// (member 1, member 2, dojo) round-trips through the store with member 2 stored
-// in the DisplayName column.
+// round-trips through the store with both member names combined in the Name
+// field ("Name 1 - Name 2"): engi does not alter the CSV layout.
 func TestEngi_PairParticipantRoundTrip(t *testing.T) {
 	_, store, _ := setupTestEngine(t)
 	compID := "engi-pair"
 	createEngiCompetition(t, store, compID, state.CompFormatLeague, 4)
 
-	pair := domain.Player{Name: "Yamada Taro", DisplayName: "Suzuki Hanako", Dojo: "Tokyo Dojo"}
+	pair := domain.Player{Name: "Yamada Taro - Suzuki Hanako", Dojo: "Tokyo Dojo"}
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{pair}))
 
-	// Load with the caller passing false; the engi flag must still force the
-	// 4-column zekken layout so member 2 reads back from DisplayName.
 	loaded, err := store.LoadParticipants(compID, false)
 	require.NoError(t, err)
 	require.Len(t, loaded, 1)
-	assert.Equal(t, "Yamada Taro", loaded[0].Name, "member 1 → Name")
-	assert.Equal(t, "Suzuki Hanako", loaded[0].DisplayName, "member 2 → DisplayName")
+	assert.Equal(t, "Yamada Taro - Suzuki Hanako", loaded[0].Name, "combined pair name round-trips")
 	assert.Equal(t, "Tokyo Dojo", loaded[0].Dojo, "shared dojo")
 }
 

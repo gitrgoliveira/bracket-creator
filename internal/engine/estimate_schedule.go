@@ -64,7 +64,7 @@ func (e *Engine) EstimateScheduleForCompetition(compID string) (ScheduleEstimate
 // competition, applying the check-in filter when enabled (mirroring
 // runDrawPipeline's filterCheckedIn opt-in semantics).
 func (e *Engine) estimateParticipantCount(comp *state.Competition) (int, error) {
-	players, err := e.store.LoadParticipants(comp.ID, comp.WithZekkenName)
+	players, err := e.store.LoadParticipants(comp.ID, comp.EffectiveWithZekkenName())
 	if err != nil {
 		return 0, err
 	}

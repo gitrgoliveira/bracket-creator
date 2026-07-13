@@ -311,8 +311,7 @@ describe('ViewerOverview league standings (mp-ldnr)', () => {
       rows.push({
         player: {
           id: `e${i}`,
-          name: `Member1-${i + 1}`,
-          displayName: `Member2-${i + 1}`,
+          name: `Member1-${i + 1} - Member2-${i + 1}`,
           dojo: `Dojo ${i + 1}`,
         },
         wins: count - i,
@@ -364,7 +363,7 @@ describe('ViewerOverview league standings (mp-ldnr)', () => {
     expect(text).toContain('Member1-1');
   });
 
-  it('engi league overview shows member2 (displayName) stacked below member1', () => {
+  it('engi league overview shows member2 (split from the combined name) stacked below member1', () => {
     const standings = { League: makeEngiStandings(2) };
     const tree = runtime.mount(ViewerOverview, {
       ...baseProps,

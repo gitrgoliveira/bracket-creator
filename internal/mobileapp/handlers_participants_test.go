@@ -1160,13 +1160,14 @@ func TestPutParticipant_DrawReady_DojoConflictWarning(t *testing.T) {
 	assert.True(t, graceFound, "Grace must appear in pools after cascade")
 }
 
-// TestEngiParticipantAddPreservesMemberTwo is a regression for Copilot PR #326
-// round 3 (backend sibling of the frontend fix): the add handler stripped
-// displayName based on the raw comp.WithZekkenName, so an Engi comp
-// (WithZekkenName=false, effective layout = WithZekkenName||Engi) dropped the
-// pair's member 2 (DisplayName), which then auto-derived from Name 1. Now keyed
-// off EffectiveWithZekkenName().
-func TestEngiParticipantAddPreservesMemberTwo(t *testing.T) {
+// TestEngiParticipantAddRoundTripsCombinedName pins the combined-name engi
+// model: a pair is ONE participant with both member names combined in Name
+// ("Name 1 - Name 2") and the shared dojo in Dojo. Engi no longer forces the
+// zekken layout (EffectiveWithZekkenName == WithZekkenName), so a non-zekken
+// engi comp stores the pair with the identical column layout as any other
+// non-zekken competition. The add handler must round-trip the combined name
+// verbatim (no split into DisplayName, no re-derivation from a first member).
+func TestEngiParticipantAddRoundTripsCombinedName(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
 
@@ -1176,13 +1177,13 @@ func TestEngiParticipantAddPreservesMemberTwo(t *testing.T) {
 		Name:           "Engi Add Handler",
 		Status:         state.CompStatusSetup,
 		Engi:           true,
-		WithZekkenName: false, // effective layout is still zekken via Engi
+		WithZekkenName: false, // engi does not alter the roster layout
 	}))
 
+	// An engi pair is ONE participant with both member names combined.
 	payload := map[string]interface{}{
-		"name":        "Emi Sasaki",
-		"displayName": "Ren Fujita", // pair member 2
-		"dojo":        "Getsurin Dojo",
+		"name": "Emi Sasaki - Ren Fujita",
+		"dojo": "Getsurin Dojo",
 	}
 	bodyBytes, _ := json.Marshal(payload)
 	w := httptest.NewRecorder()
@@ -1193,13 +1194,12 @@ func TestEngiParticipantAddPreservesMemberTwo(t *testing.T) {
 
 	var added domain.Player
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &added))
-	assert.Equal(t, "Ren Fujita", added.DisplayName, "engi member 2 must not be stripped/auto-derived on add")
+	assert.Equal(t, "Emi Sasaki - Ren Fujita", added.Name, "combined pair name must round-trip on add")
 
-	// Persisted: reload with the effective flag (engi forces the 4-col layout).
 	stored, err := store.LoadParticipants(compID, false)
 	require.NoError(t, err)
 	require.Len(t, stored, 1)
-	assert.Equal(t, "Ren Fujita", stored[0].DisplayName, "engi member 2 must round-trip")
+	assert.Equal(t, "Emi Sasaki - Ren Fujita", stored[0].Name, "combined pair name must round-trip")
 	assert.Equal(t, "Getsurin Dojo", stored[0].Dojo)
 }
 

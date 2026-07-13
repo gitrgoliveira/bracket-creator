@@ -39,6 +39,7 @@
 package helper
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -218,7 +219,7 @@ func buildTeamPointsFormula(lVCol, lPCol, rVCol, rPCol string, startRow, endRow 
 	return strings.Join(parts, "+")
 }
 
-func printSinglePool(f *excelize.File, sheetName string, pool Pool, startCol int, startRow int, teamMatches int, numWinners int, maxBlocks []int, colNames matchColumnNames, styles matchStyles, matchWinners map[string]MatchWinner, mirror bool, poolCoords map[string]cellCoord, pCoords map[string]playerCellCoord) {
+func printSinglePool(f *excelize.File, sheetName string, pool Pool, startCol int, startRow int, teamMatches int, numWinners int, maxBlocks []int, colNames matchColumnNames, styles matchStyles, matchWinners map[string]MatchWinner, mirror bool, poolCoords map[string]cellCoord, pCoords map[string]playerCellCoord, engi bool) {
 	poolRow := startRow
 
 	startColName := colNames.startColName
@@ -236,7 +237,7 @@ func printSinglePool(f *excelize.File, sheetName string, pool Pool, startCol int
 
 	poolRow++
 	if teamMatches == 0 {
-		matchHeaderWithStyles(f, sheetName, startColName, poolRow, middleColName, endColName, styles.redHeader, styles.text, styles.whiteHeader, mirror)
+		matchHeaderWithStyles(f, sheetName, startColName, poolRow, middleColName, endColName, styles.redHeader, styles.text, styles.whiteHeader, mirror, engi)
 		poolRow++
 	}
 
@@ -250,7 +251,7 @@ func printSinglePool(f *excelize.File, sheetName string, pool Pool, startCol int
 			handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, startCell, endCell, styles.text))
 
 			if teamMatches > 0 {
-				matchHeaderWithStyles(f, sheetName, startColName, poolRow, middleColName, endColName, styles.redHeader, styles.text, styles.whiteHeader, mirror)
+				matchHeaderWithStyles(f, sheetName, startColName, poolRow, middleColName, endColName, styles.redHeader, styles.text, styles.whiteHeader, mirror, engi)
 				poolRow++
 			}
 
@@ -323,7 +324,7 @@ func printSinglePool(f *excelize.File, sheetName string, pool Pool, startCol int
 	poolRow++ // Add a single row of space between the pool and the pool results
 
 	resultsTableStart := poolRow
-	poolRow = printPoolResultsTable(f, sheetName, pool, resultsTableStart, colNames, playerMatchRows, styles, mirror, teamMatches, pCoords)
+	poolRow = printPoolResultsTable(f, sheetName, pool, resultsTableStart, colNames, playerMatchRows, styles, mirror, teamMatches, pCoords, engi)
 	poolRow++
 
 	resLabelColName := mustColumnName(colNames.startCol + 5) // F
@@ -383,6 +384,15 @@ type poolResultsCtx struct {
 	scoreCol        string
 	joinFormulas    func([]string) string
 	pCoords         map[string]playerCellCoord
+	engi            bool
+}
+
+// playerNameFormulaFor returns the name-cell formula for a results-table row.
+// Engi pair names need no special handling: both member names live combined in
+// Player.Name ("Name 1 - Name 2"), so the plain reference shows the full pair.
+func (ctx poolResultsCtx) playerNameFormulaFor(player Player) string {
+	left, _ := getMatchSides(playerRef(player.Name, ctx.pCoords[playerCoordKey(player)]), "", false)
+	return left
 }
 
 // printTeamResultsTableSection writes the "Team Results" W/L/T table header and
@@ -405,8 +415,8 @@ func printTeamResultsTableSection(ctx poolResultsCtx, headerRow int, cols []stri
 
 	for i, player := range pool.Players {
 		row := headerRow + 1 + i
-		leftSide, _ := getMatchSides(playerRef(player.Name, ctx.pCoords[playerCoordKey(player)]), "", false)
-		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", startColName, row), leftSide))
+		playerNameFormula := ctx.playerNameFormulaFor(player)
+		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", startColName, row), playerNameFormula))
 		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", startColName, row), fmt.Sprintf("%s%d", startColName, row), styles.text))
 
 		records := playerMatchRows[&pool.Players[i]]
@@ -480,8 +490,8 @@ func printTeamIndividualStatsSection(ctx poolResultsCtx, headerRow int, headerRo
 	for i, player := range pool.Players {
 		row := headerRow + 1 + i
 		row2 := headerRow2 + 1 + i
-		leftSide, _ := getMatchSides(playerRef(player.Name, ctx.pCoords[playerCoordKey(player)]), "", false)
-		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", startColName, row2), leftSide))
+		playerNameFormula := ctx.playerNameFormulaFor(player)
+		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", startColName, row2), playerNameFormula))
 
 		records := playerMatchRows[&pool.Players[i]]
 		var ivF, ilF, itF, pwF, plF []string
@@ -568,10 +578,15 @@ func printIndividualResultsTableSection(ctx poolResultsCtx, headerRow int, teamM
 
 	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", startColName, headerRow), "Results"))
 	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", lVCol, headerRow), "W"))
-	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", lPCol, headerRow), "L"))
-	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", middleColName, headerRow), "T"))
-	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", rPCol, headerRow), "PW"))
-	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", rVCol, headerRow), "PL"))
+	if ctx.engi {
+		// Engi standings: W / Flags / Rank only (no L, T, PW, PL).
+		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", middleColName, headerRow), ColHeaderFlags))
+	} else {
+		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", lPCol, headerRow), "L"))
+		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", middleColName, headerRow), "T"))
+		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", rPCol, headerRow), "PW"))
+		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", rVCol, headerRow), "PL"))
+	}
 	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", rankCol, headerRow), "Rank"))
 	handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", startColName, headerRow), fmt.Sprintf("%s%d", rankCol, headerRow), styles.poolHeader))
 
@@ -579,15 +594,45 @@ func printIndividualResultsTableSection(ctx poolResultsCtx, headerRow int, teamM
 
 	for i, player := range pool.Players {
 		row := headerRow + 1 + i
-		leftSide, _ := getMatchSides(playerRef(player.Name, ctx.pCoords[playerCoordKey(player)]), "", false)
-		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", startColName, row), leftSide))
+		playerNameFormula := ctx.playerNameFormulaFor(player)
+		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", startColName, row), playerNameFormula))
 
 		records := playerMatchRows[&pool.Players[i]]
-		var wFormulas, tFormulas, lFormulas, pwFormulas, plFormulas []string
+		var wFormulas, middleColFormulas, lFormulas, pwFormulas, plFormulas []string
 		for _, rec := range records {
 			var leftTotal, rightTotal, played string
 			if teamMatches > 0 && rec.endRow > 0 {
 				continue
+			}
+			if ctx.engi {
+				// Engi: referee flag totals are integers; ties are impossible
+				// (flag counts are always odd). played is true when either
+				// input cell holds a number.
+				//
+				// We coerce every operand with N() rather than comparing raw
+				// cells or wrapping in IF(ISNUMBER(...),cell,0). Two reasons,
+				// both verified against excelize CalcCellValue:
+				//   1. Robustness: a raw cell comparison lets stray text
+				//      compare greater-than a number (Excel orders text above
+				//      numbers), so N(B)>N(F) is needed to treat non-numeric
+				//      cells as 0 flags. N(number)=number, N(text)=0, N(empty)=0.
+				//   2. Evaluability: excelize returns 0 for the specific
+				//      nesting IF(OR(...),(IF(...)>IF(...))*1,0), so the
+				//      IF(ISNUMBER(...)) wrapper form mis-evaluates here.
+				//      N() coercion inside the guarded comparison evaluates
+				//      correctly. N() is ISO-standard and portable to
+				//      Excel/LibreOffice/Sheets/Numbers.
+				var myCol, oppCol string
+				if rec.side == "left" {
+					myCol, oppCol = lVCol, rVCol
+				} else {
+					myCol, oppCol = rVCol, lVCol
+				}
+				engiPlayed := fmt.Sprintf("OR(ISNUMBER(%s%d),ISNUMBER(%s%d))", lVCol, rec.row, rVCol, rec.row)
+				wFormulas = append(wFormulas, fmt.Sprintf("IF(%s,(N(%s%d)>N(%s%d))*1,0)", engiPlayed, myCol, rec.row, oppCol, rec.row))
+				// Losses are not recorded for engi: lFormulas intentionally left empty.
+				middleColFormulas = append(middleColFormulas, fmt.Sprintf("N(%s%d)", myCol, rec.row)) // middleColFormulas = Flags column for engi
+				continue                                                                              // lFormulas, pwFormulas and plFormulas remain empty for engi
 			}
 			if teamMatches == 0 {
 				lc := func(col string, r int) string {
@@ -610,30 +655,42 @@ func printIndividualResultsTableSection(ctx poolResultsCtx, headerRow int, teamM
 				middleColName, rec.row, middleColName, rec.row, played, leftTotal, rightTotal)
 			if rec.side == "left" {
 				wFormulas = append(wFormulas, fmt.Sprintf("IF(%s,IF(%s,0,(%s>%s)*1),0)", played, isTie, leftTotal, rightTotal))
-				tFormulas = append(tFormulas, fmt.Sprintf("IF(%s,IF(%s,1,0),0)", played, isTie))
+				middleColFormulas = append(middleColFormulas, fmt.Sprintf("IF(%s,IF(%s,1,0),0)", played, isTie))
 				lFormulas = append(lFormulas, fmt.Sprintf("IF(%s,IF(%s,0,(%s<%s)*1),0)", played, isTie, leftTotal, rightTotal))
 				pwFormulas = append(pwFormulas, leftTotal)
 				plFormulas = append(plFormulas, rightTotal)
 			} else {
 				wFormulas = append(wFormulas, fmt.Sprintf("IF(%s,IF(%s,0,(%s>%s)*1),0)", played, isTie, rightTotal, leftTotal))
-				tFormulas = append(tFormulas, fmt.Sprintf("IF(%s,IF(%s,1,0),0)", played, isTie))
+				middleColFormulas = append(middleColFormulas, fmt.Sprintf("IF(%s,IF(%s,1,0),0)", played, isTie))
 				lFormulas = append(lFormulas, fmt.Sprintf("IF(%s,IF(%s,0,(%s<%s)*1),0)", played, isTie, rightTotal, leftTotal))
 				pwFormulas = append(pwFormulas, rightTotal)
 				plFormulas = append(plFormulas, leftTotal)
 			}
 		}
 		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", lVCol, row), joinFormulas(wFormulas)))
-		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", lPCol, row), joinFormulas(lFormulas)))
-		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", middleColName, row), joinFormulas(tFormulas)))
-		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", rPCol, row), joinFormulas(pwFormulas)))
-		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", rVCol, row), joinFormulas(plFormulas)))
+		if !ctx.engi {
+			// Non-engi: write the L formula. Engi omits the L column entirely (losses are not recorded).
+			handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", lPCol, row), joinFormulas(lFormulas)))
+		}
+		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", middleColName, row), joinFormulas(middleColFormulas)))
+		if !ctx.engi {
+			// Engi has no PW/PL concept; leave those cells blank.
+			handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", rPCol, row), joinFormulas(pwFormulas)))
+			handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", rVCol, row), joinFormulas(plFormulas)))
+		}
 
-		// Weighted Score formula
+		// Weighted Score formula.
 		// No leading '=', see the matching note in the team-results
 		// scoreFormula above. Google Sheets and Apple Numbers reject
 		// OOXML <f> bodies that begin with '='.
-		scoreFormula := fmt.Sprintf("(%s%d*1000000)-(%s%d*10000)+(%s%d*100)+(%s%d*1)-(%s%d*0.01)",
-			lVCol, row, lPCol, row, middleColName, row, rPCol, row, rVCol, row)
+		var scoreFormula string
+		if ctx.engi {
+			// Engi: rank by wins first, then accumulated flag total.
+			scoreFormula = fmt.Sprintf("(%s%d*1000000)+(%s%d)", lVCol, row, middleColName, row)
+		} else {
+			scoreFormula = fmt.Sprintf("(%s%d*1000000)-(%s%d*10000)+(%s%d*100)+(%s%d*1)-(%s%d*0.01)",
+				lVCol, row, lPCol, row, middleColName, row, rPCol, row, rVCol, row)
+		}
 		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", scoreCol, row), scoreFormula))
 
 		// Rank formula
@@ -647,7 +704,7 @@ func printIndividualResultsTableSection(ctx poolResultsCtx, headerRow int, teamM
 	return headerRow + len(pool.Players)
 }
 
-func printPoolResultsTable(f *excelize.File, sheetName string, pool Pool, startRow int, colNames matchColumnNames, playerMatchRows map[*Player][]playerMatchRecord, styles matchStyles, mirror bool, teamMatches int, pCoords map[string]playerCellCoord) int {
+func printPoolResultsTable(f *excelize.File, sheetName string, pool Pool, startRow int, colNames matchColumnNames, playerMatchRows map[*Player][]playerMatchRecord, styles matchStyles, mirror bool, teamMatches int, pCoords map[string]playerCellCoord, engi bool) int {
 	lVCol, lPCol, rVCol, rPCol := getMatchWinnerColumns(colNames)
 	scoreCol := mustColumnName(colNames.startCol + 20)
 	rankCol := mustColumnName(colNames.startCol + 6)
@@ -677,6 +734,7 @@ func printPoolResultsTable(f *excelize.File, sheetName string, pool Pool, startR
 		scoreCol:        scoreCol,
 		joinFormulas:    joinFormulas,
 		pCoords:         pCoords,
+		engi:            engi,
 	}
 
 	headerRow := startRow
@@ -693,7 +751,7 @@ func printPoolResultsTable(f *excelize.File, sheetName string, pool Pool, startR
 	return printIndividualResultsTableSection(ctx, headerRow, teamMatches)
 }
 
-func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinners int, numCourts int, mirror bool, poolCoords map[string]cellCoord, pCoords map[string]playerCellCoord) map[string]MatchWinner {
+func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinners int, numCourts int, mirror bool, poolCoords map[string]cellCoord, pCoords map[string]playerCellCoord, engi bool) map[string]MatchWinner {
 	numCourts = clampCourts(numCourts)
 
 	matchWinners := make(map[string]MatchWinner)
@@ -859,7 +917,7 @@ func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinner
 					colNamesByStartCol[startCol] = colNames
 				}
 
-				printSinglePool(f, sheetName, pools[poolIdx], startCol, poolRow, teamMatches, numWinners, maxBlocks, colNames, styles, matchWinners, mirror, poolCoords, pCoords)
+				printSinglePool(f, sheetName, pools[poolIdx], startCol, poolRow, teamMatches, numWinners, maxBlocks, colNames, styles, matchWinners, mirror, poolCoords, pCoords, engi)
 			}
 		}
 
@@ -897,11 +955,11 @@ func poolEntryWithStyle(startColName string, poolRow int, endColName string, f *
 	handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, startCell, endCell, textStyle))
 }
 
-func MatchHeader(f *excelize.File, sheetName string, startColName string, poolRow int, middleColName string, endColName string, mirror bool) {
-	matchHeaderWithStyles(f, sheetName, startColName, poolRow, middleColName, endColName, getRedHeaderStyle(f), getTextStyle(f), getWhiteHeaderStyle(f), mirror)
+func MatchHeader(f *excelize.File, sheetName string, startColName string, poolRow int, middleColName string, endColName string, mirror bool, engi bool) {
+	matchHeaderWithStyles(f, sheetName, startColName, poolRow, middleColName, endColName, getRedHeaderStyle(f), getTextStyle(f), getWhiteHeaderStyle(f), mirror, engi)
 }
 
-func matchHeaderWithStyles(f *excelize.File, sheetName string, startColName string, poolRow int, middleColName string, endColName string, redHeaderStyle int, textStyle int, whiteHeaderStyle int, mirror bool) {
+func matchHeaderWithStyles(f *excelize.File, sheetName string, startColName string, poolRow int, middleColName string, endColName string, redHeaderStyle int, textStyle int, whiteHeaderStyle int, mirror bool, engi bool) {
 	leftLabel, rightLabel := "Red", "White"
 	leftStyle, rightStyle := redHeaderStyle, whiteHeaderStyle
 
@@ -918,9 +976,52 @@ func matchHeaderWithStyles(f *excelize.File, sheetName string, startColName stri
 
 	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", endColName, poolRow), rightLabel))
 	handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", endColName, poolRow), fmt.Sprintf("%s%d", endColName, poolRow), rightStyle))
+
+	if engi {
+		startNum, _ := excelize.ColumnNameToNumber(startColName)
+		lVColName := mustColumnName(startNum + 1)
+		rVColName := mustColumnName(startNum + 5)
+		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", lVColName, poolRow), "Fl"))
+		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", lVColName, poolRow), fmt.Sprintf("%s%d", lVColName, poolRow), textStyle))
+		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", rVColName, poolRow), "Fl"))
+		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", rVColName, poolRow), fmt.Sprintf("%s%d", rVColName, poolRow), textStyle))
+	}
 }
 
-func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]MatchWinner, eliminationMatchRounds [][]*Node, numTeamMatches int, numCourts int, mirror bool) {
+// SetEliminationPrintArea sets (or updates) the _xlnm.Print_Area defined name
+// for sheetName so that the printed range is $A$1:$<maxCol>$lastRow, where
+// maxCol is derived from numCourts using the same formula as
+// PrintTeamEliminationMatches. It is idempotent: if the defined name already
+// exists for the sheet it is deleted first, so it can be called after
+// PrintThirdPlaceBlock to extend the print area to include the bronze block.
+func SetEliminationPrintArea(f *excelize.File, sheetName string, numCourts, lastRow int) {
+	numCourts = clampCourts(numCourts)
+	lastCourtStartCol := 1 + (numCourts-1)*CourtsColumnsPerCourt
+	maxColNum := lastCourtStartCol + 7
+	maxColName := mustColumnName(maxColNum)
+
+	// DeleteDefinedName returns ErrDefinedNameScope when the name is not found;
+	// that is expected on the first call, so only surface other errors.
+	if err := f.DeleteDefinedName(&excelize.DefinedName{
+		Name:  "_xlnm.Print_Area",
+		Scope: sheetName,
+	}); err != nil && !errors.Is(err, excelize.ErrDefinedNameScope) {
+		handleExcelError("DeleteDefinedName", err)
+	}
+
+	printArea := fmt.Sprintf("'%s'!$A$1:$%s$%d", sheetName, maxColName, lastRow)
+	handleExcelError("SetDefinedName", f.SetDefinedName(&excelize.DefinedName{
+		Name:     "_xlnm.Print_Area",
+		RefersTo: printArea,
+		Scope:    sheetName,
+	}))
+}
+
+// PrintTeamEliminationMatches renders all elimination match blocks onto the
+// Elimination Matches sheet and returns the next available start row (the row
+// immediately after the last rendered block plus any trailing space lines).
+// Callers that do not need the return values may ignore them.
+func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]MatchWinner, eliminationMatchRounds [][]*Node, numTeamMatches int, numCourts int, mirror bool, engi bool) (int, map[string]MatchWinner) {
 	numCourts = clampCourts(numCourts)
 
 	sheetName := SheetEliminationMatches
@@ -1003,7 +1104,7 @@ func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]M
 					colNamesByStartCol[startCol] = colNames
 				}
 
-				printSingleEliminationMatch(f, sheetName, eliminationMatch, poolMatchWinners, matchWinners, colNames, startRow, round, numTeamMatches, styles, mirror)
+				printSingleEliminationMatch(f, sheetName, eliminationMatch, poolMatchWinners, matchWinners, colNames, startRow, round, numTeamMatches, styles, mirror, engi)
 			}
 			startRow += matchHeight
 			rowsSinceLastPageBreak += matchHeight
@@ -1012,16 +1113,7 @@ func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]M
 		rowsSinceLastPageBreak += spaceLines
 	}
 
-	lastCourtStartCol := 1 + (numCourts-1)*CourtsColumnsPerCourt
-	maxColNum := lastCourtStartCol + 7
-	maxColName := mustColumnName(maxColNum)
-
-	printArea := fmt.Sprintf("'%s'!$A$1:$%s$%d", sheetName, maxColName, startRow-1)
-	handleExcelError("SetDefinedName", f.SetDefinedName(&excelize.DefinedName{
-		Name:     "_xlnm.Print_Area",
-		RefersTo: printArea,
-		Scope:    sheetName,
-	}))
+	SetEliminationPrintArea(f, sheetName, numCourts, startRow-1)
 
 	// Vertical page breaks before each court except the first
 	for c := 1; c < numCourts; c++ {
@@ -1031,12 +1123,220 @@ func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]M
 	}
 
 	SetSheetLayoutPortraitA4DownThenOver(f, sheetName, numCourts)
+	return startRow, matchWinners
 }
 
-func printSingleEliminationMatch(f *excelize.File, sheetName string, eliminationMatch *Node, poolMatchWinners map[string]MatchWinner, matchWinners map[string]MatchWinner, colNames matchColumnNames, matchRow int, round int, numTeamMatches int, styles matchStyles, mirror bool) {
+// loserCellOf returns the Excel cell address one row below the given "1." winner
+// cell, which is the "2." loser line of a single-elimination match block.
+func loserCellOf(winnerCell string) (string, error) {
+	col, row, err := excelize.SplitCellName(winnerCell)
+	if err != nil {
+		return "", err
+	}
+	return excelize.JoinCellName(col, row+1)
+}
+
+// bronzeEntrantFormulas derives CONCATENATE formula strings for the two bronze
+// entrant cells from the recorded matchWinners. semiA/semiB are the match numbers
+// of the two semifinals (0 = absent/bye, skipped). Returns empty strings for any
+// entry that cannot be resolved; callers guard with a non-empty check before
+// calling SetCellFormula.
+func bronzeEntrantFormulas(sheetName string, semiA, semiB int, matchWinners map[string]MatchWinner) (sideAFormula, sideBFormula string) {
+	build := func(semiN int) string {
+		if semiN == 0 || matchWinners == nil {
+			return ""
+		}
+		key := fmt.Sprintf("M %d", semiN)
+		mw, ok := matchWinners[key]
+		if !ok || mw.cell == "" {
+			return ""
+		}
+		loserCell, err := loserCellOf(mw.cell)
+		if err != nil {
+			return ""
+		}
+		if mw.sheetName == sheetName || mw.sheetName == "" {
+			return fmt.Sprintf("CONCATENATE(\"%s \",%s)", key, loserCell)
+		}
+		return fmt.Sprintf("CONCATENATE(\"%s \",'%s'!%s)", key, mw.sheetName, loserCell)
+	}
+	return build(semiA), build(semiB)
+}
+
+// printTeamMatchBlock writes the numbered team sub-match rows and, when
+// numTeamMatches > 0, the IV/PW team summary rows. Shared by regular
+// elimination matches and the bronze (3rd place) block so the team layout has
+// a single authority. leftFormula/rightFormula, when non-empty, are re-written
+// on the summary row so the team names repeat next to the totals (regular
+// matches always have both; the bronze block passes "" because its entrant
+// formulas may be blank). Returns the row after the block (unchanged for
+// individual matches, where the loop and summary are skipped entirely).
+func printTeamMatchBlock(f *excelize.File, sheetName string, colNames matchColumnNames, styles matchStyles, matchRow, numTeamMatches int, leftFormula, rightFormula string) int {
+	startColName := colNames.startColName
+	endColName := colNames.endColName
+	middleColName := colNames.middleColName
+
+	firstTeamRow := matchRow + 1
+	for i := 0; i < numTeamMatches; i++ {
+		matchRow++
+		subStart := startColName + fmt.Sprint(matchRow)
+		subEnd := endColName + fmt.Sprint(matchRow)
+		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, subStart, subEnd, styles.text))
+		handleExcelError("SetCellInt", f.SetCellInt(sheetName, subStart, int64(i+1)))
+		handleExcelError("SetCellInt", f.SetCellInt(sheetName, subEnd, int64(i+1)))
+		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName,
+			colNames.leftVictoriesColName+fmt.Sprint(matchRow),
+			colNames.rightVictoriesColName+fmt.Sprint(matchRow),
+			styles.unlockedText))
+	}
+	lastTeamRow := matchRow
+
+	if numTeamMatches > 0 {
+		matchRow += 2 // spacing before team summary
+		sumStart := startColName + fmt.Sprint(matchRow)
+		sumEnd := endColName + fmt.Sprint(matchRow)
+		if leftFormula != "" {
+			handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, sumStart, leftFormula))
+		}
+		if rightFormula != "" {
+			handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, sumEnd, rightFormula))
+		}
+		lVCol, lPCol, rVCol, rPCol := getMatchWinnerColumns(colNames)
+		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", lVCol, matchRow), "IV"))
+		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", lPCol, matchRow), "PW"))
+		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", rVCol, matchRow), "IV"))
+		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", rPCol, matchRow), "PW"))
+		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, sumStart, sumEnd, styles.text))
+		matchRow++
+		sumStart2 := startColName + fmt.Sprint(matchRow)
+		sumEnd2 := endColName + fmt.Sprint(matchRow)
+		handleExcelError("SetCellValue", f.SetCellValue(sheetName, sumStart2, "Victories / Points"))
+		handleExcelError("SetCellValue", f.SetCellValue(sheetName, sumEnd2, "Victories / Points"))
+		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, sumStart2, sumEnd2, styles.text))
+		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", lVCol, matchRow),
+			buildTeamWinnersFormula(middleColName, lVCol, lPCol, rVCol, rPCol, firstTeamRow, lastTeamRow, true)))
+		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", lPCol, matchRow),
+			buildTeamPointsFormula(lVCol, lPCol, rVCol, rPCol, firstTeamRow, lastTeamRow, true)))
+		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", rVCol, matchRow),
+			buildTeamWinnersFormula(middleColName, lVCol, lPCol, rVCol, rPCol, firstTeamRow, lastTeamRow, false)))
+		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", rPCol, matchRow),
+			buildTeamPointsFormula(lVCol, lPCol, rVCol, rPCol, firstTeamRow, lastTeamRow, false)))
+		matchRow++ // space after team summary
+	}
+	return matchRow
+}
+
+// printOrdinalMarkerRows writes the "1." / "2." result-marking rows two rows
+// below matchRow and returns the Excel row carrying the "1." marker (the cell
+// a regular elimination match registers as its winner reference; the bronze
+// block ignores it).
+func printOrdinalMarkerRows(f *excelize.File, sheetName string, colNames matchColumnNames, styles matchStyles, matchRow int) int {
+	matchRow += 2 // spacing before result marking
+	handleExcelError("SetCellValue", f.SetCellValue(sheetName, colNames.rightVictoriesColName+fmt.Sprint(matchRow), "1."))
+	handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, colNames.endColName+fmt.Sprint(matchRow), colNames.endColName+fmt.Sprint(matchRow), styles.unlockedBorderBottom))
+	winnerRow := matchRow
+	matchRow++
+	handleExcelError("SetCellValue", f.SetCellValue(sheetName, colNames.rightVictoriesColName+fmt.Sprint(matchRow), "2."))
+	handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, colNames.endColName+fmt.Sprint(matchRow), colNames.endColName+fmt.Sprint(matchRow), styles.unlockedBorderBottom))
+	return winnerRow
+}
+
+// PrintThirdPlaceBlock renders a single "3rd Place" elimination-match block
+// (identical layout to a regular match block but with the fixed header label
+// "3rd Place") starting at startRow on the SheetEliminationMatches sheet.
+// courtStartCol is 1-based (use 1 for the first/only court). semiA and semiB
+// are the match numbers of the two semifinals whose losers compete in the bronze
+// (0 means absent/bye; that entrant cell is left empty). matchWinners is the map
+// returned by PrintTeamEliminationMatches so the loser-cell refs can be derived
+// from the "2." row of each semi's block. Returns the next available start row.
+func PrintThirdPlaceBlock(f *excelize.File, courtStartCol, startRow, numTeamMatches int, mirror bool, engi bool, semiA, semiB int, matchWinners map[string]MatchWinner) int {
+	sheetName := SheetEliminationMatches
+	colNames := buildMatchColumnNames(courtStartCol)
+
+	styles := matchStyles{
+		poolHeader:           getPoolHeaderStyle(f),
+		text:                 getGreyTextStyle(f),
+		borderBottom:         getBorderStyleBottom(f),
+		redHeader:            getRedHeaderStyle(f),
+		whiteHeader:          getWhiteHeaderStyle(f),
+		unlockedText:         getUnlockedTextStyle(f),
+		unlockedBorderBottom: getUnlockedBorderStyleBottom(f),
+	}
+
+	matchHeight := EliminationMatchHeight
+	if numTeamMatches > 0 {
+		matchHeight = EliminationTeamMatchHeightBase + numTeamMatches
+	}
+
+	startColName := colNames.startColName
+	endColName := colNames.endColName
+	middleColName := colNames.middleColName
+
+	matchRow := startRow
+
+	// Header "3rd Place" (same merged style as "Round N - Match N").
+	headerStart := startColName + fmt.Sprint(matchRow)
+	headerEnd := endColName + fmt.Sprint(matchRow)
+	handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, headerStart, headerEnd, styles.poolHeader))
+	handleExcelError("MergeCell", f.MergeCell(sheetName, headerStart, headerEnd))
+	handleExcelError("SetCellValue", f.SetCellValue(sheetName, headerStart, ThirdPlaceLabel))
+	matchRow++
+
+	// Red/White label row.
+	matchHeaderWithStyles(f, sheetName, startColName, matchRow, middleColName, endColName,
+		styles.redHeader, styles.text, styles.whiteHeader, mirror, engi)
+	matchRow++
+
+	// Score row: overlay writes name cells (always) and score cells (when the
+	// match is completed); only the score cells are unlocked here.
+	scoreStart := startColName + fmt.Sprint(matchRow)
+	scoreEnd := endColName + fmt.Sprint(matchRow)
+	handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, scoreStart, scoreEnd, styles.text))
+	if numTeamMatches > 0 {
+		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, middleColName+fmt.Sprint(matchRow), middleColName+fmt.Sprint(matchRow), styles.unlockedText))
+	} else {
+		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, colNames.leftVictoriesColName+fmt.Sprint(matchRow), colNames.rightVictoriesColName+fmt.Sprint(matchRow), styles.unlockedText))
+	}
+
+	// Write CONCATENATE formulas for the entrant name cells so the bronze block
+	// self-populates when the workbook is hand-scored. The "2." (loser) line of
+	// each semifinal block is one row below the "1." winner line recorded in
+	// matchWinners. When semiA or semiB is 0 (bye or engine path without match
+	// numbers), that cell is left blank and must be filled manually.
+	sideAFormula, sideBFormula := bronzeEntrantFormulas(sheetName, semiA, semiB, matchWinners)
+	leftFormula, rightFormula := getMatchSides(sideAFormula, sideBFormula, mirror)
+	if leftFormula != "" {
+		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, scoreStart, leftFormula))
+	}
+	if rightFormula != "" {
+		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, scoreEnd, rightFormula))
+	}
+
+	// Team sub-match rows + IV/PW summary (individual: no-op). The bronze
+	// summary row leaves the entrant name cells blank because the entrant
+	// formulas may themselves be blank (bye / engine path without semifinal
+	// match numbers), unlike a regular match whose sides are always known.
+	matchRow = printTeamMatchBlock(f, sheetName, colNames, styles, matchRow, numTeamMatches, "", "")
+
+	// "1." / "2." markers; the bronze block records no downstream winner.
+	printOrdinalMarkerRows(f, sheetName, colNames, styles, matchRow)
+
+	return startRow + matchHeight
+}
+
+// PrintBronzeBlockWithPrintArea renders the naginata 3rd-place block starting at
+// startRow (deriving the two semifinal match numbers from rounds) and extends the
+// Elimination Matches print area to cover it. It bundles the three-call bronze
+// protocol shared by the create-pools, create-playoffs, and results-workbook paths.
+func PrintBronzeBlockWithPrintArea(f *excelize.File, startRow, numTeamMatches int, mirror, engi bool, numCourts int, rounds [][]*Node, matchWinners map[string]MatchWinner) {
+	semiA, semiB := SemifinalMatchNumbers(rounds)
+	bronzeEndRow := PrintThirdPlaceBlock(f, 1, startRow, numTeamMatches, mirror, engi, semiA, semiB, matchWinners)
+	SetEliminationPrintArea(f, SheetEliminationMatches, numCourts, bronzeEndRow-1)
+}
+
+func printSingleEliminationMatch(f *excelize.File, sheetName string, eliminationMatch *Node, poolMatchWinners map[string]MatchWinner, matchWinners map[string]MatchWinner, colNames matchColumnNames, matchRow int, round int, numTeamMatches int, styles matchStyles, mirror bool, engi bool) {
 	startColName := colNames.startColName
 	middleColName := colNames.middleColName
-	rightVictoriesColName := colNames.rightVictoriesColName
 	endColName := colNames.endColName
 	startCell := startColName + fmt.Sprint(matchRow)
 	endCell := endColName + fmt.Sprint(matchRow)
@@ -1046,7 +1346,7 @@ func printSingleEliminationMatch(f *excelize.File, sheetName string, elimination
 	handleExcelError("SetCellValue", f.SetCellValue(sheetName, startCell, fmt.Sprintf("Round %d - Match %d", round, eliminationMatch.matchNum)))
 
 	matchRow++
-	matchHeaderWithStyles(f, sheetName, startColName, matchRow, middleColName, endColName, styles.redHeader, styles.text, styles.whiteHeader, mirror)
+	matchHeaderWithStyles(f, sheetName, startColName, matchRow, middleColName, endColName, styles.redHeader, styles.text, styles.whiteHeader, mirror, engi)
 	matchRow++
 
 	//////////////////////////////////////
@@ -1102,64 +1402,16 @@ func printSingleEliminationMatch(f *excelize.File, sheetName string, elimination
 		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, colNames.leftVictoriesColName+fmt.Sprint(matchRow), colNames.rightVictoriesColName+fmt.Sprint(matchRow), styles.unlockedText))
 	}
 
-	// adding the individual matches
-	firstTeamMatchRow := matchRow + 1
-	for i := 0; i < numTeamMatches; i++ {
-		matchRow++
-		startCell = startColName + fmt.Sprint(matchRow)
-		endCell = endColName + fmt.Sprint(matchRow)
-		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, startCell, endCell, styles.text))
-		handleExcelError("SetCellInt", f.SetCellInt(sheetName, startCell, int64(i+1)))
-		handleExcelError("SetCellInt", f.SetCellInt(sheetName, endCell, int64(i+1)))
+	// Team sub-match rows + IV/PW summary (individual: no-op). The summary row
+	// repeats the entrant name formulas next to the totals.
+	matchRow = printTeamMatchBlock(f, sheetName, colNames, styles, matchRow, numTeamMatches, leftCellValue, rightCellValue)
 
-		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, colNames.leftVictoriesColName+fmt.Sprint(matchRow), colNames.rightVictoriesColName+fmt.Sprint(matchRow), styles.unlockedText))
-	}
-	lastTeamMatchRow := matchRow
-
-	if numTeamMatches > 0 {
-		// pool results summary
-		matchRow += 2
-		startCell = startColName + fmt.Sprint(matchRow)
-		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, startCell, leftCellValue))
-		endCell = endColName + fmt.Sprint(matchRow)
-		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, endCell, rightCellValue))
-		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, startCell, endCell, styles.text))
-
-		lVCol, lPCol, rVCol, rPCol := getMatchWinnerColumns(colNames)
-		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", lVCol, matchRow), "IV"))
-		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", lPCol, matchRow), "PW"))
-		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", rVCol, matchRow), "IV"))
-		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", rPCol, matchRow), "PW"))
-
-		matchRow++
-		startCell = startColName + fmt.Sprint(matchRow)
-		handleExcelError("SetCellValue", f.SetCellValue(sheetName, startCell, "Victories / Points"))
-		endCell = endColName + fmt.Sprint(matchRow)
-		handleExcelError("SetCellValue", f.SetCellValue(sheetName, endCell, "Victories / Points"))
-		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, startCell, endCell, styles.text))
-
-		// Use formulas to tally victories and points from the individual team sub-match rows.
-		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", lVCol, matchRow), buildTeamWinnersFormula(middleColName, lVCol, lPCol, rVCol, rPCol, firstTeamMatchRow, lastTeamMatchRow, true)))
-		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", lPCol, matchRow), buildTeamPointsFormula(lVCol, lPCol, rVCol, rPCol, firstTeamMatchRow, lastTeamMatchRow, true)))
-		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", rVCol, matchRow), buildTeamWinnersFormula(middleColName, lVCol, lPCol, rVCol, rPCol, firstTeamMatchRow, lastTeamMatchRow, false)))
-		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", rPCol, matchRow), buildTeamPointsFormula(lVCol, lPCol, rVCol, rPCol, firstTeamMatchRow, lastTeamMatchRow, false)))
-
-		matchRow++ // Add space after team match summary
-	}
-
-	matchRow += 2 // Spacing before result marking
-	resultCol := rightVictoriesColName
-	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", resultCol, matchRow), "1."))
-	handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", endColName, matchRow), fmt.Sprintf("%s%d", endColName, matchRow), styles.unlockedBorderBottom))
-
-	// Gathering the match winners for the following rounds
+	// "1." / "2." result markers; the "1." cell is the winner reference the
+	// following rounds' CONCATENATE formulas point at.
+	winnerRow := printOrdinalMarkerRows(f, sheetName, colNames, styles, matchRow)
 	matchWinners[fmt.Sprintf("M %d", eliminationMatch.matchNum)] = MatchWinner{
-		cellCoord: cellCoord{sheetName: sheetName, cell: fmt.Sprintf("%s%d", endColName, matchRow)},
+		cellCoord: cellCoord{sheetName: sheetName, cell: fmt.Sprintf("%s%d", endColName, winnerRow)},
 	}
-
-	matchRow++
-	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", resultCol, matchRow), "2."))
-	handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", endColName, matchRow), fmt.Sprintf("%s%d", endColName, matchRow), styles.unlockedBorderBottom))
 }
 
 func setMatchColumnsWidthByStartCol(f *excelize.File, sheetName string, startCol int) {

@@ -110,9 +110,9 @@ func RegisterPublicRegistrationHandlers(r *gin.RouterGroup, store *state.Store, 
 			return
 		}
 
-		// Strip displayName unless the effective layout is zekken
-		// (WithZekkenName || Engi) to avoid CSV mis-parse; engi comps keep
-		// member 2 even when the stored WithZekkenName is false.
+		// Strip displayName unless the zekken column is enabled, to avoid CSV
+		// mis-parse. Engi pairs store both member names combined in
+		// Player.Name, so DisplayName is only the zekken column value.
 		displayName := strings.TrimSpace(req.DisplayName)
 		if !comp.EffectiveWithZekkenName() {
 			displayName = ""
@@ -136,7 +136,7 @@ func RegisterPublicRegistrationHandlers(r *gin.RouterGroup, store *state.Store, 
 			Source:      "registered",
 		}
 
-		addedPlayer, err := store.AddParticipant(id, player, comp.WithZekkenName)
+		addedPlayer, err := store.AddParticipant(id, player, comp.EffectiveWithZekkenName())
 		if err != nil {
 			if errors.Is(err, state.ErrDuplicateName) {
 				c.JSON(http.StatusConflict, gin.H{"error": "A participant with this name is already registered. If this is you, no action needed. If not, try including your dojo name."})

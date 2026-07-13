@@ -1,8 +1,37 @@
 package test
 
 import (
+	"slices"
+	"strconv"
+	"strings"
+
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 )
+
+// ParsePrintAreaLastRow extracts the last-row number from a Print_Area RefersTo
+// string such as "'Elimination Matches'!$A$1:$H$35". Returns -1 on any parse error.
+func ParsePrintAreaLastRow(refersTo string) int {
+	lastDollar := strings.LastIndex(refersTo, "$")
+	if lastDollar < 0 {
+		return -1
+	}
+	row, err := strconv.Atoi(refersTo[lastDollar+1:])
+	if err != nil {
+		return -1
+	}
+	return row
+}
+
+// FindCellRow returns the 0-based index of the first sheet row containing a
+// cell equal to val, or -1 when absent. rows is the excelize GetRows shape.
+func FindCellRow(rows [][]string, val string) int {
+	for i, row := range rows {
+		if slices.Contains(row, val) {
+			return i
+		}
+	}
+	return -1
+}
 
 // CreateTestPlayers returns a slice of players for testing
 func CreateTestPlayers() []domain.Player {

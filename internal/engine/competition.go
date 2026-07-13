@@ -679,7 +679,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 		t := true
 		hasIDsHint = &t
 	}
-	players, err := e.store.LoadParticipantsOpt(id, comp.WithZekkenName, state.LoadParticipantsOpts{
+	players, err := e.store.LoadParticipantsOpt(id, comp.EffectiveWithZekkenName(), state.LoadParticipantsOpts{
 		WithSeeds: true,
 		HasIDs:    hasIDsHint,
 	})

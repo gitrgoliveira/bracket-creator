@@ -1099,7 +1099,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
           {kind === "individual" && (
             <div className="field">
               <label className="checkbox"><input type="checkbox" checked={engi} onChange={(e) => setEngi(e.target.checked)} /> Engi (kata competition)</label>
-              <div className="field__hint" style={{ marginTop: 4 }}>Flag-count scoring for Engi-Kyogi pairs. Participant CSV uses: Name 1, Name 2, Dojo.</div>
+              <div className="field__hint" style={{ marginTop: 4 }}>Flag-count scoring for Engi-Kyogi pairs. Enter each pair as one participant: Name 1 - Name 2, Dojo.</div>
             </div>
           )}
 

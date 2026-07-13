@@ -756,7 +756,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <label className="checkbox"><input type="checkbox" checked={!!local.engi} onChange={(e) => update("engi", e.target.checked)} disabled={isDrawReady || isStarted || local.kind === "team"} /> Engi (kata competition)</label>
-          <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>{local.kind === "team" ? "(Only applicable for individual competitions)" : `Flag-count scoring for Engi-Kyogi pairs. Participant CSV uses: Name 1, Name 2, Dojo.${(isDrawReady || isStarted) ? " Locked after draw." : ""}`}</div>
+          <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>{local.kind === "team" ? "(Only applicable for individual competitions)" : `Flag-count scoring for Engi-Kyogi pairs. Enter each pair as one participant: Name 1 - Name 2, Dojo.${(isDrawReady || isStarted) ? " Locked after draw." : ""}`}</div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <label className="checkbox"><input type="checkbox" checked={!!local.checkInEnabled} onChange={(e) => update("checkInEnabled", e.target.checked)} /> Check-in tracking</label>

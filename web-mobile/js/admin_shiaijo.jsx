@@ -1782,7 +1782,7 @@ function ShiaijoContext({ match, competitions, court, nextPoolName, tweaks, open
                         )
                     ) : (match.phase === "bracket" && BracketTree && bracket && bracket.rounds) ? (
                         <div className="shiaijo-context__bracket">
-                            <BracketTree rounds={bracket.rounds} highlightId={match.id} />
+                            <BracketTree rounds={bracket.rounds} highlightedMatchId={match.id} isEngi={!!match.compEngi} />
                         </div>
                     ) : (
                         <p style={{ fontSize: 12, color: "var(--ink-3)", margin: 0 }}>

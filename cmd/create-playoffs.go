@@ -22,6 +22,8 @@ type playoffOptions struct {
 	withZekkenName  bool
 	singleTree      bool
 	determined      bool
+	naginata        bool // naginata: adds a 3rd-place bronze block after elimination matches. Set ONLY by the web /create handler; deliberately NOT a CLI flag (owner decision: no new CLI options).
+	engi            bool // engi: flag-count scoring captions on elimination blocks. Set ONLY by the web /create handler; deliberately NOT a CLI flag (owner decision: no new CLI options).
 	titlePrefix     string
 	numberPrefix    string
 	SeedAssignments []domain.SeedAssignment
@@ -236,7 +238,7 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	matchWinners = helper.ConvertPlayersToWinners(players, o.withZekkenName, playerCoords)
 	helper.CreateNamesToPrint(f, players, o.withZekkenName, o.courts, playerCoords)
 
-	helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, o.teamMatches, o.courts, true)
+	printEliminationWithBronze(f, matchWinners, eliminationMatchRounds, o.teamMatches, o.courts, o.engi, o.naginata)
 	helper.FillEstimations(f, 0, 0, int64(o.teamMatches), int64(len(names)-1), o.courts)
 
 	// Apply sheet protection to all sheets except data and Time Estimator

@@ -127,18 +127,19 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   };
   useEscapeToClose(canClose ? handleDismiss : undefined);
 
-  // Pair names: member1 = side.name (or side string), member2 = side.displayName.
-  // Both sides of an engi match are pairs (one entry each).
+  // Pair names: the side's name holds both members combined ("Name 1 - Name 2");
+  // split so member 2 renders under member 1. Both sides of an engi match are
+  // pairs (one entry each).
   const nameOf = (side) => side && typeof side === "object" ? side.name || "" : side || "";
-  const displayOf = (side) => side && typeof side === "object" ? side.displayName || "" : "";
   const dojoOf = (side) => side && typeof side === "object" ? side.dojo || "" : "";
 
-  // sideB = Shiro, sideA = Aka (see file header).
-  const shiroName = nameOf(m.sideB);
-  const shiroDN   = displayOf(m.sideB);
+  // sideB = Shiro, sideA = Aka (see file header). Guard on the helper's presence
+  // for consistency with bracket.jsx: if ui.jsx has not defined
+  // window.engiPairParts yet, fall back to the unsplit name instead of throwing.
+  // These lines run only at render time, where window is always present.
+  const [shiroName, shiroDN] = window.engiPairParts ? window.engiPairParts(nameOf(m.sideB)) : [nameOf(m.sideB), ""];
   const shiroDojo = dojoOf(m.sideB);
-  const akaName   = nameOf(m.sideA);
-  const akaDN     = displayOf(m.sideA);
+  const [akaName, akaDN] = window.engiPairParts ? window.engiPairParts(nameOf(m.sideA)) : [nameOf(m.sideA), ""];
   const akaDojo   = dojoOf(m.sideA);
 
   const clamp = (n) => Math.max(0, Math.min(MAX_FLAGS, n));

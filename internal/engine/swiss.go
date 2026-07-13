@@ -132,7 +132,7 @@ func (e *Engine) GenerateSwissRound(compID string, roundNumber int) ([]state.Mat
 		return nil, validationErrorf("round %d exceeds configured swissRounds %d", roundNumber, comp.SwissRounds)
 	}
 
-	participants, err := e.store.LoadParticipants(compID, comp.WithZekkenName)
+	participants, err := e.store.LoadParticipants(compID, comp.EffectiveWithZekkenName())
 	if err != nil {
 		return nil, err
 	}
@@ -602,7 +602,7 @@ func (e *Engine) SwissStandings(compID string) ([]state.PlayerStanding, error) {
 	if comp == nil {
 		return nil, notFoundErrorf("competition %s not found", compID)
 	}
-	participants, err := e.store.LoadParticipants(compID, comp.WithZekkenName)
+	participants, err := e.store.LoadParticipants(compID, comp.EffectiveWithZekkenName())
 	if err != nil {
 		return nil, err
 	}

@@ -1371,6 +1371,19 @@ func TestMergeKachinukiSubResults(t *testing.T) {
 		assert.Equal(t, "W-1", out[0].Winner)
 		assert.Equal(t, "W-2", out[1].Winner)
 	})
+
+	t.Run("malformed negative position (< -1) is dropped, not sorted first", func(t *testing.T) {
+		// Real bouts are non-negative; the daihyosen is -1. A Position < -1 is
+		// malformed and must not be preserved-and-sorted ahead of real bouts,
+		// mirroring the defensive skip in the aggregates.
+		stored := []state.SubMatchResult{
+			{Position: 1, Winner: "R-1", Decision: "fought"},
+			{Position: -2, Winner: "bogus", Decision: "fought"},
+		}
+		out := mergeKachinukiSubResults(stored, nil)
+		require.Len(t, out, 1, "the -2 row is dropped")
+		assert.Equal(t, 1, out[0].Position)
+	})
 }
 
 // TestRecordMatchResultWithIneligibility_KachinukiMerge covers the

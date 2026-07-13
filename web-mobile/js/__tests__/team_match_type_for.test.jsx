@@ -37,6 +37,9 @@ describe('teamMatchTypeHint', () => {
     expect(teamMatchTypeHint(true)).toMatch(/winner of each bout stays/);
   });
   it('returns the fixed-order copy otherwise', () => {
-    expect(teamMatchTypeHint(false)).toMatch(/scheduled up-front by position/);
+    expect(teamMatchTypeHint(false)).toMatch(/scheduled up-front by lineup position/);
+  });
+  it('fixed-order copy is size-agnostic (no 5-person position names)', () => {
+    expect(teamMatchTypeHint(false)).not.toMatch(/Senpo|Jiho/);
   });
 });

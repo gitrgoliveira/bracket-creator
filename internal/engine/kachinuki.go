@@ -526,6 +526,13 @@ func mergeKachinukiSubResults(stored, incoming []state.SubMatchResult) []state.S
 			hasDaihyosen = true
 			continue
 		}
+		if p < 0 {
+			// Malformed negative position (not the daihyosen sentinel). Drop it
+			// rather than preserve-and-sort-it-first, mirroring the defensive
+			// Position <= DaihyosenSubPosition skip used by every aggregate
+			// (state.TeamResultFrom etc.): real bouts are non-negative.
+			continue
+		}
 		numbered = append(numbered, p)
 	}
 	sort.Ints(numbered)

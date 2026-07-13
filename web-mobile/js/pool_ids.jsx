@@ -79,5 +79,5 @@ export function teamMatchTypeFor(comp) {
 export function teamMatchTypeHint(isKachinuki) {
     return isKachinuki
         ? "The winner of each bout stays on to face the next opponent. Bouts are scored one at a time."
-        : "All bouts are scheduled up-front by position. Senpo fights Senpo, Jiho fights Jiho, and so on.";
+        : "All bouts are scheduled up-front by lineup position: each fighter faces the opponent in the same position.";
 }

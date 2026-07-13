@@ -1199,6 +1199,32 @@ func TestMaybeAdvanceKachinuki_BronzeAppendsBout(t *testing.T) {
 	assert.Equal(t, 3, bracket.ThirdPlaceMatch.SubResults[2].Position, "position must be 3")
 }
 
+// TestFindTeamMatch_BronzeRoundIndex pins that the 3rd-place (bronze) match
+// resolves to round index len(Rounds), not 0, so round-scoped lineup lookup
+// prefers the bronze's own stage (matching the client's
+// derivedBracket.rounds.length). A regular bracket match keeps its own rIdx.
+func TestFindTeamMatch_BronzeRoundIndex(t *testing.T) {
+	compID := "kachinuki-bronze-round-index"
+	eng, store, _ := setupKachinukiComp(t, compID, 5, func(c *state.Competition) { c.Naginata = true })
+
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{{ID: "SF1", SideA: "TeamA", SideB: "TeamB"}, {ID: "SF2", SideA: "TeamC", SideB: "TeamD"}},
+			{{ID: "F1", SideA: "TeamA", SideB: "TeamC"}},
+		},
+		ThirdPlaceMatch: &state.BracketMatch{ID: "m-bronze", SideA: "TeamB", SideB: "TeamD"},
+	}))
+
+	_, isBracket, roundIdx, err := eng.findTeamMatch(compID, "m-bronze")
+	require.NoError(t, err)
+	assert.True(t, isBracket, "bronze is a bracket match")
+	assert.Equal(t, 2, roundIdx, "bronze round index is len(Rounds)=2, not 0")
+
+	_, _, sfRound, err := eng.findTeamMatch(compID, "SF1")
+	require.NoError(t, err)
+	assert.Equal(t, 0, sfRound, "a first-round bracket match keeps rIdx 0")
+}
+
 // TestMergeKachinukiSubResults pins the by-position merge semantics the
 // score-write entry points rely on (ACID: a partial client log must
 // never destroy server-appended bouts).

@@ -590,7 +590,9 @@ func (e *Engine) CheckKachinukiPrematureCompletion(compID, matchID string, resul
 // findTeamMatch locates a match by ID, returning the parent record (a
 // copy), a flag indicating whether it was found in the bracket store
 // rather than the pool store, and the bracket round index (0 for pool
-// matches, rIdx for bracket matches, 0 for the ThirdPlaceMatch).
+// matches, rIdx for bracket matches, len(Rounds) for the ThirdPlaceMatch
+// so round-scoped lineup resolution prefers the bronze's own stage,
+// matching the client's derivedBracket.rounds.length).
 func (e *Engine) findTeamMatch(compID, matchID string) (*state.MatchResult, bool, int, error) {
 	poolMatches, err := e.store.LoadPoolMatches(compID)
 	if err == nil {
@@ -611,9 +613,13 @@ func (e *Engine) findTeamMatch(compID, matchID string) (*state.MatchResult, bool
 			}
 		}
 		// The Naginata 3rd-place (bronze) match is a sibling of
-		// bracket.Rounds, not an element of it; look it up here.
+		// bracket.Rounds, not an element of it; look it up here. Its
+		// effective round index is len(Rounds) (one past the final round),
+		// mirroring the client's derivedBracket.rounds.length so a
+		// round-scoped lineup saved for the bronze stage resolves ahead of
+		// an earlier round's lineup.
 		if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID == matchID {
-			return bracketMatchToTeamResult(*bm), true, 0, nil
+			return bracketMatchToTeamResult(*bm), true, len(bracket.Rounds), nil
 		}
 	}
 	return nil, false, 0, nil

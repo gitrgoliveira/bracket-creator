@@ -1,6 +1,6 @@
 # Install
 
-Docker is the recommended way to run bracket-creator on every platform. You can also install with Homebrew, Linux packages (`.deb`, `.rpm`, `.apk`), a pre-compiled binary, Go, or build from source.
+Docker is the recommended way to run bracket-creator on every platform. You can also install with Homebrew, Linux packages (`.deb`, `.rpm`, `.apk`), a pre-compiled binary, Go, or a source build.
 
 The following sections describe each method, with [Upgrading](#upgrading) notes at the end.
 
@@ -22,7 +22,7 @@ docker run -p 8080:8080 -v "$PWD/tournament-data:/tournament-data" \
 
 The app is available at `http://localhost:8080`.
 
-The container runs as a non-root user (UID 65534). On Linux hosts, create the folder and make it writable by that UID before the first run: `mkdir -p tournament-data && sudo chown 65534 tournament-data`. Without this, Docker creates a missing bind-mount directory owned by root, and neither a root-owned nor a regular-user-owned folder is writable by the container. Docker Desktop on macOS and Windows handles the permissions automatically.
+The container runs as a non-root user (UID 65534). On Linux hosts, create the folder and make it writable by that UID before the first run: `mkdir -p tournament-data && sudo chown 65534 tournament-data`. Without the `chown`, the container cannot write to the folder: if the folder does not exist, Docker creates it owned by root, and if you created it with `mkdir`, it is owned by your login user, which is a different UID. Docker Desktop on macOS and Windows handles the permissions automatically.
 
 See the [hosting guide](hosting.md) for production deployments, and [operating modes](../organisers/operating-modes.md) for access control.
 
@@ -38,7 +38,7 @@ If you prefer to build the image yourself:
     docker compose up -d
     ```
 
-    The application is available at `http://localhost:8080`.
+    Compose starts both services: the tournament app at `http://localhost:8081` and the legacy Excel-generator web UI at `http://localhost:8080`.
 
 === "Make"
 
@@ -63,7 +63,7 @@ The single binary bundles every subcommand, including `bracket-creator serve` (w
 
 ## Linux packages (deb, rpm, apk)
 
-From the next release onwards, `.deb`, `.rpm`, and `.apk` packages for amd64/x86_64 and arm64/aarch64 are attached to the [release page](https://github.com/gitrgoliveira/bracket-creator/releases). Download the package for your distribution and architecture, then install it with the native tool (each resolves dependencies for local files):
+From the next release onwards, `.deb`, `.rpm`, and `.apk` packages for amd64/x86_64 and arm64/aarch64 are attached to the [release page](https://github.com/gitrgoliveira/bracket-creator/releases). Download the package for your distribution and architecture, then install it with the native tool (which resolves dependencies for local files):
 
 === "Debian/Ubuntu"
 
@@ -87,7 +87,7 @@ From the next release onwards, `.deb`, `.rpm`, and `.apk` packages for amd64/x86
 
 The packages install the binary to `/usr/bin`, plus the man page and bash/zsh/fish shell completions.
 
-There is no hosted `apt`/`yum` repository, so these installs do not receive automatic upgrades; see [Upgrading](#upgrading).
+There is no hosted `apt`/`dnf`/`apk` repository, so these installs do not receive automatic upgrades; see [Upgrading](#upgrading).
 
 ## Pre-compiled binaries
 
@@ -133,4 +133,4 @@ The binary is at `./bin/bracket-creator`.
 * **Homebrew**: `brew upgrade bracket-creator`.
 * **Linux packages**: there is no hosted package repository, so upgrades are not automatic. Download the new release's package and install it the same way.
 * **Pre-compiled binaries**: download and extract the new release's archive over the old binary.
-* **Go / source builds**: re-run `go install ...@latest` or `git pull` and `make go/build`.
+* **Go / source builds**: re-run `go install github.com/gitrgoliveira/bracket-creator@latest`, or `git pull` and `make go/build`.

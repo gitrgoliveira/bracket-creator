@@ -98,7 +98,7 @@ See the docs for the full command references and the input format:
 
 ## Install
 
-**Docker is the recommended way to run bracket-creator on every platform.** Homebrew is the other main option, shown below. Linux packages (`apt`, `dnf`, `apk`), pre-compiled binaries, other methods, and upgrade notes are covered in the [install guide](https://gitrgoliveira.github.io/bracket-creator/user-guide/install/install/).
+**Docker is the recommended way to run bracket-creator on every platform.** Homebrew is the other main option, shown below. Linux packages (`.deb`, `.rpm`, `.apk`), pre-compiled binaries, other methods, and upgrade notes are covered in the [install guide](https://gitrgoliveira.github.io/bracket-creator/user-guide/install/install/).
 
 <details>
   <summary><b>Docker</b> (recommended)</summary>

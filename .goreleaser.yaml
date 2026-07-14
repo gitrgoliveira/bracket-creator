@@ -54,6 +54,31 @@ builds:
 universal_binaries:
   - replace: true
 
+nfpms:
+  - package_name: bracket-creator
+    formats:
+      - deb
+      - rpm
+      - apk
+    vendor: gitrgoliveira
+    homepage: https://github.com/gitrgoliveira/bracket-creator
+    maintainer: Ricardo Oliveira <oliveira.rg@gmail.com>
+    description: Kendo tournament bracket generator and live-tournament app.
+    license: MPL-2.0
+    file_name_template: "{{ .ConventionalFileName }}"
+    bindir: /usr/bin
+    contents:
+      - src: ./completions/bracket-creator.bash
+        dst: /usr/share/bash-completion/completions/bracket-creator
+      - src: ./completions/bracket-creator.zsh
+        dst: /usr/share/zsh/vendor-completions/_bracket-creator
+      - src: ./completions/bracket-creator.fish
+        dst: /usr/share/fish/vendor_completions.d/bracket-creator.fish
+      - src: ./manpages/bracket-creator.1.gz
+        dst: /usr/share/man/man1/bracket-creator.1.gz
+      - src: ./LICENSE
+        dst: /usr/share/doc/bracket-creator/copyright
+
 checksum:
   name_template: "checksums.txt"
 
@@ -77,7 +102,7 @@ archives:
       {{- if .Arm }}v{{ .Arm }}{{ end }}
     format_overrides:
       - goos: windows
-        format: zip
+        formats: [zip]
     files:
       - README.md
       - LICENSE

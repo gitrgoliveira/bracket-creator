@@ -110,7 +110,6 @@ transformations:
     pattern: gitrgoliveira
     replacement: "{{ .repo_user }}"
     files:
-      - "scripts/fury-upload.sh"
       - "README.md"
       - ".goreleaser.yaml"
       - "Makefile"

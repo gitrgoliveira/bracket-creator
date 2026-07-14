@@ -28,6 +28,49 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # Install each published nfpm package in its native distro and run the
+  # binary. A separate job so a broken package flags the workflow red without
+  # blocking the homebrew bump, and so the test covers the exact assets users
+  # download from the release page. The pre-merge gate is the local
+  # `goreleaser release --snapshot --clean` + container install check.
+  smoke-linux-packages:
+    name: Smoke test Linux packages
+    runs-on: ubuntu-latest
+    needs: goreleaser
+    permissions:
+      contents: read
+    steps:
+      - name: Download amd64 packages from the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download "${{ github.ref_name }}" --repo "$GITHUB_REPOSITORY" --dir dist \
+            --pattern '*amd64*.deb' --pattern '*x86_64*.rpm' --pattern '*x86_64*.apk'
+      - name: Install each package and run the binary
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          deb=(dist/*amd64*.deb) rpm=(dist/*x86_64*.rpm) apk=(dist/*x86_64*.apk)
+          if [ ${#deb[@]} -ne 1 ] || [ ${#rpm[@]} -ne 1 ] || [ ${#apk[@]} -ne 1 ]; then
+            echo "::error::expected exactly one amd64 deb/rpm/apk on the release, found deb=${#deb[@]} rpm=${#rpm[@]} apk=${#apk[@]}"
+            exit 1
+          fi
+          DEB=$(basename "${deb[0]}") RPM=$(basename "${rpm[0]}") APK=$(basename "${apk[0]}")
+          # --platform pins the image arch to the packages under test, in case
+          # runner architectures ever change.
+          # The slim image's dpkg path-exclude filter strips manpages/docs at
+          # unpack time; remove it so the test sees the package's real payload.
+          docker run --rm --platform linux/amd64 -v "$PWD/dist:/dist:ro" debian:stable-slim bash -c \
+            "rm -f /etc/dpkg/dpkg.cfg.d/docker \
+             && apt-get update -qq >/dev/null && apt-get install -qqy /dist/$DEB >/dev/null \
+             && bracket-creator version \
+             && test -f /usr/share/bash-completion/completions/bracket-creator \
+             && test -f /usr/share/man/man1/bracket-creator.1.gz"
+          docker run --rm --platform linux/amd64 -v "$PWD/dist:/dist:ro" fedora:latest bash -c \
+            "dnf install -qy /dist/$RPM >/dev/null && bracket-creator version"
+          docker run --rm --platform linux/amd64 -v "$PWD/dist:/dist:ro" alpine:latest sh -c \
+            "apk add --allow-untrusted -q /dist/$APK && bracket-creator version"
+
   homebrew:
     name: Bump Homebrew formula
     runs-on: ubuntu-latest

@@ -48,7 +48,7 @@ For the kendo tournament guidelines this application is based on, see [running_a
 
 The `mobile-app` command starts the tournament app server: create competitions, import participants, draw pools and brackets, schedule matches across courts, score in real time, and show results on any device (phone, tablet, laptop, or a TV by the court).
 
-[Install](#install) the binary first (Homebrew or a release binary), then start the server:
+[Install](#install) bracket-creator first. The Docker image starts the server automatically; with a binary install, start it yourself:
 
 ```bash
 bracket-creator mobile-app --folder ./tournament-data
@@ -98,13 +98,26 @@ See the docs for the full command references and the input format:
 
 ## Install
 
-*You can install via Homebrew, download a pre-compiled binary, use Docker, or compile from source.* Full instructions, including Docker and hosting options, are in the [install guide](https://gitrgoliveira.github.io/bracket-creator/user-guide/install/install/).
+**Docker is the recommended way to run bracket-creator on every platform.** Homebrew is the other main option, shown below. Linux packages (`.deb`, `.rpm`, `.apk`), pre-compiled binaries, other methods, and upgrade notes are covered in the [install guide](https://gitrgoliveira.github.io/bracket-creator/user-guide/install/install/).
 
-Before you pick a method:
+<details>
+  <summary><b>Docker</b> (recommended)</summary>
 
-* Homebrew, the pre-compiled binaries on the [release page](https://github.com/gitrgoliveira/bracket-creator/releases), and building from source (`make go/build`) all work today and bundle the web/mobile UI.
-* `go install` builds the full binary, but the embedded web assets (the Preact runtime and compiled JS bundle) are not part of the Go module, so the `serve`/`mobile-app` web UIs render blank. Use Homebrew or a release binary if you need them.
-* The `apt`/`yum`/`deb`/`rpm`/`apk` sections below are still a work in progress: those package repositories are not published yet, so the commands shown there do not work.
+Pull and run the tournament app image; tournament state lives in the mounted folder:
+
+```bash
+mkdir -p tournament-data
+docker run -p 8080:8080 -v "$PWD/tournament-data:/tournament-data" \
+  ghcr.io/gitrgoliveira/bracket-creator-mobile:latest
+```
+
+On Linux, also make the folder writable by the container's non-root user before the first run: `sudo chown 65534 tournament-data`. (Docker Desktop on macOS/Windows handles this automatically.)
+
+Then open [http://localhost:8080](http://localhost:8080).
+
+Three image variants are published: `bracket-creator-mobile` (tournament app), `bracket-creator-mobile-pdf` (tournament app plus LibreOffice for PDF export), and `bracket-creator` (the legacy Excel-generator web UI). See the [hosting guide](https://gitrgoliveira.github.io/bracket-creator/user-guide/install/hosting/) for deployment details.
+
+</details>
 
 <details>
   <summary><b>Homebrew</b></summary>
@@ -118,77 +131,6 @@ brew install bracket-creator
 `brew trust` marks the tap as trusted, which Homebrew requires before installing from a third-party tap. Update later with `brew upgrade bracket-creator`. The formula (in the [gitrgoliveira/homebrew-tap](https://github.com/gitrgoliveira/homebrew-tap) repository) builds from source, so it needs a C toolchain (the Xcode Command Line Tools on macOS or `build-essential` on Linux) and network access for Go module downloads.
 
 The single binary bundles every subcommand, including `bracket-creator serve` (web UI) and `bracket-creator mobile-app` (tournament app).
-
-</details>
-
-<details>
-  <summary><b><code>apt</code></b></summary>
-
-```bash
-echo 'deb [trusted=yes] https://apt.fury.io/gitrgoliveira/ /' | sudo tee /etc/apt/sources.list.d/gitrgoliveira.list
-sudo apt update
-sudo apt install bracket-creator
-```
-
-</details>
-
-<details>
-  <summary><b><code>yum</code></b></summary>
-
-```bash
-echo '[gitrgoliveira]
-name=Gemfury gitrgoliveira repository
-baseurl=https://yum.fury.io/gitrgoliveira/
-enabled=1
-gpgcheck=0' | sudo tee /etc/yum.repos.d/gitrgoliveira.repo
-sudo yum install bracket-creator
-```
-
-</details>
-
-<details>
-  <summary><b>deb, rpm and apk packages</b></summary>
-Download the .deb, .rpm or .apk packages from the [release page](https://github.com/gitrgoliveira/bracket-creator/releases) and install them with the appropriate tools.
-</details>
-
-<details>
-  <summary><b><code>go install</code></b></summary>
-
-```bash
-go install github.com/gitrgoliveira/bracket-creator@latest
-```
-
-This builds the full binary, including the `serve` and `mobile-app` subcommands. However, the embedded web assets are not part of the Go module, so those web UIs render blank from a `go install` build. The Excel-generating CLI commands (`create-pools`, `create-playoffs`, ...) work normally. Use Homebrew or a release binary if you need the web UI.
-
-</details>
-
-<details>
-  <summary><b>From the GitHub releases</b></summary>
-
-Download the pre-compiled binaries from the [release page](https://github.com/gitrgoliveira/bracket-creator/releases) and copy them to the desired location.
-
-```bash
-OS=linux
-ARCH=x86_64
-TAR_FILE=bracket-creator_${OS}_${ARCH}.tar.gz
-wget https://github.com/gitrgoliveira/bracket-creator/releases/latest/download/${TAR_FILE}
-sudo tar xzvf ${TAR_FILE} -C /usr/local/bin bracket-creator
-rm -f ${TAR_FILE}
-```
-
-</details>
-
-<details>
-  <summary><b>Build from source</b></summary>
-
-```bash
-git clone https://github.com/gitrgoliveira/bracket-creator.git
-cd bracket-creator
-make go/build
-./bin/bracket-creator --help
-```
-
-`make go/build` vendors the frontend runtime and compiles the JSX bundle before building, so the resulting binary bundles the full web/mobile UI (unlike plain `go install`; see the note above). It needs Go, plus Node.js and `curl` for the frontend steps.
 
 </details>
 

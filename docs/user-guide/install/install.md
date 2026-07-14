@@ -63,7 +63,7 @@ The single binary bundles every subcommand, including `bracket-creator serve` (w
 
 ## Linux packages (deb, rpm, apk)
 
-From the next release onwards, `.deb`, `.rpm`, and `.apk` packages for amd64/x86_64 and arm64/aarch64 are attached to the [release page](https://github.com/gitrgoliveira/bracket-creator/releases). Download the package for your distribution and architecture, then install it with the native tool (which resolves dependencies for local files):
+Each release attaches `.deb`, `.rpm`, and `.apk` packages for amd64/x86_64 and arm64/aarch64 to the [release page](https://github.com/gitrgoliveira/bracket-creator/releases). Download the package for your distribution and architecture, then install it with the native tool (which resolves dependencies for local files):
 
 === "Debian/Ubuntu"
 

@@ -5,7 +5,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -776,4 +779,103 @@ func TestMatchesPresentOnCourt_ThirdPlaceMatch(t *testing.T) {
 	gotPlaceholder := matchesPresentOnCourt(nil, bracketPlaceholder, "A")
 	assert.False(t, gotPlaceholder,
 		"ThirdPlaceMatch with placeholder sides must not count as a real match on court")
+}
+
+// TestCourtMatches_EmptyCompetitionsIsArrayNotNull is the regression test for
+// wrapping GET /court/:court/matches in the viewer singleflight (mirrors the
+// sf.Do("competitions", ...) pattern in handlers_viewer.go). The handler now
+// builds the response as json.Marshal of a gin.H inside sf.Do rather than
+// c.JSON of gin.H directly; a nil []gin.H would marshal to "competitions":null
+// which would break existing consumers that iterate the array unconditionally.
+// json.Marshal of the non-nil, zero-length `comps` slice must still produce
+// "competitions":[].
+func TestCourtMatches_EmptyCompetitionsIsArrayNotNull(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name: "T", Password: "", Courts: []string{"A"},
+	}))
+	// No competitions saved at all, comps stays empty.
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/court/A/matches", nil)
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, "body=%q", w.Body.String())
+	assert.Contains(t, w.Body.String(), `"competitions":[]`,
+		"empty competitions must marshal as [] not null, body=%q", w.Body.String())
+	assert.JSONEq(t, `{"court":"A","competitions":[]}`, w.Body.String())
+}
+
+// TestCourtMatches_ConcurrentRequestsCollapseToOneBuild is the acceptance
+// test for wrapping GET /court/:court/matches in the viewer singleflight
+// (mp-9afd pattern, see viewer_singleflight_test.go for the mechanism-level
+// tests). N concurrent identical requests for the SAME court must collapse
+// to exactly 1 underlying payload build.
+//
+// viewerLoadCompetition (handlers_viewer.go) is the package-level hook
+// buildViewerCompetitionPayload calls for every competition; it is shared by
+// both GET /competitions and GET /court/:court/matches. Swapping it here lets
+// the test count builds and hold the in-flight slot long enough for the
+// other goroutines to attach as waiters, exactly the barrier pattern
+// TestViewerSingleFlight_CollatesConcurrentBuilds uses at the mechanism
+// level, but exercised through the real HTTP handler.
+func TestCourtMatches_ConcurrentRequestsCollapseToOneBuild(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name: "T", Password: "", Courts: []string{"A"},
+	}))
+	comp := state.Competition{ID: "c1", Name: "Comp 1", Status: state.CompStatusPools, Courts: []string{"A"}}
+	require.NoError(t, store.SaveCompetition(&comp))
+	require.NoError(t, store.SavePoolMatches("c1", []state.MatchResult{
+		{ID: "PoolA-1", SideA: "P1", SideB: "P2", Status: state.MatchStatusScheduled, Court: "A"},
+	}))
+
+	var loadCount atomic.Int32
+	original := viewerLoadCompetition
+	viewerLoadCompetition = func(store *state.Store, compID string) (*state.Competition, error) {
+		loadCount.Add(1)
+		// Hold the in-flight slot long enough for all other goroutines to
+		// enter sf.Do, find the "court-matches:A" key already in-flight,
+		// and attach as waiters rather than each starting their own build.
+		time.Sleep(200 * time.Millisecond)
+		return store.LoadCompetition(compID)
+	}
+	t.Cleanup(func() { viewerLoadCompetition = original })
+
+	const concurrency = 20
+	var readyBarrier sync.WaitGroup
+	readyBarrier.Add(concurrency)
+
+	results := make([]*httptest.ResponseRecorder, concurrency)
+	var wg sync.WaitGroup
+	for i := 0; i < concurrency; i++ {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			readyBarrier.Done()
+			readyBarrier.Wait() // all goroutines race into the handler together
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest("GET", "/api/viewer/court/A/matches", nil)
+			r.ServeHTTP(w, req)
+			results[i] = w
+		}()
+	}
+	wg.Wait()
+
+	assert.Equalf(t, int32(1), loadCount.Load(),
+		"expected exactly 1 underlying build across %d concurrent requests to the same court; got %d (thundering-herd not suppressed)",
+		concurrency, loadCount.Load())
+
+	for i, w := range results {
+		require.Equalf(t, http.StatusOK, w.Code, "request %d: body=%q", i, w.Body.String())
+		var resp courtMatchesResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp), "request %d: body=%q", i, w.Body.String())
+		assert.Equal(t, "A", resp.Court, "request %d", i)
+		require.Equal(t, []string{"c1"}, compIDs(resp), "request %d", i)
+	}
 }

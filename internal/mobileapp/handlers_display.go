@@ -1,6 +1,7 @@
 package mobileapp
 
 import (
+	"encoding/json"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -28,6 +29,14 @@ import (
 // for a single consumer would be premature. If a second polled surface
 // lands later we can hoist a DisplayStore interface then.
 func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
+	// P2 (mp-9afd style): singleflight group for the court-scoped match feed,
+	// mirroring the sf in RegisterViewerHandlers for GET /competitions.
+	// Created once per router setup and shared by all requests via closure
+	// capture. Unlike the constant "competitions" key, the key here includes
+	// the court, different courts are different payloads and must not
+	// collapse together.
+	sf := newViewerSingleFlight()
+
 	r.GET("/court/:court/current", func(c *gin.Context) {
 		// Streaming clients poll this on a 1-2s cadence; resolveCourt pins the
 		// no-store + CORS headers so the polled-surface guarantee survives
@@ -133,23 +142,37 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 	// "Match N of M" pool counts stay correct. The right-sizing is by
 	// competition COUNT (only comps on this court, not the whole tournament).
 	r.GET("/court/:court/matches", func(c *gin.Context) {
+		// resolveCourt is a per-request concern (validates + normalizes the
+		// :court param against the current tournament) and must run outside
+		// sf.Do, only the expensive payload build is collapsed.
 		court, ok := resolveCourt(c, store)
 		if !ok {
 			return
 		}
 
-		ids, _ := store.ListCompetitions()
-		comps := make([]gin.H, 0, len(ids))
-		for _, compID := range ids {
-			// The court filter does the setup-skip and "real match on this
-			// court" gating inside the single per-comp load (no separate
-			// presence pre-check that would re-read poolMatches/bracket).
-			if payload := buildViewerCompetitionPayload(store, compID, court); payload != nil {
-				comps = append(comps, payload)
+		// P2 (mp-9afd style): collapse concurrent builds for the SAME court to
+		// O(1) per in-flight window. The key includes the court so different
+		// courts never collapse together. On panic inside the elected build,
+		// sf.Do returns an error and all waiters receive it; mapped to 500.
+		data, err := sf.Do("court-matches:"+court, func() ([]byte, error) {
+			ids, _ := store.ListCompetitions()
+			comps := make([]gin.H, 0, len(ids))
+			for _, compID := range ids {
+				// The court filter does the setup-skip and "real match on this
+				// court" gating inside the single per-comp load (no separate
+				// presence pre-check that would re-read poolMatches/bracket).
+				if payload := buildViewerCompetitionPayload(store, compID, court); payload != nil {
+					comps = append(comps, payload)
+				}
 			}
-		}
+			return json.Marshal(gin.H{"court": court, "competitions": comps})
+		})
 
-		c.JSON(http.StatusOK, gin.H{"court": court, "competitions": comps})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+			return
+		}
+		c.Data(http.StatusOK, "application/json; charset=utf-8", data)
 	})
 }
 

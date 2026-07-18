@@ -1411,7 +1411,7 @@ func TestExportCompetitionXlsx(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEmpty(t, data)
 	// Simple check for ZIP header (Excel files are ZIPs)
-	assert.Equal(t, []byte{0x50, 0x4b, 0x03, 0x04}, data[:4])
+	assert.Equal(t, zipMagic, data[:4])
 }
 
 func TestExportCompetitionXlsx_NotFound(t *testing.T) {

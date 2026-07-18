@@ -247,11 +247,7 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			return json.Marshal(comps)
 		})
 
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
-			return
-		}
-		c.Data(http.StatusOK, "application/json; charset=utf-8", data)
+		serveSingleFlightJSON(c, data, err)
 	})
 
 	r.GET("/competitions/:id", func(c *gin.Context) {
@@ -364,11 +360,7 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 			return
 		}
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
-			return
-		}
-		c.Data(http.StatusOK, "application/json; charset=utf-8", data)
+		serveSingleFlightJSON(c, data, err)
 	})
 
 	r.GET("/schedule", func(c *gin.Context) {

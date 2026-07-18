@@ -168,11 +168,7 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 			return json.Marshal(gin.H{"court": court, "competitions": comps})
 		})
 
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
-			return
-		}
-		c.Data(http.StatusOK, "application/json; charset=utf-8", data)
+		serveSingleFlightJSON(c, data, err)
 	})
 }
 

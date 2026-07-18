@@ -4,8 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"runtime/debug"
 	"sync"
+
+	"github.com/gin-gonic/gin"
 )
 
 // errNotFound is a sentinel returned by the sf.Do fn inside
@@ -91,4 +94,17 @@ func (g *viewerSingleFlight) Do(key string, fn func() ([]byte, error)) (v []byte
 
 	c.val, c.err = fn()
 	return c.val, c.err
+}
+
+// serveSingleFlightJSON writes a Do result to the response: marshalled JSON
+// bytes on success, a generic 500 on error. This is the shared tail of every
+// singleflight-backed viewer endpoint; handlers with an extra error mapping
+// (e.g. errNotFound → 404 on /competitions/:id) branch on that first and fall
+// through here for the rest.
+func serveSingleFlightJSON(c *gin.Context, data []byte, err error) {
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+	c.Data(http.StatusOK, "application/json; charset=utf-8", data)
 }

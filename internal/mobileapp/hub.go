@@ -63,9 +63,10 @@ const (
 const DefaultHistorySize = 100
 
 // DefaultMaxSSEClients caps concurrent /api/events subscribers per process.
-// Each subscriber allocates one buffered channel (100-element string buffer)
-// plus one streaming goroutine. Base struct/goroutine overhead per client:
-//   - Channel buffer: 100 string headers × 16 B (pointer + length) ≈ 1.6 KB
+// Each subscriber allocates one buffered channel (100-element historyEntry
+// buffer) plus one streaming goroutine. Base struct/goroutine overhead per
+// client:
+//   - Channel buffer: 100 entries × 24 B (int64 seq + string header) ≈ 2.4 KB
 //   - Channel struct overhead: ~100 B
 //   - Goroutine stack: 2–8 KB (starts small, grows on demand)
 //   - Base total: ~4–10 KB resident per client
@@ -128,6 +129,8 @@ type SSEEvent struct {
 // We store the marshalled form (not the SSEEvent struct) so the reconnect
 // replay path doesn't have to re-marshal, keeps cold-replay cheap and
 // guarantees the replayed bytes are exactly what live clients saw.
+// Subscriber channels carry the same pair so the streaming loop can emit
+// the SSE `id:` line without re-parsing the payload.
 type historyEntry struct {
 	seq     int64
 	payload string
@@ -144,7 +147,7 @@ type historyEntry struct {
 // is observed atomically, without that, a concurrent reconnect could
 // read a partial history slice and replay events out of order.
 type Hub struct {
-	clients map[chan string]bool
+	clients map[chan historyEntry]bool
 	mu      sync.RWMutex
 
 	// seq is the monotonic envelope counter (atomic so Broadcast can
@@ -208,7 +211,7 @@ func NewHubWithLimits(historySize, maxClients int) *Hub {
 		historySize = DefaultHistorySize
 	}
 	return &Hub{
-		clients:           make(map[chan string]bool),
+		clients:           make(map[chan historyEntry]bool),
 		history:           make([]historyEntry, historySize),
 		HistorySize:       historySize,
 		MaxClients:        maxClients,
@@ -222,7 +225,7 @@ func NewHubWithLimits(historySize, maxClients int) *Hub {
 //
 // HandleEvents converts a nil return into HTTP 503 so the SSE client
 // knows to back off and retry rather than hanging on a stuck connection.
-func (h *Hub) Subscribe() chan string {
+func (h *Hub) Subscribe() chan historyEntry {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.closed {
@@ -234,7 +237,7 @@ func (h *Hub) Subscribe() chan string {
 	// Buffer absorbs short bursts (bulk-score and schedule updates) for ~300
 	// concurrent SSE clients; truly stalled clients are detected via the
 	// non-blocking send in Broadcast and unsubscribed.
-	ch := make(chan string, 100)
+	ch := make(chan historyEntry, 100)
 	h.clients[ch] = true
 	return ch
 }
@@ -261,13 +264,13 @@ func (h *Hub) Close() {
 }
 
 // Unsubscribe removes a client channel
-func (h *Hub) Unsubscribe(ch chan string) {
+func (h *Hub) Unsubscribe(ch chan historyEntry) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.unsubscribeLocked(ch)
 }
 
-func (h *Hub) unsubscribeLocked(ch chan string) {
+func (h *Hub) unsubscribeLocked(ch chan historyEntry) {
 	if _, ok := h.clients[ch]; ok {
 		delete(h.clients, ch)
 		close(ch)
@@ -297,26 +300,26 @@ func (h *Hub) Broadcast(eventType EventType, data any) {
 		fmt.Printf("Error marshaling SSE event: %v\n", err)
 		return
 	}
-	payloadStr := string(payload)
+	entry := historyEntry{
+		seq:     seq,
+		payload: string(payload),
+	}
 
 	// Append to ring buffer first so a client that reconnects between the
 	// stamp and the fan-out sees the same envelope on replay.
 	if h.HistorySize > 0 {
-		h.history[(seq-1)%int64(h.HistorySize)] = historyEntry{
-			seq:     seq,
-			payload: payloadStr,
-		}
+		h.history[(seq-1)%int64(h.HistorySize)] = entry
 	}
 
-	clients := make([]chan string, 0, len(h.clients))
+	clients := make([]chan historyEntry, 0, len(h.clients))
 	for ch := range h.clients {
 		clients = append(clients, ch)
 	}
 
-	var dead []chan string
+	var dead []chan historyEntry
 	for _, ch := range clients {
 		select {
-		case ch <- payloadStr:
+		case ch <- entry:
 		default:
 			dead = append(dead, ch)
 		}
@@ -488,12 +491,10 @@ func (h *Hub) HandleEvents() gin.HandlerFunc {
 			select {
 			case msg, ok := <-ch:
 				if ok {
-					// Extract seq from the marshalled envelope so we can
-					// emit the SSE `id:` line. Parsing the marshalled
-					// JSON back is cheap (single int field) and avoids
-					// threading the seq through a second channel.
-					seq := extractSeq(msg)
-					writeSSEEnvelope(w, seq, msg)
+					// The broadcast entry carries the stamped seq alongside
+					// the payload, so the SSE `id:` line needs no re-parse
+					// of the marshalled JSON.
+					writeSSEEnvelope(w, msg.seq, msg.payload)
 					c.Writer.Flush() // Ensure the message is sent immediately
 					return true
 				}
@@ -539,27 +540,4 @@ func writeSSEEnvelope(w io.Writer, seq int64, payload string) {
 		// signal for production diagnostics).
 		fmt.Printf("SSE write failed (seq %d): %v\n", seq, err)
 	}
-}
-
-// extractSeq pulls the `seq` field out of a marshalled SSEEvent without
-// re-allocating the full struct. The marshalled form is always a JSON
-// object that contains a numeric `seq` field; we look it up directly
-// rather than going through json.Unmarshal to keep the hot path cheap.
-//
-// Returns 0 if the field is missing or malformed, the SSE handler
-// still writes the event in that case, just without an id line, so the
-// browser keeps its previous Last-Event-ID. That's the conservative
-// fallback: a missing id never widens a gap, it just defers the next
-// checkpoint.
-func extractSeq(payload string) int64 {
-	// Cheap structural extraction, the marshalled JSON always has
-	// `"seq":<int>` somewhere. json.Unmarshal into a stripped struct
-	// would also work but allocates more.
-	var stripped struct {
-		Seq int64 `json:"seq"`
-	}
-	if err := json.Unmarshal([]byte(payload), &stripped); err != nil {
-		return 0
-	}
-	return stripped.Seq
 }

@@ -68,15 +68,6 @@ func TestWriteSSEEnvelope_HappyPath(t *testing.T) {
 	assert.Contains(t, got, `"seq":7`)
 }
 
-// TestExtractSeq covers the missing-seq and valid-seq paths (75%→100%).
-func TestExtractSeq(t *testing.T) {
-	assert.Equal(t, int64(0), extractSeq(""))
-	assert.Equal(t, int64(0), extractSeq("not json"))
-	assert.Equal(t, int64(0), extractSeq(`{"other":1}`))
-	assert.Equal(t, int64(42), extractSeq(`{"seq":42}`))
-	assert.Equal(t, int64(0), extractSeq(`{"seq":0}`))
-}
-
 // TestValidateCompetitionLengths_ErrorCases covers the error-return branches (55.6%→100%).
 func TestValidateCompetitionLengths_ErrorCases(t *testing.T) {
 	// All fields valid.

@@ -1823,7 +1823,7 @@ func TestPUTCompetitionAwards(t *testing.T) {
 		for range 4 {
 			select {
 			case msg := <-ch:
-				if strings.Contains(msg, `"type":"tournament_updated"`) {
+				if strings.Contains(msg.payload, `"type":"tournament_updated"`) {
 					sawUpdate = true
 				}
 			default:

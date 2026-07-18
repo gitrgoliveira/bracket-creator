@@ -938,7 +938,7 @@ func TestRevertMatchToQueueHandler(t *testing.T) {
 		select {
 		case msg := <-ch:
 			var evt SSEEvent
-			require.NoError(t, json.Unmarshal([]byte(msg), &evt))
+			require.NoError(t, json.Unmarshal([]byte(msg.payload), &evt))
 			assert.Equal(t, EventMatchUpdated, evt.Type)
 		default:
 			t.Error("expected SSE broadcast but channel was empty")
@@ -1041,7 +1041,7 @@ func TestScoreHandler_CompletionBroadcastContract(t *testing.T) {
 
 // drainHubEvents pulls every queued event off the given hub-subscriber
 // channel within d, decoding each into SSEEvent for inspection.
-func drainHubEvents(t *testing.T, ch <-chan string, d time.Duration) []SSEEvent {
+func drainHubEvents(t *testing.T, ch <-chan historyEntry, d time.Duration) []SSEEvent {
 	t.Helper()
 	var events []SSEEvent
 	deadline := time.After(d)
@@ -1049,7 +1049,7 @@ func drainHubEvents(t *testing.T, ch <-chan string, d time.Duration) []SSEEvent 
 		select {
 		case msg := <-ch:
 			var e SSEEvent
-			require.NoError(t, json.Unmarshal([]byte(msg), &e))
+			require.NoError(t, json.Unmarshal([]byte(msg.payload), &e))
 			events = append(events, e)
 		case <-deadline:
 			return events

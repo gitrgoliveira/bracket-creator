@@ -47,7 +47,7 @@ func TestBroadcastsHaveStrictlyIncreasingSeq(t *testing.T) {
 		select {
 		case msg := <-ch:
 			var env SSEEvent
-			require.NoError(t, json.Unmarshal([]byte(msg), &env))
+			require.NoError(t, json.Unmarshal([]byte(msg.payload), &env))
 			assert.Equalf(t, prev+1, env.Seq, "envelope %d should have seq exactly one greater than the previous", i)
 			prev = env.Seq
 		case <-time.After(500 * time.Millisecond):

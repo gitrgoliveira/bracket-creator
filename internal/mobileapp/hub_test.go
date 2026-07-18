@@ -29,7 +29,7 @@ func TestHub(t *testing.T) {
 	select {
 	case msg := <-ch:
 		var event SSEEvent
-		err := json.Unmarshal([]byte(msg), &event)
+		err := json.Unmarshal([]byte(msg.payload), &event)
 		assert.NoError(t, err)
 		assert.Equal(t, EventTournamentUpdated, event.Type)
 		data := event.Data.(map[string]interface{})
@@ -397,7 +397,7 @@ func TestHub_HandleEvents_Closure(t *testing.T) {
 
 	// Wait for subscription to happen
 	timeout := time.After(1 * time.Second)
-	var internalCh chan string
+	var internalCh chan historyEntry
 	for {
 		select {
 		case <-timeout:

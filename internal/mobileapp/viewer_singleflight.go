@@ -13,8 +13,10 @@ import (
 // The handler maps it to HTTP 404; all other non-nil errors become 500.
 var errNotFound = errors.New("not found")
 
-// viewerSingleFlight collapses concurrent identical GET /api/viewer/competitions
-// (and /api/viewer/competitions/:id) builds to a single in-flight execution.
+// viewerSingleFlight collapses concurrent identical builds of the expensive
+// polled viewer endpoints (GET /api/viewer/competitions, its /:id variant, and
+// the court feed GET /api/viewer/court/:court/matches) to a single in-flight
+// execution per key.
 //
 // Correctness vs SSE staleness: a key stays in-flight only while the first
 // caller is still executing. The moment it finishes, the result is returned

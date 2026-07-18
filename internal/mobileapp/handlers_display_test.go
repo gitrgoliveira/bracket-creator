@@ -803,8 +803,8 @@ func TestCourtMatches_EmptyCompetitionsIsArrayNotNull(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code, "body=%q", w.Body.String())
-	assert.Contains(t, w.Body.String(), `"competitions":[]`,
-		"empty competitions must marshal as [] not null, body=%q", w.Body.String())
+	// JSONEq compares parsed values, so "competitions":null fails it: this
+	// single assertion pins both the court and the []-not-null shape.
 	assert.JSONEq(t, `{"court":"A","competitions":[]}`, w.Body.String())
 }
 

@@ -46,17 +46,7 @@ func TestLeagueStandings_RoundRobinResults(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "league-standings"
 
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:         compID,
-		Name:       "League Standings Test",
-		Kind:       "individual",
-		Format:     state.CompFormatLeague,
-		PoolSize:   4,
-		RoundRobin: true,
-		Courts:     []string{"A"},
-		StartTime:  "09:00",
-		Status:     "setup",
-	}))
+	createTestCompetition(t, store, compID, state.CompFormatLeague, 4)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
 	require.NoError(t, eng.StartCompetition(compID))
 
@@ -88,7 +78,6 @@ func TestLeagueStandings_RoundRobinResults(t *testing.T) {
 	require.Len(t, standings, 4, "league standings must cover the whole roster in one slice")
 
 	assert.Equal(t, "Alice", standings[0].Player.Name, "Alice won every match, must rank first")
-	assert.Equal(t, 1, standings[0].Rank)
 	assert.Equal(t, 3, standings[0].Wins)
 
 	// Ranks must be assigned in increasing order 1..4 across the single slice.
@@ -104,17 +93,7 @@ func TestLeagueStandings_Drawn(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "league-drawn"
 
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:         compID,
-		Name:       "League Drawn",
-		Kind:       "individual",
-		Format:     state.CompFormatLeague,
-		PoolSize:   3,
-		RoundRobin: true,
-		Courts:     []string{"A"},
-		StartTime:  "09:00",
-		Status:     "setup",
-	}))
+	createTestCompetition(t, store, compID, state.CompFormatLeague, 3)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie"})
 	require.NoError(t, eng.StartCompetition(compID))
 

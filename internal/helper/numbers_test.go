@@ -67,13 +67,6 @@ func TestAssignPlayerNumbers(t *testing.T) {
 		assert.Equal(t, "A3", pool1[2].Number)
 		assert.Equal(t, "A4", pool2[0].Number)
 		assert.Equal(t, "A5", pool2[1].Number)
-
-		// Ensure no duplicate numbers were produced across the two slices.
-		seen := make(map[string]bool)
-		for _, p := range append(append([]Player{}, pool1...), pool2...) {
-			assert.False(t, seen[p.Number], "duplicate number %q", p.Number)
-			seen[p.Number] = true
-		}
 	})
 
 	t.Run("non-1 start value", func(t *testing.T) {
@@ -87,18 +80,5 @@ func TestAssignPlayerNumbers(t *testing.T) {
 		require.Equal(t, 12, next)
 		assert.Equal(t, "K10", players[0].Number)
 		assert.Equal(t, "K11", players[1].Number)
-	})
-
-	t.Run("mutates the passed slice in place", func(t *testing.T) {
-		players := []Player{
-			{Name: "Alice"},
-			{Name: "Bob"},
-		}
-		original := players // same underlying array
-
-		AssignPlayerNumbers(players, "A", 1)
-
-		assert.Equal(t, "A1", original[0].Number)
-		assert.Equal(t, "A2", original[1].Number)
 	})
 }

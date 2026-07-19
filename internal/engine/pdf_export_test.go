@@ -3,6 +3,7 @@ package engine
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -24,11 +25,9 @@ func TestExportTournamentWorkbooks_ExplicitIDs(t *testing.T) {
 	require.NoError(t, eng.StartCompetition("comp-a"))
 
 	// comp-b has no Name, so the title must fall back to the comp ID.
-	compB := &state.Competition{
-		ID: "comp-b", Format: "league", PoolSize: 3, RoundRobin: true,
-		Courts: []string{"A"}, StartTime: "09:00", Status: "setup",
-	}
-	require.NoError(t, store.SaveCompetition(compB))
+	createTestCompetition(t, store, "comp-b", "league", 3, func(c *state.Competition) {
+		c.Name = ""
+	})
 	saveTestParticipants(t, store, "comp-b", []string{"Dave", "Eve", "Frank"})
 	require.NoError(t, eng.StartCompetition("comp-b"))
 
@@ -48,7 +47,7 @@ func TestExportTournamentWorkbooks_ExplicitIDs(t *testing.T) {
 	for _, src := range sources {
 		data, err := os.ReadFile(src.Path)
 		require.NoErrorf(t, err, "expected workbook file to exist at %s", src.Path)
-		require.NotEmpty(t, data, "workbook file must be non-empty")
+		require.GreaterOrEqual(t, len(data), len(zipMagic), "workbook must be at least ZIP-magic sized")
 		assert.Equal(t, zipMagic, data[:4], "workbook must be a valid ZIP/XLSX")
 	}
 }
@@ -73,8 +72,7 @@ func TestExportTournamentWorkbooks_AllCompetitions(t *testing.T) {
 
 	gotIDs := map[string]bool{}
 	for _, src := range sources {
-		base := filepath.Base(src.Path)
-		gotIDs[base[:len(base)-len(".xlsx")]] = true
+		gotIDs[strings.TrimSuffix(filepath.Base(src.Path), ".xlsx")] = true
 		data, err := os.ReadFile(src.Path)
 		require.NoError(t, err)
 		assert.NotEmpty(t, data)
@@ -114,34 +112,28 @@ func TestExportTournamentWorkbooks_UnknownCompID(t *testing.T) {
 func TestExportTournamentWorkbooks_IsTeamFlag(t *testing.T) {
 	tests := []struct {
 		name       string
-		comp       *state.Competition
+		compID     string
+		mutate     func(*state.Competition)
 		playerName []string
 		wantTeam   bool
 	}{
 		{
-			name: "individual comp is not a team",
-			comp: &state.Competition{
-				ID: "indiv", Kind: "individual", Format: "league", PoolSize: 3,
-				RoundRobin: true, Courts: []string{"A"}, StartTime: "09:00", Status: "setup",
-			},
+			name:       "individual comp is not a team",
+			compID:     "indiv",
 			playerName: []string{"Alice", "Bob", "Charlie"},
 			wantTeam:   false,
 		},
 		{
-			name: "TeamSize > 0 marks IsTeam true",
-			comp: &state.Competition{
-				ID: "team-size", Kind: "individual", Format: "league", PoolSize: 3,
-				TeamSize: 3, RoundRobin: true, Courts: []string{"A"}, StartTime: "09:00", Status: "setup",
-			},
+			name:       "TeamSize > 0 marks IsTeam true",
+			compID:     "team-size",
+			mutate:     func(c *state.Competition) { c.TeamSize = 3 },
 			playerName: []string{"TeamA", "TeamB", "TeamC"},
 			wantTeam:   true,
 		},
 		{
-			name: "Kind == team marks IsTeam true",
-			comp: &state.Competition{
-				ID: "team-kind", Kind: "team", Format: "league", PoolSize: 3,
-				RoundRobin: true, Courts: []string{"A"}, StartTime: "09:00", Status: "setup",
-			},
+			name:       "Kind == team marks IsTeam true",
+			compID:     "team-kind",
+			mutate:     func(c *state.Competition) { c.Kind = "team" },
 			playerName: []string{"TeamA", "TeamB", "TeamC"},
 			wantTeam:   true,
 		},
@@ -150,12 +142,16 @@ func TestExportTournamentWorkbooks_IsTeamFlag(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			eng, store, _ := setupTestEngine(t)
-			require.NoError(t, store.SaveCompetition(tc.comp))
-			saveTestParticipants(t, store, tc.comp.ID, tc.playerName)
-			require.NoError(t, eng.StartCompetition(tc.comp.ID))
+			opts := []func(*state.Competition){}
+			if tc.mutate != nil {
+				opts = append(opts, tc.mutate)
+			}
+			createTestCompetition(t, store, tc.compID, "league", 3, opts...)
+			saveTestParticipants(t, store, tc.compID, tc.playerName)
+			require.NoError(t, eng.StartCompetition(tc.compID))
 
 			tmpDir := t.TempDir()
-			sources, err := eng.ExportTournamentWorkbooks(tmpDir, tc.comp.ID)
+			sources, err := eng.ExportTournamentWorkbooks(tmpDir, tc.compID)
 			require.NoError(t, err)
 			require.Len(t, sources, 1)
 			assert.Equal(t, tc.wantTeam, sources[0].IsTeam)

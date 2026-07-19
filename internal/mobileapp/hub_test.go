@@ -28,9 +28,7 @@ func TestHub(t *testing.T) {
 
 	select {
 	case msg := <-ch:
-		var event SSEEvent
-		err := json.Unmarshal([]byte(msg.payload), &event)
-		assert.NoError(t, err)
+		event := decodeHubEvent(t, msg)
 		assert.Equal(t, EventTournamentUpdated, event.Type)
 		data := event.Data.(map[string]interface{})
 		assert.Equal(t, "bar", data["foo"])

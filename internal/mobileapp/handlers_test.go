@@ -2206,9 +2206,7 @@ func TestStartCompetition_BroadcastContract(t *testing.T) {
 	receiveEvent := func(d time.Duration) (SSEEvent, bool) {
 		select {
 		case msg := <-ch:
-			var e SSEEvent
-			require.NoError(t, json.Unmarshal([]byte(msg.payload), &e))
-			return e, true
+			return decodeHubEvent(t, msg), true
 		case <-time.After(d):
 			return SSEEvent{}, false
 		}

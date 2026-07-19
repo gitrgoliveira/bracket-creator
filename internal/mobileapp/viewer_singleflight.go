@@ -21,12 +21,14 @@ var errNotFound = errors.New("not found")
 // the court feed GET /api/viewer/court/:court/matches) to a single in-flight
 // execution per key.
 //
-// Correctness vs SSE staleness: a key stays in-flight only while the first
+// Staleness bound vs SSE: a key stays in-flight only while the elected
 // caller is still executing. The moment it finishes, the result is returned
-// to all waiters and the key is removed. A subsequent request (e.g. the next
-// SSE fan-out wave) always re-executes. This means the maximum response age
-// is the latency of one build, not a fixed TTL, there is never stale data
-// served across SSE boundaries.
+// to all waiters and the key is removed, so any request arriving after
+// completion re-executes. The maximum response age is therefore the latency
+// of one build, not a fixed TTL. Note the bound is not zero: a refetch
+// triggered by an SSE event can attach to a build elected just before the
+// write that fired the event and receive pre-write data — stale by at most
+// that one in-flight build, corrected on the next request.
 //
 // Scalability goal (P2, mp-9afd): 1000 concurrent GET /api/viewer/competitions
 // arriving within the same 500ms SSE fan-out window collapse to O(1) builds
@@ -75,7 +77,8 @@ func (g *viewerSingleFlight) Do(key string, fn func() ([]byte, error)) (v []byte
 	// If wg.Done ran first, a new caller could find the key in the map,
 	// call c.wg.Wait() (which returns immediately since the WaitGroup is
 	// already at zero), and receive the old result, violating the
-	// guarantee that each SSE wave re-executes fn for fresh data.
+	// guarantee that a request arriving after a build completes always
+	// re-executes fn for fresh data.
 	defer func() {
 		if r := recover(); r != nil {
 			c.err = fmt.Errorf("singleflight: fn panicked: %v", r)
@@ -97,13 +100,14 @@ func (g *viewerSingleFlight) Do(key string, fn func() ([]byte, error)) (v []byte
 }
 
 // serveSingleFlightJSON writes a Do result to the response: marshalled JSON
-// bytes on success, a generic 500 on error. This is the shared tail of every
-// singleflight-backed viewer endpoint; handlers with an extra error mapping
-// (e.g. errNotFound → 404 on /competitions/:id) branch on that first and fall
-// through here for the rest.
+// bytes on success, a logged generic 500 on error (internalError keeps the
+// root cause in the server log without leaking it to the client). This is
+// the shared tail of every singleflight-backed viewer endpoint; handlers
+// with an extra error mapping (e.g. errNotFound → 404 on /competitions/:id)
+// branch on that first and fall through here for the rest.
 func serveSingleFlightJSON(c *gin.Context, data []byte, err error) {
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	c.Data(http.StatusOK, "application/json; charset=utf-8", data)

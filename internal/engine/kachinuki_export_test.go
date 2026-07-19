@@ -457,15 +457,11 @@ func TestResolveKachinukiPosition_PrefersMatchScoped(t *testing.T) {
 // individual (non-team) competitions both yield an empty/nil result with no
 // error, mirroring collectKachinukiMatches' nil-guard.
 func TestKachinukiDetailMatches_NonKachinukiComp(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-
 	t.Run("fixed team", func(t *testing.T) {
 		compID := "fixed-team-comp"
-		require.NoError(t, store.SaveCompetition(&state.Competition{
-			ID:            compID,
-			TeamMatchType: state.TeamMatchTypeFixed,
-			TeamSize:      5,
-		}))
+		eng, store, _ := setupKachinukiComp(t, compID, 5, func(c *state.Competition) {
+			c.TeamMatchType = state.TeamMatchTypeFixed
+		})
 		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 			{ID: "P1-0", SideA: "RedTeam", SideB: "WhiteTeam", SubResults: []state.SubMatchResult{
 				{Position: 1, SideA: "R1", SideB: "W1", Winner: "R1"},
@@ -478,6 +474,7 @@ func TestKachinukiDetailMatches_NonKachinukiComp(t *testing.T) {
 	})
 
 	t.Run("individual", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
 		compID := "individual-comp"
 		createTestCompetition(t, store, compID, "mixed", 3)
 		saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie"})

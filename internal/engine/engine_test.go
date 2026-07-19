@@ -24,7 +24,10 @@ func setupTestEngine(t *testing.T) (*Engine, *state.Store, string) {
 	return eng, store, dir
 }
 
-func createTestCompetition(t *testing.T, store *state.Store, id string, format string, poolSize int) {
+// createTestCompetition saves a canonical individual competition. opts mutate
+// the competition before it is saved (same pattern as setupKachinukiComp), so
+// tests that need one field to differ don't restate the whole literal.
+func createTestCompetition(t *testing.T, store *state.Store, id string, format string, poolSize int, opts ...func(*state.Competition)) {
 	t.Helper()
 	comp := &state.Competition{
 		ID:           id,
@@ -38,6 +41,9 @@ func createTestCompetition(t *testing.T, store *state.Store, id string, format s
 		Courts:       []string{"A"},
 		StartTime:    "09:00",
 		Status:       "setup",
+	}
+	for _, o := range opts {
+		o(comp)
 	}
 	require.NoError(t, store.SaveCompetition(comp))
 }

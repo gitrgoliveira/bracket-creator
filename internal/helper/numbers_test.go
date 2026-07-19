@@ -9,11 +9,7 @@ import (
 
 func TestAssignPlayerNumbers(t *testing.T) {
 	t.Run("basic numbering with prefix", func(t *testing.T) {
-		players := []Player{
-			{Name: "Alice"},
-			{Name: "Bob"},
-			{Name: "Carol"},
-		}
+		players := makePlayers(3)
 
 		next := AssignPlayerNumbers(players, "A", 1)
 
@@ -24,10 +20,7 @@ func TestAssignPlayerNumbers(t *testing.T) {
 	})
 
 	t.Run("empty prefix produces bare numbers", func(t *testing.T) {
-		players := []Player{
-			{Name: "Alice"},
-			{Name: "Bob"},
-		}
+		players := makePlayers(2)
 
 		next := AssignPlayerNumbers(players, "", 1)
 
@@ -46,15 +39,11 @@ func TestAssignPlayerNumbers(t *testing.T) {
 	})
 
 	t.Run("chaining continues sequence across slices without gaps or duplicates", func(t *testing.T) {
-		pool1 := []Player{
-			{Name: "Alice"},
-			{Name: "Bob"},
-			{Name: "Carol"},
-		}
-		pool2 := []Player{
-			{Name: "Dave"},
-			{Name: "Erin"},
-		}
+		// pool1's own numbering (A1..A3) is pinned by the first subtest;
+		// here only the continuation matters: the returned counter feeds the
+		// next slice with no gap or duplicate.
+		pool1 := makePlayers(3)
+		pool2 := makePlayers(2)
 
 		next := AssignPlayerNumbers(pool1, "A", 1)
 		require.Equal(t, 4, next)
@@ -62,18 +51,12 @@ func TestAssignPlayerNumbers(t *testing.T) {
 		next = AssignPlayerNumbers(pool2, "A", next)
 		require.Equal(t, 6, next)
 
-		assert.Equal(t, "A1", pool1[0].Number)
-		assert.Equal(t, "A2", pool1[1].Number)
-		assert.Equal(t, "A3", pool1[2].Number)
 		assert.Equal(t, "A4", pool2[0].Number)
 		assert.Equal(t, "A5", pool2[1].Number)
 	})
 
 	t.Run("non-1 start value", func(t *testing.T) {
-		players := []Player{
-			{Name: "Alice"},
-			{Name: "Bob"},
-		}
+		players := makePlayers(2)
 
 		next := AssignPlayerNumbers(players, "K", 10)
 

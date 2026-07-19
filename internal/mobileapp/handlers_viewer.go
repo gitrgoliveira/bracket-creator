@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -82,12 +83,13 @@ func mergePoolNumbersIntoPlayers(comp *state.Competition, pools []helper.Pool) {
 }
 
 // viewerLoadCompetition is the store.LoadCompetition call used by the
-// public viewer goroutines. It is a package-level variable so panic-
-// recovery tests can swap it for a function that panics, exercising the
-// safeGo wiring end-to-end without needing to corrupt on-disk state. The
-// other 8 spawned goroutines also use safeGo, so a panic in any of them
-// is caught by the same mechanism; this hook just gives the integration
-// test something deterministic to trip.
+// public viewer goroutines. It is a package-level variable so tests can
+// swap it without corrupting on-disk state: panic-recovery tests substitute
+// a panicking load (exercising the safeGo wiring end-to-end), and the
+// court-feed singleflight test substitutes a slow load to hold a build
+// in-flight. The other 8 spawned goroutines also use safeGo, so a panic in
+// any of them is caught by the same mechanism; this hook just gives the
+// integration tests something deterministic to trip.
 var viewerLoadCompetition = func(store *state.Store, compID string) (*state.Competition, error) {
 	return store.LoadCompetition(compID)
 }
@@ -105,7 +107,15 @@ var viewerLoadCompetition = func(store *state.Store, compID string) (*state.Comp
 // poolMatches/bracket this function already loads, no second read. The
 // aggregate passes "" (no filter).
 func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter string) gin.H {
-	comp, _ := viewerLoadCompetition(store, compID)
+	// Per-comp read faults degrade to skipping (or thinning) the comp rather
+	// than failing the whole viewer payload — the availability trade for the
+	// public list surfaces — but each is logged so a corrupt competition
+	// leaves a server-side breadcrumb instead of silently vanishing from
+	// every board.
+	comp, err := viewerLoadCompetition(store, compID)
+	if err != nil {
+		log.Printf("mobileapp: viewer payload %s: load competition: %v", compID, err)
+	}
 	if comp == nil {
 		return nil
 	}
@@ -117,8 +127,14 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 	}
 
 	// Global views like Scoring/Schedule need matches and brackets.
-	poolMatches, _ := store.LoadPoolMatches(compID)
-	bracket, _ := store.LoadBracket(compID)
+	poolMatches, pmErr := store.LoadPoolMatches(compID)
+	if pmErr != nil {
+		log.Printf("mobileapp: viewer payload %s: load pool matches: %v", compID, pmErr)
+	}
+	bracket, brErr := store.LoadBracket(compID)
+	if brErr != nil {
+		log.Printf("mobileapp: viewer payload %s: load bracket: %v", compID, brErr)
+	}
 
 	// Court feed: drop comps with no real match on the requested court. Checked
 	// on the RAW bracket (before the preview strip below) so a preview bracket

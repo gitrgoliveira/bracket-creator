@@ -2,10 +2,13 @@ package mobileapp
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -31,10 +34,9 @@ import (
 func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 	// P2 (mp-9afd style): singleflight group for the court-scoped match feed,
 	// mirroring the sf in RegisterViewerHandlers for GET /competitions.
-	// Created once per router setup and shared by all requests via closure
-	// capture. Unlike the constant "competitions" key, the key here includes
-	// the court, different courts are different payloads and must not
-	// collapse together.
+	// Unlike the constant "competitions" key, the key here includes the
+	// court, different courts are different payloads and must not collapse
+	// together.
 	sf := newViewerSingleFlight()
 
 	r.GET("/court/:court/current", func(c *gin.Context) {
@@ -57,19 +59,29 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 		//
 		// A failing competition list is a real 500, not an idle court: the
 		// overlay must be able to distinguish "nothing running" from "backend
-		// broken" (same contract as the sibling /matches feed).
+		// broken" (same contract as the sibling /matches feed). Per-competition
+		// read faults below degrade softer by design: the broken comp is
+		// skipped (recorded via c.Error so the cause reaches server logs) so
+		// one corrupt competition doesn't take down every court's overlay —
+		// the availability trade of a live-tournament surface.
 		ids, err := store.ListCompetitions()
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+			internalError(c, err)
 			return
 		}
 		for _, compID := range ids {
-			comp, _ := store.LoadCompetition(compID)
+			comp, err := store.LoadCompetition(compID)
+			if err != nil {
+				_ = c.Error(fmt.Errorf("court current: competition %s: %w", compID, err))
+			}
 			if comp == nil {
 				continue
 			}
 
-			poolMatches, _ := store.LoadPoolMatches(compID)
+			poolMatches, err := store.LoadPoolMatches(compID)
+			if err != nil {
+				_ = c.Error(fmt.Errorf("court current: pool matches %s: %w", compID, err))
+			}
 			for _, m := range poolMatches {
 				if !strings.EqualFold(m.Court, court) || m.Status != state.MatchStatusRunning {
 					continue
@@ -89,7 +101,10 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 			// not the ippon arrays a pool MatchResult carries. parseScore turns
 			// it back into the {ippons, hansoku} shape the contract returns.
 			// Elimination matches have no representative-bout fighters.
-			bracket, _ := store.LoadBracket(compID)
+			bracket, err := store.LoadBracket(compID)
+			if err != nil {
+				_ = c.Error(fmt.Errorf("court current: bracket %s: %w", compID, err))
+			}
 			if bracket == nil {
 				continue
 			}
@@ -171,13 +186,40 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 			if err != nil {
 				return nil, err
 			}
-			comps := make([]gin.H, 0, len(ids))
-			for _, compID := range ids {
-				// The court filter does the setup-skip and "real match on this
-				// court" gating inside the single per-comp load (no separate
-				// presence pre-check that would re-read poolMatches/bracket).
-				if payload := buildViewerCompetitionPayload(store, compID, court); payload != nil {
-					comps = append(comps, payload)
+
+			// Mirror GET /competitions: build the per-comp payloads
+			// concurrently so the collapsed window costs the slowest single
+			// build, not the sum. Each goroutine writes a unique index (no
+			// mutex needed; wg.Wait provides the happens-before), and the
+			// court filter does the setup-skip and "real match on this
+			// court" gating inside the single per-comp load (no separate
+			// presence pre-check that would re-read poolMatches/bracket).
+			results := make([]any, len(ids))
+			var wg sync.WaitGroup
+			var panicRef atomic.Pointer[recoveredPanic]
+			for i, id := range ids {
+				idx, compID := i, id
+				safeGo(&wg, &panicRef, func() {
+					// A nil payload (comp filtered out or failed to load)
+					// leaves results[idx] as a nil `any` so the collect loop
+					// below skips it; assigning a nil gin.H directly would
+					// box into a non-nil interface and slip past that filter.
+					if payload := buildViewerCompetitionPayload(store, compID, court); payload != nil {
+						results[idx] = payload
+					}
+				})
+			}
+			wg.Wait()
+			if p := panicRef.Load(); p != nil {
+				return nil, p
+			}
+
+			// make(..., 0, n) so zero competitions marshals as [] not null
+			// (the wire shape the SPA and the regression test pin).
+			comps := make([]any, 0, len(ids))
+			for _, comp := range results {
+				if comp != nil {
+					comps = append(comps, comp)
 				}
 			}
 			return json.Marshal(gin.H{"court": court, "competitions": comps})

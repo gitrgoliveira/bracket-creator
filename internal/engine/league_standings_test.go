@@ -8,34 +8,42 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestLeagueStandings_NonLeagueFormat verifies that a competition whose
-// Format isn't "league" (e.g. mixed) returns a *NotFoundError so the
-// league standings surface never leaks pool data for other formats.
-func TestLeagueStandings_NonLeagueFormat(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "mixed-comp"
+// TestLeagueStandings_NotFound verifies the two *NotFoundError paths: a
+// competition whose Format isn't "league" (so the league standings surface
+// never leaks pool data for other formats) and an unknown compID.
+func TestLeagueStandings_NotFound(t *testing.T) {
+	tests := []struct {
+		name   string
+		compID string
+		setup  func(t *testing.T, store *state.Store)
+	}{
+		{
+			name:   "non-league format",
+			compID: "mixed-comp",
+			setup: func(t *testing.T, store *state.Store) {
+				createTestCompetition(t, store, "mixed-comp", state.CompFormatMixed, 3)
+			},
+		},
+		{
+			name:   "unknown competition",
+			compID: "does-not-exist",
+		},
+	}
 
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: compID, Name: "Mixed", Format: state.CompFormatMixed,
-	}))
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			eng, store, _ := setupTestEngine(t)
+			if tc.setup != nil {
+				tc.setup(t, store)
+			}
 
-	standings, err := eng.LeagueStandings(compID)
-	require.Error(t, err)
-	assert.Nil(t, standings)
-	var nfe *NotFoundError
-	assert.ErrorAs(t, err, &nfe, "non-league competition must return NotFoundError")
-}
-
-// TestLeagueStandings_UnknownCompetition verifies that an unknown compID
-// returns a *NotFoundError.
-func TestLeagueStandings_UnknownCompetition(t *testing.T) {
-	eng, _, _ := setupTestEngine(t)
-
-	standings, err := eng.LeagueStandings("does-not-exist")
-	require.Error(t, err)
-	assert.Nil(t, standings)
-	var nfe *NotFoundError
-	assert.ErrorAs(t, err, &nfe, "unknown competition must return NotFoundError")
+			standings, err := eng.LeagueStandings(tc.compID)
+			require.Error(t, err)
+			assert.Nil(t, standings)
+			var nfe *NotFoundError
+			assert.ErrorAs(t, err, &nfe, "%s must return NotFoundError", tc.name)
+		})
+	}
 }
 
 // TestLeagueStandings_RoundRobinResults verifies that a league competition
@@ -79,6 +87,8 @@ func TestLeagueStandings_RoundRobinResults(t *testing.T) {
 
 	assert.Equal(t, "Alice", standings[0].Player.Name, "Alice won every match, must rank first")
 	assert.Equal(t, 3, standings[0].Wins)
+	assert.Equal(t, "Bob", standings[1].Player.Name,
+		"Bob won both non-Alice matches (2 wins), must rank second")
 
 	// Ranks must be assigned in increasing order 1..4 across the single slice.
 	for i, s := range standings {

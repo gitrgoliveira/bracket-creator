@@ -852,9 +852,11 @@ func TestCourtDisplay_StoreErrorReturns500(t *testing.T) {
 // both GET /competitions and GET /court/:court/matches. Swapping it here lets
 // the test count builds and hold the in-flight slot long enough for the
 // other goroutines to attach as waiters, exactly the barrier pattern
-// TestViewerSingleFlight_CollatesConcurrentBuilds uses at the mechanism
-// level, but exercised through the real HTTP handler.
-func TestCourtMatches_ConcurrentRequestsCollapseToOneBuild(t *testing.T) {
+// TestCourtMatches_ConcurrentRequestsCollapse exercises through the real
+// HTTP handler what TestViewerSingleFlight_CollatesConcurrentBuilds pins at
+// the mechanism level: concurrent requests for the same court share builds
+// instead of each running their own.
+func TestCourtMatches_ConcurrentRequestsCollapse(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
 
@@ -868,16 +870,14 @@ func TestCourtMatches_ConcurrentRequestsCollapseToOneBuild(t *testing.T) {
 	}))
 
 	var loadCount atomic.Int32
-	original := viewerLoadCompetition
-	viewerLoadCompetition = func(store *state.Store, compID string) (*state.Competition, error) {
+	swapViewerLoadCompetition(t, func(store *state.Store, compID string) (*state.Competition, error) {
 		loadCount.Add(1)
-		// Hold the in-flight slot long enough for all other goroutines to
+		// Hold the in-flight slot long enough for the other goroutines to
 		// enter sf.Do, find the "court-matches:A" key already in-flight,
 		// and attach as waiters rather than each starting their own build.
 		time.Sleep(200 * time.Millisecond)
 		return store.LoadCompetition(compID)
-	}
-	t.Cleanup(func() { viewerLoadCompetition = original })
+	})
 
 	const concurrency = 20
 	var readyBarrier sync.WaitGroup
@@ -900,9 +900,16 @@ func TestCourtMatches_ConcurrentRequestsCollapseToOneBuild(t *testing.T) {
 	}
 	wg.Wait()
 
-	assert.Equalf(t, int32(1), loadCount.Load(),
-		"expected exactly 1 underlying build across %d concurrent requests to the same court; got %d (thundering-herd not suppressed)",
-		concurrency, loadCount.Load())
+	// Exactly-one election over a wall-clock hold cannot be guaranteed at
+	// the HTTP level: a goroutine descheduled past the 200ms hold (loaded CI
+	// runner, -race) may legitimately elect a second build. The exact
+	// single-election contract is pinned deterministically at the mechanism
+	// level (TestViewerSingleFlight_CollatesConcurrentBuilds); here we
+	// assert what the wiring guarantees: requests collapse at all. A handler
+	// that bypassed the singleflight would build exactly `concurrency` times.
+	assert.Lessf(t, loadCount.Load(), int32(concurrency),
+		"expected concurrent requests to the same court to collapse onto shared builds; got %d builds for %d requests (thundering-herd not suppressed)",
+		loadCount.Load(), concurrency)
 
 	for i, w := range results {
 		require.Equalf(t, http.StatusOK, w.Code, "request %d: body=%q", i, w.Body.String())

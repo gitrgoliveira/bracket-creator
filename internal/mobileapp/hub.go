@@ -311,13 +311,11 @@ func (h *Hub) Broadcast(eventType EventType, data any) {
 		h.history[(seq-1)%int64(h.HistorySize)] = entry
 	}
 
-	clients := make([]chan historyEntry, 0, len(h.clients))
-	for ch := range h.clients {
-		clients = append(clients, ch)
-	}
-
+	// Fan out under the already-held write lock. Dead (full-buffer) clients
+	// are collected and unsubscribed after the range so the map is never
+	// mutated mid-iteration; no snapshot copy of the client set is needed.
 	var dead []chan historyEntry
-	for _, ch := range clients {
+	for ch := range h.clients {
 		select {
 		case ch <- entry:
 		default:
@@ -491,9 +489,6 @@ func (h *Hub) HandleEvents() gin.HandlerFunc {
 			select {
 			case msg, ok := <-ch:
 				if ok {
-					// The broadcast entry carries the stamped seq alongside
-					// the payload, so the SSE `id:` line needs no re-parse
-					// of the marshalled JSON.
 					writeSSEEnvelope(w, msg.seq, msg.payload)
 					c.Writer.Flush() // Ensure the message is sent immediately
 					return true

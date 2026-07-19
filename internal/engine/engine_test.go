@@ -1415,8 +1415,9 @@ func TestExportCompetitionXlsx(t *testing.T) {
 
 	data, err := eng.ExportCompetitionXlsx(compID)
 	require.NoError(t, err)
-	assert.NotEmpty(t, data)
-	// Simple check for ZIP header (Excel files are ZIPs)
+	// Simple check for ZIP header (Excel files are ZIPs); the fatal length
+	// guard keeps a short-write regression from panicking the slice below.
+	require.GreaterOrEqual(t, len(data), len(zipMagic), "workbook must be at least ZIP-magic sized")
 	assert.Equal(t, zipMagic, data[:4])
 }
 

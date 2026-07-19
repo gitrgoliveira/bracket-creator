@@ -76,8 +76,17 @@ func TestLeagueStandings_RoundRobinResults(t *testing.T) {
 		}
 		matches[i].Winner = winner
 		matches[i].Status = state.MatchStatusCompleted
-		matches[i].IpponsA = []string{"M"}
-		matches[i].IpponsB = []string{}
+		// Score the winner's actual side so points-scored/points-lost data
+		// stays consistent with the recorded winner (a fixed IpponsA would
+		// hand the point to the loser whenever the winner sat on SideB,
+		// a state the engine cannot produce).
+		if m.SideA == winner {
+			matches[i].IpponsA = []string{"M"}
+			matches[i].IpponsB = []string{}
+		} else {
+			matches[i].IpponsA = []string{}
+			matches[i].IpponsB = []string{"M"}
+		}
 	}
 	require.NoError(t, store.SavePoolMatches(compID, matches))
 

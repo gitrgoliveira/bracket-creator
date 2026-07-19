@@ -49,7 +49,9 @@ func TestLineupKey(t *testing.T) {
 
 // TestTallyKachinukiEliminations_Winner exercises the winner-based
 // retirement branch: when SideB wins a bout, the SideA player is
-// retired (b counter for winner's perspective, a for loser's).
+// retired (b counter for winner's perspective, a for loser's). The
+// fixture is deliberately ASYMMETRIC (2 SideA retirements vs 1 SideB)
+// so a swap of the two returned counters cannot pass unnoticed.
 func TestTallyKachinukiEliminations_Winner(t *testing.T) {
 	m := &state.MatchResult{
 		SideA: "RedTeam",
@@ -57,11 +59,12 @@ func TestTallyKachinukiEliminations_Winner(t *testing.T) {
 		SubResults: []state.SubMatchResult{
 			{Position: 1, SideA: "R-Senpo", SideB: "W-Senpo", Winner: "W-Senpo", Decision: "fought"},
 			{Position: 2, SideA: "R-Jiho", SideB: "W-Senpo", Winner: "R-Jiho", Decision: "fought"},
+			{Position: 3, SideA: "R-Jiho", SideB: "W-Jiho", Winner: "W-Jiho", Decision: "fought"},
 		},
 	}
 	a, b := tallyKachinukiEliminations(m)
-	assert.Equal(t, 1, a, "SideA retired: W-Senpo won bout 1 → R-Senpo eliminated")
-	assert.Equal(t, 1, b, "SideB retired: R-Jiho won bout 2 → W-Senpo eliminated")
+	assert.Equal(t, 2, a, "SideA retired: R-Senpo (bout 1) and R-Jiho (bout 3) eliminated")
+	assert.Equal(t, 1, b, "SideB retired: W-Senpo (bout 2) eliminated")
 }
 
 // TestTallyKachinukiEliminations_Hikiwake verifies that a hikiwake

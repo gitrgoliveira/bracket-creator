@@ -385,12 +385,16 @@ func (h *Hub) snapshotHistorySince(since int64) (entries []historyEntry, complet
 // JS work.
 func (h *Hub) HandleEvents() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Parse Last-Event-ID BEFORE subscribing so we don't replay an
-		// event the live channel will also deliver. Subscribe takes the
-		// hub write lock; the seq stamped on any concurrent Broadcast
-		// after our snapshotHistorySince + Subscribe pair will be
-		// strictly greater than the snapshot's last seq AND delivered to
-		// our channel, so the merged stream stays gap-free.
+		// Subscribe BEFORE snapshotting history so the merged stream is
+		// gap-free: any Broadcast concurrent with connection setup is
+		// either already in the ring (replayed below) or delivered to our
+		// channel, never lost. The cost of that ordering is an overlap
+		// window, a Broadcast landing between Subscribe and the snapshot
+		// appears in BOTH; replayedThrough tracks the highest seq the
+		// replay wrote so the streaming loop can skip the duplicate and
+		// keep the stream exactly-once for non-deduping SSE consumers
+		// (the SPA also dedups via checkSeqGap, external integrations
+		// may not).
 		var lastEventID int64
 		if raw := c.GetHeader("Last-Event-ID"); raw != "" {
 			if v, err := strconv.ParseInt(raw, 10, 64); err == nil && v > 0 {
@@ -434,6 +438,13 @@ func (h *Hub) HandleEvents() gin.HandlerFunc {
 		// Last-Event-ID checkpoint. Done before entering the c.Stream
 		// loop because c.SSEvent doesn't expose the `id:` field
 		// directly.
+		// Highest seq already written to this client by the replay below.
+		// The streaming loop skips channel entries at or below it: a
+		// Broadcast that lands between Subscribe and the history snapshot
+		// is present in both the replay and the channel, and without the
+		// skip it would be emitted twice.
+		var replayedThrough int64
+
 		if lastEventID > 0 {
 			entries, complete := h.snapshotHistorySince(lastEventID)
 			currentHeadSeq := h.seq.Load()
@@ -451,6 +462,10 @@ func (h *Hub) HandleEvents() gin.HandlerFunc {
 				// its in-memory lastSeq + full refetch). Fall through to the normal
 				// streaming loop afterwards.
 				fmt.Printf("SSE replay: client Last-Event-ID=%d not satisfiable (complete=%v, headSeq=%d); sending resync_required\n", lastEventID, complete, currentHeadSeq)
+				// Events at or below head are baked into the full refetch the
+				// resync triggers (and the id: line checkpoints the client at
+				// head), so the streaming loop must not re-deliver them.
+				replayedThrough = currentHeadSeq
 				resyncEvent := SSEEvent{Type: EventResyncRequired, Seq: currentHeadSeq}
 				resyncPayload, err := json.Marshal(resyncEvent)
 				if err != nil {
@@ -474,6 +489,10 @@ func (h *Hub) HandleEvents() gin.HandlerFunc {
 				for _, entry := range entries {
 					writeSSEEnvelope(c.Writer, entry.seq, entry.payload)
 				}
+				if len(entries) > 0 {
+					// entries are ordered by ascending seq.
+					replayedThrough = entries[len(entries)-1].seq
+				}
 				c.Writer.Flush()
 			}
 		}
@@ -489,6 +508,13 @@ func (h *Hub) HandleEvents() gin.HandlerFunc {
 			select {
 			case msg, ok := <-ch:
 				if ok {
+					if msg.seq <= replayedThrough {
+						// Already written by the replay above (the Broadcast
+						// landed in the Subscribe-to-snapshot overlap window);
+						// skip so the stream is duplicate-free as well as
+						// gap-free.
+						return true
+					}
 					writeSSEEnvelope(w, msg.seq, msg.payload)
 					c.Writer.Flush() // Ensure the message is sent immediately
 					return true

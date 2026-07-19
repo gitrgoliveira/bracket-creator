@@ -54,7 +54,15 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 		// state.RunningMatchOnCourt uses, so a running KNOCKOUT bout is just
 		// as "current" as a pool bout (mp-9h1f follow-up: the prior code
 		// scanned only poolMatches, so a running elimination match read as idle).
-		ids, _ := store.ListCompetitions()
+		//
+		// A failing competition list is a real 500, not an idle court: the
+		// overlay must be able to distinguish "nothing running" from "backend
+		// broken" (same contract as the sibling /matches feed).
+		ids, err := store.ListCompetitions()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+			return
+		}
 		for _, compID := range ids {
 			comp, _ := store.LoadCompetition(compID)
 			if comp == nil {
@@ -155,7 +163,14 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 		// courts never collapse together. On panic inside the elected build,
 		// sf.Do returns an error and all waiters receive it; mapped to 500.
 		data, err := sf.Do("court-matches:"+court, func() ([]byte, error) {
-			ids, _ := store.ListCompetitions()
+			// Propagate a failing competition list so serveSingleFlightJSON
+			// maps it to a 500 (matching GET /competitions): swallowing it
+			// here would serve an empty-but-200 board to every collapsed
+			// waiter while the backend is actually broken.
+			ids, err := store.ListCompetitions()
+			if err != nil {
+				return nil, err
+			}
 			comps := make([]gin.H, 0, len(ids))
 			for _, compID := range ids {
 				// The court filter does the setup-skip and "real match on this

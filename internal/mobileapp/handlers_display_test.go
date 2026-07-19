@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -798,14 +799,44 @@ func TestCourtMatches_EmptyCompetitionsIsArrayNotNull(t *testing.T) {
 	}))
 	// No competitions saved at all, comps stays empty.
 
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/viewer/court/A/matches", nil)
-	r.ServeHTTP(w, req)
+	w, _ := getCourtMatches(t, r, "A")
 
 	require.Equal(t, http.StatusOK, w.Code, "body=%q", w.Body.String())
 	// JSONEq compares parsed values, so "competitions":null fails it: this
 	// single assertion pins both the court and the []-not-null shape.
 	assert.JSONEq(t, `{"court":"A","competitions":[]}`, w.Body.String())
+}
+
+// TestCourtDisplay_StoreErrorReturns500 pins the error contract for both
+// court-scoped polled surfaces: when the competition list cannot be read
+// (competitions dir removed to simulate an FS fault), /matches and /current
+// must return 500 rather than a misleading empty-but-OK board. Regression
+// test for the swallowed ListCompetitions error (both handlers previously
+// did `ids, _ :=` and rendered the fault as an idle/blank court).
+func TestCourtDisplay_StoreErrorReturns500(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name: "T", Password: "", Courts: []string{"A"},
+	}))
+	// Break the store AFTER the tournament is saved so resolveCourt still
+	// succeeds and the failure is attributable to ListCompetitions alone.
+	require.NoError(t, os.RemoveAll(filepath.Join(tempDir, "competitions")))
+
+	t.Run("matches feed", func(t *testing.T) {
+		w, resp := getCourtMatches(t, r, "A")
+		assert.Equal(t, http.StatusInternalServerError, w.Code, "body=%q", w.Body.String())
+		assert.Equal(t, "internal error", resp.Error)
+	})
+
+	t.Run("current feed", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/api/viewer/court/A/current", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusInternalServerError, w.Code, "body=%q", w.Body.String())
+		assert.Contains(t, w.Body.String(), `"internal error"`)
+	})
 }
 
 // TestCourtMatches_ConcurrentRequestsCollapseToOneBuild is the acceptance

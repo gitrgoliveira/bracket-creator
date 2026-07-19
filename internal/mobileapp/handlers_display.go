@@ -159,9 +159,9 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 		}
 
 		// P2 (mp-9afd style): collapse concurrent builds for the SAME court to
-		// O(1) per in-flight window. The key includes the court so different
-		// courts never collapse together. On panic inside the elected build,
-		// sf.Do returns an error and all waiters receive it; mapped to 500.
+		// O(1) per in-flight window (court-scoped key: see the sf declaration
+		// comment). On panic inside the elected build, sf.Do returns an error
+		// and all waiters receive it; mapped to 500.
 		data, err := sf.Do("court-matches:"+court, func() ([]byte, error) {
 			// Propagate a failing competition list so serveSingleFlightJSON
 			// maps it to a 500 (matching GET /competitions): swallowing it

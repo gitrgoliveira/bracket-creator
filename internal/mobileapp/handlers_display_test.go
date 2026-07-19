@@ -835,7 +835,9 @@ func TestCourtDisplay_StoreErrorReturns500(t *testing.T) {
 		req, _ := http.NewRequest("GET", "/api/viewer/court/A/current", nil)
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusInternalServerError, w.Code, "body=%q", w.Body.String())
-		assert.Contains(t, w.Body.String(), `"internal error"`)
+		var resp courtCurrentResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, "internal error", resp.Error)
 	})
 }
 

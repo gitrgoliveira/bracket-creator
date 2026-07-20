@@ -52,8 +52,17 @@ func TestViewerSingleFlight_CollatesConcurrentBuilds(t *testing.T) {
 			data, err := g.Do("test-key", func() ([]byte, error) {
 				buildCount.Add(1)
 				// Hold the in-flight slot until every other caller has
-				// attached as a waiter (released by the hook above).
-				<-gate
+				// attached as a waiter (released by the hook above). The
+				// timeout only exists for the FAILURE path: if collapse ever
+				// regresses (a second election strands `attached` below the
+				// release threshold), fail fast on the buildCount assertion
+				// instead of deadlocking the package until the go-test
+				// timeout.
+				select {
+				case <-gate:
+				case <-time.After(10 * time.Second):
+					t.Error("gate not released within 10s: not all callers attached as waiters (collapse regression?)")
+				}
 				return []byte(`["ok"]`), nil
 			})
 			results[i] = result{data, err}

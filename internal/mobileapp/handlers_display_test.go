@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -875,7 +876,16 @@ func TestCourtMatches_ConcurrentRequestsCollapse(t *testing.T) {
 		loadCount.Add(1)
 		// Hold the elected build until every other request has attached to
 		// the in-flight "court-matches:A" key (released by the hook below).
-		<-buildGate
+		// The timeout only exists for the FAILURE path: if any request exits
+		// before sf.Do (or a collapse regression elects a second build),
+		// `attached` never reaches the threshold — fail fast on the
+		// loadCount assertion instead of deadlocking the package until the
+		// go-test timeout.
+		select {
+		case <-buildGate:
+		case <-time.After(10 * time.Second):
+			t.Error("buildGate not released within 10s: not all requests attached to the in-flight build")
+		}
 		return store.LoadCompetition(compID)
 	})
 	var attached atomic.Int32

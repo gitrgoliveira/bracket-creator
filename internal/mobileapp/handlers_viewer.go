@@ -94,18 +94,6 @@ var viewerLoadCompetition = func(store *state.Store, compID string) (*state.Comp
 	return store.LoadCompetition(compID)
 }
 
-// buildViewerCompetitionPayload assembles the public per-competition viewer
-// payload ({config, poolMatches, bracket}) shared by the aggregate
-// GET /competitions and the court-scoped GET /court/:court/matches. It applies
-// the identical participant/number merge, preview-bracket strip, queue-position
-// annotation, and audit-field redaction so every PUBLIC surface sees the same
-// non-sensitive data. Returns nil when the competition cannot be loaded.
-//
-// courtFilter scopes the result for the court feed: when non-empty, the comp is
-// included ONLY if it is not in setup AND has at least one real match physically
-// on that court (matchesPresentOnCourt). The gate runs off the same
-// poolMatches/bracket this function already loads, no second read. The
-// aggregate passes "" (no filter).
 // buildViewerCompetitionPayloads lists competitions and builds each public
 // per-comp payload concurrently: one safeGo goroutine per comp writing to a
 // unique index of a pre-allocated results slice (no mutex needed; wg.Wait
@@ -149,6 +137,18 @@ func buildViewerCompetitionPayloads(store *state.Store, courtFilter string) ([]a
 	return comps, nil
 }
 
+// buildViewerCompetitionPayload assembles the public per-competition viewer
+// payload ({config, poolMatches, bracket}) shared by the aggregate
+// GET /competitions and the court-scoped GET /court/:court/matches. It applies
+// the identical participant/number merge, preview-bracket strip, queue-position
+// annotation, and audit-field redaction so every PUBLIC surface sees the same
+// non-sensitive data. Returns nil when the competition cannot be loaded.
+//
+// courtFilter scopes the result for the court feed: when non-empty, the comp is
+// included ONLY if it is not in setup AND has at least one real match physically
+// on that court (matchesPresentOnCourt). The gate runs off the same
+// poolMatches/bracket this function already loads, no second read. The
+// aggregate passes "" (no filter).
 func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter string) gin.H {
 	// Per-comp read faults degrade to skipping (or thinning) the comp rather
 	// than failing the whole viewer payload — the availability trade for the

@@ -23,8 +23,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var _ = time.Now // keep time import used (the single-goroutine test still uses it)
-
 // TestBroadcastsHaveStrictlyIncreasingSeq is the single-goroutine
 // baseline, broadcast N events from one goroutine and assert every
 // envelope received by a subscriber has seq exactly one greater than its

@@ -50,6 +50,14 @@ func newViewerSingleFlight() *viewerSingleFlight {
 	return &viewerSingleFlight{calls: make(map[string]*sfCall)}
 }
 
+// sfTestWaiterAttached, when non-nil, is invoked each time a Do caller finds
+// an in-flight build and attaches as a waiter (after releasing the mutex,
+// before blocking on the WaitGroup). Test-only hook, nil in production: it
+// lets the collapse tests release the elected builder only once every
+// concurrent caller has provably attached, making the exactly-one-election
+// assertion deterministic instead of resting on a wall-clock hold.
+var sfTestWaiterAttached func(key string)
+
 // Do executes fn if no call for key is already in-flight, or waits for the
 // in-flight call to complete and returns its result. fn must be safe to call
 // concurrently under different keys. The returned bytes must not be modified
@@ -58,14 +66,6 @@ func newViewerSingleFlight() *viewerSingleFlight {
 // If fn panics, the panic is recovered and converted to an error so that
 // waiting callers are unblocked and the key is cleaned up. The elected caller
 // receives the error; it does not re-panic.
-// sfTestWaiterAttached, when non-nil, is invoked each time a Do caller finds
-// an in-flight build and attaches as a waiter (after releasing the mutex,
-// before blocking on the WaitGroup). Test-only hook, nil in production: it
-// lets the mechanism test release the elected builder only once every
-// concurrent caller has provably attached, making the exactly-one-election
-// assertion deterministic instead of resting on a wall-clock hold.
-var sfTestWaiterAttached func(key string)
-
 func (g *viewerSingleFlight) Do(key string, fn func() ([]byte, error)) (v []byte, err error) {
 	g.mu.Lock()
 	if c, ok := g.calls[key]; ok {
@@ -107,12 +107,14 @@ func (g *viewerSingleFlight) Do(key string, fn func() ([]byte, error)) (v []byte
 	}()
 
 	c.val, c.err = fn()
-	if c.err != nil && !errors.Is(c.err, errNotFound) {
+	var rp *recoveredPanic
+	if c.err != nil && !errors.Is(c.err, errNotFound) && !errors.As(c.err, &rp) {
 		// Logged once per BUILD, not per waiter: with N callers collapsed
 		// onto this build, logging in the response tail would emit N
 		// identical lines per failure wave (unbounded under a sustained
 		// store fault at high client counts). errNotFound is the
-		// /competitions/:id 404 sentinel, not a fault.
+		// /competitions/:id 404 sentinel, not a fault; a *recoveredPanic
+		// was already logged with its stack at the safeGo recovery site.
 		log.Printf("singleflight: build for key %q failed: %v", key, c.err)
 	}
 	return c.val, c.err
@@ -121,10 +123,11 @@ func (g *viewerSingleFlight) Do(key string, fn func() ([]byte, error)) (v []byte
 // serveSingleFlightJSON writes a Do result to the response: marshalled JSON
 // bytes on success, a generic 500 on error. The error is deliberately NOT
 // logged here: this tail runs once per WAITER, so a collapsed wave of N
-// callers would emit N identical lines; Do already logs each failed build
-// exactly once (and each panic once with a stack). Handlers with an extra
-// error mapping (e.g. errNotFound → 404 on /competitions/:id) branch on
-// that first and fall through here for the rest.
+// callers would emit N identical lines; each failed build is already logged
+// exactly once (store faults by Do, panics with a stack at their recovery
+// site). Handlers with an extra error mapping (e.g. errNotFound → 404 on
+// /competitions/:id) branch on that first and fall through here for the
+// rest.
 func serveSingleFlightJSON(c *gin.Context, data []byte, err error) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})

@@ -16,6 +16,54 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// decodeHubEvent unmarshals a subscriber-channel entry's payload into an
+// SSEEvent, confining knowledge of the hub's internal entry shape to this
+// helper (plus drainHubEvents in handlers_match_test.go, which builds on
+// it) rather than every asserting test.
+func decodeHubEvent(t *testing.T, msg historyEntry) SSEEvent {
+	t.Helper()
+	var e SSEEvent
+	require.NoError(t, json.Unmarshal([]byte(msg.payload), &e))
+	return e
+}
+
+// TestSubscribeWithReplay_AtomicSnapshotBoundary pins the invariant that
+// makes the SSE stream duplicate-free by construction: subscribeWithReplay
+// registers the channel and snapshots the replay window under ONE lock
+// acquisition, so every event is either in the returned entries (stamped
+// before registration) or delivered on the channel (after), never both.
+func TestSubscribeWithReplay_AtomicSnapshotBoundary(t *testing.T) {
+	h := NewHub()
+	defer h.Close()
+
+	for i := 0; i < 5; i++ {
+		h.Broadcast(EventTournamentUpdated, map[string]int{"n": i})
+	}
+
+	ch, entries, complete, headSeq := h.subscribeWithReplay(2)
+	require.NotNil(t, ch)
+	assert.True(t, complete)
+	assert.Equal(t, int64(5), headSeq)
+	require.Len(t, entries, 3, "replay must cover (since, head]")
+	assert.Equal(t, int64(3), entries[0].seq)
+	assert.Equal(t, int64(5), entries[2].seq)
+	assert.Empty(t, ch,
+		"events stamped before registration must appear only in the replay entries, never on the channel")
+
+	h.Broadcast(EventTournamentUpdated, map[string]string{"post": "subscribe"})
+	require.Len(t, ch, 1, "an event stamped after registration must arrive on the channel")
+	msg := <-ch
+	assert.Equal(t, int64(6), msg.seq)
+	assert.Equal(t, int64(6), decodeHubEvent(t, msg).Seq)
+
+	// since == 0 is a fresh connect: no replay, head still reported.
+	ch2, entries2, complete2, head2 := h.subscribeWithReplay(0)
+	require.NotNil(t, ch2)
+	assert.Nil(t, entries2)
+	assert.True(t, complete2)
+	assert.Equal(t, int64(6), head2)
+}
+
 func TestHub(t *testing.T) {
 	h := NewHub()
 	assert.NotNil(t, h)

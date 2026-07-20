@@ -14,6 +14,15 @@ import (
 // zipMagic is the leading 4 bytes of an XLSX (a ZIP archive).
 var zipMagic = []byte{0x50, 0x4b, 0x03, 0x04}
 
+// requireZipHeader fatally asserts data starts with the ZIP magic bytes
+// (every XLSX is a ZIP), guarding the slice so a short-write regression
+// fails with a diagnostic instead of a bounds panic.
+func requireZipHeader(t *testing.T, data []byte) {
+	t.Helper()
+	require.GreaterOrEqual(t, len(data), len(zipMagic), "workbook must be at least ZIP-magic sized")
+	require.Equal(t, zipMagic, data[:len(zipMagic)], "workbook must be a valid ZIP/XLSX")
+}
+
 // TestExportTournamentWorkbooks_ExplicitIDs verifies that passing explicit
 // compIDs writes one .xlsx per requested competition into tmpDir and returns
 // a SourceWorkbook per comp with the correct Path/Title/IsTeam.
@@ -47,8 +56,7 @@ func TestExportTournamentWorkbooks_ExplicitIDs(t *testing.T) {
 	for _, src := range sources {
 		data, err := os.ReadFile(src.Path)
 		require.NoErrorf(t, err, "expected workbook file to exist at %s", src.Path)
-		require.GreaterOrEqual(t, len(data), len(zipMagic), "workbook must be at least ZIP-magic sized")
-		assert.Equal(t, zipMagic, data[:4], "workbook must be a valid ZIP/XLSX")
+		requireZipHeader(t, data)
 	}
 }
 
@@ -142,11 +150,7 @@ func TestExportTournamentWorkbooks_IsTeamFlag(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			eng, store, _ := setupTestEngine(t)
-			opts := []func(*state.Competition){}
-			if tc.mutate != nil {
-				opts = append(opts, tc.mutate)
-			}
-			createTestCompetition(t, store, tc.compID, "league", 3, opts...)
+			createTestCompetition(t, store, tc.compID, "league", 3, tc.mutate)
 			saveTestParticipants(t, store, tc.compID, tc.playerName)
 			require.NoError(t, eng.StartCompetition(tc.compID))
 

@@ -2570,6 +2570,8 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/ScheduleEntry'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /api/viewer/court/{court}/current:
     get:

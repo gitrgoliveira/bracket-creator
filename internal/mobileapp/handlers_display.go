@@ -2,13 +2,11 @@ package mobileapp
 
 import (
 	"encoding/json"
-	"fmt"
+	"log"
 	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
-	"sync/atomic"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -60,10 +58,10 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 		// A failing competition list is a real 500, not an idle court: the
 		// overlay must be able to distinguish "nothing running" from "backend
 		// broken" (same contract as the sibling /matches feed). Per-competition
-		// read faults below degrade softer by design: the broken comp is
-		// skipped (recorded via c.Error so the cause reaches server logs) so
-		// one corrupt competition doesn't take down every court's overlay —
-		// the availability trade of a live-tournament surface.
+		// read faults below follow the same soft-degrade contract as
+		// buildViewerCompetitionPayload (skip the broken comp, log the cause)
+		// and use the same log.Printf mechanism so the operator greps one
+		// format for every soft-degrade breadcrumb.
 		ids, err := store.ListCompetitions()
 		if err != nil {
 			internalError(c, err)
@@ -72,7 +70,7 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 		for _, compID := range ids {
 			comp, err := store.LoadCompetition(compID)
 			if err != nil {
-				_ = c.Error(fmt.Errorf("court current: competition %s: %w", compID, err))
+				log.Printf("mobileapp: court current %s: load competition: %v", compID, err)
 			}
 			if comp == nil {
 				continue
@@ -80,7 +78,7 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 
 			poolMatches, err := store.LoadPoolMatches(compID)
 			if err != nil {
-				_ = c.Error(fmt.Errorf("court current: pool matches %s: %w", compID, err))
+				log.Printf("mobileapp: court current %s: load pool matches: %v", compID, err)
 			}
 			for _, m := range poolMatches {
 				if !strings.EqualFold(m.Court, court) || m.Status != state.MatchStatusRunning {
@@ -103,7 +101,7 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 			// Elimination matches have no representative-bout fighters.
 			bracket, err := store.LoadBracket(compID)
 			if err != nil {
-				_ = c.Error(fmt.Errorf("court current: bracket %s: %w", compID, err))
+				log.Printf("mobileapp: court current %s: load bracket: %v", compID, err)
 			}
 			if bracket == nil {
 				continue
@@ -182,45 +180,16 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 			// maps it to a 500 (matching GET /competitions): swallowing it
 			// here would serve an empty-but-200 board to every collapsed
 			// waiter while the backend is actually broken.
-			ids, err := store.ListCompetitions()
-			if err != nil {
-				return nil, err
-			}
-
-			// Mirror GET /competitions: build the per-comp payloads
-			// concurrently so the collapsed window costs the slowest single
-			// build, not the sum. Each goroutine writes a unique index (no
-			// mutex needed; wg.Wait provides the happens-before), and the
+			// Shared concurrent builder (same as GET /competitions); the
 			// court filter does the setup-skip and "real match on this
 			// court" gating inside the single per-comp load (no separate
 			// presence pre-check that would re-read poolMatches/bracket).
-			results := make([]any, len(ids))
-			var wg sync.WaitGroup
-			var panicRef atomic.Pointer[recoveredPanic]
-			for i, id := range ids {
-				idx, compID := i, id
-				safeGo(&wg, &panicRef, func() {
-					// A nil payload (comp filtered out or failed to load)
-					// leaves results[idx] as a nil `any` so the collect loop
-					// below skips it; assigning a nil gin.H directly would
-					// box into a non-nil interface and slip past that filter.
-					if payload := buildViewerCompetitionPayload(store, compID, court); payload != nil {
-						results[idx] = payload
-					}
-				})
-			}
-			wg.Wait()
-			if p := panicRef.Load(); p != nil {
-				return nil, p
-			}
-
-			// make(..., 0, n) so zero competitions marshals as [] not null
-			// (the wire shape the SPA and the regression test pin).
-			comps := make([]any, 0, len(ids))
-			for _, comp := range results {
-				if comp != nil {
-					comps = append(comps, comp)
-				}
+			// comps is non-nil even when empty, so zero competitions
+			// marshals as [] not null (the wire shape the SPA and the
+			// regression test pin).
+			comps, err := buildViewerCompetitionPayloads(store, court)
+			if err != nil {
+				return nil, err
 			}
 			return json.Marshal(gin.H{"court": court, "competitions": comps})
 		})

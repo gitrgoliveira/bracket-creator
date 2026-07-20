@@ -1040,16 +1040,6 @@ func TestScoreHandler_CompletionBroadcastContract(t *testing.T) {
 
 // drainHubEvents pulls every queued event off the given hub-subscriber
 // channel within d, decoding each into SSEEvent for inspection.
-// decodeHubEvent unmarshals a subscriber-channel entry's payload into an
-// SSEEvent, confining knowledge of the hub's internal entry shape to this
-// helper (and drainHubEvents below) rather than every asserting test.
-func decodeHubEvent(t *testing.T, msg historyEntry) SSEEvent {
-	t.Helper()
-	var e SSEEvent
-	require.NoError(t, json.Unmarshal([]byte(msg.payload), &e))
-	return e
-}
-
 func drainHubEvents(t *testing.T, ch <-chan historyEntry, d time.Duration) []SSEEvent {
 	t.Helper()
 	var events []SSEEvent

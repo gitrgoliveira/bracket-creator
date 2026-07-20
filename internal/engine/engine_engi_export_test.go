@@ -157,9 +157,7 @@ func TestExportCompetitionXlsx_Engi(t *testing.T) {
 	require.NotEmpty(t, data)
 
 	// Valid XLSX (ZIP) magic bytes.
-	require.GreaterOrEqual(t, len(data), 4, "engi export must produce at least 4 bytes")
-	assert.Equal(t, zipMagic, data[:4],
-		"engi export must produce a valid XLSX ZIP")
+	requireZipHeader(t, data)
 
 	f, err := excelize.OpenReader(bytes.NewReader(data))
 	require.NoError(t, err)

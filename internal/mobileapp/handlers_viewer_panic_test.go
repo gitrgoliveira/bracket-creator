@@ -11,17 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestViewer_PanicInSpawnedGoroutine_ReturnsHTTP500_DoesNotCrash verifies
-// the safeGo wiring in handlers_viewer.go: a panic inside one of the
-// spawned goroutines must be converted into a 500 response rather than
-// crashing the process. This is the regression test for the unrecovered-
-// goroutine vulnerability documented in mp-663.
-//
-// The viewerLoadCompetition package-level hook lets the test swap in a
-// panicking implementation without corrupting on-disk state. All 9
-// goroutines in handlers_viewer.go go through safeGo, so this single
-// integration test covers the wiring for every call site by transitivity
-// of the helper.
 // swapViewerLoadCompetition swaps the viewerLoadCompetition hook for fn and
 // restores the production implementation on test cleanup, so no test can
 // leak an instrumented loader into the rest of the package. Used by the
@@ -34,6 +23,17 @@ func swapViewerLoadCompetition(t *testing.T, fn func(*state.Store, string) (*sta
 	t.Cleanup(func() { viewerLoadCompetition = original })
 }
 
+// TestViewer_PanicInSpawnedGoroutine_ReturnsHTTP500_DoesNotCrash verifies
+// the safeGo wiring in handlers_viewer.go: a panic inside one of the
+// spawned goroutines must be converted into a 500 response rather than
+// crashing the process. This is the regression test for the unrecovered-
+// goroutine vulnerability documented in mp-663.
+//
+// The viewerLoadCompetition package-level hook lets the test swap in a
+// panicking implementation without corrupting on-disk state. All 9
+// goroutines in handlers_viewer.go go through safeGo, so this single
+// integration test covers the wiring for every call site by transitivity
+// of the helper.
 func TestViewer_PanicInSpawnedGoroutine_ReturnsHTTP500_DoesNotCrash(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)

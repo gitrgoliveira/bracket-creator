@@ -461,10 +461,16 @@ func TestResolveKachinukiPosition_PrefersMatchScoped(t *testing.T) {
 // error, mirroring collectKachinukiMatches' nil-guard.
 func TestKachinukiDetailMatches_NonKachinukiComp(t *testing.T) {
 	t.Run("fixed team", func(t *testing.T) {
+		// Deliberately NOT setupKachinukiComp: this fixture's whole point is
+		// a non-kachinuki team type, and a helper named for kachinuki plus a
+		// counteracting override would obscure that.
+		eng, store, _ := setupTestEngine(t)
 		compID := "fixed-team-comp"
-		eng, store, _ := setupKachinukiComp(t, compID, 5, func(c *state.Competition) {
-			c.TeamMatchType = state.TeamMatchTypeFixed
-		})
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID:            compID,
+			TeamMatchType: state.TeamMatchTypeFixed,
+			TeamSize:      5,
+		}))
 		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 			{ID: "P1-0", SideA: "RedTeam", SideB: "WhiteTeam", SubResults: []state.SubMatchResult{
 				{Position: 1, SideA: "R1", SideB: "W1", Winner: "R1"},

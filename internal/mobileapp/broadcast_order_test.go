@@ -15,7 +15,6 @@
 package mobileapp
 
 import (
-	"encoding/json"
 	"sync"
 	"testing"
 	"time"
@@ -108,8 +107,7 @@ func TestConcurrentBroadcastsHaveUniqueMonotonicSeq(t *testing.T) {
 		seen[e.seq] = true
 		require.Greaterf(t, e.seq, prev, "seq %d at index %d not strictly greater than previous %d", e.seq, i, prev)
 		prev = e.seq
-		var env SSEEvent
-		require.NoError(t, json.Unmarshal([]byte(e.payload), &env))
+		env := decodeHubEvent(t, e)
 		require.Equal(t, e.seq, env.Seq, "marshalled JSON seq must match ring entry seq")
 	}
 	for s := int64(1); s <= int64(Total); s++ {

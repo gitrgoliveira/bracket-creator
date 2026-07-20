@@ -58,11 +58,22 @@ func newViewerSingleFlight() *viewerSingleFlight {
 // If fn panics, the panic is recovered and converted to an error so that
 // waiting callers are unblocked and the key is cleaned up. The elected caller
 // receives the error; it does not re-panic.
+// sfTestWaiterAttached, when non-nil, is invoked each time a Do caller finds
+// an in-flight build and attaches as a waiter (after releasing the mutex,
+// before blocking on the WaitGroup). Test-only hook, nil in production: it
+// lets the mechanism test release the elected builder only once every
+// concurrent caller has provably attached, making the exactly-one-election
+// assertion deterministic instead of resting on a wall-clock hold.
+var sfTestWaiterAttached func(key string)
+
 func (g *viewerSingleFlight) Do(key string, fn func() ([]byte, error)) (v []byte, err error) {
 	g.mu.Lock()
 	if c, ok := g.calls[key]; ok {
 		// A call for this key is already in-flight, attach and wait.
 		g.mu.Unlock()
+		if sfTestWaiterAttached != nil {
+			sfTestWaiterAttached(key)
+		}
 		c.wg.Wait()
 		return c.val, c.err
 	}
@@ -96,18 +107,27 @@ func (g *viewerSingleFlight) Do(key string, fn func() ([]byte, error)) (v []byte
 	}()
 
 	c.val, c.err = fn()
+	if c.err != nil && !errors.Is(c.err, errNotFound) {
+		// Logged once per BUILD, not per waiter: with N callers collapsed
+		// onto this build, logging in the response tail would emit N
+		// identical lines per failure wave (unbounded under a sustained
+		// store fault at high client counts). errNotFound is the
+		// /competitions/:id 404 sentinel, not a fault.
+		log.Printf("singleflight: build for key %q failed: %v", key, c.err)
+	}
 	return c.val, c.err
 }
 
 // serveSingleFlightJSON writes a Do result to the response: marshalled JSON
-// bytes on success, a logged generic 500 on error (internalError keeps the
-// root cause in the server log without leaking it to the client). This is
-// the shared tail of every singleflight-backed viewer endpoint; handlers
-// with an extra error mapping (e.g. errNotFound → 404 on /competitions/:id)
-// branch on that first and fall through here for the rest.
+// bytes on success, a generic 500 on error. The error is deliberately NOT
+// logged here: this tail runs once per WAITER, so a collapsed wave of N
+// callers would emit N identical lines; Do already logs each failed build
+// exactly once (and each panic once with a stack). Handlers with an extra
+// error mapping (e.g. errNotFound → 404 on /competitions/:id) branch on
+// that first and fall through here for the rest.
 func serveSingleFlightJSON(c *gin.Context, data []byte, err error) {
 	if err != nil {
-		internalError(c, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
 		return
 	}
 	c.Data(http.StatusOK, "application/json; charset=utf-8", data)

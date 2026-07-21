@@ -1,0 +1,2667 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://gitrgoliveira.github.io/bracket-creator/user-guide/organisers/run-tournament/">
+      
+      
+        <link rel="prev" href="../input-format/">
+      
+      
+        <link rel="next" href="../operating-modes/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../../assets/images/favicon.ico">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Run a tournament on the day - bracket-creator</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Atkinson+Hyperlegible:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Atkinson Hyperlegible";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../../assets/stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#run-a-tournament-on-the-day" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../../.." title="bracket-creator" class="md-header__button md-logo" aria-label="bracket-creator" data-md-component="logo">
+      
+  <img src="../../../assets/images/logo-crest-light.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            bracket-creator
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Run a tournament on the day
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9 2c-1.05 0-2.05.16-3 .46 4.06 1.27 7 5.04 7 9.54s-2.94 8.27-7 9.54c.95.3 1.95.46 3 .46a10 10 0 0 0 10-10A10 10 0 0 0 9 2"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/gitrgoliveira/bracket-creator" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    gitrgoliveira/bracket-creator
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../../start-here/choosing-your-setup/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  User guide
+
+        </a>
+      </li>
+    
+  
+
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../dev-guide/code_of_conduct/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Developer guide
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../../.." title="bracket-creator" class="md-nav__button md-logo" aria-label="bracket-creator" data-md-component="logo">
+      
+  <img src="../../../assets/images/logo-crest-light.png" alt="logo">
+
+    </a>
+    bracket-creator
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/gitrgoliveira/bracket-creator" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    gitrgoliveira/bracket-creator
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    User guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_2_1" id="__nav_2_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Start here
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Start here
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../start-here/choosing-your-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Choosing your setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../start-here/first-tournament/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Your first tournament
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2_2" id="__nav_2_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install and deployment
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Install and deployment
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../install/install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../install/hosting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Host the tournament app
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2_3" id="__nav_2_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    For organisers
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    For organisers
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../input-format/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Input format
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run a tournament on the day
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run a tournament on the day
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#start-the-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Start the server
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-admin-console" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The admin console
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dashboard" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dashboard
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tournament-details-and-the-public-info-page" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tournament details and the public info page
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#branding-and-sponsors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Branding and sponsors
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#announcements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Announcements
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#registration-desk" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Registration desk
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#set-up-a-competition" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Set up a competition
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Set up a competition">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#adding-participants" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adding participants
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Adding participants">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#editing-a-single-competitor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Editing a single competitor
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#check-in-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Check-in workflow
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#draw-preview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Draw preview
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pools-and-bracket" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pools and bracket
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#results-and-awards" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Results and awards
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#export-and-print" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Export and print
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Export and print">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#excel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Excel
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdf" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDF
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data format
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tournament-schedule" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tournament schedule
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operating-modes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operating modes and access control
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../formats/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tournament formats
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../team-tournaments/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Team tournaments
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../naginata/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Naginata competitions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_2_4" id="__nav_2_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    For court operators
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    For court operators
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../court-operators/scoring-a-match/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Score a match
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../court-operators/recording-decisions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Record match decisions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+    
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_2_5" id="__nav_2_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    For competitors
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    For competitors
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../competitors/self-run/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Self-run tournaments
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+    
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_2_6" id="__nav_2_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    For spectators
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    For spectators
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../spectators/following/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Follow the tournament
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_2_7" id="__nav_2_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Command line
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Command line
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../commands/create-pools/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    create-pools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../commands/create-playoffs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    create-playoffs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../commands/mobile-app/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    mobile-app
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../commands/print/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    print
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../commands/hash-password/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    hash-password
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../commands/version/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    version
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_2_8" id="__nav_2_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Legacy Web UI
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Legacy Web UI
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../web-ui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../commands/serve/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    serve
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../dev-guide/code_of_conduct/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code of conduct
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../dev-guide/contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_3" id="__nav_3_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../architecture/software-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Software
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../architecture/network-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Network
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../architecture/infrastructure-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Infrastructure
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#start-the-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Start the server
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-admin-console" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The admin console
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dashboard" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dashboard
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tournament-details-and-the-public-info-page" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tournament details and the public info page
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#branding-and-sponsors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Branding and sponsors
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#announcements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Announcements
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#registration-desk" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Registration desk
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#set-up-a-competition" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Set up a competition
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Set up a competition">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#adding-participants" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adding participants
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Adding participants">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#editing-a-single-competitor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Editing a single competitor
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#check-in-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Check-in workflow
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#draw-preview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Draw preview
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pools-and-bracket" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pools and bracket
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#results-and-awards" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Results and awards
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#export-and-print" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Export and print
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Export and print">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#excel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Excel
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdf" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDF
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data format
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tournament-schedule" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tournament schedule
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="run-a-tournament-on-the-day">Run a tournament on the day</h1>
+<p>This page is the operational hub for tournament day: start the tournament app, manage competitions, score matches, and export results. If you have not set up your tournament data yet, follow the quickstart at <a href="../../start-here/first-tournament/">First tournament</a> before continuing here.</p>
+<h2 id="start-the-server">Start the server</h2>
+<p>Run the following command from your terminal:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>bracket-creator<span class="w"> </span>mobile-app<span class="w"> </span>--folder<span class="w"> </span>./tournament-data
+</code></pre></div>
+<p>Then open <code>http://localhost:8080</code> in a browser. The server binds to <code>localhost</code> by default, so other devices cannot reach it yet. To let helpers on the same network connect, start the server with <code>--bind 0.0.0.0</code> (or a specific LAN interface), then share your machine's LAN address, for example, <code>http://192.168.1.10:8080</code>.</p>
+<p>The following flags and environment variables control the server:</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Short</th>
+<th>Env var</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--folder</code></td>
+<td><code>-f</code></td>
+<td><code>TOURNAMENT_DATA_DIR</code></td>
+<td><code>.</code></td>
+<td>Path to the data folder</td>
+</tr>
+<tr>
+<td><code>--port</code></td>
+<td><code>-p</code></td>
+<td><code>PORT</code></td>
+<td><code>8080</code></td>
+<td>HTTP port to listen on</td>
+</tr>
+<tr>
+<td><code>--bind</code></td>
+<td><code>-b</code></td>
+<td><code>BIND_ADDRESS</code></td>
+<td><code>localhost</code></td>
+<td>Network address to bind</td>
+</tr>
+</tbody>
+</table>
+<p>An explicit flag always takes precedence over the matching environment variable.</p>
+<p>The <code>make</code> targets let you launch quickly without typing flags:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>make<span class="w"> </span>run-mobile<span class="w">                            </span><span class="c1"># Default port 8080, ./tournament-data folder</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nv">PORT</span><span class="o">=</span><span class="m">8082</span><span class="w"> </span>make<span class="w"> </span>run-mobile<span class="w">                  </span><span class="c1"># Different port</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="nv">TOURNAMENT_DATA_DIR</span><span class="o">=</span>/path<span class="w"> </span>make<span class="w"> </span>run-mobile<span class="w">  </span><span class="c1"># Different data folder</span>
+</code></pre></div>
+<p>Two environment variables tune the API rate limiter for large events:</p>
+<table>
+<thead>
+<tr>
+<th>Env var</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>API_RATE_LIMIT</code></td>
+<td><code>5000</code></td>
+<td>Sustained requests per second</td>
+</tr>
+<tr>
+<td><code>API_RATE_LIMIT_BURST</code></td>
+<td><code>10000</code></td>
+<td>Peak burst size</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition tip">
+<p class="admonition-title">Tip</p>
+<p>For events with hundreds of simultaneous spectators, consider raising both rate-limit values before the tournament starts.</p>
+</div>
+<h2 id="the-admin-console">The admin console</h2>
+<p>Click <strong>Admin</strong> in the navigation bar and enter the admin password. The rules for who can access which features depend on your tournament's operating mode. See <a href="../operating-modes/">Operating modes</a> for the full access-control rules.</p>
+<h2 id="dashboard">Dashboard</h2>
+<p>The dashboard lists all competitions for the tournament. Each card shows the competition type, participant count, bracket format, and current status. Click a card to manage that competition.</p>
+<p><img alt="Admin dashboard" src="../../../screenshots/mobile-dashboard.png" /></p>
+<h2 id="tournament-details-and-the-public-info-page">Tournament details and the public info page</h2>
+<p>Open <strong>Edit details</strong> from the dashboard to fill in the public information your attendees see:</p>
+<ul>
+<li>Venue address and a map link</li>
+<li>Opening and closing times</li>
+<li>A website link and an awards note</li>
+<li>Free-text info notes (rules, transportation, access details)</li>
+<li>Contact entries</li>
+</ul>
+<p>Set the <strong>Public URL</strong> field to the externally reachable address of your app (for example, <code>https://my-tournament.example.com</code>). Setting this field enables QR codes on competitor tags and makes every shareable link work. The public URL also populates the public info page in the viewer and on spectator display screens.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>For guidance on making the app reachable over the internet, see <a href="../../install/hosting/">Hosting</a>.</p>
+</div>
+<h2 id="branding-and-sponsors">Branding and sponsors</h2>
+<p>The same <strong>Edit details</strong> page also has branding and sponsor fields, below tournament details. All fields are optional; the default kendo theme applies when nothing is configured.</p>
+<ul>
+<li><strong>Logo</strong>: upload an image file shown on the viewer, the lobby displays, and the admin screens.</li>
+<li><strong>Accent colours</strong>: set a primary accent colour and a soft background tint; the viewer and display screens adopt them across the whole site.</li>
+<li><strong>Sponsors</strong>: upload full-width images that appear on the public viewer page only. Sponsor images do not appear on the TV lobby boards or scoring displays.</li>
+</ul>
+<h2 id="announcements">Announcements</h2>
+<p>Click <strong>Announce</strong> from the dashboard to broadcast a short message to every viewer. Choose a duration of 5, 10, 15, or 30 minutes; the message clears itself automatically when the time expires. It appears as an overlay on the viewer and display screens. Spectators who allow browser notifications can receive it in the background.</p>
+<h2 id="registration-desk">Registration desk</h2>
+<p>Open <strong>Registration desk</strong> from the dashboard to access the cross-competition check-in surface for the welcome table. This view lists every competitor across all competitions so a registration helper can mark participants present as they arrive. It complements the per-competition check-in described in <a href="#set-up-a-competition">Set up a competition</a>.</p>
+<h2 id="set-up-a-competition">Set up a competition</h2>
+<p>A competition moves through three phases:</p>
+<ol>
+<li><strong>Setup</strong>: configure participants, seeding, and optional check-in.</li>
+<li><strong>Draw preview</strong> (<code>draw-ready</code>): review the generated pools, bracket, or first Swiss round. The roster is locked during this phase.</li>
+<li><strong>Match play</strong>: competitions with a pool phase start in <code>pools</code> status; knockout-only formats start in <code>playoffs</code>.</li>
+</ol>
+<p><img alt="Competition setup overview" src="../../../screenshots/mobile-participants.png" /></p>
+<h3 id="adding-participants">Adding participants</h3>
+<p>The participant setup view has two panels.</p>
+<p>The <strong>Participant list</strong> panel (labelled <strong>Team list</strong> for team competitions) contains a line-numbered paste box. Paste newline-separated rows in one of these formats:</p>
+<ul>
+<li>Without display name: <code>Name, Dojo[, Dan grade]</code></li>
+<li>With display name (zekken): <code>Name, Zekken display name, Dojo[, Dan grade]</code></li>
+</ul>
+<p>Click <strong>Paste clipboard</strong> to read a tab-separated selection from the clipboard and convert it automatically. Click <strong>Apply changes</strong> to save the list.</p>
+<p><img alt="Participant setup panels" src="../../../screenshots/mobile-participant-setup.png" /></p>
+<p>The <strong>Check-in &amp; Seeding</strong> panel (labelled <strong>Seeding</strong> when check-in is disabled) shows the working roster. From here you can:</p>
+<ul>
+<li>Drag rows to assign seeds, or type a rank number directly.</li>
+<li>Click <strong>Shuffle unseeded</strong> to randomise unranked positions.</li>
+<li>Click <strong>Import seeds (CSV)</strong> to load a seed file, or <strong>Clear seeds</strong> to remove all ranks.</li>
+</ul>
+<h4 id="editing-a-single-competitor">Editing a single competitor</h4>
+<p>Click the pencil icon on any row to open the edit modal for that competitor. You can change the name, dojo, dan grade, and display name during setup. Once the draw is generated, the pencil icon is disabled; discard the draw to re-enable editing.</p>
+<h3 id="check-in-workflow">Check-in workflow</h3>
+<p>Enable check-in in <strong>Settings</strong> for the competition. When enabled, each row in the seeding panel gains a check-in checkbox. A <strong>Show unchecked / Show all</strong> toggle filters the list, and <strong>Check in all</strong> marks every participant at once.</p>
+<p>The check-in rule is opt-in: when you click <strong>Generate draw</strong>, if at least one participant is checked in, only checked-in participants join the draw and unchecked participants are excluded (their seeds are dropped). If nobody is checked in, everyone is included.</p>
+<h3 id="draw-preview">Draw preview</h3>
+<p>Click <strong>Generate draw</strong> to produce the bracket. The competition enters <code>draw-ready</code> status and shows an interactive preview:</p>
+<ul>
+<li>Pools competitions show pool assignments.</li>
+<li>Knockout competitions show the bracket tree.</li>
+<li>Swiss competitions show round 1.</li>
+</ul>
+<p>You can still toggle individual check-in status during <code>draw-ready</code>, but roster edits (add, remove, reorder) are locked.</p>
+<p>When the preview looks correct, click <strong>Start competition</strong> to move to match play. To make roster changes instead, click <strong>Discard draw</strong> to delete the draft and return to setup.</p>
+<!-- Raw HTML is copied verbatim by MkDocs (only markdown image paths get
+     rewritten), so this src must be relative to the BUILT page URL
+     (/user-guide/organisers/run-tournament/): three levels up, not two. -->
+<figure class="bc-fig">
+  <video controls loop muted playsinline preload="metadata" width="900" height="580" aria-label="Generating the draw: the pools preview appears after clicking Generate draw.">
+    <source src="../../../screenshots/draw-generation.mp4" type="video/mp4">
+  </video>
+  <figcaption>Generating the draw. Press play to watch.</figcaption>
+</figure>
+
+<h2 id="pools-and-bracket">Pools and bracket</h2>
+<p>The <strong>Pools</strong> tab shows standings for every pool. Ranks are computed automatically from match results; operators do not edit them by hand, with one exception: chusen (drawing lots), the last-resort tie-break for a consequential team-pool tie that a daihyosen cannot settle (see <a href="../../court-operators/recording-decisions/">Recording decisions</a>). When a daihyosen settles a tie that determines pool advancement, the winning side carries a <strong>DH</strong> badge in the standings.</p>
+<p>After all pool matches are complete, advance pool winners to the elimination bracket from the Pools tab. The bracket updates in real time as results come in.</p>
+<p><img alt="Pools view" src="../../../screenshots/mobile-pool-standings.png" /></p>
+<p>For the four competition formats and the Swiss round-by-round flow, see <a href="../formats/">Formats</a>.</p>
+<p>For team lineups and team scoring rules, see <a href="../team-tournaments/">Team tournaments</a>.</p>
+<p>For how to enter scores and navigate between matches, see <a href="../../court-operators/scoring-a-match/">Scoring a match</a>.</p>
+<p>For kiken, fusenpai, daihyosen, and other special decisions, see <a href="../../court-operators/recording-decisions/">Recording decisions</a>.</p>
+<p>For naginata and Engi-kyogi divisions, see <a href="../naginata/">Naginata</a>.</p>
+<h2 id="results-and-awards">Results and awards</h2>
+<p>The public viewer shows a competition's podium when it finishes, and a provisional ranking while it is still in progress:</p>
+<ul>
+<li><strong>Kendo knockout</strong> (default): 1st place, 2nd place, and two equal 3rd places. There is no bronze match; both semi-final losers share third.</li>
+<li><strong>Naginata</strong>: a single 3rd place is decided by a playoff. See <a href="../naginata/">Naginata</a> for naginata-specific configuration.</li>
+<li><strong>Mixed format</strong> (still in its pool phase): the viewer shows a provisional cross-pool ranking until the knockout decides the final places.</li>
+</ul>
+<p>Operators see an all-competition winners view from the dashboard. You can also record optional <strong>fighting-spirit</strong> (敢闘賞) awards as free text; these appear on the viewer for all spectators. Saving awards requires the destructive-ops password in self-run mode; see <a href="../operating-modes/#destructive-ops-password">Operating modes</a>.</p>
+<p><strong>League competitions</strong> derive the podium from final standings. In an individual league, any tie within the top three places triggers a short ippon-shobu tie-breaker automatically, so the competition never closes with an unearned tie. Engi kata competitions never hold supplementary bouts; they rank by wins, then accumulated flags (see <a href="../naginata/#standings">Naginata</a>). The one exception is 3rd place: with the <strong>Award two joint 3rd places</strong> option enabled (the default for kendo), competitors tied entirely for third share the position instead, with no decider. In a team league, the operator chooses whether to run a tie-breaker or accept a tie at any position; see <a href="../team-tournaments/#team-standings-and-tie-breaks">Team standings and tie-breaks</a>.</p>
+<p>Set the <strong>Award two joint 3rd places</strong> option during setup, before you generate the draw. Once the draw exists, the option is locked; discard the draw to change it.</p>
+<h2 id="export-and-print">Export and print</h2>
+<h3 id="excel">Excel</h3>
+<p>Two Excel downloads are available from the competition page:</p>
+<ul>
+<li><strong>Download results (.xlsx)</strong>: a workbook with played scores, pool standings, winners, and decisions filled in. Covers pools, league, and knockout formats. Swiss competitions have no static bracket; follow the current standings instead.</li>
+<li><strong>Download blank template (.xlsx)</strong>: an empty bracket workbook with linked formulas for hand scoring at events without a network connection.</li>
+</ul>
+<h3 id="pdf">PDF</h3>
+<p>PDF exports (competitor tags, name sheets, and bracket trees) are available to admins only. Rendering requires LibreOffice:</p>
+<ul>
+<li>Use the <code>ghcr.io/gitrgoliveira/bracket-creator-mobile-pdf:latest</code> container image, which includes LibreOffice.</li>
+<li>Or install LibreOffice on the host and ensure <code>soffice</code> is on the system path.</li>
+</ul>
+<p>The lean container image omits LibreOffice and returns a clear message when a PDF is requested.</p>
+<p>When the <strong>Public URL</strong> is set and competitors have assigned numbers, each printed tag includes a QR code that opens that competitor's public page. See <a href="../../install/hosting/">Hosting</a> for guidance on setting the public URL.</p>
+<h2 id="data-format">Data format</h2>
+<p>Tournament state is stored as plain files inside the data folder you specified with <code>--folder</code>. You can hand-edit these files between rounds when a correction is needed:</p>
+<ul>
+<li><code>tournament.md</code>: YAML front-matter with the tournament name, date, venue, court count, and the admin password and destructive-ops password.</li>
+<li><code>competitions/&lt;id&gt;/config.md</code>: YAML front-matter with competition kind, format, pool settings, and courts.</li>
+<li><code>competitions/&lt;id&gt;/participants.csv</code>: one participant per line with name, optional display name (zekken), dojo, and optional dan grade.</li>
+</ul>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>Edit data files only between rounds, not while the server is actively processing match results. Concurrent writes can produce inconsistent state.</p>
+</div>
+<h2 id="tournament-schedule">Tournament schedule</h2>
+<p>Open <strong>Tournament schedule</strong> from the dashboard to configure timing for each competition. Set start times and minutes-per-match per competition, then click <strong>Auto-schedule competition</strong> to distribute all pool matches across the assigned shiai-jo automatically. The view shows an estimated end time per court based on match duration and the number of assigned matches.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["navigation.indexes", "navigation.instant", "navigation.tabs", "navigation.tabs.sticky", "content.code.copy"], "search": "../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+        <script src="https://cdn.jsdelivr.net/npm/mermaid@11.16.0/dist/mermaid.min.js"></script>
+      
+        <script src="../../../assets/javascripts/mermaid-init.js"></script>
+      
+    
+  </body>
+</html>

@@ -621,7 +621,7 @@ func TestTournamentHandlers_FileMode_PUTPasswordChange_BroadcastsResetEvent(t *t
 		select {
 		case msg := <-ch:
 			for _, ev := range []string{"tournament_updated", "password_reset"} {
-				if strings.Contains(msg, `"type":"`+ev+`"`) {
+				if strings.Contains(msg.payload, `"type":"`+ev+`"`) {
 					seen[ev] = true
 				}
 			}
@@ -675,7 +675,7 @@ func TestTournamentHandlers_FileMode_PUTNoPasswordChange_NoResetEvent(t *testing
 	for range 4 {
 		select {
 		case msg := <-ch:
-			if strings.Contains(msg, `"type":"password_reset"`) {
+			if strings.Contains(msg.payload, `"type":"password_reset"`) {
 				sawPasswordReset = true
 			}
 		default:
@@ -731,10 +731,10 @@ func TestTournamentHandlers_FileMode_POSTBootstrap_NoResetEvent(t *testing.T) {
 	for range 6 {
 		select {
 		case msg := <-ch:
-			if strings.Contains(msg, `"type":"password_reset"`) {
+			if strings.Contains(msg.payload, `"type":"password_reset"`) {
 				sawPasswordReset = true
 			}
-			if strings.Contains(msg, `"type":"tournament_updated"`) {
+			if strings.Contains(msg.payload, `"type":"tournament_updated"`) {
 				sawTournamentUpdated = true
 			}
 		default:
@@ -796,7 +796,7 @@ func TestTournamentHandlers_FileMode_POSTOverwriteWithNewPassword_BroadcastsRese
 		select {
 		case msg := <-ch:
 			for _, ev := range []string{"tournament_updated", "password_reset"} {
-				if strings.Contains(msg, `"type":"`+ev+`"`) {
+				if strings.Contains(msg.payload, `"type":"`+ev+`"`) {
 					seen[ev] = true
 				}
 			}
@@ -2206,9 +2206,7 @@ func TestStartCompetition_BroadcastContract(t *testing.T) {
 	receiveEvent := func(d time.Duration) (SSEEvent, bool) {
 		select {
 		case msg := <-ch:
-			var e SSEEvent
-			require.NoError(t, json.Unmarshal([]byte(msg), &e))
-			return e, true
+			return decodeHubEvent(t, msg), true
 		case <-time.After(d):
 			return SSEEvent{}, false
 		}

@@ -49,7 +49,9 @@ func TestLineupKey(t *testing.T) {
 
 // TestTallyKachinukiEliminations_Winner exercises the winner-based
 // retirement branch: when SideB wins a bout, the SideA player is
-// retired (b counter for winner's perspective, a for loser's).
+// retired (b counter for winner's perspective, a for loser's). The
+// fixture is deliberately ASYMMETRIC (2 SideA retirements vs 1 SideB)
+// so a swap of the two returned counters cannot pass unnoticed.
 func TestTallyKachinukiEliminations_Winner(t *testing.T) {
 	m := &state.MatchResult{
 		SideA: "RedTeam",
@@ -57,11 +59,12 @@ func TestTallyKachinukiEliminations_Winner(t *testing.T) {
 		SubResults: []state.SubMatchResult{
 			{Position: 1, SideA: "R-Senpo", SideB: "W-Senpo", Winner: "W-Senpo", Decision: "fought"},
 			{Position: 2, SideA: "R-Jiho", SideB: "W-Senpo", Winner: "R-Jiho", Decision: "fought"},
+			{Position: 3, SideA: "R-Jiho", SideB: "W-Jiho", Winner: "W-Jiho", Decision: "fought"},
 		},
 	}
 	a, b := tallyKachinukiEliminations(m)
-	assert.Equal(t, 1, a, "SideA retired: W-Senpo won bout 1 → R-Senpo eliminated")
-	assert.Equal(t, 1, b, "SideB retired: R-Jiho won bout 2 → W-Senpo eliminated")
+	assert.Equal(t, 2, a, "SideA retired: R-Senpo (bout 1) and R-Jiho (bout 3) eliminated")
+	assert.Equal(t, 1, b, "SideB retired: W-Senpo (bout 2) eliminated")
 }
 
 // TestTallyKachinukiEliminations_Hikiwake verifies that a hikiwake
@@ -449,6 +452,167 @@ func TestResolveKachinukiPosition_PrefersMatchScoped(t *testing.T) {
 	assert.Equal(t, "Senpo", resolveKachinukiPosition(positions, "", "TeamA", "alice"))
 	// Unknown player → empty.
 	assert.Equal(t, "", resolveKachinukiPosition(positions, "PoolA-1", "TeamA", "bob"))
+}
+
+// --- Engine.KachinukiDetailMatches (exported wrapper) ---
+
+// TestKachinukiDetailMatches_NonKachinukiComp verifies that fixed-team and
+// individual (non-team) competitions both yield an empty/nil result with no
+// error, mirroring collectKachinukiMatches' nil-guard.
+func TestKachinukiDetailMatches_NonKachinukiComp(t *testing.T) {
+	t.Run("fixed team", func(t *testing.T) {
+		// Deliberately NOT setupKachinukiComp: this fixture's whole point is
+		// a non-kachinuki team type, and a helper named for kachinuki plus a
+		// counteracting override would obscure that.
+		eng, store, _ := setupTestEngine(t)
+		compID := "fixed-team-comp"
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID:            compID,
+			TeamMatchType: state.TeamMatchTypeFixed,
+			TeamSize:      5,
+		}))
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "P1-0", SideA: "RedTeam", SideB: "WhiteTeam", SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "R1", SideB: "W1", Winner: "R1"},
+			}},
+		}))
+
+		out, err := eng.KachinukiDetailMatches(compID)
+		assert.NoError(t, err)
+		assert.Empty(t, out)
+	})
+
+	t.Run("individual", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		compID := "individual-comp"
+		createTestCompetition(t, store, compID, "mixed", 3)
+		saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie"})
+
+		out, err := eng.KachinukiDetailMatches(compID)
+		assert.NoError(t, err)
+		assert.Empty(t, out)
+	})
+}
+
+// TestKachinukiDetailMatches_PoolMatchWithSubResults verifies the exported
+// wrapper end-to-end: a kachinuki competition with a scored pool match
+// produces a detail entry with the correct Label ("Pool Match 1"), joined
+// ippon scores, winner, decision, and elimination tallies.
+func TestKachinukiDetailMatches_PoolMatchWithSubResults(t *testing.T) {
+	compID := "kachinuki-detail-pool"
+	eng, store, _ := setupKachinukiComp(t, compID, 5)
+
+	matches := []state.MatchResult{
+		{
+			ID:     "P1-0",
+			SideA:  "RedTeam",
+			SideB:  "WhiteTeam",
+			Winner: "RedTeam",
+			Status: state.MatchStatusCompleted,
+			SubResults: []state.SubMatchResult{
+				{
+					Position: 1,
+					SideA:    "R-Senpo",
+					SideB:    "W-Senpo",
+					IpponsA:  []string{"M", "K"},
+					IpponsB:  []string{"D"},
+					Winner:   "R-Senpo",
+					Decision: "fought",
+				},
+				{
+					Position: 2,
+					SideA:    "R-Senpo",
+					SideB:    "W-Jiho",
+					IpponsA:  []string{},
+					IpponsB:  []string{},
+					Winner:   "",
+					Decision: state.DecisionDraw,
+				},
+			},
+			Decision: "fought",
+		},
+	}
+	require.NoError(t, store.SavePoolMatches(compID, matches))
+
+	out, err := eng.KachinukiDetailMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+
+	detail := out[0]
+	assert.Equal(t, "Pool Match 1", detail.Label)
+	assert.Equal(t, "RedTeam", detail.SideATeam)
+	assert.Equal(t, "WhiteTeam", detail.SideBTeam)
+	assert.Equal(t, "RedTeam", detail.Winner)
+	assert.Equal(t, "fought", detail.Decision)
+
+	require.Len(t, detail.Bouts, 2)
+	assert.Equal(t, 1, detail.Bouts[0].Position)
+	assert.Equal(t, "R-Senpo", detail.Bouts[0].SideAName)
+	assert.Equal(t, "MK", detail.Bouts[0].ScoreA, "IpponsA must be joined into one string")
+	assert.Equal(t, "W-Senpo", detail.Bouts[0].SideBName)
+	assert.Equal(t, "D", detail.Bouts[0].ScoreB, "IpponsB must be joined into one string")
+	assert.Equal(t, "R-Senpo", detail.Bouts[0].Winner)
+	assert.Equal(t, "fought", detail.Bouts[0].Decision)
+
+	// Bout 1: R-Senpo (SideA) wins, so W-Senpo (SideB) retires.
+	// Bout 2 is a hikiwake, which retires one player from EACH side:
+	// R-Senpo (SideA) and W-Jiho (SideB). Distinct retired names per side:
+	// SideA={R-Senpo} (1), SideB={W-Senpo, W-Jiho} (2).
+	assert.Equal(t, 1, detail.EliminationA, "R-Senpo retires via the bout-2 hikiwake")
+	assert.Equal(t, 2, detail.EliminationB, "W-Senpo (bout1 loser) and W-Jiho (bout2 hikiwake) both retire")
+}
+
+// TestKachinukiDetailMatches_MatchesWithoutSubResultsSkipped verifies that
+// pool matches carrying no SubResults are omitted from the returned detail
+// list entirely (no empty placeholder entries).
+func TestKachinukiDetailMatches_MatchesWithoutSubResultsSkipped(t *testing.T) {
+	compID := "kachinuki-detail-skip"
+	eng, store, _ := setupKachinukiComp(t, compID, 5)
+
+	matches := []state.MatchResult{
+		{ID: "P1-0", SideA: "RedTeam", SideB: "WhiteTeam"}, // no SubResults
+		{
+			ID:    "P1-1",
+			SideA: "AlphaTeam",
+			SideB: "BetaTeam",
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "A1", SideB: "B1", Winner: "A1", Decision: "fought"},
+			},
+		},
+	}
+	require.NoError(t, store.SavePoolMatches(compID, matches))
+
+	out, err := eng.KachinukiDetailMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, out, 1, "only the match with sub-results should appear")
+	assert.Equal(t, "Pool Match 2", out[0].Label, "label index tracks the original slice position, not the filtered position")
+	assert.Equal(t, "AlphaTeam", out[0].SideATeam)
+}
+
+// TestKachinukiDetailMatches_UnknownCompetition_ValidIDFormat documents the
+// current behavior for a syntactically valid but nonexistent competition ID:
+// LoadCompetition returns (nil, nil) for a missing config.md, so
+// collectKachinukiMatches' nil-comp guard applies and the method returns an
+// empty result with no error (it does NOT synthesize a NotFoundError).
+func TestKachinukiDetailMatches_UnknownCompetition_ValidIDFormat(t *testing.T) {
+	eng, _, _ := setupTestEngine(t)
+
+	out, err := eng.KachinukiDetailMatches("does-not-exist")
+	assert.NoError(t, err)
+	assert.Nil(t, out)
+}
+
+// TestKachinukiDetailMatches_InvalidCompetitionID verifies the error path:
+// an invalid (path-traversal-shaped) competition ID is rejected by
+// state.ValidateCompetitionID inside LoadCompetition and the error
+// propagates up through KachinukiDetailMatches.
+func TestKachinukiDetailMatches_InvalidCompetitionID(t *testing.T) {
+	eng, _, _ := setupTestEngine(t)
+
+	out, err := eng.KachinukiDetailMatches("../evil")
+	require.Error(t, err)
+	assert.Nil(t, out)
+	assert.Contains(t, err.Error(), "invalid competition ID")
 }
 
 // TestBuildKachinukiPositionMap_MatchScoped verifies the loader splits

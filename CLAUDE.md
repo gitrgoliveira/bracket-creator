@@ -258,6 +258,7 @@ When rebasing or resolving conflicts, watch for these recurring breakages:
 
 - **Search ALL call sites, including test files, before removing code or parameters.** Run `grep -r` (or `grep -rn 'SYMBOL' . --include='*.go' --include='*.jsx'`) to find every reference, not just production code. A removal that compiles can still leave stale test references or skip-test code pointing at dead paths.
 - **Verify that guards and defensive code are intentional before removing them.** If a Copilot reviewer flags a removal, assume the guard was intentional unless you can prove otherwise from git blame or comments. Aggressive removal of guards (e.g. `sourceCompID` checks, `defer os.RemoveAll`) has had to be reverted.
+- **Boy Scout rule: leave code better than you found it, even outside the diff.** When a review or task surfaces a worthwhile adjacent fix — a literal duplicated in sibling files, a comment contradicting the code, a swallowed error in a handler you touched — apply it rather than skipping it as "outside the reviewed diff". Precedent: the shared singleflight response tail was hoisted and the ZIP-magic literal deduplicated across untouched test files precisely because a review flagged them. Two limits keep this from scope creep: don't apply adjacent fixes that change intended behavior (surface those as findings for a decision), and don't let a small PR grow into a refactor — fix what you touched or verified, file the rest.
 
 ## Debugging Principles
 

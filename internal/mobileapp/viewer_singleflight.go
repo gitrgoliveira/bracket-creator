@@ -4,8 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"runtime/debug"
 	"sync"
+
+	"github.com/gin-gonic/gin"
 )
 
 // errNotFound is a sentinel returned by the sf.Do fn inside
@@ -13,15 +16,19 @@ import (
 // The handler maps it to HTTP 404; all other non-nil errors become 500.
 var errNotFound = errors.New("not found")
 
-// viewerSingleFlight collapses concurrent identical GET /api/viewer/competitions
-// (and /api/viewer/competitions/:id) builds to a single in-flight execution.
+// viewerSingleFlight collapses concurrent identical builds of the expensive
+// polled viewer endpoints (GET /api/viewer/competitions, its /:id variant, and
+// the court feed GET /api/viewer/court/:court/matches) to a single in-flight
+// execution per key.
 //
-// Correctness vs SSE staleness: a key stays in-flight only while the first
+// Staleness bound vs SSE: a key stays in-flight only while the elected
 // caller is still executing. The moment it finishes, the result is returned
-// to all waiters and the key is removed. A subsequent request (e.g. the next
-// SSE fan-out wave) always re-executes. This means the maximum response age
-// is the latency of one build, not a fixed TTL, there is never stale data
-// served across SSE boundaries.
+// to all waiters and the key is removed, so any request arriving after
+// completion re-executes. The maximum response age is therefore the latency
+// of one build, not a fixed TTL. Note the bound is not zero: a refetch
+// triggered by an SSE event can attach to a build elected just before the
+// write that fired the event and receive pre-write data — stale by at most
+// that one in-flight build, corrected on the next request.
 //
 // Scalability goal (P2, mp-9afd): 1000 concurrent GET /api/viewer/competitions
 // arriving within the same 500ms SSE fan-out window collapse to O(1) builds
@@ -43,6 +50,14 @@ func newViewerSingleFlight() *viewerSingleFlight {
 	return &viewerSingleFlight{calls: make(map[string]*sfCall)}
 }
 
+// sfTestWaiterAttached, when non-nil, is invoked each time a Do caller finds
+// an in-flight build and attaches as a waiter (after releasing the mutex,
+// before blocking on the WaitGroup). Test-only hook, nil in production: it
+// lets the collapse tests release the elected builder only once every
+// concurrent caller has provably attached, making the exactly-one-election
+// assertion deterministic instead of resting on a wall-clock hold.
+var sfTestWaiterAttached func(key string)
+
 // Do executes fn if no call for key is already in-flight, or waits for the
 // in-flight call to complete and returns its result. fn must be safe to call
 // concurrently under different keys. The returned bytes must not be modified
@@ -56,6 +71,9 @@ func (g *viewerSingleFlight) Do(key string, fn func() ([]byte, error)) (v []byte
 	if c, ok := g.calls[key]; ok {
 		// A call for this key is already in-flight, attach and wait.
 		g.mu.Unlock()
+		if sfTestWaiterAttached != nil {
+			sfTestWaiterAttached(key)
+		}
 		c.wg.Wait()
 		return c.val, c.err
 	}
@@ -70,7 +88,8 @@ func (g *viewerSingleFlight) Do(key string, fn func() ([]byte, error)) (v []byte
 	// If wg.Done ran first, a new caller could find the key in the map,
 	// call c.wg.Wait() (which returns immediately since the WaitGroup is
 	// already at zero), and receive the old result, violating the
-	// guarantee that each SSE wave re-executes fn for fresh data.
+	// guarantee that a request arriving after a build completes always
+	// re-executes fn for fresh data.
 	defer func() {
 		if r := recover(); r != nil {
 			c.err = fmt.Errorf("singleflight: fn panicked: %v", r)
@@ -88,5 +107,31 @@ func (g *viewerSingleFlight) Do(key string, fn func() ([]byte, error)) (v []byte
 	}()
 
 	c.val, c.err = fn()
+	var rp *recoveredPanic
+	if c.err != nil && !errors.Is(c.err, errNotFound) && !errors.As(c.err, &rp) {
+		// Logged once per BUILD, not per waiter: with N callers collapsed
+		// onto this build, logging in the response tail would emit N
+		// identical lines per failure wave (unbounded under a sustained
+		// store fault at high client counts). errNotFound is the
+		// /competitions/:id 404 sentinel, not a fault; a *recoveredPanic
+		// was already logged with its stack at the safeGo recovery site.
+		log.Printf("singleflight: build for key %q failed: %v", key, c.err)
+	}
 	return c.val, c.err
+}
+
+// serveSingleFlightJSON writes a Do result to the response: marshalled JSON
+// bytes on success, a generic 500 on error. The error is deliberately NOT
+// logged here: this tail runs once per WAITER, so a collapsed wave of N
+// callers would emit N identical lines; each failed build is already logged
+// exactly once (store faults by Do, panics with a stack at their recovery
+// site). Handlers with an extra error mapping (e.g. errNotFound → 404 on
+// /competitions/:id) branch on that first and fall through here for the
+// rest.
+func serveSingleFlightJSON(c *gin.Context, data []byte, err error) {
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+	c.Data(http.StatusOK, "application/json; charset=utf-8", data)
 }

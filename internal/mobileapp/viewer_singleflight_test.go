@@ -16,23 +16,26 @@ import (
 // in-flight build must collapse to exactly 1 real build invocation while all
 // callers receive the correct result.
 //
-// Synchronisation strategy: all goroutines wait behind a readyBarrier so they
-// race into Do() simultaneously. The elected caller holds the in-flight slot
-// for 200ms, more than enough for the other goroutines to enter Do(), find
-// the key in the map, and block on wg.Wait(). Any goroutine that enters Do()
-// after the barrier but before fn completes will become a waiter, not an
-// independent builder.
+// Synchronisation strategy (deterministic, no wall-clock hold): the elected
+// caller's fn blocks on a gate channel that the sfTestWaiterAttached hook
+// closes only once every other caller has provably attached as a waiter. No
+// caller can arrive "late" and elect a second build, because the first
+// build cannot complete until all other callers are already waiting — so
+// the exactly-1 assertion cannot flake on scheduling.
 func TestViewerSingleFlight_CollatesConcurrentBuilds(t *testing.T) {
 	const concurrency = 100
 	g := newViewerSingleFlight()
 
 	var buildCount atomic.Int32
 
-	// readyBarrier ensures all goroutines are spawned and ready before
-	// any of them call Do, eliminates the scheduling window that caused
-	// goroutines to arrive after the elected caller had already finished.
-	var readyBarrier sync.WaitGroup
-	readyBarrier.Add(concurrency)
+	gate := make(chan struct{})
+	var attached atomic.Int32
+	sfTestWaiterAttached = func(string) {
+		if attached.Add(1) == concurrency-1 {
+			close(gate)
+		}
+	}
+	t.Cleanup(func() { sfTestWaiterAttached = nil })
 
 	type result struct {
 		data []byte
@@ -46,13 +49,20 @@ func TestViewerSingleFlight_CollatesConcurrentBuilds(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			readyBarrier.Done()
-			readyBarrier.Wait() // all goroutines race into Do together
 			data, err := g.Do("test-key", func() ([]byte, error) {
 				buildCount.Add(1)
-				// Hold the in-flight slot long enough for all other
-				// goroutines to enter Do and become waiters.
-				time.Sleep(200 * time.Millisecond)
+				// Hold the in-flight slot until every other caller has
+				// attached as a waiter (released by the hook above). The
+				// timeout only exists for the FAILURE path: if collapse ever
+				// regresses (a second election strands `attached` below the
+				// release threshold), fail fast on the buildCount assertion
+				// instead of deadlocking the package until the go-test
+				// timeout.
+				select {
+				case <-gate:
+				case <-time.After(10 * time.Second):
+					t.Error("gate not released within 10s: not all callers attached as waiters (collapse regression?)")
+				}
 				return []byte(`["ok"]`), nil
 			})
 			results[i] = result{data, err}

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -82,14 +83,58 @@ func mergePoolNumbersIntoPlayers(comp *state.Competition, pools []helper.Pool) {
 }
 
 // viewerLoadCompetition is the store.LoadCompetition call used by the
-// public viewer goroutines. It is a package-level variable so panic-
-// recovery tests can swap it for a function that panics, exercising the
-// safeGo wiring end-to-end without needing to corrupt on-disk state. The
-// other 8 spawned goroutines also use safeGo, so a panic in any of them
-// is caught by the same mechanism; this hook just gives the integration
-// test something deterministic to trip.
+// public viewer goroutines. It is a package-level variable so tests can
+// swap it without corrupting on-disk state: panic-recovery tests substitute
+// a panicking load (exercising the safeGo wiring end-to-end), and the
+// court-feed singleflight test substitutes a slow load to hold a build
+// in-flight. The other 8 spawned goroutines also use safeGo, so a panic in
+// any of them is caught by the same mechanism; this hook just gives the
+// integration tests something deterministic to trip.
 var viewerLoadCompetition = func(store *state.Store, compID string) (*state.Competition, error) {
 	return store.LoadCompetition(compID)
+}
+
+// buildViewerCompetitionPayloads lists competitions and builds each public
+// per-comp payload concurrently: one safeGo goroutine per comp writing to a
+// unique index of a pre-allocated results slice (no mutex needed; wg.Wait
+// provides the happens-before), so the wall-clock cost is the slowest single
+// build, not the sum. Shared by GET /competitions (courtFilter "") and the
+// court feed GET /court/:court/matches. Non-nil payloads are returned in
+// listing order; the returned slice is non-nil even when empty so callers
+// marshal [] rather than null.
+func buildViewerCompetitionPayloads(store *state.Store, courtFilter string) ([]any, error) {
+	ids, err := store.ListCompetitions()
+	if err != nil {
+		return nil, err
+	}
+
+	results := make([]any, len(ids))
+	var wg sync.WaitGroup
+	var panicRef atomic.Pointer[recoveredPanic]
+	for i, id := range ids {
+		idx, compID := i, id
+		safeGo(&wg, &panicRef, func() {
+			// A nil payload (comp filtered out or failed to load) leaves
+			// results[idx] as a nil `any` so the collect loop below skips
+			// it; assigning a nil gin.H directly would box into a non-nil
+			// interface and slip past that filter.
+			if payload := buildViewerCompetitionPayload(store, compID, courtFilter); payload != nil {
+				results[idx] = payload
+			}
+		})
+	}
+	wg.Wait()
+	if p := panicRef.Load(); p != nil {
+		return nil, p
+	}
+
+	comps := make([]any, 0, len(ids))
+	for _, comp := range results {
+		if comp != nil {
+			comps = append(comps, comp)
+		}
+	}
+	return comps, nil
 }
 
 // buildViewerCompetitionPayload assembles the public per-competition viewer
@@ -105,7 +150,15 @@ var viewerLoadCompetition = func(store *state.Store, compID string) (*state.Comp
 // poolMatches/bracket this function already loads, no second read. The
 // aggregate passes "" (no filter).
 func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter string) gin.H {
-	comp, _ := viewerLoadCompetition(store, compID)
+	// Per-comp read faults degrade to skipping (or thinning) the comp rather
+	// than failing the whole viewer payload — the availability trade for the
+	// public list surfaces — but every failed load below is logged so a
+	// corrupt competition leaves a server-side breadcrumb instead of
+	// silently vanishing from (or thinning on) every board.
+	comp, err := viewerLoadCompetition(store, compID)
+	if err != nil {
+		log.Printf("mobileapp: viewer payload %s: load competition: %v", compID, err)
+	}
 	if comp == nil {
 		return nil
 	}
@@ -117,8 +170,14 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 	}
 
 	// Global views like Scoring/Schedule need matches and brackets.
-	poolMatches, _ := store.LoadPoolMatches(compID)
-	bracket, _ := store.LoadBracket(compID)
+	poolMatches, pmErr := store.LoadPoolMatches(compID)
+	if pmErr != nil {
+		log.Printf("mobileapp: viewer payload %s: load pool matches: %v", compID, pmErr)
+	}
+	bracket, brErr := store.LoadBracket(compID)
+	if brErr != nil {
+		log.Printf("mobileapp: viewer payload %s: load bracket: %v", compID, brErr)
+	}
 
 	// Court feed: drop comps with no real match on the requested court. Checked
 	// on the RAW bracket (before the preview strip below) so a preview bracket
@@ -136,12 +195,18 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 		t := true
 		hasIDsHint = &t
 	}
-	players, _ := store.LoadParticipantsOpt(compID, comp.EffectiveWithZekkenName(), state.LoadParticipantsOpts{WithSeeds: false, HasIDs: hasIDsHint})
+	players, plErr := store.LoadParticipantsOpt(compID, comp.EffectiveWithZekkenName(), state.LoadParticipantsOpts{WithSeeds: false, HasIDs: hasIDsHint})
+	if plErr != nil {
+		log.Printf("mobileapp: viewer payload %s: load participants: %v", compID, plErr)
+	}
 	comp.Players = players
 	// mp-13y: merge numberPrefix-derived numbers from pools.csv. Skip the
 	// pools.csv read entirely when no prefix is configured (the common case).
 	if comp.NumberPrefix != "" {
-		pools, _ := store.LoadPools(compID)
+		pools, poolsErr := store.LoadPools(compID)
+		if poolsErr != nil {
+			log.Printf("mobileapp: viewer payload %s: load pools: %v", compID, poolsErr)
+		}
 		mergePoolNumbersIntoPlayers(comp, pools)
 	}
 
@@ -207,51 +272,14 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 		// On panic inside the elected build, sf.Do returns an error and
 		// all waiters receive it; we map that to 500 below.
 		data, err := sf.Do("competitions", func() ([]byte, error) {
-			ids, err := store.ListCompetitions()
+			comps, err := buildViewerCompetitionPayloads(store, "")
 			if err != nil {
 				return nil, err
-			}
-
-			// Preserve ordering by pre-allocating a slot per competition ID.
-			// Each goroutine writes to a unique index so no mutex is needed;
-			// wg.Wait() provides the happens-before for reads below.
-			results := make([]any, len(ids))
-			var wg sync.WaitGroup
-			var panicRef atomic.Pointer[recoveredPanic]
-
-			for i, id := range ids {
-				idx, compID := i, id
-				safeGo(&wg, &panicRef, func() {
-					// Shared per-comp builder (also used by the court-scoped
-					// /court/:court/matches feed). A nil payload (comp failed to
-					// load) leaves results[idx] as a nil `any` so the collect
-					// loop below skips it, assigning a nil gin.H directly would
-					// box into a non-nil interface and slip past that filter.
-					if payload := buildViewerCompetitionPayload(store, compID, ""); payload != nil {
-						results[idx] = payload
-					}
-				})
-			}
-			wg.Wait()
-
-			if p := panicRef.Load(); p != nil {
-				return nil, p
-			}
-
-			comps := make([]any, 0, len(ids))
-			for _, comp := range results {
-				if comp != nil {
-					comps = append(comps, comp)
-				}
 			}
 			return json.Marshal(comps)
 		})
 
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
-			return
-		}
-		c.Data(http.StatusOK, "application/json; charset=utf-8", data)
+		serveSingleFlightJSON(c, data, err)
 	})
 
 	r.GET("/competitions/:id", func(c *gin.Context) {
@@ -364,17 +392,13 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 			return
 		}
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
-			return
-		}
-		c.Data(http.StatusOK, "application/json; charset=utf-8", data)
+		serveSingleFlightJSON(c, data, err)
 	})
 
 	r.GET("/schedule", func(c *gin.Context) {
 		ids, err := store.ListCompetitions()
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+			internalError(c, err)
 			return
 		}
 		// Pre-allocate one slot per competition so goroutines write to unique
@@ -386,13 +410,19 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 		for i, id := range ids {
 			idx, compID := i, id
 			safeGo(&wg, &panicRef, func() {
-				s, _ := store.LoadSchedule(compID)
+				// Same soft-degrade contract as buildViewerCompetitionPayload:
+				// a comp whose schedule fails to read is dropped from the
+				// aggregate, with a breadcrumb, rather than failing the board.
+				s, sErr := store.LoadSchedule(compID)
+				if sErr != nil {
+					log.Printf("mobileapp: viewer schedule %s: %v", compID, sErr)
+				}
 				perComp[idx] = s
 			})
 		}
 		wg.Wait()
 		if p := panicRef.Load(); p != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+			internalError(c, p)
 			return
 		}
 		allEntries := []state.ScheduleEntry{}

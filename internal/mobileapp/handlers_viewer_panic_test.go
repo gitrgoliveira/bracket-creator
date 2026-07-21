@@ -11,6 +11,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// swapViewerLoadCompetition swaps the viewerLoadCompetition hook for fn and
+// restores the production implementation on test cleanup, so no test can
+// leak an instrumented loader into the rest of the package. Used by the
+// panic-recovery test below and the court-feed singleflight test in
+// handlers_display_test.go.
+func swapViewerLoadCompetition(t *testing.T, fn func(*state.Store, string) (*state.Competition, error)) {
+	t.Helper()
+	original := viewerLoadCompetition
+	viewerLoadCompetition = fn
+	t.Cleanup(func() { viewerLoadCompetition = original })
+}
+
 // TestViewer_PanicInSpawnedGoroutine_ReturnsHTTP500_DoesNotCrash verifies
 // the safeGo wiring in handlers_viewer.go: a panic inside one of the
 // spawned goroutines must be converted into a 500 response rather than
@@ -33,13 +45,11 @@ func TestViewer_PanicInSpawnedGoroutine_ReturnsHTTP500_DoesNotCrash(t *testing.T
 	require.NoError(t, store.SaveCompetition(&comp))
 	require.NoError(t, store.SaveParticipants("c1", nil))
 
-	// Swap in a panicking loader. Restore on cleanup so other tests in
-	// the package see the production implementation.
-	original := viewerLoadCompetition
-	viewerLoadCompetition = func(_ *state.Store, _ string) (*state.Competition, error) {
+	// Swap in a panicking loader; swapViewerLoadCompetition restores the
+	// production implementation on cleanup.
+	swapViewerLoadCompetition(t, func(_ *state.Store, _ string) (*state.Competition, error) {
 		panic("simulated corrupt-state panic in LoadCompetition")
-	}
-	t.Cleanup(func() { viewerLoadCompetition = original })
+	})
 
 	// If safeGo were missing, this request would crash the test binary
 	// (`panic: ...` with no recovery → goroutine fatal → process exit).

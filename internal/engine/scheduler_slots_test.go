@@ -302,6 +302,39 @@ func TestAssignSlotsLegacyMatchDurationFallback(t *testing.T) {
 	assert.Equal(t, 8, per)
 }
 
+// TestPerMatchElapsedSubMinuteDuration verifies mp-m5kf: a sub-minute clock
+// duration entered in seconds (e.g. 150s = 2m30s) survives into the elapsed
+// estimate through the multiplier rather than being truncated to whole
+// minutes before the calculation. 150s = 2.5min * 1.5 = 3.75 → rounds to 4.
+func TestPerMatchElapsedSubMinuteDuration(t *testing.T) {
+	comp := &state.Competition{
+		StartTime:                "09:00",
+		Courts:                   []string{"A"},
+		PoolMatchDurationSeconds: 150, // 2m30s
+	}
+	tournament := &state.Tournament{ClockToElapsedMultiplier: 1.5}
+	per := perMatchElapsedMinutes(comp, tournament, false)
+	assert.Equal(t, 4, per, "2m30s * 1.5 = 3.75 → 4 (sub-minute clock not truncated)")
+
+	// Contrast: had the 150s been truncated to 2 whole minutes first,
+	// 2 * 1.5 = 3.0 → 3. The seconds path must NOT produce 3.
+	assert.NotEqual(t, 3, per)
+}
+
+// TestPerMatchElapsedSecondsPrecedence verifies the *Seconds field wins over a
+// stale legacy whole-minute field in the slot estimator.
+func TestPerMatchElapsedSecondsPrecedence(t *testing.T) {
+	comp := &state.Competition{
+		Courts:                   []string{"A"},
+		PoolMatchDuration:        3,  // legacy minutes
+		PoolMatchDurationSeconds: 90, // 1m30s — should win
+	}
+	tournament := &state.Tournament{ClockToElapsedMultiplier: 2.0}
+	per := perMatchElapsedMinutes(comp, tournament, false)
+	// 90s = 1.5min * 2.0 = 3.0 → 3. The stale 3-min field would give 6.
+	assert.Equal(t, 3, per)
+}
+
 // TestAssignSlotsBracketByesSkipCursor verifies that bracket
 // matches auto-completed as byes do not advance the court cursor,
 // otherwise a half-empty bracket would inherit phantom 5-minute

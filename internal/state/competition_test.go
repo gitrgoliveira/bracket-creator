@@ -197,6 +197,71 @@ func TestApplyCompetitionDefaults_NoPromotionWhenAlreadySet(t *testing.T) {
 	assert.Equal(t, 6, c.PlayoffMatchDuration)
 }
 
+// mp-m5kf: sub-minute (seconds) per-match durations.
+
+// TestApplyCompetitionDefaults_SecondsBackfillFromMinutes verifies that a
+// competition carrying only the legacy whole-minute fields gets its canonical
+// *Seconds fields back-filled (minutes*60) so the scheduler and UI read a
+// single source of truth.
+func TestApplyCompetitionDefaults_SecondsBackfillFromMinutes(t *testing.T) {
+	c := &Competition{PoolMatchDuration: 3, PlayoffMatchDuration: 5}
+	ApplyCompetitionDefaults(c)
+	assert.Equal(t, 180, c.PoolMatchDurationSeconds, "3 min should back-fill to 180s")
+	assert.Equal(t, 300, c.PlayoffMatchDurationSeconds, "5 min should back-fill to 300s")
+}
+
+// TestApplyCompetitionDefaults_SecondsWinOverMinutes verifies that an explicit
+// sub-minute seconds value (e.g. 150s = 2m30s) is never clobbered by the
+// whole-minute back-fill, even when a stale minute field is also present.
+func TestApplyCompetitionDefaults_SecondsWinOverMinutes(t *testing.T) {
+	c := &Competition{PoolMatchDuration: 3, PoolMatchDurationSeconds: 150}
+	ApplyCompetitionDefaults(c)
+	assert.Equal(t, 150, c.PoolMatchDurationSeconds, "explicit 2m30s must survive back-fill")
+}
+
+// TestEffectiveMatchSeconds_Precedence pins the seconds -> minutes*60 ->
+// legacy MatchDuration*60 -> 0 fallback chain used by the scheduler and UI.
+func TestEffectiveMatchSeconds_Precedence(t *testing.T) {
+	t.Run("seconds win", func(t *testing.T) {
+		c := &Competition{PoolMatchDurationSeconds: 150, PoolMatchDuration: 3, MatchDuration: 4}
+		assert.Equal(t, 150, c.EffectivePoolMatchSeconds())
+	})
+	t.Run("fall back to per-phase minutes", func(t *testing.T) {
+		c := &Competition{PlayoffMatchDuration: 5, MatchDuration: 4}
+		assert.Equal(t, 300, c.EffectivePlayoffMatchSeconds())
+	})
+	t.Run("fall back to legacy MatchDuration", func(t *testing.T) {
+		c := &Competition{MatchDuration: 4}
+		assert.Equal(t, 240, c.EffectivePoolMatchSeconds())
+		assert.Equal(t, 240, c.EffectivePlayoffMatchSeconds())
+	})
+	t.Run("zero when unset", func(t *testing.T) {
+		c := &Competition{}
+		assert.Equal(t, 0, c.EffectivePoolMatchSeconds())
+		assert.Equal(t, 0, c.EffectivePlayoffMatchSeconds())
+	})
+}
+
+// TestCompetitionSecondsRoundTrip verifies the *Seconds fields persist through
+// YAML with their snake_case tags.
+func TestCompetitionSecondsRoundTrip(t *testing.T) {
+	original := Competition{
+		ID:                          "sec-comp",
+		Name:                        "Seconds",
+		PoolMatchDurationSeconds:    150,
+		PlayoffMatchDurationSeconds: 210,
+	}
+	data, err := yaml.Marshal(&original)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "pool_match_duration_seconds: 150")
+	assert.Contains(t, string(data), "playoff_match_duration_seconds: 210")
+
+	var loaded Competition
+	require.NoError(t, yaml.Unmarshal(data, &loaded))
+	assert.Equal(t, 150, loaded.PoolMatchDurationSeconds)
+	assert.Equal(t, 210, loaded.PlayoffMatchDurationSeconds)
+}
+
 // TestLoadCompetitionLocked_InvalidCompID covers the ValidateCompetitionID
 // error branch inside loadCompetitionLocked.
 func TestLoadCompetitionLocked_InvalidCompID(t *testing.T) {

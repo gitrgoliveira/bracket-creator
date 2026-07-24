@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { timeEdited, timeToMinutes, clampMatchDuration, filterMatchesByCourt, suggestRebalances, computeCourtPaceStats, allMatchesCompleted } from '../admin_schedule.jsx';
+import { timeEdited, timeToMinutes, clampMatchDuration, filterMatchesByCourt, suggestRebalances, computeCourtPaceStats, allMatchesCompleted, secondsToMMSS, mmssToSeconds, clampDurationSeconds, effectiveDurationSeconds } from '../admin_schedule.jsx';
 import { makeReactive } from './helpers/reactive_react.js';
 
 describe('timeEdited', () => {
@@ -166,6 +166,93 @@ describe('clampMatchDuration', () => {
       expect(clampMatchDuration(NaN, 5)).toBe(5);
       expect(clampMatchDuration(2.5, 10)).toBe(10);
     });
+  });
+});
+
+// mp-m5kf: sub-minute (mm:ss) match duration helpers.
+describe('secondsToMMSS', () => {
+  it('formats whole minutes', () => {
+    expect(secondsToMMSS(180)).toBe('3:00');
+    expect(secondsToMMSS(0)).toBe('0:00');
+  });
+  it('formats minutes + seconds with zero-padding', () => {
+    expect(secondsToMMSS(150)).toBe('2:30');
+    expect(secondsToMMSS(65)).toBe('1:05');
+    expect(secondsToMMSS(9)).toBe('0:09');
+  });
+  it('rounds fractional seconds', () => {
+    expect(secondsToMMSS(150.4)).toBe('2:30');
+    expect(secondsToMMSS(150.6)).toBe('2:31');
+  });
+  it('returns empty string for non-finite / negative input', () => {
+    expect(secondsToMMSS(NaN)).toBe('');
+    expect(secondsToMMSS(undefined)).toBe('');
+    expect(secondsToMMSS(null)).toBe('');
+    expect(secondsToMMSS(-1)).toBe('');
+    expect(secondsToMMSS(Infinity)).toBe('');
+  });
+});
+
+describe('mmssToSeconds', () => {
+  it('parses bare minutes', () => {
+    expect(mmssToSeconds('3')).toBe(180);
+    expect(mmssToSeconds('0')).toBe(0);
+  });
+  it('parses m:ss', () => {
+    expect(mmssToSeconds('2:30')).toBe(150);
+    expect(mmssToSeconds('1:05')).toBe(65);
+    expect(mmssToSeconds('0:09')).toBe(9);
+  });
+  it('trims surrounding whitespace', () => {
+    expect(mmssToSeconds('  2:30  ')).toBe(150);
+  });
+  it('returns NaN for blank / nullish', () => {
+    expect(mmssToSeconds('')).toBeNaN();
+    expect(mmssToSeconds('   ')).toBeNaN();
+    expect(mmssToSeconds(null)).toBeNaN();
+    expect(mmssToSeconds(undefined)).toBeNaN();
+  });
+  it('rejects a seconds component >= 60', () => {
+    expect(mmssToSeconds('1:60')).toBeNaN();
+    expect(mmssToSeconds('1:99')).toBeNaN();
+  });
+  it('rejects negative and malformed input', () => {
+    expect(mmssToSeconds('-1')).toBeNaN();
+    expect(mmssToSeconds('1:-5')).toBeNaN();
+    expect(mmssToSeconds('a')).toBeNaN();
+    expect(mmssToSeconds('1:2:3')).toBeNaN();
+  });
+});
+
+describe('clampDurationSeconds', () => {
+  it('passes through valid positive values (rounded)', () => {
+    expect(clampDurationSeconds(150)).toBe(150);
+    expect(clampDurationSeconds(150.6)).toBe(151);
+  });
+  it('falls back to 180 (3 min) for non-finite / sub-1 input', () => {
+    expect(clampDurationSeconds(NaN)).toBe(180);
+    expect(clampDurationSeconds(undefined)).toBe(180);
+    expect(clampDurationSeconds(0)).toBe(180);
+    expect(clampDurationSeconds(-5)).toBe(180);
+    expect(clampDurationSeconds(Infinity)).toBe(180);
+  });
+  it('honors a custom fallback', () => {
+    expect(clampDurationSeconds(NaN, 90)).toBe(90);
+  });
+});
+
+describe('effectiveDurationSeconds', () => {
+  it('prefers the seconds field when set', () => {
+    expect(effectiveDurationSeconds(150, 3)).toBe(150);
+  });
+  it('falls back to legacy minutes x60', () => {
+    expect(effectiveDurationSeconds(0, 3)).toBe(180);
+    expect(effectiveDurationSeconds(undefined, 5)).toBe(300);
+  });
+  it('returns NaN when neither is set', () => {
+    expect(effectiveDurationSeconds(0, 0)).toBeNaN();
+    expect(effectiveDurationSeconds(undefined, undefined)).toBeNaN();
+    expect(effectiveDurationSeconds(NaN, NaN)).toBeNaN();
   });
 });
 

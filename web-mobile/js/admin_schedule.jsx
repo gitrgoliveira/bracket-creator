@@ -13,6 +13,7 @@
 
 import {
   timeEdited, timeToMinutes, clampMatchDuration, allMatchesCompleted,
+  secondsToMMSS, mmssToSeconds, clampDurationSeconds, effectiveDurationSeconds,
 } from './admin_schedule_utils.jsx';
 import {
   filterMatchesByCourt, computeCourtPaceStats, CourtPacePanel,
@@ -28,6 +29,7 @@ import { AdminSchedulePage } from './admin_schedule_page.jsx';
 // target even though each lives in its own submodule.
 export {
   timeEdited, timeToMinutes, clampMatchDuration, allMatchesCompleted,
+  secondsToMMSS, mmssToSeconds, clampDurationSeconds, effectiveDurationSeconds,
   filterMatchesByCourt, computeCourtPaceStats, CourtPacePanel,
   suggestRebalances, pickCopySource, MatchLineupPanel,
 };

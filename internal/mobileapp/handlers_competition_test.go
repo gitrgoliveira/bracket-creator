@@ -1463,6 +1463,13 @@ func TestValidateCompetitionDurations_Negative(t *testing.T) {
 	assert.Error(t, err)
 	err = validateCompetitionDurations(&state.Competition{MatchDuration: -1})
 	assert.Error(t, err)
+	// mp-m5kf: the canonical seconds fields are also range-checked.
+	err = validateCompetitionDurations(&state.Competition{PoolMatchDurationSeconds: -1})
+	assert.Error(t, err)
+	err = validateCompetitionDurations(&state.Competition{PlayoffMatchDurationSeconds: -1})
+	assert.Error(t, err)
+	// A valid sub-minute value (2m30s) passes.
+	assert.NoError(t, validateCompetitionDurations(&state.Competition{PoolMatchDurationSeconds: 150}))
 }
 
 // TestValidateCompetitionFormat_UnknownFormat verifies that unknown format

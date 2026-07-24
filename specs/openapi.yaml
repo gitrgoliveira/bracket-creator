@@ -3115,6 +3115,35 @@ components:
         maxEnchoPeriods:
           type: integer
           description: Maximum number of encho (extended time) periods permitted per match.
+        poolMatchDurationSeconds:
+          type: integer
+          minimum: 0
+          description: >
+            Canonical estimated on-clock duration of a single pool/round match,
+            in SECONDS, allowing sub-minute granularity (e.g. 150 = 2m30s). Used
+            by the schedule estimator and auto-scheduler. 0 or absent means "use
+            the default" (180s). Supersedes the whole-minute `poolMatchDuration`;
+            when both are supplied the seconds field wins.
+        playoffMatchDurationSeconds:
+          type: integer
+          minimum: 0
+          description: >
+            Canonical estimated on-clock duration of a single playoff/knockout
+            match, in SECONDS (e.g. 150 = 2m30s). 0 or absent means "use the
+            default" (180s). Supersedes the whole-minute `playoffMatchDuration`.
+        poolMatchDuration:
+          type: integer
+          minimum: 0
+          description: >
+            Legacy whole-MINUTE pool/round match duration, retained for backward
+            compatibility. Prefer `poolMatchDurationSeconds`. When only this field
+            is supplied it is back-filled to seconds (x60) server-side.
+        playoffMatchDuration:
+          type: integer
+          minimum: 0
+          description: >
+            Legacy whole-MINUTE playoff match duration, retained for backward
+            compatibility. Prefer `playoffMatchDurationSeconds`.
         checkInEnabled:
           type: boolean
           description: >

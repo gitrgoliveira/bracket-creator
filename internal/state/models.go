@@ -301,26 +301,42 @@ type FightingSpiritAward struct {
 }
 
 type Competition struct {
-	ID                   string            `yaml:"id" json:"id"`
-	Name                 string            `yaml:"name" json:"name"`
-	Kind                 string            `yaml:"kind" json:"kind"`
-	Format               string            `yaml:"format" json:"format"`
-	PoolFormat           string            `yaml:"pool_format,omitempty" json:"poolFormat,omitempty"` // "full" (default) | "partial"
-	TeamSize             int               `yaml:"team_size" json:"teamSize"`
-	PoolSize             int               `yaml:"pool_size" json:"poolSize"`
-	PoolSizeMode         string            `yaml:"pool_size_mode" json:"poolSizeMode"`
-	PoolWinners          int               `yaml:"pool_winners" json:"poolWinners"`
-	RoundRobin           bool              `yaml:"round_robin" json:"roundRobin"`
-	Courts               []string          `yaml:"courts" json:"courts"`
-	StartTime            string            `yaml:"start_time" json:"startTime"`
-	Date                 string            `yaml:"date" json:"date"`
-	Status               CompetitionStatus `yaml:"status" json:"status"`
-	Mirror               bool              `yaml:"mirror" json:"mirror"`
-	WithZekkenName       bool              `yaml:"with_zekken_name" json:"withZekkenName"`
-	NumberPrefix         string            `yaml:"number_prefix,omitempty" json:"numberPrefix,omitempty"`
-	HasParticipantIDs    bool              `yaml:"has_participant_ids,omitempty" json:"hasParticipantIDs,omitempty"`
-	PoolMatchDuration    int               `yaml:"pool_match_duration,omitempty" json:"poolMatchDuration,omitempty"`
-	PlayoffMatchDuration int               `yaml:"playoff_match_duration,omitempty" json:"playoffMatchDuration,omitempty"`
+	ID                string            `yaml:"id" json:"id"`
+	Name              string            `yaml:"name" json:"name"`
+	Kind              string            `yaml:"kind" json:"kind"`
+	Format            string            `yaml:"format" json:"format"`
+	PoolFormat        string            `yaml:"pool_format,omitempty" json:"poolFormat,omitempty"` // "full" (default) | "partial"
+	TeamSize          int               `yaml:"team_size" json:"teamSize"`
+	PoolSize          int               `yaml:"pool_size" json:"poolSize"`
+	PoolSizeMode      string            `yaml:"pool_size_mode" json:"poolSizeMode"`
+	PoolWinners       int               `yaml:"pool_winners" json:"poolWinners"`
+	RoundRobin        bool              `yaml:"round_robin" json:"roundRobin"`
+	Courts            []string          `yaml:"courts" json:"courts"`
+	StartTime         string            `yaml:"start_time" json:"startTime"`
+	Date              string            `yaml:"date" json:"date"`
+	Status            CompetitionStatus `yaml:"status" json:"status"`
+	Mirror            bool              `yaml:"mirror" json:"mirror"`
+	WithZekkenName    bool              `yaml:"with_zekken_name" json:"withZekkenName"`
+	NumberPrefix      string            `yaml:"number_prefix,omitempty" json:"numberPrefix,omitempty"`
+	HasParticipantIDs bool              `yaml:"has_participant_ids,omitempty" json:"hasParticipantIDs,omitempty"`
+	// PoolMatchDuration / PlayoffMatchDuration are the legacy WHOLE-MINUTE
+	// per-phase clock durations. They are retained for backward
+	// compatibility (old config.md files, older API clients that send
+	// minutes only). The canonical values are the *Seconds fields below,
+	// which allow sub-minute granularity (e.g. 2m30s). Read durations via
+	// EffectivePoolMatchSeconds / EffectivePlayoffMatchSeconds, never these
+	// fields directly.
+	PoolMatchDuration    int `yaml:"pool_match_duration,omitempty" json:"poolMatchDuration,omitempty"`
+	PlayoffMatchDuration int `yaml:"playoff_match_duration,omitempty" json:"playoffMatchDuration,omitempty"`
+
+	// PoolMatchDurationSeconds / PlayoffMatchDurationSeconds are the
+	// canonical per-phase clock durations in SECONDS. They supersede the
+	// whole-minute fields above and let operators enter mm:ss (FR: sub-minute
+	// match durations). When set, they win over the legacy minute fields;
+	// ApplyCompetitionDefaults back-fills them (minutes*60) so callers that
+	// still send only minutes keep working.
+	PoolMatchDurationSeconds    int `yaml:"pool_match_duration_seconds,omitempty" json:"poolMatchDurationSeconds,omitempty"`
+	PlayoffMatchDurationSeconds int `yaml:"playoff_match_duration_seconds,omitempty" json:"playoffMatchDurationSeconds,omitempty"`
 	// MaxEnchoPeriods caps how many encho (overtime) periods one match
 	// may run before the operator must call daihyosen. Zero means
 	// unlimited (FIK general default). T104, CHK029.
@@ -458,6 +474,49 @@ func ApplyCompetitionDefaults(c *Competition) {
 	if c.PlayoffMatchDuration == 0 && c.MatchDuration > 0 {
 		c.PlayoffMatchDuration = c.MatchDuration
 	}
+	// Back-fill the canonical seconds fields from the whole-minute fields
+	// for callers/config files that predate sub-minute durations. Only fills
+	// when the seconds field is unset, so an explicit mm:ss value (e.g. 150s
+	// = 2m30s) is never clobbered by a stale rounded minute field.
+	if c.PoolMatchDurationSeconds == 0 && c.PoolMatchDuration > 0 {
+		c.PoolMatchDurationSeconds = c.PoolMatchDuration * 60
+	}
+	if c.PlayoffMatchDurationSeconds == 0 && c.PlayoffMatchDuration > 0 {
+		c.PlayoffMatchDurationSeconds = c.PlayoffMatchDuration * 60
+	}
+}
+
+// EffectivePoolMatchSeconds returns the canonical per-pool-match clock
+// duration in seconds, preferring the sub-minute PoolMatchDurationSeconds
+// field and falling back to the legacy whole-minute fields (x60) for
+// competitions that have not been migrated. Returns 0 when no duration is
+// configured; callers apply their own default (see scheduler_slots.go).
+func (c *Competition) EffectivePoolMatchSeconds() int {
+	if c.PoolMatchDurationSeconds > 0 {
+		return c.PoolMatchDurationSeconds
+	}
+	if c.PoolMatchDuration > 0 {
+		return c.PoolMatchDuration * 60
+	}
+	if c.MatchDuration > 0 {
+		return c.MatchDuration * 60
+	}
+	return 0
+}
+
+// EffectivePlayoffMatchSeconds is the playoff-phase counterpart of
+// EffectivePoolMatchSeconds. Same precedence and fallback semantics.
+func (c *Competition) EffectivePlayoffMatchSeconds() int {
+	if c.PlayoffMatchDurationSeconds > 0 {
+		return c.PlayoffMatchDurationSeconds
+	}
+	if c.PlayoffMatchDuration > 0 {
+		return c.PlayoffMatchDuration * 60
+	}
+	if c.MatchDuration > 0 {
+		return c.MatchDuration * 60
+	}
+	return 0
 }
 
 // IsPlayoffEnabled reports whether this competition runs a knockout/playoff

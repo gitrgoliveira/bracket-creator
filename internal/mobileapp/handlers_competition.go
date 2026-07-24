@@ -153,6 +153,9 @@ func validateCompetitionDurations(comp *state.Competition) error {
 	if comp.PoolMatchDuration < 0 || comp.PlayoffMatchDuration < 0 || comp.MatchDuration < 0 {
 		return fmt.Errorf("match duration must be >= 0")
 	}
+	if comp.PoolMatchDurationSeconds < 0 || comp.PlayoffMatchDurationSeconds < 0 {
+		return fmt.Errorf("match duration must be >= 0")
+	}
 	return nil
 }
 
@@ -1015,6 +1018,8 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				current.Mirror = comp.Mirror
 				current.PoolMatchDuration = comp.PoolMatchDuration
 				current.PlayoffMatchDuration = comp.PlayoffMatchDuration
+				current.PoolMatchDurationSeconds = comp.PoolMatchDurationSeconds
+				current.PlayoffMatchDurationSeconds = comp.PlayoffMatchDurationSeconds
 				current.MatchDuration = comp.MatchDuration
 				// FR-050a: swiss round budget is admin-editable from
 				// settings until the competition starts (the engine

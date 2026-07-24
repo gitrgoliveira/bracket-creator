@@ -4,6 +4,8 @@
 // entry for the vitest suite.
 
 import { teamMatchTypeHint } from './pool_ids.jsx';
+import { DurationInput } from './duration.jsx';
+import { effectiveDurationSeconds } from './admin_schedule_utils.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -82,7 +84,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // clockToElapsedMultiplier, or slowestCourtBufferPct on the tournament
   // settings screen and then returns here: otherwise the display would be
   // stale until a competition field changed (Finding 5 fix).
-  }, [c.id, c.format, c.kind, c.poolMatchDuration, c.playoffMatchDuration, c.courts, c.teamSize, c.poolSize, c.poolSizeMode, c.poolWinners, c.roundRobin, c.poolFormat, c.swissRounds, c.checkInEnabled, password,
+  }, [c.id, c.format, c.kind, c.poolMatchDuration, c.playoffMatchDuration, c.poolMatchDurationSeconds, c.playoffMatchDurationSeconds, c.courts, c.teamSize, c.poolSize, c.poolSizeMode, c.poolWinners, c.roundRobin, c.poolFormat, c.swissRounds, c.checkInEnabled, password,
     tournament?.openingBlock, tournament?.lunchBlock, tournament?.closingBlock,
     tournament?.clockToElapsedMultiplier, tournament?.slowestCourtBufferPct]);
   // AdminSettings unmounts when the user navigates to a different section
@@ -136,7 +138,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       });
       return next;
     });
-  }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind, c.mirror, c.status, c.poolFormat, c.poolMatchDuration, c.playoffMatchDuration, c.swissRounds, c.swissCurrentRound, c.naginata, c.checkInEnabled, c.leagueTiebreakTopN, c.leagueTwoThirdPlaces, c.teamMatchType]);
+  }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind, c.mirror, c.status, c.poolFormat, c.poolMatchDuration, c.playoffMatchDuration, c.poolMatchDurationSeconds, c.playoffMatchDurationSeconds, c.swissRounds, c.swissCurrentRound, c.naginata, c.checkInEnabled, c.leagueTiebreakTopN, c.leagueTwoThirdPlaces, c.teamMatchType]);
 
   const saveNow = () => {
     // Build `effective` from the LATEST server-known state (cRef.current)
@@ -279,6 +281,11 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       // latestC's value to avoid NaN-clobbering a previously-set value.
       poolMatchDuration: safeNonNegInt(effective.poolMatchDuration, latestC.poolMatchDuration || 0),
       playoffMatchDuration: safeNonNegInt(effective.playoffMatchDuration, latestC.playoffMatchDuration || 0),
+      // Canonical sub-minute durations (seconds). Same NaN/clobber guard as the
+      // legacy minute fields above: a cleared input (NaN) falls back to the
+      // last-saved value so an unrelated-field save can't wipe a duration.
+      poolMatchDurationSeconds: safeNonNegInt(effective.poolMatchDurationSeconds, latestC.poolMatchDurationSeconds || 0),
+      playoffMatchDurationSeconds: safeNonNegInt(effective.playoffMatchDurationSeconds, latestC.playoffMatchDurationSeconds || 0),
       // T190 (FR-050a): swissRounds is editable pre-start; safeInt
       // preserves the previously-saved value when the input is
       // cleared (so the cleared display doesn't clobber the disk
@@ -416,6 +423,18 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     setIsDirty(true);
     if (saveErr) setSaveErr(null);
     if (clashWarnings) setClashWarnings(null);
+  };
+
+  // Duration handler for the mm:ss DurationInput. Stages the canonical
+  // seconds value; when a concrete value is entered (not a blank clear -> NaN)
+  // it also zeroes the legacy whole-minute field so the seconds value is the
+  // single source of truth on save (the Go side prefers *Seconds, but zeroing
+  // the minute field keeps config.md clean and unambiguous). A blank clear
+  // leaves both fields untouched so an unrelated-field save doesn't wipe a
+  // previously-set duration (same disk-clobber guard as safeNonNegInt).
+  const updateDurationSeconds = (secKey, minKey) => (secOrNaN) => {
+    update(secKey, secOrNaN);
+    if (Number.isFinite(secOrNaN)) update(minKey, 0);
   };
 
   const toggleCourt = (cc) => {
@@ -644,32 +663,24 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
         <div className="row">
           {(local.format === "mixed" || local.format === "league" || local.format === "swiss") && (
             <div className="field">
-              <label className="field__label">{local.format === "swiss" ? "Round match duration (min)" : "Pool match duration (min)"}</label>
-              <input
-                className="input"
-                type="number"
-                min="0"
-                step="1"
-                value={Number.isFinite(local.poolMatchDuration) && local.poolMatchDuration > 0 ? local.poolMatchDuration : ""}
-                onChange={(e) => updateNumber("poolMatchDuration", e.target.value, 0)}
-                placeholder={`default: ${DEFAULT_MATCH_MINUTES}`}
+              <label className="field__label">{local.format === "swiss" ? "Round match duration (min:sec)" : "Pool match duration (min:sec)"}</label>
+              <DurationInput
+                seconds={effectiveDurationSeconds(local.poolMatchDurationSeconds, local.poolMatchDuration)}
+                onChange={updateDurationSeconds("poolMatchDurationSeconds", "poolMatchDuration")}
+                placeholderMin={`${DEFAULT_MATCH_MINUTES}`}
               />
-              <div className="field__hint">{local.format === "swiss" ? `Estimated minutes per Swiss-round match. Leave blank for the default (${DEFAULT_MATCH_MINUTES} min).` : `Estimated minutes per pool match. Leave blank for the default (${DEFAULT_MATCH_MINUTES} min).`}</div>
+              <div className="field__hint">{local.format === "swiss" ? `Estimated time per Swiss-round match (e.g. 2 min 30 sec). Leave blank for the default (${DEFAULT_MATCH_MINUTES} min).` : `Estimated time per pool match (e.g. 2 min 30 sec). Leave blank for the default (${DEFAULT_MATCH_MINUTES} min).`}</div>
             </div>
           )}
           {(local.format === "playoffs" || local.format === "mixed") && (
             <div className="field">
-              <label className="field__label">Playoff match duration (min)</label>
-              <input
-                className="input"
-                type="number"
-                min="0"
-                step="1"
-                value={Number.isFinite(local.playoffMatchDuration) && local.playoffMatchDuration > 0 ? local.playoffMatchDuration : ""}
-                onChange={(e) => updateNumber("playoffMatchDuration", e.target.value, 0)}
-                placeholder={`default: ${DEFAULT_MATCH_MINUTES}`}
+              <label className="field__label">Playoff match duration (min:sec)</label>
+              <DurationInput
+                seconds={effectiveDurationSeconds(local.playoffMatchDurationSeconds, local.playoffMatchDuration)}
+                onChange={updateDurationSeconds("playoffMatchDurationSeconds", "playoffMatchDuration")}
+                placeholderMin={`${DEFAULT_MATCH_MINUTES}`}
               />
-              <div className="field__hint">{`Estimated minutes per playoff/knockout match. Leave blank for the default (${DEFAULT_MATCH_MINUTES} min).`}</div>
+              <div className="field__hint">{`Estimated time per playoff/knockout match (e.g. 2 min 30 sec). Leave blank for the default (${DEFAULT_MATCH_MINUTES} min).`}</div>
             </div>
           )}
         </div>

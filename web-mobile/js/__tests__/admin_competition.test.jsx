@@ -362,7 +362,11 @@ describe('AdminSettings useEffect deps completeness (H3 regression)', () => {
     // the settings form AND round-tripped via finalNext. Sync deps
     // required so an SSE-driven update lands in local state while the
     // user is on the settings page.
+    // mp-m5kf: the canonical sub-minute *Seconds fields are the ones the
+    // mm:ss DurationInput binds to; their legacy minute siblings stay for
+    // backward compatibility.
     'poolMatchDuration', 'playoffMatchDuration',
+    'poolMatchDurationSeconds', 'playoffMatchDurationSeconds',
   ];
 
   it('useEffect deps include every field rendered via local.*', () => {
@@ -437,7 +441,10 @@ describe('AdminSettings.saveNow payload whitelist', () => {
     'poolFormat',
     // FR-052..FR-054 / T047: per-phase duration overrides. Zero means
     // "use legacy default": fall through to backend ApplyCompetitionDefaults.
+    // mp-m5kf: *Seconds are the canonical sub-minute (mm:ss) values; the
+    // minute fields are retained for backward compatibility.
     'poolMatchDuration', 'playoffMatchDuration',
+    'poolMatchDurationSeconds', 'playoffMatchDurationSeconds',
     // FR-050a / T190: Swiss rounds (number of rounds the operator
     // configured for a Swiss-format competition). Editable pre-start
     // and during play; the next "Generate next round" call respects

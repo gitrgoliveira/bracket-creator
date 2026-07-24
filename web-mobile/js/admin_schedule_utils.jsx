@@ -44,6 +44,54 @@ export function clampMatchDuration(raw, fallback = 3) {
   return Number.isFinite(raw) && Number.isInteger(raw) && raw >= 1 ? raw : fallback;
 }
 
+// secondsToMMSS formats a total-seconds integer as "M:SS" (e.g. 150 -> "2:30").
+// Returns "" for non-finite / negative input so a cleared field renders empty.
+export function secondsToMMSS(sec) {
+  if (!Number.isFinite(sec) || sec < 0) return "";
+  const s = Math.round(sec);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+// mmssToSeconds parses "M", "M:SS", or "MM:SS" into integer seconds.
+// Returns NaN for blank/invalid input; a seconds component >= 60 is rejected
+// (operators must carry into minutes). Used by the mm:ss DurationInput.
+export function mmssToSeconds(str) {
+  if (str == null) return NaN;
+  const t = String(str).trim();
+  if (t === "") return NaN;
+  const parts = t.split(":");
+  if (parts.length === 1) {
+    const m = Number(parts[0]);
+    return Number.isFinite(m) && m >= 0 ? Math.round(m * 60) : NaN;
+  }
+  if (parts.length === 2) {
+    const m = Number(parts[0]);
+    const s = Number(parts[1]);
+    if (!Number.isFinite(m) || !Number.isFinite(s) || m < 0 || s < 0 || s >= 60) return NaN;
+    return Math.round(m * 60 + s);
+  }
+  return NaN;
+}
+
+// clampDurationSeconds coerces a raw seconds value to a safe positive integer
+// for scheduling arithmetic, falling back to `fallback` (default 180s = 3 min,
+// matching defaultPerMatchClockSeconds in internal/engine/scheduler_slots.go)
+// for NaN / non-finite / sub-1 input. Fractional seconds round to nearest.
+export function clampDurationSeconds(raw, fallback = 180) {
+  return Number.isFinite(raw) && raw >= 1 ? Math.round(raw) : fallback;
+}
+
+// effectiveDurationSeconds resolves the canonical per-match seconds from a
+// competition's seconds field, falling back to the legacy whole-minute field
+// (x60). Mirrors EffectivePoolMatchSeconds in internal/state/models.go so the
+// UI shows the same value the scheduler uses. Returns NaN when neither is set
+// so callers can render the "default" placeholder.
+export function effectiveDurationSeconds(seconds, minutes) {
+  if (Number.isFinite(seconds) && seconds > 0) return seconds;
+  if (Number.isFinite(minutes) && minutes > 0) return minutes * 60;
+  return NaN;
+}
+
 // True when the list is non-empty and every match is in 'completed' status.
 // Drives the "All matches scored" banner in AdminScoreEditor.
 export function allMatchesCompleted(matches) {

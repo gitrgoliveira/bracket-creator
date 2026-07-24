@@ -207,4 +207,6 @@ Tournament state is stored as plain files inside the data folder you specified w
 
 ## Tournament schedule
 
-Open **Tournament schedule** from the dashboard to configure timing for each competition. Set start times and minutes-per-match per competition, then click **Auto-schedule competition** to distribute all pool matches across the assigned shiai-jo automatically. The view shows an estimated end time per court based on match duration and the number of assigned matches.
+Open **Tournament schedule** from the dashboard to configure timing for each competition. Set start times and the time per match (in minutes and seconds, for example 2 min 30 sec) per competition, then click **Auto-schedule competition** to distribute all pool matches across the assigned shiai-jo automatically. The view shows an estimated end time per court based on match duration and the number of assigned matches.
+
+Each competition can also set its own pool and playoff match durations in minutes and seconds on its **Settings** page. Leave a duration blank to use the default of 3 minutes.

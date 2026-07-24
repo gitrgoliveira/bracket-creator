@@ -486,37 +486,34 @@ func ApplyCompetitionDefaults(c *Competition) {
 	}
 }
 
+// effectiveMatchSeconds resolves a per-phase clock duration in seconds from
+// its (seconds, whole-minute, legacy-single-field) triple, preferring the
+// sub-minute value and falling back to the whole-minute fields (x60) for
+// competitions that have not been migrated. Returns 0 when none is set;
+// callers apply their own default (see scheduler_slots.go).
+func effectiveMatchSeconds(seconds, minutes, legacyMinutes int) int {
+	switch {
+	case seconds > 0:
+		return seconds
+	case minutes > 0:
+		return minutes * 60
+	case legacyMinutes > 0:
+		return legacyMinutes * 60
+	default:
+		return 0
+	}
+}
+
 // EffectivePoolMatchSeconds returns the canonical per-pool-match clock
-// duration in seconds, preferring the sub-minute PoolMatchDurationSeconds
-// field and falling back to the legacy whole-minute fields (x60) for
-// competitions that have not been migrated. Returns 0 when no duration is
-// configured; callers apply their own default (see scheduler_slots.go).
+// duration in seconds (see effectiveMatchSeconds for the precedence).
 func (c *Competition) EffectivePoolMatchSeconds() int {
-	if c.PoolMatchDurationSeconds > 0 {
-		return c.PoolMatchDurationSeconds
-	}
-	if c.PoolMatchDuration > 0 {
-		return c.PoolMatchDuration * 60
-	}
-	if c.MatchDuration > 0 {
-		return c.MatchDuration * 60
-	}
-	return 0
+	return effectiveMatchSeconds(c.PoolMatchDurationSeconds, c.PoolMatchDuration, c.MatchDuration)
 }
 
 // EffectivePlayoffMatchSeconds is the playoff-phase counterpart of
 // EffectivePoolMatchSeconds. Same precedence and fallback semantics.
 func (c *Competition) EffectivePlayoffMatchSeconds() int {
-	if c.PlayoffMatchDurationSeconds > 0 {
-		return c.PlayoffMatchDurationSeconds
-	}
-	if c.PlayoffMatchDuration > 0 {
-		return c.PlayoffMatchDuration * 60
-	}
-	if c.MatchDuration > 0 {
-		return c.MatchDuration * 60
-	}
-	return 0
+	return effectiveMatchSeconds(c.PlayoffMatchDurationSeconds, c.PlayoffMatchDuration, c.MatchDuration)
 }
 
 // IsPlayoffEnabled reports whether this competition runs a knockout/playoff

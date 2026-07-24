@@ -44,35 +44,6 @@ export function clampMatchDuration(raw, fallback = 3) {
   return Number.isFinite(raw) && Number.isInteger(raw) && raw >= 1 ? raw : fallback;
 }
 
-// secondsToMMSS formats a total-seconds integer as "M:SS" (e.g. 150 -> "2:30").
-// Returns "" for non-finite / negative input so a cleared field renders empty.
-export function secondsToMMSS(sec) {
-  if (!Number.isFinite(sec) || sec < 0) return "";
-  const s = Math.round(sec);
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-}
-
-// mmssToSeconds parses "M", "M:SS", or "MM:SS" into integer seconds.
-// Returns NaN for blank/invalid input; a seconds component >= 60 is rejected
-// (operators must carry into minutes). Used by the mm:ss DurationInput.
-export function mmssToSeconds(str) {
-  if (str == null) return NaN;
-  const t = String(str).trim();
-  if (t === "") return NaN;
-  const parts = t.split(":");
-  if (parts.length === 1) {
-    const m = Number(parts[0]);
-    return Number.isFinite(m) && m >= 0 ? Math.round(m * 60) : NaN;
-  }
-  if (parts.length === 2) {
-    const m = Number(parts[0]);
-    const s = Number(parts[1]);
-    if (!Number.isFinite(m) || !Number.isFinite(s) || m < 0 || s < 0 || s >= 60) return NaN;
-    return Math.round(m * 60 + s);
-  }
-  return NaN;
-}
-
 // clampDurationSeconds coerces a raw seconds value to a safe positive integer
 // for scheduling arithmetic, falling back to `fallback` (default 180s = 3 min,
 // matching defaultPerMatchClockSeconds in internal/engine/scheduler_slots.go)

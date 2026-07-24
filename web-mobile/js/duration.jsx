@@ -27,8 +27,9 @@ export function DurationInput({ seconds, onChange, disabled, placeholderMin, sty
     const sStr = String(sRaw).trim();
     if (mStr === "" && sStr === "") { onChange(NaN); return; }
     const m = mStr === "" ? 0 : Math.max(0, Math.floor(Number(mStr) || 0));
+    // Math.floor(Number(...) || 0) is always finite; only the range needs clamping.
     let s = sStr === "" ? 0 : Math.floor(Number(sStr) || 0);
-    if (!Number.isFinite(s) || s < 0) s = 0;
+    if (s < 0) s = 0;
     if (s > 59) s = 59;
     onChange(m * 60 + s);
   };
@@ -41,7 +42,7 @@ export function DurationInput({ seconds, onChange, disabled, placeholderMin, sty
         min="0"
         step="1"
         style={{ width: 68 }}
-        value={mmVal === "" ? "" : mmVal}
+        value={mmVal}
         placeholder={placeholderMin}
         disabled={disabled}
         onChange={(e) => emit(e.target.value, ssVal)}
@@ -55,7 +56,7 @@ export function DurationInput({ seconds, onChange, disabled, placeholderMin, sty
         max="59"
         step="1"
         style={{ width: 68 }}
-        value={ssVal === "" ? "" : ssVal}
+        value={ssVal}
         disabled={disabled}
         onChange={(e) => emit(mmVal, e.target.value)}
         aria-label="seconds"

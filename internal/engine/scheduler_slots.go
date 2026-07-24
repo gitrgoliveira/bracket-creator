@@ -49,7 +49,9 @@ const defaultPerMatchClockSeconds = 180
 // the court. Documented trade-off; T150.
 func perMatchElapsedMinutes(comp *state.Competition, tournament *state.Tournament, isPlayoff bool) int {
 	if comp == nil {
-		return int(math.Round(float64(defaultPerMatchClockSeconds) / 60.0))
+		// No competition to tune from: anchor on the bare default clock,
+		// without the multiplier (preserves the pre-seconds behavior).
+		return defaultPerMatchClockSeconds / 60
 	}
 
 	clockSec := comp.EffectivePoolMatchSeconds()

@@ -59,6 +59,14 @@ describe('DurationInput', () => {
     expect(onChange).toHaveBeenLastCalledWith(1440 * 60);
   });
 
+  it('caps the COMBINED total at the 86400s ceiling (never emits a value the server rejects)', () => {
+    const onChange = vi.fn();
+    // 1440 min already at the ceiling; adding 30s would be 86430 > 86400.
+    render(<DurationInput seconds={1440 * 60} onChange={onChange} />);
+    fireEvent.input(inputs().sec, { target: { value: '30' } });
+    expect(onChange).toHaveBeenLastCalledWith(86400);
+  });
+
   it('renders both fields blank for a zero value (resolves to default upstream)', () => {
     render(<DurationInput seconds={0} onChange={() => {}} />);
     const { min, sec } = inputs();

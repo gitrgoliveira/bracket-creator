@@ -27,7 +27,9 @@ export function DurationInput({ seconds, onChange, disabled, placeholderMin, sty
   // Recompute the combined seconds from the two sub-fields. Both blank emits
   // NaN so the caller falls back to the scheduler default; otherwise a blank
   // sub-field counts as 0, the minutes are clamped to [0, DURATION_MAX_MINUTES]
-  // and the seconds component to [0, 59].
+  // and the seconds component to [0, 59]. The COMBINED total is also capped at
+  // the ceiling so 1440min + a nonzero seconds value (e.g. 86430s) can't exceed
+  // the server's 86400s cap and 400 on save.
   const emit = (mRaw, sRaw) => {
     const mStr = String(mRaw).trim();
     const sStr = String(sRaw).trim();
@@ -38,7 +40,7 @@ export function DurationInput({ seconds, onChange, disabled, placeholderMin, sty
     let s = sStr === "" ? 0 : Math.floor(Number(sStr) || 0);
     if (s < 0) s = 0;
     if (s > 59) s = 59;
-    onChange(m * 60 + s);
+    onChange(Math.min(m * 60 + s, DURATION_MAX_MINUTES * 60));
   };
 
   return (

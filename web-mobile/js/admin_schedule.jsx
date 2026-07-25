@@ -12,7 +12,7 @@
 // double-eval, re-running all window.* assignments.
 
 import {
-  timeEdited, timeToMinutes, clampMatchDuration, allMatchesCompleted,
+  timeEdited, timeToMinutes, allMatchesCompleted,
   clampDurationSeconds, effectiveDurationSeconds,
 } from './admin_schedule_utils.jsx';
 import {
@@ -28,7 +28,7 @@ import { AdminSchedulePage } from './admin_schedule_page.jsx';
 // re-exported here so admin_schedule.jsx stays the single canonical import
 // target even though each lives in its own submodule.
 export {
-  timeEdited, timeToMinutes, clampMatchDuration, allMatchesCompleted,
+  timeEdited, timeToMinutes, allMatchesCompleted,
   clampDurationSeconds, effectiveDurationSeconds,
   filterMatchesByCourt, computeCourtPaceStats, CourtPacePanel,
   suggestRebalances, pickCopySource, MatchLineupPanel,

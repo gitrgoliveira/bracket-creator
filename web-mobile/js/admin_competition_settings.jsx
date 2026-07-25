@@ -665,7 +665,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             <div className="field">
               <label className="field__label">{local.format === "swiss" ? "Round match duration (min:sec)" : "Pool match duration (min:sec)"}</label>
               <DurationInput
-                seconds={effectiveDurationSeconds(local.poolMatchDurationSeconds, local.poolMatchDuration)}
+                seconds={effectiveDurationSeconds(local.poolMatchDurationSeconds, local.poolMatchDuration, local.matchDuration)}
                 onChange={updateDurationSeconds("poolMatchDurationSeconds", "poolMatchDuration")}
                 placeholderMin={`${DEFAULT_MATCH_MINUTES}`}
               />
@@ -676,7 +676,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             <div className="field">
               <label className="field__label">Playoff match duration (min:sec)</label>
               <DurationInput
-                seconds={effectiveDurationSeconds(local.playoffMatchDurationSeconds, local.playoffMatchDuration)}
+                seconds={effectiveDurationSeconds(local.playoffMatchDurationSeconds, local.playoffMatchDuration, local.matchDuration)}
                 onChange={updateDurationSeconds("playoffMatchDurationSeconds", "playoffMatchDuration")}
                 placeholderMin={`${DEFAULT_MATCH_MINUTES}`}
               />

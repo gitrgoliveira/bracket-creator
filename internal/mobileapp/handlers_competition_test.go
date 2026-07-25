@@ -995,6 +995,65 @@ func TestPUTCompetition_RosterPUTBypassesSettingsValidation(t *testing.T) {
 // `{ ...c, ...updated }` merge then pushed null into local state,
 // crashing render paths that read `c.players.length`. The handler now
 // loads the on-disk roster for the response when comp.Players == nil.
+// TestCompetitionDurationSeconds_PersistAndNormalize covers mp-m5kf: the
+// PUT settings path persists the canonical *Seconds fields to disk, and the
+// GET read handlers normalize legacy whole-minute / single-field durations
+// into *Seconds so the SPA always receives resolved values.
+func TestCompetitionDurationSeconds_PersistAndNormalize(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	// 1. PUT with a sub-minute seconds value persists it verbatim to disk.
+	seed := state.Competition{ID: "sec-comp", Name: "Sec Comp", Date: "12-05-2026", Format: "mixed"}
+	require.NoError(t, store.SaveCompetition(&seed))
+	body := []byte(`{"id":"sec-comp","name":"Sec Comp","date":"12-05-2026","format":"mixed","poolMatchDurationSeconds":150,"playoffMatchDurationSeconds":210}`)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/sec-comp", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+	stored, err := store.LoadCompetition("sec-comp")
+	require.NoError(t, err)
+	assert.Equal(t, 150, stored.PoolMatchDurationSeconds, "2m30s must persist to disk")
+	assert.Equal(t, 210, stored.PlayoffMatchDurationSeconds)
+
+	// 2. A legacy per-phase MINUTE competition is normalized to *Seconds on the
+	//    single-GET read path (x60).
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: "legacy-min", Name: "Legacy Min", PoolMatchDuration: 3, PlayoffMatchDuration: 5,
+	}))
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/api/competitions/legacy-min", nil)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	var got state.Competition
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	assert.Equal(t, 180, got.PoolMatchDurationSeconds, "GET must back-fill 3 min -> 180s")
+	assert.Equal(t, 300, got.PlayoffMatchDurationSeconds, "GET must back-fill 5 min -> 300s")
+
+	// 3. A legacy SINGLE-field competition (only match_duration) is normalized
+	//    to both per-phase *Seconds on the LIST read path, so the SPA's
+	//    seconds/minutes resolver never sees a bare legacy value.
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: "legacy-single", Name: "Legacy Single", MatchDuration: 5,
+	}))
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/api/competitions", nil)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	var list []state.Competition
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &list))
+	var single *state.Competition
+	for i := range list {
+		if list[i].ID == "legacy-single" {
+			single = &list[i]
+		}
+	}
+	require.NotNil(t, single, "legacy-single must appear in the list")
+	assert.Equal(t, 300, single.PoolMatchDurationSeconds, "list GET must normalize match_duration 5 -> 300s")
+	assert.Equal(t, 300, single.PlayoffMatchDurationSeconds)
+}
+
 func TestPUTCompetition_SettingsOnlyResponseIncludesPlayers(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
@@ -1470,6 +1529,14 @@ func TestValidateCompetitionDurations_Negative(t *testing.T) {
 	assert.Error(t, err)
 	// A valid sub-minute value (2m30s) passes.
 	assert.NoError(t, validateCompetitionDurations(&state.Competition{PoolMatchDurationSeconds: 150}))
+	// mp-m5kf hardening: upper bounds prevent int64 time-arithmetic overflow.
+	assert.Error(t, validateCompetitionDurations(&state.Competition{PoolMatchDurationSeconds: maxMatchDurationSeconds + 1}))
+	assert.Error(t, validateCompetitionDurations(&state.Competition{PlayoffMatchDurationSeconds: maxMatchDurationSeconds + 1}))
+	assert.Error(t, validateCompetitionDurations(&state.Competition{PoolMatchDuration: maxMatchDurationMinutes + 1}))
+	assert.Error(t, validateCompetitionDurations(&state.Competition{MatchDuration: maxMatchDurationMinutes + 1}))
+	// The exact bounds are accepted.
+	assert.NoError(t, validateCompetitionDurations(&state.Competition{PoolMatchDurationSeconds: maxMatchDurationSeconds}))
+	assert.NoError(t, validateCompetitionDurations(&state.Competition{PoolMatchDuration: maxMatchDurationMinutes}))
 }
 
 // TestValidateCompetitionFormat_UnknownFormat verifies that unknown format

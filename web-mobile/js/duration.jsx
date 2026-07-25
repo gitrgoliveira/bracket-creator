@@ -5,6 +5,11 @@
 // on the Go side). Two number sub-fields (min + sec) avoid mm:ss parse
 // ambiguity and step cleanly on mobile.
 
+// DURATION_MAX_MINUTES caps the minutes sub-field at 24 hours, matching
+// maxMatchDurationMinutes in internal/mobileapp/handlers_competition.go so the
+// client never emits a value the server would reject with a 400.
+const DURATION_MAX_MINUTES = 24 * 60; // 1440
+
 // DurationInput renders a minutes field and a seconds field bound to one
 // integer-seconds value.
 //   props.seconds        current value in seconds (number; NaN/undefined = unset)
@@ -21,12 +26,14 @@ export function DurationInput({ seconds, onChange, disabled, placeholderMin, sty
 
   // Recompute the combined seconds from the two sub-fields. Both blank emits
   // NaN so the caller falls back to the scheduler default; otherwise a blank
-  // sub-field counts as 0 and the seconds component is clamped to [0, 59].
+  // sub-field counts as 0, the minutes are clamped to [0, DURATION_MAX_MINUTES]
+  // and the seconds component to [0, 59].
   const emit = (mRaw, sRaw) => {
     const mStr = String(mRaw).trim();
     const sStr = String(sRaw).trim();
     if (mStr === "" && sStr === "") { onChange(NaN); return; }
-    const m = mStr === "" ? 0 : Math.max(0, Math.floor(Number(mStr) || 0));
+    let m = mStr === "" ? 0 : Math.max(0, Math.floor(Number(mStr) || 0));
+    if (m > DURATION_MAX_MINUTES) m = DURATION_MAX_MINUTES;
     // Math.floor(Number(...) || 0) is always finite; only the range needs clamping.
     let s = sStr === "" ? 0 : Math.floor(Number(sStr) || 0);
     if (s < 0) s = 0;
@@ -40,6 +47,7 @@ export function DurationInput({ seconds, onChange, disabled, placeholderMin, sty
         className="input"
         type="number"
         min="0"
+        max={DURATION_MAX_MINUTES}
         step="1"
         style={{ width: 68 }}
         value={mmVal}

@@ -149,12 +149,26 @@ func validateCompetitionDateInTournament(comp *state.Competition, tourn *state.T
 //
 // FR-050a: swiss is now accepted; the caller must ALSO run
 // validateSwissConfig when format == swiss to enforce swissRounds >= 1.
+// maxMatchDurationSeconds caps a single per-match clock duration at 24 hours.
+// This is far above any real kendo match yet low enough that downstream
+// time.Duration (int64 ns) slot arithmetic can never overflow into a garbage
+// (or negative) schedule. maxMatchDurationMinutes is the whole-minute
+// equivalent for the legacy fields.
+const (
+	maxMatchDurationSeconds = 24 * 60 * 60 // 86400
+	maxMatchDurationMinutes = 24 * 60      // 1440
+)
+
 func validateCompetitionDurations(comp *state.Competition) error {
-	if comp.PoolMatchDuration < 0 || comp.PlayoffMatchDuration < 0 || comp.MatchDuration < 0 {
+	if comp.PoolMatchDuration < 0 || comp.PlayoffMatchDuration < 0 || comp.MatchDuration < 0 ||
+		comp.PoolMatchDurationSeconds < 0 || comp.PlayoffMatchDurationSeconds < 0 {
 		return fmt.Errorf("match duration must be >= 0")
 	}
-	if comp.PoolMatchDurationSeconds < 0 || comp.PlayoffMatchDurationSeconds < 0 {
-		return fmt.Errorf("match duration must be >= 0")
+	if comp.PoolMatchDuration > maxMatchDurationMinutes || comp.PlayoffMatchDuration > maxMatchDurationMinutes || comp.MatchDuration > maxMatchDurationMinutes {
+		return fmt.Errorf("match duration must be <= %d minutes", maxMatchDurationMinutes)
+	}
+	if comp.PoolMatchDurationSeconds > maxMatchDurationSeconds || comp.PlayoffMatchDurationSeconds > maxMatchDurationSeconds {
+		return fmt.Errorf("match duration must be <= %d seconds", maxMatchDurationSeconds)
 	}
 	return nil
 }
@@ -294,6 +308,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		for _, id := range ids {
 			comp, err := store.LoadCompetition(id)
 			if err == nil && comp != nil {
+				// Normalize legacy/whole-minute durations into the canonical
+				// *Seconds fields so the SPA always receives resolved values
+				// (the client-side resolver only reads the seconds/minute pair,
+				// not the legacy single MatchDuration field). LoadCompetition
+				// returns a private copy, so this does not mutate the cache.
+				state.ApplyCompetitionDefaults(comp)
 				comps = append(comps, comp)
 			}
 		}
@@ -564,6 +584,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
 			return
 		}
+		// Normalize legacy/whole-minute durations into the canonical *Seconds
+		// fields so the SPA receives resolved values (see the list handler).
+		state.ApplyCompetitionDefaults(comp)
 		c.JSON(http.StatusOK, comp)
 	})
 

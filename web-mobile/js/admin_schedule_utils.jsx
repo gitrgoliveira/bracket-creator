@@ -53,13 +53,16 @@ export function clampDurationSeconds(raw, fallback = 180) {
 }
 
 // effectiveDurationSeconds resolves the canonical per-match seconds from a
-// competition's seconds field, falling back to the legacy whole-minute field
-// (x60). Mirrors EffectivePoolMatchSeconds in internal/state/models.go so the
-// UI shows the same value the scheduler uses. Returns NaN when neither is set
-// so callers can render the "default" placeholder.
-export function effectiveDurationSeconds(seconds, minutes) {
+// competition's seconds field, falling back to the per-phase whole-minute
+// field and then the legacy single MatchDuration field (both x60). Mirrors the
+// 3-tier effectiveMatchSeconds in internal/state/models.go so the UI shows the
+// same value the scheduler uses even for a legacy config the server has not
+// normalized (e.g. a raw SSE-pushed record). Returns NaN when none is set so
+// callers can render the "default" placeholder.
+export function effectiveDurationSeconds(seconds, minutes, legacyMinutes) {
   if (Number.isFinite(seconds) && seconds > 0) return seconds;
   if (Number.isFinite(minutes) && minutes > 0) return minutes * 60;
+  if (Number.isFinite(legacyMinutes) && legacyMinutes > 0) return legacyMinutes * 60;
   return NaN;
 }
 

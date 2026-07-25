@@ -321,6 +321,20 @@ func TestPerMatchElapsedSubMinuteDuration(t *testing.T) {
 	assert.NotEqual(t, 3, per)
 }
 
+// TestPerMatchElapsedSubMinuteFloors verifies mp-m5kf hardening: a tiny
+// positive clock duration whose elapsed estimate rounds to 0 is floored to 1
+// minute, so the slot loop never advances the court cursor by 0 and stacks
+// every match at the same time.
+func TestPerMatchElapsedSubMinuteFloors(t *testing.T) {
+	comp := &state.Competition{
+		Courts:                   []string{"A"},
+		PoolMatchDurationSeconds: 15, // 0.25min * 1.5 = 0.375 -> rounds to 0
+	}
+	tournament := &state.Tournament{ClockToElapsedMultiplier: 1.5}
+	per := perMatchElapsedMinutes(comp, tournament, false)
+	assert.Equal(t, 1, per, "a positive sub-minute duration must occupy at least 1 slot minute")
+}
+
 // TestPerMatchElapsedSecondsPrecedence verifies the *Seconds field wins over a
 // stale legacy whole-minute field in the slot estimator.
 func TestPerMatchElapsedSecondsPrecedence(t *testing.T) {

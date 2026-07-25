@@ -3118,32 +3118,42 @@ components:
         poolMatchDurationSeconds:
           type: integer
           minimum: 0
+          maximum: 86400
           description: >
             Canonical estimated on-clock duration of a single pool/round match,
             in SECONDS, allowing sub-minute granularity (e.g. 150 = 2m30s). Used
-            by the schedule estimator and auto-scheduler. 0 or absent means "use
-            the default" (180s). Supersedes the whole-minute `poolMatchDuration`;
-            when both are supplied the seconds field wins.
+            by the schedule estimator and auto-scheduler. When 0 or absent the
+            server falls back to the whole-minute `poolMatchDuration`, then to
+            the legacy `matchDuration`, then to the 180s scheduler default.
+            Supersedes `poolMatchDuration` when both are supplied. Capped at
+            86400 (24h).
         playoffMatchDurationSeconds:
           type: integer
           minimum: 0
+          maximum: 86400
           description: >
             Canonical estimated on-clock duration of a single playoff/knockout
-            match, in SECONDS (e.g. 150 = 2m30s). 0 or absent means "use the
-            default" (180s). Supersedes the whole-minute `playoffMatchDuration`.
+            match, in SECONDS (e.g. 150 = 2m30s). When 0 or absent the server
+            falls back to `playoffMatchDuration`, then `matchDuration`, then the
+            180s scheduler default. Supersedes `playoffMatchDuration`. Capped at
+            86400 (24h).
         poolMatchDuration:
           type: integer
           minimum: 0
+          maximum: 1440
           description: >
             Legacy whole-MINUTE pool/round match duration, retained for backward
             compatibility. Prefer `poolMatchDurationSeconds`. When only this field
-            is supplied it is back-filled to seconds (x60) server-side.
+            is supplied the server back-fills it to seconds (x60) on write and on
+            read. Capped at 1440 (24h).
         playoffMatchDuration:
           type: integer
           minimum: 0
+          maximum: 1440
           description: >
             Legacy whole-MINUTE playoff match duration, retained for backward
-            compatibility. Prefer `playoffMatchDurationSeconds`.
+            compatibility. Prefer `playoffMatchDurationSeconds`. Capped at 1440
+            (24h).
         checkInEnabled:
           type: boolean
           description: >

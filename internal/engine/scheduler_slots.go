@@ -82,7 +82,17 @@ func perMatchElapsedMinutes(comp *state.Competition, tournament *state.Tournamen
 
 	// Delegate to the shared pure core so this function and
 	// EstimateSchedule stay in exact agreement (FR-059).
-	return int(math.Round(perMatchElapsed(clockMin, multiplier, bouts)))
+	per := int(math.Round(perMatchElapsed(clockMin, multiplier, bouts)))
+	// A configured positive duration must occupy at least one slot minute.
+	// Sub-minute clocks (e.g. 15s * 1.5 = 0.375 → rounds to 0) would otherwise
+	// advance the court cursor by 0 and stack every match at the same time.
+	// clockSec is always > 0 here (defaulted above), so this floor only lifts
+	// genuine round-to-zero cases, never the nil/default path (which returns
+	// earlier).
+	if per < 1 {
+		per = 1
+	}
+	return per
 }
 
 // parseDurationMinutes converts a Go-style duration string ("30m",

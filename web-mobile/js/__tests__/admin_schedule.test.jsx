@@ -189,16 +189,22 @@ describe('clampDurationSeconds', () => {
 
 describe('effectiveDurationSeconds', () => {
   it('prefers the seconds field when set', () => {
-    expect(effectiveDurationSeconds(150, 3)).toBe(150);
+    expect(effectiveDurationSeconds(150, 3, 4)).toBe(150);
   });
-  it('falls back to legacy minutes x60', () => {
+  it('falls back to per-phase minutes x60', () => {
     expect(effectiveDurationSeconds(0, 3)).toBe(180);
     expect(effectiveDurationSeconds(undefined, 5)).toBe(300);
   });
-  it('returns NaN when neither is set', () => {
-    expect(effectiveDurationSeconds(0, 0)).toBeNaN();
-    expect(effectiveDurationSeconds(undefined, undefined)).toBeNaN();
-    expect(effectiveDurationSeconds(NaN, NaN)).toBeNaN();
+  it('falls back to the legacy single MatchDuration tier x60', () => {
+    // Mirrors the Go 3-tier effectiveMatchSeconds: a legacy comp carrying only
+    // matchDuration (no per-phase minutes, no seconds) still resolves.
+    expect(effectiveDurationSeconds(0, 0, 5)).toBe(300);
+    expect(effectiveDurationSeconds(undefined, undefined, 3)).toBe(180);
+  });
+  it('returns NaN when none is set', () => {
+    expect(effectiveDurationSeconds(0, 0, 0)).toBeNaN();
+    expect(effectiveDurationSeconds(undefined, undefined, undefined)).toBeNaN();
+    expect(effectiveDurationSeconds(NaN, NaN, NaN)).toBeNaN();
   });
 });
 

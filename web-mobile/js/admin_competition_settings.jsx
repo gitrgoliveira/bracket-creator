@@ -437,6 +437,22 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     if (Number.isFinite(secOrNaN)) update(minKey, 0);
   };
 
+  // Render one per-phase mm:ss duration field. Pool and playoff differ only in
+  // label/hint/field-key, so share the markup to keep the two hint strings in
+  // step. `seconds` resolves through the 3-tier fallback (seconds -> per-phase
+  // minutes -> legacy MatchDuration) so a legacy comp still shows its value.
+  const durationField = (label, secKey, minKey, hint) => (
+    <div className="field">
+      <label className="field__label">{label}</label>
+      <DurationInput
+        seconds={effectiveDurationSeconds(local[secKey], local[minKey], local.matchDuration)}
+        onChange={updateDurationSeconds(secKey, minKey)}
+        placeholderMin={`${DEFAULT_MATCH_MINUTES}`}
+      />
+      <div className="field__hint">{hint}</div>
+    </div>
+  );
+
   const toggleCourt = (cc) => {
     // Compute from localRef.current (kept authoritative by update) rather than
     // the render-closure `local.courts`: rapid toggles fired before React
@@ -661,28 +677,20 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       {/* Render rules: */}
       {(local.format === "mixed" || local.format === "league" || local.format === "playoffs" || local.format === "swiss") && (
         <div className="row">
-          {(local.format === "mixed" || local.format === "league" || local.format === "swiss") && (
-            <div className="field">
-              <label className="field__label">{local.format === "swiss" ? "Round match duration (min:sec)" : "Pool match duration (min:sec)"}</label>
-              <DurationInput
-                seconds={effectiveDurationSeconds(local.poolMatchDurationSeconds, local.poolMatchDuration, local.matchDuration)}
-                onChange={updateDurationSeconds("poolMatchDurationSeconds", "poolMatchDuration")}
-                placeholderMin={`${DEFAULT_MATCH_MINUTES}`}
-              />
-              <div className="field__hint">{local.format === "swiss" ? `Estimated time per Swiss-round match (e.g. 2 min 30 sec). Leave blank for the default (${DEFAULT_MATCH_MINUTES} min).` : `Estimated time per pool match (e.g. 2 min 30 sec). Leave blank for the default (${DEFAULT_MATCH_MINUTES} min).`}</div>
-            </div>
-          )}
-          {(local.format === "playoffs" || local.format === "mixed") && (
-            <div className="field">
-              <label className="field__label">Playoff match duration (min:sec)</label>
-              <DurationInput
-                seconds={effectiveDurationSeconds(local.playoffMatchDurationSeconds, local.playoffMatchDuration, local.matchDuration)}
-                onChange={updateDurationSeconds("playoffMatchDurationSeconds", "playoffMatchDuration")}
-                placeholderMin={`${DEFAULT_MATCH_MINUTES}`}
-              />
-              <div className="field__hint">{`Estimated time per playoff/knockout match (e.g. 2 min 30 sec). Leave blank for the default (${DEFAULT_MATCH_MINUTES} min).`}</div>
-            </div>
-          )}
+          {(local.format === "mixed" || local.format === "league" || local.format === "swiss") &&
+            durationField(
+              local.format === "swiss" ? "Round match duration (min:sec)" : "Pool match duration (min:sec)",
+              "poolMatchDurationSeconds",
+              "poolMatchDuration",
+              `Estimated time per ${local.format === "swiss" ? "Swiss-round" : "pool"} match (e.g. 2 min 30 sec). Leave blank for the default (${DEFAULT_MATCH_MINUTES} min).`
+            )}
+          {(local.format === "playoffs" || local.format === "mixed") &&
+            durationField(
+              "Playoff match duration (min:sec)",
+              "playoffMatchDurationSeconds",
+              "playoffMatchDuration",
+              `Estimated time per playoff/knockout match (e.g. 2 min 30 sec). Leave blank for the default (${DEFAULT_MATCH_MINUTES} min).`
+            )}
         </div>
       )}
 

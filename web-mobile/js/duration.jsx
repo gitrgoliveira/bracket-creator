@@ -34,12 +34,10 @@ export function DurationInput({ seconds, onChange, disabled, placeholderMin, sty
     const mStr = String(mRaw).trim();
     const sStr = String(sRaw).trim();
     if (mStr === "" && sStr === "") { onChange(NaN); return; }
-    let m = mStr === "" ? 0 : Math.max(0, Math.floor(Number(mStr) || 0));
-    if (m > DURATION_MAX_MINUTES) m = DURATION_MAX_MINUTES;
-    // Math.floor(Number(...) || 0) is always finite; only the range needs clamping.
-    let s = sStr === "" ? 0 : Math.floor(Number(sStr) || 0);
-    if (s < 0) s = 0;
-    if (s > 59) s = 59;
+    // Math.floor(Number(...) || 0) is always finite; clamp each sub-field to
+    // its range, then cap the combined total at the ceiling.
+    const m = Math.min(DURATION_MAX_MINUTES, Math.max(0, Math.floor(Number(mStr) || 0)));
+    const s = Math.min(59, Math.max(0, Math.floor(Number(sStr) || 0)));
     onChange(Math.min(m * 60 + s, DURATION_MAX_MINUTES * 60));
   };
 

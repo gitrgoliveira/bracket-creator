@@ -1,6 +1,8 @@
 package mobileapp
 
 import (
+	"encoding/json"
+	"log"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -28,6 +30,13 @@ import (
 // for a single consumer would be premature. If a second polled surface
 // lands later we can hoist a DisplayStore interface then.
 func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
+	// P2 (mp-9afd style): singleflight group for the court-scoped match feed,
+	// mirroring the sf in RegisterViewerHandlers for GET /competitions.
+	// Unlike the constant "competitions" key, the key here includes the
+	// court, different courts are different payloads and must not collapse
+	// together.
+	sf := newViewerSingleFlight()
+
 	r.GET("/court/:court/current", func(c *gin.Context) {
 		// Streaming clients poll this on a 1-2s cadence; resolveCourt pins the
 		// no-store + CORS headers so the polled-surface guarantee survives
@@ -45,14 +54,32 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 		// state.RunningMatchOnCourt uses, so a running KNOCKOUT bout is just
 		// as "current" as a pool bout (mp-9h1f follow-up: the prior code
 		// scanned only poolMatches, so a running elimination match read as idle).
-		ids, _ := store.ListCompetitions()
+		//
+		// A failing competition list is a real 500, not an idle court: the
+		// overlay must be able to distinguish "nothing running" from "backend
+		// broken" (same contract as the sibling /matches feed). Per-competition
+		// read faults below follow the same soft-degrade contract as
+		// buildViewerCompetitionPayload (skip the broken comp, log the cause)
+		// and use the same log.Printf mechanism so the operator greps one
+		// format for every soft-degrade breadcrumb.
+		ids, err := store.ListCompetitions()
+		if err != nil {
+			internalError(c, err)
+			return
+		}
 		for _, compID := range ids {
-			comp, _ := store.LoadCompetition(compID)
+			comp, err := store.LoadCompetition(compID)
+			if err != nil {
+				log.Printf("mobileapp: court current %s: load competition: %v", compID, err)
+			}
 			if comp == nil {
 				continue
 			}
 
-			poolMatches, _ := store.LoadPoolMatches(compID)
+			poolMatches, err := store.LoadPoolMatches(compID)
+			if err != nil {
+				log.Printf("mobileapp: court current %s: load pool matches: %v", compID, err)
+			}
 			for _, m := range poolMatches {
 				if !strings.EqualFold(m.Court, court) || m.Status != state.MatchStatusRunning {
 					continue
@@ -72,7 +99,10 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 			// not the ippon arrays a pool MatchResult carries. parseScore turns
 			// it back into the {ippons, hansoku} shape the contract returns.
 			// Elimination matches have no representative-bout fighters.
-			bracket, _ := store.LoadBracket(compID)
+			bracket, err := store.LoadBracket(compID)
+			if err != nil {
+				log.Printf("mobileapp: court current %s: load bracket: %v", compID, err)
+			}
 			if bracket == nil {
 				continue
 			}
@@ -133,23 +163,38 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 	// "Match N of M" pool counts stay correct. The right-sizing is by
 	// competition COUNT (only comps on this court, not the whole tournament).
 	r.GET("/court/:court/matches", func(c *gin.Context) {
+		// resolveCourt is a per-request concern (validates + normalizes the
+		// :court param against the current tournament) and must run outside
+		// sf.Do, only the expensive payload build is collapsed.
 		court, ok := resolveCourt(c, store)
 		if !ok {
 			return
 		}
 
-		ids, _ := store.ListCompetitions()
-		comps := make([]gin.H, 0, len(ids))
-		for _, compID := range ids {
-			// The court filter does the setup-skip and "real match on this
+		// P2 (mp-9afd style): collapse concurrent builds for the SAME court to
+		// O(1) per in-flight window (court-scoped key: see the sf declaration
+		// comment). On panic inside the elected build, sf.Do returns an error
+		// and all waiters receive it; mapped to 500.
+		data, err := sf.Do("court-matches:"+court, func() ([]byte, error) {
+			// Propagate a failing competition list so serveSingleFlightJSON
+			// maps it to a 500 (matching GET /competitions): swallowing it
+			// here would serve an empty-but-200 board to every collapsed
+			// waiter while the backend is actually broken.
+			// Shared concurrent builder (same as GET /competitions); the
+			// court filter does the setup-skip and "real match on this
 			// court" gating inside the single per-comp load (no separate
 			// presence pre-check that would re-read poolMatches/bracket).
-			if payload := buildViewerCompetitionPayload(store, compID, court); payload != nil {
-				comps = append(comps, payload)
+			// comps is non-nil even when empty, so zero competitions
+			// marshals as [] not null (the wire shape the SPA and the
+			// regression test pin).
+			comps, err := buildViewerCompetitionPayloads(store, court)
+			if err != nil {
+				return nil, err
 			}
-		}
+			return json.Marshal(gin.H{"court": court, "competitions": comps})
+		})
 
-		c.JSON(http.StatusOK, gin.H{"court": court, "competitions": comps})
+		serveSingleFlightJSON(c, data, err)
 	})
 }
 

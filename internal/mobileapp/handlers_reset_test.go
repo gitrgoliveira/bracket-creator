@@ -398,12 +398,12 @@ func TestReset_BroadcastsPasswordResetEvent(t *testing.T) {
 		select {
 		case msg := <-ch:
 			for _, ev := range []string{"tournament_updated", "password_reset"} {
-				if strings.Contains(msg, `"type":"`+ev+`"`) {
+				if strings.Contains(msg.payload, `"type":"`+ev+`"`) {
 					seen[ev] = true
 				}
 			}
-			if strings.Contains(msg, `"type":"password_reset"`) &&
-				strings.Contains(msg, `"originatorId":"client-abc-123"`) {
+			if strings.Contains(msg.payload, `"type":"password_reset"`) &&
+				strings.Contains(msg.payload, `"originatorId":"client-abc-123"`) {
 				originatorEchoed = true
 			}
 		default:

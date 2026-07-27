@@ -13,15 +13,15 @@
 // actually accepts the advertised format removes both failure modes and halves
 // the number of touch targets that have to clear 44px on a tablet.
 
-// Accepted band. Match duration drives auto-scheduling for the whole event, so
-// values outside a plausible shiai range are rejected outright rather than
-// silently clamped: a fat-fingered 0:03 would otherwise persist to config.md and
-// drive the day's timetable. Mirrored server-side by MinMatchDurationSeconds /
+// Accepted band: 1:00 to 60:00. Match duration drives auto-scheduling for the
+// whole event, so values outside it are rejected outright rather than silently
+// clamped: a fat-fingered 0:03 would otherwise persist to config.md and drive
+// the day's timetable. Mirrored server-side by MinMatchDurationSeconds /
 // MaxMatchDurationSeconds in internal/state/models.go, which both validates
 // writes and clamps migrated legacy durations. A client-only block is not a
 // block; keep these two in step.
-export const MIN_DURATION_SECONDS = 30;
-export const MAX_DURATION_SECONDS = 10 * 60; // 600
+export const MIN_DURATION_SECONDS = 60;
+export const MAX_DURATION_SECONDS = 60 * 60; // 3600
 
 // Scheduler fallback when no duration is set. Mirrors defaultPerMatchClockSeconds
 // in internal/engine/scheduler_slots.go. The blank-state note below states this

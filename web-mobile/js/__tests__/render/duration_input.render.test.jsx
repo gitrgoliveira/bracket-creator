@@ -35,6 +35,7 @@ describe('formatDuration', () => {
     expect(formatDuration(123)).toBe('2:03');
     expect(formatDuration(45)).toBe('0:45');
     expect(formatDuration(600)).toBe('10:00');
+    expect(formatDuration(3600)).toBe('60:00');
   });
 
   it('renders unset / zero / negative as blank', () => {
@@ -57,7 +58,15 @@ describe('parseDuration', () => {
 
   it('reads the m:ss form the label advertises', () => {
     expect(parseDuration('2:30')).toEqual({ seconds: 150, error: null });
-    expect(parseDuration(':45')).toEqual({ seconds: 45, error: null });
+    expect(parseDuration('0:90')).toEqual({ seconds: NaN, error: 'Seconds must be 00-59.' });
+  });
+
+  it('rejects the bare :ss form, which the 1:00 floor makes unreachable', () => {
+    // The seconds component tops out at 59, so any ":ss" entry is under the
+    // floor by construction. Worth pinning: it used to be a valid shorthand
+    // when the floor was 0:30.
+    expect(parseDuration(':45')).toEqual({ seconds: NaN, error: 'Minimum is 1:00.' });
+    expect(parseDuration(':59')).toEqual({ seconds: NaN, error: 'Minimum is 1:00.' });
   });
 
   it('accepts a single-digit seconds component so typing toward 2:30 never flashes an error', () => {
@@ -75,11 +84,15 @@ describe('parseDuration', () => {
   });
 
   it('rejects values outside the shiai band instead of clamping them', () => {
-    expect(parseDuration('0:03')).toEqual({ seconds: NaN, error: 'Minimum is 0:30.' });
-    expect(parseDuration('20')).toEqual({ seconds: NaN, error: 'Maximum is 10:00.' });
+    expect(parseDuration('0:03')).toEqual({ seconds: NaN, error: 'Minimum is 1:00.' });
+    expect(parseDuration('0:59')).toEqual({ seconds: NaN, error: 'Minimum is 1:00.' });
+    expect(parseDuration('90')).toEqual({ seconds: NaN, error: 'Maximum is 60:00.' });
+    expect(parseDuration('60:01')).toEqual({ seconds: NaN, error: 'Maximum is 60:00.' });
     // The band edges themselves are valid.
-    expect(parseDuration('0:30')).toEqual({ seconds: MIN_DURATION_SECONDS, error: null });
-    expect(parseDuration('10:00')).toEqual({ seconds: MAX_DURATION_SECONDS, error: null });
+    expect(parseDuration('1:00')).toEqual({ seconds: MIN_DURATION_SECONDS, error: null });
+    expect(parseDuration('60:00')).toEqual({ seconds: MAX_DURATION_SECONDS, error: null });
+    // A realistic long match sits comfortably inside the band.
+    expect(parseDuration('15:00')).toEqual({ seconds: 900, error: null });
   });
 });
 
@@ -112,16 +125,16 @@ describe('DurationInput', () => {
     const { onChange, onValidity } = mount({ seconds: 180 });
     fireEvent.change(field(), { target: { value: '0:03' } });
     expect(onChange).not.toHaveBeenCalled();
-    expect(onValidity).toHaveBeenLastCalledWith('Minimum is 0:30.');
-    expect(screen.getByRole('alert').textContent).toBe('Minimum is 0:30.');
+    expect(onValidity).toHaveBeenLastCalledWith('Minimum is 1:00.');
+    expect(screen.getByRole('alert').textContent).toBe('Minimum is 1:00.');
     expect(field().getAttribute('aria-invalid')).toBe('true');
   });
 
   it('clears the error and resumes emitting once the value re-enters the band', () => {
     const { onChange, onValidity } = mount({ seconds: 180 });
     fireEvent.change(field(), { target: { value: '0:03' } });
-    fireEvent.change(field(), { target: { value: '0:33' } });
-    expect(onChange).toHaveBeenLastCalledWith(33);
+    fireEvent.change(field(), { target: { value: '1:33' } });
+    expect(onChange).toHaveBeenLastCalledWith(93);
     expect(onValidity).toHaveBeenLastCalledWith(null);
     expect(screen.queryByRole('alert')).toBeNull();
   });

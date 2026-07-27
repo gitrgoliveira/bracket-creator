@@ -459,15 +459,15 @@ func (c *Competition) EffectiveWithZekkenName() bool {
 }
 
 // MinMatchDurationSeconds / MaxMatchDurationSeconds bound a per-match clock to
-// a plausible shiai range. Match duration drives auto-scheduling for the whole
-// event, so a fat-fingered 0:03 would collapse the day's timetable. They live
-// here rather than in the HTTP layer because the legacy-duration migration below
-// clamps into the same band, which is what lets every other layer assume a
-// stored duration is always in range. Mirrored client-side by
+// a plausible range: 1:00 to 60:00. Match duration drives auto-scheduling for
+// the whole event, so a fat-fingered 0:03 would collapse the day's timetable.
+// They live here rather than in the HTTP layer because the legacy-duration
+// migration below clamps into the same band, which is what lets every other
+// layer assume a stored duration is always in range. Mirrored client-side by
 // MIN_DURATION_SECONDS / MAX_DURATION_SECONDS in web-mobile/js/duration.jsx.
 const (
-	MinMatchDurationSeconds = 30
-	MaxMatchDurationSeconds = 10 * 60 // 600
+	MinMatchDurationSeconds = 60      // 1:00
+	MaxMatchDurationSeconds = 60 * 60 // 3600 (60:00)
 )
 
 // ClampMatchSeconds pins a positive duration into the shiai band. Zero (unset,
@@ -493,17 +493,19 @@ func ClampMatchSeconds(seconds int) int {
 // `match_duration`, and their schedule estimates MUST be preserved rather than
 // silently reset to the default.
 //
-// The migrated value is clamped into the shiai band. That clamp is load-bearing
-// well beyond this function: because no stored duration can be out of band,
-// nothing downstream needs to special-case one. An earlier design instead
-// grandfathered out-of-band legacy values, which forced the API to compare
-// against the previous value on every write and left the settings form able to
-// wedge itself on a value it could display but not re-submit.
+// The migrated value is clamped into the band. That clamp is load-bearing well
+// beyond this function: because no stored duration can be out of band, nothing
+// downstream needs to special-case one. An earlier design instead grandfathered
+// out-of-band legacy values, which forced the API to compare against the
+// previous value on every write and left the settings form able to wedge itself
+// on a value it could display but not re-submit.
 //
-// A clamp is lossy by construction: a competition configured at 15 minutes
-// becomes 10:00, the band ceiling. That is deliberate and preferred over both
-// dropping the value (silent reset to 3:00) and keeping it (an unrepresentable
-// value the UI cannot round-trip).
+// In practice the clamp almost never fires. The retired fields are whole
+// MINUTES, so the smallest value they can express (1) already sits exactly on
+// the 60s floor, and the 60:00 ceiling is far above any real match. Only an
+// absurd stored value (say 90 minutes) is pinned, and pinning it is preferred
+// over both dropping it (a silent reset to 3:00) and keeping it (a value the UI
+// can display but not re-submit).
 func ApplyCompetitionDefaults(c *Competition) {
 	if c == nil {
 		return

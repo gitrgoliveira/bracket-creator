@@ -205,13 +205,20 @@ func TestApplyCompetitionDefaults_PerPhaseWinsOverSingleField(t *testing.T) {
 // outside the band is pinned to the nearest bound rather than dropped (silent
 // reset) or kept (a value the UI can display but not re-submit).
 func TestApplyCompetitionDefaults_ClampsIntoBand(t *testing.T) {
-	tooLong := &Competition{MatchDuration: 15} // 900s, above the 600s ceiling
+	// A realistic legacy value now sits INSIDE the band and survives intact.
+	realistic := &Competition{MatchDuration: 15} // 900s, well under the 3600s ceiling
+	ApplyCompetitionDefaults(realistic)
+	assert.Equal(t, 900, realistic.PoolMatchDurationSeconds, "15 minutes is in band and must not be clamped")
+
+	// Only an absurd stored value is pinned.
+	tooLong := &Competition{MatchDuration: 90} // 5400s, above the 3600s ceiling
 	ApplyCompetitionDefaults(tooLong)
 	assert.Equal(t, MaxMatchDurationSeconds, tooLong.PoolMatchDurationSeconds)
 	assert.Equal(t, MaxMatchDurationSeconds, tooLong.PlayoffMatchDurationSeconds)
 
-	// The floor is 30s and a whole minute already clears it, so the only way to
-	// land under the floor is a direct sub-band value.
+	// The floor is 60s and the retired fields are whole MINUTES, so the smallest
+	// value they can express already sits exactly on it. Only a direct sub-band
+	// seconds value can land under.
 	assert.Equal(t, MinMatchDurationSeconds, ClampMatchSeconds(3))
 	assert.Equal(t, MaxMatchDurationSeconds, ClampMatchSeconds(99999))
 	assert.Equal(t, 150, ClampMatchSeconds(150), "an in-band value is untouched")

@@ -3035,11 +3035,11 @@ func TestUpdateCompetition_LegacyDurationMigrates(t *testing.T) {
 		Status:        state.CompStatusSetup,
 	}))
 
-	t.Run("the stored legacy value is migrated and clamped on read", func(t *testing.T) {
+	t.Run("the stored legacy value is migrated on read and survives intact", func(t *testing.T) {
 		got, err := store.LoadCompetition("legacy-duration")
 		require.NoError(t, err)
-		assert.Equal(t, state.MaxMatchDurationSeconds, got.PoolMatchDurationSeconds,
-			"15 minutes exceeds the band ceiling and must clamp to it, not be dropped")
+		assert.Equal(t, 900, got.PoolMatchDurationSeconds,
+			"15 minutes is inside the 1:00-60:00 band, so it must carry over unchanged")
 		assert.Zero(t, got.MatchDuration, "the retired field must be cleared")
 	})
 
@@ -3056,7 +3056,7 @@ func TestUpdateCompetition_LegacyDurationMigrates(t *testing.T) {
 		return map[string]any{
 			"name": "Legacy Duration", "format": "mixed", "poolSize": 3,
 			"courts":                   []string{"A"},
-			"poolMatchDurationSeconds": state.MaxMatchDurationSeconds,
+			"poolMatchDurationSeconds": 900,
 		}
 	}
 
@@ -3069,16 +3069,16 @@ func TestUpdateCompetition_LegacyDurationMigrates(t *testing.T) {
 		got, err := store.LoadCompetition("legacy-duration")
 		require.NoError(t, err)
 		assert.Equal(t, "Renamed Legacy", got.Name)
-		assert.Equal(t, state.MaxMatchDurationSeconds, got.PoolMatchDurationSeconds)
+		assert.Equal(t, 900, got.PoolMatchDurationSeconds)
 	})
 
 	t.Run("an out-of-band duration is rejected", func(t *testing.T) {
 		body := base()
 		body["name"] = "Renamed Legacy"
-		body["poolMatchDurationSeconds"] = 1200
+		body["poolMatchDurationSeconds"] = 5400 // 90 minutes, above the 60:00 ceiling
 		w := put(t, body)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assert.Contains(t, w.Body.String(), "between 30 and 600 seconds")
+		assert.Contains(t, w.Body.String(), "between 60 and 3600 seconds")
 	})
 
 	t.Run("a fat-fingered 3-second duration is rejected", func(t *testing.T) {
@@ -3087,7 +3087,7 @@ func TestUpdateCompetition_LegacyDurationMigrates(t *testing.T) {
 		body["poolMatchDurationSeconds"] = 3
 		w := put(t, body)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assert.Contains(t, w.Body.String(), "between 30 and 600 seconds")
+		assert.Contains(t, w.Body.String(), "between 60 and 3600 seconds")
 	})
 
 	t.Run("an in-band duration saves", func(t *testing.T) {

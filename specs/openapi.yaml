@@ -3118,7 +3118,7 @@ components:
         poolMatchDurationSeconds:
           type: integer
           minimum: 0
-          maximum: 600
+          maximum: 3600
           description: >
             Estimated on-clock duration of a single pool/round match, in SECONDS,
             allowing sub-minute granularity (e.g. 150 = 2m30s). Used by the
@@ -3128,19 +3128,21 @@ components:
 
             0 or absent means "unset": the server applies the 180s (3:00)
             scheduler default. A non-zero value must fall within the plausible
-            shiai band of 30-600 seconds (0:30-10:00); outside it the request is
+            band of 60-3600 seconds (1:00-60:00); outside it the request is
             rejected with 400 rather than clamped, because match duration drives
             the whole event's schedule.
 
             A config.md written before this field existed carries the retired
             whole-minute keys. The server migrates those to seconds when it loads
             the file, clamping into the band, and drops the old keys on the next
-            save. Such a competition is therefore already in range by the time it
-            reaches this API, and a 15-minute legacy value reads back as 600.
+            save. Such a competition is therefore always in range by the time it
+            reaches this API. The retired fields hold whole minutes, so the
+            smallest value they can express already sits on the 60s floor and the
+            clamp only fires on an absurd stored value (say 90 minutes).
         playoffMatchDurationSeconds:
           type: integer
           minimum: 0
-          maximum: 600
+          maximum: 3600
           description: >
             Estimated on-clock duration of a single playoff/knockout match, in
             SECONDS (e.g. 150 = 2m30s). Same semantics, band, and legacy-migration

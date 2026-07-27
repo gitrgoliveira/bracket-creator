@@ -3150,3 +3150,60 @@ func TestUpdateCompetition_DurationChangeKeepsDraw(t *testing.T) {
 	assert.Equal(t, 240, got.PoolMatchDurationSeconds)
 	assert.Equal(t, state.CompStatusDrawReady, got.Status, "the draw must survive a duration change")
 }
+
+// TestCompetitionAPI_RejectsOutOfBandNeverClamps pins the separation between the
+// two duration jobs: the API REFUSES an out-of-band value, while the store PINS
+// one that is already on disk. Getting these backwards is a real hazard, because
+// POST used to call state.ApplyCompetitionDefaults on the inbound body BEFORE
+// validation; had the band clamp been added there, an out-of-band POST would
+// have been silently rewritten to the ceiling and returned 201.
+func TestCompetitionAPI_RejectsOutOfBandNeverClamps(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	t.Run("POST above the ceiling is rejected, not clamped", func(t *testing.T) {
+		b, _ := json.Marshal(map[string]any{"name": "Too Long", "poolMatchDurationSeconds": 99999})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(b))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code,
+			"an out-of-band duration must 400; silently clamping it to the ceiling would be the exact behaviour this control exists to prevent")
+		assert.Contains(t, w.Body.String(), "between 60 and 3600 seconds")
+	})
+
+	t.Run("POST below the floor is rejected, not clamped", func(t *testing.T) {
+		b, _ := json.Marshal(map[string]any{"name": "Too Short", "poolMatchDurationSeconds": 3})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(b))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("a hand-edited out-of-band config stays fully editable", func(t *testing.T) {
+		// The store pins it on load, so the flat band check the API performs
+		// never sees an out-of-band value and unrelated edits keep working.
+		require.NoError(t, os.MkdirAll(filepath.Join(tempDir, "competitions", "hand-edited"), 0o700))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(tempDir, "competitions", "hand-edited", "config.md"),
+			[]byte("---\nid: hand-edited\nname: Hand Edited\nformat: mixed\npool_size: 3\ncourts:\n    - A\npool_match_duration_seconds: 99999\nstatus: setup\n---\n"),
+			0o600))
+
+		loaded, err := store.LoadCompetition("hand-edited")
+		require.NoError(t, err)
+		require.Equal(t, state.MaxMatchDurationSeconds, loaded.PoolMatchDurationSeconds)
+
+		// Rename it, echoing back the pinned value the way the settings form does.
+		b, _ := json.Marshal(map[string]any{
+			"name": "Renamed", "format": "mixed", "poolSize": 3, "courts": []string{"A"},
+			"poolMatchDurationSeconds": state.MaxMatchDurationSeconds,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/hand-edited", bytes.NewBuffer(b))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+	})
+}

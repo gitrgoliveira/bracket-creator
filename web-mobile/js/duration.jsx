@@ -101,6 +101,13 @@ export function DurationInput({ seconds, onChange, onValidity, id, label, descri
     emitted.current = seconds;
     setDraft(formatDuration(seconds));
     setError(null);
+    // Report the cleared validity too, not just the cleared visual state. The
+    // caller keeps its own per-field error map to gate Save, and an invalid
+    // draft never reaches onChange, so the field is not in editedFieldsRef and
+    // an SSE push CAN move this prop out from under it. Clearing only setError
+    // left Save disabled on an error message that was no longer displayed
+    // anywhere, with nothing on screen to fix.
+    if (onValidity) onValidity(null);
   }, [seconds]);
 
   const apply = (raw) => {

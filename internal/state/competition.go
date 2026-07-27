@@ -55,9 +55,10 @@ func parseCompetitionFile(path string) (any, error) {
 		return nil, err
 	}
 	// Single funnel for every competition read, so a config.md written before
-	// per-phase seconds existed is normalized exactly once, at the boundary.
-	// See ApplyCompetitionDefaults.
-	ApplyCompetitionDefaults(&c)
+	// per-phase seconds existed is normalized exactly once, at the boundary,
+	// and an out-of-band value hand-edited into the file is pinned rather than
+	// served through. See normalizeStoredDurations.
+	normalizeStoredDurations(&c)
 	return &c, nil
 }
 
@@ -153,15 +154,15 @@ func (s *Store) saveCompetitionChangedLocked(c *Competition, write writeFn) (boo
 		return false, err
 	}
 
-	// Normalize in place before serializing. parseCompetitionFile migrates on
+	// Normalize in place before serializing. parseCompetitionFile normalizes on
 	// read, but the read path is not the only way a competition enters the
 	// store: an in-process caller can hand us a struct carrying the retired
-	// whole-minute duration fields, and this function both writes the bytes and
-	// seeds the cache with them. Migrating here as well makes "a stored
-	// competition is always on canonical seconds" true at every entry point,
-	// rather than only for values that happen to have come off disk.
-	// Idempotent, so the read-path call is not undone.
-	ApplyCompetitionDefaults(c)
+	// whole-minute fields or an out-of-band seconds value, and this function
+	// both writes the bytes and seeds the cache with them. Normalizing here as
+	// well makes "a stored duration is canonical and in band" true at every
+	// entry point, rather than only for values that came off disk. Idempotent,
+	// so the read-path call is not undone.
+	normalizeStoredDurations(c)
 
 	path := s.compPath(c.ID, "config.md")
 	newData, err := writeFrontMatter(c)

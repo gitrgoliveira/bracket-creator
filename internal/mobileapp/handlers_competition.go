@@ -150,15 +150,17 @@ func validateCompetitionDateInTournament(comp *state.Competition, tourn *state.T
 // FR-050a: swiss is now accepted; the caller must ALSO run
 // validateSwissConfig when format == swiss to enforce swissRounds >= 1.
 
-// validateCompetitionDurations enforces the shiai band on the per-phase clock
-// durations. Zero means "unset, use the scheduler default" and is allowed.
+// validateCompetitionDurations enforces the band on the per-phase clock
+// durations of an INBOUND request body. Zero means "unset, use the scheduler
+// default" and is allowed. Out of band is rejected, never clamped: silently
+// rewriting a duration the operator typed is the failure mode this whole
+// control exists to prevent.
 //
-// This is a flat check against the incoming value, with no comparison to what
-// is stored, because state.ApplyCompetitionDefaults clamps every legacy value
-// into the same band as it migrates it. No stored duration can therefore be out
-// of band, so there is nothing to grandfather. The band bounds are
-// state.MinMatchDurationSeconds / state.MaxMatchDurationSeconds; they live in
-// the state package precisely so the migration and this validator cannot drift.
+// It is a flat check with no comparison to the stored value, because the store
+// pins every duration into this same band as it loads and saves it (see
+// normalizeStoredDurations in internal/state). No stored duration can be out of
+// band, so there is nothing to grandfather. The bounds live in the state package
+// precisely so that normalization and this validator cannot drift apart.
 func validateCompetitionDurations(comp *state.Competition) error {
 	for _, secs := range []int{comp.PoolMatchDurationSeconds, comp.PlayoffMatchDurationSeconds} {
 		if secs == 0 {
@@ -307,11 +309,8 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			comp, err := store.LoadCompetition(id)
 			if err == nil && comp != nil {
 				// Normalize legacy/whole-minute durations into the canonical
-				// *Seconds fields so the SPA always receives resolved values
-				// (the client-side resolver only reads the seconds/minute pair,
-				// not the legacy single MatchDuration field). LoadCompetition
-				// returns a private copy, so this does not mutate the cache.
-				state.ApplyCompetitionDefaults(comp)
+				// *Seconds fields. The store normalizes on load, so what
+				// LoadCompetition returns is already canonical and in band.
 				comps = append(comps, comp)
 			}
 		}
@@ -343,11 +342,6 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		comp.PoolSizeMode = strings.TrimSpace(comp.PoolSizeMode)
 		comp.StartTime = strings.TrimSpace(comp.StartTime)
 		comp.Date = strings.TrimSpace(comp.Date)
-
-		// Populate per-phase durations from the legacy MatchDuration field
-		// for callers that still send `matchDuration` only. Idempotent on
-		// modern callers that send both per-phase values.
-		state.ApplyCompetitionDefaults(&comp)
 
 		// Reject whitespace-only Name. The admin_setup.jsx Create form
 		// validates this client-side (deriveCompetitionName + the
@@ -582,9 +576,6 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
 			return
 		}
-		// Normalize legacy/whole-minute durations into the canonical *Seconds
-		// fields so the SPA receives resolved values (see the list handler).
-		state.ApplyCompetitionDefaults(comp)
 		c.JSON(http.StatusOK, comp)
 	})
 
@@ -1006,11 +997,6 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				if validationErr != nil {
 					return nil, nil
 				}
-				// Normalize the inbound body: the retired whole-minute fields
-				// are `json:"-"`, so this is a no-op for a real client and only
-				// matters for a body constructed in-process. Idempotent.
-				state.ApplyCompetitionDefaults(&comp)
-
 				// Settings-only merge. Status, Players, and
 				// HasParticipantIDs are deliberately not copied from
 				// the body. Status is managed via dedicated endpoints

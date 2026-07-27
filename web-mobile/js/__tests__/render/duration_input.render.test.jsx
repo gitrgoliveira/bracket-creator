@@ -216,3 +216,35 @@ describe('clearing a duration', () => {
     expect(Number.isFinite(staged[0][1])).toBe(true);
   });
 });
+
+// Regression guard for the tri-review finding that a prop resync cleared the
+// component's visible error but never told the caller. An invalid draft never
+// reaches onChange, so the parent never marks the field as edited, so an SSE
+// push CAN move the prop out from under it. The parent keeps its own error map
+// to gate Save, so clearing only the local error left Save disabled showing
+// "Fix match duration" with no error visible anywhere to fix.
+describe('prop resync while the field is invalid', () => {
+  it('reports the cleared validity to the caller, not just to itself', () => {
+    const onChange = vi.fn();
+    const onValidity = vi.fn();
+    const { rerender } = render(
+      <DurationInput label="Match duration" seconds={150} onChange={onChange} onValidity={onValidity} />
+    );
+
+    // Operator types something out of band: error shown, caller told.
+    fireEvent.change(screen.getByLabelText('Match duration'), { target: { value: '90:00' } });
+    expect(onValidity).toHaveBeenLastCalledWith('Maximum is 60:00.');
+    expect(screen.getByRole('alert')).toBeTruthy();
+    expect(onChange).not.toHaveBeenCalled();
+
+    // A concurrent admin's change lands via SSE and moves the prop.
+    rerender(
+      <DurationInput label="Match duration" seconds={240} onChange={onChange} onValidity={onValidity} />
+    );
+
+    // The visible error is gone AND the caller has been told, so Save unsticks.
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByLabelText('Match duration').value).toBe('4:00');
+    expect(onValidity).toHaveBeenLastCalledWith(null);
+  });
+});

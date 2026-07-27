@@ -527,6 +527,37 @@ func ApplyCompetitionDefaults(c *Competition) {
 	c.MatchDuration = 0
 }
 
+// normalizeStoredDurations is the STORE-BOUNDARY duration normalization: it
+// migrates the retired fields and then pins the canonical seconds into the band
+// unconditionally, including a value that was already populated rather than
+// derived from a legacy field.
+//
+// This is what actually makes "no stored duration is out of band" true, and it
+// is deliberately NOT part of ApplyCompetitionDefaults. Handlers call that on an
+// inbound request body, and POST does so BEFORE validateCompetitionDurations
+// runs; clamping there would silently rewrite an out-of-band value the API is
+// supposed to reject with 400, turning a refusal into a quiet mutation. Refusing
+// what a client sends and pinning what is already on disk are different jobs, so
+// they get different functions:
+//
+//   - inbound (handlers)  -> validateCompetitionDurations: reject, never clamp
+//   - stored (this file)  -> normalizeStoredDurations: clamp, never reject
+//
+// Without the unconditional clamp, a hand-edited config.md carrying
+// `pool_match_duration_seconds: 99999` would load as-is, and every subsequent
+// settings save (a rename, a court change) would fail the flat band check with
+// 400: the competition would become uneditable. That is the same failure the
+// grandfathering design was introduced and then deleted to avoid, arriving
+// through a different door.
+func normalizeStoredDurations(c *Competition) {
+	if c == nil {
+		return
+	}
+	ApplyCompetitionDefaults(c)
+	c.PoolMatchDurationSeconds = ClampMatchSeconds(c.PoolMatchDurationSeconds)
+	c.PlayoffMatchDurationSeconds = ClampMatchSeconds(c.PlayoffMatchDurationSeconds)
+}
+
 // firstPositive returns the first value greater than zero, or 0.
 func firstPositive(vals ...int) int {
 	for _, v := range vals {

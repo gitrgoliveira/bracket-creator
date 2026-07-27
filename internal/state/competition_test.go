@@ -3,6 +3,7 @@ package state
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -512,4 +513,71 @@ func TestFightingSpiritAwardsRoundTrip(t *testing.T) {
 		assert.Equal(t, "Dan Watanabe", loaded.FightingSpiritAwards[0].RecipientName)
 		assert.Equal(t, "Osaka", loaded.FightingSpiritAwards[0].RecipientDojo)
 	})
+}
+
+// TestNormalizeStoredDurations_ClampsAlreadyPopulatedValue is the regression
+// guard for the tri-review finding that ApplyCompetitionDefaults only clamped a
+// value it had just derived from the retired whole-minute fields, leaving an
+// already-populated out-of-band seconds value untouched.
+//
+// That mattered because the HTTP validator is a flat band check that trusts
+// "no stored duration is out of band". A config.md hand-edited to
+// pool_match_duration_seconds: 99999 would load as-is and then fail every
+// subsequent settings save with 400, making the competition uneditable.
+func TestNormalizeStoredDurations_ClampsAlreadyPopulatedValue(t *testing.T) {
+	t.Run("above the ceiling", func(t *testing.T) {
+		c := &Competition{PoolMatchDurationSeconds: 99999, PlayoffMatchDurationSeconds: 99999}
+		normalizeStoredDurations(c)
+		assert.Equal(t, MaxMatchDurationSeconds, c.PoolMatchDurationSeconds)
+		assert.Equal(t, MaxMatchDurationSeconds, c.PlayoffMatchDurationSeconds)
+	})
+
+	t.Run("below the floor", func(t *testing.T) {
+		c := &Competition{PoolMatchDurationSeconds: 3, PlayoffMatchDurationSeconds: 59}
+		normalizeStoredDurations(c)
+		assert.Equal(t, MinMatchDurationSeconds, c.PoolMatchDurationSeconds)
+		assert.Equal(t, MinMatchDurationSeconds, c.PlayoffMatchDurationSeconds)
+	})
+
+	t.Run("an in-band value and an unset value are untouched", func(t *testing.T) {
+		c := &Competition{PoolMatchDurationSeconds: 150}
+		normalizeStoredDurations(c)
+		assert.Equal(t, 150, c.PoolMatchDurationSeconds)
+		assert.Zero(t, c.PlayoffMatchDurationSeconds, "0 stays 0: unset means use the default")
+	})
+
+	t.Run("nil is safe", func(t *testing.T) {
+		assert.NotPanics(t, func() { normalizeStoredDurations(nil) })
+	})
+
+	// The plain migration entry point deliberately does NOT clamp a
+	// pre-populated value: handlers call it on an inbound request body, and POST
+	// does so before validation, so clamping there would silently rewrite a
+	// value the API must reject with 400.
+	t.Run("ApplyCompetitionDefaults leaves a pre-populated value alone", func(t *testing.T) {
+		c := &Competition{PoolMatchDurationSeconds: 99999}
+		ApplyCompetitionDefaults(c)
+		assert.Equal(t, 99999, c.PoolMatchDurationSeconds,
+			"clamping here would let an out-of-band POST body pass validation")
+	})
+}
+
+// TestStore_HandEditedOutOfBandDurationIsPinnedOnLoad proves the invariant end
+// to end through the real store, not just the helper: a config.md carrying an
+// absurd seconds value is pinned when it is read.
+func TestStore_HandEditedOutOfBandDurationIsPinnedOnLoad(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "competitions", "hand-edited"), 0o700))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "competitions", "hand-edited", "config.md"),
+		[]byte("---\nid: hand-edited\nname: Hand Edited\npool_match_duration_seconds: 99999\n---\n"),
+		0o600))
+
+	got, err := store.LoadCompetition("hand-edited")
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, MaxMatchDurationSeconds, got.PoolMatchDurationSeconds,
+		"a hand-edited out-of-band value must be pinned on load, or every later save 400s")
 }

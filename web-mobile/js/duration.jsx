@@ -1,75 +1,153 @@
-// duration.jsx: shared minutes+seconds match-duration input (mp-m5kf).
-// Operators enter match durations with sub-minute granularity (e.g. 2m30s);
+// duration.jsx: shared masked m:ss match-duration input (mp-m5kf).
+// Operators enter match durations with sub-minute granularity (e.g. 2:30);
 // the control is bound to a single integer-seconds value so callers persist
 // one canonical field (poolMatchDurationSeconds / playoffMatchDurationSeconds
-// on the Go side). Two number sub-fields (min + sec) avoid mm:ss parse
-// ambiguity and step cleanly on mobile.
+// on the Go side).
+//
+// This is ONE masked text field, not a minutes box plus a seconds box. The
+// two-field version shipped first and was wrong twice over: it rendered as a
+// 2x2 grid (it reused `.row`, which is a two-column CSS grid, so each unit
+// caption stranded ~160px from its input and collapsed to four stacked strips
+// under 720px), and its `(min:sec)` label taught a colon the control silently
+// swallowed, so "2:30" saved as 230 MINUTES with no warning. One field that
+// actually accepts the advertised format removes both failure modes and halves
+// the number of touch targets that have to clear 44px on a tablet.
 
-// DURATION_MAX_MINUTES caps the minutes sub-field at 24 hours, matching
-// maxMatchDurationMinutes in internal/mobileapp/handlers_competition.go so the
-// client never emits a value the server would reject with a 400.
-const DURATION_MAX_MINUTES = 24 * 60; // 1440
+// Accepted band. Match duration drives auto-scheduling for the whole event, so
+// values outside a plausible shiai range are rejected outright rather than
+// silently clamped: a fat-fingered 0:03 used to persist to config.md and drive
+// the day's timetable. Mirrored server-side by minMatchDurationSeconds /
+// maxMatchDurationSeconds in internal/mobileapp/handlers_competition.go: a
+// client-only block is not a block.
+export const MIN_DURATION_SECONDS = 30;
+export const MAX_DURATION_SECONDS = 10 * 60; // 600
 
-// DurationInput renders a minutes field and a seconds field bound to one
-// integer-seconds value.
-//   props.seconds        current value in seconds (number; NaN/undefined = unset)
-//   props.onChange(sec)  called with the new integer seconds, or NaN when both
-//                        sub-fields are cleared (caller treats NaN as "default")
-//   props.disabled       disables both inputs
-//   props.placeholderMin placeholder text for the minutes field (e.g. "3")
-//   props.style          extra style merged onto the wrapping row
-export function DurationInput({ seconds, onChange, disabled, placeholderMin, style }) {
-  const has = Number.isFinite(seconds) && seconds > 0;
-  const total = has ? Math.round(seconds) : null;
-  const mmVal = total != null ? Math.floor(total / 60) : "";
-  const ssVal = total != null ? total % 60 : "";
+// Scheduler fallback when no duration is set. Mirrors defaultPerMatchClockSeconds
+// in internal/engine/scheduler_slots.go. The blank-state note below states this
+// resolved value outright, so callers do NOT need to repeat "leave blank for the
+// default" in their field hint.
+export const DEFAULT_DURATION_SECONDS = 180;
 
-  // Recompute the combined seconds from the two sub-fields. Both blank emits
-  // NaN so the caller falls back to the scheduler default; otherwise a blank
-  // sub-field counts as 0, the minutes are clamped to [0, DURATION_MAX_MINUTES]
-  // and the seconds component to [0, 59]. The COMBINED total is also capped at
-  // the ceiling so 1440min + a nonzero seconds value (e.g. 86430s) can't exceed
-  // the server's 86400s cap and 400 on save.
-  const emit = (mRaw, sRaw) => {
-    const mStr = String(mRaw).trim();
-    const sStr = String(sRaw).trim();
-    if (mStr === "" && sStr === "") { onChange(NaN); return; }
-    // Math.floor(Number(...) || 0) is always finite; clamp each sub-field to
-    // its range, then cap the combined total at the ceiling.
-    const m = Math.min(DURATION_MAX_MINUTES, Math.max(0, Math.floor(Number(mStr) || 0)));
-    const s = Math.min(59, Math.max(0, Math.floor(Number(sStr) || 0)));
-    onChange(Math.min(m * 60 + s, DURATION_MAX_MINUTES * 60));
+// formatDuration renders canonical "m:ss". Returns "" for unset/zero so the
+// field shows its placeholder and the caller falls back to the default.
+export function formatDuration(seconds) {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "";
+  const total = Math.round(seconds);
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
+
+const BARE_MINUTES = /^\d{1,4}$/;
+const MINUTES_SECONDS = /^(\d{0,4}):(\d{1,2})$/;
+
+// parseDuration turns operator input into { seconds, error }.
+//   ""      -> { NaN,  null }   blank means "use the default"
+//   "3"     -> { 180,  null }   a bare number is WHOLE MINUTES, preserving the
+//                               habit from the minutes-only field this replaced
+//   "2:30"  -> { 150,  null }
+//   "2:3"   -> { 123,  null }   1-digit seconds parse so typing toward "2:30"
+//                               never flashes an error mid-keystroke; the field
+//                               normalizes the display to "2:03" on blur
+//   ":45"   -> { 45,   null }
+//   "2:60"  -> { NaN,  "Seconds must be 00-59." }
+//   "0:03"  -> { NaN,  "Minimum is 0:30." }
+// error is non-null exactly when the value must not be committed.
+export function parseDuration(raw) {
+  const text = String(raw == null ? "" : raw).trim();
+  if (text === "") return { seconds: NaN, error: null };
+
+  let total;
+  if (BARE_MINUTES.test(text)) {
+    total = Number(text) * 60;
+  } else {
+    const parts = MINUTES_SECONDS.exec(text);
+    if (!parts) return { seconds: NaN, error: "Use m:ss, for example 2:30." };
+    const secs = Number(parts[2]);
+    if (secs > 59) return { seconds: NaN, error: "Seconds must be 00-59." };
+    total = Number(parts[1] || 0) * 60 + secs;
+  }
+
+  if (total < MIN_DURATION_SECONDS) {
+    return { seconds: NaN, error: `Minimum is ${formatDuration(MIN_DURATION_SECONDS)}.` };
+  }
+  if (total > MAX_DURATION_SECONDS) {
+    return { seconds: NaN, error: `Maximum is ${formatDuration(MAX_DURATION_SECONDS)}.` };
+  }
+  return { seconds: total, error: null };
+}
+
+// DurationInput renders one masked m:ss field bound to an integer-seconds value.
+//   props.seconds       current value in seconds (number; NaN/undefined = unset)
+//   props.onChange(sec) called with the new integer seconds, or NaN when the
+//                       field is cleared (caller treats NaN as "use default").
+//                       NOT called while the field is invalid, so the staged
+//                       value never holds an out-of-band duration.
+//   props.onValidity(e) called with the error string (or null) on every edit so
+//                       the caller can gate its Save / Auto-schedule button
+//   props.id            id for the field, so the caller's <label htmlFor> binds
+//   props.label         accessible name when there is no visible <label>
+//   props.describedBy   id of the caller's hint element
+//   props.disabled      disables the field
+export function DurationInput({ seconds, onChange, onValidity, id, label, describedBy, disabled }) {
+  const [draft, setDraft] = React.useState(() => formatDuration(seconds));
+  const [error, setError] = React.useState(null);
+  // Last value this field emitted. The effect below resyncs the draft only when
+  // the prop moves independently (an SSE push, a discarded edit), so a resync
+  // never fights the operator mid-keystroke.
+  const emitted = React.useRef(seconds);
+
+  React.useEffect(() => {
+    if (Object.is(seconds, emitted.current)) return;
+    emitted.current = seconds;
+    setDraft(formatDuration(seconds));
+    setError(null);
+  }, [seconds]);
+
+  const apply = (raw) => {
+    setDraft(raw);
+    const parsed = parseDuration(raw);
+    setError(parsed.error);
+    if (onValidity) onValidity(parsed.error);
+    if (!parsed.error) {
+      emitted.current = parsed.seconds;
+      onChange(parsed.seconds);
+    }
   };
 
+  // Snap a valid draft to canonical "m:ss" on blur, so "2:3" reads back as
+  // "2:03" and the operator sees exactly what was committed.
+  const normalize = () => {
+    const parsed = parseDuration(draft);
+    if (!parsed.error) setDraft(formatDuration(parsed.seconds));
+  };
+
+  const errorId = id ? `${id}-error` : undefined;
+  const noteId = id ? `${id}-note` : undefined;
+  const usingDefault = draft.trim() === "" && !error;
+  const describers = [describedBy, error ? errorId : null, usingDefault ? noteId : null].filter(Boolean);
+
   return (
-    <div className="row" style={{ gap: 6, alignItems: "center", ...(style || {}) }}>
+    <div className="duration-input">
       <input
-        className="input"
-        type="number"
-        min="0"
-        max={DURATION_MAX_MINUTES}
-        step="1"
-        style={{ width: 68 }}
-        value={mmVal}
-        placeholder={placeholderMin}
+        id={id}
+        className={`input duration-input__field${error ? " duration-input__field--invalid" : ""}`}
+        type="text"
+        inputMode="numeric"
+        autoComplete="off"
+        placeholder={formatDuration(DEFAULT_DURATION_SECONDS)}
+        value={draft}
         disabled={disabled}
-        onChange={(e) => emit(e.target.value, ssVal)}
-        aria-label="minutes"
+        aria-label={label}
+        aria-invalid={error ? "true" : undefined}
+        aria-describedby={describers.length ? describers.join(" ") : undefined}
+        onChange={(e) => apply(e.target.value)}
+        onBlur={normalize}
       />
-      <span className="field__hint" style={{ margin: 0 }}>min</span>
-      <input
-        className="input"
-        type="number"
-        min="0"
-        max="59"
-        step="1"
-        style={{ width: 68 }}
-        value={ssVal}
-        disabled={disabled}
-        onChange={(e) => emit(mmVal, e.target.value)}
-        aria-label="seconds"
-      />
-      <span className="field__hint" style={{ margin: 0 }}>sec</span>
+      {error && <div className="duration-input__error" id={errorId} role="alert">{error}</div>}
+      {usingDefault && (
+        <div className="duration-input__note" id={noteId}>
+          Using the default, {formatDuration(DEFAULT_DURATION_SECONDS)}.
+        </div>
+      )}
     </div>
   );
 }

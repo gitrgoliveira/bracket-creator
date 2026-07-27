@@ -13,7 +13,6 @@ const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 // Mirrors defaultPerMatchClockMinutes in internal/engine/scheduler_slots.go
 // (a nominal estimate anchor, not a regulation match time). Surfaced in the
 // duration inputs so the operator knows what "blank" resolves to.
-const DEFAULT_MATCH_MINUTES = 3;
 
 const dmyToIso = window.dmyToIso;
 const isoToDmy = window.isoToDmy;
@@ -437,19 +436,37 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     if (Number.isFinite(secOrNaN)) update(minKey, 0);
   };
 
-  // Render one per-phase mm:ss duration field. Pool and playoff differ only in
+  // Track which duration fields currently hold an out-of-band / unparseable
+  // value so Save can be blocked. DurationInput never emits an invalid value,
+  // so without this gate a bad entry would just be silently dropped on save,
+  // which is the same "looked like it worked" failure the band is meant to end.
+  const [durationErrors, setDurationErrors] = useStateA({});
+  const setDurationError = (key) => (err) =>
+    setDurationErrors((prev) => {
+      if ((prev[key] || null) === err) return prev;
+      const next = { ...prev };
+      if (err) next[key] = err; else delete next[key];
+      return next;
+    });
+  const hasDurationError = Object.keys(durationErrors).length > 0;
+
+  // Render one per-phase m:ss duration field. Pool and playoff differ only in
   // label/hint/field-key, so share the markup to keep the two hint strings in
   // step. `seconds` resolves through the 3-tier fallback (seconds -> per-phase
   // minutes -> legacy MatchDuration) so a legacy comp still shows its value.
+  // The label owns the field via htmlFor/id, so a screen reader announces
+  // "Pool match duration" rather than four indistinguishable sub-field names.
   const durationField = (label, secKey, minKey, hint) => (
     <div className="field">
-      <label className="field__label">{label}</label>
+      <label className="field__label" htmlFor={`duration-${secKey}`}>{label}</label>
       <DurationInput
+        id={`duration-${secKey}`}
+        describedBy={`duration-${secKey}-hint`}
         seconds={effectiveDurationSeconds(local[secKey], local[minKey], local.matchDuration)}
         onChange={updateDurationSeconds(secKey, minKey)}
-        placeholderMin={`${DEFAULT_MATCH_MINUTES}`}
+        onValidity={setDurationError(secKey)}
       />
-      <div className="field__hint">{hint}</div>
+      <div className="field__hint" id={`duration-${secKey}-hint`}>{hint}</div>
     </div>
   );
 
@@ -484,14 +501,14 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             fontSize: 12.5,
             padding: "4px 8px",
             borderRadius: 4,
-            background: saveErr ? "var(--red-soft)" : isDirty ? "var(--warn-soft)" : lastSaved ? "var(--accent-soft)" : "transparent",
-            color: saveErr ? "var(--red)" : isDirty ? "var(--warn-ink)" : "var(--accent)",
+            background: (saveErr || hasDurationError) ? "var(--red-soft)" : isDirty ? "var(--warn-soft)" : lastSaved ? "var(--accent-soft)" : "transparent",
+            color: (saveErr || hasDurationError) ? "var(--red)" : isDirty ? "var(--warn-ink)" : "var(--accent)",
             fontWeight: 600,
             transition: "all 300ms"
           }}>
-            {saveErr ? `⚠ ${saveErr}` : saving ? "Saving…" : isDirty ? "● Unsaved changes" : lastSaved ? `✓ Saved at ${lastSaved}` : ""}
+            {saveErr ? `⚠ ${saveErr}` : saving ? "Saving…" : hasDurationError ? "⚠ Fix match duration" : isDirty ? "● Unsaved changes" : lastSaved ? `✓ Saved at ${lastSaved}` : ""}
           </div>
-          <button type="button" className="btn btn--primary" onClick={saveNow} disabled={!isDirty || saving}>
+          <button type="button" className="btn btn--primary" onClick={saveNow} disabled={!isDirty || saving || hasDurationError}>
             {saving ? "Saving…" : "Save changes"}
           </button>
         </div>
@@ -679,17 +696,17 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
         <div className="row">
           {(local.format === "mixed" || local.format === "league" || local.format === "swiss") &&
             durationField(
-              local.format === "swiss" ? "Round match duration (min:sec)" : "Pool match duration (min:sec)",
+              local.format === "swiss" ? "Round match duration" : "Pool match duration",
               "poolMatchDurationSeconds",
               "poolMatchDuration",
-              `Estimated time per ${local.format === "swiss" ? "Swiss-round" : "pool"} match (e.g. 2 min 30 sec). Leave blank for the default (${DEFAULT_MATCH_MINUTES} min).`
+              `Estimated time per ${local.format === "swiss" ? "Swiss-round" : "pool"} match, as m:ss (e.g. 2:30).`
             )}
           {(local.format === "playoffs" || local.format === "mixed") &&
             durationField(
-              "Playoff match duration (min:sec)",
+              "Playoff match duration",
               "playoffMatchDurationSeconds",
               "playoffMatchDuration",
-              `Estimated time per playoff/knockout match (e.g. 2 min 30 sec). Leave blank for the default (${DEFAULT_MATCH_MINUTES} min).`
+              "Estimated time per playoff/knockout match, as m:ss (e.g. 2:30)."
             )}
         </div>
       )}

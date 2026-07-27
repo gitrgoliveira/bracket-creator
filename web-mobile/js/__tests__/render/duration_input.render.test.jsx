@@ -1,83 +1,171 @@
-// Render tests for the shared mm:ss DurationInput (mp-m5kf). DurationInput is a
+// Render tests for the masked m:ss DurationInput (mp-m5kf). DurationInput is a
 // leaf component with no window.* deps, so it mounts directly under React 18 +
-// jsdom. These pin the display derivation and the emit() edge cases the unit
-// suite can't reach (they live inside the component closure).
+// jsdom. These cover the display derivation, the parse/normalize behaviour, and
+// the validation states the pure parseDuration tests can't reach (draft state,
+// aria wiring, onValidity plumbing, blur normalization).
 
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
-import { DurationInput } from '../../duration.jsx';
+import {
+  DurationInput, parseDuration, formatDuration,
+  MIN_DURATION_SECONDS, MAX_DURATION_SECONDS,
+} from '../../duration.jsx';
 
-function inputs() {
-  return {
-    min: screen.getByLabelText('minutes'),
-    sec: screen.getByLabelText('seconds'),
-  };
+const field = () => screen.getByLabelText('Match duration');
+
+function mount(props = {}) {
+  const onChange = vi.fn();
+  const onValidity = vi.fn();
+  render(
+    <DurationInput
+      label="Match duration"
+      seconds={NaN}
+      onChange={onChange}
+      onValidity={onValidity}
+      {...props}
+    />
+  );
+  return { onChange, onValidity };
 }
 
+describe('formatDuration', () => {
+  it('renders canonical m:ss with a zero-padded seconds component', () => {
+    expect(formatDuration(150)).toBe('2:30');
+    expect(formatDuration(123)).toBe('2:03');
+    expect(formatDuration(45)).toBe('0:45');
+    expect(formatDuration(600)).toBe('10:00');
+  });
+
+  it('renders unset / zero / negative as blank', () => {
+    expect(formatDuration(NaN)).toBe('');
+    expect(formatDuration(0)).toBe('');
+    expect(formatDuration(-5)).toBe('');
+    expect(formatDuration(undefined)).toBe('');
+  });
+});
+
+describe('parseDuration', () => {
+  it('treats blank as "use the default" rather than an error', () => {
+    expect(parseDuration('')).toEqual({ seconds: NaN, error: null });
+    expect(parseDuration('   ')).toEqual({ seconds: NaN, error: null });
+  });
+
+  it('reads a bare number as whole minutes', () => {
+    expect(parseDuration('3')).toEqual({ seconds: 180, error: null });
+  });
+
+  it('reads the m:ss form the label advertises', () => {
+    expect(parseDuration('2:30')).toEqual({ seconds: 150, error: null });
+    expect(parseDuration(':45')).toEqual({ seconds: 45, error: null });
+  });
+
+  it('accepts a single-digit seconds component so typing toward 2:30 never flashes an error', () => {
+    // "2:3" is a keystroke on the way to "2:30"; it must parse, not reject.
+    expect(parseDuration('2:3')).toEqual({ seconds: 123, error: null });
+  });
+
+  it('rejects a seconds component above 59', () => {
+    expect(parseDuration('2:60').error).toBe('Seconds must be 00-59.');
+  });
+
+  it('rejects unparseable input', () => {
+    expect(parseDuration('abc').error).toBe('Use m:ss, for example 2:30.');
+    expect(parseDuration('1:2:3').error).toBe('Use m:ss, for example 2:30.');
+  });
+
+  it('rejects values outside the shiai band instead of clamping them', () => {
+    expect(parseDuration('0:03')).toEqual({ seconds: NaN, error: 'Minimum is 0:30.' });
+    expect(parseDuration('20')).toEqual({ seconds: NaN, error: 'Maximum is 10:00.' });
+    // The band edges themselves are valid.
+    expect(parseDuration('0:30')).toEqual({ seconds: MIN_DURATION_SECONDS, error: null });
+    expect(parseDuration('10:00')).toEqual({ seconds: MAX_DURATION_SECONDS, error: null });
+  });
+});
+
 describe('DurationInput', () => {
-  it('derives the min/sec display from the seconds prop', () => {
-    render(<DurationInput seconds={150} onChange={() => {}} />);
-    const { min, sec } = inputs();
-    expect(min.value).toBe('2');
-    expect(sec.value).toBe('30');
+  it('derives the m:ss display from the seconds prop', () => {
+    mount({ seconds: 150 });
+    expect(field().value).toBe('2:30');
   });
 
-  it('renders both fields blank when seconds is unset', () => {
-    render(<DurationInput seconds={NaN} onChange={() => {}} />);
-    const { min, sec } = inputs();
-    expect(min.value).toBe('');
-    expect(sec.value).toBe('');
+  it('renders blank and a "using the default" note when unset', () => {
+    mount({ seconds: NaN });
+    expect(field().value).toBe('');
+    expect(screen.getByText('Using the default, 3:00.')).toBeTruthy();
   });
 
-  it('emits total seconds when the minutes field changes', () => {
+  it('emits total seconds for the m:ss the label promises', () => {
+    // The two-field predecessor turned this exact input into 230 MINUTES.
+    const { onChange } = mount({ seconds: 180 });
+    fireEvent.change(field(), { target: { value: '2:30' } });
+    expect(onChange).toHaveBeenLastCalledWith(150);
+  });
+
+  it('emits NaN when cleared so the caller falls back to the default', () => {
+    const { onChange } = mount({ seconds: 150 });
+    fireEvent.change(field(), { target: { value: '' } });
+    expect(onChange).toHaveBeenLastCalledWith(NaN);
+  });
+
+  it('does NOT emit an out-of-band value, and reports the error upward', () => {
+    const { onChange, onValidity } = mount({ seconds: 180 });
+    fireEvent.change(field(), { target: { value: '0:03' } });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onValidity).toHaveBeenLastCalledWith('Minimum is 0:30.');
+    expect(screen.getByRole('alert').textContent).toBe('Minimum is 0:30.');
+    expect(field().getAttribute('aria-invalid')).toBe('true');
+  });
+
+  it('clears the error and resumes emitting once the value re-enters the band', () => {
+    const { onChange, onValidity } = mount({ seconds: 180 });
+    fireEvent.change(field(), { target: { value: '0:03' } });
+    fireEvent.change(field(), { target: { value: '0:33' } });
+    expect(onChange).toHaveBeenLastCalledWith(33);
+    expect(onValidity).toHaveBeenLastCalledWith(null);
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('keeps the operator\'s raw text while they type, invalid or not', () => {
+    mount({ seconds: 180 });
+    fireEvent.change(field(), { target: { value: '2:6' } });
+    expect(field().value).toBe('2:6');
+  });
+
+  it('normalizes a valid draft to canonical m:ss on blur', () => {
+    mount({ seconds: 180 });
+    fireEvent.change(field(), { target: { value: '2:3' } });
+    fireEvent.blur(field());
+    expect(field().value).toBe('2:03');
+  });
+
+  it('leaves an invalid draft alone on blur so the operator can correct it', () => {
+    mount({ seconds: 180 });
+    fireEvent.change(field(), { target: { value: '2:99' } });
+    fireEvent.blur(field());
+    expect(field().value).toBe('2:99');
+    expect(screen.getByRole('alert')).toBeTruthy();
+  });
+
+  it('resyncs the draft when the seconds prop moves independently (e.g. an SSE push)', () => {
     const onChange = vi.fn();
-    render(<DurationInput seconds={150} onChange={onChange} />);
-    fireEvent.input(inputs().min, { target: { value: '3' } });
-    // sibling seconds (30) is read from the controlled prop → 3*60 + 30
-    expect(onChange).toHaveBeenLastCalledWith(210);
+    const { rerender } = render(
+      <DurationInput label="Match duration" seconds={150} onChange={onChange} />
+    );
+    expect(field().value).toBe('2:30');
+    rerender(<DurationInput label="Match duration" seconds={240} onChange={onChange} />);
+    expect(field().value).toBe('4:00');
   });
 
-  it('counts a blank minutes field as 0', () => {
-    const onChange = vi.fn();
-    render(<DurationInput seconds={NaN} onChange={onChange} />);
-    fireEvent.input(inputs().sec, { target: { value: '30' } });
-    expect(onChange).toHaveBeenLastCalledWith(30);
+  it('wires the caller hint and its own error into aria-describedby', () => {
+    mount({ seconds: 180, id: 'dur', describedBy: 'dur-hint' });
+    expect(field().getAttribute('aria-describedby')).toBe('dur-hint');
+    fireEvent.change(field(), { target: { value: 'nope' } });
+    expect(field().getAttribute('aria-describedby')).toBe('dur-hint dur-error');
   });
 
-  it('clamps the seconds component to 59', () => {
-    const onChange = vi.fn();
-    render(<DurationInput seconds={120} onChange={onChange} />);
-    fireEvent.input(inputs().sec, { target: { value: '75' } });
-    expect(onChange).toHaveBeenLastCalledWith(2 * 60 + 59);
-  });
-
-  it('clamps the minutes component to the 24h ceiling', () => {
-    const onChange = vi.fn();
-    render(<DurationInput seconds={NaN} onChange={onChange} />);
-    fireEvent.input(inputs().min, { target: { value: '999999' } });
-    expect(onChange).toHaveBeenLastCalledWith(1440 * 60);
-  });
-
-  it('caps the COMBINED total at the 86400s ceiling (never emits a value the server rejects)', () => {
-    const onChange = vi.fn();
-    // 1440 min already at the ceiling; adding 30s would be 86430 > 86400.
-    render(<DurationInput seconds={1440 * 60} onChange={onChange} />);
-    fireEvent.input(inputs().sec, { target: { value: '30' } });
-    expect(onChange).toHaveBeenLastCalledWith(86400);
-  });
-
-  it('renders both fields blank for a zero value (resolves to default upstream)', () => {
-    render(<DurationInput seconds={0} onChange={() => {}} />);
-    const { min, sec } = inputs();
-    expect(min.value).toBe('');
-    expect(sec.value).toBe('');
-  });
-
-  it('coerces a negative / non-numeric seconds entry to 0', () => {
-    const onChange = vi.fn();
-    render(<DurationInput seconds={120} onChange={onChange} />);
-    fireEvent.input(inputs().sec, { target: { value: '-5' } });
-    expect(onChange).toHaveBeenLastCalledWith(120);
+  it('opens a numeric keypad on touch devices', () => {
+    mount({ seconds: 180 });
+    expect(field().getAttribute('inputmode')).toBe('numeric');
   });
 });

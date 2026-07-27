@@ -1539,6 +1539,43 @@ func TestValidateCompetitionDurations_Negative(t *testing.T) {
 	assert.NoError(t, validateCompetitionDurations(&state.Competition{PoolMatchDuration: maxMatchDurationMinutes}))
 }
 
+// TestValidateCompetitionDurations_Band verifies the shiai band on the
+// canonical seconds fields. A fat-fingered 3-second match drives the whole
+// day's auto-schedule, so it is rejected outright rather than clamped; the
+// client-side band in web-mobile/js/duration.jsx mirrors these bounds but a
+// client-only block is not a block.
+func TestValidateCompetitionDurations_Band(t *testing.T) {
+	tests := []struct {
+		name    string
+		comp    state.Competition
+		wantErr bool
+	}{
+		{"pool below floor", state.Competition{PoolMatchDurationSeconds: 3}, true},
+		{"playoff below floor", state.Competition{PlayoffMatchDurationSeconds: minMatchDurationSeconds - 1}, true},
+		{"pool at floor", state.Competition{PoolMatchDurationSeconds: minMatchDurationSeconds}, false},
+		{"playoff at ceiling", state.Competition{PlayoffMatchDurationSeconds: maxMatchDurationSeconds}, false},
+		{"pool above ceiling", state.Competition{PoolMatchDurationSeconds: maxMatchDurationSeconds + 1}, true},
+		// 0 is "unset, use the scheduler default" and must stay accepted:
+		// otherwise clearing the field would fail to save.
+		{"unset is allowed", state.Competition{PoolMatchDurationSeconds: 0, PlayoffMatchDurationSeconds: 0}, false},
+		// The legacy whole-minute fields keep the wider 24h range so an
+		// existing 15-minute competition stays saveable when the operator
+		// edits an unrelated field such as its name.
+		{"legacy 15-minute value outside the band still saves", state.Competition{PoolMatchDuration: 15}, false},
+		{"legacy 20-minute value still saves", state.Competition{MatchDuration: 20}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateCompetitionDurations(&tt.comp)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
 // TestValidateCompetitionFormat_UnknownFormat verifies that unknown format
 // strings are rejected.
 func TestValidateCompetitionFormat_UnknownFormat(t *testing.T) {

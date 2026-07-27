@@ -133,11 +133,15 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
   const [picked, setPicked] = useStateA([]);
   const [dojoText, setDojoText] = useStateA("");
   const [compFilter, setCompFilter] = useStateA("all");
-  const [matchDurationSeconds, setMatchDurationSeconds] = useStateA(180); // seconds per match estimate (mm:ss)
+  const [matchDurationSeconds, setMatchDurationSeconds] = useStateA(180); // seconds per match estimate (m:ss)
   // Per-competition auto-schedule: startTime + duration
   const [autoComp, setAutoComp] = useStateA(tournament.competitions[0]?.id || "");
   const [autoStart, setAutoStart] = useStateA(tournament.competitions[0]?.startTime || "09:00");
   const [autoSaving, setAutoSaving] = useStateA(false);
+  // Blocks Auto-schedule while the duration field holds an out-of-band value.
+  // DurationInput never emits an invalid duration, so without this the button
+  // would silently schedule the whole competition at the last good value.
+  const [autoDurationError, setAutoDurationError] = useStateA(null);
 
   const [estOpen, setEstOpen] = useStateA(false);
   const [estMatchDurationSeconds, setEstMatchDurationSeconds] = useStateA(180);
@@ -382,17 +386,20 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
               <window.StableInput className="input" type="time" value={autoStart} onChange={val => setAutoStart(val)} style={{ width: 120 }} />
             </div>
             <div className="field">
-              <label className="field__label">Time per match</label>
-              {/* mm:ss per-match spacing. A blank clear yields NaN, which
+              <label className="field__label" htmlFor="auto-match-duration">Time per match</label>
+              {/* m:ss per-match spacing. A blank clear yields NaN, which
                   clampDurationSeconds (above) falls back to the 180s (3-minute)
                   default for the auto-schedule cursor and estimate. */}
               <DurationInput
+                id="auto-match-duration"
+                describedBy="auto-match-duration-hint"
                 seconds={matchDurationSeconds}
                 onChange={setMatchDurationSeconds}
-                placeholderMin="3"
+                onValidity={setAutoDurationError}
               />
+              <div className="field__hint" id="auto-match-duration-hint">Spacing between matches on each court, as m:ss.</div>
             </div>
-            <button type="button" className="btn btn--primary" onClick={autoSchedule} disabled={autoSaving} style={{ alignSelf: "flex-end" }}>
+            <button type="button" className="btn btn--primary" onClick={autoSchedule} disabled={autoSaving || !!autoDurationError} style={{ alignSelf: "flex-end" }}>
               {autoSaving ? "Scheduling…" : "Auto-schedule competition"}
             </button>
             {durationEstimate && (
@@ -415,9 +422,18 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
           {estOpen && (
             <div className="est-form">
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 16 }}>
-                <div className="form-group">
-                  <label className="label">Match duration (min:sec)</label>
-                  <DurationInput seconds={estMatchDurationSeconds} onChange={setEstMatchDurationSeconds} placeholderMin="3" />
+                <div className="field">
+                  {/* .field__label, not .label: `.label` has no definition in
+                      styles.css, so this rendered at inherited 16px/400 beside
+                      every sibling label at 12px/600. */}
+                  <label className="field__label" htmlFor="est-match-duration">Match duration</label>
+                  <DurationInput
+                    id="est-match-duration"
+                    describedBy="est-match-duration-hint"
+                    seconds={estMatchDurationSeconds}
+                    onChange={setEstMatchDurationSeconds}
+                  />
+                  <div className="field__hint" id="est-match-duration-hint">As m:ss, e.g. 2:30.</div>
                 </div>
                 <EstInput label="Multiplier" value={estMultiplier} setter={setEstMultiplier} min="1" max="3" step="0.1" />
                 <EstInput label="Courts" value={estCourts} setter={setEstCourts} min="1" max="26" />

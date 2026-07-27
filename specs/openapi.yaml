@@ -3118,25 +3118,28 @@ components:
         poolMatchDurationSeconds:
           type: integer
           minimum: 0
-          maximum: 86400
+          maximum: 600
           description: >
             Canonical estimated on-clock duration of a single pool/round match,
             in SECONDS, allowing sub-minute granularity (e.g. 150 = 2m30s). Used
             by the schedule estimator and auto-scheduler. When 0 or absent the
             server falls back to the whole-minute `poolMatchDuration`, then to
             the legacy `matchDuration`, then to the 180s scheduler default.
-            Supersedes `poolMatchDuration` when both are supplied. Capped at
-            86400 (24h).
+            Supersedes `poolMatchDuration` when both are supplied. A non-zero
+            value must fall within the plausible shiai band of 30-600 seconds
+            (0:30-10:00); anything outside it is rejected with 400 rather than
+            clamped, because match duration drives the whole event's schedule.
         playoffMatchDurationSeconds:
           type: integer
           minimum: 0
-          maximum: 86400
+          maximum: 600
           description: >
             Canonical estimated on-clock duration of a single playoff/knockout
             match, in SECONDS (e.g. 150 = 2m30s). When 0 or absent the server
             falls back to `playoffMatchDuration`, then `matchDuration`, then the
-            180s scheduler default. Supersedes `playoffMatchDuration`. Capped at
-            86400 (24h).
+            180s scheduler default. Supersedes `playoffMatchDuration`. A
+            non-zero value must fall within the 30-600 second band; anything
+            outside it is rejected with 400.
         poolMatchDuration:
           type: integer
           minimum: 0
@@ -3145,7 +3148,10 @@ components:
             Legacy whole-MINUTE pool/round match duration, retained for backward
             compatibility. Prefer `poolMatchDurationSeconds`. When only this field
             is supplied the server back-fills it to seconds (x60) on write and on
-            read. Capped at 1440 (24h).
+            read. Capped at 1440 (24h). The 30-600 second shiai band applied to
+            `poolMatchDurationSeconds` deliberately does NOT apply here, so an
+            existing competition configured at, say, 15 minutes stays saveable
+            when an unrelated field is edited.
         playoffMatchDuration:
           type: integer
           minimum: 0

@@ -154,9 +154,24 @@ func validateCompetitionDateInTournament(comp *state.Competition, tourn *state.T
 // time.Duration (int64 ns) slot arithmetic can never overflow into a garbage
 // (or negative) schedule. maxMatchDurationMinutes is the whole-minute
 // equivalent for the legacy fields.
+// minMatchDurationSeconds / maxMatchDurationSeconds bound the canonical
+// per-match clock to a plausible shiai range. Match duration drives
+// auto-scheduling for the whole event, so a fat-fingered 0:03 would otherwise
+// persist to config.md and collapse the day's timetable; the band rejects it at
+// the API rather than clamping it silently. Mirrored client-side by
+// MIN_DURATION_SECONDS / MAX_DURATION_SECONDS in web-mobile/js/duration.jsx.
+//
+// The band applies ONLY to the *Seconds fields, which are new and written
+// exclusively by the m:ss control. maxMatchDurationMinutes keeps its original
+// 24-hour ceiling for the legacy whole-minute fields: an existing competition
+// configured at, say, 15 minutes must stay saveable, otherwise an unrelated
+// edit (renaming it) would start failing validation. Editing the duration
+// through the UI zeroes the legacy field and moves the value into the banded
+// seconds field.
 const (
-	maxMatchDurationSeconds = 24 * 60 * 60 // 86400
-	maxMatchDurationMinutes = 24 * 60      // 1440
+	minMatchDurationSeconds = 30
+	maxMatchDurationSeconds = 10 * 60 // 600
+	maxMatchDurationMinutes = 24 * 60 // 1440
 )
 
 func validateCompetitionDurations(comp *state.Competition) error {
@@ -167,8 +182,11 @@ func validateCompetitionDurations(comp *state.Competition) error {
 	if comp.PoolMatchDuration > maxMatchDurationMinutes || comp.PlayoffMatchDuration > maxMatchDurationMinutes || comp.MatchDuration > maxMatchDurationMinutes {
 		return fmt.Errorf("match duration must be <= %d minutes", maxMatchDurationMinutes)
 	}
-	if comp.PoolMatchDurationSeconds > maxMatchDurationSeconds || comp.PlayoffMatchDurationSeconds > maxMatchDurationSeconds {
-		return fmt.Errorf("match duration must be <= %d seconds", maxMatchDurationSeconds)
+	// 0 means "unset, use the default" and is always allowed.
+	for _, secs := range []int{comp.PoolMatchDurationSeconds, comp.PlayoffMatchDurationSeconds} {
+		if secs != 0 && (secs < minMatchDurationSeconds || secs > maxMatchDurationSeconds) {
+			return fmt.Errorf("match duration must be between %d and %d seconds", minMatchDurationSeconds, maxMatchDurationSeconds)
+		}
 	}
 	return nil
 }

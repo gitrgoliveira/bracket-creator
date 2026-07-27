@@ -836,6 +836,42 @@ a:hover {
   gap: 14px;
 }
 
+/* Masked m:ss match-duration field (duration.jsx). Its own named class
+   deliberately: the first version reused `.row`, which is the two-column grid
+   directly above, so the control laid out as a 2x2 block on desktop and four
+   stacked strips under 720px. --ink-4 (4.7:1 on white) rather than --line
+   (1.25:1) so the control boundary clears WCAG 1.4.11's 3:1 under hall glare;
+   this is the operator's most consequential numeric field. */
+.duration-input {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+}
+
+.duration-input__field {
+  width: 96px;
+  text-align: center;
+  border-color: var(--ink-4);
+  font-variant-numeric: tabular-nums;
+}
+
+.duration-input__field--invalid,
+.duration-input__field--invalid:focus {
+  border-color: var(--red);
+  box-shadow: 0 0 0 3px var(--red-soft);
+}
+
+.duration-input__error {
+  font-size: 12px;
+  color: var(--red);
+}
+
+.duration-input__note {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
 .row--equal {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -3822,6 +3858,13 @@ button.pool-match-row {
   }
   .page-head__actions .input {
     min-height: 44px;
+  }
+  /* Match duration: 44px tall, and 16px type so iOS Safari does not zoom the
+     page on focus (its threshold is 16px). A tablet operator retimes matches
+     mid-event; a zoomed-in admin page is its own small disaster. */
+  .duration-input__field {
+    min-height: 44px;
+    font-size: 16px;
   }
 }
 

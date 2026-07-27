@@ -570,7 +570,17 @@ func firstPositive(vals ...int) int {
 
 // EffectivePoolMatchSeconds returns the per-pool-match clock duration in
 // seconds, or 0 when unset (callers apply their own default; see
-// scheduler_slots.go). Kept as a method so duration reads have one seam.
+// scheduler_slots.go).
+//
+// It is a plain field read today. The method survives the collapse of the old
+// three-tier resolver as the seam for CONSUMERS of a duration, which is the
+// scheduler: if a default or a phase-specific rule ever returns, it lands here
+// rather than in the middle of slot arithmetic. It is deliberately not
+// universal, and the doc comment used to overstate that. Code that validates or
+// merges the field rather than consuming it (validateCompetitionDurations and
+// the PUT merge in internal/mobileapp) reads the struct field directly and
+// should: it is acting on the wire representation, not asking "how long is a
+// match here".
 func (c *Competition) EffectivePoolMatchSeconds() int {
 	return c.PoolMatchDurationSeconds
 }

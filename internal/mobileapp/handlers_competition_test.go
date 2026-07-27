@@ -1529,44 +1529,81 @@ func TestValidateCompetitionDurations_Negative(t *testing.T) {
 	assert.Error(t, err)
 	// A valid sub-minute value (2m30s) passes.
 	assert.NoError(t, validateCompetitionDurations(&state.Competition{PoolMatchDurationSeconds: 150}))
-	// mp-m5kf hardening: upper bounds prevent int64 time-arithmetic overflow.
-	assert.Error(t, validateCompetitionDurations(&state.Competition{PoolMatchDurationSeconds: maxMatchDurationSeconds + 1}))
-	assert.Error(t, validateCompetitionDurations(&state.Competition{PlayoffMatchDurationSeconds: maxMatchDurationSeconds + 1}))
+	// mp-m5kf hardening: the legacy whole-minute ceiling prevents int64
+	// time-arithmetic overflow. The seconds band lives in validateDurationBand,
+	// not here, because it needs the stored value to compare against.
 	assert.Error(t, validateCompetitionDurations(&state.Competition{PoolMatchDuration: maxMatchDurationMinutes + 1}))
 	assert.Error(t, validateCompetitionDurations(&state.Competition{MatchDuration: maxMatchDurationMinutes + 1}))
-	// The exact bounds are accepted.
-	assert.NoError(t, validateCompetitionDurations(&state.Competition{PoolMatchDurationSeconds: maxMatchDurationSeconds}))
 	assert.NoError(t, validateCompetitionDurations(&state.Competition{PoolMatchDuration: maxMatchDurationMinutes}))
 }
 
-// TestValidateCompetitionDurations_Band verifies the shiai band on the
-// canonical seconds fields. A fat-fingered 3-second match drives the whole
-// day's auto-schedule, so it is rejected outright rather than clamped; the
+// TestValidateDurationBand verifies the shiai band on the canonical seconds
+// fields. A fat-fingered 3-second match drives the whole day's auto-schedule, so
+// a value the operator CHANGES is rejected outright rather than clamped; the
 // client-side band in web-mobile/js/duration.jsx mirrors these bounds but a
 // client-only block is not a block.
-func TestValidateCompetitionDurations_Band(t *testing.T) {
+func TestValidateDurationBand(t *testing.T) {
 	tests := []struct {
 		name    string
-		comp    state.Competition
+		next    state.Competition
+		prev    *state.Competition
 		wantErr bool
 	}{
-		{"pool below floor", state.Competition{PoolMatchDurationSeconds: 3}, true},
-		{"playoff below floor", state.Competition{PlayoffMatchDurationSeconds: minMatchDurationSeconds - 1}, true},
-		{"pool at floor", state.Competition{PoolMatchDurationSeconds: minMatchDurationSeconds}, false},
-		{"playoff at ceiling", state.Competition{PlayoffMatchDurationSeconds: maxMatchDurationSeconds}, false},
-		{"pool above ceiling", state.Competition{PoolMatchDurationSeconds: maxMatchDurationSeconds + 1}, true},
+		// Create (no stored value): every non-zero duration is newly chosen.
+		{"new pool below floor", state.Competition{PoolMatchDurationSeconds: 3}, nil, true},
+		{"new playoff below floor", state.Competition{PlayoffMatchDurationSeconds: minMatchDurationSeconds - 1}, nil, true},
+		{"new pool at floor", state.Competition{PoolMatchDurationSeconds: minMatchDurationSeconds}, nil, false},
+		{"new playoff at ceiling", state.Competition{PlayoffMatchDurationSeconds: maxMatchDurationSeconds}, nil, false},
+		{"new pool above ceiling", state.Competition{PoolMatchDurationSeconds: maxMatchDurationSeconds + 1}, nil, true},
 		// 0 is "unset, use the scheduler default" and must stay accepted:
 		// otherwise clearing the field would fail to save.
-		{"unset is allowed", state.Competition{PoolMatchDurationSeconds: 0, PlayoffMatchDurationSeconds: 0}, false},
-		// The legacy whole-minute fields keep the wider 24h range so an
-		// existing 15-minute competition stays saveable when the operator
-		// edits an unrelated field such as its name.
-		{"legacy 15-minute value outside the band still saves", state.Competition{PoolMatchDuration: 15}, false},
-		{"legacy 20-minute value still saves", state.Competition{MatchDuration: 20}, false},
+		{"unset is allowed", state.Competition{}, nil, false},
+
+		// Update against a stored value. This is the case the first cut of the
+		// band got wrong: ApplyCompetitionDefaults back-fills the seconds fields
+		// from the legacy whole-minute fields on READ, so the settings form PUTs
+		// an out-of-band seconds value back on every save. Banding the raw
+		// incoming value made such a competition impossible to save at all.
+		{
+			"unchanged out-of-band value is grandfathered",
+			state.Competition{PoolMatchDurationSeconds: 900, PlayoffMatchDurationSeconds: 900},
+			&state.Competition{MatchDuration: 15}, // effective 900s
+			false,
+		},
+		{
+			"unchanged out-of-band value from a per-phase legacy field is grandfathered",
+			state.Competition{PoolMatchDurationSeconds: 900},
+			&state.Competition{PoolMatchDuration: 15},
+			false,
+		},
+		{
+			"changing an out-of-band value to another out-of-band value is still rejected",
+			state.Competition{PoolMatchDurationSeconds: 1200},
+			&state.Competition{MatchDuration: 15},
+			true,
+		},
+		{
+			"changing an out-of-band value into the band is allowed",
+			state.Competition{PoolMatchDurationSeconds: 150},
+			&state.Competition{MatchDuration: 15},
+			false,
+		},
+		{
+			"a fat-fingered new value is still rejected on an in-band competition",
+			state.Competition{PoolMatchDurationSeconds: 3},
+			&state.Competition{PoolMatchDurationSeconds: 150},
+			true,
+		},
+		{
+			"clearing an out-of-band value back to the default is allowed",
+			state.Competition{PoolMatchDurationSeconds: 0},
+			&state.Competition{MatchDuration: 15},
+			false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateCompetitionDurations(&tt.comp)
+			err := validateDurationBand(&tt.next, tt.prev)
 			if tt.wantErr {
 				assert.Error(t, err)
 			} else {
@@ -3039,4 +3076,133 @@ func TestUpdateCompetition_TeamMatchTypeLockedWhenStarted(t *testing.T) {
 		assert.Equal(t, state.TeamMatchTypeKachinuki, stored.TeamMatchType,
 			"an omitted teamMatchType must keep the stored value, never reset it")
 	})
+}
+
+// TestUpdateCompetition_LegacyDurationStaysEditable is the end-to-end regression
+// guard for the shiai band. ApplyCompetitionDefaults back-fills the canonical
+// seconds fields from the legacy whole-minute fields on READ, so a competition
+// stored as `matchDuration: 15` is served to the settings form as
+// poolMatchDurationSeconds=900. The form PUTs the full config back on every
+// save, so the first cut of the band rejected an unrelated rename with 400 and
+// left the competition permanently uneditable.
+//
+// The unit test for the band missed this because it built state.Competition
+// literals directly, never running the back-fill the real request path runs.
+func TestUpdateCompetition_LegacyDurationStaysEditable(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	// A competition configured at 15 minutes, before per-phase seconds existed.
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:            "legacy-duration",
+		Name:          "Legacy Duration",
+		Format:        state.CompFormatMixed,
+		PoolSize:      3,
+		Courts:        []string{"A"},
+		MatchDuration: 15,
+		Status:        state.CompStatusSetup,
+	}))
+
+	put := func(t *testing.T, body map[string]any) *httptest.ResponseRecorder {
+		t.Helper()
+		b, _ := json.Marshal(body)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/legacy-duration", bytes.NewBuffer(b))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	// What the settings form actually round-trips: the back-filled 900s.
+	base := func() map[string]any {
+		return map[string]any{
+			"name": "Legacy Duration", "format": "mixed", "poolSize": 3,
+			"courts":                      []string{"A"},
+			"matchDuration":               15,
+			"poolMatchDuration":           15,
+			"playoffMatchDuration":        15,
+			"poolMatchDurationSeconds":    900,
+			"playoffMatchDurationSeconds": 900,
+		}
+	}
+
+	t.Run("renaming echoes the out-of-band duration back and must still save", func(t *testing.T) {
+		body := base()
+		body["name"] = "Renamed Legacy"
+		w := put(t, body)
+		assert.Equal(t, http.StatusOK, w.Code, "an unrelated edit must not be blocked by a grandfathered duration: %s", w.Body.String())
+
+		got, err := store.LoadCompetition("legacy-duration")
+		require.NoError(t, err)
+		assert.Equal(t, "Renamed Legacy", got.Name)
+		assert.Equal(t, 900, got.PoolMatchDurationSeconds, "the grandfathered duration must be preserved, not reset")
+	})
+
+	t.Run("changing the duration to a new out-of-band value is still rejected", func(t *testing.T) {
+		body := base()
+		body["name"] = "Renamed Legacy"
+		body["poolMatchDurationSeconds"] = 1200
+		w := put(t, body)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "between 30 and 600 seconds")
+	})
+
+	t.Run("a fat-fingered 3-second duration is still rejected", func(t *testing.T) {
+		body := base()
+		body["name"] = "Renamed Legacy"
+		body["poolMatchDurationSeconds"] = 3
+		w := put(t, body)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "between 30 and 600 seconds")
+	})
+
+	t.Run("moving the legacy duration into the band is allowed", func(t *testing.T) {
+		body := base()
+		body["name"] = "Renamed Legacy"
+		body["poolMatchDurationSeconds"] = 150
+		body["poolMatchDuration"] = 0
+		body["matchDuration"] = 0
+		w := put(t, body)
+		assert.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+
+		got, err := store.LoadCompetition("legacy-duration")
+		require.NoError(t, err)
+		assert.Equal(t, 150, got.PoolMatchDurationSeconds)
+	})
+}
+
+// TestUpdateCompetition_DurationChangeKeepsDraw pins the requirement that
+// retiming a competition never invalidates a generated draw: match duration
+// feeds the scheduler only, and reaches neither the pool allocation nor the
+// bracket, so it is deliberately absent from the draw-ready outputAffecting set.
+func TestUpdateCompetition_DurationChangeKeepsDraw(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:                       "draw-ready-duration",
+		Name:                     "Draw Ready Duration",
+		Format:                   state.CompFormatMixed,
+		PoolSize:                 3,
+		Courts:                   []string{"A"},
+		PoolMatchDurationSeconds: 150,
+		Status:                   state.CompStatusDrawReady,
+	}))
+
+	body, _ := json.Marshal(map[string]any{
+		"name": "Draw Ready Duration", "format": "mixed", "poolSize": 3,
+		"courts":                   []string{"A"},
+		"poolMatchDurationSeconds": 240,
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/draw-ready-duration", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code, "changing duration must not require discarding the draw: %s", w.Body.String())
+
+	got, err := store.LoadCompetition("draw-ready-duration")
+	require.NoError(t, err)
+	assert.Equal(t, 240, got.PoolMatchDurationSeconds)
+	assert.Equal(t, state.CompStatusDrawReady, got.Status, "the draw must survive a duration change")
 }

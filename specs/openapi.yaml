@@ -3118,28 +3118,36 @@ components:
         poolMatchDurationSeconds:
           type: integer
           minimum: 0
-          maximum: 600
+          maximum: 86400
           description: >
             Canonical estimated on-clock duration of a single pool/round match,
             in SECONDS, allowing sub-minute granularity (e.g. 150 = 2m30s). Used
             by the schedule estimator and auto-scheduler. When 0 or absent the
             server falls back to the whole-minute `poolMatchDuration`, then to
             the legacy `matchDuration`, then to the 180s scheduler default.
-            Supersedes `poolMatchDuration` when both are supplied. A non-zero
-            value must fall within the plausible shiai band of 30-600 seconds
-            (0:30-10:00); anything outside it is rejected with 400 rather than
+            Supersedes `poolMatchDuration` when both are supplied.
+
+            CHANGING this field to a non-zero value outside the plausible shiai
+            band of 30-600 seconds (0:30-10:00) is rejected with 400 rather than
             clamped, because match duration drives the whole event's schedule.
+            A value that is UNCHANGED from the stored one is accepted even when
+            it lies outside the band: the server back-fills this field from the
+            legacy whole-minute fields on read, so a competition configured long
+            ago as `matchDuration: 15` is served as 900 and echoed back on every
+            save. Rejecting that would make the competition impossible to edit at
+            all. The stated `maximum` is therefore the structural ceiling
+            (1440 minutes x 60), not the band.
         playoffMatchDurationSeconds:
           type: integer
           minimum: 0
-          maximum: 600
+          maximum: 86400
           description: >
             Canonical estimated on-clock duration of a single playoff/knockout
             match, in SECONDS (e.g. 150 = 2m30s). When 0 or absent the server
             falls back to `playoffMatchDuration`, then `matchDuration`, then the
-            180s scheduler default. Supersedes `playoffMatchDuration`. A
-            non-zero value must fall within the 30-600 second band; anything
-            outside it is rejected with 400.
+            180s scheduler default. Supersedes `playoffMatchDuration`. Subject to
+            the same 30-600 second band on change, and the same grandfathering of
+            an unchanged out-of-band value, as `poolMatchDurationSeconds`.
         poolMatchDuration:
           type: integer
           minimum: 0

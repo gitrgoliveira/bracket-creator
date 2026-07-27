@@ -35,15 +35,15 @@ func setupSwissCompetition(t *testing.T, names []string, seeds map[string]int, r
 	compID := "swiss-test"
 
 	comp := &state.Competition{
-		ID:                compID,
-		Name:              "Swiss Test",
-		Kind:              "individual",
-		Format:            state.CompFormatSwiss,
-		SwissRounds:       rounds,
-		Courts:            []string{"A", "B"},
-		StartTime:         "09:00",
-		Status:            state.CompStatusSetup,
-		PoolMatchDuration: 3,
+		ID:                       compID,
+		Name:                     "Swiss Test",
+		Kind:                     "individual",
+		Format:                   state.CompFormatSwiss,
+		SwissRounds:              rounds,
+		Courts:                   []string{"A", "B"},
+		StartTime:                "09:00",
+		Status:                   state.CompStatusSetup,
+		PoolMatchDurationSeconds: 180,
 	}
 	require.NoError(t, store.SaveCompetition(comp))
 
@@ -729,16 +729,16 @@ func TestGenerateSwissRound_TeamSizeDefaultApplied(t *testing.T) {
 	compID := "swiss-team-default"
 
 	comp := &state.Competition{
-		ID:                compID,
-		Name:              "Swiss Team Test",
-		Kind:              "team",
-		Format:            state.CompFormatSwiss,
-		TeamSize:          0, // intentionally 0, the bug: stored config missing the default
-		SwissRounds:       3,
-		Courts:            []string{"A"}, // single court so matches sequence
-		StartTime:         "09:00",
-		Status:            state.CompStatusSetup,
-		PoolMatchDuration: 3,
+		ID:                       compID,
+		Name:                     "Swiss Team Test",
+		Kind:                     "team",
+		Format:                   state.CompFormatSwiss,
+		TeamSize:                 0, // intentionally 0, the bug: stored config missing the default
+		SwissRounds:              3,
+		Courts:                   []string{"A"}, // single court so matches sequence
+		StartTime:                "09:00",
+		Status:                   state.CompStatusSetup,
+		PoolMatchDurationSeconds: 180,
 	}
 	require.NoError(t, store.SaveCompetition(comp))
 

@@ -207,9 +207,9 @@ func TestScheduleLeagueSlots_Empty(t *testing.T) {
 
 func TestAssignLeagueSlotTimes_SameSlotSameTime(t *testing.T) {
 	comp := &state.Competition{
-		StartTime:         "09:00",
-		PoolMatchDuration: 3,
-		Courts:            []string{"A", "B"},
+		StartTime:                "09:00",
+		PoolMatchDurationSeconds: 180,
+		Courts:                   []string{"A", "B"},
 	}
 	tournament := &state.Tournament{
 		ClockToElapsedMultiplier: 1.5,
@@ -250,8 +250,8 @@ func TestAssignLeagueSlotTimes_NilComp(t *testing.T) {
 
 func TestAssignLeagueSlotTimes_EmptyMatches(t *testing.T) {
 	comp := &state.Competition{
-		StartTime:         "09:00",
-		PoolMatchDuration: 3,
+		StartTime:                "09:00",
+		PoolMatchDurationSeconds: 180,
 	}
 	out, cursor := assignLeagueSlotTimes(nil, nil, comp, nil)
 	assert.Empty(t, out)
@@ -262,9 +262,9 @@ func TestAssignLeagueSlotTimes_LunchSkip(t *testing.T) {
 	// Start at 11:57, 3-minute matches -> slot 0 at 11:57, slot 1 would be 12:02
 	// but lunch is 12:00-13:00, so slot 1 should be pushed to 13:00.
 	comp := &state.Competition{
-		StartTime:         "11:57",
-		PoolMatchDuration: 3,
-		Courts:            []string{"A"},
+		StartTime:                "11:57",
+		PoolMatchDurationSeconds: 180,
+		Courts:                   []string{"A"},
 	}
 	tournament := &state.Tournament{
 		ClockToElapsedMultiplier: 1.0, // 3 min * 1.0 = 3 min elapsed

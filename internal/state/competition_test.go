@@ -33,11 +33,11 @@ func TestCompetitionLoadsPerPhaseDurations(t *testing.T) {
 	assert.Equal(t, 3, loaded.PlayoffMatchDuration, "PlayoffMatchDuration should round-trip")
 }
 
-// TestCompetitionLegacyMatchDurationFallback verifies FR-054 / NFR-025 / R9:
-// when YAML lacks the per-phase fields but carries the legacy match_duration
-// field, ApplyCompetitionDefaults populates BOTH per-phase durations with the
-// legacy value so older tournaments continue to schedule correctly.
-func TestCompetitionLegacyMatchDurationFallback(t *testing.T) {
+// TestCompetitionLegacyMatchDurationMigration verifies FR-054 / NFR-025 / R9:
+// a config.md carrying only the retired whole-minute match_duration is migrated
+// onto BOTH per-phase seconds fields, so older tournaments keep their schedule
+// estimates instead of silently reverting to the default.
+func TestCompetitionLegacyMatchDurationMigration(t *testing.T) {
 	legacyYAML := []byte(`id: legacy-comp
 name: Legacy Comp
 match_duration: 5
@@ -46,15 +46,17 @@ match_duration: 5
 	var c Competition
 	err := yaml.Unmarshal(legacyYAML, &c)
 	require.NoError(t, err)
-
-	// Before applying defaults, per-phase fields are zero.
-	require.Equal(t, 0, c.PoolMatchDuration)
-	require.Equal(t, 0, c.PlayoffMatchDuration)
+	require.Equal(t, 0, c.PoolMatchDurationSeconds, "seconds are unset before migration")
 
 	ApplyCompetitionDefaults(&c)
 
-	assert.Equal(t, 5, c.PoolMatchDuration, "legacy match_duration should fall through to PoolMatchDuration")
-	assert.Equal(t, 5, c.PlayoffMatchDuration, "legacy match_duration should fall through to PlayoffMatchDuration")
+	assert.Equal(t, 300, c.PoolMatchDurationSeconds, "5 min must migrate to 300s for the pool phase")
+	assert.Equal(t, 300, c.PlayoffMatchDurationSeconds, "5 min must migrate to 300s for the playoff phase")
+	// The retired keys are cleared so omitempty drops them on the next save and
+	// the file converges on the seconds-only schema.
+	assert.Zero(t, c.MatchDuration)
+	assert.Zero(t, c.PoolMatchDuration)
+	assert.Zero(t, c.PlayoffMatchDuration)
 }
 
 // TestSwissRoundsFieldPersists verifies FR-050a / NFR-025:
@@ -184,17 +186,47 @@ func TestCopyCompetition_Nil(t *testing.T) {
 func TestApplyCompetitionDefaults_MatchDurationPromotion(t *testing.T) {
 	c := &Competition{MatchDuration: 5}
 	ApplyCompetitionDefaults(c)
-	assert.Equal(t, 5, c.PoolMatchDuration, "MatchDuration should promote to PoolMatchDuration")
-	assert.Equal(t, 5, c.PlayoffMatchDuration, "MatchDuration should promote to PlayoffMatchDuration")
+	assert.Equal(t, 300, c.PoolMatchDurationSeconds, "MatchDuration should migrate to pool seconds")
+	assert.Equal(t, 300, c.PlayoffMatchDurationSeconds, "MatchDuration should migrate to playoff seconds")
 }
 
-// TestApplyCompetitionDefaults_NoPromotionWhenAlreadySet verifies that
-// existing per-phase durations are NOT overwritten by the legacy value.
-func TestApplyCompetitionDefaults_NoPromotionWhenAlreadySet(t *testing.T) {
+// TestApplyCompetitionDefaults_PerPhaseWinsOverSingleField verifies that the
+// per-phase retired field takes precedence over the single-field one when both
+// are present in an old config.md.
+func TestApplyCompetitionDefaults_PerPhaseWinsOverSingleField(t *testing.T) {
 	c := &Competition{PoolMatchDuration: 4, PlayoffMatchDuration: 6, MatchDuration: 5}
 	ApplyCompetitionDefaults(c)
-	assert.Equal(t, 4, c.PoolMatchDuration)
-	assert.Equal(t, 6, c.PlayoffMatchDuration)
+	assert.Equal(t, 240, c.PoolMatchDurationSeconds)
+	assert.Equal(t, 360, c.PlayoffMatchDurationSeconds)
+}
+
+// TestApplyCompetitionDefaults_ClampsIntoBand pins the clamp that makes every
+// other layer able to assume a stored duration is in range. A legacy value
+// outside the band is pinned to the nearest bound rather than dropped (silent
+// reset) or kept (a value the UI can display but not re-submit).
+func TestApplyCompetitionDefaults_ClampsIntoBand(t *testing.T) {
+	tooLong := &Competition{MatchDuration: 15} // 900s, above the 600s ceiling
+	ApplyCompetitionDefaults(tooLong)
+	assert.Equal(t, MaxMatchDurationSeconds, tooLong.PoolMatchDurationSeconds)
+	assert.Equal(t, MaxMatchDurationSeconds, tooLong.PlayoffMatchDurationSeconds)
+
+	// The floor is 30s and a whole minute already clears it, so the only way to
+	// land under the floor is a direct sub-band value.
+	assert.Equal(t, MinMatchDurationSeconds, ClampMatchSeconds(3))
+	assert.Equal(t, MaxMatchDurationSeconds, ClampMatchSeconds(99999))
+	assert.Equal(t, 150, ClampMatchSeconds(150), "an in-band value is untouched")
+	assert.Equal(t, 0, ClampMatchSeconds(0), "unset passes through as unset")
+}
+
+// TestApplyCompetitionDefaults_Idempotent guards the fact that it runs on every
+// read: a second pass must not re-migrate or disturb an already-canonical value.
+func TestApplyCompetitionDefaults_Idempotent(t *testing.T) {
+	c := &Competition{MatchDuration: 4}
+	ApplyCompetitionDefaults(c)
+	first := *c
+	ApplyCompetitionDefaults(c)
+	assert.Equal(t, first.PoolMatchDurationSeconds, c.PoolMatchDurationSeconds)
+	assert.Equal(t, first.PlayoffMatchDurationSeconds, c.PlayoffMatchDurationSeconds)
 }
 
 // mp-m5kf: sub-minute (seconds) per-match durations.
@@ -206,8 +238,8 @@ func TestApplyCompetitionDefaults_NoPromotionWhenAlreadySet(t *testing.T) {
 func TestApplyCompetitionDefaults_SecondsBackfillFromMinutes(t *testing.T) {
 	c := &Competition{PoolMatchDuration: 3, PlayoffMatchDuration: 5}
 	ApplyCompetitionDefaults(c)
-	assert.Equal(t, 180, c.PoolMatchDurationSeconds, "3 min should back-fill to 180s")
-	assert.Equal(t, 300, c.PlayoffMatchDurationSeconds, "5 min should back-fill to 300s")
+	assert.Equal(t, 180, c.PoolMatchDurationSeconds, "3 min should migrate to 180s")
+	assert.Equal(t, 300, c.PlayoffMatchDurationSeconds, "5 min should migrate to 300s")
 }
 
 // TestApplyCompetitionDefaults_SecondsWinOverMinutes verifies that an explicit
@@ -216,24 +248,18 @@ func TestApplyCompetitionDefaults_SecondsBackfillFromMinutes(t *testing.T) {
 func TestApplyCompetitionDefaults_SecondsWinOverMinutes(t *testing.T) {
 	c := &Competition{PoolMatchDuration: 3, PoolMatchDurationSeconds: 150}
 	ApplyCompetitionDefaults(c)
-	assert.Equal(t, 150, c.PoolMatchDurationSeconds, "explicit 2m30s must survive back-fill")
+	assert.Equal(t, 150, c.PoolMatchDurationSeconds, "explicit 2m30s must survive migration")
+	assert.Zero(t, c.PoolMatchDuration, "the retired field is cleared either way")
 }
 
-// TestEffectiveMatchSeconds_Precedence pins the seconds -> minutes*60 ->
-// legacy MatchDuration*60 -> 0 fallback chain used by the scheduler and UI.
-func TestEffectiveMatchSeconds_Precedence(t *testing.T) {
-	t.Run("seconds win", func(t *testing.T) {
-		c := &Competition{PoolMatchDurationSeconds: 150, PoolMatchDuration: 3, MatchDuration: 4}
+// TestEffectiveMatchSeconds reads the canonical seconds field. There is no
+// fallback chain any more: the retired whole-minute fields are migrated at the
+// store boundary, so anything the engine or API sees is already in seconds.
+func TestEffectiveMatchSeconds(t *testing.T) {
+	t.Run("returns the seconds field", func(t *testing.T) {
+		c := &Competition{PoolMatchDurationSeconds: 150, PlayoffMatchDurationSeconds: 210}
 		assert.Equal(t, 150, c.EffectivePoolMatchSeconds())
-	})
-	t.Run("fall back to per-phase minutes", func(t *testing.T) {
-		c := &Competition{PlayoffMatchDuration: 5, MatchDuration: 4}
-		assert.Equal(t, 300, c.EffectivePlayoffMatchSeconds())
-	})
-	t.Run("fall back to legacy MatchDuration", func(t *testing.T) {
-		c := &Competition{MatchDuration: 4}
-		assert.Equal(t, 240, c.EffectivePoolMatchSeconds())
-		assert.Equal(t, 240, c.EffectivePlayoffMatchSeconds())
+		assert.Equal(t, 210, c.EffectivePlayoffMatchSeconds())
 	})
 	t.Run("zero when unset", func(t *testing.T) {
 		c := &Competition{}

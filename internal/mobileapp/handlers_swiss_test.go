@@ -35,15 +35,15 @@ func makeSwissComp(t *testing.T, store *state.Store, names []string, rounds int)
 	t.Helper()
 	compID := "swiss-handler-test"
 	comp := &state.Competition{
-		ID:                compID,
-		Name:              "Swiss Handler",
-		Kind:              "individual",
-		Format:            state.CompFormatSwiss,
-		SwissRounds:       rounds,
-		Courts:            []string{"A", "B"},
-		StartTime:         "09:00",
-		Status:            state.CompStatusSetup,
-		PoolMatchDuration: 3,
+		ID:                       compID,
+		Name:                     "Swiss Handler",
+		Kind:                     "individual",
+		Format:                   state.CompFormatSwiss,
+		SwissRounds:              rounds,
+		Courts:                   []string{"A", "B"},
+		StartTime:                "09:00",
+		Status:                   state.CompStatusSetup,
+		PoolMatchDurationSeconds: 180,
 	}
 	require.NoError(t, store.SaveCompetition(comp))
 	players := make([]domain.Player, len(names))

@@ -29,9 +29,9 @@ func minutesBetween(t *testing.T, a, b string) int {
 // minutes between consecutive starts. T150.
 func TestAssignSlotsSequentialPerCourt(t *testing.T) {
 	comp := &state.Competition{
-		StartTime:         "09:00",
-		PoolMatchDuration: 3,
-		Courts:            []string{"A"},
+		StartTime:                "09:00",
+		PoolMatchDurationSeconds: 180,
+		Courts:                   []string{"A"},
 	}
 	tournament := &state.Tournament{
 		ClockToElapsedMultiplier: 1.5,
@@ -67,9 +67,9 @@ func TestAssignSlotsSequentialPerCourt(t *testing.T) {
 // match. T150.
 func TestAssignSlotsParallelAcrossCourts(t *testing.T) {
 	comp := &state.Competition{
-		StartTime:         "09:00",
-		PoolMatchDuration: 3,
-		Courts:            []string{"A", "B"},
+		StartTime:                "09:00",
+		PoolMatchDurationSeconds: 180,
+		Courts:                   []string{"A", "B"},
 	}
 	tournament := &state.Tournament{
 		ClockToElapsedMultiplier: 1.5,
@@ -101,13 +101,13 @@ func TestAssignSlotsTeamMatchScalesByBouts(t *testing.T) {
 	tournament := &state.Tournament{ClockToElapsedMultiplier: 1.5}
 
 	indiv := &state.Competition{
-		Kind:              "individual",
-		PoolMatchDuration: 3,
+		Kind:                     "individual",
+		PoolMatchDurationSeconds: 180,
 	}
 	team5 := &state.Competition{
-		Kind:              "team",
-		TeamSize:          5,
-		PoolMatchDuration: 3,
+		Kind:                     "team",
+		TeamSize:                 5,
+		PoolMatchDurationSeconds: 180,
 	}
 
 	indivPer := perMatchElapsedMinutes(indiv, tournament, false)
@@ -126,9 +126,9 @@ func TestAssignSlotsTeamMatchScalesByBouts(t *testing.T) {
 // T151, FR-056.
 func TestAssignSlotsSkipsOpeningBlock(t *testing.T) {
 	comp := &state.Competition{
-		StartTime:         "09:00",
-		PoolMatchDuration: 3,
-		Courts:            []string{"A"},
+		StartTime:                "09:00",
+		PoolMatchDurationSeconds: 180,
+		Courts:                   []string{"A"},
 	}
 	tournament := &state.Tournament{
 		ClockToElapsedMultiplier: 1.5,
@@ -153,9 +153,9 @@ func TestAssignSlotsSkipsOpeningBlock(t *testing.T) {
 // slot is 12:30. T151, FR-056.
 func TestAssignSlotsSkipsLunchBlock(t *testing.T) {
 	comp := &state.Competition{
-		StartTime:         "11:30",
-		PoolMatchDuration: 6, // 6 * 1.5 = 9 minutes per match
-		Courts:            []string{"A"},
+		StartTime:                "11:30",
+		PoolMatchDurationSeconds: 360, // 6 * 1.5 = 9 minutes per match
+		Courts:                   []string{"A"},
 	}
 	tournament := &state.Tournament{
 		ClockToElapsedMultiplier: 1.5,
@@ -194,9 +194,9 @@ func TestAssignSlotsSkipsLunchBlock(t *testing.T) {
 // T151 validation hook.
 func TestAssignSlotsNoMatchInsideCeremony(t *testing.T) {
 	comp := &state.Competition{
-		StartTime:         "08:30",
-		PoolMatchDuration: 4,
-		Courts:            []string{"A", "B"},
+		StartTime:                "08:30",
+		PoolMatchDurationSeconds: 240,
+		Courts:                   []string{"A", "B"},
 	}
 	tournament := &state.Tournament{
 		ClockToElapsedMultiplier: 1.5,
@@ -230,9 +230,9 @@ func TestAssignSlotsNoMatchInsideCeremony(t *testing.T) {
 // the same court. T150.
 func TestAssignSlotsRespectsClockToElapsedMultiplier(t *testing.T) {
 	comp := &state.Competition{
-		StartTime:         "09:00",
-		PoolMatchDuration: 4,
-		Courts:            []string{"A"},
+		StartTime:                "09:00",
+		PoolMatchDurationSeconds: 240,
+		Courts:                   []string{"A"},
 	}
 	mult1 := &state.Tournament{ClockToElapsedMultiplier: 1.0}
 	mult2 := &state.Tournament{ClockToElapsedMultiplier: 2.0}
@@ -283,18 +283,19 @@ func TestAssignSlotsZeroDurationFallback(t *testing.T) {
 	assert.Equal(t, per, gap)
 }
 
-// TestAssignSlotsLegacyMatchDurationFallback verifies that a
-// competition predating per-phase durations still produces a sensible
-// slot loop after ApplyCompetitionDefaults populates the new fields.
-// T150 backward compatibility.
-func TestAssignSlotsLegacyMatchDurationFallback(t *testing.T) {
+// TestAssignSlotsLegacyMatchDurationMigration verifies that a competition
+// predating per-phase durations still produces a sensible slot loop once
+// ApplyCompetitionDefaults has migrated its retired whole-minute field onto the
+// canonical seconds field. T150 backward compatibility.
+func TestAssignSlotsLegacyMatchDurationMigration(t *testing.T) {
 	comp := &state.Competition{
 		StartTime:     "09:00",
 		Courts:        []string{"A"},
-		MatchDuration: 5, // legacy field only
+		MatchDuration: 5, // retired field only, as an old config.md would carry
 	}
 	state.ApplyCompetitionDefaults(comp)
-	require.Equal(t, 5, comp.PoolMatchDuration, "ApplyCompetitionDefaults must promote MatchDuration")
+	require.Equal(t, 300, comp.PoolMatchDurationSeconds, "migration must promote MatchDuration to seconds")
+	require.Zero(t, comp.MatchDuration, "migration must clear the retired field so it stops being written")
 
 	tournament := &state.Tournament{ClockToElapsedMultiplier: 1.5}
 	per := perMatchElapsedMinutes(comp, tournament, false)
@@ -335,29 +336,15 @@ func TestPerMatchElapsedSubMinuteFloors(t *testing.T) {
 	assert.Equal(t, 1, per, "a positive sub-minute duration must occupy at least 1 slot minute")
 }
 
-// TestPerMatchElapsedSecondsPrecedence verifies the *Seconds field wins over a
-// stale legacy whole-minute field in the slot estimator.
-func TestPerMatchElapsedSecondsPrecedence(t *testing.T) {
-	comp := &state.Competition{
-		Courts:                   []string{"A"},
-		PoolMatchDuration:        3,  // legacy minutes
-		PoolMatchDurationSeconds: 90, // 1m30s — should win
-	}
-	tournament := &state.Tournament{ClockToElapsedMultiplier: 2.0}
-	per := perMatchElapsedMinutes(comp, tournament, false)
-	// 90s = 1.5min * 2.0 = 3.0 → 3. The stale 3-min field would give 6.
-	assert.Equal(t, 3, per)
-}
-
 // TestAssignSlotsBracketByesSkipCursor verifies that bracket
 // matches auto-completed as byes do not advance the court cursor,
 // otherwise a half-empty bracket would inherit phantom 5-minute
 // delays from each byte. T150.
 func TestAssignSlotsBracketByesSkipCursor(t *testing.T) {
 	comp := &state.Competition{
-		StartTime:            "09:00",
-		PlayoffMatchDuration: 4,
-		Courts:               []string{"A"},
+		StartTime:                   "09:00",
+		PlayoffMatchDurationSeconds: 240,
+		Courts:                      []string{"A"},
 	}
 	tournament := &state.Tournament{ClockToElapsedMultiplier: 1.5}
 
@@ -388,7 +375,7 @@ func TestAssignSlotsBracketByesSkipCursor(t *testing.T) {
 func TestAssignSlotsParityWithEstimateSchedule(t *testing.T) {
 	tournament := &state.Tournament{ClockToElapsedMultiplier: 1.5}
 
-	indiv := &state.Competition{Kind: "individual", PoolMatchDuration: 3}
+	indiv := &state.Competition{Kind: "individual", PoolMatchDurationSeconds: 180}
 	indivPer := perMatchElapsedMinutes(indiv, tournament, false)
 	indivEst := EstimateSchedule(EstimateInput{
 		MatchDurationClockMinutes: 3,
@@ -399,7 +386,7 @@ func TestAssignSlotsParityWithEstimateSchedule(t *testing.T) {
 	assert.Equal(t, indivEst, indivPer,
 		"individual per-match (slot loop) must equal EstimateSchedule total")
 
-	team := &state.Competition{Kind: "team", TeamSize: 5, PoolMatchDuration: 3}
+	team := &state.Competition{Kind: "team", TeamSize: 5, PoolMatchDurationSeconds: 180}
 	teamPer := perMatchElapsedMinutes(team, tournament, false)
 	teamEst := EstimateSchedule(EstimateInput{
 		MatchDurationClockMinutes: 3,
@@ -509,7 +496,7 @@ func TestAssignSlots_EmptyReturnsStartAnchorNotZero(t *testing.T) {
 // AFTER the final everywhere. scheduleBronze must give it the final's slot and
 // push the final one match-duration later, so bronze-then-final holds.
 func TestScheduleBronze_PlacesBronzeBeforeFinalOnSharedCourt(t *testing.T) {
-	comp := &state.Competition{StartTime: "09:00", PlayoffMatchDuration: 5, Courts: []string{"A"}, Naginata: true}
+	comp := &state.Competition{StartTime: "09:00", PlayoffMatchDurationSeconds: 300, Courts: []string{"A"}, Naginata: true}
 	bracket := &state.Bracket{
 		Rounds: [][]state.BracketMatch{
 			{{ID: "sf1", Court: "A"}, {ID: "sf2", Court: "A"}},
@@ -537,7 +524,7 @@ func TestScheduleBronze_PlacesBronzeBeforeFinalOnSharedCourt(t *testing.T) {
 // reassigned to a different court, it just borrows the final's time as a sane
 // default and must NOT disturb the final's own court timeline.
 func TestScheduleBronze_DifferentCourtInheritsFinalTimeOnly(t *testing.T) {
-	comp := &state.Competition{StartTime: "09:00", PlayoffMatchDuration: 5, Courts: []string{"A", "B"}, Naginata: true}
+	comp := &state.Competition{StartTime: "09:00", PlayoffMatchDurationSeconds: 300, Courts: []string{"A", "B"}, Naginata: true}
 	bracket := &state.Bracket{
 		Rounds: [][]state.BracketMatch{
 			{{ID: "sf1", Court: "A"}, {ID: "sf2", Court: "A"}},

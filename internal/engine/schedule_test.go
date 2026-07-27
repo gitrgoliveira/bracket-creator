@@ -297,13 +297,15 @@ func TestPerMatchElapsed_Team(t *testing.T) {
 // Tests for EstimateForCounts (Step 2)
 // ---------------------------------------------------------------------------
 
+// poolDur / playoffDur are in MINUTES for the callers' readability; the
+// competition stores seconds, the only representation that survives a load.
 func newIndivComp(courts []string, poolDur, playoffDur int, startTime string) *state.Competition {
 	return &state.Competition{
-		Kind:                 "individual",
-		Courts:               courts,
-		PoolMatchDuration:    poolDur,
-		PlayoffMatchDuration: playoffDur,
-		StartTime:            startTime,
+		Kind:                        "individual",
+		Courts:                      courts,
+		PoolMatchDurationSeconds:    poolDur * 60,
+		PlayoffMatchDurationSeconds: playoffDur * 60,
+		StartTime:                   startTime,
 	}
 }
 
@@ -370,12 +372,12 @@ func TestEstimateForCounts_PoolThenPlayoffSequential(t *testing.T) {
 // tests use individual comps, so this guards the team code path.
 func TestEstimateForCounts_TeamComp(t *testing.T) {
 	team := &state.Competition{
-		Kind:                 "team",
-		TeamSize:             3,
-		Courts:               []string{"A"},
-		PoolMatchDuration:    2,
-		PlayoffMatchDuration: 2,
-		StartTime:            "09:00",
+		Kind:                        "team",
+		TeamSize:                    3,
+		Courts:                      []string{"A"},
+		PoolMatchDurationSeconds:    120,
+		PlayoffMatchDurationSeconds: 120,
+		StartTime:                   "09:00",
 	}
 	tourn := newTournament(1.5, 10, "", "", "")
 	// Per team match (3 bouts): 3*2*1.5 + (3-1)*1 = 11. 2 matches on 1 court = 22.
@@ -397,12 +399,12 @@ func TestEstimateForCounts_TeamComp(t *testing.T) {
 func TestEstimateForCounts_TeamDefaultsTeamSize(t *testing.T) {
 	base := func(teamSize int) *state.Competition {
 		return &state.Competition{
-			Kind:                 "team",
-			TeamSize:             teamSize,
-			Courts:               []string{"A"},
-			PoolMatchDuration:    2,
-			PlayoffMatchDuration: 2,
-			StartTime:            "09:00",
+			Kind:                        "team",
+			TeamSize:                    teamSize,
+			Courts:                      []string{"A"},
+			PoolMatchDurationSeconds:    120,
+			PlayoffMatchDurationSeconds: 120,
+			StartTime:                   "09:00",
 		}
 	}
 	tourn := func() *state.Tournament { return newTournament(1.5, 10, "", "", "") }
@@ -561,7 +563,7 @@ func TestEstimateForCounts_CourtsClampedToMax(t *testing.T) {
 	for i := range courts {
 		courts[i] = fmt.Sprintf("C%d", i)
 	}
-	comp := &state.Competition{Kind: "individual", Courts: courts, PoolMatchDuration: 3, StartTime: "09:00"}
+	comp := &state.Competition{Kind: "individual", Courts: courts, PoolMatchDurationSeconds: 180, StartTime: "09:00"}
 	est := EstimateForCounts(100, 0, comp, newTournament(1.5, 10, "", "", ""))
 	assert.Len(t, est.PerCourtMinutes, MaxCourts,
 		"oversized Courts slice must clamp per-court entries to MaxCourts")
@@ -586,10 +588,10 @@ func TestEstimateForCounts_CourtsClampedToMax(t *testing.T) {
 func TestEstimateForCountsVsSlotAssigner_Balanced(t *testing.T) {
 	const bufferPct = 10
 	comp := &state.Competition{
-		Kind:              "individual",
-		Courts:            []string{"A", "B"},
-		PoolMatchDuration: 4,
-		StartTime:         "09:00",
+		Kind:                     "individual",
+		Courts:                   []string{"A", "B"},
+		PoolMatchDurationSeconds: 240,
+		StartTime:                "09:00",
 	}
 	tournament := &state.Tournament{
 		ClockToElapsedMultiplier: 1.5,

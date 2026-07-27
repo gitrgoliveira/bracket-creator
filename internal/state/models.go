@@ -319,22 +319,22 @@ type Competition struct {
 	WithZekkenName    bool              `yaml:"with_zekken_name" json:"withZekkenName"`
 	NumberPrefix      string            `yaml:"number_prefix,omitempty" json:"numberPrefix,omitempty"`
 	HasParticipantIDs bool              `yaml:"has_participant_ids,omitempty" json:"hasParticipantIDs,omitempty"`
-	// PoolMatchDuration / PlayoffMatchDuration are the legacy WHOLE-MINUTE
-	// per-phase clock durations. They are retained for backward
-	// compatibility (old config.md files, older API clients that send
-	// minutes only). The canonical values are the *Seconds fields below,
-	// which allow sub-minute granularity (e.g. 2m30s). Read durations via
-	// EffectivePoolMatchSeconds / EffectivePlayoffMatchSeconds, never these
-	// fields directly.
-	PoolMatchDuration    int `yaml:"pool_match_duration,omitempty" json:"poolMatchDuration,omitempty"`
-	PlayoffMatchDuration int `yaml:"playoff_match_duration,omitempty" json:"playoffMatchDuration,omitempty"`
+	// PoolMatchDuration / PlayoffMatchDuration are the retired WHOLE-MINUTE
+	// per-phase clock durations. They carry `json:"-"`: they are NOT part of
+	// the API in either direction. The only reason they still exist is that
+	// old config.md files on disk contain them, and ApplyCompetitionDefaults
+	// needs to read them once to migrate the value into the canonical seconds
+	// fields. It then zeroes them, so `omitempty` drops the keys on the next
+	// save and the file converges on the seconds-only schema.
+	// Never read these directly; use EffectivePoolMatchSeconds /
+	// EffectivePlayoffMatchSeconds.
+	PoolMatchDuration    int `yaml:"pool_match_duration,omitempty" json:"-"`
+	PlayoffMatchDuration int `yaml:"playoff_match_duration,omitempty" json:"-"`
 
-	// PoolMatchDurationSeconds / PlayoffMatchDurationSeconds are the
-	// canonical per-phase clock durations in SECONDS. They supersede the
-	// whole-minute fields above and let operators enter mm:ss (FR: sub-minute
-	// match durations). When set, they win over the legacy minute fields;
-	// ApplyCompetitionDefaults back-fills them (minutes*60) so callers that
-	// still send only minutes keep working.
+	// PoolMatchDurationSeconds / PlayoffMatchDurationSeconds are THE per-phase
+	// clock durations, in SECONDS, allowing sub-minute granularity (e.g. 150 =
+	// 2m30s). This is the only duration representation on the wire and the only
+	// one written to new config.md files.
 	PoolMatchDurationSeconds    int `yaml:"pool_match_duration_seconds,omitempty" json:"poolMatchDurationSeconds,omitempty"`
 	PlayoffMatchDurationSeconds int `yaml:"playoff_match_duration_seconds,omitempty" json:"playoffMatchDurationSeconds,omitempty"`
 	// MaxEnchoPeriods caps how many encho (overtime) periods one match
@@ -351,11 +351,10 @@ type Competition struct {
 	// TeamSize is 0 (individual competitions).
 	TeamMatchType TeamMatchType `yaml:"team_match_type,omitempty" json:"teamMatchType,omitempty"`
 
-	// Legacy single-phase duration. Captured at unmarshal time and used by
-	// ApplyCompetitionDefaults to populate the per-phase fields above when
-	// they are zero. Not persisted on save; only here so older YAML files
-	// round-trip through the new schema.
-	MatchDuration int `yaml:"match_duration,omitempty" json:"matchDuration,omitempty"`
+	// Retired single-phase whole-minute duration. Same status as
+	// PoolMatchDuration above: read once from old YAML by
+	// ApplyCompetitionDefaults, then zeroed. Not on the API (`json:"-"`).
+	MatchDuration int `yaml:"match_duration,omitempty" json:"-"`
 
 	// SwissRounds is the number of rounds played in a Swiss-format
 	// competition (FR-050a). Ignored when Format != CompFormatSwiss.
@@ -459,61 +458,93 @@ func (c *Competition) EffectiveWithZekkenName() bool {
 	return c.WithZekkenName
 }
 
-// ApplyCompetitionDefaults fills zero-valued per-phase durations from the
-// legacy MatchDuration field. Idempotent; safe to call repeatedly.
+// MinMatchDurationSeconds / MaxMatchDurationSeconds bound a per-match clock to
+// a plausible shiai range. Match duration drives auto-scheduling for the whole
+// event, so a fat-fingered 0:03 would collapse the day's timetable. They live
+// here rather than in the HTTP layer because the legacy-duration migration below
+// clamps into the same band, which is what lets every other layer assume a
+// stored duration is always in range. Mirrored client-side by
+// MIN_DURATION_SECONDS / MAX_DURATION_SECONDS in web-mobile/js/duration.jsx.
+const (
+	MinMatchDurationSeconds = 30
+	MaxMatchDurationSeconds = 10 * 60 // 600
+)
+
+// ClampMatchSeconds pins a positive duration into the shiai band. Zero (unset,
+// "use the scheduler default") passes through untouched.
+func ClampMatchSeconds(seconds int) int {
+	switch {
+	case seconds <= 0:
+		return 0
+	case seconds < MinMatchDurationSeconds:
+		return MinMatchDurationSeconds
+	case seconds > MaxMatchDurationSeconds:
+		return MaxMatchDurationSeconds
+	default:
+		return seconds
+	}
+}
+
+// ApplyCompetitionDefaults migrates a competition off the retired whole-minute
+// duration fields onto the canonical seconds fields. Idempotent; safe to call
+// repeatedly. Called from parseCompetitionFile, so every read is migrated.
 //
-// FR-054, NFR-025, R9: old config.md files predating per-phase durations
-// carry only `match_duration`. We MUST preserve their schedule estimates.
+// FR-054, NFR-025, R9: config.md files predating per-phase durations carry only
+// `match_duration`, and their schedule estimates MUST be preserved rather than
+// silently reset to the default.
+//
+// The migrated value is clamped into the shiai band. That clamp is load-bearing
+// well beyond this function: because no stored duration can be out of band,
+// nothing downstream needs to special-case one. An earlier design instead
+// grandfathered out-of-band legacy values, which forced the API to compare
+// against the previous value on every write and left the settings form able to
+// wedge itself on a value it could display but not re-submit.
+//
+// A clamp is lossy by construction: a competition configured at 15 minutes
+// becomes 10:00, the band ceiling. That is deliberate and preferred over both
+// dropping the value (silent reset to 3:00) and keeping it (an unrepresentable
+// value the UI cannot round-trip).
 func ApplyCompetitionDefaults(c *Competition) {
 	if c == nil {
 		return
 	}
-	if c.PoolMatchDuration == 0 && c.MatchDuration > 0 {
-		c.PoolMatchDuration = c.MatchDuration
+	if c.PoolMatchDurationSeconds == 0 {
+		if m := firstPositive(c.PoolMatchDuration, c.MatchDuration); m > 0 {
+			c.PoolMatchDurationSeconds = ClampMatchSeconds(m * 60)
+		}
 	}
-	if c.PlayoffMatchDuration == 0 && c.MatchDuration > 0 {
-		c.PlayoffMatchDuration = c.MatchDuration
+	if c.PlayoffMatchDurationSeconds == 0 {
+		if m := firstPositive(c.PlayoffMatchDuration, c.MatchDuration); m > 0 {
+			c.PlayoffMatchDurationSeconds = ClampMatchSeconds(m * 60)
+		}
 	}
-	// Back-fill the canonical seconds fields from the whole-minute fields
-	// for callers/config files that predate sub-minute durations. Only fills
-	// when the seconds field is unset, so an explicit mm:ss value (e.g. 150s
-	// = 2m30s) is never clobbered by a stale rounded minute field.
-	if c.PoolMatchDurationSeconds == 0 && c.PoolMatchDuration > 0 {
-		c.PoolMatchDurationSeconds = c.PoolMatchDuration * 60
-	}
-	if c.PlayoffMatchDurationSeconds == 0 && c.PlayoffMatchDuration > 0 {
-		c.PlayoffMatchDurationSeconds = c.PlayoffMatchDuration * 60
-	}
+	// Drop the retired fields so `omitempty` removes them from the next save
+	// and the on-disk file converges on the seconds-only schema.
+	c.PoolMatchDuration = 0
+	c.PlayoffMatchDuration = 0
+	c.MatchDuration = 0
 }
 
-// effectiveMatchSeconds resolves a per-phase clock duration in seconds from
-// its (seconds, whole-minute, legacy-single-field) triple, preferring the
-// sub-minute value and falling back to the whole-minute fields (x60) for
-// competitions that have not been migrated. Returns 0 when none is set;
-// callers apply their own default (see scheduler_slots.go).
-func effectiveMatchSeconds(seconds, minutes, legacyMinutes int) int {
-	switch {
-	case seconds > 0:
-		return seconds
-	case minutes > 0:
-		return minutes * 60
-	case legacyMinutes > 0:
-		return legacyMinutes * 60
-	default:
-		return 0
+// firstPositive returns the first value greater than zero, or 0.
+func firstPositive(vals ...int) int {
+	for _, v := range vals {
+		if v > 0 {
+			return v
+		}
 	}
+	return 0
 }
 
-// EffectivePoolMatchSeconds returns the canonical per-pool-match clock
-// duration in seconds (see effectiveMatchSeconds for the precedence).
+// EffectivePoolMatchSeconds returns the per-pool-match clock duration in
+// seconds, or 0 when unset (callers apply their own default; see
+// scheduler_slots.go). Kept as a method so duration reads have one seam.
 func (c *Competition) EffectivePoolMatchSeconds() int {
-	return effectiveMatchSeconds(c.PoolMatchDurationSeconds, c.PoolMatchDuration, c.MatchDuration)
+	return c.PoolMatchDurationSeconds
 }
 
-// EffectivePlayoffMatchSeconds is the playoff-phase counterpart of
-// EffectivePoolMatchSeconds. Same precedence and fallback semantics.
+// EffectivePlayoffMatchSeconds is the playoff-phase counterpart.
 func (c *Competition) EffectivePlayoffMatchSeconds() int {
-	return effectiveMatchSeconds(c.PlayoffMatchDurationSeconds, c.PlayoffMatchDuration, c.MatchDuration)
+	return c.PlayoffMatchDurationSeconds
 }
 
 // IsPlayoffEnabled reports whether this competition runs a knockout/playoff

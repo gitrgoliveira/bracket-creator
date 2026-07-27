@@ -97,23 +97,21 @@ describe('clampDurationSeconds', () => {
 });
 
 describe('effectiveDurationSeconds', () => {
-  it('prefers the seconds field when set', () => {
-    expect(effectiveDurationSeconds(150, 3, 4)).toBe(150);
+  // Seconds are the only duration representation the API carries: the retired
+  // whole-minute fields were removed, and internal/state migrates an old
+  // config.md onto seconds when it loads it. There is no fallback tier left.
+  it('returns the seconds value when set', () => {
+    expect(effectiveDurationSeconds(150)).toBe(150);
+    expect(effectiveDurationSeconds(600)).toBe(600);
   });
-  it('falls back to per-phase minutes x60', () => {
-    expect(effectiveDurationSeconds(0, 3)).toBe(180);
-    expect(effectiveDurationSeconds(undefined, 5)).toBe(300);
+  it('returns NaN when unset, so the caller renders the default state', () => {
+    expect(effectiveDurationSeconds(0)).toBeNaN();
+    expect(effectiveDurationSeconds(undefined)).toBeNaN();
+    expect(effectiveDurationSeconds(NaN)).toBeNaN();
+    expect(effectiveDurationSeconds(-5)).toBeNaN();
   });
-  it('falls back to the legacy single MatchDuration tier x60', () => {
-    // Mirrors the Go 3-tier effectiveMatchSeconds: a legacy comp carrying only
-    // matchDuration (no per-phase minutes, no seconds) still resolves.
-    expect(effectiveDurationSeconds(0, 0, 5)).toBe(300);
-    expect(effectiveDurationSeconds(undefined, undefined, 3)).toBe(180);
-  });
-  it('returns NaN when none is set', () => {
-    expect(effectiveDurationSeconds(0, 0, 0)).toBeNaN();
-    expect(effectiveDurationSeconds(undefined, undefined, undefined)).toBeNaN();
-    expect(effectiveDurationSeconds(NaN, NaN, NaN)).toBeNaN();
+  it('ignores extra arguments, so a stale 3-tier call site cannot resurrect a fallback', () => {
+    expect(effectiveDurationSeconds(0, 3, 4)).toBeNaN();
   });
 });
 

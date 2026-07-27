@@ -167,7 +167,7 @@ func TestDetectClashes_RosteredFootprintExtendsWindow(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID: "a", Name: "Alpha", Format: state.CompFormatPlayoffs, Kind: "individual",
 		Date: "01-07-2026", StartTime: "09:00", Courts: []string{"A"},
-		PoolMatchDuration: 3, PlayoffMatchDuration: 5, Status: state.CompStatusSetup,
+		PoolMatchDurationSeconds: 180, PlayoffMatchDurationSeconds: 300, Status: state.CompStatusSetup,
 	}))
 	saveTestParticipants(t, store, "a", []string{"P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8"})
 	est, err := eng.EstimateScheduleForCompetition("a")

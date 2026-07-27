@@ -234,8 +234,8 @@ function isValidDate(date) {
 //
 // - `value` is what to store in local state. For empty input we return NaN
 //   so the render side can do `value={Number.isFinite(v) ? v: ""}` and
-//   keep the cleared display empty (matches the matchDuration pattern at
-//   admin_schedule.jsx).
+//   keep the cleared display empty (same shape as the duration fields in
+//   admin_competition_settings.jsx).
 // - `shouldSave` is true only when the parsed value is a positive integer
 //   ≥ min. Callers MUST still issue a saveLater on false: the debounceRef
 //   is single-slot and covers all fields, so an earlier scheduled save

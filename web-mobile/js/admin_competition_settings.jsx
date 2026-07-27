@@ -9,11 +9,6 @@ import { effectiveDurationSeconds } from './admin_schedule_utils.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
-// Default on-clock minutes per match when a duration field is left blank.
-// Mirrors defaultPerMatchClockMinutes in internal/engine/scheduler_slots.go
-// (a nominal estimate anchor, not a regulation match time). Surfaced in the
-// duration inputs so the operator knows what "blank" resolves to.
-
 const dmyToIso = window.dmyToIso;
 const isoToDmy = window.isoToDmy;
 const validateAndNormalizeDate = window.validateAndNormalizeDate;
@@ -83,7 +78,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // clockToElapsedMultiplier, or slowestCourtBufferPct on the tournament
   // settings screen and then returns here: otherwise the display would be
   // stale until a competition field changed (Finding 5 fix).
-  }, [c.id, c.format, c.kind, c.poolMatchDuration, c.playoffMatchDuration, c.poolMatchDurationSeconds, c.playoffMatchDurationSeconds, c.courts, c.teamSize, c.poolSize, c.poolSizeMode, c.poolWinners, c.roundRobin, c.poolFormat, c.swissRounds, c.checkInEnabled, password,
+  }, [c.id, c.format, c.kind, c.poolMatchDurationSeconds, c.playoffMatchDurationSeconds, c.courts, c.teamSize, c.poolSize, c.poolSizeMode, c.poolWinners, c.roundRobin, c.poolFormat, c.swissRounds, c.checkInEnabled, password,
     tournament?.openingBlock, tournament?.lunchBlock, tournament?.closingBlock,
     tournament?.clockToElapsedMultiplier, tournament?.slowestCourtBufferPct]);
   // AdminSettings unmounts when the user navigates to a different section
@@ -137,7 +132,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       });
       return next;
     });
-  }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind, c.mirror, c.status, c.poolFormat, c.poolMatchDuration, c.playoffMatchDuration, c.poolMatchDurationSeconds, c.playoffMatchDurationSeconds, c.swissRounds, c.swissCurrentRound, c.naginata, c.checkInEnabled, c.leagueTiebreakTopN, c.leagueTwoThirdPlaces, c.teamMatchType]);
+  }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind, c.mirror, c.status, c.poolFormat, c.poolMatchDurationSeconds, c.playoffMatchDurationSeconds, c.swissRounds, c.swissCurrentRound, c.naginata, c.checkInEnabled, c.leagueTiebreakTopN, c.leagueTwoThirdPlaces, c.teamMatchType]);
 
   const saveNow = () => {
     // Build `effective` from the LATEST server-known state (cRef.current)
@@ -244,15 +239,12 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     // the disk value until the user types a valid replacement.
     const safeInt = (v, fallback) =>
       Number.isFinite(v) && Number.isInteger(v) && v >= 1 ? v : fallback;
-    // safeNonNegInt is the >=0 sibling for the per-phase duration
-    // fields. T047: 0 means "no override: fall through to the legacy
-    // matchDuration default per backend ApplyCompetitionDefaults", so
-    // we DO want 0 to round-trip. Same NaN/fractional/negative guards
-    // as safeInt; the only difference is the lower bound. Same
-    // disk-clobber concern as safeInt: cleared input → NaN → JSON
-    // null → Go zero. We fall back to latestC.<field> in that case so
-    // an unrelated-field save doesn't silently zero out a duration the
-    // user previously typed.
+    // safeNonNegInt is the >=0 sibling for the per-phase duration fields.
+    // T047: 0 means "unset, use the scheduler default", so we DO want 0 to
+    // round-trip: that is how clearing a duration resets it. Same
+    // NaN/fractional/negative guards as safeInt; the only difference is the
+    // lower bound. The NaN fallback to latestC.<field> still protects a field
+    // the operator never touched from being zeroed by an unrelated save.
     const safeNonNegInt = (v, fallback) =>
       Number.isFinite(v) && Number.isInteger(v) && v >= 0 ? v : fallback;
     const finalNext = {
@@ -275,14 +267,12 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       // the format runs pool play; the backend's validateCompetitionFormat
       // accepts the empty value, so a non-pool format can safely PUT "".
       poolFormat: effective.poolFormat || "",
-      // FR-052..FR-054 / T047: per-phase duration overrides. Zero means
-      // "use legacy default": fall through to safeNonNegInt with
-      // latestC's value to avoid NaN-clobbering a previously-set value.
-      poolMatchDuration: safeNonNegInt(effective.poolMatchDuration, latestC.poolMatchDuration || 0),
-      playoffMatchDuration: safeNonNegInt(effective.playoffMatchDuration, latestC.playoffMatchDuration || 0),
-      // Canonical sub-minute durations (seconds). Same NaN/clobber guard as the
-      // legacy minute fields above: a cleared input (NaN) falls back to the
-      // last-saved value so an unrelated-field save can't wipe a duration.
+      // FR-052..FR-054 / T047: per-phase durations, in SECONDS. The retired
+      // whole-minute fields are no longer sent; seconds are the only duration
+      // representation the API carries. safeNonNegInt still guards the
+      // disk-clobber case for a field the operator never touched (NaN falls
+      // back to the last-saved value); an explicit clear stages 0, which is
+      // finite and therefore round-trips as a genuine reset to the default.
       poolMatchDurationSeconds: safeNonNegInt(effective.poolMatchDurationSeconds, latestC.poolMatchDurationSeconds || 0),
       playoffMatchDurationSeconds: safeNonNegInt(effective.playoffMatchDurationSeconds, latestC.playoffMatchDurationSeconds || 0),
       // T190 (FR-050a): swissRounds is editable pre-start; safeInt
@@ -424,16 +414,18 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     if (clashWarnings) setClashWarnings(null);
   };
 
-  // Duration handler for the mm:ss DurationInput. Stages the canonical
-  // seconds value; when a concrete value is entered (not a blank clear -> NaN)
-  // it also zeroes the legacy whole-minute field so the seconds value is the
-  // single source of truth on save (the Go side prefers *Seconds, but zeroing
-  // the minute field keeps config.md clean and unambiguous). A blank clear
-  // leaves both fields untouched so an unrelated-field save doesn't wipe a
-  // previously-set duration (same disk-clobber guard as safeNonNegInt).
-  const updateDurationSeconds = (secKey, minKey) => (secOrNaN) => {
-    update(secKey, secOrNaN);
-    if (Number.isFinite(secOrNaN)) update(minKey, 0);
+  // Duration handler for the m:ss DurationInput. Stages the canonical seconds
+  // value, which is the only duration representation the API carries.
+  //
+  // A blank clear stages 0, not NaN. 0 is the wire value for "unset, use the
+  // scheduler default", so clearing the field genuinely resets it. Staging NaN
+  // instead would hit the safeNonNegInt fallback in saveNow and silently re-save
+  // the previous value, while the field displayed "Using the default, 3:00" --
+  // a save that confirms an outcome it did not perform. The disk-clobber guard
+  // that fallback exists for still protects every field the operator never
+  // touched: this handler only runs on an actual edit.
+  const updateDurationSeconds = (secKey) => (secOrNaN) => {
+    update(secKey, Number.isFinite(secOrNaN) ? secOrNaN : 0);
   };
 
   // Track which duration fields currently hold an out-of-band / unparseable
@@ -452,18 +444,16 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
 
   // Render one per-phase m:ss duration field. Pool and playoff differ only in
   // label/hint/field-key, so share the markup to keep the two hint strings in
-  // step. `seconds` resolves through the 3-tier fallback (seconds -> per-phase
-  // minutes -> legacy MatchDuration) so a legacy comp still shows its value.
-  // The label owns the field via htmlFor/id, so a screen reader announces
-  // "Pool match duration" rather than four indistinguishable sub-field names.
-  const durationField = (label, secKey, minKey, hint) => (
+  // step. The label owns the field via htmlFor/id, so a screen reader announces
+  // "Pool match duration" rather than a bare "minutes".
+  const durationField = (label, secKey, hint) => (
     <div className="field">
       <label className="field__label" htmlFor={`duration-${secKey}`}>{label}</label>
       <DurationInput
         id={`duration-${secKey}`}
         describedBy={`duration-${secKey}-hint`}
-        seconds={effectiveDurationSeconds(local[secKey], local[minKey], local.matchDuration)}
-        onChange={updateDurationSeconds(secKey, minKey)}
+        seconds={effectiveDurationSeconds(local[secKey])}
+        onChange={updateDurationSeconds(secKey)}
         onValidity={setDurationError(secKey)}
       />
       <div className="field__hint" id={`duration-${secKey}-hint`}>{hint}</div>
@@ -698,14 +688,12 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             durationField(
               local.format === "swiss" ? "Round match duration" : "Pool match duration",
               "poolMatchDurationSeconds",
-              "poolMatchDuration",
               `Estimated time per ${local.format === "swiss" ? "Swiss-round" : "pool"} match, as m:ss (e.g. 2:30).`
             )}
           {(local.format === "playoffs" || local.format === "mixed") &&
             durationField(
               "Playoff match duration",
               "playoffMatchDurationSeconds",
-              "playoffMatchDuration",
               "Estimated time per playoff/knockout match, as m:ss (e.g. 2:30)."
             )}
         </div>

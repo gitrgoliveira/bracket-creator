@@ -149,68 +149,23 @@ func validateCompetitionDateInTournament(comp *state.Competition, tourn *state.T
 //
 // FR-050a: swiss is now accepted; the caller must ALSO run
 // validateSwissConfig when format == swiss to enforce swissRounds >= 1.
-// maxMatchDurationSeconds caps a single per-match clock duration at 24 hours.
-// This is far above any real kendo match yet low enough that downstream
-// time.Duration (int64 ns) slot arithmetic can never overflow into a garbage
-// (or negative) schedule. maxMatchDurationMinutes is the whole-minute
-// equivalent for the legacy fields.
-// minMatchDurationSeconds / maxMatchDurationSeconds bound the canonical
-// per-match clock to a plausible shiai range. Match duration drives
-// auto-scheduling for the whole event, so a fat-fingered 0:03 would otherwise
-// persist to config.md and collapse the day's timetable; the band rejects it at
-// the API rather than clamping it silently. Mirrored client-side by
-// MIN_DURATION_SECONDS / MAX_DURATION_SECONDS in web-mobile/js/duration.jsx.
-//
-// The band gates a duration the operator ACTUALLY CHANGES; see
-// validateDurationBand for why an unchanged value must be grandfathered.
-// maxMatchDurationMinutes keeps its original 24-hour ceiling for the legacy
-// whole-minute fields.
-const (
-	minMatchDurationSeconds = 30
-	maxMatchDurationSeconds = 10 * 60 // 600
-	maxMatchDurationMinutes = 24 * 60 // 1440
-)
 
+// validateCompetitionDurations enforces the shiai band on the per-phase clock
+// durations. Zero means "unset, use the scheduler default" and is allowed.
+//
+// This is a flat check against the incoming value, with no comparison to what
+// is stored, because state.ApplyCompetitionDefaults clamps every legacy value
+// into the same band as it migrates it. No stored duration can therefore be out
+// of band, so there is nothing to grandfather. The band bounds are
+// state.MinMatchDurationSeconds / state.MaxMatchDurationSeconds; they live in
+// the state package precisely so the migration and this validator cannot drift.
 func validateCompetitionDurations(comp *state.Competition) error {
-	if comp.PoolMatchDuration < 0 || comp.PlayoffMatchDuration < 0 || comp.MatchDuration < 0 ||
-		comp.PoolMatchDurationSeconds < 0 || comp.PlayoffMatchDurationSeconds < 0 {
-		return fmt.Errorf("match duration must be >= 0")
-	}
-	if comp.PoolMatchDuration > maxMatchDurationMinutes || comp.PlayoffMatchDuration > maxMatchDurationMinutes || comp.MatchDuration > maxMatchDurationMinutes {
-		return fmt.Errorf("match duration must be <= %d minutes", maxMatchDurationMinutes)
-	}
-	return nil
-}
-
-// validateDurationBand rejects a per-phase duration the caller is CHANGING to a
-// value outside the plausible shiai band. `prev` is the stored competition, or
-// nil on create.
-//
-// Only a changed value is gated, because the read path back-fills the seconds
-// fields from the legacy whole-minute fields (ApplyCompetitionDefaults). A
-// competition configured long ago as `match_duration: 15` is therefore served
-// to the client as poolMatchDurationSeconds=900, and the settings form PUTs the
-// full config back on every save. Banding the raw incoming value made that
-// competition impossible to save at all: renaming it returned 400. Grandfathering
-// the unchanged value keeps existing data editable while still refusing a
-// fat-fingered 0:03 that the operator just typed.
-//
-// 0 means "unset, use the scheduler default" and is always allowed.
-func validateDurationBand(next, prev *state.Competition) error {
-	var prevPool, prevPlayoff int
-	if prev != nil {
-		prevPool = prev.EffectivePoolMatchSeconds()
-		prevPlayoff = prev.EffectivePlayoffMatchSeconds()
-	}
-	for _, f := range []struct{ next, prev int }{
-		{next.PoolMatchDurationSeconds, prevPool},
-		{next.PlayoffMatchDurationSeconds, prevPlayoff},
-	} {
-		if f.next == 0 || f.next == f.prev {
+	for _, secs := range []int{comp.PoolMatchDurationSeconds, comp.PlayoffMatchDurationSeconds} {
+		if secs == 0 {
 			continue
 		}
-		if f.next < minMatchDurationSeconds || f.next > maxMatchDurationSeconds {
-			return fmt.Errorf("match duration must be between %d and %d seconds", minMatchDurationSeconds, maxMatchDurationSeconds)
+		if secs < state.MinMatchDurationSeconds || secs > state.MaxMatchDurationSeconds {
+			return fmt.Errorf("match duration must be between %d and %d seconds", state.MinMatchDurationSeconds, state.MaxMatchDurationSeconds)
 		}
 	}
 	return nil
@@ -487,14 +442,8 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// (otherwise the per-court Shiaijo operator view can't surface them).
 		comp.Courts = resolveCompetitionCourts(comp.Courts, createTourn)
 
-		// Reject negative per-phase or legacy durations.
+		// Reject per-phase durations outside the shiai band.
 		if err := validateCompetitionDurations(&comp); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		// A brand-new competition has no stored value to grandfather, so every
-		// non-zero duration it supplies is a value someone just chose.
-		if err := validateDurationBand(&comp, nil); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -1057,21 +1006,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				if validationErr != nil {
 					return nil, nil
 				}
-				// Populate per-phase durations from legacy MatchDuration
-				// when only the legacy field was supplied. Idempotent.
-				// Runs INSIDE the transform so we can copy the resolved
-				// per-phase values straight into `current` below.
+				// Normalize the inbound body: the retired whole-minute fields
+				// are `json:"-"`, so this is a no-op for a real client and only
+				// matters for a body constructed in-process. Idempotent.
 				state.ApplyCompetitionDefaults(&comp)
-
-				// Band-check the durations against the STORED values, which is
-				// only possible here inside the transform. An unchanged value is
-				// grandfathered so a competition whose legacy whole-minute
-				// duration back-fills to an out-of-band seconds value stays
-				// editable; see validateDurationBand.
-				if err := validateDurationBand(&comp, current); err != nil {
-					validationErr = err
-					return nil, nil
-				}
 
 				// Settings-only merge. Status, Players, and
 				// HasParticipantIDs are deliberately not copied from
@@ -1098,11 +1036,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				current.PoolFormat = comp.PoolFormat
 				current.Kind = comp.Kind
 				current.Mirror = comp.Mirror
-				current.PoolMatchDuration = comp.PoolMatchDuration
-				current.PlayoffMatchDuration = comp.PlayoffMatchDuration
+				// Seconds are the only duration representation that crosses the
+				// wire. The retired whole-minute fields are not merged: `current`
+				// was migrated to seconds when it was loaded, and its legacy
+				// fields are already zero.
 				current.PoolMatchDurationSeconds = comp.PoolMatchDurationSeconds
 				current.PlayoffMatchDurationSeconds = comp.PlayoffMatchDurationSeconds
-				current.MatchDuration = comp.MatchDuration
 				// FR-050a: swiss round budget is admin-editable from
 				// settings until the competition starts (the engine
 				// gates StartCompetition on Status=setup). After start,

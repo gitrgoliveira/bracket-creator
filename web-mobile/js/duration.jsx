@@ -15,10 +15,11 @@
 
 // Accepted band. Match duration drives auto-scheduling for the whole event, so
 // values outside a plausible shiai range are rejected outright rather than
-// silently clamped: a fat-fingered 0:03 used to persist to config.md and drive
-// the day's timetable. Mirrored server-side by minMatchDurationSeconds /
-// maxMatchDurationSeconds in internal/mobileapp/handlers_competition.go: a
-// client-only block is not a block.
+// silently clamped: a fat-fingered 0:03 would otherwise persist to config.md and
+// drive the day's timetable. Mirrored server-side by MinMatchDurationSeconds /
+// MaxMatchDurationSeconds in internal/state/models.go, which both validates
+// writes and clamps migrated legacy durations. A client-only block is not a
+// block; keep these two in step.
 export const MIN_DURATION_SECONDS = 30;
 export const MAX_DURATION_SECONDS = 10 * 60; // 600
 

@@ -169,3 +169,37 @@ describe('DurationInput', () => {
     expect(field().getAttribute('inputmode')).toBe('numeric');
   });
 });
+
+// Regression guard for the tri-review finding that clearing a duration field
+// silently kept the previous value while the UI confirmed the opposite.
+// updateDurationSeconds stages 0 (the wire value for "unset") on a clear, NOT
+// NaN: NaN hit saveNow's safeNonNegInt disk-clobber fallback and re-saved the
+// old duration, so the field displayed "Using the default, 3:00" over a save
+// that had not reset anything.
+describe('clearing a duration', () => {
+  it('emits NaN from the component so the caller can stage an explicit reset', () => {
+    const onChange = vi.fn();
+    render(<DurationInput label="Match duration" seconds={150} onChange={onChange} />);
+    fireEvent.change(screen.getByLabelText('Match duration'), { target: { value: '' } });
+    expect(onChange).toHaveBeenLastCalledWith(NaN);
+  });
+
+  it('is staged as 0, not NaN, by the settings handler', () => {
+    // Mirrors updateDurationSeconds in admin_competition_settings.jsx. Kept as
+    // an inline mirror because the handler is a closure over component state.
+    const staged = [];
+    const updateDurationSeconds = (key) => (secOrNaN) =>
+      staged.push([key, Number.isFinite(secOrNaN) ? secOrNaN : 0]);
+
+    updateDurationSeconds('poolMatchDurationSeconds')(NaN);
+    updateDurationSeconds('poolMatchDurationSeconds')(150);
+
+    expect(staged).toEqual([
+      ['poolMatchDurationSeconds', 0],
+      ['poolMatchDurationSeconds', 150],
+    ]);
+    // 0 is finite, so safeNonNegInt round-trips it as a genuine reset rather
+    // than falling back to the last-saved value.
+    expect(Number.isFinite(staged[0][1])).toBe(true);
+  });
+});

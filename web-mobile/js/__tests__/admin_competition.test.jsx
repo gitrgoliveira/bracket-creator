@@ -362,10 +362,8 @@ describe('AdminSettings useEffect deps completeness (H3 regression)', () => {
     // the settings form AND round-tripped via finalNext. Sync deps
     // required so an SSE-driven update lands in local state while the
     // user is on the settings page.
-    // mp-m5kf: the canonical sub-minute *Seconds fields are the ones the
-    // mm:ss DurationInput binds to; their legacy minute siblings stay for
-    // backward compatibility.
-    'poolMatchDuration', 'playoffMatchDuration',
+    // mp-m5kf: the m:ss DurationInput binds to the canonical *Seconds fields.
+    // The whole-minute siblings were retired and are no longer on the wire.
     'poolMatchDurationSeconds', 'playoffMatchDurationSeconds',
   ];
 

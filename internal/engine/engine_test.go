@@ -24,7 +24,10 @@ func setupTestEngine(t *testing.T) (*Engine, *state.Store, string) {
 	return eng, store, dir
 }
 
-func createTestCompetition(t *testing.T, store *state.Store, id string, format string, poolSize int) {
+// createTestCompetition saves a canonical individual competition. opts mutate
+// the competition before it is saved (same pattern as setupKachinukiComp), so
+// tests that need one field to differ don't restate the whole literal.
+func createTestCompetition(t *testing.T, store *state.Store, id string, format string, poolSize int, opts ...func(*state.Competition)) {
 	t.Helper()
 	comp := &state.Competition{
 		ID:           id,
@@ -38,6 +41,11 @@ func createTestCompetition(t *testing.T, store *state.Store, id string, format s
 		Courts:       []string{"A"},
 		StartTime:    "09:00",
 		Status:       "setup",
+	}
+	for _, o := range opts {
+		if o != nil {
+			o(comp)
+		}
 	}
 	require.NoError(t, store.SaveCompetition(comp))
 }
@@ -1409,9 +1417,7 @@ func TestExportCompetitionXlsx(t *testing.T) {
 
 	data, err := eng.ExportCompetitionXlsx(compID)
 	require.NoError(t, err)
-	assert.NotEmpty(t, data)
-	// Simple check for ZIP header (Excel files are ZIPs)
-	assert.Equal(t, []byte{0x50, 0x4b, 0x03, 0x04}, data[:4])
+	requireZipHeader(t, data)
 }
 
 func TestExportCompetitionXlsx_NotFound(t *testing.T) {

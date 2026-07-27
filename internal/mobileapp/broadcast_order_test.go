@@ -15,7 +15,6 @@
 package mobileapp
 
 import (
-	"encoding/json"
 	"sync"
 	"testing"
 	"time"
@@ -23,8 +22,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-var _ = time.Now // keep time import used (the single-goroutine test still uses it)
 
 // TestBroadcastsHaveStrictlyIncreasingSeq is the single-goroutine
 // baseline, broadcast N events from one goroutine and assert every
@@ -46,8 +43,7 @@ func TestBroadcastsHaveStrictlyIncreasingSeq(t *testing.T) {
 	for i := 0; i < N; i++ {
 		select {
 		case msg := <-ch:
-			var env SSEEvent
-			require.NoError(t, json.Unmarshal([]byte(msg), &env))
+			env := decodeHubEvent(t, msg)
 			assert.Equalf(t, prev+1, env.Seq, "envelope %d should have seq exactly one greater than the previous", i)
 			prev = env.Seq
 		case <-time.After(500 * time.Millisecond):
@@ -109,8 +105,7 @@ func TestConcurrentBroadcastsHaveUniqueMonotonicSeq(t *testing.T) {
 		seen[e.seq] = true
 		require.Greaterf(t, e.seq, prev, "seq %d at index %d not strictly greater than previous %d", e.seq, i, prev)
 		prev = e.seq
-		var env SSEEvent
-		require.NoError(t, json.Unmarshal([]byte(e.payload), &env))
+		env := decodeHubEvent(t, e)
 		require.Equal(t, e.seq, env.Seq, "marshalled JSON seq must match ring entry seq")
 	}
 	for s := int64(1); s <= int64(Total); s++ {

@@ -137,8 +137,7 @@ func TestSponsor_MutationsBroadcastTournamentUpdated(t *testing.T) {
 		t.Helper()
 		select {
 		case msg := <-ch:
-			var env SSEEvent
-			require.NoError(t, json.Unmarshal([]byte(msg), &env))
+			env := decodeHubEvent(t, msg)
 			assert.Equalf(t, EventTournamentUpdated, env.Type,
 				"%s must broadcast tournament_updated so open viewers refetch", action)
 		case <-time.After(time.Second):

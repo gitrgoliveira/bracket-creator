@@ -134,8 +134,8 @@ func TestConcurrentScoresPreserveOrder(t *testing.T) {
 						} `json:"result"`
 					} `json:"data"`
 				}
-				if err := json.Unmarshal([]byte(msg), &env); err != nil {
-					t.Errorf("envelope decode failed: %v (raw: %s)", err, msg)
+				if err := json.Unmarshal([]byte(msg.payload), &env); err != nil {
+					t.Errorf("envelope decode failed: %v (raw: %s)", err, msg.payload)
 					continue
 				}
 				matchID := env.Data.MatchID

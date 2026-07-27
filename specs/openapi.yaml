@@ -2518,6 +2518,8 @@ paths:
                 oneOf:
                   - $ref: '#/components/schemas/Tournament'
                   - type: 'null'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /api/viewer/competitions:
     get:
@@ -2533,6 +2535,8 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/Competition'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /api/viewer/competitions/{id}:
     get:
@@ -2550,6 +2554,8 @@ paths:
                 $ref: '#/components/schemas/CompetitionDetail'
         '404':
           $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /api/viewer/schedule:
     get:
@@ -2564,6 +2570,8 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/ScheduleEntry'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /api/viewer/court/{court}/current:
     get:
@@ -2624,6 +2632,8 @@ paths:
                     type: string
         '404':
           description: Unknown court.
+        '500':
+          $ref: '#/components/responses/InternalError'
         '503':
           description: No active tournament loaded.
 
@@ -2677,6 +2687,8 @@ paths:
                             - type: "null"
         '404':
           description: Unknown court.
+        '500':
+          $ref: '#/components/responses/InternalError'
         '503':
           description: No active tournament loaded.
 

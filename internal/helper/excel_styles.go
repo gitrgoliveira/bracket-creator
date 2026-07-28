@@ -223,17 +223,17 @@ func getTreeTextStyle(f *excelize.File) int {
 	return getCachedStyle(f, styleTreeText, buildTreeTextStyle)
 }
 
+// buildTreeTextStyle styles a tree leaf label: bold text sitting on the
+// bracket's entrant underline. Deliberately NO fill: the label cell used to be
+// a 3.5-unit bracket column where a grey fill was a barely-visible sliver, but
+// with the wide label column (and the bye-leaf span in writeTreeValue) a fill
+// renders as a prominent grey band across the page.
 func buildTreeTextStyle(f *excelize.File) int {
 	style := mustNewStyle(f, &excelize.Style{
 		Alignment: &excelize.Alignment{Horizontal: "right", Vertical: "center"},
 		Font:      &excelize.Font{Family: "Calibri", Bold: true, Color: "000000", Size: 12},
 		Border: []excelize.Border{
 			{Type: "bottom", Color: "000000", Style: 2},
-		},
-		Fill: excelize.Fill{
-			Type:    "pattern",
-			Color:   []string{"EFEFEF"},
-			Pattern: 1,
 		},
 	})
 	return style

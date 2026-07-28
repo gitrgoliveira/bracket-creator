@@ -82,11 +82,28 @@ func CreateTreeBracket(f *excelize.File, sheet string, col int, startRow int, si
 	return middleCell
 }
 
+// treeLabelColNum is the column every bottom-level leaf label lands in:
+// PrintLeafNodes decrements its column by 2 per level down to col=2, and
+// writeTreeValue writes at col+1 = 3 = "C". The template sizes this column
+// wide (internal/excel/template.go setupTreeSheet) so labels fit.
+const treeLabelColNum = 3
+
 func writeTreeValue(f *excelize.File, sheet string, col int, startRow int, value string, matchWinners map[string]MatchWinner) {
 	treeTextStyle := getTreeTextStyle(f)
 
 	colName := mustColumnName(col + 1)
 	cell := fmt.Sprintf("%s%d", colName, startRow)
+
+	// Bye leaves sit at shallower levels, so their value cell is one of the
+	// narrow bracket columns (E, G, ...) right of the label column. Style the
+	// whole span from column C so every leaf gets the same full-width
+	// underline+fill, not a stub under the label's last few characters. The
+	// spanned cells are always empty at a leaf's row (each leaf is alone in
+	// its band), so the right-aligned text still overflows across them.
+	styleStart := cell
+	if col+1 > treeLabelColNum {
+		styleStart = fmt.Sprintf("%s%d", mustColumnName(treeLabelColNum), startRow)
+	}
 
 	// Check if value is a pool reference and we have matchWinners
 	if matchWinners != nil {
@@ -96,7 +113,7 @@ func writeTreeValue(f *excelize.File, sheet string, col int, startRow int, value
 			if err := f.SetCellFormula(sheet, cell, formula); err != nil {
 				fmt.Printf("Warning: failed to set cell formula: %v\n", err)
 			}
-			if err := f.SetCellStyle(sheet, cell, cell, treeTextStyle); err != nil {
+			if err := f.SetCellStyle(sheet, styleStart, cell, treeTextStyle); err != nil {
 				fmt.Printf("Warning: failed to set cell style: %v\n", err)
 			}
 			return
@@ -108,7 +125,7 @@ func writeTreeValue(f *excelize.File, sheet string, col int, startRow int, value
 		fmt.Printf("Warning: failed to set cell value: %v\n", err)
 	}
 
-	if err := f.SetCellStyle(sheet, cell, cell, treeTextStyle); err != nil {
+	if err := f.SetCellStyle(sheet, styleStart, cell, treeTextStyle); err != nil {
 		fmt.Printf("Warning: failed to set cell style: %v\n", err)
 	}
 

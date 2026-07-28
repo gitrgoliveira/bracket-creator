@@ -190,6 +190,49 @@ func TestTreePageGeometry(t *testing.T) {
 	}
 }
 
+// TestWriteTreeValue_ByeLeafLabelSpan pins the label styling of UNBALANCED
+// trees. A bye leaf sits at a shallower level, so its value cell is one of the
+// narrow bracket columns (E for one level up) instead of the wide label column
+// C; styling only that cell rendered a stub underline+fill beneath the last
+// few characters of the name. The style must span from column C to the value
+// cell so every leaf label looks the same.
+func TestWriteTreeValue_ByeLeafLabelSpan(t *testing.T) {
+	f := excelize.NewFile()
+	defer f.Close()
+	const sheet = "Tree 1"
+	_, err := f.NewSheet(sheet)
+	require.NoError(t, err)
+
+	// 3 leaves: CreateBalancedTree splits [a | b,c], so "Pool A-1st" is a bye
+	// leaf one level below the root, written at E6 (depth 3, startRow 4).
+	tree := CreateBalancedTree([]string{"Pool A-1st", "Pool B-1st", "Pool C-1st"})
+	depth := CalculateDepth(tree)
+	startRow := TreeTitleRows + 1
+	PrintLeafNodes(tree, f, sheet, 2*depth, startRow, depth, false, nil)
+
+	byeVal, err := f.GetCellValue(sheet, "E6")
+	require.NoError(t, err)
+	require.Equal(t, "Pool A-1st", byeVal, "fixture: the bye leaf must sit at E6")
+
+	byeStyle, err := f.GetCellStyle(sheet, "E6")
+	require.NoError(t, err)
+	require.NotZero(t, byeStyle)
+	for _, cell := range []string{"C6", "D6"} {
+		got, serr := f.GetCellStyle(sheet, cell)
+		require.NoError(t, serr)
+		assert.Equalf(t, byeStyle, got, "%s must carry the label style so the underline+fill spans the bye label", cell)
+	}
+	// The span must start at the label column, not bleed into the roster gutter.
+	gutter, err := f.GetCellStyle(sheet, "B6")
+	require.NoError(t, err)
+	assert.Zero(t, gutter, "column B must stay unstyled")
+
+	// A bottom-level leaf keeps its single-cell style (range C:C), unchanged.
+	deepVal, err := f.GetCellValue(sheet, "C9")
+	require.NoError(t, err)
+	require.Equal(t, "Pool B-1st", deepVal, "fixture: a deep leaf must sit at C9")
+}
+
 // TestSetTreePageLayout verifies the page setup a tree page gets: a print area
 // bounded to the given geometry and a fit-to-one-page-wide scaling, so a page
 // never spills a near-blank second sheet of paper and a deep bracket shrinks

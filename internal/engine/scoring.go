@@ -449,10 +449,8 @@ func (e *Engine) CalculatePoolStandings(compId string) (map[string][]state.Playe
 		// changed. Tokens are sampled BEFORE computeStandings below, see
 		// standingsTokens for why mtime alone is not sound.
 		tokens := e.sampleStandingsTokens(compId)
-		if v, ok := e.standingsCache.Load(compId); ok {
-			if cached := v.(*standingsCacheEntry); cached.standingsTokens == tokens {
-				return cached.result, nil
-			}
+		if result, ok := e.cachedStandingsIfValid(compId, tokens); ok {
+			return result, nil
 		}
 
 		// Single-flight: collapse concurrent cold-cache callers into one compute.
@@ -490,10 +488,8 @@ func (e *Engine) CalculatePoolStandings(compId string) (map[string][]state.Playe
 		// score, and handing it standings that predate its own write is exactly
 		// the fresh-matches-vs-stale-standings split that mp-n6ke fixed. Validate
 		// against our own tokens, same check as the fast path.
-		if v, ok := e.standingsCache.Load(compId); ok {
-			if cached := v.(*standingsCacheEntry); cached.standingsTokens == tokens {
-				return cached.result, nil
-			}
+		if result, ok := e.cachedStandingsIfValid(compId, tokens); ok {
+			return result, nil
 		}
 		// Either the winner's snapshot predates our tokens, or the cache was
 		// invalidated between Do completion and this Load. Either way, loop: the
@@ -507,6 +503,29 @@ func (e *Engine) CalculatePoolStandings(compId string) (map[string][]state.Playe
 	// the tokens moved under us often enough that any stamp we chose would be a
 	// guess, and a guess in this cache is what mp-n6ke was.
 	return e.computeStandings(compId)
+}
+
+// cachedStandingsIfValid returns the cached standings for a competition only if
+// the entry was stamped with exactly the tokens passed in.
+//
+// This is THE read path for the standings cache: every caller goes through it,
+// so there is one place where "is this entry still valid" is decided. That is
+// deliberate. The bug this cache was rebuilt for was a read path that skipped
+// the check (the single-flight loser returned the winner's entry unvalidated),
+// and a check open-coded at each site is one a future read path can silently
+// half-implement. Callers pass a snapshot from sampleStandingsTokens rather than
+// having this function sample its own, so the same tokens govern the lookup and
+// whatever the caller does next with the result.
+func (e *Engine) cachedStandingsIfValid(compId string, tokens standingsTokens) (map[string][]state.PlayerStanding, bool) {
+	v, ok := e.standingsCache.Load(compId)
+	if !ok {
+		return nil, false
+	}
+	cached := v.(*standingsCacheEntry)
+	if cached.standingsTokens != tokens {
+		return nil, false
+	}
+	return cached.result, true
 }
 
 // sampleStandingsTokens reads the current cache-validity key for a competition.

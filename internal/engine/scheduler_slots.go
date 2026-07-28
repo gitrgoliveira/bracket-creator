@@ -54,9 +54,9 @@ func perMatchElapsedMinutes(comp *state.Competition, tournament *state.Tournamen
 		return defaultPerMatchClockSeconds / 60
 	}
 
-	clockSec := comp.EffectivePoolMatchSeconds()
+	clockSec := comp.PoolMatchDurationSeconds
 	if isPlayoff {
-		clockSec = comp.EffectivePlayoffMatchSeconds()
+		clockSec = comp.PlayoffMatchDurationSeconds
 	}
 	if clockSec <= 0 {
 		clockSec = defaultPerMatchClockSeconds

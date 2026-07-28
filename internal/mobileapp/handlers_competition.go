@@ -948,9 +948,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					// the full config with current values for untouched fields,
 					// so a cosmetic-only edit never trips this. comp.Courts was
 					// already defaulted to >=1 court (tournament fallback) in the
-					// settings-validation block above. ApplyCompetitionDefaults
-					// touches only match-duration fields, so comparing here
-					// (pre-defaults) matches the merged result for these fields.
+					// settings-validation block above. Match durations are
+					// deliberately absent from the comparison set below: they do
+					// not reach the draw, so editing them while draw-ready is
+					// allowed and must not force a regenerate.
 					outputAffectingChanged :=
 						comp.PoolSize != current.PoolSize ||
 							comp.PoolWinners != current.PoolWinners ||

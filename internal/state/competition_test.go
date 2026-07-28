@@ -260,22 +260,6 @@ func TestApplyCompetitionDefaults_SecondsWinOverMinutes(t *testing.T) {
 	assert.Zero(t, c.PoolMatchDuration, "the retired field is cleared either way")
 }
 
-// TestEffectiveMatchSeconds reads the canonical seconds field. There is no
-// fallback chain any more: the retired whole-minute fields are migrated at the
-// store boundary, so anything the engine or API sees is already in seconds.
-func TestEffectiveMatchSeconds(t *testing.T) {
-	t.Run("returns the seconds field", func(t *testing.T) {
-		c := &Competition{PoolMatchDurationSeconds: 150, PlayoffMatchDurationSeconds: 210}
-		assert.Equal(t, 150, c.EffectivePoolMatchSeconds())
-		assert.Equal(t, 210, c.EffectivePlayoffMatchSeconds())
-	})
-	t.Run("zero when unset", func(t *testing.T) {
-		c := &Competition{}
-		assert.Equal(t, 0, c.EffectivePoolMatchSeconds())
-		assert.Equal(t, 0, c.EffectivePlayoffMatchSeconds())
-	})
-}
-
 // TestCompetitionSecondsRoundTrip verifies the *Seconds fields persist through
 // YAML with their snake_case tags.
 func TestCompetitionSecondsRoundTrip(t *testing.T) {

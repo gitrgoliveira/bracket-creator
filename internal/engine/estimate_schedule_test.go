@@ -31,14 +31,14 @@ func TestEstimateScheduleForCompetition_PlayoffsOnly(t *testing.T) {
 	compID := "est-playoffs"
 
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:                   compID,
-		Format:               state.CompFormatPlayoffs,
-		Kind:                 "individual",
-		Courts:               []string{"A"},
-		StartTime:            "09:00",
-		PoolMatchDuration:    3,
-		PlayoffMatchDuration: 5,
-		Status:               state.CompStatusSetup,
+		ID:                          compID,
+		Format:                      state.CompFormatPlayoffs,
+		Kind:                        "individual",
+		Courts:                      []string{"A"},
+		StartTime:                   "09:00",
+		PoolMatchDurationSeconds:    180,
+		PlayoffMatchDurationSeconds: 300,
+		Status:                      state.CompStatusSetup,
 	}))
 	// 8 players → NextPow2(8)=8, bracket matches = 8-1 = 7.
 	saveTestParticipants(t, store, compID, []string{"P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8"})
@@ -67,18 +67,18 @@ func TestEstimateScheduleForCompetition_Mixed(t *testing.T) {
 	// pool matches = 3*C(3,2)=9, bracket = bracketMatchCount(6)=5
 	// (pow2=8, byes=2 distributed to top seeds, mp-sess, so real=N-1=5).
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:                   compID,
-		Format:               state.CompFormatMixed,
-		Kind:                 "individual",
-		PoolSize:             3,
-		PoolSizeMode:         "min",
-		PoolWinners:          2,
-		RoundRobin:           true,
-		Courts:               []string{"A"},
-		StartTime:            "09:00",
-		PoolMatchDuration:    3,
-		PlayoffMatchDuration: 5,
-		Status:               state.CompStatusSetup,
+		ID:                          compID,
+		Format:                      state.CompFormatMixed,
+		Kind:                        "individual",
+		PoolSize:                    3,
+		PoolSizeMode:                "min",
+		PoolWinners:                 2,
+		RoundRobin:                  true,
+		Courts:                      []string{"A"},
+		StartTime:                   "09:00",
+		PoolMatchDurationSeconds:    180,
+		PlayoffMatchDurationSeconds: 300,
+		Status:                      state.CompStatusSetup,
 	}))
 	saveTestParticipants(t, store, compID, []string{
 		"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank", "Grace", "Hank", "Ivy",
@@ -106,13 +106,13 @@ func TestEstimateScheduleForCompetition_League(t *testing.T) {
 
 	// 5 players → C(5,2)=10 pool matches, 0 playoff.
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:                compID,
-		Format:            state.CompFormatLeague,
-		Kind:              "individual",
-		Courts:            []string{"A"},
-		StartTime:         "09:00",
-		PoolMatchDuration: 3,
-		Status:            state.CompStatusSetup,
+		ID:                       compID,
+		Format:                   state.CompFormatLeague,
+		Kind:                     "individual",
+		Courts:                   []string{"A"},
+		StartTime:                "09:00",
+		PoolMatchDurationSeconds: 180,
+		Status:                   state.CompStatusSetup,
 	}))
 	saveTestParticipants(t, store, compID, []string{"A", "B", "C", "D", "E"})
 
@@ -135,14 +135,14 @@ func TestEstimateScheduleForCompetition_Swiss(t *testing.T) {
 
 	// 8 players, 3 rounds → 3 * 4 = 12 pool matches.
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:                compID,
-		Format:            state.CompFormatSwiss,
-		Kind:              "individual",
-		SwissRounds:       3,
-		Courts:            []string{"A"},
-		StartTime:         "09:00",
-		PoolMatchDuration: 3,
-		Status:            state.CompStatusSetup,
+		ID:                       compID,
+		Format:                   state.CompFormatSwiss,
+		Kind:                     "individual",
+		SwissRounds:              3,
+		Courts:                   []string{"A"},
+		StartTime:                "09:00",
+		PoolMatchDurationSeconds: 180,
+		Status:                   state.CompStatusSetup,
 	}))
 	saveTestParticipants(t, store, compID, []string{"P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8"})
 
@@ -197,14 +197,14 @@ func TestEstimateParticipantCount_CheckInFilter(t *testing.T) {
 		compID := "est-checkin-some"
 
 		require.NoError(t, store.SaveCompetition(&state.Competition{
-			ID:                   compID,
-			Format:               state.CompFormatPlayoffs,
-			Kind:                 "individual",
-			Courts:               []string{"A"},
-			StartTime:            "09:00",
-			PlayoffMatchDuration: 5,
-			Status:               state.CompStatusSetup,
-			CheckInEnabled:       true,
+			ID:                          compID,
+			Format:                      state.CompFormatPlayoffs,
+			Kind:                        "individual",
+			Courts:                      []string{"A"},
+			StartTime:                   "09:00",
+			PlayoffMatchDurationSeconds: 300,
+			Status:                      state.CompStatusSetup,
+			CheckInEnabled:              true,
 		}))
 		// 8 registered, only 4 checked in.
 		// 4 → bracketMatchCount(4) = 3 (power-of-2, same under any formula).
@@ -234,14 +234,14 @@ func TestEstimateParticipantCount_CheckInFilter(t *testing.T) {
 		compID := "est-checkin-none"
 
 		require.NoError(t, store.SaveCompetition(&state.Competition{
-			ID:                   compID,
-			Format:               state.CompFormatPlayoffs,
-			Kind:                 "individual",
-			Courts:               []string{"A"},
-			StartTime:            "09:00",
-			PlayoffMatchDuration: 5,
-			Status:               state.CompStatusSetup,
-			CheckInEnabled:       true,
+			ID:                          compID,
+			Format:                      state.CompFormatPlayoffs,
+			Kind:                        "individual",
+			Courts:                      []string{"A"},
+			StartTime:                   "09:00",
+			PlayoffMatchDurationSeconds: 300,
+			Status:                      state.CompStatusSetup,
+			CheckInEnabled:              true,
 		}))
 		// 8 players, none checked in → opt-in fallback returns all 8.
 		// bracketMatchCount(8)=7 under any formula (power-of-2).
@@ -266,14 +266,14 @@ func TestEstimateParticipantCount_CheckInFilter(t *testing.T) {
 		compID := "est-checkin-disabled"
 
 		require.NoError(t, store.SaveCompetition(&state.Competition{
-			ID:                   compID,
-			Format:               state.CompFormatPlayoffs,
-			Kind:                 "individual",
-			Courts:               []string{"A"},
-			StartTime:            "09:00",
-			PlayoffMatchDuration: 5,
-			Status:               state.CompStatusSetup,
-			CheckInEnabled:       false, // disabled
+			ID:                          compID,
+			Format:                      state.CompFormatPlayoffs,
+			Kind:                        "individual",
+			Courts:                      []string{"A"},
+			StartTime:                   "09:00",
+			PlayoffMatchDurationSeconds: 300,
+			Status:                      state.CompStatusSetup,
+			CheckInEnabled:              false, // disabled
 		}))
 		// 4 checked in of 8, but CheckInEnabled=false → all 8 used.
 		saveParticipantsWithCheckIn(t, store, compID,

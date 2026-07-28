@@ -811,13 +811,45 @@ func TestCompetitionPOST_PlayerNameTooLong(t *testing.T) {
 // error path (lines 337-340 in handlers_competition.go).
 func TestCompetitionPOST_NegativeDuration(t *testing.T) {
 	r, _, _, _, _ := setupTestRouter(t)
-	comp := map[string]any{"name": "OK", "matchDuration": -1}
+	comp := map[string]any{"name": "OK", "poolMatchDurationSeconds": -1}
 	b, _ := json.Marshal(comp)
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(b))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// TestCompetitionPOST_RetiredDurationFieldIgnored pins the removal of the
+// whole-minute duration fields from the API. They are `json:"-"`, so a client
+// still sending them gets them ignored rather than honoured: the competition is
+// created on the scheduler default, not on a 15-minute clock.
+func TestCompetitionPOST_RetiredDurationFieldIgnored(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	comp := map[string]any{
+		"name":                 "Retired Fields",
+		"matchDuration":        15,
+		"poolMatchDuration":    15,
+		"playoffMatchDuration": 15,
+	}
+	b, _ := json.Marshal(comp)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(b))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusCreated, w.Code, "body: %s", w.Body.String())
+
+	var created state.Competition
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &created))
+	got, err := store.LoadCompetition(created.ID)
+	require.NoError(t, err)
+	assert.Zero(t, got.PoolMatchDurationSeconds, "a retired wire field must not set a duration")
+	assert.Zero(t, got.MatchDuration, "the retired field must not be persisted")
+
+	// And it is absent from the response body entirely.
+	assert.NotContains(t, w.Body.String(), "matchDuration")
 }
 
 // TestCompetitionPOST_InvalidFormat covers the validateCompetitionFormat

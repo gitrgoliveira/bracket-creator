@@ -27,14 +27,14 @@ const scheduleClockLayout = "15:04"
 // with the type.
 const defaultLunchStartClock = "12:00"
 
-// defaultPerMatchClockMinutes is the fallback on-clock minutes per
-// match when a competition carries neither PoolMatchDuration nor
-// PlayoffMatchDuration nor a legacy MatchDuration (e.g. an
-// unconfigured comp loaded under ApplyCompetitionDefaults). 3 minutes
-// is a reasonable nominal value that keeps the slot loop progressing
-// rather than collapsing to zero-duration steps; it is only an estimate
-// anchor, not a regulation match time.
-const defaultPerMatchClockMinutes = 3
+// defaultPerMatchClockSeconds is the fallback on-clock seconds per
+// match when a competition carries no configured per-phase or legacy
+// duration (e.g. an unconfigured comp loaded under
+// ApplyCompetitionDefaults). 180s (3 minutes) is a reasonable nominal
+// value that keeps the slot loop progressing rather than collapsing to
+// zero-duration steps; it is only an estimate anchor, not a regulation
+// match time.
+const defaultPerMatchClockSeconds = 180
 
 // perMatchElapsedMinutes returns the elapsed minutes a single match
 // should occupy on a court given the competition/tournament tuning.
@@ -49,19 +49,23 @@ const defaultPerMatchClockMinutes = 3
 // the court. Documented trade-off; T150.
 func perMatchElapsedMinutes(comp *state.Competition, tournament *state.Tournament, isPlayoff bool) int {
 	if comp == nil {
-		return defaultPerMatchClockMinutes
+		// No competition to tune from: anchor on the bare default clock,
+		// without the multiplier (preserves the pre-seconds behavior).
+		return defaultPerMatchClockSeconds / 60
 	}
 
-	clockMin := comp.PoolMatchDuration
+	clockSec := comp.PoolMatchDurationSeconds
 	if isPlayoff {
-		clockMin = comp.PlayoffMatchDuration
+		clockSec = comp.PlayoffMatchDurationSeconds
 	}
-	if clockMin <= 0 && comp.MatchDuration > 0 {
-		clockMin = comp.MatchDuration
+	if clockSec <= 0 {
+		clockSec = defaultPerMatchClockSeconds
 	}
-	if clockMin <= 0 {
-		clockMin = defaultPerMatchClockMinutes
-	}
+	// Convert to fractional minutes before the multiplier so sub-minute
+	// clock durations (e.g. 150s = 2m30s) survive into the estimate; the
+	// final per-match elapsed value is rounded to whole minutes because
+	// slot times are minute-granular (HH:MM).
+	clockMin := float64(clockSec) / 60.0
 
 	multiplier := 1.5
 	if tournament != nil && tournament.ClockToElapsedMultiplier > 0 {
@@ -78,7 +82,17 @@ func perMatchElapsedMinutes(comp *state.Competition, tournament *state.Tournamen
 
 	// Delegate to the shared pure core so this function and
 	// EstimateSchedule stay in exact agreement (FR-059).
-	return int(math.Round(perMatchElapsed(float64(clockMin), multiplier, bouts)))
+	per := int(math.Round(perMatchElapsed(clockMin, multiplier, bouts)))
+	// A configured positive duration must occupy at least one slot minute.
+	// Sub-minute clocks (e.g. 15s * 1.5 = 0.375 → rounds to 0) would otherwise
+	// advance the court cursor by 0 and stack every match at the same time.
+	// clockSec is always > 0 here (defaulted above), so this floor only lifts
+	// genuine round-to-zero cases, never the nil/default path (which returns
+	// earlier).
+	if per < 1 {
+		per = 1
+	}
+	return per
 }
 
 // parseDurationMinutes converts a Go-style duration string ("30m",

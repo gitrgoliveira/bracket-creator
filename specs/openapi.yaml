@@ -3115,6 +3115,38 @@ components:
         maxEnchoPeriods:
           type: integer
           description: Maximum number of encho (extended time) periods permitted per match.
+        poolMatchDurationSeconds:
+          type: integer
+          minimum: 0
+          maximum: 3600
+          description: >
+            Estimated on-clock duration of a single pool/round match, in SECONDS,
+            allowing sub-minute granularity (e.g. 150 = 2m30s). Used by the
+            schedule estimator and auto-scheduler. Seconds are the only duration
+            representation this API carries; the whole-minute `poolMatchDuration`
+            / `playoffMatchDuration` / `matchDuration` fields were removed.
+
+            0 or absent means "unset": the server applies the 180s (3:00)
+            scheduler default. A non-zero value must fall within the plausible
+            band of 60-3600 seconds (1:00-60:00); outside it the request is
+            rejected with 400 rather than clamped, because match duration drives
+            the whole event's schedule.
+
+            A config.md written before this field existed carries the retired
+            whole-minute keys. The server migrates those to seconds when it loads
+            the file, clamping into the band, and drops the old keys on the next
+            save. Such a competition is therefore always in range by the time it
+            reaches this API. The retired fields hold whole minutes, so the
+            smallest value they can express already sits on the 60s floor and the
+            clamp only fires on an absurd stored value (say 90 minutes).
+        playoffMatchDurationSeconds:
+          type: integer
+          minimum: 0
+          maximum: 3600
+          description: >
+            Estimated on-clock duration of a single playoff/knockout match, in
+            SECONDS (e.g. 150 = 2m30s). Same semantics, band, and legacy-migration
+            behaviour as `poolMatchDurationSeconds`.
         checkInEnabled:
           type: boolean
           description: >

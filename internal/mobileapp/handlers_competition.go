@@ -149,9 +149,26 @@ func validateCompetitionDateInTournament(comp *state.Competition, tourn *state.T
 //
 // FR-050a: swiss is now accepted; the caller must ALSO run
 // validateSwissConfig when format == swiss to enforce swissRounds >= 1.
+
+// validateCompetitionDurations enforces the band on the per-phase clock
+// durations of an INBOUND request body. Zero means "unset, use the scheduler
+// default" and is allowed. Out of band is rejected, never clamped: silently
+// rewriting a duration the operator typed is the failure mode this whole
+// control exists to prevent.
+//
+// It is a flat check with no comparison to the stored value, because the store
+// pins every duration into this same band as it loads and saves it (see
+// normalizeStoredDurations in internal/state). No stored duration can be out of
+// band, so there is nothing to grandfather. The bounds live in the state package
+// precisely so that normalization and this validator cannot drift apart.
 func validateCompetitionDurations(comp *state.Competition) error {
-	if comp.PoolMatchDuration < 0 || comp.PlayoffMatchDuration < 0 || comp.MatchDuration < 0 {
-		return fmt.Errorf("match duration must be >= 0")
+	for _, secs := range []int{comp.PoolMatchDurationSeconds, comp.PlayoffMatchDurationSeconds} {
+		if secs == 0 {
+			continue
+		}
+		if secs < state.MinMatchDurationSeconds || secs > state.MaxMatchDurationSeconds {
+			return fmt.Errorf("match duration must be between %d and %d seconds", state.MinMatchDurationSeconds, state.MaxMatchDurationSeconds)
+		}
 	}
 	return nil
 }
@@ -323,11 +340,6 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		comp.StartTime = strings.TrimSpace(comp.StartTime)
 		comp.Date = strings.TrimSpace(comp.Date)
 
-		// Populate per-phase durations from the legacy MatchDuration field
-		// for callers that still send `matchDuration` only. Idempotent on
-		// modern callers that send both per-phase values.
-		state.ApplyCompetitionDefaults(&comp)
-
 		// Reject whitespace-only Name. The admin_setup.jsx Create form
 		// validates this client-side (deriveCompetitionName + the
 		// empty-name check), but hand-crafted POSTs with an explicit
@@ -421,7 +433,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// (otherwise the per-court Shiaijo operator view can't surface them).
 		comp.Courts = resolveCompetitionCourts(comp.Courts, createTourn)
 
-		// Reject negative per-phase or legacy durations.
+		// Reject per-phase durations outside the shiai band.
 		if err := validateCompetitionDurations(&comp); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
@@ -933,9 +945,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					// the full config with current values for untouched fields,
 					// so a cosmetic-only edit never trips this. comp.Courts was
 					// already defaulted to >=1 court (tournament fallback) in the
-					// settings-validation block above. ApplyCompetitionDefaults
-					// touches only match-duration fields, so comparing here
-					// (pre-defaults) matches the merged result for these fields.
+					// settings-validation block above. Match durations are
+					// deliberately absent from the comparison set below: they do
+					// not reach the draw, so editing them while draw-ready is
+					// allowed and must not force a regenerate.
 					outputAffectingChanged :=
 						comp.PoolSize != current.PoolSize ||
 							comp.PoolWinners != current.PoolWinners ||
@@ -982,12 +995,6 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				if validationErr != nil {
 					return nil, nil
 				}
-				// Populate per-phase durations from legacy MatchDuration
-				// when only the legacy field was supplied. Idempotent.
-				// Runs INSIDE the transform so we can copy the resolved
-				// per-phase values straight into `current` below.
-				state.ApplyCompetitionDefaults(&comp)
-
 				// Settings-only merge. Status, Players, and
 				// HasParticipantIDs are deliberately not copied from
 				// the body. Status is managed via dedicated endpoints
@@ -1013,9 +1020,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				current.PoolFormat = comp.PoolFormat
 				current.Kind = comp.Kind
 				current.Mirror = comp.Mirror
-				current.PoolMatchDuration = comp.PoolMatchDuration
-				current.PlayoffMatchDuration = comp.PlayoffMatchDuration
-				current.MatchDuration = comp.MatchDuration
+				// Seconds are the only duration representation that crosses the
+				// wire. The retired whole-minute fields are not merged: `current`
+				// was migrated to seconds when it was loaded, and its legacy
+				// fields are already zero.
+				current.PoolMatchDurationSeconds = comp.PoolMatchDurationSeconds
+				current.PlayoffMatchDurationSeconds = comp.PlayoffMatchDurationSeconds
 				// FR-050a: swiss round budget is admin-editable from
 				// settings until the competition starts (the engine
 				// gates StartCompetition on Status=setup). After start,

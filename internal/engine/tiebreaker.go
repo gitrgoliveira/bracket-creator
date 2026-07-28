@@ -360,8 +360,6 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 	if err != nil {
 		return nil, err
 	}
-	state.ApplyTournamentDefaults(tournament)
-	state.ApplyCompetitionDefaults(comp)
 	allMatches, _ = assignPoolMatchSlots(allMatches, comp, tournament)
 	for i := range allMatches {
 		if t, ok := existingTimes[allMatches[i].ID]; ok {

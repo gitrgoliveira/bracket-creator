@@ -362,7 +362,9 @@ describe('AdminSettings useEffect deps completeness (H3 regression)', () => {
     // the settings form AND round-tripped via finalNext. Sync deps
     // required so an SSE-driven update lands in local state while the
     // user is on the settings page.
-    'poolMatchDuration', 'playoffMatchDuration',
+    // mp-m5kf: the m:ss DurationInput binds to the canonical *Seconds fields.
+    // The whole-minute siblings were retired and are no longer on the wire.
+    'poolMatchDurationSeconds', 'playoffMatchDurationSeconds',
   ];
 
   it('useEffect deps include every field rendered via local.*', () => {
@@ -435,9 +437,13 @@ describe('AdminSettings.saveNow payload whitelist', () => {
     'mirror',
     // FR-050 / T044: round-robin shape selector.
     'poolFormat',
-    // FR-052..FR-054 / T047: per-phase duration overrides. Zero means
-    // "use legacy default": fall through to backend ApplyCompetitionDefaults.
-    'poolMatchDuration', 'playoffMatchDuration',
+    // FR-052..FR-054 / T047: per-phase durations, in SECONDS. Zero means
+    // "unset, use the scheduler default". mp-m5kf retired the whole-minute
+    // poolMatchDuration / playoffMatchDuration / matchDuration fields: they are
+    // json:"-" on the Go struct and must never appear in the PUT body again.
+    // Leaving them listed here would let exactly that regression pass, since
+    // the assertion below only checks finalNext's keys are a SUBSET of ALLOWED.
+    'poolMatchDurationSeconds', 'playoffMatchDurationSeconds',
     // FR-050a / T190: Swiss rounds (number of rounds the operator
     // configured for a Swiss-format competition). Editable pre-start
     // and during play; the next "Generate next round" call respects
@@ -459,7 +465,14 @@ describe('AdminSettings.saveNow payload whitelist', () => {
   ]);
   // Fields that MUST NOT appear in the PUT body: pinning the
   // negative invariant explicitly so a careless re-add is caught.
-  const FORBIDDEN = ['status', 'players', 'hasParticipantIDs', 'poolMatches', 'pools', 'bracket', 'schedule'];
+  // Server-managed fields, plus (mp-m5kf) the retired whole-minute duration
+  // fields. Those are json:"-" on the Go struct, so re-adding one to the PUT
+  // body would be silently ignored by the server while looking intentional
+  // here. FORBIDDEN, not merely absent from ALLOWED: the allowlist assertion
+  // only checks finalNext's keys are a SUBSET of ALLOWED, so a stale entry
+  // there would let the regression pass unnoticed.
+  const FORBIDDEN = ['status', 'players', 'hasParticipantIDs', 'poolMatches', 'pools', 'bracket', 'schedule',
+    'poolMatchDuration', 'playoffMatchDuration', 'matchDuration'];
 
   it('finalNext contains only allowlisted settings keys', () => {
     const src = readFileSync(

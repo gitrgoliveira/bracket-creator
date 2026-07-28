@@ -995,6 +995,65 @@ func TestPUTCompetition_RosterPUTBypassesSettingsValidation(t *testing.T) {
 // `{ ...c, ...updated }` merge then pushed null into local state,
 // crashing render paths that read `c.players.length`. The handler now
 // loads the on-disk roster for the response when comp.Players == nil.
+// TestCompetitionDurationSeconds_PersistAndNormalize covers mp-m5kf: the
+// PUT settings path persists the canonical *Seconds fields to disk, and the
+// GET read handlers normalize legacy whole-minute / single-field durations
+// into *Seconds so the SPA always receives resolved values.
+func TestCompetitionDurationSeconds_PersistAndNormalize(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	// 1. PUT with a sub-minute seconds value persists it verbatim to disk.
+	seed := state.Competition{ID: "sec-comp", Name: "Sec Comp", Date: "12-05-2026", Format: "mixed"}
+	require.NoError(t, store.SaveCompetition(&seed))
+	body := []byte(`{"id":"sec-comp","name":"Sec Comp","date":"12-05-2026","format":"mixed","poolMatchDurationSeconds":150,"playoffMatchDurationSeconds":210}`)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/sec-comp", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+	stored, err := store.LoadCompetition("sec-comp")
+	require.NoError(t, err)
+	assert.Equal(t, 150, stored.PoolMatchDurationSeconds, "2m30s must persist to disk")
+	assert.Equal(t, 210, stored.PlayoffMatchDurationSeconds)
+
+	// 2. A legacy per-phase MINUTE competition is normalized to *Seconds on the
+	//    single-GET read path (x60).
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: "legacy-min", Name: "Legacy Min", PoolMatchDurationSeconds: 180, PlayoffMatchDurationSeconds: 300,
+	}))
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/api/competitions/legacy-min", nil)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	var got state.Competition
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	assert.Equal(t, 180, got.PoolMatchDurationSeconds, "GET must back-fill 3 min -> 180s")
+	assert.Equal(t, 300, got.PlayoffMatchDurationSeconds, "GET must back-fill 5 min -> 300s")
+
+	// 3. A legacy SINGLE-field competition (only match_duration) is normalized
+	//    to both per-phase *Seconds on the LIST read path, so the SPA's
+	//    seconds/minutes resolver never sees a bare legacy value.
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: "legacy-single", Name: "Legacy Single", MatchDuration: 5,
+	}))
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/api/competitions", nil)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	var list []state.Competition
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &list))
+	var single *state.Competition
+	for i := range list {
+		if list[i].ID == "legacy-single" {
+			single = &list[i]
+		}
+	}
+	require.NotNil(t, single, "legacy-single must appear in the list")
+	assert.Equal(t, 300, single.PoolMatchDurationSeconds, "list GET must normalize match_duration 5 -> 300s")
+	assert.Equal(t, 300, single.PlayoffMatchDurationSeconds)
+}
+
 func TestPUTCompetition_SettingsOnlyResponseIncludesPlayers(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
@@ -1454,15 +1513,39 @@ func TestRecordBracketMatchResult_PreservesRunningStatus(t *testing.T) {
 		"running match must have no winner, pre-fix the force-completed path also propagated empty winner upstream")
 }
 
-// TestValidateCompetitionDurations_Negative verifies that a negative duration
-// is rejected.
-func TestValidateCompetitionDurations_Negative(t *testing.T) {
-	err := validateCompetitionDurations(&state.Competition{PoolMatchDuration: -1})
-	assert.Error(t, err)
-	err = validateCompetitionDurations(&state.Competition{PlayoffMatchDuration: -1})
-	assert.Error(t, err)
-	err = validateCompetitionDurations(&state.Competition{MatchDuration: -1})
-	assert.Error(t, err)
+// TestValidateCompetitionDurations enforces the shiai band on the per-phase
+// clock durations. A fat-fingered 3-second match drives the whole day's
+// auto-schedule, so it is rejected outright rather than clamped. The check is a
+// flat comparison with no reference to the stored value: state's legacy-duration
+// migration clamps into the same band, so no stored duration can be out of range
+// and there is nothing to grandfather.
+func TestValidateCompetitionDurations(t *testing.T) {
+	tests := []struct {
+		name    string
+		comp    state.Competition
+		wantErr bool
+	}{
+		{"pool below floor", state.Competition{PoolMatchDurationSeconds: 3}, true},
+		{"playoff below floor", state.Competition{PlayoffMatchDurationSeconds: state.MinMatchDurationSeconds - 1}, true},
+		{"pool at floor", state.Competition{PoolMatchDurationSeconds: state.MinMatchDurationSeconds}, false},
+		{"playoff at ceiling", state.Competition{PlayoffMatchDurationSeconds: state.MaxMatchDurationSeconds}, false},
+		{"pool above ceiling", state.Competition{PoolMatchDurationSeconds: state.MaxMatchDurationSeconds + 1}, true},
+		{"a valid sub-minute value passes", state.Competition{PoolMatchDurationSeconds: 150}, false},
+		{"negative is rejected", state.Competition{PoolMatchDurationSeconds: -1}, true},
+		// 0 is "unset, use the scheduler default" and must stay accepted:
+		// otherwise clearing the field would fail to save.
+		{"unset is allowed", state.Competition{}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateCompetitionDurations(&tt.comp)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
 }
 
 // TestValidateCompetitionFormat_UnknownFormat verifies that unknown format
@@ -2927,5 +3010,200 @@ func TestUpdateCompetition_TeamMatchTypeLockedWhenStarted(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, state.TeamMatchTypeKachinuki, stored.TeamMatchType,
 			"an omitted teamMatchType must keep the stored value, never reset it")
+	})
+}
+
+// TestUpdateCompetition_LegacyDurationMigrates is the end-to-end guard for the
+// retirement of the whole-minute duration fields. A competition stored as
+// `match_duration: 15` is migrated to seconds when the store loads it and
+// clamped into the shiai band, so by the time it reaches the API it is already
+// in range. That is what lets the band be a flat check with nothing to
+// grandfather, and it is why an unrelated edit (a rename) can never be blocked
+// by a duration the operator did not touch.
+func TestUpdateCompetition_LegacyDurationMigrates(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	// A competition configured at 15 minutes, before per-phase seconds existed.
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:            "legacy-duration",
+		Name:          "Legacy Duration",
+		Format:        state.CompFormatMixed,
+		PoolSize:      3,
+		Courts:        []string{"A"},
+		MatchDuration: 15,
+		Status:        state.CompStatusSetup,
+	}))
+
+	t.Run("the stored legacy value is migrated on read and survives intact", func(t *testing.T) {
+		got, err := store.LoadCompetition("legacy-duration")
+		require.NoError(t, err)
+		assert.Equal(t, 900, got.PoolMatchDurationSeconds,
+			"15 minutes is inside the 1:00-60:00 band, so it must carry over unchanged")
+		assert.Zero(t, got.MatchDuration, "the retired field must be cleared")
+	})
+
+	put := func(t *testing.T, body map[string]any) *httptest.ResponseRecorder {
+		t.Helper()
+		b, _ := json.Marshal(body)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/legacy-duration", bytes.NewBuffer(b))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		return w
+	}
+	base := func() map[string]any {
+		return map[string]any{
+			"name": "Legacy Duration", "format": "mixed", "poolSize": 3,
+			"courts":                   []string{"A"},
+			"poolMatchDurationSeconds": 900,
+		}
+	}
+
+	t.Run("renaming is never blocked by the migrated duration", func(t *testing.T) {
+		body := base()
+		body["name"] = "Renamed Legacy"
+		w := put(t, body)
+		assert.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+
+		got, err := store.LoadCompetition("legacy-duration")
+		require.NoError(t, err)
+		assert.Equal(t, "Renamed Legacy", got.Name)
+		assert.Equal(t, 900, got.PoolMatchDurationSeconds)
+	})
+
+	t.Run("an out-of-band duration is rejected", func(t *testing.T) {
+		body := base()
+		body["name"] = "Renamed Legacy"
+		body["poolMatchDurationSeconds"] = 5400 // 90 minutes, above the 60:00 ceiling
+		w := put(t, body)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "between 60 and 3600 seconds")
+	})
+
+	t.Run("a fat-fingered 3-second duration is rejected", func(t *testing.T) {
+		body := base()
+		body["name"] = "Renamed Legacy"
+		body["poolMatchDurationSeconds"] = 3
+		w := put(t, body)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "between 60 and 3600 seconds")
+	})
+
+	t.Run("an in-band duration saves", func(t *testing.T) {
+		body := base()
+		body["name"] = "Renamed Legacy"
+		body["poolMatchDurationSeconds"] = 150
+		w := put(t, body)
+		assert.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+
+		got, err := store.LoadCompetition("legacy-duration")
+		require.NoError(t, err)
+		assert.Equal(t, 150, got.PoolMatchDurationSeconds)
+	})
+
+	t.Run("clearing the duration resets it to the scheduler default", func(t *testing.T) {
+		body := base()
+		body["name"] = "Renamed Legacy"
+		body["poolMatchDurationSeconds"] = 0
+		w := put(t, body)
+		assert.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+
+		got, err := store.LoadCompetition("legacy-duration")
+		require.NoError(t, err)
+		assert.Zero(t, got.PoolMatchDurationSeconds, "0 must persist as unset, not fall back to the old value")
+	})
+}
+
+// TestUpdateCompetition_DurationChangeKeepsDraw pins the requirement that
+// retiming a competition never invalidates a generated draw: match duration
+// feeds the scheduler only, and reaches neither the pool allocation nor the
+// bracket, so it is deliberately absent from the draw-ready outputAffecting set.
+func TestUpdateCompetition_DurationChangeKeepsDraw(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:                       "draw-ready-duration",
+		Name:                     "Draw Ready Duration",
+		Format:                   state.CompFormatMixed,
+		PoolSize:                 3,
+		Courts:                   []string{"A"},
+		PoolMatchDurationSeconds: 150,
+		Status:                   state.CompStatusDrawReady,
+	}))
+
+	body, _ := json.Marshal(map[string]any{
+		"name": "Draw Ready Duration", "format": "mixed", "poolSize": 3,
+		"courts":                   []string{"A"},
+		"poolMatchDurationSeconds": 240,
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/draw-ready-duration", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code, "changing duration must not require discarding the draw: %s", w.Body.String())
+
+	got, err := store.LoadCompetition("draw-ready-duration")
+	require.NoError(t, err)
+	assert.Equal(t, 240, got.PoolMatchDurationSeconds)
+	assert.Equal(t, state.CompStatusDrawReady, got.Status, "the draw must survive a duration change")
+}
+
+// TestCompetitionAPI_RejectsOutOfBandNeverClamps pins the separation between the
+// two duration jobs: the API REFUSES an out-of-band value, while the store PINS
+// one that is already on disk. Getting these backwards is a real hazard, because
+// POST used to call state.ApplyCompetitionDefaults on the inbound body BEFORE
+// validation; had the band clamp been added there, an out-of-band POST would
+// have been silently rewritten to the ceiling and returned 201.
+func TestCompetitionAPI_RejectsOutOfBandNeverClamps(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	t.Run("POST above the ceiling is rejected, not clamped", func(t *testing.T) {
+		b, _ := json.Marshal(map[string]any{"name": "Too Long", "poolMatchDurationSeconds": 99999})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(b))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code,
+			"an out-of-band duration must 400; silently clamping it to the ceiling would be the exact behaviour this control exists to prevent")
+		assert.Contains(t, w.Body.String(), "between 60 and 3600 seconds")
+	})
+
+	t.Run("POST below the floor is rejected, not clamped", func(t *testing.T) {
+		b, _ := json.Marshal(map[string]any{"name": "Too Short", "poolMatchDurationSeconds": 3})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(b))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("a hand-edited out-of-band config stays fully editable", func(t *testing.T) {
+		// The store pins it on load, so the flat band check the API performs
+		// never sees an out-of-band value and unrelated edits keep working.
+		require.NoError(t, os.MkdirAll(filepath.Join(tempDir, "competitions", "hand-edited"), 0o700))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(tempDir, "competitions", "hand-edited", "config.md"),
+			[]byte("---\nid: hand-edited\nname: Hand Edited\nformat: mixed\npool_size: 3\ncourts:\n    - A\npool_match_duration_seconds: 99999\nstatus: setup\n---\n"),
+			0o600))
+
+		loaded, err := store.LoadCompetition("hand-edited")
+		require.NoError(t, err)
+		require.Equal(t, state.MaxMatchDurationSeconds, loaded.PoolMatchDurationSeconds)
+
+		// Rename it, echoing back the pinned value the way the settings form does.
+		b, _ := json.Marshal(map[string]any{
+			"name": "Renamed", "format": "mixed", "poolSize": 3, "courts": []string{"A"},
+			"poolMatchDurationSeconds": state.MaxMatchDurationSeconds,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/hand-edited", bytes.NewBuffer(b))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
 	})
 }

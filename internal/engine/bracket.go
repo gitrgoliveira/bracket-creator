@@ -237,8 +237,6 @@ func (e *Engine) buildBracketFromLeaves(comp *state.Competition, leaves []string
 	if err != nil {
 		return nil, err
 	}
-	state.ApplyTournamentDefaults(tournament)
-	state.ApplyCompetitionDefaults(comp)
 	assignBracketMatchSlots(bracket.Rounds, comp, tournament)
 
 	// Display metadata (mp-7f2w): label each match with its effective round and

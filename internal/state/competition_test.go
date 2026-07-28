@@ -3,6 +3,7 @@ package state
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -33,11 +34,11 @@ func TestCompetitionLoadsPerPhaseDurations(t *testing.T) {
 	assert.Equal(t, 3, loaded.PlayoffMatchDuration, "PlayoffMatchDuration should round-trip")
 }
 
-// TestCompetitionLegacyMatchDurationFallback verifies FR-054 / NFR-025 / R9:
-// when YAML lacks the per-phase fields but carries the legacy match_duration
-// field, ApplyCompetitionDefaults populates BOTH per-phase durations with the
-// legacy value so older tournaments continue to schedule correctly.
-func TestCompetitionLegacyMatchDurationFallback(t *testing.T) {
+// TestCompetitionLegacyMatchDurationMigration verifies FR-054 / NFR-025 / R9:
+// a config.md carrying only the retired whole-minute match_duration is migrated
+// onto BOTH per-phase seconds fields, so older tournaments keep their schedule
+// estimates instead of silently reverting to the default.
+func TestCompetitionLegacyMatchDurationMigration(t *testing.T) {
 	legacyYAML := []byte(`id: legacy-comp
 name: Legacy Comp
 match_duration: 5
@@ -46,15 +47,17 @@ match_duration: 5
 	var c Competition
 	err := yaml.Unmarshal(legacyYAML, &c)
 	require.NoError(t, err)
-
-	// Before applying defaults, per-phase fields are zero.
-	require.Equal(t, 0, c.PoolMatchDuration)
-	require.Equal(t, 0, c.PlayoffMatchDuration)
+	require.Equal(t, 0, c.PoolMatchDurationSeconds, "seconds are unset before migration")
 
 	ApplyCompetitionDefaults(&c)
 
-	assert.Equal(t, 5, c.PoolMatchDuration, "legacy match_duration should fall through to PoolMatchDuration")
-	assert.Equal(t, 5, c.PlayoffMatchDuration, "legacy match_duration should fall through to PlayoffMatchDuration")
+	assert.Equal(t, 300, c.PoolMatchDurationSeconds, "5 min must migrate to 300s for the pool phase")
+	assert.Equal(t, 300, c.PlayoffMatchDurationSeconds, "5 min must migrate to 300s for the playoff phase")
+	// The retired keys are cleared so omitempty drops them on the next save and
+	// the file converges on the seconds-only schema.
+	assert.Zero(t, c.MatchDuration)
+	assert.Zero(t, c.PoolMatchDuration)
+	assert.Zero(t, c.PlayoffMatchDuration)
 }
 
 // TestSwissRoundsFieldPersists verifies FR-050a / NFR-025:
@@ -184,17 +187,97 @@ func TestCopyCompetition_Nil(t *testing.T) {
 func TestApplyCompetitionDefaults_MatchDurationPromotion(t *testing.T) {
 	c := &Competition{MatchDuration: 5}
 	ApplyCompetitionDefaults(c)
-	assert.Equal(t, 5, c.PoolMatchDuration, "MatchDuration should promote to PoolMatchDuration")
-	assert.Equal(t, 5, c.PlayoffMatchDuration, "MatchDuration should promote to PlayoffMatchDuration")
+	assert.Equal(t, 300, c.PoolMatchDurationSeconds, "MatchDuration should migrate to pool seconds")
+	assert.Equal(t, 300, c.PlayoffMatchDurationSeconds, "MatchDuration should migrate to playoff seconds")
 }
 
-// TestApplyCompetitionDefaults_NoPromotionWhenAlreadySet verifies that
-// existing per-phase durations are NOT overwritten by the legacy value.
-func TestApplyCompetitionDefaults_NoPromotionWhenAlreadySet(t *testing.T) {
+// TestApplyCompetitionDefaults_PerPhaseWinsOverSingleField verifies that the
+// per-phase retired field takes precedence over the single-field one when both
+// are present in an old config.md.
+func TestApplyCompetitionDefaults_PerPhaseWinsOverSingleField(t *testing.T) {
 	c := &Competition{PoolMatchDuration: 4, PlayoffMatchDuration: 6, MatchDuration: 5}
 	ApplyCompetitionDefaults(c)
-	assert.Equal(t, 4, c.PoolMatchDuration)
-	assert.Equal(t, 6, c.PlayoffMatchDuration)
+	assert.Equal(t, 240, c.PoolMatchDurationSeconds)
+	assert.Equal(t, 360, c.PlayoffMatchDurationSeconds)
+}
+
+// TestApplyCompetitionDefaults_ClampsIntoBand pins the clamp that makes every
+// other layer able to assume a stored duration is in range. A legacy value
+// outside the band is pinned to the nearest bound rather than dropped (silent
+// reset) or kept (a value the UI can display but not re-submit).
+func TestApplyCompetitionDefaults_ClampsIntoBand(t *testing.T) {
+	// A realistic legacy value now sits INSIDE the band and survives intact.
+	realistic := &Competition{MatchDuration: 15} // 900s, well under the 3600s ceiling
+	ApplyCompetitionDefaults(realistic)
+	assert.Equal(t, 900, realistic.PoolMatchDurationSeconds, "15 minutes is in band and must not be clamped")
+
+	// Only an absurd stored value is pinned.
+	tooLong := &Competition{MatchDuration: 90} // 5400s, above the 3600s ceiling
+	ApplyCompetitionDefaults(tooLong)
+	assert.Equal(t, MaxMatchDurationSeconds, tooLong.PoolMatchDurationSeconds)
+	assert.Equal(t, MaxMatchDurationSeconds, tooLong.PlayoffMatchDurationSeconds)
+
+	// The floor is 60s and the retired fields are whole MINUTES, so the smallest
+	// value they can express already sits exactly on it. Only a direct sub-band
+	// seconds value can land under.
+	assert.Equal(t, MinMatchDurationSeconds, ClampMatchSeconds(3))
+	assert.Equal(t, MaxMatchDurationSeconds, ClampMatchSeconds(99999))
+	assert.Equal(t, 150, ClampMatchSeconds(150), "an in-band value is untouched")
+	assert.Equal(t, 0, ClampMatchSeconds(0), "unset passes through as unset")
+}
+
+// TestApplyCompetitionDefaults_Idempotent guards the fact that it runs on every
+// read: a second pass must not re-migrate or disturb an already-canonical value.
+func TestApplyCompetitionDefaults_Idempotent(t *testing.T) {
+	c := &Competition{MatchDuration: 4}
+	ApplyCompetitionDefaults(c)
+	first := *c
+	ApplyCompetitionDefaults(c)
+	assert.Equal(t, first.PoolMatchDurationSeconds, c.PoolMatchDurationSeconds)
+	assert.Equal(t, first.PlayoffMatchDurationSeconds, c.PlayoffMatchDurationSeconds)
+}
+
+// mp-m5kf: sub-minute (seconds) per-match durations.
+
+// TestApplyCompetitionDefaults_SecondsBackfillFromMinutes verifies that a
+// competition carrying only the legacy whole-minute fields gets its canonical
+// *Seconds fields back-filled (minutes*60) so the scheduler and UI read a
+// single source of truth.
+func TestApplyCompetitionDefaults_SecondsBackfillFromMinutes(t *testing.T) {
+	c := &Competition{PoolMatchDuration: 3, PlayoffMatchDuration: 5}
+	ApplyCompetitionDefaults(c)
+	assert.Equal(t, 180, c.PoolMatchDurationSeconds, "3 min should migrate to 180s")
+	assert.Equal(t, 300, c.PlayoffMatchDurationSeconds, "5 min should migrate to 300s")
+}
+
+// TestApplyCompetitionDefaults_SecondsWinOverMinutes verifies that an explicit
+// sub-minute seconds value (e.g. 150s = 2m30s) is never clobbered by the
+// whole-minute back-fill, even when a stale minute field is also present.
+func TestApplyCompetitionDefaults_SecondsWinOverMinutes(t *testing.T) {
+	c := &Competition{PoolMatchDuration: 3, PoolMatchDurationSeconds: 150}
+	ApplyCompetitionDefaults(c)
+	assert.Equal(t, 150, c.PoolMatchDurationSeconds, "explicit 2m30s must survive migration")
+	assert.Zero(t, c.PoolMatchDuration, "the retired field is cleared either way")
+}
+
+// TestCompetitionSecondsRoundTrip verifies the *Seconds fields persist through
+// YAML with their snake_case tags.
+func TestCompetitionSecondsRoundTrip(t *testing.T) {
+	original := Competition{
+		ID:                          "sec-comp",
+		Name:                        "Seconds",
+		PoolMatchDurationSeconds:    150,
+		PlayoffMatchDurationSeconds: 210,
+	}
+	data, err := yaml.Marshal(&original)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "pool_match_duration_seconds: 150")
+	assert.Contains(t, string(data), "playoff_match_duration_seconds: 210")
+
+	var loaded Competition
+	require.NoError(t, yaml.Unmarshal(data, &loaded))
+	assert.Equal(t, 150, loaded.PoolMatchDurationSeconds)
+	assert.Equal(t, 210, loaded.PlayoffMatchDurationSeconds)
 }
 
 // TestLoadCompetitionLocked_InvalidCompID covers the ValidateCompetitionID
@@ -414,4 +497,71 @@ func TestFightingSpiritAwardsRoundTrip(t *testing.T) {
 		assert.Equal(t, "Dan Watanabe", loaded.FightingSpiritAwards[0].RecipientName)
 		assert.Equal(t, "Osaka", loaded.FightingSpiritAwards[0].RecipientDojo)
 	})
+}
+
+// TestNormalizeStoredDurations_ClampsAlreadyPopulatedValue is the regression
+// guard for the tri-review finding that ApplyCompetitionDefaults only clamped a
+// value it had just derived from the retired whole-minute fields, leaving an
+// already-populated out-of-band seconds value untouched.
+//
+// That mattered because the HTTP validator is a flat band check that trusts
+// "no stored duration is out of band". A config.md hand-edited to
+// pool_match_duration_seconds: 99999 would load as-is and then fail every
+// subsequent settings save with 400, making the competition uneditable.
+func TestNormalizeStoredDurations_ClampsAlreadyPopulatedValue(t *testing.T) {
+	t.Run("above the ceiling", func(t *testing.T) {
+		c := &Competition{PoolMatchDurationSeconds: 99999, PlayoffMatchDurationSeconds: 99999}
+		normalizeStoredDurations(c)
+		assert.Equal(t, MaxMatchDurationSeconds, c.PoolMatchDurationSeconds)
+		assert.Equal(t, MaxMatchDurationSeconds, c.PlayoffMatchDurationSeconds)
+	})
+
+	t.Run("below the floor", func(t *testing.T) {
+		c := &Competition{PoolMatchDurationSeconds: 3, PlayoffMatchDurationSeconds: 59}
+		normalizeStoredDurations(c)
+		assert.Equal(t, MinMatchDurationSeconds, c.PoolMatchDurationSeconds)
+		assert.Equal(t, MinMatchDurationSeconds, c.PlayoffMatchDurationSeconds)
+	})
+
+	t.Run("an in-band value and an unset value are untouched", func(t *testing.T) {
+		c := &Competition{PoolMatchDurationSeconds: 150}
+		normalizeStoredDurations(c)
+		assert.Equal(t, 150, c.PoolMatchDurationSeconds)
+		assert.Zero(t, c.PlayoffMatchDurationSeconds, "0 stays 0: unset means use the default")
+	})
+
+	t.Run("nil is safe", func(t *testing.T) {
+		assert.NotPanics(t, func() { normalizeStoredDurations(nil) })
+	})
+
+	// The plain migration entry point deliberately does NOT clamp a
+	// pre-populated value: handlers call it on an inbound request body, and POST
+	// does so before validation, so clamping there would silently rewrite a
+	// value the API must reject with 400.
+	t.Run("ApplyCompetitionDefaults leaves a pre-populated value alone", func(t *testing.T) {
+		c := &Competition{PoolMatchDurationSeconds: 99999}
+		ApplyCompetitionDefaults(c)
+		assert.Equal(t, 99999, c.PoolMatchDurationSeconds,
+			"clamping here would let an out-of-band POST body pass validation")
+	})
+}
+
+// TestStore_HandEditedOutOfBandDurationIsPinnedOnLoad proves the invariant end
+// to end through the real store, not just the helper: a config.md carrying an
+// absurd seconds value is pinned when it is read.
+func TestStore_HandEditedOutOfBandDurationIsPinnedOnLoad(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "competitions", "hand-edited"), 0o700))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "competitions", "hand-edited", "config.md"),
+		[]byte("---\nid: hand-edited\nname: Hand Edited\npool_match_duration_seconds: 99999\n---\n"),
+		0o600))
+
+	got, err := store.LoadCompetition("hand-edited")
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, MaxMatchDurationSeconds, got.PoolMatchDurationSeconds,
+		"a hand-edited out-of-band value must be pinned on load, or every later save 400s")
 }

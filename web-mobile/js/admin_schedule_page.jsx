@@ -2,7 +2,8 @@
 // EstInput (local), AdminTWMatch (local), AdminSchedulePage.
 
 import { filterMatchesByCourt, CourtPacePanel, PerCourtBreakdown } from './admin_schedule_pacing.jsx';
-import { formatMinutes, timeToMinutes, timeEdited, clampMatchDuration, COURT_STORAGE_KEY } from './admin_schedule_utils.jsx';
+import { formatMinutes, timeToMinutes, timeEdited, clampDurationSeconds, COURT_STORAGE_KEY } from './admin_schedule_utils.jsx';
+import { DurationInput } from './duration.jsx';
 
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -132,14 +133,18 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
   const [picked, setPicked] = useStateA([]);
   const [dojoText, setDojoText] = useStateA("");
   const [compFilter, setCompFilter] = useStateA("all");
-  const [matchDuration, setMatchDuration] = useStateA(3); // minutes per match estimate
+  const [matchDurationSeconds, setMatchDurationSeconds] = useStateA(180); // seconds per match estimate (m:ss)
   // Per-competition auto-schedule: startTime + duration
   const [autoComp, setAutoComp] = useStateA(tournament.competitions[0]?.id || "");
   const [autoStart, setAutoStart] = useStateA(tournament.competitions[0]?.startTime || "09:00");
   const [autoSaving, setAutoSaving] = useStateA(false);
+  // Blocks Auto-schedule while the duration field holds an out-of-band value.
+  // DurationInput never emits an invalid duration, so without this the button
+  // would silently schedule the whole competition at the last good value.
+  const [autoDurationError, setAutoDurationError] = useStateA(null);
 
   const [estOpen, setEstOpen] = useStateA(false);
-  const [estMatchDuration, setEstMatchDuration] = useStateA(3);
+  const [estMatchDurationSeconds, setEstMatchDurationSeconds] = useStateA(180);
   const [estMultiplier, setEstMultiplier] = useStateA(1.5);
   const [estCourts, setEstCourts] = useStateA(tournament.courts?.length || 1);
   const [estNumMatches, setEstNumMatches] = useStateA(0);
@@ -161,7 +166,7 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
       return;
     }
     // Guard: required params must be valid numbers > 0 to avoid 400s
-    if (!Number.isFinite(estMatchDuration) || estMatchDuration <= 0 ||
+    if (!Number.isFinite(estMatchDurationSeconds) || estMatchDurationSeconds <= 0 ||
         !Number.isFinite(estMultiplier) || estMultiplier <= 0 ||
         !Number.isFinite(estCourts) || estCourts <= 0 ||
         !Number.isFinite(estNumMatches) || estNumMatches <= 0) {
@@ -175,7 +180,8 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
       setEstLoading(true);
       try {
         const res = await window.API.estimateSchedule({
-          matchDuration: estMatchDuration,
+          // The API takes on-clock minutes (float); convert from mm:ss seconds.
+          matchDuration: estMatchDurationSeconds / 60,
           multiplier: estMultiplier,
           courts: estCourts,
           numMatches: estNumMatches,
@@ -194,7 +200,7 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
       }
     }, 300);
     return () => { clearTimeout(timer); controller.abort(); };
-  }, [estOpen, estMatchDuration, estMultiplier, estCourts, estNumMatches, estTeamSize, estBoutsPerTeamMatch, estBuffer, estCeremony, password]);
+  }, [estOpen, estMatchDurationSeconds, estMultiplier, estCourts, estNumMatches, estTeamSize, estBoutsPerTeamMatch, estBuffer, estCeremony, password]);
 
   // T040/T041: read ?court= from the URL; useQuery re-renders on history
   // changes so navigating between /admin/schedule and /admin/schedule?court=A
@@ -290,11 +296,12 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
   const hasAnyFilter = picked.length > 0 || dojoText || compFilter !== "all";
 
   // Duration estimation: earliest start to latest finish across all matches.
-  // clampMatchDuration coerces NaN / fractional / sub-1 values to the
-  // 3-minute default before any arithmetic: see helper for the full
-  // rationale (Copilot found that addMinutes("00:00", 2.5) → "00:2.5",
-  // which then persists as an invalid scheduledAt string).
-  const safeMatchDuration = clampMatchDuration(matchDuration);
+  // clampDurationSeconds coerces NaN / sub-1 values to the 180s (3-minute)
+  // default before any arithmetic. Slot times are minute-granular (HH:MM), so
+  // the mm:ss duration is accumulated as fractional minutes and rounded only
+  // at the point a scheduledAt string is emitted (see autoSchedule below).
+  const safeMatchSeconds = clampDurationSeconds(matchDurationSeconds);
+  const safeMatchMinutes = safeMatchSeconds / 60;
   const scheduledWithTimes = allMatches.filter(m => m.scheduledAt);
   const firstTime = scheduledWithTimes.length > 0 ? scheduledWithTimes.reduce((mn, m) => !mn || m.scheduledAt < mn ? m.scheduledAt : mn, null) : null;
   const lastTime = scheduledWithTimes.length > 0 ? scheduledWithTimes.reduce((mx, m) => !mx || m.scheduledAt > mx ? m.scheduledAt : mx, null) : null;
@@ -302,8 +309,8 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
     const a = timeToMinutes(firstTime);
     const b = timeToMinutes(lastTime);
     if (a === null || b === null) return null;
-    const diff = b - a + safeMatchDuration;
-    return formatMinutes(diff);
+    const diff = b - a + safeMatchMinutes;
+    return formatMinutes(Math.round(diff));
   })() : null;
 
   const saveMatchTime = async (m, newTime) => {
@@ -330,13 +337,17 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
 
     setAutoSaving(true);
     try {
-      // Assign times: each court runs in parallel from autoStart, matches spaced by matchDuration
+      // Assign times: each court runs in parallel from autoStart, matches spaced
+      // by the per-match duration. The cursor accumulates fractional minutes
+      // (mm:ss support) and is rounded to the nearest whole minute only when the
+      // HH:MM scheduledAt string is emitted, so sub-minute spacing doesn't
+      // compound rounding error across a court's match list.
       for (const [_ct, list] of Object.entries(byCt)) {
         // ?? not || so "00:00" (0 minutes: midnight) doesn't fall through to 09:00.
         let cursor = timeToMinutes(autoStart) ?? 540;
         for (const m of list.sort((a, b) => (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99"))) {
-          await window.API.updateMatchTime(m.compId, m.id, window.addMinutes("00:00", cursor), password);
-          cursor += safeMatchDuration;
+          await window.API.updateMatchTime(m.compId, m.id, window.addMinutes("00:00", Math.round(cursor)), password);
+          cursor += safeMatchMinutes;
         }
       }
     } catch (e) {
@@ -375,33 +386,20 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
               <window.StableInput className="input" type="time" value={autoStart} onChange={val => setAutoStart(val)} style={{ width: 120 }} />
             </div>
             <div className="field">
-              <label className="field__label">Minutes per match</label>
-              <input
-                className="input"
-                type="number"
-                min="1"
-                max="60"
-                step="1"
-                /* Clearing a number input gives e.target.value === "", and
-                   passing value={0} or value={NaN} to React produces either
-                   a visible "0" (jarring) or a "Received NaN for the value"
-                   warning. Round-trip NaN ↔ empty-string at the value
-                   attribute boundary so the cleared display stays empty
-                   while safeMatchDuration's Number.isFinite check (above)
-                   keeps providing the 3-minute fallback for scheduling.
-                   step="1" makes the browser's up/down arrows step in
-                   whole minutes: typing fractions like "2.5" is still
-                   physically possible, so safeMatchDuration also guards
-                   Number.isInteger. Belt-and-braces. */
-                value={Number.isFinite(matchDuration) ? matchDuration : ""}
-                onChange={e => {
-                  const raw = e.target.value;
-                  setMatchDuration(raw === "" ? NaN : +raw);
-                }}
-                style={{ width: 80 }}
+              <label className="field__label" htmlFor="auto-match-duration">Time per match</label>
+              {/* m:ss per-match spacing. A blank clear yields NaN, which
+                  clampDurationSeconds (above) falls back to the 180s (3-minute)
+                  default for the auto-schedule cursor and estimate. */}
+              <DurationInput
+                id="auto-match-duration"
+                describedBy="auto-match-duration-hint"
+                seconds={matchDurationSeconds}
+                onChange={setMatchDurationSeconds}
+                onValidity={setAutoDurationError}
               />
+              <div className="field__hint" id="auto-match-duration-hint">Spacing between matches on each court, as m:ss.</div>
             </div>
-            <button type="button" className="btn btn--primary" onClick={autoSchedule} disabled={autoSaving} style={{ alignSelf: "flex-end" }}>
+            <button type="button" className="btn btn--primary" onClick={autoSchedule} disabled={autoSaving || !!autoDurationError} style={{ alignSelf: "flex-end" }}>
               {autoSaving ? "Scheduling…" : "Auto-schedule competition"}
             </button>
             {durationEstimate && (
@@ -424,7 +422,19 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
           {estOpen && (
             <div className="est-form">
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 16 }}>
-                <EstInput label="Match duration (min)" value={estMatchDuration} setter={setEstMatchDuration} min="1" max="60" />
+                <div className="field">
+                  {/* .field__label, not .label: `.label` has no definition in
+                      styles.css, so this rendered at inherited 16px/400 beside
+                      every sibling label at 12px/600. */}
+                  <label className="field__label" htmlFor="est-match-duration">Match duration</label>
+                  <DurationInput
+                    id="est-match-duration"
+                    describedBy="est-match-duration-hint"
+                    seconds={estMatchDurationSeconds}
+                    onChange={setEstMatchDurationSeconds}
+                  />
+                  <div className="field__hint" id="est-match-duration-hint">As m:ss, e.g. 2:30.</div>
+                </div>
                 <EstInput label="Multiplier" value={estMultiplier} setter={setEstMultiplier} min="1" max="3" step="0.1" />
                 <EstInput label="Courts" value={estCourts} setter={setEstCourts} min="1" max="26" />
                 <EstInput label="Matches" value={estNumMatches} setter={setEstNumMatches} min="1" />
@@ -454,7 +464,7 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
           )}
         </div>
 
-        <CourtPacePanel byCourt={paceByCourt} safeMatchDuration={safeMatchDuration} />
+        <CourtPacePanel byCourt={paceByCourt} safeMatchDuration={safeMatchMinutes} />
 
         <div className="tw-sched">
           <div className="tw-sched__filters" data-testid="admin-schedule-court-filter">

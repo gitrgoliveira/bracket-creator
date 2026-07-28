@@ -201,7 +201,25 @@ func TestStore_TournamentYAML_EmptyCourts(t *testing.T) {
 	loaded, err := store.LoadTournament()
 	require.NoError(t, err)
 	assert.Equal(t, "Minimal", loaded.Name)
-	assert.Empty(t, loaded.Courts)
+
+	// This used to assert Courts was EMPTY, which only held because the save
+	// seeded the cache with the caller's raw struct and the following load was a
+	// cache hit that skipped normalization. Reading the very same file through a
+	// second Store (a cache miss, so a disk parse) already returned Courts=[A],
+	// because the parse path applies ApplyTournamentDefaults. The old assertion
+	// therefore pinned an answer that a restart contradicted.
+	//
+	// Both readers now agree on the canonical value. See
+	// TestSaveThenLoadTournamentIsNormalized in tournament_test.go.
+	assert.Equal(t, []string{"A"}, loaded.Courts,
+		"a tournament saved with no courts resolves to the single default court")
+
+	fresh, err := NewStore(dir)
+	require.NoError(t, err)
+	fromDisk, err := fresh.LoadTournament()
+	require.NoError(t, err)
+	assert.Equal(t, loaded.Courts, fromDisk.Courts,
+		"cache-hit and disk-read readers must not disagree about the same file")
 }
 
 func TestStore_TournamentYAML_Fallback(t *testing.T) {

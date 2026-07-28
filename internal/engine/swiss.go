@@ -239,8 +239,6 @@ func (e *Engine) GenerateSwissRound(compID string, roundNumber int) ([]state.Mat
 	if err != nil {
 		return nil, err
 	}
-	state.ApplyTournamentDefaults(tournament)
-	state.ApplyCompetitionDefaults(comp)
 	// Apply the team-size default (same guard as competition.go StartCompetition).
 	// GenerateSwissRound reloads comp from disk; if TeamSize was 0 in the stored
 	// config, the default must be applied here so assignPoolMatchSlots uses the

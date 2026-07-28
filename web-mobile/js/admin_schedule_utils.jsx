@@ -25,23 +25,12 @@ export function timeEdited(oldScheduledAt, newVal) {
   return (oldScheduledAt || "") !== newVal;
 }
 
-// Coerces the matchDuration form value to a safe integer minutes count
-// for arithmetic in durationEstimate (rendered as "HH h MM m") and the
-// auto-schedule loop (`cursor += safeMatchDuration` + addMinutes).
-//
-// Rejects:
-//   - NaN / undefined / null            (cleared input → stored as NaN)
-//   - Infinity / -Infinity              (impossible via UI but defensive)
-//   - non-integers like 2.5             (Copilot found: addMinutes would
-//                                        produce "00:2.5": invalid HH:MM.
-//                                        and durationEstimate "0h 32.5m")
-//   - values < 1                        (zero or negative makes no sense)
-//
-// Falls back to 3 minutes: the same default the matchDuration state
-// uses, so the UX is "if your typed value is invalid, we schedule as if
-// you'd left the field at 3 (the placeholder default)."
-export function clampMatchDuration(raw, fallback = 3) {
-  return Number.isFinite(raw) && Number.isInteger(raw) && raw >= 1 ? raw : fallback;
+// clampDurationSeconds coerces a raw seconds value to a safe positive integer
+// for scheduling arithmetic, falling back to `fallback` (default 180s = 3 min,
+// matching defaultPerMatchClockSeconds in internal/engine/scheduler_slots.go)
+// for NaN / non-finite / sub-1 input. Fractional seconds round to nearest.
+export function clampDurationSeconds(raw, fallback = 180) {
+  return Number.isFinite(raw) && raw >= 1 ? Math.round(raw) : fallback;
 }
 
 // True when the list is non-empty and every match is in 'completed' status.

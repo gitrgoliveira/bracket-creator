@@ -30,7 +30,8 @@ func TreePageLastRow(depth, startRow int) int {
 }
 
 // SetTreePageLayout bounds a rendered tree page to the region actually drawn and
-// scales it onto a single page wide.
+// scales it onto a single page wide (a deep bracket shrinks to fit rather than
+// breaking mid-bracket onto a second sheet of paper).
 //
 // Without a print area a tree sheet printed its whole used range: the title band
 // alone is merged across many columns, and the template pre-sizes columns out to
@@ -42,7 +43,61 @@ func TreePageLastRow(depth, startRow int) int {
 // block (the row AddPoolsToTree returns), whichever reaches further down.
 func SetTreePageLayout(f *excelize.File, sheetName string, depth, lastRow int) {
 	SetPrintArea(f, sheetName, TreePageLastCol(depth), lastRow)
-	SetSheetLayoutPortraitA4FitWidth(f, sheetName)
+	SetSheetLayoutPortraitA4(f, sheetName)
+}
+
+// RenderTreePages renders one visual bracket page per subtree: it copies the
+// styled SheetTree template into a numbered "Tree N" sheet, titles the page by
+// its shiaijo, renders the subtree's leaves, overlays that court's pool rosters
+// (when pools are provided), and bounds the page's print area to the drawn
+// region. This is the single implementation behind the CLI (create-pools /
+// create-playoffs), the blank-template export (engine), and the results
+// workbook (export) - the loop used to be copied at each call site, and a
+// geometry fix in one had to be replicated by hand into the others.
+//
+// poolSeeding is PrintLeafNodes' pools flag: apply the pool-winner tree
+// adjustment (winners on top, byes to the seeded side). Callers with no pool
+// phase (create-playoffs) pass false and nil pools.
+//
+// The consumed SheetTree template is NOT deleted here: callers that skip
+// rendering entirely (a league has no knockout) must still delete it, so
+// ownership of the deletion stays with them.
+func RenderTreePages(f *excelize.File, subtrees []*Node, numCourts int, pools []Pool, poolCoords map[string]cellCoord, playerCoords map[string]playerCellCoord, matchWinners map[string]MatchWinner, poolSeeding bool) error {
+	templateIdx, err := f.GetSheetIndex(SheetTree)
+	if err != nil {
+		return fmt.Errorf("find tree template sheet: %w", err)
+	}
+	// GetSheetIndex returns (-1, nil) for an absent sheet, so guard the index
+	// too rather than letting CopySheet fail with a misleading error source.
+	if templateIdx < 0 {
+		return fmt.Errorf("tree template sheet %q not found", SheetTree)
+	}
+
+	for i, subtree := range subtrees {
+		pageSheet := fmt.Sprintf("Tree %d", i+1)
+		pageIdx, err := f.NewSheet(pageSheet)
+		if err != nil {
+			return fmt.Errorf("create tree sheet %s: %w", pageSheet, err)
+		}
+		if err := f.CopySheet(templateIdx, pageIdx); err != nil {
+			return fmt.Errorf("copy tree template to %s: %w", pageSheet, err)
+		}
+
+		depth := CalculateDepth(subtree)
+		startRow := TreeTitleRows + 1
+		// The title formula prepends data!$B$1 (the user-supplied title prefix),
+		// so the page title itself is just the shiaijo label.
+		SetTreeSheetTitle(f, pageSheet, "Shiaijo "+CourtLabel(SubtreeCourtIndex(len(subtrees), numCourts, i)), TreePageLastCol(depth))
+		PrintLeafNodes(subtree, f, pageSheet, 2*depth, startRow, depth, poolSeeding, matchWinners)
+
+		lastRow := TreePageLastRow(depth, startRow)
+		if len(pools) > 0 {
+			poolStart, poolEnd := PoolBoundsForSubtree(len(pools), numCourts, len(subtrees), i)
+			lastRow = max(lastRow, AddPoolsToTree(f, pageSheet, pools[poolStart:poolEnd], poolCoords, playerCoords))
+		}
+		SetTreePageLayout(f, pageSheet, depth, lastRow)
+	}
+	return nil
 }
 
 func CreateTreeBracket(f *excelize.File, sheet string, col int, startRow int, size int) string {

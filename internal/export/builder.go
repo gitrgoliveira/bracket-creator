@@ -185,49 +185,17 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 			}
 		}
 
-		// Tree sheets: one visual bracket page per subtree. NewFileFromScratch
-		// creates a single styled "Tree" template; copy it into each page so every
-		// page keeps the bracket layout, render that page's leaf nodes, then delete
-		// the consumed template. This mirrors the CLI (cmd/create-pools.go) and,
-		// unlike the previous implementation, populates ALL pages for large brackets
-		// (>16 finalists) instead of leaving "Tree 2"+ blank.
+		// Tree sheets: one visual bracket page per subtree, rendered by the shared
+		// helper.RenderTreePages (also behind the CLI and the blank-template
+		// export). Unlike the pre-mp-e8ck implementation, this populates ALL
+		// pages for multi-page brackets instead of leaving "Tree 2"+ blank.
 		numPages, perr := helper.TreePageLayout(len(finals), numCourts, false)
 		if perr != nil {
 			return nil, fmt.Errorf("export: compute tree page layout: %w", perr)
 		}
 		subtrees := helper.SubdivideTree(tree, numPages)
-		treeTemplateIdx, terr := f.GetSheetIndex(helper.SheetTree)
-		if terr != nil {
-			return nil, fmt.Errorf("export: find tree template sheet: %w", terr)
-		}
-		// GetSheetIndex returns (-1, nil) for an absent sheet, so guard the index too
-		// rather than letting CopySheet later fail with a misleading error source.
-		if treeTemplateIdx < 0 {
-			return nil, fmt.Errorf("export: tree template sheet %q not found", helper.SheetTree)
-		}
-		for i, subtree := range subtrees {
-			pageSheet := fmt.Sprintf("Tree %d", i+1)
-			pageIdx, nerr := f.NewSheet(pageSheet)
-			if nerr != nil {
-				return nil, fmt.Errorf("export: create tree sheet %s: %w", pageSheet, nerr)
-			}
-			if cerr := f.CopySheet(treeTemplateIdx, pageIdx); cerr != nil {
-				return nil, fmt.Errorf("export: copy tree template to %s: %w", pageSheet, cerr)
-			}
-			d := helper.CalculateDepth(subtree)
-			startRow := helper.TreeTitleRows + 1
-			helper.PrintLeafNodes(subtree, f, pageSheet, 2*d, startRow, d, true, matchWinners)
-			// Title the page by its shiaijo, like the blank-template export. The
-			// title formula prepends data!$B$1 (already the competition name), so
-			// passing comp.Name here would render "Name - Name" duplicated.
-			courtLabel := helper.CourtLabel(helper.SubtreeCourtIndex(len(subtrees), numCourts, i))
-			helper.SetTreeSheetTitle(f, pageSheet, "Shiaijo "+courtLabel, helper.TreePageLastCol(d))
-			lastRow := helper.TreePageLastRow(d, startRow)
-			if len(pools) > 0 {
-				poolStart, poolEnd := helper.PoolBoundsForSubtree(len(pools), numCourts, len(subtrees), i)
-				lastRow = max(lastRow, helper.AddPoolsToTree(f, pageSheet, pools[poolStart:poolEnd], poolCoords, playerCoords))
-			}
-			helper.SetTreePageLayout(f, pageSheet, d, lastRow)
+		if err := helper.RenderTreePages(f, subtrees, numCourts, pools, poolCoords, playerCoords, matchWinners, true); err != nil {
+			return nil, fmt.Errorf("export: %w", err)
 		}
 	}
 	// The bare "Tree" sheet is a styled scaffold that every page is copied from,

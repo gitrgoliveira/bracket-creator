@@ -1687,35 +1687,6 @@ func SetSheetLayoutPortraitA4Centered(f *excelize.File, sheetName string) {
 	centerOnPage(f, sheetName)
 }
 
-// SetSheetLayoutPortraitA4FitWidth configures portrait A4, centred, scaled so the
-// print area is exactly one page wide and as many pages tall as it needs. Used by
-// the tree sheets, where a deep bracket is wider than A4 and must shrink to fit
-// rather than break mid-bracket onto a second sheet of paper.
-func SetSheetLayoutPortraitA4FitWidth(f *excelize.File, sheetName string) {
-	size := 9 // A4
-	orientation := "portrait"
-	fitWidth := 1
-	fitHeight := 0
-
-	if err := f.SetPageLayout(sheetName, &excelize.PageLayoutOptions{
-		Size:        &size,
-		Orientation: &orientation,
-		FitToWidth:  &fitWidth,
-		FitToHeight: &fitHeight,
-	}); err != nil {
-		handleExcelError("SetPageLayout", err)
-	}
-
-	boolTrue := true
-	if err := f.SetSheetProps(sheetName, &excelize.SheetPropsOptions{
-		FitToPage: &boolTrue,
-	}); err != nil {
-		handleExcelError("SetSheetProps", err)
-	}
-
-	centerOnPage(f, sheetName)
-}
-
 func SetSheetLayoutPortraitA4DownThenOver(f *excelize.File, sheetName string, numCourts int) {
 	// 9 = A4
 	size := 9

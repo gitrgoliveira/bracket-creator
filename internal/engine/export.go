@@ -82,41 +82,8 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		tree := helper.CreateBalancedTree(finals)
 		subtrees := helper.SubdivideTree(tree, numPages)
 
-		treeTemplateIdx, terr := f.GetSheetIndex(helper.SheetTree)
-		if terr != nil {
-			return nil, fmt.Errorf("export: find tree template sheet: %w", terr)
-		}
-		// GetSheetIndex returns (-1, nil) for an absent sheet, so guard the index
-		// too rather than letting CopySheet fail with a misleading error source.
-		if treeTemplateIdx < 0 {
-			return nil, fmt.Errorf("export: tree template sheet %q not found", helper.SheetTree)
-		}
-
-		for i, subtree := range subtrees {
-			pageSheet := fmt.Sprintf("Tree %d", i+1)
-			pageIdx, nerr := f.NewSheet(pageSheet)
-			if nerr != nil {
-				return nil, fmt.Errorf("export: create tree sheet %s: %w", pageSheet, nerr)
-			}
-			if cerr := f.CopySheet(treeTemplateIdx, pageIdx); cerr != nil {
-				return nil, fmt.Errorf("export: copy tree template to %s: %w", pageSheet, cerr)
-			}
-			depth := helper.CalculateDepth(subtree)
-			startRow := helper.TreeTitleRows + 1
-			// Leaves start below the reserved title band; row 1 would be written
-			// over by the merged title.
-			helper.PrintLeafNodes(subtree, f, pageSheet, 2*depth, startRow, depth, true, matchWinners)
-			// Title each page by its shiaijo. The title formula already prepends
-			// data!$B$1 (the competition name), so passing comp.Name here would
-			// render "Name - Name".
-			courtLabel := helper.CourtLabel(helper.SubtreeCourtIndex(len(subtrees), numCourts, i))
-			helper.SetTreeSheetTitle(f, pageSheet, "Shiaijo "+courtLabel, helper.TreePageLastCol(depth))
-			lastRow := helper.TreePageLastRow(depth, startRow)
-			if len(pools) > 0 {
-				poolStart, poolEnd := helper.PoolBoundsForSubtree(len(pools), numCourts, len(subtrees), i)
-				lastRow = max(lastRow, helper.AddPoolsToTree(f, pageSheet, pools[poolStart:poolEnd], poolCoords, playerCoords))
-			}
-			helper.SetTreePageLayout(f, pageSheet, depth, lastRow)
+		if err := helper.RenderTreePages(f, subtrees, numCourts, pools, poolCoords, playerCoords, matchWinners, true); err != nil {
+			return nil, fmt.Errorf("export: %w", err)
 		}
 
 		// 4b. Elimination Matches sheet. The tree pages show the bracket shape,

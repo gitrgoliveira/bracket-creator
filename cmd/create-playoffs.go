@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"strconv"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/excel"
@@ -180,36 +179,10 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	// divide the tree depending on the number of pages
 	subtrees := helper.SubdivideTree(tree, numPages)
 
-	treeSheet, err := f.GetSheetIndex(helper.SheetTree)
-	if err != nil {
-		return fmt.Errorf("could not find Tree sheet: %w", err)
-	}
-
-	// adding extra sheets
-	for i := 0; i < len(subtrees); i++ {
-		subtreeSheet := "Tree " + strconv.Itoa(i+1)
-		fmt.Printf("Adding sheet %s\n", subtreeSheet)
-		index, err := f.NewSheet(subtreeSheet)
-		if err != nil {
-			return fmt.Errorf("failed to create sheet %s: %w", subtreeSheet, err)
-		}
-		err = f.CopySheet(treeSheet, index)
-		if err != nil {
-			return fmt.Errorf("failed to copy sheet %d to %s: %w", treeSheet, subtreeSheet, err)
-		}
-
-		depth := helper.CalculateDepth(subtrees[i])
-		fmt.Printf("With tree Depth: %d\n", depth)
-		startRow := helper.TreeTitleRows + 1
-		// Group consecutive tree sheets under the same Shiaijo label
-		if len(subtrees) > 0 {
-			helper.SetTreeSheetTitle(f, subtreeSheet, "Shiaijo "+helper.CourtLabel(helper.SubtreeCourtIndex(len(subtrees), o.courts, i)), helper.TreePageLastCol(depth))
-		}
-
-		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, startRow, depth, false, nil)
-
-		// A playoffs bracket has no pools, so the bracket alone bounds the page.
-		helper.SetTreePageLayout(f, subtreeSheet, depth, helper.TreePageLastRow(depth, startRow))
+	// A playoffs bracket has no pools: nil pools and poolSeeding=false (no
+	// pool-winner tree adjustment).
+	if err := helper.RenderTreePages(f, subtrees, o.courts, nil, nil, nil, nil, false); err != nil {
+		return err
 	}
 	if err := f.DeleteSheet(helper.SheetTree); err != nil {
 		// Ignore sheet not exist error

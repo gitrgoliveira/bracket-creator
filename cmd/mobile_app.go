@@ -177,7 +177,11 @@ func (o *mobileAppOptions) run(cmd *cobra.Command, args []string) error {
 			// slog.Warn escapes attribute values through its encoder
 			// (text/JSON), so a malicious env var like `1\nFAKE LOG
 			// ENTRY` lands as a quoted attribute value rather than
-			// splitting into a second log line.
+			// splitting into a second log line. Verified against the
+			// default handler (no slog.SetDefault anywhere in the tree):
+			// the newline is emitted as a literal \n inside value="...",
+			// on a single output line.
+			// #nosec G706, gosec's taint analysis cannot see that slog quotes and escapes attribute values
 			slog.Warn("mobile-app: SSE_MAX_CLIENTS not a positive integer; using default",
 				"value", raw, "default", maxClients)
 		}

@@ -76,6 +76,21 @@ type fileCache struct {
 	version atomic.Uint64
 }
 
+// invalidate drops the cached body and then advances the version.
+//
+// The order is the whole point, and it is the same rule bumpFileVersion
+// follows: clear first, bump second. Bumping first would let a reader sample
+// the new token, then read the still-cached stale body and stamp it as current.
+// Both invalidation sites (whole-competition delete, WAL abort) need exactly
+// this sequence, so it lives here rather than being open-coded at each.
+func (f *fileCache) invalidate() {
+	f.mu.Lock()
+	f.data = nil
+	f.mtime = 0
+	f.mu.Unlock()
+	f.version.Add(1)
+}
+
 func NewStore(folder string) (*Store, error) {
 	s := &Store{
 		folder:            folder,
@@ -345,14 +360,7 @@ func (s *Store) discardCompCacheBodies(compID string) {
 		return
 	}
 	c.(*compCache).files.Range(func(_, v any) bool {
-		f := v.(*fileCache)
-		f.mu.Lock()
-		f.data = nil
-		f.mtime = 0
-		f.mu.Unlock()
-		// Bump after clearing, same ordering rule as bumpFileVersion: a reader
-		// must never be able to stamp pre-invalidation state with the new token.
-		f.version.Add(1)
+		v.(*fileCache).invalidate()
 		return true
 	})
 }

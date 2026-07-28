@@ -51,10 +51,24 @@ func (s *Store) loadOverridesLocked(compID string) (*Overrides, error) {
 
 // saveOverridesLocked writes overrides without acquiring the mutex.
 // Caller must hold s.mu.Lock.
+// Deliberately does NOT create the competition directory. It used to
+// os.MkdirAll it before writing, which meant an override save landing after
+// DeleteCompetition rebuilt competitions/<id>/ around a lone overrides.json.
+// That orphan outlives the delete: ListCompetitions returns every directory
+// under competitions/, and because IDs are deterministic name slugs, a
+// competition recreated under the same name adopts the dead one's rank and
+// winner overrides.
+//
+// Locking cannot fix this, which is why the fix is here instead. The save does
+// not have to interleave with the delete to resurrect the directory, it only
+// has to run after it, so serialising the two would still leave the orphan.
+//
+// Every sibling saver (savePoolMatchesLocked, and the seeds/bracket/participant
+// writers) already relies on the competition directory existing rather than
+// creating it, and atomicWriteFile opens its temp file with O_CREATE but never
+// creates the parent. So dropping the MkdirAll makes a write to a deleted
+// competition fail with ENOENT, which is the correct outcome.
 func (s *Store) saveOverridesLocked(compID string, o *Overrides) error {
-	if err := os.MkdirAll(s.compPath(compID), 0700); err != nil {
-		return err
-	}
 	data, err := json.MarshalIndent(o, "", "  ")
 	if err != nil {
 		return err

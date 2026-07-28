@@ -328,6 +328,26 @@ func (s *Store) DeleteCompetition(id string) error {
 	mu.Lock()
 	defer mu.Unlock()
 
+	// overrides.json is the one file in this directory whose writers serialize
+	// on the store-wide s.mu rather than the per-competition lock, so the lock
+	// above does not exclude them. Take s.mu as well, or a SaveRankOverride
+	// interleaving with the RemoveAll below leaves competitions/<id>/ holding a
+	// lone overrides.json: a competition that ListCompetitions still reports and
+	// whose stale overrides a same-named recreation would adopt.
+	//
+	// Lock order is compLock then s.mu, never the reverse. That is safe because
+	// s.mu is a sink: no function that holds it ever acquires a per-competition
+	// lock (verified across ListCompetitions, the tournament writers and the
+	// overrides paths), so this edge cannot close a cycle.
+	//
+	// Moving overrides onto the per-competition lock instead would be the
+	// tidier-looking fix and is WRONG: computeStandingsFrom runs inside
+	// WithTransaction (which already holds that lock) and reads overrides
+	// through e.store.LoadOverrides, so it would self-deadlock the live scoring
+	// path on a non-reentrant mutex.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if err := os.RemoveAll(s.compPath(id)); err != nil {
 		return err
 	}

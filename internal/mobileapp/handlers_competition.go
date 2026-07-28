@@ -308,9 +308,6 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		for _, id := range ids {
 			comp, err := store.LoadCompetition(id)
 			if err == nil && comp != nil {
-				// Normalize legacy/whole-minute durations into the canonical
-				// *Seconds fields. The store normalizes on load, so what
-				// LoadCompetition returns is already canonical and in band.
 				comps = append(comps, comp)
 			}
 		}

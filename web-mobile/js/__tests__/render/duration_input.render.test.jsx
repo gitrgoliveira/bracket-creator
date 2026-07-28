@@ -102,11 +102,20 @@ describe('DurationInput', () => {
     expect(field().value).toBe('2:30');
   });
 
-  it('renders blank and a "using the default" note when unset', () => {
-    mount({ seconds: NaN });
-    expect(field().value).toBe('');
-    expect(screen.getByText('Using the default, 3:00.')).toBeTruthy();
-  });
+  // 0 is what the settings page actually stages on clear, and what an
+  // unset config.md deserializes to, so the raw stored value reaches this
+  // component directly. It used to be laundered into NaN by an
+  // effectiveDurationSeconds wrapper; that wrapper was an identity function
+  // at this boundary (formatDuration already collapses NaN/0/negative to "")
+  // and was removed, so pin every unset representation here instead.
+  it.each([['NaN', NaN], ['zero', 0], ['undefined', undefined], ['negative', -5]])(
+    'renders blank and a "using the default" note when unset (%s)',
+    (_label, seconds) => {
+      mount({ seconds });
+      expect(field().value).toBe('');
+      expect(screen.getByText('Using the default, 3:00.')).toBeTruthy();
+    },
+  );
 
   it('emits total seconds for the m:ss the label promises', () => {
     // The two-field predecessor turned this exact input into 230 MINUTES.

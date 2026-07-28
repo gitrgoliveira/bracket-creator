@@ -33,15 +33,6 @@ export function clampDurationSeconds(raw, fallback = 180) {
   return Number.isFinite(raw) && raw >= 1 ? Math.round(raw) : fallback;
 }
 
-// effectiveDurationSeconds normalizes a competition's per-match seconds field
-// for display. Seconds are the only duration representation the API carries:
-// the whole-minute fields were retired, and internal/state migrates any old
-// config.md onto seconds when it loads it, so there is nothing to fall back to.
-// Returns NaN when unset so callers can render the "using the default" state.
-export function effectiveDurationSeconds(seconds) {
-  return Number.isFinite(seconds) && seconds > 0 ? seconds : NaN;
-}
-
 // True when the list is non-empty and every match is in 'completed' status.
 // Drives the "All matches scored" banner in AdminScoreEditor.
 export function allMatchesCompleted(matches) {

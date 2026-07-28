@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { timeEdited, timeToMinutes, filterMatchesByCourt, suggestRebalances, computeCourtPaceStats, allMatchesCompleted, clampDurationSeconds, effectiveDurationSeconds } from '../admin_schedule.jsx';
+import { timeEdited, timeToMinutes, filterMatchesByCourt, suggestRebalances, computeCourtPaceStats, allMatchesCompleted, clampDurationSeconds } from '../admin_schedule.jsx';
 import { makeReactive } from './helpers/reactive_react.js';
 
 describe('timeEdited', () => {
@@ -93,25 +93,6 @@ describe('clampDurationSeconds', () => {
   });
   it('honors a custom fallback', () => {
     expect(clampDurationSeconds(NaN, 90)).toBe(90);
-  });
-});
-
-describe('effectiveDurationSeconds', () => {
-  // Seconds are the only duration representation the API carries: the retired
-  // whole-minute fields were removed, and internal/state migrates an old
-  // config.md onto seconds when it loads it. There is no fallback tier left.
-  it('returns the seconds value when set', () => {
-    expect(effectiveDurationSeconds(150)).toBe(150);
-    expect(effectiveDurationSeconds(600)).toBe(600);
-  });
-  it('returns NaN when unset, so the caller renders the default state', () => {
-    expect(effectiveDurationSeconds(0)).toBeNaN();
-    expect(effectiveDurationSeconds(undefined)).toBeNaN();
-    expect(effectiveDurationSeconds(NaN)).toBeNaN();
-    expect(effectiveDurationSeconds(-5)).toBeNaN();
-  });
-  it('ignores extra arguments, so a stale 3-tier call site cannot resurrect a fallback', () => {
-    expect(effectiveDurationSeconds(0, 3, 4)).toBeNaN();
   });
 });
 

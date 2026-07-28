@@ -5,7 +5,6 @@
 
 import { teamMatchTypeHint } from './pool_ids.jsx';
 import { DurationInput } from './duration.jsx';
-import { effectiveDurationSeconds } from './admin_schedule_utils.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -452,7 +451,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       <DurationInput
         id={`duration-${secKey}`}
         describedBy={`duration-${secKey}-hint`}
-        seconds={effectiveDurationSeconds(local[secKey])}
+        seconds={local[secKey]}
         onChange={updateDurationSeconds(secKey)}
         onValidity={setDurationError(secKey)}
       />

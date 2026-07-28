@@ -111,6 +111,35 @@ func (s *Store) copyTournament(t *Tournament) *Tournament {
 	return &cp
 }
 
+// seedTournamentCache refreshes the in-memory tournament cache after a
+// successful write. Caller MUST hold s.tournamentMu.
+//
+// It seeds a NORMALIZED COPY and bumps the mtime in one step, because the two
+// must move together. The mtime bump is what makes the next LoadTournament a
+// cache hit, and LoadTournament serves s.cachedTourn verbatim on a hit; so
+// seeding the raw struct while bumping the mtime is precisely the bug this
+// pairing exists to prevent. That combination made the next load return
+// ClockToElapsedMultiplier=0 / Mode="" / Courts=nil, while the SAME file read
+// after a restart returned the canonical values, because the disk-parse path
+// applies defaults. Two readers, same bytes, different answers. A zero
+// multiplier collapses perMatchElapsed to 0, which the scheduler's 1-minute
+// floor then pins at 1 minute per match: silently wrong estimates, no error.
+// Keeping both halves here means a third save path cannot bump one without
+// the other.
+//
+// A copy, not the caller's pointer: the cache must not alias a struct the
+// caller can still mutate, and normalizing must not be a side effect of Save.
+// The on-disk bytes are deliberately left alone; the disk-parse path already
+// normalizes, so both readers agree without rewriting files.
+func (s *Store) seedTournamentCache(t *Tournament, path string) {
+	cp := s.copyTournament(t)
+	ApplyTournamentDefaults(cp)
+	s.cachedTourn = cp
+	if info, err := os.Stat(path); err == nil && info != nil {
+		s.tournMtime = info.ModTime().UnixNano()
+	}
+}
+
 // SaveTournamentChanged persists t and reports whether the on-disk content
 // actually changed. Use this instead of SaveTournament when you need to gate
 // a broadcast on a real mutation.
@@ -135,27 +164,7 @@ func (s *Store) SaveTournamentChanged(t *Tournament) (bool, error) {
 		return false, err
 	}
 
-	// Seed the cache with a NORMALIZED COPY. LoadTournament serves s.cachedTourn
-	// verbatim on a cache hit, and this save also bumps s.tournMtime, so the very
-	// next load is a hit. Without normalizing here, that load returned the raw
-	// struct (ClockToElapsedMultiplier=0, Mode="", Courts=nil) while the SAME
-	// file read after a restart returned the canonical values, because the
-	// disk-parse path applies defaults. Two readers, same bytes, different
-	// answers. A zero multiplier collapses perMatchElapsed to 0, which the
-	// scheduler's 1-minute floor then pins at 1 minute per match: silently wrong
-	// estimates with no error.
-	//
-	// A copy, not the caller's pointer: the cache must not alias a struct the
-	// caller can still mutate, and normalizing must not be a side effect of Save.
-	// The on-disk bytes are deliberately left alone; the disk-parse path already
-	// normalizes, so both readers now agree without rewriting files.
-	cachedT := s.copyTournament(t)
-	ApplyTournamentDefaults(cachedT)
-	s.cachedTourn = cachedT
-	info, _ := os.Stat(path)
-	if info != nil {
-		s.tournMtime = info.ModTime().UnixNano()
-	}
+	s.seedTournamentCache(t, path)
 
 	return true, nil
 }
@@ -270,13 +279,7 @@ func (s *Store) UpdateTournamentChanged(desired *Tournament, transform func(curr
 		return false, err
 	}
 
-	// Same normalized-copy seeding as SaveTournamentChanged above.
-	cachedDesired := s.copyTournament(desired)
-	ApplyTournamentDefaults(cachedDesired)
-	s.cachedTourn = cachedDesired
-	if info, serr := os.Stat(path); serr == nil && info != nil {
-		s.tournMtime = info.ModTime().UnixNano()
-	}
+	s.seedTournamentCache(desired, path)
 
 	return true, nil
 }

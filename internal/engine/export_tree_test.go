@@ -248,19 +248,48 @@ func TestExportCompetitionXlsx_EliminationMatchesPopulated(t *testing.T) {
 			assert.Equal(t, sc.finalists-1, headers,
 				"a knockout of %d entrants must render %d match blocks", sc.finalists, sc.finalists-1)
 
+			// Elimination block numbers per court band (8 columns per court).
+			elimNumsByCourt := map[int]map[int]bool{}
+			for _, row := range elim {
+				for c, cell := range row {
+					var round, match int
+					if _, serr := fmt.Sscanf(cell, "Round %d - Match %d", &round, &match); serr == nil {
+						court := c / 8
+						if elimNumsByCourt[court] == nil {
+							elimNumsByCourt[court] = map[int]bool{}
+						}
+						elimNumsByCourt[court][match] = true
+					}
+				}
+			}
+
 			// Junction numbering: every match that lives on a tree page gets its
 			// number stamped. Only the cross-page matches (the top pages-1
 			// junctions, drawn on no page) have nowhere to be written.
+			//
+			// Numbers are assigned round-major across the WHOLE draw
+			// (AssignMatchNumbers), so on a multi-court draw a single page shows
+			// an interleaved subset (court A: 1, 3; court B: 2, 4) - that is the
+			// numbering contract with the web app (see
+			// TestMatchNumberingParity_ExcelVsWeb), not a skip. What must hold is
+			// the operator's invariant: every number on a court's tree page has
+			// its score block in the SAME court's band on the Elimination sheet.
 			numbered := 0
-			for _, page := range treeSheets(f) {
+			pages := treeSheets(f)
+			for i, page := range pages {
 				rows, err := f.GetRows(page)
 				require.NoError(t, err)
+				court := helper.SubtreeCourtIndex(len(pages), len(sc.courts), i)
 				pageNumbered := 0
 				for _, row := range rows {
 					for _, cell := range row {
-						if _, aerr := strconv.Atoi(cell); aerr == nil && cell != "" {
-							pageNumbered++
+						n, aerr := strconv.Atoi(cell)
+						if aerr != nil || cell == "" {
+							continue
 						}
+						pageNumbered++
+						assert.Truef(t, elimNumsByCourt[court][n],
+							"%s junction %d must have its score block in court band %d of the Elimination sheet", page, n, court)
 					}
 				}
 				assert.Positivef(t, pageNumbered, "%s must carry match numbers on its junctions", page)

@@ -273,11 +273,13 @@ func (o *poolOptions) createPools(entries []string) error {
 		startRow := helper.TreeTitleRows + 1
 
 		courtLabel := helper.CourtLabel(helper.SubtreeCourtIndex(len(subtrees), o.courts, i))
-		helper.SetTreeSheetTitle(f, subtreeSheet, "Shiaijo "+courtLabel)
+		helper.SetTreeSheetTitle(f, subtreeSheet, "Shiaijo "+courtLabel, helper.TreePageLastCol(depth))
 		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, startRow, depth, true, matchWinners)
 
 		poolStart, poolEnd := helper.PoolBoundsForSubtree(len(pools), o.courts, len(subtrees), i)
-		helper.AddPoolsToTree(f, subtreeSheet, pools[poolStart:poolEnd], poolCoords, playerCoords)
+		poolsLastRow := helper.AddPoolsToTree(f, subtreeSheet, pools[poolStart:poolEnd], poolCoords, playerCoords)
+
+		helper.SetTreePageLayout(f, subtreeSheet, depth, max(helper.TreePageLastRow(depth, startRow), poolsLastRow))
 	}
 	if err := f.DeleteSheet(helper.SheetTree); err != nil {
 		fmt.Println("Note: Tree sheet might not exist:", err)

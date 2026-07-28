@@ -997,9 +997,16 @@ func matchHeaderWithStyles(f *excelize.File, sheetName string, startColName stri
 func SetEliminationPrintArea(f *excelize.File, sheetName string, numCourts, lastRow int) {
 	numCourts = clampCourts(numCourts)
 	lastCourtStartCol := 1 + (numCourts-1)*CourtsColumnsPerCourt
-	maxColNum := lastCourtStartCol + 7
-	maxColName := mustColumnName(maxColNum)
+	SetPrintArea(f, sheetName, lastCourtStartCol+7, lastRow)
+}
 
+// SetPrintArea sets (or replaces) the _xlnm.Print_Area defined name for
+// sheetName so the printed range is $A$1:$<lastCol>$<lastRow>. Without it a
+// sheet prints its whole used range, and any styled-but-empty cell to the right
+// of the content (a merged title band, a pre-sized column) spills a near-blank
+// extra page. It is idempotent: an existing definition is removed first, so
+// callers can call it again to extend the range.
+func SetPrintArea(f *excelize.File, sheetName string, lastCol, lastRow int) {
 	// DeleteDefinedName returns ErrDefinedNameScope when the name is not found;
 	// that is expected on the first call, so only surface other errors.
 	if err := f.DeleteDefinedName(&excelize.DefinedName{
@@ -1009,7 +1016,7 @@ func SetEliminationPrintArea(f *excelize.File, sheetName string, numCourts, last
 		handleExcelError("DeleteDefinedName", err)
 	}
 
-	printArea := fmt.Sprintf("'%s'!$A$1:$%s$%d", sheetName, maxColName, lastRow)
+	printArea := fmt.Sprintf("'%s'!$A$1:$%s$%d", sheetName, mustColumnName(lastCol), lastRow)
 	handleExcelError("SetDefinedName", f.SetDefinedName(&excelize.DefinedName{
 		Name:     "_xlnm.Print_Area",
 		RefersTo: printArea,
@@ -1675,6 +1682,35 @@ func SetSheetLayoutPortraitA4Centered(f *excelize.File, sheetName string) {
 		Orientation: &orientation,
 	}); err != nil {
 		handleExcelError("SetPageLayout", err)
+	}
+
+	centerOnPage(f, sheetName)
+}
+
+// SetSheetLayoutPortraitA4FitWidth configures portrait A4, centred, scaled so the
+// print area is exactly one page wide and as many pages tall as it needs. Used by
+// the tree sheets, where a deep bracket is wider than A4 and must shrink to fit
+// rather than break mid-bracket onto a second sheet of paper.
+func SetSheetLayoutPortraitA4FitWidth(f *excelize.File, sheetName string) {
+	size := 9 // A4
+	orientation := "portrait"
+	fitWidth := 1
+	fitHeight := 0
+
+	if err := f.SetPageLayout(sheetName, &excelize.PageLayoutOptions{
+		Size:        &size,
+		Orientation: &orientation,
+		FitToWidth:  &fitWidth,
+		FitToHeight: &fitHeight,
+	}); err != nil {
+		handleExcelError("SetPageLayout", err)
+	}
+
+	boolTrue := true
+	if err := f.SetSheetProps(sheetName, &excelize.SheetPropsOptions{
+		FitToPage: &boolTrue,
+	}); err != nil {
+		handleExcelError("SetSheetProps", err)
 	}
 
 	centerOnPage(f, sheetName)

@@ -215,20 +215,27 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 				return nil, fmt.Errorf("export: copy tree template to %s: %w", pageSheet, cerr)
 			}
 			d := helper.CalculateDepth(subtree)
-			helper.PrintLeafNodes(subtree, f, pageSheet, 2*d, helper.TreeTitleRows+1, d, true, matchWinners)
+			startRow := helper.TreeTitleRows + 1
+			helper.PrintLeafNodes(subtree, f, pageSheet, 2*d, startRow, d, true, matchWinners)
 			// Title the page by its shiaijo, like the blank-template export. The
 			// title formula prepends data!$B$1 (already the competition name), so
 			// passing comp.Name here would render "Name - Name" duplicated.
 			courtLabel := helper.CourtLabel(helper.SubtreeCourtIndex(len(subtrees), numCourts, i))
-			helper.SetTreeSheetTitle(f, pageSheet, "Shiaijo "+courtLabel)
+			helper.SetTreeSheetTitle(f, pageSheet, "Shiaijo "+courtLabel, helper.TreePageLastCol(d))
+			lastRow := helper.TreePageLastRow(d, startRow)
 			if len(pools) > 0 {
 				poolStart, poolEnd := helper.PoolBoundsForSubtree(len(pools), numCourts, len(subtrees), i)
-				helper.AddPoolsToTree(f, pageSheet, pools[poolStart:poolEnd], poolCoords, playerCoords)
+				lastRow = max(lastRow, helper.AddPoolsToTree(f, pageSheet, pools[poolStart:poolEnd], poolCoords, playerCoords))
 			}
+			helper.SetTreePageLayout(f, pageSheet, d, lastRow)
 		}
-		if derr := f.DeleteSheet(helper.SheetTree); derr != nil {
-			return nil, fmt.Errorf("export: delete tree template sheet: %w", derr)
-		}
+	}
+	// The bare "Tree" sheet is a styled scaffold that every page is copied from,
+	// never output itself. Delete it whether it was consumed above or left unused
+	// by a format with no knockout phase, so no blank tree page reaches the
+	// workbook or the printed booklet.
+	if derr := f.DeleteSheet(helper.SheetTree); derr != nil {
+		return nil, fmt.Errorf("export: delete tree template sheet: %w", derr)
 	}
 
 	// 5. Names to Print sheet (identical to blank-template export).

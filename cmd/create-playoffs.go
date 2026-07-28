@@ -203,10 +203,13 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 		startRow := helper.TreeTitleRows + 1
 		// Group consecutive tree sheets under the same Shiaijo label
 		if len(subtrees) > 0 {
-			helper.SetTreeSheetTitle(f, subtreeSheet, "Shiaijo "+helper.CourtLabel(helper.SubtreeCourtIndex(len(subtrees), o.courts, i)))
+			helper.SetTreeSheetTitle(f, subtreeSheet, "Shiaijo "+helper.CourtLabel(helper.SubtreeCourtIndex(len(subtrees), o.courts, i)), helper.TreePageLastCol(depth))
 		}
 
 		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, startRow, depth, false, nil)
+
+		// A playoffs bracket has no pools, so the bracket alone bounds the page.
+		helper.SetTreePageLayout(f, subtreeSheet, depth, helper.TreePageLastRow(depth, startRow))
 	}
 	if err := f.DeleteSheet(helper.SheetTree); err != nil {
 		// Ignore sheet not exist error

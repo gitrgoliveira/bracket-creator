@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -30,6 +31,27 @@ import (
 // treeLeafLabel matches the finalist placeholder a tree leaf renders, e.g.
 // CONCATENATE("Pool A-1st ",'Pool Matches'!G19) -> "Pool A-1st".
 var treeLeafLabel = regexp.MustCompile(`CONCATENATE\("([^"]+?) ",`)
+
+// printAreaRef matches the tail of a print-area definition, e.g.
+// 'Tree 1'!$A$1:$G$15 -> ("G", "15").
+var printAreaRef = regexp.MustCompile(`\$A\$1:\$([A-Z]+)\$(\d+)$`)
+
+// printAreaOf returns the sheet's _xlnm.Print_Area last column and last row, or
+// ("", 0) when the sheet has no print area defined.
+func printAreaOf(t *testing.T, f *excelize.File, sheet string) (string, int) {
+	t.Helper()
+	for _, dn := range f.GetDefinedName() {
+		if dn.Name != "_xlnm.Print_Area" || dn.Scope != sheet {
+			continue
+		}
+		m := printAreaRef.FindStringSubmatch(dn.RefersTo)
+		require.NotNilf(t, m, "unparseable print area %q on %s", dn.RefersTo, sheet)
+		lastRow, err := strconv.Atoi(m[2])
+		require.NoError(t, err)
+		return m[1], lastRow
+	}
+	return "", 0
+}
 
 // treeSheets returns the workbook's bracket pages in workbook order.
 func treeSheets(f *excelize.File) []string {
@@ -127,26 +149,160 @@ func TestExportCompetitionXlsx_TwoCourtsRendersEveryTreePage(t *testing.T) {
 	}
 }
 
-// TestExportCompetitionXlsx_LargeDrawRendersEveryTreePage covers the second,
-// independent trigger: more than helper.MaxPlayersPerTree (16) finalists split
-// the bracket across pages even on a single court.
-func TestExportCompetitionXlsx_LargeDrawRendersEveryTreePage(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	// 10 pools of 4 x 2 qualifiers = 20 finalists > MaxPlayersPerTree.
-	compID := startMixedComp(t, eng, store, "large-draw", []string{"A"}, 4, 40)
+// exportScenario parameterizes the geometry-sensitive tests over draw shapes.
+// The three shapes cover: a balanced bracket (finalists a power of two), an
+// UNBALANCED bracket (byes sit as leaves at shallower levels of the page's
+// tree), and a large draw whose pages are themselves unbalanced. The rendering
+// must hold for all of them, not just the tidy power-of-two case.
+type exportScenario struct {
+	name       string
+	courts     []string
+	poolSize   int
+	numPlayers int
+	finalists  int    // pools x 2 qualifiers
+	pages      int    // helper.TreePageLayout for finalists x courts
+	lastCol    string // helper.TreePageLastCol of each page's depth
+}
 
-	f := openExportedWorkbook(t, eng, compID)
+var exportScenarios = []exportScenario{
+	// 4 pools x 2 = 8 finalists on 2 courts: two balanced 4-leaf pages, depth 3.
+	{"balanced two-court", []string{"A", "B"}, 4, 16, 8, 2, "G"},
+	// 3 pools x 2 = 6 finalists on 2 courts: two UNBALANCED 3-leaf pages
+	// (depth 3 with a bye each).
+	{"unbalanced two-court", []string{"A", "B"}, 4, 12, 6, 2, "G"},
+	// 10 pools x 2 = 20 finalists on one court: >MaxPlayersPerTree splits into
+	// two UNBALANCED 10-leaf pages, depth 5.
+	{"large unbalanced draw", []string{"A"}, 4, 40, 20, 2, "K"},
+}
 
-	pages := treeSheets(f)
-	require.Greater(t, len(pages), 1, "a >16-finalist draw must span more than one bracket page")
+// TestExportCompetitionXlsx_TreePagesBoundedPrintArea pins the print geometry
+// of every tree page across draw shapes. Without a print area a tree sheet
+// prints its whole used range, and the styled-but-empty cells (the merged
+// title band, the template's pre-sized columns out to Z) spilled a second,
+// near-blank physical page per bracket page into every printed booklet.
+func TestExportCompetitionXlsx_TreePagesBoundedPrintArea(t *testing.T) {
+	for _, sc := range exportScenarios {
+		t.Run(sc.name, func(t *testing.T) {
+			eng, store, _ := setupTestEngine(t)
+			compID := startMixedComp(t, eng, store, "print-area", sc.courts, sc.poolSize, sc.numPlayers)
 
-	var all []string
-	for _, page := range pages {
-		labels := leafLabelsOnSheet(t, f, page)
-		assert.NotEmptyf(t, labels, "%s must render its finalists, not be blank", page)
-		all = append(all, labels...)
+			f := openExportedWorkbook(t, eng, compID)
+			pages := treeSheets(f)
+			require.Len(t, pages, sc.pages)
+
+			for _, page := range pages {
+				lastCol, lastRow := printAreaOf(t, f, page)
+				require.NotEmptyf(t, lastCol, "%s must define a print area", page)
+
+				// The area must cover everything rendered on the page...
+				maxContentRow := 0
+				rows, err := f.GetRows(page)
+				require.NoError(t, err)
+				for r, cells := range rows {
+					for _, c := range cells {
+						if c != "" {
+							maxContentRow = r + 1
+						}
+					}
+				}
+				assert.GreaterOrEqualf(t, lastRow, maxContentRow,
+					"%s print area (row %d) must cover the deepest content row (%d)", page, lastRow, maxContentRow)
+
+				// ...and stop at the bracket's last column (the root's bracket
+				// line), not at the template's pre-sized column Z.
+				assert.Equalf(t, sc.lastCol, lastCol, "%s print area must end at the bracket's last column", page)
+			}
+		})
 	}
-	assert.Len(t, all, 20, "every finalist must be rendered exactly once across the pages")
+}
+
+// TestExportCompetitionXlsx_EliminationMatchesPopulated pins the score-entry
+// side of the export across draw shapes. The tree pages only show the
+// bracket's shape; the Elimination Matches sheet holds the blocks the operator
+// writes scores into, and FillInMatches stamps the match numbers the operator
+// calls matches by onto the tree junctions. This path used to skip both,
+// shipping a workbook (and a "full-bracket" PDF) with an entirely blank
+// Elimination Matches sheet and unnumbered tree pages.
+func TestExportCompetitionXlsx_EliminationMatchesPopulated(t *testing.T) {
+	for _, sc := range exportScenarios {
+		t.Run(sc.name, func(t *testing.T) {
+			eng, store, _ := setupTestEngine(t)
+			compID := startMixedComp(t, eng, store, "elim-blocks", sc.courts, sc.poolSize, sc.numPlayers)
+
+			f := openExportedWorkbook(t, eng, compID)
+
+			// A knockout of F entrants is always F-1 matches, byes or not:
+			// every internal node of the bracket tree is a real match
+			// (TraverseRounds skips leaves), and each match eliminates exactly
+			// one entrant.
+			elim, err := f.GetRows(helper.SheetEliminationMatches)
+			require.NoError(t, err)
+			headers := 0
+			for _, row := range elim {
+				for _, cell := range row {
+					if strings.HasPrefix(cell, "Round ") && strings.Contains(cell, " - Match ") {
+						headers++
+					}
+				}
+			}
+			assert.Equal(t, sc.finalists-1, headers,
+				"a knockout of %d entrants must render %d match blocks", sc.finalists, sc.finalists-1)
+
+			// Junction numbering: every match that lives on a tree page gets its
+			// number stamped. Only the cross-page matches (the top pages-1
+			// junctions, drawn on no page) have nowhere to be written.
+			numbered := 0
+			for _, page := range treeSheets(f) {
+				rows, err := f.GetRows(page)
+				require.NoError(t, err)
+				pageNumbered := 0
+				for _, row := range rows {
+					for _, cell := range row {
+						if _, aerr := strconv.Atoi(cell); aerr == nil && cell != "" {
+							pageNumbered++
+						}
+					}
+				}
+				assert.Positivef(t, pageNumbered, "%s must carry match numbers on its junctions", page)
+				numbered += pageNumbered
+			}
+			assert.Equal(t, sc.finalists-sc.pages, numbered,
+				"all but the %d cross-page junctions must be numbered on the tree pages", sc.pages-1)
+		})
+	}
+}
+
+// TestExportCompetitionXlsx_AllFinalistsRenderedAcrossPages asserts, for every
+// draw shape, that each finalist appears exactly once across the bracket pages
+// and no page is blank. This covers the second, independent trigger into
+// multiple pages (>helper.MaxPlayersPerTree finalists on a single court) as
+// well as unbalanced draws, where a bug in bye placement could silently drop
+// or duplicate a finalist.
+func TestExportCompetitionXlsx_AllFinalistsRenderedAcrossPages(t *testing.T) {
+	for _, sc := range exportScenarios {
+		t.Run(sc.name, func(t *testing.T) {
+			eng, store, _ := setupTestEngine(t)
+			compID := startMixedComp(t, eng, store, "finalists", sc.courts, sc.poolSize, sc.numPlayers)
+
+			f := openExportedWorkbook(t, eng, compID)
+
+			pages := treeSheets(f)
+			require.Len(t, pages, sc.pages)
+
+			seen := map[string]int{}
+			for _, page := range pages {
+				labels := leafLabelsOnSheet(t, f, page)
+				assert.NotEmptyf(t, labels, "%s must render its finalists, not be blank", page)
+				for _, l := range labels {
+					seen[l]++
+				}
+			}
+			assert.Len(t, seen, sc.finalists, "every finalist must be rendered")
+			for label, n := range seen {
+				assert.Equalf(t, 1, n, "finalist %q must appear on exactly one page", label)
+			}
+		})
+	}
 }
 
 // TestExportCompetitionXlsx_LeagueHasNoTreeSheet pins that a format with no

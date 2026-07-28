@@ -10,6 +10,41 @@ import (
 // for the user to add a title. Content starts below this offset.
 const TreeTitleRows = 3
 
+// TreePageLastCol returns the last spreadsheet column (1-based) a rendered tree
+// page occupies for a bracket of the given depth. PrintLeafNodes places the root
+// at column 2*depth and CreateTreeBracket draws that node's vertical line one
+// column further right; every other column of the bracket is to the left of it.
+func TreePageLastCol(depth int) int {
+	return 2*depth + 1
+}
+
+// TreePageLastRow returns the last row a bracket of the given depth occupies
+// when its root is rendered from startRow. PrintLeafNodes offsets each right
+// subtree by the current level's size (2^(level-1)), so the deepest cell sits
+// sum(2^(depth-1)..2^0) = 2^depth - 1 rows below the start.
+func TreePageLastRow(depth, startRow int) int {
+	if depth < 1 {
+		return startRow
+	}
+	return startRow + 1<<uint(depth) - 1
+}
+
+// SetTreePageLayout bounds a rendered tree page to the region actually drawn and
+// scales it onto a single page wide.
+//
+// Without a print area a tree sheet printed its whole used range: the title band
+// alone is merged across many columns, and the template pre-sizes columns out to
+// Z, so LibreOffice emitted a second, near-blank physical page holding nothing
+// but the tail of the title border. Every printed booklet carried one of those
+// per bracket page.
+//
+// lastRow must cover both the bracket (TreePageLastRow) and the pool roster
+// block (the row AddPoolsToTree returns), whichever reaches further down.
+func SetTreePageLayout(f *excelize.File, sheetName string, depth, lastRow int) {
+	SetPrintArea(f, sheetName, TreePageLastCol(depth), lastRow)
+	SetSheetLayoutPortraitA4FitWidth(f, sheetName)
+}
+
 func CreateTreeBracket(f *excelize.File, sheet string, col int, startRow int, size int) string {
 	borderLeftStyle := GetBorderStyleLeft(f)
 	borderBottomLeftStyle := GetBorderStyleBottomLeft(f)
@@ -79,8 +114,11 @@ func writeTreeValue(f *excelize.File, sheet string, col int, startRow int, value
 
 }
 
-func AddPoolsToTree(f *excelize.File, sheetName string, pools []Pool, poolCoords map[string]cellCoord, pCoords map[string]playerCellCoord) {
-	SetSheetLayoutPortraitA4Centered(f, sheetName)
+// AddPoolsToTree renders the roster of each pool feeding this tree page down
+// column A and returns the last row it wrote to, which the caller needs to bound
+// the page's print area (SetTreePageLayout). Page layout is the caller's job:
+// this function only writes content.
+func AddPoolsToTree(f *excelize.File, sheetName string, pools []Pool, poolCoords map[string]cellCoord, pCoords map[string]playerCellCoord) int {
 	treeHeaderStyle := getTreeHeaderStyle(f)
 	treeTopStyle := getTreeTopStyle(f)
 	treeBodyStyle := getTreeBodyStyle(f)
@@ -135,6 +173,8 @@ func AddPoolsToTree(f *excelize.File, sheetName string, pools []Pool, poolCoords
 
 	}
 
+	// row is one past the last styled cell; report the last row actually used.
+	return row - 1
 }
 
 // AssignMatchNumbers assigns sequential match numbers to all non-nil nodes in
@@ -181,13 +221,17 @@ func FillInMatches(f *excelize.File, eliminationMatchRounds [][]*Node) {
 }
 
 // SetTreeSheetTitle writes a title formula into the first row of a tree sheet,
-// spanning a wide range of columns to cover the bracket layout.
+// merged across the page's content columns (endCol, from TreePageLastCol).
 // The formula prepends the value of data!$B$1 (the user-supplied title prefix)
 // to the given title string, so editing that single cell updates all tree sheets.
-func SetTreeSheetTitle(f *excelize.File, sheetName string, title string) {
+//
+// endCol must match the rendered bracket: the merge is the widest thing on the
+// sheet, so a title merged past the last bracket column would push the page's
+// used range beyond the print area and print a near-blank extra page.
+func SetTreeSheetTitle(f *excelize.File, sheetName string, title string, endCol int) {
 	titleStyle := getPoolHeaderStyle(f)
 	startCell := "A1"
-	endCell := "P1"
+	endCell := mustColumnName(endCol) + "1"
 	formula := fmt.Sprintf(`IF(data!$B$1="","%s",data!$B$1&" - %s")`, title, title)
 	handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, startCell, formula))
 	handleExcelError("MergeCell", f.MergeCell(sheetName, startCell, endCell))

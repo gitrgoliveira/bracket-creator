@@ -307,12 +307,23 @@ func setupNamesToPrintSheet(f *excelize.File) {
 func setupTreeSheet(f *excelize.File) {
 	const s = helper.SheetTree
 
-	// Column widths: A is the wide label column, B is a medium header column,
-	// and C onward are the narrow bracket-line columns.
-	// These widths are inherited by every "Tree N" sheet created via CopySheet.
+	// Column widths, inherited by every "Tree N" sheet created via CopySheet:
+	//
+	//   A  the pool roster block (helper.AddPoolsToTree)
+	//   B  a gutter, so a long entrant name has somewhere to overflow
+	//   C  the entrant labels: helper.PrintLeafNodes always writes every leaf of
+	//      every bracket, at any depth, into column C
+	//   D+ the narrow bracket-line columns
+	//
+	// C used to be 3.5 like the rest of the bracket. Its text is right-aligned
+	// against the bracket line, so a label wider than the column overflowed
+	// leftwards and was cut off by the roster block in A: rows next to a roster
+	// box printed "-2nd Player 05" instead of "Pool B-2nd Player 05", hiding
+	// exactly the part that says which pool feeds the slot.
 	logSetupErr("col A", f.SetColWidth(s, "A", "A", 25))
-	logSetupErr("col B", f.SetColWidth(s, "B", "B", 10))
-	logSetupErr("col C-Z", f.SetColWidth(s, "C", "Z", 3.5))
+	logSetupErr("col B", f.SetColWidth(s, "B", "B", 4))
+	logSetupErr("col C", f.SetColWidth(s, "C", "C", 28))
+	logSetupErr("col D-Z", f.SetColWidth(s, "D", "Z", 3.5))
 
 	// Page layout: A4 portrait, matches the original template.
 	logSetupErr("SetPageLayout", f.SetPageLayout(s, &excelize.PageLayoutOptions{

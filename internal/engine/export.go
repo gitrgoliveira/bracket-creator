@@ -59,6 +59,14 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	if numCourts < 1 {
 		numCourts = 1
 	}
+	// The stored bracket is authoritative about whether this competition has a
+	// bronze (3rd-place) bout to hand-score.
+	bracket, err := e.store.LoadBracket(id)
+	if err != nil {
+		return nil, err
+	}
+	hasBronze := comp.Naginata && bracket != nil && bracket.ThirdPlaceMatch != nil
+
 	// GenerateFinals returns placeholder "Pool A-1st" labels for ANY pooled
 	// format, including ones with no knockout phase, so gate on the format the
 	// way the results workbook does (builder.go, TestBuildResultsWorkbook_
@@ -94,47 +102,65 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 				return nil, fmt.Errorf("export: copy tree template to %s: %w", pageSheet, cerr)
 			}
 			depth := helper.CalculateDepth(subtree)
+			startRow := helper.TreeTitleRows + 1
 			// Leaves start below the reserved title band; row 1 would be written
-			// over by the merged A1:P1 title.
-			helper.PrintLeafNodes(subtree, f, pageSheet, 2*depth, helper.TreeTitleRows+1, depth, true, matchWinners)
+			// over by the merged title.
+			helper.PrintLeafNodes(subtree, f, pageSheet, 2*depth, startRow, depth, true, matchWinners)
 			// Title each page by its shiaijo. The title formula already prepends
 			// data!$B$1 (the competition name), so passing comp.Name here would
 			// render "Name - Name".
 			courtLabel := helper.CourtLabel(helper.SubtreeCourtIndex(len(subtrees), numCourts, i))
-			helper.SetTreeSheetTitle(f, pageSheet, "Shiaijo "+courtLabel)
+			helper.SetTreeSheetTitle(f, pageSheet, "Shiaijo "+courtLabel, helper.TreePageLastCol(depth))
+			lastRow := helper.TreePageLastRow(depth, startRow)
 			if len(pools) > 0 {
 				poolStart, poolEnd := helper.PoolBoundsForSubtree(len(pools), numCourts, len(subtrees), i)
-				helper.AddPoolsToTree(f, pageSheet, pools[poolStart:poolEnd], poolCoords, playerCoords)
+				lastRow = max(lastRow, helper.AddPoolsToTree(f, pageSheet, pools[poolStart:poolEnd], poolCoords, playerCoords))
 			}
+			helper.SetTreePageLayout(f, pageSheet, depth, lastRow)
 		}
+
+		// 4b. Elimination Matches sheet. The tree pages show the bracket shape,
+		//     but only these blocks give the operator somewhere to write the
+		//     scores, and only FillInMatches numbers the bracket junctions the
+		//     operator calls matches by. This path used to skip both, shipping a
+		//     workbook (and a "full-bracket" PDF) with an entirely blank
+		//     Elimination Matches sheet and unnumbered tree pages.
+		//
+		//     Order matters: the tree pages above stamp each node's sheet/cell
+		//     coordinates, which FillInMatches writes the match numbers into.
+		depth := helper.CalculateDepth(tree)
+		eliminationMatchRounds := make([][]*helper.Node, depth-1)
+		for i := depth; i > 1; i-- {
+			eliminationMatchRounds[depth-i] = helper.TraverseRounds(tree, 1, i-1)
+		}
+		helper.FillInMatches(f, eliminationMatchRounds)
+		nextRow, elimMatchWinners := helper.PrintTeamEliminationMatches(
+			f, matchWinners, eliminationMatchRounds, comp.TeamSize, numCourts, comp.Mirror, comp.Engi,
+		)
+
+		// Naginata competitions have a bronze (3rd-place) match: render it as a
+		// separate block immediately after the last elimination round, exactly as
+		// the CLI (cmd/shared.go) and the results workbook do. Feeding it the real
+		// rounds and winners wires the two entrant slots to the semi-final losers
+		// instead of leaving them blank.
+		if hasBronze {
+			helper.PrintBronzeBlockWithPrintArea(f, nextRow, comp.TeamSize, comp.Mirror, comp.Engi, numCourts, eliminationMatchRounds, elimMatchWinners)
+		}
+	} else if hasBronze {
+		// A pure playoffs competition has no pools, so GenerateFinals returns
+		// nothing and the block above is skipped: this path renders no bracket at
+		// all for it (mp-ndfu). The bronze block is then the only content on the
+		// sheet, rendered at court band 1, so numCourts=1 covers it exactly.
+		// Zero semi numbers leave both entrant slots hand-fillable.
+		bronzeEndRow := helper.PrintThirdPlaceBlock(f, 1, 2, comp.TeamSize, comp.Mirror, comp.Engi, 0, 0, nil)
+		helper.SetEliminationPrintArea(f, helper.SheetEliminationMatches, 1, bronzeEndRow-1)
+		helper.SetSheetLayoutPortraitA4DownThenOver(f, helper.SheetEliminationMatches, 1)
 	}
 	// The bare "Tree" sheet is a layout scaffold, never output. Delete it whether
 	// it was copied into pages above or left unused (a format with no knockout),
 	// so no blank tree page ever reaches the workbook or the printed booklet.
 	if err := f.DeleteSheet(helper.SheetTree); err != nil {
 		return nil, fmt.Errorf("export: delete tree template sheet: %w", err)
-	}
-
-	// 4b. Naginata: add a "3rd Place" slot on the Elimination Matches sheet so
-	// the operator can hand-score the bronze bout on the blank template.
-	// This path renders Tree sheets via PrintLeafNodes and does not call
-	// PrintTeamEliminationMatches, so no "M N" matchWinners entries exist.
-	// Pass zero semi numbers so the entrant slots remain hand-fillable.
-	if comp.Naginata {
-		b, bErr := e.store.LoadBracket(id)
-		if bErr != nil {
-			return nil, bErr
-		}
-		if b != nil && b.ThirdPlaceMatch != nil {
-			// The bronze block is the ONLY content on this sheet on the blank
-			// path (see comment above), and it is rendered at court band 1
-			// (courtStartCol=1). numCourts=1 therefore covers all content
-			// exactly; the competition's court count would only widen the
-			// print area with empty columns.
-			bronzeEndRow := helper.PrintThirdPlaceBlock(f, 1, 2, comp.TeamSize, comp.Mirror, comp.Engi, 0, 0, nil)
-			helper.SetEliminationPrintArea(f, helper.SheetEliminationMatches, 1, bronzeEndRow-1)
-			helper.SetSheetLayoutPortraitA4DownThenOver(f, helper.SheetEliminationMatches, 1)
-		}
 	}
 
 	// 5. Names to Print sheet

@@ -794,9 +794,14 @@ func TestBuildResultsWorkbook_LeagueNoPhantomBracket(t *testing.T) {
 			assert.NotContains(t, cell, "-1st", "league export must not render phantom finalist labels")
 		}
 	}
-	// No Tree pages either (the whole knockout block is skipped for league).
+	// No Tree pages either (the whole knockout block is skipped for league),
+	// and no bare "Tree" template: it is a styled scaffold, never output, and
+	// the pools-trees / full-bracket PDF groups match tree sheets by prefix, so
+	// a surviving template would print as a blank page in the booklet.
 	assert.NotContains(t, f.GetSheetList(), "Tree 1",
 		"league export must not create Tree bracket pages")
+	assert.NotContains(t, f.GetSheetList(), helper.SheetTree,
+		"the bare 'Tree' template must be deleted even when no knockout pages consume it")
 }
 
 // TestBuildResultsWorkbook_MultiCourtStandingsColumns is the regression test for
@@ -1961,6 +1966,19 @@ func TestBuildResultsWorkbook_MultiPageTreePopulated(t *testing.T) {
 
 	assert.Greater(t, formulaCellCount(t, f, "Tree 2"), 1,
 		"second tree page must be populated (styled copy + rendered leaves), not blank")
+
+	// Each page must also be print-bounded: without a print area the styled
+	// title band and pre-sized template columns spill a near-blank second
+	// physical page per bracket page into the printed booklet.
+	for _, page := range []string{"Tree 1", "Tree 2"} {
+		found := false
+		for _, dn := range f.GetDefinedName() {
+			if dn.Name == "_xlnm.Print_Area" && dn.Scope == page {
+				found = true
+			}
+		}
+		assert.Truef(t, found, "%s must define a print area", page)
+	}
 }
 
 // TestWriteTeamSubMatchScores_OutOfRangePositionSkipped verifies the upper-bound

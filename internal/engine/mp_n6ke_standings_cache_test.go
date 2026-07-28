@@ -3,6 +3,7 @@ package engine
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -94,6 +95,71 @@ func TestMpN6keStandingsCacheInvalidatedOnSameTickPoolMatchSave(t *testing.T) {
 	}
 	assert.Equal(t, 1, wins["A1"],
 		"A1's win must be visible immediately, a same-millisecond save must not be masked by an mtime-keyed cache")
+	assert.Equal(t, 0, wins["A2"])
+}
+
+// TestMpN6keLoserOfFlightRaceRejectsStaleSnapshot covers the second way the
+// cache could hand back pre-write standings: the single-flight loser path.
+//
+// A caller that arrives while another goroutine is mid-compute does not run the
+// compute itself, it reads whatever the winner stored. The winner stamps its
+// entry with tokens it sampled BEFORE its compute, so that entry can predate a
+// write which had already landed when the loser sampled. Returning it hands the
+// loser (typically advanceMixedPools, right after saving a pool score) standings
+// that predate its own write, which is the same fresh-matches-vs-stale-standings
+// split mp-n6ke fixed on the fast path.
+//
+// The race is forced, not waited for: the flight entry is pre-loaded with an
+// already-consumed sync.Once so this goroutine's once.Do is a no-op and it lands
+// on the loser branch every run. Real winners delete their flight entry before
+// releasing losers, so a consumed Once never lingers in production, but leaving
+// it here is what makes the branch reachable deterministically instead of a few
+// percent of the time.
+func TestMpN6keLoserOfFlightRaceRejectsStaleSnapshot(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "n6ke-flight"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: compID, Kind: "individual",
+		Format: state.CompFormatMixed, Status: state.CompStatusPools,
+		Courts: []string{"A"}, StartTime: "09:00", PoolWinners: 2,
+	}))
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1"}, {Name: "A2"}}},
+	}))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "A1"}, {Name: "A2"},
+	}))
+
+	// Warm the cache while the bout is unscored. This entry stands in for the
+	// snapshot a flight winner would have stamped.
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "A1", SideB: "A2", Status: state.MatchStatusScheduled},
+	}))
+	warm, err := eng.CalculatePoolStandings(compID)
+	require.NoError(t, err)
+	require.Len(t, warm["Pool A"], 2)
+
+	// Our write: A1 won. The cache now holds a snapshot older than our tokens.
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "A1", SideB: "A2", Winner: "A1",
+			IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
+	}))
+
+	consumed := &sync.Once{}
+	consumed.Do(func() {})
+	eng.standingsFlight.Store(compID, consumed)
+
+	got, err := eng.CalculatePoolStandings(compID)
+	require.NoError(t, err)
+	require.Len(t, got["Pool A"], 2)
+
+	wins := map[string]int{}
+	for _, ps := range got["Pool A"] {
+		wins[ps.Player.Name] = ps.Wins
+	}
+	assert.Equal(t, 1, wins["A1"],
+		"losing the single-flight race must not return a snapshot that predates our own write")
 	assert.Equal(t, 0, wins["A2"])
 }
 

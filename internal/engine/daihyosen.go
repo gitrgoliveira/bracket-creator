@@ -294,8 +294,6 @@ func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult,
 	if err != nil {
 		return nil, err
 	}
-	state.ApplyTournamentDefaults(tournament)
-	state.ApplyCompetitionDefaults(comp)
 	allMatches, _ = assignPoolMatchSlots(allMatches, comp, tournament)
 	for i := range allMatches {
 		if t, ok := existingTimes[allMatches[i].ID]; ok {

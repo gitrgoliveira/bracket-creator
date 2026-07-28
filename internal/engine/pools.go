@@ -150,8 +150,6 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 	if err != nil {
 		return err
 	}
-	state.ApplyTournamentDefaults(tournament)
-	state.ApplyCompetitionDefaults(comp)
 
 	if comp.Format == state.CompFormatLeague {
 		// League scheduling (mp-sjaz): spread every player's matches so

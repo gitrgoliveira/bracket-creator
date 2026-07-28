@@ -58,6 +58,16 @@ func parseCompetitionFile(path string) (any, error) {
 	// per-phase seconds existed is normalized exactly once, at the boundary,
 	// and an out-of-band value hand-edited into the file is pinned rather than
 	// served through. See normalizeStoredDurations.
+	//
+	// NORMALIZATION CONTRACT for the whole codebase: anything handed out by
+	// Store.LoadCompetition / loadCompetitionLocked (and, for tournaments,
+	// LoadTournament, which calls ApplyTournamentDefaults itself) is already
+	// canonical. Consumers must NOT re-apply defaults "just in case": that
+	// duplication is what made it unclear where the invariant actually lived.
+	// The single exception is a function that is exported AND takes raw structs
+	// instead of loading them, which therefore has no store guarantee to lean
+	// on; engine.EstimateForCounts is the only one today and says so at its
+	// call site.
 	normalizeStoredDurations(&c)
 	return &c, nil
 }

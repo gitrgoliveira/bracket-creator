@@ -222,10 +222,16 @@ func EstimateForCounts(poolCount, playoffCount int, comp *state.Competition, tou
 		numCourts = MaxCourts
 	}
 
-	// Work on shallow copies so the caller's structs are not mutated by
-	// ApplyTournamentDefaults / ApplyCompetitionDefaults. The slot
-	// assigners are called via the engine and always have defaults applied
-	// before they run; we mirror that here without the side-effect.
+	// EstimateForCounts is the one engine entry point that normalizes its own
+	// inputs, and deliberately so: it is exported and takes raw structs rather
+	// than loading them, so it has no store guarantee to lean on. A caller
+	// handing it a Tournament with SlowestCourtBufferPct unset genuinely needs
+	// the 10% default filled in (0 means "unset" for that field, not "no
+	// buffer"). Everywhere else in this package the values came from
+	// Store.LoadCompetition / LoadTournament, both of which normalize on the way
+	// out, so re-applying defaults there was dead weight and has been removed.
+	//
+	// Shallow-copy first so normalizing does not mutate the caller's structs.
 	compCopy := *comp
 	comp = &compCopy
 	var tournCopy state.Tournament

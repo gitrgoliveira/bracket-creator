@@ -255,8 +255,6 @@ func (e *Engine) GenerateLeagueTiebreakMatches(compID string, tiedTeamNames []st
 	if err != nil {
 		return nil, err
 	}
-	state.ApplyTournamentDefaults(tournament)
-	state.ApplyCompetitionDefaults(comp)
 	allMatches, _ = assignPoolMatchSlots(allMatches, comp, tournament)
 	for i := range allMatches {
 		if t, ok := existingTimes[allMatches[i].ID]; ok {

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sync"
+	"sync/atomic"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state/wal"
 )
@@ -64,6 +65,15 @@ type fileCache struct {
 	mu    sync.RWMutex
 	data  any
 	mtime int64
+
+	// version is a monotonic in-process write counter for this file, bumped by
+	// bumpFileVersion after every write. It exists because mtime alone is not a
+	// sound cache-validity token: filesystem mtimes come from the kernel coarse
+	// clock (measured at 1ms granularity here), so two writes landing in the
+	// same tick are indistinguishable and a cache keyed only on mtime serves
+	// pre-write data afterwards (mp-n6ke). Read atomically, so callers do not
+	// need to hold mu.
+	version atomic.Uint64
 }
 
 func NewStore(folder string) (*Store, error) {
@@ -271,6 +281,32 @@ func (s *Store) FileMtime(compID, filename string) int64 {
 		return 0
 	}
 	return info.ModTime().UnixNano()
+}
+
+// bumpFileVersion records that (compID, filename) has been written.
+//
+// It MUST be called AFTER the bytes reach disk (or the WAL) and after any
+// in-memory cache refresh for the same file. Ordering is the whole correctness
+// argument: bumping before the write would let a concurrent reader sample the
+// new version, read the OLD bytes, and cache them under a token that then looks
+// current, which is exactly the stale-read this counter exists to prevent.
+//
+// Bumping is always the safe direction. A spurious bump only forces a
+// recompute; a MISSED bump serves stale data. Callers should therefore bump on
+// anything that can change the file, including deletes and transaction aborts.
+func (s *Store) bumpFileVersion(compID, filename string) {
+	s.getFileCache(compID, filename).version.Add(1)
+}
+
+// FileVersion returns the monotonic in-process write counter for a file inside
+// a competition directory, for use as a cache-validity token.
+//
+// Pair it with FileMtime rather than replacing it: the version catches
+// same-millisecond in-process writes that mtime cannot distinguish, while mtime
+// still catches out-of-process edits this counter never observes. A cache entry
+// is valid only when BOTH match.
+func (s *Store) FileVersion(compID, filename string) uint64 {
+	return s.getFileCache(compID, filename).version.Load()
 }
 
 func ValidateCompetitionID(id string) error {

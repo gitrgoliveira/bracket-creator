@@ -59,7 +59,14 @@ func (s *Store) saveOverridesLocked(compID string, o *Overrides) error {
 	if err != nil {
 		return err
 	}
-	return s.atomicWrite(s.compPath(compID, "overrides.json"), data, 0600)
+	if err := s.atomicWrite(s.compPath(compID, "overrides.json"), data, 0600); err != nil {
+		return err
+	}
+	// overrides.json has no fileCache entry of its own (loadOverridesLocked
+	// reads it raw), but standings depend on it, so the version counter still
+	// has to move for caches keyed on it. This is the only overrides writer.
+	s.bumpFileVersion(compID, "overrides.json")
+	return nil
 }
 
 // modifyOverridesChanged loads, mutates, and saves overrides under a single

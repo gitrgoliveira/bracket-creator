@@ -290,6 +290,11 @@ func (s *Store) invalidateCachesForWALIntents(compID string, intents []wal.FileI
 			cache.data = nil
 			cache.mtime = 0
 			cache.mu.Unlock()
+			// An aborted transaction rolls the file back to content that
+			// downstream caches may already have derived state from (the staged
+			// results were published into cache.data at save time), so the
+			// version has to move here as well.
+			s.bumpFileVersion(compID, base)
 		}
 	}
 }

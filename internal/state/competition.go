@@ -313,6 +313,9 @@ func (s *Store) DeleteCompetitionFile(id, filename string) error {
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return err
 	}
+	// Discarding a draw artifact (pool-matches.csv among them) changes derived
+	// state just as a write does, so move the version counter here too.
+	s.bumpFileVersion(id, filename)
 	return nil
 }
 

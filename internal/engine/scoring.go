@@ -432,12 +432,17 @@ func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId strin
 }
 
 func (e *Engine) CalculatePoolStandings(compId string) (map[string][]state.PlayerStanding, error) {
-	// Fast path: return cached result when neither pool-matches nor overrides changed.
+	// Fast path: return cached result when neither pool-matches nor overrides
+	// changed. Both tokens are sampled BEFORE computeStandings below and both
+	// must match, see standingsCacheEntry for why mtime alone is not sound.
 	pmMtime := e.store.FileMtime(compId, "pool-matches.csv")
 	ovMtime := e.store.FileMtime(compId, "overrides.json")
+	pmVersion := e.store.FileVersion(compId, "pool-matches.csv")
+	ovVersion := e.store.FileVersion(compId, "overrides.json")
 	if v, ok := e.standingsCache.Load(compId); ok {
 		cached := v.(*standingsCacheEntry)
-		if cached.poolMatchesMtime == pmMtime && cached.overridesMtime == ovMtime {
+		if cached.poolMatchesMtime == pmMtime && cached.overridesMtime == ovMtime &&
+			cached.poolMatchesVersion == pmVersion && cached.overridesVersion == ovVersion {
 			return cached.result, nil
 		}
 	}
@@ -453,10 +458,16 @@ func (e *Engine) CalculatePoolStandings(compId string) (map[string][]state.Playe
 		defer e.standingsFlight.Delete(compId)
 		flightResult, flightErr = e.computeStandings(compId)
 		if flightErr == nil {
+			// Stamped with the PRE-compute tokens on purpose: a write landing
+			// during computeStandings then leaves a strictly newer version on
+			// the next call, forcing a recompute rather than blessing a result
+			// that may predate that write.
 			e.standingsCache.Store(compId, &standingsCacheEntry{
-				poolMatchesMtime: pmMtime,
-				overridesMtime:   ovMtime,
-				result:           flightResult,
+				poolMatchesMtime:   pmMtime,
+				overridesMtime:     ovMtime,
+				poolMatchesVersion: pmVersion,
+				overridesVersion:   ovVersion,
+				result:             flightResult,
 			})
 		}
 	})

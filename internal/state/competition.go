@@ -331,7 +331,12 @@ func (s *Store) DeleteCompetition(id string) error {
 	if err := os.RemoveAll(s.compPath(id)); err != nil {
 		return err
 	}
-	s.compCache.Delete(id)
+	// Deliberately NOT compCache.Delete(id): that would reset this competition's
+	// version counters to 0, and IDs are name slugs, so recreating a competition
+	// with the same name would inherit a fresh-looking token set and could match
+	// a cache entry left over from the deleted one. Clear the bodies, keep the
+	// counters climbing.
+	s.discardCompCacheBodies(id)
 	s.compMu.Delete(id)
 	return nil
 }

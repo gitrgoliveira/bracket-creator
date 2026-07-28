@@ -3,6 +3,7 @@ package engine
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -161,6 +162,70 @@ func TestMpN6keLoserOfFlightRaceRejectsStaleSnapshot(t *testing.T) {
 	assert.Equal(t, 1, wins["A1"],
 		"losing the single-flight race must not return a snapshot that predates our own write")
 	assert.Equal(t, 0, wins["A2"])
+}
+
+// TestMpN6keRecreatedCompetitionDoesNotServeDeletedStandings covers the third
+// route to a stale hit: competition IDs are deterministic slugs of the name, so
+// deleting a competition and recreating it under the same name reuses the ID.
+// standingsCache is keyed on that ID and nothing clears it on delete (state sits
+// below engine and cannot reach in), so the new competition has to be
+// distinguishable by its tokens alone.
+//
+// The collision needs the deleted competition's entry to have been stamped
+// (mtime 0, version 0), which is what happens when standings are computed before
+// any pool-match or overrides write, e.g. an operator opening the detail view of
+// a competition that has not started. The recreated competition then samples
+// (0, 0) too and matches. Nothing self-heals it either: saving pools and
+// participants does not touch pool-matches.csv or overrides.json, so the wrong
+// roster persists until the first bout is scored.
+func TestMpN6keRecreatedCompetitionDoesNotServeDeletedStandings(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "recycled"
+
+	seed := func(players ...string) {
+		pool := helper.Pool{PoolName: "Pool A"}
+		roster := make([]domain.Player, 0, len(players))
+		for _, n := range players {
+			pool.Players = append(pool.Players, helper.Player{Name: n})
+			roster = append(roster, domain.Player{Name: n})
+		}
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: compID, Name: "Recycled", Kind: "individual",
+			Format: state.CompFormatMixed, Status: state.CompStatusPools,
+			Courts: []string{"A"}, StartTime: "09:00", PoolWinners: 2,
+		}))
+		require.NoError(t, store.SavePools(compID, []helper.Pool{pool}))
+		require.NoError(t, store.SaveParticipants(compID, roster))
+	}
+
+	names := func(standings map[string][]state.PlayerStanding) []string {
+		out := []string{}
+		for _, ps := range standings["Pool A"] {
+			out = append(out, ps.Player.Name)
+		}
+		sort.Strings(out)
+		return out
+	}
+
+	// First competition, standings computed before any bout is scored, so the
+	// entry is stamped with zero tokens.
+	seed("OLD-1", "OLD-2")
+	warm, err := eng.CalculatePoolStandings(compID)
+	require.NoError(t, err)
+	require.Equal(t, []string{"OLD-1", "OLD-2"}, names(warm))
+	require.Zero(t, store.FileVersion(compID, "pool-matches.csv"),
+		"premise: no pool-match write yet, so the cached entry is stamped at version 0")
+
+	require.NoError(t, store.DeleteCompetition(compID))
+
+	// Same name, so the same ID, with a different roster. No sleep: the operator
+	// retyping a name they just deleted is a same-tick sequence.
+	seed("NEW-1", "NEW-2")
+
+	got, err := eng.CalculatePoolStandings(compID)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"NEW-1", "NEW-2"}, names(got),
+		"a recreated competition must not be served the deleted competition's standings")
 }
 
 // TestMpN6keFileVersionAdvancesOnEveryWrite pins the store-level invariant the

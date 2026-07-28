@@ -305,8 +305,56 @@ func (s *Store) bumpFileVersion(compID, filename string) {
 // same-millisecond in-process writes that mtime cannot distinguish, while mtime
 // still catches out-of-process edits this counter never observes. A cache entry
 // is valid only when BOTH match.
+//
+// The counter is monotonic for the LIFETIME OF THE PROCESS, including across a
+// competition being deleted and recreated under the same ID. Downstream caches
+// (engine.standingsCache) are keyed on compID and are not told about deletions,
+// so a counter that restarted at 0 would let a recreated competition match a
+// stale entry left by its predecessor. See discardCompCacheBodies.
 func (s *Store) FileVersion(compID, filename string) uint64 {
 	return s.getFileCache(compID, filename).version.Load()
+}
+
+// discardCompCacheBodies drops every cached file body for a competition while
+// KEEPING the per-file version counters alive, then bumps each one.
+//
+// This is what DeleteCompetition calls instead of compCache.Delete(compID).
+// Dropping the whole map looks tidier but resets every counter to 0, and
+// competition IDs are deterministic slugs of the name, so deleting a
+// competition and recreating it under the same name reuses the ID and hands the
+// new competition the old one's starting tokens. Any downstream cache still
+// holding an entry from the deleted competition (nothing invalidates
+// engine.standingsCache on delete, and internal/state sits below
+// internal/engine so it structurally cannot reach it) would then match on
+// (mtime 0, version 0) and serve the dead competition's data.
+//
+// The bodies MUST still be cleared here. Keeping the fileCache struct but
+// leaving cache.data populated would trade one stale-read for another:
+// loadCached validates on mtime alone, and mtime is quantized to ~1ms, so a
+// recreated competition writing the same filename inside one tick would present
+// an identical UnixNano and hit the dead competition's parsed body.
+//
+// Cost is one small struct per (deleted competition, filename) retained for the
+// life of the process. Competitions are few and deletions rare, and the bodies,
+// which are the only large part, are released.
+//
+// Caller must hold the per-competition write lock.
+func (s *Store) discardCompCacheBodies(compID string) {
+	c, ok := s.compCache.Load(compID)
+	if !ok {
+		return
+	}
+	c.(*compCache).files.Range(func(_, v any) bool {
+		f := v.(*fileCache)
+		f.mu.Lock()
+		f.data = nil
+		f.mtime = 0
+		f.mu.Unlock()
+		// Bump after clearing, same ordering rule as bumpFileVersion: a reader
+		// must never be able to stamp pre-invalidation state with the new token.
+		f.version.Add(1)
+		return true
+	})
 }
 
 func ValidateCompetitionID(id string) error {

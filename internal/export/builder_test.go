@@ -1972,13 +1972,8 @@ func TestBuildResultsWorkbook_MultiPageTreePopulated(t *testing.T) {
 	// title band and pre-sized template columns spill a near-blank second
 	// physical page per bracket page into the printed booklet.
 	for _, page := range []string{"Tree 1", "Tree 2"} {
-		found := false
-		for _, dn := range f.GetDefinedName() {
-			if dn.Name == "_xlnm.Print_Area" && dn.Scope == page {
-				found = true
-			}
-		}
-		assert.Truef(t, found, "%s must define a print area", page)
+		assert.GreaterOrEqualf(t, findPrintAreaLastRow(f, page), 0,
+			"%s must define a parseable print area", page)
 	}
 
 	// The tree pages must carry the junction match numbers the operator calls
@@ -3288,12 +3283,12 @@ func TestBuildResultsWorkbook_MixedTreePageHasPoolRosters(t *testing.T) {
 		"'Tree 1' title formula must not embed the competition name (data!$B$1 already prepends it)")
 }
 
-// findEliminationPrintAreaLastRow reads the workbook's defined names and returns
-// the last-row number of the _xlnm.Print_Area name scoped to SheetEliminationMatches.
+// findPrintAreaLastRow reads the workbook's defined names and returns the
+// last-row number of the _xlnm.Print_Area name scoped to the given sheet.
 // Returns -1 if not found or unparseable.
-func findEliminationPrintAreaLastRow(f *excelize.File) int {
+func findPrintAreaLastRow(f *excelize.File, scope string) int {
 	for _, dn := range f.GetDefinedName() {
-		if dn.Name == "_xlnm.Print_Area" && dn.Scope == helper.SheetEliminationMatches {
+		if dn.Name == "_xlnm.Print_Area" && dn.Scope == scope {
 			return bctest.ParsePrintAreaLastRow(dn.RefersTo)
 		}
 	}
@@ -3329,7 +3324,7 @@ func TestBuildResultsWorkbook_NaginataThirdPlacePrintAreaCoversBlock(t *testing.
 	require.GreaterOrEqual(t, thirdPlaceExcelRow, 1,
 		"'3rd Place' header row must be present in Elimination Matches")
 
-	printAreaLastRow := findEliminationPrintAreaLastRow(f)
+	printAreaLastRow := findPrintAreaLastRow(f, helper.SheetEliminationMatches)
 	require.Greater(t, printAreaLastRow, 0,
 		"_xlnm.Print_Area for Elimination Matches must exist and be parseable")
 	assert.GreaterOrEqual(t, printAreaLastRow, thirdPlaceExcelRow,

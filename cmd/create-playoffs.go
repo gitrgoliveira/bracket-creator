@@ -167,34 +167,21 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	if roughPages, _ := helper.RoundToPowerOf2(float64(len(names)), float64(helper.MaxPlayersPerTree)); o.courts > roughPages && roughPages > 0 {
 		o.courts = roughPages
 	}
-	numPages, err := helper.TreePageLayout(len(names), o.courts, o.singleTree)
+	// Create balanced tree
+	tree := helper.CreateBalancedTree(names)
+
+	// A playoffs bracket has no pools: nil pools skips the roster overlay and
+	// the pool-winner tree adjustment.
+	eliminationMatchRounds, numPages, err := helper.RenderKnockoutPages(f, tree, len(names), o.courts, o.singleTree, nil, nil, nil, nil)
 	if err != nil {
 		return err
 	}
 	fmt.Printf("Spread across %d tree pages\n", numPages)
-
-	// Create balanced tree
-	tree := helper.CreateBalancedTree(names)
-
-	// divide the tree depending on the number of pages
-	subtrees := helper.SubdivideTree(tree, numPages)
-
-	// A playoffs bracket has no pools: nil pools skips the roster overlay and
-	// the pool-winner tree adjustment.
-	if err := helper.RenderTreePages(f, subtrees, o.courts, nil, nil, nil, nil); err != nil {
-		return err
-	}
 	if err := f.DeleteSheet(helper.SheetTree); err != nil {
 		// Ignore sheet not exist error
 		fmt.Println("Note: Tree sheet might not exist:", err)
 	}
-
-	eliminationMatchRounds := helper.BuildEliminationMatchRounds(tree)
-	for i, rounds := range eliminationMatchRounds {
-		fmt.Printf("Elimination matches for round %d: %d\n", len(eliminationMatchRounds)-i, len(rounds))
-	}
-
-	helper.FillInMatches(f, eliminationMatchRounds)
+	logEliminationRounds(eliminationMatchRounds)
 
 	var matchWinners map[string]helper.MatchWinner
 	if err := f.DeleteSheet(helper.SheetPoolDraw); err != nil {

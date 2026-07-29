@@ -63,7 +63,7 @@ func SetTreePageLayout(f *excelize.File, sheetName string, depth, lastRow int) {
 // rendering entirely (a league has no knockout) must still delete it, so
 // ownership of the deletion stays with them.
 func RenderTreePages(f *excelize.File, subtrees []*Node, numCourts int, pools []Pool, poolCoords map[string]cellCoord, playerCoords map[string]playerCellCoord, matchWinners map[string]MatchWinner) error {
-	poolSeeding := len(pools) > 0
+	hasPools := len(pools) > 0
 	templateIdx, err := f.GetSheetIndex(SheetTree)
 	if err != nil {
 		return fmt.Errorf("find tree template sheet: %w", err)
@@ -89,16 +89,44 @@ func RenderTreePages(f *excelize.File, subtrees []*Node, numCourts int, pools []
 		// The title formula prepends data!$B$1 (the user-supplied title prefix),
 		// so the page title itself is just the shiaijo label.
 		SetTreeSheetTitle(f, pageSheet, "Shiaijo "+CourtLabel(SubtreeCourtIndex(len(subtrees), numCourts, i)), TreePageLastCol(depth))
-		PrintLeafNodes(subtree, f, pageSheet, 2*depth, startRow, depth, poolSeeding, matchWinners)
+		PrintLeafNodes(subtree, f, pageSheet, 2*depth, startRow, depth, hasPools, matchWinners)
 
 		lastRow := TreePageLastRow(depth, startRow)
-		if len(pools) > 0 {
+		if hasPools {
 			poolStart, poolEnd := PoolBoundsForSubtree(len(pools), numCourts, len(subtrees), i)
 			lastRow = max(lastRow, AddPoolsToTree(f, pageSheet, pools[poolStart:poolEnd], poolCoords, playerCoords))
 		}
 		SetTreePageLayout(f, pageSheet, depth, lastRow)
 	}
 	return nil
+}
+
+// RenderKnockoutPages computes the court-aware page layout for a knockout
+// tree, renders one bracket page per subtree via RenderTreePages, and numbers
+// the bracket junctions, returning the per-round match nodes (earliest round
+// first, final last) and the page count. Bundling the sequence makes its
+// ordering invariant unbreakable by construction: rendering stamps each
+// internal node's sheet/cell coordinates, which FillInMatches writes the
+// match numbers into (with a FillInMatches-first order every write is
+// silently skipped and the pages carry no numbers), and the pool-seeding
+// tree adjustment lands before the rounds are traversed, so Elimination
+// blocks always describe the same tree the pages show.
+//
+// numEntrants is the leaf count tree was built from; singleTree forces the
+// whole bracket onto one page (the CLI --single-tree flag). Deleting the
+// consumed SheetTree template stays with the caller (see RenderTreePages).
+func RenderKnockoutPages(f *excelize.File, tree *Node, numEntrants, numCourts int, singleTree bool, pools []Pool, poolCoords map[string]cellCoord, playerCoords map[string]playerCellCoord, matchWinners map[string]MatchWinner) ([][]*Node, int, error) {
+	numPages, err := TreePageLayout(numEntrants, numCourts, singleTree)
+	if err != nil {
+		return nil, 0, fmt.Errorf("compute tree page layout: %w", err)
+	}
+	subtrees := SubdivideTree(tree, numPages)
+	if err := RenderTreePages(f, subtrees, numCourts, pools, poolCoords, playerCoords, matchWinners); err != nil {
+		return nil, 0, err
+	}
+	rounds := BuildEliminationMatchRounds(tree)
+	FillInMatches(f, rounds)
+	return rounds, numPages, nil
 }
 
 func CreateTreeBracket(f *excelize.File, sheet string, col int, startRow int, size int) string {

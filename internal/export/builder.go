@@ -148,37 +148,18 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	if len(finals) > 0 && comp.IsPlayoffEnabled() {
 		tree := helper.CreateBalancedTree(finals)
 
-		// Tree sheets FIRST: one visual bracket page per subtree, rendered by the
-		// shared helper.RenderTreePages (also behind the CLI and the
-		// blank-template export). Order matters, same as those callers:
-		// PrintLeafNodes stamps each internal node's sheet/cell coordinates,
-		// which FillInMatches below writes the junction match numbers into
-		// (with the old FillInMatches-first order every write was silently
-		// skipped and the tree pages carried no match numbers), and it applies
-		// the pool-seeding treeAdjustment, so traversing the rounds before it
-		// would render the Elimination blocks from a differently-ordered tree
-		// than the pages show.
-		numPages, perr := helper.TreePageLayout(len(finals), numCourts, false)
-		if perr != nil {
-			return nil, fmt.Errorf("export: compute tree page layout: %w", perr)
-		}
-		subtrees := helper.SubdivideTree(tree, numPages)
-		if err := helper.RenderTreePages(f, subtrees, numCourts, pools, poolCoords, playerCoords, matchWinners); err != nil {
+		// Tree sheets FIRST, then the Elimination Matches skeleton, in the one
+		// mandatory order RenderKnockoutPages enforces (also behind the CLI and
+		// the blank-template export). The skeleton's "Round N - Match N" headers
+		// are what overlayBracketScores below scans. Bronze gates on the stored
+		// bracket's ThirdPlaceMatch: the bracket is authoritative here, unlike
+		// the CLI's flag-derived NeedsBronzeBlock.
+		eliminationMatchRounds, _, err := helper.RenderKnockoutPages(f, tree, len(finals), numCourts, false, pools, poolCoords, playerCoords, matchWinners)
+		if err != nil {
 			return nil, fmt.Errorf("export: %w", err)
 		}
-
-		eliminationMatchRounds := helper.BuildEliminationMatchRounds(tree)
-
-		// Populate the Elimination Matches sheet skeleton so overlayBracketScores
-		// has "Round N - Match N" headers to scan.
-		helper.FillInMatches(f, eliminationMatchRounds)
-		nextRow, elimMatchWinners := helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, comp.TeamSize, numCourts, comp.Mirror, comp.Engi)
-
-		// Naginata competitions have a bronze (3rd-place) match: render it as a
-		// separate block immediately after the last elimination round.
-		if bracket != nil && bracket.ThirdPlaceMatch != nil {
-			helper.PrintBronzeBlockWithPrintArea(f, nextRow, comp.TeamSize, comp.Mirror, comp.Engi, numCourts, eliminationMatchRounds, elimMatchWinners)
-		}
+		helper.PrintEliminationWithBronze(f, matchWinners, eliminationMatchRounds, comp.TeamSize, numCourts, comp.Mirror, comp.Engi,
+			bracket != nil && bracket.ThirdPlaceMatch != nil)
 
 		// Overlay literal scores from the live bracket state.
 		if bracket != nil {

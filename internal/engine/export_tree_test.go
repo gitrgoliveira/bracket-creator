@@ -254,7 +254,7 @@ func TestExportCompetitionXlsx_EliminationMatchesPopulated(t *testing.T) {
 				for c, cell := range row {
 					var round, match int
 					if _, serr := fmt.Sscanf(cell, "Round %d - Match %d", &round, &match); serr == nil {
-						court := c / 8
+						court := c / helper.CourtsColumnsPerCourt
 						if elimNumsByCourt[court] == nil {
 							elimNumsByCourt[court] = map[int]bool{}
 						}

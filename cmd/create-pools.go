@@ -225,17 +225,8 @@ func (o *poolOptions) createPools(entries []string) error {
 	if o.courts > numPools {
 		o.courts = numPools
 	}
-	numPages, err := helper.TreePageLayout(len(finals), o.courts, o.singleTree)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("Spread across %d tree pages\n", numPages)
-
 	// Create balanced tree
 	tree := helper.CreateBalancedTree(finals)
-
-	// divide the tree depending on the number of pages
-	subtrees := helper.SubdivideTree(tree, numPages)
 
 	// Create pool matches and get winners BEFORE creating tree sheets.
 	// Mirror the engine's authoritative PoolFormat × RoundRobin mapping
@@ -250,19 +241,15 @@ func (o *poolOptions) createPools(entries []string) error {
 	}
 	matchWinners := helper.PrintPoolMatches(f, pools, o.teamMatches, o.poolWinners, o.courts, true, poolCoords, playerCoords, o.engi)
 
-	if err := helper.RenderTreePages(f, subtrees, o.courts, pools, poolCoords, playerCoords, matchWinners); err != nil {
+	eliminationMatchRounds, numPages, err := helper.RenderKnockoutPages(f, tree, len(finals), o.courts, o.singleTree, pools, poolCoords, playerCoords, matchWinners)
+	if err != nil {
 		return err
 	}
+	fmt.Printf("Spread across %d tree pages\n", numPages)
 	if err := f.DeleteSheet(helper.SheetTree); err != nil {
 		fmt.Println("Note: Tree sheet might not exist:", err)
 	}
-
-	eliminationMatchRounds := helper.BuildEliminationMatchRounds(tree)
-	for i, rounds := range eliminationMatchRounds {
-		fmt.Printf("Elimination matches for round %d: %d\n", len(eliminationMatchRounds)-i, len(rounds))
-	}
-
-	helper.FillInMatches(f, eliminationMatchRounds)
+	logEliminationRounds(eliminationMatchRounds)
 
 	helper.CreateNamesWithPoolToPrint(f, pools, o.withZekkenName, o.courts, playerCoords)
 

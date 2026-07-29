@@ -81,41 +81,19 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	// bracket implying a knockout that will never be played.
 	finals := helper.GenerateFinals(pools, comp.PoolWinners)
 	if len(finals) > 0 && comp.IsPlayoffEnabled() {
-		numPages, perr := helper.TreePageLayout(len(finals), numCourts, false)
-		if perr != nil {
-			return nil, fmt.Errorf("export: compute tree page layout: %w", perr)
-		}
-
+		// 4b. Tree pages plus the Elimination Matches sheet, in the one mandatory
+		//     order RenderKnockoutPages enforces. This path used to skip the
+		//     Elimination blocks and junction numbering entirely, shipping a
+		//     workbook (and a "full-bracket" PDF) with an entirely blank
+		//     Elimination Matches sheet and unnumbered tree pages. The bronze
+		//     block wires its entrant slots to the semi-final losers via the
+		//     real rounds and winners, exactly as the CLI and results workbook.
 		tree := helper.CreateBalancedTree(finals)
-		subtrees := helper.SubdivideTree(tree, numPages)
-
-		if err := helper.RenderTreePages(f, subtrees, numCourts, pools, poolCoords, playerCoords, matchWinners); err != nil {
+		eliminationMatchRounds, _, err := helper.RenderKnockoutPages(f, tree, len(finals), numCourts, false, pools, poolCoords, playerCoords, matchWinners)
+		if err != nil {
 			return nil, fmt.Errorf("export: %w", err)
 		}
-
-		// 4b. Elimination Matches sheet. The tree pages show the bracket shape,
-		//     but only these blocks give the operator somewhere to write the
-		//     scores, and only FillInMatches numbers the bracket junctions the
-		//     operator calls matches by. This path used to skip both, shipping a
-		//     workbook (and a "full-bracket" PDF) with an entirely blank
-		//     Elimination Matches sheet and unnumbered tree pages.
-		//
-		//     Order matters: the tree pages above stamp each node's sheet/cell
-		//     coordinates, which FillInMatches writes the match numbers into.
-		eliminationMatchRounds := helper.BuildEliminationMatchRounds(tree)
-		helper.FillInMatches(f, eliminationMatchRounds)
-		nextRow, elimMatchWinners := helper.PrintTeamEliminationMatches(
-			f, matchWinners, eliminationMatchRounds, comp.TeamSize, numCourts, comp.Mirror, comp.Engi,
-		)
-
-		// Naginata competitions have a bronze (3rd-place) match: render it as a
-		// separate block immediately after the last elimination round, exactly as
-		// the CLI (cmd/shared.go) and the results workbook do. Feeding it the real
-		// rounds and winners wires the two entrant slots to the semi-final losers
-		// instead of leaving them blank.
-		if hasBronze {
-			helper.PrintBronzeBlockWithPrintArea(f, nextRow, comp.TeamSize, comp.Mirror, comp.Engi, numCourts, eliminationMatchRounds, elimMatchWinners)
-		}
+		helper.PrintEliminationWithBronze(f, matchWinners, eliminationMatchRounds, comp.TeamSize, numCourts, comp.Mirror, comp.Engi, hasBronze)
 	} else if hasBronze {
 		// A pure playoffs competition has no pools, so GenerateFinals returns
 		// nothing and the block above is skipped: this path renders no bracket at

@@ -925,15 +925,7 @@ func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinner
 	}
 
 	lastCourtStartCol := 1 + (numCourts-1)*CourtsColumnsPerCourt
-	maxColNum := lastCourtStartCol + 7
-	maxColName := mustColumnName(maxColNum)
-
-	printArea := fmt.Sprintf("'%s'!$A$1:$%s$%d", sheetName, maxColName, poolRow-1)
-	handleExcelError("SetDefinedName", f.SetDefinedName(&excelize.DefinedName{
-		Name:     "_xlnm.Print_Area",
-		RefersTo: printArea,
-		Scope:    sheetName,
-	}))
+	SetPrintArea(f, sheetName, lastCourtStartCol+7, poolRow-1)
 
 	// Vertical page breaks before each court except the first
 	for c := 1; c < numCourts; c++ {
@@ -1343,6 +1335,21 @@ func PrintBronzeBlockWithPrintArea(f *excelize.File, startRow, numTeamMatches in
 	SetEliminationPrintArea(f, SheetEliminationMatches, numCourts, bronzeEndRow-1)
 }
 
+// PrintEliminationWithBronze renders the Elimination Matches blocks and, when
+// includeBronze, the bronze (3rd-place) block immediately after the last
+// round, wiring its entrant slots to the semifinal losers. The bronze gate
+// stays with the caller because it is genuinely caller-specific (the CLI
+// derives it from the naginata flag and round count via NeedsBronzeBlock; the
+// exporters from the stored bracket's ThirdPlaceMatch). Returns the
+// per-junction winners map for callers that overlay literal scores afterwards.
+func PrintEliminationWithBronze(f *excelize.File, matchWinners map[string]MatchWinner, rounds [][]*Node, numTeamMatches, numCourts int, mirror, engi, includeBronze bool) map[string]MatchWinner {
+	nextRow, elimMatchWinners := PrintTeamEliminationMatches(f, matchWinners, rounds, numTeamMatches, numCourts, mirror, engi)
+	if includeBronze {
+		PrintBronzeBlockWithPrintArea(f, nextRow, numTeamMatches, mirror, engi, numCourts, rounds, elimMatchWinners)
+	}
+	return elimMatchWinners
+}
+
 func printSingleEliminationMatch(f *excelize.File, sheetName string, eliminationMatch *Node, poolMatchWinners map[string]MatchWinner, matchWinners map[string]MatchWinner, colNames matchColumnNames, matchRow int, round int, numTeamMatches int, styles matchStyles, mirror bool, engi bool) {
 	startColName := colNames.startColName
 	middleColName := colNames.middleColName
@@ -1553,11 +1560,7 @@ func printNameEntries(f *excelize.File, sheetName string, entries []nameEntry, s
 	}
 
 	if len(entries) > 0 {
-		handleExcelError("SetDefinedName", f.SetDefinedName(&excelize.DefinedName{
-			Name:     "_xlnm.Print_Area",
-			RefersTo: fmt.Sprintf("'%s'!$A$1:$B$%d", sheetName, len(entries)),
-			Scope:    sheetName,
-		}))
+		SetPrintArea(f, sheetName, 2, len(entries))
 	}
 }
 

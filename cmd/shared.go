@@ -15,9 +15,14 @@ import (
 // its print area. Shared by create-pools and create-playoffs, which both run the
 // bronze on the same court set with mirror=true.
 func printEliminationWithBronze(f *excelize.File, matchWinners map[string]helper.MatchWinner, rounds [][]*helper.Node, teamMatches, courts int, engi, naginata bool) {
-	nextRow, elimMatchWinners := helper.PrintTeamEliminationMatches(f, matchWinners, rounds, teamMatches, courts, true, engi)
-	if helper.NeedsBronzeBlock(naginata, len(rounds)) {
-		helper.PrintBronzeBlockWithPrintArea(f, nextRow, teamMatches, true, engi, courts, rounds, elimMatchWinners)
+	helper.PrintEliminationWithBronze(f, matchWinners, rounds, teamMatches, courts, true, engi, helper.NeedsBronzeBlock(naginata, len(rounds)))
+}
+
+// logEliminationRounds prints the per-round elimination match counts. Round
+// numbers count down toward the final (the last entry in rounds).
+func logEliminationRounds(rounds [][]*helper.Node) {
+	for i, r := range rounds {
+		fmt.Printf("Elimination matches for round %d: %d\n", len(rounds)-i, len(r))
 	}
 }
 

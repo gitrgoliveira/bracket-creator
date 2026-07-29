@@ -245,11 +245,7 @@ func (o *poolOptions) createPools(entries []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("Spread across %d tree pages\n", numPages)
-	if err := f.DeleteSheet(helper.SheetTree); err != nil {
-		fmt.Println("Note: Tree sheet might not exist:", err)
-	}
-	logEliminationRounds(eliminationMatchRounds)
+	finishKnockoutPages(f, numPages, eliminationMatchRounds)
 
 	helper.CreateNamesWithPoolToPrint(f, pools, o.withZekkenName, o.courts, playerCoords)
 

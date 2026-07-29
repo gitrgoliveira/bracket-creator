@@ -18,9 +18,16 @@ func printEliminationWithBronze(f *excelize.File, matchWinners map[string]helper
 	helper.PrintEliminationWithBronze(f, matchWinners, rounds, teamMatches, courts, true, engi, helper.NeedsBronzeBlock(naginata, len(rounds)))
 }
 
-// logEliminationRounds prints the per-round elimination match counts. Round
-// numbers count down toward the final (the last entry in rounds).
-func logEliminationRounds(rounds [][]*helper.Node) {
+// finishKnockoutPages runs the CLI epilogue shared by create-pools and
+// create-playoffs after RenderKnockoutPages: log the page spread, delete the
+// consumed tree template (deletion is caller-owned, see RenderTreePages), and
+// log the per-round elimination match counts (round numbers count down toward
+// the final, the last entry in rounds).
+func finishKnockoutPages(f *excelize.File, numPages int, rounds [][]*helper.Node) {
+	fmt.Printf("Spread across %d tree pages\n", numPages)
+	if err := f.DeleteSheet(helper.SheetTree); err != nil {
+		fmt.Println("Note: Tree sheet might not exist:", err)
+	}
 	for i, r := range rounds {
 		fmt.Printf("Elimination matches for round %d: %d\n", len(rounds)-i, len(r))
 	}

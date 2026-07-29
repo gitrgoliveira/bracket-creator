@@ -22,6 +22,15 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		return nil, err
 	}
 
+	// Derived once for every court-count consumer, mirroring builder.go:
+	// clamped to 1 so a competition saved without courts still lays out as a
+	// single-court draw. (The court-band helpers also clamp internally, so
+	// this is layout intent, not panic avoidance.)
+	numCourts := len(comp.Courts)
+	if numCourts < 1 {
+		numCourts = 1
+	}
+
 	f, err := excel.NewFileFromScratch()
 	if err != nil {
 		return nil, err
@@ -39,7 +48,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	}
 
 	// 3. Pool Matches sheet (red/white, scoring formulas, reactive name references)
-	matchWinners := helper.PrintPoolMatches(f, pools, comp.TeamSize, comp.PoolWinners, len(comp.Courts), comp.Mirror, poolCoords, playerCoords, comp.Engi)
+	matchWinners := helper.PrintPoolMatches(f, pools, comp.TeamSize, comp.PoolWinners, numCourts, comp.Mirror, poolCoords, playerCoords, comp.Engi)
 
 	// 4. Tree sheets: one visual bracket page per subtree, rendered exactly like
 	//    the CLI (cmd/create-pools.go) and the results workbook
@@ -52,14 +61,6 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	//    silently dropping those entrants' half of the draw. It was not a
 	//    large-draw edge case: TreePageLayout raises the page count to
 	//    NextPow2(numCourts), so every competition on 2 or more courts hit it.
-	//
-	//    numCourts is clamped to 1 so a competition saved without courts still
-	//    lays out as a single-court draw. (SubtreeCourtIndex also clamps
-	//    internally, so this is layout intent, not panic avoidance.)
-	numCourts := len(comp.Courts)
-	if numCourts < 1 {
-		numCourts = 1
-	}
 	// The stored bracket is authoritative about whether this competition has a
 	// bronze (3rd-place) bout to hand-score. Load it ONLY for naginata: it is
 	// used for nothing else on this path, and an unconditional load would let a
@@ -112,7 +113,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	}
 
 	// 5. Names to Print sheet
-	helper.CreateNamesWithPoolToPrint(f, pools, comp.EffectiveWithZekkenName(), len(comp.Courts), playerCoords)
+	helper.CreateNamesWithPoolToPrint(f, pools, comp.EffectiveWithZekkenName(), numCourts, playerCoords)
 
 	// 6. Tags sheet, pass publicURL so numbered tags get an embedded QR code.
 	// LoadTournament errors are silently ignored: a missing publicURL simply

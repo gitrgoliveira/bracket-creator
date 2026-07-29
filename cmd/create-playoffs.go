@@ -176,12 +176,7 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("Spread across %d tree pages\n", numPages)
-	if err := f.DeleteSheet(helper.SheetTree); err != nil {
-		// Ignore sheet not exist error
-		fmt.Println("Note: Tree sheet might not exist:", err)
-	}
-	logEliminationRounds(eliminationMatchRounds)
+	finishKnockoutPages(f, numPages, eliminationMatchRounds)
 
 	var matchWinners map[string]helper.MatchWinner
 	if err := f.DeleteSheet(helper.SheetPoolDraw); err != nil {

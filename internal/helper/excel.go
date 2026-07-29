@@ -924,8 +924,7 @@ func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinner
 		poolRow += totalPoolHeight
 	}
 
-	lastCourtStartCol := 1 + (numCourts-1)*CourtsColumnsPerCourt
-	SetPrintArea(f, sheetName, lastCourtStartCol+7, poolRow-1)
+	SetEliminationPrintArea(f, sheetName, numCourts, poolRow-1)
 
 	// Vertical page breaks before each court except the first
 	for c := 1; c < numCourts; c++ {
@@ -1340,14 +1339,12 @@ func PrintBronzeBlockWithPrintArea(f *excelize.File, startRow, numTeamMatches in
 // round, wiring its entrant slots to the semifinal losers. The bronze gate
 // stays with the caller because it is genuinely caller-specific (the CLI
 // derives it from the naginata flag and round count via NeedsBronzeBlock; the
-// exporters from the stored bracket's ThirdPlaceMatch). Returns the
-// per-junction winners map for callers that overlay literal scores afterwards.
-func PrintEliminationWithBronze(f *excelize.File, matchWinners map[string]MatchWinner, rounds [][]*Node, numTeamMatches, numCourts int, mirror, engi, includeBronze bool) map[string]MatchWinner {
+// exporters from the stored bracket's ThirdPlaceMatch).
+func PrintEliminationWithBronze(f *excelize.File, matchWinners map[string]MatchWinner, rounds [][]*Node, numTeamMatches, numCourts int, mirror, engi, includeBronze bool) {
 	nextRow, elimMatchWinners := PrintTeamEliminationMatches(f, matchWinners, rounds, numTeamMatches, numCourts, mirror, engi)
 	if includeBronze {
 		PrintBronzeBlockWithPrintArea(f, nextRow, numTeamMatches, mirror, engi, numCourts, rounds, elimMatchWinners)
 	}
-	return elimMatchWinners
 }
 
 func printSingleEliminationMatch(f *excelize.File, sheetName string, eliminationMatch *Node, poolMatchWinners map[string]MatchWinner, matchWinners map[string]MatchWinner, colNames matchColumnNames, matchRow int, round int, numTeamMatches int, styles matchStyles, mirror bool, engi bool) {

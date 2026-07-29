@@ -122,29 +122,15 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 		return nil, fmt.Errorf("export: overlay standings: %w", err)
 	}
 
-	// 4. Elimination Matches + Tree sheets.
-	//    Only for formats that actually have a knockout phase (Playoffs, Mixed).
-	// A League is a single round-robin with no bracket, yet GenerateFinals still
-	// returns placeholder "Pool A-1st" finalist labels for it; without the format
-	// gate that would emit a phantom Elimination/Tree bracket with no real scores.
-	// Elimination skeleton leaves: pool winners for pools-based formats, or seeded
-	// participants for a pure playoffs bracket (no pools). The latter mirrors
-	// engine.generatePlayoffs so the rendered tree matches the stored bracket that
-	// overlayBracketScores fills in.
-	finals := helper.GenerateFinals(pools, comp.EffectivePoolWinners())
-	if len(finals) == 0 && len(pools) == 0 && comp.Format == state.CompFormatPlayoffs {
-		// Prefer the frozen bracket's own leaf order (see engine.PlayoffLeavesFromBracket).
-		// Recomputing from participants+seeds at export time can desync the skeleton
-		// numbering from the stored bracket if seeds.csv drifted since generation
-		// (e.g. a seeded participant was replaced), which would silently write scores
-		// into the wrong match blocks. Fall back to participant seeding only when no
-		// bracket exists yet (pre-start; there is nothing to overlay anyway).
-		if leaves := engine.PlayoffLeavesFromBracket(bracket); len(leaves) > 0 {
-			finals = leaves
-		} else {
-			finals = engine.PlayoffFinalsFromParticipants(store, comp)
-		}
-	}
+	// 4. Elimination Matches + Tree sheets. Only for formats with a knockout
+	//    phase: the IsPlayoffEnabled gate below drops the phantom bracket a
+	//    league's placeholder finals would otherwise imply. EliminationLeaves owns
+	//    the leaf order -- pool winners, or the frozen bracket's own leaves for a
+	//    pure playoffs competition -- and is shared with the blank-template export
+	//    so the two exports of one competition render the identical bracket, with
+	//    numbering that matches the stored bracket overlayBracketScores fills in
+	//    (mp-ndfu).
+	finals := engine.EliminationLeaves(store, comp, pools, bracket)
 	if len(finals) > 0 && comp.IsPlayoffEnabled() {
 		tree := helper.CreateBalancedTree(finals)
 

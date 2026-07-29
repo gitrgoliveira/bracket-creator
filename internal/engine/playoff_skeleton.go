@@ -16,6 +16,35 @@ import (
 // bracket generation, because internal/export already imports engine (the reverse
 // import would be a cycle).
 
+// EliminationLeaves returns the elimination-tree leaf order for a competition's
+// knockout phase. It is the single owner of the leaf derivation so the blank-
+// template export (Engine.ExportCompetitionXlsx) and the results export
+// (internal/export) of one competition always render the identical bracket
+// (mp-ndfu) -- the invariant that prose-synchronized copies in the two callers
+// used to risk drifting.
+//
+// Pooled formats (Mixed), and the League case the IsPlayoffEnabled gate later
+// drops, come straight from helper.GenerateFinals on the pool winners.
+// EffectivePoolWinners (not the raw field) is used so an unset (<=0) PoolWinners
+// still yields the 2-winner knockout the tournament actually runs (mp-0yd8). A
+// pure playoffs competition has no pools, so GenerateFinals is empty; its leaves
+// come from the frozen bracket's own first-round order
+// (PlayoffLeavesFromBracket, which cannot desync from the stored bracket the
+// score overlay fills in), falling back to participant seeding only pre-start,
+// when no bracket exists yet. bracket may be nil for any non-pure-playoffs
+// caller: it is consulted only on the pure-playoffs branch, where both callers
+// load it.
+func EliminationLeaves(store *state.Store, comp *state.Competition, pools []helper.Pool, bracket *state.Bracket) []string {
+	finals := helper.GenerateFinals(pools, comp.EffectivePoolWinners())
+	if len(finals) == 0 && len(pools) == 0 && comp.Format == state.CompFormatPlayoffs {
+		if leaves := PlayoffLeavesFromBracket(bracket); len(leaves) > 0 {
+			return leaves
+		}
+		return PlayoffFinalsFromParticipants(store, comp)
+	}
+	return finals
+}
+
 // PlayoffLeavesFromBracket reconstructs the pow2 leaf ordering the engine used to
 // build a pure-playoffs bracket, read straight from the frozen bracket's first
 // round: each round-1 match contributes SideA then SideB, in order, with "" for a

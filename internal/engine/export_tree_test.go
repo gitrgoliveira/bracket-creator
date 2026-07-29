@@ -84,6 +84,22 @@ func leafLabelsOnSheet(t *testing.T, f *excelize.File, sheet string) []string {
 	return labels
 }
 
+// countEliminationMatchBlocks counts the "Round N - Match N" block headers on
+// the Elimination Matches sheet -- one per real knockout match. Takes the
+// already-fetched rows so callers that reuse them (e.g. for per-court bucketing)
+// need not read the sheet twice.
+func countEliminationMatchBlocks(rows [][]string) int {
+	headers := 0
+	for _, row := range rows {
+		for _, cell := range row {
+			if strings.HasPrefix(cell, "Round ") && strings.Contains(cell, " - Match ") {
+				headers++
+			}
+		}
+	}
+	return headers
+}
+
 // openExportedWorkbook exports compID as the blank template and opens it.
 func openExportedWorkbook(t *testing.T, eng *Engine, compID string) *excelize.File {
 	t.Helper()
@@ -237,15 +253,7 @@ func TestExportCompetitionXlsx_EliminationMatchesPopulated(t *testing.T) {
 			// one entrant.
 			elim, err := f.GetRows(helper.SheetEliminationMatches)
 			require.NoError(t, err)
-			headers := 0
-			for _, row := range elim {
-				for _, cell := range row {
-					if strings.HasPrefix(cell, "Round ") && strings.Contains(cell, " - Match ") {
-						headers++
-					}
-				}
-			}
-			assert.Equal(t, sc.finalists-1, headers,
+			assert.Equal(t, sc.finalists-1, countEliminationMatchBlocks(elim),
 				"a knockout of %d entrants must render %d match blocks", sc.finalists, sc.finalists-1)
 
 			// Elimination block numbers per court band (8 columns per court).
@@ -372,7 +380,9 @@ func TestExportCompetitionXlsx_PurePlayoffsRendersBracket(t *testing.T) {
 	f := openExportedWorkbook(t, eng, compID)
 
 	// (1) The bracket page(s) must be rendered, not skipped, and carry content --
-	// not left as a blank sheet.
+	// not left as a blank sheet. (leafLabelsOnSheet is not usable here: its regex
+	// matches the pool CONCATENATE("Pool A-1st ", ...) placeholder form, but a
+	// pure-playoffs leaf renders a participant name via a different formula.)
 	pages := treeSheets(f)
 	require.NotEmpty(t, pages, "a pure playoffs competition must render its bracket page(s)")
 	nonEmpty := 0
@@ -392,15 +402,8 @@ func TestExportCompetitionXlsx_PurePlayoffsRendersBracket(t *testing.T) {
 	// node is one match, each eliminating exactly one entrant).
 	elim, err := f.GetRows(helper.SheetEliminationMatches)
 	require.NoError(t, err)
-	headers := 0
-	for _, row := range elim {
-		for _, cell := range row {
-			if strings.HasPrefix(cell, "Round ") && strings.Contains(cell, " - Match ") {
-				headers++
-			}
-		}
-	}
-	assert.Equal(t, 7, headers, "an 8-entrant playoffs knockout must render 7 elimination match blocks")
+	assert.Equal(t, 7, countEliminationMatchBlocks(elim),
+		"an 8-entrant playoffs knockout must render 7 elimination match blocks")
 }
 
 // TestExportTournamentWorkbooks_MultiPageTree covers the PDF pipeline's input:

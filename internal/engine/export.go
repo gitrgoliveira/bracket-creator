@@ -62,11 +62,6 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	//    silently dropping those entrants' half of the draw. It was not a
 	//    large-draw edge case: TreePageLayout raises the page count to
 	//    NextPow2(numCourts), so every competition on 2 or more courts hit it.
-	// The stored bracket is authoritative about whether this competition has a
-	// bronze (3rd-place) bout to hand-score. Load it ONLY for naginata: it is
-	// used for nothing else on this path, and an unconditional load would let a
-	// corrupted bracket.json abort the export of formats (league, swiss, ...)
-	// that have zero functional dependency on that file.
 	// Load the stored bracket ONLY for the paths that actually consume it:
 	// naginata (its bronze gate) and a pure playoffs competition (its elimination
 	// leaves — mp-ndfu). Still skipped for league/swiss/mixed, whose export has
@@ -84,29 +79,12 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		hasBronze = bracket != nil && bracket.ThirdPlaceMatch != nil
 	}
 
-	// GenerateFinals returns placeholder "Pool A-1st" labels for ANY pooled
-	// format, including ones with no knockout phase, so gate on the format the
-	// way the results workbook does (builder.go, TestBuildResultsWorkbook_
-	// LeagueNoPhantomBracket); otherwise a league template grows a phantom
-	// bracket implying a knockout that will never be played.
-	// EffectivePoolWinners, not the raw field: an unset (<=0) PoolWinners runs
-	// a 2-winner knockout everywhere else (draw validation, bracket build,
-	// seeding, schedule), and the results workbook already exports it that
-	// way, so the raw 0 here rendered a blank-template printout with no
-	// knockout for the tournament actually being run (mp-0yd8).
-	finals := helper.GenerateFinals(pools, comp.EffectivePoolWinners())
-	// A pure playoffs competition has no pools, so GenerateFinals returns nothing.
-	// Derive the elimination leaves the same way the results workbook does
-	// (PlayoffLeavesFromBracket, then a participant-seeding fallback) so this
-	// blank template renders the bracket instead of an empty Elimination sheet
-	// (mp-ndfu), and its leaf order matches the results export of the same draw.
-	if len(finals) == 0 && len(pools) == 0 && comp.Format == state.CompFormatPlayoffs {
-		if leaves := PlayoffLeavesFromBracket(bracket); len(leaves) > 0 {
-			finals = leaves
-		} else {
-			finals = PlayoffFinalsFromParticipants(e.store, comp)
-		}
-	}
+	// Elimination leaves for the knockout phase, shared with the results workbook
+	// (EliminationLeaves) so both exports of one competition render the identical
+	// bracket: pool winners for pooled formats, or the stored bracket's leaves for
+	// a pure playoffs competition (mp-ndfu, mp-0yd8). The IsPlayoffEnabled gate
+	// below then drops the phantom bracket a league's placeholder finals imply.
+	finals := EliminationLeaves(e.store, comp, pools, bracket)
 	if len(finals) > 0 && comp.IsPlayoffEnabled() {
 		// 4b. Tree pages plus the Elimination Matches sheet, in the one mandatory
 		//     order RenderKnockoutPages enforces. This path used to skip the

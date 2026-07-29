@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sync"
+	"sync/atomic"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state/wal"
 )
@@ -64,6 +65,30 @@ type fileCache struct {
 	mu    sync.RWMutex
 	data  any
 	mtime int64
+
+	// version is a monotonic in-process write counter for this file, bumped by
+	// bumpFileVersion after every write. It exists because mtime alone is not a
+	// sound cache-validity token: filesystem mtimes come from the kernel coarse
+	// clock (measured at 1ms granularity here), so two writes landing in the
+	// same tick are indistinguishable and a cache keyed only on mtime serves
+	// pre-write data afterwards (mp-n6ke). Read atomically, so callers do not
+	// need to hold mu.
+	version atomic.Uint64
+}
+
+// invalidate drops the cached body and then advances the version.
+//
+// The order is the whole point, and it is the same rule bumpFileVersion
+// follows: clear first, bump second. Bumping first would let a reader sample
+// the new token, then read the still-cached stale body and stamp it as current.
+// Both invalidation sites (whole-competition delete, WAL abort) need exactly
+// this sequence, so it lives here rather than being open-coded at each.
+func (f *fileCache) invalidate() {
+	f.mu.Lock()
+	f.data = nil
+	f.mtime = 0
+	f.mu.Unlock()
+	f.version.Add(1)
 }
 
 func NewStore(folder string) (*Store, error) {
@@ -271,6 +296,73 @@ func (s *Store) FileMtime(compID, filename string) int64 {
 		return 0
 	}
 	return info.ModTime().UnixNano()
+}
+
+// bumpFileVersion records that (compID, filename) has been written.
+//
+// It MUST be called AFTER the bytes reach disk (or the WAL) and after any
+// in-memory cache refresh for the same file. Ordering is the whole correctness
+// argument: bumping before the write would let a concurrent reader sample the
+// new version, read the OLD bytes, and cache them under a token that then looks
+// current, which is exactly the stale-read this counter exists to prevent.
+//
+// Bumping is always the safe direction. A spurious bump only forces a
+// recompute; a MISSED bump serves stale data. Callers should therefore bump on
+// anything that can change the file, including deletes and transaction aborts.
+func (s *Store) bumpFileVersion(compID, filename string) {
+	s.getFileCache(compID, filename).version.Add(1)
+}
+
+// FileVersion returns the monotonic in-process write counter for a file inside
+// a competition directory, for use as a cache-validity token.
+//
+// Pair it with FileMtime rather than replacing it: the version catches
+// same-millisecond in-process writes that mtime cannot distinguish, while mtime
+// still catches out-of-process edits this counter never observes. A cache entry
+// is valid only when BOTH match.
+//
+// The counter is monotonic for the LIFETIME OF THE PROCESS, including across a
+// competition being deleted and recreated under the same ID. Downstream caches
+// (engine.standingsCache) are keyed on compID and are not told about deletions,
+// so a counter that restarted at 0 would let a recreated competition match a
+// stale entry left by its predecessor. See discardCompCacheBodies.
+func (s *Store) FileVersion(compID, filename string) uint64 {
+	return s.getFileCache(compID, filename).version.Load()
+}
+
+// discardCompCacheBodies drops every cached file body for a competition while
+// KEEPING the per-file version counters alive, then bumps each one.
+//
+// This is what DeleteCompetition calls instead of compCache.Delete(compID).
+// Dropping the whole map looks tidier but resets every counter to 0, and
+// competition IDs are deterministic slugs of the name, so deleting a
+// competition and recreating it under the same name reuses the ID and hands the
+// new competition the old one's starting tokens. Any downstream cache still
+// holding an entry from the deleted competition (nothing invalidates
+// engine.standingsCache on delete, and internal/state sits below
+// internal/engine so it structurally cannot reach it) would then match on
+// (mtime 0, version 0) and serve the dead competition's data.
+//
+// The bodies MUST still be cleared here. Keeping the fileCache struct but
+// leaving cache.data populated would trade one stale-read for another:
+// loadCached validates on mtime alone, and mtime is quantized to ~1ms, so a
+// recreated competition writing the same filename inside one tick would present
+// an identical UnixNano and hit the dead competition's parsed body.
+//
+// Cost is one small struct per (deleted competition, filename) retained for the
+// life of the process. Competitions are few and deletions rare, and the bodies,
+// which are the only large part, are released.
+//
+// Caller must hold the per-competition write lock.
+func (s *Store) discardCompCacheBodies(compID string) {
+	c, ok := s.compCache.Load(compID)
+	if !ok {
+		return
+	}
+	c.(*compCache).files.Range(func(_, v any) bool {
+		v.(*fileCache).invalidate()
+		return true
+	})
 }
 
 func ValidateCompetitionID(id string) error {

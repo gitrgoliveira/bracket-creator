@@ -51,15 +51,40 @@ func (s *Store) loadOverridesLocked(compID string) (*Overrides, error) {
 
 // saveOverridesLocked writes overrides without acquiring the mutex.
 // Caller must hold s.mu.Lock.
+// Deliberately does NOT create the competition directory. It used to
+// os.MkdirAll it before writing, which meant an override save landing after
+// DeleteCompetition rebuilt competitions/<id>/ around a lone overrides.json.
+// That orphan outlives the delete: ListCompetitions returns every directory
+// under competitions/, and because IDs are deterministic name slugs, a
+// competition recreated under the same name adopts the dead one's rank and
+// winner overrides.
+//
+// Locking cannot fix this, which is why the fix is here instead. The save does
+// not have to interleave with the delete to resurrect the directory, it only
+// has to run after it, so serialising the two would still leave the orphan.
+//
+// atomicWriteFile opens its temp file with O_CREATE but never creates the
+// parent, so dropping the MkdirAll makes a write to a deleted competition fail
+// with ENOENT, which is the correct outcome.
+//
+// saveCompetitionChangedLocked is the ONE writer that legitimately creates the
+// directory, because creating the competition is its job. Every other saver
+// must rely on it already existing. saveCompetitorStatusLocked and
+// saveTeamLineupsLocked had the same MkdirAll and were fixed with this one; if
+// you add a per-competition writer, do not reintroduce it.
 func (s *Store) saveOverridesLocked(compID string, o *Overrides) error {
-	if err := os.MkdirAll(s.compPath(compID), 0700); err != nil {
-		return err
-	}
 	data, err := json.MarshalIndent(o, "", "  ")
 	if err != nil {
 		return err
 	}
-	return s.atomicWrite(s.compPath(compID, "overrides.json"), data, 0600)
+	if err := s.atomicWrite(s.compPath(compID, "overrides.json"), data, 0600); err != nil {
+		return err
+	}
+	// overrides.json has no fileCache entry of its own (loadOverridesLocked
+	// reads it raw), but standings depend on it, so the version counter still
+	// has to move for caches keyed on it. This is the only overrides writer.
+	s.bumpFileVersion(compID, "overrides.json")
+	return nil
 }
 
 // modifyOverridesChanged loads, mutates, and saves overrides under a single

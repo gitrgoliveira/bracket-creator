@@ -313,6 +313,9 @@ func (s *Store) DeleteCompetitionFile(id, filename string) error {
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return err
 	}
+	// Discarding a draw artifact (pool-matches.csv among them) changes derived
+	// state just as a write does, so move the version counter here too.
+	s.bumpFileVersion(id, filename)
 	return nil
 }
 
@@ -325,10 +328,35 @@ func (s *Store) DeleteCompetition(id string) error {
 	mu.Lock()
 	defer mu.Unlock()
 
+	// overrides.json is the one file in this directory whose writers serialize
+	// on the store-wide s.mu rather than the per-competition lock, so the lock
+	// above does not exclude them. Take s.mu as well, or a SaveRankOverride
+	// interleaving with the RemoveAll below leaves competitions/<id>/ holding a
+	// lone overrides.json: a competition that ListCompetitions still reports and
+	// whose stale overrides a same-named recreation would adopt.
+	//
+	// Lock order is compLock then s.mu, never the reverse. That is safe because
+	// s.mu is a sink: no function that holds it ever acquires a per-competition
+	// lock (verified across ListCompetitions, the tournament writers and the
+	// overrides paths), so this edge cannot close a cycle.
+	//
+	// Moving overrides onto the per-competition lock instead would be the
+	// tidier-looking fix and is WRONG: computeStandingsFrom runs inside
+	// WithTransaction (which already holds that lock) and reads overrides
+	// through e.store.LoadOverrides, so it would self-deadlock the live scoring
+	// path on a non-reentrant mutex.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if err := os.RemoveAll(s.compPath(id)); err != nil {
 		return err
 	}
-	s.compCache.Delete(id)
+	// Deliberately NOT compCache.Delete(id): that would reset this competition's
+	// version counters to 0, and IDs are name slugs, so recreating a competition
+	// with the same name would inherit a fresh-looking token set and could match
+	// a cache entry left over from the deleted one. Clear the bodies, keep the
+	// counters climbing.
+	s.discardCompCacheBodies(id)
 	s.compMu.Delete(id)
 	return nil
 }

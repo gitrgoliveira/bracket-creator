@@ -47,6 +47,9 @@ func TestLineupRoundTrip(t *testing.T) {
 	defer cleanup()
 
 	const compID = "team-comp-1"
+	// The competition must exist: saving lineups no longer creates the
+	// competition directory (it let a write after DeleteCompetition resurrect it).
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID}))
 	lineup := fiveStarter("team-alpha", 0)
 
 	require.NoError(t, store.SetTeamLineup(compID, lineup, 5))
@@ -77,6 +80,9 @@ func TestLineupSetValidatesShape(t *testing.T) {
 	defer cleanup()
 
 	const compID = "team-comp-4"
+	// The competition must exist: saving lineups no longer creates the
+	// competition directory (it let a write after DeleteCompetition resurrect it).
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID}))
 
 	t.Run("invalid position key is rejected", func(t *testing.T) {
 		bad := domain.TeamLineup{
@@ -163,6 +169,9 @@ func TestDeleteTeamLineup_Success(t *testing.T) {
 	defer cleanup()
 
 	const compID = "team-delete-ok"
+	// The competition must exist: saving lineups no longer creates the
+	// competition directory (it let a write after DeleteCompetition resurrect it).
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID}))
 	require.NoError(t, store.SetTeamLineup(compID, fiveStarter("team-alpha", 0), 5))
 
 	// Confirm it exists.
@@ -263,6 +272,9 @@ func TestLoadTeamLineups_ReturnsDeepCopy(t *testing.T) {
 	defer cleanup()
 
 	const compID = "team-deepcopy"
+	// The competition must exist: saving lineups no longer creates the
+	// competition directory (it let a write after DeleteCompetition resurrect it).
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID}))
 	require.NoError(t, store.SetTeamLineup(compID, fiveStarter("team-alpha", 0), 5))
 
 	// First load: mutate both the returned map and a Positions entry inside it.
@@ -290,6 +302,9 @@ func TestLoadTeamLineups_CacheRefreshedOnSave(t *testing.T) {
 	defer cleanup()
 
 	const compID = "team-cache-refresh"
+	// The competition must exist: saving lineups no longer creates the
+	// competition directory (it let a write after DeleteCompetition resurrect it).
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID}))
 	require.NoError(t, store.SetTeamLineup(compID, fiveStarter("team-alpha", 0), 5))
 
 	// Warm the cache.

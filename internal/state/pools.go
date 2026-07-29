@@ -504,6 +504,12 @@ func (s *Store) savePoolMatchesLocked(compID string, results []MatchResult, writ
 	cache.mtime = s.FileMtime(compID, "pool-matches.csv")
 	cache.mu.Unlock()
 
+	// Bump last: this is the single chokepoint every pool-matches writer funnels
+	// through (SavePoolMatches, UpdatePoolMatchByID, and both storeTx variants),
+	// so downstream caches keyed on FileVersion invalidate without each of those
+	// call sites having to remember to do it.
+	s.bumpFileVersion(compID, "pool-matches.csv")
+
 	return nil
 }
 

@@ -68,10 +68,14 @@ func parseCompetitorStatusBytes(data []byte) (map[string]domain.CompetitorStatus
 // hold the per-comp write lock. The write parameter routes the
 // actual file write; directWrite for non-tx callers, WAL-capturing
 // writer for tx callers. See saveBracketLocked (T211/T212).
+//
+// Deliberately does NOT create the competition directory; see
+// saveOverridesLocked for the full reasoning. In short: a write landing after
+// DeleteCompetition would otherwise rebuild competitions/<id>/ around a lone
+// competitor-status.yaml, which ListCompetitions keeps reporting and a
+// same-named recreation adopts. Creating the directory is the job of
+// saveCompetitionChangedLocked alone.
 func (s *Store) saveCompetitorStatusLocked(compID string, statuses map[string]domain.CompetitorStatus, write writeFn) error {
-	if err := os.MkdirAll(s.compPath(compID), 0700); err != nil {
-		return err
-	}
 	keys := make([]string, 0, len(statuses))
 	for k := range statuses {
 		keys = append(keys, k)

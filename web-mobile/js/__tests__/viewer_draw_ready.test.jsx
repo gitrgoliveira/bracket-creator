@@ -10,7 +10,7 @@ function collectText(node) {
   if (Array.isArray(node)) return node.map(collectText).join('');
   if (typeof node.type === 'function') {
     try {
-      const p = { ...(node.props || {}) };
+      const p = { ...node.props };
       if (node.children?.length) p.children = node.children.length === 1 ? node.children[0] : node.children;
       return collectText(node.type(p));
     } catch { /* fall through */ }

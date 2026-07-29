@@ -60,7 +60,7 @@ export function makeReactive() {
     // them) and also kept as a top-level alias so simple tree-traversal
     // helpers can walk node.children directly.
     createElement: (type, props, ...children) => {
-      const merged = { ...(props || {}) };
+      const merged = { ...props };
       if (children.length > 0) {
         merged.children = children.length === 1 ? children[0] : children;
       }

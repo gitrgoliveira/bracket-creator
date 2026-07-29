@@ -216,9 +216,9 @@ export const isNonPublicOrigin = (origin) => {
   if (host === "localhost" || host === "0.0.0.0") return true;
   if (host === "::1" || host === "[::1]") return true;  // IPv6 loopback
   if (host.endsWith(".local")) return true;
-  if (/^127\./.test(host)) return true;
-  if (/^10\./.test(host)) return true;
-  if (/^192\.168\./.test(host)) return true;
+  if (host.startsWith("127.")) return true;
+  if (host.startsWith("10.")) return true;
+  if (host.startsWith("192.168.")) return true;
   if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) return true;
   if (hasPort) return true;
   return false;

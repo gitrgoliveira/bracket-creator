@@ -113,7 +113,7 @@ function recomputeQueuePositions(matches) {
     // identity when nothing actually changes (e.g. all qps already 0).
     const entries = matches.map((m, idx) => ({ idx, m, court: m.court || "" }));
     const byCourt = _orderByCourtKey(entries);
-    const newPositions = new Array(matches.length).fill(0);
+    const newPositions = Array.from({ length: matches.length }, () => 0);
     for (const bucket of byCourt.values()) {
         let counter = 0;
         for (const e of bucket) {

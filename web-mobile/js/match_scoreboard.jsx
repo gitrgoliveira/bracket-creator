@@ -145,7 +145,7 @@ function slotCells(letters, side, testid) {
         data-testid={i === 0 ? testid : undefined}>{ch}</span>
     );
   });
-  return side === "aka" ? cells.reverse() : cells;
+  return side === "aka" ? cells.toReversed() : cells;
 }
 
 // centreMarks: the §263 inner cells: [shiro slot][shiro slot] | vs/X | [aka slot][aka slot].

@@ -419,9 +419,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       // lineup state for the affected side.
       if (!mountedRef.current) return;
       if (teamId === teamIdForSide(m.sideA)) {
-        setLineupA(prev => ({ ...(prev || {}), positions: updated }));
+        setLineupA(prev => ({ ...prev, positions: updated }));
       } else {
-        setLineupB(prev => ({ ...(prev || {}), positions: updated }));
+        setLineupB(prev => ({ ...prev, positions: updated }));
       }
     } catch (e) {
       // Surface error briefly: can't use a toast from inside the modal so

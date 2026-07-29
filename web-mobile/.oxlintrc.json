@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react"],
+  "plugins": ["react", "unicorn", "oxc"],
   "env": {
     "browser": true,
     "es2024": true,
@@ -26,9 +26,14 @@
       { "allowShortCircuit": true, "allowTernary": true }
     ],
     "react/jsx-key": "error",
+    "react/no-object-type-as-default-prop": "error",
     "react/no-unescaped-entities": "off",
     "react/jsx-no-undef": "off",
-    "react-hooks/exhaustive-deps": "off"
+    "react-hooks/exhaustive-deps": "off",
+    "unicorn/no-useless-fallback-in-spread": "error",
+    "unicorn/no-new-array": "error",
+    "unicorn/prefer-string-starts-ends-with": "error",
+    "unicorn/no-array-reverse": "error"
   },
   "ignorePatterns": ["node_modules/**", "dist/**", "vendor/**"]
 }

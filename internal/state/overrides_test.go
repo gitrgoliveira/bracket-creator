@@ -19,6 +19,12 @@ func TestOverrides(t *testing.T) {
 
 	compID := "comp-overrides"
 
+	// The competition has to exist: saving overrides no longer creates the
+	// competition directory, because doing so let a save that landed after
+	// DeleteCompetition resurrect it as a config-less orphan. See
+	// TestSaveOverridesDoesNotResurrectDeletedCompetition.
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Comp Overrides"}))
+
 	// 1. Load empty overrides (doesn't exist)
 	overrides, err := store.LoadOverrides(compID)
 	require.NoError(t, err)

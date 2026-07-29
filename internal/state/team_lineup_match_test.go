@@ -28,6 +28,9 @@ func TestMatchLineup_RoundTrip(t *testing.T) {
 	defer cleanup()
 
 	const compID = "team-match-rt"
+	// The competition must exist: saving lineups no longer creates the
+	// competition directory (it let a write after DeleteCompetition resurrect it).
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID}))
 	require.NoError(t, store.SetTeamLineup(compID, fiveStarterForMatch("team-alpha", "P1"), 5))
 
 	got, err := store.LoadTeamLineups(compID)
@@ -48,6 +51,9 @@ func TestMatchLineup_CoexistsWithRoundLineup(t *testing.T) {
 	defer cleanup()
 
 	const compID = "team-match-coexist"
+	// The competition must exist: saving lineups no longer creates the
+	// competition directory (it let a write after DeleteCompetition resurrect it).
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID}))
 	require.NoError(t, store.SetTeamLineup(compID, fiveStarter("team-alpha", 0), 5))
 	require.NoError(t, store.SetTeamLineup(compID, fiveStarterForMatch("team-alpha", "P1"), 5))
 
@@ -69,6 +75,9 @@ func TestMatchLineup_KeyNoHyphenCollision(t *testing.T) {
 	defer cleanup()
 
 	const compID = "team-match-collision"
+	// The competition must exist: saving lineups no longer creates the
+	// competition directory (it let a write after DeleteCompetition resurrect it).
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID}))
 	l1 := fiveStarterForMatch("a-b", "c")
 	l1.Positions[domain.PosSenpo] = "team-ab-senpo"
 	l2 := fiveStarterForMatch("a", "b-c")
@@ -92,6 +101,9 @@ func TestDeleteTeamLineupForMatch(t *testing.T) {
 	defer cleanup()
 
 	const compID = "team-match-delete"
+	// The competition must exist: saving lineups no longer creates the
+	// competition directory (it let a write after DeleteCompetition resurrect it).
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID}))
 
 	// Idempotent on a missing entry.
 	require.NoError(t, store.DeleteTeamLineupForMatch(compID, "team-alpha", "P9"))

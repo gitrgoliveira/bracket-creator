@@ -431,47 +431,113 @@ func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId strin
 	return status, nil
 }
 
+// standingsFlightRetries bounds how many times CalculatePoolStandings will
+// re-enter the single-flight path before giving up on collapsing and computing
+// directly. Each retry costs two stats and a map load, so a small number is
+// enough to absorb the ordinary "winner's snapshot predates my write" case.
+const standingsFlightRetries = 3
+
 func (e *Engine) CalculatePoolStandings(compId string) (map[string][]state.PlayerStanding, error) {
-	// Fast path: return cached result when neither pool-matches nor overrides changed.
-	pmMtime := e.store.FileMtime(compId, "pool-matches.csv")
-	ovMtime := e.store.FileMtime(compId, "overrides.json")
-	if v, ok := e.standingsCache.Load(compId); ok {
-		cached := v.(*standingsCacheEntry)
-		if cached.poolMatchesMtime == pmMtime && cached.overridesMtime == ovMtime {
-			return cached.result, nil
+	// Retry as a bounded loop rather than by self-recursion: every pass
+	// re-samples the tokens, so the stack stays flat, and the bound means
+	// termination does not rest on the (correct but subtle) argument that the
+	// flight winner always deletes its entry before releasing the losers. A spin
+	// in this function would wedge a live scoring handler, which is a worse
+	// failure than the stale read the retry exists to avoid.
+	for attempt := 0; attempt < standingsFlightRetries; attempt++ {
+		// Fast path: return cached result when neither pool-matches nor overrides
+		// changed. Tokens are sampled BEFORE computeStandings below, see
+		// standingsTokens for why mtime alone is not sound.
+		tokens := e.sampleStandingsTokens(compId)
+		if result, ok := e.cachedStandingsIfValid(compId, tokens); ok {
+			return result, nil
 		}
+
+		// Single-flight: collapse concurrent cold-cache callers into one compute.
+		flightV, _ := e.standingsFlight.LoadOrStore(compId, &sync.Once{})
+		once := flightV.(*sync.Once)
+		var (
+			flightResult map[string][]state.PlayerStanding
+			flightErr    error
+		)
+		once.Do(func() {
+			defer e.standingsFlight.Delete(compId)
+			flightResult, flightErr = e.computeStandings(compId)
+			if flightErr == nil {
+				// Stamped with the PRE-compute tokens on purpose: a write landing
+				// during computeStandings then leaves a strictly newer version on
+				// the next call, forcing a recompute rather than blessing a result
+				// that may predate that write.
+				e.standingsCache.Store(compId, &standingsCacheEntry{
+					standingsTokens: tokens,
+					result:          flightResult,
+				})
+			}
+		})
+		if flightErr != nil {
+			return nil, flightErr
+		}
+		if flightResult != nil {
+			return flightResult, nil
+		}
+
+		// Lost the flight race. The winner stamped its entry with the tokens IT
+		// sampled, which may predate a write that had already landed before we
+		// sampled ours, so its result is not automatically ours to return: the
+		// caller here is typically advanceMixedPools right after saving a pool
+		// score, and handing it standings that predate its own write is exactly
+		// the fresh-matches-vs-stale-standings split that mp-n6ke fixed. Validate
+		// against our own tokens, same check as the fast path.
+		if result, ok := e.cachedStandingsIfValid(compId, tokens); ok {
+			return result, nil
+		}
+		// Either the winner's snapshot predates our tokens, or the cache was
+		// invalidated between Do completion and this Load. Either way, loop: the
+		// winner has already deleted the flight, so the next pass computes fresh
+		// (and any sibling losers rejoin that one compute rather than each
+		// starting their own).
 	}
 
-	// Single-flight: collapse concurrent cold-cache callers into one compute.
-	flightV, _ := e.standingsFlight.LoadOrStore(compId, &sync.Once{})
-	once := flightV.(*sync.Once)
-	var (
-		flightResult map[string][]state.PlayerStanding
-		flightErr    error
-	)
-	once.Do(func() {
-		defer e.standingsFlight.Delete(compId)
-		flightResult, flightErr = e.computeStandings(compId)
-		if flightErr == nil {
-			e.standingsCache.Store(compId, &standingsCacheEntry{
-				poolMatchesMtime: pmMtime,
-				overridesMtime:   ovMtime,
-				result:           flightResult,
-			})
-		}
-	})
-	if flightErr != nil {
-		return nil, flightErr
+	// Out of retries under sustained contention. Compute directly: single-flight
+	// is an optimisation, freshness is not negotiable. Deliberately not cached,
+	// the tokens moved under us often enough that any stamp we chose would be a
+	// guess, and a guess in this cache is what mp-n6ke was.
+	return e.computeStandings(compId)
+}
+
+// cachedStandingsIfValid returns the cached standings for a competition only if
+// the entry was stamped with exactly the tokens passed in.
+//
+// This is THE read path for the standings cache: every caller goes through it,
+// so there is one place where "is this entry still valid" is decided. That is
+// deliberate. The bug this cache was rebuilt for was a read path that skipped
+// the check (the single-flight loser returned the winner's entry unvalidated),
+// and a check open-coded at each site is one a future read path can silently
+// half-implement. Callers pass a snapshot from sampleStandingsTokens rather than
+// having this function sample its own, so the same tokens govern the lookup and
+// whatever the caller does next with the result.
+func (e *Engine) cachedStandingsIfValid(compId string, tokens standingsTokens) (map[string][]state.PlayerStanding, bool) {
+	v, ok := e.standingsCache.Load(compId)
+	if !ok {
+		return nil, false
 	}
-	if flightResult != nil {
-		return flightResult, nil
+	cached := v.(*standingsCacheEntry)
+	if cached.standingsTokens != tokens {
+		return nil, false
 	}
-	// Lost the flight race, read from cache populated by the winner.
-	if v, ok := e.standingsCache.Load(compId); ok {
-		return v.(*standingsCacheEntry).result, nil
+	return cached.result, true
+}
+
+// sampleStandingsTokens reads the current cache-validity key for a competition.
+// Callers must sample ONCE and reuse the snapshot: re-reading per comparison
+// would let a write slip between two reads of the same logical check.
+func (e *Engine) sampleStandingsTokens(compId string) standingsTokens {
+	return standingsTokens{
+		poolMatchesMtime:   e.store.FileMtime(compId, "pool-matches.csv"),
+		overridesMtime:     e.store.FileMtime(compId, "overrides.json"),
+		poolMatchesVersion: e.store.FileVersion(compId, "pool-matches.csv"),
+		overridesVersion:   e.store.FileVersion(compId, "overrides.json"),
 	}
-	// Narrow window: cache was invalidated between Do completion and this Load.
-	return e.CalculatePoolStandings(compId)
 }
 
 // poolStandingsLoader is the read surface computeStandingsFrom needs. Both

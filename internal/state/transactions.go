@@ -285,11 +285,11 @@ func (s *Store) invalidateCachesForWALIntents(compID string, intents []wal.FileI
 			"bracket.json",
 			competitorStatusFilename,
 			teamLineupFilename:
-			cache := s.getFileCache(compID, base)
-			cache.mu.Lock()
-			cache.data = nil
-			cache.mtime = 0
-			cache.mu.Unlock()
+			// An aborted transaction rolls the file back to content that
+			// downstream caches may already have derived state from (the staged
+			// results were published into cache.data at save time), so the
+			// version has to move here as well as the body being dropped.
+			s.getFileCache(compID, base).invalidate()
 		}
 	}
 }

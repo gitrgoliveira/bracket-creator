@@ -74,9 +74,11 @@ js/lint: ## Run Javascript linters
 	@echo "Running Javascript linters..."
 	@cd web-mobile && npm run lint
 
-js/sec: ## Run Javascript security scans (npm audit)
+js/sec: ## Run Javascript security scans (audit-ci + npm audit)
 	@echo "Running Javascript security scans..."
-	@cd web-mobile && npm audit --audit-level=high
+	@# web-mobile uses audit-ci so one proven-unfixable dev-only advisory can be
+	@# allowlisted (web-mobile/audit-ci.jsonc) without disabling the whole scan.
+	@cd web-mobile && npm run --silent audit
 	@cd web && npm audit --audit-level=high
 
 js/outdated: ## Check for outdated npm packages

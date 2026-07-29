@@ -25,7 +25,10 @@ func printEliminationWithBronze(f *excelize.File, matchWinners map[string]helper
 // returns the file and a buffered writer over it. The caller must defer
 // both Close and Flush.
 func openOutputFile(outputPath string) (*os.File, *bufio.Writer, error) {
-	f, err := os.OpenFile(outputPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600) // #nosec G304, path is user-supplied CLI argument
+	// O_TRUNC, not O_APPEND: each generator writes one complete workbook, and
+	// appending to an existing .xlsx silently doubles the file on every re-run
+	// with the same -o path (zip readers only see the trailing copy).
+	f, err := os.OpenFile(outputPath, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0600) // #nosec G304, path is user-supplied CLI argument
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to open output file: %w", err)
 	}

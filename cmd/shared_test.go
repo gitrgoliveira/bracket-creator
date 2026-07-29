@@ -1,9 +1,12 @@
 package cmd
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestOpenOutputFile_Error(t *testing.T) {
@@ -12,6 +15,25 @@ func TestOpenOutputFile_Error(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, f)
 	assert.Nil(t, w)
+}
+
+func TestOpenOutputFile_TruncatesExisting(t *testing.T) {
+	// Regression: openOutputFile used O_APPEND, so re-running a generator with
+	// the same -o path appended a second complete workbook to the first,
+	// doubling the file each run.
+	path := filepath.Join(t.TempDir(), "output.xlsx")
+	require.NoError(t, os.WriteFile(path, []byte("stale previous workbook contents"), 0600))
+
+	f, w, err := openOutputFile(path)
+	require.NoError(t, err)
+	_, err = w.WriteString("new")
+	require.NoError(t, err)
+	require.NoError(t, w.Flush())
+	require.NoError(t, f.Close())
+
+	got, err := os.ReadFile(path) // #nosec G304, temp-dir path
+	require.NoError(t, err)
+	assert.Equal(t, "new", string(got), "existing file must be truncated, not appended to")
 }
 
 func TestProcessEntries_Success(t *testing.T) {

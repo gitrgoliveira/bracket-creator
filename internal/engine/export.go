@@ -48,7 +48,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	}
 
 	// 3. Pool Matches sheet (red/white, scoring formulas, reactive name references)
-	matchWinners := helper.PrintPoolMatches(f, pools, comp.TeamSize, comp.PoolWinners, numCourts, comp.Mirror, poolCoords, playerCoords, comp.Engi)
+	matchWinners := helper.PrintPoolMatches(f, pools, comp.TeamSize, comp.EffectivePoolWinners(), numCourts, comp.Mirror, poolCoords, playerCoords, comp.Engi)
 
 	// 4. Tree sheets: one visual bracket page per subtree, rendered exactly like
 	//    the CLI (cmd/create-pools.go) and the results workbook
@@ -80,7 +80,12 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	// way the results workbook does (builder.go, TestBuildResultsWorkbook_
 	// LeagueNoPhantomBracket); otherwise a league template grows a phantom
 	// bracket implying a knockout that will never be played.
-	finals := helper.GenerateFinals(pools, comp.PoolWinners)
+	// EffectivePoolWinners, not the raw field: an unset (<=0) PoolWinners runs
+	// a 2-winner knockout everywhere else (draw validation, bracket build,
+	// seeding, schedule), and the results workbook already exports it that
+	// way, so the raw 0 here rendered a blank-template printout with no
+	// knockout for the tournament actually being run (mp-0yd8).
+	finals := helper.GenerateFinals(pools, comp.EffectivePoolWinners())
 	if len(finals) > 0 && comp.IsPlayoffEnabled() {
 		// 4b. Tree pages plus the Elimination Matches sheet, in the one mandatory
 		//     order RenderKnockoutPages enforces. This path used to skip the

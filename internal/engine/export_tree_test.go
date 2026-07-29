@@ -375,3 +375,30 @@ func TestExportTournamentWorkbooks_MultiPageTree(t *testing.T) {
 		assert.NotEmptyf(t, leafLabelsOnSheet(t, f, page), "%s must be populated in the PDF source workbook", page)
 	}
 }
+
+// TestExportCompetitionXlsx_UnsetPoolWinnersRendersKnockout pins mp-0yd8: an
+// unset (<=0) PoolWinners runs a 2-winner knockout everywhere else in the
+// engine via EffectivePoolWinners, but the blank-template export fed the raw
+// zero into GenerateFinals, rendering a workbook with no tree pages for the
+// knockout the tournament is actually running.
+func TestExportCompetitionXlsx_UnsetPoolWinnersRendersKnockout(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "mixed-unset-pool-winners"
+	createTestCompetition(t, store, compID, "mixed", 4, func(c *state.Competition) {
+		c.Courts = []string{"A"}
+		c.PoolWinners = 0
+	})
+	names := make([]string, 8)
+	for i := range names {
+		names[i] = fmt.Sprintf("Player%02d", i+1)
+	}
+	saveTestParticipants(t, store, compID, names)
+	require.NoError(t, eng.StartCompetition(compID))
+
+	f := openExportedWorkbook(t, eng, compID)
+	pages := treeSheets(f)
+	require.NotEmpty(t, pages,
+		"unset PoolWinners must still render the knockout tree (EffectivePoolWinners defaults to 2)")
+	assert.NotEmpty(t, leafLabelsOnSheet(t, f, pages[0]),
+		"tree page must carry the pool-winner finalist labels")
+}

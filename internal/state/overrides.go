@@ -63,11 +63,15 @@ func (s *Store) loadOverridesLocked(compID string) (*Overrides, error) {
 // not have to interleave with the delete to resurrect the directory, it only
 // has to run after it, so serialising the two would still leave the orphan.
 //
-// Every sibling saver (savePoolMatchesLocked, and the seeds/bracket/participant
-// writers) already relies on the competition directory existing rather than
-// creating it, and atomicWriteFile opens its temp file with O_CREATE but never
-// creates the parent. So dropping the MkdirAll makes a write to a deleted
-// competition fail with ENOENT, which is the correct outcome.
+// atomicWriteFile opens its temp file with O_CREATE but never creates the
+// parent, so dropping the MkdirAll makes a write to a deleted competition fail
+// with ENOENT, which is the correct outcome.
+//
+// saveCompetitionChangedLocked is the ONE writer that legitimately creates the
+// directory, because creating the competition is its job. Every other saver
+// must rely on it already existing. saveCompetitorStatusLocked and
+// saveTeamLineupsLocked had the same MkdirAll and were fixed with this one; if
+// you add a per-competition writer, do not reintroduce it.
 func (s *Store) saveOverridesLocked(compID string, o *Overrides) error {
 	data, err := json.MarshalIndent(o, "", "  ")
 	if err != nil {

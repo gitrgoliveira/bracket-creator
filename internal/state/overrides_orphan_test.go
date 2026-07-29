@@ -5,7 +5,9 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -81,4 +83,70 @@ func TestSaveOverridesConcurrentWithDeleteLeavesNoOrphan(t *testing.T) {
 			require.NoError(t, os.RemoveAll(compDir))
 		}
 	}
+}
+
+// competitor-status.yaml and lineups.yaml had the SAME MkdirAll as
+// overrides.json. Fixing one writer and not its siblings leaves the bug class
+// alive, so both are pinned here alongside it.
+//
+// These two need no interleaving at all: SetCompetitorStatus and SetTeamLineup
+// take the same per-competition lock DeleteCompetition holds, so a call can
+// only land strictly before or strictly after the delete. Landing after is
+// enough to resurrect the directory, which is exactly why locking was never the
+// fix for this class.
+
+func TestSetCompetitorStatusDoesNotResurrectDeletedCompetition(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	const compID = "deleted-status"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Deleted Status"}))
+	require.NoError(t, store.SetCompetitorStatus(compID, domain.CompetitorStatus{
+		PlayerID: "p1", Eligible: false, Reason: "kiken", RecordedAt: time.Unix(1700000000, 0),
+	}))
+
+	require.NoError(t, store.DeleteCompetition(compID))
+	compDir := filepath.Join(dir, "competitions", compID)
+	require.NoDirExists(t, compDir, "premise: the delete removed the directory")
+
+	err = store.SetCompetitorStatus(compID, domain.CompetitorStatus{
+		PlayerID: "p2", Eligible: false, Reason: "kiken", RecordedAt: time.Unix(1700000001, 0),
+	})
+	assert.Error(t, err, "writing competitor status for a deleted competition must fail, not recreate it")
+	assert.NoDirExists(t, compDir,
+		"a competitor-status write must never resurrect a deleted competition's directory")
+}
+
+func TestSetTeamLineupDoesNotResurrectDeletedCompetition(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	const compID = "deleted-lineup"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Deleted Lineup"}))
+
+	lineup := domain.TeamLineup{
+		TeamID:        "Team A",
+		CompetitionID: compID,
+		Round:         1,
+		Positions: map[domain.Position]string{
+			domain.PosSenpo:   "p1",
+			domain.PosJiho:    "p2",
+			domain.PosChuken:  "p3",
+			domain.PosFukusho: "p4",
+			domain.PosTaisho:  "p5",
+		},
+	}
+	require.NoError(t, store.SetTeamLineup(compID, lineup, 5))
+
+	require.NoError(t, store.DeleteCompetition(compID))
+	compDir := filepath.Join(dir, "competitions", compID)
+	require.NoDirExists(t, compDir, "premise: the delete removed the directory")
+
+	lineup.TeamID = "Team B"
+	err = store.SetTeamLineup(compID, lineup, 5)
+	assert.Error(t, err, "writing a lineup for a deleted competition must fail, not recreate it")
+	assert.NoDirExists(t, compDir,
+		"a lineup write must never resurrect a deleted competition's directory")
 }

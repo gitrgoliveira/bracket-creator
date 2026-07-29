@@ -320,8 +320,10 @@ function BracketConnectors({ rounds, treeRef, refMap, version }) {
       const out = [];
       for (let r = 0; r < rounds.length - 1; r++) {
         for (let i = 0; i < rounds[r].length; i += 2) {
-          const a = refMap.current[rounds[r][i]?.id];
-          const b = refMap.current[rounds[r][i + 1]?.id];
+          const aId = rounds[r][i]?.id;
+          const bId = rounds[r][i + 1]?.id;
+          const a = refMap.current[aId];
+          const b = refMap.current[bId];
           const next = refMap.current[rounds[r + 1][i / 2]?.id];
           if (!a || !b || !next) continue;
           const aR = a.getBoundingClientRect();
@@ -333,8 +335,8 @@ function BracketConnectors({ rounds, treeRef, refMap, version }) {
           const aRight = aR.right - treeRect.left;
           const nLeft = nR.left - treeRect.left;
           const midX = (aRight + nLeft) / 2;
-          out.push({ d: `M ${aRight} ${aMidY} L ${midX} ${aMidY} L ${midX} ${bMidY} L ${aRight} ${bMidY}` });
-          out.push({ d: `M ${midX} ${(aMidY + bMidY) / 2} L ${nLeft} ${nMidY}` });
+          out.push({ key: `${aId}-${bId}-h`, d: `M ${aRight} ${aMidY} L ${midX} ${aMidY} L ${midX} ${bMidY} L ${aRight} ${bMidY}` });
+          out.push({ key: `${aId}-${bId}-v`, d: `M ${midX} ${(aMidY + bMidY) / 2} L ${nLeft} ${nMidY}` });
         }
       }
       setPaths(out);
@@ -350,7 +352,7 @@ function BracketConnectors({ rounds, treeRef, refMap, version }) {
   return (
     <svg className="bc-connectors" width={size.w} height={size.h} style={{ position: "absolute", left: 0, top: 0, pointerEvents: "none" }}>
       {paths.map((p) => (
-        <path key={p.d} d={p.d} fill="none" stroke="var(--line-strong, #c7cdd9)" strokeWidth="1.5" />
+        <path key={p.key} d={p.d} fill="none" stroke="var(--line-strong, #c7cdd9)" strokeWidth="1.5" />
       ))}
     </svg>
   );
@@ -536,7 +538,7 @@ function BracketConnectorsMeta({ columns, feedersById, treeRef, refMap, version,
           const fRight = fR.right - treeRect.left;
           const fMidY = anchorY(fEl, fR, treeRect.top);
           const midX = (fRight + mLeft) / 2;
-          out.push({ d: `M ${fRight} ${fMidY} L ${midX} ${fMidY} L ${midX} ${mMidY} L ${mLeft} ${mMidY}` });
+          out.push({ key: `${fid}->${m.id}`, d: `M ${fRight} ${fMidY} L ${midX} ${fMidY} L ${midX} ${mMidY} L ${mLeft} ${mMidY}` });
         });
       }));
       setPaths(out);
@@ -553,7 +555,7 @@ function BracketConnectorsMeta({ columns, feedersById, treeRef, refMap, version,
   return (
     <svg className="bc-connectors" width={size.w} height={size.h} style={{ position: "absolute", left: 0, top: 0, pointerEvents: "none" }}>
       {paths.map((p) => (
-        <path key={p.d} d={p.d} fill="none" stroke="var(--line-strong, #c7cdd9)" strokeWidth="1.5" />
+        <path key={p.key} d={p.d} fill="none" stroke="var(--line-strong, #c7cdd9)" strokeWidth="1.5" />
       ))}
     </svg>
   );

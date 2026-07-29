@@ -255,6 +255,10 @@ func AssignPoolsToCourts(numPools, numCourts int) ([]int, error) {
 // when numSubtrees are spread across numCourts. Mirrors the grouping used by
 // poolBoundsForSubtree so that court labels are always consistent.
 func SubtreeCourtIndex(numSubtrees, numCourts, idx int) int {
+	// Every current caller clamps its court count, but this is the one place a
+	// zero would actually divide, so enforce the invariant here (like
+	// PoolBoundsForSubtree does) rather than trusting call sites to pre-clamp.
+	numCourts = clampCourts(numCourts)
 	pagesPerCourt := numSubtrees / numCourts
 	if pagesPerCourt < 1 {
 		pagesPerCourt = 1

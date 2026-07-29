@@ -707,3 +707,34 @@ func TestOrderStringsAlphabetically(t *testing.T) {
 		})
 	}
 }
+
+func TestSubtreeCourtIndex(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		numSubtrees int
+		numCourts   int
+		idx         int
+		expected    int
+	}{
+		{"two courts first half", 4, 2, 0, 0},
+		{"two courts first half end", 4, 2, 1, 0},
+		{"two courts second half", 4, 2, 2, 1},
+		{"two courts last page", 4, 2, 3, 1},
+		{"more courts than pages", 2, 4, 1, 1},
+		{"overflow pages clamp to last court", 5, 2, 4, 1},
+		// Regression: SubtreeCourtIndex divided by numCourts unguarded, so a
+		// zero or negative court count (a caller that skipped the clamp every
+		// current call site applies) panicked with a divide by zero. It now
+		// clamps to one court, like PoolBoundsForSubtree.
+		{"zero courts clamps to one", 4, 0, 3, 0},
+		{"negative courts clamps to one", 4, -1, 2, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.expected, SubtreeCourtIndex(tt.numSubtrees, tt.numCourts, tt.idx))
+		})
+	}
+}

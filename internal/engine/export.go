@@ -53,8 +53,9 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	//    large-draw edge case: TreePageLayout raises the page count to
 	//    NextPow2(numCourts), so every competition on 2 or more courts hit it.
 	//
-	//    numCourts is clamped to 1: SubtreeCourtIndex divides by the court count,
-	//    so a competition saved without courts would panic here.
+	//    numCourts is clamped to 1 so a competition saved without courts still
+	//    lays out as a single-court draw. (SubtreeCourtIndex also clamps
+	//    internally, so this is layout intent, not panic avoidance.)
 	numCourts := len(comp.Courts)
 	if numCourts < 1 {
 		numCourts = 1

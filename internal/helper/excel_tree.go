@@ -55,14 +55,15 @@ func SetTreePageLayout(f *excelize.File, sheetName string, depth, lastRow int) {
 // workbook (export) - the loop used to be copied at each call site, and a
 // geometry fix in one had to be replicated by hand into the others.
 //
-// poolSeeding is PrintLeafNodes' pools flag: apply the pool-winner tree
-// adjustment (winners on top, byes to the seeded side). Callers with no pool
-// phase (create-playoffs) pass false and nil pools.
+// Passing pools drives PrintLeafNodes' pool-winner tree adjustment (winners on
+// top, byes to the seeded side) as well as the roster overlay. Callers with no
+// pool phase (create-playoffs) pass nil and get neither.
 //
 // The consumed SheetTree template is NOT deleted here: callers that skip
 // rendering entirely (a league has no knockout) must still delete it, so
 // ownership of the deletion stays with them.
-func RenderTreePages(f *excelize.File, subtrees []*Node, numCourts int, pools []Pool, poolCoords map[string]cellCoord, playerCoords map[string]playerCellCoord, matchWinners map[string]MatchWinner, poolSeeding bool) error {
+func RenderTreePages(f *excelize.File, subtrees []*Node, numCourts int, pools []Pool, poolCoords map[string]cellCoord, playerCoords map[string]playerCellCoord, matchWinners map[string]MatchWinner) error {
+	poolSeeding := len(pools) > 0
 	templateIdx, err := f.GetSheetIndex(SheetTree)
 	if err != nil {
 		return fmt.Errorf("find tree template sheet: %w", err)

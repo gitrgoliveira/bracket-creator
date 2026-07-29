@@ -179,9 +179,9 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	// divide the tree depending on the number of pages
 	subtrees := helper.SubdivideTree(tree, numPages)
 
-	// A playoffs bracket has no pools: nil pools and poolSeeding=false (no
-	// pool-winner tree adjustment).
-	if err := helper.RenderTreePages(f, subtrees, o.courts, nil, nil, nil, nil, false); err != nil {
+	// A playoffs bracket has no pools: nil pools skips the roster overlay and
+	// the pool-winner tree adjustment.
+	if err := helper.RenderTreePages(f, subtrees, o.courts, nil, nil, nil, nil); err != nil {
 		return err
 	}
 	if err := f.DeleteSheet(helper.SheetTree); err != nil {

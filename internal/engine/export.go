@@ -88,7 +88,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		tree := helper.CreateBalancedTree(finals)
 		subtrees := helper.SubdivideTree(tree, numPages)
 
-		if err := helper.RenderTreePages(f, subtrees, numCourts, pools, poolCoords, playerCoords, matchWinners, true); err != nil {
+		if err := helper.RenderTreePages(f, subtrees, numCourts, pools, poolCoords, playerCoords, matchWinners); err != nil {
 			return nil, fmt.Errorf("export: %w", err)
 		}
 

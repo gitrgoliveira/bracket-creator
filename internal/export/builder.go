@@ -163,7 +163,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 			return nil, fmt.Errorf("export: compute tree page layout: %w", perr)
 		}
 		subtrees := helper.SubdivideTree(tree, numPages)
-		if err := helper.RenderTreePages(f, subtrees, numCourts, pools, poolCoords, playerCoords, matchWinners, true); err != nil {
+		if err := helper.RenderTreePages(f, subtrees, numCourts, pools, poolCoords, playerCoords, matchWinners); err != nil {
 			return nil, fmt.Errorf("export: %w", err)
 		}
 

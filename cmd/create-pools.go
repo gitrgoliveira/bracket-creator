@@ -250,7 +250,7 @@ func (o *poolOptions) createPools(entries []string) error {
 	}
 	matchWinners := helper.PrintPoolMatches(f, pools, o.teamMatches, o.poolWinners, o.courts, true, poolCoords, playerCoords, o.engi)
 
-	if err := helper.RenderTreePages(f, subtrees, o.courts, pools, poolCoords, playerCoords, matchWinners, true); err != nil {
+	if err := helper.RenderTreePages(f, subtrees, o.courts, pools, poolCoords, playerCoords, matchWinners); err != nil {
 		return err
 	}
 	if err := f.DeleteSheet(helper.SheetTree); err != nil {

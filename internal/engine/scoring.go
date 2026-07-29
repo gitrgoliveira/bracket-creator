@@ -702,7 +702,22 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 		}
 
 		sort.Slice(sorted, func(i, j int) bool {
-			return sorted[i].Points > sorted[j].Points
+			if sorted[i].Points != sorted[j].Points {
+				return sorted[i].Points > sorted[j].Points
+			}
+			// Total-order tiebreaker. A genuine Points tie (equal on every ranking
+			// criterion, no supplementary bout) must resolve deterministically
+			// rather than by the iteration order of playerStandings (ranged just
+			// above), or two tied qualifiers would seed into knockout slots in a
+			// run-dependent order (mp-xemw). ID first (stable UUID); Name is the
+			// human-unique fallback for players persisted without an ID. This only
+			// reorders players already equal on Points, so applyTiebreakSort (which
+			// reorders a tied group only when a decided TB/DH bout exists) and
+			// markTiedStandings (which flags on Points equality) are unaffected.
+			if sorted[i].Player.ID != sorted[j].Player.ID {
+				return sorted[i].Player.ID < sorted[j].Player.ID
+			}
+			return sorted[i].Player.Name < sorted[j].Player.Name
 		})
 
 		// Apply supplementary-bout results as a secondary sort within each tied

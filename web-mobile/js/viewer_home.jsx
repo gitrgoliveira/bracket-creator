@@ -82,6 +82,9 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
       map[d].push(c);
     });
     return map;
+    // comps is derived (new array each render); this memo is a within-render
+    // grouping, so re-running when comps changes is the intended behavior.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [comps, t.date]);
   const dates = Object.keys(compsByDate).sort(compareDmy);
 
@@ -121,6 +124,9 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
     const result = resolveDeepLink(window.location.search, roster);
     deepLinkApplied.current = true;
     if (result && result.player) addWatchPlayer(result.player);
+    // Runs exactly once, gated by the deepLinkApplied ref; addWatchPlayer is an
+    // unstable callback we deliberately do not depend on.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [roster, watchlist]);
 
   // global "across-all-competitions" lists for the home page
@@ -218,9 +224,12 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
   const [secondaryAlert, setSecondaryAlert] = useState(null);
   const [secondaryDismissed, setSecondaryDismissed] = useState(false);
   // Reset dismissal when the primary or its match changes.
+  // Extracted to a simple identifier: oxlint's exhaustive-deps forbids a
+  // complex expression directly in the dependency array.
+  const primaryNextMatchId = primaryNextMatch && primaryNextMatch.id;
   useEffect(() => {
     setAlertDismissed(false);
-  }, [primaryKey, primaryNextMatch && primaryNextMatch.id]);
+  }, [primaryKey, primaryNextMatchId]);
   useFollowedMatchAlert(primaryNextMatch, {
     chimeMuted,
     onAlert: (m) => { setAlertMatch(m); setAlertDismissed(false); },

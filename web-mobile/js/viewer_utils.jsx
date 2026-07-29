@@ -278,8 +278,8 @@ export function TournamentInfo({ tournament }) {
         {t.contacts && t.contacts.length > 0 && <>
           <dt className="tournament-info__label">Contact</dt>
           <dd className="tournament-info__value">
-            {t.contacts.map((ct, i) => (
-              <div key={i} className="tournament-info__contact">
+            {t.contacts.map((ct) => (
+              <div key={`${ct.label}|${ct.value}`} className="tournament-info__contact">
                 {ct.label && <span className="tournament-info__contact-label">{ct.label}:</span>}
                 {" "}{contactLink(ct.value)}
               </div>

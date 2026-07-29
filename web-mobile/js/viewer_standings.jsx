@@ -113,6 +113,7 @@ export function SwissStandingsViewer({ competition, poolMatches, tweaks }) {
   // on poolMatches length so a fresh round's matches landing triggers
   // a refresh: the round may have completed even when swissCurrentRound
   // didn't move (final round).
+  const poolMatchesLen = (poolMatches || []).length;
   React.useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -130,7 +131,9 @@ export function SwissStandingsViewer({ competition, poolMatches, tweaks }) {
         setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [c.id, c.swissCurrentRound, (poolMatches || []).length]);
+    // Extracted to a simple identifier: oxlint's exhaustive-deps forbids a
+    // complex expression directly in the dependency array.
+  }, [c.id, c.swissCurrentRound, poolMatchesLen]);
 
   const isFinal = isSwissFinalStandings(c, poolMatches);
   const heading = swissStandingsHeading(c, poolMatches);
@@ -457,24 +460,24 @@ export function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPla
           <tr>
             <th className="league-matrix__corner"></th>
             {players.map((p, i) => (
-              <th key={`${pkey(p)}#${i}`} scope="col" aria-label={playerLabel(p)} className={`league-matrix__col-head${isHighlighted(p) ? " league-matrix__col--me" : ""}`} title={playerLabel(p)}>{p.number || (i + 1)}</th>
+              <th key={pkey(p)} scope="col" aria-label={playerLabel(p)} className={`league-matrix__col-head${isHighlighted(p) ? " league-matrix__col--me" : ""}`} title={playerLabel(p)}>{p.number || (i + 1)}</th>
             ))}
           </tr>
         </thead>
         <tbody>
           {players.map((rowPlayer, ri) => (
-            <tr key={`${pkey(rowPlayer)}#${ri}`} className={isHighlighted(rowPlayer) ? "league-matrix__row--me" : ""}>
+            <tr key={pkey(rowPlayer)} className={isHighlighted(rowPlayer) ? "league-matrix__row--me" : ""}>
               <td className="league-matrix__row-head" title={playerLabel(rowPlayer)} aria-label={playerLabel(rowPlayer)}>
                 <span className="league-matrix__num">{rowPlayer.number || (ri + 1)}</span>
                 <span className="league-matrix__pname">{tweaks.showDojo ? rowPlayer.name : shortName(rowPlayer)}</span>
               </td>
               {players.map((colPlayer, ci) => {
                 const colMe = isHighlighted(colPlayer) ? " league-matrix__col--me" : "";
-                if (ri === ci) return <td key={`${pkey(colPlayer)}#${ci}`} className={`league-matrix__cell league-matrix__cell--self${colMe}`}>&mdash;</td>;
+                if (ri === ci) return <td key={`${pkey(rowPlayer)}||${pkey(colPlayer)}`} className={`league-matrix__cell league-matrix__cell--self${colMe}`}>&mdash;</td>;
                 // Look up the match by id-pair first (collision-free),
                 // then by name-pair for legacy/un-migrated data.
                 const m = matchMap[`${pkey(rowPlayer)}||${pkey(colPlayer)}`] || matchMap[`${rowPlayer.name}||${colPlayer.name}`];
-                if (!m) return <td key={`${pkey(colPlayer)}#${ci}`} title={cellTitle(rowPlayer, colPlayer, "not played")} className={`league-matrix__cell league-matrix__cell--empty${colMe}`}></td>;
+                if (!m) return <td key={`${pkey(rowPlayer)}||${pkey(colPlayer)}`} title={cellTitle(rowPlayer, colPlayer, "not played")} className={`league-matrix__cell league-matrix__cell--empty${colMe}`}></td>;
 
                 const [aName] = matchParticipantNames(m);
                 const [aId] = matchParticipantIds(m);
@@ -493,7 +496,7 @@ export function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPla
                 } : {};
 
                 if (m.status !== "completed") {
-                  return <td key={`${pkey(colPlayer)}#${ci}`} title={cellTitle(rowPlayer, colPlayer, m.status === "running" ? "Now" : "Pending")} className={`league-matrix__cell league-matrix__cell--pending ${m.status === "running" ? "league-matrix__cell--running" : ""}${colMe}`} aria-label={cellLabel(rowPlayer, colPlayer, m.status === "running" ? "Now" : "Pending")} {...interactiveProps}>
+                  return <td key={`${pkey(rowPlayer)}||${pkey(colPlayer)}`} title={cellTitle(rowPlayer, colPlayer, m.status === "running" ? "Now" : "Pending")} className={`league-matrix__cell league-matrix__cell--pending ${m.status === "running" ? "league-matrix__cell--running" : ""}${colMe}`} aria-label={cellLabel(rowPlayer, colPlayer, m.status === "running" ? "Now" : "Pending")} {...interactiveProps}>
                     {m.status === "running" ? "" : "–"}
                   </td>;
                 }
@@ -553,7 +556,7 @@ export function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPla
                 }
 
                 return (
-                  <td key={`${pkey(colPlayer)}#${ci}`} title={cellTitle(rowPlayer, colPlayer, resultLabel)} className={`league-matrix__cell ${rowWon ? "league-matrix__cell--win" : isDraw ? "league-matrix__cell--draw" : "league-matrix__cell--loss"}${colMe}`} aria-label={cellLabel(rowPlayer, colPlayer, resultLabel)} {...interactiveProps}>
+                  <td key={`${pkey(rowPlayer)}||${pkey(colPlayer)}`} title={cellTitle(rowPlayer, colPlayer, resultLabel)} className={`league-matrix__cell ${rowWon ? "league-matrix__cell--win" : isDraw ? "league-matrix__cell--draw" : "league-matrix__cell--loss"}${colMe}`} aria-label={cellLabel(rowPlayer, colPlayer, resultLabel)} {...interactiveProps}>
                     {cellContent}
                   </td>
                 );

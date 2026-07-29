@@ -120,6 +120,9 @@ export function PerCourtBreakdown({ perCourtMinutes }) {
       <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4, color: "var(--ink-2)" }}>Per-court breakdown:</div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))", gap: 8 }}>
         {perCourtMinutes.map((m, i) => (
+          // Each entry is court i (rendered as "Court A/B/C…"); the court's
+          // identity IS its index, and the list never reorders.
+          // oxlint-disable-next-line react/no-array-index-key
           <div key={i} style={{ fontSize: 12, padding: "4px 8px", background: "var(--bg-2)", borderRadius: 4, border: "1px solid var(--bg-3)" }}>
             <span style={{ color: "var(--ink-3)" }}>Court {i < 26 ? String.fromCharCode(65 + i) : i + 1}:</span>
             <strong style={{ marginLeft: 4 }}>{formatMinutes(m)}</strong>

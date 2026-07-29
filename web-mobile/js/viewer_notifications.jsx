@@ -97,6 +97,8 @@ export function AnnBellBtn() {
   // Sync with other AnnBellBtn instances on the page (watchlist bell is chime-only).
   // External permission changes (user visits browser settings) arrive via
   // NOTIF_SYNC_EVENT dispatched by the module-level subscribePermissionChanges singleton.
+  // `supported` is a static capability boolean; the effect deliberately wires
+  // up its listeners once (empty deps), as the closing comment notes.
   useEffect(() => {
     if (!supported) return;
     const onSync = (e) => {
@@ -110,6 +112,7 @@ export function AnnBellBtn() {
     return () => {
       window.removeEventListener(NOTIF_SYNC_EVENT, onSync);
     };
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, []); // supported is a static boolean; the effect only wires up listeners once
 
   if (state === "unsupported") return null;

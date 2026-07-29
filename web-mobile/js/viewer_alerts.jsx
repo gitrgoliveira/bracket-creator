@@ -216,7 +216,7 @@ export function useFollowedMatchAlert(myNextMatch, { chimeMuted, onAlert } = {})
         audioCtxRef.current = null;
       }
     };
-  }, []);
+  }, [audioCtxRef, originalTitleRef]);
 
   useEffect(() => {
     const m = myNextMatch;

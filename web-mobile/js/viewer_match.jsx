@@ -268,7 +268,7 @@ export function MatchViewerModal({ match, onClose, tournament, compId: defaultCo
       const trig = triggerRef.current;
       if (trig && typeof trig.focus === "function" && document.contains(trig)) trig.focus();
     }
-  }, []);
+  }, [trapRef, triggerRef]);
   if (!match) return null;
   const isSelfRun = tournament && tournament.mode === "self-run";
   const bothSidesReady = window.hasBothSides ? window.hasBothSides(match) : false;

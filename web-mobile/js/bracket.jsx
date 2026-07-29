@@ -349,8 +349,8 @@ function BracketConnectors({ rounds, treeRef, refMap, version }) {
 
   return (
     <svg className="bc-connectors" width={size.w} height={size.h} style={{ position: "absolute", left: 0, top: 0, pointerEvents: "none" }}>
-      {paths.map((p, i) => (
-        <path key={i} d={p.d} fill="none" stroke="var(--line-strong, #c7cdd9)" strokeWidth="1.5" />
+      {paths.map((p) => (
+        <path key={p.d} d={p.d} fill="none" stroke="var(--line-strong, #c7cdd9)" strokeWidth="1.5" />
       ))}
     </svg>
   );
@@ -552,8 +552,8 @@ function BracketConnectorsMeta({ columns, feedersById, treeRef, refMap, version,
 
   return (
     <svg className="bc-connectors" width={size.w} height={size.h} style={{ position: "absolute", left: 0, top: 0, pointerEvents: "none" }}>
-      {paths.map((p, i) => (
-        <path key={i} d={p.d} fill="none" stroke="var(--line-strong, #c7cdd9)" strokeWidth="1.5" />
+      {paths.map((p) => (
+        <path key={p.d} d={p.d} fill="none" stroke="var(--line-strong, #c7cdd9)" strokeWidth="1.5" />
       ))}
     </svg>
   );
@@ -653,6 +653,9 @@ function BracketTreeMeta({ columns, feedersById, matchNumById, variant = 1, show
     <div className={`bc-tree bc-tree--v${variant}`} ref={treeRef}>
       <BracketConnectorsMeta columns={columns} feedersById={feedersById} treeRef={treeRef} refMap={refMap} version={version} showDojo={showDojo} variant={variant} />
       {columns.map((col, ci) => (
+        // A bracket round's identity IS its ordinal position; rounds never
+        // reorder, so the column index is the correct stable key here.
+        // oxlint-disable-next-line react/no-array-index-key
         <div key={ci} className="bc-round" style={{ "--round": ci }}>
           <div className="bc-round-label">{roundLabel(ci, columns.length)}</div>
           <div className={`bc-round-matches${positioned ? " bc-round-matches--abs" : ""}`} style={matchesStyle}>
@@ -801,6 +804,9 @@ function BracketTreeLegacy({ rounds, variant = 1, showDojo = true, onMatchClick,
       {rounds.map((round, ri) => {
         const positioned = ri > 0 && cardTops;
         return (
+          // A bracket round's identity IS its ordinal position; rounds never
+          // reorder, so the round index is the correct stable key here.
+          // oxlint-disable-next-line react/no-array-index-key
           <div key={ri} className="bc-round" style={{ "--round": ri }}>
             <div className="bc-round-label">{roundLabel(ri, rounds.length)}</div>
             <div className={`bc-round-matches${positioned ? " bc-round-matches--abs" : ""}`}>

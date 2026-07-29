@@ -108,7 +108,7 @@ export function DurationInput({ seconds, onChange, onValidity, id, label, descri
     // left Save disabled on an error message that was no longer displayed
     // anywhere, with nothing on screen to fix.
     if (onValidity) onValidity(null);
-  }, [seconds]);
+  }, [seconds, onValidity]);
 
   const apply = (raw) => {
     setDraft(raw);

@@ -189,13 +189,9 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 		fmt.Println("Note: Tree sheet might not exist:", err)
 	}
 
-	depth := helper.CalculateDepth(tree)
-	eliminationMatchRounds := make([][]*helper.Node, depth-1)
-	// Get all the rounds
-	for i := depth; i > 1; i-- {
-		rounds := helper.TraverseRounds(tree, 1, i-1)
-		eliminationMatchRounds[depth-i] = rounds
-		fmt.Printf("Elimination matches for round %d: %d\n", i-1, len(eliminationMatchRounds[depth-i]))
+	eliminationMatchRounds := helper.BuildEliminationMatchRounds(tree)
+	for i, rounds := range eliminationMatchRounds {
+		fmt.Printf("Elimination matches for round %d: %d\n", len(eliminationMatchRounds)-i, len(rounds))
 	}
 
 	helper.FillInMatches(f, eliminationMatchRounds)

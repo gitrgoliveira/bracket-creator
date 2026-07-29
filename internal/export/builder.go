@@ -167,14 +167,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 			return nil, fmt.Errorf("export: %w", err)
 		}
 
-		depth := helper.CalculateDepth(tree)
-
-		// Build per-round match slices (same logic as cmd/create-pools.go).
-		eliminationMatchRounds := make([][]*helper.Node, depth-1)
-		for i := depth; i > 1; i-- {
-			rounds := helper.TraverseRounds(tree, 1, i-1)
-			eliminationMatchRounds[depth-i] = rounds
-		}
+		eliminationMatchRounds := helper.BuildEliminationMatchRounds(tree)
 
 		// Populate the Elimination Matches sheet skeleton so overlayBracketScores
 		// has "Round N - Match N" headers to scan.

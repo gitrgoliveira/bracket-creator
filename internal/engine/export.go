@@ -101,11 +101,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		//
 		//     Order matters: the tree pages above stamp each node's sheet/cell
 		//     coordinates, which FillInMatches writes the match numbers into.
-		depth := helper.CalculateDepth(tree)
-		eliminationMatchRounds := make([][]*helper.Node, depth-1)
-		for i := depth; i > 1; i-- {
-			eliminationMatchRounds[depth-i] = helper.TraverseRounds(tree, 1, i-1)
-		}
+		eliminationMatchRounds := helper.BuildEliminationMatchRounds(tree)
 		helper.FillInMatches(f, eliminationMatchRounds)
 		nextRow, elimMatchWinners := helper.PrintTeamEliminationMatches(
 			f, matchWinners, eliminationMatchRounds, comp.TeamSize, numCourts, comp.Mirror, comp.Engi,

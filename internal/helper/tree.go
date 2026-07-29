@@ -248,6 +248,23 @@ func TraverseRounds(node *Node, depth int, maxDepth int) []*Node {
 
 }
 
+// BuildEliminationMatchRounds collects the tree's internal (match) nodes into
+// per-round slices ordered earliest round first: index 0 is the deepest
+// (first-played) round and the last index is the final, matching what
+// FillInMatches and PrintTeamEliminationMatches expect. Round number =
+// len(result) - index. A tree too shallow for any match (single leaf) yields
+// an empty slice. This is the single implementation behind all four workbook
+// generators - the loop used to be copied at each call site, like the
+// tree-page rendering loop before RenderTreePages.
+func BuildEliminationMatchRounds(tree *Node) [][]*Node {
+	depth := CalculateDepth(tree)
+	rounds := make([][]*Node, 0, max(depth-1, 0))
+	for i := depth; i > 1; i-- {
+		rounds = append(rounds, TraverseRounds(tree, 1, i-1))
+	}
+	return rounds
+}
+
 // SemifinalMatchNumbers derives the two semifinal match numbers from the
 // final's children so a bronze (3rd-place) block can reference the "2."
 // loser lines via CONCATENATE formulas. Returns (0, 0) when the bracket has

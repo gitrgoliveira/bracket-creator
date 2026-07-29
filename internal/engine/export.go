@@ -6,6 +6,7 @@ import (
 
 	"github.com/gitrgoliveira/bracket-creator/internal/excel"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
+	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
 func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
@@ -66,9 +67,17 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	// used for nothing else on this path, and an unconditional load would let a
 	// corrupted bracket.json abort the export of formats (league, swiss, ...)
 	// that have zero functional dependency on that file.
+	// Load the stored bracket ONLY for the paths that actually consume it:
+	// naginata (its bronze gate) and a pure playoffs competition (its elimination
+	// leaves — mp-ndfu). Still skipped for league/swiss/mixed, whose export has
+	// zero dependency on bracket.json, so a corrupted file can never abort an
+	// export that never needed it. Bronze gates on the stored bracket's
+	// ThirdPlaceMatch exactly as the results workbook does (builder.go), so the
+	// two exports of one competition agree.
 	hasBronze := false
-	if comp.Naginata {
-		bracket, err := e.store.LoadBracket(id)
+	var bracket *state.Bracket
+	if comp.Naginata || (len(pools) == 0 && comp.Format == state.CompFormatPlayoffs) {
+		bracket, err = e.store.LoadBracket(id)
 		if err != nil {
 			return nil, err
 		}
@@ -86,6 +95,18 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	// way, so the raw 0 here rendered a blank-template printout with no
 	// knockout for the tournament actually being run (mp-0yd8).
 	finals := helper.GenerateFinals(pools, comp.EffectivePoolWinners())
+	// A pure playoffs competition has no pools, so GenerateFinals returns nothing.
+	// Derive the elimination leaves the same way the results workbook does
+	// (PlayoffLeavesFromBracket, then a participant-seeding fallback) so this
+	// blank template renders the bracket instead of an empty Elimination sheet
+	// (mp-ndfu), and its leaf order matches the results export of the same draw.
+	if len(finals) == 0 && len(pools) == 0 && comp.Format == state.CompFormatPlayoffs {
+		if leaves := PlayoffLeavesFromBracket(bracket); len(leaves) > 0 {
+			finals = leaves
+		} else {
+			finals = PlayoffFinalsFromParticipants(e.store, comp)
+		}
+	}
 	if len(finals) > 0 && comp.IsPlayoffEnabled() {
 		// 4b. Tree pages plus the Elimination Matches sheet, in the one mandatory
 		//     order RenderKnockoutPages enforces. This path used to skip the
@@ -101,9 +122,12 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		}
 		helper.PrintEliminationWithBronze(f, matchWinners, eliminationMatchRounds, comp.TeamSize, numCourts, comp.Mirror, comp.Engi, hasBronze)
 	} else if hasBronze {
-		// A pure playoffs competition has no pools, so GenerateFinals returns
-		// nothing and the block above is skipped: this path renders no bracket at
-		// all for it (mp-ndfu). The bronze block is then the only content on the
+		// Narrow fallback: a competition whose bracket has a third-place bout but
+		// yields no elimination leaves at all (no pools, no first-round entrants
+		// and no participants to seed — e.g. a bracket saved with an empty first
+		// round). The bracket-leaf/participant fallback above already covers the
+		// normal pure-playoffs case (mp-ndfu), so this only fires for that
+		// degenerate shape. The bronze block is then the only content on the
 		// sheet, rendered at court band 1, so numCourts=1 covers it exactly.
 		// nil rounds derive zero semi numbers, leaving both entrant slots
 		// hand-fillable.

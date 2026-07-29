@@ -349,6 +349,60 @@ func TestExportCompetitionXlsx_LeagueHasNoTreeSheet(t *testing.T) {
 	assert.Empty(t, treeSheets(f), "a league has no knockout, so it must export no bracket page")
 }
 
+// TestExportCompetitionXlsx_PurePlayoffsRendersBracket pins mp-ndfu: a pure
+// playoffs competition has NO pools, so helper.GenerateFinals returns nothing and
+// the blank-template export used to skip the entire knockout block -- shipping a
+// workbook (and PDF booklet) with no tree pages and an empty Elimination Matches
+// sheet. The fix derives the elimination leaves from the stored bracket
+// (PlayoffLeavesFromBracket), exactly as the results workbook does, so the two
+// exports of the same draw agree.
+func TestExportCompetitionXlsx_PurePlayoffsRendersBracket(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "pure-playoffs-bracket"
+	createTestCompetition(t, store, compID, "playoffs", 0, func(c *state.Competition) {
+		c.Courts = []string{"A"}
+	})
+	names := make([]string, 8)
+	for i := range names {
+		names[i] = fmt.Sprintf("Player%02d", i+1)
+	}
+	saveTestParticipants(t, store, compID, names)
+	require.NoError(t, eng.StartCompetition(compID))
+
+	f := openExportedWorkbook(t, eng, compID)
+
+	// (1) The bracket page(s) must be rendered, not skipped, and carry content --
+	// not left as a blank sheet.
+	pages := treeSheets(f)
+	require.NotEmpty(t, pages, "a pure playoffs competition must render its bracket page(s)")
+	nonEmpty := 0
+	rows, err := f.GetRows(pages[0])
+	require.NoError(t, err)
+	for _, row := range rows {
+		for _, c := range row {
+			if strings.TrimSpace(c) != "" {
+				nonEmpty++
+			}
+		}
+	}
+	assert.Positive(t, nonEmpty, "the bracket page must render content, not be blank")
+
+	// (2) The Elimination Matches sheet must carry the operator's score blocks.
+	// A knockout of 8 entrants is always 8-1 = 7 matches (every internal bracket
+	// node is one match, each eliminating exactly one entrant).
+	elim, err := f.GetRows(helper.SheetEliminationMatches)
+	require.NoError(t, err)
+	headers := 0
+	for _, row := range elim {
+		for _, cell := range row {
+			if strings.HasPrefix(cell, "Round ") && strings.Contains(cell, " - Match ") {
+				headers++
+			}
+		}
+	}
+	assert.Equal(t, 7, headers, "an 8-entrant playoffs knockout must render 7 elimination match blocks")
+}
+
 // TestExportTournamentWorkbooks_MultiPageTree covers the PDF pipeline's input:
 // the workbooks written for pdf.Generator come from ExportCompetitionXlsx, so
 // the printed "Pool Draw + Trees" booklet inherited the blank-page bug. The

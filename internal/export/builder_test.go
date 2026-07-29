@@ -1224,8 +1224,8 @@ func TestBuildResultsWorkbook_EndToEndEngineScored(t *testing.T) {
 // round-1 match contributes SideA then SideB in order, byes included as "".
 func TestPlayoffLeavesFromBracket(t *testing.T) {
 	t.Parallel()
-	assert.Nil(t, playoffLeavesFromBracket(nil))
-	assert.Nil(t, playoffLeavesFromBracket(&state.Bracket{}))
+	assert.Nil(t, engine.PlayoffLeavesFromBracket(nil))
+	assert.Nil(t, engine.PlayoffLeavesFromBracket(&state.Bracket{}))
 
 	br := &state.Bracket{Rounds: [][]state.BracketMatch{
 		{
@@ -1234,7 +1234,7 @@ func TestPlayoffLeavesFromBracket(t *testing.T) {
 		},
 		{{SideA: "Winner of r1-m0", SideB: "Winner of r1-m1"}},
 	}}
-	assert.Equal(t, []string{"Alice", "Dave", "Carol", ""}, playoffLeavesFromBracket(br))
+	assert.Equal(t, []string{"Alice", "Dave", "Carol", ""}, engine.PlayoffLeavesFromBracket(br))
 }
 
 // TestBuildResultsWorkbook_PlayoffsNonPow2TopologyMatchesBracket is the regression
@@ -1355,7 +1355,7 @@ func TestBuildResultsWorkbook_PlayoffsBracket(t *testing.T) {
 // mp-uagg: internal/helper.printSingleEliminationMatch used to decide leaf- vs
 // match-feeder nodes by asking whether Node.LeafVal parsed as an Excel cell
 // reference (excelize.SplitCellName). A no-pools playoffs bracket renders raw
-// participant names as leaves (playoffFinalsFromParticipants), so a competitor
+// participant names as leaves (engine.PlayoffFinalsFromParticipants), so a competitor
 // named like a cell coordinate ("P1" = column P row 1, "M3", "A4") was
 // misclassified as a match-feeder, producing a broken CONCATENATE(...,”!)
 // formula. The fix checks the structural Node.LeafNode flag instead.

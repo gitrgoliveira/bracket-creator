@@ -10,6 +10,125 @@ import (
 // for the user to add a title. Content starts below this offset.
 const TreeTitleRows = 3
 
+// TreePageLastCol returns the last spreadsheet column (1-based) a rendered tree
+// page occupies for a bracket of the given depth. PrintLeafNodes places the root
+// at column 2*depth and CreateTreeBracket draws that node's vertical line one
+// column further right; every other column of the bracket is to the left of it.
+func TreePageLastCol(depth int) int {
+	return 2*depth + 1
+}
+
+// TreePageLastRow returns the last row a bracket of the given depth occupies
+// when its root is rendered from startRow. PrintLeafNodes offsets each right
+// subtree by the current level's size (2^(level-1)), so the deepest cell sits
+// sum(2^(depth-1)..2^0) = 2^depth - 1 rows below the start.
+func TreePageLastRow(depth, startRow int) int {
+	if depth < 1 {
+		return startRow
+	}
+	return startRow + 1<<uint(depth) - 1
+}
+
+// SetTreePageLayout bounds a rendered tree page to the region actually drawn and
+// scales it onto a single page wide (a deep bracket shrinks to fit rather than
+// breaking mid-bracket onto a second sheet of paper).
+//
+// Without a print area a tree sheet printed its whole used range: the title band
+// alone is merged across many columns, and the template pre-sizes columns out to
+// Z, so LibreOffice emitted a second, near-blank physical page holding nothing
+// but the tail of the title border. Every printed booklet carried one of those
+// per bracket page.
+//
+// lastRow must cover both the bracket (TreePageLastRow) and the pool roster
+// block (the row AddPoolsToTree returns), whichever reaches further down.
+func SetTreePageLayout(f *excelize.File, sheetName string, depth, lastRow int) {
+	SetPrintArea(f, sheetName, TreePageLastCol(depth), lastRow)
+	SetSheetLayoutPortraitA4(f, sheetName)
+}
+
+// RenderTreePages renders one visual bracket page per subtree: it copies the
+// styled SheetTree template into a numbered "Tree N" sheet, titles the page by
+// its shiaijo, renders the subtree's leaves, overlays that court's pool rosters
+// (when pools are provided), and bounds the page's print area to the drawn
+// region. This is the single implementation behind the CLI (create-pools /
+// create-playoffs), the blank-template export (engine), and the results
+// workbook (export) - the loop used to be copied at each call site, and a
+// geometry fix in one had to be replicated by hand into the others.
+//
+// Passing pools drives PrintLeafNodes' pool-winner tree adjustment (winners on
+// top, byes to the seeded side) as well as the roster overlay. Callers with no
+// pool phase (create-playoffs) pass nil and get neither.
+//
+// The consumed SheetTree template is NOT deleted here: callers that skip
+// rendering entirely (a league has no knockout) must still delete it, so
+// ownership of the deletion stays with them.
+func RenderTreePages(f *excelize.File, subtrees []*Node, numCourts int, pools []Pool, poolCoords map[string]cellCoord, playerCoords map[string]playerCellCoord, matchWinners map[string]MatchWinner) error {
+	hasPools := len(pools) > 0
+	templateIdx, err := f.GetSheetIndex(SheetTree)
+	if err != nil {
+		return fmt.Errorf("find tree template sheet: %w", err)
+	}
+	// GetSheetIndex returns (-1, nil) for an absent sheet, so guard the index
+	// too rather than letting CopySheet fail with a misleading error source.
+	if templateIdx < 0 {
+		return fmt.Errorf("tree template sheet %q not found", SheetTree)
+	}
+
+	for i, subtree := range subtrees {
+		pageSheet := fmt.Sprintf("Tree %d", i+1)
+		pageIdx, err := f.NewSheet(pageSheet)
+		if err != nil {
+			return fmt.Errorf("create tree sheet %s: %w", pageSheet, err)
+		}
+		if err := f.CopySheet(templateIdx, pageIdx); err != nil {
+			return fmt.Errorf("copy tree template to %s: %w", pageSheet, err)
+		}
+
+		depth := CalculateDepth(subtree)
+		startRow := TreeTitleRows + 1
+		// The title formula prepends data!$B$1 (the user-supplied title prefix),
+		// so the page title itself is just the shiaijo label.
+		SetTreeSheetTitle(f, pageSheet, "Shiaijo "+CourtLabel(SubtreeCourtIndex(len(subtrees), numCourts, i)), TreePageLastCol(depth))
+		PrintLeafNodes(subtree, f, pageSheet, 2*depth, startRow, depth, hasPools, matchWinners)
+
+		lastRow := TreePageLastRow(depth, startRow)
+		if hasPools {
+			poolStart, poolEnd := PoolBoundsForSubtree(len(pools), numCourts, len(subtrees), i)
+			lastRow = max(lastRow, AddPoolsToTree(f, pageSheet, pools[poolStart:poolEnd], poolCoords, playerCoords))
+		}
+		SetTreePageLayout(f, pageSheet, depth, lastRow)
+	}
+	return nil
+}
+
+// RenderKnockoutPages computes the court-aware page layout for a knockout
+// tree, renders one bracket page per subtree via RenderTreePages, and numbers
+// the bracket junctions, returning the per-round match nodes (earliest round
+// first, final last) and the page count. Bundling the sequence makes its
+// ordering invariant unbreakable by construction: rendering stamps each
+// internal node's sheet/cell coordinates, which FillInMatches writes the
+// match numbers into (with a FillInMatches-first order every write is
+// silently skipped and the pages carry no numbers), and the pool-seeding
+// tree adjustment lands before the rounds are traversed, so Elimination
+// blocks always describe the same tree the pages show.
+//
+// numEntrants is the leaf count tree was built from; singleTree forces the
+// whole bracket onto one page (the CLI --single-tree flag). Deleting the
+// consumed SheetTree template stays with the caller (see RenderTreePages).
+func RenderKnockoutPages(f *excelize.File, tree *Node, numEntrants, numCourts int, singleTree bool, pools []Pool, poolCoords map[string]cellCoord, playerCoords map[string]playerCellCoord, matchWinners map[string]MatchWinner) ([][]*Node, int, error) {
+	numPages, err := TreePageLayout(numEntrants, numCourts, singleTree)
+	if err != nil {
+		return nil, 0, fmt.Errorf("compute tree page layout: %w", err)
+	}
+	subtrees := SubdivideTree(tree, numPages)
+	if err := RenderTreePages(f, subtrees, numCourts, pools, poolCoords, playerCoords, matchWinners); err != nil {
+		return nil, 0, err
+	}
+	rounds := BuildEliminationMatchRounds(tree)
+	FillInMatches(f, rounds)
+	return rounds, numPages, nil
+}
+
 func CreateTreeBracket(f *excelize.File, sheet string, col int, startRow int, size int) string {
 	borderLeftStyle := GetBorderStyleLeft(f)
 	borderBottomLeftStyle := GetBorderStyleBottomLeft(f)
@@ -47,11 +166,29 @@ func CreateTreeBracket(f *excelize.File, sheet string, col int, startRow int, si
 	return middleCell
 }
 
+// TreeLabelCol is the column every bottom-level leaf label lands in:
+// PrintLeafNodes decrements its column by 2 per level down to col=2, and
+// writeTreeValue writes at col+1 = 3 = "C". Exported because the template
+// (internal/excel/template.go setupTreeSheet) derives its column widths from
+// it — the label column must be wide so labels fit.
+const TreeLabelCol = 3
+
 func writeTreeValue(f *excelize.File, sheet string, col int, startRow int, value string, matchWinners map[string]MatchWinner) {
 	treeTextStyle := getTreeTextStyle(f)
 
 	colName := mustColumnName(col + 1)
 	cell := fmt.Sprintf("%s%d", colName, startRow)
+
+	// Bye leaves sit at shallower levels, so their value cell is one of the
+	// narrow bracket columns (E, G, ...) right of the label column. Style the
+	// whole span from column C so every leaf gets the same full-width
+	// underline+fill, not a stub under the label's last few characters. The
+	// spanned cells are always empty at a leaf's row (each leaf is alone in
+	// its band), so the right-aligned text still overflows across them.
+	styleStart := cell
+	if col+1 > TreeLabelCol {
+		styleStart = fmt.Sprintf("%s%d", mustColumnName(TreeLabelCol), startRow)
+	}
 
 	// Check if value is a pool reference and we have matchWinners
 	if matchWinners != nil {
@@ -61,7 +198,7 @@ func writeTreeValue(f *excelize.File, sheet string, col int, startRow int, value
 			if err := f.SetCellFormula(sheet, cell, formula); err != nil {
 				fmt.Printf("Warning: failed to set cell formula: %v\n", err)
 			}
-			if err := f.SetCellStyle(sheet, cell, cell, treeTextStyle); err != nil {
+			if err := f.SetCellStyle(sheet, styleStart, cell, treeTextStyle); err != nil {
 				fmt.Printf("Warning: failed to set cell style: %v\n", err)
 			}
 			return
@@ -73,14 +210,17 @@ func writeTreeValue(f *excelize.File, sheet string, col int, startRow int, value
 		fmt.Printf("Warning: failed to set cell value: %v\n", err)
 	}
 
-	if err := f.SetCellStyle(sheet, cell, cell, treeTextStyle); err != nil {
+	if err := f.SetCellStyle(sheet, styleStart, cell, treeTextStyle); err != nil {
 		fmt.Printf("Warning: failed to set cell style: %v\n", err)
 	}
 
 }
 
-func AddPoolsToTree(f *excelize.File, sheetName string, pools []Pool, poolCoords map[string]cellCoord, pCoords map[string]playerCellCoord) {
-	SetSheetLayoutPortraitA4Centered(f, sheetName)
+// AddPoolsToTree renders the roster of each pool feeding this tree page down
+// column A and returns the last row it wrote to, which the caller needs to bound
+// the page's print area (SetTreePageLayout). Page layout is the caller's job:
+// this function only writes content.
+func AddPoolsToTree(f *excelize.File, sheetName string, pools []Pool, poolCoords map[string]cellCoord, pCoords map[string]playerCellCoord) int {
 	treeHeaderStyle := getTreeHeaderStyle(f)
 	treeTopStyle := getTreeTopStyle(f)
 	treeBodyStyle := getTreeBodyStyle(f)
@@ -135,6 +275,8 @@ func AddPoolsToTree(f *excelize.File, sheetName string, pools []Pool, poolCoords
 
 	}
 
+	// row is one past the last styled cell; report the last row actually used.
+	return row - 1
 }
 
 // AssignMatchNumbers assigns sequential match numbers to all non-nil nodes in
@@ -181,13 +323,17 @@ func FillInMatches(f *excelize.File, eliminationMatchRounds [][]*Node) {
 }
 
 // SetTreeSheetTitle writes a title formula into the first row of a tree sheet,
-// spanning a wide range of columns to cover the bracket layout.
+// merged across the page's content columns (endCol, from TreePageLastCol).
 // The formula prepends the value of data!$B$1 (the user-supplied title prefix)
 // to the given title string, so editing that single cell updates all tree sheets.
-func SetTreeSheetTitle(f *excelize.File, sheetName string, title string) {
+//
+// endCol must match the rendered bracket: the merge is the widest thing on the
+// sheet, so a title merged past the last bracket column would push the page's
+// used range beyond the print area and print a near-blank extra page.
+func SetTreeSheetTitle(f *excelize.File, sheetName string, title string, endCol int) {
 	titleStyle := getPoolHeaderStyle(f)
 	startCell := "A1"
-	endCell := "P1"
+	endCell := mustColumnName(endCol) + "1"
 	formula := fmt.Sprintf(`IF(data!$B$1="","%s",data!$B$1&" - %s")`, title, title)
 	handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, startCell, formula))
 	handleExcelError("MergeCell", f.MergeCell(sheetName, startCell, endCell))

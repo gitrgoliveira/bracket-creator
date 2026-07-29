@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"strconv"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/excel"
@@ -226,17 +225,8 @@ func (o *poolOptions) createPools(entries []string) error {
 	if o.courts > numPools {
 		o.courts = numPools
 	}
-	numPages, err := helper.TreePageLayout(len(finals), o.courts, o.singleTree)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("Spread across %d tree pages\n", numPages)
-
 	// Create balanced tree
 	tree := helper.CreateBalancedTree(finals)
-
-	// divide the tree depending on the number of pages
-	subtrees := helper.SubdivideTree(tree, numPages)
 
 	// Create pool matches and get winners BEFORE creating tree sheets.
 	// Mirror the engine's authoritative PoolFormat × RoundRobin mapping
@@ -251,48 +241,11 @@ func (o *poolOptions) createPools(entries []string) error {
 	}
 	matchWinners := helper.PrintPoolMatches(f, pools, o.teamMatches, o.poolWinners, o.courts, true, poolCoords, playerCoords, o.engi)
 
-	treeSheet, err := f.GetSheetIndex(helper.SheetTree)
+	eliminationMatchRounds, numPages, err := helper.RenderKnockoutPages(f, tree, len(finals), o.courts, o.singleTree, pools, poolCoords, playerCoords, matchWinners)
 	if err != nil {
-		return fmt.Errorf("could not find Tree sheet: %w", err)
+		return err
 	}
-	// adding extra sheets
-	for i := 0; i < len(subtrees); i++ {
-		subtreeSheet := "Tree " + strconv.Itoa(i+1)
-		fmt.Printf("Adding sheet %s\n", subtreeSheet)
-		index, err := f.NewSheet(subtreeSheet)
-		if err != nil {
-			return fmt.Errorf("failed to create sheet %s: %w", subtreeSheet, err)
-		}
-		err = f.CopySheet(treeSheet, index)
-		if err != nil {
-			return fmt.Errorf("failed to copy sheet %d to %s: %w", treeSheet, subtreeSheet, err)
-		}
-
-		depth := helper.CalculateDepth(subtrees[i])
-		fmt.Printf("With tree Depth: %d\n", depth)
-		startRow := helper.TreeTitleRows + 1
-
-		courtLabel := helper.CourtLabel(helper.SubtreeCourtIndex(len(subtrees), o.courts, i))
-		helper.SetTreeSheetTitle(f, subtreeSheet, "Shiaijo "+courtLabel)
-		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, startRow, depth, true, matchWinners)
-
-		poolStart, poolEnd := helper.PoolBoundsForSubtree(len(pools), o.courts, len(subtrees), i)
-		helper.AddPoolsToTree(f, subtreeSheet, pools[poolStart:poolEnd], poolCoords, playerCoords)
-	}
-	if err := f.DeleteSheet(helper.SheetTree); err != nil {
-		fmt.Println("Note: Tree sheet might not exist:", err)
-	}
-
-	depth := helper.CalculateDepth(tree)
-	eliminationMatchRounds := make([][]*helper.Node, depth-1)
-	// Get all the rounds
-	for i := depth; i > 1; i-- {
-		rounds := helper.TraverseRounds(tree, 1, i-1)
-		eliminationMatchRounds[depth-i] = rounds
-		fmt.Printf("Elimination matches for round %d: %d\n", i-1, len(eliminationMatchRounds[depth-i]))
-	}
-
-	helper.FillInMatches(f, eliminationMatchRounds)
+	finishKnockoutPages(f, numPages, eliminationMatchRounds)
 
 	helper.CreateNamesWithPoolToPrint(f, pools, o.withZekkenName, o.courts, playerCoords)
 

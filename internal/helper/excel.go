@@ -924,16 +924,7 @@ func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinner
 		poolRow += totalPoolHeight
 	}
 
-	lastCourtStartCol := 1 + (numCourts-1)*CourtsColumnsPerCourt
-	maxColNum := lastCourtStartCol + 7
-	maxColName := mustColumnName(maxColNum)
-
-	printArea := fmt.Sprintf("'%s'!$A$1:$%s$%d", sheetName, maxColName, poolRow-1)
-	handleExcelError("SetDefinedName", f.SetDefinedName(&excelize.DefinedName{
-		Name:     "_xlnm.Print_Area",
-		RefersTo: printArea,
-		Scope:    sheetName,
-	}))
+	SetEliminationPrintArea(f, sheetName, numCourts, poolRow-1)
 
 	// Vertical page breaks before each court except the first
 	for c := 1; c < numCourts; c++ {
@@ -997,9 +988,16 @@ func matchHeaderWithStyles(f *excelize.File, sheetName string, startColName stri
 func SetEliminationPrintArea(f *excelize.File, sheetName string, numCourts, lastRow int) {
 	numCourts = clampCourts(numCourts)
 	lastCourtStartCol := 1 + (numCourts-1)*CourtsColumnsPerCourt
-	maxColNum := lastCourtStartCol + 7
-	maxColName := mustColumnName(maxColNum)
+	SetPrintArea(f, sheetName, lastCourtStartCol+7, lastRow)
+}
 
+// SetPrintArea sets (or replaces) the _xlnm.Print_Area defined name for
+// sheetName so the printed range is $A$1:$<lastCol>$<lastRow>. Without it a
+// sheet prints its whole used range, and any styled-but-empty cell to the right
+// of the content (a merged title band, a pre-sized column) spills a near-blank
+// extra page. It is idempotent: an existing definition is removed first, so
+// callers can call it again to extend the range.
+func SetPrintArea(f *excelize.File, sheetName string, lastCol, lastRow int) {
 	// DeleteDefinedName returns ErrDefinedNameScope when the name is not found;
 	// that is expected on the first call, so only surface other errors.
 	if err := f.DeleteDefinedName(&excelize.DefinedName{
@@ -1009,7 +1007,7 @@ func SetEliminationPrintArea(f *excelize.File, sheetName string, numCourts, last
 		handleExcelError("DeleteDefinedName", err)
 	}
 
-	printArea := fmt.Sprintf("'%s'!$A$1:$%s$%d", sheetName, maxColName, lastRow)
+	printArea := fmt.Sprintf("'%s'!$A$1:$%s$%d", sheetName, mustColumnName(lastCol), lastRow)
 	handleExcelError("SetDefinedName", f.SetDefinedName(&excelize.DefinedName{
 		Name:     "_xlnm.Print_Area",
 		RefersTo: printArea,
@@ -1327,11 +1325,26 @@ func PrintThirdPlaceBlock(f *excelize.File, courtStartCol, startRow, numTeamMatc
 // PrintBronzeBlockWithPrintArea renders the naginata 3rd-place block starting at
 // startRow (deriving the two semifinal match numbers from rounds) and extends the
 // Elimination Matches print area to cover it. It bundles the three-call bronze
-// protocol shared by the create-pools, create-playoffs, and results-workbook paths.
+// protocol shared by every bronze render path (CLI generators, results workbook,
+// blank-template export). nil rounds derive zero semi numbers, leaving both
+// entrant slots hand-fillable.
 func PrintBronzeBlockWithPrintArea(f *excelize.File, startRow, numTeamMatches int, mirror, engi bool, numCourts int, rounds [][]*Node, matchWinners map[string]MatchWinner) {
 	semiA, semiB := SemifinalMatchNumbers(rounds)
 	bronzeEndRow := PrintThirdPlaceBlock(f, 1, startRow, numTeamMatches, mirror, engi, semiA, semiB, matchWinners)
 	SetEliminationPrintArea(f, SheetEliminationMatches, numCourts, bronzeEndRow-1)
+}
+
+// PrintEliminationWithBronze renders the Elimination Matches blocks and, when
+// includeBronze, the bronze (3rd-place) block immediately after the last
+// round, wiring its entrant slots to the semifinal losers. The bronze gate
+// stays with the caller because it is genuinely caller-specific (the CLI
+// derives it from the naginata flag and round count via NeedsBronzeBlock; the
+// exporters from the stored bracket's ThirdPlaceMatch).
+func PrintEliminationWithBronze(f *excelize.File, matchWinners map[string]MatchWinner, rounds [][]*Node, numTeamMatches, numCourts int, mirror, engi, includeBronze bool) {
+	nextRow, elimMatchWinners := PrintTeamEliminationMatches(f, matchWinners, rounds, numTeamMatches, numCourts, mirror, engi)
+	if includeBronze {
+		PrintBronzeBlockWithPrintArea(f, nextRow, numTeamMatches, mirror, engi, numCourts, rounds, elimMatchWinners)
+	}
 }
 
 func printSingleEliminationMatch(f *excelize.File, sheetName string, eliminationMatch *Node, poolMatchWinners map[string]MatchWinner, matchWinners map[string]MatchWinner, colNames matchColumnNames, matchRow int, round int, numTeamMatches int, styles matchStyles, mirror bool, engi bool) {
@@ -1544,11 +1557,7 @@ func printNameEntries(f *excelize.File, sheetName string, entries []nameEntry, s
 	}
 
 	if len(entries) > 0 {
-		handleExcelError("SetDefinedName", f.SetDefinedName(&excelize.DefinedName{
-			Name:     "_xlnm.Print_Area",
-			RefersTo: fmt.Sprintf("'%s'!$A$1:$B$%d", sheetName, len(entries)),
-			Scope:    sheetName,
-		}))
+		SetPrintArea(f, sheetName, 2, len(entries))
 	}
 }
 
@@ -1657,24 +1666,6 @@ func SetSheetLayoutLandscapeA3(f *excelize.File, sheetName string) {
 		FitToPage: &boolTrue,
 	}); err != nil {
 		handleExcelError("SetSheetProps", err)
-	}
-
-	centerOnPage(f, sheetName)
-}
-
-// SetSheetLayoutPortraitA4Centered configures portrait A4 with print-centering.
-// Unlike SetSheetLayoutPortraitA4 it does not enable FitToPage, so smaller
-// content keeps its natural size and the horizontal/vertical centering print
-// option actually has room to take effect.
-func SetSheetLayoutPortraitA4Centered(f *excelize.File, sheetName string) {
-	size := 9 // A4
-	orientation := "portrait"
-
-	if err := f.SetPageLayout(sheetName, &excelize.PageLayoutOptions{
-		Size:        &size,
-		Orientation: &orientation,
-	}); err != nil {
-		handleExcelError("SetPageLayout", err)
 	}
 
 	centerOnPage(f, sheetName)

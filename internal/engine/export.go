@@ -22,6 +22,15 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		return nil, err
 	}
 
+	// Derived once for every court-count consumer, mirroring builder.go:
+	// clamped to 1 so a competition saved without courts still lays out as a
+	// single-court draw. (The court-band helpers also clamp internally, so
+	// this is layout intent, not panic avoidance.)
+	numCourts := len(comp.Courts)
+	if numCourts < 1 {
+		numCourts = 1
+	}
+
 	f, err := excel.NewFileFromScratch()
 	if err != nil {
 		return nil, err
@@ -39,57 +48,77 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	}
 
 	// 3. Pool Matches sheet (red/white, scoring formulas, reactive name references)
-	matchWinners := helper.PrintPoolMatches(f, pools, comp.TeamSize, comp.PoolWinners, len(comp.Courts), comp.Mirror, poolCoords, playerCoords, comp.Engi)
+	matchWinners := helper.PrintPoolMatches(f, pools, comp.TeamSize, comp.EffectivePoolWinners(), numCourts, comp.Mirror, poolCoords, playerCoords, comp.Engi)
 
-	// 4. Tree sheets
-	finals := helper.GenerateFinals(pools, comp.PoolWinners)
-	if len(finals) > 0 {
-		numPages, _ := helper.TreePageLayout(len(finals), len(comp.Courts), false)
-
-		tree := helper.CreateBalancedTree(finals)
-		subtrees := helper.SubdivideTree(tree, numPages)
-
-		for i, subtree := range subtrees {
-			sheetName := helper.SheetTree
-			if i > 0 {
-				sheetName = fmt.Sprintf("Tree %d", i+1)
-				if _, err := f.NewSheet(sheetName); err != nil {
-					return nil, err
-				}
-			}
-			// Simplified: just use the first Tree sheet for now
-			if i == 0 {
-				depth := helper.CalculateDepth(subtree)
-				helper.PrintLeafNodes(subtree, f, sheetName, 2*depth, 1, depth, true, matchWinners)
-				helper.SetTreeSheetTitle(f, sheetName, comp.Name)
-			}
+	// 4. Tree sheets: one visual bracket page per subtree, rendered exactly like
+	//    the CLI (cmd/create-pools.go) and the results workbook
+	//    (internal/export/builder.go). NewFileFromScratch creates a single styled
+	//    "Tree" template; copy it into each page so every page keeps the bracket
+	//    layout and column widths, render that page's leaves, then delete the
+	//    consumed template.
+	//
+	//    This used to render subtree 0 only and leave "Tree 2"+ as empty sheets,
+	//    silently dropping those entrants' half of the draw. It was not a
+	//    large-draw edge case: TreePageLayout raises the page count to
+	//    NextPow2(numCourts), so every competition on 2 or more courts hit it.
+	// The stored bracket is authoritative about whether this competition has a
+	// bronze (3rd-place) bout to hand-score. Load it ONLY for naginata: it is
+	// used for nothing else on this path, and an unconditional load would let a
+	// corrupted bracket.json abort the export of formats (league, swiss, ...)
+	// that have zero functional dependency on that file.
+	hasBronze := false
+	if comp.Naginata {
+		bracket, err := e.store.LoadBracket(id)
+		if err != nil {
+			return nil, err
 		}
+		hasBronze = bracket != nil && bracket.ThirdPlaceMatch != nil
 	}
 
-	// 4b. Naginata: add a "3rd Place" slot on the Elimination Matches sheet so
-	// the operator can hand-score the bronze bout on the blank template.
-	// This path renders Tree sheets via PrintLeafNodes and does not call
-	// PrintTeamEliminationMatches, so no "M N" matchWinners entries exist.
-	// Pass zero semi numbers so the entrant slots remain hand-fillable.
-	if comp.Naginata {
-		b, bErr := e.store.LoadBracket(id)
-		if bErr != nil {
-			return nil, bErr
+	// GenerateFinals returns placeholder "Pool A-1st" labels for ANY pooled
+	// format, including ones with no knockout phase, so gate on the format the
+	// way the results workbook does (builder.go, TestBuildResultsWorkbook_
+	// LeagueNoPhantomBracket); otherwise a league template grows a phantom
+	// bracket implying a knockout that will never be played.
+	// EffectivePoolWinners, not the raw field: an unset (<=0) PoolWinners runs
+	// a 2-winner knockout everywhere else (draw validation, bracket build,
+	// seeding, schedule), and the results workbook already exports it that
+	// way, so the raw 0 here rendered a blank-template printout with no
+	// knockout for the tournament actually being run (mp-0yd8).
+	finals := helper.GenerateFinals(pools, comp.EffectivePoolWinners())
+	if len(finals) > 0 && comp.IsPlayoffEnabled() {
+		// 4b. Tree pages plus the Elimination Matches sheet, in the one mandatory
+		//     order RenderKnockoutPages enforces. This path used to skip the
+		//     Elimination blocks and junction numbering entirely, shipping a
+		//     workbook (and a "full-bracket" PDF) with an entirely blank
+		//     Elimination Matches sheet and unnumbered tree pages. The bronze
+		//     block wires its entrant slots to the semi-final losers via the
+		//     real rounds and winners, exactly as the CLI and results workbook.
+		tree := helper.CreateBalancedTree(finals)
+		eliminationMatchRounds, _, err := helper.RenderKnockoutPages(f, tree, len(finals), numCourts, false, pools, poolCoords, playerCoords, matchWinners)
+		if err != nil {
+			return nil, fmt.Errorf("export: %w", err)
 		}
-		if b != nil && b.ThirdPlaceMatch != nil {
-			// The bronze block is the ONLY content on this sheet on the blank
-			// path (see comment above), and it is rendered at court band 1
-			// (courtStartCol=1). numCourts=1 therefore covers all content
-			// exactly; the competition's court count would only widen the
-			// print area with empty columns.
-			bronzeEndRow := helper.PrintThirdPlaceBlock(f, 1, 2, comp.TeamSize, comp.Mirror, comp.Engi, 0, 0, nil)
-			helper.SetEliminationPrintArea(f, helper.SheetEliminationMatches, 1, bronzeEndRow-1)
-			helper.SetSheetLayoutPortraitA4DownThenOver(f, helper.SheetEliminationMatches, 1)
-		}
+		helper.PrintEliminationWithBronze(f, matchWinners, eliminationMatchRounds, comp.TeamSize, numCourts, comp.Mirror, comp.Engi, hasBronze)
+	} else if hasBronze {
+		// A pure playoffs competition has no pools, so GenerateFinals returns
+		// nothing and the block above is skipped: this path renders no bracket at
+		// all for it (mp-ndfu). The bronze block is then the only content on the
+		// sheet, rendered at court band 1, so numCourts=1 covers it exactly.
+		// nil rounds derive zero semi numbers, leaving both entrant slots
+		// hand-fillable.
+		helper.PrintBronzeBlockWithPrintArea(f, 2, comp.TeamSize, comp.Mirror, comp.Engi, 1, nil, nil)
+		helper.SetSheetLayoutPortraitA4DownThenOver(f, helper.SheetEliminationMatches, 1)
+	}
+	// The bare "Tree" sheet is a layout scaffold, never output. Delete it whether
+	// it was copied into pages above or left unused (a format with no knockout),
+	// so no blank tree page ever reaches the workbook or the printed booklet.
+	if err := f.DeleteSheet(helper.SheetTree); err != nil {
+		return nil, fmt.Errorf("export: delete tree template sheet: %w", err)
 	}
 
 	// 5. Names to Print sheet
-	helper.CreateNamesWithPoolToPrint(f, pools, comp.EffectiveWithZekkenName(), len(comp.Courts), playerCoords)
+	helper.CreateNamesWithPoolToPrint(f, pools, comp.EffectiveWithZekkenName(), numCourts, playerCoords)
 
 	// 6. Tags sheet, pass publicURL so numbered tags get an embedded QR code.
 	// LoadTournament errors are silently ignored: a missing publicURL simply

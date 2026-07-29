@@ -147,25 +147,19 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	}
 	if len(finals) > 0 && comp.IsPlayoffEnabled() {
 		tree := helper.CreateBalancedTree(finals)
-		depth := helper.CalculateDepth(tree)
 
-		// Build per-round match slices (same logic as cmd/create-pools.go).
-		eliminationMatchRounds := make([][]*helper.Node, depth-1)
-		for i := depth; i > 1; i-- {
-			rounds := helper.TraverseRounds(tree, 1, i-1)
-			eliminationMatchRounds[depth-i] = rounds
+		// Tree sheets FIRST, then the Elimination Matches skeleton, in the one
+		// mandatory order RenderKnockoutPages enforces (also behind the CLI and
+		// the blank-template export). The skeleton's "Round N - Match N" headers
+		// are what overlayBracketScores below scans. Bronze gates on the stored
+		// bracket's ThirdPlaceMatch: the bracket is authoritative here, unlike
+		// the CLI's flag-derived NeedsBronzeBlock.
+		eliminationMatchRounds, _, err := helper.RenderKnockoutPages(f, tree, len(finals), numCourts, false, pools, poolCoords, playerCoords, matchWinners)
+		if err != nil {
+			return nil, fmt.Errorf("export: %w", err)
 		}
-
-		// Populate the Elimination Matches sheet skeleton so overlayBracketScores
-		// has "Round N - Match N" headers to scan.
-		helper.FillInMatches(f, eliminationMatchRounds)
-		nextRow, elimMatchWinners := helper.PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, comp.TeamSize, numCourts, comp.Mirror, comp.Engi)
-
-		// Naginata competitions have a bronze (3rd-place) match: render it as a
-		// separate block immediately after the last elimination round.
-		if bracket != nil && bracket.ThirdPlaceMatch != nil {
-			helper.PrintBronzeBlockWithPrintArea(f, nextRow, comp.TeamSize, comp.Mirror, comp.Engi, numCourts, eliminationMatchRounds, elimMatchWinners)
-		}
+		helper.PrintEliminationWithBronze(f, matchWinners, eliminationMatchRounds, comp.TeamSize, numCourts, comp.Mirror, comp.Engi,
+			bracket != nil && bracket.ThirdPlaceMatch != nil)
 
 		// Overlay literal scores from the live bracket state.
 		if bracket != nil {
@@ -184,51 +178,13 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 				}
 			}
 		}
-
-		// Tree sheets: one visual bracket page per subtree. NewFileFromScratch
-		// creates a single styled "Tree" template; copy it into each page so every
-		// page keeps the bracket layout, render that page's leaf nodes, then delete
-		// the consumed template. This mirrors the CLI (cmd/create-pools.go) and,
-		// unlike the previous implementation, populates ALL pages for large brackets
-		// (>16 finalists) instead of leaving "Tree 2"+ blank.
-		numPages, perr := helper.TreePageLayout(len(finals), numCourts, false)
-		if perr != nil {
-			return nil, fmt.Errorf("export: compute tree page layout: %w", perr)
-		}
-		subtrees := helper.SubdivideTree(tree, numPages)
-		treeTemplateIdx, terr := f.GetSheetIndex(helper.SheetTree)
-		if terr != nil {
-			return nil, fmt.Errorf("export: find tree template sheet: %w", terr)
-		}
-		// GetSheetIndex returns (-1, nil) for an absent sheet, so guard the index too
-		// rather than letting CopySheet later fail with a misleading error source.
-		if treeTemplateIdx < 0 {
-			return nil, fmt.Errorf("export: tree template sheet %q not found", helper.SheetTree)
-		}
-		for i, subtree := range subtrees {
-			pageSheet := fmt.Sprintf("Tree %d", i+1)
-			pageIdx, nerr := f.NewSheet(pageSheet)
-			if nerr != nil {
-				return nil, fmt.Errorf("export: create tree sheet %s: %w", pageSheet, nerr)
-			}
-			if cerr := f.CopySheet(treeTemplateIdx, pageIdx); cerr != nil {
-				return nil, fmt.Errorf("export: copy tree template to %s: %w", pageSheet, cerr)
-			}
-			d := helper.CalculateDepth(subtree)
-			helper.PrintLeafNodes(subtree, f, pageSheet, 2*d, helper.TreeTitleRows+1, d, true, matchWinners)
-			// Title the page by its shiaijo, like the blank-template export. The
-			// title formula prepends data!$B$1 (already the competition name), so
-			// passing comp.Name here would render "Name - Name" duplicated.
-			courtLabel := helper.CourtLabel(helper.SubtreeCourtIndex(len(subtrees), numCourts, i))
-			helper.SetTreeSheetTitle(f, pageSheet, "Shiaijo "+courtLabel)
-			if len(pools) > 0 {
-				poolStart, poolEnd := helper.PoolBoundsForSubtree(len(pools), numCourts, len(subtrees), i)
-				helper.AddPoolsToTree(f, pageSheet, pools[poolStart:poolEnd], poolCoords, playerCoords)
-			}
-		}
-		if derr := f.DeleteSheet(helper.SheetTree); derr != nil {
-			return nil, fmt.Errorf("export: delete tree template sheet: %w", derr)
-		}
+	}
+	// The bare "Tree" sheet is a styled scaffold that every page is copied from,
+	// never output itself. Delete it whether it was consumed above or left unused
+	// by a format with no knockout phase, so no blank tree page reaches the
+	// workbook or the printed booklet.
+	if derr := f.DeleteSheet(helper.SheetTree); derr != nil {
+		return nil, fmt.Errorf("export: delete tree template sheet: %w", derr)
 	}
 
 	// 5. Names to Print sheet (identical to blank-template export).

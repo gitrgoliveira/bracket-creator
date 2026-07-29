@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"strconv"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/excel"
@@ -168,61 +167,16 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	if roughPages, _ := helper.RoundToPowerOf2(float64(len(names)), float64(helper.MaxPlayersPerTree)); o.courts > roughPages && roughPages > 0 {
 		o.courts = roughPages
 	}
-	numPages, err := helper.TreePageLayout(len(names), o.courts, o.singleTree)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("Spread across %d tree pages\n", numPages)
-
 	// Create balanced tree
 	tree := helper.CreateBalancedTree(names)
 
-	// divide the tree depending on the number of pages
-	subtrees := helper.SubdivideTree(tree, numPages)
-
-	treeSheet, err := f.GetSheetIndex(helper.SheetTree)
+	// A playoffs bracket has no pools: nil pools skips the roster overlay and
+	// the pool-winner tree adjustment.
+	eliminationMatchRounds, numPages, err := helper.RenderKnockoutPages(f, tree, len(names), o.courts, o.singleTree, nil, nil, nil, nil)
 	if err != nil {
-		return fmt.Errorf("could not find Tree sheet: %w", err)
+		return err
 	}
-
-	// adding extra sheets
-	for i := 0; i < len(subtrees); i++ {
-		subtreeSheet := "Tree " + strconv.Itoa(i+1)
-		fmt.Printf("Adding sheet %s\n", subtreeSheet)
-		index, err := f.NewSheet(subtreeSheet)
-		if err != nil {
-			return fmt.Errorf("failed to create sheet %s: %w", subtreeSheet, err)
-		}
-		err = f.CopySheet(treeSheet, index)
-		if err != nil {
-			return fmt.Errorf("failed to copy sheet %d to %s: %w", treeSheet, subtreeSheet, err)
-		}
-
-		depth := helper.CalculateDepth(subtrees[i])
-		fmt.Printf("With tree Depth: %d\n", depth)
-		startRow := helper.TreeTitleRows + 1
-		// Group consecutive tree sheets under the same Shiaijo label
-		if len(subtrees) > 0 {
-			helper.SetTreeSheetTitle(f, subtreeSheet, "Shiaijo "+helper.CourtLabel(helper.SubtreeCourtIndex(len(subtrees), o.courts, i)))
-		}
-
-		helper.PrintLeafNodes(subtrees[i], f, subtreeSheet, depth*2, startRow, depth, false, nil)
-	}
-	if err := f.DeleteSheet(helper.SheetTree); err != nil {
-		// Ignore sheet not exist error
-		fmt.Println("Note: Tree sheet might not exist:", err)
-	}
-
-	depth := helper.CalculateDepth(tree)
-	eliminationMatchRounds := make([][]*helper.Node, depth-1)
-	// Get all the rounds
-	for i := depth; i > 1; i-- {
-		rounds := helper.TraverseRounds(tree, 1, i-1)
-		eliminationMatchRounds[depth-i] = rounds
-		fmt.Printf("Elimination matches for round %d: %d\n", i-1, len(eliminationMatchRounds[depth-i]))
-	}
-
-	helper.FillInMatches(f, eliminationMatchRounds)
+	finishKnockoutPages(f, numPages, eliminationMatchRounds)
 
 	var matchWinners map[string]helper.MatchWinner
 	if err := f.DeleteSheet(helper.SheetPoolDraw); err != nil {

@@ -15,9 +15,21 @@ import (
 // its print area. Shared by create-pools and create-playoffs, which both run the
 // bronze on the same court set with mirror=true.
 func printEliminationWithBronze(f *excelize.File, matchWinners map[string]helper.MatchWinner, rounds [][]*helper.Node, teamMatches, courts int, engi, naginata bool) {
-	nextRow, elimMatchWinners := helper.PrintTeamEliminationMatches(f, matchWinners, rounds, teamMatches, courts, true, engi)
-	if helper.NeedsBronzeBlock(naginata, len(rounds)) {
-		helper.PrintBronzeBlockWithPrintArea(f, nextRow, teamMatches, true, engi, courts, rounds, elimMatchWinners)
+	helper.PrintEliminationWithBronze(f, matchWinners, rounds, teamMatches, courts, true, engi, helper.NeedsBronzeBlock(naginata, len(rounds)))
+}
+
+// finishKnockoutPages runs the CLI epilogue shared by create-pools and
+// create-playoffs after RenderKnockoutPages: log the page spread, delete the
+// consumed tree template (deletion is caller-owned, see RenderTreePages), and
+// log the per-round elimination match counts (round numbers count down toward
+// the final, the last entry in rounds).
+func finishKnockoutPages(f *excelize.File, numPages int, rounds [][]*helper.Node) {
+	fmt.Printf("Spread across %d tree pages\n", numPages)
+	if err := f.DeleteSheet(helper.SheetTree); err != nil {
+		fmt.Println("Note: Tree sheet might not exist:", err)
+	}
+	for i, r := range rounds {
+		fmt.Printf("Elimination matches for round %d: %d\n", len(rounds)-i, len(r))
 	}
 }
 
@@ -25,7 +37,10 @@ func printEliminationWithBronze(f *excelize.File, matchWinners map[string]helper
 // returns the file and a buffered writer over it. The caller must defer
 // both Close and Flush.
 func openOutputFile(outputPath string) (*os.File, *bufio.Writer, error) {
-	f, err := os.OpenFile(outputPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600) // #nosec G304, path is user-supplied CLI argument
+	// O_TRUNC, not O_APPEND: each generator writes one complete workbook, and
+	// appending to an existing .xlsx silently doubles the file on every re-run
+	// with the same -o path (zip readers only see the trailing copy).
+	f, err := os.OpenFile(outputPath, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0600) // #nosec G304, path is user-supplied CLI argument
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to open output file: %w", err)
 	}

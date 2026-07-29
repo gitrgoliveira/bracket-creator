@@ -1603,3 +1603,58 @@ func TestSemifinalMatchNumbers(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildEliminationMatchRounds(t *testing.T) {
+	names := func(n int) []string {
+		out := make([]string, n)
+		for i := range out {
+			out[i] = fmt.Sprintf("P%d", i+1)
+		}
+		return out
+	}
+
+	tests := []struct {
+		name       string
+		numPlayers int
+		// per-round match counts, earliest round first, final last
+		wantRoundSizes []int
+	}{
+		{"single leaf has no matches", 1, []int{}},
+		{"two players", 2, []int{1}},
+		{"unbalanced three players", 3, []int{1, 1}},
+		{"balanced four players", 4, []int{2, 1}},
+		{"unbalanced six players", 6, []int{2, 2, 1}},
+		{"balanced eight players", 8, []int{4, 2, 1}},
+		{"unbalanced twelve players", 12, []int{4, 4, 2, 1}},
+		{"balanced sixteen players", 16, []int{8, 4, 2, 1}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tree := CreateBalancedTree(names(tt.numPlayers))
+			got := BuildEliminationMatchRounds(tree)
+
+			require.Len(t, got, len(tt.wantRoundSizes))
+			for i, want := range tt.wantRoundSizes {
+				assert.Len(t, got[i], want, "round index %d", i)
+			}
+
+			// Equivalence with the historical inline construction at the four
+			// generator call sites: rounds[depth-i] = TraverseRounds(tree, 1, i-1).
+			depth := CalculateDepth(tree)
+			for i := depth; i > 1; i-- {
+				assert.Equal(t, TraverseRounds(tree, 1, i-1), got[depth-i], "round for maxDepth %d", i-1)
+			}
+
+			if len(got) > 0 {
+				final := got[len(got)-1]
+				require.Len(t, final, 1, "the last index must be the final")
+				assert.Same(t, tree, final[0], "the final is the tree root")
+			}
+		})
+	}
+
+	t.Run("nil tree", func(t *testing.T) {
+		assert.Empty(t, BuildEliminationMatchRounds(nil))
+	})
+}

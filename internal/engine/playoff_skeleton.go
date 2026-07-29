@@ -16,6 +16,15 @@ import (
 // bracket generation, because internal/export already imports engine (the reverse
 // import would be a cycle).
 
+// isPurePlayoffs reports whether comp runs a standalone elimination bracket with
+// no pool phase -- the case where helper.GenerateFinals yields nothing and the
+// leaves must come from the stored bracket / participant seeding instead. Both
+// the bracket-load guard (export.go) and EliminationLeaves gate on this exact
+// condition, so it lives in one predicate rather than two hand-copied literals.
+func isPurePlayoffs(comp *state.Competition, pools []helper.Pool) bool {
+	return len(pools) == 0 && comp.Format == state.CompFormatPlayoffs
+}
+
 // EliminationLeaves returns the elimination-tree leaf order for a competition's
 // knockout phase. It is the single owner of the leaf derivation so the blank-
 // template export (Engine.ExportCompetitionXlsx) and the results export
@@ -36,7 +45,7 @@ import (
 // load it.
 func EliminationLeaves(store *state.Store, comp *state.Competition, pools []helper.Pool, bracket *state.Bracket) []string {
 	finals := helper.GenerateFinals(pools, comp.EffectivePoolWinners())
-	if len(finals) == 0 && len(pools) == 0 && comp.Format == state.CompFormatPlayoffs {
+	if len(finals) == 0 && isPurePlayoffs(comp, pools) {
 		if leaves := PlayoffLeavesFromBracket(bracket); len(leaves) > 0 {
 			return leaves
 		}

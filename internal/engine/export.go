@@ -71,7 +71,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	// two exports of one competition agree.
 	hasBronze := false
 	var bracket *state.Bracket
-	if comp.Naginata || (len(pools) == 0 && comp.Format == state.CompFormatPlayoffs) {
+	if comp.Naginata || isPurePlayoffs(comp, pools) {
 		bracket, err = e.store.LoadBracket(id)
 		if err != nil {
 			return nil, err

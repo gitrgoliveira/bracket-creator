@@ -1669,24 +1669,6 @@ func SetSheetLayoutLandscapeA3(f *excelize.File, sheetName string) {
 	centerOnPage(f, sheetName)
 }
 
-// SetSheetLayoutPortraitA4Centered configures portrait A4 with print-centering.
-// Unlike SetSheetLayoutPortraitA4 it does not enable FitToPage, so smaller
-// content keeps its natural size and the horizontal/vertical centering print
-// option actually has room to take effect.
-func SetSheetLayoutPortraitA4Centered(f *excelize.File, sheetName string) {
-	size := 9 // A4
-	orientation := "portrait"
-
-	if err := f.SetPageLayout(sheetName, &excelize.PageLayoutOptions{
-		Size:        &size,
-		Orientation: &orientation,
-	}); err != nil {
-		handleExcelError("SetPageLayout", err)
-	}
-
-	centerOnPage(f, sheetName)
-}
-
 func SetSheetLayoutPortraitA4DownThenOver(f *excelize.File, sheetName string, numCourts int) {
 	// 9 = A4
 	size := 9

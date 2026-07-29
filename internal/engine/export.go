@@ -60,12 +60,18 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		numCourts = 1
 	}
 	// The stored bracket is authoritative about whether this competition has a
-	// bronze (3rd-place) bout to hand-score.
-	bracket, err := e.store.LoadBracket(id)
-	if err != nil {
-		return nil, err
+	// bronze (3rd-place) bout to hand-score. Load it ONLY for naginata: it is
+	// used for nothing else on this path, and an unconditional load would let a
+	// corrupted bracket.json abort the export of formats (league, swiss, ...)
+	// that have zero functional dependency on that file.
+	hasBronze := false
+	if comp.Naginata {
+		bracket, err := e.store.LoadBracket(id)
+		if err != nil {
+			return nil, err
+		}
+		hasBronze = bracket != nil && bracket.ThirdPlaceMatch != nil
 	}
-	hasBronze := comp.Naginata && bracket != nil && bracket.ThirdPlaceMatch != nil
 
 	// GenerateFinals returns placeholder "Pool A-1st" labels for ANY pooled
 	// format, including ones with no knockout phase, so gate on the format the

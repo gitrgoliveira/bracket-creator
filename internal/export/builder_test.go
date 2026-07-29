@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -1979,6 +1980,30 @@ func TestBuildResultsWorkbook_MultiPageTreePopulated(t *testing.T) {
 		}
 		assert.Truef(t, found, "%s must define a print area", page)
 	}
+
+	// The tree pages must carry the junction match numbers the operator calls
+	// matches by. FillInMatches only writes a node's number when PrintLeafNodes
+	// has stamped its sheet/cell coordinates, so with the old order (rounds
+	// traversed and FillInMatches run BEFORE RenderTreePages) every junction
+	// write was silently skipped and the pages showed a bare bracket. A
+	// 32-entry draw is 31 matches; all but the cross-page final are on a page.
+	numbered := 0
+	for _, page := range []string{"Tree 1", "Tree 2"} {
+		rows, rerr := f.GetRows(page)
+		require.NoError(t, rerr)
+		pageNumbered := 0
+		for _, row := range rows {
+			for _, cell := range row {
+				if _, aerr := strconv.Atoi(cell); aerr == nil && cell != "" {
+					pageNumbered++
+				}
+			}
+		}
+		assert.Positivef(t, pageNumbered, "%s must carry match numbers on its bracket junctions", page)
+		numbered += pageNumbered
+	}
+	assert.Equal(t, 30, numbered,
+		"all 31 matches except the cross-page final must be numbered on the tree pages")
 }
 
 // TestWriteTeamSubMatchScores_OutOfRangePositionSkipped verifies the upper-bound

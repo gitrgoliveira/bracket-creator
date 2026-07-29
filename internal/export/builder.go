@@ -147,6 +147,26 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	}
 	if len(finals) > 0 && comp.IsPlayoffEnabled() {
 		tree := helper.CreateBalancedTree(finals)
+
+		// Tree sheets FIRST: one visual bracket page per subtree, rendered by the
+		// shared helper.RenderTreePages (also behind the CLI and the
+		// blank-template export). Order matters, same as those callers:
+		// PrintLeafNodes stamps each internal node's sheet/cell coordinates,
+		// which FillInMatches below writes the junction match numbers into
+		// (with the old FillInMatches-first order every write was silently
+		// skipped and the tree pages carried no match numbers), and it applies
+		// the pool-seeding treeAdjustment, so traversing the rounds before it
+		// would render the Elimination blocks from a differently-ordered tree
+		// than the pages show.
+		numPages, perr := helper.TreePageLayout(len(finals), numCourts, false)
+		if perr != nil {
+			return nil, fmt.Errorf("export: compute tree page layout: %w", perr)
+		}
+		subtrees := helper.SubdivideTree(tree, numPages)
+		if err := helper.RenderTreePages(f, subtrees, numCourts, pools, poolCoords, playerCoords, matchWinners, true); err != nil {
+			return nil, fmt.Errorf("export: %w", err)
+		}
+
 		depth := helper.CalculateDepth(tree)
 
 		// Build per-round match slices (same logic as cmd/create-pools.go).
@@ -183,19 +203,6 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 					return nil, fmt.Errorf("export: overlay playoff names: %w", err)
 				}
 			}
-		}
-
-		// Tree sheets: one visual bracket page per subtree, rendered by the shared
-		// helper.RenderTreePages (also behind the CLI and the blank-template
-		// export). Unlike the pre-mp-e8ck implementation, this populates ALL
-		// pages for multi-page brackets instead of leaving "Tree 2"+ blank.
-		numPages, perr := helper.TreePageLayout(len(finals), numCourts, false)
-		if perr != nil {
-			return nil, fmt.Errorf("export: compute tree page layout: %w", perr)
-		}
-		subtrees := helper.SubdivideTree(tree, numPages)
-		if err := helper.RenderTreePages(f, subtrees, numCourts, pools, poolCoords, playerCoords, matchWinners, true); err != nil {
-			return nil, fmt.Errorf("export: %w", err)
 		}
 	}
 	// The bare "Tree" sheet is a styled scaffold that every page is copied from,

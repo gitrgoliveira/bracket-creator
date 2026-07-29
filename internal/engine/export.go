@@ -121,9 +121,9 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		// nothing and the block above is skipped: this path renders no bracket at
 		// all for it (mp-ndfu). The bronze block is then the only content on the
 		// sheet, rendered at court band 1, so numCourts=1 covers it exactly.
-		// Zero semi numbers leave both entrant slots hand-fillable.
-		bronzeEndRow := helper.PrintThirdPlaceBlock(f, 1, 2, comp.TeamSize, comp.Mirror, comp.Engi, 0, 0, nil)
-		helper.SetEliminationPrintArea(f, helper.SheetEliminationMatches, 1, bronzeEndRow-1)
+		// nil rounds derive zero semi numbers, leaving both entrant slots
+		// hand-fillable.
+		helper.PrintBronzeBlockWithPrintArea(f, 2, comp.TeamSize, comp.Mirror, comp.Engi, 1, nil, nil)
 		helper.SetSheetLayoutPortraitA4DownThenOver(f, helper.SheetEliminationMatches, 1)
 	}
 	// The bare "Tree" sheet is a layout scaffold, never output. Delete it whether

@@ -166,11 +166,12 @@ func CreateTreeBracket(f *excelize.File, sheet string, col int, startRow int, si
 	return middleCell
 }
 
-// treeLabelColNum is the column every bottom-level leaf label lands in:
+// TreeLabelCol is the column every bottom-level leaf label lands in:
 // PrintLeafNodes decrements its column by 2 per level down to col=2, and
-// writeTreeValue writes at col+1 = 3 = "C". The template sizes this column
-// wide (internal/excel/template.go setupTreeSheet) so labels fit.
-const treeLabelColNum = 3
+// writeTreeValue writes at col+1 = 3 = "C". Exported because the template
+// (internal/excel/template.go setupTreeSheet) derives its column widths from
+// it — the label column must be wide so labels fit.
+const TreeLabelCol = 3
 
 func writeTreeValue(f *excelize.File, sheet string, col int, startRow int, value string, matchWinners map[string]MatchWinner) {
 	treeTextStyle := getTreeTextStyle(f)
@@ -185,8 +186,8 @@ func writeTreeValue(f *excelize.File, sheet string, col int, startRow int, value
 	// spanned cells are always empty at a leaf's row (each leaf is alone in
 	// its band), so the right-aligned text still overflows across them.
 	styleStart := cell
-	if col+1 > treeLabelColNum {
-		styleStart = fmt.Sprintf("%s%d", mustColumnName(treeLabelColNum), startRow)
+	if col+1 > TreeLabelCol {
+		styleStart = fmt.Sprintf("%s%d", mustColumnName(TreeLabelCol), startRow)
 	}
 
 	// Check if value is a pool reference and we have matchWinners

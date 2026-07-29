@@ -322,8 +322,12 @@ func setupTreeSheet(f *excelize.File) {
 	// exactly the part that says which pool feeds the slot.
 	logSetupErr("col A", f.SetColWidth(s, "A", "A", 25))
 	logSetupErr("col B", f.SetColWidth(s, "B", "B", 4))
-	logSetupErr("col C", f.SetColWidth(s, "C", "C", 28))
-	logSetupErr("col D-Z", f.SetColWidth(s, "D", "Z", 3.5))
+	labelCol, lcErr := excelize.ColumnNumberToName(helper.TreeLabelCol)
+	logSetupErr("label col name", lcErr)
+	bracketCol, bcErr := excelize.ColumnNumberToName(helper.TreeLabelCol + 1)
+	logSetupErr("bracket col name", bcErr)
+	logSetupErr("label col width", f.SetColWidth(s, labelCol, labelCol, 28))
+	logSetupErr("bracket cols width", f.SetColWidth(s, bracketCol, "Z", 3.5))
 
 	// Page layout: A4 portrait, matches the original template.
 	logSetupErr("SetPageLayout", f.SetPageLayout(s, &excelize.PageLayoutOptions{

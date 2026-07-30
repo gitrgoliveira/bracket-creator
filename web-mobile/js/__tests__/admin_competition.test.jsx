@@ -365,6 +365,9 @@ describe('AdminSettings useEffect deps completeness (H3 regression)', () => {
     // mp-m5kf: the m:ss DurationInput binds to the canonical *Seconds fields.
     // The whole-minute siblings were retired and are no longer on the wire.
     'poolMatchDurationSeconds', 'playoffMatchDurationSeconds',
+    // mp-9k3v: engi qualifies under BOTH (a) and (b): the JSX reads
+    // `local.engi` for the Engi checkbox, and finalNext round-trips it.
+    'engi',
   ];
 
   it('useEffect deps include every field rendered via local.*', () => {
@@ -452,6 +455,11 @@ describe('AdminSettings.saveNow payload whitelist', () => {
     // Naginata support: round-trips the flag so a settings save doesn't
     // clobber a previously-set naginata: true with Go's zero-value false.
     'naginata',
+    // mp-9k3v: engi (flag-scoring kata pairs). Same zero-value-clobber
+    // hazard as naginata/mirror, with a second failure mode: past setup the
+    // backend REJECTS a mismatched engi ("engi can only be changed before the
+    // competition starts"), so omitting it broke every settings save outright.
+    'engi',
     // mp-6nq: per-competition check-in tracking flag.
     'checkInEnabled',
     // Phase 3b (mp-8rc9): league tie-breaker config. Only meaningful for
@@ -504,6 +512,62 @@ describe('AdminSettings.saveNow payload whitelist', () => {
     }
     for (const forbidden of FORBIDDEN) {
       expect(keys.includes(forbidden), `finalNext must NOT include "${forbidden}": that field is server-managed via a dedicated endpoint, not settings`).toBe(false);
+    }
+  });
+
+  // ── Cross-language drift guard (mp-9k3v) ────────────────────────────────
+  //
+  // The settings transform in handlers_competition.go merges the bound body
+  // onto disk with unconditional `current.X = comp.X` assignments. A field
+  // the PUT body omits therefore decodes to Go's ZERO VALUE and clobbers the
+  // stored value: that is one bug shape (mirror, teamMatchType, naginata all
+  // carry comments saying so). Engi added a second, worse shape: it is also
+  // guarded by `if started && comp.Engi != current.Engi { reject }`, so an
+  // omitted `engi` didn't merely clobber, it made EVERY settings save fail on
+  // a started competition with a message about a control the operator never
+  // touched.
+  //
+  // Rather than re-discovering that per field, pin the invariant directly:
+  // every field the Go transform copies unconditionally MUST appear in
+  // finalNext. This test reads both sides, so it fails the moment a new
+  // backend field is added without a matching round-trip.
+  it('every field the Go settings transform copies is round-tripped by finalNext', () => {
+    const goSrc = readFileSync(
+      resolve(__dirname, '..', '..', '..', 'internal', 'mobileapp', 'handlers_competition.go'),
+      'utf8'
+    );
+    // `current.<Field> = comp.<Field>` — the unconditional merge assignments.
+    const copied = new Set();
+    const re = /current\.([A-Za-z0-9_]+)\s*=\s*comp\.\1\b/g;
+    let m;
+    while ((m = re.exec(goSrc)) !== null) copied.add(m[1]);
+    expect(copied.size, 'parsed no `current.X = comp.X` assignments: the transform moved or was rewritten').toBeGreaterThan(10);
+
+    // Every json tag on state.Competition is lowerCamelCase(GoFieldName),
+    // verified against internal/state/models.go.
+    const jsonName = (s) => s.charAt(0).toLowerCase() + s.slice(1);
+
+    const jsSrc = readFileSync(
+      resolve(__dirname, '..', 'admin_competition_settings.jsx'),
+      'utf8'
+    );
+    const fnMatch = jsSrc.match(/const finalNext = \{([\s\S]*?)\n\s*\};/);
+    expect(fnMatch, 'expected `const finalNext = { ... };` in saveNow').not.toBeNull();
+    const keys = new Set();
+    for (const line of fnMatch[1].split('\n')) {
+      const k = line.match(/^\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*:/);
+      if (k) keys.add(k[1]);
+    }
+
+    for (const field of copied) {
+      const want = jsonName(field);
+      expect(
+        keys.has(want),
+        `handlers_competition.go copies current.${field} = comp.${field}, but finalNext omits "${want}". ` +
+        `An omitted field JSON-decodes to Go's zero value and clobbers the stored setting on every save ` +
+        `(and, if the field also has a started-state change guard, rejects the save outright). ` +
+        `Add "${want}" to finalNext (round-tripped from effective.${want}) and to ALLOWED above.`
+      ).toBe(true);
     }
   });
 

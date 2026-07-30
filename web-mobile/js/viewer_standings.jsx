@@ -324,7 +324,7 @@ export function LeagueStandingsViewer({ competition, poolMatches, tweaks, onMatc
               {(poolMatches || []).map((m, idx) => {
                 if (isTeam) {
                   const isRepBout = isSupplementaryBout(m.id || "");
-                  const enriched = { ...m, phase: "pool", poolName: m.poolName || "", phaseName: m.poolName || "", compFormat: competition.format, compId: competition.id, compName: competition.name, compKind: isRepBout ? "" : competition.kind, teamSize: isRepBout ? 0 : competition.teamSize, teamMatchType: isRepBout ? "" : compTMT };
+                  const enriched = { ...m, phase: "pool", poolName: m.poolName || "", phaseName: m.poolName || "", compFormat: competition.format, compId: competition.id, compName: competition.name, compKind: isRepBout ? "" : competition.kind, teamSize: isRepBout ? 0 : competition.teamSize, compEngi: isRepBout ? false : isEngi, teamMatchType: isRepBout ? "" : compTMT };
                   return (
                     <PoolNumberedMatchRow
                       key={m.id}
@@ -334,7 +334,7 @@ export function LeagueStandingsViewer({ competition, poolMatches, tweaks, onMatc
                     />
                   );
                 } else {
-                  const enriched = { ...m, phase: "pool", poolName: m.poolName || "", phaseName: m.poolName || "", compFormat: competition.format, compId: competition.id, compName: competition.name, compKind: "", teamSize: 0 };
+                  const enriched = { ...m, phase: "pool", poolName: m.poolName || "", phaseName: m.poolName || "", compFormat: competition.format, compId: competition.id, compName: competition.name, compKind: "", teamSize: 0, compEngi: isEngi };
                   return (
                     <PoolNumberedMatchRow
                       key={m.id}
@@ -391,7 +391,11 @@ PoolMatchRow.displayName = "PoolMatchRow";
 
 // Round-robin matrix for a single pool/league. Each off-diagonal cell shows the
 // row player's result (W/L/X) against the column player; diagonal cells are self.
-export function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayers }) {
+// isEngi is threaded in as a prop (rather than read off a `competition` object,
+// which this component does not take) so a cell click can stamp compEngi on the
+// enriched match: ScoreEditorModal dispatches to the flag editor purely on
+// m.compEngi, with no fallback fetch of the competition config.
+export function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayers, isEngi = false }) {
   const players = pool.players || [];
   if (players.length < 2) return null;
 
@@ -437,7 +441,7 @@ export function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPla
     return parts.length > 1 ? parts[0][0] + ". " + parts.slice(1).join(" ") : n;
   };
 
-  const enrichMatch = (m) => ({ ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compFormat: m.compFormat, compName: m.compName, compKind: "", teamSize: 0 });
+  const enrichMatch = (m) => ({ ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compFormat: m.compFormat, compName: m.compName, compKind: "", teamSize: 0, compEngi: isEngi });
 
   const handleCellClick = (m) => { if (onMatchClick) onMatchClick(enrichMatch(m)); };
 
@@ -817,7 +821,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                       // bout even in a team comp, so force compKind/teamSize to route
                       // it to the individual editor (matches enrichPoolMatchWithComp).
                       const isRepBout = isSupplementaryBout(m.id || "");
-                      const enriched = { ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compFormat: competition.format, compId: competition.id, compName: competition.name, compKind: isRepBout ? "" : competition.kind, teamSize: isRepBout ? 0 : competition.teamSize, teamMatchType: isRepBout ? "" : compTMT };
+                      const enriched = { ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compFormat: competition.format, compId: competition.id, compName: competition.name, compKind: isRepBout ? "" : competition.kind, teamSize: isRepBout ? 0 : competition.teamSize, compEngi: isRepBout ? false : isEngi, teamMatchType: isRepBout ? "" : compTMT };
                       return (
                         <PoolNumberedMatchRow
                           key={m.id}
@@ -828,7 +832,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                       );
                     } else {
                       // Individual or engi: delegates name/pair rendering to PoolNumberedMatchRow (isEngi passed through for name stacking)
-                      const enriched = { ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compFormat: competition.format, compId: competition.id, compName: competition.name, compKind: "", teamSize: 0 };
+                      const enriched = { ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compFormat: competition.format, compId: competition.id, compName: competition.name, compKind: "", teamSize: 0, compEngi: isEngi };
                       return (
                         <PoolNumberedMatchRow
                           key={m.id}
@@ -847,7 +851,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
             {/* Round-robin matrix: optional grid below the match list (individual only) */}
             {matches.length > 0 && !isTeam && (
               <div style={{ marginTop: 4 }}>
-                <LeagueMatrix pool={pool} matches={matches} tweaks={tweaks} onMatchClick={onMatchClick} highlightPlayers={highlightPlayers} />
+                <LeagueMatrix pool={pool} matches={matches} tweaks={tweaks} onMatchClick={onMatchClick} highlightPlayers={highlightPlayers} isEngi={isEngi} />
               </div>
             )}
           </div>

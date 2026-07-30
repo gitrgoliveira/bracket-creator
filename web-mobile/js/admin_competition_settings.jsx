@@ -131,7 +131,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       });
       return next;
     });
-  }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind, c.mirror, c.status, c.poolFormat, c.poolMatchDurationSeconds, c.playoffMatchDurationSeconds, c.swissRounds, c.swissCurrentRound, c.naginata, c.checkInEnabled, c.leagueTiebreakTopN, c.leagueTwoThirdPlaces, c.teamMatchType]);
+  }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind, c.mirror, c.status, c.poolFormat, c.poolMatchDurationSeconds, c.playoffMatchDurationSeconds, c.swissRounds, c.swissCurrentRound, c.naginata, c.engi, c.checkInEnabled, c.leagueTiebreakTopN, c.leagueTwoThirdPlaces, c.teamMatchType]);
 
   const saveNow = () => {
     // Build `effective` from the LATEST server-known state (cRef.current)
@@ -280,6 +280,16 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       // value before the user types a valid replacement).
       swissRounds: safeInt(effective.swissRounds, latestC.swissRounds || 0),
       naginata: !!effective.naginata,
+      // Engi (flag-scoring kata pairs). Round-tripped for the same reason as
+      // `mirror` and `teamMatchType`: the backend transform unconditionally
+      // applies `current.Engi = comp.Engi`, so omitting the field JSON-encodes
+      // to false and either silently converts an engi competition to kendo
+      // ippon scoring (status=setup, where the change guard doesn't fire) or
+      // rejects EVERY settings save with "engi can only be changed before the
+      // competition starts" (draw-ready and later, where it does) — even
+      // though the operator never touched the control, which is disabled at
+      // those statuses.
+      engi: !!effective.engi,
       checkInEnabled: !!effective.checkInEnabled,
       // Phase 3b (mp-8rc9): league tie-breaker config. Only meaningful for
       // team-league competitions; safe to include for all formats because

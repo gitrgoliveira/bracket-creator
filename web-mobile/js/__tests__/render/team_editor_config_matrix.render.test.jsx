@@ -281,11 +281,11 @@ describe('TeamScoreEditorModal kachinuki bout navigation', () => {
         { position: 2, sideA: 'A1', sideB: 'B2', ipponsA: [], ipponsB: [] },
       ],
     });
+    // Exactly one bout row, and it is bout 2: bout 1 is not rendered and no
+    // back affordance exists.
     const rows = container.querySelectorAll('.team-sub-match');
     expect(rows.length).toBe(1);
     expect(rows[0].querySelector('.team-sub-match__pos-num').textContent).toBe('2');
-    // No affordance references bout 1.
-    expect(container.querySelector('.team-sub-match__pos-num').textContent).not.toBe('1');
   });
 
   it('COMPLETED (correction): every fought server bout renders and is editable', async () => {

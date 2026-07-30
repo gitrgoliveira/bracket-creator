@@ -258,7 +258,6 @@ describe('mp-yqxn.1: engi editor has no ippon buttons and no Sune', () => {
       <EngiScoreEditorModal match={makeMatch()} onClose={() => {}} onSubmit={() => {}} />
     );
     expect(container.querySelectorAll('.ipt-btn').length).toBe(0);
-    expect(screen.queryByText('Sune')).toBeNull();
     expect(container.textContent).not.toContain('Sune');
     // The flag counters ARE the scoring surface.
     expect(screen.getByTestId('engi-shiro-inc')).toBeTruthy();

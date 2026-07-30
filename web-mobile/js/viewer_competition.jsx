@@ -30,6 +30,9 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
   const c = competition;
   const isEngi = !!(c && c.engi);
 
+  // Deps enumerate the primitive c.* fields this memo (and teamMatchTypeFor(c),
+  // which the linter can't see into) actually reads, deliberately NOT the whole
+  // `c` object whose identity churns every render.
   const allMatches = useMemo(() => {
     const out = [];
     const compTMT = teamMatchTypeFor(c);
@@ -61,6 +64,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
         });
     }
     return out;
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [pools, poolMatches, bracket, c.id, c.name, c.kind, c.teamSize, c.format, c.teamMatchType, c.config?.teamMatchType]);
 
   // mp-xhaa: the schedule filter and bracket/pool highlight are driven by the
@@ -193,10 +197,13 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
   // Guard on a truthy activeTab: when no specific tab was requested (the
   // default/nullish state) there is nothing to correct: the URL is already
   // canonical.
+  // selectTab is intentionally omitted: this fires only on a tab-value change,
+  // not on selectTab's per-render identity.
   React.useEffect(() => {
     // replace=true: this is a correction, not a navigation: rewrite the
     // invalid tab URL in place so Back doesn't return to it (PR #307 review).
     if (activeTab && effectiveTab !== activeTab) selectTab(effectiveTab, true);
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveTab, activeTab, onTabChange]);
 
   const currentMatch = useMemo(() => {
@@ -209,10 +216,13 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
   const [selectedMatch, setSelectedMatch] = useState(null);
   const [bracketOverflowRight, setBracketOverflowRight] = useState(false);
 
+  // Depends on currentMatch?.id, not the object: re-scroll only when the target
+  // match actually changes, not on every currentMatch identity churn.
   React.useEffect(() => {
     if (effectiveTab === "bracket" && currentMatch) {
       setBracketScrollTarget(currentMatch.id + "::" + Date.now());
     }
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveTab, currentMatch?.id]);
 
   const hasBracketEl = effectiveTab === "bracket" && !!derivedBracket;
@@ -229,7 +239,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
     // new bracket payload rendered into the same tab) trigger a recheck.
     if (el.firstElementChild) ro.observe(el.firstElementChild);
     return () => { el.removeEventListener("scroll", check); ro.disconnect(); };
-  }, [hasBracketEl]);
+  }, [hasBracketEl, bracketScrollRef]);
 
   return (
     <div className="viewer">

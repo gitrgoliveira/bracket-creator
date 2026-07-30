@@ -73,12 +73,15 @@ function Toast({ message, type, onClose }) {
   // Accept an incoming prop change only when it is NOT being suppressed: a
   // later non-error toast is ignored while an error is still visible; anything
   // else (error→error, error→after-dismiss, non-error→anything) replaces.
+  // Deps are intentionally [message, type]: re-running on shown.*/visible would
+  // defeat the error-latch guard above (see comment).
   React.useEffect(() => {
     const incomingIsError = type === 'error';
     if (shownIsError && visible && !incomingIsError) return; // protect the error
     if (message === shown.message && type === shown.type) return; // no change
     setShown({ message, type });
     setVisible(true);
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [message, type]);
 
   // Auto-dismiss sequence, keyed on the SHOWN payload identity: NOT on
@@ -135,8 +138,11 @@ function StableInput({ value, onChange, type, autoSelect = true, ...props }) {
 
   // Sync local state when prop changes from outside (e.g. SSE)
   // Only sync if the user is NOT currently focused/composing.
+  // Deps are intentionally [value]: adding `local` would re-sync on every
+  // keystroke and defeat the "only sync from outside" behavior above.
   React.useEffect(() => {
     if (!composing.current && value !== local) setLocal(value);
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
 
   // Cancel the 200ms debounce on unmount so the timer can't fire

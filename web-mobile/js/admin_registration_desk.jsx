@@ -897,8 +897,8 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
                     <div className="rd-handoff__lead"><RdCheckIcon /> Checked in: <strong>{handoff.name}</strong></div>
                     {visibleTags.length > 0 && (
                       <div className="rd-handoff__tags">
-                        {visibleTags.map((t, i) => (
-                          <div key={i} className="rd-handoff__tag">
+                        {visibleTags.map((t) => (
+                          <div key={`${t.compName}|${t.value}`} className="rd-handoff__tag">
                             {handoff.tags.length > 1 && <span className="rd-handoff__comp">{t.compName}</span>}
                             <span className={`rd-tag rd-tag--${t.kind} rd-tag--lg`}><span className="rd-tag__value">{t.value}</span></span>
                           </div>

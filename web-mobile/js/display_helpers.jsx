@@ -293,6 +293,8 @@ function StreamingQR({ url, label }) {
     // canvasHolder.el after the JSX ref callback fires.
     const canvasHolder = React.useMemo(() => ({ el: null }), []);
 
+    // canvasHolder is a stable useMemo container (see comment); the effect is
+    // intentionally keyed on url only, reading canvasHolder.el at run time.
     React.useEffect(() => {
         const canvas = canvasHolder.el;
         if (!canvas || !url) return undefined;
@@ -302,6 +304,7 @@ function StreamingQR({ url, label }) {
         if (!fn) return undefined;
         try { fn(canvas, url, { moduleSize: 2, quietZone: 2 }); } catch (_e) { /* skip */ }
         return undefined;
+        // oxlint-disable-next-line react-hooks/exhaustive-deps
     }, [url]);
 
     return (

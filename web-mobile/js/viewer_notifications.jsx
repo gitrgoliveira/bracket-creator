@@ -110,6 +110,7 @@ export function AnnBellBtn() {
     return () => {
       window.removeEventListener(NOTIF_SYNC_EVENT, onSync);
     };
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, []); // supported is a static boolean; the effect only wires up listeners once
 
   if (state === "unsupported") return null;

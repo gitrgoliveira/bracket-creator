@@ -313,7 +313,7 @@ export function ScheduleViewer({ tournament, tweaks }) {
       setPicked(initialPicked);
       pickedSeeded.current = true;
     }
-  }, [initialPicked]);
+  }, [initialPicked, pickedSeeded]);
   const [dojoText, setDojoText] = useState("");
   const [courtFilter, setCourtFilter] = useState("all");
 

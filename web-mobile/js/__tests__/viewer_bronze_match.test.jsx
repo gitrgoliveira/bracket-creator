@@ -11,7 +11,7 @@ function collectText(node) {
   if (Array.isArray(node)) return node.map(collectText).join('');
   if (typeof node.type === 'function') {
     try {
-      const p = { ...(node.props || {}) };
+      const p = { ...node.props };
       if (node.children?.length) p.children = node.children.length === 1 ? node.children[0] : node.children;
       return collectText(node.type(p));
     } catch { /* fall through */ }
@@ -36,7 +36,7 @@ function findAll(node, predicate, acc = []) {
   // Also search the subtree returned by function-type (child component) nodes.
   if (typeof node.type === 'function') {
     try {
-      const p = { ...(node.props || {}) };
+      const p = { ...node.props };
       if (node.children?.length) p.children = node.children.length === 1 ? node.children[0] : node.children;
       findAll(node.type(p), predicate, acc);
     } catch { /* skip unrenderable components */ }

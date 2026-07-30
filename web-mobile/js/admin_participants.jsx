@@ -146,7 +146,7 @@ function levenshtein(a, b) {
   if (m === 0) return n;
   if (n === 0) return m;
   let prev = Array.from({ length: n + 1 }, (_, j) => j);
-  let curr = new Array(n + 1);
+  let curr = Array.from({ length: n + 1 });
   for (let i = 1; i <= m; i++) {
     curr[0] = i;
     for (let j = 1; j <= n; j++)
@@ -1240,8 +1240,8 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
             <div className="alert alert--warn" style={{ marginBottom: 12 }} data-testid="near-dup-banner">
               <div style={{ marginBottom: 6, fontWeight: 600 }}>Saved: but these entries look like possible duplicates. Review them:</div>
               <ul style={{ margin: "0 0 8px 16px", padding: 0 }}>
-                {nearDupPending.pairs.map((w, i) => (
-                  <li key={i}><strong>{w.a}</strong> and <strong>{w.b}</strong> <span style={{ color: "var(--ink-3)", fontSize: 12 }}>({w.score})</span></li>
+                {nearDupPending.pairs.map((w) => (
+                  <li key={`${w.a}||${w.b}`}><strong>{w.a}</strong> and <strong>{w.b}</strong> <span style={{ color: "var(--ink-3)", fontSize: 12 }}>({w.score})</span></li>
                 ))}
               </ul>
               <div style={{ display: "flex", gap: 8 }}>
@@ -1272,6 +1272,10 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                 <table className="parse-preview">
                   <thead><tr>{cols.map(h => <th key={h}>{h}</th>)}</tr></thead>
                   <tbody>{preview.map((p, i) => (
+                    // Transient preview of raw parsed paste lines (names may be
+                    // blank or duplicated pre-validation); row order is the line
+                    // order, so the line index is the only stable identity.
+                    // oxlint-disable-next-line react/no-array-index-key
                     <tr key={i}>
                       <td className={!p.name ? "cell--missing" : ""}>{p.name || "-"}</td>
                       {withZekken && <td className={!p.displayName ? "cell--missing" : ""}>{p.displayName || "-"}</td>}

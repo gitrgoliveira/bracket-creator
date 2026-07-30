@@ -11,7 +11,7 @@ import { bracketHasDecidedFinal, resolveCompetitionAwards, deriveAwards } from '
 // ── tree helpers ─────────────────────────────────────────────────────────────
 
 function mergeChildrenIntoProps(node) {
-  const p = { ...(node.props || {}) };
+  const p = { ...node.props };
   if (node.children?.length) p.children = node.children.length === 1 ? node.children[0] : node.children;
   return p;
 }

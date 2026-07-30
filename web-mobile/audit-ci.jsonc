@@ -19,26 +19,13 @@
 
   // Allowlist: suppress ONLY advisories we have proven cannot be fixed by a
   // version bump. Each entry MUST carry a reason and a removal condition.
-  "allowlist": [
-    // GHSA-mh99-v99m-4gvg -- brace-expansion DoS (unbounded expansion OOM).
-    // DEV-ONLY, never shipped: the exposure is a lint tool expanding globs
-    // from the developer's own eslint config, not untrusted input.
-    //
-    // It reaches the tree solely via:
-    //   eslint-plugin-react -> minimatch@3 -> brace-expansion@1
-    // and cannot be cleared by any override:
-    //   * The advisory is fixed only in brace-expansion 5.0.8, whose CommonJS
-    //     export is the non-callable { expand } -- forcing it onto minimatch@3
-    //     (which calls require('brace-expansion')(pattern)) throws at runtime.
-    //   * The only clean path, minimatch@10, has a non-callable { minimatch }
-    //     export that breaks eslint-plugin-react's callable minimatch() sites.
-    //   * npm's only auto-fix is a breaking eslint-plugin-react downgrade,
-    //     which also drops eslint-10 flat-config support.
-    // eslint-plugin-react is dormant (latest 7.37.5, April 2025) and closed
-    // the minimatch-v9 upgrade as "not planned" (jsx-eslint/eslint-plugin-react#4021).
-    //
-    // REMOVE this entry when eslint-plugin-react ships a release off minimatch@3,
-    // or when the plugin is replaced -- tracked in bead mp-vdkw.
-    "GHSA-mh99-v99m-4gvg"
-  ]
+  //
+  // Currently empty: the sole prior entry (GHSA-mh99-v99m-4gvg, brace-expansion
+  // DoS) was removed when the frontend linter migrated from ESLint +
+  // eslint-plugin-react to oxlint (mp-vdkw). eslint-plugin-react's dormant
+  // minimatch@3 -> brace-expansion@1 chain and eslint core's own minimatch@10
+  // -> brace-expansion@5.0.7 were the only sources of that advisory; oxlint is
+  // a self-contained binary with no JS dependency tree, so brace-expansion no
+  // longer appears in the graph at all.
+  "allowlist": []
 }

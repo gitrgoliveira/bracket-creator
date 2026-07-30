@@ -400,7 +400,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
       <div className="league-tiebreak__desc">
         All regular matches are complete. The groups below are tied at a qualifying position: run a tie-breaker or accept the shared ranks to finalise standings.
       </div>
-      {tiebreakCandidates.map((group, gi) => {
+      {tiebreakCandidates.map((group) => {
         const names = group.teamNames || [];
         const hasDH = dhMatchExistsForGroup(names);
         const dhScored = hasDH && dhMatchScoredForGroup(names);
@@ -410,7 +410,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
         const generateKey = names.join(",") + ":generate";
         const removeKey = names.join(",") + ":remove";
         return (
-          <div key={gi} className="league-tiebreak__group">
+          <div key={names.join(",")} className="league-tiebreak__group">
             <div className="league-tiebreak__group-header">
               <span className="league-tiebreak__pos">{posLabel}</span>
               <span className="league-tiebreak__teams">{names.join(" · ")}</span>

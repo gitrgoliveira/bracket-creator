@@ -220,6 +220,8 @@ export function AwardsView({ c, bracket, standings, pools, players }) {
     return () => document.removeEventListener("fullscreenchange", onFsChange);
   }, []);
 
+  // Deps track the c.* fields read here (id/format/swissCurrentRound), not the
+  // whole c object whose identity churns each render.
   React.useEffect(() => {
     if (c?.format !== "swiss" || !window.API?.swissStandings) return;
     let cancelled = false;
@@ -227,6 +229,7 @@ export function AwardsView({ c, bracket, standings, pools, players }) {
       .then((data) => { if (!cancelled) setSwissStandings(Array.isArray(data) ? data : []); })
       .catch(() => { if (!cancelled) setSwissStandings([]); });
     return () => { cancelled = true; };
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [c?.id, c?.format, c?.swissCurrentRound]);
 
   // For mixed (pools+knockout) comps, delegate to resolveCompetitionAwards so
@@ -248,6 +251,10 @@ export function AwardsView({ c, bracket, standings, pools, players }) {
         if (!cancelled) setKoAwards({ state: "in-progress", awards: [] });
       });
     return () => { cancelled = true; };
+    // isMixed is `c?.format === "mixed"` (already covered by c?.format); c is
+    // read by resolveCompetitionAwards but tracked via its primitive c.* fields,
+    // not the churning object identity.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [c?.id, c?.format]);
 
   const nameToPlayer = useMemo(() => {
@@ -359,7 +366,7 @@ export function AwardsView({ c, bracket, standings, pools, players }) {
             const style = PLACE_STYLE[a.place] || PLACE_STYLE[3];
             return (
               <div
-                key={`${a.place}-${a.name}-${idx}`}
+                key={`${a.place}-${a.name}`}
                 className={`podium-step podium-step--${a.place}`}
                 data-testid={`awards-place-${a.place}-${idx}`}
                 style={{ borderTop: `4px solid ${style.accent}` }}
@@ -435,9 +442,9 @@ export function AwardsView({ c, bracket, standings, pools, players }) {
       {/* 3rd places: side-by-side (kendo: two joint 3rds, no bronze match) */}
       {thirds.length > 0 && (
         <div className="awards-row">
-          {thirds.map((a, idx) => (
+          {thirds.map((a) => (
             <div
-              key={`3-${a.name}-${idx}`}
+              key={`3-${a.name}`}
               className="podium-step podium-step--3 place--eq"
               data-testid={`awards-place-3-${awards.indexOf(a)}`}
               style={isFs ? { fontSize: 16, padding: "16px 20px" } : null}
@@ -478,7 +485,7 @@ export function FightingSpiritSection({ fsAwards, isFs }) {
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {fsAwards.map((a, idx) => (
           <div
-            key={idx}
+            key={`${a.title}-${a.recipientName}`}
             style={{
               padding: isFs ? "14px 20px" : "10px 14px",
               borderRadius: 8,
@@ -543,6 +550,9 @@ export function AllWinnersView({ tournament, onBack, tweaks }) {
   // competition completes or its knockout resolves (same pattern as admin modal).
   const compsSig = comps.map((c) => `${c.id}:${c.status}`).join("|");
 
+  // Refetch is keyed on compsSig (a stable id:status signature), not the comps
+  // array identity: see the comment above. Depending on comps would refetch on
+  // every render.
   useEffect(() => {
     let cancelled = false;
     setViewState((s) => ({ ...s, loading: true }));
@@ -555,6 +565,7 @@ export function AllWinnersView({ tournament, onBack, tweaks }) {
       if (!cancelled) setViewState({ loading: false, results: [], error: err?.message || String(err) });
     });
     return () => { cancelled = true; };
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [compsSig]);
 
   return (
@@ -607,7 +618,7 @@ export function AllWinnersView({ tournament, onBack, tweaks }) {
                 const style = PLACE_STYLE[a.place] || PLACE_STYLE[3];
                 return (
                   <div
-                    key={`${a.place}-${a.name}-${idx}`}
+                    key={`${a.place}-${a.name}`}
                     style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0", borderBottom: idx < podium.length - 1 ? "1px solid var(--line)" : "none" }}
                     data-testid={`all-winners-place-${comp.id}-${a.place}-${idx}`}
                   >

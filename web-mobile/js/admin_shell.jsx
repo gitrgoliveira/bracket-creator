@@ -36,7 +36,7 @@ function Breadcrumbs({ items }) {
   return (
     <div className="crumbs">
       {items.map((item, i) => (
-        <React.Fragment key={i}>
+        <React.Fragment key={item.label}>
           {i > 0 && <span className="sep">/</span>}
           {item.onClick ? (
             // No document.activeElement.blur() here: it dumped keyboard focus
@@ -307,10 +307,10 @@ function AllWinnersModal({ comps, onClose }) {
             )}
             {!compErr && podium.length > 0 && (
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {podium.map((entry, idx) => {
+                {podium.map((entry) => {
                   const style = PLACE_STYLE_ADMIN[entry.place] || PLACE_STYLE_ADMIN[3];
                   return (
-                    <div key={idx} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14 }}>
+                    <div key={`${entry.place}-${entry.name}`} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14 }}>
                       <span style={{ fontSize: 16, minWidth: 22 }}>{style.icon}</span>
                       <span style={{ fontWeight: 600, minWidth: 32, color: "var(--ink-3)", fontSize: 12 }}>{style.label}</span>
                       <span style={{ fontWeight: 600 }}>{entry.name}</span>

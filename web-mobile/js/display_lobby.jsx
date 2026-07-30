@@ -61,7 +61,7 @@ function buildCourtSlots(competitions, court) {
     // is no running match we need one extra (it will promote to slot 0).
     const upcoming = findUpcomingOnCourt(competitions, court, running ? totalSlots - 1 : totalSlots);
 
-    const slots = new Array(totalSlots).fill(null);
+    const slots = Array.from({ length: totalSlots }, () => null);
 
     if (running) {
         slots[0] = { kind: 'running', match: running.match, competition: running.competition,

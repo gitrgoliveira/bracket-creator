@@ -508,8 +508,8 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             ⚠ Court clash. This competition overlaps {clashWarnings.length === 1 ? "another" : `${clashWarnings.length} other`} on a shared shiaijo:
           </div>
           <ul style={{ margin: "0 0 8px 16px", padding: 0 }}>
-            {clashWarnings.map((w, i) => (
-              <li key={i}>
+            {clashWarnings.map((w) => (
+              <li key={`${w.otherCompName}|${w.overlapStart}|${w.overlapEnd}`}>
                 <strong>{w.otherCompName}</strong>. Shiaijo {(w.sharedCourts || []).join(", ")} · {w.overlapStart}–{w.overlapEnd}
               </li>
             ))}

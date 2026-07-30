@@ -837,7 +837,10 @@ function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color }
 //
 // presets: array of string labels (e.g. ["Scoring error","Wrong competitor",…])
 // Registered as window.ReasonPrompt for use from other modules.
-function ReasonPrompt({ label = "Reason for change", presets = [], onConfirm, onCancel, submitting = false }) {
+// Module-level empty default keeps the prop reference stable across renders
+// (a `= []` inline default allocates a fresh array every call).
+const REASON_PROMPT_NO_PRESETS = [];
+function ReasonPrompt({ label = "Reason for change", presets = REASON_PROMPT_NO_PRESETS, onConfirm, onCancel, submitting = false }) {
   const [category, setCategory] = useStateA(presets[0] || "");
   const [note, setNote] = useStateA("");
   const built = note.trim() ? `${category}: ${note.trim()}` : category;

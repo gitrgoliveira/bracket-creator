@@ -223,10 +223,9 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
   const [alertDismissed, setAlertDismissed] = useState(false);
   const [secondaryAlert, setSecondaryAlert] = useState(null);
   const [secondaryDismissed, setSecondaryDismissed] = useState(false);
-  // Reset dismissal when the primary or its match changes.
-  // Extracted to a simple identifier: oxlint's exhaustive-deps forbids a
-  // complex expression directly in the dependency array.
-  const primaryNextMatchId = primaryNextMatch && primaryNextMatch.id;
+  // Reset dismissal when the primary or its match changes. Named identifier so
+  // it can go in the deps array (exhaustive-deps forbids a complex expression).
+  const primaryNextMatchId = primaryNextMatch?.id;
   useEffect(() => {
     setAlertDismissed(false);
   }, [primaryKey, primaryNextMatchId]);

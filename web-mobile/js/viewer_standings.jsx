@@ -131,8 +131,6 @@ export function SwissStandingsViewer({ competition, poolMatches, tweaks }) {
         setLoading(false);
       });
     return () => { cancelled = true; };
-    // Extracted to a simple identifier: oxlint's exhaustive-deps forbids a
-    // complex expression directly in the dependency array.
   }, [c.id, c.swissCurrentRound, poolMatchesLen]);
 
   const isFinal = isSwissFinalStandings(c, poolMatches);

@@ -66,8 +66,10 @@ Thumbs.db
 !web/package.json
 !web/package-lock.json
 node_modules/
-# worktree convenience symlink (web-mobile/node_modules -> main repo); the
-# bare node_modules/ rule above matches real dirs, not the symlink.
+# Each worktree installs its own node_modules (see js/deps in the Makefile), so
+# the bare rule above covers it. This extra no-trailing-slash rule stays only to
+# catch a legacy worktree symlink into the main checkout, which the directory
+# rule above would not match.
 web-mobile/node_modules
 specs/*
 specs/*/*

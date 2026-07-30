@@ -25,7 +25,7 @@ else
 endif
 
 # Define phony targets
-.PHONY: default help clean local/deps hooks/install go/fmt go/test go/build go/lint go/sec go/vuln go/security js/lint js/sec js/outdated js/security js/check-imports js/validate examples docker/build docker/run pre-commit docs/deps docs/serve docs/open docs/build docs/linkcheck docs/clean run run-mobile esbuild-jsx goreleaser/test release version
+.PHONY: default help clean local/deps hooks/install go/fmt go/generate go/test go/build go/lint go/sec go/vuln go/security js/deps js/lint js/sec js/outdated js/security js/check-imports js/validate examples docker/build docker/run pre-commit docs/deps docs/serve docs/open docs/build docs/linkcheck docs/clean run run-mobile esbuild-jsx goreleaser/test release version
 
 default: help ## Show help information (default)
 
@@ -35,7 +35,7 @@ clean: ## Clean build artifacts
 	rm -rf dist/
 	@echo "Done!"
 
-local/deps: hooks/install ## Install project dependencies
+local/deps: hooks/install js/deps ## Install project dependencies
 	@echo "Installing dependencies..."
 	go mod tidy
 	go install github.com/spf13/cobra-cli@v1.3.0
@@ -44,8 +44,6 @@ local/deps: hooks/install ## Install project dependencies
 	go install github.com/securego/gosec/v2/cmd/gosec@v2.25.0
 	go install golang.org/x/vuln/cmd/govulncheck@latest
 	python3 -m pip install -r docs/requirements.txt
-	@cd web-mobile && npm install
-	@cd web && npm install
 
 hooks/install: ## Wire scripts/hooks/ as the git hooks dir for this clone
 	@chmod +x scripts/hooks/*
@@ -56,11 +54,22 @@ go/fmt: ## Format Go code
 	@echo "Formatting Go code..."
 	go fmt ./...
 
-go/lint: go/fmt ## Run linters
+go/generate: ## Generate embedded build metadata and glossary data
+	@echo "Running go generate..."
+	@# internal/cmd/version //go:embed's commit.txt / version.txt / build_date.txt,
+	@# which are gitignored, so without this gosec cannot parse the package on a
+	@# fresh checkout and exits 1 reporting zero findings. The single definition
+	@# of "how to generate": the binary build depends on this target too.
+	go generate ./...
+
+# The Go tool binaries (golangci-lint, gosec, govulncheck) stay on local/deps by
+# design: they install into GOPATH/bin, which is machine-global and survives a
+# fresh worktree, unlike node_modules and the generated embeds below.
+go/lint: go/fmt go/generate ## Run linters
 	@echo "Running linters..."
 	golangci-lint run ./cmd/... ./internal/... ./tests/... .
 
-go/sec: ## Run security scans (gosec)
+go/sec: go/generate ## Run security scans (gosec)
 	@echo "Running security scans..."
 	gosec ./cmd/... ./internal/... ./tests/... .
 
@@ -70,11 +79,35 @@ go/vuln: ## Run vulnerability check (govulncheck)
 
 go/security: go/sec go/vuln ## Run all security checks
 
-js/lint: ## Run Javascript linters
+# Each worktree installs its own node_modules. Worktrees are short-lived and
+# removed after their PR merges, so the disk cost is transient, and a private
+# tree always matches that branch's package.json. Sharing one install across
+# branches is what made js/lint die with "oxlint: not found": the shared tree
+# predated the branch that added oxlint.
+#
+# npm maintains node_modules/.package-lock.json to describe the installed tree,
+# so it is a reliable staleness stamp. Keying the rule on it means npm runs only
+# when the lockfile is newer, and costs nothing on an up-to-date tree.
+web-mobile/node_modules/.package-lock.json: web-mobile/package-lock.json
+	@echo "Installing web-mobile Javascript dependencies..."
+	@# Remove a legacy shared symlink first, the LINK ONLY, never its target:
+	@# npm ci deletes node_modules by recursing into the symlink target, which
+	@# would wipe the main checkout's install and every other worktree's.
+	@if [ -L web-mobile/node_modules ]; then rm web-mobile/node_modules; fi
+	@cd web-mobile && npm ci --no-audit --no-fund
+
+js/deps: web-mobile/node_modules/.package-lock.json ## Install this worktree's JS dependencies
+	@# web/ declares no dependencies, so npm ci is a ~0.1s no-op there and
+	@# creates no node_modules, leaving no stamp file to key a rule on. Run it
+	@# unconditionally so this still works the day web/ gains a dependency.
+	@if [ -L web/node_modules ]; then rm web/node_modules; fi
+	@cd web && npm ci --no-audit --no-fund
+
+js/lint: js/deps ## Run Javascript linters
 	@echo "Running Javascript linters..."
 	@cd web-mobile && npm run lint
 
-js/sec: ## Run Javascript security scans (audit-ci + npm audit)
+js/sec: js/deps ## Run Javascript security scans (audit-ci + npm audit)
 	@echo "Running Javascript security scans..."
 	@# web-mobile uses audit-ci so one proven-unfixable dev-only advisory can be
 	@# allowlisted (web-mobile/audit-ci.jsonc) without disabling the whole scan.
@@ -88,7 +121,7 @@ js/outdated: ## Check for outdated npm packages
 
 js/security: js/sec ## Run all Javascript security checks
 
-js/test: ## Run JavaScript unit tests
+js/test: js/deps ## Run JavaScript unit tests
 	@echo "Running JavaScript tests..."
 	@cd web-mobile && NODE_NO_WARNINGS=1 npm test
 	@cd web && NODE_NO_WARNINGS=1 npm test
@@ -124,10 +157,11 @@ esbuild-jsx: ## Pre-compile JSX files to web-mobile/dist/
 		--outdir=web-mobile/dist --loader:.jsx=jsx \
 		--jsx-factory=React.createElement --jsx-fragment=React.Fragment
 
-$(BIN_PATH)/$(BIN_NAME): vendor-frontend esbuild-jsx $(GO_SOURCES) $(EMBEDDED_ASSETS)
+# go/generate is listed after esbuild-jsx so generation still runs once the
+# dist/ directory exists, matching the order when it was inline in this recipe.
+$(BIN_PATH)/$(BIN_NAME): vendor-frontend esbuild-jsx go/generate $(GO_SOURCES) $(EMBEDDED_ASSETS)
 	@echo "Building $(BIN_NAME) version $(VERSION)..."
 	@mkdir -p $(BIN_PATH)
-	go generate ./...
 	@# -buildvcs=false: version/commit/build-date are already embedded via `go generate`
 	@# (internal/cmd/version/get_build_info.sh writes commit.txt/version.txt/build_date.txt
 	@# consumed by //go:embed), so Go's auto VCS stamp is redundant. Go 1.26's default

@@ -246,3 +246,22 @@ describe('EngiScoreEditorModal correction footer (impeccable critique P1)', () =
     expect(screen.queryByTestId('engi-submit')).not.toBeNull();
   });
 });
+
+// mp-yqxn.1: naginata's Sune button belongs to the ippon editors ONLY. The
+// engi editor scores by flag counts and has NO ippon buttons at all, so there
+// is nothing for naginata to extend: pinned so a future shared-scoring-board
+// refactor cannot accidentally grow ippon affordances here. Engi never reads
+// the competition config (no fetch), so no naginata flag can reach it either.
+describe('mp-yqxn.1: engi editor has no ippon buttons and no Sune', () => {
+  it('renders flag counters but zero ippon buttons and no Sune affordance', () => {
+    const { container } = render(
+      <EngiScoreEditorModal match={makeMatch()} onClose={() => {}} onSubmit={() => {}} />
+    );
+    expect(container.querySelectorAll('.ipt-btn').length).toBe(0);
+    expect(screen.queryByText('Sune')).toBeNull();
+    expect(container.textContent).not.toContain('Sune');
+    // The flag counters ARE the scoring surface.
+    expect(screen.getByTestId('engi-shiro-inc')).toBeTruthy();
+    expect(screen.getByTestId('engi-aka-inc')).toBeTruthy();
+  });
+});

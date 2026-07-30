@@ -1,0 +1,17 @@
+{
+  "individual_scores": [
+    {"winner_side": "A", "score": [2, 0], "ipponsA": ["M", "M"], "ipponsB": []},
+    {"winner_side": "B", "score": [0, 2], "ipponsA": [], "ipponsB": ["K", "D"]},
+    {"winner_side": "A", "score": [1, 0], "ipponsA": ["M"], "ipponsB": []},
+    {"winner_side": "DRAW", "score": [0, 0], "ipponsA": [], "ipponsB": [], "decision": "hikiwake"},
+    {"winner_side": "A", "score": [2, 1], "ipponsA": ["M", "K"], "ipponsB": ["D"]},
+    {"winner_side": "B", "score": [1, 2], "ipponsA": ["M"], "ipponsB": ["K", "K"]},
+    {"winner_side": "DRAW", "score": [1, 1], "ipponsA": ["M"], "ipponsB": ["K"], "decision": "hikiwake"}
+  ],
+  "team_scores": [
+    {"winner_side": "A", "winsA": 3, "winsB": 1, "draws": 1},
+    {"winner_side": "B", "winsA": 0, "winsB": 4, "draws": 1},
+    {"winner_side": "A", "winsA": 2, "winsB": 0, "draws": 3},
+    {"winner_side": "DRAW", "winsA": 2, "winsB": 2, "draws": 1}
+  ]
+}

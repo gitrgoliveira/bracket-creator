@@ -65,6 +65,10 @@ Thumbs.db
 !web-mobile/.oxlintrc.json
 !web/package.json
 !web/package-lock.json
+# Fixture data for scripts/setup_tournament.py (make mobile-app-example);
+# without this the demo target fails with FileNotFoundError on any checkout
+# other than the one that happens to have the file untracked on disk.
+!scripts/simulation_data.json
 node_modules/
 # worktree convenience symlink (web-mobile/node_modules -> main repo); the
 # bare node_modules/ rule above matches real dirs, not the symlink.

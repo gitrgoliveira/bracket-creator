@@ -6,8 +6,12 @@ import requests
 import sys
 import time
 
-BASE_URL = "http://localhost:8080"
-PASSWORD = "testpassword"
+# PORT mirrors the env var the mobile-app binary itself reads, so
+# `PORT=8081 make mobile-app-example` points the server and this script at the
+# same place. BASE_URL overrides the whole URL for a non-local server.
+PORT = os.environ.get("PORT", "8080")
+BASE_URL = os.environ.get("BASE_URL", f"http://localhost:{PORT}").rstrip("/")
+PASSWORD = os.environ.get("TOURNAMENT_PASSWORD", "testpassword")
 HEADERS = {
     "X-Tournament-Password": PASSWORD,
     "Content-Type": "application/json"

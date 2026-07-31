@@ -507,14 +507,9 @@ describe('+ / − encho button behaviour (mp-m4bn floor-only invariants)', () =>
   // the − button must not drop below 1. These compose the nextEnchoPeriod /
   // prevEnchoPeriod helpers.
 
-  it('+ button: repeated clicks keep climbing, never clamp', () => {
-    let count = 1;
-    for (let i = 0; i < 10; i++) {
-      count = nextEnchoPeriod(count);
-    }
-    expect(count).toBe(11);
-  });
-
+  // The + button's no-upper-clamp behaviour is pinned by the
+  // nextEnchoPeriod unit block above; this block keeps only the floor
+  // and symmetry invariants the pair composes into.
   it('− button: repeated clicks bottom out at 1, not 0', () => {
     let count = 3;
     for (let i = 0; i < 10; i++) {

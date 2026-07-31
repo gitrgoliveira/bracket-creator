@@ -99,9 +99,10 @@ function ipponsFromScore(scoreStr) {
 // it surfaces as an "Ht" suffix appended by decisionSuffix when
 // decidedByHantei=true: e.g. "M–K (E) Ht".
 //
-// FR-033: when `encho` carries a positive periodCount, append " (E)" to the
-// rendered string so operators and viewers see at a glance that the match
-// went to overtime. Argument is optional and defaults to no-encho when absent.
+// FR-033: when `encho` carries a positive periodCount, the overtime marker
+// ("(E)" or "(E×N)", via enchoLabel) is appended so operators and viewers see
+// at a glance that the match went to overtime. Argument is optional and
+// defaults to no-encho when absent.
 //
 // T097: kiken / fusenpai / daihyosen append labelled suffixes alongside the
 // encho marker: wired through decisionSuffix() so the same string is used
@@ -267,6 +268,7 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
   const _isWatched = (typeof window !== "undefined" && window.isPlayerWatched) || (() => false);
   const playerHighlight = !!(highlightPlayers && (_isWatched(match.sideA, highlightPlayers) || _isWatched(match.sideB, highlightPlayers)));
 
+  const enchoBadge = enchoLabel(match.encho);
   return (
     <button
       ref={matchRef}
@@ -283,7 +285,7 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
         {running ? <span className="bc-running">● NOW</span> : null}
         {isBye ? <span className="bc-bye-tag">BYE</span> : null}
         {match.score?.type === "hikiwake" ? <span className="bc-draw">X</span> : null}
-        {match.encho?.periodCount > 0 ? <span className="bc-encho"><TermBC name="encho">{enchoLabel(match.encho)}</TermBC></span> : null}
+        {enchoBadge ? <span className="bc-encho"><TermBC name="encho">{enchoBadge}</TermBC></span> : null}
         {match.decidedByHantei ? <span className="bc-decision-chip">Ht</span> : null}
         {isKikenDecisionBC(match.decision) ? (
           <span className="bc-decision-chip"><TermBC name="kiken">Kiken</TermBC></span>

@@ -167,7 +167,7 @@ func validateURLHasHost(field, val string) error {
 func validateSubBout(prefix string, sr *state.SubMatchResult) error {
 	// Encho period counts are bounded two ways. A negative count is never
 	// valid on any bout (it would slip past the > 0 guards below and be
-	// silently treated as "no encho", bypassing the cap check). On a
+	// silently treated as "no encho"). On a
 	// numbered bout, ANY non-zero count is rejected, a regular bout has
 	// fixed regulation time and cannot go to overtime; only the daihyosen
 	// representative bout (Position == -1) may carry encho.

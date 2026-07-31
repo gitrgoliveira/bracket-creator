@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
-import { formatIpponsScore, ipponsFromScore, matchStateCell } from '../bracket.jsx';
+import { decisionSuffix, formatIpponsScore, ipponsFromScore, matchStateCell } from '../bracket.jsx';
 
 // Convention enforced across all match-list views:
 //   SHIRO (sideB) is always displayed on the LEFT.
@@ -148,14 +148,9 @@ describe('formatIpponsScore', () => {
       expect(formatIpponsScore(['M'], ['K'], null, null, { periodCount: 0 })).toBe('M–K');
     });
 
-    // mp-m4bn: one period stays the bare "(E)" (the common case, kept terse
-    // for narrow bracket nodes); two or more carry the count so a result that
-    // took three overtimes is distinguishable from one settled in the first.
-    it('carries the period count when more than one overtime ran', () => {
-      expect(formatIpponsScore(['M'], ['K'], null, null, { periodCount: 2 })).toBe('M–K (E×2)');
-      expect(formatIpponsScore(['M'], ['K'], null, null, { periodCount: 5 })).toBe('M–K (E×5)');
-    });
-
+    // Marker VALUES ("(E)" / "(E×N)" per count) are pinned by the golden
+    // it.each at the bottom of this file; here only the composition into a
+    // score string is under test.
     it('composes the counted marker with a decision label and hantei', () => {
       expect(formatIpponsScore([], [], null, 'daihyosen', { periodCount: 3 }, true)).toBe('DH (E×3) Ht');
     });
@@ -316,20 +311,10 @@ describe('team score string carries IV and PW', () => {
   });
 });
 
-// mp-m4bn: the "(E)" / "(E×N)" marker is implemented once per language:
-// enchoLabel in bracket.jsx (bracket, court console, viewer, TV) and enchoLabel
-// in internal/export/suffix.go (the exported results workbook). Per-language
-// tests do NOT catch them diverging, because the realistic drift edits one
-// renderer and its own expectations in the same commit: the other suite never
-// runs that code and stays green, and the printed workbook then disagrees with
-// what the operator saw on court.
-//
-// So both suites drive the SAME table, internal/export/testdata/encho_labels.json
-// (Go side: TestEnchoLabel_GoldenTable in suffix_test.go). The contract can only
-// move if the shared table moves, and moving it reddens the other language the
-// same run. Assertions are on VALUES: an earlier attempt grepped the Go source
-// text from here and passed unchanged when the single-period marker was switched
-// to "(OT)", while going red on behaviour-preserving refactors.
+// mp-m4bn: JS half of the shared Go/JS golden table for the overtime marker —
+// see the `_comment` in encho_labels.json for why the table is shared and why
+// it pins values, not source text. Go half: TestEnchoLabel_GoldenTable in
+// internal/export/suffix_test.go.
 describe('enchoLabel Go/JS mirror (mp-m4bn)', () => {
   const table = JSON.parse(
     readFileSync(
@@ -338,6 +323,8 @@ describe('enchoLabel Go/JS mirror (mp-m4bn)', () => {
     )
   );
 
+  // Load-bearing: vitest's it.each over an empty array silently produces
+  // zero tests (no red), so a degraded table needs its own failure.
   it('the shared golden table is present and non-empty', () => {
     expect(
       table.cases?.length,
@@ -345,12 +332,14 @@ describe('enchoLabel Go/JS mirror (mp-m4bn)', () => {
     ).toBeGreaterThan(0);
   });
 
+  // decisionSuffix with a bare encho block returns enchoLabel's output
+  // byte-for-byte (no base label, no Ht), so the table value is asserted
+  // EXACTLY — an unrelated formatIpponsScore change cannot redden this
+  // with a misleading "update both renderers" message.
   it.each(table.cases)('periodCount $periodCount renders "$label"', ({ periodCount, label }) => {
-    // formatIpponsScore composes "<score> <marker>", so the marker is whatever
-    // trails the score: an empty label must leave the score untouched.
     expect(
-      formatIpponsScore(['M'], ['K'], null, null, { periodCount }),
+      decisionSuffix({ encho: { periodCount } }),
       'JS enchoLabel disagrees with the shared table; update BOTH renderers, not just this one'
-    ).toBe(label ? `M–K ${label}` : 'M–K');
+    ).toBe(label);
   });
 });

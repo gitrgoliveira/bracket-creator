@@ -67,8 +67,9 @@ Thumbs.db
 !web/package-lock.json
 # Go testdata fixtures. These are test INPUTS, not build output: the blanket
 # *.json above would silently drop them, and a golden table that never lands
-# fails CI on a checkout that works locally.
-!**/testdata/*.json
+# fails CI on a checkout that works locally. /**/ matches zero or more
+# directories, so nested layouts (testdata/golden/...) are covered too.
+!**/testdata/**/*.json
 # Fixture data for scripts/setup_tournament.py (make mobile-app-example);
 # without this the demo target fails with FileNotFoundError on any checkout
 # other than the one that happens to have the file untracked on disk.

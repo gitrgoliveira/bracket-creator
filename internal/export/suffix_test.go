@@ -43,13 +43,12 @@ func TestDecisionSuffix(t *testing.T) {
 		// Daihyosen
 		{name: "daihyosen", decision: "daihyosen", encho: nil, hantei: false, want: "DH"},
 
-		// Encho only. mp-m4bn: one period renders the bare "(E)"; two or
-		// more carry the count so a three-overtime result is not displayed
-		// identically to one settled in the first period.
+		// Encho only. Marker values per count are pinned by
+		// TestEnchoLabel_GoldenTable; these rows cover the pass-through
+		// into the composed suffix.
 		{name: "encho only (fought)", decision: "fought", encho: encho(1), hantei: false, want: "(E)"},
 		{name: "encho nil vs zero periods", decision: "fought", encho: encho(0), hantei: false, want: ""},
 		{name: "encho x2 carries the count", decision: "fought", encho: encho(2), hantei: false, want: "(E×2)"},
-		{name: "encho x7 carries the count", decision: "fought", encho: encho(7), hantei: false, want: "(E×7)"},
 
 		// Hantei only
 		{name: "hantei only (fought)", decision: "fought", encho: nil, hantei: true, want: "Ht"},
@@ -177,22 +176,11 @@ func TestIpponsScore(t *testing.T) {
 	}
 }
 
-// TestEnchoLabel_GoldenTable drives enchoLabel over testdata/encho_labels.json,
-// the table shared with web-mobile/js/__tests__/score_display.test.jsx.
-//
-// mp-m4bn: the marker is implemented once per language and nothing but a
-// comment used to hold the two together. The realistic drift is silent, and it
-// survives per-language tests: someone edits the Go marker AND this file's
-// hand-written expectations in one commit, the JS suite never runs Go code and
-// stays green, and the printed workbook then disagrees with what the operator
-// saw on court. Reading the expectations from a file both suites consume closes
-// that: the contract can only move if the shared table moves, and moving it
-// turns the other language's suite red the same run.
-//
-// Pin VALUES, not source shape. An earlier attempt grepped this package's
-// source text from the JS side; it passed unchanged when the single-period
-// marker was switched to "(OT)" (the very divergence it was named for) and went
-// red on behaviour-preserving refactors like fmt.Sprintf.
+// TestEnchoLabel_GoldenTable is the Go half of the shared Go/JS golden table
+// for the overtime marker — see the `_comment` in testdata/encho_labels.json
+// for why the table is shared and why it pins values, not source text. JS
+// half: the "enchoLabel Go/JS mirror" describe in
+// web-mobile/js/__tests__/score_display.test.jsx.
 func TestEnchoLabel_GoldenTable(t *testing.T) {
 	t.Parallel()
 

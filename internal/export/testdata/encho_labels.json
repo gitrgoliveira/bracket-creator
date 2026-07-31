@@ -11,13 +11,16 @@
     "one language AND its own tests together is the realistic drift, and two",
     "independent tables both stay green through it. Editing this file fails",
     "the OTHER language's suite immediately, so the marker cannot move in one",
-    "renderer without the other following."
+    "renderer without the other following. Pin VALUES, not source shape: an",
+    "earlier grep-the-other-source attempt passed unchanged when the marker",
+    "was switched to \"(OT)\" and went red on behaviour-preserving refactors.",
+    "The periodCount 11 case pins that multi-digit N is not truncated."
   ],
   "cases": [
-    { "periodCount": 0, "label": "", "why": "no overtime ran" },
-    { "periodCount": 1, "label": "(E)", "why": "the common case stays terse for narrow bracket nodes and Excel cells" },
-    { "periodCount": 2, "label": "(E×2)", "why": "two or more carry the count" },
+    { "periodCount": 0, "label": "" },
+    { "periodCount": 1, "label": "(E)" },
+    { "periodCount": 2, "label": "(E×2)" },
     { "periodCount": 3, "label": "(E×3)" },
-    { "periodCount": 11, "label": "(E×11)", "why": "multi-digit N is not truncated or padded" }
+    { "periodCount": 11, "label": "(E×11)" }
   ]
 }

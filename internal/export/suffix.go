@@ -21,7 +21,7 @@ import (
 //
 // Composition order:
 //  1. Base decision label: kiken variants -> "Kiken"; fusenpai/fusensho -> "Fus."; daihyosen -> "DH".
-//  2. If enchoOn -> append " (E)".
+//  2. If encho -> append " (E)", or " (E×N)" when more than one period ran.
 //  3. If hanteiOn -> append " Ht".
 //
 // DELIBERATE DIVERGENCE from the JS: the JS omits fusensho (the per-bout default
@@ -33,7 +33,7 @@ import (
 // A zero/nil Encho (or PeriodCount == 0) is treated as no encho.
 // Returns "" when no suffix applies.
 func DecisionSuffix(decision string, encho *state.EnchoMetadata, decidedByHantei bool) string {
-	enchoOn := encho != nil && encho.PeriodCount > 0
+	enchoSfx := enchoLabel(encho)
 
 	var suffix string
 	switch {
@@ -45,11 +45,11 @@ func DecisionSuffix(decision string, encho *state.EnchoMetadata, decidedByHantei
 		suffix = "DH"
 	}
 
-	if enchoOn {
+	if enchoSfx != "" {
 		if suffix != "" {
-			suffix += " (E)"
+			suffix += " " + enchoSfx
 		} else {
-			suffix = "(E)"
+			suffix = enchoSfx
 		}
 	}
 
@@ -62,6 +62,26 @@ func DecisionSuffix(decision string, encho *state.EnchoMetadata, decidedByHantei
 	}
 
 	return suffix
+}
+
+// enchoLabel renders the overtime marker for an encho block: "" when no
+// overtime ran, "(E)" for a single period, and "(E×N)" for N > 1.
+//
+// mp-m4bn: every consumer used to treat PeriodCount as a boolean, so a match
+// that took three overtime periods was indistinguishable from one settled in
+// the first and the count was write-only. Surfacing N is what makes the
+// operator's stepper taps worth recording. One period stays the bare "(E)":
+// it is the common case and the terser marker keeps narrow Excel cells and
+// bracket nodes readable. Mirrors enchoLabel() in web-mobile/js/bracket.jsx
+// and the editors' "· (E) Overtime ×N" eyebrow. Keep the three in sync.
+func enchoLabel(encho *state.EnchoMetadata) string {
+	if encho == nil || encho.PeriodCount <= 0 {
+		return ""
+	}
+	if encho.PeriodCount > 1 {
+		return "(E×" + strconv.Itoa(encho.PeriodCount) + ")"
+	}
+	return "(E)"
 }
 
 // MiddleCellText composes the value for a match's centre "vs" cell from the

@@ -51,15 +51,29 @@ function sideLabel(side) {
 // a separate bout badge, not by this helper. Pure and DOM-free so it can be
 // reused by display.jsx (which builds its own scoreline) without dragging in
 // the rest of formatIpponsScore's bye/hantei special cases.
+// mp-m4bn: the overtime marker carries the period COUNT when a match ran more
+// than one encho period: "" / "(E)" / "(E×3)". Every consumer used to treat
+// periodCount as a boolean, so a match that took three overtimes looked
+// identical to one settled in the first and the count was write-only.
+// A single period keeps the bare "(E)" — the common case, and the terser
+// marker keeps narrow bracket nodes and Excel cells readable. Mirrors
+// enchoLabel() in internal/export/suffix.go and the score editors'
+// "· (E) Overtime ×N" eyebrow. Keep the three in sync.
+function enchoLabel(encho) {
+  const n = encho?.periodCount || 0;
+  if (n <= 0) return "";
+  return n > 1 ? `(E×${n})` : "(E)";
+}
+
 function decisionSuffix(match) {
   if (!match) return "";
   const d = match.decision || "";
-  const enchoOn = !!(match.encho && match.encho.periodCount > 0);
+  const enchoSfx = enchoLabel(match.encho);
   const hanteiOn = !!match.decidedByHantei;
   let suffix = "";
   if (isKikenDecisionBC(d)) suffix = "Kiken";
   else if (DECISION_CHIPS[d]) suffix = DECISION_CHIPS[d].label;
-  if (enchoOn) suffix = (suffix ? suffix + " " : "") + "(E)";
+  if (enchoSfx) suffix = (suffix ? suffix + " " : "") + enchoSfx;
   // FIK 7-5 / 29-6: judges' decision after a tied encho. Mark explicitly so
   // a hantei-decided final is distinguishable from an ippon-derived one
   // (audit + Excel + viewer parity).
@@ -99,8 +113,8 @@ function formatIpponsScore(ipponsA, ipponsB, score, decision, encho, decidedByHa
   // lets callers that omit the arg safely get false without sending undefined.
   const hantei = typeof decidedByHantei === "boolean" ? decidedByHantei : false;
   const decSfx = decisionSuffix({ decision, encho, decidedByHantei: hantei });
-  const enchoOnly = (encho && encho.periodCount > 0) ? " (E)" : "";
-  const suffix = decSfx ? " " + decSfx : enchoOnly;
+  const enchoSfx = enchoLabel(encho);
+  const suffix = decSfx ? " " + decSfx : (enchoSfx ? " " + enchoSfx : "");
   if (score?.type === "bye") return "BYE";
   const aStr = (ipponsA || []).filter(x => x && x !== "•").join("");
   const bStr = (ipponsB || []).filter(x => x && x !== "•").join("");
@@ -270,7 +284,7 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
         {running ? <span className="bc-running">● NOW</span> : null}
         {isBye ? <span className="bc-bye-tag">BYE</span> : null}
         {match.score?.type === "hikiwake" ? <span className="bc-draw">X</span> : null}
-        {match.encho?.periodCount > 0 ? <span className="bc-encho"><TermBC name="encho">(E)</TermBC></span> : null}
+        {match.encho?.periodCount > 0 ? <span className="bc-encho"><TermBC name="encho">{enchoLabel(match.encho)}</TermBC></span> : null}
         {match.decidedByHantei ? <span className="bc-decision-chip">Ht</span> : null}
         {isKikenDecisionBC(match.decision) ? (
           <span className="bc-decision-chip"><TermBC name="kiken">Kiken</TermBC></span>

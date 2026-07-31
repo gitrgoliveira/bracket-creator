@@ -138,12 +138,24 @@ describe('formatIpponsScore', () => {
       expect(formatIpponsScore(['M'], ['K'], { type: 'hikiwake' }, null, { periodCount: 1 })).toBe('M–K (E)');
     });
 
-    it('appends (E) to a no-score draw (X is the scoreless-draw glyph)', () => {
-      expect(formatIpponsScore([], [], null, 'hikiwake', { periodCount: 2 })).toBe('X (E)');
+    it('appends the marker to a no-score draw (X is the scoreless-draw glyph)', () => {
+      expect(formatIpponsScore([], [], null, 'hikiwake', { periodCount: 2 })).toBe('X (E×2)');
     });
 
     it('does not append (E) when periodCount is 0', () => {
       expect(formatIpponsScore(['M'], ['K'], null, null, { periodCount: 0 })).toBe('M–K');
+    });
+
+    // mp-m4bn: one period stays the bare "(E)" (the common case, kept terse
+    // for narrow bracket nodes); two or more carry the count so a result that
+    // took three overtimes is distinguishable from one settled in the first.
+    it('carries the period count when more than one overtime ran', () => {
+      expect(formatIpponsScore(['M'], ['K'], null, null, { periodCount: 2 })).toBe('M–K (E×2)');
+      expect(formatIpponsScore(['M'], ['K'], null, null, { periodCount: 5 })).toBe('M–K (E×5)');
+    });
+
+    it('composes the counted marker with a decision label and hantei', () => {
+      expect(formatIpponsScore([], [], null, 'daihyosen', { periodCount: 3 }, true)).toBe('DH (E×3) Ht');
     });
 
     it('is a no-op when encho argument is missing entirely', () => {

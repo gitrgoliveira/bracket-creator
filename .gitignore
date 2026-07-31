@@ -76,6 +76,9 @@ node_modules/
 # rule above would not match.
 web-mobile/node_modules
 specs/*
+# Re-include the spec directories themselves so git descends into them; a
+# directory excluded outright can never have its contents re-included below.
+!specs/*/
 specs/*/*
 !specs/openapi.yaml
 # UAT screenshot evidence (review.md V5): per-task PNGs captured during browser
@@ -85,6 +88,12 @@ specs/*/*
 .specify
 .agent*
 .playwright-mcp
+# The Playwright MCP writes browser_take_screenshot files to the repo/worktree
+# root, where `git add -A` would sweep them into a commit. PR screenshots belong
+# on the pr-assets branch, never in the tree. Root-anchored on purpose: a blanket
+# *.png would silently swallow new docs/screenshots/, docs/assets/images/ and
+# specs/*/screenshots/ files, which are tracked.
+/*.png
 .claude/skills/speckit-*
 .claude/worktrees/*
 

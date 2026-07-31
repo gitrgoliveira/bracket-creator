@@ -1314,8 +1314,8 @@ func TestPostScoreKikenInvalidScoreline(t *testing.T) {
 }
 
 // failingCompetitionStore returns the configured error from
-// LoadCompetition. Used to drive the fail-closed path in
-// enforceEnchoCap / bulk-score when config.md can't be loaded.
+// LoadCompetition. Used to drive the fail-closed path in the
+// override-winner handler when config.md can't be loaded.
 type failingCompetitionStore struct{ err error }
 
 func (f failingCompetitionStore) LoadCompetition(string) (*state.Competition, error) {

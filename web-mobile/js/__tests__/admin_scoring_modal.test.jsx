@@ -31,8 +31,8 @@ import { isKikenDecision } from '../api_serializers.jsx';
 
 window.isKikenDecision = isKikenDecision;
 
-// admin_scoring_modal.jsx ships seven module-private helpers that together
-// implement the FR-033 encho-period flow (T104 cap + banner) and the
+// admin_scoring_modal.jsx ships module-private helpers that together
+// implement the FR-033 encho-period flow (unbounded stepper) and the
 // T093–T098 decision prompt path. Each helper is exported separately so
 // vitest can pin the behaviour without mounting either ScoreEditorModal /
 // TeamScoreEditorModal (those run useState/useEffect at the top and the

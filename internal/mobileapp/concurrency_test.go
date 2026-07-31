@@ -81,9 +81,9 @@ func TestConcurrentScoresPreserveOrder(t *testing.T) {
 	RegisterMatchHandlers(admin, eng, store, store, hub, NewFileVerifier(store), store)
 
 	// Goroutines all fire concurrently; each scores a different match
-	// so the per-comp lock is contended on every step (LoadCompetition
-	// to check encho cap, StartMatchTx, RecordMatchResultWithIneligibilityTx,
-	// MaybeAdvanceKachinuki, tryAutoCompletePools).
+	// so the per-comp lock is contended on every step (StartMatchTx,
+	// RecordMatchResultWithIneligibilityTx, MaybeAdvanceKachinuki,
+	// tryAutoCompletePools).
 	var wg sync.WaitGroup
 	wg.Add(N)
 	for i := range N {

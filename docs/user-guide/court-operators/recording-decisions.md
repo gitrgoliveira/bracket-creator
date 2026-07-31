@@ -26,6 +26,14 @@ An injury kiken can be reinstated later by the operator if the competitor recove
 
 A hikiwake is a draw. It applies in pool, league, and Swiss matches (not in the knockout phase) and contributes to the standings separately from wins and losses.
 
+## Encho (overtime)
+
+Encho is the extra period played when a knockout match is level at the end of regulation. It follows ippon-shobu rules: the first competitor to score wins.
+
+In the score editor, open the **Overtime** control and tick **Encho started**. A counter appears so you can record how many overtime periods were fought, using the **+** and **-** buttons. The counter starts at 1 and has no upper limit: how many periods are fought, and how a match still level after them is finally settled (a judges' decision for an individual bout, a daihyosen for a team encounter), is the shimpan's call. Record what actually happened on court, however many periods that took.
+
+Completed results carry an overtime marker. A match settled in a single overtime period shows **(E)**. A match that needed more shows the count, so a result decided in the third overtime reads **(E×3)**. The marker appears on the bracket, the court console, the public viewer, and the exported results workbook, and it combines with any other tag: a withdrawal during a second overtime period reads **Kiken (E×2)**, and a match sent to a judges' decision after three reads **(E×3) Ht**.
+
 ## Daihyosen
 
 A daihyosen is a representative bout used to break a tie when points and ranking criteria cannot separate two teams.

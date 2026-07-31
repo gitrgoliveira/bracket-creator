@@ -338,6 +338,7 @@ type Competition struct {
 	// one written to new config.md files.
 	PoolMatchDurationSeconds    int `yaml:"pool_match_duration_seconds,omitempty" json:"poolMatchDurationSeconds,omitempty"`
 	PlayoffMatchDurationSeconds int `yaml:"playoff_match_duration_seconds,omitempty" json:"playoffMatchDurationSeconds,omitempty"`
+
 	// TeamMatchType selects the team-match format (FR-044). Empty value
 	// is treated as TeamMatchTypeFixed for backward compatibility; all
 	// N×1 bouts are pre-scheduled by position. TeamMatchTypeKachinuki

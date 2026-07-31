@@ -40,17 +40,8 @@ function sideLabel(side) {
   return side === "a" ? "AKA" : "SHIRO";
 }
 
-// Decision-driven suffix appended to score strings on schedule rows, bracket
-// nodes, viewer cards, and TV displays. Mirrors the Visual Rendering Contract
-// in specs/003-tournament-gap-closure/contracts/match-decisions.md §Visual:
-//   decision == "kiken"       → "Kiken"
-//   decision == "fusenpai"    → "Fus."
-//   decision == "daihyosen"   → "DH"
-// Encho (overtime) appends " (E)" on top of any other suffix so a kiken-in-
-// overtime renders "0–2 Kiken (E)". `fusensho` is per-bout only: handled by
-// a separate bout badge, not by this helper. Pure and DOM-free so it can be
-// reused by display.jsx (which builds its own scoreline) without dragging in
-// the rest of formatIpponsScore's bye/hantei special cases.
+// enchoLabel renders the overtime marker for a match's encho block: "" when no
+// overtime ran, "(E)" for a single period, "(E×N)" for N > 1.
 // mp-m4bn: the overtime marker carries the period COUNT when a match ran more
 // than one encho period: "" / "(E)" / "(E×3)". Every consumer used to treat
 // periodCount as a boolean, so a match that took three overtimes looked
@@ -67,6 +58,17 @@ function enchoLabel(encho) {
   return n > 1 ? `(E×${n})` : "(E)";
 }
 
+// Decision-driven suffix appended to score strings on schedule rows, bracket
+// nodes, viewer cards, and TV displays. Mirrors the Visual Rendering Contract
+// in specs/003-tournament-gap-closure/contracts/match-decisions.md §Visual:
+//   decision == "kiken"       → "Kiken"
+//   decision == "fusenpai"    → "Fus."
+//   decision == "daihyosen"   → "DH"
+// The enchoLabel marker is appended on top of any other suffix, so a kiken in
+// a second overtime period renders "0–2 Kiken (E×2)". `fusensho` is per-bout
+// only: handled by a separate bout badge, not by this helper. Pure and DOM-free
+// so it can be reused by display.jsx (which builds its own scoreline) without
+// dragging in the rest of formatIpponsScore's bye/hantei special cases.
 // Mirrored by DecisionSuffix in internal/export/suffix.go — keep the
 // composition order and single-space joins identical (its docstring records
 // one deliberate divergence: the export also folds fusensho into the suffix).

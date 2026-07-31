@@ -935,8 +935,7 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 
 	t.Run("invalid: negative encho on regular bout position", func(t *testing.T) {
 		// A negative period count would slip past the > 0 guard and be
-		// silently treated as "no encho", bypassing the cap check. It must
-		// be rejected outright.
+		// silently treated as "no encho". It must be rejected outright.
 		req := ScoreRequest{
 			SubResults: []state.SubMatchResult{
 				{

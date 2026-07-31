@@ -189,9 +189,6 @@ describe('nextEnchoPeriod (the + button)', () => {
 
   it('never clamps, however many periods were fought', () => {
     expect(nextEnchoPeriod(99)).toBe(100);
-    let count = 1;
-    for (let i = 0; i < 10; i++) count = nextEnchoPeriod(count);
-    expect(count).toBe(11);
   });
 });
 

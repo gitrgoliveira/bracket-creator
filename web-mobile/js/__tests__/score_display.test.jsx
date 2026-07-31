@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
 import { formatIpponsScore, ipponsFromScore, matchStateCell } from '../bracket.jsx';
 
 // Convention enforced across all match-list views:
@@ -311,5 +313,52 @@ describe('team score string carries IV and PW', () => {
       subResults: [{ position: -1, sideA: 'Ryu', sideB: 'Kaze', winner: 'Ryu', ipponsA: ['M'] }],
     };
     expect(matchStateCell(m, [], [])).toBe('IV 0–0\nPW 0–0');
+  });
+});
+
+// mp-m4bn: the "(E)" / "(E×N)" contract is implemented twice, once per
+// language: enchoLabel in bracket.jsx (bracket, court console, viewer, TV) and
+// enchoLabel in internal/export/suffix.go (the exported results workbook).
+// Until now only reciprocal comments held them together, and the realistic
+// drift is silent: someone changes the JS and its JS tests, the Go suite stays
+// green, and the printed workbook disagrees with what the operator saw on
+// screen. These cases derive the contract from OBSERVED JS behaviour and
+// assert the Go source still matches, in the same read-the-other-language
+// style as the settings round-trip test in admin_competition.test.jsx.
+describe('enchoLabel Go/JS mirror (mp-m4bn)', () => {
+  const goSrc = readFileSync(
+    resolve(__dirname, '..', '..', '..', 'internal', 'export', 'suffix.go'),
+    'utf8'
+  );
+  const goEnchoLabel = (goSrc.match(/func enchoLabel\([\s\S]*?\n}/) || [])[0];
+
+  it('the Go mirror is still where this test expects it', () => {
+    expect(
+      goEnchoLabel,
+      'expected `func enchoLabel(` in internal/export/suffix.go: it moved or was renamed, so the cases below no longer guard anything'
+    ).toBeTruthy();
+  });
+
+  it('collapses a single period to the bare marker on both sides', () => {
+    const single = formatIpponsScore(['M'], ['K'], null, null, { periodCount: 1 });
+    const jsCollapses = single === 'M–K (E)';
+    expect(
+      goEnchoLabel.includes('PeriodCount > 1'),
+      jsCollapses
+        ? 'JS renders one overtime period as the bare "(E)", so Go must keep its `PeriodCount > 1` guard or the workbook prints "(E×1)" where every screen shows "(E)".'
+        : 'JS now renders the count for a single period, so Go must drop its `PeriodCount > 1` guard to match.'
+    ).toBe(jsCollapses);
+  });
+
+  it('uses the same counted-marker glyph on both sides', () => {
+    const counted = formatIpponsScore(['M'], ['K'], null, null, { periodCount: 2 });
+    expect(counted, 'expected the counted marker on a two-period score').toBe('M–K (E×2)');
+    // Derive the glyph from the JS output rather than restating it, so a
+    // change to the marker shape moves this expectation with it.
+    const prefix = counted.slice(counted.indexOf('('), counted.indexOf('2'));
+    expect(
+      goEnchoLabel,
+      `JS builds the counted marker as "${prefix}N)"; internal/export/suffix.go must concatenate the same "${prefix}" literal or the workbook and the viewer disagree.`
+    ).toContain(`"${prefix}"`);
   });
 });

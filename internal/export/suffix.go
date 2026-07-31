@@ -45,23 +45,27 @@ func DecisionSuffix(decision string, encho *state.EnchoMetadata, decidedByHantei
 		suffix = "DH"
 	}
 
-	if enchoSfx != "" {
-		if suffix != "" {
-			suffix += " " + enchoSfx
-		} else {
-			suffix = enchoSfx
-		}
-	}
-
+	suffix = joinSp(suffix, enchoSfx)
 	if decidedByHantei {
-		if suffix != "" {
-			suffix += " Ht"
-		} else {
-			suffix = "Ht"
-		}
+		suffix = joinSp(suffix, "Ht")
 	}
 
 	return suffix
+}
+
+// joinSp joins two display fragments with a single space, skipping empties, so
+// a composed suffix never carries a leading, trailing, or doubled space. This
+// is the Go spelling of the `suffix = (suffix ? suffix + " " : "") + part`
+// shape decisionSuffix uses in web-mobile/js/bracket.jsx.
+func joinSp(a, b string) string {
+	switch {
+	case a == "":
+		return b
+	case b == "":
+		return a
+	default:
+		return a + " " + b
+	}
 }
 
 // enchoLabel renders the overtime marker for an encho block: "" when no
@@ -99,14 +103,7 @@ func MiddleCellText(decision, suffix string) string {
 	if decision == state.DecisionDraw {
 		marker = "X"
 	}
-	switch {
-	case marker != "" && suffix != "":
-		return marker + " " + suffix
-	case marker != "":
-		return marker
-	default:
-		return suffix
-	}
+	return joinSp(marker, suffix)
 }
 
 // FlagsScorePair returns the display strings for both sides of an engi bout.

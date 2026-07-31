@@ -463,7 +463,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 	// behaviour as before. T156 added the CompetitionTransactor `tx`
 	// parameter so the match-write + ineligibility-write + lineup-freeze
 	// commit under one per-comp lock acquire.
-	registerScoreHandler(r, eng, store, tx, hub, verifier, tl)
+	registerScoreHandler(r, eng, tx, hub, verifier, tl)
 
 	r.PUT("/competitions/:id/matches/:mid/court", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
@@ -882,7 +882,7 @@ type scoreRequestBody struct {
 	KachinukiBoutFinal bool `json:"kachinukiBoutFinal"`
 }
 
-func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store CompetitionStore, tx CompetitionTransactor, hub Broadcaster, verifier PasswordVerifier, tl TournamentLoader) {
+func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, tx CompetitionTransactor, hub Broadcaster, verifier PasswordVerifier, tl TournamentLoader) {
 	// C3: coalesce high-frequency "running" match_updated broadcasts to ≤4/s
 	// per match. Completed writes always proceed (isRunning=false).
 	coalescer := newMatchBroadcastCoalescer()

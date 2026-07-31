@@ -467,7 +467,7 @@ function EnchoControl({ enchoPeriodCount, setEnchoPeriodCount }) {
           <button
             type="button"
             className="btn btn--sm encho-row__btn"
-            onClick={() => setEnchoPeriodCount(c => prevEnchoPeriod(c))}
+            onClick={() => setEnchoPeriodCount(prevEnchoPeriod)}
             disabled={enchoPeriodCount <= 1}
             aria-label="Decrease overtime period count"
           >−</button>

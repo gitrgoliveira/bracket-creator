@@ -105,16 +105,15 @@ function ipponsFromScore(scoreStr) {
 //
 // T097: kiken / fusenpai / daihyosen append labelled suffixes alongside the
 // encho marker: wired through decisionSuffix() so the same string is used
-// by display.jsx's hand-rolled score block. The decision-derived suffix
-// supersedes the bare " (E)" so we don't double-print "(E)" alongside
-// "Kiken (E)".
+// by display.jsx's hand-rolled score block. decisionSuffix() is the single
+// source of the composed suffix — it already embeds the encho marker, so
+// there is no separate bare-"(E)" path here.
 function formatIpponsScore(ipponsA, ipponsB, score, decision, encho, decidedByHantei) {
   // decidedByHantei (positional) is the canonical flag. The `typeof` guard
   // lets callers that omit the arg safely get false without sending undefined.
   const hantei = typeof decidedByHantei === "boolean" ? decidedByHantei : false;
   const decSfx = decisionSuffix({ decision, encho, decidedByHantei: hantei });
-  const enchoSfx = enchoLabel(encho);
-  const suffix = decSfx ? " " + decSfx : (enchoSfx ? " " + enchoSfx : "");
+  const suffix = decSfx ? " " + decSfx : "";
   if (score?.type === "bye") return "BYE";
   const aStr = (ipponsA || []).filter(x => x && x !== "•").join("");
   const bStr = (ipponsB || []).filter(x => x && x !== "•").join("");

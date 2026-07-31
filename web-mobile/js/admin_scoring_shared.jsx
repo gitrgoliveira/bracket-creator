@@ -475,7 +475,7 @@ function EnchoControl({ enchoPeriodCount, setEnchoPeriodCount }) {
           <button
             type="button"
             className="btn btn--sm encho-row__btn"
-            onClick={() => setEnchoPeriodCount(c => nextEnchoPeriod(c))}
+            onClick={() => setEnchoPeriodCount(nextEnchoPeriod)}
             aria-label="Increase overtime period count"
           >+</button>
         </div>

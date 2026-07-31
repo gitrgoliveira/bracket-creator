@@ -41,17 +41,18 @@ function sideLabel(side) {
 }
 
 // enchoLabel renders the overtime marker for a match's encho block: "" when no
-// overtime ran, "(E)" for a single period, "(E×N)" for N > 1. A single period
-// stays bare because it is the common case and the terser marker keeps narrow
-// bracket nodes and Excel cells readable.
-// Mirrors enchoLabel() in internal/export/suffix.go, pinned by the shared table
-// in internal/export/testdata/encho_labels.json, and the score editors'
-// "· (E) Overtime ×N" eyebrow — which is a live stepper readout and so
-// deliberately never collapses ×1.
+// overtime ran, "(E)" otherwise — always bare, never a count. mp-m4bn: the
+// stepper records how many periods were fought (periodCount persists for the
+// tournament log), but the result marking deliberately never carries the
+// number: counted markers ("(E×3)") confuse readers of brackets and result
+// sheets. Do not reintroduce the count here. Mirrors enchoLabel() in
+// internal/export/suffix.go, pinned by the shared table in
+// internal/export/testdata/encho_labels.json. The score editors' "· (E)
+// Overtime ×N" eyebrow is different on purpose: a live readout of the stepper
+// the operator is using, not a result marking.
 function enchoLabel(encho) {
   const n = encho?.periodCount || 0;
-  if (n <= 0) return "";
-  return n > 1 ? `(E×${n})` : "(E)";
+  return n > 0 ? "(E)" : "";
 }
 
 // Decision-driven suffix appended to score strings on schedule rows, bracket
@@ -61,7 +62,7 @@ function enchoLabel(encho) {
 //   decision == "fusenpai"    → "Fus."
 //   decision == "daihyosen"   → "DH"
 // The enchoLabel marker is appended on top of any other suffix, so a kiken in
-// a second overtime period renders "0–2 Kiken (E×2)". `fusensho` is per-bout
+// overtime renders "0–2 Kiken (E)". `fusensho` is per-bout
 // only: handled by a separate bout badge, not by this helper. Pure and DOM-free
 // so it can be reused by display.jsx (which builds its own scoreline) without
 // dragging in the rest of formatIpponsScore's bye/hantei special cases.
@@ -100,10 +101,10 @@ function ipponsFromScore(scoreStr) {
 // it surfaces as an "Ht" suffix appended by decisionSuffix when
 // decidedByHantei=true: e.g. "M–K (E) Ht".
 //
-// FR-033: when `encho` carries a positive periodCount, the overtime marker
-// ("(E)" or "(E×N)", via enchoLabel) is appended so operators and viewers see
-// at a glance that the match went to overtime. Argument is optional and
-// defaults to no-encho when absent.
+// FR-033: when `encho` carries a positive periodCount, the bare "(E)" marker
+// (via enchoLabel) is appended so operators and viewers see at a glance that
+// the match went to overtime. Argument is optional and defaults to no-encho
+// when absent.
 //
 // T097: kiken / fusenpai / daihyosen append labelled suffixes alongside the
 // encho marker: wired through decisionSuffix() so the same string is used

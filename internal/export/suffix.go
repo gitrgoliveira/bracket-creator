@@ -21,7 +21,7 @@ import (
 //
 // Composition order:
 //  1. Base decision label: kiken variants -> "Kiken"; fusenpai/fusensho -> "Fus."; daihyosen -> "DH".
-//  2. If encho -> append " (E)", or " (E×N)" when more than one period ran.
+//  2. If encho -> append " (E)" (always bare, regardless of period count).
 //  3. If hanteiOn -> append " Ht".
 //
 // DELIBERATE DIVERGENCE from the JS: the JS omits fusensho (the per-bout default
@@ -68,23 +68,21 @@ func joinSp(a, b string) string {
 }
 
 // enchoLabel renders the overtime marker for an encho block: "" when no
-// overtime ran, "(E)" for a single period, and "(E×N)" for N > 1.
+// overtime ran, "(E)" otherwise — always bare, never a count.
 //
-// mp-m4bn: every consumer used to treat PeriodCount as a boolean, so a match
-// that took three overtime periods was indistinguishable from one settled in
-// the first and the count was write-only. Surfacing N is what makes the
-// operator's stepper taps worth recording. One period stays the bare "(E)":
-// it is the common case and the terser marker keeps narrow Excel cells and
-// bracket nodes readable. Mirrors enchoLabel() in web-mobile/js/bracket.jsx,
-// pinned by the shared table in testdata/encho_labels.json, and the editors'
-// "· (E) Overtime ×N" eyebrow — which is a live stepper readout and so
-// deliberately never collapses ×1.
+// mp-m4bn: encho is just encho. The stepper records how many periods were
+// fought (PeriodCount persists for the tournament log), but the result
+// marking deliberately never carries the number: operator feedback is that
+// counted markers ("(E×3)") confuse readers of brackets and result sheets.
+// Do not reintroduce the count here. Mirrors enchoLabel() in
+// web-mobile/js/bracket.jsx, pinned by the shared table in
+// testdata/encho_labels.json (which includes multi-digit counts precisely to
+// pin that digits never leak into the marker). The editors' "· (E) Overtime
+// ×N" eyebrow is different on purpose: a live readout of the stepper the
+// operator is using, not a result marking.
 func enchoLabel(encho *state.EnchoMetadata) string {
 	if encho == nil || encho.PeriodCount <= 0 {
 		return ""
-	}
-	if encho.PeriodCount > 1 {
-		return "(E×" + strconv.Itoa(encho.PeriodCount) + ")"
 	}
 	return "(E)"
 }

@@ -141,18 +141,19 @@ describe('formatIpponsScore', () => {
     });
 
     it('appends the marker to a no-score draw (X is the scoreless-draw glyph)', () => {
-      expect(formatIpponsScore([], [], null, 'hikiwake', { periodCount: 2 })).toBe('X (E×2)');
+      // mp-m4bn: bare (E) regardless of period count — results never show numbers.
+      expect(formatIpponsScore([], [], null, 'hikiwake', { periodCount: 2 })).toBe('X (E)');
     });
 
     it('does not append (E) when periodCount is 0', () => {
       expect(formatIpponsScore(['M'], ['K'], null, null, { periodCount: 0 })).toBe('M–K');
     });
 
-    // Marker VALUES ("(E)" / "(E×N)" per count) are pinned by the golden
-    // it.each at the bottom of this file; here only the composition into a
-    // score string is under test.
-    it('composes the counted marker with a decision label and hantei', () => {
-      expect(formatIpponsScore([], [], null, 'daihyosen', { periodCount: 3 }, true)).toBe('DH (E×3) Ht');
+    // Marker VALUES (bare "(E)" for any positive count) are pinned by the
+    // golden it.each at the bottom of this file; here only the composition
+    // into a score string is under test.
+    it('composes the marker with a decision label and hantei', () => {
+      expect(formatIpponsScore([], [], null, 'daihyosen', { periodCount: 3 }, true)).toBe('DH (E) Ht');
     });
 
     it('is a no-op when encho argument is missing entirely', () => {

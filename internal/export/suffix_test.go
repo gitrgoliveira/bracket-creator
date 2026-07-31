@@ -43,18 +43,18 @@ func TestDecisionSuffix(t *testing.T) {
 		// Daihyosen
 		{name: "daihyosen", decision: "daihyosen", encho: nil, hantei: false, want: "DH"},
 
-		// Encho only. Marker values per count are pinned by
-		// TestEnchoLabel_GoldenTable; these rows cover the pass-through
-		// into the composed suffix.
+		// Encho only. Marker values are pinned by TestEnchoLabel_GoldenTable;
+		// these rows cover the pass-through into the composed suffix. The
+		// marker is bare "(E)" regardless of period count (mp-m4bn).
 		{name: "encho only (fought)", decision: "fought", encho: encho(1), hantei: false, want: "(E)"},
 		{name: "encho nil vs zero periods", decision: "fought", encho: encho(0), hantei: false, want: ""},
-		{name: "encho x2 carries the count", decision: "fought", encho: encho(2), hantei: false, want: "(E×2)"},
+		{name: "encho x2 renders the same bare marker", decision: "fought", encho: encho(2), hantei: false, want: "(E)"},
 
 		// Hantei only
 		{name: "hantei only (fought)", decision: "fought", encho: nil, hantei: true, want: "Ht"},
 
 		// Encho + hantei
-		{name: "encho + hantei (fought)", decision: "fought", encho: encho(2), hantei: true, want: "(E×2) Ht"},
+		{name: "encho + hantei (fought)", decision: "fought", encho: encho(2), hantei: true, want: "(E) Ht"},
 
 		// Base label + encho
 		{name: "Kiken + encho", decision: "kiken-voluntary", encho: encho(1), hantei: false, want: "Kiken (E)"},
@@ -67,7 +67,7 @@ func TestDecisionSuffix(t *testing.T) {
 
 		// Full composition: base + encho + hantei
 		{name: "Kiken + encho + hantei", decision: "kiken-voluntary", encho: encho(1), hantei: true, want: "Kiken (E) Ht"},
-		{name: "DH + encho + hantei", decision: "daihyosen", encho: encho(3), hantei: true, want: "DH (E×3) Ht"},
+		{name: "DH + encho + hantei", decision: "daihyosen", encho: encho(3), hantei: true, want: "DH (E) Ht"},
 
 		// Hikiwake (draw) produces no base label; suffix still applies
 		{name: "hikiwake + hantei", decision: "hikiwake", encho: nil, hantei: true, want: "Ht"},

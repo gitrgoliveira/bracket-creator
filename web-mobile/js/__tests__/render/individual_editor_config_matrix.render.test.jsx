@@ -14,11 +14,7 @@
 import React from 'react';
 import { render, act, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
-import { FORMAT_PHASES, IMPOSSIBLE_FORMAT_PHASES, NAGINATA, MAX_ENCHO, KENDO_LETTERS, NAGINATA_LETTERS } from './score_editor_matrix_axes.js';
-
-// Expected button-letter sets, built once (compared per cell with Set toEqual).
-const KENDO_SET = new Set(KENDO_LETTERS);
-const NAGINATA_SET = new Set(NAGINATA_LETTERS);
+import { FORMAT_PHASES, IMPOSSIBLE_FORMAT_PHASES, NAGINATA, MAX_ENCHO, KENDO_SET, NAGINATA_SET } from './score_editor_matrix_axes.js';
 
 const STUBBED_GLOBALS = {
   isHikiwake: (_type) => false,
@@ -150,20 +146,28 @@ describe('individual ScoreEditorModal config matrix (running match, admin surfac
 });
 
 describe('individual editor IMPOSSIBLE CELLS (asserted, not skipped)', () => {
-  // IMPOSSIBLE_FORMAT_PHASES is the derived complement of FORMAT_PHASES, so a
-  // format added to the axes module automatically extends this block. Pinned:
-  // the individual editor's knockout check is phase-only.
+  // The cell LIST is derived (axes module complement); the EXPECTATIONS are
+  // explicit and independent, mirroring the team suite's map (its knockout
+  // gate has a format clause this editor lacks, so a shared derived
+  // expectation cannot exist). A newly-derived cell with no map entry fails
+  // loudly here until its expectation is pinned deliberately. Pinned:
   //   playoffs × pool      → draw ALLOWED: a mis-stamped playoffs match could
   //                          record a hikiwake, which knockout advancement
   //                          cannot consume. Ruled on by mp-yqxn.2.
-  //   league|swiss × bracket → draw blocked by the phase stamp alone; pinned
-  //                          for symmetry with the team matrix. Ruled on by
-  //                          mp-yqxn.3 (league) / mp-yqxn.4 (swiss).
+  //   league|swiss × bracket → draw blocked by the phase stamp alone. Ruled on
+  //                          by mp-yqxn.3 (league) / mp-yqxn.4 (swiss).
+  const IMPOSSIBLE_EXPECT_DRAW_DISABLED = {
+    'playoffs/pool': false,
+    'league/bracket': true,
+    'swiss/bracket': true,
+  };
   it.each(IMPOSSIBLE_FORMAT_PHASES.map(fp => [`${fp.format} × phase "${fp.phase}"`, fp]))(
     '%s: product-impossible; the phase stamp alone decides the draw gate',
     async (_name, fp) => {
+      const key = `${fp.format}/${fp.phase}`;
+      expect(IMPOSSIBLE_EXPECT_DRAW_DISABLED, `no pinned expectation for new impossible cell ${key}`).toHaveProperty(key);
       await renderCell({ ...fp, naginata: false, maxEncho: 0 });
-      expect(screen.getByTestId('scoring-modal-mark-draw').disabled).toBe(fp.phase === 'bracket');
+      expect(screen.getByTestId('scoring-modal-mark-draw').disabled).toBe(IMPOSSIBLE_EXPECT_DRAW_DISABLED[key]);
     }
   );
 });

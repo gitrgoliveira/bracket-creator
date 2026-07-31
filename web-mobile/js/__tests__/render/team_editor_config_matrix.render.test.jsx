@@ -21,11 +21,7 @@
 import React from 'react';
 import { render, act, fireEvent, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
-import { FORMAT_PHASES, IMPOSSIBLE_FORMAT_PHASES, NAGINATA, MAX_ENCHO, KENDO_LETTERS, NAGINATA_LETTERS } from './score_editor_matrix_axes.js';
-
-// Expected button-letter sets, built once (compared per cell with Set toEqual).
-const KENDO_SET = new Set(KENDO_LETTERS);
-const NAGINATA_SET = new Set(NAGINATA_LETTERS);
+import { FORMAT_PHASES, IMPOSSIBLE_FORMAT_PHASES, NAGINATA, MAX_ENCHO, KENDO_SET, NAGINATA_SET } from './score_editor_matrix_axes.js';
 
 const STUBBED_GLOBALS = {
   isHikiwake: (_type) => false,
@@ -184,20 +180,31 @@ describe('TeamScoreEditorModal IMPOSSIBLE CELLS (asserted, not skipped)', () => 
   // bracket. Nothing to mount for size<2; recorded here so the cell is
   // visibly excluded rather than forgotten.
 
-  // IMPOSSIBLE_FORMAT_PHASES is the derived complement of FORMAT_PHASES, so a
-  // format added to the axes module automatically extends this block. Pinned:
-  // the team editor trusts a mis-stamped phase outright.
+  // The cell LIST is derived (axes module complement); the EXPECTATIONS are
+  // explicit and independent — the team editor's knockout gate is TWO clauses
+  // (phase === "bracket" OR playoffs/mixed with a non-pool phase,
+  // admin_scoring_team.jsx isKnockoutPhase), so deriving the expected value
+  // from phase alone would silently mis-pin any future cell that exercises the
+  // format clause. A newly-derived cell with no map entry fails loudly here
+  // until its expectation is pinned deliberately. Pinned:
   //   playoffs × pool      → NON-knockout: no in-match daihyosen (a drawn pool
   //                          match must never grow one). Ruled on by mp-yqxn.2.
   //   league|swiss × bracket → the phase clause runs FIRST, so the daihyosen
   //                          affordance renders although the round-robin format
   //                          has no rules for it. Ruled on by mp-yqxn.3
   //                          (league) / mp-yqxn.4 (swiss).
+  const IMPOSSIBLE_EXPECT_DAIHYOSEN = {
+    'playoffs/pool': false,
+    'league/bracket': true,
+    'swiss/bracket': true,
+  };
   it.each(IMPOSSIBLE_FORMAT_PHASES.map(fp => [`${fp.format} × phase "${fp.phase}"`, fp]))(
     '%s: product-impossible; the editor trusts the phase stamp',
     async (_name, fp) => {
+      const key = `${fp.format}/${fp.phase}`;
+      expect(IMPOSSIBLE_EXPECT_DAIHYOSEN, `no pinned expectation for new impossible cell ${key}`).toHaveProperty(key);
       await renderCell({ ...fp, teamSize: 5, tmt: 'fixed', naginata: false, maxEncho: 0 });
-      expect(!!screen.queryByTestId('scoring-modal-daihyosen-button')).toBe(fp.phase === 'bracket');
+      expect(!!screen.queryByTestId('scoring-modal-daihyosen-button')).toBe(IMPOSSIBLE_EXPECT_DAIHYOSEN[key]);
     }
   );
 });

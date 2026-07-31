@@ -58,13 +58,18 @@ function sideLabel(side) {
 // A single period keeps the bare "(E)" — the common case, and the terser
 // marker keeps narrow bracket nodes and Excel cells readable. Mirrors
 // enchoLabel() in internal/export/suffix.go and the score editors'
-// "· (E) Overtime ×N" eyebrow. Keep the three in sync.
+// "· (E) Overtime ×N" eyebrow. Keep the three in sync on the count-carrying
+// contract; the eyebrow alone is a live stepper readout and deliberately
+// never collapses ×1.
 function enchoLabel(encho) {
   const n = encho?.periodCount || 0;
   if (n <= 0) return "";
   return n > 1 ? `(E×${n})` : "(E)";
 }
 
+// Mirrored by DecisionSuffix in internal/export/suffix.go — keep the
+// composition order and single-space joins identical (its docstring records
+// one deliberate divergence: the export also folds fusensho into the suffix).
 function decisionSuffix(match) {
   if (!match) return "";
   const d = match.decision || "";

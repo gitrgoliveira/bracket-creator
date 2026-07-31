@@ -73,7 +73,9 @@ func DecisionSuffix(decision string, encho *state.EnchoMetadata, decidedByHantei
 // operator's stepper taps worth recording. One period stays the bare "(E)":
 // it is the common case and the terser marker keeps narrow Excel cells and
 // bracket nodes readable. Mirrors enchoLabel() in web-mobile/js/bracket.jsx
-// and the editors' "· (E) Overtime ×N" eyebrow. Keep the three in sync.
+// and the editors' "· (E) Overtime ×N" eyebrow. Keep the three in sync on
+// the count-carrying contract; the eyebrow alone is a live stepper readout
+// and deliberately never collapses ×1.
 func enchoLabel(encho *state.EnchoMetadata) string {
 	if encho == nil || encho.PeriodCount <= 0 {
 		return ""

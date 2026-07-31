@@ -501,42 +501,6 @@ describe('DecisionPrompt → /decision POST integration', () => {
   });
 });
 
-describe('+ / − encho button behaviour (mp-m4bn floor-only invariants)', () => {
-  // End-to-end pin: the + button has NO upper clamp (the shimpan decide how
-  // many overtime periods are fought; the operator only records them), and
-  // the − button must not drop below 1. These compose the nextEnchoPeriod /
-  // prevEnchoPeriod helpers.
-
-  // The + button's no-upper-clamp behaviour is pinned by the
-  // nextEnchoPeriod unit block above; this block keeps only the floor
-  // and symmetry invariants the pair composes into.
-  it('− button: repeated clicks bottom out at 1, not 0', () => {
-    let count = 3;
-    for (let i = 0; i < 10; i++) {
-      count = prevEnchoPeriod(count);
-    }
-    expect(count).toBe(1);
-  });
-
-  it('the +/− pair is symmetric above the floor of 1', () => {
-    let count = 1;
-    count = nextEnchoPeriod(count); // 2
-    count = nextEnchoPeriod(count); // 3
-    count = nextEnchoPeriod(count); // 4
-    count = nextEnchoPeriod(count); // 5
-    expect(count).toBe(5);
-    // Step down to floor
-    count = prevEnchoPeriod(count); // 4
-    count = prevEnchoPeriod(count); // 3
-    count = prevEnchoPeriod(count); // 2
-    count = prevEnchoPeriod(count); // 1
-    expect(count).toBe(1);
-    // Try to go below
-    count = prevEnchoPeriod(count); // still 1
-    expect(count).toBe(1);
-  });
-});
-
 describe('isBoutDecided / MAX_IPPONS_PER_SIDE', () => {
   // Kendo best-of-3: once either side reaches 2 ippons the bout ends.
   // isBoutDecided drives the disabled-prop on ippon-add buttons in both

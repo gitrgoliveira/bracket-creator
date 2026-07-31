@@ -180,13 +180,11 @@ describe('TeamScoreEditorModal IMPOSSIBLE CELLS (asserted, not skipped)', () => 
   // bracket. Nothing to mount for size<2; recorded here so the cell is
   // visibly excluded rather than forgotten.
 
-  // The cell LIST is derived (axes module complement); the EXPECTATIONS are
-  // explicit and independent — the team editor's knockout gate is TWO clauses
-  // (phase === "bracket" OR playoffs/mixed with a non-pool phase,
-  // admin_scoring_team.jsx isKnockoutPhase), so deriving the expected value
-  // from phase alone would silently mis-pin any future cell that exercises the
-  // format clause. A newly-derived cell with no map entry fails loudly here
-  // until its expectation is pinned deliberately. Pinned:
+  // Expectations are pinned explicitly because the team editor's knockout gate
+  // is TWO clauses (phase === "bracket" OR playoffs/mixed with a non-pool
+  // phase, admin_scoring_team.jsx isKnockoutPhase) — deriving the expected
+  // value from phase alone would silently mis-pin a future cell exercising the
+  // format clause. Pinned:
   //   playoffs × pool      → NON-knockout: no in-match daihyosen (a drawn pool
   //                          match must never grow one). Ruled on by mp-yqxn.2.
   //   league|swiss × bracket → the phase clause runs FIRST, so the daihyosen
@@ -198,13 +196,21 @@ describe('TeamScoreEditorModal IMPOSSIBLE CELLS (asserted, not skipped)', () => 
     'league/bracket': true,
     'swiss/bracket': true,
   };
+
+  // Both directions at once: a newly-derived cell with no pinned expectation
+  // AND a stale expectation for a cell that became product-possible each fail
+  // this 1:1 check by name.
+  it('expectation map stays 1:1 with the derived impossible-cell list', () => {
+    expect(Object.keys(IMPOSSIBLE_EXPECT_DAIHYOSEN).sort()).toEqual(
+      IMPOSSIBLE_FORMAT_PHASES.map(fp => `${fp.format}/${fp.phase}`).sort()
+    );
+  });
+
   it.each(IMPOSSIBLE_FORMAT_PHASES.map(fp => [`${fp.format} × phase "${fp.phase}"`, fp]))(
     '%s: product-impossible; the editor trusts the phase stamp',
     async (_name, fp) => {
-      const key = `${fp.format}/${fp.phase}`;
-      expect(IMPOSSIBLE_EXPECT_DAIHYOSEN, `no pinned expectation for new impossible cell ${key}`).toHaveProperty(key);
       await renderCell({ ...fp, teamSize: 5, tmt: 'fixed', naginata: false, maxEncho: 0 });
-      expect(!!screen.queryByTestId('scoring-modal-daihyosen-button')).toBe(IMPOSSIBLE_EXPECT_DAIHYOSEN[key]);
+      expect(!!screen.queryByTestId('scoring-modal-daihyosen-button')).toBe(IMPOSSIBLE_EXPECT_DAIHYOSEN[`${fp.format}/${fp.phase}`]);
     }
   );
 });

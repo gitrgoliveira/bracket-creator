@@ -146,11 +146,9 @@ describe('individual ScoreEditorModal config matrix (running match, admin surfac
 });
 
 describe('individual editor IMPOSSIBLE CELLS (asserted, not skipped)', () => {
-  // The cell LIST is derived (axes module complement); the EXPECTATIONS are
-  // explicit and independent, mirroring the team suite's map (its knockout
-  // gate has a format clause this editor lacks, so a shared derived
-  // expectation cannot exist). A newly-derived cell with no map entry fails
-  // loudly here until its expectation is pinned deliberately. Pinned:
+  // Expectations are pinned explicitly, mirroring the team suite's map (its
+  // knockout gate has a format clause this editor lacks, so a shared derived
+  // expectation cannot exist). Pinned:
   //   playoffs × pool      → draw ALLOWED: a mis-stamped playoffs match could
   //                          record a hikiwake, which knockout advancement
   //                          cannot consume. Ruled on by mp-yqxn.2.
@@ -161,13 +159,21 @@ describe('individual editor IMPOSSIBLE CELLS (asserted, not skipped)', () => {
     'league/bracket': true,
     'swiss/bracket': true,
   };
+
+  // Both directions at once: a newly-derived cell with no pinned expectation
+  // AND a stale expectation for a cell that became product-possible each fail
+  // this 1:1 check by name.
+  it('expectation map stays 1:1 with the derived impossible-cell list', () => {
+    expect(Object.keys(IMPOSSIBLE_EXPECT_DRAW_DISABLED).sort()).toEqual(
+      IMPOSSIBLE_FORMAT_PHASES.map(fp => `${fp.format}/${fp.phase}`).sort()
+    );
+  });
+
   it.each(IMPOSSIBLE_FORMAT_PHASES.map(fp => [`${fp.format} × phase "${fp.phase}"`, fp]))(
     '%s: product-impossible; the phase stamp alone decides the draw gate',
     async (_name, fp) => {
-      const key = `${fp.format}/${fp.phase}`;
-      expect(IMPOSSIBLE_EXPECT_DRAW_DISABLED, `no pinned expectation for new impossible cell ${key}`).toHaveProperty(key);
       await renderCell({ ...fp, naginata: false, maxEncho: 0 });
-      expect(screen.getByTestId('scoring-modal-mark-draw').disabled).toBe(IMPOSSIBLE_EXPECT_DRAW_DISABLED[key]);
+      expect(screen.getByTestId('scoring-modal-mark-draw').disabled).toBe(IMPOSSIBLE_EXPECT_DRAW_DISABLED[`${fp.format}/${fp.phase}`]);
     }
   );
 });

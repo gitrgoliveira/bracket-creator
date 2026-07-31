@@ -137,6 +137,19 @@ export function SwissStandingsViewer({ competition, poolMatches, tweaks }) {
   const heading = swissStandingsHeading(c, poolMatches);
   const winner = isFinal && standings.length > 0 ? standings[0] : null;
 
+  // Mirror the pool/league standings table: dispatch the columns on scoring
+  // paradigm so engi (flag) and team (sub-bout) swiss standings surface the
+  // tie-break data the backend now tallies (mp-8pba), instead of the
+  // individual W/L/D/PW/PL shape that renders zeros for both.
+  const isEngi = !!c.engi;
+  const isTeam = !isEngi && (c.teamSize || 0) > 0;
+  const emptyColSpan = isEngi ? 4 : isTeam ? 10 : 7;
+  const rankedBy = isEngi
+    ? "Ranked by: wins → total flags → head-to-head."
+    : isTeam
+      ? "Ranked by: team wins → IV → PW → head-to-head."
+      : "Ranked by: wins → points scored (PW) → head-to-head.";
+
   if (loading) return <window.LoadingSpinner text="Loading standings…" />;
   if (error) return <div className="alert alert--error">{error}</div>;
 
@@ -153,35 +166,51 @@ export function SwissStandingsViewer({ competition, poolMatches, tweaks }) {
         <table className="pool__table">
           <thead>
             {/* Head-to-head is a tiebreaker between equal-wins-and-points */}
-            {/* pairs; surfaced as the column label so the order is */}
-            {/* explicit to viewers. The backend resolves head-to-head */}
-            {/* into the stable rank value used for row order. */}
-            <tr><th>#</th><th>Player</th><th className="num">W</th><th className="num">L</th><th className="num">D</th><th className="num">PW</th><th className="num">PL</th></tr>
+            {/* pairs; surfaced in the caption below. The backend resolves */}
+            {/* head-to-head into the stable rank value used for row order. */}
+            <StandingsTableHead isEngi={isEngi} isTeam={isTeam} />
           </thead>
           <tbody>
-            {standings.length > 0 ? standings.map((s, i) => (
-              <tr key={s.player?.id || s.player?.name || i}>
-                {/* Rank-ordered: "#" is the authoritative standing rank (s.rank),
-                    DRY with the backend tiebreak/override logic, not the row index. */}
-                <td className={`pool-standings__draw-pos${s.isOverridden ? " pool-standings__draw-pos--override" : ""}`}>{s.rank || i + 1}{s.isOverridden ? "*" : ""}</td>
-                <td>
-                  <div className="pool__player-name">{s.player?.name || ""}</div>
-                  {tweaks?.showDojo ? <div className="pool__dojo-name">{s.player?.dojo || ""}</div> : null}
-                </td>
-                <td className="num">{s.wins || 0}</td>
-                <td className="num">{s.losses || 0}</td>
-                <td className="num">{s.draws || 0}</td>
-                <td className="num">{s.ipponsGiven || 0}</td>
-                <td className="num">{s.ipponsTaken || 0}</td>
-              </tr>
-            )) : (
-              <tr><td colSpan={7} className="pool__table-empty">No matches scored yet.</td></tr>
+            {standings.length > 0 ? standings.map((s, i) => {
+              const [pMember1, pMember2] = isEngi && window.engiPairParts ? window.engiPairParts(s.player?.name || "") : [s.player?.name || "", ""];
+              return (
+                <tr key={s.player?.id || s.player?.name || i}>
+                  {/* Rank-ordered: "#" is the authoritative standing rank (s.rank),
+                      DRY with the backend tiebreak/override logic, not the row index. */}
+                  <td className={`pool-standings__draw-pos${s.isOverridden ? " pool-standings__draw-pos--override" : ""}`}>{s.rank || i + 1}{s.isOverridden ? "*" : ""}</td>
+                  <td>
+                    <div className="pool__player-name">{pMember1}</div>
+                    {/* Engi pair: member 2 (from the combined name) stacked below member 1. */}
+                    {isEngi && pMember2 ? <div className="pool__player-name">{pMember2}</div> : null}
+                    {tweaks?.showDojo ? <div className="pool__dojo-name">{s.player?.dojo || ""}</div> : null}
+                  </td>
+                  {isEngi ? (
+                    <>
+                      <td className="num">{s.wins || 0}</td>
+                      <td className="num">{s.flags || 0}</td>
+                    </>
+                  ) : (
+                    <>
+                      <td className="num">{s.wins || 0}</td>
+                      <td className="num">{s.losses || 0}</td>
+                      <td className="num">{s.draws || 0}</td>
+                      {isTeam && <td className="num">{s.individualWins || 0}</td>}
+                      {isTeam && <td className="num">{s.individualLosses || 0}</td>}
+                      {isTeam && <td className="num">{s.individualDraws || 0}</td>}
+                      <td className="num">{isTeam ? (s.pointsWon || 0) : (s.ipponsGiven || 0)}</td>
+                      <td className="num">{isTeam ? (s.pointsLost || 0) : (s.ipponsTaken || 0)}</td>
+                    </>
+                  )}
+                </tr>
+              );
+            }) : (
+              <tr><td colSpan={emptyColSpan} className="pool__table-empty">No matches scored yet.</td></tr>
             )}
           </tbody>
         </table>
         {standings.length > 0 && (
           <div className="league-matrix__legend hint--sm" style={{ marginTop: 8 }}>
-            Ranked by: wins → points scored (PW) → head-to-head.
+            {rankedBy}
           </div>
         )}
       </div>

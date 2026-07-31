@@ -609,6 +609,19 @@ func (e *Engine) SwissStandings(compID string) ([]state.PlayerStanding, error) {
 		return nil, err
 	}
 
+	// Dispatch on competition type at this single seam, mirroring the pool
+	// path (computeStandingsFrom): an engi (flag-scored) competition ranks by
+	// wins then accumulated own-side flags, so it delegates to the engi
+	// standings core rather than the ippon tally below (engi.go
+	// hard-separation principle). Swiss's head-to-head tiebreak is preserved
+	// inside that core. Team vs individual is a kendo-internal branch handled
+	// inline in the tally and sort below: a team match carries no ippons of its
+	// own, so its tie-break columns (IV/IL/IT/PW/PL) come from SubResults.
+	if comp.Engi {
+		return e.computeEngiSwissStandings(participants, matches)
+	}
+	isTeam := comp.TeamSize > 0
+
 	// Initialise one PlayerStanding per participant so the response
 	// includes the full roster (matches the existing pool-standings
 	// invariant, operators expect to see every player listed).
@@ -643,14 +656,41 @@ func (e *Engine) SwissStandings(compID string) ([]state.PlayerStanding, error) {
 		if sA == nil || sB == nil {
 			continue
 		}
-		// Ippons per side, via countScoringIppons (not len): bye-marked
-		// completed matches contain nil ippons (count 0, correct), and a
-		// real completed match can retain "•" unfilled-slot placeholders or
-		// empty entries that are not scored points and must not be tallied.
-		sA.IpponsGiven += countScoringIppons(m.IpponsA)
-		sA.IpponsTaken += countScoringIppons(m.IpponsB)
-		sB.IpponsGiven += countScoringIppons(m.IpponsB)
-		sB.IpponsTaken += countScoringIppons(m.IpponsA)
+		if isTeam && len(m.SubResults) > 0 {
+			// Team match: the parent carries no ippons of its own, so the
+			// tie-break columns (IV/IL/IT/PW/PL) come from the sub-bouts,
+			// exactly as the pool path does in computeStandingsFrom.
+			for _, sub := range m.SubResults {
+				sideAWin := isWinForSide(sub.Winner, m.SideA, sub.SideA)
+				sideBWin := isWinForSide(sub.Winner, m.SideB, sub.SideB)
+				switch {
+				case sideAWin:
+					sA.IndividualWins++
+					sB.IndividualLosses++
+				case sideBWin:
+					sB.IndividualWins++
+					sA.IndividualLosses++
+				case sub.Winner == "":
+					sA.IndividualDraws++
+					sB.IndividualDraws++
+				}
+				// countScoringIppons (not len): keeps PointsWon in sync with the
+				// wire teamResult PW so displayed and tie-break points can't drift.
+				sA.PointsWon += countScoringIppons(sub.IpponsA)
+				sA.PointsLost += countScoringIppons(sub.IpponsB)
+				sB.PointsWon += countScoringIppons(sub.IpponsB)
+				sB.PointsLost += countScoringIppons(sub.IpponsA)
+			}
+		} else {
+			// Individual scoring: ippons at match level, via countScoringIppons
+			// (not len): bye-marked completed matches contain nil ippons (count 0,
+			// correct), and a real completed match can retain "•" unfilled-slot
+			// placeholders or empty entries that are not scored points.
+			sA.IpponsGiven += countScoringIppons(m.IpponsA)
+			sA.IpponsTaken += countScoringIppons(m.IpponsB)
+			sB.IpponsGiven += countScoringIppons(m.IpponsB)
+			sB.IpponsTaken += countScoringIppons(m.IpponsA)
+		}
 
 		switch {
 		case m.Winner == m.SideA:
@@ -677,17 +717,32 @@ func (e *Engine) SwissStandings(compID string) ([]state.PlayerStanding, error) {
 	for _, s := range byName {
 		// Compose a human-readable score summary mirroring the
 		// pool-standings format so the same UI cell renders both.
-		s.ScoreSummary = fmt.Sprintf("W:%d L:%d D:%d | P:%d-%d",
-			s.Wins, s.Losses, s.Draws, s.IpponsGiven, s.IpponsTaken)
+		if isTeam {
+			s.ScoreSummary = fmt.Sprintf("W:%d L:%d D:%d | IV:%d IL:%d IT:%d | PW:%d PL:%d",
+				s.Wins, s.Losses, s.Draws,
+				s.IndividualWins, s.IndividualLosses, s.IndividualDraws,
+				s.PointsWon, s.PointsLost)
+		} else {
+			s.ScoreSummary = fmt.Sprintf("W:%d L:%d D:%d | P:%d-%d",
+				s.Wins, s.Losses, s.Draws, s.IpponsGiven, s.IpponsTaken)
+		}
 		standings = append(standings, *s)
 	}
 	sort.SliceStable(standings, func(i, j int) bool {
 		a, b := standings[i], standings[j]
-		if a.Wins != b.Wins {
-			return a.Wins > b.Wins
-		}
-		if a.IpponsGiven != b.IpponsGiven {
-			return a.IpponsGiven > b.IpponsGiven
+		if isTeam {
+			// Full ordered team chain (W, L, T, IV, IL, IT, PW, PL) packed into
+			// one score, then head-to-head, then name; see teamStandingPoints.
+			if pa, pb := teamStandingPoints(a), teamStandingPoints(b); pa != pb {
+				return pa > pb
+			}
+		} else {
+			if a.Wins != b.Wins {
+				return a.Wins > b.Wins
+			}
+			if a.IpponsGiven != b.IpponsGiven {
+				return a.IpponsGiven > b.IpponsGiven
+			}
 		}
 		// Head-to-head: if a beat b directly, a ranks higher.
 		if winner, ok := lookupH2H(headToHead, a.Player.Name, b.Player.Name); ok {

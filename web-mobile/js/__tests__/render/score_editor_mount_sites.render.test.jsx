@@ -51,7 +51,7 @@ function wiringOf(p) {
     onClose: kind(p.onClose),
     canClose: kind(p.canClose),
     variant: kind(p.variant),
-    password: kind(p.password) === 'absent' ? 'absent' : p.password,
+    password: kind(p.password),
     selfReport: kind(p.selfReport),
   };
 }
@@ -324,8 +324,9 @@ describe('mount site: admin_schedule_score_editor.jsx (Scores tab)', () => {
       );
     });
     await act(async () => { fireEvent.click(document.querySelector('button.test-score-open')); });
-    expect(wiringOf(probe.props).onSubmitAndNext).toBe('null');
-    expect(wiringOf(probe.props).onAfterDecision).toBe('null');
+    const w = wiringOf(probe.props);
+    expect(w.onSubmitAndNext).toBe('null');
+    expect(w.onAfterDecision).toBe('null');
   });
 });
 

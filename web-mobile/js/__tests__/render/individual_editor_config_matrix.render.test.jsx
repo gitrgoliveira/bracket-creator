@@ -14,7 +14,11 @@
 import React from 'react';
 import { render, act, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
-import { FORMAT_PHASES, NAGINATA, MAX_ENCHO, KENDO_LETTERS, NAGINATA_LETTERS } from './score_editor_matrix_axes.js';
+import { FORMAT_PHASES, IMPOSSIBLE_FORMAT_PHASES, NAGINATA, MAX_ENCHO, KENDO_LETTERS, NAGINATA_LETTERS } from './score_editor_matrix_axes.js';
+
+// Expected button-letter sets, built once (compared per cell with Set toEqual).
+const KENDO_SET = new Set(KENDO_LETTERS);
+const NAGINATA_SET = new Set(NAGINATA_LETTERS);
 
 const STUBBED_GLOBALS = {
   isHikiwake: (_type) => false,
@@ -121,9 +125,7 @@ describe('individual ScoreEditorModal config matrix (running match, admin surfac
     const letters = new Set(
       [...container.querySelectorAll('.ipt-btn')].map(b => b.textContent)
     );
-    expect([...letters].sort()).toEqual(
-      [...(cell.naginata ? NAGINATA_LETTERS : KENDO_LETTERS)].sort()
-    );
+    expect(letters).toEqual(cell.naginata ? NAGINATA_SET : KENDO_SET);
 
     // Hikiwake: the draw button is DISABLED for knockout matches (no draws in
     // elimination — decide by hantei after encho) and enabled for pool-shaped
@@ -148,22 +150,20 @@ describe('individual ScoreEditorModal config matrix (running match, admin surfac
 });
 
 describe('individual editor IMPOSSIBLE CELLS (asserted, not skipped)', () => {
-  it('playoffs × phase "pool": product-impossible; the editor trusts the stamp and ALLOWS a draw', async () => {
-    // Playoffs generates no pool matches. Pinned: the individual editor's
-    // knockout check is phase-only, so a playoffs match mis-stamped "pool"
-    // could be recorded as a hikiwake — which knockout advancement cannot
-    // consume. Ruled on by mp-yqxn.2.
-    await renderCell({ format: 'playoffs', phase: 'pool', naginata: false, maxEncho: 0 });
-    expect(screen.getByTestId('scoring-modal-mark-draw').disabled).toBe(false);
-  });
-
-  it.each([['league'], ['swiss']])(
-    '%s × phase "bracket": product-impossible; the phase stamp alone blocks the draw',
-    async (format) => {
-      // League/swiss produce no bracket matches; pinned for symmetry with the
-      // team-editor matrix. Ruled on by mp-yqxn.3 (league) / mp-yqxn.4 (swiss).
-      await renderCell({ format, phase: 'bracket', naginata: false, maxEncho: 0 });
-      expect(screen.getByTestId('scoring-modal-mark-draw').disabled).toBe(true);
+  // IMPOSSIBLE_FORMAT_PHASES is the derived complement of FORMAT_PHASES, so a
+  // format added to the axes module automatically extends this block. Pinned:
+  // the individual editor's knockout check is phase-only.
+  //   playoffs × pool      → draw ALLOWED: a mis-stamped playoffs match could
+  //                          record a hikiwake, which knockout advancement
+  //                          cannot consume. Ruled on by mp-yqxn.2.
+  //   league|swiss × bracket → draw blocked by the phase stamp alone; pinned
+  //                          for symmetry with the team matrix. Ruled on by
+  //                          mp-yqxn.3 (league) / mp-yqxn.4 (swiss).
+  it.each(IMPOSSIBLE_FORMAT_PHASES.map(fp => [`${fp.format} × phase "${fp.phase}"`, fp]))(
+    '%s: product-impossible; the phase stamp alone decides the draw gate',
+    async (_name, fp) => {
+      await renderCell({ ...fp, naginata: false, maxEncho: 0 });
+      expect(screen.getByTestId('scoring-modal-mark-draw').disabled).toBe(fp.phase === 'bracket');
     }
   );
 });

@@ -10,6 +10,9 @@
 // league and swiss have ONLY pool-shaped matches; mixed has both. Cells
 // outside this mapping are product-impossible and asserted as such in each
 // suite's IMPOSSIBLE CELLS block, not silently skipped.
+export const FORMATS = ['playoffs', 'mixed', 'league', 'swiss'];
+export const PHASES = ['pool', 'bracket'];
+
 export const FORMAT_PHASES = [
   { format: 'playoffs', phase: 'bracket' },
   { format: 'mixed', phase: 'pool' },
@@ -17,6 +20,14 @@ export const FORMAT_PHASES = [
   { format: 'league', phase: 'pool' },
   { format: 'swiss', phase: 'pool' },
 ];
+
+// The complement of FORMAT_PHASES within FORMATS × PHASES: shapes the product
+// cannot produce, which each suite's IMPOSSIBLE CELLS block pins (the editor
+// trusts a mis-stamped phase outright). Derived, so a format added to
+// FORMAT_PHASES automatically extends the impossible blocks too.
+export const IMPOSSIBLE_FORMAT_PHASES = FORMATS
+  .flatMap(format => PHASES.map(phase => ({ format, phase })))
+  .filter(fp => !FORMAT_PHASES.some(p => p.format === fp.format && p.phase === fp.phase));
 
 export const NAGINATA = [false, true];
 export const MAX_ENCHO = [0, 2];

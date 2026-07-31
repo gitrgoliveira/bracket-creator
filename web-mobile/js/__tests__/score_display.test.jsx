@@ -128,16 +128,17 @@ describe('formatIpponsScore', () => {
     });
   });
 
-  // FR-033: encho is rendered as a trailing " (E)" so the match list and
-  // bracket views surface that the match went to overtime.
-  describe('encho suffix', () => {
-    it('appends (E) to a normal ippon score when encho has a positive period count', () => {
-      expect(formatIpponsScore(['M'], ['K'], null, null, { periodCount: 1 })).toBe('M–K (E)');
+  // FR-033: encho renders as a bare "(E)" in the CENTRE of the score string,
+  // replacing the "–" separator (the score sheet's centre-column convention),
+  // so match lists and bracket views surface overtime at a glance.
+  describe('encho marker', () => {
+    it('places (E) between the scores when encho has a positive period count', () => {
+      expect(formatIpponsScore(['M'], ['K'], null, null, { periodCount: 1 })).toBe('M (E) K');
     });
 
-    it('appends (E) to a scored draw (shows points, not X)', () => {
-      // Item 6: scored equal draw shows techniques + encho suffix, not bare X.
-      expect(formatIpponsScore(['M'], ['K'], { type: 'hikiwake' }, null, { periodCount: 1 })).toBe('M–K (E)');
+    it('places (E) between the points of a scored draw (shows points, not X)', () => {
+      // Item 6: scored equal draw shows techniques + encho marker, not bare X.
+      expect(formatIpponsScore(['M'], ['K'], { type: 'hikiwake' }, null, { periodCount: 1 })).toBe('M (E) K');
     });
 
     it('appends the marker to a no-score draw (X is the scoreless-draw glyph)', () => {
@@ -174,12 +175,12 @@ describe('formatIpponsScore', () => {
       // Realistic: tied with scores, then hantei chose a winner. Backend
       // sends decidedByHantei=true alongside the tied ippons.
       const result = formatIpponsScore(['M'], ['K'], null, null, { periodCount: 1 }, true);
-      expect(result).toBe('M–K (E) Ht');
+      expect(result).toBe('M (E) K Ht');
     });
 
     it('omits Ht when decidedByHantei is false/missing', () => {
-      expect(formatIpponsScore(['M'], ['K'], null, null, { periodCount: 1 }, false)).toBe('M–K (E)');
-      expect(formatIpponsScore(['M'], ['K'], null, null, { periodCount: 1 })).toBe('M–K (E)');
+      expect(formatIpponsScore(['M'], ['K'], null, null, { periodCount: 1 }, false)).toBe('M (E) K');
+      expect(formatIpponsScore(['M'], ['K'], null, null, { periodCount: 1 })).toBe('M (E) K');
     });
 
     it('score.hantei is not read. Only the decidedByHantei param controls Ht', () => {
@@ -187,8 +188,8 @@ describe('formatIpponsScore', () => {
       // API fields (ipponsA/B, scoreA/B). The backend never emits a `score`
       // object, so score.hantei can never appear in real match data. Only the
       // positional decidedByHantei arg matters.
-      expect(formatIpponsScore(['M'], ['K'], { type: 'ippon', hantei: true }, null, { periodCount: 1 })).toBe('M–K (E)');
-      expect(formatIpponsScore(['M'], ['K'], { type: 'ippon', hantei: true }, null, { periodCount: 1 }, true)).toBe('M–K (E) Ht');
+      expect(formatIpponsScore(['M'], ['K'], { type: 'ippon', hantei: true }, null, { periodCount: 1 })).toBe('M (E) K');
+      expect(formatIpponsScore(['M'], ['K'], { type: 'ippon', hantei: true }, null, { periodCount: 1 }, true)).toBe('M (E) K Ht');
     });
   });
 });
@@ -211,9 +212,9 @@ describe('formatIpponsScore: hikiwake draw display (item 6)', () => {
     expect(formatIpponsScore(['M'], ['K'], { type: 'hikiwake' }, null)).toBe('M–K');
   });
 
-  it('1–1 hikiwake with encho (periodCount>0) → "M–K (E)"', () => {
-    // Encho suffix must survive the scored-draw path unchanged.
-    expect(formatIpponsScore(['M'], ['K'], { type: 'hikiwake' }, null, { periodCount: 1 })).toBe('M–K (E)');
+  it('1–1 hikiwake with encho (periodCount>0) → "M (E) K"', () => {
+    // The centred encho marker must survive the scored-draw path unchanged.
+    expect(formatIpponsScore(['M'], ['K'], { type: 'hikiwake' }, null, { periodCount: 1 })).toBe('M (E) K');
   });
 });
 

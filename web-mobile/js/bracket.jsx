@@ -99,24 +99,34 @@ function ipponsFromScore(scoreStr) {
 // Returns something like "MM–K", "M–·", "X" (hikiwake, scored or not), "BYE".
 // Hantei (judges' decision after tied encho) is NOT a separate return value;
 // it surfaces as an "Ht" suffix appended by decisionSuffix when
-// decidedByHantei=true: e.g. "M–K (E) Ht".
+// decidedByHantei=true: e.g. "M (E) K Ht".
 //
 // FR-033: when `encho` carries a positive periodCount, the bare "(E)" marker
-// (via enchoLabel) is appended so operators and viewers see at a glance that
-// the match went to overtime. Argument is optional and defaults to no-encho
-// when absent.
+// (via enchoLabel) sits in the CENTRE, replacing the "–" separator ("M (E) ·"),
+// so operators and viewers see at a glance that the match went to overtime —
+// the score sheet's centre-column convention. Argument is optional and
+// defaults to no-encho when absent.
 //
-// T097: kiken / fusenpai / daihyosen append labelled suffixes alongside the
-// encho marker: wired through decisionSuffix() so the same string is used
-// by display.jsx's hand-rolled score block. decisionSuffix() is the single
-// source of the composed suffix — it already embeds the encho marker, so
-// there is no separate bare-"(E)" path here.
+// T097: kiken / fusenpai / daihyosen append labelled TRAILING suffixes:
+// wired through decisionSuffix() so the same labels are used by display.jsx's
+// hand-rolled score block. Only the encho marker is pulled out of the
+// composed suffix and centred; paths with no two-sided score still render
+// decisionSuffix() whole.
 function formatIpponsScore(ipponsA, ipponsB, score, decision, encho, decidedByHantei) {
   // decidedByHantei (positional) is the canonical flag. The `typeof` guard
   // lets callers that omit the arg safely get false without sending undefined.
   const hantei = typeof decidedByHantei === "boolean" ? decidedByHantei : false;
-  const decSfx = decisionSuffix({ decision, encho, decidedByHantei: hantei });
-  const suffix = decSfx ? " " + decSfx : "";
+  // The (E) marker sits in the CENTRE, between the two sides' scores: the
+  // string analogue of the paper score sheet's centre column and of the Excel
+  // export, where MiddleCellText writes it into the centre "vs" cell. When a
+  // match went to encho, " (E) " replaces the "–" separator; decision tags
+  // (Kiken / Fus. / DH / Ht) remain trailing. Paths with no two-sided score
+  // fall back to the full composed decisionSuffix (nothing to sit between).
+  const enchoSfx = enchoLabel(encho);
+  const sep = enchoSfx ? ` ${enchoSfx} ` : "–";
+  const tailSfx = decisionSuffix({ decision, decidedByHantei: hantei });
+  const tail = tailSfx ? " " + tailSfx : "";
+  const fullSfx = decisionSuffix({ decision, encho, decidedByHantei: hantei });
   if (score?.type === "bye") return "BYE";
   const aStr = (ipponsA || []).filter(x => x && x !== "•").join("");
   const bStr = (ipponsB || []).filter(x => x && x !== "•").join("");
@@ -124,13 +134,14 @@ function formatIpponsScore(ipponsA, ipponsB, score, decision, encho, decidedByHa
   if (isDraw) {
     if (!aStr && !bStr) {
       // Scoreless draw (operator pressed X with no ippons entered): canonical
-      // hikiwake glyph. This is the draw marker, not the hansoku triangle.
-      return "X" + suffix;
+      // hikiwake glyph. This is the draw marker, not the hansoku triangle. X
+      // is itself centre-column content, so the composed suffix follows it.
+      return "X" + (fullSfx ? " " + fullSfx : "");
     }
     // Scored equal draw (e.g. 1–1 M–K hikiwake): show the actual points so
     // the operator and viewer see what was struck, not a bare X. The hikiwake
     // type is still recorded on the server: this is a display-only change.
-    return `${aStr || "·"}–${bStr || "·"}` + suffix;
+    return `${aStr || "·"}${sep}${bStr || "·"}` + tail;
   }
   if (!aStr && !bStr) {
     // Fall back when the per-side ippon arrays are absent but a score object
@@ -142,13 +153,13 @@ function formatIpponsScore(ipponsA, ipponsB, score, decision, encho, decidedByHa
     if (score?.type === "ippon" && (score.winnerPts > 0 || score.loserPts > 0)) {
       const winnerLetters = (score.ippons || []).filter(x => x && x !== "•").join("");
       const winnerStr = winnerLetters || `${score.winnerPts}`;
-      return `${winnerStr}–${score.loserPts}` + suffix;
+      return `${winnerStr}${sep}${score.loserPts}` + tail;
     }
     // No scores but a decision was recorded (e.g. kiken before any ippon
     // was struck): still print the suffix so the operator sees "Kiken".
-    return suffix ? suffix.trimStart() : "";
+    return fullSfx || "";
   }
-  return `${aStr || "·"}–${bStr || "·"}` + suffix;
+  return `${aStr || "·"}${sep}${bStr || "·"}` + tail;
 }
 
 // engiFlagScore: derive an engi match's flag-count score string from

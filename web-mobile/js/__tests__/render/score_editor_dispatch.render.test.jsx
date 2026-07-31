@@ -208,22 +208,22 @@ describe('ScoreEditorModal dispatch: which branch renders', () => {
 });
 
 describe('ScoreEditorModal dispatch: forwarded props per branch', () => {
+  // Props BOTH non-default branches must forward identically. The three
+  // admin/self-run props (password, selfReport, onAfterDecision) are asserted
+  // per branch below because the branches deliberately DIFFER on them.
+  const FORWARDED_TO_BOTH = [
+    'onClose', 'onSubmit', 'onSubmitAndNext', 'prevMatch', 'nextMatch',
+    'onPrev', 'onNext', 'variant', 'canClose',
+  ];
+
   it('team branch forwards the FULL bag including password, selfReport and onAfterDecision', () => {
     const bag = fullPropBag();
     render(<ScoreEditorModal match={makeMatch({ compKind: 'team', teamSize: 5 })} {...bag} />);
     const p = probes.team.props;
-    expect(p.onClose).toBe(bag.onClose);
-    expect(p.onSubmit).toBe(bag.onSubmit);
-    expect(p.onSubmitAndNext).toBe(bag.onSubmitAndNext);
-    expect(p.onAfterDecision).toBe(bag.onAfterDecision);
-    expect(p.prevMatch).toBe(bag.prevMatch);
-    expect(p.nextMatch).toBe(bag.nextMatch);
-    expect(p.onPrev).toBe(bag.onPrev);
-    expect(p.onNext).toBe(bag.onNext);
+    for (const k of FORWARDED_TO_BOTH) expect(p[k], k).toBe(bag[k]);
     expect(p.password).toBe('pw');
     expect(p.selfReport).toBe(true);
-    expect(p.variant).toBe('inline');
-    expect(p.canClose).toBe(false);
+    expect(p.onAfterDecision).toBe(bag.onAfterDecision);
   });
 
   it('engi branch forwards navigation but DROPS password, selfReport and onAfterDecision', () => {
@@ -238,15 +238,7 @@ describe('ScoreEditorModal dispatch: forwarded props per branch', () => {
     const bag = fullPropBag();
     render(<ScoreEditorModal match={makeMatch({ compEngi: true })} {...bag} />);
     const p = probes.engi.props;
-    expect(p.onClose).toBe(bag.onClose);
-    expect(p.onSubmit).toBe(bag.onSubmit);
-    expect(p.onSubmitAndNext).toBe(bag.onSubmitAndNext);
-    expect(p.prevMatch).toBe(bag.prevMatch);
-    expect(p.nextMatch).toBe(bag.nextMatch);
-    expect(p.onPrev).toBe(bag.onPrev);
-    expect(p.onNext).toBe(bag.onNext);
-    expect(p.variant).toBe('inline');
-    expect(p.canClose).toBe(false);
+    for (const k of FORWARDED_TO_BOTH) expect(p[k], k).toBe(bag[k]);
     // The three dropped props:
     expect(p.password).toBeUndefined();
     expect(p.selfReport).toBeUndefined();

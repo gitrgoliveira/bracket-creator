@@ -20,7 +20,6 @@ const STUBBED_GLOBALS = {
   // LAZY: only called in event handlers or guarded effects
   filterMatchesByCourt: (matches, _court) => matches,
   tournamentMatches: () => [],
-  filterMatchesByPhase: (matches) => matches,
   API: {
     fetchCompetitionDetails: vi.fn().mockResolvedValue(null),
     sendAnnouncement: vi.fn(),

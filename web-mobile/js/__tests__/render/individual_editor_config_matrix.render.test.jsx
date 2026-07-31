@@ -14,6 +14,7 @@
 import React from 'react';
 import { render, act, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+import { FORMAT_PHASES, NAGINATA, MAX_ENCHO, KENDO_LETTERS, NAGINATA_LETTERS } from './score_editor_matrix_axes.js';
 
 const STUBBED_GLOBALS = {
   isHikiwake: (_type) => false,
@@ -56,16 +57,8 @@ afterAll(() => {
   }
 });
 
-const FORMAT_PHASES = [
-  { format: 'playoffs', phase: 'bracket' },
-  { format: 'mixed', phase: 'pool' },
-  { format: 'mixed', phase: 'bracket' },
-  { format: 'league', phase: 'pool' },
-  { format: 'swiss', phase: 'pool' },
-];
-const NAGINATA = [false, true];
-const MAX_ENCHO = [0, 2];
-
+// Shared axes + letter tables live in score_editor_matrix_axes.js (kept in
+// lockstep with the team-editor matrix).
 const CELLS = FORMAT_PHASES.flatMap(fp =>
   NAGINATA.flatMap(naginata =>
     MAX_ENCHO.map(maxEncho => ({ ...fp, naginata, maxEncho }))
@@ -117,9 +110,6 @@ async function renderCell(cell, matchOverrides = {}, props = {}) {
   });
   return utils;
 }
-
-const KENDO_LETTERS = ['M', 'K', 'D', 'T', 'H'];
-const NAGINATA_LETTERS = ['M', 'K', 'D', 'T', 'S', 'H'];
 
 describe('individual ScoreEditorModal config matrix (running match, admin surface)', () => {
   it.each(CELLS.map(c => [cellName(c), c]))('%s', async (_name, cell) => {

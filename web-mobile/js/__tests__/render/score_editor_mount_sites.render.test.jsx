@@ -73,7 +73,6 @@ const STUBBED_GLOBALS = {
   matchScoreStr: () => '',
   // LAZY / render-time
   filterMatchesByCourt: (matches) => matches,
-  filterMatchesByPhase: (matches) => matches,
   tournamentMatches: () => [],
   compMatches: () => [],
   startPatch: () => ({ status: 'running', winner: null }),
@@ -226,7 +225,9 @@ describe('mount site: admin_pools.jsx (pools tab)', () => {
 
 describe('mount site: admin_competition_bracket.jsx (bracket panel)', () => {
   it('wires an inline no-chain editor; close only when the match is complete', async () => {
-    const bm = runningMatch({ id: 'bm1', phase: undefined, poolName: undefined });
+    // Raw bracket.rounds entries carry no phase/pool stamps: strip them so the
+    // panel's own enrichment (phase: "bracket") is what reaches the editor.
+    const bm = runningMatch({ id: 'bm1' });
     delete bm.phase;
     delete bm.poolName;
     // BracketTree probe: expose the tree's onMatchClick as a button.

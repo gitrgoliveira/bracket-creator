@@ -238,6 +238,13 @@ func engiPlayerKey(id, name string) string {
 	return "name:" + name
 }
 
+// engiScoreSummary renders the human-readable score cell for an engi
+// standing. One format definition shared by the pool/league and Swiss engi
+// standings so the two tables can never drift.
+func engiScoreSummary(s *state.PlayerStanding) string {
+	return fmt.Sprintf("W:%d Flags:%d", s.Wins, s.Flags)
+}
+
 // computeEngiStandings is the engi standings core, fully independent of the
 // kendo computeStandingsFrom. It ranks each pool by (1) total Wins, then
 // (2) total accumulated OWN-SIDE flags across every completed bout (the winner
@@ -311,7 +318,7 @@ func (e *Engine) computeEngiStandings(loader poolStandingsLoader, compID string)
 
 		sorted := make([]state.PlayerStanding, 0, len(playerStandings))
 		for _, s := range playerStandings {
-			s.ScoreSummary = fmt.Sprintf("W:%d Flags:%d", s.Wins, s.Flags)
+			s.ScoreSummary = engiScoreSummary(s)
 			sorted = append(sorted, *s)
 		}
 
@@ -397,7 +404,7 @@ func (e *Engine) computeEngiSwissStandings(participants []domain.Player, matches
 
 	standings := make([]state.PlayerStanding, 0, len(byName))
 	for _, s := range byName {
-		s.ScoreSummary = fmt.Sprintf("W:%d Flags:%d", s.Wins, s.Flags)
+		s.ScoreSummary = engiScoreSummary(s)
 		standings = append(standings, *s)
 	}
 	sort.SliceStable(standings, func(i, j int) bool {

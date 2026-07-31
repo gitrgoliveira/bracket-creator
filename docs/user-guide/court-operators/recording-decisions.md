@@ -32,7 +32,11 @@ Encho is the extra period played when a knockout match is level at the end of re
 
 In the score editor, open the **Overtime** control and tick **Encho started**. A counter appears so you can record how many overtime periods were fought, using the **+** and **-** buttons. The counter starts at 1 and has no upper limit: how many periods are fought, and how a match still level after them is finally settled (a judges' decision for an individual bout, a daihyosen for a team encounter), is the shimpan's call. Record what actually happened on court, however many periods that took.
 
+![The score editor during a second overtime period: the Encho started box is ticked, the period counter reads two, and the header shows the live overtime readout.](../../screenshots/mobile-encho-overtime.png)
+
 Completed results carry an overtime marker: **(E)**. The marker is the same however many overtime periods were fought. The counter records the number for the tournament log, but results never show it, so a bracket stays easy to read at a glance. The marker sits in the centre of the score, between the two sides' points, exactly where it goes on a paper score sheet: a match won by men in overtime reads **M (E) ·** on the court console, the public viewer, and the exported results workbook. Decision tags stay after the score: a withdrawal during overtime reads with a trailing **Kiken**, and a match sent to a judges' decision after overtime carries a trailing **Ht**. A team encounter shows its team totals in the score cell instead, so for those the marker appears on the bracket and in the exported workbook.
+
+![A completed result on the public viewer: the winner's men ippon on the left, the E overtime marker in the centre between the two scores, and the opponent on the right.](../../screenshots/viewer-result-encho.png)
 
 ## Daihyosen
 

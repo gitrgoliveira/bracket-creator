@@ -49,7 +49,7 @@ The results workbook (**Export & print**, then **Download results (.xlsx)**) inc
 
 ## Team standings and tie-breaks
 
-In pools and league, team standings are resolved in this order:
+In pools, league, and Swiss, team standings are resolved in this order:
 
 1. Team matches won
 2. Team matches lost (fewer is better)
@@ -59,6 +59,12 @@ In pools and league, team standings are resolved in this order:
 6. Individual draws across all bouts
 7. Points scored
 8. Points lost (fewer is better)
+
+In Swiss, two further tie-breaks apply after the eight criteria above:
+head-to-head (the team that won the direct encounter ranks higher), then
+name order as the final deterministic fallback.
+
+![Team Swiss standings: a table with rank, team, and the full tie-break columns W, L, T, IV, IL, IT, PW, and PL, with a caption reading "Ranked by: team wins, IV, PW, head-to-head".](../../screenshots/swiss-standings-team.png)
 
 !!! note
     When two or more teams remain tied after all eight criteria and the tie is consequential (it decides who advances or how they are seeded), what happens next depends on format:

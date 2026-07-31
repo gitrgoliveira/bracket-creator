@@ -125,14 +125,6 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			return
 		}
 
-		// T104/CHK029: enforce MaxEnchoPeriods cap on the encho block.
-		// Same shape as the score handler, Force bypasses, 0 cap means
-		// unlimited. Done BEFORE the tx so the read is cheap and we
-		// don't take the lock when the request is going to 400 anyway.
-		if !enforceEnchoCap(c, store, id, req.Encho, req.Force) {
-			return
-		}
-
 		// T156: run the entire RecordDecision flow inside one
 		// WithTransaction. The engine call chain, sides lookup, T103
 		// downstream-match check, T105 concurrent-kiken pre-check,

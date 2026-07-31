@@ -6947,11 +6947,6 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   font-family: var(--font-mono);
   font-weight: 700;
 }
-.encho-row__max-banner {
-  color: var(--red);
-  font-size: 11px;
-  display: block;
-}
 .encho-row__btn {
   min-width: 28px;
   min-height: 28px;

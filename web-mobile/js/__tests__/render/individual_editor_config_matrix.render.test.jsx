@@ -1,10 +1,10 @@
 // mp-yqxn.1: individual (kendo) ScoreEditorModal config matrix — the same
 // matrix applied to the team editor, minus the axes that don't exist for
 // individuals (teamSize, teamMatchType):
-//   {format(+phase)} × {naginata: on, off} × {maxEnchoPeriods: 0, 2}
+//   {format(+phase)} × {naginata: on, off}
 //
 // Config reaches the individual editor ONLY via the async competition fetch
-// (window.API.fetchCompetitionDetails → naginata + maxEnchoPeriods); the
+// (window.API.fetchCompetitionDetails → naginata); the
 // format/phase axes ride on the match stamps.
 //
 // REGRESSION-PIN ONLY (epic mp-yqxn constraint): DOM assertions prove nothing
@@ -14,7 +14,7 @@
 import React from 'react';
 import { render, act, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
-import { FORMAT_PHASES, IMPOSSIBLE_FORMAT_PHASES, cellKey, NAGINATA, MAX_ENCHO, KENDO_SET, NAGINATA_SET } from './score_editor_matrix_axes.js';
+import { FORMAT_PHASES, IMPOSSIBLE_FORMAT_PHASES, cellKey, NAGINATA, KENDO_SET, NAGINATA_SET } from './score_editor_matrix_axes.js';
 
 const STUBBED_GLOBALS = {
   isHikiwake: (_type) => false,
@@ -60,13 +60,11 @@ afterAll(() => {
 // Shared axes + letter tables live in score_editor_matrix_axes.js (kept in
 // lockstep with the team-editor matrix).
 const CELLS = FORMAT_PHASES.flatMap(fp =>
-  NAGINATA.flatMap(naginata =>
-    MAX_ENCHO.map(maxEncho => ({ ...fp, naginata, maxEncho }))
-  )
+  NAGINATA.map(naginata => ({ ...fp, naginata }))
 );
 
 function cellName(c) {
-  return `${c.format}/${c.phase} naginata=${c.naginata} maxEncho=${c.maxEncho}`;
+  return `${c.format}/${c.phase} naginata=${c.naginata}`;
 }
 
 function makeMatch(cell, overrides = {}) {
@@ -92,7 +90,6 @@ async function renderCell(cell, matchOverrides = {}, props = {}) {
     config: {
       format: cell.format,
       naginata: cell.naginata,
-      maxEnchoPeriods: cell.maxEncho,
       players: [],
     },
   });
@@ -172,7 +169,7 @@ describe('individual editor IMPOSSIBLE CELLS (asserted, not skipped)', () => {
   it.each(IMPOSSIBLE_FORMAT_PHASES.map(fp => [`${fp.format} × phase "${fp.phase}"`, fp]))(
     '%s: product-impossible; the phase stamp alone decides the draw gate',
     async (_name, fp) => {
-      await renderCell({ ...fp, naginata: false, maxEncho: 0 });
+      await renderCell({ ...fp, naginata: false });
       expect(screen.getByTestId('scoring-modal-mark-draw').disabled).toBe(IMPOSSIBLE_EXPECT_DRAW_DISABLED[cellKey(fp)]);
     }
   );
@@ -186,7 +183,7 @@ describe('individual editor selfReport (public self-run surface)', () => {
     // self-run surface should be able to record a judges' decision is ruled
     // on by mp-yqxn.5.
     await renderCell(
-      { format: 'mixed', phase: 'pool', naginata: false, maxEncho: 0 },
+      { format: 'mixed', phase: 'pool', naginata: false },
       {},
       { selfReport: true }
     );

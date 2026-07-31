@@ -234,9 +234,8 @@ function assertRunningWritePersisted(saveRes) {
 
 // T093/T094: build the /decision POST body. Pure helper so we can pin the
 // wire shape (decision/decisionBy/decisionReason/encho/force) against a
-// moving server contract. `force` is the T103/T104 override flag used when
-// the server replies decision_locked or max_encho_exceeded and the operator
-// confirms the override.
+// moving server contract. `force` is the T103 override flag used when the
+// server replies decision_locked and the operator confirms the override.
 function buildDecisionBody(kind, { decisionBy, decisionReason }, enchoPeriodCount, opts = {}) {
   const body = { decision: kind, decisionBy };
   if (decisionReason) body.decisionReason = decisionReason;
@@ -251,7 +250,7 @@ function buildDecisionBody(kind, { decisionBy, decisionReason }, enchoPeriodCoun
 // test pins the production call site (rather than re-implementing the chain
 // inside the test, which was how the original gap slipped through). Returns
 // the promise from window.API.recordDecision so callers can await + handle
-// the 409 decision_locked / max_encho_exceeded retry-with-force loop.
+// the 409 decision_locked retry-with-force loop.
 function submitDecisionRequest(compId, matchId, kind, decisionPayload, enchoPeriodCount, password, opts = {}) {
   const body = buildDecisionBody(kind, decisionPayload, enchoPeriodCount, opts);
   return window.API.recordDecision(compId, matchId, body, resolveDecisionPassword(password));
@@ -268,8 +267,8 @@ function submitDecisionRequest(compId, matchId, kind, decisionPayload, enchoPeri
 //   - for fusenpai / other non-kiken decisions: calls onAfterDecision when
 //     provided and the match is not a correction (item 7: starts next match),
 //     else falls back to onClose;
-//   - on 409 decision_locked / max_encho_exceeded, confirms then retries with
-//     force (recursing into itself).
+//   - on 409 decision_locked, confirms then retries with force (recursing
+//     into itself).
 // Call it fresh each render so it captures the current enchoPeriodCount/password.
 function makeSubmitDecision({
   match,
@@ -352,18 +351,6 @@ function makeSubmitDecision({
         if (!mountedRef.current) return;
         if (ok) { await submit(kind, { decisionBy, decisionReason }, { force: true }); return; }
         setDecisionErr('Override cancelled.');
-      } else if (!opts.force && /max_encho_exceeded/i.test(msg)) {
-        // T104/CHK029: encho-cap override, same confirm-and-retry shape.
-        const ok = mountedRef.current && await window.confirmDialog({
-          message:
-            'This decision would exceed the configured maximum encho periods.\n\n' +
-            'Record it anyway?',
-          confirmLabel: 'Record anyway',
-          danger: true,
-        });
-        if (!mountedRef.current) return;
-        if (ok) { await submit(kind, { decisionBy, decisionReason }, { force: true }); return; }
-        setDecisionErr('Override cancelled.');
       } else if (mountedRef.current) {
         setDecisionErr(msg);
       }
@@ -374,25 +361,13 @@ function makeSubmitDecision({
   return submit;
 }
 
-// T104/CHK029: encho-period clamp + banner predicates. maxEnchoPeriods === 0
-// (or nullish) means unlimited per the FIK default
-// (state.CompetitionConfig.MaxEnchoPeriods). shouldShowEnchoMaxBanner
-// surfaces the "Maximum encho periods reached" warning once the operator
-// has incremented to the cap; the + button uses canIncrementEncho to gate
-// further increments client-side (the server enforces the same cap on PUT
-// /score → 409 max_encho_exceeded).
-function shouldShowEnchoMaxBanner(enchoPeriodCount, maxEnchoPeriods) {
-  if (!maxEnchoPeriods || maxEnchoPeriods <= 0) return false;
-  return enchoPeriodCount >= maxEnchoPeriods;
-}
-
-function canIncrementEncho(enchoPeriodCount, maxEnchoPeriods) {
-  if (!maxEnchoPeriods || maxEnchoPeriods <= 0) return true;
-  return enchoPeriodCount < maxEnchoPeriods;
-}
-
-function nextEnchoPeriod(current, maxEnchoPeriods) {
-  return canIncrementEncho(current, maxEnchoPeriods) ? current + 1 : current;
+// mp-m4bn: encho periods are UNBOUNDED. How many overtime periods a match
+// runs, and how a still-tied match is finally resolved (hantei for an
+// individual bout, daihyosen for a team encounter), is the shimpan's call,
+// not the software's. The operator records what was fought, so the stepper
+// only guards the lower bound; there is no maximum to clamp against.
+function nextEnchoPeriod(current) {
+  return current + 1;
 }
 
 function prevEnchoPeriod(current) {
@@ -451,10 +426,9 @@ function shouldBlockScoringKeys({ decidedByHantei }) {
 // it occupies <24px of vertical space in the live scoring modal. The
 // full counter UI mounts only when overtime is active (enchoPeriodCount
 // > 0) OR the operator clicks the pill (local showCounter state). The
-// counter is the existing −/×N/+ stepper plus the "Maximum encho
-// periods reached" warning, preserved verbatim. Used by both
-// ScoreEditorModal and TeamScoreEditorModal.
-function EnchoControl({ enchoPeriodCount, setEnchoPeriodCount, maxEnchoPeriods }) {
+// counter is the −/×N/+ stepper, unbounded above (see nextEnchoPeriod).
+// Used by both ScoreEditorModal and TeamScoreEditorModal.
+function EnchoControl({ enchoPeriodCount, setEnchoPeriodCount }) {
   const [showCounter, setShowCounter] = useStateA(enchoPeriodCount > 0);
   const expanded = showCounter || enchoPeriodCount > 0;
   if (!expanded) {
@@ -501,16 +475,10 @@ function EnchoControl({ enchoPeriodCount, setEnchoPeriodCount, maxEnchoPeriods }
           <button
             type="button"
             className="btn btn--sm encho-row__btn"
-            onClick={() => setEnchoPeriodCount(c => nextEnchoPeriod(c, maxEnchoPeriods))}
-            disabled={!canIncrementEncho(enchoPeriodCount, maxEnchoPeriods)}
+            onClick={() => setEnchoPeriodCount(c => nextEnchoPeriod(c))}
             aria-label="Increase overtime period count"
           >+</button>
         </div>
-      )}
-      {shouldShowEnchoMaxBanner(enchoPeriodCount, maxEnchoPeriods) && (
-        <span role="alert" className="encho-row__max-banner">
-          Maximum encho periods reached
-        </span>
       )}
     </div>
   );
@@ -913,8 +881,6 @@ export {
   buildDecisionBody,
   submitDecisionRequest,
   makeSubmitDecision,
-  shouldShowEnchoMaxBanner,
-  canIncrementEncho,
   nextEnchoPeriod,
   prevEnchoPeriod,
   initialEnchoPeriodsForMatch,

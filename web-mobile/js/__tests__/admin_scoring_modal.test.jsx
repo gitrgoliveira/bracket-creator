@@ -4,10 +4,8 @@ import {
   assertRunningWritePersisted,
   buildDecisionBody,
   submitDecisionRequest,
-  shouldShowEnchoMaxBanner,
   getIpponButtons,
   getValidPointKeys,
-  canIncrementEncho,
   nextEnchoPeriod,
   prevEnchoPeriod,
   initialEnchoPeriodsForMatch,
@@ -143,11 +141,10 @@ describe('buildDecisionBody', () => {
     expect(body.decision).toBe('daihyosen');
   });
 
-  describe('force flag (T103/T104 override loop)', () => {
-    // T103 (decision_locked) and T104 (max_encho_exceeded) both use a
-    // confirm-and-retry-with-force flow. The helper accepts `opts.force`
-    // so the parent's retry path can call back into it without
-    // re-implementing the body shape.
+  describe('force flag (T103 override loop)', () => {
+    // T103 (decision_locked) uses a confirm-and-retry-with-force flow.
+    // The helper accepts `opts.force` so the parent's retry path can
+    // call back into it without re-implementing the body shape.
 
     it('attaches force=true when opts.force is set', () => {
       const body = buildDecisionBody('kiken-voluntary', { decisionBy: 'shiro' }, 0, { force: true });
@@ -178,96 +175,23 @@ describe('buildDecisionBody', () => {
   });
 });
 
-describe('shouldShowEnchoMaxBanner (T104)', () => {
-  // The "Maximum encho periods reached" banner surfaces once the operator
-  // has incremented to the cap. maxEnchoPeriods === 0 means "unlimited"
-  // per state.CompetitionConfig.MaxEnchoPeriods's FIK-default semantics.
+describe('nextEnchoPeriod (the + button)', () => {
+  // mp-m4bn: encho periods are UNBOUNDED. How many overtime periods are
+  // fought, and how a still-tied match is finally resolved (hantei for an
+  // individual bout, daihyosen for a team encounter), is the shimpan's
+  // call. The operator only records what happened, so the + button must
+  // never refuse a period that was actually fought.
 
-  it('returns false when maxEnchoPeriods is 0 (unlimited)', () => {
-    expect(shouldShowEnchoMaxBanner(0, 0)).toBe(false);
-    expect(shouldShowEnchoMaxBanner(5, 0)).toBe(false);
-    expect(shouldShowEnchoMaxBanner(100, 0)).toBe(false);
+  it('increments by 1', () => {
+    expect(nextEnchoPeriod(1)).toBe(2);
+    expect(nextEnchoPeriod(2)).toBe(3);
   });
 
-  it('returns false when maxEnchoPeriods is null/undefined (unlimited)', () => {
-    // Defensive: a missing field on the wire shouldn't surprise the
-    // operator with a banner; treat as unlimited.
-    expect(shouldShowEnchoMaxBanner(5, null)).toBe(false);
-    expect(shouldShowEnchoMaxBanner(5, undefined)).toBe(false);
-  });
-
-  it('returns false when enchoPeriodCount is below the cap', () => {
-    expect(shouldShowEnchoMaxBanner(0, 3)).toBe(false);
-    expect(shouldShowEnchoMaxBanner(1, 3)).toBe(false);
-    expect(shouldShowEnchoMaxBanner(2, 3)).toBe(false);
-  });
-
-  it('returns true when enchoPeriodCount equals the cap (at-cap warning)', () => {
-    expect(shouldShowEnchoMaxBanner(3, 3)).toBe(true);
-    expect(shouldShowEnchoMaxBanner(1, 1)).toBe(true);
-  });
-
-  it('returns true when enchoPeriodCount exceeds the cap (defensive)', () => {
-    // The + button is clamped, so this is unreachable through the UI.
-    // but pinning the `>=` so a future refactor doesn't accidentally
-    // narrow to `===` and leave operators staring at a non-existent
-    // banner if the count somehow over-shoots.
-    expect(shouldShowEnchoMaxBanner(4, 3)).toBe(true);
-    expect(shouldShowEnchoMaxBanner(10, 3)).toBe(true);
-  });
-
-  it('returns false when maxEnchoPeriods is negative (defensive)', () => {
-    // Negative cap is meaningless; treat as unlimited rather than
-    // banner-on-everything.
-    expect(shouldShowEnchoMaxBanner(5, -1)).toBe(false);
-  });
-});
-
-describe('canIncrementEncho (T104 + button gate)', () => {
-  it('returns true when maxEnchoPeriods is 0 (unlimited)', () => {
-    expect(canIncrementEncho(0, 0)).toBe(true);
-    expect(canIncrementEncho(100, 0)).toBe(true);
-  });
-
-  it('returns true when maxEnchoPeriods is null/undefined', () => {
-    expect(canIncrementEncho(5, null)).toBe(true);
-    expect(canIncrementEncho(5, undefined)).toBe(true);
-  });
-
-  it('returns true when below the cap', () => {
-    expect(canIncrementEncho(0, 3)).toBe(true);
-    expect(canIncrementEncho(2, 3)).toBe(true);
-  });
-
-  it('returns false when at the cap', () => {
-    expect(canIncrementEncho(3, 3)).toBe(false);
-  });
-
-  it('returns false when above the cap (defensive)', () => {
-    expect(canIncrementEncho(4, 3)).toBe(false);
-  });
-});
-
-describe('nextEnchoPeriod (T104 + button clamp)', () => {
-  // The + button uses this helper: increments by 1 but clamps at the
-  // configured cap. Combined with disabled={!canIncrementEncho(...)}
-  // the button can't fire over-the-cap, but pinning the clamp here so
-  // a future refactor that drops the disabled gate doesn't silently
-  // let the count run away.
-
-  it('increments by 1 when unlimited (maxEnchoPeriods = 0)', () => {
-    expect(nextEnchoPeriod(1, 0)).toBe(2);
-    expect(nextEnchoPeriod(99, 0)).toBe(100);
-  });
-
-  it('increments by 1 when below the cap', () => {
-    expect(nextEnchoPeriod(1, 3)).toBe(2);
-    expect(nextEnchoPeriod(2, 3)).toBe(3);
-  });
-
-  it('does NOT exceed the cap (clamps at max)', () => {
-    expect(nextEnchoPeriod(3, 3)).toBe(3);
-    expect(nextEnchoPeriod(5, 3)).toBe(5); // already over → stays put
+  it('never clamps, however many periods were fought', () => {
+    expect(nextEnchoPeriod(99)).toBe(100);
+    let count = 1;
+    for (let i = 0; i < 10; i++) count = nextEnchoPeriod(count);
+    expect(count).toBe(11);
   });
 });
 
@@ -521,11 +445,10 @@ describe('DecisionPrompt → /decision POST integration', () => {
   });
 
   it('parent flow attaches force=true on the retry-after-409 path', async () => {
-    // T103/T104: when the server replies decision_locked or
-    // max_encho_exceeded the parent's submitDecision recurses with
-    // { force: true } after the operator confirms. The body must carry
-    // that flag through to the server so the second attempt isn't
-    // also rejected.
+    // T103: when the server replies decision_locked the parent's
+    // submitDecision recurses with { force: true } after the operator
+    // confirms. The body must carry that flag through to the server so
+    // the second attempt isn't also rejected.
     const onSubmit = vi.fn((payload) => {
       const body = buildDecisionBody('kiken-voluntary', payload, 0, { force: true });
       const password = resolveDecisionPassword('pw');
@@ -578,27 +501,18 @@ describe('DecisionPrompt → /decision POST integration', () => {
   });
 });
 
-describe('+ / − encho button behaviour (T104 clamp invariants)', () => {
-  // End-to-end pin: the clamp on the + button must not let the count
-  // exceed maxEnchoPeriods even across repeated clicks, and the − button
-  // must not drop below 1. These compose the canIncrementEncho /
-  // nextEnchoPeriod / prevEnchoPeriod helpers.
+describe('+ / − encho button behaviour (mp-m4bn floor-only invariants)', () => {
+  // End-to-end pin: the + button has NO upper clamp (the shimpan decide how
+  // many overtime periods are fought; the operator only records them), and
+  // the − button must not drop below 1. These compose the nextEnchoPeriod /
+  // prevEnchoPeriod helpers.
 
-  it('+ button: repeated clicks stop at the cap', () => {
+  it('+ button: repeated clicks keep climbing, never clamp', () => {
     let count = 1;
-    const maxEnchoPeriods = 3;
     for (let i = 0; i < 10; i++) {
-      count = nextEnchoPeriod(count, maxEnchoPeriods);
+      count = nextEnchoPeriod(count);
     }
-    expect(count).toBe(3);
-  });
-
-  it('+ button: when unlimited (max=0), repeated clicks keep climbing', () => {
-    let count = 1;
-    for (let i = 0; i < 5; i++) {
-      count = nextEnchoPeriod(count, 0);
-    }
-    expect(count).toBe(6);
+    expect(count).toBe(11);
   });
 
   it('− button: repeated clicks bottom out at 1, not 0', () => {
@@ -609,16 +523,13 @@ describe('+ / − encho button behaviour (T104 clamp invariants)', () => {
     expect(count).toBe(1);
   });
 
-  it('the +/− pair is symmetric within the [1, max] window', () => {
-    const maxEnchoPeriods = 5;
+  it('the +/− pair is symmetric above the floor of 1', () => {
     let count = 1;
-    // Climb to cap
-    count = nextEnchoPeriod(count, maxEnchoPeriods); // 2
-    count = nextEnchoPeriod(count, maxEnchoPeriods); // 3
-    count = nextEnchoPeriod(count, maxEnchoPeriods); // 4
-    count = nextEnchoPeriod(count, maxEnchoPeriods); // 5
+    count = nextEnchoPeriod(count); // 2
+    count = nextEnchoPeriod(count); // 3
+    count = nextEnchoPeriod(count); // 4
+    count = nextEnchoPeriod(count); // 5
     expect(count).toBe(5);
-    expect(canIncrementEncho(count, maxEnchoPeriods)).toBe(false);
     // Step down to floor
     count = prevEnchoPeriod(count); // 4
     count = prevEnchoPeriod(count); // 3

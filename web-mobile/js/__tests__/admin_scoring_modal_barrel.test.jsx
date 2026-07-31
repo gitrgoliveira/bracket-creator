@@ -46,8 +46,6 @@ const EXPECTED_EXPORTS = [
   'buildDecisionBody',
   'submitDecisionRequest',
   'makeSubmitDecision',
-  'shouldShowEnchoMaxBanner',
-  'canIncrementEncho',
   'nextEnchoPeriod',
   'prevEnchoPeriod',
   'initialEnchoPeriodsForMatch',

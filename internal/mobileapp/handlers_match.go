@@ -150,77 +150,6 @@ func annotateBracketQueuePositions(b *state.Bracket) {
 	}
 }
 
-// enchoExceedsCap reports whether an encho block would exceed the
-// competition's MaxEnchoPeriods cap. Returns false (within limit) when
-// encho is unset, comp is nil, the cap is 0 (unlimited, FIK default),
-// the count is within the cap, or force is set. T104/CHK029.
-func enchoExceedsCap(encho *state.EnchoMetadata, comp *state.Competition, force bool) bool {
-	if encho == nil || encho.PeriodCount <= 0 {
-		return false
-	}
-	if comp == nil || comp.MaxEnchoPeriods <= 0 {
-		return false
-	}
-	return encho.PeriodCount > comp.MaxEnchoPeriods && !force
-}
-
-// anySubBoutEnchoExceedsCap returns true if any sub-result's encho
-// period count exceeds the competition cap. The same cap applies
-// per-sub-bout because each bout is a standalone overtime bout.
-func anySubBoutEnchoExceedsCap(subResults []state.SubMatchResult, comp *state.Competition, force bool) bool {
-	for i := range subResults {
-		if enchoExceedsCap(subResults[i].Encho, comp, force) {
-			return true
-		}
-	}
-	return false
-}
-
-// anySubBoutHasEncho reports whether any sub-result carries encho with at
-// least one period. Used to decide whether the cap check needs to load the
-// competition at all, ordinary team scoring (every bout has SubResults but
-// no encho) must not pay that store load.
-func anySubBoutHasEncho(subResults []state.SubMatchResult) bool {
-	for i := range subResults {
-		if subResults[i].Encho != nil && subResults[i].Encho.PeriodCount > 0 {
-			return true
-		}
-	}
-	return false
-}
-
-// enforceEnchoCap is the gin-handler wrapper around enchoExceedsCap for
-// the single-result score / decision endpoints. Loads the competition
-// once, checks the top-level encho and every sub-bout encho against the
-// cap (writing 500 on store failure, 400 on cap exceeded).
-// Returns true if the handler should continue.
-func enforceEnchoCap(c *gin.Context, store CompetitionStore, id string, encho *state.EnchoMetadata, force bool) bool {
-	return enforceEnchoCapWithSubs(c, store, id, encho, nil, force)
-}
-
-// enforceEnchoCapWithSubs is the variant used by the score endpoint. It
-// checks both the top-level encho and each sub-result's encho against the
-// competition cap in a single competition load.
-func enforceEnchoCapWithSubs(c *gin.Context, store CompetitionStore, id string, encho *state.EnchoMetadata, subs []state.SubMatchResult, force bool) bool {
-	needsCheck := (encho != nil && encho.PeriodCount > 0) || anySubBoutHasEncho(subs)
-	if !needsCheck {
-		return true
-	}
-	comp, err := store.LoadCompetition(id)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to validate encho limits"})
-		return false
-	}
-	if enchoExceedsCap(encho, comp, force) || anySubBoutEnchoExceedsCap(subs, comp, force) {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "max_encho_exceeded",
-			"limit": comp.MaxEnchoPeriods,
-		})
-		return false
-	}
-	return true
-}
-
 // tryAutoCompletePools runs the auto-complete check after a successful score
 // write. The score itself has already been recorded, so we don't fail the
 // request when the auto-complete check errors; instead we log full details
@@ -314,23 +243,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		// the batch, mirrors the single-score handler (T085/T092).
 		var eligibilityUpdates []*domain.CompetitorStatus
 
-		comp, err := store.LoadCompetition(id)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to validate encho limits"})
-			return
-		}
-		force := c.Query("force") == "true"
-
 		for i := range results {
 			// Reject a hostile/buggy far-future or negative client timestamp so
 			// it cannot freeze the match against later legitimate writes (mp-y3nk).
 			results[i].ModifiedAt = clampClientModifiedAt(results[i].ModifiedAt)
-			// T104/CHK029: enforce MaxEnchoPeriods cap on bulk-score payload
-			// (top-level and each sub-bout independently).
-			if enchoExceedsCap(results[i].Encho, comp, force) || anySubBoutEnchoExceedsCap(results[i].SubResults, comp, force) {
-				errs = append(errs, scoreError{MatchID: results[i].ID, Error: "max_encho_exceeded"})
-				continue
-			}
 
 			if err := validateBulkScoreLengths(&results[i]); err != nil {
 				errs = append(errs, scoreError{MatchID: results[i].ID, Error: err.Error()})
@@ -1004,15 +920,6 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				return
 			}
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		// T104/CHK029: enforce MaxEnchoPeriods cap. The cap is a
-		// per-competition setting; 0 means unlimited (FIK default). The
-		// operator can override by sending ?force=true after confirming
-		// the warning banner, the UI's job is to surface that prompt
-		// when the cap is reached.
-		if !enforceEnchoCapWithSubs(c, store, id, req.Encho, req.SubResults, c.Query("force") == "true") {
 			return
 		}
 

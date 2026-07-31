@@ -31,7 +31,7 @@ function poolMatchesForPool(poolMatches, poolName) {
 // raw MatchResult shape (id, status, sides, ippons, decision) with none
 // of the comp-level fields the modal needs:
 //   * compKind / teamSize: picks TeamScoreEditorModal vs individual editor
-//   * compId: fetches competition details (maxEnchoPeriods, naginata)
+//   * compId: fetches competition details (naginata)
 //              and is the path for decision/score endpoints
 //   * compName: header eyebrow
 //   * phase / poolName: header subtitle ("CompName · PoolName")

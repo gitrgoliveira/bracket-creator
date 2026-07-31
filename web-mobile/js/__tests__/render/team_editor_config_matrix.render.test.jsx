@@ -3,11 +3,11 @@
 // Mounts the REAL team editor (via the ScoreEditorModal dispatch, exactly as
 // every mount site does) across the full config matrix
 //   {format(+phase)} × {teamSize: 3, 5} × {teamMatchType: fixed, kachinuki}
-//   × {naginata: on, off} × {maxEnchoPeriods: 0, 2}
+//   × {naginata: on, off}
 // and asserts, per cell, WHICH controls render. Config reaches the editor two
 // ways, mirroring production: match-level stamps (compFormat, teamMatchType —
 // stamped by viewer_utils.compMatches) and the async competition fetch
-// (naginata, maxEnchoPeriods — via window.API.fetchCompetitionDetails).
+// (naginata — via window.API.fetchCompetitionDetails).
 //
 // Formats map to phases: playoffs has ONLY bracket matches; league and swiss
 // have ONLY pool-shaped matches; mixed has both. Cells outside that mapping
@@ -21,7 +21,7 @@
 import React from 'react';
 import { render, act, fireEvent, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
-import { FORMAT_PHASES, IMPOSSIBLE_FORMAT_PHASES, cellKey, NAGINATA, MAX_ENCHO, KENDO_SET, NAGINATA_SET } from './score_editor_matrix_axes.js';
+import { FORMAT_PHASES, IMPOSSIBLE_FORMAT_PHASES, cellKey, NAGINATA, KENDO_SET, NAGINATA_SET } from './score_editor_matrix_axes.js';
 
 const STUBBED_GLOBALS = {
   isHikiwake: (_type) => false,
@@ -74,15 +74,13 @@ const MATCH_TYPES = ['fixed', 'kachinuki'];
 const CELLS = FORMAT_PHASES.flatMap(fp =>
   TEAM_SIZES.flatMap(teamSize =>
     MATCH_TYPES.flatMap(tmt =>
-      NAGINATA.flatMap(naginata =>
-        MAX_ENCHO.map(maxEncho => ({ ...fp, teamSize, tmt, naginata, maxEncho }))
-      )
+      NAGINATA.map(naginata => ({ ...fp, teamSize, tmt, naginata }))
     )
   )
 );
 
 function cellName(c) {
-  return `${c.format}/${c.phase} size=${c.teamSize} ${c.tmt} naginata=${c.naginata} maxEncho=${c.maxEncho}`;
+  return `${c.format}/${c.phase} size=${c.teamSize} ${c.tmt} naginata=${c.naginata}`;
 }
 
 function makeTeamMatch(cell, overrides = {}) {
@@ -114,7 +112,6 @@ async function renderCell(cell, matchOverrides = {}, props = {}) {
       format: cell.format,
       teamMatchType: cell.tmt,
       naginata: cell.naginata,
-      maxEnchoPeriods: cell.maxEncho,
       players: [],
     },
   });
@@ -152,8 +149,8 @@ describe('TeamScoreEditorModal config matrix (running match, admin surface)', ()
     expect(letters).toEqual(cell.naginata ? NAGINATA_SET : KENDO_SET);
 
     // Encho affordance: always present, collapsed to the pill while no
-    // overtime is active. maxEnchoPeriods only caps the stepper (covered by
-    // the focused cap tests below).
+    // overtime is active. The stepper itself is unbounded above (mp-m4bn,
+    // covered by the focused stepper test below).
     expect(screen.queryByTestId('scoring-modal-encho-pill')).not.toBeNull();
 
     // Daihyosen affordance is knockout-only (T141): phase "bracket", or the
@@ -209,7 +206,7 @@ describe('TeamScoreEditorModal IMPOSSIBLE CELLS (asserted, not skipped)', () => 
   it.each(IMPOSSIBLE_FORMAT_PHASES.map(fp => [`${fp.format} × phase "${fp.phase}"`, fp]))(
     '%s: product-impossible; the editor trusts the phase stamp',
     async (_name, fp) => {
-      await renderCell({ ...fp, teamSize: 5, tmt: 'fixed', naginata: false, maxEncho: 0 });
+      await renderCell({ ...fp, teamSize: 5, tmt: 'fixed', naginata: false });
       expect(!!screen.queryByTestId('scoring-modal-daihyosen-button')).toBe(IMPOSSIBLE_EXPECT_DAIHYOSEN[cellKey(fp)]);
     }
   );
@@ -218,7 +215,7 @@ describe('TeamScoreEditorModal IMPOSSIBLE CELLS (asserted, not skipped)', () => 
 describe('TeamScoreEditorModal selfReport (public self-run surface)', () => {
   it('selfReport hides the admin decision controls', async () => {
     await renderCell(
-      { format: 'mixed', phase: 'pool', teamSize: 5, tmt: 'fixed', naginata: false, maxEncho: 0 },
+      { format: 'mixed', phase: 'pool', teamSize: 5, tmt: 'fixed', naginata: false },
       {},
       { selfReport: true }
     );
@@ -229,7 +226,7 @@ describe('TeamScoreEditorModal selfReport (public self-run surface)', () => {
   });
 });
 
-describe('TeamScoreEditorModal encho cap (maxEnchoPeriods)', () => {
+describe('TeamScoreEditorModal encho stepper is unbounded (mp-m4bn)', () => {
   async function expandEncho() {
     await act(async () => {
       fireEvent.click(screen.getByTestId('scoring-modal-encho-pill'));
@@ -239,24 +236,15 @@ describe('TeamScoreEditorModal encho cap (maxEnchoPeriods)', () => {
     });
   }
 
-  it('maxEncho=2: the + stepper disables at the cap and the max banner shows', async () => {
-    await renderCell({ format: 'mixed', phase: 'bracket', teamSize: 5, tmt: 'fixed', naginata: false, maxEncho: 2 });
+  it('the + stepper never disables, however many periods were fought', async () => {
+    // The shimpan decide how many overtime periods are fought and how a
+    // still-tied encounter is resolved (daihyosen for a team match). The
+    // operator only records it, so the UI must never refuse a period that
+    // actually happened, and there is no "maximum reached" alert to show.
+    await renderCell({ format: 'mixed', phase: 'bracket', teamSize: 5, tmt: 'fixed', naginata: false });
     await expandEncho();
     const inc = screen.getByRole('button', { name: 'Increase overtime period count' });
-    expect(inc.disabled).toBe(false); // ×1 < cap
-    await act(async () => { fireEvent.click(inc); }); // ×2 = cap
-    expect(inc.disabled).toBe(true);
-    expect(screen.getByRole('alert').textContent).toContain('Maximum encho periods reached');
-  });
-
-  it('maxEncho=0 means UNCAPPED: the + stepper never disables', async () => {
-    // canIncrementEncho treats 0 as "no cap". mp-m4bn tracks the fact that no
-    // UI or import path can currently SET maxEnchoPeriods, so 0/uncapped is
-    // the only reachable state in practice.
-    await renderCell({ format: 'mixed', phase: 'bracket', teamSize: 5, tmt: 'fixed', naginata: false, maxEncho: 0 });
-    await expandEncho();
-    const inc = screen.getByRole('button', { name: 'Increase overtime period count' });
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 6; i++) {
       expect(inc.disabled).toBe(false);
       await act(async () => { fireEvent.click(inc); });
     }
@@ -266,7 +254,7 @@ describe('TeamScoreEditorModal encho cap (maxEnchoPeriods)', () => {
 });
 
 describe('TeamScoreEditorModal kachinuki bout navigation', () => {
-  const KACHI_CELL = { format: 'playoffs', phase: 'bracket', teamSize: 5, tmt: 'kachinuki', naginata: false, maxEncho: 0 };
+  const KACHI_CELL = { format: 'playoffs', phase: 'bracket', teamSize: 5, tmt: 'kachinuki', naginata: false };
 
   it('RUNNING: only the current bout renders; the operator CANNOT navigate back to a scored earlier bout', async () => {
     // Server bout log: bout 1 fought (won by A1), bout 2 appended by

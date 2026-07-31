@@ -176,18 +176,13 @@ describe('buildDecisionBody', () => {
 });
 
 describe('nextEnchoPeriod (the + button)', () => {
-  // mp-m4bn: encho periods are UNBOUNDED. How many overtime periods are
-  // fought, and how a still-tied match is finally resolved (hantei for an
-  // individual bout, daihyosen for a team encounter), is the shimpan's
-  // call. The operator only records what happened, so the + button must
-  // never refuse a period that was actually fought.
+  // mp-m4bn: unbounded by design — see the nextEnchoPeriod docstring in
+  // admin_scoring_shared.jsx for why the shimpan, not the software, decide
+  // how many periods are fought.
 
-  it('increments by 1', () => {
+  it('increments by 1, with no upper bound', () => {
     expect(nextEnchoPeriod(1)).toBe(2);
     expect(nextEnchoPeriod(2)).toBe(3);
-  });
-
-  it('never clamps, however many periods were fought', () => {
     expect(nextEnchoPeriod(99)).toBe(100);
   });
 });

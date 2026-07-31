@@ -54,9 +54,8 @@ func DecisionSuffix(decision string, encho *state.EnchoMetadata, decidedByHantei
 }
 
 // joinSp joins two display fragments with a single space, skipping empties, so
-// a composed suffix never carries a leading, trailing, or doubled space. This
-// is the Go spelling of the `suffix = (suffix ? suffix + " " : "") + part`
-// shape decisionSuffix uses in web-mobile/js/bracket.jsx.
+// a composed suffix never carries a leading, trailing, or doubled space. The JS
+// mirror does the same job with [...].filter(Boolean).join(" ").
 func joinSp(a, b string) string {
 	switch {
 	case a == "":
@@ -76,10 +75,10 @@ func joinSp(a, b string) string {
 // the first and the count was write-only. Surfacing N is what makes the
 // operator's stepper taps worth recording. One period stays the bare "(E)":
 // it is the common case and the terser marker keeps narrow Excel cells and
-// bracket nodes readable. Mirrors enchoLabel() in web-mobile/js/bracket.jsx
-// and the editors' "· (E) Overtime ×N" eyebrow. Keep the three in sync on
-// the count-carrying contract; the eyebrow alone is a live stepper readout
-// and deliberately never collapses ×1.
+// bracket nodes readable. Mirrors enchoLabel() in web-mobile/js/bracket.jsx,
+// pinned by the shared table in testdata/encho_labels.json, and the editors'
+// "· (E) Overtime ×N" eyebrow — which is a live stepper readout and so
+// deliberately never collapses ×1.
 func enchoLabel(encho *state.EnchoMetadata) string {
 	if encho == nil || encho.PeriodCount <= 0 {
 		return ""

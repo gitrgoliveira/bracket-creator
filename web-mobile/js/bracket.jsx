@@ -41,17 +41,13 @@ function sideLabel(side) {
 }
 
 // enchoLabel renders the overtime marker for a match's encho block: "" when no
-// overtime ran, "(E)" for a single period, "(E×N)" for N > 1.
-// mp-m4bn: the overtime marker carries the period COUNT when a match ran more
-// than one encho period: "" / "(E)" / "(E×3)". Every consumer used to treat
-// periodCount as a boolean, so a match that took three overtimes looked
-// identical to one settled in the first and the count was write-only.
-// A single period keeps the bare "(E)" — the common case, and the terser
-// marker keeps narrow bracket nodes and Excel cells readable. Mirrors
-// enchoLabel() in internal/export/suffix.go and the score editors'
-// "· (E) Overtime ×N" eyebrow. Keep the three in sync on the count-carrying
-// contract; the eyebrow alone is a live stepper readout and deliberately
-// never collapses ×1.
+// overtime ran, "(E)" for a single period, "(E×N)" for N > 1. A single period
+// stays bare because it is the common case and the terser marker keeps narrow
+// bracket nodes and Excel cells readable.
+// Mirrors enchoLabel() in internal/export/suffix.go, pinned by the shared table
+// in internal/export/testdata/encho_labels.json, and the score editors'
+// "· (E) Overtime ×N" eyebrow — which is a live stepper readout and so
+// deliberately never collapses ×1.
 function enchoLabel(encho) {
   const n = encho?.periodCount || 0;
   if (n <= 0) return "";
@@ -75,17 +71,15 @@ function enchoLabel(encho) {
 function decisionSuffix(match) {
   if (!match) return "";
   const d = match.decision || "";
-  const enchoSfx = enchoLabel(match.encho);
-  const hanteiOn = !!match.decidedByHantei;
-  let suffix = "";
-  if (isKikenDecisionBC(d)) suffix = "Kiken";
-  else if (DECISION_CHIPS[d]) suffix = DECISION_CHIPS[d].label;
-  if (enchoSfx) suffix = (suffix ? suffix + " " : "") + enchoSfx;
+  let base = "";
+  if (isKikenDecisionBC(d)) base = "Kiken";
+  else if (DECISION_CHIPS[d]) base = DECISION_CHIPS[d].label;
   // FIK 7-5 / 29-6: judges' decision after a tied encho. Mark explicitly so
   // a hantei-decided final is distinguishable from an ippon-derived one
   // (audit + Excel + viewer parity).
-  if (hanteiOn) suffix = (suffix ? suffix + " " : "") + "Ht";
-  return suffix;
+  return [base, enchoLabel(match.encho), match.decidedByHantei ? "Ht" : ""]
+    .filter(Boolean)
+    .join(" ");
 }
 
 // Derive an ippon array from a Go-formatted scoreA/scoreB string.

@@ -316,49 +316,41 @@ describe('team score string carries IV and PW', () => {
   });
 });
 
-// mp-m4bn: the "(E)" / "(E×N)" contract is implemented twice, once per
-// language: enchoLabel in bracket.jsx (bracket, court console, viewer, TV) and
-// enchoLabel in internal/export/suffix.go (the exported results workbook).
-// Until now only reciprocal comments held them together, and the realistic
-// drift is silent: someone changes the JS and its JS tests, the Go suite stays
-// green, and the printed workbook disagrees with what the operator saw on
-// screen. These cases derive the contract from OBSERVED JS behaviour and
-// assert the Go source still matches, in the same read-the-other-language
-// style as the settings round-trip test in admin_competition.test.jsx.
+// mp-m4bn: the "(E)" / "(E×N)" marker is implemented once per language:
+// enchoLabel in bracket.jsx (bracket, court console, viewer, TV) and enchoLabel
+// in internal/export/suffix.go (the exported results workbook). Per-language
+// tests do NOT catch them diverging, because the realistic drift edits one
+// renderer and its own expectations in the same commit: the other suite never
+// runs that code and stays green, and the printed workbook then disagrees with
+// what the operator saw on court.
+//
+// So both suites drive the SAME table, internal/export/testdata/encho_labels.json
+// (Go side: TestEnchoLabel_GoldenTable in suffix_test.go). The contract can only
+// move if the shared table moves, and moving it reddens the other language the
+// same run. Assertions are on VALUES: an earlier attempt grepped the Go source
+// text from here and passed unchanged when the single-period marker was switched
+// to "(OT)", while going red on behaviour-preserving refactors.
 describe('enchoLabel Go/JS mirror (mp-m4bn)', () => {
-  const goSrc = readFileSync(
-    resolve(__dirname, '..', '..', '..', 'internal', 'export', 'suffix.go'),
-    'utf8'
+  const table = JSON.parse(
+    readFileSync(
+      resolve(__dirname, '..', '..', '..', 'internal', 'export', 'testdata', 'encho_labels.json'),
+      'utf8'
+    )
   );
-  const goEnchoLabel = (goSrc.match(/func enchoLabel\([\s\S]*?\n}/) || [])[0];
 
-  it('the Go mirror is still where this test expects it', () => {
+  it('the shared golden table is present and non-empty', () => {
     expect(
-      goEnchoLabel,
-      'expected `func enchoLabel(` in internal/export/suffix.go: it moved or was renamed, so the cases below no longer guard anything'
-    ).toBeTruthy();
+      table.cases?.length,
+      'internal/export/testdata/encho_labels.json parsed to zero cases: the mirror would assert nothing'
+    ).toBeGreaterThan(0);
   });
 
-  it('collapses a single period to the bare marker on both sides', () => {
-    const single = formatIpponsScore(['M'], ['K'], null, null, { periodCount: 1 });
-    const jsCollapses = single === 'M–K (E)';
+  it.each(table.cases)('periodCount $periodCount renders "$label"', ({ periodCount, label }) => {
+    // formatIpponsScore composes "<score> <marker>", so the marker is whatever
+    // trails the score: an empty label must leave the score untouched.
     expect(
-      goEnchoLabel.includes('PeriodCount > 1'),
-      jsCollapses
-        ? 'JS renders one overtime period as the bare "(E)", so Go must keep its `PeriodCount > 1` guard or the workbook prints "(E×1)" where every screen shows "(E)".'
-        : 'JS now renders the count for a single period, so Go must drop its `PeriodCount > 1` guard to match.'
-    ).toBe(jsCollapses);
-  });
-
-  it('uses the same counted-marker glyph on both sides', () => {
-    const counted = formatIpponsScore(['M'], ['K'], null, null, { periodCount: 2 });
-    expect(counted, 'expected the counted marker on a two-period score').toBe('M–K (E×2)');
-    // Derive the glyph from the JS output rather than restating it, so a
-    // change to the marker shape moves this expectation with it.
-    const prefix = counted.slice(counted.indexOf('('), counted.indexOf('2'));
-    expect(
-      goEnchoLabel,
-      `JS builds the counted marker as "${prefix}N)"; internal/export/suffix.go must concatenate the same "${prefix}" literal or the workbook and the viewer disagree.`
-    ).toContain(`"${prefix}"`);
+      formatIpponsScore(['M'], ['K'], null, null, { periodCount }),
+      'JS enchoLabel disagrees with the shared table; update BOTH renderers, not just this one'
+    ).toBe(label ? `M–K ${label}` : 'M–K');
   });
 });

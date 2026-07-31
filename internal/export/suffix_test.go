@@ -1,10 +1,14 @@
 package export
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
@@ -171,4 +175,47 @@ func TestIpponsScore(t *testing.T) {
 			assert.Equal(t, tc.want, IpponsScore(tc.ippons))
 		})
 	}
+}
+
+// TestEnchoLabel_GoldenTable drives enchoLabel over testdata/encho_labels.json,
+// the table shared with web-mobile/js/__tests__/score_display.test.jsx.
+//
+// mp-m4bn: the marker is implemented once per language and nothing but a
+// comment used to hold the two together. The realistic drift is silent, and it
+// survives per-language tests: someone edits the Go marker AND this file's
+// hand-written expectations in one commit, the JS suite never runs Go code and
+// stays green, and the printed workbook then disagrees with what the operator
+// saw on court. Reading the expectations from a file both suites consume closes
+// that: the contract can only move if the shared table moves, and moving it
+// turns the other language's suite red the same run.
+//
+// Pin VALUES, not source shape. An earlier attempt grepped this package's
+// source text from the JS side; it passed unchanged when the single-period
+// marker was switched to "(OT)" (the very divergence it was named for) and went
+// red on behaviour-preserving refactors like fmt.Sprintf.
+func TestEnchoLabel_GoldenTable(t *testing.T) {
+	t.Parallel()
+
+	raw, err := os.ReadFile(filepath.Join("testdata", "encho_labels.json"))
+	require.NoError(t, err, "shared Go/JS golden table is missing")
+
+	var table struct {
+		Cases []struct {
+			PeriodCount int    `json:"periodCount"`
+			Label       string `json:"label"`
+		} `json:"cases"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &table))
+	require.NotEmpty(t, table.Cases, "golden table parsed to zero cases: it would assert nothing")
+
+	for _, tc := range table.Cases {
+		t.Run(fmt.Sprintf("periodCount=%d", tc.PeriodCount), func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tc.Label, enchoLabel(encho(tc.PeriodCount)),
+				"Go enchoLabel disagrees with the shared table; update BOTH renderers, not just this one")
+		})
+	}
+
+	// nil is not expressible in the shared table but must render like 0.
+	assert.Equal(t, "", enchoLabel(nil))
 }

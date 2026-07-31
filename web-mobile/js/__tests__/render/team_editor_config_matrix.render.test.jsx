@@ -237,10 +237,9 @@ describe('TeamScoreEditorModal encho stepper is unbounded (mp-m4bn)', () => {
   }
 
   it('the + stepper never disables, however many periods were fought', async () => {
-    // The shimpan decide how many overtime periods are fought and how a
-    // still-tied encounter is resolved (daihyosen for a team match). The
-    // operator only records it, so the UI must never refuse a period that
-    // actually happened, and there is no "maximum reached" alert to show.
+    // mp-m4bn: unbounded by design — see the nextEnchoPeriod docstring in
+    // admin_scoring_shared.jsx. This is the end-to-end pin: the button never
+    // disables and there is no "maximum reached" alert to show.
     await renderCell({ format: 'mixed', phase: 'bracket', teamSize: 5, tmt: 'fixed', naginata: false });
     await expandEncho();
     const inc = screen.getByRole('button', { name: 'Increase overtime period count' });

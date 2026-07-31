@@ -1,0 +1,23 @@
+{
+  "_comment": [
+    "mp-m4bn: the single source of truth for the overtime marker, shared by",
+    "BOTH language implementations of enchoLabel: internal/export/suffix.go",
+    "(the exported results workbook) and web-mobile/js/bracket.jsx (bracket,",
+    "court console, viewer, TV). internal/export/suffix_test.go table-drives",
+    "the Go side over these cases; web-mobile/js/__tests__/score_display.test.jsx",
+    "reads this same file and drives the JS side.",
+    "",
+    "Why a shared file rather than each suite restating the strings: changing",
+    "one language AND its own tests together is the realistic drift, and two",
+    "independent tables both stay green through it. Editing this file fails",
+    "the OTHER language's suite immediately, so the marker cannot move in one",
+    "renderer without the other following."
+  ],
+  "cases": [
+    { "periodCount": 0, "label": "", "why": "no overtime ran" },
+    { "periodCount": 1, "label": "(E)", "why": "the common case stays terse for narrow bracket nodes and Excel cells" },
+    { "periodCount": 2, "label": "(E×2)", "why": "two or more carry the count" },
+    { "periodCount": 3, "label": "(E×3)" },
+    { "periodCount": 11, "label": "(E×11)", "why": "multi-digit N is not truncated or padded" }
+  ]
+}

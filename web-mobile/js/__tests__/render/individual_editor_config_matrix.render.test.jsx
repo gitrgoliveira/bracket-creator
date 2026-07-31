@@ -14,7 +14,7 @@
 import React from 'react';
 import { render, act, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
-import { FORMAT_PHASES, IMPOSSIBLE_FORMAT_PHASES, NAGINATA, MAX_ENCHO, KENDO_SET, NAGINATA_SET } from './score_editor_matrix_axes.js';
+import { FORMAT_PHASES, IMPOSSIBLE_FORMAT_PHASES, cellKey, NAGINATA, MAX_ENCHO, KENDO_SET, NAGINATA_SET } from './score_editor_matrix_axes.js';
 
 const STUBBED_GLOBALS = {
   isHikiwake: (_type) => false,
@@ -165,7 +165,7 @@ describe('individual editor IMPOSSIBLE CELLS (asserted, not skipped)', () => {
   // this 1:1 check by name.
   it('expectation map stays 1:1 with the derived impossible-cell list', () => {
     expect(Object.keys(IMPOSSIBLE_EXPECT_DRAW_DISABLED).sort()).toEqual(
-      IMPOSSIBLE_FORMAT_PHASES.map(fp => `${fp.format}/${fp.phase}`).sort()
+      IMPOSSIBLE_FORMAT_PHASES.map(cellKey).sort()
     );
   });
 
@@ -173,7 +173,7 @@ describe('individual editor IMPOSSIBLE CELLS (asserted, not skipped)', () => {
     '%s: product-impossible; the phase stamp alone decides the draw gate',
     async (_name, fp) => {
       await renderCell({ ...fp, naginata: false, maxEncho: 0 });
-      expect(screen.getByTestId('scoring-modal-mark-draw').disabled).toBe(IMPOSSIBLE_EXPECT_DRAW_DISABLED[`${fp.format}/${fp.phase}`]);
+      expect(screen.getByTestId('scoring-modal-mark-draw').disabled).toBe(IMPOSSIBLE_EXPECT_DRAW_DISABLED[cellKey(fp)]);
     }
   );
 });

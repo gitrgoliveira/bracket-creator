@@ -21,7 +21,7 @@
 import React from 'react';
 import { render, act, fireEvent, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
-import { FORMAT_PHASES, IMPOSSIBLE_FORMAT_PHASES, NAGINATA, MAX_ENCHO, KENDO_SET, NAGINATA_SET } from './score_editor_matrix_axes.js';
+import { FORMAT_PHASES, IMPOSSIBLE_FORMAT_PHASES, cellKey, NAGINATA, MAX_ENCHO, KENDO_SET, NAGINATA_SET } from './score_editor_matrix_axes.js';
 
 const STUBBED_GLOBALS = {
   isHikiwake: (_type) => false,
@@ -202,7 +202,7 @@ describe('TeamScoreEditorModal IMPOSSIBLE CELLS (asserted, not skipped)', () => 
   // this 1:1 check by name.
   it('expectation map stays 1:1 with the derived impossible-cell list', () => {
     expect(Object.keys(IMPOSSIBLE_EXPECT_DAIHYOSEN).sort()).toEqual(
-      IMPOSSIBLE_FORMAT_PHASES.map(fp => `${fp.format}/${fp.phase}`).sort()
+      IMPOSSIBLE_FORMAT_PHASES.map(cellKey).sort()
     );
   });
 
@@ -210,7 +210,7 @@ describe('TeamScoreEditorModal IMPOSSIBLE CELLS (asserted, not skipped)', () => 
     '%s: product-impossible; the editor trusts the phase stamp',
     async (_name, fp) => {
       await renderCell({ ...fp, teamSize: 5, tmt: 'fixed', naginata: false, maxEncho: 0 });
-      expect(!!screen.queryByTestId('scoring-modal-daihyosen-button')).toBe(IMPOSSIBLE_EXPECT_DAIHYOSEN[`${fp.format}/${fp.phase}`]);
+      expect(!!screen.queryByTestId('scoring-modal-daihyosen-button')).toBe(IMPOSSIBLE_EXPECT_DAIHYOSEN[cellKey(fp)]);
     }
   );
 });

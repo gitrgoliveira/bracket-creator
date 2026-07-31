@@ -32,6 +32,11 @@ export const IMPOSSIBLE_FORMAT_PHASES = FORMATS
   .flatMap(format => PHASES.map(phase => ({ format, phase })))
   .filter(fp => !FORMAT_PHASES.some(p => p.format === fp.format && p.phase === fp.phase));
 
+// Canonical "format/phase" key for a cell: the suites' expectation maps are
+// keyed by this shape, and their 1:1 completeness checks compare against
+// IMPOSSIBLE_FORMAT_PHASES.map(cellKey).
+export const cellKey = (fp) => `${fp.format}/${fp.phase}`;
+
 export const NAGINATA = [false, true];
 export const MAX_ENCHO = [0, 2];
 

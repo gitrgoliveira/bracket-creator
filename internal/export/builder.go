@@ -552,7 +552,7 @@ func setIVCellWithMark(f *excelize.File, sheetName, col string, row, iv int, mar
 // the daihyosen placeholder (Position < 0) is skipped so its blank row stays clean.
 // teamSize bounds the number of sub-match rows the grid actually has; a Position
 // outside [1, teamSize] (corrupted state) is skipped rather than writing into the
-// next encounter's cells (mirrors the guard in overlayTeamBracketScores).
+// next encounter's cells. Shared by the pool sheet and overlayTeamBracketScores.
 func writeTeamSubMatchScores(f *excelize.File, sheetName string, courtStartCol, subStartExcelRow int, subResults []state.SubMatchResult, teamSize int, mirror bool) {
 	lVCol := colNum(courtStartCol + 1)
 	middleCol := colNum(courtStartCol + 3)
@@ -943,13 +943,7 @@ func overlayTeamBracketScores(f *excelize.File, bracketByNum map[int]state.Brack
 			}
 
 			courtStartCol := headerCol + 1 // 1-based
-			lVCol := colNum(courtStartCol + 1)
-			lPCol := colNum(courtStartCol + 2)
-			middleCol := colNum(courtStartCol + 3)
-			rPCol := colNum(courtStartCol + 4)
-			rVCol := colNum(courtStartCol + 5)
-
-			headerExcelRow := rowIdx + 1 // H (1-based)
+			headerExcelRow := rowIdx + 1   // H (1-based)
 
 			// For the 3rd Place block write entrant names unconditionally so they
 			// appear even when the bronze match is not yet played. Sub-match rows,
@@ -961,53 +955,23 @@ func overlayTeamBracketScores(f *excelize.File, bracketByNum map[int]state.Brack
 				}
 			}
 
-			// Sub-match ippon letters: Position p sits at H+2+p.
-			for _, sub := range bm.SubResults {
-				if sub.Position <= 0 || sub.Position > teamSize {
-					continue // daihyosen placeholder / out-of-range
-				}
-				excelRow := headerExcelRow + 2 + sub.Position
-				leftIppons, rightIppons := sub.IpponsA, sub.IpponsB
-				if mirror {
-					leftIppons, rightIppons = sub.IpponsB, sub.IpponsA
-				}
-				lMark, rMark := SideMarksLR(sub.Decision, sub.DecidedByHantei, sub.Winner, sub.SideA, sub.SideB, mirror)
-				if s := joinSp(IpponsScore(leftIppons), lMark); s != "" {
-					setCellStr(f, sheetName, lVCol, excelRow, s)
-				}
-				if s := joinSp(IpponsScore(rightIppons), rMark); s != "" {
-					setCellStr(f, sheetName, rVCol, excelRow, s)
-				}
-				if mid := MiddleMark(sub.Decision, sub.Encho); mid != "" {
-					setCellStr(f, sheetName, middleCol, excelRow, mid)
-				}
-			}
+			// Sub-match ippon letters: Position p sits at H+2+p, i.e. the sub
+			// rows start at H+3. Same writer as the pool sheet.
+			writeTeamSubMatchScores(f, sheetName, courtStartCol, headerExcelRow+3, bm.SubResults, teamSize, mirror)
 
-			// IV/PW summary row = H + 5 + teamSize.
+			// IV/PW summary row = H + 5 + teamSize. Route through the shared
+			// pool-sheet writer so the IV-mark contract (and the forfeit
+			// fallback when no summary line exists) lives in one place.
 			summaryExcelRow := headerExcelRow + 5 + teamSize
-			lMark, rMark := SideMarksLR(bm.Decision, bm.DecidedByHantei, bm.Winner, bm.SideA, bm.SideB, mirror)
-			if line := state.TeamResultFrom(bm.SubResults, bm.SideA, bm.SideB); line != nil {
-				leftIV, leftPW := line.AkaIV, line.AkaPW
-				rightIV, rightPW := line.ShiroIV, line.ShiroPW
-				if mirror {
-					leftIV, leftPW, rightIV, rightPW = rightIV, rightPW, leftIV, leftPW
-				}
-				setIVCellWithMark(f, sheetName, lVCol, summaryExcelRow, leftIV, lMark)
-				setIntCellDirect(f, sheetName, lPCol, summaryExcelRow, leftPW)
-				setIVCellWithMark(f, sheetName, rVCol, summaryExcelRow, rightIV, rMark)
-				setIntCellDirect(f, sheetName, rPCol, summaryExcelRow, rightPW)
-			} else {
-				if lMark != "" {
-					setCellStr(f, sheetName, lVCol, summaryExcelRow, lMark)
-				}
-				if rMark != "" {
-					setCellStr(f, sheetName, rVCol, summaryExcelRow, rMark)
-				}
-			}
-
-			if mid := MiddleMark(bm.Decision, bm.Encho); mid != "" {
-				setCellStr(f, sheetName, middleCol, summaryExcelRow, mid)
-			}
+			writeTeamSummaryCells(f, sheetName, courtStartCol, summaryExcelRow, state.MatchResult{
+				SideA:           bm.SideA,
+				SideB:           bm.SideB,
+				Winner:          bm.Winner,
+				Decision:        bm.Decision,
+				Encho:           bm.Encho,
+				DecidedByHantei: &bm.DecidedByHantei,
+				SubResults:      bm.SubResults,
+			}, mirror)
 
 			// Winner marker: the "1." row is 3 rows below the summary row; reuse the
 			// individual writer, which scans forward for the "1." ordinal.

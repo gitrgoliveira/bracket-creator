@@ -68,13 +68,22 @@ function middleMark(decision, encho) {
   return enchoLabel(encho);
 }
 
+// joinSp: join a score fragment and a result mark with a space, skipping
+// empties ("M" + "Ht" → "M Ht", "" + "Kiken" → "Kiken"). The JS twin of
+// joinSp in internal/export/suffix.go.
+const joinSp = (a, b) => [a, b].filter(Boolean).join(" ");
+
+// isDrawResult: a result is a draw when the recorded decision OR the
+// client-derived score.type says hikiwake (quick-score paths set only
+// score.type, so both sources count).
+const isDrawResult = (decision, score) => isHikiwakeBC(decision) || isHikiwakeBC(score?.type);
+
 // matchMiddleMark: middleMark for a match object (TV scoreboard, lobby, OBS
 // lower-third — surfaces that render the mark as a single centre chip). A
 // client-derived score.type of hikiwake counts as a draw like the decision.
 function matchMiddleMark(match) {
   if (!match) return "";
-  const draw = isHikiwakeBC(match.decision) || isHikiwakeBC(match.score?.type);
-  return draw ? "X" : middleMark(match.decision, match.encho);
+  return isDrawResult(match.decision, match.score) ? "X" : middleMark(match.decision, match.encho);
 }
 
 // sideMarks: the per-side RESULT marks. winner goes in the winning side's
@@ -90,7 +99,7 @@ function sideMarks(decision, decidedByHantei) {
   let winner = "", loser = "";
   if (isKikenDecisionBC(decision)) loser = "Kiken";
   else if (decision === "fusenpai") loser = "Fus.";
-  if (decidedByHantei) winner = winner ? `${winner} Ht` : "Ht";
+  if (decidedByHantei) winner = "Ht"; // nothing above sets winner (fusensho is a badge here)
   return { winner, loser };
 }
 
@@ -143,7 +152,7 @@ function formatIpponsScore(ipponsLeft, ipponsRight, score, decision, encho, deci
   if (score?.type === "bye") return "BYE";
   const aStr = (ipponsLeft || []).filter(x => x && x !== "•").join("");
   const bStr = (ipponsRight || []).filter(x => x && x !== "•").join("");
-  const isDraw = isHikiwakeBC(decision) || isHikiwakeBC(score?.type);
+  const isDraw = isDrawResult(decision, score);
 
   // A cell with no points reads "–" (or stays empty when the whole string is
   // empty); the plain middle reads "vs", so the dash is never a separator and
@@ -171,23 +180,20 @@ function formatIpponsScore(ipponsLeft, ipponsRight, score, decision, encho, deci
   const trail = !attributed && (marks.winner || marks.loser)
     ? " " + [marks.winner, marks.loser].filter(Boolean).join(" ")
     : "";
-  const cell = (str, mark) => (str ? (mark ? `${str} ${mark}` : str) : mark);
 
-  if (!aStr && !bStr) {
-    // Numbers are NOT a valid display for ippon: the per-side waza-letter
-    // arrays are the only source of an ippon score. There is deliberately no
-    // winnerPts/loserPts fallback here (callers derive the arrays from
-    // scoreA/scoreB via ipponsFromScore, so real data always has letters;
-    // count-only data renders no score rather than invalid digits).
-    //
-    // No letters (kiken before any ippon, a 0-0 hantei): the cells hold only
-    // their result marks around the middle mark ("Ht (E) –").
-    if (leftMark || rightMark) {
-      return `${cell("", leftMark) || NONE}${sep}${cell("", rightMark) || NONE}`;
-    }
+  // Numbers are NOT a valid display for ippon: the per-side waza-letter
+  // arrays are the only source of an ippon score. There is deliberately no
+  // winnerPts/loserPts fallback here (callers derive the arrays from
+  // scoreA/scoreB via ipponsFromScore, so real data always has letters;
+  // count-only data renders no score rather than invalid digits).
+  if (!aStr && !bStr && !leftMark && !rightMark) {
+    // Nothing to put in either cell: collapse to the bare middle mark plus
+    // any unattributed result marks ("(E)", "Kiken").
     return [mid, marks.winner, marks.loser].filter(Boolean).join(" ");
   }
-  return `${cell(aStr, leftMark) || NONE}${sep}${cell(bStr, rightMark) || NONE}` + trail;
+  // A cell holds its letters and/or its result mark ("M Ht (E) K",
+  // "Ht (E) –" for a 0-0 hantei); an empty cell reads "–".
+  return `${joinSp(aStr, leftMark) || NONE}${sep}${joinSp(bStr, rightMark) || NONE}` + trail;
 }
 
 // engiFlagScore: derive an engi match's flag-count score string from
@@ -303,9 +309,8 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
   const cardMarks = isDone ? sideMarks(match.decision, !!match.decidedByHantei) : { winner: "", loser: "" };
   const aMark = aWin ? cardMarks.winner : (bWin ? cardMarks.loser : "");
   const bMark = bWin ? cardMarks.winner : (aWin ? cardMarks.loser : "");
-  const withMark = (s, mk) => (mk ? (s ? `${s} ${mk}` : mk) : s);
-  const aScore = isDone ? withMark(isEngiMatch ? String(match.flagsA || 0) : (ipponsA.join("") || null), aMark) : null;
-  const bScore = isDone ? withMark(isEngiMatch ? String(match.flagsB || 0) : (ipponsB.join("") || null), bMark) : null;
+  const aScore = isDone ? (joinSp(isEngiMatch ? String(match.flagsA || 0) : ipponsA.join(""), aMark) || null) : null;
+  const bScore = isDone ? (joinSp(isEngiMatch ? String(match.flagsB || 0) : ipponsB.join(""), bMark) || null) : null;
 
   const aTBD = match.sideA && typeof match.sideA.id === "string" && match.sideA.id.startsWith("tbd-");
   const bTBD = match.sideB && typeof match.sideB.id === "string" && match.sideB.id.startsWith("tbd-");
@@ -963,4 +968,4 @@ window.winnerSideLR = winnerSideLR;
 window.sideLabel = sideLabel;
 window.ipponsFromScore = ipponsFromScore;
 
-export { formatIpponsScore, enchoLabel, middleMark, matchMiddleMark, sideMarks, winnerSideLR, sideLabel, roundLabel, ipponsFromScore, teamIVScore, teamIVPWScore, engiFlagScore, matchScoreStr, matchStateCell, buildDisplayModel, computeMetaTops, bronzeUnderFinalStyle, PlayerLine };
+export { formatIpponsScore, enchoLabel, matchMiddleMark, winnerSideLR, sideLabel, roundLabel, ipponsFromScore, teamIVScore, teamIVPWScore, engiFlagScore, matchScoreStr, matchStateCell, buildDisplayModel, computeMetaTops, bronzeUnderFinalStyle, PlayerLine };

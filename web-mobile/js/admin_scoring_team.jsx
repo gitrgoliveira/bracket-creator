@@ -91,16 +91,79 @@ export function isKoTieBlocked({ isKnockoutPhase, teamWinner, isComplete }) {
 }
 
 // isKachinukiBoutMode: while a kachinuki encounter is being fought (not a
-// correction, not exhausted, no daihyosen row) the modal's primary action
-// records the CURRENT BOUT: a running write flagged kachinukiBoutFinal that
-// the server uses to append the next pairing. The match itself completes
-// server-side when one team is exhausted. Finish/complete semantics only
-// apply for corrections (isComplete) and for the tied-after-exhaustion
-// daihyosen resolution (exhausted / hasDaihyosen), where the knockout
-// no-draw rule (isKoTieBlocked) still holds. A bout-level hikiwake is a
-// legitimate bout result and must never be blocked by that rule.
-export function isKachinukiBoutMode({ isKachinuki, isComplete, exhausted, hasDaihyosen }) {
-  return !!isKachinuki && !isComplete && !exhausted && !hasDaihyosen;
+// correction, no legacy daihyosen row) the modal's primary actions are
+// [Record bout] (a running write flagged kachinukiBoutFinal that the server
+// uses to append the next pairing) and [End match] (an explicit completed
+// write whose outcome is derived from the last scored bout, see
+// deriveKachinukiEndOutcome). Completion is OPERATOR-LED (mp-gmcg): the
+// engine never auto-finalizes, so `isComplete` is the only terminator. A
+// sub-result carrying decision "kachinuki-exhaustion" on a RUNNING match
+// (e.g. a reopened encounter) must NOT kill bout mode: roster snapshots are
+// advisory, only the operator knows whether a team is truly out of players.
+// Legacy daihyosen rows keep the Finish/correction semantics (daihyosen does
+// not exist in kachinuki; existing rows are rendered defensively only). The
+// knockout no-draw rule (isKoTieBlocked) never applies to a bout submit: a
+// bout-level hikiwake is a legitimate result; End match carries its own
+// knockout-tie gate instead.
+export function isKachinukiBoutMode({ isKachinuki, isComplete, hasDaihyosen }) {
+  return !!isKachinuki && !isComplete && !hasDaihyosen;
+}
+
+// canReopenKachinukiMatch: [Reopen match] renders ONLY on a completed
+// KACHINUKI team match (mp-gmcg mistake recovery: status back to running,
+// winner/decision cleared, bout log kept, more bouts addable). The backend
+// endpoint 400s non-kachinuki competitions, whose only sanctioned edit of a
+// finished result remains the correction path, so the button must not
+// render for them at all.
+export function canReopenKachinukiMatch({ isKachinuki, isComplete }) {
+  return !!isKachinuki && !!isComplete;
+}
+
+// deriveKachinukiEndOutcome: context-derived outcome for the [End match]
+// action (mp-gmcg, spec 006 "Resolved decisions" #2). NO picker, ever: the
+// last SCORED bout decides. Entries are wire-shaped sub-results
+// ({position, sideA, sideB, ipponsA, ipponsB, winner, decision, encho});
+// daihyosen (-1) / legacy non-positive rows and unscored trailing rows are
+// ignored. A bout counts as scored once it carries any ippon, an explicit
+// hikiwake/fusensho decision, a winner, or an encho marker (a 0-0 bout sent
+// to encho is live-tied, not unscored: End must stay blocked until the
+// encho produces a point). Returns:
+//   {kind:"win", winnerSide:"a"|"b"}          last scored bout has a winner
+//                                             (score, fusensho, or a winner
+//                                             name matching a side)
+//   {kind:"draw"}                             last scored bout tied, pools/
+//                                             league: drawn encounter
+//   {kind:"blocked", reason:"knockout-tie"}   tied in a knockout: continue
+//                                             (next bout or encho)
+//   {kind:"blocked", reason:"no-bouts"}       nothing scored yet
+export function deriveKachinukiEndOutcome({ subResults, isKnockoutPhase }) {
+  const scored = (subResults || [])
+    .filter(e => {
+      if (!e || !(e.position > 0)) return false;
+      const aN = (e.ipponsA || []).length;
+      const bN = (e.ipponsB || []).length;
+      return aN > 0 || bN > 0 || e.decision === "hikiwake" || e.decision === "fusensho"
+        || !!e.winner || (e.encho && e.encho.periodCount > 0);
+    })
+    .sort((x, y) => x.position - y.position);
+  if (scored.length === 0) return { kind: "blocked", reason: "no-bouts" };
+  const last = scored[scored.length - 1];
+  let side = null;
+  if (last.decision !== "hikiwake") {
+    const aN = (last.ipponsA || []).length;
+    const bN = (last.ipponsB || []).length;
+    if (aN > bN) side = "a";
+    else if (bN > aN) side = "b";
+    else if (last.winner) {
+      // Equal counts but an explicit winner name (e.g. a server-recorded
+      // fusensho without ippons): map it back to a side when possible.
+      if (last.sideA && last.winner === last.sideA) side = "a";
+      else if (last.sideB && last.winner === last.sideB) side = "b";
+    }
+  }
+  if (side) return { kind: "win", winnerSide: side };
+  if (isKnockoutPhase) return { kind: "blocked", reason: "knockout-tie" };
+  return { kind: "draw" };
 }
 
 // kachinukiVisiblePositions: which bout slots to render for a kachinuki
@@ -166,8 +229,10 @@ export function resolveKachinukiBoutSides({ aName, bName, wKey, teamWinnerName }
 }
 
 // subBoutHasBeenPlayed: true once a sub-bout carries any operator input
-// (ippons, fouls, a per-bout fusensho, or an explicit hikiwake). Used to drop
-// untouched positions from a KACHINUKI patch: the modal maps over all team
+// (ippons, fouls, a per-bout fusensho, an explicit hikiwake, or an encho
+// marker: a 0-0 knockout tie sent to encho must stay in the patch or the
+// overtime would silently vanish from the wire). Used to drop untouched
+// positions from a KACHINUKI patch: the modal maps over all team
 // positions, but kachinuki appends bouts dynamically, so emitting unplayed
 // positions as 0–0 hikiwake would corrupt advancement (AdvanceKachinuki keys
 // off the LAST SubResult having an outcome) and inflate individual-draw
@@ -175,7 +240,7 @@ export function resolveKachinukiBoutSides({ aName, bName, wKey, teamWinnerName }
 // legitimate hikiwake.
 export function subBoutHasBeenPlayed(s) {
   if (!s) return false;
-  return (s.aPts?.length > 0) || (s.bPts?.length > 0) || (s.aFouls > 0) || (s.bFouls > 0) || !!s.fusensho || !!s.draw;
+  return (s.aPts?.length > 0) || (s.bPts?.length > 0) || (s.aFouls > 0) || (s.bFouls > 0) || !!s.fusensho || !!s.draw || (s.encho > 0);
 }
 
 export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, onAfterDecision, prevMatch, nextMatch, onPrev, onNext, password, selfReport, variant = "modal", canClose = true }) {
@@ -188,7 +253,15 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // position past teamSize, so it is unaffected. Capped at the theoretical
   // kachinuki maximum (2*MAX_TEAM_SIZE-1) as a guard against malformed data.
   const maxSubPos = (m.subResults || []).reduce((mx, s) => (s.position > 0 && s.position > mx ? s.position : mx), 0);
-  const positionCount = Math.min(Math.max(teamSize, maxSubPos), 2 * window.MAX_TEAM_SIZE - 1);
+  // mp-gmcg: bout positions the OPERATOR added client-side ("Add next bout
+  // manually", kachinuki only). The server auto-append can only pair fighters
+  // it knows from lineups + the bout log, and team sizes are unregulated, so
+  // the operator can append the next pairing locally: the row rides the next
+  // score write as a regular subResult (the server merge keeps client rows).
+  const [manualBouts, setManualBouts] = useStateA([]);
+  const kachinukiMaxBouts = 2 * window.MAX_TEAM_SIZE - 1;
+  const manualMaxPos = manualBouts.length ? Math.max(...manualBouts) : 0;
+  const positionCount = Math.min(Math.max(teamSize, maxSubPos, manualMaxPos), kachinukiMaxBouts);
   const numberedPositions = Array.from({ length: positionCount }, (_, i) => String(i + 1));
   // mp-4pc: a persisted daihyosen (representative bout) lives in
   // SubResults at wire position DAIHYOSEN_POSITION. It is scored "like any other
@@ -221,6 +294,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // the ScoreEditorModal correction flow (same ReasonPrompt + CORRECTION_PRESETS).
   const [correctionReason, setCorrectionReason] = useStateA("");
   const [showCorrectionPrompt, setShowCorrectionPrompt] = useStateA(false);
+  // mp-gmcg: [Reopen match] on a completed kachinuki match. Two-step
+  // arm/confirm (destructive-ish: it retracts a recorded result and, for
+  // bracket matches, the propagated winner slot). 409s from the server
+  // ("not completed" / "downstream match already fought") surface inline.
+  const [reopenArmed, setReopenArmed] = useStateA(false);
+  const [reopenBusy, setReopenBusy] = useStateA(false);
+  const [reopenErr, setReopenErr] = useStateA("");
   // T131: lineup data so each bout cell can show the assigned player
   // name + canonical position label. Falls back gracefully when the
   // lineup hasn't been submitted yet (404 → null).
@@ -484,6 +564,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
         // log (UAT: a recorded draw was lost and the appended placeholder
         // dropped). A fresh/unrecorded bout stays false.
         draw: existing?.decision === "hikiwake",
+        // mp-gmcg: per-bout encho count for a KACHINUKI numbered bout (a
+        // knockout tie on the final pairing goes to overtime on that same
+        // bout; daihyosen does not exist in kachinuki). Seeded from the
+        // persisted sub so re-opens keep the overtime marker. The daihyosen
+        // row's encho is handled separately (daihyosenEnchoFields).
+        encho: idx === daihyosenIdx ? 0 : (existing?.encho?.periodCount || 0),
       };
     });
   }
@@ -561,16 +647,15 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // Block Finish while a KO encounter has no winner: the operator must add and
   // score a daihyosen first (the affordance below). Pool draws stay finishable.
   const koTieBlocked = isKoTieBlocked({ isKnockoutPhase, teamWinner, isComplete });
-  // T136: "kachinuki-exhaustion" sentinel from the backend: one team has
-  // no players left, the encounter is decided. Shared by the banner and
-  // the footer action choice.
-  const kachinukiExhausted = isKachinuki && (m.decision === "kachinuki-exhaustion" || (m.subResults || []).some(s => s.decision === "kachinuki-exhaustion"));
-  // While a kachinuki match is being fought, the primary action records
-  // the current BOUT (running write + kachinukiBoutFinal flag), never a
-  // match completion; the server appends the next bout or ends the match
-  // by exhaustion. koTieBlocked does NOT apply to a bout submit (a bout
-  // hikiwake is legitimate; the match is not being completed).
-  const kachinukiBoutMode = isKachinukiBoutMode({ isKachinuki, isComplete, exhausted: kachinukiExhausted, hasDaihyosen });
+  // While a kachinuki match is being fought, the primary actions record
+  // the current BOUT (running write + kachinukiBoutFinal flag) or END the
+  // match (operator-led, mp-gmcg): completion is never inferred from
+  // roster exhaustion, so a running match: including one that carries a
+  // "kachinuki-exhaustion" sub decision after a reopen: is always in bout
+  // mode. koTieBlocked does NOT apply to a bout submit (a bout hikiwake is
+  // legitimate; the match is not being completed); End match has its own
+  // knockout-tie gate via deriveKachinukiEndOutcome.
+  const kachinukiBoutMode = isKachinukiBoutMode({ isKachinuki, isComplete, hasDaihyosen });
   // Rows to render: kachinuki shows only bouts that exist in the server log
   // (kachinukiVisiblePositions handles the bout-1 bootstrap, the running
   // current-bout selection, the correction show-all branch, and the
@@ -579,7 +664,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // render body.
   const visiblePositions = isKachinuki
     ? kachinukiVisiblePositions({
-        positions, daihyosenIdx, subResults: m.subResults, isComplete,
+        positions, daihyosenIdx,
+        // Client-added manual bouts (mp-gmcg) are not in the server log yet;
+        // fold them in as placeholder entries so the new row renders.
+        subResults: manualBouts.length
+          ? [...(m.subResults || []), ...manualBouts.map(p => ({ position: p }))]
+          : m.subResults,
+        isComplete,
         isPlayedAt: (idx) => subBoutHasBeenPlayed(subs[idx]),
       })
     : positions;
@@ -593,7 +684,95 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     return cur != null && subBoutHasBeenPlayed(subs[positions.indexOf(cur)]);
   })() : true;
   const finishSummary = `${teamVerdictText} · IV ${ivB}–${ivA} · PW ${pwB}–${pwA}`;
-  useEffectA(() => { setFinishArmed(false); }, [ivA, ivB, pwA, pwB, teamWinner]);
+
+  // mp-gmcg: [End match] outcome, derived from LOCAL bout state so an
+  // unsaved just-scored bout counts (the operator scores the final bout and
+  // taps End without a Record in between). Entries are wire-shaped for
+  // deriveKachinukiEndOutcome; the daihyosen row maps to its sentinel
+  // position so the helper drops it.
+  const [endArmed, setEndArmed] = useStateA(false);
+  const kachinukiEndOutcome = kachinukiBoutMode
+    ? deriveKachinukiEndOutcome({
+        subResults: subs.map((s, idx) => idx === daihyosenIdx
+          ? { position: DAIHYOSEN_POSITION }
+          : {
+              position: idx + 1,
+              ipponsA: s.aPts,
+              ipponsB: s.bPts,
+              decision: s.draw ? "hikiwake" : s.fusensho ? "fusensho" : "",
+              encho: s.encho > 0 ? { periodCount: s.encho } : undefined,
+            }),
+        isKnockoutPhase,
+      })
+    : null;
+  // Last LOCALLY-scored numbered bout: the encho target (the tied final
+  // pairing keeps fighting on that same bout).
+  const kachinukiLastScoredIdx = (() => {
+    let li = -1;
+    subs.forEach((s, i) => { if (i !== daihyosenIdx && subBoutHasBeenPlayed(s)) li = i; });
+    return li;
+  })();
+  const enchoCapped = maxEnchoPeriods > 0 && enchoPeriodCount >= maxEnchoPeriods;
+  // Encho on the tied final kachinuki bout: bump the bout's overtime count
+  // AND the match-level counter (decisionSuffix reads match.encho for the
+  // "(E)" suffix; enchoBlock forwards it since kachinuki has no daihyosen),
+  // then clear the tied outcome so the SAME pair keeps scoring that bout.
+  const applyKachinukiEncho = () => {
+    if (kachinukiLastScoredIdx < 0 || enchoCapped) return;
+    setEnchoPeriodCount(cnt => cnt + 1);
+    updateSub(kachinukiLastScoredIdx, prev => ({ ...prev, encho: (prev.encho || 0) + 1, draw: false, _preFusensho: undefined }));
+    setEndArmed(false);
+  };
+  // Manual next bout (mp-gmcg): the server auto-append can only pair
+  // fighters it knows (lineups + bout log) and team sizes are unregulated,
+  // so the operator can append the next pairing locally. The row becomes a
+  // regular subResult on the next write (position = last + 1); an untouched
+  // manual row is dropped by the subBoutHasBeenPlayed filter and never
+  // reaches the wire.
+  const kachinukiNextManualPos = (() => {
+    let last = 1; // bout 1 always exists (bootstrap slot)
+    (m.subResults || []).forEach(sr => { if (sr.position > 0 && sr.position > last) last = sr.position; });
+    subs.forEach((s, i) => { if (i !== daihyosenIdx && subBoutHasBeenPlayed(s) && i + 1 > last) last = i + 1; });
+    manualBouts.forEach(p => { if (p > last) last = p; });
+    return last + 1;
+  })();
+  const addManualBout = () => {
+    const nextPos = kachinukiNextManualPos;
+    if (nextPos > kachinukiMaxBouts) return;
+    setManualBouts(prev => [...prev, nextPos]);
+    setSubs(prev => {
+      const out = [...prev];
+      while (out.length < nextPos) out.push({ aPts: [], bPts: [], aFouls: 0, bFouls: 0, fusensho: "", draw: false, encho: 0 });
+      return out;
+    });
+    setFinishArmed(false);
+    setEndArmed(false);
+  };
+  // Any edit disarms both two-step confirms so a stale verdict can never be
+  // committed (subs identity changes only through updateSub/addManualBout;
+  // daihyosenHantei flips the verdict without touching subs).
+  useEffectA(() => { setFinishArmed(false); setEndArmed(false); }, [subs, daihyosenHantei]);
+
+  // mp-gmcg: reopen a completed kachinuki match (POST .../reopen): status
+  // back to running, winner/decision cleared, bout log kept. On success the
+  // server broadcasts match_updated; the refreshed match prop flips
+  // isComplete false and the regated bout mode re-engages (Record bout /
+  // End match) without remounting. 409 sentinels ("not completed",
+  // "downstream match already fought") surface inline, never silently.
+  const onReopenMatch = async () => {
+    setReopenErr("");
+    setReopenBusy(true);
+    try {
+      await window.API.reopenMatch(m.compId, m.id, resolveDecisionPassword(password));
+      if (!mountedRef.current) return;
+      setReopenArmed(false);
+    } catch (e) {
+      if (!mountedRef.current) return;
+      setReopenErr(String(e?.message || "Failed to reopen match"));
+    } finally {
+      if (mountedRef.current) setReopenBusy(false);
+    }
+  };
 
   // mp-4pc: when a daihyosen exists the encho counter belongs to that
   // sub-bout (attached per-sub in buildPatch), so suppress the top-level
@@ -619,9 +798,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       if (lineup.positions[posKeyN]) return lineup.positions[posKeyN];
       return "";
     };
+    // mp-gmcg: a manually-added bout (no server entry, no lineup key) carries
+    // the operator's player picks on the local sub state (aName/bName). They
+    // take the existing-name slot: for that bout they ARE the authoritative
+    // per-bout identity, exactly like a server bout-log entry.
+    const override = subs[idx] || {};
     return {
-      aName: resolveBoutSideName({ isKachinuki, isDaihyosen: isDaihyoRow, existingName: existing?.sideA, lineupName: pick(lineupA) }),
-      bName: resolveBoutSideName({ isKachinuki, isDaihyosen: isDaihyoRow, existingName: existing?.sideB, lineupName: pick(lineupB) }),
+      aName: resolveBoutSideName({ isKachinuki, isDaihyosen: isDaihyoRow, existingName: override.aName || existing?.sideA, lineupName: pick(lineupA) }),
+      bName: resolveBoutSideName({ isKachinuki, isDaihyosen: isDaihyoRow, existingName: override.bName || existing?.sideB, lineupName: pick(lineupB) }),
     };
   };
 
@@ -678,6 +862,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       // independently: encho is optional for a hantei decision.
       if (isDaihyo) {
         Object.assign(entry, daihyosenEnchoFields({ enchoPeriodCount, daihyosenTied, daihyosenHantei }));
+      } else if (isKachinuki && s.encho > 0) {
+        // mp-gmcg: numbered-bout encho is the KACHINUKI knockout-tie
+        // resolution (same pair keeps fighting the same bout; daihyosen
+        // does not exist in kachinuki). validateSubBout relaxes the
+        // daihyosen-only encho gate for kachinuki competitions. Hantei
+        // stays daihyosen-only: never emitted here.
+        entry.encho = { periodCount: s.encho };
       }
       return entry;
     });
@@ -705,6 +896,34 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
         subResults,
         ...enchoBlock(),
         ...(opts.kachinukiBoutFinal ? { kachinukiBoutFinal: true } : {}),
+      };
+    }
+    // mp-gmcg: [End match] carries a context-derived outcome
+    // (deriveKachinukiEndOutcome). The winner is the LAST SCORED BOUT's
+    // team, NOT the IV/PW leader: kachinuki is decided by exhaustion or
+    // the taisho-defeated rule, both of which the last bout expresses and
+    // both of which record decision "kachinuki-exhaustion". A tied last
+    // bout in pools/league ends the encounter as a drawn match
+    // ("hikiwake"); a knockout tie never reaches here (End is blocked).
+    if (opts.endOutcome) {
+      const eo = opts.endOutcome;
+      const endWinnerSide = eo.kind === "win" ? eo.winnerSide : null;
+      return {
+        winner: endWinnerSide === "a" ? m.sideA : endWinnerSide === "b" ? m.sideB : null,
+        status: "completed",
+        ipponsA: [],
+        ipponsB: [],
+        decision: eo.kind === "win" ? "kachinuki-exhaustion" : "hikiwake",
+        score: {
+          type: endWinnerSide ? "ippon" : "hikiwake",
+          winnerPts: endWinnerSide === "a" ? ivA : ivB,
+          loserPts: endWinnerSide === "a" ? ivB : ivA,
+          fouls: { a: 0, b: 0 },
+          corrected: isComplete,
+        },
+        subResults,
+        ...enchoBlock(),
+        ...correctionBlock,
       };
     }
     return {
@@ -779,8 +998,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
 
   // Compute whether each team's 5-person lineup is incomplete (any position
   // empty). Used for the non-blocking UI warning; does NOT block scoring.
+  // mp-gmcg: suppressed entirely for kachinuki: team sizes are unregulated
+  // and position vacancies are irrelevant, so "Lineup incomplete" would
+  // contradict legitimate play.
   const isFivePersonLineupIncomplete = (lineup) => {
-    if (teamSize !== 5) return false;
+    if (teamSize !== 5 || isKachinuki) return false;
     const pos = lineup?.positions || {};
     return !pos.senpo || !pos.jiho || !pos.chuken || !pos.fukusho || !pos.taisho;
   };
@@ -872,17 +1094,19 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               team header / summary / decision / footer stay anchored. */}
           <div className="team-bouts-scroll">
           {[
-            // T136: kachinukiExhausted (hoisted above) surfaces the end
-            // banner instead of more bout rows when the backend has
-            // already decided the match.
+            // mp-gmcg: operator-led completion. The banner reads "ended"
+            // ONLY for a completed match (correction view): a running
+            // match is always live bout-by-bout scoring, even when a
+            // sub-result carries a kachinuki-exhaustion decision (roster
+            // data is advisory; the operator decides when it's over).
             isKachinuki && (
               <div key="kachinuki-banner" style={{ background: "var(--bg-2, #fafafa)", border: "1px solid var(--accent, #ddd)", borderRadius: 4, padding: "8px 12px", marginBottom: 12, fontSize: 12, display: "flex", flexDirection: "column", gap: 4 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <span style={{ fontWeight: 700 }}><TermAS name="kachinuki">Kachinuki</TermAS> (winner stays on)</span>
                   <span style={{ color: "var(--ink-3)" }}>
-                    {kachinukiExhausted
-                      ? "One team exhausted: match ended."
-                      : "Score the current bout, then tap Record bout. The next bout is added automatically; the match ends when one team runs out of players."}
+                    {isComplete
+                      ? "Match ended."
+                      : "Score the current bout, then Record bout to continue (the next pairing is added), or End match to finish on the last scored bout."}
                   </span>
                 </div>
                 {/* TODO(T136): inline auto-refresh after each score so
@@ -931,6 +1155,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             const pickPlayer = (teamId, lineup) => (value) => {
               submitInlineLineup(teamId, lineup, lineupPosKey, value);
             };
+            // mp-gmcg: a manually-added bout has no lineup key (positions
+            // beyond teamSize are not valid lineup keys) and no server
+            // entry, so its player picks are stored on the local sub state
+            // (aName/bName) and ride the subResult itself. The picker is
+            // forced to render even with an empty roster so a free-typed
+            // name ("+ Add …") is always possible.
+            const isManualRow = isKachinuki && !isDaihyoRow && manualBouts.includes(idx + 1);
+            const pickManual = (sideKey) => (value) => updateSub(idx, prev => ({ ...prev, [sideKey]: value }));
 
             // Each row: [left side, center score, right side]: left=SHIRO, right=AKA
             // T096/FR-031: manual pts/fouls edits clear the per-bout fusensho
@@ -958,7 +1190,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 // accepts only senpo/… or "1".."N"), so a name pick there would
                 // 4xx. Suppress the picker by passing an empty roster (the input
                 // only renders when roster.length > 0).
-                playerName: playerBName, roster: isDaihyoRow ? [] : rosterB, onSelectName: pickPlayer(teamIdB, lineupB),
+                playerName: playerBName, roster: isDaihyoRow ? [] : rosterB, forceInput: isManualRow,
+                onSelectName: isManualRow ? pickManual("bName") : pickPlayer(teamIdB, lineupB),
               },
               {
                 key: "a", pts: s.aPts, fouls: s.aFouls,
@@ -970,7 +1203,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 }),
                 color: "aka", label: "AKA",
                 // See SHIRO note above: no lineup picker on the daihyosen row.
-                playerName: playerAName, roster: isDaihyoRow ? [] : rosterA, onSelectName: pickPlayer(teamIdA, lineupA),
+                playerName: playerAName, roster: isDaihyoRow ? [] : rosterA, forceInput: isManualRow,
+                onSelectName: isManualRow ? pickManual("aName") : pickPlayer(teamIdA, lineupA),
               },
             ];
 
@@ -1021,7 +1255,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                             no roster metadata. Lineups are always editable. */}
                         <div className="tsm-name">
                           <span className={`se-color-badge se-color-badge--${rs.color}`}>{rs.label}</span>
-                          {rs.roster && rs.roster.length > 0 ? (
+                          {(rs.roster && rs.roster.length > 0) || rs.forceInput ? (
                             <LineupNameInput
                               value={rs.playerName || ""}
                               roster={rs.roster}
@@ -1147,6 +1381,35 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
           })}
           </div>
 
+          {/* mp-gmcg: manual next bout. Secondary/unobtrusive: Record bout
+              stays the primary flow (the server auto-appends the pairing it
+              can infer). This is for the unknown-roster continue path: team
+              sizes are unregulated, so the server may not know the next
+              fighter. Disabled until the current bout is scored (the next
+              bout comes after the current one) and at the theoretical
+              kachinuki bout cap. */}
+          {kachinukiBoutMode && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, fontSize: 12 }}>
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm"
+                data-testid="kachinuki-add-bout-button"
+                onClick={addManualBout}
+                disabled={submitting || !kachinukiCurrentBoutPlayed || kachinukiNextManualPos > kachinukiMaxBouts}
+                title={!kachinukiCurrentBoutPlayed
+                  ? "Score the current bout first"
+                  : kachinukiNextManualPos > kachinukiMaxBouts
+                  ? "Bout limit reached"
+                  : "Add the next pairing yourself when it isn't added automatically"}
+              >
+                + Add next bout manually
+              </button>
+              <span style={{ color: "var(--ink-3)" }}>
+                For fighters the app doesn't know: pick or type both players on the new row.
+              </span>
+            </div>
+          )}
+
           {/* Team summary: T138: sticky to the top of the modal body so
               the IV/PW totals stay visible as the operator scrolls through
               many bout rows (especially relevant on small screens / when
@@ -1238,7 +1501,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               in handlers_daihyosen.go. Once a daihyosen exists it renders as
               a scoreable row above (mp-4pc), so don't offer a second. */}
           {(() => {
-            if (hasDaihyosen || !isKnockoutPhase) return null;
+            // mp-gmcg: daihyosen does not exist in kachinuki (a tied final
+            // bout goes to encho on that same bout; the server now 400s a
+            // kachinuki daihyosen POST), so the ADD affordance is hidden.
+            // Existing/legacy daihyosen rows still render defensively via
+            // hasDaihyosen above.
+            if (hasDaihyosen || !isKnockoutPhase || isKachinuki) return null;
             // Local tie detection drives the highlight + helper copy only: 
             // the backend is the source of truth and re-validates on submit.
             // A bout is "decided" once it carries any ippon or is a draw; a
@@ -1392,6 +1660,39 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               two Cancels and two commit buttons at the highest-stakes moment
               (amending a recorded result). Mirrored in Score/EngiScoreEditorModal. */}
           {!(isComplete && showCorrectionPrompt) && (
+          <>
+          {/* mp-gmcg: inline End-match hint (plain text, no modal). Shown
+              only while End is blocked: either nothing is scored yet, or a
+              knockout tie needs resolving (no draws in a knockout): the
+              operator continues with the next bout (Record bout) or sends
+              the SAME tied pair to overtime (Encho) until there is a
+              point. This replaces the koTieBlocked gating for kachinuki:
+              the correction-mode Finish buttons below never see a running
+              kachinuki match, so there are no competing hints. */}
+          {kachinukiBoutMode && kachinukiEndOutcome?.kind === "blocked" && (
+            <div data-testid="kachinuki-end-hint" style={{ fontSize: 12, color: "var(--ink-2)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
+              {kachinukiEndOutcome.reason === "no-bouts" ? (
+                <span>Nothing recorded yet: score a bout before ending the match.</span>
+              ) : (
+                <>
+                  <span>No draws in a knockout: continue until there is a point. Record bout brings the next fighter up; Encho keeps the same pair on this bout.</span>
+                  <button
+                    type="button"
+                    className="btn btn--sm"
+                    data-testid="kachinuki-encho-button"
+                    onClick={applyKachinukiEncho}
+                    disabled={submitting || enchoCapped}
+                    title={enchoCapped ? "Maximum encho periods reached" : "Overtime: the same pair keeps fighting this bout"}
+                  >
+                    Encho (same pair)
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+          {reopenErr && (
+            <div data-testid="kachinuki-reopen-error" style={{ color: "var(--danger, #c00)", fontSize: 12, marginBottom: 6 }}>{reopenErr}</div>
+          )}
           <div className="score-nav">
             {prevMatch ? (
               <button className="btn btn--sm score-nav__prev" onClick={onPrev} disabled={submitting}>← Prev</button>
@@ -1400,22 +1701,64 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               {m.status === "scheduled" && (
                 <button className="btn btn--sm" onClick={() => doSubmit(() => onSubmit(buildPatch("running")))} disabled={submitting}>▶ Start match</button>
               )}
+              {/* mp-gmcg: mistake recovery on a completed kachinuki match:
+                  status back to running, winner/decision cleared, bout log
+                  kept; the modal re-enters bout mode via the refreshed
+                  match prop. Two-step arm/confirm, house style. */}
+              {canReopenKachinukiMatch({ isKachinuki, isComplete }) && (
+                <button
+                  type="button"
+                  className={`btn btn--sm ${reopenArmed ? "btn--confirm" : "btn--ghost"}`}
+                  data-testid="kachinuki-reopen-button"
+                  onClick={() => {
+                    if (!reopenArmed) { setReopenArmed(true); return; }
+                    onReopenMatch();
+                  }}
+                  disabled={submitting || reopenBusy || decisionSubmitting}
+                  title="Reopen: back to running, result cleared, bouts kept"
+                >
+                  {reopenBusy ? "Reopening…" : reopenArmed ? "Confirm · Reopen match" : "Reopen match"}
+                </button>
+              )}
               {canClose && <button className="btn" onClick={handleDismiss} disabled={submitting}>Cancel</button>}
               {kachinukiBoutMode ? (
-                // Kachinuki bout submit: a RUNNING write flagged
-                // kachinukiBoutFinal, not a match completion. The server
-                // appends the next bout, or ends the match by exhaustion.
-                // koTieBlocked deliberately does not apply here: a bout
-                // hikiwake is a legitimate result (both players retire).
-                // Same two-step arm/confirm pattern as Finish; any score
-                // edit disarms via the finishArmed effect above.
+                // Kachinuki bout mode (mp-gmcg): TWO always-visible actions.
+                // [Record bout]: a RUNNING write flagged kachinukiBoutFinal;
+                // the server appends the next pairing (winner stays, tie
+                // retires both). [End match]: an explicit COMPLETED write
+                // whose outcome is derived from the last scored bout: NO
+                // picker (deriveKachinukiEndOutcome). koTieBlocked
+                // deliberately does not apply to Record bout (a bout
+                // hikiwake is a legitimate result); End match carries its
+                // own knockout-tie block + inline hint above. Both use the
+                // two-step arm/confirm idiom; arming one disarms the other
+                // and any score edit disarms both.
+                <>
                 <button type="button" className={`btn btn--primary ${finishArmed ? "btn--confirm" : ""}`} onClick={() => {
-                  if (!finishArmed) { setFinishArmed(true); return; }
+                  if (!finishArmed) { setFinishArmed(true); setEndArmed(false); return; }
                   doSubmit(() => onSubmit(buildPatch("running", { kachinukiBoutFinal: true })));
                 }} disabled={submitting || !kachinukiCurrentBoutPlayed}
                   title={!kachinukiCurrentBoutPlayed ? "Nothing recorded for this bout yet" : undefined}>
                   {submitting ? "Saving…" : !kachinukiCurrentBoutPlayed ? "Nothing recorded yet" : finishArmed ? "Confirm · Record bout" : "Record bout"}
                 </button>
+                <button type="button" className={`btn ${endArmed ? "btn--confirm" : ""}`} data-testid="kachinuki-end-match-button" onClick={() => {
+                  if (kachinukiEndOutcome?.kind === "blocked") return;
+                  if (!endArmed) { setEndArmed(true); setFinishArmed(false); return; }
+                  doSubmit(() => onSubmit(buildPatch("completed", { endOutcome: kachinukiEndOutcome })));
+                }} disabled={submitting || kachinukiEndOutcome?.kind === "blocked"}
+                  title={kachinukiEndOutcome?.kind === "blocked"
+                    ? (kachinukiEndOutcome.reason === "no-bouts"
+                        ? "Score a bout before ending the match"
+                        : "No draws in a knockout: continue (next bout or encho) until there is a point")
+                    : "End the match on the last scored bout"}>
+                  {submitting ? "Saving…"
+                    : endArmed
+                    ? (kachinukiEndOutcome?.kind === "win"
+                        ? `Confirm · ${kachinukiEndOutcome.winnerSide === "a" ? "AKA" : "SHIRO"} WIN`
+                        : "Confirm · Draw (hikiwake)")
+                    : "End match"}
+                </button>
+                </>
               ) : onSubmitAndNext ? (
                 <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={() => {
                   if (isComplete && !correctionReason) { setShowCorrectionPrompt(true); return; }
@@ -1440,6 +1783,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               <button className="btn btn--sm score-nav__next" onClick={onNext} disabled={submitting}>Next →</button>
             ) : <span />}
           </div>
+          </>
           )}
           {/* Quiet, always-present keyboard-shortcut reminder. */}
           <ScoringShortcutHint />

@@ -2,7 +2,7 @@
 // EstInput (local), AdminTWMatch (local), AdminSchedulePage.
 
 import { filterMatchesByCourt, CourtPacePanel, PerCourtBreakdown } from './admin_schedule_pacing.jsx';
-import { formatMinutes, timeToMinutes, timeEdited, clampDurationSeconds, COURT_STORAGE_KEY } from './admin_schedule_utils.jsx';
+import { formatMinutes, timeToMinutes, timeEdited, clampDurationSeconds, estimateRangeParts, COURT_STORAGE_KEY } from './admin_schedule_utils.jsx';
 import { DurationInput } from './duration.jsx';
 
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
@@ -152,13 +152,23 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
   const [estBoutsPerTeamMatch, setEstBoutsPerTeamMatch] = useStateA(0);
   const [estBuffer, setEstBuffer] = useStateA(0);
   const [estCeremony, setEstCeremony] = useStateA(0);
+  // mp-gmcg: winner-stays (kachinuki) widens the estimate into a
+  // best/average/worst range server-side (teamMatchType=kachinuki query
+  // param); in that mode the backend treats boutsPerTeamMatch as the
+  // NOMINAL team size N (best = N-bout sweep, worst = 2N-1 attrition).
+  // Seeded from the first competition, same as team size above; the
+  // inputs stay freeform so the toggle stays editable.
+  const [estKachinuki, setEstKachinuki] = useStateA(tournament.competitions[0]?.teamMatchType === "kachinuki");
   const [estResult, setEstResult] = useStateA(null);
   const [estLoading, setEstLoading] = useStateA(false);
 
   useEffectA(() => {
-    const newBouts = estTeamSize > 0 ? 2 * estTeamSize - 1 : 0;
+    // Kachinuki: the bouts field is the nominal team size N (the server
+    // derives the N..2N-1 range from it). Fixed team formats keep the
+    // legacy 2N-1 default.
+    const newBouts = estTeamSize > 0 ? (estKachinuki ? estTeamSize : 2 * estTeamSize - 1) : 0;
     setEstBoutsPerTeamMatch(prev => prev === newBouts ? prev : newBouts);
-  }, [estTeamSize]);
+  }, [estTeamSize, estKachinuki]);
 
   useEffectA(() => {
     if (!estOpen) {
@@ -188,7 +198,11 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
           teamSize: estTeamSize,
           boutsPerTeamMatch: estBoutsPerTeamMatch,
           buffer: estBuffer,
-          ceremonyMinutes: estCeremony
+          ceremonyMinutes: estCeremony,
+          // mp-gmcg: kachinuki widens the estimate into a best/average/
+          // worst range. Empty string is filtered out by estimateSchedule's
+          // param loop, so non-kachinuki requests stay byte-identical.
+          teamMatchType: estKachinuki && estTeamSize > 0 ? "kachinuki" : ""
         }, password, controller.signal);
         setEstResult(res);
       } catch (e) {
@@ -200,7 +214,7 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
       }
     }, 300);
     return () => { clearTimeout(timer); controller.abort(); };
-  }, [estOpen, estMatchDurationSeconds, estMultiplier, estCourts, estNumMatches, estTeamSize, estBoutsPerTeamMatch, estBuffer, estCeremony, password]);
+  }, [estOpen, estMatchDurationSeconds, estMultiplier, estCourts, estNumMatches, estTeamSize, estBoutsPerTeamMatch, estBuffer, estCeremony, estKachinuki, password]);
 
   // T040/T041: read ?court= from the URL; useQuery re-renders on history
   // changes so navigating between /admin/schedule and /admin/schedule?court=A
@@ -439,6 +453,25 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
                 <EstInput label="Courts" value={estCourts} setter={setEstCourts} min="1" max="26" />
                 <EstInput label="Matches" value={estNumMatches} setter={setEstNumMatches} min="1" />
                 <EstInput label="Team size (0=indiv)" value={estTeamSize} setter={setEstTeamSize} min="0" />
+                {/* mp-gmcg: winner-stays toggle, only meaningful for team
+                    estimates. Kachinuki has a variable bout count, so the
+                    server returns a best/average/worst range (rendered
+                    below) and treats the bouts field as the nominal team
+                    size N. */}
+                {estTeamSize > 0 && (
+                  <div className="field">
+                    <label className="field__label" htmlFor="est-kachinuki" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <input
+                        id="est-kachinuki"
+                        type="checkbox"
+                        checked={estKachinuki}
+                        onChange={(e) => setEstKachinuki(e.target.checked)}
+                      />
+                      Winner-stays (kachinuki)
+                    </label>
+                    <div className="field__hint">Variable bout count: shows best / average / worst.</div>
+                  </div>
+                )}
                 <EstInput label="Bouts per team match" value={estBoutsPerTeamMatch} setter={setEstBoutsPerTeamMatch} min="0" />
                 <EstInput label="Buffer %" value={estBuffer} setter={setEstBuffer} min="0" max="100" />
                 <EstInput label="Ceremony (min)" value={estCeremony} setter={setEstCeremony} min="0" />
@@ -447,7 +480,20 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
               {estResult && (
                 <div style={{ marginTop: 20, paddingTop: 20, borderTop: "1px solid var(--bg-3)" }}>
                   <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: 12 }}>
-                    <div style={{ fontSize: 24, fontWeight: 700 }}>Total: {formatMinutes(estResult.totalDurationMinutes)}</div>
+                    {/* mp-gmcg: kachinuki estimates span a range (variable
+                        bout count); the headline is the AVERAGE scenario and
+                        Best/Worst bracket it. Non-range estimates render the
+                        single total exactly as before. */}
+                    {(() => {
+                      const range = estimateRangeParts(estResult);
+                      return range ? (
+                        <div data-testid="est-range" style={{ fontSize: 24, fontWeight: 700 }}>
+                          Best {formatMinutes(range.best)} · Average {formatMinutes(range.average)} · Worst {formatMinutes(range.worst)}
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: 24, fontWeight: 700 }}>Total: {formatMinutes(estResult.totalDurationMinutes)}</div>
+                      );
+                    })()}
                     {autoStart && (
                       <div style={{ fontSize: 16, color: "var(--ink-2)" }}>
                         Projected finish: <strong>{window.addMinutes(autoStart, estResult.totalDurationMinutes)}</strong>

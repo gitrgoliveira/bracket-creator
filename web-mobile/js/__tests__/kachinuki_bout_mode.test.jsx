@@ -1,47 +1,128 @@
-// Kachinuki submission contract (UAT gap): while a kachinuki encounter is
-// being fought, the modal's primary action is "Record bout" (a running
-// write flagged kachinukiBoutFinal), NEVER a match completion, and the
-// knockout no-draw rule (koTieBlocked) must not block it: a bout hikiwake
-// is a legitimate result that retires both players. Finish/complete
-// semantics only return for corrections and for the tied-after-exhaustion
-// daihyosen resolution.
+// Operator-led kachinuki contract (mp-gmcg). While a kachinuki encounter is
+// being fought, the modal shows TWO always-visible actions: [Record bout] (a
+// running write flagged kachinukiBoutFinal) and [End match] (an explicit
+// completed write whose outcome is DERIVED from the last scored bout — no
+// picker). Completion is operator-led: the engine never auto-finalizes, so a
+// running match carrying a "kachinuki-exhaustion" sub decision (e.g. after a
+// reopen) stays in bout mode. The knockout no-draw rule (koTieBlocked) must
+// not gate the bout submit: a bout hikiwake is a legitimate result that
+// retires both players; End match carries its own knockout-tie gate via
+// deriveKachinukiEndOutcome.
 //
-// The component itself is not mounted here (vitest does not exercise the
-// big modals); the mode decision is a pure helper tested directly, same
-// pattern as resolveMatchLineup.
+// The component itself is not mounted here (vitest does not exercise the big
+// modals); the decisions are pure helpers tested directly, same pattern as
+// resolveMatchLineup.
 
 import { describe, it, expect } from 'vitest';
-import { isKachinukiBoutMode, isKoTieBlocked } from '../admin_scoring_team.jsx';
+import {
+  isKachinukiBoutMode,
+  isKoTieBlocked,
+  canReopenKachinukiMatch,
+  deriveKachinukiEndOutcome,
+} from '../admin_scoring_team.jsx';
 
 describe('isKachinukiBoutMode', () => {
   it('is true while a kachinuki match is being fought', () => {
-    expect(isKachinukiBoutMode({ isKachinuki: true, isComplete: false, exhausted: false, hasDaihyosen: false })).toBe(true);
+    expect(isKachinukiBoutMode({ isKachinuki: true, isComplete: false, hasDaihyosen: false })).toBe(true);
   });
 
   it('is false for fixed-order team matches', () => {
-    expect(isKachinukiBoutMode({ isKachinuki: false, isComplete: false, exhausted: false, hasDaihyosen: false })).toBe(false);
+    expect(isKachinukiBoutMode({ isKachinuki: false, isComplete: false, hasDaihyosen: false })).toBe(false);
   });
 
   it('is false for corrections (completed match keeps Finish semantics)', () => {
-    expect(isKachinukiBoutMode({ isKachinuki: true, isComplete: true, exhausted: false, hasDaihyosen: false })).toBe(false);
+    expect(isKachinukiBoutMode({ isKachinuki: true, isComplete: true, hasDaihyosen: false })).toBe(false);
   });
 
-  it('is false once one team is exhausted (tie resolution keeps Finish semantics)', () => {
-    expect(isKachinukiBoutMode({ isKachinuki: true, isComplete: false, exhausted: true, hasDaihyosen: false })).toBe(false);
+  it('stays TRUE on a running match even when a sub carries kachinuki-exhaustion (operator-led: roster data is advisory)', () => {
+    // The OLD auto-finalize contract exited bout mode on exhaustion. Now
+    // completion is only the operator tapping End match, so a running match is
+    // always live bout-by-bout scoring regardless of any advisory sub decision.
+    expect(isKachinukiBoutMode({ isKachinuki: true, isComplete: false, hasDaihyosen: false })).toBe(true);
   });
 
-  it('is false when a daihyosen row exists (its completion goes through Finish)', () => {
-    expect(isKachinukiBoutMode({ isKachinuki: true, isComplete: false, exhausted: false, hasDaihyosen: true })).toBe(false);
+  it('is false when a legacy daihyosen row exists (its completion goes through Finish)', () => {
+    expect(isKachinukiBoutMode({ isKachinuki: true, isComplete: false, hasDaihyosen: true })).toBe(false);
   });
 });
 
 describe('koTieBlocked does not gate the bout submit', () => {
   it('a tied knockout kachinuki mid-match is bout mode, where koTieBlocked is not consulted', () => {
-    // Tied IV/PW after a bout-1 hikiwake: koTieBlocked would read this as
-    // a forbidden knockout draw, but the match is NOT being completed.
+    // Tied IV/PW after a bout-1 hikiwake: koTieBlocked would read this as a
+    // forbidden knockout draw, but the match is NOT being completed.
     const blocked = isKoTieBlocked({ isKnockoutPhase: true, teamWinner: null, isComplete: false });
     expect(blocked).toBe(true); // the completion rule itself is unchanged
-    const boutMode = isKachinukiBoutMode({ isKachinuki: true, isComplete: false, exhausted: false, hasDaihyosen: false });
+    const boutMode = isKachinukiBoutMode({ isKachinuki: true, isComplete: false, hasDaihyosen: false });
     expect(boutMode).toBe(true); // and bout mode bypasses it by replacing the action
+  });
+});
+
+describe('canReopenKachinukiMatch', () => {
+  it('renders only on a COMPLETED kachinuki match', () => {
+    expect(canReopenKachinukiMatch({ isKachinuki: true, isComplete: true })).toBe(true);
+  });
+  it('is false on a running kachinuki match (nothing to reopen)', () => {
+    expect(canReopenKachinukiMatch({ isKachinuki: true, isComplete: false })).toBe(false);
+  });
+  it('is false for non-kachinuki (backend 400s the endpoint; button must not render)', () => {
+    expect(canReopenKachinukiMatch({ isKachinuki: false, isComplete: true })).toBe(false);
+  });
+});
+
+describe('deriveKachinukiEndOutcome', () => {
+  const bout = (position, over) => ({ position, ipponsA: [], ipponsB: [], ...over });
+
+  it('blocks with no-bouts when nothing is scored', () => {
+    expect(deriveKachinukiEndOutcome({ subResults: [], isKnockoutPhase: false }))
+      .toEqual({ kind: 'blocked', reason: 'no-bouts' });
+    // Unscored placeholder rows do not count as scored.
+    expect(deriveKachinukiEndOutcome({ subResults: [bout(1), bout(2)], isKnockoutPhase: true }))
+      .toEqual({ kind: 'blocked', reason: 'no-bouts' });
+  });
+
+  it('wins for side A when the last scored bout has more A ippons', () => {
+    const subs = [bout(1, { ipponsB: ['M'] }), bout(2, { ipponsA: ['M', 'D'] })];
+    expect(deriveKachinukiEndOutcome({ subResults: subs, isKnockoutPhase: true }))
+      .toEqual({ kind: 'win', winnerSide: 'a' });
+  });
+
+  it('wins for side B when the last scored bout has more B ippons', () => {
+    const subs = [bout(1, { ipponsA: ['M'] }), bout(2, { ipponsB: ['M', 'K'] })];
+    expect(deriveKachinukiEndOutcome({ subResults: subs, isKnockoutPhase: false }))
+      .toEqual({ kind: 'win', winnerSide: 'b' });
+  });
+
+  it('maps a fusensho/winner-name win back to a side even with equal ippon counts', () => {
+    const subs = [bout(1, { sideA: 'Red', sideB: 'White', winner: 'White', decision: 'fusensho' })];
+    expect(deriveKachinukiEndOutcome({ subResults: subs, isKnockoutPhase: true }))
+      .toEqual({ kind: 'win', winnerSide: 'b' });
+  });
+
+  it('draws on a tied last bout in pools/league', () => {
+    const subs = [bout(1, { ipponsA: ['M'], ipponsB: ['K'] })];
+    expect(deriveKachinukiEndOutcome({ subResults: subs, isKnockoutPhase: false }))
+      .toEqual({ kind: 'draw' });
+    // An explicit hikiwake decision is likewise a draw.
+    const drawn = [bout(1, { decision: 'hikiwake' })];
+    expect(deriveKachinukiEndOutcome({ subResults: drawn, isKnockoutPhase: false }))
+      .toEqual({ kind: 'draw' });
+  });
+
+  it('blocks a tied last bout in a knockout (no draws): continue with next bout or encho', () => {
+    const subs = [bout(1, { ipponsA: ['M'], ipponsB: ['K'] })];
+    expect(deriveKachinukiEndOutcome({ subResults: subs, isKnockoutPhase: true }))
+      .toEqual({ kind: 'blocked', reason: 'knockout-tie' });
+  });
+
+  it('treats a 0-0 bout sent to encho as live-tied (blocked), not unscored', () => {
+    const subs = [bout(1, { encho: { periodCount: 1 } })];
+    expect(deriveKachinukiEndOutcome({ subResults: subs, isKnockoutPhase: true }))
+      .toEqual({ kind: 'blocked', reason: 'knockout-tie' });
+  });
+
+  it('ignores daihyosen (-1) and non-positive rows, keying off the last POSITIVE bout', () => {
+    const subs = [bout(2, { ipponsA: ['M'] }), bout(-1, { ipponsB: ['K', 'D'] })];
+    expect(deriveKachinukiEndOutcome({ subResults: subs, isKnockoutPhase: true }))
+      .toEqual({ kind: 'win', winnerSide: 'a' });
   });
 });

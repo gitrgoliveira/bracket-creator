@@ -1753,6 +1753,57 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/competitions/{id}/matches/{mid}/reopen:
+    post:
+      tags: [matches]
+      summary: Reopen a completed kachinuki match
+      description: |
+        Sanctioned "Reopen match" for a COMPLETED kachinuki team match:
+        status returns to `running`, the match-level winner/decision is
+        cleared, and the bout log (subResults) is kept, so the operator can
+        add more bouts and end the match again. Kachinuki competitions only;
+        for every other competition type the correction path (a completed
+        write with a `correctionReason`) remains the sole sanctioned edit of
+        a finished result. For a bracket match whose winner was already
+        propagated but not yet fought, the downstream slot is retracted to
+        its "Winner of rX-mY" generation placeholder. In self-run mode this
+        endpoint requires the admin password (403 otherwise); reopening a
+        finalized result is an operator action. Broadcasts a `match_updated`
+        event.
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+        - $ref: '#/components/parameters/MatchId'
+      responses:
+        '200':
+          description: Match reopened (status back to `running`).
+        '400':
+          description: The competition is not a kachinuki team competition.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Self-run mode without the admin password.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: >
+            The match is not completed (only a completed kachinuki match can
+            be reopened), or a downstream knockout match fed by this match's
+            winner has already started or recorded a result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/competitions/{id}/matches/{mid}/court:
     put:
       tags: [matches]
@@ -1978,7 +2029,9 @@ paths:
       description: >
         Adds a daihyosen (representative) bout to break a tie in an
         elimination team match. Rejected if the match is not tied,
-        if it is a pool match, or if neither team has sufficient
+        if it is a pool match, if the competition is engi or kachinuki
+        (daihyosen does not exist in kachinuki; a knockout tie goes to
+        encho on the final bout), or if neither team has sufficient
         eligible competitors.
       security:
         - TournamentPassword: []
@@ -1993,7 +2046,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/MatchResult'
         '400':
-          description: Match is not tied (`not_tied`) or is a pool match (`pool_match`).
+          description: >
+            Match is not tied (`not_tied`), is a pool match (`pool_match`),
+            or the competition does not support daihyosen: engi competitions
+            decide bouts by referee flags (`error` is a human-readable
+            message), and daihyosen does not exist in kachinuki (`error`
+            begins "daihyosen does not exist in kachinuki"; a tied final bout
+            is a draw in pools/league and goes to encho in a knockout).
           content:
             application/json:
               schema:
@@ -2449,8 +2508,8 @@ paths:
           name: matchDuration
           required: true
           schema:
-            type: integer
-          description: Per-match clock duration in minutes.
+            type: number
+          description: Per-match (per-bout) clock duration in minutes; must be > 0.
         - in: query
           name: multiplier
           required: true
@@ -2459,24 +2518,41 @@ paths:
           description: Clock-to-elapsed multiplier (e.g. 1.6).
         - in: query
           name: numMatches
-          required: true
+          required: false
           schema:
             type: integer
+            default: 1
         - in: query
           name: courts
           required: true
           schema:
             type: integer
+            minimum: 1
+            maximum: 26
         - in: query
           name: teamSize
           required: false
           schema:
             type: integer
+          description: 0 = individual matches; > 0 = team matches.
         - in: query
           name: boutsPerTeamMatch
           required: false
           schema:
             type: integer
+          description: Bouts per team match; used when teamSize > 0.
+        - in: query
+          name: teamMatchType
+          required: false
+          schema:
+            type: string
+          description: >
+            `kachinuki` widens the estimate into a best/average/worst range
+            (winner-stays-on has a variable bout count: with nominal team size
+            N, best = N bouts, worst = 2N-1, average = midpoint; N is taken
+            from `boutsPerTeamMatch`). Any other value (or absent) keeps a
+            constant bout count and the three range fields collapse to one
+            value.
         - in: query
           name: buffer
           required: false
@@ -2484,7 +2560,7 @@ paths:
             type: integer
           description: Slowest-court buffer percentage.
         - in: query
-          name: ceremony
+          name: ceremonyMinutes
           required: false
           schema:
             type: integer
@@ -3422,10 +3498,14 @@ components:
           writeOnly: true
           description: >
             Transient flag, never persisted. Marks the current kachinuki bout as final
-            so the server advances the winner-stays sequence (appends the next bout or
-            completes the match when one side is exhausted). Without this flag a
-            kachinuki score write only saves the bout result and does not advance the
-            sequence.
+            so the server advances the winner-stays sequence by APPENDING the next
+            pairing (winner stays on; a tie retires both fighters). Append-only: the
+            server NEVER auto-completes a kachinuki match, even when its roster
+            snapshot says a side is exhausted (team sizes are unregulated, so the
+            snapshot is advisory). Completion is an explicit operator write with
+            `status: completed`, which also strips trailing unscored auto-appended
+            bouts. Without this flag a kachinuki score write only saves the bout
+            result and does not advance the sequence.
         teamResult:
           readOnly: true
           allOf:
@@ -3505,9 +3585,14 @@ components:
           allOf:
             - $ref: '#/components/schemas/EnchoMetadata'
           description: >
-            Overtime metadata for this sub-bout. Valid ONLY for the daihyosen
-            representative bout (`position: -1`); the server rejects a non-zero
-            `periodCount` on any numbered bout (fixed regulation time, no overtime).
+            Overtime metadata for this sub-bout. Valid for the daihyosen
+            representative bout (`position: -1`), and, in KACHINUKI
+            competitions only, also for numbered bouts (a knockout tie on the
+            final kachinuki bout is resolved by encho on that same bout; the
+            same pair keeps fighting). For all other competitions the server
+            rejects a non-zero `periodCount` on any numbered bout (fixed
+            regulation time, no overtime). `decidedByHantei` is NOT relaxed
+            for kachinuki: hantei remains daihyosen-only.
 
     BracketMatch:
       type: object
@@ -3759,10 +3844,28 @@ components:
       properties:
         totalDurationMinutes:
           type: integer
+          description: >
+            Headline estimate. For kachinuki (`teamMatchType=kachinuki`) this
+            is the AVERAGE scenario of the variable-bout-count range; otherwise
+            the bout count is constant and `totalDurationMinutes`,
+            `bestCaseMinutes`, and `worstCaseMinutes` are all equal.
+        bestCaseMinutes:
+          type: integer
+          description: >
+            Best-case scenario (kachinuki: nominal team size N bouts per
+            match, one fighter sweeps). Equals `totalDurationMinutes` for
+            non-kachinuki estimates.
+        worstCaseMinutes:
+          type: integer
+          description: >
+            Worst-case scenario (kachinuki: 2N-1 bouts per match, every bout
+            retires exactly one player). Equals `totalDurationMinutes` for
+            non-kachinuki estimates.
         perCourtMinutes:
           type: array
           items:
             type: integer
+          description: Per-court breakdown; reflects the average scenario.
         ceremonyMinutes:
           type: integer
 

@@ -158,9 +158,12 @@ describe('TeamScoreEditorModal config matrix (running match, admin surface)', ()
 
     // Daihyosen affordance is knockout-only (T141): phase "bracket", or the
     // playoffs/mixed fallback for non-pool phases. Pool matches resolve ties
-    // via standings + the auto-injected pool daihyosen instead.
-    const expectKnockout = cell.phase === 'bracket';
-    expect(!!screen.queryByTestId('scoring-modal-daihyosen-button')).toBe(expectKnockout);
+    // via standings + the auto-injected pool daihyosen instead. mp-gmcg:
+    // daihyosen does not exist in kachinuki (a tied final bout goes to encho
+    // on that same bout), so the ADD affordance is hidden for kachinuki even
+    // in a knockout — the tie resolves via the inline Encho path instead.
+    const expectDaihyosen = cell.phase === 'bracket' && cell.tmt !== 'kachinuki';
+    expect(!!screen.queryByTestId('scoring-modal-daihyosen-button')).toBe(expectDaihyosen);
 
     // Admin decision controls (kiken/fusenpai) render on the admin surface.
     expect(screen.queryByTestId('scoring-modal-kiken-voluntary-button')).not.toBeNull();

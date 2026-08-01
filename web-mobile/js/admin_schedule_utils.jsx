@@ -5,6 +5,22 @@ export function formatMinutes(m) {
   return `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 
+// mp-gmcg: kachinuki team matches have a variable bout count, so the
+// schedule estimate is a best/average/worst RANGE: the server returns
+// additive bestCaseMinutes / worstCaseMinutes bracketing the headline
+// totalDurationMinutes (the AVERAGE scenario). Returns {best, average,
+// worst} when the estimate genuinely spans a range, or null when the three
+// collapse to one number (individual / fixed-format matches, or a legacy
+// response without the fields), in which case callers render the single
+// total exactly as before.
+export function estimateRangeParts(est) {
+  if (!est) return null;
+  const best = est.bestCaseMinutes;
+  const worst = est.worstCaseMinutes;
+  if (!Number.isFinite(best) || !Number.isFinite(worst) || best === worst) return null;
+  return { best, average: est.totalDurationMinutes, worst };
+}
+
 // Estimate minutes from HH:MM string; returns null if invalid
 export function timeToMinutes(t) {
   if (!t) return null;

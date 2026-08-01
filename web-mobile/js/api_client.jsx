@@ -1619,6 +1619,22 @@ const API = {
         }
         return true;
     },
+    // mp-gmcg: reopen a COMPLETED kachinuki team match: status back to
+    // running, winner/decision cleared, bout log kept. 400 = non-kachinuki
+    // competition; 409 = not completed / downstream bracket match already
+    // fought (the propagated winner cannot be retracted). The server
+    // broadcasts match_updated on success.
+    async reopenMatch(compID, matchID, password) {
+        const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/reopen`, {
+            method: 'POST',
+            headers: { 'X-Tournament-Password': password }
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to reopen match");
+        }
+        return true;
+    },
     async updateSchedule(compID, entries, password) {
         const res = await fetch(`/api/competitions/${compID}/schedule`, {
             method: 'PUT',

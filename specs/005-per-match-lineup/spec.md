@@ -56,6 +56,16 @@ Add an optional `MatchID string` to `TeamLineup`.
    XLSX exporter (`kachinuki_export.go`), which now prefers a match-scoped lineup when
    present.
 
+> **Superseded (2026-08-01, mp-gmcg — see `specs/006-kachinuki-operator-led/spec.md`):**
+> decisions 4 and 5 above no longer hold. `TeamLineup.Validate`/`validateFive` (the
+> FIK 5-person back-fill/DQ rule) were removed; only the key-only `ValidatePositions`
+> check remains, and position vacancies never block a lineup (team sizes are
+> unregulated). `MaybeAdvanceKachinuki` now DOES read lineups: it builds each side's
+> remaining-roster queue from the saved TeamLineup (match-scoped entry preferred,
+> round-scoped fallback) via `kachinukiRemainingRoster`, degrading to the bout-log
+> heuristic when no lineup exists — and it is append-only: it never auto-finalizes a
+> kachinuki encounter; completion is an explicit operator score write.
+
 ## API
 
 `GET/PUT/DELETE /api/competitions/:id/teams/:tid/lineups/:round`: unchanged (round-scoped).

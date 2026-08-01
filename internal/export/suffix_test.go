@@ -88,6 +88,41 @@ func TestSideMarks(t *testing.T) {
 	}
 }
 
+// TestDefaultWinMaruAB pins the display fallback for default wins whose
+// stored result predates the engine's maru fill: the winner's EMPTY cell
+// fills with one maru per awarded point (regulation "○○", encho "○"); a
+// recorded score, the loser, and non-default decisions are untouched.
+func TestDefaultWinMaruAB(t *testing.T) {
+	t.Parallel()
+	encho := &state.EnchoMetadata{PeriodCount: 1}
+	tests := []struct {
+		name           string
+		scoreA, scoreB string
+		decision       string
+		encho          *state.EnchoMetadata
+		winner         string
+		wantA, wantB   string
+	}{
+		{name: "regulation kiken fills the winner pair", decision: "kiken-voluntary", winner: "Alice", wantA: "○○"},
+		{name: "legacy bare kiken fills too", decision: "kiken", winner: "Bob", wantB: "○○"},
+		{name: "fusenpai fills the survivor", decision: "fusenpai", winner: "Bob", wantB: "○○"},
+		{name: "fusensho fills the defaulted winner", decision: "fusensho", winner: "Alice", wantA: "○○"},
+		{name: "encho awards exactly one deciding point", decision: "kiken-injury", encho: encho, winner: "Alice", wantA: "○"},
+		{name: "a recorded score stands", scoreA: "M", decision: "kiken-injury", winner: "Alice", wantA: "M"},
+		{name: "non-default decision untouched", decision: "hantei", winner: "Alice"},
+		{name: "no winner untouched", decision: "kiken-voluntary"},
+		{name: "unmatched winner untouched", decision: "kiken-voluntary", winner: "Carol"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			gotA, gotB := DefaultWinMaruAB(tt.scoreA, tt.scoreB, tt.decision, tt.encho, tt.winner, "Alice", "Bob")
+			assert.Equal(t, tt.wantA, gotA)
+			assert.Equal(t, tt.wantB, gotB)
+		})
+	}
+}
+
 func TestSideMarksLR(t *testing.T) {
 	t.Parallel()
 

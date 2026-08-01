@@ -86,6 +86,10 @@ const placeMarks = (marks, firstWins, secondWins) =>
 // score.type, so both sources count).
 const isDrawResult = (decision, score) => isHikiwakeBC(decision) || isHikiwakeBC(score?.type);
 
+// isDefaultWinBC: the decisions that award the match points without a
+// technique. Mirrors isDefaultWinDecision in internal/export/suffix.go.
+const isDefaultWinBC = (d) => isKikenDecisionBC(d) || d === "fusenpai" || d === "fusensho";
+
 // boutMiddle: THE single source for what a bout's middle can read —
 // "vs" (plain, including unplayed/pending), "X" (tie), "(E)" (overtime),
 // "(DH)" (rep bout). Nothing else is a valid middle value: a dash never is
@@ -171,15 +175,17 @@ function formatIpponsScore(ipponsLeft, ipponsRight, score, decision, encho, deci
   let aStr = (ipponsLeft || []).filter(x => x && x !== "•").join("");
   let bStr = (ipponsRight || []).filter(x => x && x !== "•").join("");
   // A default win (fusensho / fusenpai / any kiken) awards the match points
-  // without a technique — one maru "○" per awarded point. The engine
-  // records them as maru ippons itself (engine/scoring.go defaultWinIppons:
-  // struck points stand, the remainder fills with ○), so scored data
-  // carries the balls; results recorded before that fill (or imported)
-  // reach here with the decision but an empty winner cell — mirror the
-  // engine's pure-fill case so a won match never reads as no-points.
-  if (isKikenDecisionBC(decision) || decision === "fusenpai" || decision === "fusensho") {
-    if (winnerSide === "left" && !aStr) aStr = "○○";
-    else if (winnerSide === "right" && !bStr) bStr = "○○";
+  // without a technique — one maru "○" per awarded point: the full
+  // two-point win in regulation, exactly one deciding point in encho
+  // (sudden death). The engine records them as maru ippons itself with the
+  // same rule (engine/scoring.go defaultWinIppon), so scored data carries
+  // the balls; results recorded before that fill (or imported) reach here
+  // with the decision but an empty winner cell — mirror the engine so a
+  // won match never reads as no-points.
+  if (isDefaultWinBC(decision)) {
+    const fill = encho ? "○" : "○○";
+    if (winnerSide === "left" && !aStr) aStr = fill;
+    else if (winnerSide === "right" && !bStr) bStr = fill;
   }
   const isDraw = isDrawResult(decision, score);
 

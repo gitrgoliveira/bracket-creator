@@ -170,6 +170,10 @@ describe('formatIpponsScore', () => {
       expect(formatIpponsScore([], [], null, 'fusenpai', null, false, 'left')).toBe('○○ vs Fus.');
     });
 
+    it('a default win during encho fills exactly the one deciding point', () => {
+      expect(formatIpponsScore([], [], null, 'kiken-injury', { periodCount: 1 }, false, 'left')).toBe('○ (E) Kiken');
+    });
+
     it('engine-recorded maru data renders as-is', () => {
       // Kiken/fusensho apply only before any point has been scored, so the
       // engine records the winner's default points as the pure maru fill

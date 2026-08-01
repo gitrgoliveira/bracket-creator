@@ -198,11 +198,12 @@ function centreMarks(sub, matchSideA, matchSideB) {
   const winAka = !!(noIppons && sub.winner &&
     (sub.winner === sub.sideA || sub.winner === sub.teamA || (matchSideA && sub.winner === matchSideA)));
   // The mark sits on the WINNING side, not in the centre: "Ht" for a hantei
-  // decision; an ippon-less default win (fusensho/kiken/bye) shows the maru
-  // pair — one "○" per awarded point of the two-point win, mirroring the
-  // engine's defaultWinIppons fill (engine/scoring.go). Only when the
-  // hantei winner is unknown does "Ht" fall back to the centre cell.
-  const winCells = sub.decidedByHantei ? ["Ht", ""] : ["○", "○"];
+  // decision; an ippon-less default win (fusensho/kiken/bye) shows one maru
+  // "○" per awarded point — the two-point pair in regulation, one deciding
+  // point in encho — mirroring the engine's defaultWinIppon fill
+  // (engine/scoring.go). Only when the hantei winner is unknown does "Ht"
+  // fall back to the centre cell.
+  const winCells = sub.decidedByHantei ? ["Ht", ""] : sub.encho ? ["○", ""] : ["○", "○"];
   const hasWinSide = winShiro || winAka;
   return (
     <span className="msb-marks" data-testid="sub-marks">

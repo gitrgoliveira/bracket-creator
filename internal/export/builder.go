@@ -522,7 +522,7 @@ func writeTeamSummaryCells(f *excelize.File, sheetName string, courtStartCol, ex
 // overlays so the cell contract lives in one place.
 func writeScoreRowCells(f *excelize.File, sheetName string, courtStartCol, excelRow int, scoreA, scoreB string, mr state.MatchResult, engi, mirror bool) {
 	if !engi {
-		scoreA, scoreB = DefaultWinMaruAB(scoreA, scoreB, mr.Decision, mr.Winner, mr.SideA, mr.SideB)
+		scoreA, scoreB = DefaultWinMaruAB(scoreA, scoreB, mr.Decision, mr.Encho, mr.Winner, mr.SideA, mr.SideB)
 	}
 	leftScore, rightScore := scoreA, scoreB
 	if mirror {
@@ -592,7 +592,7 @@ func writeTeamSubMatchScores(f *excelize.File, sheetName string, courtStartCol, 
 
 		scoreA, scoreB := DefaultWinMaruAB(
 			IpponsScore(sub.IpponsA), IpponsScore(sub.IpponsB),
-			sub.Decision, sub.Winner, sub.SideA, sub.SideB)
+			sub.Decision, sub.Encho, sub.Winner, sub.SideA, sub.SideB)
 		leftScore, rightScore := scoreA, scoreB
 		if mirror {
 			leftScore, rightScore = scoreB, scoreA

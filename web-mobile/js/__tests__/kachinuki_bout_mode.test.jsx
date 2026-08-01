@@ -22,6 +22,7 @@ import {
   buildKachinukiEndEntries,
   subBoutHasBeenPlayed,
 } from '../admin_scoring_team.jsx';
+import { applyFoulIncrement } from '../admin_scoring_shared.jsx';
 
 describe('isKachinukiBoutMode', () => {
   it('is true while a kachinuki match is being fought', () => {
@@ -129,7 +130,11 @@ describe('deriveKachinukiEndOutcome', () => {
     })).toEqual({ kind: 'win', winnerSide: 'a' });
   });
 
-  it('a fouls-only LAST bout is a tied bout, not an invisible one: pool draw / knockout blocked (operator input determines the bout outcome)', () => {
+  it('one outstanding foul on the LAST bout: fought, 0-0, tied — pool draw / knockout blocked (operator input determines the bout outcome)', () => {
+    // With the auto-award, a live counter only ever holds ONE outstanding
+    // foul (the 2nd discharges into an opponent H). A lone foul proves the
+    // bout was fought but awards nothing: End reads it as 0-0 = hikiwake,
+    // never skipping back to the previous bout.
     const subs = [sub({ aPts: ['M'] }), sub({ bFouls: 1 })];
     expect(deriveKachinukiEndOutcome({
       subResults: buildKachinukiEndEntries(subs, -1),
@@ -139,6 +144,24 @@ describe('deriveKachinukiEndOutcome', () => {
       subResults: buildKachinukiEndEntries(subs, -1),
       isKnockoutPhase: true,
     })).toEqual({ kind: 'blocked', reason: 'knockout-tie' });
+  });
+
+  it('2 fouls become a point: the auto-awarded H is a winner for End derivation (composition with applyFoulIncrement)', () => {
+    // Side B picks up two hansoku; the shared primitive discharges them
+    // into an H point for side A and resets the counter. That point is
+    // all End needs — fouls never influence the outcome any other way.
+    let fouls = 0;
+    let aPts = [];
+    ({ fouls, opponentPts: aPts } = applyFoulIncrement(fouls, aPts));
+    expect(fouls).toBe(1);
+    ({ fouls, opponentPts: aPts } = applyFoulIncrement(fouls, aPts));
+    expect(aPts).toEqual(['H']);
+    expect(fouls).toBe(0);
+    const subs = [sub({ aPts, bFouls: fouls })];
+    expect(deriveKachinukiEndOutcome({
+      subResults: buildKachinukiEndEntries(subs, -1),
+      isKnockoutPhase: true,
+    })).toEqual({ kind: 'win', winnerSide: 'a' });
   });
 
   it('wins for side A when the last scored bout has more A ippons', () => {

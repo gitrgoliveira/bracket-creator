@@ -266,10 +266,14 @@ export function resolveKachinukiBoutSides({ aName, bName, wKey, teamWinnerName }
 // This is THE single played-bout primitive for kachinuki (operator input
 // determines the bout outcome): the wire filter, the Record-bout gate,
 // kachinukiVisiblePositions, the encho target, and End-match derivation
-// (via buildKachinukiEndEntries) all route through it. Lone fouls count:
-// a bout fought to time with only a hansoku recorded is a hikiwake, not
-// an unplayed row (a hansoku-conceded point is entered as an H ippon).
-// Widen or narrow it in ONE place only.
+// (via buildKachinukiEndEntries) all route through it. Fouls: "2 fouls
+// become a point" is applyFoulIncrement's job (the 2nd foul auto-awards
+// an H into the opponent's pts and resets the counter), so a live
+// counter only ever holds ONE outstanding foul. That lone foul counts
+// here as input — the bout was fought (a hansoku was given in it), so at
+// End it reads 0-0 = hikiwake, never an unplayed row — but it never
+// influences points; only the discharged H does. Widen or narrow this
+// predicate in ONE place only.
 export function subBoutHasBeenPlayed(s) {
   if (!s) return false;
   return (s.aPts?.length > 0) || (s.bPts?.length > 0) || (s.aFouls > 0) || (s.bFouls > 0) || !!s.fusensho || !!s.draw || (s.encho > 0);

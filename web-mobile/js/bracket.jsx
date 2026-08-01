@@ -122,18 +122,20 @@ function ipponsFromScore(scoreStr) {
 }
 
 // Format ippons as a readable score string: ["M","K"] → "MK", [] → ""
-// Returns something like "MM–K", "M (E) ·", "M X K", "X", "BYE".
+// Returns something like "MM vs K", "M (E) –", "M X K", "X", "BYE".
 //
 // The string is the flat analogue of a paper score sheet row:
 //   [left cell] [middle] [right cell]
 // The MIDDLE carries exactly one mark — "X" (tie), "(E)" (overtime), "(DH)"
-// (rep bout) — or the plain "–" separator; see middleMark for the exclusivity
-// rules. RESULT marks (Kiken / Fus. / Ht) ride in the cell of the competitor
-// they name ("M Ht (E) ·", "·–Kiken"), which needs `winnerSide`
+// (rep bout) — or the plain "vs"; see middleMark for the exclusivity rules.
+// A cell with no points reads "–" (never a separator, so never ambiguous).
+// RESULT marks (Kiken / Fus. / Ht) ride in the cell of the competitor they
+// name ("M Ht (E) K", "– vs Kiken"), which needs `winnerSide`
 // ("left" | "right", from winnerSideLR) — without it the marks fall back to
 // trailing after the score, still readable but unattributed.
 // Mirrors the Excel export (internal/export/suffix.go MiddleMark/SideMarks +
-// builder cell writes).
+// builder cell writes; the sheet template's own middle cell text is "vs" and
+// its empty score cells stay empty).
 function formatIpponsScore(ipponsLeft, ipponsRight, score, decision, encho, decidedByHantei, winnerSide) {
   // decidedByHantei (positional) is the canonical flag. The `typeof` guard
   // lets callers that omit the arg safely get false without sending undefined.
@@ -143,6 +145,11 @@ function formatIpponsScore(ipponsLeft, ipponsRight, score, decision, encho, deci
   const bStr = (ipponsRight || []).filter(x => x && x !== "•").join("");
   const isDraw = isHikiwakeBC(decision) || isHikiwakeBC(score?.type);
 
+  // A cell with no points reads "–" (or stays empty when the whole string is
+  // empty); the plain middle reads "vs", so the dash is never a separator and
+  // is unambiguous as "no points".
+  const NONE = "–";
+
   if (isDraw) {
     // A tie's middle is X and NOTHING else: a match that went to encho cannot
     // have ended tied, and hantei picks a winner, so any such stale data is
@@ -150,11 +157,11 @@ function formatIpponsScore(ipponsLeft, ipponsRight, score, decision, encho, deci
     if (!aStr && !bStr) return "X";
     // Scored equal draw (e.g. 1–1 M/K hikiwake): show the points around the
     // draw mark so the viewer sees what was struck AND that it was a tie.
-    return `${aStr || "·"} X ${bStr || "·"}`;
+    return `${aStr || NONE} X ${bStr || NONE}`;
   }
 
   const mid = middleMark(decision, encho);
-  const sep = mid ? ` ${mid} ` : "–";
+  const sep = mid ? ` ${mid} ` : " vs ";
   const marks = sideMarks(decision, hantei);
   const attributed = winnerSide === "left" || winnerSide === "right";
   const leftMark = attributed ? (winnerSide === "left" ? marks.winner : marks.loser) : "";
@@ -174,13 +181,13 @@ function formatIpponsScore(ipponsLeft, ipponsRight, score, decision, encho, deci
     // count-only data renders no score rather than invalid digits).
     //
     // No letters (kiken before any ippon, a 0-0 hantei): the cells hold only
-    // their result marks around the middle mark ("Ht (E) ·").
+    // their result marks around the middle mark ("Ht (E) –").
     if (leftMark || rightMark) {
-      return `${cell("", leftMark) || "·"}${sep}${cell("", rightMark) || "·"}`;
+      return `${cell("", leftMark) || NONE}${sep}${cell("", rightMark) || NONE}`;
     }
     return [mid, marks.winner, marks.loser].filter(Boolean).join(" ");
   }
-  return `${cell(aStr, leftMark) || "·"}${sep}${cell(bStr, rightMark) || "·"}` + trail;
+  return `${cell(aStr, leftMark) || NONE}${sep}${cell(bStr, rightMark) || NONE}` + trail;
 }
 
 // engiFlagScore: derive an engi match's flag-count score string from

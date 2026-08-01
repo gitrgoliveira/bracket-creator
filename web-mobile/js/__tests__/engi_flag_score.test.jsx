@@ -49,7 +49,7 @@ describe('matchScoreStr; engi takes priority and everything else stays letters',
   it('a non-engi individual match still returns ippon letters, never digits', () => {
     const m = { status: 'completed' };
     const s = matchScoreStr(m, ['M', 'K'], ['D']);
-    expect(s).toBe('MK–D');
+    expect(s).toBe('MK vs D');
     expect(s).not.toMatch(/^\d/);
   });
 

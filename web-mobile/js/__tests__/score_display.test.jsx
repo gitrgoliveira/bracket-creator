@@ -11,23 +11,23 @@ import { enchoLabel, formatIpponsScore, ipponsFromScore, matchStateCell } from '
 //   formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision)
 //                     ^^^^^^^^   ^^^^^^^^
 //                     SHIRO      AKA
-// so the result reads left-to-right as SHIRO_score–AKA_score.
+// so the result reads left-to-right as SHIRO_score vs AKA_score.
 
 describe('formatIpponsScore', () => {
   describe('basic ippon formatting', () => {
     it('shows first-arg ippons on the left of the separator', () => {
       const score = formatIpponsScore(['M'], [], null, null);
-      // first arg scored M, second arg scored nothing → "M–·"
-      expect(score).toBe('M–·');
+      // first arg scored M, second arg scored nothing → "M vs –"
+      expect(score).toBe('M vs –');
     });
 
     it('shows second-arg ippons on the right of the separator', () => {
       const score = formatIpponsScore([], ['K'], null, null);
-      expect(score).toBe('·–K');
+      expect(score).toBe('– vs K');
     });
 
     it('shows both sides when both scored', () => {
-      expect(formatIpponsScore(['M', 'K'], ['D'], null, null)).toBe('MK–D');
+      expect(formatIpponsScore(['M', 'K'], ['D'], null, null)).toBe('MK vs D');
     });
 
     it('returns empty string when no ippons and no score', () => {
@@ -35,7 +35,7 @@ describe('formatIpponsScore', () => {
     });
 
     it('filters out placeholder bullets', () => {
-      expect(formatIpponsScore(['M', '•'], ['•'], null, null)).toBe('M–·');
+      expect(formatIpponsScore(['M', '•'], ['•'], null, null)).toBe('M vs –');
     });
   });
 
@@ -62,7 +62,7 @@ describe('formatIpponsScore', () => {
     });
 
     it('shows scored draw with one empty side using the placeholder dot', () => {
-      expect(formatIpponsScore(['M'], [], { type: 'hikiwake' }, null)).toBe('M X ·');
+      expect(formatIpponsScore(['M'], [], { type: 'hikiwake' }, null)).toBe('M X –');
     });
 
     // Numbers are NOT a valid display for ippon. The per-side waza-letter
@@ -97,15 +97,15 @@ describe('formatIpponsScore', () => {
 
     it('calling with (ipponsB, ipponsA) → left side shows SHIRO score', () => {
       const result = formatIpponsScore(akaMatch.ipponsB, akaMatch.ipponsA, akaMatch.score, akaMatch.decision);
-      // SHIRO scored nothing → left of separator is "·"
+      // SHIRO scored nothing → left cell is the no-points dash
       // AKA scored M         → right of separator is "M"
-      expect(result).toBe('·–M');
+      expect(result).toBe('– vs M');
     });
 
     it('calling with (ipponsA, ipponsB) would wrongly put AKA score on the left', () => {
       // This is the WRONG call order for SHIRO-left views. Test documents the mistake
       const wrong = formatIpponsScore(akaMatch.ipponsA, akaMatch.ipponsB, akaMatch.score, akaMatch.decision);
-      expect(wrong).toBe('M–·');   // M appears left, but AKA is visually on the right → misleading
+      expect(wrong).toBe('M vs –');   // M appears left, but AKA is visually on the right → misleading
     });
 
     it('SHIRO-left view: result string reads SHIRO_score–AKA_score', () => {
@@ -115,13 +115,13 @@ describe('formatIpponsScore', () => {
         score: null, decision: null,
       };
       const result = formatIpponsScore(shiroMatch.ipponsB, shiroMatch.ipponsA, shiroMatch.score, shiroMatch.decision);
-      // SHIRO (left) scored M, AKA (right) scored K → "M–K"
-      expect(result).toBe('M–K');
+      // SHIRO (left) scored M, AKA (right) scored K → "M vs K"
+      expect(result).toBe('M vs K');
     });
   });
 
   // The middle of a score string carries exactly ONE mark — X (tie), (E)
-  // (overtime), (DH) (rep bout) — or the plain "–" separator. X beats (E)
+  // (overtime), (DH) (rep bout) — or the plain "vs". X beats (E)
   // because a match that went to encho cannot end tied; (DH) beats (E)
   // because a daihyosen bout is one-point sudden death with no overtime.
   describe('middle mark', () => {
@@ -137,15 +137,15 @@ describe('formatIpponsScore', () => {
     it('a daihyosen is (DH), never (E): DH bouts have no encho', () => {
       // Winner side known: Ht (the hantei winner mark) sits in the winner's
       // cell, (DH) alone holds the middle.
-      expect(formatIpponsScore([], [], null, 'daihyosen', { periodCount: 3 }, true, 'left')).toBe('Ht (DH) ·');
+      expect(formatIpponsScore([], [], null, 'daihyosen', { periodCount: 3 }, true, 'left')).toBe('Ht (DH) –');
     });
 
     it('does not mark the middle when periodCount is 0', () => {
-      expect(formatIpponsScore(['M'], ['K'], null, null, { periodCount: 0 })).toBe('M–K');
+      expect(formatIpponsScore(['M'], ['K'], null, null, { periodCount: 0 })).toBe('M vs K');
     });
 
     it('is a no-op when encho argument is missing entirely', () => {
-      expect(formatIpponsScore(['M'], ['K'], null, null)).toBe('M–K');
+      expect(formatIpponsScore(['M'], ['K'], null, null)).toBe('M vs K');
     });
   });
 
@@ -154,13 +154,13 @@ describe('formatIpponsScore', () => {
   // winnerSideLR); without it they trail so the result is never dropped.
   describe('side result marks', () => {
     it('kiken marks the withdrawing (losing) side', () => {
-      expect(formatIpponsScore(['M'], [], null, 'kiken-voluntary', null, false, 'left')).toBe('M–Kiken');
-      expect(formatIpponsScore([], [], null, 'kiken-voluntary', null, false, 'right')).toBe('Kiken–·');
+      expect(formatIpponsScore(['M'], [], null, 'kiken-voluntary', null, false, 'left')).toBe('M vs Kiken');
+      expect(formatIpponsScore([], [], null, 'kiken-voluntary', null, false, 'right')).toBe('Kiken vs –');
     });
 
     it('fusenpai marks the no-show (losing) side', () => {
       // Winner on the left → the no-show's Fus. lands in the right cell.
-      expect(formatIpponsScore([], [], null, 'fusenpai', null, false, 'left')).toBe('·–Fus.');
+      expect(formatIpponsScore([], [], null, 'fusenpai', null, false, 'left')).toBe('– vs Fus.');
     });
 
     it('kiken during overtime: loser mark plus the (E) middle', () => {
@@ -168,7 +168,7 @@ describe('formatIpponsScore', () => {
     });
 
     it('falls back to a trailing mark when the winner side is unknown', () => {
-      expect(formatIpponsScore(['M'], [], null, 'kiken-voluntary', null, false)).toBe('M–· Kiken');
+      expect(formatIpponsScore(['M'], [], null, 'kiken-voluntary', null, false)).toBe('M vs – Kiken');
     });
   });
 
@@ -179,8 +179,8 @@ describe('formatIpponsScore', () => {
     it('a 0-0 hantei-decided overtime puts Ht in the winner\'s cell', () => {
       // Tied 0-0 in encho, SHIRO (left) awarded by hantei: the winner's cell
       // carries the Ht mark, the middle carries (E), the loser shows the dot.
-      expect(formatIpponsScore([], [], null, null, { periodCount: 1 }, true, 'left')).toBe('Ht (E) ·');
-      expect(formatIpponsScore([], [], null, null, { periodCount: 1 }, true, 'right')).toBe('· (E) Ht');
+      expect(formatIpponsScore([], [], null, null, { periodCount: 1 }, true, 'left')).toBe('Ht (E) –');
+      expect(formatIpponsScore([], [], null, null, { periodCount: 1 }, true, 'right')).toBe('– (E) Ht');
     });
 
     it('falls back to "(E) Ht" when the winner side is unknown', () => {
@@ -245,8 +245,8 @@ describe('formatIpponsScore: hikiwake draw display (item 6)', () => {
 describe('matchStateCell: shared running-row centre cue', () => {
   it('completed → the formatted ippon score (first arg = SHIRO/left)', () => {
     // matchStateCell(m, ipponsB, ipponsA) → matchScoreStr → formatIpponsScore
-    // renders firstArg–secondArg, so ['M'],['K'] → "M–K".
-    expect(matchStateCell({ status: 'completed' }, ['M'], ['K'])).toBe('M–K');
+    // renders firstArg vs secondArg, so ['M'],['K'] → "M vs K".
+    expect(matchStateCell({ status: 'completed' }, ['M'], ['K'])).toBe('M vs K');
   });
 
   it('completed with no derivable score → "-" fallback', () => {

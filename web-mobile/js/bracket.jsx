@@ -87,8 +87,16 @@ const placeMarks = (marks, firstWins, secondWins) =>
 const isDrawResult = (decision, score) => isHikiwakeBC(decision) || isHikiwakeBC(score?.type);
 
 // isDefaultWinBC: the decisions that award the match points without a
-// technique. Mirrors isDefaultWinDecision in internal/export/suffix.go.
+// technique. Mirrors domain.IsDefaultWinDecisionStr (Go).
 const isDefaultWinBC = (d) => isKikenDecisionBC(d) || d === "fusenpai" || d === "fusensho";
+
+// defaultWinMaru: the maru cells a default win awards — one "○" per point:
+// the two-point pair in regulation, the single deciding point in encho
+// (sudden death). THE single JS source of the maru-count rule; mirrors
+// domain.DefaultWinMaru (Go). The canonical record is the engine's
+// defaultWinIppon fill (engine/scoring.go) — displays only fall back to
+// this for winners whose recorded cells are empty (byes, legacy data).
+const defaultWinMaru = (encho) => (encho ? ["○"] : ["○", "○"]);
 
 // boutMiddle: THE single source for what a bout's middle can read —
 // "vs" (plain, including unplayed/pending), "X" (tie), "(E)" (overtime),
@@ -183,7 +191,7 @@ function formatIpponsScore(ipponsLeft, ipponsRight, score, decision, encho, deci
   // with the decision but an empty winner cell — mirror the engine so a
   // won match never reads as no-points.
   if (isDefaultWinBC(decision)) {
-    const fill = encho ? "○" : "○○";
+    const fill = defaultWinMaru(encho).join("");
     if (winnerSide === "left" && !aStr) aStr = fill;
     else if (winnerSide === "right" && !bStr) bStr = fill;
   }
@@ -1009,6 +1017,7 @@ window.engiFlagScore = engiFlagScore;
 window.matchScoreStr = matchScoreStr;
 window.matchStateCell = matchStateCell;
 window.boutMiddle = boutMiddle;
+window.defaultWinMaru = defaultWinMaru;
 window.matchMiddleMark = matchMiddleMark;
 window.winnerSideLR = winnerSideLR;
 window.sideLabel = sideLabel;

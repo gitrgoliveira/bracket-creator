@@ -163,8 +163,8 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
           // so the list reflects scoring in progress; "vs" only before it starts.
           const showScore = m.status === "completed" || m.status === "running";
           // A just-started running bout is 0–0, where formatIpponsScore returns "".
-          // Fall back so the cell is never blank: running 0–0 → "vs", a completed
-          // match with no recorded score → ":". Live techniques show once present.
+          // Fall back so the cell is never blank: an empty score renders the
+          // boutMiddle placeholder (normally "vs"). Live techniques show once present.
           const seScore = showScore ? window.matchScoreStr(m) : "";
           return (
             <div key={`${m.compId}:${m.id}`} className={`score-edit-row ${m.status === "running" ? "score-edit-row--running is-running" : ""} ${m.status === "completed" ? "score-edit-row--complete" : ""}`}>
@@ -185,9 +185,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                   <div className="score-edit-row__score">
                     <span className="score-edit-row__foul">{foulB && <span className="msb-hansoku" data-testid="foul-mark-b">{foulB}</span>}</span>
                     <span className="score-edit-row__scoreval">
-                      {m.status === "scheduled"
-                        ? <span style={{ fontSize: 11, color: "var(--ink-3)" }}>vs</span>
-                        : (seScore || <span style={{ fontSize: 11, color: "var(--ink-3)" }}>{window.boutMiddle ? window.boutMiddle(m.decision, m.encho, m.score) : "vs"}</span>)}
+                      {seScore || <span style={{ fontSize: 11, color: "var(--ink-3)" }}>{window.boutMiddle ? window.boutMiddle(m.decision, m.encho, m.score) : "vs"}</span>}
                     </span>
                     <span className="score-edit-row__foul">{foulA && <span className="msb-hansoku" data-testid="foul-mark-a">{foulA}</span>}</span>
                   </div>

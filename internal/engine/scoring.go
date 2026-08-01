@@ -303,13 +303,15 @@ func backfillMatchIdentity(result, stored *state.MatchResult) {
 	}
 }
 
-// defaultWinIppon is the FIK maru "○" (U+25CB) written into a winner's
-// ippon slots for a default win (fusensho/fusenpai/kiken/daihyosen): no
-// technique was struck, so a waza letter (M/K/D/T/H) would misrepresent the
-// scoreline. Centralised so the two RecordDecision twins (eligibility.go,
-// scoring_tx.go) can't drift onto a Unicode lookalike. countScoringIppons
-// still counts it, it is non-empty and not the "•" placeholder.
-const defaultWinIppon = "○"
+// defaultWinIppon is the FIK maru written into a winner's ippon slots for
+// a default win (fusensho/fusenpai/kiken/daihyosen): no technique was
+// struck, so a waza letter (M/K/D/T/H) would misrepresent the scoreline.
+// Aliases the canonical domain.DefaultWinIppon so the two RecordDecision
+// twins (eligibility.go, scoring_tx.go) and the display fallbacks
+// (internal/export, web-mobile) can't drift onto a Unicode lookalike.
+// countScoringIppons still counts it, it is non-empty and not the "•"
+// placeholder.
+const defaultWinIppon = domain.DefaultWinIppon
 
 // countScoringIppons counts real ippon marks, ignoring empty entries and the
 // "•" placeholder the UI uses for an unfilled slot.

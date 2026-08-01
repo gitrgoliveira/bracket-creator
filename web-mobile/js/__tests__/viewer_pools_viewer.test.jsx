@@ -73,8 +73,7 @@ describe('PoolsViewer draw-order standings (mp-938b)', () => {
     global.window.matchScoreStr = (m) =>
       (global.window.teamIVScore(m)) ||
       global.window.formatIpponsScore(m?.ipponsB || [], m?.ipponsA || [], m?.score, m?.decision, m?.encho, m?.decidedByHantei);
-    // Mirror the real matchStateCell (bracket.jsx): completed → score||"-",
-    // running → "vs", scheduled → "–".
+    // Mirror the real matchStateCell (bracket.jsx): completed → score||"vs", otherwise "vs".
     global.window.matchStateCell = (m) =>
       m?.status === 'completed' ? (global.window.matchScoreStr(m) || 'vs') : 'vs';
     global.window.ipponsFromScore = () => [];
@@ -331,8 +330,7 @@ describe('PoolNumberedMatchRow team IV score (mp-o4xl)', () => {
     global.window.matchScoreStr = (m) =>
       (global.window.teamIVScore(m)) ||
       global.window.formatIpponsScore(m?.ipponsB || [], m?.ipponsA || [], m?.score, m?.decision, m?.encho, m?.decidedByHantei);
-    // Mirror the real matchStateCell (bracket.jsx): completed → score||"-",
-    // running → "vs", scheduled → "–".
+    // Mirror the real matchStateCell (bracket.jsx): completed → score||"vs", otherwise "vs".
     global.window.matchStateCell = (m) =>
       m?.status === 'completed' ? (global.window.matchScoreStr(m) || 'vs') : 'vs';
     global.window.ipponsFromScore = () => [];

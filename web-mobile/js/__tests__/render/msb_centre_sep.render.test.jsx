@@ -2,7 +2,7 @@ import React from 'react';
 import { render } from '@testing-library/react';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { IndividualScore } from '../../match_scoreboard.jsx';
-import { boutMiddle } from '../../bracket.jsx';
+import { matchMiddleMark } from '../../bracket.jsx';
 
 // The TV centre separator is an explicit `.msb-sep` span rendered by
 // centreMarks when neither a draw "X" nor a hantei "Ht" mark occupies the
@@ -13,9 +13,9 @@ describe('msb-vs centre cell (TV centre separator)', () => {
   let prev, prevMid;
   beforeAll(() => {
     prev = window.isHikiwake; window.isHikiwake = (t) => t === 'hikiwake';
-    prevMid = window.boutMiddle; window.boutMiddle = boutMiddle; // the real single source
+    prevMid = window.matchMiddleMark; window.matchMiddleMark = matchMiddleMark; // the real chip projection
   });
-  afterAll(() => { window.isHikiwake = prev; window.boutMiddle = prevMid; });
+  afterAll(() => { window.isHikiwake = prev; window.matchMiddleMark = prevMid; });
 
   it('renders a plain "vs" msb-sep span when there is no draw/hantei mark', () => {
     const { container } = render(

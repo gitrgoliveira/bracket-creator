@@ -57,3 +57,17 @@ func TestIsKikenDecisionStr(t *testing.T) {
 	assert.False(t, domain.IsKikenDecisionStr("fusenpai"))
 	assert.False(t, domain.IsKikenDecisionStr("bogus"))
 }
+
+// TestDefaultWinHelpers pins the default-win decision class and the maru
+// award: one circle per point — the two-point pair in regulation, the
+// single deciding point in encho.
+func TestDefaultWinHelpers(t *testing.T) {
+	for _, d := range []string{"kiken", "kiken-voluntary", "kiken-injury", "fusenpai", "fusensho"} {
+		assert.True(t, domain.IsDefaultWinDecisionStr(d), d)
+	}
+	for _, d := range []string{"", "fought", "hikiwake", "daihyosen", "kachinuki-exhaustion"} {
+		assert.False(t, domain.IsDefaultWinDecisionStr(d), d)
+	}
+	assert.Equal(t, "○○", domain.DefaultWinMaru(false))
+	assert.Equal(t, "○", domain.DefaultWinMaru(true))
+}

@@ -359,10 +359,14 @@ func overlayPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[str
 				if engi {
 					scoreA, scoreB = FlagsScorePair(mr.FlagsA, mr.FlagsB)
 				} else {
-					scoreA = IpponsScore(mr.IpponsA)
-					scoreB = IpponsScore(mr.IpponsB)
+					// The maru fallback is a property of ippon-score
+					// derivation, so it rides the else branch and never
+					// touches engi flag counts.
+					scoreA, scoreB = DefaultWinMaruAB(
+						IpponsScore(mr.IpponsA), IpponsScore(mr.IpponsB),
+						mr.Decision, mr.Encho, mr.Winner, mr.SideA, mr.SideB)
 				}
-				writeScoreRowCells(f, sheetName, courtStartCol, excelRow, scoreA, scoreB, mr, engi, mirror)
+				writeScoreRowCells(f, sheetName, courtStartCol, excelRow, scoreA, scoreB, mr, mirror)
 			}
 		}
 	}
@@ -520,10 +524,7 @@ func writeTeamSummaryCells(f *excelize.File, sheetName string, courtStartCol, ex
 // B = Shiro) and owns the display swap itself — like writeTeamSubMatchScores —
 // so no caller re-enforces the mirror rule. Shared by the pool and bracket
 // overlays so the cell contract lives in one place.
-func writeScoreRowCells(f *excelize.File, sheetName string, courtStartCol, excelRow int, scoreA, scoreB string, mr state.MatchResult, engi, mirror bool) {
-	if !engi {
-		scoreA, scoreB = DefaultWinMaruAB(scoreA, scoreB, mr.Decision, mr.Encho, mr.Winner, mr.SideA, mr.SideB)
-	}
+func writeScoreRowCells(f *excelize.File, sheetName string, courtStartCol, excelRow int, scoreA, scoreB string, mr state.MatchResult, mirror bool) {
 	leftScore, rightScore := scoreA, scoreB
 	if mirror {
 		leftScore, rightScore = scoreB, scoreA
@@ -909,10 +910,12 @@ func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMa
 			if engi {
 				scoreA, scoreB = FlagsScorePair(bm.FlagsA, bm.FlagsB)
 			} else {
-				scoreA, scoreB = bm.ScoreA, bm.ScoreB
+				// Maru fallback at score derivation, like overlayPoolScores.
+				scoreA, scoreB = DefaultWinMaruAB(bm.ScoreA, bm.ScoreB,
+					bm.Decision, bm.Encho, bm.Winner, bm.SideA, bm.SideB)
 			}
 
-			writeScoreRowCells(f, sheetName, courtStartCol, excelRow, scoreA, scoreB, bracketMatchResultView(&bm), engi, mirror)
+			writeScoreRowCells(f, sheetName, courtStartCol, excelRow, scoreA, scoreB, bracketMatchResultView(&bm), mirror)
 
 			if bm.Winner != "" {
 				writeWinnerCell(f, sheetName, rows, scoreRowIdx, headerCol, bm.Winner)

@@ -148,7 +148,7 @@ function slotCells(letters, side, testid) {
   return side === "aka" ? cells.toReversed() : cells;
 }
 
-// centreMarks: the §263 inner cells: [shiro slot][shiro slot] | vs/X | [aka slot][aka slot].
+// centreMarks: the §263 inner cells: [shiro slot][shiro slot] | vs/X/(E)/(DH) | [aka slot][aka slot].
 // Hansoku ▲ shows on the offending side, on the OUTER edge of the slots (away
 // from centre); X marks a hikiwake; "Ht" flags hantei. For an ippon-less win
 // the winning side is otherwise invisible, so we mark the winner's slots:
@@ -184,10 +184,11 @@ function centreMarks(sub, matchSideA, matchSideB) {
   const lettersA = ipponLetters(sub.ipponsA); // aka / right
   const foulB = boutHansokuMark(sub.hansokuB);
   const foulA = boutHansokuMark(sub.hansokuA);
-  // The centre glyph comes from the single middle-value source (boutMiddle:
-  // vs / X / (E) / (DH) — never a dash); only the unattributable-hantei
-  // fallback below may replace the plain "vs" with a centre Ht.
-  const mid = window.boutMiddle ? window.boutMiddle(sub.decision, sub.encho, sub.score) : "vs";
+  // The centre chip comes from the single middle-value source's chip
+  // projection (matchMiddleMark: X / (E) / (DH), "" when the middle is the
+  // plain "vs" — never a dash); only the unattributable-hantei fallback
+  // below may replace the plain separator with a centre Ht.
+  const mid = window.matchMiddleMark ? window.matchMiddleMark(sub) : "";
   // Win mark only when there are no ippon letters (otherwise the letters
   // already show who won). sideB = shiro/left, sideA = aka/right.
   // Fallback chain: sub-level side → daihyosen team alias → match-level side
@@ -203,7 +204,8 @@ function centreMarks(sub, matchSideA, matchSideB) {
   // point in encho — mirroring the engine's defaultWinIppon fill
   // (engine/scoring.go). Only when the hantei winner is unknown does "Ht"
   // fall back to the centre cell.
-  const winCells = sub.decidedByHantei ? ["Ht", ""] : sub.encho ? ["○", ""] : ["○", "○"];
+  const winCells = sub.decidedByHantei ? ["Ht", ""]
+    : (window.defaultWinMaru ? window.defaultWinMaru(sub.encho) : ["○", "○"]);
   const hasWinSide = winShiro || winAka;
   return (
     <span className="msb-marks" data-testid="sub-marks">
@@ -212,7 +214,7 @@ function centreMarks(sub, matchSideA, matchSideB) {
         {winShiro ? slotCells(winCells, "shiro", "sub-win-b") : slotCells(lettersB, "shiro")}
       </span>
       <span className="msb-vs">
-        {mid !== "vs" ? <span data-testid="sub-row-draw">{mid}</span>
+        {mid ? <span data-testid="sub-row-mid">{mid}</span>
           : sub.decidedByHantei && !hasWinSide ? <span className="msb-ht" data-testid="sub-row-hantei">Ht</span>
           : <span className="msb-sep" aria-hidden="true">vs</span>}
       </span>

@@ -156,13 +156,10 @@ func FlagsScorePair(a, b int) (string, string) {
 // that fill or imported without it. Never applies to engi flag counts
 // (callers gate) or the loser.
 func DefaultWinMaruAB(scoreA, scoreB, decision string, encho *state.EnchoMetadata, winner, sideA, sideB string) (string, string) {
-	if winner == "" || !isDefaultWinDecision(decision) {
+	if winner == "" || !domain.IsDefaultWinDecisionStr(decision) {
 		return scoreA, scoreB
 	}
-	maru := "○○"
-	if encho != nil {
-		maru = "○"
-	}
+	maru := domain.DefaultWinMaru(encho != nil)
 	switch winner {
 	case sideA:
 		if scoreA == "" {
@@ -174,14 +171,6 @@ func DefaultWinMaruAB(scoreA, scoreB, decision string, encho *state.EnchoMetadat
 		}
 	}
 	return scoreA, scoreB
-}
-
-// isDefaultWinDecision: the decisions that award the match points without a
-// technique. Mirrors isDefaultWinBC in web-mobile/js/bracket.jsx.
-func isDefaultWinDecision(d string) bool {
-	return domain.IsKikenDecisionStr(d) ||
-		d == string(domain.DecisionFusenpai) ||
-		d == string(domain.DecisionFusensho)
 }
 
 // IpponsScore formats an ippon slice as a readable score string: ["M","K"] ->

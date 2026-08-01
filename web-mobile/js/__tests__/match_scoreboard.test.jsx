@@ -3,7 +3,7 @@
 // delegation tests in viewer.test.jsx / display_white_board.test.jsx don't see.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
-import { boutMiddle } from '../bracket.jsx';
+import { matchMiddleMark } from '../bracket.jsx';
 import { boutRows, findInTree, collectText } from './helpers/vdom.js';
 
 describe('match_scoreboard: withNumber', () => {
@@ -93,14 +93,14 @@ describe('match_scoreboard components', () => {
     global.window = global.window || {};
     global.window.isHikiwake = vi.fn((t) => t === 'hikiwake');
     global.window.ipponsFromScore = vi.fn(() => []);
-    global.window.boutMiddle = boutMiddle; // the real single middle source
+    global.window.matchMiddleMark = matchMiddleMark; // the real chip projection
     vi.resetModules();
     ({ BoutSubRow, IndividualScore, TeamScoreboard } = await import('../match_scoreboard.jsx'));
   });
   afterEach(() => {
     runtime.unmount();
     global.React = realReact;
-    delete global.window.isHikiwake; delete global.window.ipponsFromScore; delete global.window.boutMiddle;
+    delete global.window.isHikiwake; delete global.window.ipponsFromScore; delete global.window.matchMiddleMark;
     vi.restoreAllMocks(); vi.resetModules();
   });
 
@@ -117,7 +117,7 @@ describe('match_scoreboard components', () => {
   it('BoutSubRow marks a hikiwake with X', () => {
     const sub = { position: 1, ipponsB: [], ipponsA: [], score: { type: 'hikiwake' } };
     const tree = runtime.mount(BoutSubRow, { sub, index: 0, lineupA: null, lineupB: null, teamSize: 5 });
-    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-row-draw')).toBeTruthy();
+    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-row-mid')).toBeTruthy();
   });
 
   it('BoutSubRow shows the red ▲ hansoku on the offending side only', () => {

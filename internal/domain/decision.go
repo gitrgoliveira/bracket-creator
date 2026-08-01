@@ -50,6 +50,32 @@ func IsKikenDecisionStr(s string) bool {
 	return IsKikenDecision(Decision(s))
 }
 
+// IsDefaultWinDecisionStr reports whether the decision awards the match
+// points without a technique — the "default win" class (any kiken,
+// fusenpai, or fusensho) whose awarded points record as maru. These
+// decisions apply only before any point has been scored. Mirrors
+// isDefaultWinBC in web-mobile/js/bracket.jsx.
+func IsDefaultWinDecisionStr(s string) bool {
+	return IsKikenDecisionStr(s) || s == string(DecisionFusenpai) || s == string(DecisionFusensho)
+}
+
+// DefaultWinIppon is the FIK maru "○" (U+25CB) recorded for each point a
+// default win awards without a technique. The engine's decision recorders
+// fill the winner's ippon slots with it; display fallbacks (Excel, the
+// web scoreboard and score strings) render the same glyph for legacy rows
+// recorded before that fill.
+const DefaultWinIppon = "○"
+
+// DefaultWinMaru returns the maru string a default win awards: the
+// two-point pair in regulation, the single deciding point in encho
+// (sudden death). Mirrors defaultWinMaru in web-mobile/js/bracket.jsx.
+func DefaultWinMaru(inEncho bool) string {
+	if inEncho {
+		return DefaultWinIppon
+	}
+	return DefaultWinIppon + DefaultWinIppon
+}
+
 // UnmarshalYAML migrates legacy `decision` values (NFR-025, R6):
 //
 //   - bool true  → DecisionHikiwake (the historical "draw" flag)

@@ -577,7 +577,7 @@ func (e *Engine) CheckKachinukiPrematureCompletion(compID, matchID string, resul
 	}
 	// Withdrawals and defaults finalize a match without exhausting the
 	// roster; they are legitimate completions.
-	if domain.IsKikenDecisionStr(result.Decision) || result.Decision == string(domain.DecisionFusenpai) || result.Decision == string(domain.DecisionFusensho) {
+	if domain.IsDefaultWinDecisionStr(result.Decision) {
 		return nil
 	}
 	// A daihyosen sub-result is the sanctioned tie resolution, but only once

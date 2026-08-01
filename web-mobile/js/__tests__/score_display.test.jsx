@@ -307,17 +307,10 @@ describe('matchStateCell: shared running-row centre cue', () => {
     expect(matchStateCell({ status: 'completed' })).toBe('vs');
   });
 
-  it('running → "vs" (no centre dot; the row highlight is the now signal)', () => {
-    expect(matchStateCell({ status: 'running' })).toBe('vs');
-  });
-
-  it('scheduled → plain "vs" (a dash is not a valid middle)', () => {
-    expect(matchStateCell({ status: 'scheduled' })).toBe('vs');
-  });
-
-  it('unknown/missing status → plain "vs" (treated as not-yet-run)', () => {
-    expect(matchStateCell({ status: 'bye' })).toBe('vs');
-    expect(matchStateCell({})).toBe('vs');
+  it('every non-completed status reads the plain "vs" middle (never a dash or dot)', () => {
+    for (const status of ['running', 'scheduled', 'bye', undefined]) {
+      expect(matchStateCell({ status })).toBe('vs');
+    }
   });
 
   it('never emits a bare "●" for any state', () => {

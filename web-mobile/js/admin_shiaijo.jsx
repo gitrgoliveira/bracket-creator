@@ -245,7 +245,8 @@ export function shiaijoScoreCell(m) {
     const ipponsA = m.ipponsA || (window.ipponsFromScore ? window.ipponsFromScore(m.scoreA) : []);
     const ipponsB = m.ipponsB || (window.ipponsFromScore ? window.ipponsFromScore(m.scoreB) : []);
     const s = window.formatIpponsScore
-        ? window.formatIpponsScore(ipponsB, ipponsA, m.score, m.decision, m.encho, m.decidedByHantei)
+        ? window.formatIpponsScore(ipponsB, ipponsA, m.score, m.decision, m.encho, m.decidedByHantei,
+            window.winnerSideLR ? window.winnerSideLR(m) : null)
         : "";
     return s ? { kind: "ippon", ippon: s } : { kind: "none" };
 }

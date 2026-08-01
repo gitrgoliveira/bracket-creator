@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
-import { decisionSuffix, formatIpponsScore, ipponsFromScore, matchStateCell } from '../bracket.jsx';
+import { enchoLabel, formatIpponsScore, ipponsFromScore, matchStateCell } from '../bracket.jsx';
 
 // Convention enforced across all match-list views:
 //   SHIRO (sideB) is always displayed on the LEFT.
@@ -54,16 +54,15 @@ describe('formatIpponsScore', () => {
       expect(formatIpponsScore([], [], null, 'hikiwake')).toBe('X');
     });
 
-    it('returns the points for a scored equal draw (1–1), not bare X', () => {
-      // Item 6: operator entered M on one side, K on the other, then toggled
-      // hikiwake. The ippons are preserved on the server (the score.type is
-      // hikiwake but ipponsA/B are non-empty). Show the techniques so the
-      // viewer sees what was struck rather than losing that information.
-      expect(formatIpponsScore(['M'], ['K'], { type: 'hikiwake' }, null)).toBe('M–K');
+    it('returns the points around the X for a scored equal draw (1–1)', () => {
+      // Item 6 + the middle-column rule: the ippons are preserved on the
+      // server, so show the techniques, AND the tie's X is the middle mark,
+      // so the viewer sees both what was struck and that it was a tie.
+      expect(formatIpponsScore(['M'], ['K'], { type: 'hikiwake' }, null)).toBe('M X K');
     });
 
     it('shows scored draw with one empty side using the placeholder dot', () => {
-      expect(formatIpponsScore(['M'], [], { type: 'hikiwake' }, null)).toBe('M–·');
+      expect(formatIpponsScore(['M'], [], { type: 'hikiwake' }, null)).toBe('M X ·');
     });
 
     it('falls back to numeric score when ippons arrays are empty AND score has no ippon letters', () => {
@@ -128,33 +127,28 @@ describe('formatIpponsScore', () => {
     });
   });
 
-  // FR-033: encho renders as a bare "(E)" in the CENTRE of the score string,
-  // replacing the "–" separator (the score sheet's centre-column convention),
-  // so match lists and bracket views surface overtime at a glance.
-  describe('encho marker', () => {
+  // The middle of a score string carries exactly ONE mark — X (tie), (E)
+  // (overtime), (DH) (rep bout) — or the plain "–" separator. X beats (E)
+  // because a match that went to encho cannot end tied; (DH) beats (E)
+  // because a daihyosen bout is one-point sudden death with no overtime.
+  describe('middle mark', () => {
     it('places (E) between the scores when encho has a positive period count', () => {
       expect(formatIpponsScore(['M'], ['K'], null, null, { periodCount: 1 })).toBe('M (E) K');
     });
 
-    it('places (E) between the points of a scored draw (shows points, not X)', () => {
-      // Item 6: scored equal draw shows techniques + encho marker, not bare X.
-      expect(formatIpponsScore(['M'], ['K'], { type: 'hikiwake' }, null, { periodCount: 1 })).toBe('M (E) K');
+    it('a tie is X, never (E): stale draw+encho data renders the X alone', () => {
+      expect(formatIpponsScore(['M'], ['K'], { type: 'hikiwake' }, null, { periodCount: 1 })).toBe('M X K');
+      expect(formatIpponsScore([], [], null, 'hikiwake', { periodCount: 2 })).toBe('X');
     });
 
-    it('appends the marker to a no-score draw (X is the scoreless-draw glyph)', () => {
-      // mp-m4bn: bare (E) regardless of period count — results never show numbers.
-      expect(formatIpponsScore([], [], null, 'hikiwake', { periodCount: 2 })).toBe('X (E)');
+    it('a daihyosen is (DH), never (E): DH bouts have no encho', () => {
+      // Winner side known: Ht (the hantei winner mark) sits in the winner's
+      // cell, (DH) alone holds the middle.
+      expect(formatIpponsScore([], [], null, 'daihyosen', { periodCount: 3 }, true, 'left')).toBe('Ht (DH) ·');
     });
 
-    it('does not append (E) when periodCount is 0', () => {
+    it('does not mark the middle when periodCount is 0', () => {
       expect(formatIpponsScore(['M'], ['K'], null, null, { periodCount: 0 })).toBe('M–K');
-    });
-
-    // Marker VALUES (bare "(E)" for any positive count) are pinned by the
-    // golden it.each at the bottom of this file; here only the composition
-    // into a score string is under test.
-    it('composes the marker with a decision label and hantei', () => {
-      expect(formatIpponsScore([], [], null, 'daihyosen', { periodCount: 3 }, true)).toBe('DH (E) Ht');
     });
 
     it('is a no-op when encho argument is missing entirely', () => {
@@ -162,20 +156,51 @@ describe('formatIpponsScore', () => {
     });
   });
 
+  // Result marks (Kiken / Fus. / Ht) ride in the cell of the competitor they
+  // name when the caller supplies winnerSide (matchScoreStr derives it via
+  // winnerSideLR); without it they trail so the result is never dropped.
+  describe('side result marks', () => {
+    it('kiken marks the withdrawing (losing) side', () => {
+      expect(formatIpponsScore(['M'], [], null, 'kiken-voluntary', null, false, 'left')).toBe('M–Kiken');
+      expect(formatIpponsScore([], [], null, 'kiken-voluntary', null, false, 'right')).toBe('Kiken–·');
+    });
+
+    it('fusenpai marks the no-show (losing) side', () => {
+      // Winner on the left → the no-show's Fus. lands in the right cell.
+      expect(formatIpponsScore([], [], null, 'fusenpai', null, false, 'left')).toBe('·–Fus.');
+    });
+
+    it('kiken during overtime: loser mark plus the (E) middle', () => {
+      expect(formatIpponsScore(['M'], [], null, 'kiken-injury', { periodCount: 1 }, false, 'left')).toBe('M (E) Kiken');
+    });
+
+    it('falls back to a trailing mark when the winner side is unknown', () => {
+      expect(formatIpponsScore(['M'], [], null, 'kiken-voluntary', null, false)).toBe('M–· Kiken');
+    });
+  });
+
   // FIK Art. 7-5 / 29-6: a knockout match that remains tied in encho is
   // decided by referee hantei. The renderer must mark this distinctly so
   // it's not confused with an ippon-derived win.
-  describe('hantei (judges\' decision) suffix', () => {
-    it('appends "(E) Ht" for a 0-0 hantei-decided overtime', () => {
-      // Tied 0-0 in encho, AKA awarded by hantei. No ippons → suffix only.
+  describe('hantei (judges\' decision) winner mark', () => {
+    it('a 0-0 hantei-decided overtime puts Ht in the winner\'s cell', () => {
+      // Tied 0-0 in encho, SHIRO (left) awarded by hantei: the winner's cell
+      // carries the Ht mark, the middle carries (E), the loser shows the dot.
+      expect(formatIpponsScore([], [], null, null, { periodCount: 1 }, true, 'left')).toBe('Ht (E) ·');
+      expect(formatIpponsScore([], [], null, null, { periodCount: 1 }, true, 'right')).toBe('· (E) Ht');
+    });
+
+    it('falls back to "(E) Ht" when the winner side is unknown', () => {
       expect(formatIpponsScore([], [], null, null, { periodCount: 1 }, true)).toBe('(E) Ht');
     });
 
-    it('combines (E) Ht for a hantei-decided overtime', () => {
-      // Realistic: tied with scores, then hantei chose a winner. Backend
-      // sends decidedByHantei=true alongside the tied ippons.
-      const result = formatIpponsScore(['M'], ['K'], null, null, { periodCount: 1 }, true);
-      expect(result).toBe('M (E) K Ht');
+    it('rides next to the winner\'s letters on a scored hantei overtime', () => {
+      const result = formatIpponsScore(['M'], ['K'], null, null, { periodCount: 1 }, true, 'left');
+      expect(result).toBe('M Ht (E) K');
+    });
+
+    it('trails when the winner side is unknown (never dropped)', () => {
+      expect(formatIpponsScore(['M'], ['K'], null, null, { periodCount: 1 }, true)).toBe('M (E) K Ht');
     });
 
     it('omits Ht when decidedByHantei is false/missing', () => {
@@ -189,14 +214,15 @@ describe('formatIpponsScore', () => {
       // object, so score.hantei can never appear in real match data. Only the
       // positional decidedByHantei arg matters.
       expect(formatIpponsScore(['M'], ['K'], { type: 'ippon', hantei: true }, null, { periodCount: 1 })).toBe('M (E) K');
-      expect(formatIpponsScore(['M'], ['K'], { type: 'ippon', hantei: true }, null, { periodCount: 1 }, true)).toBe('M (E) K Ht');
+      expect(formatIpponsScore(['M'], ['K'], { type: 'ippon', hantei: true }, null, { periodCount: 1 }, true, 'left')).toBe('M Ht (E) K');
     });
   });
 });
 
 // Item 6 regression suite: scored-draw rendering (formatIpponsScore).
-// Pinned so future changes to the hikiwake branch can't silently revert
-// the display from "M–K" back to the bare-X glyph.
+// Pinned so future changes to the hikiwake branch can't silently drop the
+// struck techniques (they surround the X) or the X itself (the tie's one
+// legal middle mark).
 describe('formatIpponsScore: hikiwake draw display (item 6)', () => {
   it('0–0 hikiwake (score.type) → bare X', () => {
     expect(formatIpponsScore([], [], { type: 'hikiwake' }, null)).toBe('X');
@@ -206,15 +232,17 @@ describe('formatIpponsScore: hikiwake draw display (item 6)', () => {
     expect(formatIpponsScore([], [], null, 'hikiwake')).toBe('X');
   });
 
-  it('1–1 hikiwake (ipponsA=[M], ipponsB=[K]) → "M–K" (points shown, no X)', () => {
+  it('1–1 hikiwake (ipponsA=[M], ipponsB=[K]) → "M X K" (points around the X)', () => {
     // Canonical scored-equal-draw case: both sides hit one ippon, operator
-    // toggled hikiwake. Server keeps ippons; display must show techniques.
-    expect(formatIpponsScore(['M'], ['K'], { type: 'hikiwake' }, null)).toBe('M–K');
+    // toggled hikiwake. Server keeps ippons; display shows the techniques
+    // AND the draw mark in the middle.
+    expect(formatIpponsScore(['M'], ['K'], { type: 'hikiwake' }, null)).toBe('M X K');
   });
 
-  it('1–1 hikiwake with encho (periodCount>0) → "M (E) K"', () => {
-    // The centred encho marker must survive the scored-draw path unchanged.
-    expect(formatIpponsScore(['M'], ['K'], { type: 'hikiwake' }, null, { periodCount: 1 })).toBe('M (E) K');
+  it('1–1 hikiwake with stale encho data → still "M X K" (X beats (E))', () => {
+    // A tie cannot have gone to encho; if drifted data carries both, the
+    // draw mark wins and the overtime marker is dropped.
+    expect(formatIpponsScore(['M'], ['K'], { type: 'hikiwake' }, null, { periodCount: 1 })).toBe('M X K');
   });
 });
 
@@ -334,13 +362,12 @@ describe('enchoLabel Go/JS mirror (mp-m4bn)', () => {
     ).toBeGreaterThan(0);
   });
 
-  // decisionSuffix with a bare encho block returns enchoLabel's output
-  // byte-for-byte (no base label, no Ht), so the table value is asserted
-  // EXACTLY — an unrelated formatIpponsScore change cannot redden this
-  // with a misleading "update both renderers" message.
+  // enchoLabel is driven directly, so the table value is asserted EXACTLY —
+  // an unrelated formatIpponsScore change cannot redden this with a
+  // misleading "update both renderers" message.
   it.each(table.cases)('periodCount $periodCount renders "$label"', ({ periodCount, label }) => {
     expect(
-      decisionSuffix({ encho: { periodCount } }),
+      enchoLabel({ periodCount }),
       'JS enchoLabel disagrees with the shared table; update BOTH renderers, not just this one'
     ).toBe(label);
   });

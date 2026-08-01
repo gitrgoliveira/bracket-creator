@@ -34,7 +34,9 @@ In the score editor, open the **Overtime** control and tick **Encho started**. A
 
 ![The score editor during a second overtime period: the Encho started box is ticked, the period counter reads two, and the header shows the live overtime readout.](../../screenshots/mobile-encho-overtime.png)
 
-Completed results carry an overtime marker: **(E)**. The marker is the same however many overtime periods were fought. The counter records the number for the tournament log, but results never show it, so a bracket stays easy to read at a glance. The marker sits in the centre of the score, between the two sides' points, exactly where it goes on a paper score sheet: a match won by men in overtime reads **M (E) ·** on the court console, the public viewer, and the exported results workbook. Decision tags stay after the score: a withdrawal during overtime reads with a trailing **Kiken**, and a match sent to a judges' decision after overtime carries a trailing **Ht**. A team encounter shows its team totals in the score cell instead, so for those the marker appears on the bracket and in the exported workbook.
+Completed results follow the paper score sheet's layout. The centre, between the two sides' points, only ever carries one mark: **vs** while nothing is decided, **X** for a tie, **(E)** for a match that went to overtime, or **(DH)** for a team encounter sent to a representative bout. The marks never combine: a match that went to encho cannot end in a tie, and a daihyosen has no overtime. A match won by men in overtime reads **M (E) ·** on the court console, the public viewer, and the exported results workbook, and the marker is the same however many overtime periods were fought: the counter records the number for the tournament log, but results never show it.
+
+Everything else is a result, written beside the competitor it names: **Ht** next to the winner of a judges' decision, **Kiken** next to the competitor who withdrew, **Fus.** next to a no-show. A match decided by hantei after a tied overtime reads **M Ht (E) K**, with the winner's mark on the winner's side of the centre. A team encounter shows its team totals in the score cell instead, so for those the marks appear on the bracket and in the exported workbook.
 
 ![A completed result on the public viewer: the winner's men ippon on the left, the E overtime marker in the centre between the two scores, and the opponent on the right.](../../screenshots/viewer-result-encho.png)
 
@@ -49,7 +51,7 @@ It applies in two situations:
 
 A tie that does not affect advancement is left as a shared rank with no extra bout. In league play, running the daihyosen is the operator's choice rather than an automatic step; see [Team standings and tie-breaks](../organisers/team-tournaments.md#team-standings-and-tie-breaks) for both options.
 
-The bout is a single-point ippon-shobu with no time limit, between one representative from each tied team. The score editor lets you pick each team's representative from its roster. On the court console, the bout appears with a **DH** tag. In pool and league standings, the team that won its daihyosen carries a **DH** badge.
+The bout is a single-point ippon-shobu with no time limit, between one representative from each tied team; because it runs until someone scores, a daihyosen has no encho. The score editor lets you pick each team's representative from its roster. On the court console, the bout appears with a **(DH)** mark in the centre of the score. In pool and league standings, the team that won its daihyosen carries a **DH** badge.
 
 ## Chusen (drawing lots)
 

@@ -14,43 +14,83 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-// DecisionSuffix returns the display suffix for a match decision, encho, and
-// hantei flag. It follows the canonical JS decisionSuffix() in
-// web-mobile/js/bracket.jsx, including the "Ht" suffix mandated by the "Excel +
-// viewer parity" comment there (FIK 7-5 / 29-6).
+// MiddleMark returns the ONE mark the centre "vs" cell may carry for a
+// completed match. The middle column of a score sheet can only ever read:
 //
-// Composition order:
-//  1. Base decision label: kiken variants -> "Kiken"; fusenpai/fusensho -> "Fus."; daihyosen -> "DH".
-//  2. If encho -> append " (E)" (always bare, regardless of period count).
-//  3. If hanteiOn -> append " Ht".
+//	vs     not yet decided (the template's own text; we return "" and leave it)
+//	X      a tie (hikiwake)
+//	(E)    the match went to overtime
+//	(DH)   a team encounter sent to a representative bout
 //
-// DELIBERATE DIVERGENCE from the JS: the JS omits fusensho (the per-bout default
-// WIN) here because the viewer surfaces it via a separate bout badge. A flat
-// spreadsheet cell has no such badge, so this export folds fusensho into the
-// suffix ("Fus.") too, preserving the defaulted-bout signal in the archive
-// rather than dropping it.
+// The marks are mutually exclusive by rule, not by accident: X means a tie
+// and a match that went to encho cannot end tied (encho runs until someone
+// scores), so X beats (E) if stale data carries both; and a daihyosen bout is
+// one-point sudden death, so DH bouts do not have encho and (DH) beats (E).
 //
-// A zero/nil Encho (or PeriodCount == 0) is treated as no encho.
-// Returns "" when no suffix applies.
-func DecisionSuffix(decision string, encho *state.EnchoMetadata, decidedByHantei bool) string {
-	enchoSfx := enchoLabel(encho)
+// Everything else — Kiken, Fus., Ht — is a RESULT, not a middle mark, and
+// belongs beside the competitor it names: see SideMarks. Mirrors
+// middleMark()/formatIpponsScore in web-mobile/js/bracket.jsx.
+func MiddleMark(decision string, encho *state.EnchoMetadata) string {
+	switch {
+	case decision == state.DecisionDraw:
+		return "X"
+	case decision == string(domain.DecisionDaihyosen):
+		return "(DH)"
+	default:
+		return enchoLabel(encho)
+	}
+}
 
-	var suffix string
+// SideMarks returns the per-side result marks for a decision: winnerMark goes
+// in the winning side's score cell, loserMark in the losing side's.
+//
+//	hantei    -> winner "Ht"   (FIK 7-5 / 29-6: judges picked the winner)
+//	kiken     -> loser  "Kiken" (the mark names the competitor who withdrew)
+//	fusenpai  -> loser  "Fus."  (the mark names the no-show)
+//	fusensho  -> winner "Fus."  (the default WIN names the present side)
+//
+// The JS viewer surfaces fusensho via a separate bout badge, so its
+// sideMarks() omits it; a flat spreadsheet cell has no badge, so this export
+// keeps the "Fus." mark (deliberate divergence, mirrored in the JS docstring).
+func SideMarks(decision string, decidedByHantei bool) (winnerMark, loserMark string) {
 	switch {
 	case domain.IsKikenDecisionStr(decision):
-		suffix = "Kiken"
-	case decision == string(domain.DecisionFusenpai), decision == string(domain.DecisionFusensho):
-		suffix = "Fus."
-	case decision == string(domain.DecisionDaihyosen):
-		suffix = "DH"
+		loserMark = "Kiken"
+	case decision == string(domain.DecisionFusenpai):
+		loserMark = "Fus."
+	case decision == string(domain.DecisionFusensho):
+		winnerMark = "Fus."
 	}
-
-	suffix = joinSp(suffix, enchoSfx)
 	if decidedByHantei {
-		suffix = joinSp(suffix, "Ht")
+		winnerMark = joinSp(winnerMark, "Ht")
 	}
+	return winnerMark, loserMark
+}
 
-	return suffix
+// SideMarksLR resolves SideMarks into (left, right) on-sheet order for a
+// match between sideA and sideB. Default layout is SideA (Aka) on the left;
+// mirror swaps the sides physically, matching the leftIppons/rightIppons
+// swaps at the call sites. A missing or unmatchable winner (a draw, an
+// unfinished match, or drifted data) yields no marks: result marks hang off
+// a winner by definition.
+func SideMarksLR(decision string, decidedByHantei bool, winner, sideA, sideB string, mirror bool) (left, right string) {
+	winnerMark, loserMark := SideMarks(decision, decidedByHantei)
+	if winnerMark == "" && loserMark == "" || winner == "" {
+		return "", ""
+	}
+	var aMark, bMark string
+	switch winner {
+	case sideA:
+		aMark, bMark = winnerMark, loserMark
+	case sideB:
+		aMark, bMark = loserMark, winnerMark
+	default:
+		return "", ""
+	}
+	if mirror {
+		return bMark, aMark
+	}
+	return aMark, bMark
 }
 
 // joinSp joins two display fragments with a single space, skipping empties, so
@@ -85,22 +125,6 @@ func enchoLabel(encho *state.EnchoMetadata) string {
 		return ""
 	}
 	return "(E)"
-}
-
-// MiddleCellText composes the value for a match's centre "vs" cell from the
-// hikiwake draw marker and the decision suffix. When a match is a draw AND also
-// carries a suffix (a scoreless encho draw -> "X (E)", a hantei-decided draw ->
-// "X Ht", a team encounter drawn into a daihyosen -> "X DH"), BOTH are kept so
-// the exported workbook never loses the draw indicator. This mirrors
-// formatIpponsScore in web-mobile/js/bracket.jsx, which renders "X" + suffix for
-// a scoreless draw. Returns "" when neither applies, so the caller can leave the
-// cell untouched rather than blanking a formula.
-func MiddleCellText(decision, suffix string) string {
-	marker := ""
-	if decision == state.DecisionDraw {
-		marker = "X"
-	}
-	return joinSp(marker, suffix)
 }
 
 // FlagsScorePair returns the display strings for both sides of an engi bout.

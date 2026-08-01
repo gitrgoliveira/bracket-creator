@@ -125,7 +125,7 @@ function LobbyMatchCell({ slot, rowKind }) {
 
     const phase = phaseLabel(match, isBracket, roundIndex, totalRounds, competition?.format);
     const compMeta = [competition?.name, phase, match.scheduledAt].filter(Boolean).join(' · ');
-    const sfx = (kind === 'running' && window.decisionSuffix) ? window.decisionSuffix(match) : '';
+    const sfx = (kind === 'running' && window.matchMiddleMark) ? window.matchMiddleMark(match) : '';
 
     return (
         <td style={{ padding: '4px 8px', verticalAlign: 'top' }}>

@@ -17,105 +17,106 @@ func encho(periods int) *state.EnchoMetadata {
 	return &state.EnchoMetadata{PeriodCount: periods}
 }
 
-func TestDecisionSuffix(t *testing.T) {
+func TestMiddleMark(t *testing.T) {
 	t.Parallel()
 
+	// The middle can only ever be "" (template keeps its "vs"), "X", "(E)"
+	// or "(DH)" — one mark, mutually exclusive. X beats (E) because a match
+	// that went to encho cannot end tied; (DH) beats (E) because a daihyosen
+	// bout is one-point sudden death with no overtime.
 	tests := []struct {
 		name     string
 		decision string
 		encho    *state.EnchoMetadata
-		hantei   bool
 		want     string
 	}{
-		// Base: no suffix
-		{name: "empty decision, no encho, no hantei", decision: "", encho: nil, hantei: false, want: ""},
-		{name: "fought, no extras", decision: "fought", encho: nil, hantei: false, want: ""},
-
-		// Kiken variants
-		{name: "kiken-voluntary", decision: "kiken-voluntary", encho: nil, hantei: false, want: "Kiken"},
-		{name: "kiken-injury", decision: "kiken-injury", encho: nil, hantei: false, want: "Kiken"},
-		{name: "kiken (legacy)", decision: "kiken", encho: nil, hantei: false, want: "Kiken"},
-
-		// Fusenpai / fusensho
-		{name: "fusenpai", decision: "fusenpai", encho: nil, hantei: false, want: "Fus."},
-		{name: "fusensho", decision: "fusensho", encho: nil, hantei: false, want: "Fus."},
-
-		// Daihyosen
-		{name: "daihyosen", decision: "daihyosen", encho: nil, hantei: false, want: "DH"},
-
-		// Encho only. Marker values are pinned by TestEnchoLabel_GoldenTable;
-		// these rows cover the pass-through into the composed suffix. The
-		// marker is bare "(E)" regardless of period count (mp-m4bn).
-		{name: "encho only (fought)", decision: "fought", encho: encho(1), hantei: false, want: "(E)"},
-		{name: "encho nil vs zero periods", decision: "fought", encho: encho(0), hantei: false, want: ""},
-		{name: "encho x2 renders the same bare marker", decision: "fought", encho: encho(2), hantei: false, want: "(E)"},
-
-		// Hantei only
-		{name: "hantei only (fought)", decision: "fought", encho: nil, hantei: true, want: "Ht"},
-
-		// Encho + hantei
-		{name: "encho + hantei (fought)", decision: "fought", encho: encho(2), hantei: true, want: "(E) Ht"},
-
-		// Base label + encho
-		{name: "Kiken + encho", decision: "kiken-voluntary", encho: encho(1), hantei: false, want: "Kiken (E)"},
-		{name: "Fus. + encho", decision: "fusenpai", encho: encho(1), hantei: false, want: "Fus. (E)"},
-		{name: "DH + encho", decision: "daihyosen", encho: encho(1), hantei: false, want: "DH (E)"},
-
-		// Base label + hantei
-		{name: "Kiken + hantei", decision: "kiken-voluntary", encho: nil, hantei: true, want: "Kiken Ht"},
-		{name: "DH + hantei", decision: "daihyosen", encho: nil, hantei: true, want: "DH Ht"},
-
-		// Full composition: base + encho + hantei
-		{name: "Kiken + encho + hantei", decision: "kiken-voluntary", encho: encho(1), hantei: true, want: "Kiken (E) Ht"},
-		{name: "DH + encho + hantei", decision: "daihyosen", encho: encho(3), hantei: true, want: "DH (E) Ht"},
-
-		// Hikiwake (draw) produces no base label; suffix still applies
-		{name: "hikiwake + hantei", decision: "hikiwake", encho: nil, hantei: true, want: "Ht"},
-		{name: "hikiwake + encho", decision: "hikiwake", encho: encho(1), hantei: false, want: "(E)"},
-		{name: "hikiwake + encho + hantei", decision: "hikiwake", encho: encho(1), hantei: true, want: "(E) Ht"},
+		{name: "fought, no encho", decision: "fought", encho: nil, want: ""},
+		{name: "empty decision, no encho", decision: "", encho: nil, want: ""},
+		{name: "encho win", decision: "fought", encho: encho(1), want: "(E)"},
+		{name: "encho win, multi-period stays bare", decision: "fought", encho: encho(4), want: "(E)"},
+		{name: "zero periods is no encho", decision: "fought", encho: encho(0), want: ""},
+		{name: "tie", decision: "hikiwake", encho: nil, want: "X"},
+		{name: "tie beats stale encho data", decision: "hikiwake", encho: encho(2), want: "X"},
+		{name: "daihyosen", decision: "daihyosen", encho: nil, want: "(DH)"},
+		{name: "daihyosen beats stale encho data (DH bouts have no encho)", decision: "daihyosen", encho: encho(1), want: "(DH)"},
+		{name: "kiken leaves the middle alone", decision: "kiken-voluntary", encho: nil, want: ""},
+		{name: "kiken during overtime keeps the (E) middle", decision: "kiken-voluntary", encho: encho(1), want: "(E)"},
+		{name: "fusenpai leaves the middle alone", decision: "fusenpai", encho: nil, want: ""},
 	}
 
 	for _, tc := range tests {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := DecisionSuffix(tc.decision, tc.encho, tc.hantei)
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, MiddleMark(tc.decision, tc.encho))
 		})
 	}
 }
 
-func TestMiddleCellText(t *testing.T) {
+func TestSideMarks(t *testing.T) {
 	t.Parallel()
 
+	// Result marks name their competitor: Ht the hantei winner, Kiken the
+	// withdrawer, Fus. the no-show (fusenpai, loser) or the defaulted winner
+	// (fusensho — kept in the export because a spreadsheet has no bout badge).
 	tests := []struct {
-		name     string
-		decision string
-		suffix   string
-		want     string
+		name       string
+		decision   string
+		hantei     bool
+		wantWinner string
+		wantLoser  string
 	}{
-		// Non-draw: just the suffix (may be empty).
-		{name: "fought, no suffix", decision: "fought", suffix: "", want: ""},
-		{name: "fought, kiken suffix", decision: "fought", suffix: "Kiken", want: "Kiken"},
-		{name: "daihyosen suffix only", decision: "daihyosen", suffix: "DH", want: "DH"},
-
-		// Draw alone -> bare "X".
-		{name: "draw, no suffix", decision: "hikiwake", suffix: "", want: "X"},
-
-		// The regression this helper fixes: draw AND suffix must be COMBINED,
-		// not overwritten. Previously the code wrote "X" then replaced it with
-		// the suffix, dropping the draw marker.
-		{name: "draw + encho", decision: "hikiwake", suffix: "(E)", want: "X (E)"},
-		{name: "draw + hantei", decision: "hikiwake", suffix: "Ht", want: "X Ht"},
-		{name: "draw + encho + hantei", decision: "hikiwake", suffix: "(E) Ht", want: "X (E) Ht"},
-		{name: "draw + DH", decision: "hikiwake", suffix: "DH", want: "X DH"},
+		{name: "fought", decision: "fought", hantei: false, wantWinner: "", wantLoser: ""},
+		{name: "hantei", decision: "fought", hantei: true, wantWinner: "Ht", wantLoser: ""},
+		{name: "kiken-voluntary", decision: "kiken-voluntary", hantei: false, wantWinner: "", wantLoser: "Kiken"},
+		{name: "kiken-injury", decision: "kiken-injury", hantei: false, wantWinner: "", wantLoser: "Kiken"},
+		{name: "kiken (legacy)", decision: "kiken", hantei: false, wantWinner: "", wantLoser: "Kiken"},
+		{name: "fusenpai marks the no-show loser", decision: "fusenpai", hantei: false, wantWinner: "", wantLoser: "Fus."},
+		{name: "fusensho marks the defaulted winner", decision: "fusensho", hantei: false, wantWinner: "Fus.", wantLoser: ""},
+		{name: "daihyosen is a middle mark, not a side mark", decision: "daihyosen", hantei: false, wantWinner: "", wantLoser: ""},
+		{name: "hikiwake has no side marks", decision: "hikiwake", hantei: false, wantWinner: "", wantLoser: ""},
 	}
 
 	for _, tc := range tests {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, tc.want, MiddleCellText(tc.decision, tc.suffix))
+			w, l := SideMarks(tc.decision, tc.hantei)
+			assert.Equal(t, tc.wantWinner, w, "winner mark")
+			assert.Equal(t, tc.wantLoser, l, "loser mark")
+		})
+	}
+}
+
+func TestSideMarksLR(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		decision  string
+		hantei    bool
+		winner    string
+		mirror    bool
+		wantLeft  string
+		wantRight string
+	}{
+		// Default layout: SideA (Aka) left, SideB right.
+		{name: "hantei, A wins", decision: "fought", hantei: true, winner: "A", wantLeft: "Ht", wantRight: ""},
+		{name: "hantei, B wins", decision: "fought", hantei: true, winner: "B", wantLeft: "", wantRight: "Ht"},
+		{name: "hantei, B wins, mirrored", decision: "fought", hantei: true, winner: "B", mirror: true, wantLeft: "Ht", wantRight: ""},
+		{name: "kiken, A wins marks B", decision: "kiken-voluntary", winner: "A", wantLeft: "", wantRight: "Kiken"},
+		{name: "kiken, A wins, mirrored", decision: "kiken-voluntary", winner: "A", mirror: true, wantLeft: "Kiken", wantRight: ""},
+		{name: "no winner recorded: marks have no home", decision: "kiken-voluntary", winner: "", wantLeft: "", wantRight: ""},
+		{name: "drifted winner name: no marks rather than a guess", decision: "kiken-voluntary", winner: "C", wantLeft: "", wantRight: ""},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			l, r := SideMarksLR(tc.decision, tc.hantei, tc.winner, "A", "B", tc.mirror)
+			assert.Equal(t, tc.wantLeft, l, "left mark")
+			assert.Equal(t, tc.wantRight, r, "right mark")
 		})
 	}
 }

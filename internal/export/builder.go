@@ -365,7 +365,6 @@ func overlayPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[str
 				}
 
 				hantei := mr.DecidedByHantei != nil && *mr.DecidedByHantei
-				sfx := DecisionSuffix(mr.Decision, mr.Encho, hantei)
 
 				var leftScore, rightScore string
 				if engi {
@@ -374,9 +373,12 @@ func overlayPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[str
 					leftScore = IpponsScore(leftIppons)
 					rightScore = IpponsScore(rightIppons)
 				}
-				setCellStr(f, sheetName, lVCol, excelRow, leftScore)
-				setCellStr(f, sheetName, rVCol, excelRow, rightScore)
-				if mid := MiddleCellText(mr.Decision, sfx); mid != "" {
+				// Result marks (Kiken/Fus./Ht) go in the competitor's score
+				// cell; the middle carries only its single mark (X/(E)).
+				lMark, rMark := SideMarksLR(mr.Decision, hantei, mr.Winner, mr.SideA, mr.SideB, mirror)
+				setCellStr(f, sheetName, lVCol, excelRow, joinSp(leftScore, lMark))
+				setCellStr(f, sheetName, rVCol, excelRow, joinSp(rightScore, rMark))
+				if mid := MiddleMark(mr.Decision, mr.Encho); mid != "" {
 					setCellStr(f, sheetName, middleCol, excelRow, mid)
 				}
 			}
@@ -492,14 +494,19 @@ func buildCourtMatchJobs(pools []helper.Pool, numCourts int, poolOrdinals map[st
 //	rVCol (startCol+5) = right IV, rPCol (startCol+4) = right PW
 //
 // SideA is Red (left by default), SideB is Shiro (right); mirror swaps sides.
-// The middle "vs" cell carries the encounter's decision suffix (DH etc.) or the
-// hikiwake "X" marker when the team encounter is a draw.
+// The middle "vs" cell carries only the encounter's single middle mark
+// (X for a drawn encounter, (DH) when it went to a representative bout);
+// encounter-level result marks (Kiken/Fus./Ht) ride in the competitor's IV
+// cell, next to their victory count.
 func writeTeamSummaryCells(f *excelize.File, sheetName string, courtStartCol, excelRow int, mr state.MatchResult, mirror bool) {
 	lVCol := colNum(courtStartCol + 1)
 	lPCol := colNum(courtStartCol + 2)
 	middleCol := colNum(courtStartCol + 3)
 	rPCol := colNum(courtStartCol + 4)
 	rVCol := colNum(courtStartCol + 5)
+
+	hantei := mr.DecidedByHantei != nil && *mr.DecidedByHantei
+	lMark, rMark := SideMarksLR(mr.Decision, hantei, mr.Winner, mr.SideA, mr.SideB, mirror)
 
 	line := state.TeamResultFrom(mr.SubResults, mr.SideA, mr.SideB)
 	if line != nil {
@@ -509,17 +516,34 @@ func writeTeamSummaryCells(f *excelize.File, sheetName string, courtStartCol, ex
 		if mirror {
 			leftIV, leftPW, rightIV, rightPW = rightIV, rightPW, leftIV, leftPW
 		}
-		setIntCellDirect(f, sheetName, lVCol, excelRow, leftIV)
+		setIVCellWithMark(f, sheetName, lVCol, excelRow, leftIV, lMark)
 		setIntCellDirect(f, sheetName, lPCol, excelRow, leftPW)
-		setIntCellDirect(f, sheetName, rVCol, excelRow, rightIV)
+		setIVCellWithMark(f, sheetName, rVCol, excelRow, rightIV, rMark)
 		setIntCellDirect(f, sheetName, rPCol, excelRow, rightPW)
+	} else {
+		// No summary line (e.g. a forfeit before any bout was fought):
+		// the result marks still need a home in the competitor's cell.
+		if lMark != "" {
+			setCellStr(f, sheetName, lVCol, excelRow, lMark)
+		}
+		if rMark != "" {
+			setCellStr(f, sheetName, rVCol, excelRow, rMark)
+		}
 	}
 
-	hantei := mr.DecidedByHantei != nil && *mr.DecidedByHantei
-	sfx := DecisionSuffix(mr.Decision, mr.Encho, hantei)
-	if mid := MiddleCellText(mr.Decision, sfx); mid != "" {
+	if mid := MiddleMark(mr.Decision, mr.Encho); mid != "" {
 		setCellStr(f, sheetName, middleCol, excelRow, mid)
 	}
+}
+
+// setIVCellWithMark writes a team IV count, appending a result mark
+// ("2 Kiken") when one applies to that side; a markless cell stays numeric.
+func setIVCellWithMark(f *excelize.File, sheetName, col string, row, iv int, mark string) {
+	if mark == "" {
+		setIntCellDirect(f, sheetName, col, row, iv)
+		return
+	}
+	setCellStr(f, sheetName, col, row, joinSp(fmt.Sprintf("%d", iv), mark))
 }
 
 // writeTeamSubMatchScores writes each sub-bout's ippon letters onto the team
@@ -545,18 +569,15 @@ func writeTeamSubMatchScores(f *excelize.File, sheetName string, courtStartCol, 
 		if mirror {
 			leftIppons, rightIppons = sub.IpponsB, sub.IpponsA
 		}
-		lScore := IpponsScore(leftIppons)
-		rScore := IpponsScore(rightIppons)
-		if lScore != "" {
+		lMark, rMark := SideMarksLR(sub.Decision, sub.DecidedByHantei, sub.Winner, sub.SideA, sub.SideB, mirror)
+		if lScore := joinSp(IpponsScore(leftIppons), lMark); lScore != "" {
 			setCellStr(f, sheetName, lVCol, excelRow, lScore)
 		}
-		if rScore != "" {
+		if rScore := joinSp(IpponsScore(rightIppons), rMark); rScore != "" {
 			setCellStr(f, sheetName, rVCol, excelRow, rScore)
 		}
 
-		hantei := sub.DecidedByHantei
-		sfx := DecisionSuffix(sub.Decision, sub.Encho, hantei)
-		if mid := MiddleCellText(sub.Decision, sfx); mid != "" {
+		if mid := MiddleMark(sub.Decision, sub.Encho); mid != "" {
 			setCellStr(f, sheetName, middleCol, excelRow, mid)
 		}
 	}
@@ -873,12 +894,12 @@ func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMa
 				}
 			}
 
-			sfx := DecisionSuffix(bm.Decision, bm.Encho, bm.DecidedByHantei)
+			lMark, rMark := SideMarksLR(bm.Decision, bm.DecidedByHantei, bm.Winner, bm.SideA, bm.SideB, mirror)
 
-			setCellStr(f, sheetName, lVCol, excelRow, leftScore)
-			setCellStr(f, sheetName, rVCol, excelRow, rightScore)
+			setCellStr(f, sheetName, lVCol, excelRow, joinSp(leftScore, lMark))
+			setCellStr(f, sheetName, rVCol, excelRow, joinSp(rightScore, rMark))
 
-			if mid := MiddleCellText(bm.Decision, sfx); mid != "" {
+			if mid := MiddleMark(bm.Decision, bm.Encho); mid != "" {
 				setCellStr(f, sheetName, middleCol, excelRow, mid)
 			}
 
@@ -950,34 +971,41 @@ func overlayTeamBracketScores(f *excelize.File, bracketByNum map[int]state.Brack
 				if mirror {
 					leftIppons, rightIppons = sub.IpponsB, sub.IpponsA
 				}
-				if s := IpponsScore(leftIppons); s != "" {
+				lMark, rMark := SideMarksLR(sub.Decision, sub.DecidedByHantei, sub.Winner, sub.SideA, sub.SideB, mirror)
+				if s := joinSp(IpponsScore(leftIppons), lMark); s != "" {
 					setCellStr(f, sheetName, lVCol, excelRow, s)
 				}
-				if s := IpponsScore(rightIppons); s != "" {
+				if s := joinSp(IpponsScore(rightIppons), rMark); s != "" {
 					setCellStr(f, sheetName, rVCol, excelRow, s)
 				}
-				subSfx := DecisionSuffix(sub.Decision, sub.Encho, sub.DecidedByHantei)
-				if mid := MiddleCellText(sub.Decision, subSfx); mid != "" {
+				if mid := MiddleMark(sub.Decision, sub.Encho); mid != "" {
 					setCellStr(f, sheetName, middleCol, excelRow, mid)
 				}
 			}
 
 			// IV/PW summary row = H + 5 + teamSize.
 			summaryExcelRow := headerExcelRow + 5 + teamSize
+			lMark, rMark := SideMarksLR(bm.Decision, bm.DecidedByHantei, bm.Winner, bm.SideA, bm.SideB, mirror)
 			if line := state.TeamResultFrom(bm.SubResults, bm.SideA, bm.SideB); line != nil {
 				leftIV, leftPW := line.AkaIV, line.AkaPW
 				rightIV, rightPW := line.ShiroIV, line.ShiroPW
 				if mirror {
 					leftIV, leftPW, rightIV, rightPW = rightIV, rightPW, leftIV, leftPW
 				}
-				setIntCellDirect(f, sheetName, lVCol, summaryExcelRow, leftIV)
+				setIVCellWithMark(f, sheetName, lVCol, summaryExcelRow, leftIV, lMark)
 				setIntCellDirect(f, sheetName, lPCol, summaryExcelRow, leftPW)
-				setIntCellDirect(f, sheetName, rVCol, summaryExcelRow, rightIV)
+				setIVCellWithMark(f, sheetName, rVCol, summaryExcelRow, rightIV, rMark)
 				setIntCellDirect(f, sheetName, rPCol, summaryExcelRow, rightPW)
+			} else {
+				if lMark != "" {
+					setCellStr(f, sheetName, lVCol, summaryExcelRow, lMark)
+				}
+				if rMark != "" {
+					setCellStr(f, sheetName, rVCol, summaryExcelRow, rMark)
+				}
 			}
 
-			sfx := DecisionSuffix(bm.Decision, bm.Encho, bm.DecidedByHantei)
-			if mid := MiddleCellText(bm.Decision, sfx); mid != "" {
+			if mid := MiddleMark(bm.Decision, bm.Encho); mid != "" {
 				setCellStr(f, sheetName, middleCol, summaryExcelRow, mid)
 			}
 

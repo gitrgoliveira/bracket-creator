@@ -97,9 +97,9 @@ describe('ViewerCompetition draw-ready exposure (mp-rrd)', () => {
     global.window.roundLabel = (i) => `Round ${i + 1}`;
     global.window.formatIpponsScore = () => '';
     global.window.teamIVScore = () => null;
-    global.window.matchScoreStr = (m, ippB, ippA) =>
+    global.window.matchScoreStr = (m) =>
       (global.window.teamIVScore(m)) ||
-      global.window.formatIpponsScore(ippB, ippA, m?.score, m?.decision, m?.encho, m?.decidedByHantei);
+      global.window.formatIpponsScore(m?.ipponsB || [], m?.ipponsA || [], m?.score, m?.decision, m?.encho, m?.decidedByHantei);
     global.window.ipponsFromScore = () => [];
     global.window.isHikiwake = () => false;
     global.window.hasBothSides = (m) => !!(m && m.sideA && m.sideB);
@@ -209,9 +209,9 @@ describe('ViewerOverview pre-start messaging (mp-rrd)', () => {
     global.window.isHikiwake = () => false;
     global.window.formatIpponsScore = () => '';
     global.window.teamIVScore = () => null;
-    global.window.matchScoreStr = (m, ippB, ippA) =>
+    global.window.matchScoreStr = (m) =>
       (global.window.teamIVScore(m)) ||
-      global.window.formatIpponsScore(ippB, ippA, m?.score, m?.decision, m?.encho, m?.decidedByHantei);
+      global.window.formatIpponsScore(m?.ipponsB || [], m?.ipponsA || [], m?.score, m?.decision, m?.encho, m?.decidedByHantei);
     global.window.ipponsFromScore = () => [];
     vi.resetModules();
     ({ ViewerOverview } = await import('../viewer.jsx'));

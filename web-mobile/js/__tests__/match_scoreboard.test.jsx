@@ -383,7 +383,11 @@ describe('match_scoreboard components', () => {
     const tree = runtime.mount(BoutSubRow, { sub, index: 0, lineupA: null, lineupB: null, teamSize: 2 });
     const winB = findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-b');
     expect(winB).toBeTruthy();
-    expect(collectText(winB)).toContain('○');
+    // The testid rides the first slot cell only; count the maru across the
+    // whole row — the loser side carries none, so the row total IS the
+    // winner's fill: one ball per awarded point of the default win.
+    const maru = (collectText(tree).match(/○/g) || []).length;
+    expect(maru).toBe(2);
   });
 
   it('BoutSubRow matches a winner stored as the TEAM name via sub.teamA/teamB (daihyosen)', () => {

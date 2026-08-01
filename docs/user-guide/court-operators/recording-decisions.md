@@ -22,6 +22,8 @@ An injury kiken can be reinstated later by the operator if the competitor recove
 
 **Fusensho** is a per-bout default win, used in team matches when the opposing team fields a vacant position.
 
+A default win (kiken, fusenpai, or fusensho) awards the match points without a technique, and each awarded point is recorded as a circle: the winner's score shows two circles. These results apply only before any point has been scored; once a score exists in the match, they are not applicable.
+
 ## Hikiwake
 
 A hikiwake is a draw. It applies in pool, league, and Swiss matches (not in the knockout phase) and contributes to the standings separately from wins and losses.

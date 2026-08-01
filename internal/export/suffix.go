@@ -146,6 +146,39 @@ func FlagsScorePair(a, b int) (string, string) {
 	return strconv.Itoa(max(0, a)), strconv.Itoa(max(0, b))
 }
 
+// DefaultWinMaruAB fills the WINNER's empty score cell with the maru pair
+// "○○" for a default win, given SIDE-ordered scores. One maru per awarded
+// point: a fusensho/fusenpai/kiken win is the full two-point win (FIK
+// sanbon shobu). The engine already records default wins as maru ippons
+// (engine/scoring.go defaultWinIppon fills ["○","○"], or one "○" for a
+// kiken during encho), so scored data carries the balls itself — this
+// fallback covers results recorded before that fill or imported without
+// it. Never applies to engi flag counts (callers gate) or the loser.
+func DefaultWinMaruAB(scoreA, scoreB, decision, winner, sideA, sideB string) (string, string) {
+	if winner == "" || !isDefaultWinDecision(decision) {
+		return scoreA, scoreB
+	}
+	switch winner {
+	case sideA:
+		if scoreA == "" {
+			scoreA = "○○"
+		}
+	case sideB:
+		if scoreB == "" {
+			scoreB = "○○"
+		}
+	}
+	return scoreA, scoreB
+}
+
+// isDefaultWinDecision: the decisions that award the match points without a
+// technique. Mirrors isDefaultWinBC in web-mobile/js/bracket.jsx.
+func isDefaultWinDecision(d string) bool {
+	return domain.IsKikenDecisionStr(d) ||
+		d == string(domain.DecisionFusenpai) ||
+		d == string(domain.DecisionFusensho)
+}
+
 // IpponsScore formats an ippon slice as a readable score string: ["M","K"] ->
 // "MK", nil/empty -> "". Mirrors the character-join behaviour in
 // formatIpponsScore (bracket.jsx) without the full display logic (bye/hikiwake

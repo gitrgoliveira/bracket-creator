@@ -362,7 +362,7 @@ func overlayPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[str
 					scoreA = IpponsScore(mr.IpponsA)
 					scoreB = IpponsScore(mr.IpponsB)
 				}
-				writeScoreRowCells(f, sheetName, courtStartCol, excelRow, scoreA, scoreB, mr, mirror)
+				writeScoreRowCells(f, sheetName, courtStartCol, excelRow, scoreA, scoreB, mr, engi, mirror)
 			}
 		}
 	}
@@ -520,7 +520,10 @@ func writeTeamSummaryCells(f *excelize.File, sheetName string, courtStartCol, ex
 // B = Shiro) and owns the display swap itself — like writeTeamSubMatchScores —
 // so no caller re-enforces the mirror rule. Shared by the pool and bracket
 // overlays so the cell contract lives in one place.
-func writeScoreRowCells(f *excelize.File, sheetName string, courtStartCol, excelRow int, scoreA, scoreB string, mr state.MatchResult, mirror bool) {
+func writeScoreRowCells(f *excelize.File, sheetName string, courtStartCol, excelRow int, scoreA, scoreB string, mr state.MatchResult, engi, mirror bool) {
+	if !engi {
+		scoreA, scoreB = DefaultWinMaruAB(scoreA, scoreB, mr.Decision, mr.Winner, mr.SideA, mr.SideB)
+	}
 	leftScore, rightScore := scoreA, scoreB
 	if mirror {
 		leftScore, rightScore = scoreB, scoreA
@@ -587,15 +590,18 @@ func writeTeamSubMatchScores(f *excelize.File, sheetName string, courtStartCol, 
 		// Sub-match row for Position P is the P-th sub row (1-based Position).
 		excelRow := subStartExcelRow + (sub.Position - 1)
 
-		leftIppons, rightIppons := sub.IpponsA, sub.IpponsB
+		scoreA, scoreB := DefaultWinMaruAB(
+			IpponsScore(sub.IpponsA), IpponsScore(sub.IpponsB),
+			sub.Decision, sub.Winner, sub.SideA, sub.SideB)
+		leftScore, rightScore := scoreA, scoreB
 		if mirror {
-			leftIppons, rightIppons = sub.IpponsB, sub.IpponsA
+			leftScore, rightScore = scoreB, scoreA
 		}
 		lMark, rMark := SideMarksLR(sub.Decision, sub.DecidedByHantei, sub.Winner, sub.SideA, sub.SideB, mirror)
-		if lScore := joinSp(IpponsScore(leftIppons), lMark); lScore != "" {
+		if lScore := joinSp(leftScore, lMark); lScore != "" {
 			setCellStr(f, sheetName, lVCol, excelRow, lScore)
 		}
-		if rScore := joinSp(IpponsScore(rightIppons), rMark); rScore != "" {
+		if rScore := joinSp(rightScore, rMark); rScore != "" {
 			setCellStr(f, sheetName, rVCol, excelRow, rScore)
 		}
 
@@ -906,7 +912,7 @@ func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMa
 				scoreA, scoreB = bm.ScoreA, bm.ScoreB
 			}
 
-			writeScoreRowCells(f, sheetName, courtStartCol, excelRow, scoreA, scoreB, bracketMatchResultView(&bm), mirror)
+			writeScoreRowCells(f, sheetName, courtStartCol, excelRow, scoreA, scoreB, bracketMatchResultView(&bm), engi, mirror)
 
 			if bm.Winner != "" {
 				writeWinnerCell(f, sheetName, rows, scoreRowIdx, headerCol, bm.Winner)

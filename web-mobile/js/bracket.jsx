@@ -168,8 +168,19 @@ function formatIpponsScore(ipponsLeft, ipponsRight, score, decision, encho, deci
   // lets callers that omit the arg safely get false without sending undefined.
   const hantei = typeof decidedByHantei === "boolean" ? decidedByHantei : false;
   if (score?.type === "bye") return "BYE";
-  const aStr = (ipponsLeft || []).filter(x => x && x !== "•").join("");
-  const bStr = (ipponsRight || []).filter(x => x && x !== "•").join("");
+  let aStr = (ipponsLeft || []).filter(x => x && x !== "•").join("");
+  let bStr = (ipponsRight || []).filter(x => x && x !== "•").join("");
+  // A default win (fusensho / fusenpai / any kiken) awards the match points
+  // without a technique — one maru "○" per awarded point. The engine
+  // records them as maru ippons itself (engine/scoring.go defaultWinIppons:
+  // struck points stand, the remainder fills with ○), so scored data
+  // carries the balls; results recorded before that fill (or imported)
+  // reach here with the decision but an empty winner cell — mirror the
+  // engine's pure-fill case so a won match never reads as no-points.
+  if (isKikenDecisionBC(decision) || decision === "fusenpai" || decision === "fusensho") {
+    if (winnerSide === "left" && !aStr) aStr = "○○";
+    else if (winnerSide === "right" && !bStr) bStr = "○○";
+  }
   const isDraw = isDrawResult(decision, score);
 
   // A cell with no points reads "–" (or stays empty when the whole string is

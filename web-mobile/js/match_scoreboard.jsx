@@ -151,9 +151,9 @@ function slotCells(letters, side, testid) {
 // centreMarks: the §263 inner cells: [shiro slot][shiro slot] | vs/X | [aka slot][aka slot].
 // Hansoku ▲ shows on the offending side, on the OUTER edge of the slots (away
 // from centre); X marks a hikiwake; "Ht" flags hantei. For an ippon-less win
-// the winning side is otherwise invisible, so we mark the winner's first slot:
-// "Ht" when decided by hantei, else ○ for a non-hantei ippon-less win (see
-// the winMark line below). Modern fusensho/kiken carry ["○","○"] ippons
+// the winning side is otherwise invisible, so we mark the winner's slots:
+// "Ht" when decided by hantei, else the maru pair ○ ○ — one per awarded
+// point (see winCells below). Modern fusensho/kiken carry ["○","○"] ippons
 // and render through the normal slot path, so they never reach this fallback.
 // A plain helper (not a component) so it renders inline into the parent's tree.
 function centreMarks(sub, matchSideA, matchSideB) {
@@ -198,15 +198,17 @@ function centreMarks(sub, matchSideA, matchSideB) {
   const winAka = !!(noIppons && sub.winner &&
     (sub.winner === sub.sideA || sub.winner === sub.teamA || (matchSideA && sub.winner === matchSideA)));
   // The mark sits on the WINNING side, not in the centre: "Ht" for a hantei
-  // decision, else ○ (fusensho/kiken/other ippon-less win). Only when the
+  // decision; an ippon-less default win (fusensho/kiken/bye) shows the maru
+  // pair — one "○" per awarded point of the two-point win, mirroring the
+  // engine's defaultWinIppons fill (engine/scoring.go). Only when the
   // hantei winner is unknown does "Ht" fall back to the centre cell.
-  const winMark = sub.decidedByHantei ? "Ht" : "○";
+  const winCells = sub.decidedByHantei ? ["Ht", ""] : ["○", "○"];
   const hasWinSide = winShiro || winAka;
   return (
     <span className="msb-marks" data-testid="sub-marks">
       <span className={"msb-slots" + (winShiro ? " msb-slots--win" : "")}>
         {foulB && <span className="msb-hansoku" data-testid="foul-mark-b">{foulB}</span>}
-        {winShiro ? slotCells([winMark, ""], "shiro", "sub-win-b") : slotCells(lettersB, "shiro")}
+        {winShiro ? slotCells(winCells, "shiro", "sub-win-b") : slotCells(lettersB, "shiro")}
       </span>
       <span className="msb-vs">
         {mid !== "vs" ? <span data-testid="sub-row-draw">{mid}</span>
@@ -214,7 +216,7 @@ function centreMarks(sub, matchSideA, matchSideB) {
           : <span className="msb-sep" aria-hidden="true">vs</span>}
       </span>
       <span className={"msb-slots msb-slots--aka" + (winAka ? " msb-slots--win" : "")}>
-        {winAka ? slotCells([winMark, ""], "aka", "sub-win-a") : slotCells(lettersA, "aka")}
+        {winAka ? slotCells(winCells, "aka", "sub-win-a") : slotCells(lettersA, "aka")}
         {foulA && <span className="msb-hansoku" data-testid="foul-mark-a">{foulA}</span>}
       </span>
     </span>

@@ -435,6 +435,10 @@ func (e *Engine) RecordDecision(compID, matchID, decision, decisionBy, decisionR
 			return nil, nil, ErrDecisionLocked
 		}
 	}
+	// Kiken/fusenpai/fusensho apply only BEFORE any point has been scored
+	// (operator ruling: once a score exists those results are not
+	// applicable), so there are never struck ippons to preserve: the
+	// winner gets the pure maru fill, the loser ends with none.
 	winningCount := 2
 	if encho != nil {
 		winningCount = 1

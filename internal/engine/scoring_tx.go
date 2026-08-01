@@ -1008,6 +1008,9 @@ func (e *Engine) RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 			return nil, nil, ErrDecisionLocked
 		}
 	}
+	// Kiken/fusenpai/fusensho apply only BEFORE any point has been scored
+	// (operator ruling, mirrors RecordDecision in eligibility.go), so the
+	// winner gets the pure maru fill and the loser ends with none.
 	winningCount := 2
 	if encho != nil {
 		winningCount = 1

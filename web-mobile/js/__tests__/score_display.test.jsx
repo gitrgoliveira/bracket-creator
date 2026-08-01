@@ -155,7 +155,7 @@ describe('formatIpponsScore', () => {
   describe('side result marks', () => {
     it('kiken marks the withdrawing (losing) side', () => {
       expect(formatIpponsScore(['M'], [], null, 'kiken-voluntary', null, false, 'left')).toBe('M vs Kiken');
-      expect(formatIpponsScore([], [], null, 'kiken-voluntary', null, false, 'right')).toBe('Kiken vs –');
+      expect(formatIpponsScore([], [], null, 'kiken-voluntary', null, false, 'right')).toBe('Kiken vs ○○');
     });
 
     it('legacy bare "kiken" (old pool-matches.csv rows) marks the loser like kiken-voluntary', () => {
@@ -164,9 +164,17 @@ describe('formatIpponsScore', () => {
       expect(formatIpponsScore(['M'], [], null, 'kiken', null, false, 'left')).toBe('M vs Kiken');
     });
 
-    it('fusenpai marks the no-show (losing) side', () => {
-      // Winner on the left → the no-show's Fus. lands in the right cell.
-      expect(formatIpponsScore([], [], null, 'fusenpai', null, false, 'left')).toBe('– vs Fus.');
+    it('fusenpai marks the no-show (losing) side; the winner shows the maru pair', () => {
+      // Winner on the left → the no-show's Fus. lands in the right cell,
+      // and the default win awards the two points as ○○ (one per point).
+      expect(formatIpponsScore([], [], null, 'fusenpai', null, false, 'left')).toBe('○○ vs Fus.');
+    });
+
+    it('engine-recorded maru data renders as-is', () => {
+      // Kiken/fusensho apply only before any point has been scored, so the
+      // engine records the winner's default points as the pure maru fill
+      // (["○","○"]); the string renders them like any other ippon letters.
+      expect(formatIpponsScore(['○', '○'], [], null, 'kiken-voluntary', null, false, 'left')).toBe('○○ vs Kiken');
     });
 
     it('fusensho places NO side mark: the bout badge carries it (documented Excel divergence)', () => {
@@ -175,7 +183,7 @@ describe('formatIpponsScore', () => {
       // not. Pin the divergence from this side too so a future change folding
       // "Fus." back into the string cannot land silently.
       expect(formatIpponsScore(['M'], [], null, 'fusensho', null, false, 'left')).toBe('M vs –');
-      expect(formatIpponsScore([], [], null, 'fusensho', null, false, 'left')).toBe('');
+      expect(formatIpponsScore([], [], null, 'fusensho', null, false, 'left')).toBe('○○ vs –');
     });
 
     it('kiken during overtime: loser mark plus the (E) middle', () => {

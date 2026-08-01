@@ -64,11 +64,17 @@ type AdvanceKachinukiInput struct {
 //   - Next: when non-nil, the next bout to schedule. Position is set to
 //     LastBout.Position + 1; SideA/SideB carry the next pair of player
 //     names. Other fields are left zero, the score handler will fill
-//     them as the bout is played.
-//   - MatchEnded: true when the ADVISORY roster snapshot says one team has
-//     no remaining un-retired players. Next is nil. WinningSide is "A" or
-//     "B"; Decision is domain.DecisionKachinukiExhaustion. Team sizes are
-//     unregulated, so the snapshot may be wrong; MaybeAdvanceKachinuki
+//     them as the bout is played. After a hikiwake that empties exactly
+//     ONE side's advisory roster, Next is a one-sided WALKOVER SLOT (the
+//     surviving side's next fighter, the other side empty): the tie left
+//     no decisive point, so the walkover bout is how the surviving
+//     team's win is expressed (spec 006 decision 2), or the operator
+//     fills the empty side and fights on.
+//   - MatchEnded: true when the last bout had a WINNER and the loser's
+//     ADVISORY roster is empty (the decisive point already exists, so no
+//     walkover slot is appended). Next is nil. WinningSide is "A" or
+//     "B"; Decision is domain.DecisionKachinukiExhaustion. Team sizes
+//     are unregulated, so the snapshot may be wrong; MaybeAdvanceKachinuki
 //     logs this and simply appends nothing — it never finalizes the match.
 //   - BothExhausted: true when a hikiwake retired the last SNAPSHOT player
 //     on both teams simultaneously. MatchEnded is false. Also advisory:
@@ -101,12 +107,15 @@ type AdvanceKachinukiResult struct {
 //  3. LastBout is a hikiwake (Decision == domain.DecisionHikiwake or
 //     Winner == "" with a recorded decision) → both retire; pair the
 //     heads of input.SideA and input.SideB.
-//  4. One side's queue empty → MatchEnded=true, the non-empty side wins
-//     by exhaustion in the ADVISORY snapshot. BOTH empty (simultaneous
-//     exhaustion after a hikiwake) → BothExhausted=true and no winner.
-//     Either way the caller (MaybeAdvanceKachinuki) only logs — the match
-//     stays running until the operator ends it with an explicit completed
-//     score write (mp-gmcg operator-led contract).
+//  4. After a WIN, the loser's queue empty → MatchEnded=true, the winner's
+//     side wins by exhaustion in the ADVISORY snapshot (the decisive point
+//     already exists; nothing is appended). After a HIKIWAKE, exactly one
+//     queue empty → append a one-sided WALKOVER SLOT for the surviving
+//     side's next fighter (spec 006 decision 2). BOTH empty →
+//     BothExhausted=true and no winner. In every case the caller
+//     (MaybeAdvanceKachinuki) never finalizes — the match stays running
+//     until the operator ends it with an explicit completed score write
+//     (mp-gmcg operator-led contract).
 //
 // The function is pure: no I/O, no logging on the happy path. Unusual
 // inputs (Winner not matching either side) log a warning so
@@ -174,9 +183,12 @@ func advanceWinnerStays(stayingName string, lastPos int, oppQueue []string, winn
 
 // advanceAfterHikiwake builds the next-bout descriptor when both
 // previous-bout players retire. Pairs the heads of each remaining
-// queue. Either side empty → opposing side wins by exhaustion; both
-// empty → BothExhausted (advisory: the operator ends the encounter, the
-// engine never finalizes — mp-gmcg).
+// queue. Exactly one side empty → append a ONE-SIDED WALKOVER SLOT
+// (spec 006 decision 2: the surviving team's next fighter comes up and
+// takes the walkover point via per-bout fusensho; the extra bout IS how
+// the win is expressed, then the operator taps End match on that point).
+// Both empty → BothExhausted (advisory: the operator ends the encounter,
+// the engine never finalizes — mp-gmcg).
 func advanceAfterHikiwake(in AdvanceKachinukiInput) AdvanceKachinukiResult {
 	switch {
 	case len(in.SideA) == 0 && len(in.SideB) == 0:
@@ -189,16 +201,31 @@ func advanceAfterHikiwake(in AdvanceKachinukiInput) AdvanceKachinukiResult {
 			in.LastBout.Position)
 		return AdvanceKachinukiResult{BothExhausted: true}
 	case len(in.SideA) == 0:
+		// SideA's ADVISORY roster is out but SideB has a next fighter: the
+		// tie left no decisive point, so append the walkover slot. The slot
+		// is advisory like every append: the operator gives the surviving
+		// fighter the per-bout fusensho and Ends on that point, fills the
+		// empty side instead (unregulated team sizes / taisho-rule
+		// continue), or abandons it (a trailing unscored slot is stripped
+		// on the completed write).
+		log.Printf("engine.AdvanceKachinuki: hikiwake exhausted side A at position %d (advisory); appending walkover slot for %s",
+			in.LastBout.Position, in.SideB[0])
 		return AdvanceKachinukiResult{
-			MatchEnded:  true,
-			WinningSide: "B",
-			Decision:    string(domain.DecisionKachinukiExhaustion),
+			Next: &state.SubMatchResult{
+				Position: in.LastBout.Position + 1,
+				SideA:    "",
+				SideB:    in.SideB[0],
+			},
 		}
 	case len(in.SideB) == 0:
+		log.Printf("engine.AdvanceKachinuki: hikiwake exhausted side B at position %d (advisory); appending walkover slot for %s",
+			in.LastBout.Position, in.SideA[0])
 		return AdvanceKachinukiResult{
-			MatchEnded:  true,
-			WinningSide: "A",
-			Decision:    string(domain.DecisionKachinukiExhaustion),
+			Next: &state.SubMatchResult{
+				Position: in.LastBout.Position + 1,
+				SideA:    in.SideA[0],
+				SideB:    "",
+			},
 		}
 	}
 	return AdvanceKachinukiResult{

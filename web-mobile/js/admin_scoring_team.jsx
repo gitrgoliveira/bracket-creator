@@ -1216,6 +1216,22 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             // name ("+ Add …") is always possible.
             const isManualRow = isKachinuki && !isDaihyoRow && manualBouts.includes(idx + 1);
             const pickManual = (sideKey) => (value) => updateSub(idx, prev => ({ ...prev, [sideKey]: value }));
+            // mp-gmcg: a kachinuki side with NO resolved name AND no lineup
+            // route gets a free-typed name input riding the sub (like a
+            // manual row). This covers the one-sided WALKOVER SLOT the engine
+            // appends when a hikiwake empties one advisory roster (spec 006
+            // decision 2): the operator can fill the empty side to keep
+            // fighting (taisho rule / a fighter the app has never seen)
+            // instead of taking the walkover fusensho. Scoped tightly: for
+            // positions 1..teamSize with a roster present, name picks keep
+            // routing through the INLINE LINEUP submit (existing T131 flow);
+            // the free path applies only where that route cannot work —
+            // position beyond teamSize (not a valid lineup key, the PUT
+            // would 4xx) or no roster to pick from.
+            const freeNameA = isKachinuki && !isDaihyoRow && !playerAName
+              && (idx + 1 > teamSize || !(rosterA && rosterA.length));
+            const freeNameB = isKachinuki && !isDaihyoRow && !playerBName
+              && (idx + 1 > teamSize || !(rosterB && rosterB.length));
 
             // Each row: [left side, center score, right side]: left=SHIRO, right=AKA
             // T096/FR-031: manual pts/fouls edits clear the per-bout fusensho
@@ -1243,8 +1259,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 // accepts only senpo/… or "1".."N"), so a name pick there would
                 // 4xx. Suppress the picker by passing an empty roster (the input
                 // only renders when roster.length > 0).
-                playerName: playerBName, roster: isDaihyoRow ? [] : rosterB, forceInput: isManualRow,
-                onSelectName: isManualRow ? pickManual("bName") : pickPlayer(teamIdB, lineupB),
+                playerName: playerBName, roster: isDaihyoRow ? [] : rosterB, forceInput: isManualRow || freeNameB,
+                onSelectName: (isManualRow || freeNameB) ? pickManual("bName") : pickPlayer(teamIdB, lineupB),
               },
               {
                 key: "a", pts: s.aPts, fouls: s.aFouls,
@@ -1256,8 +1272,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 }),
                 color: "aka", label: "AKA",
                 // See SHIRO note above: no lineup picker on the daihyosen row.
-                playerName: playerAName, roster: isDaihyoRow ? [] : rosterA, forceInput: isManualRow,
-                onSelectName: isManualRow ? pickManual("aName") : pickPlayer(teamIdA, lineupA),
+                playerName: playerAName, roster: isDaihyoRow ? [] : rosterA, forceInput: isManualRow || freeNameA,
+                onSelectName: (isManualRow || freeNameA) ? pickManual("aName") : pickPlayer(teamIdA, lineupA),
               },
             ];
 

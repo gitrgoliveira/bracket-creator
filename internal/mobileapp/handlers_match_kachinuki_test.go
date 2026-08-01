@@ -180,6 +180,58 @@ func TestScoreHandler_KachinukiBoutFinalAppendsNextBout(t *testing.T) {
 	assert.Empty(t, matches[0].Decision, "no match-level decision while bouts remain")
 }
 
+// TestScoreHandler_KachinukiHikiwakeAppendsWalkoverSlot pins spec 006
+// decision 2 through the wire: a hikiwake that empties one side's
+// ADVISORY roster while the other side still has fighters appends a
+// ONE-SIDED WALKOVER SLOT (surviving side's next fighter, other side
+// empty). The tie left no decisive point, so the walkover bout is how
+// the surviving team's win gets expressed: the operator gives the
+// fighter the per-bout fusensho and Ends on that point, fills the empty
+// side instead, or abandons the slot (trailing unscored bouts are
+// stripped on the completed write). Record bout — not a manual add — is
+// the documented flow.
+func TestScoreHandler_KachinukiHikiwakeAppendsWalkoverSlot(t *testing.T) {
+	compID := "kachinuki-walkover-slot"
+	r, store := setupKachinukiScoreServer(t, compID)
+	// W-1 beat R-1 and R-2; bout 3 pairs W-1 against R-3 (Ryu's last).
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{
+			ID: "P1-0", SideA: "Ryu", SideB: "Tora", Status: state.MatchStatusRunning,
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "R-1", SideB: "W-1", IpponsB: []string{"M", "K"}, Winner: "W-1", Decision: "fought"},
+				{Position: 2, SideA: "R-2", SideB: "W-1", IpponsB: []string{"M"}, Winner: "W-1", Decision: "fought"},
+				{Position: 3, SideA: "R-3", SideB: "W-1"},
+			},
+		},
+	}))
+
+	w := putScore(t, r, compID, "P1-0", map[string]any{
+		"sideA":              "Ryu",
+		"sideB":              "Tora",
+		"status":             "running",
+		"kachinukiBoutFinal": true,
+		"subResults": []map[string]any{
+			{"position": 1, "sideA": "R-1", "sideB": "W-1", "ipponsA": []string{}, "ipponsB": []string{"M", "K"}, "winner": "W-1", "decision": "fought"},
+			{"position": 2, "sideA": "R-2", "sideB": "W-1", "ipponsA": []string{}, "ipponsB": []string{"M"}, "winner": "W-1", "decision": "fought"},
+			// The hikiwake retires R-3 (Ryu's last known fighter) AND W-1.
+			kachinukiSub(3, "R-3", "W-1", nil, "", "hikiwake"),
+		},
+	})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	require.Len(t, matches[0].SubResults, 4, "the walkover slot must be appended")
+	slot := matches[0].SubResults[3]
+	assert.Equal(t, 4, slot.Position)
+	assert.Equal(t, "", slot.SideA, "the exhausted side stays empty on the walkover slot")
+	assert.Equal(t, "W-2", slot.SideB, "surviving side's next fighter takes the slot")
+	assert.Equal(t, state.MatchStatusRunning, matches[0].Status, "operator-led: the match stays running")
+	assert.Empty(t, matches[0].Winner)
+	assert.Empty(t, matches[0].Decision)
+}
+
 // TestScoreHandler_KachinukiPartialWritePreservesAppendedBout: ACID
 // data-loss guard (UAT: a recorded bout-1 draw was lost and the
 // server-appended bout-2 placeholder silently destroyed). A running

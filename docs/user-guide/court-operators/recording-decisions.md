@@ -38,7 +38,7 @@ Completed results follow the paper score sheet's layout. The centre, between the
 
 Everything else is a result, written beside the competitor it names: **Ht** next to the winner of a judges' decision, **Kiken** next to the competitor who withdrew, **Fus.** next to a no-show. A match decided by hantei after a tied overtime reads **M Ht (E) K**, with the winner's mark on the winner's side of the centre. A team encounter shows its team totals in the score cell instead, so for those the marks appear on the bracket and in the exported workbook.
 
-![A completed result on the public viewer: the winner's men ippon on the left, the E overtime marker in the centre between the two scores, and the opponent on the right.](../../screenshots/viewer-result-encho.png)
+![Two completed results on the public viewer: an overtime win reading M, the E marker, then a dash for the side with no points, and a hantei result with the Ht mark beside the winner.](../../screenshots/viewer-result-encho.png)
 
 ## Daihyosen
 

@@ -269,7 +269,7 @@ describe('formatIpponsScore: hikiwake draw display (item 6)', () => {
 // matchStateCell: the shared centre-cell lifecycle cue. completed → score
 // string (with a plain-"vs" fallback), anything else → "vs": a dash is never
 // a valid middle value (operator ruling), so unplayed matches read "vs" too.
-// boutMiddle is THE single source for what a bout's middle can read:
+// boutMiddle is the single source for what a bout's middle can read:
 // "vs" | "X" | "(E)" | "(DH)" — never a dash, never a side mark. Every
 // surface (score strings, matchStateCell, the TV scoreboard separators)
 // derives its middle from it.

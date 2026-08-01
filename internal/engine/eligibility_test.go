@@ -201,6 +201,18 @@ func TestRecordDecision_DefaultWinIpponMarkers(t *testing.T) {
 	assert.Equal(t, "Alice", result.Winner)
 	assert.Equal(t, []string{"○", "○"}, result.IpponsA)
 	assert.Empty(t, result.IpponsB)
+
+	// A default win DURING ENCHO awards exactly the one deciding point
+	// (sudden death), so the fill is a single maru, not the pair.
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled},
+	}))
+	result, _, err = eng.RecordDecision(compID, "Pool A-0", "kiken-injury", "shiro", "injury in encho", &state.EnchoMetadata{PeriodCount: 1}, true)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, "Alice", result.Winner)
+	assert.Equal(t, []string{"○"}, result.IpponsA)
+	assert.Empty(t, result.IpponsB)
 }
 
 // TestRecordDecision_ConcurrentKiken verifies CHK047/T105: when two

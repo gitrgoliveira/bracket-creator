@@ -109,7 +109,7 @@ func TestDefaultWinMaruAB(t *testing.T) {
 		{name: "fusensho fills the defaulted winner", decision: "fusensho", winner: "Alice", wantA: "○○"},
 		{name: "encho awards exactly one deciding point", decision: "kiken-injury", encho: encho, winner: "Alice", wantA: "○"},
 		{name: "a recorded score stands", scoreA: "M", decision: "kiken-injury", winner: "Alice", wantA: "M"},
-		{name: "non-default decision untouched", decision: "hantei", winner: "Alice"},
+		{name: "non-default decision untouched", decision: "fought", winner: "Alice"},
 		{name: "no winner untouched", decision: "kiken-voluntary"},
 		{name: "unmatched winner untouched", decision: "kiken-voluntary", winner: "Carol"},
 	}

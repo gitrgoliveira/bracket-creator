@@ -298,8 +298,18 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                 // modal re-renders as the live scoring board (the background
                 // refresh/SSE then reconciles the canonical state). Any other
                 // submit (finish/correction/draw) closes as before.
+                //
+                // mp-gmcg: a kachinuki Record-bout write (kachinukiBoutFinal)
+                // comes back with the POST-advance bout log: the server
+                // appended the next pairing (winner stays / stays-on slot).
+                // Adopt it into the open match so the editor shows the new
+                // bout without a close/reopen (SSE only refreshes the list,
+                // never this snapshot).
                 if (patch.status === "running" && !patch.winner) {
-                  setOpenMatch(prev => prev ? { ...prev, status: "running" } : prev);
+                  const freshSubs = patch.kachinukiBoutFinal && res && Array.isArray(res.subResults)
+                    ? { subResults: res.subResults }
+                    : {};
+                  setOpenMatch(prev => prev ? { ...prev, status: "running", ...freshSubs } : prev);
                 } else {
                   setOpenMatch(null);
                 }

@@ -49,6 +49,18 @@ How each situation plays out at the table:
 | A tie involving one Taisho | The Taisho retires like anyone else. If their team now has nobody left, tap **Record bout**: the app adds the next bout, pairing the surviving team's next fighter with the fighter who just tied. Under this mode that fighter is out, so give the surviving fighter the walkover (**Fusensho**), then **End match** on that point. | The Taisho stays on. Tap **Record bout**: the app adds the next bout with the same Taisho against the opponent's next fighter. Nothing to re-type; score it as normal. |
 | A tie between the two Taisho | **End match** records a drawn encounter in pools and leagues. In a knockout there are no drawn encounters, so End match is held back: use **Encho** until one Taisho scores, then **End match**. | **Encho**, in any stage: the same pair fights on until one takes a point, then **End match**. |
 
+The clip below walks through the flows end to end, recorded from the score editor:
+
+<video controls muted playsinline width="100%">
+  <source src="../../videos/kachinuki-demo.webm" type="video/webm">
+  Your browser does not support the video tag.
+</video>
+
+1. **Exhaustion mode with a walkover** (0:00): a win keeps the winner on, two ties retire pairs, the app then pairs the surviving team's next fighter with the fighter who tied; the survivor takes the **Fusensho** walkover and **End match** records the win.
+2. **The taisho rule and a knockout tie** (0:22): a Taisho who draws stays on automatically, and when the two Taisho then tie, End match is held back; **Encho** keeps the pair fighting until a point lands.
+3. **A drawn encounter in a league** (0:45): the same tied final pair in a league is simply ended as a draw.
+4. **Reopen** (1:00): a completed encounter is reopened, keeping its bouts, and ended again.
+
 ### Choosing the team match format
 
 When you create a team competition, pick the format under **Team match format**: **Regular** (every position plays its opposite number, the default) or **Kachinuki (winner stays on)**. The same control appears in the competition's **Settings** tab. It locks once the draw is generated: discard the draw to change it. Once the competition has started, the format can no longer be changed.

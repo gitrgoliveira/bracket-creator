@@ -76,10 +76,16 @@ function positionAbbrevFor(teamSize, index, sub) {
 // FIK rules), so a null winner in the bracket phase never reads "DRAW": it's
 // "DAIHYOSEN" once a scored tie exists to break, or "-" before any bout lands.
 // Only a pool encounter reads a null winner as a true draw. (a = Aka, b = Shiro.)
-export function teamResultLabel({ teamWinner, isKnockoutPhase, hasAnyScore }) {
+//
+// KACHINUKI (mp-gmcg): daihyosen does not exist, so a tied knockout kachinuki
+// encounter must never read "DAIHYOSEN": the tie is resolved by fighting on
+// (next bout or encho on the same pair), so the band stays pending ("-")
+// until the operator ends the match. Pools keep "DRAW": that is exactly what
+// End match would record there.
+export function teamResultLabel({ teamWinner, isKnockoutPhase, hasAnyScore, isKachinuki }) {
   if (teamWinner === "a") return "AKA WIN";
   if (teamWinner === "b") return "SHIRO WIN";
-  if (isKnockoutPhase) return hasAnyScore ? "DAIHYOSEN" : "-";
+  if (isKnockoutPhase) return hasAnyScore && !isKachinuki ? "DAIHYOSEN" : "-";
   return "DRAW";
 }
 
@@ -578,9 +584,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // affordance shown as active.
   const sideAName = typeof m.sideA === "object" ? m.sideA?.name : m.sideA;
   const sideBName = typeof m.sideB === "object" ? m.sideB?.name : m.sideB;
-  const initSubsRef = React.useRef(null);
-  if (initSubsRef.current === null) {
-    initSubsRef.current = positions.map((_, idx) => {
+  // seedSubAt builds the local sub state for one position index from the
+  // CURRENT match prop (existingSub is re-derived each render). Used for
+  // the one-time initial seed below AND to extend the rows when the server
+  // appends a kachinuki bout while the modal is open (growth effect after
+  // the subs state declaration).
+  const seedSubAt = (idx) => {
       const pos = idx === daihyosenIdx ? DAIHYOSEN_POSITION : idx + 1;
       const existing = existingSub.find(s => s.position === pos);
       let fusensho = "";
@@ -620,9 +629,38 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
         // row's encho is handled separately (daihyosenEnchoFields).
         encho: idx === daihyosenIdx ? 0 : (existing?.encho?.periodCount || 0),
       };
-    });
+  };
+  const initSubsRef = React.useRef(null);
+  if (initSubsRef.current === null) {
+    initSubsRef.current = positions.map((_, idx) => seedSubAt(idx));
   }
-  const [subs, setSubs] = useStateA(initSubsRef.current);
+  const [subsRaw, setSubs] = useStateA(initSubsRef.current);
+  // mp-gmcg growth: a kachinuki Record-bout write appends the next pairing
+  // server-side and the host adopts the fresh bout log into the match prop,
+  // so `positions` can GROW while the modal is mounted. The extension must
+  // be RENDER-SYNCHRONOUS: this very render already indexes subs for the
+  // new position (an effect would run after the crash). Extend the dirty
+  // baseline once (length-guarded, so re-renders never double-append) and
+  // derive a row list that always covers positions; the effect below then
+  // commits the extension into state so updateSub can edit the new row.
+  // Rows the operator already has are never touched. Kachinuki only, and
+  // kachinuki has no daihyosen row (daihyosenIdx -1), so appending keeps
+  // the idx↔position mapping stable.
+  let subs = subsRaw;
+  if (isKachinuki && daihyosenIdx < 0 && positions.length > subsRaw.length) {
+    if (positions.length > initSubsRef.current.length) {
+      const added = [];
+      for (let i = initSubsRef.current.length; i < positions.length; i++) added.push(seedSubAt(i));
+      initSubsRef.current = [...initSubsRef.current, ...added];
+    }
+    subs = [...subsRaw, ...initSubsRef.current.slice(subsRaw.length, positions.length)];
+  }
+  useEffectA(() => {
+    if (!isKachinuki || daihyosenIdx >= 0) return;
+    const target = positions.length;
+    setSubs(prev => prev.length >= target ? prev : [...prev, ...initSubsRef.current.slice(prev.length, target)]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [positions.length]);
   // C1: updateSub is the single choke-point for all sub-bout state
   // mutations. Calling markScoringDirty() here captures every edit
   // (pts add/remove, fouls, fusensho, draw) without repetition.
@@ -692,7 +730,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // result, so a KO encounter tied solely on 0–0 draws must read "DAIHYOSEN",
   // not pending ("-"). teamEncounterHasResult folds those draws in.
   const teamHasAnyScore = teamEncounterHasResult({ ivA, ivB, pwA, pwB, subTotals, daihyosenIdx });
-  const teamVerdictText = teamResultLabel({ teamWinner, isKnockoutPhase, hasAnyScore: teamHasAnyScore });
+  const teamVerdictText = teamResultLabel({ teamWinner, isKnockoutPhase, hasAnyScore: teamHasAnyScore, isKachinuki });
   // Block Finish while a KO encounter has no winner: the operator must add and
   // score a daihyosen first (the affordance below). Pool draws stay finishable.
   const koTieBlocked = isKoTieBlocked({ isKnockoutPhase, teamWinner, isComplete });

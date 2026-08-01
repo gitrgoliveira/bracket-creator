@@ -1123,6 +1123,9 @@ describe('teamResultLabel (no draw in a knockout)', () => {
   it('a tied KNOCKOUT encounter is never a draw; it needs a daihyosen', () => {
     // Scored tie in a bracket match → resolve by representative bout.
     expect(teamResultLabel({ teamWinner: null, isKnockoutPhase: true, hasAnyScore: true })).toBe('DAIHYOSEN');
+    // mp-gmcg: daihyosen does not exist in kachinuki — a tied knockout
+    // kachinuki encounter stays pending; the tie is resolved by fighting on.
+    expect(teamResultLabel({ teamWinner: null, isKnockoutPhase: true, hasAnyScore: true, isKachinuki: true })).toBe('-');
     // Nothing scored yet in a bracket match → pending, still not a draw.
     expect(teamResultLabel({ teamWinner: null, isKnockoutPhase: true, hasAnyScore: false })).toBe("-");
   });

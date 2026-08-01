@@ -210,6 +210,31 @@ func isKachinukiComp(comp *state.Competition) bool {
 	return comp != nil && comp.TeamSize >= 2 && comp.TeamMatchType == state.TeamMatchTypeKachinuki
 }
 
+// loadMatchSubResults reloads the current bout log for matchID from either
+// store (pool matches first, then the bracket; match-ID shapes vary across
+// formats and fixtures, so lookup is by ID equality, not prefix). Used by
+// the score handler to echo the post-advance kachinuki log. Best-effort:
+// ok=false on any load failure or unknown ID.
+func loadMatchSubResults(store CompetitionStore, compID, matchID string) ([]state.SubMatchResult, bool) {
+	if ms, err := store.LoadPoolMatches(compID); err == nil {
+		for i := range ms {
+			if ms[i].ID == matchID {
+				return ms[i].SubResults, true
+			}
+		}
+	}
+	if b, err := store.LoadBracket(compID); err == nil && b != nil {
+		for rIdx := range b.Rounds {
+			for mIdx := range b.Rounds[rIdx] {
+				if b.Rounds[rIdx][mIdx].ID == matchID {
+					return b.Rounds[rIdx][mIdx].SubResults, true
+				}
+			}
+		}
+	}
+	return nil, false
+}
+
 // allowNumberedEnchoFor is the single decision point for the kachinuki
 // bout-level encho exception (mp-gmcg): a tied kachinuki pairing may be
 // fought on in overtime on that same bout, so the daihyosen-only encho
@@ -1487,6 +1512,16 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			if advanced, kerr := eng.MaybeAdvanceKachinuki(id, mid); kerr != nil {
 				log.Printf("engine.MaybeAdvanceKachinuki(%s, %s): %v", id, mid, kerr)
 			} else if advanced {
+				// Echo the POST-advance bout log so the open score editor can
+				// render the appended pairing immediately (Record bout →
+				// next bout appears, mp-gmcg): the `result` echoed below
+				// predates the append, and SSE only refreshes the match
+				// LIST, not the host's open-match snapshot. Best-effort: on
+				// a load failure the pre-advance log is echoed and the next
+				// refresh reconciles.
+				if subs, ok := loadMatchSubResults(store, id, mid); ok {
+					result.SubResults = subs
+				}
 				hub.Broadcast(EventMatchUpdated, gin.H{
 					"competitionId": id,
 					"matchId":       mid,

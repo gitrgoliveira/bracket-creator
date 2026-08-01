@@ -169,6 +169,15 @@ func TestScoreHandler_KachinukiBoutFinalAppendsNextBout(t *testing.T) {
 	})
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 
+	// The response must echo the POST-advance bout log (mp-gmcg): the open
+	// score editor adopts it to render the appended pairing without a
+	// close/reopen; the pre-advance result would hide the new bout.
+	var echoed state.MatchResult
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &echoed))
+	require.Len(t, echoed.SubResults, 2, "response must carry the appended bout")
+	assert.Equal(t, "R-1", echoed.SubResults[1].SideA)
+	assert.Equal(t, "W-2", echoed.SubResults[1].SideB)
+
 	matches, err := store.LoadPoolMatches(compID)
 	require.NoError(t, err)
 	require.Len(t, matches, 1)

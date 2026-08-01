@@ -231,8 +231,9 @@ export function TWMatch({ m, highlight, onClick }) {
   const aWin = m.winner && m.sideA && m.winner.id === m.sideA.id;
   const bWin = m.winner && m.sideB && m.winner.id === m.sideB.id;
   // Bracket matches carry scoreA/scoreB strings rather than ipponsA/B arrays
-  // (see normalizeMatch). Apply the same fallback used in VSchedItem so the
-  // score cell renders the derived winnerPts–loserPts string instead of ":".
+  // (see normalizeMatch). Derive the arrays like VSchedItem does: they are
+  // load-bearing, since matchScoreStr renders waza letters only and has no
+  // numeric fallback — without them the score cell would render blank.
   const twIpponsA = m.ipponsA || window.ipponsFromScore(m.scoreA);
   const twIpponsB = m.ipponsB || window.ipponsFromScore(m.scoreB);
   const scoreStr = m.status === "completed" ? window.matchScoreStr(m, twIpponsB, twIpponsA) : null;

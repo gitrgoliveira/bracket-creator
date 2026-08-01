@@ -73,6 +73,14 @@ function middleMark(decision, encho) {
 // joinSp in internal/export/suffix.go.
 const joinSp = (a, b) => [a, b].filter(Boolean).join(" ");
 
+// placeMarks: resolve sideMarks onto the two display slots — the winner's
+// mark rides the winning side, the loser's the other. When neither slot is
+// known to have won, no marks are placed; each caller owns that fallback
+// (score strings trail the marks, match cards drop them). The JS analogue
+// of the winner-resolution half of SideMarksLR in internal/export/suffix.go.
+const placeMarks = (marks, firstWins, secondWins) =>
+  firstWins ? [marks.winner, marks.loser] : secondWins ? [marks.loser, marks.winner] : ["", ""];
+
 // isDrawResult: a result is a draw when the recorded decision OR the
 // client-derived score.type says hikiwake (quick-score paths set only
 // score.type, so both sources count).
@@ -173,8 +181,7 @@ function formatIpponsScore(ipponsLeft, ipponsRight, score, decision, encho, deci
   const sep = mid ? ` ${mid} ` : " vs ";
   const marks = sideMarks(decision, hantei);
   const attributed = winnerSide === "left" || winnerSide === "right";
-  const leftMark = attributed ? (winnerSide === "left" ? marks.winner : marks.loser) : "";
-  const rightMark = attributed ? (winnerSide === "right" ? marks.winner : marks.loser) : "";
+  const [leftMark, rightMark] = placeMarks(marks, winnerSide === "left", winnerSide === "right");
   // Unattributable marks (no winnerSide from the caller) trail the string so
   // the result is never silently dropped.
   const trail = !attributed && (marks.winner || marks.loser)
@@ -307,8 +314,7 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
   // that side's score slot — the node's "results column". The meta strip
   // above carries only the middle marks (X / (E) / (DH)).
   const cardMarks = isDone ? sideMarks(match.decision, !!match.decidedByHantei) : { winner: "", loser: "" };
-  const aMark = aWin ? cardMarks.winner : (bWin ? cardMarks.loser : "");
-  const bMark = bWin ? cardMarks.winner : (aWin ? cardMarks.loser : "");
+  const [aMark, bMark] = placeMarks(cardMarks, aWin, bWin);
   const aScore = isDone ? (joinSp(isEngiMatch ? String(match.flagsA || 0) : ipponsA.join(""), aMark) || null) : null;
   const bScore = isDone ? (joinSp(isEngiMatch ? String(match.flagsB || 0) : ipponsB.join(""), bMark) || null) : null;
 

@@ -104,8 +104,9 @@ const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange })
       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
         {m.status === "completed" && (() => {
           // Bracket matches carry scoreA/scoreB rather than ipponsA/B.
-          // Derive per-side arrays so the score reads SHIRO–AKA correctly
-          // even when AKA wins (winnerPts–loserPts fallback inverts left/right).
+          // Derive per-side arrays: the waza-letter arrays are the ONLY
+          // source of an ippon score string (numbers are never a valid
+          // ippon display), so without this the cell would render blank.
           // Use ipponsFromScore so the trailing "(HN)" hansoku suffix from
           // Go's formatScore doesn't get split into bogus ippon letters.
           const tIpponsA = m.ipponsA || window.ipponsFromScore(m.scoreA);

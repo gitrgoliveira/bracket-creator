@@ -154,9 +154,9 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
   const aWin = m.winner && m.sideA && m.winner.id === m.sideA.id;
   const bWin = m.winner && m.sideB && m.winner.id === m.sideB.id;
   // Bracket matches carry scoreA/scoreB strings rather than ipponsA/B arrays.
-  // Fall back so the score string reflects per-side letters instead of the
-  // orientation-agnostic winnerPts–loserPts that formatIpponsScore uses when
-  // both ippon arrays are absent (which would invert left/right when AKA wins).
+  // Derive per-side arrays: the waza-letter arrays are the ONLY source of an
+  // ippon score string (numbers are never a valid ippon display; there is no
+  // winnerPts–loserPts fallback), so without this the cell would render blank.
   const vIpponsA = m.ipponsA || window.ipponsFromScore(m.scoreA);
   const vIpponsB = m.ipponsB || window.ipponsFromScore(m.scoreB);
   // Score string for completed matches (final) and running matches (live, once

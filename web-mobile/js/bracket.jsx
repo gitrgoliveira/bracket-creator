@@ -167,19 +167,14 @@ function formatIpponsScore(ipponsLeft, ipponsRight, score, decision, encho, deci
   const cell = (str, mark) => (str ? (mark ? `${str} ${mark}` : str) : mark);
 
   if (!aStr && !bStr) {
-    // Fall back when the per-side ippon arrays are absent but a score object
-    // exists (e.g. server-provided bracket scores). Prefer the winner's waza
-    // LETTERS (score.ippons) over a bare count so the schedule always shows
-    // technique letters when the data carries them: only the loser, which is
-    // stored as a count not letters, falls back to a number. This path is
-    // winner-first by construction, so the marks attach positionally.
-    if (score?.type === "ippon" && (score.winnerPts > 0 || score.loserPts > 0)) {
-      const winnerLetters = (score.ippons || []).filter(x => x && x !== "•").join("");
-      const winnerStr = winnerLetters || `${score.winnerPts}`;
-      return `${cell(winnerStr, marks.winner)}${sep}${cell(`${score.loserPts}`, marks.loser)}`;
-    }
-    // No scores at all (kiken before any ippon, a 0-0 hantei): the cells
-    // hold only their result marks around the middle mark ("Ht (E) ·").
+    // Numbers are NOT a valid display for ippon: the per-side waza-letter
+    // arrays are the only source of an ippon score. There is deliberately no
+    // winnerPts/loserPts fallback here (callers derive the arrays from
+    // scoreA/scoreB via ipponsFromScore, so real data always has letters;
+    // count-only data renders no score rather than invalid digits).
+    //
+    // No letters (kiken before any ippon, a 0-0 hantei): the cells hold only
+    // their result marks around the middle mark ("Ht (E) ·").
     if (leftMark || rightMark) {
       return `${cell("", leftMark) || "·"}${sep}${cell("", rightMark) || "·"}`;
     }

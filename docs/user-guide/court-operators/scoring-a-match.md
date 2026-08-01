@@ -43,4 +43,4 @@ If two courts recorded different results for the same match while one was offlin
 
 ## Team matches and kachinuki
 
-Kachinuki team encounters are scored one bout at a time with the **Record bout** button: the app adds the next pairing automatically until one team runs out of players. See [Scoring a kachinuki encounter](../organisers/team-tournaments.md#scoring-a-kachinuki-encounter) for the full flow.
+Kachinuki team encounters are scored one bout at a time. Score the current bout, then use **Record bout** to keep going (the winner stays on and the next pairing is added) or **End match** to finish on the last scored bout. You decide when the encounter is over, so end it when a team is out of fighters or when the other team's Taisho has been beaten. In a knockout, a tied last bout cannot end the match: continue with the next fighter, or send the tied final pair to **Encho**. If you finish too early, open the completed match and use **Reopen match** to carry on. See [Scoring a kachinuki encounter](../organisers/team-tournaments.md#scoring-a-kachinuki-encounter) for the full flow.

@@ -51,7 +51,7 @@ Before play begins, set the number of rounds in the competition settings. You ca
 
 2. **Record match results.** Scorers enter results in the tournament app. All matches in the current round must be completed before you can advance.
 
-3. **Review the standings.** Standings update in real time from wins, points scored, and head-to-head records. The standings page is public and visible to competitors and spectators.
+3. **Review the standings.** Standings update in real time and are ranked by wins, then the scoring detail for the competition kind (points scored for individual, the full [team tie-break chain](team-tournaments.md#team-standings-and-tie-breaks) for teams, accumulated flags for [Engi](naginata.md#standings)), then head-to-head. The standings page is public and visible to competitors and spectators.
 
 4. **Generate the next round.** Once all matches in the current round are complete, use the admin panel to generate the next round's pairings.
 

@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -237,6 +238,13 @@ func engiPlayerKey(id, name string) string {
 	return "name:" + name
 }
 
+// engiScoreSummary renders the human-readable score cell for an engi
+// standing. One format definition shared by the pool/league and Swiss engi
+// standings so the two tables can never drift.
+func engiScoreSummary(s *state.PlayerStanding) string {
+	return fmt.Sprintf("W:%d Flags:%d", s.Wins, s.Flags)
+}
+
 // computeEngiStandings is the engi standings core, fully independent of the
 // kendo computeStandingsFrom. It ranks each pool by (1) total Wins, then
 // (2) total accumulated OWN-SIDE flags across every completed bout (the winner
@@ -310,7 +318,7 @@ func (e *Engine) computeEngiStandings(loader poolStandingsLoader, compID string)
 
 		sorted := make([]state.PlayerStanding, 0, len(playerStandings))
 		for _, s := range playerStandings {
-			s.ScoreSummary = fmt.Sprintf("W:%d Flags:%d", s.Wins, s.Flags)
+			s.ScoreSummary = engiScoreSummary(s)
 			sorted = append(sorted, *s)
 		}
 
@@ -334,4 +342,92 @@ func (e *Engine) computeEngiStandings(loader poolStandingsLoader, compID string)
 		allStandings[p.PoolName] = sorted
 	}
 	return allStandings, nil
+}
+
+// computeEngiSwissStandings is the engi twin of SwissStandings: the
+// flag-scored standings core for a Swiss competition. It is the delegate the
+// kendo SwissStandings branches to at its engi dispatch seam, so engi's
+// flag ranking stays out of the kendo tally (engi.go hard-separation
+// principle). It mirrors SwissStandings' cumulative-across-rounds structure
+// (one flat group, byes are auto-wins, head-to-head is the final tiebreak
+// before name) but ranks by (1) Wins then (2) accumulated OWN-SIDE flags,
+// exactly like the pool/league computeEngiStandings.
+//
+// Identity is keyed by display NAME, exactly like the kendo SwissStandings it
+// twins: Swiss matches persist no per-side UUIDs (SideAID/SideBID/WinnerID are
+// empty in pool-matches.csv), and Swiss already treats names as unique
+// identities (swissFieldNamesFromMatches, helper.CheckDuplicateEntries). Keying
+// by engiPlayerKey would build "id:<uuid>" roster keys that never match the
+// name-only lookups the empty-ID matches produce, tallying nothing.
+func (e *Engine) computeEngiSwissStandings(participants []domain.Player, matches []state.MatchResult) ([]state.PlayerStanding, error) {
+	byName := make(map[string]*state.PlayerStanding, len(participants))
+	for _, p := range participants {
+		byName[p.Name] = &state.PlayerStanding{Player: p}
+	}
+
+	headToHead := make(map[string]map[string]string) // sideA → sideB → who won
+	for _, m := range matches {
+		if _, ok := parseSwissMatchRound(m.ID); !ok {
+			continue
+		}
+		// Bye: SideA wins, no flags accrued, no head-to-head.
+		if m.SideB == "" {
+			if sA := byName[m.SideA]; sA != nil {
+				sA.Wins++
+			}
+			continue
+		}
+		if m.Status != state.MatchStatusCompleted {
+			continue
+		}
+		sA := byName[m.SideA]
+		sB := byName[m.SideB]
+		if sA == nil || sB == nil {
+			continue
+		}
+		// Engi has no draws (odd flag total) and records no losses: ranking is
+		// Wins then accumulated own-side Flags. Winner resolves by name (Swiss
+		// stores no WinnerID); a completed engi bout always names a winner.
+		switch m.Winner {
+		case m.SideA:
+			sA.Wins++
+			recordHeadToHead(headToHead, m.SideA, m.SideB, m.SideA)
+		case m.SideB:
+			sB.Wins++
+			recordHeadToHead(headToHead, m.SideA, m.SideB, m.SideB)
+		}
+		// Own-side flag accrual: winner AND loser both accumulate the flags
+		// raised for their own side.
+		sA.Flags += m.FlagsA
+		sB.Flags += m.FlagsB
+	}
+
+	standings := make([]state.PlayerStanding, 0, len(byName))
+	for _, s := range byName {
+		s.ScoreSummary = engiScoreSummary(s)
+		standings = append(standings, *s)
+	}
+	sort.SliceStable(standings, func(i, j int) bool {
+		a, b := standings[i], standings[j]
+		if a.Wins != b.Wins {
+			return a.Wins > b.Wins
+		}
+		if a.Flags != b.Flags {
+			return a.Flags > b.Flags
+		}
+		// Head-to-head: if a beat b directly, a ranks higher.
+		if winner, ok := lookupH2H(headToHead, a.Player.Name, b.Player.Name); ok {
+			if winner == a.Player.Name {
+				return true
+			}
+			if winner == b.Player.Name {
+				return false
+			}
+		}
+		return a.Player.Name < b.Player.Name
+	})
+	for i := range standings {
+		standings[i].Rank = i + 1
+	}
+	return standings, nil
 }

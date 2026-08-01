@@ -168,6 +168,55 @@ func isWinForSide(subWinner, matchSide, subSide string) bool {
 	return subWinner == matchSide || (subSide != "" && subWinner == subSide)
 }
 
+// accrueTeamSubResults folds one completed team match's sub-bout results into
+// both sides' standings (IV/IL/IT and PW/PL). Shared by the pool/league core
+// (computeStandingsFrom) and SwissStandings so the team tie-break accrual
+// rules live in exactly one place: a future change to how draws, empty-winner
+// sub-bouts, or countScoringIppons feed the tie-break cannot silently diverge
+// between formats.
+func accrueTeamSubResults(sA, sB *state.PlayerStanding, m state.MatchResult) {
+	for _, sub := range m.SubResults {
+		sideAWin := isWinForSide(sub.Winner, m.SideA, sub.SideA)
+		sideBWin := isWinForSide(sub.Winner, m.SideB, sub.SideB)
+		switch {
+		case sideAWin:
+			sA.IndividualWins++
+			sB.IndividualLosses++
+		case sideBWin:
+			sB.IndividualWins++
+			sA.IndividualLosses++
+		case sub.Winner == "":
+			sA.IndividualDraws++
+			sB.IndividualDraws++
+		}
+		// countScoringIppons (not len): a completed bout can retain
+		// "•" unfilled-slot placeholders or empty entries, which are
+		// not scored points. This keeps the ranking PointsWon in sync
+		// with the wire teamResult PW (state.TeamResultFrom uses the
+		// same rule) so the displayed points and the tie-break points
+		// cannot drift.
+		sA.PointsWon += countScoringIppons(sub.IpponsA)
+		sA.PointsLost += countScoringIppons(sub.IpponsB)
+		sB.PointsWon += countScoringIppons(sub.IpponsB)
+		sB.PointsLost += countScoringIppons(sub.IpponsA)
+	}
+}
+
+// teamScoreSummary / individualScoreSummary render the human-readable score
+// cell for a standing. One format definition each, shared by the pool/league
+// and Swiss standings assembly loops so the two tables can never drift.
+func teamScoreSummary(s *state.PlayerStanding) string {
+	return fmt.Sprintf("W:%d L:%d D:%d | IV:%d IL:%d IT:%d | PW:%d PL:%d",
+		s.Wins, s.Losses, s.Draws,
+		s.IndividualWins, s.IndividualLosses, s.IndividualDraws,
+		s.PointsWon, s.PointsLost)
+}
+
+func individualScoreSummary(s *state.PlayerStanding) string {
+	return fmt.Sprintf("W:%d L:%d D:%d | P:%d-%d",
+		s.Wins, s.Losses, s.Draws, s.IpponsGiven, s.IpponsTaken)
+}
+
 // deriveDaihyosenWinner fills result.Winner from a completed daihyosen
 // sub-result (Position == -1) when the caller has not set it explicitly.
 // Playoff team matches end in daihyosen when IV and PW are tied; the
@@ -645,31 +694,7 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 			}
 
 			if isTeam && len(m.SubResults) > 0 {
-				for _, sub := range m.SubResults {
-					sideAWin := isWinForSide(sub.Winner, m.SideA, sub.SideA)
-					sideBWin := isWinForSide(sub.Winner, m.SideB, sub.SideB)
-					switch {
-					case sideAWin:
-						sA.IndividualWins++
-						sB.IndividualLosses++
-					case sideBWin:
-						sB.IndividualWins++
-						sA.IndividualLosses++
-					case sub.Winner == "":
-						sA.IndividualDraws++
-						sB.IndividualDraws++
-					}
-					// countScoringIppons (not len): a completed bout can retain
-					// "•" unfilled-slot placeholders or empty entries, which are
-					// not scored points. This keeps the ranking PointsWon in sync
-					// with the wire teamResult PW (state.TeamResultFrom uses the
-					// same rule) so the displayed points and the tie-break points
-					// cannot drift.
-					sA.PointsWon += countScoringIppons(sub.IpponsA)
-					sA.PointsLost += countScoringIppons(sub.IpponsB)
-					sB.PointsWon += countScoringIppons(sub.IpponsB)
-					sB.PointsLost += countScoringIppons(sub.IpponsA)
-				}
+				accrueTeamSubResults(sA, sB, m)
 			} else {
 				// Individual scoring: ippons at match level. countScoringIppons
 				// (not len) so leftover "•" placeholders / empty slots in a
@@ -687,16 +712,12 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 				// Single packed ranking score over the full team tiebreak chain
 				// (W, L, T, IV, IL, IT, PW, PL). See teamStandingPoints.
 				s.Points = teamStandingPoints(*s)
-				s.ScoreSummary = fmt.Sprintf("W:%d L:%d D:%d | IV:%d IL:%d IT:%d | PW:%d PL:%d",
-					s.Wins, s.Losses, s.Draws,
-					s.IndividualWins, s.IndividualLosses, s.IndividualDraws,
-					s.PointsWon, s.PointsLost)
+				s.ScoreSummary = teamScoreSummary(s)
 			} else {
 				// Single packed ranking score over the individual chain
 				// (W, L, D, ippons given, ippons taken). See individualStandingPoints.
 				s.Points = individualStandingPoints(*s)
-				s.ScoreSummary = fmt.Sprintf("W:%d L:%d D:%d | P:%d-%d",
-					s.Wins, s.Losses, s.Draws, s.IpponsGiven, s.IpponsTaken)
+				s.ScoreSummary = individualScoreSummary(s)
 			}
 			sorted = append(sorted, *s)
 		}

@@ -108,19 +108,24 @@ and Shiro (white):
 
 ### Standings
 
-In Engi pools and leagues, pairs are ranked by the following criteria, in order:
+In Engi pools, leagues, and Swiss competitions, pairs are ranked by the
+following criteria, in order:
 
 1. Total wins.
 2. Total flags accumulated across all bouts, as the tie-break when wins are equal.
-3. Name order (alphabetical by the pair's first listed member), when wins and
-   accumulated flags are both equal.
+3. Head-to-head (Swiss only): when two pairs are tied on wins and flags, the
+   pair that won their direct bout ranks higher.
+4. Name order (alphabetical by the pair's first listed member), when the
+   criteria above are all equal.
 
 Both the winning and the losing side's flags count toward that side's own tally,
 so a pair that loses by three flags to two still keeps its two flags.
 
+![Engi Swiss standings: a winner banner above a final standings table with rank, pair, victories (V), and total flags columns, and a caption reading "Ranked by: wins, total flags, head-to-head".](../../screenshots/swiss-standings-engi.png)
+
 Engi never holds a supplementary tie-break bout (no ippon-shobu, no daihyosen):
-a ranking that is still tied after wins and flags is settled by the name-order
-fallback above.
+a ranking that is still tied after wins and flags is settled by the head-to-head
+(in Swiss) and name-order fallbacks above.
 
 ### Excel exports
 

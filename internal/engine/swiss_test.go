@@ -783,3 +783,173 @@ func TestGenerateSwissRound_TeamSizeDefaultApplied(t *testing.T) {
 			gap, times[i-1], times[i])
 	}
 }
+
+// standingByName indexes a standings slice by competitor display name.
+func standingByName(standings []state.PlayerStanding) map[string]state.PlayerStanding {
+	m := make(map[string]state.PlayerStanding, len(standings))
+	for _, s := range standings {
+		m[s.Player.Name] = s
+	}
+	return m
+}
+
+// TestSwissStandings_Team verifies that a TEAM Swiss competition tallies the
+// per-bout tie-break columns (IV/IL/IT/PW/PL) from each match's SubResults and
+// ranks on the full team chain, not on name order. Regression guard for
+// mp-8pba consequence B: before the fix SwissStandings ignored SubResults, so
+// two teams tied on Wins fell through to head-to-head and then name, hiding
+// the individual-victory margin that actually separates them.
+func TestSwissStandings_Team(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "swiss-team-standings"
+
+	comp := &state.Competition{
+		ID:                       compID,
+		Name:                     "Swiss Team Standings",
+		Kind:                     "team",
+		Format:                   state.CompFormatSwiss,
+		TeamSize:                 5,
+		SwissRounds:              1,
+		Courts:                   []string{"A"},
+		StartTime:                "09:00",
+		Status:                   state.CompStatusSetup,
+		PoolMatchDurationSeconds: 180,
+	}
+	require.NoError(t, store.SaveCompetition(comp))
+
+	teams := []domain.Player{
+		swissTestPlayer("TeamA"), swissTestPlayer("TeamB"),
+		swissTestPlayer("TeamC"), swissTestPlayer("TeamD"),
+	}
+	require.NoError(t, store.SaveParticipants(compID, teams))
+
+	// teamSubs builds a 5-bout sub-result slice awarding `aWins` bouts to
+	// SideA and the rest to SideB, each decided bout worth 2 ippons.
+	teamSubs := func(sideA, sideB string, aWins int) []state.SubMatchResult {
+		subs := make([]state.SubMatchResult, 5)
+		for i := 0; i < 5; i++ {
+			s := state.SubMatchResult{Position: i + 1, SideA: sideA, SideB: sideB}
+			if i < aWins {
+				s.Winner = sideA
+				s.IpponsA = []string{"M", "M"}
+			} else {
+				s.Winner = sideB
+				s.IpponsB = []string{"M", "M"}
+			}
+			subs[i] = s
+		}
+		return subs
+	}
+
+	// TeamA beats TeamB 3-2; TeamC beats TeamD 5-0. Both winners have exactly
+	// one team win, so they tie on the first team-chain criterion and the
+	// ranking must fall to individual victories (IV 5 for C beats IV 3 for A).
+	// Side/Winner IDs are deliberately left empty, mirroring real Swiss matches
+	// (buildSwissMatches persists no per-side UUIDs), so the standings must key
+	// on name alone.
+	matches := []state.MatchResult{
+		{
+			ID: "Swiss-R1-0", SideA: "TeamA", SideB: "TeamB",
+			Winner:     "TeamA",
+			Status:     state.MatchStatusCompleted,
+			SubResults: teamSubs("TeamA", "TeamB", 3),
+		},
+		{
+			ID: "Swiss-R1-1", SideA: "TeamC", SideB: "TeamD",
+			Winner:     "TeamC",
+			Status:     state.MatchStatusCompleted,
+			SubResults: teamSubs("TeamC", "TeamD", 5),
+		},
+	}
+	require.NoError(t, store.SavePoolMatches(compID, matches))
+
+	standings, err := eng.SwissStandings(compID)
+	require.NoError(t, err)
+	require.Len(t, standings, len(teams))
+	byName := standingByName(standings)
+
+	// Sub-bout detail is tallied (the whole point of the fix).
+	assert.Equal(t, 3, byName["TeamA"].IndividualWins, "TeamA IV from 3 won bouts")
+	assert.Equal(t, 2, byName["TeamA"].IndividualLosses, "TeamA IL from 2 lost bouts")
+	assert.Equal(t, 5, byName["TeamC"].IndividualWins, "TeamC IV from a 5-0 sweep")
+	assert.Equal(t, 6, byName["TeamA"].PointsWon, "TeamA PW = 3 bouts x 2 ippons")
+	assert.Equal(t, 10, byName["TeamC"].PointsWon, "TeamC PW = 5 bouts x 2 ippons")
+
+	// Both winners tie on Wins; TeamC's larger IV margin must rank it higher.
+	assert.Less(t, byName["TeamC"].Rank, byName["TeamA"].Rank,
+		"TeamC (IV 5) must outrank TeamA (IV 3) despite both having one team win")
+
+	// The summary renders the team columns, not the individual P:x-y form.
+	assert.Contains(t, byName["TeamA"].ScoreSummary, "IV:",
+		"team standings summary must expose the individual-victory column")
+}
+
+// TestSwissStandings_Engi verifies that an ENGI (flag-scored) Swiss
+// competition accumulates own-side referee flags and ranks on them, rather
+// than tallying ippons that never exist. Regression guard for mp-8pba
+// consequence A: before the fix SwissStandings read ippons only, so every
+// engi competitor showed zero flags and genuine ties fell through to name.
+func TestSwissStandings_Engi(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "swiss-engi-standings"
+
+	comp := &state.Competition{
+		ID:                       compID,
+		Name:                     "Swiss Engi Standings",
+		Kind:                     "individual",
+		Format:                   state.CompFormatSwiss,
+		Engi:                     true,
+		SwissRounds:              1,
+		Courts:                   []string{"A"},
+		StartTime:                "09:00",
+		Status:                   state.CompStatusSetup,
+		PoolMatchDurationSeconds: 180,
+	}
+	require.NoError(t, store.SaveCompetition(comp))
+
+	pairs := []domain.Player{
+		swissTestPlayer("E1"), swissTestPlayer("E2"),
+		swissTestPlayer("E3"), swissTestPlayer("E4"),
+	}
+	require.NoError(t, store.SaveParticipants(compID, pairs))
+
+	// E1 beats E2 3-2 flags; E3 beats E4 5-0 flags. Both winners have one win,
+	// so the tie must break on accumulated own-side flags (E3's 5 beats E1's 3).
+	// Side/Winner IDs are deliberately left empty, mirroring real Swiss engi
+	// matches (pool-matches.csv persists no per-side UUIDs); the standings must
+	// therefore key on name alone, or every competitor tallies zero.
+	matches := []state.MatchResult{
+		{
+			ID: "Swiss-R1-0", SideA: "E1", SideB: "E2",
+			Winner: "E1",
+			Status: state.MatchStatusCompleted,
+			FlagsA: 3, FlagsB: 2,
+		},
+		{
+			ID: "Swiss-R1-1", SideA: "E3", SideB: "E4",
+			Winner: "E3",
+			Status: state.MatchStatusCompleted,
+			FlagsA: 5, FlagsB: 0,
+		},
+	}
+	require.NoError(t, store.SavePoolMatches(compID, matches))
+
+	standings, err := eng.SwissStandings(compID)
+	require.NoError(t, err)
+	require.Len(t, standings, len(pairs))
+	byName := standingByName(standings)
+
+	// Own-side flags accrue for winner AND loser.
+	assert.Equal(t, 1, byName["E1"].Wins)
+	assert.Equal(t, 3, byName["E1"].Flags, "E1 accrues its 3 own-side flags")
+	assert.Equal(t, 2, byName["E2"].Flags, "the loser E2 still accrues its 2 flags")
+	assert.Equal(t, 5, byName["E3"].Flags, "E3 accrues its 5 own-side flags")
+
+	// Both winners tie on Wins; E3's larger flag total must rank it higher.
+	assert.Less(t, byName["E3"].Rank, byName["E1"].Rank,
+		"E3 (5 flags) must outrank E1 (3 flags) despite both having one win")
+
+	// The summary renders the engi flag column, not the ippon P:x-y form.
+	assert.Contains(t, byName["E1"].ScoreSummary, "Flags:",
+		"engi standings summary must expose the accumulated-flags column")
+}

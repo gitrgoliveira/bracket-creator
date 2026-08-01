@@ -1766,10 +1766,11 @@ paths:
         write with a `correctionReason`) remains the sole sanctioned edit of
         a finished result. For a bracket match whose winner was already
         propagated but not yet fought, the downstream slot is retracted to
-        its "Winner of rX-mY" generation placeholder. In self-run mode this
-        endpoint requires the admin password (403 otherwise); reopening a
-        finalized result is an operator action. Broadcasts a `match_updated`
-        event.
+        its "Winner of rX-mY" generation placeholder. Reopening a finalized
+        result is an organiser action: the route stays main-password-gated
+        even in self-run mode (same class as override-winner), so a request
+        without a valid `X-Tournament-Password` gets 401. Broadcasts a
+        `match_updated` event.
       security:
         - TournamentPassword: []
       parameters:
@@ -1784,8 +1785,11 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-        '403':
-          description: Self-run mode without the admin password.
+        '401':
+          description: >
+            Missing or invalid tournament password. Applies in every mode:
+            in self-run mode this route is one of the main-gated organiser
+            corrections, not participant-driven play.
           content:
             application/json:
               schema:
@@ -3587,12 +3591,15 @@ components:
           description: >
             Overtime metadata for this sub-bout. Valid for the daihyosen
             representative bout (`position: -1`), and, in KACHINUKI
-            competitions only, also for numbered bouts (a knockout tie on the
-            final kachinuki bout is resolved by encho on that same bout; the
-            same pair keeps fighting). For all other competitions the server
-            rejects a non-zero `periodCount` on any numbered bout (fixed
-            regulation time, no overtime). `decidedByHantei` is NOT relaxed
-            for kachinuki: hantei remains daihyosen-only.
+            competitions, also for numbered bouts of KNOCKOUT (bracket)
+            matches only (a knockout tie on the final kachinuki bout is
+            resolved by encho on that same bout; the same pair keeps
+            fighting). Pool, league, and Swiss kachinuki encounters may
+            legitimately end in a draw, so their numbered bouts reject encho
+            like any other competition: the server rejects a non-zero
+            `periodCount` on any numbered bout outside a kachinuki bracket
+            match (fixed regulation time, no overtime). `decidedByHantei` is
+            NOT relaxed for kachinuki: hantei remains daihyosen-only.
 
     BracketMatch:
       type: object

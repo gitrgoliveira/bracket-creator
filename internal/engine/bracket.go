@@ -361,6 +361,15 @@ func assignBracketMatchNumbers(b *state.Bracket) {
 	}
 }
 
+// IsBracketMatchID reports whether matchID names a knockout bracket match.
+// Bracket IDs are generated as "m-r{ROUND}-{POS}" (see the fmt.Sprintf in
+// buildBracketFromLeaves above); pool matches use the "Pool " prefix
+// (IsPoolMatchID) and Swiss rounds "Swiss-R", so the "m-r" prefix is
+// unambiguous across the three match-ID families.
+func IsBracketMatchID(matchID string) bool {
+	return strings.HasPrefix(matchID, "m-r")
+}
+
 // bracketMatchPosFromID extracts the 0-based within-round position from a bracket
 // match ID of the form "m-r{ROUND}-{POS}" (e.g. "m-r2-1" → 1). It is the same
 // position the JS buildDisplayModel reads from the id suffix when ordering match

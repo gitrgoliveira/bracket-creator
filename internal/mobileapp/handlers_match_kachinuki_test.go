@@ -409,6 +409,11 @@ func TestScoreHandler_KachinukiEarlyCompletionAccepted(t *testing.T) {
 // A completed write whose final bout carries the encho marker and a
 // winner must round-trip the marker + winner through the store and
 // propagate the match winner to the next round.
+//
+// The fixture uses PRODUCTION-shaped bracket IDs ("m-r{N}-{POS}",
+// buildBracketFromLeaves): allowNumberedEnchoFor scopes the numbered-bout
+// encho exception to bracket matches via engine.IsBracketMatchID, so the
+// ID shape is semantically significant here.
 func TestScoreHandler_KachinukiEnchoFinalBoutPersists(t *testing.T) {
 	compID := "kachinuki-encho-final-bout"
 	r, store := setupKachinukiScoreServer(t, compID)
@@ -418,7 +423,7 @@ func TestScoreHandler_KachinukiEnchoFinalBoutPersists(t *testing.T) {
 		Rounds: [][]state.BracketMatch{
 			{
 				{
-					ID: "R1M0", SideA: "Ryu", SideB: "Tora", Status: state.MatchStatusRunning,
+					ID: "m-r1-0", SideA: "Ryu", SideB: "Tora", Status: state.MatchStatusRunning,
 					SubResults: []state.SubMatchResult{
 						{Position: 1, SideA: "R-1", SideB: "W-1", Decision: "hikiwake"},
 						{Position: 2, SideA: "R-2", SideB: "W-2", Decision: "hikiwake"},
@@ -427,12 +432,12 @@ func TestScoreHandler_KachinukiEnchoFinalBoutPersists(t *testing.T) {
 				},
 			},
 			{
-				{ID: "R2M0"},
+				{ID: "m-r2-0"},
 			},
 		},
 	}))
 
-	w := putScore(t, r, compID, "R1M0", map[string]any{
+	w := putScore(t, r, compID, "m-r1-0", map[string]any{
 		"sideA":    "Ryu",
 		"sideB":    "Tora",
 		"winner":   "Ryu",
@@ -468,6 +473,42 @@ func TestScoreHandler_KachinukiEnchoFinalBoutPersists(t *testing.T) {
 	require.NotNil(t, final.Encho, "encho marker must round-trip through the store")
 	assert.Equal(t, 2, final.Encho.PeriodCount)
 	assert.Equal(t, "Ryu", bracket.Rounds[1][0].SideA, "winner must propagate to the next round")
+}
+
+// TestScoreHandler_KachinukiPoolBoutEnchoRejected pins the SCOPE of the
+// numbered-bout encho exception (allowNumberedEnchoFor): it applies to
+// kachinuki BRACKET matches only. A pool (or league/Swiss) kachinuki
+// encounter may legitimately end in a draw, so encho on one of its
+// numbered bouts is not a thing — the strict daihyosen-only gate must
+// still reject it even though the competition is kachinuki.
+func TestScoreHandler_KachinukiPoolBoutEnchoRejected(t *testing.T) {
+	compID := "kachinuki-pool-encho-rejected"
+	r, store := setupKachinukiScoreServer(t, compID)
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{
+			ID: "Pool 1-0", SideA: "Ryu", SideB: "Tora", Status: state.MatchStatusRunning,
+			SubResults: []state.SubMatchResult{{Position: 1, SideA: "R-1", SideB: "W-1"}},
+		},
+	}))
+
+	w := putScore(t, r, compID, "Pool 1-0", map[string]any{
+		"sideA":  "Ryu",
+		"sideB":  "Tora",
+		"status": "running",
+		"subResults": []map[string]any{
+			{
+				"position": 1,
+				"sideA":    "R-1",
+				"sideB":    "W-1",
+				"ipponsA":  []string{"M"},
+				"ipponsB":  []string{"K"},
+				"encho":    map[string]any{"periodCount": 1},
+			},
+		},
+	})
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), "daihyosen representative bout",
+		"pool kachinuki numbered bouts must keep the strict daihyosen-only encho gate")
 }
 
 // TestScoreHandler_KachinukiSimultaneousExhaustionNoWinnerIs400: a

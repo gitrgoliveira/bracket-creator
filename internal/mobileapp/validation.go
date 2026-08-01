@@ -162,8 +162,10 @@ func validateURLHasHost(field, val string) error {
 //
 // EXCEPTION (mp-gmcg): in a KACHINUKI competition a knockout tie on the
 // final bout is resolved by encho on that same numbered bout (daihyosen
-// does not exist in kachinuki), so callers that know the competition pass
-// allowNumberedEncho=true and the daihyosen-only encho gate is skipped.
+// does not exist in kachinuki), so callers pass allowNumberedEncho=true —
+// derived via allowNumberedEnchoFor (handlers_match.go), which scopes the
+// exception to kachinuki BRACKET matches only; pool/league/Swiss kachinuki
+// ties are legitimate draws, so their bouts keep the daihyosen-only gate.
 // The hantei gate is NOT relaxed: kachinuki bouts are never decided by
 // hantei.
 //
@@ -411,10 +413,10 @@ func (r *ScoreRequest) Validate() error {
 
 // validateWithOptions is Validate with the kachinuki numbered-bout encho
 // exception threaded through (mp-gmcg): the score handler passes
-// allowNumberedEncho=true when the target competition is kachinuki, where
-// a knockout tie on the final bout is resolved by encho on that same
-// numbered bout. Every other caller keeps the strict daihyosen-only gate
-// via Validate().
+// allowNumberedEncho=true when the target is a kachinuki BRACKET match
+// (allowNumberedEnchoFor), where a knockout tie on the final bout is
+// resolved by encho on that same numbered bout. Every other caller keeps
+// the strict daihyosen-only gate via Validate().
 func (r *ScoreRequest) validateWithOptions(allowNumberedEncho bool) error {
 	if r.Status != "" {
 		switch r.Status {

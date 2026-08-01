@@ -210,6 +210,18 @@ func isKachinukiComp(comp *state.Competition) bool {
 	return comp != nil && comp.TeamSize >= 2 && comp.TeamMatchType == state.TeamMatchTypeKachinuki
 }
 
+// allowNumberedEnchoFor is the single decision point for the kachinuki
+// numbered-bout encho exception (mp-gmcg, spec 006 decisions 2-3): a tied
+// final kachinuki bout in a KNOCKOUT resolves by encho on that same numbered
+// bout, so the daihyosen-only encho gate in validateSubBout is relaxed — but
+// only for bracket matches. Pool, league, and Swiss kachinuki encounters may
+// legitimately tie (hikiwake), so encho there stays rejected by the strict
+// gate. Both the single-score and bulk-score paths must route through this
+// helper rather than re-deriving the rule.
+func allowNumberedEnchoFor(comp *state.Competition, matchID string) bool {
+	return isKachinukiComp(comp) && engine.IsBracketMatchID(matchID)
+}
+
 // enforceEnchoCap is the gin-handler wrapper around enchoExceedsCap for
 // the single-result score / decision endpoints. Loads the competition
 // once, checks the top-level encho and every sub-bout encho against the
@@ -353,7 +365,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				continue
 			}
 
-			if err := validateBulkScoreLengths(&results[i], isKachinukiComp(comp)); err != nil {
+			if err := validateBulkScoreLengths(&results[i], allowNumberedEnchoFor(comp, results[i].ID)); err != nil {
 				errs = append(errs, scoreError{MatchID: results[i].ID, Error: err.Error()})
 				continue
 			}
@@ -679,25 +691,15 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			return
 		}
 
-		// Self-run mode: reopening a finalized result is an operator action.
-		// Anonymous participants are blocked from overwriting finalized
-		// results on the score path (checkFinalizedUnderTx); an ungated
-		// reopen would be a trivial bypass, so require the admin password
-		// here (mirrors enforceSelfRunPolicy's verification mechanics).
-		if t, terr := tl.LoadTournament(); terr != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load tournament config"})
-			return
-		} else if t != nil && t.Mode == "self-run" {
-			okPw, verr := verifier.Verify(c.GetHeader("X-Tournament-Password"))
-			if verr != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "auth verification failed"})
-				return
-			}
-			if !okPw {
-				c.JSON(http.StatusForbidden, gin.H{"error": "reopening a completed match requires the admin password"})
-				return
-			}
-		}
+		// Self-run mode: reopening a finalized result is an organiser action
+		// (anonymous participants are blocked from overwriting finalized
+		// results on the score path via checkFinalizedUnderTx; an ungated
+		// reopen would be a trivial bypass). The gate lives in the CENTRAL
+		// allowlist, isSelfRunMainGatedConfigRoute (middleware.go), same as
+		// its sibling override-winner — NOT hand-rolled here, so it shares
+		// AuthMiddleware's verification mechanics including the F4
+		// empty-stored-password fail-closed branch. Pinned by
+		// TestSelfRun_ReopenRequiresMainPassword.
 
 		if err := eng.ReopenKachinukiMatch(id, mid); err != nil {
 			var notFoundErr *engine.NotFoundError
@@ -1088,14 +1090,16 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		req := body.ScoreRequest
 		// Kachinuki exception (mp-gmcg): a knockout tie on the FINAL bout is
 		// resolved by encho on that same numbered bout, so the daihyosen-only
-		// encho gate in validateSubBout is relaxed for kachinuki competitions.
-		// The competition is loaded only when the payload actually carries a
-		// numbered-bout encho, keeping the hot scoring path free of the read.
-		// Fail closed: a load failure keeps the strict gate (400 below).
+		// encho gate in validateSubBout is relaxed for kachinuki BRACKET
+		// matches (allowNumberedEnchoFor; pool/league/Swiss kachinuki ties are
+		// legitimate draws, so encho stays rejected there). The competition is
+		// loaded only when the payload actually carries a numbered-bout encho,
+		// keeping the hot scoring path free of the read. Fail closed: a load
+		// failure keeps the strict gate (400 below).
 		allowNumberedEncho := false
 		if anyNumberedBoutHasEncho(req.SubResults) {
 			if comp, err := store.LoadCompetition(id); err == nil {
-				allowNumberedEncho = isKachinukiComp(comp)
+				allowNumberedEncho = allowNumberedEnchoFor(comp, mid)
 			}
 		}
 		if err := req.validateWithOptions(allowNumberedEncho); err != nil {

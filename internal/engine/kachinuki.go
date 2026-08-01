@@ -57,19 +57,24 @@ type AdvanceKachinukiInput struct {
 	SideB    []string
 }
 
-// AdvanceKachinukiResult is the engine's verdict.
+// AdvanceKachinukiResult is the engine's verdict. Under the operator-led
+// contract (mp-gmcg) the verdict is ADVISORY: completion only ever happens
+// through an explicit operator score write, never from this result.
 //
 //   - Next: when non-nil, the next bout to schedule. Position is set to
 //     LastBout.Position + 1; SideA/SideB carry the next pair of player
 //     names. Other fields are left zero, the score handler will fill
 //     them as the bout is played.
-//   - MatchEnded: true when one team has no remaining un-retired
-//     players. Next is nil. WinningSide is "A" or "B"; Decision is
-//     domain.DecisionKachinukiExhaustion. Callers should mark the
-//     parent MatchResult completed with these values.
-//   - BothExhausted: true when a hikiwake retired the last player on
-//     both teams simultaneously. MatchEnded is false; the caller
-//     decides the outcome by phase (pool/league draw, bracket daihyosen).
+//   - MatchEnded: true when the ADVISORY roster snapshot says one team has
+//     no remaining un-retired players. Next is nil. WinningSide is "A" or
+//     "B"; Decision is domain.DecisionKachinukiExhaustion. Team sizes are
+//     unregulated, so the snapshot may be wrong; MaybeAdvanceKachinuki
+//     logs this and simply appends nothing — it never finalizes the match.
+//   - BothExhausted: true when a hikiwake retired the last SNAPSHOT player
+//     on both teams simultaneously. MatchEnded is false. Also advisory:
+//     the operator ends the encounter (pool/league tie → drawn encounter;
+//     a knockout tie continues via a further bout or encho on the final
+//     bout — daihyosen does not exist in kachinuki).
 type AdvanceKachinukiResult struct {
 	Next        *state.SubMatchResult
 	MatchEnded  bool
@@ -77,10 +82,11 @@ type AdvanceKachinukiResult struct {
 	Decision    string // domain.DecisionKachinukiExhaustion when MatchEnded
 
 	// BothExhausted is true only when a hikiwake retired the last player on
-	// BOTH teams at once (no winner determinable). AdvanceKachinuki cannot
-	// pick a winner; the caller decides the outcome by phase: a pool/league
-	// encounter is finalized as a draw, a bracket encounter stays running
-	// until the operator resolves the tie with a daihyosen.
+	// BOTH teams at once (no winner determinable) in the ADVISORY snapshot.
+	// AdvanceKachinuki cannot pick a winner and MaybeAdvanceKachinuki takes
+	// no action beyond logging; the operator decides how the encounter ends
+	// (drawn in pools/league, continued via next bout or encho in a
+	// knockout).
 	BothExhausted bool
 }
 
@@ -96,10 +102,11 @@ type AdvanceKachinukiResult struct {
 //     Winner == "" with a recorded decision) → both retire; pair the
 //     heads of input.SideA and input.SideB.
 //  4. One side's queue empty → MatchEnded=true, the non-empty side wins
-//     by exhaustion. BOTH empty (simultaneous exhaustion after a
-//     hikiwake) → BothExhausted=true and no winner; the caller finalizes
-//     a pool/league encounter as a draw or keeps a bracket encounter
-//     running for a daihyosen.
+//     by exhaustion in the ADVISORY snapshot. BOTH empty (simultaneous
+//     exhaustion after a hikiwake) → BothExhausted=true and no winner.
+//     Either way the caller (MaybeAdvanceKachinuki) only logs — the match
+//     stays running until the operator ends it with an explicit completed
+//     score write (mp-gmcg operator-led contract).
 //
 // The function is pure: no I/O, no logging on the happy path. Unusual
 // inputs (Winner not matching either side) log a warning so
@@ -168,15 +175,17 @@ func advanceWinnerStays(stayingName string, lastPos int, oppQueue []string, winn
 // advanceAfterHikiwake builds the next-bout descriptor when both
 // previous-bout players retire. Pairs the heads of each remaining
 // queue. Either side empty → opposing side wins by exhaustion; both
-// empty → BothExhausted (caller finalizes a pool draw or keeps a bracket running for daihyosen).
+// empty → BothExhausted (advisory: the operator ends the encounter, the
+// engine never finalizes — mp-gmcg).
 func advanceAfterHikiwake(in AdvanceKachinukiInput) AdvanceKachinukiResult {
 	switch {
 	case len(in.SideA) == 0 && len(in.SideB) == 0:
-		// Both teams ran out simultaneously after a draw. The engine cannot
-		// determine a winner; flag BothExhausted and let the caller decide by
-		// phase (pool/league finalize as a draw, bracket stays running for a
-		// daihyosen). See MaybeAdvanceKachinuki.
-		log.Printf("engine.AdvanceKachinuki: hikiwake exhausted both teams simultaneously at position %d; caller resolves by phase (pool draw / bracket daihyosen)",
+		// Both teams ran out simultaneously after a draw, per the ADVISORY
+		// roster snapshot. The engine cannot determine a winner; flag
+		// BothExhausted and append nothing. The operator ends the encounter:
+		// drawn in pools/league, continued (next bout or encho) in a
+		// knockout. See MaybeAdvanceKachinuki.
+		log.Printf("engine.AdvanceKachinuki: hikiwake exhausted both teams simultaneously at position %d (advisory); operator ends the encounter",
 			in.LastBout.Position)
 		return AdvanceKachinukiResult{BothExhausted: true}
 	case len(in.SideA) == 0:

@@ -127,7 +127,16 @@ export function canReopenKachinukiMatch({ isKachinuki, isComplete }) {
 // ignored. A bout counts as scored once it carries any ippon, an explicit
 // hikiwake/fusensho decision, a winner, or an encho marker (a 0-0 bout sent
 // to encho is live-tied, not unscored: End must stay blocked until the
-// encho produces a point). Returns:
+// encho produces a point).
+//
+// This "scored" filter is DELIBERATELY narrower than subBoutHasBeenPlayed
+// (below): that predicate answers "does this row carry operator INPUT and
+// belong on the wire" and so counts lone fouls, while this one answers
+// "does this bout have an OUTCOME the encounter can end on" — fouls alone
+// decide nothing (a hansoku-conceded point is entered as an H ippon, which
+// this filter does see). Do NOT unify them: counting a fouls-only last
+// bout as a scored 0-0 tie would wrongly draw a pool encounter or block a
+// knockout End on a bout that has no result yet. Returns:
 //   {kind:"win", winnerSide:"a"|"b"}          last scored bout has a winner
 //                                             (score, fusensho, or a winner
 //                                             name matching a side)
@@ -238,6 +247,11 @@ export function resolveKachinukiBoutSides({ aName, bName, wKey, teamWinnerName }
 // off the LAST SubResult having an outcome) and inflate individual-draw
 // standings. Fixed-position matches keep all positions: a 0–0 there is a
 // legitimate hikiwake.
+//
+// Counterpart: deriveKachinukiEndOutcome's "scored" filter (above) is
+// deliberately NARROWER — it asks "does this bout have an outcome", so it
+// excludes lone fouls that this predicate counts as input. See the note
+// there before attempting to unify the two.
 export function subBoutHasBeenPlayed(s) {
   if (!s) return false;
   return (s.aPts?.length > 0) || (s.bPts?.length > 0) || (s.aFouls > 0) || (s.bFouls > 0) || !!s.fusensho || !!s.draw || (s.encho > 0);

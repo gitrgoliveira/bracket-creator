@@ -969,3 +969,42 @@ func TestSelfRun_Sponsors_RequireMainPassword(t *testing.T) {
 			"GET /api/sponsors/:file must be public, logo is served to unauthenticated viewer/TV surfaces")
 	})
 }
+
+// ---------------------------------------------------------------------------
+// §reopen: Self-run auth gate for kachinuki match reopen (mp-gmcg)
+// ---------------------------------------------------------------------------
+//
+// POST .../matches/:mid/reopen mutates a FINALIZED result (clears
+// winner/decision, retracts propagated bracket winners), the same organiser
+// correction class as PUT .../override-winner. It is listed in
+// isSelfRunMainGatedConfigRoute so the CENTRAL AuthMiddleware gate (including
+// the F4 empty-stored-password fail-closed branch) applies; the handler
+// deliberately carries no hand-rolled self-run check.
+func TestSelfRun_ReopenRequiresMainPassword(t *testing.T) {
+	store := newTempStore(t)
+	seedSelfRunTournament(t, store, "admin-pw")
+	r := setupSelfRunRouter(t, store, NewFileVerifier(store))
+
+	t.Run("without_password_returns_401", func(t *testing.T) {
+		req := jsonReq(http.MethodPost, "/api/competitions/some-comp/matches/m-r1-0/reopen", nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusUnauthorized, w.Code,
+			"reopen must be main-gated in self-run mode: it rewrites a finalized result")
+	})
+
+	t.Run("with_main_password_passes_the_gate", func(t *testing.T) {
+		req := jsonReq(http.MethodPost, "/api/competitions/some-comp/matches/m-r1-0/reopen", nil)
+		req.Header.Set("X-Tournament-Password", "main-pw")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		// What matters here is that the credential cleared the middleware (a
+		// 401 would mean the gate rejected the main password). The handler
+		// itself then answers 400: the fixture competition doesn't exist, so
+		// the engine's kachinuki-only validation fires.
+		assert.NotEqual(t, http.StatusUnauthorized, w.Code, w.Body.String())
+		assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+		assert.Contains(t, w.Body.String(), "kachinuki",
+			"the request must reach ReopenKachinukiMatch's own validation")
+	})
+}

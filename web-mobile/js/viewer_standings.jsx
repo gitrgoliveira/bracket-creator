@@ -657,8 +657,8 @@ export const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick, isEngi }
       </div>
       <span className="pool-match-numbered-row__score">
         {/* Running matches are signalled by the row highlight (shared .is-running),
-            not a centre dot: matchStateCell shows "vs" for the live matchup,
-            a score when completed, "–" when scheduled. */}
+            not a centre dot: matchStateCell shows the score when completed and
+            the plain "vs" middle otherwise (a dash is never a middle value). */}
         {window.matchStateCell(m)}
       </span>
       <div className="pool-match-numbered-row__side pool-match-numbered-row__side--aka">

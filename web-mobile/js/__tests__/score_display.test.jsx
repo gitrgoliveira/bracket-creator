@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
-import { enchoLabel, formatIpponsScore, ipponsFromScore, matchStateCell } from '../bracket.jsx';
+import { boutMiddle, enchoLabel, formatIpponsScore, ipponsFromScore, matchStateCell } from '../bracket.jsx';
 
 // Convention enforced across all match-list views:
 //   SHIRO (sideB) is always displayed on the LEFT.
@@ -255,8 +255,34 @@ describe('formatIpponsScore: hikiwake draw display (item 6)', () => {
 });
 
 // matchStateCell: the shared centre-cell lifecycle cue. completed → score
-// string (with "-" fallback), running → "vs" (the row highlight is the "now"
-// signal, NOT a centre dot), scheduled/other → "–".
+// string (with a plain-"vs" fallback), anything else → "vs": a dash is never
+// a valid middle value (operator ruling), so unplayed matches read "vs" too.
+// boutMiddle is THE single source for what a bout's middle can read:
+// "vs" | "X" | "(E)" | "(DH)" — never a dash, never a side mark. Every
+// surface (score strings, matchStateCell, the TV scoreboard separators)
+// derives its middle from it.
+describe('boutMiddle: the only four middle values', () => {
+  it('plain/unplayed → "vs"', () => {
+    expect(boutMiddle(null, null, null)).toBe('vs');
+    expect(boutMiddle('', undefined, undefined)).toBe('vs');
+  });
+  it('tie → X (from decision or client score.type), beating stale encho', () => {
+    expect(boutMiddle('hikiwake', null, null)).toBe('X');
+    expect(boutMiddle(null, null, { type: 'hikiwake' })).toBe('X');
+    expect(boutMiddle('hikiwake', { periodCount: 2 }, null)).toBe('X');
+  });
+  it('overtime → bare (E)', () => {
+    expect(boutMiddle(null, { periodCount: 1 }, null)).toBe('(E)');
+  });
+  it('daihyosen → (DH), beating stale encho', () => {
+    expect(boutMiddle('daihyosen', { periodCount: 3 }, null)).toBe('(DH)');
+  });
+  it('side results never surface in the middle', () => {
+    expect(boutMiddle('kiken-voluntary', null, null)).toBe('vs');
+    expect(boutMiddle('fusenpai', null, null)).toBe('vs');
+  });
+});
+
 describe('matchStateCell: shared running-row centre cue', () => {
   it('completed → the formatted ippon score (ipponsB = SHIRO = left)', () => {
     // matchStateCell(m) → matchScoreStr derives the arrays from the match:
@@ -264,22 +290,22 @@ describe('matchStateCell: shared running-row centre cue', () => {
     expect(matchStateCell({ status: 'completed', ipponsB: ['M'], ipponsA: ['K'] })).toBe('M vs K');
   });
 
-  it('completed with no derivable score → "-" fallback', () => {
-    // No ippons, no score, no decision → matchScoreStr returns "" → "-".
-    expect(matchStateCell({ status: 'completed' })).toBe('-');
+  it('completed with no derivable score → plain "vs" (never a dash)', () => {
+    // No ippons, no score, no decision → matchScoreStr returns "" → "vs".
+    expect(matchStateCell({ status: 'completed' })).toBe('vs');
   });
 
   it('running → "vs" (no centre dot; the row highlight is the now signal)', () => {
     expect(matchStateCell({ status: 'running' })).toBe('vs');
   });
 
-  it('scheduled → "–"', () => {
-    expect(matchStateCell({ status: 'scheduled' })).toBe('–');
+  it('scheduled → plain "vs" (a dash is not a valid middle)', () => {
+    expect(matchStateCell({ status: 'scheduled' })).toBe('vs');
   });
 
-  it('unknown/missing status → "–" (treated as not-yet-run)', () => {
-    expect(matchStateCell({ status: 'bye' })).toBe('–');
-    expect(matchStateCell({})).toBe('–');
+  it('unknown/missing status → plain "vs" (treated as not-yet-run)', () => {
+    expect(matchStateCell({ status: 'bye' })).toBe('vs');
+    expect(matchStateCell({})).toBe('vs');
   });
 
   it('never emits a bare "●" for any state', () => {

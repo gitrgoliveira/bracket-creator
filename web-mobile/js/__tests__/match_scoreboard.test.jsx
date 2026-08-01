@@ -3,6 +3,7 @@
 // delegation tests in viewer.test.jsx / display_white_board.test.jsx don't see.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
+import { boutMiddle } from '../bracket.jsx';
 import { boutRows, findInTree, collectText } from './helpers/vdom.js';
 
 describe('match_scoreboard: withNumber', () => {
@@ -92,13 +93,14 @@ describe('match_scoreboard components', () => {
     global.window = global.window || {};
     global.window.isHikiwake = vi.fn((t) => t === 'hikiwake');
     global.window.ipponsFromScore = vi.fn(() => []);
+    global.window.boutMiddle = boutMiddle; // the real single middle source
     vi.resetModules();
     ({ BoutSubRow, IndividualScore, TeamScoreboard } = await import('../match_scoreboard.jsx'));
   });
   afterEach(() => {
     runtime.unmount();
     global.React = realReact;
-    delete global.window.isHikiwake; delete global.window.ipponsFromScore;
+    delete global.window.isHikiwake; delete global.window.ipponsFromScore; delete global.window.boutMiddle;
     vi.restoreAllMocks(); vi.resetModules();
   });
 

@@ -76,8 +76,7 @@ describe('PoolsViewer draw-order standings (mp-938b)', () => {
     // Mirror the real matchStateCell (bracket.jsx): completed → score||"-",
     // running → "vs", scheduled → "–".
     global.window.matchStateCell = (m) =>
-      m?.status === 'completed' ? (global.window.matchScoreStr(m) || '-')
-      : m?.status === 'running' ? 'vs' : '–';
+      m?.status === 'completed' ? (global.window.matchScoreStr(m) || 'vs') : 'vs';
     global.window.ipponsFromScore = () => [];
     global.window.queueLabel = () => '';
     global.window.queueLabelCompact = () => null;
@@ -335,8 +334,7 @@ describe('PoolNumberedMatchRow team IV score (mp-o4xl)', () => {
     // Mirror the real matchStateCell (bracket.jsx): completed → score||"-",
     // running → "vs", scheduled → "–".
     global.window.matchStateCell = (m) =>
-      m?.status === 'completed' ? (global.window.matchScoreStr(m) || '-')
-      : m?.status === 'running' ? 'vs' : '–';
+      m?.status === 'completed' ? (global.window.matchScoreStr(m) || 'vs') : 'vs';
     global.window.ipponsFromScore = () => [];
     global.window.queueLabel = () => '';
     global.window.queueLabelCompact = () => null;
@@ -378,7 +376,7 @@ describe('PoolNumberedMatchRow team IV score (mp-o4xl)', () => {
     expect(text).not.toContain('-');
   });
 
-  it('renders "-" for a completed individual match with no subResults when formatIpponsScore returns empty', () => {
+  it('renders the plain "vs" middle for a completed individual match with no derivable score', () => {
     // teamIVScore returns null for individual matches (no subResults)
     global.window.teamIVScore = () => null;
     global.window.formatIpponsScore = () => ''; // also empty
@@ -394,7 +392,7 @@ describe('PoolNumberedMatchRow team IV score (mp-o4xl)', () => {
 
     const tree = runtime.mount(PoolNumberedMatchRow, { m, num: 2 });
     const text = collectText(tree);
-    expect(text).toContain('-');
+    expect(text).toContain('vs');
   });
 
   it('falls back to formatIpponsScore when teamIVScore returns null', () => {
@@ -474,8 +472,7 @@ describe('PoolNumberedMatchRow engi stacked pair names (mp-gy6g)', () => {
       (global.window.teamIVScore(m)) ||
       global.window.formatIpponsScore(m?.ipponsB || [], m?.ipponsA || [], m?.score, m?.decision, m?.encho, m?.decidedByHantei);
     global.window.matchStateCell = (m) =>
-      m?.status === 'completed' ? (global.window.matchScoreStr(m) || '-')
-      : m?.status === 'running' ? 'vs' : '–';
+      m?.status === 'completed' ? (global.window.matchScoreStr(m) || 'vs') : 'vs';
     global.window.ipponsFromScore = () => [];
     global.window.queueLabel = () => '';
     global.window.queueLabelCompact = () => null;
@@ -598,8 +595,7 @@ describe('PoolsViewer engi stacked pair names in standings (mp-gy6g)', () => {
       (global.window.teamIVScore(m)) ||
       global.window.formatIpponsScore(m?.ipponsB || [], m?.ipponsA || [], m?.score, m?.decision, m?.encho, m?.decidedByHantei);
     global.window.matchStateCell = (m) =>
-      m?.status === 'completed' ? (global.window.matchScoreStr(m) || '-')
-      : m?.status === 'running' ? 'vs' : '–';
+      m?.status === 'completed' ? (global.window.matchScoreStr(m) || 'vs') : 'vs';
     global.window.ipponsFromScore = () => [];
     global.window.queueLabel = () => '';
     global.window.queueLabelCompact = () => null;

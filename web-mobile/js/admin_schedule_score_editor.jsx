@@ -187,7 +187,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                     <span className="score-edit-row__scoreval">
                       {m.status === "scheduled"
                         ? <span style={{ fontSize: 11, color: "var(--ink-3)" }}>vs</span>
-                        : (seScore || <span style={{ fontSize: 11, color: "var(--ink-3)" }}>{m.status === "running" ? "vs" : "-"}</span>)}
+                        : (seScore || <span style={{ fontSize: 11, color: "var(--ink-3)" }}>{window.boutMiddle ? window.boutMiddle(m.decision, m.encho, m.score) : "vs"}</span>)}
                     </span>
                     <span className="score-edit-row__foul">{foulA && <span className="msb-hansoku" data-testid="foul-mark-a">{foulA}</span>}</span>
                   </div>

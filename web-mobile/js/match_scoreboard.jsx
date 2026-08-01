@@ -172,7 +172,7 @@ function centreMarks(sub, matchSideA, matchSideB) {
           {slotCells([String(flagsB), ""], "shiro", "sub-flags-b")}
         </span>
         <span className="msb-vs">
-          <span className="msb-sep" aria-hidden="true">–</span>
+          <span className="msb-sep" aria-hidden="true">vs</span>
         </span>
         <span className={"msb-slots msb-slots--aka" + (winAka ? " msb-slots--win" : "")}>
           {slotCells([String(flagsA), ""], "aka", "sub-flags-a")}
@@ -184,9 +184,10 @@ function centreMarks(sub, matchSideA, matchSideB) {
   const lettersA = ipponLetters(sub.ipponsA); // aka / right
   const foulB = boutHansokuMark(sub.hansokuB);
   const foulA = boutHansokuMark(sub.hansokuA);
-  const isDraw = !sub.decidedByHantei &&
-    typeof window.isHikiwake === "function" &&
-    (window.isHikiwake(sub.score?.type) || window.isHikiwake(sub.decision));
+  // The centre glyph comes from the single middle-value source (boutMiddle:
+  // vs / X / (E) / (DH) — never a dash); only the unattributable-hantei
+  // fallback below may replace the plain "vs" with a centre Ht.
+  const mid = window.boutMiddle ? window.boutMiddle(sub.decision, sub.encho, sub.score) : "vs";
   // Win mark only when there are no ippon letters (otherwise the letters
   // already show who won). sideB = shiro/left, sideA = aka/right.
   // Fallback chain: sub-level side → daihyosen team alias → match-level side
@@ -208,9 +209,9 @@ function centreMarks(sub, matchSideA, matchSideB) {
         {winShiro ? slotCells([winMark, ""], "shiro", "sub-win-b") : slotCells(lettersB, "shiro")}
       </span>
       <span className="msb-vs">
-        {isDraw ? <span data-testid="sub-row-draw">X</span>
+        {mid !== "vs" ? <span data-testid="sub-row-draw">{mid}</span>
           : sub.decidedByHantei && !hasWinSide ? <span className="msb-ht" data-testid="sub-row-hantei">Ht</span>
-          : <span className="msb-sep" aria-hidden="true">–</span>}
+          : <span className="msb-sep" aria-hidden="true">vs</span>}
       </span>
       <span className={"msb-slots msb-slots--aka" + (winAka ? " msb-slots--win" : "")}>
         {winAka ? slotCells([winMark, ""], "aka", "sub-win-a") : slotCells(lettersA, "aka")}

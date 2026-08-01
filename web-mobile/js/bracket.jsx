@@ -52,7 +52,7 @@ function enchoLabel(encho) {
 
 // middleMark: the ONE mark the centre of a score may carry. The middle column
 // of a score sheet can only ever read:
-//   vs     not yet decided (callers render their own "vs"/"–" placeholder)
+//   vs     not yet decided (callers render the plain "vs" middle)
 //   X      a tie (hikiwake)
 //   (E)    the match went to overtime
 //   (DH)   a team encounter sent to a representative bout
@@ -86,12 +86,22 @@ const placeMarks = (marks, firstWins, secondWins) =>
 // score.type, so both sources count).
 const isDrawResult = (decision, score) => isHikiwakeBC(decision) || isHikiwakeBC(score?.type);
 
-// matchMiddleMark: middleMark for a match object (TV scoreboard, lobby, OBS
-// lower-third — surfaces that render the mark as a single centre chip). A
-// client-derived score.type of hikiwake counts as a draw like the decision.
+// boutMiddle: THE single source for what a bout's middle can read —
+// "vs" (plain, including unplayed/pending), "X" (tie), "(E)" (overtime),
+// "(DH)" (rep bout). Nothing else is a valid middle value: a dash never is
+// (operator ruling), and Ht/Kiken/Fus. are side results, never middles.
+// Every surface that renders a bout middle derives it from here.
+function boutMiddle(decision, encho, score) {
+  return (isDrawResult(decision, score) ? "X" : middleMark(decision, encho)) || "vs";
+}
+
+// matchMiddleMark: the SPECIAL middle marks only ("" when the middle is the
+// plain "vs") — for surfaces that render the mark as a single centre chip
+// (MatchCard meta strip, TV scoreboard header, lobby, OBS lower-third).
 function matchMiddleMark(match) {
   if (!match) return "";
-  return isDrawResult(match.decision, match.score) ? "X" : middleMark(match.decision, match.encho);
+  const mid = boutMiddle(match.decision, match.encho, match.score);
+  return mid === "vs" ? "" : mid;
 }
 
 // sideMarks: the per-side RESULT marks. winner goes in the winning side's
@@ -934,15 +944,15 @@ function matchScoreStr(m) {
       m.score, m.decision, m.encho, m.decidedByHantei, winnerSideLR(m));
 }
 
-// matchStateCell: the centre score-cell content for a compact match row, shared
-// so every list renders the SAME lifecycle cue: completed → score string,
-// running → "vs" (the row's .is-running highlight is the "now" signal, NOT a
-// centre dot), scheduled → "–". The labelled "● NOW" badge used in headers/
-// status columns is a separate affordance and is NOT produced here.
+// matchStateCell: the centre score-cell content for a compact match row,
+// shared so every list renders the SAME cue: completed → score string,
+// anything else → boutMiddle (normally the plain "vs"); the row's
+// .is-running highlight is the "now" signal, NOT a centre glyph, and the
+// labelled "● NOW" badge elsewhere is a separate affordance.
 function matchStateCell(m) {
-  if (m.status === "completed") return matchScoreStr(m) || "-";
-  if (m.status === "running") return "vs";
-  return "–";
+  const mid = boutMiddle(m.decision, m.encho, m.score);
+  if (m.status === "completed") return matchScoreStr(m) || mid;
+  return mid;
 }
 
 // bronzeUnderFinalStyle: inline style that places the 3rd-place (bronze) card
@@ -981,9 +991,10 @@ window.teamIVPWScore = teamIVPWScore;
 window.engiFlagScore = engiFlagScore;
 window.matchScoreStr = matchScoreStr;
 window.matchStateCell = matchStateCell;
+window.boutMiddle = boutMiddle;
 window.matchMiddleMark = matchMiddleMark;
 window.winnerSideLR = winnerSideLR;
 window.sideLabel = sideLabel;
 window.ipponsFromScore = ipponsFromScore;
 
-export { formatIpponsScore, enchoLabel, matchMiddleMark, winnerSideLR, sideLabel, roundLabel, ipponsFromScore, teamIVScore, teamIVPWScore, engiFlagScore, matchScoreStr, matchStateCell, buildDisplayModel, computeMetaTops, bronzeUnderFinalStyle, PlayerLine };
+export { formatIpponsScore, enchoLabel, boutMiddle, matchMiddleMark, winnerSideLR, sideLabel, roundLabel, ipponsFromScore, teamIVScore, teamIVPWScore, engiFlagScore, matchScoreStr, matchStateCell, buildDisplayModel, computeMetaTops, bronzeUnderFinalStyle, PlayerLine };

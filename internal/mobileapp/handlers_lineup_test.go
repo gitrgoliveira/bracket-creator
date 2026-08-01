@@ -21,7 +21,7 @@ import (
 // fault is a 500 (not misreported as a bad request).
 func TestLineupSetStatus(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest,
-		lineupSetStatus(domain.ErrLineupMissingSenpo), "validation sentinel -> 400")
+		lineupSetStatus(domain.ErrLineupTeamSizeInvalid), "validation sentinel -> 400")
 	assert.Equal(t, http.StatusBadRequest,
 		lineupSetStatus(errors.New("team_lineup: position \"x\" not allowed in 5-person team")), "validation error -> 400")
 	assert.Equal(t, http.StatusInternalServerError,

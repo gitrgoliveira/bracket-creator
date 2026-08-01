@@ -1127,15 +1127,16 @@ func applyBracketWrite(result *state.MatchResult, storedModifiedAt int64) bool {
 }
 
 // validateBracketCompletion rejects a Completed bracket-family write with no
-// winner. For kachinuki this happens when both sides exhaust simultaneously
-// (simultaneous hikiwake exhaustion); the operator must resolve via daihyosen
-// before marking the match Completed. Applies to all bracket match types (an
-// elimination result must never be indeterminate) and is the single AMENDMENT 2
-// choke point shared by recordBracketMatchResult, recordBracketMatchResultTx,
-// and applyBronzeMatchResult so the twins cannot drift.
+// winner: an elimination result must never be indeterminate. A tied fixed-
+// format encounter resolves via daihyosen; a tied kachinuki final bout
+// resolves via encho on that same bout (daihyosen does not exist in
+// kachinuki, mp-gmcg). Applies to all bracket match types and is the single
+// AMENDMENT 2 choke point shared by recordBracketMatchResult,
+// recordBracketMatchResultTx, and applyBronzeMatchResult so the twins cannot
+// drift.
 func validateBracketCompletion(matchID string, status state.MatchStatus, winner string) error {
 	if status == state.MatchStatusCompleted && winner == "" {
-		return validationErrorf("bracket match %s: cannot mark completed with no winner; resolve via daihyosen first", matchID)
+		return validationErrorf("bracket match %s: cannot mark completed with no winner; resolve the tie first (daihyosen, or encho on the final kachinuki bout)", matchID)
 	}
 	return nil
 }

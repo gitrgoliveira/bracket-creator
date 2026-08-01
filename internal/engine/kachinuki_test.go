@@ -281,9 +281,15 @@ func TestMaybeAdvanceKachinuki_NoSubResults(t *testing.T) {
 	assert.False(t, changed, "no sub-results means nothing to advance")
 }
 
-// TestMaybeAdvanceKachinuki_AppendsBout verifies the happy path: when
-// the last bout has a winner the function appends the next bout.
-func TestMaybeAdvanceKachinuki_AppendsBout(t *testing.T) {
+// TestMaybeAdvanceKachinuki_ExhaustedSnapshotNoOp verifies operator-led
+// completion (mp-gmcg): an apparently-exhausted roster snapshot is ADVISORY
+// only. With no lineup saved, the bout-log-only roster after bout 1 shows
+// SideB empty (W-Senpo retired, nobody else ever seen), so the pure core
+// reports MatchEnded (WinningSide=A) — but team sizes are unregulated and
+// the snapshot may be incomplete, so the engine must NOT finalize. The
+// stored match stays completely untouched; the operator ends the encounter
+// with an explicit completed score write through the normal scoring path.
+func TestMaybeAdvanceKachinuki_ExhaustedSnapshotNoOp(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "advance-append"
 
@@ -293,8 +299,8 @@ func TestMaybeAdvanceKachinuki_AppendsBout(t *testing.T) {
 		TeamSize:      5,
 	}))
 
-	// Bout 1: R-Senpo beats W-Senpo. Remaining: W-Jiho is still in,
-	// so AdvanceKachinuki should produce a next bout for position 2.
+	// Bout 1: R-Senpo beats W-Senpo. Bout-log-only roster: remainingB=[]
+	// → the pure core reports MatchEnded, which the caller ignores.
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{
 			ID:    "P1-0",
@@ -308,18 +314,17 @@ func TestMaybeAdvanceKachinuki_AppendsBout(t *testing.T) {
 
 	changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
 	require.NoError(t, err)
-	// The remaining queues from the bout log are empty (only one bout, one
-	// player each side, winner stays → SideB queue has no one left from
-	// bout log). AdvanceKachinuki sees WinningSide=A and empty SideB queue
-	// → MatchEnded. So changed should be true (ended state persisted).
-	assert.True(t, changed)
+	assert.False(t, changed, "an exhausted snapshot is advisory; the engine must not mutate the match")
 
-	// Verify the match was updated.
+	// The stored match must be completely untouched.
 	matches, err := store.LoadPoolMatches(compID)
 	require.NoError(t, err)
 	require.Len(t, matches, 1)
-	assert.Equal(t, state.MatchStatusCompleted, matches[0].Status,
-		"match should be completed when SideB queue is exhausted")
+	assert.NotEqual(t, state.MatchStatusCompleted, matches[0].Status,
+		"the engine must never auto-complete a kachinuki match")
+	assert.Empty(t, matches[0].Winner, "no winner may be assigned by the engine")
+	assert.Empty(t, matches[0].Decision, "no decision may be written by the engine")
+	assert.Len(t, matches[0].SubResults, 1, "no bout may be appended off an exhausted snapshot")
 }
 
 // TestMaybeAdvanceKachinuki_IgnoresTrailingDaihyosen verifies advancement is
@@ -334,8 +339,28 @@ func TestMaybeAdvanceKachinuki_IgnoresTrailingDaihyosen(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:            compID,
 		TeamMatchType: state.TeamMatchTypeKachinuki,
-		TeamSize:      5,
+		TeamSize:      3,
 	}))
+	// Saved lineups give WhiteTeam a non-empty remaining queue after bout 1,
+	// so advancing off the numbered bout APPENDS the next pairing. That
+	// append is the proof the daihyosen row was skipped (operator-led
+	// completion, mp-gmcg: appending is the only mutation the engine makes).
+	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
+		TeamID: "RedTeam", Round: 0,
+		Positions: map[domain.Position]string{
+			domain.PositionNumbered(1): "R-Senpo",
+			domain.PositionNumbered(2): "R-2",
+			domain.PositionNumbered(3): "R-3",
+		},
+	}, 3))
+	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
+		TeamID: "WhiteTeam", Round: 0,
+		Positions: map[domain.Position]string{
+			domain.PositionNumbered(1): "W-Senpo",
+			domain.PositionNumbered(2): "W-2",
+			domain.PositionNumbered(3): "W-3",
+		},
+	}, 3))
 
 	// Bout 1 (numbered) has a decisive outcome that should drive advancement.
 	// A trailing daihyosen placeholder (Position -1) is unscored: if selection
@@ -360,8 +385,19 @@ func TestMaybeAdvanceKachinuki_IgnoresTrailingDaihyosen(t *testing.T) {
 	matches, err := store.LoadPoolMatches(compID)
 	require.NoError(t, err)
 	require.Len(t, matches, 1)
-	assert.Equal(t, state.MatchStatusCompleted, matches[0].Status,
-		"WhiteTeam is exhausted after bout 1, so the match completes")
+	require.Len(t, matches[0].SubResults, 3, "the next bout must be appended off the numbered result")
+	appended := matches[0].SubResults[2]
+	assert.NotEqual(t, state.DaihyosenSubPosition, appended.Position, "the appended entry is a numbered kachinuki bout")
+	assert.Equal(t, "R-Senpo", appended.SideA, "R-Senpo stays on as the bout-1 winner")
+	assert.Equal(t, "W-2", appended.SideB, "W-2 is next from the WhiteTeam lineup")
+	// The daihyosen placeholder itself must survive untouched.
+	daihyosen := matches[0].SubResults[1]
+	require.Equal(t, state.DaihyosenSubPosition, daihyosen.Position)
+	assert.Empty(t, daihyosen.Winner, "the unscored daihyosen row must not be mutated")
+	assert.Empty(t, daihyosen.Decision, "the unscored daihyosen row must not be mutated")
+	// And the engine never finalizes: the encounter keeps running (mp-gmcg).
+	assert.NotEqual(t, state.MatchStatusCompleted, matches[0].Status)
+	assert.Empty(t, matches[0].Winner)
 }
 
 // TestMaybeAdvanceKachinuki_MatchNotFound verifies that requesting
@@ -444,11 +480,14 @@ func TestMaybeAdvanceKachinuki_BracketPath(t *testing.T) {
 	assert.False(t, changed)
 }
 
-// TestMaybeAdvanceKachinuki_BronzeFinalize verifies the Naginata 3rd-place
-// (bronze) match — a sibling of bracket.Rounds, not an element of it — is
-// found and finalized by the kachinuki advancement path, at parity with a
-// Rounds bracket match.
-func TestMaybeAdvanceKachinuki_BronzeFinalize(t *testing.T) {
+// TestMaybeAdvanceKachinuki_BronzeExhaustedSnapshotNoOp verifies the Naginata
+// 3rd-place (bronze) match — a sibling of bracket.Rounds, not an element of
+// it — is found by the kachinuki advancement path but is NEVER auto-finalized
+// (operator-led completion, mp-gmcg): the bout-log-only roster after bout 1
+// shows SideB exhausted, an advisory verdict only, so the engine leaves the
+// ThirdPlaceMatch completely untouched. The bronze APPEND branch is pinned
+// separately by TestMaybeAdvanceKachinuki_BronzeAppendsBout.
+func TestMaybeAdvanceKachinuki_BronzeExhaustedSnapshotNoOp(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "advance-bronze"
 
@@ -460,8 +499,8 @@ func TestMaybeAdvanceKachinuki_BronzeFinalize(t *testing.T) {
 	}))
 
 	// Bronze match with a single bout: R-Senpo beats W-Senpo. The winner stays
-	// and SideB's queue is exhausted → AdvanceKachinuki ends the match (same
-	// shape as TestMaybeAdvanceKachinuki_AppendsBout).
+	// and SideB's bout-log-only queue is exhausted → the pure core reports
+	// MatchEnded, which the caller must treat as advisory (no finalize).
 	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
 		Rounds: [][]state.BracketMatch{
 			{{ID: "m-r1-0", SideA: "RedTeam", SideB: "WhiteTeam", Winner: "RedTeam", Status: state.MatchStatusCompleted}},
@@ -480,13 +519,15 @@ func TestMaybeAdvanceKachinuki_BronzeFinalize(t *testing.T) {
 
 	changed, err := eng.MaybeAdvanceKachinuki(compID, "m-bronze")
 	require.NoError(t, err)
-	assert.True(t, changed, "bronze kachinuki match must be found and finalized")
+	assert.False(t, changed, "bronze exhausted snapshot is advisory; the engine must not mutate the match")
 
 	bracket, err := store.LoadBracket(compID)
 	require.NoError(t, err)
 	require.NotNil(t, bracket.ThirdPlaceMatch)
-	assert.Equal(t, state.MatchStatusCompleted, bracket.ThirdPlaceMatch.Status, "bronze finalized")
-	assert.Equal(t, "RedTeam", bracket.ThirdPlaceMatch.Winner, "bronze winner mirrored from kachinuki outcome")
+	assert.NotEqual(t, state.MatchStatusCompleted, bracket.ThirdPlaceMatch.Status, "bronze must not be auto-completed")
+	assert.Empty(t, bracket.ThirdPlaceMatch.Winner, "no winner may be assigned by the engine")
+	assert.Empty(t, bracket.ThirdPlaceMatch.Decision, "no decision may be written by the engine")
+	assert.Len(t, bracket.ThirdPlaceMatch.SubResults, 1, "no bout may be appended off an exhausted snapshot")
 }
 
 // TestMaybeAdvanceKachinuki_AppendsBoutNextRound verifies the case where
@@ -766,10 +807,15 @@ func TestMaybeAdvanceKachinuki_CompletedMatchNoOp(t *testing.T) {
 	assert.Equal(t, "RedTeam", matches[0].Winner)
 }
 
-// TestMaybeAdvanceKachinuki_FullExhaustion5v5 verifies that a full 5-person
-// lineup is used to correctly detect exhaustion after the last player of one
-// side is defeated.
-func TestMaybeAdvanceKachinuki_FullExhaustion5v5(t *testing.T) {
+// TestMaybeAdvanceKachinuki_FullSequence5v5EndsWithOperator walks a full 5v5
+// sequence bout by bout: R-S sweeps the WhiteTeam lineup, and after each
+// scored bout the engine appends the next pairing from the saved lineups
+// (pinning the append chain). After the FINAL bout (W-T, last of WhiteTeam,
+// defeated) the roster snapshot is exhausted — but that verdict is advisory
+// only (operator-led completion, mp-gmcg): the last advance is a no-op and
+// the match stays running with the full bout log intact until the operator
+// sends an explicit completed score write.
+func TestMaybeAdvanceKachinuki_FullSequence5v5EndsWithOperator(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "kachinuki-5v5-exhaustion"
 
@@ -794,36 +840,63 @@ func TestMaybeAdvanceKachinuki_FullExhaustion5v5(t *testing.T) {
 		},
 	}, 5))
 
-	// R-S has beaten W-S, W-J, W-C, W-F. Now beats W-T (last of WhiteTeam).
-	// After this bout: remainingA=[R-S], remainingB=[] → MatchEnded WinningSide=A.
+	// Bout 1 scored: R-S beats W-S. The walk below scores each appended
+	// bout in turn (R-S keeps winning) and re-runs advancement.
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{
-			ID:    "P1-0",
-			SideA: "RedTeam",
-			SideB: "WhiteTeam",
+			ID:     "P1-0",
+			SideA:  "RedTeam",
+			SideB:  "WhiteTeam",
+			Status: state.MatchStatusRunning,
 			SubResults: []state.SubMatchResult{
 				{Position: 1, SideA: "R-S", SideB: "W-S", Winner: "R-S", Decision: "fought"},
-				{Position: 2, SideA: "R-S", SideB: "W-J", Winner: "R-S", Decision: "fought"},
-				{Position: 3, SideA: "R-S", SideB: "W-C", Winner: "R-S", Decision: "fought"},
-				{Position: 4, SideA: "R-S", SideB: "W-F", Winner: "R-S", Decision: "fought"},
-				{Position: 5, SideA: "R-S", SideB: "W-T", Winner: "R-S", Decision: "fought"},
 			},
 		},
 	}))
 
+	whiteOrder := []string{"W-S", "W-J", "W-C", "W-F", "W-T"}
+	for bout := 2; bout <= 5; bout++ {
+		changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
+		require.NoError(t, err, "bout %d", bout)
+		require.True(t, changed, "bout %d must be appended from the lineups", bout)
+
+		matches, err := store.LoadPoolMatches(compID)
+		require.NoError(t, err)
+		require.Len(t, matches, 1)
+		require.Len(t, matches[0].SubResults, bout, "append chain must reach bout %d", bout)
+		next := &matches[0].SubResults[bout-1]
+		assert.Equal(t, "R-S", next.SideA, "bout %d: R-S stays on as the winner", bout)
+		assert.Equal(t, whiteOrder[bout-1], next.SideB, "bout %d: next WhiteTeam fighter in lineup order", bout)
+		assert.Empty(t, next.Winner, "bout %d is appended unscored", bout)
+		assert.NotEqual(t, state.MatchStatusCompleted, matches[0].Status, "encounter keeps running mid-sequence")
+
+		// Operator scores the appended bout: R-S wins again.
+		next.Winner = "R-S"
+		next.Decision = "fought"
+		require.NoError(t, store.SavePoolMatches(compID, matches))
+	}
+
+	// W-T (last of WhiteTeam) is now defeated: the snapshot is exhausted,
+	// but that is advisory only — the engine must NOT finalize (mp-gmcg).
 	changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
 	require.NoError(t, err)
-	assert.True(t, changed, "all WhiteTeam players retired; match must end")
+	assert.False(t, changed, "exhaustion is advisory; the operator ends the match explicitly")
 
 	matches, err := store.LoadPoolMatches(compID)
 	require.NoError(t, err)
 	require.Len(t, matches, 1)
-	assert.Equal(t, state.MatchStatusCompleted, matches[0].Status)
-	assert.Equal(t, "RedTeam", matches[0].Winner, "RedTeam wins by exhausting WhiteTeam")
+	assert.Len(t, matches[0].SubResults, 5, "the full bout log must stay intact")
+	assert.NotEqual(t, state.MatchStatusCompleted, matches[0].Status, "the engine must never auto-complete")
+	assert.Empty(t, matches[0].Winner, "no winner may be assigned by the engine")
+	assert.Empty(t, matches[0].Decision, "no decision may be written by the engine")
 }
 
 // TestMaybeAdvanceKachinuki_NoLineupFallback verifies that when no lineup is
-// saved the function falls back to the bout-log-only approach without error.
+// saved the function falls back to the bout-log-only roster without error.
+// The fallback snapshot (knownB={W-1}, retiredB={W-1} → remainingB=[]) reads
+// as MatchEnded, but that verdict is advisory only (operator-led completion,
+// mp-gmcg): with team sizes unregulated the bout log may not have seen the
+// whole roster, so the engine must leave the match untouched.
 func TestMaybeAdvanceKachinuki_NoLineupFallback(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "kachinuki-no-lineup-fallback"
@@ -846,14 +919,18 @@ func TestMaybeAdvanceKachinuki_NoLineupFallback(t *testing.T) {
 		},
 	}))
 
-	// Without lineup: knownB={W-1}, retiredB={W-1}, remainingB=[] → MatchEnded.
+	// Without lineup: remainingB=[] → advisory MatchEnded → no-op.
 	changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
 	require.NoError(t, err)
-	assert.True(t, changed, "bout-log-only fallback: W-1 retired, SideB empty → match ended")
+	assert.False(t, changed, "bout-log-only exhaustion is advisory; the engine must not mutate the match")
 
 	matches, err := store.LoadPoolMatches(compID)
 	require.NoError(t, err)
-	assert.Equal(t, state.MatchStatusCompleted, matches[0].Status)
+	require.Len(t, matches, 1)
+	assert.NotEqual(t, state.MatchStatusCompleted, matches[0].Status, "the engine must never auto-complete")
+	assert.Empty(t, matches[0].Winner)
+	assert.Empty(t, matches[0].Decision)
+	assert.Len(t, matches[0].SubResults, 1, "no bout may be appended off the exhausted fallback snapshot")
 }
 
 // TestMaybeAdvanceKachinuki_MatchScopedLineup verifies that a match-scoped
@@ -1024,10 +1101,11 @@ func TestMaybeAdvanceKachinuki_NoOutcome(t *testing.T) {
 }
 
 // TestMaybeAdvanceKachinuki_HikiwakeBothExhausted verifies that when both
-// sides of a POOL match are exhausted simultaneously after a hikiwake,
-// MaybeAdvanceKachinuki finalizes the encounter as a draw (Status=Completed,
-// Decision="hikiwake", Winner=""). Daihyosen is knockout-only; pool encounters
-// are legitimately drawn. GAP 2b.
+// sides of a POOL match look simultaneously exhausted after a hikiwake, the
+// BothExhausted verdict is ADVISORY only (operator-led completion, mp-gmcg):
+// the engine no longer auto-finalizes the pool draw. The match is left
+// completely untouched; the operator records the draw explicitly through the
+// normal scoring path.
 func TestMaybeAdvanceKachinuki_HikiwakeBothExhausted(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "kachinuki-hikiwake-exhausted"
@@ -1057,22 +1135,25 @@ func TestMaybeAdvanceKachinuki_HikiwakeBothExhausted(t *testing.T) {
 
 	changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
 	require.NoError(t, err)
-	assert.True(t, changed, "pool simultaneous exhaustion must finalize the encounter as a draw")
+	assert.False(t, changed, "BothExhausted is advisory; the engine must not finalize the pool draw")
 
 	matches, err := store.LoadPoolMatches(compID)
 	require.NoError(t, err)
 	require.Len(t, matches, 1)
-	assert.Equal(t, state.MatchStatusCompleted, matches[0].Status, "pool match must be completed as a draw")
-	assert.Equal(t, state.DecisionDraw, matches[0].Decision, "decision must be hikiwake (draw)")
-	assert.Empty(t, matches[0].Winner, "no winner on a drawn encounter")
+	assert.NotEqual(t, state.MatchStatusCompleted, matches[0].Status, "the engine must never auto-complete")
+	assert.Empty(t, matches[0].Decision, "no draw decision may be written by the engine")
+	assert.Empty(t, matches[0].Winner, "no winner may be assigned by the engine")
+	assert.Len(t, matches[0].SubResults, 1, "the bout log must stay intact")
 }
 
 // TestMaybeAdvanceKachinuki_SimultaneousExhaustionStaysRunning verifies that
-// when both teams of a POOL match are exhausted simultaneously after a hikiwake,
-// MaybeAdvanceKachinuki finalizes the pool encounter as a draw (changed=true,
-// Status=Completed, Decision="hikiwake", Winner=""). The name is preserved for
-// historical context; see also TestMaybeAdvanceKachinuki_BracketSimultaneousExhaustionStaysRunning
-// for the bracket path that does leave the match running. GAP 2b.
+// when both teams of a POOL match look simultaneously exhausted after a
+// hikiwake, the encounter literally STAYS RUNNING (operator-led completion,
+// mp-gmcg): the match starts in MatchStatusRunning and the advisory
+// BothExhausted verdict must preserve that status verbatim — no completion,
+// no draw decision, no winner. The operator records the draw explicitly. See
+// TestMaybeAdvanceKachinuki_BracketSimultaneousExhaustionStaysRunning for the
+// bracket twin.
 func TestMaybeAdvanceKachinuki_SimultaneousExhaustionStaysRunning(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "kachinuki-simultaneous-exhaustion"
@@ -1083,12 +1164,14 @@ func TestMaybeAdvanceKachinuki_SimultaneousExhaustionStaysRunning(t *testing.T) 
 		TeamSize:      5,
 		Format:        state.CompFormatMixed,
 	}))
-	// Single hikiwake bout, both players are the last on their side.
+	// Single hikiwake bout, both players are the last on their side. The
+	// match is explicitly Running so the test can pin status preservation.
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{
-			ID:    "P1-0",
-			SideA: "RedTeam",
-			SideB: "WhiteTeam",
+			ID:     "P1-0",
+			SideA:  "RedTeam",
+			SideB:  "WhiteTeam",
+			Status: state.MatchStatusRunning,
 			SubResults: []state.SubMatchResult{
 				{
 					Position: 1,
@@ -1102,20 +1185,23 @@ func TestMaybeAdvanceKachinuki_SimultaneousExhaustionStaysRunning(t *testing.T) 
 
 	changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
 	require.NoError(t, err)
-	assert.True(t, changed, "pool simultaneous exhaustion must finalize the encounter as a draw")
+	assert.False(t, changed, "simultaneous exhaustion is advisory; the engine must not mutate the match")
 
 	matches, err := store.LoadPoolMatches(compID)
 	require.NoError(t, err)
 	require.Len(t, matches, 1)
-	assert.Equal(t, state.MatchStatusCompleted, matches[0].Status, "pool draw must be completed")
-	assert.Equal(t, state.DecisionDraw, matches[0].Decision, "decision must be hikiwake")
-	assert.Empty(t, matches[0].Winner, "no winner on a drawn pool encounter")
+	assert.Equal(t, state.MatchStatusRunning, matches[0].Status, "the pool encounter must stay running for the operator")
+	assert.Empty(t, matches[0].Decision, "no draw decision may be written by the engine")
+	assert.Empty(t, matches[0].Winner, "no winner on the untouched encounter")
+	assert.Len(t, matches[0].SubResults, 1, "the bout log must stay intact")
 }
 
-// TestMaybeAdvanceKachinuki_MatchEndedPoolUpdate verifies that when one side
-// is exhausted (the winning side "has won"), MaybeAdvanceKachinuki marks the
-// pool match as completed and returns (true, nil).
-func TestMaybeAdvanceKachinuki_MatchEndedPoolUpdate(t *testing.T) {
+// TestMaybeAdvanceKachinuki_MatchEndedAdvisoryNoOp verifies that a MatchEnded
+// verdict for the SideB winner (SideA snapshot exhausted) is ADVISORY only
+// (operator-led completion, mp-gmcg): the engine must not complete the pool
+// match, assign WhiteTeam the win, or touch the bout log. Symmetric twin of
+// TestMaybeAdvanceKachinuki_ExhaustedSnapshotNoOp (which pins WinningSide=A).
+func TestMaybeAdvanceKachinuki_MatchEndedAdvisoryNoOp(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "kachinuki-match-ended"
 
@@ -1125,10 +1211,11 @@ func TestMaybeAdvanceKachinuki_MatchEndedPoolUpdate(t *testing.T) {
 		TeamSize:      5,
 		Format:        state.CompFormatMixed,
 	}))
-	// After B-Senpo beats A-Senpo, A's remaining roster is empty → match ends.
+	// After B-Senpo beats A-Senpo, A's bout-log-only roster is empty.
 	// With kachinukiRemainingRoster: knownA={A-Senpo}, retiredA={A-Senpo},
 	// remainingA=[]. knownB={B-Senpo}, retiredB={}, remainingB=[B-Senpo].
-	// AdvanceKachinuki sees SideA=[] → WinningSide="B" → MatchEnded=true.
+	// AdvanceKachinuki sees SideA=[] → WinningSide="B" → MatchEnded=true,
+	// which the caller must log and otherwise ignore.
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{
 			ID:    "P1-0",
@@ -1148,29 +1235,33 @@ func TestMaybeAdvanceKachinuki_MatchEndedPoolUpdate(t *testing.T) {
 
 	changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
 	require.NoError(t, err)
-	assert.True(t, changed, "match should have been marked completed")
+	assert.False(t, changed, "MatchEnded is advisory; the engine must not mutate the match")
 
 	matches, err := store.LoadPoolMatches(compID)
 	require.NoError(t, err)
 	require.Len(t, matches, 1)
-	assert.Equal(t, state.MatchStatusCompleted, matches[0].Status)
-	assert.Equal(t, "WhiteTeam", matches[0].Winner)
+	assert.NotEqual(t, state.MatchStatusCompleted, matches[0].Status, "the engine must never auto-complete")
+	assert.Empty(t, matches[0].Winner, "no winner may be assigned by the engine")
+	assert.Empty(t, matches[0].Decision, "no decision may be written by the engine")
+	assert.Len(t, matches[0].SubResults, 1, "the bout log must stay intact")
 }
 
-// A4 bracket bout-append and winner propagation tests -------------------------
+// A4 bracket bout-append tests ------------------------------------------------
 
-// TestMaybeAdvanceKachinuki_BracketPropagatesWinner verifies that when a bracket
-// kachinuki match ends, propagateBracketWinner is called so the winning team
-// advances to the next round. GAP 4 (A4).
-func TestMaybeAdvanceKachinuki_BracketPropagatesWinner(t *testing.T) {
+// TestMaybeAdvanceKachinuki_BracketNoAutoFinalize verifies that a bracket
+// kachinuki match whose roster snapshot reads as exhausted is NOT finalized
+// by the engine and, in particular, NO winner is propagated to the next
+// round (operator-led completion, mp-gmcg): the operator's explicit
+// completed score write owns finalization and propagation.
+func TestMaybeAdvanceKachinuki_BracketNoAutoFinalize(t *testing.T) {
 	compID := "kachinuki-bracket-propagates-winner"
 	eng, store, _ := setupKachinukiComp(t, compID, 5)
 
 	// 2-round bracket: Round 0 = [SF1, SF2], Round 1 = [Final].
 	// SF1: TeamA vs TeamB. Bout 1: A-Senpo beats B-Senpo.
 	// Bout-log-only fallback: knownB={B-Senpo}, retiredB={B-Senpo} → remainingB=[].
-	// AdvanceKachinuki → MatchEnded=true, WinningSide=A → Winner=TeamA.
-	// propagateBracketWinner must feed TeamA into Final.SideA.
+	// AdvanceKachinuki → MatchEnded=true (advisory only): the engine must not
+	// complete SF1 nor feed TeamA into the Final.
 	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
 		Rounds: [][]state.BracketMatch{
 			{
@@ -1196,14 +1287,17 @@ func TestMaybeAdvanceKachinuki_BracketPropagatesWinner(t *testing.T) {
 
 	changed, err := eng.MaybeAdvanceKachinuki(compID, "SF1")
 	require.NoError(t, err)
-	assert.True(t, changed, "SF1 should have been finalized")
+	assert.False(t, changed, "an exhausted bracket snapshot is advisory; the engine must not finalize SF1")
 
 	bracket, err := store.LoadBracket(compID)
 	require.NoError(t, err)
-	assert.Equal(t, state.MatchStatusCompleted, bracket.Rounds[0][0].Status, "SF1 marked completed")
-	assert.Equal(t, "TeamA", bracket.Rounds[0][0].Winner, "SF1 winner is TeamA")
-	// propagateBracketWinner must have fed TeamA into the Final's SideA slot.
-	assert.Equal(t, "TeamA", bracket.Rounds[1][0].SideA, "Final SideA must be populated from SF1 winner")
+	assert.NotEqual(t, state.MatchStatusCompleted, bracket.Rounds[0][0].Status, "SF1 must not be auto-completed")
+	assert.Empty(t, bracket.Rounds[0][0].Winner, "no winner may be assigned by the engine")
+	assert.Len(t, bracket.Rounds[0][0].SubResults, 1, "the bout log must stay intact")
+	// No propagation: the Final's slots must stay empty until the operator
+	// completes SF1 through the scoring path.
+	assert.Empty(t, bracket.Rounds[1][0].SideA, "Final SideA must not be populated by this call")
+	assert.Empty(t, bracket.Rounds[1][0].SideB, "Final SideB must not be populated by this call")
 }
 
 // TestMaybeAdvanceKachinuki_BracketAppendsBout verifies that when a bracket
@@ -1429,166 +1523,6 @@ func TestRecordMatchResultWithIneligibility_KachinukiMerge(t *testing.T) {
 	assert.Equal(t, "R-2", matches[0].SubResults[1].SideA)
 }
 
-// TestCheckKachinukiPrematureCompletion pins every bypass branch of the
-// completed-write safety net.
-func TestCheckKachinukiPrematureCompletion(t *testing.T) {
-	setup := func(t *testing.T, compID string, matchStatus state.MatchStatus) (*Engine, *state.Store) {
-		t.Helper()
-		eng, store, _ := setupTestEngine(t)
-		require.NoError(t, store.SaveCompetition(&state.Competition{
-			ID:            compID,
-			TeamMatchType: state.TeamMatchTypeKachinuki,
-			TeamSize:      3,
-			Format:        state.CompFormatMixed,
-		}))
-		require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
-			TeamID: "RedTeam", Round: 0,
-			Positions: map[domain.Position]string{
-				domain.PositionNumbered(1): "R-1",
-				domain.PositionNumbered(2): "R-2",
-				domain.PositionNumbered(3): "R-3",
-			},
-		}, 3))
-		require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
-			TeamID: "WhiteTeam", Round: 0,
-			Positions: map[domain.Position]string{
-				domain.PositionNumbered(1): "W-1",
-				domain.PositionNumbered(2): "W-2",
-				domain.PositionNumbered(3): "W-3",
-			},
-		}, 3))
-		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
-			{
-				ID: "P1-0", SideA: "RedTeam", SideB: "WhiteTeam", Status: matchStatus,
-				SubResults: []state.SubMatchResult{
-					{Position: 1, SideA: "R-1", SideB: "W-1", Winner: "R-1", Decision: "fought"},
-				},
-			},
-		}))
-		return eng, store
-	}
-
-	t.Run("both rosters remaining rejects", func(t *testing.T) {
-		eng, _ := setup(t, "premature-both-remaining", state.MatchStatusRunning)
-		err := eng.CheckKachinukiPrematureCompletion("premature-both-remaining", "P1-0", &state.MatchResult{
-			Status: state.MatchStatusCompleted, Winner: "RedTeam",
-			SubResults: []state.SubMatchResult{
-				{Position: 1, SideA: "R-1", SideB: "W-1", Winner: "R-1", Decision: "fought"},
-			},
-		})
-		assert.ErrorIs(t, err, ErrKachinukiPrematureCompletion)
-	})
-
-	t.Run("non-completed write passes", func(t *testing.T) {
-		eng, _ := setup(t, "premature-running-ok", state.MatchStatusRunning)
-		assert.NoError(t, eng.CheckKachinukiPrematureCompletion("premature-running-ok", "P1-0", &state.MatchResult{
-			Status: state.MatchStatusRunning,
-		}))
-	})
-
-	t.Run("withdrawal decision passes", func(t *testing.T) {
-		eng, _ := setup(t, "premature-kiken-ok", state.MatchStatusRunning)
-		assert.NoError(t, eng.CheckKachinukiPrematureCompletion("premature-kiken-ok", "P1-0", &state.MatchResult{
-			Status: state.MatchStatusCompleted, Winner: "RedTeam", Decision: "kiken-voluntary",
-		}))
-	})
-
-	t.Run("daihyosen sub-result passes", func(t *testing.T) {
-		eng, _ := setup(t, "premature-daihyosen-ok", state.MatchStatusRunning)
-		assert.NoError(t, eng.CheckKachinukiPrematureCompletion("premature-daihyosen-ok", "P1-0", &state.MatchResult{
-			Status: state.MatchStatusCompleted, Winner: "RedTeam",
-			SubResults: []state.SubMatchResult{
-				{Position: -1, SideA: "RedTeam", SideB: "WhiteTeam", Winner: "RedTeam", Decision: "daihyosen"},
-			},
-		}))
-	})
-
-	t.Run("correction of a completed match passes", func(t *testing.T) {
-		eng, _ := setup(t, "premature-correction-ok", state.MatchStatusCompleted)
-		assert.NoError(t, eng.CheckKachinukiPrematureCompletion("premature-correction-ok", "P1-0", &state.MatchResult{
-			Status: state.MatchStatusCompleted, Winner: "RedTeam",
-			SubResults: []state.SubMatchResult{
-				{Position: 1, SideA: "R-1", SideB: "W-1", Winner: "R-1", Decision: "fought"},
-			},
-		}))
-	})
-
-	t.Run("exhausted side passes", func(t *testing.T) {
-		eng, _ := setup(t, "premature-exhausted-ok", state.MatchStatusRunning)
-		// Incoming log retires the whole WhiteTeam roster: W-1..W-3 all lost.
-		assert.NoError(t, eng.CheckKachinukiPrematureCompletion("premature-exhausted-ok", "P1-0", &state.MatchResult{
-			Status: state.MatchStatusCompleted, Winner: "RedTeam",
-			SubResults: []state.SubMatchResult{
-				{Position: 1, SideA: "R-1", SideB: "W-1", Winner: "R-1", Decision: "fought"},
-				{Position: 2, SideA: "R-1", SideB: "W-2", Winner: "R-1", Decision: "fought"},
-				{Position: 3, SideA: "R-1", SideB: "W-3", Winner: "R-1", Decision: "fought"},
-			},
-		}))
-	})
-
-	t.Run("unknown match passes through to the 404 path", func(t *testing.T) {
-		eng, _ := setup(t, "premature-unknown-match", state.MatchStatusRunning)
-		assert.NoError(t, eng.CheckKachinukiPrematureCompletion("premature-unknown-match", "no-such-match", &state.MatchResult{
-			Status: state.MatchStatusCompleted, Winner: "RedTeam",
-		}))
-	})
-
-	t.Run("non-kachinuki competition passes", func(t *testing.T) {
-		eng, store, _ := setupTestEngine(t)
-		require.NoError(t, store.SaveCompetition(&state.Competition{
-			ID: "premature-fixed-comp", TeamSize: 3, TeamMatchType: state.TeamMatchTypeFixed,
-		}))
-		assert.NoError(t, eng.CheckKachinukiPrematureCompletion("premature-fixed-comp", "P1-0", &state.MatchResult{
-			Status: state.MatchStatusCompleted, Winner: "RedTeam",
-		}))
-	})
-}
-
-// TestCheckKachinukiPrematureCompletion_MergesPartialIncoming guards the
-// pre-check against a partial or stale client log on a completed write. The
-// write path merges sub-results by position, so exhaustion must be judged on
-// the MERGED log, not the incoming log alone: a client that omits earlier
-// server-appended bouts must not trip a false 409 when the committed (merged)
-// log would show exhaustion.
-func TestCheckKachinukiPrematureCompletion_MergesPartialIncoming(t *testing.T) {
-	eng, store, comp := setupKachinukiComp(t, "premature-merge", 3, func(c *state.Competition) { c.Format = state.CompFormatMixed })
-	require.NoError(t, store.SetTeamLineup(comp.ID, domain.TeamLineup{
-		TeamID: "RedTeam", Round: 0,
-		Positions: map[domain.Position]string{
-			domain.PositionNumbered(1): "R-1", domain.PositionNumbered(2): "R-2", domain.PositionNumbered(3): "R-3",
-		},
-	}, 3))
-	require.NoError(t, store.SetTeamLineup(comp.ID, domain.TeamLineup{
-		TeamID: "WhiteTeam", Round: 0,
-		Positions: map[domain.Position]string{
-			domain.PositionNumbered(1): "W-1", domain.PositionNumbered(2): "W-2", domain.PositionNumbered(3): "W-3",
-		},
-	}, 3))
-	// Server already holds the FULL exhausting log: R-1 beat W-1..W-3, so
-	// WhiteTeam is fully retired and completion is legitimate.
-	require.NoError(t, store.SavePoolMatches(comp.ID, []state.MatchResult{
-		{
-			ID: "P1-0", SideA: "RedTeam", SideB: "WhiteTeam", Status: state.MatchStatusRunning,
-			SubResults: []state.SubMatchResult{
-				{Position: 1, SideA: "R-1", SideB: "W-1", Winner: "R-1", Decision: "fought"},
-				{Position: 2, SideA: "R-1", SideB: "W-2", Winner: "R-1", Decision: "fought"},
-				{Position: 3, SideA: "R-1", SideB: "W-3", Winner: "R-1", Decision: "fought"},
-			},
-		},
-	}))
-
-	// The client submits a PARTIAL completed write carrying only the last
-	// bout (a stale/short log). Judged alone this looks like W-1/W-2 remain
-	// (a false 409); merged with the stored log WhiteTeam is exhausted.
-	err := eng.CheckKachinukiPrematureCompletion(comp.ID, "P1-0", &state.MatchResult{
-		Status: state.MatchStatusCompleted, Winner: "RedTeam",
-		SubResults: []state.SubMatchResult{
-			{Position: 3, SideA: "R-1", SideB: "W-3", Winner: "R-1", Decision: "fought"},
-		},
-	})
-	assert.NoError(t, err, "merged log shows WhiteTeam exhausted; completion must be allowed, not falsely rejected")
-}
-
 // TestMaybeAdvanceKachinuki_NamelessBoutNoOp: identity is required for
 // retirement math. A bout that carries an outcome but EMPTY side names
 // (UAT: the final's bootstrapped bout 1 was submitted as a nameless
@@ -1708,85 +1642,13 @@ func TestMaybeAdvanceKachinuki_FallbackRosterFirstAppearanceOrder(t *testing.T) 
 	}
 }
 
-// TestCheckKachinukiPrematureCompletion_EmptyDaihyosenRejected is the
-// regression test for Fix 4: a completed kachinuki write whose only
-// daihyosen sub-result carries NO winner (an unscored placeholder) must
-// still be rejected when both teams still have players remaining. The old
-// code bypassed the guard on ANY Position=-1 sub-result regardless of
-// whether a winner had been recorded.
-func TestCheckKachinukiPrematureCompletion_EmptyDaihyosenRejected(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	const compID = "premature-daihyosen-no-winner"
-
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:            compID,
-		TeamMatchType: state.TeamMatchTypeKachinuki,
-		TeamSize:      3,
-		Format:        state.CompFormatMixed,
-	}))
-	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
-		TeamID: "RedTeam", Round: 0,
-		Positions: map[domain.Position]string{
-			domain.PositionNumbered(1): "R-1",
-			domain.PositionNumbered(2): "R-2",
-			domain.PositionNumbered(3): "R-3",
-		},
-	}, 3))
-	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
-		TeamID: "WhiteTeam", Round: 0,
-		Positions: map[domain.Position]string{
-			domain.PositionNumbered(1): "W-1",
-			domain.PositionNumbered(2): "W-2",
-			domain.PositionNumbered(3): "W-3",
-		},
-	}, 3))
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
-		{
-			ID: "P1-0", SideA: "RedTeam", SideB: "WhiteTeam",
-			Status: state.MatchStatusRunning,
-			SubResults: []state.SubMatchResult{
-				{Position: 1, SideA: "R-1", SideB: "W-1", Winner: "R-1", Decision: "fought"},
-			},
-		},
-	}))
-
-	t.Run("unscored daihyosen placeholder is rejected", func(t *testing.T) {
-		// Position=-1 sub-result but Winner="" means the daihyosen has not yet
-		// been played. Both teams still have R-2/R-3 and W-2/W-3 remaining, so
-		// this must be rejected as a premature completion.
-		err := eng.CheckKachinukiPrematureCompletion(compID, "P1-0", &state.MatchResult{
-			Status: state.MatchStatusCompleted, Winner: "RedTeam",
-			SubResults: []state.SubMatchResult{
-				{Position: 1, SideA: "R-1", SideB: "W-1", Winner: "R-1", Decision: "fought"},
-				{Position: -1, SideA: "RedTeam", SideB: "WhiteTeam", Winner: "", Decision: "daihyosen"},
-			},
-		})
-		assert.ErrorIs(t, err, ErrKachinukiPrematureCompletion,
-			"an unscored daihyosen placeholder must not bypass the premature-completion guard")
-	})
-
-	t.Run("winner-carrying daihyosen still passes", func(t *testing.T) {
-		// Sanity-check: a Position=-1 sub-result WITH a winner is the legitimate
-		// completion path and must still return nil.
-		err := eng.CheckKachinukiPrematureCompletion(compID, "P1-0", &state.MatchResult{
-			Status: state.MatchStatusCompleted, Winner: "RedTeam",
-			SubResults: []state.SubMatchResult{
-				{Position: 1, SideA: "R-1", SideB: "W-1", Winner: "R-1", Decision: "fought"},
-				{Position: -1, SideA: "RedTeam", SideB: "WhiteTeam", Winner: "RedTeam", Decision: "daihyosen"},
-			},
-		})
-		assert.NoError(t, err,
-			"a winner-carrying daihyosen sub-result must still allow the completion")
-	})
-}
-
-// TestMaybeAdvanceKachinuki_PoolSimultaneousExhaustionDraw is the primary
-// regression test for the pool/league draw finalization fix. A hikiwake that
-// retires the last player on both sides in a POOL match must produce a
-// completed, winner-less encounter (Status=Completed, Decision="hikiwake",
-// Winner=""). Daihyosen is knockout-only; pool encounters are legitimately
-// drawn. GAP 2b.
-func TestMaybeAdvanceKachinuki_PoolSimultaneousExhaustionDraw(t *testing.T) {
+// TestMaybeAdvanceKachinuki_PoolSimultaneousExhaustionNoOp pins that the pool
+// BothExhausted auto-draw is REMOVED (operator-led completion, mp-gmcg): a
+// hikiwake that retires the last lineup player on both sides of a POOL match
+// leaves the encounter untouched — still running, no draw decision, no
+// winner, full bout log intact. The operator records the draw explicitly
+// through the normal scoring path.
+func TestMaybeAdvanceKachinuki_PoolSimultaneousExhaustionNoOp(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "kachinuki-pool-draw-finalize"
 
@@ -1815,7 +1677,8 @@ func TestMaybeAdvanceKachinuki_PoolSimultaneousExhaustionDraw(t *testing.T) {
 		},
 	}, 3))
 	// Bout 3 is the last for both teams (R-3 vs W-3) and ends in hikiwake.
-	// After bout 3: remainingA=[], remainingB=[] → BothExhausted → pool draw.
+	// After bout 3: remainingA=[], remainingB=[] → BothExhausted, an advisory
+	// verdict the engine logs and otherwise ignores.
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{
 			ID:    "P1-0",
@@ -1831,14 +1694,15 @@ func TestMaybeAdvanceKachinuki_PoolSimultaneousExhaustionDraw(t *testing.T) {
 
 	changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
 	require.NoError(t, err)
-	assert.True(t, changed, "pool simultaneous exhaustion must finalize the encounter as a draw")
+	assert.False(t, changed, "the pool BothExhausted auto-draw is removed; the engine must not mutate the match")
 
 	matches, err := store.LoadPoolMatches(compID)
 	require.NoError(t, err)
 	require.Len(t, matches, 1)
-	assert.Equal(t, state.MatchStatusCompleted, matches[0].Status, "pool match must be completed")
-	assert.Equal(t, state.DecisionDraw, matches[0].Decision, "decision must be hikiwake (draw)")
-	assert.Empty(t, matches[0].Winner, "no winner on a drawn pool encounter")
+	assert.NotEqual(t, state.MatchStatusCompleted, matches[0].Status, "the engine must never auto-complete the pool draw")
+	assert.Empty(t, matches[0].Decision, "no draw decision may be written by the engine")
+	assert.Empty(t, matches[0].Winner, "no winner on the untouched pool encounter")
+	assert.Len(t, matches[0].SubResults, 3, "the full bout log must stay intact")
 }
 
 // TestMaybeAdvanceKachinuki_BracketSimultaneousExhaustionStaysRunning verifies

@@ -9,19 +9,26 @@
 //     un-retired player from the losing team.
 //   - On a hikiwake (draw) BOTH players retire and the next pair from
 //     each remaining roster advance.
-//   - The team match ends when one side has no remaining un-retired
-//     players, the other side wins by exhaustion
-//     (domain.DecisionKachinukiExhaustion).
+//   - The encounter can be won two ways: by EXHAUSTION (one side has no
+//     remaining un-retired players) or by the TAISHO-DEFEATED rule (the
+//     taisho -- always the last fighter -- loses, so their team loses).
+//     Team sizes are unregulated and lineup vacancies are not enforced,
+//     so the app's roster snapshot is advisory: the shiaijo OPERATOR
+//     declares the end ("End match"), the engine never auto-finalizes
+//     (mp-gmcg). Both win rules persist as
+//     domain.DecisionKachinukiExhaustion.
+//   - A tied final bout is a drawn encounter in pools/league; a knockout
+//     tie is resolved by encho on that same bout (daihyosen does not
+//     exist in kachinuki).
 //
 // AdvanceKachinuki encapsulates the pure decision logic. Callers
 // (typically a score handler, see handlers_match.go) pass a snapshot
 // of the just-completed bout plus the remaining un-retired roster per
 // side, and the engine returns either the next bout to schedule or a
-// MatchEnded sentinel.
+// MatchEnded sentinel (advisory, logged only).
 package engine
 
 import (
-	"errors"
 	"fmt"
 	"log"
 	"sort"
@@ -29,13 +36,6 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
-
-// ErrKachinukiPrematureCompletion is returned by
-// CheckKachinukiPrematureCompletion when a completed-status write would
-// finalize a kachinuki match that still has players remaining on both
-// teams and carries no daihyosen resolution. The score handler maps it
-// to HTTP 409.
-var ErrKachinukiPrematureCompletion = errors.New("kachinuki match cannot be completed while both teams still have players remaining")
 
 // AdvanceKachinukiInput is the minimal snapshot AdvanceKachinuki needs.
 // The engine deliberately does NOT load the full match, callers pass
@@ -277,22 +277,6 @@ func describeKachinukiResult(r AdvanceKachinukiResult) string {
 	return "no-op"
 }
 
-// kachinukiMatchEnded computes the terminal (status, winner, decision) for a
-// kachinuki encounter that has ended, resolving AdvanceKachinukiResult.WinningSide
-// ("A"/"B") against the caller's side names. Shared by the pool, bracket-rounds,
-// and bronze finalize sites so the end-state mapping lives in one place. Assign
-// with `x.Status, x.Winner, x.Decision = kachinukiMatchEnded(out, x.SideA, x.SideB)`.
-func kachinukiMatchEnded(out AdvanceKachinukiResult, sideA, sideB string) (state.MatchStatus, string, string) {
-	winner := ""
-	switch out.WinningSide {
-	case "A":
-		winner = sideA
-	case "B":
-		winner = sideB
-	}
-	return state.MatchStatusCompleted, winner, out.Decision
-}
-
 // appendNextKachinukiBout appends the engine-produced next bout to a
 // bracket match's log, mirroring the pool mutate closure (GAP 4): the
 // encounter stays running with no match-level winner or decision.
@@ -317,12 +301,14 @@ func appendNextKachinukiBout(bm *state.BracketMatch, next state.SubMatchResult) 
 //     entry has no final outcome (still in progress).
 //  3. Build the remaining-roster snapshot per side from the saved
 //     TeamLineup (GAP 1/2a), falling back to the unique player names
-//     seen in the bout log when no lineup is saved. The exhaustion-end
-//     and hikiwake-after-empty-queue cases run off this roster data.
+//     seen in the bout log when no lineup is saved.
 //  4. Pass to AdvanceKachinuki. When it returns Next, append the bout
-//     to SubResults and persist (status stays Running). When it returns
-//     MatchEnded, finalize the parent match (Status=Completed,
-//     Decision=kachinuki-exhaustion, Winner=team-name).
+//     to SubResults and persist (status stays Running). It NEVER
+//     finalizes the parent match: completion is operator-led (mp-gmcg).
+//     A MatchEnded/BothExhausted verdict is advisory only (team sizes
+//     are unregulated, so the roster snapshot may be incomplete); the
+//     operator ends the encounter with an explicit completed score
+//     write from the score editor.
 //
 // Returns (changed, error). `changed` indicates whether SubResults or
 // the parent match was mutated, handler uses it to decide whether to
@@ -408,25 +394,22 @@ func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, error) {
 	log.Printf("engine.MaybeAdvanceKachinuki compId=%s matchId=%s rosterAvailable=%t result=%s",
 		compID, matchID, rosterAvailable, describeKachinukiResult(out))
 
-	// Simultaneous exhaustion: a pool or league encounter is a legitimate
-	// draw (daihyosen is knockout-only), so finalize it as a hikiwake here.
-	// A bracket encounter falls through to the running-state guard below and
-	// stays open until the operator adds a daihyosen (scoring.go rejects a
-	// winnerless bracket completion, AMENDMENT 2).
-	if out.BothExhausted && !isBracket {
-		out = AdvanceKachinukiResult{MatchEnded: true, Decision: state.DecisionDraw}
-	}
-
-	if !out.MatchEnded && out.Next == nil {
+	// Operator-led completion (mp-gmcg): the engine NEVER auto-finalizes a
+	// kachinuki encounter. Team sizes are unregulated and lineup vacancies
+	// are not enforced, so the roster snapshot above is advisory: a side
+	// that looks exhausted may still have fighters the app has never seen.
+	// MatchEnded/BothExhausted are logged (breadcrumb above) but not acted
+	// on; the shiaijo operator ends the match explicitly from the score
+	// editor ("End match"), which arrives as a normal completed score write
+	// (winner from the last decisive bout, covering both win rules -- full
+	// exhaustion AND taisho-defeated -- or hikiwake in pools/league; a
+	// knockout tie is resolved by encho on the final bout, never a draw).
+	if out.Next == nil {
 		return false, nil
 	}
 
 	// Persist via the matching atomic primitive.
 	mutate := func(parent *state.MatchResult) {
-		if out.MatchEnded {
-			parent.Status, parent.Winner, parent.Decision = kachinukiMatchEnded(out, parent.SideA, parent.SideB)
-			return
-		}
 		// Append the next bout. The handler's broadcast carries the
 		// updated subResults so SSE consumers see the new pairing.
 		// Appending means the encounter continues: the parent match must
@@ -446,29 +429,16 @@ func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, error) {
 			for rIdx := range bracket.Rounds {
 				for mIdx := range bracket.Rounds[rIdx] {
 					if bracket.Rounds[rIdx][mIdx].ID == matchID {
-						bm := &bracket.Rounds[rIdx][mIdx]
-						if out.MatchEnded {
-							// Finalize the bracket match and propagate the winner
-							// to the next round so downstream SideA/SideB slots
-							// are populated without a manual reload (GAP 4).
-							bm.Status, bm.Winner, bm.Decision = kachinukiMatchEnded(out, bm.SideA, bm.SideB)
-							e.propagateBracketWinner(bracket, rIdx, mIdx)
-						} else if out.Next != nil {
-							appendNextKachinukiBout(bm, *out.Next)
-						}
+						appendNextKachinukiBout(&bracket.Rounds[rIdx][mIdx], *out.Next)
 						return nil
 					}
 				}
 			}
 			// The Naginata 3rd-place (bronze) match is a sibling of
 			// bracket.Rounds, not an element of it, so the loop above never
-			// reaches it. Bronze is a terminal match: no propagation needed.
+			// reaches it.
 			if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID == matchID {
-				if out.MatchEnded {
-					bm.Status, bm.Winner, bm.Decision = kachinukiMatchEnded(out, bm.SideA, bm.SideB)
-				} else if out.Next != nil {
-					appendNextKachinukiBout(bm, *out.Next)
-				}
+				appendNextKachinukiBout(bm, *out.Next)
 				return nil
 			}
 			return notFoundErrorf("bracket match %s not found", matchID)
@@ -544,76 +514,6 @@ func mergeKachinukiSubResults(stored, incoming []state.SubMatchResult) []state.S
 		out = append(out, byPos[state.DaihyosenSubPosition])
 	}
 	return out
-}
-
-// CheckKachinukiPrematureCompletion is the score handler's pre-write
-// safety net (ACID: no silent drops, no silent acceptance of a bogus
-// final). A status=completed write on a kachinuki team match is only
-// legitimate when one of these holds:
-//
-//   - the write is a correction (the stored match is already completed),
-//   - the patch carries a daihyosen sub-result (position -1), the
-//     sanctioned tied-after-exhaustion resolution,
-//   - the match-level decision is a withdrawal/default
-//     (kiken*/fusenpai/fusensho), which finalizes without playing out
-//     the roster,
-//   - the roster snapshot derived from the incoming bout log says at
-//     least one side is exhausted.
-//
-// Otherwise it returns ErrKachinukiPrematureCompletion (handler: 409).
-// Non-kachinuki competitions and non-completed writes always pass.
-// Must be called OUTSIDE the score transaction: the store loads here
-// acquire the per-comp lock themselves.
-func (e *Engine) CheckKachinukiPrematureCompletion(compID, matchID string, result *state.MatchResult) error {
-	if result == nil || result.Status != state.MatchStatusCompleted {
-		return nil
-	}
-	comp, err := e.store.LoadCompetition(compID)
-	if err != nil {
-		return err
-	}
-	if comp == nil || comp.TeamSize < 2 || comp.TeamMatchType != state.TeamMatchTypeKachinuki {
-		return nil
-	}
-	// Withdrawals and defaults finalize a match without exhausting the
-	// roster; they are legitimate completions.
-	if domain.IsKikenDecisionStr(result.Decision) || result.Decision == string(domain.DecisionFusenpai) || result.Decision == string(domain.DecisionFusensho) {
-		return nil
-	}
-	// A daihyosen sub-result is the sanctioned tie resolution, but only once
-	// it carries a winner: an empty/unscored Position=-1 placeholder must not
-	// let a premature completion (players still remaining) slip past. This
-	// mirrors deriveDaihyosenWinner, which also requires sub.Winner != "".
-	for _, sub := range result.SubResults {
-		if sub.Position == state.DaihyosenSubPosition && sub.Winner != "" {
-			return nil
-		}
-	}
-	parent, _, roundIdx, err := e.findTeamMatch(compID, matchID)
-	if err != nil {
-		return err
-	}
-	if parent == nil {
-		return nil // unknown match: the write path owns the 404
-	}
-	if parent.Status == state.MatchStatusCompleted {
-		return nil // correction of a finished result
-	}
-	// Judge exhaustion from the MERGED bout log, mirroring the write path
-	// (applyKachinukiMerge): the incoming bouts are overlaid onto the stored
-	// log BY POSITION, so a partial or stale client log (one that omits
-	// earlier server-appended bouts) cannot make this pre-check see fewer
-	// retirements than the committed result will, and thus cannot falsely
-	// 409 a legitimate exhaustion completion.
-	probe := *parent
-	if len(result.SubResults) > 0 {
-		probe.SubResults = mergeKachinukiSubResults(parent.SubResults, result.SubResults)
-	}
-	remainingA, remainingB, _ := e.kachinukiRemainingRoster(compID, matchID, comp, &probe, roundIdx)
-	if len(remainingA) == 0 || len(remainingB) == 0 {
-		return nil // one side exhausted: a legitimate completion
-	}
-	return ErrKachinukiPrematureCompletion
 }
 
 // findTeamMatch locates a match by ID, returning the parent record (a

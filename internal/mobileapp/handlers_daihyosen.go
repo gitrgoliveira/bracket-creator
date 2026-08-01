@@ -198,7 +198,7 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			updated    state.MatchResult
 			subOut     *state.SubMatchResult
 			notFound   bool
-			addErrCode string // "", "not_tied", "pool_match", "insufficient_eligibility", "engi_competition"
+			addErrCode string // "", "not_tied", "pool_match", "insufficient_eligibility", "engi_competition", "kachinuki_competition"
 			haveResult bool
 		)
 		txErr := store.WithTransaction(id, func(stx state.StoreTx) error {
@@ -212,6 +212,14 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			}
 			if comp != nil && comp.Engi {
 				addErrCode = "engi_competition"
+				return nil
+			}
+			// Daihyosen does not exist in kachinuki (mp-gmcg): a tied final
+			// bout is a drawn encounter in pools/league, and a knockout tie
+			// is resolved by ENCHO on the taisho bout itself, never by a
+			// separate representative bout.
+			if comp != nil && comp.TeamMatchType == state.TeamMatchTypeKachinuki {
+				addErrCode = "kachinuki_competition"
 				return nil
 			}
 
@@ -282,6 +290,9 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 		switch addErrCode {
 		case "engi_competition":
 			c.JSON(http.StatusBadRequest, gin.H{"error": "engi competitions do not support daihyosen; use flag scoring instead"})
+			return
+		case "kachinuki_competition":
+			c.JSON(http.StatusBadRequest, gin.H{"error": "daihyosen does not exist in kachinuki; a tied final bout is a draw in pools/league and goes to encho in a knockout"})
 			return
 		case "not_tied":
 			c.JSON(http.StatusBadRequest, gin.H{"error": "not_tied"})

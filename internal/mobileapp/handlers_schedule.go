@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
+	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
 // RegisterScheduleHandlers wires the stateless schedule estimator
@@ -34,6 +35,9 @@ func RegisterScheduleHandlers(r *gin.RouterGroup) {
 //   - numMatches:        int, total matches (default 1)
 //   - teamSize:          int, 0 = individual, >0 = team
 //   - boutsPerTeamMatch: int, used when teamSize > 0
+//   - teamMatchType:     string, "kachinuki" widens the estimate into a
+//     best/average/worst range (variable bout count, mp-gmcg); any
+//     other value (or absent) keeps a constant bout count
 //   - buffer:            int, slowest-court buffer % (default 0)
 //   - ceremonyMinutes:   int, ceremony block minutes (default 0)
 //
@@ -100,6 +104,7 @@ func scheduleEstimateHandler(c *gin.Context) {
 		BoutsPerTeamMatch:         queryIntDefault(c, "boutsPerTeamMatch", 0),
 		SlowestCourtBufferPct:     queryIntDefault(c, "buffer", 0),
 		CeremonyMinutes:           queryIntDefault(c, "ceremonyMinutes", 0),
+		Kachinuki:                 c.Query("teamMatchType") == string(state.TeamMatchTypeKachinuki),
 	}
 
 	c.JSON(http.StatusOK, engine.EstimateSchedule(in))

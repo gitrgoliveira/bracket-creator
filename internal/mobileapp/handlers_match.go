@@ -1049,23 +1049,13 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			result.CorrectionReason = ""
 		}
 
-		// Kachinuki safety net (ACID, no silent drops): a completed write
-		// on a kachinuki match whose roster snapshot is not exhausted and
-		// whose patch carries no daihyosen sub-result is rejected loudly,
-		// never silently accepted. Runs OUTSIDE the transaction because the
-		// engine's store loads acquire the per-comp lock themselves; the
-		// tiny TOCTOU window mirrors CheckCrossCompCourtBusy below.
-		if err := eng.CheckKachinukiPrematureCompletion(id, mid, result); err != nil {
-			if errors.Is(err, engine.ErrKachinukiPrematureCompletion) {
-				c.JSON(http.StatusConflict, gin.H{
-					"error":   "kachinuki_premature_completion",
-					"message": "This kachinuki match still has players remaining on both teams. Record the remaining bouts (the match completes automatically when one team is exhausted), or add a daihyosen to resolve a tie.",
-				})
-				return
-			}
-			internalError(c, err)
-			return
-		}
+		// NOTE (mp-gmcg): kachinuki completion is operator-led. A completed
+		// write on a kachinuki match is always an explicit operator action
+		// ("End match") and is accepted even when the roster snapshot shows
+		// players remaining: team sizes are unregulated and the
+		// taisho-defeated rule legitimately ends a match early, so the app
+		// cannot second-guess the shiaijo. The former premature-completion
+		// 409 gate was removed with the engine's auto-finalize.
 
 		// C2 rev-guard: drop stale "running" autosave writes that arrive
 		// out of order after a reconnect flush.

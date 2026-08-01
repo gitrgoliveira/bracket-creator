@@ -43,12 +43,12 @@ describe('engiFlagScore', () => {
 describe('matchScoreStr; engi takes priority and everything else stays letters', () => {
   it('an engi match returns the numeric flag score, not ippon letters', () => {
     const m = { flagsA: 3, flagsB: 2, ipponsA: [], ipponsB: [] };
-    expect(matchScoreStr(m, [], [])).toBe('2–3');
+    expect(matchScoreStr(m)).toBe('2–3');
   });
 
   it('a non-engi individual match still returns ippon letters, never digits', () => {
-    const m = { status: 'completed' };
-    const s = matchScoreStr(m, ['M', 'K'], ['D']);
+    const m = { status: 'completed', ipponsB: ['M', 'K'], ipponsA: ['D'] };
+    const s = matchScoreStr(m);
     expect(s).toBe('MK vs D');
     expect(s).not.toMatch(/^\d/);
   });
@@ -60,7 +60,7 @@ describe('matchScoreStr; engi takes priority and everything else stays letters',
       subResults: [{ position: 0, winner: 'TeamB', sideA: 'P1', sideB: 'P2' }],
       teamResult: { shiroIV: 1, akaIV: 0, shiroPW: 2, akaPW: 1 },
     };
-    const s = matchScoreStr(m, [], []);
+    const s = matchScoreStr(m);
     expect(s).toBe('IV 1–0\nPW 2–1');
     expect(s).not.toMatch(/^\d/);
   });

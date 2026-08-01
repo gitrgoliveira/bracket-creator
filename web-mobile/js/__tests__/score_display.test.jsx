@@ -258,33 +258,33 @@ describe('formatIpponsScore: hikiwake draw display (item 6)', () => {
 // string (with "-" fallback), running → "vs" (the row highlight is the "now"
 // signal, NOT a centre dot), scheduled/other → "–".
 describe('matchStateCell: shared running-row centre cue', () => {
-  it('completed → the formatted ippon score (first arg = SHIRO/left)', () => {
-    // matchStateCell(m, ipponsB, ipponsA) → matchScoreStr → formatIpponsScore
-    // renders firstArg vs secondArg, so ['M'],['K'] → "M vs K".
-    expect(matchStateCell({ status: 'completed' }, ['M'], ['K'])).toBe('M vs K');
+  it('completed → the formatted ippon score (ipponsB = SHIRO = left)', () => {
+    // matchStateCell(m) → matchScoreStr derives the arrays from the match:
+    // ipponsB renders left, ipponsA right, so B:['M'] A:['K'] → "M vs K".
+    expect(matchStateCell({ status: 'completed', ipponsB: ['M'], ipponsA: ['K'] })).toBe('M vs K');
   });
 
   it('completed with no derivable score → "-" fallback', () => {
     // No ippons, no score, no decision → matchScoreStr returns "" → "-".
-    expect(matchStateCell({ status: 'completed' }, [], [])).toBe('-');
+    expect(matchStateCell({ status: 'completed' })).toBe('-');
   });
 
   it('running → "vs" (no centre dot; the row highlight is the now signal)', () => {
-    expect(matchStateCell({ status: 'running' }, [], [])).toBe('vs');
+    expect(matchStateCell({ status: 'running' })).toBe('vs');
   });
 
   it('scheduled → "–"', () => {
-    expect(matchStateCell({ status: 'scheduled' }, [], [])).toBe('–');
+    expect(matchStateCell({ status: 'scheduled' })).toBe('–');
   });
 
   it('unknown/missing status → "–" (treated as not-yet-run)', () => {
-    expect(matchStateCell({ status: 'bye' }, [], [])).toBe('–');
-    expect(matchStateCell({}, [], [])).toBe('–');
+    expect(matchStateCell({ status: 'bye' })).toBe('–');
+    expect(matchStateCell({})).toBe('–');
   });
 
   it('never emits a bare "●" for any state', () => {
     for (const status of ['completed', 'running', 'scheduled', 'bye', undefined]) {
-      expect(matchStateCell({ status }, [], [])).not.toContain('●');
+      expect(matchStateCell({ status })).not.toContain('●');
     }
   });
 });
@@ -336,7 +336,7 @@ describe('team score string carries IV and PW', () => {
         { position: 1, sideA: 'Ryu Ichiro', sideB: 'Tora Ichiro', winner: 'Ryu Ichiro', ipponsA: ['M'] },
       ],
     };
-    expect(matchStateCell(m, [], [])).toBe('IV 0–5\nPW 0–5');
+    expect(matchStateCell(m)).toBe('IV 0–5\nPW 0–5');
   });
 
   it('renders the tied IV and PW for a daihyosen-decided final', () => {
@@ -345,7 +345,7 @@ describe('team score string carries IV and PW', () => {
       teamResult: { shiroIV: 0, akaIV: 0, shiroPW: 0, akaPW: 0 },
       subResults: [{ position: -1, sideA: 'Ryu', sideB: 'Kaze', winner: 'Ryu', ipponsA: ['M'] }],
     };
-    expect(matchStateCell(m, [], [])).toBe('IV 0–0\nPW 0–0');
+    expect(matchStateCell(m)).toBe('IV 0–0\nPW 0–0');
   });
 });
 

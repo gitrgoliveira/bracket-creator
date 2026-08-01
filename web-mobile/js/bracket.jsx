@@ -189,7 +189,6 @@ function formatIpponsScore(ipponsLeft, ipponsRight, score, decision, encho, deci
   // caller) stay loose and trail the string so the result is never silently
   // dropped.
   const looseMarks = leftMark || rightMark ? "" : joinSp(marks.winner, marks.loser);
-  const trail = looseMarks ? " " + looseMarks : "";
 
   // Numbers are NOT a valid display for ippon: the per-side waza-letter
   // arrays are the only source of an ippon score. There is deliberately no
@@ -203,7 +202,7 @@ function formatIpponsScore(ipponsLeft, ipponsRight, score, decision, encho, deci
   }
   // A cell holds its letters and/or its result mark ("M Ht (E) K",
   // "Ht (E) –" for a 0-0 hantei); an empty cell reads "–".
-  return `${joinSp(aStr, leftMark) || NONE}${sep}${joinSp(bStr, rightMark) || NONE}` + trail;
+  return joinSp(`${joinSp(aStr, leftMark) || NONE}${sep}${joinSp(bStr, rightMark) || NONE}`, looseMarks);
 }
 
 // engiFlagScore: derive an engi match's flag-count score string from
@@ -918,19 +917,20 @@ function BracketTreeLegacy({ rounds, variant = 1, showDojo = true, onMatchClick,
 // competition type: ippon LETTERS, never numbers). Returns "" when no path
 // produces a string (caller handles the ": " fallback).
 //
-// ipponsB/ipponsA are optional overrides; when omitted they are derived
-// here from the match itself. The derivation is load-bearing: bracket
-// matches carry scoreA/scoreB strings rather than ipponsA/B arrays, the
-// waza-letter arrays are the ONLY source of an ippon score string (numbers
-// are never a valid ippon display, there is no numeric fallback), and
+// The ippon arrays are derived here, never passed in — a positional
+// (B, A) parameter pair was the left/right-inversion trap this hoist
+// removed. The derivation is load-bearing: bracket matches carry
+// scoreA/scoreB strings rather than ipponsA/B arrays, the waza-letter
+// arrays are the ONLY source of an ippon score string (numbers are never
+// a valid ippon display, there is no numeric fallback), and
 // ipponsFromScore strips Go formatScore's trailing "(HN)" hansoku suffix
 // so it doesn't split into bogus ippon letters.
-function matchScoreStr(m, ipponsB, ipponsA) {
+function matchScoreStr(m) {
   return engiFlagScore(m)
     || teamIVPWScore(m)
     || formatIpponsScore(
-      ipponsB || m.ipponsB || ipponsFromScore(m.scoreB),
-      ipponsA || m.ipponsA || ipponsFromScore(m.scoreA),
+      m.ipponsB || ipponsFromScore(m.scoreB),
+      m.ipponsA || ipponsFromScore(m.scoreA),
       m.score, m.decision, m.encho, m.decidedByHantei, winnerSideLR(m));
 }
 
@@ -939,8 +939,8 @@ function matchScoreStr(m, ipponsB, ipponsA) {
 // running → "vs" (the row's .is-running highlight is the "now" signal, NOT a
 // centre dot), scheduled → "–". The labelled "● NOW" badge used in headers/
 // status columns is a separate affordance and is NOT produced here.
-function matchStateCell(m, ipponsB, ipponsA) {
-  if (m.status === "completed") return matchScoreStr(m, ipponsB, ipponsA) || "-";
+function matchStateCell(m) {
+  if (m.status === "completed") return matchScoreStr(m) || "-";
   if (m.status === "running") return "vs";
   return "–";
 }

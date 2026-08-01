@@ -748,17 +748,25 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     setFinishArmed(false);
     setEndArmed(false);
   };
-  // Any edit disarms both two-step confirms so a stale verdict can never be
+  // Any edit disarms every two-step confirm so a stale verdict can never be
   // committed (subs identity changes only through updateSub/addManualBout;
-  // daihyosenHantei flips the verdict without touching subs).
-  useEffectA(() => { setFinishArmed(false); setEndArmed(false); }, [subs, daihyosenHantei]);
+  // daihyosenHantei flips the verdict without touching subs). reopenArmed is
+  // disarmed here too (mp-gmcg): on a completed match the operator can arm
+  // Reopen and then start a score correction instead — a later tap must not
+  // fire the reopen (which would clear the result and discard the correction).
+  useEffectA(() => { setFinishArmed(false); setEndArmed(false); setReopenArmed(false); }, [subs, daihyosenHantei]);
 
   // mp-gmcg: reopen a completed kachinuki match (POST .../reopen): status
-  // back to running, winner/decision cleared, bout log kept. On success the
-  // server broadcasts match_updated; the refreshed match prop flips
-  // isComplete false and the regated bout mode re-engages (Record bout /
-  // End match) without remounting. 409 sentinels ("not completed",
-  // "downstream match already fought") surface inline, never silently.
+  // back to running, winner/decision cleared, bout log kept. This POST is a
+  // direct API call, NOT a score write, so it does NOT flow through the host's
+  // onEditScore/setOpenMatch channel that keeps the modal live across a
+  // running write — the `match` prop here is the host's openMatch snapshot,
+  // captured completed, and nothing repaints it in place. So on success we
+  // CLOSE the editor: the host's SSE match_updated handler flips the match
+  // row to running, and the operator taps Score to resume bout-by-bout on the
+  // now-running encounter. The server's 409s are full-sentence messages ("...
+  // is not completed ..." / "cannot reopen: a downstream knockout match ...")
+  // and surface inline verbatim, never silently.
   const onReopenMatch = async () => {
     setReopenErr("");
     setReopenBusy(true);
@@ -766,6 +774,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       await window.API.reopenMatch(m.compId, m.id, resolveDecisionPassword(password));
       if (!mountedRef.current) return;
       setReopenArmed(false);
+      onClose();
     } catch (e) {
       if (!mountedRef.current) return;
       setReopenErr(String(e?.message || "Failed to reopen match"));

@@ -158,9 +158,24 @@ describe('formatIpponsScore', () => {
       expect(formatIpponsScore([], [], null, 'kiken-voluntary', null, false, 'right')).toBe('Kiken vs –');
     });
 
+    it('legacy bare "kiken" (old pool-matches.csv rows) marks the loser like kiken-voluntary', () => {
+      // CSV/JSON decisions are plain strings — only YAML migrates the legacy
+      // value — so old data can still serve "kiken" and must render the same.
+      expect(formatIpponsScore(['M'], [], null, 'kiken', null, false, 'left')).toBe('M vs Kiken');
+    });
+
     it('fusenpai marks the no-show (losing) side', () => {
       // Winner on the left → the no-show's Fus. lands in the right cell.
       expect(formatIpponsScore([], [], null, 'fusenpai', null, false, 'left')).toBe('– vs Fus.');
+    });
+
+    it('fusensho places NO side mark: the bout badge carries it (documented Excel divergence)', () => {
+      // internal/export/suffix.go SideMarks folds fusensho in as a winner-side
+      // "Fus." because Excel has no badges; the JS mirror deliberately does
+      // not. Pin the divergence from this side too so a future change folding
+      // "Fus." back into the string cannot land silently.
+      expect(formatIpponsScore(['M'], [], null, 'fusensho', null, false, 'left')).toBe('M vs –');
+      expect(formatIpponsScore([], [], null, 'fusensho', null, false, 'left')).toBe('');
     });
 
     it('kiken during overtime: loser mark plus the (E) middle', () => {

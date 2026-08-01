@@ -169,8 +169,12 @@ function formatIpponsScore(ipponsLeft, ipponsRight, score, decision, encho, deci
 
   if (isDraw) {
     // A tie's middle is X and NOTHING else: a match that went to encho cannot
-    // have ended tied, and hantei picks a winner, so any such stale data is
-    // dropped rather than displayed as a contradiction.
+    // have ended tied, and hantei picks a winner, so THIS STRING drops such
+    // stale data rather than displaying a contradiction. (Scope: the score
+    // string only. A hand-edited row carrying draw+hantei+winner would still
+    // show Ht on the MatchCard and in Excel, whose sideMarks run
+    // unconditionally; no API-legal state produces that combination —
+    // validation rejects decidedByHantei on a draw.)
     if (!aStr && !bStr) return "X";
     // Scored equal draw (e.g. 1–1 M/K hikiwake): show the points around the
     // draw mark so the viewer sees what was struck AND that it was a tie.

@@ -93,9 +93,10 @@ const isDefaultWinBC = (d) => isKikenDecisionBC(d) || d === "fusenpai" || d === 
 // defaultWinMaru: the maru cells a default win awards — one "○" per point:
 // the two-point pair in regulation, the single deciding point in encho
 // (sudden death). THE single JS source of the maru-count rule; mirrors
-// domain.DefaultWinMaru (Go). The canonical record is the engine's
-// defaultWinIppon fill (engine/scoring.go) — displays only fall back to
-// this for winners whose recorded cells are empty (byes, legacy data).
+// domain.DefaultWinIppons (Go, same cells shape). The canonical record is
+// the engine's RecordDecision fill via domain.DefaultWinIppons — displays
+// only fall back to this for winners whose recorded cells are empty
+// (byes, legacy data).
 const defaultWinMaru = (encho) => (encho ? ["○"] : ["○", "○"]);
 
 // boutMiddle: THE single source for what a bout's middle can read —
@@ -186,7 +187,7 @@ function formatIpponsScore(ipponsLeft, ipponsRight, score, decision, encho, deci
   // without a technique — one maru "○" per awarded point: the full
   // two-point win in regulation, exactly one deciding point in encho
   // (sudden death). The engine records them as maru ippons itself with the
-  // same rule (engine/scoring.go defaultWinIppon), so scored data carries
+  // same rule (domain.DefaultWinIppons), so scored data carries
   // the balls; results recorded before that fill (or imported) reach here
   // with the decision but an empty winner cell — mirror the engine so a
   // won match never reads as no-points.
@@ -1023,4 +1024,4 @@ window.winnerSideLR = winnerSideLR;
 window.sideLabel = sideLabel;
 window.ipponsFromScore = ipponsFromScore;
 
-export { formatIpponsScore, enchoLabel, boutMiddle, matchMiddleMark, winnerSideLR, sideLabel, roundLabel, ipponsFromScore, teamIVScore, teamIVPWScore, engiFlagScore, matchScoreStr, matchStateCell, buildDisplayModel, computeMetaTops, bronzeUnderFinalStyle, PlayerLine };
+export { formatIpponsScore, enchoLabel, boutMiddle, defaultWinMaru, matchMiddleMark, winnerSideLR, sideLabel, roundLabel, ipponsFromScore, teamIVScore, teamIVPWScore, engiFlagScore, matchScoreStr, matchStateCell, buildDisplayModel, computeMetaTops, bronzeUnderFinalStyle, PlayerLine };

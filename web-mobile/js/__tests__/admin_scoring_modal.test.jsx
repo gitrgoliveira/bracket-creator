@@ -23,6 +23,7 @@ import {
   isKoTieBlocked,
 } from '../admin_scoring_modal.jsx';
 import { makeSubmitDecision } from '../admin_scoring_shared.jsx';
+import { defaultWinMaru } from '../bracket.jsx';
 // teamEncounterHasResult is a module-internal helper of admin_scoring_team.jsx
 // (not part of the thin-entry consumer barrel), imported directly like the
 // resolveMatchLineup tests do.
@@ -698,6 +699,11 @@ describe('nextFoulOnDecrement (team `−` button regression)', () => {
 });
 
 describe('applyFusenshoToggle', () => {
+  // The toggle takes its maru cells from the shared count rule; register
+  // the REAL source so these tests pin it, not the window-absent fallback.
+  beforeEach(() => { global.window.defaultWinMaru = defaultWinMaru; });
+  afterEach(() => { delete global.window.defaultWinMaru; });
+
   // Per-bout Fusensho is a toggle in TeamScoreEditorModal. Toggle-on
   // overwrites the bout to a 2-0 default win for the chosen side; the
   // pre-fusensho points are stashed in _preFusensho so that toggling off

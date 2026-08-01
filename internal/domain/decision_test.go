@@ -68,6 +68,6 @@ func TestDefaultWinHelpers(t *testing.T) {
 	for _, d := range []string{"", "fought", "hikiwake", "daihyosen", "kachinuki-exhaustion"} {
 		assert.False(t, domain.IsDefaultWinDecisionStr(d), d)
 	}
-	assert.Equal(t, "○○", domain.DefaultWinMaru(false))
-	assert.Equal(t, "○", domain.DefaultWinMaru(true))
+	assert.Equal(t, []string{"○", "○"}, domain.DefaultWinIppons(false))
+	assert.Equal(t, []string{"○"}, domain.DefaultWinIppons(true))
 }

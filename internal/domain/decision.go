@@ -1,10 +1,6 @@
 package domain
 
-import (
-	"strings"
-
-	"gopkg.in/yaml.v3"
-)
+import "gopkg.in/yaml.v3"
 
 // Decision identifies how a match was concluded.
 //
@@ -81,11 +77,6 @@ func DefaultWinIppons(inEncho bool) []string {
 		return []string{DefaultWinIppon}
 	}
 	return []string{DefaultWinIppon, DefaultWinIppon}
-}
-
-// DefaultWinMaru is DefaultWinIppons joined for display strings/cells.
-func DefaultWinMaru(inEncho bool) string {
-	return strings.Join(DefaultWinIppons(inEncho), "")
 }
 
 // UnmarshalYAML migrates legacy `decision` values (NFR-025, R6):

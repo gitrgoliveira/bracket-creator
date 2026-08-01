@@ -9,6 +9,7 @@ package export
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -146,8 +147,8 @@ func FlagsScorePair(a, b int) (string, string) {
 	return strconv.Itoa(max(0, a)), strconv.Itoa(max(0, b))
 }
 
-// DefaultWinMaruAB fills the WINNER's empty score cell with the
-// domain.DefaultWinMaru award for a default win, given SIDE-ordered
+// DefaultWinMaruAB fills the WINNER's empty score cell with the joined
+// domain.DefaultWinIppons award for a default win, given SIDE-ordered
 // scores. The engine already records default wins as maru ippons from the
 // same rule (domain.DefaultWinIppons), so scored data carries the balls
 // itself — this fallback covers results recorded before that fill or
@@ -157,7 +158,7 @@ func DefaultWinMaruAB(scoreA, scoreB, decision string, encho *state.EnchoMetadat
 	if winner == "" || !domain.IsDefaultWinDecisionStr(decision) {
 		return scoreA, scoreB
 	}
-	maru := domain.DefaultWinMaru(encho != nil)
+	maru := strings.Join(domain.DefaultWinIppons(encho != nil), "")
 	switch winner {
 	case sideA:
 		if scoreA == "" {

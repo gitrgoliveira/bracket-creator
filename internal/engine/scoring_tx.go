@@ -1011,7 +1011,7 @@ func (e *Engine) RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	// Kiken/fusenpai/fusensho apply only BEFORE any point has been scored
 	// (operator ruling, mirrors RecordDecision in eligibility.go), so the
 	// winner gets the pure maru fill and the loser ends with none.
-	winIppons := domain.DefaultWinIppons(encho != nil)
+	winIppons := domain.DefaultWinIppons(encho.On())
 	result := &state.MatchResult{
 		ID:             matchID,
 		SideA:          sideA,

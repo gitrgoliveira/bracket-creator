@@ -94,7 +94,6 @@ func TestSideMarks(t *testing.T) {
 // recorded score, the loser, and non-default decisions are untouched.
 func TestDefaultWinMaruAB(t *testing.T) {
 	t.Parallel()
-	encho := &state.EnchoMetadata{PeriodCount: 1}
 	tests := []struct {
 		name           string
 		scoreA, scoreB string
@@ -107,7 +106,8 @@ func TestDefaultWinMaruAB(t *testing.T) {
 		{name: "legacy bare kiken fills too", decision: "kiken", winner: "Bob", wantB: "○○"},
 		{name: "fusenpai fills the survivor", decision: "fusenpai", winner: "Bob", wantB: "○○"},
 		{name: "fusensho fills the defaulted winner", decision: "fusensho", winner: "Alice", wantA: "○○"},
-		{name: "encho awards exactly one deciding point", decision: "kiken-injury", encho: encho, winner: "Alice", wantA: "○"},
+		{name: "encho awards exactly one deciding point", decision: "kiken-injury", encho: encho(1), winner: "Alice", wantA: "○"},
+		{name: "degenerate periodCount-0 block is not encho: full pair", decision: "kiken-injury", encho: encho(0), winner: "Alice", wantA: "○○"},
 		{name: "a recorded score stands", scoreA: "M", decision: "kiken-injury", winner: "Alice", wantA: "M"},
 		{name: "non-default decision untouched", decision: "fought", winner: "Alice"},
 		{name: "no winner untouched", decision: "kiken-voluntary"},

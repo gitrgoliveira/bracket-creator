@@ -871,6 +871,17 @@ type EnchoMetadata struct {
 	PeriodCount int `json:"periodCount" yaml:"periodCount"`
 }
 
+// On reports whether the block records overtime that was actually fought:
+// non-nil with a positive PeriodCount. THE single predicate for "did this
+// result happen in encho" — the (E) label (enchoLabel, pinned by the
+// golden table), the default-win maru count (domain.DefaultWinIppons
+// callers), and decision validation all key on it, so a degenerate
+// {periodCount: 0} block can never make one surface claim overtime while
+// another denies it. Mirrors enchoOn in web-mobile/js/bracket.jsx.
+func (e *EnchoMetadata) On() bool {
+	return e != nil && e.PeriodCount > 0
+}
+
 // Clone returns a deep copy of the encho metadata, or nil if e is nil.
 // Used by the match/bracket copy paths so cached state never shares an
 // Encho pointer with a returned value.

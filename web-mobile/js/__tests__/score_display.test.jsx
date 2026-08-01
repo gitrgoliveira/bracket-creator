@@ -61,7 +61,7 @@ describe('formatIpponsScore', () => {
       expect(formatIpponsScore(['M'], ['K'], { type: 'hikiwake' }, null)).toBe('M X K');
     });
 
-    it('shows scored draw with one empty side using the placeholder dot', () => {
+    it('shows scored draw with one empty side as the no-points dash', () => {
       expect(formatIpponsScore(['M'], [], { type: 'hikiwake' }, null)).toBe('M X –');
     });
 
@@ -174,6 +174,12 @@ describe('formatIpponsScore', () => {
       expect(formatIpponsScore([], [], null, 'kiken-injury', { periodCount: 1 }, false, 'left')).toBe('○ (E) Kiken');
     });
 
+    it('a degenerate periodCount-0 encho block is not encho: full pair, no (E)', () => {
+      // enchoOn is the single predicate — the maru count and the (E) label
+      // can never disagree about whether overtime ran.
+      expect(formatIpponsScore([], [], null, 'kiken-injury', { periodCount: 0 }, false, 'left')).toBe('○○ vs Kiken');
+    });
+
     it('engine-recorded maru data renders as-is', () => {
       // Kiken/fusensho apply only before any point has been scored, so the
       // engine records the winner's default points as the pure maru fill
@@ -205,7 +211,7 @@ describe('formatIpponsScore', () => {
   describe('hantei (judges\' decision) winner mark', () => {
     it('a 0-0 hantei-decided overtime puts Ht in the winner\'s cell', () => {
       // Tied 0-0 in encho, SHIRO (left) awarded by hantei: the winner's cell
-      // carries the Ht mark, the middle carries (E), the loser shows the dot.
+      // carries the Ht mark, the middle carries (E), the loser shows the no-points dash.
       expect(formatIpponsScore([], [], null, null, { periodCount: 1 }, true, 'left')).toBe('Ht (E) –');
       expect(formatIpponsScore([], [], null, null, { periodCount: 1 }, true, 'right')).toBe('– (E) Ht');
     });

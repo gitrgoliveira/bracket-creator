@@ -46,9 +46,15 @@ function sideLabel(side) {
 // Overtime ×N" eyebrow is different on purpose: a live readout of the stepper
 // the operator is using, not a result marking.
 function enchoLabel(encho) {
-  const n = encho?.periodCount || 0;
-  return n > 0 ? "(E)" : "";
+  return enchoOn(encho) ? "(E)" : "";
 }
+
+// enchoOn: THE single predicate for "did this result happen in encho" —
+// a non-degenerate block with a positive periodCount. The (E) label and
+// the default-win maru count both key on it, so a stray
+// {periodCount: 0} block can never make one surface claim overtime
+// while another denies it. Mirrors state.EnchoMetadata.On (Go).
+const enchoOn = (encho) => (encho?.periodCount || 0) > 0;
 
 // middleMark: the ONE mark the centre of a score may carry. The middle column
 // of a score sheet can only ever read:
@@ -97,7 +103,7 @@ const isDefaultWinBC = (d) => isKikenDecisionBC(d) || d === "fusenpai" || d === 
 // the engine's RecordDecision fill via domain.DefaultWinIppons — displays
 // only fall back to this for winners whose recorded cells are empty
 // (byes, legacy data).
-const defaultWinMaru = (encho) => (encho ? ["○"] : ["○", "○"]);
+const defaultWinMaru = (encho) => (enchoOn(encho) ? ["○"] : ["○", "○"]);
 
 // boutMiddle: THE single source for what a bout's middle can read —
 // "vs" (plain, including unplayed/pending), "X" (tie), "(E)" (overtime),

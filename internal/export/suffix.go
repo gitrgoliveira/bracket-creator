@@ -122,7 +122,7 @@ func joinSp(a, b string) string {
 // ×N" eyebrow is different on purpose: a live readout of the stepper the
 // operator is using, not a result marking.
 func enchoLabel(encho *state.EnchoMetadata) string {
-	if encho == nil || encho.PeriodCount <= 0 {
+	if !encho.On() {
 		return ""
 	}
 	return "(E)"
@@ -158,7 +158,7 @@ func DefaultWinMaruAB(scoreA, scoreB, decision string, encho *state.EnchoMetadat
 	if winner == "" || !domain.IsDefaultWinDecisionStr(decision) {
 		return scoreA, scoreB
 	}
-	maru := strings.Join(domain.DefaultWinIppons(encho != nil), "")
+	maru := strings.Join(domain.DefaultWinIppons(encho.On()), "")
 	switch winner {
 	case sideA:
 		if scoreA == "" {

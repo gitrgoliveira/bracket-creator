@@ -22,6 +22,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
@@ -570,10 +571,9 @@ func (r *ScoreRequest) validateDecision() error {
 		if r.DecisionBy == "" {
 			return &ValidationError{Field: "decisionBy", Message: fmt.Sprintf("required when decision is %s", r.Decision)}
 		}
-		need := 2
-		if r.Encho != nil {
-			need = 1
-		}
+		// The required scoreline is exactly what the recorder will fill
+		// (domain.DefaultWinIppons keyed on the shared encho predicate).
+		need := len(domain.DefaultWinIppons(r.Encho.On()))
 		if !winningScoreline(r.IpponsA, r.IpponsB, need) {
 			return &ValidationError{
 				Field:   "scoreline",

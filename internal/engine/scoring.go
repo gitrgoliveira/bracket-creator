@@ -305,8 +305,8 @@ func backfillMatchIdentity(result, stored *state.MatchResult) {
 
 // countScoringIppons counts real ippon marks, ignoring empty entries and the
 // "•" placeholder the UI uses for an unfilled slot. The default-win maru
-// (domain.DefaultWinIppon, filled by the RecordDecision twins via
-// domain.DefaultWinIppons) counts like any struck ippon.
+// (filled by the RecordDecision twins via domain.DefaultWinIppons) counts
+// like any struck ippon.
 func countScoringIppons(ippons []string) int {
 	n := 0
 	for _, v := range ippons {

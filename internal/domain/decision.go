@@ -59,24 +59,21 @@ func IsDefaultWinDecisionStr(s string) bool {
 	return IsKikenDecisionStr(s) || s == string(DecisionFusenpai) || s == string(DecisionFusensho)
 }
 
-// DefaultWinIppon is the FIK maru "○" (U+25CB) recorded for each point a
-// default win awards without a technique. The engine's decision recorders
-// fill the winner's ippon slots with it; display fallbacks (Excel, the
-// web scoreboard and score strings) render the same glyph for legacy rows
-// recorded before that fill.
-const DefaultWinIppon = "○"
+// defaultWinIppon is the FIK maru "○" (U+25CB) recorded for each point a
+// default win awards without a technique.
+const defaultWinIppon = "○"
 
 // DefaultWinIppons returns the winner's ippon slots for a default win —
-// one DefaultWinIppon per awarded point: the two-point pair in regulation,
+// one maru per awarded point: the two-point pair in regulation,
 // the single deciding point in encho (sudden death). THE single Go source
 // of the maru-count rule, consumed by the engine's RecordDecision twins
 // (the canonical record) and, joined, by the display fallbacks. Mirrors
 // defaultWinMaru in web-mobile/js/bracket.jsx (same cells shape).
 func DefaultWinIppons(inEncho bool) []string {
 	if inEncho {
-		return []string{DefaultWinIppon}
+		return []string{defaultWinIppon}
 	}
-	return []string{DefaultWinIppon, DefaultWinIppon}
+	return []string{defaultWinIppon, defaultWinIppon}
 }
 
 // UnmarshalYAML migrates legacy `decision` values (NFR-025, R6):

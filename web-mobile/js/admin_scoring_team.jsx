@@ -1732,9 +1732,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               ) : (
                 <>
                   {kachinukiEndOutcome.kind === "draw" ? (
-                    <span>Tied bout: End match records a drawn encounter; Record bout retires both and brings the next pair up; Encho keeps the same pair fighting when this pairing must produce a result.</span>
+                    <span>Tied bout: End match records a drawn encounter; Record bout retires both and brings the next pair up (or add the next bout manually); Encho keeps the same pair fighting when this pairing must produce a result.</span>
                   ) : (
-                    <span>No draws in a knockout: continue until there is a point. Record bout brings the next fighter up; Encho keeps the same pair on this bout.</span>
+                    <span>No draws in a knockout: continue until there is a point. Record bout brings the next fighter up (or add the next bout manually); Encho keeps the same pair on this bout.</span>
                   )}
                   <button
                     type="button"

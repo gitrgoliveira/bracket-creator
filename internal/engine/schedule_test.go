@@ -294,6 +294,179 @@ func TestPerMatchElapsed_Team(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Kachinuki best/average/worst range (mp-gmcg)
+// ---------------------------------------------------------------------------
+
+// TestKachinukiBoutRange pins the (best, avg, worst) bout counts for a
+// kachinuki team match of nominal size n: best = n (a sweep), worst =
+// 2n-1 (maximal attrition), avg = midpoint (3n-1)/2. Non-positive n
+// returns all zeros.
+func TestKachinukiBoutRange(t *testing.T) {
+	tests := []struct {
+		name      string
+		n         int
+		wantBest  float64
+		wantAvg   float64
+		wantWorst float64
+	}{
+		{"n=0 returns zeros", 0, 0, 0, 0},
+		{"negative n returns zeros", -3, 0, 0, 0},
+		{"n=1 degenerate: single bout in every scenario", 1, 1, 1, 1},
+		{"n=4 fractional midpoint", 4, 4, 5.5, 7},
+		{"n=5 FIK team", 5, 5, 7, 9},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			best, avg, worst := kachinukiBoutRange(tc.n)
+			assert.InDelta(t, tc.wantBest, best, 0.001, "best")
+			assert.InDelta(t, tc.wantAvg, avg, 0.001, "avg")
+			assert.InDelta(t, tc.wantWorst, worst, 0.001, "worst")
+		})
+	}
+}
+
+// TestPerMatchElapsedBouts_Fractional pins the float-bouts core directly:
+// bouts > 0 → bouts*clock*multiplier + (bouts-1)*1 changeover minutes
+// (fractional bouts must NOT be truncated, the kachinuki average is
+// fractional for even team sizes); bouts <= 0 falls back to the
+// individual formula clock*multiplier.
+func TestPerMatchElapsedBouts_Fractional(t *testing.T) {
+	tests := []struct {
+		name       string
+		clockMin   float64
+		multiplier float64
+		bouts      float64
+		want       float64
+	}{
+		{"bouts=0 falls back to individual", 3, 1.5, 0, 4.5},
+		{"negative bouts falls back to individual", 3, 1.5, -2, 4.5},
+		{"bouts=1 has no changeover", 3, 1.5, 1, 4.5},
+		// 5*3*1.5 + 4*1 = 26.5
+		{"bouts=5 integer", 3, 1.5, 5, 26.5},
+		// 5.5*3*1.5 + 4.5*1 = 24.75 + 4.5 = 29.25 (kachinuki n=4 average)
+		{"bouts=5.5 fractional survives", 3, 1.5, 5.5, 29.25},
+		// 7*3*1.5 + 6*1 = 37.5 (kachinuki n=5 average)
+		{"bouts=7 kachinuki n=5 average", 3, 1.5, 7, 37.5},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := perMatchElapsedBouts(tc.clockMin, tc.multiplier, tc.bouts)
+			assert.InDelta(t, tc.want, got, 0.001)
+		})
+	}
+}
+
+// TestEstimateSchedule_KachinukiRange pins the exact best/average/worst
+// arithmetic for a kachinuki estimate (mp-gmcg). Fixture: clock=3min,
+// multiplier=1.5, 2 matches on 1 court, team size 5, no buffer/ceremony.
+//
+// kachinukiBoutRange(5) = (5, 7, 9) bouts. Per match
+// (perMatchElapsedBouts, includes the (bouts-1)*1min changeover):
+//
+//	best:  5*3*1.5 + 4 = 26.5 min → ×2 matches = 53
+//	avg:   7*3*1.5 + 6 = 37.5 min → ×2 matches = 75
+//	worst: 9*3*1.5 + 8 = 48.5 min → ×2 matches = 97
+//
+// TotalDurationMinutes carries the AVERAGE scenario; PerCourtMinutes
+// reflects the average too.
+func TestEstimateSchedule_KachinukiRange(t *testing.T) {
+	result := EstimateSchedule(EstimateInput{
+		MatchDurationClockMinutes: 3,
+		Multiplier:                1.5,
+		NumMatches:                2,
+		NumCourts:                 1,
+		TeamSize:                  5,
+		BoutsPerTeamMatch:         5,
+		Kachinuki:                 true,
+	})
+
+	assert.Equal(t, 53, result.BestCaseMinutes, "best: 2 × (5*3*1.5 + 4) = 53")
+	assert.Equal(t, 75, result.TotalDurationMinutes, "avg headline: 2 × (7*3*1.5 + 6) = 75")
+	assert.Equal(t, 97, result.WorstCaseMinutes, "worst: 2 × (9*3*1.5 + 8) = 97")
+	assert.Less(t, result.BestCaseMinutes, result.TotalDurationMinutes)
+	assert.Less(t, result.TotalDurationMinutes, result.WorstCaseMinutes)
+	require.Len(t, result.PerCourtMinutes, 1)
+	assert.Equal(t, 75, result.PerCourtMinutes[0], "PerCourtMinutes reflects the average scenario")
+}
+
+// TestEstimateSchedule_KachinukiCeremonyAdditive verifies CeremonyMinutes
+// is added verbatim to ALL THREE scenario fields, not just the headline.
+func TestEstimateSchedule_KachinukiCeremonyAdditive(t *testing.T) {
+	base := EstimateInput{
+		MatchDurationClockMinutes: 3,
+		Multiplier:                1.5,
+		NumMatches:                2,
+		NumCourts:                 1,
+		TeamSize:                  5,
+		BoutsPerTeamMatch:         5,
+		Kachinuki:                 true,
+	}
+	plain := EstimateSchedule(base)
+
+	withCeremony := base
+	withCeremony.CeremonyMinutes = 10
+	cer := EstimateSchedule(withCeremony)
+
+	assert.Equal(t, plain.BestCaseMinutes+10, cer.BestCaseMinutes)
+	assert.Equal(t, plain.TotalDurationMinutes+10, cer.TotalDurationMinutes)
+	assert.Equal(t, plain.WorstCaseMinutes+10, cer.WorstCaseMinutes)
+}
+
+// TestEstimateSchedule_NonKachinukiCollapses pins the collapse contract:
+// when Kachinuki is false (fixed-format team or individual), or when
+// Kachinuki is set but there is no bout count to widen (individual), the
+// bout count is constant, so BestCaseMinutes == TotalDurationMinutes ==
+// WorstCaseMinutes.
+func TestEstimateSchedule_NonKachinukiCollapses(t *testing.T) {
+	tests := []struct {
+		name string
+		in   EstimateInput
+	}{
+		{
+			name: "fixed-format team match",
+			in: EstimateInput{
+				MatchDurationClockMinutes: 3,
+				Multiplier:                1.5,
+				NumMatches:                2,
+				NumCourts:                 1,
+				TeamSize:                  5,
+				BoutsPerTeamMatch:         5,
+				Kachinuki:                 false,
+			},
+		},
+		{
+			name: "individual match",
+			in: EstimateInput{
+				MatchDurationClockMinutes: 3,
+				Multiplier:                1.5,
+				NumMatches:                4,
+				NumCourts:                 1,
+			},
+		},
+		{
+			name: "kachinuki flag without team bouts is inert",
+			in: EstimateInput{
+				MatchDurationClockMinutes: 3,
+				Multiplier:                1.5,
+				NumMatches:                4,
+				NumCourts:                 1,
+				Kachinuki:                 true, // TeamSize=0 → no bout count to widen
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := EstimateSchedule(tc.in)
+			assert.Equal(t, result.TotalDurationMinutes, result.BestCaseMinutes,
+				"best must equal total when the bout count is constant")
+			assert.Equal(t, result.TotalDurationMinutes, result.WorstCaseMinutes,
+				"worst must equal total when the bout count is constant")
+			assert.Greater(t, result.TotalDurationMinutes, 0)
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Tests for EstimateForCounts (Step 2)
 // ---------------------------------------------------------------------------
 
@@ -418,6 +591,91 @@ func TestEstimateForCounts_TeamDefaultsTeamSize(t *testing.T) {
 	assert.Greater(t, omitted.TotalDurationMinutes, indiv.TotalDurationMinutes,
 		"defaulted team comp (%d) must exceed the individual formula (%d)",
 		omitted.TotalDurationMinutes, indiv.TotalDurationMinutes)
+}
+
+// TestEstimateForCounts_KachinukiRange verifies the kachinuki branch of
+// EstimateForCounts prices three distinct scenarios (mp-gmcg). Fixture:
+// team size 3, 2-minute clock, 1.5x multiplier, 10% buffer, 2 pool
+// matches on 1 court.
+//
+// kachinukiBoutRange(3) = (3, 4, 5) bouts. Per match via
+// perMatchElapsedMinutesBouts (per-bout 2*1.5 = 3min + 1min changeover
+// per switch):
+//
+//	best:  3*3 + 2 = 11 min  → ×2 = 22 → ×1.10 = 24.2 → 24
+//	avg:   4*3 + 3 = 15 min  → ×2 = 30 → ×1.10 = 33.0 → 33
+//	worst: 5*3 + 4 = 19 min  → ×2 = 38 → ×1.10 = 41.8 → 42
+//
+// The BEST case is the nominal (TeamSize-bout) walk, so it must equal
+// the fixed-format estimate for the same fixture
+// (TestEstimateForCounts_TeamComp pins that at 24).
+func TestEstimateForCounts_KachinukiRange(t *testing.T) {
+	kachiComp := func() *state.Competition {
+		return &state.Competition{
+			Kind:                        "team",
+			TeamSize:                    3,
+			TeamMatchType:               state.TeamMatchTypeKachinuki,
+			Courts:                      []string{"A"},
+			PoolMatchDurationSeconds:    120,
+			PlayoffMatchDurationSeconds: 120,
+			StartTime:                   "09:00",
+		}
+	}
+	tourn := func() *state.Tournament { return newTournament(1.5, 10, "", "", "") }
+
+	est := EstimateForCounts(2, 0, kachiComp(), tourn())
+
+	assert.Equal(t, 24, est.BestCaseMinutes, "best: round(2*11*1.10) = 24")
+	assert.Equal(t, 33, est.TotalDurationMinutes, "avg headline: round(2*15*1.10) = 33")
+	assert.Equal(t, 42, est.WorstCaseMinutes, "worst: round(2*19*1.10) = 42")
+	assert.Less(t, est.BestCaseMinutes, est.TotalDurationMinutes)
+	assert.Less(t, est.TotalDurationMinutes, est.WorstCaseMinutes)
+	require.Len(t, est.PerCourtMinutes, 1)
+	assert.Equal(t, 33, est.PerCourtMinutes[0], "PerCourtMinutes reflects the average scenario")
+
+	// Best case == the fixed-format (nominal TeamSize-bout) estimate.
+	fixed := kachiComp()
+	fixed.TeamMatchType = state.TeamMatchTypeFixed
+	fixedEst := EstimateForCounts(2, 0, fixed, tourn())
+	assert.Equal(t, fixedEst.TotalDurationMinutes, est.BestCaseMinutes,
+		"kachinuki best case must equal the fixed-format nominal estimate")
+}
+
+// TestEstimateForCounts_NonKachinukiCollapses pins the collapse contract
+// for EstimateForCounts: fixed-format team and individual competitions
+// have a constant bout count, so all three scenario fields are equal.
+func TestEstimateForCounts_NonKachinukiCollapses(t *testing.T) {
+	tests := []struct {
+		name string
+		comp *state.Competition
+	}{
+		{
+			name: "fixed-format team",
+			comp: &state.Competition{
+				Kind:                        "team",
+				TeamSize:                    3,
+				TeamMatchType:               state.TeamMatchTypeFixed,
+				Courts:                      []string{"A"},
+				PoolMatchDurationSeconds:    120,
+				PlayoffMatchDurationSeconds: 120,
+				StartTime:                   "09:00",
+			},
+		},
+		{
+			name: "individual",
+			comp: newIndivComp([]string{"A"}, 3, 5, "09:00"),
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			est := EstimateForCounts(4, 3, tc.comp, newTournament(1.5, 10, "", "", ""))
+			assert.Equal(t, est.TotalDurationMinutes, est.BestCaseMinutes,
+				"best must equal total for a constant bout count")
+			assert.Equal(t, est.TotalDurationMinutes, est.WorstCaseMinutes,
+				"worst must equal total for a constant bout count")
+			assert.Greater(t, est.TotalDurationMinutes, 0)
+		})
+	}
 }
 
 // TestEstimateForCounts_EvenDistribution verifies even distribution across courts.

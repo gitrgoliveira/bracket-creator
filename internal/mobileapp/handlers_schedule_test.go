@@ -224,3 +224,70 @@ func TestScheduleEstimateEndpoint(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "courts must be between 1 and 26")
 	})
 }
+
+// TestScheduleEstimateEndpoint_Kachinuki covers the mp-gmcg range
+// contract on the wire: teamMatchType=kachinuki widens the estimate
+// into bestCaseMinutes < totalDurationMinutes < worstCaseMinutes;
+// any other (or absent) teamMatchType collapses the three fields to
+// one value.
+//
+// Fixture: matchDuration=3, multiplier=1.5, 2 matches, 1 court, team
+// size 5. kachinukiBoutRange(5) = (5, 7, 9) bouts, so per match
+// (bouts*3*1.5 + (bouts-1)*1 changeover): best 26.5, avg 37.5,
+// worst 48.5 → ×2 matches = 53 / 75 / 97.
+func TestScheduleEstimateEndpoint_Kachinuki(t *testing.T) {
+	r, _, _, _, tempDir := setupTestRouter(t)
+	defer func() {
+		require.NoError(t, os.RemoveAll(tempDir))
+	}()
+
+	const baseQuery = "/api/schedule/estimate?matchDuration=3&multiplier=1.5&numMatches=2&courts=1&teamSize=5&boutsPerTeamMatch=5"
+
+	t.Run("teamMatchType=kachinuki returns a best/avg/worst range", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", baseQuery+"&teamMatchType=kachinuki", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var resp engine.ScheduleEstimate
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, 53, resp.BestCaseMinutes, "best: 2 × (5*3*1.5 + 4) = 53")
+		assert.Equal(t, 75, resp.TotalDurationMinutes, "avg headline: 2 × (7*3*1.5 + 6) = 75")
+		assert.Equal(t, 97, resp.WorstCaseMinutes, "worst: 2 × (9*3*1.5 + 8) = 97")
+		assert.Less(t, resp.BestCaseMinutes, resp.TotalDurationMinutes)
+		assert.Less(t, resp.TotalDurationMinutes, resp.WorstCaseMinutes)
+
+		// Pin the wire field names too: the JSON keys must be the
+		// documented camelCase names, not Go field names.
+		var raw map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &raw))
+		assert.Contains(t, raw, "bestCaseMinutes")
+		assert.Contains(t, raw, "worstCaseMinutes")
+		assert.Contains(t, raw, "totalDurationMinutes")
+	})
+
+	t.Run("absent teamMatchType collapses the range", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", baseQuery, nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var resp engine.ScheduleEstimate
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, 53, resp.TotalDurationMinutes, "fixed 5-bout total: 2 × 26.5 = 53")
+		assert.Equal(t, resp.TotalDurationMinutes, resp.BestCaseMinutes)
+		assert.Equal(t, resp.TotalDurationMinutes, resp.WorstCaseMinutes)
+	})
+
+	t.Run("teamMatchType=fixed collapses the range", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", baseQuery+"&teamMatchType=fixed", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var resp engine.ScheduleEstimate
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, resp.TotalDurationMinutes, resp.BestCaseMinutes)
+		assert.Equal(t, resp.TotalDurationMinutes, resp.WorstCaseMinutes)
+	})
+}

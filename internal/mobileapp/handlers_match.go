@@ -189,6 +189,27 @@ func anySubBoutHasEncho(subResults []state.SubMatchResult) bool {
 	return false
 }
 
+// anyNumberedBoutHasEncho reports whether any NUMBERED sub-result (a real
+// team bout, not the position -1 daihyosen) carries an encho marker. Used
+// by the score endpoints to decide whether the kachinuki numbered-bout
+// encho exception needs the competition loaded at all: ordinary payloads
+// carry no numbered-bout encho and must not pay the store read.
+func anyNumberedBoutHasEncho(subResults []state.SubMatchResult) bool {
+	for i := range subResults {
+		sr := &subResults[i]
+		if sr.Position != state.DaihyosenSubPosition && sr.Encho != nil && sr.Encho.PeriodCount > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// isKachinukiComp reports whether comp is a kachinuki TEAM competition,
+// mirroring the engine's dispatch gate (TeamSize >= 2 + kachinuki type).
+func isKachinukiComp(comp *state.Competition) bool {
+	return comp != nil && comp.TeamSize >= 2 && comp.TeamMatchType == state.TeamMatchTypeKachinuki
+}
+
 // enforceEnchoCap is the gin-handler wrapper around enchoExceedsCap for
 // the single-result score / decision endpoints. Loads the competition
 // once, checks the top-level encho and every sub-bout encho against the
@@ -332,7 +353,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				continue
 			}
 
-			if err := validateBulkScoreLengths(&results[i]); err != nil {
+			if err := validateBulkScoreLengths(&results[i], isKachinukiComp(comp)); err != nil {
 				errs = append(errs, scoreError{MatchID: results[i].ID, Error: err.Error()})
 				continue
 			}
@@ -626,6 +647,77 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		// cleanup) so a later re-start of this match, whose client may reuse the
 		// same RevSession or reset its rev counter, is not wrongly dropped as
 		// stale against a leftover mark.
+		runningRevStore.Delete(id + ":" + mid)
+
+		hub.Broadcast(EventMatchUpdated, gin.H{
+			"competitionId": id,
+			"matchId":       mid,
+		})
+
+		c.Status(http.StatusOK)
+	})
+
+	// POST /competitions/:id/matches/:mid/reopen
+	// Sanctioned "Reopen match" for a COMPLETED kachinuki team match
+	// (mp-gmcg, spec 006 decision 4): status back to running, match-level
+	// winner/decision cleared, bout log kept, so the operator can add more
+	// bouts and later End match again. A dedicated endpoint rather than a
+	// score-write flag so the score path's stale-write guard (a plain
+	// running write against a completed match silently no-ops) stays fully
+	// intact. Non-kachinuki competitions get 400 (their only sanctioned
+	// edit of a finished result remains the correction path); a
+	// non-completed match or a bracket match whose winner already feeds a
+	// fought downstream match gets 409.
+	r.POST("/competitions/:id/matches/:mid/reopen", func(c *gin.Context) {
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
+		mid := c.Param("mid")
+		if err := validateMaxLen("matchId", mid, MaxLenMatchID); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Self-run mode: reopening a finalized result is an operator action.
+		// Anonymous participants are blocked from overwriting finalized
+		// results on the score path (checkFinalizedUnderTx); an ungated
+		// reopen would be a trivial bypass, so require the admin password
+		// here (mirrors enforceSelfRunPolicy's verification mechanics).
+		if t, terr := tl.LoadTournament(); terr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load tournament config"})
+			return
+		} else if t != nil && t.Mode == "self-run" {
+			okPw, verr := verifier.Verify(c.GetHeader("X-Tournament-Password"))
+			if verr != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "auth verification failed"})
+				return
+			}
+			if !okPw {
+				c.JSON(http.StatusForbidden, gin.H{"error": "reopening a completed match requires the admin password"})
+				return
+			}
+		}
+
+		if err := eng.ReopenKachinukiMatch(id, mid); err != nil {
+			var notFoundErr *engine.NotFoundError
+			var validationErr *engine.ValidationError
+			switch {
+			case errors.Is(err, engine.ErrReopenNotCompleted),
+				errors.Is(err, engine.ErrReopenDownstreamFought):
+				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			case errors.As(err, &notFoundErr):
+				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			case errors.As(err, &validationErr):
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			default:
+				internalError(c, err)
+			}
+			return
+		}
+
+		// The match re-entered the running state; any rev-guard high-water
+		// mark from its previous life is dead (mirrors revert-to-queue).
 		runningRevStore.Delete(id + ":" + mid)
 
 		hub.Broadcast(EventMatchUpdated, gin.H{
@@ -994,7 +1086,19 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			return
 		}
 		req := body.ScoreRequest
-		if err := req.Validate(); err != nil {
+		// Kachinuki exception (mp-gmcg): a knockout tie on the FINAL bout is
+		// resolved by encho on that same numbered bout, so the daihyosen-only
+		// encho gate in validateSubBout is relaxed for kachinuki competitions.
+		// The competition is loaded only when the payload actually carries a
+		// numbered-bout encho, keeping the hot scoring path free of the read.
+		// Fail closed: a load failure keeps the strict gate (400 below).
+		allowNumberedEncho := false
+		if anyNumberedBoutHasEncho(req.SubResults) {
+			if comp, err := store.LoadCompetition(id); err == nil {
+				allowNumberedEncho = isKachinukiComp(comp)
+			}
+		}
+		if err := req.validateWithOptions(allowNumberedEncho); err != nil {
 			// Map ValidationError → 400 with the validator's message.
 			// Engine errors below remain 500 (they surface I/O / state
 			// failures, not request-shape errors).

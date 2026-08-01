@@ -160,16 +160,24 @@ func validateURLHasHost(field, val string) error {
 // never decided by hantei. Hantei does NOT require encho, though, a tied
 // daihyosen may be decided by judges directly (the encho gate was removed).
 //
+// EXCEPTION (mp-gmcg): in a KACHINUKI competition a knockout tie on the
+// final bout is resolved by encho on that same numbered bout (daihyosen
+// does not exist in kachinuki), so callers that know the competition pass
+// allowNumberedEncho=true and the daihyosen-only encho gate is skipped.
+// The hantei gate is NOT relaxed: kachinuki bouts are never decided by
+// hantei.
+//
 // The winner/tied-scoreline/decision checks here intentionally mirror the
 // top-level DecidedByHantei block in ScoreRequest.Validate. Keep them in sync:
 // the sub-bout variant adds the Position guards and omits the top-level-only
 // Status/DecisionBy checks (SubMatchResult has no such fields).
-func validateSubBout(prefix string, sr *state.SubMatchResult) error {
+func validateSubBout(prefix string, sr *state.SubMatchResult, allowNumberedEncho bool) error {
 	// Encho period counts are bounded two ways. A negative count is never
 	// valid on any bout (it would slip past the > 0 guards below and be
 	// silently treated as "no encho", bypassing the cap check). On a
-	// numbered bout, ANY non-zero count is rejected, a regular bout has
-	// fixed regulation time and cannot go to overtime; only the daihyosen
+	// numbered bout, ANY non-zero count is rejected unless the caller
+	// allows it (kachinuki, see above): a fixed-format bout has fixed
+	// regulation time and cannot go to overtime; only the daihyosen
 	// representative bout (Position == -1) may carry encho.
 	if sr.Encho != nil {
 		if sr.Encho.PeriodCount < 0 {
@@ -178,7 +186,7 @@ func validateSubBout(prefix string, sr *state.SubMatchResult) error {
 				Message: "encho period count must not be negative",
 			}
 		}
-		if sr.Position != state.DaihyosenSubPosition && sr.Encho.PeriodCount != 0 {
+		if !allowNumberedEncho && sr.Position != state.DaihyosenSubPosition && sr.Encho.PeriodCount != 0 {
 			return &ValidationError{
 				Field:   prefix + "encho",
 				Message: "encho is only valid for the daihyosen representative bout (position -1)",
@@ -217,7 +225,9 @@ func validateSubBout(prefix string, sr *state.SubMatchResult) error {
 // endpoint, which writes through RecordMatchResult and so bypasses
 // ScoreRequest.Validate's checks. Same caps as ScoreRequest.Validate
 // so the per-result and per-endpoint enforcement stays in lockstep.
-func validateBulkScoreLengths(r *state.MatchResult) error {
+// allowNumberedEncho mirrors validateSubBout's kachinuki exception; the
+// bulk handler derives it from the competition it already loads.
+func validateBulkScoreLengths(r *state.MatchResult, allowNumberedEncho bool) error {
 	if err := validateMaxLen("sideA", r.SideA, MaxLenMatchSide); err != nil {
 		return err
 	}
@@ -272,7 +282,7 @@ func validateBulkScoreLengths(r *state.MatchResult) error {
 		if err := validateIpponCounts(prefix, sr.IpponsA, sr.IpponsB); err != nil {
 			return err
 		}
-		if err := validateSubBout(prefix, sr); err != nil {
+		if err := validateSubBout(prefix, sr, allowNumberedEncho); err != nil {
 			return err
 		}
 	}
@@ -396,6 +406,16 @@ type ScoreRequest state.MatchResult
 //     (2-0 in regulation, 1-0 in encho for kiken). fusensho is only
 //     valid on a per-bout SubResult, not on a top-level score request.
 func (r *ScoreRequest) Validate() error {
+	return r.validateWithOptions(false)
+}
+
+// validateWithOptions is Validate with the kachinuki numbered-bout encho
+// exception threaded through (mp-gmcg): the score handler passes
+// allowNumberedEncho=true when the target competition is kachinuki, where
+// a knockout tie on the final bout is resolved by encho on that same
+// numbered bout. Every other caller keeps the strict daihyosen-only gate
+// via Validate().
+func (r *ScoreRequest) validateWithOptions(allowNumberedEncho bool) error {
 	if r.Status != "" {
 		switch r.Status {
 		case state.MatchStatusScheduled, state.MatchStatusRunning, state.MatchStatusCompleted:
@@ -485,7 +505,7 @@ func (r *ScoreRequest) Validate() error {
 		if err := validateIpponCounts(prefix, sr.IpponsA, sr.IpponsB); err != nil {
 			return err
 		}
-		if err := validateSubBout(prefix, sr); err != nil {
+		if err := validateSubBout(prefix, sr, allowNumberedEncho); err != nil {
 			return err
 		}
 	}

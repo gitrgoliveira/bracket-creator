@@ -200,7 +200,7 @@ func TestValidateBulkScoreLengths_IpponCounts(t *testing.T) {
 		IpponsA: []string{"M", "K"},
 		IpponsB: []string{"D", "T"},
 	}
-	err := validateBulkScoreLengths(r)
+	err := validateBulkScoreLengths(r, false)
 	require.Error(t, err, "bulk-score 2-2 must be rejected by validateBulkScoreLengths")
 	var verr *ValidationError
 	require.True(t, errors.As(err, &verr))
@@ -218,7 +218,7 @@ func TestValidateBulkScoreLengths_SubResultIppons(t *testing.T) {
 			{Position: 1, IpponsA: []string{"M", "K"}, IpponsB: []string{"D", "T"}},
 		},
 	}
-	err := validateBulkScoreLengths(r)
+	err := validateBulkScoreLengths(r, false)
 	require.Error(t, err)
 	var verr *ValidationError
 	require.True(t, errors.As(err, &verr))
@@ -484,7 +484,7 @@ func TestReasonCaps_ValidateTrimmedValue(t *testing.T) {
 			"correctionReason within cap after trim must not be rejected")
 	})
 	t.Run("validateBulkScoreLengths correctionReason", func(t *testing.T) {
-		require.NoError(t, validateBulkScoreLengths(&state.MatchResult{CorrectionReason: padded}),
+		require.NoError(t, validateBulkScoreLengths(&state.MatchResult{CorrectionReason: padded}, false),
 			"bulk correctionReason within cap after trim must not be rejected")
 	})
 }
@@ -538,7 +538,7 @@ func TestValidateBulkScoreLengths(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateBulkScoreLengths(&tt.mr)
+			err := validateBulkScoreLengths(&tt.mr, false)
 			if tt.wantField == "" {
 				assert.NoError(t, err)
 				return
@@ -1127,7 +1127,7 @@ func TestValidateBulkScoreLengths_SubBoutDecidedByHantei(t *testing.T) {
 				},
 			},
 		}
-		verr := validateBulkScoreLengths(r)
+		verr := validateBulkScoreLengths(r, false)
 		require.IsType(t, &ValidationError{}, verr)
 		assert.Equal(t, "subResults[0].decidedByHantei", verr.(*ValidationError).Field)
 	})
@@ -1142,7 +1142,7 @@ func TestValidateBulkScoreLengths_SubBoutDecidedByHantei(t *testing.T) {
 				},
 			},
 		}
-		verr := validateBulkScoreLengths(r)
+		verr := validateBulkScoreLengths(r, false)
 		require.IsType(t, &ValidationError{}, verr)
 		assert.Equal(t, "subResults[0].encho", verr.(*ValidationError).Field)
 	})
@@ -1157,7 +1157,7 @@ func TestValidateBulkScoreLengths_SubBoutDecidedByHantei(t *testing.T) {
 				},
 			},
 		}
-		assert.NoError(t, validateBulkScoreLengths(r))
+		assert.NoError(t, validateBulkScoreLengths(r, false))
 	})
 
 	t.Run("invalid: daihyosen hantei without winner rejected on bulk path", func(t *testing.T) {
@@ -1170,7 +1170,7 @@ func TestValidateBulkScoreLengths_SubBoutDecidedByHantei(t *testing.T) {
 				},
 			},
 		}
-		verr := validateBulkScoreLengths(r)
+		verr := validateBulkScoreLengths(r, false)
 		require.IsType(t, &ValidationError{}, verr)
 		assert.Equal(t, "subResults[0].decidedByHantei", verr.(*ValidationError).Field)
 	})
@@ -1185,7 +1185,7 @@ func TestValidateBulkScoreLengths_SubBoutDecidedByHantei(t *testing.T) {
 				},
 			},
 		}
-		assert.NoError(t, validateBulkScoreLengths(r))
+		assert.NoError(t, validateBulkScoreLengths(r, false))
 	})
 
 	t.Run("invalid: daihyosen hantei with non-tied scoreline rejected on bulk path", func(t *testing.T) {
@@ -1198,7 +1198,7 @@ func TestValidateBulkScoreLengths_SubBoutDecidedByHantei(t *testing.T) {
 				},
 			},
 		}
-		verr := validateBulkScoreLengths(r)
+		verr := validateBulkScoreLengths(r, false)
 		require.IsType(t, &ValidationError{}, verr)
 		assert.Equal(t, "subResults[0].decidedByHantei", verr.(*ValidationError).Field)
 	})
@@ -1339,7 +1339,7 @@ func TestScoreRequestValidate_FlagsNonNegative(t *testing.T) {
 		assert.Equal(t, "flagsB", verr.Field)
 	})
 	t.Run("negative flagsA rejected in bulk validator", func(t *testing.T) {
-		err := validateBulkScoreLengths(&state.MatchResult{FlagsA: -1})
+		err := validateBulkScoreLengths(&state.MatchResult{FlagsA: -1}, false)
 		require.Error(t, err)
 		var verr *ValidationError
 		require.Truef(t, errors.As(err, &verr), "want *ValidationError, got %T", err)

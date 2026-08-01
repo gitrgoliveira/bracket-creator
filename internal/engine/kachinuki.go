@@ -29,6 +29,7 @@
 package engine
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"sort"
@@ -456,10 +457,199 @@ func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, error) {
 	return true, nil
 }
 
+// Sentinel errors for the operator-led reopen path (mp-gmcg, spec 006
+// decision 4). Both map to HTTP 409 in the handler.
+var (
+	// ErrReopenNotCompleted: only a COMPLETED kachinuki match can be
+	// reopened; a running match needs no reopen and a scheduled one has
+	// nothing to reopen.
+	ErrReopenNotCompleted = errors.New("match is not completed; only a completed kachinuki match can be reopened")
+	// ErrReopenDownstreamFought: the reopened match's winner was already
+	// propagated into a downstream knockout match that has started or
+	// recorded results; reopening would corrupt the bracket.
+	ErrReopenDownstreamFought = errors.New("cannot reopen: a downstream knockout match has already started or recorded a result")
+)
+
+// ReopenKachinukiMatch is the sanctioned "Reopen match" path for a
+// COMPLETED kachinuki team match (mp-gmcg, spec 006 decision 4): status
+// back to running, match-level winner/decision cleared, the full bout log
+// kept, so the operator can add more bouts and later End match again.
+//
+// Kachinuki ONLY: for every other competition type the correction path
+// (completed -> completed with a correctionReason) remains the sole
+// sanctioned edit of a finished result, and this returns a
+// *ValidationError (HTTP 400). The score path's stale-write guard
+// (a plain running write against a completed match silently no-ops) is
+// intentionally untouched; reopen is explicit and separate.
+//
+// Bracket matches: the completed result may already have been propagated
+// downstream (propagateBracketWinner fills the next round's slot, and a
+// semifinal feeds its loser to the bronze match). If any downstream
+// target has started or recorded a result, reopen is rejected with
+// ErrReopenDownstreamFought rather than corrupting the bracket. When the
+// downstream slot is merely filled but unfought, the slot is reset the
+// same way generation fills it: the next-round side returns to its
+// "Winner of rX-mY" placeholder (the exact string propagateBracketWinner
+// re-resolves on the next completion) and the bronze side to empty.
+func (e *Engine) ReopenKachinukiMatch(compID, matchID string) error {
+	comp, err := e.store.LoadCompetition(compID)
+	if err != nil {
+		return err
+	}
+	if comp == nil || comp.TeamSize < 2 || comp.TeamMatchType != state.TeamMatchTypeKachinuki {
+		return validationErrorf("reopen is only supported for kachinuki team matches; correct other results via the score editor (correctionReason)")
+	}
+
+	var opErr error
+	txErr := e.store.WithTransaction(compID, func(tx state.StoreTx) error {
+		// Pool store first, mirroring findTeamMatch's lookup order.
+		poolMatches, lerr := tx.LoadPoolMatches(compID)
+		if lerr == nil {
+			for i := range poolMatches {
+				if poolMatches[i].ID != matchID {
+					continue
+				}
+				if poolMatches[i].Status != state.MatchStatusCompleted {
+					opErr = ErrReopenNotCompleted
+					return nil
+				}
+				m := &poolMatches[i]
+				m.Status = state.MatchStatusRunning
+				m.Winner = ""
+				m.WinnerID = ""
+				m.Decision = ""
+				m.DecisionBy = ""
+				m.DecisionReason = ""
+				// SavePoolMatches funnels through the normal save chokepoint,
+				// so standings caches invalidate via the usual version bump.
+				return tx.SavePoolMatches(compID, poolMatches)
+			}
+		}
+
+		bracket, lerr := tx.LoadBracket(compID)
+		if lerr != nil {
+			return lerr
+		}
+		if bracket != nil {
+			for rIdx := range bracket.Rounds {
+				for mIdx := range bracket.Rounds[rIdx] {
+					bm := &bracket.Rounds[rIdx][mIdx]
+					if bm.ID != matchID {
+						continue
+					}
+					if bm.Status != state.MatchStatusCompleted {
+						opErr = ErrReopenNotCompleted
+						return nil
+					}
+					if derr := retractPropagatedWinner(bracket, rIdx, mIdx); derr != nil {
+						opErr = derr
+						return nil
+					}
+					reopenBracketMatch(bm)
+					return tx.SaveBracket(compID, bracket)
+				}
+			}
+			// The bronze (3rd-place) match is a sibling of Rounds and has no
+			// downstream match, so no retraction is needed.
+			if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID == matchID {
+				if bm.Status != state.MatchStatusCompleted {
+					opErr = ErrReopenNotCompleted
+					return nil
+				}
+				reopenBracketMatch(bm)
+				return tx.SaveBracket(compID, bracket)
+			}
+		}
+
+		opErr = notFoundErrorf("match %s not found", matchID)
+		return nil
+	})
+	if txErr != nil {
+		return txErr
+	}
+	return opErr
+}
+
+// reopenBracketMatch flips a completed bracket match back to running,
+// clearing the match-level outcome while keeping the bout log.
+func reopenBracketMatch(bm *state.BracketMatch) {
+	bm.Status = state.MatchStatusRunning
+	bm.Winner = ""
+	bm.Decision = ""
+	bm.DecisionBy = ""
+	bm.DecisionReason = ""
+}
+
+// retractPropagatedWinner undoes what propagateBracketWinner did for the
+// match at (rIdx, mIdx): the next round's slot returns to its "Winner of
+// rX-mY" placeholder and, for a semifinal feeding a bronze match, the
+// bronze slot returns to empty. All downstream targets are CHECKED before
+// any is mutated, so a rejection leaves the bracket untouched. A
+// downstream match that has started, recorded bouts, or completed (which
+// includes a bye auto-resolution off this match's winner) rejects the
+// reopen with ErrReopenDownstreamFought.
+func retractPropagatedWinner(bracket *state.Bracket, rIdx, mIdx int) error {
+	var bronze *state.BracketMatch
+	if bracket.ThirdPlaceMatch != nil && rIdx == len(bracket.Rounds)-2 {
+		bronze = bracket.ThirdPlaceMatch
+		if bracketMatchStartedOrScored(bronze) {
+			return ErrReopenDownstreamFought
+		}
+	}
+	var next *state.BracketMatch
+	if rIdx+1 < len(bracket.Rounds) {
+		next = &bracket.Rounds[rIdx+1][mIdx/2]
+		if bracketMatchStartedOrScored(next) {
+			return ErrReopenDownstreamFought
+		}
+	}
+	if bronze != nil {
+		// Mirror propagateBracketWinner's positional assignment: semifinal
+		// mIdx 0 feeds the bronze SideA, mIdx 1 feeds SideB.
+		if mIdx%2 == 0 {
+			bronze.SideA = ""
+		} else {
+			bronze.SideB = ""
+		}
+	}
+	if next != nil {
+		// The placeholder format matches generation (bracket.go) and
+		// parseWinnerOf: depth is 1-based from the final, so the source
+		// match at round rIdx is depth len(Rounds)-rIdx.
+		placeholder := fmt.Sprintf("Winner of r%d-m%d", len(bracket.Rounds)-rIdx, mIdx)
+		if mIdx%2 == 0 {
+			next.SideA = placeholder
+		} else {
+			next.SideB = placeholder
+		}
+	}
+	return nil
+}
+
+// bracketMatchStartedOrScored reports whether a downstream bracket match
+// is anything other than an untouched scheduled slot: running/completed
+// status, a winner, recorded bouts, or a scoreline all block a reopen.
+func bracketMatchStartedOrScored(bm *state.BracketMatch) bool {
+	return bm.Status == state.MatchStatusRunning ||
+		bm.Status == state.MatchStatusCompleted ||
+		bm.Winner != "" ||
+		len(bm.SubResults) > 0 ||
+		bm.ScoreA != "" ||
+		bm.ScoreB != ""
+}
+
 // applyKachinukiMerge merges an incoming kachinuki bout log into the stored
 // prior log by position via mergeKachinukiSubResults. No-op for individual,
 // fixed-format, or missing competitions. Shared by the locked and tx scoring
 // paths so the merge guard cannot drift between them.
+//
+// On a COMPLETED write (the operator's explicit "End match", mp-gmcg) it
+// additionally strips trailing UNSCORED bouts after the merge:
+// MaybeAdvanceKachinuki auto-appends the next pairing after every scored
+// bout, so ending the match leaves an abandoned empty pairing at the tail.
+// Because the merge preserves stored entries by position, a client simply
+// omitting that row cannot remove it, the server must strip it here so it
+// never reaches standings/exports.
 func applyKachinukiMerge(comp *state.Competition, prior, result *state.MatchResult) {
 	if comp == nil || comp.TeamSize < 2 || comp.TeamMatchType != state.TeamMatchTypeKachinuki {
 		return
@@ -469,6 +659,43 @@ func applyKachinukiMerge(comp *state.Competition, prior, result *state.MatchResu
 		stored = prior.SubResults
 	}
 	result.SubResults = mergeKachinukiSubResults(stored, result.SubResults)
+	if result.Status == state.MatchStatusCompleted {
+		result.SubResults = stripTrailingUnscoredKachinukiBouts(result.SubResults)
+	}
+}
+
+// isUnscoredKachinukiBout reports whether a bout carries no recorded
+// outcome or score at all: no winner, no decision, no real ippons on
+// either side, no hansoku, no hantei, no encho marker. Such a row is the
+// placeholder pairing MaybeAdvanceKachinuki appends for a bout that was
+// never fought.
+func isUnscoredKachinukiBout(s state.SubMatchResult) bool {
+	return s.Winner == "" &&
+		s.Decision == "" &&
+		countScoringIppons(s.IpponsA) == 0 &&
+		countScoringIppons(s.IpponsB) == 0 &&
+		s.HansokuA == 0 &&
+		s.HansokuB == 0 &&
+		!s.DecidedByHantei &&
+		s.Encho == nil
+}
+
+// stripTrailingUnscoredKachinukiBouts drops TRAILING unscored bouts from a
+// kachinuki bout log (highest positions downward), stopping at the first
+// scored row. Interior unscored rows are never touched (stripping them
+// would renumber history), and the walk stops entirely on any row with
+// Position <= 0 so a legacy daihyosen sentinel (Position -1, ordered last
+// by mergeKachinukiSubResults) is never deleted or skipped over.
+func stripTrailingUnscoredKachinukiBouts(subs []state.SubMatchResult) []state.SubMatchResult {
+	end := len(subs)
+	for end > 0 {
+		s := subs[end-1]
+		if s.Position <= 0 || !isUnscoredKachinukiBout(s) {
+			break
+		}
+		end--
+	}
+	return subs[:end]
 }
 
 // mergeKachinukiSubResults merges an incoming kachinuki bout log into

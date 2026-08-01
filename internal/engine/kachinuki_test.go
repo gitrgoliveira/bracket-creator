@@ -1480,6 +1480,318 @@ func TestMergeKachinukiSubResults(t *testing.T) {
 	})
 }
 
+// TestReopenKachinukiMatch pins the sanctioned reopen path (mp-gmcg,
+// spec 006 decision 4): a completed kachinuki match returns to running
+// with the match-level outcome cleared and the bout log intact.
+// Kachinuki-only; bracket reopens retract an unfought propagated winner
+// (next-round slot back to its "Winner of rX-mY" placeholder, bronze
+// loser slot back to empty) and reject when downstream already fought.
+func TestReopenKachinukiMatch(t *testing.T) {
+	completedPool := func() state.MatchResult {
+		return state.MatchResult{
+			ID: "P1-0", SideA: "RedTeam", SideB: "WhiteTeam", Status: state.MatchStatusCompleted,
+			Winner: "RedTeam", WinnerID: "red-id", Decision: "kachinuki-exhaustion",
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "R-1", SideB: "W-1", IpponsA: []string{"M"}, Winner: "R-1", Decision: "fought"},
+			},
+		}
+	}
+
+	t.Run("non-kachinuki competition rejected with ValidationError", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		require.NoError(t, store.SaveCompetition(&state.Competition{ID: "fixed", TeamSize: 3}))
+		require.NoError(t, store.SavePoolMatches("fixed", []state.MatchResult{completedPool()}))
+		err := eng.ReopenKachinukiMatch("fixed", "P1-0")
+		var verr *ValidationError
+		require.ErrorAs(t, err, &verr, "non-kachinuki reopen must be a validation error (400)")
+	})
+
+	t.Run("pool match reopened: running, outcome cleared, bout log kept", func(t *testing.T) {
+		eng, store, _ := setupKachinukiComp(t, "reopen-pool", 3)
+		require.NoError(t, store.SavePoolMatches("reopen-pool", []state.MatchResult{completedPool()}))
+		require.NoError(t, eng.ReopenKachinukiMatch("reopen-pool", "P1-0"))
+
+		matches, err := store.LoadPoolMatches("reopen-pool")
+		require.NoError(t, err)
+		require.Len(t, matches, 1)
+		assert.Equal(t, state.MatchStatusRunning, matches[0].Status)
+		assert.Empty(t, matches[0].Winner)
+		assert.Empty(t, matches[0].WinnerID, "the resolved winner id must be cleared with the winner")
+		assert.Empty(t, matches[0].Decision)
+		require.Len(t, matches[0].SubResults, 1, "bout log kept")
+	})
+
+	t.Run("not completed", func(t *testing.T) {
+		eng, store, _ := setupKachinukiComp(t, "reopen-running", 3)
+		m := completedPool()
+		m.Status = state.MatchStatusRunning
+		m.Winner = ""
+		require.NoError(t, store.SavePoolMatches("reopen-running", []state.MatchResult{m}))
+		err := eng.ReopenKachinukiMatch("reopen-running", "P1-0")
+		assert.ErrorIs(t, err, ErrReopenNotCompleted)
+	})
+
+	t.Run("match not found", func(t *testing.T) {
+		eng, _, _ := setupKachinukiComp(t, "reopen-missing", 3)
+		err := eng.ReopenKachinukiMatch("reopen-missing", "nope")
+		var nfErr *NotFoundError
+		assert.ErrorAs(t, err, &nfErr)
+	})
+
+	t.Run("semifinal reopen retracts the final slot AND the bronze loser", func(t *testing.T) {
+		eng, store, _ := setupKachinukiComp(t, "reopen-semi", 3)
+		require.NoError(t, store.SaveBracket("reopen-semi", &state.Bracket{
+			Rounds: [][]state.BracketMatch{
+				{
+					{
+						ID: "SF0", SideA: "RedTeam", SideB: "WhiteTeam", Status: state.MatchStatusCompleted,
+						Winner: "RedTeam", Decision: "kachinuki-exhaustion",
+						SubResults: []state.SubMatchResult{
+							{Position: 1, SideA: "R-1", SideB: "W-1", IpponsA: []string{"M"}, Winner: "R-1", Decision: "fought"},
+						},
+					},
+					{ID: "SF1", SideA: "Kuma", SideB: "Washi", Status: state.MatchStatusScheduled},
+				},
+				{
+					{ID: "F0", SideA: "RedTeam", SideB: "Winner of r2-m1", Status: state.MatchStatusScheduled},
+				},
+			},
+			ThirdPlaceMatch: &state.BracketMatch{
+				ID: "B0", SideA: "WhiteTeam", SideB: "", Status: state.MatchStatusScheduled,
+			},
+		}))
+		require.NoError(t, eng.ReopenKachinukiMatch("reopen-semi", "SF0"))
+
+		bracket, err := store.LoadBracket("reopen-semi")
+		require.NoError(t, err)
+		sf := bracket.Rounds[0][0]
+		assert.Equal(t, state.MatchStatusRunning, sf.Status)
+		assert.Empty(t, sf.Winner)
+		assert.Empty(t, sf.Decision)
+		require.Len(t, sf.SubResults, 1, "bout log kept")
+		assert.Equal(t, "Winner of r2-m0", bracket.Rounds[1][0].SideA, "final slot retracted to the generation placeholder")
+		assert.Equal(t, "Winner of r2-m1", bracket.Rounds[1][0].SideB, "sibling slot untouched")
+		assert.Empty(t, bracket.ThirdPlaceMatch.SideA, "bronze loser slot retracted")
+	})
+
+	t.Run("downstream fought rejects the reopen and leaves the bracket untouched", func(t *testing.T) {
+		eng, store, _ := setupKachinukiComp(t, "reopen-blocked", 3)
+		require.NoError(t, store.SaveBracket("reopen-blocked", &state.Bracket{
+			Rounds: [][]state.BracketMatch{
+				{
+					{
+						ID: "SF0", SideA: "RedTeam", SideB: "WhiteTeam", Status: state.MatchStatusCompleted,
+						Winner: "RedTeam", Decision: "kachinuki-exhaustion",
+					},
+					{ID: "SF1", SideA: "Kuma", SideB: "Washi", Status: state.MatchStatusCompleted, Winner: "Kuma"},
+				},
+				{
+					{
+						ID: "F0", SideA: "RedTeam", SideB: "Kuma", Status: state.MatchStatusRunning,
+						SubResults: []state.SubMatchResult{{Position: 1, SideA: "R-1", SideB: "K-1"}},
+					},
+				},
+			},
+		}))
+		err := eng.ReopenKachinukiMatch("reopen-blocked", "SF0")
+		assert.ErrorIs(t, err, ErrReopenDownstreamFought)
+
+		bracket, lerr := store.LoadBracket("reopen-blocked")
+		require.NoError(t, lerr)
+		assert.Equal(t, state.MatchStatusCompleted, bracket.Rounds[0][0].Status)
+		assert.Equal(t, "RedTeam", bracket.Rounds[1][0].SideA, "downstream pairing untouched")
+	})
+
+	t.Run("bronze match reopens with no downstream checks", func(t *testing.T) {
+		eng, store, _ := setupKachinukiComp(t, "reopen-bronze", 3)
+		require.NoError(t, store.SaveBracket("reopen-bronze", &state.Bracket{
+			Rounds: [][]state.BracketMatch{
+				{{ID: "F0", SideA: "RedTeam", SideB: "Kuma", Status: state.MatchStatusScheduled}},
+			},
+			ThirdPlaceMatch: &state.BracketMatch{
+				ID: "B0", SideA: "WhiteTeam", SideB: "Washi", Status: state.MatchStatusCompleted,
+				Winner: "Washi", Decision: "kachinuki-exhaustion",
+				SubResults: []state.SubMatchResult{
+					{Position: 1, SideA: "W-1", SideB: "X-1", IpponsB: []string{"M"}, Winner: "X-1", Decision: "fought"},
+				},
+			},
+		}))
+		require.NoError(t, eng.ReopenKachinukiMatch("reopen-bronze", "B0"))
+
+		bracket, err := store.LoadBracket("reopen-bronze")
+		require.NoError(t, err)
+		assert.Equal(t, state.MatchStatusRunning, bracket.ThirdPlaceMatch.Status)
+		assert.Empty(t, bracket.ThirdPlaceMatch.Winner)
+		require.Len(t, bracket.ThirdPlaceMatch.SubResults, 1, "bout log kept")
+	})
+}
+
+// TestStripTrailingUnscoredKachinukiBouts pins the completed-write strip
+// (mp-gmcg): MaybeAdvanceKachinuki auto-appends the next pairing after each
+// scored bout, so an operator's "End match" leaves an abandoned unscored
+// placeholder at the tail. The server strips only TRAILING unscored rows,
+// stopping at the first scored row or any Position <= 0 sentinel.
+func TestStripTrailingUnscoredKachinukiBouts(t *testing.T) {
+	scored := func(pos int, winner string) state.SubMatchResult {
+		return state.SubMatchResult{Position: pos, SideA: "R", SideB: "W", IpponsA: []string{"M"}, Winner: winner, Decision: "fought"}
+	}
+	placeholder := func(pos int) state.SubMatchResult {
+		return state.SubMatchResult{Position: pos, SideA: "R", SideB: "W"}
+	}
+
+	tests := []struct {
+		name    string
+		in      []state.SubMatchResult
+		wantPos []int
+	}{
+		{
+			name:    "trailing unscored placeholder stripped",
+			in:      []state.SubMatchResult{scored(1, "R"), placeholder(2)},
+			wantPos: []int{1},
+		},
+		{
+			name:    "trailing scored bout kept",
+			in:      []state.SubMatchResult{scored(1, "R"), scored(2, "W")},
+			wantPos: []int{1, 2},
+		},
+		{
+			name:    "interior unscored row kept, only the tail strips",
+			in:      []state.SubMatchResult{scored(1, "R"), placeholder(2), scored(3, "W"), placeholder(4)},
+			wantPos: []int{1, 2, 3},
+		},
+		{
+			name: "tied final bout with hikiwake decision kept",
+			in: []state.SubMatchResult{
+				scored(1, "R"),
+				{Position: 2, SideA: "R-2", SideB: "W-2", Decision: "hikiwake"},
+			},
+			wantPos: []int{1, 2},
+		},
+		{
+			name:    "multiple trailing unscored rows all stripped back to the last scored bout",
+			in:      []state.SubMatchResult{scored(1, "R"), placeholder(2), placeholder(3)},
+			wantPos: []int{1},
+		},
+		{
+			name:    "log with only unscored rows strips to empty",
+			in:      []state.SubMatchResult{placeholder(1), placeholder(2)},
+			wantPos: []int{},
+		},
+		{
+			name: "trailing daihyosen sentinel stops the walk (legacy row never deleted)",
+			in: []state.SubMatchResult{
+				scored(1, "R"),
+				{Position: state.DaihyosenSubPosition, SideA: "Ryu", SideB: "Tora", Winner: "Ryu", Decision: "daihyosen"},
+			},
+			wantPos: []int{1, state.DaihyosenSubPosition},
+		},
+		{
+			name: "unscored trailing row BEFORE a sentinel is protected too (walk stops entirely)",
+			in: []state.SubMatchResult{
+				scored(1, "R"),
+				placeholder(2),
+				{Position: state.DaihyosenSubPosition, SideA: "Ryu", SideB: "Tora", Winner: "Ryu", Decision: "daihyosen"},
+			},
+			wantPos: []int{1, 2, state.DaihyosenSubPosition},
+		},
+		{
+			name: "encho marker counts as scored",
+			in: []state.SubMatchResult{
+				scored(1, "R"),
+				{Position: 2, SideA: "R", SideB: "W", Encho: &state.EnchoMetadata{PeriodCount: 1}},
+			},
+			wantPos: []int{1, 2},
+		},
+		{
+			name: "hansoku-only bout counts as scored",
+			in: []state.SubMatchResult{
+				scored(1, "R"),
+				{Position: 2, SideA: "R", SideB: "W", HansokuB: 1},
+			},
+			wantPos: []int{1, 2},
+		},
+		{
+			name: "placeholder-dot ippons are still unscored",
+			in: []state.SubMatchResult{
+				scored(1, "R"),
+				{Position: 2, SideA: "R", SideB: "W", IpponsA: []string{"•", ""}, IpponsB: []string{""}},
+			},
+			wantPos: []int{1},
+		},
+		{
+			name:    "empty log stays empty",
+			in:      nil,
+			wantPos: []int{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out := stripTrailingUnscoredKachinukiBouts(tt.in)
+			gotPos := make([]int, 0, len(out))
+			for _, s := range out {
+				gotPos = append(gotPos, s.Position)
+			}
+			assert.Equal(t, tt.wantPos, gotPos)
+		})
+	}
+}
+
+// TestApplyKachinukiMerge_StripOnCompletedOnly pins WHERE the strip runs:
+// applyKachinukiMerge is the single chokepoint both scoring twins funnel
+// through, and it strips only when the incoming write is completed. A
+// running write (autosave, record-bout) must keep the appended placeholder.
+func TestApplyKachinukiMerge_StripOnCompletedOnly(t *testing.T) {
+	comp := &state.Competition{
+		ID:            "strip-choke",
+		TeamSize:      3,
+		TeamMatchType: state.TeamMatchTypeKachinuki,
+	}
+	prior := &state.MatchResult{
+		SubResults: []state.SubMatchResult{
+			{Position: 1, SideA: "R-1", SideB: "W-1", IpponsA: []string{"M"}, Winner: "R-1", Decision: "fought"},
+			{Position: 2, SideA: "R-1", SideB: "W-2"}, // server-appended, never fought
+		},
+	}
+
+	t.Run("completed write strips the merged trailing placeholder", func(t *testing.T) {
+		result := &state.MatchResult{
+			Status: state.MatchStatusCompleted,
+			Winner: "Ryu",
+			SubResults: []state.SubMatchResult{
+				// Stale client omits the appended bout 2; the merge restores it,
+				// then the completed-status strip removes it again.
+				{Position: 1, SideA: "R-1", SideB: "W-1", IpponsA: []string{"M"}, Winner: "R-1", Decision: "fought"},
+			},
+		}
+		applyKachinukiMerge(comp, prior, result)
+		require.Len(t, result.SubResults, 1, "the abandoned placeholder must not survive a completed write")
+		assert.Equal(t, 1, result.SubResults[0].Position)
+	})
+
+	t.Run("running write keeps the merged placeholder", func(t *testing.T) {
+		result := &state.MatchResult{
+			Status: state.MatchStatusRunning,
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "R-1", SideB: "W-1", IpponsA: []string{"M"}, Winner: "R-1", Decision: "fought"},
+			},
+		}
+		applyKachinukiMerge(comp, prior, result)
+		require.Len(t, result.SubResults, 2, "a running write must preserve the server-appended bout")
+		assert.Equal(t, 2, result.SubResults[1].Position)
+	})
+
+	t.Run("non-kachinuki competition is untouched", func(t *testing.T) {
+		fixed := &state.Competition{ID: "fixed", TeamSize: 3}
+		result := &state.MatchResult{
+			Status:     state.MatchStatusCompleted,
+			SubResults: []state.SubMatchResult{{Position: 1}, {Position: 2}},
+		}
+		applyKachinukiMerge(fixed, prior, result)
+		assert.Len(t, result.SubResults, 2, "no merge and no strip outside kachinuki")
+	})
+}
+
 // TestRecordMatchResultWithIneligibility_KachinukiMerge covers the
 // NON-TX twin's merge block: a partial kachinuki patch must preserve the
 // stored appended placeholder (same contract the tx twin enforces for

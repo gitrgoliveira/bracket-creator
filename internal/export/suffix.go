@@ -32,7 +32,7 @@ import (
 // middleMark()/formatIpponsScore in web-mobile/js/bracket.jsx.
 func MiddleMark(decision string, encho *state.EnchoMetadata) string {
 	switch {
-	case decision == state.DecisionDraw:
+	case state.IsDraw(decision):
 		return "X"
 	case decision == string(domain.DecisionDaihyosen):
 		return "(DH)"
@@ -75,8 +75,8 @@ func SideMarks(decision string, decidedByHantei bool) (winnerMark, loserMark str
 // a winner by definition.
 func SideMarksLR(decision string, decidedByHantei bool, winner, sideA, sideB string, mirror bool) (left, right string) {
 	winnerMark, loserMark := SideMarks(decision, decidedByHantei)
-	if winnerMark == "" && loserMark == "" || winner == "" {
-		return "", ""
+	if winner == "" {
+		return "", "" // an empty winner must not string-match an empty side
 	}
 	var aMark, bMark string
 	switch winner {

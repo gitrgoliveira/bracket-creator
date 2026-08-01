@@ -230,13 +230,7 @@ export function matchHighlightedBy(m, picked, dojoText) {
 export function TWMatch({ m, highlight, onClick }) {
   const aWin = m.winner && m.sideA && m.winner.id === m.sideA.id;
   const bWin = m.winner && m.sideB && m.winner.id === m.sideB.id;
-  // Bracket matches carry scoreA/scoreB strings rather than ipponsA/B arrays
-  // (see normalizeMatch). Derive the arrays like VSchedItem does: they are
-  // load-bearing, since matchScoreStr renders waza letters only and has no
-  // numeric fallback — without them the score cell would render blank.
-  const twIpponsA = m.ipponsA || window.ipponsFromScore(m.scoreA);
-  const twIpponsB = m.ipponsB || window.ipponsFromScore(m.scoreB);
-  const scoreStr = m.status === "completed" ? window.matchScoreStr(m, twIpponsB, twIpponsA) : null;
+  const scoreStr = m.status === "completed" ? window.matchScoreStr(m) : null;
   // FR-025: per-court queue position: see VSchedItem for the contract.
   // Short pill form here because the tw-match row is denser than the
   // upcoming-list row in the per-competition viewer. Wording is owned

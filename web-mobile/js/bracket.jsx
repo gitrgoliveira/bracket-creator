@@ -180,13 +180,12 @@ function formatIpponsScore(ipponsLeft, ipponsRight, score, decision, encho, deci
   const mid = middleMark(decision, encho);
   const sep = mid ? ` ${mid} ` : " vs ";
   const marks = sideMarks(decision, hantei);
-  const attributed = winnerSide === "left" || winnerSide === "right";
   const [leftMark, rightMark] = placeMarks(marks, winnerSide === "left", winnerSide === "right");
-  // Unattributable marks (no winnerSide from the caller) trail the string so
-  // the result is never silently dropped.
-  const trail = !attributed && (marks.winner || marks.loser)
-    ? " " + [marks.winner, marks.loser].filter(Boolean).join(" ")
-    : "";
+  // Marks placeMarks could not attribute to a side (no winnerSide from the
+  // caller) stay loose and trail the string so the result is never silently
+  // dropped.
+  const looseMarks = leftMark || rightMark ? "" : joinSp(marks.winner, marks.loser);
+  const trail = looseMarks ? " " + looseMarks : "";
 
   // Numbers are NOT a valid display for ippon: the per-side waza-letter
   // arrays are the only source of an ippon score. There is deliberately no
@@ -195,8 +194,8 @@ function formatIpponsScore(ipponsLeft, ipponsRight, score, decision, encho, deci
   // count-only data renders no score rather than invalid digits).
   if (!aStr && !bStr && !leftMark && !rightMark) {
     // Nothing to put in either cell: collapse to the bare middle mark plus
-    // any unattributed result marks ("(E)", "Kiken").
-    return [mid, marks.winner, marks.loser].filter(Boolean).join(" ");
+    // any loose result marks ("(E)", "Kiken").
+    return joinSp(mid, looseMarks);
   }
   // A cell holds its letters and/or its result mark ("M Ht (E) K",
   // "Ht (E) –" for a 0-0 hantei); an empty cell reads "–".
@@ -912,14 +911,23 @@ function BracketTreeLegacy({ rounds, variant = 1, showDojo = true, onMatchClick,
 // Tries engiFlagScore first (engi matches → numeric "Shiro–Aka" flag count,
 // the ONLY case with digits), then teamIVScore (team matches with
 // subResults → "IV–IV"), then falls back to formatIpponsScore (every other
-// competition type: ippon LETTERS, never numbers). Callers pass
-// pre-resolved ippons arrays (which may be derived from scoreA/scoreB for
-// bracket matches). Returns "" when no path produces a string (caller
-// handles the ": " fallback).
+// competition type: ippon LETTERS, never numbers). Returns "" when no path
+// produces a string (caller handles the ": " fallback).
+//
+// ipponsB/ipponsA are optional overrides; when omitted they are derived
+// here from the match itself. The derivation is load-bearing: bracket
+// matches carry scoreA/scoreB strings rather than ipponsA/B arrays, the
+// waza-letter arrays are the ONLY source of an ippon score string (numbers
+// are never a valid ippon display, there is no numeric fallback), and
+// ipponsFromScore strips Go formatScore's trailing "(HN)" hansoku suffix
+// so it doesn't split into bogus ippon letters.
 function matchScoreStr(m, ipponsB, ipponsA) {
   return engiFlagScore(m)
     || teamIVPWScore(m)
-    || formatIpponsScore(ipponsB, ipponsA, m.score, m.decision, m.encho, m.decidedByHantei, winnerSideLR(m));
+    || formatIpponsScore(
+      ipponsB || m.ipponsB || ipponsFromScore(m.scoreB),
+      ipponsA || m.ipponsA || ipponsFromScore(m.scoreA),
+      m.score, m.decision, m.encho, m.decidedByHantei, winnerSideLR(m));
 }
 
 // matchStateCell: the centre score-cell content for a compact match row, shared

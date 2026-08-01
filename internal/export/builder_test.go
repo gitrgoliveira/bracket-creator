@@ -234,7 +234,7 @@ func TestBuildResultsWorkbook_StandingsLiteral_NoFormulaCollapse(t *testing.T) {
 	assert.True(t, winsFound, "W (wins) column must contain literal '1' for Alice after a win, not a collapsed formula '0'")
 }
 
-func TestBuildResultsWorkbook_DecisionSuffixInSheet(t *testing.T) {
+func TestBuildResultsWorkbook_ResultMarksInScoreCells(t *testing.T) {
 	t.Parallel()
 	dir, store, eng, compID := testSetup(t)
 	defer os.RemoveAll(dir)
@@ -398,13 +398,13 @@ func TestBuildResultsWorkbook_DrawMatch(t *testing.T) {
 	assert.True(t, foundX, "pool matches sheet must contain 'X' for a hikiwake (draw) with no ippons")
 }
 
-// TestBuildResultsWorkbook_DrawWithSuffixKeepsMarker pins the draw-vs-encho
+// TestBuildResultsWorkbook_DrawExcludesEnchoMark pins the draw-vs-encho
 // exclusivity rule: X means a tie and a match that went to encho cannot end
 // tied, so stale data carrying both exports the X ALONE — the middle column
 // holds exactly one mark and the tie wins. (This test previously guarded the
 // opposite, a combined "X (E)" cell, from the era when the middle carried a
 // composed suffix.)
-func TestBuildResultsWorkbook_DrawWithSuffixKeepsMarker(t *testing.T) {
+func TestBuildResultsWorkbook_DrawExcludesEnchoMark(t *testing.T) {
 	t.Parallel()
 	dir, store, eng, compID := testSetup(t)
 	defer os.RemoveAll(dir)
@@ -2591,13 +2591,13 @@ func TestBuildResultsWorkbook_NonEngiStandingsHeadersUnchanged(t *testing.T) {
 // TDD-5: Engi special-case characterization tests
 // ------------------------------------------------------------
 
-// TestBuildResultsWorkbook_EngiDecisionSuffix characterizes the result-mark
+// TestBuildResultsWorkbook_EngiKikenMarkPlacement characterizes the result-mark
 // placement for a kiken-voluntary engi match: "Kiken" rides in the WITHDRAWING
 // pair's score cell (the loser, SideB, right of the vs column), the winner's
 // score cell stays blank (FlagsScorePair returns ("", "") when neither side
 // scored flags), and the middle cell keeps its template "vs" (kiken is a
 // result, not a middle mark).
-func TestBuildResultsWorkbook_EngiDecisionSuffix(t *testing.T) {
+func TestBuildResultsWorkbook_EngiKikenMarkPlacement(t *testing.T) {
 	t.Parallel()
 	dir, store, eng, compID := testSetup(t)
 	defer os.RemoveAll(dir)

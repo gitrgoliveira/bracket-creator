@@ -154,12 +154,6 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
           const aWin = m.winner && m.sideA && m.winner.id === m.sideA.id;
           const bWin = m.winner && m.sideB && m.winner.id === m.sideB.id;
           const isCorrection = m.status === "completed" && m.score?.corrected;
-          // Bracket matches carry scoreA/scoreB strings rather than ipponsA/B
-          // arrays (see normalizeMatch). Apply the same fallback used in VSchedItem.
-          // Use ipponsFromScore so the trailing "(HN)" hansoku suffix from
-          // Go's formatScore doesn't get split into bogus ippon letters.
-          const seIpponsA = m.ipponsA || window.ipponsFromScore(m.scoreA);
-          const seIpponsB = m.ipponsB || window.ipponsFromScore(m.scoreB);
           // Outstanding single hansoku → red ▲ next to the offending side (same
           // mark as the scoresheet). hansoku may live on the match or under
           // score.fouls depending on the source; fall back across both.
@@ -171,7 +165,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
           // A just-started running bout is 0–0, where formatIpponsScore returns "".
           // Fall back so the cell is never blank: running 0–0 → "vs", a completed
           // match with no recorded score → ":". Live techniques show once present.
-          const seScore = showScore ? window.matchScoreStr(m, seIpponsB, seIpponsA) : "";
+          const seScore = showScore ? window.matchScoreStr(m) : "";
           return (
             <div key={`${m.compId}:${m.id}`} className={`score-edit-row ${m.status === "running" ? "score-edit-row--running is-running" : ""} ${m.status === "completed" ? "score-edit-row--complete" : ""}`}>
               <div>

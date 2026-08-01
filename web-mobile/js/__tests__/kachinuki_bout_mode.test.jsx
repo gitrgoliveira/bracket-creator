@@ -19,6 +19,8 @@ import {
   isKoTieBlocked,
   canReopenKachinukiMatch,
   deriveKachinukiEndOutcome,
+  buildKachinukiEndEntries,
+  subBoutHasBeenPlayed,
 } from '../admin_scoring_team.jsx';
 
 describe('isKachinukiBoutMode', () => {
@@ -69,15 +71,74 @@ describe('canReopenKachinukiMatch', () => {
   });
 });
 
+// The single played-bout primitive (operator input determines the bout
+// outcome): buildKachinukiEndEntries feeds End derivation exactly the bouts
+// subBoutHasBeenPlayed admits, so End, the wire filter, and the encho target
+// can never disagree about which bout is last.
+describe('buildKachinukiEndEntries', () => {
+  const sub = (over) => ({ aPts: [], bPts: [], aFouls: 0, bFouls: 0, fusensho: '', draw: false, encho: 0, ...over });
+
+  it('drops untouched rows (auto-appended / manual placeholders never reach derivation)', () => {
+    const entries = buildKachinukiEndEntries([sub({ aPts: ['M'] }), sub()], -1);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].position).toBe(1);
+  });
+
+  it('drops the daihyosen row regardless of its content', () => {
+    const entries = buildKachinukiEndEntries([sub({ aPts: ['M'] }), sub({ aPts: ['K'] })], 1);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].position).toBe(1);
+  });
+
+  it('keeps a fouls-only bout: input is input (a bout fought to time with only a hansoku is a hikiwake)', () => {
+    const subs = [sub({ aPts: ['M'] }), sub({ bFouls: 1 })];
+    expect(subBoutHasBeenPlayed(subs[1])).toBe(true); // same primitive
+    const entries = buildKachinukiEndEntries(subs, -1);
+    expect(entries.map(e => e.position)).toEqual([1, 2]);
+  });
+
+  it('maps draw, fusensho, and encho onto the wire shape', () => {
+    const entries = buildKachinukiEndEntries(
+      [sub({ draw: true }), sub({ fusensho: 'a', aPts: ['○', '○'] }), sub({ encho: 2 })], -1);
+    expect(entries[0].decision).toBe('hikiwake');
+    expect(entries[1].decision).toBe('fusensho');
+    expect(entries[2].encho).toEqual({ periodCount: 2 });
+  });
+});
+
 describe('deriveKachinukiEndOutcome', () => {
   const bout = (position, over) => ({ position, ipponsA: [], ipponsB: [], ...over });
+  const sub = (over) => ({ aPts: [], bPts: [], aFouls: 0, bFouls: 0, fusensho: '', draw: false, encho: 0, ...over });
 
-  it('blocks with no-bouts when nothing is scored', () => {
+  it('blocks with no-bouts when nothing is recorded', () => {
     expect(deriveKachinukiEndOutcome({ subResults: [], isKnockoutPhase: false }))
       .toEqual({ kind: 'blocked', reason: 'no-bouts' });
-    // Unscored placeholder rows do not count as scored.
-    expect(deriveKachinukiEndOutcome({ subResults: [bout(1), bout(2)], isKnockoutPhase: true }))
-      .toEqual({ kind: 'blocked', reason: 'no-bouts' });
+    // Composition: a fresh match's untouched rows are filtered by the
+    // builder before derivation ever sees them.
+    expect(deriveKachinukiEndOutcome({
+      subResults: buildKachinukiEndEntries([sub(), sub()], -1),
+      isKnockoutPhase: true,
+    })).toEqual({ kind: 'blocked', reason: 'no-bouts' });
+  });
+
+  it('a trailing untouched auto-appended bout does not mask the decisive bout (composition)', () => {
+    const subs = [sub({ aPts: ['M'] }), sub()]; // bout 2 appended, never touched
+    expect(deriveKachinukiEndOutcome({
+      subResults: buildKachinukiEndEntries(subs, -1),
+      isKnockoutPhase: true,
+    })).toEqual({ kind: 'win', winnerSide: 'a' });
+  });
+
+  it('a fouls-only LAST bout is a tied bout, not an invisible one: pool draw / knockout blocked (operator input determines the bout outcome)', () => {
+    const subs = [sub({ aPts: ['M'] }), sub({ bFouls: 1 })];
+    expect(deriveKachinukiEndOutcome({
+      subResults: buildKachinukiEndEntries(subs, -1),
+      isKnockoutPhase: false,
+    })).toEqual({ kind: 'draw' });
+    expect(deriveKachinukiEndOutcome({
+      subResults: buildKachinukiEndEntries(subs, -1),
+      isKnockoutPhase: true,
+    })).toEqual({ kind: 'blocked', reason: 'knockout-tie' });
   });
 
   it('wins for side A when the last scored bout has more A ippons', () => {

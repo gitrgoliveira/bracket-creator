@@ -119,41 +119,56 @@ export function canReopenKachinukiMatch({ isKachinuki, isComplete }) {
   return !!isKachinuki && !!isComplete;
 }
 
+// buildKachinukiEndEntries: maps the modal's LOCAL sub state to the
+// wire-shaped entries deriveKachinukiEndOutcome consumes, keeping ONLY
+// bouts that carry operator input — decided by subBoutHasBeenPlayed, the
+// single played-bout primitive (it also gates the wire filter, the Record
+// button, visible positions, and the encho target, so every kachinuki
+// surface agrees on which bout is "last"). The daihyosen row is dropped
+// here (daihyosen does not exist in kachinuki); untouched auto-appended /
+// manual placeholder rows are dropped exactly as they are dropped from
+// the wire.
+export function buildKachinukiEndEntries(subs, daihyosenIdx) {
+  return (subs || [])
+    .map((s, idx) => ({ s, idx }))
+    .filter(({ s, idx }) => idx !== daihyosenIdx && subBoutHasBeenPlayed(s))
+    .map(({ s, idx }) => ({
+      position: idx + 1,
+      ipponsA: s.aPts,
+      ipponsB: s.bPts,
+      decision: s.draw ? "hikiwake" : s.fusensho ? "fusensho" : "",
+      encho: s.encho > 0 ? { periodCount: s.encho } : undefined,
+    }));
+}
+
 // deriveKachinukiEndOutcome: context-derived outcome for the [End match]
-// action (mp-gmcg, spec 006 "Resolved decisions" #2). NO picker, ever: the
-// last SCORED bout decides. Entries are wire-shaped sub-results
-// ({position, sideA, sideB, ipponsA, ipponsB, winner, decision, encho});
-// daihyosen (-1) / legacy non-positive rows and unscored trailing rows are
-// ignored. A bout counts as scored once it carries any ippon, an explicit
-// hikiwake/fusensho decision, a winner, or an encho marker (a 0-0 bout sent
-// to encho is live-tied, not unscored: End must stay blocked until the
-// encho produces a point).
+// action (mp-gmcg, spec 006 "Resolved decisions" #2). NO picker, ever:
+// OPERATOR INPUT DETERMINES THE BOUT OUTCOME — the last bout carrying any
+// operator input decides the encounter. If that bout has a winner (more
+// ippons, or a fusensho), that team wins; if it does not (explicit
+// hikiwake, equal ippons, a pending 0-0 encho, or ONLY fouls: a bout
+// fought to time with no ippon is a hikiwake), the encounter is tied on
+// that bout. There is no separate "has an outcome" notion: outcomes exist
+// only as operator input, so the app never skips back past an
+// input-bearing bout when ending a match.
 //
-// This "scored" filter is DELIBERATELY narrower than subBoutHasBeenPlayed
-// (below): that predicate answers "does this row carry operator INPUT and
-// belong on the wire" and so counts lone fouls, while this one answers
-// "does this bout have an OUTCOME the encounter can end on" — fouls alone
-// decide nothing (a hansoku-conceded point is entered as an H ippon, which
-// this filter does see). Do NOT unify them: counting a fouls-only last
-// bout as a scored 0-0 tie would wrongly draw a pool encounter or block a
-// knockout End on a bout that has no result yet. Returns:
-//   {kind:"win", winnerSide:"a"|"b"}          last scored bout has a winner
+// PRECONDITION: entries are wire-shaped sub-results ({position, sideA,
+// sideB, ipponsA, ipponsB, winner, decision, encho}) that already carry
+// operator input — production callers build them with
+// buildKachinukiEndEntries (above), whose subBoutHasBeenPlayed filter is
+// the single source of that judgement. This function only drops
+// daihyosen (-1) / legacy non-positive sentinel rows. Returns:
+//   {kind:"win", winnerSide:"a"|"b"}          last bout has a winner
 //                                             (score, fusensho, or a winner
 //                                             name matching a side)
-//   {kind:"draw"}                             last scored bout tied, pools/
+//   {kind:"draw"}                             last bout tied, pools/
 //                                             league: drawn encounter
 //   {kind:"blocked", reason:"knockout-tie"}   tied in a knockout: continue
 //                                             (next bout or encho)
-//   {kind:"blocked", reason:"no-bouts"}       nothing scored yet
+//   {kind:"blocked", reason:"no-bouts"}       nothing recorded yet
 export function deriveKachinukiEndOutcome({ subResults, isKnockoutPhase }) {
   const scored = (subResults || [])
-    .filter(e => {
-      if (!e || !(e.position > 0)) return false;
-      const aN = (e.ipponsA || []).length;
-      const bN = (e.ipponsB || []).length;
-      return aN > 0 || bN > 0 || e.decision === "hikiwake" || e.decision === "fusensho"
-        || !!e.winner || (e.encho && e.encho.periodCount > 0);
-    })
+    .filter(e => e && e.position > 0)
     .sort((x, y) => x.position - y.position);
   if (scored.length === 0) return { kind: "blocked", reason: "no-bouts" };
   const last = scored[scored.length - 1];
@@ -248,10 +263,13 @@ export function resolveKachinukiBoutSides({ aName, bName, wKey, teamWinnerName }
 // standings. Fixed-position matches keep all positions: a 0–0 there is a
 // legitimate hikiwake.
 //
-// Counterpart: deriveKachinukiEndOutcome's "scored" filter (above) is
-// deliberately NARROWER — it asks "does this bout have an outcome", so it
-// excludes lone fouls that this predicate counts as input. See the note
-// there before attempting to unify the two.
+// This is THE single played-bout primitive for kachinuki (operator input
+// determines the bout outcome): the wire filter, the Record-bout gate,
+// kachinukiVisiblePositions, the encho target, and End-match derivation
+// (via buildKachinukiEndEntries) all route through it. Lone fouls count:
+// a bout fought to time with only a hansoku recorded is a hikiwake, not
+// an unplayed row (a hansoku-conceded point is entered as an H ippon).
+// Widen or narrow it in ONE place only.
 export function subBoutHasBeenPlayed(s) {
   if (!s) return false;
   return (s.aPts?.length > 0) || (s.bPts?.length > 0) || (s.aFouls > 0) || (s.bFouls > 0) || !!s.fusensho || !!s.draw || (s.encho > 0);
@@ -701,26 +719,21 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
 
   // mp-gmcg: [End match] outcome, derived from LOCAL bout state so an
   // unsaved just-scored bout counts (the operator scores the final bout and
-  // taps End without a Record in between). Entries are wire-shaped for
-  // deriveKachinukiEndOutcome; the daihyosen row maps to its sentinel
-  // position so the helper drops it.
+  // taps End without a Record in between). buildKachinukiEndEntries keeps
+  // exactly the bouts subBoutHasBeenPlayed admits, so End derivation, the
+  // wire filter, and the encho target below all agree on which bout is the
+  // last one.
   const [endArmed, setEndArmed] = useStateA(false);
   const kachinukiEndOutcome = kachinukiBoutMode
     ? deriveKachinukiEndOutcome({
-        subResults: subs.map((s, idx) => idx === daihyosenIdx
-          ? { position: DAIHYOSEN_POSITION }
-          : {
-              position: idx + 1,
-              ipponsA: s.aPts,
-              ipponsB: s.bPts,
-              decision: s.draw ? "hikiwake" : s.fusensho ? "fusensho" : "",
-              encho: s.encho > 0 ? { periodCount: s.encho } : undefined,
-            }),
+        subResults: buildKachinukiEndEntries(subs, daihyosenIdx),
         isKnockoutPhase,
       })
     : null;
-  // Last LOCALLY-scored numbered bout: the encho target (the tied final
-  // pairing keeps fighting on that same bout).
+  // Last LOCALLY-played numbered bout: the encho target (the tied final
+  // pairing keeps fighting on that same bout). Same subBoutHasBeenPlayed
+  // primitive as the End derivation above, so Encho always lands on the
+  // bout End would judge.
   const kachinukiLastScoredIdx = (() => {
     let li = -1;
     subs.forEach((s, i) => { if (i !== daihyosenIdx && subBoutHasBeenPlayed(s)) li = i; });

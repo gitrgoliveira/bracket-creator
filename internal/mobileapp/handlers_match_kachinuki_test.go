@@ -181,15 +181,15 @@ func TestScoreHandler_KachinukiBoutFinalAppendsNextBout(t *testing.T) {
 }
 
 // TestScoreHandler_KachinukiHikiwakeAppendsWalkoverSlot pins spec 006
-// decision 2 through the wire: a hikiwake that empties one side's
-// ADVISORY roster while the other side still has fighters appends a
-// ONE-SIDED WALKOVER SLOT (surviving side's next fighter, other side
-// empty). The tie left no decisive point, so the walkover bout is how
-// the surviving team's win gets expressed: the operator gives the
-// fighter the per-bout fusensho and Ends on that point, fills the empty
-// side instead, or abandons the slot (trailing unscored bouts are
-// stripped on the completed write). Record bout — not a manual add — is
-// the documented flow.
+// decision 2 + the stays-on ruling through the wire: a hikiwake that
+// leaves one side without a replacement while the other side still has
+// fighters appends the next bout KEEPING THE FIGHTER WHO JUST TIED on
+// that side (under the taisho rule they continue, with nothing to
+// re-type) against the surviving side's next fighter. Under plain
+// exhaustion the operator gives the survivor the per-bout fusensho and
+// Ends on that point (the walkover), or abandons the slot (trailing
+// unscored bouts are stripped on the completed write). Record bout —
+// not a manual add — is the documented flow.
 func TestScoreHandler_KachinukiHikiwakeAppendsWalkoverSlot(t *testing.T) {
 	compID := "kachinuki-walkover-slot"
 	r, store := setupKachinukiScoreServer(t, compID)
@@ -222,11 +222,11 @@ func TestScoreHandler_KachinukiHikiwakeAppendsWalkoverSlot(t *testing.T) {
 	matches, err := store.LoadPoolMatches(compID)
 	require.NoError(t, err)
 	require.Len(t, matches, 1)
-	require.Len(t, matches[0].SubResults, 4, "the walkover slot must be appended")
+	require.Len(t, matches[0].SubResults, 4, "the next-bout slot must be appended")
 	slot := matches[0].SubResults[3]
 	assert.Equal(t, 4, slot.Position)
-	assert.Equal(t, "", slot.SideA, "the exhausted side stays empty on the walkover slot")
-	assert.Equal(t, "W-2", slot.SideB, "surviving side's next fighter takes the slot")
+	assert.Equal(t, "R-3", slot.SideA, "the fighter who just tied stays on the slot")
+	assert.Equal(t, "W-2", slot.SideB, "surviving side's next fighter comes up")
 	assert.Equal(t, state.MatchStatusRunning, matches[0].Status, "operator-led: the match stays running")
 	assert.Empty(t, matches[0].Winner)
 	assert.Empty(t, matches[0].Decision)

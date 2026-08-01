@@ -412,11 +412,12 @@ func TestMaybeAdvanceKachinuki_MatchNotFound(t *testing.T) {
 }
 
 // TestAdvanceKachinuki_HikiwakeSideAExhausted covers the case where SideA
-// runs out after a hikiwake but SideB still has players. Spec 006
-// decision 2: the tie left no decisive point, so the engine appends a
-// ONE-SIDED WALKOVER SLOT for SideB's next fighter (the operator gives
-// them the per-bout fusensho and Ends on that point, or fills the empty
-// side and fights on). It must NOT flag MatchEnded: that is the win
+// has no replacement after a hikiwake but SideB does. Operator ruling:
+// the fighter who just tied STAYS ON THE SLOT (under the taisho rule a
+// drawing Taisho continues, with nothing to re-type), paired against
+// SideB's next fighter; under plain exhaustion the operator gives the
+// survivor the per-bout fusensho and Ends on that point (the walkover,
+// spec 006 decision 2). It must NOT flag MatchEnded: that is the win
 // path's verdict, and here there is no decisive point to End on.
 func TestAdvanceKachinuki_HikiwakeSideAExhausted(t *testing.T) {
 	bout := state.SubMatchResult{
@@ -430,16 +431,16 @@ func TestAdvanceKachinuki_HikiwakeSideAExhausted(t *testing.T) {
 		SideA:    []string{},                        // SideA exhausted
 		SideB:    []string{"B-Fukusho", "B-Taisho"}, // SideB still has players
 	})
-	assert.False(t, res.MatchEnded, "hikiwake leaves no decisive point; the walkover bout expresses the win")
+	assert.False(t, res.MatchEnded, "hikiwake leaves no decisive point; the appended bout expresses the outcome")
 	assert.False(t, res.BothExhausted)
-	require.NotNil(t, res.Next, "expected the walkover slot")
+	require.NotNil(t, res.Next, "expected the next-bout slot")
 	assert.Equal(t, 4, res.Next.Position)
-	assert.Equal(t, "", res.Next.SideA, "exhausted side stays empty on the walkover slot")
+	assert.Equal(t, "A-Chuken", res.Next.SideA, "the fighter who just tied stays on the slot")
 	assert.Equal(t, "B-Fukusho", res.Next.SideB)
 }
 
-// TestAdvanceKachinuki_HikiwakeSideBExhausted mirrors the walkover-slot
-// contract for SideB running out after a hikiwake.
+// TestAdvanceKachinuki_HikiwakeSideBExhausted mirrors the stays-on-slot
+// contract for SideB having no replacement after a hikiwake.
 func TestAdvanceKachinuki_HikiwakeSideBExhausted(t *testing.T) {
 	bout := state.SubMatchResult{
 		Position: 3,
@@ -452,12 +453,12 @@ func TestAdvanceKachinuki_HikiwakeSideBExhausted(t *testing.T) {
 		SideA:    []string{"A-Fukusho", "A-Taisho"}, // SideA still has players
 		SideB:    []string{},                        // SideB exhausted
 	})
-	assert.False(t, res.MatchEnded, "hikiwake leaves no decisive point; the walkover bout expresses the win")
+	assert.False(t, res.MatchEnded, "hikiwake leaves no decisive point; the appended bout expresses the outcome")
 	assert.False(t, res.BothExhausted)
-	require.NotNil(t, res.Next, "expected the walkover slot")
+	require.NotNil(t, res.Next, "expected the next-bout slot")
 	assert.Equal(t, 4, res.Next.Position)
 	assert.Equal(t, "A-Fukusho", res.Next.SideA)
-	assert.Equal(t, "", res.Next.SideB, "exhausted side stays empty on the walkover slot")
+	assert.Equal(t, "B-Chuken", res.Next.SideB, "the fighter who just tied stays on the slot")
 }
 
 // TestMaybeAdvanceKachinuki_BracketPath verifies that findTeamMatch exercises

@@ -1,6 +1,10 @@
 package domain
 
-import "gopkg.in/yaml.v3"
+import (
+	"strings"
+
+	"gopkg.in/yaml.v3"
+)
 
 // Decision identifies how a match was concluded.
 //
@@ -66,14 +70,22 @@ func IsDefaultWinDecisionStr(s string) bool {
 // recorded before that fill.
 const DefaultWinIppon = "○"
 
-// DefaultWinMaru returns the maru string a default win awards: the
-// two-point pair in regulation, the single deciding point in encho
-// (sudden death). Mirrors defaultWinMaru in web-mobile/js/bracket.jsx.
-func DefaultWinMaru(inEncho bool) string {
+// DefaultWinIppons returns the winner's ippon slots for a default win —
+// one DefaultWinIppon per awarded point: the two-point pair in regulation,
+// the single deciding point in encho (sudden death). THE single Go source
+// of the maru-count rule, consumed by the engine's RecordDecision twins
+// (the canonical record) and, joined, by the display fallbacks. Mirrors
+// defaultWinMaru in web-mobile/js/bracket.jsx (same cells shape).
+func DefaultWinIppons(inEncho bool) []string {
 	if inEncho {
-		return DefaultWinIppon
+		return []string{DefaultWinIppon}
 	}
-	return DefaultWinIppon + DefaultWinIppon
+	return []string{DefaultWinIppon, DefaultWinIppon}
+}
+
+// DefaultWinMaru is DefaultWinIppons joined for display strings/cells.
+func DefaultWinMaru(inEncho bool) string {
+	return strings.Join(DefaultWinIppons(inEncho), "")
 }
 
 // UnmarshalYAML migrates legacy `decision` values (NFR-025, R6):

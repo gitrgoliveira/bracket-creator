@@ -146,15 +146,13 @@ func FlagsScorePair(a, b int) (string, string) {
 	return strconv.Itoa(max(0, a)), strconv.Itoa(max(0, b))
 }
 
-// DefaultWinMaruAB fills the WINNER's empty score cell with maru for a
-// default win, given SIDE-ordered scores. One maru per awarded point: in
-// regulation a fusensho/fusenpai/kiken win is the full two-point win (FIK
-// sanbon shobu) → "○○"; in encho (sudden death) exactly one deciding point
-// is awarded → "○". The engine already records default wins as maru ippons
-// with the same rule (engine/scoring.go defaultWinIppon), so scored data
-// carries the balls itself — this fallback covers results recorded before
-// that fill or imported without it. Never applies to engi flag counts
-// (callers gate) or the loser.
+// DefaultWinMaruAB fills the WINNER's empty score cell with the
+// domain.DefaultWinMaru award for a default win, given SIDE-ordered
+// scores. The engine already records default wins as maru ippons from the
+// same rule (domain.DefaultWinIppons), so scored data carries the balls
+// itself — this fallback covers results recorded before that fill or
+// imported without it. Never applies to engi flag counts (callers gate)
+// or the loser.
 func DefaultWinMaruAB(scoreA, scoreB, decision string, encho *state.EnchoMetadata, winner, sideA, sideB string) (string, string) {
 	if winner == "" || !domain.IsDefaultWinDecisionStr(decision) {
 		return scoreA, scoreB

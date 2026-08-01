@@ -132,8 +132,11 @@ function applyFusenshoToggle(prev, side) {
     return { ...prev, fusensho: "", _preFusensho: undefined };
   }
   const snap = prev._preFusensho || { aPts: prev.aPts, bPts: prev.bPts, aFouls: prev.aFouls, bFouls: prev.bFouls };
-  if (side === "a") return { aPts: ["○", "○"], bPts: [], aFouls: 0, bFouls: 0, fusensho: "a", _preFusensho: snap };
-  return { aPts: [], bPts: ["○", "○"], aFouls: 0, bFouls: 0, fusensho: "b", _preFusensho: snap };
+  // Fusensho is a pre-bout (regulation) default win: the maru cells come
+  // from the shared count rule (defaultWinMaru in bracket.jsx).
+  const maru = window.defaultWinMaru ? window.defaultWinMaru(false) : ["○", "○"];
+  if (side === "a") return { aPts: maru, bPts: [], aFouls: 0, bFouls: 0, fusensho: "a", _preFusensho: snap };
+  return { aPts: [], bPts: maru, aFouls: 0, bFouls: 0, fusensho: "b", _preFusensho: snap };
 }
 
 // applyFoulIncrement: pure helper modelling a single `+` press on a

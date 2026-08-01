@@ -199,10 +199,8 @@ function centreMarks(sub, matchSideA, matchSideB) {
   const winAka = !!(noIppons && sub.winner &&
     (sub.winner === sub.sideA || sub.winner === sub.teamA || (matchSideA && sub.winner === matchSideA)));
   // The mark sits on the WINNING side, not in the centre: "Ht" for a hantei
-  // decision; an ippon-less default win (fusensho/kiken/bye) shows one maru
-  // "○" per awarded point — the two-point pair in regulation, one deciding
-  // point in encho — mirroring the engine's defaultWinIppon fill
-  // (engine/scoring.go). Only when the hantei winner is unknown does "Ht"
+  // decision, else the defaultWinMaru cells for an ippon-less default win
+  // (fusensho/kiken/bye). Only when the hantei winner is unknown does "Ht"
   // fall back to the centre cell.
   const winCells = sub.decidedByHantei ? ["Ht", ""]
     : (window.defaultWinMaru ? window.defaultWinMaru(sub.encho) : ["○", "○"]);

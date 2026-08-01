@@ -439,14 +439,7 @@ func (e *Engine) RecordDecision(compID, matchID, decision, decisionBy, decisionR
 	// (operator ruling: once a score exists those results are not
 	// applicable), so there are never struck ippons to preserve: the
 	// winner gets the pure maru fill, the loser ends with none.
-	winningCount := 2
-	if encho != nil {
-		winningCount = 1
-	}
-	winIppons := make([]string, winningCount)
-	for i := range winIppons {
-		winIppons[i] = defaultWinIppon
-	}
+	winIppons := domain.DefaultWinIppons(encho != nil)
 	result := &state.MatchResult{
 		ID:             matchID,
 		SideA:          sideA,

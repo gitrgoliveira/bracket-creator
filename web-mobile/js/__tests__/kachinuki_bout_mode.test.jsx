@@ -21,6 +21,7 @@ import {
   deriveKachinukiEndOutcome,
   buildKachinukiEndEntries,
   subBoutHasBeenPlayed,
+  kachinukiEnchoAvailable,
 } from '../admin_scoring_team.jsx';
 import { applyFoulIncrement } from '../admin_scoring_shared.jsx';
 
@@ -208,5 +209,26 @@ describe('deriveKachinukiEndOutcome', () => {
     const subs = [bout(2, { ipponsA: ['M'] }), bout(-1, { ipponsB: ['K', 'D'] })];
     expect(deriveKachinukiEndOutcome({ subResults: subs, isKnockoutPhase: true }))
       .toEqual({ kind: 'win', winnerSide: 'a' });
+  });
+});
+
+// Whether a tied pairing must be fought to a result (e.g. the taisho must be
+// defeated) is OPERATOR DISCRETION, never derived from the phase — so the
+// Encho affordance renders for every tied last bout, pools included.
+describe('kachinukiEnchoAvailable', () => {
+  it('available on a tied last bout in pools/league (End would record a draw; fighting on is the operator\'s call)', () => {
+    expect(kachinukiEnchoAvailable({ kind: 'draw' })).toBe(true);
+  });
+  it('available on a tied last bout in a knockout (End is blocked)', () => {
+    expect(kachinukiEnchoAvailable({ kind: 'blocked', reason: 'knockout-tie' })).toBe(true);
+  });
+  it('not available when nothing is recorded', () => {
+    expect(kachinukiEnchoAvailable({ kind: 'blocked', reason: 'no-bouts' })).toBe(false);
+  });
+  it('not available when the last bout already has a winner', () => {
+    expect(kachinukiEnchoAvailable({ kind: 'win', winnerSide: 'a' })).toBe(false);
+  });
+  it('not available outside bout mode (null outcome)', () => {
+    expect(kachinukiEnchoAvailable(null)).toBe(false);
   });
 });

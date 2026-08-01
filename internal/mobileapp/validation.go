@@ -160,14 +160,14 @@ func validateURLHasHost(field, val string) error {
 // never decided by hantei. Hantei does NOT require encho, though, a tied
 // daihyosen may be decided by judges directly (the encho gate was removed).
 //
-// EXCEPTION (mp-gmcg): in a KACHINUKI competition a knockout tie on the
-// final bout is resolved by encho on that same numbered bout (daihyosen
-// does not exist in kachinuki), so callers pass allowNumberedEncho=true —
-// derived via allowNumberedEnchoFor (handlers_match.go), which scopes the
-// exception to kachinuki BRACKET matches only; pool/league/Swiss kachinuki
-// ties are legitimate draws, so their bouts keep the daihyosen-only gate.
-// The hantei gate is NOT relaxed: kachinuki bouts are never decided by
-// hantei.
+// EXCEPTION (mp-gmcg): in a KACHINUKI competition a tied pairing may be
+// fought on in overtime on that same bout (daihyosen does not exist in
+// kachinuki), so callers pass allowNumberedEncho=true — derived via
+// allowNumberedEnchoFor (handlers_match.go). The exception applies in
+// EVERY phase: whether the final pairing must produce a result (e.g. the
+// taisho must be defeated) is operator discretion, never derivable from
+// pool-vs-bracket. The hantei gate is NOT relaxed: kachinuki bouts are
+// never decided by hantei.
 //
 // The winner/tied-scoreline/decision checks here intentionally mirror the
 // top-level DecidedByHantei block in ScoreRequest.Validate. Keep them in sync:
@@ -411,11 +411,11 @@ func (r *ScoreRequest) Validate() error {
 	return r.validateWithOptions(false)
 }
 
-// validateWithOptions is Validate with the kachinuki numbered-bout encho
+// validateWithOptions is Validate with the kachinuki bout-level encho
 // exception threaded through (mp-gmcg): the score handler passes
-// allowNumberedEncho=true when the target is a kachinuki BRACKET match
-// (allowNumberedEnchoFor), where a knockout tie on the final bout is
-// resolved by encho on that same numbered bout. Every other caller keeps
+// allowNumberedEncho=true when the target competition is kachinuki
+// (allowNumberedEnchoFor) — any phase; whether a tied pairing must be
+// fought to a result is operator discretion. Every other caller keeps
 // the strict daihyosen-only gate via Validate().
 func (r *ScoreRequest) validateWithOptions(allowNumberedEncho bool) error {
 	if r.Status != "" {

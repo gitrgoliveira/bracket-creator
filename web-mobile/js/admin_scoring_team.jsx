@@ -190,6 +190,19 @@ export function deriveKachinukiEndOutcome({ subResults, isKnockoutPhase }) {
   return { kind: "draw" };
 }
 
+// kachinukiEnchoAvailable: whether the Encho (same pair fights on)
+// affordance renders for the current End-match outcome. Available for
+// EVERY tied last bout — knockout (End is blocked, overtime is one of the
+// two ways forward) AND pools/league (End would record a drawn encounter,
+// but whether the pairing must produce a result, e.g. the taisho must be
+// defeated, is OPERATOR DISCRETION, never derived from the phase). Not
+// available when nothing is recorded or when the last bout already has a
+// winner.
+export function kachinukiEnchoAvailable(outcome) {
+  if (!outcome) return false;
+  return outcome.kind === "draw" || (outcome.kind === "blocked" && outcome.reason === "knockout-tie");
+}
+
 // kachinukiVisiblePositions: which bout slots to render for a kachinuki
 // match. The server bout log (m.subResults) is the source of truth for
 // which bouts exist, with two carve-outs:
@@ -1702,20 +1715,27 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
           {!(isComplete && showCorrectionPrompt) && (
           <>
           {/* mp-gmcg: inline End-match hint (plain text, no modal). Shown
-              only while End is blocked: either nothing is scored yet, or a
-              knockout tie needs resolving (no draws in a knockout): the
-              operator continues with the next bout (Record bout) or sends
-              the SAME tied pair to overtime (Encho) until there is a
-              point. This replaces the koTieBlocked gating for kachinuki:
-              the correction-mode Finish buttons below never see a running
+              while End is blocked (nothing scored yet, or a knockout tie:
+              no draws in a bracket) AND on a tied last bout in pools/
+              league, where ending as a draw and fighting on are BOTH
+              legitimate: whether the pairing must produce a result (e.g.
+              the taisho must be defeated) is operator discretion, never
+              derived from the phase. The Encho affordance therefore
+              renders for every tied last bout (kachinukiEnchoAvailable).
+              This replaces the koTieBlocked gating for kachinuki: the
+              correction-mode Finish buttons below never see a running
               kachinuki match, so there are no competing hints. */}
-          {kachinukiBoutMode && kachinukiEndOutcome?.kind === "blocked" && (
+          {kachinukiBoutMode && (kachinukiEndOutcome?.kind === "blocked" || kachinukiEndOutcome?.kind === "draw") && (
             <div data-testid="kachinuki-end-hint" style={{ fontSize: 12, color: "var(--ink-2)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
-              {kachinukiEndOutcome.reason === "no-bouts" ? (
+              {!kachinukiEnchoAvailable(kachinukiEndOutcome) ? (
                 <span>Nothing recorded yet: score a bout before ending the match.</span>
               ) : (
                 <>
-                  <span>No draws in a knockout: continue until there is a point. Record bout brings the next fighter up; Encho keeps the same pair on this bout.</span>
+                  {kachinukiEndOutcome.kind === "draw" ? (
+                    <span>Tied bout: End match records a drawn encounter; Record bout retires both and brings the next pair up; Encho keeps the same pair fighting when this pairing must produce a result.</span>
+                  ) : (
+                    <span>No draws in a knockout: continue until there is a point. Record bout brings the next fighter up; Encho keeps the same pair on this bout.</span>
+                  )}
                   <button
                     type="button"
                     className="btn btn--sm"

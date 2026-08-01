@@ -30,9 +30,24 @@ Individual bouts are scored first. Once all bouts are done, the encounter result
 
 ## Kachinuki (winner stays on)
 
-In kachinuki format, the winner of each bout remains on the court to face the next opponent from the opposing team. If a bout ends in a hikiwake (draw), both fighters retire instead of one continuing, and the next pair takes the court. A team can win an encounter in two ways: by exhausting the other team (the opponents run out of fighters), or by defeating the other team's Taisho, who is always the last fighter, so a loss there ends the encounter.
+In kachinuki format, the winner of each bout remains on the court to face the next opponent from the opposing team. If a bout ends in a hikiwake (draw), both fighters retire instead of one continuing, and the next pair takes the court. Kachinuki is run under one of two rule sets, described below. Because only the shiaijo operator knows which rule set governs a match, and because team sizes are flexible, the app never decides on its own when a kachinuki encounter is over: the court operator does, using the buttons in the score editor.
 
-Because a match can end for either reason, and because team sizes are flexible, the app does not decide on its own when a kachinuki encounter is over. The court operator does, using the two buttons in the score editor. This keeps the operator, who can see the court, in charge of the result rather than the app guessing from a roster it may not fully know.
+### Kachinuki modes
+
+Which mode governs a match comes from your tournament rules, and it can differ between rounds of the same competition: for example, plain exhaustion in the pools and the taisho rule in the final rounds. The app has no mode setting. You apply the mode through the scoring buttons, and the app follows your lead.
+
+**Exhaustion (plain winner stays on).** A win eliminates the loser; a tie eliminates both fighters. The encounter ends when one team has no fighters left, and that team loses. If the two Taisho meet and draw, both teams are out at the same time and the encounter is drawn. A drawn encounter is a legal result in pools and leagues; in a knockout the bracket needs a winner, so the final pair fights on in overtime (encho) instead.
+
+**The taisho must be defeated.** A tie or a win still eliminates every other fighter, but a Taisho is only eliminated by being beaten. A Taisho who draws stays on the court: the tied opponent retires, and the opponent's next fighter comes up against the same Taisho. The encounter only ends when one Taisho is defeated, so it is always decisive, whatever the stage. When Taisho meets Taisho and the bout is tied, neither can retire on the tie: the pair fights on in encho until one takes a point.
+
+How each situation plays out at the table:
+
+| The bout just ended with | Exhaustion | Taisho must be defeated |
+|---|---|---|
+| A winner | **Record bout**: the winner stays on against the loser's next team-mate. If the losing team has nobody left, **End match** instead: their team has lost. | Same, and if the beaten fighter was a Taisho, **End match**: their team has lost. |
+| A tie between two ordinary fighters | Mark the **Tie**, then **Record bout**: both retire and the next pair comes up. | Same. |
+| A tie involving one Taisho | The Taisho retires like anyone else. If their team now has nobody left, **Record bout** and give the surviving team's next fighter the walkover (**Fusensho**), then **End match** on that point. | The Taisho stays on. Use **Add next bout manually** and pair the same Taisho against the opponent's next fighter. |
+| A tie between the two Taisho | **End match** records a drawn encounter in pools and leagues. In a knockout there are no drawn encounters, so End match is held back: use **Encho** until one Taisho scores, then **End match**. | **Encho**, in any stage: the same pair fights on until one takes a point, then **End match**. |
 
 ### Choosing the team match format
 
@@ -47,14 +62,15 @@ Kachinuki encounters are scored one bout at a time. Score the current bout, then
 
 ![The kachinuki score editor after a bout is scored, showing the winner-stays banner, the current bout with ippon buttons for each side, and the two footer actions Record bout and End match.](../../screenshots/kachinuki-scoring-buttons.png)
 
-What **End match** does when the last bout is a draw depends on the stage:
+When the last bout is tied, the editor offers every legitimate way forward and you choose, according to the [kachinuki mode](#kachinuki-modes) in force; the app never decides it from the stage:
 
-- In **pools and leagues**, the encounter ends as a draw.
-- In a **knockout**, there are no draws, so End match is held back. Continue instead: bring the next fighter up with **Record bout**, or, when the last fighters of both teams are tied, send that same pair to overtime with **Encho** and keep scoring until one of them takes a point. The editor shows this prompt and an Encho button when it applies.
+- **Record bout** retires both fighters and brings the next pair up.
+- **Encho** keeps the same pair fighting on that bout until one of them takes a point. Use it whenever your rules say this pairing must have a result, in any stage.
+- **End match** finishes the encounter on the tie. In pools and leagues this records a drawn encounter. In a knockout the bracket needs a winner, so End match is held back while the last bout is tied; continue with Record bout or Encho instead.
 
 ![The kachinuki score editor on a tied knockout bout, showing the notice that a knockout cannot end in a draw with an Encho button, and the End match button held back.](../../screenshots/kachinuki-knockout-tie-encho.png)
 
-There is no representative bout (daihyosen) in kachinuki: a tied final pair in a knockout is settled by encho on that same bout, not by a separate rep bout.
+There is no representative bout (daihyosen) in kachinuki: a tied pairing that must produce a result is settled by encho on that same bout, not by a separate rep bout.
 
 If you finish an encounter too early or record the wrong result, reopen it. Open the completed match and use **Reopen match**: the encounter returns to in progress with its bouts kept, so you can add or rescore bouts and end it again. In a knockout, reopening also rolls back the next-round slot that this result had filled, as long as that later match has not started.
 

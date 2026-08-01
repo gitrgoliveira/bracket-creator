@@ -408,12 +408,8 @@ func TestScoreHandler_KachinukiEarlyCompletionAccepted(t *testing.T) {
 // pair keeps fighting; daihyosen does not exist in kachinuki, mp-gmcg).
 // A completed write whose final bout carries the encho marker and a
 // winner must round-trip the marker + winner through the store and
-// propagate the match winner to the next round.
-//
-// The fixture uses PRODUCTION-shaped bracket IDs ("m-r{N}-{POS}",
-// buildBracketFromLeaves): allowNumberedEnchoFor scopes the numbered-bout
-// encho exception to bracket matches via engine.IsBracketMatchID, so the
-// ID shape is semantically significant here.
+// propagate the match winner to the next round. The fixture uses
+// production-shaped bracket IDs ("m-r{N}-{POS}", buildBracketFromLeaves).
 func TestScoreHandler_KachinukiEnchoFinalBoutPersists(t *testing.T) {
 	compID := "kachinuki-encho-final-bout"
 	r, store := setupKachinukiScoreServer(t, compID)
@@ -475,14 +471,15 @@ func TestScoreHandler_KachinukiEnchoFinalBoutPersists(t *testing.T) {
 	assert.Equal(t, "Ryu", bracket.Rounds[1][0].SideA, "winner must propagate to the next round")
 }
 
-// TestScoreHandler_KachinukiPoolBoutEnchoRejected pins the SCOPE of the
-// numbered-bout encho exception (allowNumberedEnchoFor): it applies to
-// kachinuki BRACKET matches only. A pool (or league/Swiss) kachinuki
-// encounter may legitimately end in a draw, so encho on one of its
-// numbered bouts is not a thing — the strict daihyosen-only gate must
-// still reject it even though the competition is kachinuki.
-func TestScoreHandler_KachinukiPoolBoutEnchoRejected(t *testing.T) {
-	compID := "kachinuki-pool-encho-rejected"
+// TestScoreHandler_KachinukiPoolBoutEnchoAccepted pins the SCOPE of the
+// kachinuki bout-level encho exception (allowNumberedEnchoFor): it applies
+// in EVERY phase, pools included. Whether the final pairing must produce a
+// result (e.g. the taisho must be defeated) is OPERATOR DISCRETION — the
+// operator may fight a tied pool pairing on in overtime rather than accept
+// the draw, and the app must never hard-code that rule by phase (operator
+// ruling superseding an earlier bracket-only scoping).
+func TestScoreHandler_KachinukiPoolBoutEnchoAccepted(t *testing.T) {
+	compID := "kachinuki-pool-encho-accepted"
 	r, store := setupKachinukiScoreServer(t, compID)
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{
@@ -506,9 +503,15 @@ func TestScoreHandler_KachinukiPoolBoutEnchoRejected(t *testing.T) {
 			},
 		},
 	})
-	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
-	assert.Contains(t, w.Body.String(), "daihyosen representative bout",
-		"pool kachinuki numbered bouts must keep the strict daihyosen-only encho gate")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	require.Len(t, matches[0].SubResults, 1)
+	require.NotNil(t, matches[0].SubResults[0].Encho,
+		"the overtime marker must persist on the pool bout")
+	assert.Equal(t, 1, matches[0].SubResults[0].Encho.PeriodCount)
 }
 
 // TestScoreHandler_KachinukiSimultaneousExhaustionNoWinnerIs400: a

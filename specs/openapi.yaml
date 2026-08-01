@@ -3591,15 +3591,15 @@ components:
           description: >
             Overtime metadata for this sub-bout. Valid for the daihyosen
             representative bout (`position: -1`), and, in KACHINUKI
-            competitions, also for numbered bouts of KNOCKOUT (bracket)
-            matches only (a knockout tie on the final kachinuki bout is
-            resolved by encho on that same bout; the same pair keeps
-            fighting). Pool, league, and Swiss kachinuki encounters may
-            legitimately end in a draw, so their numbered bouts reject encho
-            like any other competition: the server rejects a non-zero
-            `periodCount` on any numbered bout outside a kachinuki bracket
-            match (fixed regulation time, no overtime). `decidedByHantei` is
-            NOT relaxed for kachinuki: hantei remains daihyosen-only.
+            competitions, also for numbered bouts in ANY phase: a tied
+            kachinuki pairing may be fought on in overtime on that same
+            bout (the same pair keeps fighting). Whether a tied pairing
+            must produce a result (for example, a rule that the taisho has
+            to be defeated) is the operator's call, never derived from
+            pool-vs-bracket. For all non-kachinuki competitions the server
+            rejects a non-zero `periodCount` on any numbered bout (fixed
+            regulation time, no overtime). `decidedByHantei` is NOT relaxed
+            for kachinuki: hantei remains daihyosen-only.
 
     BracketMatch:
       type: object

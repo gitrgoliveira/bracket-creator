@@ -321,11 +321,31 @@ func preserveLoserScore(result, prior *state.MatchResult, decisionBy string) {
 		return
 	}
 	result.SubResults = prior.SubResults
+	// Preserve only points the loser actually STRUCK (Art. 32 says "any point
+	// scored"): strip the maru marker so a prior default-win decision's ○○
+	// fill is never carried forward as if it were struck points. This matters
+	// on the T103 re-decision path when decisionBy flips — the side that was
+	// the prior winner holds maru, not real points, and must not inherit it as
+	// the new loser.
 	if decisionBy == "shiro" {
-		result.IpponsB = prior.IpponsB // loser = SideB (Shiro) keeps struck points
+		result.IpponsB = struckIppons(prior.IpponsB) // loser = SideB (Shiro)
 	} else {
-		result.IpponsA = prior.IpponsA // loser = SideA (Aka) keeps struck points
+		result.IpponsA = struckIppons(prior.IpponsA) // loser = SideA (Aka)
 	}
+}
+
+// struckIppons returns the real struck ippon letters from a slice, dropping
+// empty entries, the "•" UI placeholder, and the domain.DefaultWinIppon maru
+// (an awarded default win, not a struck point). Distinct from
+// countScoringIppons, which counts the maru as a scoring ippon by design.
+func struckIppons(ippons []string) []string {
+	var out []string
+	for _, v := range ippons {
+		if v != "" && v != "•" && v != domain.DefaultWinIppon {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // countScoringIppons counts real ippon marks, ignoring empty entries and the

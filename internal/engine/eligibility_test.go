@@ -1359,3 +1359,32 @@ func TestRecordDecision_TeamWithdrawalKeepsSubResults(t *testing.T) {
 	assert.Equal(t, "Team Red", result.SubResults[0].Winner)
 	assert.Equal(t, "Team White", result.SubResults[1].Winner)
 }
+
+// TestRecordDecision_ReDecisionFlipNoPhantomMaru guards the T103 correction
+// path: re-recording a default win with a FLIPPED decisionBy must not carry
+// the first decision's ○○ maru fill onto the new loser as phantom struck
+// points. preserveLoserScore keeps only real struck ippons (FIK Art. 32 "any
+// point scored"), stripping the maru marker.
+func TestRecordDecision_ReDecisionFlipNoPhantomMaru(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "redecision-flip"
+	createTestCompetition(t, store, compID, "league", 2)
+	aliceID, bobID := helper.NewUUID4(), helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: aliceID, Name: "Alice", Dojo: "A"},
+		{ID: bobID, Name: "Bob", Dojo: "B"},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled},
+	}))
+	// Decision 1: Bob (shiro) withdraws -> Alice wins ○○.
+	_, _, err := eng.RecordDecision(compID, "Pool A-0", "kiken-voluntary", "shiro", "withdrew", nil, false)
+	require.NoError(t, err)
+	// Correction: actually Alice (aka) withdrew -> flip decisionBy. Bob wins ○○;
+	// Alice must NOT inherit decision 1's maru as points scored.
+	result, _, err := eng.RecordDecision(compID, "Pool A-0", "kiken-voluntary", "aka", "correction", nil, false)
+	require.NoError(t, err)
+	assert.Equal(t, "Bob", result.Winner)
+	assert.Equal(t, []string{"○", "○"}, result.IpponsB, "new winner Bob gets the maru fill")
+	assert.Empty(t, result.IpponsA, "flipped loser Alice must not inherit the prior maru as phantom points")
+}

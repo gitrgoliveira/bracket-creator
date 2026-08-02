@@ -268,7 +268,9 @@ export function kachinukiBandModel({ subs, daihyosenIdx, isComplete, matchWinner
   }
   const how = last.fusensho ? " (fusensho)" : "";
   const stay = streak >= 2 ? ` · stays on, ${streak} wins` : " · stays on";
-  return { headline, fact: `${last.winner} beat ${last.loser}${how}${stay}` };
+  // "Last:" prefix mirrors the tie-fact ("Last: hikiwake …") so the headline
+  // "BOUT N" is never misread as bout N's own (unfought) result (critique P2).
+  return { headline, fact: `Last: ${last.winner} beat ${last.loser}${how}${stay}` };
 }
 
 // kachinukiVisiblePositions: which bout slots to render for a kachinuki
@@ -1198,12 +1200,20 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
 
         <div className="editor-modal__body">
           {/* FR-033 encho toggle: see ScoreEditorModal for the contract.
-              EnchoControl collapses to a pill when no overtime is active. */}
-          <EnchoControl
-            enchoPeriodCount={enchoPeriodCount}
-            setEnchoPeriodCount={setEnchoPeriodCount}
-            maxEnchoPeriods={maxEnchoPeriods}
-          />
+              EnchoControl collapses to a pill when no overtime is active.
+              mp-gmcg (critique + operator ruling): in kachinuki bout mode this
+              top period-stepper is redundant AND confusing next to the footer
+              Encho button. Declaring encho there is OPTIONAL and its only
+              effect is the middle mark (vs → "(E)"); no ×N period count is
+              needed. So the top control is suppressed while fighting a
+              kachinuki match; corrections/daihyosen/fixed formats keep it. */}
+          {!kachinukiBoutMode && (
+            <EnchoControl
+              enchoPeriodCount={enchoPeriodCount}
+              setEnchoPeriodCount={setEnchoPeriodCount}
+              maxEnchoPeriods={maxEnchoPeriods}
+            />
+          )}
           {/* Team header */}
           <div className="sb-match" style={{ marginBottom: teamSize === 5 && (lineupIncompleteB || lineupIncompleteA) ? 4 : 16 }}>
             {teamSides.map((s, idx) => (
@@ -1416,7 +1426,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 <div className="team-sub-match__row">
                   {rowSides.map((rs, rsIdx) => (
                     <React.Fragment key={rs.key}>
-                      <div className={`team-sub-match__side ${rsIdx === 1 ? "team-sub-match__side--right" : ""}`}>
+                      <div className={`team-sub-match__side team-sub-match__side--${rs.color} ${rsIdx === 1 ? "team-sub-match__side--right" : ""}`}>
                         {/* Name picker grouped with this side's score controls.
                             SHIRO chip + a typeable picker (filter the roster as
                             you type, or write a name) so operators can set the
@@ -1786,31 +1796,39 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
           {/* T093–T098: decision (kiken/fusenpai) controls for the overall
               team match. Per-bout Fusensho lives on each sub-match row
               (see the row-level "Fusensho" button per side, T096). */}
+          {/* mp-gmcg (critique P3): kiken/fusenpai are withdrawal/no-show
+              decisions, rare relative to scoring, so they collapse into a
+              disclosure by default instead of standing always-open beside the
+              active bout. Native <details> keeps the buttons in the DOM
+              (still queryable/testable); it just reclaims the ambient
+              attention the scoring task should own. */}
           {!withdrawnPlayer && !decisionPromptKind && !selfReport && (
-            <div className="decision-controls" style={{ display: "flex", gap: 8, marginTop: 12, fontSize: 12, alignItems: "center" }}>
-              <span style={{ color: "var(--ink-3)", fontWeight: 600 }}>Team decision:</span>
-              <div className="decision-btn-group">
-                <button data-testid="scoring-modal-kiken-voluntary-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("kiken-voluntary"); }} disabled={submitting || decisionSubmitting}>
-                  Kiken – Voluntary
-                </button>
-                <GlossaryHintAS name="kiken-voluntary" />
+            <details className="decision-disclosure">
+              <summary className="decision-disclosure__summary">Withdrawal or no-show (kiken · fusenpai)</summary>
+              <div className="decision-controls" style={{ display: "flex", gap: 8, marginTop: 10, fontSize: 12, alignItems: "center", flexWrap: "wrap" }}>
+                <div className="decision-btn-group">
+                  <button data-testid="scoring-modal-kiken-voluntary-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("kiken-voluntary"); }} disabled={submitting || decisionSubmitting}>
+                    Kiken – Voluntary
+                  </button>
+                  <GlossaryHintAS name="kiken-voluntary" />
+                </div>
+                <div className="decision-btn-group">
+                  <button data-testid="scoring-modal-kiken-injury-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("kiken-injury"); }} disabled={submitting || decisionSubmitting}>
+                    Kiken – Injury
+                  </button>
+                  <GlossaryHintAS name="kiken-injury" />
+                </div>
+                <div className="decision-btn-group">
+                  <button data-testid="scoring-modal-fusenpai-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("fusenpai"); }} disabled={submitting || decisionSubmitting}>
+                    Fusenpai
+                  </button>
+                  <GlossaryHintAS name="fusenpai" />
+                </div>
+                <span style={{ color: "var(--ink-3)", fontSize: 12, marginLeft: 4 }}>
+                  (<TermAS name="fusensho">Fusensho</TermAS> is per-bout: use the "Fusensho" button on each row above.)
+                </span>
               </div>
-              <div className="decision-btn-group">
-                <button data-testid="scoring-modal-kiken-injury-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("kiken-injury"); }} disabled={submitting || decisionSubmitting}>
-                  Kiken – Injury
-                </button>
-                <GlossaryHintAS name="kiken-injury" />
-              </div>
-              <div className="decision-btn-group">
-                <button data-testid="scoring-modal-fusenpai-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("fusenpai"); }} disabled={submitting || decisionSubmitting}>
-                  Fusenpai
-                </button>
-                <GlossaryHintAS name="fusenpai" />
-              </div>
-              <span style={{ color: "var(--ink-3)", fontSize: 12, marginLeft: 4 }}>
-                (<TermAS name="fusensho">Fusensho</TermAS> is per-bout: use the "Fusensho" button on each row above.)
-              </span>
-            </div>
+            </details>
           )}
           {decisionErr && (
             <div style={{ color: "var(--danger, #c00)", fontSize: 12, marginTop: 6 }}>{decisionErr}</div>

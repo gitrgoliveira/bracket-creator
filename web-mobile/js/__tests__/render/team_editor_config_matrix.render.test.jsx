@@ -151,10 +151,16 @@ describe('TeamScoreEditorModal config matrix (running match, admin surface)', ()
     );
     expect(letters).toEqual(cell.naginata ? NAGINATA_SET : KENDO_SET);
 
-    // Encho affordance: always present, collapsed to the pill while no
-    // overtime is active. maxEnchoPeriods only caps the stepper (covered by
-    // the focused cap tests below).
-    expect(screen.queryByTestId('scoring-modal-encho-pill')).not.toBeNull();
+    // Encho affordance: the top overtime pill is present for FIXED formats
+    // (collapsed while no overtime is active). mp-gmcg: in a running
+    // kachinuki match (bout mode) the top pill is suppressed — declaring
+    // encho there is the optional footer Encho on a tied bout, not a top
+    // period-stepper — so the pill must be ABSENT for kachinuki cells.
+    if (cell.tmt === 'kachinuki') {
+      expect(screen.queryByTestId('scoring-modal-encho-pill')).toBeNull();
+    } else {
+      expect(screen.queryByTestId('scoring-modal-encho-pill')).not.toBeNull();
+    }
 
     // Daihyosen affordance is knockout-only (T141): phase "bracket", or the
     // playoffs/mixed fallback for non-pool phases. Pool matches resolve ties

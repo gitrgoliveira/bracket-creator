@@ -240,7 +240,7 @@ describe('kachinukiBandModel', () => {
       ...base, subs: [sub({ aPts: ['M', 'K'] }), sub()], currentBout: 2,
     });
     expect(kb.headline).toBe('BOUT 2');
-    expect(kb.fact).toBe('Alpha Senpo beat Bravo Senpo · stays on');
+    expect(kb.fact).toBe('Last: Alpha Senpo beat Bravo Senpo · stays on');
     expect(kb.verdict).toBeUndefined();
   });
 
@@ -248,7 +248,7 @@ describe('kachinukiBandModel', () => {
     const kb = kachinukiBandModel({
       ...base, subs: [sub({ aPts: ['M'] }), sub({ aPts: ['D'] }), sub()], currentBout: 3,
     });
-    expect(kb.fact).toBe('Alpha Senpo beat Bravo Chuken · stays on, 2 wins');
+    expect(kb.fact).toBe('Last: Alpha Senpo beat Bravo Chuken · stays on, 2 wins');
   });
 
   it('a tied last bout: hikiwake fact, both retired', () => {
@@ -282,7 +282,7 @@ describe('kachinukiBandModel', () => {
     const kb = kachinukiBandModel({
       ...base, subs: [sub({ bPts: ['M'] })], namesAt: () => ({}), currentBout: 2,
     });
-    expect(kb.fact).toBe('Shiro beat Aka · stays on');
+    expect(kb.fact).toBe('Last: Shiro beat Aka · stays on');
   });
 });
 

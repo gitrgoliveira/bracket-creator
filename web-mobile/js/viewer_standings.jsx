@@ -407,7 +407,7 @@ export const PoolMatchRow = React.memo(({ m, onClick }) => {
         <span className="pool-match-row__badge pool-match-row__badge--shiro">SHIRO</span>
       </div>
       <span className="pool-match-row__score">
-        {window.matchStateCell(m, m.ipponsB, m.ipponsA)}
+        {window.matchStateCell(m)}
       </span>
       <div className={`pool-match-row__side ${aWin ? "pool-match-row__side--win" : ""}`}>
         <span className="pool-match-row__badge pool-match-row__badge--aka">AKA</span>
@@ -657,9 +657,9 @@ export const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick, isEngi }
       </div>
       <span className="pool-match-numbered-row__score">
         {/* Running matches are signalled by the row highlight (shared .is-running),
-            not a centre dot: matchStateCell shows "vs" for the live matchup,
-            a score when completed, "–" when scheduled. */}
-        {window.matchStateCell(m, m.ipponsB, m.ipponsA)}
+            not a centre dot: matchStateCell shows the score when completed and
+            the plain "vs" middle otherwise (a dash is never a middle value). */}
+        {window.matchStateCell(m)}
       </span>
       <div className="pool-match-numbered-row__side pool-match-numbered-row__side--aka">
         <span className="sr-only">Aka: </span>

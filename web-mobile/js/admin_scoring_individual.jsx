@@ -94,12 +94,8 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // 4xx on retry): the write never landed, so we must show an explicit "not
   // saved" failure state rather than let the pending banner clear to "saved".
   const [writeFailed, setWriteFailed] = useStateA(null); // { reason } | null
-  // T104/CHK029: MaxEnchoPeriods cap from the competition config.
-  // Fetched once on open so the warning banner can fire before the
-  // operator submits (the server validates the same cap on PUT /score).
-  const [maxEnchoPeriods, setMaxEnchoPeriods] = useStateA(0);
   // Naginata competitions add an extra "S" (Sune) ippon button.
-  // Fetched from the competition config alongside maxEnchoPeriods.
+  // Fetched from the competition config on open.
   const [isNaginata, setIsNaginata] = useStateA(false);
   // Engi competitions use flag-count scoring; dispatched to EngiScoreEditorModal.
   // Derived synchronously from m.compEngi (stamped at enrichment time by
@@ -150,7 +146,6 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     let cancelled = false;
     window.API.fetchCompetitionDetails(m.compId).then(d => {
       if (!cancelled) {
-        setMaxEnchoPeriods(d?.config?.maxEnchoPeriods || 0);
         setIsNaginata(!!d?.config?.naginata);
       }
     }).catch(() => {});
@@ -677,7 +672,6 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
             <EnchoControl
               enchoPeriodCount={enchoPeriodCount}
               setEnchoPeriodCount={setEnchoPeriodCount}
-              maxEnchoPeriods={maxEnchoPeriods}
             />
           </div>
 

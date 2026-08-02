@@ -27,7 +27,7 @@ describe('StreamingOverlay DH signal', () => {
   let runtime;
   let StreamingOverlay;
   const savedGlobals = {};
-  const STUBBED = ['isHikiwake', 'decisionSuffix', 'Term'];
+  const STUBBED = ['isHikiwake', 'matchMiddleMark', 'Term'];
 
   const runningMatch = (id) => ({
     id, court: 'A', status: 'running',
@@ -48,7 +48,7 @@ describe('StreamingOverlay DH signal', () => {
         ? { had: true, val: global.window[k] } : { had: false };
     });
     global.window.isHikiwake = () => false;
-    global.window.decisionSuffix = () => '';
+    global.window.matchMiddleMark = () => '';
     global.window.Term = function Term(props) { return { type: 'span', props, children: props?.children }; };
     vi.resetModules();
     ({ StreamingOverlay } = await import('../streaming_overlay.jsx'));

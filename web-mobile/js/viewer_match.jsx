@@ -153,18 +153,12 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true }) {
 export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight }) => {
   const aWin = m.winner && m.sideA && m.winner.id === m.sideA.id;
   const bWin = m.winner && m.sideB && m.winner.id === m.sideB.id;
-  // Bracket matches carry scoreA/scoreB strings rather than ipponsA/B arrays.
-  // Fall back so the score string reflects per-side letters instead of the
-  // orientation-agnostic winnerPts–loserPts that formatIpponsScore uses when
-  // both ippon arrays are absent (which would invert left/right when AKA wins).
-  const vIpponsA = m.ipponsA || window.ipponsFromScore(m.scoreA);
-  const vIpponsB = m.ipponsB || window.ipponsFromScore(m.scoreB);
   // Score string for completed matches (final) and running matches (live, once
   // at least one ippon has landed). matchScoreStr returns "" before any score
   // exists, so a just-started running match falls through to the "vs" render.
   const isRunning = m.status === "running";
   const scoreStr = (m.status === "completed" || isRunning)
-    ? (window.matchScoreStr(m, vIpponsB, vIpponsA) || null)
+    ? (window.matchScoreStr(m) || null)
     : null;
   // FR-025: queue position is 1-indexed per court for scheduled matches;
   // running/completed are 0 (set server-side, omitempty in JSON → undefined

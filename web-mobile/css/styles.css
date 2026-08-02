@@ -6330,11 +6330,10 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .msb-row--queued .msb-name { color: #9ca3af; }
 .msb-row--queued .msb-name--aka { color: #d4a5a8; }
 .msb-row--queued .msb-slot { color: #9ca3af; }
-/* Daihyosen */
-.msb-row--dh-banner { justify-content: center; border-top: 2px solid #111; padding: 6px 0 2px; }
-.msb-dh-tag { display: inline-block; background: #111; color: #fff; font-size: 10px;
-  font-weight: 700; letter-spacing: .1em; padding: 2px 8px; border-radius: 3px; }
-.msb-dh-pending { text-align: center; padding: 8px 0; font-size: 12px; color: var(--ink-3); }
+/* Daihyosen: the rep bout carries its own (DH) centre mark, so no text
+   banner — just a top-border divider separating it from the numbered bouts. */
+.msb-row--dh { border-top: 2px solid #111; }
+.msb-dh-pending { text-align: center; padding: 8px 0; font-size: 12px; color: var(--ink-3); border-top: 2px solid #111; }
 /* TV variant, scale up for the fullscreen board.
    The font sizes and slot box dimensions are multiplied by --msb-scale
    (default 1); a few fixed values (horizontal padding, slot border-radius)
@@ -6357,7 +6356,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .msb--tv .msb-row--summary .msb-slot { min-width: calc(6vh * var(--msb-scale, 1)); font-size: calc(3.4vh * var(--msb-scale, 1)); }
 .msb--tv .msb-lab { font-size: calc(1.2vh * var(--msb-scale, 1)); }
 .msb--tv .msb-hansoku { font-size: calc(2.8vh * var(--msb-scale, 1)); font-weight: 900; }
-.msb--tv .msb-dh-tag { font-size: calc(1.8vh * var(--msb-scale, 1)); padding: 0.4vh 1.2vh; letter-spacing: .12em; }
+.msb--tv .msb-row--dh { border-top: 0.3vh solid #111; }
 /* TV bout decisiveness: winning side's filled slots are slightly bolder
    so spectators can read the match result at a glance from distance. */
 .msb--tv .msb-slots--win .msb-slot { font-size: calc(3.2vh * var(--msb-scale, 1)); }
@@ -6946,11 +6945,6 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   text-align: center;
   font-family: var(--font-mono);
   font-weight: 700;
-}
-.encho-row__max-banner {
-  color: var(--red);
-  font-size: 11px;
-  display: block;
 }
 .encho-row__btn {
   min-width: 28px;

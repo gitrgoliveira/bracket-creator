@@ -2,16 +2,22 @@ import React from 'react';
 import { render } from '@testing-library/react';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { IndividualScore } from '../../match_scoreboard.jsx';
+import { matchMiddleMark } from '../../bracket.jsx';
 
-// The TV centre dash is an explicit `.msb-sep` span rendered by centreMarks
-// when neither a draw "X" nor a hantei "Ht" mark occupies the centre cell.
-// The CSS hides it on non-TV surfaces and shows it in .msb--tv context.
-describe('msb-vs centre cell (TV centre dash)', () => {
-  let prev;
-  beforeAll(() => { prev = window.isHikiwake; window.isHikiwake = (t) => t === 'hikiwake'; });
-  afterAll(() => { window.isHikiwake = prev; });
+// The TV centre separator is an explicit `.msb-sep` span rendered by
+// centreMarks when neither a draw "X" nor a hantei "Ht" mark occupies the
+// centre cell. It reads "vs" — a dash is never a valid middle value
+// (operator ruling). The CSS hides it on non-TV surfaces and shows it in
+// .msb--tv context.
+describe('msb-vs centre cell (TV centre separator)', () => {
+  let prev, prevMid;
+  beforeAll(() => {
+    prev = window.isHikiwake; window.isHikiwake = (t) => t === 'hikiwake';
+    prevMid = window.matchMiddleMark; window.matchMiddleMark = matchMiddleMark; // the real chip projection
+  });
+  afterAll(() => { window.isHikiwake = prev; window.matchMiddleMark = prevMid; });
 
-  it('renders an msb-sep dash span when there is no draw/hantei mark', () => {
+  it('renders a plain "vs" msb-sep span when there is no draw/hantei mark', () => {
     const { container } = render(
       <IndividualScore match={{ sideA: { name: 'A' }, sideB: { name: 'B' }, ipponsA: ['M'], ipponsB: [] }} variant="tv" showNames />
     );
@@ -19,11 +25,11 @@ describe('msb-vs centre cell (TV centre dash)', () => {
     expect(vs).toBeTruthy();
     const sep = vs.querySelector('.msb-sep');
     expect(sep).toBeTruthy();
-    expect(sep.textContent).toBe('–');
+    expect(sep.textContent).toBe('vs');
     expect(sep.getAttribute('aria-hidden')).toBe('true');
   });
 
-  it('renders the draw X and no msb-sep on a hikiwake → no dash collision', () => {
+  it('renders the draw X and no msb-sep on a hikiwake → no separator collision', () => {
     const { container } = render(
       <IndividualScore match={{ sideA: { name: 'A' }, sideB: { name: 'B' }, ipponsA: [], ipponsB: [], decision: 'hikiwake' }} variant="tv" showNames />
     );

@@ -333,13 +333,10 @@ func overlayPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[str
 
 			// Column layout (1-based) for the default mirror=false template:
 			// startCol+1 = left victories (Red/SideA), startCol+3 = middle/vs,
-			// startCol+5 = right victories (White/SideB). With mirror=true the sides
-			// swap physically (White left, Red right); leftIppons/rightIppons below
-			// are swapped to match, so lVCol/rVCol always align with the header.
+			// startCol+5 = right victories (White/SideB). With mirror=true the
+			// sides swap physically (White left, Red right); writeScoreRowCells
+			// owns that display swap and derives the columns from courtStartCol.
 			courtStartCol := 1 + c*helper.CourtsColumnsPerCourt
-			lVCol := colNum(courtStartCol + 1)
-			middleCol := colNum(courtStartCol + 3)
-			rVCol := colNum(courtStartCol + 5)
 
 			ords := poolOrdinals[pool.PoolName]
 			for i := range pool.Matches {
@@ -358,27 +355,18 @@ func overlayPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[str
 				// Header is at excel row rowIdx+1; match i sits at header + 1 + i.
 				excelRow := rowIdx + 2 + i
 
-				leftIppons := mr.IpponsA
-				rightIppons := mr.IpponsB
-				if mirror {
-					leftIppons, rightIppons = mr.IpponsB, mr.IpponsA
-				}
-
-				hantei := mr.DecidedByHantei != nil && *mr.DecidedByHantei
-				sfx := DecisionSuffix(mr.Decision, mr.Encho, hantei)
-
-				var leftScore, rightScore string
+				var scoreA, scoreB string
 				if engi {
-					leftScore, rightScore = mirroredFlagsScore(mr.FlagsA, mr.FlagsB, mirror)
+					scoreA, scoreB = FlagsScorePair(mr.FlagsA, mr.FlagsB)
 				} else {
-					leftScore = IpponsScore(leftIppons)
-					rightScore = IpponsScore(rightIppons)
+					// The maru fallback is a property of ippon-score
+					// derivation, so it rides the else branch and never
+					// touches engi flag counts.
+					scoreA, scoreB = DefaultWinMaruAB(
+						IpponsScore(mr.IpponsA), IpponsScore(mr.IpponsB),
+						mr.Decision, mr.Encho, mr.Winner, mr.SideA, mr.SideB)
 				}
-				setCellStr(f, sheetName, lVCol, excelRow, leftScore)
-				setCellStr(f, sheetName, rVCol, excelRow, rightScore)
-				if mid := MiddleCellText(mr.Decision, sfx); mid != "" {
-					setCellStr(f, sheetName, middleCol, excelRow, mid)
-				}
+				writeScoreRowCells(f, sheetName, courtStartCol, excelRow, scoreA, scoreB, mr, mirror)
 			}
 		}
 	}
@@ -492,14 +480,17 @@ func buildCourtMatchJobs(pools []helper.Pool, numCourts int, poolOrdinals map[st
 //	rVCol (startCol+5) = right IV, rPCol (startCol+4) = right PW
 //
 // SideA is Red (left by default), SideB is Shiro (right); mirror swaps sides.
-// The middle "vs" cell carries the encounter's decision suffix (DH etc.) or the
-// hikiwake "X" marker when the team encounter is a draw.
+// The middle "vs" cell carries only the encounter's single middle mark
+// (X for a drawn encounter, (DH) when it went to a representative bout);
+// encounter-level result marks (Kiken/Fus./Ht) ride in the competitor's IV
+// cell, next to their victory count.
 func writeTeamSummaryCells(f *excelize.File, sheetName string, courtStartCol, excelRow int, mr state.MatchResult, mirror bool) {
 	lVCol := colNum(courtStartCol + 1)
 	lPCol := colNum(courtStartCol + 2)
-	middleCol := colNum(courtStartCol + 3)
 	rPCol := colNum(courtStartCol + 4)
 	rVCol := colNum(courtStartCol + 5)
+
+	lMark, rMark := SideMarksLR(mr.Decision, hanteiOf(mr), mr.Winner, mr.SideA, mr.SideB, mirror)
 
 	line := state.TeamResultFrom(mr.SubResults, mr.SideA, mr.SideB)
 	if line != nil {
@@ -509,17 +500,77 @@ func writeTeamSummaryCells(f *excelize.File, sheetName string, courtStartCol, ex
 		if mirror {
 			leftIV, leftPW, rightIV, rightPW = rightIV, rightPW, leftIV, leftPW
 		}
-		setIntCellDirect(f, sheetName, lVCol, excelRow, leftIV)
+		setIVCellWithMark(f, sheetName, lVCol, excelRow, leftIV, lMark)
 		setIntCellDirect(f, sheetName, lPCol, excelRow, leftPW)
-		setIntCellDirect(f, sheetName, rVCol, excelRow, rightIV)
+		setIVCellWithMark(f, sheetName, rVCol, excelRow, rightIV, rMark)
 		setIntCellDirect(f, sheetName, rPCol, excelRow, rightPW)
+	} else {
+		// No summary line (e.g. a forfeit before any bout was fought):
+		// the result marks still need a home in the competitor's cell.
+		if lMark != "" {
+			setCellStr(f, sheetName, lVCol, excelRow, lMark)
+		}
+		if rMark != "" {
+			setCellStr(f, sheetName, rVCol, excelRow, rMark)
+		}
 	}
 
-	hantei := mr.DecidedByHantei != nil && *mr.DecidedByHantei
-	sfx := DecisionSuffix(mr.Decision, mr.Encho, hantei)
-	if mid := MiddleCellText(mr.Decision, sfx); mid != "" {
-		setCellStr(f, sheetName, middleCol, excelRow, mid)
+	writeMiddleMarkCell(f, sheetName, courtStartCol, excelRow, mr.Decision, mr.Encho)
+}
+
+// writeScoreRowCells writes an individual match's score row: each side's
+// score joined with its result mark (Kiken/Fus./Ht ride in the competitor's
+// cell), and the single middle mark. Takes SIDE-ordered scores (A = Aka,
+// B = Shiro) and owns the display swap itself — like writeTeamSubMatchScores —
+// so no caller re-enforces the mirror rule. Shared by the pool and bracket
+// overlays so the cell contract lives in one place.
+func writeScoreRowCells(f *excelize.File, sheetName string, courtStartCol, excelRow int, scoreA, scoreB string, mr state.MatchResult, mirror bool) {
+	leftScore, rightScore := scoreA, scoreB
+	if mirror {
+		leftScore, rightScore = scoreB, scoreA
 	}
+	lMark, rMark := SideMarksLR(mr.Decision, hanteiOf(mr), mr.Winner, mr.SideA, mr.SideB, mirror)
+	setCellStr(f, sheetName, colNum(courtStartCol+1), excelRow, joinSp(leftScore, lMark))
+	setCellStr(f, sheetName, colNum(courtStartCol+5), excelRow, joinSp(rightScore, rMark))
+	writeMiddleMarkCell(f, sheetName, courtStartCol, excelRow, mr.Decision, mr.Encho)
+}
+
+// writeMiddleMarkCell writes the single middle mark (X / (E) / (DH)),
+// leaving the cell untouched when no mark applies so the template's own
+// "vs" survives. The one place the middle-cell contract lives.
+func writeMiddleMarkCell(f *excelize.File, sheetName string, courtStartCol, excelRow int, decision string, encho *state.EnchoMetadata) {
+	if mid := MiddleMark(decision, encho); mid != "" {
+		setCellStr(f, sheetName, colNum(courtStartCol+3), excelRow, mid)
+	}
+}
+
+// hanteiOf reads MatchResult's *bool hantei flag as a plain bool.
+func hanteiOf(mr state.MatchResult) bool {
+	return mr.DecidedByHantei != nil && *mr.DecidedByHantei
+}
+
+// bracketMatchResultView adapts a BracketMatch to the MatchResult shape the
+// shared row writers consume (they read only the result fields).
+func bracketMatchResultView(bm *state.BracketMatch) state.MatchResult {
+	return state.MatchResult{
+		SideA:           bm.SideA,
+		SideB:           bm.SideB,
+		Winner:          bm.Winner,
+		Decision:        bm.Decision,
+		Encho:           bm.Encho,
+		DecidedByHantei: state.HanteiPtr(bm.DecidedByHantei),
+		SubResults:      bm.SubResults,
+	}
+}
+
+// setIVCellWithMark writes a team IV count, appending a result mark
+// ("2 Kiken") when one applies to that side; a markless cell stays numeric.
+func setIVCellWithMark(f *excelize.File, sheetName, col string, row, iv int, mark string) {
+	if mark == "" {
+		setIntCellDirect(f, sheetName, col, row, iv)
+		return
+	}
+	setCellStr(f, sheetName, col, row, joinSp(fmt.Sprintf("%d", iv), mark))
 }
 
 // writeTeamSubMatchScores writes each sub-bout's ippon letters onto the team
@@ -528,10 +579,9 @@ func writeTeamSummaryCells(f *excelize.File, sheetName string, courtStartCol, ex
 // the daihyosen placeholder (Position < 0) is skipped so its blank row stays clean.
 // teamSize bounds the number of sub-match rows the grid actually has; a Position
 // outside [1, teamSize] (corrupted state) is skipped rather than writing into the
-// next encounter's cells (mirrors the guard in overlayTeamBracketScores).
+// next encounter's cells. Shared by the pool sheet and overlayTeamBracketScores.
 func writeTeamSubMatchScores(f *excelize.File, sheetName string, courtStartCol, subStartExcelRow int, subResults []state.SubMatchResult, teamSize int, mirror bool) {
 	lVCol := colNum(courtStartCol + 1)
-	middleCol := colNum(courtStartCol + 3)
 	rVCol := colNum(courtStartCol + 5)
 
 	for _, sub := range subResults {
@@ -541,24 +591,22 @@ func writeTeamSubMatchScores(f *excelize.File, sheetName string, courtStartCol, 
 		// Sub-match row for Position P is the P-th sub row (1-based Position).
 		excelRow := subStartExcelRow + (sub.Position - 1)
 
-		leftIppons, rightIppons := sub.IpponsA, sub.IpponsB
+		scoreA, scoreB := DefaultWinMaruAB(
+			IpponsScore(sub.IpponsA), IpponsScore(sub.IpponsB),
+			sub.Decision, sub.Encho, sub.Winner, sub.SideA, sub.SideB)
+		leftScore, rightScore := scoreA, scoreB
 		if mirror {
-			leftIppons, rightIppons = sub.IpponsB, sub.IpponsA
+			leftScore, rightScore = scoreB, scoreA
 		}
-		lScore := IpponsScore(leftIppons)
-		rScore := IpponsScore(rightIppons)
-		if lScore != "" {
+		lMark, rMark := SideMarksLR(sub.Decision, sub.DecidedByHantei, sub.Winner, sub.SideA, sub.SideB, mirror)
+		if lScore := joinSp(leftScore, lMark); lScore != "" {
 			setCellStr(f, sheetName, lVCol, excelRow, lScore)
 		}
-		if rScore != "" {
+		if rScore := joinSp(rightScore, rMark); rScore != "" {
 			setCellStr(f, sheetName, rVCol, excelRow, rScore)
 		}
 
-		hantei := sub.DecidedByHantei
-		sfx := DecisionSuffix(sub.Decision, sub.Encho, hantei)
-		if mid := MiddleCellText(sub.Decision, sfx); mid != "" {
-			setCellStr(f, sheetName, middleCol, excelRow, mid)
-		}
+		writeMiddleMarkCell(f, sheetName, courtStartCol, excelRow, sub.Decision, sub.Encho)
 	}
 }
 
@@ -854,33 +902,20 @@ func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMa
 				}
 			}
 
-			lVCol := colNum(courtStartCol + 1)
-			middleCol := colNum(courtStartCol + 3)
-			rVCol := colNum(courtStartCol + 5)
-
 			// For engi, the bracket stores flag counts in FlagsA/FlagsB;
 			// ScoreA/ScoreB hold ippon letters that do not apply. Render the
-			// flag count via mirroredFlagsScore instead, matching
+			// flag count via FlagsScorePair instead, matching
 			// overlayPoolScores.
-			var leftScore, rightScore string
+			var scoreA, scoreB string
 			if engi {
-				leftScore, rightScore = mirroredFlagsScore(bm.FlagsA, bm.FlagsB, mirror)
+				scoreA, scoreB = FlagsScorePair(bm.FlagsA, bm.FlagsB)
 			} else {
-				leftScore = bm.ScoreA
-				rightScore = bm.ScoreB
-				if mirror {
-					leftScore, rightScore = rightScore, leftScore
-				}
+				// Maru fallback at score derivation, like overlayPoolScores.
+				scoreA, scoreB = DefaultWinMaruAB(bm.ScoreA, bm.ScoreB,
+					bm.Decision, bm.Encho, bm.Winner, bm.SideA, bm.SideB)
 			}
 
-			sfx := DecisionSuffix(bm.Decision, bm.Encho, bm.DecidedByHantei)
-
-			setCellStr(f, sheetName, lVCol, excelRow, leftScore)
-			setCellStr(f, sheetName, rVCol, excelRow, rightScore)
-
-			if mid := MiddleCellText(bm.Decision, sfx); mid != "" {
-				setCellStr(f, sheetName, middleCol, excelRow, mid)
-			}
+			writeScoreRowCells(f, sheetName, courtStartCol, excelRow, scoreA, scoreB, bracketMatchResultView(&bm), mirror)
 
 			if bm.Winner != "" {
 				writeWinnerCell(f, sheetName, rows, scoreRowIdx, headerCol, bm.Winner)
@@ -922,13 +957,7 @@ func overlayTeamBracketScores(f *excelize.File, bracketByNum map[int]state.Brack
 			}
 
 			courtStartCol := headerCol + 1 // 1-based
-			lVCol := colNum(courtStartCol + 1)
-			lPCol := colNum(courtStartCol + 2)
-			middleCol := colNum(courtStartCol + 3)
-			rPCol := colNum(courtStartCol + 4)
-			rVCol := colNum(courtStartCol + 5)
-
-			headerExcelRow := rowIdx + 1 // H (1-based)
+			headerExcelRow := rowIdx + 1   // H (1-based)
 
 			// For the 3rd Place block write entrant names unconditionally so they
 			// appear even when the bronze match is not yet played. Sub-match rows,
@@ -940,46 +969,15 @@ func overlayTeamBracketScores(f *excelize.File, bracketByNum map[int]state.Brack
 				}
 			}
 
-			// Sub-match ippon letters: Position p sits at H+2+p.
-			for _, sub := range bm.SubResults {
-				if sub.Position <= 0 || sub.Position > teamSize {
-					continue // daihyosen placeholder / out-of-range
-				}
-				excelRow := headerExcelRow + 2 + sub.Position
-				leftIppons, rightIppons := sub.IpponsA, sub.IpponsB
-				if mirror {
-					leftIppons, rightIppons = sub.IpponsB, sub.IpponsA
-				}
-				if s := IpponsScore(leftIppons); s != "" {
-					setCellStr(f, sheetName, lVCol, excelRow, s)
-				}
-				if s := IpponsScore(rightIppons); s != "" {
-					setCellStr(f, sheetName, rVCol, excelRow, s)
-				}
-				subSfx := DecisionSuffix(sub.Decision, sub.Encho, sub.DecidedByHantei)
-				if mid := MiddleCellText(sub.Decision, subSfx); mid != "" {
-					setCellStr(f, sheetName, middleCol, excelRow, mid)
-				}
-			}
+			// Sub-match ippon letters: Position p sits at H+2+p, i.e. the sub
+			// rows start at H+3. Same writer as the pool sheet.
+			writeTeamSubMatchScores(f, sheetName, courtStartCol, headerExcelRow+3, bm.SubResults, teamSize, mirror)
 
-			// IV/PW summary row = H + 5 + teamSize.
+			// IV/PW summary row = H + 5 + teamSize. Route through the shared
+			// pool-sheet writer so the IV-mark contract (and the forfeit
+			// fallback when no summary line exists) lives in one place.
 			summaryExcelRow := headerExcelRow + 5 + teamSize
-			if line := state.TeamResultFrom(bm.SubResults, bm.SideA, bm.SideB); line != nil {
-				leftIV, leftPW := line.AkaIV, line.AkaPW
-				rightIV, rightPW := line.ShiroIV, line.ShiroPW
-				if mirror {
-					leftIV, leftPW, rightIV, rightPW = rightIV, rightPW, leftIV, leftPW
-				}
-				setIntCellDirect(f, sheetName, lVCol, summaryExcelRow, leftIV)
-				setIntCellDirect(f, sheetName, lPCol, summaryExcelRow, leftPW)
-				setIntCellDirect(f, sheetName, rVCol, summaryExcelRow, rightIV)
-				setIntCellDirect(f, sheetName, rPCol, summaryExcelRow, rightPW)
-			}
-
-			sfx := DecisionSuffix(bm.Decision, bm.Encho, bm.DecidedByHantei)
-			if mid := MiddleCellText(bm.Decision, sfx); mid != "" {
-				setCellStr(f, sheetName, middleCol, summaryExcelRow, mid)
-			}
+			writeTeamSummaryCells(f, sheetName, courtStartCol, summaryExcelRow, bracketMatchResultView(&bm), mirror)
 
 			// Winner marker: the "1." row is 3 rows below the summary row; reuse the
 			// individual writer, which scans forward for the "1." ordinal.

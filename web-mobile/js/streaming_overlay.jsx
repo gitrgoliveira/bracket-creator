@@ -184,9 +184,9 @@ function StreamingOverlay({ court, position, competitions }) {
     const aka = hasRunning && !isTeamMatch ? sideLabel(running.match.sideA, zekken) : '';
     const ipponsB = hasRunning && !isTeamMatch ? ((running.match.ipponsB || []).filter(x => x && x !== "•").join('') || '0') : '';
     const ipponsA = hasRunning && !isTeamMatch ? ((running.match.ipponsA || []).filter(x => x && x !== "•").join('') || '0') : '';
-    // T097: Kiken/Fus./DH/(E) suffix on the OBS lower-third. Computed off
-    // the running match so it disappears the moment the overlay fades out.
-    const decSfx = hasRunning && !isTeamMatch && window.decisionSuffix ? window.decisionSuffix(running.match) : '';
+    // T097: the middle mark (X / (E) / (DH)) on the OBS lower-third. Computed
+    // off the running match so it disappears the moment the overlay fades out.
+    const decSfx = hasRunning && !isTeamMatch && window.matchMiddleMark ? window.matchMiddleMark(running.match) : '';
     const compName = comp?.name || '';
 
     // QR target URL: the tournament viewer home page (NOT a per-match deep

@@ -338,10 +338,6 @@ type Competition struct {
 	// one written to new config.md files.
 	PoolMatchDurationSeconds    int `yaml:"pool_match_duration_seconds,omitempty" json:"poolMatchDurationSeconds,omitempty"`
 	PlayoffMatchDurationSeconds int `yaml:"playoff_match_duration_seconds,omitempty" json:"playoffMatchDurationSeconds,omitempty"`
-	// MaxEnchoPeriods caps how many encho (overtime) periods one match
-	// may run before the operator must call daihyosen. Zero means
-	// unlimited (FIK general default). T104, CHK029.
-	MaxEnchoPeriods int `yaml:"max_encho_periods,omitempty" json:"maxEnchoPeriods,omitempty"`
 
 	// TeamMatchType selects the team-match format (FR-044). Empty value
 	// is treated as TeamMatchTypeFixed for backward compatibility; all
@@ -873,6 +869,17 @@ func HanteiPtr(b bool) *bool {
 // FR-032
 type EnchoMetadata struct {
 	PeriodCount int `json:"periodCount" yaml:"periodCount"`
+}
+
+// On reports whether the block records overtime that was actually fought:
+// non-nil with a positive PeriodCount. THE single predicate for "did this
+// result happen in encho" — the (E) label (enchoLabel, pinned by the
+// golden table), the default-win maru count (domain.DefaultWinIppons
+// callers), and decision validation all key on it, so a degenerate
+// {periodCount: 0} block can never make one surface claim overtime while
+// another denies it. Mirrors enchoOn in web-mobile/js/bracket.jsx.
+func (e *EnchoMetadata) On() bool {
+	return e != nil && e.PeriodCount > 0
 }
 
 // Clone returns a deep copy of the encho metadata, or nil if e is nil.

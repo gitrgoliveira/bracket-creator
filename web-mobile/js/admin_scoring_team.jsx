@@ -354,7 +354,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // from match-level compFormat (when set by compMatches) or the comp
   // fetch fallback. Phase === "bracket" is the in-modal signal.
   const compFormat = m.compFormat || compMeta?.config?.format || "";
-  const maxEnchoPeriods = compMeta?.config?.maxEnchoPeriods || 0;
   const isNaginataTeam = !!compMeta?.config?.naginata;
   // Knockout phase = a bracket match. A POOL match is never knockout, even in a
   // mixed/playoffs competition: pool team matches may legitimately draw
@@ -827,7 +826,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
           <EnchoControl
             enchoPeriodCount={enchoPeriodCount}
             setEnchoPeriodCount={setEnchoPeriodCount}
-            maxEnchoPeriods={maxEnchoPeriods}
           />
           {/* Team header */}
           <div className="sb-match" style={{ marginBottom: teamSize === 5 && (lineupIncompleteB || lineupIncompleteA) ? 4 : 16 }}>

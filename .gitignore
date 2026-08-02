@@ -65,6 +65,11 @@ Thumbs.db
 !web-mobile/.oxlintrc.json
 !web/package.json
 !web/package-lock.json
+# Go testdata fixtures. These are test INPUTS, not build output: the blanket
+# *.json above would silently drop them, and a golden table that never lands
+# fails CI on a checkout that works locally. /**/ matches zero or more
+# directories, so nested layouts (testdata/golden/...) are covered too.
+!**/testdata/**/*.json
 # Fixture data for scripts/setup_tournament.py (make mobile-app-example);
 # without this the demo target fails with FileNotFoundError on any checkout
 # other than the one that happens to have the file untracked on disk.
@@ -76,6 +81,9 @@ node_modules/
 # rule above would not match.
 web-mobile/node_modules
 specs/*
+# Re-include the spec directories themselves so git descends into them; a
+# directory excluded outright can never have its contents re-included below.
+!specs/*/
 specs/*/*
 !specs/openapi.yaml
 # UAT screenshot evidence (review.md V5): per-task PNGs captured during browser
@@ -85,6 +93,12 @@ specs/*/*
 .specify
 .agent*
 .playwright-mcp
+# The Playwright MCP writes browser_take_screenshot files to the repo/worktree
+# root, where `git add -A` would sweep them into a commit. PR screenshots belong
+# on the pr-assets branch, never in the tree. Root-anchored on purpose: a blanket
+# *.png would silently swallow new docs/screenshots/, docs/assets/images/ and
+# specs/*/screenshots/ files, which are tracked.
+/*.png
 .claude/skills/speckit-*
 .claude/worktrees/*
 

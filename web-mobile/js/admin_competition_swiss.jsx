@@ -8,8 +8,8 @@ const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 // section. Extracted so the conditional logic ("which round, are
 // matches complete, can we generate next?") is unit-testable without
 // mounting AdminSwissRounds. Mirrors the admin_scoring_modal.jsx
-// pattern (buildDecisionBody / shouldShowEnchoMaxBanner pure helpers
-// exported for tests).
+// pattern (buildDecisionBody / nextEnchoPeriod pure helpers exported
+// for tests).
 
 // Returns the canonical match-ID prefix for a Swiss round. Matches
 // engine/swiss.go's `swissPoolName`/`swissMatchID`. Keep in sync.

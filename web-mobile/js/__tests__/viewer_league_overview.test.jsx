@@ -49,9 +49,9 @@ describe('ViewerOverview league standings (mp-ldnr)', () => {
     global.window.isHikiwake = () => false;
     global.window.formatIpponsScore = () => '';
     global.window.teamIVScore = () => null;
-    global.window.matchScoreStr = (m, ippB, ippA) =>
+    global.window.matchScoreStr = (m) =>
       (global.window.teamIVScore(m)) ||
-      global.window.formatIpponsScore(ippB, ippA, m?.score, m?.decision, m?.encho, m?.decidedByHantei);
+      global.window.formatIpponsScore(m?.ipponsB || [], m?.ipponsA || [], m?.score, m?.decision, m?.encho, m?.decidedByHantei);
     global.window.ipponsFromScore = () => [];
     global.window.queueLabel = () => '';
     global.window.queueLabelCompact = () => null;

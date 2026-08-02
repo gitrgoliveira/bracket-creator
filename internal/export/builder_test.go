@@ -234,7 +234,7 @@ func TestBuildResultsWorkbook_StandingsLiteral_NoFormulaCollapse(t *testing.T) {
 	assert.True(t, winsFound, "W (wins) column must contain literal '1' for Alice after a win, not a collapsed formula '0'")
 }
 
-func TestBuildResultsWorkbook_DecisionSuffixInSheet(t *testing.T) {
+func TestBuildResultsWorkbook_ResultMarksInScoreCells(t *testing.T) {
 	t.Parallel()
 	dir, store, eng, compID := testSetup(t)
 	defer os.RemoveAll(dir)
@@ -272,20 +272,13 @@ func TestBuildResultsWorkbook_DecisionSuffixInSheet(t *testing.T) {
 	rows, err := f.GetRows(helper.SheetPoolMatches)
 	require.NoError(t, err)
 
-	// The vs/middle cell should contain "Kiken (E) Ht".
-	foundSuffix := false
-	for _, row := range rows {
-		for _, cell := range row {
-			if cell == "Kiken (E) Ht" {
-				foundSuffix = true
-				break
-			}
-		}
-		if foundSuffix {
-			break
-		}
-	}
-	assert.True(t, foundSuffix, "pool matches sheet must contain 'Kiken (E) Ht' suffix")
+	// The middle carries only its one mark ("(E)"); the result marks ride in
+	// the competitors' score cells: Alice (winner, scored M, hantei) "M Ht",
+	// Bob (withdrew) "Kiken".
+	assert.True(t, sheetContainsCell(rows, "(E)"), "the vs cell must carry the (E) middle mark")
+	assert.True(t, sheetContainsCell(rows, "M Ht"), "the winner's cell must carry her score plus the Ht mark")
+	assert.True(t, sheetContainsCell(rows, "Kiken"), "the withdrawing side's cell must carry the Kiken mark")
+	assert.False(t, sheetContainsCell(rows, "Kiken (E) Ht"), "the old composed middle suffix must be gone")
 }
 
 func TestBuildResultsWorkbook_BracketScores(t *testing.T) {
@@ -405,12 +398,13 @@ func TestBuildResultsWorkbook_DrawMatch(t *testing.T) {
 	assert.True(t, foundX, "pool matches sheet must contain 'X' for a hikiwake (draw) with no ippons")
 }
 
-// TestBuildResultsWorkbook_DrawWithSuffixKeepsMarker is the regression test for
-// the draw-marker overwrite bug: a hikiwake that also went to encho (or was
-// hantei-decided) must export the COMBINED "X (E)" / "X Ht" in the vs column, not
-// just the suffix. Previously the code wrote "X" then overwrote it with the
-// suffix, silently dropping the draw indicator from the archived workbook.
-func TestBuildResultsWorkbook_DrawWithSuffixKeepsMarker(t *testing.T) {
+// TestBuildResultsWorkbook_DrawExcludesEnchoMark pins the draw-vs-encho
+// exclusivity rule: X means a tie and a match that went to encho cannot end
+// tied, so stale data carrying both exports the X ALONE — the middle column
+// holds exactly one mark and the tie wins. (This test previously guarded the
+// opposite, a combined "X (E)" cell, from the era when the middle carried a
+// composed suffix.)
+func TestBuildResultsWorkbook_DrawExcludesEnchoMark(t *testing.T) {
 	t.Parallel()
 	dir, store, eng, compID := testSetup(t)
 	defer os.RemoveAll(dir)
@@ -441,10 +435,12 @@ func TestBuildResultsWorkbook_DrawWithSuffixKeepsMarker(t *testing.T) {
 	rows, err := f.GetRows(helper.SheetPoolMatches)
 	require.NoError(t, err)
 
-	assert.True(t, sheetContainsCell(rows, "X (E)"),
-		"a hikiwake-in-encho must export the combined 'X (E)' marker, not just '(E)'")
+	assert.True(t, sheetContainsCell(rows, "X"),
+		"a draw with stale encho data must export the X marker")
 	assert.False(t, sheetContainsCell(rows, "(E)"),
-		"the bare '(E)' cell must not appear: it means the draw marker was dropped")
+		"a tie can never carry the overtime marker: X wins, (E) is dropped")
+	assert.False(t, sheetContainsCell(rows, "X (E)"),
+		"the old combined draw+encho cell must be gone")
 }
 
 // ------------------------------------------------------------
@@ -1903,7 +1899,7 @@ func TestBuildResultsWorkbook_TeamResults(t *testing.T) {
 	require.Greater(t, len(elimRows[vp]), vpCol+1)
 	assert.Equal(t, "1", elimRows[vp][vpCol+1], "Red A bracket IV must be literal 1 on the summary row")
 
-	assert.True(t, sheetContainsCell(elimRows, "DH"), "daihyosen suffix 'DH' must appear on the team encounter")
+	assert.True(t, sheetContainsCell(elimRows, "(DH)"), "the '(DH)' middle mark must appear on the team encounter")
 	assert.True(t, sheetContainsCell(elimRows, "Red A"), "winner 'Red A' must be written as a literal")
 }
 
@@ -2595,11 +2591,13 @@ func TestBuildResultsWorkbook_NonEngiStandingsHeadersUnchanged(t *testing.T) {
 // TDD-5: Engi special-case characterization tests
 // ------------------------------------------------------------
 
-// TestBuildResultsWorkbook_EngiDecisionSuffix characterizes the vs-cell text for
-// a kiken-voluntary engi match: the middle cell must carry "Kiken" and both
-// adjacent score cells (at column offsets -2 and +2 from the vs cell) must be
-// blank because FlagsScorePair returns ("", "") when neither side scored flags.
-func TestBuildResultsWorkbook_EngiDecisionSuffix(t *testing.T) {
+// TestBuildResultsWorkbook_EngiKikenMarkPlacement characterizes the result-mark
+// placement for a kiken-voluntary engi match: "Kiken" rides in the WITHDRAWING
+// pair's score cell (the loser, SideB, right of the vs column), the winner's
+// score cell stays blank (FlagsScorePair returns ("", "") when neither side
+// scored flags), and the middle cell keeps its template "vs" (kiken is a
+// result, not a middle mark).
+func TestBuildResultsWorkbook_EngiKikenMarkPlacement(t *testing.T) {
 	t.Parallel()
 	dir, store, eng, compID := testSetup(t)
 	defer os.RemoveAll(dir)
@@ -2637,26 +2635,24 @@ func TestBuildResultsWorkbook_EngiDecisionSuffix(t *testing.T) {
 	rows, err := f.GetRows(helper.SheetPoolMatches)
 	require.NoError(t, err)
 
-	// The vs/middle cell must carry "Kiken" for a kiken-voluntary engi match.
+	// The withdrawing pair's score cell must carry "Kiken".
 	assert.True(t, sheetContainsCell(rows, "Kiken"),
-		"Pool Matches vs-cell must render 'Kiken' for a kiken-voluntary engi match")
+		"the withdrawing pair's score cell must render 'Kiken' for a kiken-voluntary engi match")
 
-	// Score cells flanking the vs column must be blank: FlagsScorePair returns ("", "") for a no-flag decision.
-	// The vs cell sits at column offset 3 from the court band start; score cells
-	// are at offsets 1 (left) and 5 (right), so -2 and +2 from the vs index.
+	// Geometry: the loser (SideB) sits RIGHT of the vs column, so from the
+	// Kiken cell the middle is 2 columns left (template "vs") and the
+	// winner's score cell 4 columns left (blank: no flags were scored).
 	for _, row := range rows {
 		for j, cell := range row {
 			if cell != "Kiken" {
 				continue
 			}
-			require.GreaterOrEqual(t, j, 2,
-				"Kiken vs-cell must not appear in the first two columns")
-			assert.Equal(t, "", row[j-2],
-				"left score cell (col offset -2 from vs) must be blank for kiken with FlagsA=0")
-			if j+2 < len(row) {
-				assert.Equal(t, "", row[j+2],
-					"right score cell (col offset +2 from vs) must be blank for kiken with FlagsB=0")
-			}
+			require.GreaterOrEqual(t, j, 4,
+				"Kiken must sit in the right-hand score cell, not the first columns")
+			assert.Contains(t, []string{"", "vs"}, row[j-2],
+				"the middle cell must stay untouched (template text): kiken is a result, not a middle mark")
+			assert.Equal(t, "", row[j-4],
+				"the winner's score cell must be blank for kiken with FlagsA=0")
 		}
 	}
 }

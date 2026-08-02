@@ -148,12 +148,12 @@ function slotCells(letters, side, testid) {
   return side === "aka" ? cells.toReversed() : cells;
 }
 
-// centreMarks: the §263 inner cells: [shiro slot][shiro slot] | vs/X | [aka slot][aka slot].
+// centreMarks: the §263 inner cells: [shiro slot][shiro slot] | vs/X/(E)/(DH) | [aka slot][aka slot].
 // Hansoku ▲ shows on the offending side, on the OUTER edge of the slots (away
 // from centre); X marks a hikiwake; "Ht" flags hantei. For an ippon-less win
-// the winning side is otherwise invisible, so we mark the winner's first slot:
-// "Ht" when decided by hantei, else ○ for a non-hantei ippon-less win (see
-// the winMark line below). Modern fusensho/kiken carry ["○","○"] ippons
+// the winning side is otherwise invisible, so we mark the winner's slots:
+// "Ht" when decided by hantei, else the maru pair ○ ○ — one per awarded
+// point (see winCells below). Modern fusensho/kiken carry ["○","○"] ippons
 // and render through the normal slot path, so they never reach this fallback.
 // A plain helper (not a component) so it renders inline into the parent's tree.
 function centreMarks(sub, matchSideA, matchSideB) {
@@ -172,7 +172,7 @@ function centreMarks(sub, matchSideA, matchSideB) {
           {slotCells([String(flagsB), ""], "shiro", "sub-flags-b")}
         </span>
         <span className="msb-vs">
-          <span className="msb-sep" aria-hidden="true">–</span>
+          <span className="msb-sep" aria-hidden="true">vs</span>
         </span>
         <span className={"msb-slots msb-slots--aka" + (winAka ? " msb-slots--win" : "")}>
           {slotCells([String(flagsA), ""], "aka", "sub-flags-a")}
@@ -184,9 +184,11 @@ function centreMarks(sub, matchSideA, matchSideB) {
   const lettersA = ipponLetters(sub.ipponsA); // aka / right
   const foulB = boutHansokuMark(sub.hansokuB);
   const foulA = boutHansokuMark(sub.hansokuA);
-  const isDraw = !sub.decidedByHantei &&
-    typeof window.isHikiwake === "function" &&
-    (window.isHikiwake(sub.score?.type) || window.isHikiwake(sub.decision));
+  // The centre chip comes from the single middle-value source's chip
+  // projection (matchMiddleMark: X / (E) / (DH), "" when the middle is the
+  // plain "vs" — never a dash); only the unattributable-hantei fallback
+  // below may replace the plain separator with a centre Ht.
+  const mid = window.matchMiddleMark ? window.matchMiddleMark(sub) : "";
   // Win mark only when there are no ippon letters (otherwise the letters
   // already show who won). sideB = shiro/left, sideA = aka/right.
   // Fallback chain: sub-level side → daihyosen team alias → match-level side
@@ -197,23 +199,25 @@ function centreMarks(sub, matchSideA, matchSideB) {
   const winAka = !!(noIppons && sub.winner &&
     (sub.winner === sub.sideA || sub.winner === sub.teamA || (matchSideA && sub.winner === matchSideA)));
   // The mark sits on the WINNING side, not in the centre: "Ht" for a hantei
-  // decision, else ○ (fusensho/kiken/other ippon-less win). Only when the
-  // hantei winner is unknown does "Ht" fall back to the centre cell.
-  const winMark = sub.decidedByHantei ? "Ht" : "○";
+  // decision, else the defaultWinMaru cells for an ippon-less default win
+  // (fusensho/kiken/bye). Only when the hantei winner is unknown does "Ht"
+  // fall back to the centre cell.
+  const winCells = sub.decidedByHantei ? ["Ht", ""]
+    : (window.defaultWinMaru ? window.defaultWinMaru(sub.encho) : ["○", "○"]);
   const hasWinSide = winShiro || winAka;
   return (
     <span className="msb-marks" data-testid="sub-marks">
       <span className={"msb-slots" + (winShiro ? " msb-slots--win" : "")}>
         {foulB && <span className="msb-hansoku" data-testid="foul-mark-b">{foulB}</span>}
-        {winShiro ? slotCells([winMark, ""], "shiro", "sub-win-b") : slotCells(lettersB, "shiro")}
+        {winShiro ? slotCells(winCells, "shiro", "sub-win-b") : slotCells(lettersB, "shiro")}
       </span>
       <span className="msb-vs">
-        {isDraw ? <span data-testid="sub-row-draw">X</span>
+        {mid ? <span data-testid="sub-row-mid">{mid}</span>
           : sub.decidedByHantei && !hasWinSide ? <span className="msb-ht" data-testid="sub-row-hantei">Ht</span>
-          : <span className="msb-sep" aria-hidden="true">–</span>}
+          : <span className="msb-sep" aria-hidden="true">vs</span>}
       </span>
       <span className={"msb-slots msb-slots--aka" + (winAka ? " msb-slots--win" : "")}>
-        {winAka ? slotCells([winMark, ""], "aka", "sub-win-a") : slotCells(lettersA, "aka")}
+        {winAka ? slotCells(winCells, "aka", "sub-win-a") : slotCells(lettersA, "aka")}
         {foulA && <span className="msb-hansoku" data-testid="foul-mark-a">{foulA}</span>}
       </span>
     </span>
@@ -439,22 +443,18 @@ export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH,
           teamSize={teamSize} isDH={false} state={rowState(i)} matchSideA={matchSideA} matchSideB={matchSideB} kachinuki={!!kachinuki} />
       ))}
 
-      {/* Daihyosen banner + rep bout (knockout tie only). The DH sub is
-          enriched with the parent team names (teamB=shiro, teamA=aka) so
-          centreMarks can resolve a winner key stored as the TEAM name to
-          the correct side: see centreMarks for the fallback chain. */}
-      {renderDH && (
-        <>
-          <div className="msb-row msb-row--dh-banner" data-testid="dh-banner">
-            <span className="msb-dh-tag">DAIHYOSEN</span>
-          </div>
-          {dhSub
-            ? <BoutSubRow sub={{ ...dhSub, teamB: shiroName, teamA: akaName }}
-                index={regular.length} lineupA={lineupA} lineupB={lineupB}
-                teamSize={teamSize} isDH={true} state={isRunning ? "now" : "done"} matchSideA={matchSideA} matchSideB={matchSideB} />
-            : <div className="msb-dh-pending" data-testid="tvd-dh-pending">Daihyosen pending</div>}
-        </>
-      )}
+      {/* Rep bout (knockout tie only). No separate "DAIHYOSEN" text banner:
+          the rep-bout row already carries the (DH) centre mark and a top-
+          border divider (.msb-row--dh / .msb-dh-pending), so the banner was
+          redundant. The DH sub is enriched with the parent team names
+          (teamB=shiro, teamA=aka) so centreMarks can resolve a winner key
+          stored as the TEAM name to the correct side: see centreMarks for
+          the fallback chain. */}
+      {renderDH && (dhSub
+        ? <BoutSubRow sub={{ ...dhSub, teamB: shiroName, teamA: akaName }}
+            index={regular.length} lineupA={lineupA} lineupB={lineupB}
+            teamSize={teamSize} isDH={true} state={isRunning ? "now" : "done"} matchSideA={matchSideA} matchSideB={matchSideB} />
+        : <div className="msb-dh-pending" data-testid="tvd-dh-pending">Daihyosen pending</div>)}
     </div>
   );
 }

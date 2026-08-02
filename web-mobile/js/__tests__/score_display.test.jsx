@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { formatIpponsScore, ipponsFromScore, matchStateCell } from '../bracket.jsx';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
+import { boutMiddle, enchoLabel, formatIpponsScore, ipponsFromScore, matchStateCell, winnerSideLR } from '../bracket.jsx';
 
 // Convention enforced across all match-list views:
 //   SHIRO (sideB) is always displayed on the LEFT.
@@ -9,23 +11,23 @@ import { formatIpponsScore, ipponsFromScore, matchStateCell } from '../bracket.j
 //   formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision)
 //                     ^^^^^^^^   ^^^^^^^^
 //                     SHIRO      AKA
-// so the result reads left-to-right as SHIRO_score–AKA_score.
+// so the result reads left-to-right as SHIRO_score vs AKA_score.
 
 describe('formatIpponsScore', () => {
   describe('basic ippon formatting', () => {
     it('shows first-arg ippons on the left of the separator', () => {
       const score = formatIpponsScore(['M'], [], null, null);
-      // first arg scored M, second arg scored nothing → "M–·"
-      expect(score).toBe('M–·');
+      // first arg scored M, second arg scored nothing → "M vs –"
+      expect(score).toBe('M vs –');
     });
 
     it('shows second-arg ippons on the right of the separator', () => {
       const score = formatIpponsScore([], ['K'], null, null);
-      expect(score).toBe('·–K');
+      expect(score).toBe('– vs K');
     });
 
     it('shows both sides when both scored', () => {
-      expect(formatIpponsScore(['M', 'K'], ['D'], null, null)).toBe('MK–D');
+      expect(formatIpponsScore(['M', 'K'], ['D'], null, null)).toBe('MK vs D');
     });
 
     it('returns empty string when no ippons and no score', () => {
@@ -33,7 +35,7 @@ describe('formatIpponsScore', () => {
     });
 
     it('filters out placeholder bullets', () => {
-      expect(formatIpponsScore(['M', '•'], ['•'], null, null)).toBe('M–·');
+      expect(formatIpponsScore(['M', '•'], ['•'], null, null)).toBe('M vs –');
     });
   });
 
@@ -52,35 +54,27 @@ describe('formatIpponsScore', () => {
       expect(formatIpponsScore([], [], null, 'hikiwake')).toBe('X');
     });
 
-    it('returns the points for a scored equal draw (1–1), not bare X', () => {
-      // Item 6: operator entered M on one side, K on the other, then toggled
-      // hikiwake. The ippons are preserved on the server (the score.type is
-      // hikiwake but ipponsA/B are non-empty). Show the techniques so the
-      // viewer sees what was struck rather than losing that information.
-      expect(formatIpponsScore(['M'], ['K'], { type: 'hikiwake' }, null)).toBe('M–K');
+    it('returns the points around the X for a scored equal draw (1–1)', () => {
+      // Item 6 + the middle-column rule: the ippons are preserved on the
+      // server, so show the techniques, AND the tie's X is the middle mark,
+      // so the viewer sees both what was struck and that it was a tie.
+      expect(formatIpponsScore(['M'], ['K'], { type: 'hikiwake' }, null)).toBe('M X K');
     });
 
-    it('shows scored draw with one empty side using the placeholder dot', () => {
-      expect(formatIpponsScore(['M'], [], { type: 'hikiwake' }, null)).toBe('M–·');
+    it('shows scored draw with one empty side as the no-points dash', () => {
+      expect(formatIpponsScore(['M'], [], { type: 'hikiwake' }, null)).toBe('M X –');
     });
 
-    it('falls back to numeric score when ippons arrays are empty AND score has no ippon letters', () => {
-      const score = formatIpponsScore([], [], { type: 'ippon', winnerPts: 2, loserPts: 1 }, null);
-      expect(score).toBe('2–1');
-    });
-
-    it('prefers the winner waza LETTERS over a count when score.ippons is present', () => {
-      // Per-side arrays absent (server bracket score) but score.ippons carries
-      // the winner's techniques. Show "MK–1", not "2–1". Loser is a count-only
-      // value in this degenerate path, so it stays numeric. Display-only: the
-      // numeric winnerPts/loserPts fields are untouched for logic that needs them.
-      const score = formatIpponsScore([], [], { type: 'ippon', winnerPts: 2, loserPts: 1, ippons: ['M', 'K'] }, null);
-      expect(score).toBe('MK–1');
-    });
-
-    it('ignores empty/dot placeholders in score.ippons and falls back to the count', () => {
-      const score = formatIpponsScore([], [], { type: 'ippon', winnerPts: 1, loserPts: 0, ippons: ['•'] }, null);
-      expect(score).toBe('1–0');
+    // Numbers are NOT a valid display for ippon. The per-side waza-letter
+    // arrays are the only source of an ippon score string: real data always
+    // carries them (callers derive via ipponsFromScore from scoreA/scoreB),
+    // and count-only score objects render NO score rather than digits. The
+    // numeric winnerPts/loserPts fields stay untouched for logic that needs
+    // them (activity checks, standings) — they just never render as ippon.
+    it('never renders numeric counts as an ippon score', () => {
+      expect(formatIpponsScore([], [], { type: 'ippon', winnerPts: 2, loserPts: 1 }, null)).toBe('');
+      expect(formatIpponsScore([], [], { type: 'ippon', winnerPts: 2, loserPts: 1, ippons: ['M', 'K'] }, null)).toBe('');
+      expect(formatIpponsScore([], [], { type: 'ippon', winnerPts: 1, loserPts: 0, ippons: ['•'] }, null)).toBe('');
     });
   });
 
@@ -103,15 +97,15 @@ describe('formatIpponsScore', () => {
 
     it('calling with (ipponsB, ipponsA) → left side shows SHIRO score', () => {
       const result = formatIpponsScore(akaMatch.ipponsB, akaMatch.ipponsA, akaMatch.score, akaMatch.decision);
-      // SHIRO scored nothing → left of separator is "·"
+      // SHIRO scored nothing → left cell is the no-points dash
       // AKA scored M         → right of separator is "M"
-      expect(result).toBe('·–M');
+      expect(result).toBe('– vs M');
     });
 
     it('calling with (ipponsA, ipponsB) would wrongly put AKA score on the left', () => {
       // This is the WRONG call order for SHIRO-left views. Test documents the mistake
       const wrong = formatIpponsScore(akaMatch.ipponsA, akaMatch.ipponsB, akaMatch.score, akaMatch.decision);
-      expect(wrong).toBe('M–·');   // M appears left, but AKA is visually on the right → misleading
+      expect(wrong).toBe('M vs –');   // M appears left, but AKA is visually on the right → misleading
     });
 
     it('SHIRO-left view: result string reads SHIRO_score–AKA_score', () => {
@@ -121,55 +115,123 @@ describe('formatIpponsScore', () => {
         score: null, decision: null,
       };
       const result = formatIpponsScore(shiroMatch.ipponsB, shiroMatch.ipponsA, shiroMatch.score, shiroMatch.decision);
-      // SHIRO (left) scored M, AKA (right) scored K → "M–K"
-      expect(result).toBe('M–K');
+      // SHIRO (left) scored M, AKA (right) scored K → "M vs K"
+      expect(result).toBe('M vs K');
     });
   });
 
-  // FR-033: encho is rendered as a trailing " (E)" so the match list and
-  // bracket views surface that the match went to overtime.
-  describe('encho suffix', () => {
-    it('appends (E) to a normal ippon score when encho has a positive period count', () => {
-      expect(formatIpponsScore(['M'], ['K'], null, null, { periodCount: 1 })).toBe('M–K (E)');
+  // The middle of a score string carries exactly ONE mark — X (tie), (E)
+  // (overtime), (DH) (rep bout) — or the plain "vs". X beats (E)
+  // because a match that went to encho cannot end tied; (DH) beats (E)
+  // because a daihyosen bout is one-point sudden death with no overtime.
+  describe('middle mark', () => {
+    it('places (E) between the scores when encho has a positive period count', () => {
+      expect(formatIpponsScore(['M'], ['K'], null, null, { periodCount: 1 })).toBe('M (E) K');
     });
 
-    it('appends (E) to a scored draw (shows points, not X)', () => {
-      // Item 6: scored equal draw shows techniques + encho suffix, not bare X.
-      expect(formatIpponsScore(['M'], ['K'], { type: 'hikiwake' }, null, { periodCount: 1 })).toBe('M–K (E)');
+    it('a tie is X, never (E): stale draw+encho data renders the X alone', () => {
+      expect(formatIpponsScore(['M'], ['K'], { type: 'hikiwake' }, null, { periodCount: 1 })).toBe('M X K');
+      expect(formatIpponsScore([], [], null, 'hikiwake', { periodCount: 2 })).toBe('X');
     });
 
-    it('appends (E) to a no-score draw (X is the scoreless-draw glyph)', () => {
-      expect(formatIpponsScore([], [], null, 'hikiwake', { periodCount: 2 })).toBe('X (E)');
+    it('a daihyosen is (DH), never (E): DH bouts have no encho', () => {
+      // Winner side known: Ht (the hantei winner mark) sits in the winner's
+      // cell, (DH) alone holds the middle.
+      expect(formatIpponsScore([], [], null, 'daihyosen', { periodCount: 3 }, true, 'left')).toBe('Ht (DH) –');
     });
 
-    it('does not append (E) when periodCount is 0', () => {
-      expect(formatIpponsScore(['M'], ['K'], null, null, { periodCount: 0 })).toBe('M–K');
+    it('does not mark the middle when periodCount is 0', () => {
+      expect(formatIpponsScore(['M'], ['K'], null, null, { periodCount: 0 })).toBe('M vs K');
     });
 
     it('is a no-op when encho argument is missing entirely', () => {
-      expect(formatIpponsScore(['M'], ['K'], null, null)).toBe('M–K');
+      expect(formatIpponsScore(['M'], ['K'], null, null)).toBe('M vs K');
+    });
+  });
+
+  // Result marks (Kiken / Fus. / Ht) ride in the cell of the competitor they
+  // name when the caller supplies winnerSide (matchScoreStr derives it via
+  // winnerSideLR); without it they trail so the result is never dropped.
+  describe('side result marks', () => {
+    it('kiken marks the withdrawing (losing) side', () => {
+      expect(formatIpponsScore(['M'], [], null, 'kiken-voluntary', null, false, 'left')).toBe('M vs Kiken');
+      expect(formatIpponsScore([], [], null, 'kiken-voluntary', null, false, 'right')).toBe('Kiken vs ○○');
+    });
+
+    it('legacy bare "kiken" (old pool-matches.csv rows) marks the loser like kiken-voluntary', () => {
+      // CSV/JSON decisions are plain strings — only YAML migrates the legacy
+      // value — so old data can still serve "kiken" and must render the same.
+      expect(formatIpponsScore(['M'], [], null, 'kiken', null, false, 'left')).toBe('M vs Kiken');
+    });
+
+    it('fusenpai marks the no-show (losing) side; the winner shows the maru pair', () => {
+      // Winner on the left → the no-show's Fus. lands in the right cell,
+      // and the default win awards the two points as ○○ (one per point).
+      expect(formatIpponsScore([], [], null, 'fusenpai', null, false, 'left')).toBe('○○ vs Fus.');
+    });
+
+    it('a default win during encho fills exactly the one deciding point', () => {
+      expect(formatIpponsScore([], [], null, 'kiken-injury', { periodCount: 1 }, false, 'left')).toBe('○ (E) Kiken');
+    });
+
+    it('a degenerate periodCount-0 encho block is not encho: full pair, no (E)', () => {
+      // enchoOn is the single predicate — the maru count and the (E) label
+      // can never disagree about whether overtime ran.
+      expect(formatIpponsScore([], [], null, 'kiken-injury', { periodCount: 0 }, false, 'left')).toBe('○○ vs Kiken');
+    });
+
+    it('engine-recorded maru data renders as-is', () => {
+      // Kiken/fusensho apply only before any point has been scored, so the
+      // engine records the winner's default points as the pure maru fill
+      // (["○","○"]); the string renders them like any other ippon letters.
+      expect(formatIpponsScore(['○', '○'], [], null, 'kiken-voluntary', null, false, 'left')).toBe('○○ vs Kiken');
+    });
+
+    it('fusensho places NO side mark: the bout badge carries it (documented Excel divergence)', () => {
+      // internal/export/suffix.go SideMarks folds fusensho in as a winner-side
+      // "Fus." because Excel has no badges; the JS mirror deliberately does
+      // not. Pin the divergence from this side too so a future change folding
+      // "Fus." back into the string cannot land silently.
+      expect(formatIpponsScore(['M'], [], null, 'fusensho', null, false, 'left')).toBe('M vs –');
+      expect(formatIpponsScore([], [], null, 'fusensho', null, false, 'left')).toBe('○○ vs –');
+    });
+
+    it('kiken during overtime: loser mark plus the (E) middle', () => {
+      expect(formatIpponsScore(['M'], [], null, 'kiken-injury', { periodCount: 1 }, false, 'left')).toBe('M (E) Kiken');
+    });
+
+    it('falls back to a trailing mark when the winner side is unknown', () => {
+      expect(formatIpponsScore(['M'], [], null, 'kiken-voluntary', null, false)).toBe('M vs – Kiken');
     });
   });
 
   // FIK Art. 7-5 / 29-6: a knockout match that remains tied in encho is
   // decided by referee hantei. The renderer must mark this distinctly so
   // it's not confused with an ippon-derived win.
-  describe('hantei (judges\' decision) suffix', () => {
-    it('appends "(E) Ht" for a 0-0 hantei-decided overtime', () => {
-      // Tied 0-0 in encho, AKA awarded by hantei. No ippons → suffix only.
+  describe('hantei (judges\' decision) winner mark', () => {
+    it('a 0-0 hantei-decided overtime puts Ht in the winner\'s cell', () => {
+      // Tied 0-0 in encho, SHIRO (left) awarded by hantei: the winner's cell
+      // carries the Ht mark, the middle carries (E), the loser shows the no-points dash.
+      expect(formatIpponsScore([], [], null, null, { periodCount: 1 }, true, 'left')).toBe('Ht (E) –');
+      expect(formatIpponsScore([], [], null, null, { periodCount: 1 }, true, 'right')).toBe('– (E) Ht');
+    });
+
+    it('falls back to "(E) Ht" when the winner side is unknown', () => {
       expect(formatIpponsScore([], [], null, null, { periodCount: 1 }, true)).toBe('(E) Ht');
     });
 
-    it('combines (E) Ht for a hantei-decided overtime', () => {
-      // Realistic: tied with scores, then hantei chose a winner. Backend
-      // sends decidedByHantei=true alongside the tied ippons.
-      const result = formatIpponsScore(['M'], ['K'], null, null, { periodCount: 1 }, true);
-      expect(result).toBe('M–K (E) Ht');
+    it('rides next to the winner\'s letters on a scored hantei overtime', () => {
+      const result = formatIpponsScore(['M'], ['K'], null, null, { periodCount: 1 }, true, 'left');
+      expect(result).toBe('M Ht (E) K');
+    });
+
+    it('trails when the winner side is unknown (never dropped)', () => {
+      expect(formatIpponsScore(['M'], ['K'], null, null, { periodCount: 1 }, true)).toBe('M (E) K Ht');
     });
 
     it('omits Ht when decidedByHantei is false/missing', () => {
-      expect(formatIpponsScore(['M'], ['K'], null, null, { periodCount: 1 }, false)).toBe('M–K (E)');
-      expect(formatIpponsScore(['M'], ['K'], null, null, { periodCount: 1 })).toBe('M–K (E)');
+      expect(formatIpponsScore(['M'], ['K'], null, null, { periodCount: 1 }, false)).toBe('M (E) K');
+      expect(formatIpponsScore(['M'], ['K'], null, null, { periodCount: 1 })).toBe('M (E) K');
     });
 
     it('score.hantei is not read. Only the decidedByHantei param controls Ht', () => {
@@ -177,15 +239,16 @@ describe('formatIpponsScore', () => {
       // API fields (ipponsA/B, scoreA/B). The backend never emits a `score`
       // object, so score.hantei can never appear in real match data. Only the
       // positional decidedByHantei arg matters.
-      expect(formatIpponsScore(['M'], ['K'], { type: 'ippon', hantei: true }, null, { periodCount: 1 })).toBe('M–K (E)');
-      expect(formatIpponsScore(['M'], ['K'], { type: 'ippon', hantei: true }, null, { periodCount: 1 }, true)).toBe('M–K (E) Ht');
+      expect(formatIpponsScore(['M'], ['K'], { type: 'ippon', hantei: true }, null, { periodCount: 1 })).toBe('M (E) K');
+      expect(formatIpponsScore(['M'], ['K'], { type: 'ippon', hantei: true }, null, { periodCount: 1 }, true, 'left')).toBe('M Ht (E) K');
     });
   });
 });
 
 // Item 6 regression suite: scored-draw rendering (formatIpponsScore).
-// Pinned so future changes to the hikiwake branch can't silently revert
-// the display from "M–K" back to the bare-X glyph.
+// Pinned so future changes to the hikiwake branch can't silently drop the
+// struck techniques (they surround the X) or the X itself (the tie's one
+// legal middle mark).
 describe('formatIpponsScore: hikiwake draw display (item 6)', () => {
   it('0–0 hikiwake (score.type) → bare X', () => {
     expect(formatIpponsScore([], [], { type: 'hikiwake' }, null)).toBe('X');
@@ -195,49 +258,70 @@ describe('formatIpponsScore: hikiwake draw display (item 6)', () => {
     expect(formatIpponsScore([], [], null, 'hikiwake')).toBe('X');
   });
 
-  it('1–1 hikiwake (ipponsA=[M], ipponsB=[K]) → "M–K" (points shown, no X)', () => {
+  it('1–1 hikiwake (ipponsA=[M], ipponsB=[K]) → "M X K" (points around the X)', () => {
     // Canonical scored-equal-draw case: both sides hit one ippon, operator
-    // toggled hikiwake. Server keeps ippons; display must show techniques.
-    expect(formatIpponsScore(['M'], ['K'], { type: 'hikiwake' }, null)).toBe('M–K');
+    // toggled hikiwake. Server keeps ippons; display shows the techniques
+    // AND the draw mark in the middle.
+    expect(formatIpponsScore(['M'], ['K'], { type: 'hikiwake' }, null)).toBe('M X K');
   });
 
-  it('1–1 hikiwake with encho (periodCount>0) → "M–K (E)"', () => {
-    // Encho suffix must survive the scored-draw path unchanged.
-    expect(formatIpponsScore(['M'], ['K'], { type: 'hikiwake' }, null, { periodCount: 1 })).toBe('M–K (E)');
+  it('1–1 hikiwake with stale encho data → still "M X K" (X beats (E))', () => {
+    // A tie cannot have gone to encho; if drifted data carries both, the
+    // draw mark wins and the overtime marker is dropped.
+    expect(formatIpponsScore(['M'], ['K'], { type: 'hikiwake' }, null, { periodCount: 1 })).toBe('M X K');
   });
 });
 
 // matchStateCell: the shared centre-cell lifecycle cue. completed → score
-// string (with "-" fallback), running → "vs" (the row highlight is the "now"
-// signal, NOT a centre dot), scheduled/other → "–".
+// string (with a plain-"vs" fallback), anything else → "vs": a dash is never
+// a valid middle value (operator ruling), so unplayed matches read "vs" too.
+// boutMiddle is the single source for what a bout's middle can read:
+// "vs" | "X" | "(E)" | "(DH)" — never a dash, never a side mark. Every
+// surface (score strings, matchStateCell, the TV scoreboard separators)
+// derives its middle from it.
+describe('boutMiddle: the only four middle values', () => {
+  it('plain/unplayed → "vs"', () => {
+    expect(boutMiddle(null, null, null)).toBe('vs');
+    expect(boutMiddle('', undefined, undefined)).toBe('vs');
+  });
+  it('tie → X (from decision or client score.type), beating stale encho', () => {
+    expect(boutMiddle('hikiwake', null, null)).toBe('X');
+    expect(boutMiddle(null, null, { type: 'hikiwake' })).toBe('X');
+    expect(boutMiddle('hikiwake', { periodCount: 2 }, null)).toBe('X');
+  });
+  it('overtime → bare (E)', () => {
+    expect(boutMiddle(null, { periodCount: 1 }, null)).toBe('(E)');
+  });
+  it('daihyosen → (DH), beating stale encho', () => {
+    expect(boutMiddle('daihyosen', { periodCount: 3 }, null)).toBe('(DH)');
+  });
+  it('side results never surface in the middle', () => {
+    expect(boutMiddle('kiken-voluntary', null, null)).toBe('vs');
+    expect(boutMiddle('fusenpai', null, null)).toBe('vs');
+  });
+});
+
 describe('matchStateCell: shared running-row centre cue', () => {
-  it('completed → the formatted ippon score (first arg = SHIRO/left)', () => {
-    // matchStateCell(m, ipponsB, ipponsA) → matchScoreStr → formatIpponsScore
-    // renders firstArg–secondArg, so ['M'],['K'] → "M–K".
-    expect(matchStateCell({ status: 'completed' }, ['M'], ['K'])).toBe('M–K');
+  it('completed → the formatted ippon score (ipponsB = SHIRO = left)', () => {
+    // matchStateCell(m) → matchScoreStr derives the arrays from the match:
+    // ipponsB renders left, ipponsA right, so B:['M'] A:['K'] → "M vs K".
+    expect(matchStateCell({ status: 'completed', ipponsB: ['M'], ipponsA: ['K'] })).toBe('M vs K');
   });
 
-  it('completed with no derivable score → "-" fallback', () => {
-    // No ippons, no score, no decision → matchScoreStr returns "" → "-".
-    expect(matchStateCell({ status: 'completed' }, [], [])).toBe('-');
+  it('completed with no derivable score → plain "vs" (never a dash)', () => {
+    // No ippons, no score, no decision → matchScoreStr returns "" → "vs".
+    expect(matchStateCell({ status: 'completed' })).toBe('vs');
   });
 
-  it('running → "vs" (no centre dot; the row highlight is the now signal)', () => {
-    expect(matchStateCell({ status: 'running' }, [], [])).toBe('vs');
-  });
-
-  it('scheduled → "–"', () => {
-    expect(matchStateCell({ status: 'scheduled' }, [], [])).toBe('–');
-  });
-
-  it('unknown/missing status → "–" (treated as not-yet-run)', () => {
-    expect(matchStateCell({ status: 'bye' }, [], [])).toBe('–');
-    expect(matchStateCell({}, [], [])).toBe('–');
+  it('every non-completed status reads the plain "vs" middle (never a dash or dot)', () => {
+    for (const status of ['running', 'scheduled', 'bye', undefined]) {
+      expect(matchStateCell({ status })).toBe('vs');
+    }
   });
 
   it('never emits a bare "●" for any state', () => {
     for (const status of ['completed', 'running', 'scheduled', 'bye', undefined]) {
-      expect(matchStateCell({ status }, [], [])).not.toContain('●');
+      expect(matchStateCell({ status })).not.toContain('●');
     }
   });
 });
@@ -289,7 +373,7 @@ describe('team score string carries IV and PW', () => {
         { position: 1, sideA: 'Ryu Ichiro', sideB: 'Tora Ichiro', winner: 'Ryu Ichiro', ipponsA: ['M'] },
       ],
     };
-    expect(matchStateCell(m, [], [])).toBe('IV 0–5\nPW 0–5');
+    expect(matchStateCell(m)).toBe('IV 0–5\nPW 0–5');
   });
 
   it('renders the tied IV and PW for a daihyosen-decided final', () => {
@@ -298,6 +382,72 @@ describe('team score string carries IV and PW', () => {
       teamResult: { shiroIV: 0, akaIV: 0, shiroPW: 0, akaPW: 0 },
       subResults: [{ position: -1, sideA: 'Ryu', sideB: 'Kaze', winner: 'Ryu', ipponsA: ['M'] }],
     };
-    expect(matchStateCell(m, [], [])).toBe('IV 0–0\nPW 0–0');
+    expect(matchStateCell(m)).toBe('IV 0–0\nPW 0–0');
+  });
+});
+
+// mp-m4bn: JS half of the shared Go/JS golden table for the overtime marker —
+// see the `_comment` in encho_labels.json for why the table is shared and why
+// it pins values, not source text. Go half: TestEnchoLabel_GoldenTable in
+// internal/export/suffix_test.go.
+describe('enchoLabel Go/JS mirror (mp-m4bn)', () => {
+  const table = JSON.parse(
+    readFileSync(
+      resolve(__dirname, '..', '..', '..', 'internal', 'export', 'testdata', 'encho_labels.json'),
+      'utf8'
+    )
+  );
+
+  // Load-bearing: vitest's it.each over an empty array silently produces
+  // zero tests (no red), so a degraded table needs its own failure.
+  it('the shared golden table is present and non-empty', () => {
+    expect(
+      table.cases?.length,
+      'internal/export/testdata/encho_labels.json parsed to zero cases: the mirror would assert nothing'
+    ).toBeGreaterThan(0);
+  });
+
+  // enchoLabel is driven directly, so the table value is asserted EXACTLY —
+  // an unrelated formatIpponsScore change cannot redden this with a
+  // misleading "update both renderers" message.
+  it.each(table.cases)('periodCount $periodCount renders "$label"', ({ periodCount, label }) => {
+    expect(
+      enchoLabel({ periodCount }),
+      'JS enchoLabel disagrees with the shared table; update BOTH renderers, not just this one'
+    ).toBe(label);
+  });
+});
+
+// winnerSideLR must decide by participant id when both sides carry ids —
+// two different-dojo competitors may share a display name (allowed:
+// CheckDuplicateEntriesByNameDojo rejects only same-name AND same-dojo), so
+// a name match must never override the id that disambiguates them. Regression
+// for the id/name OR-precedence bug that inverted the score string (and thus
+// the maru/Kiken/Ht placement) for a same-name bout.
+describe('winnerSideLR: id disambiguates same-name opponents', () => {
+  const shiroWon = { sideA: { id: 'a1', name: 'Ken' }, sideB: { id: 'b1', name: 'Ken' }, winner: { id: 'b1', name: 'Ken' } };
+  const akaWon   = { sideA: { id: 'a1', name: 'Ken' }, sideB: { id: 'b1', name: 'Ken' }, winner: { id: 'a1', name: 'Ken' } };
+
+  it('same-name bout resolves to the winner by id (SHIRO=B=left, AKA=A=right)', () => {
+    expect(winnerSideLR(shiroWon)).toBe('left');
+    expect(winnerSideLR(akaWon)).toBe('right');
+  });
+
+  it('the inverted score string is fixed: aka winning a same-name kiken reads "Kiken vs ○○"', () => {
+    // sideB (shiro/left) withdrew, sideA (aka/right) won by default. Before the
+    // fix winnerSideLR returned "left", rendering "○○ vs Kiken" (winner and
+    // withdrawer swapped).
+    const s = formatIpponsScore([], [], null, 'kiken-voluntary', null, false, winnerSideLR(akaWon));
+    expect(s).toBe('Kiken vs ○○');
+  });
+
+  it('falls back to name when an id is absent (bare-string winner / legacy data)', () => {
+    expect(winnerSideLR({ sideA: { id: 'a1', name: 'Alice' }, sideB: { id: 'b1', name: 'Bob' }, winner: 'Bob' })).toBe('left');
+    expect(winnerSideLR({ sideA: 'Alice', sideB: 'Bob', winner: 'Alice' })).toBe('right');
+  });
+
+  it('returns null with no winner or a drifted winner', () => {
+    expect(winnerSideLR({ sideA: { id: 'a1', name: 'Alice' }, sideB: { id: 'b1', name: 'Bob' } })).toBe(null);
+    expect(winnerSideLR({ sideA: { id: 'a1', name: 'Alice' }, sideB: { id: 'b1', name: 'Bob' }, winner: { id: 'c1', name: 'Carol' } })).toBe(null);
   });
 });

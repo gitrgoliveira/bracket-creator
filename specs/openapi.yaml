@@ -2638,7 +2638,12 @@ paths:
           required: false
           schema:
             type: integer
-          description: Bouts per team match; used when teamSize > 0.
+          description: >
+            OVERRIDE for the bouts per team match. Omit it for the normal case:
+            when `teamSize > 0` the bout count defaults to `teamSize`, which is
+            the rule the generated schedule itself is laid out with. Supply it
+            only to price a hypothetical the scheduler will not reproduce.
+            Ignored when `teamSize` is 0 (that selects individual matches).
         - in: query
           name: teamMatchType
           required: false
@@ -2647,10 +2652,10 @@ paths:
           description: >
             `kachinuki` widens the estimate into a best/average/worst range
             (winner-stays-on has a variable bout count: with nominal team size
-            N, best = N bouts, worst = 2N-1, average = midpoint; N is taken
-            from `boutsPerTeamMatch`). Any other value (or absent) keeps a
-            constant bout count and the three range fields collapse to one
-            value.
+            N, best = N bouts, worst = 2N-1, average = midpoint; N is the
+            resolved bout count, i.e. `teamSize` unless `boutsPerTeamMatch`
+            overrides it). Any other value (or absent) keeps a constant bout
+            count and the three range fields collapse to one value.
         - in: query
           name: buffer
           required: false

@@ -2,7 +2,8 @@
 // EstInput (local), AdminTWMatch (local), AdminSchedulePage.
 
 import { filterMatchesByCourt, CourtPacePanel, PerCourtBreakdown } from './admin_schedule_pacing.jsx';
-import { formatMinutes, timeToMinutes, timeEdited, clampDurationSeconds, estimateRangeParts, COURT_STORAGE_KEY } from './admin_schedule_utils.jsx';
+import { formatMinutes, timeToMinutes, timeEdited, clampDurationSeconds, EstimateHeadline, COURT_STORAGE_KEY } from './admin_schedule_utils.jsx';
+import { teamMatchTypeFor } from './pool_ids.jsx';
 import { DurationInput } from './duration.jsx';
 
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
@@ -122,25 +123,6 @@ const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange })
 });
 AdminTWMatch.displayName = "AdminTWMatch";
 
-// estimatorDefaultBouts: how many bouts the estimator should assume per team
-// match, given the team size configured for the competition.
-//
-// N under BOTH team formats, because that is what each actually fights:
-//   - Regular: every position plays its opposite number exactly once. N bouts.
-//   - Kachinuki: the server treats this as the NOMINAL N and derives the
-//     N (one fighter sweeps) .. 2N-1 (every bout retires one) range itself,
-//     so handing it 2N-1 would make it price a range off the worst case.
-//
-// This is the client mirror of the server's own default: perMatchElapsedMinutes
-// (engine/scheduler_slots.go) uses `bouts = comp.TeamSize`, and that is the
-// function the REAL schedule is laid out with. Extracted and named so the two
-// can be compared at a glance — the panel previously seeded 2N-1 for regular
-// team matches, which at N=5 priced 9 bouts against the scheduler's 5 and
-// inflated the whole estimate by ~80%.
-export function estimatorDefaultBouts(teamSize) {
-  return teamSize > 0 ? teamSize : 0;
-}
-
 export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewerMode, password }) {
   const [picked, setPicked] = useStateA([]);
   const [dojoText, setDojoText] = useStateA("");
@@ -160,27 +142,28 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
   const [estMultiplier, setEstMultiplier] = useStateA(1.5);
   const [estCourts, setEstCourts] = useStateA(tournament.courts?.length || 1);
   const [estNumMatches, setEstNumMatches] = useStateA(0);
+  // Team size is the ONLY bout-count input. A team match is worth N bouts and
+  // nothing in the app can schedule otherwise: the slot assigners price every
+  // team match through perMatchElapsedMinutes, which derives bouts from
+  // TeamSize alone. The panel used to carry a second "Bouts per team match"
+  // field alongside this one, kept in sync by an effect; it could only ever
+  // hold the same number, and hand-editing it produced an estimate the app's
+  // own auto-schedule would never reproduce (and, under kachinuki, silently
+  // moved the whole best/worst range onto a team size that does not exist).
+  // The server now defaults the bout count to team size, so there is nothing
+  // left for the client to mirror.
   const [estTeamSize, setEstTeamSize] = useStateA(tournament.competitions[0]?.teamSize || 0);
-  const [estBoutsPerTeamMatch, setEstBoutsPerTeamMatch] = useStateA(0);
   const [estBuffer, setEstBuffer] = useStateA(0);
   const [estCeremony, setEstCeremony] = useStateA(0);
   // mp-gmcg: winner-stays (kachinuki) widens the estimate into a
   // best/average/worst range server-side (teamMatchType=kachinuki query
-  // param); in that mode the backend treats boutsPerTeamMatch as the
-  // NOMINAL team size N (best = N-bout sweep, worst = 2N-1 attrition).
-  // Seeded from the first competition, same as team size above; the
-  // inputs stay freeform so the toggle stays editable.
-  const [estKachinuki, setEstKachinuki] = useStateA(tournament.competitions[0]?.teamMatchType === "kachinuki");
+  // param), derived from the nominal team size N (best = N-bout sweep,
+  // worst = 2N-1 attrition). Seeded from the first competition, same as
+  // team size above; teamMatchTypeFor reads both the flat and the
+  // config-nested competition shapes.
+  const [estKachinuki, setEstKachinuki] = useStateA(teamMatchTypeFor(tournament.competitions[0]) === "kachinuki");
   const [estResult, setEstResult] = useStateA(null);
   const [estLoading, setEstLoading] = useStateA(false);
-
-  useEffectA(() => {
-    const newBouts = estimatorDefaultBouts(estTeamSize);
-    setEstBoutsPerTeamMatch(prev => prev === newBouts ? prev : newBouts);
-    // estKachinuki is deliberately NOT a dependency: the default is now the
-    // same under both formats, so toggling it must not stomp a bout count the
-    // operator typed by hand.
-  }, [estTeamSize]);
 
   useEffectA(() => {
     if (!estOpen) {
@@ -207,8 +190,11 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
           multiplier: estMultiplier,
           courts: estCourts,
           numMatches: estNumMatches,
+          // boutsPerTeamMatch is deliberately NOT sent: the server defaults it
+          // to teamSize, which is the only value a generated schedule can
+          // realise. It stays on the wire as an optional override for other
+          // callers.
           teamSize: estTeamSize,
-          boutsPerTeamMatch: estBoutsPerTeamMatch,
           buffer: estBuffer,
           ceremonyMinutes: estCeremony,
           // mp-gmcg: kachinuki widens the estimate into a best/average/
@@ -226,7 +212,7 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
       }
     }, 300);
     return () => { clearTimeout(timer); controller.abort(); };
-  }, [estOpen, estMatchDurationSeconds, estMultiplier, estCourts, estNumMatches, estTeamSize, estBoutsPerTeamMatch, estBuffer, estCeremony, estKachinuki, password]);
+  }, [estOpen, estMatchDurationSeconds, estMultiplier, estCourts, estNumMatches, estTeamSize, estBuffer, estCeremony, estKachinuki, password]);
 
   // T040/T041: read ?court= from the URL; useQuery re-renders on history
   // changes so navigating between /admin/schedule and /admin/schedule?court=A
@@ -484,7 +470,6 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
                     <div className="field__hint">Variable bout count: shows best / average / worst.</div>
                   </div>
                 )}
-                <EstInput label="Bouts per team match" value={estBoutsPerTeamMatch} setter={setEstBoutsPerTeamMatch} min="0" />
                 <EstInput label="Buffer %" value={estBuffer} setter={setEstBuffer} min="0" max="100" />
                 <EstInput label="Ceremony (min)" value={estCeremony} setter={setEstCeremony} min="0" />
               </div>
@@ -494,18 +479,27 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
                   <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: 12 }}>
                     {/* mp-gmcg: kachinuki estimates span a range (variable
                         bout count); the headline is the AVERAGE scenario and
-                        Best/Worst bracket it. Non-range estimates render the
-                        single total exactly as before. */}
-                    {(() => {
-                      const range = estimateRangeParts(estResult);
-                      return range ? (
-                        <div data-testid="est-range" style={{ fontSize: 24, fontWeight: 700 }}>
-                          Best {formatMinutes(range.best)} · Average {formatMinutes(range.average)} · Worst {formatMinutes(range.worst)}
-                        </div>
-                      ) : (
-                        <div style={{ fontSize: 24, fontWeight: 700 }}>Total: {formatMinutes(estResult.totalDurationMinutes)}</div>
-                      );
-                    })()}
+                        Best/Worst bracket it. EstimateHeadline is the ONE home
+                        for that range-vs-total decision, shared with the
+                        competition Overview and Settings panels — this surface
+                        carried a third inline copy that had already drifted
+                        (no bold labels, no "0m" fallback), so the same server
+                        response read differently depending on where you looked.
+                        Not pixel-identical to the copy it replaces: the shared
+                        component wraps each label in <strong>, which resolves
+                        BOLDER than this wrapper's fontWeight: 700 rather than
+                        collapsing into it, so "Best/Average/Worst" now stand
+                        out from their values. Checked in the browser and kept
+                        — it matches how the other two surfaces mark up the same
+                        line, which is the consistency this share is for. */}
+                    <div style={{ fontSize: 24, fontWeight: 700 }}>
+                      <EstimateHeadline
+                        estimate={estResult}
+                        total={formatMinutes(estResult.totalDurationMinutes)}
+                        format={formatMinutes}
+                        testId="est-range"
+                      />
+                    </div>
                     {autoStart && (
                       <div style={{ fontSize: 16, color: "var(--ink-2)" }}>
                         Projected finish: <strong>{window.addMinutes(autoStart, estResult.totalDurationMinutes)}</strong>

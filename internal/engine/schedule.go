@@ -53,11 +53,11 @@ type ScheduleEstimate struct {
 }
 
 // EstimateInput holds the parameters EstimateSchedule consumes. All
-// fields are required except SlowestCourtBufferPct (no buffer when 0)
-// and CeremonyMinutes (no ceremony when 0). TeamSize=0 selects the
-// individual-match branch; TeamSize>0 with BoutsPerTeamMatch>0 selects
-// the team-match branch and scales per-match duration by bouts plus an
-// inter-bout transition allowance (~1 minute per switch).
+// fields are required except SlowestCourtBufferPct (no buffer when 0),
+// CeremonyMinutes (no ceremony when 0) and BoutsPerTeamMatch (defaults
+// to TeamSize). TeamSize=0 selects the individual-match branch;
+// TeamSize>0 selects the team-match branch and scales per-match duration
+// by bouts plus an inter-bout transition allowance (~1 minute per switch).
 //
 // FR-055, FR-058: the multiplier converts on-clock minutes to elapsed
 // minutes; team-match duration scales linearly with bouts plus a
@@ -68,11 +68,17 @@ type EstimateInput struct {
 	NumMatches                int
 	NumCourts                 int
 	TeamSize                  int
-	BoutsPerTeamMatch         int
-	SlowestCourtBufferPct     int
-	CeremonyMinutes           int
+	// BoutsPerTeamMatch OVERRIDES the bout count for a team match. Leave 0
+	// for the normal case: a team match is worth TeamSize bouts, which is
+	// the rule every other producer runs on (perMatchElapsedMinutes,
+	// EstimateForCounts) and the only one an actual generated schedule can
+	// reproduce. Set it only to price a hypothetical the scheduler will not
+	// lay out.
+	BoutsPerTeamMatch     int
+	SlowestCourtBufferPct int
+	CeremonyMinutes       int
 	// Kachinuki widens the estimate into a best/average/worst range
-	// (mp-gmcg): BoutsPerTeamMatch is treated as the nominal team size N,
+	// (mp-gmcg): the resolved bout count is the nominal team size N,
 	// best = N bouts, worst = 2N-1, average = midpoint. False (fixed
 	// format or individual) keeps a constant bout count, so the three
 	// range fields collapse to one value.
@@ -145,9 +151,23 @@ func EstimateSchedule(in EstimateInput) ScheduleEstimate {
 	// Per-match elapsed minutes via the shared pure core. Kachinuki
 	// (mp-gmcg) widens the constant bout count into a best/avg/worst
 	// range; fixed/individual keeps one value for all three scenarios.
+	//
+	// A team match is worth TeamSize bouts unless the caller overrides it.
+	// That default lives HERE rather than in each caller because it is the
+	// rule the rest of the system already runs on: perMatchElapsedMinutes
+	// (scheduler_slots.go) derives `bouts = comp.TeamSize` with no caller
+	// input, and it is the function the REAL schedule is laid out with.
+	// Requiring the caller to restate it made "team match" and "how long a
+	// team match takes" two separate things a caller had to get right
+	// together, and getting it wrong was silent: TeamSize>0 with the bouts
+	// field omitted fell through to the INDIVIDUAL formula and answered a
+	// team question with a one-bout number, no error.
 	bouts := 0
-	if in.TeamSize > 0 && in.BoutsPerTeamMatch > 0 {
-		bouts = in.BoutsPerTeamMatch
+	if in.TeamSize > 0 {
+		bouts = in.TeamSize
+		if in.BoutsPerTeamMatch > 0 {
+			bouts = in.BoutsPerTeamMatch
+		}
 	}
 	bestBouts, avgBouts, worstBouts := float64(bouts), float64(bouts), float64(bouts)
 	if in.Kachinuki && bouts > 0 {
@@ -389,12 +409,22 @@ func EstimateForCounts(poolCount, playoffCount int, comp *state.Competition, tou
 	// scenarios. The headline TotalDurationMinutes / PerCourtMinutes is
 	// the AVERAGE; best (= the nominal walk) and worst bracket it.
 	if comp.Kind == "team" && comp.TeamMatchType == state.TeamMatchTypeKachinuki && comp.TeamSize > 0 {
-		_, avgBouts, worstBouts := kachinukiBoutRange(comp.TeamSize)
+		bestBouts, avgBouts, worstBouts := kachinukiBoutRange(comp.TeamSize)
 		perCourtAvg, maxAvg := walk(
 			perMatchElapsedMinutesBouts(comp, tournament, false, avgBouts),
 			perMatchElapsedMinutesBouts(comp, tournament, true, avgBouts),
 		)
-		_, maxBest := walk(poolPerMatch, playoffPerMatch)
+		// Priced from kachinukiBoutRange's own `best`, not from the nominal
+		// walk. The two are equal today only because perMatchElapsedMinutes
+		// happens to use bouts = TeamSize; leaning on that coincidence meant
+		// retuning the nominal rule would silently stop BestCaseMinutes being
+		// the best case (and could render Best > Average) while avg and worst
+		// stayed right. All three scenarios now come from the one helper that
+		// owns the range.
+		_, maxBest := walk(
+			perMatchElapsedMinutesBouts(comp, tournament, false, bestBouts),
+			perMatchElapsedMinutesBouts(comp, tournament, true, bestBouts),
+		)
 		_, maxWorst := walk(
 			perMatchElapsedMinutesBouts(comp, tournament, false, worstBouts),
 			perMatchElapsedMinutesBouts(comp, tournament, true, worstBouts),

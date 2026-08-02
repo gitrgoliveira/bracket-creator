@@ -389,6 +389,68 @@ func TestEstimateSchedule_KachinukiRange(t *testing.T) {
 	assert.Equal(t, 75, result.PerCourtMinutes[0], "PerCourtMinutes reflects the average scenario")
 }
 
+// TestEstimateSchedule_BoutsDefaultToTeamSize pins the rule that used to live
+// in the caller: a team match is worth TeamSize bouts unless overridden.
+//
+// The old guard (`TeamSize > 0 && BoutsPerTeamMatch > 0`) meant a caller that
+// said "team" but omitted the bout count silently got the INDIVIDUAL formula
+// and a one-bout answer to a team question. That was reachable from the admin
+// panel: clearing the bouts field emitted NaN, the client drops NaN params,
+// and nothing rejected the request, so a 5-person team priced at 4.5 minutes
+// per encounter instead of 26.5 while the kachinuki range collapsed silently.
+func TestEstimateSchedule_BoutsDefaultToTeamSize(t *testing.T) {
+	base := EstimateInput{
+		MatchDurationClockMinutes: 3,
+		Multiplier:                1.5,
+		NumMatches:                2,
+		NumCourts:                 1,
+		TeamSize:                  5,
+	}
+
+	t.Run("omitted bouts price the same as bouts == TeamSize", func(t *testing.T) {
+		explicit := base
+		explicit.BoutsPerTeamMatch = 5
+		assert.Equal(t, EstimateSchedule(explicit), EstimateSchedule(base),
+			"omitting the override must not change a single field of the estimate")
+	})
+
+	t.Run("omitted bouts are a TEAM estimate, not the individual formula", func(t *testing.T) {
+		individual := base
+		individual.TeamSize = 0
+		assert.Greater(t, EstimateSchedule(base).TotalDurationMinutes,
+			EstimateSchedule(individual).TotalDurationMinutes,
+			"a team match must never be priced as a single bout")
+		// 2 × (5*3*1.5 + 4) = 53, the fixed-format team number.
+		assert.Equal(t, 53, EstimateSchedule(base).TotalDurationMinutes)
+	})
+
+	t.Run("kachinuki derives its range from TeamSize when bouts are omitted", func(t *testing.T) {
+		k := base
+		k.Kachinuki = true
+		got := EstimateSchedule(k)
+		// Identical to TestEstimateSchedule_KachinukiRange, which passes
+		// BoutsPerTeamMatch: 5 explicitly. The range must not collapse.
+		assert.Equal(t, 53, got.BestCaseMinutes)
+		assert.Equal(t, 75, got.TotalDurationMinutes)
+		assert.Equal(t, 97, got.WorstCaseMinutes)
+	})
+
+	t.Run("an explicit override still wins", func(t *testing.T) {
+		override := base
+		override.BoutsPerTeamMatch = 3
+		// 2 × (3*3*1.5 + 2) = 31, not the 53 TeamSize would give.
+		assert.Equal(t, 31, EstimateSchedule(override).TotalDurationMinutes)
+	})
+
+	t.Run("bouts without a team size stay individual", func(t *testing.T) {
+		orphan := base
+		orphan.TeamSize = 0
+		orphan.BoutsPerTeamMatch = 5
+		assert.Equal(t, 9, EstimateSchedule(orphan).TotalDurationMinutes,
+			"TeamSize is the team/individual gate: 2 × 3*1.5 = 9")
+	})
+}
+
 // TestEstimateSchedule_KachinukiCeremonyAdditive verifies CeremonyMinutes
 // is added verbatim to ALL THREE scenario fields, not just the headline.
 func TestEstimateSchedule_KachinukiCeremonyAdditive(t *testing.T) {

@@ -22,6 +22,7 @@ import {
   buildKachinukiEndEntries,
   subBoutHasBeenPlayed,
   kachinukiEnchoAvailable,
+  kachinukiBandModel,
 } from '../admin_scoring_team.jsx';
 import { applyFoulIncrement } from '../admin_scoring_shared.jsx';
 
@@ -209,6 +210,79 @@ describe('deriveKachinukiEndOutcome', () => {
     const subs = [bout(2, { ipponsA: ['M'] }), bout(-1, { ipponsB: ['K', 'D'] })];
     expect(deriveKachinukiEndOutcome({ subResults: subs, isKnockoutPhase: true }))
       .toEqual({ kind: 'win', winnerSide: 'a' });
+  });
+});
+
+// kachinukiBandModel: the summary band's content model (light instrument
+// panel; brief confirmed 2026-08-02). Bout-log facts only while running —
+// never a verdict (the old IV/PW-derived "AKA WIN" contradicted the End
+// gate mid-match); the verdict returns on completion from the MATCH winner.
+describe('kachinukiBandModel', () => {
+  const sub = (over) => ({ aPts: [], bPts: [], aFouls: 0, bFouls: 0, fusensho: '', draw: false, encho: 0, ...over });
+  const names = [
+    { aName: 'Alpha Senpo', bName: 'Bravo Senpo' },
+    { aName: 'Alpha Senpo', bName: 'Bravo Chuken' },
+    { aName: 'Alpha Chuken', bName: 'Bravo Taisho' },
+  ];
+  const base = {
+    daihyosenIdx: -1, isComplete: false, matchWinner: '', matchDecision: '',
+    sideAName: 'Team Alpha', sideBName: 'Team Bravo',
+    namesAt: (idx) => names[idx] || {},
+  };
+
+  it('fresh match: bout number only, no fabricated fact, no verdict', () => {
+    const kb = kachinukiBandModel({ ...base, subs: [sub()], currentBout: 1 });
+    expect(kb).toEqual({ headline: 'BOUT 1', fact: '' });
+  });
+
+  it('after a win: last-bout fact with stays-on, never a verdict while running', () => {
+    const kb = kachinukiBandModel({
+      ...base, subs: [sub({ aPts: ['M', 'K'] }), sub()], currentBout: 2,
+    });
+    expect(kb.headline).toBe('BOUT 2');
+    expect(kb.fact).toBe('Alpha Senpo beat Bravo Senpo · stays on');
+    expect(kb.verdict).toBeUndefined();
+  });
+
+  it('a streak reads as a bout-log fact ("stays on, 2 wins")', () => {
+    const kb = kachinukiBandModel({
+      ...base, subs: [sub({ aPts: ['M'] }), sub({ aPts: ['D'] }), sub()], currentBout: 3,
+    });
+    expect(kb.fact).toBe('Alpha Senpo beat Bravo Chuken · stays on, 2 wins');
+  });
+
+  it('a tied last bout: hikiwake fact, both retired', () => {
+    const kb = kachinukiBandModel({
+      ...base, subs: [sub({ aPts: ['M'] }), sub({ draw: true }), sub()], currentBout: 3,
+    });
+    expect(kb.headline).toBe('BOUT 3');
+    expect(kb.fact).toBe('Last: hikiwake · both retired');
+  });
+
+  it('completed: verdict from the MATCH winner (last-bout rule), not IV lead', () => {
+    const kb = kachinukiBandModel({
+      ...base, subs: [sub({ aPts: ['M'] })],
+      isComplete: true, matchWinner: 'Team Bravo', matchDecision: 'kachinuki-exhaustion',
+    });
+    expect(kb.headline).toBe('FINAL · 1 BOUT');
+    expect(kb.verdict).toBe('SHIRO WIN');
+    expect(kb.verdictSide).toBe('shiro');
+  });
+
+  it('completed draw: hikiwake verdict', () => {
+    const kb = kachinukiBandModel({
+      ...base, subs: [sub({ draw: true }), sub({ draw: true })],
+      isComplete: true, matchWinner: '', matchDecision: 'hikiwake',
+    });
+    expect(kb.verdict).toBe('DRAW');
+    expect(kb.verdictSide).toBe('draw');
+  });
+
+  it('nameless bootstrap bout degrades to side labels, not blank facts', () => {
+    const kb = kachinukiBandModel({
+      ...base, subs: [sub({ bPts: ['M'] })], namesAt: () => ({}), currentBout: 2,
+    });
+    expect(kb.fact).toBe('Shiro beat Aka · stays on');
   });
 });
 

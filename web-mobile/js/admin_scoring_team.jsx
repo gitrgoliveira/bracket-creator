@@ -209,6 +209,68 @@ export function kachinukiEnchoAvailable(outcome) {
   return outcome.kind === "draw" || (outcome.kind === "blocked" && outcome.reason === "knockout-tie");
 }
 
+// kachinukiBandModel: content model for the summary band in KACHINUKI mode
+// (light instrument panel, user-confirmed brief 2026-08-02). The band shows
+// BOUT-LOG FACTS ONLY — never roster inferences (the roster is advisory by
+// operator ruling) and NEVER a verdict while the match is running (the old
+// IV/PW-derived "AKA WIN" contradicted the End gate mid-match, critique P1).
+// The verdict returns only on completion, derived from the MATCH winner —
+// the last bout decides kachinuki, never the IV lead.
+//
+// Inputs: subs = the modal's local sub state (subBoutHasBeenPlayed is the
+// single played-bout primitive); serverSubs = m.subResults (bout-log names);
+// currentBout = the visible bout position (1-based). Pure and unit-tested.
+// Returns { headline, fact } while running, { headline, verdict,
+// verdictSide: "aka"|"shiro"|"draw" } when complete.
+export function kachinukiBandModel({ subs, daihyosenIdx, isComplete, matchWinner, matchDecision, sideAName, sideBName, currentBout, namesAt }) {
+  const played = [];
+  (subs || []).forEach((s, idx) => {
+    if (idx === daihyosenIdx || !subBoutHasBeenPlayed(s)) return;
+    // Names come from the caller's resolver — the modal passes the SAME
+    // primitive the bout rows render with (playerNamesForBout: local
+    // override → server log → lineup), so the band can never disagree
+    // with the row above it. Anonymous bouts degrade to side labels.
+    const names = namesAt ? namesAt(idx) : {};
+    const aName = names.aName || "";
+    const bName = names.bName || "";
+    const aN = (s.aPts || []).length;
+    const bN = (s.bPts || []).length;
+    // Winner/loser derive from the SIDE, never from name comparison — an
+    // unresolved name must not collapse both sides onto one label.
+    const winnerSide = s.draw ? "" : aN > bN ? "a" : bN > aN ? "b" : "";
+    played.push({
+      winner: winnerSide === "a" ? (aName || "Aka") : winnerSide === "b" ? (bName || "Shiro") : "",
+      loser: winnerSide === "a" ? (bName || "Shiro") : winnerSide === "b" ? (aName || "Aka") : "",
+      tie: !!s.draw || (aN === bN && !s.fusensho),
+      fusensho: !!s.fusensho,
+    });
+  });
+
+  if (isComplete) {
+    const n = played.length;
+    const headline = `FINAL · ${n} BOUT${n === 1 ? "" : "S"}`;
+    if (matchWinner && matchWinner === sideAName) return { headline, verdict: "AKA WIN", verdictSide: "aka" };
+    if (matchWinner && matchWinner === sideBName) return { headline, verdict: "SHIRO WIN", verdictSide: "shiro" };
+    if (matchDecision === "hikiwake" || !matchWinner) return { headline, verdict: "DRAW", verdictSide: "draw" };
+    return { headline, verdict: String(matchWinner).toUpperCase(), verdictSide: "draw" };
+  }
+
+  const headline = `BOUT ${currentBout || played.length + 1}`;
+  const last = played[played.length - 1];
+  if (!last) return { headline, fact: "" };
+  if (last.tie) return { headline, fact: "Last: hikiwake · both retired" };
+  // Streak: consecutive trailing wins by the same fighter — a pure bout-log
+  // fact ("stays on" is winner-stays semantics, not a roster claim).
+  let streak = 0;
+  for (let i = played.length - 1; i >= 0; i--) {
+    if (played[i].winner && played[i].winner === last.winner) streak++;
+    else break;
+  }
+  const how = last.fusensho ? " (fusensho)" : "";
+  const stay = streak >= 2 ? ` · stays on, ${streak} wins` : " · stays on";
+  return { headline, fact: `${last.winner} beat ${last.loser}${how}${stay}` };
+}
+
 // kachinukiVisiblePositions: which bout slots to render for a kachinuki
 // match. The server bout log (m.subResults) is the source of truth for
 // which bouts exist, with two carve-outs:
@@ -369,7 +431,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // T141: error banner mapping for the daihyosen POST. Server returns
   // 400 not_tied / 400 pool_match / 409 insufficient_eligibility: see
   // handlers_daihyosen.go for the canonical strings.
-  const [daihyosenErr, setDaihyosenErr] = useStateA("");
+  const [editorErr, setEditorErr] = useStateA(""); // inline error surface: daihyosen + lineup saves
   const [daihyosenBusy, setDaihyosenBusy] = useStateA(false);
   // mp-4pc: the daihyosen is the only team sub-bout that may be decided
   // by hantei (judges' decision on a tied bout, FIK 7-5 / 29-6: encho
@@ -399,7 +461,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // T141: remove an unscored daihyosen placeholder. Defined at component
   // level so both the hantei row and any other affordance can call it.
   const onRemoveDaihyosen = async () => {
-    setDaihyosenErr("");
+    setEditorErr("");
     setDaihyosenBusy(true);
     try {
       await window.API.removeDaihyosen(m.compId, m.id, resolveDecisionPassword(password));
@@ -411,7 +473,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       let userMsg = msg;
       if (msg === "daihyosen_scored") userMsg = "Clear the daihyosen score before removing it";
       else if (msg === "no_daihyosen") userMsg = "No daihyosen to remove";
-      setDaihyosenErr(userMsg);
+      setEditorErr(userMsg);
     } finally {
       if (mountedRef.current) setDaihyosenBusy(false);
     }
@@ -560,8 +622,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       }
     } catch (e) {
       // Surface error briefly: can't use a toast from inside the modal so
-      // we reuse the daihyosenErr channel for a one-off message.
-      if (mountedRef.current) setDaihyosenErr(e?.message || "Failed to update lineup");
+      // we reuse the editorErr channel for a one-off message.
+      if (mountedRef.current) setEditorErr(e?.message || "Failed to update lineup");
     } finally {
       if (mountedRef.current) setInlineLineupSaving(false);
     }
@@ -1191,10 +1253,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             // sub-result carries a kachinuki-exhaustion decision (roster
             // data is advisory; the operator decides when it's over).
             isKachinuki && (
-              <div key="kachinuki-banner" style={{ background: "var(--bg-2, #fafafa)", border: "1px solid var(--accent, #ddd)", borderRadius: 4, padding: "8px 12px", marginBottom: 12, fontSize: 12, display: "flex", flexDirection: "column", gap: 4 }}>
+              <div key="kachinuki-banner" style={{ background: "var(--bg-2, #f1f5f9)", border: "1px solid var(--accent, #ddd)", borderRadius: 4, padding: "8px 12px", marginBottom: 12, fontSize: 12, display: "flex", flexDirection: "column", gap: 4 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <span style={{ fontWeight: 700 }}><TermAS name="kachinuki">Kachinuki</TermAS> (winner stays on)</span>
-                  <span style={{ color: "var(--ink-3)" }}>
+                  <span style={{ color: "var(--ink-2)" }}>
                     {isComplete
                       ? "Match ended."
                       : "Score the current bout, then Record bout to continue (the next pairing is added), or End match to finish on the last scored bout."}
@@ -1518,26 +1580,58 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
           )}
 
           {/* Team summary: T138: sticky to the top of the modal body so
-              the IV/PW totals stay visible as the operator scrolls through
-              many bout rows (especially relevant on small screens / when
-              every sub-match has been scored). zIndex: 5 keeps it under
-              the modal head (10) but above the bout cells. */}
-          <div className="team-summary" style={{ position: "sticky", top: 0, zIndex: 5 }}>
-            {teamSides.map((ts, idx) => (
-              <React.Fragment key={ts.key}>
-                <div className="team-summary__side">
-                  <div className="team-summary__label">{ts.label}</div>
-                  <div className="team-summary__stats">IV: {ts.iv} · PW: {ts.pw}</div>
-                </div>
-                {idx === 0 && (
-                  <div className="team-summary__side team-summary__side--center">
-                    <div className="team-summary__label">RESULT</div>
-                    <div className="team-summary__verdict">{teamVerdictText}</div>
-                  </div>
-                )}
-              </React.Fragment>
-            ))}
-          </div>
+              the totals stay visible as the operator scrolls through many
+              bout rows. zIndex: 5 keeps it under the modal head (10) but
+              above the bout cells.
+              mp-gmcg band redesign (user-confirmed brief): in kachinuki the
+              centre cell carries BOUT-LOG FACTS while running (bout number +
+              last bout result; never a verdict — the old IV/PW-derived
+              "AKA WIN" contradicted the End gate) and the verdict only on
+              completion, derived from the match winner. IV/PW demote to the
+              side cells (they still feed standings tie-breaks). Non-kachinuki
+              team matches keep RESULT + teamVerdictText: fixed formats ARE
+              decided by IV/PW. */}
+          {(() => {
+            const kb = isKachinuki && !hasDaihyosen
+              ? kachinukiBandModel({
+                  subs, daihyosenIdx, isComplete,
+                  namesAt: playerNamesForBout,
+                  matchWinner: typeof m.winner === "object" ? m.winner?.name : m.winner,
+                  matchDecision: m.decision,
+                  sideAName, sideBName,
+                  currentBout: parseInt(visiblePositions[visiblePositions.length - 1], 10) || undefined,
+                })
+              : null;
+            return (
+              <div className="team-summary" style={{ position: "sticky", top: 0, zIndex: 5 }}>
+                {teamSides.map((ts, idx) => (
+                  <React.Fragment key={ts.key}>
+                    <div className="team-summary__side">
+                      <div className="team-summary__label">{ts.label}</div>
+                      <div className="team-summary__stats">IV: {ts.iv} · PW: {ts.pw}</div>
+                    </div>
+                    {idx === 0 && (
+                      <div className="team-summary__side team-summary__side--center">
+                        {kb ? (
+                          <>
+                            <div className="team-summary__label">{kb.headline}</div>
+                            {kb.verdict
+                              ? <div className={`team-summary__verdict team-summary__verdict--${kb.verdictSide}`} data-testid="team-summary-verdict">{kb.verdict}</div>
+                              : (kb.fact ? <div className="team-summary__fact" data-testid="team-summary-fact">{kb.fact}</div> : null)}
+                          </>
+                        ) : (
+                          <>
+                            <div className="team-summary__label">RESULT</div>
+                            <div className="team-summary__verdict">{teamVerdictText}</div>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </React.Fragment>
+                ))}
+              </div>
+            );
+          })()}
 
           {/* mp-4pc: hantei affordance for the daihyosen: the rep bout is
               the only team sub-bout that may be decided by judges (FIK 7-5 /
@@ -1549,7 +1643,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             const dt = subTotals[daihyosenIdx];
             const tiedScore = dt.aTotal === dt.bTotal;
             return (
-              <div className="hantei-row" data-testid="team-daihyosen-hantei-row" style={{ display: "flex", gap: 8, alignItems: "center", padding: "6px 8px", marginTop: 12, background: "var(--card-2, #fafafa)", borderRadius: 6, fontSize: 12 }}>
+              <div className="hantei-row" data-testid="team-daihyosen-hantei-row" style={{ display: "flex", gap: 8, alignItems: "center", padding: "6px 8px", marginTop: 12, background: "var(--surface-2)", borderRadius: 6, fontSize: 12 }}>
                 <span style={{ fontWeight: 600, color: "var(--ink-2)" }}>Daihyosen hantei</span>
                 <span style={{ color: "var(--ink-3)" }}>(judges' decision)</span>
                 {dt.aTotal === 0 && dt.bTotal === 0 && !daihyosenHanteiArmed && (
@@ -1622,7 +1716,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             const anyBoutDecided = subTotals.some(t => t.aTotal > 0 || t.bTotal > 0 || t.draw || t.winner !== null);
             const teamTied = anyBoutDecided && ivA === ivB && pwA === pwB;
             const onDaihyosen = async () => {
-              setDaihyosenErr("");
+              setEditorErr("");
               setDaihyosenBusy(true);
               try {
                 // Persist the operator's current bout scores first (status
@@ -1654,7 +1748,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 else if (msg === "insufficient_eligibility") userMsg = "Not enough eligible competitors for a representative bout";
                 else if (msg === "score_not_synced") userMsg = "Couldn't save the current scores (offline or server busy). Try again once the connection is back.";
                 else if (!userMsg) userMsg = "Could not add a representative bout";
-                setDaihyosenErr(userMsg);
+                setEditorErr(userMsg);
               } finally {
                 if (mountedRef.current) setDaihyosenBusy(false);
               }
@@ -1678,8 +1772,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                     {daihyosenBusy ? "Adding…" : "Add representative bout"}
                   </button>
                 </div>
-                {daihyosenErr && (
-                  <div className="daihyosen-controls__err">{daihyosenErr}</div>
+                {editorErr && (
+                  <div className="daihyosen-controls__err">{editorErr}</div>
                 )}
               </div>
             );
@@ -1713,7 +1807,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 </button>
                 <GlossaryHintAS name="fusenpai" />
               </div>
-              <span style={{ color: "var(--ink-3)", fontSize: 11, marginLeft: 4 }}>
+              <span style={{ color: "var(--ink-3)", fontSize: 12, marginLeft: 4 }}>
                 (<TermAS name="fusensho">Fusensho</TermAS> is per-bout: use the "Fusensho" button on each row above.)
               </span>
             </div>
@@ -1780,27 +1874,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               correction-mode Finish buttons below never see a running
               kachinuki match, so there are no competing hints. */}
           {kachinukiBoutMode && (kachinukiEndOutcome?.kind === "blocked" || kachinukiEndOutcome?.kind === "draw") && (
-            <div data-testid="kachinuki-end-hint" style={{ fontSize: 12, color: "var(--ink-2)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
+            <div data-testid="kachinuki-end-hint" style={{ fontSize: 12, color: "var(--ink-2)" }}>
               {!kachinukiEnchoAvailable(kachinukiEndOutcome) ? (
                 <span>Nothing recorded yet: score a bout before ending the match.</span>
+              ) : kachinukiEndOutcome.kind === "draw" ? (
+                <span>Tied bout. End match records a drawn encounter. Record bout retires both and brings the next pair up. Encho keeps the same pair fighting when this pairing must produce a result.</span>
               ) : (
-                <>
-                  {kachinukiEndOutcome.kind === "draw" ? (
-                    <span>Tied bout: End match records a drawn encounter; Record bout retires both and brings the next pair up (or add the next bout manually); Encho keeps the same pair fighting when this pairing must produce a result.</span>
-                  ) : (
-                    <span>No draws in a knockout: continue until there is a point. Record bout brings the next fighter up (or add the next bout manually); Encho keeps the same pair on this bout.</span>
-                  )}
-                  <button
-                    type="button"
-                    className="btn btn--sm"
-                    data-testid="kachinuki-encho-button"
-                    onClick={applyKachinukiEncho}
-                    disabled={submitting || enchoCapped}
-                    title={enchoCapped ? "Maximum encho periods reached" : "Overtime: the same pair keeps fighting this bout"}
-                  >
-                    Encho (same pair)
-                  </button>
-                </>
+                <span>No draws in a knockout. Record bout brings the next fighter up. Encho keeps the same pair on this bout. Continue until there is a point.</span>
               )}
             </div>
           )}
@@ -1844,17 +1924,40 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 // picker (deriveKachinukiEndOutcome). koTieBlocked
                 // deliberately does not apply to Record bout (a bout
                 // hikiwake is a legitimate result); End match carries its
-                // own knockout-tie block + inline hint above. Both use the
-                // two-step arm/confirm idiom; arming one disarms the other
-                // and any score edit disarms both.
+                // own knockout-tie block + inline hint above. Record is
+                // ONE TAP (hot path, recoverable); End keeps the two-step
+                // arm/confirm and any score edit disarms it.
                 <>
-                <button type="button" className={`btn btn--primary ${finishArmed ? "btn--confirm" : ""}`} onClick={() => {
-                  if (!finishArmed) { setFinishArmed(true); setEndArmed(false); return; }
+                <button type="button" className="btn btn--primary" onClick={() => {
+                  // ONE TAP (user ruling via critique): Record is the hot
+                  // path, repeated every bout, and a running, mergeable
+                  // write — a mis-tap is recovered by editing the appended
+                  // bout. End/Reopen keep the two-step arm: they are rare
+                  // and terminal.
+                  setEndArmed(false);
                   doSubmit(() => onSubmit(buildPatch("running", { kachinukiBoutFinal: true })));
                 }} disabled={submitting || !kachinukiCurrentBoutPlayed}
                   title={!kachinukiCurrentBoutPlayed ? "Nothing recorded for this bout yet" : undefined}>
-                  {submitting ? "Saving…" : !kachinukiCurrentBoutPlayed ? "Nothing recorded yet" : finishArmed ? "Confirm · Record bout" : "Record bout"}
+                  {submitting ? "Saving…" : "Record bout"}
                 </button>
+                {/* Encho sits BESIDE End match (critique P2): it is End's
+                    alternative on a tied last bout — same pair fights on —
+                    so the two must share the action row, not have Encho
+                    buried in the hint paragraph. Rendered only when a tied
+                    last bout makes it meaningful (kachinukiEnchoAvailable:
+                    any phase, operator discretion). */}
+                {kachinukiEnchoAvailable(kachinukiEndOutcome) && (
+                  <button
+                    type="button"
+                    className="btn"
+                    data-testid="kachinuki-encho-button"
+                    onClick={applyKachinukiEncho}
+                    disabled={submitting || enchoCapped}
+                    title={enchoCapped ? "Maximum encho periods reached" : "Overtime: the same pair keeps fighting this bout"}
+                  >
+                    Encho
+                  </button>
+                )}
                 <button type="button" className={`btn ${endArmed ? "btn--confirm" : ""}`} data-testid="kachinuki-end-match-button" onClick={() => {
                   if (kachinukiEndOutcome?.kind === "blocked") return;
                   if (!endArmed) { setEndArmed(true); setFinishArmed(false); return; }

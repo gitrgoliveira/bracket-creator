@@ -97,6 +97,7 @@ function ScoringShortcutHint() {
   };
   return (
     <div
+      className="scoring-shortcut-hint"
       data-testid="scoring-modal-shortcut-hint"
       aria-hidden="true"
       style={{ marginTop: 6, fontSize: 12, color: "var(--ink-3)", textAlign: "center", display: "flex", gap: 4, justifyContent: "center", alignItems: "center", flexWrap: "wrap" }}

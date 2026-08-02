@@ -1643,6 +1643,86 @@ func TestReopenKachinukiMatch(t *testing.T) {
 	})
 }
 
+// TestReopenKachinukiMatch_ReopenPending pins the one-tap reopen's audit
+// carry-forward (mp-gmcg) across ALL THREE match homes: pool, bracket round,
+// and the bronze (3rd-place) match, which is a SIBLING of Rounds and is
+// exactly the branch a per-home copy of this rule would lose.
+//
+// Reopen no longer demands a justification, so a reason-less reopen must
+// record that one is outstanding (ReopenPending); the score path then refuses
+// to complete the match again without a correctionReason. A reopen that DID
+// carry a reason is already justified and must leave nothing outstanding —
+// otherwise volunteering a reason would be strictly worse than staying silent.
+func TestReopenKachinukiMatch_ReopenPending(t *testing.T) {
+	completedPool := func() state.MatchResult {
+		return state.MatchResult{
+			ID: "P1-0", SideA: "RedTeam", SideB: "WhiteTeam", Status: state.MatchStatusCompleted,
+			Winner: "RedTeam", Decision: "kachinuki-exhaustion",
+		}
+	}
+	completedBracket := func() *state.Bracket {
+		return &state.Bracket{
+			Rounds: [][]state.BracketMatch{
+				{{
+					ID: "F0", SideA: "RedTeam", SideB: "WhiteTeam", Status: state.MatchStatusCompleted,
+					Winner: "RedTeam", Decision: "kachinuki-exhaustion",
+				}},
+			},
+			ThirdPlaceMatch: &state.BracketMatch{
+				ID: "B0", SideA: "Kuma", SideB: "Washi", Status: state.MatchStatusCompleted,
+				Winner: "Kuma", Decision: "kachinuki-exhaustion",
+			},
+		}
+	}
+
+	for _, tc := range []struct {
+		name        string
+		reason      string
+		wantPending bool
+	}{
+		{"no reason: justification outstanding", "", true},
+		{"whitespace-only reason: outstanding (trimmed to empty)", "   \t ", true},
+		{"reason supplied: nothing outstanding", "ended one bout too early", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Run("pool", func(t *testing.T) {
+				compID := "reopen-pending-pool"
+				eng, store, _ := setupKachinukiComp(t, compID, 3)
+				require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{completedPool()}))
+				require.NoError(t, eng.ReopenKachinukiMatch(compID, "P1-0", tc.reason))
+
+				matches, err := store.LoadPoolMatches(compID)
+				require.NoError(t, err)
+				require.Len(t, matches, 1)
+				assert.Equal(t, tc.wantPending, matches[0].ReopenPending)
+			})
+
+			t.Run("bracket round", func(t *testing.T) {
+				compID := "reopen-pending-bracket"
+				eng, store, _ := setupKachinukiComp(t, compID, 3)
+				require.NoError(t, store.SaveBracket(compID, completedBracket()))
+				require.NoError(t, eng.ReopenKachinukiMatch(compID, "F0", tc.reason))
+
+				bracket, err := store.LoadBracket(compID)
+				require.NoError(t, err)
+				assert.Equal(t, tc.wantPending, bracket.Rounds[0][0].ReopenPending)
+			})
+
+			t.Run("bronze", func(t *testing.T) {
+				compID := "reopen-pending-bronze"
+				eng, store, _ := setupKachinukiComp(t, compID, 3)
+				require.NoError(t, store.SaveBracket(compID, completedBracket()))
+				require.NoError(t, eng.ReopenKachinukiMatch(compID, "B0", tc.reason))
+
+				bracket, err := store.LoadBracket(compID)
+				require.NoError(t, err)
+				require.NotNil(t, bracket.ThirdPlaceMatch)
+				assert.Equal(t, tc.wantPending, bracket.ThirdPlaceMatch.ReopenPending)
+			})
+		})
+	}
+}
+
 // TestReopenKachinukiMatchCourtBusy pins the reopen court gate (mp-gmcg).
 //
 // NOTE ON THE FIXTURES: every OTHER reopen test builds its matches with NO

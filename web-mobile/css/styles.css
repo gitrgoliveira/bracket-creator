@@ -6651,6 +6651,52 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   flex-wrap: wrap;
 }
 
+/* mp-gmcg: court-busy remedy panel in the team score editor's footer. The
+   operator wanted to reopen their own match and instead learned another match
+   holds the court; from here they can clear it. Danger palette because the
+   action inside DESTROYS that other match's score: the panel must not read as
+   a neutral notice. */
+.reopen-conflict {
+  background: var(--danger-soft);
+  border: 1px solid #f5c2c2;
+  border-radius: var(--r-sm);
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  font-size: var(--fs-sm);
+}
+.reopen-conflict__head {
+  font-weight: 700;
+  color: #9b1c1c;
+}
+/* The consequence sentence. Stated in full and always visible: an operator
+   about to wipe someone else's score may not have to hover, expand or guess. */
+.reopen-conflict__warn {
+  margin-top: 2px;
+  color: #9b1c1c;
+}
+/* The server's own words, kept verbatim underneath ours so nothing it said is
+   swallowed by the friendlier heading. */
+.reopen-conflict__msg {
+  margin-top: 4px;
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+}
+.reopen-conflict__actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+/* The verdict about to be committed, shown above the reopen-reason prompt:
+   that prompt's Confirm IS the commit, and it hides the End button whose
+   armed label would otherwise carry this. */
+.reopen-reason__verdict {
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+  margin-bottom: 4px;
+}
+
 /* F5: pending-write banner, offline / transient queued terminal write */
 .pending-write-banner {
   display: flex;

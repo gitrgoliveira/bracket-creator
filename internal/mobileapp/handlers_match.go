@@ -3,6 +3,7 @@ package mobileapp
 import (
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"sort"
@@ -351,21 +352,27 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			results[i].CorrectionReason = strings.TrimSpace(results[i].CorrectionReason)
 			var capturedStatus *domain.CompetitorStatus
 			if err := tx.WithTransaction(id, func(stx state.StoreTx) error {
-				// Correction-reason audit policy (require a reason on a
-				// completed -> completed overwrite, otherwise carry the STORED
-				// reason forward so a kachinuki reopen justification survives the
-				// following End). The rule itself lives in
+				// Correction-reason audit policy (require a reason when the write
+				// rewrites a result the operator already declared final — a
+				// completed -> completed overwrite, or the re-End of a match
+				// reopened without one — otherwise carry the STORED reason
+				// forward). The rule itself lives in
 				// applyCorrectionReasonUnderTx, shared with the single-score path
 				// so the two cannot drift; only the error SHAPE differs here
 				// (partial-success entries carry a plain message).
-				if _, missingReason := applyCorrectionReasonUnderTx(stx, id, results[i].ID, &results[i]); missingReason {
-					return errors.New("correcting a completed match result requires a non-empty correctionReason")
+				check := applyCorrectionReasonUnderTx(stx, id, results[i].ID, &results[i])
+				if check.Reject != nil {
+					return errors.New(check.Reject.Message)
 				}
 				status, err := eng.RecordMatchResultWithIneligibilityTx(stx, id, results[i].ID, &results[i])
-				if err == nil {
-					capturedStatus = status
+				if err != nil {
+					return err
 				}
-				return err
+				capturedStatus = status
+				if check.ClearBracketReopenPending {
+					return clearReopenPendingUnderTx(stx, id, results[i].ID)
+				}
+				return nil
 			}); err != nil {
 				errs = append(errs, scoreError{MatchID: results[i].ID, Error: err.Error()})
 				continue
@@ -641,13 +648,22 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 	// bouts and later End match again. A dedicated endpoint rather than a
 	// score-write flag so the score path's stale-write guard (a plain
 	// running write against a completed match silently no-ops) stays fully
-	// intact. Body: {"reason": "<why>"} — mandatory, it is the audit trail
-	// for rewriting a finalized result (the score path's correction gate
-	// demands the same thing, and reopen must not be the way around it).
+	// intact.
+	//
+	// Body: {"reason": "<why>"} — OPTIONAL, and an absent body is equally
+	// valid, so reopening is ONE TAP. Requiring the justification here was
+	// too much friction for the case it is most needed in: an operator who
+	// ended a match by mistake, at a shiaijo, mid-session, had to compose a
+	// reason before they could get back in. Rewriting a finalized result is
+	// still audited — a reason-less reopen sets state.MatchResult.ReopenPending
+	// and the score path then refuses to complete the match again without a
+	// correctionReason (see applyCorrectionReasonUnderTx). The record is
+	// written later than the action it justifies; it is not lost.
+	//
 	// Non-kachinuki competitions get 400 (their only sanctioned edit of a
-	// finished result remains the correction path), as does a missing or
-	// over-long reason; a non-completed match, a bracket match whose winner
-	// already feeds a fought downstream match, or a BUSY COURT gets 409.
+	// finished result remains the correction path), as does an over-long
+	// reason; a non-completed match, a bracket match whose winner already
+	// feeds a fought downstream match, or a BUSY COURT gets 409.
 	r.POST("/competitions/:id/matches/:mid/reopen", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
@@ -661,18 +677,21 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		var body struct {
 			Reason string `json:"reason"`
 		}
-		if err := c.ShouldBindJSON(&body); err != nil {
+		// io.EOF is an EMPTY body, which is the one-tap case: the client sends
+		// no JSON at all. Only a malformed body is a 400 — an operator tapping
+		// Reopen must never be blocked on request shape.
+		if err := c.ShouldBindJSON(&body); err != nil && !errors.Is(err, io.EOF) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 		reason := strings.TrimSpace(body.Reason)
-		if reason == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "reason is required: reopening a finalized result must be justified"})
-			return
-		}
-		if err := validateMaxLen("reason", reason, MaxLenCorrectionReason); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
+		// Only a SUPPLIED reason is length-checked; empty is the sanctioned
+		// one-tap shape and is handled by the ReopenPending flag instead.
+		if reason != "" {
+			if err := validateMaxLen("reason", reason, MaxLenCorrectionReason); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
 		}
 
 		// Self-run mode: reopening a finalized result is an organiser action
@@ -938,12 +957,23 @@ type matchStores interface {
 // matchSnapshot is the stored state of a match as this file's guards read
 // it: Status drives the correction / stale-write / finalized gates,
 // CorrectionReason carries the kachinuki reopen justification forward (see
-// applyCorrectionReasonUnderTx), and SubResults echoes the post-advance
-// kachinuki bout log back to the open score editor.
+// applyCorrectionReasonUnderTx), ReopenPending says a reason-less reopen
+// still owes one, and SubResults echoes the post-advance kachinuki bout log
+// back to the open score editor.
+//
+// InBracket is the match's HOME rather than its content: the pool write is a
+// whole-struct overwrite that carries ReopenPending itself, while the bracket
+// write copies field by field and deliberately never reads the flag off the
+// client-supplied payload, so only a bracket match needs the separate
+// clearReopenPendingUnderTx pass. lookupMatchSnapshot already knows which
+// store it found the match in, so reporting it costs nothing and saves the
+// clear path a second traversal.
 type matchSnapshot struct {
 	Status           state.MatchStatus
 	CorrectionReason string
+	ReopenPending    bool
 	SubResults       []state.SubMatchResult
+	InBracket        bool
 }
 
 // lookupMatchSnapshot is THE traversal of the three homes a match ID can
@@ -977,6 +1007,7 @@ func lookupMatchSnapshot(s matchStores, compID, matchID string) (matchSnapshot, 
 			return matchSnapshot{
 				Status:           poolMatches[i].Status,
 				CorrectionReason: poolMatches[i].CorrectionReason,
+				ReopenPending:    poolMatches[i].ReopenPending,
 				SubResults:       poolMatches[i].SubResults,
 			}, true, loadErr
 		}
@@ -1006,7 +1037,9 @@ func bracketMatchSnapshot(bm *state.BracketMatch) matchSnapshot {
 	return matchSnapshot{
 		Status:           bm.Status,
 		CorrectionReason: bm.CorrectionReason,
+		ReopenPending:    bm.ReopenPending,
 		SubResults:       bm.SubResults,
+		InBracket:        true,
 	}
 }
 
@@ -1031,6 +1064,23 @@ func matchStatusFromStore(store CompetitionStore, compID, matchID string) state.
 	return snap.Status
 }
 
+// correctionCheck is applyCorrectionReasonUnderTx's verdict.
+//
+//   - StoredStatus is the match's status as stored, returned so the caller's
+//     stale-after-complete guard doesn't have to look the match up again.
+//   - Reject is non-nil when the write must be refused; the caller renders it
+//     in its own error shape (a 400 on the single-score path, a
+//     partial-success entry on the bulk path).
+//   - ClearBracketReopenPending asks the caller to run
+//     clearReopenPendingUnderTx AFTER a successful engine write. Only bracket
+//     matches need it: the pool write is a whole-struct overwrite that carries
+//     r.ReopenPending straight through.
+type correctionCheck struct {
+	StoredStatus              state.MatchStatus
+	Reject                    *ValidationError
+	ClearBracketReopenPending bool
+}
+
 // applyCorrectionReasonUnderTx applies the correction-reason audit policy to
 // r and returns the match's STORED status. Runs inside WithTransaction
 // (caller MUST hold the per-comp lock via the supplied StoreTx), so the
@@ -1038,24 +1088,44 @@ func matchStatusFromStore(store CompetitionStore, compID, matchID string) state.
 //
 // The policy is shared by the single-score and bulk-score paths so the audit
 // rule cannot drift between them (same reason applyKachinukiMerge is shared
-// by the locked and tx scoring paths); each caller wraps the missingReason
-// signal in its own error shape.
+// by the locked and tx scoring paths); each caller wraps the Reject verdict
+// in its own error shape.
+//
+// A completion must be JUSTIFIED in two cases, and both demand exactly the
+// same thing (a non-empty CorrectionReason), because both rewrite a result
+// the operator had already declared final:
 //
 //   - completed -> completed is a CORRECTION: overwriting an already-finalized
-//     result requires a non-empty CorrectionReason for traceability. This
-//     applies to ANY decision type, including a withdrawal (kiken/fusenpai)
-//     submitted via /score; exempting those would let a finalized result be
-//     overwritten with no audit reason. missingReason reports the violation
-//     and r is left untouched.
-//   - anything else (a first finalization, or a running/scheduled write) is
-//     NOT a correction. A client-supplied reason is meaningless there and the
-//     caller already dropped it, but the reason STORED on the match must
-//     survive: the kachinuki reopen path (mp-gmcg) records the operator's
-//     justification there, and blanking it would erase the audit trail at the
-//     very write it was recorded to justify. Carrying it on the non-completed
-//     writes too is what keeps it alive for POOL matches, whose write is a
-//     whole-struct overwrite (`*r = *result` in engine/scoring_tx.go) rather
-//     than the bracket path's set-if-non-empty.
+//     result requires a reason for traceability. This applies to ANY decision
+//     type, including a withdrawal (kiken/fusenpai) submitted via /score;
+//     exempting those would let a finalized result be overwritten with no
+//     audit reason.
+//   - the match carries ReopenPending: it was reopened with no reason
+//     (mp-gmcg), so its stored status is `running` and the completion looks
+//     like a first finalization — but the finalized result it replaces was
+//     discarded by that reopen. The justification reopen no longer asks for is
+//     collected HERE, on a step the operator was already taking.
+//
+// In both cases Reject reports a missing reason and r is left otherwise
+// untouched; on acceptance the supplied reason is kept and ReopenPending is
+// discharged (nothing is outstanding once the record exists).
+//
+// Anything else (a genuine first finalization, or a running/scheduled write)
+// is not a rewrite. A client-supplied reason is meaningless there and is
+// dropped, but the reason STORED on the match must survive: the kachinuki
+// reopen path records the operator's justification there, and blanking it
+// would erase the audit trail at the very write it was recorded to justify.
+// Carrying it on the non-completed writes too is what keeps it alive for POOL
+// matches, whose write is a whole-struct overwrite (`*r = *result` in
+// engine/scoring_tx.go) rather than the bracket path's set-if-non-empty.
+//
+// ReopenPending is SERVER-OWNED and is re-stamped from the stored value on
+// every write, before any of the above. state.MatchResult binds straight from
+// the request body, so a client could otherwise plant the flag on an unrelated
+// match or — the damaging direction — clear its own outstanding justification
+// by sending `reopenPending: false`. Re-stamping is also what keeps the flag
+// alive across a pool match's running writes, which would otherwise blank it
+// through the same whole-struct overwrite.
 //
 // Returning the stored status keeps this the transaction's ONLY match lookup:
 // StoreTx loads deliberately bypass the file cache (state.LoadPoolMatchesLocked
@@ -1063,13 +1133,76 @@ func matchStatusFromStore(store CompetitionStore, compID, matchID string) state.
 // parse (and, for a bracket match, an os.ReadFile plus a whole-bracket
 // json.Unmarshal) while the per-comp WRITE lock is held. The caller's
 // stale-after-complete guard reads the returned status instead.
-func applyCorrectionReasonUnderTx(stx state.StoreTx, compID, matchID string, r *state.MatchResult) (state.MatchStatus, bool) {
+func applyCorrectionReasonUnderTx(stx state.StoreTx, compID, matchID string, r *state.MatchResult) correctionCheck {
 	snap, _ := matchSnapshotFor(stx, compID, matchID)
-	if r.Status == state.MatchStatusCompleted && snap.Status == state.MatchStatusCompleted {
-		return snap.Status, r.CorrectionReason == ""
+	r.ReopenPending = snap.ReopenPending
+	if r.Status == state.MatchStatusCompleted && (snap.Status == state.MatchStatusCompleted || snap.ReopenPending) {
+		if r.CorrectionReason == "" {
+			return correctionCheck{StoredStatus: snap.Status, Reject: missingCorrectionReasonError(snap)}
+		}
+		// The justification has landed: the reopen is no longer outstanding.
+		r.ReopenPending = false
+		return correctionCheck{
+			StoredStatus:              snap.Status,
+			ClearBracketReopenPending: snap.InBracket && snap.ReopenPending,
+		}
 	}
 	r.CorrectionReason = snap.CorrectionReason
-	return snap.Status, false
+	return correctionCheck{StoredStatus: snap.Status}
+}
+
+// missingCorrectionReasonError names the CAUSE, not just the rule. Both
+// branches reject on the same field with the same HTTP shape, but an operator
+// re-ending a match they reopened one tap ago has no idea they are performing
+// a "correction" — telling them the reopen is what asks for the reason is the
+// difference between a fixable prompt and a dead end.
+func missingCorrectionReasonError(snap matchSnapshot) *ValidationError {
+	msg := "correcting a completed match result requires a non-empty correctionReason"
+	if snap.Status != state.MatchStatusCompleted && snap.ReopenPending {
+		msg = "this match was reopened; ending it again requires a reason"
+	}
+	return &ValidationError{Field: "correctionReason", Message: msg}
+}
+
+// clearReopenPendingUnderTx discharges a BRACKET match's stored ReopenPending
+// flag after a completion that carried its justification. Runs inside the
+// caller's WithTransaction, AFTER the engine write has succeeded: the
+// single-score handler commits the transaction even when the engine rejects
+// the write (engErr is surfaced afterwards), so clearing beforehand would
+// persist a discharge for a write that never landed.
+//
+// Bracket matches only. recordBracketMatchResult* copies the payload into the
+// stored BracketMatch field by field and deliberately does NOT copy
+// ReopenPending — the payload is client-supplied, and a score write must not
+// be able to move a server-owned audit flag. So the flag needs this explicit
+// pass, while a POOL match is already handled by the whole-struct overwrite
+// (`*r = *result`) carrying the cleared r.ReopenPending.
+//
+// Callers gate on correctionCheck.ClearBracketReopenPending, so the extra
+// bracket load only happens on the rare re-End after a reason-less reopen.
+func clearReopenPendingUnderTx(stx state.StoreTx, compID, matchID string) error {
+	bracket, err := stx.LoadBracket(compID)
+	if err != nil {
+		return fmt.Errorf("clear reopen flag: load bracket: %w", err)
+	}
+	if bracket == nil {
+		return nil
+	}
+	for rIdx := range bracket.Rounds {
+		for mIdx := range bracket.Rounds[rIdx] {
+			if bracket.Rounds[rIdx][mIdx].ID == matchID {
+				bracket.Rounds[rIdx][mIdx].ReopenPending = false
+				return stx.SaveBracket(compID, bracket)
+			}
+		}
+	}
+	// The bronze (3rd-place) match is a SIBLING of Rounds, not an element of
+	// it; the loop above never reaches it (see lookupMatchSnapshot).
+	if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID == matchID {
+		bm.ReopenPending = false
+		return stx.SaveBracket(compID, bracket)
+	}
+	return nil
 }
 
 // registerScoreHandler wires the `PUT /competitions/:id/matches/:mid/score`
@@ -1335,20 +1468,20 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 						return nil
 					}
 				}
-				// Correction audit: overwriting an already-completed result
-				// (completed -> completed) is a correction and requires a non-empty
-				// CorrectionReason for traceability; a first finalization needs no
-				// reason but must carry the STORED one forward. Both halves of that
-				// rule live in applyCorrectionReasonUnderTx, shared with the
-				// bulk-score path. It runs inside the tx so the is-completed read is
-				// race-free (same lock), and the status it returns is reused by the
-				// stale-write guard below rather than looked up a second time.
-				existingStatus, missingReason := applyCorrectionReasonUnderTx(stx, id, mid, result)
-				if missingReason {
-					engErr = &ValidationError{
-						Field:   "correctionReason",
-						Message: "correcting a completed match result requires a non-empty correctionReason",
-					}
+				// Correction audit: a write that rewrites a result the operator
+				// already declared final requires a non-empty CorrectionReason for
+				// traceability — either a completed -> completed overwrite, or the
+				// re-End of a match reopened without a reason (mp-gmcg). A genuine
+				// first finalization needs no reason but must carry the STORED one
+				// forward. All of that rule lives in
+				// applyCorrectionReasonUnderTx, shared with the bulk-score path. It
+				// runs inside the tx so the is-completed read is race-free (same
+				// lock), and the status it returns is reused by the stale-write
+				// guard below rather than looked up a second time.
+				check := applyCorrectionReasonUnderTx(stx, id, mid, result)
+				existingStatus := check.StoredStatus
+				if check.Reject != nil {
+					engErr = check.Reject
 					return nil
 				}
 				// Bracket integrity: a running- OR scheduled-status write must
@@ -1384,6 +1517,12 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				// includes the K3 rollback for the AlreadyIneligible path,
 				// returning nil here commits whatever final state the engine
 				// settled on.
+				if engErr == nil && check.ClearBracketReopenPending {
+					// Only after the write actually landed: this branch commits
+					// even when engErr is set, so discharging the outstanding
+					// justification any earlier would clear it for a rejected write.
+					return clearReopenPendingUnderTx(stx, id, mid)
+				}
 				return nil
 			})
 		})

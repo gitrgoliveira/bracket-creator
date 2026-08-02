@@ -84,7 +84,7 @@ When the last bout is tied, the editor offers every legitimate way forward and y
 
 There is no representative bout (daihyosen) in kachinuki: a tied pairing that must produce a result is settled by encho on that same bout, not by a separate rep bout.
 
-If you finish an encounter too early or record the wrong result, reopen it. Open the completed match and use **Reopen match**: the encounter returns to in progress with its bouts kept, so you can add or rescore bouts and end it again. Reopening discards a result that has already been recorded, so it asks for a reason first, in the same way as a correction, and the reason is kept with the result. In a knockout, reopening also rolls back the next-round slot that this result had filled, as long as that later match has not started.
+If you finish an encounter too early or record the wrong result, reopen it. Open the completed match and use **Reopen match**: a single tap returns the encounter to in progress with its bouts kept, so you can add or rescore bouts and end it again. Reopening discards a result that has already been recorded, so a reason is still kept with the result, but it is asked for when you end the match again rather than before you can get back in. In a knockout, reopening also rolls back the next-round slot that this result had filled, as long as that later match has not started.
 
 Reopening is refused while another match is already running on the same court, because the reopened encounter would go back into play alongside it. Finish the running match, or send it back to the queue, and then reopen.
 

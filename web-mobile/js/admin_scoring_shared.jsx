@@ -865,6 +865,17 @@ window.ReasonPrompt = ReasonPrompt;
 
 const CORRECTION_PRESETS = ["Scoring error", "Wrong competitor", "Data entry", "Other"];
 
+// mp-gmcg: presets for the REOPEN audit reason, collected on the write that
+// closes a reopened kachinuki encounter back out (admin_scoring_team.jsx).
+// "Ended by mistake" is FIRST, and therefore the default selection, because it
+// is the overwhelmingly common reason a shiaijo operator reopens a match: the
+// correction presets offer no honest option for it, so an operator forced
+// through that list either mislabels the reopen "Scoring error" or picks
+// "Other" and types the same sentence every time. The remaining entries mirror
+// CORRECTION_PRESETS so a reopen made for a genuine scoring/identity/data
+// problem still lands in the same audit vocabulary.
+const REOPEN_PRESETS = ["Ended by mistake", "Scoring error", "Wrong competitor", "Data entry", "Other"];
+
 // ES exports: the modal file imports these and re-exports the test-facing
 // subset, so `import { … } from './admin_scoring_modal.jsx'` keeps working.
 export {
@@ -898,4 +909,5 @@ export {
   LineupNameInput,
   ReasonPrompt,
   CORRECTION_PRESETS,
+  REOPEN_PRESETS,
 };

@@ -814,6 +814,25 @@ type MatchResult struct {
 	// columns absent load as 0. Bracket matches persist fine via bracket.json.
 	FlagsA int `json:"flagsA,omitempty" yaml:"flags_a,omitempty"`
 	FlagsB int `json:"flagsB,omitempty" yaml:"flags_b,omitempty"`
+	// ReopenPending marks a kachinuki match that was reopened WITHOUT an audit
+	// reason and therefore still owes one (mp-gmcg). Reopening is one tap so an
+	// operator who ended a match by mistake can get straight back in; the
+	// justification is collected on the NEXT completion instead, folded into a
+	// step they were already taking. The score path refuses to complete a
+	// flagged match without a correctionReason and clears the flag once one
+	// lands, so the audit record is written later than the action it justifies
+	// but is never lost.
+	//
+	// SERVER-OWNED. MatchResult binds straight from the score request body, so
+	// a client could otherwise plant or clear the flag; the handler overwrites
+	// it from the STORED value on every write (see
+	// applyCorrectionReasonUnderTx in mobileapp/handlers_match.go) and is the
+	// only thing that moves it.
+	//
+	// Append-only CSV column (rec index 24, after FlagsB at 22/23); older files
+	// with the column absent load as false. Bracket matches mirror it on
+	// BracketMatch, persisted via bracket.json.
+	ReopenPending bool `json:"reopenPending,omitempty" yaml:"reopen_pending,omitempty"`
 	// Rev is a client-monotonic revision counter carried on "running"-status
 	// autosave writes. The server uses it (scoped to RevSession) to drop stale
 	// in-flight writes that arrive out of order after a reconnect flush
@@ -984,6 +1003,14 @@ type BracketMatch struct {
 	// counts survive a restart. Zero for non-engi matches.
 	FlagsA int `json:"flagsA,omitempty"`
 	FlagsB int `json:"flagsB,omitempty"`
+	// ReopenPending mirrors MatchResult.ReopenPending for bracket matches
+	// (mp-gmcg): the match was reopened with no audit reason and still owes
+	// one, so the next completion must carry a correctionReason. Persisted in
+	// bracket.json. Server-owned: the score write deliberately does NOT copy
+	// this field off the client-supplied MatchResult (unlike ResultSource /
+	// CorrectionReason), so only the reopen path and the handler's
+	// clearReopenPendingUnderTx ever move it.
+	ReopenPending bool `json:"reopenPending,omitempty"`
 	// Display metadata (mp-7f2w); additive, computed at generation time so the
 	// viewer can render the bracket with the SAME effective-round columns as the
 	// printed Excel Tree sheet (matches grouped by depth-from-root, structural

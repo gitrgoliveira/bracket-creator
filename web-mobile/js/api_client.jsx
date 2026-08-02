@@ -1620,35 +1620,49 @@ const API = {
         return true;
     },
     // mp-gmcg: reopen a COMPLETED kachinuki team match: status back to
-    // running, winner/decision cleared, bout log kept. `reason` is the
-    // mandatory audit justification (recorded with the result, same class as
-    // a correctionReason on a completed write) and is collected by the
-    // ReasonPrompt in admin_scoring_team.jsx before this call is made.
-    // 400 = missing/empty/over-length reason, or a non-kachinuki competition;
-    // 409 = not completed / downstream bracket match already fought (the
-    // propagated winner cannot be retracted) / another match is already
-    // running on this match's court. The editor shows whichever came back
-    // verbatim, so the unwrap keeps the server's own words.
+    // running, winner/decision cleared, bout log kept.
+    //
+    // NO REASON IS SENT, deliberately (operator ruling). An operator who ended
+    // a match BY MISTAKE at a shiaijo must be able to get back into it in ONE
+    // TAP; making them justify the mistake before they may undo it is friction
+    // at the worst possible moment. The audit trail is collected on the way
+    // OUT instead: the server stamps `reopenPending` on the reopened match and
+    // rejects the later COMPLETING write unless it carries a correctionReason
+    // (400, field correctionReason), which admin_scoring_team.jsx prompts for
+    // on [End match]. The body stays an empty JSON object (not absent) so a
+    // handler that binds JSON still parses the request.
+    //
+    // 400 = a non-kachinuki competition; 409 = not completed / downstream
+    // bracket match already fought (the propagated winner cannot be retracted)
+    // / another match is already running on this match's court. The editor
+    // shows whichever came back verbatim, so the unwrap keeps the server's own
+    // words.
     //
     // TWO 409 SHAPES: most carry the sentence in `error`, but the court-busy
     // conflict reuses the score path's structured payload, where `error` is
-    // the machine code "court_busy" and the sentence is in `message`. Prefer
-    // `message` so the operator never reads a bare code; `code` is kept on the
-    // thrown Error for callers that want to branch. The server broadcasts
-    // match_updated on success.
-    async reopenMatch(compID, matchID, reason, password) {
+    // the machine code "court_busy", the sentence is in `message`, and
+    // court/matchId/compId identify the BLOCKING match. Prefer `message` so the
+    // operator never reads a bare code, and carry the blocking match's identity
+    // onto the thrown Error: without it the editor could only print the
+    // conflict, and a busy court would be a dead end (kachinuki reopen is the
+    // ONLY way to fix a bout log). The server broadcasts match_updated on
+    // success.
+    async reopenMatch(compID, matchID, password) {
         const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/reopen`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'X-Tournament-Password': password
             },
-            body: JSON.stringify({ reason })
+            body: JSON.stringify({})
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
             const e = new Error(err.message || err.error || "Failed to reopen match");
             if (err.error) e.code = err.error;
+            if (err.court) e.court = err.court;
+            if (err.matchId) e.matchId = err.matchId;
+            if (err.compId) e.compId = err.compId;
             throw e;
         }
         return true;

@@ -951,21 +951,17 @@ func loadPoolMatch(t *testing.T, store *state.Store, compID, matchID string) sta
 	return state.MatchResult{}
 }
 
-// TestReopenHandler_ReasonRequired pins the reopen audit gate (mp-gmcg).
-//
-// Every other format requires a non-empty correctionReason to overwrite a
-// finalized result, and the reopen endpoint is the only other way to rewrite
-// one — so it must demand the same justification, otherwise it is simply the
-// way around the audit trail.
-func TestReopenHandler_ReasonRequired(t *testing.T) {
+// TestReopenHandler_ReasonRejections pins what the reopen endpoint STILL
+// rejects (mp-gmcg). The reason itself is optional now (see
+// TestReopenHandler_ReasonOptional), but a supplied one must fit the same
+// 200-character audit cap as correctionReason, and a body that is neither
+// absent nor valid JSON is a client bug, not a one-tap reopen.
+func TestReopenHandler_ReasonRejections(t *testing.T) {
 	cases := []struct {
 		name string
 		body []byte
 		want string
 	}{
-		{"no reason field", []byte(`{}`), "reason is required"},
-		{"empty reason", []byte(`{"reason":""}`), "reason is required"},
-		{"whitespace-only reason", []byte(`{"reason":"   \t "}`), "reason is required"},
 		// gin's JSON encoder escapes "<", so match on the tail of the message.
 		{"oversized reason", []byte(`{"reason":"` + strings.Repeat("x", MaxLenCorrectionReason+1) + `"}`), "200 characters"},
 		{"malformed body", []byte(`{nope`), ""},
@@ -984,8 +980,344 @@ func TestReopenHandler_ReasonRequired(t *testing.T) {
 			m := loadPoolMatch(t, store, compID, "P1-0")
 			assert.Equal(t, state.MatchStatusCompleted, m.Status, "a rejected reopen must leave the result finalized")
 			assert.Equal(t, "Ryu", m.Winner)
+			assert.False(t, m.ReopenPending, "a rejected reopen leaves nothing outstanding")
 		})
 	}
+}
+
+// TestReopenHandler_ReasonOptional is the one-tap regression (mp-gmcg).
+//
+// Reopen used to demand a justification up front, which was exactly the wrong
+// moment to ask for one: the operator is at a shiaijo, mid-session, and ended
+// the match by mistake. So an absent body, an absent field, an empty string
+// and a whitespace-only string all reopen the match — and every one of them
+// leaves ReopenPending set, which is what carries the audit obligation
+// forward to the next completion (TestReopenHandler_PendingReasonEnforcedOnReEnd).
+func TestReopenHandler_ReasonOptional(t *testing.T) {
+	cases := []struct {
+		name string
+		body []byte
+	}{
+		{"absent body", nil},
+		{"no reason field", []byte(`{}`)},
+		{"empty reason", []byte(`{"reason":""}`)},
+		{"whitespace-only reason", []byte(`{"reason":"   \t "}`)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			compID := "kachinuki-reopen-one-tap"
+			r, store := setupKachinukiScoreServer(t, compID)
+			require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{completedKachinukiPoolMatch()}))
+
+			w := postReopenRaw(t, r, compID, "P1-0", tc.body)
+			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+			m := loadPoolMatch(t, store, compID, "P1-0")
+			assert.Equal(t, state.MatchStatusRunning, m.Status, "the match must be reopened")
+			assert.Empty(t, m.Winner, "winner cleared")
+			assert.Empty(t, m.CorrectionReason, "no reason was given, so none is recorded yet")
+			assert.True(t, m.ReopenPending,
+				"a reason-less reopen must record that a justification is still outstanding")
+			require.Len(t, m.SubResults, 1, "the bout log must stay intact")
+		})
+	}
+}
+
+// TestReopenHandler_ReasonSuppliedLeavesNothingOutstanding: a reopen that DID
+// carry a reason is already justified at the moment it happens, so it must not
+// also demand one on the next End — that would make volunteering a reason
+// strictly worse than staying silent.
+func TestReopenHandler_ReasonSuppliedLeavesNothingOutstanding(t *testing.T) {
+	compID := "kachinuki-reopen-justified"
+	r, store := setupKachinukiScoreServer(t, compID)
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{completedKachinukiPoolMatch()}))
+
+	w := postReopen(t, r, compID, "P1-0", "ended one bout too early")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	m := loadPoolMatch(t, store, compID, "P1-0")
+	assert.Equal(t, "ended one bout too early", m.CorrectionReason)
+	assert.False(t, m.ReopenPending, "a justified reopen owes nothing")
+
+	// The re-End therefore needs no reason of its own.
+	w = putScore(t, r, compID, "P1-0", map[string]any{
+		"sideA": "Ryu", "sideB": "Tora", "winner": "Ryu",
+		"status": "completed", "decision": "kachinuki-exhaustion",
+		"subResults": []map[string]any{
+			kachinukiSub(1, "R-1", "W-1", []string{"M", "K"}, "R-1", "fought"),
+		},
+	})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Equal(t, state.MatchStatusCompleted, loadPoolMatch(t, store, compID, "P1-0").Status)
+}
+
+// endKachinukiPoolMatch is the operator's "End match" write for the canonical
+// pool fixture, optionally carrying a correctionReason.
+func endKachinukiPoolMatch(reason string) map[string]any {
+	payload := map[string]any{
+		"sideA": "Ryu", "sideB": "Tora", "winner": "Ryu",
+		"status": "completed", "decision": "kachinuki-exhaustion",
+		"subResults": []map[string]any{
+			kachinukiSub(1, "R-1", "W-1", []string{"M", "K"}, "R-1", "fought"),
+		},
+	}
+	if reason != "" {
+		payload["correctionReason"] = reason
+	}
+	return payload
+}
+
+// TestReopenHandler_PendingReasonEnforcedOnReEnd is the audit regression that
+// makes the one-tap reopen safe (mp-gmcg).
+//
+// Reopen no longer collects a justification, so the ONLY thing standing
+// between a discarded finalized result and no audit record at all is this
+// gate: a match flagged ReopenPending cannot be completed again without a
+// correctionReason. Losing it would mean a finished result could be rewritten
+// with no record of who changed it or why — the exact hole the correction gate
+// exists to close.
+func TestReopenHandler_PendingReasonEnforcedOnReEnd(t *testing.T) {
+	compID := "kachinuki-reopen-pending"
+	r, store := setupKachinukiScoreServer(t, compID)
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{completedKachinukiPoolMatch()}))
+
+	require.Equal(t, http.StatusOK, postReopenRaw(t, r, compID, "P1-0", nil).Code)
+	require.True(t, loadPoolMatch(t, store, compID, "P1-0").ReopenPending)
+
+	// A running write in between must NOT discharge the obligation: the whole
+	// -struct pool overwrite would otherwise blank the flag.
+	w := putScore(t, r, compID, "P1-0", map[string]any{
+		"sideA": "Ryu", "sideB": "Tora", "status": "running",
+		"subResults": []map[string]any{
+			kachinukiSub(1, "R-1", "W-1", []string{"M", "K"}, "R-1", "fought"),
+		},
+	})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.True(t, loadPoolMatch(t, store, compID, "P1-0").ReopenPending,
+		"a running write must not discharge the outstanding justification")
+
+	// A client cannot clear its own obligation by sending the flag.
+	w = putScore(t, r, compID, "P1-0", map[string]any{
+		"sideA": "Ryu", "sideB": "Tora", "status": "running",
+		"reopenPending": false,
+		"subResults": []map[string]any{
+			kachinukiSub(1, "R-1", "W-1", []string{"M", "K"}, "R-1", "fought"),
+		},
+	})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.True(t, loadPoolMatch(t, store, compID, "P1-0").ReopenPending,
+		"reopenPending is server-owned: a client-supplied false must be ignored")
+
+	// Ending it again without a reason is refused, and the match stays open so
+	// the operator can retry with one.
+	w = putScore(t, r, compID, "P1-0", endKachinukiPoolMatch(""))
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), "correctionReason")
+	assert.Contains(t, w.Body.String(), "reopened",
+		"the message must name the cause; the operator did not knowingly perform a 'correction'")
+	m := loadPoolMatch(t, store, compID, "P1-0")
+	assert.Equal(t, state.MatchStatusRunning, m.Status, "a refused End must leave the match open")
+	assert.True(t, m.ReopenPending, "the obligation survives a refused End")
+
+	// With a reason it completes, the reason is recorded, and nothing is
+	// outstanding any more.
+	const reason = "Ended by mistake: bout 2 was still to be fought"
+	w = putScore(t, r, compID, "P1-0", endKachinukiPoolMatch(reason))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	m = loadPoolMatch(t, store, compID, "P1-0")
+	assert.Equal(t, state.MatchStatusCompleted, m.Status)
+	assert.Equal(t, reason, m.CorrectionReason, "the justification must be persisted")
+	assert.False(t, m.ReopenPending, "the flag must be cleared once the record exists")
+}
+
+// TestReopenHandler_PendingReasonEnforcedOnBulkScore pins the SAME rule on the
+// bulk-score path. Both paths share applyCorrectionReasonUnderTx precisely so
+// the audit gate cannot be walked around by picking the other endpoint.
+func TestReopenHandler_PendingReasonEnforcedOnBulkScore(t *testing.T) {
+	compID := "kachinuki-reopen-bulk"
+	r, store := setupKachinukiScoreServer(t, compID)
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{completedKachinukiPoolMatch()}))
+	require.Equal(t, http.StatusOK, postReopenRaw(t, r, compID, "P1-0", nil).Code)
+
+	bulk := func(reason string) *httptest.ResponseRecorder {
+		t.Helper()
+		body, err := json.Marshal([]state.MatchResult{{
+			ID: "P1-0", SideA: "Ryu", SideB: "Tora", Winner: "Ryu",
+			Status: state.MatchStatusCompleted, Decision: "kachinuki-exhaustion",
+			CorrectionReason: reason,
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "R-1", SideB: "W-1", IpponsA: []string{"M", "K"}, Winner: "R-1", Decision: "fought"},
+			},
+		}})
+		require.NoError(t, err)
+		w := httptest.NewRecorder()
+		req, err := http.NewRequest("POST", "/api/competitions/"+compID+"/matches/bulk-score", bytes.NewBuffer(body))
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	w := bulk("")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var noReason struct {
+		Succeeded int `json:"succeeded"`
+		Errors    []struct {
+			MatchID string `json:"matchId"`
+			Error   string `json:"error"`
+		} `json:"errors"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &noReason))
+	assert.Zero(t, noReason.Succeeded, "a reason-less completion of a reopened match must not land")
+	require.Len(t, noReason.Errors, 1)
+	assert.Contains(t, noReason.Errors[0].Error, "reopened")
+	m := loadPoolMatch(t, store, compID, "P1-0")
+	assert.Equal(t, state.MatchStatusRunning, m.Status)
+	assert.True(t, m.ReopenPending)
+
+	w = bulk("Ended by mistake: bulk correction")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var withReason struct {
+		Succeeded int `json:"succeeded"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &withReason))
+	assert.Equal(t, 1, withReason.Succeeded)
+	m = loadPoolMatch(t, store, compID, "P1-0")
+	assert.Equal(t, state.MatchStatusCompleted, m.Status)
+	assert.Equal(t, "Ended by mistake: bulk correction", m.CorrectionReason)
+	assert.False(t, m.ReopenPending, "the flag must be cleared once the record exists")
+}
+
+// TestReopenHandler_PendingReasonEnforcedOnBracketMatch is the bracket half of
+// the same contract. It is a genuinely separate path: the bracket score write
+// copies the payload into the stored BracketMatch field by field and
+// deliberately never reads ReopenPending off the client-supplied body, so
+// without clearReopenPendingUnderTx the flag would survive the justified End
+// and demand a fresh reason on every subsequent write.
+func TestReopenHandler_PendingReasonEnforcedOnBracketMatch(t *testing.T) {
+	compID := "kachinuki-reopen-bracket-pending"
+	r, store := setupKachinukiScoreServer(t, compID)
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				{
+					ID: "R1M0", SideA: "Ryu", SideB: "Tora", Status: state.MatchStatusCompleted,
+					Winner: "Ryu", Decision: "kachinuki-exhaustion",
+					SubResults: []state.SubMatchResult{
+						{Position: 1, SideA: "R-1", SideB: "W-1", IpponsA: []string{"M"}, Winner: "R-1", Decision: "fought"},
+					},
+				},
+			},
+		},
+	}))
+
+	loadBM := func() state.BracketMatch {
+		t.Helper()
+		b, err := store.LoadBracket(compID)
+		require.NoError(t, err)
+		require.NotNil(t, b)
+		return b.Rounds[0][0]
+	}
+
+	require.Equal(t, http.StatusOK, postReopenRaw(t, r, compID, "R1M0", nil).Code)
+	bm := loadBM()
+	require.Equal(t, state.MatchStatusRunning, bm.Status)
+	assert.True(t, bm.ReopenPending, "a reason-less bracket reopen must flag the justification as outstanding")
+
+	end := func(reason string) map[string]any {
+		payload := map[string]any{
+			"sideA": "Ryu", "sideB": "Tora", "winner": "Ryu",
+			"status": "completed", "decision": "kachinuki-exhaustion",
+			"subResults": []map[string]any{
+				kachinukiSub(1, "R-1", "W-1", []string{"M"}, "R-1", "fought"),
+			},
+		}
+		if reason != "" {
+			payload["correctionReason"] = reason
+		}
+		return payload
+	}
+
+	w := putScore(t, r, compID, "R1M0", end(""))
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), "reopened")
+	assert.Equal(t, state.MatchStatusRunning, loadBM().Status, "a refused End must leave the match open")
+
+	const reason = "Ended by mistake: semifinal was still live"
+	w = putScore(t, r, compID, "R1M0", end(reason))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	bm = loadBM()
+	assert.Equal(t, state.MatchStatusCompleted, bm.Status)
+	assert.Equal(t, reason, bm.CorrectionReason)
+	assert.False(t, bm.ReopenPending, "the bracket flag must be cleared once the record exists")
+
+	// And the next ordinary correction is gated only by the normal
+	// completed -> completed rule, not by a stale reopen obligation.
+	w = putScore(t, r, compID, "R1M0", end("Scoring error: wrong waza"))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.False(t, loadBM().ReopenPending)
+}
+
+// TestReopenHandler_PendingReasonEnforcedOnBronzeMatch runs the same contract
+// against the bronze (3rd-place) match, which is a SIBLING of bracket.Rounds
+// rather than an element of it. A rounds-only loop never reaches it, so a
+// bronze that was reopened would keep its outstanding justification forever
+// and every later write would be refused — the exact branch-omission bug
+// lookupMatchSnapshot's single traversal exists to prevent.
+func TestReopenHandler_PendingReasonEnforcedOnBronzeMatch(t *testing.T) {
+	compID := "kachinuki-reopen-bronze-pending"
+	r, store := setupKachinukiScoreServer(t, compID)
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{{ID: "F0", SideA: "Kuma", SideB: "Washi", Status: state.MatchStatusScheduled}},
+		},
+		ThirdPlaceMatch: &state.BracketMatch{
+			ID: "B0", SideA: "Ryu", SideB: "Tora", Status: state.MatchStatusCompleted,
+			Winner: "Ryu", Decision: "kachinuki-exhaustion",
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "R-1", SideB: "W-1", IpponsA: []string{"M"}, Winner: "R-1", Decision: "fought"},
+			},
+		},
+	}))
+
+	loadBronze := func() state.BracketMatch {
+		t.Helper()
+		b, err := store.LoadBracket(compID)
+		require.NoError(t, err)
+		require.NotNil(t, b)
+		require.NotNil(t, b.ThirdPlaceMatch)
+		return *b.ThirdPlaceMatch
+	}
+
+	require.Equal(t, http.StatusOK, postReopenRaw(t, r, compID, "B0", nil).Code)
+	assert.True(t, loadBronze().ReopenPending)
+
+	end := func(reason string) map[string]any {
+		payload := map[string]any{
+			"sideA": "Ryu", "sideB": "Tora", "winner": "Ryu",
+			"status": "completed", "decision": "kachinuki-exhaustion",
+			"subResults": []map[string]any{
+				kachinukiSub(1, "R-1", "W-1", []string{"M"}, "R-1", "fought"),
+			},
+		}
+		if reason != "" {
+			payload["correctionReason"] = reason
+		}
+		return payload
+	}
+
+	w := putScore(t, r, compID, "B0", end(""))
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), "reopened")
+	assert.Equal(t, state.MatchStatusRunning, loadBronze().Status)
+
+	const reason = "Ended by mistake: bronze was still live"
+	w = putScore(t, r, compID, "B0", end(reason))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	bronze := loadBronze()
+	assert.Equal(t, state.MatchStatusCompleted, bronze.Status)
+	assert.Equal(t, reason, bronze.CorrectionReason)
+	assert.False(t, bronze.ReopenPending, "the bronze flag must be cleared once the record exists")
 }
 
 // TestReopenHandler_ReasonSurvivesTheReEnd is the audit-trail regression

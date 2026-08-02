@@ -1661,6 +1661,22 @@ paths:
                           delivery, or rejected because the match is already
                           completed. Omitted on normal responses.
                     required: [stale]
+        '400':
+          description: |
+            Invalid payload, or a completion that rewrites a result the
+            operator had already declared final without justifying it. The
+            latter needs a non-empty `correctionReason` in two cases:
+            - the match is already `completed` (a correction);
+            - the match carries `reopenPending`, i.e. it was reopened via
+              `POST .../reopen` without a reason. Its stored status is
+              `running`, so the write looks like a first completion, but the
+              finalized result it replaces was discarded by that reopen. A
+              successful completion records the reason and clears
+              `reopenPending`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '409':
           description: |
             Conflict; one of six codes returned in the `error` field:
@@ -1772,39 +1788,47 @@ paths:
         without a valid `X-Tournament-Password` gets 401. Broadcasts a
         `match_updated` event.
 
-        Discarding a finalized result is audited: a non-empty `reason` is
-        REQUIRED in the body, the same class of justification as the
-        `correctionReason` on a completed score write, and it is recorded
-        with the result.
+        Discarding a finalized result is audited, but NOT at this step:
+        `reason` is optional and the request body may be omitted entirely, so
+        reopening is one tap for an operator who ended a match by mistake at a
+        shiaijo. When no reason is given the match is flagged `reopenPending`
+        and the justification is collected on the next completion instead: a
+        `PUT .../score` that completes a `reopenPending` match is rejected with
+        400 unless it carries a `correctionReason`, which then clears the flag.
+        The audit record is therefore written later than the action it
+        justifies, never skipped. A `reason` supplied here is recorded
+        immediately as the match's `correctionReason` and leaves nothing
+        outstanding (`reopenPending` stays false).
       security:
         - TournamentPassword: []
       parameters:
         - $ref: '#/components/parameters/CompetitionId'
         - $ref: '#/components/parameters/MatchId'
       requestBody:
-        required: true
+        required: false
         content:
           application/json:
             schema:
               type: object
-              required: [reason]
               properties:
                 reason:
                   type: string
-                  minLength: 1
                   maxLength: 200
                   description: >
-                    Why the recorded result is being discarded (e.g. "Ended
-                    too early"). Trimmed server-side, so whitespace-only is
-                    rejected as empty. Same 200-character cap as
-                    `decisionReason` / `correctionReason`.
+                    Optional. Why the recorded result is being discarded (e.g.
+                    "Ended too early"). Trimmed server-side; absent, empty or
+                    whitespace-only all mean "no reason given", which sets
+                    `reopenPending` instead of rejecting the request. Same
+                    200-character cap as `decisionReason` /
+                    `correctionReason`.
       responses:
         '200':
           description: Match reopened (status back to `running`).
         '400':
           description: >
-            The `reason` is missing, empty after trimming, or longer than 200
-            characters; or the competition is not a kachinuki team competition.
+            The `reason` is longer than 200 characters, the body is present but
+            malformed JSON, or the competition is not a kachinuki team
+            competition.
           content:
             application/json:
               schema:
@@ -3524,6 +3548,26 @@ components:
           type: string
           maxLength: 200
           description: Free-text operator note for the decision.
+        correctionReason:
+          type: string
+          maxLength: 200
+          description: >
+            Audit justification for rewriting a result the operator had already
+            declared final. Required when the write completes a match that is
+            already `completed` (a correction) or that carries `reopenPending`;
+            otherwise it is dropped, so the field always means "this rewrote a
+            finalized result". A stored reason is carried forward across
+            subsequent writes.
+        reopenPending:
+          type: boolean
+          readOnly: true
+          description: >
+            True when the match was reopened via `POST .../reopen` without a
+            reason and still owes its audit justification. While set, a write
+            that completes the match must carry a `correctionReason` (400
+            otherwise); a successful one records the reason and clears this
+            flag. Server-owned: a client-supplied value is ignored on every
+            write.
         encho:
           $ref: '#/components/schemas/EnchoMetadata'
         status:
@@ -3696,6 +3740,14 @@ components:
         decidedByHantei:
           type: boolean
           description: True when the match winner was declared by referee hantei on a tied bout (overtime not required).
+        reopenPending:
+          type: boolean
+          readOnly: true
+          description: >
+            Mirrors `MatchResult.reopenPending` for elimination-stage matches:
+            the match was reopened without a reason and still owes its audit
+            justification, so the next completing write must carry a
+            `correctionReason`. Persisted in bracket.json.
         subResults:
           type: array
           description: >

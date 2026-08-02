@@ -527,13 +527,25 @@ var (
 // back to running, match-level winner/decision cleared, the full bout log
 // kept, so the operator can add more bouts and later End match again.
 //
-// `reason` is the MANDATORY audit justification, persisted as the match's
-// CorrectionReason. Reopening is the only way to rewrite a finalized
-// kachinuki result without going through the score path's correction gate
-// (which requires a correctionReason of its own), so without this the
-// result could be changed with no record of who changed it or why. The
-// caller (the reopen handler) rejects an empty/oversized reason; the
-// value is trimmed here so a padded reason can never be persisted.
+// `reason` is an OPTIONAL audit justification, persisted as the match's
+// CorrectionReason when supplied. Reopening is the only way to rewrite a
+// finalized kachinuki result without going through the score path's
+// correction gate (which requires a correctionReason of its own), so the
+// justification cannot simply be dropped — but demanding it HERE was too
+// much friction: an operator who ended a match by mistake, at a shiaijo,
+// mid-session, had to compose a reason before they could get back in.
+// Reopen is therefore one tap, and when no reason is given the match is
+// flagged ReopenPending instead: the score path then refuses to complete it
+// again without a correctionReason and clears the flag once one lands
+// (mp-gmcg). The audit record is written LATER than the action it
+// justifies; it is never written at all only if the match is never ended
+// again, in which case there is no rewritten result to justify.
+//
+// The flag is persisted rather than held client-side because the score
+// editor mounts per match: navigating away and back would lose it.
+//
+// A supplied reason is trimmed here so a padded reason can never be
+// persisted; the caller (the reopen handler) rejects an oversized one.
 //
 // COURT GATE. Reopening puts the match back in the RUNNING state, and
 // court exclusivity keys purely on `status == running`
@@ -631,6 +643,7 @@ func (e *Engine) ReopenKachinukiMatch(compID, matchID, reason string) error {
 				m.DecisionBy = ""
 				m.DecisionReason = ""
 				m.CorrectionReason = reason
+				m.ReopenPending = reopenPending(reason)
 				// SavePoolMatches funnels through the normal save chokepoint,
 				// so standings caches invalidate via the usual version bump.
 				return tx.SavePoolMatches(compID, poolMatches)
@@ -691,6 +704,18 @@ func reopenBracketMatch(bm *state.BracketMatch, reason string) {
 	bm.DecisionBy = ""
 	bm.DecisionReason = ""
 	bm.CorrectionReason = reason
+	bm.ReopenPending = reopenPending(reason)
+}
+
+// reopenPending reports whether a reopen still OWES an audit justification:
+// true when no reason was supplied (the score path collects it on the next
+// completion), false when the operator already gave one so this reopen is
+// justified as it happens. One helper rather than three inline `reason == ""`
+// tests, so the pool, bracket-round and bronze homes cannot drift — the same
+// reason ReopenKachinukiMatch keeps its preconditions in a single `guard`
+// closure.
+func reopenPending(reason string) bool {
+	return reason == ""
 }
 
 // retractPropagatedWinner undoes what propagateBracketWinner did for the

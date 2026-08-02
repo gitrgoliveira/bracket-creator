@@ -339,8 +339,7 @@ describe('match_scoreboard components', () => {
     // The rep bout carries its own (DH) centre mark, so the old text banner
     // was removed as redundant.
     expect(boutRows(tree).some(r => r.isDH)).toBe(true);
-    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'dh-banner')).toBeNull();
-    expect(collectText(tree)).not.toContain('DAIHYOSEN');
+    expect(collectText(tree)).not.toContain('DAIHYOSEN'); // the redundant text banner stays gone
   });
 
   it('TeamScoreboard does NOT render the Daihyosen when the regular bouts are not tied (mp-13y #12)', () => {

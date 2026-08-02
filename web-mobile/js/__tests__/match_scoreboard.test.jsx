@@ -289,7 +289,7 @@ describe('match_scoreboard components', () => {
     const text = collectText(tree);
     expect(text).toContain('IV'); expect(text).toContain('PW');
     expect(boutRows(tree).length).toBe(5); // 2 scored + 3 padded positions
-    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'dh-banner')).toBeNull();
+    expect(boutRows(tree).some(r => r.isDH)).toBe(false); // no rep bout when showDH:false
   });
 
   it('TeamScoreboard highlights the first unplayed bout as "now" across the padded positions when RUNNING (mp-1oy3)', () => {
@@ -330,15 +330,17 @@ describe('match_scoreboard components', () => {
     expect(boutRows(tree).map(r => r.state)).toEqual(['now', 'queued', 'queued', 'queued', 'queued']);
   });
 
-  it('TeamScoreboard renders the DAIHYOSEN banner + rep-bout row when showDH AND the match is tied', () => {
+  it('TeamScoreboard renders the rep-bout row (no redundant DAIHYOSEN text banner) when showDH AND the match is tied', () => {
     const subResults = [
       { position: 1, ipponsB: ['M'], ipponsA: ['M'] },   // 1-1 → IV 0-0, PW 1-1 → tied
       { position: -1, ipponsB: ['M'], ipponsA: [] },
     ];
     const tree = runtime.mount(TeamScoreboard, { subResults, lineupA: null, lineupB: null, teamSize: 5, showDH: true });
-    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'dh-banner')).toBeTruthy();
-    expect(collectText(tree)).toContain('DAIHYOSEN');
+    // The rep bout carries its own (DH) centre mark, so the old text banner
+    // was removed as redundant.
     expect(boutRows(tree).some(r => r.isDH)).toBe(true);
+    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'dh-banner')).toBeNull();
+    expect(collectText(tree)).not.toContain('DAIHYOSEN');
   });
 
   it('TeamScoreboard does NOT render the Daihyosen when the regular bouts are not tied (mp-13y #12)', () => {
@@ -348,9 +350,8 @@ describe('match_scoreboard components', () => {
       { position: -1, sideA: 'Aka T', sideB: 'Shiro T', winner: 'Aka T' }, // stale/invalid DH
     ];
     const tree = runtime.mount(TeamScoreboard, { subResults, lineupA: null, lineupB: null, teamSize: 5, showDH: true });
-    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'dh-banner')).toBeNull();
-    expect(collectText(tree)).not.toContain('DAIHYOSEN');
     expect(boutRows(tree).some(r => r.isDH)).toBe(false);
+    expect(collectText(tree)).not.toContain('DAIHYOSEN');
   });
 
   it('TeamScoreboard renders teamSize numbered rows when there are no bouts yet (mp-13y #4/#6)', () => {

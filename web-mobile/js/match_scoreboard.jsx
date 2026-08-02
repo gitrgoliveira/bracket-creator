@@ -443,22 +443,18 @@ export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH,
           teamSize={teamSize} isDH={false} state={rowState(i)} matchSideA={matchSideA} matchSideB={matchSideB} kachinuki={!!kachinuki} />
       ))}
 
-      {/* Daihyosen banner + rep bout (knockout tie only). The DH sub is
-          enriched with the parent team names (teamB=shiro, teamA=aka) so
-          centreMarks can resolve a winner key stored as the TEAM name to
-          the correct side: see centreMarks for the fallback chain. */}
-      {renderDH && (
-        <>
-          <div className="msb-row msb-row--dh-banner" data-testid="dh-banner">
-            <span className="msb-dh-tag">DAIHYOSEN</span>
-          </div>
-          {dhSub
-            ? <BoutSubRow sub={{ ...dhSub, teamB: shiroName, teamA: akaName }}
-                index={regular.length} lineupA={lineupA} lineupB={lineupB}
-                teamSize={teamSize} isDH={true} state={isRunning ? "now" : "done"} matchSideA={matchSideA} matchSideB={matchSideB} />
-            : <div className="msb-dh-pending" data-testid="tvd-dh-pending">Daihyosen pending</div>}
-        </>
-      )}
+      {/* Rep bout (knockout tie only). No separate "DAIHYOSEN" text banner:
+          the rep-bout row already carries the (DH) centre mark and a top-
+          border divider (.msb-row--dh / .msb-dh-pending), so the banner was
+          redundant. The DH sub is enriched with the parent team names
+          (teamB=shiro, teamA=aka) so centreMarks can resolve a winner key
+          stored as the TEAM name to the correct side: see centreMarks for
+          the fallback chain. */}
+      {renderDH && (dhSub
+        ? <BoutSubRow sub={{ ...dhSub, teamB: shiroName, teamA: akaName }}
+            index={regular.length} lineupA={lineupA} lineupB={lineupB}
+            teamSize={teamSize} isDH={true} state={isRunning ? "now" : "done"} matchSideA={matchSideA} matchSideB={matchSideB} />
+        : <div className="msb-dh-pending" data-testid="tvd-dh-pending">Daihyosen pending</div>)}
     </div>
   );
 }

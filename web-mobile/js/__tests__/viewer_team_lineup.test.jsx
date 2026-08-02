@@ -235,8 +235,8 @@ describe('viewer: BoutSubRow canonical layout (mp-13y)', () => {
   });
 
   it('renders the DH row with the sub-row-dh testid (position -1)', () => {
-    // The "DAIHYOSEN" banner is rendered by TeamScoreboard, not the bout row;
-    // the rep-bout row itself carries data-testid="sub-row-dh".
+    // The rep-bout row carries data-testid="sub-row-dh" and its own (DH) centre
+    // mark; there is no separate "DAIHYOSEN" text banner.
     const sub = { position: -1, ipponsA: ['K'], ipponsB: [], decidedByHantei: false };
     const tree = runtime.mount(BoutSubRow, { sub, index: 0, lineupA: null, lineupB: null, teamSize: 3, isDH: true });
     expect(collectText(tree)).not.toContain('Match -1');

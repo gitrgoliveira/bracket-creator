@@ -151,8 +151,16 @@ function winnerSideLR(m) {
   const nameOf = s => (s && typeof s === "object" ? s.name : s);
   const wId = idOf(m.winner);
   const wName = nameOf(m.winner);
-  if ((wId && wId === idOf(m.sideB)) || (wName && wName === nameOf(m.sideB))) return "left";
-  if ((wId && wId === idOf(m.sideA)) || (wName && wName === nameOf(m.sideA))) return "right";
+  // Prefer id equality: two different-dojo competitors may share a display
+  // name, so a name match must NEVER override the ids that disambiguate them
+  // (mirrors sideAWon in api_serializers.jsx). Fall back to name only when an
+  // id is absent on the winner or on that side.
+  const matchesSide = side => {
+    const sId = idOf(side);
+    return (wId && sId) ? wId === sId : (!!wName && wName === nameOf(side));
+  };
+  if (matchesSide(m.sideB)) return "left";
+  if (matchesSide(m.sideA)) return "right";
   return null;
 }
 

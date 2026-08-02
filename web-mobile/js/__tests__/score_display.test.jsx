@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
-import { boutMiddle, enchoLabel, formatIpponsScore, ipponsFromScore, matchStateCell } from '../bracket.jsx';
+import { boutMiddle, enchoLabel, formatIpponsScore, ipponsFromScore, matchStateCell, winnerSideLR } from '../bracket.jsx';
 
 // Convention enforced across all match-list views:
 //   SHIRO (sideB) is always displayed on the LEFT.
@@ -415,5 +415,39 @@ describe('enchoLabel Go/JS mirror (mp-m4bn)', () => {
       enchoLabel({ periodCount }),
       'JS enchoLabel disagrees with the shared table; update BOTH renderers, not just this one'
     ).toBe(label);
+  });
+});
+
+// winnerSideLR must decide by participant id when both sides carry ids —
+// two different-dojo competitors may share a display name (allowed:
+// CheckDuplicateEntriesByNameDojo rejects only same-name AND same-dojo), so
+// a name match must never override the id that disambiguates them. Regression
+// for the id/name OR-precedence bug that inverted the score string (and thus
+// the maru/Kiken/Ht placement) for a same-name bout.
+describe('winnerSideLR: id disambiguates same-name opponents', () => {
+  const shiroWon = { sideA: { id: 'a1', name: 'Ken' }, sideB: { id: 'b1', name: 'Ken' }, winner: { id: 'b1', name: 'Ken' } };
+  const akaWon   = { sideA: { id: 'a1', name: 'Ken' }, sideB: { id: 'b1', name: 'Ken' }, winner: { id: 'a1', name: 'Ken' } };
+
+  it('same-name bout resolves to the winner by id (SHIRO=B=left, AKA=A=right)', () => {
+    expect(winnerSideLR(shiroWon)).toBe('left');
+    expect(winnerSideLR(akaWon)).toBe('right');
+  });
+
+  it('the inverted score string is fixed: aka winning a same-name kiken reads "Kiken vs ○○"', () => {
+    // sideB (shiro/left) withdrew, sideA (aka/right) won by default. Before the
+    // fix winnerSideLR returned "left", rendering "○○ vs Kiken" (winner and
+    // withdrawer swapped).
+    const s = formatIpponsScore([], [], null, 'kiken-voluntary', null, false, winnerSideLR(akaWon));
+    expect(s).toBe('Kiken vs ○○');
+  });
+
+  it('falls back to name when an id is absent (bare-string winner / legacy data)', () => {
+    expect(winnerSideLR({ sideA: { id: 'a1', name: 'Alice' }, sideB: { id: 'b1', name: 'Bob' }, winner: 'Bob' })).toBe('left');
+    expect(winnerSideLR({ sideA: 'Alice', sideB: 'Bob', winner: 'Alice' })).toBe('right');
+  });
+
+  it('returns null with no winner or a drifted winner', () => {
+    expect(winnerSideLR({ sideA: { id: 'a1', name: 'Alice' }, sideB: { id: 'b1', name: 'Bob' } })).toBe(null);
+    expect(winnerSideLR({ sideA: { id: 'a1', name: 'Alice' }, sideB: { id: 'b1', name: 'Bob' }, winner: { id: 'c1', name: 'Carol' } })).toBe(null);
   });
 });

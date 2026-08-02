@@ -1009,7 +1009,7 @@ type BracketMatch struct {
 	// bracket.json. Server-owned: the score write deliberately does NOT copy
 	// this field off the client-supplied MatchResult (unlike ResultSource /
 	// CorrectionReason), so only the reopen path and the handler's
-	// clearReopenPendingUnderTx ever move it.
+	// dischargeReopenPendingUnderTx ever move it.
 	ReopenPending bool `json:"reopenPending,omitempty"`
 	// Display metadata (mp-7f2w); additive, computed at generation time so the
 	// viewer can render the bracket with the SAME effective-round columns as the

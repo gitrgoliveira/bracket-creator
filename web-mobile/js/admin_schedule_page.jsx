@@ -122,6 +122,25 @@ const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange })
 });
 AdminTWMatch.displayName = "AdminTWMatch";
 
+// estimatorDefaultBouts: how many bouts the estimator should assume per team
+// match, given the team size configured for the competition.
+//
+// N under BOTH team formats, because that is what each actually fights:
+//   - Regular: every position plays its opposite number exactly once. N bouts.
+//   - Kachinuki: the server treats this as the NOMINAL N and derives the
+//     N (one fighter sweeps) .. 2N-1 (every bout retires one) range itself,
+//     so handing it 2N-1 would make it price a range off the worst case.
+//
+// This is the client mirror of the server's own default: perMatchElapsedMinutes
+// (engine/scheduler_slots.go) uses `bouts = comp.TeamSize`, and that is the
+// function the REAL schedule is laid out with. Extracted and named so the two
+// can be compared at a glance — the panel previously seeded 2N-1 for regular
+// team matches, which at N=5 priced 9 bouts against the scheduler's 5 and
+// inflated the whole estimate by ~80%.
+export function estimatorDefaultBouts(teamSize) {
+  return teamSize > 0 ? teamSize : 0;
+}
+
 export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewerMode, password }) {
   const [picked, setPicked] = useStateA([]);
   const [dojoText, setDojoText] = useStateA("");
@@ -156,12 +175,12 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
   const [estLoading, setEstLoading] = useStateA(false);
 
   useEffectA(() => {
-    // Kachinuki: the bouts field is the nominal team size N (the server
-    // derives the N..2N-1 range from it). Fixed team formats keep the
-    // legacy 2N-1 default.
-    const newBouts = estTeamSize > 0 ? (estKachinuki ? estTeamSize : 2 * estTeamSize - 1) : 0;
+    const newBouts = estimatorDefaultBouts(estTeamSize);
     setEstBoutsPerTeamMatch(prev => prev === newBouts ? prev : newBouts);
-  }, [estTeamSize, estKachinuki]);
+    // estKachinuki is deliberately NOT a dependency: the default is now the
+    // same under both formats, so toggling it must not stomp a bout count the
+    // operator typed by hand.
+  }, [estTeamSize]);
 
   useEffectA(() => {
     if (!estOpen) {

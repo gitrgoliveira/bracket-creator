@@ -29,6 +29,10 @@ What Correct offers depends on the format:
 - For most matches, the editor reopens with the recorded scores ready to edit. Adjust the ippons, fouls, or winner, then use **Save correction**. A short reason is required so the change stays traceable.
 - For a kachinuki team encounter, the editor shows the recorded bouts with a **Reopen match** button. Reopen is immediate: one tap returns the encounter to running with its bout log intact, so you can carry on or fix a bout. A reason is still kept with the result, but you are asked for it when you end the match again rather than on the way back in, so correcting a mistake never costs you more than a tap.
 
+    You are asked for that reason however you end it. If the encounter finishes with a withdrawal or a no-show instead of a scored bout, the kiken or fusenpai panel asks for the reason in the same way, and the **Record** button stays unavailable until you give one.
+
+    ![The Fusenpai panel on a reopened encounter: a side picker, a required reason box prompting "Why is this match being ended again?", a note that the match was reopened so ending it again needs a reason, and a Record button held back until the reason is filled in.](../../screenshots/decision-reason-after-reopen.png)
+
 ![Ending a reopened encounter: the editor asks for a reason, with "Ended by mistake" already selected and a note box beside it](../../screenshots/kachinuki-reopen-reason.png)
 
 Reopening puts the encounter back into play, and a court can only run one match at a time. If another match is already running on that court, the editor names it and offers you two ways forward: leave it running, or clear its score, send it back to the queue and reopen in a single step. Sending a match back to the queue clears any score already entered for it, so if that match is part way through, finish it first instead.

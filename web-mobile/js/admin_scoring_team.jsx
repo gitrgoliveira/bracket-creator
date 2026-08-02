@@ -2041,6 +2041,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               sideB={{ name: m.sideB?.name || m.sideB }}
               defaultSide="shiro"
               askReason={window.isKikenDecision(decisionPromptKind)}
+              // Same server-owned obligation the End-match flow honours via
+              // reopenReasonRequired: a decision finalizes the match too, so
+              // POST /decision rejects it without a reason. Rides m.reopenPending
+              // (not local state) for the same reason the End prompt does — the
+              // editor remounts per match and a client-only flag would evaporate.
+              requireReason={reopenReasonRequired}
               submitting={decisionSubmitting}
               onCancel={() => { setDecisionPromptKind(""); setDecisionErr(""); }}
               onSubmit={({ decisionBy, decisionReason }) => submitDecision(decisionPromptKind, { decisionBy, decisionReason })}

@@ -286,6 +286,42 @@ describe('kachinuki reopen: a busy court gets a remedy, not a dead end', () => {
     expect(window.API.reopenMatch).toHaveBeenCalledTimes(1);
   });
 
+  // POST /decision is the OTHER way to finalize a match, so the server demands
+  // the outstanding reason there too. The client has to ASK for it: the reason
+  // box is normally rendered only for kiken, so on a reopened encounter a
+  // fusenpai had no field at all and the operator met a 400 they could not
+  // satisfy from the UI. These pin the prompt, not just the payload.
+  it('asks for the reason on a fusenpai after a reason-less reopen', async () => {
+    await renderEditor({ match: reopenedKachinukiMatch() });
+    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-fusenpai-button')); });
+
+    // The box exists at all (it does not for a non-reopened fusenpai) and says
+    // it is required, naming the reopen as the cause.
+    const input = screen.getByTestId('decision-reason');
+    expect(input).toBeTruthy();
+    expect(screen.getByText(/Reason \(required/)).toBeTruthy();
+    expect(screen.getByText(/reopened, so ending it again needs a reason/)).toBeTruthy();
+
+    // Record is held back while it is empty, so the operator cannot walk into
+    // the server's rejection.
+    const record = screen.getByRole('button', { name: 'Record' });
+    expect(record.disabled).toBe(true);
+    await act(async () => { fireEvent.input(input, { target: { value: '   ' } }); });
+    expect(record.disabled).toBe(true);
+    await act(async () => { fireEvent.input(input, { target: { value: 'Ended by mistake' } }); });
+    expect(record.disabled).toBe(false);
+  });
+
+  it('leaves the reason optional when the match was not reopened', async () => {
+    // Blast radius: the ordinary decision flow must stay reasonless. Gating
+    // every decision would be a worse regression than the hole it closed.
+    await renderEditor({ match: completedKachinukiMatch({ status: 'running', winner: null }) });
+    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-fusenpai-button')); });
+
+    expect(screen.queryByTestId('decision-reason')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Record' }).disabled).toBe(false);
+  });
+
   it('recovers when the requeue lands but the retried reopen still fails', async () => {
     const onClose = vi.fn();
     window.API.reopenMatch = vi.fn()

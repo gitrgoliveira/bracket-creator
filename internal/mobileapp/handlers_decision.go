@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -133,19 +134,46 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 		// handle, so the per-comp lock is acquired exactly once for the
 		// entire mutation.
 		var (
-			result *state.MatchResult
-			status *domain.CompetitorStatus
-			engErr error
+			result    *state.MatchResult
+			status    *domain.CompetitorStatus
+			engErr    error
+			reasonErr *ValidationError
 		)
+		reason := strings.TrimSpace(req.DecisionReason)
 		txErr := tx.WithTransaction(id, func(stx state.StoreTx) error {
+			// mp-gmcg: a reason-less kachinuki reopen DEFERS its audit
+			// justification to whatever finalizes the match next. PUT /score
+			// collects it (applyCorrectionReasonUnderTx); this endpoint is the
+			// OTHER way to finalize a match, so it has to collect it too — a
+			// kiken recorded on a reopened encounter is still a result
+			// replacing one the operator had already declared final.
+			//
+			// Checked in-tx, before the engine write, so the read is race-free
+			// against a concurrent finalization and a rejection costs no write.
+			snap, _ := matchSnapshotFor(stx, id, mid)
+			if snap.ReopenPending && reason == "" {
+				reasonErr = &ValidationError{Field: "decisionReason", Message: ReopenNeedsReasonMessage}
+				return nil
+			}
 			result, status, engErr = eng.RecordDecisionTx(stx, id, mid, req.Decision, req.DecisionBy, req.DecisionReason, req.Encho, req.Force)
 			if result != nil && result.ResultSource == "" {
 				result.ResultSource = "admin"
+			}
+			// Discharge only behind a write that actually landed: the closure
+			// returns nil on engErr (the transaction commits regardless, engErr
+			// is surfaced below), so an unguarded call would clear the
+			// obligation for a rejected decision.
+			if engErr == nil && snap.ReopenPending {
+				return dischargeReopenPendingUnderTx(stx, id, mid, reason)
 			}
 			return nil
 		})
 		if txErr != nil {
 			internalError(c, txErr)
+			return
+		}
+		if reasonErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": reasonErr.Error()})
 			return
 		}
 		if engErr != nil {

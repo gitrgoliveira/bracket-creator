@@ -635,15 +635,7 @@ func (e *Engine) ReopenKachinukiMatch(compID, matchID, reason string) error {
 					opErr = gerr
 					return nil
 				}
-				m := &poolMatches[i]
-				m.Status = state.MatchStatusRunning
-				m.Winner = ""
-				m.WinnerID = ""
-				m.Decision = ""
-				m.DecisionBy = ""
-				m.DecisionReason = ""
-				m.CorrectionReason = reason
-				m.ReopenPending = reopenPending(reason)
+				reopenPoolMatch(&poolMatches[i], reason)
 				// SavePoolMatches funnels through the normal save chokepoint,
 				// so standings caches invalidate via the usual version bump.
 				return tx.SavePoolMatches(compID, poolMatches)
@@ -697,12 +689,67 @@ func (e *Engine) ReopenKachinukiMatch(compID, matchID, reason string) error {
 // reopenBracketMatch flips a completed bracket match back to running,
 // clearing the match-level outcome while keeping the bout log, and stamps
 // the operator's audit reason (see ReopenKachinukiMatch).
+// reopenPoolMatch is reopenBracketMatch's twin for a pool/league match. Same
+// rule, same field set, different struct: MatchResult carries the scoreline as
+// IpponsA/IpponsB (BracketMatch renders it into ScoreA/ScoreB strings), adds
+// WinnerID and the rep-bout nominations, and holds DecidedByHantei as a
+// *bool where the bracket has a plain bool. See reopenBracketMatch for why
+// each of these is verdict rather than bout record.
+//
+// RepPlayerA/B name who fought a pool daihyosen. That bout's own record lives
+// in SubResults like any other; these two fields are the discarded verdict's
+// nomination for it, so they go with the rest of the verdict.
+func reopenPoolMatch(m *state.MatchResult, reason string) {
+	m.Status = state.MatchStatusRunning
+	m.Winner = ""
+	m.WinnerID = ""
+	m.IpponsA = nil
+	m.IpponsB = nil
+	m.Decision = ""
+	m.DecisionBy = ""
+	m.DecisionReason = ""
+	m.Encho = nil
+	m.DecidedByHantei = nil
+	m.ResultSource = ""
+	m.RepPlayerA = ""
+	m.RepPlayerB = ""
+	m.CorrectionReason = reason
+	m.ReopenPending = reopenPending(reason)
+}
+
+// reopenBracketMatch discards the ENCOUNTER-LEVEL VERDICT and keeps the BOUT
+// LOG. Those are separate things in the data model, which is what makes this
+// safe: every fact about a bout that was actually fought — who fought it
+// (SideA/SideB), what they struck, hansoku, hantei, whether it went to encho —
+// lives on the SubMatchResult for that bout (state/models.go). SubResults is
+// therefore untouched here, and all of it survives a reopen.
+//
+// Everything cleared below is the discarded verdict ABOUT those bouts, not a
+// record OF them: the encounter winner, the match-level default-win scoreline
+// (the FIK Art. 32 maru fill a kiken/fusenpai writes at match level), the
+// decision, the match-level encho/hantei state describing the bout in progress
+// when the operator ended it, and the provenance stamps for a result that no
+// longer exists (IsOverridden, ResultSource). Leaving those behind produced a
+// match that was running yet still advertised a winner, a scoreline, and a
+// manual-override badge inherited from the result the reopen threw away.
+//
+// This is deliberately the same field set RevertMatchToQueue clears
+// (engine/scoring.go) MINUS SubResults, which requeue drops and reopen exists
+// to preserve, and minus CorrectionReason/ReopenPending, which the reopen is
+// itself setting. Keep the two lists in step: a field worth clearing when a
+// match goes back to the queue is worth clearing when it goes back into play.
 func reopenBracketMatch(bm *state.BracketMatch, reason string) {
 	bm.Status = state.MatchStatusRunning
 	bm.Winner = ""
+	bm.ScoreA = ""
+	bm.ScoreB = ""
 	bm.Decision = ""
 	bm.DecisionBy = ""
 	bm.DecisionReason = ""
+	bm.Encho = nil
+	bm.DecidedByHantei = false
+	bm.IsOverridden = false
+	bm.ResultSource = ""
 	bm.CorrectionReason = reason
 	bm.ReopenPending = reopenPending(reason)
 }

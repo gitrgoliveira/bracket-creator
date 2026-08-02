@@ -84,7 +84,9 @@ When the last bout is tied, the editor offers every legitimate way forward and y
 
 There is no representative bout (daihyosen) in kachinuki: a tied pairing that must produce a result is settled by encho on that same bout, not by a separate rep bout.
 
-If you finish an encounter too early or record the wrong result, reopen it. Open the completed match and use **Reopen match**: a single tap returns the encounter to in progress with its bouts kept, so you can add or rescore bouts and end it again. Reopening discards a result that has already been recorded, so a reason is still kept with the result, but it is asked for when you end the match again rather than before you can get back in. In a knockout, reopening also rolls back the next-round slot that this result had filled, as long as that later match has not started.
+If you finish an encounter too early or record the wrong result, reopen it. Open the completed match and use **Reopen match**: a single tap returns the encounter to in progress with its bouts kept, so you can add or rescore bouts and end it again. Reopening discards a result that has already been recorded, so a reason is still kept with the result, but it is asked for when you end the match again rather than before you can get back in. That applies however you end it, whether you finish on a scored bout or record a withdrawal or a no-show. In a knockout, reopening also rolls back the next-round slot that this result had filled, as long as that later match has not started.
+
+Reopening keeps every bout that was fought. The bout log is preserved in full, including who fought each bout, the points scored, and any overtime, so nothing you have already recorded is lost. What reopening clears is the finished-match verdict it is discarding: the winning team, the final score line, and any withdrawal or no-show recorded against the encounter.
 
 Reopening is refused while another match is already running on the same court, because the reopened encounter would go back into play alongside it. Finish the running match, or send it back to the queue, and then reopen.
 

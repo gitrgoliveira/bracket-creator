@@ -1723,6 +1723,118 @@ func TestReopenKachinukiMatch_ReopenPending(t *testing.T) {
 	}
 }
 
+// TestReopenKachinukiMatch_DiscardsVerdictKeepsBoutLog pins the split that
+// makes a reopen safe: the BOUT LOG is sacred, the ENCOUNTER VERDICT is not.
+//
+// Every fact about a bout that was actually fought lives on its
+// SubMatchResult — who fought it, what they struck, hansoku, hantei, encho —
+// so SubResults must survive a reopen untouched. Everything at match level is
+// the discarded verdict ABOUT those bouts and must not: a reopened match that
+// still advertises a winner, a default-win scoreline, a hantei/encho state, or
+// a manual-override badge is describing a result the operator just threw away.
+//
+// Both homes are checked because they carry the verdict in different fields
+// (MatchResult keeps ippons + WinnerID + rep nominations; BracketMatch keeps
+// rendered ScoreA/ScoreB and IsOverridden) and drifted before.
+func TestReopenKachinukiMatch_DiscardsVerdictKeepsBoutLog(t *testing.T) {
+	boutLog := []state.SubMatchResult{
+		{
+			Position: 1, SideA: "R-1", SideB: "W-1",
+			IpponsA: []string{"M"}, IpponsB: []string{"K"},
+			HansokuB: 1, Winner: "R-1", Decision: "fought",
+			DecidedByHantei: true, Encho: &state.EnchoMetadata{PeriodCount: 2},
+		},
+		{
+			Position: 2, SideA: "R-1", SideB: "W-2",
+			IpponsA: []string{}, IpponsB: []string{}, Decision: "hikiwake",
+		},
+	}
+	hantei := true
+
+	t.Run("pool", func(t *testing.T) {
+		compID := "reopen-verdict-pool"
+		eng, store, _ := setupKachinukiComp(t, compID, 3)
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{{
+			ID: "P1-0", SideA: "RedTeam", SideB: "WhiteTeam",
+			Status: state.MatchStatusCompleted,
+			Winner: "RedTeam", WinnerID: "red-uuid",
+			IpponsA: []string{"○", "○"}, IpponsB: []string{"M"},
+			Decision: "kiken-voluntary", DecisionBy: "shiro", DecisionReason: "withdrew",
+			Encho: &state.EnchoMetadata{PeriodCount: 1}, DecidedByHantei: &hantei,
+			ResultSource: "admin", RepPlayerA: "R-2", RepPlayerB: "W-2",
+			SubResults: boutLog,
+		}}))
+		require.NoError(t, eng.ReopenKachinukiMatch(compID, "P1-0", "ended too early"))
+
+		matches, err := store.LoadPoolMatches(compID)
+		require.NoError(t, err)
+		require.Len(t, matches, 1)
+		m := matches[0]
+
+		// The bout log is untouched, in full.
+		require.Len(t, m.SubResults, 2, "reopen must never drop a bout that was fought")
+		assert.Equal(t, boutLog[0], m.SubResults[0], "bout 1 must survive byte-for-byte, encho and hantei included")
+		assert.Equal(t, boutLog[1], m.SubResults[1], "including the drawn bout")
+		assert.Equal(t, "R-1", m.SubResults[0].SideA, "who participated must always be recorded")
+
+		// The verdict is gone.
+		assert.Equal(t, state.MatchStatusRunning, m.Status)
+		assert.Empty(t, m.Winner, "a running match must not advertise a winner")
+		assert.Empty(t, m.WinnerID)
+		assert.Empty(t, m.IpponsA, "the match-level default-win maru belonged to the discarded result")
+		assert.Empty(t, m.IpponsB)
+		assert.Empty(t, m.Decision)
+		assert.Empty(t, m.DecisionBy)
+		assert.Empty(t, m.DecisionReason)
+		assert.Nil(t, m.Encho, "match-level encho described the bout the operator ended on")
+		assert.Nil(t, m.DecidedByHantei)
+		assert.Empty(t, m.ResultSource, "provenance of a result that no longer exists")
+		assert.Empty(t, m.RepPlayerA)
+		assert.Empty(t, m.RepPlayerB)
+		assert.Equal(t, "ended too early", m.CorrectionReason, "the reopen's own reason is set, not cleared")
+	})
+
+	t.Run("bracket", func(t *testing.T) {
+		compID := "reopen-verdict-bracket"
+		eng, store, _ := setupKachinukiComp(t, compID, 3)
+		require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+			Rounds: [][]state.BracketMatch{
+				{{
+					ID: "F0", SideA: "RedTeam", SideB: "WhiteTeam",
+					Status: state.MatchStatusCompleted, Winner: "RedTeam",
+					ScoreA: "2", ScoreB: "1",
+					Decision: "kiken-voluntary", DecisionBy: "shiro", DecisionReason: "withdrew",
+					Encho: &state.EnchoMetadata{PeriodCount: 1}, DecidedByHantei: true,
+					IsOverridden: true, ResultSource: "admin",
+					SubResults: boutLog,
+				}},
+			},
+		}))
+		require.NoError(t, eng.ReopenKachinukiMatch(compID, "F0", "ended too early"))
+
+		bracket, err := store.LoadBracket(compID)
+		require.NoError(t, err)
+		bm := bracket.Rounds[0][0]
+
+		require.Len(t, bm.SubResults, 2, "reopen must never drop a bout that was fought")
+		assert.Equal(t, boutLog[0], bm.SubResults[0])
+		assert.Equal(t, boutLog[1], bm.SubResults[1])
+
+		assert.Equal(t, state.MatchStatusRunning, bm.Status)
+		assert.Empty(t, bm.Winner)
+		assert.Empty(t, bm.ScoreA, "the rendered scoreline described the discarded result")
+		assert.Empty(t, bm.ScoreB)
+		assert.Empty(t, bm.Decision)
+		assert.Empty(t, bm.DecisionBy)
+		assert.Empty(t, bm.DecisionReason)
+		assert.Nil(t, bm.Encho)
+		assert.False(t, bm.DecidedByHantei)
+		assert.False(t, bm.IsOverridden, "a reopened match is not carrying a manual override any more")
+		assert.Empty(t, bm.ResultSource)
+		assert.Equal(t, "ended too early", bm.CorrectionReason)
+	})
+}
+
 // TestReopenKachinukiMatchCourtBusy pins the reopen court gate (mp-gmcg).
 //
 // NOTE ON THE FIXTURES: every OTHER reopen test builds its matches with NO

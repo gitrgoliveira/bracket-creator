@@ -370,7 +370,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				}
 				capturedStatus = status
 				if check.ClearBracketReopenPending {
-					return clearReopenPendingUnderTx(stx, id, results[i].ID)
+					return dischargeReopenPendingUnderTx(stx, id, results[i].ID, "")
 				}
 				return nil
 			}); err != nil {
@@ -965,7 +965,7 @@ type matchStores interface {
 // whole-struct overwrite that carries ReopenPending itself, while the bracket
 // write copies field by field and deliberately never reads the flag off the
 // client-supplied payload, so only a bracket match needs the separate
-// clearReopenPendingUnderTx pass. lookupMatchSnapshot already knows which
+// dischargeReopenPendingUnderTx pass. lookupMatchSnapshot already knows which
 // store it found the match in, so reporting it costs nothing and saves the
 // clear path a second traversal.
 type matchSnapshot struct {
@@ -1072,7 +1072,7 @@ func matchStatusFromStore(store CompetitionStore, compID, matchID string) state.
 //     in its own error shape (a 400 on the single-score path, a
 //     partial-success entry on the bulk path).
 //   - ClearBracketReopenPending asks the caller to run
-//     clearReopenPendingUnderTx AFTER a successful engine write. Only bracket
+//     dischargeReopenPendingUnderTx AFTER a successful engine write. Only bracket
 //     matches need it: the pool write is a whole-struct overwrite that carries
 //     r.ReopenPending straight through.
 type correctionCheck struct {
@@ -1159,48 +1159,96 @@ func applyCorrectionReasonUnderTx(stx state.StoreTx, compID, matchID string, r *
 func missingCorrectionReasonError(snap matchSnapshot) *ValidationError {
 	msg := "correcting a completed match result requires a non-empty correctionReason"
 	if snap.Status != state.MatchStatusCompleted && snap.ReopenPending {
-		msg = "this match was reopened; ending it again requires a reason"
+		msg = ReopenNeedsReasonMessage
 	}
 	return &ValidationError{Field: "correctionReason", Message: msg}
 }
 
-// clearReopenPendingUnderTx discharges a BRACKET match's stored ReopenPending
-// flag after a completion that carried its justification. Runs inside the
+// ReopenNeedsReasonMessage is the operator-facing text for "you reopened this
+// match, so finalizing it again has to say why". It lives here as a constant
+// because a match can be finalized through EITHER endpoint — PUT /score
+// (applyCorrectionReasonUnderTx, above) or POST /decision (kiken/fusenpai,
+// handlers_decision.go) — and the two report it on DIFFERENT fields
+// (correctionReason vs decisionReason, each endpoint's own audit field). The
+// FIELD differs, the rule does not, so the wording is shared rather than
+// duplicated: an operator who meets this on one endpoint should not be told
+// something subtly different on the other.
+const ReopenNeedsReasonMessage = "this match was reopened; ending it again requires a reason"
+
+// dischargeReopenPendingUnderTx clears a match's stored ReopenPending flag
+// after a completion that carried its justification, and — when reason is
+// non-empty — records that justification in CorrectionReason. Runs inside the
 // caller's WithTransaction, AFTER the engine write has succeeded: the
-// single-score handler commits the transaction even when the engine rejects
-// the write (engErr is surfaced afterwards), so clearing beforehand would
+// finalizing handlers commit the transaction even when the engine rejects the
+// write (engErr is surfaced afterwards), so discharging beforehand would
 // persist a discharge for a write that never landed.
 //
-// Bracket matches only. recordBracketMatchResult* copies the payload into the
-// stored BracketMatch field by field and deliberately does NOT copy
-// ReopenPending — the payload is client-supplied, and a score write must not
-// be able to move a server-owned audit flag. So the flag needs this explicit
-// pass, while a POOL match is already handled by the whole-struct overwrite
-// (`*r = *result`) carrying the cleared r.ReopenPending.
+// BOTH match homes, because both finalizing endpoints reach both:
 //
-// Callers gate on correctionCheck.ClearBracketReopenPending, so the extra
-// bracket load only happens on the rare re-End after a reason-less reopen.
-func clearReopenPendingUnderTx(stx state.StoreTx, compID, matchID string) error {
+//   - PUT /score passes reason "" and is gated on
+//     correctionCheck.ClearBracketReopenPending, so only a BRACKET match ever
+//     arrives from that path. Its reason is already stored (the engine write
+//     copies CorrectionReason set-if-non-empty) and a POOL match is already
+//     handled by the whole-struct overwrite (`*r = *result`) carrying the
+//     cleared r.ReopenPending.
+//   - POST /decision passes the operator's decisionReason and needs BOTH arms.
+//     RecordDecisionTx builds its own result struct, so the pool overwrite
+//     blanks ReopenPending with no audit record (a SILENT discharge) while the
+//     bracket write, being field-by-field, never copies the flag and leaves it
+//     stuck on a completed match. Same rule, two opposite failures; one
+//     explicit pass fixes both.
+//
+// CorrectionReason is set-if-empty so the "" caller cannot blank a stored
+// reason, and so a reason already recorded by the engine write wins over a
+// re-statement here.
+//
+// recordBracketMatchResult* deliberately does NOT copy ReopenPending from the
+// payload — that field is client-supplied and a score write must not be able
+// to move a server-owned audit flag — which is why the flag needs this
+// explicit pass rather than riding along with the result.
+func dischargeReopenPendingUnderTx(stx state.StoreTx, compID, matchID, reason string) error {
+	// Pool first, mirroring lookupMatchSnapshot's order. UpdatePoolMatchByID
+	// reports found=false for a bracket match, which is the fall-through.
+	found, err := stx.UpdatePoolMatchByID(compID, matchID, func(r *state.MatchResult) {
+		r.ReopenPending = false
+		if reason != "" && r.CorrectionReason == "" {
+			r.CorrectionReason = reason
+		}
+	})
+	if err != nil {
+		return fmt.Errorf("discharge reopen flag: pool match: %w", err)
+	}
+	if found {
+		return nil
+	}
 	bracket, err := stx.LoadBracket(compID)
 	if err != nil {
-		return fmt.Errorf("clear reopen flag: load bracket: %w", err)
+		return fmt.Errorf("discharge reopen flag: load bracket: %w", err)
 	}
 	if bracket == nil {
 		return nil
 	}
+	// One closure rather than the mutation written at both homes: the rounds
+	// loop and the bronze branch must not drift (same reasoning as the pool
+	// mutate above, and as ReopenKachinukiMatch's `guard`).
+	discharge := func(bm *state.BracketMatch) error {
+		bm.ReopenPending = false
+		if reason != "" && bm.CorrectionReason == "" {
+			bm.CorrectionReason = reason
+		}
+		return stx.SaveBracket(compID, bracket)
+	}
 	for rIdx := range bracket.Rounds {
 		for mIdx := range bracket.Rounds[rIdx] {
 			if bracket.Rounds[rIdx][mIdx].ID == matchID {
-				bracket.Rounds[rIdx][mIdx].ReopenPending = false
-				return stx.SaveBracket(compID, bracket)
+				return discharge(&bracket.Rounds[rIdx][mIdx])
 			}
 		}
 	}
 	// The bronze (3rd-place) match is a SIBLING of Rounds, not an element of
 	// it; the loop above never reaches it (see lookupMatchSnapshot).
 	if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID == matchID {
-		bm.ReopenPending = false
-		return stx.SaveBracket(compID, bracket)
+		return discharge(bm)
 	}
 	return nil
 }
@@ -1521,7 +1569,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 					// Only after the write actually landed: this branch commits
 					// even when engErr is set, so discharging the outstanding
 					// justification any earlier would clear it for a rejected write.
-					return clearReopenPendingUnderTx(stx, id, mid)
+					return dischargeReopenPendingUnderTx(stx, id, mid, "")
 				}
 				return nil
 			})

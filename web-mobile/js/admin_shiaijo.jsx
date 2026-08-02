@@ -518,6 +518,12 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // scoring panel instead; the find() in pickedMatch guards staleness, so a
     // pick that completes or vanishes falls back to running[0] automatically.
     const [pickedKey, setPickedKey] = useStateSh(null);
+    // The COMPLETED match the operator has opened to correct in place (parity
+    // with the Scores page's "Correct" button). Kept separate from pickedKey so
+    // it takes priority over the running bout WITHOUT disturbing it, and so it
+    // never interferes with the finish-advance fallback that pickedKey drives.
+    // Cleared by "Back to court". null = not correcting anything.
+    const [correctingKey, setCorrectingKey] = useStateSh(null);
     // Pending court reassignment, awaiting operator confirmation. Moving a match
     // off this shiaijo is disruptive (it leaves the court and joins another's
     // queue), so it's gated behind a confirm step. {compId, matchId, to, label, from}.
@@ -613,15 +619,27 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // governed by two rules in pickMatch: it is BLOCKED while the current bout
     // has scoring in progress (you must finish or correct it first), and an
     // unscored current bout is DEFERRED one slot before the new pick starts.
-    // A completed pick (or one that disappears) falls back to running[0]: the
+    // A pickedMatch that completes (or vanishes) falls back to running[0]: the
     // find() filters out completed matches and the `pickedMatch || running[0]`
-    // expression covers the null case. Fixing a finished score is still done
-    // in the competition's own admin view, so completed matches aren't picked.
+    // expression covers the null case. This keeps the finish-advance flow clean
+    // (a just-scored pick hands off to the next bout, not to itself). Correcting
+    // a completed match is a DELIBERATE, separate action via correctingKey /
+    // correctMatch below — not a pickedMatch, so it never disturbs this fallback.
     const pickedMatch = useMemoSh(
         () => pickedKey ? sorted.find((x) => matchKey(x) === pickedKey && x.status !== "completed") || null : null,
         [pickedKey, sorted]
     );
-    const selectedMatch = useMemoSh(() => pickedMatch || running[0] || null, [pickedMatch, running]);
+    // The completed match being corrected. NO status filter: it must stay
+    // selected across a kachinuki Reopen (completed → running) and the fresh
+    // End (running → completed) so the operator never loses the panel
+    // mid-correction. "Back to court" clears correctingKey to fall back to the
+    // live bout. Takes priority over the running match so the panel follows the
+    // deliberate correction the operator asked for.
+    const correctingMatch = useMemoSh(
+        () => correctingKey ? sorted.find((x) => matchKey(x) === correctingKey) || null : null,
+        [correctingKey, sorted]
+    );
+    const selectedMatch = useMemoSh(() => correctingMatch || pickedMatch || running[0] || null, [correctingMatch, pickedMatch, running]);
 
     // For pool daihyosen/tiebreaker bouts, enrich the selected match with
     // rep-player roster data so ScoreEditorModal renders the rep-picker dropdowns
@@ -786,8 +804,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     };
 
     // pickMatch: run an upcoming match out of order. Rules:
-    //   • Completed matches are never picked (correct them in the comp admin).
-    //   • If a DIFFERENT bout is running with scoring already started, block: 
+    //   • Completed matches are never picked here — correcting them is a
+    //     separate deliberate action (see correctMatch), so this returns early.
+    //   • If a DIFFERENT bout is running with scoring already started, block:
     //     finish or correct it first (can't abandon a half-scored bout).
     //   • If a DIFFERENT bout is running but unscored, defer it: un-start it
     //     (back to scheduled) so the court is never left with two running bouts.
@@ -826,6 +845,24 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         }
         setPickedKey(matchKey(m));
     };
+
+    // correctMatch: open a COMPLETED match to correct it in place, mirroring the
+    // Scores page's "Correct" button. The court operator often spots a wrong
+    // score after the match closed (frequently once the court is otherwise
+    // done), so they must be able to fix it here rather than leaving for the
+    // competition admin view. This deliberately does NOT touch the running bout:
+    // a past-match correction must never defer or revert the live match. The
+    // editor then offers Reopen (kachinuki: back to running, keep the bout log)
+    // or a direct score re-write (other formats), same as the Scores page.
+    const correctMatch = (m) => {
+        if (!m || m.status !== "completed") return;
+        setCorrectingKey(matchKey(m));
+    };
+    // Leave the correction and return to the live court (running bout or the
+    // done state). Only offered on a COMPLETED correcting match: while it is
+    // reopened (running) the operator finishes via End match / Send back to
+    // queue, so a stray "Back to court" can't strand a result-less running bout.
+    const stopCorrecting = () => setCorrectingKey(null);
 
     // Call to court: optional. Broadcasts a tournament announcement so the
     // competitors (and anyone watching the public app) are notified they're
@@ -1184,7 +1221,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                         matches={(showAllCompleted || filteredCompleted.length <= COMPLETED_PREVIEW)
                                             ? filteredCompleted
                                             : filteredCompleted.slice(-COMPLETED_PREVIEW)}
-                                        courts={courts} onMoveCourt={requestMoveCourt}
+                                        courts={courts} onMoveCourt={requestMoveCourt} onCorrect={correctMatch}
                                     />
                                     {filteredCompleted.length > COMPLETED_PREVIEW && (
                                         <button
@@ -1218,7 +1255,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                     <span className="shiaijo-nudge__cta" aria-hidden="true">Switch →</span>
                                 </button>
                             )}
-                            {allDone && (
+                            {allDone && !correctingMatch && (
                                 <div className="empty">
                                     <h3>{selectedCompName ? `${selectedCompName} is complete on Shiaijo ${court}` : `All matches complete on Shiaijo ${court}`}</h3>
                                     <p style={{ fontSize: 13, color: "var(--ink-3)" }}>
@@ -1243,7 +1280,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 </div>
                             )}
 
-                            {!allDone && selectedMatch && (
+                            {(!allDone || correctingMatch) && selectedMatch && (
                                 <ScoreEditorModal
                                     key={`${matchKey(selectedMatch)}:${(selectedMatch.subResults || []).length}`}
                                     variant="inline"
@@ -1297,7 +1334,20 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 />
                             )}
 
-                            {!allDone && selectedMatch && selectedMatch.status === "running" && window.API && typeof window.API.revertMatchToQueue === "function" && (
+                            {correctingMatch && correctingMatch.status === "completed" && (
+                                <div className="shiaijo-revert">
+                                    <button
+                                        type="button"
+                                        className="btn btn--sm btn--ghost"
+                                        onClick={stopCorrecting}
+                                        title="Stop correcting this completed match and return to the live court"
+                                    >
+                                        ← Back to court
+                                    </button>
+                                </div>
+                            )}
+
+                            {!allDone && !correctingMatch && selectedMatch && selectedMatch.status === "running" && window.API && typeof window.API.revertMatchToQueue === "function" && (
                                 <div className="shiaijo-revert">
                                     <button
                                         type="button"
@@ -1451,12 +1501,12 @@ export function groupQueueMatches(matches) {
     return order.map((k) => byKey.get(k));
 }
 
-function ShiaijoQueueGroup({ label, matches, subGroup, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick, onCall, callingKey, calledKey, startingKey }) {
+function ShiaijoQueueGroup({ label, matches, subGroup, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick, onCorrect, onCall, callingKey, calledKey, startingKey }) {
     const renderRow = (m) => (
         <ShiaijoQueueRow
             key={matchKey(m)} m={m}
             scheduled={scheduled}
-            courts={courts} onMoveCourt={onMoveCourt} onMove={onMove} onEnterLineup={onEnterLineup} onPick={onPick}
+            courts={courts} onMoveCourt={onMoveCourt} onMove={onMove} onEnterLineup={onEnterLineup} onPick={onPick} onCorrect={onCorrect}
             onCall={onCall} callingKey={callingKey} calledKey={calledKey} startingKey={startingKey}
         />
     );
@@ -1482,7 +1532,7 @@ function ShiaijoQueueGroup({ label, matches, subGroup, scheduled, courts, onMove
     );
 }
 
-export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick, onCall, callingKey, calledKey, startingKey, pending, onResolve }) {
+export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick, onCorrect, onCall, callingKey, calledKey, startingKey, pending, onResolve }) {
     const isComplete = m.status === "completed";
     const scoreCell = shiaijoScoreCell(m);
     // Derive position in the full scheduled list to know when to disable ↑/↓.
@@ -1545,6 +1595,14 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
                     {scoreCell.kind === "team" && <span className="shiaijo-row__teamscore">{scoreCell.iv}</span>}
                     {scoreCell.kind === "engi" && <span className="shiaijo-row__teamscore"><abbr className="shiaijo-row__iv" title="Total flags received">Flags</abbr>{scoreCell.flags}</span>}
                     {scoreCell.kind === "ippon" && scoreCell.ippon}
+                </div>
+            )}
+            {/* Correct: reopen/fix a completed match in place (parity with the
+                Scores page). A pending placeholder final has no real result to
+                correct, so it never gets the button. */}
+            {!pending && isComplete && onCorrect && (
+                <div className="shiaijo-qrow__actions" onClick={(e) => e.stopPropagation()}>
+                    <button type="button" className="btn btn--ghost btn--sm shiaijo-row__correct" onClick={() => onCorrect(m)} title="Reopen or fix this completed match">Correct</button>
                 </div>
             )}
             {showActions && (

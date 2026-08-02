@@ -1016,6 +1016,36 @@ func lookupMatchStatusUnderTx(stx state.StoreTx, compID, matchID string) state.M
 	return ""
 }
 
+// matchStatusFromStore is the non-transactional twin of
+// lookupMatchStatusUnderTx: it reads a match's current status via plain
+// store loads so a correction (a completed -> completed overwrite) can be
+// detected BEFORE the transaction begins, letting the pre-tx court gate skip
+// it. A benign TOCTOU with a concurrent status change only decides whether the
+// (spurious-for-corrections) court check runs; the audit-critical
+// correction-REASON requirement still uses the race-free in-tx read.
+func matchStatusFromStore(store CompetitionStore, compID, matchID string) state.MatchStatus {
+	if poolMatches, err := store.LoadPoolMatches(compID); err == nil {
+		for i := range poolMatches {
+			if poolMatches[i].ID == matchID {
+				return poolMatches[i].Status
+			}
+		}
+	}
+	if bracket, err := store.LoadBracket(compID); err == nil && bracket != nil {
+		for _, round := range bracket.Rounds {
+			for i := range round {
+				if round[i].ID == matchID {
+					return round[i].Status
+				}
+			}
+		}
+		if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchID {
+			return bracket.ThirdPlaceMatch.Status
+		}
+	}
+	return ""
+}
+
 // registerScoreHandler wires the `PUT /competitions/:id/matches/:mid/score`
 // endpoint via the consumer-boundary interfaces (T014/T017) instead of
 // the concrete `*engine.Engine` / `*Hub`. This is the Slice 0
@@ -1240,6 +1270,21 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 
 		isWithdrawal := domain.IsKikenDecisionStr(result.Decision) || result.Decision == "fusenpai"
 
+		// isCorrection: a completed -> completed overwrite (the operator is
+		// fixing an already-finished result, e.g. via the shiaijo console's or
+		// the Scores page's "Correct" affordance). Such a write never places or
+		// keeps the match on the court, so BOTH court-exclusivity gates below
+		// must skip it; otherwise correcting a completed match while ANOTHER
+		// match runs on the same court is wrongly rejected with court_busy,
+		// which blocks the operator from going back to correct any match. The
+		// pre-tx store read is a benign TOCTOU (see matchStatusFromStore); a
+		// running/scheduled write is never a correction, so the && short-circuit
+		// skips the read on the hot live-scoring path. A first finalization
+		// (running -> completed) is NOT a correction, so the start gate still
+		// runs there and its eligibility/simultaneity checks are preserved.
+		isCorrection := result.Status == state.MatchStatusCompleted &&
+			matchStatusFromStore(store, id, mid) == state.MatchStatusCompleted
+
 		// FR-035: WithCourtExclusivityLock serializes the cross-competition
 		// court-busy check + per-competition write under a tournament-level
 		// mutex so two concurrent match-starts on the same court in different
@@ -1252,7 +1297,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			staleAfterComplete bool
 		)
 		txErr := tx.WithCourtExclusivityLock(func() error {
-			if !isWithdrawal {
+			if !isWithdrawal && !isCorrection {
 				if err := eng.CheckCrossCompCourtBusy(id, mid); err != nil {
 					return err
 				}
@@ -1317,7 +1362,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 					staleAfterComplete = true
 					return nil
 				}
-				if !isWithdrawal {
+				if !isWithdrawal && !isCorrection {
 					if err := eng.StartMatchTx(stx, id, mid); err != nil {
 						engErr = err
 						return nil

@@ -16,7 +16,18 @@ Open a match from the Upcoming list to start scoring it; the score editor opens 
 If you start the wrong bout, use **Send back to queue** on the running match. The action clears any partial score, removes the match from the active view, and returns it to the Upcoming list so the correct match can start.
 
 !!! note
-    Send back to queue only works on a running, unfinished match. A completed, scored match is not affected. To correct a result that has already been recorded, go to the competition view and edit the match there.
+    Send back to queue only works on a running, unfinished match. A completed, scored match is not affected. To fix a result that has already been recorded, use **Correct** on the match in the Completed list (see [Correct a completed result](#correct-a-completed-result)).
+
+## Correct a completed result
+
+Once a match is scored it moves to the **Completed** list on the court console, and each row carries a **Correct** button. You do not have to leave the console to fix a mistake: Correct opens the finished match back in the score editor, even while the next match is already running on the same court.
+
+What Correct offers depends on the format:
+
+- For most matches, the editor reopens with the recorded scores ready to edit. Adjust the ippons, fouls, or winner, then use **Save correction**. A short reason is required so the change stays traceable.
+- For a kachinuki team encounter, the editor shows the recorded bouts with a **Reopen match** button. Reopen returns the encounter to running with its bout log intact, so you can carry on or fix a bout and then end it again.
+
+If the correction changes who won a knockout match, the later rounds update to follow the new winner. When you are done, use **Back to court** to return to the live match.
 
 ## Matches waiting on earlier results
 

@@ -2384,6 +2384,85 @@ func TestScoreHandler_RunningWriteCannotRevertCompleted(t *testing.T) {
 	assert.False(t, revPresent, "runningRevStore must have no entry after stale running write on completed match")
 }
 
+// TestScoreHandler_CorrectCompletedWhileCourtBusy pins the "correct any match"
+// fix: correcting an already-completed match (completed -> completed overwrite
+// with a correctionReason) must NOT be rejected with court_busy just because a
+// DIFFERENT match is now running on the same court. A correction never places
+// the match on the court, so the court-exclusivity start-gate must skip it. The
+// realistic operator sequence is finish M1 -> start M2 (same court) -> spot a
+// scoring error on M1 -> correct it while M2 is live. Without the isCorrection
+// skip this returned 409 court_busy and the operator could not go back.
+func TestScoreHandler_CorrectCompletedWhileCourtBusy(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "corr-court"
+	m1, m2 := "PoolA-1", "PoolA-2"
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "", Courts: []string{"A"}}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Courts: []string{"A"}}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: m1, SideA: "Alice", SideB: "Bob", Court: "A", Status: state.MatchStatusRunning},
+		{ID: m2, SideA: "Carol", SideB: "Dan", Court: "A", Status: state.MatchStatusScheduled},
+	}))
+	runningRevStore.Delete(compID + ":" + m1)
+	runningRevStore.Delete(compID + ":" + m2)
+
+	putScore := func(matchID string, payload map[string]any) *httptest.ResponseRecorder {
+		t.Helper()
+		body, _ := json.Marshal(payload)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/"+matchID+"/score", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		return w
+	}
+	loadWinner := func(matchID string) string {
+		t.Helper()
+		ms, err := store.LoadPoolMatches(compID)
+		require.NoError(t, err)
+		for _, m := range ms {
+			if m.ID == matchID {
+				return m.Winner
+			}
+		}
+		t.Fatalf("match %s not found", matchID)
+		return ""
+	}
+
+	// Step 1: finish M1 (Alice wins) while M2 is still scheduled — no conflict.
+	w1 := putScore(m1, map[string]any{
+		"sideA": "Alice", "sideB": "Bob", "winner": "Alice",
+		"ipponsA": []string{"M", "K"}, "ipponsB": []string{}, "status": "completed",
+	})
+	require.Equal(t, http.StatusOK, w1.Code, "finishing M1 must succeed: %s", w1.Body.String())
+
+	// Step 2: start M2 (running) on court A — M1 is completed, no conflict.
+	w2 := putScore(m2, map[string]any{
+		"sideA": "Carol", "sideB": "Dan", "ipponsA": []string{}, "ipponsB": []string{}, "status": "running",
+	})
+	require.Equal(t, http.StatusOK, w2.Code, "starting M2 must succeed: %s", w2.Body.String())
+
+	// Step 3: correct M1 (flip the winner to Bob) while M2 runs on the same
+	// court. This is the regression: it must succeed, not 409 court_busy.
+	w3 := putScore(m1, map[string]any{
+		"sideA": "Alice", "sideB": "Bob", "winner": "Bob",
+		"ipponsA": []string{"M"}, "ipponsB": []string{"M", "K"}, "status": "completed",
+		"correctionReason": "scoring error: Bob actually won",
+	})
+	require.Equal(t, http.StatusOK, w3.Code, "correcting a completed match while the court is busy must not 409 court_busy: %s", w3.Body.String())
+	assert.Equal(t, "Bob", loadWinner(m1), "the correction must persist the flipped winner")
+	assert.Equal(t, state.MatchStatusRunning, func() state.MatchStatus {
+		ms, _ := store.LoadPoolMatches(compID)
+		for _, m := range ms {
+			if m.ID == m2 {
+				return m.Status
+			}
+		}
+		return ""
+	}(), "M2 must stay running: the correction must not disturb the live match")
+}
+
 // TestScoreHandler_ScheduledWriteCannotRevertCompleted verifies the bracket
 // integrity guard: a "scheduled"-status write onto an already-completed match
 // must be silently no-op'd (HTTP 200 with {"stale":true}) and must not mutate

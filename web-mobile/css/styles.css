@@ -5114,6 +5114,7 @@ button.pool-match-row {
   font-weight: 700;
   font-family: var(--font-mono);
   color: var(--ink-2);
+  white-space: nowrap;
 }
 
 /* Centre cell mirrors the side cells so the verdict/fact shares the stats
@@ -5142,8 +5143,6 @@ button.pool-match-row {
 .team-summary__verdict--aka { color: var(--red); }
 .team-summary__verdict--shiro { color: var(--accent); }
 .team-summary__verdict--draw { color: var(--ink-1); }
-
-.team-summary__stats { white-space: nowrap; }
 
 /* mp-gmcg (critique P3): collapsed withdrawal/no-show decisions. Quiet
    disclosure — the summary is a plain muted line with a marker, so it reads

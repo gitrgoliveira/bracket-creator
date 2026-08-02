@@ -1,5 +1,8 @@
-// Pure utility functions extracted from admin_schedule.jsx (mp-d7tl).
-// No React, no window dependencies: safe to import anywhere including tests.
+// Pure utility functions extracted from admin_schedule.jsx (mp-d7tl), plus
+// EstimateHeadline, the one presentational component the two schedule-estimate
+// panels share. No window dependencies and no React import: the component
+// touches the global React only when it is rendered, so importing this module
+// stays safe anywhere including tests.
 
 export function formatMinutes(m) {
   return `${Math.floor(m / 60)}h ${m % 60}m`;
@@ -19,6 +22,28 @@ export function estimateRangeParts(est) {
   const worst = est.worstCaseMinutes;
   if (!Number.isFinite(best) || !Number.isFinite(worst) || best === worst) return null;
   return { best, average: est.totalDurationMinutes, worst };
+}
+
+// EstimateHeadline: the headline line of a schedule-estimate panel, shared by
+// the competition Overview footer and the competition Settings panel — the
+// two carried byte-identical copies of it. ONE home for the range-vs-total
+// decision: when estimateRangeParts says the estimate genuinely spans a range
+// (kachinuki's variable bout count) it reads "Best · Average · Worst",
+// otherwise the single "Total:" line exactly as before.
+//
+// `total` is the ALREADY-FORMATTED total string (each call site formats it
+// anyway for its own empty-estimate guard) and `format` is that site's minute
+// formatter: Overview resolves window.formatCompMinutes with a fallback while
+// Settings imports it directly, so it is passed in rather than imported here.
+// `testId` keeps each call site's own data-testid on the range row.
+export function EstimateHeadline({ estimate, total, format, testId }) {
+  const range = estimateRangeParts(estimate);
+  if (!range) return <div><strong>Total:</strong> {total}</div>;
+  return (
+    <div data-testid={testId}>
+      <strong>Best</strong> {format(range.best) || "0m"} · <strong>Average</strong> {format(range.average) || "0m"} · <strong>Worst</strong> {format(range.worst) || "0m"}
+    </div>
+  );
 }
 
 // Estimate minutes from HH:MM string; returns null if invalid

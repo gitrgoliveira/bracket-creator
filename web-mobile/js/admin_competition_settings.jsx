@@ -5,7 +5,7 @@
 
 import { teamMatchTypeHint } from './pool_ids.jsx';
 import { DurationInput } from './duration.jsx';
-import { estimateRangeParts } from './admin_schedule_utils.jsx';
+import { EstimateHeadline } from './admin_schedule_utils.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -750,19 +750,14 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             // teamMatchType; no extra param needed here). The headline
             // totalDurationMinutes is the AVERAGE scenario; when the range
             // collapses (fixed/individual) the single total renders as before.
-            const range = estimateRangeParts(compEstimate);
+            // EstimateHeadline (admin_schedule_utils.jsx) owns that decision
+            // for both this panel and the Overview footer.
             if (!total) {
               return <div style={{ fontSize: 12, color: "var(--ink-3, #6b7280)" }}>No estimate yet. Add participants and configure duration to see a projection.</div>;
             }
             return (
               <div style={{ fontSize: 12.5, color: "var(--ink-1, #111827)" }}>
-                {range ? (
-                  <div data-testid="comp-est-range">
-                    <strong>Best</strong> {formatCompMinutes(range.best) || "0m"} · <strong>Average</strong> {formatCompMinutes(range.average) || "0m"} · <strong>Worst</strong> {formatCompMinutes(range.worst) || "0m"}
-                  </div>
-                ) : (
-                  <div><strong>Total:</strong> {total}</div>
-                )}
+                <EstimateHeadline estimate={compEstimate} total={total} format={formatCompMinutes} testId="comp-est-range" />
                 {perCourt.length > 1 && (
                   <div style={{ marginTop: 2 }}>
                     <strong>Per court:</strong>{" "}

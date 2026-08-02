@@ -79,7 +79,7 @@ type EstimateInput struct {
 	Kachinuki bool
 }
 
-// perMatchElapsed returns the un-rounded elapsed minutes for a single
+// perMatchElapsedBouts returns the un-rounded elapsed minutes for a single
 // match given the on-clock duration, the multiplier, and the number of
 // bouts (0 = individual match; >0 = team match with that many bouts).
 //
@@ -89,18 +89,14 @@ type EstimateInput struct {
 //	bouts > 0:  bouts * clockMin * multiplier + (bouts-1) * 1
 //	            (the +1 per switch covers rotation/transition between bouts)
 //
+// bouts is a float because the kachinuki AVERAGE scenario has a fractional
+// bout count ((3N-1)/2 for odd expressions), which must not be truncated
+// before the duration math (mp-gmcg).
+//
 // This is the single source of truth shared by EstimateSchedule and
 // perMatchElapsedMinutes (scheduler_slots.go). Both callers delegate
 // here, satisfying the FR-059 "MUST agree" constraint without manual
 // synchronisation.
-func perMatchElapsed(clockMin, multiplier float64, bouts int) float64 {
-	return perMatchElapsedBouts(clockMin, multiplier, float64(bouts))
-}
-
-// perMatchElapsedBouts is the float-bouts generalisation of
-// perMatchElapsed: the kachinuki AVERAGE scenario has a fractional bout
-// count ((3N-1)/2 for odd expressions), which must not be truncated
-// before the duration math (mp-gmcg).
 func perMatchElapsedBouts(clockMin, multiplier, bouts float64) float64 {
 	if bouts > 0 {
 		return bouts*clockMin*multiplier + (bouts-1)*1.0
@@ -133,7 +129,7 @@ func kachinukiBoutRange(n int) (best, avg, worst float64) {
 // team-match bout count, slowest-court buffer %, and ceremony block.
 //
 // Algorithm:
-//  1. perMatchMin = perMatchElapsed(clockMin, multiplier, bouts)
+//  1. perMatchMin = perMatchElapsedBouts(clockMin, multiplier, bouts)
 //  2. totalMin = perMatchMin * numMatches
 //  3. perCourt = totalMin / numCourts  (clamped numCourts >= 1)
 //  4. perCourt *= (1 + buffer/100)

@@ -325,6 +325,15 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 			result.ScheduledAt = r.ScheduledAt
 		}
 		result.Round = r.Round
+		// Twin parity with the bracket write in recordBracketMatchResultTx,
+		// which is set-if-non-empty and so leaves a stored reason alone. The
+		// whole-struct overwrite below would otherwise BLANK it: the kachinuki
+		// reopen path persists the operator's audit justification here, and
+		// the first "Record bout" after a reopen is a plain write carrying no
+		// reason of its own.
+		if result.CorrectionReason == "" {
+			result.CorrectionReason = r.CorrectionReason
+		}
 		*r = *result
 	})
 	if err != nil {
@@ -458,6 +467,13 @@ func (e *Engine) recordMatchResultTx(tx state.StoreTx, compID, matchID string, r
 			result.ScheduledAt = r.ScheduledAt
 		}
 		result.Round = r.Round
+		// NOTE the forward write (RecordMatchResultWithIneligibilityTx) does a
+		// set-if-empty preservation of CorrectionReason here; this rollback path
+		// deliberately does NOT. It restores a trusted prior snapshot
+		// byte-for-byte, so an empty prior reason must CLEAR the field rather
+		// than inherit the rejected partial write's reason — the same reasoning
+		// that makes rollbackMatchResultTx normalize nil SubResults/DecidedByHantei
+		// into explicit clears.
 		*r = *result
 	})
 	if err != nil {
@@ -658,17 +674,42 @@ func (e *Engine) checkSimultaneousMatchTx(tx state.StoreTx, compID, matchID stri
 }
 
 // checkCourtExclusivityTx checks that no OTHER match in compID's own pool or
-// bracket is already running on the same court. The cross-competition check is
-// intentionally omitted here: calling store.RunningMatchOnCourt (which acquires
-// read locks on other competitions) while holding compID's write lock via
-// WithTransaction risks a circular-wait deadlock if another competition is
-// simultaneously in its own WithTransaction. The cross-competition check is
-// performed by CheckCrossCompCourtBusy before WithTransaction is entered.
+// bracket is already running on the same court. It is the entry point for
+// callers that know only the match id: it resolves the court via the tx and
+// then defers to courtFreeInCompTx, which carries the check itself and the
+// lock-ordering rationale.
 func (e *Engine) checkCourtExclusivityTx(tx state.StoreTx, compID, matchID string) error {
 	court, err := lookupMatchCourtTx(tx, compID, matchID)
 	if err != nil {
 		return err
 	}
+	return courtFreeInCompTx(tx, compID, matchID, court)
+}
+
+// courtFreeInCompTx is the same-competition half of the court-exclusivity
+// gate: it reports whether any match in compID's own pool or bracket OTHER
+// than matchID is already running on court. Returns *CourtBusyError (HTTP 409
+// court_busy) when the court is taken; a match with no court assigned is
+// never gated.
+//
+// The cross-competition check is intentionally omitted here: calling
+// store.RunningMatchOnCourt (which acquires read locks on other competitions)
+// while holding compID's write lock via WithTransaction risks a circular-wait
+// deadlock if another competition is simultaneously in its own
+// WithTransaction. The cross-competition check is performed by
+// CheckCrossCompCourtBusy before WithTransaction is entered.
+//
+// The court is a PARAMETER rather than looked up here so that callers already
+// holding it (the kachinuki reopen path, see ReopenKachinukiMatch) skip a
+// redundant in-tx lookupMatchCourtTx walk: tx loads bypass the file cache, so
+// they are real disk reads taken under the write lock.
+//
+// The reopen path needs this gate for a specific reason: reopening flips the
+// match back to running, so a court that already has a running match would end
+// up with TWO, wedging the exclusivity check for BOTH (the re-End of the
+// reopened match and every further score write to the genuinely live bout).
+// See ReopenKachinukiMatch's COURT GATE note.
+func courtFreeInCompTx(tx state.StoreTx, compID, matchID, court string) error {
 	if court == "" {
 		return nil
 	}

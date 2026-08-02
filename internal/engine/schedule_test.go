@@ -242,7 +242,7 @@ func TestGenerateSchedule_NilBracket(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Tests for the Step 1 pure formula (perMatchElapsed)
+// Tests for the Step 1 pure formula (perMatchElapsedBouts)
 // ---------------------------------------------------------------------------
 
 // TestPerMatchElapsed_Individual verifies the individual-match branch:
@@ -262,7 +262,7 @@ func TestPerMatchElapsed_Individual(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := perMatchElapsed(tc.clockMin, tc.multiplier, tc.bouts)
+			got := perMatchElapsedBouts(tc.clockMin, tc.multiplier, float64(tc.bouts))
 			assert.InDelta(t, tc.want, got, 0.001)
 		})
 	}
@@ -287,7 +287,7 @@ func TestPerMatchElapsed_Team(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := perMatchElapsed(tc.clockMin, tc.multiplier, tc.bouts)
+			got := perMatchElapsedBouts(tc.clockMin, tc.multiplier, float64(tc.bouts))
 			assert.InDelta(t, tc.want, got, 0.001)
 		})
 	}

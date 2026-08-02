@@ -555,8 +555,9 @@ var (
 // (CheckCrossCompCourtBusy takes read locks on other competitions, so
 // calling it while holding this competition's write lock risks a
 // circular wait); the same-competition half runs inside the tx off the
-// same courtOccupiedInCompTx the score path uses. Both are skipped when
-// the match has no court assigned, mirroring checkCourtExclusivityTx.
+// same courtFreeInCompTx the score path reaches via
+// checkCourtExclusivityTx. Both are skipped when the match has no court
+// assigned.
 //
 // Kachinuki ONLY: for every other competition type the correction path
 // (completed -> completed with a correctionReason) remains the sole
@@ -593,6 +594,24 @@ func (e *Engine) ReopenKachinukiMatch(compID, matchID, reason string) error {
 
 	var opErr error
 	txErr := e.store.WithTransaction(compID, func(tx state.StoreTx) error {
+		// guard is the SINGLE copy of the preconditions every match home
+		// below (pool, bracket round, bronze) must pass: the match must be
+		// completed, and its court must be free. Kept as one closure rather
+		// than open-coded per branch because three hand-written copies is
+		// exactly the shape that loses one when a fourth match home appears.
+		//
+		// The court half is the same-competition half of the reopen court
+		// gate (see the COURT GATE note above): reopening flips the match
+		// back to running, so a court that already has a running match would
+		// end up with two, wedging the exclusivity check for BOTH. DO NOT
+		// remove this guard as a redundant-looking check.
+		guard := func(status state.MatchStatus, court string) error {
+			if status != state.MatchStatusCompleted {
+				return ErrReopenNotCompleted
+			}
+			return courtFreeInCompTx(tx, compID, matchID, court)
+		}
+
 		// Pool store first, mirroring findTeamMatch's lookup order.
 		poolMatches, lerr := tx.LoadPoolMatches(compID)
 		if lerr == nil {
@@ -600,12 +619,8 @@ func (e *Engine) ReopenKachinukiMatch(compID, matchID, reason string) error {
 				if poolMatches[i].ID != matchID {
 					continue
 				}
-				if poolMatches[i].Status != state.MatchStatusCompleted {
-					opErr = ErrReopenNotCompleted
-					return nil
-				}
-				if cerr := reopenCourtFreeTx(tx, compID, matchID, poolMatches[i].Court); cerr != nil {
-					opErr = cerr
+				if gerr := guard(poolMatches[i].Status, poolMatches[i].Court); gerr != nil {
+					opErr = gerr
 					return nil
 				}
 				m := &poolMatches[i]
@@ -633,12 +648,8 @@ func (e *Engine) ReopenKachinukiMatch(compID, matchID, reason string) error {
 					if bm.ID != matchID {
 						continue
 					}
-					if bm.Status != state.MatchStatusCompleted {
-						opErr = ErrReopenNotCompleted
-						return nil
-					}
-					if cerr := reopenCourtFreeTx(tx, compID, matchID, bm.Court); cerr != nil {
-						opErr = cerr
+					if gerr := guard(bm.Status, bm.Court); gerr != nil {
+						opErr = gerr
 						return nil
 					}
 					if derr := retractPropagatedWinner(bracket, rIdx, mIdx); derr != nil {
@@ -652,12 +663,8 @@ func (e *Engine) ReopenKachinukiMatch(compID, matchID, reason string) error {
 			// The bronze (3rd-place) match is a sibling of Rounds and has no
 			// downstream match, so no retraction is needed.
 			if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID == matchID {
-				if bm.Status != state.MatchStatusCompleted {
-					opErr = ErrReopenNotCompleted
-					return nil
-				}
-				if cerr := reopenCourtFreeTx(tx, compID, matchID, bm.Court); cerr != nil {
-					opErr = cerr
+				if gerr := guard(bm.Status, bm.Court); gerr != nil {
+					opErr = gerr
 					return nil
 				}
 				reopenBracketMatch(bm, reason)
@@ -672,27 +679,6 @@ func (e *Engine) ReopenKachinukiMatch(compID, matchID, reason string) error {
 		return txErr
 	}
 	return opErr
-}
-
-// reopenCourtFreeTx is the same-competition half of the reopen court gate
-// (see ReopenKachinukiMatch): reopening flips the match back to running, so
-// a court that already has a running match would end up with two, wedging
-// the exclusivity check for BOTH. Returns *CourtBusyError (HTTP 409
-// court_busy, the same shape the score path returns) when the court is
-// taken. A match with no court assigned is never gated, mirroring
-// checkCourtExclusivityTx.
-func reopenCourtFreeTx(tx state.StoreTx, compID, matchID, court string) error {
-	if court == "" {
-		return nil
-	}
-	occ, err := courtOccupiedInCompTx(tx, compID, court, matchID)
-	if err != nil {
-		return err
-	}
-	if occ != nil {
-		return &CourtBusyError{Court: court, MatchID: occ.MatchID, CompID: occ.CompID}
-	}
-	return nil
 }
 
 // reopenBracketMatch flips a completed bracket match back to running,

@@ -105,20 +105,22 @@ func TestValidateCompetitionLengths_ErrorCases(t *testing.T) {
 	}))
 }
 
-// TestBracketMatchToResult covers the bracketMatchToResult helper (0%).
-func TestBracketMatchToResult(t *testing.T) {
+// TestBracketMatchSnapshot covers bracketMatchSnapshot, the BracketMatch ->
+// matchSnapshot projection used by the single match traversal.
+func TestBracketMatchSnapshot(t *testing.T) {
 	bm := &state.BracketMatch{
-		ID:       "match-1",
-		Winner:   "Alice",
-		Decision: string(domain.DecisionFought),
-		Status:   state.MatchStatusCompleted,
+		ID:               "match-1",
+		Winner:           "Alice",
+		Decision:         string(domain.DecisionFought),
+		Status:           state.MatchStatusCompleted,
+		CorrectionReason: "reopened: wrong bout recorded",
+		SubResults:       []state.SubMatchResult{{Position: 1, Winner: "Alice"}},
 	}
-	got := bracketMatchToResult(bm)
-	require.NotNil(t, got)
-	assert.Equal(t, bm.ID, got.ID)
-	assert.Equal(t, bm.Winner, got.Winner)
-	assert.Equal(t, bm.Decision, got.Decision)
+	got := bracketMatchSnapshot(bm)
 	assert.Equal(t, bm.Status, got.Status)
+	assert.Equal(t, bm.CorrectionReason, got.CorrectionReason)
+	require.Len(t, got.SubResults, 1)
+	assert.Equal(t, "Alice", got.SubResults[0].Winner)
 }
 
 // TestWriteSSEEnvelope_Discard ensures no panic writing to io.Discard.

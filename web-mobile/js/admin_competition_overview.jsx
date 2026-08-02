@@ -4,7 +4,7 @@
 // imports (no standalone <script> tag) and consumed by the AdminCompetition
 // shell via window.*.
 
-import { estimateRangeParts } from './admin_schedule_utils.jsx';
+import { EstimateHeadline } from './admin_schedule_utils.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -586,7 +586,8 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
     // best/average/worst range (it knows the competition's teamMatchType).
     // The headline totalDurationMinutes is the AVERAGE; when the range
     // collapses (fixed/individual) the single total renders as before.
-    const range = estimateRangeParts(estimate);
+    // EstimateHeadline (admin_schedule_utils.jsx) owns that decision for
+    // both this footer and the Settings panel.
     return (
       <div style={{
         padding: "10px 12px",
@@ -612,13 +613,7 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
           }
           return (
             <div style={{ fontSize: 12.5, color: "var(--ink)" }}>
-              {range ? (
-                <div data-testid="overview-est-range">
-                  <strong>Best</strong> {formatCompMinutes(range.best) || "0m"} · <strong>Average</strong> {formatCompMinutes(range.average) || "0m"} · <strong>Worst</strong> {formatCompMinutes(range.worst) || "0m"}
-                </div>
-              ) : (
-                <div><strong>Total:</strong> {total}</div>
-              )}
+              <EstimateHeadline estimate={estimate} total={total} format={formatCompMinutes} testId="overview-est-range" />
               {perCourt.length > 1 && (
                 <div style={{ marginTop: 2 }}>
                   <strong>Per court:</strong>{" "}

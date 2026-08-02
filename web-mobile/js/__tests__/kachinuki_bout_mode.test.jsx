@@ -23,8 +23,45 @@ import {
   subBoutHasBeenPlayed,
   kachinukiEnchoAvailable,
   kachinukiBandModel,
+  boutWinnerSide,
 } from '../admin_scoring_team.jsx';
 import { applyFoulIncrement } from '../admin_scoring_shared.jsx';
+
+// boutWinnerSide: the ONE home for "which side won this bout". The rule used
+// to be spelled three times (the IV/PW tally, the kachinuki band, End-match
+// derivation) and the copies disagreed on the fusensho case.
+describe('boutWinnerSide', () => {
+  it('gives the bout to the higher ippon count', () => {
+    expect(boutWinnerSide({ aCount: 2, bCount: 1 })).toBe('a');
+    expect(boutWinnerSide({ aCount: 0, bCount: 1 })).toBe('b');
+  });
+
+  it('has no winner on equal counts or an explicit hikiwake', () => {
+    expect(boutWinnerSide({ aCount: 1, bCount: 1 })).toBeNull();
+    expect(boutWinnerSide({ aCount: 0, bCount: 0 })).toBeNull();
+    expect(boutWinnerSide({ aCount: 2, bCount: 0, draw: true })).toBeNull();
+  });
+
+  it('a fusensho is decided by the DECISION, not the cells: the marked side wins even when the counts tie', () => {
+    // FIK Art. 32: the default win awards the winner maru (○○, one ○ in
+    // encho) while the loser's already-struck ippons are PRESERVED
+    // (preserveLoserScore), so a re-opened walkover can read 2-2 or 1-1.
+    expect(boutWinnerSide({ aCount: 2, bCount: 2, fusenshoSide: 'a' })).toBe('a');
+    expect(boutWinnerSide({ aCount: 1, bCount: 1, fusenshoSide: 'b' })).toBe('b');
+    // ... and even when the preserved loser score is the HIGHER one, the
+    // bout must never be handed to the side that was absent.
+    expect(boutWinnerSide({ aCount: 1, bCount: 2, fusenshoSide: 'a' })).toBe('a');
+  });
+
+  it('an explicit hikiwake outranks a stale fusensho marker', () => {
+    expect(boutWinnerSide({ aCount: 2, bCount: 0, draw: true, fusenshoSide: 'a' })).toBeNull();
+  });
+
+  it('tolerates a missing/garbage fusensho marker (falls through to the counts)', () => {
+    expect(boutWinnerSide()).toBeNull();
+    expect(boutWinnerSide({ aCount: 2, bCount: 0, fusenshoSide: '' })).toBe('a');
+  });
+});
 
 describe('isKachinukiBoutMode', () => {
   it('is true while a kachinuki match is being fought', () => {
@@ -184,6 +221,18 @@ describe('deriveKachinukiEndOutcome', () => {
       .toEqual({ kind: 'win', winnerSide: 'b' });
   });
 
+  it('ends on a fusensho whose maru tie the preserved loser score (composition, no winner name to fall back on)', () => {
+    // Same state as the band regression: local sub state carries the marked
+    // side but no names, so the winner-name fallback cannot help. Counting
+    // alone would have ended a walkover as a draw (or blocked it as a
+    // knockout tie); the shared side rule attributes it.
+    const subs = [sub({ aPts: ['○', '○'], bPts: ['M', 'K'], fusensho: 'a' })];
+    expect(deriveKachinukiEndOutcome({
+      subResults: buildKachinukiEndEntries(subs, -1),
+      isKnockoutPhase: true,
+    })).toEqual({ kind: 'win', winnerSide: 'a' });
+  });
+
   it('draws on a tied last bout in pools/league', () => {
     const subs = [bout(1, { ipponsA: ['M'], ipponsB: ['K'] })];
     expect(deriveKachinukiEndOutcome({ subResults: subs, isKnockoutPhase: false }))
@@ -276,6 +325,21 @@ describe('kachinukiBandModel', () => {
     });
     expect(kb.verdict).toBe('DRAW');
     expect(kb.verdictSide).toBe('draw');
+  });
+
+  it('a fusensho whose maru tie the preserved loser score still names both fighters', () => {
+    // A walkover re-opened from the server: applyFusenshoToggle wrote ○○ to
+    // the winner, and the loser's already-struck ippons are preserved (FIK
+    // Art. 32 / preserveLoserScore), so seedSubAt hands the band a 2-2 row
+    // carrying fusensho: 'a'. Deriving the winner from the counts alone made
+    // the side unattributable while `tie` stayed false, and the band rendered
+    // "Last:  beat  (fusensho) · stays on" with BOTH names blank.
+    const kb = kachinukiBandModel({
+      ...base,
+      subs: [sub({ aPts: ['○', '○'], bPts: ['M', 'K'], fusensho: 'a' }), sub()],
+      currentBout: 2,
+    });
+    expect(kb.fact).toBe('Last: Alpha Senpo beat Bravo Senpo (fusensho) · stays on');
   });
 
   it('nameless bootstrap bout degrades to side labels, not blank facts', () => {

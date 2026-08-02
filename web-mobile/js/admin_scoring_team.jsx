@@ -125,6 +125,31 @@ export function canReopenKachinukiMatch({ isKachinuki, isComplete }) {
   return !!isKachinuki && !!isComplete;
 }
 
+// boutWinnerSide: THE single home for "which side won this sub-bout".
+// Returns "a" (Aka), "b" (Shiro), or null when the bout has no winner.
+// One rule, three surfaces — the IV/PW tally and persisted bout winner
+// (subTotals), the kachinuki band's last-bout fact (kachinukiBandModel),
+// and the End-match derivation (deriveKachinukiEndOutcome) all call this,
+// so they can never disagree about who won a bout.
+//
+// Order matters. An operator-marked hikiwake has no winner at all. A
+// FUSENSHO is a DEFAULT WIN (FIK Art. 32): the decision names the winner,
+// the maru cells (○○, or a single ○ in encho) are merely the score board's
+// marking of it, and the loser's already-struck ippons are PRESERVED
+// (preserveLoserScore, engine/scoring.go). So a walkover whose loser kept
+// two ippons re-opens as 2–2 and one declared in encho as 1–1: counting
+// alone would read those as tied, which left the band rendering
+// "Last:  beat  (fusensho)" with both names blank, and could even hand the
+// bout to the side that withdrew. The fusensho side wins regardless of the
+// cells. Widen or narrow this rule in ONE place only.
+export function boutWinnerSide({ aCount = 0, bCount = 0, draw = false, fusenshoSide = "" } = {}) {
+  if (draw) return null;
+  if (fusenshoSide === "a" || fusenshoSide === "b") return fusenshoSide;
+  if (aCount > bCount) return "a";
+  if (bCount > aCount) return "b";
+  return null;
+}
+
 // buildKachinukiEndEntries: maps the modal's LOCAL sub state to the
 // wire-shaped entries deriveKachinukiEndOutcome consumes, keeping ONLY
 // bouts that carry operator input — decided by subBoutHasBeenPlayed, the
@@ -135,13 +160,15 @@ export function canReopenKachinukiMatch({ isKachinuki, isComplete }) {
 // manual placeholder rows are dropped exactly as they are dropped from
 // the wire.
 //
-// CROSS-FILE INVARIANT (fusensho): these entries carry decision "fusensho"
-// but NO winner, and deriveKachinukiEndOutcome resolves the side purely by
-// comparing ippon counts. That resolves only because applyFusenshoToggle
-// (admin_scoring_shared.jsx) writes the ○○ maru into the winning side's
-// pts when the operator toggles fusensho, which arrives here as ipponsA /
-// ipponsB. A refactor that stops writing those maru cells would silently
-// leave a walkover-ended encounter with no derivable winner.
+// FUSENSHO: the entries carry decision "fusensho" but no winner NAME (the
+// local sub state has no names for a bout the server has not paired yet),
+// so they also carry fusenshoSide — the side the operator marked — and
+// boutWinnerSide resolves the winner from that decision rather than from the
+// ippon counts. Counting alone is not enough: applyFusenshoToggle
+// (admin_scoring_shared.jsx) writes the ○○ maru into the winning side's pts,
+// but a walkover re-opened from the server arrives with the loser's
+// preserved ippons too and can read 2–2 / 1–1. fusenshoSide is local to this
+// derivation and never reaches the wire (buildPatch builds the wire rows).
 export function buildKachinukiEndEntries(subs, daihyosenIdx) {
   return (subs || [])
     .map((s, idx) => ({ s, idx }))
@@ -151,6 +178,7 @@ export function buildKachinukiEndEntries(subs, daihyosenIdx) {
       ipponsA: s.aPts,
       ipponsB: s.bPts,
       decision: s.draw ? "hikiwake" : s.fusensho ? "fusensho" : "",
+      fusenshoSide: s.draw ? "" : (s.fusensho || ""),
       encho: s.encho > 0 ? { periodCount: s.encho } : undefined,
     }));
 }
@@ -186,18 +214,20 @@ export function deriveKachinukiEndOutcome({ subResults, isKnockoutPhase }) {
     .sort((x, y) => x.position - y.position);
   if (scored.length === 0) return { kind: "blocked", reason: "no-bouts" };
   const last = scored[scored.length - 1];
-  let side = null;
-  if (last.decision !== "hikiwake") {
-    const aN = (last.ipponsA || []).length;
-    const bN = (last.ipponsB || []).length;
-    if (aN > bN) side = "a";
-    else if (bN > aN) side = "b";
-    else if (last.winner) {
-      // Equal counts but an explicit winner name (e.g. a server-recorded
-      // fusensho without ippons): map it back to a side when possible.
-      if (last.sideA && last.winner === last.sideA) side = "a";
-      else if (last.sideB && last.winner === last.sideB) side = "b";
-    }
+  // The side rule is NOT re-spelled here: boutWinnerSide is its one home.
+  let side = boutWinnerSide({
+    aCount: (last.ipponsA || []).length,
+    bCount: (last.ipponsB || []).length,
+    draw: last.decision === "hikiwake",
+    fusenshoSide: last.fusenshoSide,
+  });
+  if (side === null && last.decision !== "hikiwake" && last.winner) {
+    // Layered ON TOP of the side rule, not a second copy of it: a
+    // server-recorded bout may name its winner by STRING with nothing a
+    // side rule can key off (a fusensho persisted without maru cells and
+    // without a marked side). Map that name back to a side when possible.
+    if (last.sideA && last.winner === last.sideA) side = "a";
+    else if (last.sideB && last.winner === last.sideB) side = "b";
   }
   if (side) return { kind: "win", winnerSide: side };
   if (isKnockoutPhase) return { kind: "blocked", reason: "knockout-tie" };
@@ -244,12 +274,17 @@ export function kachinukiBandModel({ subs, daihyosenIdx, isComplete, matchWinner
     const aN = (s.aPts || []).length;
     const bN = (s.bPts || []).length;
     // Winner/loser derive from the SIDE, never from name comparison — an
-    // unresolved name must not collapse both sides onto one label.
-    const winnerSide = s.draw ? "" : aN > bN ? "a" : bN > aN ? "b" : "";
+    // unresolved name must not collapse both sides onto one label. The side
+    // itself comes from boutWinnerSide (the one winner rule), so a fusensho
+    // whose maru happen to tie the loser's preserved score still names its
+    // winner instead of rendering "Last:  beat  (fusensho)".
+    const winnerSide = boutWinnerSide({ aCount: aN, bCount: bN, draw: s.draw, fusenshoSide: s.fusensho });
     played.push({
       winner: winnerSide === "a" ? (aName || "Aka") : winnerSide === "b" ? (bName || "Shiro") : "",
       loser: winnerSide === "a" ? (bName || "Shiro") : winnerSide === "b" ? (aName || "Aka") : "",
-      tie: !!s.draw || (aN === bN && !s.fusensho),
+      // "No winner" IS the tie, so it reads off the same rule: an explicit
+      // hikiwake or equal counts with no fusensho to attribute them to.
+      tie: winnerSide === null,
       fusensho: !!s.fusensho,
     });
   });
@@ -758,11 +793,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // applyFoulIncrement at the 2-foul boundary), so totals are just the
   // pts length. No separate hansoku tally is needed in the live view.
   // A bout the operator marked as a draw has no winner, so it counts as a
-  // hikiwake for IV/PW and serialises with decision="hikiwake".
+  // hikiwake for IV/PW and serialises with decision="hikiwake". The winner
+  // itself comes from boutWinnerSide — the one winner rule, shared with the
+  // kachinuki band and End-match derivation.
   const subTotals = subs.map(s => {
     const aT = s.aPts.length;
     const bT = s.bPts.length;
-    const winner = s.draw ? null : aT > bT ? "a" : bT > aT ? "b" : null;
+    const winner = boutWinnerSide({ aCount: aT, bCount: bT, draw: s.draw, fusenshoSide: s.fusensho });
     return { aTotal: aT, bTotal: bT, winner, draw: !!s.draw };
   });
 
@@ -892,13 +929,17 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // regular subResult on the next write (position = last + 1); an untouched
   // manual row is dropped by the subBoutHasBeenPlayed filter and never
   // reaches the wire.
-  const kachinukiNextManualPos = (() => {
-    let last = 1; // bout 1 always exists (bootstrap slot)
-    (m.subResults || []).forEach(sr => { if (sr.position > 0 && sr.position > last) last = sr.position; });
-    subs.forEach((s, i) => { if (i !== daihyosenIdx && subBoutHasBeenPlayed(s) && i + 1 > last) last = i + 1; });
-    manualBouts.forEach(p => { if (p > last) last = p; });
-    return last + 1;
-  })();
+  //
+  // One past the furthest bout anyone knows about, reusing the values already
+  // in scope rather than re-scanning: maxSubPos (the server log) and
+  // manualMaxPos (rows this operator added) — the same two that size the grid
+  // via positionCount — plus kachinukiLastScoredIdx (the last locally-played
+  // bout, from the one subBoutHasBeenPlayed primitive), which is -1 when
+  // nothing is played and so cannot raise the floor. Floor 1 because bout 1
+  // always exists (the bootstrap slot). Position is the merge key the server
+  // keys off (mergeKachinukiSubResults), so a private re-derivation here
+  // would silently mis-number a bout the grid has already numbered.
+  const kachinukiNextManualPos = Math.max(1, maxSubPos, manualMaxPos, kachinukiLastScoredIdx + 1) + 1;
   const addManualBout = () => {
     const nextPos = kachinukiNextManualPos;
     if (nextPos > kachinukiMaxBouts) return;
@@ -1809,12 +1850,20 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                     {daihyosenBusy ? "Adding…" : "Add representative bout"}
                   </button>
                 </div>
-                {editorErr && (
-                  <div className="daihyosen-controls__err">{editorErr}</div>
-                )}
               </div>
             );
           })()}
+
+          {/* The modal's ONE inline error surface: the daihyosen add/remove
+              POSTs AND the inline lineup-position PUT all report here. It
+              used to live INSIDE the add-daihyosen block above, which returns
+              null for kachinuki / pool / already-has-a-daihyosen matches — so
+              a failed lineup save (reachable exactly in the kachinuki flow)
+              set a message the operator never saw. Rendered here, a sibling
+              of decisionErr, it shows wherever it is set. */}
+          {editorErr && (
+            <div data-testid="team-editor-error" className="daihyosen-controls__err" style={{ marginTop: 6 }}>{editorErr}</div>
+          )}
 
           {/* Ippon-type letter legend: same affordance as the individual
               editor; the per-bout buttons use the same M/K/D/T/H letters. */}

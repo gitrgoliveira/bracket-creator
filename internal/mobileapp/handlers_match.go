@@ -174,40 +174,6 @@ func isKachinukiComp(comp *state.Competition) bool {
 	return comp != nil && comp.TeamSize >= 2 && comp.TeamMatchType == state.TeamMatchTypeKachinuki
 }
 
-// loadMatchSubResults reloads the current bout log for matchID from either
-// store (pool matches first, then the bracket; match-ID shapes vary across
-// formats and fixtures, so lookup is by ID equality, not prefix). Used by
-// the score handler to echo the post-advance kachinuki log. Best-effort:
-// ok=false on any load failure or unknown ID.
-func loadMatchSubResults(store CompetitionStore, compID, matchID string) ([]state.SubMatchResult, bool) {
-	if ms, err := store.LoadPoolMatches(compID); err == nil {
-		for i := range ms {
-			if ms[i].ID == matchID {
-				return ms[i].SubResults, true
-			}
-		}
-	}
-	if b, err := store.LoadBracket(compID); err == nil && b != nil {
-		for rIdx := range b.Rounds {
-			for mIdx := range b.Rounds[rIdx] {
-				if b.Rounds[rIdx][mIdx].ID == matchID {
-					return b.Rounds[rIdx][mIdx].SubResults, true
-				}
-			}
-		}
-		// The bronze (3rd-place) match is a SIBLING of Rounds, not an element
-		// of it, so the loop above never reaches it. MaybeAdvanceKachinuki
-		// appends bouts to it like any other bracket match, so omitting this
-		// branch left a kachinuki bronze "Record bout" echoing the pre-advance
-		// log and the appended pairing never reached the open editor. Mirrors
-		// matchStatusFromStore / lookupMatchStatusUnderTx below.
-		if b.ThirdPlaceMatch != nil && b.ThirdPlaceMatch.ID == matchID {
-			return b.ThirdPlaceMatch.SubResults, true
-		}
-	}
-	return nil, false
-}
-
 // allowNumberedEnchoFor is the single decision point for the kachinuki
 // bout-level encho exception (mp-gmcg): a tied kachinuki pairing may be
 // fought on in overtime on that same bout, so the daihyosen-only encho
@@ -222,6 +188,31 @@ func loadMatchSubResults(store CompetitionStore, compID, matchID string) ([]stat
 // this helper rather than re-deriving the rule.
 func allowNumberedEnchoFor(comp *state.Competition) bool {
 	return isKachinukiComp(comp)
+}
+
+// allowNumberedEnchoFromStore resolves the numbered-bout encho gate for
+// compID: it loads the competition and applies allowNumberedEnchoFor, but
+// ONLY when the payload actually carries a numbered-bout encho
+// (hasNumberedEncho, from anyNumberedBoutHasEncho). An ordinary payload
+// carries none and must not pay the store read on the hot scoring path.
+//
+// FAIL CLOSED: any load failure keeps the STRICT daihyosen-only gate. The
+// error is logged rather than swallowed (errcheck) and rather than returned:
+// a load failure must not surface to the operator as a 400 blaming the
+// payload ("encho is only valid for the daihyosen representative bout
+// (position -1)"), which is what an ignored error produced. Both the
+// single-score and bulk-score paths route through here so neither the gate
+// nor its diagnosability can drift from the other.
+func allowNumberedEnchoFromStore(store CompetitionStore, compID string, hasNumberedEncho bool) bool {
+	if !hasNumberedEncho {
+		return false
+	}
+	comp, err := store.LoadCompetition(compID)
+	if err != nil {
+		log.Printf("LoadCompetition(%s) for the numbered-bout encho gate: %v; keeping the strict gate", compID, err)
+		return false
+	}
+	return allowNumberedEnchoFor(comp)
 }
 
 // tryAutoCompletePools runs the auto-complete check after a successful score
@@ -317,26 +308,26 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		// the batch, mirrors the single-score handler (T085/T092).
 		var eligibilityUpdates []*domain.CompetitorStatus
 
-		// Kachinuki relaxes the numbered-bout encho gate (allowNumberedEnchoFor);
-		// load the competition once so per-result length validation knows the
-		// format. Fail closed: a nil comp keeps the strict gate. The error is
-		// logged rather than swallowed (errcheck) and rather than returned: a
-		// load failure must not surface to the operator as a 400 blaming the
-		// payload ("encho is only valid for the daihyosen representative bout"),
-		// which is what an ignored error produced.
-		var comp *state.Competition
-		if loaded, cerr := store.LoadCompetition(id); cerr != nil {
-			log.Printf("bulk-score LoadCompetition(%s): %v; keeping the strict numbered-bout encho gate", id, cerr)
-		} else {
-			comp = loaded
+		// Kachinuki relaxes the numbered-bout encho gate. Every result in the
+		// batch belongs to the same competition, so the gate is resolved ONCE
+		// (allowNumberedEnchoFromStore also keeps the fail-closed behaviour and
+		// the load-error log): scan the batch first so an import that carries no
+		// bout-level encho at all never pays the store read.
+		batchHasNumberedEncho := false
+		for i := range results {
+			if anyNumberedBoutHasEncho(results[i].SubResults) {
+				batchHasNumberedEncho = true
+				break
+			}
 		}
+		allowNumberedEncho := allowNumberedEnchoFromStore(store, id, batchHasNumberedEncho)
 
 		for i := range results {
 			// Reject a hostile/buggy far-future or negative client timestamp so
 			// it cannot freeze the match against later legitimate writes (mp-y3nk).
 			results[i].ModifiedAt = clampClientModifiedAt(results[i].ModifiedAt)
 
-			if err := validateBulkScoreLengths(&results[i], allowNumberedEnchoFor(comp)); err != nil {
+			if err := validateBulkScoreLengths(&results[i], allowNumberedEncho); err != nil {
 				errs = append(errs, scoreError{MatchID: results[i].ID, Error: err.Error()})
 				continue
 			}
@@ -360,16 +351,15 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			results[i].CorrectionReason = strings.TrimSpace(results[i].CorrectionReason)
 			var capturedStatus *domain.CompetitorStatus
 			if err := tx.WithTransaction(id, func(stx state.StoreTx) error {
-				existingStatus, storedReason := lookupMatchAuditStateUnderTx(stx, id, results[i].ID)
-				if results[i].Status == state.MatchStatusCompleted && existingStatus == state.MatchStatusCompleted {
-					if results[i].CorrectionReason == "" {
-						return errors.New("correcting a completed match result requires a non-empty correctionReason")
-					}
-				} else {
-					// Not a correction: drop the client value but carry the STORED
-					// reason forward, same rule as the single-score path (a
-					// kachinuki reopen reason must survive the following End).
-					results[i].CorrectionReason = storedReason
+				// Correction-reason audit policy (require a reason on a
+				// completed -> completed overwrite, otherwise carry the STORED
+				// reason forward so a kachinuki reopen justification survives the
+				// following End). The rule itself lives in
+				// applyCorrectionReasonUnderTx, shared with the single-score path
+				// so the two cannot drift; only the error SHAPE differs here
+				// (partial-success entries carry a plain message).
+				if _, missingReason := applyCorrectionReasonUnderTx(stx, id, results[i].ID, &results[i]); missingReason {
+					return errors.New("correcting a completed match result requires a non-empty correctionReason")
 				}
 				status, err := eng.RecordMatchResultWithIneligibilityTx(stx, id, results[i].ID, &results[i])
 				if err == nil {
@@ -464,7 +454,12 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		// plain RecordMatchResult path, which has no kachinuki merge and no
 		// premature-completion check, so a single call would destroy a live
 		// winner-stays sequence. Same incompatibility class as engi: reject.
-		if comp != nil && comp.TeamMatchType == state.TeamMatchTypeKachinuki {
+		// isKachinukiComp, not a bare TeamMatchType test: the sequence this
+		// guard protects only exists when the engine actually runs kachinuki
+		// advancement, which requires TeamSize >= 2 (MaybeAdvanceKachinuki
+		// returns early below that). One spelling of "is this kachinuki"
+		// across the package, matching the engine's dispatch gate.
+		if isKachinukiComp(comp) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "quick-score is not supported for kachinuki competitions; score bouts individually"})
 			return
 		}
@@ -909,137 +904,172 @@ var errResultFinalized = errors.New("result_finalized")
 // checkFinalizedUnderTx runs inside WithTransaction (under the per-comp
 // lock) so it's safe from TOCTOU races. Returns errResultFinalized when
 // an anonymous caller tries to write to a completed match. Fails closed:
-// a load error rejects the request rather than allowing an overwrite.
+// a load error rejects the request rather than allowing an overwrite,
+// which is why this is the one caller that reads lookupMatchSnapshot's
+// error instead of going through the best-effort matchSnapshotFor.
 func checkFinalizedUnderTx(stx state.StoreTx, compID, matchID string) error {
-	poolMatches, err := stx.LoadPoolMatches(compID)
+	snap, found, err := lookupMatchSnapshot(stx, compID, matchID)
 	if err != nil {
-		return fmt.Errorf("finalized guard: load pool matches: %w", err)
+		return fmt.Errorf("finalized guard: %w", err)
+	}
+	if found && isMatchFinalized(snap.Status) {
+		return errResultFinalized
+	}
+	return nil
+}
+
+// isMatchFinalized reports whether the given stored status represents a
+// concluded match. Any completed match is finalized, anonymous callers must
+// not overwrite it regardless of whether a winner was explicitly recorded.
+func isMatchFinalized(status state.MatchStatus) bool {
+	return status == state.MatchStatusCompleted
+}
+
+// matchStores is the minimal read surface a match lookup needs: the two
+// files a match can live in. BOTH state.StoreTx (in-transaction, per-comp
+// lock already held) and CompetitionStore (plain loads, each taking the lock
+// itself) satisfy it, so the transactional and the non-transactional lookups
+// share ONE traversal instead of a hand-rolled walk per projection.
+type matchStores interface {
+	LoadPoolMatches(compID string) ([]state.MatchResult, error)
+	LoadBracket(compID string) (*state.Bracket, error)
+}
+
+// matchSnapshot is the stored state of a match as this file's guards read
+// it: Status drives the correction / stale-write / finalized gates,
+// CorrectionReason carries the kachinuki reopen justification forward (see
+// applyCorrectionReasonUnderTx), and SubResults echoes the post-advance
+// kachinuki bout log back to the open score editor.
+type matchSnapshot struct {
+	Status           state.MatchStatus
+	CorrectionReason string
+	SubResults       []state.SubMatchResult
+}
+
+// lookupMatchSnapshot is THE traversal of the three homes a match ID can
+// have — the pool-matches CSV, the bracket rounds, and the bracket's
+// ThirdPlaceMatch — searched in that order. Lookup is by ID equality, not
+// prefix: match-ID shapes vary across formats and fixtures.
+//
+// The bronze (3rd-place) match is a SIBLING of Rounds, not an element of it,
+// so a rounds-only loop never reaches it. Forgetting that branch is the bug
+// this single traversal exists to make impossible: MaybeAdvanceKachinuki
+// appends bouts to the bronze like any other bracket match, and a per-caller
+// copy of the walk that omitted it left a kachinuki bronze "Record bout"
+// echoing the pre-advance log, with the appended pairing never reaching the
+// open editor.
+//
+// found=false means the ID is in neither store; callers treat an unknown
+// match as "nothing recorded yet" (the engine rejects it via errMatchNotFound
+// on the actual score write, so there is nothing to fail here). err is the
+// FIRST load failure seen, and the walk continues past it so a best-effort
+// caller can still find a bracket match when the pool CSV is unreadable.
+// Only a caller that must FAIL CLOSED on a load error reads err
+// (checkFinalizedUnderTx); the rest go through matchSnapshotFor.
+func lookupMatchSnapshot(s matchStores, compID, matchID string) (matchSnapshot, bool, error) {
+	var loadErr error
+	poolMatches, err := s.LoadPoolMatches(compID)
+	if err != nil {
+		loadErr = fmt.Errorf("load pool matches: %w", err)
 	}
 	for i := range poolMatches {
-		if poolMatches[i].ID == matchID && isMatchFinalized(&poolMatches[i]) {
-			return errResultFinalized
+		if poolMatches[i].ID == matchID {
+			return matchSnapshot{
+				Status:           poolMatches[i].Status,
+				CorrectionReason: poolMatches[i].CorrectionReason,
+				SubResults:       poolMatches[i].SubResults,
+			}, true, loadErr
 		}
 	}
-	bracket, err := stx.LoadBracket(compID)
-	if err != nil {
-		return fmt.Errorf("finalized guard: load bracket: %w", err)
+	bracket, err := s.LoadBracket(compID)
+	if err != nil && loadErr == nil {
+		loadErr = fmt.Errorf("load bracket: %w", err)
 	}
 	if bracket != nil {
 		for _, round := range bracket.Rounds {
 			for i := range round {
 				if round[i].ID == matchID {
-					mr := bracketMatchToResult(&round[i])
-					if isMatchFinalized(mr) {
-						return errResultFinalized
-					}
+					return bracketMatchSnapshot(&round[i]), true, loadErr
 				}
 			}
 		}
 		if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchID {
-			mr := bracketMatchToResult(bracket.ThirdPlaceMatch)
-			if isMatchFinalized(mr) {
-				return errResultFinalized
-			}
+			return bracketMatchSnapshot(bracket.ThirdPlaceMatch), true, loadErr
 		}
 	}
-	return nil
+	return matchSnapshot{}, false, loadErr
 }
 
-// bracketMatchToResult projects the fields of a BracketMatch that the
-// finalized guard cares about into a MatchResult so the guard can use a
-// uniform type.
-func bracketMatchToResult(bm *state.BracketMatch) *state.MatchResult {
-	return &state.MatchResult{
-		ID:       bm.ID,
-		Winner:   bm.Winner,
-		Decision: bm.Decision,
-		Status:   bm.Status,
+// bracketMatchSnapshot projects a BracketMatch into the same shape as a pool
+// MatchResult so lookupMatchSnapshot returns one type across both stores.
+func bracketMatchSnapshot(bm *state.BracketMatch) matchSnapshot {
+	return matchSnapshot{
+		Status:           bm.Status,
+		CorrectionReason: bm.CorrectionReason,
+		SubResults:       bm.SubResults,
 	}
 }
 
-// isMatchFinalized reports whether the given result represents a concluded
-// match. Any completed match is finalized, anonymous callers must not
-// overwrite it regardless of whether a winner was explicitly recorded.
-func isMatchFinalized(r *state.MatchResult) bool {
-	return r.Status == state.MatchStatusCompleted
+// matchSnapshotFor is the best-effort form of lookupMatchSnapshot, for the
+// callers where a load failure is indistinguishable from "nothing recorded
+// yet": every one of them re-reads on the next request and the authoritative
+// rejection happens on the engine write.
+func matchSnapshotFor(s matchStores, compID, matchID string) (matchSnapshot, bool) {
+	snap, found, _ := lookupMatchSnapshot(s, compID, matchID)
+	return snap, found
 }
 
-// lookupMatchStatusUnderTx reads the current status of matchID from
-// the pool-matches CSV or bracket JSON (in that order) without taking
-// any additional lock (caller MUST hold the per-comp lock via
-// WithTransaction). Returns the empty MatchStatus "" when the match
-// cannot be found in either store, callers treat an unknown match as
-// "not yet completed" (the engine will reject it via errMatchNotFound
-// on the actual score write, so we don't need to fail here).
-func lookupMatchStatusUnderTx(stx state.StoreTx, compID, matchID string) state.MatchStatus {
-	status, _ := lookupMatchAuditStateUnderTx(stx, compID, matchID)
-	return status
-}
-
-// lookupMatchAuditStateUnderTx is lookupMatchStatusUnderTx generalized to
-// also yield the STORED CorrectionReason, covering the same three homes
-// (pool matches, bracket rounds, ThirdPlaceMatch) in the same order.
-//
-// The reason is needed because the kachinuki reopen path (mp-gmcg) writes
-// the operator's justification onto the match it sends back to running:
-// the following "End match" is a FIRST finalization, which used to blank
-// the field unconditionally, so the reopen audit trail died at the very
-// write it was recorded to justify. Callers carry the stored value
-// forward; a CLIENT-supplied reason on a first finalization is still
-// dropped (only a completed -> completed correction may set one).
-func lookupMatchAuditStateUnderTx(stx state.StoreTx, compID, matchID string) (state.MatchStatus, string) {
-	poolMatches, err := stx.LoadPoolMatches(compID)
-	if err == nil {
-		for i := range poolMatches {
-			if poolMatches[i].ID == matchID {
-				return poolMatches[i].Status, poolMatches[i].CorrectionReason
-			}
-		}
-	}
-	bracket, err := stx.LoadBracket(compID)
-	if err == nil && bracket != nil {
-		for _, round := range bracket.Rounds {
-			for i := range round {
-				if round[i].ID == matchID {
-					return round[i].Status, round[i].CorrectionReason
-				}
-			}
-		}
-		if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchID {
-			return bracket.ThirdPlaceMatch.Status, bracket.ThirdPlaceMatch.CorrectionReason
-		}
-	}
-	return "", ""
-}
-
-// matchStatusFromStore is the non-transactional twin of
-// lookupMatchStatusUnderTx: it reads a match's current status via plain
-// store loads so a correction (a completed -> completed overwrite) can be
-// detected BEFORE the transaction begins, letting the pre-tx court gate skip
-// it. A benign TOCTOU with a concurrent status change only decides whether the
+// matchStatusFromStore is the non-transactional status projection of
+// matchSnapshotFor: it reads a match's current status via plain store loads
+// so a correction (a completed -> completed overwrite) can be detected BEFORE
+// the transaction begins, letting the pre-tx court gate skip it. A benign
+// TOCTOU with a concurrent status change only decides whether the
 // (spurious-for-corrections) court check runs; the audit-critical
 // correction-REASON requirement still uses the race-free in-tx read.
 func matchStatusFromStore(store CompetitionStore, compID, matchID string) state.MatchStatus {
-	if poolMatches, err := store.LoadPoolMatches(compID); err == nil {
-		for i := range poolMatches {
-			if poolMatches[i].ID == matchID {
-				return poolMatches[i].Status
-			}
-		}
+	snap, _ := matchSnapshotFor(store, compID, matchID)
+	return snap.Status
+}
+
+// applyCorrectionReasonUnderTx applies the correction-reason audit policy to
+// r and returns the match's STORED status. Runs inside WithTransaction
+// (caller MUST hold the per-comp lock via the supplied StoreTx), so the
+// is-completed read is race-free against a concurrent score write.
+//
+// The policy is shared by the single-score and bulk-score paths so the audit
+// rule cannot drift between them (same reason applyKachinukiMerge is shared
+// by the locked and tx scoring paths); each caller wraps the missingReason
+// signal in its own error shape.
+//
+//   - completed -> completed is a CORRECTION: overwriting an already-finalized
+//     result requires a non-empty CorrectionReason for traceability. This
+//     applies to ANY decision type, including a withdrawal (kiken/fusenpai)
+//     submitted via /score; exempting those would let a finalized result be
+//     overwritten with no audit reason. missingReason reports the violation
+//     and r is left untouched.
+//   - anything else (a first finalization, or a running/scheduled write) is
+//     NOT a correction. A client-supplied reason is meaningless there and the
+//     caller already dropped it, but the reason STORED on the match must
+//     survive: the kachinuki reopen path (mp-gmcg) records the operator's
+//     justification there, and blanking it would erase the audit trail at the
+//     very write it was recorded to justify. Carrying it on the non-completed
+//     writes too is what keeps it alive for POOL matches, whose write is a
+//     whole-struct overwrite (`*r = *result` in engine/scoring_tx.go) rather
+//     than the bracket path's set-if-non-empty.
+//
+// Returning the stored status keeps this the transaction's ONLY match lookup:
+// StoreTx loads deliberately bypass the file cache (state.LoadPoolMatchesLocked
+// / loadBracketLocked), so a second walk is a real os.Open plus a full CSV
+// parse (and, for a bracket match, an os.ReadFile plus a whole-bracket
+// json.Unmarshal) while the per-comp WRITE lock is held. The caller's
+// stale-after-complete guard reads the returned status instead.
+func applyCorrectionReasonUnderTx(stx state.StoreTx, compID, matchID string, r *state.MatchResult) (state.MatchStatus, bool) {
+	snap, _ := matchSnapshotFor(stx, compID, matchID)
+	if r.Status == state.MatchStatusCompleted && snap.Status == state.MatchStatusCompleted {
+		return snap.Status, r.CorrectionReason == ""
 	}
-	if bracket, err := store.LoadBracket(compID); err == nil && bracket != nil {
-		for _, round := range bracket.Rounds {
-			for i := range round {
-				if round[i].ID == matchID {
-					return round[i].Status
-				}
-			}
-		}
-		if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchID {
-			return bracket.ThirdPlaceMatch.Status
-		}
-	}
-	return ""
+	r.CorrectionReason = snap.CorrectionReason
+	return snap.Status, false
 }
 
 // registerScoreHandler wires the `PUT /competitions/:id/matches/:mid/score`
@@ -1150,13 +1180,10 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		// validateSubBout is relaxed for kachinuki competitions. The
 		// competition is loaded only when the payload actually carries a
 		// bout-level encho, keeping the hot scoring path free of the read.
-		// Fail closed: a load failure keeps the strict gate (400 below).
-		allowNumberedEncho := false
-		if anyNumberedBoutHasEncho(req.SubResults) {
-			if comp, err := store.LoadCompetition(id); err == nil {
-				allowNumberedEncho = allowNumberedEnchoFor(comp)
-			}
-		}
+		// Fail closed: a load failure keeps the strict gate (400 below) and is
+		// logged by allowNumberedEnchoFromStore, which the bulk-score path
+		// shares so the gate and its diagnostics stay identical.
+		allowNumberedEncho := allowNumberedEnchoFromStore(store, id, anyNumberedBoutHasEncho(req.SubResults))
 		if err := req.validateWithOptions(allowNumberedEncho); err != nil {
 			// Map ValidationError → 400 with the validator's message.
 			// Engine errors below remain 500 (they surface I/O / state
@@ -1310,34 +1337,19 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				}
 				// Correction audit: overwriting an already-completed result
 				// (completed -> completed) is a correction and requires a non-empty
-				// CorrectionReason for traceability. This applies to ANY decision
-				// type, including a withdrawal (kiken/fusenpai) submitted via /score,
-				// exempting those would let a finalized result be overwritten with
-				// no audit reason. The check runs inside the tx so the is-completed
-				// read is race-free (same lock). A first finalization (existing
-				// status is not completed) needs no reason.
-				existingStatus, storedReason := lookupMatchAuditStateUnderTx(stx, id, mid)
-				if result.Status == state.MatchStatusCompleted && existingStatus == state.MatchStatusCompleted {
-					// Overwriting a finalized result is a correction, require a reason.
-					if result.CorrectionReason == "" {
-						engErr = &ValidationError{
-							Field:   "correctionReason",
-							Message: "correcting a completed match result requires a non-empty correctionReason",
-						}
-						return nil
+				// CorrectionReason for traceability; a first finalization needs no
+				// reason but must carry the STORED one forward. Both halves of that
+				// rule live in applyCorrectionReasonUnderTx, shared with the
+				// bulk-score path. It runs inside the tx so the is-completed read is
+				// race-free (same lock), and the status it returns is reused by the
+				// stale-write guard below rather than looked up a second time.
+				existingStatus, missingReason := applyCorrectionReasonUnderTx(stx, id, mid, result)
+				if missingReason {
+					engErr = &ValidationError{
+						Field:   "correctionReason",
+						Message: "correcting a completed match result requires a non-empty correctionReason",
 					}
-				} else {
-					// NOT a correction (a first finalization, or a running/
-					// scheduled write). The contract says a client-supplied reason
-					// is meaningless here, so it was already dropped above — but the
-					// reason STORED on the match must survive: the kachinuki reopen
-					// path (mp-gmcg) records the operator's justification there, and
-					// blanking it would erase the audit trail at the very write it
-					// justifies. Carrying it on the non-completed writes too is what
-					// keeps it alive for POOL matches, whose write is a whole-struct
-					// overwrite (`*r = *result` in engine/scoring_tx.go) rather than
-					// the bracket path's set-if-non-empty.
-					result.CorrectionReason = storedReason
+					return nil
 				}
 				// Bracket integrity: a running- OR scheduled-status write must
 				// never revert an already-completed match (e.g. a stale autosave
@@ -1350,8 +1362,12 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				// reverts only a running match and rejects a completed one (409).
 				// A finished result is corrected via the score editor, not requeued.
 				// No-op it as a stale write so the client's flush discards it.
+				// existingStatus is the status read by the correction gate a few
+				// lines up: same transaction, same lock, and nothing between the two
+				// touches the store, so re-reading it would only re-parse the
+				// pool-matches CSV / bracket JSON (StoreTx loads bypass the cache).
 				if (result.Status == state.MatchStatusRunning || result.Status == state.MatchStatusScheduled) &&
-					lookupMatchStatusUnderTx(stx, id, mid) == state.MatchStatusCompleted {
+					existingStatus == state.MatchStatusCompleted {
 					staleAfterComplete = true
 					return nil
 				}
@@ -1557,8 +1573,8 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				// LIST, not the host's open-match snapshot. Best-effort: on
 				// a load failure the pre-advance log is echoed and the next
 				// refresh reconciles.
-				if subs, ok := loadMatchSubResults(store, id, mid); ok {
-					result.SubResults = subs
+				if snap, ok := matchSnapshotFor(store, id, mid); ok {
+					result.SubResults = snap.SubResults
 				}
 				hub.Broadcast(EventMatchUpdated, gin.H{
 					"competitionId": id,

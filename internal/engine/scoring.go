@@ -303,6 +303,31 @@ func backfillMatchIdentity(result, stored *state.MatchResult) {
 	}
 }
 
+// preserveLoserScore implements FIK Regulations Article 32 ("Any point
+// scored by the shiai-funo-sha shall remain valid") on a default-win
+// result. The winner keeps the maru default-win fill already set on
+// `result`; this only touches the WITHDRAWING side, which keeps whatever it
+// had struck, and preserves the encounter's prior sub-bouts so a team
+// withdrawal never wipes the sub-bouts already fought (both teams' results
+// stand and continue to count in IV/PW standings via accrueTeamSubResults).
+//
+// prior is the match state before the decision; nothing is preserved unless
+// its sides still match — a drifted or re-oriented prior must not
+// mis-attribute points. decisionBy names the WITHDRAWING side
+// ("shiro" = SideB/Shiro, "aka" = SideA/Aka). Shared by the two
+// RecordDecision twins.
+func preserveLoserScore(result, prior *state.MatchResult, decisionBy string) {
+	if prior == nil || prior.SideA != result.SideA || prior.SideB != result.SideB {
+		return
+	}
+	result.SubResults = prior.SubResults
+	if decisionBy == "shiro" {
+		result.IpponsB = prior.IpponsB // loser = SideB (Shiro) keeps struck points
+	} else {
+		result.IpponsA = prior.IpponsA // loser = SideA (Aka) keeps struck points
+	}
+}
+
 // countScoringIppons counts real ippon marks, ignoring empty entries and the
 // "•" placeholder the UI uses for an unfilled slot. The default-win maru
 // (filled by the RecordDecision twins via domain.DefaultWinIppons) counts

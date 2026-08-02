@@ -435,10 +435,9 @@ func (e *Engine) RecordDecision(compID, matchID, decision, decisionBy, decisionR
 			return nil, nil, ErrDecisionLocked
 		}
 	}
-	// Kiken/fusenpai/fusensho apply only BEFORE any point has been scored
-	// (operator ruling: once a score exists those results are not
-	// applicable), so there are never struck ippons to preserve: the
-	// winner gets the pure maru fill, the loser ends with none.
+	// The winner gets the maru default-win fill; the withdrawing side keeps
+	// whatever it had struck and the encounter keeps its prior sub-bouts
+	// (FIK Art. 32 — see preserveLoserScore below).
 	winIppons := domain.DefaultWinIppons(encho.On())
 	result := &state.MatchResult{
 		ID:             matchID,
@@ -450,9 +449,8 @@ func (e *Engine) RecordDecision(compID, matchID, decision, decisionBy, decisionR
 		Encho:          encho,
 		Status:         state.MatchStatusCompleted,
 	}
-	// shiro=SideB (White, left), aka=SideA (Red, right). The losing
-	// side ends with 0 ippons; the surviving side gets the ○ default-win fill
-	// and becomes Winner.
+	// shiro=SideB (White, left), aka=SideA (Red, right). The surviving side
+	// gets the ○ default-win fill and becomes Winner.
 	if decisionBy == "shiro" {
 		result.IpponsA = winIppons
 		result.Winner = sideA
@@ -460,6 +458,7 @@ func (e *Engine) RecordDecision(compID, matchID, decision, decisionBy, decisionR
 		result.IpponsB = winIppons
 		result.Winner = sideB
 	}
+	preserveLoserScore(result, prior, decisionBy)
 	status, err := e.RecordMatchResultWithIneligibility(compID, matchID, result)
 	if err != nil {
 		return nil, nil, err

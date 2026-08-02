@@ -179,7 +179,7 @@ func validateSubBout(prefix string, sr *state.SubMatchResult) error {
 				Message: "encho period count must not be negative",
 			}
 		}
-		if sr.Position != state.DaihyosenSubPosition && sr.Encho.PeriodCount != 0 {
+		if sr.Position != state.DaihyosenSubPosition && sr.Encho.On() {
 			return &ValidationError{
 				Field:   prefix + "encho",
 				Message: "encho is only valid for the daihyosen representative bout (position -1)",
@@ -587,8 +587,12 @@ func (r *ScoreRequest) validateDecision() error {
 		if r.DecisionBy == "" {
 			return &ValidationError{Field: "decisionBy", Message: "required when decision is fusenpai"}
 		}
-		if !winningScoreline(r.IpponsA, r.IpponsB, 2) {
-			return &ValidationError{Field: "scoreline", Message: "fusenpai requires 2-0 scoreline"}
+		// Same derivation as the kiken arm above: the validator enforces
+		// exactly what the recorder fills (a fusenpai recorded during
+		// encho awards the single deciding point).
+		need := len(domain.DefaultWinIppons(r.Encho.On()))
+		if !winningScoreline(r.IpponsA, r.IpponsB, need) {
+			return &ValidationError{Field: "scoreline", Message: fmt.Sprintf("fusenpai requires %d-0 scoreline", need)}
 		}
 		if err := r.requireWinnerForDecision("fusenpai"); err != nil {
 			return err

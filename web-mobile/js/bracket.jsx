@@ -1025,6 +1025,7 @@ window.matchScoreStr = matchScoreStr;
 window.matchStateCell = matchStateCell;
 window.boutMiddle = boutMiddle;
 window.defaultWinMaru = defaultWinMaru;
+window.enchoOn = enchoOn;
 window.matchMiddleMark = matchMiddleMark;
 window.winnerSideLR = winnerSideLR;
 window.sideLabel = sideLabel;

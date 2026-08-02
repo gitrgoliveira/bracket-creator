@@ -782,7 +782,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             (mm.score?.winnerPts || 0) > 0 ||
             (mm.score?.loserPts || 0) > 0 ||
             fouls > 0 ||
-            (mm.encho?.periodCount || 0) > 0 ||
+            (window.enchoOn ? window.enchoOn(mm.encho) : (mm.encho?.periodCount || 0) > 0) ||
             (mm.subResults?.length || 0) > 0;
     };
 

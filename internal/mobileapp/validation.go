@@ -22,6 +22,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
@@ -175,12 +176,11 @@ func validateURLHasHost(field, val string) error {
 // Status/DecisionBy checks (SubMatchResult has no such fields).
 func validateSubBout(prefix string, sr *state.SubMatchResult, allowNumberedEncho bool) error {
 	// Encho period counts are bounded two ways. A negative count is never
-	// valid on any bout (it would slip past the > 0 guards below and be
-	// silently treated as "no encho", bypassing the cap check). On a
-	// numbered bout, ANY non-zero count is rejected unless the caller
-	// allows it (kachinuki, see above): a fixed-format bout has fixed
-	// regulation time and cannot go to overtime; only the daihyosen
-	// representative bout (Position == -1) may carry encho.
+	// valid on any bout (it would make Encho.On() read false below and be
+	// silently treated as "no encho"). On a numbered bout, ANY non-zero
+	// count is rejected unless the caller allows it (kachinuki, see above):
+	// a regular bout has fixed regulation time and cannot go to overtime;
+	// only the daihyosen representative bout (Position == -1) may carry encho.
 	if sr.Encho != nil {
 		if sr.Encho.PeriodCount < 0 {
 			return &ValidationError{
@@ -188,7 +188,7 @@ func validateSubBout(prefix string, sr *state.SubMatchResult, allowNumberedEncho
 				Message: "encho period count must not be negative",
 			}
 		}
-		if !allowNumberedEncho && sr.Position != state.DaihyosenSubPosition && sr.Encho.PeriodCount != 0 {
+		if !allowNumberedEncho && sr.Position != state.DaihyosenSubPosition && sr.Encho.On() {
 			return &ValidationError{
 				Field:   prefix + "encho",
 				Message: "encho is only valid for the daihyosen representative bout (position -1)",
@@ -405,7 +405,7 @@ type ScoreRequest state.MatchResult
 //     value must be one of fought/hikiwake/kiken/fusenpai/fusensho/
 //     daihyosen/kachinuki-exhaustion (or empty).
 //     kiken/fusenpai require decisionBy and a winning-side scoreline
-//     (2-0 in regulation, 1-0 in encho for kiken). fusensho is only
+//     (2-0 in regulation, 1-0 in encho). fusensho is only
 //     valid on a per-bout SubResult, not on a top-level score request.
 func (r *ScoreRequest) Validate() error {
 	return r.validateWithOptions(false)
@@ -588,31 +588,22 @@ func (r *ScoreRequest) validateDecision() error {
 		}
 	}
 	switch r.Decision {
-	case "kiken-voluntary", "kiken-injury":
+	case "kiken-voluntary", "kiken-injury", "fusenpai":
 		if r.DecisionBy == "" {
 			return &ValidationError{Field: "decisionBy", Message: fmt.Sprintf("required when decision is %s", r.Decision)}
 		}
-		need := 2
-		if r.Encho != nil {
-			need = 1
-		}
+		// The required default-win scoreline is exactly what the recorder
+		// fills (domain.DefaultWinIppons keyed on the shared encho
+		// predicate): the full pair in regulation, the single deciding
+		// point in encho.
+		need := len(domain.DefaultWinIppons(r.Encho.On()))
 		if !winningScoreline(r.IpponsA, r.IpponsB, need) {
 			return &ValidationError{
 				Field:   "scoreline",
 				Message: fmt.Sprintf("%s requires %d-0 scoreline", r.Decision, need),
 			}
 		}
-		if err := r.requireWinnerForDecision(r.Decision); err != nil {
-			return err
-		}
-	case "fusenpai":
-		if r.DecisionBy == "" {
-			return &ValidationError{Field: "decisionBy", Message: "required when decision is fusenpai"}
-		}
-		if !winningScoreline(r.IpponsA, r.IpponsB, 2) {
-			return &ValidationError{Field: "scoreline", Message: "fusenpai requires 2-0 scoreline"}
-		}
-		if err := r.requireWinnerForDecision("fusenpai"); err != nil {
+		if err := r.requireWinnerForDecision(); err != nil {
 			return err
 		}
 	case "fusensho":
@@ -675,11 +666,11 @@ func validateIpponCounts(field string, ipponsA, ipponsB []string) error {
 // Winner as the canonical surviving side. Without this, a bulk-score
 // or hand-crafted request could record an ineligibility against the
 // wrong player.
-func (r *ScoreRequest) requireWinnerForDecision(label string) error {
+func (r *ScoreRequest) requireWinnerForDecision() error {
 	if r.Winner == "" {
 		return &ValidationError{
 			Field:   "winner",
-			Message: fmt.Sprintf("required when decision is %s (names the surviving side)", label),
+			Message: fmt.Sprintf("required when decision is %s (names the surviving side)", r.Decision),
 		}
 	}
 	return nil

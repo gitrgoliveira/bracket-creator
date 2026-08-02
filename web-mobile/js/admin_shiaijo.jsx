@@ -245,7 +245,8 @@ export function shiaijoScoreCell(m) {
     const ipponsA = m.ipponsA || (window.ipponsFromScore ? window.ipponsFromScore(m.scoreA) : []);
     const ipponsB = m.ipponsB || (window.ipponsFromScore ? window.ipponsFromScore(m.scoreB) : []);
     const s = window.formatIpponsScore
-        ? window.formatIpponsScore(ipponsB, ipponsA, m.score, m.decision, m.encho, m.decidedByHantei)
+        ? window.formatIpponsScore(ipponsB, ipponsA, m.score, m.decision, m.encho, m.decidedByHantei,
+            window.winnerSideLR ? window.winnerSideLR(m) : null)
         : "";
     return s ? { kind: "ippon", ippon: s } : { kind: "none" };
 }
@@ -799,7 +800,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             (mm.score?.winnerPts || 0) > 0 ||
             (mm.score?.loserPts || 0) > 0 ||
             fouls > 0 ||
-            (mm.encho?.periodCount || 0) > 0 ||
+            (window.enchoOn ? window.enchoOn(mm.encho) : (mm.encho?.periodCount || 0) > 0) ||
             (mm.subResults?.length || 0) > 0;
     };
 

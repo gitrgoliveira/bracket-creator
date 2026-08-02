@@ -22,9 +22,25 @@ An injury kiken can be reinstated later by the operator if the competitor recove
 
 **Fusensho** is a per-bout default win, used in team matches when the opposing team fields a vacant position.
 
+A default win (kiken, fusenpai, or fusensho) awards the winner the match points without a technique, and each awarded point is recorded as a circle. This follows the FIK Regulations of Kendo Shiai and Shinpan (Article 32 and the score board appendix): the winner's score shows two circles, or a single circle when the win happens during overtime, where only the one deciding point is awarded. Any point the withdrawing side had already scored stays valid and is kept on the sheet; in a team match, the sub-bouts already fought are preserved and still count toward the standings.
+
 ## Hikiwake
 
 A hikiwake is a draw. It applies in pool, league, and Swiss matches (not in the knockout phase) and contributes to the standings separately from wins and losses.
+
+## Encho (overtime)
+
+Encho is the extra period played when a knockout match is level at the end of regulation. It follows ippon-shobu rules: the first competitor to score wins.
+
+In the score editor, open the **Overtime** control and tick **Encho started**. A counter appears so you can record how many overtime periods were fought, using the **+** and **-** buttons. The counter starts at 1 and has no upper limit: how many periods are fought, and how a match still level after them is finally settled (a judges' decision for an individual bout, a daihyosen for a team encounter), is the shimpan's call. Record what actually happened on court, however many periods that took.
+
+![The score editor during a second overtime period: the Encho started box is ticked, the period counter reads two, and the header shows the live overtime readout.](../../screenshots/mobile-encho-overtime.png)
+
+Completed results follow the paper score sheet's layout. The centre, between the two sides' points, only ever carries one mark: **vs** when no special mark applies, **X** for a tie, **(E)** for a match that went to overtime, or **(DH)** for a team encounter sent to a representative bout. The marks never combine: a match that went to encho cannot end in a tie, and a daihyosen has no overtime. A side with no points shows a plain dash. A match won by men in regulation reads **M vs -** and the same win in overtime reads **M (E) -** on the court console and the public viewer; the exported results workbook carries the same **(E)** marker in its centre column, with a no-points cell left blank rather than dashed. The marker is the same however many overtime periods were fought, because the counter records the number for the tournament log but results never show it.
+
+Everything else is a result, written beside the competitor it names: **Ht** next to the winner of a judges' decision, **Kiken** next to the competitor who withdrew, **Fus.** next to a no-show. A match decided by hantei after a tied overtime reads **M Ht (E) K**, with the winner's mark on the winner's side of the centre. A team encounter shows its team totals in the score cell instead, so for those the marks appear on the bracket and in the exported workbook.
+
+![Two completed results on the public viewer: an overtime win reading M, the E marker, then a dash for the side with no points, and a hantei result with the Ht mark beside the winner.](../../screenshots/viewer-result-encho.png)
 
 ## Daihyosen
 
@@ -37,7 +53,7 @@ It applies in two situations:
 
 A tie that does not affect advancement is left as a shared rank with no extra bout. In league play, running the daihyosen is the operator's choice rather than an automatic step; see [Team standings and tie-breaks](../organisers/team-tournaments.md#team-standings-and-tie-breaks) for both options.
 
-The bout is a single-point ippon-shobu with no time limit, between one representative from each tied team. The score editor lets you pick each team's representative from its roster. On the court console, the bout appears with a **DH** tag. In pool and league standings, the team that won its daihyosen carries a **DH** badge.
+The bout is a single-point ippon-shobu with no time limit, between one representative from each tied team; because it runs until someone scores, a daihyosen has no encho. The score editor lets you pick each team's representative from its roster. On the court console, the bout appears with a **(DH)** mark in the centre of the score. In pool and league standings, the team that won its daihyosen carries a **DH** badge.
 
 ## Chusen (drawing lots)
 

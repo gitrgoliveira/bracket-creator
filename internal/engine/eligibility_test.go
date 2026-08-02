@@ -201,6 +201,18 @@ func TestRecordDecision_DefaultWinIpponMarkers(t *testing.T) {
 	assert.Equal(t, "Alice", result.Winner)
 	assert.Equal(t, []string{"○", "○"}, result.IpponsA)
 	assert.Empty(t, result.IpponsB)
+
+	// A default win DURING ENCHO awards exactly the one deciding point
+	// (sudden death), so the fill is a single maru, not the pair.
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled},
+	}))
+	result, _, err = eng.RecordDecision(compID, "Pool A-0", "kiken-injury", "shiro", "injury in encho", &state.EnchoMetadata{PeriodCount: 1}, true)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, "Alice", result.Winner)
+	assert.Equal(t, []string{"○"}, result.IpponsA)
+	assert.Empty(t, result.IpponsB)
 }
 
 // TestRecordDecision_ConcurrentKiken verifies CHK047/T105: when two
@@ -1292,4 +1304,87 @@ func TestEligibilityHelpers_NilCompetitionNoPanic(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Nil(t, status)
 	})
+}
+
+// TestRecordDecision_LoserKeepsStruckPoints pins FIK Regulations Article 32
+// ("Any point scored by the shiai-funo-sha shall remain valid"): a withdrawal
+// keeps the losing side's already-struck ippons. The winner still gets the
+// maru default-win fill, but the loser is NOT zeroed.
+func TestRecordDecision_LoserKeepsStruckPoints(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "loser-keeps-points"
+	createTestCompetition(t, store, compID, "league", 2)
+	aliceID, bobID := helper.NewUUID4(), helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: aliceID, Name: "Alice", Dojo: "A"},
+		{ID: bobID, Name: "Bob", Dojo: "B"},
+	}))
+	// Live bout: Alice (aka/SideA) struck M, Bob (shiro/SideB) struck K.
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning,
+			IpponsA: []string{"M"}, IpponsB: []string{"K"}},
+	}))
+	// Bob (shiro) withdraws -> Alice wins by default: Alice gets the maru
+	// pair; Bob KEEPS his struck K.
+	result, _, err := eng.RecordDecision(compID, "Pool A-0", "kiken-voluntary", "shiro", "withdrew", nil, false)
+	require.NoError(t, err)
+	assert.Equal(t, "Alice", result.Winner)
+	assert.Equal(t, []string{"○", "○"}, result.IpponsA, "winner gets the maru default-win fill")
+	assert.Equal(t, []string{"K"}, result.IpponsB, "withdrawing side keeps its struck ippon (FIK Art. 32)")
+}
+
+// TestRecordDecision_TeamWithdrawalKeepsSubResults pins that a team encounter
+// withdrawal preserves the sub-bouts already fought (FIK Art. 32) rather than
+// wiping the whole subResults array, so both teams' recorded results stand and
+// keep counting toward the standings.
+func TestRecordDecision_TeamWithdrawalKeepsSubResults(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "team-withdrawal-subs"
+	createTestCompetition(t, store, compID, "league", 2, func(c *state.Competition) {
+		c.Kind = "team"
+		c.TeamSize = 3
+	})
+	subs := []state.SubMatchResult{
+		{Position: 1, SideA: "Team Red", SideB: "Team White", IpponsA: []string{"M"}, Winner: "Team Red"},
+		{Position: 2, SideA: "Team Red", SideB: "Team White", IpponsB: []string{"K"}, Winner: "Team White"},
+	}
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Team Red", SideB: "Team White", Status: state.MatchStatusRunning, SubResults: subs},
+	}))
+	// aka (SideA = Team Red) withdraws -> shiro (SideB = Team White) wins.
+	result, _, err := eng.RecordDecision(compID, "Pool A-0", "kiken-voluntary", "aka", "withdrew", nil, false)
+	require.NoError(t, err)
+	assert.Equal(t, "Team White", result.Winner)
+	require.Len(t, result.SubResults, 2, "team sub-bouts already fought are preserved (FIK Art. 32)")
+	assert.Equal(t, "Team Red", result.SubResults[0].Winner)
+	assert.Equal(t, "Team White", result.SubResults[1].Winner)
+}
+
+// TestRecordDecision_ReDecisionFlipNoPhantomMaru guards the T103 correction
+// path: re-recording a default win with a FLIPPED decisionBy must not carry
+// the first decision's ○○ maru fill onto the new loser as phantom struck
+// points. preserveLoserScore keeps only real struck ippons (FIK Art. 32 "any
+// point scored"), stripping the maru marker.
+func TestRecordDecision_ReDecisionFlipNoPhantomMaru(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "redecision-flip"
+	createTestCompetition(t, store, compID, "league", 2)
+	aliceID, bobID := helper.NewUUID4(), helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: aliceID, Name: "Alice", Dojo: "A"},
+		{ID: bobID, Name: "Bob", Dojo: "B"},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled},
+	}))
+	// Decision 1: Bob (shiro) withdraws -> Alice wins ○○.
+	_, _, err := eng.RecordDecision(compID, "Pool A-0", "kiken-voluntary", "shiro", "withdrew", nil, false)
+	require.NoError(t, err)
+	// Correction: actually Alice (aka) withdrew -> flip decisionBy. Bob wins ○○;
+	// Alice must NOT inherit decision 1's maru as points scored.
+	result, _, err := eng.RecordDecision(compID, "Pool A-0", "kiken-voluntary", "aka", "correction", nil, false)
+	require.NoError(t, err)
+	assert.Equal(t, "Bob", result.Winner)
+	assert.Equal(t, []string{"○", "○"}, result.IpponsB, "new winner Bob gets the maru fill")
+	assert.Empty(t, result.IpponsA, "flipped loser Alice must not inherit the prior maru as phantom points")
 }

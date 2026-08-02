@@ -50,12 +50,11 @@ describe('LeagueStandingsViewer (mp-dunx)', () => {
     global.window.isHikiwake = () => false;
     global.window.formatIpponsScore = () => '';
     global.window.teamIVScore = () => null;
-    global.window.matchScoreStr = (m, ippB, ippA) =>
+    global.window.matchScoreStr = (m) =>
       (global.window.teamIVScore(m)) ||
-      global.window.formatIpponsScore(ippB, ippA, m?.score, m?.decision, m?.encho, m?.decidedByHantei);
-    global.window.matchStateCell = (m, ippB, ippA) =>
-      m?.status === 'completed' ? (global.window.matchScoreStr(m, ippB, ippA) || '-')
-      : m?.status === 'running' ? 'vs' : '–';
+      global.window.formatIpponsScore(m?.ipponsB || [], m?.ipponsA || [], m?.score, m?.decision, m?.encho, m?.decidedByHantei);
+    global.window.matchStateCell = (m) =>
+      m?.status === 'completed' ? (global.window.matchScoreStr(m) || 'vs') : 'vs';
     global.window.ipponsFromScore = () => [];
     global.window.queueLabel = () => '';
     global.window.queueLabelCompact = () => null;

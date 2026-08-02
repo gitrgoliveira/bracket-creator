@@ -50,6 +50,40 @@ func IsKikenDecisionStr(s string) bool {
 	return IsKikenDecision(Decision(s))
 }
 
+// IsDefaultWinDecisionStr reports whether the decision awards the match
+// points without a technique — the "default win" class (any kiken,
+// fusenpai, or fusensho) whose awarded points record as maru. These
+// decisions apply only before any point has been scored. Mirrors
+// isDefaultWinBC in web-mobile/js/bracket.jsx.
+func IsDefaultWinDecisionStr(s string) bool {
+	return IsKikenDecisionStr(s) || s == string(DecisionFusenpai) || s == string(DecisionFusensho)
+}
+
+// DefaultWinIppon is the FIK maru "○" (U+25CB) recorded for each point a
+// default win awards without a technique. Exported so consumers can filter
+// it out of a struck-ippon count (e.g. engine.struckIppons, which must tell
+// an awarded maru apart from a real struck point) without hardcoding the
+// glyph and risking a Unicode lookalike.
+const DefaultWinIppon = "○"
+
+// DefaultWinIppons returns the winner's ippon slots for a default win:
+// one maru per awarded point, as prescribed by the FIK Regulations of
+// Kendo Shiai and Shinpan — Article 32 ("The winner by virtue of
+// Articles 30 or 31 shall be given two points ... However, the winner
+// will be awarded one point in the case of encho") and the Score Board
+// appendix (printed p.15: "Fusen-gachi, Kiken or Shiai-funo ... put one
+// mark in case of Encho"). So the two-point pair "○○" in regulation, a
+// single deciding "○" in encho (sudden death). THE single Go source of
+// the maru-count rule, consumed by the engine's RecordDecision twins
+// (the canonical record) and, joined, by the display fallbacks. Mirrors
+// defaultWinMaru in web-mobile/js/bracket.jsx (same cells shape).
+func DefaultWinIppons(inEncho bool) []string {
+	if inEncho {
+		return []string{DefaultWinIppon}
+	}
+	return []string{DefaultWinIppon, DefaultWinIppon}
+}
+
 // UnmarshalYAML migrates legacy `decision` values (NFR-025, R6):
 //
 //   - bool true  → DecisionHikiwake (the historical "draw" flag)

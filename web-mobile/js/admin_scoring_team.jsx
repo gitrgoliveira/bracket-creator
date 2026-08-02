@@ -553,7 +553,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // from match-level compFormat (when set by compMatches) or the comp
   // fetch fallback. Phase === "bracket" is the in-modal signal.
   const compFormat = m.compFormat || compMeta?.config?.format || "";
-  const maxEnchoPeriods = compMeta?.config?.maxEnchoPeriods || 0;
   const isNaginataTeam = !!compMeta?.config?.naginata;
   // Knockout phase = a bracket match. A POOL match is never knockout, even in a
   // mixed/playoffs competition: pool team matches may legitimately draw
@@ -858,13 +857,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     subs.forEach((s, i) => { if (i !== daihyosenIdx && subBoutHasBeenPlayed(s)) li = i; });
     return li;
   })();
-  const enchoCapped = maxEnchoPeriods > 0 && enchoPeriodCount >= maxEnchoPeriods;
   // Encho on the tied final kachinuki bout: bump the bout's overtime count
   // AND the match-level counter (decisionSuffix reads match.encho for the
   // "(E)" suffix; enchoBlock forwards it since kachinuki has no daihyosen),
   // then clear the tied outcome so the SAME pair keeps scoring that bout.
   const applyKachinukiEncho = () => {
-    if (kachinukiLastScoredIdx < 0 || enchoCapped) return;
+    if (kachinukiLastScoredIdx < 0) return;
     setEnchoPeriodCount(cnt => cnt + 1);
     updateSub(kachinukiLastScoredIdx, prev => ({ ...prev, encho: (prev.encho || 0) + 1, draw: false, _preFusensho: undefined }));
     setEndArmed(false);
@@ -1204,14 +1202,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               mp-gmcg (critique + operator ruling): in kachinuki bout mode this
               top period-stepper is redundant AND confusing next to the footer
               Encho button. Declaring encho there is OPTIONAL and its only
-              effect is the middle mark (vs → "(E)"); no ×N period count is
+              effect is the middle mark (vs → "(E)"); no period count is
               needed. So the top control is suppressed while fighting a
               kachinuki match; corrections/daihyosen/fixed formats keep it. */}
           {!kachinukiBoutMode && (
             <EnchoControl
               enchoPeriodCount={enchoPeriodCount}
               setEnchoPeriodCount={setEnchoPeriodCount}
-              maxEnchoPeriods={maxEnchoPeriods}
             />
           )}
           {/* Team header */}
@@ -1970,8 +1967,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                     className="btn"
                     data-testid="kachinuki-encho-button"
                     onClick={applyKachinukiEncho}
-                    disabled={submitting || enchoCapped}
-                    title={enchoCapped ? "Maximum encho periods reached" : "Overtime: the same pair keeps fighting this bout"}
+                    disabled={submitting}
+                    title="Overtime: the same pair keeps fighting this bout"
                   >
                     Encho
                   </button>

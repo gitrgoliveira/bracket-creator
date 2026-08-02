@@ -38,7 +38,6 @@ export const IMPOSSIBLE_FORMAT_PHASES = FORMATS
 export const cellKey = (fp) => `${fp.format}/${fp.phase}`;
 
 export const NAGINATA = [false, true];
-export const MAX_ENCHO = [0, 2];
 
 // Independent hardcoded expectations for getIpponButtons(isNaginata) — NOT
 // computed from the component, so a letter-set change in

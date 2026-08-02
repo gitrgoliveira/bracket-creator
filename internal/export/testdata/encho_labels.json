@@ -1,0 +1,32 @@
+{
+  "_comment": [
+    "mp-m4bn: the single source of truth for the overtime marker, shared by",
+    "BOTH language implementations of enchoLabel: internal/export/suffix.go",
+    "(the exported results workbook) and web-mobile/js/bracket.jsx (bracket,",
+    "court console, viewer, TV). internal/export/suffix_test.go table-drives",
+    "the Go side over these cases; web-mobile/js/__tests__/score_display.test.jsx",
+    "reads this same file and drives the JS side.",
+    "",
+    "THE CONTRACT: encho is just encho. Any positive periodCount renders the",
+    "bare \"(E)\"; zero/absent renders \"\". The stepper records how many periods",
+    "were fought (periodCount persists for the tournament log), but the result",
+    "marking never carries the number: counted markers (\"(E×3)\") confuse",
+    "readers of brackets and result sheets (operator decision, PR #376). The",
+    "multi-digit periodCount 11 case pins that digits never leak in.",
+    "",
+    "Why a shared file rather than each suite restating the strings: changing",
+    "one language AND its own tests together is the realistic drift, and two",
+    "independent tables both stay green through it. Editing this file fails",
+    "the OTHER language's suite immediately, so the marker cannot move in one",
+    "renderer without the other following. Pin VALUES, not source shape: an",
+    "earlier grep-the-other-source attempt passed unchanged when the marker",
+    "was switched to \"(OT)\" and went red on behaviour-preserving refactors."
+  ],
+  "cases": [
+    { "periodCount": 0, "label": "" },
+    { "periodCount": 1, "label": "(E)" },
+    { "periodCount": 2, "label": "(E)" },
+    { "periodCount": 3, "label": "(E)" },
+    { "periodCount": 11, "label": "(E)" }
+  ]
+}

@@ -30,41 +30,138 @@ function roundLabel(roundIdx, total) {
   return `R${2 ** (fromEnd + 1)}`;
 }
 
-const DECISION_CHIPS = {
-  fusenpai: { term: "fusenpai",   label: "Fus."  },
-  daihyosen: { term: "daihyosen",  label: "DH"    },
-};
-
 // sideA = top = Aka (Red), sideB = bottom = Shiro (White)
 function sideLabel(side) {
   return side === "a" ? "AKA" : "SHIRO";
 }
 
-// Decision-driven suffix appended to score strings on schedule rows, bracket
-// nodes, viewer cards, and TV displays. Mirrors the Visual Rendering Contract
-// in specs/003-tournament-gap-closure/contracts/match-decisions.md §Visual:
-//   decision == "kiken"       → "Kiken"
-//   decision == "fusenpai"    → "Fus."
-//   decision == "daihyosen"   → "DH"
-// Encho (overtime) appends " (E)" on top of any other suffix so a kiken-in-
-// overtime renders "0–2 Kiken (E)". `fusensho` is per-bout only: handled by
-// a separate bout badge, not by this helper. Pure and DOM-free so it can be
-// reused by display.jsx (which builds its own scoreline) without dragging in
-// the rest of formatIpponsScore's bye/hantei special cases.
-function decisionSuffix(match) {
+// enchoLabel renders the overtime marker for a match's encho block: "" when no
+// overtime ran, "(E)" otherwise — always bare, never a count. mp-m4bn: the
+// stepper records how many periods were fought (periodCount persists for the
+// tournament log), but the result marking deliberately never carries the
+// number: counted markers ("(E×3)") confuse readers of brackets and result
+// sheets. Do not reintroduce the count here. Mirrors enchoLabel() in
+// internal/export/suffix.go, pinned by the shared table in
+// internal/export/testdata/encho_labels.json. The score editors' "· (E)
+// Overtime ×N" eyebrow is different on purpose: a live readout of the stepper
+// the operator is using, not a result marking.
+function enchoLabel(encho) {
+  return enchoOn(encho) ? "(E)" : "";
+}
+
+// enchoOn: THE single predicate for "did this result happen in encho" —
+// a non-degenerate block with a positive periodCount. The (E) label and
+// the default-win maru count both key on it, so a stray
+// {periodCount: 0} block can never make one surface claim overtime
+// while another denies it. Mirrors state.EnchoMetadata.On (Go).
+const enchoOn = (encho) => (encho?.periodCount || 0) > 0;
+
+// middleMark: the ONE mark the centre of a score may carry. The middle column
+// of a score sheet can only ever read:
+//   vs     not yet decided (callers render the plain "vs" middle)
+//   X      a tie (hikiwake)
+//   (E)    the match went to overtime
+//   (DH)   a team encounter sent to a representative bout
+// Mutually exclusive by rule: X means a tie and a match that went to encho
+// cannot end tied (encho runs until someone scores), so X beats (E); and a
+// daihyosen bout is one-point sudden death, so DH bouts do not have encho and
+// (DH) beats (E). Everything else — Kiken, Fus., Ht — is a RESULT and belongs
+// beside the competitor it names: see sideMarks. Mirrors MiddleMark in
+// internal/export/suffix.go.
+function middleMark(decision, encho) {
+  if (isHikiwakeBC(decision)) return "X";
+  if (decision === "daihyosen") return "(DH)";
+  return enchoLabel(encho);
+}
+
+// joinSp: join a score fragment and a result mark with a space, skipping
+// empties ("M" + "Ht" → "M Ht", "" + "Kiken" → "Kiken"). The JS twin of
+// joinSp in internal/export/suffix.go.
+const joinSp = (a, b) => [a, b].filter(Boolean).join(" ");
+
+// placeMarks: resolve sideMarks onto the two display slots — the winner's
+// mark rides the winning side, the loser's the other. When neither slot is
+// known to have won, no marks are placed; each caller owns that fallback
+// (score strings trail the marks, match cards drop them). The JS analogue
+// of the winner-resolution half of SideMarksLR in internal/export/suffix.go.
+const placeMarks = (marks, firstWins, secondWins) =>
+  firstWins ? [marks.winner, marks.loser] : secondWins ? [marks.loser, marks.winner] : ["", ""];
+
+// isDrawResult: a result is a draw when the recorded decision OR the
+// client-derived score.type says hikiwake (quick-score paths set only
+// score.type, so both sources count).
+const isDrawResult = (decision, score) => isHikiwakeBC(decision) || isHikiwakeBC(score?.type);
+
+// isDefaultWinBC: the decisions that award the match points without a
+// technique. Mirrors domain.IsDefaultWinDecisionStr (Go).
+const isDefaultWinBC = (d) => isKikenDecisionBC(d) || d === "fusenpai" || d === "fusensho";
+
+// defaultWinMaru: the maru cells a default win awards — one "○" per point,
+// per the FIK Regulations (Article 32 and the Score Board appendix p.15:
+// "put one mark in case of Encho"): the two-point pair in regulation, the
+// single deciding point in encho (sudden death). THE single JS source of
+// the maru-count rule; mirrors domain.DefaultWinIppons (Go, same cells
+// shape). The canonical record is the engine's RecordDecision fill via
+// domain.DefaultWinIppons — displays only fall back to this for winners
+// whose recorded cells are empty (byes, legacy data).
+const defaultWinMaru = (encho) => (enchoOn(encho) ? ["○"] : ["○", "○"]);
+
+// boutMiddle: THE single source for what a bout's middle can read —
+// "vs" (plain, including unplayed/pending), "X" (tie), "(E)" (overtime),
+// "(DH)" (rep bout). Nothing else is a valid middle value: a dash never is
+// (operator ruling), and Ht/Kiken/Fus. are side results, never middles.
+// Every surface that renders a bout middle derives it from here.
+function boutMiddle(decision, encho, score) {
+  return (isDrawResult(decision, score) ? "X" : middleMark(decision, encho)) || "vs";
+}
+
+// matchMiddleMark: the SPECIAL middle marks only ("" when the middle is the
+// plain "vs") — for surfaces that render the mark as a single centre chip
+// (MatchCard meta strip, TV scoreboard header, lobby, OBS lower-third).
+function matchMiddleMark(match) {
   if (!match) return "";
-  const d = match.decision || "";
-  const enchoOn = !!(match.encho && match.encho.periodCount > 0);
-  const hanteiOn = !!match.decidedByHantei;
-  let suffix = "";
-  if (isKikenDecisionBC(d)) suffix = "Kiken";
-  else if (DECISION_CHIPS[d]) suffix = DECISION_CHIPS[d].label;
-  if (enchoOn) suffix = (suffix ? suffix + " " : "") + "(E)";
-  // FIK 7-5 / 29-6: judges' decision after a tied encho. Mark explicitly so
-  // a hantei-decided final is distinguishable from an ippon-derived one
-  // (audit + Excel + viewer parity).
-  if (hanteiOn) suffix = (suffix ? suffix + " " : "") + "Ht";
-  return suffix;
+  const mid = boutMiddle(match.decision, match.encho, match.score);
+  return mid === "vs" ? "" : mid;
+}
+
+// sideMarks: the per-side RESULT marks. winner goes in the winning side's
+// score cell, loser in the losing side's — the mark names its competitor:
+//   hantei   → winner "Ht"    (FIK 7-5 / 29-6: judges picked the winner)
+//   kiken    → loser  "Kiken" (the competitor who withdrew)
+//   fusenpai → loser  "Fus."  (the no-show)
+// `fusensho` (the per-bout default WIN) is deliberately absent here: the
+// viewer surfaces it via a separate bout badge. The Excel export has no
+// badges, so its SideMarks (internal/export/suffix.go) folds fusensho in as
+// a winner-side "Fus." — the one deliberate divergence between the mirrors.
+function sideMarks(decision, decidedByHantei) {
+  let winner = "", loser = "";
+  if (isKikenDecisionBC(decision)) loser = "Kiken";
+  else if (decision === "fusenpai") loser = "Fus.";
+  if (decidedByHantei) winner = "Ht"; // nothing above sets winner (fusensho is a badge here)
+  return { winner, loser };
+}
+
+// winnerSideLR: which DISPLAY side won, under the SHIRO-left convention every
+// score string uses (sideB = Shiro = left, sideA = Aka = right). Returns
+// "left" | "right" | null (no winner recorded, or drifted data). Accepts both
+// object sides ({id, name}) and bare name strings.
+function winnerSideLR(m) {
+  if (!m || !m.winner) return null;
+  const idOf = s => (s && typeof s === "object" ? s.id : null);
+  const nameOf = s => (s && typeof s === "object" ? s.name : s);
+  const wId = idOf(m.winner);
+  const wName = nameOf(m.winner);
+  // Prefer id equality: two different-dojo competitors may share a display
+  // name, so a name match must NEVER override the ids that disambiguate them
+  // (mirrors sideAWon in api_serializers.jsx). Fall back to name only when an
+  // id is absent on the winner or on that side.
+  const matchesSide = side => {
+    const sId = idOf(side);
+    return (wId && sId) ? wId === sId : (!!wName && wName === nameOf(side));
+  };
+  if (matchesSide(m.sideB)) return "left";
+  if (matchesSide(m.sideA)) return "right";
+  return null;
 }
 
 // Derive an ippon array from a Go-formatted scoreA/scoreB string.
@@ -80,59 +177,83 @@ function ipponsFromScore(scoreStr) {
 }
 
 // Format ippons as a readable score string: ["M","K"] → "MK", [] → ""
-// Returns something like "MM–K", "M–·", "X" (hikiwake, scored or not), "BYE".
-// Hantei (judges' decision after tied encho) is NOT a separate return value;
-// it surfaces as an "Ht" suffix appended by decisionSuffix when
-// decidedByHantei=true: e.g. "M–K (E) Ht".
+// Returns something like "MM vs K", "M (E) –", "M X K", "X", "BYE".
 //
-// FR-033: when `encho` carries a positive periodCount, append " (E)" to the
-// rendered string so operators and viewers see at a glance that the match
-// went to overtime. Argument is optional and defaults to no-encho when absent.
-//
-// T097: kiken / fusenpai / daihyosen append labelled suffixes alongside the
-// encho marker: wired through decisionSuffix() so the same string is used
-// by display.jsx's hand-rolled score block. The decision-derived suffix
-// supersedes the bare " (E)" so we don't double-print "(E)" alongside
-// "Kiken (E)".
-function formatIpponsScore(ipponsA, ipponsB, score, decision, encho, decidedByHantei) {
+// The string is the flat analogue of a paper score sheet row:
+//   [left cell] [middle] [right cell]
+// The MIDDLE carries exactly one mark — "X" (tie), "(E)" (overtime), "(DH)"
+// (rep bout) — or the plain "vs"; see middleMark for the exclusivity rules.
+// A cell with no points reads "–" (never a separator, so never ambiguous).
+// RESULT marks (Kiken / Fus. / Ht) ride in the cell of the competitor they
+// name ("M Ht (E) K", "– vs Kiken"), which needs `winnerSide`
+// ("left" | "right", from winnerSideLR) — without it the marks fall back to
+// trailing after the score, still readable but unattributed.
+// Mirrors the Excel export (internal/export/suffix.go MiddleMark/SideMarks +
+// builder cell writes; the sheet template's own middle cell text is "vs" and
+// its empty score cells stay empty).
+function formatIpponsScore(ipponsLeft, ipponsRight, score, decision, encho, decidedByHantei, winnerSide) {
   // decidedByHantei (positional) is the canonical flag. The `typeof` guard
   // lets callers that omit the arg safely get false without sending undefined.
   const hantei = typeof decidedByHantei === "boolean" ? decidedByHantei : false;
-  const decSfx = decisionSuffix({ decision, encho, decidedByHantei: hantei });
-  const enchoOnly = (encho && encho.periodCount > 0) ? " (E)" : "";
-  const suffix = decSfx ? " " + decSfx : enchoOnly;
   if (score?.type === "bye") return "BYE";
-  const aStr = (ipponsA || []).filter(x => x && x !== "•").join("");
-  const bStr = (ipponsB || []).filter(x => x && x !== "•").join("");
-  const isDraw = isHikiwakeBC(decision) || isHikiwakeBC(score?.type);
+  let aStr = (ipponsLeft || []).filter(x => x && x !== "•").join("");
+  let bStr = (ipponsRight || []).filter(x => x && x !== "•").join("");
+  // A default win (fusensho / fusenpai / any kiken) awards the match points
+  // without a technique — one maru "○" per awarded point: the full
+  // two-point win in regulation, exactly one deciding point in encho
+  // (sudden death). The engine records them as maru ippons itself with the
+  // same rule (domain.DefaultWinIppons), so scored data carries
+  // the balls; results recorded before that fill (or imported) reach here
+  // with the decision but an empty winner cell — mirror the engine so a
+  // won match never reads as no-points.
+  if (isDefaultWinBC(decision)) {
+    const fill = defaultWinMaru(encho).join("");
+    if (winnerSide === "left" && !aStr) aStr = fill;
+    else if (winnerSide === "right" && !bStr) bStr = fill;
+  }
+  const isDraw = isDrawResult(decision, score);
+
+  // A cell with no points reads "–" (or stays empty when the whole string is
+  // empty); the plain middle reads "vs", so the dash is never a separator and
+  // is unambiguous as "no points".
+  const NONE = "–";
+
   if (isDraw) {
-    if (!aStr && !bStr) {
-      // Scoreless draw (operator pressed X with no ippons entered): canonical
-      // hikiwake glyph. This is the draw marker, not the hansoku triangle.
-      return "X" + suffix;
-    }
-    // Scored equal draw (e.g. 1–1 M–K hikiwake): show the actual points so
-    // the operator and viewer see what was struck, not a bare X. The hikiwake
-    // type is still recorded on the server: this is a display-only change.
-    return `${aStr || "·"}–${bStr || "·"}` + suffix;
+    // A tie's middle is X and NOTHING else: a match that went to encho cannot
+    // have ended tied, and hantei picks a winner, so THIS STRING drops such
+    // stale data rather than displaying a contradiction. (Scope: the score
+    // string only. A hand-edited row carrying draw+hantei+winner would still
+    // show Ht on the MatchCard and in Excel, whose sideMarks run
+    // unconditionally; no API-legal state produces that combination —
+    // validation rejects decidedByHantei on a draw.)
+    if (!aStr && !bStr) return "X";
+    // Scored equal draw (e.g. 1–1 M/K hikiwake): show the points around the
+    // draw mark so the viewer sees what was struck AND that it was a tie.
+    return `${aStr || NONE} X ${bStr || NONE}`;
   }
-  if (!aStr && !bStr) {
-    // Fall back when the per-side ippon arrays are absent but a score object
-    // exists (e.g. server-provided bracket scores). Prefer the winner's waza
-    // LETTERS (score.ippons) over a bare count so the schedule always shows
-    // technique letters when the data carries them: only the loser, which is
-    // stored as a count not letters, falls back to a number. Winner-first
-    // order matches the historical numeric fallback (no orientation change).
-    if (score?.type === "ippon" && (score.winnerPts > 0 || score.loserPts > 0)) {
-      const winnerLetters = (score.ippons || []).filter(x => x && x !== "•").join("");
-      const winnerStr = winnerLetters || `${score.winnerPts}`;
-      return `${winnerStr}–${score.loserPts}` + suffix;
-    }
-    // No scores but a decision was recorded (e.g. kiken before any ippon
-    // was struck): still print the suffix so the operator sees "Kiken".
-    return suffix ? suffix.trimStart() : "";
+
+  const mid = middleMark(decision, encho);
+  const sep = mid ? ` ${mid} ` : " vs ";
+  const marks = sideMarks(decision, hantei);
+  const [leftMark, rightMark] = placeMarks(marks, winnerSide === "left", winnerSide === "right");
+  // Marks placeMarks could not attribute to a side (no winnerSide from the
+  // caller) stay loose and trail the string so the result is never silently
+  // dropped.
+  const looseMarks = leftMark || rightMark ? "" : joinSp(marks.winner, marks.loser);
+
+  // Numbers are NOT a valid display for ippon: the per-side waza-letter
+  // arrays are the only source of an ippon score. There is deliberately no
+  // winnerPts/loserPts fallback here (callers derive the arrays from
+  // scoreA/scoreB via ipponsFromScore, so real data always has letters;
+  // count-only data renders no score rather than invalid digits).
+  if (!aStr && !bStr && !leftMark && !rightMark) {
+    // Nothing to put in either cell: collapse to the bare middle mark plus
+    // any loose result marks ("(E)", "Kiken").
+    return joinSp(mid, looseMarks);
   }
-  return `${aStr || "·"}–${bStr || "·"}` + suffix;
+  // A cell holds its letters and/or its result mark ("M Ht (E) K",
+  // "Ht (E) –" for a 0-0 hantei); an empty cell reads "–".
+  return joinSp(`${joinSp(aStr, leftMark) || NONE}${sep}${joinSp(bStr, rightMark) || NONE}`, looseMarks);
 }
 
 // engiFlagScore: derive an engi match's flag-count score string from
@@ -242,8 +363,13 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
   // engi flag editor (see engiFlagScore in this file for the shared-cell
   // equivalent).
   const isEngiMatch = match.flagsA != null || match.flagsB != null;
-  const aScore = isDone ? (isEngiMatch ? String(match.flagsA || 0) : (ipponsA.join("") || null)) : null;
-  const bScore = isDone ? (isEngiMatch ? String(match.flagsB || 0) : (ipponsB.join("") || null)) : null;
+  // Result marks (Kiken / Fus. / Ht) ride with the competitor they name, in
+  // that side's score slot — the node's "results column". The meta strip
+  // above carries only the middle marks (X / (E) / (DH)).
+  const cardMarks = isDone ? sideMarks(match.decision, !!match.decidedByHantei) : { winner: "", loser: "" };
+  const [aMark, bMark] = placeMarks(cardMarks, aWin, bWin);
+  const aScore = isDone ? (joinSp(isEngiMatch ? String(match.flagsA || 0) : ipponsA.join(""), aMark) || null) : null;
+  const bScore = isDone ? (joinSp(isEngiMatch ? String(match.flagsB || 0) : ipponsB.join(""), bMark) || null) : null;
 
   const aTBD = match.sideA && typeof match.sideA.id === "string" && match.sideA.id.startsWith("tbd-");
   const bTBD = match.sideB && typeof match.sideB.id === "string" && match.sideB.id.startsWith("tbd-");
@@ -254,6 +380,9 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
   const _isWatched = (typeof window !== "undefined" && window.isPlayerWatched) || (() => false);
   const playerHighlight = !!(highlightPlayers && (_isWatched(match.sideA, highlightPlayers) || _isWatched(match.sideB, highlightPlayers)));
 
+  // Meta-strip middle mark: X | (E) | (DH), mutually exclusive (see
+  // middleMark). The X chip keeps its dedicated span below for styling.
+  const metaMid = matchMiddleMark(match);
   return (
     <button
       ref={matchRef}
@@ -269,16 +398,10 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
         {match.scheduledAt ? <span className="bc-time">{match.scheduledAt}</span> : null}
         {running ? <span className="bc-running">● NOW</span> : null}
         {isBye ? <span className="bc-bye-tag">BYE</span> : null}
-        {match.score?.type === "hikiwake" ? <span className="bc-draw">X</span> : null}
-        {match.encho?.periodCount > 0 ? <span className="bc-encho"><TermBC name="encho">(E)</TermBC></span> : null}
-        {match.decidedByHantei ? <span className="bc-decision-chip">Ht</span> : null}
-        {isKikenDecisionBC(match.decision) ? (
-          <span className="bc-decision-chip"><TermBC name="kiken">Kiken</TermBC></span>
-        ) : null}
-        {DECISION_CHIPS[match.decision] ? (
-          <span className="bc-decision-chip">
-            <TermBC name={DECISION_CHIPS[match.decision].term}>{DECISION_CHIPS[match.decision].label}</TermBC>
-          </span>
+        {metaMid === "X" ? <span className="bc-draw">X</span> : null}
+        {metaMid === "(E)" ? <span className="bc-encho"><TermBC name="encho">(E)</TermBC></span> : null}
+        {metaMid === "(DH)" ? (
+          <span className="bc-decision-chip"><TermBC name="daihyosen">(DH)</TermBC></span>
         ) : null}
       </div>
       <PlayerLine player={match.sideA} isWinner={aWin} side="a" showDojo={showDojo} score={aScore} isTBD={aTBD} isEngi={isEngi} />
@@ -842,25 +965,35 @@ function BracketTreeLegacy({ rounds, variant = 1, showDojo = true, onMatchClick,
 // Tries engiFlagScore first (engi matches → numeric "Shiro–Aka" flag count,
 // the ONLY case with digits), then teamIVScore (team matches with
 // subResults → "IV–IV"), then falls back to formatIpponsScore (every other
-// competition type: ippon LETTERS, never numbers). Callers pass
-// pre-resolved ippons arrays (which may be derived from scoreA/scoreB for
-// bracket matches). Returns "" when no path produces a string (caller
-// handles the ": " fallback).
-function matchScoreStr(m, ipponsB, ipponsA) {
+// competition type: ippon LETTERS, never numbers). Returns "" when no path
+// produces a string (caller handles the ": " fallback).
+//
+// The ippon arrays are derived here, never passed in — a positional
+// (B, A) parameter pair was the left/right-inversion trap this hoist
+// removed. The derivation is load-bearing: bracket matches carry
+// scoreA/scoreB strings rather than ipponsA/B arrays, the waza-letter
+// arrays are the ONLY source of an ippon score string (numbers are never
+// a valid ippon display, there is no numeric fallback), and
+// ipponsFromScore strips Go formatScore's trailing "(HN)" hansoku suffix
+// so it doesn't split into bogus ippon letters.
+function matchScoreStr(m) {
   return engiFlagScore(m)
     || teamIVPWScore(m)
-    || formatIpponsScore(ipponsB, ipponsA, m.score, m.decision, m.encho, m.decidedByHantei);
+    || formatIpponsScore(
+      m.ipponsB || ipponsFromScore(m.scoreB),
+      m.ipponsA || ipponsFromScore(m.scoreA),
+      m.score, m.decision, m.encho, m.decidedByHantei, winnerSideLR(m));
 }
 
-// matchStateCell: the centre score-cell content for a compact match row, shared
-// so every list renders the SAME lifecycle cue: completed → score string,
-// running → "vs" (the row's .is-running highlight is the "now" signal, NOT a
-// centre dot), scheduled → "–". The labelled "● NOW" badge used in headers/
-// status columns is a separate affordance and is NOT produced here.
-function matchStateCell(m, ipponsB, ipponsA) {
-  if (m.status === "completed") return matchScoreStr(m, ipponsB, ipponsA) || "-";
-  if (m.status === "running") return "vs";
-  return "–";
+// matchStateCell: the centre score-cell content for a compact match row,
+// shared so every list renders the SAME cue: completed → score string,
+// anything else → boutMiddle (normally the plain "vs"); the row's
+// .is-running highlight is the "now" signal, NOT a centre glyph, and the
+// labelled "● NOW" badge elsewhere is a separate affordance.
+function matchStateCell(m) {
+  const mid = boutMiddle(m.decision, m.encho, m.score);
+  if (m.status === "completed") return matchScoreStr(m) || mid;
+  return mid;
 }
 
 // bronzeUnderFinalStyle: inline style that places the 3rd-place (bronze) card
@@ -899,8 +1032,12 @@ window.teamIVPWScore = teamIVPWScore;
 window.engiFlagScore = engiFlagScore;
 window.matchScoreStr = matchScoreStr;
 window.matchStateCell = matchStateCell;
-window.decisionSuffix = decisionSuffix;
+window.boutMiddle = boutMiddle;
+window.defaultWinMaru = defaultWinMaru;
+window.enchoOn = enchoOn;
+window.matchMiddleMark = matchMiddleMark;
+window.winnerSideLR = winnerSideLR;
 window.sideLabel = sideLabel;
 window.ipponsFromScore = ipponsFromScore;
 
-export { formatIpponsScore, decisionSuffix, sideLabel, roundLabel, ipponsFromScore, teamIVScore, teamIVPWScore, engiFlagScore, matchScoreStr, matchStateCell, buildDisplayModel, computeMetaTops, bronzeUnderFinalStyle, PlayerLine };
+export { formatIpponsScore, enchoLabel, boutMiddle, defaultWinMaru, matchMiddleMark, winnerSideLR, sideLabel, roundLabel, ipponsFromScore, teamIVScore, teamIVPWScore, engiFlagScore, matchScoreStr, matchStateCell, buildDisplayModel, computeMetaTops, bronzeUnderFinalStyle, PlayerLine };

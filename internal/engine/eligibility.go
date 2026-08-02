@@ -368,8 +368,9 @@ func (e *Engine) checkEligibilityExcludingMatch(compID string, playerIDs []strin
 // RecordDecision auto-fills the scoreline from decision/decisionBy/encho
 // and persists the result via RecordMatchResultWithIneligibility. The
 // canonical SideA=Aka / SideB=Shiro mapping (CLAUDE.md) is used to
-// translate decisionBy → which side loses/forfeits: winner gets ○○ (regulation)
-// or ○ (encho), loser gets nothing.
+// translate decisionBy → which side loses/forfeits: the winner gets the
+// maru default-win fill (○○ regulation, ○ encho); the loser keeps any
+// points it had already struck (FIK Art. 32, via preserveLoserScore).
 //
 // When the match already has a kiken/fusenpai decision recorded (the
 // "undo" path, T103/CHK024) the engine enforces the
@@ -435,14 +436,10 @@ func (e *Engine) RecordDecision(compID, matchID, decision, decisionBy, decisionR
 			return nil, nil, ErrDecisionLocked
 		}
 	}
-	winningCount := 2
-	if encho != nil {
-		winningCount = 1
-	}
-	winIppons := make([]string, winningCount)
-	for i := range winIppons {
-		winIppons[i] = defaultWinIppon
-	}
+	// The winner gets the maru default-win fill; the withdrawing side keeps
+	// whatever it had struck and the encounter keeps its prior sub-bouts
+	// (FIK Art. 32 — see preserveLoserScore below).
+	winIppons := domain.DefaultWinIppons(encho.On())
 	result := &state.MatchResult{
 		ID:             matchID,
 		SideA:          sideA,
@@ -453,9 +450,8 @@ func (e *Engine) RecordDecision(compID, matchID, decision, decisionBy, decisionR
 		Encho:          encho,
 		Status:         state.MatchStatusCompleted,
 	}
-	// shiro=SideB (White, left), aka=SideA (Red, right). The losing
-	// side ends with 0 ippons; the surviving side gets the ○ default-win fill
-	// and becomes Winner.
+	// shiro=SideB (White, left), aka=SideA (Red, right). The surviving side
+	// gets the ○ default-win fill and becomes Winner.
 	if decisionBy == "shiro" {
 		result.IpponsA = winIppons
 		result.Winner = sideA
@@ -463,6 +459,7 @@ func (e *Engine) RecordDecision(compID, matchID, decision, decisionBy, decisionR
 		result.IpponsB = winIppons
 		result.Winner = sideB
 	}
+	preserveLoserScore(result, prior, decisionBy)
 	status, err := e.RecordMatchResultWithIneligibility(compID, matchID, result)
 	if err != nil {
 		return nil, nil, err

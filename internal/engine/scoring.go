@@ -303,16 +303,55 @@ func backfillMatchIdentity(result, stored *state.MatchResult) {
 	}
 }
 
-// defaultWinIppon is the FIK maru "○" (U+25CB) written into a winner's
-// ippon slots for a default win (fusensho/fusenpai/kiken/daihyosen): no
-// technique was struck, so a waza letter (M/K/D/T/H) would misrepresent the
-// scoreline. Centralised so the two RecordDecision twins (eligibility.go,
-// scoring_tx.go) can't drift onto a Unicode lookalike. countScoringIppons
-// still counts it, it is non-empty and not the "•" placeholder.
-const defaultWinIppon = "○"
+// preserveLoserScore implements FIK Regulations Article 32 ("Any point
+// scored by the shiai-funo-sha shall remain valid") on a default-win
+// result. The winner keeps the maru default-win fill already set on
+// `result`; this only touches the WITHDRAWING side, which keeps whatever it
+// had struck, and preserves the encounter's prior sub-bouts so a team
+// withdrawal never wipes the sub-bouts already fought (both teams' results
+// stand and continue to count in IV/PW standings via accrueTeamSubResults).
+//
+// prior is the match state before the decision; nothing is preserved unless
+// its sides still match — a drifted or re-oriented prior must not
+// mis-attribute points. decisionBy names the WITHDRAWING side
+// ("shiro" = SideB/Shiro, "aka" = SideA/Aka). Shared by the two
+// RecordDecision twins.
+func preserveLoserScore(result, prior *state.MatchResult, decisionBy string) {
+	if prior == nil || prior.SideA != result.SideA || prior.SideB != result.SideB {
+		return
+	}
+	result.SubResults = prior.SubResults
+	// Preserve only points the loser actually STRUCK (Art. 32 says "any point
+	// scored"): strip the maru marker so a prior default-win decision's ○○
+	// fill is never carried forward as if it were struck points. This matters
+	// on the T103 re-decision path when decisionBy flips — the side that was
+	// the prior winner holds maru, not real points, and must not inherit it as
+	// the new loser.
+	if decisionBy == "shiro" {
+		result.IpponsB = struckIppons(prior.IpponsB) // loser = SideB (Shiro)
+	} else {
+		result.IpponsA = struckIppons(prior.IpponsA) // loser = SideA (Aka)
+	}
+}
+
+// struckIppons returns the real struck ippon letters from a slice, dropping
+// empty entries, the "•" UI placeholder, and the domain.DefaultWinIppon maru
+// (an awarded default win, not a struck point). Distinct from
+// countScoringIppons, which counts the maru as a scoring ippon by design.
+func struckIppons(ippons []string) []string {
+	var out []string
+	for _, v := range ippons {
+		if v != "" && v != "•" && v != domain.DefaultWinIppon {
+			out = append(out, v)
+		}
+	}
+	return out
+}
 
 // countScoringIppons counts real ippon marks, ignoring empty entries and the
-// "•" placeholder the UI uses for an unfilled slot.
+// "•" placeholder the UI uses for an unfilled slot. The default-win maru
+// (filled by the RecordDecision twins via domain.DefaultWinIppons) counts
+// like any struck ippon.
 func countScoringIppons(ippons []string) int {
 	n := 0
 	for _, v := range ippons {

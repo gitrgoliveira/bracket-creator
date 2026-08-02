@@ -457,9 +457,9 @@ describe('MatchDetailCard team sub-rows (mp-8sw)', () => {
     STUBBED.forEach(k => { savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k) ? { had: true, val: global.window[k] } : { had: false }; });
     global.window.formatIpponsScore = vi.fn(() => '3-2');
     global.window.teamIVScore = () => null;
-    global.window.matchScoreStr = (m, ippB, ippA) =>
+    global.window.matchScoreStr = (m) =>
       (global.window.teamIVScore(m)) ||
-      global.window.formatIpponsScore(ippB, ippA, m?.score, m?.decision, m?.encho, m?.decidedByHantei);
+      global.window.formatIpponsScore(m?.ipponsB || [], m?.ipponsA || [], m?.score, m?.decision, m?.encho, m?.decidedByHantei);
     global.window.ipponsFromScore = vi.fn(() => []);
     global.window.isHikiwake = vi.fn(() => false);
     vi.resetModules();
@@ -1045,9 +1045,9 @@ describe('ViewerOverview self-run vs officiated match click (mp-7x4n)', () => {
     global.window.ipponsFromScore = vi.fn(() => []);
     global.window.formatIpponsScore = vi.fn(() => '');
     global.window.teamIVScore = () => null;
-    global.window.matchScoreStr = (m, ippB, ippA) =>
+    global.window.matchScoreStr = (m) =>
       (global.window.teamIVScore(m)) ||
-      global.window.formatIpponsScore(ippB, ippA, m?.score, m?.decision, m?.encho, m?.decidedByHantei);
+      global.window.formatIpponsScore(m?.ipponsB || [], m?.ipponsA || [], m?.score, m?.decision, m?.encho, m?.decidedByHantei);
     global.window.queueLabel = vi.fn(() => '');
     global.window.queueLabelCompact = vi.fn(() => '');
     global.window.isHikiwake = vi.fn(() => false);

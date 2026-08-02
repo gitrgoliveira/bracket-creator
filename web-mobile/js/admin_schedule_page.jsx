@@ -102,16 +102,9 @@ const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange })
           serializer and the schedule row exposes bout details, append an
           "FS" badge to each affected bout cell. */}
       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
-        {m.status === "completed" && (() => {
-          // Bracket matches carry scoreA/scoreB rather than ipponsA/B.
-          // Derive per-side arrays so the score reads SHIRO–AKA correctly
-          // even when AKA wins (winnerPts–loserPts fallback inverts left/right).
-          // Use ipponsFromScore so the trailing "(HN)" hansoku suffix from
-          // Go's formatScore doesn't get split into bogus ippon letters.
-          const tIpponsA = m.ipponsA || window.ipponsFromScore(m.scoreA);
-          const tIpponsB = m.ipponsB || window.ipponsFromScore(m.scoreB);
-          return <div style={{ fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 13, whiteSpace: "pre-line", textAlign: "center", lineHeight: 1.3 }}>{window.matchScoreStr(m, tIpponsB, tIpponsA)}</div>;
-        })()}
+        {m.status === "completed" && (
+          <div style={{ fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 13, whiteSpace: "pre-line", textAlign: "center", lineHeight: 1.3 }}>{window.matchScoreStr(m)}</div>
+        )}
         {/* No centre "●" dot: a running match is signalled by the row's
             .tw-match--running highlight (accent border + ring). The labelled
             "● NOW" / "● {count} now" badges elsewhere are a separate affordance. */}

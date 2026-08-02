@@ -1008,14 +1008,10 @@ func (e *Engine) RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 			return nil, nil, ErrDecisionLocked
 		}
 	}
-	winningCount := 2
-	if encho != nil {
-		winningCount = 1
-	}
-	winIppons := make([]string, winningCount)
-	for i := range winIppons {
-		winIppons[i] = defaultWinIppon
-	}
+	// The winner gets the maru default-win fill; the withdrawing side keeps
+	// whatever it had struck and the encounter keeps its prior sub-bouts
+	// (FIK Art. 32 — mirrors RecordDecision in eligibility.go).
+	winIppons := domain.DefaultWinIppons(encho.On())
 	result := &state.MatchResult{
 		ID:             matchID,
 		SideA:          sideA,
@@ -1033,6 +1029,7 @@ func (e *Engine) RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 		result.IpponsB = winIppons
 		result.Winner = sideB
 	}
+	preserveLoserScore(result, prior, decisionBy)
 	status, err := e.RecordMatchResultWithIneligibilityTx(tx, compID, matchID, result)
 	if err != nil {
 		return nil, nil, err

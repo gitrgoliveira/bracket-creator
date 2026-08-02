@@ -1031,8 +1031,8 @@ describe('ScoreEditorModal isEngi derived synchronously (finding 10)', () => {
   });
 
   it('the async fetch effect no longer calls setIsEngi', () => {
-    // The fetchCompetitionDetails effect still runs for maxEnchoPeriods
-    // and isNaginata; it must not set isEngi.
+    // The fetchCompetitionDetails effect still runs for isNaginata; it
+    // must not set isEngi.
     const fetchBlock = src.match(/fetchCompetitionDetails[\s\S]{0,500}catch\(\)/)?.[0] || '';
     expect(fetchBlock).not.toContain('setIsEngi');
     expect(fetchBlock).not.toContain('engi');

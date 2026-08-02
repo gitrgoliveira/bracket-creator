@@ -254,7 +254,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
   // Enrich the bracket match with the competition metadata the shared scorer
   // (ScoreEditorModal / MatchDetailCard) reads off the match object: the raw
   // bracket.rounds entries carry none of it. Mirrors enrichPoolMatchWithComp:
-  //   compId      → decision endpoints + maxEncho/naginata fetch
+  //   compId      → decision endpoints + naginata fetch
   //   compKind /  → individual vs team editor routing
   //   teamSize
   //   phase       → "bracket" makes isKnockoutPhase true: blocks hikiwake (no

@@ -71,7 +71,9 @@ function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, is
     const repShiro = (promoted.match.repPlayerB || "").trim();
     const repAka = (promoted.match.repPlayerA || "").trim();
     const next = queueMatches && queueMatches.length ? queueMatches[0] : null;
-    const sfx = (window.decisionSuffix && window.decisionSuffix(promoted.match)) || "";
+    // Centre chip carries only the middle mark (X / (E) / (DH)); per-side
+    // result marks live in the score strings via matchScoreStr elsewhere.
+    const sfx = (window.matchMiddleMark && window.matchMiddleMark(promoted.match)) || "";
     // Header subtitle: competition name + phase, joined only when both exist
     // (phaseLabel is "" for league, so no dangling " · ").
     const compName = promoted.competition?.name || "";

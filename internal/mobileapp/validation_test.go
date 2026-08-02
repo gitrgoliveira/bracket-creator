@@ -289,26 +289,20 @@ func TestValidateDecision_InvalidDecisionBy(t *testing.T) {
 	assert.Equal(t, "decisionBy", verr.Field)
 }
 
-// TestValidateDecision_KikenRequiresDecisionBy verifies that kiken without
-// decisionBy returns an error on the decisionBy field.
-func TestValidateDecision_KikenRequiresDecisionBy(t *testing.T) {
-	req := ScoreRequest{Decision: "kiken"}
-	err := req.Validate()
-	require.Error(t, err)
-	var verr *ValidationError
-	require.True(t, errors.As(err, &verr))
-	assert.Equal(t, "decisionBy", verr.Field)
-}
-
-// TestValidateDecision_FusenpaiRequiresDecisionBy verifies that fusenpai
-// without decisionBy returns an error on the decisionBy field.
-func TestValidateDecision_FusenpaiRequiresDecisionBy(t *testing.T) {
-	req := ScoreRequest{Decision: "fusenpai"}
-	err := req.Validate()
-	require.Error(t, err)
-	var verr *ValidationError
-	require.True(t, errors.As(err, &verr))
-	assert.Equal(t, "decisionBy", verr.Field)
+// TestValidateDecision_RequiresDecisionBy verifies that every default-win
+// decision the top-level validator accepts (including the legacy "kiken"
+// alias, which the whitelist normalizes) demands decisionBy.
+func TestValidateDecision_RequiresDecisionBy(t *testing.T) {
+	for _, decision := range []string{"kiken", "fusenpai"} {
+		t.Run(decision, func(t *testing.T) {
+			req := ScoreRequest{Decision: decision}
+			err := req.Validate()
+			require.Error(t, err)
+			var verr *ValidationError
+			require.True(t, errors.As(err, &verr))
+			assert.Equal(t, "decisionBy", verr.Field)
+		})
+	}
 }
 
 // TestValidateDecision_FusenshoTopLevel verifies that fusensho is rejected at
@@ -322,19 +316,24 @@ func TestValidateDecision_FusenshoTopLevel(t *testing.T) {
 	assert.Equal(t, "decision", verr.Field)
 }
 
-// TestRequireWinnerForDecision_EmptyWinner verifies that kiken with a valid
-// scoreline but no Winner field is rejected.
+// TestRequireWinnerForDecision_EmptyWinner verifies that a default win
+// with a valid scoreline but no Winner field is rejected (kiken and
+// fusenpai share the merged validator arm).
 func TestRequireWinnerForDecision_EmptyWinner(t *testing.T) {
-	req := ScoreRequest{
-		Decision:   "kiken",
-		DecisionBy: "shiro",
-		IpponsA:    []string{"M", "K"},
+	for _, decision := range []string{"kiken", "fusenpai"} {
+		t.Run(decision, func(t *testing.T) {
+			req := ScoreRequest{
+				Decision:   decision,
+				DecisionBy: "shiro",
+				IpponsA:    []string{"M", "K"},
+			}
+			err := req.Validate()
+			require.Error(t, err)
+			var verr *ValidationError
+			require.True(t, errors.As(err, &verr))
+			assert.Equal(t, "winner", verr.Field)
+		})
 	}
-	err := req.Validate()
-	require.Error(t, err)
-	var verr *ValidationError
-	require.True(t, errors.As(err, &verr))
-	assert.Equal(t, "winner", verr.Field)
 }
 
 // TestValidateDecision_KikenBadScorelline verifies that kiken requires a
@@ -364,21 +363,6 @@ func TestValidateDecision_FusenpaiValidFull(t *testing.T) {
 		Winner:     "Alice",
 	}
 	assert.NoError(t, req.Validate())
-}
-
-// TestValidateDecision_FusenpaiNoWinner verifies that fusenpai with a valid
-// scoreline but no Winner is rejected.
-func TestValidateDecision_FusenpaiNoWinner(t *testing.T) {
-	req := ScoreRequest{
-		Decision:   "fusenpai",
-		DecisionBy: "shiro",
-		IpponsA:    []string{"M", "K"},
-	}
-	err := req.Validate()
-	require.Error(t, err)
-	var verr *ValidationError
-	require.True(t, errors.As(err, &verr))
-	assert.Equal(t, "winner", verr.Field)
 }
 
 // TestValidateDecision_KachinukiExhaustionOk verifies that
@@ -1364,10 +1348,18 @@ func TestValidateDecision_EnchoScoreline(t *testing.T) {
 					Encho:      encho,
 				}
 			}
+			rejectScoreline := func(t *testing.T, req *ScoreRequest, why string) {
+				t.Helper()
+				err := req.Validate()
+				require.Error(t, err, why)
+				var verr *ValidationError
+				require.True(t, errors.As(err, &verr), why)
+				assert.Equal(t, "scoreline", verr.Field, why)
+			}
 			assert.NoError(t, build([]string{"○"}, &state.EnchoMetadata{PeriodCount: 1}).Validate(), "1-0 in encho accepted")
-			assert.Error(t, build([]string{"○", "○"}, &state.EnchoMetadata{PeriodCount: 1}).Validate(), "2-0 in encho rejected")
-			assert.Error(t, build([]string{"○"}, nil).Validate(), "1-0 in regulation rejected")
-			assert.Error(t, build([]string{"○"}, &state.EnchoMetadata{PeriodCount: 0}).Validate(), "degenerate periodCount-0 block is not encho")
+			rejectScoreline(t, build([]string{"○", "○"}, &state.EnchoMetadata{PeriodCount: 1}), "2-0 in encho rejected")
+			rejectScoreline(t, build([]string{"○"}, nil), "1-0 in regulation rejected")
+			rejectScoreline(t, build([]string{"○"}, &state.EnchoMetadata{PeriodCount: 0}), "degenerate periodCount-0 block is not encho")
 		})
 	}
 }

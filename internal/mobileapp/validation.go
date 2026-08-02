@@ -394,7 +394,7 @@ type ScoreRequest state.MatchResult
 //     value must be one of fought/hikiwake/kiken/fusenpai/fusensho/
 //     daihyosen/kachinuki-exhaustion (or empty).
 //     kiken/fusenpai require decisionBy and a winning-side scoreline
-//     (2-0 in regulation, 1-0 in encho for kiken). fusensho is only
+//     (2-0 in regulation, 1-0 in encho). fusensho is only
 //     valid on a per-bout SubResult, not on a top-level score request.
 func (r *ScoreRequest) Validate() error {
 	if r.Status != "" {
@@ -582,7 +582,7 @@ func (r *ScoreRequest) validateDecision() error {
 				Message: fmt.Sprintf("%s requires %d-0 scoreline", r.Decision, need),
 			}
 		}
-		if err := r.requireWinnerForDecision(r.Decision); err != nil {
+		if err := r.requireWinnerForDecision(); err != nil {
 			return err
 		}
 	case "fusensho":
@@ -645,11 +645,11 @@ func validateIpponCounts(field string, ipponsA, ipponsB []string) error {
 // Winner as the canonical surviving side. Without this, a bulk-score
 // or hand-crafted request could record an ineligibility against the
 // wrong player.
-func (r *ScoreRequest) requireWinnerForDecision(label string) error {
+func (r *ScoreRequest) requireWinnerForDecision() error {
 	if r.Winner == "" {
 		return &ValidationError{
 			Field:   "winner",
-			Message: fmt.Sprintf("required when decision is %s (names the surviving side)", label),
+			Message: fmt.Sprintf("required when decision is %s (names the surviving side)", r.Decision),
 		}
 	}
 	return nil

@@ -9499,34 +9499,56 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   }
 }
 
-/* mp-gmcg adapt (critique P1): phone-width bout rows. At 390px the
-   3-column bout grid overflowed 61px (the AKA name input overlapped the
-   AKA chip, point slots clipped off-screen), so under 480px the row
-   STACKS: Shiro side / centre marks / Aka side, each full width. The
-   position rail moves above the row. The band's fact line may wrap
-   instead of clipping. */
-@media (max-width: 480px) {
-  .team-sub-match {
+/* mp-gmcg (critique P1 + shiaijo-console fix): the bout row STACKS when its
+   CONTAINER is narrow — Shiro side / centre marks / Aka side, each full
+   width. This is a CONTAINER query, not a viewport one: the score editor
+   renders both as a wide overlay (admin scores page, ~860px → 2-column) AND
+   as a narrow inline .scoring-panel in the shiaijo court console (~460px on
+   a wide desktop viewport). A viewport media query kept the inline panel in
+   the 2-column layout, so the side-coloured cells were too narrow and the
+   name inputs + × clear overflowed outside them. Container query fixes both
+   the phone overlay and the desktop inline panel with one rule.
+   The query container is .editor-modal__body — the editor's scroll body,
+   present in BOTH contexts. (An earlier attempt made .team-bouts-scroll the
+   container, but inline-size containment collapsed it to width 0 inside the
+   overlay's flex-column body, so the query silently never matched; the body
+   has a reliable width in every context.) The bout rows AND the summary band
+   are both inside it, so a single container drives both. */
+.editor-modal__body {
+  container-type: inline-size;
+  container-name: editorbody;
+}
+@container editorbody (max-width: 520px) {
+  /* Bout row STACKS: Shiro side / centre marks / Aka side, each full width.
+     Selectors carry the .team-bouts-scroll prefix to match the specificity
+     (0,2,0) of the base .team-bouts-scroll .team-sub-match__row override —
+     a bare selector (0,1,0) would lose the cascade regardless of order. */
+  .team-bouts-scroll .team-sub-match {
     grid-template-columns: 1fr;
     gap: 8px;
   }
-  .team-sub-match__row,
   .team-bouts-scroll .team-sub-match__row {
     grid-template-columns: 1fr;
     gap: 10px;
   }
-  .team-sub-match__side,
-  .team-sub-match__side--right,
   .team-bouts-scroll .team-sub-match__side,
   .team-bouts-scroll .team-sub-match__side--right {
     justify-content: center;
     min-width: 0;
   }
-  .tsm-name {
+  .team-bouts-scroll .tsm-name {
     width: 100%;
     min-width: 0;
   }
-  .team-summary__fact {
-    white-space: normal;
+  /* Summary band: 3-column at wide widths clipped "AKA (RED)" + its IV/PW off
+     the right edge in the narrow shiaijo inline panel, hiding the Aka side's
+     stats. When narrow it stacks (Shiro row / centre fact / Aka row) and the
+     fact wraps instead of clipping. */
+  .team-summary {
+    grid-template-columns: 1fr;
+    row-gap: 8px;
+    text-align: center;
   }
+  .team-summary__side--right { text-align: center; }
+  .team-summary__fact { white-space: normal; }
 }

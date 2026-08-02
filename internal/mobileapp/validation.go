@@ -167,7 +167,7 @@ func validateURLHasHost(field, val string) error {
 // Status/DecisionBy checks (SubMatchResult has no such fields).
 func validateSubBout(prefix string, sr *state.SubMatchResult) error {
 	// Encho period counts are bounded two ways. A negative count is never
-	// valid on any bout (it would slip past the > 0 guards below and be
+	// valid on any bout (it would make Encho.On() read false below and be
 	// silently treated as "no encho"). On a numbered bout, ANY non-zero
 	// count is rejected, a regular bout has fixed regulation time and
 	// cannot go to overtime; only the daihyosen representative bout
@@ -567,12 +567,14 @@ func (r *ScoreRequest) validateDecision() error {
 		}
 	}
 	switch r.Decision {
-	case "kiken-voluntary", "kiken-injury":
+	case "kiken-voluntary", "kiken-injury", "fusenpai":
 		if r.DecisionBy == "" {
 			return &ValidationError{Field: "decisionBy", Message: fmt.Sprintf("required when decision is %s", r.Decision)}
 		}
-		// The required scoreline is exactly what the recorder will fill
-		// (domain.DefaultWinIppons keyed on the shared encho predicate).
+		// The required default-win scoreline is exactly what the recorder
+		// fills (domain.DefaultWinIppons keyed on the shared encho
+		// predicate): the full pair in regulation, the single deciding
+		// point in encho.
 		need := len(domain.DefaultWinIppons(r.Encho.On()))
 		if !winningScoreline(r.IpponsA, r.IpponsB, need) {
 			return &ValidationError{
@@ -581,20 +583,6 @@ func (r *ScoreRequest) validateDecision() error {
 			}
 		}
 		if err := r.requireWinnerForDecision(r.Decision); err != nil {
-			return err
-		}
-	case "fusenpai":
-		if r.DecisionBy == "" {
-			return &ValidationError{Field: "decisionBy", Message: "required when decision is fusenpai"}
-		}
-		// Same derivation as the kiken arm above: the validator enforces
-		// exactly what the recorder fills (a fusenpai recorded during
-		// encho awards the single deciding point).
-		need := len(domain.DefaultWinIppons(r.Encho.On()))
-		if !winningScoreline(r.IpponsA, r.IpponsB, need) {
-			return &ValidationError{Field: "scoreline", Message: fmt.Sprintf("fusenpai requires %d-0 scoreline", need)}
-		}
-		if err := r.requireWinnerForDecision("fusenpai"); err != nil {
 			return err
 		}
 	case "fusensho":

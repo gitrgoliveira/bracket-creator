@@ -1345,3 +1345,29 @@ func TestScoreRequestValidate_FlagsNonNegative(t *testing.T) {
 		assert.Equal(t, "flagsA", verr.Field)
 	})
 }
+
+// TestValidateDecision_EnchoScoreline pins that the required default-win
+// scoreline follows the recorder's fill (domain.DefaultWinIppons keyed on
+// the shared Encho.On predicate): the full pair in regulation, the single
+// deciding point in encho — for the kiken variants and fusenpai alike.
+func TestValidateDecision_EnchoScoreline(t *testing.T) {
+	for _, decision := range []string{"kiken-voluntary", "fusenpai"} {
+		t.Run(decision, func(t *testing.T) {
+			build := func(ippons []string, encho *state.EnchoMetadata) *ScoreRequest {
+				return &ScoreRequest{
+					SideA:      "Alice",
+					SideB:      "Bob",
+					Decision:   decision,
+					DecisionBy: "shiro",
+					IpponsA:    ippons,
+					Winner:     "Alice",
+					Encho:      encho,
+				}
+			}
+			assert.NoError(t, build([]string{"○"}, &state.EnchoMetadata{PeriodCount: 1}).Validate(), "1-0 in encho accepted")
+			assert.Error(t, build([]string{"○", "○"}, &state.EnchoMetadata{PeriodCount: 1}).Validate(), "2-0 in encho rejected")
+			assert.Error(t, build([]string{"○"}, nil).Validate(), "1-0 in regulation rejected")
+			assert.Error(t, build([]string{"○"}, &state.EnchoMetadata{PeriodCount: 0}).Validate(), "degenerate periodCount-0 block is not encho")
+		})
+	}
+}

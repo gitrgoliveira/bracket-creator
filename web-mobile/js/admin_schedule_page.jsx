@@ -13,19 +13,34 @@ const Breadcrumbs = window.Breadcrumbs;
 const CourtPicker = window.CourtPicker;
 const hasBothSides = window.hasBothSides;
 
-function EstInput({ label, value, setter, min, max, step = "1" }) {
+// `field`/`field__label`, NOT `form-group`/`label`: neither of the latter has
+// a definition in styles.css, so every input built here rendered its label at
+// the inherited 16px/400 while the one hand-rolled field beside them (Match
+// duration, which uses DurationInput) rendered at 12px/600. The same mistake
+// was found and fixed for that one field; the shared component it sits next to
+// kept it, which is why the panel showed one small bold label among seven
+// large light ones.
+//
+// `hint` is optional and renders the same `.field__hint` line that field uses,
+// wired to the input via aria-describedby so it reaches a screen reader rather
+// than only sighted operators.
+function EstInput({ label, value, setter, min, max, step = "1", hint, id }) {
+  const hintId = hint && id ? `${id}-hint` : undefined;
   return (
-    <div className="form-group">
-      <label className="label">{label}</label>
+    <div className="field">
+      <label className="field__label" htmlFor={id}>{label}</label>
       <input
+        id={id}
         type="number"
         className="input"
         value={Number.isFinite(value) ? value : ""}
         min={min}
         max={max}
         step={step}
+        aria-describedby={hintId}
         onChange={e => { const val = e.target.value; setter(val === "" ? NaN : +val); }}
       />
+      {hint && <div className="field__hint" id={hintId}>{hint}</div>}
     </div>
   );
 }
@@ -449,7 +464,23 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
                 </div>
                 <EstInput label="Multiplier" value={estMultiplier} setter={setEstMultiplier} min="1" max="3" step="0.1" />
                 <EstInput label="Courts" value={estCourts} setter={setEstCourts} min="1" max="26" />
-                <EstInput label="Matches" value={estNumMatches} setter={setEstNumMatches} min="1" />
+                {/* "Team matches", not a bare "Matches", once a team size is
+                    set: this field counts ENCOUNTERS, and each encounter then
+                    costs several bouts. The panel used to carry a "Bouts per
+                    team match" field beside it, which was the only thing on
+                    screen distinguishing the two; removing that redundant
+                    input took the cue with it, and a reader immediately
+                    misread a 10 here as bouts (impossible for a 5-person
+                    kachinuki team, where 2N-1 = 9 is the ceiling). The label
+                    now carries the distinction on its own. */}
+                <EstInput
+                  id="est-num-matches"
+                  label={estTeamSize > 0 ? "Team matches" : "Matches"}
+                  value={estNumMatches}
+                  setter={setEstNumMatches}
+                  min="1"
+                  hint={estTeamSize > 0 ? "Encounters, not bouts. Each one costs several bouts." : undefined}
+                />
                 <EstInput label="Team size (0=indiv)" value={estTeamSize} setter={setEstTeamSize} min="0" />
                 {/* mp-gmcg: winner-stays toggle, only meaningful for team
                     estimates. Kachinuki has a variable bout count, so the

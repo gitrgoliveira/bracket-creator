@@ -22,6 +22,8 @@ If you start the wrong bout, use **Send back to queue** on the running match. Th
 
 Once a match is scored it moves to the **Completed** list on the court console, and each row carries a **Correct** button. You do not have to leave the console to fix a mistake: Correct opens the finished match back in the score editor, even while the next match is already running on the same court.
 
+![The court console Completed list showing a finished match with its result and a Correct button.](../../screenshots/console-correct-completed.png)
+
 What Correct offers depends on the format:
 
 - For most matches, the editor reopens with the recorded scores ready to edit. Adjust the ippons, fouls, or winner, then use **Save correction**. A short reason is required so the change stays traceable.

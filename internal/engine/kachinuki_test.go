@@ -1513,7 +1513,7 @@ func TestReopenKachinukiMatch(t *testing.T) {
 		eng, store, _ := setupTestEngine(t)
 		require.NoError(t, store.SaveCompetition(&state.Competition{ID: "fixed", TeamSize: 3}))
 		require.NoError(t, store.SavePoolMatches("fixed", []state.MatchResult{completedPool()}))
-		err := eng.ReopenKachinukiMatch("fixed", "P1-0")
+		err := eng.ReopenKachinukiMatch("fixed", "P1-0", "operator error")
 		var verr *ValidationError
 		require.ErrorAs(t, err, &verr, "non-kachinuki reopen must be a validation error (400)")
 	})
@@ -1521,7 +1521,7 @@ func TestReopenKachinukiMatch(t *testing.T) {
 	t.Run("pool match reopened: running, outcome cleared, bout log kept", func(t *testing.T) {
 		eng, store, _ := setupKachinukiComp(t, "reopen-pool", 3)
 		require.NoError(t, store.SavePoolMatches("reopen-pool", []state.MatchResult{completedPool()}))
-		require.NoError(t, eng.ReopenKachinukiMatch("reopen-pool", "P1-0"))
+		require.NoError(t, eng.ReopenKachinukiMatch("reopen-pool", "P1-0", "  wrong winner recorded  "))
 
 		matches, err := store.LoadPoolMatches("reopen-pool")
 		require.NoError(t, err)
@@ -1531,6 +1531,8 @@ func TestReopenKachinukiMatch(t *testing.T) {
 		assert.Empty(t, matches[0].WinnerID, "the resolved winner id must be cleared with the winner")
 		assert.Empty(t, matches[0].Decision)
 		require.Len(t, matches[0].SubResults, 1, "bout log kept")
+		assert.Equal(t, "wrong winner recorded", matches[0].CorrectionReason,
+			"the reopen reason is the audit trail for rewriting a finalized result, and must be stored trimmed")
 	})
 
 	t.Run("not completed", func(t *testing.T) {
@@ -1539,13 +1541,13 @@ func TestReopenKachinukiMatch(t *testing.T) {
 		m.Status = state.MatchStatusRunning
 		m.Winner = ""
 		require.NoError(t, store.SavePoolMatches("reopen-running", []state.MatchResult{m}))
-		err := eng.ReopenKachinukiMatch("reopen-running", "P1-0")
+		err := eng.ReopenKachinukiMatch("reopen-running", "P1-0", "operator error")
 		assert.ErrorIs(t, err, ErrReopenNotCompleted)
 	})
 
 	t.Run("match not found", func(t *testing.T) {
 		eng, _, _ := setupKachinukiComp(t, "reopen-missing", 3)
-		err := eng.ReopenKachinukiMatch("reopen-missing", "nope")
+		err := eng.ReopenKachinukiMatch("reopen-missing", "nope", "operator error")
 		var nfErr *NotFoundError
 		assert.ErrorAs(t, err, &nfErr)
 	})
@@ -1572,7 +1574,7 @@ func TestReopenKachinukiMatch(t *testing.T) {
 				ID: "B0", SideA: "WhiteTeam", SideB: "", Status: state.MatchStatusScheduled,
 			},
 		}))
-		require.NoError(t, eng.ReopenKachinukiMatch("reopen-semi", "SF0"))
+		require.NoError(t, eng.ReopenKachinukiMatch("reopen-semi", "SF0", "taisho bout must be re-fought"))
 
 		bracket, err := store.LoadBracket("reopen-semi")
 		require.NoError(t, err)
@@ -1581,6 +1583,7 @@ func TestReopenKachinukiMatch(t *testing.T) {
 		assert.Empty(t, sf.Winner)
 		assert.Empty(t, sf.Decision)
 		require.Len(t, sf.SubResults, 1, "bout log kept")
+		assert.Equal(t, "taisho bout must be re-fought", sf.CorrectionReason, "reopen reason persisted on the bracket match")
 		assert.Equal(t, "Winner of r2-m0", bracket.Rounds[1][0].SideA, "final slot retracted to the generation placeholder")
 		assert.Equal(t, "Winner of r2-m1", bracket.Rounds[1][0].SideB, "sibling slot untouched")
 		assert.Empty(t, bracket.ThirdPlaceMatch.SideA, "bronze loser slot retracted")
@@ -1605,7 +1608,7 @@ func TestReopenKachinukiMatch(t *testing.T) {
 				},
 			},
 		}))
-		err := eng.ReopenKachinukiMatch("reopen-blocked", "SF0")
+		err := eng.ReopenKachinukiMatch("reopen-blocked", "SF0", "operator error")
 		assert.ErrorIs(t, err, ErrReopenDownstreamFought)
 
 		bracket, lerr := store.LoadBracket("reopen-blocked")
@@ -1628,13 +1631,152 @@ func TestReopenKachinukiMatch(t *testing.T) {
 				},
 			},
 		}))
-		require.NoError(t, eng.ReopenKachinukiMatch("reopen-bronze", "B0"))
+		require.NoError(t, eng.ReopenKachinukiMatch("reopen-bronze", "B0", "bronze scored on the wrong sheet"))
 
 		bracket, err := store.LoadBracket("reopen-bronze")
 		require.NoError(t, err)
 		assert.Equal(t, state.MatchStatusRunning, bracket.ThirdPlaceMatch.Status)
 		assert.Empty(t, bracket.ThirdPlaceMatch.Winner)
 		require.Len(t, bracket.ThirdPlaceMatch.SubResults, 1, "bout log kept")
+		assert.Equal(t, "bronze scored on the wrong sheet", bracket.ThirdPlaceMatch.CorrectionReason,
+			"reopen reason persisted on the bronze match")
+	})
+}
+
+// TestReopenKachinukiMatchCourtBusy pins the reopen court gate (mp-gmcg).
+//
+// NOTE ON THE FIXTURES: every OTHER reopen test builds its matches with NO
+// Court set, so the gate never engaged and the bug survived review. These
+// subtests set Court explicitly on BOTH matches, which is the whole point.
+//
+// Reopen flips the match back to RUNNING, and court exclusivity keys purely
+// on `status == running` (courtOccupiedInCompTx). Reopening onto a busy
+// court would leave two running matches there, and checkCourtExclusivityTx
+// then rejects BOTH: the re-End of the reopened match AND every further
+// score write to the genuinely live bout. So the reopen itself is refused.
+func TestReopenKachinukiMatchCourtBusy(t *testing.T) {
+	completedOnCourt := func(id, court string) state.MatchResult {
+		return state.MatchResult{
+			ID: id, SideA: "RedTeam", SideB: "WhiteTeam", Status: state.MatchStatusCompleted,
+			Winner: "RedTeam", Decision: "kachinuki-exhaustion", Court: court,
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "R-1", SideB: "W-1", IpponsA: []string{"M"}, Winner: "R-1", Decision: "fought"},
+			},
+		}
+	}
+	runningOnCourt := func(id, court string) state.MatchResult {
+		return state.MatchResult{
+			ID: id, SideA: "Kuma", SideB: "Washi", Status: state.MatchStatusRunning, Court: court,
+		}
+	}
+
+	t.Run("same competition: busy court rejects, the finished result is untouched", func(t *testing.T) {
+		eng, store, _ := setupKachinukiComp(t, "reopen-court-busy", 3)
+		require.NoError(t, store.SavePoolMatches("reopen-court-busy", []state.MatchResult{
+			completedOnCourt("P1-0", "A"),
+			runningOnCourt("P1-1", "A"),
+		}))
+
+		err := eng.ReopenKachinukiMatch("reopen-court-busy", "P1-0", "need more bouts")
+		require.Error(t, err)
+		var busy *CourtBusyError
+		require.ErrorAs(t, err, &busy)
+		assert.Equal(t, "A", busy.Court)
+		assert.Equal(t, "P1-1", busy.MatchID, "the error must name the match holding the court")
+		assert.ErrorIs(t, err, ErrCourtBusy, "reopen reuses the single court-busy sentinel")
+
+		matches, lerr := store.LoadPoolMatches("reopen-court-busy")
+		require.NoError(t, lerr)
+		assert.Equal(t, state.MatchStatusCompleted, matches[0].Status, "the reopen must not land")
+		assert.Equal(t, "RedTeam", matches[0].Winner)
+		assert.Empty(t, matches[0].CorrectionReason, "a rejected reopen must not stamp an audit reason")
+		assert.Equal(t, state.MatchStatusRunning, matches[1].Status, "the live match keeps the court")
+	})
+
+	t.Run("same competition: a free court still reopens", func(t *testing.T) {
+		eng, store, _ := setupKachinukiComp(t, "reopen-court-free", 3)
+		require.NoError(t, store.SavePoolMatches("reopen-court-free", []state.MatchResult{
+			completedOnCourt("P1-0", "A"),
+			// Running, but on a DIFFERENT court: no conflict.
+			runningOnCourt("P1-1", "B"),
+		}))
+
+		require.NoError(t, eng.ReopenKachinukiMatch("reopen-court-free", "P1-0", "need more bouts"))
+		matches, lerr := store.LoadPoolMatches("reopen-court-free")
+		require.NoError(t, lerr)
+		assert.Equal(t, state.MatchStatusRunning, matches[0].Status)
+	})
+
+	t.Run("bracket match on a busy court is refused too", func(t *testing.T) {
+		eng, store, _ := setupKachinukiComp(t, "reopen-court-busy-bracket", 3)
+		require.NoError(t, store.SaveBracket("reopen-court-busy-bracket", &state.Bracket{
+			Rounds: [][]state.BracketMatch{
+				{
+					{
+						ID: "SF0", SideA: "RedTeam", SideB: "WhiteTeam", Status: state.MatchStatusCompleted,
+						Winner: "RedTeam", Decision: "kachinuki-exhaustion", Court: "A",
+					},
+					{ID: "SF1", SideA: "Kuma", SideB: "Washi", Status: state.MatchStatusRunning, Court: "A"},
+				},
+				{{ID: "F0", SideA: "RedTeam", SideB: "Winner of r2-m1", Status: state.MatchStatusScheduled}},
+			},
+		}))
+
+		err := eng.ReopenKachinukiMatch("reopen-court-busy-bracket", "SF0", "need more bouts")
+		var busy *CourtBusyError
+		require.ErrorAs(t, err, &busy)
+		assert.Equal(t, "SF1", busy.MatchID)
+
+		bracket, lerr := store.LoadBracket("reopen-court-busy-bracket")
+		require.NoError(t, lerr)
+		assert.Equal(t, state.MatchStatusCompleted, bracket.Rounds[0][0].Status, "the reopen must not land")
+		assert.Equal(t, "RedTeam", bracket.Rounds[1][0].SideA, "the downstream slot must not be retracted")
+	})
+
+	t.Run("bronze match on a busy court is refused too", func(t *testing.T) {
+		eng, store, _ := setupKachinukiComp(t, "reopen-court-busy-bronze", 3)
+		require.NoError(t, store.SaveBracket("reopen-court-busy-bronze", &state.Bracket{
+			Rounds: [][]state.BracketMatch{
+				{{ID: "F0", SideA: "RedTeam", SideB: "Kuma", Status: state.MatchStatusRunning, Court: "A"}},
+			},
+			ThirdPlaceMatch: &state.BracketMatch{
+				ID: "B0", SideA: "WhiteTeam", SideB: "Washi", Status: state.MatchStatusCompleted,
+				Winner: "Washi", Decision: "kachinuki-exhaustion", Court: "A",
+			},
+		}))
+
+		err := eng.ReopenKachinukiMatch("reopen-court-busy-bronze", "B0", "need more bouts")
+		var busy *CourtBusyError
+		require.ErrorAs(t, err, &busy)
+		assert.Equal(t, "F0", busy.MatchID)
+
+		bracket, lerr := store.LoadBracket("reopen-court-busy-bronze")
+		require.NoError(t, lerr)
+		assert.Equal(t, state.MatchStatusCompleted, bracket.ThirdPlaceMatch.Status, "the reopen must not land")
+	})
+
+	t.Run("a running match in ANOTHER competition on the same court also rejects", func(t *testing.T) {
+		// Courts are tournament-global, so the cross-competition half of the
+		// gate (CheckCrossCompCourtBusy, run before the transaction) matters
+		// just as much: two competitions sharing court A must not both put a
+		// running match on it.
+		eng, store, _ := setupKachinukiComp(t, "reopen-cross-a", 3)
+		require.NoError(t, store.SavePoolMatches("reopen-cross-a", []state.MatchResult{
+			completedOnCourt("P1-0", "A"),
+		}))
+		require.NoError(t, store.SaveCompetition(&state.Competition{ID: "reopen-cross-b"}))
+		require.NoError(t, store.SavePoolMatches("reopen-cross-b", []state.MatchResult{
+			runningOnCourt("P9-0", "A"),
+		}))
+
+		err := eng.ReopenKachinukiMatch("reopen-cross-a", "P1-0", "need more bouts")
+		var busy *CourtBusyError
+		require.ErrorAs(t, err, &busy)
+		assert.Equal(t, "reopen-cross-b", busy.CompID, "the conflicting competition must be named")
+
+		matches, lerr := store.LoadPoolMatches("reopen-cross-a")
+		require.NoError(t, lerr)
+		assert.Equal(t, state.MatchStatusCompleted, matches[0].Status, "the reopen must not land")
 	})
 }
 

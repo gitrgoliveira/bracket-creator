@@ -134,6 +134,14 @@ export function canReopenKachinukiMatch({ isKachinuki, isComplete }) {
 // here (daihyosen does not exist in kachinuki); untouched auto-appended /
 // manual placeholder rows are dropped exactly as they are dropped from
 // the wire.
+//
+// CROSS-FILE INVARIANT (fusensho): these entries carry decision "fusensho"
+// but NO winner, and deriveKachinukiEndOutcome resolves the side purely by
+// comparing ippon counts. That resolves only because applyFusenshoToggle
+// (admin_scoring_shared.jsx) writes the ○○ maru into the winning side's
+// pts when the operator toggles fusensho, which arrives here as ipponsA /
+// ipponsB. A refactor that stops writing those maru cells would silently
+// leave a walkover-ended encounter with no derivable winner.
 export function buildKachinukiEndEntries(subs, daihyosenIdx) {
   return (subs || [])
     .map((s, idx) => ({ s, idx }))
@@ -413,11 +421,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // the ScoreEditorModal correction flow (same ReasonPrompt + CORRECTION_PRESETS).
   const [correctionReason, setCorrectionReason] = useStateA("");
   const [showCorrectionPrompt, setShowCorrectionPrompt] = useStateA(false);
-  // mp-gmcg: [Reopen match] on a completed kachinuki match. Two-step
-  // arm/confirm (destructive-ish: it retracts a recorded result and, for
-  // bracket matches, the propagated winner slot). 409s from the server
-  // ("not completed" / "downstream match already fought") surface inline.
-  const [reopenArmed, setReopenArmed] = useStateA(false);
+  // mp-gmcg: [Reopen match] on a completed kachinuki match. Reopening
+  // discards a recorded result (and, for bracket matches, the propagated
+  // winner slot), so it captures an audit reason exactly like a correction:
+  // the tap opens the same ReasonPrompt and its Confirm IS the second step
+  // of the two-step commit (no separate arm state — one confirm, not two).
+  // 409s from the server ("not completed" / "downstream match already
+  // fought" / "another match is running on court X") surface inline.
+  const [showReopenPrompt, setShowReopenPrompt] = useStateA(false);
   const [reopenBusy, setReopenBusy] = useStateA(false);
   const [reopenErr, setReopenErr] = useStateA("");
   // T131: lineup data so each bout cell can show the assigned player
@@ -806,6 +817,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // legitimate; the match is not being completed); End match has its own
   // knockout-tie gate via deriveKachinukiEndOutcome.
   const kachinukiBoutMode = isKachinukiBoutMode({ isKachinuki, isComplete, hasDaihyosen });
+  // The two audit prompts that can take over the footer. Both are the same
+  // ReasonPrompt, so they are mutually exclusive by construction: only one
+  // Cancel/Confirm row may ever be on screen (correction wins if some future
+  // path opens both). Each also hides the footer's own nav+actions below.
+  const correctionPromptOpen = isComplete && showCorrectionPrompt;
+  const reopenPromptOpen = showReopenPrompt
+    && canReopenKachinukiMatch({ isKachinuki, isComplete })
+    && !correctionPromptOpen;
   // Rows to render: kachinuki shows only bouts that exist in the server log
   // (kachinukiVisiblePositions handles the bout-1 bootstrap, the running
   // current-bout selection, the correction show-all branch, and the
@@ -894,11 +913,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   };
   // Any edit disarms every two-step confirm so a stale verdict can never be
   // committed (subs identity changes only through updateSub/addManualBout;
-  // daihyosenHantei flips the verdict without touching subs). reopenArmed is
-  // disarmed here too (mp-gmcg): on a completed match the operator can arm
-  // Reopen and then start a score correction instead — a later tap must not
-  // fire the reopen (which would clear the result and discard the correction).
-  useEffectA(() => { setFinishArmed(false); setEndArmed(false); setReopenArmed(false); }, [subs, daihyosenHantei]);
+  // daihyosenHantei flips the verdict without touching subs). The reopen
+  // prompt is dismissed here too (mp-gmcg): on a completed match the operator
+  // can open Reopen and then start a score correction instead — confirming
+  // the stale prompt must not fire the reopen (which would clear the result
+  // and discard the correction).
+  useEffectA(() => { setFinishArmed(false); setEndArmed(false); setShowReopenPrompt(false); }, [subs, daihyosenHantei]);
 
   // mp-gmcg: reopen a completed kachinuki match (POST .../reopen): status
   // back to running, winner/decision cleared, bout log kept. This POST is a
@@ -909,15 +929,25 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // CLOSE the editor: the host's SSE match_updated handler flips the match
   // row to running, and the operator taps Score to resume bout-by-bout on the
   // now-running encounter. The server's 409s are full-sentence messages ("...
-  // is not completed ..." / "cannot reopen: a downstream knockout match ...")
-  // and surface inline verbatim, never silently.
-  const onReopenMatch = async () => {
+  // is not completed ..." / "cannot reopen: a downstream knockout match ..." /
+  // "Court A already has a running match ...", the last normalized out of the
+  // structured court_busy payload by API.reopenMatch) and surface inline
+  // verbatim, never silently.
+  //
+  // `reason` is the ReasonPrompt's confirmed string and is REQUIRED: the
+  // server 400s an empty one, so the empty case is refused here rather than
+  // shown to the operator as a failed round-trip. ReasonPrompt cannot emit
+  // an empty string while it has presets (its category defaults to
+  // presets[0]); this guard keeps that a local invariant of the reopen call
+  // instead of a property of the prompt's configuration.
+  const onReopenMatch = async (reason) => {
+    const trimmed = String(reason || "").trim();
+    if (!trimmed) return;
     setReopenErr("");
     setReopenBusy(true);
     try {
-      await window.API.reopenMatch(m.compId, m.id, resolveDecisionPassword(password));
+      await window.API.reopenMatch(m.compId, m.id, trimmed, resolveDecisionPassword(password));
       if (!mountedRef.current) return;
-      setReopenArmed(false);
       onClose();
     } catch (e) {
       if (!mountedRef.current) return;
@@ -1857,7 +1887,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
         <div className="editor-modal__foot editor-modal__foot--nav">
           {/* Audit reason prompt for team-match corrections: same contract
               as ScoreEditorModal: operator must confirm before the patch fires. */}
-          {isComplete && showCorrectionPrompt && (
+          {correctionPromptOpen && (
             <ReasonPrompt
               label="Reason for correction"
               presets={CORRECTION_PRESETS}
@@ -1871,11 +1901,30 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               onCancel={() => setShowCorrectionPrompt(false)}
             />
           )}
-          {/* While the correction prompt is open it owns the only Cancel/commit
+          {/* mp-gmcg: the same audit prompt for [Reopen match]. Reopening
+              discards a recorded result, so it is the same class of edit as a
+              correction and is recorded with the same kind of reason; the
+              server requires a non-empty one. Confirm posts straight away and
+              closes the prompt, so a failure lands in the reopenErr line below
+              (the server's 409 text verbatim) with the button back to rest. */}
+          {reopenPromptOpen && (
+            <ReasonPrompt
+              label="Reason for reopening"
+              presets={CORRECTION_PRESETS}
+              submitting={reopenBusy}
+              onConfirm={(r) => {
+                setShowReopenPrompt(false);
+                onReopenMatch(r);
+              }}
+              onCancel={() => setShowReopenPrompt(false)}
+            />
+          )}
+          {/* While a reason prompt is open it owns the only Cancel/commit
               row: hide the footer's own nav+actions so the operator never sees
               two Cancels and two commit buttons at the highest-stakes moment
-              (amending a recorded result). Mirrored in Score/EngiScoreEditorModal. */}
-          {!(isComplete && showCorrectionPrompt) && (
+              (amending or discarding a recorded result). Mirrored in
+              Score/EngiScoreEditorModal. */}
+          {!(correctionPromptOpen || reopenPromptOpen) && (
           <>
           {/* mp-gmcg: inline End-match hint (plain text, no modal). Shown
               while End is blocked (nothing scored yet, or a knockout tie:
@@ -1913,20 +1962,19 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               {/* mp-gmcg: mistake recovery on a completed kachinuki match:
                   status back to running, winner/decision cleared, bout log
                   kept; the modal re-enters bout mode via the refreshed
-                  match prop. Two-step arm/confirm, house style. */}
+                  match prop. The tap opens the audit ReasonPrompt above,
+                  whose Confirm is the second step of the commit — the reason
+                  is captured BEFORE the POST, never after it. */}
               {canReopenKachinukiMatch({ isKachinuki, isComplete }) && (
                 <button
                   type="button"
-                  className={`btn btn--sm ${reopenArmed ? "btn--confirm" : "btn--ghost"}`}
+                  className="btn btn--sm btn--ghost"
                   data-testid="kachinuki-reopen-button"
-                  onClick={() => {
-                    if (!reopenArmed) { setReopenArmed(true); return; }
-                    onReopenMatch();
-                  }}
+                  onClick={() => setShowReopenPrompt(true)}
                   disabled={submitting || reopenBusy || decisionSubmitting}
                   title="Reopen: back to running, result cleared, bouts kept"
                 >
-                  {reopenBusy ? "Reopening…" : reopenArmed ? "Confirm · Reopen match" : "Reopen match"}
+                  {reopenBusy ? "Reopening…" : "Reopen match"}
                 </button>
               )}
               {canClose && <button className="btn" onClick={handleDismiss} disabled={submitting}>Cancel</button>}

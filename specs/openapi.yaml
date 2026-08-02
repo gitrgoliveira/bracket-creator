@@ -1771,16 +1771,40 @@ paths:
         even in self-run mode (same class as override-winner), so a request
         without a valid `X-Tournament-Password` gets 401. Broadcasts a
         `match_updated` event.
+
+        Discarding a finalized result is audited: a non-empty `reason` is
+        REQUIRED in the body, the same class of justification as the
+        `correctionReason` on a completed score write, and it is recorded
+        with the result.
       security:
         - TournamentPassword: []
       parameters:
         - $ref: '#/components/parameters/CompetitionId'
         - $ref: '#/components/parameters/MatchId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  minLength: 1
+                  maxLength: 200
+                  description: >
+                    Why the recorded result is being discarded (e.g. "Ended
+                    too early"). Trimmed server-side, so whitespace-only is
+                    rejected as empty. Same 200-character cap as
+                    `decisionReason` / `correctionReason`.
       responses:
         '200':
           description: Match reopened (status back to `running`).
         '400':
-          description: The competition is not a kachinuki team competition.
+          description: >
+            The `reason` is missing, empty after trimming, or longer than 200
+            characters; or the competition is not a kachinuki team competition.
           content:
             application/json:
               schema:
@@ -1797,14 +1821,43 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: >
-            The match is not completed (only a completed kachinuki match can
-            be reopened), or a downstream knockout match fed by this match's
-            winner has already started or recorded a result.
+          description: |
+            Conflict. Two body shapes, matching the score endpoint's:
+            - Plain sentence in `error`: the match is not completed (only a
+              completed kachinuki match can be reopened), or a downstream
+              knockout match fed by this match's winner has already started
+              or recorded a result.
+            - `error: court_busy` (machine code, sentence in `message`):
+              another match is already running on this match's court, in this
+              or another competition. Reopening would put a second live match
+              on that court, so the operator must finish or requeue the
+              running one first. Extra fields: `court`, `matchId`, `compId`,
+              `message`. Same shape as the score endpoint's `court_busy`, so
+              clients keep one branch for it.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                anyOf:
+                  - $ref: '#/components/schemas/Error'
+                  - type: object
+                    required: [error]
+                    properties:
+                      error:
+                        type: string
+                        enum: [court_busy]
+                        description: Machine-readable conflict code.
+                      court:
+                        type: string
+                        description: Court label of the busy court.
+                      matchId:
+                        type: string
+                        description: ID of the match already running on that court.
+                      compId:
+                        type: string
+                        description: Competition owning that running match (may differ from this one).
+                      message:
+                        type: string
+                        description: Human-readable sentence; what clients display.
         '500':
           $ref: '#/components/responses/InternalError'
 

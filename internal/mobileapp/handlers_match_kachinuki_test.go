@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -662,14 +663,23 @@ func TestScoreHandler_KachinukiDaihyosenCompletionPropagates(t *testing.T) {
 	assert.Equal(t, "Ryu", bracket.Rounds[1][0].SideA, "winner must propagate to the next round")
 }
 
-// postReopen POSTs to the reopen endpoint.
-func postReopen(t *testing.T, r *gin.Engine, compID, matchID string) *httptest.ResponseRecorder {
+// postReopenRaw POSTs an arbitrary body to the reopen endpoint.
+func postReopenRaw(t *testing.T, r *gin.Engine, compID, matchID string, body []byte) *httptest.ResponseRecorder {
 	t.Helper()
 	w := httptest.NewRecorder()
-	req, err := http.NewRequest("POST", "/api/competitions/"+compID+"/matches/"+matchID+"/reopen", nil)
+	req, err := http.NewRequest("POST", "/api/competitions/"+compID+"/matches/"+matchID+"/reopen", bytes.NewBuffer(body))
 	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 	return w
+}
+
+// postReopen POSTs to the reopen endpoint with the mandatory audit reason.
+func postReopen(t *testing.T, r *gin.Engine, compID, matchID, reason string) *httptest.ResponseRecorder {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{"reason": reason})
+	require.NoError(t, err)
+	return postReopenRaw(t, r, compID, matchID, body)
 }
 
 // completedKachinukiPoolMatch is the canonical finished pool encounter
@@ -694,7 +704,7 @@ func TestReopenHandler_KachinukiPoolMatch(t *testing.T) {
 	r, store := setupKachinukiScoreServer(t, compID)
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{completedKachinukiPoolMatch()}))
 
-	w := postReopen(t, r, compID, "P1-0")
+	w := postReopen(t, r, compID, "P1-0", "wrong winner recorded")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 
 	matches, err := store.LoadPoolMatches(compID)
@@ -756,7 +766,7 @@ func TestReopenHandler_NonKachinukiRejected(t *testing.T) {
 	admin := r.Group("/api")
 	RegisterMatchHandlers(admin, eng, store, store, hub, NewFileVerifier(store), store)
 
-	w := postReopen(t, r, compID, "P1-0")
+	w := postReopen(t, r, compID, "P1-0", "wrong winner recorded")
 	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
 	assert.Contains(t, w.Body.String(), "kachinuki")
 
@@ -778,7 +788,7 @@ func TestReopenHandler_NotCompleted409(t *testing.T) {
 		},
 	}))
 
-	w := postReopen(t, r, compID, "P1-0")
+	w := postReopen(t, r, compID, "P1-0", "wrong winner recorded")
 	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
 	assert.Contains(t, w.Body.String(), "not completed")
 }
@@ -814,7 +824,7 @@ func TestReopenHandler_BracketDownstreamStates(t *testing.T) {
 			},
 		}))
 
-		w := postReopen(t, r, compID, "R1M0")
+		w := postReopen(t, r, compID, "R1M0", "semifinal must be re-fought")
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 
 		bracket, err := store.LoadBracket(compID)
@@ -850,7 +860,7 @@ func TestReopenHandler_BracketDownstreamStates(t *testing.T) {
 			},
 		}))
 
-		w := postReopen(t, r, compID, "R1M0")
+		w := postReopen(t, r, compID, "R1M0", "semifinal must be re-fought")
 		require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
 		assert.Contains(t, w.Body.String(), "downstream")
 
@@ -925,4 +935,275 @@ func TestScoreHandler_KachinukiCompletedCorrectionDoesNotAdvance(t *testing.T) {
 	require.Len(t, matches, 1)
 	assert.Len(t, matches[0].SubResults, 1, "a correction must never append a new bout")
 	assert.Equal(t, state.MatchStatusCompleted, matches[0].Status)
+}
+
+// loadPoolMatch is a small lookup helper for the reopen tests below.
+func loadPoolMatch(t *testing.T, store *state.Store, compID, matchID string) state.MatchResult {
+	t.Helper()
+	ms, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	for _, m := range ms {
+		if m.ID == matchID {
+			return m
+		}
+	}
+	t.Fatalf("match %s not found in %s", matchID, compID)
+	return state.MatchResult{}
+}
+
+// TestReopenHandler_ReasonRequired pins the reopen audit gate (mp-gmcg).
+//
+// Every other format requires a non-empty correctionReason to overwrite a
+// finalized result, and the reopen endpoint is the only other way to rewrite
+// one — so it must demand the same justification, otherwise it is simply the
+// way around the audit trail.
+func TestReopenHandler_ReasonRequired(t *testing.T) {
+	cases := []struct {
+		name string
+		body []byte
+		want string
+	}{
+		{"no reason field", []byte(`{}`), "reason is required"},
+		{"empty reason", []byte(`{"reason":""}`), "reason is required"},
+		{"whitespace-only reason", []byte(`{"reason":"   \t "}`), "reason is required"},
+		// gin's JSON encoder escapes "<", so match on the tail of the message.
+		{"oversized reason", []byte(`{"reason":"` + strings.Repeat("x", MaxLenCorrectionReason+1) + `"}`), "200 characters"},
+		{"malformed body", []byte(`{nope`), ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			compID := "kachinuki-reopen-reason"
+			r, store := setupKachinukiScoreServer(t, compID)
+			require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{completedKachinukiPoolMatch()}))
+
+			w := postReopenRaw(t, r, compID, "P1-0", tc.body)
+			require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+			if tc.want != "" {
+				assert.Contains(t, w.Body.String(), tc.want)
+			}
+			m := loadPoolMatch(t, store, compID, "P1-0")
+			assert.Equal(t, state.MatchStatusCompleted, m.Status, "a rejected reopen must leave the result finalized")
+			assert.Equal(t, "Ryu", m.Winner)
+		})
+	}
+}
+
+// TestReopenHandler_ReasonSurvivesTheReEnd is the audit-trail regression
+// (mp-gmcg): the reopen reason is recorded on the match as its
+// CorrectionReason, and it must still be there after the operator has
+// recorded further bouts and Ended the match again.
+//
+// Two things used to erase it. (1) The pool write is a whole-struct
+// overwrite (`*r = *result` in engine/scoring_tx.go), so every running write
+// with an empty CorrectionReason wiped the stored one. (2) The re-End is a
+// FIRST finalization (the match is running, not completed), and that branch
+// executed `result.CorrectionReason = ""` unconditionally. Net effect: a
+// finished kachinuki result could be rewritten with no record of who changed
+// it or why — exactly what the correction gate exists to prevent.
+func TestReopenHandler_ReasonSurvivesTheReEnd(t *testing.T) {
+	compID := "kachinuki-reopen-audit"
+	r, store := setupKachinukiScoreServer(t, compID)
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{completedKachinukiPoolMatch()}))
+
+	const reason = "bout 1 scored on the wrong sheet"
+	w := postReopen(t, r, compID, "P1-0", "  "+reason+"  ")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Equal(t, reason, loadPoolMatch(t, store, compID, "P1-0").CorrectionReason,
+		"the reopen reason must be persisted (trimmed) as the match's correction reason")
+
+	// The operator records the next bout (a plain running write).
+	w = putScore(t, r, compID, "P1-0", map[string]any{
+		"sideA":              "Ryu",
+		"sideB":              "Tora",
+		"status":             "running",
+		"kachinukiBoutFinal": true,
+		"subResults": []map[string]any{
+			kachinukiSub(1, "R-1", "W-1", []string{"M", "K"}, "R-1", "fought"),
+		},
+	})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Equal(t, reason, loadPoolMatch(t, store, compID, "P1-0").CorrectionReason,
+		"a running write must not wipe the reopen audit reason")
+
+	// The operator ends the match again. This is a FIRST finalization (the
+	// match is running), so no client reason is supplied — the stored one must
+	// survive it.
+	w = putScore(t, r, compID, "P1-0", map[string]any{
+		"sideA":    "Ryu",
+		"sideB":    "Tora",
+		"winner":   "Tora",
+		"status":   "completed",
+		"decision": "kachinuki-exhaustion",
+		"subResults": []map[string]any{
+			kachinukiSub(1, "R-1", "W-1", []string{"M", "K"}, "R-1", "fought"),
+			{
+				"position": 2, "sideA": "R-1", "sideB": "W-2",
+				"ipponsA": []string{}, "ipponsB": []string{"D", "K"},
+				"winner": "W-2", "decision": "fought",
+			},
+		},
+	})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	m := loadPoolMatch(t, store, compID, "P1-0")
+	assert.Equal(t, state.MatchStatusCompleted, m.Status)
+	assert.Equal(t, "Tora", m.Winner)
+	assert.Equal(t, reason, m.CorrectionReason,
+		"the reopen reason is the audit record for this rewrite and must survive the re-End")
+}
+
+// TestScoreHandler_FirstFinalizationDropsClientReason is the other half of
+// the contract carrying the reopen reason forward: only a STORED reason is
+// honoured on a first finalization. A client that volunteers a
+// correctionReason on a match that was never completed must still have it
+// dropped, so the field keeps meaning "this rewrote a finalized result".
+func TestScoreHandler_FirstFinalizationDropsClientReason(t *testing.T) {
+	compID := "kachinuki-first-final-reason"
+	r, store := setupKachinukiScoreServer(t, compID)
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{
+			ID: "P1-0", SideA: "Ryu", SideB: "Tora", Status: state.MatchStatusRunning,
+			SubResults: []state.SubMatchResult{{Position: 1, SideA: "R-1", SideB: "W-1"}},
+		},
+	}))
+
+	w := putScore(t, r, compID, "P1-0", map[string]any{
+		"sideA":            "Ryu",
+		"sideB":            "Tora",
+		"winner":           "Ryu",
+		"status":           "completed",
+		"decision":         "kachinuki-exhaustion",
+		"correctionReason": "invented by the client",
+		"subResults": []map[string]any{
+			kachinukiSub(1, "R-1", "W-1", []string{"M", "K"}, "R-1", "fought"),
+		},
+	})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Empty(t, loadPoolMatch(t, store, compID, "P1-0").CorrectionReason,
+		"a client-supplied reason on a genuine first finalization must be dropped")
+}
+
+// TestReopenHandler_CourtBusy409 is the two-running-matches-on-one-court
+// regression (mp-gmcg).
+//
+// NOTE ON THE FIXTURES: every other reopen test builds its matches with NO
+// Court set, which is precisely why this bug survived — the court gate never
+// engaged. Both matches here carry Court "A" deliberately.
+//
+// Reopen puts the match back in the RUNNING state and court exclusivity keys
+// purely on `status == running`, so reopening onto a busy court leaves TWO
+// running matches there and the exclusivity check then rejects BOTH: the
+// re-End of the reopened match AND — the damaging half — every further score
+// write to the match actually being fought. So the reopen is refused, and the
+// live match must remain scoreable afterwards.
+func TestReopenHandler_CourtBusy409(t *testing.T) {
+	compID := "kachinuki-reopen-court-busy"
+	r, store := setupKachinukiScoreServer(t, compID)
+	finished := completedKachinukiPoolMatch()
+	finished.Court = "A"
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		finished,
+		// The live match on the same court. Different teams, so only the COURT
+		// dimension can reject anything here.
+		{ID: "P1-1", SideA: "Kuma", SideB: "Washi", Court: "A", Status: state.MatchStatusRunning},
+	}))
+	runningRevStore.Delete(compID + ":P1-1")
+
+	w := postReopen(t, r, compID, "P1-0", "need more bouts")
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), "court_busy")
+	assert.Contains(t, w.Body.String(), "P1-1", "the response must name the match holding the court")
+
+	m := loadPoolMatch(t, store, compID, "P1-0")
+	assert.Equal(t, state.MatchStatusCompleted, m.Status, "the refused reopen must not land")
+	assert.Equal(t, "Ryu", m.Winner)
+	assert.Empty(t, m.CorrectionReason, "a refused reopen must not stamp an audit reason")
+
+	// The damaging half: the genuinely live match on that court must still be
+	// scoreable. With the reopen applied, this write returned 409 court_busy
+	// and the operator could not score the bout in front of them.
+	w = putScore(t, r, compID, "P1-1", map[string]any{
+		"sideA": "Kuma", "sideB": "Washi",
+		"ipponsA": []string{"M"}, "ipponsB": []string{}, "status": "running",
+	})
+	require.Equal(t, http.StatusOK, w.Code, "the live match on that court must stay scoreable: %s", w.Body.String())
+	assert.Equal(t, state.MatchStatusRunning, loadPoolMatch(t, store, compID, "P1-1").Status)
+}
+
+// TestScoreHandler_KachinukiBronzeBoutFinalEchoesAppendedBout: the bronze
+// (3rd-place) match is a SIBLING of bracket.Rounds, not an element of it.
+// MaybeAdvanceKachinuki appends bouts to it like any other bracket match, so
+// the handler's post-advance echo must look there too — otherwise "Record
+// bout" appends server-side but the response carries the PRE-advance log and
+// the new pairing never reaches the open score editor.
+func TestScoreHandler_KachinukiBronzeBoutFinalEchoesAppendedBout(t *testing.T) {
+	compID := "kachinuki-bronze-echo"
+	r, store := setupKachinukiScoreServer(t, compID)
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{{ID: "F0", SideA: "Kuma", SideB: "Washi", Status: state.MatchStatusScheduled}},
+		},
+		ThirdPlaceMatch: &state.BracketMatch{
+			ID: "B0", SideA: "Ryu", SideB: "Tora", Status: state.MatchStatusRunning,
+			SubResults: []state.SubMatchResult{{Position: 1, SideA: "R-1", SideB: "W-1"}},
+		},
+	}))
+
+	w := putScore(t, r, compID, "B0", map[string]any{
+		"sideA":              "Ryu",
+		"sideB":              "Tora",
+		"status":             "running",
+		"kachinukiBoutFinal": true,
+		"subResults": []map[string]any{
+			kachinukiSub(1, "R-1", "W-1", []string{"M", "K"}, "R-1", "fought"),
+		},
+	})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.Len(t, bracket.ThirdPlaceMatch.SubResults, 2, "the bout must be appended on disk")
+
+	var echoed state.MatchResult
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &echoed))
+	require.Len(t, echoed.SubResults, 2, "the response must echo the appended bronze pairing")
+	assert.Equal(t, "R-1", echoed.SubResults[1].SideA, "winner stays on")
+	assert.Equal(t, "W-2", echoed.SubResults[1].SideB, "next from the lineup")
+}
+
+// TestAnyNumberedBoutHasEncho pins the encho predicate used by both score
+// paths to decide whether the kachinuki numbered-bout exception needs the
+// competition loaded. It must route through state.EnchoMetadata.On() — the
+// single "did this happen in encho" predicate — so a degenerate
+// {periodCount: 0} block reads the same here as in validateSubBout.
+func TestAnyNumberedBoutHasEncho(t *testing.T) {
+	tests := []struct {
+		name string
+		subs []state.SubMatchResult
+		want bool
+	}{
+		{"empty log", nil, false},
+		{"no encho block", []state.SubMatchResult{{Position: 1}}, false},
+		{"degenerate zero-period block is not encho", []state.SubMatchResult{{Position: 1, Encho: &state.EnchoMetadata{}}}, false},
+		{"real encho on a numbered bout", []state.SubMatchResult{{Position: 2, Encho: &state.EnchoMetadata{PeriodCount: 1}}}, true},
+		{
+			"encho on the daihyosen only is not a numbered bout",
+			[]state.SubMatchResult{{Position: state.DaihyosenSubPosition, Encho: &state.EnchoMetadata{PeriodCount: 1}}},
+			false,
+		},
+		{
+			"mixed: the numbered bout still counts",
+			[]state.SubMatchResult{
+				{Position: state.DaihyosenSubPosition, Encho: &state.EnchoMetadata{PeriodCount: 2}},
+				{Position: 1},
+				{Position: 2, Encho: &state.EnchoMetadata{PeriodCount: 1}},
+			},
+			true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, anyNumberedBoutHasEncho(tc.subs))
+		})
+	}
 }

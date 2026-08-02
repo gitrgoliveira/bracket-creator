@@ -994,7 +994,11 @@ func TestSelfRun_ReopenRequiresMainPassword(t *testing.T) {
 	})
 
 	t.Run("with_main_password_passes_the_gate", func(t *testing.T) {
-		req := jsonReq(http.MethodPost, "/api/competitions/some-comp/matches/m-r1-0/reopen", nil)
+		// The body carries the mandatory audit reason so the request gets past
+		// the handler's own 400 and reaches the engine's kachinuki-only check,
+		// which is what this assertion is actually about.
+		req := jsonReq(http.MethodPost, "/api/competitions/some-comp/matches/m-r1-0/reopen",
+			map[string]any{"reason": "wrong winner recorded"})
 		req.Header.Set("X-Tournament-Password", "main-pw")
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)

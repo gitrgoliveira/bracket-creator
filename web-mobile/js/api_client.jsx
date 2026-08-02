@@ -1620,18 +1620,36 @@ const API = {
         return true;
     },
     // mp-gmcg: reopen a COMPLETED kachinuki team match: status back to
-    // running, winner/decision cleared, bout log kept. 400 = non-kachinuki
-    // competition; 409 = not completed / downstream bracket match already
-    // fought (the propagated winner cannot be retracted). The server
-    // broadcasts match_updated on success.
-    async reopenMatch(compID, matchID, password) {
+    // running, winner/decision cleared, bout log kept. `reason` is the
+    // mandatory audit justification (recorded with the result, same class as
+    // a correctionReason on a completed write) and is collected by the
+    // ReasonPrompt in admin_scoring_team.jsx before this call is made.
+    // 400 = missing/empty/over-length reason, or a non-kachinuki competition;
+    // 409 = not completed / downstream bracket match already fought (the
+    // propagated winner cannot be retracted) / another match is already
+    // running on this match's court. The editor shows whichever came back
+    // verbatim, so the unwrap keeps the server's own words.
+    //
+    // TWO 409 SHAPES: most carry the sentence in `error`, but the court-busy
+    // conflict reuses the score path's structured payload, where `error` is
+    // the machine code "court_busy" and the sentence is in `message`. Prefer
+    // `message` so the operator never reads a bare code; `code` is kept on the
+    // thrown Error for callers that want to branch. The server broadcasts
+    // match_updated on success.
+    async reopenMatch(compID, matchID, reason, password) {
         const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/reopen`, {
             method: 'POST',
-            headers: { 'X-Tournament-Password': password }
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Tournament-Password': password
+            },
+            body: JSON.stringify({ reason })
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to reopen match");
+            const e = new Error(err.message || err.error || "Failed to reopen match");
+            if (err.error) e.code = err.error;
+            throw e;
         }
         return true;
     },

@@ -33,6 +33,7 @@ import (
 	"fmt"
 	"log"
 	"sort"
+	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -504,7 +505,12 @@ func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, error) {
 }
 
 // Sentinel errors for the operator-led reopen path (mp-gmcg, spec 006
-// decision 4). Both map to HTTP 409 in the handler.
+// decision 4). Both map to HTTP 409 in the handler, as does the third
+// reopen conflict — a busy court — which deliberately reuses the existing
+// ErrCourtBusy / *CourtBusyError pair (eligibility.go) rather than minting
+// a reopen-specific twin, so the "court already has a running match"
+// condition has exactly ONE sentinel and one wire shape across the score
+// and reopen paths.
 var (
 	// ErrReopenNotCompleted: only a COMPLETED kachinuki match can be
 	// reopened; a running match needs no reopen and a scheduled one has
@@ -520,6 +526,37 @@ var (
 // COMPLETED kachinuki team match (mp-gmcg, spec 006 decision 4): status
 // back to running, match-level winner/decision cleared, the full bout log
 // kept, so the operator can add more bouts and later End match again.
+//
+// `reason` is the MANDATORY audit justification, persisted as the match's
+// CorrectionReason. Reopening is the only way to rewrite a finalized
+// kachinuki result without going through the score path's correction gate
+// (which requires a correctionReason of its own), so without this the
+// result could be changed with no record of who changed it or why. The
+// caller (the reopen handler) rejects an empty/oversized reason; the
+// value is trimmed here so a padded reason can never be persisted.
+//
+// COURT GATE. Reopening puts the match back in the RUNNING state, and
+// court exclusivity keys purely on `status == running`
+// (courtOccupiedInCompTx / checkCourtExclusivityTx). Reopening a match
+// whose court already has a running match would therefore leave TWO
+// running matches on one court, and the exclusivity check then rejects
+// BOTH of them: the re-End of the reopened match AND every further score
+// write to the genuinely live bout — i.e. reopening a past match would
+// stop the operator scoring the match actually being fought. So a busy
+// court REJECTS the reopen (*CourtBusyError, HTTP 409 court_busy).
+// Semantically that is also the right answer: a reopen means "we need to
+// fight more bouts", which really does take the court. The common case —
+// a plain completed -> completed correction — is unaffected: it never
+// re-enters the running state and the score handler's isCorrection skip
+// already lets it through on a busy court. DO NOT remove this guard as a
+// redundant-looking check.
+//
+// The cross-competition half runs BEFORE WithTransaction
+// (CheckCrossCompCourtBusy takes read locks on other competitions, so
+// calling it while holding this competition's write lock risks a
+// circular wait); the same-competition half runs inside the tx off the
+// same courtOccupiedInCompTx the score path uses. Both are skipped when
+// the match has no court assigned, mirroring checkCourtExclusivityTx.
 //
 // Kachinuki ONLY: for every other competition type the correction path
 // (completed -> completed with a correctionReason) remains the sole
@@ -537,13 +574,21 @@ var (
 // same way generation fills it: the next-round side returns to its
 // "Winner of rX-mY" placeholder (the exact string propagateBracketWinner
 // re-resolves on the next completion) and the bronze side to empty.
-func (e *Engine) ReopenKachinukiMatch(compID, matchID string) error {
+func (e *Engine) ReopenKachinukiMatch(compID, matchID, reason string) error {
 	comp, err := e.store.LoadCompetition(compID)
 	if err != nil {
 		return err
 	}
 	if comp == nil || comp.TeamSize < 2 || comp.TeamMatchType != state.TeamMatchTypeKachinuki {
 		return validationErrorf("reopen is only supported for kachinuki team matches; correct other results via the score editor (correctionReason)")
+	}
+	reason = strings.TrimSpace(reason)
+
+	// Cross-competition court gate, deliberately OUTSIDE the transaction (see
+	// the doc comment). Also surfaces the *NotFoundError for an unknown match
+	// before any lock is taken.
+	if err := e.CheckCrossCompCourtBusy(compID, matchID); err != nil {
+		return err
 	}
 
 	var opErr error
@@ -559,6 +604,10 @@ func (e *Engine) ReopenKachinukiMatch(compID, matchID string) error {
 					opErr = ErrReopenNotCompleted
 					return nil
 				}
+				if cerr := reopenCourtFreeTx(tx, compID, matchID, poolMatches[i].Court); cerr != nil {
+					opErr = cerr
+					return nil
+				}
 				m := &poolMatches[i]
 				m.Status = state.MatchStatusRunning
 				m.Winner = ""
@@ -566,6 +615,7 @@ func (e *Engine) ReopenKachinukiMatch(compID, matchID string) error {
 				m.Decision = ""
 				m.DecisionBy = ""
 				m.DecisionReason = ""
+				m.CorrectionReason = reason
 				// SavePoolMatches funnels through the normal save chokepoint,
 				// so standings caches invalidate via the usual version bump.
 				return tx.SavePoolMatches(compID, poolMatches)
@@ -587,11 +637,15 @@ func (e *Engine) ReopenKachinukiMatch(compID, matchID string) error {
 						opErr = ErrReopenNotCompleted
 						return nil
 					}
+					if cerr := reopenCourtFreeTx(tx, compID, matchID, bm.Court); cerr != nil {
+						opErr = cerr
+						return nil
+					}
 					if derr := retractPropagatedWinner(bracket, rIdx, mIdx); derr != nil {
 						opErr = derr
 						return nil
 					}
-					reopenBracketMatch(bm)
+					reopenBracketMatch(bm, reason)
 					return tx.SaveBracket(compID, bracket)
 				}
 			}
@@ -602,7 +656,11 @@ func (e *Engine) ReopenKachinukiMatch(compID, matchID string) error {
 					opErr = ErrReopenNotCompleted
 					return nil
 				}
-				reopenBracketMatch(bm)
+				if cerr := reopenCourtFreeTx(tx, compID, matchID, bm.Court); cerr != nil {
+					opErr = cerr
+					return nil
+				}
+				reopenBracketMatch(bm, reason)
 				return tx.SaveBracket(compID, bracket)
 			}
 		}
@@ -616,14 +674,37 @@ func (e *Engine) ReopenKachinukiMatch(compID, matchID string) error {
 	return opErr
 }
 
+// reopenCourtFreeTx is the same-competition half of the reopen court gate
+// (see ReopenKachinukiMatch): reopening flips the match back to running, so
+// a court that already has a running match would end up with two, wedging
+// the exclusivity check for BOTH. Returns *CourtBusyError (HTTP 409
+// court_busy, the same shape the score path returns) when the court is
+// taken. A match with no court assigned is never gated, mirroring
+// checkCourtExclusivityTx.
+func reopenCourtFreeTx(tx state.StoreTx, compID, matchID, court string) error {
+	if court == "" {
+		return nil
+	}
+	occ, err := courtOccupiedInCompTx(tx, compID, court, matchID)
+	if err != nil {
+		return err
+	}
+	if occ != nil {
+		return &CourtBusyError{Court: court, MatchID: occ.MatchID, CompID: occ.CompID}
+	}
+	return nil
+}
+
 // reopenBracketMatch flips a completed bracket match back to running,
-// clearing the match-level outcome while keeping the bout log.
-func reopenBracketMatch(bm *state.BracketMatch) {
+// clearing the match-level outcome while keeping the bout log, and stamps
+// the operator's audit reason (see ReopenKachinukiMatch).
+func reopenBracketMatch(bm *state.BracketMatch, reason string) {
 	bm.Status = state.MatchStatusRunning
 	bm.Winner = ""
 	bm.Decision = ""
 	bm.DecisionBy = ""
 	bm.DecisionReason = ""
+	bm.CorrectionReason = reason
 }
 
 // retractPropagatedWinner undoes what propagateBracketWinner did for the

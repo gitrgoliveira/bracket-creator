@@ -158,7 +158,10 @@ func annotateBracketQueuePositions(b *state.Bracket) {
 func anyNumberedBoutHasEncho(subResults []state.SubMatchResult) bool {
 	for i := range subResults {
 		sr := &subResults[i]
-		if sr.Position != state.DaihyosenSubPosition && sr.Encho != nil && sr.Encho.PeriodCount > 0 {
+		// Encho.On() is the single "did this happen in encho" predicate
+		// (CLAUDE.md); validateSubBout uses the same one, so an open-coded
+		// nil+PeriodCount chain here could drift from it.
+		if sr.Position != state.DaihyosenSubPosition && sr.Encho.On() {
 			return true
 		}
 	}
@@ -191,6 +194,15 @@ func loadMatchSubResults(store CompetitionStore, compID, matchID string) ([]stat
 					return b.Rounds[rIdx][mIdx].SubResults, true
 				}
 			}
+		}
+		// The bronze (3rd-place) match is a SIBLING of Rounds, not an element
+		// of it, so the loop above never reaches it. MaybeAdvanceKachinuki
+		// appends bouts to it like any other bracket match, so omitting this
+		// branch left a kachinuki bronze "Record bout" echoing the pre-advance
+		// log and the appended pairing never reached the open editor. Mirrors
+		// matchStatusFromStore / lookupMatchStatusUnderTx below.
+		if b.ThirdPlaceMatch != nil && b.ThirdPlaceMatch.ID == matchID {
+			return b.ThirdPlaceMatch.SubResults, true
 		}
 	}
 	return nil, false
@@ -307,8 +319,17 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 
 		// Kachinuki relaxes the numbered-bout encho gate (allowNumberedEnchoFor);
 		// load the competition once so per-result length validation knows the
-		// format. Fail closed: a nil comp keeps the strict gate.
-		comp, _ := store.LoadCompetition(id)
+		// format. Fail closed: a nil comp keeps the strict gate. The error is
+		// logged rather than swallowed (errcheck) and rather than returned: a
+		// load failure must not surface to the operator as a 400 blaming the
+		// payload ("encho is only valid for the daihyosen representative bout"),
+		// which is what an ignored error produced.
+		var comp *state.Competition
+		if loaded, cerr := store.LoadCompetition(id); cerr != nil {
+			log.Printf("bulk-score LoadCompetition(%s): %v; keeping the strict numbered-bout encho gate", id, cerr)
+		} else {
+			comp = loaded
+		}
 
 		for i := range results {
 			// Reject a hostile/buggy far-future or negative client timestamp so
@@ -339,17 +360,16 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			results[i].CorrectionReason = strings.TrimSpace(results[i].CorrectionReason)
 			var capturedStatus *domain.CompetitorStatus
 			if err := tx.WithTransaction(id, func(stx state.StoreTx) error {
-				if results[i].Status != state.MatchStatusCompleted {
-					results[i].CorrectionReason = ""
-				} else {
-					existing := lookupMatchStatusUnderTx(stx, id, results[i].ID)
-					if existing == state.MatchStatusCompleted {
-						if results[i].CorrectionReason == "" {
-							return errors.New("correcting a completed match result requires a non-empty correctionReason")
-						}
-					} else {
-						results[i].CorrectionReason = "" // first finalization, not a correction
+				existingStatus, storedReason := lookupMatchAuditStateUnderTx(stx, id, results[i].ID)
+				if results[i].Status == state.MatchStatusCompleted && existingStatus == state.MatchStatusCompleted {
+					if results[i].CorrectionReason == "" {
+						return errors.New("correcting a completed match result requires a non-empty correctionReason")
 					}
+				} else {
+					// Not a correction: drop the client value but carry the STORED
+					// reason forward, same rule as the single-score path (a
+					// kachinuki reopen reason must survive the following End).
+					results[i].CorrectionReason = storedReason
 				}
 				status, err := eng.RecordMatchResultWithIneligibilityTx(stx, id, results[i].ID, &results[i])
 				if err == nil {
@@ -626,10 +646,13 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 	// bouts and later End match again. A dedicated endpoint rather than a
 	// score-write flag so the score path's stale-write guard (a plain
 	// running write against a completed match silently no-ops) stays fully
-	// intact. Non-kachinuki competitions get 400 (their only sanctioned
-	// edit of a finished result remains the correction path); a
-	// non-completed match or a bracket match whose winner already feeds a
-	// fought downstream match gets 409.
+	// intact. Body: {"reason": "<why>"} — mandatory, it is the audit trail
+	// for rewriting a finalized result (the score path's correction gate
+	// demands the same thing, and reopen must not be the way around it).
+	// Non-kachinuki competitions get 400 (their only sanctioned edit of a
+	// finished result remains the correction path), as does a missing or
+	// over-long reason; a non-completed match, a bracket match whose winner
+	// already feeds a fought downstream match, or a BUSY COURT gets 409.
 	r.POST("/competitions/:id/matches/:mid/reopen", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
@@ -637,6 +660,22 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		}
 		mid := c.Param("mid")
 		if err := validateMaxLen("matchId", mid, MaxLenMatchID); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		var body struct {
+			Reason string `json:"reason"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		reason := strings.TrimSpace(body.Reason)
+		if reason == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "reason is required: reopening a finalized result must be justified"})
+			return
+		}
+		if err := validateMaxLen("reason", reason, MaxLenCorrectionReason); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -651,13 +690,33 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		// empty-stored-password fail-closed branch. Pinned by
 		// TestSelfRun_ReopenRequiresMainPassword.
 
-		if err := eng.ReopenKachinukiMatch(id, mid); err != nil {
+		// WithCourtExclusivityLock mirrors the score path: the engine's
+		// cross-competition court check runs before its own per-comp
+		// transaction, so without the tournament-level lock a concurrent
+		// match-start in another competition could pass its check and commit
+		// between the two, re-creating the very two-running-matches-on-one-
+		// court wedge the reopen court gate exists to prevent.
+		err := tx.WithCourtExclusivityLock(func() error {
+			return eng.ReopenKachinukiMatch(id, mid, reason)
+		})
+		if err != nil {
 			var notFoundErr *engine.NotFoundError
 			var validationErr *engine.ValidationError
+			var courtBusyErr *engine.CourtBusyError
 			switch {
 			case errors.Is(err, engine.ErrReopenNotCompleted),
 				errors.Is(err, engine.ErrReopenDownstreamFought):
 				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			case errors.As(err, &courtBusyErr):
+				// Same 409 shape as the score path so clients have one
+				// court_busy branch to handle (mp-gmcg).
+				c.JSON(http.StatusConflict, gin.H{
+					"error":   "court_busy",
+					"court":   courtBusyErr.Court,
+					"matchId": courtBusyErr.MatchID,
+					"compId":  courtBusyErr.CompID,
+					"message": fmt.Sprintf("Court %s already has a running match (%s). Finish that match before reopening this one.", courtBusyErr.Court, courtBusyErr.MatchID),
+				})
 			case errors.As(err, &notFoundErr):
 				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 			case errors.As(err, &validationErr):
@@ -913,11 +972,27 @@ func isMatchFinalized(r *state.MatchResult) bool {
 // "not yet completed" (the engine will reject it via errMatchNotFound
 // on the actual score write, so we don't need to fail here).
 func lookupMatchStatusUnderTx(stx state.StoreTx, compID, matchID string) state.MatchStatus {
+	status, _ := lookupMatchAuditStateUnderTx(stx, compID, matchID)
+	return status
+}
+
+// lookupMatchAuditStateUnderTx is lookupMatchStatusUnderTx generalized to
+// also yield the STORED CorrectionReason, covering the same three homes
+// (pool matches, bracket rounds, ThirdPlaceMatch) in the same order.
+//
+// The reason is needed because the kachinuki reopen path (mp-gmcg) writes
+// the operator's justification onto the match it sends back to running:
+// the following "End match" is a FIRST finalization, which used to blank
+// the field unconditionally, so the reopen audit trail died at the very
+// write it was recorded to justify. Callers carry the stored value
+// forward; a CLIENT-supplied reason on a first finalization is still
+// dropped (only a completed -> completed correction may set one).
+func lookupMatchAuditStateUnderTx(stx state.StoreTx, compID, matchID string) (state.MatchStatus, string) {
 	poolMatches, err := stx.LoadPoolMatches(compID)
 	if err == nil {
 		for i := range poolMatches {
 			if poolMatches[i].ID == matchID {
-				return poolMatches[i].Status
+				return poolMatches[i].Status, poolMatches[i].CorrectionReason
 			}
 		}
 	}
@@ -926,15 +1001,15 @@ func lookupMatchStatusUnderTx(stx state.StoreTx, compID, matchID string) state.M
 		for _, round := range bracket.Rounds {
 			for i := range round {
 				if round[i].ID == matchID {
-					return round[i].Status
+					return round[i].Status, round[i].CorrectionReason
 				}
 			}
 		}
 		if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchID {
-			return bracket.ThirdPlaceMatch.Status
+			return bracket.ThirdPlaceMatch.Status, bracket.ThirdPlaceMatch.CorrectionReason
 		}
 	}
-	return ""
+	return "", ""
 }
 
 // matchStatusFromStore is the non-transactional twin of
@@ -1241,22 +1316,28 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				// no audit reason. The check runs inside the tx so the is-completed
 				// read is race-free (same lock). A first finalization (existing
 				// status is not completed) needs no reason.
-				if result.Status == state.MatchStatusCompleted {
-					existing := lookupMatchStatusUnderTx(stx, id, mid)
-					if existing == state.MatchStatusCompleted {
-						// Overwriting a finalized result is a correction, require a reason.
-						if result.CorrectionReason == "" {
-							engErr = &ValidationError{
-								Field:   "correctionReason",
-								Message: "correcting a completed match result requires a non-empty correctionReason",
-							}
-							return nil
+				existingStatus, storedReason := lookupMatchAuditStateUnderTx(stx, id, mid)
+				if result.Status == state.MatchStatusCompleted && existingStatus == state.MatchStatusCompleted {
+					// Overwriting a finalized result is a correction, require a reason.
+					if result.CorrectionReason == "" {
+						engErr = &ValidationError{
+							Field:   "correctionReason",
+							Message: "correcting a completed match result requires a non-empty correctionReason",
 						}
-					} else {
-						// First finalization, not a correction. The contract says the
-						// reason is omitted here, so drop any client-supplied value.
-						result.CorrectionReason = ""
+						return nil
 					}
+				} else {
+					// NOT a correction (a first finalization, or a running/
+					// scheduled write). The contract says a client-supplied reason
+					// is meaningless here, so it was already dropped above — but the
+					// reason STORED on the match must survive: the kachinuki reopen
+					// path (mp-gmcg) records the operator's justification there, and
+					// blanking it would erase the audit trail at the very write it
+					// justifies. Carrying it on the non-completed writes too is what
+					// keeps it alive for POOL matches, whose write is a whole-struct
+					// overwrite (`*r = *result` in engine/scoring_tx.go) rather than
+					// the bracket path's set-if-non-empty.
+					result.CorrectionReason = storedReason
 				}
 				// Bracket integrity: a running- OR scheduled-status write must
 				// never revert an already-completed match (e.g. a stale autosave

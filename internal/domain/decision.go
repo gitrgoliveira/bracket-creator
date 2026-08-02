@@ -63,10 +63,15 @@ func IsDefaultWinDecisionStr(s string) bool {
 // default win awards without a technique.
 const defaultWinIppon = "○"
 
-// DefaultWinIppons returns the winner's ippon slots for a default win —
-// one maru per awarded point: the two-point pair in regulation,
-// the single deciding point in encho (sudden death). THE single Go source
-// of the maru-count rule, consumed by the engine's RecordDecision twins
+// DefaultWinIppons returns the winner's ippon slots for a default win:
+// one maru per awarded point, as prescribed by the FIK Regulations of
+// Kendo Shiai and Shinpan — Article 32 ("The winner by virtue of
+// Articles 30 or 31 shall be given two points ... However, the winner
+// will be awarded one point in the case of encho") and the Score Board
+// appendix (printed p.15: "Fusen-gachi, Kiken or Shiai-funo ... put one
+// mark in case of Encho"). So the two-point pair "○○" in regulation, a
+// single deciding "○" in encho (sudden death). THE single Go source of
+// the maru-count rule, consumed by the engine's RecordDecision twins
 // (the canonical record) and, joined, by the display fallbacks. Mirrors
 // defaultWinMaru in web-mobile/js/bracket.jsx (same cells shape).
 func DefaultWinIppons(inEncho bool) []string {

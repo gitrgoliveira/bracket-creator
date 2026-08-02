@@ -96,13 +96,14 @@ const isDrawResult = (decision, score) => isHikiwakeBC(decision) || isHikiwakeBC
 // technique. Mirrors domain.IsDefaultWinDecisionStr (Go).
 const isDefaultWinBC = (d) => isKikenDecisionBC(d) || d === "fusenpai" || d === "fusensho";
 
-// defaultWinMaru: the maru cells a default win awards — one "○" per point:
-// the two-point pair in regulation, the single deciding point in encho
-// (sudden death). THE single JS source of the maru-count rule; mirrors
-// domain.DefaultWinIppons (Go, same cells shape). The canonical record is
-// the engine's RecordDecision fill via domain.DefaultWinIppons — displays
-// only fall back to this for winners whose recorded cells are empty
-// (byes, legacy data).
+// defaultWinMaru: the maru cells a default win awards — one "○" per point,
+// per the FIK Regulations (Article 32 and the Score Board appendix p.15:
+// "put one mark in case of Encho"): the two-point pair in regulation, the
+// single deciding point in encho (sudden death). THE single JS source of
+// the maru-count rule; mirrors domain.DefaultWinIppons (Go, same cells
+// shape). The canonical record is the engine's RecordDecision fill via
+// domain.DefaultWinIppons — displays only fall back to this for winners
+// whose recorded cells are empty (byes, legacy data).
 const defaultWinMaru = (encho) => (enchoOn(encho) ? ["○"] : ["○", "○"]);
 
 // boutMiddle: THE single source for what a bout's middle can read —

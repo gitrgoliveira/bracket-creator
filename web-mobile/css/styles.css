@@ -4706,7 +4706,12 @@ button.pool-match-row {
 
 .sb-match {
   display: grid;
-  grid-template-columns: 1fr 140px 1fr;
+  /* minmax(0, 1fr): let the side tracks shrink below their content so a long
+     UNBROKEN name (a mis-pasted token, a single-word team name) wraps instead
+     of forcing the board wider than .scoring-panel, which clips it (hiding the
+     Aka side's scoring buttons on a tablet). Paired with .sb-name overflow-wrap
+     below. Realistic spaced/CJK names already wrap and are unaffected. */
+  grid-template-columns: minmax(0, 1fr) 140px minmax(0, 1fr);
   align-items: stretch;
   background: var(--surface);
   border: 1px solid var(--line);
@@ -4720,6 +4725,7 @@ button.pool-match-row {
   display: flex;
   flex-direction: column;
   justify-content: center;
+  min-width: 0; /* allow the grid track to shrink below the name's content width */
   transition: background 0.3s ease;
   /* Aka/Shiro side treatment (DESIGN.md §4): solid side tint + a thick coloured
      top bar so the colour reads as real area. Matches the inline editor's
@@ -4775,7 +4781,42 @@ button.pool-match-row {
   color: var(--ink);
   letter-spacing: -0.02em;
   margin-bottom: 8px;
+  /* Break a pathological unbroken token (no spaces/hyphens/CJK break points)
+     mid-word so it never forces the grid track wide. Spaced names still prefer
+     to break at spaces first, so normal names are visually unchanged. */
+  overflow-wrap: anywhere;
 }
+
+/* Option D (harden): on the INDIVIDUAL scoring board only — scoped with
+   :has(.sb-slots) so the team header (.sb-match/.sb-side carrying just a
+   badge + name, no slots) is untouched — lay each side out as a SUBGRID that
+   shares the parent's rows. The name row then sizes to the TALLER of the two
+   names, so both sides' score slots begin on the same line with NO truncation,
+   and the pills align. The 1fr spacer rows top and bottom keep the block
+   vertically centred; the name sits at the bottom of its (possibly taller)
+   row so it hugs its scores. Grid items stretch by default, so the pill is
+   pinned back to a hug-content chip mirrored inward. */
+.sb-match:has(.sb-slots) {
+  grid-template-rows: 1fr auto auto auto auto 1fr;
+}
+.sb-match:has(.sb-slots) > .sb-side {
+  display: grid;
+  grid-row: 1 / -1;
+  grid-template-rows: subgrid;
+}
+.sb-match:has(.sb-slots) > .sb-side > .sb-side__badge { grid-row: 2; }
+.sb-match:has(.sb-slots) > .sb-side > .sb-name { grid-row: 3; align-self: end; }
+.sb-match:has(.sb-slots) > .sb-side > .sb-slots { grid-row: 4; }
+.sb-match:has(.sb-slots) > .sb-side > .sb-points-grid { grid-row: 5; }
+.sb-match:has(.sb-slots) > .sb-center { grid-row: 1 / -1; }
+.sb-match:has(.sb-slots) > .sb-side--shiro > .sb-side__badge { justify-self: end; }
+.sb-match:has(.sb-slots) > .sb-side--aka > .sb-side__badge { justify-self: start; }
+/* Slots hug the INSIDE (against the centre vs) via justify-self on the hug-
+   content group; the existing flex-direction (row / row-reverse) still controls
+   the outside-to-inside fill, so each side's first ippon stays on its name side
+   and fills toward the centre — the fixed FIK rule is untouched. */
+.sb-match:has(.sb-slots) > .sb-side--shiro > .sb-slots { justify-self: end; }
+.sb-match:has(.sb-slots) > .sb-side--aka > .sb-slots { justify-self: start; }
 
 /* the side label (".sb-dojo" historically held it) becomes the identity chip,
    one statement of the side, colour-coded, like the inline editor's chip */

@@ -624,10 +624,12 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                     </div>
                     {idx === 0 && (
                       <div className="sb-center">
+                        {/* Middle mark is "VS" only — individual ippons are WAZA
+                            LETTERS in the slots, never a numeric count (numbers
+                            belong to pool/team summaries or engi). Matches the
+                            team editor's centre and the boutMiddle contract. */}
                         {!isDrawToggled && (
-                          <div className="sb-vs">
-                            {aTotal === 0 && bTotal === 0 ? "VS" : `${bTotal}–${aTotal}`}
-                          </div>
+                          <div className="sb-vs">VS</div>
                         )}
                         <button
                           className={`sb-draw-toggle btn${isDrawToggled ? " sb-draw-toggle--active" : ""}`}

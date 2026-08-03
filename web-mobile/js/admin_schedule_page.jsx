@@ -1,49 +1,23 @@
 // Schedule page components extracted from admin_schedule.jsx (mp-d7tl).
-// EstInput (local), AdminTWMatch (local), AdminSchedulePage.
+// AdminTWMatch (local), AdminSchedulePage.
+//
+// The tournament-wide "Schedule estimator" what-if panel that used to live
+// here was removed (mp-gmcg): it re-asked the operator for values the app
+// already knows per competition (and made them hand-enter a match count),
+// duplicating the per-competition estimate already shown on the competition
+// Overview and Settings. A dedicated hypothetical estimator page is tracked
+// separately.
 
-import { filterMatchesByCourt, CourtPacePanel, PerCourtBreakdown } from './admin_schedule_pacing.jsx';
-import { formatMinutes, timeToMinutes, timeEdited, clampDurationSeconds, EstimateHeadline, COURT_STORAGE_KEY } from './admin_schedule_utils.jsx';
-import { teamMatchTypeFor } from './pool_ids.jsx';
+import { filterMatchesByCourt, CourtPacePanel } from './admin_schedule_pacing.jsx';
+import { formatMinutes, timeToMinutes, timeEdited, clampDurationSeconds, COURT_STORAGE_KEY } from './admin_schedule_utils.jsx';
 import { DurationInput } from './duration.jsx';
 
-const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
+const { useState: useStateA, useMemo: useMemoA } = React;
 
 const AdminTopbar = window.AdminTopbar;
 const Breadcrumbs = window.Breadcrumbs;
 const CourtPicker = window.CourtPicker;
 const hasBothSides = window.hasBothSides;
-
-// `field`/`field__label`, NOT `form-group`/`label`: neither of the latter has
-// a definition in styles.css, so every input built here rendered its label at
-// the inherited 16px/400 while the one hand-rolled field beside them (Match
-// duration, which uses DurationInput) rendered at 12px/600. The same mistake
-// was found and fixed for that one field; the shared component it sits next to
-// kept it, which is why the panel showed one small bold label among seven
-// large light ones.
-//
-// `hint` is optional and renders the same `.field__hint` line that field uses,
-// wired to the input via aria-describedby so it reaches a screen reader rather
-// than only sighted operators.
-function EstInput({ label, value, setter, min, max, step = "1", hint, id }) {
-  const hintId = hint && id ? `${id}-hint` : undefined;
-  return (
-    <div className="field">
-      <label className="field__label" htmlFor={id}>{label}</label>
-      <input
-        id={id}
-        type="number"
-        className="input"
-        value={Number.isFinite(value) ? value : ""}
-        min={min}
-        max={max}
-        step={step}
-        aria-describedby={hintId}
-        onChange={e => { const val = e.target.value; setter(val === "" ? NaN : +val); }}
-      />
-      {hint && <div className="field__hint" id={hintId}>{hint}</div>}
-    </div>
-  );
-}
 
 const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange }) => {
   const [editingTime, setEditingTime] = useStateA(false);
@@ -152,83 +126,6 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
   // would silently schedule the whole competition at the last good value.
   const [autoDurationError, setAutoDurationError] = useStateA(null);
 
-  const [estOpen, setEstOpen] = useStateA(false);
-  const [estMatchDurationSeconds, setEstMatchDurationSeconds] = useStateA(180);
-  const [estMultiplier, setEstMultiplier] = useStateA(1.5);
-  const [estCourts, setEstCourts] = useStateA(tournament.courts?.length || 1);
-  const [estNumMatches, setEstNumMatches] = useStateA(0);
-  // Team size is the ONLY bout-count input. A team match is worth N bouts and
-  // nothing in the app can schedule otherwise: the slot assigners price every
-  // team match through perMatchElapsedMinutes, which derives bouts from
-  // TeamSize alone. The panel used to carry a second "Bouts per team match"
-  // field alongside this one, kept in sync by an effect; it could only ever
-  // hold the same number, and hand-editing it produced an estimate the app's
-  // own auto-schedule would never reproduce (and, under kachinuki, silently
-  // moved the whole best/worst range onto a team size that does not exist).
-  // The server now defaults the bout count to team size, so there is nothing
-  // left for the client to mirror.
-  const [estTeamSize, setEstTeamSize] = useStateA(tournament.competitions[0]?.teamSize || 0);
-  const [estBuffer, setEstBuffer] = useStateA(0);
-  const [estCeremony, setEstCeremony] = useStateA(0);
-  // mp-gmcg: winner-stays (kachinuki) widens the estimate into a
-  // best/average/worst range server-side (teamMatchType=kachinuki query
-  // param), derived from the nominal team size N (best = N-bout sweep,
-  // worst = 2N-1 attrition). Seeded from the first competition, same as
-  // team size above; teamMatchTypeFor reads both the flat and the
-  // config-nested competition shapes.
-  const [estKachinuki, setEstKachinuki] = useStateA(teamMatchTypeFor(tournament.competitions[0]) === "kachinuki");
-  const [estResult, setEstResult] = useStateA(null);
-  const [estLoading, setEstLoading] = useStateA(false);
-
-  useEffectA(() => {
-    if (!estOpen) {
-      setEstLoading(false);
-      return;
-    }
-    // Guard: required params must be valid numbers > 0 to avoid 400s
-    if (!Number.isFinite(estMatchDurationSeconds) || estMatchDurationSeconds <= 0 ||
-        !Number.isFinite(estMultiplier) || estMultiplier <= 0 ||
-        !Number.isFinite(estCourts) || estCourts <= 0 ||
-        !Number.isFinite(estNumMatches) || estNumMatches <= 0) {
-      setEstResult(null);
-      setEstLoading(false);
-      return;
-    }
-
-    const controller = new AbortController();
-    const timer = setTimeout(async () => {
-      setEstLoading(true);
-      try {
-        const res = await window.API.estimateSchedule({
-          // The API takes on-clock minutes (float); convert from mm:ss seconds.
-          matchDuration: estMatchDurationSeconds / 60,
-          multiplier: estMultiplier,
-          courts: estCourts,
-          numMatches: estNumMatches,
-          // boutsPerTeamMatch is deliberately NOT sent: the server defaults it
-          // to teamSize, which is the only value a generated schedule can
-          // realise. It stays on the wire as an optional override for other
-          // callers.
-          teamSize: estTeamSize,
-          buffer: estBuffer,
-          ceremonyMinutes: estCeremony,
-          // mp-gmcg: kachinuki widens the estimate into a best/average/
-          // worst range. Empty string is filtered out by estimateSchedule's
-          // param loop, so non-kachinuki requests stay byte-identical.
-          teamMatchType: estKachinuki && estTeamSize > 0 ? "kachinuki" : ""
-        }, password, controller.signal);
-        setEstResult(res);
-      } catch (e) {
-        if (!controller.signal.aborted) {
-          console.error("Estimation failed", e);
-        }
-      } finally {
-        setEstLoading(false);
-      }
-    }, 300);
-    return () => { clearTimeout(timer); controller.abort(); };
-  }, [estOpen, estMatchDurationSeconds, estMultiplier, estCourts, estNumMatches, estTeamSize, estBuffer, estCeremony, estKachinuki, password]);
-
   // T040/T041: read ?court= from the URL; useQuery re-renders on history
   // changes so navigating between /admin/schedule and /admin/schedule?court=A
   // toggles the filter without a full page reload. The window.AppRouter
@@ -255,14 +152,6 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
     () => window.tournamentMatches(tournament).filter(hasBothSides),
     [tournament]
   );
-
-  const estNumMatchesRef = useRefA(false);
-  useEffectA(() => {
-    if (!estNumMatchesRef.current && allMatches.length > 0) {
-      setEstNumMatches(allMatches.length);
-      estNumMatchesRef.current = true;
-    }
-  }, [allMatches.length]);
 
   const filtered = window.applyFilters(allMatches, picked, dojoText, compFilter);
   // T040 (US1, FR-001): apply the court scope AFTER the user-driven
@@ -435,116 +324,6 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
               </div>
             )}
           </div>
-        </div>
-
-        <div className="card" style={{ marginBottom: 20 }}>
-          <div
-            className="card__title"
-            style={{ display: "flex", justifyContent: "space-between", cursor: "pointer", marginBottom: estOpen ? 12 : 0 }}
-            onClick={() => setEstOpen(!estOpen)}
-          >
-            <span>Schedule estimator {estLoading && <span style={{ fontSize: 12, fontWeight: 400, color: "var(--ink-4)", marginLeft: 8 }}>Recalculating...</span>}</span>
-            <span style={{ fontSize: 18, fontWeight: 400 }}>{estOpen ? "−" : "+"}</span>
-          </div>
-          {estOpen && (
-            <div className="est-form">
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 16 }}>
-                <div className="field">
-                  {/* .field__label, not .label: `.label` has no definition in
-                      styles.css, so this rendered at inherited 16px/400 beside
-                      every sibling label at 12px/600. */}
-                  <label className="field__label" htmlFor="est-match-duration">Match duration</label>
-                  <DurationInput
-                    id="est-match-duration"
-                    describedBy="est-match-duration-hint"
-                    seconds={estMatchDurationSeconds}
-                    onChange={setEstMatchDurationSeconds}
-                  />
-                  <div className="field__hint" id="est-match-duration-hint">As m:ss, e.g. 2:30.</div>
-                </div>
-                <EstInput label="Multiplier" value={estMultiplier} setter={setEstMultiplier} min="1" max="3" step="0.1" />
-                <EstInput label="Courts" value={estCourts} setter={setEstCourts} min="1" max="26" />
-                {/* "Team matches", not a bare "Matches", once a team size is
-                    set: this field counts ENCOUNTERS, and each encounter then
-                    costs several bouts. The panel used to carry a "Bouts per
-                    team match" field beside it, which was the only thing on
-                    screen distinguishing the two; removing that redundant
-                    input took the cue with it, and a reader immediately
-                    misread a 10 here as bouts (impossible for a 5-person
-                    kachinuki team, where 2N-1 = 9 is the ceiling). The label
-                    now carries the distinction on its own. */}
-                <EstInput
-                  id="est-num-matches"
-                  label={estTeamSize > 0 ? "Team matches" : "Matches"}
-                  value={estNumMatches}
-                  setter={setEstNumMatches}
-                  min="1"
-                  hint={estTeamSize > 0 ? "Encounters, not bouts. Each one costs several bouts." : undefined}
-                />
-                <EstInput label="Team size (0=indiv)" value={estTeamSize} setter={setEstTeamSize} min="0" />
-                {/* mp-gmcg: winner-stays toggle, only meaningful for team
-                    estimates. Kachinuki has a variable bout count, so the
-                    server returns a best/average/worst range (rendered
-                    below) and treats the bouts field as the nominal team
-                    size N. */}
-                {estTeamSize > 0 && (
-                  <div className="field">
-                    <label className="field__label" htmlFor="est-kachinuki" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <input
-                        id="est-kachinuki"
-                        type="checkbox"
-                        checked={estKachinuki}
-                        onChange={(e) => setEstKachinuki(e.target.checked)}
-                      />
-                      Winner-stays (kachinuki)
-                    </label>
-                    <div className="field__hint">Variable bout count: shows best / average / worst.</div>
-                  </div>
-                )}
-                <EstInput label="Buffer %" value={estBuffer} setter={setEstBuffer} min="0" max="100" />
-                <EstInput label="Ceremony (min)" value={estCeremony} setter={setEstCeremony} min="0" />
-              </div>
-
-              {estResult && (
-                <div style={{ marginTop: 20, paddingTop: 20, borderTop: "1px solid var(--bg-3)" }}>
-                  <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: 12 }}>
-                    {/* mp-gmcg: kachinuki estimates span a range (variable
-                        bout count); the headline is the AVERAGE scenario and
-                        Best/Worst bracket it. EstimateHeadline is the ONE home
-                        for that range-vs-total decision, shared with the
-                        competition Overview and Settings panels — this surface
-                        carried a third inline copy that had already drifted
-                        (no bold labels, no "0m" fallback), so the same server
-                        response read differently depending on where you looked.
-                        Not pixel-identical to the copy it replaces: the shared
-                        component wraps each label in <strong>, which resolves
-                        BOLDER than this wrapper's fontWeight: 700 rather than
-                        collapsing into it, so "Best/Average/Worst" now stand
-                        out from their values. Checked in the browser and kept
-                        — it matches how the other two surfaces mark up the same
-                        line, which is the consistency this share is for. */}
-                    <div style={{ fontSize: 24, fontWeight: 700 }}>
-                      <EstimateHeadline
-                        estimate={estResult}
-                        total={formatMinutes(estResult.totalDurationMinutes)}
-                        format={formatMinutes}
-                        testId="est-range"
-                      />
-                    </div>
-                    {autoStart && (
-                      <div style={{ fontSize: 16, color: "var(--ink-2)" }}>
-                        Projected finish: <strong>{window.addMinutes(autoStart, estResult.totalDurationMinutes)}</strong>
-                      </div>
-                    )}
-                  </div>
-                  {estResult.ceremonyMinutes > 0 && (
-                    <div style={{ fontSize: 13, color: "var(--ink-3)", marginTop: 4 }}>Includes {estResult.ceremonyMinutes}m ceremony</div>
-                  )}
-                  <PerCourtBreakdown perCourtMinutes={estResult.perCourtMinutes} />
-                </div>
-              )}
-            </div>
-          )}
         </div>
 
         <CourtPacePanel byCourt={paceByCourt} safeMatchDuration={safeMatchMinutes} />

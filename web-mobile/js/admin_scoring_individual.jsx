@@ -400,13 +400,14 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   const isKnockoutPhase = m.phase === "bracket";
   const canFinish = !decidedByHantei && (isDrawToggled || aTotal > 0 || bTotal > 0);
 
-  // Finish guard (see TeamScoreEditorModal): one tap arms + shows the result on
-  // the button, a second commits. Disarms on any score change so a stale result
-  // can't be confirmed. Keyboard Enter stays direct (deliberate, not an
-  // accidental tablet brush). a-vs-b is AKA-vs-SHIRO; show SHIRO–AKA order.
+  // Finish guard (see TeamScoreEditorModal): one tap ARMS the button — its label
+  // becomes an explicit "Tap again to finish" INSTRUCTION (not a verdict), so the
+  // two-tap requirement is stated rather than inferred from a colour flip — and a
+  // second tap commits. Disarms on any score change so a stale result can't be
+  // confirmed. Keyboard Enter stays direct (deliberate, not an accidental tablet
+  // brush). The result itself is verified from the score slots above, not the
+  // button; a lossy "SHIRO WIN 1–0" caption is not a check.
   const [finishArmed, setFinishArmed] = useStateA(false);
-  const finishVerdict = isDrawToggled ? "DRAW" : (aTotal > bTotal ? "AKA WIN" : bTotal > aTotal ? "SHIRO WIN" : "");
-  const finishSummary = isDrawToggled ? "DRAW" : `${finishVerdict} ${bTotal}–${aTotal}`.trim();
   useEffectA(() => { setFinishArmed(false); }, [aTotal, bTotal, isDrawToggled]);
 
   const isDirty =
@@ -906,7 +907,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                   if (!isComplete && !finishArmed) { setFinishArmed(true); return; }
                   doSubmit(() => (isComplete ? onSubmit : onSubmitAndNext)(buildPatch("completed")));
                 }} disabled={submitting || !canFinish}>
-                  {submitting ? "Saving…" : isComplete ? "Save correction" : finishArmed ? `Confirm · ${finishSummary} →` : "Finish + Start Next →"}
+                  {submitting ? "Saving…" : isComplete ? "Save correction" : finishArmed ? "Tap again to finish →" : "Finish + Start Next →"}
                 </button>
               ) : (
                 <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={() => {
@@ -914,7 +915,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                   if (!isComplete && !finishArmed) { setFinishArmed(true); return; }
                   doSubmit(() => onSubmit(buildPatch("completed")));
                 }} disabled={submitting || !canFinish}>
-                  {submitting ? "Saving…" : isComplete ? "Save correction" : finishArmed ? `Confirm · ${finishSummary}` : "Finish"}
+                  {submitting ? "Saving…" : isComplete ? "Save correction" : finishArmed ? "Tap again to finish" : "Finish"}
                 </button>
               )}
             </div>

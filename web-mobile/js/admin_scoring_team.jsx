@@ -960,7 +960,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     const cur = visiblePositions.find(p => p !== "daihyosen");
     return cur != null && subBoutHasBeenPlayed(subs[positions.indexOf(cur)]);
   })() : true;
-  const finishSummary = `${teamVerdictText} · IV ${ivB}–${ivA} · PW ${pwB}–${pwA}`;
 
   // mp-gmcg: [End match] outcome, derived from LOCAL bout state so an
   // unsaved just-scored bout counts (the operator scores the final bout and
@@ -2406,7 +2405,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                     : "End the match on the last scored bout"}>
                   {submitting ? "Saving…"
                     : endArmed
-                    ? `Confirm · ${kachinukiEndOutcomeLabel(kachinukiEndOutcome)}`
+                    ? "Tap again to end match"
                     : "End match"}
                 </button>
                 </>
@@ -2426,7 +2425,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                   doSubmit(() => (isComplete ? onSubmit : onSubmitAndNext)(buildPatch("completed")));
                 }} disabled={submitting || koTieBlocked}
                   title={koTieBlocked ? "A knockout match can't be a draw: add and score a daihyosen to decide a winner" : undefined}>
-                  {submitting ? "Saving…" : isComplete ? "Save correction" : koTieBlocked ? "Needs a winner" : finishArmed ? `Confirm · ${finishSummary} →` : "Finish + Start Next →"}
+                  {submitting ? "Saving…" : isComplete ? "Save correction" : koTieBlocked ? "Needs a winner" : finishArmed ? "Tap again to finish →" : "Finish + Start Next →"}
                 </button>
               ) : (
                 <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={() => {
@@ -2435,7 +2434,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                   doSubmit(() => onSubmit(buildPatch("completed")));
                 }} disabled={submitting || koTieBlocked}
                   title={koTieBlocked ? "A knockout match can't be a draw: add and score a daihyosen to decide a winner" : undefined}>
-                  {submitting ? "Saving…" : isComplete ? "Save correction" : koTieBlocked ? "Needs a winner" : finishArmed ? `Confirm · ${finishSummary}` : "Finish"}
+                  {submitting ? "Saving…" : isComplete ? "Save correction" : koTieBlocked ? "Needs a winner" : finishArmed ? "Tap again to finish" : "Finish"}
                 </button>
               )}
             </div>

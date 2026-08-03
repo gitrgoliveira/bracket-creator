@@ -90,7 +90,7 @@ Reopening keeps every bout that was fought. The bout log is preserved in full, i
 
 Reopening is refused while another match is already running on the same court, because the reopened encounter would go back into play alongside it. Finish the running match, or send it back to the queue, and then reopen.
 
-![The score editor for a completed kachinuki match, showing the recorded bouts and a Reopen match button alongside the correction controls.](../../screenshots/kachinuki-reopen.png)
+![The score editor for a completed kachinuki match, showing the recorded bouts and the Reopen match button, which is the only correction control for kachinuki.](../../screenshots/kachinuki-reopen.png)
 
 The results workbook (**Export & print**, then **Download results (.xlsx)**) includes a **Kachinuki Detail** sheet with the bout-by-bout record for every kachinuki encounter: who fought whom, scores, draws, and each fighter's lineup position.
 

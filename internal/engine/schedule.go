@@ -398,11 +398,6 @@ func EstimateForCounts(poolCount, playoffCount int, comp *state.Competition, tou
 		return perCourtList, maxDuration
 	}
 
-	// Nominal per-match minutes via the shared slot-model helper
-	// (bouts = TeamSize; for kachinuki that is the BEST-case sweep).
-	poolPerMatch := perMatchElapsedMinutes(comp, tournament, false /*isPlayoff*/)
-	playoffPerMatch := perMatchElapsedMinutes(comp, tournament, true /*isPlayoff*/)
-
 	ceremonyMin := parseDurationMinutes(tournament.ClosingBlock)
 
 	// Kachinuki (mp-gmcg): the bout count is variable, so price three
@@ -438,6 +433,11 @@ func EstimateForCounts(poolCount, playoffCount int, comp *state.Competition, tou
 		}
 	}
 
+	// Nominal per-match minutes via the shared slot-model helper (bouts =
+	// TeamSize). Computed after the kachinuki early-return above, which prices
+	// its own three scenarios and never reads these.
+	poolPerMatch := perMatchElapsedMinutes(comp, tournament, false /*isPlayoff*/)
+	playoffPerMatch := perMatchElapsedMinutes(comp, tournament, true /*isPlayoff*/)
 	perCourtList, maxDuration := walk(poolPerMatch, playoffPerMatch)
 	total := int(math.Round(maxDuration)) + ceremonyMin
 	return ScheduleEstimate{

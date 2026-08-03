@@ -2401,3 +2401,131 @@ func TestMaybeAdvanceKachinuki_BracketSimultaneousExhaustionStaysRunning(t *test
 	assert.NotEqual(t, state.MatchStatusCompleted, bracket.Rounds[0][0].Status, "bracket match must not be completed")
 	assert.Empty(t, bracket.Rounds[0][0].Winner, "no winner assigned by the engine for bracket simultaneous exhaustion")
 }
+
+// saveMixedKachinukiCompForReopenTest builds a mixed KACHINUKI competition (two
+// 1-winner pools feeding a single knockout leaf) for exercising the pool reopen
+// downstream guard. Standings derive W/L straight from the match Winner
+// (computeStandingsFrom), so A1/B1 rank first in their pools once their pool
+// matches complete, regardless of the (absent) sub-bout detail.
+func saveMixedKachinukiCompForReopenTest(t *testing.T) (*Engine, *state.Store, string) {
+	t.Helper()
+	eng, store, _ := setupTestEngine(t)
+	compID := "kachinuki-reopen-guard"
+
+	pools := []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1"}, {Name: "A2"}}},
+		{PoolName: "Pool B", Players: []helper.Player{{Name: "B1"}, {Name: "B2"}}},
+	}
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:            compID,
+		Name:          compID,
+		Kind:          "team",
+		Format:        state.CompFormatMixed,
+		Status:        state.CompStatusPools,
+		Courts:        []string{"A"},
+		StartTime:     "09:00",
+		PoolWinners:   1,
+		TeamSize:      2,
+		TeamMatchType: state.TeamMatchTypeKachinuki,
+	}))
+	require.NoError(t, store.SavePools(compID, pools))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "A1"}, {Name: "A2"}, {Name: "B1"}, {Name: "B2"},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "A1", SideB: "A2", Status: state.MatchStatusScheduled},
+		{ID: "Pool B-0", SideA: "B1", SideB: "B2", Status: state.MatchStatusScheduled},
+	}))
+	finals := helper.GenerateFinals(pools, 1)
+	tree := helper.CreateBalancedTree(finals)
+	helper.ApplyPoolAdjustments(tree)
+	leaves := helper.TreeToLeafArray(tree)
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	bracket, err := eng.buildBracketFromLeaves(comp, leaves)
+	require.NoError(t, err)
+	bracket.Preview = true
+	require.NoError(t, store.SaveBracket(compID, bracket))
+	return eng, store, compID
+}
+
+func loadPoolMatchByID(t *testing.T, store *state.Store, compID, matchID string) *state.MatchResult {
+	t.Helper()
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	for i := range matches {
+		if matches[i].ID == matchID {
+			return &matches[i]
+		}
+	}
+	return nil
+}
+
+// TestReopenKachinukiPoolMatch_DownstreamKnockoutStarted_Rejected pins the
+// pool-branch parity with the bracket branch (mp-gmcg): reopening a pool match
+// whose current finisher already sits in a STARTED knockout match is refused
+// with ErrReopenDownstreamFought, so a later re-End cannot strand the displaced
+// finisher in the bracket. The score path's mp-e2k1 guard cannot catch that,
+// because by re-End time the reopened match is excluded from the standings
+// baseline it compares against.
+func TestReopenKachinukiPoolMatch_DownstreamKnockoutStarted_Rejected(t *testing.T) {
+	eng, store, compID := saveMixedKachinukiCompForReopenTest(t)
+
+	scorePoolMatchTx(t, eng, store, compID, "Pool A-0", "A1", "A2", "A1")
+	scorePoolMatchTx(t, eng, store, compID, "Pool B-0", "B1", "B2", "B1")
+
+	_, allResolved, err := eng.ResolveQualifiedPools(compID)
+	require.NoError(t, err)
+	require.True(t, allResolved)
+
+	// Start the knockout leaf (A1 vs B1) → RUNNING: A1 is now committed to it.
+	b, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.Len(t, b.Rounds, 1)
+	require.Len(t, b.Rounds[0], 1)
+	knockoutMatchID := b.Rounds[0][0].ID
+	txErr := store.WithTransaction(compID, func(tx state.StoreTx) error {
+		_, e := eng.RecordMatchResultWithIneligibilityTx(tx, compID, knockoutMatchID, &state.MatchResult{
+			SideA: "A1", SideB: "B1", Status: state.MatchStatusRunning,
+		})
+		return e
+	})
+	require.NoError(t, txErr)
+
+	// Reopening Pool A-0 (whose finisher A1 sits in the running knockout) is refused.
+	err = eng.ReopenKachinukiMatch(compID, "Pool A-0", "")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrReopenDownstreamFought)
+
+	// The pool match stays completed with its original winner (not reopened).
+	poolA0 := loadPoolMatchByID(t, store, compID, "Pool A-0")
+	require.NotNil(t, poolA0)
+	assert.Equal(t, state.MatchStatusCompleted, poolA0.Status)
+	assert.Equal(t, "A1", poolA0.Winner)
+	assert.False(t, poolA0.ReopenPending)
+}
+
+// TestReopenKachinukiPoolMatch_KnockoutNotStarted_Allowed is the companion: with
+// the knockout resolved but NOT started, reopening a pool match succeeds — there
+// is no started bracket match to strand a finisher in — mirroring the bracket
+// branch resetting an unfought downstream slot.
+func TestReopenKachinukiPoolMatch_KnockoutNotStarted_Allowed(t *testing.T) {
+	eng, store, compID := saveMixedKachinukiCompForReopenTest(t)
+
+	scorePoolMatchTx(t, eng, store, compID, "Pool A-0", "A1", "A2", "A1")
+	scorePoolMatchTx(t, eng, store, compID, "Pool B-0", "B1", "B2", "B1")
+
+	_, allResolved, err := eng.ResolveQualifiedPools(compID)
+	require.NoError(t, err)
+	require.True(t, allResolved)
+	// The knockout leaf is resolved but left SCHEDULED (never started).
+
+	err = eng.ReopenKachinukiMatch(compID, "Pool A-0", "scored the wrong bout")
+	require.NoError(t, err)
+
+	poolA0 := loadPoolMatchByID(t, store, compID, "Pool A-0")
+	require.NotNil(t, poolA0)
+	assert.Equal(t, state.MatchStatusRunning, poolA0.Status)
+	assert.Empty(t, poolA0.Winner)
+	assert.Equal(t, "scored the wrong bout", poolA0.CorrectionReason)
+}

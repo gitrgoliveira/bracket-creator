@@ -156,6 +156,20 @@ describe('kachinuki [Reopen match] is one tap', () => {
     // Not a conflict: no remedy is offered for a downstream-fought match.
     expect(screen.queryByTestId('kachinuki-reopen-conflict')).toBeNull();
   });
+
+  it('stays disabled after a successful tap so a double-tap cannot fire a second reopen', async () => {
+    // mp-gmcg: onClose is a no-op in the inline (shiaijo) variant, so the
+    // completed snapshot lingers through the SSE refetch window. The button
+    // must stay disabled until the match flips to running, or a second tap
+    // posts a reopen the server rejects as "not completed" (409).
+    await renderEditor();
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-reopen-button')); });
+    await waitFor(() => expect(window.API.reopenMatch).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId('kachinuki-reopen-button').disabled).toBe(true);
+    // A second tap is a no-op: no further server call.
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-reopen-button')); });
+    expect(window.API.reopenMatch).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('kachinuki reopen: the reason is collected on the way OUT', () => {
@@ -342,5 +356,29 @@ describe('kachinuki reopen: a busy court gets a remedy, not a dead end', () => {
     expect(screen.queryByTestId('kachinuki-reopen-conflict')).toBeNull();
     expect(screen.getByTestId('kachinuki-reopen-button').textContent).toBe('Reopen match');
     expect(onClose).not.toHaveBeenCalled();
+  });
+});
+
+describe('kachinuki completed correction is Reopen-only (no IV/PW Save correction)', () => {
+  // A completed kachinuki match must NOT offer the generic "Save correction"
+  // button. That path builds the completed patch from teamWinner — the IV/PW
+  // leader — which is the exact rule kachinuki does NOT use (it is decided by
+  // the LAST scored bout). Correcting a finalized kachinuki result goes through
+  // Reopen instead: back to bout mode, then End match re-derives from the last
+  // bout via deriveKachinukiEndOutcome. Without the guard a "Save correction"
+  // could silently rewrite a drawn/again-decided encounter to the IV winner.
+  it('a completed kachinuki match shows Reopen but not Save correction', async () => {
+    await renderEditor(); // default match is a completed kachinuki encounter
+    expect(screen.getByTestId('kachinuki-reopen-button')).toBeTruthy();
+    expect(screen.queryByText('Save correction')).toBeNull();
+  });
+
+  it('a completed NON-kachinuki team match still shows Save correction', async () => {
+    // Scoping control: the suppression is kachinuki-only. A regular team match
+    // keeps the generic correction (its winner IS the IV/PW leader) and has no
+    // Reopen affordance.
+    await renderEditor({ match: completedKachinukiMatch({ teamMatchType: 'regular' }) });
+    expect(screen.getByText('Save correction')).toBeTruthy();
+    expect(screen.queryByTestId('kachinuki-reopen-button')).toBeNull();
   });
 });

@@ -635,6 +635,18 @@ func (e *Engine) ReopenKachinukiMatch(compID, matchID, reason string) error {
 					opErr = gerr
 					return nil
 				}
+				// mp-gmcg: the bracket branch below refuses a reopen whose winner
+				// already fed a started knockout match (retractPropagatedWinner).
+				// A pool finisher feeds the knockout INDIRECTLY, through the
+				// standings the bracket was seeded from, so it needs the same
+				// refusal or it silently strands a displaced finisher in a
+				// started bracket match (the score path's mp-e2k1 guard can't
+				// catch it: by re-End time the reopened match is already excluded
+				// from the standings baseline it compares against).
+				if derr := e.checkPoolReopenDownstreamTx(tx, compID, comp, matchID); derr != nil {
+					opErr = derr
+					return nil
+				}
 				reopenPoolMatch(&poolMatches[i], reason)
 				// SavePoolMatches funnels through the normal save chokepoint,
 				// so standings caches invalidate via the usual version bump.
@@ -686,6 +698,48 @@ func (e *Engine) ReopenKachinukiMatch(compID, matchID, reason string) error {
 	return opErr
 }
 
+// checkPoolReopenDownstreamTx is the pool-match twin of the bracket branch's
+// retractPropagatedWinner guard (mp-gmcg). Reopening a pool match flips it back
+// to running, which drops it from the standings the knockout bracket was seeded
+// from. If this pool's CURRENT qualifying finishers already sit in a started
+// (running/completed) knockout match, re-ending the reopened match with a
+// different result would strand a displaced finisher there. It mirrors the
+// existing mp-e2k1 score-path guard exactly (top-N pool finishers vs
+// hasStartedKnockoutMatchTx), and only fires for mixed competitions — the sole
+// format that feeds pool finishers into a bracket; league/swiss have no bracket
+// to desync. Standings are read BEFORE reopenPoolMatch mutates, so they reflect
+// the finishers actually committed to the bracket.
+func (e *Engine) checkPoolReopenDownstreamTx(tx state.StoreTx, compID string, comp *state.Competition, matchID string) error {
+	if comp == nil || comp.Format != state.CompFormatMixed {
+		return nil
+	}
+	pn, ok := poolNameFromMatchID(matchID)
+	if !ok || !IsPoolMatchID(matchID) {
+		return nil
+	}
+	standings, err := e.computeStandingsFrom(tx, compID)
+	if err != nil {
+		return fmt.Errorf("reopen: pre-reopen standings for pool %q: %w", pn, err)
+	}
+	ps := standings[pn]
+	winners := comp.EffectivePoolWinners()
+	topN := make([]string, 0, winners)
+	for i := 0; i < winners && i < len(ps); i++ {
+		topN = append(topN, ps[i].Player.Name)
+	}
+	if len(topN) == 0 {
+		return nil
+	}
+	blockingFinisher, _, herr := e.hasStartedKnockoutMatchTx(tx, compID, topN)
+	if herr != nil {
+		return fmt.Errorf("reopen: checking started knockout matches: %w", herr)
+	}
+	if blockingFinisher != "" {
+		return ErrReopenDownstreamFought
+	}
+	return nil
+}
+
 // reopenBracketMatch flips a completed bracket match back to running,
 // clearing the match-level outcome while keeping the bout log, and stamps
 // the operator's audit reason (see ReopenKachinukiMatch).
@@ -733,11 +787,17 @@ func reopenPoolMatch(m *state.MatchResult, reason string) {
 // match that was running yet still advertised a winner, a scoreline, and a
 // manual-override badge inherited from the result the reopen threw away.
 //
-// This is deliberately the same field set RevertMatchToQueue clears
-// (engine/scoring.go) MINUS SubResults, which requeue drops and reopen exists
-// to preserve, and minus CorrectionReason/ReopenPending, which the reopen is
-// itself setting. Keep the two lists in step: a field worth clearing when a
-// match goes back to the queue is worth clearing when it goes back into play.
+// This clears the verdict fields RevertMatchToQueue clears (engine/scoring.go)
+// that a kachinuki result can actually carry, MINUS SubResults (which requeue
+// drops and reopen exists to preserve) and CorrectionReason/ReopenPending
+// (which the reopen is itself setting). Two RevertMatchToQueue fields are
+// deliberately NOT mirrored: match-level HansokuA/B and FlagsA/B are never
+// populated on a kachinuki team match (hansoku rides on the sub-bouts, flags
+// are engi-only, and reopen*Match run for kachinuki matches only), and
+// ModifiedAt is left at the completion stamp on purpose — it still fences any
+// stale pre-completion offline write via ApplyByTimestamp and never blocks the
+// re-End. If you add a match-level verdict field a kachinuki result CAN carry,
+// clear it here too.
 func reopenBracketMatch(bm *state.BracketMatch, reason string) {
 	bm.Status = state.MatchStatusRunning
 	bm.Winner = ""

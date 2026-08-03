@@ -1033,19 +1033,34 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     setReopenErr(msg);
   };
 
+  // Once the match reopens (status flips to running / bout mode), drop any
+  // stale reopen error or court-busy conflict and re-enable the control: they
+  // describe a completed-state action that no longer applies. Without this a
+  // failed-then-succeeded reopen could leave an error lingering in bout mode
+  // (the inline variant does not remount on the transition).
+  useEffectA(() => {
+    if (!isComplete) { setReopenErr(""); setReopenConflict(null); setReopenBusy(false); }
+  }, [isComplete]);
+
   const onReopenMatch = async () => {
+    if (reopenBusy) return;
     setReopenErr("");
     setReopenConflict(null);
     setReopenBusy(true);
     try {
       await window.API.reopenMatch(m.compId, m.id, resolveDecisionPassword(password));
       if (!mountedRef.current) return;
+      // Success: KEEP the button disabled (reopenBusy stays true). onClose is a
+      // no-op in the inline (shiaijo) variant, so the completed snapshot lingers
+      // through the SSE refetch window; re-enabling now would let a double-tap
+      // fire a second reopen that the server rejects ("not completed", 409). The
+      // refetch flips the match to running, and the effect above clears
+      // reopenBusy. The overlay variant unmounts on onClose, so this is moot.
       onClose();
     } catch (e) {
       if (!mountedRef.current) return;
       applyReopenFailure(e);
-    } finally {
-      if (mountedRef.current) setReopenBusy(false);
+      setReopenBusy(false);
     }
   };
 
@@ -2283,7 +2298,16 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                     : "End match"}
                 </button>
                 </>
-              ) : onSubmitAndNext ? (
+              ) : (isKachinuki && isComplete) ? null : onSubmitAndNext ? (
+                // mp-gmcg: a COMPLETED kachinuki match has no generic "Save
+                // correction" button. That path calls buildPatch("completed")
+                // with no endOutcome, which derives the winner from the IV/PW
+                // leader (teamWinner) — the exact rule kachinuki does NOT use
+                // (it is decided by the LAST scored bout, via
+                // deriveKachinukiEndOutcome). Correcting a finalized kachinuki
+                // result therefore goes through Reopen (above): back to bout
+                // mode, then End match re-derives from the last bout. Only
+                // non-kachinuki completed matches keep the generic correction.
                 <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={() => {
                   if (isComplete && !correctionReason) { setReasonPromptKind("correction"); return; }
                   if (!isComplete && !finishArmed) { setFinishArmed(true); return; }

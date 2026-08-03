@@ -2542,3 +2542,97 @@ func TestReopenKachinukiPoolMatch_KnockoutNotStarted_Allowed(t *testing.T) {
 	assert.Empty(t, poolA0.Winner)
 	assert.Equal(t, "scored the wrong bout", poolA0.CorrectionReason)
 }
+
+// TestRemoveTrailingKachinukiBout covers the operator undo for a bout appended
+// by mistake (mp-gmcg): a RUNNING kachinuki encounter drops its trailing
+// UNSCORED bout, reusing the same strip the End-match write applies so the
+// removable set is identical in both places. A scored trailing bout, a
+// completed match, and a non-kachinuki competition are all rejected rather than
+// silently no-op'd. It targets a regular numbered bout, never a daihyosen.
+func TestRemoveTrailingKachinukiBout(t *testing.T) {
+	scored := state.SubMatchResult{Position: 1, SideA: "R1", SideB: "W1", Winner: "R1", Decision: "fought"}
+	appended := state.SubMatchResult{Position: 2, SideA: "R1", SideB: "W2"} // unscored placeholder
+
+	t.Run("removes a trailing unscored bout from a running pool match", func(t *testing.T) {
+		eng, store, _ := setupKachinukiComp(t, "rm-pool", 5)
+		require.NoError(t, store.SavePoolMatches("rm-pool", []state.MatchResult{
+			{ID: "P1-0", SideA: "RedTeam", SideB: "WhiteTeam", Status: state.MatchStatusRunning,
+				SubResults: []state.SubMatchResult{scored, appended}},
+		}))
+
+		updated, err := eng.RemoveTrailingKachinukiBout("rm-pool", "P1-0")
+		require.NoError(t, err)
+		require.NotNil(t, updated)
+		require.Len(t, updated.SubResults, 1, "the trailing unscored bout is dropped")
+		assert.Equal(t, 1, updated.SubResults[0].Position)
+		assert.Equal(t, state.MatchStatusRunning, updated.Status, "the match stays running")
+
+		// Persisted, not just returned.
+		stored := loadPoolMatchByID(t, store, "rm-pool", "P1-0")
+		require.NotNil(t, stored)
+		require.Len(t, stored.SubResults, 1)
+	})
+
+	t.Run("removes a trailing unscored bout from a running bracket match", func(t *testing.T) {
+		eng, store, _ := setupKachinukiComp(t, "rm-bracket", 5)
+		require.NoError(t, store.SaveBracket("rm-bracket", &state.Bracket{
+			Rounds: [][]state.BracketMatch{{
+				{ID: "B1", SideA: "RedTeam", SideB: "WhiteTeam", Status: state.MatchStatusRunning,
+					SubResults: []state.SubMatchResult{scored, appended}},
+			}},
+		}))
+
+		updated, err := eng.RemoveTrailingKachinukiBout("rm-bracket", "B1")
+		require.NoError(t, err)
+		require.NotNil(t, updated)
+		require.Len(t, updated.SubResults, 1)
+
+		bracket, err := store.LoadBracket("rm-bracket")
+		require.NoError(t, err)
+		require.Len(t, bracket.Rounds[0][0].SubResults, 1, "the strip is persisted on the bracket match")
+	})
+
+	t.Run("rejects when the trailing bout is already scored", func(t *testing.T) {
+		eng, store, _ := setupKachinukiComp(t, "rm-scored", 5)
+		require.NoError(t, store.SavePoolMatches("rm-scored", []state.MatchResult{
+			{ID: "P1-0", Status: state.MatchStatusRunning, SubResults: []state.SubMatchResult{scored}},
+		}))
+
+		_, err := eng.RemoveTrailingKachinukiBout("rm-scored", "P1-0")
+		require.ErrorIs(t, err, ErrNoRemovableBout)
+
+		stored := loadPoolMatchByID(t, store, "rm-scored", "P1-0")
+		require.Len(t, stored.SubResults, 1, "a scored bout is never removed")
+	})
+
+	t.Run("rejects a completed match (reopen it first)", func(t *testing.T) {
+		eng, store, _ := setupKachinukiComp(t, "rm-done", 5)
+		require.NoError(t, store.SavePoolMatches("rm-done", []state.MatchResult{
+			{ID: "P1-0", Status: state.MatchStatusCompleted, SubResults: []state.SubMatchResult{scored, appended}},
+		}))
+
+		_, err := eng.RemoveTrailingKachinukiBout("rm-done", "P1-0")
+		require.ErrorIs(t, err, ErrRemoveBoutNotRunning)
+	})
+
+	t.Run("rejects a non-kachinuki competition", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: "rm-fixed", TeamSize: 5, TeamMatchType: state.TeamMatchTypeFixed,
+		}))
+		require.NoError(t, store.SavePoolMatches("rm-fixed", []state.MatchResult{
+			{ID: "P1-0", Status: state.MatchStatusRunning, SubResults: []state.SubMatchResult{scored, appended}},
+		}))
+
+		_, err := eng.RemoveTrailingKachinukiBout("rm-fixed", "P1-0")
+		var verr *ValidationError
+		require.ErrorAs(t, err, &verr)
+	})
+
+	t.Run("not found for an unknown match", func(t *testing.T) {
+		eng, _, _ := setupKachinukiComp(t, "rm-nf", 5)
+		_, err := eng.RemoveTrailingKachinukiBout("rm-nf", "nope")
+		var nferr *NotFoundError
+		require.ErrorAs(t, err, &nferr)
+	})
+}

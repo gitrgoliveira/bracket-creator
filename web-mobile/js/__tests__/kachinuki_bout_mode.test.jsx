@@ -18,6 +18,7 @@ import {
   isKachinukiBoutMode,
   isKoTieBlocked,
   canReopenKachinukiMatch,
+  isKachinukiBoutRemovable,
   deriveKachinukiEndOutcome,
   kachinukiEndOutcomeLabel,
   buildKachinukiEndEntries,
@@ -109,6 +110,24 @@ describe('canReopenKachinukiMatch', () => {
   });
   it('is false for non-kachinuki (backend 400s the endpoint; button must not render)', () => {
     expect(canReopenKachinukiMatch({ isKachinuki: false, isComplete: true })).toBe(false);
+  });
+});
+
+// isKachinukiBoutRemovable: the [× Remove this bout] gate. Removable only when
+// the current bout is an unscored appended EXTRA (a prior bout was scored) —
+// exactly what the End-match strip would drop.
+describe('isKachinukiBoutRemovable', () => {
+  it('is true for an unscored current bout with a prior scored bout', () => {
+    expect(isKachinukiBoutRemovable({ boutMode: true, currentBoutPlayed: false, lastScoredIdx: 0 })).toBe(true);
+  });
+  it('is false when the current bout is already scored (a scored bout is never removed)', () => {
+    expect(isKachinukiBoutRemovable({ boutMode: true, currentBoutPlayed: true, lastScoredIdx: 1 })).toBe(false);
+  });
+  it('is false for the bootstrap bout 1 (no prior scored bout, lastScoredIdx -1)', () => {
+    expect(isKachinukiBoutRemovable({ boutMode: true, currentBoutPlayed: false, lastScoredIdx: -1 })).toBe(false);
+  });
+  it('is false outside bout mode (correction / non-kachinuki / completed)', () => {
+    expect(isKachinukiBoutRemovable({ boutMode: false, currentBoutPlayed: false, lastScoredIdx: 0 })).toBe(false);
   });
 });
 

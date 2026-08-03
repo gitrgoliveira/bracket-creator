@@ -554,6 +554,35 @@ describe('API Utils', () => {
       });
     });
 
+    // mp-gmcg: remove a kachinuki bout appended by mistake. Pins the DELETE
+    // endpoint + auth header and the { result } envelope unwrap.
+    describe('removeKachinukiBout', () => {
+      it('DELETEs the kachinuki-bout endpoint and unwraps the result', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ({ result: { id: 'm1', subResults: [{ position: 1 }] } }),
+        });
+        const result = await API.removeKachinukiBout('comp1', 'm1', 'secret');
+        expect(result).toEqual({ id: 'm1', subResults: [{ position: 1 }] });
+        expect(global.fetch).toHaveBeenCalledWith(
+          '/api/competitions/comp1/matches/m1/kachinuki-bout',
+          expect.objectContaining({
+            method: 'DELETE',
+            headers: expect.objectContaining({ 'X-Tournament-Password': 'secret' }),
+          })
+        );
+      });
+
+      it('throws the server error message on a 409', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          json: async () => ({ error: 'no unscored bout to remove; only an empty appended bout can be removed' }),
+        });
+        await expect(API.removeKachinukiBout('c1', 'm1', 'pw'))
+          .rejects.toThrow('no unscored bout to remove');
+      });
+    });
+
     // mp-a7y: pins the invalidate endpoint URL + auth header so a
     // future refactor can't silently re-route the call. The handler
     // is gated on tournament password (internal/mobileapp/handlers_competition.go);

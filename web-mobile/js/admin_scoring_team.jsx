@@ -126,6 +126,17 @@ export function canReopenKachinukiMatch({ isKachinuki, isComplete }) {
   return !!isKachinuki && !!isComplete;
 }
 
+// isKachinukiBoutRemovable: whether the [× Remove this bout] undo renders for
+// the current bout. True only when the encounter is in bout mode, the current
+// bout is UNSCORED, and a prior bout WAS scored (lastScoredIdx >= 0) — so the
+// current bout is an appended EXTRA, never the bootstrap bout 1. That is exactly
+// the row the End-match strip (stripTrailingUnscoredKachinukiBouts) would drop,
+// so the button just makes the implicit strip explicit and reversible on the
+// spot. mp-gmcg.
+export function isKachinukiBoutRemovable({ boutMode, currentBoutPlayed, lastScoredIdx }) {
+  return !!boutMode && !currentBoutPlayed && lastScoredIdx >= 0;
+}
+
 // boutWinnerSide: THE single home for "which side won this sub-bout".
 // Returns "a" (Aka), "b" (Shiro), or null when the bout has no winner.
 // One rule, three surfaces — the IV/PW tally and persisted bout winner
@@ -489,6 +500,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // panel instead of a dead end (reopenConflict).
   const [reopenBusy, setReopenBusy] = useStateA(false);
   const [reopenErr, setReopenErr] = useStateA("");
+  // mp-gmcg: [Remove this bout] busy/error, kept separate from the reopen
+  // channel above (that one is the completed-match flow; this is a running-
+  // match empty-bout undo).
+  const [removingBout, setRemovingBout] = useStateA(false);
+  const [removeBoutErr, setRemoveBoutErr] = useStateA("");
   // The structured court_busy 409, unpacked: { court, matchId, compId,
   // message } describing the match ALREADY RUNNING on this court. Non-null
   // means the remedy panel is on screen.
@@ -997,6 +1013,51 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     });
     setFinishArmed(false);
     setEndArmed(false);
+  };
+  // Remove-this-bout (mp-gmcg): the explicit undo for a pairing appended by
+  // mistake. Removable ONLY when the current bout is unscored AND a prior bout
+  // was already scored (kachinukiLastScoredIdx >= 0) — i.e. it is an appended
+  // EXTRA, never the bootstrap bout 1. This is exactly the row the End-match
+  // strip would drop; surfacing it as a button makes that implicit behaviour
+  // explicit and reversible on the spot.
+  const kachinukiBoutRemovable = isKachinukiBoutRemovable({
+    boutMode: kachinukiBoutMode,
+    currentBoutPlayed: kachinukiCurrentBoutPlayed,
+    lastScoredIdx: kachinukiLastScoredIdx,
+  });
+  // Position of the current (trailing) visible bout, the removal target.
+  const kachinukiCurBoutPos = (() => {
+    const cur = visiblePositions.find(p => p !== "daihyosen");
+    return cur == null ? 0 : positions.indexOf(cur) + 1;
+  })();
+  const removeCurrentBout = async () => {
+    if (!kachinukiBoutRemovable || kachinukiCurBoutPos <= 0) return;
+    const pos = kachinukiCurBoutPos;
+    // A manual bout the operator added but the server has NOT persisted yet
+    // (position beyond maxSubPos, the server log's high-water mark) is purely
+    // local: pop it, no round-trip. A [Record bout] append IS persisted
+    // (pos <= maxSubPos), so it must be stripped server-side.
+    if (pos > maxSubPos) {
+      setManualBouts(prev => prev.filter(p => p !== pos));
+      setSubs(prev => prev.slice(0, pos - 1));
+      setEndArmed(false);
+      setFinishArmed(false);
+      setRemoveBoutErr("");
+      return;
+    }
+    setRemoveBoutErr("");
+    setRemovingBout(true);
+    try {
+      // SSE match_updated refreshes the match prop with the shorter bout log,
+      // so the removed row disappears; mirrors the Record-bout growth path.
+      await window.API.removeKachinukiBout(m.compId, m.id, resolveDecisionPassword(password));
+      setEndArmed(false);
+      setFinishArmed(false);
+    } catch (e) {
+      setRemoveBoutErr(String(e?.message || "Could not remove that bout"));
+    } finally {
+      setRemovingBout(false);
+    }
   };
   // Any edit disarms every two-step confirm so a stale verdict can never be
   // committed (subs identity changes only through updateSub/addManualBout;
@@ -1809,6 +1870,31 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               <span style={{ color: "var(--ink-3)" }}>
                 For fighters the app doesn't know: pick or type both players on the new row.
               </span>
+            </div>
+          )}
+
+          {/* mp-gmcg: explicit undo for a bout appended by mistake. Renders only
+              when the current bout is an unscored EXTRA (a prior bout was
+              scored), i.e. exactly the row the End-match strip would drop — made
+              visible and reversible on the spot instead of silent. */}
+          {kachinukiBoutRemovable && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, fontSize: 12, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm"
+                data-testid="kachinuki-remove-bout-button"
+                onClick={removeCurrentBout}
+                disabled={submitting || removingBout}
+                title="Remove this empty bout — added by mistake. Nothing has been recorded for it, so nothing is lost."
+              >
+                {removingBout ? "Removing…" : "× Remove this bout"}
+              </button>
+              <span style={{ color: "var(--ink-3)" }}>
+                Added a pairing by mistake? This bout has no score yet, so removing it loses nothing.
+              </span>
+              {removeBoutErr && (
+                <span data-testid="kachinuki-remove-bout-error" style={{ color: "var(--danger, #c00)", width: "100%" }}>{removeBoutErr}</span>
+              )}
             </div>
           )}
 

@@ -1691,3 +1691,89 @@ func TestAnyNumberedBoutHasEncho(t *testing.T) {
 		})
 	}
 }
+
+// deleteKachinukiBout DELETEs the kachinuki empty-bout removal endpoint.
+func deleteKachinukiBout(t *testing.T, r *gin.Engine, compID, matchID string) *httptest.ResponseRecorder {
+	t.Helper()
+	w := httptest.NewRecorder()
+	req, err := http.NewRequest(http.MethodDelete, "/api/competitions/"+compID+"/matches/"+matchID+"/kachinuki-bout", nil)
+	require.NoError(t, err)
+	r.ServeHTTP(w, req)
+	return w
+}
+
+// TestRemoveKachinukiBoutHandler covers the DELETE .../kachinuki-bout wiring
+// (mp-gmcg): the operator undo for a pairing appended by mistake. 200 strips a
+// trailing unscored bout; a scored trailing bout and a completed match both 409;
+// a non-kachinuki competition 400s; an unknown match 404s.
+func TestRemoveKachinukiBoutHandler(t *testing.T) {
+	scored := state.SubMatchResult{Position: 1, SideA: "R-1", SideB: "W-1", Winner: "R-1", Decision: "fought"}
+	appended := state.SubMatchResult{Position: 2, SideA: "R-1", SideB: "W-2"}
+
+	t.Run("200 strips a trailing unscored bout", func(t *testing.T) {
+		compID := "rm-bout-ok"
+		r, store := setupKachinukiScoreServer(t, compID)
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "P1-0", SideA: "Ryu", SideB: "Tora", Status: state.MatchStatusRunning,
+				SubResults: []state.SubMatchResult{scored, appended}},
+		}))
+
+		w := deleteKachinukiBout(t, r, compID, "P1-0")
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+		matches, err := store.LoadPoolMatches(compID)
+		require.NoError(t, err)
+		require.Len(t, matches[0].SubResults, 1, "the appended empty bout is gone")
+	})
+
+	t.Run("409 when the trailing bout is scored", func(t *testing.T) {
+		compID := "rm-bout-scored"
+		r, store := setupKachinukiScoreServer(t, compID)
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "P1-0", Status: state.MatchStatusRunning, SubResults: []state.SubMatchResult{scored}},
+		}))
+
+		w := deleteKachinukiBout(t, r, compID, "P1-0")
+		require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	})
+
+	t.Run("409 on a completed match", func(t *testing.T) {
+		compID := "rm-bout-done"
+		r, store := setupKachinukiScoreServer(t, compID)
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "P1-0", Status: state.MatchStatusCompleted, SubResults: []state.SubMatchResult{scored, appended}},
+		}))
+
+		w := deleteKachinukiBout(t, r, compID, "P1-0")
+		require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	})
+
+	t.Run("404 for an unknown match", func(t *testing.T) {
+		compID := "rm-bout-nf"
+		r, store := setupKachinukiScoreServer(t, compID)
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{}))
+
+		w := deleteKachinukiBout(t, r, compID, "nope")
+		require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
+	})
+
+	t.Run("400 for a non-kachinuki competition", func(t *testing.T) {
+		compID := "rm-bout-fixed"
+		store, err := state.NewStore(t.TempDir())
+		require.NoError(t, err)
+		eng := engine.New(store)
+		hub := NewHub()
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: compID, TeamSize: 3, TeamMatchType: state.TeamMatchTypeFixed,
+		}))
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "P1-0", Status: state.MatchStatusRunning, SubResults: []state.SubMatchResult{scored, appended}},
+		}))
+		gin.SetMode(gin.TestMode)
+		r := gin.New()
+		RegisterMatchHandlers(r.Group("/api"), eng, store, store, hub, NewFileVerifier(store), store)
+
+		w := deleteKachinukiBout(t, r, compID, "P1-0")
+		require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	})
+}

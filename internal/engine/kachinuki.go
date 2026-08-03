@@ -520,6 +520,16 @@ var (
 	// propagated into a downstream knockout match that has started or
 	// recorded results; reopening would corrupt the bracket.
 	ErrReopenDownstreamFought = errors.New("cannot reopen: a downstream knockout match has already started or recorded a result")
+	// ErrRemoveBoutNotRunning: bouts are removed from a RUNNING encounter only.
+	// A completed kachinuki match already had its trailing unscored bouts
+	// stripped on the End-match write, so there is nothing to remove; edit a
+	// finished result via reopen/correction instead.
+	ErrRemoveBoutNotRunning = errors.New("match is not running; reopen it before removing a bout")
+	// ErrNoRemovableBout: the encounter has no trailing UNSCORED bout to drop —
+	// the current bout is already scored, or there are no bouts. Surfaced so the
+	// operator learns the empty-bout undo had nothing to act on rather than
+	// getting a silent no-op.
+	ErrNoRemovableBout = errors.New("no unscored bout to remove; only an empty appended bout can be removed")
 )
 
 // ReopenKachinukiMatch is the sanctioned "Reopen match" path for a
@@ -696,6 +706,122 @@ func (e *Engine) ReopenKachinukiMatch(compID, matchID, reason string) error {
 		return txErr
 	}
 	return opErr
+}
+
+// RemoveTrailingKachinukiBout drops the trailing UNSCORED bout(s) from a RUNNING
+// kachinuki encounter — the explicit operator undo for a pairing appended by
+// mistake ([Record bout] / [Add next bout]). It reuses
+// stripTrailingUnscoredKachinukiBouts, so the removable set is IDENTICAL to what
+// the completed-write strip drops: "removable" is defined in exactly ONE place,
+// and (because that primitive stops at Position <= 0) it can never touch a
+// non-numbered sub — daihyosen does not exist in kachinuki and is not involved.
+//
+// Mirrors ReopenKachinukiMatch's find-across-homes skeleton (pool → bracket
+// rounds → bronze) so a fourth match home can't be forgotten. Returns the
+// updated match for the caller to broadcast. No court gate: the match is (and
+// stays) running, so removing an empty bout changes no court occupancy.
+func (e *Engine) RemoveTrailingKachinukiBout(compID, matchID string) (*state.MatchResult, error) {
+	comp, err := e.store.LoadCompetition(compID)
+	if err != nil {
+		return nil, err
+	}
+	if comp == nil || comp.TeamSize < 2 || comp.TeamMatchType != state.TeamMatchTypeKachinuki {
+		return nil, validationErrorf("removing a bout is only supported for kachinuki team matches")
+	}
+
+	var (
+		updated *state.MatchResult
+		opErr   error
+	)
+	txErr := e.store.WithTransaction(compID, func(tx state.StoreTx) error {
+		// strip is the SINGLE precondition+mutation every match home applies:
+		// the encounter must be RUNNING and must carry a trailing unscored bout.
+		// One closure so pool/round/bronze cannot drift (same reasoning as
+		// ReopenKachinukiMatch's guard).
+		strip := func(status state.MatchStatus, subs []state.SubMatchResult) ([]state.SubMatchResult, error) {
+			if status != state.MatchStatusRunning {
+				return nil, ErrRemoveBoutNotRunning
+			}
+			stripped := stripTrailingUnscoredKachinukiBouts(subs)
+			if len(stripped) == len(subs) {
+				return nil, ErrNoRemovableBout
+			}
+			return stripped, nil
+		}
+
+		// Pool store first, mirroring findTeamMatch's lookup order.
+		poolMatches, lerr := tx.LoadPoolMatches(compID)
+		if lerr == nil {
+			for i := range poolMatches {
+				if poolMatches[i].ID != matchID {
+					continue
+				}
+				stripped, serr := strip(poolMatches[i].Status, poolMatches[i].SubResults)
+				if serr != nil {
+					opErr = serr
+					return nil
+				}
+				poolMatches[i].SubResults = stripped
+				if werr := tx.SavePoolMatches(compID, poolMatches); werr != nil {
+					return werr
+				}
+				u := poolMatches[i]
+				updated = &u
+				return nil
+			}
+		}
+
+		bracket, lerr := tx.LoadBracket(compID)
+		if lerr != nil {
+			return lerr
+		}
+		if bracket != nil {
+			for rIdx := range bracket.Rounds {
+				for mIdx := range bracket.Rounds[rIdx] {
+					bm := &bracket.Rounds[rIdx][mIdx]
+					if bm.ID != matchID {
+						continue
+					}
+					stripped, serr := strip(bm.Status, bm.SubResults)
+					if serr != nil {
+						opErr = serr
+						return nil
+					}
+					bm.SubResults = stripped
+					if werr := tx.SaveBracket(compID, bracket); werr != nil {
+						return werr
+					}
+					updated = bracketMatchToTeamResult(*bm)
+					return nil
+				}
+			}
+			// The bronze (3rd-place) match is a sibling of Rounds (the strip
+			// loops above never reach it), so it needs its own branch.
+			if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID == matchID {
+				stripped, serr := strip(bm.Status, bm.SubResults)
+				if serr != nil {
+					opErr = serr
+					return nil
+				}
+				bm.SubResults = stripped
+				if werr := tx.SaveBracket(compID, bracket); werr != nil {
+					return werr
+				}
+				updated = bracketMatchToTeamResult(*bm)
+				return nil
+			}
+		}
+
+		opErr = notFoundErrorf("match %s not found", matchID)
+		return nil
+	})
+	if txErr != nil {
+		return nil, txErr
+	}
+	if opErr != nil {
+		return nil, opErr
+	}
+	return updated, nil
 }
 
 // checkPoolReopenDownstreamTx is the pool-match twin of the bracket branch's

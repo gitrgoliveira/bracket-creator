@@ -750,6 +750,53 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		c.Status(http.StatusOK)
 	})
 
+	// DELETE /competitions/:id/matches/:mid/kachinuki-bout
+	//
+	// mp-gmcg: remove a trailing UNSCORED kachinuki bout appended by mistake
+	// ([Record bout] / [Add next bout]). This is the explicit operator undo for
+	// the empty appended pairing that otherwise only vanishes implicitly on the
+	// End-match strip. It targets a regular numbered bout, NOT a daihyosen
+	// (which does not exist in kachinuki); the engine reuses the same
+	// trailing-unscored strip the completed write applies, so the removable set
+	// is identical in both places.
+	//
+	// Not court-gated (a running match stays running) and not self-run
+	// main-gated: this only ever mutates a RUNNING encounter and drops an
+	// unscored bout, so it rides the same trust as the score path rather than
+	// the reopen path's finalized-result gate.
+	r.DELETE("/competitions/:id/matches/:mid/kachinuki-bout", func(c *gin.Context) {
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
+		mid := c.Param("mid")
+
+		updated, err := eng.RemoveTrailingKachinukiBout(id, mid)
+		if err != nil {
+			var notFoundErr *engine.NotFoundError
+			var validationErr *engine.ValidationError
+			switch {
+			case errors.Is(err, engine.ErrNoRemovableBout), errors.Is(err, engine.ErrRemoveBoutNotRunning):
+				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			case errors.As(err, &notFoundErr):
+				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			case errors.As(err, &validationErr):
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			default:
+				internalError(c, err)
+			}
+			return
+		}
+
+		hub.Broadcast(EventMatchUpdated, gin.H{
+			"competitionId": id,
+			"matchId":       mid,
+			"result":        matchPtrForBroadcast(updated),
+		})
+
+		c.JSON(http.StatusOK, gin.H{"result": updated})
+	})
+
 	r.PUT("/competitions/:id/matches/:mid/override-winner", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {

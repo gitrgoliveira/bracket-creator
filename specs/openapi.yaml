@@ -1885,6 +1885,60 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/competitions/{id}/matches/{mid}/kachinuki-bout:
+    delete:
+      tags: [matches]
+      summary: Remove a kachinuki bout appended by mistake
+      description: |
+        Removes the trailing UNSCORED bout from a RUNNING kachinuki team
+        encounter: the explicit operator undo for a pairing appended by
+        mistake (`[Record bout]` / `[Add next bout]`). It targets a regular
+        numbered bout, NOT a daihyosen (which does not exist in kachinuki), and
+        drops exactly the trailing-unscored row the End-match write would strip
+        on completion, so the removable set is identical in both places. A
+        scored bout is never removed. The match stays `running`. Broadcasts a
+        `match_updated` event.
+
+        Unlike reopen (which edits a FINALIZED result and is therefore
+        main-password-gated in self-run mode), this only ever mutates a running
+        encounter and discards an unscored bout, so it rides the same trust as
+        the score path.
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+        - $ref: '#/components/parameters/MatchId'
+      responses:
+        '200':
+          description: The trailing unscored bout was removed; returns the updated match.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    $ref: '#/components/schemas/MatchResult'
+        '400':
+          description: The competition is not a kachinuki team competition.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: >
+            The match is not running (a completed match already had its trailing
+            unscored bouts stripped on the End-match write; reopen it first), or
+            there is no unscored bout to remove (the current bout is already
+            scored).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/competitions/{id}/matches/{mid}/court:
     put:
       tags: [matches]

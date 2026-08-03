@@ -1667,6 +1667,23 @@ const API = {
         }
         return true;
     },
+    // mp-gmcg: remove a trailing UNSCORED kachinuki bout appended by mistake
+    // ([Record bout] / [Add next bout]). Kachinuki-only; targets a numbered
+    // bout, never a daihyosen. Returns the updated MatchResult (envelope
+    // unwrapped, like removeDaihyosen). A 409 ("no unscored bout to remove" /
+    // "match is not running") surfaces as the thrown Error's message.
+    async removeKachinukiBout(compID, matchID, password) {
+        const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/kachinuki-bout`, {
+            method: 'DELETE',
+            headers: { 'X-Tournament-Password': password }
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to remove bout");
+        }
+        const body = await res.json().catch(() => ({}));
+        return body.result ?? body;
+    },
     async updateSchedule(compID, entries, password) {
         const res = await fetch(`/api/competitions/${compID}/schedule`, {
             method: 'PUT',

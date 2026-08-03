@@ -70,6 +70,7 @@ beforeEach(() => {
     recordDecision: vi.fn(),
     reopenMatch: vi.fn().mockResolvedValue(true),
     revertMatchToQueue: vi.fn().mockResolvedValue(true),
+    removeKachinukiBout: vi.fn().mockResolvedValue({ id: 'm1', subResults: [] }),
   };
 });
 
@@ -380,5 +381,52 @@ describe('kachinuki completed correction is Reopen-only (no IV/PW Save correctio
     await renderEditor({ match: completedKachinukiMatch({ teamMatchType: 'regular' }) });
     expect(screen.getByText('Save correction')).toBeTruthy();
     expect(screen.queryByTestId('kachinuki-reopen-button')).toBeNull();
+  });
+});
+
+// mp-gmcg: [× Remove this bout] is the explicit undo for a pairing appended by
+// mistake on a RUNNING kachinuki encounter. It renders only when the current
+// bout is an unscored EXTRA (a prior bout was scored) — exactly the row the
+// End-match strip would drop — and DELETEs it server-side.
+describe('kachinuki [× Remove this bout] undoes a bout added by mistake', () => {
+  function runningWithAppendedBout(overrides = {}) {
+    return completedKachinukiMatch({
+      status: 'running',
+      winner: null,
+      subResults: [
+        { position: 1, sideA: 'A1', sideB: 'B1', ipponsA: ['M'], ipponsB: [], winner: 'A1' },
+        { position: 2, sideA: 'A1', sideB: 'B2', ipponsA: [], ipponsB: [] },
+      ],
+      ...overrides,
+    });
+  }
+
+  it('renders on an unscored appended bout and DELETEs it via the API', async () => {
+    await renderEditor({ match: runningWithAppendedBout() });
+    const btn = screen.getByTestId('kachinuki-remove-bout-button');
+    expect(btn).toBeTruthy();
+    await act(async () => { fireEvent.click(btn); });
+    expect(window.API.removeKachinukiBout).toHaveBeenCalledWith('comp1', 'm1', 'secret');
+  });
+
+  it('does NOT render on the bootstrap bout 1 (nothing appended yet)', async () => {
+    await renderEditor({
+      match: runningWithAppendedBout({
+        subResults: [{ position: 1, sideA: 'A1', sideB: 'B1', ipponsA: [], ipponsB: [] }],
+      }),
+    });
+    expect(screen.queryByTestId('kachinuki-remove-bout-button')).toBeNull();
+    expect(window.API.removeKachinukiBout).not.toHaveBeenCalled();
+  });
+
+  it('surfaces a failure inline and does not close the editor', async () => {
+    const onClose = vi.fn();
+    window.API.removeKachinukiBout = vi.fn().mockRejectedValue(new Error('no unscored bout to remove'));
+    await renderEditor({ match: runningWithAppendedBout(), onClose });
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-remove-bout-button')); });
+    await waitFor(() => {
+      expect(screen.getByTestId('kachinuki-remove-bout-error').textContent).toBe('no unscored bout to remove');
+    });
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

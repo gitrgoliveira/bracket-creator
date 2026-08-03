@@ -401,12 +401,19 @@ describe('kachinuki [× Remove this bout] undoes a bout added by mistake', () =>
     });
   }
 
-  it('renders on an unscored appended bout and DELETEs it via the API', async () => {
+  it('renders on an unscored appended bout, DELETEs it, and adopts the shorter log', async () => {
+    // The server returns the post-strip match (bout 1 only). The parent does
+    // NOT refresh this snapshot for an out-of-band mutation, so the modal must
+    // adopt the shorter log itself — proven by the button vanishing (the
+    // current bout is now the SCORED bout 1, which is not removable).
+    window.API.removeKachinukiBout = vi.fn().mockResolvedValue({
+      id: 'm1', subResults: [{ position: 1, sideA: 'A1', sideB: 'B1', ipponsA: ['M'], ipponsB: [], winner: 'A1' }],
+    });
     await renderEditor({ match: runningWithAppendedBout() });
-    const btn = screen.getByTestId('kachinuki-remove-bout-button');
-    expect(btn).toBeTruthy();
-    await act(async () => { fireEvent.click(btn); });
+    expect(screen.getByTestId('kachinuki-remove-bout-button')).toBeTruthy();
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-remove-bout-button')); });
     expect(window.API.removeKachinukiBout).toHaveBeenCalledWith('comp1', 'm1', 'secret');
+    await waitFor(() => expect(screen.queryByTestId('kachinuki-remove-bout-button')).toBeNull());
   });
 
   it('does NOT render on the bootstrap bout 1 (nothing appended yet)', async () => {

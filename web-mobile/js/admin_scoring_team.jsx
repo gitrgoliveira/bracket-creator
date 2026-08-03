@@ -433,7 +433,16 @@ export function subBoutHasBeenPlayed(s) {
 }
 
 export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, onAfterDecision, prevMatch, nextMatch, onPrev, onNext, password, selfReport, variant = "modal", canClose = true }) {
-  const m = match;
+  // mp-gmcg: a successful [× Remove this bout] shrinks the SERVER bout log, but
+  // the parent does NOT refresh the openMatch snapshot on an out-of-band
+  // mutation (SSE refreshes the LIST, not this prop — the same reason
+  // Record-bout growth rides onSubmit's return, see admin_schedule_score_editor).
+  // matchOverride shadows the prop so the removed bout disappears at once. It is
+  // cleared whenever the parent passes a genuinely new match object (the next
+  // Record / prev / next), after which the prop is authoritative again.
+  const [matchOverride, setMatchOverride] = useStateA(null);
+  useEffectA(() => { setMatchOverride(null); }, [match]);
+  const m = matchOverride || match;
   const isComplete = m.status === "completed";
   // Kachinuki appends bouts beyond teamSize (engine assigns Position =
   // len(SubResults)+1, up to 2*roster-1 bouts), so size the grid to cover every
@@ -1048,9 +1057,15 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     setRemoveBoutErr("");
     setRemovingBout(true);
     try {
-      // SSE match_updated refreshes the match prop with the shorter bout log,
-      // so the removed row disappears; mirrors the Record-bout growth path.
-      await window.API.removeKachinukiBout(m.compId, m.id, resolveDecisionPassword(password));
+      const updated = await window.API.removeKachinukiBout(m.compId, m.id, resolveDecisionPassword(password));
+      // The parent won't refresh this snapshot for an out-of-band mutation, so
+      // adopt the shorter log locally (server truth if returned, else drop the
+      // removed position) and trim the matching local row.
+      const nextSubs = updated && Array.isArray(updated.subResults)
+        ? updated.subResults
+        : (match.subResults || []).filter(s => s.position !== pos);
+      setMatchOverride({ ...match, subResults: nextSubs });
+      setSubs(prev => prev.slice(0, Math.max(1, pos - 1)));
       setEndArmed(false);
       setFinishArmed(false);
     } catch (e) {

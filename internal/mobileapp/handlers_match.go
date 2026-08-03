@@ -727,13 +727,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			case errors.As(err, &courtBusyErr):
 				// Same 409 shape as the score path so clients have one
 				// court_busy branch to handle (mp-gmcg).
-				c.JSON(http.StatusConflict, gin.H{
-					"error":   "court_busy",
-					"court":   courtBusyErr.Court,
-					"matchId": courtBusyErr.MatchID,
-					"compId":  courtBusyErr.CompID,
-					"message": fmt.Sprintf("Court %s already has a running match (%s). Finish that match before reopening this one.", courtBusyErr.Court, courtBusyErr.MatchID),
-				})
+				respondCourtBusy(c, courtBusyErr, "reopening this one")
 			case errors.As(err, &notFoundErr):
 				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 			case errors.As(err, &validationErr):
@@ -1070,6 +1064,22 @@ func matchSnapshotOrErr(s matchStores, compID, matchID, guardLabel string) (matc
 		return matchSnapshot{}, false, fmt.Errorf("%s guard: %w", guardLabel, err)
 	}
 	return snap, found, nil
+}
+
+// respondCourtBusy writes the shared 409 court_busy body. The court-
+// exclusivity gate fires on three paths (score start, score reopen, and
+// kachinuki reopen); `action` names what the operator was attempting (e.g.
+// "starting a new one") so the sentence reads naturally. Keeping the
+// {error,court,matchId,compId,message} shape in ONE place means every client
+// court_busy branch stays in lockstep when the wire contract moves.
+func respondCourtBusy(c *gin.Context, err *engine.CourtBusyError, action string) {
+	c.JSON(http.StatusConflict, gin.H{
+		"error":   "court_busy",
+		"court":   err.Court,
+		"matchId": err.MatchID,
+		"compId":  err.CompID,
+		"message": fmt.Sprintf("Court %s already has a running match (%s). Finish that match before %s.", err.Court, err.MatchID, action),
+	})
 }
 
 // matchStatusFromStore is the non-transactional status projection of
@@ -1610,13 +1620,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			// infrastructure itself (WAL commit failure, etc.).
 			var courtBusyErr *engine.CourtBusyError
 			if errors.As(txErr, &courtBusyErr) {
-				c.JSON(http.StatusConflict, gin.H{
-					"error":   "court_busy",
-					"court":   courtBusyErr.Court,
-					"matchId": courtBusyErr.MatchID,
-					"compId":  courtBusyErr.CompID,
-					"message": fmt.Sprintf("Court %s already has a running match (%s). Finish that match before starting a new one.", courtBusyErr.Court, courtBusyErr.MatchID),
-				})
+				respondCourtBusy(c, courtBusyErr, "starting a new one")
 				return
 			}
 			var notFoundErr *engine.NotFoundError
@@ -1688,13 +1692,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			}
 			var courtBusyErr *engine.CourtBusyError
 			if errors.As(engErr, &courtBusyErr) {
-				c.JSON(http.StatusConflict, gin.H{
-					"error":   "court_busy",
-					"court":   courtBusyErr.Court,
-					"matchId": courtBusyErr.MatchID,
-					"compId":  courtBusyErr.CompID,
-					"message": fmt.Sprintf("Court %s already has a running match (%s). Finish that match before starting a new one.", courtBusyErr.Court, courtBusyErr.MatchID),
-				})
+				respondCourtBusy(c, courtBusyErr, "starting a new one")
 				return
 			}
 			var downstreamKnockoutErr *engine.DownstreamKnockoutScoredError

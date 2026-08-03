@@ -235,6 +235,16 @@ export function deriveKachinukiEndOutcome({ subResults, isKnockoutPhase }) {
   return { kind: "draw" };
 }
 
+// kachinukiEndOutcomeLabel: the ONE home for the [End match] verdict wording.
+// deriveKachinukiEndOutcome owns the OUTCOME; this owns its DISPLAY STRING so
+// the two End-match surfaces (the reopen verdict-preview and the End/Confirm
+// button) can never drift. The win wording defers to teamResultLabel, the
+// canonical "AKA WIN"/"SHIRO WIN" source; a tied end reads "Draw (hikiwake)".
+export function kachinukiEndOutcomeLabel(outcome) {
+  if (outcome?.kind === "win") return teamResultLabel({ teamWinner: outcome.winnerSide });
+  return "Draw (hikiwake)";
+}
+
 // kachinukiEnchoAvailable: whether the Encho (same pair fights on)
 // affordance renders for the current End-match outcome. Available for
 // EVERY tied last bout — knockout (End is blocked, overtime is one of the
@@ -293,8 +303,13 @@ export function kachinukiBandModel({ subs, daihyosenIdx, isComplete, matchWinner
   if (isComplete) {
     const n = played.length;
     const headline = `FINAL · ${n} BOUT${n === 1 ? "" : "S"}`;
-    if (matchWinner && matchWinner === sideAName) return { headline, verdict: "AKA WIN", verdictSide: "aka" };
-    if (matchWinner && matchWinner === sideBName) return { headline, verdict: "SHIRO WIN", verdictSide: "shiro" };
+    // Winner wording defers to teamResultLabel (the one "AKA WIN"/"SHIRO WIN"
+    // home). The raw-name fallback keeps an unattributable winner from being
+    // silently dropped.
+    const winSide = matchWinner && matchWinner === sideAName ? "a"
+      : matchWinner && matchWinner === sideBName ? "b"
+      : null;
+    if (winSide) return { headline, verdict: teamResultLabel({ teamWinner: winSide }), verdictSide: winSide === "a" ? "aka" : "shiro" };
     if (matchDecision === "hikiwake" || !matchWinner) return { headline, verdict: "DRAW", verdictSide: "draw" };
     return { headline, verdict: String(matchWinner).toUpperCase(), verdictSide: "draw" };
   }
@@ -2108,9 +2123,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
           {reopenPromptOpen && (
             <>
               <div className="reopen-reason__verdict" data-testid="kachinuki-end-verdict">
-                Ending this match: <strong>{kachinukiEndOutcome?.kind === "win"
-                  ? `${kachinukiEndOutcome.winnerSide === "a" ? "AKA" : "SHIRO"} WIN`
-                  : "Draw (hikiwake)"}</strong>
+                Ending this match: <strong>{kachinukiEndOutcomeLabel(kachinukiEndOutcome)}</strong>
               </div>
               <ReasonPrompt
                 label="Reason for reopening"
@@ -2292,9 +2305,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                     : "End the match on the last scored bout"}>
                   {submitting ? "Saving…"
                     : endArmed
-                    ? (kachinukiEndOutcome?.kind === "win"
-                        ? `Confirm · ${kachinukiEndOutcome.winnerSide === "a" ? "AKA" : "SHIRO"} WIN`
-                        : "Confirm · Draw (hikiwake)")
+                    ? `Confirm · ${kachinukiEndOutcomeLabel(kachinukiEndOutcome)}`
                     : "End match"}
                 </button>
                 </>

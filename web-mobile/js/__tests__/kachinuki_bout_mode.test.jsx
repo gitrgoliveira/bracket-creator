@@ -19,6 +19,7 @@ import {
   isKoTieBlocked,
   canReopenKachinukiMatch,
   deriveKachinukiEndOutcome,
+  kachinukiEndOutcomeLabel,
   buildKachinukiEndEntries,
   subBoutHasBeenPlayed,
   kachinukiEnchoAvailable,
@@ -259,6 +260,23 @@ describe('deriveKachinukiEndOutcome', () => {
     const subs = [bout(2, { ipponsA: ['M'] }), bout(-1, { ipponsB: ['K', 'D'] })];
     expect(deriveKachinukiEndOutcome({ subResults: subs, isKnockoutPhase: true }))
       .toEqual({ kind: 'win', winnerSide: 'a' });
+  });
+});
+
+// kachinukiEndOutcomeLabel: the ONE display-string home for the [End match]
+// verdict, shared by the reopen preview and the End/Confirm button so they
+// cannot drift. Win wording defers to teamResultLabel; a tie reads "Draw
+// (hikiwake)".
+describe('kachinukiEndOutcomeLabel', () => {
+  it('routes a win through teamResultLabel (AKA/SHIRO WIN)', () => {
+    expect(kachinukiEndOutcomeLabel({ kind: 'win', winnerSide: 'a' })).toBe('AKA WIN');
+    expect(kachinukiEndOutcomeLabel({ kind: 'win', winnerSide: 'b' })).toBe('SHIRO WIN');
+  });
+
+  it('reads every non-win outcome as "Draw (hikiwake)"', () => {
+    expect(kachinukiEndOutcomeLabel({ kind: 'draw' })).toBe('Draw (hikiwake)');
+    expect(kachinukiEndOutcomeLabel({ kind: 'blocked', reason: 'knockout-tie' })).toBe('Draw (hikiwake)');
+    expect(kachinukiEndOutcomeLabel(null)).toBe('Draw (hikiwake)');
   });
 });
 

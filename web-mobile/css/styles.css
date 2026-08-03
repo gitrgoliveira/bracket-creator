@@ -35,6 +35,8 @@
      reads at the call site; it resolves to the canonical palette red. */
   --danger: var(--red);
   --danger-soft: var(--red-soft);
+  --danger-border: #f5c2c2; /* red-200: error hairline border, mirrors --warn-border */
+  --danger-ink: #9b1c1c;    /* red-900: strongest error text, ~7:1 on --danger-soft */
   /* Warning/caution, amber. Non-overlapping with --red (Aka/danger) and
      --accent (navy/running) per DESIGN.md Principle 3. Used by the offline
      sync pill, .alert--warn and .tag-badge--warn. */
@@ -6033,8 +6035,8 @@ button.pool-match-row {
 
 .alert--error {
   background: var(--danger-soft);
-  border-color: #f5c2c2;
-  color: #9b1c1c;
+  border-color: var(--danger-border);
+  color: var(--danger-ink);
 }
 
 .alert--warn {
@@ -6658,7 +6660,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
    a neutral notice. */
 .reopen-conflict {
   background: var(--danger-soft);
-  border: 1px solid #f5c2c2;
+  border: 1px solid var(--danger-border);
   border-radius: var(--r-sm);
   padding: 8px 12px;
   margin-bottom: 8px;
@@ -6666,13 +6668,13 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 .reopen-conflict__head {
   font-weight: 700;
-  color: #9b1c1c;
+  color: var(--danger-ink);
 }
 /* The consequence sentence. Stated in full and always visible: an operator
    about to wipe someone else's score may not have to hover, expand or guess. */
 .reopen-conflict__warn {
   margin-top: 2px;
-  color: #9b1c1c;
+  color: var(--danger-ink);
 }
 /* The server's own words, kept verbatim underneath ours so nothing it said is
    swallowed by the friendlier heading. */
@@ -6733,8 +6735,8 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
    reads as an error the operator must act on, not a transient "will retry". */
 .pending-write-banner--failed {
   background: var(--danger-soft);
-  border-color: #f5c2c2;
-  color: #9b1c1c;
+  border-color: var(--danger-border);
+  color: var(--danger-ink);
 }
 .pending-write-banner--failed::before {
   background: var(--danger);

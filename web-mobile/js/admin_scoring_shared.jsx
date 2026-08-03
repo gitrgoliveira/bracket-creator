@@ -112,32 +112,43 @@ function ScoringShortcutHint() {
 }
 
 // applyFusenshoToggle: pure reducer for the per-bout Fusensho button in
-// TeamScoreEditorModal. Implements three behaviours on top of the sub
-// state {aPts, bPts, aFouls, bFouls, fusensho, _preFusensho?}:
+// TeamScoreEditorModal. Implements three behaviours on top of a sub-bout
+// object {aPts, bPts, aFouls, bFouls, fusensho, _preFusensho?, ...}:
 //   1. Toggle-on from a clean state: snapshot {aPts,bPts,aFouls,bFouls}
-//      into _preFusensho, then write the 2-0 default win.
+//      into _preFusensho, then write the default win.
 //   2. Side-switch (fusensho is already on the other side): preserve
 //      the original _preFusensho so a later untoggle restores the
-//      genuine pre-fusensho score, not the intermediate 2-0.
+//      genuine pre-fusensho score, not the intermediate default win.
 //   3. Toggle-off (re-clicking the active side): restore from
 //      _preFusensho and clear it. If no snapshot exists (e.g. modal
 //      reopened from saved state: initSubs doesn't round-trip the
 //      snapshot), just clear the flag.
+// EVERY branch spreads `...prev` so per-sub fields this reducer does NOT
+// own survive the toggle — notably the kachinuki `encho` marker (mp-gmcg)
+// and manually typed side names. A bespoke object literal silently dropped
+// them, which erased the (E) audit mark and inflated an encho default win
+// from one maru to two. draw and fusensho are mutually exclusive, so a set
+// draw is cleared when fusensho is applied.
 // Manual pts/fouls edits clear _preFusensho separately (handled in
 // the setPts/setFouls closures): once the operator hand-edits, the
 // snapshot is stale.
 function applyFusenshoToggle(prev, side) {
   if (prev.fusensho === side) {
     const snap = prev._preFusensho;
-    if (snap) return { aPts: snap.aPts, bPts: snap.bPts, aFouls: snap.aFouls, bFouls: snap.bFouls, fusensho: "", _preFusensho: undefined };
+    if (snap) return { ...prev, aPts: snap.aPts, bPts: snap.bPts, aFouls: snap.aFouls, bFouls: snap.bFouls, fusensho: "", _preFusensho: undefined };
     return { ...prev, fusensho: "", _preFusensho: undefined };
   }
   const snap = prev._preFusensho || { aPts: prev.aPts, bPts: prev.bPts, aFouls: prev.aFouls, bFouls: prev.bFouls };
-  // Fusensho is a pre-bout (regulation) default win: the maru cells come
-  // from the shared count rule (defaultWinMaru in bracket.jsx).
-  const maru = window.defaultWinMaru ? window.defaultWinMaru(false) : ["○", "○"];
-  if (side === "a") return { aPts: maru, bPts: [], aFouls: 0, bFouls: 0, fusensho: "a", _preFusensho: snap };
-  return { aPts: [], bPts: maru, aFouls: 0, bFouls: 0, fusensho: "b", _preFusensho: snap };
+  // The maru cells come from the shared count rule (defaultWinMaru in
+  // bracket.jsx): one maru per point, so two in regulation but ONE in encho.
+  // Derive from THIS bout's encho state — a per-bout fusensho can land on a
+  // pairing already fighting on in overtime — never a hardcoded non-encho
+  // `false`.
+  const enchoArg = prev.encho > 0 ? { periodCount: prev.encho } : false;
+  const maru = window.defaultWinMaru ? window.defaultWinMaru(enchoArg) : (prev.encho > 0 ? ["○"] : ["○", "○"]);
+  const base = { ...prev, aFouls: 0, bFouls: 0, _preFusensho: snap, ...(prev.draw ? { draw: false } : {}) };
+  if (side === "a") return { ...base, aPts: maru, bPts: [], fusensho: "a" };
+  return { ...base, aPts: [], bPts: maru, fusensho: "b" };
 }
 
 // applyFoulIncrement: pure helper modelling a single `+` press on a
@@ -889,8 +900,10 @@ const CORRECTION_PRESETS = ["Scoring error", "Wrong competitor", "Data entry", "
 // through that list either mislabels the reopen "Scoring error" or picks
 // "Other" and types the same sentence every time. The remaining entries mirror
 // CORRECTION_PRESETS so a reopen made for a genuine scoring/identity/data
-// problem still lands in the same audit vocabulary.
-const REOPEN_PRESETS = ["Ended by mistake", "Scoring error", "Wrong competitor", "Data entry", "Other"];
+// problem still lands in the same audit vocabulary — so it is DERIVED from
+// CORRECTION_PRESETS rather than restated, making that mirror structural
+// instead of a comment-only obligation that drifts on the next edit.
+const REOPEN_PRESETS = ["Ended by mistake", ...CORRECTION_PRESETS];
 
 // ES exports: the modal file imports these and re-exports the test-facing
 // subset, so `import { … } from './admin_scoring_modal.jsx'` keeps working.

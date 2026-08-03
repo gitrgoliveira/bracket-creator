@@ -913,7 +913,10 @@ func applyKachinukiMerge(comp *state.Competition, prior, result *state.MatchResu
 // outcome or score at all: no winner, no decision, no real ippons on
 // either side, no hansoku, no hantei, no encho marker. Such a row is the
 // placeholder pairing MaybeAdvanceKachinuki appends for a bout that was
-// never fought.
+// never fought. The encho test uses the canonical EnchoMetadata.On()
+// predicate (the same one validation and the (E) label share), so a
+// degenerate zero-period block is NOT mistaken for a real marker that would
+// wedge an unscored placeholder into a completed record.
 func isUnscoredKachinukiBout(s state.SubMatchResult) bool {
 	return s.Winner == "" &&
 		s.Decision == "" &&
@@ -922,7 +925,7 @@ func isUnscoredKachinukiBout(s state.SubMatchResult) bool {
 		s.HansokuA == 0 &&
 		s.HansokuB == 0 &&
 		!s.DecidedByHantei &&
-		s.Encho == nil
+		!s.Encho.On()
 }
 
 // stripTrailingUnscoredKachinukiBouts drops TRAILING unscored bouts from a

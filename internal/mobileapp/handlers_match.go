@@ -360,7 +360,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				// applyCorrectionReasonUnderTx, shared with the single-score path
 				// so the two cannot drift; only the error SHAPE differs here
 				// (partial-success entries carry a plain message).
-				check := applyCorrectionReasonUnderTx(stx, id, results[i].ID, &results[i])
+				check, snapErr := applyCorrectionReasonUnderTx(stx, id, results[i].ID, &results[i])
+				if snapErr != nil {
+					return snapErr
+				}
 				if check.Reject != nil {
 					return errors.New(check.Reject.Message)
 				}
@@ -1133,22 +1136,30 @@ type correctionCheck struct {
 // parse (and, for a bracket match, an os.ReadFile plus a whole-bracket
 // json.Unmarshal) while the per-comp WRITE lock is held. The caller's
 // stale-after-complete guard reads the returned status instead.
-func applyCorrectionReasonUnderTx(stx state.StoreTx, compID, matchID string, r *state.MatchResult) correctionCheck {
-	snap, _ := matchSnapshotFor(stx, compID, matchID)
+func applyCorrectionReasonUnderTx(stx state.StoreTx, compID, matchID string, r *state.MatchResult) (correctionCheck, error) {
+	// Fail CLOSED on a load error (mirrors checkFinalizedUnderTx): the
+	// best-effort matchSnapshotFor would drop it and let the correction-reason
+	// gate below pass on an assumed-false ReopenPending, silently finalizing
+	// without the mandatory reason (and, on a client-supplied CorrectionReason,
+	// dropping it) — the exact audit hole this gate exists to close (mp-gmcg).
+	snap, _, err := lookupMatchSnapshot(stx, compID, matchID)
+	if err != nil {
+		return correctionCheck{}, fmt.Errorf("correction-reason guard: %w", err)
+	}
 	r.ReopenPending = snap.ReopenPending
 	if r.Status == state.MatchStatusCompleted && (snap.Status == state.MatchStatusCompleted || snap.ReopenPending) {
 		if r.CorrectionReason == "" {
-			return correctionCheck{StoredStatus: snap.Status, Reject: missingCorrectionReasonError(snap)}
+			return correctionCheck{StoredStatus: snap.Status, Reject: missingCorrectionReasonError(snap)}, nil
 		}
 		// The justification has landed: the reopen is no longer outstanding.
 		r.ReopenPending = false
 		return correctionCheck{
 			StoredStatus:              snap.Status,
 			ClearBracketReopenPending: snap.InBracket && snap.ReopenPending,
-		}
+		}, nil
 	}
 	r.CorrectionReason = snap.CorrectionReason
-	return correctionCheck{StoredStatus: snap.Status}
+	return correctionCheck{StoredStatus: snap.Status}, nil
 }
 
 // missingCorrectionReasonError names the CAUSE, not just the rule. Both
@@ -1526,7 +1537,10 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				// runs inside the tx so the is-completed read is race-free (same
 				// lock), and the status it returns is reused by the stale-write
 				// guard below rather than looked up a second time.
-				check := applyCorrectionReasonUnderTx(stx, id, mid, result)
+				check, snapErr := applyCorrectionReasonUnderTx(stx, id, mid, result)
+				if snapErr != nil {
+					return snapErr
+				}
 				existingStatus := check.StoredStatus
 				if check.Reject != nil {
 					engErr = check.Reject

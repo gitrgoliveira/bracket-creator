@@ -150,7 +150,14 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			//
 			// Checked in-tx, before the engine write, so the read is race-free
 			// against a concurrent finalization and a rejection costs no write.
-			snap, _ := matchSnapshotFor(stx, id, mid)
+			// Fail CLOSED on a load error (mirrors checkFinalizedUnderTx): a
+			// best-effort matchSnapshotFor would drop it and finalize on an
+			// assumed-false ReopenPending, silently discarding the mandatory
+			// reopen audit reason.
+			snap, _, snapErr := lookupMatchSnapshot(stx, id, mid)
+			if snapErr != nil {
+				return fmt.Errorf("reopen-pending guard: %w", snapErr)
+			}
 			if snap.ReopenPending && reason == "" {
 				reasonErr = &ValidationError{Field: "decisionReason", Message: ReopenNeedsReasonMessage}
 				return nil

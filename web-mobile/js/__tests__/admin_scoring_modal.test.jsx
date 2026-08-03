@@ -813,6 +813,42 @@ describe('applyFusenshoToggle', () => {
       _preFusensho: undefined,
     });
   });
+
+  // mp-gmcg: a kachinuki sub-bout carries an `encho` period count (and, for
+  // manual bouts, typed side names). The reducer must preserve every field it
+  // does not own; regressions for the bespoke-literal drop that erased the
+  // (E) mark and forced a two-maru default win on a bout already in overtime.
+  it('toggle-on keeps the encho marker and awards the encho (one-maru) default win', () => {
+    const prev = { aPts: [], bPts: [], aFouls: 0, bFouls: 0, fusensho: "", draw: false, encho: 1 };
+    const next = applyFusenshoToggle(prev, "b");
+    expect(next.encho).toBe(1);
+    expect(next.bPts).toEqual(['○']); // one maru in encho, not ['○','○']
+    expect(next.aPts).toEqual([]);
+    expect(next.fusensho).toBe("b");
+  });
+
+  it('side-switch keeps the encho marker on the bout', () => {
+    const prev = { aPts: ['○'], bPts: [], aFouls: 0, bFouls: 0, fusensho: "a", _preFusensho: { aPts: [], bPts: [], aFouls: 0, bFouls: 0 }, draw: false, encho: 2 };
+    const next = applyFusenshoToggle(prev, "b");
+    expect(next.encho).toBe(2);
+    expect(next.fusensho).toBe("b");
+    expect(next.bPts).toEqual(['○']);
+  });
+
+  it('toggle-off restores the score but keeps the encho marker', () => {
+    const prev = { aPts: ['○'], bPts: [], aFouls: 0, bFouls: 0, fusensho: "a", _preFusensho: { aPts: ['M'], bPts: [], aFouls: 0, bFouls: 0 }, draw: false, encho: 1 };
+    const next = applyFusenshoToggle(prev, "a");
+    expect(next.encho).toBe(1);
+    expect(next.aPts).toEqual(['M']);
+    expect(next.fusensho).toBe("");
+  });
+
+  it('applying fusensho clears a stale draw (mutually exclusive)', () => {
+    const prev = { aPts: [], bPts: [], aFouls: 0, bFouls: 0, fusensho: "", draw: true };
+    const next = applyFusenshoToggle(prev, "a");
+    expect(next.draw).toBe(false);
+    expect(next.fusensho).toBe("a");
+  });
 });
 
 describe('getIpponButtons', () => {

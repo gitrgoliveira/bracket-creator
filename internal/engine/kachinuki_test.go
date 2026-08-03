@@ -2049,6 +2049,19 @@ func TestStripTrailingUnscoredKachinukiBouts(t *testing.T) {
 			wantPos: []int{1, 2},
 		},
 		{
+			// A non-nil but degenerate zero-period Encho block is NOT a real
+			// marker (EnchoMetadata.On() is false), so an otherwise-empty
+			// trailing row carrying only {PeriodCount:0} is still an unscored
+			// placeholder and must strip. Guards against a client-supplied
+			// zero block wedging a phantom bout into a completed record.
+			name: "degenerate zero-period encho block still strips as unscored",
+			in: []state.SubMatchResult{
+				scored(1, "R"),
+				{Position: 2, SideA: "R", SideB: "W", Encho: &state.EnchoMetadata{PeriodCount: 0}},
+			},
+			wantPos: []int{1},
+		},
+		{
 			name: "hansoku-only bout counts as scored",
 			in: []state.SubMatchResult{
 				scored(1, "R"),

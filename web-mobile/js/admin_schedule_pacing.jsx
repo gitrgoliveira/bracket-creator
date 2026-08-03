@@ -113,6 +113,11 @@ export function suggestRebalances(perCourtStats, perMatchMinutes) {
   };
 }
 
+// NOTE: PerCourtBreakdown currently has no production caller. Its only page
+// use was the standalone Schedule-page "Schedule estimator" what-if panel,
+// removed in mp-gmcg (the Overview/Settings surfaces build their own inline
+// per-court list). It is retained, exported, and smoke-tested for the tracked
+// hypothetical-estimator page (mp-lw5p); delete it if that lands without it.
 export function PerCourtBreakdown({ perCourtMinutes }) {
   if (!perCourtMinutes || perCourtMinutes.length === 0) return null;
   return (

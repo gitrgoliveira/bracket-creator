@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +21,35 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// TestApplyCorrectionReasonUnderTx_FailsClosedOnLoadError pins that the
+// reopen/correction audit gate fails CLOSED when the pre-write snapshot read
+// errors (mp-gmcg). A best-effort matchSnapshotFor swallowed the error and let
+// the write finalize on an assumed-false ReopenPending, silently dropping the
+// mandatory audit reason; the gate now mirrors checkFinalizedUnderTx and
+// surfaces the error so the transaction aborts (HTTP 500) instead. A directory
+// in place of pool-matches.csv is the deterministic stand-in for the transient
+// single-read fault: os.Open on a dir succeeds but csv.ReadAll on it does not,
+// so LoadPoolMatches returns a real read error rather than the empty slice a
+// missing file yields.
+func TestApplyCorrectionReasonUnderTx_FailsClosedOnLoadError(t *testing.T) {
+	root := t.TempDir()
+	store, err := state.NewStore(root)
+	require.NoError(t, err)
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1"}))
+
+	poolPath := filepath.Join(root, "competitions", "c1", "pool-matches.csv")
+	require.NoError(t, os.MkdirAll(poolPath, 0o755))
+
+	var gotErr error
+	txErr := store.WithTransaction("c1", func(stx state.StoreTx) error {
+		r := &state.MatchResult{ID: "m1", Status: state.MatchStatusCompleted}
+		_, gotErr = applyCorrectionReasonUnderTx(stx, "c1", "m1", r)
+		return nil
+	})
+	require.NoError(t, txErr)
+	require.Error(t, gotErr, "a snapshot load error must fail closed, not be swallowed")
+}
 
 func TestBulkScoreHandler(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)

@@ -141,11 +141,10 @@ function applyFusenshoToggle(prev, side) {
   const snap = prev._preFusensho || { aPts: prev.aPts, bPts: prev.bPts, aFouls: prev.aFouls, bFouls: prev.bFouls };
   // The maru cells come from the shared count rule (defaultWinMaru in
   // bracket.jsx): one maru per point, so two in regulation but ONE in encho.
-  // Derive from THIS bout's encho state — a per-bout fusensho can land on a
-  // pairing already fighting on in overtime — never a hardcoded non-encho
-  // `false`.
-  const enchoArg = prev.encho > 0 ? { periodCount: prev.encho } : false;
-  const maru = window.defaultWinMaru ? window.defaultWinMaru(enchoArg) : (prev.encho > 0 ? ["○"] : ["○", "○"]);
+  // Pass THIS bout's encho period — a per-bout fusensho can land on a pairing
+  // already fighting on in overtime — and let the shared rule decide; a zero or
+  // absent period reads as regulation there, so no local branch is needed.
+  const maru = window.defaultWinMaru ? window.defaultWinMaru({ periodCount: prev.encho }) : ["○", "○"];
   const base = { ...prev, aFouls: 0, bFouls: 0, _preFusensho: snap, ...(prev.draw ? { draw: false } : {}) };
   if (side === "a") return { ...base, aPts: maru, bPts: [], fusensho: "a" };
   return { ...base, aPts: [], bPts: maru, fusensho: "b" };

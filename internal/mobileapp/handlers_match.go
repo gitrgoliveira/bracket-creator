@@ -927,12 +927,12 @@ var errResultFinalized = errors.New("result_finalized")
 // lock) so it's safe from TOCTOU races. Returns errResultFinalized when
 // an anonymous caller tries to write to a completed match. Fails closed:
 // a load error rejects the request rather than allowing an overwrite,
-// which is why this is the one caller that reads lookupMatchSnapshot's
-// error instead of going through the best-effort matchSnapshotFor.
+// which is why it reads the snapshot through the fail-closed
+// matchSnapshotOrErr rather than the best-effort matchSnapshotFor.
 func checkFinalizedUnderTx(stx state.StoreTx, compID, matchID string) error {
-	snap, found, err := lookupMatchSnapshot(stx, compID, matchID)
+	snap, found, err := matchSnapshotOrErr(stx, compID, matchID, "finalized")
 	if err != nil {
-		return fmt.Errorf("finalized guard: %w", err)
+		return err
 	}
 	if found && isMatchFinalized(snap.Status) {
 		return errResultFinalized
@@ -997,8 +997,9 @@ type matchSnapshot struct {
 // on the actual score write, so there is nothing to fail here). err is the
 // FIRST load failure seen, and the walk continues past it so a best-effort
 // caller can still find a bracket match when the pool CSV is unreadable.
-// Only a caller that must FAIL CLOSED on a load error reads err
-// (checkFinalizedUnderTx); the rest go through matchSnapshotFor.
+// Callers do not open-code this: a fail-closed audit gate goes through
+// matchSnapshotOrErr (surfaces err), a best-effort caller through
+// matchSnapshotFor (drops it).
 func lookupMatchSnapshot(s matchStores, compID, matchID string) (matchSnapshot, bool, error) {
 	var loadErr error
 	poolMatches, err := s.LoadPoolMatches(compID)
@@ -1053,6 +1054,22 @@ func bracketMatchSnapshot(bm *state.BracketMatch) matchSnapshot {
 func matchSnapshotFor(s matchStores, compID, matchID string) (matchSnapshot, bool) {
 	snap, found, _ := lookupMatchSnapshot(s, compID, matchID)
 	return snap, found
+}
+
+// matchSnapshotOrErr is the fail-CLOSED counterpart to matchSnapshotFor: it
+// SURFACES a load error (wrapped as "<guardLabel> guard: …") instead of
+// swallowing it, so an in-transaction audit gate aborts rather than acting on a
+// best-effort empty snapshot. A new fail-closed gate must reach for THIS, not
+// matchSnapshotFor — reading a match's ReopenPending/status under a dropped load
+// error is the exact hole mp-gmcg closed. The caller keeps its own found/err
+// handling (the return shapes legitimately differ: a sentinel, a bare error, a
+// (correctionCheck{}, err)); this owns only the shared load-and-wrap.
+func matchSnapshotOrErr(s matchStores, compID, matchID, guardLabel string) (matchSnapshot, bool, error) {
+	snap, found, err := lookupMatchSnapshot(s, compID, matchID)
+	if err != nil {
+		return matchSnapshot{}, false, fmt.Errorf("%s guard: %w", guardLabel, err)
+	}
+	return snap, found, nil
 }
 
 // matchStatusFromStore is the non-transactional status projection of
@@ -1137,14 +1154,13 @@ type correctionCheck struct {
 // json.Unmarshal) while the per-comp WRITE lock is held. The caller's
 // stale-after-complete guard reads the returned status instead.
 func applyCorrectionReasonUnderTx(stx state.StoreTx, compID, matchID string, r *state.MatchResult) (correctionCheck, error) {
-	// Fail CLOSED on a load error (mirrors checkFinalizedUnderTx): the
-	// best-effort matchSnapshotFor would drop it and let the correction-reason
-	// gate below pass on an assumed-false ReopenPending, silently finalizing
-	// without the mandatory reason (and, on a client-supplied CorrectionReason,
-	// dropping it) — the exact audit hole this gate exists to close (mp-gmcg).
-	snap, _, err := lookupMatchSnapshot(stx, compID, matchID)
+	// matchSnapshotOrErr fails CLOSED on a load error: the correction-reason
+	// gate below must not pass on an assumed-false ReopenPending, silently
+	// finalizing without the mandatory reason (or dropping a client-supplied
+	// CorrectionReason) — the audit hole this gate exists to close (mp-gmcg).
+	snap, _, err := matchSnapshotOrErr(stx, compID, matchID, "correction-reason")
 	if err != nil {
-		return correctionCheck{}, fmt.Errorf("correction-reason guard: %w", err)
+		return correctionCheck{}, err
 	}
 	r.ReopenPending = snap.ReopenPending
 	if r.Status == state.MatchStatusCompleted && (snap.Status == state.MatchStatusCompleted || snap.ReopenPending) {

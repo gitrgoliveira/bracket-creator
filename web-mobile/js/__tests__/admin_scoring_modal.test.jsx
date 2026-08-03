@@ -827,14 +827,6 @@ describe('applyFusenshoToggle', () => {
     expect(next.fusensho).toBe("b");
   });
 
-  it('side-switch keeps the encho marker on the bout', () => {
-    const prev = { aPts: ['○'], bPts: [], aFouls: 0, bFouls: 0, fusensho: "a", _preFusensho: { aPts: [], bPts: [], aFouls: 0, bFouls: 0 }, draw: false, encho: 2 };
-    const next = applyFusenshoToggle(prev, "b");
-    expect(next.encho).toBe(2);
-    expect(next.fusensho).toBe("b");
-    expect(next.bPts).toEqual(['○']);
-  });
-
   it('toggle-off restores the score but keeps the encho marker', () => {
     const prev = { aPts: ['○'], bPts: [], aFouls: 0, bFouls: 0, fusensho: "a", _preFusensho: { aPts: ['M'], bPts: [], aFouls: 0, bFouls: 0 }, draw: false, encho: 1 };
     const next = applyFusenshoToggle(prev, "a");

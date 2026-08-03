@@ -113,7 +113,6 @@ export function suggestRebalances(perCourtStats, perMatchMinutes) {
   };
 }
 
-
 // CourtPacePanel: admin-only collapsible card showing per-court pace status
 // and a rebalancing suggestion. Never rendered in viewer or display views.
 export function CourtPacePanel({ byCourt, safeMatchDuration }) {

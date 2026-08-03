@@ -1,7 +1,7 @@
 // Court-pacing components extracted from admin_schedule.jsx (mp-d7tl).
-// filterMatchesByCourt, computeCourtPaceStats, CourtPacePanel, PerCourtBreakdown, suggestRebalances.
+// filterMatchesByCourt, computeCourtPaceStats, CourtPacePanel, suggestRebalances.
 
-import { formatMinutes, timeToMinutes } from './admin_schedule_utils.jsx';
+import { timeToMinutes } from './admin_schedule_utils.jsx';
 
 const { useState: useStateA, useEffect: useEffectA } = React;
 
@@ -113,30 +113,6 @@ export function suggestRebalances(perCourtStats, perMatchMinutes) {
   };
 }
 
-// NOTE: PerCourtBreakdown currently has no production caller. Its only page
-// use was the standalone Schedule-page "Schedule estimator" what-if panel,
-// removed in mp-gmcg (the Overview/Settings surfaces build their own inline
-// per-court list). It is retained, exported, and smoke-tested for the tracked
-// hypothetical-estimator page (mp-lw5p); delete it if that lands without it.
-export function PerCourtBreakdown({ perCourtMinutes }) {
-  if (!perCourtMinutes || perCourtMinutes.length === 0) return null;
-  return (
-    <div className="est-breakdown" style={{ marginTop: 12 }}>
-      <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4, color: "var(--ink-2)" }}>Per-court breakdown:</div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))", gap: 8 }}>
-        {perCourtMinutes.map((m, i) => (
-          // Each entry is court i (rendered as "Court A/B/C…"); the court's
-          // identity IS its index, and the list never reorders.
-          // oxlint-disable-next-line react/no-array-index-key
-          <div key={i} style={{ fontSize: 12, padding: "4px 8px", background: "var(--bg-2)", borderRadius: 4, border: "1px solid var(--bg-3)" }}>
-            <span style={{ color: "var(--ink-3)" }}>Court {i < 26 ? String.fromCharCode(65 + i) : i + 1}:</span>
-            <strong style={{ marginLeft: 4 }}>{formatMinutes(m)}</strong>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 // CourtPacePanel: admin-only collapsible card showing per-court pace status
 // and a rebalancing suggestion. Never rendered in viewer or display views.

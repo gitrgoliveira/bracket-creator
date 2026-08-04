@@ -288,6 +288,24 @@ describe('TeamScoreEditorModal kachinuki bout navigation', () => {
     expect(rows[1].querySelector('.team-sub-match__btns')).not.toBeNull();
   });
 
+  it('RUNNING: a fought hikiwake bout shows an X on its read-only row', async () => {
+    // Bout 1 fought to a hikiwake (both retire), bout 2 appended and unscored.
+    // The read-only row for bout 1 carries the same centre X mark as an editable
+    // tie, so a draw in the fought history is unambiguous.
+    const { container } = await renderCell(KACHI_CELL, {
+      subResults: [
+        { position: 1, sideA: 'A1', sideB: 'B1', ipponsA: [], ipponsB: [], decision: 'hikiwake' },
+        { position: 2, sideA: 'A2', sideB: 'B2', ipponsA: [], ipponsB: [] },
+      ],
+    });
+    const rows = container.querySelectorAll('.team-sub-match');
+    expect(rows.length).toBe(2);
+    expect(rows[0].classList.contains('team-sub-match--readonly')).toBe(true);
+    expect(rows[0].querySelector('.tsm-draw')?.textContent).toBe('X');
+    // No winner is bolded on a tie.
+    expect(rows[0].querySelector('.tsm-name__static--win')).toBeNull();
+  });
+
   it('COMPLETED (correction): every fought server bout renders and is editable', async () => {
     const { container } = await renderCell(KACHI_CELL, {
       status: 'completed',

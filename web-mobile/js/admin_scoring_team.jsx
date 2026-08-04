@@ -2532,7 +2532,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
           </>
           )}
           {/* Quiet, always-present keyboard-shortcut reminder. */}
-          <ScoringShortcutHint />
+          <ScoringShortcutHint pointKeys={kachinukiBoutMode ? getIpponButtons(isNaginataTeam).join("") : ""} />
         </div>
     </>
   );

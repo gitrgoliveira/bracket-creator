@@ -928,7 +928,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
           </div>
           )}
           {/* Quiet, always-present keyboard-shortcut reminder. */}
-          <ScoringShortcutHint />
+          <ScoringShortcutHint pointKeys={getValidPointKeys(isNaginata)} />
         </div>
     </>
   );

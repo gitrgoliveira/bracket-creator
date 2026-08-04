@@ -89,12 +89,18 @@ function IpponLegend({ isNaginata }) {
 // affordance sits where operators look for navigation. Clarity over
 // decoration: plain muted text, no animation. Styled inline (this region of
 // styles.css is owned elsewhere).
-function ScoringShortcutHint() {
+// pointKeys: the valid ippon letters ("MKDTH" / "MKDTSH") when this editor
+// supports keyboard scoring — individual matches and kachinuki bouts — else
+// "" (fixed-order team bouts score by tap only). Listed so the shortcut is
+// discoverable instead of hidden in the code; the hint is display:none under
+// a coarse pointer, so this only ever shows to a keyboard/mouse operator.
+function ScoringShortcutHint({ pointKeys = "" }) {
   const kbd = {
     fontFamily: "var(--font-mono)", fontSize: 11, padding: "1px 5px",
     border: "1px solid var(--line)", borderRadius: 4, background: "var(--surface)",
     color: "var(--ink-3)", margin: "0 1px",
   };
+  const keys = pointKeys ? [...pointKeys] : [];
   return (
     <div
       className="scoring-shortcut-hint"
@@ -102,6 +108,15 @@ function ScoringShortcutHint() {
       aria-hidden="true"
       style={{ marginTop: 6, fontSize: 12, color: "var(--ink-3)", textAlign: "center", display: "flex", gap: 4, justifyContent: "center", alignItems: "center", flexWrap: "wrap" }}
     >
+      {keys.length > 0 && (
+        <React.Fragment>
+          {keys.map((k) => <kbd key={k} style={kbd}>{k}</kbd>)}
+          <span>Shiro</span>
+          <span aria-hidden="true">·</span>
+          <kbd style={kbd}>⇧</kbd><span>Aka</span>
+          <span aria-hidden="true">·</span>
+        </React.Fragment>
+      )}
       <kbd style={kbd}>←</kbd><kbd style={kbd}>→</kbd>
       <span>prev/next</span>
       <span aria-hidden="true">·</span>

@@ -270,8 +270,9 @@ describe('TeamScoreEditorModal kachinuki bout navigation', () => {
     // engine.AdvanceKachinuki and not yet scored. Both render (mp-gmcg): bout 1
     // as a READ-ONLY team-sheet row (no scoring controls) above bout 2, the
     // current editable bout — the operator sees the whole encounter like a
-    // regular team sheet. Only the current bout is editable; correcting an
-    // earlier bout still goes through Reopen (correction mode below).
+    // regular team sheet. The read-only row is TAPPABLE to reopen it inline
+    // for correction (mp-gmcg; see the correction tests below); until tapped
+    // it carries no scoring controls.
     const { container } = await renderCell(KACHI_CELL, {
       subResults: [
         { position: 1, sideA: 'A1', sideB: 'B1', ipponsA: ['M', 'K'], ipponsB: [], winner: 'A1' },
@@ -321,6 +322,107 @@ describe('TeamScoreEditorModal kachinuki bout navigation', () => {
     // A further Aka keystroke (Shift+M) is a no-op — a decided bout can't reach 2-2.
     await act(async () => { fireEvent.keyDown(document.body, { key: 'M', shiftKey: true }); });
     expect(filled('aka')).toBe(0);
+  });
+
+  it('RUNNING: tapping a fought bout reopens it inline with scoring controls (mp-gmcg)', async () => {
+    // The mid-encounter correction path: a fought bout is read-only with a
+    // visible "Correct" affordance, and tapping it reopens the SAME scoring
+    // controls as the current bout, in place, flagged as the bout being
+    // corrected. No Reopen/End round-trip needed.
+    const { container } = await renderCell(KACHI_CELL, {
+      subResults: [
+        { position: 1, sideA: 'A1', sideB: 'B1', ipponsA: [], ipponsB: ['M', 'K'], winner: 'B1' },
+        { position: 2, sideA: 'A2', sideB: 'B1', ipponsA: [], ipponsB: [] },
+      ],
+    });
+    const done = screen.getByTestId('kachinuki-done-bout-0');
+    expect(done.classList.contains('team-sub-match--readonly')).toBe(true);
+    expect(done.querySelector('.team-sub-match__edit-hint')).not.toBeNull();
+    expect(done.querySelector('.team-sub-match__btns')).toBeNull();
+    await act(async () => { fireEvent.click(done); });
+    const rows = container.querySelectorAll('.team-sub-match');
+    expect(rows.length).toBe(2);
+    // Bout 1 now editable + flagged as being corrected; bout 2 stays editable.
+    expect(rows[0].classList.contains('team-sub-match--correcting')).toBe(true);
+    expect(rows[0].querySelector('.team-sub-match__btns')).not.toBeNull();
+    expect(rows[1].querySelector('.team-sub-match__btns')).not.toBeNull();
+    expect(screen.getByTestId('kachinuki-done-edit-footer-0')).toBeTruthy();
+  });
+
+  it('RUNNING: correcting a fought bout without changing the winner shows no chain warning (mp-gmcg)', async () => {
+    // Shiro (sideB) won 2-1. Removing the loser's (Aka) ippon is a pure score
+    // fix: the winner is unchanged, so the later bouts are unaffected and no
+    // warning shows.
+    const { container } = await renderCell(KACHI_CELL, {
+      subResults: [
+        { position: 1, sideA: 'A1', sideB: 'B1', ipponsA: ['M'], ipponsB: ['M', 'K'], winner: 'B1' },
+        { position: 2, sideA: 'A2', sideB: 'B1', ipponsA: [], ipponsB: [] },
+      ],
+    });
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-done-bout-0')); });
+    const bout0 = container.querySelectorAll('.team-sub-match')[0];
+    const akaFilled = bout0.querySelectorAll('.tsm-center-pts--aka .editor-side__pt--filled');
+    expect(akaFilled.length).toBe(1);
+    await act(async () => { fireEvent.click(akaFilled[0]); });
+    expect(screen.queryByTestId('kachinuki-done-edit-warn')).toBeNull();
+  });
+
+  it('RUNNING: changing who won a fought bout warns the later bouts need re-checking (mp-gmcg)', async () => {
+    // Shiro (sideB) won 2-1. Removing a winner ippon makes it 1-1 — no longer
+    // Shiro's win — which reshapes who-stays-on for every later bout. The app
+    // never restacks them itself (only the courtside operator knows the real
+    // later results), so it warns instead.
+    const { container } = await renderCell(KACHI_CELL, {
+      subResults: [
+        { position: 1, sideA: 'A1', sideB: 'B1', ipponsA: ['M'], ipponsB: ['M', 'K'], winner: 'B1' },
+        { position: 2, sideA: 'A2', sideB: 'B1', ipponsA: [], ipponsB: [] },
+      ],
+    });
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-done-bout-0')); });
+    expect(screen.queryByTestId('kachinuki-done-edit-warn')).toBeNull();
+    const bout0 = container.querySelectorAll('.team-sub-match')[0];
+    const shiroFilled = bout0.querySelectorAll('.tsm-center-pts--shiro .editor-side__pt--filled');
+    expect(shiroFilled.length).toBe(2);
+    await act(async () => { fireEvent.click(shiroFilled[0]); });
+    expect(screen.getByTestId('kachinuki-done-edit-warn')).toBeTruthy();
+  });
+
+  it('RUNNING: Done collapses a corrected bout back to a read-only row (mp-gmcg)', async () => {
+    await renderCell(KACHI_CELL, {
+      subResults: [
+        { position: 1, sideA: 'A1', sideB: 'B1', ipponsA: [], ipponsB: ['M', 'K'], winner: 'B1' },
+        { position: 2, sideA: 'A2', sideB: 'B1', ipponsA: [], ipponsB: [] },
+      ],
+    });
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-done-bout-0')); });
+    expect(screen.getByTestId('kachinuki-done-edit-footer-0')).toBeTruthy();
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-done-edit-done')); });
+    expect(screen.getByTestId('kachinuki-done-bout-0').classList.contains('team-sub-match--readonly')).toBe(true);
+    expect(screen.queryByTestId('kachinuki-done-edit-footer-0')).toBeNull();
+  });
+
+  it('RUNNING: an open past-bout correction survives a same-match reload (mp-gmcg)', async () => {
+    // Autosave persists each correction as a running write that round-trips back
+    // over SSE as a fresh `match` object with the SAME id. The editor must stay
+    // open across that reload (keyed on match id, not object identity) instead of
+    // collapsing after every ippon change.
+    const overrides = {
+      subResults: [
+        { position: 1, sideA: 'A1', sideB: 'B1', ipponsA: [], ipponsB: ['M', 'K'], winner: 'B1' },
+        { position: 2, sideA: 'A2', sideB: 'B1', ipponsA: [], ipponsB: [] },
+      ],
+    };
+    const utils = await renderCell(KACHI_CELL, overrides);
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-done-bout-0')); });
+    expect(screen.getByTestId('kachinuki-done-edit-footer-0')).toBeTruthy();
+    // Simulate the SSE reload: a brand-new match object, same id + data.
+    await act(async () => {
+      utils.rerender(
+        <ScoreEditorModal match={makeTeamMatch(KACHI_CELL, overrides)} onClose={vi.fn()}
+          onSubmit={vi.fn().mockResolvedValue(undefined)} password="" />
+      );
+    });
+    expect(screen.getByTestId('kachinuki-done-edit-footer-0')).toBeTruthy();
   });
 
   it('COMPLETED (correction): every fought server bout renders and is editable', async () => {

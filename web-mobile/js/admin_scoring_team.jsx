@@ -443,6 +443,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // Record / prev / next), after which the prop is authoritative again.
   const [matchOverride, setMatchOverride] = useStateA(null);
   useEffectA(() => { setMatchOverride(null); }, [match]);
+  // mp-gmcg: never carry an open past-bout correction across a match SWITCH,
+  // but DO survive a same-match reload. Autosave persists each correction as a
+  // running write, which round-trips back over SSE as a fresh `match` object
+  // (same id); keying on match?.id — not the object ref — keeps the editor open
+  // across that reload instead of collapsing it after every ippon change.
+  useEffectA(() => { setEditingDoneBoutIdx(-1); editingDoneOriginalRef.current = null; }, [match?.id]);
   const m = matchOverride || match;
   const isComplete = m.status === "completed";
   // Kachinuki appends bouts beyond teamSize (engine assigns Position =
@@ -515,6 +521,19 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // match empty-bout undo).
   const [removingBout, setRemovingBout] = useStateA(false);
   const [removeBoutErr, setRemoveBoutErr] = useStateA("");
+  // mp-gmcg: full inline edit of a bout ALREADY fought during a RUNNING
+  // kachinuki encounter. Tapping a read-only past bout reopens it in the same
+  // scoring controls as the current bout; the debounced autosave persists the
+  // change as an unflagged running write the server merges BY POSITION (no
+  // advancement, no truncation — the bout log is the source of truth and every
+  // bout/participant stays recorded). editingDoneBoutIdx is the canonical index
+  // of the past bout being corrected, or -1. editingDoneOriginalRef snapshots
+  // that bout's outcome on open so a correction that FLIPS who won can warn the
+  // operator that the later bouts (fought on the old result) need re-checking —
+  // the app never restacks them itself, because only the courtside operator
+  // knows the real later results.
+  const [editingDoneBoutIdx, setEditingDoneBoutIdx] = useStateA(-1);
+  const editingDoneOriginalRef = useRefA(null);
   // The structured court_busy 409, unpacked: { court, matchId, compId,
   // message } describing the match ALREADY RUNNING on this court. Non-null
   // means the remedy panel is on screen.
@@ -1294,11 +1313,45 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     };
   };
 
+  // mp-gmcg: open a past (already-fought) bout for inline correction. Snapshot
+  // its current outcome so renderDoneBoutEditFooter can tell if the operator
+  // FLIPS who won (which invalidates the later bouts' fighters).
+  const openDoneBoutEdit = (idx) => {
+    const t = subTotals[idx];
+    editingDoneOriginalRef.current = { winner: t ? t.winner : null };
+    setEditingDoneBoutIdx(idx);
+  };
+  const closeDoneBoutEdit = () => { editingDoneOriginalRef.current = null; setEditingDoneBoutIdx(-1); };
+
+  // mp-gmcg: footer under a past bout opened for correction — a [Done] control
+  // to collapse it back, and a non-destructive warning when the correction has
+  // changed who won (the later bouts were fought on the old result). Rendered
+  // as its own element in the bout list so it sits directly beneath the bout
+  // being edited without surgery inside the shared editable-bout block.
+  const renderDoneBoutEditFooter = (idx) => {
+    const orig = editingDoneOriginalRef.current;
+    const t = subTotals[idx];
+    const winnerFlipped = !!orig && !!t && t.winner !== orig.winner;
+    return (
+      <div key={`edit-footer-${idx}`} className="kachinuki-done-edit-footer" data-testid={`kachinuki-done-edit-footer-${idx}`}>
+        {winnerFlipped && (
+          <p className="kachinuki-done-edit-warn" data-testid="kachinuki-done-edit-warn">
+            You changed who won bout {idx + 1}. The later bouts were fought based on the old result, so check they still show the right competitors and fix any that are wrong.
+          </p>
+        )}
+        <button type="button" className="btn btn--sm kachinuki-done-edit-done" data-testid="kachinuki-done-edit-done" onClick={closeDoneBoutEdit}>
+          Done correcting bout {idx + 1}
+        </button>
+      </div>
+    );
+  };
+
   // mp-gmcg: read-only display of a fought kachinuki bout — the SAME
   // team-sub-match layout as the editable bout row (position, Shiro/Aka names,
   // centred ippon-mark slots, winner) minus the controls. Reuses the
   // bout-scoring component's markup + CSS so past bouts read like a regular team
-  // sheet / the TV board rather than a text log.
+  // sheet / the TV board rather than a text log. Tapping the row reopens it for
+  // inline correction (openDoneBoutEdit) — the only mid-encounter fix path.
   const renderReadOnlyBout = (idx) => {
     const s = subs[idx];
     const t = subTotals[idx];
@@ -1308,7 +1361,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     const isDraw = s.draw || (t.winner === null && scored);
     const nameCls = (side) => "tsm-name__static" + (t.winner === side ? " tsm-name__static--win" : "");
     return (
-      <div key={`ro-${idx}`} className="team-sub-match team-sub-match--readonly" data-testid={`kachinuki-done-bout-${idx}`}>
+      <div key={`ro-${idx}`} className="team-sub-match team-sub-match--readonly team-sub-match--editable" data-testid={`kachinuki-done-bout-${idx}`}
+        role="button" tabIndex={0} aria-label={`Correct bout ${idx + 1}`}
+        onClick={() => openDoneBoutEdit(idx)}
+        onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openDoneBoutEdit(idx); } }}>
         <div className="team-sub-match__pos"><span className="team-sub-match__pos-num">{idx + 1}</span>{posAbbrev && <span className="team-sub-match__pos-name">{posAbbrev}</span>}</div>
         <div className="team-sub-match__row">
           <div className="team-sub-match__side team-sub-match__side--shiro">
@@ -1331,6 +1387,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             <div className="tsm-name"><span className={nameCls("a")}>{aName || "-"}</span></div>
           </div>
         </div>
+        <span className="team-sub-match__edit-hint" aria-hidden="true">✎ Correct</span>
       </div>
     );
   };
@@ -1670,7 +1727,16 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             // the current editable bout (pre-rendered elements pass through the
             // isValidElement gate below, like the banner). kachinukiDoneBoutIdxs
             // is already [] outside kachinuki bout mode, so no guard is needed.
-            ...kachinukiDoneBoutIdxs.map(renderReadOnlyBout),
+            // The one done bout opened for correction (editingDoneBoutIdx) emits
+            // its POSITION instead — falling through to the shared editable-bout
+            // block below, in its own chronological slot — followed by a footer
+            // (Done + winner-flip warning). positions holds unique 1..N values,
+            // so positions.indexOf round-trips the index cleanly.
+            ...kachinukiDoneBoutIdxs.flatMap(idx => (
+              idx === editingDoneBoutIdx
+                ? [positions[idx], renderDoneBoutEditFooter(idx)]
+                : [renderReadOnlyBout(idx)]
+            )),
             ...visiblePositions,
           ].filter(Boolean).map((pos, _displayIdx) => {
             // Kachinuki returns a banner element as the first item; pass
@@ -1803,7 +1869,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             })();
 
             return (
-              <div key={idx} className="team-sub-match">
+              <div key={idx} className={"team-sub-match" + (idx === editingDoneBoutIdx ? " team-sub-match--correcting" : "")}>
                 <div className="team-sub-match__pos" title={posLabel}>
                   {/* Bout number AND the FIK position handle (Sen/Ji/Chu/Fuk/Tai
                       for 5-person teams): operators think in positions, so the

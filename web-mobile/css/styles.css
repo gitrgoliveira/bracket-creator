@@ -6831,6 +6831,65 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   font-weight: 800;
 }
 
+/* mp-gmcg: a fought kachinuki bout is tappable during a RUNNING encounter to
+   reopen it for inline correction. The whole row is the target (a tired
+   operator shouldn't have to hit a tiny icon), with an always-visible chip
+   since touch has no hover. */
+.team-sub-match--editable {
+  position: relative;
+  cursor: pointer;
+  transition: opacity 120ms ease-out, box-shadow 120ms ease-out;
+}
+.team-sub-match--editable:hover {
+  opacity: 1;
+}
+.team-sub-match--editable:focus-visible {
+  outline: none;
+  opacity: 1;
+  box-shadow: var(--focus-ring);
+  border-radius: 8px;
+}
+.team-sub-match__edit-hint {
+  position: absolute;
+  top: 4px;
+  right: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--ink, #111827);
+  background: var(--accent-soft);
+  border-radius: 999px;
+  padding: 1px 7px;
+  pointer-events: none;
+}
+/* The bout currently open for correction: a clear accent frame so the operator
+   sees which row the scoring controls belong to. */
+.team-sub-match--correcting {
+  box-shadow: var(--focus-ring);
+  border-radius: 8px;
+}
+/* Footer beneath a bout opened for correction: the [Done] control and a
+   non-destructive warning when the correction has flipped who won. */
+.kachinuki-done-edit-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 2px 0 10px;
+}
+.kachinuki-done-edit-warn {
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--warn-ink);
+  background: var(--warn-soft);
+  border: 1px solid var(--warn-border);
+  border-radius: 6px;
+}
+.kachinuki-done-edit-done {
+  align-self: flex-start;
+}
+
 /* ---------- Team sub-match fouls (inline, independent) ---------- */
 .tsm-side-label {
   font-size: 9px;

@@ -1314,7 +1314,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   };
 
   // mp-gmcg: open a past (already-fought) bout for inline correction. Snapshot
-  // its current outcome so renderDoneBoutEditFooter can tell if the operator
+  // its current outcome so renderCorrectionWarning can tell if the operator
   // FLIPS who won (which invalidates the later bouts' fighters).
   const openDoneBoutEdit = (idx) => {
     const t = subTotals[idx];
@@ -1328,21 +1328,18 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // changed who won (the later bouts were fought on the old result). Rendered
   // as its own element in the bout list so it sits directly beneath the bout
   // being edited without surgery inside the shared editable-bout block.
-  const renderDoneBoutEditFooter = (idx) => {
+  const renderCorrectionWarning = (idx) => {
     const orig = editingDoneOriginalRef.current;
     const t = subTotals[idx];
     const winnerFlipped = !!orig && !!t && t.winner !== orig.winner;
+    // The black-triangle caret (in the bout's position column) is the
+    // expand/collapse control, so no Done button here. The footer exists only
+    // to carry the winner-flip warning; nothing to show otherwise.
+    if (!winnerFlipped) return null;
     return (
-      <div key={`edit-footer-${idx}`} className="kachinuki-done-edit-footer" data-testid={`kachinuki-done-edit-footer-${idx}`}>
-        {winnerFlipped && (
-          <p className="kachinuki-done-edit-warn" data-testid="kachinuki-done-edit-warn">
-            You changed who won bout {idx + 1}. The later bouts were fought based on the old result, so check they still show the right competitors and fix any that are wrong.
-          </p>
-        )}
-        <button type="button" className="btn btn--sm kachinuki-done-edit-done" data-testid="kachinuki-done-edit-done" onClick={closeDoneBoutEdit}>
-          Done correcting bout {idx + 1}
-        </button>
-      </div>
+      <p key={`edit-warn-${idx}`} className="kachinuki-done-edit-warn" data-testid="kachinuki-done-edit-warn">
+        You changed who won bout {idx + 1}. The later bouts were fought based on the old result, so check they still show the right competitors and fix any that are wrong.
+      </p>
     );
   };
 
@@ -1356,16 +1353,17 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     const s = subs[idx];
     const t = subTotals[idx];
     const { aName, bName } = playerNamesForBout(idx);
-    const posAbbrev = positionAbbrevFor(teamSize, idx, (m.subResults || []).find(sr => sr.position === idx + 1));
     const scored = t.aTotal > 0 || t.bTotal > 0;
     const isDraw = s.draw || (t.winner === null && scored);
     const nameCls = (side) => "tsm-name__static" + (t.winner === side ? " tsm-name__static--win" : "");
     return (
       <div key={`ro-${idx}`} className="team-sub-match team-sub-match--readonly team-sub-match--editable" data-testid={`kachinuki-done-bout-${idx}`}
-        role="button" tabIndex={0} aria-label={`Correct bout ${idx + 1}`}
+        role="button" tabIndex={0} aria-label={`Correct bout ${idx + 1}`} aria-expanded={false}
         onClick={() => openDoneBoutEdit(idx)}
         onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openDoneBoutEdit(idx); } }}>
-        <div className="team-sub-match__pos"><span className="team-sub-match__pos-num">{idx + 1}</span>{posAbbrev && <span className="team-sub-match__pos-name">{posAbbrev}</span>}</div>
+        {/* Kachinuki: only the bout number (no FIK position handle — the winner
+            stays on, so a bout is not "position vs same position"). */}
+        <div className="team-sub-match__pos"><span className="tsm-caret" aria-hidden="true">▶</span><span className="team-sub-match__pos-num">{idx + 1}</span></div>
         <div className="team-sub-match__row">
           <div className="team-sub-match__side team-sub-match__side--shiro">
             <div className="tsm-name"><span className={nameCls("b")}>{bName || "-"}</span></div>
@@ -1387,7 +1385,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             <div className="tsm-name"><span className={nameCls("a")}>{aName || "-"}</span></div>
           </div>
         </div>
-        <span className="team-sub-match__edit-hint" aria-hidden="true">✎ Correct</span>
       </div>
     );
   };
@@ -1734,7 +1731,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             // so positions.indexOf round-trips the index cleanly.
             ...kachinukiDoneBoutIdxs.flatMap(idx => (
               idx === editingDoneBoutIdx
-                ? [positions[idx], renderDoneBoutEditFooter(idx)]
+                ? [positions[idx], renderCorrectionWarning(idx)]
                 : [renderReadOnlyBout(idx)]
             )),
             ...visiblePositions,
@@ -1871,6 +1868,15 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             return (
               <div key={idx} className={"team-sub-match" + (idx === editingDoneBoutIdx ? " team-sub-match--correcting" : "")}>
                 <div className="team-sub-match__pos" title={posLabel}>
+                  {/* mp-gmcg: a bout opened for correction gets the same black
+                      triangle as its collapsed row, now pointing down (rotated
+                      via --open) and clickable to collapse it back. Only the
+                      corrected past bout carries it; the live current bout does
+                      not (it is never collapsible). */}
+                  {idx === editingDoneBoutIdx && (
+                    <button type="button" className="tsm-caret tsm-caret--open tsm-caret-btn" data-testid={`kachinuki-done-collapse-${idx}`}
+                      aria-label={`Collapse bout ${idx + 1}`} aria-expanded={true} onClick={closeDoneBoutEdit}>▶</button>
+                  )}
                   {/* Bout number AND the FIK position handle (Sen/Ji/Chu/Fuk/Tai
                       for 5-person teams): operators think in positions, so the
                       abbreviation rides in the row instead of hiding in the
@@ -1878,7 +1884,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                       the size-agnostic anchor; >5-person teams show it alone.
                       Daihyosen (the rep bout) shows "DH". */}
                   <span className="team-sub-match__pos-num">{isDaihyoRow ? "DH" : idx + 1}</span>
-                  {!isDaihyoRow && posAbbrev && (
+                  {/* mp-gmcg: the FIK position handle (Senpo/Jiho/...) is shown
+                      only for REGULAR team matches, where each position fights
+                      its counterpart. In kachinuki the winner stays on and faces
+                      the NEXT team's fighter, so a bout is not "Jiho vs Jiho" and
+                      the label misleads: only the bout number is kept. */}
+                  {!isKachinuki && !isDaihyoRow && posAbbrev && (
                     <span className="team-sub-match__pos-name">{posAbbrev}</span>
                   )}
                 </div>

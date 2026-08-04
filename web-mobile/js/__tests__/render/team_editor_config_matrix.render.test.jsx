@@ -326,9 +326,9 @@ describe('TeamScoreEditorModal kachinuki bout navigation', () => {
 
   it('RUNNING: tapping a fought bout reopens it inline with scoring controls (mp-gmcg)', async () => {
     // The mid-encounter correction path: a fought bout is read-only with a
-    // visible "Correct" affordance, and tapping it reopens the SAME scoring
-    // controls as the current bout, in place, flagged as the bout being
-    // corrected. No Reopen/End round-trip needed.
+    // black expand caret and aria-expanded=false, and tapping it reopens the
+    // SAME scoring controls as the current bout, in place, flagged as the bout
+    // being corrected with a collapse caret. No Reopen/End round-trip needed.
     const { container } = await renderCell(KACHI_CELL, {
       subResults: [
         { position: 1, sideA: 'A1', sideB: 'B1', ipponsA: [], ipponsB: ['M', 'K'], winner: 'B1' },
@@ -337,7 +337,8 @@ describe('TeamScoreEditorModal kachinuki bout navigation', () => {
     });
     const done = screen.getByTestId('kachinuki-done-bout-0');
     expect(done.classList.contains('team-sub-match--readonly')).toBe(true);
-    expect(done.querySelector('.team-sub-match__edit-hint')).not.toBeNull();
+    expect(done.getAttribute('aria-expanded')).toBe('false');
+    expect(done.querySelector('.tsm-caret')).not.toBeNull();
     expect(done.querySelector('.team-sub-match__btns')).toBeNull();
     await act(async () => { fireEvent.click(done); });
     const rows = container.querySelectorAll('.team-sub-match');
@@ -346,7 +347,10 @@ describe('TeamScoreEditorModal kachinuki bout navigation', () => {
     expect(rows[0].classList.contains('team-sub-match--correcting')).toBe(true);
     expect(rows[0].querySelector('.team-sub-match__btns')).not.toBeNull();
     expect(rows[1].querySelector('.team-sub-match__btns')).not.toBeNull();
-    expect(screen.getByTestId('kachinuki-done-edit-footer-0')).toBeTruthy();
+    // The collapse caret (rotated, aria-expanded=true) is the close control.
+    const caret = screen.getByTestId('kachinuki-done-collapse-0');
+    expect(caret.classList.contains('tsm-caret--open')).toBe(true);
+    expect(caret.getAttribute('aria-expanded')).toBe('true');
   });
 
   it('RUNNING: correcting a fought bout without changing the winner shows no chain warning (mp-gmcg)', async () => {
@@ -387,7 +391,7 @@ describe('TeamScoreEditorModal kachinuki bout navigation', () => {
     expect(screen.getByTestId('kachinuki-done-edit-warn')).toBeTruthy();
   });
 
-  it('RUNNING: Done collapses a corrected bout back to a read-only row (mp-gmcg)', async () => {
+  it('RUNNING: the collapse caret returns a corrected bout to a read-only row (mp-gmcg)', async () => {
     await renderCell(KACHI_CELL, {
       subResults: [
         { position: 1, sideA: 'A1', sideB: 'B1', ipponsA: [], ipponsB: ['M', 'K'], winner: 'B1' },
@@ -395,10 +399,28 @@ describe('TeamScoreEditorModal kachinuki bout navigation', () => {
       ],
     });
     await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-done-bout-0')); });
-    expect(screen.getByTestId('kachinuki-done-edit-footer-0')).toBeTruthy();
-    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-done-edit-done')); });
+    expect(screen.getByTestId('kachinuki-done-collapse-0')).toBeTruthy();
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-done-collapse-0')); });
     expect(screen.getByTestId('kachinuki-done-bout-0').classList.contains('team-sub-match--readonly')).toBe(true);
-    expect(screen.queryByTestId('kachinuki-done-edit-footer-0')).toBeNull();
+    expect(screen.queryByTestId('kachinuki-done-collapse-0')).toBeNull();
+  });
+
+  it('RUNNING: tapping a different fought bout switches which one is open (mp-gmcg)', async () => {
+    // Only one bout is open at a time: opening another collapses the current.
+    await renderCell(KACHI_CELL, {
+      subResults: [
+        { position: 1, sideA: 'A1', sideB: 'B1', ipponsA: [], ipponsB: ['M', 'K'], winner: 'B1' },
+        { position: 2, sideA: 'A2', sideB: 'B1', ipponsA: ['M', 'K'], ipponsB: [], winner: 'A2' },
+        { position: 3, sideA: 'A2', sideB: 'B2', ipponsA: [], ipponsB: [] },
+      ],
+    });
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-done-bout-0')); });
+    expect(screen.getByTestId('kachinuki-done-collapse-0')).toBeTruthy();
+    // Open bout 2: bout 1 collapses (its caret gone), bout 2's caret appears.
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-done-bout-1')); });
+    expect(screen.queryByTestId('kachinuki-done-collapse-0')).toBeNull();
+    expect(screen.getByTestId('kachinuki-done-collapse-1')).toBeTruthy();
+    expect(screen.getByTestId('kachinuki-done-bout-0').classList.contains('team-sub-match--readonly')).toBe(true);
   });
 
   it('RUNNING: an open past-bout correction survives a same-match reload (mp-gmcg)', async () => {
@@ -414,7 +436,7 @@ describe('TeamScoreEditorModal kachinuki bout navigation', () => {
     };
     const utils = await renderCell(KACHI_CELL, overrides);
     await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-done-bout-0')); });
-    expect(screen.getByTestId('kachinuki-done-edit-footer-0')).toBeTruthy();
+    expect(screen.getByTestId('kachinuki-done-collapse-0')).toBeTruthy();
     // Simulate the SSE reload: a brand-new match object, same id + data.
     await act(async () => {
       utils.rerender(
@@ -422,7 +444,7 @@ describe('TeamScoreEditorModal kachinuki bout navigation', () => {
           onSubmit={vi.fn().mockResolvedValue(undefined)} password="" />
       );
     });
-    expect(screen.getByTestId('kachinuki-done-edit-footer-0')).toBeTruthy();
+    expect(screen.getByTestId('kachinuki-done-collapse-0')).toBeTruthy();
   });
 
   it('COMPLETED (correction): every fought server bout renders and is editable', async () => {

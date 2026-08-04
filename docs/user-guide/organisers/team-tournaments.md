@@ -76,9 +76,9 @@ If the app adds a pairing you did not want, for example an extra bout after the 
 
 ![The kachinuki score editor: the bouts already fought shown as read-only rows above the current bout (which carries the ippon buttons for each side), the × Remove this bout undo for a pairing added by mistake, and the Record bout and End match footer actions.](../../screenshots/kachinuki-scoring-buttons.png)
 
-To fix a bout you have already recorded, without ending the encounter, tap its row. It reopens in place with the same scoring controls as the current bout, so you can adjust the points or change who won, and the change saves as you go. Tap **Done correcting** when you are finished.
+To fix a bout you have already recorded, without ending the encounter, tap its row. It reopens in place with the same scoring controls as the current bout, so you can adjust the points or change who won, and the change saves as you go. Each fought bout carries a black triangle in its number column: it points right when the bout is collapsed and down when it is open, so tapping it expands the bout to correct it and collapses it again when you are finished.
 
-![The kachinuki score editor with an earlier bout reopened for correction: the bout sits in an accent frame with its ippon buttons for each side, a Done correcting button beneath it, and the other fought bouts still shown as read-only rows above and below.](../../screenshots/kachinuki-correct-bout.png)
+![The kachinuki score editor with an earlier bout reopened for correction: the bout sits in an accent frame with its ippon buttons for each side and a downward black triangle in its number column that collapses it again, while the other fought bouts stay as read-only rows above and below, each with a rightward triangle.](../../screenshots/kachinuki-correct-bout.png)
 
 If your correction changes who won that bout, the bouts after it were fought on the old result, so the app flags them for you to check and put right. It never re-shuffles the later bouts on its own: only you, at the court, know how they actually went.
 

@@ -308,12 +308,6 @@ export function kachinukiBandModel({ subs, daihyosenIdx, isComplete, matchWinner
       // hikiwake or equal counts with no fusensho to attribute them to.
       tie: winnerSide === null,
       fusensho: !!s.fusensho,
-      // aName/bName retained so the read-only bout-log strip can name both
-      // fighters in a hikiwake row (winner/loser are blank for a tie).
-      aName, bName,
-      // pos = the bout's 1-based position: a stable, data-dependent React key
-      // for the strip (bouts are append-only, never reordered).
-      pos: idx + 1,
     });
   });
 
@@ -326,15 +320,15 @@ export function kachinukiBandModel({ subs, daihyosenIdx, isComplete, matchWinner
     const winSide = matchWinner && matchWinner === sideAName ? "a"
       : matchWinner && matchWinner === sideBName ? "b"
       : null;
-    if (winSide) return { headline, verdict: teamResultLabel({ teamWinner: winSide }), verdictSide: winSide === "a" ? "aka" : "shiro", played };
-    if (matchDecision === "hikiwake" || !matchWinner) return { headline, verdict: "DRAW", verdictSide: "draw", played };
-    return { headline, verdict: String(matchWinner).toUpperCase(), verdictSide: "draw", played };
+    if (winSide) return { headline, verdict: teamResultLabel({ teamWinner: winSide }), verdictSide: winSide === "a" ? "aka" : "shiro" };
+    if (matchDecision === "hikiwake" || !matchWinner) return { headline, verdict: "DRAW", verdictSide: "draw" };
+    return { headline, verdict: String(matchWinner).toUpperCase(), verdictSide: "draw" };
   }
 
   const headline = `BOUT ${currentBout || played.length + 1}`;
   const last = played[played.length - 1];
-  if (!last) return { headline, fact: "", played };
-  if (last.tie) return { headline, fact: "Last: hikiwake · both retired", played };
+  if (!last) return { headline, fact: "" };
+  if (last.tie) return { headline, fact: "Last: hikiwake · both retired" };
   // Streak: consecutive trailing wins by the same fighter — a pure bout-log
   // fact ("stays on" is winner-stays semantics, not a roster claim).
   let streak = 0;
@@ -346,22 +340,7 @@ export function kachinukiBandModel({ subs, daihyosenIdx, isComplete, matchWinner
   const stay = streak >= 2 ? ` · stays on, ${streak} wins` : " · stays on";
   // "Last:" prefix mirrors the tie-fact ("Last: hikiwake …") so the headline
   // "BOUT N" is never misread as bout N's own (unfought) result (critique P2).
-  return { headline, fact: `Last: ${last.winner} beat ${last.loser}${how}${stay}`, played };
-}
-
-// kachinukiBoutLogLine: one plain-language line for a played bout in the
-// read-only bout-log strip. The running kachinuki scorer renders only the
-// CURRENT bout (kachinukiVisiblePositions), so before this the operator could
-// not see or verify bouts 1..N-1 while fighting — they had to end the encounter
-// first (critique P1). This reuses the SAME played[] entries kachinukiBandModel
-// builds, so the strip and the band's "Last:" fact can never disagree. Pure.
-export function kachinukiBoutLogLine(p) {
-  if (!p) return "";
-  if (p.tie) {
-    const who = p.aName && p.bName ? ` · ${p.aName} vs ${p.bName}` : "";
-    return `hikiwake${who}`;
-  }
-  return `${p.winner} beat ${p.loser}${p.fusensho ? " (fusensho)" : ""}`;
+  return { headline, fact: `Last: ${last.winner} beat ${last.loser}${how}${stay}` };
 }
 
 // kachinukiVisiblePositions: which bout slots to render for a kachinuki
@@ -991,6 +970,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const kachinukiCurBoutIdx = kachinukiBoutMode
     ? (() => { const cur = visiblePositions.find(p => p !== "daihyosen"); return cur != null ? positions.indexOf(cur) : -1; })()
     : -1;
+  // mp-gmcg: the bouts already fought (everything played except the current
+  // bout). They render as READ-ONLY team-sub-match rows above the current
+  // editable bout, so the operator sees the whole encounter like a regular team
+  // sheet — reusing the bout-scoring component in a display mode (this replaces
+  // the earlier plain-text "bout log").
+  const kachinukiDoneBoutIdxs = kachinukiBoutMode
+    ? positions.map((_, i) => i).filter(i => i !== daihyosenIdx && i !== kachinukiCurBoutIdx && subBoutHasBeenPlayed(subs[i]))
+    : [];
   const scoreCurrentBoutWaza = (side, waza) => {
     if (kachinukiCurBoutIdx < 0) return;
     updateSub(kachinukiCurBoutIdx, prev => ({
@@ -1297,6 +1284,47 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       aName: resolveBoutSideName({ isKachinuki, isDaihyosen: isDaihyoRow, existingName: override.aName || existing?.sideA, lineupName: pick(lineupA) }),
       bName: resolveBoutSideName({ isKachinuki, isDaihyosen: isDaihyoRow, existingName: override.bName || existing?.sideB, lineupName: pick(lineupB) }),
     };
+  };
+
+  // mp-gmcg: read-only display of a fought kachinuki bout — the SAME
+  // team-sub-match layout as the editable bout row (position, Shiro/Aka names,
+  // centred ippon-mark slots, winner) minus the controls. Reuses the
+  // bout-scoring component's markup + CSS so past bouts read like a regular team
+  // sheet / the TV board rather than a text log.
+  const renderReadOnlyBout = (idx) => {
+    const s = subs[idx];
+    const t = subTotals[idx];
+    const { aName, bName } = playerNamesForBout(idx);
+    const posAbbrev = positionAbbrevFor(teamSize, idx, (m.subResults || []).find(sr => sr.position === idx + 1));
+    const scored = t.aTotal > 0 || t.bTotal > 0;
+    const isDraw = s.draw || (t.winner === null && scored);
+    const nameCls = (side) => "tsm-name__static" + (t.winner === side ? " tsm-name__static--win" : "");
+    return (
+      <div key={`ro-${idx}`} className="team-sub-match team-sub-match--readonly" data-testid={`kachinuki-done-bout-${idx}`}>
+        <div className="team-sub-match__pos"><span className="team-sub-match__pos-num">{idx + 1}</span>{posAbbrev && <span className="team-sub-match__pos-name">{posAbbrev}</span>}</div>
+        <div className="team-sub-match__row">
+          <div className="team-sub-match__side team-sub-match__side--shiro">
+            <div className="tsm-name"><span className={nameCls("b")}>{bName || "-"}</span></div>
+          </div>
+          <div className="team-sub-match__center">
+            <div className="tsm-center-marks">
+              <div className="tsm-center-pts tsm-center-pts--shiro">
+                {s.bFouls >= 1 && <span className="tsm-foul-tri" title="Hansoku: 1 foul">▲</span>}
+                {[0, 1].map(i => <span key={i} className={`editor-side__pt ${s.bPts[i] ? "editor-side__pt--filled" : ""}`}>{s.bPts[i] || "·"}</span>)}
+              </div>
+              <div className="team-sub-match__score">{isDraw ? <span className="tsm-draw">X</span> : null}</div>
+              <div className="tsm-center-pts tsm-center-pts--aka">
+                {[1, 0].map(i => <span key={i} className={`editor-side__pt ${s.aPts[i] ? "editor-side__pt--filled" : ""}`}>{s.aPts[i] || "·"}</span>)}
+                {s.aFouls >= 1 && <span className="tsm-foul-tri" title="Hansoku: 1 foul">▲</span>}
+              </div>
+            </div>
+          </div>
+          <div className="team-sub-match__side team-sub-match__side--aka team-sub-match__side--right">
+            <div className="tsm-name"><span className={nameCls("a")}>{aName || "-"}</span></div>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   // opts.kachinukiBoutFinal: attach the transient bout-final flag ONLY for
@@ -1630,6 +1658,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                     flow forwards through parent + closes the modal). */}
               </div>
             ),
+            // mp-gmcg: the bouts already fought render as read-only rows above
+            // the current editable bout (pre-rendered elements pass through the
+            // isValidElement gate below, like the banner).
+            ...(kachinukiBoutMode ? kachinukiDoneBoutIdxs.map(renderReadOnlyBout) : []),
             ...visiblePositions,
           ].filter(Boolean).map((pos, _displayIdx) => {
             // Kachinuki returns a banner element as the first item; pass
@@ -1978,7 +2010,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               side cells (they still feed standings tie-breaks). Non-kachinuki
               team matches keep RESULT + teamVerdictText: fixed formats ARE
               decided by IV/PW. */}
-          {(() => {
+          {/* mp-gmcg: in the RUNNING kachinuki scorer the fought bouts render as
+              read-only rows above (renderReadOnlyBout), so the IV/PW summary band
+              is redundant and is dropped. Completed kachinuki (correction verdict)
+              and fixed-format team matches keep it. */}
+          {!kachinukiBoutMode && (() => {
             const kb = isKachinuki && !hasDaihyosen
               ? kachinukiBandModel({
                   subs, daihyosenIdx, isComplete,
@@ -1990,28 +2026,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 })
               : null;
             return (
-              <>
-              {/* mp-gmcg: read-only bout-log strip. The running kachinuki scorer
-                  renders only the CURRENT bout, so the operator could not see or
-                  verify the winner-stays-on chain while fighting (critique P1).
-                  Collapsed by default (the "N recorded" count stays glanceable);
-                  one tap reveals bouts 1..N. Reuses kb.played + kachinukiBoutLogLine
-                  so it can never disagree with the band's "Last:" fact. */}
-              {kachinukiBoutMode && kb && kb.played && kb.played.length > 0 && (
-                <details className="kachinuki-boutlog" data-testid="kachinuki-boutlog">
-                  <summary className="kachinuki-boutlog__summary decision-disclosure__summary">
-                    Bouts so far · {kb.played.length} recorded
-                  </summary>
-                  <ol className="kachinuki-boutlog__list">
-                    {kb.played.map((p) => (
-                      <li key={`bout-${p.pos}`} className="kachinuki-boutlog__item">
-                        <span className="kachinuki-boutlog__num">Bout {p.pos}</span>
-                        <span className="kachinuki-boutlog__fact">{kachinukiBoutLogLine(p)}</span>
-                      </li>
-                    ))}
-                  </ol>
-                </details>
-              )}
               <div className="team-summary" style={{ position: "sticky", top: 0, zIndex: 5 }}>
                 {teamSides.map((ts, idx) => (
                   <React.Fragment key={ts.key}>
@@ -2039,7 +2053,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                   </React.Fragment>
                 ))}
               </div>
-              </>
             );
           })()}
 

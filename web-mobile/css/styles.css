@@ -6811,40 +6811,24 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   .decision-disclosure__summary { min-height: 44px; }
 }
 
-/* ---------- Kachinuki read-only bout-log strip (critique P1) ---------- */
-/* The running kachinuki scorer shows only the current bout; this collapsed
-   strip lets the operator see/verify the winner-stays-on chain without ending
-   the encounter. Summary reuses .decision-disclosure__summary for styling. */
-.kachinuki-boutlog {
-  margin: 8px 0;
-  font-size: 12px;
+/* ---------- Kachinuki read-only bout rows ---------- */
+/* The bouts already fought render as read-only team-sub-match rows above the
+   current editable bout (renderReadOnlyBout): the same layout as the editable
+   row, minus the controls, so the encounter reads like a regular team sheet.
+   Muted a touch so the live bout stands out; the winner's name is bold. */
+.team-sub-match--readonly {
+  opacity: 0.92;
 }
-.kachinuki-boutlog__list {
-  list-style: none;
-  margin: 6px 0 0;
-  padding: 8px 10px;
-  background: var(--surface-2, #f1f5f9);
-  border: 1px solid var(--border, #e4e6eb);
-  border-radius: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+.team-sub-match--readonly .tsm-name {
+  margin: 0;
 }
-.kachinuki-boutlog__item {
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
-}
-.kachinuki-boutlog__num {
-  flex: 0 0 auto;
-  min-width: 3.5em;
-  font-weight: 700;
-  color: var(--ink-3);
-  font-variant-numeric: tabular-nums;
-}
-.kachinuki-boutlog__fact {
-  color: var(--ink-1, var(--ink, #111827));
-  overflow-wrap: anywhere;
+/* The SHIRO/AKA chips are dropped on read-only rows; the side is carried by the
+   column + the tinted side background. Colour the name Shiro-dark / Aka-red so
+   each row still reads its side at a glance, matching the scoreboard. */
+.team-sub-match--readonly .team-sub-match__side--shiro .tsm-name__static { color: var(--ink, #111827); }
+.team-sub-match--readonly .team-sub-match__side--aka .tsm-name__static { color: var(--red, #b91c1c); }
+.tsm-name__static--win {
+  font-weight: 800;
 }
 
 /* ---------- Team sub-match fouls (inline, independent) ---------- */

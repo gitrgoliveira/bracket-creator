@@ -265,25 +265,27 @@ describe('TeamScoreEditorModal encho stepper is unbounded (mp-m4bn)', () => {
 describe('TeamScoreEditorModal kachinuki bout navigation', () => {
   const KACHI_CELL = { format: 'playoffs', phase: 'bracket', teamSize: 5, tmt: 'kachinuki', naginata: false };
 
-  it('RUNNING: only the current bout renders; the operator CANNOT navigate back to a scored earlier bout', async () => {
+  it('RUNNING: the fought bouts render as read-only rows above the current editable bout', async () => {
     // Server bout log: bout 1 fought (won by A1), bout 2 appended by
-    // engine.AdvanceKachinuki and not yet scored. kachinukiVisiblePositions
-    // shows ONLY the first unscored server bout while running: bout 1 is not
-    // rendered and no back affordance exists. Corrections to an earlier bout
-    // require finishing the match first (correction mode below). Whether the
-    // operator SHOULD be able to step back mid-encounter is ruled on by
-    // mp-yqxn.2.
+    // engine.AdvanceKachinuki and not yet scored. Both render (mp-gmcg): bout 1
+    // as a READ-ONLY team-sheet row (no scoring controls) above bout 2, the
+    // current editable bout — the operator sees the whole encounter like a
+    // regular team sheet. Only the current bout is editable; correcting an
+    // earlier bout still goes through Reopen (correction mode below).
     const { container } = await renderCell(KACHI_CELL, {
       subResults: [
         { position: 1, sideA: 'A1', sideB: 'B1', ipponsA: ['M', 'K'], ipponsB: [], winner: 'A1' },
         { position: 2, sideA: 'A1', sideB: 'B2', ipponsA: [], ipponsB: [] },
       ],
     });
-    // Exactly one bout row, and it is bout 2: bout 1 is not rendered and no
-    // back affordance exists.
     const rows = container.querySelectorAll('.team-sub-match');
-    expect(rows.length).toBe(1);
-    expect(rows[0].querySelector('.team-sub-match__pos-num').textContent).toBe('2');
+    expect(rows.length).toBe(2);
+    expect([...rows].map(r => r.querySelector('.team-sub-match__pos-num').textContent)).toEqual(['1', '2']);
+    // Bout 1 (fought) is read-only — no scoring controls; bout 2 (current) is editable.
+    expect(rows[0].classList.contains('team-sub-match--readonly')).toBe(true);
+    expect(rows[0].querySelector('.team-sub-match__btns')).toBeNull();
+    expect(rows[1].classList.contains('team-sub-match--readonly')).toBe(false);
+    expect(rows[1].querySelector('.team-sub-match__btns')).not.toBeNull();
   });
 
   it('COMPLETED (correction): every fought server bout renders and is editable', async () => {

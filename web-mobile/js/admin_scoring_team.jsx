@@ -1323,21 +1323,19 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   };
   const closeDoneBoutEdit = () => { editingDoneOriginalRef.current = null; setEditingDoneBoutIdx(-1); };
 
-  // mp-gmcg: footer under a past bout opened for correction — a [Done] control
-  // to collapse it back, and a non-destructive warning when the correction has
-  // changed who won (the later bouts were fought on the old result). Rendered
-  // as its own element in the bout list so it sits directly beneath the bout
-  // being edited without surgery inside the shared editable-bout block.
+  // mp-gmcg: the non-destructive warning shown beneath a past bout opened for
+  // correction, when the correction has changed who won (the later bouts were
+  // fought on the old result). Collapse is the black-triangle caret, so there is
+  // no Done button. Rendered as its own element in the bout list so it sits
+  // directly beneath the bout being edited without surgery inside the shared
+  // editable-bout block.
   const renderCorrectionWarning = (idx) => {
     const orig = editingDoneOriginalRef.current;
     const t = subTotals[idx];
     const winnerFlipped = !!orig && !!t && t.winner !== orig.winner;
-    // The black-triangle caret (in the bout's position column) is the
-    // expand/collapse control, so no Done button here. The footer exists only
-    // to carry the winner-flip warning; nothing to show otherwise.
-    if (!winnerFlipped) return null;
+    if (!winnerFlipped) return null; // nothing to show unless the winner changed
     return (
-      <p key={`edit-warn-${idx}`} className="kachinuki-done-edit-warn" data-testid="kachinuki-done-edit-warn">
+      <p key={`edit-warn-${idx}`} className="alert alert--warn kachinuki-done-edit-warn" data-testid="kachinuki-done-edit-warn">
         You changed who won bout {idx + 1}. The later bouts were fought based on the old result, so check they still show the right competitors and fix any that are wrong.
       </p>
     );
@@ -1749,7 +1747,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             const isDaihyoRow = idx === daihyosenIdx;
             const existingSubAtIdx = (m.subResults || []).find(sr => sr.position === (isDaihyoRow ? DAIHYOSEN_POSITION : idx + 1));
             const posLabel = isDaihyoRow ? "Daihyosen" : positionLabelFor(teamSize, idx, existingSubAtIdx);
-            const posAbbrev = isDaihyoRow ? "" : positionAbbrevFor(teamSize, idx, existingSubAtIdx);
+            // No FIK position handle (Senpo/Jiho/...) for the daihyosen rep bout,
+            // nor for kachinuki: with winner-stays-on a bout is the previous
+            // winner vs the NEXT team's fighter, not "Jiho vs Jiho", so the label
+            // misleads. This is the single home for the rule (the read-only rows
+            // simply never render it).
+            const posAbbrev = (isDaihyoRow || isKachinuki) ? "" : positionAbbrevFor(teamSize, idx, existingSubAtIdx);
             // Resolve the player name occupying this position on each
             // side: lineup data first (canonical when present), then the
             // SubMatchResult.SideA/SideB strings from a prior score.
@@ -1884,12 +1887,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                       the size-agnostic anchor; >5-person teams show it alone.
                       Daihyosen (the rep bout) shows "DH". */}
                   <span className="team-sub-match__pos-num">{isDaihyoRow ? "DH" : idx + 1}</span>
-                  {/* mp-gmcg: the FIK position handle (Senpo/Jiho/...) is shown
-                      only for REGULAR team matches, where each position fights
-                      its counterpart. In kachinuki the winner stays on and faces
-                      the NEXT team's fighter, so a bout is not "Jiho vs Jiho" and
-                      the label misleads: only the bout number is kept. */}
-                  {!isKachinuki && !isDaihyoRow && posAbbrev && (
+                  {/* posAbbrev is already "" for kachinuki + daihyosen (see its
+                      computation above), so only the number shows for those. */}
+                  {posAbbrev && (
                     <span className="team-sub-match__pos-name">{posAbbrev}</span>
                   )}
                 </div>

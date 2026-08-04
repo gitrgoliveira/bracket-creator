@@ -6900,16 +6900,12 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   box-shadow: var(--focus-ring);
   border-radius: 8px;
 }
-/* Non-destructive warning beneath a bout whose correction flipped who won. */
+/* Non-destructive warning beneath a bout whose correction flipped who won.
+   Composes the shared .alert .alert--warn base (padding/border/colors); only the
+   layout deltas live here. */
 .kachinuki-done-edit-warn {
   margin: 4px 0 10px;
-  padding: 8px 10px;
-  font-size: 13px;
   line-height: 1.4;
-  color: var(--warn-ink);
-  background: var(--warn-soft);
-  border: 1px solid var(--warn-border);
-  border-radius: 6px;
 }
 
 /* ---------- Team sub-match fouls (inline, independent) ---------- */

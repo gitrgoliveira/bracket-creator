@@ -306,6 +306,23 @@ describe('TeamScoreEditorModal kachinuki bout navigation', () => {
     expect(rows[0].querySelector('.tsm-name__static--win')).toBeNull();
   });
 
+  it('RUNNING: the keyboard cannot score a bout that is already decided (no impossible 2-2)', async () => {
+    // Regression for the /simplify catch: keyboard scoring must honour the same
+    // guards as the ippon buttons (disabled once decided, capped per side), so
+    // it can't record a score the taps forbid.
+    const { container } = await renderCell(KACHI_CELL, {
+      subResults: [{ position: 1, sideA: 'A1', sideB: 'B1', ipponsA: [], ipponsB: [] }],
+    });
+    const filled = (side) => container.querySelectorAll(`.tsm-center-pts--${side} .editor-side__pt--filled`).length;
+    // Score Shiro (no shift) to 2 ippons via the keyboard: the bout is now decided.
+    await act(async () => { fireEvent.keyDown(document.body, { key: 'm' }); });
+    await act(async () => { fireEvent.keyDown(document.body, { key: 'k' }); });
+    expect(filled('shiro')).toBe(2);
+    // A further Aka keystroke (Shift+M) is a no-op — a decided bout can't reach 2-2.
+    await act(async () => { fireEvent.keyDown(document.body, { key: 'M', shiftKey: true }); });
+    expect(filled('aka')).toBe(0);
+  });
+
   it('COMPLETED (correction): every fought server bout renders and is editable', async () => {
     const { container } = await renderCell(KACHI_CELL, {
       status: 'completed',

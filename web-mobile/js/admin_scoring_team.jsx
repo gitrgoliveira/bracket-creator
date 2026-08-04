@@ -8,6 +8,7 @@ import {
   MAX_IPPONS_PER_SIDE,
   isBoutDecided,
   getIpponButtons,
+  getValidPointKeys,
   IpponLegend,
   ScoringShortcutHint,
   applyFusenshoToggle,
@@ -980,12 +981,19 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     : [];
   const scoreCurrentBoutWaza = (side, waza) => {
     if (kachinukiCurBoutIdx < 0) return;
-    updateSub(kachinukiCurBoutIdx, prev => ({
-      ...prev,
-      [side === "a" ? "aPts" : "bPts"]: [...(side === "a" ? prev.aPts : prev.bPts), waza],
-      // Mirror rowSide.setPts: entering a strike clears a pending fusensho/draw.
-      fusensho: "", _preFusensho: undefined, draw: false,
-    }));
+    const cur = subs[kachinukiCurBoutIdx];
+    // Match the ippon buttons' guards so the keyboard can't record a score the
+    // taps forbid: the buttons are disabled once the bout is decided
+    // (subBoutDecided — a side reached 2 ippons, so scoring on could push an
+    // impossible 2-2), and never append past MAX_IPPONS_PER_SIDE per side.
+    if (isBoutDecided(cur.aPts, cur.bPts)) return;
+    const key = side === "a" ? "aPts" : "bPts";
+    updateSub(kachinukiCurBoutIdx, prev => (
+      prev[key].length >= MAX_IPPONS_PER_SIDE
+        ? prev
+        // Mirror setPts's clear-tail: a fresh strike clears a pending fusensho/draw.
+        : { ...prev, [key]: [...prev[key], waza], fusensho: "", _preFusensho: undefined, draw: false }
+    ));
   };
 
   // mp-gmcg: [End match] outcome, derived from LOCAL bout state so an
@@ -1515,7 +1523,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       if (!s.kachinukiBoutMode || window.isInteractiveTarget(ev.target)) return;
       if (ev.key.length !== 1) return;
       const upper = ev.key.toUpperCase();
-      if (getIpponButtons(s.isNaginataTeam).includes(upper)) {
+      if (getValidPointKeys(s.isNaginataTeam).includes(upper)) {
         ev.preventDefault();
         // Shift → AKA (red, sideA); no Shift → SHIRO (white, sideB). ev.shiftKey
         // (not uppercase) avoids Caps Lock misrouting.
@@ -1660,8 +1668,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             ),
             // mp-gmcg: the bouts already fought render as read-only rows above
             // the current editable bout (pre-rendered elements pass through the
-            // isValidElement gate below, like the banner).
-            ...(kachinukiBoutMode ? kachinukiDoneBoutIdxs.map(renderReadOnlyBout) : []),
+            // isValidElement gate below, like the banner). kachinukiDoneBoutIdxs
+            // is already [] outside kachinuki bout mode, so no guard is needed.
+            ...kachinukiDoneBoutIdxs.map(renderReadOnlyBout),
             ...visiblePositions,
           ].filter(Boolean).map((pos, _displayIdx) => {
             // Kachinuki returns a banner element as the first item; pass
@@ -2545,7 +2554,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
           </>
           )}
           {/* Quiet, always-present keyboard-shortcut reminder. */}
-          <ScoringShortcutHint pointKeys={kachinukiBoutMode ? getIpponButtons(isNaginataTeam).join("") : ""} />
+          <ScoringShortcutHint pointKeys={kachinukiBoutMode ? getValidPointKeys(isNaginataTeam) : ""} />
         </div>
     </>
   );

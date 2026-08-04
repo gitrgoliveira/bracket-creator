@@ -6791,13 +6791,61 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 
 /* ---------- H ippon button ---------- */
+/* H is the Hansoku point (awarded on the opponent's 2nd foul), not an earned
+   strike, so it keeps a distinct red ink + border. But a resting red FILL made
+   it read as pre-selected/active beside the neutral M/K/D/T, so a tired operator
+   misread the lone filled button as an alert (critique). Drop the resting fill;
+   keep the ink/border cue and let the tint appear only on hover. */
 .ipt-btn--h {
-  background: rgba(220, 38, 38, 0.08);
   color: var(--red);
   border-color: rgba(220, 38, 38, 0.3);
   font-weight: 800;
 }
-.ipt-btn--h:hover { background: rgba(220, 38, 38, 0.15); }
+.ipt-btn--h:hover { background: rgba(220, 38, 38, 0.12); }
+
+/* Touch: the "Send back to queue" control and the kiken/fusenpai disclosure
+   toggles were the only operator controls that fell below the 44px touch target
+   on tablets (critique measured ~26px and ~18px); floor them on coarse pointer. */
+@media (pointer: coarse) {
+  .shiaijo-revert { min-height: 44px; }
+  .decision-disclosure__summary { min-height: 44px; }
+}
+
+/* ---------- Kachinuki read-only bout-log strip (critique P1) ---------- */
+/* The running kachinuki scorer shows only the current bout; this collapsed
+   strip lets the operator see/verify the winner-stays-on chain without ending
+   the encounter. Summary reuses .decision-disclosure__summary for styling. */
+.kachinuki-boutlog {
+  margin: 8px 0;
+  font-size: 12px;
+}
+.kachinuki-boutlog__list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  background: var(--surface-2, #f1f5f9);
+  border: 1px solid var(--border, #e4e6eb);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.kachinuki-boutlog__item {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+.kachinuki-boutlog__num {
+  flex: 0 0 auto;
+  min-width: 3.5em;
+  font-weight: 700;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.kachinuki-boutlog__fact {
+  color: var(--ink-1, var(--ink, #111827));
+  overflow-wrap: anywhere;
+}
 
 /* ---------- Team sub-match fouls (inline, independent) ---------- */
 .tsm-side-label {

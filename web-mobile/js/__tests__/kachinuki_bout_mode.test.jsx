@@ -25,6 +25,7 @@ import {
   subBoutHasBeenPlayed,
   kachinukiEnchoAvailable,
   kachinukiBandModel,
+  kachinukiBoutLogLine,
   boutWinnerSide,
 } from '../admin_scoring_team.jsx';
 import { applyFoulIncrement } from '../admin_scoring_shared.jsx';
@@ -318,7 +319,7 @@ describe('kachinukiBandModel', () => {
 
   it('fresh match: bout number only, no fabricated fact, no verdict', () => {
     const kb = kachinukiBandModel({ ...base, subs: [sub()], currentBout: 1 });
-    expect(kb).toEqual({ headline: 'BOUT 1', fact: '' });
+    expect(kb).toEqual({ headline: 'BOUT 1', fact: '', played: [] });
   });
 
   it('after a win: last-bout fact with stays-on, never a verdict while running', () => {
@@ -328,6 +329,13 @@ describe('kachinukiBandModel', () => {
     expect(kb.headline).toBe('BOUT 2');
     expect(kb.fact).toBe('Last: Alpha Senpo beat Bravo Senpo · stays on');
     expect(kb.verdict).toBeUndefined();
+    // The read-only bout-log strip reads the SAME played[] the band builds, so
+    // the two can never disagree; the current (unscored) bout is not in it.
+    expect(kb.played).toHaveLength(1);
+    expect(kb.played[0]).toMatchObject({
+      winner: 'Alpha Senpo', loser: 'Bravo Senpo', tie: false,
+      aName: 'Alpha Senpo', bName: 'Bravo Senpo',
+    });
   });
 
   it('a streak reads as a bout-log fact ("stays on, 2 wins")', () => {
@@ -384,6 +392,42 @@ describe('kachinukiBandModel', () => {
       ...base, subs: [sub({ bPts: ['M'] })], namesAt: () => ({}), currentBout: 2,
     });
     expect(kb.fact).toBe('Last: Shiro beat Aka · stays on');
+  });
+});
+
+// kachinukiBoutLogLine: one plain-language line per played bout in the running
+// read-only bout-log strip (the operator could not see bouts 1..N-1 before —
+// critique P1). Reuses the band's played[] entries so the strip and the band's
+// "Last:" fact are the same source and can never drift.
+describe('kachinukiBoutLogLine', () => {
+  it('a decided bout reads "winner beat loser"', () => {
+    expect(kachinukiBoutLogLine({ winner: 'Alpha Senpo', loser: 'Bravo Senpo', tie: false }))
+      .toBe('Alpha Senpo beat Bravo Senpo');
+  });
+  it('marks a fusensho (default-win) bout', () => {
+    expect(kachinukiBoutLogLine({ winner: 'Alpha', loser: 'Bravo', tie: false, fusensho: true }))
+      .toBe('Alpha beat Bravo (fusensho)');
+  });
+  it('a tie names both fighters (winner/loser are blank for a hikiwake)', () => {
+    expect(kachinukiBoutLogLine({ tie: true, aName: 'Alpha', bName: 'Bravo' }))
+      .toBe('hikiwake · Alpha vs Bravo');
+  });
+  it('a nameless tie degrades to a bare hikiwake', () => {
+    expect(kachinukiBoutLogLine({ tie: true, aName: '', bName: '' })).toBe('hikiwake');
+  });
+  it('is empty for a missing entry', () => {
+    expect(kachinukiBoutLogLine(null)).toBe('');
+  });
+  it('reads the band\'s played[] so the strip and the "Last:" fact cannot drift', () => {
+    const sub = (over) => ({ aPts: [], bPts: [], aFouls: 0, bFouls: 0, fusensho: '', draw: false, encho: 0, ...over });
+    const kb = kachinukiBandModel({
+      daihyosenIdx: -1, isComplete: false, matchWinner: '', matchDecision: '',
+      sideAName: 'A', sideBName: 'B',
+      namesAt: (idx) => [{ aName: 'Alpha', bName: 'Bravo' }][idx] || {},
+      subs: [sub({ aPts: ['M'] }), sub()], currentBout: 2,
+    });
+    expect(kachinukiBoutLogLine(kb.played[0])).toBe('Alpha beat Bravo');
+    expect(kb.fact).toContain('Alpha beat Bravo');
   });
 });
 

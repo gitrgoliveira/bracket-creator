@@ -308,6 +308,12 @@ export function kachinukiBandModel({ subs, daihyosenIdx, isComplete, matchWinner
       // hikiwake or equal counts with no fusensho to attribute them to.
       tie: winnerSide === null,
       fusensho: !!s.fusensho,
+      // aName/bName retained so the read-only bout-log strip can name both
+      // fighters in a hikiwake row (winner/loser are blank for a tie).
+      aName, bName,
+      // pos = the bout's 1-based position: a stable, data-dependent React key
+      // for the strip (bouts are append-only, never reordered).
+      pos: idx + 1,
     });
   });
 
@@ -320,15 +326,15 @@ export function kachinukiBandModel({ subs, daihyosenIdx, isComplete, matchWinner
     const winSide = matchWinner && matchWinner === sideAName ? "a"
       : matchWinner && matchWinner === sideBName ? "b"
       : null;
-    if (winSide) return { headline, verdict: teamResultLabel({ teamWinner: winSide }), verdictSide: winSide === "a" ? "aka" : "shiro" };
-    if (matchDecision === "hikiwake" || !matchWinner) return { headline, verdict: "DRAW", verdictSide: "draw" };
-    return { headline, verdict: String(matchWinner).toUpperCase(), verdictSide: "draw" };
+    if (winSide) return { headline, verdict: teamResultLabel({ teamWinner: winSide }), verdictSide: winSide === "a" ? "aka" : "shiro", played };
+    if (matchDecision === "hikiwake" || !matchWinner) return { headline, verdict: "DRAW", verdictSide: "draw", played };
+    return { headline, verdict: String(matchWinner).toUpperCase(), verdictSide: "draw", played };
   }
 
   const headline = `BOUT ${currentBout || played.length + 1}`;
   const last = played[played.length - 1];
-  if (!last) return { headline, fact: "" };
-  if (last.tie) return { headline, fact: "Last: hikiwake · both retired" };
+  if (!last) return { headline, fact: "", played };
+  if (last.tie) return { headline, fact: "Last: hikiwake · both retired", played };
   // Streak: consecutive trailing wins by the same fighter — a pure bout-log
   // fact ("stays on" is winner-stays semantics, not a roster claim).
   let streak = 0;
@@ -340,7 +346,22 @@ export function kachinukiBandModel({ subs, daihyosenIdx, isComplete, matchWinner
   const stay = streak >= 2 ? ` · stays on, ${streak} wins` : " · stays on";
   // "Last:" prefix mirrors the tie-fact ("Last: hikiwake …") so the headline
   // "BOUT N" is never misread as bout N's own (unfought) result (critique P2).
-  return { headline, fact: `Last: ${last.winner} beat ${last.loser}${how}${stay}` };
+  return { headline, fact: `Last: ${last.winner} beat ${last.loser}${how}${stay}`, played };
+}
+
+// kachinukiBoutLogLine: one plain-language line for a played bout in the
+// read-only bout-log strip. The running kachinuki scorer renders only the
+// CURRENT bout (kachinukiVisiblePositions), so before this the operator could
+// not see or verify bouts 1..N-1 while fighting — they had to end the encounter
+// first (critique P1). This reuses the SAME played[] entries kachinukiBandModel
+// builds, so the strip and the band's "Last:" fact can never disagree. Pure.
+export function kachinukiBoutLogLine(p) {
+  if (!p) return "";
+  if (p.tie) {
+    const who = p.aName && p.bName ? ` · ${p.aName} vs ${p.bName}` : "";
+    return `hikiwake${who}`;
+  }
+  return `${p.winner} beat ${p.loser}${p.fusensho ? " (fusensho)" : ""}`;
 }
 
 // kachinukiVisiblePositions: which bout slots to render for a kachinuki
@@ -961,6 +982,25 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     return cur != null && subBoutHasBeenPlayed(subs[positions.indexOf(cur)]);
   })() : true;
 
+  // mp-gmcg: keyboard ippon entry for the CURRENT kachinuki bout (critique P2).
+  // Team scoring is many bouts in general (an ambiguous key target — the reason
+  // the handler below only bound Esc/arrows), but a RUNNING kachinuki encounter
+  // shows exactly ONE current bout, so M/K/D/T/H (Shift = Aka) is unambiguous
+  // here — mirroring the individual editor. Wired only in kachinukiBoutMode;
+  // fixed-format multi-bout scoring stays tap-only.
+  const kachinukiCurBoutIdx = kachinukiBoutMode
+    ? (() => { const cur = visiblePositions.find(p => p !== "daihyosen"); return cur != null ? positions.indexOf(cur) : -1; })()
+    : -1;
+  const scoreCurrentBoutWaza = (side, waza) => {
+    if (kachinukiCurBoutIdx < 0) return;
+    updateSub(kachinukiCurBoutIdx, prev => ({
+      ...prev,
+      [side === "a" ? "aPts" : "bPts"]: [...(side === "a" ? prev.aPts : prev.bPts), waza],
+      // Mirror rowSide.setPts: entering a strike clears a pending fusensho/draw.
+      fusensho: "", _preFusensho: undefined, draw: false,
+    }));
+  };
+
   // mp-gmcg: [End match] outcome, derived from LOCAL bout state so an
   // unsaved just-scored bout counts (the operator scores the final bout and
   // taps End without a Record in between). buildKachinukiEndEntries keeps
@@ -1424,12 +1464,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     onClose();
   };
 
-  // Esc-to-close, matching ScoreEditorModal. The full keyboard-shortcut
-  // surface (M/K/D/T/H, ←/→, Enter) isn't wired here: team scoring is
-  // many sub-matches and would need different bindings: but Esc is
-  // table-stakes UX.
+  // Esc-to-close + ←/→ match nav, matching ScoreEditorModal. M/K/D/T/H ippon
+  // shortcuts are wired ONLY for kachinuki bout mode (one current bout, an
+  // unambiguous target — see scoreCurrentBoutWaza); fixed-format team scoring
+  // is many sub-matches and stays tap-only, and Enter-to-finish isn't wired.
   const kbRef = React.useRef(null);
-  kbRef.current = { submitting, handleDismiss, onPrev, onNext };
+  kbRef.current = { submitting, handleDismiss, onPrev, onNext, kachinukiBoutMode, isNaginataTeam, scoreCurrentBoutWaza };
   useEffectA(() => {
     const onKeyDown = (ev) => {
       const s = kbRef.current;
@@ -1439,6 +1479,20 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       if (window.isTextEntry(ev.target)) return;
       if (ev.key === "ArrowLeft" && s.onPrev) { ev.preventDefault(); s.onPrev(); return; }
       if (ev.key === "ArrowRight" && s.onNext) { ev.preventDefault(); s.onNext(); return; }
+      // mp-gmcg: keyboard ippon entry, KACHINUKI bout mode only (one current
+      // bout → unambiguous target; the general team editor has many). Mirrors
+      // the individual editor: blocked when any interactive element
+      // (input/button/link) has focus so name typing and native button
+      // activation still work.
+      if (!s.kachinukiBoutMode || window.isInteractiveTarget(ev.target)) return;
+      if (ev.key.length !== 1) return;
+      const upper = ev.key.toUpperCase();
+      if (getIpponButtons(s.isNaginataTeam).includes(upper)) {
+        ev.preventDefault();
+        // Shift → AKA (red, sideA); no Shift → SHIRO (white, sideB). ev.shiftKey
+        // (not uppercase) avoids Caps Lock misrouting.
+        s.scoreCurrentBoutWaza(ev.shiftKey ? "a" : "b", upper);
+      }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -1936,6 +1990,28 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 })
               : null;
             return (
+              <>
+              {/* mp-gmcg: read-only bout-log strip. The running kachinuki scorer
+                  renders only the CURRENT bout, so the operator could not see or
+                  verify the winner-stays-on chain while fighting (critique P1).
+                  Collapsed by default (the "N recorded" count stays glanceable);
+                  one tap reveals bouts 1..N. Reuses kb.played + kachinukiBoutLogLine
+                  so it can never disagree with the band's "Last:" fact. */}
+              {kachinukiBoutMode && kb && kb.played && kb.played.length > 0 && (
+                <details className="kachinuki-boutlog" data-testid="kachinuki-boutlog">
+                  <summary className="kachinuki-boutlog__summary decision-disclosure__summary">
+                    Bouts so far · {kb.played.length} recorded
+                  </summary>
+                  <ol className="kachinuki-boutlog__list">
+                    {kb.played.map((p) => (
+                      <li key={`bout-${p.pos}`} className="kachinuki-boutlog__item">
+                        <span className="kachinuki-boutlog__num">Bout {p.pos}</span>
+                        <span className="kachinuki-boutlog__fact">{kachinukiBoutLogLine(p)}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </details>
+              )}
               <div className="team-summary" style={{ position: "sticky", top: 0, zIndex: 5 }}>
                 {teamSides.map((ts, idx) => (
                   <React.Fragment key={ts.key}>
@@ -1963,6 +2039,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                   </React.Fragment>
                 ))}
               </div>
+              </>
             );
           })()}
 
@@ -2268,6 +2345,16 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               )}
             </div>
           )}
+          {/* mp-gmcg: inline reason for the disabled [Record bout]. The tired
+              operator sees the greyed button but the "why" was tooltip-only,
+              unreachable on a tablet (critique P2). Shown only in the common
+              "winner stays, next bout pending" state the blocked/draw hints
+              above do not cover; it clears the moment the bout is scored. */}
+          {kachinukiBoutMode && !kachinukiCurrentBoutPlayed && kachinukiEndOutcome?.kind === "win" && (
+            <div data-testid="kachinuki-record-hint" style={{ fontSize: 12, color: "var(--ink-2)" }}>
+              <span>Score this bout to enable <strong>Record bout</strong>, or <strong>End match</strong> to finish on the last scored bout.</span>
+            </div>
+          )}
           {reopenErr && (
             <div data-testid="kachinuki-reopen-error" style={{ color: "var(--danger, #c00)", fontSize: 12, marginBottom: 6 }}>{reopenErr}</div>
           )}
@@ -2405,7 +2492,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                     : "End the match on the last scored bout"}>
                   {submitting ? "Saving…"
                     : endArmed
-                    ? "Tap again to end match"
+                    ? `Tap again — ${kachinukiEndOutcomeLabel(kachinukiEndOutcome)}`
                     : "End match"}
                 </button>
                 </>

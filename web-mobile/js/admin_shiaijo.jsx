@@ -1773,6 +1773,15 @@ function ShiaijoContext({ match, competitions, court, nextPoolName, tweaks, open
             </button>
             {open && (
                 <div className="shiaijo-context__body">
+                    {/* mp-gmcg: the scorer's live IV/PW tally and this standings
+                        table disagreed on screen (critique P1) — standings only
+                        count RECORDED encounters, so a running match reads 0.
+                        Name the gap instead of leaving two contradictory numbers. */}
+                    {isPool && match.status === "running" && (
+                        <p className="shiaijo-context__live-note" style={{ fontSize: 12, color: "var(--ink-2)", margin: "0 0 8px" }}>
+                            This match is still in progress, so its result isn't in the standings below yet — they update when it's recorded.
+                        </p>
+                    )}
                     {isPool ? (
                         isSwissComp ? (
                             // Swiss standings come from the dedicated

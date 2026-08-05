@@ -307,11 +307,13 @@ describe('TeamScoreEditorModal kachinuki bout navigation', () => {
     expect(rows[0].querySelector('.tsm-name__static--win')).toBeNull();
   });
 
-  it('RUNNING: the current (pending, unscored) bout reads "vs" in the middle, never a dash', async () => {
-    // Agreed display contract (CLAUDE.md § Match Decision Types): the middle is
-    // vs/X/(E)/(DH) only. A dash is a CELL value, never the middle, so an unplayed
-    // bout reads "vs" like every other surface (mirrors msb_centre_sep for the
-    // scoreboard). Bout 1 fought (Aka wins), bout 2 appended and unscored.
+  it('RUNNING: every non-tie bout middle reads "vs" — decided AND pending — never a dash', async () => {
+    // Durable fix: the editor derives its centre from the single-source
+    // boutMiddle (CLAUDE.md § Match Decision Types: the middle is vs/X/(E)/(DH)
+    // only; a dash is a CELL value, never the middle). A DECIDED-by-points bout
+    // reads "vs" like the bracket/scoreboard (the cell ippon letters carry the
+    // score), and an unplayed bout reads "vs" too. Bout 1 fought (Aka wins,
+    // read-only done row), bout 2 appended and unscored (live entry row).
     const { container } = await renderCell(KACHI_CELL, {
       subResults: [
         { position: 1, sideA: 'A1', sideB: 'B1', ipponsA: ['M', 'M'], ipponsB: [], winner: 'A1' },
@@ -319,9 +321,11 @@ describe('TeamScoreEditorModal kachinuki bout navigation', () => {
       ],
     });
     const rows = container.querySelectorAll('.team-sub-match');
-    const mid = rows[1].querySelector('.team-sub-match__score');
-    expect(mid?.textContent).toBe('vs');
-    expect(mid?.textContent || '').not.toContain('–');
+    const decidedMid = rows[0].querySelector('.team-sub-match__score'); // done, decided by points
+    const pendingMid = rows[1].querySelector('.team-sub-match__score'); // live, unscored
+    expect(decidedMid?.textContent).toBe('vs');
+    expect(pendingMid?.textContent).toBe('vs');
+    expect((decidedMid?.textContent || '') + (pendingMid?.textContent || '')).not.toContain('–');
   });
 
   it('RUNNING: the keyboard cannot score a bout that is already decided (no impossible 2-2)', async () => {

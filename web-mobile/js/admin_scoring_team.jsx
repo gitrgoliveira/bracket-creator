@@ -33,6 +33,30 @@ import {
 
 import { useDebouncedRunningWrite, SyncStatusPill } from './admin_scoring_autosave.jsx';
 
+// boutMiddle is THE single source for a bout's centre value (vs/X/(E)/(DH));
+// the editor derives its per-bout middle from it rather than restating the
+// chain (CLAUDE.md § Match Decision Types: the middle rule lives in ONE place).
+import { boutMiddle } from './bracket.jsx';
+
+// renderTeamBoutMiddle: the ONE place the editor turns a sub-bout into its
+// centre value, for BOTH the read-only done row and the live entry row. Derives
+// vs/X/(E)/(DH) from the single-source boutMiddle (decided-by-points reads "vs"
+// like the bracket/scoreboard; the cell ippon letters carry the score). The
+// editor's local sub state has no decision string, so synthesise boutMiddle's
+// three inputs: a marked/derived tie → hikiwake, the daihyosen row →
+// "daihyosen", s.encho (a period count) → {periodCount}. X keeps its dedicated
+// styling; vs/(E)/(DH) render as the quiet centre span.
+function renderTeamBoutMiddle(s, t, isDaihyoRow) {
+  const scored = t.aTotal > 0 || t.bTotal > 0;
+  const isDraw = s.draw || (t.winner === null && scored);
+  const mid = boutMiddle(
+    isDaihyoRow ? "daihyosen" : (isDraw ? "hikiwake" : ""),
+    s.encho > 0 ? { periodCount: s.encho } : null,
+    isDraw ? { type: "hikiwake" } : null,
+  );
+  return mid === "X" ? <span className="tsm-draw">X</span> : <span style={{ color: "var(--ink-3)" }}>{mid}</span>;
+}
+
 // mp-bkg / mp-13y: resolveMatchLineup and resolveLineupTeamId are now shared
 // across all consumer surfaces (admin scoring modal, viewer, TvDisplay,
 // StreamingOverlay). The implementations live in lineup_resolver.jsx;
@@ -1351,8 +1375,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     const s = subs[idx];
     const t = subTotals[idx];
     const { aName, bName } = playerNamesForBout(idx);
-    const scored = t.aTotal > 0 || t.bTotal > 0;
-    const isDraw = s.draw || (t.winner === null && scored);
     const nameCls = (side) => "tsm-name__static" + (t.winner === side ? " tsm-name__static--win" : "");
     return (
       <div key={`ro-${idx}`} className="team-sub-match team-sub-match--readonly team-sub-match--editable" data-testid={`kachinuki-done-bout-${idx}`}
@@ -1372,7 +1394,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 {s.bFouls >= 1 && <span className="tsm-foul-tri" title="Hansoku: 1 foul">▲</span>}
                 {[0, 1].map(i => <span key={i} className={`editor-side__pt ${s.bPts[i] ? "editor-side__pt--filled" : ""}`}>{s.bPts[i] || "·"}</span>)}
               </div>
-              <div className="team-sub-match__score">{isDraw ? <span className="tsm-draw">X</span> : null}</div>
+              <div className="team-sub-match__score">{renderTeamBoutMiddle(s, t, false)}</div>
               <div className="tsm-center-pts tsm-center-pts--aka">
                 {[1, 0].map(i => <span key={i} className={`editor-side__pt ${s.aPts[i] ? "editor-side__pt--filled" : ""}`}>{s.aPts[i] || "·"}</span>)}
                 {s.aFouls >= 1 && <span className="tsm-foul-tri" title="Hansoku: 1 foul">▲</span>}
@@ -1841,20 +1863,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               if (isDaihyoRow && daihyosenTied && daihyosenHantei) {
                 return <span>{`${t.bTotal}–${t.aTotal}`} <span style={{ fontSize: 11, opacity: 0.7 }}>(Ht)</span></span>;
               }
-              // Draw: either an operator-marked tie, or equal non-zero scores
-              // (the tie-marking rule). Canonical display: a hikiwake is an X on
-              // the centre line (running_a_kendo_tournament.md), scored or not.
-              const scored = t.aTotal > 0 || t.bTotal > 0;
-              const isDraw = s.draw || (t.winner === null && scored);
-              if (isDraw) return <span className="tsm-draw">X</span>;
-              // Pending bout (0–0, not yet marked): the middle reads "vs", never
-              // a dash. Agreed display contract (CLAUDE.md § Match Decision Types):
-              // the middle is vs/X/(E)/(DH) only; a dash is a CELL value, never the
-              // middle, so an unplayed bout reads "vs" like every other surface.
-              if (t.winner === null) return <span style={{ color: "var(--ink-3)" }}>vs</span>;
-              // Decided bout: the centred ippon letters already show who won: 
-              // the numeric tally was redundant, so the centre stays clear.
-              return null;
+              // Everything else derives from the SINGLE-SOURCE boutMiddle via the
+              // shared helper (vs/X/(E)/(DH)) — never restated here (CLAUDE.md).
+              return renderTeamBoutMiddle(s, t, isDaihyoRow);
             })();
 
             return (

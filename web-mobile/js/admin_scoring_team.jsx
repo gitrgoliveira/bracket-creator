@@ -2101,7 +2101,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               <div className="team-summary" style={{ position: "sticky", top: 0, zIndex: 5 }}>
                 {teamSides.map((ts, idx) => (
                   <React.Fragment key={ts.key}>
-                    <div className="team-summary__side">
+                    {/* idx 0 = SHIRO (left, default left-align); idx 1 = AKA, which
+                        sits in the right 1fr grid cell and must right-align to mirror
+                        SHIRO — the --right class existed but was never wired up, so
+                        AKA's IV/PW floated mid-panel. */}
+                    <div className={`team-summary__side${idx === 1 ? " team-summary__side--right" : ""}`}>
                       <div className="team-summary__label">{ts.label}</div>
                       <div className="team-summary__stats">IV: {ts.iv} · PW: {ts.pw}</div>
                     </div>

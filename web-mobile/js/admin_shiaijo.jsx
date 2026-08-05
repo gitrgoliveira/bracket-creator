@@ -1254,7 +1254,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                     onClick={() => setSelectedCompId(nudgeBanner.compId)}
                                     aria-label={`Switch to ${nudgeBanner.comp}`}
                                 >
-                                    <span className="shiaijo-nudge__icon" aria-hidden="true">⚠</span>
+                                    <span className="shiaijo-nudge__icon" aria-hidden="true">{Icon ? <Icon name="alert-triangle" size={15} /> : "⚠"}</span>
                                     <span className="shiaijo-nudge__text">
                                         {`Switch to ${nudgeBanner.comp}: ${nudgeBanner.count} match${nudgeBanner.count === 1 ? "" : "es"} waiting on this court.`}
                                     </span>
@@ -1796,7 +1796,7 @@ function ShiaijoContext({ match, competitions, court, nextPoolName, tweaks, open
                         Name the gap instead of leaving two contradictory numbers. */}
                     {isPool && match.status === "running" && (
                         <p className="shiaijo-context__live-note" style={{ fontSize: 12, color: "var(--ink-2)", margin: "0 0 8px" }}>
-                            This match is still in progress, so its result isn't in the standings below yet — they update when it's recorded.
+                            This match is still in progress, so its result isn’t in the standings below yet — they update when it’s recorded.
                         </p>
                     )}
                     {isPool ? (

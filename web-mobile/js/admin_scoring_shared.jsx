@@ -4,6 +4,7 @@
 // two stateful editors. See web-mobile/admin_split_plan.md.
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
+const Icon = window.Icon;
 
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 
@@ -470,7 +471,7 @@ function EnchoControl({ enchoPeriodCount, setEnchoPeriodCount }) {
           onClick={() => setShowCounter(true)}
           aria-label="Show overtime (encho) controls"
         >
-          <span aria-hidden="true">⏱</span>
+          <span aria-hidden="true" className="encho-pill__icon">{Icon ? <Icon name="timer" size={14} /> : "⏱"}</span>
           <TermAS name="encho">Overtime</TermAS>
         </button>
       </div>

@@ -626,7 +626,7 @@ a:hover {
   border-radius: 6px;
   border: 1px solid transparent;
   cursor: pointer;
-  transition: all 120ms ease;
+  transition: background-color 120ms var(--ease-out), border-color 120ms var(--ease-out), color 120ms var(--ease-out);
   user-select: none;
   text-align: center;
   box-sizing: border-box;
@@ -2722,10 +2722,17 @@ button.vsched-item:not([data-clickable]) {
 }
 .winner-badge__icon {
   font-size: 22px;
+  display: inline-flex;
+  align-items: center;
 }
+/* Line-icon (Icon component) trophy inherits currentColor (the badge's own
+   ink), so it stays monochrome and on-voice. font-size no longer sizes an SVG,
+   so drive dimensions here; the px value still sizes the emoji fallback. */
+.winner-badge__icon svg { width: 20px; height: 20px; }
 .winner-badge--lg .winner-badge__icon {
   font-size: 28px;
 }
+.winner-badge--lg .winner-badge__icon svg { width: 26px; height: 26px; }
 
 /* MyMatchPanel: "Following: Name [Clear]" header row */
 .my-match__follow-row {
@@ -4880,7 +4887,7 @@ button.pool-match-row {
   font-family: var(--font-mono);
   color: var(--ink-3);
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 180ms var(--ease-out), box-shadow 180ms var(--ease-out), background-color 180ms var(--ease-out), color 180ms var(--ease-out);
 }
 
 .sb-slot--filled {
@@ -5010,7 +5017,7 @@ button.pool-match-row {
   font-weight: 800;
   color: var(--ink-4);
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background-color 180ms var(--ease-out), border-color 180ms var(--ease-out), color 180ms var(--ease-out);
 }
 
 .sb-hansoku-dot.is-on {
@@ -8715,6 +8722,12 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   justify-content: flex-end;
   margin-top: 8px;
 }
+/* The exit is a recovery action, kept quiet vs the primary Record/End buttons,
+   but a bare ghost link floating in whitespace reads as text, not a control.
+   A hairline border gives it a tappable boundary without competing for the eye. */
+.shiaijo-revert .btn--ghost {
+  border-color: var(--line);
+}
 
 /* Page title doubles as the court switcher: the H1 shows a chevron and a
    transparent native <select> overlays it (native picker + a11y, no duplicate
@@ -8809,6 +8822,8 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   font-size: 15px;
   flex-shrink: 0;
   line-height: 1.4;
+  display: inline-flex;
+  align-items: center;
 }
 .shiaijo-nudge__text {
   line-height: 1.4;

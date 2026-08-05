@@ -56,10 +56,10 @@ The clip below walks through the flows end to end, recorded from the score edito
   Your browser does not support the video tag.
 </video>
 
-1. **Exhaustion mode with a walkover** (0:00): a win keeps the winner on, two ties retire pairs, the app then pairs the surviving team's next fighter with the fighter who tied; the survivor takes the **Fusensho** walkover and **End match** records the win.
-2. **The taisho rule and a knockout tie** (0:18): a Taisho who draws stays on automatically, and when the two Taisho then tie, End match is held back; **Encho** keeps the pair fighting until a point lands.
-3. **A drawn encounter in a league** (0:39): the same tied final pair in a league is simply ended as a draw.
-4. **Reopen** (0:54): a completed encounter is reopened, keeping its bouts, and ended again.
+1. **Winner stays on** (0:00): each win keeps the winner on to face the losing team's next fighter, and every fought bout reads **vs** in the centre.
+2. **A knockout tie and Encho** (0:08): a knockout cannot end in a draw, so a tied bout holds **End match** back and offers **Encho** — the same pair fights on, marked **(E)**, until a point lands.
+3. **A drawn encounter in a league** (0:15): the same tie in a league is simply ended as a draw, marked **X**.
+4. **Reopen** (0:22): a completed encounter is reopened with all its bouts intact, then ended again — which asks for a reason.
 
 ### Choosing the team match format
 

@@ -1640,20 +1640,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
         </div>
 
         <div className="editor-modal__body">
-          {/* FR-033 encho toggle: see ScoreEditorModal for the contract.
-              EnchoControl collapses to a pill when no overtime is active.
-              mp-gmcg (critique + operator ruling): in kachinuki bout mode this
-              top period-stepper is redundant AND confusing next to the footer
-              Encho button. Declaring encho there is OPTIONAL and its only
-              effect is the middle mark (vs → "(E)"); no period count is
-              needed. So the top control is suppressed while fighting a
-              kachinuki match; corrections/daihyosen/fixed formats keep it. */}
-          {!kachinukiBoutMode && (
-            <EnchoControl
-              enchoPeriodCount={enchoPeriodCount}
-              setEnchoPeriodCount={setEnchoPeriodCount}
-            />
-          )}
           {/* Team header */}
           <div className="sb-match" style={{ marginBottom: teamSize === 5 && (lineupIncompleteB || lineupIncompleteA) ? 4 : 16 }}>
             {teamSides.map((s, idx) => (
@@ -2365,6 +2351,21 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               withdrawnPlayer={withdrawnPlayer}
               onAwarded={() => { /* stay open; operator decides when to close */ }}
               onClose={() => { setWithdrawnPlayer(null); onClose(); }}
+            />
+          )}
+
+          {/* FR-033 encho toggle. Placed at the BOTTOM, beside the End/Reopen
+              controls (operator feedback: controls belong at the bottom, not the
+              top). EnchoControl collapses to a pill when no overtime is active.
+              mp-gmcg (critique + operator ruling): suppressed in kachinuki bout
+              mode — declaring encho there is OPTIONAL, its only effect the middle
+              mark (vs → "(E)"), and it is done via the footer Encho button, so a
+              period-stepper would be redundant AND confusing. Corrections,
+              daihyosen and fixed-format team matches keep it. */}
+          {!kachinukiBoutMode && (
+            <EnchoControl
+              enchoPeriodCount={enchoPeriodCount}
+              setEnchoPeriodCount={setEnchoPeriodCount}
             />
           )}
 

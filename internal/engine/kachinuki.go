@@ -866,9 +866,6 @@ func (e *Engine) checkPoolReopenDownstreamTx(tx state.StoreTx, compID string, co
 	return nil
 }
 
-// reopenBracketMatch flips a completed bracket match back to running,
-// clearing the match-level outcome while keeping the bout log, and stamps
-// the operator's audit reason (see ReopenKachinukiMatch).
 // reopenPoolMatch is reopenBracketMatch's twin for a pool/league match. Same
 // rule, same field set, different struct: MatchResult carries the scoreline as
 // IpponsA/IpponsB (BracketMatch renders it into ScoreA/ScoreB strings), adds

@@ -1776,4 +1776,16 @@ func TestRemoveKachinukiBoutHandler(t *testing.T) {
 		w := deleteKachinukiBout(t, r, compID, "P1-0")
 		require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
 	})
+
+	t.Run("400 for a matchId over the length cap", func(t *testing.T) {
+		// Parity with the sibling reopen/score routes: an over-long matchId is
+		// rejected up front by validateMaxLen (mp-gmcg review), before the
+		// engine lookup that would otherwise 404 it.
+		compID := "rm-bout-longmid"
+		r, _ := setupKachinukiScoreServer(t, compID)
+
+		w := deleteKachinukiBout(t, r, compID, strings.Repeat("x", MaxLenMatchID+1))
+		require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+		assert.Contains(t, w.Body.String(), "matchId")
+	})
 }

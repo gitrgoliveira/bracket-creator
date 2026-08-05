@@ -951,6 +951,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             if (showToast) showToast(`${label} sent back to queue`);
             setPendingRevert(null);
             setPickedKey(null);
+            // Release a correction pin too: reverting a REOPENED correction sends
+            // it back to scheduled, so keeping correctingKey would re-pin the panel
+            // to a now-scheduled match with no exit. Clearing it falls back to the
+            // live court. Harmless (no-op) when reverting a plain running bout.
+            setCorrectingKey(null);
         } catch (e) {
             if (mountedRef.current) {
                 if (showToast) showToast((e && e.message) || "Could not send match back to queue", "error");
@@ -1348,7 +1353,19 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 </div>
                             )}
 
-                            {!allDone && !correctingMatch && selectedMatch && selectedMatch.status === "running" && window.API && typeof window.API.revertMatchToQueue === "function" && (
+                            {/* Exit for the LIVE running bout AND for a reopened
+                                correction (completed -> Reopen -> running). NO
+                                `!correctingMatch` guard: while a correction is
+                                reopened it IS the running bout on this court, so
+                                "Send back to queue" is its sanctioned exit - the
+                                twin of "Back to court" above, which stopCorrecting
+                                deliberately withholds while running (a stray Back
+                                to court could strand a result-less bout behind
+                                another running match). `status === "running"`
+                                alone keeps this off a still-completed correction,
+                                which shows "Back to court" instead. Without this,
+                                a reopened correction had no in-panel exit. */}
+                            {!allDone && selectedMatch && selectedMatch.status === "running" && window.API && typeof window.API.revertMatchToQueue === "function" && (
                                 <div className="shiaijo-revert">
                                     <button
                                         type="button"

@@ -104,7 +104,11 @@ func scheduleEstimateHandler(c *gin.Context) {
 		BoutsPerTeamMatch:         queryIntDefault(c, "boutsPerTeamMatch", 0),
 		SlowestCourtBufferPct:     queryIntDefault(c, "buffer", 0),
 		CeremonyMinutes:           queryIntDefault(c, "ceremonyMinutes", 0),
-		Kachinuki:                 c.Query("teamMatchType") == string(state.TeamMatchTypeKachinuki),
+		// teamMatchType widens the estimate into a best/average/worst range for
+		// kachinuki. No first-party caller passes it yet (Overview/Settings use
+		// the per-competition estimate); it is retained for the planned
+		// hypothetical estimator page (mp-lw5p) and documented in the OpenAPI spec.
+		Kachinuki: c.Query("teamMatchType") == string(state.TeamMatchTypeKachinuki),
 	}
 
 	c.JSON(http.StatusOK, engine.EstimateSchedule(in))

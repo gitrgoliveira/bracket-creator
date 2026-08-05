@@ -1551,6 +1551,13 @@ const API = {
         }
         return true;
     },
+    // Stateless hypothetical estimate against GET /api/schedule/estimate. The
+    // free-form estimator PANEL was removed (per-competition estimates on
+    // Overview/Settings go through estimateCompetitionSchedule instead), so this
+    // method currently has no production caller. It is RETAINED DELIBERATELY -
+    // not dead - for the planned standalone hypothetical estimator page
+    // (mp-lw5p), which reuses this endpoint and the `teamMatchType` query param.
+    // Exercised by api.test.jsx. Do not delete without closing mp-lw5p first.
     async estimateSchedule(args, password, signal) {
         const params = new URLSearchParams();
         Object.entries(args).forEach(([k, v]) => {

@@ -770,6 +770,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			return
 		}
 		mid := c.Param("mid")
+		if err := validateMaxLen("matchId", mid, MaxLenMatchID); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 
 		updated, err := eng.RemoveTrailingKachinukiBout(id, mid)
 		if err != nil {

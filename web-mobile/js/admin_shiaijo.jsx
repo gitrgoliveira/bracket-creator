@@ -1254,7 +1254,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                     onClick={() => setSelectedCompId(nudgeBanner.compId)}
                                     aria-label={`Switch to ${nudgeBanner.comp}`}
                                 >
-                                    <span className="shiaijo-nudge__icon" aria-hidden="true">{Icon ? <Icon name="alert-triangle" size={15} /> : "⚠"}</span>
+                                    <span className="shiaijo-nudge__icon" aria-hidden="true">{Icon ? <Icon name="alert-circle" size={15} /> : "⚠"}</span>
                                     <span className="shiaijo-nudge__text">
                                         {`Switch to ${nudgeBanner.comp}: ${nudgeBanner.count} match${nudgeBanner.count === 1 ? "" : "es"} waiting on this court.`}
                                     </span>

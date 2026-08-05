@@ -3,7 +3,6 @@
 // Extracted from admin_scoring_modal.jsx (mp-zac3).
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
-const Icon = window.Icon;
 
 import {
   MAX_IPPONS_PER_SIDE,
@@ -2508,7 +2507,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             ) : <span />}
             <div className="score-nav__actions">
               {m.status === "scheduled" && (
-                <button className="btn btn--sm" onClick={() => doSubmit(() => onSubmit(buildPatch("running")))} disabled={submitting}>{Icon ? <Icon name="play" size={13} /> : "▶"} Start match</button>
+                <button className="btn btn--sm" onClick={() => doSubmit(() => onSubmit(buildPatch("running")))} disabled={submitting}>Start match</button>
               )}
               {/* mp-gmcg: mistake recovery on a completed kachinuki match:
                   status back to running, winner/decision cleared, bout log

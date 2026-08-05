@@ -899,7 +899,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
             <div className="score-nav__actions">
               {m.status === "scheduled" && (
                 <button className="btn btn--sm" onClick={() => doSubmit(() => onSubmit(buildPatch("running")))} disabled={submitting}>
-                  ▶ Start match
+                  Start match
                 </button>
               )}
               {canClose && <button className="btn" onClick={handleDismiss} disabled={submitting}>Cancel</button>}

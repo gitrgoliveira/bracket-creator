@@ -307,6 +307,23 @@ describe('TeamScoreEditorModal kachinuki bout navigation', () => {
     expect(rows[0].querySelector('.tsm-name__static--win')).toBeNull();
   });
 
+  it('RUNNING: the current (pending, unscored) bout reads "vs" in the middle, never a dash', async () => {
+    // Agreed display contract (CLAUDE.md § Match Decision Types): the middle is
+    // vs/X/(E)/(DH) only. A dash is a CELL value, never the middle, so an unplayed
+    // bout reads "vs" like every other surface (mirrors msb_centre_sep for the
+    // scoreboard). Bout 1 fought (Aka wins), bout 2 appended and unscored.
+    const { container } = await renderCell(KACHI_CELL, {
+      subResults: [
+        { position: 1, sideA: 'A1', sideB: 'B1', ipponsA: ['M', 'M'], ipponsB: [], winner: 'A1' },
+        { position: 2, sideA: 'A1', sideB: 'B2', ipponsA: [], ipponsB: [] },
+      ],
+    });
+    const rows = container.querySelectorAll('.team-sub-match');
+    const mid = rows[1].querySelector('.team-sub-match__score');
+    expect(mid?.textContent).toBe('vs');
+    expect(mid?.textContent || '').not.toContain('–');
+  });
+
   it('RUNNING: the keyboard cannot score a bout that is already decided (no impossible 2-2)', async () => {
     // Regression for the /simplify catch: keyboard scoring must honour the same
     // guards as the ippon buttons (disabled once decided, capped per side), so

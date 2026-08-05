@@ -1847,8 +1847,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               const scored = t.aTotal > 0 || t.bTotal > 0;
               const isDraw = s.draw || (t.winner === null && scored);
               if (isDraw) return <span className="tsm-draw">X</span>;
-              // Pending bout (0–0, not yet marked): a quiet placeholder.
-              if (t.winner === null) return <span style={{ color: "var(--ink-3)" }}>–</span>;
+              // Pending bout (0–0, not yet marked): the middle reads "vs", never
+              // a dash. Agreed display contract (CLAUDE.md § Match Decision Types):
+              // the middle is vs/X/(E)/(DH) only; a dash is a CELL value, never the
+              // middle, so an unplayed bout reads "vs" like every other surface.
+              if (t.winner === null) return <span style={{ color: "var(--ink-3)" }}>vs</span>;
               // Decided bout: the centred ippon letters already show who won: 
               // the numeric tally was redundant, so the centre stays clear.
               return null;

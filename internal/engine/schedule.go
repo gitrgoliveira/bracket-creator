@@ -355,47 +355,72 @@ func EstimateForCounts(poolCount, playoffCount int, comp *state.Competition, tou
 	// never to the fixed OpeningBlock offset or LunchBlock dead-time
 	// (those have no runtime variance to pad). Mirrors
 	// EstimateSchedule, which buffers match time alone.
-	walk := func(poolPerMatch, playoffPerMatch int) ([]int, float64) {
-		courtCursor := make([]time.Time, numCourts)
-		for i := range courtCursor {
-			courtCursor[i] = dayStart.Add(time.Duration(openingMin) * time.Minute)
+	// walk runs the per-court cursor simulation for one or more per-match
+	// scenarios in a SINGLE pass over the match distribution. The distribution
+	// (base/rem per court) is identical across scenarios; only the per-match
+	// minutes — and thus how each cursor lands relative to the lunch block —
+	// differ, so a cursor per scenario advances together court-by-court. This is
+	// bit-identical to running the old single-scenario walk once per scenario,
+	// but prices kachinuki's best/avg/worst without re-deriving the distribution
+	// three times or discarding two perCourtList builds (mp-gmcg review F7).
+	// Returns each scenario's (perCourtList, slowest-court buffered duration),
+	// positionally.
+	walk := func(scenarios []schedScenario) ([][]int, []float64) {
+		ns := len(scenarios)
+		courtCursor := make([][]time.Time, ns)
+		matchMin := make([][]float64, ns)
+		start := dayStart.Add(time.Duration(openingMin) * time.Minute)
+		for s := range scenarios {
+			courtCursor[s] = make([]time.Time, numCourts)
+			for i := range courtCursor[s] {
+				courtCursor[s][i] = start
+			}
+			matchMin[s] = make([]float64, numCourts)
 		}
-		matchMin := make([]float64, numCourts)
 
-		for _, spec := range []struct{ count, perMatch int }{
-			{poolCount, poolPerMatch},
-			{playoffCount, playoffPerMatch},
+		for _, spec := range []struct {
+			count    int
+			perMatch func(schedScenario) int
+		}{
+			{poolCount, func(sc schedScenario) int { return sc.poolPerMatch }},
+			{playoffCount, func(sc schedScenario) int { return sc.playoffPerMatch }},
 		} {
 			base := spec.count / numCourts
 			rem := spec.count % numCourts
-			for ci := range courtCursor {
+			for ci := 0; ci < numCourts; ci++ {
 				n := base
 				if ci < rem {
 					n++
 				}
-				for range n {
-					courtCursor[ci] = skipCeremonyBlocks(courtCursor[ci], lunchStart, lunchMin)
-					courtCursor[ci] = courtCursor[ci].Add(time.Duration(spec.perMatch) * time.Minute)
+				for s := range scenarios {
+					pm := spec.perMatch(scenarios[s])
+					for range n {
+						courtCursor[s][ci] = skipCeremonyBlocks(courtCursor[s][ci], lunchStart, lunchMin)
+						courtCursor[s][ci] = courtCursor[s][ci].Add(time.Duration(pm) * time.Minute)
+					}
+					matchMin[s][ci] += float64(n * pm)
 				}
-				matchMin[ci] += float64(n * spec.perMatch)
 			}
 		}
 
-		perCourtList := make([]int, numCourts)
-		var maxDuration float64
-		for ci, cur := range courtCursor {
-			raw := cur.Sub(dayStart).Minutes()
-			// fixedOverhead = OpeningBlock offset + any LunchBlock dead-time
-			// (raw minus pure match time). Buffer the match time only; add the
-			// fixed overhead back unbuffered.
-			fixedOverhead := raw - matchMin[ci]
-			buffered := fixedOverhead + matchMin[ci]*bufferMultiplier
-			perCourtList[ci] = int(math.Round(buffered))
-			if buffered > maxDuration {
-				maxDuration = buffered
+		perCourtLists := make([][]int, ns)
+		maxDurations := make([]float64, ns)
+		for s := range scenarios {
+			perCourtLists[s] = make([]int, numCourts)
+			for ci, cur := range courtCursor[s] {
+				raw := cur.Sub(dayStart).Minutes()
+				// fixedOverhead = OpeningBlock offset + any LunchBlock dead-time
+				// (raw minus pure match time). Buffer the match time only; add the
+				// fixed overhead back unbuffered.
+				fixedOverhead := raw - matchMin[s][ci]
+				buffered := fixedOverhead + matchMin[s][ci]*bufferMultiplier
+				perCourtLists[s][ci] = int(math.Round(buffered))
+				if buffered > maxDurations[s] {
+					maxDurations[s] = buffered
+				}
 			}
 		}
-		return perCourtList, maxDuration
+		return perCourtLists, maxDurations
 	}
 
 	ceremonyMin := parseDurationMinutes(tournament.ClosingBlock)
@@ -405,30 +430,22 @@ func EstimateForCounts(poolCount, playoffCount int, comp *state.Competition, tou
 	// the AVERAGE; best (= the nominal walk) and worst bracket it.
 	if comp.Kind == "team" && comp.TeamMatchType == state.TeamMatchTypeKachinuki && comp.TeamSize > 0 {
 		bestBouts, avgBouts, worstBouts := kachinukiBoutRange(comp.TeamSize)
-		perCourtAvg, maxAvg := walk(
-			perMatchElapsedMinutesBouts(comp, tournament, false, avgBouts),
-			perMatchElapsedMinutesBouts(comp, tournament, true, avgBouts),
-		)
-		// Priced from kachinukiBoutRange's own `best`, not from the nominal
-		// walk. The two are equal today only because perMatchElapsedMinutes
-		// happens to use bouts = TeamSize; leaning on that coincidence meant
-		// retuning the nominal rule would silently stop BestCaseMinutes being
-		// the best case (and could render Best > Average) while avg and worst
-		// stayed right. All three scenarios now come from the one helper that
-		// owns the range.
-		_, maxBest := walk(
-			perMatchElapsedMinutesBouts(comp, tournament, false, bestBouts),
-			perMatchElapsedMinutesBouts(comp, tournament, true, bestBouts),
-		)
-		_, maxWorst := walk(
-			perMatchElapsedMinutesBouts(comp, tournament, false, worstBouts),
-			perMatchElapsedMinutesBouts(comp, tournament, true, worstBouts),
-		)
+		// Order: best, avg, worst. Each scenario's per-match minutes come from
+		// kachinukiBoutRange's own bout counts, NOT from the nominal walk: the
+		// two are equal today only because perMatchElapsedMinutes uses
+		// bouts = TeamSize, and leaning on that coincidence meant retuning the
+		// nominal rule could silently stop BestCaseMinutes being the best case
+		// (or render Best > Average) while avg and worst stayed right.
+		perCourts, maxes := walk([]schedScenario{
+			{perMatchElapsedMinutesBouts(comp, tournament, false, bestBouts), perMatchElapsedMinutesBouts(comp, tournament, true, bestBouts)},
+			{perMatchElapsedMinutesBouts(comp, tournament, false, avgBouts), perMatchElapsedMinutesBouts(comp, tournament, true, avgBouts)},
+			{perMatchElapsedMinutesBouts(comp, tournament, false, worstBouts), perMatchElapsedMinutesBouts(comp, tournament, true, worstBouts)},
+		})
 		return ScheduleEstimate{
-			TotalDurationMinutes: int(math.Round(maxAvg)) + ceremonyMin,
-			BestCaseMinutes:      int(math.Round(maxBest)) + ceremonyMin,
-			WorstCaseMinutes:     int(math.Round(maxWorst)) + ceremonyMin,
-			PerCourtMinutes:      perCourtAvg,
+			BestCaseMinutes:      int(math.Round(maxes[0])) + ceremonyMin,
+			TotalDurationMinutes: int(math.Round(maxes[1])) + ceremonyMin, // the AVERAGE is the headline
+			WorstCaseMinutes:     int(math.Round(maxes[2])) + ceremonyMin,
+			PerCourtMinutes:      perCourts[1], // avg
 			CeremonyMinutes:      ceremonyMin,
 		}
 	}
@@ -436,18 +453,24 @@ func EstimateForCounts(poolCount, playoffCount int, comp *state.Competition, tou
 	// Nominal per-match minutes via the shared slot-model helper (bouts =
 	// TeamSize). Computed after the kachinuki early-return above, which prices
 	// its own three scenarios and never reads these.
-	poolPerMatch := perMatchElapsedMinutes(comp, tournament, false /*isPlayoff*/)
-	playoffPerMatch := perMatchElapsedMinutes(comp, tournament, true /*isPlayoff*/)
-	perCourtList, maxDuration := walk(poolPerMatch, playoffPerMatch)
-	total := int(math.Round(maxDuration)) + ceremonyMin
+	perCourts, maxes := walk([]schedScenario{{
+		perMatchElapsedMinutes(comp, tournament, false /*isPlayoff*/),
+		perMatchElapsedMinutes(comp, tournament, true /*isPlayoff*/),
+	}})
+	total := int(math.Round(maxes[0])) + ceremonyMin
 	return ScheduleEstimate{
 		TotalDurationMinutes: total,
 		BestCaseMinutes:      total,
 		WorstCaseMinutes:     total,
-		PerCourtMinutes:      perCourtList,
+		PerCourtMinutes:      perCourts[0],
 		CeremonyMinutes:      ceremonyMin,
 	}
 }
+
+// schedScenario is one per-match timing (pool + playoff minutes) that
+// EstimateForCounts's walk prices. Kachinuki passes three (best/avg/worst);
+// every other format passes one.
+type schedScenario struct{ poolPerMatch, playoffPerMatch int }
 
 func (e *Engine) GenerateSchedule(compID string) error {
 	comp, err := e.store.LoadCompetition(compID)

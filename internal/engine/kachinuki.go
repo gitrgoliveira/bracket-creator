@@ -634,14 +634,9 @@ func (e *Engine) ReopenKachinukiMatch(compID, matchID, reason string) error {
 			return courtFreeInCompTx(tx, compID, matchID, court)
 		}
 
-		// Pool store first, mirroring findTeamMatch's lookup order.
-		poolMatches, lerr := tx.LoadPoolMatches(compID)
-		if lerr == nil {
-			for i := range poolMatches {
-				if poolMatches[i].ID != matchID {
-					continue
-				}
-				if gerr := guard(poolMatches[i].Status, poolMatches[i].Court); gerr != nil {
+		found, ferr := findMatchHome(tx, compID, matchID, func(h matchHome) error {
+			if h.Pool != nil {
+				if gerr := guard(h.Pool.Status, h.Pool.Court); gerr != nil {
 					opErr = gerr
 					return nil
 				}
@@ -657,49 +652,33 @@ func (e *Engine) ReopenKachinukiMatch(compID, matchID, reason string) error {
 					opErr = derr
 					return nil
 				}
-				reopenPoolMatch(&poolMatches[i], reason)
+				reopenPoolMatch(h.Pool, reason)
 				// SavePoolMatches funnels through the normal save chokepoint,
 				// so standings caches invalidate via the usual version bump.
-				return tx.SavePoolMatches(compID, poolMatches)
+				return h.Save()
 			}
-		}
-
-		bracket, lerr := tx.LoadBracket(compID)
-		if lerr != nil {
-			return lerr
-		}
-		if bracket != nil {
-			for rIdx := range bracket.Rounds {
-				for mIdx := range bracket.Rounds[rIdx] {
-					bm := &bracket.Rounds[rIdx][mIdx]
-					if bm.ID != matchID {
-						continue
-					}
-					if gerr := guard(bm.Status, bm.Court); gerr != nil {
-						opErr = gerr
-						return nil
-					}
-					if derr := retractPropagatedWinner(bracket, rIdx, mIdx); derr != nil {
-						opErr = derr
-						return nil
-					}
-					reopenBracketMatch(bm, reason)
-					return tx.SaveBracket(compID, bracket)
-				}
+			if gerr := guard(h.Bracket.Status, h.Bracket.Court); gerr != nil {
+				opErr = gerr
+				return nil
 			}
-			// The bronze (3rd-place) match is a sibling of Rounds and has no
-			// downstream match, so no retraction is needed.
-			if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID == matchID {
-				if gerr := guard(bm.Status, bm.Court); gerr != nil {
-					opErr = gerr
+			// A bracket ROUND winner may already be propagated downstream; the
+			// bronze (3rd-place) match is a sibling with no downstream, so it
+			// needs no retraction.
+			if !h.Bronze {
+				if derr := retractPropagatedWinner(h.BracketRoot, h.RIdx, h.MIdx); derr != nil {
+					opErr = derr
 					return nil
 				}
-				reopenBracketMatch(bm, reason)
-				return tx.SaveBracket(compID, bracket)
 			}
+			reopenBracketMatch(h.Bracket, reason)
+			return h.Save()
+		})
+		if ferr != nil {
+			return ferr
 		}
-
-		opErr = notFoundErrorf("match %s not found", matchID)
+		if !found {
+			opErr = notFoundErrorf("match %s not found", matchID)
+		}
 		return nil
 	})
 	if txErr != nil {
@@ -762,70 +741,39 @@ func (e *Engine) RemoveTrailingKachinukiBout(compID, matchID string) (*state.Mat
 			return subs[:n-1], nil
 		}
 
-		// Pool store first, mirroring findTeamMatch's lookup order.
-		poolMatches, lerr := tx.LoadPoolMatches(compID)
-		if lerr == nil {
-			for i := range poolMatches {
-				if poolMatches[i].ID != matchID {
-					continue
-				}
-				stripped, serr := strip(poolMatches[i].Status, poolMatches[i].SubResults)
+		found, ferr := findMatchHome(tx, compID, matchID, func(h matchHome) error {
+			if h.Pool != nil {
+				stripped, serr := strip(h.Pool.Status, h.Pool.SubResults)
 				if serr != nil {
 					opErr = serr
 					return nil
 				}
-				poolMatches[i].SubResults = stripped
-				if werr := tx.SavePoolMatches(compID, poolMatches); werr != nil {
+				h.Pool.SubResults = stripped
+				if werr := h.Save(); werr != nil {
 					return werr
 				}
-				u := poolMatches[i]
+				u := *h.Pool
 				updated = &u
 				return nil
 			}
-		}
-
-		bracket, lerr := tx.LoadBracket(compID)
-		if lerr != nil {
-			return lerr
-		}
-		if bracket != nil {
-			for rIdx := range bracket.Rounds {
-				for mIdx := range bracket.Rounds[rIdx] {
-					bm := &bracket.Rounds[rIdx][mIdx]
-					if bm.ID != matchID {
-						continue
-					}
-					stripped, serr := strip(bm.Status, bm.SubResults)
-					if serr != nil {
-						opErr = serr
-						return nil
-					}
-					bm.SubResults = stripped
-					if werr := tx.SaveBracket(compID, bracket); werr != nil {
-						return werr
-					}
-					updated = bracketMatchToTeamResult(*bm)
-					return nil
-				}
-			}
-			// The bronze (3rd-place) match is a sibling of Rounds (the strip
-			// loops above never reach it), so it needs its own branch.
-			if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID == matchID {
-				stripped, serr := strip(bm.Status, bm.SubResults)
-				if serr != nil {
-					opErr = serr
-					return nil
-				}
-				bm.SubResults = stripped
-				if werr := tx.SaveBracket(compID, bracket); werr != nil {
-					return werr
-				}
-				updated = bracketMatchToTeamResult(*bm)
+			stripped, serr := strip(h.Bracket.Status, h.Bracket.SubResults)
+			if serr != nil {
+				opErr = serr
 				return nil
 			}
+			h.Bracket.SubResults = stripped
+			if werr := h.Save(); werr != nil {
+				return werr
+			}
+			updated = bracketMatchToTeamResult(*h.Bracket)
+			return nil
+		})
+		if ferr != nil {
+			return ferr
 		}
-
-		opErr = notFoundErrorf("match %s not found", matchID)
+		if !found {
+			opErr = notFoundErrorf("match %s not found", matchID)
+		}
 		return nil
 	})
 	if txErr != nil {
@@ -835,6 +783,75 @@ func (e *Engine) RemoveTrailingKachinukiBout(compID, matchID string) (*state.Mat
 		return nil, opErr
 	}
 	return updated, nil
+}
+
+// matchHome is the store location that owns a match ID, handed to a
+// findMatchHome visitor. Exactly one of Pool / Bracket is non-nil. For a
+// bracket ROUND match, Bracket points into BracketRoot.Rounds[RIdx][MIdx] and
+// Bronze is false; for the 3rd-place match, Bracket is BracketRoot.ThirdPlaceMatch,
+// Bronze is true, and RIdx/MIdx are meaningless (the bronze is a SIBLING of
+// Rounds, not an element — forgetting it is the class of bug this shared walk
+// exists to make impossible). Save persists the store the match lives in.
+type matchHome struct {
+	Pool        *state.MatchResult
+	Bracket     *state.BracketMatch
+	BracketRoot *state.Bracket
+	RIdx, MIdx  int
+	Bronze      bool
+	Save        func() error
+}
+
+// findMatchHome walks the three homes a match ID can have — pool matches, then
+// bracket rounds, then the bronze (3rd-place) match — in that FIXED order, and
+// invokes visit for the owning home. It is the mutating, in-transaction twin of
+// lookupMatchSnapshot (mobileapp): a single walk so a new caller cannot drop the
+// bronze branch or the pool-load-error swallow by hand-copying the ~60-line
+// skeleton (mp-gmcg review F6). found=false with a nil error means the ID is in
+// neither store. A pool LOAD error is swallowed and the walk still tries the
+// bracket (matching the open-coded copies this replaced); a bracket load error
+// is returned. visit's own error propagates.
+func findMatchHome(tx state.StoreTx, compID, matchID string, visit func(matchHome) error) (bool, error) {
+	poolMatches, lerr := tx.LoadPoolMatches(compID)
+	if lerr == nil {
+		for i := range poolMatches {
+			if poolMatches[i].ID == matchID {
+				return true, visit(matchHome{
+					Pool: &poolMatches[i],
+					Save: func() error { return tx.SavePoolMatches(compID, poolMatches) },
+				})
+			}
+		}
+	}
+
+	bracket, berr := tx.LoadBracket(compID)
+	if berr != nil {
+		return false, berr
+	}
+	if bracket != nil {
+		for rIdx := range bracket.Rounds {
+			for mIdx := range bracket.Rounds[rIdx] {
+				if bracket.Rounds[rIdx][mIdx].ID == matchID {
+					return true, visit(matchHome{
+						Bracket:     &bracket.Rounds[rIdx][mIdx],
+						BracketRoot: bracket,
+						RIdx:        rIdx,
+						MIdx:        mIdx,
+						Save:        func() error { return tx.SaveBracket(compID, bracket) },
+					})
+				}
+			}
+		}
+		if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID == matchID {
+			return true, visit(matchHome{
+				Bracket:     bm,
+				BracketRoot: bracket,
+				Bronze:      true,
+				Save:        func() error { return tx.SaveBracket(compID, bracket) },
+			})
+		}
+	}
+
+	return false, nil
 }
 
 // checkPoolReopenDownstreamTx is the pool-match twin of the bracket branch's

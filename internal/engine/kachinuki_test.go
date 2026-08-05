@@ -2592,6 +2592,29 @@ func TestRemoveTrailingKachinukiBout(t *testing.T) {
 		require.Len(t, bracket.Rounds[0][0].SubResults, 1, "the strip is persisted on the bracket match")
 	})
 
+	// The bronze (3rd-place) match is a SIBLING of Rounds, not an element of it,
+	// so a rounds-only walk never reaches it. Pins the bronze home before the
+	// findMatchHome extraction (mp-gmcg review F6).
+	t.Run("removes a trailing unscored bout from the bronze match", func(t *testing.T) {
+		eng, store, _ := setupKachinukiComp(t, "rm-bronze", 5)
+		require.NoError(t, store.SaveBracket("rm-bronze", &state.Bracket{
+			ThirdPlaceMatch: &state.BracketMatch{
+				ID: "m-bronze", SideA: "RedTeam", SideB: "WhiteTeam", Status: state.MatchStatusRunning,
+				SubResults: []state.SubMatchResult{scored, appended},
+			},
+		}))
+
+		updated, err := eng.RemoveTrailingKachinukiBout("rm-bronze", "m-bronze")
+		require.NoError(t, err)
+		require.NotNil(t, updated)
+		require.Len(t, updated.SubResults, 1)
+
+		bracket, err := store.LoadBracket("rm-bronze")
+		require.NoError(t, err)
+		require.NotNil(t, bracket.ThirdPlaceMatch)
+		require.Len(t, bracket.ThirdPlaceMatch.SubResults, 1, "the strip is persisted on the bronze match")
+	})
+
 	t.Run("rejects when the trailing bout is already scored", func(t *testing.T) {
 		eng, store, _ := setupKachinukiComp(t, "rm-scored", 5)
 		require.NoError(t, store.SavePoolMatches("rm-scored", []state.MatchResult{

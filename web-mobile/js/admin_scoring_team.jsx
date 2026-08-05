@@ -430,6 +430,27 @@ export function resolveKachinukiBoutSides({ aName, bName, wKey, teamWinnerName }
   return { sideA, sideB, winner };
 }
 
+// fusenshoSideFromSub: which side ("a" / "b" / "") a persisted fusensho sub-bout
+// was awarded to, for re-seeding the local editor state on a reopen or remount.
+// The winner is stored as the bout competitor's OWN name — for a KACHINUKI bout
+// that is the PLAYER name (resolveKachinukiBoutSides), which never equals the
+// match-level team names, so match the sub's own sideA/sideB (correct for a
+// fixed-position bout too: there winner === sideA === the team name). Fall back
+// to the maru (○) pattern applyFusenshoToggle writes into the winner's ippons,
+// for legacy rows that carry no per-bout sides. mp-gmcg review: the earlier
+// match against the team-level sideAName/sideBName silently dropped a reopened
+// kachinuki fusensho (its player-name winner matched neither team name), so the
+// "(fusensho)" affordance vanished on every Reopen and Record-bout remount.
+export function fusenshoSideFromSub(sub) {
+  if (!sub || sub.decision !== "fusensho") return "";
+  const allMaru = (arr) => Array.isArray(arr) && arr.length > 0 && arr.every(x => x === "○");
+  if (sub.winner && sub.winner === sub.sideA) return "a";
+  if (sub.winner && sub.winner === sub.sideB) return "b";
+  if (allMaru(sub.ipponsA) && !allMaru(sub.ipponsB)) return "a";
+  if (allMaru(sub.ipponsB) && !allMaru(sub.ipponsA)) return "b";
+  return "";
+}
+
 // subBoutHasBeenPlayed: true once a sub-bout carries any operator input
 // (ippons, fouls, a per-bout fusensho, an explicit hikiwake, or an encho
 // marker: a 0-0 knockout tie sent to encho must stay in the patch or the
@@ -802,11 +823,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const seedSubAt = (idx) => {
       const pos = idx === daihyosenIdx ? DAIHYOSEN_POSITION : idx + 1;
       const existing = existingSub.find(s => s.position === pos);
-      let fusensho = "";
-      if (existing?.decision === "fusensho") {
-        if (existing.winner === sideAName) fusensho = "a";
-        else if (existing.winner === sideBName) fusensho = "b";
-      }
+      const fusensho = fusenshoSideFromSub(existing);
       // reconcileFoulsAtOpen mirrors ScoreEditorModal: pre-fix builds
       // stored the cumulative raw foul count alongside the already-awarded
       // H in the opponent's ippon array. The counter now means "outstanding
@@ -995,25 +1012,26 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
         isPlayedAt: (idx) => subBoutHasBeenPlayed(subs[idx]),
       })
     : positions;
-  // UX guard: Record bout with nothing entered for the current bout would
-  // submit a silent no-op (known quirk Q4: the glossary term inside the
-  // Tie button swallows taps, and that chain used to end in a silent 200).
-  // Disable the button until the CURRENT visible bout carries operator
-  // input (points, fouls, fusensho, or an explicit draw).
-  const kachinukiCurrentBoutPlayed = kachinukiBoutMode ? (() => {
-    const cur = visiblePositions.find(p => p !== "daihyosen");
-    return cur != null && subBoutHasBeenPlayed(subs[positions.indexOf(cur)]);
-  })() : true;
-
   // mp-gmcg: keyboard ippon entry for the CURRENT kachinuki bout (critique P2).
   // Team scoring is many bouts in general (an ambiguous key target — the reason
   // the handler below only bound Esc/arrows), but a RUNNING kachinuki encounter
   // shows exactly ONE current bout, so M/K/D/T/H (Shift = Aka) is unambiguous
   // here — mirroring the individual editor. Wired only in kachinukiBoutMode;
-  // fixed-format multi-bout scoring stays tap-only.
+  // fixed-format multi-bout scoring stays tap-only. This is THE single
+  // "current visible bout" derivation (the daihyosen-skip lives here only);
+  // kachinukiCurrentBoutPlayed and kachinukiCurBoutPos below are pure
+  // functions of it.
   const kachinukiCurBoutIdx = kachinukiBoutMode
     ? (() => { const cur = visiblePositions.find(p => p !== "daihyosen"); return cur != null ? positions.indexOf(cur) : -1; })()
     : -1;
+  // UX guard: Record bout with nothing entered for the current bout would
+  // submit a silent no-op (known quirk Q4: the glossary term inside the
+  // Tie button swallows taps, and that chain used to end in a silent 200).
+  // Disable the button until the CURRENT visible bout carries operator
+  // input (points, fouls, fusensho, or an explicit draw).
+  const kachinukiCurrentBoutPlayed = kachinukiBoutMode
+    ? kachinukiCurBoutIdx >= 0 && subBoutHasBeenPlayed(subs[kachinukiCurBoutIdx])
+    : true;
   // mp-gmcg: the bouts already fought (everything played except the current
   // bout). They render as READ-ONLY team-sub-match rows above the current
   // editable bout, so the operator sees the whole encounter like a regular team
@@ -1111,11 +1129,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     currentBoutPlayed: kachinukiCurrentBoutPlayed,
     lastScoredIdx: kachinukiLastScoredIdx,
   });
-  // Position of the current (trailing) visible bout, the removal target.
-  const kachinukiCurBoutPos = (() => {
-    const cur = visiblePositions.find(p => p !== "daihyosen");
-    return cur == null ? 0 : positions.indexOf(cur) + 1;
-  })();
+  // Position of the current (trailing) visible bout, the removal target
+  // (derived from kachinukiCurBoutIdx; only read when kachinukiBoutRemovable,
+  // which itself requires bout mode).
+  const kachinukiCurBoutPos = kachinukiCurBoutIdx < 0 ? 0 : kachinukiCurBoutIdx + 1;
   const removeCurrentBout = async () => {
     if (!kachinukiBoutRemovable || kachinukiCurBoutPos <= 0) return;
     const pos = kachinukiCurBoutPos;

@@ -760,10 +760,13 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 	// trailing-unscored strip the completed write applies, so the removable set
 	// is identical in both places.
 	//
-	// Not court-gated (a running match stays running) and not self-run
-	// main-gated: this only ever mutates a RUNNING encounter and drops an
-	// unscored bout, so it rides the same trust as the score path rather than
-	// the reopen path's finalized-result gate.
+	// Not court-gated (a running match stays running). It IS self-run
+	// main-gated (isSelfRunMainGatedConfigRoute, middleware.go): removing a
+	// bout is an organiser correction, the same class as reopen/override-winner,
+	// NOT the participant score path — which self-gates via enforceSelfRunPolicy
+	// (this handler has no such in-handler check), so without the allowlist
+	// entry a self-run pass-through would let an anonymous spectator delete a
+	// live pairing (mp-gmcg review F2).
 	r.DELETE("/competitions/:id/matches/:mid/kachinuki-bout", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
@@ -798,7 +801,11 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			"result":        matchPtrForBroadcast(updated),
 		})
 
-		c.JSON(http.StatusOK, gin.H{"result": updated})
+		// Project the 200 body the same way as the broadcast: the caller only
+		// needs the (shortened) subResults to re-sync its local log, not the
+		// audit free-text (correctionReason/decisionReason) or another client's
+		// revSession (mp-gmcg review F2).
+		c.JSON(http.StatusOK, gin.H{"result": matchPtrForBroadcast(updated)})
 	})
 
 	r.PUT("/competitions/:id/matches/:mid/override-winner", func(c *gin.Context) {
@@ -1235,6 +1242,16 @@ func applyCorrectionReasonUnderTx(stx state.StoreTx, compID, matchID string, r *
 			ClearBracketReopenPending: snap.InBracket && snap.ReopenPending,
 		}, nil
 	}
+	// Non-completing write: pin the reason to the STORED one. This is not just a
+	// carry-forward — it also refuses a client-supplied reason on a running
+	// write, so the audit note can only ever change through the completing
+	// correction branch above. The engine twin (recordMatchResultTx in
+	// scoring_tx.go: `if result.CorrectionReason == "" { ... = r.CorrectionReason }`)
+	// independently carries the stored reason across its whole-struct overwrite
+	// for callers that DON'T pass through here; the two are deliberately kept
+	// separate (this one is stricter) — do not collapse one into the other
+	// without re-checking that a running write still cannot rewrite the note
+	// (mp-gmcg review F5).
 	r.CorrectionReason = snap.CorrectionReason
 	return correctionCheck{StoredStatus: snap.Status}, nil
 }

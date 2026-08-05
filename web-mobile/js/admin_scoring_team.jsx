@@ -487,7 +487,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // cleared whenever the parent passes a genuinely new match object (the next
   // Record / prev / next), after which the prop is authoritative again.
   const [matchOverride, setMatchOverride] = useStateA(null);
-  useEffectA(() => { setMatchOverride(null); }, [match]);
+  // Clear the override once the prop actually MOVES off the pre-removal state —
+  // a genuine match switch (id) OR the bout-log length changing (the parent
+  // catching up to the removal, or a later Record-bout re-growing it). Keying
+  // on the object identity alone (`[match]`) cleared on every same-content SSE
+  // reload, so the removed bout flashed back; keying on id alone would never
+  // clear on a same-id Record-bout and the stale shorter override would then
+  // shadow the freshly-grown log (mp-gmcg review F4).
+  useEffectA(() => { setMatchOverride(null); }, [match?.id, (match?.subResults || []).length]);
   // mp-gmcg: never carry an open past-bout correction across a match SWITCH,
   // but DO survive a same-match reload. Autosave persists each correction as a
   // running write, which round-trips back over SSE as a fresh `match` object
@@ -1133,6 +1140,20 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // (derived from kachinukiCurBoutIdx; only read when kachinukiBoutRemovable,
   // which itself requires bout mode).
   const kachinukiCurBoutPos = kachinukiCurBoutIdx < 0 ? 0 : kachinukiCurBoutIdx + 1;
+  // A removal lowers maxSubPos or manualMaxPos, but positionCount is floored at
+  // teamSize, so subsRaw must never be trimmed BELOW the new positionCount:
+  // otherwise the state array falls short of positions.length (pinned by the
+  // floor), the render-only extension (above) patches the gap every render
+  // without ever committing, updateSub(idx) then silently misses the regrown
+  // rows, and the [subs] disarm effect thrashes on a fresh identity each render
+  // (mp-gmcg review F1). Resize to exactly the post-removal positionCount:
+  // trailing rows the floor still shows are re-seeded from initSubsRef.
+  const removalTarget = (newMaxSub, newManualMax) =>
+    Math.min(Math.max(teamSize, newMaxSub, newManualMax), kachinukiMaxBouts);
+  const resizeSubsTo = (prev, target) => {
+    const kept = prev.slice(0, target);
+    return kept.length >= target ? kept : [...kept, ...initSubsRef.current.slice(kept.length, target)];
+  };
   const removeCurrentBout = async () => {
     if (!kachinukiBoutRemovable || kachinukiCurBoutPos <= 0) return;
     const pos = kachinukiCurBoutPos;
@@ -1141,8 +1162,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // local: pop it, no round-trip. A [Record bout] append IS persisted
     // (pos <= maxSubPos), so it must be stripped server-side.
     if (pos > maxSubPos) {
-      setManualBouts(prev => prev.filter(p => p !== pos));
-      setSubs(prev => prev.slice(0, pos - 1));
+      const remaining = manualBouts.filter(p => p !== pos);
+      setManualBouts(remaining);
+      const target = removalTarget(maxSubPos, remaining.length ? Math.max(...remaining) : 0);
+      setSubs(prev => resizeSubsTo(prev, target));
       setEndArmed(false);
       setFinishArmed(false);
       setRemoveBoutErr("");
@@ -1159,7 +1182,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
         ? updated.subResults
         : (match.subResults || []).filter(s => s.position !== pos);
       setMatchOverride({ ...match, subResults: nextSubs });
-      setSubs(prev => prev.slice(0, Math.max(1, pos - 1)));
+      // The server strips exactly the trailing bout at `pos`, so the new log
+      // ceiling is pos-1; keep the teamSize floor (removalTarget).
+      setSubs(prev => resizeSubsTo(prev, removalTarget(pos - 1, manualMaxPos)));
       setEndArmed(false);
       setFinishArmed(false);
     } catch (e) {

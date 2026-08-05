@@ -436,4 +436,65 @@ describe('kachinuki [× Remove this bout] undoes a bout added by mistake', () =>
     });
     expect(onClose).not.toHaveBeenCalled();
   });
+
+  // mp-gmcg review F1: removing a bout must not leave subsRaw shorter than the
+  // teamSize-floored positionCount. If it does, the render-only extension patches
+  // the gap without committing, and the NEXT Record-bout's updateSub(curIdx)
+  // becomes an out-of-range no-op — so a score on the re-appended bout silently
+  // vanishes. Drive the full sequence: remove → server catches up → Record
+  // re-appends bout 2 → score it, and assert the score registers.
+  it('records a score on a bout re-appended after a removal (subsRaw stays sized to the floor)', async () => {
+    const boutOneOnly = [{ position: 1, sideA: 'A1', sideB: 'B1', ipponsA: ['M'], ipponsB: [], winner: 'A1' }];
+    window.API.removeKachinukiBout = vi.fn().mockResolvedValue({ id: 'm1', subResults: boutOneOnly });
+    const utils = await renderEditor({ match: runningWithAppendedBout() });
+
+    // Remove the trailing unscored bout 2; the current bout becomes scored bout 1.
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-remove-bout-button')); });
+    await waitFor(() => expect(screen.queryByTestId('kachinuki-remove-bout-button')).toBeNull());
+
+    const propWith = (subResults) => (
+      <ScoreEditorModal
+        match={completedKachinukiMatch({ status: 'running', winner: null, subResults })}
+        onClose={vi.fn()} onSubmit={vi.fn().mockResolvedValue(undefined)} password="secret"
+      />
+    );
+    // The parent's snapshot catches up to the removal (log length 2 → 1, which
+    // clears the local override), then Record re-appends bout 2 (1 → 2).
+    await act(async () => { utils.rerender(propWith(boutOneOnly)); });
+    await act(async () => {
+      utils.rerender(propWith([...boutOneOnly, { position: 2, sideA: 'A1', sideB: 'B2', ipponsA: [], ipponsB: [] }]));
+    });
+
+    // Bout 2 is the unplayed current bout → the Record-bout hint is shown.
+    expect(screen.queryByTestId('kachinuki-record-hint')).not.toBeNull();
+    // Score it via the keyboard (Shiro men). Pre-fix this was a no-op.
+    await act(async () => { fireEvent.keyDown(window, { key: 'm' }); });
+    await waitFor(() => expect(screen.queryByTestId('kachinuki-record-hint')).toBeNull());
+  });
+
+  // mp-gmcg review F4: the local override that hides the removed bout must
+  // survive a same-content snapshot reload. An SSE refresh hands back a NEW
+  // match object with identical (stale) content while the parent list catches
+  // up; keying the override reset on object identity cleared it and flashed the
+  // removed bout back. Key on id + log length instead.
+  it('does not flash the removed bout back on a same-content snapshot reload', async () => {
+    window.API.removeKachinukiBout = vi.fn().mockResolvedValue({
+      id: 'm1', subResults: [{ position: 1, sideA: 'A1', sideB: 'B1', ipponsA: ['M'], ipponsB: [], winner: 'A1' }],
+    });
+    const utils = await renderEditor({ match: runningWithAppendedBout() });
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-remove-bout-button')); });
+    await waitFor(() => expect(screen.queryByTestId('kachinuki-remove-bout-button')).toBeNull());
+
+    // A fresh object, SAME stale two-bout content (the delete has not yet
+    // propagated to the parent's list). The removed bout must stay gone.
+    await act(async () => {
+      utils.rerender(
+        <ScoreEditorModal
+          match={runningWithAppendedBout()}
+          onClose={vi.fn()} onSubmit={vi.fn().mockResolvedValue(undefined)} password="secret"
+        />
+      );
+    });
+    expect(screen.queryByTestId('kachinuki-remove-bout-button')).toBeNull();
+  });
 });

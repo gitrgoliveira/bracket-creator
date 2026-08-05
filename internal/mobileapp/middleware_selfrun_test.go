@@ -1012,3 +1012,20 @@ func TestSelfRun_ReopenRequiresMainPassword(t *testing.T) {
 			"the request must reach ReopenKachinukiMatch's own validation")
 	})
 }
+
+// mp-gmcg review F2: DELETE kachinuki-bout removes a live pairing, an organiser
+// correction like reopen/override-winner — it must NOT be anonymously callable
+// in self-run mode. The participant score path self-gates via
+// enforceSelfRunPolicy; this route relies on the central allowlist instead, so
+// a missing allowlist entry would let the self-run pass-through expose it.
+func TestSelfRun_RemoveKachinukiBoutRequiresMainPassword(t *testing.T) {
+	store := newTempStore(t)
+	seedSelfRunTournament(t, store, "admin-pw")
+	r := setupSelfRunRouter(t, store, NewFileVerifier(store))
+
+	req := jsonReq(http.MethodDelete, "/api/competitions/some-comp/matches/m-r1-0/kachinuki-bout", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusUnauthorized, w.Code,
+		"removing a bout must be main-gated in self-run mode: an anonymous spectator must not delete a live pairing")
+}

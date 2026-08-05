@@ -257,6 +257,7 @@ func isSelfRunMainGatedConfigRoute(method, fullPath string) bool {
 		http.MethodPut + " /api/competitions/:id/teams/:tid/match-lineups/:matchId",    // team match lineup, organiser
 		http.MethodDelete + " /api/competitions/:id/teams/:tid/match-lineups/:matchId", // team match lineup, organiser
 		http.MethodPost + " /api/competitions/:id/matches/:mid/decision",               // mp-ba3: kiken/fusenpai/daihyosen are admin-only decisions
+		http.MethodDelete + " /api/competitions/:id/matches/:mid/kachinuki-bout",       // mp-gmcg: removing a bout is an organiser correction, same class as reopen/override-winner; the participant score path gates itself via enforceSelfRunPolicy, this route does not
 		http.MethodPost + " /api/sponsors",                                             // mp-c38: sponsor logo upload, organiser setup, not operational play
 		http.MethodDelete + " /api/sponsors/:index",                                    // mp-c38: sponsor deletion, organiser setup, not operational play
 		http.MethodPost + " /api/print/:type":                                          // mp-w87e: PDF export, admin/CPU-heavy, not operational play

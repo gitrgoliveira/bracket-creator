@@ -742,11 +742,24 @@ func (e *Engine) RemoveTrailingKachinukiBout(compID, matchID string) (*state.Mat
 			if status != state.MatchStatusRunning {
 				return nil, ErrRemoveBoutNotRunning
 			}
-			stripped := stripTrailingUnscoredKachinukiBouts(subs)
-			if len(stripped) == len(subs) {
+			// Remove ONLY the single trailing bout, and never the last remaining
+			// one: the operator's "× Remove this bout" is singular, and a RUNNING
+			// kachinuki encounter must always keep at least one bout (mp-gmcg
+			// review F3). stripTrailingUnscoredKachinukiBouts drops the whole
+			// trailing run with no floor — correct for the completed-write caller
+			// (a completed match always carries a scored bout, so it never
+			// empties) but not here, where bout 1 could be unscored, or two
+			// "Add next bout manually" pairings could be appended and one tap
+			// must not strip both.
+			n := len(subs)
+			if n <= 1 {
 				return nil, ErrNoRemovableBout
 			}
-			return stripped, nil
+			last := subs[n-1]
+			if last.Position <= 0 || !isUnscoredKachinukiBout(last) {
+				return nil, ErrNoRemovableBout
+			}
+			return subs[:n-1], nil
 		}
 
 		// Pool store first, mirroring findTeamMatch's lookup order.

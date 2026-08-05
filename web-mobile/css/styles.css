@@ -4803,27 +4803,35 @@ button.pool-match-row {
    vertically centred; the name sits at the bottom of its (possibly taller)
    row so it hugs its scores. Grid items stretch by default, so the pill is
    pinned back to a hug-content chip mirrored inward. */
-.sb-match:has(.sb-slots) {
-  grid-template-rows: 1fr auto auto auto auto 1fr;
+/* Gated on @supports so an older Chromium WebView (subgrid shipped Chrome 117 /
+   Safari 16) — the class of courtside Android tablet this app targets — falls
+   back to the base .sb-side flex column rather than landing the grid-row: 2..5
+   assignments on IMPLICIT rows and rendering misaligned. Modern browsers get
+   the subgrid alignment; old ones get the pre-change flex layout (mp-gmcg
+   review F8). */
+@supports (grid-template-rows: subgrid) {
+  .sb-match:has(.sb-slots) {
+    grid-template-rows: 1fr auto auto auto auto 1fr;
+  }
+  .sb-match:has(.sb-slots) > .sb-side {
+    display: grid;
+    grid-row: 1 / -1;
+    grid-template-rows: subgrid;
+  }
+  .sb-match:has(.sb-slots) > .sb-side > .sb-side__badge { grid-row: 2; }
+  .sb-match:has(.sb-slots) > .sb-side > .sb-name { grid-row: 3; align-self: end; }
+  .sb-match:has(.sb-slots) > .sb-side > .sb-slots { grid-row: 4; }
+  .sb-match:has(.sb-slots) > .sb-side > .sb-points-grid { grid-row: 5; }
+  .sb-match:has(.sb-slots) > .sb-center { grid-row: 1 / -1; }
+  .sb-match:has(.sb-slots) > .sb-side--shiro > .sb-side__badge { justify-self: end; }
+  .sb-match:has(.sb-slots) > .sb-side--aka > .sb-side__badge { justify-self: start; }
+  /* Slots hug the INSIDE (against the centre vs) via justify-self on the hug-
+     content group; the existing flex-direction (row / row-reverse) still controls
+     the outside-to-inside fill, so each side's first ippon stays on its name side
+     and fills toward the centre — the fixed FIK rule is untouched. */
+  .sb-match:has(.sb-slots) > .sb-side--shiro > .sb-slots { justify-self: end; }
+  .sb-match:has(.sb-slots) > .sb-side--aka > .sb-slots { justify-self: start; }
 }
-.sb-match:has(.sb-slots) > .sb-side {
-  display: grid;
-  grid-row: 1 / -1;
-  grid-template-rows: subgrid;
-}
-.sb-match:has(.sb-slots) > .sb-side > .sb-side__badge { grid-row: 2; }
-.sb-match:has(.sb-slots) > .sb-side > .sb-name { grid-row: 3; align-self: end; }
-.sb-match:has(.sb-slots) > .sb-side > .sb-slots { grid-row: 4; }
-.sb-match:has(.sb-slots) > .sb-side > .sb-points-grid { grid-row: 5; }
-.sb-match:has(.sb-slots) > .sb-center { grid-row: 1 / -1; }
-.sb-match:has(.sb-slots) > .sb-side--shiro > .sb-side__badge { justify-self: end; }
-.sb-match:has(.sb-slots) > .sb-side--aka > .sb-side__badge { justify-self: start; }
-/* Slots hug the INSIDE (against the centre vs) via justify-self on the hug-
-   content group; the existing flex-direction (row / row-reverse) still controls
-   the outside-to-inside fill, so each side's first ippon stays on its name side
-   and fills toward the centre — the fixed FIK rule is untouched. */
-.sb-match:has(.sb-slots) > .sb-side--shiro > .sb-slots { justify-self: end; }
-.sb-match:has(.sb-slots) > .sb-side--aka > .sb-slots { justify-self: start; }
 
 /* the side label (".sb-dojo" historically held it) becomes the identity chip,
    one statement of the side, colour-coded, like the inline editor's chip */

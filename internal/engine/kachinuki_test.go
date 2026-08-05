@@ -2635,4 +2635,37 @@ func TestRemoveTrailingKachinukiBout(t *testing.T) {
 		var nferr *NotFoundError
 		require.ErrorAs(t, err, &nferr)
 	})
+
+	// mp-gmcg review F3: the strip must floor at one bout and remove only the
+	// single trailing pairing, never the whole trailing run.
+	t.Run("refuses to empty a running match whose only bout is unscored", func(t *testing.T) {
+		eng, store, _ := setupKachinukiComp(t, "rm-floor", 5)
+		bootstrap := state.SubMatchResult{Position: 1, SideA: "R1", SideB: "W1"} // unscored bout 1
+		require.NoError(t, store.SavePoolMatches("rm-floor", []state.MatchResult{
+			{ID: "P1-0", Status: state.MatchStatusRunning, SubResults: []state.SubMatchResult{bootstrap}},
+		}))
+
+		_, err := eng.RemoveTrailingKachinukiBout("rm-floor", "P1-0")
+		require.ErrorIs(t, err, ErrNoRemovableBout)
+
+		stored := loadPoolMatchByID(t, store, "rm-floor", "P1-0")
+		require.Len(t, stored.SubResults, 1, "the last remaining bout is never stripped")
+	})
+
+	t.Run("removes only the single trailing bout when two are appended", func(t *testing.T) {
+		eng, store, _ := setupKachinukiComp(t, "rm-single", 5)
+		appended2 := state.SubMatchResult{Position: 3, SideA: "R1", SideB: "W3"} // second unscored
+		require.NoError(t, store.SavePoolMatches("rm-single", []state.MatchResult{
+			{ID: "P1-0", Status: state.MatchStatusRunning,
+				SubResults: []state.SubMatchResult{scored, appended, appended2}},
+		}))
+
+		updated, err := eng.RemoveTrailingKachinukiBout("rm-single", "P1-0")
+		require.NoError(t, err)
+		require.Len(t, updated.SubResults, 2, "only the last trailing bout is dropped, not both")
+		assert.Equal(t, 2, updated.SubResults[1].Position, "the first appended bout survives")
+
+		stored := loadPoolMatchByID(t, store, "rm-single", "P1-0")
+		require.Len(t, stored.SubResults, 2)
+	})
 }

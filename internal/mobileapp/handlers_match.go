@@ -370,7 +370,9 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				}
 				capturedStatus = status
 				if check.ClearBracketReopenPending {
-					return dischargeReopenPendingUnderTx(stx, id, results[i].ID, "")
+					// ClearBracketReopenPending is snap.InBracket && snap.ReopenPending,
+					// so the match is known to be in the bracket: skip the pool probe.
+					return dischargeReopenPendingUnderTx(stx, id, results[i].ID, "", true)
 				}
 				return nil
 			}); err != nil {
@@ -1308,49 +1310,40 @@ const ReopenNeedsReasonMessage = "this match was reopened; ending it again requi
 // payload — that field is client-supplied and a score write must not be able
 // to move a server-owned audit flag — which is why the flag needs this
 // explicit pass rather than riding along with the result.
-func dischargeReopenPendingUnderTx(stx state.StoreTx, compID, matchID, reason string) error {
-	// Pool first, mirroring lookupMatchSnapshot's order. UpdatePoolMatchByID
-	// reports found=false for a bracket match, which is the fall-through.
-	found, err := stx.UpdatePoolMatchByID(compID, matchID, func(r *state.MatchResult) {
-		r.ReopenPending = false
-		if reason != "" && r.CorrectionReason == "" {
-			r.CorrectionReason = reason
+func dischargeReopenPendingUnderTx(stx state.StoreTx, compID, matchID, reason string, inBracket bool) error {
+	// inBracket lets a caller that already knows the match's home (from the
+	// snapshot it read) skip the pool probe: the score paths reach here only
+	// behind ClearBracketReopenPending (== snap.InBracket && snap.ReopenPending),
+	// so the pool arm would be a guaranteed miss — a full uncached
+	// pool-matches.csv parse for nothing (mp-gmcg review). The /decision caller
+	// passes snap.InBracket, so a genuine pool match still takes the pool arm.
+	if !inBracket {
+		// Pool first, mirroring lookupMatchSnapshot's order. UpdatePoolMatchByID
+		// reports found=false for a bracket match, which is the fall-through.
+		found, err := stx.UpdatePoolMatchByID(compID, matchID, func(r *state.MatchResult) {
+			r.ReopenPending = false
+			if reason != "" && r.CorrectionReason == "" {
+				r.CorrectionReason = reason
+			}
+		})
+		if err != nil {
+			return fmt.Errorf("discharge reopen flag: pool match: %w", err)
 		}
-	})
-	if err != nil {
-		return fmt.Errorf("discharge reopen flag: pool match: %w", err)
+		if found {
+			return nil
+		}
 	}
-	if found {
-		return nil
-	}
-	bracket, err := stx.LoadBracket(compID)
-	if err != nil {
-		return fmt.Errorf("discharge reopen flag: load bracket: %w", err)
-	}
-	if bracket == nil {
-		return nil
-	}
-	// One closure rather than the mutation written at both homes: the rounds
-	// loop and the bronze branch must not drift (same reasoning as the pool
-	// mutate above, and as ReopenKachinukiMatch's `guard`).
-	discharge := func(bm *state.BracketMatch) error {
+	// Bracket arm: UpdateBracketMatchByID owns the rounds → bronze-sibling walk
+	// (mp-gmcg review), so the easy-to-forget bronze branch is no longer
+	// hand-written here. A miss (bracket match not found either) saves nothing.
+	_, err := stx.UpdateBracketMatchByID(compID, matchID, func(bm *state.BracketMatch) {
 		bm.ReopenPending = false
 		if reason != "" && bm.CorrectionReason == "" {
 			bm.CorrectionReason = reason
 		}
-		return stx.SaveBracket(compID, bracket)
-	}
-	for rIdx := range bracket.Rounds {
-		for mIdx := range bracket.Rounds[rIdx] {
-			if bracket.Rounds[rIdx][mIdx].ID == matchID {
-				return discharge(&bracket.Rounds[rIdx][mIdx])
-			}
-		}
-	}
-	// The bronze (3rd-place) match is a SIBLING of Rounds, not an element of
-	// it; the loop above never reaches it (see lookupMatchSnapshot).
-	if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID == matchID {
-		return discharge(bm)
+	})
+	if err != nil {
+		return fmt.Errorf("discharge reopen flag: bracket match: %w", err)
 	}
 	return nil
 }
@@ -1674,7 +1667,8 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 					// Only after the write actually landed: this branch commits
 					// even when engErr is set, so discharging the outstanding
 					// justification any earlier would clear it for a rejected write.
-					return dischargeReopenPendingUnderTx(stx, id, mid, "")
+					// ClearBracketReopenPending implies InBracket, so skip the pool probe.
+					return dischargeReopenPendingUnderTx(stx, id, mid, "", true)
 				}
 				return nil
 			})

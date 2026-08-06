@@ -247,3 +247,65 @@ func (s *Store) updateBracketLocked(compID string, mutate func(*Bracket) error, 
 	// dead code; trust the contract from parseBracketFile.
 	return s.saveBracketLocked(compID, bracket, write)
 }
+
+// findBracketMatchByID returns a pointer to the bracket match with the given
+// ID — searching the rounds FIRST, then the ThirdPlaceMatch sibling — or nil.
+// THE single bracket-match walk: the bronze (3rd-place) match is a SIBLING of
+// Rounds, not an element, so a rounds-only loop never reaches it (the recurring
+// forgotten-branch bug this consolidation exists to prevent, mp-gmcg).
+func findBracketMatchByID(b *Bracket, matchID string) *BracketMatch {
+	if b == nil {
+		return nil
+	}
+	for rIdx := range b.Rounds {
+		for mIdx := range b.Rounds[rIdx] {
+			if b.Rounds[rIdx][mIdx].ID == matchID {
+				return &b.Rounds[rIdx][mIdx]
+			}
+		}
+	}
+	if b.ThirdPlaceMatch != nil && b.ThirdPlaceMatch.ID == matchID {
+		return b.ThirdPlaceMatch
+	}
+	return nil
+}
+
+// UpdateBracketMatchByID finds the bracket match with the given ID (via
+// findBracketMatchByID, so rounds AND the bronze sibling), applies mutate, and
+// saves. Returns found=false with NO write when no match has that ID. This is
+// the bracket-match analogue of UpdatePoolMatchByID (mp-gmcg review): a
+// consumer mutating one bracket match by id no longer hand-rolls the
+// load → walk-rounds → bronze-sibling → save sequence, so the bronze branch
+// can't be forgotten in a copy of it.
+//
+// IMPORTANT: mutate runs under the per-competition lock; it MUST NOT call any
+// other Store method that acquires the same lock (the non-recursive mutex
+// deadlocks). Same contract as UpdateBracket.
+func (s *Store) UpdateBracketMatchByID(compID, matchID string, mutate func(*BracketMatch)) (bool, error) {
+	if err := ValidateCompetitionID(compID); err != nil {
+		return false, err
+	}
+	mu := s.getCompLock(compID)
+	mu.Lock()
+	defer mu.Unlock()
+	return s.updateBracketMatchByIDLocked(compID, matchID, mutate, s.directWrite)
+}
+
+// updateBracketMatchByIDLocked is the lock-free body of UpdateBracketMatchByID
+// (caller holds the per-comp write lock), mirroring updatePoolMatchByIDLocked.
+// It saves ONLY when the match is found, so a miss costs a parse but no write.
+func (s *Store) updateBracketMatchByIDLocked(compID, matchID string, mutate func(*BracketMatch), write writeFn) (bool, error) {
+	// Load directly under the lock (see UpdatePoolMatchByID for why we bypass
+	// the cached path here).
+	path := s.compPath(compID, "bracket.json")
+	parsed, err := parseBracketFile(path)
+	if err != nil {
+		return false, err
+	}
+	bracket, _ := parsed.(*Bracket)
+	if bm := findBracketMatchByID(bracket, matchID); bm != nil {
+		mutate(bm)
+		return true, s.saveBracketLocked(compID, bracket, write)
+	}
+	return false, nil
+}

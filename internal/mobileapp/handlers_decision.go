@@ -171,7 +171,10 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			// is surfaced below), so an unguarded call would clear the
 			// obligation for a rejected decision.
 			if engErr == nil && snap.ReopenPending {
-				return dischargeReopenPendingUnderTx(stx, id, mid, reason)
+				// A decision can complete a POOL or a bracket match, so pass the
+				// snapshot's own home: a pool match still takes the pool arm, a
+				// bracket match skips the guaranteed-miss pool probe (mp-gmcg review).
+				return dischargeReopenPendingUnderTx(stx, id, mid, reason, snap.InBracket)
 			}
 			return nil
 		})

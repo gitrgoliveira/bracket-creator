@@ -204,10 +204,20 @@ func EstimateSchedule(in EstimateInput) ScheduleEstimate {
 		perCourtList[i] = avgPerCourt
 	}
 
+	// best/avg/worst collapse for every NON-kachinuki request (individual and
+	// fixed-format: bestBouts == avgBouts == worstBouts), so reuse the single
+	// computed value instead of recomputing the identical arithmetic twice —
+	// only kachinuki actually prices three distinct scenarios (mp-gmcg review).
+	bestPerCourt, worstPerCourt := avgPerCourt, avgPerCourt
+	if in.Kachinuki && bouts > 0 {
+		bestPerCourt = perCourtFor(bestBouts)
+		worstPerCourt = perCourtFor(worstBouts)
+	}
+
 	return ScheduleEstimate{
 		TotalDurationMinutes: avgPerCourt + in.CeremonyMinutes,
-		BestCaseMinutes:      perCourtFor(bestBouts) + in.CeremonyMinutes,
-		WorstCaseMinutes:     perCourtFor(worstBouts) + in.CeremonyMinutes,
+		BestCaseMinutes:      bestPerCourt + in.CeremonyMinutes,
+		WorstCaseMinutes:     worstPerCourt + in.CeremonyMinutes,
 		PerCourtMinutes:      perCourtList,
 		CeremonyMinutes:      in.CeremonyMinutes,
 	}

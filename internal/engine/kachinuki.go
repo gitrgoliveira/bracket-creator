@@ -369,7 +369,7 @@ func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if comp == nil || comp.TeamSize < 2 || comp.TeamMatchType != state.TeamMatchTypeKachinuki {
+	if !comp.IsKachinuki() {
 		return false, nil
 	}
 
@@ -602,7 +602,7 @@ func (e *Engine) ReopenKachinukiMatch(compID, matchID, reason string) error {
 	if err != nil {
 		return err
 	}
-	if comp == nil || comp.TeamSize < 2 || comp.TeamMatchType != state.TeamMatchTypeKachinuki {
+	if !comp.IsKachinuki() {
 		return validationErrorf("reopen is only supported for kachinuki team matches; correct other results via the score editor (correctionReason)")
 	}
 	reason = strings.TrimSpace(reason)
@@ -687,24 +687,29 @@ func (e *Engine) ReopenKachinukiMatch(compID, matchID, reason string) error {
 	return opErr
 }
 
-// RemoveTrailingKachinukiBout drops the trailing UNSCORED bout(s) from a RUNNING
-// kachinuki encounter — the explicit operator undo for a pairing appended by
-// mistake ([Record bout] / [Add next bout]). It reuses
-// stripTrailingUnscoredKachinukiBouts, so the removable set is IDENTICAL to what
-// the completed-write strip drops: "removable" is defined in exactly ONE place,
-// and (because that primitive stops at Position <= 0) it can never touch a
-// non-numbered sub — daihyosen does not exist in kachinuki and is not involved.
+// RemoveTrailingKachinukiBout drops the SINGLE trailing UNSCORED bout from a
+// RUNNING kachinuki encounter — the explicit operator undo for a pairing
+// appended by mistake ([Record bout] / [Add next bout]). Its own `strip`
+// closure (below), not stripTrailingUnscoredKachinukiBouts, defines
+// "removable" here: never the last remaining bout, and never more than one
+// per call (review F3) — a DIFFERENT, narrower rule than the completed-write
+// strip's "drop the whole trailing run", which is safe there only because a
+// completed match always has a scored bout to stop on. Position <= 0 is
+// still refused, so a non-numbered sub is never touched — daihyosen does not
+// exist in kachinuki and is not involved.
 //
-// Mirrors ReopenKachinukiMatch's find-across-homes skeleton (pool → bracket
-// rounds → bronze) so a fourth match home can't be forgotten. Returns the
-// updated match for the caller to broadcast. No court gate: the match is (and
-// stays) running, so removing an empty bout changes no court occupancy.
+// Walks the same three match homes as ReopenKachinukiMatch (pool → bracket
+// rounds → bronze) via the shared findMatchHome visitor (review F6), so a
+// fourth match home or a lookup-order change can't be forgotten in just one
+// of the two. Returns the updated match for the caller to broadcast. No
+// court gate: the match is (and stays) running, so removing an empty bout
+// changes no court occupancy.
 func (e *Engine) RemoveTrailingKachinukiBout(compID, matchID string) (*state.MatchResult, error) {
 	comp, err := e.store.LoadCompetition(compID)
 	if err != nil {
 		return nil, err
 	}
-	if comp == nil || comp.TeamSize < 2 || comp.TeamMatchType != state.TeamMatchTypeKachinuki {
+	if !comp.IsKachinuki() {
 		return nil, validationErrorf("removing a bout is only supported for kachinuki team matches")
 	}
 
@@ -970,10 +975,11 @@ func reopenBracketMatch(bm *state.BracketMatch, reason string) {
 // reopenPending reports whether a reopen still OWES an audit justification:
 // true when no reason was supplied (the score path collects it on the next
 // completion), false when the operator already gave one so this reopen is
-// justified as it happens. One helper rather than three inline `reason == ""`
-// tests, so the pool, bracket-round and bronze homes cannot drift — the same
-// reason ReopenKachinukiMatch keeps its preconditions in a single `guard`
-// closure.
+// justified as it happens. One helper rather than a `reason == ""` test
+// inlined at each of its two call sites (reopenPoolMatch, reopenBracketMatch
+// — the latter already covers both the bracket-round and bronze homes), so a
+// third caller can't drift from the rule — the same reason
+// ReopenKachinukiMatch keeps its preconditions in a single `guard` closure.
 func reopenPending(reason string) bool {
 	return reason == ""
 }
@@ -1011,10 +1017,10 @@ func retractPropagatedWinner(bracket *state.Bracket, rIdx, mIdx int) error {
 		}
 	}
 	if next != nil {
-		// The placeholder format matches generation (bracket.go) and
-		// parseWinnerOf: depth is 1-based from the final, so the source
-		// match at round rIdx is depth len(Rounds)-rIdx.
-		placeholder := fmt.Sprintf("Winner of r%d-m%d", len(bracket.Rounds)-rIdx, mIdx)
+		// winnerOfPlaceholder (bracket.go) is the ONE producer this now shares
+		// with generation and parseWinnerOf: depth is 1-based from the final,
+		// so the source match at round rIdx is depth len(Rounds)-rIdx.
+		placeholder := winnerOfPlaceholder(len(bracket.Rounds)-rIdx, mIdx)
 		if mIdx%2 == 0 {
 			next.SideA = placeholder
 		} else {
@@ -1039,7 +1045,9 @@ func bracketMatchStartedOrScored(bm *state.BracketMatch) bool {
 // applyKachinukiMerge merges an incoming kachinuki bout log into the stored
 // prior log by position via mergeKachinukiSubResults. No-op for individual,
 // fixed-format, or missing competitions. Shared by the locked and tx scoring
-// paths so the merge guard cannot drift between them.
+// paths (RecordMatchResultTx/RecordMatchResult AND, via
+// RecordMatchResultWithIneligibilityTx, RecordDecisionTx) so the merge guard
+// cannot drift between them.
 //
 // On a COMPLETED write (the operator's explicit "End match", mp-gmcg) it
 // additionally strips trailing UNSCORED bouts after the merge:
@@ -1047,9 +1055,11 @@ func bracketMatchStartedOrScored(bm *state.BracketMatch) bool {
 // bout, so ending the match leaves an abandoned empty pairing at the tail.
 // Because the merge preserves stored entries by position, a client simply
 // omitting that row cannot remove it, the server must strip it here so it
-// never reaches standings/exports.
+// never reaches standings/exports. It then derives the winner from the
+// cleaned bout log (deriveKachinukiWinner) so a plain bout-driven End write
+// cannot carry an outcome the log itself does not support.
 func applyKachinukiMerge(comp *state.Competition, prior, result *state.MatchResult) {
-	if comp == nil || comp.TeamSize < 2 || comp.TeamMatchType != state.TeamMatchTypeKachinuki {
+	if !comp.IsKachinuki() {
 		return
 	}
 	var stored []state.SubMatchResult
@@ -1059,6 +1069,54 @@ func applyKachinukiMerge(comp *state.Competition, prior, result *state.MatchResu
 	result.SubResults = mergeKachinukiSubResults(stored, result.SubResults)
 	if result.Status == state.MatchStatusCompleted {
 		result.SubResults = stripTrailingUnscoredKachinukiBouts(result.SubResults)
+		deriveKachinukiWinner(result)
+	}
+}
+
+// deriveKachinukiWinner authoritatively derives result.Winner from the
+// merged bout log's LAST bout carrying a recorded outcome, mirroring
+// deriveKachinukiEndOutcome (admin_scoring_team.jsx): OPERATOR INPUT
+// DETERMINES THE BOUT OUTCOME. This is the server-side twin of that client
+// rule (mp-gmcg review C3): before this, the client simply HID the generic
+// "Save correction" button that would have let an operator pick an
+// unsupported winner, but nothing stopped a bulk /scores write, an offline
+// flush, or any future caller from completing a kachinuki match with a
+// winner the bout log does not support — the invariant was enforced by not
+// rendering a button, which is not enforcement.
+//
+// Scoped STRICTLY to decision == kachinuki-exhaustion: that value is UNIQUE
+// to the plain bout-driven End-match write (buildPatch("completed",
+// {endOutcome}) in admin_scoring_team.jsx always sends it for a decisive
+// end, "hikiwake" for a drawn one). kiken/fusenpai/fusensho/daihyosen
+// completions reach this SAME merge point (RecordDecisionTx ->
+// RecordMatchResultWithIneligibilityTx -> applyKachinukiMerge) with THEIR
+// OWN decision values and their own winner rule — the non-withdrawing side,
+// already set on result.Winner before this runs (see RecordDecisionTx) —
+// and re-deriving from the bout log there would silently overturn a
+// legitimate walkover, which is exactly the "loser kept its struck ippons"
+// case FIK Art. 32 protects. "hikiwake" and "" carry no winner to derive.
+func deriveKachinukiWinner(result *state.MatchResult) {
+	if result == nil || result.Decision != string(domain.DecisionKachinukiExhaustion) {
+		return
+	}
+	var last *state.SubMatchResult
+	for i := range result.SubResults {
+		s := &result.SubResults[i]
+		if s.Position <= 0 || isUnscoredKachinukiBout(*s) {
+			continue
+		}
+		if last == nil || s.Position > last.Position {
+			last = s
+		}
+	}
+	if last == nil || last.Winner == "" {
+		return
+	}
+	switch {
+	case isWinForSide(last.Winner, result.SideA, last.SideA):
+		result.Winner = result.SideA
+	case isWinForSide(last.Winner, result.SideB, last.SideB):
+		result.Winner = result.SideB
 	}
 }
 

@@ -1320,12 +1320,13 @@ func (e *Engine) propagateBracketWinner(bracket *state.Bracket, rIdx, mIdx int) 
 	}
 }
 
-// parseWinnerOf parses "Winner of rX-mY" and returns (rIdx, mIdx)
-// Depth in the string is 1-based (root is 1). Rounds in bracket are 0-indexed (Round 1 is index 0).
-// Depth d corresponds to Round (maxDepth - d).
+// parseWinnerOf parses winnerOfFormat's "Winner of rX-mY" (bracket.go) and
+// returns (rIdx, mIdx). Depth in the string is 1-based (root is 1). Rounds in
+// bracket are 0-indexed (Round 1 is index 0). Depth d corresponds to Round
+// (maxDepth - d).
 func parseWinnerOf(s string, numRounds int) (int, int) {
 	var depth, matchIdx int
-	_, err := fmt.Sscanf(s, "Winner of r%d-m%d", &depth, &matchIdx)
+	_, err := fmt.Sscanf(s, winnerOfFormat, &depth, &matchIdx)
 	if err != nil {
 		return -1, -1
 	}

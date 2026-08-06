@@ -312,7 +312,7 @@ describe('kachinukiBandModel', () => {
   ];
   const base = {
     daihyosenIdx: -1, isComplete: false, matchWinner: '', matchDecision: '',
-    sideAName: 'Team Alpha', sideBName: 'Team Bravo',
+    sideA: 'Team Alpha', sideB: 'Team Bravo',
     namesAt: (idx) => names[idx] || {},
   };
 
@@ -362,6 +362,25 @@ describe('kachinukiBandModel', () => {
     });
     expect(kb.verdict).toBe('DRAW');
     expect(kb.verdictSide).toBe('draw');
+  });
+
+  it('two teams sharing a display name: the verdict resolves by id, not name (review)', () => {
+    // Bare name-equality comparison (the pre-fix implementation) cannot tell
+    // these two sides apart: matchWinner === sideAName would ALSO be true here,
+    // attributing the win to sideA regardless of which team actually won.
+    // winnerSideLR (bracket.jsx) prefers id equality, so the SAME-NAMED sideB
+    // still resolves correctly.
+    const kb = kachinukiBandModel({
+      ...base,
+      subs: [sub({ aPts: ['M'] })],
+      isComplete: true,
+      sideA: { id: 'team-1', name: 'Same Name' },
+      sideB: { id: 'team-2', name: 'Same Name' },
+      matchWinner: { id: 'team-2', name: 'Same Name' },
+      matchDecision: 'kachinuki-exhaustion',
+    });
+    expect(kb.verdict).toBe('SHIRO WIN');
+    expect(kb.verdictSide).toBe('shiro');
   });
 
   it('a fusensho whose maru tie the preserved loser score still names both fighters', () => {

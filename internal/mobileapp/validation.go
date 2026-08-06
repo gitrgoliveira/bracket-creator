@@ -164,7 +164,7 @@ func validateURLHasHost(field, val string) error {
 // EXCEPTION (mp-gmcg): in a KACHINUKI competition a tied pairing may be
 // fought on in overtime on that same bout (daihyosen does not exist in
 // kachinuki), so callers pass allowNumberedEncho=true — derived via
-// allowNumberedEnchoFor (handlers_match.go). The exception applies in
+// allowNumberedEnchoFromStore (handlers_match.go). The exception applies in
 // EVERY phase: whether the final pairing must produce a result (e.g. the
 // taisho must be defeated) is operator discretion, never derivable from
 // pool-vs-bracket. The hantei gate is NOT relaxed: kachinuki bouts are
@@ -414,7 +414,7 @@ func (r *ScoreRequest) Validate() error {
 // validateWithOptions is Validate with the kachinuki bout-level encho
 // exception threaded through (mp-gmcg): the score handler passes
 // allowNumberedEncho=true when the target competition is kachinuki
-// (allowNumberedEnchoFor) — any phase; whether a tied pairing must be
+// (allowNumberedEnchoFromStore) — any phase; whether a tied pairing must be
 // fought to a result is operator discretion. Every other caller keeps
 // the strict daihyosen-only gate via Validate().
 func (r *ScoreRequest) validateWithOptions(allowNumberedEncho bool) error {

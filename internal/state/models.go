@@ -455,6 +455,20 @@ func (c *Competition) EffectiveWithZekkenName() bool {
 	return c.WithZekkenName
 }
 
+// IsKachinuki reports whether c is a kachinuki (winner-stays-on) team
+// competition. The single spelling of this predicate (mp-gmcg review): before
+// this method it was reimplemented inline at 7 call sites across
+// internal/engine, internal/mobileapp and internal/state, and two of those
+// copies disagreed on the TeamSize threshold (most required >= 2, one
+// required only > 0) — a TeamSize == 1 competition with TeamMatchType ==
+// kachinuki was "kachinuki" to one caller and not to another. >= 2 is the
+// correct threshold: kachinuki is specifically about a bout winner staying on
+// to face the LOSING team's next fighter, which is meaningless with a single
+// fighter per side.
+func (c *Competition) IsKachinuki() bool {
+	return c != nil && c.TeamSize >= 2 && c.TeamMatchType == TeamMatchTypeKachinuki
+}
+
 // MinMatchDurationSeconds / MaxMatchDurationSeconds bound a per-match clock to
 // a plausible range: 1:00 to 60:00. Match duration drives auto-scheduling for
 // the whole event, so a fat-fingered 0:03 would collapse the day's timetable.

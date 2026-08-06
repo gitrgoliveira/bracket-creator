@@ -36,7 +36,7 @@ import { useDebouncedRunningWrite, SyncStatusPill } from './admin_scoring_autosa
 // boutMiddle is THE single source for a bout's centre value (vs/X/(E)/(DH));
 // the editor derives its per-bout middle from it rather than restating the
 // chain (CLAUDE.md § Match Decision Types: the middle rule lives in ONE place).
-import { boutMiddle } from './bracket.jsx';
+import { boutMiddle, winnerSideLR } from './bracket.jsx';
 
 // renderTeamBoutMiddle: the ONE place the editor turns a sub-bout into its
 // centre value, for BOTH the read-only done row and the live entry row. Derives
@@ -307,7 +307,12 @@ export function kachinukiEnchoAvailable(outcome) {
 // currentBout = the visible bout position (1-based). Pure and unit-tested.
 // Returns { headline, fact } while running, { headline, verdict,
 // verdictSide: "aka"|"shiro"|"draw" } when complete.
-export function kachinukiBandModel({ subs, daihyosenIdx, isComplete, matchWinner, matchDecision, sideAName, sideBName, currentBout, namesAt }) {
+export function kachinukiBandModel({ subs, daihyosenIdx, isComplete, matchWinner, matchDecision, sideA, sideB, currentBout, namesAt }) {
+  // The display string for the "unattributable winner" fallback below, kept
+  // separate from `matchWinner` itself: winnerSideLR needs the RAW (possibly
+  // {id,name}) form to prefer id equality over name (two teams CAN share a
+  // display name), so matchWinner is passed through unflattened.
+  const matchWinnerName = matchWinner && typeof matchWinner === "object" ? matchWinner.name : matchWinner;
   const played = [];
   (subs || []).forEach((s, idx) => {
     if (idx === daihyosenIdx || !subBoutHasBeenPlayed(s)) return;
@@ -341,13 +346,14 @@ export function kachinukiBandModel({ subs, daihyosenIdx, isComplete, matchWinner
     const headline = `FINAL · ${n} BOUT${n === 1 ? "" : "S"}`;
     // Winner wording defers to teamResultLabel (the one "AKA WIN"/"SHIRO WIN"
     // home). The raw-name fallback keeps an unattributable winner from being
-    // silently dropped.
-    const winSide = matchWinner && matchWinner === sideAName ? "a"
-      : matchWinner && matchWinner === sideBName ? "b"
-      : null;
+    // silently dropped. winSide reuses winnerSideLR (bracket.jsx) rather than
+    // re-deriving name-equality here: it prefers id equality over name, which
+    // bare-name comparison cannot (review: two teams CAN share a display name).
+    const lr = winnerSideLR({ winner: matchWinner, sideA, sideB });
+    const winSide = lr === "right" ? "a" : lr === "left" ? "b" : null;
     if (winSide) return { headline, verdict: teamResultLabel({ teamWinner: winSide }), verdictSide: winSide === "a" ? "aka" : "shiro" };
     if (matchDecision === "hikiwake" || !matchWinner) return { headline, verdict: "DRAW", verdictSide: "draw" };
-    return { headline, verdict: String(matchWinner).toUpperCase(), verdictSide: "draw" };
+    return { headline, verdict: String(matchWinnerName).toUpperCase(), verdictSide: "draw" };
   }
 
   const headline = `BOUT ${currentBout || played.length + 1}`;
@@ -518,7 +524,15 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const [manualBouts, setManualBouts] = useStateA([]);
   const kachinukiMaxBouts = 2 * window.MAX_TEAM_SIZE - 1;
   const manualMaxPos = manualBouts.length ? Math.max(...manualBouts) : 0;
-  const positionCount = Math.min(Math.max(teamSize, maxSubPos, manualMaxPos), kachinukiMaxBouts);
+  // The ONE clamp defining how many bout slots the grid covers: teamSize is
+  // the floor, the highest known position (server log or a manually-added
+  // row) extends it, kachinukiMaxBouts is the theoretical ceiling. Reused by
+  // removeCurrentBout below to size subsRaw back down after a removal — the
+  // two must never drift, since a mismatch is exactly the F1 freeze bug
+  // (review: this and the removal-time clamp used to be two independent
+  // copies of the same formula).
+  const clampPositionCount = (maxSub, manualMax) => Math.min(Math.max(teamSize, maxSub, manualMax), kachinukiMaxBouts);
+  const positionCount = clampPositionCount(maxSubPos, manualMaxPos);
   const numberedPositions = Array.from({ length: positionCount }, (_, i) => String(i + 1));
   // mp-4pc: a persisted daihyosen (representative bout) lives in
   // SubResults at wire position DAIHYOSEN_POSITION. It is scored "like any other
@@ -1146,10 +1160,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // floor), the render-only extension (above) patches the gap every render
   // without ever committing, updateSub(idx) then silently misses the regrown
   // rows, and the [subs] disarm effect thrashes on a fresh identity each render
-  // (mp-gmcg review F1). Resize to exactly the post-removal positionCount:
-  // trailing rows the floor still shows are re-seeded from initSubsRef.
-  const removalTarget = (newMaxSub, newManualMax) =>
-    Math.min(Math.max(teamSize, newMaxSub, newManualMax), kachinukiMaxBouts);
+  // (mp-gmcg review F1). Resize to exactly the post-removal positionCount, via
+  // the SAME clampPositionCount that sizes positionCount above — trailing rows
+  // the floor still shows are re-seeded from initSubsRef.
   const resizeSubsTo = (prev, target) => {
     const kept = prev.slice(0, target);
     return kept.length >= target ? kept : [...kept, ...initSubsRef.current.slice(kept.length, target)];
@@ -1164,7 +1177,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     if (pos > maxSubPos) {
       const remaining = manualBouts.filter(p => p !== pos);
       setManualBouts(remaining);
-      const target = removalTarget(maxSubPos, remaining.length ? Math.max(...remaining) : 0);
+      const target = clampPositionCount(maxSubPos, remaining.length ? Math.max(...remaining) : 0);
       setSubs(prev => resizeSubsTo(prev, target));
       setEndArmed(false);
       setFinishArmed(false);
@@ -1183,8 +1196,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
         : (match.subResults || []).filter(s => s.position !== pos);
       setMatchOverride({ ...match, subResults: nextSubs });
       // The server strips exactly the trailing bout at `pos`, so the new log
-      // ceiling is pos-1; keep the teamSize floor (removalTarget).
-      setSubs(prev => resizeSubsTo(prev, removalTarget(pos - 1, manualMaxPos)));
+      // ceiling is pos-1; keep the teamSize floor (clampPositionCount).
+      setSubs(prev => resizeSubsTo(prev, clampPositionCount(pos - 1, manualMaxPos)));
       setEndArmed(false);
       setFinishArmed(false);
     } catch (e) {
@@ -2147,9 +2160,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               ? kachinukiBandModel({
                   subs, daihyosenIdx, isComplete,
                   namesAt: playerNamesForBout,
-                  matchWinner: typeof m.winner === "object" ? m.winner?.name : m.winner,
+                  // RAW winner/sides (not pre-flattened to names): winnerSideLR
+                  // inside kachinukiBandModel needs the {id,name} shape to prefer
+                  // id equality over name (review: two teams CAN share a name).
+                  matchWinner: m.winner,
                   matchDecision: m.decision,
-                  sideAName, sideBName,
+                  sideA: m.sideA, sideB: m.sideB,
                   currentBout: parseInt(visiblePositions[visiblePositions.length - 1], 10) || undefined,
                 })
               : null;
@@ -2530,7 +2546,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               danger palette, above the button — never hidden behind a tooltip
               or implied by a red button. */}
           {reopenConflict && (
-            <div className="reopen-conflict" data-testid="kachinuki-reopen-conflict">
+            <div className="alert alert--error reopen-conflict" data-testid="kachinuki-reopen-conflict">
               <div className="reopen-conflict__head">
                 Shiaijo {reopenConflict.court || "?"} is running {blockerLabel || reopenConflict.matchId}.
               </div>
@@ -2610,7 +2626,22 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                   // bout. End/Reopen keep the two-step arm: they are rare
                   // and terminal.
                   setEndArmed(false);
-                  doSubmit(() => onSubmit(buildPatch("running", { kachinukiBoutFinal: true })));
+                  doSubmit(async () => {
+                    const res = await onSubmit(buildPatch("running", { kachinukiBoutFinal: true }));
+                    // mp-gmcg review C1: if a prior [Remove this bout] left
+                    // matchOverride shadowing the `match` prop, adopt THIS
+                    // write's own fresh subResults into the override directly
+                    // rather than waiting for the prop to change (it can
+                    // return to exactly its pre-removal length, which the
+                    // id+length effect above can never observe — see that
+                    // effect's comment). A failed write resolves with no
+                    // subResults (the host's onSubmit swallows the error), so
+                    // this is a no-op then and the still-correct override is
+                    // left untouched.
+                    if (mountedRef.current && res && Array.isArray(res.subResults)) {
+                      setMatchOverride(prev => prev ? { ...prev, subResults: res.subResults } : prev);
+                    }
+                  });
                 }} disabled={submitting || !kachinukiCurrentBoutPlayed}
                   title={!kachinukiCurrentBoutPlayed ? "Nothing recorded for this bout yet" : undefined}>
                   {submitting ? "Saving…" : "Record bout"}

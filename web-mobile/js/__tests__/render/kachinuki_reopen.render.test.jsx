@@ -443,6 +443,16 @@ describe('kachinuki [× Remove this bout] undoes a bout added by mistake', () =>
   // becomes an out-of-range no-op — so a score on the re-appended bout silently
   // vanishes. Drive the full sequence: remove → server catches up → Record
   // re-appends bout 2 → score it, and assert the score registers.
+  //
+  // NOTE (review C1): the intermediate `rerender(propWith(boutOneOnly))` below
+  // simulates a host that re-syncs the `match` PROP down to the post-removal
+  // length before Record grows it again. Neither real host actually does this
+  // (admin_schedule_score_editor.jsx's openMatch is untouched by a removal;
+  // admin_shiaijo.jsx remounts the whole modal on a length change instead) — so
+  // this test pins the id+length effect's OWN behaviour when the prop genuinely
+  // moves through that state, but does not by itself prove the real modal-host
+  // sequence works. See the "adopts a Record-bout append directly" test below
+  // for that sequence, where the prop's length never changes at all.
   it('records a score on a bout re-appended after a removal (subsRaw stays sized to the floor)', async () => {
     const boutOneOnly = [{ position: 1, sideA: 'A1', sideB: 'B1', ipponsA: ['M'], ipponsB: [], winner: 'A1' }];
     window.API.removeKachinukiBout = vi.fn().mockResolvedValue({ id: 'm1', subResults: boutOneOnly });
@@ -470,6 +480,45 @@ describe('kachinuki [× Remove this bout] undoes a bout added by mistake', () =>
     // Score it via the keyboard (Shiro men). Pre-fix this was a no-op.
     await act(async () => { fireEvent.keyDown(window, { key: 'm' }); });
     await waitFor(() => expect(screen.queryByTestId('kachinuki-record-hint')).toBeNull());
+  });
+
+  // mp-gmcg review C1: the REAL admin_schedule_score_editor.jsx modal-host
+  // sequence — openMatch (and so the `match` prop) is untouched by a removal,
+  // and Record-bout's own response spreads a fresh subResults of the SAME
+  // length back onto it (remove: L→L-1 in the override only; Record:
+  // L-1→L again), so the id+length effect's deps never change and the
+  // override could freeze on the pre-append state forever. The fix adopts
+  // Record's own response directly into the override, independent of the prop
+  // ever visibly changing — proven here by NEVER rerendering the match prop
+  // for the whole sequence.
+  it('adopts a Record-bout append directly into the override when the parent prop never changes', async () => {
+    const boutOneOnly = [{ position: 1, sideA: 'A1', sideB: 'B1', ipponsA: ['M'], ipponsB: [], winner: 'A1' }];
+    window.API.removeKachinukiBout = vi.fn().mockResolvedValue({ id: 'm1', subResults: boutOneOnly });
+    // Mirrors the FIXED admin_schedule_score_editor.jsx onSubmit, which now
+    // returns `res` (containing the post-advance subResults) from its
+    // kachinukiBoutFinal branch instead of silently dropping it.
+    const boutOneAndNew = [...boutOneOnly, { position: 2, sideA: 'A1', sideB: 'B3', ipponsA: [], ipponsB: [] }];
+    const onSubmit = vi.fn().mockResolvedValue({ subResults: boutOneAndNew });
+    await renderEditor({ match: runningWithAppendedBout(), onSubmit });
+
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-remove-bout-button')); });
+    await waitFor(() => expect(screen.queryByTestId('kachinuki-remove-bout-button')).toBeNull());
+    // Bout 1 (the surviving bout) is already scored → no "unplayed" hint yet,
+    // and Record bout is enabled.
+    expect(screen.queryByTestId('kachinuki-record-hint')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Record bout' })).not.toBeDisabled();
+
+    // The `match` prop is NEVER rerendered from here on: this is the exact
+    // modal-host behaviour the bug depends on.
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Record bout' })); });
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+
+    // Pre-fix: the override stays frozen on the 1-bout post-removal state, so
+    // the editor still thinks bout 1 (already scored) is current — Record
+    // stays enabled and the hint stays absent, i.e. this assertion is the one
+    // that catches the freeze.
+    await waitFor(() => expect(screen.queryByTestId('kachinuki-record-hint')).not.toBeNull());
+    expect(screen.getByRole('button', { name: 'Record bout' })).toBeDisabled();
   });
 
   // mp-gmcg review F4: the local override that hides the removed bout must

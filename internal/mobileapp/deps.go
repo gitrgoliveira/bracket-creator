@@ -142,7 +142,8 @@ type EligibilityEngine interface {
 // SetTeamLineup / DeleteTeamLineup methods on *state.Store.
 //
 // The handler also needs the competition's TeamSize to drive
-// TeamLineup.Validate, so it composes this interface with
+// TeamLineup.ValidatePositions (position-key validity only, no
+// completeness/vacancy rule), so it composes this interface with
 // CompetitionStore at the registration site rather than promoting
 // LoadCompetition into this minimal store interface; same pattern
 // the other handler families use.

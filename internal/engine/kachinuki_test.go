@@ -2151,6 +2151,97 @@ func TestApplyKachinukiMerge_StripOnCompletedOnly(t *testing.T) {
 	})
 }
 
+// TestApplyKachinukiMerge_DerivesWinnerFromBoutLog is the C1/C3-fix pin
+// (mp-gmcg review C3): "OPERATOR INPUT DETERMINES THE BOUT OUTCOME" was
+// enforced only by the client HIDING the generic correction button —
+// applyKachinukiMerge itself accepted whatever winner a completed
+// kachinuki-exhaustion write carried. It must now derive the winner from the
+// merged bout log's last scored bout, overriding a client value that
+// disagrees with it.
+func TestApplyKachinukiMerge_DerivesWinnerFromBoutLog(t *testing.T) {
+	comp := &state.Competition{
+		ID: "derive-win", TeamSize: 3, TeamMatchType: state.TeamMatchTypeKachinuki,
+	}
+
+	t.Run("a wrong client-supplied winner is overridden by the last bout", func(t *testing.T) {
+		result := &state.MatchResult{
+			SideA: "RedTeam", SideB: "WhiteTeam",
+			Status: state.MatchStatusCompleted, Decision: "kachinuki-exhaustion",
+			// The client claims WhiteTeam won; the bout log's last scored bout
+			// (position 2, R-2 the winner) says RedTeam actually won.
+			Winner: "WhiteTeam",
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "R-1", SideB: "W-1", IpponsA: []string{"M"}, Winner: "R-1", Decision: "fought"},
+				{Position: 2, SideA: "R-2", SideB: "W-2", IpponsA: []string{"M"}, Winner: "R-2", Decision: "fought"},
+			},
+		}
+		applyKachinukiMerge(comp, nil, result)
+		assert.Equal(t, "RedTeam", result.Winner, "the bout log, not the client's claim, decides the winner")
+	})
+
+	t.Run("an absent client winner is filled from the last bout", func(t *testing.T) {
+		result := &state.MatchResult{
+			SideA: "RedTeam", SideB: "WhiteTeam",
+			Status: state.MatchStatusCompleted, Decision: "kachinuki-exhaustion",
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "R-1", SideB: "W-1", IpponsA: []string{"M"}, Winner: "W-1", Decision: "fought"},
+			},
+		}
+		applyKachinukiMerge(comp, nil, result)
+		assert.Equal(t, "WhiteTeam", result.Winner)
+	})
+
+	t.Run("a matching client winner is left as is", func(t *testing.T) {
+		result := &state.MatchResult{
+			SideA: "RedTeam", SideB: "WhiteTeam",
+			Status: state.MatchStatusCompleted, Decision: "kachinuki-exhaustion",
+			Winner: "RedTeam",
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "R-1", SideB: "W-1", IpponsA: []string{"M"}, Winner: "R-1", Decision: "fought"},
+			},
+		}
+		applyKachinukiMerge(comp, nil, result)
+		assert.Equal(t, "RedTeam", result.Winner)
+	})
+
+	// The critical guard: kiken/fusenpai/fusensho decisions reach this SAME
+	// merge point (RecordDecisionTx -> RecordMatchResultWithIneligibilityTx ->
+	// applyKachinukiMerge) with their OWN winner rule (the non-withdrawing
+	// side), independent of the bout log. deriveKachinukiWinner must NOT touch
+	// it, or a legitimate walkover (FIK Art. 32 — the withdrawing side keeps
+	// its already-struck ippons and can be "ahead" on the last logged bout)
+	// would be silently overturned.
+	for _, decision := range []string{"kiken-voluntary", "kiken-injury", "fusenpai", "fusensho"} {
+		t.Run("a "+decision+" decision's winner is untouched even when the bout log disagrees", func(t *testing.T) {
+			result := &state.MatchResult{
+				SideA: "RedTeam", SideB: "WhiteTeam",
+				Status: state.MatchStatusCompleted, Decision: decision,
+				// RedTeam withdraws (WhiteTeam wins by walkover), but the last
+				// LOGGED bout was won by a RED player — exactly the case that
+				// must NOT flip the winner back to RedTeam.
+				Winner: "WhiteTeam",
+				SubResults: []state.SubMatchResult{
+					{Position: 1, SideA: "R-1", SideB: "W-1", IpponsA: []string{"M"}, Winner: "R-1", Decision: "fought"},
+				},
+			}
+			applyKachinukiMerge(comp, nil, result)
+			assert.Equal(t, "WhiteTeam", result.Winner, "a walkover's winner must never be re-derived from the bout log")
+		})
+	}
+
+	t.Run("a running write is never touched (derivation is completed-only)", func(t *testing.T) {
+		result := &state.MatchResult{
+			SideA: "RedTeam", SideB: "WhiteTeam",
+			Status: state.MatchStatusRunning, Decision: "kachinuki-exhaustion", Winner: "WhiteTeam",
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "R-1", SideB: "W-1", IpponsA: []string{"M"}, Winner: "R-1", Decision: "fought"},
+			},
+		}
+		applyKachinukiMerge(comp, nil, result)
+		assert.Equal(t, "WhiteTeam", result.Winner, "no derivation before the match actually completes")
+	})
+}
+
 // TestRecordMatchResultWithIneligibility_KachinukiMerge covers the
 // NON-TX twin's merge block: a partial kachinuki patch must preserve the
 // stored appended placeholder (same contract the tx twin enforces for

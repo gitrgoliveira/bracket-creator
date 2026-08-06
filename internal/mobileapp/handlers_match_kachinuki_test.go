@@ -552,7 +552,7 @@ func TestScoreHandler_KachinukiEnchoFinalBoutPersists(t *testing.T) {
 }
 
 // TestScoreHandler_KachinukiPoolBoutEnchoAccepted pins the SCOPE of the
-// kachinuki bout-level encho exception (allowNumberedEnchoFor): it applies
+// kachinuki bout-level encho exception (allowNumberedEnchoFromStore): it applies
 // in EVERY phase, pools included. Whether the final pairing must produce a
 // result (e.g. the taisho must be defeated) is OPERATOR DISCRETION — the
 // operator may fight a tied pool pairing on in overtime rather than accept

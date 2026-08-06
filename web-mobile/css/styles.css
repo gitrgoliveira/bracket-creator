@@ -6713,14 +6713,12 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
    operator wanted to reopen their own match and instead learned another match
    holds the court; from here they can clear it. Danger palette because the
    action inside DESTROYS that other match's score: the panel must not read as
-   a neutral notice. */
+   a neutral notice. Composes .alert.alert--error (background/border/padding/
+   font-size — --r-sm and --fs-sm resolve to the SAME 6px/13px .alert already
+   hard-codes) in the JSX; this rule adds only what's specific here (review:
+   this used to re-declare the whole alert--error palette by hand). */
 .reopen-conflict {
-  background: var(--danger-soft);
-  border: 1px solid var(--danger-border);
-  border-radius: var(--r-sm);
-  padding: 8px 12px;
   margin-bottom: 8px;
-  font-size: var(--fs-sm);
 }
 .reopen-conflict__head {
   font-weight: 700;

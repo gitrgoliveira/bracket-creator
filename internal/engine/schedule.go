@@ -340,31 +340,28 @@ func EstimateForCounts(poolCount, playoffCount int, comp *state.Competition, tou
 		bufferMultiplier = 1.0 + float64(tournament.SlowestCourtBufferPct)/100.0
 	}
 
-	// walk runs the per-court cursor simulation for ONE scenario's
-	// per-match minutes and returns (perCourtList, slowest-court
-	// duration). Distributes pool matches evenly across courts, then
-	// advances each court's cursor per match (with lunch skipping),
-	// pools-then-playoffs. We use integer division; the remainder
-	// matches are spread across the first courts, an intentional
-	// even-distribution heuristic for this pre-draw estimate. (The
-	// post-draw assigner does NO distribution of its own: it schedules
-	// matches that already carry a Court assignment.)
-	//
-	// Pure match minutes per court are tracked separately from the
-	// cursor so the slowest-court buffer applies to match time ONLY,
-	// never to the fixed OpeningBlock offset or LunchBlock dead-time
-	// (those have no runtime variance to pad). Mirrors
-	// EstimateSchedule, which buffers match time alone.
 	// walk runs the per-court cursor simulation for one or more per-match
-	// scenarios in a SINGLE pass over the match distribution. The distribution
-	// (base/rem per court) is identical across scenarios; only the per-match
-	// minutes — and thus how each cursor lands relative to the lunch block —
-	// differ, so a cursor per scenario advances together court-by-court. This is
-	// bit-identical to running the old single-scenario walk once per scenario,
-	// but prices kachinuki's best/avg/worst without re-deriving the distribution
-	// three times or discarding two perCourtList builds (mp-gmcg review F7).
-	// Returns each scenario's (perCourtList, slowest-court buffered duration),
-	// positionally.
+	// scenarios in a SINGLE pass over the match distribution, returning each
+	// scenario's (perCourtList, slowest-court buffered duration), positionally.
+	// The distribution (base/rem per court) is identical across scenarios —
+	// pool matches spread evenly across courts, remainder matches to the first
+	// courts, an intentional even-distribution heuristic for this pre-draw
+	// estimate (the post-draw assigner does NO distribution of its own: it
+	// schedules matches that already carry a Court assignment) — only the
+	// per-match minutes, and thus how each cursor lands relative to the lunch
+	// block, differ, so a cursor per scenario advances together court-by-court
+	// (mp-gmcg review F7). This shares the distribution derivation across
+	// scenarios; the kachinuki caller below still discards two of the three
+	// perCourtList builds (it only surfaces the average one) — negligible on
+	// this admin page-load endpoint, so left as is (review E7), but the
+	// sharing is scoped to the distribution, not a claim that nothing is
+	// discarded.
+	//
+	// Pure match minutes per court are tracked separately from the cursor so
+	// the slowest-court buffer applies to match time ONLY, never to the fixed
+	// OpeningBlock offset or LunchBlock dead-time (those have no runtime
+	// variance to pad). Mirrors EstimateSchedule, which buffers match time
+	// alone.
 	walk := func(scenarios []schedScenario) ([][]int, []float64) {
 		ns := len(scenarios)
 		courtCursor := make([][]time.Time, ns)
@@ -428,7 +425,12 @@ func EstimateForCounts(poolCount, playoffCount int, comp *state.Competition, tou
 	// Kachinuki (mp-gmcg): the bout count is variable, so price three
 	// scenarios. The headline TotalDurationMinutes / PerCourtMinutes is
 	// the AVERAGE; best (= the nominal walk) and worst bracket it.
-	if comp.Kind == "team" && comp.TeamMatchType == state.TeamMatchTypeKachinuki && comp.TeamSize > 0 {
+	// IsKachinuki requires TeamSize >= 2 (review: this used to accept
+	// TeamSize > 0, so a TeamSize == 1 competition priced a fake best/avg/worst
+	// range here while every engine kachinuki function refused it as
+	// non-kachinuki — a single fighter per side has no "winner stays on" to
+	// range-price).
+	if comp.IsKachinuki() {
 		bestBouts, avgBouts, worstBouts := kachinukiBoutRange(comp.TeamSize)
 		// Order: best, avg, worst. Each scenario's per-match minutes come from
 		// kachinukiBoutRange's own bout counts, NOT from the nominal walk: the

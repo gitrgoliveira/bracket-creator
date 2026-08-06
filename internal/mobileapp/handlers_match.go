@@ -169,41 +169,38 @@ func anyNumberedBoutHasEncho(subResults []state.SubMatchResult) bool {
 	return false
 }
 
-// isKachinukiComp reports whether comp is a kachinuki TEAM competition,
-// mirroring the engine's dispatch gate (TeamSize >= 2 + kachinuki type).
+// isKachinukiComp reports whether comp is a kachinuki TEAM competition. Thin
+// wrapper over state.Competition.IsKachinuki so every mobileapp call site goes
+// through the one predicate (mp-gmcg review: this and 6 other inline
+// TeamMatchType/TeamSize checks across engine/mobileapp/state used to
+// disagree on the TeamSize threshold).
 func isKachinukiComp(comp *state.Competition) bool {
-	return comp != nil && comp.TeamSize >= 2 && comp.TeamMatchType == state.TeamMatchTypeKachinuki
-}
-
-// allowNumberedEnchoFor is the single decision point for the kachinuki
-// bout-level encho exception (mp-gmcg): a tied kachinuki pairing may be
-// fought on in overtime on that same bout, so the daihyosen-only encho
-// gate in validateSubBout is relaxed for kachinuki competitions — in
-// EVERY phase. Whether the final pairing must produce a result (e.g. the
-// taisho must be defeated) is OPERATOR DISCRETION, never derivable from
-// pool-vs-bracket (operator ruling, 2026-08-01, reverting an earlier
-// bracket-only scoping that hard-coded the rule by phase — the exact
-// thing spec 006's problem statement forbids). The encounter-level
-// no-draw rule for brackets lives in validateBracketCompletion, not
-// here. Both the single-score and bulk-score paths must route through
-// this helper rather than re-deriving the rule.
-func allowNumberedEnchoFor(comp *state.Competition) bool {
-	return isKachinukiComp(comp)
+	return comp.IsKachinuki()
 }
 
 // allowNumberedEnchoFromStore resolves the numbered-bout encho gate for
-// compID: it loads the competition and applies allowNumberedEnchoFor, but
-// ONLY when the payload actually carries a numbered-bout encho
-// (hasNumberedEncho, from anyNumberedBoutHasEncho). An ordinary payload
-// carries none and must not pay the store read on the hot scoring path.
+// compID: it loads the competition and applies isKachinukiComp, but ONLY when
+// the payload actually carries a numbered-bout encho (hasNumberedEncho, from
+// anyNumberedBoutHasEncho). An ordinary payload carries none and must not pay
+// the store read on the hot scoring path.
+//
+// This is the single decision point for the kachinuki bout-level encho
+// exception (mp-gmcg): a tied kachinuki pairing may be fought on in overtime
+// on that same bout, so the daihyosen-only encho gate in validateSubBout is
+// relaxed for kachinuki competitions — in EVERY phase. Whether the final
+// pairing must produce a result (e.g. the taisho must be defeated) is
+// OPERATOR DISCRETION, never derivable from pool-vs-bracket (operator ruling,
+// 2026-08-01, reverting an earlier bracket-only scoping that hard-coded the
+// rule by phase — the exact thing spec 006's problem statement forbids). The
+// encounter-level no-draw rule for brackets lives in validateBracketCompletion,
+// not here. Both the single-score and bulk-score paths must route through
+// this helper rather than re-deriving the rule.
 //
 // FAIL CLOSED: any load failure keeps the STRICT daihyosen-only gate. The
 // error is logged rather than swallowed (errcheck) and rather than returned:
 // a load failure must not surface to the operator as a 400 blaming the
 // payload ("encho is only valid for the daihyosen representative bout
-// (position -1)"), which is what an ignored error produced. Both the
-// single-score and bulk-score paths route through here so neither the gate
-// nor its diagnosability can drift from the other.
+// (position -1)"), which is what an ignored error produced.
 func allowNumberedEnchoFromStore(store CompetitionStore, compID string, hasNumberedEncho bool) bool {
 	if !hasNumberedEncho {
 		return false
@@ -213,7 +210,7 @@ func allowNumberedEnchoFromStore(store CompetitionStore, compID string, hasNumbe
 		log.Printf("LoadCompetition(%s) for the numbered-bout encho gate: %v; keeping the strict gate", compID, err)
 		return false
 	}
-	return allowNumberedEnchoFor(comp)
+	return isKachinukiComp(comp)
 }
 
 // tryAutoCompletePools runs the auto-complete check after a successful score
@@ -1462,7 +1459,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		// Kachinuki exception (mp-gmcg): a tied kachinuki pairing may be
 		// fought on in overtime on that same bout, in ANY phase — whether the
 		// final pairing must produce a result is operator discretion
-		// (allowNumberedEnchoFor), so the daihyosen-only encho gate in
+		// (allowNumberedEnchoFromStore), so the daihyosen-only encho gate in
 		// validateSubBout is relaxed for kachinuki competitions. The
 		// competition is loaded only when the payload actually carries a
 		// bout-level encho, keeping the hot scoring path free of the read.

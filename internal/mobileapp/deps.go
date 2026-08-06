@@ -48,6 +48,10 @@ type CompetitionStore interface {
 	LoadPoolMatches(id string) ([]state.MatchResult, error)
 	// LoadBracket returns the elimination bracket for compID.
 	LoadBracket(id string) (*state.Bracket, error)
+	// MatchStatusByID returns the status of one match (pool → bracket →
+	// bronze) without the deep copy the Load* methods make. Mirrors
+	// state.Store.MatchStatusByID.
+	MatchStatusByID(compID, matchID string) (state.MatchStatus, bool, error)
 }
 
 // ScoringEngine is the consumer-boundary view of engine.Engine used by

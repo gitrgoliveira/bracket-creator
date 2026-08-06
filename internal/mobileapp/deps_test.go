@@ -26,6 +26,10 @@ func (stubCompetitionStore) LoadBracket(string) (*state.Bracket, error) {
 	return nil, nil
 }
 
+func (stubCompetitionStore) MatchStatusByID(string, string) (state.MatchStatus, bool, error) {
+	return "", false, nil
+}
+
 // stubTournamentLoader is a no-op implementation of TournamentLoader. Same
 // rationale as stubCompetitionStore.
 type stubTournamentLoader struct{}

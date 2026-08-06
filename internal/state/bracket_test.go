@@ -250,6 +250,110 @@ func TestUpdateBracketMatchByID(t *testing.T) {
 	})
 }
 
+// TestMatchStatusByID covers the no-copy status reader (mp-gmcg review E5):
+// pool first, then bracket rounds, then the bronze sibling; found=false
+// otherwise; and its status must AGREE with the full-copy LoadPoolMatches /
+// LoadBracket path it replaces.
+func TestMatchStatusByID(t *testing.T) {
+	newStore := func(t *testing.T) (*Store, string) {
+		t.Helper()
+		dir, err := os.MkdirTemp("", "state-match-status-*")
+		require.NoError(t, err)
+		t.Cleanup(func() { os.RemoveAll(dir) })
+		store, err := NewStore(dir)
+		require.NoError(t, err)
+		compID := "test-comp"
+		require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Test"}))
+		require.NoError(t, store.SavePoolMatches(compID, []MatchResult{
+			{ID: "P1-0", Status: MatchStatusCompleted, Winner: "Alice",
+				SubResults: []SubMatchResult{{Position: 1, IpponsA: []string{"M"}, Winner: "Alice"}}},
+			{ID: "P1-1", Status: MatchStatusRunning},
+		}))
+		require.NoError(t, store.SaveBracket(compID, &Bracket{
+			Rounds:          [][]BracketMatch{{{ID: "B1", Status: MatchStatusScheduled}}},
+			ThirdPlaceMatch: &BracketMatch{ID: "BRONZE", Status: MatchStatusRunning},
+		}))
+		return store, compID
+	}
+
+	t.Run("finds a pool match's status", func(t *testing.T) {
+		store, compID := newStore(t)
+		st, found, err := store.MatchStatusByID(compID, "P1-0")
+		require.NoError(t, err)
+		require.True(t, found)
+		assert.Equal(t, MatchStatusCompleted, st)
+	})
+
+	t.Run("finds a bracket round match's status", func(t *testing.T) {
+		store, compID := newStore(t)
+		st, found, err := store.MatchStatusByID(compID, "B1")
+		require.NoError(t, err)
+		require.True(t, found)
+		assert.Equal(t, MatchStatusScheduled, st)
+	})
+
+	t.Run("finds the BRONZE sibling's status (a rounds-only walk would miss it)", func(t *testing.T) {
+		store, compID := newStore(t)
+		st, found, err := store.MatchStatusByID(compID, "BRONZE")
+		require.NoError(t, err)
+		require.True(t, found)
+		assert.Equal(t, MatchStatusRunning, st)
+	})
+
+	t.Run("found=false for an unknown match", func(t *testing.T) {
+		store, compID := newStore(t)
+		_, found, err := store.MatchStatusByID(compID, "nope")
+		require.NoError(t, err)
+		assert.False(t, found)
+	})
+
+	t.Run("invalid compID errors", func(t *testing.T) {
+		store, _ := newStore(t)
+		_, _, err := store.MatchStatusByID("../traversal", "P1-0")
+		assert.Error(t, err)
+	})
+
+	t.Run("agrees with the full-copy load path for every match", func(t *testing.T) {
+		store, compID := newStore(t)
+		// Build the authoritative status map from the deep-copy loaders.
+		want := map[string]MatchStatus{}
+		pm, err := store.LoadPoolMatches(compID)
+		require.NoError(t, err)
+		for _, m := range pm {
+			want[m.ID] = m.Status
+		}
+		br, err := store.LoadBracket(compID)
+		require.NoError(t, err)
+		for _, round := range br.Rounds {
+			for _, bm := range round {
+				want[bm.ID] = bm.Status
+			}
+		}
+		if br.ThirdPlaceMatch != nil {
+			want[br.ThirdPlaceMatch.ID] = br.ThirdPlaceMatch.Status
+		}
+		for id, wantStatus := range want {
+			got, found, err := store.MatchStatusByID(compID, id)
+			require.NoError(t, err)
+			require.Truef(t, found, "MatchStatusByID must find %q", id)
+			assert.Equalf(t, wantStatus, got, "status mismatch for %q", id)
+		}
+	})
+
+	t.Run("does not mutate cached data: a status read leaves later loads intact", func(t *testing.T) {
+		store, compID := newStore(t)
+		_, _, err := store.MatchStatusByID(compID, "P1-0")
+		require.NoError(t, err)
+		// The SubResults must still be intact on a subsequent full load (the
+		// no-copy read must never have aliased or truncated the cached slice).
+		pm, err := store.LoadPoolMatches(compID)
+		require.NoError(t, err)
+		require.Len(t, pm, 2)
+		require.Len(t, pm[0].SubResults, 1, "cached SubResults untouched by the status read")
+		assert.Equal(t, "Alice", pm[0].SubResults[0].Winner)
+	})
+}
+
 func TestLoadBracketLocked_ViaTransaction(t *testing.T) {
 	dir, err := os.MkdirTemp("", "state-bracket-locked-*")
 	require.NoError(t, err)

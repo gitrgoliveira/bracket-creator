@@ -976,7 +976,7 @@ var errResultFinalized = errors.New("result_finalized")
 // an anonymous caller tries to write to a completed match. Fails closed:
 // a load error rejects the request rather than allowing an overwrite,
 // which is why it reads the snapshot through the fail-closed
-// matchSnapshotOrErr rather than the best-effort matchSnapshotFor.
+// matchSnapshotOrErr rather than a best-effort error-swallowing read.
 func checkFinalizedUnderTx(stx state.StoreTx, compID, matchID string) error {
 	snap, found, err := matchSnapshotOrErr(stx, compID, matchID, "finalized")
 	if err != nil {
@@ -1046,8 +1046,8 @@ type matchSnapshot struct {
 // FIRST load failure seen, and the walk continues past it so a best-effort
 // caller can still find a bracket match when the pool CSV is unreadable.
 // Callers do not open-code this: a fail-closed audit gate goes through
-// matchSnapshotOrErr (surfaces err), a best-effort caller through
-// matchSnapshotFor (drops it).
+// matchSnapshotOrErr (surfaces err); MatchStatusByID is the no-copy status-only
+// reader for the pre-tx correction check (review E5).
 func lookupMatchSnapshot(s matchStores, compID, matchID string) (matchSnapshot, bool, error) {
 	var loadErr error
 	poolMatches, err := s.LoadPoolMatches(compID)
@@ -1095,23 +1095,16 @@ func bracketMatchSnapshot(bm *state.BracketMatch) matchSnapshot {
 	}
 }
 
-// matchSnapshotFor is the best-effort form of lookupMatchSnapshot, for the
-// callers where a load failure is indistinguishable from "nothing recorded
-// yet": every one of them re-reads on the next request and the authoritative
-// rejection happens on the engine write.
-func matchSnapshotFor(s matchStores, compID, matchID string) (matchSnapshot, bool) {
-	snap, found, _ := lookupMatchSnapshot(s, compID, matchID)
-	return snap, found
-}
-
-// matchSnapshotOrErr is the fail-CLOSED counterpart to matchSnapshotFor: it
+// matchSnapshotOrErr is the fail-CLOSED reader over lookupMatchSnapshot: it
 // SURFACES a load error (wrapped as "<guardLabel> guard: …") instead of
-// swallowing it, so an in-transaction audit gate aborts rather than acting on a
-// best-effort empty snapshot. A new fail-closed gate must reach for THIS, not
-// matchSnapshotFor — reading a match's ReopenPending/status under a dropped load
-// error is the exact hole mp-gmcg closed. The caller keeps its own found/err
-// handling (the return shapes legitimately differ: a sentinel, a bare error, a
-// (correctionCheck{}, err)); this owns only the shared load-and-wrap.
+// swallowing it, so an in-transaction audit gate aborts rather than acting on an
+// empty snapshot. A fail-closed gate must reach for THIS — reading a match's
+// ReopenPending/status under a dropped load error is the exact hole mp-gmcg
+// closed. The caller keeps its own found/err handling (the return shapes
+// legitimately differ: a sentinel, a bare error, a (correctionCheck{}, err));
+// this owns only the shared load-and-wrap. (There was once a best-effort
+// error-swallowing twin, matchSnapshotFor; it was removed when its last caller
+// switched to the no-copy MatchStatusByID — review E5.)
 func matchSnapshotOrErr(s matchStores, compID, matchID, guardLabel string) (matchSnapshot, bool, error) {
 	snap, found, err := lookupMatchSnapshot(s, compID, matchID)
 	if err != nil {
@@ -1136,16 +1129,23 @@ func respondCourtBusy(c *gin.Context, err *engine.CourtBusyError, action string)
 	})
 }
 
-// matchStatusFromStore is the non-transactional status projection of
-// matchSnapshotFor: it reads a match's current status via plain store loads
-// so a correction (a completed -> completed overwrite) can be detected BEFORE
-// the transaction begins, letting the pre-tx court gate skip it. A benign
-// TOCTOU with a concurrent status change only decides whether the
-// (spurious-for-corrections) court check runs; the audit-critical
-// correction-REASON requirement still uses the race-free in-tx read.
+// matchStatusFromStore is the non-transactional status read used to detect a
+// correction (a completed -> completed overwrite) BEFORE the transaction begins,
+// letting the pre-tx court gate skip it. A benign TOCTOU with a concurrent
+// status change only decides whether the (spurious-for-corrections) court check
+// runs; the audit-critical correction-REASON requirement still uses the
+// race-free in-tx read.
 func matchStatusFromStore(store CompetitionStore, compID, matchID string) state.MatchStatus {
-	snap, _ := matchSnapshotFor(store, compID, matchID)
-	return snap.Status
+	// MatchStatusByID reads the cached parse and copies nothing, unlike
+	// matchSnapshotFor (which deep-clones every pool match's SubResults and the
+	// whole bracket just to read one enum). A load error or an unknown match
+	// yields "" — the isCorrection caller treats a non-completed status as
+	// "not a correction", the safe default (mp-gmcg review E5).
+	status, _, err := store.MatchStatusByID(compID, matchID)
+	if err != nil {
+		return ""
+	}
+	return status
 }
 
 // correctionCheck is applyCorrectionReasonUnderTx's verdict.

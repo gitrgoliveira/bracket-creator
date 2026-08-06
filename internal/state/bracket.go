@@ -270,6 +270,42 @@ func findBracketMatchByID(b *Bracket, matchID string) *BracketMatch {
 	return nil
 }
 
+// MatchStatusByID returns the status of the match with the given ID, searching
+// pool matches FIRST, then the bracket (rounds, then the bronze sibling), or
+// found=false. It reads the CACHED parse directly and copies NOTHING: the
+// caller wants only the status enum, so this avoids the deep SubResults/bracket
+// clone that LoadPoolMatches / LoadBracket make on every call (mp-gmcg review
+// E5). Only VALUES are returned — the cached slices are never exposed or
+// mutated, so reading them without a defensive copy is safe (writers replace
+// the cached parse, never mutate it in place). Search order matches
+// lookupMatchSnapshot (mobileapp), so the status agrees with the full snapshot.
+func (s *Store) MatchStatusByID(compID, matchID string) (MatchStatus, bool, error) {
+	if err := ValidateCompetitionID(compID); err != nil {
+		return "", false, err
+	}
+	pdata, err := s.loadCached(compID, "pool-matches.csv", parsePoolMatchesFile)
+	if err != nil {
+		return "", false, err
+	}
+	if results, ok := pdata.([]MatchResult); ok {
+		for i := range results {
+			if results[i].ID == matchID {
+				return results[i].Status, true, nil
+			}
+		}
+	}
+	bdata, err := s.loadCached(compID, "bracket.json", parseBracketFile)
+	if err != nil {
+		return "", false, err
+	}
+	if b, _ := bdata.(*Bracket); b != nil {
+		if bm := findBracketMatchByID(b, matchID); bm != nil {
+			return bm.Status, true, nil
+		}
+	}
+	return "", false, nil
+}
+
 // UpdateBracketMatchByID finds the bracket match with the given ID (via
 // findBracketMatchByID, so rounds AND the bronze sibling), applies mutate, and
 // saves. Returns found=false with NO write when no match has that ID. This is

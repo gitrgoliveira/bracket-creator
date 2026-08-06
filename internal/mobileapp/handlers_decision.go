@@ -150,10 +150,10 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			//
 			// Checked in-tx, before the engine write, so the read is race-free
 			// against a concurrent finalization and a rejection costs no write.
-			// matchSnapshotOrErr fails CLOSED on a load error (unlike the
-			// best-effort matchSnapshotFor), so a dropped read can't finalize on
-			// an assumed-false ReopenPending and silently discard the mandatory
-			// reopen audit reason.
+			// matchSnapshotOrErr fails CLOSED on a load error (unlike a
+			// best-effort error-swallowing read), so a dropped read can't
+			// finalize on an assumed-false ReopenPending and silently discard the
+			// mandatory reopen audit reason.
 			//
 			// The read is KACHINUKI-ONLY: ReopenPending is set exclusively by
 			// ReopenKachinukiMatch (which rejects non-kachinuki), so a

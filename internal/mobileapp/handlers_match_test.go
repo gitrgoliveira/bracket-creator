@@ -24,7 +24,7 @@ import (
 
 // TestApplyCorrectionReasonUnderTx_FailsClosedOnLoadError pins that the
 // reopen/correction audit gate fails CLOSED when the pre-write snapshot read
-// errors (mp-gmcg). A best-effort matchSnapshotFor swallowed the error and let
+// errors (mp-gmcg). A best-effort read that swallowed the error and let
 // the write finalize on an assumed-false ReopenPending, silently dropping the
 // mandatory audit reason; the gate now mirrors checkFinalizedUnderTx and
 // surfaces the error so the transaction aborts (HTTP 500) instead. A directory
@@ -1358,6 +1358,10 @@ func (f failingCompetitionStore) LoadPoolMatches(string) ([]state.MatchResult, e
 
 func (f failingCompetitionStore) LoadBracket(string) (*state.Bracket, error) {
 	return nil, f.err
+}
+
+func (f failingCompetitionStore) MatchStatusByID(string, string) (state.MatchStatus, bool, error) {
+	return "", false, f.err
 }
 
 // TestAnnotateQueuePositions_NonEmpty verifies that annotateQueuePositions

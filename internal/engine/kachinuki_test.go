@@ -2064,7 +2064,7 @@ func TestRequeueBlockerAndReopenKachinuki(t *testing.T) {
 		assert.True(t, byID["P1-0"].ReopenPending, "reason-less reopen leaves the audit obligation")
 	})
 
-	t.Run("blocker in a DIFFERENT competition (cross-court conflict)", func(t *testing.T) {
+	t.Run("blocker in a DIFFERENT competition on the same court", func(t *testing.T) {
 		eng, store, _ := setupKachinukiComp(t, "rq-target", 3)
 		require.NoError(t, store.SaveCompetition(&state.Competition{
 			ID: "rq-blocker", TeamSize: 3, TeamMatchType: state.TeamMatchTypeKachinuki,
@@ -2076,6 +2076,29 @@ func TestRequeueBlockerAndReopenKachinuki(t *testing.T) {
 
 		assert.Equal(t, state.MatchStatusRunning, loadPoolMatchByID(t, store, "rq-target", "P1-0").Status)
 		assert.Equal(t, state.MatchStatusScheduled, loadPoolMatchByID(t, store, "rq-blocker", "B1-0").Status)
+	})
+
+	// A competition runs across SEVERAL courts, so only the match holding the
+	// TARGET's court is a blocker; a running sibling on another court is
+	// untouched and never blocks the reopen.
+	t.Run("same competition, multiple courts: only the same-court blocker is requeued", func(t *testing.T) {
+		eng, store, _ := setupKachinukiComp(t, "rq-multicourt", 3)
+		require.NoError(t, store.SavePoolMatches("rq-multicourt", []state.MatchResult{
+			completedOnCourt("P1-0", "A"), // target on court A
+			runningOnCourt("P1-1", "A"),   // blocker holding court A
+			runningOnCourt("P1-2", "B"),   // sibling on court B — different court, NOT a blocker
+		}))
+
+		require.NoError(t, eng.RequeueBlockerAndReopenKachinuki("rq-multicourt", "P1-0", "rq-multicourt", "P1-1", ""))
+
+		byID := map[string]state.MatchResult{}
+		matches, _ := store.LoadPoolMatches("rq-multicourt")
+		for _, m := range matches {
+			byID[m.ID] = m
+		}
+		assert.Equal(t, state.MatchStatusScheduled, byID["P1-1"].Status, "the court-A blocker is requeued")
+		assert.Equal(t, state.MatchStatusRunning, byID["P1-0"].Status, "the target reopens onto court A")
+		assert.Equal(t, state.MatchStatusRunning, byID["P1-2"].Status, "the court-B sibling is untouched (different court)")
 	})
 
 	t.Run("a COMPLETED blocker surfaces ErrMatchAlreadyCompleted and leaves the target finished", func(t *testing.T) {

@@ -717,12 +717,16 @@ func (e *Engine) reopenKachinukiUnderCourtLock(compID string, comp *state.Compet
 
 // RequeueBlockerAndReopenKachinuki atomically frees a court and reopens a
 // kachinuki match onto it: under ONE hold of the court-exclusivity lock it
-// requeues the blocking match (which may be in a DIFFERENT competition — a
-// cross-court conflict) and then reopens the target. Holding the lock across
-// both steps closes the race the two-call client flow had (another operator
-// could take the freed court between the requeue and the reopen — mp-gmcg
-// review A4). RevertMatchToQueue takes only the blocker's per-competition lock,
-// so calling it under the court lock keeps the courtCheckMu → per-comp ordering.
+// requeues the blocking match and then reopens the target. A court hosts
+// matches from ANY competition, and one competition spreads its matches across
+// SEVERAL courts, so the blocker holding this match's court may be in the same
+// competition (on this same court, a sibling of the target) or in a different
+// one — either way it is the match occupying THIS court. Holding the lock
+// across both steps closes the race the two-call client flow had (another
+// operator could take the freed court between the requeue and the reopen —
+// mp-gmcg review A4). RevertMatchToQueue takes only the blocker's
+// per-competition lock, so calling it under the court lock keeps the
+// courtCheckMu → per-comp ordering.
 func (e *Engine) RequeueBlockerAndReopenKachinuki(targetComp, targetMatch, blockerComp, blockerMatch, reason string) error {
 	comp, err := e.store.LoadCompetition(targetComp)
 	if err != nil {

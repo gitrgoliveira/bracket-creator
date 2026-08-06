@@ -750,12 +750,14 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 	//
 	// mp-gmcg (review A4): the ATOMIC court-busy remedy. When a plain reopen of
 	// a finished kachinuki match is refused because ANOTHER match holds its
-	// court, this requeues that blocking match (which may be in a DIFFERENT
-	// competition — a cross-court conflict) AND reopens the target under ONE
+	// court, this requeues that blocking match AND reopens the target under ONE
 	// hold of the court-exclusivity lock, so no peer can grab the freed court
-	// between the two steps the old two-call client flow made. Destructive (the
-	// blocker loses any partial score), so it is main-password-gated in self-run
-	// mode via the central allowlist, the same class as reopen/override-winner.
+	// between the two steps the old two-call client flow made. The blocker may
+	// be in the same competition (competitions run across several courts, so a
+	// sibling match can hold this one's court) or in a different one — the body
+	// carries whichever competition owns it. Destructive (the blocker loses any
+	// partial score), so it is main-password-gated in self-run mode via the
+	// central allowlist, the same class as reopen/override-winner.
 	// Body: {blockerCompId, blockerMatchId, reason?} — reason optional, exactly
 	// like reopen (an absent reason leaves the target ReopenPending).
 	r.POST("/competitions/:id/matches/:mid/requeue-blocker-and-reopen", func(c *gin.Context) {

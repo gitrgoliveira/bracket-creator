@@ -1894,8 +1894,11 @@ paths:
         kachinuki match ({id}/{mid}, the target) is refused because ANOTHER
         match holds its court, this requeues that blocking match AND reopens
         the target under ONE hold of the court-exclusivity lock, so no other
-        match can take the freed court between the two steps. The blocker may
-        be in a DIFFERENT competition (a cross-court conflict). It replaces the
+        match can take the freed court between the two steps. Because a court
+        hosts matches from any competition and one competition runs across
+        several courts, the blocker holding this court may be in the same
+        competition (a sibling match) or a different one; `blockerCompId` names
+        whichever owns it. It replaces the
         client's former two separate calls (revert-to-queue then reopen), which
         raced. On success the target returns to `running` (with `reopenPending`
         set when no `reason` is given, exactly like reopen) and the blocker

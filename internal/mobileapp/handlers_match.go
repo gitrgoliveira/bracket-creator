@@ -707,15 +707,11 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		// empty-stored-password fail-closed branch. Pinned by
 		// TestSelfRun_ReopenRequiresMainPassword.
 
-		// WithCourtExclusivityLock mirrors the score path: the engine's
-		// cross-competition court check runs before its own per-comp
-		// transaction, so without the tournament-level lock a concurrent
-		// match-start in another competition could pass its check and commit
-		// between the two, re-creating the very two-running-matches-on-one-
-		// court wedge the reopen court gate exists to prevent.
-		err := tx.WithCourtExclusivityLock(func() error {
-			return eng.ReopenKachinukiMatch(id, mid, reason)
-		})
+		// ReopenKachinukiMatch holds the court-exclusivity lock itself now
+		// (mp-gmcg review A2), so its cross-competition pre-check and in-tx
+		// same-comp check are atomic by construction — the handler no longer
+		// has to remember to wrap the call.
+		err := eng.ReopenKachinukiMatch(id, mid, reason)
 		if err != nil {
 			var notFoundErr *engine.NotFoundError
 			var validationErr *engine.ValidationError

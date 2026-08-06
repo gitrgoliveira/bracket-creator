@@ -607,84 +607,97 @@ func (e *Engine) ReopenKachinukiMatch(compID, matchID, reason string) error {
 	}
 	reason = strings.TrimSpace(reason)
 
-	// Cross-competition court gate, deliberately OUTSIDE the transaction (see
-	// the doc comment). Also surfaces the *NotFoundError for an unknown match
-	// before any lock is taken.
-	if err := e.CheckCrossCompCourtBusy(compID, matchID); err != nil {
-		return err
-	}
-
-	var opErr error
-	txErr := e.store.WithTransaction(compID, func(tx state.StoreTx) error {
-		// guard is the SINGLE copy of the preconditions every match home
-		// below (pool, bracket round, bronze) must pass: the match must be
-		// completed, and its court must be free. Kept as one closure rather
-		// than open-coded per branch because three hand-written copies is
-		// exactly the shape that loses one when a fourth match home appears.
-		//
-		// The court half is the same-competition half of the reopen court
-		// gate (see the COURT GATE note above): reopening flips the match
-		// back to running, so a court that already has a running match would
-		// end up with two, wedging the exclusivity check for BOTH. DO NOT
-		// remove this guard as a redundant-looking check.
-		guard := func(status state.MatchStatus, court string) error {
-			if status != state.MatchStatusCompleted {
-				return ErrReopenNotCompleted
-			}
-			return courtFreeInCompTx(tx, compID, matchID, court)
+	// Court exclusivity is held HERE, inside the engine, so the
+	// cross-competition pre-check and the same-competition in-transaction check
+	// are atomic BY CONSTRUCTION — not by every caller remembering to wrap the
+	// call in WithCourtExclusivityLock (mp-gmcg review A2). Without it a
+	// concurrent match-start in ANOTHER competition could pass its own
+	// cross-comp check and commit between our two halves, re-creating the
+	// two-running-matches-on-one-court wedge the reopen court gate exists to
+	// prevent. e.store owns the lock; nothing below re-takes it (non-reentrant),
+	// and the ordering is courtCheckMu → per-comp lock, the same as the score
+	// path. The LoadCompetition/validation above stay outside: they touch no
+	// court state, so a bad-input rejection need not serialize on the lock.
+	return e.store.WithCourtExclusivityLock(func() error {
+		// Cross-competition court gate, deliberately OUTSIDE the transaction (see
+		// the doc comment). Also surfaces the *NotFoundError for an unknown match
+		// before any per-comp lock is taken.
+		if err := e.CheckCrossCompCourtBusy(compID, matchID); err != nil {
+			return err
 		}
 
-		found, ferr := findMatchHome(tx, compID, matchID, func(h matchHome) error {
-			if h.Pool != nil {
-				if gerr := guard(h.Pool.Status, h.Pool.Court); gerr != nil {
+		var opErr error
+		txErr := e.store.WithTransaction(compID, func(tx state.StoreTx) error {
+			// guard is the SINGLE copy of the preconditions every match home
+			// below (pool, bracket round, bronze) must pass: the match must be
+			// completed, and its court must be free. Kept as one closure rather
+			// than open-coded per branch because three hand-written copies is
+			// exactly the shape that loses one when a fourth match home appears.
+			//
+			// The court half is the same-competition half of the reopen court
+			// gate (see the COURT GATE note above): reopening flips the match
+			// back to running, so a court that already has a running match would
+			// end up with two, wedging the exclusivity check for BOTH. DO NOT
+			// remove this guard as a redundant-looking check.
+			guard := func(status state.MatchStatus, court string) error {
+				if status != state.MatchStatusCompleted {
+					return ErrReopenNotCompleted
+				}
+				return courtFreeInCompTx(tx, compID, matchID, court)
+			}
+
+			found, ferr := findMatchHome(tx, compID, matchID, func(h matchHome) error {
+				if h.Pool != nil {
+					if gerr := guard(h.Pool.Status, h.Pool.Court); gerr != nil {
+						opErr = gerr
+						return nil
+					}
+					// mp-gmcg: the bracket branch below refuses a reopen whose winner
+					// already fed a started knockout match (retractPropagatedWinner).
+					// A pool finisher feeds the knockout INDIRECTLY, through the
+					// standings the bracket was seeded from, so it needs the same
+					// refusal or it silently strands a displaced finisher in a
+					// started bracket match (the score path's mp-e2k1 guard can't
+					// catch it: by re-End time the reopened match is already excluded
+					// from the standings baseline it compares against).
+					if derr := e.checkPoolReopenDownstreamTx(tx, compID, comp, matchID); derr != nil {
+						opErr = derr
+						return nil
+					}
+					reopenPoolMatch(h.Pool, reason)
+					// SavePoolMatches funnels through the normal save chokepoint,
+					// so standings caches invalidate via the usual version bump.
+					return h.Save()
+				}
+				if gerr := guard(h.Bracket.Status, h.Bracket.Court); gerr != nil {
 					opErr = gerr
 					return nil
 				}
-				// mp-gmcg: the bracket branch below refuses a reopen whose winner
-				// already fed a started knockout match (retractPropagatedWinner).
-				// A pool finisher feeds the knockout INDIRECTLY, through the
-				// standings the bracket was seeded from, so it needs the same
-				// refusal or it silently strands a displaced finisher in a
-				// started bracket match (the score path's mp-e2k1 guard can't
-				// catch it: by re-End time the reopened match is already excluded
-				// from the standings baseline it compares against).
-				if derr := e.checkPoolReopenDownstreamTx(tx, compID, comp, matchID); derr != nil {
-					opErr = derr
-					return nil
+				// A bracket ROUND winner may already be propagated downstream; the
+				// bronze (3rd-place) match is a sibling with no downstream, so it
+				// needs no retraction.
+				if !h.Bronze {
+					if derr := retractPropagatedWinner(h.BracketRoot, h.RIdx, h.MIdx); derr != nil {
+						opErr = derr
+						return nil
+					}
 				}
-				reopenPoolMatch(h.Pool, reason)
-				// SavePoolMatches funnels through the normal save chokepoint,
-				// so standings caches invalidate via the usual version bump.
+				reopenBracketMatch(h.Bracket, reason)
 				return h.Save()
+			})
+			if ferr != nil {
+				return ferr
 			}
-			if gerr := guard(h.Bracket.Status, h.Bracket.Court); gerr != nil {
-				opErr = gerr
-				return nil
+			if !found {
+				opErr = notFoundErrorf("match %s not found", matchID)
 			}
-			// A bracket ROUND winner may already be propagated downstream; the
-			// bronze (3rd-place) match is a sibling with no downstream, so it
-			// needs no retraction.
-			if !h.Bronze {
-				if derr := retractPropagatedWinner(h.BracketRoot, h.RIdx, h.MIdx); derr != nil {
-					opErr = derr
-					return nil
-				}
-			}
-			reopenBracketMatch(h.Bracket, reason)
-			return h.Save()
+			return nil
 		})
-		if ferr != nil {
-			return ferr
+		if txErr != nil {
+			return txErr
 		}
-		if !found {
-			opErr = notFoundErrorf("match %s not found", matchID)
-		}
-		return nil
+		return opErr
 	})
-	if txErr != nil {
-		return txErr
-	}
-	return opErr
 }
 
 // RemoveTrailingKachinukiBout drops the SINGLE trailing UNSCORED bout from a

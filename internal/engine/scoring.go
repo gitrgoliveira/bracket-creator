@@ -449,8 +449,12 @@ func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId strin
 	// destroy server-appended bouts). Applied here at the entry point,
 	// BEFORE the pool/bracket write primitives, so the rollback path
 	// below (which replays `prior` through those primitives) still
-	// restores the pre-write state exactly.
-	applyKachinukiMerge(comp, prior, result)
+	// restores the pre-write state exactly. A merge-time rejection (e.g. a
+	// kachinuki-exhaustion write ending on a tied bout, mp-gmcg review R2)
+	// returns BEFORE any write primitive, so nothing is persisted.
+	if merr := applyKachinukiMerge(comp, prior, result); merr != nil {
+		return nil, merr
+	}
 
 	var sideMismatch bool
 	err := e.withPoolMatch(compId, matchId, func(r *state.MatchResult) {
@@ -1495,6 +1499,17 @@ func (e *Engine) UpdateMatchTime(compId string, matchId string, scheduledAt stri
 // Modelled on UpdateMatchCourt: pool-match first, bracket-match fallback,
 // using the same atomic withPoolMatch/withBracketMatch primitives so the
 // entire load+mutate+save runs under the per-competition lock.
+//
+// COMPOSED UNDER THE COURT LOCK: RequeueBlockerAndReopenKachinuki calls this
+// from INSIDE store.WithCourtExclusivityLock so the blocker requeue and the
+// reopen share one lock section (mp-gmcg review A4/R3). This method must
+// therefore take ONLY the per-competition lock (via withPoolMatch/
+// withBracketMatch) and MUST NOT acquire the court-exclusivity lock — that
+// mutex is tournament-global and non-reentrant, so a court check added here
+// would deadlock the whole tournament under that composition. It is a
+// court-FREEING operation and needs no court gate; if that ever changes, add a
+// lock-free `revertMatchToQueueUnderCourtLock` core and call THAT from the
+// composition, mirroring reopenKachinukiUnderCourtLock.
 func (e *Engine) RevertMatchToQueue(compId, matchId string) error {
 	var alreadyCompleted bool
 

@@ -532,6 +532,24 @@ var (
 	ErrNoRemovableBout = errors.New("no unscored bout to remove; only an empty appended bout can be removed")
 )
 
+// loadKachinukiForReopen loads the target competition, rejects it unless it is
+// a kachinuki team competition, and trims the reason — the shared prologue of
+// ReopenKachinukiMatch and RequeueBlockerAndReopenKachinuki (mp-gmcg review R7:
+// the two used to copy-paste this LoadCompetition → IsKachinuki → same literal
+// operator sentence → TrimSpace block verbatim). It touches no court state, so
+// callers run it OUTSIDE WithCourtExclusivityLock: a bad-input rejection need
+// not serialize on the tournament-global lock.
+func (e *Engine) loadKachinukiForReopen(compID, reason string) (*state.Competition, string, error) {
+	comp, err := e.store.LoadCompetition(compID)
+	if err != nil {
+		return nil, "", err
+	}
+	if !comp.IsKachinuki() {
+		return nil, "", validationErrorf("reopen is only supported for kachinuki team matches; correct other results via the score editor (correctionReason)")
+	}
+	return comp, strings.TrimSpace(reason), nil
+}
+
 // ReopenKachinukiMatch is the sanctioned "Reopen match" path for a
 // COMPLETED kachinuki team match (mp-gmcg, spec 006 decision 4): status
 // back to running, match-level winner/decision cleared, the full bout log
@@ -598,14 +616,10 @@ var (
 // "Winner of rX-mY" placeholder (the exact string propagateBracketWinner
 // re-resolves on the next completion) and the bronze side to empty.
 func (e *Engine) ReopenKachinukiMatch(compID, matchID, reason string) error {
-	comp, err := e.store.LoadCompetition(compID)
+	comp, reason, err := e.loadKachinukiForReopen(compID, reason)
 	if err != nil {
 		return err
 	}
-	if !comp.IsKachinuki() {
-		return validationErrorf("reopen is only supported for kachinuki team matches; correct other results via the score editor (correctionReason)")
-	}
-	reason = strings.TrimSpace(reason)
 
 	// Court exclusivity is held HERE, inside the engine, so the
 	// cross-competition pre-check and the same-competition in-transaction check
@@ -727,26 +741,65 @@ func (e *Engine) reopenKachinukiUnderCourtLock(compID string, comp *state.Compet
 // mp-gmcg review A4). RevertMatchToQueue takes only the blocker's
 // per-competition lock, so calling it under the court lock keeps the
 // courtCheckMu → per-comp ordering.
+//
+// The blocker id is CLIENT-SUPPLIED and RevertMatchToQueue is destructive (it
+// clears the match's score), so requireBlockerHoldsCourt gates it FIRST: the
+// named match must be running on the target's court, else the call is rejected
+// without touching anything (mp-gmcg review R1). Without that gate a wrongly
+// named bystander on a different court would be wiped AND the reopen would then
+// fail on the court's real occupant, leaving the wipe committed but invisible
+// behind a "court busy" response.
 func (e *Engine) RequeueBlockerAndReopenKachinuki(targetComp, targetMatch, blockerComp, blockerMatch, reason string) error {
-	comp, err := e.store.LoadCompetition(targetComp)
+	comp, reason, err := e.loadKachinukiForReopen(targetComp, reason)
 	if err != nil {
 		return err
 	}
-	if !comp.IsKachinuki() {
-		return validationErrorf("reopen is only supported for kachinuki team matches; correct other results via the score editor (correctionReason)")
-	}
-	reason = strings.TrimSpace(reason)
 	return e.store.WithCourtExclusivityLock(func() error {
-		// Free the court first, then reopen onto it. RevertMatchToQueue is
-		// idempotent for an already-scheduled match, so a blocker that a peer
-		// already cleared is not an error; a COMPLETED blocker returns
-		// ErrMatchAlreadyCompleted (it never held the court as "running", so
-		// requeuing it is the wrong remedy — surface it).
+		if verr := e.requireBlockerHoldsCourt(targetComp, targetMatch, blockerComp, blockerMatch); verr != nil {
+			return verr
+		}
 		if rerr := e.RevertMatchToQueue(blockerComp, blockerMatch); rerr != nil {
 			return rerr
 		}
 		return e.reopenKachinukiUnderCourtLock(targetComp, comp, targetMatch, reason)
 	})
+}
+
+// requireBlockerHoldsCourt verifies the client-named blocker is a RUNNING match
+// on targetMatch's court, the precondition RequeueBlockerAndReopenKachinuki's
+// destructive requeue depends on (mp-gmcg review R1). It rejects — WITHOUT
+// touching the blocker — when the target has no court, when the blocker sits on
+// a different court (the bystander-wipe case), or when the blocker is not
+// running (a completed/scheduled match is not what is wedging the court; retry
+// the plain reopen). Reads are value-only via the cached snapshot: the caller
+// holds only the court lock, not any per-comp write lock, so these Load*/
+// MatchStatusByID reads match CheckCrossCompCourtBusy's pre-tx discipline.
+func (e *Engine) requireBlockerHoldsCourt(targetComp, targetMatch, blockerComp, blockerMatch string) error {
+	targetCourt, err := e.lookupMatchCourt(targetComp, targetMatch)
+	if err != nil {
+		return err
+	}
+	if targetCourt == "" {
+		return validationErrorf("match %s has no court assigned, so no match can be blocking its court", targetMatch)
+	}
+	blockerCourt, err := e.lookupMatchCourt(blockerComp, blockerMatch)
+	if err != nil {
+		return err
+	}
+	if blockerCourt != targetCourt {
+		return validationErrorf("match %s is on court %q, not %s's court %q; requeuing it would not free the court", blockerMatch, blockerCourt, targetMatch, targetCourt)
+	}
+	status, found, err := e.store.MatchStatusByID(blockerComp, blockerMatch)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return notFoundErrorf("blocker match %s not found in competition %s", blockerMatch, blockerComp)
+	}
+	if status != state.MatchStatusRunning {
+		return validationErrorf("match %s is not running (status %q); it is not blocking the court, retry the reopen", blockerMatch, status)
+	}
+	return nil
 }
 
 // RemoveTrailingKachinukiBout drops the SINGLE trailing UNSCORED bout from a
@@ -1131,9 +1184,9 @@ func bracketMatchStartedOrScored(bm *state.BracketMatch) bool {
 // never reaches standings/exports. It then derives the winner from the
 // cleaned bout log (deriveKachinukiWinner) so a plain bout-driven End write
 // cannot carry an outcome the log itself does not support.
-func applyKachinukiMerge(comp *state.Competition, prior, result *state.MatchResult) {
+func applyKachinukiMerge(comp *state.Competition, prior, result *state.MatchResult) error {
 	if !comp.IsKachinuki() {
-		return
+		return nil
 	}
 	var stored []state.SubMatchResult
 	if prior != nil {
@@ -1142,8 +1195,9 @@ func applyKachinukiMerge(comp *state.Competition, prior, result *state.MatchResu
 	result.SubResults = mergeKachinukiSubResults(stored, result.SubResults)
 	if result.Status == state.MatchStatusCompleted {
 		result.SubResults = stripTrailingUnscoredKachinukiBouts(result.SubResults)
-		deriveKachinukiWinner(result)
+		return deriveKachinukiWinner(result)
 	}
+	return nil
 }
 
 // deriveKachinukiWinner authoritatively derives result.Winner from the
@@ -1168,9 +1222,20 @@ func applyKachinukiMerge(comp *state.Competition, prior, result *state.MatchResu
 // and re-deriving from the bout log there would silently overturn a
 // legitimate walkover, which is exactly the "loser kept its struck ippons"
 // case FIK Art. 32 protects. "hikiwake" and "" carry no winner to derive.
-func deriveKachinukiWinner(result *state.MatchResult) {
+//
+// It also REJECTS a kachinuki-exhaustion write whose last scored bout is a DRAW
+// (mp-gmcg review R2): exhaustion means the final pairing was decisive and the
+// loser had no replacement, so a tied last bout contradicts the decision. C3
+// closed "wrong winner when the log names one"; this closes the residue where
+// the log names NO winner yet the client still sends one (for a bracket match
+// validateBracketCompletion only checks the winner is non-empty, so it would
+// otherwise pass). A genuine tie is "hikiwake" in pools, or goes to encho in a
+// knockout — which gives the bout a winner. A completed write with NO scored
+// bout at all leaves the client's winner untouched (a separate degenerate case,
+// out of scope here).
+func deriveKachinukiWinner(result *state.MatchResult) error {
 	if result == nil || result.Decision != string(domain.DecisionKachinukiExhaustion) {
-		return
+		return nil
 	}
 	var last *state.SubMatchResult
 	for i := range result.SubResults {
@@ -1182,8 +1247,11 @@ func deriveKachinukiWinner(result *state.MatchResult) {
 			last = s
 		}
 	}
-	if last == nil || last.Winner == "" {
-		return
+	if last == nil {
+		return nil
+	}
+	if last.Winner == "" {
+		return validationErrorf("a kachinuki match ending on a tied bout is not a decisive win: record the last bout's winner, take it to overtime, or end the encounter as a draw (hikiwake)")
 	}
 	switch {
 	case isWinForSide(last.Winner, result.SideA, last.SideA):
@@ -1191,6 +1259,7 @@ func deriveKachinukiWinner(result *state.MatchResult) {
 	case isWinForSide(last.Winner, result.SideB, last.SideB):
 		result.Winner = result.SideB
 	}
+	return nil
 }
 
 // isUnscoredKachinukiBout reports whether a bout carries no recorded

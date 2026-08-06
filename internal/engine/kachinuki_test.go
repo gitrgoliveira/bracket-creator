@@ -2101,16 +2101,54 @@ func TestRequeueBlockerAndReopenKachinuki(t *testing.T) {
 		assert.Equal(t, state.MatchStatusRunning, byID["P1-2"].Status, "the court-B sibling is untouched (different court)")
 	})
 
-	t.Run("a COMPLETED blocker surfaces ErrMatchAlreadyCompleted and leaves the target finished", func(t *testing.T) {
+	// mp-gmcg review R1: the blocker id is CLIENT-SUPPLIED and RevertMatchToQueue
+	// is destructive. Naming a bystander running on a DIFFERENT court must be
+	// rejected WITHOUT wiping it — otherwise the requeue commits, the reopen then
+	// fails on the court's real occupant, and the operator sees only "court busy".
+	t.Run("a blocker on a DIFFERENT court is rejected and left untouched", func(t *testing.T) {
+		eng, store, _ := setupKachinukiComp(t, "rq-wrongcourt", 3)
+		bystander := runningOnCourt("P1-2", "B")
+		bystander.IpponsA = []string{"M"} // a partial score the wipe would clear
+		bystander.SubResults = []state.SubMatchResult{
+			{Position: 1, SideA: "K-1", SideB: "Wa-1", IpponsA: []string{"M"}},
+		}
+		require.NoError(t, store.SavePoolMatches("rq-wrongcourt", []state.MatchResult{
+			completedOnCourt("P1-0", "A"), // target on court A
+			runningOnCourt("P1-1", "A"),   // the REAL blocker holding court A
+			bystander,                     // a bystander on court B
+		}))
+
+		// Client wrongly names the court-B bystander as the blocker.
+		err := eng.RequeueBlockerAndReopenKachinuki("rq-wrongcourt", "P1-0", "rq-wrongcourt", "P1-2", "")
+		var verr *ValidationError
+		require.ErrorAs(t, err, &verr, "a blocker on the wrong court is a client error")
+
+		byID := map[string]state.MatchResult{}
+		matches, _ := store.LoadPoolMatches("rq-wrongcourt")
+		for _, m := range matches {
+			byID[m.ID] = m
+		}
+		assert.Equal(t, state.MatchStatusRunning, byID["P1-2"].Status, "the bystander must NOT be requeued")
+		assert.Equal(t, []string{"M"}, byID["P1-2"].IpponsA, "the bystander's score must NOT be wiped")
+		assert.Len(t, byID["P1-2"].SubResults, 1, "the bystander's bout log must NOT be wiped")
+		assert.Equal(t, state.MatchStatusRunning, byID["P1-1"].Status, "the real blocker is untouched")
+		assert.Equal(t, state.MatchStatusCompleted, byID["P1-0"].Status, "the target must NOT reopen when the guard rejects")
+	})
+
+	// A COMPLETED match never holds the court as "running", so it is not the
+	// blocker (a plain reopen is the correct remedy); R1's guard rejects it
+	// rather than destructively requeuing it.
+	t.Run("a COMPLETED blocker is not running, so it is rejected and the target stays finished", func(t *testing.T) {
 		eng, store, _ := setupKachinukiComp(t, "rq-done-blocker", 3)
 		require.NoError(t, store.SavePoolMatches("rq-done-blocker", []state.MatchResult{
 			completedOnCourt("P1-0", "A"),
 			completedOnCourt("P1-1", "A"),
 		}))
 		err := eng.RequeueBlockerAndReopenKachinuki("rq-done-blocker", "P1-0", "rq-done-blocker", "P1-1", "")
-		require.ErrorIs(t, err, ErrMatchAlreadyCompleted)
+		var verr *ValidationError
+		require.ErrorAs(t, err, &verr)
 		assert.Equal(t, state.MatchStatusCompleted, loadPoolMatchByID(t, store, "rq-done-blocker", "P1-0").Status,
-			"the target must not reopen when the requeue fails")
+			"the target must not reopen when the requeue is rejected")
 	})
 
 	t.Run("a non-kachinuki target is rejected", func(t *testing.T) {
@@ -2360,8 +2398,42 @@ func TestApplyKachinukiMerge_DerivesWinnerFromBoutLog(t *testing.T) {
 				{Position: 1, SideA: "R-1", SideB: "W-1", IpponsA: []string{"M"}, Winner: "R-1", Decision: "fought"},
 			},
 		}
-		applyKachinukiMerge(comp, nil, result)
+		require.NoError(t, applyKachinukiMerge(comp, nil, result))
 		assert.Equal(t, "RedTeam", result.Winner)
+	})
+
+	// mp-gmcg review R2: a kachinuki-exhaustion write whose last SCORED bout is
+	// a DRAW is rejected. Exhaustion means the final pairing was decisive and
+	// the loser had no replacement, so a tied last bout contradicts it. Without
+	// this the arbitrary client winner would survive (deriveKachinukiWinner used
+	// to return early on a winnerless last bout) and a bracket match would then
+	// pass validateBracketCompletion on that fabricated winner.
+	t.Run("a kachinuki-exhaustion ending on a tied last bout is rejected", func(t *testing.T) {
+		result := &state.MatchResult{
+			SideA: "RedTeam", SideB: "WhiteTeam",
+			Status: state.MatchStatusCompleted, Decision: "kachinuki-exhaustion",
+			Winner: "RedTeam", // a winner the bout log does not support
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "R-1", SideB: "W-1", IpponsA: []string{"M"}, Winner: "R-1", Decision: "fought"},
+				{Position: 2, SideA: "R-2", SideB: "W-2", Decision: "hikiwake"}, // scored, but a draw
+			},
+		}
+		err := applyKachinukiMerge(comp, nil, result)
+		var verr *ValidationError
+		require.ErrorAs(t, err, &verr, "a decisive-win decision on a tied last bout must be rejected")
+	})
+
+	// The reject is scoped to kachinuki-exhaustion: a genuine drawn encounter
+	// carries decision "hikiwake", which is accepted on a tied last bout.
+	t.Run("a hikiwake decision on a tied last bout is accepted", func(t *testing.T) {
+		result := &state.MatchResult{
+			SideA: "RedTeam", SideB: "WhiteTeam",
+			Status: state.MatchStatusCompleted, Decision: "hikiwake",
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "R-1", SideB: "W-1", Decision: "hikiwake"},
+			},
+		}
+		require.NoError(t, applyKachinukiMerge(comp, nil, result), "a hikiwake draw is legitimate")
 	})
 
 	// The critical guard: kiken/fusenpai/fusensho decisions reach this SAME

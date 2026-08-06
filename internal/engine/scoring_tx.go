@@ -264,8 +264,12 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	// destroy server-appended bouts). Applied here at the entry point,
 	// BEFORE the pool/bracket write primitives, so the rollback path
 	// below (which replays `prior` through those primitives) still
-	// restores the pre-write state exactly.
-	applyKachinukiMerge(comp, prior, result)
+	// restores the pre-write state exactly. A merge-time rejection (e.g. a
+	// kachinuki-exhaustion write ending on a tied bout, mp-gmcg review R2)
+	// returns BEFORE any write primitive, so nothing is persisted.
+	if merr := applyKachinukiMerge(comp, prior, result); merr != nil {
+		return nil, merr
+	}
 
 	// mp-e2k1: For mixed competitions, capture the pre-write standings for
 	// the match's pool so we can compare after the write and detect whether

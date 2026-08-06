@@ -61,6 +61,22 @@ function fetchWithTimeout(url, opts, ms = 12000) {
     return fetch(url, { ...opts, signal: controller.signal }).finally(() => clearTimeout(timer));
 }
 
+// reopenFailureError builds the Error thrown by a failed reopen. reopenMatch and
+// requeueBlockerAndReopen surface the SAME structured shape (mp-gmcg review R8):
+// the operator-facing `message`, the machine `code`, and the court/matchId/compId
+// of the BLOCKING match, which applyReopenFailure (admin_scoring_team.jsx) reads
+// to re-offer the requeue remedy when a court is busy. One builder so a new
+// server field is threaded once, not per endpoint. Async: it awaits the body.
+async function reopenFailureError(res) {
+    const err = await res.json().catch(() => ({}));
+    const e = new Error(err.message || err.error || "Failed to reopen match");
+    if (err.error) e.code = err.error;
+    if (err.court) e.court = err.court;
+    if (err.matchId) e.matchId = err.matchId;
+    if (err.compId) e.compId = err.compId;
+    return e;
+}
+
 // normalizeViewerCompItem maps one {config, poolMatches, bracket} item from the
 // aggregate GET /api/viewer/competitions or the court-scoped GET
 // /api/viewer/court/:court/matches into the flattened, normalized competition shape
@@ -1663,15 +1679,7 @@ const API = {
             },
             body: JSON.stringify({})
         });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            const e = new Error(err.message || err.error || "Failed to reopen match");
-            if (err.error) e.code = err.error;
-            if (err.court) e.court = err.court;
-            if (err.matchId) e.matchId = err.matchId;
-            if (err.compId) e.compId = err.compId;
-            throw e;
-        }
+        if (!res.ok) throw await reopenFailureError(res);
         return true;
     },
     // mp-gmcg (review A4): atomically requeue the match holding the court AND
@@ -1689,15 +1697,7 @@ const API = {
             },
             body: JSON.stringify({ blockerCompId: blockerComp, blockerMatchId: blockerMatch })
         });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            const e = new Error(err.message || err.error || "Failed to reopen match");
-            if (err.error) e.code = err.error;
-            if (err.court) e.court = err.court;
-            if (err.matchId) e.matchId = err.matchId;
-            if (err.compId) e.compId = err.compId;
-            throw e;
-        }
+        if (!res.ok) throw await reopenFailureError(res);
         return true;
     },
     // mp-gmcg: remove a trailing UNSCORED kachinuki bout appended by mistake

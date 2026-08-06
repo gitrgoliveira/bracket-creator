@@ -217,12 +217,12 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			// Daihyosen does not exist in kachinuki (mp-gmcg): a tied final
 			// bout is a drawn encounter in pools/league, and a knockout tie
 			// is resolved by ENCHO on the taisho bout itself, never by a
-			// separate representative bout. isKachinukiComp is the engine's
+			// separate representative bout. comp.IsKachinuki() is the engine's
 			// own dispatch gate (TeamSize >= 2 + kachinuki type): a
 			// competition the engine refuses to advance as kachinuki
 			// (MaybeAdvanceKachinuki returns early below TeamSize 2) must not
 			// be told "kachinuki_competition" here either.
-			if isKachinukiComp(comp) {
+			if comp.IsKachinuki() {
 				addErrCode = "kachinuki_competition"
 				return nil
 			}

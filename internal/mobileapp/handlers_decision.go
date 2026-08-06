@@ -163,7 +163,7 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			// review E3). snap stays zero-valued (ReopenPending false), so the
 			// checks below are correctly no-ops.
 			var snap matchSnapshot
-			if isKachinukiComp(comp) {
+			if comp.IsKachinuki() {
 				var snapErr error
 				snap, _, snapErr = matchSnapshotOrErr(stx, id, mid, "reopen-pending")
 				if snapErr != nil {

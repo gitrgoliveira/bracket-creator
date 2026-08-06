@@ -170,17 +170,8 @@ func anyNumberedBoutHasEncho(subResults []state.SubMatchResult) bool {
 	return false
 }
 
-// isKachinukiComp reports whether comp is a kachinuki TEAM competition. Thin
-// wrapper over state.Competition.IsKachinuki so every mobileapp call site goes
-// through the one predicate (mp-gmcg review: this and 6 other inline
-// TeamMatchType/TeamSize checks across engine/mobileapp/state used to
-// disagree on the TeamSize threshold).
-func isKachinukiComp(comp *state.Competition) bool {
-	return comp.IsKachinuki()
-}
-
 // allowNumberedEnchoFromStore resolves the numbered-bout encho gate for
-// compID: it loads the competition and applies isKachinukiComp, but ONLY when
+// compID: it loads the competition and applies comp.IsKachinuki, but ONLY when
 // the payload actually carries a numbered-bout encho (hasNumberedEncho, from
 // anyNumberedBoutHasEncho). An ordinary payload carries none and must not pay
 // the store read on the hot scoring path.
@@ -211,7 +202,7 @@ func allowNumberedEnchoFromStore(store CompetitionStore, compID string, hasNumbe
 		log.Printf("LoadCompetition(%s) for the numbered-bout encho gate: %v; keeping the strict gate", compID, err)
 		return false
 	}
-	return isKachinukiComp(comp)
+	return comp.IsKachinuki()
 }
 
 // tryAutoCompletePools runs the auto-complete check after a successful score
@@ -464,12 +455,11 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		// plain RecordMatchResult path, which has no kachinuki merge and no
 		// premature-completion check, so a single call would destroy a live
 		// winner-stays sequence. Same incompatibility class as engi: reject.
-		// isKachinukiComp, not a bare TeamMatchType test: the sequence this
+		// comp.IsKachinuki(), not a bare TeamMatchType test: the sequence this
 		// guard protects only exists when the engine actually runs kachinuki
 		// advancement, which requires TeamSize >= 2 (MaybeAdvanceKachinuki
-		// returns early below that). One spelling of "is this kachinuki"
-		// across the package, matching the engine's dispatch gate.
-		if isKachinukiComp(comp) {
+		// returns early below that), matching the engine's dispatch gate.
+		if comp.IsKachinuki() {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "quick-score is not supported for kachinuki competitions; score bouts individually"})
 			return
 		}

@@ -86,3 +86,53 @@ describe('API.reopenMatch', () => {
       .rejects.toThrow('Failed to reopen match');
   });
 });
+
+// requeueBlockerAndReopen shares reopenMatch's structured-error builder
+// (mp-gmcg review R8: reopenFailureError). These pin that the second path
+// surfaces the SAME court_busy shape applyReopenFailure depends on, so a
+// regression that rewired only one method would fail here.
+describe('API.requeueBlockerAndReopen', () => {
+  let originalFetch;
+  beforeEach(() => { originalFetch = global.fetch; });
+  afterEach(() => { global.fetch = originalFetch; });
+
+  it('POSTs the blocker identity to the atomic endpoint with the password header', async () => {
+    global.fetch = mockFetch(200, {});
+    const ok = await API.requeueBlockerAndReopen('tgt', 'm-r1-0', 'blk', 'm-r1-1', 'secret');
+    expect(ok).toBe(true);
+    const [url, opts] = global.fetch.mock.calls[0];
+    expect(url).toBe('/api/competitions/tgt/matches/m-r1-0/requeue-blocker-and-reopen');
+    expect(opts.method).toBe('POST');
+    expect(opts.headers['X-Tournament-Password']).toBe('secret');
+    expect(opts.headers['Content-Type']).toBe('application/json');
+    expect(JSON.parse(opts.body)).toEqual({ blockerCompId: 'blk', blockerMatchId: 'm-r1-1' });
+  });
+
+  it('surfaces the same structured court-busy shape as reopenMatch', async () => {
+    // A DIFFERENT match may have taken the freed court between the operator
+    // opening the remedy and confirming it; the panel re-offers the remedy off
+    // exactly these fields, so the requeue path must carry them too.
+    global.fetch = mockFetch(409, {
+      error: 'court_busy',
+      court: 'B',
+      matchId: 'm-r2-3',
+      compId: 'c9',
+      message: 'Court B already has a running match (m-r2-3). Finish that match before reopening this one.',
+    });
+    const err = await API.requeueBlockerAndReopen('c9', 'm1', 'c9', 'm-blk', 'secret').then(
+      () => { throw new Error('expected a rejection'); },
+      (e) => e
+    );
+    expect(err.message).toContain('Court B already has a running match');
+    expect(err.code).toBe('court_busy');
+    expect(err.court).toBe('B');
+    expect(err.matchId).toBe('m-r2-3');
+    expect(err.compId).toBe('c9');
+  });
+
+  it('throws the fallback message when the error body has no error field', async () => {
+    global.fetch = mockFetch(500, {});
+    await expect(API.requeueBlockerAndReopen('c1', 'm1', 'c1', 'm2', 'secret'))
+      .rejects.toThrow('Failed to reopen match');
+  });
+});

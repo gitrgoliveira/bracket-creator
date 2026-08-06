@@ -710,15 +710,36 @@ func (e *Engine) checkCourtExclusivityTx(tx state.StoreTx, compID, matchID strin
 // reopened match and every further score write to the genuinely live bout).
 // See ReopenKachinukiMatch's COURT GATE note.
 func courtFreeInCompTx(tx state.StoreTx, compID, matchID, court string) error {
+	return courtFreeInCompTxWith(tx, compID, matchID, court, nil, nil)
+}
+
+// courtFreeInCompTxWith is courtFreeInCompTx that REUSES pool matches and/or a
+// bracket the caller already loaded in the same transaction, loading only the
+// slice it wasn't handed (mp-gmcg review E4: the reopen path's findMatchHome
+// has already loaded these under the same lock, so re-loading them for the
+// court scan is pure waste). A nil argument means "load it" — and crucially,
+// findMatchHome SWALLOWS a pool-load error (it still tries the bracket), so a
+// nil poolMatches here forces an authoritative reload that SURFACES a genuine
+// load failure rather than silently skipping pool matches in the scan.
+func courtFreeInCompTxWith(tx state.StoreTx, compID, matchID, court string, poolMatches []state.MatchResult, bracket *state.Bracket) error {
 	if court == "" {
 		return nil
 	}
-	occ, err := courtOccupiedInCompTx(tx, compID, court, matchID)
-	if err != nil {
-		return err
+	if poolMatches == nil {
+		var err error
+		if poolMatches, err = tx.LoadPoolMatches(compID); err != nil {
+			return err
+		}
 	}
-	if occ != nil {
-		return &CourtBusyError{Court: court, MatchID: occ.MatchID, CompID: occ.CompID}
+	if bracket == nil {
+		var err error
+		if bracket, err = tx.LoadBracket(compID); err != nil {
+			return err
+		}
+	}
+	if occ := courtOccupied(poolMatches, bracket, court, matchID); occ != nil {
+		// The scan is same-competition, so the occupant is in compID.
+		return &CourtBusyError{Court: court, MatchID: occ.MatchID, CompID: compID}
 	}
 	return nil
 }
@@ -752,41 +773,40 @@ func lookupMatchCourtTx(tx state.StoreTx, compID, matchID string) (string, error
 	return "", notFoundErrorf("match %q not found in competition %q", matchID, compID)
 }
 
-// courtOccupiedInCompTx scans compID's pool matches and bracket (via tx)
-// for any match, other than skipMatchID, that is Running on court.
-func courtOccupiedInCompTx(tx state.StoreTx, compID, court, skipMatchID string) (*state.CourtOccupancy, error) {
-	poolMatches, err := tx.LoadPoolMatches(compID)
-	if err != nil {
-		return nil, err
-	}
-	for _, m := range poolMatches {
+// courtOccupied is the PURE court-occupancy scan (mp-gmcg review E4): given
+// already-loaded pool matches and bracket, return the RUNNING match on `court`
+// other than skipMatchID (pool first, then bracket rounds, then the bronze
+// sibling), or nil. No I/O, so callers that already hold the loaded slices —
+// the reopen path via findMatchHome — reuse them instead of re-loading. compID
+// is only stamped onto the CourtOccupancy result, so it is not needed for the
+// scan and is not a parameter here (the caller carries it).
+func courtOccupied(poolMatches []state.MatchResult, bracket *state.Bracket, court, skipMatchID string) *state.CourtOccupancy {
+	for i := range poolMatches {
+		m := &poolMatches[i]
 		if m.ID == skipMatchID || m.Status != state.MatchStatusRunning {
 			continue
 		}
 		if m.Court == court {
-			return &state.CourtOccupancy{CompID: compID, MatchID: m.ID}, nil
+			return &state.CourtOccupancy{MatchID: m.ID}
 		}
 	}
-	bracket, err := tx.LoadBracket(compID)
-	if err != nil {
-		return nil, err
-	}
 	if bracket != nil {
-		for _, round := range bracket.Rounds {
-			for _, bm := range round {
+		for rIdx := range bracket.Rounds {
+			for mIdx := range bracket.Rounds[rIdx] {
+				bm := &bracket.Rounds[rIdx][mIdx]
 				if bm.ID == skipMatchID || bm.Status != state.MatchStatusRunning {
 					continue
 				}
 				if bm.Court == court {
-					return &state.CourtOccupancy{CompID: compID, MatchID: bm.ID}, nil
+					return &state.CourtOccupancy{MatchID: bm.ID}
 				}
 			}
 		}
 		if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID != skipMatchID && bm.Status == state.MatchStatusRunning && bm.Court == court {
-			return &state.CourtOccupancy{CompID: compID, MatchID: bm.ID}, nil
+			return &state.CourtOccupancy{MatchID: bm.ID}
 		}
 	}
-	return nil, nil
+	return nil
 }
 
 func resolvePlayerIDsTx(tx state.StoreTx, compID, sideA, sideB string) (string, string) {

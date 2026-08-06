@@ -1849,7 +1849,7 @@ func TestReopenKachinukiMatch_DiscardsVerdictKeepsBoutLog(t *testing.T) {
 // subtests set Court explicitly on BOTH matches, which is the whole point.
 //
 // Reopen flips the match back to RUNNING, and court exclusivity keys purely
-// on `status == running` (courtOccupiedInCompTx). Reopening onto a busy
+// on `status == running` (courtOccupied). Reopening onto a busy
 // court would leave two running matches there, and checkCourtExclusivityTx
 // then rejects BOTH: the re-End of the reopened match AND every further
 // score write to the genuinely live bout. So the reopen itself is refused.
@@ -1882,6 +1882,9 @@ func TestReopenKachinukiMatchCourtBusy(t *testing.T) {
 		require.ErrorAs(t, err, &busy)
 		assert.Equal(t, "A", busy.Court)
 		assert.Equal(t, "P1-1", busy.MatchID, "the error must name the match holding the court")
+		// The same-comp court scan (E4: courtFreeInCompTxWith reusing
+		// findMatchHome's loaded pool matches) must still stamp the competition.
+		assert.Equal(t, "reopen-court-busy", busy.CompID, "the same-comp occupant is in this competition")
 		assert.ErrorIs(t, err, ErrCourtBusy, "reopen reuses the single court-busy sentinel")
 
 		matches, lerr := store.LoadPoolMatches("reopen-court-busy")
@@ -1904,6 +1907,47 @@ func TestReopenKachinukiMatchCourtBusy(t *testing.T) {
 		matches, lerr := store.LoadPoolMatches("reopen-court-free")
 		require.NoError(t, lerr)
 		assert.Equal(t, state.MatchStatusRunning, matches[0].Status)
+	})
+
+	// mp-gmcg review E4: the reopen court scan reuses findMatchHome's loaded
+	// pool matches AND loads the bracket when the home is a pool match. These
+	// two cross-store cases exercise both branches: a bracket reopen must still
+	// see a POOL occupant (reused pool slice), and a pool reopen must still see
+	// a BRACKET occupant (the bracket the pool-home walk did not load).
+	t.Run("bracket-home reopen is blocked by a POOL match on the same court", func(t *testing.T) {
+		eng, store, _ := setupKachinukiComp(t, "reopen-bracket-pool-busy", 3)
+		require.NoError(t, store.SaveBracket("reopen-bracket-pool-busy", &state.Bracket{
+			Rounds: [][]state.BracketMatch{{
+				{ID: "SF0", SideA: "RedTeam", SideB: "WhiteTeam", Status: state.MatchStatusCompleted,
+					Winner: "RedTeam", Decision: "kachinuki-exhaustion", Court: "A"},
+			}},
+		}))
+		require.NoError(t, store.SavePoolMatches("reopen-bracket-pool-busy", []state.MatchResult{
+			runningOnCourt("P1-0", "A"),
+		}))
+
+		err := eng.ReopenKachinukiMatch("reopen-bracket-pool-busy", "SF0", "need more bouts")
+		var busy *CourtBusyError
+		require.ErrorAs(t, err, &busy)
+		assert.Equal(t, "P1-0", busy.MatchID, "a pool match holding the court blocks a bracket reopen")
+		assert.Equal(t, "reopen-bracket-pool-busy", busy.CompID)
+	})
+
+	t.Run("pool-home reopen is blocked by a BRACKET match on the same court", func(t *testing.T) {
+		eng, store, _ := setupKachinukiComp(t, "reopen-pool-bracket-busy", 3)
+		require.NoError(t, store.SavePoolMatches("reopen-pool-bracket-busy", []state.MatchResult{
+			completedOnCourt("P1-0", "A"),
+		}))
+		require.NoError(t, store.SaveBracket("reopen-pool-bracket-busy", &state.Bracket{
+			Rounds: [][]state.BracketMatch{{
+				{ID: "SF1", SideA: "Kuma", SideB: "Washi", Status: state.MatchStatusRunning, Court: "A"},
+			}},
+		}))
+
+		err := eng.ReopenKachinukiMatch("reopen-pool-bracket-busy", "P1-0", "need more bouts")
+		var busy *CourtBusyError
+		require.ErrorAs(t, err, &busy)
+		assert.Equal(t, "SF1", busy.MatchID, "a bracket match holding the court blocks a pool reopen")
 	})
 
 	t.Run("bracket match on a busy court is refused too", func(t *testing.T) {

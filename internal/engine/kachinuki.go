@@ -559,7 +559,7 @@ var (
 //
 // COURT GATE. Reopening puts the match back in the RUNNING state, and
 // court exclusivity keys purely on `status == running`
-// (courtOccupiedInCompTx / checkCourtExclusivityTx). Reopening a match
+// (courtOccupied / checkCourtExclusivityTx). Reopening a match
 // whose court already has a running match would therefore leave TWO
 // running matches on one court, and the exclusivity check then rejects
 // BOTH of them: the re-End of the reopened match AND every further score
@@ -639,16 +639,20 @@ func (e *Engine) ReopenKachinukiMatch(compID, matchID, reason string) error {
 			// back to running, so a court that already has a running match would
 			// end up with two, wedging the exclusivity check for BOTH. DO NOT
 			// remove this guard as a redundant-looking check.
-			guard := func(status state.MatchStatus, court string) error {
+			guard := func(h matchHome, status state.MatchStatus, court string) error {
 				if status != state.MatchStatusCompleted {
 					return ErrReopenNotCompleted
 				}
-				return courtFreeInCompTx(tx, compID, matchID, court)
+				// Reuse the pool matches + bracket findMatchHome already loaded
+				// under this tx for the same-comp court scan, instead of the
+				// re-load courtFreeInCompTx would do (mp-gmcg review E4). A nil
+				// slice (pool-load error, or the bracket on a pool home) reloads.
+				return courtFreeInCompTxWith(tx, compID, matchID, court, h.PoolMatches, h.BracketRoot)
 			}
 
 			found, ferr := findMatchHome(tx, compID, matchID, func(h matchHome) error {
 				if h.Pool != nil {
-					if gerr := guard(h.Pool.Status, h.Pool.Court); gerr != nil {
+					if gerr := guard(h, h.Pool.Status, h.Pool.Court); gerr != nil {
 						opErr = gerr
 						return nil
 					}
@@ -669,7 +673,7 @@ func (e *Engine) ReopenKachinukiMatch(compID, matchID, reason string) error {
 					// so standings caches invalidate via the usual version bump.
 					return h.Save()
 				}
-				if gerr := guard(h.Bracket.Status, h.Bracket.Court); gerr != nil {
+				if gerr := guard(h, h.Bracket.Status, h.Bracket.Court); gerr != nil {
 					opErr = gerr
 					return nil
 				}
@@ -817,6 +821,14 @@ type matchHome struct {
 	RIdx, MIdx  int
 	Bronze      bool
 	Save        func() error
+	// PoolMatches / BracketRoot are the FULL slices findMatchHome already
+	// loaded under this tx, exposed so a visitor's court check can reuse them
+	// instead of re-loading (mp-gmcg review E4). PoolMatches is nil when the
+	// pool load errored (findMatchHome swallows that error and tries the
+	// bracket), so a court check treating nil as "reload" surfaces the failure
+	// rather than skipping pool matches. BracketRoot is nil for a pool home
+	// (findMatchHome returns before loading the bracket).
+	PoolMatches []state.MatchResult
 }
 
 // findMatchHome walks the three homes a match ID can have — pool matches, then
@@ -834,8 +846,9 @@ func findMatchHome(tx state.StoreTx, compID, matchID string, visit func(matchHom
 		for i := range poolMatches {
 			if poolMatches[i].ID == matchID {
 				return true, visit(matchHome{
-					Pool: &poolMatches[i],
-					Save: func() error { return tx.SavePoolMatches(compID, poolMatches) },
+					Pool:        &poolMatches[i],
+					PoolMatches: poolMatches,
+					Save:        func() error { return tx.SavePoolMatches(compID, poolMatches) },
 				})
 			}
 		}
@@ -852,6 +865,7 @@ func findMatchHome(tx state.StoreTx, compID, matchID string, visit func(matchHom
 					return true, visit(matchHome{
 						Bracket:     &bracket.Rounds[rIdx][mIdx],
 						BracketRoot: bracket,
+						PoolMatches: poolMatches,
 						RIdx:        rIdx,
 						MIdx:        mIdx,
 						Save:        func() error { return tx.SaveBracket(compID, bracket) },
@@ -863,6 +877,7 @@ func findMatchHome(tx state.StoreTx, compID, matchID string, visit func(matchHom
 			return true, visit(matchHome{
 				Bracket:     bm,
 				BracketRoot: bracket,
+				PoolMatches: poolMatches,
 				Bronze:      true,
 				Save:        func() error { return tx.SaveBracket(compID, bracket) },
 			})

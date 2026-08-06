@@ -154,9 +154,21 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			// best-effort matchSnapshotFor), so a dropped read can't finalize on
 			// an assumed-false ReopenPending and silently discard the mandatory
 			// reopen audit reason.
-			snap, _, snapErr := matchSnapshotOrErr(stx, id, mid, "reopen-pending")
-			if snapErr != nil {
-				return snapErr
+			//
+			// The read is KACHINUKI-ONLY: ReopenPending is set exclusively by
+			// ReopenKachinukiMatch (which rejects non-kachinuki), so a
+			// non-kachinuki match can never carry it. Skip the whole (2-file)
+			// snapshot read for the common non-kachinuki decision — comp is
+			// already loaded above, so the gate itself costs no read (mp-gmcg
+			// review E3). snap stays zero-valued (ReopenPending false), so the
+			// checks below are correctly no-ops.
+			var snap matchSnapshot
+			if isKachinukiComp(comp) {
+				var snapErr error
+				snap, _, snapErr = matchSnapshotOrErr(stx, id, mid, "reopen-pending")
+				if snapErr != nil {
+					return snapErr
+				}
 			}
 			if snap.ReopenPending && reason == "" {
 				reasonErr = &ValidationError{Field: "decisionReason", Message: ReopenNeedsReasonMessage}

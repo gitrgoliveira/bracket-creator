@@ -712,6 +712,39 @@ func completedKachinukiPoolMatch() state.MatchResult {
 	}
 }
 
+// TestDecisionHandler_KachinukiReopenPendingRequiresReason pins E3's kachinuki
+// branch (mp-gmcg review): the /decision handler keeps the reopen-pending
+// snapshot read ONLY for kachinuki, and a decision that completes a REOPENED
+// kachinuki match must still carry the audit reason. If E3 wrongly skipped the
+// read for kachinuki too, the obligation would silently vanish and the kiken
+// would land unaudited instead of 400-ing on the missing reason.
+func TestDecisionHandler_KachinukiReopenPendingRequiresReason(t *testing.T) {
+	compID := "kachinuki-decision-reopen"
+	r, store := setupKachinukiScoreServer(t, compID)
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{completedKachinukiPoolMatch()}))
+
+	// Reason-less reopen: the match goes back to running with ReopenPending set,
+	// the audit obligation now owed by whatever finalizes it next.
+	require.Equal(t, http.StatusOK, postReopen(t, r, compID, "P1-0", "").Code)
+	require.True(t, loadPoolMatch(t, store, compID, "P1-0").ReopenPending)
+
+	// A kiken decision with NO reason must be refused: /decision is the OTHER
+	// way to finalize, so it collects the reopen reason too.
+	w := postDecision(t, r, compID, "P1-0", map[string]any{"decision": "kiken", "decisionBy": "aka"})
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), "decisionReason")
+	m := loadPoolMatch(t, store, compID, "P1-0")
+	assert.True(t, m.ReopenPending, "a blocked decision leaves the obligation outstanding")
+	assert.Equal(t, state.MatchStatusRunning, m.Status)
+
+	// With a reason it lands and the obligation is discharged.
+	w = postDecision(t, r, compID, "P1-0", map[string]any{"decision": "kiken", "decisionBy": "aka", "decisionReason": "Ryu withdrew, injured"})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	m = loadPoolMatch(t, store, compID, "P1-0")
+	assert.False(t, m.ReopenPending, "the reason discharged the obligation")
+	assert.Equal(t, state.MatchStatusCompleted, m.Status)
+}
+
 // TestReopenHandler_KachinukiPoolMatch pins the sanctioned reopen path
 // (mp-gmcg, spec 006 decision 4): a completed pool kachinuki match goes
 // back to running with winner/decision cleared and the bout log intact,

@@ -179,6 +179,16 @@ func (s *Store) saveBracketLocked(compID string, b *Bracket, write writeFn) erro
 	cache.mtime = s.FileMtime(compID, "bracket.json")
 	cache.mu.Unlock()
 
+	// Bump last, mirroring savePoolMatchesLocked: this is the single chokepoint
+	// every bracket writer funnels through (SaveBracket, UpdateBracket,
+	// UpdateBracketMatchByID, and the storeTx variants), so any future cache
+	// keyed on FileVersion("bracket.json") invalidates by construction rather
+	// than depending on a new writer remembering to bump (mp-gmcg review R4; per
+	// CLAUDE.md an extra bump only costs a recompute, a missed one serves stale
+	// data). No version-keyed consumer reads the bracket token today, so this is
+	// hardening against the asymmetry, not a live-bug fix.
+	s.bumpFileVersion(compID, "bracket.json")
+
 	return nil
 }
 

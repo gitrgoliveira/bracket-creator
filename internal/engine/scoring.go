@@ -87,44 +87,32 @@ func (e *Engine) withPoolMatch(compId, matchId string, mutate func(*state.MatchR
 }
 
 // withBracketMatch atomically loads the bracket, calls mutate on the
-// match matching matchId, and saves the updated bracket. Returns
-// errMatchNotFound when not present (so RecordMatchResult callers
-// fall through cleanly when neither pool-match nor bracket-match
-// has that ID).
+// match matching matchId, and saves. Returns errMatchNotFound when not
+// present (so RecordMatchResult callers fall through cleanly when neither
+// pool-match nor bracket-match has that ID).
 //
-// Same TOCTOU-closure rationale as withPoolMatch: delegates to
-// state.Store.UpdateBracket which holds the per-competition lock
-// across load + mutate + save. Returning errMatchNotFound from the
-// mutate closure is how we signal "don't save the unchanged bracket
-// back", see UpdateBracket's docstring.
+// Delegates to state.Store.UpdateBracketMatchByID (mp-gmcg review R5), which
+// holds the per-competition lock across load → walk-rounds → bronze-sibling →
+// mutate → save and writes ONLY when the match is found — the exact walk this
+// used to hand-roll, and the sibling of UpdatePoolMatchByID. findBracketMatchByID
+// searches Rounds FIRST then the ThirdPlaceMatch sibling, so "m-bronze" resolves
+// here too.
+//
+// NOTE: no playability gate here. withBracketMatch backs the SCHEDULING mutators
+// (UpdateMatchCourt / UpdateMatchTime) and RevertMatchToQueue, which must work
+// on not-yet-resolved (placeholder) knockout matches so operators can pre-arrange
+// courts/times. The per-match playability gate lives only in the SCORING paths
+// (recordBracketMatchResult / recordBracketMatchResultTx / OverrideBracketWinner),
+// which mutate via UpdateBracket directly.
 func (e *Engine) withBracketMatch(compId, matchId string, mutate func(*state.BracketMatch)) error {
-	return e.store.UpdateBracket(compId, func(bracket *state.Bracket) error {
-		if bracket == nil {
-			return errMatchNotFound
-		}
-		for rIdx := range bracket.Rounds {
-			for mIdx := range bracket.Rounds[rIdx] {
-				if bracket.Rounds[rIdx][mIdx].ID == matchId {
-					// NOTE: no playability gate here. withBracketMatch backs the
-					// SCHEDULING mutators (UpdateMatchCourt / UpdateMatchTime),
-					// which must work on not-yet-resolved (placeholder) knockout
-					// matches so operators can pre-arrange courts/times. The
-					// per-match playability gate lives only in the SCORING paths
-					// (recordBracketMatchResult / recordBracketMatchResultTx /
-					// OverrideBracketWinner).
-					mutate(&bracket.Rounds[rIdx][mIdx])
-					return nil
-				}
-			}
-		}
-		// The bronze (3rd-place) playoff lives outside Rounds; resolve it
-		// here so UpdateMatchCourt / UpdateMatchTime work on "m-bronze".
-		if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchId {
-			mutate(bracket.ThirdPlaceMatch)
-			return nil
-		}
+	found, err := e.store.UpdateBracketMatchByID(compId, matchId, mutate)
+	if err != nil {
+		return err
+	}
+	if !found {
 		return errMatchNotFound
-	})
+	}
+	return nil
 }
 
 // applyHansokuIppons auto-awards ippons from accumulated hansoku counts per

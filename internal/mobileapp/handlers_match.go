@@ -746,6 +746,94 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		c.Status(http.StatusOK)
 	})
 
+	// POST /competitions/:id/matches/:mid/requeue-blocker-and-reopen
+	//
+	// mp-gmcg (review A4): the ATOMIC court-busy remedy. When a plain reopen of
+	// a finished kachinuki match is refused because ANOTHER match holds its
+	// court, this requeues that blocking match (which may be in a DIFFERENT
+	// competition — a cross-court conflict) AND reopens the target under ONE
+	// hold of the court-exclusivity lock, so no peer can grab the freed court
+	// between the two steps the old two-call client flow made. Destructive (the
+	// blocker loses any partial score), so it is main-password-gated in self-run
+	// mode via the central allowlist, the same class as reopen/override-winner.
+	// Body: {blockerCompId, blockerMatchId, reason?} — reason optional, exactly
+	// like reopen (an absent reason leaves the target ReopenPending).
+	r.POST("/competitions/:id/matches/:mid/requeue-blocker-and-reopen", func(c *gin.Context) {
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
+		mid := c.Param("mid")
+		if err := validateMaxLen("matchId", mid, MaxLenMatchID); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		var body struct {
+			BlockerCompID  string `json:"blockerCompId"`
+			BlockerMatchID string `json:"blockerMatchId"`
+			Reason         string `json:"reason"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil && !errors.Is(err, io.EOF) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if err := state.ValidateCompetitionID(body.BlockerCompID); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "blockerCompId: " + err.Error()})
+			return
+		}
+		if body.BlockerMatchID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "blockerMatchId is required"})
+			return
+		}
+		if err := validateMaxLen("blockerMatchId", body.BlockerMatchID, MaxLenMatchID); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		reason := strings.TrimSpace(body.Reason)
+		if reason != "" {
+			if err := validateMaxLen("reason", reason, MaxLenCorrectionReason); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+		}
+
+		err := eng.RequeueBlockerAndReopenKachinuki(id, mid, body.BlockerCompID, body.BlockerMatchID, reason)
+		if err != nil {
+			var notFoundErr *engine.NotFoundError
+			var validationErr *engine.ValidationError
+			var courtBusyErr *engine.CourtBusyError
+			switch {
+			case errors.Is(err, engine.ErrReopenNotCompleted),
+				errors.Is(err, engine.ErrReopenDownstreamFought),
+				errors.Is(err, engine.ErrMatchAlreadyCompleted):
+				// ErrMatchAlreadyCompleted here means the BLOCKER was already
+				// finished (it never held the court as running), so requeuing it
+				// is the wrong remedy — surface it rather than silently reopening.
+				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			case errors.As(err, &courtBusyErr):
+				// A match OTHER than the one we requeued still holds the court.
+				respondCourtBusy(c, courtBusyErr, "reopening this one")
+			case errors.As(err, &notFoundErr):
+				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			case errors.As(err, &validationErr):
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			default:
+				internalError(c, err)
+			}
+			return
+		}
+
+		// Target re-entered running; blocker went back to scheduled. Clear both
+		// rev-guard high-water marks and broadcast both matches (mirrors reopen
+		// and revert-to-queue).
+		runningRevStore.Delete(id + ":" + mid)
+		runningRevStore.Delete(body.BlockerCompID + ":" + body.BlockerMatchID)
+		hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": id, "matchId": mid})
+		hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": body.BlockerCompID, "matchId": body.BlockerMatchID})
+
+		c.Status(http.StatusOK)
+	})
+
 	// DELETE /competitions/:id/matches/:mid/kachinuki-bout
 	//
 	// mp-gmcg: remove a trailing UNSCORED kachinuki bout appended by mistake

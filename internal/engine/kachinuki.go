@@ -619,88 +619,129 @@ func (e *Engine) ReopenKachinukiMatch(compID, matchID, reason string) error {
 	// path. The LoadCompetition/validation above stay outside: they touch no
 	// court state, so a bad-input rejection need not serialize on the lock.
 	return e.store.WithCourtExclusivityLock(func() error {
-		// Cross-competition court gate, deliberately OUTSIDE the transaction (see
-		// the doc comment). Also surfaces the *NotFoundError for an unknown match
-		// before any per-comp lock is taken.
-		if err := e.CheckCrossCompCourtBusy(compID, matchID); err != nil {
-			return err
+		return e.reopenKachinukiUnderCourtLock(compID, comp, matchID, reason)
+	})
+}
+
+// reopenKachinukiUnderCourtLock runs the reopen body assuming the store's
+// court-exclusivity lock is ALREADY held by the caller (mp-gmcg review A4), so a
+// preceding blocker requeue and this reopen can share ONE lock section
+// (RequeueBlockerAndReopenKachinuki) with no window for another match to grab
+// the freed court. It MUST NOT take the court lock itself (the mutex is
+// non-reentrant). comp is the kachinuki-validated target competition the caller
+// already loaded; reason is already trimmed.
+func (e *Engine) reopenKachinukiUnderCourtLock(compID string, comp *state.Competition, matchID, reason string) error {
+	// Cross-competition court gate, deliberately OUTSIDE the transaction (see
+	// the doc comment). Also surfaces the *NotFoundError for an unknown match
+	// before any per-comp lock is taken.
+	if err := e.CheckCrossCompCourtBusy(compID, matchID); err != nil {
+		return err
+	}
+
+	var opErr error
+	txErr := e.store.WithTransaction(compID, func(tx state.StoreTx) error {
+		// guard is the SINGLE copy of the preconditions every match home
+		// below (pool, bracket round, bronze) must pass: the match must be
+		// completed, and its court must be free. Kept as one closure rather
+		// than open-coded per branch because three hand-written copies is
+		// exactly the shape that loses one when a fourth match home appears.
+		//
+		// The court half is the same-competition half of the reopen court
+		// gate (see the COURT GATE note above): reopening flips the match
+		// back to running, so a court that already has a running match would
+		// end up with two, wedging the exclusivity check for BOTH. DO NOT
+		// remove this guard as a redundant-looking check.
+		guard := func(h matchHome, status state.MatchStatus, court string) error {
+			if status != state.MatchStatusCompleted {
+				return ErrReopenNotCompleted
+			}
+			// Reuse the pool matches + bracket findMatchHome already loaded
+			// under this tx for the same-comp court scan, instead of the
+			// re-load courtFreeInCompTx would do (mp-gmcg review E4). A nil
+			// slice (pool-load error, or the bracket on a pool home) reloads.
+			return courtFreeInCompTxWith(tx, compID, matchID, court, h.PoolMatches, h.BracketRoot)
 		}
 
-		var opErr error
-		txErr := e.store.WithTransaction(compID, func(tx state.StoreTx) error {
-			// guard is the SINGLE copy of the preconditions every match home
-			// below (pool, bracket round, bronze) must pass: the match must be
-			// completed, and its court must be free. Kept as one closure rather
-			// than open-coded per branch because three hand-written copies is
-			// exactly the shape that loses one when a fourth match home appears.
-			//
-			// The court half is the same-competition half of the reopen court
-			// gate (see the COURT GATE note above): reopening flips the match
-			// back to running, so a court that already has a running match would
-			// end up with two, wedging the exclusivity check for BOTH. DO NOT
-			// remove this guard as a redundant-looking check.
-			guard := func(h matchHome, status state.MatchStatus, court string) error {
-				if status != state.MatchStatusCompleted {
-					return ErrReopenNotCompleted
-				}
-				// Reuse the pool matches + bracket findMatchHome already loaded
-				// under this tx for the same-comp court scan, instead of the
-				// re-load courtFreeInCompTx would do (mp-gmcg review E4). A nil
-				// slice (pool-load error, or the bracket on a pool home) reloads.
-				return courtFreeInCompTxWith(tx, compID, matchID, court, h.PoolMatches, h.BracketRoot)
-			}
-
-			found, ferr := findMatchHome(tx, compID, matchID, func(h matchHome) error {
-				if h.Pool != nil {
-					if gerr := guard(h, h.Pool.Status, h.Pool.Court); gerr != nil {
-						opErr = gerr
-						return nil
-					}
-					// mp-gmcg: the bracket branch below refuses a reopen whose winner
-					// already fed a started knockout match (retractPropagatedWinner).
-					// A pool finisher feeds the knockout INDIRECTLY, through the
-					// standings the bracket was seeded from, so it needs the same
-					// refusal or it silently strands a displaced finisher in a
-					// started bracket match (the score path's mp-e2k1 guard can't
-					// catch it: by re-End time the reopened match is already excluded
-					// from the standings baseline it compares against).
-					if derr := e.checkPoolReopenDownstreamTx(tx, compID, comp, matchID); derr != nil {
-						opErr = derr
-						return nil
-					}
-					reopenPoolMatch(h.Pool, reason)
-					// SavePoolMatches funnels through the normal save chokepoint,
-					// so standings caches invalidate via the usual version bump.
-					return h.Save()
-				}
-				if gerr := guard(h, h.Bracket.Status, h.Bracket.Court); gerr != nil {
+		found, ferr := findMatchHome(tx, compID, matchID, func(h matchHome) error {
+			if h.Pool != nil {
+				if gerr := guard(h, h.Pool.Status, h.Pool.Court); gerr != nil {
 					opErr = gerr
 					return nil
 				}
-				// A bracket ROUND winner may already be propagated downstream; the
-				// bronze (3rd-place) match is a sibling with no downstream, so it
-				// needs no retraction.
-				if !h.Bronze {
-					if derr := retractPropagatedWinner(h.BracketRoot, h.RIdx, h.MIdx); derr != nil {
-						opErr = derr
-						return nil
-					}
+				// mp-gmcg: the bracket branch below refuses a reopen whose winner
+				// already fed a started knockout match (retractPropagatedWinner).
+				// A pool finisher feeds the knockout INDIRECTLY, through the
+				// standings the bracket was seeded from, so it needs the same
+				// refusal or it silently strands a displaced finisher in a
+				// started bracket match (the score path's mp-e2k1 guard can't
+				// catch it: by re-End time the reopened match is already excluded
+				// from the standings baseline it compares against).
+				if derr := e.checkPoolReopenDownstreamTx(tx, compID, comp, matchID); derr != nil {
+					opErr = derr
+					return nil
 				}
-				reopenBracketMatch(h.Bracket, reason)
+				reopenPoolMatch(h.Pool, reason)
+				// SavePoolMatches funnels through the normal save chokepoint,
+				// so standings caches invalidate via the usual version bump.
 				return h.Save()
-			})
-			if ferr != nil {
-				return ferr
 			}
-			if !found {
-				opErr = notFoundErrorf("match %s not found", matchID)
+			if gerr := guard(h, h.Bracket.Status, h.Bracket.Court); gerr != nil {
+				opErr = gerr
+				return nil
 			}
-			return nil
+			// A bracket ROUND winner may already be propagated downstream; the
+			// bronze (3rd-place) match is a sibling with no downstream, so it
+			// needs no retraction.
+			if !h.Bronze {
+				if derr := retractPropagatedWinner(h.BracketRoot, h.RIdx, h.MIdx); derr != nil {
+					opErr = derr
+					return nil
+				}
+			}
+			reopenBracketMatch(h.Bracket, reason)
+			return h.Save()
 		})
-		if txErr != nil {
-			return txErr
+		if ferr != nil {
+			return ferr
 		}
-		return opErr
+		if !found {
+			opErr = notFoundErrorf("match %s not found", matchID)
+		}
+		return nil
+	})
+	if txErr != nil {
+		return txErr
+	}
+	return opErr
+}
+
+// RequeueBlockerAndReopenKachinuki atomically frees a court and reopens a
+// kachinuki match onto it: under ONE hold of the court-exclusivity lock it
+// requeues the blocking match (which may be in a DIFFERENT competition — a
+// cross-court conflict) and then reopens the target. Holding the lock across
+// both steps closes the race the two-call client flow had (another operator
+// could take the freed court between the requeue and the reopen — mp-gmcg
+// review A4). RevertMatchToQueue takes only the blocker's per-competition lock,
+// so calling it under the court lock keeps the courtCheckMu → per-comp ordering.
+func (e *Engine) RequeueBlockerAndReopenKachinuki(targetComp, targetMatch, blockerComp, blockerMatch, reason string) error {
+	comp, err := e.store.LoadCompetition(targetComp)
+	if err != nil {
+		return err
+	}
+	if !comp.IsKachinuki() {
+		return validationErrorf("reopen is only supported for kachinuki team matches; correct other results via the score editor (correctionReason)")
+	}
+	reason = strings.TrimSpace(reason)
+	return e.store.WithCourtExclusivityLock(func() error {
+		// Free the court first, then reopen onto it. RevertMatchToQueue is
+		// idempotent for an already-scheduled match, so a blocker that a peer
+		// already cleared is not an error; a COMPLETED blocker returns
+		// ErrMatchAlreadyCompleted (it never held the court as "running", so
+		// requeuing it is the wrong remedy — surface it).
+		if rerr := e.RevertMatchToQueue(blockerComp, blockerMatch); rerr != nil {
+			return rerr
+		}
+		return e.reopenKachinukiUnderCourtLock(targetComp, comp, targetMatch, reason)
 	})
 }
 

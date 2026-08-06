@@ -1029,3 +1029,19 @@ func TestSelfRun_RemoveKachinukiBoutRequiresMainPassword(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, w.Code,
 		"removing a bout must be main-gated in self-run mode: an anonymous spectator must not delete a live pairing")
 }
+
+// mp-gmcg review A4: requeue-blocker-and-reopen requeues a live match AND
+// reopens a finalized result — doubly destructive — so it must NOT be
+// anonymously callable in self-run mode. Same central-allowlist gate as reopen.
+func TestSelfRun_RequeueBlockerAndReopenRequiresMainPassword(t *testing.T) {
+	store := newTempStore(t)
+	seedSelfRunTournament(t, store, "admin-pw")
+	r := setupSelfRunRouter(t, store, NewFileVerifier(store))
+
+	req := jsonReq(http.MethodPost, "/api/competitions/some-comp/matches/m-r1-0/requeue-blocker-and-reopen",
+		map[string]any{"blockerCompId": "some-comp", "blockerMatchId": "m-r1-1"})
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusUnauthorized, w.Code,
+		"requeue-blocker-and-reopen must be main-gated in self-run mode")
+}

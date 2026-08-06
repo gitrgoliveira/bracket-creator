@@ -1885,6 +1885,110 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/competitions/{id}/matches/{mid}/requeue-blocker-and-reopen:
+    post:
+      tags: [matches]
+      summary: Atomically requeue a blocking match and reopen a kachinuki match
+      description: |
+        The atomic remedy for a court_busy reopen. When reopening a finished
+        kachinuki match ({id}/{mid}, the target) is refused because ANOTHER
+        match holds its court, this requeues that blocking match AND reopens
+        the target under ONE hold of the court-exclusivity lock, so no other
+        match can take the freed court between the two steps. The blocker may
+        be in a DIFFERENT competition (a cross-court conflict). It replaces the
+        client's former two separate calls (revert-to-queue then reopen), which
+        raced. On success the target returns to `running` (with `reopenPending`
+        set when no `reason` is given, exactly like reopen) and the blocker
+        returns to `scheduled` with its partial score cleared; a `match_updated`
+        event is broadcast for BOTH matches.
+
+        Doubly destructive (it discards the target's finalized result AND the
+        blocker's partial score), so it is main-password-gated in self-run mode
+        via the central allowlist, the same class as reopen and override-winner.
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+        - $ref: '#/components/parameters/MatchId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [blockerCompId, blockerMatchId]
+              properties:
+                blockerCompId:
+                  type: string
+                  description: Competition owning the blocking match (may differ from {id}).
+                blockerMatchId:
+                  type: string
+                  description: ID of the running match to requeue to free the court.
+                reason:
+                  type: string
+                  maxLength: 200
+                  description: >
+                    Optional reopen reason for the target, identical to the
+                    reopen endpoint's: absent/empty leaves the target
+                    `reopenPending`, a supplied reason is recorded as its
+                    `correctionReason`.
+      responses:
+        '200':
+          description: Blocker requeued and target reopened (both broadcast).
+        '400':
+          description: >
+            `blockerCompId` is missing or malformed, `blockerMatchId` is missing
+            or too long, the `reason` exceeds 200 characters, the body is
+            malformed JSON, or the target competition is not kachinuki.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: >
+            Missing or invalid tournament password. In self-run mode this route
+            is a main-gated organiser correction, not participant-driven play.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: The target or the blocking match was not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: |
+            Conflict. Plain sentence in `error` when the target is not completed,
+            a downstream knockout fed by the target has been fought, or the
+            BLOCKER was already completed (so it never held the court as running
+            and requeuing it is the wrong remedy). Or `error: court_busy` (same
+            shape as reopen: `court`, `matchId`, `compId`, `message`) when a
+            match OTHER than the one requeued has since taken the court — the
+            client re-offers the remedy for that new blocker.
+          content:
+            application/json:
+              schema:
+                anyOf:
+                  - $ref: '#/components/schemas/Error'
+                  - type: object
+                    required: [error]
+                    properties:
+                      error:
+                        type: string
+                        enum: [court_busy]
+                      court:
+                        type: string
+                      matchId:
+                        type: string
+                      compId:
+                        type: string
+                      message:
+                        type: string
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/competitions/{id}/matches/{mid}/kachinuki-bout:
     delete:
       tags: [matches]

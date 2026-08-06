@@ -1674,6 +1674,32 @@ const API = {
         }
         return true;
     },
+    // mp-gmcg (review A4): atomically requeue the match holding the court AND
+    // reopen the target, in ONE server call under one court lock — replaces the
+    // former two-call revert-then-reopen, which raced (a peer could take the
+    // freed court between the calls). Surfaces the SAME court_busy detail shape
+    // as reopenMatch, so the panel re-offers the remedy when a DIFFERENT match
+    // has since taken the court.
+    async requeueBlockerAndReopen(targetComp, targetMatch, blockerComp, blockerMatch, password) {
+        const res = await fetch(`/api/competitions/${targetComp}/matches/${targetMatch}/requeue-blocker-and-reopen`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Tournament-Password': password
+            },
+            body: JSON.stringify({ blockerCompId: blockerComp, blockerMatchId: blockerMatch })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            const e = new Error(err.message || err.error || "Failed to reopen match");
+            if (err.error) e.code = err.error;
+            if (err.court) e.court = err.court;
+            if (err.matchId) e.matchId = err.matchId;
+            if (err.compId) e.compId = err.compId;
+            throw e;
+        }
+        return true;
+    },
     // mp-gmcg: remove a trailing UNSCORED kachinuki bout appended by mistake
     // ([Record bout] / [Add next bout]). Kachinuki-only; targets a numbered
     // bout, never a daihyosen. Returns the updated MatchResult (envelope

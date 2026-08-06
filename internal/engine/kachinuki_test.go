@@ -2023,6 +2023,92 @@ func TestReopenKachinukiMatchCourtBusy(t *testing.T) {
 	})
 }
 
+// TestRequeueBlockerAndReopenKachinuki pins the atomic court-busy remedy
+// (mp-gmcg review A4): under ONE court-exclusivity lock, requeue the match
+// holding the court, then reopen the target onto the freed court — so no peer
+// can grab the court between the two steps the old two-call client flow made.
+func TestRequeueBlockerAndReopenKachinuki(t *testing.T) {
+	completedOnCourt := func(id, court string) state.MatchResult {
+		return state.MatchResult{
+			ID: id, SideA: "RedTeam", SideB: "WhiteTeam", Status: state.MatchStatusCompleted,
+			Winner: "RedTeam", Decision: "kachinuki-exhaustion", Court: court,
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "R-1", SideB: "W-1", IpponsA: []string{"M"}, Winner: "R-1", Decision: "fought"},
+			},
+		}
+	}
+	runningOnCourt := func(id, court string) state.MatchResult {
+		return state.MatchResult{ID: id, SideA: "Kuma", SideB: "Washi", Status: state.MatchStatusRunning, Court: court}
+	}
+
+	t.Run("frees the blocker then reopens the target, atomically", func(t *testing.T) {
+		eng, store, _ := setupKachinukiComp(t, "requeue-reopen", 3)
+		require.NoError(t, store.SavePoolMatches("requeue-reopen", []state.MatchResult{
+			completedOnCourt("P1-0", "A"),
+			runningOnCourt("P1-1", "A"),
+		}))
+
+		// A plain reopen is refused: court A is busy with P1-1.
+		require.ErrorIs(t, eng.ReopenKachinukiMatch("requeue-reopen", "P1-0", ""), ErrCourtBusy)
+
+		// Requeue the blocker + reopen the target in one atomic operation.
+		require.NoError(t, eng.RequeueBlockerAndReopenKachinuki("requeue-reopen", "P1-0", "requeue-reopen", "P1-1", ""))
+
+		byID := map[string]state.MatchResult{}
+		matches, _ := store.LoadPoolMatches("requeue-reopen")
+		for _, m := range matches {
+			byID[m.ID] = m
+		}
+		assert.Equal(t, state.MatchStatusScheduled, byID["P1-1"].Status, "blocker requeued")
+		assert.Equal(t, state.MatchStatusRunning, byID["P1-0"].Status, "target reopened onto the freed court")
+		assert.True(t, byID["P1-0"].ReopenPending, "reason-less reopen leaves the audit obligation")
+	})
+
+	t.Run("blocker in a DIFFERENT competition (cross-court conflict)", func(t *testing.T) {
+		eng, store, _ := setupKachinukiComp(t, "rq-target", 3)
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: "rq-blocker", TeamSize: 3, TeamMatchType: state.TeamMatchTypeKachinuki,
+		}))
+		require.NoError(t, store.SavePoolMatches("rq-target", []state.MatchResult{completedOnCourt("P1-0", "A")}))
+		require.NoError(t, store.SavePoolMatches("rq-blocker", []state.MatchResult{runningOnCourt("B1-0", "A")}))
+
+		require.NoError(t, eng.RequeueBlockerAndReopenKachinuki("rq-target", "P1-0", "rq-blocker", "B1-0", ""))
+
+		assert.Equal(t, state.MatchStatusRunning, loadPoolMatchByID(t, store, "rq-target", "P1-0").Status)
+		assert.Equal(t, state.MatchStatusScheduled, loadPoolMatchByID(t, store, "rq-blocker", "B1-0").Status)
+	})
+
+	t.Run("a COMPLETED blocker surfaces ErrMatchAlreadyCompleted and leaves the target finished", func(t *testing.T) {
+		eng, store, _ := setupKachinukiComp(t, "rq-done-blocker", 3)
+		require.NoError(t, store.SavePoolMatches("rq-done-blocker", []state.MatchResult{
+			completedOnCourt("P1-0", "A"),
+			completedOnCourt("P1-1", "A"),
+		}))
+		err := eng.RequeueBlockerAndReopenKachinuki("rq-done-blocker", "P1-0", "rq-done-blocker", "P1-1", "")
+		require.ErrorIs(t, err, ErrMatchAlreadyCompleted)
+		assert.Equal(t, state.MatchStatusCompleted, loadPoolMatchByID(t, store, "rq-done-blocker", "P1-0").Status,
+			"the target must not reopen when the requeue fails")
+	})
+
+	t.Run("a non-kachinuki target is rejected", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: "rq-fixed", TeamSize: 3, TeamMatchType: state.TeamMatchTypeFixed,
+		}))
+		err := eng.RequeueBlockerAndReopenKachinuki("rq-fixed", "P1-0", "rq-fixed", "P1-1", "")
+		var verr *ValidationError
+		require.ErrorAs(t, err, &verr)
+	})
+
+	t.Run("an unknown blocker errors and leaves the target finished", func(t *testing.T) {
+		eng, store, _ := setupKachinukiComp(t, "rq-nf-blocker", 3)
+		require.NoError(t, store.SavePoolMatches("rq-nf-blocker", []state.MatchResult{completedOnCourt("P1-0", "A")}))
+		err := eng.RequeueBlockerAndReopenKachinuki("rq-nf-blocker", "P1-0", "rq-nf-blocker", "nope", "")
+		require.Error(t, err)
+		assert.Equal(t, state.MatchStatusCompleted, loadPoolMatchByID(t, store, "rq-nf-blocker", "P1-0").Status)
+	})
+}
+
 // TestStripTrailingUnscoredKachinukiBouts pins the completed-write strip
 // (mp-gmcg): MaybeAdvanceKachinuki auto-appends the next pairing after each
 // scored bout, so an operator's "End match" leaves an abandoned unscored

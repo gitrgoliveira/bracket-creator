@@ -700,6 +700,74 @@ func postReopen(t *testing.T, r *gin.Engine, compID, matchID, reason string) *ht
 	return postReopenRaw(t, r, compID, matchID, body)
 }
 
+func postRequeueAndReopen(t *testing.T, r *gin.Engine, compID, matchID string, payload map[string]any) *httptest.ResponseRecorder {
+	t.Helper()
+	body, err := json.Marshal(payload)
+	require.NoError(t, err)
+	w := httptest.NewRecorder()
+	req, err := http.NewRequest("POST", "/api/competitions/"+compID+"/matches/"+matchID+"/requeue-blocker-and-reopen", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	return w
+}
+
+// TestRequeueBlockerAndReopenHandler covers the atomic court-busy remedy
+// endpoint (mp-gmcg review A4).
+func TestRequeueBlockerAndReopenHandler(t *testing.T) {
+	setup := func(t *testing.T) (*gin.Engine, *state.Store, string) {
+		compID := "requeue-reopen-handler"
+		r, store := setupKachinukiScoreServer(t, compID)
+		target := completedKachinukiPoolMatch() // P1-0, completed
+		target.Court = "A"
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			target,
+			{ID: "P1-1", SideA: "Kuma", SideB: "Washi", Status: state.MatchStatusRunning, Court: "A"},
+		}))
+		return r, store, compID
+	}
+
+	t.Run("frees the blocker and reopens the target (200)", func(t *testing.T) {
+		r, store, compID := setup(t)
+
+		// A plain reopen is refused (court A busy).
+		require.Equal(t, http.StatusConflict, postReopen(t, r, compID, "P1-0", "").Code)
+
+		w := postRequeueAndReopen(t, r, compID, "P1-0", map[string]any{
+			"blockerCompId": compID, "blockerMatchId": "P1-1",
+		})
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+		assert.Equal(t, state.MatchStatusScheduled, loadPoolMatch(t, store, compID, "P1-1").Status, "blocker requeued")
+		reopened := loadPoolMatch(t, store, compID, "P1-0")
+		assert.Equal(t, state.MatchStatusRunning, reopened.Status, "target reopened")
+		assert.True(t, reopened.ReopenPending, "reason-less reopen leaves the audit obligation")
+	})
+
+	t.Run("a completed blocker is a 409 and the target stays finished", func(t *testing.T) {
+		r, store, compID := setup(t)
+		w := postRequeueAndReopen(t, r, compID, "P1-0", map[string]any{
+			"blockerCompId": compID, "blockerMatchId": "P1-0", // the (completed) target as its own blocker
+		})
+		require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+		assert.Equal(t, state.MatchStatusCompleted, loadPoolMatch(t, store, compID, "P1-0").Status)
+	})
+
+	t.Run("an unknown blocker is a 404", func(t *testing.T) {
+		r, _, compID := setup(t)
+		w := postRequeueAndReopen(t, r, compID, "P1-0", map[string]any{
+			"blockerCompId": compID, "blockerMatchId": "no-such-match",
+		})
+		require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
+	})
+
+	t.Run("a missing blockerMatchId is a 400", func(t *testing.T) {
+		r, _, compID := setup(t)
+		w := postRequeueAndReopen(t, r, compID, "P1-0", map[string]any{"blockerCompId": compID})
+		require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	})
+}
+
 // completedKachinukiPoolMatch is the canonical finished pool encounter
 // used by the reopen tests: one decisive bout, ended by the operator.
 func completedKachinukiPoolMatch() state.MatchResult {

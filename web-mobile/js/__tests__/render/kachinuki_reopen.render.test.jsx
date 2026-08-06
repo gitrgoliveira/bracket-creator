@@ -70,6 +70,7 @@ beforeEach(() => {
     recordDecision: vi.fn(),
     reopenMatch: vi.fn().mockResolvedValue(true),
     revertMatchToQueue: vi.fn().mockResolvedValue(true),
+    requeueBlockerAndReopen: vi.fn().mockResolvedValue(true),
     removeKachinukiBout: vi.fn().mockResolvedValue({ id: 'm1', subResults: [] }),
   };
 });
@@ -264,26 +265,31 @@ describe('kachinuki reopen: a busy court gets a remedy, not a dead end', () => {
     expect(screen.getByTestId('kachinuki-reopen-requeue-button')).toBeTruthy();
   });
 
-  it('requeues the blocking match and retries the reopen', async () => {
+  it('requeues the blocker and reopens the target in ONE atomic call', async () => {
     const onClose = vi.fn();
-    window.API.reopenMatch = vi.fn()
-      .mockRejectedValueOnce(courtBusyError())
-      .mockResolvedValueOnce(true);
+    // The one-tap reopen surfaces the court_busy conflict; the remedy is then
+    // the single requeue-and-reopen call (mp-gmcg A4).
+    window.API.reopenMatch = vi.fn().mockRejectedValueOnce(courtBusyError());
+    window.API.requeueBlockerAndReopen = vi.fn().mockResolvedValue(true);
     await renderEditor({ onClose });
     await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-reopen-button')); });
     await screen.findByTestId('kachinuki-reopen-conflict');
 
     await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-reopen-requeue-button')); });
 
-    // The BLOCKING match is requeued (not this one), then the reopen retries.
-    expect(window.API.revertMatchToQueue).toHaveBeenCalledWith('comp1', 'm-r1-1', 'secret');
-    await waitFor(() => expect(window.API.reopenMatch).toHaveBeenCalledTimes(2));
+    // ONE server call: target=(comp1, m1), blocker=(comp1, m-r1-1). No second
+    // reopenMatch call — the requeue and reopen commit together server-side.
+    expect(window.API.requeueBlockerAndReopen).toHaveBeenCalledWith('comp1', 'm1', 'comp1', 'm-r1-1', 'secret');
+    expect(window.API.reopenMatch).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(onClose).toHaveBeenCalled());
   });
 
-  it('keeps the panel and explains itself when the requeue is refused', async () => {
+  it('clears the panel and shows the message when the atomic remedy is refused', async () => {
+    // A completed blocker (409) is not a court_busy, so the stale conflict panel
+    // is dropped and the server's sentence is shown; the operator can tap Reopen
+    // again (the court may now be free).
     window.API.reopenMatch = vi.fn().mockRejectedValue(courtBusyError());
-    window.API.revertMatchToQueue = vi.fn().mockRejectedValue(new Error('match already completed'));
+    window.API.requeueBlockerAndReopen = vi.fn().mockRejectedValue(new Error('match already completed'));
     await renderEditor();
     await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-reopen-button')); });
     await screen.findByTestId('kachinuki-reopen-conflict');
@@ -293,12 +299,28 @@ describe('kachinuki reopen: a busy court gets a remedy, not a dead end', () => {
     await waitFor(() => {
       expect(screen.getByTestId('kachinuki-reopen-error').textContent).toContain('match already completed');
     });
-    // The blocker is still there to clear, so the remedy stays offered and the
-    // button comes back to rest rather than sticking on "Working…".
-    expect(screen.getByTestId('kachinuki-reopen-conflict')).toBeTruthy();
-    expect(screen.getByTestId('kachinuki-reopen-requeue-button').textContent).toBe('Clear its score, queue it, and reopen');
-    // Only the first attempt reached the reopen endpoint.
-    expect(window.API.reopenMatch).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('kachinuki-reopen-conflict')).toBeNull();
+    expect(screen.getByTestId('kachinuki-reopen-button').textContent).toBe('Reopen match');
+  });
+
+  it('re-offers the remedy when a DIFFERENT match has since taken the court', async () => {
+    // The atomic remedy fails with a court_busy naming a NEW blocker: the panel
+    // updates to that match rather than dead-ending.
+    window.API.reopenMatch = vi.fn().mockRejectedValue(courtBusyError());
+    const newBlocker = courtBusyError();
+    newBlocker.matchId = 'm-r1-2';
+    newBlocker.message = 'Court A already has a running match (m-r1-2). Finish that match before reopening this one.';
+    window.API.requeueBlockerAndReopen = vi.fn().mockRejectedValue(newBlocker);
+    await renderEditor();
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-reopen-button')); });
+    await screen.findByTestId('kachinuki-reopen-conflict');
+
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-reopen-requeue-button')); });
+
+    // Still a conflict panel, now naming the new blocker — the remedy is re-offered.
+    const panel = await screen.findByTestId('kachinuki-reopen-conflict');
+    await waitFor(() => expect(panel.textContent).toContain('m-r1-2'));
+    expect(screen.getByTestId('kachinuki-reopen-requeue-button')).toBeTruthy();
   });
 
   // POST /decision is the OTHER way to finalize a match, so the server demands
@@ -337,19 +359,20 @@ describe('kachinuki reopen: a busy court gets a remedy, not a dead end', () => {
     expect(screen.getByRole('button', { name: 'Record' }).disabled).toBe(false);
   });
 
-  it('recovers when the requeue lands but the retried reopen still fails', async () => {
+  it('recovers when the atomic remedy fails on the target (downstream fought)', async () => {
     const onClose = vi.fn();
-    window.API.reopenMatch = vi.fn()
-      .mockRejectedValueOnce(courtBusyError())
-      .mockRejectedValueOnce(new Error('cannot reopen: a downstream knockout match has already been fought'));
+    window.API.reopenMatch = vi.fn().mockRejectedValueOnce(courtBusyError());
+    window.API.requeueBlockerAndReopen = vi.fn()
+      .mockRejectedValue(new Error('cannot reopen: a downstream knockout match has already been fought'));
     await renderEditor({ onClose });
     await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-reopen-button')); });
     await screen.findByTestId('kachinuki-reopen-conflict');
 
     await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-reopen-requeue-button')); });
 
-    // Not stuck: the second failure reaches the operator, the (now irrelevant)
-    // conflict panel is gone, and Reopen is tappable again.
+    // Not stuck: the failure reaches the operator, the (now irrelevant) conflict
+    // panel is gone, and Reopen is tappable again. Nothing partially applied —
+    // the requeue and reopen commit together server-side.
     await waitFor(() => {
       expect(screen.getByTestId('kachinuki-reopen-error').textContent)
         .toBe('cannot reopen: a downstream knockout match has already been fought');

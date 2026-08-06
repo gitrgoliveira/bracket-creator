@@ -1296,25 +1296,25 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     if (!c || reopenBusy) return;
     setReopenErr("");
     setReopenBusy(true);
-    let requeued = false;
     try {
-      await window.API.revertMatchToQueue(c.compId, c.matchId, resolveDecisionPassword(password));
+      // ONE atomic server call (mp-gmcg review A4): requeue the blocker AND
+      // reopen the target under a single court lock, closing the race the old
+      // two-call revert-then-reopen had (a peer could take the freed court in
+      // between). A court_busy failure means a DIFFERENT match has since taken
+      // the court; applyReopenFailure re-offers the remedy for that one.
+      await window.API.requeueBlockerAndReopen(m.compId, m.id, c.compId, c.matchId, resolveDecisionPassword(password));
       if (!mountedRef.current) return;
-      requeued = true;
       setReopenConflict(null);
-      await window.API.reopenMatch(m.compId, m.id, resolveDecisionPassword(password));
-      if (!mountedRef.current) return;
       onClose();
     } catch (e) {
       if (!mountedRef.current) return;
-      // Either half can fail, and neither may leave the operator staring at a
-      // dead panel. A failed REQUEUE keeps the panel (the blocker is still
-      // there to clear, so a retry is the right next tap); a failed RETRY runs
-      // back through applyReopenFailure, which re-offers the remedy if a
-      // DIFFERENT match has since taken the court and otherwise shows the
-      // server's sentence.
-      if (requeued) { applyReopenFailure(e); return; }
-      setReopenErr(`Could not send that match back to the queue: ${String(e?.message || "unknown error")}`);
+      // One atomic call now, so a single failure path: applyReopenFailure
+      // re-offers the remedy if a DIFFERENT match has since taken the court
+      // (court_busy), and otherwise shows the server's sentence — a completed
+      // or unknown blocker, a downstream-fought target, etc. The requeue and
+      // reopen commit together or not at all, so there is no partial state to
+      // describe separately.
+      applyReopenFailure(e);
     } finally {
       if (mountedRef.current) setReopenBusy(false);
     }

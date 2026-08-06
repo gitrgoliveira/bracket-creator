@@ -190,7 +190,7 @@ func TestRecordMatchResult_DuplicateCompletedSubmitIsIdempotent(t *testing.T) {
 		}))
 
 		// First call, should append bout 3.
-		changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
+		changed, _, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
 		require.NoError(t, err)
 		assert.True(t, changed, "first advance must append bout 3")
 
@@ -206,7 +206,7 @@ func TestRecordMatchResult_DuplicateCompletedSubmitIsIdempotent(t *testing.T) {
 		assert.Empty(t, lastBout.Decision, "freshly appended bout must have no decision yet")
 
 		// Second call, the last sub-result has no outcome, so this must be a no-op.
-		changed2, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
+		changed2, _, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
 		require.NoError(t, err)
 
 		matches2, err := store.LoadPoolMatches(compID)

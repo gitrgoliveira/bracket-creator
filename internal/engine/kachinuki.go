@@ -364,13 +364,21 @@ func appendNextKachinukiBout(bm *state.BracketMatch, next state.SubMatchResult) 
 // bout list.
 //
 // FR-044, T135, T137.
-func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, error) {
+// MaybeAdvanceKachinuki appends the next winner-stays-on pairing when the last
+// bout resolved, and reports (advanced, postLog, err): postLog is the FULL
+// bout log AFTER the append when advanced is true (nil otherwise). Returning
+// the log lets the caller echo the appended pairing to the open editor without
+// re-reading the match from the store — the read this replaced was ~the 9th
+// store read on a request already doing several, once per advancing bout, live
+// (mp-gmcg review E1). The engine NEVER auto-finalizes (operator-led
+// completion); see the out.Next == nil path.
+func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, []state.SubMatchResult, error) {
 	comp, err := e.store.LoadCompetition(compID)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	if !comp.IsKachinuki() {
-		return false, nil
+		return false, nil, nil
 	}
 
 	// Locate the parent match in either the pool or bracket store:
@@ -379,17 +387,17 @@ func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, error) {
 	// exhaustion).
 	parent, isBracket, roundIdx, err := e.findTeamMatch(compID, matchID)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	if parent == nil || len(parent.SubResults) == 0 {
-		return false, nil
+		return false, nil, nil
 	}
 	// A completed match is final: corrections re-submit the bout log of a
 	// finished match and must never re-run advancement (which would append
 	// a phantom next bout onto the completed result). Defense in depth on
 	// top of the handler's kachinukiBoutFinal gating.
 	if parent.Status == state.MatchStatusCompleted {
-		return false, nil
+		return false, nil, nil
 	}
 
 	// Advancement is driven by the last NUMBERED bout. A daihyosen sub-result
@@ -407,14 +415,14 @@ func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, error) {
 	}
 	if lastIdx < 0 {
 		// Only the daihyosen placeholder is present: nothing to advance off.
-		return false, nil
+		return false, nil, nil
 	}
 	last := parent.SubResults[lastIdx]
 	// Only act when the last bout has a final outcome. A bout written
 	// with no Winner AND no Decision is still being scored; bail.
 	hasOutcome := last.Winner != "" || last.Decision != ""
 	if !hasOutcome {
-		return false, nil
+		return false, nil, nil
 	}
 	// Identity guard: retirement math needs to know WHO fought. A bout
 	// carrying an outcome but no side names (e.g. a client that could not
@@ -424,7 +432,7 @@ func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, error) {
 	// so the operator can correct the bout.
 	if last.SideA == "" && last.SideB == "" {
 		log.Printf("engine.MaybeAdvanceKachinuki compId=%s matchId=%s: last bout (position %d) has an outcome but no side names; skipping advancement", compID, matchID, last.Position)
-		return false, nil
+		return false, nil, nil
 	}
 
 	// Build remaining-roster snapshot. When a TeamLineup has been saved
@@ -453,55 +461,47 @@ func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, error) {
 	// exhaustion AND taisho-defeated -- or hikiwake in pools/league; a
 	// knockout tie is resolved by encho on the final bout, never a draw).
 	if out.Next == nil {
-		return false, nil
+		return false, nil, nil
 	}
 
-	// Persist via the matching atomic primitive.
-	mutate := func(parent *state.MatchResult) {
-		// Append the next bout. The handler's broadcast carries the
-		// updated subResults so SSE consumers see the new pairing.
-		// Appending means the encounter continues: the parent match must
-		// stay running with no match-level winner/decision.
+	// postLog captures the FULL bout log AFTER the append, so the caller can
+	// echo it without re-reading the match (E1). A fresh slice header keeps it
+	// independent of the store's parse buffer.
+	var postLog []state.SubMatchResult
+
+	if isBracket {
+		// UpdateBracketMatchByID owns the rounds → bronze-sibling walk, so the
+		// append site no longer re-implements it (and can't forget the bronze).
+		found, err := e.store.UpdateBracketMatchByID(compID, matchID, func(bm *state.BracketMatch) {
+			appendNextKachinukiBout(bm, *out.Next)
+			postLog = append([]state.SubMatchResult(nil), bm.SubResults...)
+		})
+		if err != nil {
+			return false, nil, err
+		}
+		if !found {
+			return false, nil, notFoundErrorf("bracket match %s not found", matchID)
+		}
+		return true, postLog, nil
+	}
+
+	found, err := e.store.UpdatePoolMatchByID(compID, matchID, func(parent *state.MatchResult) {
+		// Append the next bout. Appending means the encounter continues: the
+		// parent match must stay running with no match-level winner/decision.
 		out.Next.Position = len(parent.SubResults) + 1
 		parent.SubResults = append(parent.SubResults, *out.Next)
 		parent.Status = state.MatchStatusRunning
 		parent.Winner = ""
 		parent.Decision = ""
+		postLog = append([]state.SubMatchResult(nil), parent.SubResults...)
+	})
+	if err != nil {
+		return false, nil, err
 	}
-
-	if isBracket {
-		if err := e.store.UpdateBracket(compID, func(bracket *state.Bracket) error {
-			if bracket == nil {
-				return notFoundErrorf("bracket not found for competition %s", compID)
-			}
-			for rIdx := range bracket.Rounds {
-				for mIdx := range bracket.Rounds[rIdx] {
-					if bracket.Rounds[rIdx][mIdx].ID == matchID {
-						appendNextKachinukiBout(&bracket.Rounds[rIdx][mIdx], *out.Next)
-						return nil
-					}
-				}
-			}
-			// The Naginata 3rd-place (bronze) match is a sibling of
-			// bracket.Rounds, not an element of it, so the loop above never
-			// reaches it.
-			if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID == matchID {
-				appendNextKachinukiBout(bm, *out.Next)
-				return nil
-			}
-			return notFoundErrorf("bracket match %s not found", matchID)
-		}); err != nil {
-			return false, err
-		}
-		return true, nil
+	if !found {
+		return false, nil, nil
 	}
-
-	if found, err := e.store.UpdatePoolMatchByID(compID, matchID, mutate); err != nil {
-		return false, err
-	} else if !found {
-		return false, nil
-	}
-	return true, nil
+	return true, postLog, nil
 }
 
 // Sentinel errors for the operator-led reopen path (mp-gmcg, spec 006

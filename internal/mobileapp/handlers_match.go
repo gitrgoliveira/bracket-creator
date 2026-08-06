@@ -155,14 +155,15 @@ func annotateBracketQueuePositions(b *state.Bracket) {
 // team bout, not the position -1 daihyosen) carries an encho marker. Used
 // by the score endpoints to decide whether the kachinuki numbered-bout
 // encho exception needs the competition loaded at all: ordinary payloads
-// carry no numbered-bout encho and must not pay the store read.
+// carry no numbered-bout encho and must not pay the store read (a
+// LoadCompetition that deep-copies the Players slice, per score write).
+//
+// Shares subBoutNeedsNumberedEnchoAllowance with validateSubBout's gate, so
+// this pre-scan and the enforcement it front-runs can never diverge — the
+// fragility the prior open-coded copy carried (mp-gmcg review).
 func anyNumberedBoutHasEncho(subResults []state.SubMatchResult) bool {
 	for i := range subResults {
-		sr := &subResults[i]
-		// Encho.On() is the single "did this happen in encho" predicate
-		// (CLAUDE.md); validateSubBout uses the same one, so an open-coded
-		// nil+PeriodCount chain here could drift from it.
-		if sr.Position != state.DaihyosenSubPosition && sr.Encho.On() {
+		if subBoutNeedsNumberedEnchoAllowance(&subResults[i]) {
 			return true
 		}
 	}
@@ -1837,18 +1838,18 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		// to retry and double-record. Mirrors the recordIneligibility
 		// non-fatal pattern.
 		if body.KachinukiBoutFinal {
-			if advanced, kerr := eng.MaybeAdvanceKachinuki(id, mid); kerr != nil {
+			if advanced, postLog, kerr := eng.MaybeAdvanceKachinuki(id, mid); kerr != nil {
 				log.Printf("engine.MaybeAdvanceKachinuki(%s, %s): %v", id, mid, kerr)
 			} else if advanced {
 				// Echo the POST-advance bout log so the open score editor can
 				// render the appended pairing immediately (Record bout →
 				// next bout appears, mp-gmcg): the `result` echoed below
 				// predates the append, and SSE only refreshes the match
-				// LIST, not the host's open-match snapshot. Best-effort: on
-				// a load failure the pre-advance log is echoed and the next
-				// refresh reconciles.
-				if snap, ok := matchSnapshotFor(store, id, mid); ok {
-					result.SubResults = snap.SubResults
+				// LIST, not the host's open-match snapshot. MaybeAdvanceKachinuki
+				// hands back the post-append log directly, so no store re-read
+				// (mp-gmcg review E1).
+				if postLog != nil {
+					result.SubResults = postLog
 				}
 				hub.Broadcast(EventMatchUpdated, gin.H{
 					"competitionId": id,

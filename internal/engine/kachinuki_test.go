@@ -254,7 +254,7 @@ func TestMaybeAdvanceKachinuki_NonKachinuki(t *testing.T) {
 		TeamSize:      5,
 	}))
 
-	changed, err := eng.MaybeAdvanceKachinuki(compID, "any-match")
+	changed, _, err := eng.MaybeAdvanceKachinuki(compID, "any-match")
 	assert.NoError(t, err)
 	assert.False(t, changed)
 }
@@ -276,7 +276,7 @@ func TestMaybeAdvanceKachinuki_NoSubResults(t *testing.T) {
 		{ID: "P1-0", SideA: "RedTeam", SideB: "WhiteTeam", Status: state.MatchStatusScheduled},
 	}))
 
-	changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
+	changed, _, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
 	assert.NoError(t, err)
 	assert.False(t, changed, "no sub-results means nothing to advance")
 }
@@ -312,7 +312,7 @@ func TestMaybeAdvanceKachinuki_ExhaustedSnapshotNoOp(t *testing.T) {
 		},
 	}))
 
-	changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
+	changed, _, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
 	require.NoError(t, err)
 	assert.False(t, changed, "an exhausted snapshot is advisory; the engine must not mutate the match")
 
@@ -378,7 +378,7 @@ func TestMaybeAdvanceKachinuki_IgnoresTrailingDaihyosen(t *testing.T) {
 		},
 	}))
 
-	changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
+	changed, _, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
 	require.NoError(t, err)
 	assert.True(t, changed, "advancement must run off the numbered bout, not the trailing daihyosen row")
 
@@ -406,7 +406,7 @@ func TestMaybeAdvanceKachinuki_MatchNotFound(t *testing.T) {
 	compID := "advance-not-found"
 	eng, _, _ := setupKachinukiComp(t, compID, 5)
 
-	changed, err := eng.MaybeAdvanceKachinuki(compID, "nonexistent")
+	changed, _, err := eng.MaybeAdvanceKachinuki(compID, "nonexistent")
 	assert.NoError(t, err)
 	assert.False(t, changed)
 }
@@ -486,7 +486,7 @@ func TestMaybeAdvanceKachinuki_BracketPath(t *testing.T) {
 	// No pool matches so findTeamMatch falls through to the bracket search.
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{}))
 
-	changed, err := eng.MaybeAdvanceKachinuki(compID, bracketMatchID)
+	changed, _, err := eng.MaybeAdvanceKachinuki(compID, bracketMatchID)
 	require.NoError(t, err)
 	// BracketMatch has no SubResults → early return false.
 	assert.False(t, changed)
@@ -529,7 +529,7 @@ func TestMaybeAdvanceKachinuki_BronzeExhaustedSnapshotNoOp(t *testing.T) {
 	// No pool matches so findTeamMatch falls through to the bracket search.
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{}))
 
-	changed, err := eng.MaybeAdvanceKachinuki(compID, "m-bronze")
+	changed, _, err := eng.MaybeAdvanceKachinuki(compID, "m-bronze")
 	require.NoError(t, err)
 	assert.False(t, changed, "bronze exhausted snapshot is advisory; the engine must not mutate the match")
 
@@ -571,7 +571,7 @@ func TestMaybeAdvanceKachinuki_AppendsBoutNextRound(t *testing.T) {
 		},
 	}))
 
-	changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
+	changed, postLog, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
 	require.NoError(t, err)
 	assert.True(t, changed, "next bout should have been appended")
 
@@ -581,6 +581,13 @@ func TestMaybeAdvanceKachinuki_AppendsBoutNextRound(t *testing.T) {
 	assert.Len(t, matches[0].SubResults, 3, "bout 3 should have been appended")
 	assert.Equal(t, "A-Jiho", matches[0].SubResults[2].SideA, "A-Jiho stays as SideA winner")
 	assert.Equal(t, "B-Senpo", matches[0].SubResults[2].SideB, "B-Senpo is next SideB")
+
+	// mp-gmcg review E1: the returned postLog is the FULL post-append bout log,
+	// so the handler echoes the appended pairing without re-reading the store.
+	// It must match what was persisted.
+	require.Len(t, postLog, 3, "postLog carries the appended bout")
+	assert.Equal(t, matches[0].SubResults, postLog, "postLog equals the persisted bout log")
+	assert.Equal(t, 3, postLog[2].Position, "appended bout carries its position")
 }
 
 // A2 lineup integration tests -----------------------------------------------
@@ -631,7 +638,7 @@ func TestMaybeAdvanceKachinuki_RosterFromLineup(t *testing.T) {
 		},
 	}))
 
-	changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
+	changed, _, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
 	require.NoError(t, err)
 	assert.True(t, changed, "next bout must be appended (W-2 is in queue from lineup)")
 
@@ -707,7 +714,7 @@ func TestMaybeAdvanceKachinuki_RosterFromLineup_ParticipantIDKeyed(t *testing.T)
 		},
 	}))
 
-	changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
+	changed, _, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
 	require.NoError(t, err)
 	assert.True(t, changed, "next bout must be appended (W-2 queued in the id-keyed lineup)")
 
@@ -807,7 +814,7 @@ func TestMaybeAdvanceKachinuki_CompletedMatchNoOp(t *testing.T) {
 		},
 	}))
 
-	changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
+	changed, _, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
 	require.NoError(t, err)
 	assert.False(t, changed, "a completed match must never be advanced")
 
@@ -868,7 +875,7 @@ func TestMaybeAdvanceKachinuki_FullSequence5v5EndsWithOperator(t *testing.T) {
 
 	whiteOrder := []string{"W-S", "W-J", "W-C", "W-F", "W-T"}
 	for bout := 2; bout <= 5; bout++ {
-		changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
+		changed, _, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
 		require.NoError(t, err, "bout %d", bout)
 		require.True(t, changed, "bout %d must be appended from the lineups", bout)
 
@@ -890,7 +897,7 @@ func TestMaybeAdvanceKachinuki_FullSequence5v5EndsWithOperator(t *testing.T) {
 
 	// W-T (last of WhiteTeam) is now defeated: the snapshot is exhausted,
 	// but that is advisory only — the engine must NOT finalize (mp-gmcg).
-	changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
+	changed, _, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
 	require.NoError(t, err)
 	assert.False(t, changed, "exhaustion is advisory; the operator ends the match explicitly")
 
@@ -932,7 +939,7 @@ func TestMaybeAdvanceKachinuki_NoLineupFallback(t *testing.T) {
 	}))
 
 	// Without lineup: remainingB=[] → advisory MatchEnded → no-op.
-	changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
+	changed, _, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
 	require.NoError(t, err)
 	assert.False(t, changed, "bout-log-only exhaustion is advisory; the engine must not mutate the match")
 
@@ -999,7 +1006,7 @@ func TestMaybeAdvanceKachinuki_MatchScopedLineup(t *testing.T) {
 		},
 	}))
 
-	changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
+	changed, _, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
 	require.NoError(t, err)
 	assert.True(t, changed, "next bout must be appended using match-scoped lineup")
 
@@ -1066,7 +1073,7 @@ func TestMaybeAdvanceKachinuki_LatestRoundLineupFallback(t *testing.T) {
 		},
 	}))
 
-	changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
+	changed, _, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
 	require.NoError(t, err)
 	assert.True(t, changed, "next bout must be appended (W-2 is in pool-round-0 lineup)")
 
@@ -1107,7 +1114,7 @@ func TestMaybeAdvanceKachinuki_NoOutcome(t *testing.T) {
 		},
 	}))
 
-	changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
+	changed, _, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
 	require.NoError(t, err)
 	assert.False(t, changed, "incomplete bout (no outcome) must not advance the match")
 }
@@ -1145,7 +1152,7 @@ func TestMaybeAdvanceKachinuki_HikiwakeBothExhausted(t *testing.T) {
 		},
 	}))
 
-	changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
+	changed, _, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
 	require.NoError(t, err)
 	assert.False(t, changed, "BothExhausted is advisory; the engine must not finalize the pool draw")
 
@@ -1195,7 +1202,7 @@ func TestMaybeAdvanceKachinuki_SimultaneousExhaustionStaysRunning(t *testing.T) 
 		},
 	}))
 
-	changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
+	changed, _, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
 	require.NoError(t, err)
 	assert.False(t, changed, "simultaneous exhaustion is advisory; the engine must not mutate the match")
 
@@ -1245,7 +1252,7 @@ func TestMaybeAdvanceKachinuki_MatchEndedAdvisoryNoOp(t *testing.T) {
 		},
 	}))
 
-	changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
+	changed, _, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
 	require.NoError(t, err)
 	assert.False(t, changed, "MatchEnded is advisory; the engine must not mutate the match")
 
@@ -1297,7 +1304,7 @@ func TestMaybeAdvanceKachinuki_BracketNoAutoFinalize(t *testing.T) {
 		},
 	}))
 
-	changed, err := eng.MaybeAdvanceKachinuki(compID, "SF1")
+	changed, _, err := eng.MaybeAdvanceKachinuki(compID, "SF1")
 	require.NoError(t, err)
 	assert.False(t, changed, "an exhausted bracket snapshot is advisory; the engine must not finalize SF1")
 
@@ -1340,7 +1347,7 @@ func TestMaybeAdvanceKachinuki_BracketAppendsBout(t *testing.T) {
 		},
 	}))
 
-	changed, err := eng.MaybeAdvanceKachinuki(compID, "B-Final")
+	changed, _, err := eng.MaybeAdvanceKachinuki(compID, "B-Final")
 	require.NoError(t, err)
 	assert.True(t, changed, "next bout must be appended to BracketMatch.SubResults")
 
@@ -1376,7 +1383,7 @@ func TestMaybeAdvanceKachinuki_BronzeAppendsBout(t *testing.T) {
 		},
 	}))
 
-	changed, err := eng.MaybeAdvanceKachinuki(compID, "m-bronze")
+	changed, _, err := eng.MaybeAdvanceKachinuki(compID, "m-bronze")
 	require.NoError(t, err)
 	assert.True(t, changed, "next bout must be appended to ThirdPlaceMatch.SubResults")
 
@@ -2326,7 +2333,7 @@ func TestMaybeAdvanceKachinuki_NamelessBoutNoOp(t *testing.T) {
 		},
 	}))
 
-	changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
+	changed, _, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
 	require.NoError(t, err)
 	assert.False(t, changed, "a nameless bout must not advance the sequence")
 
@@ -2389,7 +2396,7 @@ func TestMaybeAdvanceKachinuki_FallbackRosterFirstAppearanceOrder(t *testing.T) 
 			},
 		}))
 
-		changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
+		changed, _, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
 		require.NoError(t, err, "iteration %d", i)
 		require.True(t, changed, "iteration %d: hikiwake must advance the sequence", i)
 
@@ -2454,7 +2461,7 @@ func TestMaybeAdvanceKachinuki_PoolSimultaneousExhaustionNoOp(t *testing.T) {
 		},
 	}))
 
-	changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
+	changed, _, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
 	require.NoError(t, err)
 	assert.False(t, changed, "the pool BothExhausted auto-draw is removed; the engine must not mutate the match")
 
@@ -2495,7 +2502,7 @@ func TestMaybeAdvanceKachinuki_BracketSimultaneousExhaustionStaysRunning(t *test
 		},
 	}))
 
-	changed, err := eng.MaybeAdvanceKachinuki(compID, "B-Final")
+	changed, _, err := eng.MaybeAdvanceKachinuki(compID, "B-Final")
 	require.NoError(t, err)
 	assert.False(t, changed, "bracket simultaneous exhaustion must leave the match running; operator resolves via daihyosen")
 

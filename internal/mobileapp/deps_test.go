@@ -82,8 +82,8 @@ func (stubScoringEngine) UpdateMatchTime(string, string, string) error {
 	return nil
 }
 
-func (stubScoringEngine) MaybeAdvanceKachinuki(string, string) (bool, error) {
-	return false, nil
+func (stubScoringEngine) MaybeAdvanceKachinuki(string, string) (bool, []state.SubMatchResult, error) {
+	return false, nil, nil
 }
 
 // stubEligibilityEngine is a controllable implementation of EligibilityEngine

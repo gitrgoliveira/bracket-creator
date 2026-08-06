@@ -117,9 +117,11 @@ type ScoringEngine interface {
 	UpdateMatchTime(compID string, matchID string, scheduledAt string) error
 	// MaybeAdvanceKachinuki runs the post-score advancement for a
 	// kachinuki ("winner-stays-on") team match. No-op for non-kachinuki
-	// competitions. Mirrors engine.Engine.MaybeAdvanceKachinuki.
-	// FR-044, T135.
-	MaybeAdvanceKachinuki(compID, matchID string) (bool, error)
+	// competitions. Returns (advanced, postLog, err): postLog is the full
+	// bout log AFTER the appended pairing when advanced is true, so the
+	// caller echoes it without re-reading the match. Mirrors
+	// engine.Engine.MaybeAdvanceKachinuki. FR-044, T135.
+	MaybeAdvanceKachinuki(compID, matchID string) (bool, []state.SubMatchResult, error)
 }
 
 // CompetitorStatusStore is the consumer-boundary view of state.Store

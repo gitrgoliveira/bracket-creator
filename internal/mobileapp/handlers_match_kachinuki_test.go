@@ -744,13 +744,40 @@ func TestRequeueBlockerAndReopenHandler(t *testing.T) {
 		assert.True(t, reopened.ReopenPending, "reason-less reopen leaves the audit obligation")
 	})
 
-	t.Run("a completed blocker is a 409 and the target stays finished", func(t *testing.T) {
+	// mp-gmcg review R1: a COMPLETED match never holds the court as "running",
+	// so it is not the blocker (a plain reopen is the correct remedy for a free
+	// court). The guard rejects it (400 "not running") rather than destructively
+	// requeuing it.
+	t.Run("a completed blocker is not running: 400 and the target stays finished", func(t *testing.T) {
 		r, store, compID := setup(t)
 		w := postRequeueAndReopen(t, r, compID, "P1-0", map[string]any{
 			"blockerCompId": compID, "blockerMatchId": "P1-0", // the (completed) target as its own blocker
 		})
-		require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+		require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+		assert.Contains(t, w.Body.String(), "is not running")
 		assert.Equal(t, state.MatchStatusCompleted, loadPoolMatch(t, store, compID, "P1-0").Status)
+	})
+
+	// mp-gmcg review R1: the blocker id is client-supplied. Naming a bystander
+	// running on a DIFFERENT court must be a 400 that wipes nothing — otherwise
+	// the requeue commits and the reopen then 409s on the court's real occupant.
+	t.Run("a blocker on a different court is a 400 and the bystander is untouched", func(t *testing.T) {
+		r, store, compID := setup(t)
+		matches, _ := store.LoadPoolMatches(compID)
+		matches = append(matches, state.MatchResult{
+			ID: "P1-2", SideA: "Taka", SideB: "Oni", Status: state.MatchStatusRunning, Court: "B",
+			IpponsA: []string{"M"}, // a partial score the wipe would clear
+		})
+		require.NoError(t, store.SavePoolMatches(compID, matches))
+
+		w := postRequeueAndReopen(t, r, compID, "P1-0", map[string]any{
+			"blockerCompId": compID, "blockerMatchId": "P1-2", // wrong court
+		})
+		require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+		bystander := loadPoolMatch(t, store, compID, "P1-2")
+		assert.Equal(t, state.MatchStatusRunning, bystander.Status, "the bystander must not be requeued")
+		assert.Equal(t, []string{"M"}, bystander.IpponsA, "the bystander's score must not be wiped")
+		assert.Equal(t, state.MatchStatusCompleted, loadPoolMatch(t, store, compID, "P1-0").Status, "target not reopened")
 	})
 
 	t.Run("an unknown blocker is a 404", func(t *testing.T) {

@@ -14,12 +14,22 @@ type CourtOccupancy struct {
 // never considered busy (unassigned matches don't block anything).
 //
 // Lock discipline: each competition's data is loaded under its own
-// per-comp READ lock (via the public Load* methods). The caller MUST NOT
-// already hold the write lock for any competition that this method
-// scans, that would deadlock the non-reentrant RWMutex. On the
-// StartMatchTx path the caller holds compID_X's write lock, so
-// skipCompID must be set to compID_X; that competition is checked by
-// the caller via StoreTx instead.
+// per-comp READ lock (loadCached takes it, exactly as the public Load*
+// methods do). The caller MUST NOT already hold the write lock for any
+// competition that this method scans, that would deadlock the
+// non-reentrant RWMutex. On the StartMatchTx path the caller holds
+// compID_X's write lock, so skipCompID must be set to compID_X; that
+// competition is checked by the caller via StoreTx instead.
+//
+// The scan reads the CACHED values without deep-copying them (the no-copy
+// technique MatchStatusByID established, mp-gmcg review R9): it needs three
+// strings per match — Status, Court, ID — and returns only two of them by
+// value, so nothing interior escapes and the cached tree is never mutated.
+// This matters because the caller runs it inside the tournament-global
+// courtCheckMu (CheckCrossCompCourtBusy), once per competition in the
+// tournament, on every finalizing score write: copyMatchResults/copyBracket
+// would clone every bout log in the tournament to read a status field, while
+// holding the mutex that serializes score writes across all courts.
 func (s *Store) RunningMatchOnCourt(court, skipCompID string) (*CourtOccupancy, error) {
 	if court == "" {
 		return nil, nil
@@ -50,28 +60,38 @@ func (s *Store) RunningMatchOnCourt(court, skipCompID string) (*CourtOccupancy, 
 	return nil, nil
 }
 
+// runningOnCourtInPoolMatches scans compID's cached pool matches (no deep
+// copy, see RunningMatchOnCourt) for a running match on court.
 func runningOnCourtInPoolMatches(s *Store, compID, court string) (*CourtOccupancy, error) {
-	matches, err := s.LoadPoolMatches(compID)
+	data, err := s.loadCached(compID, "pool-matches.csv", parsePoolMatchesFile)
 	if err != nil {
 		return nil, err
 	}
-	for _, m := range matches {
-		if m.Status == MatchStatusRunning && m.Court == court {
-			return &CourtOccupancy{CompID: compID, MatchID: m.ID}, nil
+	matches, _ := data.([]MatchResult)
+	for i := range matches {
+		if matches[i].Status == MatchStatusRunning && matches[i].Court == court {
+			return &CourtOccupancy{CompID: compID, MatchID: matches[i].ID}, nil
 		}
 	}
 	return nil, nil
 }
 
+// runningOnCourtInBracket is runningOnCourtInPoolMatches over the bracket:
+// rounds first, then the bronze (3rd-place) SIBLING of Rounds, which a
+// rounds-only loop never reaches.
 func runningOnCourtInBracket(s *Store, compID, court string) (*CourtOccupancy, error) {
-	bracket, err := s.LoadBracket(compID)
-	if err != nil || bracket == nil {
+	data, err := s.loadCached(compID, "bracket.json", parseBracketFile)
+	if err != nil {
 		return nil, err
 	}
+	bracket, _ := data.(*Bracket)
+	if bracket == nil {
+		return nil, nil
+	}
 	for _, round := range bracket.Rounds {
-		for _, bm := range round {
-			if bm.Status == MatchStatusRunning && bm.Court == court {
-				return &CourtOccupancy{CompID: compID, MatchID: bm.ID}, nil
+		for i := range round {
+			if round[i].Status == MatchStatusRunning && round[i].Court == court {
+				return &CourtOccupancy{CompID: compID, MatchID: round[i].ID}, nil
 			}
 		}
 	}

@@ -570,3 +570,85 @@ describe('kachinuki [× Remove this bout] undoes a bout added by mistake', () =>
     expect(screen.queryByTestId('kachinuki-remove-bout-button')).toBeNull();
   });
 });
+
+// mp-gmcg review: the Encho affordance targets the last SCORED bout, which
+// diverges from the current EDITABLE bout the moment Record advances the
+// encounter. Offering it after the advance let a tap write overtime onto a
+// now read-only past bout while the appended bout hung unscored.
+describe('kachinuki Encho is offered only on the current tied bout', () => {
+  // A tie needs operator input to count as played: equal ippons (1-1).
+  const tiedBout = (pos, a = 'A1', b = 'B1') => (
+    { position: pos, sideA: a, sideB: b, ipponsA: ['M'], ipponsB: ['M'] }
+  );
+
+  it('shows the Encho button when the tied bout is the current bout', async () => {
+    await renderEditor({
+      match: completedKachinukiMatch({ status: 'running', winner: null, subResults: [tiedBout(1)] }),
+    });
+    expect(screen.getByTestId('kachinuki-encho-button')).toBeTruthy();
+  });
+
+  it('hides the Encho button once Record has appended the next pairing', async () => {
+    await renderEditor({
+      match: completedKachinukiMatch({
+        status: 'running', winner: null,
+        // Bout 1 tied (last SCORED), bout 2 appended and unplayed (current).
+        subResults: [tiedBout(1), { position: 2, sideA: 'A1', sideB: 'B2', ipponsA: [], ipponsB: [] }],
+      }),
+    });
+    // The End outcome still reads "draw" (it judges the last SCORED bout), so
+    // the pre-fix gate kachinukiEnchoAvailable would still render the button;
+    // the fix additionally requires last-scored === current-editable.
+    expect(screen.queryByTestId('kachinuki-encho-button')).toBeNull();
+    // The hint must not advertise the now-hidden button either.
+    const hint = screen.queryByTestId('kachinuki-end-hint');
+    if (hint) expect(hint.textContent).not.toContain('Encho keeps');
+  });
+});
+
+// mp-gmcg review: a per-bout kachinuki encho also bumped the MATCH-level
+// enchoPeriodCount, which enchoBlock() serialised onto EVERY completed branch
+// — including the End-as-draw one. That persisted `encho` alongside decision
+// "hikiwake", a contradiction the display only swallowed because X beats (E).
+describe('kachinuki End-match omits the match-level encho on a drawn end', () => {
+  const decisiveBout = { position: 1, sideA: 'A1', sideB: 'B1', ipponsA: ['M', 'M'], ipponsB: [], winner: 'A1', encho: { periodCount: 1 } };
+
+  async function endMatch(onSubmit) {
+    // Non-reopened running match → ordinary arm/confirm (two taps), no prompt.
+    fireEvent.click(screen.getByTestId('kachinuki-end-match-button'));
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-end-match-button')); });
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    return onSubmit.mock.calls[0][0];
+  }
+
+  it('keeps the encounter (E) on a DECISIVE end where a bout went to overtime', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    await renderEditor({
+      match: completedKachinukiMatch({
+        status: 'running', winner: null,
+        encho: { periodCount: 1 }, // seeds enchoPeriodCount
+        subResults: [decisiveBout],
+      }),
+      onSubmit,
+    });
+    const patch = await endMatch(onSubmit);
+    expect(patch.decision).toBe('kachinuki-exhaustion');
+    expect(patch.encho?.periodCount).toBe(1);
+  });
+
+  it('drops the encounter (E) on a DRAWN end even when an earlier bout had overtime', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    await renderEditor({
+      match: completedKachinukiMatch({
+        status: 'running', winner: null,
+        encho: { periodCount: 1 }, // an earlier bout went to overtime
+        // Last SCORED bout is a tie → End records a drawn encounter (pool phase).
+        subResults: [decisiveBout, { position: 2, sideA: 'A2', sideB: 'B2', ipponsA: ['M'], ipponsB: ['M'] }],
+      }),
+      onSubmit,
+    });
+    const patch = await endMatch(onSubmit);
+    expect(patch.decision).toBe('hikiwake');
+    expect(patch.encho).toBeUndefined();
+  });
+});

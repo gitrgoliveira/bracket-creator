@@ -1100,12 +1100,26 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     subs.forEach((s, i) => { if (i !== daihyosenIdx && subBoutHasBeenPlayed(s)) li = i; });
     return li;
   })();
-  // Encho on the tied final kachinuki bout: bump the bout's overtime count
+  // Encho is offered ONLY while the bout End would judge (the last SCORED bout)
+  // is the bout being edited (the current visible slot). They diverge the
+  // moment Record bout is tapped on a tie: the server appends the next pairing,
+  // kachinukiCurBoutIdx moves to that fresh unplayed slot, but the End outcome
+  // still reflects the tied bout N — so without this gate the Encho button
+  // stays on screen and applyKachinukiEncho would write overtime onto bout N,
+  // now rendered READ-ONLY, while the appended bout N+1 hangs unscored
+  // (mp-gmcg review). Overtime means "the SAME pair keeps fighting THIS bout",
+  // meaningful only before the encounter has moved on.
+  const kachinukiEnchoOffered = kachinukiBoutMode
+    && kachinukiEnchoAvailable(kachinukiEndOutcome)
+    && kachinukiLastScoredIdx === kachinukiCurBoutIdx;
+  // Encho on the tied current kachinuki bout: bump the bout's overtime count
   // AND the match-level counter (decisionSuffix reads match.encho for the
   // "(E)" suffix; enchoBlock forwards it since kachinuki has no daihyosen),
-  // then clear the tied outcome so the SAME pair keeps scoring that bout.
+  // then clear the tied outcome so the SAME pair keeps scoring that bout. The
+  // guard mirrors kachinukiEnchoOffered so the keyboard/programmatic path can
+  // never target a bout the encounter has already advanced past.
   const applyKachinukiEncho = () => {
-    if (kachinukiLastScoredIdx < 0) return;
+    if (kachinukiLastScoredIdx < 0 || kachinukiLastScoredIdx !== kachinukiCurBoutIdx) return;
     setEnchoPeriodCount(cnt => cnt + 1);
     updateSub(kachinukiLastScoredIdx, prev => ({ ...prev, encho: (prev.encho || 0) + 1, draw: false, _preFusensho: undefined }));
     setEndArmed(false);
@@ -1581,7 +1595,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
           corrected: isComplete,
         },
         subResults,
-        ...enchoBlock(),
+        // The match-level (E) is omitted on a DRAWN end: the middle mark can be
+        // X (tie) OR (E) but never both — a match that went to encho cannot end
+        // tied (boutMiddle) — so persisting encho alongside decision "hikiwake"
+        // is a contradiction the display only swallows because X beats (E)
+        // (mp-gmcg review). Each bout that actually went to overtime still
+        // records its own `encho` on its SubMatchResult (entry.encho above), so
+        // no overtime is lost; only the spurious encounter-level marker is.
+        ...(endWinnerSide ? enchoBlock() : {}),
         ...correctionBlock,
       };
     }
@@ -2515,9 +2536,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               {!kachinukiEnchoAvailable(kachinukiEndOutcome) ? (
                 <span>Nothing recorded yet: score a bout before ending the match.</span>
               ) : kachinukiEndOutcome.kind === "draw" ? (
-                <span>Tied bout. End match records a drawn encounter. Record bout retires both and brings the next pair up. Encho keeps the same pair fighting when this pairing must produce a result.</span>
+                // The Encho clause is dropped once the encounter has advanced
+                // past the tied bout (kachinukiEnchoOffered false) so the hint
+                // never advertises a hidden button (mp-gmcg review).
+                <span>Tied bout. End match records a drawn encounter. Record bout retires both and brings the next pair up.{kachinukiEnchoOffered ? " Encho keeps the same pair fighting when this pairing must produce a result." : ""}</span>
               ) : (
-                <span>No draws in a knockout. Record bout brings the next fighter up. Encho keeps the same pair on this bout. Continue until there is a point.</span>
+                <span>No draws in a knockout. Record bout brings the next fighter up.{kachinukiEnchoOffered ? " Encho keeps the same pair on this bout." : ""} Continue until there is a point.</span>
               )}
             </div>
           )}
@@ -2649,10 +2673,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 {/* Encho sits BESIDE End match (critique P2): it is End's
                     alternative on a tied last bout — same pair fights on —
                     so the two must share the action row, not have Encho
-                    buried in the hint paragraph. Rendered only when a tied
-                    last bout makes it meaningful (kachinukiEnchoAvailable:
-                    any phase, operator discretion). */}
-                {kachinukiEnchoAvailable(kachinukiEndOutcome) && (
+                    buried in the hint paragraph. Rendered only when the tied
+                    bout End would judge is still the CURRENT editable bout
+                    (kachinukiEnchoOffered): once Record has advanced the
+                    encounter, overtime on the past bout is meaningless and the
+                    button would silently edit a read-only row (mp-gmcg review). */}
+                {kachinukiEnchoOffered && (
                   <button
                     type="button"
                     className="btn"

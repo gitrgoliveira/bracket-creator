@@ -232,11 +232,11 @@ func (s *Store) LoadPoolMatches(compID string) ([]MatchResult, error) {
 		return nil, err
 	}
 
-	data, err := s.loadCached(compID, "pool-matches.csv", parsePoolMatchesFile)
+	matches, err := s.cachedPoolMatches(compID)
 	if err != nil {
 		return nil, err
 	}
-	return s.copyMatchResults(data.([]MatchResult)), nil
+	return s.copyMatchResults(matches), nil
 }
 
 // LoadPoolMatchesLocked loads pool matches WITHOUT acquiring the

@@ -175,12 +175,8 @@ func TestRunningMatchOnCourt_BracketMatch(t *testing.T) {
 // no-copy rewrite of the scan (mp-gmcg review R9) — the branch it protects is
 // the one this repo has repeatedly lost to hand-copied bracket walks.
 func TestRunningMatchOnCourt_BronzeMatch(t *testing.T) {
-	dir, err := os.MkdirTemp("", "court-test-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-
-	store, err := NewStore(dir)
-	require.NoError(t, err)
+	store, cleanup := newTestStore(t)
+	defer cleanup()
 
 	require.NoError(t, store.SaveCompetition(&Competition{ID: "comp1"}))
 	require.NoError(t, store.SaveBracket("comp1", &Bracket{

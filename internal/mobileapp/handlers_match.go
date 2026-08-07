@@ -796,11 +796,15 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			var courtBusyErr *engine.CourtBusyError
 			switch {
 			case errors.Is(err, engine.ErrReopenNotCompleted),
-				errors.Is(err, engine.ErrReopenDownstreamFought),
-				errors.Is(err, engine.ErrMatchAlreadyCompleted):
-				// ErrMatchAlreadyCompleted here means the BLOCKER was already
-				// finished (it never held the court as running), so requeuing it
-				// is the wrong remedy — surface it rather than silently reopening.
+				errors.Is(err, engine.ErrReopenDownstreamFought):
+				// These name a bad TARGET (not completed, or a downstream match
+				// already fought). A completed/scheduled BLOCKER never reaches
+				// RevertMatchToQueue's ErrMatchAlreadyCompleted here:
+				// requireBlockerHoldsCourt rejects a non-running blocker as a
+				// ValidationError → 400 first, and all score writes serialize on
+				// the court lock so it cannot complete inside the window (mp-gmcg
+				// review). The revert-to-queue handler keeps that 409, where a
+				// completed match is still reachable.
 				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 			case errors.As(err, &courtBusyErr):
 				// A match OTHER than the one we requeued still holds the court.
@@ -1115,10 +1119,9 @@ type matchSnapshot struct {
 // lookupMatchSnapshot is mobileapp's READ-side traversal of the three homes a
 // match ID can have — the pool-matches CSV, the bracket rounds, and the
 // bracket's ThirdPlaceMatch — searched in that order. Lookup is by ID equality,
-// not prefix: match-ID shapes vary across formats and fixtures. Its job is
-// "handler holds an id and wants a snapshot of that match"; engine's
-// findMatchHome is the mutating in-transaction twin, and state's
-// MatchStatusByID is the no-copy status-only reader (mp-gmcg review).
+// not prefix: match-ID shapes vary across formats and fixtures. It reads a
+// snapshot for a handler holding only an id; the fail-closed audit wrapper is
+// matchSnapshotOrErr (mp-gmcg review).
 //
 // The bronze (3rd-place) match is a SIBLING of Rounds, not an element of it,
 // so a rounds-only loop never reaches it. Forgetting that branch is the bug
@@ -1221,8 +1224,8 @@ func respondCourtBusy(c *gin.Context, err *engine.CourtBusyError, action string)
 // race-free in-tx read.
 func matchStatusFromStore(store CompetitionStore, compID, matchID string) state.MatchStatus {
 	// MatchStatusByID reads the cached parse and copies nothing, unlike
-	// matchSnapshotFor (which deep-clones every pool match's SubResults and the
-	// whole bracket just to read one enum). A load error or an unknown match
+	// lookupMatchSnapshot (which deep-clones every pool match's SubResults and
+	// the whole bracket just to read one enum). A load error or an unknown match
 	// yields "" — the isCorrection caller treats a non-completed status as
 	// "not a correction", the safe default (mp-gmcg review E5).
 	status, _, err := store.MatchStatusByID(compID, matchID)

@@ -236,21 +236,13 @@ func EstimateSchedule(in EstimateInput) ScheduleEstimate {
 		perCourtList[i] = avgPerCourt
 	}
 
-	// best/avg/worst collapse for every NON-kachinuki request (individual and
-	// fixed-format), so reuse the single computed value instead of recomputing
-	// identical arithmetic — only kachinuki prices three distinct scenarios.
-	// The collapse is derived from the BOUT COUNTS themselves rather than by
-	// restating the `in.Kachinuki && bouts > 0` condition that produced them
-	// (mp-gmcg review R10): the two sites then cannot drift into disagreeing
-	// about which requests have a range, which would silently flatten best and
-	// worst onto avg for a format that doesn't exist yet.
-	bestPerCourt, worstPerCourt := avgPerCourt, avgPerCourt
-	if bestBouts != avgBouts {
-		bestPerCourt = perCourtFor(bestBouts)
-	}
-	if worstBouts != avgBouts {
-		worstPerCourt = perCourtFor(worstBouts)
-	}
+	// perCourtFor is a pure closure over `in` and `courts`, so for a
+	// non-kachinuki request (bestBouts == avgBouts == worstBouts) it returns
+	// bit-identically avgPerCourt — no guard needed to "avoid recomputation",
+	// and an unconditional call is structurally unable to disagree about which
+	// requests have a range (mp-gmcg review: R10 replaced one restated condition
+	// with two derived ones; zero is available and carries no drift hazard).
+	bestPerCourt, worstPerCourt := perCourtFor(bestBouts), perCourtFor(worstBouts)
 
 	return ScheduleEstimate{
 		TotalDurationMinutes: avgPerCourt + in.CeremonyMinutes,

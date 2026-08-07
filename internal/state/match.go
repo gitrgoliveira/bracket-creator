@@ -13,23 +13,18 @@ type CourtOccupancy struct {
 // occupant found, or nil if the court is free. An empty court string is
 // never considered busy (unassigned matches don't block anything).
 //
-// Lock discipline: each competition's data is loaded under its own
-// per-comp READ lock (loadCached takes it, exactly as the public Load*
-// methods do). The caller MUST NOT already hold the write lock for any
-// competition that this method scans, that would deadlock the
-// non-reentrant RWMutex. On the StartMatchTx path the caller holds
-// compID_X's write lock, so skipCompID must be set to compID_X; that
-// competition is checked by the caller via StoreTx instead.
+// The scan reads the CACHED values without deep-copying them (cachedPoolMatches
+// / cachedBracket, mp-gmcg review R9): it needs three strings per match —
+// Status, Court, ID — and returns only two of them by value, so nothing
+// interior escapes and the cached tree is never mutated. copyMatchResults/
+// copyBracket would clone every bout log in the tournament to read one status
+// field, and this runs once per competition on every finalizing score write.
 //
-// The scan reads the CACHED values without deep-copying them (the no-copy
-// technique MatchStatusByID established, mp-gmcg review R9): it needs three
-// strings per match — Status, Court, ID — and returns only two of them by
-// value, so nothing interior escapes and the cached tree is never mutated.
-// This matters because the caller runs it inside the tournament-global
-// courtCheckMu (CheckCrossCompCourtBusy), once per competition in the
-// tournament, on every finalizing score write: copyMatchResults/copyBracket
-// would clone every bout log in the tournament to read a status field, while
-// holding the mutex that serializes score writes across all courts.
+// Lock discipline: each competition's data is loaded under its own per-comp
+// READ lock (loadCached takes it). The caller MUST NOT already hold the write
+// lock for any competition this scans (the RWMutex is non-reentrant); on the
+// StartMatchTx path skipCompID is the caller's own write-locked competition,
+// which it checks via StoreTx instead.
 func (s *Store) RunningMatchOnCourt(court, skipCompID string) (*CourtOccupancy, error) {
 	if court == "" {
 		return nil, nil
@@ -63,11 +58,10 @@ func (s *Store) RunningMatchOnCourt(court, skipCompID string) (*CourtOccupancy, 
 // runningOnCourtInPoolMatches scans compID's cached pool matches (no deep
 // copy, see RunningMatchOnCourt) for a running match on court.
 func runningOnCourtInPoolMatches(s *Store, compID, court string) (*CourtOccupancy, error) {
-	data, err := s.loadCached(compID, "pool-matches.csv", parsePoolMatchesFile)
+	matches, err := s.cachedPoolMatches(compID)
 	if err != nil {
 		return nil, err
 	}
-	matches, _ := data.([]MatchResult)
 	for i := range matches {
 		if matches[i].Status == MatchStatusRunning && matches[i].Court == court {
 			return &CourtOccupancy{CompID: compID, MatchID: matches[i].ID}, nil
@@ -80,11 +74,10 @@ func runningOnCourtInPoolMatches(s *Store, compID, court string) (*CourtOccupanc
 // rounds first, then the bronze (3rd-place) SIBLING of Rounds, which a
 // rounds-only loop never reaches.
 func runningOnCourtInBracket(s *Store, compID, court string) (*CourtOccupancy, error) {
-	data, err := s.loadCached(compID, "bracket.json", parseBracketFile)
+	bracket, err := s.cachedBracket(compID)
 	if err != nil {
 		return nil, err
 	}
-	bracket, _ := data.(*Bracket)
 	if bracket == nil {
 		return nil, nil
 	}

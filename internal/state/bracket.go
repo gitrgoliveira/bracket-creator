@@ -9,11 +9,11 @@ func (s *Store) LoadBracket(compID string) (*Bracket, error) {
 	if err := ValidateCompetitionID(compID); err != nil {
 		return nil, err
 	}
-	data, err := s.loadCached(compID, "bracket.json", parseBracketFile)
+	bracket, err := s.cachedBracket(compID)
 	if err != nil {
 		return nil, err
 	}
-	return s.copyBracket(data.(*Bracket)), nil
+	return s.copyBracket(bracket), nil
 }
 
 func parseBracketFile(path string) (any, error) {
@@ -260,17 +260,10 @@ func (s *Store) updateBracketLocked(compID string, mutate func(*Bracket) error, 
 
 // findBracketMatchByID returns a pointer to the bracket match with the given
 // ID — searching the rounds FIRST, then the ThirdPlaceMatch sibling — or nil.
-// It is internal/state's one walk over A BRACKET, and it knows nothing about
-// pool matches: the bronze (3rd-place) match is a SIBLING of Rounds, not an
-// element, so a rounds-only loop never reaches it — the recurring
-// forgotten-branch bug this consolidation exists to prevent (mp-gmcg).
-//
-// Three other walks cover jobs this one cannot, distinguished by JOB rather
-// than by preference (mp-gmcg review): mobileapp's lookupMatchSnapshot searches
-// pool matches THEN the bracket for a reader holding only an id; engine's
-// findMatchHome is the mutating, in-transaction twin of that; MatchStatusByID
-// below re-walks both stores because it is the no-copy variant. Reach for the
-// one whose job matches, not the one whose comment sounds most definitive.
+// The bronze (3rd-place) match is a SIBLING of Rounds, not an element, so a
+// rounds-only loop never reaches it: forgetting that branch is the recurring
+// bug this shared walk exists to prevent (mp-gmcg). It walks a bracket only;
+// callers that also need pool matches wrap it (e.g. MatchStatusByID below).
 func findBracketMatchByID(b *Bracket, matchID string) *BracketMatch {
 	if b == nil {
 		return nil
@@ -295,34 +288,27 @@ func findBracketMatchByID(b *Bracket, matchID string) *BracketMatch {
 // clone that LoadPoolMatches / LoadBracket make on every call (mp-gmcg review
 // E5). Only VALUES are returned — the cached slices are never exposed or
 // mutated, so reading them without a defensive copy is safe (writers replace
-// the cached parse, never mutate it in place). Search order matches
-// lookupMatchSnapshot (mobileapp), so the status agrees with the full snapshot.
-//
-// It re-walks both stores rather than routing through that helper BECAUSE it is
-// the no-copy variant: lookupMatchSnapshot builds its snapshot from the copying
-// Load* methods, which is the entire cost this exists to avoid (and state
-// cannot import mobileapp anyway). That is the only reason to add a traversal
-// here — see findBracketMatchByID for the other walks and their jobs.
+// the cached parse, never mutate it in place). The no-copy read is the whole
+// reason this exists as a separate traversal rather than a status projection
+// over a fuller snapshot reader.
 func (s *Store) MatchStatusByID(compID, matchID string) (MatchStatus, bool, error) {
 	if err := ValidateCompetitionID(compID); err != nil {
 		return "", false, err
 	}
-	pdata, err := s.loadCached(compID, "pool-matches.csv", parsePoolMatchesFile)
+	results, err := s.cachedPoolMatches(compID)
 	if err != nil {
 		return "", false, err
 	}
-	if results, ok := pdata.([]MatchResult); ok {
-		for i := range results {
-			if results[i].ID == matchID {
-				return results[i].Status, true, nil
-			}
+	for i := range results {
+		if results[i].ID == matchID {
+			return results[i].Status, true, nil
 		}
 	}
-	bdata, err := s.loadCached(compID, "bracket.json", parseBracketFile)
+	b, err := s.cachedBracket(compID)
 	if err != nil {
 		return "", false, err
 	}
-	if b, _ := bdata.(*Bracket); b != nil {
+	if b != nil {
 		if bm := findBracketMatchByID(b, matchID); bm != nil {
 			return bm.Status, true, nil
 		}

@@ -352,11 +352,11 @@ func appendNextKachinukiBout(bm *state.BracketMatch, next state.SubMatchResult) 
 //     seen in the bout log when no lineup is saved.
 //  4. Pass to AdvanceKachinuki. When it returns Next, append the bout
 //     to SubResults and persist (status stays Running). It NEVER
-//     finalizes the parent match: completion is operator-led (mp-gmcg).
-//     A MatchEnded/BothExhausted verdict is advisory only (team sizes
-//     are unregulated, so the roster snapshot may be incomplete); the
-//     operator ends the encounter with an explicit completed score
-//     write from the score editor.
+//     finalizes the parent match: completion is operator-led (mp-gmcg,
+//     the out.Next == nil path below). A MatchEnded/BothExhausted verdict
+//     is advisory only (team sizes are unregulated, so the roster snapshot
+//     may be incomplete); the operator ends the encounter with an explicit
+//     completed score write from the score editor.
 //
 // Reports (advanced, postLog, err): `advanced` is whether SubResults or the
 // parent match was mutated (the handler uses it to decide whether to emit an
@@ -365,8 +365,7 @@ func appendNextKachinukiBout(bm *state.BracketMatch, next state.SubMatchResult) 
 // caller echo the appended pairing to the open editor without re-reading the
 // match from the store — the read this replaced was ~the 9th store read on a
 // request already doing several, once per advancing bout, live (mp-gmcg review
-// E1). The engine NEVER auto-finalizes (operator-led completion); see the
-// out.Next == nil path.
+// E1).
 //
 // FR-044, T135, T137.
 func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, []state.SubMatchResult, error) {
@@ -529,22 +528,23 @@ var (
 	ErrNoRemovableBout = errors.New("no unscored bout to remove; only an empty appended bout can be removed")
 )
 
-// loadKachinukiForReopen loads the target competition, rejects it unless it is
-// a kachinuki team competition, and trims the reason — the shared prologue of
-// ReopenKachinukiMatch and RequeueBlockerAndReopenKachinuki (mp-gmcg review R7:
-// the two used to copy-paste this LoadCompetition → IsKachinuki → same literal
-// operator sentence → TrimSpace block verbatim). It touches no court state, so
-// callers run it OUTSIDE WithCourtExclusivityLock: a bad-input rejection need
-// not serialize on the tournament-global lock.
-func (e *Engine) loadKachinukiForReopen(compID, reason string) (*state.Competition, string, error) {
+// loadKachinukiComp loads the target competition and rejects it unless it is a
+// kachinuki team competition — the shared prologue of ReopenKachinukiMatch and
+// RequeueBlockerAndReopenKachinuki (mp-gmcg review R7: the two used to copy-paste
+// this LoadCompetition → IsKachinuki → same literal operator sentence verbatim).
+// It touches no court state, so callers run it OUTSIDE WithCourtExclusivityLock:
+// a bad-input rejection need not serialize on the tournament-global lock. The
+// reason is NOT handled here — reopenKachinukiUnderCourtLock, the single shared
+// consumer, trims it (mp-gmcg review).
+func (e *Engine) loadKachinukiComp(compID string) (*state.Competition, error) {
 	comp, err := e.store.LoadCompetition(compID)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	if !comp.IsKachinuki() {
-		return nil, "", validationErrorf("reopen is only supported for kachinuki team matches; correct other results via the score editor (correctionReason)")
+		return nil, validationErrorf("reopen is only supported for kachinuki team matches; correct other results via the score editor (correctionReason)")
 	}
-	return comp, strings.TrimSpace(reason), nil
+	return comp, nil
 }
 
 // ReopenKachinukiMatch is the sanctioned "Reopen match" path for a
@@ -613,7 +613,7 @@ func (e *Engine) loadKachinukiForReopen(compID, reason string) (*state.Competiti
 // "Winner of rX-mY" placeholder (the exact string propagateBracketWinner
 // re-resolves on the next completion) and the bronze side to empty.
 func (e *Engine) ReopenKachinukiMatch(compID, matchID, reason string) error {
-	comp, reason, err := e.loadKachinukiForReopen(compID, reason)
+	comp, err := e.loadKachinukiComp(compID)
 	if err != nil {
 		return err
 	}
@@ -640,8 +640,11 @@ func (e *Engine) ReopenKachinukiMatch(compID, matchID, reason string) error {
 // (RequeueBlockerAndReopenKachinuki) with no window for another match to grab
 // the freed court. It MUST NOT take the court lock itself (the mutex is
 // non-reentrant). comp is the kachinuki-validated target competition the caller
-// already loaded; reason is already trimmed.
+// already loaded. This is the SINGLE shared consumer of `reason`, so it trims
+// it here (mp-gmcg review): a padded reason can never reach reopenPending /
+// CorrectionReason regardless of which entry point called in.
 func (e *Engine) reopenKachinukiUnderCourtLock(compID string, comp *state.Competition, matchID, reason string) error {
+	reason = strings.TrimSpace(reason)
 	// Cross-competition court gate, deliberately OUTSIDE the transaction (see
 	// the doc comment). Also surfaces the *NotFoundError for an unknown match
 	// before any per-comp lock is taken.
@@ -747,7 +750,7 @@ func (e *Engine) reopenKachinukiUnderCourtLock(compID string, comp *state.Compet
 // fail on the court's real occupant, leaving the wipe committed but invisible
 // behind a "court busy" response.
 func (e *Engine) RequeueBlockerAndReopenKachinuki(targetComp, targetMatch, blockerComp, blockerMatch, reason string) error {
-	comp, reason, err := e.loadKachinukiForReopen(targetComp, reason)
+	comp, err := e.loadKachinukiComp(targetComp)
 	if err != nil {
 		return err
 	}
@@ -768,9 +771,16 @@ func (e *Engine) RequeueBlockerAndReopenKachinuki(targetComp, targetMatch, block
 // touching the blocker — when the target has no court, when the blocker sits on
 // a different court (the bystander-wipe case), or when the blocker is not
 // running (a completed/scheduled match is not what is wedging the court; retry
-// the plain reopen). Reads are value-only via the cached snapshot: the caller
-// holds only the court lock, not any per-comp write lock, so these Load*/
-// MatchStatusByID reads match CheckCrossCompCourtBusy's pre-tx discipline.
+// the plain reopen). Each check returns its OWN operator-facing message, which
+// is why this validates the client's claim directly rather than folding into a
+// single store.RunningMatchOnCourt occupant lookup (that would name the true
+// occupant but collapse the three messages into one).
+//
+// The two lookupMatchCourt reads go through the COPYING LoadPoolMatches/
+// LoadBracket; MatchStatusByID is the no-copy one. The path is operator-
+// initiated and rare, so the extra copies don't matter, but the doc should not
+// claim they aren't made. The caller holds only the court lock, not a per-comp
+// write lock, so these reads match CheckCrossCompCourtBusy's pre-tx discipline.
 func (e *Engine) requireBlockerHoldsCourt(targetComp, targetMatch, blockerComp, blockerMatch string) error {
 	targetCourt, err := e.lookupMatchCourt(targetComp, targetMatch)
 	if err != nil {
@@ -791,6 +801,11 @@ func (e *Engine) requireBlockerHoldsCourt(targetComp, targetMatch, blockerComp, 
 		return err
 	}
 	if !found {
+		// lookupMatchCourt above already 404s an unknown id, so on the normal
+		// path found is true here. This still fires if blockerComp is DELETED
+		// between the two cached reads (DeleteCompetition takes the per-comp
+		// lock, not the court lock we hold) — a clearer message than the
+		// "not running (status \"\")" the check below would otherwise give.
 		return notFoundErrorf("blocker match %s not found in competition %s", blockerMatch, blockerComp)
 	}
 	if status != state.MatchStatusRunning {
@@ -928,14 +943,13 @@ type matchHome struct {
 
 // findMatchHome walks the three homes a match ID can have — pool matches, then
 // bracket rounds, then the bronze (3rd-place) match — in that FIXED order, and
-// invokes visit for the owning home. Its job is the MUTATING, in-transaction
-// one — it is the write-side twin of mobileapp's read-only lookupMatchSnapshot
-// — and it is the engine's only copy of that walk, so a new caller cannot drop
-// the bronze branch or the pool-load-error swallow by hand-copying the ~60-line
-// skeleton (mp-gmcg review F6). found=false with a nil error means the ID is in
-// neither store. A pool LOAD error is swallowed and the walk still tries the
-// bracket (matching the open-coded copies this replaced); a bracket load error
-// is returned. visit's own error propagates.
+// invokes visit for the owning home. It is the MUTATING, in-transaction walk,
+// and the engine's only copy of it, so a new caller cannot drop the bronze
+// branch or the pool-load-error swallow by hand-copying the ~60-line skeleton
+// (mp-gmcg review F6). found=false with a nil error means the ID is in neither
+// store. A pool LOAD error is swallowed and the walk still tries the bracket
+// (matching the open-coded copies this replaced); a bracket load error is
+// returned. visit's own error propagates.
 func findMatchHome(tx state.StoreTx, compID, matchID string, visit func(matchHome) error) (bool, error) {
 	poolMatches, lerr := tx.LoadPoolMatches(compID)
 	if lerr == nil {

@@ -155,6 +155,19 @@ func validateURLHasHost(field, val string) error {
 	return nil
 }
 
+// subBoutNeedsNumberedEnchoAllowance reports whether sr is a NUMBERED bout
+// (not the position -1 daihyosen) carrying an encho marker — the exact shape
+// rejected UNLESS the kachinuki numbered-bout allowance applies. THE one
+// predicate shared by validateSubBout's gate (which enforces it) and
+// anyNumberedBoutHasEncho (which pre-scans a payload to decide whether the
+// competition even needs loading for the allowance): deriving both from one
+// place means a future widening of the gate — hantei on a numbered bout is the
+// flagged next candidate — is added HERE, so the pre-scan cannot silently stop
+// matching and evaporate the exception (mp-gmcg review).
+func subBoutNeedsNumberedEnchoAllowance(sr *state.SubMatchResult) bool {
+	return sr.Position != state.DaihyosenSubPosition && sr.Encho.On()
+}
+
 // validateSubBout enforces FIK sub-bout invariants on a single SubMatchResult.
 // Both encho and hantei are valid ONLY for the daihyosen representative bout
 // (Position == -1): regular numbered bouts have fixed regulation time and are
@@ -174,19 +187,6 @@ func validateURLHasHost(field, val string) error {
 // top-level DecidedByHantei block in ScoreRequest.Validate. Keep them in sync:
 // the sub-bout variant adds the Position guards and omits the top-level-only
 // Status/DecisionBy checks (SubMatchResult has no such fields).
-// subBoutNeedsNumberedEnchoAllowance reports whether sr is a NUMBERED bout
-// (not the position -1 daihyosen) carrying an encho marker — the exact shape
-// rejected UNLESS the kachinuki numbered-bout allowance applies. THE one
-// predicate shared by validateSubBout's gate (which enforces it) and
-// anyNumberedBoutHasEncho (which pre-scans a payload to decide whether the
-// competition even needs loading for the allowance): deriving both from one
-// place means a future widening of the gate — hantei on a numbered bout is the
-// flagged next candidate — is added HERE, so the pre-scan cannot silently stop
-// matching and evaporate the exception (mp-gmcg review).
-func subBoutNeedsNumberedEnchoAllowance(sr *state.SubMatchResult) bool {
-	return sr.Position != state.DaihyosenSubPosition && sr.Encho.On()
-}
-
 func validateSubBout(prefix string, sr *state.SubMatchResult, allowNumberedEncho bool) error {
 	// Encho period counts are bounded two ways. A negative count is never
 	// valid on any bout (it would make Encho.On() read false below and be

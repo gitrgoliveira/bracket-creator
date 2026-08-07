@@ -703,16 +703,19 @@ func (e *Engine) checkCourtExclusivityTx(tx state.StoreTx, compID, matchID strin
 // WithTransaction. The cross-competition check is performed by
 // CheckCrossCompCourtBusy before WithTransaction is entered.
 //
-// The court is a PARAMETER rather than looked up here so that callers already
-// holding it (the kachinuki reopen path, see ReopenKachinukiMatch) skip a
-// redundant in-tx lookupMatchCourtTx walk: tx loads bypass the file cache, so
-// they are real disk reads taken under the write lock.
+// The court is a PARAMETER rather than looked up here because the callers that
+// need this gate mostly already hold it, and an in-tx lookupMatchCourtTx walk
+// is not free: tx loads bypass the file cache, so they are real disk reads
+// taken under the write lock. checkCourtExclusivityTx is the wrapper for the
+// one caller that knows only the match id and must do that lookup.
 //
-// The reopen path needs this gate for a specific reason: reopening flips the
-// match back to running, so a court that already has a running match would end
-// up with TWO, wedging the exclusivity check for BOTH (the re-End of the
-// reopened match and every further score write to the genuinely live bout).
-// See ReopenKachinukiMatch's COURT GATE note.
+// The reopen path reaches the gate through courtFreeInCompTxWith (it also has
+// the loaded slices to hand), not through this nil/nil wrapper, and it needs
+// the gate for a specific reason: reopening flips the match back to running, so
+// a court that already has a running match would end up with TWO, wedging the
+// exclusivity check for BOTH (the re-End of the reopened match and every
+// further score write to the genuinely live bout). See ReopenKachinukiMatch's
+// COURT GATE note.
 func courtFreeInCompTx(tx state.StoreTx, compID, matchID, court string) error {
 	return courtFreeInCompTxWith(tx, compID, matchID, court, nil, nil)
 }

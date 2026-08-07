@@ -358,20 +358,17 @@ func appendNextKachinukiBout(bm *state.BracketMatch, next state.SubMatchResult) 
 //     operator ends the encounter with an explicit completed score
 //     write from the score editor.
 //
-// Returns (changed, error). `changed` indicates whether SubResults or
-// the parent match was mutated, handler uses it to decide whether to
-// emit an additional match-updated SSE event with the freshly-derived
-// bout list.
+// Reports (advanced, postLog, err): `advanced` is whether SubResults or the
+// parent match was mutated (the handler uses it to decide whether to emit an
+// extra match-updated SSE event), and `postLog` is the FULL bout log AFTER the
+// append when advanced is true (nil otherwise). Returning the log lets the
+// caller echo the appended pairing to the open editor without re-reading the
+// match from the store — the read this replaced was ~the 9th store read on a
+// request already doing several, once per advancing bout, live (mp-gmcg review
+// E1). The engine NEVER auto-finalizes (operator-led completion); see the
+// out.Next == nil path.
 //
 // FR-044, T135, T137.
-// MaybeAdvanceKachinuki appends the next winner-stays-on pairing when the last
-// bout resolved, and reports (advanced, postLog, err): postLog is the FULL
-// bout log AFTER the append when advanced is true (nil otherwise). Returning
-// the log lets the caller echo the appended pairing to the open editor without
-// re-reading the match from the store — the read this replaced was ~the 9th
-// store read on a request already doing several, once per advancing bout, live
-// (mp-gmcg review E1). The engine NEVER auto-finalizes (operator-led
-// completion); see the out.Next == nil path.
 func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, []state.SubMatchResult, error) {
 	comp, err := e.store.LoadCompetition(compID)
 	if err != nil {

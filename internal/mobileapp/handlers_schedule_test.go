@@ -93,6 +93,28 @@ func TestScheduleEstimateEndpoint(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
 
+	// mp-gmcg review: a teamSize PAST int64 range must 400, not silently fall
+	// back to 0 and answer 200 with an individual-formula estimate (what
+	// queryIntDefault did — strconv.Atoi errors on a 20-digit value → default).
+	// The OpenAPI contract promises out-of-range → 400.
+	t.Run("teamSize beyond int64 range returns 400 (not a silent 200)", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET",
+			"/api/schedule/estimate?matchDuration=3&multiplier=1.5&courts=1&teamSize=99999999999999999999",
+			nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("garbage boutsPerTeamMatch returns 400", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET",
+			"/api/schedule/estimate?matchDuration=3&multiplier=1.5&courts=1&teamSize=5&boutsPerTeamMatch=lots",
+			nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
 	t.Run("teamSize at the MaxTeamSize boundary is accepted", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("GET",

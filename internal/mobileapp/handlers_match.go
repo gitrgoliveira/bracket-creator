@@ -796,15 +796,19 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			var courtBusyErr *engine.CourtBusyError
 			switch {
 			case errors.Is(err, engine.ErrReopenNotCompleted),
-				errors.Is(err, engine.ErrReopenDownstreamFought):
-				// These name a bad TARGET (not completed, or a downstream match
-				// already fought). A completed/scheduled BLOCKER never reaches
-				// RevertMatchToQueue's ErrMatchAlreadyCompleted here:
-				// requireBlockerHoldsCourt rejects a non-running blocker as a
-				// ValidationError → 400 first, and all score writes serialize on
-				// the court lock so it cannot complete inside the window (mp-gmcg
-				// review). The revert-to-queue handler keeps that 409, where a
-				// completed match is still reachable.
+				errors.Is(err, engine.ErrReopenDownstreamFought),
+				errors.Is(err, engine.ErrMatchAlreadyCompleted):
+				// ErrReopenNotCompleted / ErrReopenDownstreamFought name a bad
+				// TARGET. ErrMatchAlreadyCompleted means the BLOCKER finished
+				// between requireBlockerHoldsCourt's read and RevertMatchToQueue:
+				// requireBlockerHoldsCourt does NOT hold the court lock, and
+				// neither do the completion paths that can win that race — POST
+				// /decision (kiken/fusenpai) and POST /bulk-score both complete a
+				// match under the per-comp lock alone (mp-gmcg review). Its cached
+				// pre-tx status read widens the window further (mtime-keyed). A 409
+				// with the sentinel's "correct via the score editor" guidance is
+				// the right answer; without this case it would fall through to a
+				// 500 (the sentinel is not a ValidationError/NotFound/CourtBusy).
 				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 			case errors.As(err, &courtBusyErr):
 				// A match OTHER than the one we requeued still holds the court.
@@ -1658,6 +1662,17 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		// runs there and its eligibility/simultaneity checks are preserved.
 		isCorrection := result.Status == state.MatchStatusCompleted &&
 			matchStatusFromStore(store, id, mid) == state.MatchStatusCompleted
+
+		// Only the cross-comp gate below keys on this pre-tx isCorrection; the
+		// eligibility/simultaneity gate (StartMatchTx) re-derives it from the
+		// race-free in-tx status (mp-gmcg review). The mtime-keyed stale read
+		// that motivated that move is benign HERE for a different reason: this
+		// gate only ever skips for a write whose result.Status is completed, and
+		// a COMPLETING write never leaves the court running-occupied — so a
+		// misclassified first finalization skips a cross-comp court check that
+		// its own effect would have made a no-op anyway. The lasting
+		// two-running-matches-on-one-court state the gate exists to prevent needs
+		// a write that STAYS running, which is never a correction.
 
 		// FR-035: WithCourtExclusivityLock serializes the cross-competition
 		// court-busy check + per-competition write under a tournament-level

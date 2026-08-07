@@ -1,6 +1,7 @@
 package mobileapp
 
 import (
+	"fmt"
 	"math"
 	"net/http"
 	"strconv"
@@ -93,17 +94,18 @@ func scheduleEstimateHandler(c *gin.Context) {
 
 	// teamSize / boutsPerTeamMatch are load-bearing on this branch (they set
 	// the bout count that scales the whole estimate), so — unlike the truly
-	// optional buffer/ceremony scalars — they get an explicit 1..MaxTeamSize
-	// 400 rather than a silent fallback: an unbounded value overflows the bout
-	// math into a negative or inverted-range duration (mp-gmcg review, mirrors
-	// the courts guard above). 0 stays legal (the individual-match default).
-	teamSize := queryIntDefault(c, "teamSize", 0)
-	boutsPerTeamMatch := queryIntDefault(c, "boutsPerTeamMatch", 0)
-	if teamSize < 0 || teamSize > engine.MaxTeamSize ||
-		boutsPerTeamMatch < 0 || boutsPerTeamMatch > engine.MaxTeamSize {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "teamSize and boutsPerTeamMatch must be between 0 and 100",
-		})
+	// optional buffer/ceremony scalars — they get STRICT parsing with an
+	// explicit 0..MaxTeamSize 400. queryIntDefault would map a parse failure
+	// (garbage, OR a value past int64 range) to the default 0 and answer 200
+	// with an INDIVIDUAL-formula estimate for what the client asked as a team
+	// question — the exact silent fallthrough the spec's "out of range → 400"
+	// contract forbids (mp-gmcg review). 0 stays legal (individual-match default).
+	teamSize, ok := parseOptionalBoundedInt(c, "teamSize", engine.MaxTeamSize)
+	if !ok {
+		return
+	}
+	boutsPerTeamMatch, ok := parseOptionalBoundedInt(c, "boutsPerTeamMatch", engine.MaxTeamSize)
+	if !ok {
 		return
 	}
 
@@ -128,6 +130,27 @@ func scheduleEstimateHandler(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, engine.EstimateSchedule(in))
+}
+
+// parseOptionalBoundedInt reads an OPTIONAL query int constrained to [0, max].
+// An absent/empty value returns (0, true). A present value that is unparsable
+// (garbage OR past int64 range, both of which strconv.Atoi errors on) or out of
+// range writes a 400 and returns ok=false, so the caller stops. This is the
+// strict counterpart to queryIntDefault, for params whose silent fallback to
+// the default would be a WRONG answer rather than a harmless one — the OpenAPI
+// contract promises a 400 for out-of-range here (mp-gmcg review). The bound is a
+// parameter so the message never hardcodes a number that could drift.
+func parseOptionalBoundedInt(c *gin.Context, key string, max int) (int, bool) {
+	raw := c.Query(key)
+	if raw == "" {
+		return 0, true
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil || v < 0 || v > max {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("%s must be between 0 and %d", key, max)})
+		return 0, false
+	}
+	return v, true
 }
 
 // queryIntDefault returns the parsed int value of c.Query(key), or

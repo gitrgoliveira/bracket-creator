@@ -26,6 +26,18 @@ const MaxCourts = 26
 // callers) and 400'd by the handler (matching the MaxCourts precedent).
 const MaxTeamSize = 100
 
+// MaxScheduleCount and MaxSchedulePct are the same class of defensive bound for
+// the OTHER scalars that scale the estimate — numMatches and ceremonyMinutes
+// (counts/minutes) and the slowest-court buffer (a percentage). Without them a
+// hostile query-string overflows the same duration math MaxTeamSize guards
+// (int(math.Round(perCourt)) or the ceremony addition) on this public endpoint
+// (mp-gmcg review). Both are far beyond any real tournament — a million matches
+// or minutes, a 100 000 % buffer — while keeping the arithmetic exact.
+const (
+	MaxScheduleCount = 1_000_000
+	MaxSchedulePct   = 100_000
+)
+
 // ScheduleEstimate is the wire response for GET /api/schedule/estimate
 // and the return type of EstimateSchedule. All durations are in minutes,
 // rounded to the nearest integer.
@@ -218,14 +230,23 @@ func EstimateSchedule(in EstimateInput) ScheduleEstimate {
 		courts = MaxCourts
 	}
 
+	// numMatches, the buffer %, and the ceremony block scale the same duration
+	// math as the bout count, so they get the same defensive clamp — otherwise
+	// a hostile numMatches/ceremonyMinutes overflows int(math.Round(...)) / the
+	// ceremony addition, and a hostile buffer blows up the multiply (mp-gmcg
+	// review). See MaxScheduleCount / MaxSchedulePct.
+	numMatches := clampNonNeg(in.NumMatches, MaxScheduleCount)
+	bufferPct := clampNonNeg(in.SlowestCourtBufferPct, MaxSchedulePct)
+	ceremonyMinutes := clampNonNeg(in.CeremonyMinutes, MaxScheduleCount)
+
 	// One scenario = total clock time across all matches, distributed
 	// evenly across courts, with the slowest-court buffer applied.
 	perCourtFor := func(boutsF float64) int {
 		perMatchMin := perMatchElapsedBouts(in.MatchDurationClockMinutes, in.Multiplier, boutsF)
-		perCourt := perMatchMin * float64(in.NumMatches) / float64(courts)
+		perCourt := perMatchMin * float64(numMatches) / float64(courts)
 		// Slowest-court buffer (10–15% typical). Skipped when 0.
-		if in.SlowestCourtBufferPct > 0 {
-			perCourt *= 1.0 + float64(in.SlowestCourtBufferPct)/100.0
+		if bufferPct > 0 {
+			perCourt *= 1.0 + float64(bufferPct)/100.0
 		}
 		return int(math.Round(perCourt))
 	}
@@ -245,11 +266,11 @@ func EstimateSchedule(in EstimateInput) ScheduleEstimate {
 	bestPerCourt, worstPerCourt := perCourtFor(bestBouts), perCourtFor(worstBouts)
 
 	return ScheduleEstimate{
-		TotalDurationMinutes: avgPerCourt + in.CeremonyMinutes,
-		BestCaseMinutes:      bestPerCourt + in.CeremonyMinutes,
-		WorstCaseMinutes:     worstPerCourt + in.CeremonyMinutes,
+		TotalDurationMinutes: avgPerCourt + ceremonyMinutes,
+		BestCaseMinutes:      bestPerCourt + ceremonyMinutes,
+		WorstCaseMinutes:     worstPerCourt + ceremonyMinutes,
 		PerCourtMinutes:      perCourtList,
-		CeremonyMinutes:      in.CeremonyMinutes,
+		CeremonyMinutes:      ceremonyMinutes,
 	}
 }
 

@@ -400,8 +400,10 @@ func TestEstimateSchedule_ClampsHostileBoutDrivers(t *testing.T) {
 		name string
 		in   EstimateInput
 	}{
-		{"huge teamSize", EstimateInput{MatchDurationClockMinutes: 3, Multiplier: 1.5, NumMatches: 1, NumCourts: 1, TeamSize: 1<<62 + 1, Kachinuki: true}},
-		{"huge boutsPerTeamMatch", EstimateInput{MatchDurationClockMinutes: 3, Multiplier: 1.5, NumMatches: 1, NumCourts: 1, TeamSize: 5, BoutsPerTeamMatch: 1 << 40}},
+		// math.MaxInt (not a fixed 1<<62) so the test compiles on 32-bit
+		// GOARCHs where int is 32-bit (mp-gmcg review).
+		{"huge teamSize", EstimateInput{MatchDurationClockMinutes: 3, Multiplier: 1.5, NumMatches: 1, NumCourts: 1, TeamSize: math.MaxInt, Kachinuki: true}},
+		{"huge boutsPerTeamMatch", EstimateInput{MatchDurationClockMinutes: 3, Multiplier: 1.5, NumMatches: 1, NumCourts: 1, TeamSize: 5, BoutsPerTeamMatch: math.MaxInt}},
 		{"negative teamSize", EstimateInput{MatchDurationClockMinutes: 3, Multiplier: 1.5, NumMatches: 1, NumCourts: 1, TeamSize: -5}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -422,6 +424,34 @@ func TestEstimateSchedule_ClampsHostileBoutDrivers(t *testing.T) {
 				capped.BoutsPerTeamMatch = MaxTeamSize
 			}
 			assert.Equal(t, EstimateSchedule(capped).WorstCaseMinutes, got.WorstCaseMinutes, "clamps to the MaxTeamSize equivalent")
+		})
+	}
+}
+
+// TestEstimateSchedule_ClampsHostileScalars pins mp-gmcg review: numMatches, the
+// buffer %, and ceremonyMinutes scale the same duration math as the bout count,
+// so a hostile value must not overflow int(math.Round(perCourt)) / the ceremony
+// addition into a negative total. All are clamped to MaxScheduleCount /
+// MaxSchedulePct.
+func TestEstimateSchedule_ClampsHostileScalars(t *testing.T) {
+	base := EstimateInput{MatchDurationClockMinutes: 3, Multiplier: 1.5, NumMatches: 1, NumCourts: 1}
+	for _, tc := range []struct {
+		name string
+		in   EstimateInput
+	}{
+		{"huge numMatches", func() EstimateInput { in := base; in.NumMatches = math.MaxInt; return in }()},
+		{"huge ceremonyMinutes", func() EstimateInput { in := base; in.CeremonyMinutes = math.MaxInt; return in }()},
+		{"huge buffer", func() EstimateInput { in := base; in.SlowestCourtBufferPct = math.MaxInt; return in }()},
+		{"negative numMatches", func() EstimateInput { in := base; in.NumMatches = -1; return in }()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := EstimateSchedule(tc.in)
+			assert.GreaterOrEqual(t, got.TotalDurationMinutes, 0, "no negative total from overflow")
+			assert.GreaterOrEqual(t, got.BestCaseMinutes, 0, "no negative best from overflow")
+			assert.GreaterOrEqual(t, got.WorstCaseMinutes, 0, "no negative worst from overflow")
+			for _, pc := range got.PerCourtMinutes {
+				assert.GreaterOrEqual(t, pc, 0, "no negative per-court minutes from overflow")
+			}
 		})
 	}
 }

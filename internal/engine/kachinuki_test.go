@@ -2211,6 +2211,51 @@ func TestRequeueBlockerAndReopenKachinuki(t *testing.T) {
 		assert.Equal(t, state.MatchStatusCompleted, byID["P1-0"].Status, "the target must NOT reopen when the guard rejects")
 	})
 
+	// mp-gmcg review U2: the target's RESULT preconditions (completed +
+	// downstream-not-fought) are checked read-only BEFORE the destructive revert,
+	// so a target that cannot be reopened — its winner already fed a fought
+	// knockout — does not cost the blocker its live on-court score. Without the
+	// pre-check the revert committed first and the reopen then failed, wiping a
+	// running match for nothing.
+	t.Run("a target with a fought downstream is rejected WITHOUT wiping the blocker", func(t *testing.T) {
+		eng, store, _ := setupKachinukiComp(t, "rq-downstream", 3)
+		require.NoError(t, store.SaveBracket("rq-downstream", &state.Bracket{
+			Rounds: [][]state.BracketMatch{
+				{
+					{ID: "SF0", SideA: "RedTeam", SideB: "WhiteTeam", Status: state.MatchStatusCompleted,
+						Winner: "RedTeam", Decision: "kachinuki-exhaustion", Court: "A"},
+					{ID: "SF1", SideA: "Kuma", SideB: "Washi", Status: state.MatchStatusCompleted, Winner: "Kuma"},
+				},
+				{
+					// The final is already being fought — SF0's winner fed it.
+					{ID: "F0", SideA: "RedTeam", SideB: "Kuma", Status: state.MatchStatusRunning,
+						SubResults: []state.SubMatchResult{{Position: 1, SideA: "R-1", SideB: "K-1"}}},
+				},
+			},
+		}))
+		// A blocker running on SF0's court (A), in another competition, with a
+		// live score the destructive revert would clear.
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: "rq-ds-blocker", TeamSize: 3, TeamMatchType: state.TeamMatchTypeKachinuki,
+		}))
+		blocker := runningOnCourt("B1-0", "A")
+		blocker.IpponsA = []string{"M"}
+		blocker.SubResults = []state.SubMatchResult{{Position: 1, SideA: "K-1", SideB: "Wa-1", IpponsA: []string{"M"}}}
+		require.NoError(t, store.SavePoolMatches("rq-ds-blocker", []state.MatchResult{blocker}))
+
+		err := eng.RequeueBlockerAndReopenKachinuki("rq-downstream", "SF0", "rq-ds-blocker", "B1-0", "")
+		assert.ErrorIs(t, err, ErrReopenDownstreamFought)
+
+		b := loadPoolMatchByID(t, store, "rq-ds-blocker", "B1-0")
+		assert.Equal(t, state.MatchStatusRunning, b.Status, "blocker must NOT be requeued when the target can't reopen")
+		assert.Equal(t, []string{"M"}, b.IpponsA, "blocker's score must NOT be wiped")
+		assert.Len(t, b.SubResults, 1, "blocker's bout log must NOT be wiped")
+
+		bracket, lerr := store.LoadBracket("rq-downstream")
+		require.NoError(t, lerr)
+		assert.Equal(t, state.MatchStatusCompleted, bracket.Rounds[0][0].Status, "target stays completed")
+	})
+
 	// A COMPLETED match never holds the court as "running", so it is not the
 	// blocker (a plain reopen is the correct remedy); R1's guard rejects it
 	// rather than destructively requeuing it.

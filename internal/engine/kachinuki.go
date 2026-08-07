@@ -758,11 +758,68 @@ func (e *Engine) RequeueBlockerAndReopenKachinuki(targetComp, targetMatch, block
 		if verr := e.requireBlockerHoldsCourt(targetComp, targetMatch, blockerComp, blockerMatch); verr != nil {
 			return verr
 		}
+		// Pre-check the TARGET's RESULT preconditions (completed +
+		// downstream-not-fought) read-only BEFORE the destructive revert, so a
+		// target that cannot be reopened — because its winner already fed a
+		// fought knockout — does not cost the blocker its live on-court score
+		// (mp-gmcg review). The court half is deliberately NOT checked here: the
+		// revert is what frees the court, so the reopen's own court gate is the
+		// authoritative one. We hold the court lock, and every /score write takes
+		// it too, so the target's downstream state is stable across the
+		// pre-check → revert → reopen sequence; the reopen re-checks regardless.
+		if perr := e.checkTargetReopenable(targetComp, comp, targetMatch); perr != nil {
+			return perr
+		}
 		if rerr := e.RevertMatchToQueue(blockerComp, blockerMatch); rerr != nil {
 			return rerr
 		}
 		return e.reopenKachinukiUnderCourtLock(targetComp, comp, targetMatch, reason)
 	})
+}
+
+// checkTargetReopenable runs the read-only reopen RESULT preconditions for the
+// requeue-and-reopen path (mp-gmcg review): it opens a target-competition tx and
+// reports whether the match is completed and its winner has not fed a fought
+// downstream, WITHOUT the court check (the caller is about to free the court)
+// and WITHOUT any mutation. It shares its leaf predicates —
+// checkPoolReopenDownstreamTx and downstreamFoughtForRound — with
+// reopenKachinukiUnderCourtLock's guard, so the pre-check cannot pass a target
+// the reopen will then reject.
+func (e *Engine) checkTargetReopenable(compID string, comp *state.Competition, matchID string) error {
+	var checkErr error
+	txErr := e.store.WithTransaction(compID, func(tx state.StoreTx) error {
+		found, ferr := findMatchHome(tx, compID, matchID, func(h matchHome) error {
+			if h.Pool != nil {
+				if h.Pool.Status != state.MatchStatusCompleted {
+					checkErr = ErrReopenNotCompleted
+					return nil
+				}
+				checkErr = e.checkPoolReopenDownstreamTx(tx, compID, comp, matchID)
+				return nil
+			}
+			if h.Bracket.Status != state.MatchStatusCompleted {
+				checkErr = ErrReopenNotCompleted
+				return nil
+			}
+			// Bronze is a sibling of Rounds with no downstream, so it can never
+			// be downstream-fought (matches reopenKachinukiUnderCourtLock's !Bronze).
+			if !h.Bronze && downstreamFoughtForRound(h.BracketRoot, h.RIdx, h.MIdx) {
+				checkErr = ErrReopenDownstreamFought
+			}
+			return nil
+		})
+		if ferr != nil {
+			return ferr
+		}
+		if !found {
+			checkErr = notFoundErrorf("match %s not found", matchID)
+		}
+		return nil
+	})
+	if txErr != nil {
+		return txErr
+	}
+	return checkErr
 }
 
 // requireBlockerHoldsCourt verifies the client-named blocker is a RUNNING match
@@ -1130,20 +1187,39 @@ func reopenPending(reason string) bool {
 // downstream match that has started, recorded bouts, or completed (which
 // includes a bye auto-resolution off this match's winner) rejects the
 // reopen with ErrReopenDownstreamFought.
+// downstreamFoughtForRound reports whether the match at bracket round rIdx / slot
+// mIdx has a downstream (next-round match, or the bronze it feeds) that is
+// already started or scored — the read-only predicate that makes reopening it
+// unsafe. Extracted so the destructive retractPropagatedWinner and the
+// read-only reopen pre-check (checkKachinukiReopenable) key on ONE definition
+// and cannot drift into disagreeing about what "downstream fought" means
+// (mp-gmcg review): drift there wipes a blocker's live score for a reopen that
+// then fails.
+func downstreamFoughtForRound(bracket *state.Bracket, rIdx, mIdx int) bool {
+	if bracket.ThirdPlaceMatch != nil && rIdx == len(bracket.Rounds)-2 {
+		if bracketMatchStartedOrScored(bracket.ThirdPlaceMatch) {
+			return true
+		}
+	}
+	if rIdx+1 < len(bracket.Rounds) {
+		if bracketMatchStartedOrScored(&bracket.Rounds[rIdx+1][mIdx/2]) {
+			return true
+		}
+	}
+	return false
+}
+
 func retractPropagatedWinner(bracket *state.Bracket, rIdx, mIdx int) error {
+	if downstreamFoughtForRound(bracket, rIdx, mIdx) {
+		return ErrReopenDownstreamFought
+	}
 	var bronze *state.BracketMatch
 	if bracket.ThirdPlaceMatch != nil && rIdx == len(bracket.Rounds)-2 {
 		bronze = bracket.ThirdPlaceMatch
-		if bracketMatchStartedOrScored(bronze) {
-			return ErrReopenDownstreamFought
-		}
 	}
 	var next *state.BracketMatch
 	if rIdx+1 < len(bracket.Rounds) {
 		next = &bracket.Rounds[rIdx+1][mIdx/2]
-		if bracketMatchStartedOrScored(next) {
-			return ErrReopenDownstreamFought
-		}
 	}
 	if bronze != nil {
 		// Mirror propagateBracketWinner's positional assignment: semifinal

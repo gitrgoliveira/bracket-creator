@@ -2784,6 +2784,12 @@ paths:
           schema:
             type: integer
             default: 1
+            minimum: 0
+            maximum: 1000000
+          description: >
+            Scales the whole estimate, so it is parsed strictly: a value out of
+            range (0..1000000) or unparsable returns 400 rather than a silently
+            wrong one-match answer.
         - in: query
           name: courts
           required: true

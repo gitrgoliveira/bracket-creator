@@ -100,11 +100,20 @@ func scheduleEstimateHandler(c *gin.Context) {
 	// with an INDIVIDUAL-formula estimate for what the client asked as a team
 	// question — the exact silent fallthrough the spec's "out of range → 400"
 	// contract forbids (mp-gmcg review). 0 stays legal (individual-match default).
-	teamSize, ok := parseOptionalBoundedInt(c, "teamSize", engine.MaxTeamSize)
+	teamSize, ok := parseOptionalBoundedInt(c, "teamSize", 0, engine.MaxTeamSize)
 	if !ok {
 		return
 	}
-	boutsPerTeamMatch, ok := parseOptionalBoundedInt(c, "boutsPerTeamMatch", engine.MaxTeamSize)
+	boutsPerTeamMatch, ok := parseOptionalBoundedInt(c, "boutsPerTeamMatch", 0, engine.MaxTeamSize)
+	if !ok {
+		return
+	}
+	// numMatches is load-bearing the same way (it scales the WHOLE estimate), so
+	// it gets the same strict parse — garbage/overflow defaulting to 1 would
+	// answer 200 with a one-match estimate for a client asking about a full day
+	// (mp-gmcg review). Default 1 when absent. buffer/ceremonyMinutes stay on the
+	// silent queryIntDefault path: they only pad an already-computed number.
+	numMatches, ok := parseOptionalBoundedInt(c, "numMatches", 1, engine.MaxScheduleCount)
 	if !ok {
 		return
 	}
@@ -116,7 +125,7 @@ func scheduleEstimateHandler(c *gin.Context) {
 	in := engine.EstimateInput{
 		MatchDurationClockMinutes: matchDuration,
 		Multiplier:                multiplier,
-		NumMatches:                queryIntDefault(c, "numMatches", 1),
+		NumMatches:                numMatches,
 		NumCourts:                 courts,
 		TeamSize:                  teamSize,
 		BoutsPerTeamMatch:         boutsPerTeamMatch,
@@ -133,17 +142,17 @@ func scheduleEstimateHandler(c *gin.Context) {
 }
 
 // parseOptionalBoundedInt reads an OPTIONAL query int constrained to [0, max].
-// An absent/empty value returns (0, true). A present value that is unparsable
+// An absent/empty value returns (def, true). A present value that is unparsable
 // (garbage OR past int64 range, both of which strconv.Atoi errors on) or out of
 // range writes a 400 and returns ok=false, so the caller stops. This is the
 // strict counterpart to queryIntDefault, for params whose silent fallback to
 // the default would be a WRONG answer rather than a harmless one — the OpenAPI
 // contract promises a 400 for out-of-range here (mp-gmcg review). The bound is a
 // parameter so the message never hardcodes a number that could drift.
-func parseOptionalBoundedInt(c *gin.Context, key string, max int) (int, bool) {
+func parseOptionalBoundedInt(c *gin.Context, key string, def, max int) (int, bool) {
 	raw := c.Query(key)
 	if raw == "" {
-		return 0, true
+		return def, true
 	}
 	v, err := strconv.Atoi(raw)
 	if err != nil || v < 0 || v > max {

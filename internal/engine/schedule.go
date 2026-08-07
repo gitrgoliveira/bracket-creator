@@ -38,6 +38,16 @@ const (
 	MaxSchedulePct   = 100_000
 )
 
+// maxEstimateMinutes is the ceiling clamped onto per-court minutes right before
+// the float→int conversion. It closes the overflow class the int clamps cannot:
+// matchDuration and multiplier are floats (the handler only checks them
+// positive-finite), so a hostile matchDuration=1e19 drives perCourt past int64
+// and int(math.Round(...)) yields the implementation-defined min-int (mp-gmcg
+// review). 1e15 is far beyond any real tournament, exactly representable in
+// float64 (< 2^53), and leaves ~4 orders of magnitude below int64 max for the
+// ceremony addition — so no input combination can produce a negative duration.
+const maxEstimateMinutes = 1e15
+
 // ScheduleEstimate is the wire response for GET /api/schedule/estimate
 // and the return type of EstimateSchedule. All durations are in minutes,
 // rounded to the nearest integer.
@@ -247,6 +257,15 @@ func EstimateSchedule(in EstimateInput) ScheduleEstimate {
 		// Slowest-court buffer (10–15% typical). Skipped when 0.
 		if bufferPct > 0 {
 			perCourt *= 1.0 + float64(bufferPct)/100.0
+		}
+		// Clamp to [0, maxEstimateMinutes] before the int conversion so a hostile
+		// float input (matchDuration/multiplier, unbounded by the int clamps) or
+		// a NaN can't produce a negative min-int. NaN fails every comparison, so
+		// test it explicitly. See maxEstimateMinutes.
+		if math.IsNaN(perCourt) || perCourt > maxEstimateMinutes {
+			perCourt = maxEstimateMinutes
+		} else if perCourt < 0 {
+			perCourt = 0
 		}
 		return int(math.Round(perCourt))
 	}

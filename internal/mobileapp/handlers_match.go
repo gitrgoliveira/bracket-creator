@@ -795,20 +795,26 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			var validationErr *engine.ValidationError
 			var courtBusyErr *engine.CourtBusyError
 			switch {
+			case errors.Is(err, engine.ErrMatchAlreadyCompleted):
+				// The BLOCKER finished in the race window between
+				// requireBlockerHoldsCourt's read and RevertMatchToQueue.
+				// requireBlockerHoldsCourt runs under the court lock, but that
+				// does not exclude the completion paths that win the race: POST
+				// /decision (kiken/fusenpai) and POST /bulk-score complete a match
+				// under the per-comp lock alone, never the court lock (mp-gmcg
+				// review; the cached pre-tx status read widens the window
+				// further). The court is now FREE (occupancy keys on status ==
+				// running), so the remedy is to retry the plain reopen, NOT the
+				// sentinel's "correct a completed bout" (which names no match and
+				// points at the wrong fix). Still a 409 — a raw fall-through would
+				// 500, as the sentinel is not a ValidationError/NotFound/CourtBusy.
+				c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("the blocking match %q finished on its own, so its court is now free — retry the reopen", body.BlockerMatchID)})
 			case errors.Is(err, engine.ErrReopenNotCompleted),
-				errors.Is(err, engine.ErrReopenDownstreamFought),
-				errors.Is(err, engine.ErrMatchAlreadyCompleted):
-				// ErrReopenNotCompleted / ErrReopenDownstreamFought name a bad
-				// TARGET. ErrMatchAlreadyCompleted means the BLOCKER finished
-				// between requireBlockerHoldsCourt's read and RevertMatchToQueue:
-				// requireBlockerHoldsCourt does NOT hold the court lock, and
-				// neither do the completion paths that can win that race — POST
-				// /decision (kiken/fusenpai) and POST /bulk-score both complete a
-				// match under the per-comp lock alone (mp-gmcg review). Its cached
-				// pre-tx status read widens the window further (mtime-keyed). A 409
-				// with the sentinel's "correct via the score editor" guidance is
-				// the right answer; without this case it would fall through to a
-				// 500 (the sentinel is not a ValidationError/NotFound/CourtBusy).
+				errors.Is(err, engine.ErrReopenDownstreamFought):
+				// These name a bad TARGET (not completed, or its winner already
+				// fed a fought knockout). The requeue-and-reopen path pre-checks
+				// both read-only BEFORE the destructive revert
+				// (checkTargetReopenable), so the blocker keeps its live score.
 				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 			case errors.As(err, &courtBusyErr):
 				// A match OTHER than the one we requeued still holds the court.

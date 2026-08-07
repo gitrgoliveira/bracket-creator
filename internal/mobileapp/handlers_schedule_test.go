@@ -115,6 +115,36 @@ func TestScheduleEstimateEndpoint(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
 
+	// mp-gmcg review: numMatches scales the whole estimate, so garbage/overflow
+	// must 400, not silently default to 1 and answer 200 with a one-match
+	// estimate for a client asking about a full day.
+	t.Run("numMatches beyond int64 range returns 400", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET",
+			"/api/schedule/estimate?matchDuration=3&multiplier=1.5&courts=1&numMatches=99999999999999999999",
+			nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("garbage numMatches returns 400", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET",
+			"/api/schedule/estimate?matchDuration=3&multiplier=1.5&courts=1&numMatches=loads",
+			nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("absent numMatches still defaults to 1 (200)", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET",
+			"/api/schedule/estimate?matchDuration=3&multiplier=1.5&courts=1",
+			nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
 	t.Run("teamSize at the MaxTeamSize boundary is accepted", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("GET",

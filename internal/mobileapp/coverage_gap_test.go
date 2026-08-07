@@ -448,12 +448,15 @@ func TestScheduleEstimate_UnparsableCourts(t *testing.T) {
 }
 
 // TestScheduleEstimate_InvalidOptionalParam covers the queryIntDefault error
-// fallback (line 118-120 in handlers_schedule.go), an unparsable optional
-// param silently falls back to the default and the request still returns 200.
+// fallback: an unparsable GENUINELY-optional param (buffer/ceremonyMinutes,
+// which only pad an already-computed number) silently falls back to its default
+// and the request still returns 200. numMatches/teamSize/boutsPerTeamMatch are
+// NOT on this path anymore — they parse strictly and 400 (mp-gmcg review),
+// covered by TestScheduleEstimateEndpoint's dedicated 400 cases.
 func TestScheduleEstimate_InvalidOptionalParam(t *testing.T) {
 	r, _, _, _, _ := setupTestRouter(t)
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/schedule/estimate?matchDuration=3&multiplier=1.5&courts=1&numMatches=abc", nil)
+	req, _ := http.NewRequest("GET", "/api/schedule/estimate?matchDuration=3&multiplier=1.5&courts=1&buffer=abc", nil)
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 }

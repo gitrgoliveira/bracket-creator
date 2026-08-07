@@ -443,6 +443,11 @@ func TestEstimateSchedule_ClampsHostileScalars(t *testing.T) {
 		{"huge ceremonyMinutes", func() EstimateInput { in := base; in.CeremonyMinutes = math.MaxInt; return in }()},
 		{"huge buffer", func() EstimateInput { in := base; in.SlowestCourtBufferPct = math.MaxInt; return in }()},
 		{"negative numMatches", func() EstimateInput { in := base; in.NumMatches = -1; return in }()},
+		// The FLOAT inputs the int clamps don't cover: a hostile matchDuration/
+		// multiplier drove perCourt past int64 and int(math.Round(...)) yielded
+		// min-int, until perCourt itself was clamped (mp-gmcg review U1).
+		{"huge matchDuration", func() EstimateInput { in := base; in.MatchDurationClockMinutes = 1e19; return in }()},
+		{"huge multiplier", func() EstimateInput { in := base; in.Multiplier = 1e19; return in }()},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := EstimateSchedule(tc.in)

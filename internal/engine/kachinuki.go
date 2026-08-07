@@ -592,7 +592,7 @@ func (e *Engine) loadKachinukiForReopen(compID, reason string) (*state.Competiti
 // (CheckCrossCompCourtBusy takes read locks on other competitions, so
 // calling it while holding this competition's write lock risks a
 // circular wait); the same-competition half runs inside the tx off the
-// same courtFreeInCompTx the score path reaches via
+// same courtFreeInCompTxWith the score path reaches via
 // checkCourtExclusivityTx. Both are skipped when the match has no court
 // assigned.
 //
@@ -668,7 +668,7 @@ func (e *Engine) reopenKachinukiUnderCourtLock(compID string, comp *state.Compet
 			}
 			// Reuse the pool matches + bracket findMatchHome already loaded
 			// under this tx for the same-comp court scan, instead of the
-			// re-load courtFreeInCompTx would do (mp-gmcg review E4). A nil
+			// re-load a nil/nil call would do (mp-gmcg review E4). A nil
 			// slice (pool-load error, or the bracket on a pool home) reloads.
 			return courtFreeInCompTxWith(tx, compID, matchID, court, h.PoolMatches, h.BracketRoot)
 		}
@@ -928,9 +928,10 @@ type matchHome struct {
 
 // findMatchHome walks the three homes a match ID can have — pool matches, then
 // bracket rounds, then the bronze (3rd-place) match — in that FIXED order, and
-// invokes visit for the owning home. It is the mutating, in-transaction twin of
-// lookupMatchSnapshot (mobileapp): a single walk so a new caller cannot drop the
-// bronze branch or the pool-load-error swallow by hand-copying the ~60-line
+// invokes visit for the owning home. Its job is the MUTATING, in-transaction
+// one — it is the write-side twin of mobileapp's read-only lookupMatchSnapshot
+// — and it is the engine's only copy of that walk, so a new caller cannot drop
+// the bronze branch or the pool-load-error swallow by hand-copying the ~60-line
 // skeleton (mp-gmcg review F6). found=false with a nil error means the ID is in
 // neither store. A pool LOAD error is swallowed and the walk still tries the
 // bracket (matching the open-coded copies this replaced); a bracket load error

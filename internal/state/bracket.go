@@ -260,9 +260,17 @@ func (s *Store) updateBracketLocked(compID string, mutate func(*Bracket) error, 
 
 // findBracketMatchByID returns a pointer to the bracket match with the given
 // ID — searching the rounds FIRST, then the ThirdPlaceMatch sibling — or nil.
-// THE single bracket-match walk: the bronze (3rd-place) match is a SIBLING of
-// Rounds, not an element, so a rounds-only loop never reaches it (the recurring
-// forgotten-branch bug this consolidation exists to prevent, mp-gmcg).
+// It is internal/state's one walk over A BRACKET, and it knows nothing about
+// pool matches: the bronze (3rd-place) match is a SIBLING of Rounds, not an
+// element, so a rounds-only loop never reaches it — the recurring
+// forgotten-branch bug this consolidation exists to prevent (mp-gmcg).
+//
+// Three other walks cover jobs this one cannot, distinguished by JOB rather
+// than by preference (mp-gmcg review): mobileapp's lookupMatchSnapshot searches
+// pool matches THEN the bracket for a reader holding only an id; engine's
+// findMatchHome is the mutating, in-transaction twin of that; MatchStatusByID
+// below re-walks both stores because it is the no-copy variant. Reach for the
+// one whose job matches, not the one whose comment sounds most definitive.
 func findBracketMatchByID(b *Bracket, matchID string) *BracketMatch {
 	if b == nil {
 		return nil
@@ -289,6 +297,12 @@ func findBracketMatchByID(b *Bracket, matchID string) *BracketMatch {
 // mutated, so reading them without a defensive copy is safe (writers replace
 // the cached parse, never mutate it in place). Search order matches
 // lookupMatchSnapshot (mobileapp), so the status agrees with the full snapshot.
+//
+// It re-walks both stores rather than routing through that helper BECAUSE it is
+// the no-copy variant: lookupMatchSnapshot builds its snapshot from the copying
+// Load* methods, which is the entire cost this exists to avoid (and state
+// cannot import mobileapp anyway). That is the only reason to add a traversal
+// here — see findBracketMatchByID for the other walks and their jobs.
 func (s *Store) MatchStatusByID(compID, matchID string) (MatchStatus, bool, error) {
 	if err := ValidateCompetitionID(compID); err != nil {
 		return "", false, err

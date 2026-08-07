@@ -1033,8 +1033,9 @@ func TestKnockoutRescore_NotGatedAsPoolMatch(t *testing.T) {
 // TestCourtOccupied covers the PURE court-occupancy scan extracted for E4
 // (mp-gmcg review): given already-loaded pool matches + bracket, find the
 // RUNNING match on a court other than skipMatchID, searching pool → rounds →
-// bronze. The loading wrappers (courtFreeInCompTx and courtFreeInCompTxWith)
-// are covered end-to-end by the reopen court-busy tests.
+// bronze. The loading wrapper (courtFreeInCompTxWith) and its id-only entry
+// point (checkCourtExclusivityTx) are covered end-to-end by the reopen
+// court-busy tests.
 func TestCourtOccupied(t *testing.T) {
 	running := func(id, court string) state.MatchResult {
 		return state.MatchResult{ID: id, Court: court, Status: state.MatchStatusRunning}

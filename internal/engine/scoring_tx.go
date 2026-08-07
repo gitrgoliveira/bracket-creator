@@ -677,57 +677,47 @@ func (e *Engine) checkSimultaneousMatchTx(tx state.StoreTx, compID, matchID stri
 	return nil
 }
 
-// checkCourtExclusivityTx checks that no OTHER match in compID's own pool or
-// bracket is already running on the same court. It is the entry point for
-// callers that know only the match id: it resolves the court via the tx and
-// then defers to courtFreeInCompTx, which carries the check itself and the
-// lock-ordering rationale.
+// checkCourtExclusivityTx is the court-exclusivity entry point for callers that
+// know only the match id: it resolves the court via the tx, then runs the gate.
+// Callers that already HOLD the court (and often the loaded slices too) skip
+// this and call courtFreeInCompTxWith directly — an in-tx lookupMatchCourtTx
+// walk is not free, since tx loads bypass the file cache and are therefore real
+// disk reads taken under the write lock.
 func (e *Engine) checkCourtExclusivityTx(tx state.StoreTx, compID, matchID string) error {
 	court, err := lookupMatchCourtTx(tx, compID, matchID)
 	if err != nil {
 		return err
 	}
-	return courtFreeInCompTx(tx, compID, matchID, court)
+	return courtFreeInCompTxWith(tx, compID, matchID, court, nil, nil)
 }
 
-// courtFreeInCompTx is the same-competition half of the court-exclusivity
-// gate: it reports whether any match in compID's own pool or bracket OTHER
-// than matchID is already running on court. Returns *CourtBusyError (HTTP 409
-// court_busy) when the court is taken; a match with no court assigned is
-// never gated.
+// courtFreeInCompTxWith is the same-competition half of the court-exclusivity
+// gate: it reports whether any match in compID's own pool or bracket OTHER than
+// matchID is already running on court. Returns *CourtBusyError (HTTP 409
+// court_busy) when the court is taken; a match with no court assigned is never
+// gated.
 //
 // The cross-competition check is intentionally omitted here: calling
 // store.RunningMatchOnCourt (which acquires read locks on other competitions)
 // while holding compID's write lock via WithTransaction risks a circular-wait
-// deadlock if another competition is simultaneously in its own
-// WithTransaction. The cross-competition check is performed by
-// CheckCrossCompCourtBusy before WithTransaction is entered.
+// deadlock if another competition is simultaneously in its own WithTransaction.
+// The cross-competition check is performed by CheckCrossCompCourtBusy before
+// WithTransaction is entered.
 //
-// The court is a PARAMETER rather than looked up here because the callers that
-// need this gate mostly already hold it, and an in-tx lookupMatchCourtTx walk
-// is not free: tx loads bypass the file cache, so they are real disk reads
-// taken under the write lock. checkCourtExclusivityTx is the wrapper for the
-// one caller that knows only the match id and must do that lookup.
+// It REUSES pool matches and/or a bracket the caller already loaded in the same
+// transaction, loading only the slice it wasn't handed (mp-gmcg review E4: the
+// reopen path's findMatchHome has already loaded these under the same lock, so
+// re-loading them for the court scan is pure waste). A nil argument means "load
+// it" — and crucially, findMatchHome SWALLOWS a pool-load error (it still tries
+// the bracket), so a nil poolMatches here forces an authoritative reload that
+// SURFACES a genuine load failure rather than silently skipping pool matches in
+// the scan.
 //
-// The reopen path reaches the gate through courtFreeInCompTxWith (it also has
-// the loaded slices to hand), not through this nil/nil wrapper, and it needs
-// the gate for a specific reason: reopening flips the match back to running, so
-// a court that already has a running match would end up with TWO, wedging the
-// exclusivity check for BOTH (the re-End of the reopened match and every
-// further score write to the genuinely live bout). See ReopenKachinukiMatch's
-// COURT GATE note.
-func courtFreeInCompTx(tx state.StoreTx, compID, matchID, court string) error {
-	return courtFreeInCompTxWith(tx, compID, matchID, court, nil, nil)
-}
-
-// courtFreeInCompTxWith is courtFreeInCompTx that REUSES pool matches and/or a
-// bracket the caller already loaded in the same transaction, loading only the
-// slice it wasn't handed (mp-gmcg review E4: the reopen path's findMatchHome
-// has already loaded these under the same lock, so re-loading them for the
-// court scan is pure waste). A nil argument means "load it" — and crucially,
-// findMatchHome SWALLOWS a pool-load error (it still tries the bracket), so a
-// nil poolMatches here forces an authoritative reload that SURFACES a genuine
-// load failure rather than silently skipping pool matches in the scan.
+// The reopen path needs this gate for a specific reason: reopening flips the
+// match back to running, so a court that already has a running match would end
+// up with TWO, wedging the exclusivity check for BOTH (the re-End of the
+// reopened match and every further score write to the genuinely live bout).
+// See ReopenKachinukiMatch's COURT GATE note.
 func courtFreeInCompTxWith(tx state.StoreTx, compID, matchID, court string, poolMatches []state.MatchResult, bracket *state.Bracket) error {
 	if court == "" {
 		return nil

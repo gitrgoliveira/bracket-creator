@@ -1107,10 +1107,13 @@ type matchSnapshot struct {
 	InBracket        bool
 }
 
-// lookupMatchSnapshot is THE traversal of the three homes a match ID can
-// have — the pool-matches CSV, the bracket rounds, and the bracket's
-// ThirdPlaceMatch — searched in that order. Lookup is by ID equality, not
-// prefix: match-ID shapes vary across formats and fixtures.
+// lookupMatchSnapshot is mobileapp's READ-side traversal of the three homes a
+// match ID can have — the pool-matches CSV, the bracket rounds, and the
+// bracket's ThirdPlaceMatch — searched in that order. Lookup is by ID equality,
+// not prefix: match-ID shapes vary across formats and fixtures. Its job is
+// "handler holds an id and wants a snapshot of that match"; engine's
+// findMatchHome is the mutating in-transaction twin, and state's
+// MatchStatusByID is the no-copy status-only reader (mp-gmcg review).
 //
 // The bronze (3rd-place) match is a SIBLING of Rounds, not an element of it,
 // so a rounds-only loop never reaches it. Forgetting that branch is the bug
@@ -1182,9 +1185,7 @@ func bracketMatchSnapshot(bm *state.BracketMatch) matchSnapshot {
 // ReopenPending/status under a dropped load error is the exact hole mp-gmcg
 // closed. The caller keeps its own found/err handling (the return shapes
 // legitimately differ: a sentinel, a bare error, a (correctionCheck{}, err));
-// this owns only the shared load-and-wrap. (There was once a best-effort
-// error-swallowing twin, matchSnapshotFor; it was removed when its last caller
-// switched to the no-copy MatchStatusByID — review E5.)
+// this owns only the shared load-and-wrap.
 func matchSnapshotOrErr(s matchStores, compID, matchID, guardLabel string) (matchSnapshot, bool, error) {
 	snap, found, err := lookupMatchSnapshot(s, compID, matchID)
 	if err != nil {

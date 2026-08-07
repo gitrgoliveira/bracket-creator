@@ -1730,6 +1730,82 @@ func TestReopenKachinukiMatch_ReopenPending(t *testing.T) {
 	}
 }
 
+// TestRevertMatchToQueue_ClearsReopenPending pins mp-gmcg review R1: a match
+// reopened without a reason carries ReopenPending, and sending it back to the
+// queue must CLEAR that audit debt. If it didn't, the requeued (now scheduled,
+// empty) match would still owe a correctionReason for a result that no longer
+// exists, and applyCorrectionReasonUnderTx would reject its next honest
+// finalization demanding one. reopenBracketMatch's doc names this mirror
+// obligation on RevertMatchToQueue; the two homes carry the flag separately.
+func TestRevertMatchToQueue_ClearsReopenPending(t *testing.T) {
+	t.Run("pool", func(t *testing.T) {
+		compID := "revert-pending-pool"
+		eng, store, _ := setupKachinukiComp(t, compID, 3)
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{{
+			ID: "P1-0", SideA: "RedTeam", SideB: "WhiteTeam", Status: state.MatchStatusCompleted,
+			Winner: "RedTeam", Decision: "kachinuki-exhaustion",
+		}}))
+		require.NoError(t, eng.ReopenKachinukiMatch(compID, "P1-0", "")) // reason-less → pending
+		before, err := store.LoadPoolMatches(compID)
+		require.NoError(t, err)
+		require.True(t, before[0].ReopenPending, "precondition: reason-less reopen sets the flag")
+
+		require.NoError(t, eng.RevertMatchToQueue(compID, "P1-0"))
+		after, err := store.LoadPoolMatches(compID)
+		require.NoError(t, err)
+		assert.Equal(t, state.MatchStatusScheduled, after[0].Status)
+		assert.False(t, after[0].ReopenPending, "requeue must clear the outstanding reopen debt")
+	})
+
+	t.Run("bracket", func(t *testing.T) {
+		compID := "revert-pending-bracket"
+		eng, store, _ := setupKachinukiComp(t, compID, 3)
+		require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+			Rounds: [][]state.BracketMatch{{{
+				ID: "F0", SideA: "RedTeam", SideB: "WhiteTeam", Status: state.MatchStatusCompleted,
+				Winner: "RedTeam", Decision: "kachinuki-exhaustion",
+			}}},
+		}))
+		require.NoError(t, eng.ReopenKachinukiMatch(compID, "F0", "")) // reason-less → pending
+		before, err := store.LoadBracket(compID)
+		require.NoError(t, err)
+		require.True(t, before.Rounds[0][0].ReopenPending, "precondition")
+
+		require.NoError(t, eng.RevertMatchToQueue(compID, "F0"))
+		after, err := store.LoadBracket(compID)
+		require.NoError(t, err)
+		assert.Equal(t, state.MatchStatusScheduled, after.Rounds[0][0].Status)
+		assert.False(t, after.Rounds[0][0].ReopenPending, "requeue must clear the outstanding reopen debt")
+	})
+}
+
+// TestOverrideBracketWinner_ClearsReopenPending pins the related half of R1:
+// override-winner is a second finalization path that bypasses
+// applyCorrectionReasonUnderTx, so a reopened bracket match closed out via an
+// override must also discharge ReopenPending, or the flag lingers indefinitely.
+func TestOverrideBracketWinner_ClearsReopenPending(t *testing.T) {
+	compID := "override-pending"
+	eng, store, _ := setupKachinukiComp(t, compID, 3)
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{{{
+			ID: "F0", SideA: "RedTeam", SideB: "WhiteTeam", Status: state.MatchStatusCompleted,
+			Winner: "RedTeam", Decision: "kachinuki-exhaustion",
+		}}},
+	}))
+	require.NoError(t, eng.ReopenKachinukiMatch(compID, "F0", "")) // reason-less → pending
+	before, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.True(t, before.Rounds[0][0].ReopenPending, "precondition")
+
+	applied, err := eng.OverrideBracketWinner(compID, "F0", "WhiteTeam", 0)
+	require.NoError(t, err)
+	require.True(t, applied)
+	after, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, "WhiteTeam", after.Rounds[0][0].Winner)
+	assert.False(t, after.Rounds[0][0].ReopenPending, "an override discharges the reopen debt")
+}
+
 // TestReopenKachinukiMatch_DiscardsVerdictKeepsBoutLog pins the split that
 // makes a reopen safe: the BOUT LOG is sacred, the ENCOUNTER VERDICT is not.
 //
@@ -2421,6 +2497,30 @@ func TestApplyKachinukiMerge_DerivesWinnerFromBoutLog(t *testing.T) {
 		err := applyKachinukiMerge(comp, nil, result)
 		var verr *ValidationError
 		require.ErrorAs(t, err, &verr, "a decisive-win decision on a tied last bout must be rejected")
+	})
+
+	// mp-gmcg review: a kachinuki-exhaustion write whose last SCORED bout names
+	// a winner matching NEITHER competitor is rejected, not accepted verbatim. A
+	// kachinuki bout persists the PLAYER name as its winner and never the team
+	// name, so the winner can only match the sub's own sideA/sideB; a payload
+	// that carries a winner + ippons but omits those sides (a bulk PUT /scores,
+	// an offline flush) used to fall through the winner switch and keep the
+	// client's match-level winner, which a bracket match's validateBracketCompletion
+	// would then wave through on the non-empty check alone.
+	t.Run("a kachinuki-exhaustion winner matching neither side is rejected", func(t *testing.T) {
+		result := &state.MatchResult{
+			SideA: "RedTeam", SideB: "WhiteTeam",
+			Status: state.MatchStatusCompleted, Decision: "kachinuki-exhaustion",
+			Winner: "WhiteTeam", // an arbitrary match-level winner the log can't attribute
+			SubResults: []state.SubMatchResult{
+				// A decisive bout (R-1 struck a point) but with NO sub sides, so
+				// neither isWinForSide branch can bind the player-name winner.
+				{Position: 1, IpponsA: []string{"M"}, Winner: "R-1", Decision: "fought"},
+			},
+		}
+		err := applyKachinukiMerge(comp, nil, result)
+		var verr *ValidationError
+		require.ErrorAs(t, err, &verr, "an unattributable deciding-bout winner must be rejected")
 	})
 
 	// The reject is scoped to kachinuki-exhaustion: a genuine drawn encounter

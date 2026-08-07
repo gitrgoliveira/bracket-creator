@@ -1417,6 +1417,13 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 					m.Winner = winnerName
 					m.IsOverridden = true
 					m.Status = state.MatchStatusCompleted
+					// An override is itself the operator's audited, final decision,
+					// so it discharges any outstanding reopen debt: a reopened match
+					// closed out this way must not keep ReopenPending set (it bypasses
+					// applyCorrectionReasonUnderTx/dischargeReopenPendingUnderTx), or
+					// the flag lingers until some later score write is forced to
+					// invent a reason (mp-gmcg review).
+					m.ReopenPending = false
 					if modifiedAt != 0 {
 						m.ModifiedAt = modifiedAt
 					}
@@ -1439,6 +1446,8 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 			bm.Winner = winnerName
 			bm.IsOverridden = true
 			bm.Status = state.MatchStatusCompleted
+			// Mirror of the round branch: an override discharges the reopen debt.
+			bm.ReopenPending = false
 			if modifiedAt != 0 {
 				bm.ModifiedAt = modifiedAt
 			}
@@ -1527,6 +1536,14 @@ func (e *Engine) RevertMatchToQueue(compId, matchId string) error {
 		r.DecidedByHantei = nil
 		r.ResultSource = ""
 		r.CorrectionReason = ""
+		// ReopenPending is a match-level verdict field a kachinuki result can
+		// carry (reopenPoolMatch sets it), so requeue must clear it too: a
+		// reopened-then-requeued match that kept the flag would keep owing an
+		// audit reason for a result that no longer exists, and
+		// applyCorrectionReasonUnderTx would reject its first honest
+		// finalization demanding one (mp-gmcg review). reopenBracketMatch's doc
+		// names this exact mirror obligation on RevertMatchToQueue.
+		r.ReopenPending = false
 		// Rep-bout nominations name who fought a pool/league daihyosen; they are
 		// result data for that supplementary bout, so a requeued match must not
 		// keep them (bracket matches have no rep fields).
@@ -1568,6 +1585,11 @@ func (e *Engine) RevertMatchToQueue(compId, matchId string) error {
 		m.IsOverridden = false
 		m.ResultSource = ""
 		m.CorrectionReason = ""
+		// Mirror of the pool branch (mp-gmcg review): clear the reopen-pending
+		// audit debt so a reopened-then-requeued bracket match can be replayed
+		// and finalized without applyCorrectionReasonUnderTx demanding a reason
+		// for a result the requeue already discarded.
+		m.ReopenPending = false
 		// Revert fence (mp-y3nk): stamp now() so any pre-revert offline write
 		// (T_stale < T_revert) is dropped by ApplyByTimestamp on replay.
 		// Using 0 would make ApplyByTimestamp always return true (weaker).

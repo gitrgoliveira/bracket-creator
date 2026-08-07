@@ -2,6 +2,7 @@ package mobileapp
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -67,6 +68,41 @@ func TestScheduleEstimateEndpoint(t *testing.T) {
 			nil)
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	// mp-gmcg review: teamSize / boutsPerTeamMatch are load-bearing (they set
+	// the bout count that scales the estimate), so an unbounded value overflows
+	// the duration math into a negative or inverted range. Reject out-of-range
+	// values with a 400, mirroring the courts guard, rather than answering 200
+	// with a garbage duration.
+	t.Run("out-of-range teamSize returns 400", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET",
+			"/api/schedule/estimate?matchDuration=3&multiplier=1.5&courts=1&teamSize=9223372036854775807",
+			nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("out-of-range boutsPerTeamMatch returns 400", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET",
+			"/api/schedule/estimate?matchDuration=3&multiplier=1.5&courts=1&teamSize=5&boutsPerTeamMatch=100000",
+			nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("teamSize at the MaxTeamSize boundary is accepted", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET",
+			fmt.Sprintf("/api/schedule/estimate?matchDuration=3&multiplier=1.5&numMatches=1&courts=1&teamSize=%d", engine.MaxTeamSize),
+			nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp engine.ScheduleEstimate
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Greater(t, resp.TotalDurationMinutes, 0, "a boundary team size still yields a positive estimate")
 	})
 
 	t.Run("missing multiplier returns 400", func(t *testing.T) {

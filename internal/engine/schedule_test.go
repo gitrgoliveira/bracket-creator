@@ -389,6 +389,43 @@ func TestEstimateSchedule_KachinukiRange(t *testing.T) {
 	assert.Equal(t, 75, result.PerCourtMinutes[0], "PerCourtMinutes reflects the average scenario")
 }
 
+// TestEstimateSchedule_ClampsHostileBoutDrivers pins mp-gmcg review R5: a
+// pathologically large TeamSize / BoutsPerTeamMatch must not overflow the
+// duration math. Before the clamp, `worst = 2n-1` and `bouts*clock*mult`
+// overflowed int64 and the int(math.Round(...)) conversion of the out-of-range
+// float yielded a NEGATIVE duration or a worst < best inverted range. After
+// clamping to MaxTeamSize the estimate is finite, positive, and ordered.
+func TestEstimateSchedule_ClampsHostileBoutDrivers(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		in   EstimateInput
+	}{
+		{"huge teamSize", EstimateInput{MatchDurationClockMinutes: 3, Multiplier: 1.5, NumMatches: 1, NumCourts: 1, TeamSize: 1<<62 + 1, Kachinuki: true}},
+		{"huge boutsPerTeamMatch", EstimateInput{MatchDurationClockMinutes: 3, Multiplier: 1.5, NumMatches: 1, NumCourts: 1, TeamSize: 5, BoutsPerTeamMatch: 1 << 40}},
+		{"negative teamSize", EstimateInput{MatchDurationClockMinutes: 3, Multiplier: 1.5, NumMatches: 1, NumCourts: 1, TeamSize: -5}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := EstimateSchedule(tc.in)
+			assert.GreaterOrEqual(t, got.TotalDurationMinutes, 0, "no negative duration from overflow")
+			assert.LessOrEqual(t, got.BestCaseMinutes, got.TotalDurationMinutes, "best <= avg")
+			assert.LessOrEqual(t, got.TotalDurationMinutes, got.WorstCaseMinutes, "avg <= worst (range not inverted)")
+			// The clamp caps the bout count at MaxTeamSize, so the result matches
+			// the same input with TeamSize/BoutsPerTeamMatch pinned to the cap.
+			capped := tc.in
+			if capped.TeamSize > MaxTeamSize {
+				capped.TeamSize = MaxTeamSize
+			}
+			if capped.TeamSize < 0 {
+				capped.TeamSize = 0
+			}
+			if capped.BoutsPerTeamMatch > MaxTeamSize {
+				capped.BoutsPerTeamMatch = MaxTeamSize
+			}
+			assert.Equal(t, EstimateSchedule(capped).WorstCaseMinutes, got.WorstCaseMinutes, "clamps to the MaxTeamSize equivalent")
+		})
+	}
+}
+
 // TestEstimateSchedule_BoutsDefaultToTeamSize pins the rule that used to live
 // in the caller: a team match is worth TeamSize bouts unless overridden.
 //

@@ -1256,6 +1256,18 @@ func deriveKachinukiWinner(result *state.MatchResult) error {
 		result.Winner = result.SideA
 	case isWinForSide(last.Winner, result.SideB, last.SideB):
 		result.Winner = result.SideB
+	default:
+		// The deciding bout names a winner that matches NEITHER side (mp-gmcg
+		// review, R2 residue). A kachinuki bout persists the PLAYER name as its
+		// winner (resolveKachinukiBoutSides never writes the team name), so the
+		// only thing this can match is last.SideA/last.SideB. A payload carrying
+		// a sub winner + ippons but omitting the sub's sideA/sideB — a bulk
+		// PUT /scores, an offline flush, any non-editor caller — reaches here,
+		// and without this guard result.Winner would keep whatever the client
+		// sent (for a bracket match validateBracketCompletion only checks it is
+		// non-empty). Reject the unattributable winner rather than accept it; the
+		// score editor always sends the sub sides.
+		return validationErrorf("a kachinuki match's deciding bout names a winner (%q) that is neither competitor: send the bout's sideA/sideB so the encounter winner can be derived", last.Winner)
 	}
 	return nil
 }

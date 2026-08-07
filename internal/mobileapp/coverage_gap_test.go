@@ -114,13 +114,14 @@ func TestBracketMatchSnapshot(t *testing.T) {
 		Decision:         string(domain.DecisionFought),
 		Status:           state.MatchStatusCompleted,
 		CorrectionReason: "reopened: wrong bout recorded",
+		ReopenPending:    true,
 		SubResults:       []state.SubMatchResult{{Position: 1, Winner: "Alice"}},
 	}
 	got := bracketMatchSnapshot(bm)
 	assert.Equal(t, bm.Status, got.Status)
 	assert.Equal(t, bm.CorrectionReason, got.CorrectionReason)
-	require.Len(t, got.SubResults, 1)
-	assert.Equal(t, "Alice", got.SubResults[0].Winner)
+	assert.True(t, got.ReopenPending)
+	assert.True(t, got.InBracket, "a bracket-match projection is always InBracket")
 }
 
 // TestWriteSSEEnvelope_Discard ensures no panic writing to io.Discard.

@@ -14,6 +14,18 @@ import (
 // trigger an excessive allocation (CodeQL go/uncontrolled-allocation-size).
 const MaxCourts = 26
 
+// MaxTeamSize is a defensive upper bound on the `teamSize` /
+// `boutsPerTeamMatch` parameters. It is NOT a domain rule — kachinuki team
+// sizes are unregulated, and standard kendo teams are 3/5/7 — but a public,
+// stateless endpoint must not let an unbounded value drive the bout math:
+// `worst = 2n-1` and `bouts * clock * multiplier` overflow int64 for a large
+// n, and the final int(math.Round(...)) conversion of an out-of-range float is
+// implementation-defined in Go, yielding a negative duration or an inverted
+// best/worst range (mp-gmcg review). 100 is ~14× the largest real team, so no
+// legitimate planning number is rejected. Clamped in EstimateSchedule (all
+// callers) and 400'd by the handler (matching the MaxCourts precedent).
+const MaxTeamSize = 100
+
 // ScheduleEstimate is the wire response for GET /api/schedule/estimate
 // and the return type of EstimateSchedule. All durations are in minutes,
 // rounded to the nearest integer.
@@ -130,6 +142,19 @@ func kachinukiBoutRange(n int) (best, avg, worst float64) {
 	return best, avg, worst
 }
 
+// clampNonNeg returns v bounded to [0, max]: a negative value becomes 0 and a
+// value above max is capped. Used to keep the schedule bout drivers in a range
+// the duration arithmetic cannot overflow (see MaxTeamSize).
+func clampNonNeg(v, max int) int {
+	if v < 0 {
+		return 0
+	}
+	if v > max {
+		return max
+	}
+	return v
+}
+
 // EstimateSchedule computes the total elapsed-minute estimate for a
 // match set given clock duration, multiplier, court count, optional
 // team-match bout count, slowest-court buffer %, and ceremony block.
@@ -162,11 +187,18 @@ func EstimateSchedule(in EstimateInput) ScheduleEstimate {
 	// together, and getting it wrong was silent: TeamSize>0 with the bouts
 	// field omitted fell through to the INDIVIDUAL formula and answered a
 	// team question with a one-bout number, no error.
+	// Clamp the bout drivers to [0, MaxTeamSize] BEFORE the arithmetic so a
+	// hostile query-string cannot overflow the duration math (mp-gmcg review):
+	// the handler already 400s these, but clamping here protects every other
+	// caller and keeps the int(math.Round(...)) conversion in range. See
+	// MaxTeamSize.
+	teamSize := clampNonNeg(in.TeamSize, MaxTeamSize)
+	boutsOverride := clampNonNeg(in.BoutsPerTeamMatch, MaxTeamSize)
 	bouts := 0
-	if in.TeamSize > 0 {
-		bouts = in.TeamSize
-		if in.BoutsPerTeamMatch > 0 {
-			bouts = in.BoutsPerTeamMatch
+	if teamSize > 0 {
+		bouts = teamSize
+		if boutsOverride > 0 {
+			bouts = boutsOverride
 		}
 	}
 	bestBouts, avgBouts, worstBouts := float64(bouts), float64(bouts), float64(bouts)

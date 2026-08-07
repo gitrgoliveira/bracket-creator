@@ -1088,9 +1088,15 @@ type matchStores interface {
 // matchSnapshot is the stored state of a match as this file's guards read
 // it: Status drives the correction / stale-write / finalized gates,
 // CorrectionReason carries the kachinuki reopen justification forward (see
-// applyCorrectionReasonUnderTx), ReopenPending says a reason-less reopen
-// still owes one, and SubResults echoes the post-advance kachinuki bout log
-// back to the open score editor.
+// applyCorrectionReasonUnderTx), and ReopenPending says a reason-less reopen
+// still owes one.
+//
+// It carries only the fields the guards actually read: the post-advance
+// kachinuki bout log now rides back to the editor on MaybeAdvanceKachinuki's
+// postLog return (result.SubResults), not through this snapshot, so keeping a
+// SubResults field here would be a write-only value — and an expensive one, as
+// lookupMatchSnapshot deep-clones every sub-bout under the per-comp write lock
+// (mp-gmcg review).
 //
 // InBracket is the match's HOME rather than its content: the pool write is a
 // whole-struct overwrite that carries ReopenPending itself, while the bracket
@@ -1103,7 +1109,6 @@ type matchSnapshot struct {
 	Status           state.MatchStatus
 	CorrectionReason string
 	ReopenPending    bool
-	SubResults       []state.SubMatchResult
 	InBracket        bool
 }
 
@@ -1143,7 +1148,6 @@ func lookupMatchSnapshot(s matchStores, compID, matchID string) (matchSnapshot, 
 				Status:           poolMatches[i].Status,
 				CorrectionReason: poolMatches[i].CorrectionReason,
 				ReopenPending:    poolMatches[i].ReopenPending,
-				SubResults:       poolMatches[i].SubResults,
 			}, true, loadErr
 		}
 	}
@@ -1173,7 +1177,6 @@ func bracketMatchSnapshot(bm *state.BracketMatch) matchSnapshot {
 		Status:           bm.Status,
 		CorrectionReason: bm.CorrectionReason,
 		ReopenPending:    bm.ReopenPending,
-		SubResults:       bm.SubResults,
 		InBracket:        true,
 	}
 }
@@ -1728,7 +1731,20 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 					staleAfterComplete = true
 					return nil
 				}
-				if !isWithdrawal && !isCorrection {
+				// The StartMatchTx eligibility/simultaneity gate keys off the
+				// RACE-FREE in-tx status, not the pre-tx cache read: `isCorrection`
+				// is derived from matchStatusFromStore -> MatchStatusByID ->
+				// loadCached, which validates on mtime alone, so a completed match
+				// requeued within the same ~1ms kernel-clock tick still reads
+				// `completed` and would misclassify a genuine FIRST finalization as
+				// a correction — skipping the ineligible-competitor (409) and
+				// simultaneous-match checks (CLAUDE.md: never key on mtime alone;
+				// mp-gmcg review). existingStatus comes from the same tx/lock as
+				// this write, so completed->completed corrections still skip the
+				// gate while a scheduled/running stored status runs it.
+				isCorrectionInTx := result.Status == state.MatchStatusCompleted &&
+					existingStatus == state.MatchStatusCompleted
+				if !isWithdrawal && !isCorrectionInTx {
 					if err := eng.StartMatchTx(stx, id, mid); err != nil {
 						engErr = err
 						return nil

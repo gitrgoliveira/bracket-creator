@@ -2796,12 +2796,19 @@ paths:
           required: false
           schema:
             type: integer
-          description: 0 = individual matches; > 0 = team matches.
+            minimum: 0
+            maximum: 100
+          description: >
+            0 = individual matches; > 0 = team matches. Bounded to 0..100
+            (a value out of range returns 400): it scales the whole estimate,
+            so an unbounded value would overflow the duration math.
         - in: query
           name: boutsPerTeamMatch
           required: false
           schema:
             type: integer
+            minimum: 0
+            maximum: 100
           description: >
             OVERRIDE for the bouts per team match. Omit it for the normal case:
             when `teamSize > 0` the bout count defaults to `teamSize`, which is

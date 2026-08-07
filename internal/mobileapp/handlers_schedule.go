@@ -91,6 +91,22 @@ func scheduleEstimateHandler(c *gin.Context) {
 		return
 	}
 
+	// teamSize / boutsPerTeamMatch are load-bearing on this branch (they set
+	// the bout count that scales the whole estimate), so — unlike the truly
+	// optional buffer/ceremony scalars — they get an explicit 1..MaxTeamSize
+	// 400 rather than a silent fallback: an unbounded value overflows the bout
+	// math into a negative or inverted-range duration (mp-gmcg review, mirrors
+	// the courts guard above). 0 stays legal (the individual-match default).
+	teamSize := queryIntDefault(c, "teamSize", 0)
+	boutsPerTeamMatch := queryIntDefault(c, "boutsPerTeamMatch", 0)
+	if teamSize < 0 || teamSize > engine.MaxTeamSize ||
+		boutsPerTeamMatch < 0 || boutsPerTeamMatch > engine.MaxTeamSize {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "teamSize and boutsPerTeamMatch must be between 0 and 100",
+		})
+		return
+	}
+
 	// Optional fields default to 0/1; intDefault clamps parse failures
 	// silently so a malformed optional param doesn't 400 the whole
 	// request (the caller's UI is unlikely to send garbage on purpose
@@ -100,8 +116,8 @@ func scheduleEstimateHandler(c *gin.Context) {
 		Multiplier:                multiplier,
 		NumMatches:                queryIntDefault(c, "numMatches", 1),
 		NumCourts:                 courts,
-		TeamSize:                  queryIntDefault(c, "teamSize", 0),
-		BoutsPerTeamMatch:         queryIntDefault(c, "boutsPerTeamMatch", 0),
+		TeamSize:                  teamSize,
+		BoutsPerTeamMatch:         boutsPerTeamMatch,
 		SlowestCourtBufferPct:     queryIntDefault(c, "buffer", 0),
 		CeremonyMinutes:           queryIntDefault(c, "ceremonyMinutes", 0),
 		// teamMatchType widens the estimate into a best/average/worst range for

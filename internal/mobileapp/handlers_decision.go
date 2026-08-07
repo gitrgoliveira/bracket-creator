@@ -174,7 +174,13 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 				reasonErr = &ValidationError{Field: "decisionReason", Message: ReopenNeedsReasonMessage}
 				return nil
 			}
-			result, status, engErr = eng.RecordDecisionTx(stx, id, mid, req.Decision, req.DecisionBy, req.DecisionReason, req.Encho, req.Force)
+			// Pass the TRIMMED reason (not req.DecisionReason): it is persisted
+			// into DecisionReason, and dischargeReopenPendingUnderTx stores the
+			// same trimmed value into CorrectionReason below — feeding the raw one
+			// here left the two audit fields on one record disagreeing byte-for-
+			// byte on padding. Mirrors the score path's up-front TrimSpace of
+			// CorrectionReason (mp-gmcg review).
+			result, status, engErr = eng.RecordDecisionTx(stx, id, mid, req.Decision, req.DecisionBy, reason, req.Encho, req.Force)
 			if result != nil && result.ResultSource == "" {
 				result.ResultSource = "admin"
 			}

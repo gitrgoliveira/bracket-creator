@@ -47,15 +47,15 @@ const (
 // float64 (< 2^53), and leaves ~4 orders of magnitude below int64 max for the
 // ceremony addition — so no input combination can produce a negative duration.
 //
-// This assumes a 64-bit int: 1e15 exceeds a 32-bit int's ~2.1e9 range, so on a
-// 32-bit GOARCH the int(math.Round(...)) below would itself re-trigger the very
-// overflow this ceiling exists to prevent. The whole package is already 64-bit
-// only — internal/engine fails to compile on GOARCH=386 at tiebreaker.go's
-// 100_000_000_000 constant, and .goreleaser.yaml ships no 32-bit target. If that
-// 32-bit break is ever fixed, scale this to the platform (e.g.
-// min(1e15, float64(math.MaxInt/2)), which forces it to a var) so the clamp stays
-// correct there too.
-const maxEstimateMinutes = 1e15
+// The min() keeps the clamp correct on a 32-bit int too, where a bare 1e15 would
+// overflow and re-trigger the very conversion this ceiling exists to prevent:
+// min/max over constant operands is itself a constant expression (Go >= 1.21), so
+// this stays a compile-time const, and float64(math.MaxInt/2) folds to a value
+// far above 1e15 on every 64-bit platform (~4.6e18) — bit-identical to 1e15
+// today, and automatically correct if the package's current 32-bit compile break
+// (tiebreaker.go's 100_000_000_000 overflows a 32-bit int; .goreleaser.yaml ships
+// no 32-bit target) is ever fixed.
+const maxEstimateMinutes = min(1e15, float64(math.MaxInt/2))
 
 // ScheduleEstimate is the wire response for GET /api/schedule/estimate
 // and the return type of EstimateSchedule. All durations are in minutes,

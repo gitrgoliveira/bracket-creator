@@ -2097,6 +2097,45 @@ func TestReopenKachinukiMatchCourtBusy(t *testing.T) {
 		require.NoError(t, lerr)
 		assert.Equal(t, state.MatchStatusCompleted, matches[0].Status, "the reopen must not land")
 	})
+
+	// mp-gmcg review: an UNREOPENABLE target (its winner already fed a fought
+	// downstream) whose court is held by a running match in ANOTHER competition
+	// must report the permanent ErrReopenDownstreamFought, NOT a transient
+	// court_busy. Otherwise the admin remedy panel (which branches on
+	// code=="court_busy") offers to requeue the court's occupant for a target that
+	// can never reopen — a dead end. The plain-reopen entry pre-checks the result
+	// preconditions before CheckCrossCompCourtBusy so the right 409 wins.
+	t.Run("an unreopenable target is not masked by a cross-competition court_busy", func(t *testing.T) {
+		eng, store, _ := setupKachinukiComp(t, "reopen-cross-ds-a", 3)
+		require.NoError(t, store.SaveBracket("reopen-cross-ds-a", &state.Bracket{
+			Rounds: [][]state.BracketMatch{
+				{
+					{ID: "SF0", SideA: "RedTeam", SideB: "WhiteTeam", Status: state.MatchStatusCompleted,
+						Winner: "RedTeam", Decision: "kachinuki-exhaustion", Court: "A"},
+					{ID: "SF1", SideA: "Kuma", SideB: "Washi", Status: state.MatchStatusCompleted, Winner: "Kuma"},
+				},
+				{
+					// The final is already being fought — SF0's winner fed it.
+					{ID: "F0", SideA: "RedTeam", SideB: "Kuma", Status: state.MatchStatusRunning,
+						SubResults: []state.SubMatchResult{{Position: 1, SideA: "R-1", SideB: "K-1"}}},
+				},
+			},
+		}))
+		// Another competition holds SF0's court (A) with a running match.
+		require.NoError(t, store.SaveCompetition(&state.Competition{ID: "reopen-cross-ds-b"}))
+		require.NoError(t, store.SavePoolMatches("reopen-cross-ds-b", []state.MatchResult{
+			runningOnCourt("P9-0", "A"),
+		}))
+
+		err := eng.ReopenKachinukiMatch("reopen-cross-ds-a", "SF0", "")
+		require.ErrorIs(t, err, ErrReopenDownstreamFought, "the permanent reason must win over a transient court_busy")
+		var busy *CourtBusyError
+		require.NotErrorAs(t, err, &busy, "an unreopenable target must not surface as court_busy")
+
+		bracket, lerr := store.LoadBracket("reopen-cross-ds-a")
+		require.NoError(t, lerr)
+		assert.Equal(t, state.MatchStatusCompleted, bracket.Rounds[0][0].Status, "the target stays completed")
+	})
 }
 
 // TestRequeueBlockerAndReopenKachinuki pins the atomic court-busy remedy

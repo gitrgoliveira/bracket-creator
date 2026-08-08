@@ -630,6 +630,22 @@ func (e *Engine) ReopenKachinukiMatch(compID, matchID, reason string) error {
 	// path. The LoadCompetition/validation above stay outside: they touch no
 	// court state, so a bad-input rejection need not serialize on the lock.
 	return e.store.WithCourtExclusivityLock(func() error {
+		// Read-only RESULT preconditions BEFORE the court gates, so a plain reopen
+		// of a permanently-unreopenable target (not completed, or its winner fed a
+		// fought downstream) reports THAT — not a transient court_busy. The admin
+		// remedy panel turns court_busy into an offer to requeue the court's
+		// occupant (applyReopenFailure branches on code=="court_busy",
+		// admin_scoring_team.jsx); without this pre-check a cross-comp court hold
+		// (CheckCrossCompCourtBusy runs before the tx) would surface court_busy
+		// first and steer the operator into that dead-end remedy for a target that
+		// can never reopen (mp-gmcg review). checkTargetReopenable is the SAME
+		// read-only pre-check the requeue path runs before its revert, and the
+		// mutation below re-checks — so this only reorders which 409 wins. It lives
+		// at this plain-reopen entry rather than in the shared body because the
+		// requeue path already pre-checks before its revert and must not re-run it.
+		if verr := e.checkTargetReopenable(compID, comp, matchID); verr != nil {
+			return verr
+		}
 		return e.reopenKachinukiUnderCourtLock(compID, comp, matchID, reason)
 	})
 }
@@ -674,9 +690,11 @@ func (e *Engine) reopenKachinukiUnderCourtLock(compID string, comp *state.Compet
 			// matters because a pool finisher feeds the knockout INDIRECTLY via
 			// the standings the bracket was seeded from (the score path's mp-e2k1
 			// guard can't catch it: by re-End the reopened match is already out of
-			// the standings baseline). Court is the reopen-only half, gated next,
-			// so a PERMANENTLY-unreopenable target reports that rather than a
-			// transient "court busy".
+			// the standings baseline). These precede the SAME-competition court
+			// gate below; the cross-comp gate (CheckCrossCompCourtBusy) already ran
+			// before this tx, and the plain-reopen entry (ReopenKachinukiMatch)
+			// pre-checks these preconditions before THAT — so an unreopenable
+			// target is never masked by a transient court_busy on either gate.
 			if rerr := e.reopenResultPreconditionTx(tx, compID, comp, matchID, h); rerr != nil {
 				opErr = rerr
 				return nil
@@ -807,13 +825,16 @@ func (e *Engine) reopenResultPreconditionTx(tx state.StoreTx, compID string, com
 	return nil
 }
 
-// checkTargetReopenable runs the read-only reopen RESULT preconditions for the
-// requeue-and-reopen path (mp-gmcg review): it opens a target-competition tx and
-// reports whether the match is completed and its winner has not fed a fought
-// downstream, WITHOUT the court check (the caller is about to free the court) and
-// WITHOUT any mutation. The preconditions live in reopenResultPreconditionTx,
-// which reopenKachinukiUnderCourtLock also runs, so this pre-check cannot pass a
-// target the reopen will then reject.
+// checkTargetReopenable runs the read-only reopen RESULT preconditions (mp-gmcg
+// review): it opens a target-competition tx and reports whether the match is
+// completed and its winner has not fed a fought downstream, WITHOUT any court
+// check and WITHOUT any mutation. Two callers run it before their court gates:
+// the requeue-and-reopen path (before its destructive revert, so a target that
+// can't reopen never costs the blocker its score) and the plain-reopen entry
+// (before CheckCrossCompCourtBusy, so an unreopenable target reports that rather
+// than a transient court_busy). The preconditions live in
+// reopenResultPreconditionTx, which reopenKachinukiUnderCourtLock also runs, so
+// this pre-check cannot pass a target the reopen will then reject.
 func (e *Engine) checkTargetReopenable(compID string, comp *state.Competition, matchID string) error {
 	var checkErr error
 	txErr := e.store.WithTransaction(compID, func(tx state.StoreTx) error {
@@ -1192,15 +1213,19 @@ func reopenPending(reason string) bool {
 	return reason == ""
 }
 
-// downstreamTargets returns the bracket matches the winner of (rIdx, mIdx) was
-// propagated INTO: bronze (the 3rd-place match, only when this is a semifinal
-// that feeds it) and next (the next-round slot). Either may be nil. This is the
-// SINGLE derivation of downstream LOCATION, so the read-only
-// downstreamFoughtForRound predicate and the destructive retractPropagatedWinner
-// mutation cannot drift on WHERE a winner went — the drift that would split
-// "check passes" from "mutation misses" and wipe a blocker's live score for a
-// reopen that then fails (mp-gmcg review). A change to the location rule (e.g.
-// the bronze-feeding round index) now lands in exactly one place.
+// downstreamTargets returns the bracket matches this result was propagated into:
+// next (the next-round slot, which received the WINNER) and bronze (the 3rd-place
+// match, which received the semifinal LOSER, and only when this is a semifinal
+// that feeds it). Either may be nil. This is the SINGLE derivation of downstream
+// LOCATION on the REOPEN side, so the read-only downstreamFoughtForRound predicate
+// and the destructive retractPropagatedWinner mutation cannot drift on WHERE a
+// result went — the drift that would split "check passes" from "mutation misses"
+// and wipe a blocker's live score for a reopen that then fails (mp-gmcg review).
+// propagateBracketWinner (scoring.go) independently encodes the same slot rule
+// (the mIdx/2 next-round index and the bronze-feeding round index), so a
+// location-rule change must still land there too — as retractPropagatedWinner's
+// body comment already flags ("Mirror propagateBracketWinner's positional
+// assignment").
 func downstreamTargets(bracket *state.Bracket, rIdx, mIdx int) (bronze, next *state.BracketMatch) {
 	if bracket.ThirdPlaceMatch != nil && rIdx == len(bracket.Rounds)-2 {
 		bronze = bracket.ThirdPlaceMatch

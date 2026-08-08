@@ -654,44 +654,36 @@ func (e *Engine) reopenKachinukiUnderCourtLock(compID string, comp *state.Compet
 
 	var opErr error
 	txErr := e.store.WithTransaction(compID, func(tx state.StoreTx) error {
-		// guard is the SINGLE copy of the preconditions every match home
-		// below (pool, bracket round, bronze) must pass: the match must be
-		// completed, and its court must be free. Kept as one closure rather
-		// than open-coded per branch because three hand-written copies is
-		// exactly the shape that loses one when a fourth match home appears.
-		//
-		// The court half is the same-competition half of the reopen court
-		// gate (see the COURT GATE note above): reopening flips the match
-		// back to running, so a court that already has a running match would
-		// end up with two, wedging the exclusivity check for BOTH. DO NOT
-		// remove this guard as a redundant-looking check.
-		guard := func(h matchHome, status state.MatchStatus, court string) error {
-			if status != state.MatchStatusCompleted {
-				return ErrReopenNotCompleted
-			}
-			// Reuse the pool matches + bracket findMatchHome already loaded
-			// under this tx for the same-comp court scan, instead of the
-			// re-load a nil/nil call would do (mp-gmcg review E4). A nil
-			// slice (pool-load error, or the bracket on a pool home) reloads.
+		// courtGate is the same-competition half of the reopen court gate (see
+		// the COURT GATE note above): reopening flips the match back to running,
+		// so a court that already has a running match would end up with two,
+		// wedging the exclusivity check for BOTH. DO NOT remove it as a
+		// redundant-looking check. It reuses the pool matches + bracket
+		// findMatchHome already loaded under this tx for the same-comp scan,
+		// instead of the re-load a nil/nil call would do (mp-gmcg review E4); a
+		// nil slice (pool-load error, or the bracket on a pool home) reloads.
+		courtGate := func(h matchHome, court string) error {
 			return courtFreeInCompTxWith(tx, compID, matchID, court, h.PoolMatches, h.BracketRoot)
 		}
 
 		found, ferr := findMatchHome(tx, compID, matchID, func(h matchHome) error {
+			// Read-only RESULT preconditions (completed + downstream-not-fought),
+			// the SAME check checkTargetReopenable runs, shared via
+			// reopenResultPreconditionTx so neither path can add one the other
+			// misses (mp-gmcg review). The pool branch's downstream refusal
+			// matters because a pool finisher feeds the knockout INDIRECTLY via
+			// the standings the bracket was seeded from (the score path's mp-e2k1
+			// guard can't catch it: by re-End the reopened match is already out of
+			// the standings baseline). Court is the reopen-only half, gated next,
+			// so a PERMANENTLY-unreopenable target reports that rather than a
+			// transient "court busy".
+			if rerr := e.reopenResultPreconditionTx(tx, compID, comp, matchID, h); rerr != nil {
+				opErr = rerr
+				return nil
+			}
 			if h.Pool != nil {
-				if gerr := guard(h, h.Pool.Status, h.Pool.Court); gerr != nil {
-					opErr = gerr
-					return nil
-				}
-				// mp-gmcg: the bracket branch below refuses a reopen whose winner
-				// already fed a started knockout match (retractPropagatedWinner).
-				// A pool finisher feeds the knockout INDIRECTLY, through the
-				// standings the bracket was seeded from, so it needs the same
-				// refusal or it silently strands a displaced finisher in a
-				// started bracket match (the score path's mp-e2k1 guard can't
-				// catch it: by re-End time the reopened match is already excluded
-				// from the standings baseline it compares against).
-				if derr := e.checkPoolReopenDownstreamTx(tx, compID, comp, matchID); derr != nil {
-					opErr = derr
+				if cerr := courtGate(h, h.Pool.Court); cerr != nil {
+					opErr = cerr
 					return nil
 				}
 				reopenPoolMatch(h.Pool, reason)
@@ -699,13 +691,15 @@ func (e *Engine) reopenKachinukiUnderCourtLock(compID string, comp *state.Compet
 				// so standings caches invalidate via the usual version bump.
 				return h.Save()
 			}
-			if gerr := guard(h, h.Bracket.Status, h.Bracket.Court); gerr != nil {
-				opErr = gerr
+			if cerr := courtGate(h, h.Bracket.Court); cerr != nil {
+				opErr = cerr
 				return nil
 			}
 			// A bracket ROUND winner may already be propagated downstream; the
 			// bronze (3rd-place) match is a sibling with no downstream, so it
-			// needs no retraction.
+			// needs no retraction. downstreamFoughtForRound was already verified
+			// above; retractPropagatedWinner re-checks it as its documented
+			// check-before-mutate contract — a no-op here — then does the mutation.
 			if !h.Bronze {
 				if derr := retractPropagatedWinner(h.BracketRoot, h.RIdx, h.MIdx); derr != nil {
 					opErr = derr
@@ -785,35 +779,46 @@ func (e *Engine) RequeueBlockerAndReopenKachinuki(targetComp, targetMatch, block
 	})
 }
 
+// reopenResultPreconditionTx runs the read-only RESULT preconditions a reopen
+// requires for one already-located match home: the match must be COMPLETED, and
+// its winner must not have fed a fought downstream — a started knockout for a
+// bracket round (downstreamFoughtForRound), or a started knockout seeded off this
+// pool's current finisher for a pool match (checkPoolReopenDownstreamTx). It
+// EXCLUDES the court gate (the requeue path frees the court itself; the plain
+// reopen checks it separately) and performs NO mutation. checkTargetReopenable
+// and reopenKachinukiUnderCourtLock both run it, so a RESULT precondition added to
+// one path can't be missed by the other — the drift that reopens the
+// wipe-for-nothing hazard (mp-gmcg review).
+func (e *Engine) reopenResultPreconditionTx(tx state.StoreTx, compID string, comp *state.Competition, matchID string, h matchHome) error {
+	if h.Pool != nil {
+		if h.Pool.Status != state.MatchStatusCompleted {
+			return ErrReopenNotCompleted
+		}
+		return e.checkPoolReopenDownstreamTx(tx, compID, comp, matchID)
+	}
+	if h.Bracket.Status != state.MatchStatusCompleted {
+		return ErrReopenNotCompleted
+	}
+	// Bronze is a sibling of Rounds with no downstream, so it can never be
+	// downstream-fought (matches reopenKachinukiUnderCourtLock's !Bronze).
+	if !h.Bronze && downstreamFoughtForRound(h.BracketRoot, h.RIdx, h.MIdx) {
+		return ErrReopenDownstreamFought
+	}
+	return nil
+}
+
 // checkTargetReopenable runs the read-only reopen RESULT preconditions for the
 // requeue-and-reopen path (mp-gmcg review): it opens a target-competition tx and
 // reports whether the match is completed and its winner has not fed a fought
-// downstream, WITHOUT the court check (the caller is about to free the court)
-// and WITHOUT any mutation. It shares its leaf predicates —
-// checkPoolReopenDownstreamTx and downstreamFoughtForRound — with
-// reopenKachinukiUnderCourtLock's guard, so the pre-check cannot pass a target
-// the reopen will then reject.
+// downstream, WITHOUT the court check (the caller is about to free the court) and
+// WITHOUT any mutation. The preconditions live in reopenResultPreconditionTx,
+// which reopenKachinukiUnderCourtLock also runs, so this pre-check cannot pass a
+// target the reopen will then reject.
 func (e *Engine) checkTargetReopenable(compID string, comp *state.Competition, matchID string) error {
 	var checkErr error
 	txErr := e.store.WithTransaction(compID, func(tx state.StoreTx) error {
 		found, ferr := findMatchHome(tx, compID, matchID, func(h matchHome) error {
-			if h.Pool != nil {
-				if h.Pool.Status != state.MatchStatusCompleted {
-					checkErr = ErrReopenNotCompleted
-					return nil
-				}
-				checkErr = e.checkPoolReopenDownstreamTx(tx, compID, comp, matchID)
-				return nil
-			}
-			if h.Bracket.Status != state.MatchStatusCompleted {
-				checkErr = ErrReopenNotCompleted
-				return nil
-			}
-			// Bronze is a sibling of Rounds with no downstream, so it can never
-			// be downstream-fought (matches reopenKachinukiUnderCourtLock's !Bronze).
-			if !h.Bronze && downstreamFoughtForRound(h.BracketRoot, h.RIdx, h.MIdx) {
-				checkErr = ErrReopenDownstreamFought
-			}
+			checkErr = e.reopenResultPreconditionTx(tx, compID, comp, matchID, h)
 			return nil
 		})
 		if ferr != nil {
@@ -1187,26 +1192,35 @@ func reopenPending(reason string) bool {
 	return reason == ""
 }
 
+// downstreamTargets returns the bracket matches the winner of (rIdx, mIdx) was
+// propagated INTO: bronze (the 3rd-place match, only when this is a semifinal
+// that feeds it) and next (the next-round slot). Either may be nil. This is the
+// SINGLE derivation of downstream LOCATION, so the read-only
+// downstreamFoughtForRound predicate and the destructive retractPropagatedWinner
+// mutation cannot drift on WHERE a winner went — the drift that would split
+// "check passes" from "mutation misses" and wipe a blocker's live score for a
+// reopen that then fails (mp-gmcg review). A change to the location rule (e.g.
+// the bronze-feeding round index) now lands in exactly one place.
+func downstreamTargets(bracket *state.Bracket, rIdx, mIdx int) (bronze, next *state.BracketMatch) {
+	if bracket.ThirdPlaceMatch != nil && rIdx == len(bracket.Rounds)-2 {
+		bronze = bracket.ThirdPlaceMatch
+	}
+	if rIdx+1 < len(bracket.Rounds) {
+		next = &bracket.Rounds[rIdx+1][mIdx/2]
+	}
+	return bronze, next
+}
+
 // downstreamFoughtForRound reports whether the match at bracket round rIdx / slot
 // mIdx has a downstream (next-round match, or the bronze it feeds) that is
 // already started or scored — the read-only predicate that makes reopening it
-// unsafe. Extracted so the destructive retractPropagatedWinner and the
-// read-only reopen pre-check (checkTargetReopenable) key on ONE definition
-// and cannot drift into disagreeing about what "downstream fought" means
-// (mp-gmcg review): drift there wipes a blocker's live score for a reopen that
-// then fails.
+// unsafe. It and the destructive retractPropagatedWinner both consume
+// downstreamTargets, so they key on ONE definition of both WHERE the winner went
+// and WHAT "downstream fought" means (mp-gmcg review).
 func downstreamFoughtForRound(bracket *state.Bracket, rIdx, mIdx int) bool {
-	if bracket.ThirdPlaceMatch != nil && rIdx == len(bracket.Rounds)-2 {
-		if bracketMatchStartedOrScored(bracket.ThirdPlaceMatch) {
-			return true
-		}
-	}
-	if rIdx+1 < len(bracket.Rounds) {
-		if bracketMatchStartedOrScored(&bracket.Rounds[rIdx+1][mIdx/2]) {
-			return true
-		}
-	}
-	return false
+	bronze, next := downstreamTargets(bracket, rIdx, mIdx)
+	return (bronze != nil && bracketMatchStartedOrScored(bronze)) ||
+		(next != nil && bracketMatchStartedOrScored(next))
 }
 
 // retractPropagatedWinner undoes what propagateBracketWinner did for the
@@ -1221,14 +1235,7 @@ func retractPropagatedWinner(bracket *state.Bracket, rIdx, mIdx int) error {
 	if downstreamFoughtForRound(bracket, rIdx, mIdx) {
 		return ErrReopenDownstreamFought
 	}
-	var bronze *state.BracketMatch
-	if bracket.ThirdPlaceMatch != nil && rIdx == len(bracket.Rounds)-2 {
-		bronze = bracket.ThirdPlaceMatch
-	}
-	var next *state.BracketMatch
-	if rIdx+1 < len(bracket.Rounds) {
-		next = &bracket.Rounds[rIdx+1][mIdx/2]
-	}
+	bronze, next := downstreamTargets(bracket, rIdx, mIdx)
 	if bronze != nil {
 		// Mirror propagateBracketWinner's positional assignment: semifinal
 		// mIdx 0 feeds the bronze SideA, mIdx 1 feeds SideB.

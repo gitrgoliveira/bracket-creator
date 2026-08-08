@@ -46,6 +46,15 @@ const (
 // review). 1e15 is far beyond any real tournament, exactly representable in
 // float64 (< 2^53), and leaves ~4 orders of magnitude below int64 max for the
 // ceremony addition — so no input combination can produce a negative duration.
+//
+// This assumes a 64-bit int: 1e15 exceeds a 32-bit int's ~2.1e9 range, so on a
+// 32-bit GOARCH the int(math.Round(...)) below would itself re-trigger the very
+// overflow this ceiling exists to prevent. The whole package is already 64-bit
+// only — internal/engine fails to compile on GOARCH=386 at tiebreaker.go's
+// 100_000_000_000 constant, and .goreleaser.yaml ships no 32-bit target. If that
+// 32-bit break is ever fixed, scale this to the platform (e.g.
+// min(1e15, float64(math.MaxInt/2)), which forces it to a var) so the clamp stays
+// correct there too.
 const maxEstimateMinutes = 1e15
 
 // ScheduleEstimate is the wire response for GET /api/schedule/estimate

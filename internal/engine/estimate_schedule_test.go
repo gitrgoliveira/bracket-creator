@@ -539,3 +539,35 @@ func TestEstimateMatchCounts_vs_RealMixedDraw(t *testing.T) {
 		})
 	}
 }
+
+// TestEstimateForCounts_KachinukiRange_Golden pins EstimateForCounts's
+// kachinuki best/avg/worst output for a fixed config, so the F7 one-pass walk
+// refactor is proven bit-identical: the numbers below were captured from the
+// three-separate-walks implementation and must not move (mp-gmcg review F7).
+func TestEstimateForCounts_KachinukiRange_Golden(t *testing.T) {
+	comp := &state.Competition{
+		ID:                          "est-kachinuki",
+		Format:                      state.CompFormatMixed,
+		Kind:                        "team",
+		TeamMatchType:               state.TeamMatchTypeKachinuki,
+		TeamSize:                    5,
+		Courts:                      []string{"A", "B"},
+		StartTime:                   "09:00",
+		PoolMatchDurationSeconds:    180,
+		PlayoffMatchDurationSeconds: 300,
+		Status:                      state.CompStatusSetup,
+	}
+	tourn := &state.Tournament{}
+	state.ApplyTournamentDefaults(tourn)
+
+	got := EstimateForCounts(9, 5, comp, tourn)
+
+	// Strict ordering is the load-bearing invariant of the three scenarios.
+	assert.Less(t, got.BestCaseMinutes, got.TotalDurationMinutes, "best < avg")
+	assert.Less(t, got.TotalDurationMinutes, got.WorstCaseMinutes, "avg < worst")
+	// Golden values, captured from the three-separate-walks implementation.
+	assert.Equal(t, 287, got.BestCaseMinutes)
+	assert.Equal(t, 404, got.TotalDurationMinutes)
+	assert.Equal(t, 520, got.WorstCaseMinutes)
+	assert.Equal(t, []int{404, 297}, got.PerCourtMinutes)
+}

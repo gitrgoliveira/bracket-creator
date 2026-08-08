@@ -11,6 +11,22 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
+// winnerOfFormat / winnerOfPlaceholder are the ONE producer of the
+// generation-time "not yet decided" slot value: depth is 1-based from the
+// final (matching parseWinnerOf's contract, scoring.go), matchIdx is 0-based
+// within that round. Before this, three independent fmt.Sprintf("Winner of
+// r%d-m%d", ...) call sites (here x2, and retractPropagatedWinner in
+// kachinuki.go) and one fmt.Sscanf parser (parseWinnerOf) each hard-coded the
+// same literal — a wording change had to touch all four to keep
+// propagateBracketWinner able to re-resolve a reopened match's downstream
+// slot; missing even one would silently break re-propagation on that one
+// path only (mp-gmcg review).
+const winnerOfFormat = "Winner of r%d-m%d"
+
+func winnerOfPlaceholder(depth, matchIdx int) string {
+	return fmt.Sprintf(winnerOfFormat, depth, matchIdx)
+}
+
 // generatePlayoffs builds and saves an elimination bracket for a standalone
 // (direct-elimination) playoffs competition. StandardSeeding → CreateBalancedTree
 // → TreeToLeafArray mirrors the Excel create-playoffs path exactly (mp-5ng7);
@@ -141,7 +157,7 @@ func (e *Engine) buildBracketFromLeaves(comp *state.Competition, leaves []string
 					sideA = n.Left.LeafVal
 				} else {
 					// Placeholder for winner of previous round match
-					sideA = fmt.Sprintf("Winner of r%d-m%d", d+1, i*2)
+					sideA = winnerOfPlaceholder(d+1, i*2)
 				}
 			}
 			sideB := ""
@@ -149,7 +165,7 @@ func (e *Engine) buildBracketFromLeaves(comp *state.Competition, leaves []string
 				if n.Right.LeafNode {
 					sideB = n.Right.LeafVal
 				} else {
-					sideB = fmt.Sprintf("Winner of r%d-m%d", d+1, i*2+1)
+					sideB = winnerOfPlaceholder(d+1, i*2+1)
 				}
 			}
 

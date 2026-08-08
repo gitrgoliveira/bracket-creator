@@ -48,6 +48,10 @@ type CompetitionStore interface {
 	LoadPoolMatches(id string) ([]state.MatchResult, error)
 	// LoadBracket returns the elimination bracket for compID.
 	LoadBracket(id string) (*state.Bracket, error)
+	// MatchStatusByID returns the status of one match (pool → bracket →
+	// bronze) without the deep copy the Load* methods make. Mirrors
+	// state.Store.MatchStatusByID.
+	MatchStatusByID(compID, matchID string) (state.MatchStatus, bool, error)
 }
 
 // ScoringEngine is the consumer-boundary view of engine.Engine used by
@@ -117,16 +121,11 @@ type ScoringEngine interface {
 	UpdateMatchTime(compID string, matchID string, scheduledAt string) error
 	// MaybeAdvanceKachinuki runs the post-score advancement for a
 	// kachinuki ("winner-stays-on") team match. No-op for non-kachinuki
-	// competitions. Mirrors engine.Engine.MaybeAdvanceKachinuki.
-	// FR-044, T135.
-	MaybeAdvanceKachinuki(compID, matchID string) (bool, error)
-	// CheckKachinukiPrematureCompletion rejects a completed-status write
-	// that would finalize a kachinuki match while both rosters still
-	// have players and no daihyosen resolves the tie
-	// (engine.ErrKachinukiPrematureCompletion, mapped to 409). No-op for
-	// non-kachinuki competitions and non-completed writes. Mirrors
-	// engine.Engine.CheckKachinukiPrematureCompletion.
-	CheckKachinukiPrematureCompletion(compID, matchID string, result *state.MatchResult) error
+	// competitions. Returns (advanced, postLog, err): postLog is the full
+	// bout log AFTER the appended pairing when advanced is true, so the
+	// caller echoes it without re-reading the match. Mirrors
+	// engine.Engine.MaybeAdvanceKachinuki. FR-044, T135.
+	MaybeAdvanceKachinuki(compID, matchID string) (bool, []state.SubMatchResult, error)
 }
 
 // CompetitorStatusStore is the consumer-boundary view of state.Store
@@ -149,7 +148,8 @@ type EligibilityEngine interface {
 // SetTeamLineup / DeleteTeamLineup methods on *state.Store.
 //
 // The handler also needs the competition's TeamSize to drive
-// TeamLineup.Validate, so it composes this interface with
+// TeamLineup.ValidatePositions (position-key validity only, no
+// completeness/vacancy rule), so it composes this interface with
 // CompetitionStore at the registration site rather than promoting
 // LoadCompetition into this minimal store interface; same pattern
 // the other handler families use.

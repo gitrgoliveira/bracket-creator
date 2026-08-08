@@ -160,6 +160,78 @@ func TestPoolMatches_LegacyFileWithoutRepPlayers(t *testing.T) {
 	assert.Empty(t, results[0].RepPlayerB)
 }
 
+// TestPoolMatches_LegacyFileWithoutReopenPending verifies a pool-matches.csv
+// written before the ReopenPending column existed (24 columns, through
+// FlagsB) still loads, with the flag false (mp-gmcg backward-compat).
+//
+// False is the only safe default: a true would put every pre-existing match
+// behind a justification the operator never incurred, and the score path
+// would refuse to complete it without a correctionReason.
+func TestPoolMatches_LegacyFileWithoutReopenPending(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	compID := "legacy-reopen-pending"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Legacy"}))
+
+	// 24-column row (through FlagsB), no ReopenPending column.
+	header := "PoolName,MatchIdx,SideA,SideB,Winner,IpponsA,IpponsB,HansokuA,HansokuB,Decision,Status,Court,SubResults,ScheduledAt,ResultSource,Round,SideAID,SideBID,WinnerID,CorrectionReason,RepPlayerA,RepPlayerB,FlagsA,FlagsB\n"
+	row := "Pool A,0,Alice,Bob,Alice,M|K,,0,0,,completed,A,,,,,,,,,,,0,0\n"
+	require.NoError(t, os.WriteFile(store.compPath(compID, "pool-matches.csv"), []byte(header+row), 0600))
+
+	results, err := store.LoadPoolMatchesLocked(compID)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "Alice", results[0].SideA, "the row must still parse")
+	assert.Equal(t, MatchStatusCompleted, results[0].Status)
+	assert.False(t, results[0].ReopenPending, "missing ReopenPending column → false")
+}
+
+// TestPoolMatches_ReopenPendingRoundTrip verifies the appended ReopenPending
+// column survives a save→load cycle. Without persistence the "this match owes
+// an audit reason" state would be lost on restart, and the discarded result
+// could then be rewritten with no record (mp-gmcg).
+func TestPoolMatches_ReopenPendingRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	compID := "reopen-pending-roundtrip"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Test"}))
+	require.NoError(t, store.SavePoolMatches(compID, []MatchResult{
+		{ID: "P1-0", SideA: "Alice", SideB: "Bob", Status: MatchStatusRunning, ReopenPending: true},
+		{ID: "P1-1", SideA: "Carol", SideB: "Dave", Status: MatchStatusRunning},
+	}))
+
+	loaded, err := store.LoadPoolMatchesLocked(compID)
+	require.NoError(t, err)
+	require.Len(t, loaded, 2)
+	assert.True(t, loaded[0].ReopenPending, "the outstanding justification must survive a restart")
+	assert.False(t, loaded[1].ReopenPending, "an untouched match owes nothing")
+}
+
+// TestPoolMatches_ReopenPendingCorruptValueIsFalse: a hand-edited or corrupted
+// CSV must not be able to wedge a match behind a justification it can never
+// satisfy, so a non-boolean value in the column reads as false.
+func TestPoolMatches_ReopenPendingCorruptValueIsFalse(t *testing.T) {
+	rec := make([]string, 25)
+	rec[0], rec[1], rec[2], rec[3] = "Pool A", "0", "X", "Y"
+	rec[24] = "yes please"
+
+	got := parsePoolMatchesRecords([][]string{rec})
+	require.Len(t, got, 1)
+	assert.False(t, got[0].ReopenPending, "unparseable ReopenPending → false")
+
+	// A valid boolean still loads unchanged (both spellings strconv accepts).
+	for _, v := range []string{"true", "1"} {
+		rec[24] = v
+		got = parsePoolMatchesRecords([][]string{rec})
+		require.Len(t, got, 1)
+		assert.Truef(t, got[0].ReopenPending, "ReopenPending %q must parse as true", v)
+	}
+}
+
 // TestPools_PlayerIDRoundTrip verifies the appended participant-id column in
 // pools.csv survives a save→load cycle so pool.players carry .ID for the
 // league matrix.

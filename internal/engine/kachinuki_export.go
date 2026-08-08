@@ -33,14 +33,14 @@ func (e *Engine) KachinukiDetailMatches(id string) ([]helper.KachinukiMatchDetai
 
 // collectKachinukiMatches returns the bout-by-bout detail for every
 // kachinuki match in the competition that has at least one bout. Only
-// invoked for competitions with comp.TeamMatchType == TeamMatchTypeKachinuki;
-// returns an empty slice for fixed team or individual competitions.
+// invoked for competitions where comp.IsKachinuki() is true; returns an
+// empty slice for fixed team or individual competitions.
 //
 // The function is read-only: load pool matches, bracket, and team lineups,
 // flatten into helper.KachinukiMatchDetail. The order is pool matches in
 // persisted order, then bracket matches round-by-round.
 func (e *Engine) collectKachinukiMatches(compID string, comp *state.Competition) ([]helper.KachinukiMatchDetail, error) {
-	if comp == nil || comp.TeamMatchType != state.TeamMatchTypeKachinuki || comp.TeamSize < 2 {
+	if !comp.IsKachinuki() {
 		return nil, nil
 	}
 

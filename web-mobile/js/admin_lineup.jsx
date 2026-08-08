@@ -151,9 +151,11 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
     setError("");
     setSaving(true);
     try {
-      // Strip empty positions so the server doesn't see them as
-      // explicit empty strings: domain.TeamLineup.Validate counts
-      // empty values as "missing", which is what we want.
+      // Strip empty positions before sending: an omitted key reads as
+      // "vacant" the same way an explicit empty string would (the server's
+      // ValidatePositions only checks that submitted KEYS are valid for the
+      // team size, not whether values are filled), so this is a storage-
+      // hygiene choice — an omitted key, not a stored empty string.
       const positionsOut = {};
       Object.entries(values).forEach(([k, v]) => {
         // Trim here too (not just onBlur) so a Save triggered without a blur:

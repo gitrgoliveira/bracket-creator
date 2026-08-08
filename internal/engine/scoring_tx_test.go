@@ -336,6 +336,70 @@ func TestRecordMatchResultWithIneligibilityTx_PreservesSideIDs(t *testing.T) {
 	assert.Equal(t, aID, matches[0].WinnerID, "WinnerSide=A must resolve WinnerID even when both sides share a name")
 }
 
+// TestRecordMatchResultWithIneligibilityTx_PreservesCorrectionReason guards the
+// pool/bracket twin asymmetry: the bracket write is set-if-non-empty, so a
+// stored CorrectionReason survives a write carrying none, while the pool write
+// is a whole-struct overwrite that used to BLANK it. That matters because the
+// kachinuki reopen path persists the operator's mandatory audit justification
+// in that field, and the first "Record bout" after a reopen is a plain pool
+// write with no reason of its own.
+func TestRecordMatchResultWithIneligibilityTx_PreservesCorrectionReason(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "tx-correction-reason"
+	createTestCompetition(t, store, compID, "league", 2)
+
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: helper.NewUUID4(), Name: "Alice", Dojo: "A"},
+		{ID: helper.NewUUID4(), Name: "Bob", Dojo: "B"},
+	}))
+
+	score := func(t *testing.T, result *state.MatchResult) state.MatchResult {
+		t.Helper()
+		var engErr error
+		_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
+			_, engErr = eng.RecordMatchResultWithIneligibilityTx(tx, compID, "Pool A-0", result)
+			return nil
+		})
+		require.NoError(t, engErr)
+		matches, err := store.LoadPoolMatches(compID)
+		require.NoError(t, err)
+		require.Len(t, matches, 1)
+		return matches[0]
+	}
+
+	t.Run("stored reason survives a write carrying none", func(t *testing.T) {
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{{
+			ID: "Pool A-0", SideA: "Alice", SideB: "Bob",
+			Status:           state.MatchStatusRunning,
+			CorrectionReason: "reopen: taisho bout must be re-fought",
+		}}))
+
+		got := score(t, &state.MatchResult{
+			ID: "Pool A-0", SideA: "Alice", SideB: "Bob",
+			IpponsA: []string{"M"}, Status: state.MatchStatusRunning,
+		})
+		assert.Equal(t, "reopen: taisho bout must be re-fought", got.CorrectionReason,
+			"a bout write with no reason must not erase the reopen audit justification")
+	})
+
+	t.Run("an explicit reason still overwrites the stored one", func(t *testing.T) {
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{{
+			ID: "Pool A-0", SideA: "Alice", SideB: "Bob",
+			Status:           state.MatchStatusCompleted,
+			CorrectionReason: "reopen: taisho bout must be re-fought",
+		}}))
+
+		got := score(t, &state.MatchResult{
+			ID: "Pool A-0", SideA: "Alice", SideB: "Bob",
+			Winner: "Alice", IpponsA: []string{"M"},
+			Status:           state.MatchStatusCompleted,
+			CorrectionReason: "scorer error: wrong waza",
+		})
+		assert.Equal(t, "scorer error: wrong waza", got.CorrectionReason,
+			"preservation must not shadow a reason the operator supplied")
+	})
+}
+
 // TestStartMatchTx_BlocksIneligibleParticipant verifies the FR-035
 // pre-flight gate. After Alice is recorded as kiken'd on Pool A-0
 // (her status: ineligible, matchID=Pool A-0), StartMatchTx for
@@ -964,4 +1028,89 @@ func TestKnockoutRescore_NotGatedAsPoolMatch(t *testing.T) {
 	}))
 	assert.NoError(t, rescore, "knockout re-score must not be gated by the pool re-score guard")
 	assert.NotErrorIs(t, rescore, ErrDownstreamKnockoutScored)
+}
+
+// TestCourtOccupied covers the PURE court-occupancy scan extracted for E4
+// (mp-gmcg review): given already-loaded pool matches + bracket, find the
+// RUNNING match on a court other than skipMatchID, searching pool → rounds →
+// bronze. The loading wrapper (courtFreeInCompTxWith) and its id-only entry
+// point (checkCourtExclusivityTx) are covered end-to-end by the reopen
+// court-busy tests.
+func TestCourtOccupied(t *testing.T) {
+	running := func(id, court string) state.MatchResult {
+		return state.MatchResult{ID: id, Court: court, Status: state.MatchStatusRunning}
+	}
+	brk := func(id, court string, st state.MatchStatus) state.BracketMatch {
+		return state.BracketMatch{ID: id, Court: court, Status: st}
+	}
+
+	t.Run("finds a running pool match on the court", func(t *testing.T) {
+		pool := []state.MatchResult{running("P1-0", "A"), running("P1-1", "B")}
+		occ := courtOccupied(pool, nil, "A", "other")
+		require.NotNil(t, occ)
+		assert.Equal(t, "P1-0", occ.MatchID)
+	})
+
+	t.Run("skips the target match (skipMatchID)", func(t *testing.T) {
+		pool := []state.MatchResult{running("P1-0", "A")}
+		assert.Nil(t, courtOccupied(pool, nil, "A", "P1-0"),
+			"the match being (re)opened is itself on the court and must be skipped")
+	})
+
+	t.Run("ignores non-running matches", func(t *testing.T) {
+		pool := []state.MatchResult{
+			{ID: "done", Court: "A", Status: state.MatchStatusCompleted},
+			{ID: "sched", Court: "A", Status: state.MatchStatusScheduled},
+		}
+		assert.Nil(t, courtOccupied(pool, nil, "A", "x"))
+	})
+
+	t.Run("ignores a running match on a DIFFERENT court", func(t *testing.T) {
+		pool := []state.MatchResult{running("P1-0", "B")}
+		assert.Nil(t, courtOccupied(pool, nil, "A", "x"))
+	})
+
+	t.Run("finds a running bracket ROUND match", func(t *testing.T) {
+		b := &state.Bracket{Rounds: [][]state.BracketMatch{
+			{brk("R1-0", "A", state.MatchStatusScheduled)},
+			{brk("R2-0", "A", state.MatchStatusRunning)},
+		}}
+		occ := courtOccupied(nil, b, "A", "x")
+		require.NotNil(t, occ)
+		assert.Equal(t, "R2-0", occ.MatchID)
+	})
+
+	t.Run("finds the running BRONZE sibling a rounds-only scan would miss", func(t *testing.T) {
+		b := &state.Bracket{
+			Rounds:          [][]state.BracketMatch{{brk("R1-0", "A", state.MatchStatusScheduled)}},
+			ThirdPlaceMatch: &state.BracketMatch{ID: "BRONZE", Court: "A", Status: state.MatchStatusRunning},
+		}
+		occ := courtOccupied(nil, b, "A", "x")
+		require.NotNil(t, occ)
+		assert.Equal(t, "BRONZE", occ.MatchID)
+	})
+
+	t.Run("skips the bronze when it IS the target", func(t *testing.T) {
+		b := &state.Bracket{ThirdPlaceMatch: &state.BracketMatch{ID: "BRONZE", Court: "A", Status: state.MatchStatusRunning}}
+		assert.Nil(t, courtOccupied(nil, b, "A", "BRONZE"))
+	})
+
+	t.Run("pool is scanned before the bracket (same court, both running)", func(t *testing.T) {
+		pool := []state.MatchResult{running("P1-0", "A")}
+		b := &state.Bracket{Rounds: [][]state.BracketMatch{{brk("R1-0", "A", state.MatchStatusRunning)}}}
+		occ := courtOccupied(pool, b, "A", "x")
+		require.NotNil(t, occ)
+		assert.Equal(t, "P1-0", occ.MatchID, "pool home is searched first")
+	})
+
+	t.Run("nothing loaded, nothing occupied", func(t *testing.T) {
+		assert.Nil(t, courtOccupied(nil, nil, "A", "x"))
+		assert.Nil(t, courtOccupied([]state.MatchResult{}, &state.Bracket{}, "A", "x"))
+	})
+
+	t.Run("does not stamp CompID (the caller carries it)", func(t *testing.T) {
+		occ := courtOccupied([]state.MatchResult{running("P1-0", "A")}, nil, "A", "x")
+		require.NotNil(t, occ)
+		assert.Empty(t, occ.CompID, "the pure scan has no compID; wrappers stamp it")
+	})
 }

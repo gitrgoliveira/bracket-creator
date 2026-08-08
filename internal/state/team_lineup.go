@@ -185,11 +185,14 @@ func (s *Store) saveTeamLineupsLocked(compID string, lineups map[string]domain.T
 
 // SetTeamLineup validates and persists a lineup, replacing any prior
 // entry for the same (teamID, round). The caller MUST pass the
-// competition's team size so ValidatePositions can enforce the FIK
-// position-key rules. Lineups are always editable, including while a
-// match is running or completed.
+// competition's team size so ValidatePositions can check that the
+// position keys are valid for that size (it enforces no completeness or
+// vacancy rule; see TeamLineup.ValidatePositions). Lineups are always
+// editable, including while a match is running or completed.
 //
-// FR-040, FR-041 / R4 / CHK012.
+// FR-040, FR-041 / R4. (The former CHK012 reference is dropped: it named the
+// FIK 5-person completeness/DQ check that was removed with TeamLineup.Validate
+// — vacancies never block a lineup now, mp-gmcg.)
 func (s *Store) SetTeamLineup(compID string, lineup domain.TeamLineup, teamSize int) error {
 	if err := ValidateCompetitionID(compID); err != nil {
 		return err

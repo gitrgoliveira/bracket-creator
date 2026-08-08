@@ -237,14 +237,14 @@ describe('C1 debounced autosave: ScoreEditorModal (individual match)', () => {
     await act(async () => { fireEvent.click(menButtons[0]); });
     expect(onSubmit).toHaveBeenCalledTimes(0);
 
-    // Click the Finish button (first arm: shows the verdict; canFinish is true
-    // because aTotal>0). The component shows "Finish" until armed.
+    // Click the Finish button (first arm: the label flips to the explicit
+    // "Tap again to finish" instruction; canFinish is true because aTotal>0).
     const finishBtn = screen.getByText(/Finish/);
     await act(async () => { fireEvent.click(finishBtn); });
 
-    // At this point the button is in the armed state ("Confirm · ...").
-    // Click again to actually submit.
-    const confirmBtn = screen.queryByText(/Confirm/);
+    // Armed state — the label is now "Tap again to finish". Tap it again to
+    // actually submit; the explicit finish must CANCEL the pending autosave.
+    const confirmBtn = screen.queryByText(/Tap again/);
     if (confirmBtn) {
       await act(async () => { fireEvent.click(confirmBtn); });
     }

@@ -77,3 +77,42 @@ func TestFileVersionAdvancesOnDeleteCompetitionFile(t *testing.T) {
 	assert.Greater(t, store.FileVersion(compID, "pool-matches.csv"), before,
 		"discarding a draw artifact changes derived state just as a write does, so the version must advance")
 }
+
+// TestFileVersionAdvancesOnBracketWrite pins that the bracket writers advance
+// FileVersion("bracket.json") exactly like the pool writers advance the pool
+// token (mp-gmcg review R4). No version-keyed consumer reads the bracket token
+// today, so this guards the asymmetry — saveBracketLocked used to refresh the
+// cache without bumping — so a future bracket-derived cache is correct by
+// construction. It also pins the save-only-if-found contract.
+func TestFileVersionAdvancesOnBracketWrite(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	const compID = "bracket-ver"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Bracket"}))
+
+	v0 := store.FileVersion(compID, "bracket.json")
+	require.NoError(t, store.SaveBracket(compID, &Bracket{
+		Rounds: [][]BracketMatch{{
+			{ID: "m0", SideA: "A", SideB: "B", Status: MatchStatusScheduled},
+		}},
+	}))
+	v1 := store.FileVersion(compID, "bracket.json")
+	assert.Greater(t, v1, v0, "SaveBracket must advance the bracket version")
+
+	found, err := store.UpdateBracketMatchByID(compID, "m0", func(m *BracketMatch) {
+		m.Status = MatchStatusRunning
+	})
+	require.NoError(t, err)
+	require.True(t, found)
+	v2 := store.FileVersion(compID, "bracket.json")
+	assert.Greater(t, v2, v1, "UpdateBracketMatchByID must advance the bracket version")
+
+	// A not-found update writes nothing, so it must NOT bump the version.
+	found, err = store.UpdateBracketMatchByID(compID, "nope", func(m *BracketMatch) {})
+	require.NoError(t, err)
+	require.False(t, found)
+	assert.Equal(t, v2, store.FileVersion(compID, "bracket.json"),
+		"a not-found update writes nothing, so it must not bump the version")
+}

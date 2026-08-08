@@ -49,7 +49,13 @@ function toBackendMatchResult(patch, match) {
         ipponsB,
         hansokuA: patch.hansokuA ?? fouls.a ?? 0,
         hansokuB: patch.hansokuB ?? fouls.b ?? 0,
-        decision: isHikiwake(score.type) ? "hikiwake" : "",
+        // mp-gmcg: an explicit patch-level decision wins (kachinuki [End
+        // match] sends "kachinuki-exhaustion" for a win and "hikiwake" for a
+        // drawn pool/league encounter); otherwise keep the legacy mapping
+        // from score.type. The score endpoint accepts and persists a
+        // top-level decision (ScoreRequest = state.MatchResult;
+        // validateDecision allowlists kachinuki-exhaustion).
+        decision: patch.decision || (isHikiwake(score.type) ? "hikiwake" : ""),
         status: toBackendStatus(patch.status || "scheduled"),
     };
     // Carry the winner's participant id so a SAME-NAME head-to-head (the winner

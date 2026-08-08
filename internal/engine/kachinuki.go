@@ -939,7 +939,7 @@ func (e *Engine) RemoveTrailingKachinukiBout(compID, matchID string) (*state.Mat
 		// strip is the SINGLE precondition+mutation every match home applies:
 		// the encounter must be RUNNING and must carry a trailing unscored bout.
 		// One closure so pool/round/bronze cannot drift (same reasoning as
-		// ReopenKachinukiMatch's guard).
+		// reopenResultPreconditionTx, the reopen's single result-precondition helper).
 		strip := func(status state.MatchStatus, subs []state.SubMatchResult) ([]state.SubMatchResult, error) {
 			if status != state.MatchStatusRunning {
 				return nil, ErrRemoveBoutNotRunning
@@ -1207,8 +1207,8 @@ func reopenBracketMatch(bm *state.BracketMatch, reason string) {
 // justified as it happens. One helper rather than a `reason == ""` test
 // inlined at each of its two call sites (reopenPoolMatch, reopenBracketMatch
 // — the latter already covers both the bracket-round and bronze homes), so a
-// third caller can't drift from the rule — the same reason
-// ReopenKachinukiMatch keeps its preconditions in a single `guard` closure.
+// third caller can't drift from the rule — the same reason the reopen keeps its
+// result preconditions in a single reopenResultPreconditionTx.
 func reopenPending(reason string) bool {
 	return reason == ""
 }

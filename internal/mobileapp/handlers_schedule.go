@@ -42,8 +42,8 @@ func RegisterScheduleHandlers(r *gin.RouterGroup) {
 //   - buffer:            int, slowest-court buffer % (default 0)
 //   - ceremonyMinutes:   int, ceremony block minutes (default 0)
 //
-// Returns 400 when any required param is missing or unparsable, or when a
-// bounded optional param (teamSize, boutsPerTeamMatch, numMatches) is
+// Returns 400 when any required param is missing or unparsable, or when courts
+// or a bounded optional param (teamSize, boutsPerTeamMatch, numMatches) is
 // malformed or out of range; 200 with ScheduleEstimate JSON otherwise.
 func scheduleEstimateHandler(c *gin.Context) {
 	matchDurationStr := c.Query("matchDuration")
@@ -112,8 +112,8 @@ func scheduleEstimateHandler(c *gin.Context) {
 	// numMatches is load-bearing the same way (it scales the WHOLE estimate), so
 	// it gets the same strict parse — garbage/overflow defaulting to 1 would
 	// answer 200 with a one-match estimate for a client asking about a full day
-	// (mp-gmcg review). Default 1 when absent. buffer/ceremonyMinutes stay on the
-	// silent queryIntDefault path: they only pad an already-computed number.
+	// (mp-gmcg review). Default 1 when absent. (The buffer/ceremonyMinutes
+	// contrast lives at their parse site below.)
 	numMatches, ok := parseOptionalBoundedInt(c, "numMatches", 1, engine.MaxScheduleCount)
 	if !ok {
 		return

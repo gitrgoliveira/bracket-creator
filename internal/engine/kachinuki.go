@@ -764,9 +764,17 @@ func (e *Engine) RequeueBlockerAndReopenKachinuki(targetComp, targetMatch, block
 		// fought knockout — does not cost the blocker its live on-court score
 		// (mp-gmcg review). The court half is deliberately NOT checked here: the
 		// revert is what frees the court, so the reopen's own court gate is the
-		// authoritative one. We hold the court lock, and every /score write takes
-		// it too, so the target's downstream state is stable across the
-		// pre-check → revert → reopen sequence; the reopen re-checks regardless.
+		// authoritative one. This NARROWS the wipe window but does NOT close it:
+		// PUT /score takes the court lock we hold, but POST /decision and POST
+		// /bulk-score complete a match under the per-comp lock alone (see the
+		// handler at handlers_match.go:801), so a downstream write landing between
+		// this pre-check's tx close and the reopen's own in-tx re-check can still
+		// make the reopen fail AFTER the revert — costing the blocker its score.
+		// The reopen's re-check is the backstop that preserves bracket integrity
+		// in that race regardless; closing the residual window deterministically
+		// would need the pre-check, revert, and reopen under one target-comp
+		// transaction, which the cross-comp revert (it takes the BLOCKER comp's
+		// lock) cannot provide.
 		if perr := e.checkTargetReopenable(targetComp, comp, targetMatch); perr != nil {
 			return perr
 		}
@@ -1179,19 +1187,11 @@ func reopenPending(reason string) bool {
 	return reason == ""
 }
 
-// retractPropagatedWinner undoes what propagateBracketWinner did for the
-// match at (rIdx, mIdx): the next round's slot returns to its "Winner of
-// rX-mY" placeholder and, for a semifinal feeding a bronze match, the
-// bronze slot returns to empty. All downstream targets are CHECKED before
-// any is mutated, so a rejection leaves the bracket untouched. A
-// downstream match that has started, recorded bouts, or completed (which
-// includes a bye auto-resolution off this match's winner) rejects the
-// reopen with ErrReopenDownstreamFought.
 // downstreamFoughtForRound reports whether the match at bracket round rIdx / slot
 // mIdx has a downstream (next-round match, or the bronze it feeds) that is
 // already started or scored — the read-only predicate that makes reopening it
 // unsafe. Extracted so the destructive retractPropagatedWinner and the
-// read-only reopen pre-check (checkKachinukiReopenable) key on ONE definition
+// read-only reopen pre-check (checkTargetReopenable) key on ONE definition
 // and cannot drift into disagreeing about what "downstream fought" means
 // (mp-gmcg review): drift there wipes a blocker's live score for a reopen that
 // then fails.
@@ -1209,6 +1209,14 @@ func downstreamFoughtForRound(bracket *state.Bracket, rIdx, mIdx int) bool {
 	return false
 }
 
+// retractPropagatedWinner undoes what propagateBracketWinner did for the
+// match at (rIdx, mIdx): the next round's slot returns to its "Winner of
+// rX-mY" placeholder and, for a semifinal feeding a bronze match, the
+// bronze slot returns to empty. All downstream targets are CHECKED before
+// any is mutated, so a rejection leaves the bracket untouched. A
+// downstream match that has started, recorded bouts, or completed (which
+// includes a bye auto-resolution off this match's winner) rejects the
+// reopen with ErrReopenDownstreamFought.
 func retractPropagatedWinner(bracket *state.Bracket, rIdx, mIdx int) error {
 	if downstreamFoughtForRound(bracket, rIdx, mIdx) {
 		return ErrReopenDownstreamFought

@@ -814,7 +814,12 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				// These name a bad TARGET (not completed, or its winner already
 				// fed a fought knockout). The requeue-and-reopen path pre-checks
 				// both read-only BEFORE the destructive revert
-				// (checkTargetReopenable), so the blocker keeps its live score.
+				// (checkTargetReopenable), so in the common path the blocker keeps
+				// its live score. A /decision or /bulk-score write racing between
+				// that pre-check and the reopen's own in-tx re-check can still
+				// surface these post-revert (engine kachinuki.go:761) — i.e. with
+				// the blocker already requeued; rare, and bracket integrity still
+				// holds via the re-check.
 				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 			case errors.As(err, &courtBusyErr):
 				// A match OTHER than the one we requeued still holds the court.

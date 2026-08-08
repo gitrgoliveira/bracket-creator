@@ -2256,6 +2256,89 @@ func TestRequeueBlockerAndReopenKachinuki(t *testing.T) {
 		assert.Equal(t, state.MatchStatusCompleted, bracket.Rounds[0][0].Status, "target stays completed")
 	})
 
+	// mp-gmcg review: the fought-downstream subtest above only exercises the
+	// BRACKET branch of checkTargetReopenable. checkPoolReopenDownstreamTx
+	// short-circuits unless Format == Mixed (kachinuki.go), so the pre-check's
+	// POOL branch is otherwise dead in this whole test — a refactor that dropped
+	// its wiring would pass every case. This pins it: a MIXED-format pool target
+	// whose finisher already sits in a started knockout is refused via the pool
+	// branch WITHOUT wiping the blocker.
+	t.Run("a mixed-pool target with a started knockout downstream is rejected WITHOUT wiping the blocker", func(t *testing.T) {
+		eng, store, compID := saveMixedKachinukiCompForReopenTest(t)
+		scorePoolMatchTx(t, eng, store, compID, "Pool A-0", "A1", "A2", "A1")
+		scorePoolMatchTx(t, eng, store, compID, "Pool B-0", "B1", "B2", "B1")
+		_, allResolved, err := eng.ResolveQualifiedPools(compID)
+		require.NoError(t, err)
+		require.True(t, allResolved)
+
+		// Start the knockout leaf (A1 vs B1) → RUNNING: A1, Pool A-0's finisher,
+		// is now committed to it, so reopening Pool A-0 must be refused.
+		b, err := store.LoadBracket(compID)
+		require.NoError(t, err)
+		require.NoError(t, store.WithTransaction(compID, func(tx state.StoreTx) error {
+			_, e := eng.RecordMatchResultWithIneligibilityTx(tx, compID, b.Rounds[0][0].ID, &state.MatchResult{
+				SideA: "A1", SideB: "B1", Status: state.MatchStatusRunning,
+			})
+			return e
+		}))
+
+		// Give the completed Pool A-0 a court so requireBlockerHoldsCourt passes
+		// and the flow reaches the pre-check (the fixture assigns none).
+		matches, err := store.LoadPoolMatches(compID)
+		require.NoError(t, err)
+		for i := range matches {
+			if matches[i].ID == "Pool A-0" {
+				matches[i].Court = "A"
+			}
+		}
+		require.NoError(t, store.SavePoolMatches(compID, matches))
+
+		// A blocker running on Pool A-0's court (A), in another competition, with
+		// a live score the destructive revert would clear.
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: "rq-pool-blocker", TeamSize: 2, TeamMatchType: state.TeamMatchTypeKachinuki,
+		}))
+		blocker := runningOnCourt("B1-0", "A")
+		blocker.IpponsA = []string{"M"}
+		blocker.SubResults = []state.SubMatchResult{{Position: 1, SideA: "K-1", SideB: "Wa-1", IpponsA: []string{"M"}}}
+		require.NoError(t, store.SavePoolMatches("rq-pool-blocker", []state.MatchResult{blocker}))
+
+		err = eng.RequeueBlockerAndReopenKachinuki(compID, "Pool A-0", "rq-pool-blocker", "B1-0", "")
+		assert.ErrorIs(t, err, ErrReopenDownstreamFought)
+
+		bl := loadPoolMatchByID(t, store, "rq-pool-blocker", "B1-0")
+		require.NotNil(t, bl)
+		assert.Equal(t, state.MatchStatusRunning, bl.Status, "blocker must NOT be requeued when the pool target can't reopen")
+		assert.Equal(t, []string{"M"}, bl.IpponsA, "blocker's score must NOT be wiped")
+		assert.Len(t, bl.SubResults, 1, "blocker's bout log must NOT be wiped")
+		assert.Equal(t, state.MatchStatusCompleted, loadPoolMatchByID(t, store, compID, "Pool A-0").Status, "pool target stays completed")
+	})
+
+	// mp-gmcg review: the ErrReopenNotCompleted arm of the pre-check had no
+	// requeue-path coverage either. A target that is not completed must be
+	// refused BEFORE the destructive revert, so the blocker keeps its score.
+	t.Run("a target that is NOT completed is rejected WITHOUT wiping the blocker", func(t *testing.T) {
+		eng, store, _ := setupKachinukiComp(t, "rq-notdone", 3)
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: "rq-notdone-blocker", TeamSize: 3, TeamMatchType: state.TeamMatchTypeKachinuki,
+		}))
+		// Target is RUNNING (not completed) but holds court A.
+		require.NoError(t, store.SavePoolMatches("rq-notdone", []state.MatchResult{runningOnCourt("P1-0", "A")}))
+		blocker := runningOnCourt("B1-0", "A")
+		blocker.IpponsA = []string{"M"}
+		blocker.SubResults = []state.SubMatchResult{{Position: 1, SideA: "K-1", SideB: "Wa-1", IpponsA: []string{"M"}}}
+		require.NoError(t, store.SavePoolMatches("rq-notdone-blocker", []state.MatchResult{blocker}))
+
+		err := eng.RequeueBlockerAndReopenKachinuki("rq-notdone", "P1-0", "rq-notdone-blocker", "B1-0", "")
+		assert.ErrorIs(t, err, ErrReopenNotCompleted)
+
+		bl := loadPoolMatchByID(t, store, "rq-notdone-blocker", "B1-0")
+		require.NotNil(t, bl)
+		assert.Equal(t, state.MatchStatusRunning, bl.Status, "blocker must NOT be requeued when the target isn't completed")
+		assert.Equal(t, []string{"M"}, bl.IpponsA, "blocker's score must NOT be wiped")
+		assert.Len(t, bl.SubResults, 1, "blocker's bout log must NOT be wiped")
+	})
+
 	// A COMPLETED match never holds the court as "running", so it is not the
 	// blocker (a plain reopen is the correct remedy); R1's guard rejects it
 	// rather than destructively requeuing it.

@@ -42,8 +42,9 @@ func RegisterScheduleHandlers(r *gin.RouterGroup) {
 //   - buffer:            int, slowest-court buffer % (default 0)
 //   - ceremonyMinutes:   int, ceremony block minutes (default 0)
 //
-// Returns 400 when any required param is missing or unparsable, 200
-// with ScheduleEstimate JSON otherwise.
+// Returns 400 when any required param is missing or unparsable, or when a
+// bounded optional param (teamSize, boutsPerTeamMatch, numMatches) is
+// malformed or out of range; 200 with ScheduleEstimate JSON otherwise.
 func scheduleEstimateHandler(c *gin.Context) {
 	matchDurationStr := c.Query("matchDuration")
 	multiplierStr := c.Query("multiplier")
@@ -118,10 +119,11 @@ func scheduleEstimateHandler(c *gin.Context) {
 		return
 	}
 
-	// Optional fields default to 0/1; intDefault clamps parse failures
-	// silently so a malformed optional param doesn't 400 the whole
-	// request (the caller's UI is unlikely to send garbage on purpose
-	// here and stricter validation belongs in the body-shape PRs).
+	// buffer/ceremonyMinutes stay on the silent queryIntDefault path (both
+	// default 0): they only pad an already-computed number, so a malformed
+	// value falling back to 0 is a harmless answer, not a wrong one — unlike
+	// the bounded teamSize/boutsPerTeamMatch/numMatches above, which scale the
+	// estimate and therefore 400 on garbage or out-of-range input.
 	in := engine.EstimateInput{
 		MatchDurationClockMinutes: matchDuration,
 		Multiplier:                multiplier,

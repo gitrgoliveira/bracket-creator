@@ -136,13 +136,30 @@ func TestScheduleEstimateEndpoint(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
 
-	t.Run("absent numMatches still defaults to 1 (200)", func(t *testing.T) {
-		w := httptest.NewRecorder()
+	// mp-gmcg review: assert the VALUE, not just the 200 — numMatches=0 is also
+	// legal (bounds 0..MaxScheduleCount) and also 200, so a status-only check
+	// would still pass if the absent default silently regressed from 1 to 0. The
+	// absent-numMatches estimate must equal an explicit numMatches=1 estimate and
+	// be positive (i.e. not the zero-duration 0-default).
+	t.Run("absent numMatches still defaults to 1", func(t *testing.T) {
+		absent := httptest.NewRecorder()
 		req, _ := http.NewRequest("GET",
-			"/api/schedule/estimate?matchDuration=3&multiplier=1.5&courts=1",
-			nil)
-		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusOK, w.Code)
+			"/api/schedule/estimate?matchDuration=3&multiplier=1.5&courts=1", nil)
+		r.ServeHTTP(absent, req)
+		require.Equal(t, http.StatusOK, absent.Code)
+
+		explicit := httptest.NewRecorder()
+		req2, _ := http.NewRequest("GET",
+			"/api/schedule/estimate?matchDuration=3&multiplier=1.5&courts=1&numMatches=1", nil)
+		r.ServeHTTP(explicit, req2)
+		require.Equal(t, http.StatusOK, explicit.Code)
+
+		var absentResp, explicitResp engine.ScheduleEstimate
+		require.NoError(t, json.Unmarshal(absent.Body.Bytes(), &absentResp))
+		require.NoError(t, json.Unmarshal(explicit.Body.Bytes(), &explicitResp))
+		assert.Greater(t, absentResp.TotalDurationMinutes, 0, "absent numMatches must default to 1, not the zero-duration 0-default")
+		assert.Equal(t, explicitResp.TotalDurationMinutes, absentResp.TotalDurationMinutes,
+			"absent numMatches must estimate identically to numMatches=1")
 	})
 
 	t.Run("teamSize at the MaxTeamSize boundary is accepted", func(t *testing.T) {

@@ -1334,9 +1334,7 @@ describe('VSchedItem live score rendering (mp-42rg)', () => {
     });
     global.window.ipponsFromScore = vi.fn(() => []);
     global.window.matchScoreStr = vi.fn(() => '');
-    // VSchedItem's no-score fallback renders the bout middle from the shared
-    // boutMiddle primitive (bracket.jsx); these fixtures carry no
-    // decision/encho, so the real primitive would return the plain "vs".
+    // Real boutMiddle (bracket.jsx) would return "vs" for these decision-less fixtures.
     global.window.boutMiddle = vi.fn(() => 'vs');
     global.window.roundLabel = vi.fn((i) => `Round ${i + 1}`);
     global.window.pluralize = vi.fn((n, s) => `${n} ${s}`);

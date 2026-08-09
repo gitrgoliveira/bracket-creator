@@ -23,6 +23,14 @@ import { findInTree, hasClass, collectText } from './helpers/vdom.js';
 
 const realReact = global.React;
 
+// The three special middles (label, payload, expected mark), shared by the
+// score-string-path block and the fallback block so the two stay in sync.
+const MARK_CASES = [
+  ['hikiwake tie', { decision: 'hikiwake' }, 'X'],
+  ['encho', { encho: { periodCount: 1 } }, '(E)'],
+  ['daihyosen', { decision: 'daihyosen' }, '(DH)'],
+];
+
 describe('mp-u37s: VSchedItem bout middle is never a dash', () => {
   let runtime, VSchedItem;
 
@@ -65,24 +73,14 @@ describe('mp-u37s: VSchedItem bout middle is never a dash', () => {
     sideB: { id: 'b', name: 'Phoenix' },
   };
 
-  // THE bug case: completed, no score cells → matchScoreStr returns "".
-  it('completed match with no recorded score renders "vs", not "-"', () => {
-    const mid = centreText({ ...base, status: 'completed' });
-    expect(mid).not.toBe('-');
-    expect(mid).not.toContain('-');
-    expect(mid).toBe('vs');
-  });
-
-  it('completed match with a winner but no recorded score renders "vs", not "-"', () => {
-    const mid = centreText({ ...base, status: 'completed', winner: { id: 'a', name: 'Ryu' } });
-    expect(mid).not.toContain('-');
-    expect(mid).toBe('vs');
-  });
-
-  it('completed match decided "fought" with no recorded score renders "vs", not "-"', () => {
-    const mid = centreText({ ...base, status: 'completed', decision: 'fought' });
-    expect(mid).not.toContain('-');
-    expect(mid).toBe('vs');
+  // THE bug case and its near variants: completed, no score cells →
+  // matchScoreStr returns "" and the middle must read "vs", never "-".
+  it.each([
+    ['no extra fields', {}],
+    ['a winner', { winner: { id: 'a', name: 'Ryu' } }],
+    ['decision "fought"', { decision: 'fought' }],
+  ])('completed match with no recorded score and %s renders "vs", not "-"', (_label, extra) => {
+    expect(centreText({ ...base, status: 'completed', ...extra })).toBe('vs');
   });
 
   it('running match with no score yet still renders "vs"', () => {
@@ -93,48 +91,31 @@ describe('mp-u37s: VSchedItem bout middle is never a dash', () => {
     expect(centreText({ ...base, status: 'scheduled' })).toBe('vs');
   });
 
-  // Non-plain middles reach this surface INSIDE the score string, not through
-  // the fallback: matchScoreStr already returns "X"/"(E)"/"(DH)" for these
-  // payloads, so scoreStr is truthy and the vsched-item__score span wins. These
-  // cases therefore pin the score-string path (that formatIpponsScore keeps
-  // surfacing the marks), NOT the fallback. The fallback's own handling of the
-  // same marks is pinned separately below.
-  it.each([
-    ['hikiwake tie', { decision: 'hikiwake' }, 'X'],
-    ['encho', { encho: { periodCount: 1 } }, '(E)'],
-    ['daihyosen', { decision: 'daihyosen' }, '(DH)'],
-  ])('completed %s renders its mark in the centre, never a dash', (_label, extra, want) => {
+  // These payloads make matchScoreStr truthy ("X"/"(E)"/"(DH)" ride inside the
+  // score string), so they pin the score-string span, NOT the fallback — the
+  // fallback's own handling of the same marks is pinned below.
+  it.each(MARK_CASES)('completed %s renders its mark in the centre, never a dash', (_label, extra, want) => {
     const mid = centreText({ ...base, status: 'completed', ...extra });
     expect(mid).toContain(want);
     expect(mid).not.toContain('-');
   });
 
-  // Directly pin the FALLBACK branch for the non-"vs" marks. Only
-  // matchScoreStr is stubbed (to the empty string the bye case produces);
-  // boutMiddle stays REAL, so this asserts what the new call actually returns
-  // rather than what a stub was told to say. Without this, every non-"vs"
-  // assertion above would still pass with the fallback entirely broken.
+  // Directly pin the FALLBACK branch. Only matchScoreStr is stubbed (to the
+  // empty string the bye case produces); boutMiddle stays REAL, so this asserts
+  // what the new call actually returns rather than what a stub was told to say.
+  // Without this, every non-"vs" assertion above would still pass with the
+  // fallback entirely broken. No restore needed: the outer beforeEach re-imports
+  // bracket.jsx per test, re-publishing the real window.matchScoreStr.
   describe('fallback branch with an empty score string', () => {
-    let realMatchScoreStr;
-
     beforeEach(() => {
-      realMatchScoreStr = global.window.matchScoreStr;
       global.window.matchScoreStr = () => '';
     });
 
-    afterEach(() => {
-      global.window.matchScoreStr = realMatchScoreStr;
-    });
-
     it.each([
-      ['hikiwake tie', { decision: 'hikiwake' }, 'X'],
-      ['encho', { encho: { periodCount: 1 } }, '(E)'],
-      ['daihyosen', { decision: 'daihyosen' }, '(DH)'],
+      ...MARK_CASES,
       ['no decision', {}, 'vs'],
     ])('completed %s falls back to its boutMiddle mark, never a dash', (_label, extra, want) => {
-      const mid = centreText({ ...base, status: 'completed', ...extra });
-      expect(mid).toBe(want);
-      expect(mid).not.toContain('-');
+      expect(centreText({ ...base, status: 'completed', ...extra })).toBe(want);
     });
   });
 });

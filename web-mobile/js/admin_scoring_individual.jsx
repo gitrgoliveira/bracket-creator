@@ -626,20 +626,17 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                       <div className="sb-center">
                         {/* Middle mark is "VS" only — individual ippons are WAZA
                             LETTERS in the slots, never a numeric count (numbers
-                            belong to pool/team summaries or engi). Matches the
-                            team editor's centre. This is an entry-zone separator,
-                            not a result projection, so the boutMiddle contract does
-                            not bind it. mp-42g deliberately demoted the vs/X that
-                            used to live here (it was the draw-toggle button itself,
-                            undiscoverable as such) to a plain non-interactive
-                            separator. The special middles get dedicated controls
-                            instead — tie by the draw toggle below (its active state
-                            replaces this VS, seeded from the persisted decision via
-                            initialIsDrawToggled), encho by the "· (E) Overtime ×N"
-                            eyebrow plus the EnchoControl pill, daihyosen by the DH
-                            eyebrow badge. Don't "restore" X/(E)/(DH) here.
-                            The exemption itself is stated once, in bracket.jsx's
-                            SCOPE note above boutMiddle; change it there first. */}
+                            belong to pool/team summaries or engi). Entry-zone
+                            separator, exempt from the boutMiddle contract per the
+                            SCOPE note in bracket.jsx (the master statement; change
+                            it there first). mp-42g demoted the vs/X that used to
+                            live here (it was the draw-toggle button itself,
+                            undiscoverable as such) to a plain separator; the
+                            special middles have dedicated controls — tie via the
+                            draw toggle below (seeded from the persisted decision
+                            via initialIsDrawToggled), encho via the "· (E)
+                            Overtime ×N" eyebrow + EnchoControl pill, daihyosen via
+                            the DH eyebrow badge. Don't "restore" X/(E)/(DH) here. */}
                         {!isDrawToggled && (
                           <div className="sb-vs">VS</div>
                         )}

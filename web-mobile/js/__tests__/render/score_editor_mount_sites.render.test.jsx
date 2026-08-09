@@ -71,6 +71,8 @@ const STUBBED_GLOBALS = {
   getScoreBtnClass: () => 'test-score-open',
   ipponsFromScore: () => [],
   matchScoreStr: () => '',
+  // Real boutMiddle (bracket.jsx) would return "vs" for these decision-less fixtures.
+  boutMiddle: () => 'vs',
   // LAZY / render-time
   filterMatchesByCourt: (matches) => matches,
   tournamentMatches: () => [],

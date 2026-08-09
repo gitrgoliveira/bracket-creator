@@ -151,6 +151,17 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
     // server payload). Use
     // hasBothSides, never `m.sideA && m.sideB`: normalizeMatch substitutes a
     // truthy {id:"",name:""} for a missing side.
+    //
+    // SWISS is NOT affected by this filter, despite building a bye in the same
+    // one-real-side shape ({SideA: name, SideB: "", Winner: name, completed} —
+    // engine/swiss.go). Swiss piggybacks on pool-matches.csv but never writes
+    // pools.csv, so the viewer payload carries `pools: []` with the matches in
+    // poolMatches (verified against a live 5-player Swiss round: 3 poolMatches,
+    // pools empty). The loop above walks `pools`, so NO Swiss match reaches
+    // allMatches at all and none of these three lists can contain one. A Swiss
+    // bye therefore does not appear here for a different reason than a knockout
+    // bye, and the operator has ruled that acceptable. Do not add a Swiss case
+    // to this filter expecting it to change anything.
     const recent = allMatches
       .filter((m) => m.status === "completed" && m.winner && hasBothSides(m) && matchInvolvesWatched(m))
       .sort((a, b) => (b.scheduledAt || "00:00").localeCompare(a.scheduledAt || "00:00"))

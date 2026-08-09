@@ -210,11 +210,21 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
             (bracket.jsx): "vs" / "X" / "(E)" / "(DH)" and nothing else. A dash
             is never a valid middle (it is a CELL value only), so both the
             pending and the completed-but-scoreless cases go through the same
-            call rather than being branched by status here. */}
+            call rather than being branched by status here.
+
+            Guarded like the twin call in admin_schedule_score_editor.jsx, and
+            unlike matchScoreStr above, because this branch also renders for
+            SCHEDULED rows: an unguarded call would make bracket.jsx a hard
+            dependency of an up-next list that previously needed no helper at
+            all, so a mount without it would throw instead of degrading. The
+            literal here is the module-missing fallback, NOT a second statement
+            of the display contract; boutMiddle stays the source whenever it is
+            present. Production load order already guarantees it is
+            (index.html tags bracket.js before every viewer module). */}
         {scoreStr ? (
           <span className={`vsched-item__score${isRunning ? " vsched-item__score--live" : ""}`}>{scoreStr}</span>
         ) : (
-          <span className="vsched-item__vs">{window.boutMiddle(m.decision, m.encho, m.score)}</span>
+          <span className="vsched-item__vs">{window.boutMiddle ? window.boutMiddle(m.decision, m.encho, m.score) : "vs"}</span>
         )}
         <div className={`vsched-item__side vsched-item__side--aka ${aWin ? "vsched-item__side--w" : ""}`}>
           <span className="sr-only">Aka:</span>

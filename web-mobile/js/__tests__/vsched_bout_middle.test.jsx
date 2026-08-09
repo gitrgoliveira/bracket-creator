@@ -137,4 +137,31 @@ describe('mp-u37s: VSchedItem bout middle is never a dash', () => {
       expect(mid).not.toContain('-');
     });
   });
+
+  // Degradation: a SCHEDULED row must render without bracket.jsx loaded at all.
+  // This branch renders for scheduled matches, whereas matchScoreStr above is
+  // gated to completed/running, so an unguarded call would have made bracket.jsx
+  // a hard dependency of an up-next list that previously needed no helper. Two
+  // fixtures (viewer.test.jsx, vsched_winner_cue.test.jsx) had to grow a
+  // boutMiddle stub before this guard existed; both are back to their original
+  // form, and this test is what keeps them that way.
+  describe('without bracket.jsx loaded', () => {
+    let saved;
+
+    beforeEach(() => {
+      saved = { boutMiddle: global.window.boutMiddle, matchScoreStr: global.window.matchScoreStr };
+      delete global.window.boutMiddle;
+      delete global.window.matchScoreStr;
+    });
+
+    afterEach(() => {
+      global.window.boutMiddle = saved.boutMiddle;
+      global.window.matchScoreStr = saved.matchScoreStr;
+    });
+
+    it('a scheduled row still renders "vs" instead of throwing', () => {
+      expect(() => centreText({ ...base, status: 'scheduled' })).not.toThrow();
+      expect(centreText({ ...base, status: 'scheduled' })).toBe('vs');
+    });
+  });
 });

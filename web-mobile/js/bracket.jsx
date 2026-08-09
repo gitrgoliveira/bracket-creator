@@ -485,6 +485,15 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
   const aWin = match.winner && match.sideA && match.winner.id === match.sideA.id;
   const bWin = match.winner && match.sideB && match.winner.id === match.sideB.id;
   const running = match.status === "running";
+  // score.type === "bye" is CLIENT-ONLY: the sole producers are the sample-data
+  // generators in data.jsx (advanceByes / simulateRounds), never a server
+  // payload — Go's BracketMatch/Match carry scoreA/scoreB strings and no `score`
+  // object, and api_serializers.normalizeMatch only ever synthesizes
+  // type "ippon" or "hikiwake". Kept because it is the ONLY bye cue a MatchCard
+  // has (the card builds its per-side scores from ippon arrays and never calls
+  // matchScoreStr, so removing this leaves such a card completely unlabelled).
+  // A server-fed structural bye is not drawn as a MatchCard at all: it renders
+  // as the bc-bye-slot placeholder in BracketTreeMeta below.
   const isBye = match.score?.type === "bye";
 
   const ipponsA = match.ipponsA || ipponsFromScore(match.scoreA);
@@ -936,9 +945,17 @@ function BracketTreeMeta({ columns, feedersById, matchNumById, slotLabel, varian
                   aria-label={`${m.playerName || "Bye"}: advances without an opponent`}
                   ref={(el) => { if (el) refMap.current[m.id] = el; }}
                 >
-                  {m.playerName
-                    ? <span className="bc-bye-slot__name">{m.playerName}</span>
-                    : <span className="bc-bye-slot__tag">BYE</span>}
+                  {/* The BYE tag is unconditional: a named slot without it is
+                      just a grey box with a name in it, which reads as an
+                      unexplained extra card rather than "this entrant advanced
+                      unopposed". Name + tag share one flex row (see
+                      .bc-bye-slot in styles.css): the name takes the free space
+                      and ellipsises, the tag never shrinks, so a long name
+                      truncates instead of pushing the marker out of the
+                      fixed-width column. Rendered once in both cases: the
+                      nameless slot is the tag alone, exactly as before. */}
+                  {m.playerName ? <span className="bc-bye-slot__name">{m.playerName}</span> : null}
+                  <span className="bc-bye-slot__tag">BYE</span>
                 </div>
               ) : (
                 <MatchCard

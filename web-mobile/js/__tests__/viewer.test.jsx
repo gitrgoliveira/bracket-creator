@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { applyFilters, matchHighlightedBy, competitionKindLabel, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, compMatches, subBoutLabel, TournamentInfo, isHttpURL, linkBase, isNonPublicOrigin } from '../viewer.jsx';
 import { formatDate } from '../ui.jsx';
 import { makeReactive } from './helpers/reactive_react.js';
+import { stubVSchedGlobals } from './test_helpers.js';
 
 // Walks a vnode tree and concatenates all string/number leaves. Child
 // component vnodes (e.g. TermV) are NOT executed by the reactive shim,
@@ -1300,8 +1301,7 @@ describe('VSchedItem live score rendering (mp-42rg)', () => {
   const realReact = global.React;
   let runtime;
   let VSchedItemComp;
-  const savedGlobals = {};
-  const STUBBED = ['ipponsFromScore', 'matchScoreStr', 'boutMiddle', 'roundLabel', 'pluralize', 'queueLabelCompact'];
+  let restoreGlobals;
 
   function findNode(node, pred) {
     if (!node || typeof node !== 'object') return null;
@@ -1327,18 +1327,10 @@ describe('VSchedItem live score rendering (mp-42rg)', () => {
   beforeEach(async () => {
     runtime = makeReactive();
     global.React = runtime.React;
-    global.window = global.window || {};
-    STUBBED.forEach(k => {
-      savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k)
-        ? { had: true, val: global.window[k] } : { had: false };
+    restoreGlobals = stubVSchedGlobals({
+      roundLabel: vi.fn((i) => `Round ${i + 1}`),
+      pluralize: vi.fn((n, s) => `${n} ${s}`),
     });
-    global.window.ipponsFromScore = vi.fn(() => []);
-    global.window.matchScoreStr = vi.fn(() => '');
-    // Real boutMiddle (bracket.jsx) would return "vs" for these decision-less fixtures.
-    global.window.boutMiddle = vi.fn(() => 'vs');
-    global.window.roundLabel = vi.fn((i) => `Round ${i + 1}`);
-    global.window.pluralize = vi.fn((n, s) => `${n} ${s}`);
-    global.window.queueLabelCompact = null;
     vi.resetModules();
     ({ VSchedItem: VSchedItemComp } = await import('../viewer.jsx'));
   });
@@ -1346,10 +1338,7 @@ describe('VSchedItem live score rendering (mp-42rg)', () => {
   afterEach(() => {
     runtime.unmount();
     global.React = realReact;
-    STUBBED.forEach(k => {
-      if (savedGlobals[k]?.had) global.window[k] = savedGlobals[k].val;
-      else delete global.window[k];
-    });
+    restoreGlobals();
     vi.restoreAllMocks();
     vi.resetModules();
   });

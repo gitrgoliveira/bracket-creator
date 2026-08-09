@@ -47,3 +47,32 @@ export function makeFullyLockedLocalStorageMock(initial = {}) {
     clear: () => {},
   };
 }
+
+// stubVSchedGlobals: the window.* helpers VSchedItem (viewer_match.jsx) reads
+// at render time, stubbed the way its mounting suites need them. boutMiddle
+// stubs to "vs" because the real primitive (bracket.jsx) returns "vs" for
+// decision-less fixtures. Pass per-suite extras to route more keys through
+// the same save/restore. Returns restore(): puts back (or deletes) whatever
+// each key held before.
+export function stubVSchedGlobals(extra = {}) {
+  const stubs = {
+    ipponsFromScore: vi.fn(() => []),
+    matchScoreStr: vi.fn(() => ''),
+    boutMiddle: vi.fn(() => 'vs'),
+    queueLabelCompact: null,
+    ...extra,
+  };
+  global.window = global.window || {};
+  const saved = {};
+  for (const [k, v] of Object.entries(stubs)) {
+    saved[k] = Object.prototype.hasOwnProperty.call(global.window, k)
+      ? { had: true, val: global.window[k] } : { had: false };
+    global.window[k] = v;
+  }
+  return () => {
+    for (const k of Object.keys(saved)) {
+      if (saved[k].had) global.window[k] = saved[k].val;
+      else delete global.window[k];
+    }
+  };
+}

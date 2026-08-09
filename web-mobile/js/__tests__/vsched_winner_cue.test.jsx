@@ -13,21 +13,17 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
 import { findAll, hasClass } from './helpers/vdom.js';
+import { stubVSchedGlobals } from './test_helpers.js';
 
 const realReact = global.React;
 
 describe('T5: VSchedItem winner cue - completed team match', () => {
-  let runtime, VSchedItem, normalizeMatch;
+  let runtime, VSchedItem, normalizeMatch, restoreGlobals;
 
   beforeEach(async () => {
     runtime = makeReactive();
     global.React = runtime.React;
-    global.window = global.window || {};
-    global.window.ipponsFromScore = vi.fn(() => []);
-    global.window.matchScoreStr = vi.fn(() => '');
-    // Real boutMiddle (bracket.jsx) would return "vs" for these decision-less fixtures.
-    global.window.boutMiddle = vi.fn(() => 'vs');
-    global.window.queueLabelCompact = null;
+    restoreGlobals = stubVSchedGlobals();
     vi.resetModules();
     // Import serializers first (attaches window.normalizeMatch) then viewer_match.
     ({ normalizeMatch } = await import('../api_serializers.jsx'));
@@ -37,10 +33,7 @@ describe('T5: VSchedItem winner cue - completed team match', () => {
   afterEach(() => {
     runtime.unmount();
     global.React = realReact;
-    delete global.window.ipponsFromScore;
-    delete global.window.matchScoreStr;
-    delete global.window.boutMiddle;
-    delete global.window.queueLabelCompact;
+    restoreGlobals();
     vi.restoreAllMocks();
     vi.resetModules();
   });

@@ -1749,16 +1749,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 </div>
                 {idx === 0 && (
                   <div className="sb-center">
-                    {/* Encounter-header separator, deliberately a plain "VS":
-                        an entry-zone separator, not a result projection, so the
-                        boutMiddle contract does not bind it — the same mp-42g
-                        exemption as the individual editor's centre. The
+                    {/* Encounter-header separator, deliberately a plain "VS" —
+                        the same mp-42g entry-zone exemption as the individual
+                        editor's centre, per the SCOPE note in bracket.jsx (the
+                        master statement; change it there first). The
                         result-projecting surface in this file is the per-bout
-                        row, which derives its middle through
-                        renderTeamBoutMiddle → boutMiddle. Don't "fix" this one
-                        to match that one; they answer different questions.
-                        The exemption itself is stated once, in bracket.jsx's
-                        SCOPE note above boutMiddle; change it there first. */}
+                        row, which goes through renderTeamBoutMiddle → boutMiddle.
+                        Don't "fix" this one to match that one; they answer
+                        different questions. */}
                     <div className="sb-vs">VS</div>
                   </div>
                 )}

@@ -1749,6 +1749,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 </div>
                 {idx === 0 && (
                   <div className="sb-center">
+                    {/* Encounter-header separator, deliberately a plain "VS":
+                        an entry-zone separator, not a result projection, so the
+                        boutMiddle contract does not bind it — the same mp-42g
+                        exemption as the individual editor's centre. The
+                        result-projecting surface in this file is the per-bout
+                        row, which derives its middle through
+                        renderTeamBoutMiddle → boutMiddle. Don't "fix" this one
+                        to match that one; they answer different questions. */}
                     <div className="sb-vs">VS</div>
                   </div>
                 )}

@@ -25,6 +25,10 @@ describe('T5: VSchedItem winner cue - completed team match', () => {
     global.window = global.window || {};
     global.window.ipponsFromScore = vi.fn(() => []);
     global.window.matchScoreStr = vi.fn(() => '');
+    // VSchedItem's no-score fallback renders the bout middle from the shared
+    // boutMiddle primitive (bracket.jsx); these fixtures carry no
+    // decision/encho, so the real primitive would return the plain "vs".
+    global.window.boutMiddle = vi.fn(() => 'vs');
     global.window.queueLabelCompact = null;
     vi.resetModules();
     // Import serializers first (attaches window.normalizeMatch) then viewer_match.
@@ -37,6 +41,7 @@ describe('T5: VSchedItem winner cue - completed team match', () => {
     global.React = realReact;
     delete global.window.ipponsFromScore;
     delete global.window.matchScoreStr;
+    delete global.window.boutMiddle;
     delete global.window.queueLabelCompact;
     vi.restoreAllMocks();
     vi.resetModules();

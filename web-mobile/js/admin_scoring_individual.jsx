@@ -627,7 +627,17 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                         {/* Middle mark is "VS" only — individual ippons are WAZA
                             LETTERS in the slots, never a numeric count (numbers
                             belong to pool/team summaries or engi). Matches the
-                            team editor's centre and the boutMiddle contract. */}
+                            team editor's centre. This is an entry-zone separator,
+                            not a result projection, so the boutMiddle contract does
+                            not bind it. mp-42g deliberately demoted the vs/X that
+                            used to live here (it was the draw-toggle button itself,
+                            undiscoverable as such) to a plain non-interactive
+                            separator. The special middles get dedicated controls
+                            instead — tie by the draw toggle below (its active state
+                            replaces this VS, seeded from the persisted decision via
+                            initialIsDrawToggled), encho by the "· (E) Overtime ×N"
+                            eyebrow plus the EnchoControl pill, daihyosen by the DH
+                            eyebrow badge. Don't "restore" X/(E)/(DH) here. */}
                         {!isDrawToggled && (
                           <div className="sb-vs">VS</div>
                         )}

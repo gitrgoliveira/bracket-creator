@@ -352,6 +352,14 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
             </div>
           </div>
 
+          {/* Decorative entry-zone divider (aria-hidden), not a result
+              projection: the boutMiddle vs/X/(E)/(DH) contract does not bind
+              it, and the exemption is structural rather than stylistic. Flag
+              totals are constrained to odd values by VALID_TOTALS, so a draw
+              cannot exist here and "X" is unreachable by construction; engi
+              has no ippon, no encho and no daihyosen, so "(E)" and "(DH)"
+              have nothing to report either. There is no tied engi result to
+              confirm or render. */}
           <div className="engi-divider" aria-hidden="true">vs</div>
 
           {/* Aka / Red / sideA */}

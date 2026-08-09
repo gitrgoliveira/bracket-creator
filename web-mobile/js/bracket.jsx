@@ -110,7 +110,14 @@ const defaultWinMaru = (encho) => (enchoOn(encho) ? ["○"] : ["○", "○"]);
 // "vs" (plain, including unplayed/pending), "X" (tie), "(E)" (overtime),
 // "(DH)" (rep bout). Nothing else is a valid middle value: a dash never is
 // (operator ruling), and Ht/Kiken/Fus. are side results, never middles.
-// Every surface that renders a bout middle derives it from here.
+// SCOPE: this binds the surfaces that PROJECT A RESULT — viewer, display,
+// scoreboard, match cards, export cells — and every one of them derives its
+// middle from here. It does NOT bind the score editors' live-ENTRY
+// separators (the plain "VS" in the individual/team encounter headers, the
+// engi divider): those sit in the input zone and project no result, so they
+// are exempt by mp-42g and carry their own note at each site. The team
+// editor's per-BOUT rows do project a result, and go through
+// renderTeamBoutMiddle → boutMiddle like every other bound surface.
 function boutMiddle(decision, encho, score) {
   return (isDrawResult(decision, score) ? "X" : middleMark(decision, encho)) || "vs";
 }

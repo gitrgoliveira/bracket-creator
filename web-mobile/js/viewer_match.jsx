@@ -205,12 +205,16 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
           <span className="n">{withNumber(m.sideB)}</span>
           {tweaks.showDojo && m.sideB?.dojo ? <span className="d">{m.sideB.dojo}</span> : null}
         </div>
+        {/* No score string (pending, or completed with no recorded cells) →
+            the bout MIDDLE, derived from the single source boutMiddle
+            (bracket.jsx): "vs" / "X" / "(E)" / "(DH)" and nothing else. A dash
+            is never a valid middle (it is a CELL value only), so both the
+            pending and the completed-but-scoreless cases go through the same
+            call rather than being branched by status here. */}
         {scoreStr ? (
           <span className={`vsched-item__score${isRunning ? " vsched-item__score--live" : ""}`}>{scoreStr}</span>
-        ) : m.status === "completed" ? (
-          <span className="vsched-item__vs">-</span>
         ) : (
-          <span className="vsched-item__vs">vs</span>
+          <span className="vsched-item__vs">{window.boutMiddle(m.decision, m.encho, m.score)}</span>
         )}
         <div className={`vsched-item__side vsched-item__side--aka ${aWin ? "vsched-item__side--w" : ""}`}>
           <span className="sr-only">Aka:</span>

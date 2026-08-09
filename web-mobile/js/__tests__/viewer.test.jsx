@@ -1301,7 +1301,7 @@ describe('VSchedItem live score rendering (mp-42rg)', () => {
   let runtime;
   let VSchedItemComp;
   const savedGlobals = {};
-  const STUBBED = ['ipponsFromScore', 'matchScoreStr', 'roundLabel', 'pluralize', 'queueLabelCompact'];
+  const STUBBED = ['ipponsFromScore', 'matchScoreStr', 'boutMiddle', 'roundLabel', 'pluralize', 'queueLabelCompact'];
 
   function findNode(node, pred) {
     if (!node || typeof node !== 'object') return null;
@@ -1334,6 +1334,10 @@ describe('VSchedItem live score rendering (mp-42rg)', () => {
     });
     global.window.ipponsFromScore = vi.fn(() => []);
     global.window.matchScoreStr = vi.fn(() => '');
+    // VSchedItem's no-score fallback renders the bout middle from the shared
+    // boutMiddle primitive (bracket.jsx); these fixtures carry no
+    // decision/encho, so the real primitive would return the plain "vs".
+    global.window.boutMiddle = vi.fn(() => 'vs');
     global.window.roundLabel = vi.fn((i) => `Round ${i + 1}`);
     global.window.pluralize = vi.fn((n, s) => `${n} ${s}`);
     global.window.queueLabelCompact = null;

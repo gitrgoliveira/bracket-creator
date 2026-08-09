@@ -49,8 +49,26 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   const isTeam = m.compKind === "team" || m.teamSize > 0;
   const teamSize = m.teamSize || 5;
 
-  const seedAPts = m.ipponsA?.filter(x => x && x !== "•") || (m.score?.type === "ippon" && m.winner?.id === m.sideA?.id ? m.score.ippons || [] : []);
-  const seedBPts = m.ipponsB?.filter(x => x && x !== "•") || (m.score?.type === "ippon" && m.winner?.id === m.sideB?.id ? m.score.ippons || [] : []);
+  // Seed from ipponsA/ipponsB when present, else PARSE the scoreA/scoreB
+  // string. That fallback is load-bearing for knockout: state.MatchResult
+  // carries ipponsA/ipponsB on the wire, but state.BracketMatch carries only
+  // the scoreA/scoreB strings, so a bracket match re-read from the server
+  // (any reload, or opening the editor from the Scores page) arrived with no
+  // ippon arrays at all. The editor then opened EMPTY on a match that already
+  // had points, and the next tap saved over them — the operator silently lost
+  // a recorded ippon mid-match. Every display surface already parses the
+  // string this way (admin_shiaijo.jsx, match_scoreboard.jsx, bracket.jsx);
+  // this editor was the one that did not.
+  // Keep the score.type === "ippon" branch as the LAST resort: it serves the
+  // quick-score paths that set only score.ippons. It must stay reachable when
+  // neither source yields a point, so test emptiness explicitly rather than
+  // relying on ||: an empty array is truthy and would swallow it.
+  const cellsA = m.ipponsA || (window.ipponsFromScore ? window.ipponsFromScore(m.scoreA) : []);
+  const cellsB = m.ipponsB || (window.ipponsFromScore ? window.ipponsFromScore(m.scoreB) : []);
+  const cleanA = (cellsA || []).filter(x => x && x !== "•");
+  const cleanB = (cellsB || []).filter(x => x && x !== "•");
+  const seedAPts = cleanA.length ? cleanA : (m.score?.type === "ippon" && m.winner?.id === m.sideA?.id ? m.score.ippons || [] : []);
+  const seedBPts = cleanB.length ? cleanB : (m.score?.type === "ippon" && m.winner?.id === m.sideB?.id ? m.score.ippons || [] : []);
 
   // Use ?? not || so an explicit 0 isn't treated as "unset".
   // reconcileFoulsAtOpen turns the pre-fix cumulative raw count into the

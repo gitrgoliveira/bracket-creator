@@ -173,6 +173,16 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
     return null;
   }, [bracket]);
 
+  // Names an unresolved feeder slot after the card that will fill it
+  // ("Winner of M1"), via the one rule in bracket.jsx. Only the match modal
+  // needs it explicitly: BracketTree builds the same labeller internally from
+  // the rounds it is handed. Without it the modal would still never leak the
+  // raw id, but it would say "TBD" where the card behind it says "Winner of M1".
+  const bracketSlotLabel = useMemo(
+    () => (derivedBracket && window.bracketSlotLabeller ? window.bracketSlotLabeller(derivedBracket.rounds) : null),
+    [derivedBracket]
+  );
+
   // draw-ready is NOT pre-start for the purposes of showing pool/bracket
   // structure: the draw has been generated and the payload already includes
   // pools + bracket data returned unconditionally by handlers_viewer.go.
@@ -421,7 +431,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
           {window.VersionFooter && <window.VersionFooter />}
         </div>
       </div>
-      {selectedMatch && <MatchViewerModal match={selectedMatch} onClose={() => setSelectedMatch(null)} tournament={tournament} compId={c.id} />}
+      {selectedMatch && <MatchViewerModal match={selectedMatch} onClose={() => setSelectedMatch(null)} tournament={tournament} compId={c.id} slotLabel={bracketSlotLabel} />}
     </div>
   );
 }

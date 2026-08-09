@@ -262,6 +262,15 @@ export function shiaijoScoreCell(m) {
 function ResolveFeedersModal({ match, comp, password, onClose, onResolved, onOptimisticResolve, showToast }) {
     const rounds = (comp && comp.bracket && comp.bracket.rounds) || [];
     const slots = useMemoSh(() => pendingFeederSlots(match, rounds), [match, rounds]);
+    // Slot text comes from the ONE rule in bracket.jsx, so this modal names a
+    // feeder exactly as the bracket card does ("Winner of M3") instead of
+    // stripping the prefix off the wire value and printing "r2-m0".
+    // (Guarded like the window.boutMiddle reads elsewhere: a mount without
+    // bracket.js degrades instead of throwing. index.html loads it first.)
+    const slotLabel = useMemoSh(
+        () => (window.bracketSlotLabeller ? window.bracketSlotLabeller(rounds) : (n) => n),
+        [rounds]
+    );
     const resolvable = slots.filter(s => s.resolvable);
     const blocked = slots.filter(s => !s.resolvable);
     // feeder id → asserted winner name.
@@ -322,7 +331,10 @@ function ResolveFeedersModal({ match, comp, password, onClose, onResolved, onOpt
             </p>
             {resolvable.map((s) => (
                 <div key={s.feeder.id} className="resolve-feeder">
-                    <div className="resolve-feeder__label">Winner of {s.feeder.matchNumber ? `Match ${s.feeder.matchNumber}` : s.placeholder.replace(/^Winner of /, "")}</div>
+                    {/* s.feeder is the match whose winner is being asserted, so
+                        name the slot after IT rather than re-deriving from the
+                        slot string. */}
+                    <div className="resolve-feeder__label">{slotLabel(s.placeholder, s.feeder.id)}</div>
                     <div className="resolve-feeder__opts">
                         {s.options.map((opt) => {
                             const name = _bracketSideName(opt);
@@ -571,6 +583,24 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         () => courtMatchesRaw.filter(window.isPendingBracketMatch),
         [courtMatchesRaw]
     );
+    // A "Later" row shows the placeholder sides of a bout whose feeders are not
+    // in yet, so its names go through the shared slot rule (bracket.jsx) and read
+    // "Winner of M3" — the number on the bracket card — instead of the internal
+    // "r2-m0". One labeller per competition, memoised with the court feed it is
+    // derived from. NOTE: the labeller is DISPLAY only; the queue is still split
+    // by isPendingBracketMatch / hasBothSides on the RAW sides above, so a
+    // relabelled row stays non-actionable exactly as before.
+    const slotLabelFor = useMemoSh(() => {
+        const cache = new Map();
+        return (compId) => {
+            if (!cache.has(compId)) {
+                const c = courtCompetitions.find((x) => x.id === compId);
+                const rounds = (c && c.bracket && c.bracket.rounds) || [];
+                cache.set(compId, window.bracketSlotLabeller ? window.bracketSlotLabeller(rounds) : (n) => n);
+            }
+            return cache.get(compId);
+        };
+    }, [courtCompetitions]);
     const { sorted, running, scheduled, completed } = useMemoSh(
         () => partitionShiaijoMatches(allMatches),
         [allMatches]
@@ -1206,7 +1236,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                     </div>
                                     <div className="score-editor__list">
                                         {filteredPending.map((m) => (
-                                            <ShiaijoQueueRow key={matchKey(m)} m={m} pending onResolve={setResolveMatch} />
+                                            <ShiaijoQueueRow key={matchKey(m)} m={m} pending onResolve={setResolveMatch} slotLabel={slotLabelFor(m.compId)} />
                                         ))}
                                     </div>
                                 </div>
@@ -1550,8 +1580,15 @@ function ShiaijoQueueGroup({ label, matches, subGroup, scheduled, courts, onMove
     );
 }
 
-export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick, onCorrect, onCall, callingKey, calledKey, startingKey, pending, onResolve }) {
+export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick, onCorrect, onCall, callingKey, calledKey, startingKey, pending, onResolve, slotLabel }) {
     const isComplete = m.status === "completed";
+    // Slot text through the one shared rule (bracket.jsx). Actionable rows never
+    // hold a placeholder (hasBothSides filtered them out), so this only ever
+    // changes the `pending` "Later" rows; the fallbacks keep any other caller
+    // from printing a raw "Winner of rX-mY" if it ever does.
+    const slotName = slotLabel || window.slotDisplayName || ((n) => n);
+    const aName = slotName(m.sideA?.name || "", (m.feeders || [])[0]);
+    const bName = slotName(m.sideB?.name || "", (m.feeders || [])[1]);
     const scoreCell = shiaijoScoreCell(m);
     // Derive position in the full scheduled list to know when to disable ↑/↓.
     // `scheduled` is the court's complete scheduled array (including Up Next);
@@ -1592,14 +1629,14 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
                 </span>
             </div>
             <div className="shiaijo-qrow__match">
-                <div className="shiaijo-qrow__side" aria-label={`Shiro: ${m.sideB?.name || ""}`}>
+                <div className="shiaijo-qrow__side" aria-label={`Shiro: ${bName}`}>
                     <span className="se-color-badge se-color-badge--shiro">SHIRO</span>
-                    <span className="shiaijo-qrow__name">{m.sideB?.number ? <span className="num-prefix">{m.sideB.number}</span> : null}{m.sideB?.name}</span>
+                    <span className="shiaijo-qrow__name">{m.sideB?.number ? <span className="num-prefix">{m.sideB.number}</span> : null}{bName}</span>
                 </div>
                 <span className="shiaijo-qrow__vs">vs</span>
-                <div className="shiaijo-qrow__side shiaijo-qrow__side--aka" aria-label={`Aka: ${m.sideA?.name || ""}`}>
+                <div className="shiaijo-qrow__side shiaijo-qrow__side--aka" aria-label={`Aka: ${aName}`}>
                     <span className="se-color-badge se-color-badge--aka">AKA</span>
-                    <span className="shiaijo-qrow__name">{m.sideA?.number ? <span className="num-prefix">{m.sideA.number}</span> : null}{m.sideA?.name}</span>
+                    <span className="shiaijo-qrow__name">{m.sideA?.number ? <span className="num-prefix">{m.sideA.number}</span> : null}{aName}</span>
                 </div>
             </div>
             {/* Completed result on its own centred line BELOW the names: the

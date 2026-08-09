@@ -220,18 +220,21 @@ Name[, Zekken/DisplayName], Dojo[, DanGrade][, source]
 
 ## PR Workflow
 
-- **Build the PR body from the repo template.** When creating a PR, populate the description from `.github/pull_request_template.md` and fill every section: `gh pr create --body-file <filled-template>` (the bare `gh pr create` / `--fill` does NOT apply the template). Set the `Closes mp-xxxx` bead reference.
+- **Build the PR body from the repo template.** When creating a PR, populate the description from `.github/pull_request_template.md` and fill every section: `gh pr create --body-file <filled-template>` (the bare `gh pr create` / `--fill` does NOT apply the template). Set the `Closes bc-xxxx` bead reference (`mp-xxxx` for older beads that predate the prefix change).
 - **Embed screenshots via the `pr-assets` side branch, not gists** (`gh gist create` rejects binaries). Push the PNG to the `pr-assets` branch (never merged to main): `gh api --method PUT .../contents/pr-assets/<pr>/shot.png -f branch=pr-assets -f content="$(base64 < shot.png | tr -d '\n')"`, then embed `![](https://raw.githubusercontent.com/gitrgoliveira/bracket-creator/pr-assets/pr-assets/<pr>/shot.png)`. A real browser/MCP screenshot is MANDATORY for any UI change. There is NO textual/DOM/geometry substitute. If you have not captured one, the PR is not review-ready: capture it first, then fill the Screenshots section. Full verified recipe: the `/pr-screenshots` skill. **Capture only via the browser/MCP screenshot tools, NEVER a desktop or full-screen grab (`screencapture`, `scrot`, OS shortcuts), which exposes the user's private screen.**
 - **Test plan is a gate, not a formality.** Before requesting review on a PR, check off EVERY item in the PR description's test plan. Do not mark a PR ready while any checkbox is unverified. Manual/browser steps are not optional; execute them, then check them.
 - **Keep the bead `in_progress` until the PR actually merges.** A green review is not a merge. Only `bd close <id>` after the merge lands, with a reason referencing the merge commit/PR.
 - **After a merge, run the full `/cleanup` sequence** (close bead → fast-forward main → remove worktree → delete local + remote branch → prune). Don't wait to be asked for each step. See the `/cleanup` skill.
 - **Verify the worktree/branch before any edit.** This repo uses a git worktree per PR; edits applied to the wrong worktree (or directly to the `main` checkout) force patch-and-revert recovery. When there is any ambiguity, confirm with `pwd` and `git branch --show-current` before the first Edit/Write. Never edit the main checkout directly; always work inside a worktree.
 
-## Code Review (Copilot)
+## Code Review
 
-- **Never report a review round "clean" until a fresh fetch shows zero unresolved threads.** State the total unresolved count first, give every thread an explicit disposition (fix or dismissal with a reason), then re-verify the count is zero. The `/review-loop` skill encodes the full loop.
+- **There is no automated Copilot review loop.** It was retired on 2026-07-24. Do not run `/review-loop`, do not re-request Copilot, and never treat "waiting for a bot review" as a merge gate.
+- **Review threads still appear — the repo owner posts them by hand.** Read and address them like any other review feedback. What is retired is the bot and the loop around it, not the reviewing.
+- **Never report a review round "clean" until a fresh fetch shows zero unresolved threads.** State the total unresolved count first, give every thread an explicit disposition (fix or dismissal with a reason), then re-verify the count is zero.
 - **Report `resolved` and `outdated` threads separately.** Never claim zero unresolved threads without checking for outdated-but-visible threads that the user can still see in the GitHub UI. A query that filters out outdated threads produces a false "clean" that contradicts what the user sees.
-- **Re-request Copilot via the GraphQL `requestReviews` mutation with the bot node id**: both `gh pr edit --add-reviewer Copilot` (lowercases the login, fails) and REST `POST .../requested_reviewers -f "reviewers[]=Copilot"` (silently no-ops; that array is users-only and Copilot is a Bot) are broken. Full recipe + verification step in the `/review-loop` skill (rule 4).
+- **Paginate when counting or resolving threads.** GitHub's `reviewThreads(first:100)` caps at 100; a capped lookup silently finds nothing for threads past #100 and falsely prints "already resolved" while leaving them unresolved, which then blocks merge under a ruleset with `required_review_thread_resolution:true`.
+- Deeper passes are run on request: `/tri-review`, `/code-review`, `/security-review`, `/impeccable critique`. A zero-findings result from a reviewer that never ran looks identical to a genuinely clean review — check for agent failures before trusting one.
 - Run `make go/test` after fixes and before pushing. A red gate means fix-or-revert, never push.
 
 ## Testing & Verification
@@ -345,7 +348,10 @@ Treat this as an extra mandatory step in the Session Completion workflow above, 
 
 ### Where the issues live
 
-- **Issues use the `mp-` prefix**, in the local Dolt DB under `.beads/` (database `mp`, named in `.beads/metadata.json`). A small legacy set uses `bracket-creator-*`. All of `.beads/` is gitignored, so the DB is never committed here.
+- **New issues use the `bc-` prefix; existing issues keep the IDs they already have.** Create one with `bd create "<title>" --id bc-<4-char-slug> --force`. BOTH flags are required: without `--id` bd mints an `mp-` ID from the in-DB `issue_prefix` (still `mp`), and without `--force` it refuses with `prefix mismatch: database uses 'mp-'`. Pick the slug yourself in the existing house style and check it is free first.
+- **Do not "fix" this by renaming the prefix.** `bd config set issue_prefix` is refused outright, and `bd rename-prefix` rewrites the whole DB. With this repo's three prefixes present (`mp`, `mp-mol`, `bracket-creator`) it requires `--repair`, which REGENERATES every ID as random 8-hex (`mp-gmcg` → `bc-b90638d7`; verified on a throwaway DB copy — 0 of 581 mnemonics survived). That would strand ~1240 `mp-xxxx` references across the codebase, docs, git history and merged PR bodies. Mixed prefixes are fine: a `bc-` bead is fully first-class and can depend on an `mp-` bead.
+- **Historical IDs:** ~550 use `mp-` (including `mp-mol-*` molecules poured from formulas) and a small legacy set uses `bracket-creator-*`. They stay as they are, so every existing reference in code comments and docs remains valid.
+- The DB lives in the local Dolt store under `.beads/` (database `mp`, named in `.beads/metadata.json`). All of `.beads/` is gitignored, so the DB is never committed here.
 - **Sync remote:** the PRIVATE Forgejo repo `Ricardo/bracket-creator-beads` over `git+https`, stored as `sync.remote`. Beads push to `refs/dolt/data` there, deliberately NOT to `origin` — this GitHub repo is public and the issue DB is not. Do not add a beads remote pointing at a public repo.
 - **`.beads/` is shared by every worktree** (bd walks up from the worktree to the repo root), so concurrent sessions write to one DB. Never swap, restore, or replace the DB while another session may be running.
 
@@ -353,4 +359,5 @@ Treat this as an extra mandatory step in the Session Completion workflow above, 
 
 - **`store is read-only` means a prefix-ownership problem, not a lock or corruption.** bd routes writes by issue-ID prefix; a prefix this repo does not own is routed elsewhere (see `routing.*` in `.beads/config.yaml`) and rejected. Run the write where that prefix lives, or fix the routing. Diagnose by comparing a native-prefix write against the failing one.
 - **`bd config set` / `unset` are unreliable on nested keys.** `set` can rewrite flat `a.b:` keys into a nested `a:` block; `unset` can report success while leaving the key in the file. Always confirm with `bd config get <key>` AND by re-reading `.beads/config.yaml`, and hand-edit when they misbehave.
+- **`bd where` reports the wrong prefix here.** It reads `issue_prefix` from `.beads/config.yaml` (which says `bc`), but ID generation uses the value stored in the DB (`bd config list` → `issue_prefix = mp`). The file value is inert. Trust `bd config list`, not `bd where`.
 - **`bd export` JSONL is lossy: it carries `dependency_count` but no dependency edges, and no comment bodies.** Never migrate or restore a beads DB via export/import — it silently drops blocker relationships. Copy the Dolt database directory instead.

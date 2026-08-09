@@ -39,12 +39,15 @@ func RegisterScheduleHandlers(r *gin.RouterGroup) {
 //   - teamMatchType:     string, "kachinuki" widens the estimate into a
 //     best/average/worst range (variable bout count, mp-gmcg); any
 //     other value (or absent) keeps a constant bout count
-//   - buffer:            int, slowest-court buffer % (default 0)
-//   - ceremonyMinutes:   int, ceremony block minutes (default 0)
+//   - buffer:            int, slowest-court buffer % (default 0; lenient — a
+//     malformed value falls back to the default rather than 400ing)
+//   - ceremonyMinutes:   int, ceremony block minutes (default 0; lenient — a
+//     malformed value falls back to the default rather than 400ing)
 //
-// Returns 400 when any param is missing or fails validation (parse, range, or
-// the per-param constraints listed above); 200 with ScheduleEstimate JSON
-// otherwise.
+// Returns 400 when a required param is missing, or when a provided param is
+// rejected by its stated validation (parse, range, or per-param constraint) —
+// the lenient buffer/ceremonyMinutes never reject (a malformed value falls back
+// to its default). 200 with ScheduleEstimate JSON otherwise.
 func scheduleEstimateHandler(c *gin.Context) {
 	matchDurationStr := c.Query("matchDuration")
 	multiplierStr := c.Query("multiplier")

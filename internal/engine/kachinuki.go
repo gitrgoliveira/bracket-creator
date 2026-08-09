@@ -780,14 +780,15 @@ func (e *Engine) RequeueBlockerAndReopenKachinuki(targetComp, targetMatch, block
 		}
 		// Pre-check the TARGET's RESULT preconditions (completed +
 		// downstream-not-fought) read-only BEFORE the destructive revert, so a
-		// target that cannot be reopened — because its winner already fed a
+		// target that cannot be reopened — because its result already fed a
 		// fought knockout — does not cost the blocker its live on-court score
 		// (mp-gmcg review). The court half is deliberately NOT checked here: the
 		// revert is what frees the court, so the reopen's own court gate is the
 		// authoritative one. This NARROWS the wipe window but does NOT close it:
 		// PUT /score takes the court lock we hold, but POST /decision and POST
 		// /bulk-score complete a match under the per-comp lock alone (see the
-		// handler at handlers_match.go:801), so a downstream write landing between
+		// ErrMatchAlreadyCompleted case in the requeue handler), so a downstream
+		// write landing between
 		// this pre-check's tx close and the reopen's own in-tx re-check can still
 		// make the reopen fail AFTER the revert — costing the blocker its score.
 		// The reopen's re-check is the backstop that preserves bracket integrity
@@ -838,12 +839,14 @@ func (e *Engine) reopenResultPreconditionTx(tx state.StoreTx, compID string, com
 // review): it opens a target-competition tx and reports whether the match is
 // completed and its result has not fed a fought downstream, WITHOUT any court
 // check and WITHOUT any mutation. Two callers run it before their court gates:
-// the requeue-and-reopen path (before its destructive revert, so a target that
-// can't reopen never costs the blocker its score) and the plain-reopen entry
-// (before CheckCrossCompCourtBusy, so an unreopenable target reports that rather
-// than a transient court_busy). The preconditions live in
+// the requeue-and-reopen path (before its destructive revert, so in the common
+// path a target that can't reopen doesn't cost the blocker its score) and the
+// plain-reopen entry (before CheckCrossCompCourtBusy, so an unreopenable target
+// reports that rather than a transient court_busy). The preconditions live in
 // reopenResultPreconditionTx, which reopenKachinukiUnderCourtLock also runs, so
-// this pre-check cannot pass a target the reopen will then reject.
+// the pre-check and the reopen share ONE rule set and cannot DRIFT — though a
+// /decision or /bulk-score racing the gap can still make the reopen reject after
+// the pre-check passed (the accepted window the requeue comment documents).
 func (e *Engine) checkTargetReopenable(compID string, comp *state.Competition, matchID string) error {
 	var checkErr error
 	txErr := e.store.WithTransaction(compID, func(tx state.StoreTx) error {

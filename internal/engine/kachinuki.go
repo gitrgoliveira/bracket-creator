@@ -642,7 +642,9 @@ func (e *Engine) ReopenKachinukiMatch(compID, matchID, reason string) error {
 		// read-only pre-check the requeue path runs before its revert, and the
 		// mutation below re-checks — so this only reorders which 409 wins. It lives
 		// at this plain-reopen entry rather than in the shared body because the
-		// requeue path already pre-checks before its revert and must not re-run it.
+		// requeue path already pre-checks before its revert and need not re-run it
+		// (the check is read-only, so a second run would be wasted work, not a
+		// hazard).
 		if verr := e.checkTargetReopenable(compID, comp, matchID); verr != nil {
 			return verr
 		}
@@ -662,8 +664,10 @@ func (e *Engine) ReopenKachinukiMatch(compID, matchID, reason string) error {
 func (e *Engine) reopenKachinukiUnderCourtLock(compID string, comp *state.Competition, matchID, reason string) error {
 	reason = strings.TrimSpace(reason)
 	// Cross-competition court gate, deliberately OUTSIDE the transaction (see
-	// the doc comment). Also surfaces the *NotFoundError for an unknown match
-	// before any per-comp lock is taken.
+	// the doc comment). Its own *NotFoundError is now only a backstop: both entry
+	// points surface an unknown match earlier (the plain entry via
+	// checkTargetReopenable, the requeue entry via requireBlockerHoldsCourt), so
+	// this gate's 404 is reachable only if the competition is deleted in the gap.
 	if err := e.CheckCrossCompCourtBusy(compID, matchID); err != nil {
 		return err
 	}
@@ -693,8 +697,12 @@ func (e *Engine) reopenKachinukiUnderCourtLock(compID string, comp *state.Compet
 			// the standings baseline). These precede the SAME-competition court
 			// gate below; the cross-comp gate (CheckCrossCompCourtBusy) already ran
 			// before this tx, and the plain-reopen entry (ReopenKachinukiMatch)
-			// pre-checks these preconditions before THAT — so an unreopenable
-			// target is never masked by a transient court_busy on either gate.
+			// pre-checks these preconditions before THAT — so an unreopenable target
+			// is not masked by a transient court_busy on either gate, EXCEPT in the
+			// same accepted race the requeue path documents: a /decision or
+			// /bulk-score completing a downstream between the entry pre-check's tx
+			// close and CheckCrossCompCourtBusy can still surface court_busy for a
+			// now-unreopenable target (a retry then reports the permanent 409).
 			if rerr := e.reopenResultPreconditionTx(tx, compID, comp, matchID, h); rerr != nil {
 				opErr = rerr
 				return nil

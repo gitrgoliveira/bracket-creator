@@ -4,6 +4,8 @@
 // imports (no standalone <script> tag) and consumed by the AdminCompetition
 // shell via window.*.
 
+import { EstimateHeadline } from './admin_schedule_utils.jsx';
+
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
 const compMatchStats = window.compMatchStats;
@@ -580,6 +582,12 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
     const total = formatCompMinutes(estimate && estimate.totalDurationMinutes);
     const perCourt = estimate ? (estimate.perCourtMinutes || []).map(m => formatCompMinutes(m) || "0m") : [];
     const ceremony = formatCompMinutes(estimate && estimate.ceremonyMinutes);
+    // mp-gmcg: kachinuki has a variable bout count, so the server returns a
+    // best/average/worst range (it knows the competition's teamMatchType).
+    // The headline totalDurationMinutes is the AVERAGE; when the range
+    // collapses (fixed/individual) the single total renders as before.
+    // EstimateHeadline (admin_schedule_utils.jsx) owns that decision for
+    // both this footer and the Settings panel.
     return (
       <div style={{
         padding: "10px 12px",
@@ -605,7 +613,7 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
           }
           return (
             <div style={{ fontSize: 12.5, color: "var(--ink)" }}>
-              <div><strong>Total:</strong> {total}</div>
+              <EstimateHeadline estimate={estimate} total={total} format={formatCompMinutes} testId="overview-est-range" />
               {perCourt.length > 1 && (
                 <div style={{ marginTop: 2 }}>
                   <strong>Per court:</strong>{" "}

@@ -272,6 +272,55 @@ describe('AdminShiaijoPage render-smoke', () => {
     }
   });
 
+  // mp-gmcg regression: correcting a COMPLETED match then Reopening it (kachinuki:
+  // completed -> running, keep the bout log) must never strand the operator. The
+  // "Back to court" exit is deliberately withheld while running (it could strand a
+  // result-less bout behind another running match), so "Send back to queue" must
+  // take over as the exit. A prior `!correctingMatch` guard hid BOTH once reopened,
+  // leaving the shiaijo panel with no in-panel exit - the exact dead-end this
+  // feature exists to remove.
+  it('a reopened correction keeps an in-panel exit (Send back to queue), never a dead-end', async () => {
+    const completed = {
+      id: 'm1', compId: 'c1', compName: 'Cup', status: 'completed',
+      phase: 'bracket', matchNumber: 1, court: 'A', compKind: 'team', teamSize: 5,
+      sideA: { id: 'a', name: 'Team A' }, sideB: { id: 'b', name: 'Team B' },
+      winner: { id: 'a', name: 'Team A' },
+    };
+    // Mutable court feed: the reopen happens server-side inside the (stubbed)
+    // editor, so we model its effect by returning the SAME match as running on
+    // the next refetch. tournamentMatches ignores its arg and reads this closure.
+    let current = [completed];
+    window.tournamentMatches = () => current;
+    window.filterMatchesByCourt = (matches) => matches;
+    // fetchCourtMatches returns a FRESH array each call so courtComps identity
+    // changes and courtMatchesRaw re-derives from the mutated feed.
+    const fetchCourtMatches = vi.fn().mockImplementation(() => Promise.resolve([{ id: 'c1', name: 'Cup' }]));
+    const prevFetch = window.API.fetchCourtMatches;
+    const prevSub = window.API.subscribeToEvents;
+    const prevRevert = window.API.revertMatchToQueue;
+    window.API.fetchCourtMatches = fetchCourtMatches;
+    window.API.subscribeToEvents = () => () => {};
+    window.API.revertMatchToQueue = vi.fn().mockResolvedValue(true);
+    try {
+      let utils;
+      await act(async () => { utils = renderPage(makeMinimalTournament()); });
+      // Correct the completed match -> correcting (completed): the exit is "Back to court".
+      await act(async () => { utils.getByRole('button', { name: /^correct$/i }).click(); });
+      expect(utils.getByRole('button', { name: /back to court/i })).toBeTruthy();
+      expect(utils.queryByRole('button', { name: /send back to queue/i })).toBeNull();
+      // Simulate the Reopen: the match comes back RUNNING on the next refetch.
+      current = [{ ...completed, status: 'running', winner: undefined }];
+      await act(async () => { utils.getByRole('button', { name: /refresh/i }).click(); });
+      // Now reopened (running). Exactly one exit, and it is Send back to queue.
+      expect(utils.getByRole('button', { name: /send back to queue/i })).toBeTruthy();
+      expect(utils.queryByRole('button', { name: /back to court/i })).toBeNull();
+    } finally {
+      window.API.fetchCourtMatches = prevFetch;
+      window.API.subscribeToEvents = prevSub;
+      window.API.revertMatchToQueue = prevRevert;
+    }
+  });
+
   // Guard: verify that a missing window scope reference causes a render failure.
   // This is the exact class of bug that PR #271 introduced undetected:
   // requestMoveCourt was used in ShiaijoQueueGroup but not passed as a prop,

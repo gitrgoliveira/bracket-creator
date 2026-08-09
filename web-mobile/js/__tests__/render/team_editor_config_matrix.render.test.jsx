@@ -148,16 +148,26 @@ describe('TeamScoreEditorModal config matrix (running match, admin surface)', ()
     );
     expect(letters).toEqual(cell.naginata ? NAGINATA_SET : KENDO_SET);
 
-    // Encho affordance: always present, collapsed to the pill while no
-    // overtime is active. The stepper itself is unbounded above (mp-m4bn,
-    // covered by the focused stepper test below).
-    expect(screen.queryByTestId('scoring-modal-encho-pill')).not.toBeNull();
+    // Encho affordance: the top overtime pill is present for FIXED formats
+    // (collapsed while no overtime is active; the stepper itself is now
+    // unbounded above per mp-m4bn). mp-gmcg: in a running kachinuki match
+    // (bout mode) the top pill is suppressed — declaring encho there is the
+    // optional footer Encho on a tied bout, not a top period-stepper — so the
+    // pill must be ABSENT for kachinuki cells.
+    if (cell.tmt === 'kachinuki') {
+      expect(screen.queryByTestId('scoring-modal-encho-pill')).toBeNull();
+    } else {
+      expect(screen.queryByTestId('scoring-modal-encho-pill')).not.toBeNull();
+    }
 
     // Daihyosen affordance is knockout-only (T141): phase "bracket", or the
     // playoffs/mixed fallback for non-pool phases. Pool matches resolve ties
-    // via standings + the auto-injected pool daihyosen instead.
-    const expectKnockout = cell.phase === 'bracket';
-    expect(!!screen.queryByTestId('scoring-modal-daihyosen-button')).toBe(expectKnockout);
+    // via standings + the auto-injected pool daihyosen instead. mp-gmcg:
+    // daihyosen does not exist in kachinuki (a tied final bout goes to encho
+    // on that same bout), so the ADD affordance is hidden for kachinuki even
+    // in a knockout — the tie resolves via the inline Encho path instead.
+    const expectDaihyosen = cell.phase === 'bracket' && cell.tmt !== 'kachinuki';
+    expect(!!screen.queryByTestId('scoring-modal-daihyosen-button')).toBe(expectDaihyosen);
 
     // Admin decision controls (kiken/fusenpai) render on the admin surface.
     expect(screen.queryByTestId('scoring-modal-kiken-voluntary-button')).not.toBeNull();
@@ -255,25 +265,207 @@ describe('TeamScoreEditorModal encho stepper is unbounded (mp-m4bn)', () => {
 describe('TeamScoreEditorModal kachinuki bout navigation', () => {
   const KACHI_CELL = { format: 'playoffs', phase: 'bracket', teamSize: 5, tmt: 'kachinuki', naginata: false };
 
-  it('RUNNING: only the current bout renders; the operator CANNOT navigate back to a scored earlier bout', async () => {
+  it('RUNNING: the fought bouts render as read-only rows above the current editable bout', async () => {
     // Server bout log: bout 1 fought (won by A1), bout 2 appended by
-    // engine.AdvanceKachinuki and not yet scored. kachinukiVisiblePositions
-    // shows ONLY the first unscored server bout while running: bout 1 is not
-    // rendered and no back affordance exists. Corrections to an earlier bout
-    // require finishing the match first (correction mode below). Whether the
-    // operator SHOULD be able to step back mid-encounter is ruled on by
-    // mp-yqxn.2.
+    // engine.AdvanceKachinuki and not yet scored. Both render (mp-gmcg): bout 1
+    // as a READ-ONLY team-sheet row (no scoring controls) above bout 2, the
+    // current editable bout — the operator sees the whole encounter like a
+    // regular team sheet. The read-only row is TAPPABLE to reopen it inline
+    // for correction (mp-gmcg; see the correction tests below); until tapped
+    // it carries no scoring controls.
     const { container } = await renderCell(KACHI_CELL, {
       subResults: [
         { position: 1, sideA: 'A1', sideB: 'B1', ipponsA: ['M', 'K'], ipponsB: [], winner: 'A1' },
         { position: 2, sideA: 'A1', sideB: 'B2', ipponsA: [], ipponsB: [] },
       ],
     });
-    // Exactly one bout row, and it is bout 2: bout 1 is not rendered and no
-    // back affordance exists.
     const rows = container.querySelectorAll('.team-sub-match');
-    expect(rows.length).toBe(1);
-    expect(rows[0].querySelector('.team-sub-match__pos-num').textContent).toBe('2');
+    expect(rows.length).toBe(2);
+    expect([...rows].map(r => r.querySelector('.team-sub-match__pos-num').textContent)).toEqual(['1', '2']);
+    // Bout 1 (fought) is read-only — no scoring controls; bout 2 (current) is editable.
+    expect(rows[0].classList.contains('team-sub-match--readonly')).toBe(true);
+    expect(rows[0].querySelector('.team-sub-match__btns')).toBeNull();
+    expect(rows[1].classList.contains('team-sub-match--readonly')).toBe(false);
+    expect(rows[1].querySelector('.team-sub-match__btns')).not.toBeNull();
+  });
+
+  it('RUNNING: a fought hikiwake bout shows an X on its read-only row', async () => {
+    // Bout 1 fought to a hikiwake (both retire), bout 2 appended and unscored.
+    // The read-only row for bout 1 carries the same centre X mark as an editable
+    // tie, so a draw in the fought history is unambiguous.
+    const { container } = await renderCell(KACHI_CELL, {
+      subResults: [
+        { position: 1, sideA: 'A1', sideB: 'B1', ipponsA: [], ipponsB: [], decision: 'hikiwake' },
+        { position: 2, sideA: 'A2', sideB: 'B2', ipponsA: [], ipponsB: [] },
+      ],
+    });
+    const rows = container.querySelectorAll('.team-sub-match');
+    expect(rows.length).toBe(2);
+    expect(rows[0].classList.contains('team-sub-match--readonly')).toBe(true);
+    expect(rows[0].querySelector('.tsm-draw')?.textContent).toBe('X');
+    // No winner is bolded on a tie.
+    expect(rows[0].querySelector('.tsm-name__static--win')).toBeNull();
+  });
+
+  it('RUNNING: every non-tie bout middle reads "vs" — decided AND pending — never a dash', async () => {
+    // Durable fix: the editor derives its centre from the single-source
+    // boutMiddle (CLAUDE.md § Match Decision Types: the middle is vs/X/(E)/(DH)
+    // only; a dash is a CELL value, never the middle). A DECIDED-by-points bout
+    // reads "vs" like the bracket/scoreboard (the cell ippon letters carry the
+    // score), and an unplayed bout reads "vs" too. Bout 1 fought (Aka wins,
+    // read-only done row), bout 2 appended and unscored (live entry row).
+    const { container } = await renderCell(KACHI_CELL, {
+      subResults: [
+        { position: 1, sideA: 'A1', sideB: 'B1', ipponsA: ['M', 'M'], ipponsB: [], winner: 'A1' },
+        { position: 2, sideA: 'A1', sideB: 'B2', ipponsA: [], ipponsB: [] },
+      ],
+    });
+    const rows = container.querySelectorAll('.team-sub-match');
+    const decidedMid = rows[0].querySelector('.team-sub-match__score'); // done, decided by points
+    const pendingMid = rows[1].querySelector('.team-sub-match__score'); // live, unscored
+    expect(decidedMid?.textContent).toBe('vs');
+    expect(pendingMid?.textContent).toBe('vs');
+    expect((decidedMid?.textContent || '') + (pendingMid?.textContent || '')).not.toContain('–');
+  });
+
+  it('RUNNING: the keyboard cannot score a bout that is already decided (no impossible 2-2)', async () => {
+    // Regression for the /simplify catch: keyboard scoring must honour the same
+    // guards as the ippon buttons (disabled once decided, capped per side), so
+    // it can't record a score the taps forbid.
+    const { container } = await renderCell(KACHI_CELL, {
+      subResults: [{ position: 1, sideA: 'A1', sideB: 'B1', ipponsA: [], ipponsB: [] }],
+    });
+    const filled = (side) => container.querySelectorAll(`.tsm-center-pts--${side} .editor-side__pt--filled`).length;
+    // Score Shiro (no shift) to 2 ippons via the keyboard: the bout is now decided.
+    await act(async () => { fireEvent.keyDown(document.body, { key: 'm' }); });
+    await act(async () => { fireEvent.keyDown(document.body, { key: 'k' }); });
+    expect(filled('shiro')).toBe(2);
+    // A further Aka keystroke (Shift+M) is a no-op — a decided bout can't reach 2-2.
+    await act(async () => { fireEvent.keyDown(document.body, { key: 'M', shiftKey: true }); });
+    expect(filled('aka')).toBe(0);
+  });
+
+  it('RUNNING: tapping a fought bout reopens it inline with scoring controls (mp-gmcg)', async () => {
+    // The mid-encounter correction path: a fought bout is read-only with a
+    // black expand caret and aria-expanded=false, and tapping it reopens the
+    // SAME scoring controls as the current bout, in place, flagged as the bout
+    // being corrected with a collapse caret. No Reopen/End round-trip needed.
+    const { container } = await renderCell(KACHI_CELL, {
+      subResults: [
+        { position: 1, sideA: 'A1', sideB: 'B1', ipponsA: [], ipponsB: ['M', 'K'], winner: 'B1' },
+        { position: 2, sideA: 'A2', sideB: 'B1', ipponsA: [], ipponsB: [] },
+      ],
+    });
+    const done = screen.getByTestId('kachinuki-done-bout-0');
+    expect(done.classList.contains('team-sub-match--readonly')).toBe(true);
+    expect(done.getAttribute('aria-expanded')).toBe('false');
+    expect(done.querySelector('.tsm-caret')).not.toBeNull();
+    expect(done.querySelector('.team-sub-match__btns')).toBeNull();
+    await act(async () => { fireEvent.click(done); });
+    const rows = container.querySelectorAll('.team-sub-match');
+    expect(rows.length).toBe(2);
+    // Bout 1 now editable + flagged as being corrected; bout 2 stays editable.
+    expect(rows[0].classList.contains('team-sub-match--correcting')).toBe(true);
+    expect(rows[0].querySelector('.team-sub-match__btns')).not.toBeNull();
+    expect(rows[1].querySelector('.team-sub-match__btns')).not.toBeNull();
+    // The collapse caret (rotated, aria-expanded=true) is the close control.
+    const caret = screen.getByTestId('kachinuki-done-collapse-0');
+    expect(caret.classList.contains('tsm-caret--open')).toBe(true);
+    expect(caret.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('RUNNING: correcting a fought bout without changing the winner shows no chain warning (mp-gmcg)', async () => {
+    // Shiro (sideB) won 2-1. Removing the loser's (Aka) ippon is a pure score
+    // fix: the winner is unchanged, so the later bouts are unaffected and no
+    // warning shows.
+    const { container } = await renderCell(KACHI_CELL, {
+      subResults: [
+        { position: 1, sideA: 'A1', sideB: 'B1', ipponsA: ['M'], ipponsB: ['M', 'K'], winner: 'B1' },
+        { position: 2, sideA: 'A2', sideB: 'B1', ipponsA: [], ipponsB: [] },
+      ],
+    });
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-done-bout-0')); });
+    const bout0 = container.querySelectorAll('.team-sub-match')[0];
+    const akaFilled = bout0.querySelectorAll('.tsm-center-pts--aka .editor-side__pt--filled');
+    expect(akaFilled.length).toBe(1);
+    await act(async () => { fireEvent.click(akaFilled[0]); });
+    expect(screen.queryByTestId('kachinuki-done-edit-warn')).toBeNull();
+  });
+
+  it('RUNNING: changing who won a fought bout warns the later bouts need re-checking (mp-gmcg)', async () => {
+    // Shiro (sideB) won 2-1. Removing a winner ippon makes it 1-1 — no longer
+    // Shiro's win — which reshapes who-stays-on for every later bout. The app
+    // never restacks them itself (only the courtside operator knows the real
+    // later results), so it warns instead.
+    const { container } = await renderCell(KACHI_CELL, {
+      subResults: [
+        { position: 1, sideA: 'A1', sideB: 'B1', ipponsA: ['M'], ipponsB: ['M', 'K'], winner: 'B1' },
+        { position: 2, sideA: 'A2', sideB: 'B1', ipponsA: [], ipponsB: [] },
+      ],
+    });
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-done-bout-0')); });
+    expect(screen.queryByTestId('kachinuki-done-edit-warn')).toBeNull();
+    const bout0 = container.querySelectorAll('.team-sub-match')[0];
+    const shiroFilled = bout0.querySelectorAll('.tsm-center-pts--shiro .editor-side__pt--filled');
+    expect(shiroFilled.length).toBe(2);
+    await act(async () => { fireEvent.click(shiroFilled[0]); });
+    expect(screen.getByTestId('kachinuki-done-edit-warn')).toBeTruthy();
+  });
+
+  it('RUNNING: the collapse caret returns a corrected bout to a read-only row (mp-gmcg)', async () => {
+    await renderCell(KACHI_CELL, {
+      subResults: [
+        { position: 1, sideA: 'A1', sideB: 'B1', ipponsA: [], ipponsB: ['M', 'K'], winner: 'B1' },
+        { position: 2, sideA: 'A2', sideB: 'B1', ipponsA: [], ipponsB: [] },
+      ],
+    });
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-done-bout-0')); });
+    expect(screen.getByTestId('kachinuki-done-collapse-0')).toBeTruthy();
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-done-collapse-0')); });
+    expect(screen.getByTestId('kachinuki-done-bout-0').classList.contains('team-sub-match--readonly')).toBe(true);
+    expect(screen.queryByTestId('kachinuki-done-collapse-0')).toBeNull();
+  });
+
+  it('RUNNING: tapping a different fought bout switches which one is open (mp-gmcg)', async () => {
+    // Only one bout is open at a time: opening another collapses the current.
+    await renderCell(KACHI_CELL, {
+      subResults: [
+        { position: 1, sideA: 'A1', sideB: 'B1', ipponsA: [], ipponsB: ['M', 'K'], winner: 'B1' },
+        { position: 2, sideA: 'A2', sideB: 'B1', ipponsA: ['M', 'K'], ipponsB: [], winner: 'A2' },
+        { position: 3, sideA: 'A2', sideB: 'B2', ipponsA: [], ipponsB: [] },
+      ],
+    });
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-done-bout-0')); });
+    expect(screen.getByTestId('kachinuki-done-collapse-0')).toBeTruthy();
+    // Open bout 2: bout 1 collapses (its caret gone), bout 2's caret appears.
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-done-bout-1')); });
+    expect(screen.queryByTestId('kachinuki-done-collapse-0')).toBeNull();
+    expect(screen.getByTestId('kachinuki-done-collapse-1')).toBeTruthy();
+    expect(screen.getByTestId('kachinuki-done-bout-0').classList.contains('team-sub-match--readonly')).toBe(true);
+  });
+
+  it('RUNNING: an open past-bout correction survives a same-match reload (mp-gmcg)', async () => {
+    // Autosave persists each correction as a running write that round-trips back
+    // over SSE as a fresh `match` object with the SAME id. The editor must stay
+    // open across that reload (keyed on match id, not object identity) instead of
+    // collapsing after every ippon change.
+    const overrides = {
+      subResults: [
+        { position: 1, sideA: 'A1', sideB: 'B1', ipponsA: [], ipponsB: ['M', 'K'], winner: 'B1' },
+        { position: 2, sideA: 'A2', sideB: 'B1', ipponsA: [], ipponsB: [] },
+      ],
+    };
+    const utils = await renderCell(KACHI_CELL, overrides);
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-done-bout-0')); });
+    expect(screen.getByTestId('kachinuki-done-collapse-0')).toBeTruthy();
+    // Simulate the SSE reload: a brand-new match object, same id + data.
+    await act(async () => {
+      utils.rerender(
+        <ScoreEditorModal match={makeTeamMatch(KACHI_CELL, overrides)} onClose={vi.fn()}
+          onSubmit={vi.fn().mockResolvedValue(undefined)} password="" />
+      );
+    });
+    expect(screen.getByTestId('kachinuki-done-collapse-0')).toBeTruthy();
   });
 
   it('COMPLETED (correction): every fought server bout renders and is editable', async () => {

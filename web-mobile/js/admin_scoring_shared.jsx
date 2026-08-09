@@ -4,6 +4,7 @@
 // two stateful editors. See web-mobile/admin_split_plan.md.
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
+const Icon = window.Icon;
 
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 
@@ -89,18 +90,34 @@ function IpponLegend({ isNaginata }) {
 // affordance sits where operators look for navigation. Clarity over
 // decoration: plain muted text, no animation. Styled inline (this region of
 // styles.css is owned elsewhere).
-function ScoringShortcutHint() {
+// pointKeys: the valid ippon letters ("MKDTH" / "MKDTSH") when this editor
+// supports keyboard scoring — individual matches and kachinuki bouts — else
+// "" (fixed-order team bouts score by tap only). Listed so the shortcut is
+// discoverable instead of hidden in the code; the hint is display:none under
+// a coarse pointer, so this only ever shows to a keyboard/mouse operator.
+function ScoringShortcutHint({ pointKeys = "" }) {
   const kbd = {
     fontFamily: "var(--font-mono)", fontSize: 11, padding: "1px 5px",
     border: "1px solid var(--line)", borderRadius: 4, background: "var(--surface)",
     color: "var(--ink-3)", margin: "0 1px",
   };
+  const keys = pointKeys ? [...pointKeys] : [];
   return (
     <div
+      className="scoring-shortcut-hint"
       data-testid="scoring-modal-shortcut-hint"
       aria-hidden="true"
       style={{ marginTop: 6, fontSize: 12, color: "var(--ink-3)", textAlign: "center", display: "flex", gap: 4, justifyContent: "center", alignItems: "center", flexWrap: "wrap" }}
     >
+      {keys.length > 0 && (
+        <React.Fragment>
+          {keys.map((k) => <kbd key={k} style={kbd}>{k}</kbd>)}
+          <span>Shiro</span>
+          <span aria-hidden="true">·</span>
+          <kbd style={kbd}>⇧</kbd><span>Aka</span>
+          <span aria-hidden="true">·</span>
+        </React.Fragment>
+      )}
       <kbd style={kbd}>←</kbd><kbd style={kbd}>→</kbd>
       <span>prev/next</span>
       <span aria-hidden="true">·</span>
@@ -111,32 +128,42 @@ function ScoringShortcutHint() {
 }
 
 // applyFusenshoToggle: pure reducer for the per-bout Fusensho button in
-// TeamScoreEditorModal. Implements three behaviours on top of the sub
-// state {aPts, bPts, aFouls, bFouls, fusensho, _preFusensho?}:
+// TeamScoreEditorModal. Implements three behaviours on top of a sub-bout
+// object {aPts, bPts, aFouls, bFouls, fusensho, _preFusensho?, ...}:
 //   1. Toggle-on from a clean state: snapshot {aPts,bPts,aFouls,bFouls}
-//      into _preFusensho, then write the 2-0 default win.
+//      into _preFusensho, then write the default win.
 //   2. Side-switch (fusensho is already on the other side): preserve
 //      the original _preFusensho so a later untoggle restores the
-//      genuine pre-fusensho score, not the intermediate 2-0.
+//      genuine pre-fusensho score, not the intermediate default win.
 //   3. Toggle-off (re-clicking the active side): restore from
 //      _preFusensho and clear it. If no snapshot exists (e.g. modal
 //      reopened from saved state: initSubs doesn't round-trip the
 //      snapshot), just clear the flag.
+// EVERY branch spreads `...prev` so per-sub fields this reducer does NOT
+// own survive the toggle — notably the kachinuki `encho` marker (mp-gmcg)
+// and manually typed side names. A bespoke object literal silently dropped
+// them, which erased the (E) audit mark and inflated an encho default win
+// from one maru to two. draw and fusensho are mutually exclusive, so a set
+// draw is cleared when fusensho is applied.
 // Manual pts/fouls edits clear _preFusensho separately (handled in
 // the setPts/setFouls closures): once the operator hand-edits, the
 // snapshot is stale.
 function applyFusenshoToggle(prev, side) {
   if (prev.fusensho === side) {
     const snap = prev._preFusensho;
-    if (snap) return { aPts: snap.aPts, bPts: snap.bPts, aFouls: snap.aFouls, bFouls: snap.bFouls, fusensho: "", _preFusensho: undefined };
+    if (snap) return { ...prev, aPts: snap.aPts, bPts: snap.bPts, aFouls: snap.aFouls, bFouls: snap.bFouls, fusensho: "", _preFusensho: undefined };
     return { ...prev, fusensho: "", _preFusensho: undefined };
   }
   const snap = prev._preFusensho || { aPts: prev.aPts, bPts: prev.bPts, aFouls: prev.aFouls, bFouls: prev.bFouls };
-  // Fusensho is a pre-bout (regulation) default win: the maru cells come
-  // from the shared count rule (defaultWinMaru in bracket.jsx).
-  const maru = window.defaultWinMaru ? window.defaultWinMaru(false) : ["○", "○"];
-  if (side === "a") return { aPts: maru, bPts: [], aFouls: 0, bFouls: 0, fusensho: "a", _preFusensho: snap };
-  return { aPts: [], bPts: maru, aFouls: 0, bFouls: 0, fusensho: "b", _preFusensho: snap };
+  // The maru cells come from the shared count rule (defaultWinMaru in
+  // bracket.jsx): one maru per point, so two in regulation but ONE in encho.
+  // Pass THIS bout's encho period — a per-bout fusensho can land on a pairing
+  // already fighting on in overtime — and let the shared rule decide; a zero or
+  // absent period reads as regulation there, so no local branch is needed.
+  const maru = window.defaultWinMaru ? window.defaultWinMaru({ periodCount: prev.encho }) : ["○", "○"];
+  const base = { ...prev, aFouls: 0, bFouls: 0, _preFusensho: snap, ...(prev.draw ? { draw: false } : {}) };
+  if (side === "a") return { ...base, aPts: maru, bPts: [], fusensho: "a" };
+  return { ...base, aPts: [], bPts: maru, fusensho: "b" };
 }
 
 // applyFoulIncrement: pure helper modelling a single `+` press on a
@@ -444,7 +471,7 @@ function EnchoControl({ enchoPeriodCount, setEnchoPeriodCount }) {
           onClick={() => setShowCounter(true)}
           aria-label="Show overtime (encho) controls"
         >
-          <span aria-hidden="true">⏱</span>
+          <span aria-hidden="true" className="encho-pill__icon">{Icon ? <Icon name="timer" size={14} /> : "⏱"}</span>
           <TermAS name="encho">Overtime</TermAS>
         </button>
       </div>
@@ -491,9 +518,17 @@ function EnchoControl({ enchoPeriodCount, setEnchoPeriodCount }) {
 // while open. Side picker uses radio inputs labelled "SHIRO (White)" / "AKA
 // (Red)" to stay consistent with the score board legend; the value submitted
 // to the backend is "shiro" or "aka" per DecisionRequest.Validate.
-function DecisionPrompt({ kind, sideA, sideB, defaultSide, askReason, onCancel, onSubmit, submitting }) {
+// requireReason (mp-gmcg): the match was reopened without a reason, so the
+// server rejects ANY finalization that carries none — including this one, since
+// a decision is just the other way to end a match. Without this the operator
+// meets a 400 they cannot satisfy: the reason box is only rendered for kiken,
+// so fusenpai on a reopened encounter would have no field to fill at all.
+// Forcing the box open AND blocking submit turns that dead end into a prompt.
+function DecisionPrompt({ kind, sideA, sideB, defaultSide, askReason, requireReason, onCancel, onSubmit, submitting }) {
   const [side, setSide] = useStateA(defaultSide || "shiro");
   const [reason, setReason] = useStateA("");
+  const showReason = askReason || requireReason;
+  const reasonMissing = requireReason && reason.trim() === "";
   // Display rule (locked, glossary.md §Display rule): render the
   // romaji term ALONE: the popover (via <Term>) carries the gloss.
   // We keep "Decision" untouched (it's already plain English) and
@@ -509,8 +544,8 @@ function DecisionPrompt({ kind, sideA, sideB, defaultSide, askReason, onCancel, 
 
   const submit = (e) => {
     e?.preventDefault?.();
-    if (submitting) return;
-    onSubmit({ decisionBy: side, decisionReason: askReason ? reason.trim() : "" });
+    if (submitting || reasonMissing) return;
+    onSubmit({ decisionBy: side, decisionReason: showReason ? reason.trim() : "" });
   };
 
   return (
@@ -528,23 +563,31 @@ function DecisionPrompt({ kind, sideA, sideB, defaultSide, askReason, onCancel, 
             <span><TermAS name="aka">AKA</TermAS> (Red){sideA?.name ? `: ${sideA.name}` : ""}</span>
           </label>
         </div>
-        {askReason && (
+        {showReason && (
           <label style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4 }}>
-            <span style={{ fontWeight: 600 }}>Reason (optional, ≤200 chars)</span>
+            <span style={{ fontWeight: 600 }}>
+              {requireReason ? "Reason (required, ≤200 chars)" : "Reason (optional, ≤200 chars)"}
+            </span>
             <input
               type="text"
               className="input"
               maxLength={200}
               value={reason}
               onInput={(e) => setReason(e.target.value)}
-              placeholder="e.g. injury, no-show, doctor's stop"
+              placeholder={requireReason ? "Why is this match being ended again?" : "e.g. injury, no-show, doctor's stop"}
+              data-testid="decision-reason"
             />
+            {requireReason && (
+              <span style={{ fontSize: 11, color: "var(--muted, #666)" }}>
+                This match was reopened, so ending it again needs a reason.
+              </span>
+            )}
           </label>
         )}
       </div>
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 10 }}>
         <button type="button" className="btn btn--sm" onClick={onCancel} disabled={submitting}>Cancel</button>
-        <button type="submit" className="btn btn--primary btn--sm" disabled={submitting}>
+        <button type="submit" className="btn btn--primary btn--sm" disabled={submitting || reasonMissing}>
           {submitting ? "Saving…" : "Record"}
         </button>
       </div>
@@ -864,6 +907,19 @@ window.ReasonPrompt = ReasonPrompt;
 
 const CORRECTION_PRESETS = ["Scoring error", "Wrong competitor", "Data entry", "Other"];
 
+// mp-gmcg: presets for the REOPEN audit reason, collected on the write that
+// closes a reopened kachinuki encounter back out (admin_scoring_team.jsx).
+// "Ended by mistake" is FIRST, and therefore the default selection, because it
+// is the overwhelmingly common reason a shiaijo operator reopens a match: the
+// correction presets offer no honest option for it, so an operator forced
+// through that list either mislabels the reopen "Scoring error" or picks
+// "Other" and types the same sentence every time. The remaining entries mirror
+// CORRECTION_PRESETS so a reopen made for a genuine scoring/identity/data
+// problem still lands in the same audit vocabulary — so it is DERIVED from
+// CORRECTION_PRESETS rather than restated, making that mirror structural
+// instead of a comment-only obligation that drifts on the next edit.
+const REOPEN_PRESETS = ["Ended by mistake", ...CORRECTION_PRESETS];
+
 // ES exports: the modal file imports these and re-exports the test-facing
 // subset, so `import { … } from './admin_scoring_modal.jsx'` keeps working.
 export {
@@ -897,4 +953,5 @@ export {
   LineupNameInput,
   ReasonPrompt,
   CORRECTION_PRESETS,
+  REOPEN_PRESETS,
 };

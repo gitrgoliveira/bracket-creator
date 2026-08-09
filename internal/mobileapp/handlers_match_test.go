@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +21,35 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// TestApplyCorrectionReasonUnderTx_FailsClosedOnLoadError pins that the
+// reopen/correction audit gate fails CLOSED when the pre-write snapshot read
+// errors (mp-gmcg). A best-effort read that swallowed the error and let
+// the write finalize on an assumed-false ReopenPending, silently dropping the
+// mandatory audit reason; the gate now mirrors checkFinalizedUnderTx and
+// surfaces the error so the transaction aborts (HTTP 500) instead. A directory
+// in place of pool-matches.csv is the deterministic stand-in for the transient
+// single-read fault: os.Open on a dir succeeds but csv.ReadAll on it does not,
+// so LoadPoolMatches returns a real read error rather than the empty slice a
+// missing file yields.
+func TestApplyCorrectionReasonUnderTx_FailsClosedOnLoadError(t *testing.T) {
+	root := t.TempDir()
+	store, err := state.NewStore(root)
+	require.NoError(t, err)
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1"}))
+
+	poolPath := filepath.Join(root, "competitions", "c1", "pool-matches.csv")
+	require.NoError(t, os.MkdirAll(poolPath, 0o755))
+
+	var gotErr error
+	txErr := store.WithTransaction("c1", func(stx state.StoreTx) error {
+		r := &state.MatchResult{ID: "m1", Status: state.MatchStatusCompleted}
+		_, gotErr = applyCorrectionReasonUnderTx(stx, "c1", "m1", r)
+		return nil
+	})
+	require.NoError(t, txErr)
+	require.Error(t, gotErr, "a snapshot load error must fail closed, not be swallowed")
+}
 
 func TestBulkScoreHandler(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
@@ -1330,6 +1360,10 @@ func (f failingCompetitionStore) LoadBracket(string) (*state.Bracket, error) {
 	return nil, f.err
 }
 
+func (f failingCompetitionStore) MatchStatusByID(string, string) (state.MatchStatus, bool, error) {
+	return "", false, f.err
+}
+
 // TestAnnotateQueuePositions_NonEmpty verifies that annotateQueuePositions
 // fills in per-court queue positions for a non-empty match list.
 func TestAnnotateQueuePositions_NonEmpty(t *testing.T) {
@@ -2120,6 +2154,85 @@ func TestScoreHandler_RunningWriteCannotRevertCompleted(t *testing.T) {
 	// Step 5: no lingering runningRevStore entry.
 	_, revPresent := runningRevStore.Load(matchKey)
 	assert.False(t, revPresent, "runningRevStore must have no entry after stale running write on completed match")
+}
+
+// TestScoreHandler_CorrectCompletedWhileCourtBusy pins the "correct any match"
+// fix: correcting an already-completed match (completed -> completed overwrite
+// with a correctionReason) must NOT be rejected with court_busy just because a
+// DIFFERENT match is now running on the same court. A correction never places
+// the match on the court, so the court-exclusivity start-gate must skip it. The
+// realistic operator sequence is finish M1 -> start M2 (same court) -> spot a
+// scoring error on M1 -> correct it while M2 is live. Without the isCorrection
+// skip this returned 409 court_busy and the operator could not go back.
+func TestScoreHandler_CorrectCompletedWhileCourtBusy(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "corr-court"
+	m1, m2 := "PoolA-1", "PoolA-2"
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "", Courts: []string{"A"}}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Courts: []string{"A"}}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: m1, SideA: "Alice", SideB: "Bob", Court: "A", Status: state.MatchStatusRunning},
+		{ID: m2, SideA: "Carol", SideB: "Dan", Court: "A", Status: state.MatchStatusScheduled},
+	}))
+	runningRevStore.Delete(compID + ":" + m1)
+	runningRevStore.Delete(compID + ":" + m2)
+
+	putScore := func(matchID string, payload map[string]any) *httptest.ResponseRecorder {
+		t.Helper()
+		body, _ := json.Marshal(payload)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/"+matchID+"/score", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		return w
+	}
+	loadWinner := func(matchID string) string {
+		t.Helper()
+		ms, err := store.LoadPoolMatches(compID)
+		require.NoError(t, err)
+		for _, m := range ms {
+			if m.ID == matchID {
+				return m.Winner
+			}
+		}
+		t.Fatalf("match %s not found", matchID)
+		return ""
+	}
+
+	// Step 1: finish M1 (Alice wins) while M2 is still scheduled — no conflict.
+	w1 := putScore(m1, map[string]any{
+		"sideA": "Alice", "sideB": "Bob", "winner": "Alice",
+		"ipponsA": []string{"M", "K"}, "ipponsB": []string{}, "status": "completed",
+	})
+	require.Equal(t, http.StatusOK, w1.Code, "finishing M1 must succeed: %s", w1.Body.String())
+
+	// Step 2: start M2 (running) on court A — M1 is completed, no conflict.
+	w2 := putScore(m2, map[string]any{
+		"sideA": "Carol", "sideB": "Dan", "ipponsA": []string{}, "ipponsB": []string{}, "status": "running",
+	})
+	require.Equal(t, http.StatusOK, w2.Code, "starting M2 must succeed: %s", w2.Body.String())
+
+	// Step 3: correct M1 (flip the winner to Bob) while M2 runs on the same
+	// court. This is the regression: it must succeed, not 409 court_busy.
+	w3 := putScore(m1, map[string]any{
+		"sideA": "Alice", "sideB": "Bob", "winner": "Bob",
+		"ipponsA": []string{"M"}, "ipponsB": []string{"M", "K"}, "status": "completed",
+		"correctionReason": "scoring error: Bob actually won",
+	})
+	require.Equal(t, http.StatusOK, w3.Code, "correcting a completed match while the court is busy must not 409 court_busy: %s", w3.Body.String())
+	assert.Equal(t, "Bob", loadWinner(m1), "the correction must persist the flipped winner")
+	assert.Equal(t, state.MatchStatusRunning, func() state.MatchStatus {
+		ms, _ := store.LoadPoolMatches(compID)
+		for _, m := range ms {
+			if m.ID == m2 {
+				return m.Status
+			}
+		}
+		return ""
+	}(), "M2 must stay running: the correction must not disturb the live match")
 }
 
 // TestScoreHandler_ScheduledWriteCannotRevertCompleted verifies the bracket

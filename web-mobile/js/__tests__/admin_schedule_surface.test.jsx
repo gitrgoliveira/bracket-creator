@@ -54,7 +54,6 @@ describe('admin_schedule ES export surface', () => {
 
 const WINDOW_NAMES = [
   'AdminSchedulePage',
-  'PerCourtBreakdown',
   'AdminScoreEditorPage',
   'AdminScoreEditor',
   'AdminExport',

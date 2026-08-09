@@ -27,7 +27,7 @@ import { defaultWinMaru } from '../bracket.jsx';
 // teamEncounterHasResult is a module-internal helper of admin_scoring_team.jsx
 // (not part of the thin-entry consumer barrel), imported directly like the
 // resolveMatchLineup tests do.
-import { teamEncounterHasResult, resolveKachinukiBoutSides, subBoutHasBeenPlayed } from '../admin_scoring_team.jsx';
+import { teamEncounterHasResult, resolveKachinukiBoutSides, subBoutHasBeenPlayed, fusenshoSideFromSub } from '../admin_scoring_team.jsx';
 import { isKikenDecision } from '../api_serializers.jsx';
 
 window.isKikenDecision = isKikenDecision;
@@ -813,6 +813,34 @@ describe('applyFusenshoToggle', () => {
       _preFusensho: undefined,
     });
   });
+
+  // mp-gmcg: a kachinuki sub-bout carries an `encho` period count (and, for
+  // manual bouts, typed side names). The reducer must preserve every field it
+  // does not own; regressions for the bespoke-literal drop that erased the
+  // (E) mark and forced a two-maru default win on a bout already in overtime.
+  it('toggle-on keeps the encho marker and awards the encho (one-maru) default win', () => {
+    const prev = { aPts: [], bPts: [], aFouls: 0, bFouls: 0, fusensho: "", draw: false, encho: 1 };
+    const next = applyFusenshoToggle(prev, "b");
+    expect(next.encho).toBe(1);
+    expect(next.bPts).toEqual(['○']); // one maru in encho, not ['○','○']
+    expect(next.aPts).toEqual([]);
+    expect(next.fusensho).toBe("b");
+  });
+
+  it('toggle-off restores the score but keeps the encho marker', () => {
+    const prev = { aPts: ['○'], bPts: [], aFouls: 0, bFouls: 0, fusensho: "a", _preFusensho: { aPts: ['M'], bPts: [], aFouls: 0, bFouls: 0 }, draw: false, encho: 1 };
+    const next = applyFusenshoToggle(prev, "a");
+    expect(next.encho).toBe(1);
+    expect(next.aPts).toEqual(['M']);
+    expect(next.fusensho).toBe("");
+  });
+
+  it('applying fusensho clears a stale draw (mutually exclusive)', () => {
+    const prev = { aPts: [], bPts: [], aFouls: 0, bFouls: 0, fusensho: "", draw: true };
+    const next = applyFusenshoToggle(prev, "a");
+    expect(next.draw).toBe(false);
+    expect(next.fusensho).toBe("a");
+  });
 });
 
 describe('getIpponButtons', () => {
@@ -991,6 +1019,9 @@ describe('teamResultLabel (no draw in a knockout)', () => {
   it('a tied KNOCKOUT encounter is never a draw; it needs a daihyosen', () => {
     // Scored tie in a bracket match → resolve by representative bout.
     expect(teamResultLabel({ teamWinner: null, isKnockoutPhase: true, hasAnyScore: true })).toBe('DAIHYOSEN');
+    // mp-gmcg: daihyosen does not exist in kachinuki — a tied knockout
+    // kachinuki encounter stays pending; the tie is resolved by fighting on.
+    expect(teamResultLabel({ teamWinner: null, isKnockoutPhase: true, hasAnyScore: true, isKachinuki: true })).toBe('-');
     // Nothing scored yet in a bracket match → pending, still not a draw.
     expect(teamResultLabel({ teamWinner: null, isKnockoutPhase: true, hasAnyScore: false })).toBe("-");
   });
@@ -1049,6 +1080,41 @@ describe('resolveKachinukiBoutSides (per-competitor identity for kachinuki bouts
   it('returns an empty winner for a drawn bout (no wKey)', () => {
     const r = resolveKachinukiBoutSides({ aName: 'A-Chuken', bName: 'B-Chuken', wKey: null, teamWinnerName: '' });
     expect(r).toEqual({ sideA: 'A-Chuken', sideB: 'B-Chuken', winner: '' });
+  });
+});
+
+describe('fusenshoSideFromSub (recovers a per-bout fusensho on reseed)', () => {
+  it('recovers a KACHINUKI fusensho from its player-name winner (not the team name)', () => {
+    // Regression (mp-gmcg review): a kachinuki fusensho persists the PLAYER
+    // name as winner. The old reseed matched the winner against the match-level
+    // TEAM names, so it never matched and the "(fusensho)" affordance was lost
+    // on every Reopen / Record-bout remount.
+    expect(fusenshoSideFromSub({
+      decision: 'fusensho', sideA: 'A-Taisho', sideB: 'B-Taisho',
+      winner: 'A-Taisho', ipponsA: ['○', '○'], ipponsB: [],
+    })).toBe('a');
+    expect(fusenshoSideFromSub({
+      decision: 'fusensho', sideA: 'A-Taisho', sideB: 'B-Taisho',
+      winner: 'B-Taisho', ipponsA: [], ipponsB: ['○', '○'],
+    })).toBe('b');
+  });
+
+  it('recovers a fixed-position fusensho from its team-name winner', () => {
+    expect(fusenshoSideFromSub({
+      decision: 'fusensho', sideA: 'Team A', sideB: 'Team B',
+      winner: 'Team A', ipponsA: ['○', '○'], ipponsB: [],
+    })).toBe('a');
+  });
+
+  it('falls back to the maru pattern when the sub carries no per-bout sides', () => {
+    // Legacy rows: no sideA/sideB/winner, but the walkover still wrote ○○ into
+    // the winning side's ippons.
+    expect(fusenshoSideFromSub({ decision: 'fusensho', ipponsB: ['○', '○'], ipponsA: [] })).toBe('b');
+  });
+
+  it('returns "" for a non-fusensho or missing sub', () => {
+    expect(fusenshoSideFromSub({ decision: 'hikiwake', winner: 'A-Senpo', sideA: 'A-Senpo' })).toBe('');
+    expect(fusenshoSideFromSub(null)).toBe('');
   });
 });
 

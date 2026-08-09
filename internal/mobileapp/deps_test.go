@@ -26,6 +26,10 @@ func (stubCompetitionStore) LoadBracket(string) (*state.Bracket, error) {
 	return nil, nil
 }
 
+func (stubCompetitionStore) MatchStatusByID(string, string) (state.MatchStatus, bool, error) {
+	return "", false, nil
+}
+
 // stubTournamentLoader is a no-op implementation of TournamentLoader. Same
 // rationale as stubCompetitionStore.
 type stubTournamentLoader struct{}
@@ -82,12 +86,8 @@ func (stubScoringEngine) UpdateMatchTime(string, string, string) error {
 	return nil
 }
 
-func (stubScoringEngine) MaybeAdvanceKachinuki(string, string) (bool, error) {
-	return false, nil
-}
-
-func (stubScoringEngine) CheckKachinukiPrematureCompletion(string, string, *state.MatchResult) error {
-	return nil
+func (stubScoringEngine) MaybeAdvanceKachinuki(string, string) (bool, []state.SubMatchResult, error) {
+	return false, nil, nil
 }
 
 // stubEligibilityEngine is a controllable implementation of EligibilityEngine

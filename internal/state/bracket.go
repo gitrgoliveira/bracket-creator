@@ -9,11 +9,11 @@ func (s *Store) LoadBracket(compID string) (*Bracket, error) {
 	if err := ValidateCompetitionID(compID); err != nil {
 		return nil, err
 	}
-	data, err := s.loadCached(compID, "bracket.json", parseBracketFile)
+	bracket, err := s.cachedBracket(compID)
 	if err != nil {
 		return nil, err
 	}
-	return s.copyBracket(data.(*Bracket)), nil
+	return s.copyBracket(bracket), nil
 }
 
 func parseBracketFile(path string) (any, error) {
@@ -179,6 +179,16 @@ func (s *Store) saveBracketLocked(compID string, b *Bracket, write writeFn) erro
 	cache.mtime = s.FileMtime(compID, "bracket.json")
 	cache.mu.Unlock()
 
+	// Bump last, mirroring savePoolMatchesLocked: this is the single chokepoint
+	// every bracket writer funnels through (SaveBracket, UpdateBracket,
+	// UpdateBracketMatchByID, and the storeTx variants), so any future cache
+	// keyed on FileVersion("bracket.json") invalidates by construction rather
+	// than depending on a new writer remembering to bump (mp-gmcg review R4; per
+	// CLAUDE.md an extra bump only costs a recompute, a missed one serves stale
+	// data). No version-keyed consumer reads the bracket token today, so this is
+	// hardening against the asymmetry, not a live-bug fix.
+	s.bumpFileVersion(compID, "bracket.json")
+
 	return nil
 }
 
@@ -246,4 +256,102 @@ func (s *Store) updateBracketLocked(compID string, mutate func(*Bracket) error, 
 	// `&Bracket{...}` on missing file (never nil). The nil-check would be
 	// dead code; trust the contract from parseBracketFile.
 	return s.saveBracketLocked(compID, bracket, write)
+}
+
+// findBracketMatchByID returns a pointer to the bracket match with the given
+// ID — searching the rounds FIRST, then the ThirdPlaceMatch sibling — or nil.
+// The bronze (3rd-place) match is a SIBLING of Rounds, not an element, so a
+// rounds-only loop never reaches it: forgetting that branch is the recurring
+// bug this shared walk exists to prevent (mp-gmcg). It walks a bracket only;
+// callers that also need pool matches wrap it (e.g. MatchStatusByID below).
+func findBracketMatchByID(b *Bracket, matchID string) *BracketMatch {
+	if b == nil {
+		return nil
+	}
+	for rIdx := range b.Rounds {
+		for mIdx := range b.Rounds[rIdx] {
+			if b.Rounds[rIdx][mIdx].ID == matchID {
+				return &b.Rounds[rIdx][mIdx]
+			}
+		}
+	}
+	if b.ThirdPlaceMatch != nil && b.ThirdPlaceMatch.ID == matchID {
+		return b.ThirdPlaceMatch
+	}
+	return nil
+}
+
+// MatchStatusByID returns the status of the match with the given ID, searching
+// pool matches FIRST, then the bracket (rounds, then the bronze sibling), or
+// found=false. It reads the CACHED parse directly and copies NOTHING: the
+// caller wants only the status enum, so this avoids the deep SubResults/bracket
+// clone that LoadPoolMatches / LoadBracket make on every call (mp-gmcg review
+// E5). Only VALUES are returned — the cached slices are never exposed or
+// mutated, so reading them without a defensive copy is safe (writers replace
+// the cached parse, never mutate it in place). The no-copy read is the whole
+// reason this exists as a separate traversal rather than a status projection
+// over a fuller snapshot reader.
+func (s *Store) MatchStatusByID(compID, matchID string) (MatchStatus, bool, error) {
+	if err := ValidateCompetitionID(compID); err != nil {
+		return "", false, err
+	}
+	results, err := s.cachedPoolMatches(compID)
+	if err != nil {
+		return "", false, err
+	}
+	for i := range results {
+		if results[i].ID == matchID {
+			return results[i].Status, true, nil
+		}
+	}
+	b, err := s.cachedBracket(compID)
+	if err != nil {
+		return "", false, err
+	}
+	if b != nil {
+		if bm := findBracketMatchByID(b, matchID); bm != nil {
+			return bm.Status, true, nil
+		}
+	}
+	return "", false, nil
+}
+
+// UpdateBracketMatchByID finds the bracket match with the given ID (via
+// findBracketMatchByID, so rounds AND the bronze sibling), applies mutate, and
+// saves. Returns found=false with NO write when no match has that ID. This is
+// the bracket-match analogue of UpdatePoolMatchByID (mp-gmcg review): a
+// consumer mutating one bracket match by id no longer hand-rolls the
+// load → walk-rounds → bronze-sibling → save sequence, so the bronze branch
+// can't be forgotten in a copy of it.
+//
+// IMPORTANT: mutate runs under the per-competition lock; it MUST NOT call any
+// other Store method that acquires the same lock (the non-recursive mutex
+// deadlocks). Same contract as UpdateBracket.
+func (s *Store) UpdateBracketMatchByID(compID, matchID string, mutate func(*BracketMatch)) (bool, error) {
+	if err := ValidateCompetitionID(compID); err != nil {
+		return false, err
+	}
+	mu := s.getCompLock(compID)
+	mu.Lock()
+	defer mu.Unlock()
+	return s.updateBracketMatchByIDLocked(compID, matchID, mutate, s.directWrite)
+}
+
+// updateBracketMatchByIDLocked is the lock-free body of UpdateBracketMatchByID
+// (caller holds the per-comp write lock), mirroring updatePoolMatchByIDLocked.
+// It saves ONLY when the match is found, so a miss costs a parse but no write.
+func (s *Store) updateBracketMatchByIDLocked(compID, matchID string, mutate func(*BracketMatch), write writeFn) (bool, error) {
+	// Load directly under the lock (see UpdatePoolMatchByID for why we bypass
+	// the cached path here).
+	path := s.compPath(compID, "bracket.json")
+	parsed, err := parseBracketFile(path)
+	if err != nil {
+		return false, err
+	}
+	bracket, _ := parsed.(*Bracket)
+	if bm := findBracketMatchByID(bracket, matchID); bm != nil {
+		mutate(bm)
+		return true, s.saveBracketLocked(compID, bracket, write)
+	}
+	return false, nil
 }

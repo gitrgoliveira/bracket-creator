@@ -9,8 +9,10 @@
 // All store I/O goes through the TeamLineupStore + CompetitionStore
 // interfaces (deps.go) rather than the concrete *state.Store
 // (NFR-002). The handler needs CompetitionStore to look up the
-// competition's TeamSize, which drives the FIK back-fill validation
-// inside TeamLineup.Validate.
+// competition's TeamSize, which TeamLineup.ValidatePositions uses to
+// check that submitted position KEYS are valid for that size — it
+// enforces no completeness or vacancy rule (mp-gmcg: team sizes are
+// unregulated and a partial lineup must be persistable).
 package mobileapp
 
 import (
@@ -25,8 +27,8 @@ import (
 )
 
 // lineupSetStatus maps a SetTeamLineup error to the right HTTP status. Domain
-// lineup validation failures (bad positions, missing senpo/taisho, disqualifying
-// vacancies, bad team size) all carry the "team_lineup:" prefix and are client
+// lineup validation failures (a position key not valid for the team size, or a
+// non-positive team size) all carry the "team_lineup:" prefix and are client
 // errors (400). Anything else is a server fault (YAML parse / disk I/O) and must
 // be a 500 so a real failure is not misreported as a bad request. compID is
 // already validated upstream by requireValidCompID, so ValidateCompetitionID

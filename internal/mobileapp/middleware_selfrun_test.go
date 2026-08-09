@@ -969,3 +969,79 @@ func TestSelfRun_Sponsors_RequireMainPassword(t *testing.T) {
 			"GET /api/sponsors/:file must be public, logo is served to unauthenticated viewer/TV surfaces")
 	})
 }
+
+// ---------------------------------------------------------------------------
+// §reopen: Self-run auth gate for kachinuki match reopen (mp-gmcg)
+// ---------------------------------------------------------------------------
+//
+// POST .../matches/:mid/reopen mutates a FINALIZED result (clears
+// winner/decision, retracts propagated bracket winners), the same organiser
+// correction class as PUT .../override-winner. It is listed in
+// isSelfRunMainGatedConfigRoute so the CENTRAL AuthMiddleware gate (including
+// the F4 empty-stored-password fail-closed branch) applies; the handler
+// deliberately carries no hand-rolled self-run check.
+func TestSelfRun_ReopenRequiresMainPassword(t *testing.T) {
+	store := newTempStore(t)
+	seedSelfRunTournament(t, store, "admin-pw")
+	r := setupSelfRunRouter(t, store, NewFileVerifier(store))
+
+	t.Run("without_password_returns_401", func(t *testing.T) {
+		req := jsonReq(http.MethodPost, "/api/competitions/some-comp/matches/m-r1-0/reopen", nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusUnauthorized, w.Code,
+			"reopen must be main-gated in self-run mode: it rewrites a finalized result")
+	})
+
+	t.Run("with_main_password_passes_the_gate", func(t *testing.T) {
+		// The body carries the mandatory audit reason so the request gets past
+		// the handler's own 400 and reaches the engine's kachinuki-only check,
+		// which is what this assertion is actually about.
+		req := jsonReq(http.MethodPost, "/api/competitions/some-comp/matches/m-r1-0/reopen",
+			map[string]any{"reason": "wrong winner recorded"})
+		req.Header.Set("X-Tournament-Password", "main-pw")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		// What matters here is that the credential cleared the middleware (a
+		// 401 would mean the gate rejected the main password). The handler
+		// itself then answers 400: the fixture competition doesn't exist, so
+		// the engine's kachinuki-only validation fires.
+		assert.NotEqual(t, http.StatusUnauthorized, w.Code, w.Body.String())
+		assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+		assert.Contains(t, w.Body.String(), "kachinuki",
+			"the request must reach ReopenKachinukiMatch's own validation")
+	})
+}
+
+// mp-gmcg review F2: DELETE kachinuki-bout removes a live pairing, an organiser
+// correction like reopen/override-winner — it must NOT be anonymously callable
+// in self-run mode. The participant score path self-gates via
+// enforceSelfRunPolicy; this route relies on the central allowlist instead, so
+// a missing allowlist entry would let the self-run pass-through expose it.
+func TestSelfRun_RemoveKachinukiBoutRequiresMainPassword(t *testing.T) {
+	store := newTempStore(t)
+	seedSelfRunTournament(t, store, "admin-pw")
+	r := setupSelfRunRouter(t, store, NewFileVerifier(store))
+
+	req := jsonReq(http.MethodDelete, "/api/competitions/some-comp/matches/m-r1-0/kachinuki-bout", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusUnauthorized, w.Code,
+		"removing a bout must be main-gated in self-run mode: an anonymous spectator must not delete a live pairing")
+}
+
+// mp-gmcg review A4: requeue-blocker-and-reopen requeues a live match AND
+// reopens a finalized result — doubly destructive — so it must NOT be
+// anonymously callable in self-run mode. Same central-allowlist gate as reopen.
+func TestSelfRun_RequeueBlockerAndReopenRequiresMainPassword(t *testing.T) {
+	store := newTempStore(t)
+	seedSelfRunTournament(t, store, "admin-pw")
+	r := setupSelfRunRouter(t, store, NewFileVerifier(store))
+
+	req := jsonReq(http.MethodPost, "/api/competitions/some-comp/matches/m-r1-0/requeue-blocker-and-reopen",
+		map[string]any{"blockerCompId": "some-comp", "blockerMatchId": "m-r1-1"})
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusUnauthorized, w.Code,
+		"requeue-blocker-and-reopen must be main-gated in self-run mode")
+}

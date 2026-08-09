@@ -19,6 +19,7 @@ import { poolNameOf, isSupplementaryBout, isPoolDaihyosenBout, teamMatchTypeFor 
 
 const { useState, useMemo } = React;
 const EmptyState = window.EmptyState;
+const Icon = window.Icon;
 
 // DH-winner detection uses isPoolDaihyosenBout (pool_ids.jsx): a suffix match
 // (…-DH-N) so a pool name that happens to contain "-DH-" can't false-positive a
@@ -72,7 +73,7 @@ export function WinnerBadge({ name, isFs = false, testId, marginBottom }) {
       data-testid={testId}
       style={marginBottom != null ? { marginBottom } : undefined}
     >
-      <span className="winner-badge__icon" aria-hidden="true">🏆</span>
+      <span className="winner-badge__icon" aria-hidden="true">{Icon ? <Icon name="trophy" /> : "🏆"}</span>
       <span>Winner: {name}</span>
     </div>
   );

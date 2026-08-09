@@ -105,20 +105,23 @@ func TestValidateCompetitionLengths_ErrorCases(t *testing.T) {
 	}))
 }
 
-// TestBracketMatchToResult covers the bracketMatchToResult helper (0%).
-func TestBracketMatchToResult(t *testing.T) {
+// TestBracketMatchSnapshot covers bracketMatchSnapshot, the BracketMatch ->
+// matchSnapshot projection used by the single match traversal.
+func TestBracketMatchSnapshot(t *testing.T) {
 	bm := &state.BracketMatch{
-		ID:       "match-1",
-		Winner:   "Alice",
-		Decision: string(domain.DecisionFought),
-		Status:   state.MatchStatusCompleted,
+		ID:               "match-1",
+		Winner:           "Alice",
+		Decision:         string(domain.DecisionFought),
+		Status:           state.MatchStatusCompleted,
+		CorrectionReason: "reopened: wrong bout recorded",
+		ReopenPending:    true,
+		SubResults:       []state.SubMatchResult{{Position: 1, Winner: "Alice"}},
 	}
-	got := bracketMatchToResult(bm)
-	require.NotNil(t, got)
-	assert.Equal(t, bm.ID, got.ID)
-	assert.Equal(t, bm.Winner, got.Winner)
-	assert.Equal(t, bm.Decision, got.Decision)
+	got := bracketMatchSnapshot(bm)
 	assert.Equal(t, bm.Status, got.Status)
+	assert.Equal(t, bm.CorrectionReason, got.CorrectionReason)
+	assert.True(t, got.ReopenPending)
+	assert.True(t, got.InBracket, "a bracket-match projection is always InBracket")
 }
 
 // TestWriteSSEEnvelope_Discard ensures no panic writing to io.Discard.
@@ -445,12 +448,15 @@ func TestScheduleEstimate_UnparsableCourts(t *testing.T) {
 }
 
 // TestScheduleEstimate_InvalidOptionalParam covers the queryIntDefault error
-// fallback (line 118-120 in handlers_schedule.go), an unparsable optional
-// param silently falls back to the default and the request still returns 200.
+// fallback: an unparsable GENUINELY-optional param (buffer/ceremonyMinutes,
+// which only pad an already-computed number) silently falls back to its default
+// and the request still returns 200. numMatches/teamSize/boutsPerTeamMatch are
+// NOT on this path anymore — they parse strictly and 400 (mp-gmcg review),
+// covered by TestScheduleEstimateEndpoint's dedicated 400 cases.
 func TestScheduleEstimate_InvalidOptionalParam(t *testing.T) {
 	r, _, _, _, _ := setupTestRouter(t)
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/schedule/estimate?matchDuration=3&multiplier=1.5&courts=1&numMatches=abc", nil)
+	req, _ := http.NewRequest("GET", "/api/schedule/estimate?matchDuration=3&multiplier=1.5&courts=1&buffer=abc", nil)
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 }

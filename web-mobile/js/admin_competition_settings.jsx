@@ -5,6 +5,7 @@
 
 import { teamMatchTypeHint } from './pool_ids.jsx';
 import { DurationInput } from './duration.jsx';
+import { EstimateHeadline } from './admin_schedule_utils.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -744,12 +745,19 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             const total = formatCompMinutes(compEstimate.totalDurationMinutes);
             const perCourt = (compEstimate.perCourtMinutes || []).map(m => formatCompMinutes(m) || "0m");
             const ceremony = formatCompMinutes(compEstimate.ceremonyMinutes);
+            // mp-gmcg: kachinuki has a variable bout count, so the server
+            // returns a best/average/worst range (it knows the competition's
+            // teamMatchType; no extra param needed here). The headline
+            // totalDurationMinutes is the AVERAGE scenario; when the range
+            // collapses (fixed/individual) the single total renders as before.
+            // EstimateHeadline (admin_schedule_utils.jsx) owns that decision
+            // for both this panel and the Overview footer.
             if (!total) {
               return <div style={{ fontSize: 12, color: "var(--ink-3, #6b7280)" }}>No estimate yet. Add participants and configure duration to see a projection.</div>;
             }
             return (
               <div style={{ fontSize: 12.5, color: "var(--ink-1, #111827)" }}>
-                <div><strong>Total:</strong> {total}</div>
+                <EstimateHeadline estimate={compEstimate} total={total} format={formatCompMinutes} testId="comp-est-range" />
                 {perCourt.length > 1 && (
                   <div style={{ marginTop: 2 }}>
                     <strong>Per court:</strong>{" "}

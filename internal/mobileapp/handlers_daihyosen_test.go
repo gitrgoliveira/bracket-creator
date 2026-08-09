@@ -81,6 +81,48 @@ func TestDaihyosenHandler_EngiGuard(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "engi")
 }
 
+// TestDaihyosenHandler_KachinukiGuard verifies the daihyosen endpoint rejects
+// kachinuki competitions with 400 (mp-gmcg): daihyosen does not exist in
+// kachinuki — a tied final bout is a drawn encounter in pools/league and is
+// resolved by encho on that same bout in a knockout. Mirrors the engi guard
+// above; the guard runs before match lookup, so a tied bracket match must
+// still be rejected.
+func TestDaihyosenHandler_KachinukiGuard(t *testing.T) {
+	r, store, _, _, _ := setupDaihyosenTestRouter(t)
+
+	cid := "kachinuki-daihyosen"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:            cid,
+		TeamSize:      3,
+		TeamMatchType: state.TeamMatchTypeKachinuki,
+	}))
+	// A fully-tied bracket kachinuki match: without the guard this state
+	// would pass AddDaihyosen's tie check, so the 400 proves the guard fires.
+	require.NoError(t, store.SaveBracket(cid, &state.Bracket{
+		Rounds: [][]state.BracketMatch{{{
+			ID: "b1", SideA: "Ryu", SideB: "Tora", Status: state.MatchStatusRunning,
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "R-1", SideB: "W-1", Decision: "hikiwake"},
+				{Position: 2, SideA: "R-2", SideB: "W-2", Decision: "hikiwake"},
+				{Position: 3, SideA: "R-3", SideB: "W-3", Decision: "hikiwake"},
+			},
+		}}},
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/competitions/"+cid+"/matches/b1/daihyosen", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code, "daihyosen on kachinuki comp must return 400; body: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "daihyosen does not exist in kachinuki")
+
+	// The guard must leave the match untouched: no daihyosen row appended.
+	bracket, err := store.LoadBracket(cid)
+	require.NoError(t, err)
+	require.NotNil(t, bracket)
+	assert.Len(t, bracket.Rounds[0][0].SubResults, 3, "no daihyosen sub-result may be appended")
+}
+
 // TestFindMatchForDaihyosen_PoolFound verifies that a pool match is located
 // when searched by its "Pool *" ID.
 func TestFindMatchForDaihyosen_PoolFound(t *testing.T) {

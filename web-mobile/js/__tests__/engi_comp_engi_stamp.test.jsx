@@ -70,7 +70,8 @@ function installStubs() {
   global.window.ipponsFromScore = () => [];
   global.window.isHikiwake = () => false;
   // Deliberately the naive check, and safe ONLY because this file asserts
-  // compEngi stamping and never exercises a side-presence filter. Do NOT copy
+  // compEngi stamping: ViewerCompetition does call this stub, but no fixture
+  // here has an absent side and no assertion depends on the verdict. Do NOT copy
   // this harness into a test that does: normalizeMatch substitutes a truthy
   // {id:"",name:""} for an absent side, so this stub waves byes through and
   // would give such a test a vacuous pass. Import admin_helpers.jsx for the

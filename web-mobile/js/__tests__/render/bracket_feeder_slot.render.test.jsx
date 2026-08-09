@@ -6,8 +6,11 @@ import { describe, it, expect, beforeAll } from 'vitest';
 // through BracketTree → MatchCard → PlayerLine. An unresolved feeder side
 // arrives from the server as the wire value "Winner of r<depth>-m<idx>", which
 // is (a) an internal index a spectator cannot use and (b) NOT the number the
-// same bracket prints on its cards. These tests pin that no raw id reaches the
-// DOM and that the human label names a card that is actually on screen.
+// same bracket prints on its cards. These tests pin that no raw SLOT VALUE
+// reaches the DOM, and that the human label names a card that is actually on
+// screen. Note the regex targets the "Winner of r<N>-m<N>" slot shape, not
+// match ids in general: those legitimately appear in data-match-id and in the
+// aria-label fallback, and are not what leaks to a reader.
 
 let BracketTree, MatchCard;
 

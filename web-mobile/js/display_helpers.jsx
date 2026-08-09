@@ -264,6 +264,22 @@ function phaseLabel(m, isBracket, roundIndex, totalRounds, format) {
 // because the board is per-court; the spectator wants to know how far into the
 // phase this court is, not the venue overall. Returns null when there's no
 // group to count (e.g. promoted / promoted.competition missing).
+// bracketRoundSiblings returns the matches sharing `match`'s EFFECTIVE round
+// (mp-7f2w displayRound) — the same round phaseLabel names. Selecting
+// rounds[roundIndex] instead mixes rounds whenever a bye collapses one: in a
+// 5-entrant draw backend round 0 holds both a semifinal and a quarterfinal, so
+// the board rendered "SEMIFINALS · 0 / 2" over a set containing a quarterfinal
+// and listed that quarterfinal under the semifinal heading. Hidden phantom
+// matches are never real bouts and are excluded. Falls back to the raw round
+// for legacy brackets with no metadata, where roundIndex IS the effective round.
+function bracketRoundSiblings(rounds, match, roundIndex) {
+    const dr = match && match.displayRound;
+    if (typeof dr === "number" && dr > 0) {
+        return rounds.flat().filter((m) => m && !m.hidden && m.displayRound === dr);
+    }
+    return rounds[roundIndex] || [];
+}
+
 function phaseProgressOnCourt(promoted, court) {
     if (!promoted) return null;
     const comp = promoted.competition;
@@ -271,7 +287,7 @@ function phaseProgressOnCourt(promoted, court) {
     let group;
     if (promoted.isBracket) {
         const rounds = (comp.bracket && comp.bracket.rounds) || [];
-        const round = rounds[promoted.roundIndex] || [];
+        const round = bracketRoundSiblings(rounds, promoted.match, promoted.roundIndex);
         // Exclude unresolved placeholders ("Winner of rX-mY" / "Pool X-1st") so
         // the denominator matches the runnable matches the board actually shows
         // (the feed filters them via bracketSidesReady too).
@@ -326,6 +342,7 @@ function StreamingQR({ url, label }) {
 
 export {
     DISPLAY_PLACEHOLDER_RE,
+    bracketRoundSiblings,
     bracketSidesReady,
     findRunningOnCourt,
     findUpcomingOnCourt,

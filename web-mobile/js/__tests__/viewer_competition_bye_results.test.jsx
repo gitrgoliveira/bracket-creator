@@ -9,9 +9,10 @@
 // "TBD vs <name>" under a Final badge, with nothing to say that nobody was
 // ever scheduled. A bye is bracket structure, not a result; it stays
 // discoverable in the Bracket tab, where the entrant renders as an unopposed
-// slot feeding the next round. (Verified in the browser: it is NOT tagged
-// "BYE" there. bracket.jsx gates that tag on score.type === "bye", which the
-// Go side never sets, so it is unreachable from a server payload.)
+// slot tagged BYE feeding the next round (bc-bye-slot__tag in BracketTreeMeta,
+// pinned by render/bracket_bye_slot.render.test.jsx; not the MatchCard's
+// bc-bye-tag, which is gated on score.type === "bye" and unreachable from a
+// server payload).
 //
 // The filter's guard is the shared `hasBothSides` predicate, NOT a hand-rolled
 // `m.sideA && m.sideB`: normalizeMatch (api_serializers.jsx) substitutes a
@@ -83,7 +84,7 @@ describe('ViewerCompetition Recent results excludes byes', () => {
     saved = installStubs();
     vi.resetModules();
     // Side-effect imports: publish the REAL window.hasBothSides (the predicate
-    // under test) and the real window.roundLabel / window.matchScoreStr the
+    // under test) and the real window.bracketRoundLabel / window.matchScoreStr the
     // viewer calls while building and rendering the match lists.
     await import('../admin_helpers.jsx');
     await import('../bracket.jsx');
@@ -99,10 +100,15 @@ describe('ViewerCompetition Recent results excludes byes', () => {
     vi.resetModules();
   });
 
-  // Three entrants → one real first-round match plus one structural bye,
-  // shaped exactly as internal/engine/bracket.go emits it: the bye's empty
-  // side is the JSON empty string "", and it is already completed with the
-  // lone competitor as winner.
+  // Three entrants → one real first-round match plus one structural bye.
+  // Carries the PROPERTIES that matter here exactly as internal/engine/bracket.go
+  // emits them: the absent side is the JSON empty string "" (sideA has no
+  // omitempty, so it really is on the wire) and the match is already completed
+  // with the lone competitor as winner. Deliberately NOT a byte-faithful
+  // capture: the engine's ids are 1-based (m-r1-*) and it also stamps
+  // hidden:true. Both are omitted so the filter is forced to key on the SIDES,
+  // which is the property under test; hidden would be an easier discriminator
+  // and must not be what makes this pass.
   const rawDetail = () => ({
     id: 'c1',
     name: 'Knockout Cup',

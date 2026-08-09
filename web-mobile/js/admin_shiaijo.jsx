@@ -1530,7 +1530,16 @@ export function groupQueueMatches(matches) {
     for (const m of matches) {
         let key, label;
         if (m.phase === "bracket") {
-            key = "round:" + (m.roundIndex != null ? m.roundIndex : (m.round || ""));
+            // Key on the LABEL, not roundIndex: m.round is the EFFECTIVE round
+            // (bracketRoundLabel), and one backend round can hold two of them
+            // when a bye collapses a round, while two backend rounds can share
+            // one. Keying on roundIndex therefore both put a quarterfinal under
+            // a "Semifinals" heading and split one round name across two
+            // identically-titled groups. Keying on the displayed string keeps
+            // the invariant the operator relies on: the heading describes every
+            // match under it. Same cross-competition behaviour as before, since
+            // a shared roundIndex already merged those.
+            key = "round:" + (m.round || "");
             label = m.round || "Playoffs";
         } else if (m.phase === "pool") {
             key = "pool:" + (m.poolName || "");

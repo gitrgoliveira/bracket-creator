@@ -145,9 +145,10 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
     // arrived here as finished results reading "TBD vs <name>" with a Final
     // badge and no indication that nobody was ever scheduled. A bye is bracket
     // structure, not a result. It stays discoverable in the Bracket tab, where
-    // the entrant renders as an unopposed slot feeding the next round (NOT as a
-    // "BYE" tag: bracket.jsx gates that on score.type === "bye", which the Go
-    // side never sets, so it is unreachable from a server payload). Use
+    // the entrant renders as an unopposed slot tagged BYE feeding the next
+    // round (that is bc-bye-slot__tag in BracketTreeMeta; not the MatchCard's
+    // bc-bye-tag, which is gated on score.type === "bye" and unreachable from a
+    // server payload). Use
     // hasBothSides, never `m.sideA && m.sideB`: normalizeMatch substitutes a
     // truthy {id:"",name:""} for a missing side.
     const recent = allMatches

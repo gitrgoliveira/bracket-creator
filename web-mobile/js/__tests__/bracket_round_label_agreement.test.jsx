@@ -14,7 +14,7 @@ import { phaseLabel } from '../display_helpers.jsx';
 //
 // bracketRoundLabel is the single primitive both sides now go through.
 
-// The 5-player individual knockout exactly as the engine persists it. Captured
+// The 5-player individual knockout as the engine persists it, trimmed to the fields under test (winner/status/court/scheduledAt/matchNumber dropped). Captured
 // from a live run: TOURNAMENT_DATA_DIR=… mobile-app, 5 participants, start,
 // then competitions/<id>/bracket.json. 3 backend rounds; Alice/Bob sit in
 // backend round 0 but carry displayRound 2 (their winner meets the final).
@@ -34,8 +34,12 @@ const fivePlayerRounds = () => [
   ],
 ];
 
-// Column labels exactly as BracketTreeMeta renders them: one per column, taken
-// from a match in that column through the shared primitive.
+// The column labels BracketTreeMeta is EXPECTED to render: one per column,
+// taken from a match in that column through the shared primitive. This mirrors
+// the component's call rather than reading its output, so it pins the ROW side
+// of the agreement only; that the DOM header really says this is pinned by
+// render/bracket_round_label.render.test.jsx, which mounts BracketTree and
+// reads .bc-round-label.
 const columnLabels = (rounds) => {
   const model = buildDisplayModel(rounds);
   return model.columns.map((col, ci) => bracketRoundLabel(col[0], ci, model.columns.length));

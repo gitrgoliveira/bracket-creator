@@ -221,7 +221,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
       matchNum: displayModel.matchNumById ? displayModel.matchNumById[matchId] : null,
       // window.bracketRoundLabel is the one round-naming primitive (mp-u37s), so
       // this panel, the column header beside it and the viewer/board rows for the
-      // same match can never disagree. `ci` is already the DISPLAY column here,
+      // same match can never disagree. `ci` is the DISPLAY column whenever the bracket carries metadata, and the raw index otherwise (where no displayRound exists to disagree with),
       // which is why this surface was correct before; keep it derived from the
       // match anyway rather than holding a second copy of the rule.
       roundName: (ci >= 0 && window.bracketRoundLabel) ? window.bracketRoundLabel(found, ci, cols.length) : null,

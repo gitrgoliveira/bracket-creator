@@ -29,7 +29,7 @@ func RegisterScheduleHandlers(r *gin.RouterGroup) {
 //
 // Required query params:
 //   - matchDuration: float, on-clock minutes per match (per bout); must be > 0
-//   - multiplier:    float, clock→elapsed multiplier (e.g. 1.5)
+//   - multiplier:    float, clock→elapsed multiplier (e.g. 1.5); must be > 0
 //   - courts:        int >= 1, number of parallel courts
 //
 // Optional query params:
@@ -42,9 +42,9 @@ func RegisterScheduleHandlers(r *gin.RouterGroup) {
 //   - buffer:            int, slowest-court buffer % (default 0)
 //   - ceremonyMinutes:   int, ceremony block minutes (default 0)
 //
-// Returns 400 when any required param is missing or unparsable, or when courts
-// or a bounded optional param (teamSize, boutsPerTeamMatch, numMatches) is
-// malformed or out of range; 200 with ScheduleEstimate JSON otherwise.
+// Returns 400 when any param is missing or fails validation (parse, range, or
+// the per-param constraints listed above); 200 with ScheduleEstimate JSON
+// otherwise.
 func scheduleEstimateHandler(c *gin.Context) {
 	matchDurationStr := c.Query("matchDuration")
 	multiplierStr := c.Query("multiplier")

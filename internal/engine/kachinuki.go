@@ -631,7 +631,7 @@ func (e *Engine) ReopenKachinukiMatch(compID, matchID, reason string) error {
 	// court state, so a bad-input rejection need not serialize on the lock.
 	return e.store.WithCourtExclusivityLock(func() error {
 		// Read-only RESULT preconditions BEFORE the court gates, so a plain reopen
-		// of a permanently-unreopenable target (not completed, or its winner fed a
+		// of a permanently-unreopenable target (not completed, or its result fed a
 		// fought downstream) reports THAT — not a transient court_busy. The admin
 		// remedy panel turns court_busy into an offer to requeue the court's
 		// occupant (applyReopenFailure branches on code=="court_busy",
@@ -807,9 +807,10 @@ func (e *Engine) RequeueBlockerAndReopenKachinuki(targetComp, targetMatch, block
 
 // reopenResultPreconditionTx runs the read-only RESULT preconditions a reopen
 // requires for one already-located match home: the match must be COMPLETED, and
-// its winner must not have fed a fought downstream — a started knockout for a
-// bracket round (downstreamFoughtForRound), or a started knockout seeded off this
-// pool's current finisher for a pool match (checkPoolReopenDownstreamTx). It
+// its result must not have fed a fought downstream (winner to the next round, or
+// a semifinal loser to the bronze) — a started knockout for a bracket round
+// (downstreamFoughtForRound), or a started knockout seeded off this pool's
+// current finisher for a pool match (checkPoolReopenDownstreamTx). It
 // EXCLUDES the court gate (the requeue path frees the court itself; the plain
 // reopen checks it separately) and performs NO mutation. checkTargetReopenable
 // and reopenKachinukiUnderCourtLock both run it, so a RESULT precondition added to
@@ -835,7 +836,7 @@ func (e *Engine) reopenResultPreconditionTx(tx state.StoreTx, compID string, com
 
 // checkTargetReopenable runs the read-only reopen RESULT preconditions (mp-gmcg
 // review): it opens a target-competition tx and reports whether the match is
-// completed and its winner has not fed a fought downstream, WITHOUT any court
+// completed and its result has not fed a fought downstream, WITHOUT any court
 // check and WITHOUT any mutation. Two callers run it before their court gates:
 // the requeue-and-reopen path (before its destructive revert, so a target that
 // can't reopen never costs the blocker its score) and the plain-reopen entry
@@ -1048,7 +1049,13 @@ type matchHome struct {
 // (mp-gmcg review F6). found=false with a nil error means the ID is in neither
 // store. A pool LOAD error is swallowed and the walk still tries the bracket
 // (matching the open-coded copies this replaced); a bracket load error is
-// returned. visit's own error propagates.
+// returned. visit's own error propagates. CAVEAT (mp-gmcg review): swallowing the
+// pool load error turns a pool-matches.csv I/O fault into found=false for a
+// pool-home ID — a 404 "not found", not a 500 — so ReopenKachinukiMatch's
+// checkTargetReopenable pre-check (now the first gate) reports "not found" during
+// an FS fault where the pre-reorder cross-comp gate propagated the I/O error.
+// Accepted as a transient-and-retried trade; propagating here instead would
+// change every findMatchHome caller.
 func findMatchHome(tx state.StoreTx, compID, matchID string, visit func(matchHome) error) (bool, error) {
 	poolMatches, lerr := tx.LoadPoolMatches(compID)
 	if lerr == nil {

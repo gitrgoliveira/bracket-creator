@@ -1930,21 +1930,6 @@ func TestReopenKachinukiMatch_DiscardsVerdictKeepsBoutLog(t *testing.T) {
 // then rejects BOTH: the re-End of the reopened match AND every further
 // score write to the genuinely live bout. So the reopen itself is refused.
 func TestReopenKachinukiMatchCourtBusy(t *testing.T) {
-	completedOnCourt := func(id, court string) state.MatchResult {
-		return state.MatchResult{
-			ID: id, SideA: "RedTeam", SideB: "WhiteTeam", Status: state.MatchStatusCompleted,
-			Winner: "RedTeam", Decision: "kachinuki-exhaustion", Court: court,
-			SubResults: []state.SubMatchResult{
-				{Position: 1, SideA: "R-1", SideB: "W-1", IpponsA: []string{"M"}, Winner: "R-1", Decision: "fought"},
-			},
-		}
-	}
-	runningOnCourt := func(id, court string) state.MatchResult {
-		return state.MatchResult{
-			ID: id, SideA: "Kuma", SideB: "Washi", Status: state.MatchStatusRunning, Court: court,
-		}
-	}
-
 	t.Run("same competition: busy court rejects, the finished result is untouched", func(t *testing.T) {
 		eng, store, _ := setupKachinukiComp(t, "reopen-court-busy", 3)
 		require.NoError(t, store.SavePoolMatches("reopen-court-busy", []state.MatchResult{
@@ -2107,20 +2092,7 @@ func TestReopenKachinukiMatchCourtBusy(t *testing.T) {
 	// preconditions before CheckCrossCompCourtBusy so the right 409 wins.
 	t.Run("an unreopenable target is not masked by a cross-competition court_busy", func(t *testing.T) {
 		eng, store, _ := setupKachinukiComp(t, "reopen-cross-ds-a", 3)
-		require.NoError(t, store.SaveBracket("reopen-cross-ds-a", &state.Bracket{
-			Rounds: [][]state.BracketMatch{
-				{
-					{ID: "SF0", SideA: "RedTeam", SideB: "WhiteTeam", Status: state.MatchStatusCompleted,
-						Winner: "RedTeam", Decision: "kachinuki-exhaustion", Court: "A"},
-					{ID: "SF1", SideA: "Kuma", SideB: "Washi", Status: state.MatchStatusCompleted, Winner: "Kuma"},
-				},
-				{
-					// The final is already being fought — SF0's winner fed it.
-					{ID: "F0", SideA: "RedTeam", SideB: "Kuma", Status: state.MatchStatusRunning,
-						SubResults: []state.SubMatchResult{{Position: 1, SideA: "R-1", SideB: "K-1"}}},
-				},
-			},
-		}))
+		require.NoError(t, store.SaveBracket("reopen-cross-ds-a", foughtDownstreamBracket()))
 		// Another competition holds SF0's court (A) with a running match.
 		require.NoError(t, store.SaveCompetition(&state.Competition{ID: "reopen-cross-ds-b"}))
 		require.NoError(t, store.SavePoolMatches("reopen-cross-ds-b", []state.MatchResult{
@@ -2143,19 +2115,6 @@ func TestReopenKachinukiMatchCourtBusy(t *testing.T) {
 // holding the court, then reopen the target onto the freed court — so no peer
 // can grab the court between the two steps the old two-call client flow made.
 func TestRequeueBlockerAndReopenKachinuki(t *testing.T) {
-	completedOnCourt := func(id, court string) state.MatchResult {
-		return state.MatchResult{
-			ID: id, SideA: "RedTeam", SideB: "WhiteTeam", Status: state.MatchStatusCompleted,
-			Winner: "RedTeam", Decision: "kachinuki-exhaustion", Court: court,
-			SubResults: []state.SubMatchResult{
-				{Position: 1, SideA: "R-1", SideB: "W-1", IpponsA: []string{"M"}, Winner: "R-1", Decision: "fought"},
-			},
-		}
-	}
-	runningOnCourt := func(id, court string) state.MatchResult {
-		return state.MatchResult{ID: id, SideA: "Kuma", SideB: "Washi", Status: state.MatchStatusRunning, Court: court}
-	}
-
 	t.Run("frees the blocker then reopens the target, atomically", func(t *testing.T) {
 		eng, store, _ := setupKachinukiComp(t, "requeue-reopen", 3)
 		require.NoError(t, store.SavePoolMatches("requeue-reopen", []state.MatchResult{
@@ -2239,9 +2198,7 @@ func TestRequeueBlockerAndReopenKachinuki(t *testing.T) {
 		for _, m := range matches {
 			byID[m.ID] = m
 		}
-		assert.Equal(t, state.MatchStatusRunning, byID["P1-2"].Status, "the bystander must NOT be requeued")
-		assert.Equal(t, []string{"M"}, byID["P1-2"].IpponsA, "the bystander's score must NOT be wiped")
-		assert.Len(t, byID["P1-2"].SubResults, 1, "the bystander's bout log must NOT be wiped")
+		assertBlockerIntact(t, store, "rq-wrongcourt", "P1-2") // the wrongly-named bystander must NOT be wiped
 		assert.Equal(t, state.MatchStatusRunning, byID["P1-1"].Status, "the real blocker is untouched")
 		assert.Equal(t, state.MatchStatusCompleted, byID["P1-0"].Status, "the target must NOT reopen when the guard rejects")
 	})
@@ -2254,20 +2211,7 @@ func TestRequeueBlockerAndReopenKachinuki(t *testing.T) {
 	// running match for nothing.
 	t.Run("a target with a fought downstream is rejected WITHOUT wiping the blocker", func(t *testing.T) {
 		eng, store, _ := setupKachinukiComp(t, "rq-downstream", 3)
-		require.NoError(t, store.SaveBracket("rq-downstream", &state.Bracket{
-			Rounds: [][]state.BracketMatch{
-				{
-					{ID: "SF0", SideA: "RedTeam", SideB: "WhiteTeam", Status: state.MatchStatusCompleted,
-						Winner: "RedTeam", Decision: "kachinuki-exhaustion", Court: "A"},
-					{ID: "SF1", SideA: "Kuma", SideB: "Washi", Status: state.MatchStatusCompleted, Winner: "Kuma"},
-				},
-				{
-					// The final is already being fought — SF0's winner fed it.
-					{ID: "F0", SideA: "RedTeam", SideB: "Kuma", Status: state.MatchStatusRunning,
-						SubResults: []state.SubMatchResult{{Position: 1, SideA: "R-1", SideB: "K-1"}}},
-				},
-			},
-		}))
+		require.NoError(t, store.SaveBracket("rq-downstream", foughtDownstreamBracket()))
 		// A blocker running on SF0's court (A), in another competition, with a
 		// live score the destructive revert would clear.
 		require.NoError(t, store.SaveCompetition(&state.Competition{
@@ -3024,14 +2968,55 @@ func loadPoolMatchByID(t *testing.T, store *state.Store, compID, matchID string)
 	return nil
 }
 
-// scoredBlocker builds a RUNNING match holding court with a live score (one
-// ippon) and a single scored bout — the state a destructive requeue would wipe.
-// assertBlockerIntact checks exactly this shape survives.
-func scoredBlocker(id, court string) state.MatchResult {
+// runningOnCourt builds a RUNNING team match (no score yet) holding court — the
+// bare "this match occupies the court" fixture shared across the reopen/requeue
+// tests. completedOnCourt is its finished counterpart; scoredBlocker adds a score.
+func runningOnCourt(id, court string) state.MatchResult {
 	return state.MatchResult{
 		ID: id, SideA: "Kuma", SideB: "Washi", Status: state.MatchStatusRunning, Court: court,
-		IpponsA:    []string{"M"},
-		SubResults: []state.SubMatchResult{{Position: 1, SideA: "K-1", SideB: "Wa-1", IpponsA: []string{"M"}}},
+	}
+}
+
+// completedOnCourt builds a COMPLETED kachinuki team match (RedTeam over WhiteTeam
+// by exhaustion, one scored bout) holding court.
+func completedOnCourt(id, court string) state.MatchResult {
+	return state.MatchResult{
+		ID: id, SideA: "RedTeam", SideB: "WhiteTeam", Status: state.MatchStatusCompleted,
+		Winner: "RedTeam", Decision: "kachinuki-exhaustion", Court: court,
+		SubResults: []state.SubMatchResult{
+			{Position: 1, SideA: "R-1", SideB: "W-1", IpponsA: []string{"M"}, Winner: "R-1", Decision: "fought"},
+		},
+	}
+}
+
+// scoredBlocker is runningOnCourt plus a live score (one ippon) and a single
+// scored bout — the state a destructive requeue would wipe. Composing on
+// runningOnCourt keeps the blocker fixture in lockstep with the plain running
+// fixture. assertBlockerIntact checks exactly this shape survives.
+func scoredBlocker(id, court string) state.MatchResult {
+	m := runningOnCourt(id, court)
+	m.IpponsA = []string{"M"}
+	m.SubResults = []state.SubMatchResult{{Position: 1, SideA: "K-1", SideB: "Wa-1", IpponsA: []string{"M"}}}
+	return m
+}
+
+// foughtDownstreamBracket returns a two-round bracket whose semifinal SF0
+// (completed on court A, RedTeam by exhaustion) has already fed the RUNNING final
+// F0 — SF0's winner sits in a fought downstream, so reopening SF0 is refused.
+func foughtDownstreamBracket() *state.Bracket {
+	return &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				{ID: "SF0", SideA: "RedTeam", SideB: "WhiteTeam", Status: state.MatchStatusCompleted,
+					Winner: "RedTeam", Decision: "kachinuki-exhaustion", Court: "A"},
+				{ID: "SF1", SideA: "Kuma", SideB: "Washi", Status: state.MatchStatusCompleted, Winner: "Kuma"},
+			},
+			{
+				// The final is already being fought — SF0's winner fed it.
+				{ID: "F0", SideA: "RedTeam", SideB: "Kuma", Status: state.MatchStatusRunning,
+					SubResults: []state.SubMatchResult{{Position: 1, SideA: "R-1", SideB: "K-1"}}},
+			},
+		},
 	}
 }
 

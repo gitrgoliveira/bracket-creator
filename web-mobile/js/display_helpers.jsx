@@ -229,8 +229,13 @@ function phaseLabel(m, isBracket, roundIndex, totalRounds, format) {
     if (format === "league") return "";
     if (m.phaseName) return m.phaseName;
     if (m.poolName) return m.poolName;
-    if (isBracket && typeof roundIndex === "number" && window.roundLabel) {
-        return window.roundLabel(roundIndex, totalRounds);
+    // Bracket matches reach the display surfaces straight off c.bracket.rounds
+    // (no phaseName stamped), so this branch is the label. Route it through
+    // window.bracketRoundLabel: it keys on the match's effective round (mp-7f2w
+    // displayRound) so the board agrees with the bracket column and the viewer
+    // rows for the same match; roundIndex is only the legacy fallback (mp-u37s).
+    if (isBracket && typeof roundIndex === "number" && window.bracketRoundLabel) {
+        return window.bracketRoundLabel(m, roundIndex, totalRounds);
     }
     // Pool matches reach the feed with a pool-shaped id "<PoolName>-<index>"
     // (regular bouts use round === -1 sentinel; DH/TB supplementary bouts are
@@ -238,7 +243,7 @@ function phaseLabel(m, isBracket, roundIndex, totalRounds, format) {
     // never render a bare "-1" or "0": covers regular, daihyosen and tiebreaker
     // bouts alike via poolNameOf. Guard on !isBracket: poolNameOf matches any
     // "*-<digits>" shape, so a bracket id like "m-r1-0" would otherwise yield a
-    // bogus "m-r1" pool-like label when window.roundLabel is unavailable.
+    // bogus "m-r1" pool-like label when window.bracketRoundLabel is unavailable.
     if (!isBracket) {
         const fromId = poolNameOf(m.id);
         if (fromId) return fromId;

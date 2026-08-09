@@ -20,14 +20,51 @@ function TermBC(props) {
 function isHikiwakeBC(v) { return v === "hikiwake"; }
 function isKikenDecisionBC(v) { return v === "kiken" || v === "kiken-voluntary" || v === "kiken-injury"; }
 
-function roundLabel(roundIdx, total) {
-  const fromEnd = total - 1 - roundIdx;
+// roundLabelFromEnd: the ONE mapping from "rounds still to come after this one"
+// to a round NAME. 0 = Final, 1 = Semifinals, 2 = Quarterfinals, then the
+// abbreviated bracket-size form. Every round name on every surface bottoms out
+// here; nothing else may spell these strings.
+function roundLabelFromEnd(fromEnd) {
   if (fromEnd === 0) return "Final";
   if (fromEnd === 1) return "Semifinals";
   if (fromEnd === 2) return "Quarterfinals";
   // mp-13y #8: abbreviated column header: R{N} where N is the bracket size
   // = 2^(fromEnd+1). Keeps column labels tight for wide brackets (R32, R128).
   return `R${2 ** (fromEnd + 1)}`;
+}
+
+function roundLabel(roundIdx, total) {
+  return roundLabelFromEnd(total - 1 - roundIdx);
+}
+
+// bracketRoundLabel: THE single source of truth for what round a bracket MATCH
+// belongs to, on every surface (bracket columns, viewer rows, admin score
+// editor, watchlist, TV/display boards).
+//
+// mp-7f2w gave every real match an EFFECTIVE round (`displayRound`, counted from
+// the final: 1 = Final, 2 = Semifinals, …) computed by walking the real feeder
+// graph, so a structural bye COLLAPSES a round rather than showing an empty
+// card. In a non-power-of-two draw that effective round can be nearer the final
+// than the match's raw position in `bracket.rounds`, and the two disagree:
+//
+//   5-player knockout, backend rounds = 3
+//     m-r1-0 (Alice v Bob)  backend round 0 → "Quarterfinals"
+//                           displayRound 2  → "Semifinals"   ← its winner
+//                                                              goes straight
+//                                                              to the final
+//
+// The effective round is the true one: a match whose winner plays the final IS a
+// semifinal, whatever array slot it occupies. So prefer `displayRound` and fall
+// back to the raw position only for legacy brackets generated before the field
+// existed (and for the pre-meta rendering path), where the two coincide anyway.
+//
+// Do NOT re-derive a round name from a raw round index at a call site: that is
+// exactly the duplication that let the Overview rows say "Quarterfinals" while
+// the bracket column above the same match said "Semifinals" (mp-u37s).
+function bracketRoundLabel(m, roundIdx, total) {
+  const dr = m && m.displayRound;
+  if (typeof dr === "number" && dr > 0) return roundLabelFromEnd(dr - 1);
+  return roundLabel(roundIdx, total);
 }
 
 // sideA = top = Aka (Red), sideB = bottom = Shiro (White)
@@ -788,7 +825,14 @@ function BracketTreeMeta({ columns, feedersById, matchNumById, variant = 1, show
         // Column index is a stable key: bracket rounds never reorder.
         // oxlint-disable-next-line react/no-array-index-key
         <div key={ci} className="bc-round" style={{ "--round": ci }}>
-          <div className="bc-round-label">{roundLabel(ci, columns.length)}</div>
+          {/* Label the column from a match IN it, through the shared primitive,
+              so a column header and the row/eyebrow labels for the same match can
+              never diverge. Provably the same string as roundLabel(ci, length):
+              columns run displayRound maxDR→1, so ci === maxDR - displayRound.
+              The (ci, length) args are the fallback for an empty column, which
+              buildDisplayModel never produces (the BFS assigns a contiguous
+              1…maxDR, so every column holds at least one real match). */}
+          <div className="bc-round-label">{bracketRoundLabel(col[0], ci, columns.length)}</div>
           <div className={`bc-round-matches${positioned ? " bc-round-matches--abs" : ""}`} style={matchesStyle}>
             {col.map((m, mi) => {
               const top = positioned ? cardTops.tops[m.id] : undefined;
@@ -938,6 +982,9 @@ function BracketTreeLegacy({ rounds, variant = 1, showDojo = true, onMatchClick,
           // Round index is a stable key: bracket rounds never reorder.
           // oxlint-disable-next-line react/no-array-index-key
           <div key={ri} className="bc-round" style={{ "--round": ri }}>
+            {/* Legacy (pre-mp-7f2w) brackets only: this renderer runs exactly
+                when NO match carries displayRound, so bracketRoundLabel would
+                degrade to this same call. Raw index is the only round there is. */}
             <div className="bc-round-label">{roundLabel(ri, rounds.length)}</div>
             <div className={`bc-round-matches${positioned ? " bc-round-matches--abs" : ""}`}>
               {round.map((m, mi) => {
@@ -1030,6 +1077,10 @@ window.BracketTree = BracketTree;
 window.MatchCard = MatchCard;
 window.bronzeUnderFinalStyle = bronzeUnderFinalStyle;
 window.roundLabel = roundLabel;
+// Exposed so every surface that labels a bracket MATCH (viewer rows, admin
+// score editor, TV/display boards) uses the effective-round rule rather than
+// re-deriving a name from the raw round index. See bracketRoundLabel above.
+window.bracketRoundLabel = bracketRoundLabel;
 // Exposed so the bracket winner-picker panel can label a selected match with
 // the SAME number ("M1") and round the tree shows on its cards/columns.
 window.buildDisplayModel = buildDisplayModel;
@@ -1047,4 +1098,4 @@ window.winnerSideLR = winnerSideLR;
 window.sideLabel = sideLabel;
 window.ipponsFromScore = ipponsFromScore;
 
-export { formatIpponsScore, enchoLabel, boutMiddle, defaultWinMaru, matchMiddleMark, winnerSideLR, sideLabel, roundLabel, ipponsFromScore, teamIVScore, teamIVPWScore, engiFlagScore, matchScoreStr, matchStateCell, buildDisplayModel, computeMetaTops, bronzeUnderFinalStyle, PlayerLine };
+export { formatIpponsScore, enchoLabel, boutMiddle, defaultWinMaru, matchMiddleMark, winnerSideLR, sideLabel, roundLabel, bracketRoundLabel, ipponsFromScore, teamIVScore, teamIVPWScore, engiFlagScore, matchScoreStr, matchStateCell, buildDisplayModel, computeMetaTops, bronzeUnderFinalStyle, PlayerLine };

@@ -212,13 +212,19 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
   const matchMeta = (matchId) => {
     if (!matchId || !bracket?.rounds) return { matchNum: null, roundName: null };
     const cols = displayModel.hasMeta ? displayModel.columns : bracket.rounds;
-    let ci = -1;
+    let ci = -1, found = null;
     for (let i = 0; i < cols.length; i++) {
-      if ((cols[i] || []).some((m) => m && m.id === matchId)) { ci = i; break; }
+      const hit = (cols[i] || []).find((m) => m && m.id === matchId);
+      if (hit) { ci = i; found = hit; break; }
     }
     return {
       matchNum: displayModel.matchNumById ? displayModel.matchNumById[matchId] : null,
-      roundName: (ci >= 0 && window.roundLabel) ? window.roundLabel(ci, cols.length) : null,
+      // window.bracketRoundLabel is the one round-naming primitive (mp-u37s), so
+      // this panel, the column header beside it and the viewer/board rows for the
+      // same match can never disagree. `ci` is already the DISPLAY column here,
+      // which is why this surface was correct before; keep it derived from the
+      // match anyway rather than holding a second copy of the rule.
+      roundName: (ci >= 0 && window.bracketRoundLabel) ? window.bracketRoundLabel(found, ci, cols.length) : null,
     };
   };
 

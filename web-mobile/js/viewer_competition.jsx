@@ -60,7 +60,12 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
     // renders `bracket`/`derivedBracket` directly and is NOT affected.
     if (bracket && bracket.rounds && !bracket.preview) {
         bracket.rounds.forEach((round, ri) => {
-            round.forEach((m) => out.push({ ...m, phase: "bracket", round: window.roundLabel(ri, bracket.rounds.length), phaseName: window.roundLabel(ri, bracket.rounds.length), roundIndex: ri, compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize, compEngi: isEngi, teamMatchType: compTMT }));
+            // window.bracketRoundLabel is the ONE round-naming primitive: it keys
+            // on the match's effective round (mp-7f2w displayRound), so an Overview
+            // row and the Bracket tab column above the same match always agree.
+            // roundLabel(ri, …) named a DIFFERENT round whenever a bye collapsed
+            // one (mp-u37s). roundIndex stays RAW: lineup fetches key on it.
+            round.forEach((m) => out.push({ ...m, phase: "bracket", round: window.bracketRoundLabel(m, ri, bracket.rounds.length), phaseName: window.bracketRoundLabel(m, ri, bracket.rounds.length), roundIndex: ri, compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize, compEngi: isEngi, teamMatchType: compTMT }));
         });
     }
     return out;
@@ -351,7 +356,12 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
                     scrollContainerRef={bracketScrollRef}
                     highlightPlayers={highlightPlayers}
                     onMatchClick={(m, ri, _mi, total) => {
-                      const label = window.roundLabel(ri, total ?? derivedBracket.rounds.length);
+                      // Same primitive as the row surfaces and the column header
+                      // above the card. BracketTree hands back the DISPLAY column
+                      // index here, so this already agreed; going through
+                      // bracketRoundLabel keeps it agreeing if that ever changes,
+                      // and leaves no second copy of the naming rule (mp-u37s).
+                      const label = window.bracketRoundLabel(m, ri, total ?? derivedBracket.rounds.length);
                       // m.roundIndex is the backend round array index, stamped by
                       // buildDisplayModel (meta mode) or the raw rounds[ri] position
                       // (legacy mode where ri equals the backend index). Prefer it

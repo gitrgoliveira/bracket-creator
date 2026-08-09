@@ -1756,7 +1756,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                         result-projecting surface in this file is the per-bout
                         row, which derives its middle through
                         renderTeamBoutMiddle → boutMiddle. Don't "fix" this one
-                        to match that one; they answer different questions. */}
+                        to match that one; they answer different questions.
+                        The exemption itself is stated once, in bracket.jsx's
+                        SCOPE note above boutMiddle; change it there first. */}
                     <div className="sb-vs">VS</div>
                   </div>
                 )}

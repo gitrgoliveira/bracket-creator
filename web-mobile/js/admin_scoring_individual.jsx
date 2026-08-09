@@ -637,7 +637,9 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                             replaces this VS, seeded from the persisted decision via
                             initialIsDrawToggled), encho by the "· (E) Overtime ×N"
                             eyebrow plus the EnchoControl pill, daihyosen by the DH
-                            eyebrow badge. Don't "restore" X/(E)/(DH) here. */}
+                            eyebrow badge. Don't "restore" X/(E)/(DH) here.
+                            The exemption itself is stated once, in bracket.jsx's
+                            SCOPE note above boutMiddle; change it there first. */}
                         {!isDrawToggled && (
                           <div className="sb-vs">VS</div>
                         )}

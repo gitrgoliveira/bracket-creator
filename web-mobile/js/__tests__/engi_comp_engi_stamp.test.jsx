@@ -68,6 +68,12 @@ function installStubs() {
   global.window.matchStateCell = () => '-';
   global.window.ipponsFromScore = () => [];
   global.window.isHikiwake = () => false;
+  // Deliberately the naive check, and safe ONLY because this file asserts
+  // compEngi stamping and never exercises a side-presence filter. Do NOT copy
+  // this harness into a test that does: normalizeMatch substitutes a truthy
+  // {id:"",name:""} for an absent side, so this stub waves byes through and
+  // would give such a test a vacuous pass. Import admin_helpers.jsx for the
+  // real predicate instead, as viewer_competition_bye_results.test.jsx does.
   global.window.hasBothSides = (m) => !!(m && m.sideA && m.sideB);
   global.window.compareDmy = (a, b) => String(a).localeCompare(String(b));
   global.window.queueLabel = () => '';

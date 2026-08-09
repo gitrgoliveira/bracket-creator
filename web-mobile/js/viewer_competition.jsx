@@ -134,8 +134,19 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
     // pool-then-bracket order (not time order), so a bare slice(-N).reverse()
     // produced a jumbled "Recent results" list: sort by scheduledAt desc,
     // then take the most recent N. Missing times sort last (oldest).
+    // hasBothSides here for the same reason as running/upcoming above, and to
+    // keep byes out: a non-power-of-two knockout auto-completes its bye
+    // matches, which have one real competitor and one absent side, so they
+    // arrived here as finished results reading "TBD vs <name>" with a Final
+    // badge and no indication that nobody was ever scheduled. A bye is bracket
+    // structure, not a result. It stays discoverable in the Bracket tab, where
+    // the entrant renders as an unopposed slot feeding the next round (NOT as a
+    // "BYE" tag: bracket.jsx gates that on score.type === "bye", which the Go
+    // side never sets, so it is unreachable from a server payload). Use
+    // hasBothSides, never `m.sideA && m.sideB`: normalizeMatch substitutes a
+    // truthy {id:"",name:""} for a missing side.
     const recent = allMatches
-      .filter((m) => m.status === "completed" && m.winner && matchInvolvesWatched(m))
+      .filter((m) => m.status === "completed" && m.winner && hasBothSides(m) && matchInvolvesWatched(m))
       .sort((a, b) => (b.scheduledAt || "00:00").localeCompare(a.scheduledAt || "00:00"))
       .slice(0, hasActiveFilter ? 20 : 5);
     return { runningMatches: running, upcomingMatches: upcoming, recentMatches: recent };

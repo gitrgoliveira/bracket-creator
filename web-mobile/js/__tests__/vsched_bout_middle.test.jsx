@@ -93,8 +93,12 @@ describe('mp-u37s: VSchedItem bout middle is never a dash', () => {
     expect(centreText({ ...base, status: 'scheduled' })).toBe('vs');
   });
 
-  // Non-plain middles are carried by the score string on this surface; pinned
-  // here so a future refactor of the fallback cannot swallow them either.
+  // Non-plain middles reach this surface INSIDE the score string, not through
+  // the fallback: matchScoreStr already returns "X"/"(E)"/"(DH)" for these
+  // payloads, so scoreStr is truthy and the vsched-item__score span wins. These
+  // cases therefore pin the score-string path (that formatIpponsScore keeps
+  // surfacing the marks), NOT the fallback. The fallback's own handling of the
+  // same marks is pinned separately below.
   it.each([
     ['hikiwake tie', { decision: 'hikiwake' }, 'X'],
     ['encho', { encho: { periodCount: 1 } }, '(E)'],
@@ -103,5 +107,34 @@ describe('mp-u37s: VSchedItem bout middle is never a dash', () => {
     const mid = centreText({ ...base, status: 'completed', ...extra });
     expect(mid).toContain(want);
     expect(mid).not.toContain('-');
+  });
+
+  // Directly pin the FALLBACK branch for the non-"vs" marks. Only
+  // matchScoreStr is stubbed (to the empty string the bye case produces);
+  // boutMiddle stays REAL, so this asserts what the new call actually returns
+  // rather than what a stub was told to say. Without this, every non-"vs"
+  // assertion above would still pass with the fallback entirely broken.
+  describe('fallback branch with an empty score string', () => {
+    let realMatchScoreStr;
+
+    beforeEach(() => {
+      realMatchScoreStr = global.window.matchScoreStr;
+      global.window.matchScoreStr = () => '';
+    });
+
+    afterEach(() => {
+      global.window.matchScoreStr = realMatchScoreStr;
+    });
+
+    it.each([
+      ['hikiwake tie', { decision: 'hikiwake' }, 'X'],
+      ['encho', { encho: { periodCount: 1 } }, '(E)'],
+      ['daihyosen', { decision: 'daihyosen' }, '(DH)'],
+      ['no decision', {}, 'vs'],
+    ])('completed %s falls back to its boutMiddle mark, never a dash', (_label, extra, want) => {
+      const mid = centreText({ ...base, status: 'completed', ...extra });
+      expect(mid).toBe(want);
+      expect(mid).not.toContain('-');
+    });
   });
 });

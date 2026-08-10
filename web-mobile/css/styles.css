@@ -4873,11 +4873,15 @@ button.pool-match-row {
 }
 
 /* Ippon fill order is fixed OUTSIDE-TO-INSIDE: each side's first ippon sits in
-   the slot nearest that competitor's name (the board's outer edge) and fills
-   inward toward the centre. Shiro (left column) packs its slots to the left
-   (outer) by default; Aka (right column) must mirror it, pack to the right and
-   render pts[0] at the outer (right) edge. See running_a_kendo_tournament.md →
-   Individual Match Scoreboard. */
+   the slot nearest that competitor's name and fills inward toward the centre.
+   "Outer" here means the outer of that SIDE'S TWO SLOTS, never the outer edge
+   of the board: the board's outer edges carry the names, and the slot group as
+   a whole hugs the centre vs (the .sb-slots justify-self rules above). Shiro
+   (left column) packs its slots to the left (outer) by default; Aka (right
+   column) must mirror it, pack to the right and render pts[0] at the outer
+   (right) edge. Fixed by FIK Table 1 (p.15), Yuko-datotsu row, which pins the
+   mark order to the Taisho round of Table 2 (p.16). See
+   running_a_kendo_tournament.md → Individual Match Scoreboard. */
 .sb-side--aka .sb-slots {
   flex-direction: row-reverse;
 }
@@ -5506,9 +5510,11 @@ button.pool-match-row {
 .team-bouts-scroll .team-sub-match__score {
   min-width: 34px;
 }
-/* Outstanding hansoku: a red ▲ on the offending side's inner edge, sitting
-   with the centre marks (canonical kendo scoresheet). A 2nd foul discharges
-   it to an H ippon for the opponent. */
+/* Outstanding hansoku: a red ▲ between the offending competitor's name and
+   that side's ippon slots, sitting with the centre marks (FIK Table 2, p.16 —
+   its Taisho row puts White's ▲ at the far left and Red's at the far right,
+   each on its own competitor's name side). A 2nd foul discharges it to an H
+   ippon for the opponent. */
 .team-bouts-scroll .tsm-foul-tri {
   color: var(--danger);
   font-size: 13px;

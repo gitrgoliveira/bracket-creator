@@ -130,10 +130,13 @@ function ipponLetters(arr) {
 }
 
 // letters[0] is the OUTER ippon (the first point scored), letters[1] the inner.
-// Ippons fill from the OUTSIDE toward the centre: shiro fills left→right (its
-// outer edge is the left), aka fills right→left (its outer edge is the right),
-// so for aka we reverse the visual cell order. The testid stays on the logical
-// outer cell (letters[0]) regardless of which side renders it.
+// "Outer"/"inner" are relative to that side's OWN TWO SLOTS, never to the board:
+// the names hold the board's outer edges and both slot groups flank the centre
+// vs (FIK Table 2, p.16). Ippons fill from each name toward the centre: shiro
+// fills left→right (its outer slot is the left), aka fills right→left (its outer
+// slot is the right), so for aka we reverse the visual cell order. The testid
+// stays on the logical outer cell (letters[0]) regardless of which side renders
+// it.
 const WAZA_NAMES = { M: "Men (head)", K: "Kote (wrist)", D: "Do (body)", T: "Tsuki (throat)", H: "Hansoku (penalty)", S: "Sune (shin)", "○": "Default win" };
 
 function slotCells(letters, side, testid) {
@@ -149,9 +152,10 @@ function slotCells(letters, side, testid) {
 }
 
 // centreMarks: the §263 inner cells: [shiro slot][shiro slot] | vs/X/(E)/(DH) | [aka slot][aka slot].
-// Hansoku ▲ shows on the offending side, on the OUTER edge of the slots (away
-// from centre); X marks a hikiwake; "Ht" flags hantei. For an ippon-less win
-// the winning side is otherwise invisible, so we mark the winner's slots:
+// Hansoku ▲ shows between the offending competitor's name and that side's ippon
+// slots (FIK Table 2, p.16 Taisho row: White's ▲ far left, Red's far right, each
+// on its own name side); X marks a hikiwake; "Ht" flags hantei. For an ippon-less
+// win the winning side is otherwise invisible, so we mark the winner's slots:
 // "Ht" when decided by hantei, else the maru pair ○ ○ — one per awarded
 // point (see winCells below). Modern fusensho/kiken carry ["○","○"] ippons
 // and render through the normal slot path, so they never reach this fallback.

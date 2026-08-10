@@ -2057,10 +2057,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                         <div className="team-sub-match__center">
                           <div className="tsm-center-marks">
                           <div className="tsm-center-pts tsm-center-pts--shiro">
-                            {/* Outstanding hansoku → red ▲ next to the name (the
-                                outer edge), rendered before the slots. A 2nd foul
-                                discharges to an H ippon for the opponent and clears
-                                this. (running_a_kendo_tournament.md: ▲ next to name.) */}
+                            {/* Outstanding hansoku → red ▲ between the competitor's
+                                name and that side's ippon slots, so rendered before
+                                the slots. A 2nd foul discharges to an H ippon for the
+                                opponent and clears this. (FIK Table 2, p.16 Taisho
+                                row; running_a_kendo_tournament.md: ▲ next to name.) */}
                             {rowSides[0].fouls >= 1 && <span className="tsm-foul-tri" title="Hansoku: 1 foul">▲</span>}
                             {[0, 1].map(i => (
                               <button key={i} className={`editor-side__pt ${rowSides[0].pts[i] ? "editor-side__pt--filled" : ""}`}
@@ -2073,17 +2074,19 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                             {scoreDisplay}
                           </div>
                           <div className="tsm-center-pts tsm-center-pts--aka">
-                            {/* Aka fills outside-in: its first ippon sits on the
-                                outer (right) edge nearest the Aka name, so render
-                                the slots in reverse (pts[1] then pts[0]). */}
+                            {/* Aka fills outside-in: its first ippon sits in the
+                                outer (right) one of its OWN two slots, nearest the
+                                Aka name, so render the slots in reverse (pts[1] then
+                                pts[0]). The pair itself stays inside, flanking the
+                                centre score (FIK Table 2, p.16). */}
                             {[1, 0].map(i => (
                               <button key={i} className={`editor-side__pt ${rowSides[1].pts[i] ? "editor-side__pt--filled" : ""}`}
                                 onClick={() => rowSides[1].setPts(rowSides[1].pts.filter((_, j) => j !== i))} title="Click to remove">
                                 {rowSides[1].pts[i] || "·"}
                               </button>
                             ))}
-                            {/* Outstanding hansoku → red ▲ next to the Aka name
-                                (the outer/right edge), after the reversed slots. */}
+                            {/* Outstanding hansoku → red ▲ between the Aka name and
+                                that side's ippon slots, so after the reversed slots. */}
                             {rowSides[1].fouls >= 1 && <span className="tsm-foul-tri" title="Hansoku: 1 foul">▲</span>}
                           </div>
                           </div>

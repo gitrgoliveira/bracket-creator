@@ -160,9 +160,8 @@ func (e *Engine) completedPoolNames(compID string, comp *state.Competition) (map
 // bracket's court/time slots are assigned at draw time and never change here,
 // only competitor labels.
 //
-// It used to RECOMPUTE that template instead, rerunning the whole
-// GenerateFinals → CreateBalancedTree → ApplyPoolAdjustments → TreeToLeafArray →
-// buildBracketFromLeaves draw on every call and matching it against the live
+// It used to RECOMPUTE that template instead, rerunning the whole draw and
+// buildBracketFromLeaves on every call and matching it against the live
 // bracket BY POSITION. That was correct only while the placement algorithm never
 // changed: an operator who upgraded between a competition's draw and the end of
 // its pool phase (ordinary for a two-day event) would have had qualifiers written

@@ -134,15 +134,16 @@ func TestSetTreeSheetTitle(t *testing.T) {
 // too. Both helpers are in fact exact for every CreateBalancedTree shape: the
 // root's bracket line always lands in column 2*depth+1, and the split
 // (mid = len/2) always puts a deepest chain on the right-most descent, whose
-// row offsets sum to 2^depth - 1. The ADJUSTED variant is exercised separately
-// because treeAdjustment may swap a bye pair, moving the deepest chain off the
-// right-most path and leaving the last rows of the envelope unused. (The
-// placement pass is applied to the tree here, the way RenderKnockoutPages
-// applies it before rendering; PrintLeafNodes itself no longer reorders.)
+// row offsets sum to 2^depth - 1. The DRAW variant is exercised separately
+// because a court-first draw (BuildKnockoutDraw) places its region byes at the
+// FRONT of a region, which moves the deepest chain off the right-most path and
+// can leave the last rows of the envelope unused. That is the shape the
+// workbook actually prints, so it is the one that has to stay inside the
+// envelope.
 func TestTreePageGeometry(t *testing.T) {
 	for _, leaves := range []int{1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 13, 16} {
-		for _, adjusted := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%d leaves adjusted=%v", leaves, adjusted), func(t *testing.T) {
+		for _, fromDraw := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%d leaves fromDraw=%v", leaves, fromDraw), func(t *testing.T) {
 				f := excelize.NewFile()
 				defer f.Close()
 				const sheet = "Tree 1"
@@ -151,13 +152,17 @@ func TestTreePageGeometry(t *testing.T) {
 
 				names := make([]string, leaves)
 				for i := range names {
-					// Pool-style labels so the adjusted variant exercises
-					// treeAdjustment's real reordering logic.
 					names[i] = fmt.Sprintf("Pool %c-%s", 'A'+rune(i/2), GetOrdinal(i%2+1))
 				}
 				tree := CreateBalancedTree(names)
-				if adjusted {
-					ApplyPoolAdjustments(tree)
+				if fromDraw {
+					// One qualifier per pool on two shiaijo: the region byes
+					// land at the front of each region, which is exactly the
+					// asymmetry the envelope has to tolerate.
+					pools, _ := makePools(leaves)
+					d := BuildKnockoutDraw(pools, 1, 2)
+					require.NotNil(t, d)
+					tree = d.Root
 				}
 				depth := CalculateDepth(tree)
 				startRow := TreeTitleRows + 1
@@ -179,9 +184,9 @@ func TestTreePageGeometry(t *testing.T) {
 					}
 				}
 
-				if adjusted {
-					// treeAdjustment may park a bye above the deep chain, so the
-					// render can end short of the envelope, never past it.
+				if fromDraw {
+					// A region bye sits above the deep chain, so the render can
+					// end short of the envelope, never past it.
 					assert.LessOrEqual(t, maxCol, TreePageLastCol(depth), "depth %d: used columns must stay inside the envelope", depth)
 					assert.LessOrEqual(t, maxRow, TreePageLastRow(depth, startRow), "depth %d: used rows must stay inside the envelope", depth)
 					// The root's bracket line pins the last column regardless.

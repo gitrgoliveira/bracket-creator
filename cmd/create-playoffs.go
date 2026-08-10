@@ -178,9 +178,12 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	// Create balanced tree
 	tree := helper.CreateBalancedTree(names)
 
-	// A playoffs bracket has no pools: nil pools skips the roster overlay and
-	// the pool-winner tree adjustment.
-	eliminationMatchRounds, numPages, err := helper.RenderKnockoutPages(f, tree, len(names), o.courts, o.singleTree, nil, nil, nil, nil)
+	// A playoffs bracket has no pools, so R2-R7 do not apply: its placement is
+	// StandardSeeding's and stays untouched. R8 does apply, so the tree is cut
+	// into one region per shiaijo and paginated exactly like a pool-fed draw.
+	// nil pools skips the roster overlay.
+	draw := helper.NewPlayoffDraw(tree, o.courts)
+	eliminationMatchRounds, numPages, err := helper.RenderKnockoutPages(f, draw, o.singleTree, nil, nil, nil, nil)
 	if err != nil {
 		return err
 	}

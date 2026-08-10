@@ -59,13 +59,12 @@ func CreateBalancedTree(leafValues []string) *Node {
 // junction's bracket lines, and stamps each internal node's sheet/cell
 // coordinates so FillInMatches can write the match numbers into them.
 //
-// It is a PURE RENDERER - it never reorders the tree. Pool placement is one
-// whole-tree pass (ApplyPoolAdjustments) run upstream by RenderKnockoutPages,
-// before the tree is split into pages. It used to run here instead, per page
-// subtree and as a side effect of drawing, which meant the Excel path applied
-// placement to a DIFFERENT scope than the engine path applied it to (the engine
-// always adjusted the whole tree), and nodes above the page roots were never
-// visited at all. Do not reintroduce a mutation here.
+// It is a PURE RENDERER - it never reorders the tree. Placement is decided when
+// the draw is BUILT (BuildKnockoutDraw, draw.go), so by the time a page is
+// drawn its leaves are already final. It used to run a placement fix-up here,
+// per page subtree and as a side effect of drawing, which meant the Excel path
+// applied placement to a DIFFERENT scope than the engine path applied it to.
+// Do not reintroduce a mutation here.
 func PrintLeafNodes(node *Node, f *excelize.File, sheetName string, startCol int, startRow int, depth int, matchWinners map[string]MatchWinner) {
 	if node == nil {
 		return
@@ -85,49 +84,9 @@ func PrintLeafNodes(node *Node, f *excelize.File, sheetName string, startCol int
 	PrintLeafNodes(node.Right, f, sheetName, startCol-2, startRow+size, depth-1, matchWinners)
 }
 
-// treeAdjustment repositions leaf nodes within a two-level subtree so that
-// the lower-position pool finalist (e.g. "-1st" beats "-2nd") appears at the top
-// of a match pair.  In the Excel layout a smaller row number is the preferred
-// / seeded side that receives a bye when there is an odd number of players,
-// so putting the first-place finisher on top is necessary for correct seeding.
-//
-// Two cases are handled:
-//  1. Both children are leaf nodes → swap them so the lower-position value
-//     is on the left (top) child.
-//  2. Left child is a leaf and right child is an internal node → swap the leaf
-//     with the right node's top-left leaf if the incoming leaf has a lower
-//     position, ensuring the first-place finisher gets the bye at this level.
-func treeAdjustment(node *Node) {
-
-	if node.Left.LeafNode && node.Right.LeafNode {
-
-		// Need to ensure pools winners stay on top
-		_, leftRankStr := splitPoolNameAndRank(node.Left.LeafVal)
-		leftPos := parsePoolRank(leftRankStr)
-		_, rightRankStr := splitPoolNameAndRank(node.Right.LeafVal)
-		rightPos := parsePoolRank(rightRankStr)
-
-		// For that we need to ensure the last character of the left (i.e. top) node is higher than the right
-		if leftPos > rightPos {
-			node.Left, node.Right = node.Right, node.Left
-		}
-	}
-
-	// Also need to ensure pool winners are the ones that get a bye
-	if node.Left.LeafNode && !node.Right.LeafNode {
-		// find a second placed pool winner on the other branch
-		_, leftRankStr := splitPoolNameAndRank(node.Left.LeafVal)
-		leftPos := parsePoolRank(leftRankStr)
-		_, rightRankStr := splitPoolNameAndRank(node.Right.Left.LeafVal)
-		rightPos := parsePoolRank(rightRankStr)
-
-		// For that we need to ensure the last character of the left (i.e. top) node is higher than the left of the right branch
-		if leftPos > rightPos {
-			node.Left, node.Right.Left = node.Right.Left, node.Left
-		}
-	}
-}
-
+// splitPoolNameAndRank splits a pool-finalist placeholder ("Pool A-1st") into
+// its pool name and ordinal suffix at the LAST hyphen. Pool names may contain
+// hyphens; a rank never does.
 func splitPoolNameAndRank(val string) (string, string) {
 	idx := strings.LastIndex(val, "-")
 	if idx == -1 {
@@ -147,54 +106,6 @@ func parsePoolRank(rankStr string) int64 {
 	}
 	pos, _ := strconv.ParseInt(s, 10, 64)
 	return pos
-}
-
-// GenerateFinals interleaves pool finalists so that when CreateBalancedTree
-// distributes them into bracket slots, the first-place finisher of one pool
-// is paired against the second-place finisher of another pool.
-//
-// The algorithm emits one full pass over the pools per "round" r (r =
-// 0..poolWinners-1). Within a round, pool p contributes the finisher of rank
-// (p + r) % poolWinners. For any fixed pool p, the ranks chosen across the
-// rounds form a cyclic shift of {0..poolWinners-1}, a permutation, so every
-// "<pool>-<ordinal>" placeholder appears EXACTLY once: no duplicates, none
-// missing, for ALL pool counts and poolWinners values. Adjacent slots hold
-// different pools whose ranks differ by 1 (mod poolWinners), preserving the
-// cross-pool seeding intent so 1st-place finishers are paired against lower
-// finishers of other pools.
-//
-// (The previous formulation gated its round counter on
-// `len(pools)%poolWinners == 0`, which aliased the rank rotation for
-// non-coprime combinations, e.g. poolWinners>=4 with 2/6/10 pools, silently
-// duplicating some placeholders and dropping others. Since mp-turx makes these
-// placeholders the leaves of the LIVE in-place knockout, that corrupted real
-// results; this formulation is duplicate-free by construction.)
-//
-// Example with 4 pools and 2 winners per pool:
-//
-//	result = [Pool_A-1st, Pool_B-2nd, Pool_C-1st, Pool_D-2nd,
-//	          Pool_A-2nd, Pool_B-1st, Pool_C-2nd, Pool_D-1st]
-func GenerateFinals(pools []Pool, poolWinners int) []string {
-	if poolWinners <= 0 || len(pools) == 0 {
-		return nil
-	}
-
-	finalists := make([][]string, len(pools))
-	for i := 0; i < len(pools); i++ {
-		for j := 0; j < poolWinners; j++ {
-			finalists[i] = append(finalists[i], fmt.Sprintf("%s-%s", pools[i].PoolName, GetOrdinal(j+1)))
-		}
-	}
-
-	matches := make([]string, 0, len(pools)*poolWinners)
-	for r := 0; r < poolWinners; r++ {
-		for p := 0; p < len(pools); p++ {
-			pos := (p + r) % poolWinners
-			matches = append(matches, finalists[p][pos])
-		}
-	}
-
-	return matches
 }
 
 func CalculateDepth(node *Node) int {
@@ -301,22 +212,59 @@ func NeedsBronzeBlock(naginata bool, numRounds int) bool {
 	return naginata && numRounds >= 2
 }
 
-// function that subdivides a tree into a specified number of subtrees
-func SubdivideTree(node *Node, numSubtrees int) []*Node {
-	if node == nil || numSubtrees <= 0 {
-		return nil
+// SubdivideRegions cuts a draw's shiaijo regions into Excel tree pages: each
+// region contributes exactly pagesPerCourt pages, in court order, so page
+// (c*pagesPerCourt + i) always belongs to shiaijo c (R8).
+//
+// A 1-page court prints its whole region, a 2-page court its region's two child
+// subtrees and a 4-page court its four grandchildren. Every page is therefore a
+// genuine subtree, which is what a bracket has to be to print at all.
+//
+// pagesPerCourt is validated by KnockoutPagesPerCourt, which never asks for a
+// split a region cannot honour; asking anyway yields the deepest split that
+// exists, padded with the region itself, so the page count stays an exact
+// multiple rather than silently drifting.
+//
+// This replaces the old count-based SubdivideTree, which split by TREE POSITION
+// and could not express a non-power-of-two page count at all: asked for 3 pages
+// on a 12-leaf tree it returned [left half, right half, WHOLE TREE], so page 3
+// reprinted every match on pages 1 and 2.
+func SubdivideRegions(regions []*Node, pagesPerCourt int) []*Node {
+	if pagesPerCourt < 1 {
+		pagesPerCourt = 1
 	}
-	subtrees := []*Node{}
-	if node.Left != nil {
-		subtrees = append(subtrees, SubdivideTree(node.Left, numSubtrees/2)...)
+	pages := make([]*Node, 0, len(regions)*pagesPerCourt)
+	for _, r := range regions {
+		pages = append(pages, regionPages(r, pagesPerCourt)...)
 	}
-	if node.Right != nil {
-		subtrees = append(subtrees, SubdivideTree(node.Right, numSubtrees/2)...)
+	return pages
+}
+
+// regionPages splits one region into exactly want pages (1, 2 or 4).
+func regionPages(region *Node, want int) []*Node {
+	pages := []*Node{region}
+	for len(pages) < want {
+		next := make([]*Node, 0, len(pages)*2)
+		split := false
+		for _, p := range pages {
+			if p != nil && !p.LeafNode && p.Left != nil && p.Right != nil {
+				next = append(next, p.Left, p.Right)
+				split = true
+			} else {
+				next = append(next, p, p)
+			}
+		}
+		if !split {
+			// Nothing left to cut: repeat the region rather than emit a page
+			// count that is not a multiple of the shiaijo count.
+			for len(pages) < want {
+				pages = append(pages, region)
+			}
+			break
+		}
+		pages = next
 	}
-	if len(subtrees) < numSubtrees {
-		subtrees = append(subtrees, node)
-	}
-	return subtrees
+	return pages[:want]
 }
 
 // TreeToLeafArray converts a tree built by CreateBalancedTree into a
@@ -343,25 +291,6 @@ func TreeToLeafArray(node *Node) []string {
 		right = append(right, "")
 	}
 	return append(left, right...)
-}
-
-// ApplyPoolAdjustments runs the pool-finalist placement pass over a WHOLE tree:
-// a pre-order treeAdjustment traversal that lifts pool winners to the top of
-// each pairing and into the bye slots.
-//
-// This is the single placement pass for BOTH draw paths. The engine calls it
-// before TreeToLeafArray (bracket.go at draw, knockout.go for the re-seed
-// template); RenderKnockoutPages calls it before splitting the tree into Excel
-// pages. Call it on the tree BEFORE anything derives structure from it -
-// SubdivideTree, TreeToLeafArray or BuildEliminationMatchRounds - so every
-// derived view describes the same placement.
-func ApplyPoolAdjustments(node *Node) {
-	if node == nil || node.LeafNode {
-		return
-	}
-	treeAdjustment(node)
-	ApplyPoolAdjustments(node.Left)
-	ApplyPoolAdjustments(node.Right)
 }
 
 func RoundToPowerOf2(x, y float64) (int, error) {
@@ -397,23 +326,91 @@ func NextPow2(n int) int {
 	return p
 }
 
-// TreePageLayout computes the number of tree sheet pages needed for numPlayers
-// competitors assigned to numCourts Shiaijo. When singleTree is true the
-// result is always 1 (unless court expansion requires more, which singleTree
-// suppresses). numCourts must be clamped by the caller before calling if
-// caller-specific rules apply (e.g. capping at numPools).
-func TreePageLayout(numPlayers, numCourts int, singleTree bool) (int, error) {
-	numPages, err := RoundToPowerOf2(float64(numPlayers), float64(MaxPlayersPerTree))
-	if err != nil {
-		return 0, err
+// KnockoutPagesPerCourt returns how many Excel tree pages each shiaijo gets:
+// 1, 2 or 4 (R8), the smallest power of two such that no page carries more than
+// MaxPlayersPerTree entrants.
+//
+// The result is clamped down to the deepest split every region can actually
+// honour, so SubdivideRegions never has to invent a subtree: a court whose
+// region is a single match cannot print two pages, and the page count must stay
+// an exact multiple of the shiaijo count for the page-to-court mapping
+// (SubtreeCourtIndex, PoolBoundsForSubtree) to be exact. In practice the clamp
+// is inert, because AssignPoolsToCourts keeps region sizes within one pool of
+// each other; it only bites on a draw whose regions are wildly uneven.
+//
+// An oversized region gets MORE PAGES, never an error (R8), and the cap at 4
+// means a very large region may still exceed MaxPlayersPerTree per page. That
+// is the stated trade: a page too dense to read beats a draw that refuses to
+// print during a live event.
+func KnockoutPagesPerCourt(regions []*Node) int {
+	if len(regions) == 0 {
+		return 1
 	}
-	if numPages < 1 || singleTree {
-		numPages = 1
+	widest := 0
+	splittable := 4
+	for _, r := range regions {
+		if l := CountLeaves(r); l > widest {
+			widest = l
+		}
+		if s := maxRegionSplit(r); s < splittable {
+			splittable = s
+		}
 	}
-	if courtPages := NextPow2(numCourts); courtPages > numPages {
-		numPages = courtPages
+	pages := 1
+	for pages < 4 && ceilDiv(widest, pages) > MaxPlayersPerTree {
+		pages *= 2
 	}
-	return numPages, nil
+	if pages > splittable {
+		pages = splittable
+	}
+	if pages < 1 {
+		pages = 1
+	}
+	return pages
+}
+
+// maxRegionSplit is how many genuine page subtrees a region can be cut into:
+// 1 for a lone leaf, 2 when either child is a leaf, 4 otherwise.
+func maxRegionSplit(region *Node) int {
+	if region == nil || region.LeafNode || region.Left == nil || region.Right == nil {
+		return 1
+	}
+	for _, c := range []*Node{region.Left, region.Right} {
+		if c.LeafNode || c.Left == nil || c.Right == nil {
+			return 2
+		}
+	}
+	return 4
+}
+
+func ceilDiv(a, b int) int {
+	if b <= 0 {
+		return a
+	}
+	return (a + b - 1) / b
+}
+
+// TreePageLayout returns the TOTAL number of Excel tree pages for a draw:
+// len(regions) x KnockoutPagesPerCourt (R8), so the page count is always a
+// multiple of the shiaijo count and page (c*p + i) belongs to shiaijo c.
+//
+// singleTree (the CLI --single-tree flag) forces the whole bracket onto ONE
+// page and wins outright. It used to be silently overridden by the court
+// expansion below it, so "--single-tree" on a 4-court event still printed four
+// pages.
+//
+// It used to compute max(NextPow2(numCourts), pow2(numPlayers/16)), a number
+// that had no relationship to where the tree could actually be cut: on 3 courts
+// it asked for 4 pages and SubdivideTree answered with the whole tree as a
+// trailing duplicate page.
+func TreePageLayout(regions []*Node, singleTree bool) int {
+	if singleTree {
+		return 1
+	}
+	if len(regions) == 0 {
+		return 1
+	}
+	return len(regions) * KnockoutPagesPerCourt(regions)
 }
 
 func GetOrdinal(n int) string {

@@ -1,64 +1,154 @@
 package helper
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-// assertFullCoverage verifies that PoolBoundsForSubtree produces a partition of
-// [0, numPools) across numSubtrees pages: each pool is covered exactly once, no
-// gaps, no overlaps, and every page range has start <= end.
-func assertFullCoverage(t *testing.T, numPools, numCourts, numSubtrees int) {
+// assertCourtBlocks verifies that PoolBoundsForSubtree hands every page the
+// whole pool block of the shiaijo that page belongs to: the ranges are never
+// inverted, every page of one court reports the same block, and the blocks over
+// all courts partition [0, numPools).
+func assertCourtBlocks(t *testing.T, numPools, numCourts, numSubtrees int) {
 	t.Helper()
-	seen := make([]bool, numPools)
+	perCourt := map[int][2]int{}
 	for idx := 0; idx < numSubtrees; idx++ {
 		start, end := PoolBoundsForSubtree(numPools, numCourts, numSubtrees, idx)
 		assert.LessOrEqual(t, start, end, "page %d: start must be <= end", idx)
-		for p := start; p < end; p++ {
-			assert.False(t, seen[p], "pool %d covered more than once (page %d [%d,%d))", p, idx, start, end)
+		court := SubtreeCourtIndex(numSubtrees, numCourts, idx)
+		if prev, seen := perCourt[court]; seen {
+			assert.Equal(t, prev, [2]int{start, end},
+				"every page of shiaijo %d must offer that court's whole block", court)
+			continue
+		}
+		perCourt[court] = [2]int{start, end}
+	}
+
+	seen := make([]bool, numPools)
+	for _, r := range perCourt {
+		for p := r[0]; p < r[1]; p++ {
+			assert.False(t, seen[p], "pool %d covered by more than one shiaijo", p)
 			seen[p] = true
 		}
 	}
 	for p := range seen {
-		assert.True(t, seen[p], "pool %d not covered by any page", p)
+		assert.True(t, seen[p], "pool %d belongs to no shiaijo", p)
 	}
 }
 
-// TestPoolBoundsForSubtree_Coverage exercises both the uneven-pages-per-court
-// regression case and the clean-division baseline.
-func TestPoolBoundsForSubtree_Coverage(t *testing.T) {
+// TestPoolBoundsForSubtree_CourtBlocks exercises one page per court and the
+// multi-page-per-court case, which is where the retired page-within-court split
+// used to hand a page pools its bracket did not contain.
+func TestPoolBoundsForSubtree_CourtBlocks(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name                             string
 		numPools, numCourts, numSubtrees int
 	}{
-		{"uneven distribution (regression)", 6, 3, 4},
-		{"even division", 8, 2, 4},
+		{"one page per court", 8, 2, 2},
+		{"two pages per court", 8, 2, 4},
+		{"four pages per court", 12, 2, 8},
+		{"uneven pools per court", 7, 4, 4},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			assertFullCoverage(t, tc.numPools, tc.numCourts, tc.numSubtrees)
+			assertCourtBlocks(t, tc.numPools, tc.numCourts, tc.numSubtrees)
 		})
 	}
 }
 
-// TestPoolBoundsForSubtree_MorePagesThanPools guards against inverted ranges:
-// when a court has more tree pages than pools (e.g. 2 pools split across 4
-// pages), the overflow pages must yield an empty range (start == end), never
-// start > end, which would make pools[start:end] slicing panic.
-func TestPoolBoundsForSubtree_MorePagesThanPools(t *testing.T) {
-	numPools, numCourts, numSubtrees := 2, 1, 4
-	covered := 0
-	for i := range numSubtrees {
-		start, end := PoolBoundsForSubtree(numPools, numCourts, numSubtrees, i)
-		if start > end {
-			t.Fatalf("page %d: inverted range start=%d > end=%d", i, start, end)
-		}
-		covered += end - start
+// TestPoolBoundsForSubtree_SingleTree pins the one case where a page covers
+// more than one shiaijo: --single-tree renders the whole draw on one page, so
+// that page offers every pool rather than court A's alone.
+func TestPoolBoundsForSubtree_SingleTree(t *testing.T) {
+	start, end := PoolBoundsForSubtree(8, 4, 1, 0)
+	assert.Equal(t, 0, start)
+	assert.Equal(t, 8, end)
+}
+
+// TestPoolBoundsForSubtree_Degenerate pins the guards: a zero court or page
+// count yields an empty range rather than dividing by zero or inverting.
+func TestPoolBoundsForSubtree_Degenerate(t *testing.T) {
+	for _, tc := range []struct{ pools, courts, subtrees, idx int }{
+		{8, 0, 4, 0},
+		{8, 2, 0, 0},
+		{0, 2, 2, 0},
+	} {
+		start, end := PoolBoundsForSubtree(tc.pools, tc.courts, tc.subtrees, tc.idx)
+		assert.LessOrEqual(t, start, end)
+		assert.Equal(t, 0, start)
+		assert.Equal(t, 0, end)
 	}
-	if covered != numPools {
-		t.Fatalf("pages must cover every pool exactly once: covered %d of %d", covered, numPools)
+}
+
+// TestPageRosterPools is the narrowing that makes a roster overlay honest: a
+// page only ever overlays the pools it actually prints a qualifier of.
+func TestPageRosterPools(t *testing.T) {
+	pools, _ := makePools(4)
+	draw := BuildKnockoutDraw(pools, 2, 2)
+	require.NotNil(t, draw)
+
+	// One page per court: every home pool's winner is on its own court's page,
+	// so narrowing is the identity.
+	for c, region := range draw.Regions {
+		start, end := PoolBoundsForSubtree(4, 2, 2, c)
+		assert.Equal(t, pools[start:end], PageRosterPools(pools[start:end], region),
+			"one page per shiaijo overlays the court's whole block")
+	}
+
+	// Two pages per court: each page keeps only the pools it prints.
+	pages := SubdivideRegions(draw.Regions, 2)
+	require.Len(t, pages, 4)
+	for i, page := range pages {
+		start, end := PoolBoundsForSubtree(4, 2, len(pages), i)
+		got := PageRosterPools(pools[start:end], page)
+		printed := map[string]bool{}
+		for _, l := range TreeLeafLabels(page) {
+			name, _ := splitPoolNameAndRank(l)
+			printed[name] = true
+		}
+		for _, p := range got {
+			assert.Truef(t, printed[p.PoolName], "page %d overlays %s but does not print it", i+1, p.PoolName)
+		}
+	}
+
+	assert.Nil(t, PageRosterPools(nil, draw.Root))
+	assert.Nil(t, PageRosterPools(pools, nil))
+}
+
+// TestRenderedPageOverlayNeverClaimsAnAbsentPool sweeps the property over the
+// whole configuration space, from the rendered page rather than from the range
+// arithmetic.
+func TestRenderedPageOverlayNeverClaimsAnAbsentPool(t *testing.T) {
+	for _, numCourts := range []int{1, 2, 4} {
+		for nPools := 1; nPools <= 12; nPools++ {
+			for poolWinners := 1; poolWinners <= 4; poolWinners++ {
+				t.Run(fmt.Sprintf("%d_pools_%d_winners_%d_courts", nPools, poolWinners, numCourts), func(t *testing.T) {
+					pools, _ := makePools(nPools)
+					draw := BuildKnockoutDraw(pools, poolWinners, numCourts)
+					require.NotNil(t, draw)
+					courts := draw.NumCourts()
+					pages := SubdivideRegions(draw.Regions, KnockoutPagesPerCourt(draw.Regions))
+
+					for i, page := range pages {
+						start, end := PoolBoundsForSubtree(nPools, courts, len(pages), i)
+						overlay := PageRosterPools(pools[start:end], page)
+						printed := map[string]bool{}
+						for _, l := range TreeLeafLabels(page) {
+							name, _ := splitPoolNameAndRank(l)
+							printed[name] = true
+						}
+						for _, p := range overlay {
+							assert.Truef(t, printed[p.PoolName],
+								"page %d overlays %s with no qualifier of it on the page", i+1, p.PoolName)
+						}
+					}
+				})
+			}
+		}
 	}
 }

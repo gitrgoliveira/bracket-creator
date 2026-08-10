@@ -753,7 +753,7 @@ func columnContains(rows [][]string, col int, want string) bool {
 }
 
 // TestBuildResultsWorkbook_LeagueNoPhantomBracket is the regression test for the
-// phantom-bracket bug: GenerateFinals returns placeholder "Pool A-1st" finalist
+// phantom-bracket bug: the draw returns placeholder "Pool A-1st" finalist
 // labels even for a League (which has no knockout phase), so without the
 // IsPlayoffEnabled() gate the export emitted an Elimination Matches sheet full of
 // "Round N - Match N" headers and finalist placeholders, plus "Tree 1" pages,
@@ -1464,7 +1464,7 @@ func TestBuildResultsWorkbook_MixedEndToEnd(t *testing.T) {
 	assert.True(t, sheetContainsCell(rows, "MK"),
 		"mixed pool grid must show the literal ippon score 'MK'")
 	assertNoBrokenFormulas(t, f, helper.SheetPoolMatches)
-	// Mixed advances pool winners into a bracket: GenerateFinals renders finalist
+	// Mixed advances pool winners into a bracket: the draw renders finalist
 	// slots as "Pool-Ordinal" (e.g. "Pool A-1st"), so the Elimination Matches
 	// sheet is populated too and must be equally free of broken formulas.
 	assertNoBrokenFormulas(t, f, helper.SheetEliminationMatches)

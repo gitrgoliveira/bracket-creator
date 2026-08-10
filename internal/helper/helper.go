@@ -253,7 +253,19 @@ func AssignPoolsToCourts(numPools, numCourts int) ([]int, error) {
 
 // SubtreeCourtIndex returns the zero-based court index for tree subtree idx
 // when numSubtrees are spread across numCourts. Mirrors the grouping used by
-// poolBoundsForSubtree so that court labels are always consistent.
+// PoolBoundsForSubtree so that court labels are always consistent.
+//
+// numSubtrees is an EXACT multiple of numCourts (R8: SubdivideRegions emits
+// numCourts x {1,2,4} pages, one court's pages consecutively), so the division
+// below is exact and idx/pagesPerCourt can never reach numCourts. It used to
+// carry an overflow clamp that folded the leftover pages onto the last court,
+// which is what let a 3-court draw print four pages and label the duplicated
+// fourth one "Shiaijo C".
+//
+// The one remaining non-multiple case is --single-tree, which prints ONE page
+// for the whole draw; pagesPerCourt then floors to 0, is raised to 1, and the
+// single page reports court 0. TreePageTitle names every shiaijo on that page
+// rather than pretending it is court A's.
 func SubtreeCourtIndex(numSubtrees, numCourts, idx int) int {
 	// Every current caller clamps its court count, but this is the one place a
 	// zero would actually divide, so enforce the invariant here (like
@@ -263,11 +275,19 @@ func SubtreeCourtIndex(numSubtrees, numCourts, idx int) int {
 	if pagesPerCourt < 1 {
 		pagesPerCourt = 1
 	}
-	courtIdx := idx / pagesPerCourt
-	if courtIdx >= numCourts {
-		courtIdx = numCourts - 1
+	return idx / pagesPerCourt
+}
+
+// TreePageTitle is the shiaijo title a rendered tree page carries. Normally
+// that is the one court whose region the page prints. When the whole draw is
+// forced onto fewer pages than there are courts (--single-tree), the page
+// carries every court's bracket, so it names the whole range instead of
+// claiming a single shiaijo it does not own.
+func TreePageTitle(numSubtrees, numCourts, idx int) string {
+	if numSubtrees > 0 && numSubtrees < numCourts {
+		return fmt.Sprintf("Shiaijo %s-%s", CourtLabel(0), CourtLabel(clampCourts(numCourts)-1))
 	}
-	return courtIdx
+	return "Shiaijo " + CourtLabel(SubtreeCourtIndex(numSubtrees, numCourts, idx))
 }
 
 // ReorderPoolsForCourts deinterleaves pools so that when divided into

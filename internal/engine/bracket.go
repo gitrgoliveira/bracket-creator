@@ -55,7 +55,11 @@ func (e *Engine) generatePlayoffs(comp *state.Competition, players []domain.Play
 	tree := helper.CreateBalancedTree(names)
 	leaves := helper.TreeToLeafArray(tree)
 
-	bracket, err := e.buildBracketFromLeaves(comp, leaves)
+	// R2-R7 leave a playoffs bracket alone, but its matches still need courts,
+	// so the seeded tree is cut into one region per shiaijo exactly as the Excel
+	// pagination cuts it (helper.NewPlayoffDraw).
+	draw := helper.NewPlayoffDraw(tree, len(comp.Courts))
+	bracket, err := e.buildBracketFromLeaves(comp, leaves, draw.RegionSpans())
 	if err != nil {
 		return err
 	}
@@ -65,8 +69,8 @@ func (e *Engine) generatePlayoffs(comp *state.Competition, players []domain.Play
 
 // generatePoolPreviewBracket builds the in-place knockout bracket for a mixed
 // (Pools + Knockout) competition at draw time. Its leaves start as pool-origin
-// placeholders ("Pool A-1st", "Pool B-2nd", …) produced by helper.GenerateFinals,
-// the same hyphenated labels the Excel Tree sheet uses, and the bracket is
+// placeholders ("Pool A-1st", "Pool B-2nd", …) produced by the court-first draw
+// (helper.BuildKnockoutDraw), the same labels the Excel Tree sheet uses, and the bracket is
 // scheduled here so knockout matches have court/time slots from the start. As
 // each pool finishes, ResolveQualifiedPools replaces that pool's placeholders
 // with the real finishers IN PLACE (no separate playoffs competition, no manual
@@ -76,8 +80,8 @@ func (e *Engine) generatePlayoffs(comp *state.Competition, players []domain.Play
 // this flag.
 //
 // No-ops (returns nil without writing bracket.json) when there are no pools
-// (nothing to seed a tree from) or when helper.GenerateFinals returns an empty
-// list. PoolWinners <= 0 is coerced to 2 (matching the same default in
+// (nothing to seed a tree from) or when the draw comes back empty.
+// PoolWinners <= 0 is coerced to 2 (matching the same default in
 // ResolveQualifiedPools) rather than treated as "skip", a mixed source with the
 // field unset still has a knockout to preview, and matching the resolver default
 // ensures the preview shape equals the live knockout bracket.
@@ -92,20 +96,18 @@ func (e *Engine) generatePoolPreviewBracket(comp *state.Competition) error {
 
 	poolWinners := comp.EffectivePoolWinners()
 
-	finals := helper.GenerateFinals(pools, poolWinners)
-	if len(finals) == 0 {
+	// Mirror the Excel create-pools path exactly: the SAME court-first draw
+	// builds both, so the preview bracket has the same topology, the same
+	// region-to-shiaijo mapping and the same byes as the printed Excel bracket
+	// (mp-5ng7). Flattening to a pow2 leaf array is TreeToLeafArray's job and
+	// re-pads the regions' structural byes as "" slots.
+	draw := helper.BuildKnockoutDraw(pools, poolWinners, len(comp.Courts))
+	if draw == nil {
 		return nil
 	}
+	previewLeaves := helper.TreeToLeafArray(draw.Root)
 
-	// Mirror the Excel create-pools path: build tree, apply pool adjustments
-	// so 1st-place finishers get byes, then flatten to a pow2 leaf array
-	// (mp-5ng7). This gives the preview bracket the same topology as the
-	// printed Excel bracket.
-	tree := helper.CreateBalancedTree(finals)
-	helper.ApplyPoolAdjustments(tree)
-	previewLeaves := helper.TreeToLeafArray(tree)
-
-	bracket, err := e.buildBracketFromLeaves(comp, previewLeaves)
+	bracket, err := e.buildBracketFromLeaves(comp, previewLeaves, draw.RegionSpans())
 	if err != nil {
 		return err
 	}
@@ -121,7 +123,15 @@ func (e *Engine) generatePoolPreviewBracket(comp *state.Competition) error {
 // (preview bracket), the tree shape, court assignment, bye resolution, and
 // scheduling are identical either way. The caller persists the result (and
 // sets Preview when appropriate).
-func (e *Engine) buildBracketFromLeaves(comp *state.Competition, leaves []string) (*state.Bracket, error) {
+//
+// regionSpans is the draw's per-shiaijo leaf spans (KnockoutDraw.RegionSpans).
+// It is what makes each match's COURT exact: a region is a contiguous, aligned
+// span of the pow2 leaf array (R3), so a match's court is the region containing
+// its first-round slot. The court used to be derived by dividing the round-1
+// slot count by the court count, which is only right when every court holds the
+// same number of pools, and which silently clamped every overflow slot onto the
+// last court. A nil/empty spans slice falls back to court 0.
+func (e *Engine) buildBracketFromLeaves(comp *state.Competition, leaves []string, regionSpans [][2]int) (*state.Bracket, error) {
 	// NextPow2 ensures we have a balanced tree with enough slots
 	pow2 := helper.NextPow2(len(leaves))
 	leafValues := make([]string, pow2)
@@ -135,12 +145,6 @@ func (e *Engine) buildBracketFromLeaves(comp *state.Competition, leaves []string
 
 	tree := helper.CreateBalancedTree(leafValues)
 	maxDepth := helper.CalculateDepth(tree)
-
-	numCourts := len(comp.Courts)
-	if numCourts == 0 {
-		numCourts = 1
-	}
-	numRound1Matches := pow2 / 2
 
 	var rounds [][]state.BracketMatch
 	// Round 1 is the first level of matches (just above leaves)
@@ -173,11 +177,17 @@ func (e *Engine) buildBracketFromLeaves(comp *state.Competition, leaves []string
 			// but marked as completed/skipped.
 
 			// Derive court from the first-round slot this match covers.
-			// Match (rIdx, i) is rooted above first-round slot i * 2^rIdx.
-			firstRoundSlot := i * (1 << rIdx)
-			courtIdx := helper.SubtreeCourtIndex(numRound1Matches, numCourts, firstRoundSlot)
+			// Match (rIdx, i) is rooted above LEAF slot i * 2^(rIdx+1); its
+			// region is the one owning that leaf. Matches above every region
+			// root (the half-finals and the final) take the leftmost region's
+			// court, which is what puts the final on shiaijo A by default.
+			leafSlot := i * (1 << (rIdx + 1))
+			courtIdx := helper.CourtForLeafSlot(regionSpans, leafSlot)
 			court := ""
 			if len(comp.Courts) > 0 {
+				if courtIdx >= len(comp.Courts) {
+					courtIdx = len(comp.Courts) - 1
+				}
 				court = comp.Courts[courtIdx]
 			}
 
@@ -317,7 +327,7 @@ func (e *Engine) buildBracketFromLeaves(comp *state.Competition, leaves []string
 // a field called "placeholder" would both mislead and double the size of every
 // bracket.json for no reader. Sniffing the leaves rather than taking a flag keeps
 // the single-signature builder its three call sites already share; a leaf array
-// either came from helper.GenerateFinals or it did not.
+// either came from the pool-fed draw or it did not.
 //
 // It is NOT a general "original sides" snapshot: it is written once at draw and
 // never updated, which is precisely what makes it a stable resolution key.

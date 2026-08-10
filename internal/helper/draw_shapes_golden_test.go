@@ -12,15 +12,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// This file freezes the CURRENT pool-to-knockout draw behaviour (bc-draw
-// Phase 1) into testdata/draw_shapes.json.
+// This file captures the pool-to-knockout draw's shape into
+// testdata/draw_shapes.json (bc-draw).
 //
-// IT PINS DEFECTS ON PURPOSE. Several captured values violate the rules the
-// draw is meant to follow (see the per-field comments on drawShapeCase and the
-// `_comment` block written into the golden file). Do NOT "fix" a value here:
-// the golden is the diff instrument for the later phases, so a behaviour-
-// preserving refactor must show a ZERO diff against it and the algorithm
-// change that follows must show a reviewable one.
+// It is the diff instrument for the draw. It used to pin DEFECTS on purpose,
+// which is why the golden file's `_comment` block still names them: reading the
+// two revisions side by side is how the rewrite is reviewed. What it records
+// now is the shipped behaviour, so a diff here means the draw moved and the
+// reason has to be stated. Do NOT hand-edit a value.
 //
 // Regeneration (same convention as the file itself documents):
 //
@@ -37,8 +36,8 @@ const drawGoldenPoolSize = 4
 // drawGoldenByeMarker is what a round-1 pairing prints for an empty leaf.
 const drawGoldenByeMarker = "(bye)"
 
-// The sweep required by bc-draw Phase 1. Nothing is skipped: a combination that
-// errors records the error string as the case's value.
+// The sweep required by bc-draw. Nothing is skipped: a combination that errors
+// records the error string as the case's value.
 var (
 	drawSweepPoolWinners = []int{1, 2, 3, 4}
 	drawSweepPoolCounts  = []int{2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}
@@ -70,79 +69,85 @@ type drawShapeCase struct {
 
 	// RosterSize / PoolNames / PoolSizes describe the pools the draw is built
 	// from. Sizes are deliberately mixed (see drawGoldenRosterSize): R6's
-	// "oversized pool" bye criterion keys on them. Today they feed NOTHING -
-	// the draw is derived from pool NAMES alone - so a size change must not
-	// move any other field in this file.
+	// "oversized pool" bye criterion keys on them, so a size change here CAN
+	// move a bye (it could not before, when the draw was derived from pool
+	// names alone).
 	RosterSize int      `json:"rosterSize"`
 	PoolNames  []string `json:"poolNames"`
 	PoolSizes  []int    `json:"poolSizes"`
 
-	// PoolToCourt is AssignPoolsToCourts' output: pool index -> court index.
-	// Contiguous blocks, which is why GenerateFinals' adjacent-pool pairing
-	// puts both sides of a round-1 match on the SAME shiaijo.
+	// DrawCourts is the shiaijo count the draw actually used. It is the
+	// requested count clamped by EffectiveDrawCourts, which never allocates
+	// more courts than pools (a court with no pools would own an empty region)
+	// and steps back down to an even count when that clamp lands on an odd one.
+	DrawCourts int `json:"drawCourts"`
+
+	// PoolToCourt is AssignPoolsToCourts' output over DrawCourts: pool index ->
+	// court index. Contiguous blocks - this IS the R3 allocation, and each
+	// block's pools own exactly one region of the bracket.
 	PoolToCourt []int `json:"poolToCourt"`
 
 	NumEntrants int `json:"numEntrants"`
 
-	// Leaves is the leaf array after
-	// GenerateFinals -> CreateBalancedTree -> ApplyPoolAdjustments -> TreeToLeafArray
-	// (the engine's draw pipeline). "" is a structural bye slot.
+	// Leaves is TreeToLeafArray over the court-first draw's root: the pow2 slot
+	// array the engine's bracket is built from. "" is a structural bye slot.
 	Leaves []string `json:"leaves"`
 
 	// Round1 pairs Leaves[2i] against Leaves[2i+1]; byes print as
 	// drawGoldenByeMarker so they are never silently absent from the diff.
 	Round1 []string `json:"round1"`
 
-	// Byes are the placeholders that receive a bye: the non-empty side of a
-	// round-1 pair whose other side is empty, in leaf order.
-	//
-	// DEFECT PINNED: at 3+ qualifiers per pool these are frequently 2nd and
-	// 3rd places while pool WINNERS play a round-1 match, which R6 forbids
-	// (byes are meant to go to a region's home 1st places, seeded first). See
-	// TestTreeAdjustmentByeAllocation for the named per-pool-count assertion.
+	// Byes are the placeholders that receive a NAMED round-1 bye: the non-empty
+	// side of a round-1 pair whose other side is empty, in leaf order. Under D4
+	// a region of q occupants grants exactly q mod 2 of them, to its
+	// highest-precedence occupant under R6 (seeded pools' winners, then
+	// oversized pools' winners, then remaining winners, then crossed-in ranks).
 	Byes []string `json:"byes"`
 
-	// NumPages is TreePageLayout(numEntrants, courts, false) - always a power
-	// of two. NumPagesRendered is len(SubdivideTree(tree, NumPages)), what the
-	// workbook actually gets.
-	//
-	// DEFECT PINNED: the two disagree whenever the tree is shallower than the
-	// requested page count, because SubdivideTree cannot split a tree it has
-	// run out of levels for and falls back to appending the WHOLE TREE as an
-	// extra page.
+	// NumPages is TreePageLayout(regions, false) = DrawCourts x {1,2,4}.
+	// NumPagesRendered is len(SubdivideRegions(...)), what the workbook
+	// actually gets. R8 makes them equal in every case; a case where they
+	// diverge is a bug, not a recorded quirk.
 	NumPages         int `json:"numPages"`
 	NumPagesRendered int `json:"numPagesRendered"`
 
 	Pages []drawShapePage `json:"pages"`
 
-	// PageCourtMismatchCount is the number of pages whose roster overlay
-	// claims a different pool set than the page's bracket actually contains.
-	// A scalar so the defect's scale is visible without reading the detail.
+	// PageCourtMismatchCount is the number of pages whose roster overlay or
+	// title disagrees with the bracket printed on them. R3/R8 make this ZERO in
+	// every case; a non-zero value is a regression, not a pinned defect.
 	PageCourtMismatchCount int `json:"pageCourtMismatchCount"`
 
 	// PageCourtMismatch details ONLY the mismatching pages (every page's
 	// claims and contents are in Pages regardless).
 	//
-	// DEFECT PINNED - this is the single most important field in the file.
-	// Each tree page is titled "Shiaijo <label>" (SubtreeCourtIndex) and gets
-	// a roster overlay for PoolBoundsForSubtree's pool slice, but the bracket
-	// printed on it comes from SubdivideTree, which splits the draw by tree
-	// position. Because a court's qualifiers are scattered across both halves
-	// of the draw, the title and the roster describe one shiaijo while the
-	// bracket shows another's competitors. Violates R3/R8.
+	// Two things count as a mismatch, and crossing is deliberately NOT one of
+	// them: a page legitimately prints the partner court's runners-up, because
+	// that is what R4b routes there.
+	//
+	//  1. claimedButAbsent - the page overlays a pool's roster but holds no
+	//     qualifier of that pool. This was the old draw's headline defect: a
+	//     page titled "Shiaijo A" overlaying pools A and B while its bracket
+	//     printed Pool C-1st and Pool D-2nd.
+	//  2. foreignHomeWinners - a pool WINNER printed on a shiaijo other than the
+	//     one its pool ran on, which R4a forbids outright.
 	PageCourtMismatch []drawPageMismatch `json:"pageCourtMismatch"`
 }
 
 type drawShapePage struct {
 	Page       int    `json:"page"`
 	CourtLabel string `json:"courtLabel"`
-	// PoolStart/PoolEnd are PoolBoundsForSubtree's [start, end) into PoolNames.
+	// PoolStart/PoolEnd are PoolBoundsForSubtree's [start, end) into PoolNames:
+	// the whole pool block of the page's shiaijo.
 	PoolStart int `json:"poolStart"`
 	PoolEnd   int `json:"poolEnd"`
-	// ClaimedPools is the roster overlay printed on the page (PoolNames[start:end]).
+	// ClaimedPools is the roster overlay actually printed on the page, i.e. that
+	// block narrowed by PageRosterPools to the pools the page prints.
 	ClaimedPools []string `json:"claimedPools"`
 	// PresentPools is the pools whose qualifiers actually appear in this
-	// page's leaves, sorted and de-duplicated.
+	// page's leaves, sorted and de-duplicated. It is normally a SUPERSET of
+	// ClaimedPools: the page's own pools plus the partner court's pools whose
+	// runners-up crossed in under R4b.
 	PresentPools []string `json:"presentPools"`
 	LeafCount    int      `json:"leafCount"`
 }
@@ -156,10 +161,10 @@ type drawPageMismatch struct {
 	CourtLabel string `json:"courtLabel"`
 	// ClaimedButAbsent: overlaid on the page, no qualifier of theirs on it.
 	ClaimedButAbsent []string `json:"claimedButAbsent"`
-	// PresentButUnclaimed: competitors printed on a page titled with another
-	// shiaijo, i.e. the operator-visible half of the defect.
-	PresentButUnclaimed []string `json:"presentButUnclaimed"`
-	Summary             string   `json:"summary"`
+	// ForeignHomeWinners: pool winners printed on a shiaijo other than the one
+	// their pool ran on (R4a).
+	ForeignHomeWinners []string `json:"foreignHomeWinners"`
+	Summary            string   `json:"summary"`
 }
 
 // drawGoldenRosterSize returns the synthetic roster size that makes
@@ -255,25 +260,29 @@ func buildDrawShapeCase(numPools, poolWinners, courts int) drawShapeCase {
 		c.PoolSizes = append(c.PoolSizes, len(p.Players))
 	}
 
+	// The live draw pipeline, verbatim: engine/bracket.go
+	// generatePoolPreviewBracket runs exactly this one call. (So did
+	// ResolveQualifiedPools, until it stopped recomputing the placeholder
+	// template on every pool completion and started reading the labels the draw
+	// persisted on each match instead.)
+	draw := BuildKnockoutDraw(pools, poolWinners, courts)
+	if draw == nil {
+		return drawShapeCase{Error: "BuildKnockoutDraw returned no draw"}
+	}
+	c.Leaves = TreeToLeafArray(draw.Root)
+	c.NumEntrants = numPools * poolWinners
+	c.DrawCourts = draw.NumCourts()
+
 	// NOTE: the engine does NOT call ReorderPoolsForCourts (bc-draw Phase 2a),
 	// so the golden does not either. AssignPoolsToCourts therefore sees the
-	// raw pool order, which is what makes the court blocks contiguous.
-	assignments, err := AssignPoolsToCourts(numPools, courts)
+	// raw pool order, which is what makes the court blocks contiguous. It is
+	// read back with the draw's OWN court count, which is what the draw
+	// allocated against.
+	assignments, err := AssignPoolsToCourts(numPools, c.DrawCourts)
 	if err != nil {
 		return drawShapeCase{Error: "AssignPoolsToCourts: " + err.Error()}
 	}
 	c.PoolToCourt = assignments
-
-	// The live draw pipeline, verbatim: engine/bracket.go
-	// generatePoolPreviewBracket runs exactly these four calls. (So did
-	// ResolveQualifiedPools, until it stopped recomputing the placeholder
-	// template on every pool completion and started reading the labels the draw
-	// persisted on each match instead.)
-	finals := GenerateFinals(pools, poolWinners)
-	tree := CreateBalancedTree(finals)
-	ApplyPoolAdjustments(tree)
-	c.Leaves = TreeToLeafArray(tree)
-	c.NumEntrants = numPools * poolWinners
 
 	c.Round1 = []string{}
 	c.Byes = []string{}
@@ -295,23 +304,25 @@ func buildDrawShapeCase(numPools, poolWinners, courts int) drawShapeCase {
 		}
 	}
 
-	numPages, err := TreePageLayout(c.NumEntrants, courts, false)
-	if err != nil {
-		return drawShapeCase{Error: "TreePageLayout: " + err.Error()}
-	}
-	c.NumPages = numPages
+	c.NumPages = TreePageLayout(draw.Regions, false)
 
 	// RenderTreePages drives both court labelling and the roster overlay off
 	// len(subtrees), NOT off the requested page count, so the golden does too.
-	subtrees := SubdivideTree(tree, numPages)
+	// The two now always agree (R8), which is itself a recorded property.
+	subtrees := SubdivideRegions(draw.Regions, KnockoutPagesPerCourt(draw.Regions))
 	c.NumPagesRendered = len(subtrees)
 
 	c.Pages = []drawShapePage{}
 	c.PageCourtMismatch = []drawPageMismatch{}
 	for i, subtree := range subtrees {
-		label := CourtLabel(SubtreeCourtIndex(len(subtrees), courts, i))
-		start, end := PoolBoundsForSubtree(numPools, courts, len(subtrees), i)
-		claimed := append([]string{}, c.PoolNames[start:end]...)
+		label := CourtLabel(SubtreeCourtIndex(len(subtrees), c.DrawCourts, i))
+		start, end := PoolBoundsForSubtree(numPools, c.DrawCourts, len(subtrees), i)
+		// Exactly what RenderTreePages overlays: the page's shiaijo block,
+		// narrowed to the pools it actually prints a qualifier of.
+		claimed := []string{}
+		for _, p := range PageRosterPools(pools[start:end], subtree) {
+			claimed = append(claimed, p.PoolName)
+		}
 		pageLeaves := collectOrderedLeaves(subtree)
 		present := sortedUniquePoolNames(pageLeaves)
 
@@ -326,15 +337,26 @@ func buildDrawShapeCase(numPools, poolWinners, courts int) drawShapeCase {
 		})
 
 		absent := missingFrom(claimed, present)
-		unclaimed := missingFrom(present, claimed)
-		if len(absent) == 0 && len(unclaimed) == 0 {
+		// A pool WINNER on a page belonging to another shiaijo is an R4a
+		// violation; a crossed-in runner-up is not, so only rank 1 counts.
+		foreign := []string{}
+		for _, l := range pageLeaves {
+			if leafRank(l) != 1 {
+				continue
+			}
+			pi := slices.Index(c.PoolNames, leafPool(l))
+			if pi >= 0 && assignments[pi] != SubtreeCourtIndex(len(subtrees), c.DrawCourts, i) {
+				foreign = append(foreign, l)
+			}
+		}
+		if len(absent) == 0 && len(foreign) == 0 {
 			continue
 		}
 		c.PageCourtMismatch = append(c.PageCourtMismatch, drawPageMismatch{
-			Page:                i + 1,
-			CourtLabel:          label,
-			ClaimedButAbsent:    absent,
-			PresentButUnclaimed: unclaimed,
+			Page:               i + 1,
+			CourtLabel:         label,
+			ClaimedButAbsent:   absent,
+			ForeignHomeWinners: foreign,
 			Summary: fmt.Sprintf("page %d titled %q overlays %v but its bracket contains %v",
 				i+1, "Shiaijo "+label, claimed, present),
 		})
@@ -347,53 +369,58 @@ func buildDrawShapeCase(numPools, poolWinners, courts int) drawShapeCase {
 func buildDrawShapesGolden() drawShapesGolden {
 	g := drawShapesGolden{
 		Comment: []string{
-			"bc-draw Phase 1 characterization golden. Generated by",
-			"internal/helper/draw_shapes_golden_test.go; regenerate with:",
+			"bc-draw characterization golden for the pool-to-knockout draw.",
+			"Generated by internal/helper/draw_shapes_golden_test.go; regenerate:",
 			"",
 			"    UPDATE_GOLDEN=1 go test ./internal/helper/ -run TestDrawShapesGolden",
 			"",
-			"THIS FILE PINS BEHAVIOUR WE BELIEVE IS WRONG. It is the diff",
-			"instrument for the pool-to-knockout draw rewrite: the behaviour-",
-			"preserving refactor phase must produce a ZERO diff against it, and",
-			"the algorithm change after it must produce a reviewable one. Do not",
-			"hand-edit a value to make it look correct.",
+			"It is the diff instrument for the draw: any change to placement, byes",
+			"or pagination shows up here as a reviewable diff, and a change that",
+			"was not intended is a regression. Do not hand-edit a value.",
 			"",
 			"What each case captures, for one (pool count, qualifiers per pool,",
 			"shiaijo count) combination, from the live pipeline",
-			"GenerateFinals -> CreateBalancedTree -> ApplyPoolAdjustments ->",
-			"TreeToLeafArray plus TreePageLayout/SubdivideTree page geometry.",
-			"Pools come from helper.CreatePools over a synthetic roster with one",
-			"dojo per player, sized so every case mixes 4-player and 3-player",
-			"pools (see drawGoldenRosterSize).",
+			"BuildKnockoutDraw -> TreeToLeafArray plus the TreePageLayout /",
+			"SubdivideRegions page geometry. Pools come from helper.CreatePools",
+			"over a synthetic roster with one dojo per player, sized so every case",
+			"mixes 4-player and 3-player pools (see drawGoldenRosterSize).",
 			"",
-			"KNOWN DEFECTS PINNED HERE:",
+			"IT USED TO PIN FOUR DEFECTS. They are recorded here because the file",
+			"is read side by side with its predecessor:",
 			"",
-			"1. pageCourtMismatch - a tree page is titled \"Shiaijo X\" and gets",
-			"   the roster overlay for X's pools, but the bracket printed on it",
-			"   is whatever SubdivideTree's positional split handed over. With 4",
-			"   pools x 2 qualifiers x 2 courts, page 1 says Shiaijo A and",
-			"   overlays Pool A and Pool B while its bracket holds Pool C-1st and",
-			"   Pool D-2nd. Every court's qualifiers are scattered across both",
-			"   halves of the draw, so no page can honestly claim one shiaijo.",
+			"1. pageCourtMismatch - a tree page was titled \"Shiaijo X\" and got the",
+			"   roster overlay for X's pools, but the bracket printed on it was",
+			"   whatever the positional split handed over. With 4 pools x 2",
+			"   qualifiers x 2 shiaijo, page 1 said Shiaijo A and overlaid Pool A",
+			"   and Pool B while its bracket held Pool C-1st and Pool D-2nd. The",
+			"   draw is now built court-first, so a page IS one shiaijo's region",
+			"   (R3/R8) and this field is empty in every case.",
 			"",
-			"2. byes - at 3+ qualifiers per pool the bye repeatedly lands on a",
-			"   2nd or 3rd place while pool WINNERS play a round-1 match. The",
-			"   two-node local swap in treeAdjustment cannot see far enough to",
-			"   place a bye correctly once more than two ranks are in play.",
+			"2. byes - at 3+ qualifiers per pool a bye repeatedly landed on a 2nd or",
+			"   3rd place while pool WINNERS played a round-1 match. Byes are now",
+			"   allocated inside each region by R6 precedence: a seeded pool's",
+			"   winner, then an oversized pool's winner (D1), then the remaining",
+			"   home winners, and only then a crossed-in rank. A non-winner bye",
+			"   survives in exactly one shape - a 2-pool, 3-qualifier draw, where a",
+			"   region holds one home winner plus BOTH of the other pool's lower",
+			"   qualifiers and the bye has to move to keep them out of a round-1",
+			"   match against each other (R5 outranks R6).",
 			"",
-			"3. numPages vs numPagesRendered - TreePageLayout only ever returns a",
-			"   power of two, and SubdivideTree cannot honour a page count deeper",
-			"   than the tree: it appends the WHOLE TREE as a trailing page, so a",
-			"   small draw on 4 courts renders one page that duplicates the",
-			"   entire bracket.",
+			"3. numPages vs numPagesRendered - the page count was a power of two",
+			"   unrelated to the tree, and the splitter, out of levels, appended the",
+			"   WHOLE TREE as a trailing page that reprinted the whole bracket. The",
+			"   count is now shiaijo x {1,2,4} and the two always agree.",
 			"",
-			"4. round1 - poolToCourt shows contiguous court blocks and",
-			"   GenerateFinals pairs each pool with its ADJACENT pool, so at 2",
-			"   qualifiers both sides of a round-1 match are normally on the SAME",
-			"   shiaijo instead of crossing to a partner court.",
+			"4. round1 - contiguous court blocks plus adjacent-pool pairing meant",
+			"   both sides of a 2-qualifier round-1 match were normally on the SAME",
+			"   shiaijo. Every 2nd place now crosses to the partner court (R4b), so",
+			"   a round-1 match pairs a home winner against a crossed-in runner-up.",
+			"   Two crossed-in qualifiers of the same source court CAN still meet",
+			"   when a region is short of home winners; that is R4f (structure beats",
+			"   preference) and the reference draw does it too.",
 			"",
-			"Cases that cannot be built record `error` and nothing else; none do",
-			"today, and a case gaining an error is itself a reportable change.",
+			"Cases that cannot be built record `error` and nothing else; none do,",
+			"and a case gaining an error is itself a reportable change.",
 		},
 		Sweep: drawShapesSweep{
 			PoolWinners: drawSweepPoolWinners,

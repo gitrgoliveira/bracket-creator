@@ -230,7 +230,7 @@ func StandardSeeding(players []Player) []Player {
 // PoolSeeding reorders players for pool distribution so that top seeds land
 // in pools that are appropriately spread across the given number of courts.
 //
-// It assigns seeds to courts in a round-robin fashion and uses a per-court
+// It assigns each seed to a court by seedCourtOrder (D6) and uses a per-court
 // priority to ensure correct bracket placement (e.g., top and bottom of the
 // court's bracket) after the pools are deinterleaved by ReorderPoolsForCourts.
 func PoolSeeding(players []Player, numPools int, numCourts int) []Player {
@@ -295,8 +295,11 @@ func PoolSeeding(players []Player, numPools int, numCourts int) []Player {
 
 	// Assign seeded players based on court-aware priority order.
 	for i, p := range seeded {
-		// global pool rank (0 to numPools-1)
-		poolRank := i % numPools
+		// global pool rank (0 to numPools-1). Pool rank r lands on court
+		// r%numCourts (the deinterleave ReorderPoolsForCourts applies), so
+		// targeting a rank whose court is seedCourtOrder's is what puts the
+		// seed in D6's half and quarter.
+		poolRank := seedPoolRank(i, numPools, numCourts)
 		posInPool := i / numPools // which slot within the pool
 
 		placed := false
@@ -413,6 +416,60 @@ func generatePoolPriority(n int) []int {
 	}
 
 	return priority
+}
+
+// seedCourtOrder returns the court seed rank i+1 (0-based i) belongs on, per
+// D6: seeds 1 and 3 fall in one HALF of the draw and seeds 2 and 4 in the
+// other, each of the four in a distinct QUARTER.
+//
+// Courts [0, k) are the draw's first half and [k, 2k) its second (k =
+// numCourts/2), and within a half the first k/2 courts are one quarter and the
+// rest the other, which is exactly how the draw combines regions. So seeds
+// alternate halves by parity and step a quarter every two ranks:
+//
+//	4 courts: seed 1 -> A, seed 2 -> C, seed 3 -> B, seed 4 -> D
+//	2 courts: seeds 1 and 3 -> A, seeds 2 and 4 -> B (two seeded pools per court)
+//	1 court:  every seed on the one court; the quarters are inside its region
+//
+// This deliberately differs from the conventional bracket, which groups seed 4
+// with 1 and 3 with 2 and gives semifinals 1 v 4 and 2 v 3. The operator chose
+// 1 with 3 and 2 with 4, so the semifinals are 1 v 3 and 2 v 4 when the seeds
+// hold. It used to be a plain round robin over courts (seed 1 -> A, 2 -> B,
+// 3 -> C, 4 -> D), which put seeds 1 and 2 in the SAME half of a 4-court draw
+// and let them meet in a semifinal rather than the final.
+//
+// Ranks beyond the 4th, and any rank the court count cannot separate, fall back
+// to the round robin: there is no further structure to spread them over.
+func seedCourtOrder(i, numCourts int) int {
+	if numCourts < 2 || i >= 4 {
+		return i % numCourts
+	}
+	k := numCourts / 2
+	// Step of one QUARTER inside a half. With a single court per half the two
+	// quarters live inside that court's own region, so there is nowhere to step
+	// to and seeds 1 and 3 share the court (D6's two-court case).
+	quarter := k / 2
+	court := (i%2)*k + (i/2)*quarter
+	if court >= numCourts {
+		court = numCourts - 1
+	}
+	return court
+}
+
+// seedPoolRank maps a seed to the pool rank whose court is seedCourtOrder's,
+// keeping seeds that share a court on different pools of it. Falls back to the
+// plain round robin when the derived rank is out of range (fewer pools than
+// courts), and the placement loop's own offset search then resolves any
+// collision.
+func seedPoolRank(i, numPools, numCourts int) int {
+	if numCourts < 2 {
+		return i % numPools
+	}
+	rank := (i/numCourts)*numCourts + seedCourtOrder(i, numCourts)
+	if rank >= numPools {
+		return i % numPools
+	}
+	return rank
 }
 
 // ApplySeeds assigns seeds to the helper players, handling swaps if needed

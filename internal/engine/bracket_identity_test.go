@@ -107,10 +107,10 @@ func enginePlayoffsLeaves(t *testing.T, players []domain.Player) []string {
 }
 
 func excelMixedLeaves(pools []helper.Pool, poolWinners int) []string {
-	finals := helper.GenerateFinals(pools, poolWinners)
-	tree := helper.CreateBalancedTree(finals)
-	helper.ApplyPoolAdjustments(tree)
-	return helper.TreeToLeafArray(tree)
+	// One shiaijo, matching the single-court competition engineMixedLeaves
+	// builds below: the draw is court-aware, so the two sides of an identity
+	// check have to agree on the court count as well as the pools.
+	return helper.TreeToLeafArray(helper.BuildKnockoutDraw(pools, poolWinners, 1).Root)
 }
 
 // engineMixedLeaves runs the REAL engine path (StartCompetition on a mixed

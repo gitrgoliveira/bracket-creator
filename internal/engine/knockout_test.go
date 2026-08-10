@@ -31,15 +31,13 @@ func saveMixedScaffold(t *testing.T, store *state.Store, compID string, pools []
 	require.NoError(t, store.SavePools(compID, pools))
 
 	// Build the preview bracket the same way the engine does so placeholder
-	// labels match exactly (GenerateFinals → CreateBalancedTree →
-	// ApplyPoolAdjustments → TreeToLeafArray → buildBracketFromLeaves).
-	finals := helper.GenerateFinals(pools, poolWinners)
-	tree := helper.CreateBalancedTree(finals)
-	helper.ApplyPoolAdjustments(tree)
-	leaves := helper.TreeToLeafArray(tree)
+	// labels match exactly (BuildKnockoutDraw → TreeToLeafArray →
+	// buildBracketFromLeaves).
+	draw := helper.BuildKnockoutDraw(pools, poolWinners, 1)
+	leaves := helper.TreeToLeafArray(draw.Root)
 	eng := New(store)
 	comp, _ := store.LoadCompetition(compID)
-	bracket, err := eng.buildBracketFromLeaves(comp, leaves)
+	bracket, err := eng.buildBracketFromLeaves(comp, leaves, draw.RegionSpans())
 	require.NoError(t, err)
 	bracket.Preview = true
 	require.NoError(t, store.SaveBracket(compID, bracket))
@@ -632,14 +630,15 @@ func round0Slots(b *state.Bracket) []string {
 // through ResolveQualifiedPools) produces it with real competitor names, not
 // just the placeholder pipeline.
 //
-// CURRENT BEHAVIOUR, TWO DEFECTS PINNED:
-//   - Pool C's WINNER (C1) plays a round-1 match while the winners of pools A
-//     and B bye. bc-draw R6 wants byes distributed by seed and pool size, not
-//     by whichever leaf the balanced-tree split happened to leave odd.
-//   - A2 vs C2 is a runner-up-versus-runner-up round-1 match, so the
-//     "every round-1 match is a 1st against a 2nd" property does not hold at
-//     3 pools (it holds only at power-of-two pool counts; see
-//     helper.TestBracketCrossPoolMatching).
+// The competition runs on ONE shiaijo, so R4(e) splits its three pools into
+// half-blocks of 2 (A, B) and 1 (C) that act as partner courts. Block 1 holds
+// A1, B1 and C2 (C's runner-up crosses in); block 2 holds C1, A2 and B2. Each
+// block has three occupants, so each grants exactly one named bye (D4), and R6
+// gives it to a home winner: A1 in the first block, C1 in the second.
+//
+// It used to pin two defects here: pool C's WINNER played a round-1 match while
+// A and B byed (byes fell wherever the balanced split left an odd leaf), and
+// A2 v C2 was a runner-up-versus-runner-up round-1 match. Both are gone.
 func TestResolveQualifiedPools_ThreePoolsTwoWinners_SlotMapping(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "unbalanced-3x2"
@@ -660,16 +659,17 @@ func TestResolveQualifiedPools_ThreePoolsTwoWinners_SlotMapping(t *testing.T) {
 
 	// Slot-for-slot placement of the first round. "" is a bye.
 	assert.Equal(t, []string{
-		"A1|",   // Pool A winner byes
-		"C1|B2", // Pool C WINNER must play, against Pool B's runner-up
-		"B1|",   // Pool B winner byes
-		"A2|C2", // runner-up vs runner-up
+		"A1|",   // Pool A's winner takes the first block's bye (R6-3, pool order)
+		"B1|C2", // home winner against the runner-up crossed in from block 2
+		"C1|",   // Pool C's winner takes the second block's bye
+		"A2|B2", // block 2 is short of home winners, so two crossed-in
+		//          runners-up meet (R4f: structure beats preference)
 	}, round0Slots(b), "3-pool x 2-qualifier slot mapping changed")
 
 	// The two byes are auto-completed with the bye holder as winner.
 	assert.Equal(t, "A1", b.Rounds[0][0].Winner)
 	assert.Equal(t, state.MatchStatusCompleted, b.Rounds[0][0].Status)
-	assert.Equal(t, "B1", b.Rounds[0][2].Winner)
+	assert.Equal(t, "C1", b.Rounds[0][2].Winner)
 	assert.Equal(t, state.MatchStatusCompleted, b.Rounds[0][2].Status)
 
 	// The two real round-1 matches are still waiting to be played.
@@ -677,8 +677,9 @@ func TestResolveQualifiedPools_ThreePoolsTwoWinners_SlotMapping(t *testing.T) {
 	assert.Equal(t, state.MatchStatusScheduled, b.Rounds[0][3].Status)
 
 	// Same-pool qualifiers are kept apart until the final: A1/A2, B1/B2 and
-	// C1/C2 each sit in opposite halves of the 8-slot draw. This property DOES
-	// hold today and the rewrite (bc-draw R5) must preserve it.
+	// C1/C2 each sit in opposite halves of the 8-slot draw. R5 makes this a
+	// guarantee rather than a coincidence - every runner-up crosses to the
+	// partner block, which is half the bracket away.
 	slots := round0Slots(b)
 	topHalf := slots[0] + "|" + slots[1]
 	bottomHalf := slots[2] + "|" + slots[3]
@@ -697,13 +698,16 @@ func TestResolveQualifiedPools_ThreePoolsTwoWinners_SlotMapping(t *testing.T) {
 // real names. It exists because the 3-pool case could be read as "the earliest
 // pools bye"; here they do not.
 //
-// CURRENT BEHAVIOUR, DEFECTS PINNED:
-//   - the byes go to pools C and D, chosen by nothing but where the balanced
-//     split left an odd leaf (bc-draw R6 replaces this with seed/pool-size
-//     precedence);
-//   - the draw contains two round-1 matches with BOTH sides empty, an artefact
-//     of padding 10 finishers into 16 slots. They are auto-completed with no
-//     winner, and the round-2 match above each is effectively another bye.
+// One shiaijo again, so R4(e) splits the five pools into half-blocks of 3
+// (A, B, C) and 2 (D, E). Block 1 holds A1, B1, C1 plus D2 and E2; block 2 holds
+// D1, E1 plus A2, B2 and C2. Five occupants each, so each block grants exactly
+// one named bye (D4) and R6 gives it to a home winner: A1 and D1, the first pool
+// of each block in pool order (no seeds, equal pool sizes).
+//
+// It used to pin two defects: the byes went to pools C and D purely by tree
+// position, and the padded draw carried two round-1 matches with BOTH sides
+// empty. Both are gone - the greedy region layout pairs the empties into
+// phantom matches that are dropped, so every round-1 slot printed here is real.
 func TestResolveQualifiedPools_FivePoolsTwoWinners_ByePools(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "unbalanced-5x2"
@@ -722,18 +726,18 @@ func TestResolveQualifiedPools_FivePoolsTwoWinners_ByePools(t *testing.T) {
 	require.False(t, bracketHasPoolPlaceholders(b))
 
 	assert.Equal(t, []string{
-		"A1|B2",
-		"|", // both sides bye: padding artefact, no match is ever played here
-		"C1|",
-		"E1|D2",
-		"B1|A2",
-		"|", // both sides bye
-		"D1|",
-		"C2|E2",
+		"A1|",   // block 1's bye, to its first home winner (R6-3)
+		"B1|D2", // home winner against a runner-up crossed in from block 2
+		"C1|E2", //
+		"|",     // phantom: both slots empty, dropped downstream
+		"D1|",   // block 2's bye
+		"E1|A2", //
+		"B2|C2", // block 2 is short of home winners (R4f)
+		"|",     // phantom
 	}, round0Slots(b), "5-pool x 2-qualifier slot mapping changed")
 
-	// Only pools C and D get a bye - not the first two pools, and nothing about
-	// pool size or seeding was consulted.
+	// The byes go to the two blocks' first home winners under R6 precedence,
+	// not to whichever leaf the split left odd.
 	var byeHolders []string
 	for _, m := range b.Rounds[0] {
 		switch {
@@ -743,11 +747,11 @@ func TestResolveQualifiedPools_FivePoolsTwoWinners_ByePools(t *testing.T) {
 			byeHolders = append(byeHolders, m.SideB)
 		}
 	}
-	assert.Equal(t, []string{"C1", "D1"}, byeHolders,
-		"byes land on the pool C and pool D winners purely by tree position")
+	assert.Equal(t, []string{"A1", "D1"}, byeHolders,
+		"each half-block byes its highest-precedence home winner (R6)")
 
 	// The empty round-1 matches are completed with no winner at all.
-	for _, idx := range []int{1, 5} {
+	for _, idx := range []int{3, 7} {
 		m := b.Rounds[0][idx]
 		assert.Equal(t, state.MatchStatusCompleted, m.Status, "empty slot %d must be auto-completed", idx)
 		assert.Empty(t, m.Winner, "empty slot %d has no winner to record", idx)

@@ -723,7 +723,11 @@ func TestSubtreeCourtIndex(t *testing.T) {
 		{"two courts second half", 4, 2, 2, 1},
 		{"two courts last page", 4, 2, 3, 1},
 		{"more courts than pages", 2, 4, 1, 1},
-		{"overflow pages clamp to last court", 5, 2, 4, 1},
+		// R8 makes numSubtrees an exact multiple of numCourts, so the old
+		// overflow clamp (which folded leftover pages onto the last court and
+		// let a 3-court draw label a duplicated fourth page "Shiaijo C") is
+		// unreachable. A non-multiple now simply divides through.
+		{"non-multiple divides through", 5, 2, 4, 2},
 		// Regression: SubtreeCourtIndex divided by numCourts unguarded, so a
 		// zero or negative court count (a caller that skipped the clamp every
 		// current call site applies) panicked with a divide by zero. It now

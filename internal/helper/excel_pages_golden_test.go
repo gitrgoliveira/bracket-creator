@@ -17,20 +17,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// This file freezes the CURRENT Excel/CLI knockout PAGE behaviour (bc-draw
-// Phase 3) into testdata/excel_pages.json. It is the sibling of
-// draw_shapes_golden_test.go, which covers the ENGINE draw pipeline
-// (GenerateFinals -> CreateBalancedTree -> ApplyPoolAdjustments ->
-// TreeToLeafArray) and stops at the tree. Nothing pinned the other path: what a
-// tree PAGE actually prints after RenderKnockoutPages -> SubdivideTree ->
-// PrintLeafNodes had no characterization at all, so the two paths could (and
-// did) diverge unobserved.
+// This file captures the Excel/CLI knockout PAGE behaviour into
+// testdata/excel_pages.json (bc-draw). It is the sibling of
+// draw_shapes_golden_test.go, which covers the ENGINE draw pipeline and stops
+// at the tree. Nothing pinned the other path: what a tree PAGE actually prints
+// had no characterization at all, so the two paths could (and did) diverge
+// unobserved. They now share helper.BuildKnockoutDraw, so a shape change must
+// appear in BOTH files.
 //
-// IT PINS DEFECTS ON PURPOSE, the same ones the engine golden pins plus the
-// page-scoped placement the Excel path used to apply. Do NOT "fix" a value
-// here: the golden is the diff instrument for the later phases, so a
-// behaviour-preserving refactor must show a ZERO diff against it and the
-// algorithm change that follows must show a reviewable one.
+// It used to pin DEFECTS on purpose, which is why the golden file's `_comment`
+// block still names them: reading the two revisions side by side is how the
+// rewrite is reviewed. What it records now is the shipped behaviour. Do NOT
+// hand-edit a value.
 //
 // Everything recorded is READ BACK OUT OF A RENDERED WORKBOOK, not recomputed
 // from the tree: the generator drives the real helper.RenderKnockoutPages (the
@@ -47,7 +45,7 @@ import (
 // Regeneration is deterministic: no shuffling, no map iteration and no clock
 // reaches the output, so two consecutive runs produce a byte-identical file.
 
-// The sweep required by bc-draw Phase 3. It is a superset of the engine
+// The sweep required by bc-draw. It is a superset of the engine
 // golden's (drawSweepPoolCounts starts at 2): pool count 1 is added because the
 // degenerate cases are precisely where a tree PAGE ROOT can be a leaf, which is
 // the one shape whose placement a page-scoped pass cannot reach.
@@ -82,26 +80,26 @@ type excelPageCase struct {
 
 	NumEntrants int `json:"numEntrants"`
 
+	// DrawCourts is the shiaijo count the draw actually used, i.e. the
+	// requested count clamped by EffectiveDrawCourts. Every page count below is
+	// a multiple of it.
+	DrawCourts int `json:"drawCourts"`
+
 	// PagesRequested is RenderKnockoutPages' returned page count
-	// (TreePageLayout). PagesRendered is how many "Tree N" sheets the workbook
-	// actually carries.
-	//
-	// DEFECT PINNED: the two disagree whenever the tree is shallower than the
-	// requested page count, because SubdivideTree cannot split a tree it has
-	// run out of levels for and falls back to appending the WHOLE TREE as an
-	// extra page - which then prints the same bracket twice.
+	// (DrawCourts x {1,2,4}). PagesRendered is how many "Tree N" sheets the
+	// workbook actually carries. R8 makes them equal in every case; a case
+	// where they diverge is a bug, not a recorded quirk.
 	PagesRequested int `json:"pagesRequested"`
 	PagesRendered  int `json:"pagesRendered"`
 
 	Pages []excelPageView `json:"pages"`
 
-	// TreeLeaves is the whole tree's leaf order AFTER rendering, left to right.
-	// Rendering mutates the tree today (PrintLeafNodes applies the pool
-	// placement pass per page subtree as a side effect of drawing it), so this
-	// is the state BuildEliminationMatchRounds and FillInMatches went on to
-	// traverse - the tree the Elimination Matches sheet describes. It is the
-	// field that shows a cross-page placement move, which a per-page leaf list
-	// alone can hide.
+	// TreeLeaves is the whole draw's leaf order, left to right: the tree
+	// BuildEliminationMatchRounds and FillInMatches traverse, and therefore the
+	// one the Elimination Matches sheet describes. Rendering no longer mutates
+	// it (placement happens in BuildKnockoutDraw), so this is also the order the
+	// pages were cut from - it is the field that shows a cross-page placement
+	// move, which a per-page leaf list alone can hide.
 	TreeLeaves []string `json:"treeLeaves"`
 }
 
@@ -119,7 +117,7 @@ type excelPageView struct {
 	Leaves []string `json:"leaves"`
 }
 
-// excelPageLeafLabel matches the entrant placeholders GenerateFinals emits
+// excelPageLeafLabel matches the entrant placeholders the draw emits
 // ("Pool A-1st"). Scanning for them is what separates a leaf label from the
 // junction match NUMBERS FillInMatches writes into the same odd columns.
 var excelPageLeafLabel = regexp.MustCompile(`^Pool [A-Z]+-\d+(?:st|nd|rd|th)$`)
@@ -228,23 +226,26 @@ func buildExcelPageCase(t *testing.T, numPools, poolWinners, courts int) excelPa
 
 	poolCoords, playerCoords := AddPoolDataToSheet(f, pools, false, "")
 
-	finals := GenerateFinals(pools, poolWinners)
-	tree := CreateBalancedTree(finals)
+	draw := BuildKnockoutDraw(pools, poolWinners, courts)
+	if draw == nil {
+		return excelPageCase{Error: "BuildKnockoutDraw returned no draw"}
+	}
 
 	// The live Excel funnel, verbatim: every one of the four workbook
 	// generators calls exactly this, with matchWinners nil here so the leaf
-	// cells hold literal labels instead of CONCATENATE formulas (placement is
+	// cells hold literal labels instead of CONCATENATE formulas (the draw is
 	// independent of the pool-match cross-references).
-	_, numPages, err := RenderKnockoutPages(f, tree, len(finals), courts, false, pools, poolCoords, playerCoords, nil)
+	_, numPages, err := RenderKnockoutPages(f, draw, false, pools, poolCoords, playerCoords, nil)
 	if err != nil {
 		return excelPageCase{Error: "RenderKnockoutPages: " + err.Error()}
 	}
 
 	c := excelPageCase{
 		NumEntrants:    numPools * poolWinners,
+		DrawCourts:     draw.NumCourts(),
 		PagesRequested: numPages,
 		Pages:          []excelPageView{},
-		TreeLeaves:     collectOrderedLeaves(tree),
+		TreeLeaves:     TreeLeafLabels(draw.Root),
 	}
 	for i, sheet := range treePageSheets(f) {
 		c.Pages = append(c.Pages, excelPageView{
@@ -262,48 +263,49 @@ func buildExcelPagesGolden(t *testing.T) excelPagesGolden {
 	t.Helper()
 	g := excelPagesGolden{
 		Comment: []string{
-			"bc-draw Phase 3 characterization golden. Generated by",
-			"internal/helper/excel_pages_golden_test.go; regenerate with:",
+			"bc-draw characterization golden for the RENDERED knockout pages.",
+			"Generated by internal/helper/excel_pages_golden_test.go; regenerate:",
 			"",
 			"    UPDATE_GOLDEN=1 go test ./internal/helper/ -run TestExcelPagesGolden",
 			"",
-			"THIS FILE PINS BEHAVIOUR WE BELIEVE IS WRONG. It is the Excel/CLI half",
-			"of the pool-to-knockout draw's diff instrument; testdata/draw_shapes.json",
-			"is the engine half. A behaviour-preserving refactor must produce a ZERO",
-			"diff against both, and the algorithm change after it must produce a",
-			"reviewable one. Do not hand-edit a value to make it look correct.",
+			"It is the Excel/CLI half of the draw's diff instrument;",
+			"testdata/draw_shapes.json is the engine half. Both must show the same",
+			"change for the same reason, because both paths now build the draw with",
+			"the SAME helper.BuildKnockoutDraw. Do not hand-edit a value.",
 			"",
 			"Each case renders one (pool count, qualifiers per pool, shiaijo count)",
-			"combination through the real funnel - GenerateFinals ->",
-			"CreateBalancedTree -> RenderKnockoutPages (TreePageLayout ->",
-			"SubdivideTree -> RenderTreePages -> PrintLeafNodes -> FillInMatches) -",
-			"and READS THE WORKBOOK BACK: every leaf recorded here was scanned out",
-			"of a rendered 'Tree N' sheet and every court label was parsed out of",
-			"that sheet's real title formula. Pools come from helper.CreatePools",
-			"over the same synthetic roster the engine golden uses.",
+			"combination through the real funnel - BuildKnockoutDraw ->",
+			"RenderKnockoutPages (KnockoutPagesPerCourt -> SubdivideRegions ->",
+			"RenderTreePages -> PrintLeafNodes -> FillInMatches) - and READS THE",
+			"WORKBOOK BACK: every leaf recorded here was scanned out of a rendered",
+			"'Tree N' sheet and every court label was parsed out of that sheet's",
+			"real title formula. Pools come from helper.CreatePools over the same",
+			"synthetic roster the engine golden uses.",
 			"",
-			"KNOWN DEFECTS PINNED HERE:",
+			"IT USED TO PIN THREE DEFECTS, all now closed:",
 			"",
-			"1. pagesRequested vs pagesRendered - TreePageLayout only ever returns a",
-			"   power of two, and SubdivideTree cannot honour a page count deeper",
-			"   than the tree: it appends the WHOLE TREE as a trailing page, so a",
-			"   small draw on 4 shiaijo renders a page that reprints the entire",
-			"   bracket under another shiaijo's title.",
+			"1. pagesRequested vs pagesRendered - the page count was a power of two",
+			"   unrelated to the tree, and the splitter, out of levels, appended the",
+			"   WHOLE TREE as a trailing page that reprinted the entire bracket",
+			"   under another shiaijo's title. The count is now shiaijo x {1,2,4}",
+			"   and the two always agree.",
 			"",
-			"2. courtLabel vs leaves - a page titled 'Shiaijo X' prints whatever",
-			"   SubdivideTree's positional split handed it. Because a court's",
-			"   qualifiers are scattered across both halves of the draw, the title",
-			"   routinely names one shiaijo while the bracket shows another's",
-			"   competitors (the engine golden's pageCourtMismatch, seen here from",
-			"   the printed page rather than from the tree).",
+			"2. courtLabel vs leaves - a page titled 'Shiaijo X' printed whatever",
+			"   the positional split handed it, so the title routinely named one",
+			"   shiaijo while the bracket showed another's competitors. A page is",
+			"   now a genuine subtree of exactly one court's region (R3/R8): it",
+			"   holds that court's home winners plus the runners-up that crossed in",
+			"   from its partner court, and nothing else.",
 			"",
-			"3. Degenerate pages - when the requested page count exceeds the tree's",
-			"   depth, a page ROOT can be a single leaf. Such a page prints one name",
-			"   and no bracket at all, and the match that name is due to play is on",
-			"   no page.",
+			"3. Degenerate pages - a page ROOT could be a single leaf when the",
+			"   requested page count exceeded the tree's depth, printing one name",
+			"   and no bracket while the match that name was due to play appeared on",
+			"   no page. Pages are cut from regions, so a page is only a lone leaf",
+			"   when that shiaijo genuinely has one qualifier (the reference draw's",
+			"   one-pool court does exactly that).",
 			"",
-			"Cases that cannot be rendered record `error` and nothing else; none do",
-			"today, and a case gaining an error is itself a reportable change.",
+			"Cases that cannot be rendered record `error` and nothing else; none do,",
+			"and a case gaining an error is itself a reportable change.",
 		},
 		Sweep: excelPagesSweep{
 			PoolWinners: excelPagesSweepPoolWinners,
@@ -458,7 +460,7 @@ func TestExcelPagesGoldenReadbackIsComplete(t *testing.T) {
 }
 
 // TestExcelPageLeafLabelPattern pins the scanner's discrimination directly: it
-// must accept the entrant placeholders GenerateFinals emits and reject the
+// must accept the entrant placeholders the draw emits and reject the
 // junction match numbers FillInMatches writes into the same columns.
 func TestExcelPageLeafLabelPattern(t *testing.T) {
 	for _, v := range []string{"Pool A-1st", "Pool B-2nd", "Pool C-3rd", "Pool D-4th", "Pool AA-1st"} {

@@ -122,9 +122,12 @@ func applyTiebreakSort(sorted []state.PlayerStanding, matches []state.MatchResul
 // outcome and therefore warrants a supplementary bout.
 //
 // A pool seeds its knockout from the top EffectivePoolWinners of each pool, and
-// 1st-place finishers get byes (bracket.go ApplyPoolAdjustments), so every
-// position in [1..poolWinners] is a distinct, consequential seed. A tied group
-// whose BEST position is already past the cutoff (positions[0]+1 > poolWinners)
+// finishing position decides where in the bracket a qualifier lands: the 1st
+// stays in its own shiaijo's region while lower finishers cross to other courts
+// (R4), and a region's structural bye goes to its highest-precedence occupant,
+// which is a HOME 1st whenever the region has one (R6, helper.BuildKnockoutDraw).
+// So every position in [1..poolWinners] is a distinct, consequential seed. A tied
+// group whose BEST position is already past the cutoff (positions[0]+1 > poolWinners)
 // sits entirely among eliminated ranks: those teams share that rank and no
 // supplementary ippon-shobu / daihyosen is played. This mirrors the rule that a
 // supplementary bout is held only "to determine their relative ranking" where

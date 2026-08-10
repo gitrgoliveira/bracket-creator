@@ -55,12 +55,17 @@ func SetTreePageLayout(f *excelize.File, sheetName string, depth, lastRow int) {
 // workbook (export) - the loop used to be copied at each call site, and a
 // geometry fix in one had to be replicated by hand into the others.
 //
-// Passing pools drives the per-page roster overlay. It no longer drives any
-// reordering: the pool-winner placement pass (winners on top, byes to the
-// seeded side) is a whole-tree pass RenderKnockoutPages runs BEFORE the tree is
-// split into these subtrees, so by the time a page is drawn its leaves are
-// already final. Callers with no pool phase (create-playoffs) pass nil and get
-// neither the overlay nor the placement pass.
+// Passing pools drives the per-page roster overlay. It drives no reordering:
+// placement is decided when the draw is BUILT (helper.BuildKnockoutDraw), so by
+// the time a page is drawn its leaves are already final. Callers with no pool
+// phase (create-playoffs) pass nil and get no overlay.
+//
+// subtrees must be SubdivideRegions' output, i.e. exactly numCourts x {1,2,4}
+// pages in court order. That exact multiple is what makes the page title and
+// the roster overlay agree with the bracket printed underneath them: page
+// c*pagesPerCourt+i is shiaijo c's region (or a child of it), and both
+// SubtreeCourtIndex and PoolBoundsForSubtree divide by the same exact
+// pagesPerCourt.
 //
 // The consumed SheetTree template is NOT deleted here: callers that skip
 // rendering entirely (a league has no knockout) must still delete it, so
@@ -91,63 +96,64 @@ func RenderTreePages(f *excelize.File, subtrees []*Node, numCourts int, pools []
 		startRow := TreeTitleRows + 1
 		// The title formula prepends data!$B$1 (the user-supplied title prefix),
 		// so the page title itself is just the shiaijo label.
-		SetTreeSheetTitle(f, pageSheet, "Shiaijo "+CourtLabel(SubtreeCourtIndex(len(subtrees), numCourts, i)), TreePageLastCol(depth))
+		SetTreeSheetTitle(f, pageSheet, TreePageTitle(len(subtrees), numCourts, i), TreePageLastCol(depth))
 		PrintLeafNodes(subtree, f, pageSheet, 2*depth, startRow, depth, matchWinners)
 
 		lastRow := TreePageLastRow(depth, startRow)
 		if hasPools {
 			poolStart, poolEnd := PoolBoundsForSubtree(len(pools), numCourts, len(subtrees), i)
-			lastRow = max(lastRow, AddPoolsToTree(f, pageSheet, pools[poolStart:poolEnd], poolCoords, playerCoords))
+			// The page's own shiaijo block, narrowed to the pools with a
+			// qualifier actually printed on this page, so a roster overlay can
+			// never describe competitors the page does not carry.
+			overlay := PageRosterPools(pools[poolStart:poolEnd], subtree)
+			lastRow = max(lastRow, AddPoolsToTree(f, pageSheet, overlay, poolCoords, playerCoords))
 		}
 		SetTreePageLayout(f, pageSheet, depth, lastRow)
 	}
 	return nil
 }
 
-// RenderKnockoutPages places the pool finalists, computes the court-aware page
-// layout for a knockout tree, renders one bracket page per subtree via
-// RenderTreePages, and numbers the bracket junctions, returning the per-round
-// match nodes (earliest round first, final last) and the page count.
+// RenderKnockoutPages paginates a knockout draw by shiaijo, renders one bracket
+// page per page-subtree via RenderTreePages, and numbers the bracket junctions,
+// returning the per-round match nodes (earliest round first, final last) and the
+// page count.
 //
 // It is the single funnel for every workbook generator (cmd/create-pools,
 // cmd/create-playoffs, internal/export/builder, internal/engine/export), which
-// is what lets two invariants be enforced here once instead of at four call
+// is what lets these invariants be enforced here once instead of at four call
 // sites:
 //
-//   - Placement first. ApplyPoolAdjustments runs on the WHOLE tree before it is
-//     split, so the pages, the Elimination blocks and the engine's own bracket
-//     all describe the same draw. It used to run inside PrintLeafNodes, per page
-//     subtree, which scoped it to whatever SubdivideTree had handed over.
-//     Pass an UNPLACED tree: placement is not idempotent from 3 qualifiers per
-//     pool up (TestApplyPoolAdjustmentsIsNotIdempotent), so a caller that has
-//     already run ApplyPoolAdjustments would get a different draw here. Every
-//     caller builds a fresh CreateBalancedTree, which is the shape to keep.
+//   - Pages are shiaijo regions. draw.Regions comes from the court-first build,
+//     so a page is a genuine subtree of exactly one court's region and the page
+//     title, the roster overlay and the bracket printed on it all name the same
+//     shiaijo (R3/R8). There is no placement pass any more: the draw arrives
+//     already placed, which is why RenderTreePages and PrintLeafNodes never
+//     touch the tree.
 //   - Render before numbering. Rendering stamps each internal node's sheet/cell
 //     coordinates and FillInMatches writes the match numbers into them; with a
 //     FillInMatches-first order every write is silently skipped and the pages
 //     carry no numbers.
 //
-// numEntrants is the leaf count tree was built from; singleTree forces the
-// whole bracket onto one page (the CLI --single-tree flag). Deleting the
-// consumed SheetTree template stays with the caller (see RenderTreePages).
-func RenderKnockoutPages(f *excelize.File, tree *Node, numEntrants, numCourts int, singleTree bool, pools []Pool, poolCoords map[string]cellCoord, playerCoords map[string]playerCellCoord, matchWinners map[string]MatchWinner) ([][]*Node, int, error) {
-	// Same gate RenderTreePages applies to the roster overlay: a knockout with
-	// no pool phase (create-playoffs) has no pool finishing positions to place
-	// by, and its leaf labels are competitor names.
-	if len(pools) > 0 {
-		ApplyPoolAdjustments(tree)
+// singleTree forces the whole bracket onto one page (the CLI --single-tree
+// flag). Deleting the consumed SheetTree template stays with the caller (see
+// RenderTreePages).
+func RenderKnockoutPages(f *excelize.File, draw *KnockoutDraw, singleTree bool, pools []Pool, poolCoords map[string]cellCoord, playerCoords map[string]playerCellCoord, matchWinners map[string]MatchWinner) ([][]*Node, int, error) {
+	if draw == nil || draw.Root == nil {
+		return nil, 0, fmt.Errorf("render knockout pages: empty draw")
 	}
-	numPages, err := TreePageLayout(numEntrants, numCourts, singleTree)
-	if err != nil {
-		return nil, 0, fmt.Errorf("compute tree page layout: %w", err)
+	numCourts := draw.NumCourts()
+	var subtrees []*Node
+	if singleTree {
+		subtrees = []*Node{draw.Root}
+	} else {
+		subtrees = SubdivideRegions(draw.Regions, KnockoutPagesPerCourt(draw.Regions))
 	}
-	subtrees := SubdivideTree(tree, numPages)
 	if err := RenderTreePages(f, subtrees, numCourts, pools, poolCoords, playerCoords, matchWinners); err != nil {
 		return nil, 0, err
 	}
-	rounds := BuildEliminationMatchRounds(tree)
+	rounds := BuildEliminationMatchRounds(draw.Root)
 	FillInMatches(f, rounds)
-	return rounds, numPages, nil
+	return rounds, len(subtrees), nil
 }
 
 func CreateTreeBracket(f *excelize.File, sheet string, col int, startRow int, size int) string {

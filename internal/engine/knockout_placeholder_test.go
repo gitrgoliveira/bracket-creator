@@ -146,9 +146,9 @@ func TestResolveQualifiedPools_SurvivesPlacementChange(t *testing.T) {
 	// Pinned end state: the swapped pairings hold the swapped qualifiers, NOT the
 	// ones the current algorithm would compute for those positions.
 	assert.Equal(t, []string{
-		"D1|C2", // drawn last by the current algorithm, first by this one
-		"C1|D2",
-		"B1|A2",
-		"A1|B2", // and vice versa
+		"D1|B2", // drawn last by the current algorithm, first by this one
+		"B1|D2",
+		"C1|A2",
+		"A1|C2", // and vice versa
 	}, round0Slots(b), "qualifiers must land where the DRAW put them, not where a recompute would")
 }

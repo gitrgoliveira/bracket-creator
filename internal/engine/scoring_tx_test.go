@@ -557,13 +557,11 @@ func saveMixedCompForGuardTest(t *testing.T, teamSize int) (*Engine, *state.Stor
 	}))
 
 	// Build the preview bracket from the pools.
-	finals := helper.GenerateFinals(pools, 1)
-	tree := helper.CreateBalancedTree(finals)
-	helper.ApplyPoolAdjustments(tree)
-	leaves := helper.TreeToLeafArray(tree)
+	draw := helper.BuildKnockoutDraw(pools, 1, 1)
+	leaves := helper.TreeToLeafArray(draw.Root)
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
-	bracket, err := eng.buildBracketFromLeaves(comp, leaves)
+	bracket, err := eng.buildBracketFromLeaves(comp, leaves, draw.RegionSpans())
 	require.NoError(t, err)
 	bracket.Preview = true
 	require.NoError(t, store.SaveBracket(compID, bracket))
@@ -904,12 +902,10 @@ func TestPoolRescore_CorruptBracket_FailsClosed(t *testing.T) {
 	// Build + save a valid bracket, then corrupt it on disk. The tx read path
 	// (loadBracketLocked) parses the file directly (no cache), so the corrupt
 	// bytes surface as a parse error inside the guard.
-	finals := helper.GenerateFinals(pools, 1)
-	tree := helper.CreateBalancedTree(finals)
-	helper.ApplyPoolAdjustments(tree)
+	draw := helper.BuildKnockoutDraw(pools, 1, 1)
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
-	bracket, err := eng.buildBracketFromLeaves(comp, helper.TreeToLeafArray(tree))
+	bracket, err := eng.buildBracketFromLeaves(comp, helper.TreeToLeafArray(draw.Root), draw.RegionSpans())
 	require.NoError(t, err)
 	require.NoError(t, store.SaveBracket(compID, bracket))
 	bracketPath := filepath.Join(dir, "competitions", compID, "bracket.json")

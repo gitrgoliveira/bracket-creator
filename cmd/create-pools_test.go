@@ -978,6 +978,14 @@ func TestCreatePools_WithMaxPlayersAndSeeds(t *testing.T) {
 // The critical regression is the "17 pools, 2 courts, 4 subtrees" case: the old
 // naive i*poolsPerSubtree slicing let subtree 1 span pools from both court A
 // (indices 0-8) and court B (index 9+).
+//
+// Every page of a court now offers that court's WHOLE block. The
+// page-within-court split it used to apply had nothing behind it: a page is a
+// child subtree of the region, and which of the court's pools appear on which
+// child is a property of the draw, not of the pool index.
+// helper.PageRosterPools narrows the block to the pools the page actually
+// prints, which is the only correspondence that exists (see
+// helper/pool_bounds_test.go).
 func TestPoolBoundsForSubtree(t *testing.T) {
 	t.Parallel()
 
@@ -993,30 +1001,30 @@ func TestPoolBoundsForSubtree(t *testing.T) {
 		// Regression case: 17 pools unevenly split across 2 courts (9 + 8),
 		// each court has 2 subtree pages.
 		// Court A occupies pools[0:9], Court B occupies pools[9:17].
-		{name: "17p_2c_4s_tree0", numPools: 17, numCourts: 2, numSubtrees: 4, subtreeIdx: 0, wantStart: 0, wantEnd: 5},
-		{name: "17p_2c_4s_tree1", numPools: 17, numCourts: 2, numSubtrees: 4, subtreeIdx: 1, wantStart: 5, wantEnd: 9},
-		{name: "17p_2c_4s_tree2", numPools: 17, numCourts: 2, numSubtrees: 4, subtreeIdx: 2, wantStart: 9, wantEnd: 13},
-		{name: "17p_2c_4s_tree3", numPools: 17, numCourts: 2, numSubtrees: 4, subtreeIdx: 3, wantStart: 13, wantEnd: 17},
+		{name: "17p_2c_4s_tree0", numPools: 17, numCourts: 2, numSubtrees: 4, subtreeIdx: 0, wantStart: 0, wantEnd: 9},
+		{name: "17p_2c_4s_tree1", numPools: 17, numCourts: 2, numSubtrees: 4, subtreeIdx: 1, wantStart: 0, wantEnd: 9},
+		{name: "17p_2c_4s_tree2", numPools: 17, numCourts: 2, numSubtrees: 4, subtreeIdx: 2, wantStart: 9, wantEnd: 17},
+		{name: "17p_2c_4s_tree3", numPools: 17, numCourts: 2, numSubtrees: 4, subtreeIdx: 3, wantStart: 9, wantEnd: 17},
 
 		// Even split: 16 pools, 2 courts (8 each), 4 subtrees (2 per court).
-		{name: "16p_2c_4s_tree0", numPools: 16, numCourts: 2, numSubtrees: 4, subtreeIdx: 0, wantStart: 0, wantEnd: 4},
-		{name: "16p_2c_4s_tree1", numPools: 16, numCourts: 2, numSubtrees: 4, subtreeIdx: 1, wantStart: 4, wantEnd: 8},
-		{name: "16p_2c_4s_tree2", numPools: 16, numCourts: 2, numSubtrees: 4, subtreeIdx: 2, wantStart: 8, wantEnd: 12},
-		{name: "16p_2c_4s_tree3", numPools: 16, numCourts: 2, numSubtrees: 4, subtreeIdx: 3, wantStart: 12, wantEnd: 16},
+		{name: "16p_2c_4s_tree0", numPools: 16, numCourts: 2, numSubtrees: 4, subtreeIdx: 0, wantStart: 0, wantEnd: 8},
+		{name: "16p_2c_4s_tree1", numPools: 16, numCourts: 2, numSubtrees: 4, subtreeIdx: 1, wantStart: 0, wantEnd: 8},
+		{name: "16p_2c_4s_tree2", numPools: 16, numCourts: 2, numSubtrees: 4, subtreeIdx: 2, wantStart: 8, wantEnd: 16},
+		{name: "16p_2c_4s_tree3", numPools: 16, numCourts: 2, numSubtrees: 4, subtreeIdx: 3, wantStart: 8, wantEnd: 16},
 
 		// Single court: all pools belong to the same block.
-		{name: "6p_1c_2s_tree0", numPools: 6, numCourts: 1, numSubtrees: 2, subtreeIdx: 0, wantStart: 0, wantEnd: 3},
-		{name: "6p_1c_2s_tree1", numPools: 6, numCourts: 1, numSubtrees: 2, subtreeIdx: 1, wantStart: 3, wantEnd: 6},
+		{name: "6p_1c_2s_tree0", numPools: 6, numCourts: 1, numSubtrees: 2, subtreeIdx: 0, wantStart: 0, wantEnd: 6},
+		{name: "6p_1c_2s_tree1", numPools: 6, numCourts: 1, numSubtrees: 2, subtreeIdx: 1, wantStart: 0, wantEnd: 6},
 
 		// One page per court (no multi-page case, but must still be correct).
 		{name: "6p_2c_2s_tree0", numPools: 6, numCourts: 2, numSubtrees: 2, subtreeIdx: 0, wantStart: 0, wantEnd: 3},
 		{name: "6p_2c_2s_tree1", numPools: 6, numCourts: 2, numSubtrees: 2, subtreeIdx: 1, wantStart: 3, wantEnd: 6},
 
 		// 5 pools, 2 courts: court A gets 3 pools (0-2), court B gets 2 (3-4).
-		{name: "5p_2c_4s_tree0", numPools: 5, numCourts: 2, numSubtrees: 4, subtreeIdx: 0, wantStart: 0, wantEnd: 2},
-		{name: "5p_2c_4s_tree1", numPools: 5, numCourts: 2, numSubtrees: 4, subtreeIdx: 1, wantStart: 2, wantEnd: 3},
-		{name: "5p_2c_4s_tree2", numPools: 5, numCourts: 2, numSubtrees: 4, subtreeIdx: 2, wantStart: 3, wantEnd: 4},
-		{name: "5p_2c_4s_tree3", numPools: 5, numCourts: 2, numSubtrees: 4, subtreeIdx: 3, wantStart: 4, wantEnd: 5},
+		{name: "5p_2c_4s_tree0", numPools: 5, numCourts: 2, numSubtrees: 4, subtreeIdx: 0, wantStart: 0, wantEnd: 3},
+		{name: "5p_2c_4s_tree1", numPools: 5, numCourts: 2, numSubtrees: 4, subtreeIdx: 1, wantStart: 0, wantEnd: 3},
+		{name: "5p_2c_4s_tree2", numPools: 5, numCourts: 2, numSubtrees: 4, subtreeIdx: 2, wantStart: 3, wantEnd: 5},
+		{name: "5p_2c_4s_tree3", numPools: 5, numCourts: 2, numSubtrees: 4, subtreeIdx: 3, wantStart: 3, wantEnd: 5},
 	}
 
 	for _, tt := range tests {
@@ -1030,9 +1038,6 @@ func TestPoolBoundsForSubtree(t *testing.T) {
 			// Verify the slice lies strictly within the owning court's block.
 			pagesPerCourt := tt.numSubtrees / tt.numCourts
 			courtIdx := tt.subtreeIdx / pagesPerCourt
-			if courtIdx >= tt.numCourts {
-				courtIdx = tt.numCourts - 1
-			}
 			floor := tt.numPools / tt.numCourts
 			extra := tt.numPools % tt.numCourts
 			courtStart := courtIdx*floor + min(courtIdx, extra)
@@ -1046,9 +1051,8 @@ func TestPoolBoundsForSubtree(t *testing.T) {
 	}
 }
 
-// TestPoolBoundsForSubtree_DegenerateInputs guards against divide-by-zero
-// when SubdivideTree returns fewer subtrees than expected for very small
-// brackets (e.g. courts > numSubtrees).
+// TestPoolBoundsForSubtree_DegenerateInputs guards against divide-by-zero when
+// there are fewer pages than courts (--single-tree on a multi-shiaijo draw).
 func TestPoolBoundsForSubtree_DegenerateInputs(t *testing.T) {
 	t.Parallel()
 

@@ -130,17 +130,15 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	//    so the two exports of one competition render the identical bracket, with
 	//    numbering that matches the stored bracket overlayBracketScores fills in
 	//    (mp-ndfu).
-	finals := engine.EliminationLeaves(store, comp, pools, bracket)
-	if len(finals) > 0 && comp.IsPlayoffEnabled() {
-		tree := helper.CreateBalancedTree(finals)
-
+	draw := engine.EliminationDraw(store, comp, pools, bracket, numCourts)
+	if draw != nil && comp.IsPlayoffEnabled() {
 		// Tree sheets FIRST, then the Elimination Matches skeleton, in the one
 		// mandatory order RenderKnockoutPages enforces (also behind the CLI and
 		// the blank-template export). The skeleton's "Round N - Match N" headers
 		// are what overlayBracketScores below scans. Bronze gates on the stored
 		// bracket's ThirdPlaceMatch: the bracket is authoritative here, unlike
 		// the CLI's flag-derived NeedsBronzeBlock.
-		eliminationMatchRounds, _, err := helper.RenderKnockoutPages(f, tree, len(finals), numCourts, false, pools, poolCoords, playerCoords, matchWinners)
+		eliminationMatchRounds, _, err := helper.RenderKnockoutPages(f, draw, false, pools, poolCoords, playerCoords, matchWinners)
 		if err != nil {
 			return nil, fmt.Errorf("export: %w", err)
 		}

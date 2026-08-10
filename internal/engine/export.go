@@ -84,8 +84,8 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	// bracket: pool winners for pooled formats, or the stored bracket's leaves for
 	// a pure playoffs competition (mp-ndfu, mp-0yd8). The IsPlayoffEnabled gate
 	// below then drops the phantom bracket a league's placeholder finals imply.
-	finals := EliminationLeaves(e.store, comp, pools, bracket)
-	if len(finals) > 0 && comp.IsPlayoffEnabled() {
+	draw := EliminationDraw(e.store, comp, pools, bracket, numCourts)
+	if draw != nil && comp.IsPlayoffEnabled() {
 		// 4b. Tree pages plus the Elimination Matches sheet, in the one mandatory
 		//     order RenderKnockoutPages enforces. This path used to skip the
 		//     Elimination blocks and junction numbering entirely, shipping a
@@ -93,8 +93,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		//     Elimination Matches sheet and unnumbered tree pages. The bronze
 		//     block wires its entrant slots to the semi-final losers via the
 		//     real rounds and winners, exactly as the CLI and results workbook.
-		tree := helper.CreateBalancedTree(finals)
-		eliminationMatchRounds, _, err := helper.RenderKnockoutPages(f, tree, len(finals), numCourts, false, pools, poolCoords, playerCoords, matchWinners)
+		eliminationMatchRounds, _, err := helper.RenderKnockoutPages(f, draw, false, pools, poolCoords, playerCoords, matchWinners)
 		if err != nil {
 			return nil, fmt.Errorf("export: %w", err)
 		}

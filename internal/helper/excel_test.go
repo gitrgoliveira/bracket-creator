@@ -465,7 +465,7 @@ func TestFillInMatchesTable(t *testing.T) {
 }
 
 func TestFillInMatchesMultiPageBracket(t *testing.T) {
-	// Simulates a multi-page bracket where SubdivideTree splits the tree into
+	// Simulates a multi-page bracket where the page splitter cuts the tree into
 	// subtrees. Subtree nodes get SheetName set by PrintLeafNodes, but the
 	// connecting nodes (final, semi-finals) between subtrees have SheetName="".
 	// All nodes must still receive sequential matchNum values so the

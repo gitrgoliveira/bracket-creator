@@ -9,22 +9,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// This file pins the page-to-shiaijo LABELLING DEFECT (bc-draw Phase 1).
+// This file pins the page-to-shiaijo mapping (bc-draw R3/R8).
 //
 // RenderTreePages titles each Excel tree page "Shiaijo <CourtLabel>" from
 // SubtreeCourtIndex and overlays the pool rosters PoolBoundsForSubtree hands
-// back, but the bracket printed on that page comes from SubdivideTree, which
-// splits the draw by TREE POSITION. Because GenerateFinals interleaves each
-// court's qualifiers across both halves of the draw, the title and the roster
-// describe one shiaijo while the bracket shows another's competitors.
+// back. Under the court-first draw the bracket printed on that page is a
+// genuine subtree of exactly that shiaijo's region, so the title, the roster
+// overlay and the competitors all name the same court.
 //
-// Everything asserted here is CURRENT, WRONG behaviour. It violates bc-draw R3
-// ("each shiaijo's pools occupy exactly ONE contiguous region of the draw, and
-// that region IS a subtree") and R8 (a tree page must be a genuine subtree of a
-// court's region). Do not fix it in this file: it is the "before" side of the
-// rewrite's review diff, and the full sweep lives in testdata/draw_shapes.json.
+// It used to pin the OPPOSITE: the old flat draw scattered every court's
+// qualifiers across both halves of the bracket, so a page titled "Shiaijo A"
+// and overlaying pools A and B printed Pool C-1st and Pool D-2nd. The sweep
+// below asserts that mismatch is now zero for EVERY combination, which is the
+// operator-visible half of the whole rewrite.
 
-// pageCourtView is one rendered tree page's two disagreeing views of itself.
+// pageCourtView is one rendered tree page's two views of itself, which must now
+// agree.
 type pageCourtView struct {
 	courtLabel   string
 	claimedPools []string // the roster overlay printed on the page
@@ -33,26 +33,28 @@ type pageCourtView struct {
 }
 
 // renderedPageViews reproduces exactly what RenderTreePages does for page
-// labelling and roster overlay. The whole-tree placement pass it applies is now
-// the only one there is: RenderKnockoutPages runs ApplyPoolAdjustments before
-// splitting the tree, so this model and the rendered workbook see the same
-// leaves (it used to be the ENGINE's order only, because the Excel path adjusted
-// per page subtree instead).
+// labelling and roster overlay, from the same court-first draw the workbook
+// renders.
 func renderedPageViews(t *testing.T, nPools, poolWinners, numCourts int) []pageCourtView {
 	t.Helper()
 
-	pools, poolNames := makePools(nPools)
-	tree := buildAdjustedTree(pools, poolWinners)
+	pools, _ := makePools(nPools)
+	draw := BuildKnockoutDraw(pools, poolWinners, numCourts)
+	require.NotNil(t, draw)
+	courts := draw.NumCourts()
 
-	numPages, err := TreePageLayout(nPools*poolWinners, numCourts, false)
-	require.NoError(t, err)
-	// RenderTreePages derives both the court label and the pool bounds from
-	// len(subtrees), NOT from the requested page count, so this does too.
-	subtrees := SubdivideTree(tree, numPages)
+	subtrees := SubdivideRegions(draw.Regions, KnockoutPagesPerCourt(draw.Regions))
+	require.Equal(t, TreePageLayout(draw.Regions, false), len(subtrees),
+		"the page count RenderKnockoutPages reports must be the page count it renders")
+	require.Zero(t, len(subtrees)%courts, "pages are an exact multiple of the shiaijo count (R8)")
 
 	views := make([]pageCourtView, 0, len(subtrees))
 	for i, subtree := range subtrees {
-		start, end := PoolBoundsForSubtree(nPools, numCourts, len(subtrees), i)
+		start, end := PoolBoundsForSubtree(nPools, courts, len(subtrees), i)
+		claimed := []string{}
+		for _, p := range PageRosterPools(pools[start:end], subtree) {
+			claimed = append(claimed, p.PoolName)
+		}
 		leaves := collectOrderedLeaves(subtree)
 
 		present := []string{}
@@ -65,8 +67,8 @@ func renderedPageViews(t *testing.T, nPools, poolWinners, numCourts int) []pageC
 		slices.Sort(present)
 
 		views = append(views, pageCourtView{
-			courtLabel:   CourtLabel(SubtreeCourtIndex(len(subtrees), numCourts, i)),
-			claimedPools: append([]string{}, poolNames[start:end]...),
+			courtLabel:   CourtLabel(SubtreeCourtIndex(len(subtrees), courts, i)),
+			claimedPools: claimed,
 			presentPools: present,
 			leaves:       leaves,
 		})
@@ -74,140 +76,166 @@ func renderedPageViews(t *testing.T, nPools, poolWinners, numCourts int) []pageC
 	return views
 }
 
-// TestTreePageCourtLabelMismatch_CurrentBehaviour is the worked example from
-// bc-draw: 4 pools x 2 qualifiers on 2 shiaijo. Page 1 is titled "Shiaijo A"
-// and overlays Pool A and Pool B, but its bracket holds Pool C-1st and
-// Pool D-2nd, competitors who fought their pools on shiaijo B.
-func TestTreePageCourtLabelMismatch_CurrentBehaviour(t *testing.T) {
+// TestTreePageCourtLabel_WorkedExample is the worked example from bc-draw,
+// inverted: 4 pools x 2 qualifiers on 2 shiaijo. Page 1 is titled "Shiaijo A",
+// overlays Pool A and Pool B, and its bracket now holds exactly shiaijo A's
+// home winners plus the runners-up that crossed in from its partner court -
+// never a competitor whose pool ran on the other shiaijo's region.
+func TestTreePageCourtLabel_WorkedExample(t *testing.T) {
 	const (
 		nPools      = 4
 		poolWinners = 2
 		numCourts   = 2
 	)
 
-	// The court blocks themselves are contiguous and correct: pools A/B on
-	// shiaijo A, pools C/D on shiaijo B. The defect is entirely in how the
-	// bracket is split, not in how pools are allocated to courts.
 	assignments, err := AssignPoolsToCourts(nPools, numCourts)
 	require.NoError(t, err)
 	require.Equal(t, []int{0, 0, 1, 1}, assignments,
 		"pools A,B belong to shiaijo A and C,D to shiaijo B")
 
 	views := renderedPageViews(t, nPools, poolWinners, numCourts)
-	require.Len(t, views, 2, "8 entrants on 2 courts render 2 tree pages")
+	require.Len(t, views, 2, "8 entrants on 2 courts render 2 tree pages, one per shiaijo")
 
 	t.Run("page_1_titled_Shiaijo_A", func(t *testing.T) {
 		p := views[0]
-		assert.Equal(t, "A", p.courtLabel, "page 1 is titled \"Shiaijo A\"")
+		assert.Equal(t, "A", p.courtLabel)
 		assert.Equal(t, []string{"Pool A", "Pool B"}, p.claimedPools,
 			"page 1's roster overlay claims shiaijo A's pools")
-
-		// ...but the bracket printed underneath that title holds shiaijo B's
-		// qualifiers. This is the defect, stated as an assertion so the
-		// rewrite cannot land silently.
-		assert.Contains(t, p.leaves, "Pool C-1st",
-			"page titled Shiaijo A prints shiaijo B's Pool C winner")
-		assert.Contains(t, p.leaves, "Pool D-2nd",
-			"page titled Shiaijo A prints shiaijo B's Pool D runner-up")
-		assert.Equal(t, []string{"Pool A", "Pool B", "Pool C", "Pool D"}, p.presentPools,
-			"page titled Shiaijo A actually contains competitors from ALL FOUR pools")
+		// A's own winners stay; C and D's runners-up cross in from the partner
+		// court (R4b). Nothing from A or B's pools appears on the other page.
+		assert.ElementsMatch(t,
+			[]string{"Pool A-1st", "Pool B-1st", "Pool C-2nd", "Pool D-2nd"}, p.leaves)
 	})
 
 	t.Run("page_2_titled_Shiaijo_B", func(t *testing.T) {
 		p := views[1]
-		assert.Equal(t, "B", p.courtLabel, "page 2 is titled \"Shiaijo B\"")
-		assert.Equal(t, []string{"Pool C", "Pool D"}, p.claimedPools,
-			"page 2's roster overlay claims shiaijo B's pools")
-		assert.Contains(t, p.leaves, "Pool A-2nd",
-			"page titled Shiaijo B prints shiaijo A's Pool A runner-up")
-		assert.Contains(t, p.leaves, "Pool B-1st",
-			"page titled Shiaijo B prints shiaijo A's Pool B winner")
-		assert.Equal(t, []string{"Pool A", "Pool B", "Pool C", "Pool D"}, p.presentPools,
-			"page titled Shiaijo B actually contains competitors from ALL FOUR pools")
+		assert.Equal(t, "B", p.courtLabel)
+		assert.Equal(t, []string{"Pool C", "Pool D"}, p.claimedPools)
+		assert.ElementsMatch(t,
+			[]string{"Pool C-1st", "Pool D-1st", "Pool A-2nd", "Pool B-2nd"}, p.leaves)
 	})
 }
 
-// TestTreePageCourtLabelMismatch_Sweep pins WHEN the labelling happens to come
-// out right on a multi-shiaijo draw. Exactly one combination survives today:
-// ONE qualifier per pool with the pool count divisible by the court count. At
-// 1 qualifier nothing crosses between pools, so the positional split coincides
-// with the court blocks; add a second qualifier and every configuration
-// mislabels. bc-draw R3/R4 make the correct case universal.
-func TestTreePageCourtLabelMismatch_Sweep(t *testing.T) {
-	for _, numCourts := range []int{2, 4} {
+// TestTreePageHomePoolsAlwaysPresent sweeps the whole configuration space and
+// asserts the property that makes a printed page usable: every pool the page's
+// roster overlay claims has at least one of its qualifiers in the bracket
+// printed on that page, and every court's HOME winners are on that court's own
+// pages.
+//
+// The converse ("nothing from another court appears") is deliberately NOT
+// asserted: R4 crossing means a page legitimately shows the partner court's
+// runners-up, which is the whole point of the rule. What the old draw got wrong
+// was the first half - a page claiming pools whose competitors were nowhere on
+// it - and that is now empty everywhere.
+func TestTreePageHomePoolsAlwaysPresent(t *testing.T) {
+	for _, numCourts := range []int{1, 2, 4} {
 		for nPools := 2; nPools <= 12; nPools++ {
 			for poolWinners := 1; poolWinners <= 4; poolWinners++ {
 				name := fmt.Sprintf("%d_pools_%d_winners_%d_courts", nPools, poolWinners, numCourts)
 				t.Run(name, func(t *testing.T) {
 					views := renderedPageViews(t, nPools, poolWinners, numCourts)
 
-					var mismatched []string
+					var claimedButAbsent []string
 					for i, p := range views {
-						claimedButAbsent := false
 						for _, c := range p.claimedPools {
 							if !slices.Contains(p.presentPools, c) {
-								claimedButAbsent = true
+								claimedButAbsent = append(claimedButAbsent,
+									fmt.Sprintf("page %d (Shiaijo %s) claims %s, contains %v",
+										i+1, p.courtLabel, c, p.presentPools))
 							}
 						}
-						presentButUnclaimed := false
-						for _, c := range p.presentPools {
-							if !slices.Contains(p.claimedPools, c) {
-								presentButUnclaimed = true
-							}
-						}
-						if claimedButAbsent || presentButUnclaimed {
-							mismatched = append(mismatched, fmt.Sprintf(
-								"page %d (Shiaijo %s) claims %v, contains %v",
-								i+1, p.courtLabel, p.claimedPools, p.presentPools))
-						}
 					}
-
-					wantCorrect := poolWinners == 1 && nPools%numCourts == 0
-					if wantCorrect {
-						assert.Empty(t, mismatched,
-							"1 qualifier per pool with %d pools evenly split over %d shiaijo is the one case that labels correctly today",
-							nPools, numCourts)
-						return
-					}
-					assert.NotEmpty(t, mismatched,
-						"expected the known page-to-shiaijo labelling defect for %d pools x %d qualifiers on %d shiaijo; if this is now clean, bc-draw R3/R8 landed and this test must be inverted",
-						nPools, poolWinners, numCourts)
+					assert.Empty(t, claimedButAbsent,
+						"every pool a page's roster overlay claims must have a qualifier on that page")
 				})
 			}
 		}
 	}
 }
 
-// TestTreePageCountExceedsTreeDepth_CurrentBehaviour pins the second page-layout
-// defect: TreePageLayout only ever returns a power of two and never checks the
-// tree can be cut that many times, while SubdivideTree, having run out of
-// levels, appends the WHOLE TREE as a trailing page. A 2-pool, 1-qualifier draw
-// on 4 shiaijo therefore asks for 4 pages and renders 3, the last of which
-// duplicates the entire bracket and is titled with the last court.
-//
-// It is the only combination in the bc-draw sweep (1..4 qualifiers x 2..12
-// pools x 1/2/4 courts) where the requested and rendered page counts differ.
-func TestTreePageCountExceedsTreeDepth_CurrentBehaviour(t *testing.T) {
-	pools, _ := makePools(2)
-	tree := buildAdjustedTree(pools, 1)
+// TestHomeWinnersStayOnTheirOwnShiaijoPage is R4a stated as a page property: a
+// pool's WINNER is always printed on a page belonging to the shiaijo that pool
+// ran on. This is what an operator running shiaijo C relies on when they pick
+// up shiaijo C's pages.
+func TestHomeWinnersStayOnTheirOwnShiaijoPage(t *testing.T) {
+	for _, numCourts := range []int{2, 4} {
+		for nPools := numCourts; nPools <= 12; nPools++ {
+			for poolWinners := 1; poolWinners <= 4; poolWinners++ {
+				name := fmt.Sprintf("%d_pools_%d_winners_%d_courts", nPools, poolWinners, numCourts)
+				t.Run(name, func(t *testing.T) {
+					pools, poolNames := makePools(nPools)
+					draw := BuildKnockoutDraw(pools, poolWinners, numCourts)
+					require.NotNil(t, draw)
+					assignment, err := AssignPoolsToCourts(nPools, draw.NumCourts())
+					require.NoError(t, err)
 
-	numPages, err := TreePageLayout(2, 4, false)
-	require.NoError(t, err)
-	assert.Equal(t, 4, numPages, "4 shiaijo force 4 pages even for a 2-entrant draw")
-
-	subtrees := SubdivideTree(tree, numPages)
-	assert.Len(t, subtrees, 3, "SubdivideTree cannot honour 4 pages on a 2-leaf tree")
-
-	assert.Equal(t, []string{"Pool A-1st"}, collectOrderedLeaves(subtrees[0]))
-	assert.Equal(t, []string{"Pool B-1st"}, collectOrderedLeaves(subtrees[1]))
-	assert.Equal(t, []string{"Pool A-1st", "Pool B-1st"}, collectOrderedLeaves(subtrees[2]),
-		"page 3 is the WHOLE tree again, so the only match in the draw is printed twice")
-
-	// And the duplicate page is labelled as its own shiaijo.
-	labels := make([]string, len(subtrees))
-	for i := range subtrees {
-		labels[i] = CourtLabel(SubtreeCourtIndex(len(subtrees), 4, i))
+					for pi, name := range poolNames {
+						want := assignment[pi]
+						assert.Contains(t, TreeLeafLabels(draw.Regions[want]), name+"-1st",
+							"%s ran on shiaijo %s, so its winner belongs to that region",
+							name, CourtLabel(want))
+					}
+				})
+			}
+		}
 	}
-	assert.Equal(t, []string{"A", "B", "C"}, labels,
-		"three pages get three different shiaijo titles for a two-competitor draw")
+}
+
+// TestTreePageCountIsAMultipleOfTheShiaijoCount pins R8's arithmetic directly,
+// including the case the old layout could not express at all: a 2-entrant draw
+// on 4 shiaijo. TreePageLayout used to return a power of two regardless of the
+// tree (4 pages), and SubdivideTree, out of levels, appended the WHOLE TREE as
+// a trailing third page that reprinted the only match in the draw.
+func TestTreePageCountIsAMultipleOfTheShiaijoCount(t *testing.T) {
+	for _, numCourts := range []int{1, 2, 4} {
+		for nPools := 1; nPools <= 12; nPools++ {
+			for poolWinners := 1; poolWinners <= 4; poolWinners++ {
+				name := fmt.Sprintf("%d_pools_%d_winners_%d_courts", nPools, poolWinners, numCourts)
+				t.Run(name, func(t *testing.T) {
+					pools, _ := makePools(nPools)
+					draw := BuildKnockoutDraw(pools, poolWinners, numCourts)
+					require.NotNil(t, draw)
+
+					pagesPerCourt := KnockoutPagesPerCourt(draw.Regions)
+					assert.Contains(t, []int{1, 2, 4}, pagesPerCourt,
+						"a shiaijo gets 1, 2 or 4 pages, never anything else (R8)")
+
+					pages := SubdivideRegions(draw.Regions, pagesPerCourt)
+					assert.Len(t, pages, draw.NumCourts()*pagesPerCourt)
+					assert.Equal(t, TreePageLayout(draw.Regions, false), len(pages))
+
+					// No page reprints a match another page already carries.
+					seen := map[string]int{}
+					for _, p := range pages {
+						for _, l := range TreeLeafLabels(p) {
+							seen[l]++
+						}
+					}
+					for l, n := range seen {
+						assert.Equal(t, 1, n, "%s is printed on %d pages", l, n)
+					}
+					assert.Len(t, seen, nPools*poolWinners, "every entrant is printed exactly once")
+				})
+			}
+		}
+	}
+}
+
+// TestTreePageLayoutSingleTree pins --single-tree: it forces ONE page and wins
+// outright. It used to be silently overridden by the court expansion, so
+// "--single-tree" on a 4-court event still printed four pages.
+func TestTreePageLayoutSingleTree(t *testing.T) {
+	pools, _ := makePools(8)
+	draw := BuildKnockoutDraw(pools, 2, 4)
+	require.NotNil(t, draw)
+
+	assert.Equal(t, 4, TreePageLayout(draw.Regions, false))
+	assert.Equal(t, 1, TreePageLayout(draw.Regions, true))
+
+	// The one page covers every court, so it names the whole shiaijo range and
+	// overlays every pool rather than claiming to be shiaijo A's.
+	assert.Equal(t, "Shiaijo A-D", TreePageTitle(1, 4, 0))
+	start, end := PoolBoundsForSubtree(8, 4, 1, 0)
+	assert.Equal(t, 0, start)
+	assert.Equal(t, 8, end)
 }

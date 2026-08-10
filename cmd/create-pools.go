@@ -224,29 +224,23 @@ func (o *poolOptions) createPools(entries []string) error {
 	if err := helper.AddPoolsToSheet(f, pools, poolCoords, playerCoords); err != nil {
 		fmt.Fprintf(os.Stderr, "Error adding pools to sheet: %v\n", err)
 	}
-	finals := helper.GenerateFinals(pools, o.poolWinners)
-
-	fmt.Printf("There will be %d finalists\n", len(finals))
+	fmt.Printf("There will be %d finalists\n", numPools*o.poolWinners)
 
 	// Clamp courts to the number of pools (e.g. if defaulted to 2 but only 1 pool exists).
 	// The clamp can produce a value the operator never asked for, so it has to
 	// respect the shiaijo-count rule too: clamping a legal --courts 4 onto 3
 	// pools would otherwise silently hand the draw an unpairable 3 courts.
 	// Step down to the nearest even count instead (1 pool stays 1, which is
-	// the explicitly allowed single-shiaijo case).
-	if o.courts > numPools {
-		o.courts = numPools
-		if o.courts > 1 && o.courts%2 == 1 {
-			o.courts--
-		}
-	}
-	// Create balanced tree
-	tree := helper.CreateBalancedTree(finals)
+	// the explicitly allowed single-shiaijo case). helper.EffectiveDrawCourts
+	// is the same rule the draw applies internally, shared so the Pool Matches
+	// and Names sheets band by the same court count the bracket regions use.
+	o.courts = helper.EffectiveDrawCourts(numPools, o.courts)
 
-	// Create pool matches and get winners BEFORE creating tree sheets.
-	// Mirror the engine's authoritative PoolFormat × RoundRobin mapping
-	// (internal/engine/pools.go) so an exported partial-pool competition
-	// gets the path-graph match set, not full round-robin.
+	// Create pool matches BEFORE the draw: R6's second bye criterion ranks by
+	// how many pool matches a pool's qualifier plays (D1), which helper.poolLoad
+	// reads off the drawn pool. Mirror the engine's authoritative PoolFormat ×
+	// RoundRobin mapping (internal/engine/pools.go) so an exported partial-pool
+	// competition gets the path-graph match set, not full round-robin.
 	if o.poolFormat == "partial" {
 		helper.CreatePartialPoolMatches(pools)
 	} else if o.roundRobin {
@@ -256,7 +250,15 @@ func (o *poolOptions) createPools(entries []string) error {
 	}
 	matchWinners := helper.PrintPoolMatches(f, pools, o.teamMatches, o.poolWinners, o.courts, true, poolCoords, playerCoords, o.engi)
 
-	eliminationMatchRounds, numPages, err := helper.RenderKnockoutPages(f, tree, len(finals), o.courts, o.singleTree, pools, poolCoords, playerCoords, matchWinners)
+	// Court-first pool-to-knockout draw (specs/007-ekc-draw): one bracket
+	// region per shiaijo, 2nd places crossing to the partner court, byes
+	// allocated inside each region by seed then pool load.
+	draw := helper.BuildKnockoutDraw(pools, o.poolWinners, o.courts)
+	if draw == nil {
+		return fmt.Errorf("could not build a knockout draw from %d pools with %d winners per pool", numPools, o.poolWinners)
+	}
+
+	eliminationMatchRounds, numPages, err := helper.RenderKnockoutPages(f, draw, o.singleTree, pools, poolCoords, playerCoords, matchWinners)
 	if err != nil {
 		return err
 	}
@@ -274,7 +276,7 @@ func (o *poolOptions) createPools(entries []string) error {
 	}
 
 	printEliminationWithBronze(f, matchWinners, eliminationMatchRounds, o.teamMatches, o.courts, o.engi, o.naginata)
-	helper.FillEstimations(f, int64(len(pools)), int64(totalPoolMatches), int64(o.teamMatches), int64(len(finals)-1), o.courts)
+	helper.FillEstimations(f, int64(len(pools)), int64(totalPoolMatches), int64(o.teamMatches), int64(numPools*o.poolWinners-1), o.courts)
 
 	// Apply sheet protection to all sheets except data and Time Estimator
 	helper.ProtectAllSheets(f)

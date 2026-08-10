@@ -356,8 +356,7 @@ func TestEliminationMatchSameSheetFormulas(t *testing.T) {
 	poolWinners := 2
 	matchWinners := PrintPoolMatches(f, pools, 0, poolWinners, 1, false, poolCoords, pCoords, false)
 
-	finalists := GenerateFinals(pools, poolWinners)
-	tree := CreateBalancedTree(finalists)
+	tree := BuildKnockoutDraw(pools, poolWinners, 1).Root
 	depth := CalculateDepth(tree)
 	rounds := make([][]*Node, depth-1)
 	for i := depth; i > 1; i-- {
@@ -437,8 +436,7 @@ func TestPoolWinnerFormulaReferences(t *testing.T) {
 	matchWinners := PrintPoolMatches(f, pools, 0, poolWinners, 1, false, poolCoords, pCoords, false)
 
 	// Build elimination tree using the same LeafVal format as in production.
-	finalists := GenerateFinals(pools, poolWinners)
-	tree := CreateBalancedTree(finalists)
+	tree := BuildKnockoutDraw(pools, poolWinners, 1).Root
 	depth := CalculateDepth(tree)
 	eliminationMatchRounds := make([][]*Node, depth-1)
 	for i := depth; i > 1; i-- {

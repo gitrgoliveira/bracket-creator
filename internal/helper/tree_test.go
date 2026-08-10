@@ -131,8 +131,7 @@ func TestPrintLeafNodes(t *testing.T) {
 	f.NewSheet("Sheet1")
 	f.NewSheet("Sheet2")
 
-	// Test with pools set to true
-	PrintLeafNodes(node, f, "Sheet1", 10, 1, 3, true, nil)
+	PrintLeafNodes(node, f, "Sheet1", 10, 1, 3, nil)
 
 	// Verify leaf values were written to expected cells
 	cellChecks := map[string]string{
@@ -147,13 +146,40 @@ func TestPrintLeafNodes(t *testing.T) {
 		assert.Equal(t, expected, value)
 	}
 
-	// Test with pools set to false
-	PrintLeafNodes(node, f, "Sheet2", 10, 1, 3, false, nil)
+	// Rendering is pure: drawing the same tree again on another sheet writes
+	// the same labels to the same cells, and the tree is not reordered by
+	// having been drawn.
+	PrintLeafNodes(node, f, "Sheet2", 10, 1, 3, nil)
 	for cell, expected := range cellChecks {
 		value, err := f.GetCellValue("Sheet2", cell)
 		require.NoError(t, err)
 		assert.Equal(t, expected, value)
 	}
+}
+
+// TestPrintLeafNodesDoesNotReorderTree pins the pure-renderer contract directly:
+// placement is ApplyPoolAdjustments' job (run once, on the whole tree, by
+// RenderKnockoutPages), so drawing a page must leave the leaf order untouched
+// even when that order is one the placement pass would change.
+func TestPrintLeafNodesDoesNotReorderTree(t *testing.T) {
+	// "Pool A-2nd" above "Pool B-1st" is exactly the pairing treeAdjustment
+	// swaps, so a renderer that still adjusted would be caught here.
+	tree := CreateBalancedTree([]string{"Pool A-2nd", "Pool B-1st"})
+	before := collectOrderedLeaves(tree)
+
+	f := excelize.NewFile()
+	defer f.Close()
+	_, err := f.NewSheet("Tree 1")
+	require.NoError(t, err)
+
+	PrintLeafNodes(tree, f, "Tree 1", 4, 1, 2, nil)
+
+	assert.Equal(t, before, collectOrderedLeaves(tree), "rendering must not reorder the tree")
+
+	// And the placement pass still does the reordering when it is run.
+	ApplyPoolAdjustments(tree)
+	assert.Equal(t, []string{"Pool B-1st", "Pool A-2nd"}, collectOrderedLeaves(tree),
+		"ApplyPoolAdjustments owns the placement PrintLeafNodes gave up")
 }
 
 func TestGenerateFinals(t *testing.T) {
@@ -1151,16 +1177,16 @@ func TestPrintLeafNodesEdgeCases(t *testing.T) {
 	tests := []struct {
 		name         string
 		setupTree    func() *Node
-		pools        bool
 		matchWinners map[string]MatchWinner
 		shouldPanic  bool
 	}{
 		{
-			name: "single leaf with pools enabled",
+			// A page whose root is a single leaf: SubdivideTree produces these
+			// whenever the requested page count is deeper than the tree.
+			name: "single leaf page",
 			setupTree: func() *Node {
 				return &Node{Val: 1, LeafNode: true, LeafVal: "A-1st"}
 			},
-			pools:        true,
 			matchWinners: nil,
 			shouldPanic:  false,
 		},
@@ -1169,7 +1195,6 @@ func TestPrintLeafNodesEdgeCases(t *testing.T) {
 			setupTree: func() *Node {
 				return CreateBalancedTree([]string{"Winner1", "Winner2"})
 			},
-			pools: false,
 			matchWinners: map[string]MatchWinner{
 				"Winner1": {cellCoord: cellCoord{sheetName: "Sheet1", cell: "A1"}},
 				"Winner2": {cellCoord: cellCoord{sheetName: "Sheet1", cell: "A2"}},
@@ -1196,7 +1221,7 @@ func TestPrintLeafNodesEdgeCases(t *testing.T) {
 			depth := CalculateDepth(tree)
 
 			// Should not panic
-			PrintLeafNodes(tree, f, "TestSheet", 10, 1, depth, tt.pools, tt.matchWinners)
+			PrintLeafNodes(tree, f, "TestSheet", 10, 1, depth, tt.matchWinners)
 
 			// If we got here without panic, test passes
 			if !tt.shouldPanic {
@@ -1664,6 +1689,130 @@ func TestNeedsBronzeBlock(t *testing.T) {
 			assert.Equal(t, tc.want, NeedsBronzeBlock(tc.naginata, tc.rounds))
 		})
 	}
+}
+
+// treeShape renders a tree's TOPOLOGY only - which positions are leaves and
+// which are junctions - with every label discarded.
+func treeShape(node *Node) string {
+	if node == nil {
+		return "."
+	}
+	if node.LeafNode {
+		return "L"
+	}
+	return "(" + treeShape(node.Left) + treeShape(node.Right) + ")"
+}
+
+// TestApplyPoolAdjustmentsPreservesShape pins the property that makes it safe to
+// run the placement pass BEFORE SubdivideTree rather than inside the per-page
+// render (bc-draw Phase 3).
+//
+// treeAdjustment only ever exchanges two LEAVES: its first branch swaps two leaf
+// children, and its second swaps a leaf child with node.Right.Left - which is
+// itself always a leaf, because CreateBalancedTree only ever gives a node a leaf
+// left child when that node spans 2 or 3 entrants, and a 3-entrant node's right
+// child is a 2-leaf pair. So placement moves labels between slots and never
+// moves a slot.
+//
+// That is the whole safety argument for the hoist: page boundaries are chosen by
+// SubdivideTree from the tree's topology, so adjusting first cannot move them.
+// If this ever goes red, RenderKnockoutPages is splitting a differently-shaped
+// tree than it used to and every page boundary in the sweep is suspect.
+func TestApplyPoolAdjustmentsPreservesShape(t *testing.T) {
+	for nPools := 1; nPools <= 12; nPools++ {
+		for poolWinners := 1; poolWinners <= 4; poolWinners++ {
+			t.Run(fmt.Sprintf("%d_pools_%d_winners", nPools, poolWinners), func(t *testing.T) {
+				pools, _ := makePools(nPools)
+				finals := GenerateFinals(pools, poolWinners)
+
+				before := CreateBalancedTree(finals)
+				after := CreateBalancedTree(finals)
+				ApplyPoolAdjustments(after)
+
+				require.Equal(t, treeShape(before), treeShape(after),
+					"placement must not change the tree's topology")
+				assert.ElementsMatch(t, collectOrderedLeaves(before), collectOrderedLeaves(after),
+					"placement must not add, drop or duplicate an entrant")
+
+				// Running it twice must not change the SHAPE either, whatever
+				// it does to the labels (see TestApplyPoolAdjustmentsIsNotIdempotent).
+				ApplyPoolAdjustments(after)
+				assert.Equal(t, treeShape(before), treeShape(after),
+					"a second placement pass must not change the topology either")
+
+				// The consequence the hoist depends on, asserted directly: the
+				// page split is identical whether it runs before or after
+				// placement, for every page count the layout can ask for.
+				for _, numPages := range []int{1, 2, 4, 8} {
+					pagesBefore := SubdivideTree(before, numPages)
+					pagesAfter := SubdivideTree(after, numPages)
+					require.Lenf(t, pagesAfter, len(pagesBefore), "%d pages: page count moved", numPages)
+					for i := range pagesBefore {
+						assert.Equalf(t, treeShape(pagesBefore[i]), treeShape(pagesAfter[i]),
+							"%d pages: page %d covers a different region of the draw", numPages, i+1)
+					}
+				}
+			})
+		}
+	}
+}
+
+// TestApplyPoolAdjustmentsIsNotIdempotent pins a sharp edge on the placement
+// pass, found while hoisting it out of PrintLeafNodes (bc-draw Phase 3).
+//
+// Running the pass TWICE can produce a different draw from running it once, so
+// "place the tree" is an operation a tree must undergo exactly once. The cause
+// is the same short sight TestTreeAdjustmentByeAllocation pins: treeAdjustment's
+// bye branch compares node.Left against node.Right.Left, but the recursion then
+// visits node.Right and may swap a lower-ranked leaf INTO node.Right.Left, which
+// the already-completed comparison at node never sees. A second pass sees it and
+// swaps again. It needs three ranks in play to bite, so it appears from 3
+// qualifiers per pool upward and never at 1 or 2.
+//
+// This is NOT introduced by the hoist - ApplyPoolAdjustments has always been the
+// engine's whole-tree pass - but the hoist puts it inside RenderKnockoutPages,
+// which four generators call, so the precondition is now worth stating: hand the
+// funnel an UNPLACED tree. Every caller does today (each builds a fresh
+// CreateBalancedTree). bc-draw Phase 4 replaces this pass; a rewrite that is
+// order-independent would make this test's expectation flip to "unchanged",
+// which is an improvement to record deliberately, not to absorb.
+func TestApplyPoolAdjustmentsIsNotIdempotent(t *testing.T) {
+	// The smallest configuration in the sweep that exhibits it.
+	pools, _ := makePools(2)
+	tree := CreateBalancedTree(GenerateFinals(pools, 3))
+
+	ApplyPoolAdjustments(tree)
+	once := collectOrderedLeaves(tree)
+	require.Equal(t,
+		[]string{"Pool A-1st", "Pool B-2nd", "Pool A-2nd", "Pool B-3rd", "Pool B-1st", "Pool A-3rd"},
+		once, "one placement pass")
+
+	ApplyPoolAdjustments(tree)
+	twice := collectOrderedLeaves(tree)
+	assert.Equal(t,
+		[]string{"Pool A-1st", "Pool B-2nd", "Pool A-2nd", "Pool B-1st", "Pool B-3rd", "Pool A-3rd"},
+		twice, "a second pass moves Pool B-1st into the bye slot the first pass left to Pool B-3rd")
+	require.NotEqual(t, once, twice, "the whole point: placement is not idempotent")
+
+	// At 1 and 2 qualifiers there are too few ranks for the blind spot to
+	// open, and the pass IS stable.
+	for _, poolWinners := range []int{1, 2} {
+		for nPools := 1; nPools <= 12; nPools++ {
+			stable := CreateBalancedTree(GenerateFinals(makePoolsOnly(nPools), poolWinners))
+			ApplyPoolAdjustments(stable)
+			first := collectOrderedLeaves(stable)
+			ApplyPoolAdjustments(stable)
+			assert.Equalf(t, first, collectOrderedLeaves(stable),
+				"%d pools x %d qualifiers must be stable", nPools, poolWinners)
+		}
+	}
+}
+
+// makePoolsOnly is makePools without the names return, for callers that only
+// need the pools.
+func makePoolsOnly(n int) []Pool {
+	pools, _ := makePools(n)
+	return pools
 }
 
 func TestTreeAdjustmentSwapsBothLeaves(t *testing.T) {

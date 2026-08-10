@@ -55,17 +55,21 @@ func CreateBalancedTree(leafValues []string) *Node {
 	return node
 }
 
-func PrintLeafNodes(node *Node, f *excelize.File, sheetName string, startCol int, startRow int, depth int, pools bool, matchWinners map[string]MatchWinner) {
+// PrintLeafNodes draws one bracket page: it writes every leaf's label and every
+// junction's bracket lines, and stamps each internal node's sheet/cell
+// coordinates so FillInMatches can write the match numbers into them.
+//
+// It is a PURE RENDERER - it never reorders the tree. Pool placement is one
+// whole-tree pass (ApplyPoolAdjustments) run upstream by RenderKnockoutPages,
+// before the tree is split into pages. It used to run here instead, per page
+// subtree and as a side effect of drawing, which meant the Excel path applied
+// placement to a DIFFERENT scope than the engine path applied it to (the engine
+// always adjusted the whole tree), and nodes above the page roots were never
+// visited at all. Do not reintroduce a mutation here.
+func PrintLeafNodes(node *Node, f *excelize.File, sheetName string, startCol int, startRow int, depth int, matchWinners map[string]MatchWinner) {
 	if node == nil {
 		return
 	}
-
-	if pools && !node.LeafNode {
-		// Need to ensure pools winners stay on top and pool winners are the ones that get a bye
-		treeAdjustment(node)
-	}
-	// emptyRows:= 2 * (depth + 1) //int(math.Pow(2, float64(depth))) - 3
-	// fmt.Println(emptyRows)
 
 	size := int(math.Pow(2, float64(depth-1)))
 
@@ -77,8 +81,8 @@ func PrintLeafNodes(node *Node, f *excelize.File, sheetName string, startCol int
 		node.SheetName = sheetName // How is this used?
 	}
 
-	PrintLeafNodes(node.Left, f, sheetName, startCol-2, startRow, depth-1, pools, matchWinners)
-	PrintLeafNodes(node.Right, f, sheetName, startCol-2, startRow+size, depth-1, pools, matchWinners)
+	PrintLeafNodes(node.Left, f, sheetName, startCol-2, startRow, depth-1, matchWinners)
+	PrintLeafNodes(node.Right, f, sheetName, startCol-2, startRow+size, depth-1, matchWinners)
 }
 
 // treeAdjustment repositions leaf nodes within a two-level subtree so that
@@ -341,9 +345,16 @@ func TreeToLeafArray(node *Node) []string {
 	return append(left, right...)
 }
 
-// ApplyPoolAdjustments applies the same pre-order treeAdjustment traversal
-// that PrintLeafNodes performs when pools=true. Use before TreeToLeafArray
-// to reproduce the pool-finalist ordering the Excel bracket applies.
+// ApplyPoolAdjustments runs the pool-finalist placement pass over a WHOLE tree:
+// a pre-order treeAdjustment traversal that lifts pool winners to the top of
+// each pairing and into the bye slots.
+//
+// This is the single placement pass for BOTH draw paths. The engine calls it
+// before TreeToLeafArray (bracket.go at draw, knockout.go for the re-seed
+// template); RenderKnockoutPages calls it before splitting the tree into Excel
+// pages. Call it on the tree BEFORE anything derives structure from it -
+// SubdivideTree, TreeToLeafArray or BuildEliminationMatchRounds - so every
+// derived view describes the same placement.
 func ApplyPoolAdjustments(node *Node) {
 	if node == nil || node.LeafNode {
 		return

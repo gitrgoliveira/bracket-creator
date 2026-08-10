@@ -55,9 +55,12 @@ func SetTreePageLayout(f *excelize.File, sheetName string, depth, lastRow int) {
 // workbook (export) - the loop used to be copied at each call site, and a
 // geometry fix in one had to be replicated by hand into the others.
 //
-// Passing pools drives PrintLeafNodes' pool-winner tree adjustment (winners on
-// top, byes to the seeded side) as well as the roster overlay. Callers with no
-// pool phase (create-playoffs) pass nil and get neither.
+// Passing pools drives the per-page roster overlay. It no longer drives any
+// reordering: the pool-winner placement pass (winners on top, byes to the
+// seeded side) is a whole-tree pass RenderKnockoutPages runs BEFORE the tree is
+// split into these subtrees, so by the time a page is drawn its leaves are
+// already final. Callers with no pool phase (create-playoffs) pass nil and get
+// neither the overlay nor the placement pass.
 //
 // The consumed SheetTree template is NOT deleted here: callers that skip
 // rendering entirely (a league has no knockout) must still delete it, so
@@ -89,7 +92,7 @@ func RenderTreePages(f *excelize.File, subtrees []*Node, numCourts int, pools []
 		// The title formula prepends data!$B$1 (the user-supplied title prefix),
 		// so the page title itself is just the shiaijo label.
 		SetTreeSheetTitle(f, pageSheet, "Shiaijo "+CourtLabel(SubtreeCourtIndex(len(subtrees), numCourts, i)), TreePageLastCol(depth))
-		PrintLeafNodes(subtree, f, pageSheet, 2*depth, startRow, depth, hasPools, matchWinners)
+		PrintLeafNodes(subtree, f, pageSheet, 2*depth, startRow, depth, matchWinners)
 
 		lastRow := TreePageLastRow(depth, startRow)
 		if hasPools {
@@ -101,21 +104,39 @@ func RenderTreePages(f *excelize.File, subtrees []*Node, numCourts int, pools []
 	return nil
 }
 
-// RenderKnockoutPages computes the court-aware page layout for a knockout
-// tree, renders one bracket page per subtree via RenderTreePages, and numbers
-// the bracket junctions, returning the per-round match nodes (earliest round
-// first, final last) and the page count. Bundling the sequence makes its
-// ordering invariant unbreakable by construction: rendering stamps each
-// internal node's sheet/cell coordinates, which FillInMatches writes the
-// match numbers into (with a FillInMatches-first order every write is
-// silently skipped and the pages carry no numbers), and the pool-seeding
-// tree adjustment lands before the rounds are traversed, so Elimination
-// blocks always describe the same tree the pages show.
+// RenderKnockoutPages places the pool finalists, computes the court-aware page
+// layout for a knockout tree, renders one bracket page per subtree via
+// RenderTreePages, and numbers the bracket junctions, returning the per-round
+// match nodes (earliest round first, final last) and the page count.
+//
+// It is the single funnel for every workbook generator (cmd/create-pools,
+// cmd/create-playoffs, internal/export/builder, internal/engine/export), which
+// is what lets two invariants be enforced here once instead of at four call
+// sites:
+//
+//   - Placement first. ApplyPoolAdjustments runs on the WHOLE tree before it is
+//     split, so the pages, the Elimination blocks and the engine's own bracket
+//     all describe the same draw. It used to run inside PrintLeafNodes, per page
+//     subtree, which scoped it to whatever SubdivideTree had handed over.
+//     Pass an UNPLACED tree: placement is not idempotent from 3 qualifiers per
+//     pool up (TestApplyPoolAdjustmentsIsNotIdempotent), so a caller that has
+//     already run ApplyPoolAdjustments would get a different draw here. Every
+//     caller builds a fresh CreateBalancedTree, which is the shape to keep.
+//   - Render before numbering. Rendering stamps each internal node's sheet/cell
+//     coordinates and FillInMatches writes the match numbers into them; with a
+//     FillInMatches-first order every write is silently skipped and the pages
+//     carry no numbers.
 //
 // numEntrants is the leaf count tree was built from; singleTree forces the
 // whole bracket onto one page (the CLI --single-tree flag). Deleting the
 // consumed SheetTree template stays with the caller (see RenderTreePages).
 func RenderKnockoutPages(f *excelize.File, tree *Node, numEntrants, numCourts int, singleTree bool, pools []Pool, poolCoords map[string]cellCoord, playerCoords map[string]playerCellCoord, matchWinners map[string]MatchWinner) ([][]*Node, int, error) {
+	// Same gate RenderTreePages applies to the roster overlay: a knockout with
+	// no pool phase (create-playoffs) has no pool finishing positions to place
+	// by, and its leaf labels are competitor names.
+	if len(pools) > 0 {
+		ApplyPoolAdjustments(tree)
+	}
 	numPages, err := TreePageLayout(numEntrants, numCourts, singleTree)
 	if err != nil {
 		return nil, 0, fmt.Errorf("compute tree page layout: %w", err)

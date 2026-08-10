@@ -33,7 +33,11 @@ type pageCourtView struct {
 }
 
 // renderedPageViews reproduces exactly what RenderTreePages does for page
-// labelling and roster overlay, using the engine's whole-tree adjustment order.
+// labelling and roster overlay. The whole-tree placement pass it applies is now
+// the only one there is: RenderKnockoutPages runs ApplyPoolAdjustments before
+// splitting the tree, so this model and the rendered workbook see the same
+// leaves (it used to be the ENGINE's order only, because the Excel path adjusted
+// per page subtree instead).
 func renderedPageViews(t *testing.T, nPools, poolWinners, numCourts int) []pageCourtView {
 	t.Helper()
 

@@ -298,7 +298,61 @@ func (e *Engine) buildBracketFromLeaves(comp *state.Competition, leaves []string
 		scheduleBronze(bracket, comp, tournament)
 	}
 
+	// Freeze the draw-time slot labels (bc-draw). Runs LAST, after byes have
+	// resolved, winners have propagated and the bronze exists, so what is
+	// recorded is exactly the sides this draw produced.
+	recordDrawPlaceholders(bracket, leaves)
+
 	return bracket, nil
+}
+
+// recordDrawPlaceholders copies each match's draw-time SideA/SideB/Winner into
+// its PlaceholderA/B/Winner fields, so ResolveQualifiedPools can later tell which
+// pool finisher owns a slot WITHOUT recomputing the draw (see the field comments
+// on state.BracketMatch, and legacy_template_v1.go for why that recompute was a
+// live-event hazard).
+//
+// Only for a pool-fed knockout: a standalone playoffs bracket's leaves are real
+// competitors, nothing ever "resolves" into it, and recording player names under
+// a field called "placeholder" would both mislead and double the size of every
+// bracket.json for no reader. Sniffing the leaves rather than taking a flag keeps
+// the single-signature builder its three call sites already share; a leaf array
+// either came from helper.GenerateFinals or it did not.
+//
+// It is NOT a general "original sides" snapshot: it is written once at draw and
+// never updated, which is precisely what makes it a stable resolution key.
+func recordDrawPlaceholders(bracket *state.Bracket, leaves []string) {
+	if bracket == nil || !leavesCarryPoolPlaceholders(leaves) {
+		return
+	}
+	stamp := func(m *state.BracketMatch) {
+		m.PlaceholderA = m.SideA
+		m.PlaceholderB = m.SideB
+		m.PlaceholderWinner = m.Winner
+	}
+	for ri := range bracket.Rounds {
+		for mi := range bracket.Rounds[ri] {
+			stamp(&bracket.Rounds[ri][mi])
+		}
+	}
+	if bracket.ThirdPlaceMatch != nil {
+		// Empty in every current draw (the bronze is fed by semifinal losers
+		// long after this runs); stamped anyway so the bronze can never become
+		// the one match whose placeholder silently went missing.
+		stamp(bracket.ThirdPlaceMatch)
+	}
+}
+
+// leavesCarryPoolPlaceholders reports whether a leaf array is a pool-fed draw,
+// i.e. holds at least one "Pool X-Nth" finalist placeholder. Byes ("") and
+// resolved player names are not placeholders.
+func leavesCarryPoolPlaceholders(leaves []string) bool {
+	for _, l := range leaves {
+		if helper.IsPoolFinalistPlaceholder(l) {
+			return true
+		}
+	}
+	return false
 }
 
 // bronzeDefaultCourt chooses the 3rd-place (bronze) match's default court. The

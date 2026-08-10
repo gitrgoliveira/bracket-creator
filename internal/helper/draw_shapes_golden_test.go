@@ -264,8 +264,11 @@ func buildDrawShapeCase(numPools, poolWinners, courts int) drawShapeCase {
 	}
 	c.PoolToCourt = assignments
 
-	// The live draw pipeline, verbatim (engine/knockout.go ResolveQualifiedPools
-	// and engine/bracket.go both run exactly these four calls).
+	// The live draw pipeline, verbatim: engine/bracket.go
+	// generatePoolPreviewBracket runs exactly these four calls. (So did
+	// ResolveQualifiedPools, until it stopped recomputing the placeholder
+	// template on every pool completion and started reading the labels the draw
+	// persisted on each match instead.)
 	finals := GenerateFinals(pools, poolWinners)
 	tree := CreateBalancedTree(finals)
 	ApplyPoolAdjustments(tree)

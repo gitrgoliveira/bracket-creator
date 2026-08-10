@@ -1049,6 +1049,34 @@ type BracketMatch struct {
 	// 0 = unstamped/legacy: arrival-order, still applies (never dropped). See
 	// domain.ApplyByTimestamp.
 	ModifiedAt int64 `json:"modifiedAt,omitempty"`
+	// PlaceholderA / PlaceholderB / PlaceholderWinner record what SideA / SideB /
+	// Winner held at DRAW time, before any pool resolved. They are written once,
+	// by engine.buildBracketFromLeaves, for a pool-fed (mixed) knockout whose
+	// leaves are pool-origin placeholders ("Pool A-1st", …), and are NEVER
+	// rewritten afterwards, unlike the live sides, which
+	// engine.ResolveQualifiedPools overwrites in place with real competitor
+	// names as each pool finishes.
+	//
+	// They exist so the resolver can map "which pool finisher belongs in this
+	// slot" WITHOUT recomputing the draw. Before this, it rebuilt the whole
+	// placeholder template from the live draw algorithm on every pool completion
+	// and matched it against the running bracket BY POSITION, which is correct
+	// only while the placement algorithm never changes; an operator upgrading
+	// between a competition's draw and the end of its pool phase would have had
+	// qualifiers written into the wrong slots of a live knockout, undetected
+	// (the structural guards only catch differing round/match counts).
+	//
+	// Additive and backward compatible in BOTH directions: omitempty keeps them
+	// out of every non-pool bracket (standalone playoffs leaves are real names,
+	// so nothing is recorded), an older binary ignores them, and a bracket drawn
+	// before they existed carries none, which is exactly how the resolver detects
+	// a legacy file (see engine/legacy_template_v1.go). The bronze
+	// (ThirdPlaceMatch) carries them too for uniformity; in every current draw
+	// they are empty there, because its sides are filled from the semifinal
+	// losers well after the bracket is built.
+	PlaceholderA      string `json:"placeholderA,omitempty"`
+	PlaceholderB      string `json:"placeholderB,omitempty"`
+	PlaceholderWinner string `json:"placeholderWinner,omitempty"`
 }
 
 type Bracket struct {

@@ -3958,6 +3958,26 @@ components:
           readOnly: true
           allOf:
             - $ref: '#/components/schemas/TeamResultLine'
+        placeholderA:
+          type: string
+          readOnly: true
+          description: >
+            The pool-origin label this slot held at draw time (e.g. "Pool A-1st"),
+            for a mixed (pools then knockout) competition. Written once when the
+            bracket is drawn and never rewritten, unlike `sideA`, which is replaced
+            with the real competitor as that pool finishes. Absent on a standalone
+            playoffs bracket (its leaves are real competitors) and on a bracket
+            drawn before this field existed.
+        placeholderB:
+          type: string
+          readOnly: true
+          description: The draw-time counterpart of `sideB`. See `placeholderA`.
+        placeholderWinner:
+          type: string
+          readOnly: true
+          description: >
+            The draw-time counterpart of `winner`, non-empty only where the draw
+            pre-filled a bye winner. See `placeholderA`.
 
     CourtMatchSide:
       type: object

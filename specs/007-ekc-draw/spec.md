@@ -715,6 +715,43 @@ it).
 **This is the one item in bc-draw that can corrupt a live event. Phase 4 MUST NOT ship
 without one of the two fixes below.**
 
+**STATUS: CLOSED, ahead of Phase 4.** Option (b) shipped, with the preferred legacy
+handling: `state.BracketMatch` now persists `placeholderA/B/Winner`, written by
+`buildBracketFromLeaves` for pool-fed draws; `ResolveQualifiedPools` reads them and no
+longer recomputes anything; a bracket without them is reconstructed once by the frozen
+`internal/engine/legacy_template_v1.go` and backfilled. The rest of this section is kept
+as the reasoning of record. Phase 4's only remaining obligation here is to delete the
+frozen file (and its test) one release after it ships.
+
+Four corrections to the design sketch below, found once the code was in front of us and
+recorded here because they change what a reimplementation would have to do:
+
+1. **"Record a placeholder when the leaves are pool-origin" must be read per BRACKET,
+   not per match.** A round-2 match's sides are propagated labels or `"Winner of rX-mY"`,
+   neither of which is a pool-origin label, so a per-match rule leaves those fields empty
+   and makes a fully-recorded bracket indistinguishable from a legacy one. The draw
+   records every match once it is pool-fed, and legacy detection asks whether ANY match
+   carries a placeholder.
+2. **`Winner` is load-bearing, not defensive.** A bye match carries a propagated
+   placeholder in `Winner`, and the sides downstream of it are propagated placeholders
+   too rather than `"Winner of ..."` strings. Freezing only the round-1 leaf array would
+   therefore have been wrong: the frozen builder has to reproduce the winner propagation
+   as well.
+3. **The frozen copy is smaller than this section claims.** It does NOT need
+   `buildBracketFromLeaves`' ID assignment, court derivation, scheduling, display
+   metadata or match numbering: none of those affect which label owned a slot. Only the
+   side/winner derivation is in scope, which is why the frozen file is a few hundred
+   lines rather than a fork of the builder. That makes option (b) cheaper than argued
+   below, not more expensive.
+4. **A backfill that resolves nothing must still persist, and must NOT clear
+   `Preview`.** Reconstructing and saving the placeholders is not the same event as a
+   pool resolving, and conflating them would flip a preview bracket to live on a
+   competition where no pool has finished.
+
+The hazard is also slightly wider than stated below: the recompute was equally wrong if
+the POOLS changed after the draw, not only if the algorithm did. Reading a persisted
+label fixes both.
+
 ### The hazard
 
 For a mixed competition the preview bracket **is** the live in-place knockout: it is

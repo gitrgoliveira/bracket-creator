@@ -238,6 +238,30 @@ func SanitizeName(name string) string {
 	return fmt.Sprintf("%c. %s", firstName[0], lastName)
 }
 
+// PoolCount reports how many pools CreatePools will build for numPlayers
+// participants at poolSize, without building them.
+//
+// This is the ONE definition of the pool count. CreatePools calls it, and so
+// must every caller that needs the count before the pools exist, most notably
+// PoolSeeding, whose second argument is the pool COUNT and not the pool SIZE.
+// Keeping a second copy of this arithmetic is exactly how the engine came to
+// hand PoolSeeding a pool size (bc-draw Phase 2a).
+//
+// isMax mirrors CreatePools' parameter: true means poolSize is the MAXIMUM
+// players per pool (ceiling division, PoolSizeMode "max"), false means it is
+// the minimum/target size (floor division). The result is 0 when no pool can
+// be formed at all (non-positive poolSize, no players, or fewer players than
+// poolSize in min mode); CreatePools turns that into an error.
+func PoolCount(numPlayers, poolSize int, isMax bool) int {
+	if poolSize <= 0 || numPlayers <= 0 {
+		return 0
+	}
+	if isMax {
+		return (numPlayers + poolSize - 1) / poolSize
+	}
+	return numPlayers / poolSize
+}
+
 func CreatePools(players []Player, poolSize int, isMax bool) ([]Pool, error) {
 	// Guard before the division below: poolSize is the divisor in both the
 	// "max" and fixed-size branches, so a zero/negative value panics with an
@@ -247,12 +271,7 @@ func CreatePools(players []Player, poolSize int, isMax bool) ([]Pool, error) {
 	if poolSize <= 0 {
 		return nil, fmt.Errorf("cannot create pools: pool size must be at least 1, got %d", poolSize)
 	}
-	var totalPools int
-	if isMax {
-		totalPools = (len(players) + poolSize - 1) / poolSize
-	} else {
-		totalPools = len(players) / poolSize
-	}
+	totalPools := PoolCount(len(players), poolSize, isMax)
 
 	if totalPools == 0 && len(players) > 0 {
 		return nil, fmt.Errorf("cannot create pools: player count (%d) is less than pool size (%d)", len(players), poolSize)

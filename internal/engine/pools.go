@@ -20,20 +20,56 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 		return validationErrorf("competition %s cannot start: pool size must be at least 1, got %d, set a pool size before starting", comp.ID, comp.PoolSize)
 	}
 
+	isMax := comp.PoolSizeMode == "max"
+
+	// numCourts is the modulus for BOTH the seed spread and the pool
+	// deinterleave, so it is derived once here. An unset court list means one
+	// unnamed court; helper.PoolSeeding and helper.ReorderPoolsForCourts each
+	// treat anything below 1 as 1, and normalising up front keeps them and the
+	// AssignPoolsToCourts call below reading off a single value.
+	numCourts := len(comp.Courts)
+	if numCourts == 0 {
+		numCourts = 1
+	}
+
 	// helper.Player is a type alias for domain.Player (NFR-007); the
 	// Excel-coupled helpers accept domain values directly.
 	if len(seeds) > 0 {
 		if err := helper.ApplySeeds(players, seeds); err != nil {
 			return fmt.Errorf("applying seeds: %w", err)
 		}
-		players = helper.PoolSeeding(players, comp.PoolSize, len(comp.Courts))
 	}
 
-	isMax := comp.PoolSizeMode == "max"
+	// Mirrors cmd/create-pools.go exactly (bc-draw Phase 2a). Two things about
+	// this call had drifted from the CLI:
+	//
+	//  1. The second argument is the pool COUNT, not the pool SIZE. Passing
+	//     comp.PoolSize put every seed in the wrong pool whenever the two
+	//     differ, which is almost always. helper.PoolCount is the same function
+	//     CreatePools uses to size its own pool slice, so the two cannot drift.
+	//  2. It runs UNCONDITIONALLY, not only when seeds exist. With zero seeds
+	//     PoolSeeding still clusters players by dojo so that CreatePools'
+	//     round-robin fill lands club-mates in different pools; gating it on
+	//     seeds disabled that for every unseeded competition, which is the
+	//     common case in the app and never the case in the CLI.
+	players = helper.PoolSeeding(players, helper.PoolCount(len(players), comp.PoolSize, isMax), numCourts)
+
 	pools, err := helper.CreatePools(players, comp.PoolSize, isMax)
 	if err != nil {
 		return err
 	}
+
+	// Deinterleave pools into court blocks, at the same point in the sequence
+	// the CLI does it (seed, create, reorder). PoolSeeding's placement maths
+	// assumes this has run (see the doc comment on helper.PoolSeeding), and
+	// without it helper.AssignPoolsToCourts' contiguous blocks piled every
+	// oversized pool onto the first court: 26 players at PoolSize 4 in "max"
+	// mode on 2 courts gave court A 16 players (pools 0-3, all oversized) and
+	// court B 10. Everything below that reads pool order or pool names runs
+	// after this call, so they all see the reordered, realphabetised list: the
+	// mixed-format validation messages, AssignPlayerNumbers, SavePools, the
+	// MatchResult ID prefix and AssignPoolsToCourts.
+	pools = helper.ReorderPoolsForCourts(pools, numCourts)
 
 	// A "mixed" competition is "Pools + Knockout" by definition, a single
 	// pool collapses to a round-robin with a tacked-on 2-player "final", which
@@ -88,11 +124,6 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 	// Save pools
 	if err := e.store.SavePools(comp.ID, pools); err != nil {
 		return err
-	}
-
-	numCourts := len(comp.Courts)
-	if numCourts == 0 {
-		numCourts = 1
 	}
 
 	if len(pools) == 1 && numCourts > 1 {

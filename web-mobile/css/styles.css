@@ -2105,7 +2105,11 @@ a:hover {
      ragged right edge. min-width keeps the inline editor from squashing when
      it DOES sit beside the bracket. */
   flex: 1 1 520px;
-  min-width: 500px;
+  /* min(500px, 100%): keep the 500px floor that stops the inline editor from
+     squashing, but never demand more than the row actually has. A flat 500px
+     pushed the panel outside its grid track on ~800px tablets (the track is
+     narrower than 500 there) and re-introduced page-level sideways scroll. */
+  min-width: min(500px, 100%);
 }
 /* Phones / small tablets: drop the minimum so the panel fills the single
    column instead of overflowing; the editor's own coarse-pointer rules handle
@@ -2548,6 +2552,26 @@ a.vlist-item {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
+  }
+}
+
+/* The viewer shell caps at 480/768/1024 because everything else in it is a
+   READING column: competition names, schedule rows, standings tables. Those
+   need a bounded line length, and that cap is what this rule deliberately does
+   NOT touch. The bracket tab is the one exception: it holds a single wide
+   DIAGRAM, and the cap was clipping its most important card. A 7-pool /
+   2-qualifier draw is a 4-round, 1124px-wide ladder, so inside a 1024px shell
+   the Final hung ~80px past the canvas edge and rendered with its match number
+   and "Winner of …" labels sliced in half. Widening the viewport did not help:
+   the shell stayed 1024 and simply grew the empty margins.
+   Only the bracket tab gets the wider cap (ViewerCompetition adds the modifier
+   for effectiveTab === "bracket"), so no text surface is stretched. The canvas
+   keeps overflow:auto plus its right-edge fade, so brackets bigger than the cap
+   still scroll deliberately instead of being cut. Must stay AFTER the
+   .viewer__shell media rules above: same specificity, later rule wins. */
+@media (min-width: 768px) {
+  .viewer__shell--bracket {
+    max-width: 1440px;
   }
 }
 
@@ -3523,7 +3547,17 @@ button.pool-match-row {
 /* Sidebar (admin tournament) */
 .workspace {
   display: grid;
-  grid-template-columns: 240px 1fr;
+  /* minmax(0, 1fr), NOT a bare 1fr. `1fr` means minmax(auto, 1fr), and that
+     `auto` floors the content track at the item's MIN-CONTENT width. On the
+     bracket page the item is .bracket-layout, whose min-content is the two
+     flex bases side by side (~1150px), so the track grew to 1150 no matter
+     how narrow the window was: the row could then always fit on one line, so
+     flex-wrap never fired, the scoring panel never dropped below the bracket,
+     and .bracket-canvas was left the ~590px remainder while the whole admin
+     page scrolled sideways. Pinning the minimum to 0 lets the track take the
+     space that is actually available and leaves inner scroll containers
+     (.bracket-canvas has overflow:auto) to scroll their own overflow. */
+  grid-template-columns: 240px minmax(0, 1fr);
   gap: 24px;
 }
 
@@ -5998,7 +6032,10 @@ button.pool-match-row {
   }
 
   .workspace {
-    grid-template-columns: 1fr;
+    /* Same minmax(0, …) reasoning as the two-column rule above: a bare 1fr
+       floors the single column at its content's min-content width, which made
+       the bracket page 1154px wide inside a 390px phone. */
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .side-nav {

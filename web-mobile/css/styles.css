@@ -4882,8 +4882,10 @@ button.pool-match-row {
 /* Ippon fill order is fixed OUTSIDE-TO-INSIDE: each side's first ippon sits in
    the slot nearest that competitor's name and fills inward toward the centre.
    "Outer" here means the outer of that SIDE'S TWO SLOTS, never the outer edge
-   of the board: the board's outer edges carry the names, and the slot group as
-   a whole hugs the centre vs (the .sb-slots justify-self rules above). Shiro
+   of the board: the board's outer edges carry the names. Where the browser
+   supports subgrid the slot group as a whole also hugs the centre vs (the
+   .sb-slots justify-self rules above); in the non-subgrid fallback it does not,
+   and only this within-group fill order still holds. Shiro
    (left column) packs its slots to the left (outer) by default; Aka (right
    column) must mirror it, pack to the right and render pts[0] at the outer
    (right) edge. Fixed by FIK Table 1 (p.15), Yuko-datotsu row, which pins the
@@ -5519,9 +5521,10 @@ button.pool-match-row {
 }
 /* Outstanding hansoku: a red ▲ between the offending competitor's name and
    that side's ippon slots, sitting with the centre marks (FIK Table 2, p.16 —
-   its Taisho row puts White's ▲ at the far left and Red's at the far right,
-   each on its own competitor's name side). A 2nd foul discharges it to an H
-   ippon for the opponent. */
+   in its Taisho row each ▲ sits at the name-side edge of that side's own score
+   column, White's against the White name and Red's against the Red name, i.e.
+   outside the ippon slots but still inboard of the name). A 2nd foul discharges
+   it to an H ippon for the opponent. */
 .team-bouts-scroll .tsm-foul-tri {
   color: var(--danger);
   font-size: 13px;

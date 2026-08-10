@@ -45,9 +45,10 @@ func isPurePlayoffs(comp *state.Competition, pools []helper.Pool) bool {
 // load it.
 //
 // Prefer EliminationDraw where the TREE is needed: the leaf list alone cannot
-// reproduce the court regions, and rebuilding a tree from it with
-// CreateBalancedTree would print a different bracket from the one the engine
-// persisted.
+// reproduce the court regions, and a rebuild has to go through
+// helper.BuildSlotTree to collapse the array's bye slots (see EliminationDraw).
+// CreateBalancedTree over this list would print a different bracket from the one
+// the engine persisted.
 func EliminationLeaves(store *state.Store, comp *state.Competition, pools []helper.Pool, bracket *state.Bracket) []string {
 	if draw := poolDraw(comp, pools, len(comp.Courts)); draw != nil {
 		return helper.TreeLeafLabels(draw.Root)
@@ -77,6 +78,21 @@ func poolDraw(comp *state.Competition, pools []helper.Pool, numCourts int) *help
 // bracket (mp-ndfu), and so both render the SAME bracket the engine persisted
 // in bracket.json rather than a re-derivation of it.
 //
+// The playoffs rebuild goes through helper.BuildSlotTree, NOT CreateBalancedTree.
+// PlayoffLeavesFromBracket hands back the frozen bracket's pow2 first round, so
+// a ragged roster's leaf array carries "" bye slots, and only BuildSlotTree
+// collapses an all-empty half instead of giving it a node. CreateBalancedTree
+// gave every "" a leaf, so the sheet drew and numbered a junction for each
+// phantom pair: at 5 entrants, 7 printed junctions for a 4-bout bracket, with
+// Match 2 between two empty slots and every number after it off the bracket's
+// own (bc-cse). That is the same collapse the pool-fed draw applies in
+// buildRegion, so both formats now rebuild a leaf array the one way, and the
+// tree this yields is the tree generatePlayoffs itself cut into regions
+// (CreateBalancedTree over the unpadded entrant list) -- BuildSlotTree is
+// TreeToLeafArray's inverse -- so the printed pages, the printed numbers and the
+// stored bracket all describe one draw. It is also what cmd/create-playoffs
+// prints, since it builds from the entrant list and never pads.
+//
 // Returns nil when there is nothing to render.
 func EliminationDraw(store *state.Store, comp *state.Competition, pools []helper.Pool, bracket *state.Bracket, numCourts int) *helper.KnockoutDraw {
 	if draw := poolDraw(comp, pools, numCourts); draw != nil {
@@ -86,18 +102,23 @@ func EliminationDraw(store *state.Store, comp *state.Competition, pools []helper
 	if len(leaves) == 0 {
 		return nil
 	}
-	return helper.NewPlayoffDraw(helper.CreateBalancedTree(leaves), numCourts)
+	// nil (every slot a bye) falls through NewPlayoffDraw as a nil draw, which
+	// the callers already treat as "nothing to render".
+	return helper.NewPlayoffDraw(helper.BuildSlotTree(leaves), numCourts)
 }
 
 // PlayoffLeavesFromBracket reconstructs the pow2 leaf ordering the engine used to
 // build a pure-playoffs bracket, read straight from the frozen bracket's first
 // round: each round-1 match contributes SideA then SideB, in order, with "" for a
-// bye. Feeding THIS order to the export skeleton guarantees its printed
-// "Round N - Match N" numbering matches the stored bracket's MatchNumber (the two
-// numbering walks are equal-by-contract, assignBracketMatchNumbers vs
-// helper.AssignMatchNumbers), so overlayBracketScores writes each score into the
-// right block even when seeds.csv has drifted. Returns nil for a nil/empty bracket
-// (e.g. a playoffs competition not yet started).
+// bye. Feeding THIS order to the export skeleton is what keeps the printed
+// "Round N - Match N" numbering equal to the stored bracket's MatchNumber even
+// when seeds.csv has drifted, so overlayBracketScores writes each score into the
+// right block. The two numbering walks are equal-by-contract
+// (assignBracketMatchNumbers vs helper.AssignMatchNumbers), but only over the
+// same SHAPE: the leaf order alone is not enough, the rebuild must also collapse
+// the "" slots below, or the numbering walks over a tree with extra nodes in it
+// (see EliminationDraw). Returns nil for a nil/empty bracket (e.g. a playoffs
+// competition not yet started).
 func PlayoffLeavesFromBracket(bracket *state.Bracket) []string {
 	if bracket == nil || len(bracket.Rounds) == 0 {
 		return nil

@@ -388,7 +388,7 @@ func buildRegion(occ []drawOccupant, pools []Pool) *Node {
 	for len(slots) < NextPow2(len(occ)) {
 		slots = append(slots, "")
 	}
-	return buildSlotTree(slots)
+	return BuildSlotTree(slots)
 }
 
 // separateSamePoolPairs repairs the one thing the rank interleave cannot avoid
@@ -484,14 +484,29 @@ func interleaveGroups(groups [][]drawOccupant) []drawOccupant {
 	return out
 }
 
-// buildSlotTree turns a power-of-two slot array into a bracket subtree by
+// BuildSlotTree turns a power-of-two slot array into a bracket subtree by
 // recursive halving, COLLAPSING any half that is entirely empty.
 //
 // The collapse is what turns padding into structure: a side with no occupants
 // contributes no node, so its sibling advances a round instead of playing a
 // phantom match. TreeToLeafArray re-pads the result, so the slot array is
 // recovered byte for byte on the way back out to the engine.
-func buildSlotTree(slots []string) *Node {
+//
+// This is the ONLY correct way to rebuild a tree from a pow2 leaf array, and it
+// is why CreateBalancedTree must not be used for one. CreateBalancedTree gives
+// every slot a node, so an all-empty half becomes a phantom match that
+// PrintLeafNodes draws and AssignMatchNumbers numbers -- a bye's empty slots
+// printed as a bout, and every later number shifted off the bracket's own
+// (bc-cse: a 5-entrant playoffs sheet printed 7 junctions for a 4-bout draw,
+// and the results workbook, which matches score blocks BY printed number, then
+// wrote each result into the wrong block). CreateBalancedTree stays correct for
+// its own input, an entrant list with no bye slots in it: with no empty slot to
+// collapse the two builders produce the identical tree.
+//
+// Exported for the standalone-playoffs export path (engine.EliminationDraw),
+// which rebuilds its tree from the frozen bracket's pow2 first round; the
+// pool-fed draw reaches it through buildRegion.
+func BuildSlotTree(slots []string) *Node {
 	if len(slots) == 0 {
 		return nil
 	}
@@ -502,8 +517,8 @@ func buildSlotTree(slots []string) *Node {
 		return &Node{LeafNode: true, LeafVal: slots[0], Val: 1}
 	}
 	mid := len(slots) / 2
-	left := buildSlotTree(slots[:mid])
-	right := buildSlotTree(slots[mid:])
+	left := BuildSlotTree(slots[:mid])
+	right := BuildSlotTree(slots[mid:])
 	return joinNodes(left, right)
 }
 
@@ -809,7 +824,7 @@ func (p *drawPlan) combine(blockRoots []*Node) (*Node, []*Node) {
 }
 
 // combineNodes joins region subtrees by the same greedy, collapse-on-empty
-// halving buildSlotTree uses, padding at the END so the trailing block takes
+// halving BuildSlotTree uses, padding at the END so the trailing block takes
 // the shallow slot D2 allocates.
 func combineNodes(nodes []*Node) *Node {
 	if len(nodes) == 0 {

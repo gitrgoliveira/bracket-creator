@@ -566,6 +566,65 @@ func mixedParityRoster(numPools int) []domain.Player {
 	return players
 }
 
+// playoffsParityRoster builds n unseeded competitors for a standalone playoffs
+// draw. Unique dojos are irrelevant here (there are no pools to keep apart) but
+// are kept so the roster is the same shape as the mixed one.
+func playoffsParityRoster(n int) []domain.Player {
+	players := make([]domain.Player, n)
+	for i := range players {
+		players[i] = domain.Player{
+			Name: fmt.Sprintf("P%03d", i+1),
+			Dojo: fmt.Sprintf("Dojo %03d", i+1),
+		}
+	}
+	return players
+}
+
+// TestExcelWorkbookMatchesEngineBracket_Playoffs is the same parity check on the
+// STANDALONE playoffs path, which derives its tree from the persisted bracket
+// (EliminationDraw -> PlayoffLeavesFromBracket) rather than from pools.
+//
+// The ragged sizes are the point. A non-power-of-two roster's leaf array carries
+// "" bye slots, and a tree builder that does not collapse an all-empty half
+// draws and numbers a junction for every one of them: at 5 players that is 7
+// printed junctions for a 4-bout bracket, with "Match 2" sitting between two
+// empty slots and every printed number shifted off the bracket's own. 8 and 16
+// are in as controls - they have no byes, so they pass either way and pin that
+// the sweep is measuring the bye handling and not the whole path.
+func TestExcelWorkbookMatchesEngineBracket_Playoffs(t *testing.T) {
+	rosterSizes := []int{5, 6, 7, 8, 12, 16, 24}
+	courtCounts := []int{1, 2, 4}
+
+	for _, size := range rosterSizes {
+		for _, numCourts := range courtCounts {
+			name := fmt.Sprintf("%dplayers_%dshiaijo", size, numCourts)
+			t.Run(name, func(t *testing.T) {
+				eng, store, _ := setupTestEngine(t)
+				compID := fmt.Sprintf("parity-playoffs-%d-%d", size, numCourts)
+
+				courts := make([]string, numCourts)
+				for i := range courts {
+					courts[i] = helper.CourtLabel(i)
+				}
+
+				require.NoError(t, store.SaveCompetition(&state.Competition{
+					ID:        compID,
+					Name:      "Parity",
+					Format:    state.CompFormatPlayoffs,
+					Kind:      "individual",
+					Courts:    courts,
+					StartTime: "09:00",
+					Status:    state.CompStatusSetup,
+				}))
+				require.NoError(t, store.SaveParticipants(compID, playoffsParityRoster(size)))
+				require.NoError(t, eng.StartCompetition(compID))
+
+				assertWorkbookMatchesBracket(t, eng, store, compID)
+			})
+		}
+	}
+}
+
 // TestExcelWorkbookMatchesEngineBracket_Mixed sweeps pool-fed knockout draws and
 // asserts the exported workbook and the persisted bracket describe the same
 // draw: same entrants in the same order page by page, the same shiaijo per page,

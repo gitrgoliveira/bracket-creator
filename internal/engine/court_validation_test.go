@@ -72,3 +72,61 @@ func TestValidateCourtCount(t *testing.T) {
 		})
 	}
 }
+
+// TestCourtsOutsideTournament pins the orphaned-shiaijo predicate: a
+// competition's courts are a SUBSET of the tournament's, and reducing the
+// venue's court count leaves the competition holding one that no longer
+// exists. Mirrored client-side by
+// web-mobile/js/__tests__/court_membership.test.jsx.
+func TestCourtsOutsideTournament(t *testing.T) {
+	tests := []struct {
+		desc   string
+		comp   []string
+		tourn  []string
+		expect []string
+	}{
+		{"every court still exists", []string{"A", "B"}, []string{"A", "B", "C"}, nil},
+		{"one dropped court", []string{"A", "B", "C", "D"}, []string{"A", "B", "C"}, []string{"D"}},
+		{"reports in the competition's order", []string{"A", "D", "B"}, []string{"A"}, []string{"D", "B"}},
+		{"identical lists", []string{"A", "B"}, []string{"A", "B"}, nil},
+		// Empty comp courts mean "inherit the tournament's", which is
+		// trivially a subset (resolveCompetitionCourts materialises it).
+		{"no allocation yet", nil, []string{"A", "B"}, nil},
+		// Empty tournament courts mean "not known yet" (bootstrap), NOT
+		// "the venue has no courts": flagging here would reject everything.
+		{"tournament courts unknown", []string{"A"}, nil, nil},
+		{"duplicate orphan reported once", []string{"D", "D"}, []string{"A"}, []string{"D"}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.desc, func(t *testing.T) {
+			assert.Equal(t, tc.expect, CourtsOutsideTournament(tc.comp, tc.tourn))
+		})
+	}
+}
+
+// TestValidateCourtsInTournament pins the operator-facing message: it names
+// the missing shiaijo, the courts that DO exist, and both ways out.
+func TestValidateCourtsInTournament(t *testing.T) {
+	t.Run("accepts a subset", func(t *testing.T) {
+		require.NoError(t, ValidateCourtsInTournament([]string{"A", "B"}, []string{"A", "B", "C"}))
+	})
+
+	t.Run("names a single missing shiaijo", func(t *testing.T) {
+		err := ValidateCourtsInTournament([]string{"A", "B", "C", "D"}, []string{"A", "B", "C"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "shiaijo D is not part of this tournament")
+		assert.Contains(t, err.Error(), "the tournament has A, B, C")
+		assert.Contains(t, err.Error(), "reassign")
+	})
+
+	t.Run("agrees in the plural", func(t *testing.T) {
+		err := ValidateCourtsInTournament([]string{"A", "C", "D"}, []string{"A"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "shiaijo C, D are not part of this tournament")
+	})
+
+	t.Run("silent when the tournament courts are unknown", func(t *testing.T) {
+		require.NoError(t, ValidateCourtsInTournament([]string{"A"}, nil))
+	})
+}

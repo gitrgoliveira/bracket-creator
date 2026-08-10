@@ -523,6 +523,26 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   const courtsChanged = (local.courts || []).join(",") !== savedCourts.join(",");
   const blockingCourtsErr = !!courtsErr && courtsChanged;
 
+  // Shiaijo the competition holds that the tournament no longer has (the
+  // operator shrank the venue's court count under a competition already
+  // assigned the removed court). Drives the flagged pill + hint below;
+  // courtPillOptions is what keeps the rendered selection equal to
+  // local.courts, so the screen can never show one allocation and save
+  // another. NOT a Save blocker, for the same reason savedCourtsErr isn't:
+  // the stored value is already in this state and every unrelated edit on
+  // this screen must stay possible. The server refuses the tournament change
+  // that would create this, and refuses to draw while it stands.
+  const courtOptions = window.courtPillOptions(tournament.courts, local.courts);
+  const orphanedCourtsErr = window.orphanedShiaijoError(tournament.courts, local.courts);
+
+  // The single disabled-condition for BOTH Save buttons (header and footer).
+  // Derived once on purpose: the footer button used to repeat the expression
+  // and had drifted, omitting hasDurationError AND blockingCourtsErr, so with
+  // an unpairable shiaijo count the header button greyed out while the footer
+  // one stayed live, fired the PUT and took a 400. Anything that should block
+  // saving belongs here, never at a call site.
+  const saveDisabled = !isDirty || saving || hasDurationError || blockingCourtsErr;
+
   return (
     <div className="card">
       <div className="card__head">
@@ -539,7 +559,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           }}>
             {saveErr ? `⚠ ${saveErr}` : saving ? "Saving…" : hasDurationError ? "⚠ Fix match duration" : blockingCourtsErr ? "⚠ Fix shiaijo count" : isDirty ? "● Unsaved changes" : lastSaved ? `✓ Saved at ${lastSaved}` : ""}
           </div>
-          <button type="button" className="btn btn--primary" onClick={saveNow} disabled={!isDirty || saving || hasDurationError || blockingCourtsErr}>
+          <button type="button" className="btn btn--primary" onClick={saveNow} disabled={saveDisabled}>
             {saving ? "Saving…" : "Save changes"}
           </button>
         </div>
@@ -684,11 +704,30 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             Discard the draw to change pools, courts, or format.
           </div>
         )}
+        {/* Pills come from courtPillOptions, not from tournament.courts, so
+            the rendered selection always equals local.courts: a shiaijo this
+            competition still holds after the tournament dropped it gets its
+            own flagged pill instead of vanishing from the screen while
+            staying on disk. Deselecting it is the fix, so the pill stays
+            clickable. */}
         <div className="radio-group">
-          {tournament.courts.map((cc) => (
-            <button key={cc} className={`radio-pill ${local.courts.includes(cc) ? "is-active" : ""}`} type="button" onClick={() => toggleCourt(cc)} disabled={isDrawReady}>Shiaijo (court) {cc}</button>
+          {courtOptions.map(({ court: cc, selected, inTournament }) => (
+            <button
+              key={cc}
+              className={`radio-pill ${selected ? "is-active" : ""}`}
+              type="button"
+              onClick={() => toggleCourt(cc)}
+              disabled={isDrawReady}
+              style={inTournament ? undefined : { borderColor: "var(--red)", color: selected ? undefined : "var(--red)" }}
+              data-testid={inTournament ? undefined : `orphan-court-${cc}`}
+            >Shiaijo (court) {cc}{inTournament ? "" : " (not in tournament)"}</button>
           ))}
         </div>
+        {orphanedCourtsErr && (
+          <div className="field__hint" style={{ color: "var(--red)", fontWeight: 600 }} data-testid="orphan-shiaijo-hint">
+            {orphanedCourtsErr}
+          </div>
+        )}
         {/* Shiaijo-count rule, shown with the other court hints below so the
             operator reads cap, suggestion and pairing in one place. Rendered
             for ANY unpairable selection, staged or already saved, so the
@@ -897,12 +936,15 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
         </div>
       )}
       {/* Repeat Save at the foot of the long settings form so the operator
-          doesn't have to scroll back to the header after editing. Same handler
-          and disabled rules as the header button. */}
+          doesn't have to scroll back to the header after editing. Same
+          onClick and the SAME `saveDisabled` value as the header button: the
+          two cannot drift because there is only one condition. */}
       <div style={{ marginTop: 20, display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10 }}>
         {saveErr && <span style={{ fontSize: 12.5, color: "var(--red)", fontWeight: 600 }}>⚠ {saveErr}</span>}
-        {!saveErr && isDirty && !saving && <span style={{ fontSize: 12.5, color: "var(--warn)", fontWeight: 600 }}>● Unsaved changes</span>}
-        <button type="button" className="btn btn--primary" onClick={saveNow} disabled={!isDirty || saving}>
+        {!saveErr && hasDurationError && <span style={{ fontSize: 12.5, color: "var(--red)", fontWeight: 600 }}>⚠ Fix match duration</span>}
+        {!saveErr && !hasDurationError && blockingCourtsErr && <span style={{ fontSize: 12.5, color: "var(--red)", fontWeight: 600 }}>⚠ Fix shiaijo count</span>}
+        {!saveErr && !hasDurationError && !blockingCourtsErr && isDirty && !saving && <span style={{ fontSize: 12.5, color: "var(--warn)", fontWeight: 600 }}>● Unsaved changes</span>}
+        <button type="button" className="btn btn--primary" onClick={saveNow} disabled={saveDisabled}>
           {saving ? "Saving…" : "Save changes"}
         </button>
       </div>

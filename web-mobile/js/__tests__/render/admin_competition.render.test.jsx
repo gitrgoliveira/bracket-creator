@@ -121,8 +121,8 @@ function makeTournament(comp, overrides = {}) {
 // fetch) flush and settle their state updates inside the act boundary: the
 // render harness fails the test on the "not wrapped in act(...)" console.error
 // otherwise. Returns the render result; a throw during mount fails the test.
-async function mountSection(section, { comp = makeCompetition(), tweaks = {}, bracket = null } = {}) {
-  const t = makeTournament(comp);
+async function mountSection(section, { comp = makeCompetition(), tweaks = {}, bracket = null, tournament = {} } = {}) {
+  const t = makeTournament(comp, tournament);
   let result;
   await act(async () => {
     result = render(
@@ -302,5 +302,112 @@ describe('AdminCompetition "Complete competition" action (mp-gy6g)', () => {
     await act(async () => { fireEvent.click(btn); });
 
     expect(window.API.completeCompetition).not.toHaveBeenCalled();
+  });
+});
+
+// bc-draw R9 UAT gap 1: the settings screen renders Save TWICE (header and
+// foot of a long form) and the two disabled conditions had drifted. The footer
+// copy omitted both hasDurationError and blockingCourtsErr, so with an
+// unpairable shiaijo count the header greyed out while the footer stayed live,
+// fired the PUT and took a 400. Both now read one derived `saveDisabled`.
+describe('AdminSettings Save buttons (bc-draw R9 gap 1)', () => {
+  const saveButtons = (container) =>
+    Array.from(container.querySelectorAll('button')).filter((b) => b.textContent.trim().startsWith('Save changes'));
+
+  const clickPill = async (container, label) => {
+    const pill = Array.from(container.querySelectorAll('button.radio-pill'))
+      .find((b) => b.textContent.trim() === label);
+    expect(pill, `pill "${label}" not found`).not.toBeUndefined();
+    await act(async () => { fireEvent.click(pill); });
+  };
+
+  it('renders exactly two Save buttons, both disabled while nothing is dirty', async () => {
+    const { container } = await mountSection('settings');
+    const saves = saveButtons(container);
+    expect(saves).toHaveLength(2);
+    saves.forEach((b) => expect(b.disabled).toBe(true));
+  });
+
+  it('enables BOTH Save buttons after a valid court change', async () => {
+    // Guards the fix from over-correcting into "footer always disabled":
+    // A + B is a pairable allocation, so both buttons must go live.
+    const comp = makeCompetition({ courts: ['A'], format: 'playoffs' });
+    const { container } = await mountSection('settings', { comp, tournament: { courts: ['A', 'B', 'C'] } });
+    await clickPill(container, 'Shiaijo (court) B');
+    const saves = saveButtons(container);
+    expect(saves).toHaveLength(2);
+    saves.forEach((b) => expect(b.disabled).toBe(false));
+  });
+
+  it('disables BOTH Save buttons on an unpairable shiaijo count', async () => {
+    const comp = makeCompetition({ courts: ['A', 'B'], format: 'playoffs' });
+    const { container } = await mountSection('settings', { comp, tournament: { courts: ['A', 'B', 'C'] } });
+    await clickPill(container, 'Shiaijo (court) C'); // → A, B, C: 3 shiaijo
+    expect(container.querySelector('[data-testid="odd-shiaijo-hint"]')).not.toBeNull();
+    const saves = saveButtons(container);
+    expect(saves).toHaveLength(2);
+    saves.forEach((b) => expect(b.disabled).toBe(true));
+  });
+});
+
+// bc-draw R9 UAT gap 3: shrinking the tournament's shiaijo count left the
+// competition holding a court the venue no longer has. The pills were built
+// from tournament.courts alone, so a competition storing [A B C D] under a
+// 3-shiaijo tournament rendered three selected pills while four were on disk:
+// the screen showed one allocation and would have saved another, and no rule
+// fired because the SHOWN count (3) was not the STORED count (4).
+describe('AdminSettings orphaned shiaijo (bc-draw R9 gap 3)', () => {
+  const pillLabels = (container) =>
+    Array.from(container.querySelectorAll('button.radio-pill'))
+      .map((b) => b.textContent.trim())
+      .filter((t) => t.startsWith('Shiaijo'));
+
+  const orphanComp = () => makeCompetition({ courts: ['A', 'B', 'C', 'D'], format: 'playoffs' });
+  const threeCourtVenue = { courts: ['A', 'B', 'C'] };
+
+  it('renders a flagged pill for a court the tournament no longer has', async () => {
+    const { container } = await mountSection('settings', { comp: orphanComp(), tournament: threeCourtVenue });
+    const labels = pillLabels(container);
+    // Four pills for four stored courts: what is shown equals what is stored.
+    expect(labels).toHaveLength(4);
+    expect(labels[3]).toContain('D');
+    expect(labels[3]).toContain('not in tournament');
+    expect(container.querySelector('[data-testid="orphan-court-D"]')).not.toBeNull();
+  });
+
+  it('every rendered pill is selected, matching the stored allocation exactly', async () => {
+    const { container } = await mountSection('settings', { comp: orphanComp(), tournament: threeCourtVenue });
+    const selected = Array.from(container.querySelectorAll('button.radio-pill.is-active'))
+      .map((b) => b.textContent.trim())
+      .filter((t) => t.startsWith('Shiaijo'));
+    expect(selected).toHaveLength(4);
+  });
+
+  it('explains the orphaned shiaijo instead of silently hiding it', async () => {
+    const { container } = await mountSection('settings', { comp: orphanComp(), tournament: threeCourtVenue });
+    const hint = container.querySelector('[data-testid="orphan-shiaijo-hint"]');
+    expect(hint).not.toBeNull();
+    expect(hint.textContent).toContain('D');
+    expect(hint.textContent).toContain('no longer part of this tournament');
+  });
+
+  it('says nothing when every assigned shiaijo still exists', async () => {
+    const comp = makeCompetition({ courts: ['A', 'B'], format: 'playoffs' });
+    const { container } = await mountSection('settings', { comp, tournament: threeCourtVenue });
+    expect(container.querySelector('[data-testid="orphan-shiaijo-hint"]')).toBeNull();
+    expect(pillLabels(container)).toHaveLength(3);
+  });
+
+  it('blocks Generate draw and explains why, rather than letting it 400', async () => {
+    // The engine refuses a draw onto a shiaijo the tournament lacks, so the
+    // overview must not offer the button. Needs >=2 players and status setup.
+    const comp = orphanComp();
+    const { container } = await mountSection('overview', { comp, tournament: threeCourtVenue });
+    const draw = Array.from(container.querySelectorAll('button')).find((b) => b.textContent.trim() === 'Generate draw');
+    expect(draw).not.toBeUndefined();
+    expect(draw.disabled).toBe(true);
+    const block = container.querySelector('[data-testid="odd-shiaijo-block"]');
+    expect(block).not.toBeNull();
+    expect(block.textContent).toContain('no longer part of this tournament');
   });
 });

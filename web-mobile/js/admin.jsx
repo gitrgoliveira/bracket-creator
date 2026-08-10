@@ -367,6 +367,13 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     showToast(`${c.name} started`);
   };
 
+  // Re-throws after surfacing the error toast, exactly like updateCompetition
+  // and addCompetition above, so the Edit-details form can put the server's
+  // reason in its own banner. It used to swallow the rejection into a `false`
+  // return, which left an 8-second toast as the only trace of, say, the
+  // orphaned-shiaijo refusal — long gone by the time the operator scrolled
+  // back to the Save button. `false` still means "component unmounted mid-PUT"
+  // (nothing to report to), which is why the boolean survives.
   const updateTournament = async (patch) => {
     try {
       // Surface a new password to the parent BEFORE the API call so the
@@ -407,7 +414,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     } catch (e) {
       if (!mountedRef.current) return false;
       showToast(e.message, "error");
-      return false;
+      throw e;
     }
   };
 
@@ -637,22 +644,23 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       tournament={t}
       onCancel={() => setView({ kind: "dashboard" })}
       onCreate={async (c) => {
+        // Deliberately NOT wrapped in try/catch: addCompetition already
+        // toasts the failure, and the rejection must reach
+        // AdminCreateCompetition so the form can put the server's reason in
+        // its own error banner. Swallowing it here left the operator with a
+        // button that did nothing visible once the toast expired.
+        const created = await addCompetition(c);
+        // Non-blocking court-clash check: warn if the new competition lands
+        // on a shiaijo already in use at the same time. The create still
+        // proceeds; the operator can adjust its start time / courts after.
         try {
-          const created = await addCompetition(c);
-          // Non-blocking court-clash check: warn if the new competition lands
-          // on a shiaijo already in use at the same time. The create still
-          // proceeds; the operator can adjust its start time / courts after.
-          try {
-            const clashes = await window.API.getScheduleClashes(created.id, password);
-            if (Array.isArray(clashes) && clashes.length > 0) {
-              const names = clashes.map((w) => w.otherCompName).join(", ");
-              showToast(`Heads up: court clash with ${names}. Adjust start time or courts in Settings`, "error");
-            }
-          } catch { /* clash check is best-effort; never block creation */ }
-          setView({ kind: "competition", id: created.id, section: "participants" });
-        } catch {
-          // error already alerted inside addCompetition
-        }
+          const clashes = await window.API.getScheduleClashes(created.id, password);
+          if (Array.isArray(clashes) && clashes.length > 0) {
+            const names = clashes.map((w) => w.otherCompName).join(", ");
+            showToast(`Heads up: court clash with ${names}. Adjust start time or courts in Settings`, "error");
+          }
+        } catch { /* clash check is best-effort; never block creation */ }
+        setView({ kind: "competition", id: created.id, section: "participants" });
       }}
       onLogout={onLogout}
       onViewerMode={onViewerMode}

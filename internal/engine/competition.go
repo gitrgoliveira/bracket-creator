@@ -643,6 +643,33 @@ func (e *Engine) runDrawPipeline(id string) error {
 		}
 	}
 
+	// Orphaned-shiaijo gate. Same placement and the same write-time logic as
+	// the pairing gate above, for the same reason: this is the one path both
+	// GenerateDraw and StartCompetition take, so it catches every caller.
+	//
+	// A competition may only be drawn onto shiaijo the tournament actually
+	// has. Without this, shrinking the venue's court count (PUT /tournament)
+	// left the competition's stored list untouched, and the draw happily
+	// scheduled matches onto a court with no operator view: invisible matches
+	// for the whole event. The tournament-side refusal in
+	// handlers_tournament.go stops that happening through the UI; this gate
+	// covers records that are ALREADY orphaned (saved before the guard
+	// existed, imported, or hand-edited) and any caller below the HTTP layer.
+	//
+	// Unlike the pairing rule this one applies to EVERY format: a league or
+	// Swiss competition has no bracket regions to pair, but its matches still
+	// need a court an operator can open. It reads comp.Courts, the same list
+	// the generators below assign from, so what is validated is what is used.
+	tourn, terr := e.store.LoadTournament()
+	if terr != nil {
+		return terr
+	}
+	if tourn != nil {
+		if err := ValidateCourtsInTournament(comp.Courts, tourn.Courts); err != nil {
+			return validationErrorf("competition %s cannot generate a draw: %s", id, err.Error())
+		}
+	}
+
 	// Snapshot the loaded config BEFORE the pipeline mutates anything.
 	// The atomic-commit transform below compares `current` (freshly
 	// reloaded under the lock) to THESE snapshots, not to the

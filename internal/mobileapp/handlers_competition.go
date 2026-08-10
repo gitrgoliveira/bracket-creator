@@ -434,6 +434,21 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
+		// A competition may only be allocated shiaijo the tournament has.
+		// Checked BEFORE resolveCompetitionCourts because an empty list means
+		// "inherit the tournament's", which is trivially a subset. The
+		// operator UI can't author an orphan (its pills come from the
+		// tournament's list), so this is defense against direct API callers;
+		// without it the create succeeds and the failure only surfaces later,
+		// at the engine's draw gate. engine.ValidateCourtsInTournament owns
+		// the message.
+		if createTourn != nil {
+			if err := engine.ValidateCourtsInTournament(comp.Courts, createTourn.Courts); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "courts: " + err.Error()})
+				return
+			}
+		}
+
 		// Guarantee >=1 court: empty competition courts inherit the
 		// tournament's courts so every match carries a real court label
 		// (otherwise the per-court Shiaijo operator view can't surface them).
@@ -719,6 +734,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// these behind `comp.Players == nil` keeps the defense-in-depth
 		// against bad settings PUTs and unblocks roster saves on legacy
 		// state.
+		// Declared out here (not in the settings branch that loads it) so the
+		// update transform below can read it for the orphaned-shiaijo check,
+		// which needs the STORED allocation and therefore runs inside the
+		// transform. Stays nil on the roster-only path, where no court is
+		// being written.
+		var putTourn *state.Tournament
 		if comp.Players == nil {
 			// Reject whitespace-only Name (see POST handler above). The
 			// admin SETTINGS edit path (AdminSettings.saveNow in
@@ -747,11 +768,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// (the worst case is a missed tournament date update, which
 			// would just skip the range check, a harmless skip vs. a
 			// deadlock is the right trade-off).
-			putTourn, putTournErr := store.LoadTournament()
+			loadedTourn, putTournErr := store.LoadTournament()
 			if putTournErr != nil {
 				internalError(c, putTournErr)
 				return
 			}
+			putTourn = loadedTourn
 			if err := validateCompetitionDateInTournament(&comp, putTourn); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
@@ -1037,11 +1059,26 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// all. Checking only the court list would let that through
 				// and leave the operator with a competition that cannot
 				// draw and no message saying why.
+				//
+				// The orphaned-shiaijo rule rides on the same trigger and for
+				// the same reason: a competition left holding a court the
+				// tournament no longer has must stay editable (that is exactly
+				// the operator's route back to a valid allocation, and the
+				// settings screen renders the orphan as a deselectable pill),
+				// so only a CHANGE that still names a missing court is
+				// refused. It is NOT scoped to bracket formats: a league's
+				// matches need an operator view just as much.
 				if strings.Join(comp.Courts, ",") != strings.Join(current.Courts, ",") ||
 					comp.Format != current.Format {
 					if err := validateCompetitionCourtPairing(comp.Courts, comp.Format); err != nil {
 						validationErr = fmt.Errorf("courts: %w", err)
 						return nil, nil
+					}
+					if putTourn != nil {
+						if err := engine.ValidateCourtsInTournament(comp.Courts, putTourn.Courts); err != nil {
+							validationErr = fmt.Errorf("courts: %w", err)
+							return nil, nil
+						}
 					}
 				}
 				// Settings-only merge. Status, Players, and

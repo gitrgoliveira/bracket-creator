@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -82,4 +83,73 @@ func CompetitionDrawsBracket(format string) bool {
 //     operator fixes it by reassigning shiaijo in competition settings.
 func ValidateCourtPairing(numCourts int) error {
 	return helper.ValidateCourtPairing(numCourts)
+}
+
+// CourtsOutsideTournament returns, in the competition's own order, every
+// shiaijo a competition is assigned that the tournament does not have. It is
+// the single source of the "orphaned shiaijo" predicate.
+//
+// A competition's court list is a SUBSET of the venue's: the tournament owns
+// the shiaijo, competitions are allocated some of them. Nothing used to
+// enforce that after creation, so shrinking the tournament's court count left
+// a competition holding a court that no longer exists. Such a court has no
+// operator view (/admin/shiaijo/:court is built from the tournament list), so
+// any match drawn onto it is invisible for the whole event.
+//
+// An empty tournament list returns nothing: it means "not known yet" (the
+// bootstrap window before POST /tournament, and the no-tournament-yet edge
+// resolveCompetitionCourts defends against), not "no courts exist". Treating
+// it as the latter would reject every competition in that window.
+//
+// Duplicates in compCourts are reported once, in first-seen order, so the
+// message never repeats a label.
+//
+// Mirrored client-side as courtsOutsideTournament in
+// web-mobile/js/admin_helpers.jsx, which drives the settings screen's
+// orphaned-shiaijo pill and hint.
+func CourtsOutsideTournament(compCourts, tournCourts []string) []string {
+	if len(compCourts) == 0 || len(tournCourts) == 0 {
+		return nil
+	}
+	have := make(map[string]bool, len(tournCourts))
+	for _, cc := range tournCourts {
+		have[cc] = true
+	}
+	var missing []string
+	seen := make(map[string]bool, len(compCourts))
+	for _, cc := range compCourts {
+		if have[cc] || seen[cc] {
+			continue
+		}
+		seen[cc] = true
+		missing = append(missing, cc)
+	}
+	return missing
+}
+
+// ValidateCourtsInTournament rejects a competition allocation that names a
+// shiaijo the tournament does not have, and owns the operator-facing message
+// for it. Callers: the engine draw gate (runDrawPipeline) and the competition
+// write paths in internal/mobileapp/handlers_competition.go.
+//
+// The draw gate is the authoritative one. Refusing the tournament update
+// while a live competition depends on a removed court (handlers_tournament.go)
+// stops the orphan being CREATED, but records orphaned before that guard
+// existed, or by a hand-edited config.md or an imported manifest, can still
+// reach the pipeline. Blocking there is what makes "a competition can never be
+// drawn onto a shiaijo the tournament does not have" true rather than likely,
+// and it validates the same list the draw then uses.
+func ValidateCourtsInTournament(compCourts, tournCourts []string) error {
+	missing := CourtsOutsideTournament(compCourts, tournCourts)
+	if len(missing) == 0 {
+		return nil
+	}
+	verb := "is"
+	if len(missing) > 1 {
+		verb = "are"
+	}
+	return fmt.Errorf(
+		"shiaijo %s %s not part of this tournament (the tournament has %s): reassign the competition's shiaijo, or add the shiaijo back to the tournament",
+		strings.Join(missing, ", "), verb, strings.Join(tournCourts, ", "),
+	)
 }

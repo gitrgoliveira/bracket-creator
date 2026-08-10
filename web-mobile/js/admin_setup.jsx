@@ -304,6 +304,16 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
         contacts: contacts.filter(c => (c.value || "").trim()).map(c => ({ label: (c.label || "").trim(), value: (c.value || "").trim() })),
         theme: theme || undefined,
       });
+    } catch (e) {
+      // Server rejection (orphaned shiaijo, immutable mode, duplicate court
+      // label, ...). Report it in the form's own banner, not only in the
+      // toast that AdminApp already fired and that expires in 8s. errorField
+      // stays null: the reason may not belong to any single input, so it
+      // renders form-level rather than being mis-attributed to one field.
+      if (mountedRef.current) {
+        setError((e && e.message) || "Could not save the tournament. Please try again.");
+        setErrorField(null);
+      }
     } finally {
       // Release the latch so a failed save can be retried. On success onSave
       // navigates away (this view unmounts); the mountedRef guard skips the
@@ -702,6 +712,25 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     prevCourtsRef.current = tournament.courts;
   }, [tournament.courts]);
   const [error, setError] = useStateA("");
+  // In-flight guard for the create request. Also the reason this component
+  // needs a mountedRef: a SUCCESSFUL create unmounts it (the parent switches
+  // to the new competition's view), so the post-await state updates below
+  // must not fire.
+  const [creating, setCreating] = useStateA(false);
+  const mountedRef = useRefA(true);
+  useEffectA(() => () => { mountedRef.current = false; }, []);
+
+  // Shiaijo-count rule (shiaijoCountError, mirrored from
+  // helper.ValidateCourtPairing), identical to the competition Settings
+  // screen: a competition whose draw builds a knockout bracket runs on 1
+  // shiaijo or an even number, and league/Swiss are out of scope
+  // (formatDrawsBracket). The server rejects an unpairable allocation on
+  // create with a 400, so without this the operator meets a live button, a
+  // failed request and a form that still looks fine. There is no
+  // stored-vs-staged distinction to make here: a create authors a brand-new
+  // allocation, so the hint and the block are the same condition.
+  const courtsErr = window.formatDrawsBracket(format)
+    ? window.shiaijoCountError(selectedCourts.length) : null;
 
   // Auto-stack the default start time after the previous competition on the
   // same day. We take the latest-STARTING same-day competition and add its
@@ -730,9 +759,15 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     return () => { controller.abort(); };
   }, [date, tournament.competitions, password]);
 
-  const toggleCourt = (cc) => setSelectedCourts((sc) => sc.includes(cc) ? sc.filter((c) => c !== cc) : [...sc, cc].sort());
+  const toggleCourt = (cc) => {
+    // Clear a stale banner (client-side guard or server rejection) the moment
+    // the operator changes the allocation, same as every other field's
+    // onChange on this form.
+    setError("");
+    setSelectedCourts((sc) => sc.includes(cc) ? sc.filter((c) => c !== cc) : [...sc, cc].sort());
+  };
 
-  const create = () => {
+  const create = async () => {
     // deriveCompetitionName trims the raw input first so whitespace-only
     // never bypasses the default-fallback (truthy strings of spaces would
     // create a backend-trimmed empty name). See the helper at the top of
@@ -742,6 +777,14 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     const exists = (tournament.competitions || []).some(cc => cc.name.toLowerCase() === finalName.toLowerCase());
     if (exists) {
       setError(`A competition named "${finalName}" already exists. Please use a unique name.`);
+      return;
+    }
+
+    // Shiaijo-count guard. The submit button is already disabled on this
+    // condition; re-checking here keeps the guard true for a programmatic
+    // call and puts the reason in the same banner as every other guard.
+    if (courtsErr) {
+      setError(courtsErr);
       return;
     }
 
@@ -865,7 +908,25 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     if (kind === "team") {
       c.teamMatchType = teamMatchType;
     }
-    onCreate(c);
+    // Surface a SERVER rejection in this form's own error banner, the same
+    // channel every client-side guard above uses. Previously onCreate's
+    // rejection was swallowed by the parent (admin.jsx) and the only trace
+    // was a bottom-of-screen toast that expires after 8s, so any 400 the
+    // client didn't predict (unpairable shiaijo, duplicate prefix, a rule
+    // added server-side later) read to the operator as a dead button. The
+    // toast still fires; this makes the reason persist next to the form.
+    setError("");
+    setCreating(true);
+    try {
+      await onCreate(c);
+    } catch (e) {
+      if (mountedRef.current) {
+        setError((e && e.message) || "Could not create the competition. Please try again.");
+      }
+    } finally {
+      // Skipped on success: onCreate navigates away and unmounts this form.
+      if (mountedRef.current) setCreating(false);
+    }
   };
 
   return (
@@ -1005,6 +1066,14 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
                 <button key={cc} className={`radio-pill ${selectedCourts.includes(cc) ? "is-active" : ""}`} type="button" onClick={() => toggleCourt(cc)}>Shiaijo (court) {cc}</button>
               ))}
             </div>
+            {/* Same hint, same wording and the same position relative to the
+                pills as the competition Settings screen: immediately under
+                the pills, above the concurrency hint. */}
+            {courtsErr && (
+              <div className="field__hint" style={{ color: "var(--red)", fontWeight: 600 }} data-testid="odd-shiaijo-hint">
+                {courtsErr}
+              </div>
+            )}
             <div className="field__hint">Concurrency for this competition equals the number of shiaijo (courts) assigned. Different competitions can share shiaijo (courts); the schedule prevents conflicts.</div>
           </div>
 
@@ -1109,7 +1178,14 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
 
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
             <button type="button" className="btn" onClick={onCancel}>Cancel</button>
-            <button type="button" className="btn btn--primary" onClick={create}>Create & continue →</button>
+            {/* Disabled on the same condition that drives the red hint under
+                the shiaijo pills, so the button never invites a request the
+                server will reject. `creating` additionally blocks a double
+                submit while the POST is in flight. */}
+            <button type="button" className="btn btn--primary" onClick={create} disabled={!!courtsErr || creating}>
+              {creating && <span className="spinner" />}
+              {creating ? "Creating…" : "Create & continue →"}
+            </button>
           </div>
         </div>
       </div>

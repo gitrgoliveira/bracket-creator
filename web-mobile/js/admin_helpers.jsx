@@ -31,7 +31,7 @@ function sideName(side) {
 //
 // Mixed-comp pool-origin caveat: before a pool finishes seeding, knockout
 // bracket leaves carry pool-origin placeholder labels like "Pool A-1st",
-// "Pool B-2nd" (format produced by helper.GenerateFinals / engine/knockout.go).
+// "Pool B-2nd" (format produced by helper.BuildKnockoutDraw / engine/knockout.go).
 // These look like real strings to sideName() but are not real participants.
 // Mirrors the Go regex poolFinalistPlaceholderRE = `^Pool .+-\d+(st|nd|rd|th)$`.
 const BRACKET_PLACEHOLDER_RE = /^Winner of r\d+-m\d+$/;
@@ -425,6 +425,76 @@ function formatDrawsBracket(format) {
   return format !== "league" && format !== "swiss";
 }
 
+// Returns the competition's assigned shiaijo that the TOURNAMENT does not
+// have, in the competition's own order. Mirrors
+// engine.CourtsOutsideTournament (internal/engine/court_validation.go).
+//
+// Reducing the tournament's court count leaves every competition's own list
+// alone, so a competition allocated A–D keeps D after the venue shrinks to
+// A–C. D is then a shiaijo with no operator view, and the draw and schedule
+// would still use it. The server refuses the reduction while a live
+// competition depends on the court and refuses to draw onto one; this helper
+// is how the settings screen SHOWS the leftover rather than quietly hiding it.
+//
+// An empty tournament list returns nothing: it means "not loaded yet", not
+// "the venue has no courts". Duplicates are reported once.
+function courtsOutsideTournament(tournamentCourts, selectedCourts) {
+  const tourn = Array.isArray(tournamentCourts) ? tournamentCourts : [];
+  const sel = Array.isArray(selectedCourts) ? selectedCourts : [];
+  if (!tourn.length || !sel.length) return [];
+  const seen = new Set();
+  return sel.filter((cc) => {
+    if (tourn.includes(cc) || seen.has(cc)) return false;
+    seen.add(cc);
+    return true;
+  });
+}
+
+// The shiaijo pills a competition-settings screen must render, so that what
+// is SHOWN is exactly what would be SAVED.
+//
+// Rendering `tournament.courts` alone (the old behaviour) silently dropped
+// any court the competition still holds but the tournament no longer has: a
+// competition storing [A B C D] under a 3-shiaijo tournament drew three
+// selected pills, so the operator saw an odd-looking 3-court selection while
+// 4 were on disk, no rule fired on the shown count, and saving an unrelated
+// field kept all four. Emitting the leftovers as extra, flagged pills keeps
+// `pills.filter(selected)` equal to `local.courts` at all times, and gives the
+// operator the one action that fixes it: deselect and save.
+//
+// Same shape as the "(outside tournament days)" option the date <select> on
+// that screen renders for an out-of-range date, and for the same reason.
+//
+// Returns [{ court, selected, inTournament }] with the tournament's courts
+// first, in tournament order, then the leftovers in the competition's order.
+function courtPillOptions(tournamentCourts, selectedCourts) {
+  const tourn = Array.isArray(tournamentCourts) ? tournamentCourts : [];
+  const sel = Array.isArray(selectedCourts) ? selectedCourts : [];
+  const seen = new Set();
+  const out = [];
+  for (const cc of tourn) {
+    if (seen.has(cc)) continue;
+    seen.add(cc);
+    out.push({ court: cc, selected: sel.includes(cc), inTournament: true });
+  }
+  for (const cc of courtsOutsideTournament(tourn, sel)) {
+    if (seen.has(cc)) continue;
+    seen.add(cc);
+    out.push({ court: cc, selected: true, inTournament: false });
+  }
+  return out;
+}
+
+// Operator-facing message for the flagged pills above. Null when every
+// assigned shiaijo still exists. Sibling of shiaijoCountError: predicate and
+// label in one call, so no call site restates the rule.
+function orphanedShiaijoError(tournamentCourts, selectedCourts) {
+  const missing = courtsOutsideTournament(tournamentCourts, selectedCourts);
+  if (!missing.length) return null;
+  const plural = missing.length > 1;
+  return `Shiaijo ${missing.join(", ")} ${plural ? "are" : "is"} no longer part of this tournament. Deselect ${plural ? "them" : "it"} and save: matches cannot run on a shiaijo the tournament does not have, and the draw will be refused until you do.`;
+}
+
 // Resolves the 0-based round index from a match object. Bracket matches
 // carry m.roundIndex (stamped by compMatches/viewer.jsx); fall back to a
 // non-negative numeric m.round for any older shapes.
@@ -469,6 +539,9 @@ if (typeof window !== "undefined") {
   window.courtCount = courtCount;
   window.shiaijoCountError = shiaijoCountError;
   window.formatDrawsBracket = formatDrawsBracket;
+  window.courtsOutsideTournament = courtsOutsideTournament;
+  window.courtPillOptions = courtPillOptions;
+  window.orphanedShiaijoError = orphanedShiaijoError;
 }
 
 // --- Elevated (destructive-ops) password prompt (spec 004 / mp-e21) ---
@@ -565,5 +638,8 @@ export {
   courtCount,
   shiaijoCountError,
   formatDrawsBracket,
+  courtsOutsideTournament,
+  courtPillOptions,
+  orphanedShiaijoError,
   resolveRoundIndex,
 };

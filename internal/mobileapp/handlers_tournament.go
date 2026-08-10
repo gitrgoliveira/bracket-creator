@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -105,6 +106,88 @@ func validateCourts(courts []string) error {
 		return err
 	}
 	return validateCourtLabels(courts)
+}
+
+// competitionsBlockingCourtRemoval is the pure half of the shrink guard: it
+// reports the competitions that would be ORPHANED by a tournament court list,
+// i.e. those still assigned a shiaijo the incoming list does not contain.
+//
+// Why refuse rather than prune. Dropping a court from tournament.md used to
+// leave every competition's own list untouched, so a competition assigned
+// A–D silently kept D after the venue shrank to A–C. D then had no operator
+// view (/admin/shiaijo/:court is built from the tournament list) while the
+// draw and the schedule estimate happily kept using it, and the settings
+// screen rendered only the three pills it could find while storing four,
+// showing one thing and saving another. Of the three possible mechanisms:
+//
+//   - prune on read hides the divergence without fixing the stored value,
+//     so the draw still uses the orphan;
+//   - prune on write silently drops a shiaijo a competition may be actively
+//     running on, which is the worst outcome mid-event;
+//   - refusing the tournament update tells the operator exactly which
+//     competition holds the court and changes nothing behind their back.
+//
+// Only LIVE competitions block. A completed or invalidated one is history:
+// no new draw or schedule can be built for it, and blocking on it would wedge
+// the common multi-day case (morning divisions ran on 4 shiaijo, the
+// afternoon needs 2) with no remedy but deleting finished results. The engine
+// draw gate (engine.ValidateCourtsInTournament) is what guarantees a
+// competition can never be DRAWN onto a court the tournament lacks, including
+// for records orphaned before this guard existed.
+//
+// Returns nil when nothing blocks. The message names every blocker so the
+// operator can fix them in one pass rather than one 400 at a time.
+func competitionsBlockingCourtRemoval(comps []*state.Competition, courts []string) error {
+	var blockers []string
+	for _, comp := range comps {
+		if comp == nil {
+			continue
+		}
+		if comp.Status == state.CompStatusComplete || comp.Status == state.CompStatusInvalid {
+			continue
+		}
+		missing := engine.CourtsOutsideTournament(comp.Courts, courts)
+		if len(missing) == 0 {
+			continue
+		}
+		name := comp.Name
+		if name == "" {
+			name = comp.ID
+		}
+		blockers = append(blockers, fmt.Sprintf("%q still runs on shiaijo %s", name, strings.Join(missing, ", ")))
+	}
+	if len(blockers) == 0 {
+		return nil
+	}
+	return fmt.Errorf(
+		"cannot set the tournament's shiaijo to %s: %s. Reassign those shiaijo in the competition's settings first, then change the tournament",
+		strings.Join(courts, ", "), strings.Join(blockers, "; "),
+	)
+}
+
+// checkCourtRemoval is the store-walking half of the shrink guard. It returns
+// (infraErr, validationErr) like checkUniqueCompFields: infraErr means the
+// store could not be queried (caller should 500), validationErr means a live
+// competition still depends on a court being removed (caller should 400).
+func checkCourtRemoval(store *state.Store, courts []string) (error, error) {
+	ids, err := store.ListCompetitions()
+	if err != nil {
+		// No competitions directory yet (fresh data dir) is not a failure:
+		// there is nothing to orphan.
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return fmt.Errorf("list competitions: %w", err), nil
+	}
+	comps := make([]*state.Competition, 0, len(ids))
+	for _, id := range ids {
+		comp, lerr := store.LoadCompetition(id)
+		if lerr != nil {
+			return fmt.Errorf("load competition %s: %w", id, lerr), nil
+		}
+		comps = append(comps, comp)
+	}
+	return nil, competitionsBlockingCourtRemoval(comps, courts)
 }
 
 // validateCompetitionCourts is the looser competition-level check:
@@ -441,6 +524,22 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			return
 		}
 
+		// Refuse a court list that would orphan a live competition. Runs
+		// BEFORE UpdateTournamentChanged, not inside its transform: that
+		// primitive holds the store-wide lock, and ListCompetitions /
+		// LoadCompetition take it too, so checking inside would deadlock on a
+		// non-reentrant mutex. The resulting TOCTOU window (a competition
+		// claiming a court between this check and the save) is covered by the
+		// engine's draw gate, which re-checks against the tournament at the
+		// moment a draw is built.
+		if infraErr, validationErr := checkCourtRemoval(store, t.Courts); infraErr != nil {
+			internalError(c, infraErr)
+			return
+		} else if validationErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": validationErr.Error()})
+			return
+		}
+
 		// Validate Mode before entering the update transform. Mode is
 		// immutable after creation (mp-7h7), the transform enforces that
 		// invariant, but it must also be a known value so an invalid string
@@ -714,6 +813,18 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 
 		if err := validateCourts(t.Courts); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Same orphaned-shiaijo refusal as the PUT handler. POST is not
+		// create-only (it is re-POSTed against an existing record, see the
+		// password-preserve block below), so a court reduction can arrive
+		// here too and must be caught by the same guard.
+		if infraErr, validationErr := checkCourtRemoval(store, t.Courts); infraErr != nil {
+			internalError(c, infraErr)
+			return
+		} else if validationErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": validationErr.Error()})
 			return
 		}
 

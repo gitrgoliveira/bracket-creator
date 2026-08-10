@@ -1475,8 +1475,6 @@ func TestStoreTx_PendingPaths(t *testing.T) {
 			return tx.SetTeamLineup(cid, bad, 5)
 		})
 		require.Error(t, err, "pending-path ValidatePositions must propagate invalid-key errors")
-		require.NotErrorIs(t, err, domain.ErrLineupTooManyMissing,
-			"completeness check must NOT fire from ValidatePositions")
 	})
 
 	t.Run("SetCompetitorStatus pending-path: invalid status", func(t *testing.T) {

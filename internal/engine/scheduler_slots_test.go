@@ -336,6 +336,62 @@ func TestPerMatchElapsedSubMinuteFloors(t *testing.T) {
 	assert.Equal(t, 1, per, "a positive sub-minute duration must occupy at least 1 slot minute")
 }
 
+// TestPerMatchElapsedMinutesBouts verifies the explicit-bouts variant
+// used by the kachinuki best/avg/worst pricing in EstimateForCounts
+// (mp-gmcg): the same clock/multiplier/floor rules as the nominal path,
+// but with a caller-supplied (possibly fractional) bout count.
+func TestPerMatchElapsedMinutesBouts(t *testing.T) {
+	comp2min := func() *state.Competition {
+		return &state.Competition{
+			Kind:                        "team",
+			TeamSize:                    3,
+			Courts:                      []string{"A"},
+			PoolMatchDurationSeconds:    120, // 2min clock
+			PlayoffMatchDurationSeconds: 180, // 3min clock
+		}
+	}
+	tourn := &state.Tournament{ClockToElapsedMultiplier: 1.5}
+
+	t.Run("nil comp anchors on the bare default clock", func(t *testing.T) {
+		// defaultPerMatchClockSeconds/60 = 3, multiplier NOT applied.
+		assert.Equal(t, 3, perMatchElapsedMinutesBouts(nil, tourn, false, 5))
+	})
+
+	t.Run("integer bouts match the nominal formula", func(t *testing.T) {
+		// 4 bouts × (2min × 1.5) + 3 changeovers = 12 + 3 = 15.
+		assert.Equal(t, 15, perMatchElapsedMinutesBouts(comp2min(), tourn, false, 4))
+	})
+
+	t.Run("fractional bouts are priced without truncation", func(t *testing.T) {
+		// 5.5 bouts × 3min + 4.5 changeovers = 16.5 + 4.5 = 21 (kachinuki n=4 avg).
+		assert.Equal(t, 21, perMatchElapsedMinutesBouts(comp2min(), tourn, false, 5.5))
+	})
+
+	t.Run("bouts=0 falls back to the individual formula", func(t *testing.T) {
+		// 2min × 1.5 = 3.
+		assert.Equal(t, 3, perMatchElapsedMinutesBouts(comp2min(), tourn, false, 0))
+	})
+
+	t.Run("isPlayoff reads the playoff clock", func(t *testing.T) {
+		// 3min × 1.5 = 4.5 → rounds to 5 (bouts=0 individual path).
+		assert.Equal(t, 5, perMatchElapsedMinutesBouts(comp2min(), tourn, true, 0))
+	})
+
+	t.Run("round-to-zero result floors to 1", func(t *testing.T) {
+		tiny := comp2min()
+		tiny.PoolMatchDurationSeconds = 15 // 0.25min × 1.5 = 0.375 → rounds to 0
+		assert.Equal(t, 1, perMatchElapsedMinutesBouts(tiny, tourn, false, 0))
+	})
+
+	t.Run("agrees with perMatchElapsedMinutes at the nominal bout count", func(t *testing.T) {
+		comp := comp2min()
+		nominal := perMatchElapsedMinutes(comp, tourn, false)
+		explicit := perMatchElapsedMinutesBouts(comp, tourn, false, float64(comp.TeamSize))
+		assert.Equal(t, nominal, explicit,
+			"delegating path and explicit-bouts path must agree at bouts=TeamSize")
+	})
+}
+
 // TestAssignSlotsBracketByesSkipCursor verifies that bracket
 // matches auto-completed as byes do not advance the court cursor,
 // otherwise a half-empty bracket would inherit phantom 5-minute

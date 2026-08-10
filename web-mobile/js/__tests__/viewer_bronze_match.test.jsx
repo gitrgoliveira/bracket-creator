@@ -73,7 +73,7 @@ describe('ViewerCompetition bronze / 3rd-place match rendering (mp-gy6g)', () =>
   // the setup/teardown symmetric and avoids surprise bleed between test suites.
   const STUBBED = [
     'StatusBadge', 'formatDate', 'formatLabel', 'pluralize', 'Term',
-    'BracketTree', 'MatchCard', 'buildBracket', 'roundLabel', 'formatIpponsScore',
+    'BracketTree', 'MatchCard', 'buildBracket', 'roundLabel', 'bracketRoundLabel', 'formatIpponsScore',
     'ipponsFromScore', 'isHikiwake', 'hasBothSides', 'compareDmy',
     'queueLabel', 'queueLabelCompact', 'teamIVScore', 'matchScoreStr',
     'EmptyState', 'bronzeUnderFinalStyle',
@@ -148,6 +148,7 @@ describe('ViewerCompetition bronze / 3rd-place match rendering (mp-gy6g)', () =>
     global.window.pluralize = (n, a, b) => `${n} ${n === 1 ? a : b}`;
     global.window.buildBracket = () => [];
     global.window.roundLabel = (i) => `Round ${i + 1}`;
+    global.window.bracketRoundLabel = (_m, i, n) => global.window.roundLabel(i, n);
     global.window.formatIpponsScore = () => '';
     global.window.teamIVScore = () => null;
     global.window.matchScoreStr = () => '';

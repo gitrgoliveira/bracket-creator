@@ -197,6 +197,58 @@ func TestDecisionHandler_NoDeadlockOnConcurrentKiken(t *testing.T) {
 	assert.Containsf(t, losers[0].body, "already_ineligible", "loser should see already_ineligible body, got %s", losers[0].body)
 }
 
+// TestDecisionHandler_TrimsDecisionReason pins mp-gmcg review: the /decision
+// endpoint must persist the TRIMMED reason into DecisionReason, matching the
+// trimmed value dischargeReopenPendingUnderTx stores into CorrectionReason on a
+// reopened match — feeding the raw padded string left the two audit fields on
+// one record disagreeing byte-for-byte. Mirrors the score path's up-front
+// TrimSpace of CorrectionReason.
+func TestDecisionHandler_TrimsDecisionReason(t *testing.T) {
+	tempDir := t.TempDir()
+	store, err := state.NewStore(tempDir)
+	require.NoError(t, err)
+	eng := engine.New(store)
+	hub := NewHub()
+
+	compID := "trim-decision-reason"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     compID,
+		Format: state.CompFormatMixed,
+		Status: state.CompStatusPools,
+	}))
+	aliceID := helper.NewUUID4()
+	bobID := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: aliceID, Name: "Alice", Dojo: "A"},
+		{ID: bobID, Name: "Bob", Dojo: "B"},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled},
+	}))
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	admin := r.Group("/api")
+	RegisterDecisionHandlers(admin, eng, store, store, hub)
+
+	body, _ := json.Marshal(DecisionRequest{
+		Decision:       "kiken",
+		DecisionBy:     "aka", // Alice withdraws, Bob wins
+		DecisionReason: "  ended by mistake  ",
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/matches/Pool A-0/decision", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "decision should succeed: %s", w.Body.String())
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	assert.Equal(t, "ended by mistake", matches[0].DecisionReason,
+		"DecisionReason must be stored trimmed, not with the request's padding")
+}
+
 // TestBulkScore_CorrectionGateRaceproof verifies the mp-ic5b TOCTOU fix:
 // a concurrent PUT /score finalisation and a POST /bulk-score on the same
 // match (no correctionReason on either) must not both succeed. Pre-fix the

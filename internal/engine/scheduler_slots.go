@@ -42,12 +42,27 @@ const defaultPerMatchClockSeconds = 180
 // (FR-053); team matches scale by bout count plus inter-bout
 // transitions (FR-058).
 //
-// The kachinuki branch uses comp.TeamSize as the worst-case bout
-// count for slot planning, a kachinuki match may finish earlier in
-// practice if one side gets exhausted, but the operator must reserve
-// the upper-bound block so the auto-scheduler does not double-book
-// the court. Documented trade-off; T150.
+// The kachinuki branch uses comp.TeamSize as the NOMINAL bout count
+// for slot planning. Note this is kachinuki's BEST case (a sweep is
+// exactly N bouts; attrition can run to 2N-1), so slots are optimistic
+// for kachinuki; EstimateForCounts surfaces the full best/avg/worst
+// range via perMatchElapsedMinutesBouts (mp-gmcg). Documented
+// trade-off; T150.
 func perMatchElapsedMinutes(comp *state.Competition, tournament *state.Tournament, isPlayoff bool) int {
+	// Team match branch. comp.TeamSize == 0 means individual; >0
+	// means a per-bout calculation (see function doc for kachinuki).
+	bouts := 0.0
+	if comp != nil && comp.Kind == "team" && comp.TeamSize > 0 {
+		bouts = float64(comp.TeamSize)
+	}
+	return perMatchElapsedMinutesBouts(comp, tournament, isPlayoff, bouts)
+}
+
+// perMatchElapsedMinutesBouts is perMatchElapsedMinutes with an explicit
+// (possibly fractional) bout count, so EstimateForCounts can price the
+// kachinuki best/avg/worst scenarios (mp-gmcg) with the exact same
+// clock/multiplier/floor rules as the nominal path.
+func perMatchElapsedMinutesBouts(comp *state.Competition, tournament *state.Tournament, isPlayoff bool, bouts float64) int {
 	if comp == nil {
 		// No competition to tune from: anchor on the bare default clock,
 		// without the multiplier (preserves the pre-seconds behavior).
@@ -72,17 +87,9 @@ func perMatchElapsedMinutes(comp *state.Competition, tournament *state.Tournamen
 		multiplier = tournament.ClockToElapsedMultiplier
 	}
 
-	// Team match branch. comp.TeamSize == 0 means individual; >0
-	// means a per-bout calculation. For kachinuki we still use
-	// TeamSize as the upper bound (see function doc).
-	bouts := 0
-	if comp.Kind == "team" && comp.TeamSize > 0 {
-		bouts = comp.TeamSize
-	}
-
 	// Delegate to the shared pure core so this function and
 	// EstimateSchedule stay in exact agreement (FR-059).
-	per := int(math.Round(perMatchElapsed(clockMin, multiplier, bouts)))
+	per := int(math.Round(perMatchElapsedBouts(clockMin, multiplier, bouts)))
 	// A configured positive duration must occupy at least one slot minute.
 	// Sub-minute clocks (e.g. 15s * 1.5 = 0.375 → rounds to 0) would otherwise
 	// advance the court cursor by 0 and stack every match at the same time.

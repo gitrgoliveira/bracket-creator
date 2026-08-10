@@ -14,6 +14,49 @@ import (
 // trigger an excessive allocation (CodeQL go/uncontrolled-allocation-size).
 const MaxCourts = 26
 
+// MaxTeamSize is a defensive upper bound on the `teamSize` /
+// `boutsPerTeamMatch` parameters. It is NOT a domain rule — kachinuki team
+// sizes are unregulated, and standard kendo teams are 3/5/7 — but a public,
+// stateless endpoint must not let an unbounded value drive the bout math:
+// `worst = 2n-1` and `bouts * clock * multiplier` overflow int64 for a large
+// n, and the final int(math.Round(...)) conversion of an out-of-range float is
+// implementation-defined in Go, yielding a negative duration or an inverted
+// best/worst range (mp-gmcg review). 100 is ~14× the largest real team, so no
+// legitimate planning number is rejected. Clamped in EstimateSchedule (all
+// callers) and 400'd by the handler (matching the MaxCourts precedent).
+const MaxTeamSize = 100
+
+// MaxScheduleCount and MaxSchedulePct are the same class of defensive bound for
+// the OTHER scalars that scale the estimate — numMatches and ceremonyMinutes
+// (counts/minutes) and the slowest-court buffer (a percentage). Without them a
+// hostile query-string overflows the same duration math MaxTeamSize guards
+// (int(math.Round(perCourt)) or the ceremony addition) on this public endpoint
+// (mp-gmcg review). Both are far beyond any real tournament — a million matches
+// or minutes, a 100 000 % buffer — while keeping the arithmetic exact.
+const (
+	MaxScheduleCount = 1_000_000
+	MaxSchedulePct   = 100_000
+)
+
+// maxEstimateMinutes is the ceiling clamped onto per-court minutes right before
+// the float→int conversion. It closes the overflow class the int clamps cannot:
+// matchDuration and multiplier are floats (the handler only checks them
+// positive-finite), so a hostile matchDuration=1e19 drives perCourt past int64
+// and int(math.Round(...)) yields the implementation-defined min-int (mp-gmcg
+// review). 1e15 is far beyond any real tournament, exactly representable in
+// float64 (< 2^53), and leaves ~4 orders of magnitude below int64 max for the
+// ceremony addition — so no input combination can produce a negative duration.
+//
+// The min() keeps the clamp correct on a 32-bit int too, where a bare 1e15 would
+// overflow and re-trigger the very conversion this ceiling exists to prevent:
+// min/max over constant operands is itself a constant expression (Go >= 1.21), so
+// this stays a compile-time const, and float64(math.MaxInt/2) folds to a value
+// far above 1e15 on every 64-bit platform (~4.6e18) — bit-identical to 1e15
+// today, and automatically correct if the package's current 32-bit compile break
+// (tiebreaker.go's 100_000_000_000 overflows a 32-bit int; .goreleaser.yaml ships
+// no 32-bit target) is ever fixed.
+const maxEstimateMinutes = min(1e15, float64(math.MaxInt/2))
+
 // ScheduleEstimate is the wire response for GET /api/schedule/estimate
 // and the return type of EstimateSchedule. All durations are in minutes,
 // rounded to the nearest integer.
@@ -29,19 +72,35 @@ const MaxCourts = 26
 // fills PerCourtMinutes from a per-court clock cursor that INCLUDES the
 // OpeningBlock offset and any LunchBlock dead-time, see its doc comment.
 //
+// Best/worst/average (mp-gmcg): kachinuki team matches have a variable
+// bout count, so the estimate is a RANGE. With nominal team size N
+// (sizes are unregulated; N is the configured planning number):
+//
+//	best  = N bouts per match  (one fighter sweeps the opposing team)
+//	worst = 2N-1 bouts         (every bout retires exactly one player)
+//	avg   = (3N-1)/2 bouts     (midpoint)
+//
+// TotalDurationMinutes is the AVERAGE scenario (the headline number);
+// BestCaseMinutes / WorstCaseMinutes bracket it. For individual and
+// fixed-format team matches the bout count is constant, so all three
+// fields carry the same value. PerCourtMinutes reflects the average
+// scenario.
+//
 // data-model §5/§6.
 type ScheduleEstimate struct {
 	TotalDurationMinutes int   `json:"totalDurationMinutes"`
+	BestCaseMinutes      int   `json:"bestCaseMinutes"`
+	WorstCaseMinutes     int   `json:"worstCaseMinutes"`
 	PerCourtMinutes      []int `json:"perCourtMinutes"`
 	CeremonyMinutes      int   `json:"ceremonyMinutes"`
 }
 
 // EstimateInput holds the parameters EstimateSchedule consumes. All
-// fields are required except SlowestCourtBufferPct (no buffer when 0)
-// and CeremonyMinutes (no ceremony when 0). TeamSize=0 selects the
-// individual-match branch; TeamSize>0 with BoutsPerTeamMatch>0 selects
-// the team-match branch and scales per-match duration by bouts plus an
-// inter-bout transition allowance (~1 minute per switch).
+// fields are required except SlowestCourtBufferPct (no buffer when 0),
+// CeremonyMinutes (no ceremony when 0) and BoutsPerTeamMatch (defaults
+// to TeamSize). TeamSize=0 selects the individual-match branch;
+// TeamSize>0 selects the team-match branch and scales per-match duration
+// by bouts plus an inter-bout transition allowance (~1 minute per switch).
 //
 // FR-055, FR-058: the multiplier converts on-clock minutes to elapsed
 // minutes; team-match duration scales linearly with bouts plus a
@@ -52,12 +111,24 @@ type EstimateInput struct {
 	NumMatches                int
 	NumCourts                 int
 	TeamSize                  int
-	BoutsPerTeamMatch         int
-	SlowestCourtBufferPct     int
-	CeremonyMinutes           int
+	// BoutsPerTeamMatch OVERRIDES the bout count for a team match. Leave 0
+	// for the normal case: a team match is worth TeamSize bouts, which is
+	// the rule every other producer runs on (perMatchElapsedMinutes,
+	// EstimateForCounts) and the only one an actual generated schedule can
+	// reproduce. Set it only to price a hypothetical the scheduler will not
+	// lay out.
+	BoutsPerTeamMatch     int
+	SlowestCourtBufferPct int
+	CeremonyMinutes       int
+	// Kachinuki widens the estimate into a best/average/worst range
+	// (mp-gmcg): the resolved bout count is the nominal team size N,
+	// best = N bouts, worst = 2N-1, average = midpoint. False (fixed
+	// format or individual) keeps a constant bout count, so the three
+	// range fields collapse to one value.
+	Kachinuki bool
 }
 
-// perMatchElapsed returns the un-rounded elapsed minutes for a single
+// perMatchElapsedBouts returns the un-rounded elapsed minutes for a single
 // match given the on-clock duration, the multiplier, and the number of
 // bouts (0 = individual match; >0 = team match with that many bouts).
 //
@@ -67,15 +138,52 @@ type EstimateInput struct {
 //	bouts > 0:  bouts * clockMin * multiplier + (bouts-1) * 1
 //	            (the +1 per switch covers rotation/transition between bouts)
 //
+// bouts is a float because the kachinuki AVERAGE scenario has a fractional
+// bout count ((3N-1)/2 for odd expressions), which must not be truncated
+// before the duration math (mp-gmcg).
+//
 // This is the single source of truth shared by EstimateSchedule and
 // perMatchElapsedMinutes (scheduler_slots.go). Both callers delegate
 // here, satisfying the FR-059 "MUST agree" constraint without manual
 // synchronisation.
-func perMatchElapsed(clockMin, multiplier float64, bouts int) float64 {
+func perMatchElapsedBouts(clockMin, multiplier, bouts float64) float64 {
 	if bouts > 0 {
-		return float64(bouts)*clockMin*multiplier + float64(bouts-1)*1.0
+		return bouts*clockMin*multiplier + (bouts-1)*1.0
 	}
 	return clockMin * multiplier
+}
+
+// kachinukiBoutRange returns the (best, average, worst) bout counts for
+// a kachinuki team match with nominal team size n (mp-gmcg):
+//
+//	best  = n     one fighter sweeps the whole opposing team
+//	worst = 2n-1  every bout retires exactly one player
+//	avg   = (best+worst)/2, the midpoint planning number
+//
+// Team sizes are unregulated, so n is the configured planning number,
+// not a guarantee; the range brackets realistic outcomes rather than
+// bounding them absolutely.
+func kachinukiBoutRange(n int) (best, avg, worst float64) {
+	if n <= 0 {
+		return 0, 0, 0
+	}
+	best = float64(n)
+	worst = float64(2*n - 1)
+	avg = (best + worst) / 2
+	return best, avg, worst
+}
+
+// clampNonNeg returns v bounded to [0, max]: a negative value becomes 0 and a
+// value above max is capped. Used to keep the schedule bout drivers in a range
+// the duration arithmetic cannot overflow (see MaxTeamSize).
+func clampNonNeg(v, max int) int {
+	if v < 0 {
+		return 0
+	}
+	if v > max {
+		return max
+	}
+	return v
 }
 
 // EstimateSchedule computes the total elapsed-minute estimate for a
@@ -83,7 +191,7 @@ func perMatchElapsed(clockMin, multiplier float64, bouts int) float64 {
 // team-match bout count, slowest-court buffer %, and ceremony block.
 //
 // Algorithm:
-//  1. perMatchMin = perMatchElapsed(clockMin, multiplier, bouts)
+//  1. perMatchMin = perMatchElapsedBouts(clockMin, multiplier, bouts)
 //  2. totalMin = perMatchMin * numMatches
 //  3. perCourt = totalMin / numCourts  (clamped numCourts >= 1)
 //  4. perCourt *= (1 + buffer/100)
@@ -96,19 +204,43 @@ func perMatchElapsed(clockMin, multiplier float64, bouts int) float64 {
 // handler has no competition/tournament context. Use EstimateForCounts
 // when per-comp, break-aware estimation is needed.
 func EstimateSchedule(in EstimateInput) ScheduleEstimate {
-	// Per-match elapsed minutes via the shared pure core.
+	// Per-match elapsed minutes via the shared pure core. Kachinuki
+	// (mp-gmcg) widens the constant bout count into a best/avg/worst
+	// range; fixed/individual keeps one value for all three scenarios.
+	//
+	// A team match is worth TeamSize bouts unless the caller overrides it.
+	// That default lives HERE rather than in each caller because it is the
+	// rule the rest of the system already runs on: perMatchElapsedMinutes
+	// (scheduler_slots.go) derives `bouts = comp.TeamSize` with no caller
+	// input, and it is the function the REAL schedule is laid out with.
+	// Requiring the caller to restate it made "team match" and "how long a
+	// team match takes" two separate things a caller had to get right
+	// together, and getting it wrong was silent: TeamSize>0 with the bouts
+	// field omitted fell through to the INDIVIDUAL formula and answered a
+	// team question with a one-bout number, no error.
+	// Clamp the bout drivers to [0, MaxTeamSize] BEFORE the arithmetic so a
+	// hostile query-string cannot overflow the duration math (mp-gmcg review):
+	// the handler already 400s these, but clamping here protects every other
+	// caller and keeps the int(math.Round(...)) conversion in range. See
+	// MaxTeamSize.
+	teamSize := clampNonNeg(in.TeamSize, MaxTeamSize)
+	boutsOverride := clampNonNeg(in.BoutsPerTeamMatch, MaxTeamSize)
 	bouts := 0
-	if in.TeamSize > 0 && in.BoutsPerTeamMatch > 0 {
-		bouts = in.BoutsPerTeamMatch
+	if teamSize > 0 {
+		bouts = teamSize
+		if boutsOverride > 0 {
+			bouts = boutsOverride
+		}
 	}
-	perMatchMin := perMatchElapsed(in.MatchDurationClockMinutes, in.Multiplier, bouts)
+	bestBouts, avgBouts, worstBouts := float64(bouts), float64(bouts), float64(bouts)
+	if in.Kachinuki && bouts > 0 {
+		bestBouts, avgBouts, worstBouts = kachinukiBoutRange(bouts)
+	}
 
-	// Total clock time across all matches, distributed evenly across
-	// courts. Courts is clamped to [1, MaxCourts] so a malformed or
-	// hostile input cannot trigger a giant slice allocation downstream
-	// (CodeQL go/uncontrolled-allocation-size) nor divide by zero.
-	// MaxCourts matches the CLI's A–Z hard cap (CLAUDE.md, FR limit).
-	totalMin := perMatchMin * float64(in.NumMatches)
+	// Courts is clamped to [1, MaxCourts] so a malformed or hostile
+	// input cannot trigger a giant slice allocation downstream (CodeQL
+	// go/uncontrolled-allocation-size) nor divide by zero. MaxCourts
+	// matches the CLI's A–Z hard cap (CLAUDE.md, FR limit).
 	courts := in.NumCourts
 	if courts < 1 {
 		courts = 1
@@ -116,24 +248,57 @@ func EstimateSchedule(in EstimateInput) ScheduleEstimate {
 	if courts > MaxCourts {
 		courts = MaxCourts
 	}
-	perCourt := totalMin / float64(courts)
 
-	// Slowest-court buffer (10–15% typical). Skipped when 0.
-	if in.SlowestCourtBufferPct > 0 {
-		perCourt *= 1.0 + float64(in.SlowestCourtBufferPct)/100.0
+	// numMatches, the buffer %, and the ceremony block scale the same duration
+	// math as the bout count, so they get the same defensive clamp — otherwise
+	// a hostile numMatches/ceremonyMinutes overflows int(math.Round(...)) / the
+	// ceremony addition, and a hostile buffer blows up the multiply (mp-gmcg
+	// review). See MaxScheduleCount / MaxSchedulePct.
+	numMatches := clampNonNeg(in.NumMatches, MaxScheduleCount)
+	bufferPct := clampNonNeg(in.SlowestCourtBufferPct, MaxSchedulePct)
+	ceremonyMinutes := clampNonNeg(in.CeremonyMinutes, MaxScheduleCount)
+
+	// One scenario = total clock time across all matches, distributed
+	// evenly across courts, with the slowest-court buffer applied.
+	perCourtFor := func(boutsF float64) int {
+		perMatchMin := perMatchElapsedBouts(in.MatchDurationClockMinutes, in.Multiplier, boutsF)
+		perCourt := perMatchMin * float64(numMatches) / float64(courts)
+		// Slowest-court buffer (10–15% typical). Skipped when 0.
+		if bufferPct > 0 {
+			perCourt *= 1.0 + float64(bufferPct)/100.0
+		}
+		// Clamp to [0, maxEstimateMinutes] before the int conversion so a hostile
+		// float input (matchDuration/multiplier, unbounded by the int clamps) or
+		// a NaN can't produce a negative min-int. NaN fails every comparison, so
+		// test it explicitly. See maxEstimateMinutes.
+		if math.IsNaN(perCourt) || perCourt > maxEstimateMinutes {
+			perCourt = maxEstimateMinutes
+		} else if perCourt < 0 {
+			perCourt = 0
+		}
+		return int(math.Round(perCourt))
 	}
 
-	perCourtInt := int(math.Round(perCourt))
+	avgPerCourt := perCourtFor(avgBouts)
 	perCourtList := make([]int, courts)
 	for i := range perCourtList {
-		perCourtList[i] = perCourtInt
+		perCourtList[i] = avgPerCourt
 	}
 
-	total := perCourtInt + in.CeremonyMinutes
+	// perCourtFor is a pure closure over `in` and `courts`, so for a
+	// non-kachinuki request (bestBouts == avgBouts == worstBouts) it returns
+	// bit-identically avgPerCourt — no guard needed to "avoid recomputation",
+	// and an unconditional call is structurally unable to disagree about which
+	// requests have a range (mp-gmcg review: R10 replaced one restated condition
+	// with two derived ones; zero is available and carries no drift hazard).
+	bestPerCourt, worstPerCourt := perCourtFor(bestBouts), perCourtFor(worstBouts)
+
 	return ScheduleEstimate{
-		TotalDurationMinutes: total,
+		TotalDurationMinutes: avgPerCourt + ceremonyMinutes,
+		BestCaseMinutes:      bestPerCourt + ceremonyMinutes,
+		WorstCaseMinutes:     worstPerCourt + ceremonyMinutes,
 		PerCourtMinutes:      perCourtList,
-		CeremonyMinutes:      in.CeremonyMinutes,
+		CeremonyMinutes:      ceremonyMinutes,
 	}
 }
 
@@ -257,56 +422,6 @@ func EstimateForCounts(poolCount, playoffCount int, comp *state.Competition, tou
 	lunchMin := parseDurationMinutes(tournament.LunchBlock)
 	lunchStart := parseClockHHMM(defaultLunchStartClock)
 
-	// Phase durations via the shared slot-model helper.
-	poolPerMatch := perMatchElapsedMinutes(comp, tournament, false /*isPlayoff*/)
-	playoffPerMatch := perMatchElapsedMinutes(comp, tournament, true /*isPlayoff*/)
-
-	// Distribute pool matches evenly across courts, then advance each
-	// court's cursor by poolPerMatch per match (with lunch skipping).
-	// We use integer division; the remainder matches are spread across
-	// the first courts, an intentional even-distribution heuristic for this
-	// pre-draw estimate. (The post-draw assigner does NO distribution of its
-	// own: it schedules matches that already carry a Court assignment.)
-	courtCursor := make([]time.Time, numCourts)
-	for i := range courtCursor {
-		courtCursor[i] = dayStart.Add(time.Duration(openingMin) * time.Minute)
-	}
-	// Pure match minutes per court, tracked separately from the cursor so the
-	// slowest-court buffer can be applied to match time ONLY, never to the
-	// fixed OpeningBlock offset or LunchBlock dead-time (those have no runtime
-	// variance to pad). Mirrors EstimateSchedule, which buffers match time alone.
-	matchMin := make([]float64, numCourts)
-
-	// --- Pool phase ---
-	base := poolCount / numCourts
-	rem := poolCount % numCourts
-	for ci := range courtCursor {
-		n := base
-		if ci < rem {
-			n++
-		}
-		for range n {
-			courtCursor[ci] = skipCeremonyBlocks(courtCursor[ci], lunchStart, lunchMin)
-			courtCursor[ci] = courtCursor[ci].Add(time.Duration(poolPerMatch) * time.Minute)
-		}
-		matchMin[ci] += float64(n * poolPerMatch)
-	}
-
-	// --- Playoff phase ---
-	base = playoffCount / numCourts
-	rem = playoffCount % numCourts
-	for ci := range courtCursor {
-		n := base
-		if ci < rem {
-			n++
-		}
-		for range n {
-			courtCursor[ci] = skipCeremonyBlocks(courtCursor[ci], lunchStart, lunchMin)
-			courtCursor[ci] = courtCursor[ci].Add(time.Duration(playoffPerMatch) * time.Minute)
-		}
-		matchMin[ci] += float64(n * playoffPerMatch)
-	}
-
 	// Convert clock times back to durations from dayStart.
 	// tournament is always non-nil here (see copy above).
 	bufferMultiplier := 1.0
@@ -314,30 +429,139 @@ func EstimateForCounts(poolCount, playoffCount int, comp *state.Competition, tou
 		bufferMultiplier = 1.0 + float64(tournament.SlowestCourtBufferPct)/100.0
 	}
 
-	perCourtList := make([]int, numCourts)
-	var maxDuration float64
-	for ci, cur := range courtCursor {
-		raw := cur.Sub(dayStart).Minutes()
-		// fixedOverhead = OpeningBlock offset + any LunchBlock dead-time
-		// (raw minus pure match time). Buffer the match time only; add the
-		// fixed overhead back unbuffered.
-		fixedOverhead := raw - matchMin[ci]
-		buffered := fixedOverhead + matchMin[ci]*bufferMultiplier
-		perCourtList[ci] = int(math.Round(buffered))
-		if buffered > maxDuration {
-			maxDuration = buffered
+	// walk runs the per-court cursor simulation for one or more per-match
+	// scenarios in a SINGLE pass over the match distribution, returning each
+	// scenario's (perCourtList, slowest-court buffered duration), positionally.
+	// The distribution (base/rem per court) is identical across scenarios —
+	// pool matches spread evenly across courts, remainder matches to the first
+	// courts, an intentional even-distribution heuristic for this pre-draw
+	// estimate (the post-draw assigner does NO distribution of its own: it
+	// schedules matches that already carry a Court assignment) — only the
+	// per-match minutes, and thus how each cursor lands relative to the lunch
+	// block, differ, so a cursor per scenario advances together court-by-court
+	// (mp-gmcg review F7). This shares the distribution derivation across
+	// scenarios; the kachinuki caller below still discards two of the three
+	// perCourtList builds (it only surfaces the average one) — negligible on
+	// this admin page-load endpoint, so left as is (review E7), but the
+	// sharing is scoped to the distribution, not a claim that nothing is
+	// discarded.
+	//
+	// Pure match minutes per court are tracked separately from the cursor so
+	// the slowest-court buffer applies to match time ONLY, never to the fixed
+	// OpeningBlock offset or LunchBlock dead-time (those have no runtime
+	// variance to pad). Mirrors EstimateSchedule, which buffers match time
+	// alone.
+	walk := func(scenarios []schedScenario) ([][]int, []float64) {
+		ns := len(scenarios)
+		courtCursor := make([][]time.Time, ns)
+		matchMin := make([][]float64, ns)
+		start := dayStart.Add(time.Duration(openingMin) * time.Minute)
+		for s := range scenarios {
+			courtCursor[s] = make([]time.Time, numCourts)
+			for i := range courtCursor[s] {
+				courtCursor[s][i] = start
+			}
+			matchMin[s] = make([]float64, numCourts)
 		}
+
+		for _, spec := range []struct {
+			count    int
+			perMatch func(schedScenario) int
+		}{
+			{poolCount, func(sc schedScenario) int { return sc.poolPerMatch }},
+			{playoffCount, func(sc schedScenario) int { return sc.playoffPerMatch }},
+		} {
+			base := spec.count / numCourts
+			rem := spec.count % numCourts
+			for ci := 0; ci < numCourts; ci++ {
+				n := base
+				if ci < rem {
+					n++
+				}
+				for s := range scenarios {
+					pm := spec.perMatch(scenarios[s])
+					for range n {
+						courtCursor[s][ci] = skipCeremonyBlocks(courtCursor[s][ci], lunchStart, lunchMin)
+						courtCursor[s][ci] = courtCursor[s][ci].Add(time.Duration(pm) * time.Minute)
+					}
+					matchMin[s][ci] += float64(n * pm)
+				}
+			}
+		}
+
+		perCourtLists := make([][]int, ns)
+		maxDurations := make([]float64, ns)
+		for s := range scenarios {
+			perCourtLists[s] = make([]int, numCourts)
+			for ci, cur := range courtCursor[s] {
+				raw := cur.Sub(dayStart).Minutes()
+				// fixedOverhead = OpeningBlock offset + any LunchBlock dead-time
+				// (raw minus pure match time). Buffer the match time only; add the
+				// fixed overhead back unbuffered.
+				fixedOverhead := raw - matchMin[s][ci]
+				buffered := fixedOverhead + matchMin[s][ci]*bufferMultiplier
+				perCourtLists[s][ci] = int(math.Round(buffered))
+				if buffered > maxDurations[s] {
+					maxDurations[s] = buffered
+				}
+			}
+		}
+		return perCourtLists, maxDurations
 	}
 
 	ceremonyMin := parseDurationMinutes(tournament.ClosingBlock)
 
-	total := int(math.Round(maxDuration)) + ceremonyMin
+	// Kachinuki (mp-gmcg): the bout count is variable, so price three
+	// scenarios. The headline TotalDurationMinutes / PerCourtMinutes is
+	// the AVERAGE; best (= the nominal walk) and worst bracket it.
+	// IsKachinuki requires TeamSize >= 2 (review: this used to accept
+	// TeamSize > 0, so a TeamSize == 1 competition priced a fake best/avg/worst
+	// range here while every engine kachinuki function refused it as
+	// non-kachinuki — a single fighter per side has no "winner stays on" to
+	// range-price).
+	if comp.IsKachinuki() {
+		bestBouts, avgBouts, worstBouts := kachinukiBoutRange(comp.TeamSize)
+		// Order: best, avg, worst. Each scenario's per-match minutes come from
+		// kachinukiBoutRange's own bout counts, NOT from the nominal walk: the
+		// two are equal today only because perMatchElapsedMinutes uses
+		// bouts = TeamSize, and leaning on that coincidence meant retuning the
+		// nominal rule could silently stop BestCaseMinutes being the best case
+		// (or render Best > Average) while avg and worst stayed right.
+		perCourts, maxes := walk([]schedScenario{
+			{perMatchElapsedMinutesBouts(comp, tournament, false, bestBouts), perMatchElapsedMinutesBouts(comp, tournament, true, bestBouts)},
+			{perMatchElapsedMinutesBouts(comp, tournament, false, avgBouts), perMatchElapsedMinutesBouts(comp, tournament, true, avgBouts)},
+			{perMatchElapsedMinutesBouts(comp, tournament, false, worstBouts), perMatchElapsedMinutesBouts(comp, tournament, true, worstBouts)},
+		})
+		return ScheduleEstimate{
+			BestCaseMinutes:      int(math.Round(maxes[0])) + ceremonyMin,
+			TotalDurationMinutes: int(math.Round(maxes[1])) + ceremonyMin, // the AVERAGE is the headline
+			WorstCaseMinutes:     int(math.Round(maxes[2])) + ceremonyMin,
+			PerCourtMinutes:      perCourts[1], // avg
+			CeremonyMinutes:      ceremonyMin,
+		}
+	}
+
+	// Nominal per-match minutes via the shared slot-model helper (bouts =
+	// TeamSize). Computed after the kachinuki early-return above, which prices
+	// its own three scenarios and never reads these.
+	perCourts, maxes := walk([]schedScenario{{
+		perMatchElapsedMinutes(comp, tournament, false /*isPlayoff*/),
+		perMatchElapsedMinutes(comp, tournament, true /*isPlayoff*/),
+	}})
+	total := int(math.Round(maxes[0])) + ceremonyMin
 	return ScheduleEstimate{
 		TotalDurationMinutes: total,
-		PerCourtMinutes:      perCourtList,
+		BestCaseMinutes:      total,
+		WorstCaseMinutes:     total,
+		PerCourtMinutes:      perCourts[0],
 		CeremonyMinutes:      ceremonyMin,
 	}
 }
+
+// schedScenario is one per-match timing (pool + playoff minutes) that
+// EstimateForCounts's walk prices. Kachinuki passes three (best/avg/worst);
+// every other format passes one.
+type schedScenario struct{ poolPerMatch, playoffPerMatch int }
 
 func (e *Engine) GenerateSchedule(compID string) error {
 	comp, err := e.store.LoadCompetition(compID)

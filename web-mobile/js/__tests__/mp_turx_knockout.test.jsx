@@ -68,7 +68,7 @@ describe('ViewerCompetition: merged mixed comp shows no cross-link (mp-turx back
   const savedGlobals = {};
   const STUBBED = [
     'StatusBadge', 'formatDate', 'formatLabel', 'pluralize', 'Term',
-    'BracketTree', 'buildBracket', 'roundLabel', 'formatIpponsScore',
+    'BracketTree', 'buildBracket', 'roundLabel', 'bracketRoundLabel', 'formatIpponsScore',
     'ipponsFromScore', 'isHikiwake', 'hasBothSides', 'compareDmy',
     'queueLabel', 'queueLabelCompact', 'teamIVScore', 'matchScoreStr',
   ];
@@ -114,6 +114,7 @@ describe('ViewerCompetition: merged mixed comp shows no cross-link (mp-turx back
     global.window.pluralize = (n, a, b) => `${n} ${n === 1 ? a : b}`;
     global.window.buildBracket = () => runningBracket.rounds;
     global.window.roundLabel = (i) => `Round ${i + 1}`;
+    global.window.bracketRoundLabel = (_m, i, n) => global.window.roundLabel(i, n);
     global.window.formatIpponsScore = () => '';
     global.window.teamIVScore = () => null;
     global.window.matchScoreStr = (m) =>
@@ -228,7 +229,7 @@ describe('AdminCompetition: page-head has no Start-knockout affordance (mp-turx)
     'AdminTopbar', 'AdminParticipants', 'AdminSettings', 'AdminExport',
     'AdminScoreEditor', 'AdminPools', 'AdminCompOverview', 'AdminTeamLineupsList',
     'AdminSwissRounds', 'RunningMatchPanel', 'BracketTree', 'promptAdminPassword',
-    'isValidDate', 'roundLabel', 'hasBothSides',
+    'isValidDate', 'roundLabel', 'bracketRoundLabel', 'hasBothSides',
     'AdminCompetition',
   ];
 
@@ -286,6 +287,7 @@ describe('AdminCompetition: page-head has no Start-knockout affordance (mp-turx)
     global.window.promptAdminPassword = () => 'admin';
     global.window.isValidDate = () => true;
     global.window.roundLabel = (i) => `Round ${i + 1}`;
+    global.window.bracketRoundLabel = (_m, i, n) => global.window.roundLabel(i, n);
     global.window.hasBothSides = (m) => !!(m && m.sideA && m.sideB && m.sideA.id && m.sideB.id);
     global.window.API = {
       startCompetition: vi.fn(() => Promise.resolve({})),
@@ -446,7 +448,7 @@ describe('AdminBracket: per-match playability (mp-turx)', () => {
     'AdminTopbar', 'AdminParticipants', 'AdminSettings', 'AdminExport',
     'AdminScoreEditor', 'AdminPools', 'AdminCompOverview', 'AdminTeamLineupsList',
     'AdminSwissRounds', 'RunningMatchPanel', 'BracketTree', 'promptAdminPassword',
-    'isValidDate', 'roundLabel', 'hasBothSides',
+    'isValidDate', 'roundLabel', 'bracketRoundLabel', 'hasBothSides',
     'AdminCompetition',
   ];
 
@@ -527,6 +529,7 @@ describe('AdminBracket: per-match playability (mp-turx)', () => {
     global.window.promptAdminPassword = () => 'admin';
     global.window.isValidDate = () => true;
     global.window.roundLabel = (i) => `Round ${i + 1}`;
+    global.window.bracketRoundLabel = (_m, i, n) => global.window.roundLabel(i, n);
     global.window.hasBothSides = realHasBothSides;
     global.window.API = {
       startCompetition: vi.fn(() => Promise.resolve({})),

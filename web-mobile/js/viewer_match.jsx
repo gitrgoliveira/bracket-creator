@@ -76,16 +76,26 @@ export function localQueueLabelCompact(m) {
 // MatchDetailCard
 // ---------------------------------------------------------------------------
 
-export function MatchDetailCard({ match, onClose, escapeToClose = true }) {
+export function MatchDetailCard({ match, onClose, escapeToClose = true, slotLabel }) {
   window.useEscapeToClose(escapeToClose ? onClose : undefined);
   if (!match) return null;
   const isTeam = match.compKind === "team" || match.teamSize > 0;
   const teamSize = match.teamSize || 0;
+  // A card opened from the Bracket tab can still hold an unresolved feeder slot
+  // ("Winner of r3-m3"), so names go through the ONE slot-naming rule
+  // (slotDisplayName / bracketSlotLabeller in bracket.jsx) — never printed raw.
+  // `slotLabel` carries the bracket, so this modal names the same card the tree
+  // does ("Winner of M1"); openers with no bracket to resolve against (the
+  // schedule/home lists, which filter placeholder-sided matches out anyway) fall
+  // back to the context-free rule, which degrades to "TBD". The last fallback is
+  // for a mount without bracket.js; production load order rules it out
+  // (index.html tags bracket.js before every viewer module).
+  const slotName = slotLabel || window.slotDisplayName || ((n) => n);
   // withNumber prepends the assigned competitor number (e.g. "K1") when the
   // competition has numberPrefix; team-level sides have no .number so this
   // degrades to the bare team name.
-  const aName = withNumber(match.sideA);
-  const bName = withNumber(match.sideB);
+  const aName = slotName(withNumber(match.sideA), (match.feeders || [])[0]);
+  const bName = slotName(withNumber(match.sideB), (match.feeders || [])[1]);
   const aWin = match.winner?.id === match.sideA?.id && match.winner?.id;
   const bWin = match.winner?.id === match.sideB?.id && match.winner?.id;
   const isRunning = match.status === "running";
@@ -205,12 +215,26 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
           <span className="n">{withNumber(m.sideB)}</span>
           {tweaks.showDojo && m.sideB?.dojo ? <span className="d">{m.sideB.dojo}</span> : null}
         </div>
+        {/* No score string (pending, or completed with no recorded cells) →
+            the bout MIDDLE, derived from the single source boutMiddle
+            (bracket.jsx): "vs" / "X" / "(E)" / "(DH)" and nothing else. A dash
+            is never a valid middle (it is a CELL value only), so both the
+            pending and the completed-but-scoreless cases go through the same
+            call rather than being branched by status here.
+
+            Guarded like the twin call in admin_schedule_score_editor.jsx, and
+            unlike matchScoreStr above, because this branch also renders for
+            SCHEDULED rows: an unguarded call would make bracket.jsx a hard
+            dependency of an up-next list that previously needed no helper at
+            all, so a mount without it would throw instead of degrading. The
+            literal here is the module-missing fallback, NOT a second statement
+            of the display contract; boutMiddle stays the source whenever it is
+            present. Production load order already guarantees it is
+            (index.html tags bracket.js before every viewer module). */}
         {scoreStr ? (
           <span className={`vsched-item__score${isRunning ? " vsched-item__score--live" : ""}`}>{scoreStr}</span>
-        ) : m.status === "completed" ? (
-          <span className="vsched-item__vs">-</span>
         ) : (
-          <span className="vsched-item__vs">vs</span>
+          <span className="vsched-item__vs">{window.boutMiddle ? window.boutMiddle(m.decision, m.encho, m.score) : "vs"}</span>
         )}
         <div className={`vsched-item__side vsched-item__side--aka ${aWin ? "vsched-item__side--w" : ""}`}>
           <span className="sr-only">Aka:</span>
@@ -227,7 +251,7 @@ VSchedItem.displayName = "VSchedItem";
 // MatchViewerModal
 // ---------------------------------------------------------------------------
 
-export function MatchViewerModal({ match, onClose, tournament, compId: defaultCompId }) {
+export function MatchViewerModal({ match, onClose, tournament, compId: defaultCompId, slotLabel }) {
   window.useEscapeToClose(onClose);
   const [scoringMatch, setScoringMatch] = useState(null);
   const triggerRef = useRefV(null);
@@ -267,8 +291,12 @@ export function MatchViewerModal({ match, onClose, tournament, compId: defaultCo
   const isSelfRun = tournament && tournament.mode === "self-run";
   const bothSidesReady = window.hasBothSides ? window.hasBothSides(match) : false;
   const isFinalized = match.status === "completed";
-  const sideAName = match.sideA?.name || (typeof match.sideA === "string" ? match.sideA : "");
-  const sideBName = match.sideB?.name || (typeof match.sideB === "string" ? match.sideB : "");
+  // Same slot-naming rule as the card below (see MatchDetailCard): the
+  // accessible name must read like the visible one, so an unresolved feeder
+  // announces as "Winner of M1"/"TBD" rather than the raw wire value.
+  const slotName = slotLabel || window.slotDisplayName || ((n) => n);
+  const sideAName = slotName(match.sideA?.name || (typeof match.sideA === "string" ? match.sideA : ""), (match.feeders || [])[0]);
+  const sideBName = slotName(match.sideB?.name || (typeof match.sideB === "string" ? match.sideB : ""), (match.feeders || [])[1]);
   const dialogLabel = sideAName && sideBName ? `Match: ${sideBName} vs ${sideAName}` : "Match details";
 
   if (scoringMatch && window.ScoreEditorModal) {
@@ -306,7 +334,7 @@ export function MatchViewerModal({ match, onClose, tournament, compId: defaultCo
         {/* Reuse the canonical MatchDetailCard so the modal and the inline
             card render identically (DRY): same header, colour badges and
             BoutSubRow team grid. The modal adds only the self-run scoring. */}
-        <MatchDetailCard match={match} onClose={onClose} escapeToClose={false} />
+        <MatchDetailCard match={match} onClose={onClose} escapeToClose={false} slotLabel={slotLabel} />
         {isSelfRun && bothSidesReady && (
           <div className="card" style={{ marginTop: 12, padding: 16 }}>
             {isFinalized ? (

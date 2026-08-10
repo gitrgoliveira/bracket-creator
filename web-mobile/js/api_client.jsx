@@ -61,6 +61,22 @@ function fetchWithTimeout(url, opts, ms = 12000) {
     return fetch(url, { ...opts, signal: controller.signal }).finally(() => clearTimeout(timer));
 }
 
+// reopenFailureError builds the Error thrown by a failed reopen. reopenMatch and
+// requeueBlockerAndReopen surface the SAME structured shape (mp-gmcg review R8):
+// the operator-facing `message`, the machine `code`, and the court/matchId/compId
+// of the BLOCKING match, which applyReopenFailure (admin_scoring_team.jsx) reads
+// to re-offer the requeue remedy when a court is busy. One builder so a new
+// server field is threaded once, not per endpoint. Async: it awaits the body.
+async function reopenFailureError(res) {
+    const err = await res.json().catch(() => ({}));
+    const e = new Error(err.message || err.error || "Failed to reopen match");
+    if (err.error) e.code = err.error;
+    if (err.court) e.court = err.court;
+    if (err.matchId) e.matchId = err.matchId;
+    if (err.compId) e.compId = err.compId;
+    return e;
+}
+
 // normalizeViewerCompItem maps one {config, poolMatches, bracket} item from the
 // aggregate GET /api/viewer/competitions or the court-scoped GET
 // /api/viewer/court/:court/matches into the flattened, normalized competition shape
@@ -1551,6 +1567,13 @@ const API = {
         }
         return true;
     },
+    // Stateless hypothetical estimate against GET /api/schedule/estimate. The
+    // free-form estimator PANEL was removed (per-competition estimates on
+    // Overview/Settings go through estimateCompetitionSchedule instead), so this
+    // method currently has no production caller. It is RETAINED DELIBERATELY -
+    // not dead - for the planned standalone hypothetical estimator page
+    // (mp-lw5p), which reuses this endpoint and the `teamMatchType` query param.
+    // Exercised by api.test.jsx. Do not delete without closing mp-lw5p first.
     async estimateSchedule(args, password, signal) {
         const params = new URLSearchParams();
         Object.entries(args).forEach(([k, v]) => {
@@ -1618,6 +1641,81 @@ const API = {
             throw new Error(err.error || "Failed to send match back to queue");
         }
         return true;
+    },
+    // mp-gmcg: reopen a COMPLETED kachinuki team match: status back to
+    // running, winner/decision cleared, bout log kept.
+    //
+    // NO REASON IS SENT, deliberately (operator ruling). An operator who ended
+    // a match BY MISTAKE at a shiaijo must be able to get back into it in ONE
+    // TAP; making them justify the mistake before they may undo it is friction
+    // at the worst possible moment. The audit trail is collected on the way
+    // OUT instead: the server stamps `reopenPending` on the reopened match and
+    // rejects the later COMPLETING write unless it carries a correctionReason
+    // (400, field correctionReason), which admin_scoring_team.jsx prompts for
+    // on [End match]. The body stays an empty JSON object (not absent) so a
+    // handler that binds JSON still parses the request.
+    //
+    // 400 = a non-kachinuki competition; 409 = not completed / downstream
+    // bracket match already fought (the propagated winner cannot be retracted)
+    // / another match is already running on this match's court. The editor
+    // shows whichever came back verbatim, so the unwrap keeps the server's own
+    // words.
+    //
+    // TWO 409 SHAPES: most carry the sentence in `error`, but the court-busy
+    // conflict reuses the score path's structured payload, where `error` is
+    // the machine code "court_busy", the sentence is in `message`, and
+    // court/matchId/compId identify the BLOCKING match. Prefer `message` so the
+    // operator never reads a bare code, and carry the blocking match's identity
+    // onto the thrown Error: without it the editor could only print the
+    // conflict, and a busy court would be a dead end (kachinuki reopen is the
+    // ONLY way to fix a bout log). The server broadcasts match_updated on
+    // success.
+    async reopenMatch(compID, matchID, password) {
+        const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/reopen`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Tournament-Password': password
+            },
+            body: JSON.stringify({})
+        });
+        if (!res.ok) throw await reopenFailureError(res);
+        return true;
+    },
+    // mp-gmcg (review A4): atomically requeue the match holding the court AND
+    // reopen the target, in ONE server call under one court lock — replaces the
+    // former two-call revert-then-reopen, which raced (a peer could take the
+    // freed court between the calls). Surfaces the SAME court_busy detail shape
+    // as reopenMatch, so the panel re-offers the remedy when a DIFFERENT match
+    // has since taken the court.
+    async requeueBlockerAndReopen(targetComp, targetMatch, blockerComp, blockerMatch, password) {
+        const res = await fetch(`/api/competitions/${targetComp}/matches/${targetMatch}/requeue-blocker-and-reopen`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Tournament-Password': password
+            },
+            body: JSON.stringify({ blockerCompId: blockerComp, blockerMatchId: blockerMatch })
+        });
+        if (!res.ok) throw await reopenFailureError(res);
+        return true;
+    },
+    // mp-gmcg: remove a trailing UNSCORED kachinuki bout appended by mistake
+    // ([Record bout] / [Add next bout]). Kachinuki-only; targets a numbered
+    // bout, never a daihyosen. Returns the updated MatchResult (envelope
+    // unwrapped, like removeDaihyosen). A 409 ("no unscored bout to remove" /
+    // "match is not running") surfaces as the thrown Error's message.
+    async removeKachinukiBout(compID, matchID, password) {
+        const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/kachinuki-bout`, {
+            method: 'DELETE',
+            headers: { 'X-Tournament-Password': password }
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to remove bout");
+        }
+        const body = await res.json().catch(() => ({}));
+        return body.result ?? body;
     },
     async updateSchedule(compID, entries, password) {
         const res = await fetch(`/api/competitions/${compID}/schedule`, {

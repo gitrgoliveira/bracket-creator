@@ -282,6 +282,35 @@ func (s *Store) loadCached(compID, filename string, parse func(path string) (any
 	return data, nil
 }
 
+// cachedPoolMatches returns the CACHED pool-matches parse WITHOUT copying — the
+// no-copy accessor the status/court scans use (callers MUST NOT mutate the
+// result; writers replace the cached parse, never mutate in place). It is the
+// single place that pairs "pool-matches.csv" with parsePoolMatchesFile and
+// asserts the type, so no caller hand-rolls that pairing (mp-gmcg review).
+// LoadPoolMatches deep-copies this for callers that need an owned slice.
+func (s *Store) cachedPoolMatches(compID string) ([]MatchResult, error) {
+	data, err := s.loadCached(compID, "pool-matches.csv", parsePoolMatchesFile)
+	if err != nil {
+		return nil, err
+	}
+	matches, _ := data.([]MatchResult)
+	return matches, nil
+}
+
+// cachedBracket is cachedPoolMatches's bracket twin: the no-copy accessor for
+// bracket.json, pairing it with parseBracketFile in one place. parseBracketFile
+// never returns a nil *Bracket on success (a missing file parses to an empty
+// &Bracket{}), so a nil result means a load/parse error surfaced via err.
+// LoadBracket deep-copies this for callers that need an owned tree.
+func (s *Store) cachedBracket(compID string) (*Bracket, error) {
+	data, err := s.loadCached(compID, "bracket.json", parseBracketFile)
+	if err != nil {
+		return nil, err
+	}
+	bracket, _ := data.(*Bracket)
+	return bracket, nil
+}
+
 // compPath builds and cleans the path to a file inside a competition directory.
 func (s *Store) compPath(compID string, parts ...string) string {
 	segments := append([]string{s.folder, "competitions", compID}, parts...)

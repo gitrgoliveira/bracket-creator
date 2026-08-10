@@ -35,6 +35,8 @@
      reads at the call site; it resolves to the canonical palette red. */
   --danger: var(--red);
   --danger-soft: var(--red-soft);
+  --danger-border: #f5c2c2; /* red-200: error hairline border, mirrors --warn-border */
+  --danger-ink: #9b1c1c;    /* red-900: strongest error text, ~7:1 on --danger-soft */
   /* Warning/caution, amber. Non-overlapping with --red (Aka/danger) and
      --accent (navy/running) per DESIGN.md Principle 3. Used by the offline
      sync pill, .alert--warn and .tag-badge--warn. */
@@ -624,7 +626,7 @@ a:hover {
   border-radius: 6px;
   border: 1px solid transparent;
   cursor: pointer;
-  transition: all 120ms ease;
+  transition: background-color 120ms var(--ease-out), border-color 120ms var(--ease-out), color 120ms var(--ease-out);
   user-select: none;
   text-align: center;
   box-sizing: border-box;
@@ -667,8 +669,12 @@ a:hover {
 .btn:focus-visible,
 .court-popover button:focus-visible,
 .running-strip__chip:focus-visible,
-.radio-pill:focus-visible {
-  outline: none;
+.radio-pill:focus-visible,
+.tsm-fouls__btn:focus-visible {
+  /* Visible 2px accent outline + the soft glow: --accent-soft alone is
+     ~1.09:1 on white, effectively invisible to keyboard users (critique P3). */
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
   box-shadow: var(--focus-ring);
 }
 
@@ -2716,10 +2722,17 @@ button.vsched-item:not([data-clickable]) {
 }
 .winner-badge__icon {
   font-size: 22px;
+  display: inline-flex;
+  align-items: center;
 }
+/* Line-icon (Icon component) trophy inherits currentColor (the badge's own
+   ink), so it stays monochrome and on-voice. font-size no longer sizes an SVG,
+   so drive dimensions here; the px value still sizes the emoji fallback. */
+.winner-badge__icon svg { width: 20px; height: 20px; }
 .winner-badge--lg .winner-badge__icon {
   font-size: 28px;
 }
+.winner-badge--lg .winner-badge__icon svg { width: 26px; height: 26px; }
 
 /* MyMatchPanel: "Following: Name [Clear]" header row */
 .my-match__follow-row {
@@ -3999,6 +4012,14 @@ button.pool-match-row {
   background: var(--line-2);
 }
 
+/* mp-gmcg (critique P3): give autocomplete options the app's accent focus
+   ring instead of the UA-default blue 1px outline, so keyboard focus in the
+   picker matches every other focusable control in the editor. */
+.pmf__option:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
 .pmf__option.is-picked {
   background: var(--accent-soft);
 }
@@ -4599,12 +4620,20 @@ button.pool-match-row {
 }
 
 /* Score editor modal */
+/* mp-gmcg adapt (critique P1): the modal is a flex column and only the BODY
+   scrolls, so the footer (Cancel / Record bout / End match) is ALWAYS
+   reachable — previously the whole modal scrolled and on a 390px phone the
+   primary action sat below the fold behind a nested scroll. Applies to every
+   overlay editor (individual, team, engi); the inline .scoring-panel variant
+   flows in the page and is unaffected. */
 .editor-modal {
   background: var(--surface);
   border-radius: var(--r-lg);
   width: min(560px, calc(100vw - 32px));
   max-height: calc(100vh - 32px);
-  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   box-shadow: var(--shadow-lg);
 }
 
@@ -4626,6 +4655,7 @@ button.pool-match-row {
 .editor-modal__head {
   padding: 18px 22px;
   border-bottom: 1px solid var(--line);
+  flex: 0 0 auto;
 }
 
 .editor-modal__body {
@@ -4633,6 +4663,10 @@ button.pool-match-row {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  /* The scroll region of the pinned-footer modal (see .editor-modal). */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .editor-modal__foot {
@@ -4641,6 +4675,33 @@ button.pool-match-row {
   display: flex;
   justify-content: space-between;
   gap: 8px;
+  flex: 0 0 auto;
+}
+
+/* Coarse-pointer tap floor for the score editors' small buttons (Tie,
+   Fusensho, decision row, Encho): 44px per DESIGN §2.4; scoped to the
+   editors so dense list surfaces keep their density (critique P3). */
+@media (pointer: coarse) {
+  .editor-modal .btn--sm,
+  .scoring-panel .btn--sm {
+    min-height: 44px;
+  }
+}
+
+/* Keyboard-shortcut reminder (←/→ · Esc): meaningless on touch devices, so
+   it hides under coarse pointers (critique minor). */
+@media (pointer: coarse) {
+  .scoring-shortcut-hint { display: none; }
+}
+
+/* mp-gmcg layout (critique P2): the nav-variant footer stacks its content
+   (contextual hint, inline error, action row, shortcut hint). The base
+   row+space-between turned those fragments into side-by-side columns the
+   moment the kachinuki tied-state hint mounted, orphaning buttons away
+   from their alternatives. */
+.editor-modal__foot--nav {
+  flex-direction: column;
+  align-items: stretch;
 }
 
 .scoring-board {
@@ -4652,7 +4713,12 @@ button.pool-match-row {
 
 .sb-match {
   display: grid;
-  grid-template-columns: 1fr 140px 1fr;
+  /* minmax(0, 1fr): let the side tracks shrink below their content so a long
+     UNBROKEN name (a mis-pasted token, a single-word team name) wraps instead
+     of forcing the board wider than .scoring-panel, which clips it (hiding the
+     Aka side's scoring buttons on a tablet). Paired with .sb-name overflow-wrap
+     below. Realistic spaced/CJK names already wrap and are unaffected. */
+  grid-template-columns: minmax(0, 1fr) 140px minmax(0, 1fr);
   align-items: stretch;
   background: var(--surface);
   border: 1px solid var(--line);
@@ -4666,6 +4732,7 @@ button.pool-match-row {
   display: flex;
   flex-direction: column;
   justify-content: center;
+  min-width: 0; /* allow the grid track to shrink below the name's content width */
   transition: background 0.3s ease;
   /* Aka/Shiro side treatment (DESIGN.md §4): solid side tint + a thick coloured
      top bar so the colour reads as real area. Matches the inline editor's
@@ -4721,6 +4788,49 @@ button.pool-match-row {
   color: var(--ink);
   letter-spacing: -0.02em;
   margin-bottom: 8px;
+  /* Break a pathological unbroken token (no spaces/hyphens/CJK break points)
+     mid-word so it never forces the grid track wide. Spaced names still prefer
+     to break at spaces first, so normal names are visually unchanged. */
+  overflow-wrap: anywhere;
+}
+
+/* Option D (harden): on the INDIVIDUAL scoring board only — scoped with
+   :has(.sb-slots) so the team header (.sb-match/.sb-side carrying just a
+   badge + name, no slots) is untouched — lay each side out as a SUBGRID that
+   shares the parent's rows. The name row then sizes to the TALLER of the two
+   names, so both sides' score slots begin on the same line with NO truncation,
+   and the pills align. The 1fr spacer rows top and bottom keep the block
+   vertically centred; the name sits at the bottom of its (possibly taller)
+   row so it hugs its scores. Grid items stretch by default, so the pill is
+   pinned back to a hug-content chip mirrored inward. */
+/* Gated on @supports so an older Chromium WebView (subgrid shipped Chrome 117 /
+   Safari 16) — the class of courtside Android tablet this app targets — falls
+   back to the base .sb-side flex column rather than landing the grid-row: 2..5
+   assignments on IMPLICIT rows and rendering misaligned. Modern browsers get
+   the subgrid alignment; old ones get the pre-change flex layout (mp-gmcg
+   review F8). */
+@supports (grid-template-rows: subgrid) {
+  .sb-match:has(.sb-slots) {
+    grid-template-rows: 1fr auto auto auto auto 1fr;
+  }
+  .sb-match:has(.sb-slots) > .sb-side {
+    display: grid;
+    grid-row: 1 / -1;
+    grid-template-rows: subgrid;
+  }
+  .sb-match:has(.sb-slots) > .sb-side > .sb-side__badge { grid-row: 2; }
+  .sb-match:has(.sb-slots) > .sb-side > .sb-name { grid-row: 3; align-self: end; }
+  .sb-match:has(.sb-slots) > .sb-side > .sb-slots { grid-row: 4; }
+  .sb-match:has(.sb-slots) > .sb-side > .sb-points-grid { grid-row: 5; }
+  .sb-match:has(.sb-slots) > .sb-center { grid-row: 1 / -1; }
+  .sb-match:has(.sb-slots) > .sb-side--shiro > .sb-side__badge { justify-self: end; }
+  .sb-match:has(.sb-slots) > .sb-side--aka > .sb-side__badge { justify-self: start; }
+  /* Slots hug the INSIDE (against the centre vs) via justify-self on the hug-
+     content group; the existing flex-direction (row / row-reverse) still controls
+     the outside-to-inside fill, so each side's first ippon stays on its name side
+     and fills toward the centre — the fixed FIK rule is untouched. */
+  .sb-match:has(.sb-slots) > .sb-side--shiro > .sb-slots { justify-self: end; }
+  .sb-match:has(.sb-slots) > .sb-side--aka > .sb-slots { justify-self: start; }
 }
 
 /* the side label (".sb-dojo" historically held it) becomes the identity chip,
@@ -4785,7 +4895,7 @@ button.pool-match-row {
   font-family: var(--font-mono);
   color: var(--ink-3);
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 180ms var(--ease-out), box-shadow 180ms var(--ease-out), background-color 180ms var(--ease-out), color 180ms var(--ease-out);
 }
 
 .sb-slot--filled {
@@ -4915,7 +5025,7 @@ button.pool-match-row {
   font-weight: 800;
   color: var(--ink-4);
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background-color 180ms var(--ease-out), border-color 180ms var(--ease-out), color 180ms var(--ease-out);
 }
 
 .sb-hansoku-dot.is-on {
@@ -4978,6 +5088,31 @@ button.pool-match-row {
   flex-direction: row-reverse;
 }
 
+/* mp-gmcg (critique P1, DESIGN.md §2/§4): give each side its own tinted CELL
+   in the scoring row, not just a ~10px end badge. The two M/K/D/T/H clusters
+   are pixel-symmetric, so under hall glare a fast operator can score the
+   wrong side. This reuses the kendo-card treatment EXACTLY (.sb-side /
+   .engi-side): a full-area fill + a colored top bar, never colour-alone —
+   Aka = red-soft fill + red top bar, Shiro = framed cool white + 45° hatch +
+   accent top bar (so "white" reads as a side, survives glare/CVD). Not a
+   side-stripe: the fill is the treatment, the bar frames the top. */
+.team-sub-match__side--aka,
+.team-sub-match__side--shiro {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border-top: 3px solid transparent;
+}
+.team-sub-match__side--aka {
+  background: var(--red-soft);
+  border-top-color: var(--red);
+}
+.team-sub-match__side--shiro {
+  background: var(--white-side);
+  border-top-color: var(--accent);
+  background-image: repeating-linear-gradient(
+    -45deg, transparent 0 7px, var(--shiro-hatch) 7px 8px);
+}
+
 .team-sub-match__pts {
   display: flex;
   gap: 4px;
@@ -4990,21 +5125,30 @@ button.pool-match-row {
   font-size: 16px;
 }
 
+/* Summary band: light instrument panel (mp-gmcg band redesign, brief
+   confirmed 2026-08-02). This is the SINGLE source of truth: it replaces
+   the old three-generation cascade (legacy dark block, light "Instrument
+   Panel" refresh, compact-modal dark override) whose interleaving rendered
+   the verdict navy-on-near-black at ~1.3:1 (critique P0). Do not add a
+   second .team-summary block. Inks hold WCAG AA on --surface-2: this band
+   is glanced from arm's length under hall glare. */
 .team-summary {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
-  gap: 16px;
-  background: #1e293b;
-  color: white;
-  padding: 20px;
-  border-radius: 12px;
-  margin-top: 24px;
+  gap: 12px;
+  background: var(--surface-2);
+  color: var(--ink-1);
+  border: 1px solid var(--line);
+  padding: 10px 14px;
+  border-radius: 10px;
+  margin-top: 8px;
   align-items: center;
 }
 
 .team-summary__side {
   display: flex;
   flex-direction: column;
+  gap: 2px;
 }
 
 .team-summary__side--right {
@@ -5012,25 +5156,78 @@ button.pool-match-row {
 }
 
 .team-summary__label {
-  font-size: 11px;
-  font-weight: 600;
-  opacity: 0.7;
+  font-size: 10px;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.07em;
+  /* --ink-2, not --ink-3: at this size on --surface-2, --ink-3 lands at
+     4.41:1, just under WCAG AA. */
+  color: var(--ink-2);
 }
 
+/* IV/PW: demoted to secondary data (they feed standings tie-breaks but, in
+   kachinuki, never decide the encounter — the last bout does). */
 .team-summary__stats {
-  font-size: 20px;
+  font-size: 12.5px;
   font-weight: 700;
   font-family: var(--font-mono);
+  color: var(--ink-2);
+  white-space: nowrap;
 }
 
-.team-summary__result {
-  font-size: 24px;
-  font-weight: 800;
-  color: var(--accent-light);
-  letter-spacing: 0.05em;
+/* Centre cell mirrors the side cells so the verdict/fact shares the stats
+   baseline. */
+.team-summary__side--center {
+  align-items: center;
+  text-align: center;
 }
+
+/* Kachinuki running headline content: a bout-log fact ("X beat Y · stays
+   on"), never a verdict — the verdict appears only on completion. */
+.team-summary__fact {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--ink-1);
+  white-space: nowrap;
+}
+
+.team-summary__verdict {
+  font-weight: 800;
+  font-size: 18px;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  color: var(--ink-1);
+}
+.team-summary__verdict--aka { color: var(--red); }
+.team-summary__verdict--shiro { color: var(--accent); }
+.team-summary__verdict--draw { color: var(--ink-1); }
+
+/* mp-gmcg (critique P3): collapsed withdrawal/no-show decisions. Quiet
+   disclosure — the summary is a plain muted line with a marker, so it reads
+   as "more if you need it", not a competing action row. */
+.decision-disclosure {
+  margin-top: 12px;
+  border-top: 1px solid var(--line-2);
+  padding-top: 8px;
+}
+.decision-disclosure__summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-3);
+  list-style-position: inside;
+  user-select: none;
+}
+.decision-disclosure__summary:hover { color: var(--ink-2); }
+.decision-disclosure__summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* (mp-gmcg: the phone-width bout-row stacking block moved to the END of
+   the file so it wins the cascade over the .team-bouts-scroll layout
+   overrides declared below it.) */
 
 .hansoku-dot {
   width: 22px;
@@ -5511,59 +5708,8 @@ button.pool-match-row {
   font-size: 10px;
 }
 
-.team-summary {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  gap: 8px;
-  align-items: center;
-  padding: 10px 12px;
-  background: var(--surface-2);
-  border-radius: 8px;
-  margin-top: 4px;
-  /* Override the legacy dark-scoreboard `color: white` above, this is the
-     light variant, so text must be dark ink to stay readable on surface-2. */
-  color: var(--ink-1);
-}
-
-.team-summary__side {
-  text-align: center;
-}
-
-.team-summary__side--win {
-  font-weight: 700;
-  color: var(--accent);
-}
-
-.team-summary__label {
-  font-size: 12px;
-  /* --ink-2, not --ink-3: at 12px/600 on the slate summary band --ink-3 lands
-     at 4.41:1, just under WCAG AA. This is the verdict caption the operator
-     glances at under hall glare, so hold it above the line. */
-  color: var(--ink-2);
-  opacity: 1;
-}
-
-.team-summary__result {
-  font-weight: 700;
-  font-size: 13px;
-  text-align: center;
-  white-space: nowrap;
-  color: var(--accent);
-}
-
-/* Centre cell mirrors the side cells (label on top, value below) so the
-   verdict word sits on the same baseline as the IV/PW stats either side. */
-.team-summary__side--center {
-  align-items: center;
-  text-align: center;
-}
-.team-summary__verdict {
-  font-weight: 800;
-  font-size: 18px;
-  letter-spacing: 0.04em;
-  white-space: nowrap;
-  color: var(--accent);
-}
+/* (The former duplicate light-refresh .team-summary block lived here; the
+   single consolidated block above is now the only source. mp-gmcg.) */
 
 /* ---------- Aka/Shiro color badges ---------- */
 /* Used in brackets, pool match rows, schedule items, score editor */
@@ -5945,8 +6091,8 @@ button.pool-match-row {
 
 .alert--error {
   background: var(--danger-soft);
-  border-color: #f5c2c2;
-  color: #9b1c1c;
+  border-color: var(--danger-border);
+  color: var(--danger-ink);
 }
 
 .alert--warn {
@@ -6563,6 +6709,50 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   flex-wrap: wrap;
 }
 
+/* mp-gmcg: court-busy remedy panel in the team score editor's footer. The
+   operator wanted to reopen their own match and instead learned another match
+   holds the court; from here they can clear it. Danger palette because the
+   action inside DESTROYS that other match's score: the panel must not read as
+   a neutral notice. Composes .alert.alert--error (background/border/padding/
+   font-size — --r-sm and --fs-sm resolve to the SAME 6px/13px .alert already
+   hard-codes) in the JSX; this rule adds only what's specific here (review:
+   this used to re-declare the whole alert--error palette by hand). */
+.reopen-conflict {
+  margin-bottom: 8px;
+}
+.reopen-conflict__head {
+  font-weight: 700;
+  color: var(--danger-ink);
+}
+/* The consequence sentence. Stated in full and always visible: an operator
+   about to wipe someone else's score may not have to hover, expand or guess. */
+.reopen-conflict__warn {
+  margin-top: 2px;
+  color: var(--danger-ink);
+}
+/* The server's own words, kept verbatim underneath ours so nothing it said is
+   swallowed by the friendlier heading. */
+.reopen-conflict__msg {
+  margin-top: 4px;
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+}
+.reopen-conflict__actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+/* The verdict about to be committed, shown above the reopen-reason prompt:
+   that prompt's Confirm IS the commit, and it hides the End button whose
+   armed label would otherwise carry this. */
+.reopen-reason__verdict {
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+  margin-bottom: 4px;
+}
+
 /* F5: pending-write banner, offline / transient queued terminal write */
 .pending-write-banner {
   display: flex;
@@ -6599,8 +6789,8 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
    reads as an error the operator must act on, not a transient "will retry". */
 .pending-write-banner--failed {
   background: var(--danger-soft);
-  border-color: #f5c2c2;
-  color: #9b1c1c;
+  border-color: var(--danger-border);
+  color: var(--danger-ink);
 }
 .pending-write-banner--failed::before {
   background: var(--danger);
@@ -6614,13 +6804,121 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 
 /* ---------- H ippon button ---------- */
+/* H is the Hansoku point (awarded on the opponent's 2nd foul), not an earned
+   strike, so it keeps a distinct red ink + border. But a resting red FILL made
+   it read as pre-selected/active beside the neutral M/K/D/T, so a tired operator
+   misread the lone filled button as an alert (critique). Drop the resting fill;
+   keep the ink/border cue and let the tint appear only on hover. */
 .ipt-btn--h {
-  background: rgba(220, 38, 38, 0.08);
   color: var(--red);
   border-color: rgba(220, 38, 38, 0.3);
   font-weight: 800;
 }
-.ipt-btn--h:hover { background: rgba(220, 38, 38, 0.15); }
+.ipt-btn--h:hover { background: rgba(220, 38, 38, 0.12); }
+
+/* Touch: the "Send back to queue" control and the kiken/fusenpai disclosure
+   toggles were the only operator controls that fell below the 44px touch target
+   on tablets (critique measured ~26px and ~18px); floor them on coarse pointer. */
+@media (pointer: coarse) {
+  .shiaijo-revert { min-height: 44px; }
+  .decision-disclosure__summary { min-height: 44px; }
+}
+
+/* ---------- Kachinuki read-only bout rows ---------- */
+/* The bouts already fought render as read-only team-sub-match rows above the
+   current editable bout (renderReadOnlyBout): the same layout as the editable
+   row, minus the controls, so the encounter reads like a regular team sheet.
+   Muted a touch so the live bout stands out; the winner's name is bold. */
+.team-sub-match--readonly {
+  opacity: 0.92;
+}
+.team-sub-match--readonly .tsm-name {
+  margin: 0;
+}
+/* The SHIRO/AKA chips are dropped on read-only rows; the side is carried by the
+   column + the tinted side background. Colour the name Shiro-dark / Aka-red so
+   each row still reads its side at a glance, matching the scoreboard. */
+.team-sub-match--readonly .team-sub-match__side--shiro .tsm-name__static { color: var(--ink, #111827); }
+.team-sub-match--readonly .team-sub-match__side--aka .tsm-name__static { color: var(--red, #b91c1c); }
+.tsm-name__static--win {
+  font-weight: 800;
+}
+
+/* mp-gmcg: a fought kachinuki bout is tappable during a RUNNING encounter to
+   reopen it for inline correction. The whole row is the target (a tired
+   operator shouldn't have to hit a tiny icon); the black caret in the position
+   column is the expand/collapse indicator. */
+.team-sub-match--editable {
+  cursor: pointer;
+  transition: box-shadow 120ms ease-out;
+}
+.team-sub-match--editable:hover {
+  opacity: 1;
+}
+.team-sub-match--editable:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: 8px;
+}
+
+/* Black-triangle disclosure caret. ▶ collapsed; rotated to point down when the
+   bout is open for correction. X means delete in this app (see "× Remove this
+   bout"), so expand/collapse is a triangle, matching the disclosure convention. */
+.tsm-caret {
+  display: inline-block;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--ink-1);
+  transition: transform 120ms ease-out;
+}
+.tsm-caret--open {
+  transform: rotate(90deg);
+}
+/* On an opened bout the caret is a real button: the row itself now carries the
+   scoring controls, so the whole-row expand target can't double as collapse. */
+.tsm-caret-btn {
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+.tsm-caret-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: 4px;
+}
+/* Flex the position column only when a caret rides in it, so the caret sits
+   left of the number without disturbing caret-less rows. */
+.team-sub-match__pos:has(.tsm-caret) {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 3px 6px;
+}
+@media (pointer: coarse) {
+  .tsm-caret-btn {
+    min-height: 44px;
+    min-width: 36px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin: -10px 0;
+  }
+}
+
+/* The bout currently open for correction: a clear accent frame so the operator
+   sees which row the scoring controls belong to. */
+.team-sub-match--correcting {
+  box-shadow: var(--focus-ring);
+  border-radius: 8px;
+}
+/* Non-destructive warning beneath a bout whose correction flipped who won.
+   Composes the shared .alert .alert--warn base (padding/border/colors); only the
+   layout deltas live here. */
+.kachinuki-done-edit-warn {
+  margin: 4px 0 10px;
+  line-height: 1.4;
+}
 
 /* ---------- Team sub-match fouls (inline, independent) ---------- */
 .tsm-side-label {
@@ -7117,34 +7415,12 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 
 /* --- Compact mode: team summary + decision controls --------------------- */
+/* Compact modal: the band's single consolidated block above already fits
+   the compact density; the old dark override that lived here (and caused
+   the 1.3:1 verdict, critique P0) was removed. mp-gmcg. */
 .editor-modal--compact .team-summary {
-  padding: 5px 12px !important;
+  padding: 6px 12px !important;
   margin-top: 4px !important;
-  border-radius: 8px;
-  background: #1e2a3a; /* fallback, approximate ink-92%+accent-8% */
-  background: color-mix(in srgb, var(--ink) 92%, var(--accent) 8%);
-  color: white;
-}
-.editor-modal--compact .team-summary__label {
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  opacity: 0.7;
-}
-.editor-modal--compact .team-summary__stats {
-  font-family: var(--font-mono);
-  font-size: 14px;
-  font-weight: 700;
-}
-.editor-modal--compact .team-summary__result {
-  font-size: 16px;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-}
-.editor-modal--compact .team-summary__result > div {
-  font-size: 10px !important;
-  letter-spacing: 0.08em;
-  margin-top: 2px !important;
 }
 .decision-btn-group {
   display: inline-flex;
@@ -7248,6 +7524,19 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   }
 }
 
+/* mp-gmcg (critique P2): mouse/laptop operators too. On a fine pointer the
+   editor's ippon + foul buttons sat at ~20x17px, half DESIGN.md's 36px
+   pragmatic floor for admin surfaces. Coarse pointers get 44px above; give
+   fine pointers a 32px min so a precise-but-small click target isn't a
+   frustration on a trackpad. */
+@media (pointer: fine) {
+  .team-bouts-scroll .ipt-btn,
+  .team-bouts-scroll .tsm-fouls__btn {
+    min-width: 32px;
+    min-height: 32px;
+  }
+}
+
 /* --- Touch-target floor for the Engi flag counters --------------------- *
    .engi-counter__btn is the single most-tapped control in the Engi flow
    (every flag increment) and had no coarse-pointer override at all: it sat
@@ -7265,7 +7554,8 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
    obvious with the accent ring language (DESIGN.md §6 / §3). Scoped to the
    .ipt-btn family this region owns. */
 .ipt-btn:focus-visible {
-  outline: none;
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
   border-color: var(--accent);
   box-shadow: var(--focus-ring);
 }
@@ -8438,6 +8728,12 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   justify-content: flex-end;
   margin-top: 8px;
 }
+/* The exit is a recovery action, kept quiet vs the primary Record/End buttons,
+   but a bare ghost link floating in whitespace reads as text, not a control.
+   A hairline border gives it a tappable boundary without competing for the eye. */
+.shiaijo-revert .btn--ghost {
+  border-color: var(--line);
+}
 
 /* Page title doubles as the court switcher: the H1 shows a chevron and a
    transparent native <select> overlays it (native picker + a11y, no duplicate
@@ -8532,6 +8828,8 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   font-size: 15px;
   flex-shrink: 0;
   line-height: 1.4;
+  display: inline-flex;
+  align-items: center;
 }
 .shiaijo-nudge__text {
   line-height: 1.4;
@@ -9410,4 +9708,58 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   .rd-search__input {
     transition: none;
   }
+}
+
+/* mp-gmcg (critique P1 + shiaijo-console fix): the bout row STACKS when its
+   CONTAINER is narrow — Shiro side / centre marks / Aka side, each full
+   width. This is a CONTAINER query, not a viewport one: the score editor
+   renders both as a wide overlay (admin scores page, ~860px → 2-column) AND
+   as a narrow inline .scoring-panel in the shiaijo court console (~460px on
+   a wide desktop viewport). A viewport media query kept the inline panel in
+   the 2-column layout, so the side-coloured cells were too narrow and the
+   name inputs + × clear overflowed outside them. Container query fixes both
+   the phone overlay and the desktop inline panel with one rule.
+   The query container is .editor-modal__body — the editor's scroll body,
+   present in BOTH contexts. (An earlier attempt made .team-bouts-scroll the
+   container, but inline-size containment collapsed it to width 0 inside the
+   overlay's flex-column body, so the query silently never matched; the body
+   has a reliable width in every context.) The bout rows AND the summary band
+   are both inside it, so a single container drives both. */
+.editor-modal__body {
+  container-type: inline-size;
+  container-name: editorbody;
+}
+@container editorbody (max-width: 520px) {
+  /* Bout row STACKS: Shiro side / centre marks / Aka side, each full width.
+     Selectors carry the .team-bouts-scroll prefix to match the specificity
+     (0,2,0) of the base .team-bouts-scroll .team-sub-match__row override —
+     a bare selector (0,1,0) would lose the cascade regardless of order. */
+  .team-bouts-scroll .team-sub-match {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .team-bouts-scroll .team-sub-match__row {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .team-bouts-scroll .team-sub-match__side,
+  .team-bouts-scroll .team-sub-match__side--right {
+    justify-content: center;
+    min-width: 0;
+  }
+  .team-bouts-scroll .tsm-name {
+    width: 100%;
+    min-width: 0;
+  }
+  /* Summary band: 3-column at wide widths clipped "AKA (RED)" + its IV/PW off
+     the right edge in the narrow shiaijo inline panel, hiding the Aka side's
+     stats. When narrow it stacks (Shiro row / centre fact / Aka row) and the
+     fact wraps instead of clipping. */
+  .team-summary {
+    grid-template-columns: 1fr;
+    row-gap: 8px;
+    text-align: center;
+  }
+  .team-summary__side--right { text-align: center; }
+  .team-summary__fact { white-space: normal; }
 }

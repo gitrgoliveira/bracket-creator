@@ -264,8 +264,12 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	// destroy server-appended bouts). Applied here at the entry point,
 	// BEFORE the pool/bracket write primitives, so the rollback path
 	// below (which replays `prior` through those primitives) still
-	// restores the pre-write state exactly.
-	applyKachinukiMerge(comp, prior, result)
+	// restores the pre-write state exactly. A merge-time rejection (e.g. a
+	// kachinuki-exhaustion write ending on a tied bout, mp-gmcg review R2)
+	// returns BEFORE any write primitive, so nothing is persisted.
+	if merr := applyKachinukiMerge(comp, prior, result); merr != nil {
+		return nil, merr
+	}
 
 	// mp-e2k1: For mixed competitions, capture the pre-write standings for
 	// the match's pool so we can compare after the write and detect whether
@@ -325,6 +329,15 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 			result.ScheduledAt = r.ScheduledAt
 		}
 		result.Round = r.Round
+		// Twin parity with the bracket write in recordBracketMatchResultTx,
+		// which is set-if-non-empty and so leaves a stored reason alone. The
+		// whole-struct overwrite below would otherwise BLANK it: the kachinuki
+		// reopen path persists the operator's audit justification here, and
+		// the first "Record bout" after a reopen is a plain write carrying no
+		// reason of its own.
+		if result.CorrectionReason == "" {
+			result.CorrectionReason = r.CorrectionReason
+		}
 		*r = *result
 	})
 	if err != nil {
@@ -458,6 +471,13 @@ func (e *Engine) recordMatchResultTx(tx state.StoreTx, compID, matchID string, r
 			result.ScheduledAt = r.ScheduledAt
 		}
 		result.Round = r.Round
+		// NOTE the forward write (RecordMatchResultWithIneligibilityTx) does a
+		// set-if-empty preservation of CorrectionReason here; this rollback path
+		// deliberately does NOT. It restores a trusted prior snapshot
+		// byte-for-byte, so an empty prior reason must CLEAR the field rather
+		// than inherit the rejected partial write's reason — the same reasoning
+		// that makes rollbackMatchResultTx normalize nil SubResults/DecidedByHantei
+		// into explicit clears.
 		*r = *result
 	})
 	if err != nil {
@@ -657,27 +677,66 @@ func (e *Engine) checkSimultaneousMatchTx(tx state.StoreTx, compID, matchID stri
 	return nil
 }
 
-// checkCourtExclusivityTx checks that no OTHER match in compID's own pool or
-// bracket is already running on the same court. The cross-competition check is
-// intentionally omitted here: calling store.RunningMatchOnCourt (which acquires
-// read locks on other competitions) while holding compID's write lock via
-// WithTransaction risks a circular-wait deadlock if another competition is
-// simultaneously in its own WithTransaction. The cross-competition check is
-// performed by CheckCrossCompCourtBusy before WithTransaction is entered.
+// checkCourtExclusivityTx is the court-exclusivity entry point for callers that
+// know only the match id: it resolves the court via the tx, then runs the gate.
+// Callers that already HOLD the court (and often the loaded slices too) skip
+// this and call courtFreeInCompTxWith directly — an in-tx lookupMatchCourtTx
+// walk is not free, since tx loads bypass the file cache and are therefore real
+// disk reads taken under the write lock.
 func (e *Engine) checkCourtExclusivityTx(tx state.StoreTx, compID, matchID string) error {
 	court, err := lookupMatchCourtTx(tx, compID, matchID)
 	if err != nil {
 		return err
 	}
+	return courtFreeInCompTxWith(tx, compID, matchID, court, nil, nil)
+}
+
+// courtFreeInCompTxWith is the same-competition half of the court-exclusivity
+// gate: it reports whether any match in compID's own pool or bracket OTHER than
+// matchID is already running on court. Returns *CourtBusyError (HTTP 409
+// court_busy) when the court is taken; a match with no court assigned is never
+// gated.
+//
+// The cross-competition check is intentionally omitted here: calling
+// store.RunningMatchOnCourt (which acquires read locks on other competitions)
+// while holding compID's write lock via WithTransaction risks a circular-wait
+// deadlock if another competition is simultaneously in its own WithTransaction.
+// The cross-competition check is performed by CheckCrossCompCourtBusy before
+// WithTransaction is entered.
+//
+// It REUSES pool matches and/or a bracket the caller already loaded in the same
+// transaction, loading only the slice it wasn't handed (mp-gmcg review E4: the
+// reopen path's findMatchHome has already loaded these under the same lock, so
+// re-loading them for the court scan is pure waste). A nil argument means "load
+// it" — and crucially, findMatchHome SWALLOWS a pool-load error (it still tries
+// the bracket), so a nil poolMatches here forces an authoritative reload that
+// SURFACES a genuine load failure rather than silently skipping pool matches in
+// the scan.
+//
+// The reopen path needs this gate for a specific reason: reopening flips the
+// match back to running, so a court that already has a running match would end
+// up with TWO, wedging the exclusivity check for BOTH (the re-End of the
+// reopened match and every further score write to the genuinely live bout).
+// See ReopenKachinukiMatch's COURT GATE note.
+func courtFreeInCompTxWith(tx state.StoreTx, compID, matchID, court string, poolMatches []state.MatchResult, bracket *state.Bracket) error {
 	if court == "" {
 		return nil
 	}
-	occ, err := courtOccupiedInCompTx(tx, compID, court, matchID)
-	if err != nil {
-		return err
+	if poolMatches == nil {
+		var err error
+		if poolMatches, err = tx.LoadPoolMatches(compID); err != nil {
+			return err
+		}
 	}
-	if occ != nil {
-		return &CourtBusyError{Court: court, MatchID: occ.MatchID, CompID: occ.CompID}
+	if bracket == nil {
+		var err error
+		if bracket, err = tx.LoadBracket(compID); err != nil {
+			return err
+		}
+	}
+	if occ := courtOccupied(poolMatches, bracket, court, matchID); occ != nil {
+		// The scan is same-competition, so the occupant is in compID.
+		return &CourtBusyError{Court: court, MatchID: occ.MatchID, CompID: compID}
 	}
 	return nil
 }
@@ -711,41 +770,40 @@ func lookupMatchCourtTx(tx state.StoreTx, compID, matchID string) (string, error
 	return "", notFoundErrorf("match %q not found in competition %q", matchID, compID)
 }
 
-// courtOccupiedInCompTx scans compID's pool matches and bracket (via tx)
-// for any match, other than skipMatchID, that is Running on court.
-func courtOccupiedInCompTx(tx state.StoreTx, compID, court, skipMatchID string) (*state.CourtOccupancy, error) {
-	poolMatches, err := tx.LoadPoolMatches(compID)
-	if err != nil {
-		return nil, err
-	}
-	for _, m := range poolMatches {
+// courtOccupied is the PURE court-occupancy scan (mp-gmcg review E4): given
+// already-loaded pool matches and bracket, return the RUNNING match on `court`
+// other than skipMatchID (pool first, then bracket rounds, then the bronze
+// sibling), or nil. No I/O, so callers that already hold the loaded slices —
+// the reopen path via findMatchHome — reuse them instead of re-loading. compID
+// is only stamped onto the CourtOccupancy result, so it is not needed for the
+// scan and is not a parameter here (the caller carries it).
+func courtOccupied(poolMatches []state.MatchResult, bracket *state.Bracket, court, skipMatchID string) *state.CourtOccupancy {
+	for i := range poolMatches {
+		m := &poolMatches[i]
 		if m.ID == skipMatchID || m.Status != state.MatchStatusRunning {
 			continue
 		}
 		if m.Court == court {
-			return &state.CourtOccupancy{CompID: compID, MatchID: m.ID}, nil
+			return &state.CourtOccupancy{MatchID: m.ID}
 		}
 	}
-	bracket, err := tx.LoadBracket(compID)
-	if err != nil {
-		return nil, err
-	}
 	if bracket != nil {
-		for _, round := range bracket.Rounds {
-			for _, bm := range round {
+		for rIdx := range bracket.Rounds {
+			for mIdx := range bracket.Rounds[rIdx] {
+				bm := &bracket.Rounds[rIdx][mIdx]
 				if bm.ID == skipMatchID || bm.Status != state.MatchStatusRunning {
 					continue
 				}
 				if bm.Court == court {
-					return &state.CourtOccupancy{CompID: compID, MatchID: bm.ID}, nil
+					return &state.CourtOccupancy{MatchID: bm.ID}
 				}
 			}
 		}
 		if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID != skipMatchID && bm.Status == state.MatchStatusRunning && bm.Court == court {
-			return &state.CourtOccupancy{CompID: compID, MatchID: bm.ID}, nil
+			return &state.CourtOccupancy{MatchID: bm.ID}
 		}
 	}
-	return nil, nil
+	return nil
 }
 
 func resolvePlayerIDsTx(tx state.StoreTx, compID, sideA, sideB string) (string, string) {

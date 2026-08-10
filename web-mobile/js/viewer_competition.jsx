@@ -60,7 +60,12 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
     // renders `bracket`/`derivedBracket` directly and is NOT affected.
     if (bracket && bracket.rounds && !bracket.preview) {
         bracket.rounds.forEach((round, ri) => {
-            round.forEach((m) => out.push({ ...m, phase: "bracket", round: window.roundLabel(ri, bracket.rounds.length), phaseName: window.roundLabel(ri, bracket.rounds.length), roundIndex: ri, compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize, compEngi: isEngi, teamMatchType: compTMT }));
+            // window.bracketRoundLabel is the ONE round-naming primitive: it keys
+            // on the match's effective round (mp-7f2w displayRound), so an Overview
+            // row and the Bracket tab column above the same match always agree.
+            // roundLabel(ri, …) named a DIFFERENT round whenever a bye collapsed
+            // one (mp-u37s). roundIndex stays RAW: lineup fetches key on it.
+            round.forEach((m) => out.push({ ...m, phase: "bracket", round: window.bracketRoundLabel(m, ri, bracket.rounds.length), phaseName: window.bracketRoundLabel(m, ri, bracket.rounds.length), roundIndex: ri, compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize, compEngi: isEngi, teamMatchType: compTMT }));
         });
     }
     return out;
@@ -134,8 +139,31 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
     // pool-then-bracket order (not time order), so a bare slice(-N).reverse()
     // produced a jumbled "Recent results" list: sort by scheduledAt desc,
     // then take the most recent N. Missing times sort last (oldest).
+    // hasBothSides here for the same reason as running/upcoming above, and to
+    // keep byes out: a non-power-of-two knockout auto-completes its bye
+    // matches, which have one real competitor and one absent side, so they
+    // arrived here as finished results reading "TBD vs <name>" with a Final
+    // badge and no indication that nobody was ever scheduled. A bye is bracket
+    // structure, not a result. It stays discoverable in the Bracket tab, where
+    // the entrant renders as an unopposed slot tagged BYE feeding the next
+    // round (that is bc-bye-slot__tag in BracketTreeMeta; not the MatchCard's
+    // bc-bye-tag, which is gated on score.type === "bye" and unreachable from a
+    // server payload). Use
+    // hasBothSides, never `m.sideA && m.sideB`: normalizeMatch substitutes a
+    // truthy {id:"",name:""} for a missing side.
+    //
+    // SWISS is NOT affected by this filter, despite building a bye in the same
+    // one-real-side shape ({SideA: name, SideB: "", Winner: name, completed} —
+    // engine/swiss.go). Swiss piggybacks on pool-matches.csv but never writes
+    // pools.csv, so the viewer payload carries `pools: []` with the matches in
+    // poolMatches (verified against a live 5-player Swiss round: 3 poolMatches,
+    // pools empty). The loop above walks `pools`, so NO Swiss match reaches
+    // allMatches at all and none of these three lists can contain one. A Swiss
+    // bye therefore does not appear here for a different reason than a knockout
+    // bye, and the operator has ruled that acceptable. Do not add a Swiss case
+    // to this filter expecting it to change anything.
     const recent = allMatches
-      .filter((m) => m.status === "completed" && m.winner && matchInvolvesWatched(m))
+      .filter((m) => m.status === "completed" && m.winner && hasBothSides(m) && matchInvolvesWatched(m))
       .sort((a, b) => (b.scheduledAt || "00:00").localeCompare(a.scheduledAt || "00:00"))
       .slice(0, hasActiveFilter ? 20 : 5);
     return { runningMatches: running, upcomingMatches: upcoming, recentMatches: recent };
@@ -156,6 +184,16 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
     if (bracket && bracket.rounds && bracket.rounds.length > 0) return bracket;
     return null;
   }, [bracket]);
+
+  // Names an unresolved feeder slot after the card that will fill it
+  // ("Winner of M1"), via the one rule in bracket.jsx. Only the match modal
+  // needs it explicitly: BracketTree builds the same labeller internally from
+  // the rounds it is handed. Without it the modal would still never leak the
+  // raw id, but it would say "TBD" where the card behind it says "Winner of M1".
+  const bracketSlotLabel = useMemo(
+    () => (derivedBracket && window.bracketSlotLabeller ? window.bracketSlotLabeller(derivedBracket.rounds) : null),
+    [derivedBracket]
+  );
 
   // draw-ready is NOT pre-start for the purposes of showing pool/bracket
   // structure: the draw has been generated and the payload already includes
@@ -340,7 +378,12 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
                     scrollContainerRef={bracketScrollRef}
                     highlightPlayers={highlightPlayers}
                     onMatchClick={(m, ri, _mi, total) => {
-                      const label = window.roundLabel(ri, total ?? derivedBracket.rounds.length);
+                      // Same primitive as the row surfaces and the column header
+                      // above the card. BracketTree hands back the DISPLAY column
+                      // index here, so this already agreed; going through
+                      // bracketRoundLabel keeps it agreeing if that ever changes,
+                      // and leaves no second copy of the naming rule (mp-u37s).
+                      const label = window.bracketRoundLabel(m, ri, total ?? derivedBracket.rounds.length);
                       // m.roundIndex is the backend round array index, stamped by
                       // buildDisplayModel (meta mode) or the raw rounds[ri] position
                       // (legacy mode where ri equals the backend index). Prefer it
@@ -400,7 +443,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
           {window.VersionFooter && <window.VersionFooter />}
         </div>
       </div>
-      {selectedMatch && <MatchViewerModal match={selectedMatch} onClose={() => setSelectedMatch(null)} tournament={tournament} compId={c.id} />}
+      {selectedMatch && <MatchViewerModal match={selectedMatch} onClose={() => setSelectedMatch(null)} tournament={tournament} compId={c.id} slotLabel={bracketSlotLabel} />}
     </div>
   );
 }

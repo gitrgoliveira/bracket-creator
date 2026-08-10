@@ -50,7 +50,7 @@ describe('ViewerCompetition draw-ready exposure (mp-rrd)', () => {
   // MUST be set before importing viewer.jsx, plus the lazily-looked-up ones.
   const STUBBED = [
     'StatusBadge', 'formatDate', 'formatLabel', 'pluralize', 'Term',
-    'BracketTree', 'buildBracket', 'roundLabel', 'formatIpponsScore',
+    'BracketTree', 'buildBracket', 'roundLabel', 'bracketRoundLabel', 'formatIpponsScore',
     'ipponsFromScore', 'isHikiwake', 'hasBothSides', 'compareDmy',
     'queueLabel', 'queueLabelCompact', 'teamIVScore', 'matchScoreStr',
     'EmptyState',
@@ -95,6 +95,7 @@ describe('ViewerCompetition draw-ready exposure (mp-rrd)', () => {
     global.window.pluralize = (n, a, b) => `${n} ${n === 1 ? a : b}`;
     global.window.buildBracket = () => sampleBracket.rounds;
     global.window.roundLabel = (i) => `Round ${i + 1}`;
+    global.window.bracketRoundLabel = (_m, i, n) => global.window.roundLabel(i, n);
     global.window.formatIpponsScore = () => '';
     global.window.teamIVScore = () => null;
     global.window.matchScoreStr = (m) =>
@@ -267,12 +268,13 @@ describe('draw-ready is not running (mp-rrd)', () => {
     global.window = global.window || {};
     // Save/restore the globals we stub so we don't leak state into other
     // suites if they were already present (delete-only would clobber them).
-    const stubbed = ['hasBothSides', 'roundLabel'];
+    const stubbed = ['hasBothSides', 'roundLabel', 'bracketRoundLabel'];
     const prior = stubbed.map(k => Object.prototype.hasOwnProperty.call(global.window, k)
       ? { k, had: true, val: global.window[k] }
       : { k, had: false });
     global.window.hasBothSides = (m) => !!(m && m.sideA && m.sideB);
     global.window.roundLabel = (i) => `Round ${i + 1}`;
+    global.window.bracketRoundLabel = (_m, i, n) => global.window.roundLabel(i, n);
     try {
       const { tournamentMatches, compMatches } = await import('../viewer.jsx');
       const drawReady = {

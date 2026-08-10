@@ -352,6 +352,13 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
             </div>
           </div>
 
+          {/* Decorative entry-zone divider (aria-hidden), exempt from the
+              boutMiddle contract per the SCOPE note in bracket.jsx (the
+              master statement; change it there first). Here the exemption is
+              structural, not just stylistic: flag totals are constrained to
+              odd values by VALID_TOTALS, so a draw cannot exist and "X" is
+              unreachable by construction; engi has no ippon, no encho and no
+              daihyosen, so "(E)" and "(DH)" have nothing to report either. */}
           <div className="engi-divider" aria-hidden="true">vs</div>
 
           {/* Aka / Red / sideA */}

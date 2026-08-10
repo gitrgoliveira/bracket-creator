@@ -87,11 +87,16 @@ export function compMatches(c) {
   // any code path that bypasses the aggregator.
   const isPreviewBracket = !!(c.bracket && c.bracket.preview);
   const rounds = (!isPreviewBracket && c.bracket && c.bracket.rounds) ? c.bracket.rounds : (!isPreviewBracket ? (c.bracket || []) : []);
+  // window.bracketRoundLabel (bracket.jsx) is the ONE place the round name is
+  // decided: it prefers the match's effective round (mp-7f2w displayRound, which
+  // collapses bye-only rounds) so these rows agree with the bracket column drawn
+  // above the very same match. Do not substitute roundLabel(ri, …) here — the raw
+  // index is a DIFFERENT round in any non-power-of-two draw (mp-u37s).
   rounds.forEach((round, ri) => round.forEach((m) => out.push({
     ...m,
     phase: "bracket",
-    round: window.roundLabel(ri, rounds.length),
-    phaseName: window.roundLabel(ri, rounds.length),
+    round: window.bracketRoundLabel(m, ri, rounds.length),
+    phaseName: window.bracketRoundLabel(m, ri, rounds.length),
     // Raw 0-based round index alongside the display label so consumers
     // (useTeamLineups) need not parse the label: now a bracket-size string
     // ("Round 16") that a "Round N"→N-1 parse would misread as round 15.

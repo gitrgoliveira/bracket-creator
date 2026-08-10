@@ -354,7 +354,9 @@ describe('Viewer Utils', () => {
     it('threads compKind and teamSize onto bracket matches for team comps', () => {
       global.window = global.window || {};
       const savedRoundLabel = global.window.roundLabel;
+      const savedBracketRoundLabel = global.window.bracketRoundLabel;
       global.window.roundLabel = (i, _total) => `Round ${i + 1}`;
+      global.window.bracketRoundLabel = (_m, i, n) => global.window.roundLabel(i, n);
       try {
         const c = mkComp({
           kind: 'team',
@@ -369,6 +371,8 @@ describe('Viewer Utils', () => {
       } finally {
         if (savedRoundLabel === undefined) delete global.window.roundLabel;
         else global.window.roundLabel = savedRoundLabel;
+        if (savedBracketRoundLabel === undefined) delete global.window.bracketRoundLabel;
+        else global.window.bracketRoundLabel = savedBracketRoundLabel;
       }
     });
   });
@@ -1014,7 +1018,7 @@ describe('ViewerOverview self-run vs officiated match click (mp-7x4n)', () => {
   const realReact = global.React;
   let runtime;
   let ViewerOverview;
-  const STUBBED = ['ipponsFromScore', 'formatIpponsScore', 'queueLabel', 'isHikiwake', 'useEscapeToClose', 'hasBothSides', 'StatusBadge', 'formatLabel', 'roundLabel', 'queueLabelCompact', 'pluralize', 'teamIVScore', 'matchScoreStr'];
+  const STUBBED = ['ipponsFromScore', 'formatIpponsScore', 'queueLabel', 'isHikiwake', 'useEscapeToClose', 'hasBothSides', 'StatusBadge', 'formatLabel', 'roundLabel', 'bracketRoundLabel', 'queueLabelCompact', 'pluralize', 'teamIVScore', 'matchScoreStr'];
   const savedGlobals = {};
 
   const mkMatch = (id) => ({
@@ -1056,6 +1060,7 @@ describe('ViewerOverview self-run vs officiated match click (mp-7x4n)', () => {
     global.window.StatusBadge = vi.fn(() => null);
     global.window.formatLabel = vi.fn((x) => x || '');
     global.window.roundLabel = vi.fn((x) => x || '');
+    global.window.bracketRoundLabel = (_m, i, n) => global.window.roundLabel(i, n);
     global.window.pluralize = vi.fn((n, s) => `${n} ${s}`);
     vi.resetModules();
     ({ ViewerOverview } = await import('../viewer.jsx'));
@@ -1301,7 +1306,7 @@ describe('VSchedItem live score rendering (mp-42rg)', () => {
   let runtime;
   let VSchedItemComp;
   const savedGlobals = {};
-  const STUBBED = ['ipponsFromScore', 'matchScoreStr', 'roundLabel', 'pluralize', 'queueLabelCompact'];
+  const STUBBED = ['ipponsFromScore', 'matchScoreStr', 'roundLabel', 'bracketRoundLabel', 'pluralize', 'queueLabelCompact'];
 
   function findNode(node, pred) {
     if (!node || typeof node !== 'object') return null;
@@ -1335,6 +1340,7 @@ describe('VSchedItem live score rendering (mp-42rg)', () => {
     global.window.ipponsFromScore = vi.fn(() => []);
     global.window.matchScoreStr = vi.fn(() => '');
     global.window.roundLabel = vi.fn((i) => `Round ${i + 1}`);
+    global.window.bracketRoundLabel = (_m, i, n) => global.window.roundLabel(i, n);
     global.window.pluralize = vi.fn((n, s) => `${n} ${s}`);
     global.window.queueLabelCompact = null;
     vi.resetModules();
@@ -1397,7 +1403,7 @@ describe('ViewerHome empty-state discoverability (mp-og2g)', () => {
   const STUBBED = [
     'StatusBadge', 'formatDate', 'formatLabel', 'formatViewerHeaderEyebrow',
     'pluralize', 'hasBothSides', 'compareDmy', 'queueLabelCompact',
-    'roundLabel', 'matchScoreStr', 'ipponsFromScore', 'EmptyState',
+    'roundLabel', 'bracketRoundLabel', 'matchScoreStr', 'ipponsFromScore', 'EmptyState',
   ];
   const savedGlobals = {};
 
@@ -1458,6 +1464,7 @@ describe('ViewerHome empty-state discoverability (mp-og2g)', () => {
     global.window.compareDmy = () => 0;
     global.window.queueLabelCompact = null;
     global.window.roundLabel = (i) => `Round ${i + 1}`;
+    global.window.bracketRoundLabel = (_m, i, n) => global.window.roundLabel(i, n);
     global.window.matchScoreStr = () => '';
     global.window.ipponsFromScore = () => [];
     vi.resetModules();
@@ -1526,7 +1533,7 @@ describe('ViewerHome globalRunning de-dup (mp-42rg)', () => {
   const STUBBED = [
     'StatusBadge', 'formatDate', 'formatLabel', 'formatViewerHeaderEyebrow',
     'pluralize', 'hasBothSides', 'compareDmy', 'queueLabelCompact',
-    'roundLabel', 'matchScoreStr', 'ipponsFromScore', 'EmptyState',
+    'roundLabel', 'bracketRoundLabel', 'matchScoreStr', 'ipponsFromScore', 'EmptyState',
   ];
   const savedGlobals = {};
 
@@ -1594,6 +1601,7 @@ describe('ViewerHome globalRunning de-dup (mp-42rg)', () => {
     global.window.compareDmy = () => 0;
     global.window.queueLabelCompact = null;
     global.window.roundLabel = (i) => `Round ${i + 1}`;
+    global.window.bracketRoundLabel = (_m, i, n) => global.window.roundLabel(i, n);
     global.window.matchScoreStr = () => '';
     global.window.ipponsFromScore = () => [];
     global.window.EmptyState = function EmptyState(props) { return { type: 'div', props: { className: 'empty', ...props }, children: [props.icon, props.title, props.message, props.cta].filter(Boolean) }; };

@@ -229,8 +229,13 @@ function phaseLabel(m, isBracket, roundIndex, totalRounds, format) {
     if (format === "league") return "";
     if (m.phaseName) return m.phaseName;
     if (m.poolName) return m.poolName;
-    if (isBracket && typeof roundIndex === "number" && window.roundLabel) {
-        return window.roundLabel(roundIndex, totalRounds);
+    // Bracket matches reach the display surfaces straight off c.bracket.rounds
+    // (no phaseName stamped), so this branch is the label. Route it through
+    // window.bracketRoundLabel: it keys on the match's effective round (mp-7f2w
+    // displayRound) so the board agrees with the bracket column and the viewer
+    // rows for the same match; roundIndex is only the legacy fallback (mp-u37s).
+    if (isBracket && typeof roundIndex === "number" && window.bracketRoundLabel) {
+        return window.bracketRoundLabel(m, roundIndex, totalRounds);
     }
     // Pool matches reach the feed with a pool-shaped id "<PoolName>-<index>"
     // (regular bouts use round === -1 sentinel; DH/TB supplementary bouts are
@@ -238,7 +243,7 @@ function phaseLabel(m, isBracket, roundIndex, totalRounds, format) {
     // never render a bare "-1" or "0": covers regular, daihyosen and tiebreaker
     // bouts alike via poolNameOf. Guard on !isBracket: poolNameOf matches any
     // "*-<digits>" shape, so a bracket id like "m-r1-0" would otherwise yield a
-    // bogus "m-r1" pool-like label when window.roundLabel is unavailable.
+    // bogus "m-r1" pool-like label when window.bracketRoundLabel is unavailable.
     if (!isBracket) {
         const fromId = poolNameOf(m.id);
         if (fromId) return fromId;
@@ -259,6 +264,22 @@ function phaseLabel(m, isBracket, roundIndex, totalRounds, format) {
 // because the board is per-court; the spectator wants to know how far into the
 // phase this court is, not the venue overall. Returns null when there's no
 // group to count (e.g. promoted / promoted.competition missing).
+// bracketRoundSiblings returns the matches sharing `match`'s EFFECTIVE round
+// (mp-7f2w displayRound) — the same round phaseLabel names. Selecting
+// rounds[roundIndex] instead mixes rounds whenever a bye collapses one: in a
+// 5-entrant draw backend round 0 holds both a semifinal and a quarterfinal, so
+// the board rendered "SEMIFINALS · 0 / 2" over a set containing a quarterfinal
+// and listed that quarterfinal under the semifinal heading. Hidden phantom
+// matches are never real bouts and are excluded. Falls back to the raw round
+// for legacy brackets with no metadata, where roundIndex IS the effective round.
+function bracketRoundSiblings(rounds, match, roundIndex) {
+    const dr = match && match.displayRound;
+    if (typeof dr === "number" && dr > 0) {
+        return rounds.flat().filter((m) => m && !m.hidden && m.displayRound === dr);
+    }
+    return rounds[roundIndex] || [];
+}
+
 function phaseProgressOnCourt(promoted, court) {
     if (!promoted) return null;
     const comp = promoted.competition;
@@ -266,7 +287,7 @@ function phaseProgressOnCourt(promoted, court) {
     let group;
     if (promoted.isBracket) {
         const rounds = (comp.bracket && comp.bracket.rounds) || [];
-        const round = rounds[promoted.roundIndex] || [];
+        const round = bracketRoundSiblings(rounds, promoted.match, promoted.roundIndex);
         // Exclude unresolved placeholders ("Winner of rX-mY" / "Pool X-1st") so
         // the denominator matches the runnable matches the board actually shows
         // (the feed filters them via bracketSidesReady too).
@@ -321,6 +342,7 @@ function StreamingQR({ url, label }) {
 
 export {
     DISPLAY_PLACEHOLDER_RE,
+    bracketRoundSiblings,
     bracketSidesReady,
     findRunningOnCourt,
     findUpcomingOnCourt,

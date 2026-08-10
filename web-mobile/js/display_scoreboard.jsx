@@ -2,7 +2,7 @@
 // Fullscreen white board shown on Shiaijo-dedicated screens.
 // T061, T062, T063, mp-13y.
 
-import { findRunningOnCourt, findUpcomingOnCourt, countCourtMatches, sideLabel, phaseLabel, TermD, poolNameOf, isSupplementaryBout, phaseProgressOnCourt, StreamingQR } from './display_helpers.jsx';
+import { findRunningOnCourt, findUpcomingOnCourt, countCourtMatches, sideLabel, phaseLabel, TermD, poolNameOf, isSupplementaryBout, phaseProgressOnCourt, bracketRoundSiblings, StreamingQR } from './display_helpers.jsx';
 import { teamMatchTypeFor, DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import { TeamScoreboard, IndividualScore, useTeamLineups, teamIVPW } from './match_scoreboard.jsx';
 
@@ -205,8 +205,10 @@ function gatherIndividualGroup(promoted, court) {
     const matchCourt = court || cur.court || "";
     let group;
     if (promoted.isBracket) {
+        // Effective round, matching the phaseLabel heading above these rows:
+        // the raw round can mix two effective rounds when a bye collapses one.
         const rounds = (comp.bracket && comp.bracket.rounds) || [];
-        group = rounds[promoted.roundIndex] || [];
+        group = bracketRoundSiblings(rounds, cur, promoted.roundIndex);
     } else {
         const pool = poolNameOf(cur.id);
         if (!pool) return []; // non-pool-shaped id → don't collect every other non-pool match

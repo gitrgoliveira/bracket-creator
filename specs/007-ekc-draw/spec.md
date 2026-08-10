@@ -2,7 +2,7 @@
 
 **Bead:** bc-draw
 **Status:** Phase 0. This document is the definition of record for rules R1-R9 and
-the three pinned defaults. Once agreed, divergence found later is fixed in **code**,
+pinned defaults D1-D7. Once agreed, divergence found later is fixed in **code**,
 never by quietly rewriting this spec. Phases 1-5 are checked against it.
 
 **Source of truth:** the DESCRIPTION section of bead `bc-draw`. Where the bead's
@@ -152,8 +152,8 @@ Halves: {A, B} and {C, D}. Half 1 holds 3 entrants, half 2 holds 4.
 | 3 qualifiers (R4c, D3) | never | never | never |
 
 Round-1 byes per region across all three references: court occupancy 1 -> 1 bye,
-2 -> 0, 3 -> 1, 4 -> 0, 5 -> 1. See the Open section for what this does and does not
-determine.
+2 -> 0, 3 -> 1, 4 -> 0, 5 -> 1. All five are `q mod 2`, and `q = 5` is the observation
+that discriminates between the two candidate region constructions; **D4** decides it.
 
 ## Rules
 
@@ -175,7 +175,9 @@ organising committee, not to a heuristic over data the tool does not hold.
 ### R2 Seed placement
 
 Seeded pools MUST be distinct, and their qualifiers MUST be spread as widely as the
-configuration allows:
+configuration allows. The **normative statement of the rule is D6**, which is a single
+constraint covering every court count; the per-court-count bullets below are worked
+examples derived from it, not independent rules:
 
 - **4 or more courts:** one seeded pool per court, each in a different quarter of the
   draw.
@@ -186,8 +188,16 @@ configuration allows:
 - **Fewer than 4 pools:** the effective seed count is capped at the pool count, and the
   surplus seed ranks are ignored **with a warning**. It MUST NOT be an error.
 
-*Reference:* the Female draw places its three seeds on three different courts (A, B, C)
-and gives one of them the half's only bye.
+Fewer than 4 seeds, **including none at all**, is a normal configuration, not a
+degenerate one. The rule applies to whichever ranks are present, in rank order; with
+zero seeds it is vacuous and placement falls through to R4 and R6 alone. When the
+configuration cannot satisfy every constraint at once, D7 gives the order in which they
+give way.
+
+*Reference:* the Female draw places its **three** seeds on three different courts
+(A, B, C) and gives one of them the half's only bye. It is a 3-seed draw, so it
+corroborates "distinct courts, distinct quarters" but does not pin the rank-to-court
+mapping.
 
 ### R3 Court blocks
 
@@ -213,7 +223,8 @@ courts, each other on two. Within a pool:
   different quarter from both the pool's 1st and its 2nd. At fewer than 4 courts this
   degrades to "a different quarter than both", balancing region sizes. EKC never shows
   3 qualifiers, so this is our extrapolation (operator decision, 2026-08-09); the exact
-  placement is pinned in **D3** below.
+  placement is pinned in **D3** below, and **D5** continues the same rotation for 4th
+  and further qualifiers.
 - **(d)** At **1 qualifier** per pool nothing crosses and round-1 matches are
   within-court, exactly as both EKC individual draws show.
 - **(e)** A **1-court** competition emulates the structure: the court's pools split into
@@ -236,6 +247,10 @@ A pool's qualifiers MUST be separated maximally.
 - **At 3 or more qualifiers:** two of them necessarily share a half (pigeonhole), so
   the rule becomes: **no two qualifiers of one pool in the same quarter**, and the
   earliest possible same-pool reunion pushed as late as the structure allows.
+- **Beyond one qualifier per quarter:** the no-two-in-a-quarter guarantee is itself
+  pigeonhole-limited. A draw has four quarters, so at **5 or more** qualifiers per pool
+  two of them must share one and R5 degrades to the reunion clause alone. **D5** states
+  the placement rotation and where the guarantee stops.
 
 *Reference:* the Team draw, P1#1 in Q1 against P1#2 in Q3.
 
@@ -255,10 +270,12 @@ Within a region, precedence for each structural bye slot:
    descending load, ties by pool order.
 3. **Remaining home 1st places**, in pool order.
 4. **Crossed-in 2nd places**, ranked by their own pool's precedence (seed, then size,
-   then pool order); then **crossed-in 3rd places** likewise.
+   then pool order); then **crossed-in 3rd places** likewise, then any further
+   crossed-in ranks in rank order.
 
 Precedence is a **preference, not a guarantee**: R3, R4 and R5 win. A region with no
-structural bye MUST grant none regardless of precedence.
+structural bye MUST grant none regardless of precedence. **How many byes a region has
+is D4**; this list only decides who gets them.
 
 *Rationale for criterion 2:* in a round-robin pool of n every competitor fights n-1
 matches, so a 4-pool winner reaches the knockout on 3 matches against a 3-pool winner's
@@ -277,9 +294,12 @@ flow down the R6 list: crossed-in 2nds, then crossed-in 3rds. Bye arithmetic is 
 REGION** under the court-first construction, not global: a region of `q` occupants
 carries `NextPow2(q) - q` empty slots.
 
-*Note:* `NextPow2(q) - q` counts a region's empty **leaf slots**. It is not the same as
-the number of pools that receive a visible round-1 bye, which the references pin only
-for `q` in 1..5; see the Open section.
+*Note, and this supersedes the earlier framing of R7:* `NextPow2(q) - q` counts a
+region's empty **leaf slots**. It is NOT the number of named byes. Most of those empty
+slots pair with each other and are never seen. The number of occupants that receive a
+named round-1 bye is `q mod 2`, pinned in **D4**, which is what R6 allocates over. Quote
+the leaf-slot formula only when talking about slot arithmetic, never when talking about
+byes.
 
 ### R8 Tree pages
 
@@ -318,7 +338,11 @@ the settings PUT would lock the operator out of unrelated edits.
 
 ## Pinned defaults
 
-The bead requires these three to be decided here. They are rules, not open questions.
+D1-D3 are the three the bead required to be decided here. D4-D7 close the four items
+that a first draft of this spec left open; they were ruled on by the operator on
+2026-08-10. All seven are rules, not open questions. Where a default goes beyond what
+the EKC sheets show it is labelled an extrapolation and listed again at the end of this
+document.
 
 ### D1. R6 criterion 2 under `poolFormat: "partial"`
 
@@ -438,6 +462,188 @@ as R4c says.
 **At 1 court**, R4e's half-blocks stand in for partner courts and the 2-court rule
 applies unchanged: the 3rd goes to the other half-block's other quarter.
 
+### D4. Region internal shape, and how many empty slots become named byes
+
+**Rule.** A region of `q` occupants is built **GREEDILY**. Its round-1 layer holds
+`floor(q/2)` real matches and, when `q` is odd, exactly **ONE** named bye. Every
+remaining empty slot pairs with another empty slot, forming a phantom match that is
+already dropped downstream and never printed or displayed. So:
+
+> **Round-1 byes per region = `q mod 2`**, and the named bye goes to the region's
+> highest-precedence occupant under R6.
+
+**Derivation.** EKC male court A has `q = 5` in an 8-slot region, so 3 empty slots. The
+sheet shows **P1 bye, P2 v P3, P4 v P5**: two round-1 matches and ONE named bye, with
+the other two empties consumed by a phantom pair and W(P4vP5) taking a round-2 bye. The
+alternative construction, "pad to `NextPow2` and spread the empties", would have
+produced **three** named byes and one round-1 match, which is not what the sheet shows.
+All five observed occupancies (`q` = 1, 2, 3, 4, 5 across the three draws) are
+consistent with `q mod 2`, and `q = 5` is the only one that discriminates between the
+two constructions. This supersedes the R7 framing: `NextPow2(q) - q` counts empty leaf
+slots, not named byes.
+
+The parity always works out, which is why the greedy layout is realisable inside a
+power-of-two region: for `q >= 2`, `NextPow2(q)` is even, so `NextPow2(q) - q` has the
+same parity as `q`. Exactly `q mod 2` empty slots are left unpaired and the rest form
+phantom pairs.
+
+**Deeper layers.** The same greedy rule applies layer by layer: a layer of `x` survivors
+holds `floor(x/2)` matches and, when `x` is odd, one bye. Byes above round 1 fall to
+whichever slot the phantom pairs leave, and they are taken by **match winners, not
+pools**, so R6 does not allocate them and there is nothing for the operator to choose.
+Court A of the male draw is the worked case: 5 -> 3 -> 2 -> 1, four matches in three
+rounds, with the round-2 bye going to W(P4vP5).
+
+**Phantom matches are already handled downstream** and need no new code:
+`computeBracketDisplayMetadata` (`internal/engine/bracket.go:414`) marks
+non-real matches `Hidden` via its `isReal` predicate (`:427`),
+`buildBracketFromLeaves` invokes it at `:263` before numbering, and the frontend's
+`buildDisplayModel` (`web-mobile/js/bracket.jsx:660`) does the equivalent.
+
+**Implementation warning: `CreateBalancedTree` does NOT produce this shape.** Phase 4
+MUST construct a region's round-1 layer explicitly rather than delegating to
+`CreateBalancedTree`. Simulating the exact current path
+(`CreateBalancedTree` -> `TreeToLeafArray` -> pad to `NextPow2`, which is what
+`internal/engine/bracket.go:124` `buildBracketFromLeaves` consumes) for `q` = 1..24
+gives:
+
+| `q` | greedy | `CreateBalancedTree` | verdict |
+|---|---|---|---|
+| 1, 2, 3, 4, 7, 8, 15, 16 | as above | identical, bye on occupant 1 | agrees |
+| **5** | 2 matches + 1 bye | 2 matches + 1 bye, **bye on occupant 3** | count agrees, **wrong occupant** |
+| **9** | 4 matches + 1 bye | 4 matches + 1 bye, **bye on occupant 7** | count agrees, **wrong occupant** |
+| **17** | 8 matches + 1 bye | 8 matches + 1 bye, **bye on occupant 15** | count agrees, **wrong occupant** |
+| **6** | 3 matches + 0 byes | **2 matches + 2 byes** | disagrees |
+| **10** | 5 matches + 0 byes | **4 matches + 2 byes** | disagrees |
+| **11** | 5 matches + 1 bye | **4 matches + 3 byes** | disagrees |
+| **12** | 6 matches + 0 byes | **4 matches + 4 byes** | disagrees |
+| **13** | 6 matches + 1 bye | **5 matches + 3 byes** | disagrees |
+| **14** | 7 matches + 0 byes | **6 matches + 2 byes** | disagrees |
+| **18-24** | | disagrees at every value | disagrees |
+
+Counts agree only at `q` in {1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17} and the disagreement
+set is unbounded (every `q` in 18..24 disagrees, worsening as `q` grows: at `q = 24`
+recursive halving gives 8 matches + 8 byes where greedy gives 12 matches + 0 byes).
+Where the counts DO agree, the placement can still be wrong: at `q = 2^k + 1` (5, 9, 17)
+the bye lands on occupant `q - 2` instead of occupant 1, while at `q = 2^k - 1`
+(1, 3, 7, 15) it correctly lands on occupant 1.
+
+`ApplyPoolAdjustments` cannot repair this. `treeAdjustment`
+(`internal/helper/tree.go:96`) swaps only when `leftPos > rightPos`, comparing the
+**rank ordinal** parsed off the placeholder. In a 1-qualifier competition every occupant
+is a "-1st", so the comparison is never strictly greater and no swap ever fires. The
+`q = 5` wrong-occupant case IS the EKC male court-A case, and the existing fix-up
+provably cannot reach it.
+
+### D5. Qualifiers beyond 3rd place
+
+**This is an extrapolation on the same footing as D3. EKC never shows more than 2
+qualifiers per pool.**
+
+**Rule.** R4's crossing generalises as a **rotation over regions**, so that a pool's
+qualifiers occupy distinct quarters for as long as distinct quarters exist.
+
+At **4 courts**, a pool on court A places: **1st -> A** (own), **2nd -> C** (partner),
+**3rd -> D**, **4th -> B**. Four qualifiers, four distinct quarters. The full rotation
+is symmetric:
+
+| Pool's court | 1st | 2nd | 3rd | 4th |
+|---|---|---|---|---|
+| A | A | C | D | B |
+| B | B | D | C | A |
+| C | C | A | B | D |
+| D | D | B | A | C |
+
+Each region therefore receives crossed-in qualifiers from **exactly one source court per
+rank**, so region sizes stay balanced. The 3rd-place column is exactly the A->D, B->C,
+C->B, D->A involution D3 derives independently, so the two defaults agree.
+
+At **2 courts** the four quarters are A1, A2, B1, B2: **1st** goes to a quarter of its
+own court's half, **2nd** to a quarter of the partner half, **3rd** to the partner
+half's OTHER quarter, **4th** to the pool's own half's other quarter. Where a rank has a
+choice of two quarters (the 2nd, and the 1st when its half is empty), take the one with
+fewest current occupants, ties by quarter order, which is D3's tiebreak chain reused
+unchanged.
+
+**Beyond 4 qualifiers per pool** the same rotation continues over regions in D3's
+candidate order. R5's no-two-in-a-quarter guarantee is pigeonhole-impossible from the
+5th qualifier onward (a draw has four quarters), so from there R5 degrades to "as late a
+reunion as the structure allows" and there is **no additional guarantee**.
+`EffectivePoolWinners` (`internal/state/models.go:601`) is unbounded above, so this is
+reachable configuration, not a hypothetical.
+
+**Consequence for Phase 1.** The golden file sweeps 1-4 qualifiers, so its 4-qualifier
+cases are **RECORDED, not normative**, until Phase 4 implements D5. A Phase 3 diff
+against them still proves behaviour preservation; a Phase 4 diff against them proves
+nothing until they are regenerated.
+
+### D6. R2 seed placement, generalised
+
+**Rule, covering every court count, and the normative form of R2:**
+
+> Seeds **1 and 3** fall in one half of the draw and seeds **2 and 4** in the other,
+> each of the four in a **distinct quarter**, and, subject to that, on **distinct
+> courts** and in **distinct pools**.
+
+This preserves the operator's 2026-08-09 decision (semifinals **1 v 3** and **2 v 4**
+when the seeds hold) and generalises it. At 4 courts it yields **seed 1 -> court A,
+seed 3 -> court B, seed 2 -> court C, seed 4 -> court D**, from which "one seeded pool
+per court, each in a different quarter" follows as a **consequence** rather than as a
+separate rule. At 6 or more courts a quarter spans more than one region, so the
+half/quarter constraint is the operative one and "distinct courts" becomes the tiebreak
+that spreads seeds within a quarter.
+
+**This deliberately differs from the conventional seeding convention.** Under both
+conventions seeds 1 and 2 are in opposite halves and can only meet in the final, and
+seeds 3 and 4 are placed to meet them in the semifinals. What differs is the **pairing**:
+the conventional bracket groups 4 with 1 and 3 with 2, giving semifinals 1 v 4 and
+2 v 3; the operator chose to group **3 with 1 and 4 with 2**, giving semifinals 1 v 3
+and 2 v 4. Anyone comparing our output against a standard seeding table will see this
+difference immediately and it is intended, not a defect.
+
+**Fewer than four seeds.** Apply the rule to the ranks that exist, in rank order: seed 1
+takes half X quarter 1, seed 2 takes half Y quarter 1, seed 3 takes half X quarter 2,
+seed 4 takes half Y quarter 2. With three seeds, quarter (Y, 2) is simply unoccupied by
+a seed; with two, seeds 1 and 2 sit in opposite halves; with one, the rule fixes only
+its quarter; with **none** it is vacuous and R4 plus R6 place everything. Zero seeds
+MUST be a normal, warning-free configuration.
+
+*Reference:* the Female draw, three seeds on three distinct courts (A, B, C), one of
+them taking the half's only bye. It corroborates the distinctness constraints but not
+the rank-to-court mapping, since the bead records which pools are seeded and not their
+ranks.
+
+### D7. R2 when the constraints cannot all be satisfied
+
+**Rule.** D6's constraints are a preference ordered exactly like R6's. In order:
+
+1. **Distinct halves** for the 1+3 / 2+4 grouping.
+2. **Distinct quarters.**
+3. **Distinct courts.**
+4. **Distinct pools.**
+
+Drop **only the deepest unsatisfiable constraint**, and only for the seed that cannot be
+placed under it, keeping every constraint that is still satisfiable for the other seeds.
+When more than one seed cannot be placed, the **numerically largest seed rank gives way
+first**: seed 4 before seed 3, seed 3 before seed 2, and seed 1 never gives way while
+any lower-priority seed still can. Seeding exists to protect the top seed most.
+
+**Constraint 4 is not droppable.** Two seeds MUST never share a pool. A configuration
+that cannot give all four seeds distinct pools instead **caps the effective seed count
+at the pool count and ignores the surplus ranks with a warning** (R2, last bullet). That
+is the failure mode for constraint 4, and it is why the ladder in practice degrades
+across 1-3 only.
+
+**It MUST NEVER be an error.** Every configuration produces a draw. A competition with
+4 seeds, 2 courts and 5 pools split 3/2 is legal and must draw; it simply cannot give
+all four seeds their own quarter, so the deepest failing constraint gives way for the
+lowest-priority seed and the operator sees a warning describing what was relaxed.
+
+*Rationale:* a seeding rule that can refuse to draw is worse than a seeding rule that
+degrades predictably. The operator can always inspect the result and move a seed by
+hand; they cannot proceed at all against a hard error, and a live event has no time for
+one.
+
 ## What changes in the code
 
 Verified at commit `be378413` (main, PR #382). Every line below was opened and matched
@@ -481,7 +687,7 @@ to its expected content.
 | API, competition PUT | `internal/mobileapp/handlers_competition.go:757` |
 | The validator both call | `internal/mobileapp/handlers_tournament.go:117` `validateCompetitionCourts` (today it only delegates to `validateCourtLabels`) |
 | Engine | `internal/engine/court_validation.go:21` `ValidateCourtCount` (today only the idle-court cap) |
-| CLI `--courts` | `internal/helper/helper.go:93` `ValidateCourts` (today only the 26-court A-Z cap, `MaxCourts` at `internal/helper/constants.go:57`) |
+| CLI `--courts` | `internal/helper/helper.go:93` `ValidateCourts` (today only the 26-court A-Z cap, `MaxCourts` at `internal/helper/constants.go:57`). **Verified: both commands do route through it**, `cmd/create-pools.go:86` and `cmd/create-playoffs.go:75`, so one change covers both. **But `create-pools` re-clamps AFTER validating**: `:225-226` sets `o.courts = numPools` when courts exceed the pool count, so a legal `--courts 4` with 3 pools silently becomes an illegal **3**. R9 must be re-checked on the clamped value there. `create-playoffs`'s clamp (`:167-168`) is safe: it clamps to `RoundToPowerOf2`, always a power of two |
 | UI blocker + legacy warning | `web-mobile/js/admin_competition_settings.jsx:632-659`, the "Assigned shiaijo (courts)" field: label at `:633`, court pills at `:640-644`, the existing hard-cap and suggested-court hints at `:645-658`. Requires a rebuild (`//go:embed`) and a browser screenshot of the blocked state |
 
 ### Pool composition inputs (context for R6-2)
@@ -596,41 +802,30 @@ Note that Phase 3 is behaviour-preserving (zero golden-file diff), so this hazar
 **not** apply to it. It applies to Phase 4 alone, which is why bc-draw groups every
 shape-affecting rule into that single phase: the migration is paid exactly once.
 
-## Open
+## Extrapolations the operator should confirm
 
-Genuinely undetermined by bc-draw. These MUST be resolved before the phase that needs
-them, and MUST NOT be guessed at implementation time.
+Nothing here is open: every rule in this document is decided and implementable. These
+five defaults are the ones that go **beyond** what the three EKC sheets show, so they
+are the ones where a later operator ruling is most likely. Each line states what would
+change if the operator rules differently.
 
-1. **How many of a region's `NextPow2(q) - q` empty slots become named round-1 byes.**
-   R7 gives the empty-slot arithmetic; R6 allocates byes to pools. The two count
-   different things, and the bead does not state the mapping. The references pin only
-   `q` in 1..5 (occupancy 1 -> 1 round-1 bye, 2 -> 0, 3 -> 1, 4 -> 0, 5 -> 1). All five
-   observations are consistent with "round-1 byes = `q mod 2`" (greedy pairing: play
-   `floor(q/2)` matches in round 1 and carry the odd occupant), and the `q = 5` case is
-   the one that discriminates: greedy gives 1 round-1 bye where a
-   pad-to-`NextPow2`-and-spread placement gives 3. A pad-to-`NextPow2` placement can
-   also reproduce the observed sheet if the empty slots are placed adjacently, so the
-   references constrain the **placement of empties within a region** rather than
-   choosing between the two constructions. **Needed by Phase 4**, and it is directly
-   observable in the Phase 1 golden file.
-2. **Where the 4th qualifier goes.** R4 rules on 1st, 2nd and 3rd places; R6-4 ranks
-   "crossed-in 2nd places ... then crossed-in 3rd places likewise" and stops there.
-   `EffectivePoolWinners` is unbounded above and the Phase 1 golden file explicitly
-   sweeps **1-4 qualifiers**, so a 4-qualifier draw will be pinned by that golden file
-   whether or not a rule exists for it. **Needed by Phase 1** (to know whether the
-   golden values are normative or merely recorded) and by Phase 4.
-3. **Whether R2's quarter guarantees survive at 6+ courts.** At 4 courts a quarter is a
-   court region, so "one seeded pool per court, each in a different quarter" is
-   self-consistent. At 6, 10, 12 and 14 courts a quarter spans more than one region and
-   the regions merge asymmetrically (D2), so "a different quarter" and "one per court"
-   are no longer the same constraint. The bead states R2 only for 4+, 2 and 1 court.
-   **Needed by Phase 4.**
-4. **What happens to R2's 2-court seed layout when there are exactly 2 or 3 pools per
-   court.** R2 requires two seeded pools per court, each in its own quarter, but caps
-   the effective seed count at the pool count only for **fewer than 4 pools overall**.
-   A 2-court competition with 5 pools split 3/2 cannot give both of one court's seeded
-   pools its own quarter if that court's region has fewer than 2 quarters' worth of
-   occupants. **Needed by Phase 4.**
+- **D3, 3rd-place placement.** EKC never shows 3 qualifiers; if the operator prefers a
+  different quarter for the 3rd, the 4-court involution (A->D, B->C, C->B, D->A) and the
+  2-court partner-half rule change, and D5's rotation table changes with them.
+- **D4, greedy region shape.** If the operator wants the pad-to-`NextPow2`-and-spread
+  construction instead, a `q = 5` region prints 1 round-1 match and 3 named byes rather
+  than 2 matches and 1 bye, and R6 then allocates three byes per odd region instead of
+  one.
+- **D5, 4th and later qualifiers.** EKC never shows more than 2 qualifiers; a different
+  rotation changes only draws with `poolWinners >= 3`, and would require the Phase 1
+  golden file's 3- and 4-qualifier cases to be regenerated rather than merely rerecorded.
+- **D6, 1+3 / 2+4 seed grouping.** Reverting to the conventional 1+4 / 2+3 grouping
+  changes the semifinal pairings from 1 v 3 and 2 v 4 to 1 v 4 and 2 v 3, and swaps
+  which court seeds 3 and 4 land on; nothing else in the draw moves.
+- **D7, constraint-drop order.** If the operator would rather relax "distinct halves"
+  before "distinct quarters", or protect the lowest seed instead of the highest, only
+  under-constrained configurations change; every configuration that can satisfy D6 in
+  full is unaffected.
 
 ## Out of scope
 

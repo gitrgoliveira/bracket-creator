@@ -1661,6 +1661,22 @@ paths:
                           delivery, or rejected because the match is already
                           completed. Omitted on normal responses.
                     required: [stale]
+        '400':
+          description: |
+            Invalid payload, or a completion that rewrites a result the
+            operator had already declared final without justifying it. The
+            latter needs a non-empty `correctionReason` in two cases:
+            - the match is already `completed` (a correction);
+            - the match carries `reopenPending`, i.e. it was reopened via
+              `POST .../reopen` without a reason. Its stored status is
+              `running`, so the write looks like a first completion, but the
+              finalized result it replaces was discarded by that reopen. A
+              successful completion records the reason and clears
+              `reopenPending`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '409':
           description: |
             Conflict; one of six codes returned in the `error` field:
@@ -1746,6 +1762,286 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: The match is already completed; correct it via the score editor instead.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/competitions/{id}/matches/{mid}/reopen:
+    post:
+      tags: [matches]
+      summary: Reopen a completed kachinuki match
+      description: |
+        Sanctioned "Reopen match" for a COMPLETED kachinuki team match:
+        status returns to `running`, the match-level winner/decision is
+        cleared, and the bout log (subResults) is kept, so the operator can
+        add more bouts and end the match again. Kachinuki competitions only;
+        for every other competition type the correction path (a completed
+        write with a `correctionReason`) remains the sole sanctioned edit of
+        a finished result. For a bracket match whose winner was already
+        propagated but not yet fought, the downstream slot is retracted to
+        its "Winner of rX-mY" generation placeholder. Reopening a finalized
+        result is an organiser action: the route stays main-password-gated
+        even in self-run mode (same class as override-winner), so a request
+        without a valid `X-Tournament-Password` gets 401. Broadcasts a
+        `match_updated` event.
+
+        Discarding a finalized result is audited, but NOT at this step:
+        `reason` is optional and the request body may be omitted entirely, so
+        reopening is one tap for an operator who ended a match by mistake at a
+        shiaijo. When no reason is given the match is flagged `reopenPending`
+        and the justification is collected on the next completion instead: a
+        `PUT .../score` that completes a `reopenPending` match is rejected with
+        400 unless it carries a `correctionReason`, which then clears the flag.
+        The audit record is therefore written later than the action it
+        justifies, never skipped. A `reason` supplied here is recorded
+        immediately as the match's `correctionReason` and leaves nothing
+        outstanding (`reopenPending` stays false).
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+        - $ref: '#/components/parameters/MatchId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  maxLength: 200
+                  description: >
+                    Optional. Why the recorded result is being discarded (e.g.
+                    "Ended too early"). Trimmed server-side; absent, empty or
+                    whitespace-only all mean "no reason given", which sets
+                    `reopenPending` instead of rejecting the request. Same
+                    200-character cap as `decisionReason` /
+                    `correctionReason`.
+      responses:
+        '200':
+          description: Match reopened (status back to `running`).
+        '400':
+          description: >
+            The `reason` is longer than 200 characters, the body is present but
+            malformed JSON, or the competition is not a kachinuki team
+            competition.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: >
+            Missing or invalid tournament password. Applies in every mode:
+            in self-run mode this route is one of the main-gated organiser
+            corrections, not participant-driven play.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: |
+            Conflict. Two body shapes, matching the score endpoint's:
+            - Plain sentence in `error`: the match is not completed (only a
+              completed kachinuki match can be reopened), or a downstream
+              knockout match fed by this match's winner has already started
+              or recorded a result.
+            - `error: court_busy` (machine code, sentence in `message`):
+              another match is already running on this match's court, in this
+              or another competition. Reopening would put a second live match
+              on that court, so the operator must finish or requeue the
+              running one first. Extra fields: `court`, `matchId`, `compId`,
+              `message`. Same shape as the score endpoint's `court_busy`, so
+              clients keep one branch for it.
+          content:
+            application/json:
+              schema:
+                anyOf:
+                  - $ref: '#/components/schemas/Error'
+                  - type: object
+                    required: [error]
+                    properties:
+                      error:
+                        type: string
+                        enum: [court_busy]
+                        description: Machine-readable conflict code.
+                      court:
+                        type: string
+                        description: Court label of the busy court.
+                      matchId:
+                        type: string
+                        description: ID of the match already running on that court.
+                      compId:
+                        type: string
+                        description: Competition owning that running match (may differ from this one).
+                      message:
+                        type: string
+                        description: Human-readable sentence; what clients display.
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/competitions/{id}/matches/{mid}/requeue-blocker-and-reopen:
+    post:
+      tags: [matches]
+      summary: Atomically requeue a blocking match and reopen a kachinuki match
+      description: |
+        The atomic remedy for a court_busy reopen. When reopening a finished
+        kachinuki match ({id}/{mid}, the target) is refused because ANOTHER
+        match holds its court, this requeues that blocking match AND reopens
+        the target under ONE hold of the court-exclusivity lock, so no other
+        match can take the freed court between the two steps. Because a court
+        hosts matches from any competition and one competition runs across
+        several courts, the blocker holding this court may be in the same
+        competition (a sibling match) or a different one; `blockerCompId` names
+        whichever owns it. It replaces the
+        client's former two separate calls (revert-to-queue then reopen), which
+        raced. On success the target returns to `running` (with `reopenPending`
+        set when no `reason` is given, exactly like reopen) and the blocker
+        returns to `scheduled` with its partial score cleared; a `match_updated`
+        event is broadcast for BOTH matches.
+
+        Doubly destructive (it discards the target's finalized result AND the
+        blocker's partial score), so it is main-password-gated in self-run mode
+        via the central allowlist, the same class as reopen and override-winner.
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+        - $ref: '#/components/parameters/MatchId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [blockerCompId, blockerMatchId]
+              properties:
+                blockerCompId:
+                  type: string
+                  description: Competition owning the blocking match (may differ from {id}).
+                blockerMatchId:
+                  type: string
+                  description: ID of the running match to requeue to free the court.
+                reason:
+                  type: string
+                  maxLength: 200
+                  description: >
+                    Optional reopen reason for the target, identical to the
+                    reopen endpoint's: absent/empty leaves the target
+                    `reopenPending`, a supplied reason is recorded as its
+                    `correctionReason`.
+      responses:
+        '200':
+          description: Blocker requeued and target reopened (both broadcast).
+        '400':
+          description: >
+            `blockerCompId` is missing or malformed, `blockerMatchId` is missing
+            or too long, the `reason` exceeds 200 characters, the body is
+            malformed JSON, or the target competition is not kachinuki.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: >
+            Missing or invalid tournament password. In self-run mode this route
+            is a main-gated organiser correction, not participant-driven play.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: The target or the blocking match was not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: |
+            Conflict. Plain sentence in `error` when the target is not completed,
+            a downstream knockout fed by the target has been fought, or the
+            BLOCKER was already completed (so it never held the court as running
+            and requeuing it is the wrong remedy). Or `error: court_busy` (same
+            shape as reopen: `court`, `matchId`, `compId`, `message`) when a
+            match OTHER than the one requeued has since taken the court — the
+            client re-offers the remedy for that new blocker.
+          content:
+            application/json:
+              schema:
+                anyOf:
+                  - $ref: '#/components/schemas/Error'
+                  - type: object
+                    required: [error]
+                    properties:
+                      error:
+                        type: string
+                        enum: [court_busy]
+                      court:
+                        type: string
+                      matchId:
+                        type: string
+                      compId:
+                        type: string
+                      message:
+                        type: string
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/competitions/{id}/matches/{mid}/kachinuki-bout:
+    delete:
+      tags: [matches]
+      summary: Remove a kachinuki bout appended by mistake
+      description: |
+        Removes the single trailing UNSCORED bout from a RUNNING kachinuki team
+        encounter: the explicit operator undo for a pairing appended by
+        mistake (`[Record bout]` / `[Add next bout]`). It targets a regular
+        numbered bout, NOT a daihyosen (which does not exist in kachinuki).
+        Removes at most one bout and never the last remaining one: the
+        End-match write's own trailing-unscored strip has no such floor (it
+        drops the whole trailing run and can never leave a running encounter
+        with zero bouts), so the two removable sets are related but not
+        identical. A scored bout is never removed. The match stays `running`.
+        Broadcasts a `match_updated` event.
+
+        Removing a bout is an organiser correction, the same class as reopen
+        and override-winner: the route stays main-password-gated even in
+        self-run mode, so a request without a valid `X-Tournament-Password`
+        gets 401.
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+        - $ref: '#/components/parameters/MatchId'
+      responses:
+        '200':
+          description: The trailing unscored bout was removed; returns the updated match.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    $ref: '#/components/schemas/MatchResult'
+        '400':
+          description: The competition is not a kachinuki team competition.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: >
+            The match is not running (a completed match already had its trailing
+            unscored bouts stripped on the End-match write; reopen it first), or
+            there is no removable bout: the current bout is already scored, or
+            it is the only bout the encounter has (a running kachinuki
+            encounter always keeps at least one).
           content:
             application/json:
               schema:
@@ -1931,6 +2227,13 @@ paths:
         Records a non-scored decision for a match. Use this instead of
         `/score` when the outcome is determined by walkover, withdrawal,
         or representative bout rather than ippon scoring.
+
+
+        A decision FINALIZES the match, so it is subject to the same audit
+        rule as `/score`: when the match carries `reopenPending` (it was
+        reopened without a reason), `decisionReason` becomes REQUIRED and the
+        request is rejected with 400 without it. The supplied reason is
+        persisted to `correctionReason` and `reopenPending` is cleared.
       security:
         - TournamentPassword: []
       parameters:
@@ -1953,6 +2256,10 @@ paths:
                 decisionReason:
                   type: string
                   maxLength: 200
+                  description: >
+                    Free-text operator note. REQUIRED when the target match has
+                    `reopenPending: true`; optional otherwise. Whitespace-only
+                    does not satisfy the requirement.
                 encho:
                   $ref: '#/components/schemas/EnchoMetadata'
       responses:
@@ -1963,7 +2270,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/MatchResult'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: >
+            Invalid payload, or a missing `decisionReason` on a match that was
+            reopened without one (`reopenPending: true`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '409':
           description: Competitor not eligible (ineligible_competitor).
           content:
@@ -1978,7 +2291,9 @@ paths:
       description: >
         Adds a daihyosen (representative) bout to break a tie in an
         elimination team match. Rejected if the match is not tied,
-        if it is a pool match, or if neither team has sufficient
+        if it is a pool match, if the competition is engi or kachinuki
+        (daihyosen does not exist in kachinuki; a knockout tie goes to
+        encho on the final bout), or if neither team has sufficient
         eligible competitors.
       security:
         - TournamentPassword: []
@@ -1993,7 +2308,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/MatchResult'
         '400':
-          description: Match is not tied (`not_tied`) or is a pool match (`pool_match`).
+          description: >
+            Match is not tied (`not_tied`), is a pool match (`pool_match`),
+            or the competition does not support daihyosen: engi competitions
+            decide bouts by referee flags (`error` is a human-readable
+            message), and daihyosen does not exist in kachinuki (`error`
+            begins "daihyosen does not exist in kachinuki"; a tied final bout
+            is a draw in pools/league and goes to encho in a knockout).
           content:
             application/json:
               schema:
@@ -2449,8 +2770,8 @@ paths:
           name: matchDuration
           required: true
           schema:
-            type: integer
-          description: Per-match clock duration in minutes.
+            type: number
+          description: Per-match (per-bout) clock duration in minutes; must be > 0.
         - in: query
           name: multiplier
           required: true
@@ -2459,24 +2780,59 @@ paths:
           description: Clock-to-elapsed multiplier (e.g. 1.6).
         - in: query
           name: numMatches
-          required: true
+          required: false
           schema:
             type: integer
+            default: 1
+            minimum: 0
+            maximum: 1000000
+          description: >
+            Scales the whole estimate, so it is parsed strictly: a value out of
+            range (0..1000000) or unparsable returns 400 rather than a silently
+            wrong one-match answer.
         - in: query
           name: courts
           required: true
           schema:
             type: integer
+            minimum: 1
+            maximum: 26
         - in: query
           name: teamSize
           required: false
           schema:
             type: integer
+            minimum: 0
+            maximum: 100
+          description: >
+            0 = individual matches; > 0 = team matches. Bounded to 0..100
+            (a value out of range returns 400): it scales the whole estimate,
+            so an unbounded value would overflow the duration math.
         - in: query
           name: boutsPerTeamMatch
           required: false
           schema:
             type: integer
+            minimum: 0
+            maximum: 100
+          description: >
+            OVERRIDE for the bouts per team match. Omit it for the normal case:
+            when `teamSize > 0` the bout count defaults to `teamSize`, which is
+            the rule the generated schedule itself is laid out with. Supply it
+            only to price a hypothetical the scheduler will not reproduce.
+            Ignored when `teamSize` is 0 (that selects individual matches).
+        - in: query
+          name: teamMatchType
+          required: false
+          schema:
+            type: string
+          description: >
+            `kachinuki` widens the estimate into a best/average/worst range
+            (winner-stays-on has a variable bout count: with nominal team size
+            N, best = N bouts, worst = 2N-1, average = midpoint; N is the
+            resolved bout count, i.e. `teamSize` unless `boutsPerTeamMatch`
+            overrides it). Any other value (or absent) keeps a constant bout
+            count and the three range fields collapse to one value.
         - in: query
           name: buffer
           required: false
@@ -2484,7 +2840,7 @@ paths:
             type: integer
           description: Slowest-court buffer percentage.
         - in: query
-          name: ceremony
+          name: ceremonyMinutes
           required: false
           schema:
             type: integer
@@ -3391,6 +3747,26 @@ components:
           type: string
           maxLength: 200
           description: Free-text operator note for the decision.
+        correctionReason:
+          type: string
+          maxLength: 200
+          description: >
+            Audit justification for rewriting a result the operator had already
+            declared final. Required when the write completes a match that is
+            already `completed` (a correction) or that carries `reopenPending`;
+            otherwise it is dropped, so the field always means "this rewrote a
+            finalized result". A stored reason is carried forward across
+            subsequent writes.
+        reopenPending:
+          type: boolean
+          readOnly: true
+          description: >
+            True when the match was reopened via `POST .../reopen` without a
+            reason and still owes its audit justification. While set, a write
+            that completes the match must carry a `correctionReason` (400
+            otherwise); a successful one records the reason and clears this
+            flag. Server-owned: a client-supplied value is ignored on every
+            write.
         encho:
           $ref: '#/components/schemas/EnchoMetadata'
         status:
@@ -3419,10 +3795,14 @@ components:
           writeOnly: true
           description: >
             Transient flag, never persisted. Marks the current kachinuki bout as final
-            so the server advances the winner-stays sequence (appends the next bout or
-            completes the match when one side is exhausted). Without this flag a
-            kachinuki score write only saves the bout result and does not advance the
-            sequence.
+            so the server advances the winner-stays sequence by APPENDING the next
+            pairing (winner stays on; a tie retires both fighters). Append-only: the
+            server NEVER auto-completes a kachinuki match, even when its roster
+            snapshot says a side is exhausted (team sizes are unregulated, so the
+            snapshot is advisory). Completion is an explicit operator write with
+            `status: completed`, which also strips trailing unscored auto-appended
+            bouts. Without this flag a kachinuki score write only saves the bout
+            result and does not advance the sequence.
         teamResult:
           readOnly: true
           allOf:
@@ -3502,9 +3882,17 @@ components:
           allOf:
             - $ref: '#/components/schemas/EnchoMetadata'
           description: >
-            Overtime metadata for this sub-bout. Valid ONLY for the daihyosen
-            representative bout (`position: -1`); the server rejects a non-zero
-            `periodCount` on any numbered bout (fixed regulation time, no overtime).
+            Overtime metadata for this sub-bout. Valid for the daihyosen
+            representative bout (`position: -1`), and, in KACHINUKI
+            competitions, also for numbered bouts in ANY phase: a tied
+            kachinuki pairing may be fought on in overtime on that same
+            bout (the same pair keeps fighting). Whether a tied pairing
+            must produce a result (for example, a rule that the taisho has
+            to be defeated) is the operator's call, never derived from
+            pool-vs-bracket. For all non-kachinuki competitions the server
+            rejects a non-zero `periodCount` on any numbered bout (fixed
+            regulation time, no overtime). `decidedByHantei` is NOT relaxed
+            for kachinuki: hantei remains daihyosen-only.
 
     BracketMatch:
       type: object
@@ -3551,6 +3939,14 @@ components:
         decidedByHantei:
           type: boolean
           description: True when the match winner was declared by referee hantei on a tied bout (overtime not required).
+        reopenPending:
+          type: boolean
+          readOnly: true
+          description: >
+            Mirrors `MatchResult.reopenPending` for elimination-stage matches:
+            the match was reopened without a reason and still owes its audit
+            justification, so the next completing write must carry a
+            `correctionReason`. Persisted in bracket.json.
         subResults:
           type: array
           description: >
@@ -3756,10 +4152,28 @@ components:
       properties:
         totalDurationMinutes:
           type: integer
+          description: >
+            Headline estimate. For kachinuki (`teamMatchType=kachinuki`) this
+            is the AVERAGE scenario of the variable-bout-count range; otherwise
+            the bout count is constant and `totalDurationMinutes`,
+            `bestCaseMinutes`, and `worstCaseMinutes` are all equal.
+        bestCaseMinutes:
+          type: integer
+          description: >
+            Best-case scenario (kachinuki: nominal team size N bouts per
+            match, one fighter sweeps). Equals `totalDurationMinutes` for
+            non-kachinuki estimates.
+        worstCaseMinutes:
+          type: integer
+          description: >
+            Worst-case scenario (kachinuki: 2N-1 bouts per match, every bout
+            retires exactly one player). Equals `totalDurationMinutes` for
+            non-kachinuki estimates.
         perCourtMinutes:
           type: array
           items:
             type: integer
+          description: Per-court breakdown; reflects the average scenario.
         ceremonyMinutes:
           type: integer
 

@@ -65,11 +65,14 @@ func TestTeamLineup_OrderedRoster_Empty(t *testing.T) {
 	assert.Empty(t, got)
 }
 
-// TestTeamLineupValidate exercises FR-037/FR-041/R4/CHK012: the
-// FIK 5-person back-fill rule (Senpo + Taisho mandatory; 1 vacancy
-// must be Jiho; 2 vacancies must be Jiho+Fukusho; 3+ vacancies
-// disqualifies) and the numbered fallback for non-5 sizes.
-func TestTeamLineupValidate(t *testing.T) {
+// TestTeamLineupValidatePositions pins the key-only contract (mp-gmcg):
+// position KEYS must fit the team size, but vacancies are irrelevant and
+// never rejected. Team sizes are unregulated and lineups are entered
+// incrementally, so any subset of positions (including none, and
+// including a lineup with no Senpo or Taisho) must be persistable. The
+// former FIK back-fill/DQ rule (Validate/validateFive) is deliberately
+// gone; there is no completeness enforcement at any layer.
+func TestTeamLineupValidatePositions(t *testing.T) {
 	pos := func(m map[domain.Position]string) domain.TeamLineup {
 		return domain.TeamLineup{Positions: m}
 	}
@@ -82,7 +85,7 @@ func TestTeamLineupValidate(t *testing.T) {
 		wantSome bool
 	}{
 		{
-			name: "5p all filled",
+			name: "5p all filled ok",
 			size: 5,
 			lineup: pos(map[domain.Position]string{
 				domain.PosSenpo: "a", domain.PosJiho: "b", domain.PosChuken: "c",
@@ -90,69 +93,22 @@ func TestTeamLineupValidate(t *testing.T) {
 			}),
 		},
 		{
-			name: "5p Jiho-only vacancy ok",
-			size: 5,
-			lineup: pos(map[domain.Position]string{
-				domain.PosSenpo: "a", domain.PosChuken: "c",
-				domain.PosFukusho: "d", domain.PosTaisho: "e",
-			}),
+			name:   "5p empty lineup ok (vacancies never block)",
+			size:   5,
+			lineup: pos(map[domain.Position]string{}),
 		},
 		{
-			name: "5p Chuken-only vacancy rejected",
+			name: "5p missing Senpo and Taisho ok (no completeness rule)",
 			size: 5,
 			lineup: pos(map[domain.Position]string{
-				domain.PosSenpo: "a", domain.PosJiho: "b",
-				domain.PosFukusho: "d", domain.PosTaisho: "e",
+				domain.PosChuken: "c",
 			}),
-			wantSome: true,
-		},
-		{
-			name: "5p Jiho+Fukusho vacancies ok",
-			size: 5,
-			lineup: pos(map[domain.Position]string{
-				domain.PosSenpo: "a", domain.PosChuken: "c", domain.PosTaisho: "e",
-			}),
-		},
-		{
-			name: "5p Jiho+Chuken vacancies rejected",
-			size: 5,
-			lineup: pos(map[domain.Position]string{
-				domain.PosSenpo: "a", domain.PosFukusho: "d", domain.PosTaisho: "e",
-			}),
-			wantSome: true,
-		},
-		{
-			name: "5p Senpo vacancy rejected",
-			size: 5,
-			lineup: pos(map[domain.Position]string{
-				domain.PosJiho: "b", domain.PosChuken: "c",
-				domain.PosFukusho: "d", domain.PosTaisho: "e",
-			}),
-			wantErr: domain.ErrLineupMissingSenpo,
-		},
-		{
-			name: "5p Taisho vacancy rejected",
-			size: 5,
-			lineup: pos(map[domain.Position]string{
-				domain.PosSenpo: "a", domain.PosJiho: "b",
-				domain.PosChuken: "c", domain.PosFukusho: "d",
-			}),
-			wantErr: domain.ErrLineupMissingTaisho,
-		},
-		{
-			name: "5p three+ vacancies disqualifies",
-			size: 5,
-			lineup: pos(map[domain.Position]string{
-				domain.PosSenpo: "a", domain.PosTaisho: "e",
-			}),
-			wantErr: domain.ErrLineupTooManyMissing,
 		},
 		{
 			name: "5p numbered key not allowed",
 			size: 5,
 			lineup: pos(map[domain.Position]string{
-				domain.PosSenpo: "a", domain.PosJiho: "b", domain.PosChuken: "c",
-				domain.PosFukusho: "d", domain.PosTaisho: "e",
+				domain.PosSenpo:            "a",
 				domain.PositionNumbered(1): "x",
 			}),
 			wantSome: true,
@@ -162,7 +118,6 @@ func TestTeamLineupValidate(t *testing.T) {
 			size: 3,
 			lineup: pos(map[domain.Position]string{
 				domain.PositionNumbered(1): "a",
-				domain.PositionNumbered(2): "b",
 				domain.PositionNumbered(3): "c",
 			}),
 		},
@@ -170,8 +125,15 @@ func TestTeamLineupValidate(t *testing.T) {
 			name: "3p named senpo key rejected",
 			size: 3,
 			lineup: pos(map[domain.Position]string{
-				domain.PosSenpo:            "a",
-				domain.PositionNumbered(2): "b",
+				domain.PosSenpo: "a",
+			}),
+			wantSome: true,
+		},
+		{
+			name: "3p position out of range rejected",
+			size: 3,
+			lineup: pos(map[domain.Position]string{
+				domain.PositionNumbered(4): "d",
 			}),
 			wantSome: true,
 		},
@@ -185,7 +147,7 @@ func TestTeamLineupValidate(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := tc.lineup.Validate(tc.size)
+			err := tc.lineup.ValidatePositions(tc.size)
 			switch {
 			case tc.wantErr != nil:
 				require.ErrorIs(t, err, tc.wantErr)

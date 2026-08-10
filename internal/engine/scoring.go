@@ -87,44 +87,32 @@ func (e *Engine) withPoolMatch(compId, matchId string, mutate func(*state.MatchR
 }
 
 // withBracketMatch atomically loads the bracket, calls mutate on the
-// match matching matchId, and saves the updated bracket. Returns
-// errMatchNotFound when not present (so RecordMatchResult callers
-// fall through cleanly when neither pool-match nor bracket-match
-// has that ID).
+// match matching matchId, and saves. Returns errMatchNotFound when not
+// present (so RecordMatchResult callers fall through cleanly when neither
+// pool-match nor bracket-match has that ID).
 //
-// Same TOCTOU-closure rationale as withPoolMatch: delegates to
-// state.Store.UpdateBracket which holds the per-competition lock
-// across load + mutate + save. Returning errMatchNotFound from the
-// mutate closure is how we signal "don't save the unchanged bracket
-// back", see UpdateBracket's docstring.
+// Delegates to state.Store.UpdateBracketMatchByID (mp-gmcg review R5), which
+// holds the per-competition lock across load → walk-rounds → bronze-sibling →
+// mutate → save and writes ONLY when the match is found — the exact walk this
+// used to hand-roll, and the sibling of UpdatePoolMatchByID. findBracketMatchByID
+// searches Rounds FIRST then the ThirdPlaceMatch sibling, so "m-bronze" resolves
+// here too.
+//
+// NOTE: no playability gate here. withBracketMatch backs the SCHEDULING mutators
+// (UpdateMatchCourt / UpdateMatchTime) and RevertMatchToQueue, which must work
+// on not-yet-resolved (placeholder) knockout matches so operators can pre-arrange
+// courts/times. The per-match playability gate lives only in the SCORING paths
+// (recordBracketMatchResult / recordBracketMatchResultTx / OverrideBracketWinner),
+// which mutate via UpdateBracket directly.
 func (e *Engine) withBracketMatch(compId, matchId string, mutate func(*state.BracketMatch)) error {
-	return e.store.UpdateBracket(compId, func(bracket *state.Bracket) error {
-		if bracket == nil {
-			return errMatchNotFound
-		}
-		for rIdx := range bracket.Rounds {
-			for mIdx := range bracket.Rounds[rIdx] {
-				if bracket.Rounds[rIdx][mIdx].ID == matchId {
-					// NOTE: no playability gate here. withBracketMatch backs the
-					// SCHEDULING mutators (UpdateMatchCourt / UpdateMatchTime),
-					// which must work on not-yet-resolved (placeholder) knockout
-					// matches so operators can pre-arrange courts/times. The
-					// per-match playability gate lives only in the SCORING paths
-					// (recordBracketMatchResult / recordBracketMatchResultTx /
-					// OverrideBracketWinner).
-					mutate(&bracket.Rounds[rIdx][mIdx])
-					return nil
-				}
-			}
-		}
-		// The bronze (3rd-place) playoff lives outside Rounds; resolve it
-		// here so UpdateMatchCourt / UpdateMatchTime work on "m-bronze".
-		if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchId {
-			mutate(bracket.ThirdPlaceMatch)
-			return nil
-		}
+	found, err := e.store.UpdateBracketMatchByID(compId, matchId, mutate)
+	if err != nil {
+		return err
+	}
+	if !found {
 		return errMatchNotFound
-	})
+	}
+	return nil
 }
 
 // applyHansokuIppons auto-awards ippons from accumulated hansoku counts per
@@ -449,8 +437,12 @@ func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId strin
 	// destroy server-appended bouts). Applied here at the entry point,
 	// BEFORE the pool/bracket write primitives, so the rollback path
 	// below (which replays `prior` through those primitives) still
-	// restores the pre-write state exactly.
-	applyKachinukiMerge(comp, prior, result)
+	// restores the pre-write state exactly. A merge-time rejection (e.g. a
+	// kachinuki-exhaustion write ending on a tied bout, mp-gmcg review R2)
+	// returns BEFORE any write primitive, so nothing is persisted.
+	if merr := applyKachinukiMerge(comp, prior, result); merr != nil {
+		return nil, merr
+	}
 
 	var sideMismatch bool
 	err := e.withPoolMatch(compId, matchId, func(r *state.MatchResult) {
@@ -1166,15 +1158,16 @@ func applyBracketWrite(result *state.MatchResult, storedModifiedAt int64) bool {
 }
 
 // validateBracketCompletion rejects a Completed bracket-family write with no
-// winner. For kachinuki this happens when both sides exhaust simultaneously
-// (simultaneous hikiwake exhaustion); the operator must resolve via daihyosen
-// before marking the match Completed. Applies to all bracket match types (an
-// elimination result must never be indeterminate) and is the single AMENDMENT 2
-// choke point shared by recordBracketMatchResult, recordBracketMatchResultTx,
-// and applyBronzeMatchResult so the twins cannot drift.
+// winner: an elimination result must never be indeterminate. A tied fixed-
+// format encounter resolves via daihyosen; a tied kachinuki final bout
+// resolves via encho on that same bout (daihyosen does not exist in
+// kachinuki, mp-gmcg). Applies to all bracket match types and is the single
+// AMENDMENT 2 choke point shared by recordBracketMatchResult,
+// recordBracketMatchResultTx, and applyBronzeMatchResult so the twins cannot
+// drift.
 func validateBracketCompletion(matchID string, status state.MatchStatus, winner string) error {
 	if status == state.MatchStatusCompleted && winner == "" {
-		return validationErrorf("bracket match %s: cannot mark completed with no winner; resolve via daihyosen first", matchID)
+		return validationErrorf("bracket match %s: cannot mark completed with no winner; resolve the tie first (daihyosen, or encho on the final kachinuki bout)", matchID)
 	}
 	return nil
 }
@@ -1319,12 +1312,13 @@ func (e *Engine) propagateBracketWinner(bracket *state.Bracket, rIdx, mIdx int) 
 	}
 }
 
-// parseWinnerOf parses "Winner of rX-mY" and returns (rIdx, mIdx)
-// Depth in the string is 1-based (root is 1). Rounds in bracket are 0-indexed (Round 1 is index 0).
-// Depth d corresponds to Round (maxDepth - d).
+// parseWinnerOf parses winnerOfFormat's "Winner of rX-mY" (bracket.go) and
+// returns (rIdx, mIdx). Depth in the string is 1-based (root is 1). Rounds in
+// bracket are 0-indexed (Round 1 is index 0). Depth d corresponds to Round
+// (maxDepth - d).
 func parseWinnerOf(s string, numRounds int) (int, int) {
 	var depth, matchIdx int
-	_, err := fmt.Sscanf(s, "Winner of r%d-m%d", &depth, &matchIdx)
+	_, err := fmt.Sscanf(s, winnerOfFormat, &depth, &matchIdx)
 	if err != nil {
 		return -1, -1
 	}
@@ -1423,6 +1417,13 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 					m.Winner = winnerName
 					m.IsOverridden = true
 					m.Status = state.MatchStatusCompleted
+					// An override is itself the operator's audited, final decision,
+					// so it discharges any outstanding reopen debt: a reopened match
+					// closed out this way must not keep ReopenPending set (it bypasses
+					// applyCorrectionReasonUnderTx/dischargeReopenPendingUnderTx), or
+					// the flag lingers until some later score write is forced to
+					// invent a reason (mp-gmcg review).
+					m.ReopenPending = false
 					if modifiedAt != 0 {
 						m.ModifiedAt = modifiedAt
 					}
@@ -1445,6 +1446,8 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 			bm.Winner = winnerName
 			bm.IsOverridden = true
 			bm.Status = state.MatchStatusCompleted
+			// Mirror of the round branch: an override discharges the reopen debt.
+			bm.ReopenPending = false
 			if modifiedAt != 0 {
 				bm.ModifiedAt = modifiedAt
 			}
@@ -1493,6 +1496,17 @@ func (e *Engine) UpdateMatchTime(compId string, matchId string, scheduledAt stri
 // Modelled on UpdateMatchCourt: pool-match first, bracket-match fallback,
 // using the same atomic withPoolMatch/withBracketMatch primitives so the
 // entire load+mutate+save runs under the per-competition lock.
+//
+// COMPOSED UNDER THE COURT LOCK: RequeueBlockerAndReopenKachinuki calls this
+// from INSIDE store.WithCourtExclusivityLock so the blocker requeue and the
+// reopen share one lock section (mp-gmcg review A4/R3). This method must
+// therefore take ONLY the per-competition lock (via withPoolMatch/
+// withBracketMatch) and MUST NOT acquire the court-exclusivity lock — that
+// mutex is tournament-global and non-reentrant, so a court check added here
+// would deadlock the whole tournament under that composition. It is a
+// court-FREEING operation and needs no court gate; if that ever changes, add a
+// lock-free `revertMatchToQueueUnderCourtLock` core and call THAT from the
+// composition, mirroring reopenKachinukiUnderCourtLock.
 func (e *Engine) RevertMatchToQueue(compId, matchId string) error {
 	var alreadyCompleted bool
 
@@ -1522,6 +1536,14 @@ func (e *Engine) RevertMatchToQueue(compId, matchId string) error {
 		r.DecidedByHantei = nil
 		r.ResultSource = ""
 		r.CorrectionReason = ""
+		// ReopenPending is a match-level verdict field a kachinuki result can
+		// carry (reopenPoolMatch sets it), so requeue must clear it too: a
+		// reopened-then-requeued match that kept the flag would keep owing an
+		// audit reason for a result that no longer exists, and
+		// applyCorrectionReasonUnderTx would reject its first honest
+		// finalization demanding one (mp-gmcg review). reopenBracketMatch's doc
+		// names this exact mirror obligation on RevertMatchToQueue.
+		r.ReopenPending = false
 		// Rep-bout nominations name who fought a pool/league daihyosen; they are
 		// result data for that supplementary bout, so a requeued match must not
 		// keep them (bracket matches have no rep fields).
@@ -1563,6 +1585,11 @@ func (e *Engine) RevertMatchToQueue(compId, matchId string) error {
 		m.IsOverridden = false
 		m.ResultSource = ""
 		m.CorrectionReason = ""
+		// Mirror of the pool branch (mp-gmcg review): clear the reopen-pending
+		// audit debt so a reopened-then-requeued bracket match can be replayed
+		// and finalized without applyCorrectionReasonUnderTx demanding a reason
+		// for a result the requeue already discarded.
+		m.ReopenPending = false
 		// Revert fence (mp-y3nk): stamp now() so any pre-revert offline write
 		// (T_stale < T_revert) is dropped by ApplyByTimestamp on replay.
 		// Using 0 would make ApplyByTimestamp always return true (weaker).

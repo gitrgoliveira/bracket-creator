@@ -266,7 +266,13 @@ export function TWMatch({ m, highlight, onClick }) {
       </div>
       <div style={{ textAlign: "right", fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 13 }}>
         {m.status === "completed" && scoreStr}
-        {m.status === "completed" && m.score?.type === "bye" && <span style={{ fontSize: 10, color: "var(--ink-3)" }}>BYE</span>}
+        {/* No separate "BYE" span here. Two independent reasons: this list is
+            filtered through hasBothSides (see ScheduleViewer.allMatches), which
+            rejects a match with an absent side, and a bye is exactly that; and
+            score.type === "bye" is client-only sample data (data.jsx) that no
+            live surface produces. Were one to arrive anyway, scoreStr above
+            already reads "BYE" (matchScoreStr → formatIpponsScore), so the span
+            only ever risked printing the word twice. */}
         {/* No centre "●" dot: a running match is signalled by the row's
             .tw-match--running highlight (accent ring). The labelled "● NOW"
             badge elsewhere is a separate status affordance. */}

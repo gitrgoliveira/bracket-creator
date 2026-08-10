@@ -8,6 +8,7 @@ describe('compMatches: bronze (3rd-place) playoff', () => {
   beforeEach(() => {
     global.window = global.window || {};
     global.window.roundLabel = (i, n) => (i === n - 1 ? 'Final' : `Round ${i + 1}`);
+    global.window.bracketRoundLabel = (_m, i, n) => global.window.roundLabel(i, n);
   });
 
   const comp = () => ({

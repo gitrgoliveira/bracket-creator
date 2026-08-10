@@ -17,7 +17,7 @@ import {
 } from './admin_schedule_utils.jsx';
 import {
   filterMatchesByCourt, computeCourtPaceStats, CourtPacePanel,
-  suggestRebalances, PerCourtBreakdown,
+  suggestRebalances,
 } from './admin_schedule_pacing.jsx';
 import { pickCopySource, MatchLineupPanel } from './admin_schedule_lineup.jsx';
 import { AdminExport } from './admin_schedule_export.jsx';
@@ -35,7 +35,6 @@ export {
 };
 
 window.AdminSchedulePage = AdminSchedulePage;
-window.PerCourtBreakdown = PerCourtBreakdown;
 window.AdminScoreEditorPage = AdminScoreEditorPage;
 window.AdminScoreEditor = AdminScoreEditor;
 window.AdminExport = AdminExport;

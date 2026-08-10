@@ -481,6 +481,29 @@ func TestValidateTournamentMode(t *testing.T) {
 	assert.Error(t, ValidateTournamentMode("unknown-mode"))
 }
 
+// TestCompetition_IsKachinuki pins the >= 2 TeamSize threshold (mp-gmcg
+// review): before this method, one caller (internal/engine/schedule.go)
+// accepted TeamSize > 0, disagreeing with every other caller's >= 2 — a
+// TeamSize == 1 competition was "kachinuki" to one and not the other.
+func TestCompetition_IsKachinuki(t *testing.T) {
+	t.Run("nil receiver is false", func(t *testing.T) {
+		var c *Competition
+		assert.False(t, c.IsKachinuki())
+	})
+	t.Run("wrong TeamMatchType is false regardless of TeamSize", func(t *testing.T) {
+		c := &Competition{TeamSize: 5, TeamMatchType: TeamMatchTypeFixed}
+		assert.False(t, c.IsKachinuki())
+	})
+	t.Run("TeamSize 0 or 1 is false even with TeamMatchType kachinuki", func(t *testing.T) {
+		assert.False(t, (&Competition{TeamSize: 0, TeamMatchType: TeamMatchTypeKachinuki}).IsKachinuki())
+		assert.False(t, (&Competition{TeamSize: 1, TeamMatchType: TeamMatchTypeKachinuki}).IsKachinuki())
+	})
+	t.Run("TeamSize >= 2 with TeamMatchType kachinuki is true", func(t *testing.T) {
+		assert.True(t, (&Competition{TeamSize: 2, TeamMatchType: TeamMatchTypeKachinuki}).IsKachinuki())
+		assert.True(t, (&Competition{TeamSize: 5, TeamMatchType: TeamMatchTypeKachinuki}).IsKachinuki())
+	})
+}
+
 func TestMatchResult_RoundRoundtrip(t *testing.T) {
 	mr := MatchResult{
 		ID:    "test-match-1",

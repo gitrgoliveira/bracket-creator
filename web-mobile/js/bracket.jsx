@@ -20,14 +20,134 @@ function TermBC(props) {
 function isHikiwakeBC(v) { return v === "hikiwake"; }
 function isKikenDecisionBC(v) { return v === "kiken" || v === "kiken-voluntary" || v === "kiken-injury"; }
 
-function roundLabel(roundIdx, total) {
-  const fromEnd = total - 1 - roundIdx;
+// roundLabelFromEnd: the ONE mapping from "rounds still to come after this one"
+// to a round NAME. 0 = Final, 1 = Semifinals, 2 = Quarterfinals, then the
+// abbreviated bracket-size form. Every round name on every surface bottoms out
+// here; nothing else may spell these strings.
+function roundLabelFromEnd(fromEnd) {
   if (fromEnd === 0) return "Final";
   if (fromEnd === 1) return "Semifinals";
   if (fromEnd === 2) return "Quarterfinals";
   // mp-13y #8: abbreviated column header: R{N} where N is the bracket size
   // = 2^(fromEnd+1). Keeps column labels tight for wide brackets (R32, R128).
   return `R${2 ** (fromEnd + 1)}`;
+}
+
+function roundLabel(roundIdx, total) {
+  return roundLabelFromEnd(total - 1 - roundIdx);
+}
+
+// bracketRoundLabel: THE single source of truth for what round a bracket MATCH
+// belongs to, on every surface (bracket columns, viewer rows, admin score
+// editor, watchlist, TV/display boards).
+//
+// mp-7f2w gave every real match an EFFECTIVE round (`displayRound`, counted from
+// the final: 1 = Final, 2 = Semifinals, …) computed by walking the real feeder
+// graph, so a structural bye COLLAPSES a round rather than showing an empty
+// card. In a non-power-of-two draw that effective round can be nearer the final
+// than the match's raw position in `bracket.rounds`, and the two disagree:
+//
+//   5-player knockout, backend rounds = 3
+//     m-r1-0 (Alice v Bob)  backend round 0 → "Quarterfinals"
+//                           displayRound 2  → "Semifinals"   ← its winner
+//                                                              goes straight
+//                                                              to the final
+//
+// The effective round is the true one: a match whose winner plays the final IS a
+// semifinal, whatever array slot it occupies. So prefer `displayRound` and fall
+// back to the raw position only for legacy brackets generated before the field
+// existed (and for the pre-meta rendering path), where the two coincide anyway.
+//
+// Do NOT re-derive a round name from a raw round index at a call site: that is
+// exactly the duplication that let the Overview rows say "Quarterfinals" while
+// the bracket column above the same match said "Semifinals" (mp-u37s).
+function bracketRoundLabel(m, roundIdx, total) {
+  const dr = m && m.displayRound;
+  if (typeof dr === "number" && dr > 0) return roundLabelFromEnd(dr - 1);
+  return roundLabel(roundIdx, total);
+}
+
+// FEEDER_SLOT_RE reads (never writes) the engine's unresolved-feeder slot
+// value, "Winner of r<depth>-m<index>" — the wire shape produced by
+// engine.winnerOfPlaceholder and matched by helper.reservedWinnerOfRE, by
+// admin_helpers.BRACKET_PLACEHOLDER_RE and by display_helpers'
+// DISPLAY_PLACEHOLDER_RE. Those filters decide whether a match is
+// playable/schedulable/announceable and they keep operating on the RAW value:
+// nothing here rewrites a side, so a slot relabelled for humans is still the
+// same unplayable placeholder to every predicate. The two capture groups are
+// the only addition: they let a DISPLAY surface say which match will fill the
+// slot. Do not use this regex as a filter — use the predicates named above (they live in admin_helpers.jsx / display_helpers.jsx / Go, not here).
+const FEEDER_SLOT_RE = /^Winner of r(\d+)-m(\d+)$/;
+
+// slotDisplayName: THE single mapping from a bracket SLOT VALUE to the text a
+// human reads in that slot. Every surface that puts a bracket side in front of
+// a person — public bracket, admin bracket, match details, the shiaijo "Later"
+// queue — goes through this; no surface may print a raw slot value.
+//
+// "r3-m3" is a backend round/index pair, meaningless to a spectator AND not the
+// number the bracket prints on its cards ("M1", "M2", … from matchNumById /
+// state.BracketMatch.MatchNumber, which are ordered by effective round, not by
+// the id). Printing it therefore pointed readers at the wrong card. So:
+//   feeder resolved to a numbered match → "Winner of M<n>", which names a card
+//                                         visible on the same screen;
+//   feeder not resolvable (legacy bracket with no numbering, or a hidden
+//   phantom feeder)                     → "TBD", the neutral label the empty
+//                                         side already uses. Never the raw id.
+// Anything that is NOT a feeder slot is returned untouched — in particular the
+// pool-origin placeholders ("Pool A-1st", "Pool B-2nd"): those are already
+// self-describing to a spectator (they name a pool and a finishing position, no
+// internal index), so relabelling them would lose real information.
+function slotDisplayName(name, feederMatchNum) {
+  if (typeof name !== "string" || !FEEDER_SLOT_RE.test(name)) return name;
+  return feederMatchNum > 0 ? `Winner of M${feederMatchNum}` : "TBD";
+}
+
+// makeSlotLabeller binds slotDisplayName to ONE bracket: it returns
+// (slotValue, feederId) => display text, resolving each feeder slot to the
+// match that will fill it.
+//
+// Two resolution paths, in order:
+//  1. `feederId` — the caller's own state.BracketMatch.Feeders entry for that
+//     side (mp-7f2w, [A, B] order). PREFERRED: the engine walked the REAL
+//     feeder graph to build it, so it sees through phantom bye matches. In a
+//     5-entrant draw the final's slot literally reads "Winner of r2-m0", but
+//     r2-m0 is a dead bye match — the winner actually arrives from m-r1-0.
+//  2. Positional parse of the slot itself, mirroring Go parseWinnerOf
+//     (scoring.go): depth is 1-based from the final, so roundIndex =
+//     rounds.length - depth and the index is the 0-based position in that
+//     round. The fallback for brackets saved before the feeder metadata
+//     existed, where there are no phantoms to see through anyway.
+// Either way the NUMBER comes from matchNumById when the caller has a display
+// model (the exact map that stamps "M<n>" on the cards, so the reference always
+// resolves against something on screen), falling back to the server's
+// match.matchNumber, which is equal-by-contract (engine.assignBracketMatchNumbers).
+// An unresolvable feeder yields 0 and slotDisplayName degrades it to "TBD".
+function makeSlotLabeller(rounds, matchNumById) {
+  const rs = Array.isArray(rounds) ? rounds : [];
+  const numOf = (m) => (m ? ((matchNumById && matchNumById[m.id]) || m.matchNumber || 0) : 0);
+  const byId = (id) => {
+    for (const round of rs) {
+      const hit = (round || []).find((m) => m && m.id === id);
+      if (hit) return hit;
+    }
+    return null;
+  };
+  return (name, feederId) => {
+    const mm = typeof name === "string" ? FEEDER_SLOT_RE.exec(name) : null;
+    if (!mm) return name;
+    let num = feederId ? numOf(byId(feederId)) : 0;
+    if (!num) num = numOf((rs[rs.length - Number(mm[1])] || [])[Number(mm[2])]);
+    return slotDisplayName(name, num);
+  };
+}
+
+// bracketSlotLabeller: makeSlotLabeller for callers that hold only the rounds
+// (the match-details modal, the shiaijo queue). It derives the SAME numbering
+// the tree draws by going through buildDisplayModel, so a slot's label and the
+// card it points at can never disagree. BracketTree builds its labeller from
+// the model it already computed instead of calling this (same result, one pass).
+function bracketSlotLabeller(rounds) {
+  return makeSlotLabeller(rounds, buildDisplayModel(rounds).matchNumById);
 }
 
 // sideA = top = Aka (Red), sideB = bottom = Shiro (White)
@@ -110,7 +230,14 @@ const defaultWinMaru = (encho) => (enchoOn(encho) ? ["○"] : ["○", "○"]);
 // "vs" (plain, including unplayed/pending), "X" (tie), "(E)" (overtime),
 // "(DH)" (rep bout). Nothing else is a valid middle value: a dash never is
 // (operator ruling), and Ht/Kiken/Fus. are side results, never middles.
-// Every surface that renders a bout middle derives it from here.
+// SCOPE: this binds the surfaces that PROJECT A RESULT — viewer, display,
+// scoreboard, match cards — and every one of them derives its
+// middle from here. It does NOT bind the score editors' live-ENTRY
+// separators (the plain "VS" in the individual/team encounter headers, the
+// engi divider): those sit in the input zone and project no result, so they
+// are exempt by mp-42g and carry their own note at each site. The team
+// editor's per-BOUT rows do project a result, and go through
+// renderTeamBoutMiddle → boutMiddle like every other bound surface.
 function boutMiddle(decision, encho, score) {
   return (isDrawResult(decision, score) ? "X" : middleMark(decision, encho)) || "vs";
 }
@@ -311,7 +438,7 @@ function teamIVPWScore(m) {
   return iv == null ? null : `IV ${iv}`;
 }
 
-const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD, isEngi }) => {
+const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD, isEngi, slotLabel, feederId }) => {
   const isAka = side === "a";
   if (!player || isTBD) {
     return (
@@ -321,9 +448,15 @@ const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD,
       </div>
     );
   }
+  // One call, on the whole name, before the engi pair split: a feeder slot has
+  // no " - " so the split is a no-op on it either way, and doing it first keeps
+  // the rule in one place rather than per-half. `slotLabel` carries this card's bracket (so the
+  // slot resolves to "Winner of M<n>"); without one, slotDisplayName still
+  // guarantees no raw id escapes — it degrades to "TBD".
+  const shownName = slotLabel ? slotLabel(player.name, feederId) : slotDisplayName(player.name);
   // Engi pair: split the combined name so member 2 stacks under member 1
   // instead of truncating on narrow bracket cards.
-  const [m1, m2] = isEngi && window.engiPairParts ? window.engiPairParts(player.name) : [player.name, ""];
+  const [m1, m2] = isEngi && window.engiPairParts ? window.engiPairParts(shownName) : [shownName, ""];
   return (
     <div className={`bc-side bc-side--${side} ${isWinner ? "bc-side--winner" : ""}`}>
       <span className={`bc-color-badge bc-color-badge--${isAka ? "aka" : "shiro"}`}>{isAka ? "AKA" : "SHIRO"}</span>
@@ -348,10 +481,21 @@ const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD,
 });
 PlayerLine.displayName = "PlayerLine";
 
-const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, matchRef, highlightPlayers, matchNum, isEngi }) => {
+const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, matchRef, highlightPlayers, matchNum, isEngi, slotLabel }) => {
   const aWin = match.winner && match.sideA && match.winner.id === match.sideA.id;
   const bWin = match.winner && match.sideB && match.winner.id === match.sideB.id;
   const running = match.status === "running";
+  // score.type === "bye" is CLIENT-ONLY: the sole producers are the sample-data
+  // generators in data.jsx (advanceByes / simulateRounds), never a server
+  // payload — Go's BracketMatch/Match carry scoreA/scoreB strings and no `score`
+  // object, and api_serializers.normalizeMatch only ever synthesizes
+  // type "ippon" or "hikiwake". Kept because it is the ONLY bye cue a MatchCard
+  // has (the card builds its per-side scores from ippon arrays and never calls
+  // matchScoreStr, so removing this leaves such a card completely unlabelled).
+  // A server-fed structural bye in a bracket carrying mp-7f2w metadata is not
+  // drawn as a MatchCard at all (a legacy bracket has no metadata, routes to
+  // BracketTreeLegacy, and does draw every rounds[] entry as a card): it renders
+  // as the bc-bye-slot placeholder in BracketTreeMeta below.
   const isBye = match.score?.type === "bye";
 
   const ipponsA = match.ipponsA || ipponsFromScore(match.scoreA);
@@ -404,9 +548,11 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
           <span className="bc-decision-chip"><TermBC name="daihyosen">(DH)</TermBC></span>
         ) : null}
       </div>
-      <PlayerLine player={match.sideA} isWinner={aWin} side="a" showDojo={showDojo} score={aScore} isTBD={aTBD} isEngi={isEngi} />
+      {/* feeders is [A, B]: hand each side ITS feeder so an unresolved slot can
+          be named after the match that will actually fill it (see makeSlotLabeller). */}
+      <PlayerLine player={match.sideA} isWinner={aWin} side="a" showDojo={showDojo} score={aScore} isTBD={aTBD} isEngi={isEngi} slotLabel={slotLabel} feederId={(match.feeders || [])[0]} />
       <div className="bc-divider"></div>
-      <PlayerLine player={match.sideB} isWinner={bWin} side="b" showDojo={showDojo} score={bScore} isTBD={bTBD} isEngi={isEngi} />
+      <PlayerLine player={match.sideB} isWinner={bWin} side="b" showDojo={showDojo} score={bScore} isTBD={bTBD} isEngi={isEngi} slotLabel={slotLabel} feederId={(match.feeders || [])[1]} />
     </button>
   );
 });
@@ -689,7 +835,7 @@ function BracketConnectorsMeta({ columns, feedersById, treeRef, refMap, version,
 // (hidden) are dropped. All cards are absolutely positioned at the
 // feeder-graph-derived top so parents sit centred on their feeders
 // (see computeMetaTops).
-function BracketTreeMeta({ columns, feedersById, matchNumById, variant = 1, showDojo = true, onMatchClick, highlightedMatchId, autoScrollMatchId, scrollContainerRef, highlightPlayers, isEngi }) {
+function BracketTreeMeta({ columns, feedersById, matchNumById, slotLabel, variant = 1, showDojo = true, onMatchClick, highlightedMatchId, autoScrollMatchId, scrollContainerRef, highlightPlayers, isEngi }) {
   const treeRef = useRef(null);
   const refMap = useRef({});
   const [version, setVersion] = useStateBC(0);
@@ -781,7 +927,14 @@ function BracketTreeMeta({ columns, feedersById, matchNumById, variant = 1, show
         // Column index is a stable key: bracket rounds never reorder.
         // oxlint-disable-next-line react/no-array-index-key
         <div key={ci} className="bc-round" style={{ "--round": ci }}>
-          <div className="bc-round-label">{roundLabel(ci, columns.length)}</div>
+          {/* Label the column from a match IN it, through the shared primitive,
+              so a column header and the row/eyebrow labels for the same match can
+              never diverge. Provably the same string as roundLabel(ci, length):
+              columns run displayRound maxDR→1, so ci === maxDR - displayRound.
+              The (ci, length) args are the fallback for an empty column, which
+              buildDisplayModel never produces (the BFS assigns a contiguous
+              1…maxDR, so every column holds at least one real match). */}
+          <div className="bc-round-label">{bracketRoundLabel(col[0], ci, columns.length)}</div>
           <div className={`bc-round-matches${positioned ? " bc-round-matches--abs" : ""}`} style={matchesStyle}>
             {col.map((m, mi) => {
               const top = positioned ? cardTops.tops[m.id] : undefined;
@@ -794,9 +947,17 @@ function BracketTreeMeta({ columns, feedersById, matchNumById, variant = 1, show
                   aria-label={`${m.playerName || "Bye"}: advances without an opponent`}
                   ref={(el) => { if (el) refMap.current[m.id] = el; }}
                 >
-                  {m.playerName
-                    ? <span className="bc-bye-slot__name">{m.playerName}</span>
-                    : <span className="bc-bye-slot__tag">BYE</span>}
+                  {/* The BYE tag is unconditional: a named slot without it is
+                      just a grey box with a name in it, which reads as an
+                      unexplained extra card rather than "this entrant advanced
+                      unopposed". Name + tag share one flex row (see
+                      .bc-bye-slot in styles.css): the name takes the free space
+                      and ellipsises, the tag never shrinks, so a long name
+                      truncates instead of pushing the marker out of the
+                      fixed-width column. Rendered once in both cases: the
+                      nameless slot is the tag alone, exactly as before. */}
+                  {m.playerName ? <span className="bc-bye-slot__name">{m.playerName}</span> : null}
+                  <span className="bc-bye-slot__tag">BYE</span>
                 </div>
               ) : (
                 <MatchCard
@@ -809,6 +970,7 @@ function BracketTreeMeta({ columns, feedersById, matchNumById, variant = 1, show
                   highlightPlayers={highlightPlayers}
                   matchNum={matchNumById[m.id]}
                   isEngi={isEngi}
+                  slotLabel={slotLabel}
                 />
               );
               return (
@@ -831,13 +993,17 @@ function BracketTree(props) {
   // meta renderer's effects key on those: recomputing every render would reset
   // the measured layout in a loop.
   const model = React.useMemo(() => buildDisplayModel(props.rounds), [props.rounds]);
+  // One labeller per bracket, built from the model that numbers the cards, so
+  // "Winner of M3" always names the card drawn as "M3". Memoised alongside the
+  // model: MatchCard is memo(), so a fresh function every render would defeat it.
+  const slotLabel = React.useMemo(() => makeSlotLabeller(props.rounds, model.matchNumById), [props.rounds, model]);
   if (model.hasMeta) {
-    return <BracketTreeMeta {...props} columns={model.columns} feedersById={model.feedersById} matchNumById={model.matchNumById} />;
+    return <BracketTreeMeta {...props} columns={model.columns} feedersById={model.feedersById} matchNumById={model.matchNumById} slotLabel={slotLabel} />;
   }
-  return <BracketTreeLegacy {...props} />;
+  return <BracketTreeLegacy {...props} slotLabel={slotLabel} />;
 }
 
-function BracketTreeLegacy({ rounds, variant = 1, showDojo = true, onMatchClick, highlightedMatchId, autoScrollMatchId, scrollContainerRef, highlightPlayers, isEngi }) {
+function BracketTreeLegacy({ rounds, slotLabel, variant = 1, showDojo = true, onMatchClick, highlightedMatchId, autoScrollMatchId, scrollContainerRef, highlightPlayers, isEngi }) {
   const treeRef = useRef(null);
   const refMap = useRef({});
   const [version, setVersion] = useStateBC(0);
@@ -931,6 +1097,10 @@ function BracketTreeLegacy({ rounds, variant = 1, showDojo = true, onMatchClick,
           // Round index is a stable key: bracket rounds never reorder.
           // oxlint-disable-next-line react/no-array-index-key
           <div key={ri} className="bc-round" style={{ "--round": ri }}>
+            {/* Legacy (pre-mp-7f2w) brackets only: this renderer runs when no
+                match carries displayRound AND none is hidden (see hasMeta), so
+                bracketRoundLabel would degrade to this same call. Raw index is
+                the only round there is. */}
             <div className="bc-round-label">{roundLabel(ri, rounds.length)}</div>
             <div className={`bc-round-matches${positioned ? " bc-round-matches--abs" : ""}`}>
               {round.map((m, mi) => {
@@ -949,6 +1119,7 @@ function BracketTreeLegacy({ rounds, variant = 1, showDojo = true, onMatchClick,
                     onClick={() => onMatchClick && onMatchClick(m, ri, mi, rounds.length)}
                     highlightPlayers={highlightPlayers}
                     isEngi={isEngi}
+                    slotLabel={slotLabel}
                   />
                 </div>
                 );
@@ -1023,9 +1194,20 @@ window.BracketTree = BracketTree;
 window.MatchCard = MatchCard;
 window.bronzeUnderFinalStyle = bronzeUnderFinalStyle;
 window.roundLabel = roundLabel;
+// Exposed so every surface that labels a bracket MATCH (viewer rows, admin
+// score editor, TV/display boards) uses the effective-round rule rather than
+// re-deriving a name from the raw round index. See bracketRoundLabel above.
+window.bracketRoundLabel = bracketRoundLabel;
 // Exposed so the bracket winner-picker panel can label a selected match with
 // the SAME number ("M1") and round the tree shows on its cards/columns.
 window.buildDisplayModel = buildDisplayModel;
+// Exposed so every surface that shows a bracket SIDE to a human (match details
+// modal, shiaijo "Later" queue, feeder-resolution modal) renders slot values
+// through the one rule instead of printing the raw "Winner of rX-mY" wire
+// value. slotDisplayName is the no-bracket-context fallback ("TBD");
+// bracketSlotLabeller resolves the slot to the card number the tree prints.
+window.slotDisplayName = slotDisplayName;
+window.bracketSlotLabeller = bracketSlotLabeller;
 window.formatIpponsScore = formatIpponsScore;
 window.teamIVScore = teamIVScore;
 window.teamIVPWScore = teamIVPWScore;
@@ -1040,4 +1222,4 @@ window.winnerSideLR = winnerSideLR;
 window.sideLabel = sideLabel;
 window.ipponsFromScore = ipponsFromScore;
 
-export { formatIpponsScore, enchoLabel, boutMiddle, defaultWinMaru, matchMiddleMark, winnerSideLR, sideLabel, roundLabel, ipponsFromScore, teamIVScore, teamIVPWScore, engiFlagScore, matchScoreStr, matchStateCell, buildDisplayModel, computeMetaTops, bronzeUnderFinalStyle, PlayerLine };
+export { formatIpponsScore, enchoLabel, boutMiddle, defaultWinMaru, matchMiddleMark, winnerSideLR, sideLabel, roundLabel, bracketRoundLabel, ipponsFromScore, teamIVScore, teamIVPWScore, engiFlagScore, matchScoreStr, matchStateCell, buildDisplayModel, computeMetaTops, bronzeUnderFinalStyle, PlayerLine, slotDisplayName, makeSlotLabeller, bracketSlotLabeller, MatchCard, BracketTree };

@@ -232,11 +232,11 @@ func (s *Store) LoadPoolMatches(compID string) ([]MatchResult, error) {
 		return nil, err
 	}
 
-	data, err := s.loadCached(compID, "pool-matches.csv", parsePoolMatchesFile)
+	matches, err := s.cachedPoolMatches(compID)
 	if err != nil {
 		return nil, err
 	}
-	return s.copyMatchResults(data.([]MatchResult)), nil
+	return s.copyMatchResults(matches), nil
 }
 
 // LoadPoolMatchesLocked loads pool matches WITHOUT acquiring the
@@ -406,6 +406,17 @@ func parsePoolMatchesRecords(records [][]string) []MatchResult {
 				m.FlagsB = v
 			}
 		}
+		// Reopen-pending column (appended after FlagsB), the "this match was
+		// reopened and still owes an audit reason" flag (mp-gmcg). Absent in
+		// files written before it existed → false, i.e. nothing outstanding,
+		// which is exactly how those matches behaved. A non-boolean value is
+		// treated as false for the same reason: a hand-edited CSV must not be
+		// able to wedge a match behind a justification it can never satisfy.
+		if len(rec) > 24 {
+			if v, err := strconv.ParseBool(rec[24]); err == nil {
+				m.ReopenPending = v
+			}
+		}
 
 		results = append(results, m)
 	}
@@ -442,7 +453,7 @@ func (s *Store) savePoolMatchesLocked(compID string, results []MatchResult, writ
 	// the previous os.Create + streaming pattern lacked.
 	var buf bytes.Buffer
 	writer := csv.NewWriter(&buf)
-	if err := writer.Write([]string{"PoolName", "MatchIdx", "SideA", "SideB", "Winner", "IpponsA", "IpponsB", "HansokuA", "HansokuB", "Decision", "Status", "Court", "SubResults", "ScheduledAt", "ResultSource", "Round", "SideAID", "SideBID", "WinnerID", "CorrectionReason", "RepPlayerA", "RepPlayerB", "FlagsA", "FlagsB"}); err != nil {
+	if err := writer.Write([]string{"PoolName", "MatchIdx", "SideA", "SideB", "Winner", "IpponsA", "IpponsB", "HansokuA", "HansokuB", "Decision", "Status", "Court", "SubResults", "ScheduledAt", "ResultSource", "Round", "SideAID", "SideBID", "WinnerID", "CorrectionReason", "RepPlayerA", "RepPlayerB", "FlagsA", "FlagsB", "ReopenPending"}); err != nil {
 		return err
 	}
 
@@ -485,6 +496,7 @@ func (s *Store) savePoolMatchesLocked(compID string, results []MatchResult, writ
 			r.RepPlayerB,
 			strconv.Itoa(r.FlagsA),
 			strconv.Itoa(r.FlagsB),
+			strconv.FormatBool(r.ReopenPending),
 		}); err != nil {
 			return err
 		}

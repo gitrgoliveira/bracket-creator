@@ -112,6 +112,10 @@ type StoreTx interface {
 	// use this to keep their match-result write under the SAME lock
 	// acquire as the competitor-status side effects.
 	UpdatePoolMatchByID(compID, matchID string, mutate func(*MatchResult)) (bool, error)
+	// UpdateBracketMatchByID is the tx-aware twin of
+	// Store.UpdateBracketMatchByID: find one bracket match by id (rounds +
+	// bronze sibling), mutate, save; found=false and no write on a miss.
+	UpdateBracketMatchByID(compID, matchID string, mutate func(*BracketMatch)) (bool, error)
 	// UpdateBracket is the tx-aware twin of Store.UpdateBracket. The
 	// mutate closure may modify the bracket arbitrarily and signal "match
 	// not found" by returning an error (typically wrapping the engine's
@@ -578,6 +582,34 @@ func (t *storeTx) UpdatePoolMatchByID(compID, matchID string, mutate func(*Match
 		return false, nil
 	}
 	return t.store.updatePoolMatchByIDLocked(compID, matchID, mutate, t.txWriteFn())
+}
+
+// UpdateBracketMatchByID dispatches to a lock-free body that mirrors
+// Store.UpdateBracketMatchByID's load + find + mutate + save sequence. Caller
+// (WithTransaction) is responsible for the per-comp lock.
+//
+// Read-your-own-writes: if bracket.json has been staged earlier in this tx,
+// this load + mutate + save sees the staged version, not the stale on-disk
+// one (same rationale as UpdatePoolMatchByID / UpdateBracket).
+func (t *storeTx) UpdateBracketMatchByID(compID, matchID string, mutate func(*BracketMatch)) (bool, error) {
+	if err := t.checkCompID(compID); err != nil {
+		return false, err
+	}
+	if err := ValidateCompetitionID(compID); err != nil {
+		return false, err
+	}
+	if pending, ok := t.pendingFor("bracket.json"); ok {
+		b, perr := parseBracketBytes(pending)
+		if perr != nil {
+			return false, perr
+		}
+		if bm := findBracketMatchByID(b, matchID); bm != nil {
+			mutate(bm)
+			return true, t.store.saveBracketLocked(compID, b, t.txWriteFn())
+		}
+		return false, nil
+	}
+	return t.store.updateBracketMatchByIDLocked(compID, matchID, mutate, t.txWriteFn())
 }
 
 // UpdateBracket dispatches to a lock-free body that mirrors

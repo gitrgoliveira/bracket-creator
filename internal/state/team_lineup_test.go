@@ -94,8 +94,6 @@ func TestLineupSetValidatesShape(t *testing.T) {
 		}
 		err := store.SetTeamLineup(compID, bad, 5)
 		require.Error(t, err, "an invalid position key must be rejected")
-		assert.NotErrorIs(t, err, domain.ErrLineupTooManyMissing,
-			"key validation must fire before the completeness check")
 
 		got, err := store.LoadTeamLineups(compID)
 		require.NoError(t, err)

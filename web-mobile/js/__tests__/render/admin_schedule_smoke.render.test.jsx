@@ -51,7 +51,7 @@ const STUBBED_GLOBALS = {
 };
 
 const originals = {};
-let AdminSchedulePage, AdminScoreEditorPage, PerCourtBreakdown;
+let AdminSchedulePage, AdminScoreEditorPage;
 
 beforeAll(async () => {
   for (const [k, v] of Object.entries(STUBBED_GLOBALS)) {
@@ -61,7 +61,6 @@ beforeAll(async () => {
   await import('../../admin_schedule.jsx');
   AdminSchedulePage    = window.AdminSchedulePage;
   AdminScoreEditorPage = window.AdminScoreEditorPage;
-  PerCourtBreakdown    = window.PerCourtBreakdown;
 });
 
 afterAll(() => {
@@ -81,25 +80,6 @@ const EMPTY_TOURNAMENT = {
 };
 
 const noop = () => {};
-
-// ── PerCourtBreakdown ────────────────────────────────────────────────────────
-
-describe('PerCourtBreakdown smoke', () => {
-  it('renders null when perCourtMinutes is empty', () => {
-    const { container } = render(
-      React.createElement(PerCourtBreakdown, { perCourtMinutes: [] }),
-    );
-    expect(container.firstChild).toBeNull();
-  });
-
-  it('mounts with data and renders court labels', () => {
-    render(
-      React.createElement(PerCourtBreakdown, { perCourtMinutes: [60, 90] }),
-    );
-    expect(screen.getByText(/Court A/)).toBeInTheDocument();
-    expect(screen.getByText(/Court B/)).toBeInTheDocument();
-  });
-});
 
 // ── AdminScoreEditorPage ─────────────────────────────────────────────────────
 

@@ -554,7 +554,7 @@ describe('groupQueueMatches; Upcoming queue grouping', () => {
     expect(groups[1].matches.map((m) => m.id)).toEqual(['b1']);
   });
 
-  it('groups playoff matches by round, keyed by round index', () => {
+  it('groups playoff matches by round name', () => {
     const groups = groupQueueMatches([
       bracket('Semifinals', 0, 's1'), bracket('Semifinals', 0, 's2'), bracket('Final', 1, 'f1'),
     ]);

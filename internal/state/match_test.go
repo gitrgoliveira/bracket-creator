@@ -169,6 +169,27 @@ func TestRunningMatchOnCourt_BracketMatch(t *testing.T) {
 	assert.Equal(t, "bm1", occ.MatchID)
 }
 
+// TestRunningMatchOnCourt_BronzeMatch pins the branch a rounds-only loop never
+// reaches: the 3rd-place match is a SIBLING of Rounds, not an element of it, so
+// a bronze running on a court must still make that court busy. Added with the
+// no-copy rewrite of the scan (mp-gmcg review R9) — the branch it protects is
+// the one this repo has repeatedly lost to hand-copied bracket walks.
+func TestRunningMatchOnCourt_BronzeMatch(t *testing.T) {
+	store, cleanup := newTestStore(t)
+	defer cleanup()
+
+	require.NoError(t, store.SaveCompetition(&Competition{ID: "comp1"}))
+	require.NoError(t, store.SaveBracket("comp1", &Bracket{
+		Rounds:          [][]BracketMatch{{{ID: "bm1", Status: MatchStatusCompleted, Court: "B"}}},
+		ThirdPlaceMatch: &BracketMatch{ID: "bronze", Status: MatchStatusRunning, Court: "B"},
+	}))
+
+	occ, err := store.RunningMatchOnCourt("B", "")
+	require.NoError(t, err)
+	require.NotNil(t, occ, "a running bronze match must occupy its court")
+	assert.Equal(t, "bronze", occ.MatchID)
+}
+
 func TestRunningMatchOnCourt_EmptyCourtIsNeverBusy(t *testing.T) {
 	dir, err := os.MkdirTemp("", "court-test-*")
 	require.NoError(t, err)

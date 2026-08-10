@@ -165,6 +165,195 @@ func TestUpdateBracket_MissingFile_EmptyBracket(t *testing.T) {
 	assert.True(t, called)
 }
 
+// TestUpdateBracketMatchByID covers the bracket-match analogue of
+// UpdatePoolMatchByID (mp-gmcg review): find one match by id across rounds AND
+// the bronze sibling, mutate, save; found=false and NO write on a miss.
+func TestUpdateBracketMatchByID(t *testing.T) {
+	newStore := func(t *testing.T) (*Store, string) {
+		t.Helper()
+		dir, err := os.MkdirTemp("", "state-bracket-updbyid-*")
+		require.NoError(t, err)
+		t.Cleanup(func() { os.RemoveAll(dir) })
+		store, err := NewStore(dir)
+		require.NoError(t, err)
+		compID := "test-comp"
+		require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Test"}))
+		require.NoError(t, store.SaveBracket(compID, &Bracket{
+			Rounds: [][]BracketMatch{{
+				{ID: "M1", SideA: "Alice", SideB: "Bob", Status: MatchStatusScheduled},
+				{ID: "M2", SideA: "Charlie", SideB: "Dave", Status: MatchStatusScheduled},
+			}},
+			ThirdPlaceMatch: &BracketMatch{ID: "BRONZE", SideA: "Eve", SideB: "Frank", Status: MatchStatusScheduled},
+		}))
+		return store, compID
+	}
+
+	t.Run("mutates a round match, leaves siblings untouched", func(t *testing.T) {
+		store, compID := newStore(t)
+		found, err := store.UpdateBracketMatchByID(compID, "M1", func(bm *BracketMatch) {
+			bm.Winner = "Alice"
+			bm.Status = MatchStatusCompleted
+		})
+		require.NoError(t, err)
+		assert.True(t, found)
+
+		b, err := store.LoadBracket(compID)
+		require.NoError(t, err)
+		assert.Equal(t, "Alice", b.Rounds[0][0].Winner)
+		assert.Equal(t, MatchStatusCompleted, b.Rounds[0][0].Status)
+		assert.Equal(t, MatchStatusScheduled, b.Rounds[0][1].Status, "sibling round match untouched")
+		assert.Equal(t, MatchStatusScheduled, b.ThirdPlaceMatch.Status, "bronze untouched")
+	})
+
+	t.Run("finds the BRONZE match, which a rounds-only walk would miss", func(t *testing.T) {
+		store, compID := newStore(t)
+		found, err := store.UpdateBracketMatchByID(compID, "BRONZE", func(bm *BracketMatch) {
+			bm.Winner = "Eve"
+		})
+		require.NoError(t, err)
+		assert.True(t, found)
+
+		b, err := store.LoadBracket(compID)
+		require.NoError(t, err)
+		assert.Equal(t, "Eve", b.ThirdPlaceMatch.Winner)
+	})
+
+	t.Run("not found: mutate never called, no write", func(t *testing.T) {
+		store, compID := newStore(t)
+		called := false
+		found, err := store.UpdateBracketMatchByID(compID, "nope", func(bm *BracketMatch) { called = true })
+		require.NoError(t, err)
+		assert.False(t, found)
+		assert.False(t, called)
+	})
+
+	t.Run("invalid compID errors", func(t *testing.T) {
+		store, _ := newStore(t)
+		_, err := store.UpdateBracketMatchByID("../traversal", "M1", func(bm *BracketMatch) {})
+		assert.Error(t, err)
+	})
+
+	t.Run("tx twin mutates and persists", func(t *testing.T) {
+		store, compID := newStore(t)
+		var found bool
+		require.NoError(t, store.WithTransaction(compID, func(tx StoreTx) error {
+			var err error
+			found, err = tx.UpdateBracketMatchByID(compID, "M2", func(bm *BracketMatch) {
+				bm.Winner = "Dave"
+			})
+			return err
+		}))
+		assert.True(t, found)
+		b, err := store.LoadBracket(compID)
+		require.NoError(t, err)
+		assert.Equal(t, "Dave", b.Rounds[0][1].Winner)
+	})
+}
+
+// TestMatchStatusByID covers the no-copy status reader (mp-gmcg review E5):
+// pool first, then bracket rounds, then the bronze sibling; found=false
+// otherwise; and its status must AGREE with the full-copy LoadPoolMatches /
+// LoadBracket path it replaces.
+func TestMatchStatusByID(t *testing.T) {
+	newStore := func(t *testing.T) (*Store, string) {
+		t.Helper()
+		dir, err := os.MkdirTemp("", "state-match-status-*")
+		require.NoError(t, err)
+		t.Cleanup(func() { os.RemoveAll(dir) })
+		store, err := NewStore(dir)
+		require.NoError(t, err)
+		compID := "test-comp"
+		require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Test"}))
+		require.NoError(t, store.SavePoolMatches(compID, []MatchResult{
+			{ID: "P1-0", Status: MatchStatusCompleted, Winner: "Alice",
+				SubResults: []SubMatchResult{{Position: 1, IpponsA: []string{"M"}, Winner: "Alice"}}},
+			{ID: "P1-1", Status: MatchStatusRunning},
+		}))
+		require.NoError(t, store.SaveBracket(compID, &Bracket{
+			Rounds:          [][]BracketMatch{{{ID: "B1", Status: MatchStatusScheduled}}},
+			ThirdPlaceMatch: &BracketMatch{ID: "BRONZE", Status: MatchStatusRunning},
+		}))
+		return store, compID
+	}
+
+	t.Run("finds a pool match's status", func(t *testing.T) {
+		store, compID := newStore(t)
+		st, found, err := store.MatchStatusByID(compID, "P1-0")
+		require.NoError(t, err)
+		require.True(t, found)
+		assert.Equal(t, MatchStatusCompleted, st)
+	})
+
+	t.Run("finds a bracket round match's status", func(t *testing.T) {
+		store, compID := newStore(t)
+		st, found, err := store.MatchStatusByID(compID, "B1")
+		require.NoError(t, err)
+		require.True(t, found)
+		assert.Equal(t, MatchStatusScheduled, st)
+	})
+
+	t.Run("finds the BRONZE sibling's status (a rounds-only walk would miss it)", func(t *testing.T) {
+		store, compID := newStore(t)
+		st, found, err := store.MatchStatusByID(compID, "BRONZE")
+		require.NoError(t, err)
+		require.True(t, found)
+		assert.Equal(t, MatchStatusRunning, st)
+	})
+
+	t.Run("found=false for an unknown match", func(t *testing.T) {
+		store, compID := newStore(t)
+		_, found, err := store.MatchStatusByID(compID, "nope")
+		require.NoError(t, err)
+		assert.False(t, found)
+	})
+
+	t.Run("invalid compID errors", func(t *testing.T) {
+		store, _ := newStore(t)
+		_, _, err := store.MatchStatusByID("../traversal", "P1-0")
+		assert.Error(t, err)
+	})
+
+	t.Run("agrees with the full-copy load path for every match", func(t *testing.T) {
+		store, compID := newStore(t)
+		// Build the authoritative status map from the deep-copy loaders.
+		want := map[string]MatchStatus{}
+		pm, err := store.LoadPoolMatches(compID)
+		require.NoError(t, err)
+		for _, m := range pm {
+			want[m.ID] = m.Status
+		}
+		br, err := store.LoadBracket(compID)
+		require.NoError(t, err)
+		for _, round := range br.Rounds {
+			for _, bm := range round {
+				want[bm.ID] = bm.Status
+			}
+		}
+		if br.ThirdPlaceMatch != nil {
+			want[br.ThirdPlaceMatch.ID] = br.ThirdPlaceMatch.Status
+		}
+		for id, wantStatus := range want {
+			got, found, err := store.MatchStatusByID(compID, id)
+			require.NoError(t, err)
+			require.Truef(t, found, "MatchStatusByID must find %q", id)
+			assert.Equalf(t, wantStatus, got, "status mismatch for %q", id)
+		}
+	})
+
+	t.Run("does not mutate cached data: a status read leaves later loads intact", func(t *testing.T) {
+		store, compID := newStore(t)
+		_, _, err := store.MatchStatusByID(compID, "P1-0")
+		require.NoError(t, err)
+		// The SubResults must still be intact on a subsequent full load (the
+		// no-copy read must never have aliased or truncated the cached slice).
+		pm, err := store.LoadPoolMatches(compID)
+		require.NoError(t, err)
+		require.Len(t, pm, 2)
+		require.Len(t, pm[0].SubResults, 1, "cached SubResults untouched by the status read")
+		assert.Equal(t, "Alice", pm[0].SubResults[0].Winner)
+	})
+}
+
 func TestLoadBracketLocked_ViaTransaction(t *testing.T) {
 	dir, err := os.MkdirTemp("", "state-bracket-locked-*")
 	require.NoError(t, err)

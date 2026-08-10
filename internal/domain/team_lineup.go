@@ -46,85 +46,15 @@ type TeamLineup struct {
 	Positions     map[Position]string `json:"positions" yaml:"positions"`
 }
 
-var (
-	ErrLineupMissingSenpo    = errors.New("team_lineup: senpo must be present")
-	ErrLineupMissingTaisho   = errors.New("team_lineup: taisho must be present")
-	ErrLineupTooManyMissing  = errors.New("team_lineup: 3+ missing positions, team is disqualified")
-	ErrLineupTeamSizeInvalid = errors.New("team_lineup: teamSize must be positive")
-)
-
-// Validate enforces FR-037 / FR-041 / R4 / CHK012: a 5-person lineup
-// must include Senpo and Taisho, and any kiken vacancies must follow
-// the FIK back-fill rule (the missing position is Jiho first, then
-// Jiho+Fukusho). For non-5 sizes positions must be numeric "1".."N".
-//
-// Returning a non-nil error signals the team should not be allowed to
-// take the court (either reject the lineup PUT or DQ the team via
-// CompetitorStatus).
-func (t TeamLineup) Validate(teamSize int) error {
-	if teamSize <= 0 {
-		return ErrLineupTeamSizeInvalid
-	}
-	if teamSize == 5 {
-		return t.validateFive()
-	}
-	return t.validateNumbered(teamSize)
-}
-
-func (t TeamLineup) validateFive() error {
-	allowed := allowedPositionSet(5)
-	for pos := range t.Positions {
-		if _, ok := allowed[pos]; !ok {
-			return fmt.Errorf("team_lineup: position %q not allowed in 5-person team", pos)
-		}
-	}
-	// Senpo and Taisho are mandatory (R4, they bookend the match).
-	if t.Positions[PosSenpo] == "" {
-		return ErrLineupMissingSenpo
-	}
-	if t.Positions[PosTaisho] == "" {
-		return ErrLineupMissingTaisho
-	}
-	// Count missing among middle positions (Jiho, Chuken, Fukusho).
-	missing := make([]Position, 0, 3)
-	for _, p := range []Position{PosJiho, PosChuken, PosFukusho} {
-		if t.Positions[p] == "" {
-			missing = append(missing, p)
-		}
-	}
-	switch len(missing) {
-	case 0:
-		return nil
-	case 1:
-		// The single vacancy must be Jiho (FIK back-fill rule).
-		if missing[0] != PosJiho {
-			return fmt.Errorf("team_lineup: with 1 vacancy, the missing position must be Jiho, got %q", missing[0])
-		}
-		return nil
-	case 2:
-		// The two vacancies must be Jiho and Fukusho.
-		found := map[Position]bool{missing[0]: true, missing[1]: true}
-		if !found[PosJiho] || !found[PosFukusho] {
-			return fmt.Errorf("team_lineup: with 2 vacancies, the missing positions must be Jiho and Fukusho, got %v", missing)
-		}
-		return nil
-	default:
-		return ErrLineupTooManyMissing
-	}
-}
-
-func (t TeamLineup) validateNumbered(teamSize int) error {
-	// Identical to ValidatePositions on the reachable path (Validate already
-	// rejected teamSize <= 0 and dispatched teamSize == 5 to validateFive), so
-	// delegate rather than keep a second copy of the key-check loop.
-	return t.ValidatePositions(teamSize)
-}
+var ErrLineupTeamSizeInvalid = errors.New("team_lineup: teamSize must be positive")
 
 // ValidatePositions checks only that the position KEYS are valid for the team
-// size; it does NOT enforce the FIK completeness/vacancy rule. Lineups are
-// entered incrementally while bouts run, so a partial lineup must be
-// persistable, completeness is surfaced as a non-blocking UI warning, not
-// enforced at write time.
+// size; it does NOT enforce any completeness or vacancy rule. Position
+// vacancies are irrelevant and never block a lineup (mp-gmcg): team sizes are
+// unregulated, lineups are entered incrementally while bouts run, and a
+// partial lineup must be persistable. The FIK back-fill/DQ rule that used to
+// live here (Validate/validateFive) was removed, it was never called on a
+// production path and contradicted operator-led kachinuki play.
 func (t TeamLineup) ValidatePositions(teamSize int) error {
 	if teamSize <= 0 {
 		return ErrLineupTeamSizeInvalid

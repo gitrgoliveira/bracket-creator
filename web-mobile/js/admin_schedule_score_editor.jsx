@@ -290,8 +290,28 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                 // modal re-renders as the live scoring board (the background
                 // refresh/SSE then reconciles the canonical state). Any other
                 // submit (finish/correction/draw) closes as before.
+                //
+                // mp-gmcg: a kachinuki Record-bout write (kachinukiBoutFinal)
+                // comes back with the POST-advance bout log: the server
+                // appended the next pairing (winner stays / stays-on slot).
+                // Adopt it into the open match so the editor shows the new
+                // bout without a close/reopen (SSE only refreshes the list,
+                // never this snapshot).
                 if (patch.status === "running" && !patch.winner) {
-                  setOpenMatch(prev => prev ? { ...prev, status: "running" } : prev);
+                  const freshSubs = patch.kachinukiBoutFinal && res && Array.isArray(res.subResults)
+                    ? { subResults: res.subResults }
+                    : {};
+                  setOpenMatch(prev => prev ? { ...prev, status: "running", ...freshSubs } : prev);
+                  // mp-gmcg review C1: also hand `res` back to the modal itself. A
+                  // prior [Remove this bout] can leave the modal's local
+                  // matchOverride shadowing THIS prop, and a Record-bout append can
+                  // return openMatch.subResults.length to EXACTLY its pre-removal
+                  // value (remove: L→L-1 here only; this append: L-1→L again) — the
+                  // modal's length-keyed effect never observes a change and the
+                  // override freezes forever. Returning res lets the modal adopt
+                  // the fresh subResults into its own override directly, with no
+                  // dependency on this prop ever visibly changing.
+                  return res;
                 } else {
                   setOpenMatch(null);
                 }

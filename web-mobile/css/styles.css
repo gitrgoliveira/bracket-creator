@@ -4804,11 +4804,18 @@ button.pool-match-row {
    row so it hugs its scores. Grid items stretch by default, so the pill is
    pinned back to a hug-content chip mirrored inward. */
 /* Gated on @supports so an older Chromium WebView (subgrid shipped Chrome 117 /
-   Safari 16) — the class of courtside Android tablet this app targets — falls
-   back to the base .sb-side flex column rather than landing the grid-row: 2..5
-   assignments on IMPLICIT rows and rendering misaligned. Modern browsers get
-   the subgrid alignment; old ones get the pre-change flex layout (mp-gmcg
-   review F8). */
+   Safari 16) falls back to the base .sb-side flex column rather than landing
+   the grid-row: 2..5 assignments on IMPLICIT rows and rendering misaligned.
+   Modern browsers get the subgrid alignment; old ones get the pre-change flex
+   layout (mp-gmcg review F8).
+
+   This is the operator console, which runs on a tablet (iPad Air class or an
+   equivalent Android tablet) or a laptop — see the "Devices and screens" table
+   in docs/user-guide/start-here/choosing-your-setup.md for the full set of
+   screens this app targets, which also covers court and lobby displays and
+   spectator phones. A current tablet or laptop clears the subgrid bar; the
+   fallback exists for older or locked-down venue hardware, and it is the one
+   path where the ippon slots do NOT hug the centre. */
 @supports (grid-template-rows: subgrid) {
   .sb-match:has(.sb-slots) {
     grid-template-rows: 1fr auto auto auto auto 1fr;

@@ -423,7 +423,13 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// resolveCompetitionCourts on the next line, so every match ends
 		// up with a real court label). Defense against direct API callers
 		// sending multi-character labels.
-		if err := validateCompetitionCourts(comp.Courts); err != nil {
+		//
+		// validateCompetitionCourts ALSO applies the shiaijo-count rule
+		// (1 or an even number) to a bracket-drawing competition, since a
+		// create authors a brand-new allocation and has no stored value to
+		// preserve. The settings PUT splits the two checks instead; see the
+		// comment on its call site.
+		if err := validateCompetitionCourts(comp.Courts, comp.Format); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "courts: " + err.Error()})
 			return
 		}
@@ -752,9 +758,18 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			}
 
 			// Cross-file guard symmetry with POST handler + POST/PUT /tournament:
-			// validateCompetitionCourts label + cap check (empty allowed
-			// because the engine applies a 1-court default for competitions).
-			if err := validateCompetitionCourts(comp.Courts); err != nil {
+			// label + cap check (empty allowed because the engine applies a
+			// 1-court default for competitions).
+			//
+			// This is validateCourtLabels, NOT validateCompetitionCourts:
+			// the shiaijo-pairing half of that validator needs the STORED
+			// allocation to decide, so it runs inside the update transform
+			// below (search validateCompetitionCourtPairing) where `current`
+			// is loaded. A PUT that leaves an already-odd allocation alone
+			// must SUCCEED, otherwise a competition saved before the rule
+			// existed could never have its name, date or durations edited
+			// again. Only a change TO an odd allocation is rejected.
+			if err := validateCourtLabels(comp.Courts); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "courts: " + err.Error()})
 				return
 			}
@@ -994,6 +1009,40 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				}
 				if validationErr != nil {
 					return nil, nil
+				}
+				// Shiaijo-count rule, deferred here from the settings
+				// validation block above because it is the one court check
+				// that needs the STORED allocation to decide.
+				//
+				// A competition must run on 1 shiaijo or an even number:
+				// the knockout draw pairs shiaijo, so an odd count leaves
+				// one without a partner (helper.ValidateCourtPairing owns
+				// the message). Existing data is validated on WRITE ONLY,
+				// so this fires only when the allocation is actually being
+				// CHANGED. A competition already saved with an odd
+				// allocation stays editable: an unrelated edit (name, date,
+				// durations, check-in) that leaves courts as they are must
+				// SUCCEED, otherwise the operator is locked out of the
+				// settings screen entirely and cannot even rename the
+				// competition. The operator UI surfaces a persistent
+				// warning on that screen instead, and the engine refuses to
+				// build a draw on an odd allocation.
+				//
+				// Any change to the list must land on a valid count, using
+				// the same join-comparison the draw-ready guard above uses
+				// for courts. The FORMAT is part of the trigger too: the
+				// rule is scoped to bracket-drawing formats, so switching a
+				// league on 3 shiaijo to mixed makes a stored-and-valid
+				// allocation unpairable without the court list changing at
+				// all. Checking only the court list would let that through
+				// and leave the operator with a competition that cannot
+				// draw and no message saying why.
+				if strings.Join(comp.Courts, ",") != strings.Join(current.Courts, ",") ||
+					comp.Format != current.Format {
+					if err := validateCompetitionCourtPairing(comp.Courts, comp.Format); err != nil {
+						validationErr = fmt.Errorf("courts: %w", err)
+						return nil, nil
+					}
 				}
 				// Settings-only merge. Status, Players, and
 				// HasParticipantIDs are deliberately not copied from

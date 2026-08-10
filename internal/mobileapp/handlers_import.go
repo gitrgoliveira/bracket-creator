@@ -172,9 +172,13 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 		return res
 	}
 
-	// Cross-file guard symmetry with the POST /competitions and
-	// PUT /competitions/:id handlers, which call validateCompetitionCourts
-	// to reject empty / multi-character / >26-court manifests. Pre-fix the
+	// Cross-file guard symmetry with the POST /competitions handler, which
+	// calls validateCompetitionCourts to reject multi-character / >26-court
+	// manifests and, for a bracket-drawing competition, an unpairable
+	// shiaijo count (1 or an even number). Like a create, an imported row
+	// authors a brand-new allocation, so there is no stored value to
+	// preserve and the full check applies; the settings PUT is the one write
+	// path that splits the two checks. Pre-fix the
 	// import path bypassed this check and could land a Competition with
 	// court labels that no other write path would accept, e.g. a manifest
 	// row with 30 courts or court="AA" would persist via SaveCompetition
@@ -182,7 +186,7 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 	// are permitted here, resolveCompetitionCourts (below, once the
 	// tournament is loaded) inherits the tournament's courts, matching the
 	// POST/PUT handlers. Per-row res.Error to match the other patterns.
-	if err := validateCompetitionCourts(comp.Courts); err != nil {
+	if err := validateCompetitionCourts(comp.Courts, comp.Format); err != nil {
 		res.Error = "courts: " + err.Error()
 		return res
 	}

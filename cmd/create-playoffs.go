@@ -75,6 +75,14 @@ func (o *playoffOptions) run(cmd *cobra.Command, args []string) error {
 	if err := helper.ValidateCourts(o.courts); err != nil {
 		return err
 	}
+	// Shiaijo-count rule: 1 court or an even number. The tree is split into
+	// one region per court and the regions pair up, so an odd count above 1
+	// leaves one court without a partner. Checked after ValidateCourts so
+	// the 26-court label cap is still reported first for a value that
+	// breaks both.
+	if err := helper.ValidateCourtPairing(o.courts); err != nil {
+		return err
+	}
 
 	outputFile, outputWriter, err := openOutputFile(o.outputPath)
 	if err != nil {

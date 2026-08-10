@@ -622,6 +622,27 @@ func (e *Engine) runDrawPipeline(id string) error {
 		return notFoundErrorf("competition %s not found", id)
 	}
 
+	// Shiaijo-count gate. runDrawPipeline is the single path both
+	// GenerateDraw and StartCompetition take to build a draw, so checking
+	// here covers every caller, including callers that never touch the HTTP
+	// layer (the API validators cannot see those).
+	//
+	// Scoped to formats that actually build a bracket: the rule exists
+	// because bracket regions pair up court by court, and a league or Swiss
+	// competition has no regions to pair. An empty court list is skipped
+	// too, since it means "no explicit allocation", which the generators
+	// read as one court.
+	//
+	// This is a write-time check, not a read-time one: an already-drawn or
+	// already-running competition is untouched and keeps serving its
+	// matches. Only a NEW draw on an odd allocation is refused, and the
+	// operator clears it by reassigning shiaijo in competition settings.
+	if len(comp.Courts) > 0 && CompetitionDrawsBracket(comp.Format) {
+		if err := ValidateCourtPairing(len(comp.Courts)); err != nil {
+			return validationErrorf("competition %s cannot generate a draw: %s", id, err.Error())
+		}
+	}
+
 	// Snapshot the loaded config BEFORE the pipeline mutates anything.
 	// The atomic-commit transform below compares `current` (freshly
 	// reloaded under the lock) to THESE snapshots, not to the

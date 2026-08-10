@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
+	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
@@ -108,14 +109,58 @@ func validateCourts(courts []string) error {
 
 // validateCompetitionCourts is the looser competition-level check:
 // 0..helper.MaxCourts entries, each (when present) a single non-empty
-// character. Empty is allowed at validation time because all three write
-// paths (POST /competitions, PUT settings, and the manifest importer)
-// resolve empty courts to the tournament's courts via
+// character, and a pairable count. Empty is allowed at validation time
+// because all three write paths (POST /competitions, PUT settings, and the
+// manifest importer) resolve empty courts to the tournament's courts via
 // resolveCompetitionCourts immediately after this check, so a persisted
 // competition always carries >=1 court. The label and cap invariants from
 // validateCourtLabels still apply when courts are explicitly provided.
-func validateCompetitionCourts(courts []string) error {
-	return validateCourtLabels(courts)
+//
+// Used where a NEW allocation is authored (POST /competitions and the
+// manifest importer). The settings PUT deliberately does NOT call this
+// one: it checks labels here and defers the pairing check to the update
+// transform, where the STORED allocation is known and the check can be
+// limited to an allocation actually being changed. See
+// validateCompetitionCourtPairing.
+func validateCompetitionCourts(courts []string, format string) error {
+	if err := validateCourtLabels(courts); err != nil {
+		return err
+	}
+	return validateCompetitionCourtPairing(courts, format)
+}
+
+// validateCompetitionCourtPairing rejects an odd competition-level court
+// allocation greater than 1 (helper.ValidateCourtPairing owns the rule and
+// its message; the knockout draw pairs shiaijo, so an odd count leaves one
+// without a partner). 1 court is valid, and so is an empty list, which
+// means "inherit the tournament's courts" and is resolved by
+// resolveCompetitionCourts right after every call site.
+//
+// Scoped by format to the competitions whose draw builds a bracket
+// (engine.CompetitionDrawsBracket): a league or Swiss competition has no
+// bracket regions to pair, and its courts are plain parallel mats, so the
+// rule does not bind there. Note the app itself suggests odd court counts
+// for a league (engine.SuggestedMaxCourts is floor(N/2)-1), which a
+// format-blind rule would then reject.
+//
+// Note what else is NOT validated: the TOURNAMENT's court list. The rule is
+// per competition, so a 5-shiaijo venue is perfectly legal and simply
+// cannot give all five to one bracket competition (4 + 1 across two
+// competitions is the intended shape). A competition that inherits an odd
+// venue list rather than choosing its own is left to the engine's draw-time
+// gate, which refuses the draw with the same message: rejecting it here
+// would make an odd venue unusable for competition creation, which is
+// precisely the tournament-level constraint the rule does not impose.
+//
+// Existing data is validated on WRITE only. A competition already saved
+// with an odd allocation keeps running and keeps being editable; the
+// operator UI shows a persistent warning on its settings screen until the
+// allocation is changed.
+func validateCompetitionCourtPairing(courts []string, format string) error {
+	if len(courts) == 0 || !engine.CompetitionDrawsBracket(format) {
+		return nil
+	}
+	return helper.ValidateCourtPairing(len(courts))
 }
 
 // resolveCompetitionCourts guarantees a competition resolves to at least one

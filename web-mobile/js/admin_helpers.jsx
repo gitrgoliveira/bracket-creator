@@ -384,6 +384,47 @@ function courtCount(courts) {
   return normalizeCourts(courts).length;
 }
 
+// Shiaijo-count rule for ONE competition, mirrored from
+// helper.ValidateCourtPairing (internal/helper/court_parity.go): a
+// competition runs on 1 shiaijo, or on an EVEN number of shiaijo. An odd
+// allocation greater than 1 (3, 5, 7, ...) is invalid, because the knockout
+// draw builds one bracket region per shiaijo and pairs those regions up so
+// each pool's runner-up crosses to its court's partner. With an odd count
+// one court has no partner.
+//
+// 1 shiaijo is explicitly VALID (its single region splits into two
+// half-blocks that act as partner courts), so the message always offers 1
+// and must never read as "at least 2 courts".
+//
+// The rule is per competition, never per venue: a 5-shiaijo tournament is
+// fine and simply splits its courts across competitions (4 + 1). Nothing
+// here validates the tournament's own court list.
+//
+// Returns null when the count is valid, or the operator-facing message when
+// it is not, so call sites can use it as both predicate and label. The Go
+// side and this string are pinned against each other by
+// web-mobile/js/__tests__/court_parity.test.jsx and
+// internal/helper/court_parity_test.go.
+function shiaijoCountError(n) {
+  if (!Number.isFinite(n) || n <= 1 || n % 2 === 0) return null;
+  return `${n} shiaijo cannot be paired. Use ${n - 1} or ${n + 1}, or 1: the knockout draw pairs shiaijo so each pool's runner-up crosses to a partner shiaijo, and an odd number leaves one shiaijo without a partner.`;
+}
+
+// Scope of the shiaijo-count rule above: true when the competition's draw
+// builds a knockout bracket. Mirrors engine.CompetitionDrawsBracket
+// (internal/engine/court_validation.go), which in turn mirrors the format
+// switch in the engine's draw pipeline: league and Swiss produce pools or
+// rounds and never a bracket, while mixed, playoffs and a legacy record
+// with no format at all all end up building one.
+//
+// League and Swiss courts are plain parallel mats with no regions to pair,
+// so shiaijoCountError must not be applied to them. The app actively
+// recommends odd counts there (the league court hint suggests
+// floor(players/2)-1), which a format-blind rule would then reject.
+function formatDrawsBracket(format) {
+  return format !== "league" && format !== "swiss";
+}
+
 // Resolves the 0-based round index from a match object. Bracket matches
 // carry m.roundIndex (stamped by compMatches/viewer.jsx); fall back to a
 // non-negative numeric m.round for any older shapes.
@@ -426,6 +467,8 @@ if (typeof window !== "undefined") {
   window.promptAdminPassword = promptAdminPassword;
   window.normalizeCourts = normalizeCourts;
   window.courtCount = courtCount;
+  window.shiaijoCountError = shiaijoCountError;
+  window.formatDrawsBracket = formatDrawsBracket;
 }
 
 // --- Elevated (destructive-ops) password prompt (spec 004 / mp-e21) ---
@@ -520,5 +563,7 @@ export {
   deriveTournamentDays,
   normalizeCourts,
   courtCount,
+  shiaijoCountError,
+  formatDrawsBracket,
   resolveRoundIndex,
 };

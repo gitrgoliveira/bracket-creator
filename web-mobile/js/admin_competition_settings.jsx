@@ -492,6 +492,37 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // changes the scoring paradigm; flipping naginata affects the bronze match.
   const isStarted = !!(local.status && local.status !== "setup" && local.status !== "draw-ready");
 
+  // Shiaijo-count rule (shiaijoCountError, mirrored from
+  // helper.ValidateCourtPairing): a competition whose draw builds a knockout
+  // bracket runs on 1 shiaijo or an even number. League and Swiss are out of
+  // scope (formatDrawsBracket): their courts are parallel mats with no
+  // bracket regions to pair, and the league hint right under these pills
+  // recommends floor(players/2)-1 courts, which is odd half the time.
+  //
+  // Three distinct states, deliberately kept apart:
+  //
+  //   courtsErr      the CURRENT selection is unpairable, drives the red hint
+  //                  under the court pills.
+  //   savedCourtsErr the allocation ON DISK is unpairable, drives the
+  //                  persistent warning banner. A competition saved before
+  //                  this rule existed (or one that inherited an odd venue
+  //                  court list) lands here and keeps running; it just cannot
+  //                  generate a draw until the operator fixes it.
+  //   courtsChanged  the operator is actually reassigning shiaijo.
+  //
+  // Save is blocked only for `courtsErr && courtsChanged`, exactly matching
+  // the server, which validates courts on write only. Blocking Save whenever
+  // the STORED value is odd would lock the operator out of every unrelated
+  // edit on that screen (name, date, durations, check-in), which is the one
+  // outcome this rule must not cause.
+  const savedCourts = c.courts || [];
+  const courtsErr = window.formatDrawsBracket(local.format)
+    ? window.shiaijoCountError((local.courts || []).length) : null;
+  const savedCourtsErr = window.formatDrawsBracket(c.format)
+    ? window.shiaijoCountError(savedCourts.length) : null;
+  const courtsChanged = (local.courts || []).join(",") !== savedCourts.join(",");
+  const blockingCourtsErr = !!courtsErr && courtsChanged;
+
   return (
     <div className="card">
       <div className="card__head">
@@ -501,18 +532,34 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             fontSize: 12.5,
             padding: "4px 8px",
             borderRadius: 4,
-            background: (saveErr || hasDurationError) ? "var(--red-soft)" : isDirty ? "var(--warn-soft)" : lastSaved ? "var(--accent-soft)" : "transparent",
-            color: (saveErr || hasDurationError) ? "var(--red)" : isDirty ? "var(--warn-ink)" : "var(--accent)",
+            background: (saveErr || hasDurationError || blockingCourtsErr) ? "var(--red-soft)" : isDirty ? "var(--warn-soft)" : lastSaved ? "var(--accent-soft)" : "transparent",
+            color: (saveErr || hasDurationError || blockingCourtsErr) ? "var(--red)" : isDirty ? "var(--warn-ink)" : "var(--accent)",
             fontWeight: 600,
             transition: "all 300ms"
           }}>
-            {saveErr ? `⚠ ${saveErr}` : saving ? "Saving…" : hasDurationError ? "⚠ Fix match duration" : isDirty ? "● Unsaved changes" : lastSaved ? `✓ Saved at ${lastSaved}` : ""}
+            {saveErr ? `⚠ ${saveErr}` : saving ? "Saving…" : hasDurationError ? "⚠ Fix match duration" : blockingCourtsErr ? "⚠ Fix shiaijo count" : isDirty ? "● Unsaved changes" : lastSaved ? `✓ Saved at ${lastSaved}` : ""}
           </div>
-          <button type="button" className="btn btn--primary" onClick={saveNow} disabled={!isDirty || saving || hasDurationError}>
+          <button type="button" className="btn btn--primary" onClick={saveNow} disabled={!isDirty || saving || hasDurationError || blockingCourtsErr}>
             {saving ? "Saving…" : "Save changes"}
           </button>
         </div>
       </div>
+      {/* Persistent warning for an allocation ALREADY on disk that cannot be
+          paired. Not a blocker: the competition keeps running and the rest of
+          this screen stays editable (the server validates courts on write
+          only). It stays visible until the allocation is changed, because the
+          draw cannot be generated while it stands. Suppressed once the
+          operator has staged a fix, where the pills speak for themselves. */}
+      {savedCourtsErr && !courtsChanged && (
+        <div className="alert alert--warn" style={{ marginBottom: 12 }} data-testid="odd-shiaijo-banner">
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>
+            ⚠ This competition is assigned {savedCourts.length} shiaijo, which cannot be paired.
+          </div>
+          <div>
+            {savedCourtsErr} Change the assignment below and save; the draw cannot be generated until you do.
+          </div>
+        </div>
+      )}
       {clashWarnings && clashWarnings.length > 0 && (
         <div className="alert alert--warn" style={{ marginBottom: 12 }} data-testid="clash-banner">
           <div style={{ fontWeight: 600, marginBottom: 6 }}>
@@ -642,6 +689,17 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             <button key={cc} className={`radio-pill ${local.courts.includes(cc) ? "is-active" : ""}`} type="button" onClick={() => toggleCourt(cc)} disabled={isDrawReady}>Shiaijo (court) {cc}</button>
           ))}
         </div>
+        {/* Shiaijo-count rule, shown with the other court hints below so the
+            operator reads cap, suggestion and pairing in one place. Rendered
+            for ANY unpairable selection, staged or already saved, so the
+            field never looks fine while the draw is blocked. Save itself is
+            gated on blockingCourtsErr (a CHANGE to an unpairable count), not
+            on this hint. */}
+        {courtsErr && (
+          <div className="field__hint" style={{ color: "var(--red)", fontWeight: 600 }} data-testid="odd-shiaijo-hint">
+            {courtsErr}
+          </div>
+        )}
         {(local.format === "league" || local.poolFormat === "partial") ? (() => {
           const playerCount = (c.players || []).length;
           const ct = (n) => n === 1 ? "1 court" : `${n} courts`;

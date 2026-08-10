@@ -115,6 +115,13 @@ func createTournamentHandler(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	// Same shiaijo-count rule the --courts flag enforces on the CLI: this
+	// form drives the identical generator, so an odd count above 1 would
+	// produce the same unpairable court regions here.
+	if err := helper.ValidateCourtPairing(courts); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
 	// Reject duplicate participant entries up front so the user sees a
 	// clear error instead of silently dropped rows in the spreadsheet.

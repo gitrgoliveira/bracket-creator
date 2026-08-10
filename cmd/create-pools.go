@@ -86,6 +86,15 @@ func (o *poolOptions) run(cmd *cobra.Command, args []string) error {
 	if err := helper.ValidateCourts(o.courts); err != nil {
 		return err
 	}
+	// Shiaijo-count rule: 1 court or an even number. The tree is split into
+	// one region per court and the regions pair up, so an odd count above 1
+	// leaves one court without a partner. Checked after ValidateCourts so
+	// the 26-court label cap is still reported first for a value that
+	// breaks both. Re-checked after the pool-count clamp below, which can
+	// lower o.courts to an odd value the operator never asked for.
+	if err := helper.ValidateCourtPairing(o.courts); err != nil {
+		return err
+	}
 
 	outputFile, outputWriter, err := openOutputFile(o.outputPath)
 	if err != nil {
@@ -168,13 +177,11 @@ func (o *poolOptions) createPools(entries []string) error {
 		}
 	}
 
-	// Calculate number of pools to ensure seeding distribution matches pool count
-	var numPools int
-	if isMax {
-		numPools = (len(players) + activePoolSize - 1) / activePoolSize
-	} else {
-		numPools = len(players) / activePoolSize
-	}
+	// Calculate number of pools to ensure seeding distribution matches pool
+	// count. helper.PoolCount is the same function CreatePools uses below, so
+	// the count fed to PoolSeeding can never drift from the pools actually
+	// built (bc-draw Phase 2a).
+	numPools := helper.PoolCount(len(players), activePoolSize, isMax)
 	if numPools == 0 {
 		return fmt.Errorf("not enough valid participants (%d) to form a pool of size %d", len(players), activePoolSize)
 	}
@@ -221,9 +228,17 @@ func (o *poolOptions) createPools(entries []string) error {
 
 	fmt.Printf("There will be %d finalists\n", len(finals))
 
-	// Clamp courts to the number of pools (e.g. if defaulted to 2 but only 1 pool exists)
+	// Clamp courts to the number of pools (e.g. if defaulted to 2 but only 1 pool exists).
+	// The clamp can produce a value the operator never asked for, so it has to
+	// respect the shiaijo-count rule too: clamping a legal --courts 4 onto 3
+	// pools would otherwise silently hand the draw an unpairable 3 courts.
+	// Step down to the nearest even count instead (1 pool stays 1, which is
+	// the explicitly allowed single-shiaijo case).
 	if o.courts > numPools {
 		o.courts = numPools
+		if o.courts > 1 && o.courts%2 == 1 {
+			o.courts--
+		}
 	}
 	// Create balanced tree
 	tree := helper.CreateBalancedTree(finals)

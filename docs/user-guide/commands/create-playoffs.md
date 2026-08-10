@@ -12,7 +12,7 @@ bracket-creator create-playoffs [flags]
 |------|-------|---------|-------------|
 | `--file` | `-f` | (none) | CSV file with participants **(required)** |
 | `--output` | `-o` | (none) | Output `.xlsx` path **(required)** |
-| `--courts` | `-c` | `2` | Number of shiai-jo (courts) to split the tree across |
+| `--courts` | `-c` | `2` | Number of shiai-jo (courts) to split the tree across. Must be 1 or an even number, see [Shiai-jo count](#shiai-jo-count) |
 | `--team-matches` | `-t` | `0` | Players per team (0 = individual tournament) |
 | `--with-zekken-name` | `-z` | `false` | Use second CSV column as zekken display name |
 | `--seeds` | (none) | (none) | CSV file with seed rankings |
@@ -44,6 +44,14 @@ bracket-creator create-playoffs \
   -f participants.csv -o tournament.xlsx \
   -t 3 -c 2 -z
 ```
+
+## Shiai-jo count
+
+`--courts` takes **1 or an even number**. The tree is split into one block per shiai-jo and those blocks are paired up, so an odd number above 1 leaves one shiai-jo without a partner and the command stops with an error naming the counts to use instead.
+
+A single shiai-jo is always allowed: `-c 1` splits its block into two halves that act as partner shiai-jo, producing the same bracket shape as a multi-shiai-jo run. The upper bound is 26, because shiai-jo are labelled A to Z.
+
+This is a per-tournament-file rule, not a rule about your venue. A hall with five shiai-jo can generate one file for four shiai-jo and another for one. See [create-pools](create-pools.md#shiai-jo-count) for the same rule on the pools command.
 
 ## Seeding
 

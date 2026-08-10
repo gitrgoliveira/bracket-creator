@@ -28,6 +28,10 @@ Mixed runs two phases. First, competitors are divided into pools and play a roun
 
 Use mixed for most events. Pools give every competitor several matches before the knockout begins, and the bracket rewards pool performance through seeding.
 
+A mixed competition must be assigned **1 shiai-jo (court), or an even number of them**. The knockout draw gives each shiai-jo its own block of the bracket and pairs those blocks up, so each pool's runner-up crosses into the partner shiai-jo's block and the two qualifiers from one pool stay apart as long as possible. With an odd number above 1, one shiai-jo has no partner to cross to. A single shiai-jo is always allowed: its block splits into two halves that act as partner shiai-jo.
+
+This applies to the competition's own allocation, not to the venue: a five shiai-jo hall can run one competition on four and another on one. Playoffs competitions follow the same rule, because they also split their bracket across shiai-jo. League and Swiss competitions produce no bracket and can use any number.
+
 ## League
 
 League is a full round-robin: every competitor meets every other competitor. Final standings come from the accumulated results across all matches; there is no knockout stage.

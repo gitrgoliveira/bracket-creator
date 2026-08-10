@@ -91,6 +91,16 @@ A competition moves through three phases:
 
 ![Competition setup overview](../../screenshots/mobile-participants.png)
 
+### Assigning shiai-jo
+
+The competition **Settings** page has an **Assigned shiai-jo (courts)** field listing every shiai-jo in the venue. Pick the ones this competition runs on; the number you pick is how many of its matches can run at the same time.
+
+Assign **1 shiai-jo, or an even number of them**. The knockout draw pairs shiai-jo so that each pool's runner-up crosses into its partner shiai-jo's part of the bracket, which keeps the two qualifiers from one pool apart until as late as possible. An odd number above 1 leaves one shiai-jo without a partner, so the draw cannot be built. A single shiai-jo is always allowed: its bracket splits into two half-blocks that act as partner shiai-jo, so the draw has the same shape as a multi-shiai-jo one.
+
+The rule applies to each competition's own allocation, never to the venue. A five shiai-jo hall is perfectly normal: run one competition on four shiai-jo and another on one. It also applies only to the formats that produce a knockout bracket, which are playoffs and mixed. League and Swiss competitions have no bracket to pair up, so they can use any number of shiai-jo.
+
+If you pick an odd number the settings page shows the valid counts to use instead, and **Generate draw** and **Start competition** stay disabled until you change it. A competition saved with an odd allocation before the rule applied keeps running and stays editable; its settings page carries a standing warning until you reassign its shiai-jo.
+
 ### Adding participants
 
 The participant setup view has two panels.

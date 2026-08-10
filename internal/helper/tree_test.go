@@ -2,6 +2,7 @@ package helper
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"testing"
 
@@ -1439,24 +1440,63 @@ func TestBracketNoSamePoolFirstRoundMatch(t *testing.T) {
 	}
 }
 
+// TestBracketCrossPoolMatching characterizes the cross-pool ("1st meets a 2nd")
+// property at 2 qualifiers per pool across the FULL 2..12 pool range, not just
+// the power-of-two counts the test originally swept (bc-draw Phase 1).
+//
+// CURRENT BEHAVIOUR, DEFECT PINNED: the property holds only at power-of-two
+// pool counts. At every other count some first-round matches are 2nd-vs-2nd,
+// and the number of them grows with the count. wantSameRank is therefore the
+// number of round-1 matches that VIOLATE the intended rule, pinned as-is.
+//
+// The one thing that does hold everywhere is the weaker guarantee: the
+// violations are always 2nd-vs-2nd, so two pool WINNERS never meet in round 1.
+// The rewrite (bc-draw R4/R5) is expected to drive wantSameRank to 0
+// everywhere by crossing 2nd places to a partner court instead of pairing
+// adjacent pools; when it does, this table changes and that is the point.
 func TestBracketCrossPoolMatching(t *testing.T) {
-	// For power-of-2 pool counts, every first-round match should be 1st vs 2nd.
-	poolCounts := []int{2, 4, 8}
+	cases := []struct {
+		nPools       int
+		wantSameRank int
+	}{
+		{nPools: 2, wantSameRank: 0}, // power of two: rule holds
+		{nPools: 3, wantSameRank: 1},
+		{nPools: 4, wantSameRank: 0}, // power of two: rule holds
+		{nPools: 5, wantSameRank: 1},
+		{nPools: 6, wantSameRank: 2},
+		{nPools: 7, wantSameRank: 1},
+		{nPools: 8, wantSameRank: 0}, // power of two: rule holds
+		{nPools: 9, wantSameRank: 1},
+		{nPools: 10, wantSameRank: 2},
+		{nPools: 11, wantSameRank: 3},
+		{nPools: 12, wantSameRank: 4},
+	}
 
-	for _, nPools := range poolCounts {
-		t.Run(fmt.Sprintf("%d_pools_2_winners", nPools), func(t *testing.T) {
-			pools, _ := makePools(nPools)
+	for _, tc := range cases {
+		t.Run(fmt.Sprintf("%d_pools_2_winners", tc.nPools), func(t *testing.T) {
+			pools, _ := makePools(tc.nPools)
 			tree := buildAdjustedTree(pools, 2)
 
 			matches := findLeafMatches(tree)
 			require.NotEmpty(t, matches)
 
+			var sameRank []string
 			for _, m := range matches {
 				topRank := leafRank(m.top)
 				bottomRank := leafRank(m.bottom)
-				assert.NotEqual(t, topRank, bottomRank,
-					"expected 1st-vs-2nd cross-pool match, got %s vs %s", m.top, m.bottom)
+				if topRank != bottomRank {
+					continue
+				}
+				sameRank = append(sameRank, fmt.Sprintf("%s vs %s", m.top, m.bottom))
+				// The violations are 2nd-vs-2nd only: two pool winners meeting
+				// in round 1 would be a strictly worse defect than the one
+				// being pinned here, so fail loudly if that ever appears.
+				assert.NotEqual(t, int64(1), topRank,
+					"two pool WINNERS meeting in round 1 is a new, worse defect: %s vs %s", m.top, m.bottom)
 			}
+
+			assert.Len(t, sameRank, tc.wantSameRank,
+				"same-rank (non-cross-pool) round-1 matches changed for %d pools: %v", tc.nPools, sameRank)
 		})
 	}
 }
@@ -1481,23 +1521,127 @@ func TestTreeAdjustmentRankOrdering(t *testing.T) {
 	}
 }
 
+// TestTreeAdjustmentByeAllocation characterizes WHICH finishing places receive
+// the structural byes, swept over 1..4 qualifiers per pool x 2..12 pools
+// (bc-draw Phase 1; the test previously swept 2 qualifiers x 3 pool counts).
+//
+// wantByeRanks is the multiset of finishing places holding a bye, sorted
+// ascending: [1 1] means two pool winners bye, [1 2 3] means a winner, a 2nd
+// and a 3rd do.
+//
+// CURRENT BEHAVIOUR, DEFECT PINNED. At 1 and 2 qualifiers per pool the intended
+// rule holds and every bye goes to a pool winner. At 3 qualifiers it breaks at
+// 2, 6, 7, 8, 9, 11 and 12 pools, and at 4 qualifiers at 3, 5, 6, 7, 9, 10, 11
+// and 12 pools: a 2nd or 3rd place byes into round 2 while pool WINNERS play a
+// round-1 match. The cause is that treeAdjustment only ever inspects two
+// adjacent nodes, so with more than two ranks in play it cannot see the leaf it
+// would have to swap with.
+//
+// bc-draw R6 replaces this with region-local allocation (seeded pools' winners
+// first, then oversized pools' winners, then remaining winners, only then
+// crossed-in 2nds and 3rds), so THIS TABLE IS EXPECTED TO CHANGE. Until then a
+// change here means the draw moved without the rewrite.
 func TestTreeAdjustmentByeAllocation(t *testing.T) {
-	// For non-power-of-2 finalist counts, byes should go to 1st-place finishers.
-	poolCounts := []int{3, 5, 6}
+	cases := []struct {
+		poolWinners  int
+		nPools       int
+		wantByeRanks []int
+	}{
+		// 1 qualifier per pool: every bye goes to a pool winner (rule holds).
+		{poolWinners: 1, nPools: 2, wantByeRanks: nil},
+		{poolWinners: 1, nPools: 3, wantByeRanks: []int{1}},
+		{poolWinners: 1, nPools: 4, wantByeRanks: nil},
+		{poolWinners: 1, nPools: 5, wantByeRanks: []int{1}},
+		{poolWinners: 1, nPools: 6, wantByeRanks: []int{1, 1}},
+		{poolWinners: 1, nPools: 7, wantByeRanks: []int{1}},
+		{poolWinners: 1, nPools: 8, wantByeRanks: nil},
+		{poolWinners: 1, nPools: 9, wantByeRanks: []int{1}},
+		{poolWinners: 1, nPools: 10, wantByeRanks: []int{1, 1}},
+		{poolWinners: 1, nPools: 11, wantByeRanks: []int{1, 1, 1}},
+		{poolWinners: 1, nPools: 12, wantByeRanks: []int{1, 1, 1, 1}},
 
-	for _, nPools := range poolCounts {
-		t.Run(fmt.Sprintf("%d_pools_2_winners", nPools), func(t *testing.T) {
-			pools, _ := makePools(nPools)
-			tree := buildAdjustedTree(pools, 2)
+		// 2 qualifiers per pool: every bye still goes to a pool winner.
+		{poolWinners: 2, nPools: 2, wantByeRanks: nil},
+		{poolWinners: 2, nPools: 3, wantByeRanks: []int{1, 1}},
+		{poolWinners: 2, nPools: 4, wantByeRanks: nil},
+		{poolWinners: 2, nPools: 5, wantByeRanks: []int{1, 1}},
+		{poolWinners: 2, nPools: 6, wantByeRanks: []int{1, 1, 1, 1}},
+		{poolWinners: 2, nPools: 7, wantByeRanks: []int{1, 1}},
+		{poolWinners: 2, nPools: 8, wantByeRanks: nil},
+		{poolWinners: 2, nPools: 9, wantByeRanks: []int{1, 1}},
+		{poolWinners: 2, nPools: 10, wantByeRanks: []int{1, 1, 1, 1}},
+		{poolWinners: 2, nPools: 11, wantByeRanks: []int{1, 1, 1, 1, 1, 1}},
+		{poolWinners: 2, nPools: 12, wantByeRanks: []int{1, 1, 1, 1, 1, 1, 1, 1}},
+
+		// 3 qualifiers per pool: non-winner byes appear at 2, 6, 7, 8, 9, 11, 12.
+		{poolWinners: 3, nPools: 2, wantByeRanks: []int{1, 3}},
+		{poolWinners: 3, nPools: 3, wantByeRanks: []int{1}},
+		{poolWinners: 3, nPools: 4, wantByeRanks: []int{1, 1, 1, 1}},
+		{poolWinners: 3, nPools: 5, wantByeRanks: []int{1}},
+		{poolWinners: 3, nPools: 6, wantByeRanks: []int{1, 2}},
+		{poolWinners: 3, nPools: 7, wantByeRanks: []int{1, 1, 1, 1, 2}},
+		{poolWinners: 3, nPools: 8, wantByeRanks: []int{1, 1, 1, 1, 1, 2, 2, 3}},
+		{poolWinners: 3, nPools: 9, wantByeRanks: []int{1, 1, 1, 1, 2}},
+		{poolWinners: 3, nPools: 10, wantByeRanks: []int{1, 1}},
+		{poolWinners: 3, nPools: 11, wantByeRanks: []int{2}}, // the ONLY bye goes to a 2nd place
+		{poolWinners: 3, nPools: 12, wantByeRanks: []int{1, 1, 1, 2}},
+
+		// 4 qualifiers per pool: non-winner byes at 3, 5, 6, 7, 9, 10, 11, 12.
+		{poolWinners: 4, nPools: 2, wantByeRanks: nil},
+		{poolWinners: 4, nPools: 3, wantByeRanks: []int{1, 1, 2, 3}},
+		{poolWinners: 4, nPools: 4, wantByeRanks: nil},
+		{poolWinners: 4, nPools: 5, wantByeRanks: []int{1, 1, 2, 3}},
+		{poolWinners: 4, nPools: 6, wantByeRanks: []int{1, 1, 1, 1, 2, 2, 3, 3}},
+		{poolWinners: 4, nPools: 7, wantByeRanks: []int{1, 1, 2, 3}},
+		{poolWinners: 4, nPools: 8, wantByeRanks: nil},
+		{poolWinners: 4, nPools: 9, wantByeRanks: []int{1, 1, 2, 3}},
+		{poolWinners: 4, nPools: 10, wantByeRanks: []int{1, 1, 1, 1, 2, 2, 3, 3}},
+		{poolWinners: 4, nPools: 11, wantByeRanks: []int{1, 1, 1, 1, 1, 1, 2, 2, 2, 3, 3, 3}},
+		{poolWinners: 4, nPools: 12, wantByeRanks: []int{1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3}},
+	}
+
+	for _, tc := range cases {
+		t.Run(fmt.Sprintf("%d_pools_%d_winners", tc.nPools, tc.poolWinners), func(t *testing.T) {
+			pools, _ := makePools(tc.nPools)
+			tree := buildAdjustedTree(pools, tc.poolWinners)
 
 			byes := findByeLeaves(tree)
-			require.NotEmptyf(t, byes, "expected byes for %d pools (non-power-of-2 finalists)", nPools)
-
+			gotRanks := make([]int, 0, len(byes))
 			for _, b := range byes {
-				rank := leafRank(b)
-				assert.Equal(t, int64(1), rank,
-					"bye should go to a 1st-place finisher, got %s (rank %d)", b, rank)
+				gotRanks = append(gotRanks, int(leafRank(b)))
 			}
+			sort.Ints(gotRanks)
+
+			want := tc.wantByeRanks
+			if want == nil {
+				want = []int{}
+			}
+			assert.Equal(t, want, gotRanks,
+				"bye allocation changed for %d pools x %d qualifiers (byes were %v)", tc.nPools, tc.poolWinners, byes)
+
+			// Where a non-winner byes, a pool WINNER is simultaneously made to
+			// play a round-1 match. Assert that explicitly: it is the half of
+			// the defect an operator actually notices, and R6 removes it.
+			nonWinnerBye := false
+			for _, r := range gotRanks {
+				if r != 1 {
+					nonWinnerBye = true
+					break
+				}
+			}
+			if !nonWinnerBye {
+				return
+			}
+			winnerInRound1 := false
+			for _, m := range findLeafMatches(tree) {
+				if leafRank(m.top) == 1 || leafRank(m.bottom) == 1 {
+					winnerInRound1 = true
+					break
+				}
+			}
+			assert.True(t, winnerInRound1,
+				"a non-winner holds a bye at %d pools x %d qualifiers, so a pool winner must be playing round 1 (R6 violation being pinned)",
+				tc.nPools, tc.poolWinners)
 		})
 	}
 }

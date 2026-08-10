@@ -106,76 +106,17 @@ func enginePlayoffsLeaves(t *testing.T, players []domain.Player) []string {
 	return leaves
 }
 
-func excelMixedLeaves(pools []helper.Pool, poolWinners int) []string {
-	// One shiaijo, matching the single-court competition engineMixedLeaves
-	// builds below: the draw is court-aware, so the two sides of an identity
-	// check have to agree on the court count as well as the pools.
-	return helper.TreeToLeafArray(helper.BuildKnockoutDraw(pools, poolWinners, 1).Root)
-}
-
-// engineMixedLeaves runs the REAL engine path (StartCompetition on a mixed
-// comp) and extracts the preview bracket's round-0 leaf ordering. This
-// exercises generatePoolPreviewBracket end-to-end.
-func engineMixedLeaves(t *testing.T, pools []helper.Pool, poolWinners int) []string {
-	t.Helper()
-	eng, store, _ := setupTestEngine(t)
-
-	compID := fmt.Sprintf("identity-mixed-%d-%d", len(pools), poolWinners)
-	// PoolSize == poolWinners so each pool is populated with exactly PoolWinners
-	// participants, a valid mixed config (every pool can supply PoolWinners
-	// finishers). This still produces len(pools) pools, so the preview bracket's
-	// placeholder topology ("Pool A-1st" …) is identical to the Excel reference.
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:           compID,
-		Format:       state.CompFormatMixed,
-		Kind:         "individual",
-		PoolSize:     poolWinners,
-		PoolSizeMode: "min",
-		PoolWinners:  poolWinners,
-		RoundRobin:   true,
-		Courts:       []string{"A"},
-		StartTime:    "09:00",
-		Status:       state.CompStatusSetup,
-	}))
-
-	// Populate PoolWinners participants per pool so every pool can supply its
-	// finishers (and pools get created).
-	names := make([]string, len(pools)*poolWinners)
-	for i := range names {
-		names[i] = fmt.Sprintf("P%02d", i+1)
-	}
-	players := make([]domain.Player, len(names))
-	for i, n := range names {
-		players[i] = domain.Player{Name: n, Dojo: "D"}
-	}
-	require.NoError(t, store.SaveParticipants(compID, players))
-	require.NoError(t, eng.StartCompetition(compID))
-
-	bracket, err := store.LoadBracket(compID)
-	require.NoError(t, err)
-	require.NotNil(t, bracket)
-	require.NotEmpty(t, bracket.Rounds)
-
-	totalFinalists := len(pools) * poolWinners
-	pow2 := helper.NextPow2(totalFinalists)
-	leaves := make([]string, pow2)
-	for i, m := range bracket.Rounds[0] {
-		sideA, sideB := m.SideA, m.SideB
-		if strings.HasPrefix(sideA, "Winner of") {
-			sideA = ""
-		}
-		if strings.HasPrefix(sideB, "Winner of") {
-			sideB = ""
-		}
-		leaves[i*2] = sideA
-		leaves[i*2+1] = sideB
-	}
-	return leaves
-}
-
 // TestBracketIdentity_PurePlayoffs verifies that the engine's generatePlayoffs
 // path produces leaf arrays identical to the Excel create-playoffs reference
 // for various roster sizes.
+//
+// SCOPE, so this is not mistaken for proof about the printed workbook: both
+// sides here are computed, and excelPlayoffsLeaves is a transcription of
+// cmd/create-playoffs.go's INPUT tree, not a rendered sheet. What it pins is
+// that the engine feeds the elimination renderer the same tree the CLI does.
+// The artifact-level equivalent - render a workbook and read the sheets back -
+// is TestExcelWorkbookMatchesEngineBracket_Mixed (excel_draw_parity_test.go),
+// which covers the pool-fed draw.
 func TestBracketIdentity_PurePlayoffs(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -401,48 +342,10 @@ func TestBracketDisplayMetadata_Feeders(t *testing.T) {
 	}
 }
 
-// TestBracketIdentity_MixedComp verifies that the engine's pool-preview path
-// produces leaf arrays identical to the Excel create-pools reference.
-func TestBracketIdentity_MixedComp(t *testing.T) {
-	cases := []struct {
-		name        string
-		poolNames   []string
-		poolWinners int
-	}{
-		{"2 pools 2 winners", []string{"Pool A", "Pool B"}, 2},
-		{"3 pools 2 winners", []string{"Pool A", "Pool B", "Pool C"}, 2},
-		{"4 pools 2 winners", []string{"Pool A", "Pool B", "Pool C", "Pool D"}, 2},
-		{"4 pools 3 winners", []string{"Pool A", "Pool B", "Pool C", "Pool D"}, 3},
-		{"6 pools 2 winners", []string{"Pool A", "Pool B", "Pool C", "Pool D", "Pool E", "Pool F"}, 2},
-	}
-
-	for _, tt := range cases {
-		t.Run(tt.name, func(t *testing.T) {
-			pools := make([]helper.Pool, len(tt.poolNames))
-			for i, name := range tt.poolNames {
-				pools[i] = helper.Pool{PoolName: name}
-			}
-
-			excelLeaves := excelMixedLeaves(pools, tt.poolWinners)
-			engineLeaves := engineMixedLeaves(t, pools, tt.poolWinners)
-
-			require.Equal(t, len(excelLeaves), len(engineLeaves),
-				"leaf array lengths must match")
-			assert.Equal(t, excelLeaves, engineLeaves,
-				"engine leaves must be identical to Excel leaves")
-
-			totalFinalists := len(tt.poolNames) * tt.poolWinners
-			assert.Equal(t, helper.NextPow2(totalFinalists), len(engineLeaves),
-				"output length must be NextPow2(finalists)")
-
-			realCount := 0
-			for _, v := range engineLeaves {
-				if v != "" {
-					realCount++
-				}
-			}
-			assert.Equal(t, totalFinalists, realCount,
-				"non-empty slots must equal total finalists")
-		})
-	}
-}
+// The mixed (pool-fed) identity check lives in excel_draw_parity_test.go.
+// TestBracketIdentity_MixedComp used to sit here and compared the engine against
+// excelMixedLeaves - BuildKnockoutDraw -> TreeToLeafArray written out inside this
+// file, i.e. the call the ENGINE makes, labelled "Excel". It rendered nothing, so
+// it could not see a workbook that disagreed with the bracket.
+// TestExcelWorkbookMatchesEngineBracket_Mixed renders the workbook and reads the
+// Tree sheets back instead.

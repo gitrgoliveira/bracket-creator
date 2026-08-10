@@ -320,8 +320,12 @@ func AddPoolsToTree(f *excelize.File, sheetName string, pools []Pool, poolCoords
 // paths. That contract is verified by TestMatchNumberingParity_ExcelVsWeb in
 // internal/engine, which builds both numberings from identical entrant sets
 // (including bye-producing, non-power-of-two sizes) and asserts the sequences match
-// position-for-position. The printed Excel sheet is authoritative; if they ever
-// diverge, the web path must be corrected to match this one.
+// position-for-position, and by TestExcelWorkbookMatchesEngineBracket_Mixed, which
+// covers the pool-fed draw by reading the numbers back off a RENDERED workbook.
+// The printed Excel sheet is authoritative; if they ever diverge, the web path must
+// be corrected to match this one (it already had to be: the walk here numbers each
+// effective round left to right across the whole tree, and a pool-fed draw puts
+// matches from two pow2 rounds in one effective round).
 func AssignMatchNumbers(eliminationMatchRounds [][]*Node) {
 	var matchNum int64 = 1
 	for _, round := range eliminationMatchRounds {

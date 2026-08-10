@@ -693,14 +693,23 @@ function buildDisplayModel(rounds) {
       });
       feedersById[m.id] = resolvedFeeders;
     });
-    // Match numbers: earliest round first (highest displayRound), then by position
-    // extracted from the id suffix: mirrors the Excel FillInMatches order so
-    // card labels ("M1", "M2") match what referees see on the printed sheet.
+    // Match numbers: earliest round first (highest displayRound), then LEFT TO
+    // RIGHT across the whole tree: mirrors the Excel FillInMatches order so card
+    // labels ("M1", "M2") match what referees see on the printed sheet.
+    //
+    // "Left to right" is the match's leftmost first-round slot, pos<<(roundIndex+1),
+    // NOT the position alone: one effective round can hold matches from several
+    // backend rounds at once (a shallow region's first bout shares a displayRound
+    // with a deep region's second bout), and position means a different span in
+    // each, so ordering on it interleaves them wrongly and the card number stops
+    // matching the printed sheet. Equal-by-contract with the Go walk in
+    // engine.assignBracketMatchNumbers, which sorts on the same key.
     // id format: "m-r{ROUND}-{POS}": last segment is the 0-based within-round index.
     const posFromId = (id) => { const p = id.split("-"); return parseInt(p[p.length - 1], 10) || 0; };
+    const leafSlotOf = (m) => posFromId(m.id) * Math.pow(2, (m.roundIndex || 0) + 1);
     const numbered = [...real].sort((a, b) => {
       const dr = b.displayRound - a.displayRound;
-      return dr !== 0 ? dr : posFromId(a.id) - posFromId(b.id);
+      return dr !== 0 ? dr : leafSlotOf(a) - leafSlotOf(b);
     });
     const matchNumById = {};
     numbered.forEach((m, i) => { matchNumById[m.id] = i + 1; });

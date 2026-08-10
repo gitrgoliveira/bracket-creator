@@ -1,0 +1,623 @@
+package engine
+
+import (
+	"bytes"
+	"fmt"
+	"slices"
+	"strconv"
+	"strings"
+	"testing"
+
+	excelize "github.com/xuri/excelize/v2"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
+	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// Excel/engine draw parity, measured on the ARTIFACTS (bc-draw Phase 5).
+//
+// This replaces TestBracketIdentity_MixedComp, which claimed to prove the
+// printed workbook and the live bracket describe one draw and did not: it
+// compared the engine against excelMixedLeaves, a MODEL of the Excel path
+// written inside the test file (BuildKnockoutDraw -> TreeToLeafArray, which is
+// literally what the ENGINE calls). Nothing in it rendered a workbook, so the
+// whole RenderKnockoutPages -> SubdivideRegions -> RenderTreePages ->
+// PrintLeafNodes -> FillInMatches path was unmeasured, and the two real
+// artifacts could (and in Phase 3 did) disagree while it stayed green.
+//
+// What runs here instead:
+//
+//	engine side  Engine.StartCompetition -> bracket.json (store.LoadBracket)
+//	excel side   Engine.ExportCompetitionXlsx -> real .xlsx bytes, reopened with
+//	             excelize and scanned cell by cell
+//
+// Both are production entry points and neither is reimplemented. The only thing
+// they share is the competition on disk; the Excel side re-derives its draw
+// through EliminationDraw exactly as an operator's export does, so a
+// re-derivation that no longer matches the persisted bracket shows up here.
+//
+// The read-back is modelled on internal/helper/excel_pages_golden_test.go,
+// which scans rendered "Tree N" sheets rather than recomputing them. It is
+// DUPLICATED rather than shared, deliberately: that reader lives in
+// `package helper` test files, which Go cannot import from `package engine`,
+// and promoting it would mean a non-test package that no production code uses
+// (the coverage gate then polices it, and it could not import helper for
+// SheetTree/SheetData without an import cycle back into helper's own in-package
+// tests). The duplication is also narrow - this reader measures cell GEOMETRY
+// and junction numbers, which the golden reader does not need - and it cannot
+// rot silently, because the first check in assertWorkbookMatchesBracket fails
+// whenever the scan stops finding exactly what the bracket holds.
+
+// treePageFirstRow is the sheet row PrintLeafNodes starts a page at
+// (RenderTreePages passes TreeTitleRows+1).
+const treePageFirstRow = helper.TreeTitleRows + 1
+
+// renderedNode is one thing found on a rendered tree page, located by inverting
+// PrintLeafNodes' placement.
+//
+// PrintLeafNodes walks the page subtree with (startCol, startRow, depth),
+// halving the row span and stepping the column left by 2 per level, so the node
+// at LEVEL l (0 = page root) and INDEX i within that level always lands at
+//
+//	col = 2*(depth-l) + 1
+//	row = treePageFirstRow + i*2^(depth-l) + 2^(depth-l-1)
+//
+// for both kinds of content: a leaf writes its label there (writeTreeValue) and
+// an internal node's junction connector sits there (CreateTreeBracket's middle
+// cell, which is where FillInMatches later writes the match number). Inverting
+// that pair of formulas turns a rendered sheet back into a tree, which is what
+// makes "who plays whom, and who byes" readable off the workbook instead of
+// recomputed from the code that drew it.
+type renderedNode struct {
+	level int
+	index int
+	cell  string
+	// label is set for a leaf (the entrant printed there), number for a
+	// junction (the printed "Match N"). Exactly one is set.
+	label  string
+	number int
+}
+
+// renderedPage is one "Tree N" sheet, read back.
+type renderedPage struct {
+	sheet string
+	// court is the shiaijo letter parsed out of the page's real title formula
+	// (SetTreeSheetTitle writes IF(data!$B$1="","Shiaijo X",…)), not recomputed.
+	court string
+	// depth is the page's bracket depth, taken from the print area the renderer
+	// declared for it (SetPrintArea's last column is TreePageLastCol = 2*depth+1).
+	depth int
+	// leaves are in render order: top to bottom on the sheet, which is the
+	// tree's left-to-right leaf order and the order an operator reads.
+	leaves    []renderedNode
+	junctions []renderedNode
+}
+
+// leafLabels returns the page's entrant labels in render order.
+func (p renderedPage) leafLabels() []string {
+	out := make([]string, len(p.leaves))
+	for i, l := range p.leaves {
+		out[i] = l.label
+	}
+	return out
+}
+
+// readRenderedTreePages reopens exported workbook bytes and reads every tree
+// page back out of it. Nothing here is recomputed from the draw: sheet list,
+// title, print area and cell contents all come from the file.
+func readRenderedTreePages(t *testing.T, raw []byte) []renderedPage {
+	t.Helper()
+	f, err := excelize.OpenReader(bytes.NewReader(raw))
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+
+	printAreas := map[string]string{}
+	for _, dn := range f.GetDefinedName() {
+		if dn.Name == "_xlnm.Print_Area" {
+			printAreas[dn.Scope] = dn.RefersTo
+		}
+	}
+
+	var pages []renderedPage
+	for _, sheet := range treeSheetsInPageOrder(f) {
+		area, ok := printAreas[sheet]
+		require.Truef(t, ok, "%s must declare a print area (SetTreePageLayout)", sheet)
+		depth := treePageDepthFromPrintArea(t, area)
+
+		page := renderedPage{sheet: sheet, court: treePageCourt(t, f, sheet), depth: depth}
+		rows, err := f.GetRows(sheet)
+		require.NoError(t, err)
+		for r, row := range rows {
+			for c, value := range row {
+				col, rowNum := c+1, r+1
+				// Every value a tree page carries sits in an ODD column at or
+				// right of TreeLabelCol: leaves at 2d+1 (writeTreeValue) and
+				// junction numbers at 2d+1 (CreateTreeBracket's middle cell).
+				// Column A holds only the title and the roster overlay, and the
+				// even columns only bracket line styling.
+				if col < helper.TreeLabelCol || col%2 == 0 {
+					continue
+				}
+				cell, err := excelize.CoordinatesToCellName(col, rowNum)
+				require.NoError(t, err)
+
+				node, ok := treeNodeAt(depth, rowNum, col)
+				if !ok {
+					continue
+				}
+				node.cell = cell
+
+				if n, err := strconv.Atoi(value); err == nil {
+					// A junction: FillInMatches wrote the printed match number.
+					// A bare integer is never an entrant label - a pool-fed leaf
+					// reads "Pool X-Nth" - so the two kinds cannot be confused.
+					node.number = n
+					page.junctions = append(page.junctions, node)
+					continue
+				}
+				label := value
+				if label == "" {
+					// A leaf whose cell is a live cross-reference:
+					// CONCATENATE("Pool A-1st ",'Pool Matches'!G19). The label
+					// is the literal inside the formula.
+					formula, ferr := f.GetCellFormula(sheet, cell)
+					require.NoError(t, ferr)
+					label = concatenatedLeafLabel(formula)
+				}
+				if label == "" {
+					continue
+				}
+				node.label = label
+				page.leaves = append(page.leaves, node)
+			}
+		}
+		pages = append(pages, page)
+	}
+	return pages
+}
+
+// treeSheetsInPageOrder returns the rendered page sheets ordered by page number.
+func treeSheetsInPageOrder(f *excelize.File) []string {
+	type page struct {
+		num  int
+		name string
+	}
+	var found []page
+	for _, name := range f.GetSheetList() {
+		rest, ok := strings.CutPrefix(name, "Tree ")
+		if !ok {
+			continue
+		}
+		num, err := strconv.Atoi(rest)
+		if err != nil {
+			continue
+		}
+		found = append(found, page{num: num, name: name})
+	}
+	slices.SortFunc(found, func(a, b page) int { return a.num - b.num })
+	names := make([]string, len(found))
+	for i, p := range found {
+		names[i] = p.name
+	}
+	return names
+}
+
+// treePageCourt parses the shiaijo letter out of the page's title formula.
+func treePageCourt(t *testing.T, f *excelize.File, sheet string) string {
+	t.Helper()
+	formula, err := f.GetCellFormula(sheet, "A1")
+	require.NoError(t, err)
+	_, after, ok := strings.Cut(formula, `"Shiaijo `)
+	require.Truef(t, ok, "%s title formula %q must name a shiaijo", sheet, formula)
+	court, _, ok := strings.Cut(after, `"`)
+	require.Truef(t, ok, "%s title formula %q must name a shiaijo", sheet, formula)
+	return court
+}
+
+// treePageDepthFromPrintArea recovers the page's bracket depth from the print
+// area the renderer declared: SetTreePageLayout bounds the page at
+// TreePageLastCol(depth) = 2*depth+1.
+func treePageDepthFromPrintArea(t *testing.T, refersTo string) int {
+	t.Helper()
+	_, end, ok := strings.Cut(refersTo, ":")
+	require.Truef(t, ok, "print area %q must be a range", refersTo)
+	parts := strings.Split(end, "$")
+	require.Lenf(t, parts, 3, "print area end %q must be $COL$ROW", end)
+	lastCol, err := excelize.ColumnNameToNumber(parts[1])
+	require.NoError(t, err)
+	require.Truef(t, lastCol%2 == 1, "print area last column %d must be TreePageLastCol (odd)", lastCol)
+	return (lastCol - 1) / 2
+}
+
+// treeNodeAt inverts PrintLeafNodes' placement for one cell. ok is false when
+// the cell is not on a node position at all (nothing the renderer writes ever
+// lands off-grid, so a false here means the geometry moved and the caller's
+// completeness check will say so).
+func treeNodeAt(depth, row, col int) (renderedNode, bool) {
+	d := (col - 1) / 2 // the depth argument PrintLeafNodes held at this column
+	if d < 1 || d > depth {
+		return renderedNode{}, false
+	}
+	span := 1 << d         // rows this node's subtree occupies
+	offset := 1 << (d - 1) // rows from the subtree's top to its connector row
+	rel := row - treePageFirstRow - offset
+	if rel < 0 || rel%span != 0 {
+		return renderedNode{}, false
+	}
+	return renderedNode{level: depth - d, index: rel / span}, true
+}
+
+// concatenatedLeafLabel extracts the entrant label from the live cross-reference
+// formula writeTreeValue emits, or "" when the formula is not one.
+func concatenatedLeafLabel(formula string) string {
+	rest, ok := strings.CutPrefix(formula, `CONCATENATE("`)
+	if !ok {
+		return ""
+	}
+	label, _, ok := strings.Cut(rest, `",`)
+	if !ok {
+		return ""
+	}
+	// writeTreeValue joins the label and the reference with a single space.
+	return strings.TrimSuffix(label, " ")
+}
+
+// isAncestor reports whether node (level, index) is an ancestor of (lower,
+// lowerIndex) in the page's complete-binary-tree coordinate system.
+func isAncestor(level, index, lower, lowerIndex int) bool {
+	if lower <= level {
+		return false
+	}
+	return lowerIndex>>(lower-level) == index
+}
+
+// printedBouts returns, for every junction printed anywhere in the workbook, the
+// printed match number and the entrant labels that reach it. A page is a genuine
+// subtree (R3/R8), so a junction's entrants are all on its own page.
+//
+// Matches ABOVE the page roots (the half-finals and the final on a multi-page
+// draw) are on no tree page at all - they live on the Elimination Matches sheet -
+// so they are absent here by construction, and the caller accounts for them.
+func printedBouts(t *testing.T, pages []renderedPage) map[int][]string {
+	t.Helper()
+	bouts := map[int][]string{}
+	for _, page := range pages {
+		for _, j := range page.junctions {
+			var leaves []string
+			for _, l := range page.leaves {
+				if isAncestor(j.level, j.index, l.level, l.index) {
+					leaves = append(leaves, l.label)
+				}
+			}
+			require.NotEmptyf(t, leaves, "%s!%s: printed match %d has no entrants under it",
+				page.sheet, j.cell, j.number)
+			_, dup := bouts[j.number]
+			require.Falsef(t, dup, "%s!%s: match number %d printed twice", page.sheet, j.cell, j.number)
+			slices.Sort(leaves)
+			bouts[j.number] = leaves
+		}
+	}
+	return bouts
+}
+
+// bracketMatchLeafSets returns each bracket match's entrant set (sorted), walking
+// the real feeder graph: a match's entrants are its own resolved sides plus every
+// entrant of its real feeders.
+func bracketMatchLeafSets(bracket *state.Bracket) map[string][]string {
+	byID := map[string]*state.BracketMatch{}
+	for r := range bracket.Rounds {
+		for i := range bracket.Rounds[r] {
+			m := &bracket.Rounds[r][i]
+			byID[m.ID] = m
+		}
+	}
+	cache := map[string][]string{}
+	var leavesOf func(m *state.BracketMatch) []string
+	leavesOf = func(m *state.BracketMatch) []string {
+		if cached, ok := cache[m.ID]; ok {
+			return cached
+		}
+		var acc []string
+		for _, side := range []string{m.SideA, m.SideB} {
+			if side != "" && !strings.HasPrefix(side, "Winner of") {
+				acc = append(acc, side)
+			}
+		}
+		for _, fid := range m.Feeders {
+			if fid == "" {
+				continue
+			}
+			if f, ok := byID[fid]; ok {
+				acc = append(acc, leavesOf(f)...)
+			}
+		}
+		cache[m.ID] = acc
+		return acc
+	}
+
+	out := map[string][]string{}
+	for r := range bracket.Rounds {
+		for i := range bracket.Rounds[r] {
+			m := &bracket.Rounds[r][i]
+			leaves := slices.Clone(leavesOf(m))
+			slices.Sort(leaves)
+			out[m.ID] = leaves
+		}
+	}
+	return out
+}
+
+// engineEntrant is one competitor/placeholder in the persisted bracket.
+type engineEntrant struct {
+	label string
+	// firstBoutDisplayRound is the effective round of the entrant's first REAL
+	// bout. An entrant with no bye meets someone in the deepest round; every
+	// round it byes moves this one closer to the final, which is exactly what a
+	// bye is and what the printed page shows by indenting the name a column right.
+	firstBoutDisplayRound int
+}
+
+// engineEntrants reads the persisted bracket's entrants in draw order (the
+// first round's slots, left to right).
+func engineEntrants(t *testing.T, bracket *state.Bracket) []engineEntrant {
+	t.Helper()
+	require.NotEmpty(t, bracket.Rounds)
+
+	var out []engineEntrant
+	byLabel := map[string]int{}
+	for _, m := range bracket.Rounds[0] {
+		for _, side := range []string{m.SideA, m.SideB} {
+			if side == "" {
+				continue
+			}
+			_, seen := byLabel[side]
+			require.Falsef(t, seen, "entrant %q appears twice in the first round", side)
+			byLabel[side] = len(out)
+			out = append(out, engineEntrant{label: side})
+		}
+	}
+
+	for ri, round := range bracket.Rounds {
+		for _, m := range round {
+			if m.Hidden {
+				continue
+			}
+			for _, side := range []string{m.SideA, m.SideB} {
+				idx, ok := byLabel[side]
+				if !ok || out[idx].firstBoutDisplayRound != 0 {
+					continue
+				}
+				require.NotZerof(t, m.DisplayRound,
+					"real match %s (round %d) must carry a DisplayRound", m.ID, ri)
+				out[idx].firstBoutDisplayRound = m.DisplayRound
+			}
+		}
+	}
+	for _, e := range out {
+		require.NotZerof(t, e.firstBoutDisplayRound, "entrant %q never reaches a real bout", e.label)
+	}
+	return out
+}
+
+// assertWorkbookMatchesBracket is the whole parity check for one competition:
+// the workbook Engine.ExportCompetitionXlsx produced against the bracket
+// Engine.StartCompetition persisted.
+func assertWorkbookMatchesBracket(t *testing.T, eng *Engine, store *state.Store, compID string) {
+	t.Helper()
+
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.NotNil(t, bracket)
+
+	raw, err := eng.ExportCompetitionXlsx(compID)
+	require.NoError(t, err)
+	pages := readRenderedTreePages(t, raw)
+	require.NotEmpty(t, pages, "the workbook must carry at least one tree page")
+
+	entrants := engineEntrants(t, bracket)
+
+	// 1. The instrument itself: the scan must find exactly the draw's entrants.
+	//    Without this a reader that silently stopped matching cells would make
+	//    every comparison below trivially true.
+	var printedLabels []string
+	for _, page := range pages {
+		printedLabels = append(printedLabels, page.leafLabels()...)
+	}
+	engineLabels := make([]string, len(entrants))
+	for i, e := range entrants {
+		engineLabels[i] = e.label
+	}
+	require.ElementsMatch(t, engineLabels, printedLabels,
+		"the entrants scanned off the rendered pages must be exactly the bracket's entrants")
+
+	// 2. ORDER, page by page: the pages, read top to bottom in page order,
+	//    reproduce the bracket's first-round slot order.
+	assert.Equal(t, engineLabels, printedLabels,
+		"printed entrant order must equal the bracket's first-round order")
+
+	// 3. Per-shiaijo grouping: the shiaijo a page is TITLED for, taken from its
+	//    own title formula, against the shiaijo the bracket schedules the bouts
+	//    on. Every bout drawn entirely from one shiaijo's pages must run on that
+	//    shiaijo - which is the "a page really holds that shiaijo's region"
+	//    claim, made on both sides at once and including the hidden bye bouts
+	//    that no junction is printed for. A bout whose entrants span two shiaijo
+	//    belongs to neither page (it is printed on the Elimination Matches sheet,
+	//    and the bracket puts it on the leftmost region's court by design), so
+	//    those are excluded rather than asserted about.
+	leafSets := bracketMatchLeafSets(bracket)
+	courtOfEntrant := map[string]string{}
+	pagesPerCourt := map[string]int{}
+	for _, page := range pages {
+		pagesPerCourt[page.court]++
+		for _, l := range page.leaves {
+			courtOfEntrant[l.label] = page.court
+		}
+	}
+	for _, round := range bracket.Rounds {
+		for _, m := range round {
+			var courts []string
+			for _, label := range leafSets[m.ID] {
+				if c := courtOfEntrant[label]; !slices.Contains(courts, c) {
+					courts = append(courts, c)
+				}
+			}
+			if len(courts) != 1 {
+				continue
+			}
+			assert.Equalf(t, courts[0], m.Court,
+				"bout %s draws only from the pages titled Shiaijo %s (%v) but the bracket schedules it on shiaijo %q",
+				m.ID, courts[0], leafSets[m.ID], m.Court)
+		}
+	}
+	// R8: the page count is a whole number of pages per shiaijo.
+	var perCourt []int
+	for _, n := range pagesPerCourt {
+		perCourt = append(perCourt, n)
+	}
+	slices.Sort(perCourt)
+	assert.Equalf(t, perCourt[0], perCourt[len(perCourt)-1],
+		"every shiaijo must get the same page count (R8), got %v", pagesPerCourt)
+
+	// 4. Bouts: every junction printed on a page names the same match number and
+	//    the same entrants as the bracket's match. This is where a bye that fell
+	//    to the wrong occupant shows up - the bye's entrant set differs from the
+	//    pairing that replaced it.
+	engineBouts := map[int][]string{}
+	for _, round := range bracket.Rounds {
+		for _, m := range round {
+			if m.Hidden {
+				continue
+			}
+			require.NotZerof(t, m.MatchNumber, "real match %s must be numbered", m.ID)
+			engineBouts[m.MatchNumber] = leafSets[m.ID]
+		}
+	}
+	printed := printedBouts(t, pages)
+	for num, leaves := range printed {
+		engineLeaves, ok := engineBouts[num]
+		require.Truef(t, ok, "printed Match %d (entrants %v) has no bracket match", num, leaves)
+		assert.Equalf(t, engineLeaves, leaves,
+			"Match %d: the bracket says %v, the workbook prints %v", num, engineLeaves, leaves)
+	}
+
+	// The bouts a tree page cannot show are exactly the ones above the page
+	// roots (they belong to no single shiaijo); there are len(pages)-1 of them
+	// and, because both numbering walks run deepest round first, they are the
+	// last numbers.
+	assert.Equalf(t, len(engineBouts)-(len(pages)-1), len(printed),
+		"every bout except the %d above the page roots must be printed", len(pages)-1)
+	for num := 1; num <= len(printed); num++ {
+		assert.Containsf(t, printed, num, "Match %d is on no tree page", num)
+	}
+
+	// 5. Byes: an entrant that byes is drawn one bracket column further right
+	//    per round skipped, so its printed column says which effective round it
+	//    enters at. Converted to the bracket's DisplayRound scale it must equal
+	//    the round of the entrant's first real bout. The offset between the two
+	//    scales is the number of rounds above the page roots, so it is the SAME
+	//    for every entrant on every page - deriving it rather than assuming it
+	//    keeps the check on the artifacts, and its uniformity is itself R8.
+	firstDR := map[string]int{}
+	for _, e := range entrants {
+		firstDR[e.label] = e.firstBoutDisplayRound
+	}
+	offset, offsetFrom := -1, ""
+	for _, page := range pages {
+		for _, l := range page.leaves {
+			// The entrant's first bout is its parent junction, one level up,
+			// whose round counted from the page's own final is exactly the
+			// leaf's level. Level 0 (a page that is a lone entrant) means the
+			// first bout is above the page entirely.
+			entryRound := l.level
+			got := firstDR[l.label] - entryRound
+			if offset < 0 {
+				offset, offsetFrom = got, fmt.Sprintf("%s!%s (%s)", page.sheet, l.cell, l.label)
+				continue
+			}
+			assert.Equalf(t, offset, got,
+				"%s!%s: %q is printed entering at page round %d (bracket DisplayRound %d), "+
+					"which is %d round(s) off %s - its bye depth differs between the workbook and the bracket",
+				page.sheet, l.cell, l.label, entryRound, firstDR[l.label], got-offset, offsetFrom)
+		}
+	}
+}
+
+// mixedParityRoster builds a roster that CreatePools(roster, 4, max) splits into
+// exactly numPools pools of MIXED size (4 and 3 players), which is what R6's
+// oversized-pool bye criterion keys on: with uniform pools that criterion can
+// never fire and a bye divergence hides. Same derivation as the helper golden
+// files' drawGoldenRosterSize, restated here because it lives in a _test.go file
+// of another package.
+func mixedParityRoster(numPools int) []domain.Player {
+	extra := max(numPools-3, 1)
+	size := 3*numPools + extra
+	players := make([]domain.Player, size)
+	for i := range players {
+		players[i] = domain.Player{
+			// A unique dojo per player keeps CreatePools' conflict avoidance
+			// out of the picture, so pool composition is deterministic.
+			Name: fmt.Sprintf("P%03d", i+1),
+			Dojo: fmt.Sprintf("Dojo %03d", i+1),
+		}
+	}
+	return players
+}
+
+// TestExcelWorkbookMatchesEngineBracket_Mixed sweeps pool-fed knockout draws and
+// asserts the exported workbook and the persisted bracket describe the same
+// draw: same entrants in the same order page by page, the same shiaijo per page,
+// the same bouts under the same match numbers, and the same byes.
+func TestExcelWorkbookMatchesEngineBracket_Mixed(t *testing.T) {
+	// Unbalanced pool counts are in deliberately: 3, 6 and 7 pools are where a
+	// court holds fewer pools than its partner, which is where region sizes go
+	// odd and byes appear, and they were exactly what the modelled test covered
+	// worst.
+	poolCounts := []int{2, 3, 4, 6, 7, 8}
+	poolWinners := []int{1, 2, 3}
+	courtCounts := []int{1, 2, 4}
+
+	for _, numPools := range poolCounts {
+		for _, winners := range poolWinners {
+			for _, numCourts := range courtCounts {
+				name := fmt.Sprintf("%dpools_%dqual_%dshiaijo", numPools, winners, numCourts)
+				t.Run(name, func(t *testing.T) {
+					eng, store, _ := setupTestEngine(t)
+					compID := fmt.Sprintf("parity-%d-%d-%d", numPools, winners, numCourts)
+
+					// Court names ARE the shiaijo labels the tree pages print
+					// (helper.CourtLabel), so page title and match court compare
+					// directly.
+					courts := make([]string, numCourts)
+					for i := range courts {
+						courts[i] = helper.CourtLabel(i)
+					}
+
+					require.NoError(t, store.SaveCompetition(&state.Competition{
+						ID:           compID,
+						Name:         "Parity",
+						Format:       state.CompFormatMixed,
+						Kind:         "individual",
+						PoolSize:     4,
+						PoolSizeMode: "max",
+						PoolWinners:  winners,
+						RoundRobin:   true,
+						Courts:       courts,
+						StartTime:    "09:00",
+						Status:       state.CompStatusSetup,
+					}))
+					require.NoError(t, store.SaveParticipants(compID, mixedParityRoster(numPools)))
+					require.NoError(t, eng.StartCompetition(compID))
+
+					pools, err := store.LoadPools(compID)
+					require.NoError(t, err)
+					require.Lenf(t, pools, numPools, "the sweep case must actually produce %d pools", numPools)
+
+					assertWorkbookMatchesBracket(t, eng, store, compID)
+				})
+			}
+		}
+	}
+}

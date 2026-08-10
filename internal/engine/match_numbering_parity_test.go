@@ -149,6 +149,14 @@ func engineNumberBySignature(t *testing.T, players []domain.Player) map[string]i
 // pipeline), then every bout is matched by its leaf-descendant set and the assigned
 // numbers are compared. If a future change drifts the web path, this test fails and
 // the web path must be corrected to match the authoritative Excel numbering.
+//
+// SCOPE. Two things this does NOT do, both covered by
+// TestExcelWorkbookMatchesEngineBracket_Mixed (excel_draw_parity_test.go): it never
+// opens a workbook (it drives the real numbering function, but its round
+// construction is transcribed from cmd/create-playoffs.go rather than read off a
+// rendered sheet), and it only covers PLAYOFFS brackets. The pool-fed draw, where
+// one effective round can hold matches from several pow2 rounds at once, is where
+// the two numbering walks actually drifted (bc-draw Phase 5).
 func TestMatchNumberingParity_ExcelVsWeb(t *testing.T) {
 	// Sizes chosen to span every bye topology: 3/5/6/7 give shallow byes,
 	// 11/13 give multi-level bye chains, 4/8/16 are clean powers of two

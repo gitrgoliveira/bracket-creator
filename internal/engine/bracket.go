@@ -3,7 +3,6 @@ package engine
 import (
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -396,24 +395,39 @@ func bronzeDefaultCourt(finalCourt string, courts []string) string {
 // in raw Rounds order drifts (e.g. 5 entrants: the lone deep first-round bout must
 // be Match 1, not the shallow slot-0 bout). DisplayRound already encodes the Excel
 // depth grouping (verified by TestBracketDisplayMetadata_MatchesExcelRounds), so we
-// number by descending DisplayRound (deepest/earliest round first) then by the
-// 0-based position parsed from the match ID, identical to both the Excel
-// AssignMatchNumbers walk and the JS buildDisplayModel matchNumById ordering.
+// number by descending DisplayRound (deepest/earliest round first).
+//
+// The tie-break inside a DisplayRound is the match's LEFTMOST FIRST-ROUND SLOT,
+// mi<<(ri+1) — the same expression buildBracketFromLeaves uses to find a match's
+// court. It has to be, because Excel's TraverseRounds walks each depth level
+// LEFT TO RIGHT across the whole tree, and one effective round can draw its
+// matches from several pow2 rounds at once: a shallow region's first bout and a
+// deep region's second bout share a DisplayRound while sitting in bracket.Rounds
+// 0 and 1. Tie-breaking on the within-round position alone (the old rule) then
+// interleaves them by an index that means different things in the two rounds, and
+// the printed "Match 12" and the app's "Match 12" become different bouts. Measured
+// on a pool-fed draw of 8 pools x 3 qualifiers: the sheet numbered Pool G-3rd v
+// Pool H-3rd 12 while the app numbered the E-1st/A-2nd v F-1st/B-2nd bout 12
+// (bc-draw Phase 5). The leaf slot orders them the way the sheet prints them,
+// because a node's slot range is contiguous and left-to-right IS increasing slot.
 //
 // Skip rule (matches the Excel nil-node skip): Hidden (structural-bye) matches and
 // both-sides-empty dead matches are excluded and do not consume a number.
 //
 // The printed Excel sheet is authoritative. The contract is enforced by
-// TestMatchNumberingParity_ExcelVsWeb (match_numbering_parity_test.go), which builds
-// both numberings from identical entrant sets, including bye-producing, non-power-
-// of-two sizes, and asserts the real-match numbers are identical bout-for-bout.
-// If they ever diverge, fix THIS path to match the Excel one.
+// TestMatchNumberingParity_ExcelVsWeb (match_numbering_parity_test.go) for
+// playoffs brackets and by TestExcelWorkbookMatchesEngineBracket_Mixed
+// (excel_draw_parity_test.go) for pool-fed ones, the latter by reading the numbers
+// back out of a rendered workbook. If they ever diverge, fix THIS path to match
+// the Excel one — and the JS buildDisplayModel matchNumById ordering with it
+// (web-mobile/js/bracket.jsx), which is the third implementation of this walk.
 //
 // Must run AFTER computeBracketDisplayMetadata, which sets Hidden / DisplayRound.
 func assignBracketMatchNumbers(b *state.Bracket) {
 	type ref struct {
-		m   *state.BracketMatch
-		pos int
+		m *state.BracketMatch
+		// leafSlot is the first-round slot this match's subtree starts at.
+		leafSlot int
 	}
 	var real []ref
 	for ri := range b.Rounds {
@@ -425,37 +439,20 @@ func assignBracketMatchNumbers(b *state.Bracket) {
 			if m.SideA == "" && m.SideB == "" {
 				continue
 			}
-			real = append(real, ref{m: m, pos: bracketMatchPosFromID(m.ID)})
+			real = append(real, ref{m: m, leafSlot: mi * (1 << (ri + 1))})
 		}
 	}
-	// Descending DisplayRound (deepest/earliest round first), then ascending
-	// position, mirrors the Excel eliminationMatchRounds walk.
+	// Descending DisplayRound (deepest/earliest round first), then left to right
+	// across the whole tree, mirrors the Excel eliminationMatchRounds walk.
 	sort.SliceStable(real, func(i, j int) bool {
 		if real[i].m.DisplayRound != real[j].m.DisplayRound {
 			return real[i].m.DisplayRound > real[j].m.DisplayRound
 		}
-		return real[i].pos < real[j].pos
+		return real[i].leafSlot < real[j].leafSlot
 	})
 	for i, r := range real {
 		r.m.MatchNumber = i + 1
 	}
-}
-
-// bracketMatchPosFromID extracts the 0-based within-round position from a bracket
-// match ID of the form "m-r{ROUND}-{POS}" (e.g. "m-r2-1" → 1). It is the same
-// position the JS buildDisplayModel reads from the id suffix when ordering match
-// numbers, keeping the Go and JS numbering tie-breaks identical. Returns 0 for any
-// unparseable ID (defensive; real IDs always carry a trailing integer).
-func bracketMatchPosFromID(id string) int {
-	idx := strings.LastIndex(id, "-")
-	if idx < 0 || idx == len(id)-1 {
-		return 0
-	}
-	pos, err := strconv.Atoi(id[idx+1:])
-	if err != nil {
-		return 0
-	}
-	return pos
 }
 
 // computeBracketDisplayMetadata fills DisplayRound / Hidden / Feeders on every

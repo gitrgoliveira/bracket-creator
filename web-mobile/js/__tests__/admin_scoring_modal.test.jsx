@@ -1384,6 +1384,17 @@ describe('hanteiWinnerKey (individual editor Ht chip attribution)', () => {
     expect(hanteiWinnerKey({ winner: { id: 'ux', name: 'Tanaka' }, sideA: A, sideB: B })).toBe('');
   });
 
+  it('falls to the name when only ONE side carries an id (replaced participant)', () => {
+    // A replaced/deleted participant leaves one side id-less while the winner
+    // keeps its stamped uuid: the id-space is not authoritative then, and the
+    // distinguishing name still resolves the side.
+    expect(hanteiWinnerKey({
+      winner: { id: 'uuid-b', name: 'Suzuki' },
+      sideA: { id: 'uuid-a', name: 'Tanaka' },
+      sideB: { id: '', name: 'Suzuki' },
+    })).toBe('b');
+  });
+
   it('returns "" with no winner at all', () => {
     expect(hanteiWinnerKey({ sideA: A, sideB: B })).toBe('');
     expect(hanteiWinnerKey(null)).toBe('');
@@ -1393,32 +1404,38 @@ describe('hanteiWinnerKey (individual editor Ht chip attribution)', () => {
 describe('preserveStoredDaihyosenVerdict (unattributable verdict survives correction saves)', () => {
   // Rename drift can leave a stored hantei whose winner name matches neither
   // current side: the seed then arms the panel with no side picked. Until the
-  // operator re-picks or cancels, a correction save must pass the SERVER's
-  // verdict through verbatim - without this, fixing an unrelated bout score
-  // silently flipped a hantei win into a hikiwake (pool) or stripped the
-  // completed match's winner (knockout).
+  // operator re-picks, cancels, or edits the daihyosen row itself, a
+  // correction save passes the SERVER's verdict through verbatim - without
+  // this, fixing an unrelated bout score silently flipped a hantei win into
+  // a hikiwake (pool) or stripped the completed match's winner (knockout).
   const stored = { decidedByHantei: true, winner: 'Old Team Name', encho: { periodCount: 1 } };
 
-  it('passes the stored verdict through while armed and unpicked', () => {
-    expect(preserveStoredDaihyosenVerdict({ armed: true, pickedSide: '', existingDaihyosen: stored }))
-      .toEqual({ winner: 'Old Team Name', decidedByHantei: true, encho: { periodCount: 1 } });
+  it('passes the stored verdict through while armed, unpicked and still tied', () => {
+    // encho is deliberately ABSENT from the overlay: the editor seeds its
+    // encho counter from the stored row, so daihyosenEnchoFields already
+    // round-trips an untouched value, and carrying it here would overwrite
+    // an operator's encho edit.
+    expect(preserveStoredDaihyosenVerdict({ armed: true, pickedSide: '', tied: true, existingDaihyosen: stored }))
+      .toEqual({ winner: 'Old Team Name', decidedByHantei: true });
   });
 
   it('yields to a re-picked side', () => {
-    expect(preserveStoredDaihyosenVerdict({ armed: true, pickedSide: 'a', existingDaihyosen: stored })).toBe(null);
+    expect(preserveStoredDaihyosenVerdict({ armed: true, pickedSide: 'a', tied: true, existingDaihyosen: stored })).toBe(null);
   });
 
   it('yields to an explicit cancel (panel un-armed)', () => {
-    expect(preserveStoredDaihyosenVerdict({ armed: false, pickedSide: '', existingDaihyosen: stored })).toBe(null);
+    expect(preserveStoredDaihyosenVerdict({ armed: false, pickedSide: '', tied: true, existingDaihyosen: stored })).toBe(null);
+  });
+
+  it('yields when the operator unties the daihyosen row itself', () => {
+    // Re-asserting decidedByHantei onto an untied row would have the server
+    // reject the whole save ("requires a tied scoreline"), blocking the very
+    // correction the operator is making.
+    expect(preserveStoredDaihyosenVerdict({ armed: true, pickedSide: '', tied: false, existingDaihyosen: stored })).toBe(null);
   });
 
   it('does nothing when the server holds no verdict', () => {
-    expect(preserveStoredDaihyosenVerdict({ armed: true, pickedSide: '', existingDaihyosen: { decidedByHantei: false } })).toBe(null);
-    expect(preserveStoredDaihyosenVerdict({ armed: true, pickedSide: '', existingDaihyosen: null })).toBe(null);
-  });
-
-  it('omits encho when the stored row has none', () => {
-    expect(preserveStoredDaihyosenVerdict({ armed: true, pickedSide: '', existingDaihyosen: { decidedByHantei: true, winner: 'X' } }))
-      .toEqual({ winner: 'X', decidedByHantei: true });
+    expect(preserveStoredDaihyosenVerdict({ armed: true, pickedSide: '', tied: true, existingDaihyosen: { decidedByHantei: false } })).toBe(null);
+    expect(preserveStoredDaihyosenVerdict({ armed: true, pickedSide: '', tied: true, existingDaihyosen: null })).toBe(null);
   });
 });

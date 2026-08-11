@@ -47,3 +47,15 @@ export function resultSlot(cells) {
   const slot = [pair[0] || "", pair[1] || ""].findIndex(v => !v);
   return { slot, loose: slot === -1 };
 }
+
+// realIppons: what counts as a RECORDED ippon (drops empties and the "\u2022"
+// placeholder). Exported so every JS surface counts the same way; the display
+// pair, the hantei tie gates and the editors' totals must never read
+// different totals from one array. (Go's validation.go compares raw lengths
+// at the wire layer; its own comment marks the pair keep-in-sync.)
+export const realIppons = (arr) => (arr || []).filter(x => x && x !== "\u2022");
+
+// hanteiTied: the ONE JS statement of "hantei applies only to a tied
+// scoreline" (FIK 7-5 / 29-6, mirroring validation.go's equal-counts gate),
+// counted through realIppons.
+export const hanteiTied = (ipponsA, ipponsB) => realIppons(ipponsA).length === realIppons(ipponsB).length;

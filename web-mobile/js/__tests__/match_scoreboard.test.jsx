@@ -75,28 +75,28 @@ describe('match_scoreboard: teamIVPW', () => {
     expect(teamIVPW(subs, 'Team A', 'Team B')).toEqual({ ivShiro: 0, ivAka: 0, pwShiro: 0, pwAka: 0 });
   });
 
-  it('attributes NO IV by name when the winner matches both sides (same-name teams)', () => {
-    // matchSideA-first would credit every such bout to Aka while the bout
-    // rows mark nobody (centreMarks' unattributable guard): the summary and
-    // the rows must agree. The ippon comparison still decides where letters
-    // differ, so the second bout below goes to shiro on points.
+  it('credits AKA when the winner matches both sides, matching Go (same-name teams)', () => {
+    // Go's isWinForSide / TeamResultFrom / SideMarksLR all resolve a winner
+    // naming both sides to side A (aka) by check order, and the server
+    // standings and Excel export are computed from those. The JS summary must
+    // agree with them - an earlier credit-nobody rule made the on-screen
+    // summary contradict the standings table on the same page.
     const subs = [
       { position: 1, sideA: '', sideB: '', winner: 'Seibukan', ipponsA: ['M'], ipponsB: ['M'] },
-      { position: 2, sideA: '', sideB: '', winner: 'Seibukan', ipponsA: [], ipponsB: ['M', 'K'] },
     ];
-    expect(teamIVPW(subs, 'Seibukan', 'Seibukan')).toEqual({ ivShiro: 1, ivAka: 0, pwShiro: 3, pwAka: 1 });
+    expect(teamIVPW(subs, 'Seibukan', 'Seibukan')).toEqual({ ivShiro: 0, ivAka: 1, pwShiro: 1, pwAka: 1 });
   });
 
   it('rows and summary agree on cross-level ambiguity (shared subWinnerSides)', () => {
     // Drifted mixed-level data: the winner matches a SUB side on one flank and
-    // the MATCH side on the other. The bout row marks nobody (unattributable),
-    // so the IV summary must not credit anybody either - both go through the
-    // one subWinnerSides resolver. The ippon fallback then decides: 1-1 here,
-    // so no IV at all.
+    // the MATCH side on the other. Both the bout row and the IV summary go
+    // through the one subWinnerSides resolver, which is aka-first like Go's
+    // isWinForSide - so both attribute AKA, and neither can contradict the
+    // other or the server's numbers.
     const subs = [
       { position: 1, sideA: 'X', sideB: '', winner: 'X', ipponsA: ['M'], ipponsB: ['M'] },
     ];
-    expect(teamIVPW(subs, 'Y', 'X')).toEqual({ ivShiro: 0, ivAka: 0, pwShiro: 1, pwAka: 1 });
+    expect(teamIVPW(subs, 'Y', 'X')).toEqual({ ivShiro: 0, ivAka: 1, pwShiro: 1, pwAka: 1 });
   });
 
   it('falls back to ippon comparison when winner matches neither side', () => {
@@ -334,11 +334,12 @@ describe('match_scoreboard components', () => {
     expect(collectText(tree)).not.toContain('Ht');
   });
 
-  it('marks NEITHER side when the winner matches both (same-name teams)', () => {
-    // Two teams sharing a name (different dojos) meet: sub.winner, the shared
-    // team name, string-matches both match-level sides. Asserting both won is
-    // worse than asserting nothing, so the row is treated as unattributable,
-    // mirroring IndividualScore's ambiguous blanking.
+  it('marks AKA (never both, never neither) when the winner matches both sides', () => {
+    // Two teams sharing a name (different dojos) meet: sub.winner string-
+    // matches both match-level sides. Marking BOTH asserted two winners (the
+    // original bug); marking NEITHER made the verdict invisible AND
+    // contradicted the Go-computed standings/export, which resolve this case
+    // to side A by check order. One side - the same side Go picks - wears it.
     const sub = {
       position: -1, ipponsA: ['M'], ipponsB: ['M'],
       decidedByHantei: true, winner: 'Seibukan',
@@ -347,9 +348,9 @@ describe('match_scoreboard components', () => {
       sub, index: 0, lineupA: null, lineupB: null, teamSize: 3, isDH: true,
       matchSideA: 'Seibukan', matchSideB: 'Seibukan',
     });
-    expect(collectText(tree)).not.toContain('Ht');
-    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-a')).toBeNull();
+    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-a')).toBeTruthy();
     expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-b')).toBeNull();
+    expect(centreText(tree)).not.toContain('Ht');
   });
 
   it('IndividualScore: with both slots full the Ht rides beside them, never the centre', () => {

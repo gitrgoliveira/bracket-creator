@@ -9,6 +9,7 @@ const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 // daihyosen-specific; the rep pickers below stay gated on m.repIsTeam (a "-TB-"
 // tiebreaker is also a rep bout, just not a daihyosen).
 import { isPoolDaihyosenBout } from './pool_ids.jsx';
+import { realIppons } from './result_slot.jsx';
 
 import {
   MAX_IPPONS_PER_SIDE,
@@ -209,8 +210,13 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // Hansoku Hs are now physically present in the opponent's pts array
   // (folded in at the 2-foul boundary by applyFoulIncrement). The counter
   // is "outstanding fouls": no derived addends needed.
-  const aTotal = aPts.filter((x) => x !== "•").length;
-  const bTotal = bPts.filter((x) => x !== "•").length;
+  // Counted through the shared realIppons filter (drops empties AND the "•"
+  // placeholder): the raw score.ippons seed path can inject either, and no
+  // entry path ever adds "" as a point, so every consumer of these totals -
+  // the hantei gates, winner derivation, buildPatch - reads the same rule as
+  // the scoreboard's hanteiTied.
+  const aTotal = realIppons(aPts).length;
+  const bTotal = realIppons(bPts).length;
 
   const addPt = (side, letter) => {
     // No-op when the side is already at the 2-ippon max: don't mark dirty or
@@ -388,6 +394,28 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // onIncrement applies the FIK 2-foul auto-award rule via applyFoulIncrement:
   // every 2nd foul on this side discharges into a hansoku ippon ("H") for
   // the OPPONENT and resets this side's counter to 0.
+  // slotButtons: one side's two ippon slots. Display parity with the shared
+  // scoreboard and the team editor: a RECORDED hantei shows Ht in the winner's
+  // free slot via the same hanteiSlot the team editor uses (delegating to
+  // resultSlot, the one owner of which-slot). Gated on the LIVE decidedByHantei
+  // too, so cancelling the recorded verdict clears the chip with it, and on the
+  // shared tie rule (aTotal/bTotal count through realIppons, like the
+  // scoreboard's hanteiTied): a drifted decidedByHantei on an untied line
+  // shows letters plainly here too. Display only: the slots are disabled while
+  // the hantei stands.
+  const slotButtons = (s) => {
+    const htSlot = hanteiSlot(
+      decidedByHantei && aTotal === bTotal && recordedHtKey === s.key, s.pts);
+    return [0, 1].map((i) => {
+      const isHt = htSlot === i;
+      return (
+        <button key={i} className={`sb-slot ${(isHt || s.pts[i]) ? "sb-slot--filled" : ""}`} onClick={() => removePt(s.key, i)} disabled={decidedByHantei} title={decidedByHantei ? (initialDecidedByHantei ? "Locked: hantei already recorded" : "Hantei armed: choose a winner above, or cancel") : "Click to remove"}>
+          {isHt ? "Ht" : (s.pts[i] || "\u00b7")}
+        </button>
+      );
+    });
+  };
+
   const sides = [
     {
       key: "b", name: m.sideB?.name, dojo: m.sideB?.dojo, pts: bPts, fouls: bFouls,
@@ -637,33 +665,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                       <div className={`sb-side__badge sb-side__badge--${s.color}`}>{s.color === "shiro" ? "Shiro" : "Aka"}</div>
                       <div className="sb-name">{s.name}</div>
                       <div className="sb-slots">
-                        {(() => {
-                          // Display parity with the shared scoreboard and the
-                          // team editor: a RECORDED hantei shows Ht in the
-                          // winner's free slot, via the same hanteiSlot the
-                          // team editor uses (which delegates to resultSlot,
-                          // the one owner of which-slot) — no inline
-                          // restatement of the rule. Gated on the LIVE
-                          // decidedByHantei too, so cancelling the recorded
-                          // verdict clears the chip with it (recordedHtKey
-                          // alone kept a stale, clickable Ht after Cancel).
-                          // Tie uses the •-filtered aTotal/bTotal — the
-                          // component's one count rule — matching the
-                          // scoreboard's realIppons gate; a drifted
-                          // decidedByHantei on an untied line shows letters
-                          // plainly here too. Display only: the slots are
-                          // disabled while the hantei stands.
-                          const htSlot = hanteiSlot(
-                            decidedByHantei && aTotal === bTotal && recordedHtKey === s.key, s.pts);
-                          return [0, 1].map((i) => {
-                            const isHt = htSlot === i;
-                            return (
-                              <button key={i} className={`sb-slot ${(isHt || s.pts[i]) ? "sb-slot--filled" : ""}`} onClick={() => removePt(s.key, i)} disabled={decidedByHantei} title={decidedByHantei ? (initialDecidedByHantei ? "Locked: hantei already recorded" : "Hantei armed: choose a winner above, or cancel") : "Click to remove"}>
-                                {isHt ? "Ht" : (s.pts[i] || "·")}
-                              </button>
-                            );
-                          });
-                        })()}
+                        {slotButtons(s)}
                       </div>
                       <div className="sb-points-grid">
                         {getIpponButtons(isNaginata).map((cc) => (

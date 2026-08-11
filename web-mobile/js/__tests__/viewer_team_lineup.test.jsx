@@ -244,10 +244,18 @@ describe('viewer: BoutSubRow canonical layout (mp-13y)', () => {
     expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-row-hantei')).toBeNull();
   });
 
-  it('renders the "Ht" hantei marker when decidedByHantei=true', () => {
-    const sub = { position: -1, ipponsA: ['K'], ipponsB: [], decidedByHantei: true };
+  it('renders the "Ht" hantei marker on the winner, never in the centre', () => {
+    // A hantei needs a winner and a tied scoreline (validation.go), so this
+    // fixture is 1-1 with sideA winning. Ht rides in sideA's free slot; the
+    // centre keeps its plain separator because it carries shared marks only.
+    const sub = {
+      position: -1, sideA: 'Aka Rep', sideB: 'Shiro Rep',
+      ipponsA: ['K'], ipponsB: ['M'], decidedByHantei: true, winner: 'Aka Rep',
+    };
     const tree = runtime.mount(BoutSubRow, { sub, index: 0, lineupA: null, lineupB: null, teamSize: 3, isDH: true });
-    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-row-hantei')).toBeTruthy();
+    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-row-hantei')).toBeNull();
+    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-a')).toBeTruthy();
+    expect(collectText(tree)).toContain('Ht');
   });
 
   it('falls back to bout number when no lineup provided (individual index + 1)', () => {

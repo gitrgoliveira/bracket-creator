@@ -193,10 +193,40 @@ describe('match_scoreboard components', () => {
       winner: 'Same Name',
     };
     const tree = runtime.mount(IndividualScore, { match });
-    // Neither side wears the win mark; the centre Ht fallback still appears.
+    // Neither side wears the win mark. There is NO centre Ht either: the centre
+    // carries shared marks only, so an unattributable winner gets no mark at
+    // all rather than one in the shared cell. Unreachable through the API,
+    // which requires a winner and disambiguates same-name pairs by uuid.
     expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-a')).toBeNull();
     expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-b')).toBeNull();
-    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-row-hantei')).toBeTruthy();
+    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-row-hantei')).toBeNull();
+    expect(collectText(tree)).not.toContain('Ht');
+  });
+
+  it('IndividualScore: a 1-1 hantei puts Ht in the winner\'s free slot, never the centre', () => {
+    // A hantei is decided from a TIED scoreline (validation.go), so 1-1 is the
+    // normal case after encho and both of the winner's slots are NOT free.
+    // Ht fills the next free slot in the same outside-to-inside order a point
+    // would, giving [K][ ] vs [Ht][M] with Aka (sideA) the hantei winner.
+    const match = {
+      sideA: { id: 'p1', name: 'Aka' }, sideB: { id: 'p2', name: 'Shiro' },
+      ipponsA: ['M'], ipponsB: ['K'], decidedByHantei: true,
+      winner: { id: 'p1', name: 'Aka' },
+    };
+    const tree = runtime.mount(IndividualScore, { match });
+    // Never in the shared centre cell.
+    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-row-hantei')).toBeNull();
+    // The scored M survives: Ht is added, it does not replace the point.
+    const text = collectText(tree);
+    expect(text).toContain('Ht');
+    expect(text).toContain('M');
+    expect(text).toContain('K');
+    // Aka's group renders inner-to-outer, so the free INNER slot holds Ht and
+    // the outer (name-side) slot keeps M: reading left to right, Ht then M.
+    expect(text.indexOf('Ht')).toBeLessThan(text.lastIndexOf('M'));
+    // The win mark rides on Aka, not Shiro.
+    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-a')).toBeTruthy();
+    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-b')).toBeNull();
   });
 
   it('IndividualScore: ids resolve a same-name head-to-head correctly (winner side gets Ht)', () => {

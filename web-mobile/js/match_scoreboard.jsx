@@ -190,38 +190,56 @@ function centreMarks(sub, matchSideA, matchSideB) {
   const foulA = boutHansokuMark(sub.hansokuA);
   // The centre chip comes from the single middle-value source's chip
   // projection (matchMiddleMark: X / (E) / (DH), "" when the middle is the
-  // plain "vs" — never a dash); only the unattributable-hantei fallback
-  // below may replace the plain separator with a centre Ht.
+  // plain "vs" — never a dash). Nothing else may write the middle: the centre
+  // carries SHARED marks only, never a result belonging to one competitor.
   const mid = window.matchMiddleMark ? window.matchMiddleMark(sub) : "";
-  // Win mark only when there are no ippon letters (otherwise the letters
-  // already show who won). sideB = shiro/left, sideA = aka/right.
+  // Which side the result mark belongs to. sideB = shiro/left, sideA = aka/right.
   // Fallback chain: sub-level side → daihyosen team alias → match-level side
   // (quick-score sub-bouts have empty sub.sideA/sideB).
   const noIppons = !lettersB.some(Boolean) && !lettersA.some(Boolean);
-  const winShiro = !!(noIppons && sub.winner &&
+  const winnerIsShiro = !!(sub.winner &&
     (sub.winner === sub.sideB || sub.winner === sub.teamB || (matchSideB && sub.winner === matchSideB)));
-  const winAka = !!(noIppons && sub.winner &&
+  const winnerIsAka = !!(sub.winner &&
     (sub.winner === sub.sideA || sub.winner === sub.teamA || (matchSideA && sub.winner === matchSideA)));
-  // The mark sits on the WINNING side, not in the centre: "Ht" for a hantei
-  // decision, else the defaultWinMaru cells for an ippon-less default win
-  // (fusensho/kiken/bye). Only when the hantei winner is unknown does "Ht"
-  // fall back to the centre cell.
-  const winCells = sub.decidedByHantei ? ["Ht", ""]
-    : (window.defaultWinMaru ? window.defaultWinMaru(sub.encho) : ["○", "○"]);
-  const hasWinSide = winShiro || winAka;
+  // A hantei ALWAYS names a winner and is decided from a TIED scoreline
+  // (validation.go: "requires winner to be set" + "requires a tied scoreline"),
+  // so it is not gated on noIppons: sanbon-shobu ends at 2, so the only tied
+  // hantei scores are 0-0 and 1-1 and the winner always has a free slot. The
+  // maru pair for an ippon-less default win (fusensho/kiken/bye) still is
+  // gated, because there the empty letters are what make room for it.
+  const winShiro = sub.decidedByHantei ? winnerIsShiro : (noIppons && winnerIsShiro);
+  const winAka = sub.decidedByHantei ? winnerIsAka : (noIppons && winnerIsAka);
+  // Ht behaves like a point: it fills the winner's next FREE slot in the same
+  // outside-to-inside order a point would (0-0 → the outer slot, 1-1 → the
+  // inner one, giving [K][ ] vs [Ht][M]), so it always rides beside the
+  // competitor it names. `loose` is the degenerate guard for data with no free
+  // slot; it renders inboard of that side's slots, still never in the centre.
+  const resultCells = (letters) => {
+    if (!sub.decidedByHantei) {
+      return { cells: window.defaultWinMaru ? window.defaultWinMaru(sub.encho) : ["○", "○"], loose: false };
+    }
+    const cells = [letters[0] || "", letters[1] || ""];
+    const free = cells.findIndex(v => !v);
+    if (free === -1) return { cells, loose: true };
+    cells[free] = "Ht";
+    return { cells, loose: false };
+  };
+  const shiroRes = winShiro ? resultCells(lettersB) : null;
+  const akaRes = winAka ? resultCells(lettersA) : null;
   return (
     <span className="msb-marks" data-testid="sub-marks">
       <span className={"msb-slots" + (winShiro ? " msb-slots--win" : "")}>
         {foulB && <span className="msb-hansoku" data-testid="foul-mark-b">{foulB}</span>}
-        {winShiro ? slotCells(winCells, "shiro", "sub-win-b") : slotCells(lettersB, "shiro")}
+        {shiroRes ? slotCells(shiroRes.cells, "shiro", "sub-win-b") : slotCells(lettersB, "shiro")}
+        {shiroRes?.loose && <span className="msb-ht" data-testid="sub-ht-b">Ht</span>}
       </span>
       <span className="msb-vs">
         {mid ? <span data-testid="sub-row-mid">{mid}</span>
-          : sub.decidedByHantei && !hasWinSide ? <span className="msb-ht" data-testid="sub-row-hantei">Ht</span>
           : <span className="msb-sep" aria-hidden="true">vs</span>}
       </span>
       <span className={"msb-slots msb-slots--aka" + (winAka ? " msb-slots--win" : "")}>
-        {winAka ? slotCells(winCells, "aka", "sub-win-a") : slotCells(lettersA, "aka")}
+        {akaRes?.loose && <span className="msb-ht" data-testid="sub-ht-a">Ht</span>}
+        {akaRes ? slotCells(akaRes.cells, "aka", "sub-win-a") : slotCells(lettersA, "aka")}
         {foulA && <span className="msb-hansoku" data-testid="foul-mark-a">{foulA}</span>}
       </span>
     </span>

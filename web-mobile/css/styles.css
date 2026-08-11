@@ -4879,16 +4879,23 @@ button.pool-match-row {
   margin: 12px 0;
 }
 
-/* Ippon fill order is fixed OUTSIDE-TO-INSIDE: each side's first ippon sits in
-   the slot nearest that competitor's name and fills inward toward the centre.
-   "Outer" here means the outer of that SIDE'S TWO SLOTS, never the outer edge
-   of the board: the board's outer edges carry the names. Where the browser
-   supports subgrid the slot group as a whole also hugs the centre vs (the
-   .sb-slots justify-self rules above); in the non-subgrid fallback it does not,
-   and only this within-group fill order still holds. Shiro
-   (left column) packs its slots to the left (outer) by default; Aka (right
-   column) must mirror it, pack to the right and render pts[0] at the outer
-   (right) edge. Fixed by FIK Table 1 (p.15), Yuko-datotsu row, which pins the
+/* Ippon fill order is fixed OUTSIDE-TO-INSIDE: pts[0] (the first point scored)
+   takes the slot FARTHEST from the centre vs, and later points fill inward
+   toward it.
+
+   State it against the CENTRE, never against the name. On the FIK plate the
+   name sits at the board's outer edge, so "outer slot" and "slot nearest the
+   name" coincide; on THIS board they do not. Both names are pinned inward
+   (.sb-side--shiro{text-align:right} / .sb-side--aka{text-align:left}), so the
+   slot nearest the name is pts[1], and reading the rule off the name inverts
+   it.
+
+   Shiro (left column) packs its slots to the left (outer) by default; Aka
+   (right column) must mirror it, pack to the right and render pts[0] at the
+   outer (right) edge. Where the browser supports subgrid the slot group as a
+   whole also hugs the centre vs (the .sb-slots justify-self rules above); in
+   the non-subgrid fallback it does not, and only this within-group fill order
+   still holds. Fixed by FIK Table 1 (p.15), Yuko-datotsu row, which pins the
    mark order to the Taisho round of Table 2 (p.16). See
    running_a_kendo_tournament.md → Individual Match Scoreboard. */
 .sb-side--aka .sb-slots {

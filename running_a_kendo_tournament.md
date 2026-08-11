@@ -280,7 +280,7 @@ Both the column layout and the mark order come from the FIK *Regulations of Kend
 - **vs**, centre column, normally blank. **X** marks a hikiwake (draw).
 - **Fouls**, hansoku are tracked per side. A single outstanding hansoku displays as the **red upward triangle (▲)** next to the offending competitor's name (FIK Shinpan Management p.15, Table 1; position as above, between the name and that side's slots). On the second hansoku the **▲ is deleted** and 1 ippon is awarded to the opponent (recorded as **H** in one of the opponent's slots, filling outside-to-inside like any ippon), so the outstanding count is always 0 or 1, a competitor never shows two triangles. In sosai (simultaneous mutual hansoku) the ▲ marks are left in place.
 - **Draw**, an **X** in the "vs" column, or both sides finishing with equal total ippon, marks a hikiwake. Draws only occur in pool matches.
-- **Hantei**, if a knockout match is decided by judges' decision, an **Ht** mark is placed on the winner's side to show the referees **decided the match**. **Ht** is not an ippon (distinct from **H**, the hansoku ippon), it records the match outcome, not a scored point.
+- **Hantei**, if a knockout match is decided by judges' decision, an **Ht** mark is placed on the winner's side to show the referees **decided the match**. A hantei is only taken from a tied scoreline, so it is decided at 0-0 or 1-1 and the winner always has a free slot: **Ht** fills that slot in the same outside-to-inside order a point would, so at 1-1 the board reads `[K][ ] vs [Ht][M]`. It never sits on the centre line, which carries shared marks only. **Ht** is not an ippon (distinct from **H**, the hansoku ippon), it records the match outcome, not a scored point.
 
 ### Team Match Scoreboard
 

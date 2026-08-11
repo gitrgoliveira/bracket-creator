@@ -177,14 +177,28 @@ one; it is not a minimum, a maximum or a default. R2 and D6 apply to whichever r
 exist, in rank order.
 
 **The number of seeds MUST NOT change the shape of the draw** (operator ruling,
-2026-08-11). Which slots exist, which are byes, who crosses where and how many rounds a
-block runs are all functions of the pools, the qualifier count and the shiaijo
-allocation alone. Seeds decide only WHICH competitor occupies a slot: they choose the
-pool a competitor is drawn into (`PoolSeeding`) and they order R6's claim on a block's
-bye. A draw with no seeds at all MUST therefore satisfy R3 to R7 exactly as a seeded one
-does, and a draw with 8 seeds MUST have the same shape as the same competition with
-none. `TestSeedCountDoesNotChangeDrawShape` and `TestStructuralRulesHoldAtEverySeedCount`
-measure both claims.
+2026-08-11). Seeds decide only WHICH competitor occupies a slot: they choose the pool a
+competitor is drawn into (`PoolSeeding`) and they order R6's claim on a block's bye. A
+draw with no seeds at all MUST therefore satisfy R3 to R7 exactly as a seeded one does,
+and a draw with 8 seeds MUST have the same shape as the same competition with none.
+
+The shape is a function of exactly three things:
+
+    shape = f(pool count, qualifiers per pool, shiaijo count)
+
+and of nothing else. Not the seeds, and **not the pool sizes** either: sizes feed R6
+criterion 2, the oversized-pool bye (**D1**), which likewise chooses who receives a bye
+rather than how many byes there are or where they fall. Not, of course, the results,
+which do not exist yet.
+
+*Why this is worth stating as a rule.* Everything in that function is known the moment
+the pools are formed, so the bracket can be drawn, printed and handed out then, and
+nothing that happens afterwards can reshape it. An operator who has posted a bracket
+must never see its structure move because a seed was added, a late entry changed a pool
+size, or a pool finished. Only names appear.
+
+`TestSeedCountDoesNotChangeDrawShape`, `TestPoolSizesDoNotChangeDrawShape` and
+`TestStructuralRulesHoldAtEverySeedCount` measure the three claims.
 
 *Rationale:* seeding is a competitive-protection decision that belongs to the
 organising committee, not to a heuristic over data the tool does not hold.

@@ -236,3 +236,61 @@ func TestSeedIndexEqualsRankMinusOne(t *testing.T) {
 		})
 	}
 }
+
+// poolsOfSizes builds len(sizes) pools holding the given numbers of players.
+// The names are synthetic; only the COUNT per pool matters here.
+func poolsOfSizes(sizes []int) []Pool {
+	pools := make([]Pool, len(sizes))
+	for i, n := range sizes {
+		pools[i] = Pool{PoolName: fmt.Sprintf("Pool %c", 'A'+i)}
+		pools[i].Players = make([]Player, n)
+		for j := range pools[i].Players {
+			pools[i].Players[j] = Player{Name: fmt.Sprintf("p%d-%d", i, j)}
+		}
+	}
+	return pools
+}
+
+// TestPoolSizesDoNotChangeDrawShape completes the statement of what the tree
+// depends on, and it is shorter than it looks:
+//
+//	shape = f(pool count, qualifiers per pool, shiaijo count)
+//
+// Pool SIZES are not in it. They feed R6 criterion 2, the oversized-pool bye
+// (D1's "whose qualifier plays more pool matches"), which chooses WHICH occupant
+// receives a block's bye and never how many byes there are or where they fall.
+// So they behave exactly as seeds do: they decide who stands in a slot, not
+// which slots exist.
+//
+// This matters for an operator's mental model. The bracket can be drawn, printed
+// and handed out as soon as the pools are formed, because nothing that happens
+// after that -- not the pool sizes settling, not the seeds, not a single result
+// -- can reshape it. Only the names change.
+func TestPoolSizesDoNotChangeDrawShape(t *testing.T) {
+	// Six pools throughout; only the sizes vary, from perfectly even to
+	// pathologically lopsided.
+	variants := [][]int{
+		{3, 3, 3, 3, 3, 3},
+		{4, 4, 4, 3, 3, 3},
+		{7, 3, 3, 3, 3, 3},
+		{9, 8, 7, 6, 5, 4},
+		{2, 2, 2, 2, 2, 9},
+	}
+	for _, numCourts := range []int{1, 2, 4} {
+		for poolWinners := 1; poolWinners <= 3; poolWinners++ {
+			name := fmt.Sprintf("%dq_%dsj", poolWinners, numCourts)
+			t.Run(name, func(t *testing.T) {
+				base := BuildKnockoutDraw(poolsOfSizes(variants[0]), poolWinners, numCourts)
+				require.NotNil(t, base)
+				want := drawShapeSignature(base.Root)
+
+				for _, sizes := range variants[1:] {
+					draw := BuildKnockoutDraw(poolsOfSizes(sizes), poolWinners, numCourts)
+					require.NotNil(t, draw)
+					assert.Equalf(t, want, drawShapeSignature(draw.Root),
+						"pool sizes %v changed the shape of the draw; sizes may only decide who receives a bye", sizes)
+				}
+			})
+		}
+	}
+}

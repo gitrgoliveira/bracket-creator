@@ -57,6 +57,19 @@ function renderTeamBoutMiddle(s, t, isDaihyoRow) {
   return mid === "X" ? <span className="tsm-draw">X</span> : <span style={{ color: "var(--ink-3)" }}>{mid}</span>;
 }
 
+// hanteiSlot: which of a side's two ippon slots carries the "Ht" mark, or -1
+// for none. Ht names ONE competitor, so it rides beside that competitor like a
+// point and NEVER in the centre cell (the centre carries the shared boutMiddle
+// projection only). It fills the next FREE slot in the same outside-to-inside
+// order a point would, so a 0-0 daihyosen puts it in the outer slot. The editor
+// twin of resultCells in match_scoreboard.jsx; keep the two in step.
+// Returns -1 when this side did not win the hantei, or has no free slot.
+export function hanteiSlot(isWinner, pts) {
+  if (!isWinner) return -1;
+  const cells = pts || [];
+  return [cells[0] || "", cells[1] || ""].findIndex(v => !v);
+}
+
 // mp-bkg / mp-13y: resolveMatchLineup and resolveLineupTeamId are now shared
 // across all consumer surfaces (admin scoring modal, viewer, TvDisplay,
 // StreamingOverlay). The implementations live in lineup_resolver.jsx;
@@ -1941,16 +1954,18 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             // Sub-bout is decided once either side reaches 2 ippons.
             const subBoutDecided = isBoutDecided(s.aPts, s.bPts);
 
-            const scoreDisplay = (() => {
-              // mp-4pc: a hantei-decided daihyosen has a tied scoreline but
-              // a declared winner: show the winner + (Ht) rather than X.
-              if (isDaihyoRow && daihyosenTied && daihyosenHantei) {
-                return <span>{`${t.bTotal}–${t.aTotal}`} <span style={{ fontSize: 11, opacity: 0.7 }}>(Ht)</span></span>;
-              }
-              // Everything else derives from the SINGLE-SOURCE boutMiddle via the
-              // shared helper (vs/X/(E)/(DH)) — never restated here (CLAUDE.md).
-              return renderTeamBoutMiddle(s, t, isDaihyoRow);
-            })();
+            const dhHantei = isDaihyoRow && daihyosenTied && daihyosenHantei;
+            const htSlotB = hanteiSlot(dhHantei === "b", rowSides[0].pts);
+            const htSlotA = hanteiSlot(dhHantei === "a", rowSides[1].pts);
+            // Clicking the Ht undoes the hantei, the same way clicking a point
+            // removes it: a mis-entered referee decision must be correctable
+            // without leaving the row.
+            const clearHantei = () => { setDaihyosenHanteiArmed(false); setDaihyosenHantei(""); };
+
+            // The centre carries the SINGLE-SOURCE boutMiddle projection only
+            // (vs/X/(E)/(DH)) — never restated here, and never a result mark or
+            // a numeric bout score (CLAUDE.md).
+            const scoreDisplay = renderTeamBoutMiddle(s, t, isDaihyoRow);
 
             return (
               <div key={idx} className={"team-sub-match" + (idx === editingDoneBoutIdx ? " team-sub-match--correcting" : "")}>
@@ -2064,9 +2079,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                                 row; running_a_kendo_tournament.md: ▲ next to name.) */}
                             {rowSides[0].fouls >= 1 && <span className="tsm-foul-tri" title="Hansoku: 1 foul">▲</span>}
                             {[0, 1].map(i => (
-                              <button key={i} className={`editor-side__pt ${rowSides[0].pts[i] ? "editor-side__pt--filled" : ""}`}
-                                onClick={() => rowSides[0].setPts(rowSides[0].pts.filter((_, j) => j !== i))} title="Click to remove">
-                                {rowSides[0].pts[i] || "·"}
+                              <button key={i} className={`editor-side__pt ${(htSlotB === i || rowSides[0].pts[i]) ? "editor-side__pt--filled" : ""}`}
+                                data-testid={htSlotB === i ? "team-daihyosen-ht-shiro" : undefined}
+                                onClick={() => (htSlotB === i
+                                  ? clearHantei()
+                                  : rowSides[0].setPts(rowSides[0].pts.filter((_, j) => j !== i)))}
+                                title={htSlotB === i ? "Hantei winner: click to undo" : "Click to remove"}>
+                                {htSlotB === i ? "Ht" : (rowSides[0].pts[i] || "·")}
                               </button>
                             ))}
                           </div>
@@ -2080,9 +2099,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                                 pts[0]). The pair itself stays inside, flanking the
                                 centre score (FIK Table 2, p.16). */}
                             {[1, 0].map(i => (
-                              <button key={i} className={`editor-side__pt ${rowSides[1].pts[i] ? "editor-side__pt--filled" : ""}`}
-                                onClick={() => rowSides[1].setPts(rowSides[1].pts.filter((_, j) => j !== i))} title="Click to remove">
-                                {rowSides[1].pts[i] || "·"}
+                              <button key={i} className={`editor-side__pt ${(htSlotA === i || rowSides[1].pts[i]) ? "editor-side__pt--filled" : ""}`}
+                                data-testid={htSlotA === i ? "team-daihyosen-ht-aka" : undefined}
+                                onClick={() => (htSlotA === i
+                                  ? clearHantei()
+                                  : rowSides[1].setPts(rowSides[1].pts.filter((_, j) => j !== i)))}
+                                title={htSlotA === i ? "Hantei winner: click to undo" : "Click to remove"}>
+                                {htSlotA === i ? "Ht" : (rowSides[1].pts[i] || "·")}
                               </button>
                             ))}
                             {/* Outstanding hansoku → red ▲ between the Aka name and

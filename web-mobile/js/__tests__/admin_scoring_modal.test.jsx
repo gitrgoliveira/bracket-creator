@@ -27,7 +27,7 @@ import { defaultWinMaru } from '../bracket.jsx';
 // teamEncounterHasResult is a module-internal helper of admin_scoring_team.jsx
 // (not part of the thin-entry consumer barrel), imported directly like the
 // resolveMatchLineup tests do.
-import { teamEncounterHasResult, resolveKachinukiBoutSides, subBoutHasBeenPlayed, fusenshoSideFromSub } from '../admin_scoring_team.jsx';
+import { teamEncounterHasResult, resolveKachinukiBoutSides, subBoutHasBeenPlayed, fusenshoSideFromSub, hanteiSlot } from '../admin_scoring_team.jsx';
 import { isKikenDecision } from '../api_serializers.jsx';
 
 window.isKikenDecision = isKikenDecision;
@@ -1292,3 +1292,33 @@ describe('isKoTieBlocked (Finish gate for knockout ties)', () => {
   });
 });
 
+
+describe('hanteiSlot (Ht rides beside the competitor, never in the centre)', () => {
+  // Operator ruling: there must be no centre hantei. Ht names ONE competitor,
+  // so it behaves like a point and fills that side's next FREE slot. The twin
+  // of resultCells in match_scoreboard.jsx.
+  it('returns -1 for a side that did not win the hantei', () => {
+    expect(hanteiSlot(false, [])).toBe(-1);
+    expect(hanteiSlot(false, ['M'])).toBe(-1);
+  });
+
+  it('takes the outer slot on a 0-0 daihyosen (the normal case)', () => {
+    // A daihyosen is one-point sudden death, so a tied one is 0-0 and both
+    // slots are free: Ht lands in slot 0, the outer/name-side one.
+    expect(hanteiSlot(true, [])).toBe(0);
+  });
+
+  it('takes the free INNER slot when a point was already struck', () => {
+    // Mirrors the 1-1 scoreboard case: the letter keeps its outer slot and Ht
+    // fills inward, giving [K][ ] vs [Ht][M] on the shared scoreboard.
+    expect(hanteiSlot(true, ['K'])).toBe(1);
+  });
+
+  it('returns -1 when both slots are full, so nothing overwrites a point', () => {
+    expect(hanteiSlot(true, ['K', 'M'])).toBe(-1);
+  });
+
+  it('tolerates a missing pts array', () => {
+    expect(hanteiSlot(true, undefined)).toBe(0);
+  });
+});

@@ -3,7 +3,7 @@
 // delegation tests in viewer.test.jsx / display_white_board.test.jsx don't see.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
-import { matchMiddleMark } from '../bracket.jsx';
+import { matchMiddleMark, defaultWinMaru } from '../bracket.jsx';
 import { boutRows, findInTree, collectText } from './helpers/vdom.js';
 
 describe('match_scoreboard: withNumber', () => {
@@ -234,6 +234,54 @@ describe('match_scoreboard components', () => {
     // The win mark rides on Aka, not Shiro.
     expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-a')).toBeTruthy();
     expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-b')).toBeNull();
+  });
+
+  it('IndividualScore threads encho: the centre can read (E)', () => {
+    // Regression: the synthesised sub dropped `encho`, so matchMiddleMark could
+    // never produce (E) on an individual row — and these rows carry no separate
+    // centre chip to compensate, so the overtime was invisible.
+    const match = {
+      sideA: { id: 'p1', name: 'Aka' }, sideB: { id: 'p2', name: 'Shiro' },
+      ipponsA: ['M'], ipponsB: [], winner: { id: 'p1', name: 'Aka' },
+      encho: { periodCount: 1 },
+    };
+    const tree = runtime.mount(IndividualScore, { match });
+    expect(centreText(tree)).toBe('(E)');
+  });
+
+  it('IndividualScore threads encho: a default win in overtime is ONE maru', () => {
+    // FIK marks a default win with one maru per awarded point: two in
+    // regulation, ONE in encho. Without the encho passthrough every default win
+    // rendered the regulation pair.
+    global.window.defaultWinMaru = defaultWinMaru;
+    const match = {
+      sideA: { id: 'p1', name: 'Aka' }, sideB: { id: 'p2', name: 'Shiro' },
+      ipponsA: [], ipponsB: [], winner: { id: 'p1', name: 'Aka' },
+      decision: 'fusensho', encho: { periodCount: 1 },
+    };
+    // Collect the whole aka SLOT GROUP: the sub-win-a testid sits on cell 0
+    // only, which reads a single maru in both cases and would not distinguish.
+    const tree = runtime.mount(IndividualScore, { match });
+    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-a')).toBeTruthy();
+    expect(collectText(findInTree(tree, n =>
+      typeof n?.props?.className === 'string' && n.props.className.includes('msb-slots--aka')))).toBe('\u25cb');
+    delete global.window.defaultWinMaru;
+  });
+
+  it('IndividualScore: a default win in REGULATION is the maru pair', () => {
+    // The control for the test above: same match without encho keeps ○○, so
+    // the single ○ there is attributable to the passthrough and not to the
+    // helper always returning one.
+    global.window.defaultWinMaru = defaultWinMaru;
+    const match = {
+      sideA: { id: 'p1', name: 'Aka' }, sideB: { id: 'p2', name: 'Shiro' },
+      ipponsA: [], ipponsB: [], winner: { id: 'p1', name: 'Aka' },
+      decision: 'fusensho', encho: null,
+    };
+    const tree = runtime.mount(IndividualScore, { match });
+    expect(collectText(findInTree(tree, n =>
+      typeof n?.props?.className === 'string' && n.props.className.includes('msb-slots--aka')))).toBe('\u25cb\u25cb');
+    delete global.window.defaultWinMaru;
   });
 
   it('IndividualScore: with both slots full the Ht rides beside them, never the centre', () => {

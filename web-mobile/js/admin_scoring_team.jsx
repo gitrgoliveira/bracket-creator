@@ -47,9 +47,19 @@ import { resultSlot } from './result_slot.jsx';
 // three inputs: a marked/derived tie → hikiwake, the daihyosen row →
 // "daihyosen", s.encho (a period count) → {periodCount}. X keeps its dedicated
 // styling; vs/(E)/(DH) render as the quiet centre span.
-function renderTeamBoutMiddle(s, t, isDaihyoRow) {
-  const scored = t.aTotal > 0 || t.bTotal > 0;
-  const isDraw = s.draw || (t.winner === null && scored);
+// teamBoutIsDraw: does this bout row read as a hikiwake? Tied-and-scored is the
+// derivation, EXCEPT that a hantei declares a winner and so un-draws the bout
+// however level the scoreline. Without that exception a 1-1 daihyosen taken to
+// hantei derives hikiwake, and boutMiddle puts X in the centre — claiming a draw
+// on a knockout bout whose winner is simultaneously wearing Ht. Exported so the
+// exception is pinned without mounting the editor.
+export function teamBoutIsDraw(s, t, hanteiWinner) {
+  if (hanteiWinner) return false;
+  return !!(s.draw || (t.winner === null && (t.aTotal > 0 || t.bTotal > 0)));
+}
+
+function renderTeamBoutMiddle(s, t, isDaihyoRow, hanteiWinner) {
+  const isDraw = teamBoutIsDraw(s, t, hanteiWinner);
   const mid = boutMiddle(
     isDaihyoRow ? "daihyosen" : (isDraw ? "hikiwake" : ""),
     s.encho > 0 ? { periodCount: s.encho } : null,
@@ -1990,8 +2000,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
 
             // The centre carries the SINGLE-SOURCE boutMiddle projection only
             // (vs/X/(E)/(DH)) — never restated here, and never a result mark or
-            // a numeric bout score (CLAUDE.md).
-            const scoreDisplay = renderTeamBoutMiddle(s, t, isDaihyoRow);
+            // a numeric bout score (CLAUDE.md). dhHantei is passed so a hantei
+            // winner un-draws a level scoreline instead of centring an X.
+            const scoreDisplay = renderTeamBoutMiddle(s, t, isDaihyoRow, dhHantei);
 
             return (
               <div key={idx} className={"team-sub-match" + (idx === editingDoneBoutIdx ? " team-sub-match--correcting" : "")}>

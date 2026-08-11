@@ -346,8 +346,11 @@ export function IndividualScore({ match, variant, showNames, withZekkenName }) {
   // winner key to each side's key. Prefer the participant id so a same-name
   // head-to-head (two players sharing a name) isn't flagged a win on BOTH
   // sides; fall back to the name. When the two sides are indistinguishable
-  // (same name, no ids), blank the winner so neither side is marked: the
-  // centre Ht/○ fallback still conveys the result.
+  // (same name, no ids), blank the winner so neither side is marked. Nothing
+  // then reports the result on this row: the centre carries shared marks only,
+  // so there is deliberately no centre fallback to fall back TO. Unreachable
+  // through the API, which requires a winner and disambiguates same-name pairs
+  // by uuid.
   const aKey = sideId(match.sideA) || sideName(match.sideA);
   const bKey = sideId(match.sideB) || sideName(match.sideB);
   const ambiguous = !!aKey && aKey === bKey;
@@ -356,6 +359,11 @@ export function IndividualScore({ match, variant, showNames, withZekkenName }) {
     ipponsB: match.ipponsB || (window.ipponsFromScore ? window.ipponsFromScore(match.scoreB) : []),
     hansokuA: match.hansokuA, hansokuB: match.hansokuB,
     decidedByHantei: match.decidedByHantei, score: match.score, decision: match.decision,
+    // encho MUST be threaded: without it matchMiddleMark can never yield (E) on
+    // an individual row (and these rows carry no separate chip to compensate),
+    // and defaultWinMaru would award the regulation ○○ for a default win that
+    // actually happened in overtime, where the rulebook marks a single ○.
+    encho: match.encho,
     winner: ambiguous ? "" : (sideId(match.winner) || sideName(match.winner)),
     sideA: aKey, sideB: bKey,
     flagsA: match.flagsA, flagsB: match.flagsB,

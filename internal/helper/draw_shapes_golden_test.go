@@ -79,7 +79,9 @@ type drawShapeCase struct {
 	// DrawCourts is the shiaijo count the draw actually used. It is the
 	// requested count clamped by EffectiveDrawCourts, which never allocates
 	// more courts than pools (a court with no pools would own an empty region)
-	// and steps back down to an even count when that clamp lands on an odd one.
+	// and, when it does clamp, steps down to the largest POWER OF TWO that fits
+	// (LargestShiaijoCountAtMost), never merely to an even count: 8 shiaijo over
+	// 7 pools gives 4, not 6, because R9 rejects 6.
 	DrawCourts int `json:"drawCourts"`
 
 	// PoolToCourt is AssignPoolsToCourts' output over DrawCourts: pool index ->
@@ -113,24 +115,32 @@ type drawShapeCase struct {
 
 	Pages []drawShapePage `json:"pages"`
 
-	// PageCourtMismatchCount is the number of pages whose roster overlay or
-	// title disagrees with the bracket printed on them. R3/R8 make this ZERO in
-	// every case; a non-zero value is a regression, not a pinned defect.
+	// PageCourtMismatchCount is the number of pages whose title disagrees with
+	// the bracket printed on them, i.e. that print a pool WINNER belonging to
+	// another shiaijo. R3/R8/R4a make this ZERO in every case; a non-zero value
+	// is a regression, not a pinned defect.
 	PageCourtMismatchCount int `json:"pageCourtMismatchCount"`
 
 	// PageCourtMismatch details ONLY the mismatching pages (every page's
 	// claims and contents are in Pages regardless).
 	//
-	// Two things count as a mismatch, and crossing is deliberately NOT one of
-	// them: a page legitimately prints the partner court's runners-up, because
-	// that is what R4b routes there.
+	// What counts as a mismatch is foreignHomeWinners: a pool WINNER printed on
+	// a shiaijo other than the one its pool ran on, which R4a forbids outright.
+	// Crossing is deliberately NOT one, because a page legitimately prints the
+	// partner court's runners-up - that is what R4b routes there.
 	//
-	//  1. claimedButAbsent - the page overlays a pool's roster but holds no
-	//     qualifier of that pool. This was the old draw's headline defect: a
-	//     page titled "Shiaijo A" overlaying pools A and B while its bracket
-	//     printed Pool C-1st and Pool D-2nd.
-	//  2. foreignHomeWinners - a pool WINNER printed on a shiaijo other than the
-	//     one its pool ran on, which R4a forbids outright.
+	// It used to carry a second field, claimedButAbsent ("the page overlays a
+	// pool's roster but holds no qualifier of that pool" - the old draw's
+	// headline defect, a page titled "Shiaijo A" overlaying pools A and B while
+	// its bracket printed Pool C-1st and Pool D-2nd). It was DROPPED because it
+	// had become unfalsifiable: PageRosterPools now derives the claim BY
+	// filtering the block down to the pools present on the page, so a claim this
+	// file recomputes with it cannot name an absent pool whatever the renderer
+	// does. The zero it reported was arithmetic, not evidence. The property it
+	// stood for is now asserted where it can actually fail, against a rendered
+	// workbook: TestTreePageHomePoolsAlwaysPresent
+	// (draw_court_mapping_test.go). Dropping it changed no bytes in the golden,
+	// because pageCourtMismatch is empty in every case.
 	PageCourtMismatch []drawPageMismatch `json:"pageCourtMismatch"`
 }
 
@@ -159,10 +169,9 @@ type drawShapePage struct {
 type drawPageMismatch struct {
 	Page       int    `json:"page"`
 	CourtLabel string `json:"courtLabel"`
-	// ClaimedButAbsent: overlaid on the page, no qualifier of theirs on it.
-	ClaimedButAbsent []string `json:"claimedButAbsent"`
 	// ForeignHomeWinners: pool winners printed on a shiaijo other than the one
-	// their pool ran on (R4a).
+	// their pool ran on (R4a). This is the genuine cross-check in this file -
+	// the page's contents against AssignPoolsToCourts, two independent sources.
 	ForeignHomeWinners []string `json:"foreignHomeWinners"`
 	Summary            string   `json:"summary"`
 }
@@ -228,17 +237,6 @@ func sortedUniquePoolNames(leaves []string) []string {
 		out = append(out, name)
 	}
 	slices.Sort(out)
-	return out
-}
-
-// missingFrom returns the members of want that are absent from have.
-func missingFrom(want, have []string) []string {
-	out := []string{}
-	for _, w := range want {
-		if !slices.Contains(have, w) {
-			out = append(out, w)
-		}
-	}
 	return out
 }
 
@@ -336,9 +334,12 @@ func buildDrawShapeCase(numPools, poolWinners, courts int) drawShapeCase {
 			LeafCount:    len(pageLeaves),
 		})
 
-		absent := missingFrom(claimed, present)
 		// A pool WINNER on a page belonging to another shiaijo is an R4a
 		// violation; a crossed-in runner-up is not, so only rank 1 counts.
+		// This compares the page's LEAVES with AssignPoolsToCourts, which is why
+		// it is the mismatch this file can still detect: neither side is derived
+		// from the other. (The retired claimedButAbsent compared the overlay
+		// helper's output with the input it filtered on - see drawPageMismatch.)
 		foreign := []string{}
 		for _, l := range pageLeaves {
 			if leafRank(l) != 1 {
@@ -349,13 +350,12 @@ func buildDrawShapeCase(numPools, poolWinners, courts int) drawShapeCase {
 				foreign = append(foreign, l)
 			}
 		}
-		if len(absent) == 0 && len(foreign) == 0 {
+		if len(foreign) == 0 {
 			continue
 		}
 		c.PageCourtMismatch = append(c.PageCourtMismatch, drawPageMismatch{
 			Page:               i + 1,
 			CourtLabel:         label,
-			ClaimedButAbsent:   absent,
 			ForeignHomeWinners: foreign,
 			Summary: fmt.Sprintf("page %d titled %q overlays %v but its bracket contains %v",
 				i+1, "Shiaijo "+label, claimed, present),

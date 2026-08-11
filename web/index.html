@@ -127,12 +127,18 @@
                                             id="teamMatches" min="0" value="0">
                                     </div>
                                     <div class="mb-2">
-                                        <label for="courts" class="form-label">Number of Shiaijo (courts):
+                                        <!-- The valid counts are the powers of two (VALID_SHIAIJO_COUNTS in
+                                             js/validation.js, mirroring helper.ValidateShiaijoCount). They are
+                                             spelled out here so the rule is taught at the field instead of only
+                                             surfacing as a rejection after a bad pick; tests/validation.spec.js
+                                             pins this copy against the derived list so it cannot drift. -->
+                                        <label for="courts" class="form-label">Number of Shiaijo (courts), 1, 2, 4, 8 or 16:
                                             <i class="bi bi-question-circle tooltip-icon" data-bs-toggle="tooltip"
-                                                title="Number of courts (Shiaijo A, B, …). For pool tournaments, pools are split evenly across courts. For both types, each tree sheet is labelled with the matching Shiaijo name."></i>
+                                                title="Number of courts (Shiaijo A, B, …); use 1, 2, 4, 8 or 16. For pool tournaments, pools are split evenly across courts. For both types, each tree sheet is labelled with the matching Shiaijo name."></i>
                                         </label>
                                         <input type="number" class="form-control form-control-sm" name="courts" id="courts"
-                                            min="1" max="26" value="2">
+                                            min="1" max="26" value="2" aria-describedby="courtsHelp">
+                                        <div class="form-text" id="courtsHelp">The knockout draw gives each shiaijo its own block of the bracket and the blocks merge in pairs, so the count has to halve cleanly.</div>
                                     </div>
                                 </div>
                             </div>

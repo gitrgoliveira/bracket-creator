@@ -15,13 +15,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestPlayoffOptionsRun_CourtPairing sweeps --courts on create-playoffs. The
-// tree is split into one region per shiaijo and those regions pair up, so 1
-// court or an even number is accepted and an odd count above 1 is refused
-// before any file is written.
-func TestPlayoffOptionsRun_CourtPairing(t *testing.T) {
-	for n := 1; n <= 8; n++ {
-		valid := n == 1 || n%2 == 0
+// TestPlayoffOptionsRun_ShiaijoCount sweeps --courts on create-playoffs across
+// 1..17. The tree gives each shiaijo its own block and the blocks merge in
+// pairs, so a power of two (1, 2, 4, 8 or 16) is accepted and everything else
+// is refused before any file is written.
+func TestPlayoffOptionsRun_ShiaijoCount(t *testing.T) {
+	for n := 1; n <= 17; n++ {
 		t.Run(fmt.Sprintf("courts=%d", n), func(t *testing.T) {
 			dir := t.TempDir()
 			input := filepath.Join(dir, "input.csv")
@@ -36,13 +35,14 @@ func TestPlayoffOptionsRun_CourtPairing(t *testing.T) {
 				courts:     n,
 			}
 			err := o.run(nil, nil)
-			if valid {
+			if legalShiaijoCount(n) {
 				assert.NoErrorf(t, err, "%d courts must be accepted", n)
 				return
 			}
 			require.Errorf(t, err, "%d courts must be rejected", n)
-			assert.Contains(t, err.Error(), "courts must be 1 or an even number")
-			assert.Contains(t, err.Error(), fmt.Sprintf("use %d or %d, or 1", n-1, n+1))
+			assert.Contains(t, err.Error(), "shiaijo count must be a power of two")
+			assert.Contains(t, err.Error(), ", or 1",
+				"the message must always offer a single shiaijo")
 
 			// The check runs before the workbook is opened, so a rejected run
 			// leaves no half-written output behind.
@@ -53,10 +53,29 @@ func TestPlayoffOptionsRun_CourtPairing(t *testing.T) {
 	}
 }
 
-// TestPlayoffOptionsRun_CourtCapBeforePairing pins the order of the two court
-// checks: 27 breaks both the A-Z label cap and the pairing rule, and the cap
-// is the one an operator needs to hear about first.
-func TestPlayoffOptionsRun_CourtCapBeforePairing(t *testing.T) {
+// TestPlayoffOptionsRun_RejectsEvenNonPowerOfTwo is the regression for the rule
+// change: --courts 6 passed the retired "1 or an even number" rule.
+func TestPlayoffOptionsRun_RejectsEvenNonPowerOfTwo(t *testing.T) {
+	dir := t.TempDir()
+	input := filepath.Join(dir, "input.csv")
+	require.NoError(t, os.WriteFile(input,
+		[]byte("John Doe,Dojo1\nJane Smith,Dojo2\nAlice,Dojo3\nBob,Dojo4\n"), 0o600))
+
+	o := &playoffOptions{
+		filePath:   input,
+		outputPath: filepath.Join(dir, "out.xlsx"),
+		determined: true,
+		courts:     6,
+	}
+	err := o.run(nil, nil)
+	require.Error(t, err, "6 is even but not a power of two")
+	assert.Contains(t, err.Error(), "use 4 or 8, or 1")
+}
+
+// TestPlayoffOptionsRun_CourtCapBeforeShiaijoCount pins the order of the two
+// court checks: 27 breaks both the A-Z label cap and the shiaijo-count rule,
+// and the cap is the one an operator needs to hear about first.
+func TestPlayoffOptionsRun_CourtCapBeforeShiaijoCount(t *testing.T) {
 	dir := t.TempDir()
 	input := filepath.Join(dir, "input.csv")
 	require.NoError(t, os.WriteFile(input, []byte("John Doe,Dojo1\nJane Smith,Dojo2\n"), 0o600))
@@ -70,13 +89,13 @@ func TestPlayoffOptionsRun_CourtCapBeforePairing(t *testing.T) {
 	err := o.run(nil, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "courts must be <= 26")
-	assert.NotContains(t, err.Error(), "even number")
+	assert.NotContains(t, err.Error(), "power of two")
 }
 
-// TestCreateHandler_CourtPairing covers the web form that drives the same
-// generator as the CLI flags: it must refuse an unpairable court count too,
+// TestCreateHandler_ShiaijoCount covers the web form that drives the same
+// generator as the CLI flags: it must refuse an illegal court count too,
 // otherwise the browser path is a hole in the rule.
-func TestCreateHandler_CourtPairing(t *testing.T) {
+func TestCreateHandler_ShiaijoCount(t *testing.T) {
 	post := func(t *testing.T, courts string) *httptest.ResponseRecorder {
 		t.Helper()
 		form := url.Values{
@@ -103,6 +122,13 @@ func TestCreateHandler_CourtPairing(t *testing.T) {
 		w := post(t, "3")
 		require.Equal(t, http.StatusBadRequest, w.Code)
 		assert.Contains(t, w.Body.String(), "use 2 or 4, or 1")
+	})
+
+	t.Run("6 courts rejected", func(t *testing.T) {
+		// Even but not a power of two: accepted by the retired rule.
+		w := post(t, "6")
+		require.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "use 4 or 8, or 1")
 	})
 
 	t.Run("2 courts accepted", func(t *testing.T) {

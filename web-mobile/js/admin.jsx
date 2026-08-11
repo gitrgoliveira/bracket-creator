@@ -316,10 +316,22 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
 
   // Opens the confirm modal (does NOT start anything). The dashboard's
   // "Start all" button calls this; confirmation happens inside the modal.
+  //
+  // A competition whose shiaijo allocation the draw cannot split is SPLIT OUT
+  // rather than offered: the server refuses its start with a 400, so batching
+  // it in produced a guaranteed entry in the "failed" list and a raw API
+  // message. Same derived value as the competition header and the dashboard
+  // card (competitionDrawBlockedReason, admin_helpers.jsx). They are listed in
+  // the modal with their reason instead of being silently dropped, so "start
+  // all" never quietly means "start most".
   const startAllCompetitions = () => {
-    const setupComps = (t.competitions || []).filter(c => c.status === "setup" && (c.players || []).length >= 2);
-    if (setupComps.length === 0) return;
-    setStartAll({ phase: "confirm", comps: setupComps, failed: [] });
+    const { startable, blocked } = window.partitionStartableCompetitions(t.competitions, t.courts);
+    // Nothing to say at all: no eligible competitions.
+    if (startable.length === 0 && blocked.length === 0) return;
+    // When EVERY eligible competition is blocked, still open the modal.
+    // Returning early would leave the dashboard's "Start all" button dead on
+    // click with no explanation anywhere.
+    setStartAll({ phase: "confirm", comps: startable, blocked, failed: [] });
   };
 
   // Runs the actual start for a given set of competitions. Used both for the
@@ -823,7 +835,12 @@ function normalizeCreatedRecord(created) {
 // while phase === "running".
 function StartAllModal({ state, onConfirm, onRetry, onClose }) {
   const dismissable = state.phase !== "running";
-  const { phase, comps = [], failed = [] } = state;
+  // `blocked` is [{ comp, reason }] for competitions this action must NOT
+  // offer: their shiaijo allocation is one the draw cannot split, so the
+  // server would refuse the start. They are named with their reason instead
+  // of dropped, so the count in the button and the competitions on the
+  // dashboard still add up for the operator.
+  const { phase, comps = [], failed = [], blocked = [] } = state;
 
   let title = "Start all competitions";
   if (phase === "running") title = "Starting competitions…";
@@ -832,7 +849,7 @@ function StartAllModal({ state, onConfirm, onRetry, onClose }) {
   const footer = <>
     {phase === "confirm" && <>
       <button type="button" className="btn btn--ghost" onClick={onClose}>Cancel</button>
-      <button type="button" className="btn btn--primary" onClick={onConfirm}>Start {window.pluralize(comps.length, "competition")}</button>
+      <button type="button" className="btn btn--primary" onClick={onConfirm} disabled={comps.length === 0}>Start {window.pluralize(comps.length, "competition")}</button>
     </>}
     {phase === "result" && <>
       {failed.length > 0 && <button type="button" className="btn btn--primary" onClick={onRetry}>Retry failed</button>}
@@ -844,12 +861,29 @@ function StartAllModal({ state, onConfirm, onRetry, onClose }) {
     <Modal title={title} onClose={onClose} dismissable={dismissable} footer={footer}>
       {phase === "confirm" && <>
         <p className="start-all__lead">
-          This will start {window.pluralize(comps.length, "competition")} now. Once a
-          competition starts, its pools and bracket are generated and scoring opens.
+          {comps.length === 0
+            ? "Nothing can be started yet."
+            : <>This will start {window.pluralize(comps.length, "competition")} now. Once a
+              competition starts, its pools and bracket are generated and scoring opens.</>}
         </p>
         <ul className="start-all__list">
           {comps.map(c => <li key={c.id}>{c.name}</li>)}
         </ul>
+        {blocked.length > 0 && (
+          <div data-testid="start-all-blocked">
+            <p className="start-all__lead">
+              {window.pluralize(blocked.length, "competition")} will NOT be started:
+            </p>
+            <ul className="start-all__list start-all__list--failed">
+              {blocked.map(b => (
+                <li key={b.comp.id}>
+                  <span className="start-all__failed-name">{b.comp.name}</span>
+                  <span className="start-all__failed-reason">{b.reason} Reassign shiaijo in its Settings tab.</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </>}
       {phase === "running" && (
         <div className="start-all__running">
@@ -882,4 +916,8 @@ window.mergeCompetitionsIntoTournament = mergeCompetitionsIntoTournament;
 window.mergeTournamentPatch = mergeTournamentPatch;
 window.normalizeCreatedRecord = normalizeCreatedRecord;
 
-export { mergeCompetitionsIntoTournament, mergeTournamentPatch, normalizeCreatedRecord };
+// StartAllModal is exported for the render suite only: it is a module-internal
+// component with no window binding, and its confirm phase now carries the
+// "will NOT be started" list, which is the surface that stops "Start all"
+// offering a competition the server would refuse.
+export { mergeCompetitionsIntoTournament, mergeTournamentPatch, normalizeCreatedRecord, StartAllModal };

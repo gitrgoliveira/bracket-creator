@@ -226,7 +226,13 @@ func ReadCSVFile(filePath string) ([][]string, error) {
 // AssignPoolsToCourts distributes numPools pools across numCourts courts using
 // contiguous blocks that match the tree sheet grouping. The first court gets
 // ceil(numPools/numCourts) pools, subsequent courts get the remainder.
-// Returns an error when numCourts exceeds numPools.
+//
+// Every court gets at least one pool WHEN numCourts <= numPools, which is what
+// makes a draw's blocks all non-empty (EffectiveDrawCourts is the clamp that
+// guarantees the precondition, and every draw goes through it). Asked for more
+// courts than pools it does not error, it leaves the trailing courts empty; the
+// error return is kept for callers that already handle one and for future
+// validation.
 func AssignPoolsToCourts(numPools, numCourts int) ([]int, error) {
 	if numCourts < 1 {
 		numCourts = 1

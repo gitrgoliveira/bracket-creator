@@ -208,6 +208,7 @@ Name[, Zekken/DisplayName], Dojo[, DanGrade][, source]
 
 ## Common Pitfalls
 
+- **Kendo uses NO MATS. Never write "mat" or "mats"** in code, comments, tests, UI strings, docs or commit messages. The fighting area is a **shiaijo** (in prose, a **court**); "shiai-jo" hyphenated on the public `docs/` site. "Mat" is judo/wrestling vocabulary and is simply wrong for this sport. Reaching for it to avoid repeating "court" is how it gets in. (The only legitimate `mat` in the tree is a QR bitmap variable in `web-mobile/js/qr.jsx`.)
 - Excel coordinates matter: changing match generation requires updating cell references and formula links across sheets
 - `team-matches=0` means individual tournaments, not team tournaments
 - The `errcheck` linter is enabled (test files excepted). Don't introduce `_ =` or bare ignored returns in production code. Wrap and propagate, or log via `handleExcelError`/`handleExcelDataError`

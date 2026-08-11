@@ -132,7 +132,28 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 		}
 	}
 
-	courtAssign, err := helper.AssignPoolsToCourts(len(pools), numCourts)
+	// The shiaijo count the pool phase actually runs on. It is DERIVED, not the
+	// operator's allocation: a court with no home pool would own an empty
+	// bracket region, so the draw steps the count down to what the pools can
+	// carry (helper.EffectiveDrawCourts), landing on a power of two because R9
+	// validates the derived value too, not merely an even number.
+	//
+	// The pool phase has to step down with it. helper.BuildKnockoutDraw applies
+	// the same clamp internally to the same pool count, so passing the RAW
+	// count here spread the pool matches over MORE shiaijo than the bracket
+	// had regions: 10 competitors at PoolSize 4 in max mode on 4 shiaijo gives
+	// 3 pools, so the pool phase ran on A, B and C (an allocation R9 forbids)
+	// while the bracket had two regions, A and B. The CLI has always clamped at
+	// the equivalent point (cmd/create-pools.go, before PrintPoolMatches and
+	// BuildKnockoutDraw), so this is also what keeps the two paths in parity.
+	//
+	// League is unaffected: it has exactly one pool, and the clamp of any count
+	// onto one pool is 1, which assigns that single pool to court 0 exactly as
+	// the raw count did. The single-pool spread below reads comp.Courts
+	// directly and still uses every shiaijo the league was allocated.
+	drawCourts := helper.EffectiveDrawCourts(len(pools), numCourts)
+
+	courtAssign, err := helper.AssignPoolsToCourts(len(pools), drawCourts)
 	if err != nil {
 		return fmt.Errorf("assigning pools to courts: %w", err)
 	}

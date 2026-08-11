@@ -698,11 +698,13 @@ func TestResolveQualifiedPools_ThreePoolsTwoWinners_SlotMapping(t *testing.T) {
 // real names. It exists because the 3-pool case could be read as "the earliest
 // pools bye"; here they do not.
 //
-// One shiaijo again, so R4(e) splits the five pools into half-blocks of 3
-// (A, B, C) and 2 (D, E). Block 1 holds A1, B1, C1 plus D2 and E2; block 2 holds
-// D1, E1 plus A2, B2 and C2. Five occupants each, so each block grants exactly
-// one named bye (D4) and R6 gives it to a home winner: A1 and D1, the first pool
-// of each block in pool order (no seeds, equal pool sizes).
+// One shiaijo again, so R4(e) subdivides the five pools into FOUR blocks by
+// repeated halving: (A, B), (C), (D), (E). Partners are block 1 with block 3 and
+// block 2 with block 4, so block 1 holds A1, B1 and the crossed-in D2; block 2
+// holds C1 and E2; block 3 holds D1 plus A2 and B2; block 4 holds E1 and C2.
+// The two odd blocks grant one named bye each (D4) and R6 gives both to a home
+// winner: A1 and D1, the first pool of each block in pool order (no seeds,
+// equal pool sizes).
 //
 // It used to pin two defects: the byes went to pools C and D purely by tree
 // position, and the padded draw carried two round-1 matches with BOTH sides
@@ -727,17 +729,17 @@ func TestResolveQualifiedPools_FivePoolsTwoWinners_ByePools(t *testing.T) {
 
 	assert.Equal(t, []string{
 		"A1|",   // block 1's bye, to its first home winner (R6-3)
-		"B1|D2", // home winner against a runner-up crossed in from block 2
-		"C1|E2", //
+		"B1|D2", // home winner against a runner-up crossed in from block 3
+		"C1|E2", // block 2: home winner against block 4's runner-up
 		"|",     // phantom: both slots empty, dropped downstream
-		"D1|",   // block 2's bye
-		"E1|A2", //
-		"B2|C2", // block 2 is short of home winners (R4f)
+		"D1|",   // block 3's bye
+		"A2|B2", // block 3 is short of home winners (R4f)
+		"E1|C2", // block 4
 		"|",     // phantom
 	}, round0Slots(b), "5-pool x 2-qualifier slot mapping changed")
 
-	// The byes go to the two blocks' first home winners under R6 precedence,
-	// not to whichever leaf the split left odd.
+	// The byes go to the two odd blocks' first home winners under R6
+	// precedence, not to whichever leaf the split left odd.
 	var byeHolders []string
 	for _, m := range b.Rounds[0] {
 		switch {
@@ -748,7 +750,7 @@ func TestResolveQualifiedPools_FivePoolsTwoWinners_ByePools(t *testing.T) {
 		}
 	}
 	assert.Equal(t, []string{"A1", "D1"}, byeHolders,
-		"each half-block byes its highest-precedence home winner (R6)")
+		"each odd block byes its highest-precedence home winner (R6)")
 
 	// The empty round-1 matches are completed with no winner at all.
 	for _, idx := range []int{3, 7} {

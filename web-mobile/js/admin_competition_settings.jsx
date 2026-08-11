@@ -493,28 +493,33 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   const isStarted = !!(local.status && local.status !== "setup" && local.status !== "draw-ready");
 
   // Shiaijo-count rule (shiaijoCountError, mirrored from
-  // helper.ValidateCourtPairing): a competition whose draw builds a knockout
-  // bracket runs on 1 shiaijo or an even number. League and Swiss are out of
-  // scope (formatDrawsBracket): their courts are parallel mats with no
-  // bracket regions to pair, and the league hint right under these pills
-  // recommends floor(players/2)-1 courts, which is odd half the time.
+  // helper.ValidateShiaijoCount): a competition whose draw builds a knockout
+  // bracket runs on 1, 2, 4, 8 or 16 shiaijo. League and Swiss are out of
+  // scope (formatDrawsBracket): their shiaijo run in parallel with no
+  // bracket blocks to merge, and the league hint right under these pills
+  // recommends floor(players/2)-1 courts, which is rarely a power of two.
   //
-  // Three distinct states, deliberately kept apart:
+  // Four distinct states, deliberately kept apart:
   //
-  //   courtsErr      the CURRENT selection is unpairable, drives the red hint
+  //   courtsHint     the STANDING teaching hint: which counts this operator
+  //                  may pick and why, shown whether or not the current
+  //                  selection is valid. Venue-aware, so a 3-shiaijo
+  //                  tournament reads "can use 1 or 2 (this tournament has
+  //                  3)" instead of learning the rule from a refusal.
+  //   courtsErr      the CURRENT selection is invalid, drives the red hint
   //                  under the court pills.
-  //   savedCourtsErr the allocation ON DISK is unpairable, drives the
-  //                  persistent warning banner. A competition saved before
-  //                  this rule existed (or one that inherited an odd venue
-  //                  court list) lands here and keeps running; it just cannot
+  //   savedCourtsErr the allocation ON DISK is invalid, drives the persistent
+  //                  warning banner. A competition saved before this rule
+  //                  existed (or one that inherited a 3-shiaijo venue court
+  //                  list) lands here and keeps running; it just cannot
   //                  generate a draw until the operator fixes it.
   //   courtsChanged  the operator is actually reassigning shiaijo.
   //
   // Save is blocked only for `courtsErr && courtsChanged`, exactly matching
   // the server, which validates courts on write only. Blocking Save whenever
-  // the STORED value is odd would lock the operator out of every unrelated
-  // edit on that screen (name, date, durations, check-in), which is the one
-  // outcome this rule must not cause.
+  // the STORED value is invalid would lock the operator out of every
+  // unrelated edit on that screen (name, date, durations, check-in), which is
+  // the one outcome this rule must not cause.
   const savedCourts = c.courts || [];
   const courtsErr = window.formatDrawsBracket(local.format)
     ? window.shiaijoCountError((local.courts || []).length) : null;
@@ -522,6 +527,11 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     ? window.shiaijoCountError(savedCourts.length) : null;
   const courtsChanged = (local.courts || []).join(",") !== savedCourts.join(",");
   const blockingCourtsErr = !!courtsErr && courtsChanged;
+  // The mechanism sentence is dropped from the standing hint while the red
+  // error is on screen: the error states it one line above, and printing it
+  // twice buries the part that changes (which counts to pick).
+  const courtsHint = window.formatDrawsBracket(local.format)
+    ? window.shiaijoCountHint((tournament.courts || []).length, !courtsErr) : null;
 
   // Shiaijo the competition holds that the tournament no longer has (the
   // operator shrank the venue's court count under a competition already
@@ -538,7 +548,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // The single disabled-condition for BOTH Save buttons (header and footer).
   // Derived once on purpose: the footer button used to repeat the expression
   // and had drifted, omitting hasDurationError AND blockingCourtsErr, so with
-  // an unpairable shiaijo count the header button greyed out while the footer
+  // an invalid shiaijo count the header button greyed out while the footer
   // one stayed live, fired the PUT and took a 400. Anything that should block
   // saving belongs here, never at a call site.
   const saveDisabled = !isDirty || saving || hasDurationError || blockingCourtsErr;
@@ -564,16 +574,18 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           </button>
         </div>
       </div>
-      {/* Persistent warning for an allocation ALREADY on disk that cannot be
-          paired. Not a blocker: the competition keeps running and the rest of
-          this screen stays editable (the server validates courts on write
-          only). It stays visible until the allocation is changed, because the
-          draw cannot be generated while it stands. Suppressed once the
-          operator has staged a fix, where the pills speak for themselves. */}
+      {/* Persistent warning for an allocation ALREADY on disk that the draw
+          cannot halve down. Not a blocker: the competition keeps running and
+          the rest of this screen stays editable (the server validates courts
+          on write only), which is what lets a record written before this rule
+          existed keep loading and rendering. It stays visible until the
+          allocation is changed, because the draw cannot be generated while it
+          stands. Suppressed once the operator has staged a fix, where the
+          pills speak for themselves. */}
       {savedCourtsErr && !courtsChanged && (
-        <div className="alert alert--warn" style={{ marginBottom: 12 }} data-testid="odd-shiaijo-banner">
+        <div className="alert alert--warn" style={{ marginBottom: 12 }} data-testid="shiaijo-count-banner">
           <div style={{ fontWeight: 600, marginBottom: 6 }}>
-            ⚠ This competition is assigned {savedCourts.length} shiaijo, which cannot be paired.
+            ⚠ This competition is assigned {savedCourts.length} shiaijo, which the knockout draw cannot split.
           </div>
           <div>
             {savedCourtsErr} Change the assignment below and save; the draw cannot be generated until you do.
@@ -729,14 +741,23 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           </div>
         )}
         {/* Shiaijo-count rule, shown with the other court hints below so the
-            operator reads cap, suggestion and pairing in one place. Rendered
-            for ANY unpairable selection, staged or already saved, so the
+            operator reads cap, suggestion and count rule in one place.
+            Rendered for ANY invalid selection, staged or already saved, so the
             field never looks fine while the draw is blocked. Save itself is
-            gated on blockingCourtsErr (a CHANGE to an unpairable count), not
-            on this hint. */}
+            gated on blockingCourtsErr (a CHANGE to an invalid count), not on
+            this hint. */}
         {courtsErr && (
-          <div className="field__hint" style={{ color: "var(--red)", fontWeight: 600 }} data-testid="odd-shiaijo-hint">
+          <div className="field__hint" style={{ color: "var(--red)", fontWeight: 600 }} data-testid="shiaijo-count-error">
             {courtsErr}
+          </div>
+        )}
+        {/* STANDING hint: teaches the rule before it can block anything, so
+            the operator meets "you may pick 1 or 2 here" rather than learning
+            it from a refusal. Shown for every valid AND invalid selection;
+            only league/Swiss (out of scope) drop it. */}
+        {courtsHint && (
+          <div className="field__hint" data-testid="shiaijo-count-hint">
+            {courtsHint}
           </div>
         )}
         {(local.format === "league" || local.poolFormat === "partial") ? (() => {
@@ -744,7 +765,12 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           const ct = (n) => n === 1 ? "1 court" : `${n} courts`;
           const pt = (n) => n === 1 ? "1 player" : `${n} players`;
           if (playerCount < 2) return <div className="field__hint">Suggested: up to {ct(Math.max(1, Math.floor(playerCount / 2) - 1))} for {pt(playerCount)}</div>;
-          const numCourts = local.courts.length;
+          // `local.courts` is seeded from the competition record, which Go
+          // ships as `courts: null` when it was stored without a courts key.
+          // Every other read on this screen already defaults it; this one did
+          // not, so the league/partial-pool branch alone crashed the settings
+          // tab - the very screen an operator opens to assign the shiaijo.
+          const numCourts = (local.courts || []).length;
           const hardCap = Math.max(1, Math.floor(playerCount / 2));
           const suggestedCourts = Math.max(1, hardCap - 1);
           if (numCourts > hardCap) return <div className="field__hint" style={{ color: "var(--red)" }}>Too many courts. {hardCap} max for {pt(playerCount)} (suggested: {suggestedCourts})</div>;

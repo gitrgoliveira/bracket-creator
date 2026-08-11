@@ -172,20 +172,41 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 		return res
 	}
 
+	// Load the tournament once per row; the cost is a file stat + cache hit
+	// after the first row. It feeds three checks below (shiaijo inheritance,
+	// the court validators and the date-range check). Failures are soft
+	// (res.Error, not HTTP abort) matching all other per-row validation
+	// patterns.
+	importTourn, importTournErr := store.LoadTournament()
+	if importTournErr != nil {
+		res.Error = "load tournament: " + importTournErr.Error()
+		return res
+	}
+
+	// Guarantee >=1 court: a manifest row that omits courts inherits the
+	// tournament's courts, identical to the POST /competitions and PUT
+	// settings handlers (resolveCompetitionCourts). Keeps all three write
+	// paths on one rule instead of a special-case "A" default for imports.
+	//
+	// Resolved BEFORE the court validator below, matching POST /competitions.
+	// A manifest that simply omits the optional `courts:` key is the ORDINARY
+	// case, so validating the pre-resolution list meant the commonest import
+	// on a 3-shiaijo venue silently persisted a 3-shiaijo competition, while
+	// the same manifest with the courts spelled out was refused.
+	comp.Courts = resolveCompetitionCourts(comp.Courts, importTourn)
+
 	// Cross-file guard symmetry with the POST /competitions handler, which
-	// calls validateCompetitionCourts to reject multi-character / >26-court
-	// manifests and, for a bracket-drawing competition, an unpairable
-	// shiaijo count (1 or an even number). Like a create, an imported row
-	// authors a brand-new allocation, so there is no stored value to
-	// preserve and the full check applies; the settings PUT is the one write
-	// path that splits the two checks. Pre-fix the
-	// import path bypassed this check and could land a Competition with
-	// court labels that no other write path would accept, e.g. a manifest
-	// row with 30 courts or court="AA" would persist via SaveCompetition
-	// here while the same value via the REST API would 400. Empty courts
-	// are permitted here, resolveCompetitionCourts (below, once the
-	// tournament is loaded) inherits the tournament's courts, matching the
-	// POST/PUT handlers. Per-row res.Error to match the other patterns.
+	// calls validateCompetitionCourts on the same resolved list to reject
+	// multi-character / >26-court manifests and, for a bracket-drawing
+	// competition, an illegal shiaijo count (anything but 1, 2, 4, 8 or 16).
+	// Like a create, an imported row authors a brand-new allocation, so there
+	// is no stored value to preserve and the full check applies; the settings
+	// PUT is the one write path that splits the two checks. Pre-fix the import
+	// path bypassed this check and could land a Competition with court labels
+	// that no other write path would accept, e.g. a manifest row with 30
+	// courts or court="AA" would persist via SaveCompetition here while the
+	// same value via the REST API would 400. Per-row res.Error to match the
+	// other patterns.
 	if err := validateCompetitionCourts(comp.Courts, comp.Format); err != nil {
 		res.Error = "courts: " + err.Error()
 		return res
@@ -202,24 +223,10 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 
 	// Cross-file guard symmetry with POST/PUT /competitions: reject a
 	// competition date that falls outside the tournament's day range.
-	// Load the tournament once per row; the cost is a file stat + cache
-	// hit after the first row. Failures are soft (res.Error, not HTTP
-	// abort) matching all other per-row validation patterns.
-	importTourn, importTournErr := store.LoadTournament()
-	if importTournErr != nil {
-		res.Error = "load tournament: " + importTournErr.Error()
-		return res
-	}
 	if err := validateCompetitionDateInTournament(comp, importTourn); err != nil {
 		res.Error = err.Error()
 		return res
 	}
-
-	// Guarantee >=1 court: a manifest row that omits courts inherits the
-	// tournament's courts, identical to the POST /competitions and PUT
-	// settings handlers (resolveCompetitionCourts). Keeps all three write
-	// paths on one rule instead of a special-case "A" default for imports.
-	comp.Courts = resolveCompetitionCourts(comp.Courts, importTourn)
 
 	// Cross-file guard symmetry with POST /competitions and PUT
 	// /competitions/:id (handlers_competition.go): reject unknown formats

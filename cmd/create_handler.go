@@ -116,9 +116,9 @@ func createTournamentHandler(c *gin.Context) {
 		return
 	}
 	// Same shiaijo-count rule the --courts flag enforces on the CLI: this
-	// form drives the identical generator, so an odd count above 1 would
-	// produce the same unpairable court regions here.
-	if err := helper.ValidateCourtPairing(courts); err != nil {
+	// form drives the identical generator, so a count that is not a power of
+	// two would produce the same unmergeable court blocks here.
+	if err := helper.ValidateShiaijoCount(courts); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}

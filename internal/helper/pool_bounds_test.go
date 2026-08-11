@@ -100,30 +100,50 @@ func TestPageRosterPools(t *testing.T) {
 			"one page per shiaijo overlays the court's whole block")
 	}
 
-	// Two pages per court: each page keeps only the pools it prints.
+	// Two pages per court: each page keeps only the pools it prints. The
+	// expectation is spelled out rather than re-derived from the page's own
+	// leaves, which is the whole point - "every pool it kept is printed on the
+	// page" is how PageRosterPools DEFINES its output, so asserting it back
+	// cannot fail. Shiaijo A's block is [Pool A, Pool B] on both of A's pages,
+	// and each page carries one of them plus a crossed-in runner-up whose pool
+	// is outside the block and therefore gets no roster.
 	pages := SubdivideRegions(draw.Regions, 2)
 	require.Len(t, pages, 4)
+	wantClaims := [][]string{{"Pool A"}, {"Pool B"}, {"Pool C"}, {"Pool D"}}
+	wantLeaves := [][]string{
+		{"Pool A-1st", "Pool C-2nd"},
+		{"Pool B-1st", "Pool D-2nd"},
+		{"Pool C-1st", "Pool A-2nd"},
+		{"Pool D-1st", "Pool B-2nd"},
+	}
 	for i, page := range pages {
 		start, end := PoolBoundsForSubtree(4, 2, len(pages), i)
-		got := PageRosterPools(pools[start:end], page)
-		printed := map[string]bool{}
-		for _, l := range TreeLeafLabels(page) {
-			name, _ := splitPoolNameAndRank(l)
-			printed[name] = true
+		got := []string{}
+		for _, p := range PageRosterPools(pools[start:end], page) {
+			got = append(got, p.PoolName)
 		}
-		for _, p := range got {
-			assert.Truef(t, printed[p.PoolName], "page %d overlays %s but does not print it", i+1, p.PoolName)
-		}
+		assert.Equalf(t, wantLeaves[i], TreeLeafLabels(page), "page %d bracket", i+1)
+		assert.Equalf(t, wantClaims[i], got, "page %d roster overlay", i+1)
 	}
 
 	assert.Nil(t, PageRosterPools(nil, draw.Root))
 	assert.Nil(t, PageRosterPools(pools, nil))
 }
 
-// TestRenderedPageOverlayNeverClaimsAnAbsentPool sweeps the property over the
-// whole configuration space, from the rendered page rather than from the range
-// arithmetic.
-func TestRenderedPageOverlayNeverClaimsAnAbsentPool(t *testing.T) {
+// TestPageOverlayNeverClaimsAnAbsentPool sweeps the narrowing over the whole
+// configuration space at the HELPER level: PoolBoundsForSubtree +
+// PageRosterPools over the real page subtrees, with the page's contents
+// re-derived from its leaves.
+//
+// Its reach is limited by construction and that limit is the reason the name no
+// longer says "rendered": both sides key on the same leaf labels, so it catches
+// a narrowing that filters on the wrong THING (this is how it earns its keep)
+// but not one that filters on the wrong RANGE. A page handed every court's
+// pools still only keeps the ones it prints, so this sweep passes while the
+// operator gets a page overlaying rosters from a shiaijo they are not running.
+// TestTreePageHomePoolsAlwaysPresent (draw_court_mapping_test.go) closes that
+// off the rendered workbook.
+func TestPageOverlayNeverClaimsAnAbsentPool(t *testing.T) {
 	for _, numCourts := range []int{1, 2, 4} {
 		for nPools := 1; nPools <= 12; nPools++ {
 			for poolWinners := 1; poolWinners <= 4; poolWinners++ {

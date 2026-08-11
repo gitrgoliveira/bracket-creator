@@ -55,7 +55,7 @@ func newCreatePoolCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&o.withZekkenName, "with-zekken-name", "z", false, "Use the second column of the input CSV as the participant's display name on the zekken. Falls back to sanitized name if empty.")
 	cmd.Flags().BoolVarP(&o.singleTree, "single-tree", "", false, "Create a single tree instead of dividing into multiple sheets (default false)")
 	cmd.Flags().IntVarP(&o.teamMatches, "team-matches", "t", 0, "create team matches with x players per team (default 0)")
-	cmd.Flags().IntVarP(&o.courts, "courts", "c", 2, "number of Shiaijo (courts) to distribute pools across (default 2)")
+	cmd.Flags().IntVarP(&o.courts, "courts", "c", 2, "number of Shiaijo (courts) to distribute pools across: 1, 2, 4, 8 or 16 (default 2)")
 	cmd.Flags().StringVarP(&o.titlePrefix, "title-prefix", "", "", "title prefix for the tournament (default \"\")")
 	cmd.Flags().StringVarP(&o.seedsPath, "seeds", "", "", "CSV file mapping exact participant names to their initial seed rank")
 	cmd.Flags().StringVarP(&o.numberPrefix, "number-prefix", "n", "", "Assign consecutive numbers with this letter prefix (e.g. 'K' produces K1, K2, ...)")
@@ -86,13 +86,14 @@ func (o *poolOptions) run(cmd *cobra.Command, args []string) error {
 	if err := helper.ValidateCourts(o.courts); err != nil {
 		return err
 	}
-	// Shiaijo-count rule: 1 court or an even number. The tree is split into
-	// one region per court and the regions pair up, so an odd count above 1
-	// leaves one court without a partner. Checked after ValidateCourts so
-	// the 26-court label cap is still reported first for a value that
-	// breaks both. Re-checked after the pool-count clamp below, which can
-	// lower o.courts to an odd value the operator never asked for.
-	if err := helper.ValidateCourtPairing(o.courts); err != nil {
+	// Shiaijo-count rule: a power of two (1, 2, 4, 8 or 16). The tree gives
+	// each court its own block and the blocks merge in pairs, so the count
+	// has to halve cleanly. Checked after ValidateCourts so the 26-court
+	// label cap is still reported first for a value that breaks both. The
+	// pool-count clamp below can lower o.courts to a value the operator
+	// never asked for, so it steps down through helper.EffectiveDrawCourts,
+	// which lands on a legal count by construction.
+	if err := helper.ValidateShiaijoCount(o.courts); err != nil {
 		return err
 	}
 
@@ -229,11 +230,12 @@ func (o *poolOptions) createPools(entries []string) error {
 	// Clamp courts to the number of pools (e.g. if defaulted to 2 but only 1 pool exists).
 	// The clamp can produce a value the operator never asked for, so it has to
 	// respect the shiaijo-count rule too: clamping a legal --courts 4 onto 3
-	// pools would otherwise silently hand the draw an unpairable 3 courts.
-	// Step down to the nearest even count instead (1 pool stays 1, which is
-	// the explicitly allowed single-shiaijo case). helper.EffectiveDrawCourts
-	// is the same rule the draw applies internally, shared so the Pool Matches
-	// and Names sheets band by the same court count the bracket regions use.
+	// pools would otherwise silently hand the draw an illegal 3 courts. Step
+	// down to the largest power of two that fits instead (1 pool stays 1,
+	// which is the explicitly allowed single-shiaijo case; 7 pools carry 4
+	// courts, not the merely-even 6). helper.EffectiveDrawCourts is the same
+	// rule the draw applies internally, shared so the Pool Matches and Names
+	// sheets band by the same court count the bracket regions use.
 	o.courts = helper.EffectiveDrawCourts(numPools, o.courts)
 
 	// Create pool matches BEFORE the draw: R6's second bye criterion ranks by
@@ -256,6 +258,16 @@ func (o *poolOptions) createPools(entries []string) error {
 	draw := helper.BuildKnockoutDraw(pools, o.poolWinners, o.courts)
 	if draw == nil {
 		return fmt.Errorf("could not build a knockout draw from %d pools with %d winners per pool", numPools, o.poolWinners)
+	}
+
+	// R2/D7: a seeding constraint the configuration cannot satisfy is a
+	// WARNING, never an error -- the draw always happens and the operator can
+	// move a seed by hand. On the command line the operator is watching this
+	// output as the workbook is written, so stdout is where they read it; the
+	// workbook itself is the artifact, not a message channel. Silent on a
+	// competition with no seeds, which is a normal configuration.
+	for _, w := range helper.SeedPlacementWarnings(draw, pools, o.courts) {
+		fmt.Printf("Warning: %s\n", w)
 	}
 
 	eliminationMatchRounds, numPages, err := helper.RenderKnockoutPages(f, draw, o.singleTree, pools, poolCoords, playerCoords, matchWinners)

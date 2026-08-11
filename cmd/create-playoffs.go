@@ -47,7 +47,7 @@ func newCreatePlayoffCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&o.withZekkenName, "with-zekken-name", "z", false, "Use the second column of the input CSV as the participant's display name on the zekken. Falls back to sanitized name if empty.")
 	cmd.Flags().BoolVarP(&o.singleTree, "single-tree", "", false, "Create a single tree instead of dividing into multiple sheets (default false)")
 	cmd.Flags().IntVarP(&o.teamMatches, "team-matches", "t", 0, "create team matches with x players per team (default 0)")
-	cmd.Flags().IntVarP(&o.courts, "courts", "c", 2, "number of Shiaijo (courts) to distribute tree pages across (default 2)")
+	cmd.Flags().IntVarP(&o.courts, "courts", "c", 2, "number of Shiaijo (courts) to distribute tree pages across: 1, 2, 4, 8 or 16 (default 2)")
 	cmd.Flags().StringVarP(&o.titlePrefix, "title-prefix", "", "", "title prefix for the tournament (default \"\")")
 	cmd.Flags().StringVarP(&o.numberPrefix, "number-prefix", "n", "", "Assign consecutive numbers with this letter prefix (e.g. 'K' produces K1, K2, ...)")
 
@@ -75,12 +75,13 @@ func (o *playoffOptions) run(cmd *cobra.Command, args []string) error {
 	if err := helper.ValidateCourts(o.courts); err != nil {
 		return err
 	}
-	// Shiaijo-count rule: 1 court or an even number. The tree is split into
-	// one region per court and the regions pair up, so an odd count above 1
-	// leaves one court without a partner. Checked after ValidateCourts so
-	// the 26-court label cap is still reported first for a value that
-	// breaks both.
-	if err := helper.ValidateCourtPairing(o.courts); err != nil {
+	// Shiaijo-count rule: a power of two (1, 2, 4, 8 or 16). The tree gives
+	// each court its own block and the blocks merge in pairs, so the count
+	// has to halve cleanly. Checked after ValidateCourts so the 26-court
+	// label cap is still reported first for a value that breaks both. The
+	// page-count clamp further down is safe by construction: it clamps to
+	// helper.RoundToPowerOf2, which is already a power of two.
+	if err := helper.ValidateShiaijoCount(o.courts); err != nil {
 		return err
 	}
 

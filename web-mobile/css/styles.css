@@ -1110,8 +1110,16 @@ a:hover {
 
 .tcard__actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   padding-top: 4px;
+}
+
+/* Full-row explanation under the card's action buttons (e.g. why a start is
+   blocked). Without the flex-basis it becomes a second column and squeezes
+   the button beside it into a 3-line sliver. */
+.tcard__actions .tcard__action-note {
+  flex-basis: 100%;
 }
 
 .tcard__stat {
@@ -6117,6 +6125,36 @@ button.pool-match-row {
 .parse-preview .cell--missing {
   color: var(--red, #c00);
   background: var(--danger-soft);
+}
+
+/* ---------- Import results rows (.import-result) ----------
+   One competition per row: a head line carrying the name and the
+   imported/not-imported tag, and, when the server refused it, the reason as
+   ordinary body text on its own line beneath.
+
+   The reason used to render inside .tag-badge--warn, which is 10px, uppercase
+   and letter-spaced: correct for a one- or two-word tag, and unreadable for
+   the shiaijo-count sentence, which is over 200 characters. It also sat inside
+   the flex head, so at tablet width it wrapped to three shouted lines. Full
+   body size, normal case, its own line, and it wraps like prose. */
+.import-result {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.import-result__head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.import-result__error {
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--danger-ink);
+  text-transform: none;
+  letter-spacing: normal;
 }
 
 .alert {

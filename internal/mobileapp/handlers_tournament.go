@@ -108,9 +108,32 @@ func validateCourts(courts []string) error {
 	return validateCourtLabels(courts)
 }
 
+// courtsRemovedBy returns the shiaijo the incoming list DROPS from the stored
+// one, in stored order. It is what makes the shrink guard a guard on the
+// REQUEST rather than on the state of the world: a court that is missing from
+// both lists was already missing before this request, so no update can be
+// blamed for it.
+func courtsRemovedBy(stored, incoming []string) []string {
+	if len(stored) == 0 {
+		return nil
+	}
+	keep := make(map[string]bool, len(incoming))
+	for _, cc := range incoming {
+		keep[cc] = true
+	}
+	var removed []string
+	for _, cc := range stored {
+		if keep[cc] {
+			continue
+		}
+		removed = append(removed, cc)
+	}
+	return removed
+}
+
 // competitionsBlockingCourtRemoval is the pure half of the shrink guard: it
-// reports the competitions that would be ORPHANED by a tournament court list,
-// i.e. those still assigned a shiaijo the incoming list does not contain.
+// reports the competitions that this request would ORPHAN, i.e. those still
+// assigned a shiaijo the incoming list REMOVES from the stored one.
 //
 // Why refuse rather than prune. Dropping a court from tournament.md used to
 // leave every competition's own list untouched, so a competition assigned
@@ -127,6 +150,17 @@ func validateCourts(courts []string) error {
 //   - refusing the tournament update tells the operator exactly which
 //     competition holds the court and changes nothing behind their back.
 //
+// The comparison is stored-vs-incoming, never competition-vs-incoming alone.
+// A competition can already hold a shiaijo the venue does not have (nothing
+// enforced the subset before this rule existed, and tournament-data survives a
+// binary upgrade), and such an orphan is not this request's doing. Judging the
+// competition against the incoming list alone made EVERY tournament write fail
+// while one existed: renaming the tournament, fixing the venue address,
+// changing branding, rotating the admin password. validateCourts rejects an
+// empty list, so there was not even a partial-PUT escape. The draw gate
+// (engine.ValidateCourtsInTournament) is what refuses to USE a pre-existing
+// orphan, and the settings screen is where the operator clears it.
+//
 // Only LIVE competitions block. A completed or invalidated one is history:
 // no new draw or schedule can be built for it, and blocking on it would wedge
 // the common multi-day case (morning divisions ran on 4 shiaijo, the
@@ -137,7 +171,15 @@ func validateCourts(courts []string) error {
 //
 // Returns nil when nothing blocks. The message names every blocker so the
 // operator can fix them in one pass rather than one 400 at a time.
-func competitionsBlockingCourtRemoval(comps []*state.Competition, courts []string) error {
+func competitionsBlockingCourtRemoval(comps []*state.Competition, stored, courts []string) error {
+	removed := courtsRemovedBy(stored, courts)
+	if len(removed) == 0 {
+		return nil
+	}
+	dropped := make(map[string]bool, len(removed))
+	for _, cc := range removed {
+		dropped[cc] = true
+	}
 	var blockers []string
 	for _, comp := range comps {
 		if comp == nil {
@@ -146,7 +188,15 @@ func competitionsBlockingCourtRemoval(comps []*state.Competition, courts []strin
 		if comp.Status == state.CompStatusComplete || comp.Status == state.CompStatusInvalid {
 			continue
 		}
-		missing := engine.CourtsOutsideTournament(comp.Courts, courts)
+		// CourtsOutsideTournament stays the single "outside the venue"
+		// predicate; the filter below narrows its answer to the shiaijo THIS
+		// request takes away, leaving pre-existing orphans alone.
+		var missing []string
+		for _, cc := range engine.CourtsOutsideTournament(comp.Courts, courts) {
+			if dropped[cc] {
+				missing = append(missing, cc)
+			}
+		}
 		if len(missing) == 0 {
 			continue
 		}
@@ -168,8 +218,27 @@ func competitionsBlockingCourtRemoval(comps []*state.Competition, courts []strin
 // checkCourtRemoval is the store-walking half of the shrink guard. It returns
 // (infraErr, validationErr) like checkUniqueCompFields: infraErr means the
 // store could not be queried (caller should 500), validationErr means a live
-// competition still depends on a court being removed (caller should 400).
+// competition still depends on a court this request REMOVES (caller should
+// 400).
+//
+// The stored court list is loaded here, not passed in, because both call sites
+// (PUT and POST /tournament) run before the write transform and neither has it
+// to hand. A tournament that does not exist yet removes nothing.
 func checkCourtRemoval(store *state.Store, courts []string) (error, error) {
+	tourn, err := store.LoadTournament()
+	if err != nil {
+		return fmt.Errorf("load tournament: %w", err), nil
+	}
+	var stored []string
+	if tourn != nil {
+		stored = tourn.Courts
+	}
+	// Nothing is being taken away, so nothing can be orphaned by this write.
+	// Short-circuiting here also keeps the common case (an edit that leaves
+	// the venue's shiaijo alone) from walking every competition on disk.
+	if len(courtsRemovedBy(stored, courts)) == 0 {
+		return nil, nil
+	}
 	ids, err := store.ListCompetitions()
 	if err != nil {
 		// No competitions directory yet (fresh data dir) is not a failure:
@@ -187,63 +256,68 @@ func checkCourtRemoval(store *state.Store, courts []string) (error, error) {
 		}
 		comps = append(comps, comp)
 	}
-	return nil, competitionsBlockingCourtRemoval(comps, courts)
+	return nil, competitionsBlockingCourtRemoval(comps, stored, courts)
 }
 
 // validateCompetitionCourts is the looser competition-level check:
 // 0..helper.MaxCourts entries, each (when present) a single non-empty
-// character, and a pairable count. Empty is allowed at validation time
-// because all three write paths (POST /competitions, PUT settings, and the
-// manifest importer) resolve empty courts to the tournament's courts via
-// resolveCompetitionCourts immediately after this check, so a persisted
-// competition always carries >=1 court. The label and cap invariants from
-// validateCourtLabels still apply when courts are explicitly provided.
+// character, and a legal shiaijo count. The label and cap invariants from
+// validateCourtLabels apply, plus the R9 count rule.
 //
 // Used where a NEW allocation is authored (POST /competitions and the
-// manifest importer). The settings PUT deliberately does NOT call this
-// one: it checks labels here and defers the pairing check to the update
-// transform, where the STORED allocation is known and the check can be
-// limited to an allocation actually being changed. See
-// validateCompetitionCourtPairing.
+// manifest importer), and both of those call it on the RESOLVED court list
+// -- after resolveCompetitionCourts has materialised an omitted list from
+// the tournament's courts. That ordering is load-bearing: an empty list
+// MEANS "inherit the tournament's courts", so validating it before
+// resolution validated a value that is never stored and let a 3-shiaijo
+// venue smuggle a 3-shiaijo competition in by inheritance, while the
+// operator who typed the same three courts out was refused. The value that
+// gets persisted is the value that gets validated.
+//
+// The settings PUT deliberately does NOT call this one: it checks labels up
+// front and defers the count check to the update transform, where the
+// STORED allocation is known and the check can be limited to an allocation
+// actually being changed. See validateCompetitionShiaijoCount.
 func validateCompetitionCourts(courts []string, format string) error {
 	if err := validateCourtLabels(courts); err != nil {
 		return err
 	}
-	return validateCompetitionCourtPairing(courts, format)
+	return validateCompetitionShiaijoCount(courts, format)
 }
 
-// validateCompetitionCourtPairing rejects an odd competition-level court
-// allocation greater than 1 (helper.ValidateCourtPairing owns the rule and
-// its message; the knockout draw pairs shiaijo, so an odd count leaves one
-// without a partner). 1 court is valid, and so is an empty list, which
-// means "inherit the tournament's courts" and is resolved by
-// resolveCompetitionCourts right after every call site.
+// validateCompetitionShiaijoCount rejects a competition-level court
+// allocation that is not a power of two (helper.ValidateShiaijoCount owns the
+// rule and its message: the knockout draw gives each shiaijo its own block of
+// the bracket and the blocks merge in pairs, so the count has to halve
+// cleanly). 1, 2, 4, 8 and 16 are legal; 3, 5, 6, 7, 10 and the rest are not.
+//
+// An empty list passes, because it means "inherit the tournament's courts"
+// and carries no count of its own. Every caller either resolves it first
+// (POST /competitions, the manifest importer) or is comparing it against a
+// stored allocation that was itself already resolved (the settings PUT).
 //
 // Scoped by format to the competitions whose draw builds a bracket
 // (engine.CompetitionDrawsBracket): a league or Swiss competition has no
-// bracket regions to pair, and its courts are plain parallel mats, so the
-// rule does not bind there. Note the app itself suggests odd court counts
+// bracket blocks to merge, and its courts run in parallel, so the
+// rule does not bind there. Note the app itself suggests court counts like 3
 // for a league (engine.SuggestedMaxCourts is floor(N/2)-1), which a
 // format-blind rule would then reject.
 //
 // Note what else is NOT validated: the TOURNAMENT's court list. The rule is
-// per competition, so a 5-shiaijo venue is perfectly legal and simply
-// cannot give all five to one bracket competition (4 + 1 across two
-// competitions is the intended shape). A competition that inherits an odd
-// venue list rather than choosing its own is left to the engine's draw-time
-// gate, which refuses the draw with the same message: rejecting it here
-// would make an odd venue unusable for competition creation, which is
-// precisely the tournament-level constraint the rule does not impose.
+// per competition, so a 3-, 5- or 7-shiaijo venue is perfectly legal and
+// simply cannot give all of them to one bracket competition (4 + 1 across
+// two competitions is the intended shape on a 5-court venue; a 3-court venue
+// runs its competitions on 2 and 1).
 //
-// Existing data is validated on WRITE only. A competition already saved
-// with an odd allocation keeps running and keeps being editable; the
-// operator UI shows a persistent warning on its settings screen until the
-// allocation is changed.
-func validateCompetitionCourtPairing(courts []string, format string) error {
+// Existing data is validated on WRITE only. A competition already saved with
+// an invalid allocation keeps running and keeps being editable; the operator
+// UI shows a persistent warning on its settings screen until the allocation
+// is changed.
+func validateCompetitionShiaijoCount(courts []string, format string) error {
 	if len(courts) == 0 || !engine.CompetitionDrawsBracket(format) {
 		return nil
 	}
-	return helper.ValidateCourtPairing(len(courts))
+	return helper.ValidateShiaijoCount(len(courts))
 }
 
 // resolveCompetitionCourts guarantees a competition resolves to at least one
@@ -257,6 +331,14 @@ func validateCompetitionCourtPairing(courts []string, format string) error {
 // across the venue's courts so each court's operator view is populated.
 // Tournaments always have >=1 court (validateCourts rejects empty); the
 // ["A"] return is pure defense for the no-tournament-yet bootstrap edge.
+//
+// Call this BEFORE validating a competition's allocation, never after. What
+// it returns is what gets persisted, so it is what the shiaijo-count and
+// orphaned-shiaijo rules have to see. Validating the pre-resolution list let
+// a 3-shiaijo venue inherit an illegal 3-shiaijo allocation while an operator
+// who typed the same three courts out was refused (R9: "wherever an
+// allocation is DERIVED rather than chosen, the DERIVED value is what gets
+// validated").
 func resolveCompetitionCourts(compCourts []string, tourn *state.Tournament) []string {
 	if len(compCourts) > 0 {
 		return compCourts

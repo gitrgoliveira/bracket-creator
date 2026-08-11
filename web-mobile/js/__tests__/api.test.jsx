@@ -458,6 +458,22 @@ describe('API Utils', () => {
       expect(normalizeCompetitionDetail(null)).toBeNull();
       expect(normalizeCompetitionDetail(undefined)).toBeUndefined();
     });
+
+    // The NESTED record is the shape the operator console actually renders:
+    // GET /api/viewer/competitions/:id answers {config, pools, ...} and
+    // admin.jsx passes `detail.config` straight to AdminCompetition. Only the
+    // top level was normalized, so config.courts stayed null and the claim
+    // that no consumer has to guard was false for the one path that matters.
+    it('coerces null courts on the nested config record too', () => {
+      const out = normalizeCompetitionDetail({ config: { id: 'x', name: 'X', courts: null }, pools: [] });
+      expect(out.config.courts).toEqual([]);
+    });
+
+    it('preserves a populated nested courts list and the rest of config', () => {
+      const out = normalizeCompetitionDetail({ config: { id: 'x', name: 'X', courts: ['A', 'B'], format: 'mixed' } });
+      expect(out.config.courts).toEqual(['A', 'B']);
+      expect(out.config.format).toBe('mixed');
+    });
   });
 
   describe('API object', () => {

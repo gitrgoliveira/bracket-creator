@@ -60,6 +60,20 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
 
+  // Seed-placement warnings for the generated draw. The seeding rules cannot
+  // refuse a draw: a constraint the configuration cannot satisfy gives way and
+  // the operator is TOLD what was relaxed, so this is advice and never a
+  // blocker. Fetched rather than read off the competition because this page
+  // loads its detail through the PUBLIC viewer endpoint, which deliberately
+  // does not carry operator advice. Re-fetched on every status change, so
+  // discarding a draw clears it and regenerating replaces it.
+  const [drawWarnings, setDrawWarnings] = useStateA([]);
+  useEffectA(() => {
+    let live = true;
+    window.API.fetchDrawWarnings(c.id, password).then((w) => { if (live) setDrawWarnings(w || []); });
+    return () => { live = false; };
+  }, [c.id, c.status, password]);
+
   // Use the shared isValidDate (admin_helpers.jsx) which delegates to
   // normalizeDate for semantic validity: rejects "32-13-2026" / Feb 31 /
   // Feb 29 in non-leap years. Without this, the Start button would enable
@@ -230,29 +244,28 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   const canComplete = c.status !== "setup" && c.status !== "draw-ready" &&
     c.status !== "completed" && c.status !== "invalid" &&
     bracketFullyComplete(bracket);
-  // Shiaijo-count blocker (shiaijoCountError, mirrored from
-  // helper.ValidateCourtPairing): the knockout draw pairs shiaijo, so a
-  // competition that draws a bracket must run on 1 or an even number.
-  // formatDrawsBracket keeps league and Swiss out of it, exactly as the
-  // engine's draw-time gate does. Read from the SAVED c.courts because that
-  // is the allocation the server will draw with. The engine refuses such a
-  // draw anyway; disabling the buttons turns a failed request into an
-  // up-front explanation pointing at the Settings tab, matching the
-  // invalid-date blocker directly below.
-  const courtsPairingErr = window.formatDrawsBracket(c.format)
-    ? window.shiaijoCountError((c.courts || []).length) : null;
-  // Orphaned-shiaijo blocker (orphanedShiaijoError, mirrored from
-  // engine.ValidateCourtsInTournament): the competition still lists a shiaijo
-  // the tournament no longer has, because the venue's court count was reduced
-  // under it. Unlike the pairing rule this one applies to EVERY format: a
-  // league match on a court with no operator view is just as invisible.
-  // Same read-the-SAVED-value reasoning as above, and the same purpose:
-  // the engine refuses this draw, so the button must say so up front rather
-  // than 400.
-  const courtsOrphanErr = window.orphanedShiaijoError(t.courts, c.courts);
-  // ONE value for both draw buttons and the message under them, so a future
-  // court rule can never be wired into one and forgotten in the other.
-  const drawCourtsErr = courtsPairingErr || courtsOrphanErr;
+  // Court blocker for the draw: the shiaijo-count rule (a bracket-drawing
+  // competition runs on 1, 2, 4, 8 or 16 shiaijo) plus the orphaned-shiaijo
+  // rule (the competition still lists a court the tournament no longer has).
+  // Both live in competitionDrawBlockedReason (admin_helpers.jsx) so this
+  // header, the dashboard card's "Start competition →" and the
+  // tournament-level "Start all" picker read ONE derived value: the two
+  // latter surfaces used to ignore the rule entirely and let the operator
+  // fire a request the server refuses with a transient toast.
+  //
+  // The engine refuses such a draw anyway; disabling the buttons turns a
+  // failed request into an up-front explanation pointing at the Settings tab,
+  // matching the invalid-date blocker directly below.
+  const drawCourtsErr = window.competitionDrawBlockedReason(c, t.courts);
+  // Go ships a nil slice as JSON null, so a competition stored without a
+  // courts key arrives as `courts: null`. The page-head subtitle read
+  // c.courts.join(...) directly and took the whole console down with
+  // "Cannot read properties of null (reading 'join')" - every section, not
+  // just the subtitle. This screen is the documented remedy for exactly that
+  // record (its Settings tab is where the operator assigns shiaijo), so it is
+  // the one page that must survive the shape. Same reason c.players is read
+  // through a default below.
+  const courtList = c.courts || [];
   // Compute the other-competitions list once (used for both the render guard
   // and the map below).
   const otherComps = (t.competitions || []).filter((cc) => cc.id !== c.id);
@@ -307,12 +320,12 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
               <StatusBadge status={localStatus ?? c.status} format={c.format} />
             </div>
             <div className="page-head__sub">
-              {window.competitionKindLabel(c)} · {c.players.length} {c.kind === "team" ? "teams" : "players"} ·
-              {c.date && ` ${formatDate(c.date)} at `} {c.startTime} · {c.courts.join(", ")}
+              {window.competitionKindLabel(c)} · {(c.players || []).length} {c.kind === "team" ? "teams" : "players"} ·
+              {c.date && ` ${formatDate(c.date)} at `} {c.startTime} · {courtList.length ? courtList.join(", ") : "No shiaijo assigned"}
             </div>
           </div>
           <div className="page-head__actions" style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
-            {(!c.status || c.status === "setup") && c.players.length >= 2 && (
+            {(!c.status || c.status === "setup") && (c.players || []).length >= 2 && (
               <>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                   <button type="button" className="btn btn--primary" onClick={generateDraw} disabled={!isDateValid(c.date) || !!drawCourtsErr || generating || starting}>
@@ -330,7 +343,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
                   </div>
                 )}
                 {drawCourtsErr && (
-                  <div style={{ color: "var(--red)", fontSize: 11, fontWeight: 600, maxWidth: 380, textAlign: "right" }} data-testid="odd-shiaijo-block">
+                  <div style={{ color: "var(--red)", fontSize: 11, fontWeight: 600, maxWidth: 380, textAlign: "right" }} data-testid="shiaijo-count-block">
                     ⚠ Cannot start: {drawCourtsErr} Reassign shiaijo in the Settings tab.
                   </div>
                 )}
@@ -374,6 +387,19 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
             )}
           </div>
         </div>
+
+        {/* Seed-placement warnings for the generated draw. Derived on the
+            server per request, so the banner stays true for as long as the
+            draw it describes exists and clears itself when that draw is
+            discarded. */}
+        {drawWarnings.length > 0 && (
+          <div className="alert alert--warn" style={{ margin: "0 0 14px" }} data-testid="draw-seed-warnings">
+            <strong>Seeding: the draw could not honour every rule.</strong>
+            <ul style={{ margin: "6px 0 0", paddingInlineStart: 18 }}>
+              {drawWarnings.map((w) => <li key={w}>{w}</li>)}
+            </ul>
+          </div>
+        )}
 
         <div className="workspace">
           {/* Left column stacks the per-competition nav and, as a SEPARATE

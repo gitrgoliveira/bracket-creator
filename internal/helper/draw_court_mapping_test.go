@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	excelize "github.com/xuri/excelize/v2"
 )
 
 // This file pins the page-to-shiaijo mapping (bc-draw R3/R8).
@@ -22,6 +23,12 @@ import (
 // and overlaying pools A and B printed Pool C-1st and Pool D-2nd. The sweep
 // below asserts that mismatch is now zero for EVERY combination, which is the
 // operator-visible half of the whole rewrite.
+//
+// Everything here is read back out of a RENDERED workbook (see
+// renderedPageViews). A page's title, its roster overlay and its bracket are
+// three independent artifacts on the sheet, so comparing them measures the
+// shipped renderer; recomputing any of them from the helper that produced it
+// would only compare that helper with itself.
 
 // pageCourtView is one rendered tree page's two views of itself, which must now
 // agree.
@@ -32,30 +39,80 @@ type pageCourtView struct {
 	leaves       []string
 }
 
-// renderedPageViews reproduces exactly what RenderTreePages does for page
-// labelling and roster overlay, from the same court-first draw the workbook
-// renders.
+// readTreePageOverlayPools returns the pools whose roster the page actually
+// overlays, read out of the sheet. AddPoolsToTree writes each overlaid pool's
+// data-sheet header as a formula down column A ("'data'!$A$6"), so inverting
+// poolCoords turns that formula back into the pool it names. Column A is the
+// overlay's own column: PrintLeafNodes starts at 2*depth, so no entrant label
+// can be mistaken for one.
+func readTreePageOverlayPools(t *testing.T, f *excelize.File, sheet string, poolByHeaderRef map[string]string) []string {
+	t.Helper()
+	rows, err := f.GetRows(sheet)
+	require.NoError(t, err)
+	claimed := []string{}
+	// +4 covers the trailing rows AddPoolsToTree styles but leaves empty, which
+	// GetRows may not report.
+	for r := 1; r <= len(rows)+4; r++ {
+		formula, err := f.GetCellFormula(sheet, fmt.Sprintf("A%d", r))
+		require.NoError(t, err)
+		if name, ok := poolByHeaderRef[formula]; ok {
+			claimed = append(claimed, name)
+		}
+	}
+	return claimed
+}
+
+// renderedPageViews renders a competition through the REAL workbook funnel and
+// reads both of each page's views of itself back out of the sheet it produced:
+// the roster overlay from the pool-header formulas AddPoolsToTree writes down
+// column A, and the bracket from the entrant labels PrintLeafNodes writes into
+// the tree columns.
+//
+// It used to RE-CALL PoolBoundsForSubtree and PageRosterPools to work out the
+// overlay, which made every "the page's claim matches its bracket" assertion
+// below a TAUTOLOGY. PageRosterPools computes the claim by filtering the
+// shiaijo's block down to the pools whose labels are on the page, so a claim it
+// produced could not name an absent pool however the helper behaved: the test
+// compared a set against a superset of itself and "0 mismatches" proved nothing
+// about the shipped overlay. Reading the claim off the rendered sheet measures
+// what an operator is handed, so an over-claiming overlay (the defect the
+// narrowing exists to prevent) now fails these tests - see
+// TestTreePageHomePoolsAlwaysPresent.
+//
+// Pools come from the golden files' synthetic roster rather than name-only
+// stubs because the overlay is written from poolCoords, which
+// AddPoolDataToSheet only populates for pools that have players.
 func renderedPageViews(t *testing.T, nPools, poolWinners, numCourts int) []pageCourtView {
 	t.Helper()
 
-	pools, _ := makePools(nPools)
+	pools, err := CreatePools(drawGoldenRoster(nPools), drawGoldenPoolSize, true)
+	require.NoError(t, err)
+	require.Len(t, pools, nPools)
+
 	draw := BuildKnockoutDraw(pools, poolWinners, numCourts)
 	require.NotNil(t, draw)
 	courts := draw.NumCourts()
 
-	subtrees := SubdivideRegions(draw.Regions, KnockoutPagesPerCourt(draw.Regions))
-	require.Equal(t, TreePageLayout(draw.Regions, false), len(subtrees),
-		"the page count RenderKnockoutPages reports must be the page count it renders")
-	require.Zero(t, len(subtrees)%courts, "pages are an exact multiple of the shiaijo count (R8)")
+	f := newRenderTargetFile(t)
+	defer func() { _ = f.Close() }()
+	poolCoords, playerCoords := AddPoolDataToSheet(f, pools, false, "")
+	poolByHeaderRef := make(map[string]string, len(poolCoords))
+	for name, coord := range poolCoords {
+		poolByHeaderRef[sheetRef(coord.sheetName, coord.cell)] = name
+	}
+	require.Len(t, poolByHeaderRef, nPools, "every pool must have a distinct data-sheet header to overlay")
 
-	views := make([]pageCourtView, 0, len(subtrees))
-	for i, subtree := range subtrees {
-		start, end := PoolBoundsForSubtree(nPools, courts, len(subtrees), i)
-		claimed := []string{}
-		for _, p := range PageRosterPools(pools[start:end], subtree) {
-			claimed = append(claimed, p.PoolName)
-		}
-		leaves := collectOrderedLeaves(subtree)
+	_, numPages, err := RenderKnockoutPages(f, draw, false, pools, poolCoords, playerCoords, nil)
+	require.NoError(t, err)
+
+	sheets := treePageSheets(f)
+	require.Equal(t, numPages, len(sheets),
+		"the page count RenderKnockoutPages reports must be the page count it renders")
+	require.Zero(t, len(sheets)%courts, "pages are an exact multiple of the shiaijo count (R8)")
+
+	views := make([]pageCourtView, 0, len(sheets))
+	for _, sheet := range sheets {
+		leaves := readTreePageLeaves(t, f, sheet)
 
 		present := []string{}
 		for _, l := range leaves {
@@ -67,8 +124,8 @@ func renderedPageViews(t *testing.T, nPools, poolWinners, numCourts int) []pageC
 		slices.Sort(present)
 
 		views = append(views, pageCourtView{
-			courtLabel:   CourtLabel(SubtreeCourtIndex(len(subtrees), courts, i)),
-			claimedPools: claimed,
+			courtLabel:   readTreePageCourtLabel(t, f, sheet),
+			claimedPools: readTreePageOverlayPools(t, f, sheet, poolByHeaderRef),
 			presentPools: present,
 			leaves:       leaves,
 		})
@@ -117,16 +174,28 @@ func TestTreePageCourtLabel_WorkedExample(t *testing.T) {
 }
 
 // TestTreePageHomePoolsAlwaysPresent sweeps the whole configuration space and
-// asserts the property that makes a printed page usable: every pool the page's
-// roster overlay claims has at least one of its qualifiers in the bracket
-// printed on that page, and every court's HOME winners are on that court's own
-// pages.
+// asserts the two halves of an honest roster overlay, from the RENDERED sheet:
 //
-// The converse ("nothing from another court appears") is deliberately NOT
-// asserted: R4 crossing means a page legitimately shows the partner court's
-// runners-up, which is the whole point of the rule. What the old draw got wrong
-// was the first half - a page claiming pools whose competitors were nowhere on
-// it - and that is now empty everywhere.
+//  1. Nothing overlaid is absent. Every pool the printed overlay names has at
+//     least one of its qualifiers in the bracket printed on the same page. This
+//     is what the narrowing (PageRosterPools) buys, and it only bites on a
+//     shiaijo printed across 2 or 4 pages, where one page carries one child
+//     subtree of the region and therefore only some of the court's pools.
+//  2. Nothing owed is missing, and nothing foreign is added. Across one
+//     shiaijo's pages the overlays name EXACTLY that shiaijo's pool block from
+//     AssignPoolsToCourts - the same allocation the Pool Matches sheet and the
+//     schedule use - so the operator holding that court's pages holds every
+//     roster it ran and no other court's.
+//
+// Half 2 is what makes half 1 worth asserting. On its own, half 1 is also
+// satisfied by overlaying NOTHING; the union check is the independent
+// cross-reference (AssignPoolsToCourts against the printed sheet) that pins the
+// overlay from the other side.
+//
+// The per-page converse ("nothing from another court appears in the BRACKET")
+// is deliberately not asserted: R4 crossing means a page legitimately prints the
+// partner court's runners-up, which is the whole point of the rule. Its
+// qualifiers just do not get a roster.
 func TestTreePageHomePoolsAlwaysPresent(t *testing.T) {
 	for _, numCourts := range []int{1, 2, 4} {
 		for nPools := 2; nPools <= 12; nPools++ {
@@ -134,8 +203,10 @@ func TestTreePageHomePoolsAlwaysPresent(t *testing.T) {
 				name := fmt.Sprintf("%d_pools_%d_winners_%d_courts", nPools, poolWinners, numCourts)
 				t.Run(name, func(t *testing.T) {
 					views := renderedPageViews(t, nPools, poolWinners, numCourts)
+					_, poolNames := makePools(nPools)
 
 					var claimedButAbsent []string
+					overlaidByCourt := map[string][]string{}
 					for i, p := range views {
 						for _, c := range p.claimedPools {
 							if !slices.Contains(p.presentPools, c) {
@@ -143,10 +214,31 @@ func TestTreePageHomePoolsAlwaysPresent(t *testing.T) {
 									fmt.Sprintf("page %d (Shiaijo %s) claims %s, contains %v",
 										i+1, p.courtLabel, c, p.presentPools))
 							}
+							if !slices.Contains(overlaidByCourt[p.courtLabel], c) {
+								overlaidByCourt[p.courtLabel] = append(overlaidByCourt[p.courtLabel], c)
+							}
 						}
 					}
 					assert.Empty(t, claimedButAbsent,
 						"every pool a page's roster overlay claims must have a qualifier on that page")
+
+					// The draw's own court count, not the requested one:
+					// EffectiveDrawCourts clamps a request bigger than the pool
+					// count (8 shiaijo over 7 pools draws on 4).
+					drawCourts := EffectiveDrawCourts(nPools, numCourts)
+					assignment, err := AssignPoolsToCourts(nPools, drawCourts)
+					require.NoError(t, err)
+					wantByCourt := map[string][]string{}
+					for pi, court := range assignment {
+						label := CourtLabel(court)
+						wantByCourt[label] = append(wantByCourt[label], poolNames[pi])
+					}
+					for label, want := range wantByCourt {
+						assert.ElementsMatch(t, want, overlaidByCourt[label],
+							"shiaijo %s ran %v, so its pages must overlay exactly those rosters", label, want)
+					}
+					assert.Len(t, overlaidByCourt, len(wantByCourt),
+						"no page may overlay a roster under a shiaijo label that ran no pools")
 				})
 			}
 		}

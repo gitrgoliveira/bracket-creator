@@ -384,30 +384,186 @@ function courtCount(courts) {
   return normalizeCourts(courts).length;
 }
 
+// --- Shiaijo-count rule (spec 007 R9) --------------------------------------
+//
+// A competition's shiaijo allocation must be a POWER OF TWO. The valid
+// counts are derived from MAX_COURTS rather than written out, so the A–Z
+// label cap and this list can never disagree: 32 shiaijo are unlabelled and
+// therefore unreachable, which is why 16 is the practical ceiling.
+const VALID_SHIAIJO_COUNTS = (() => {
+  const out = [];
+  for (let p = 1; p <= MAX_COURTS; p *= 2) out.push(p);
+  return out;
+})();
+
+// The canonical reason, authored ONCE and reused by every surface that
+// states the rule (the rejection message, the standing field hint, the
+// stored-allocation banner). Kept as a bare clause so it can be embedded
+// after a colon; REASON_SENTENCE is the standalone-sentence form.
+const SHIAIJO_RULE_REASON = "the knockout draw gives each shiaijo its own block of the bracket and the blocks merge in pairs, so the count has to halve cleanly";
+const SHIAIJO_RULE_REASON_SENTENCE = "The knockout draw gives each shiaijo its own block of the bracket and the blocks merge in pairs, so the count has to halve cleanly.";
+
+// The organiser's real question, answered ONCE. Every message about this rule
+// leads with a verdict about a number, which an organiser whose venue has
+// exactly 3 shiaijo reads as a verdict about their venue. It is not: the venue
+// may hold any number, and only a single competition's slice of it is
+// constrained. Kept verbatim from the wording the operator guide settled on.
+const SHIAIJO_RULE_IS_PER_COMPETITION = "This is a rule about each competition, never about your venue.";
+
+// "1, 2 or 4" from [1, 2, 4]. Oxford-comma-free, matching the microcopy
+// elsewhere in the console.
+function joinCounts(list) {
+  if (list.length <= 1) return String(list[0] ?? "");
+  return `${list.slice(0, -1).join(", ")} or ${list[list.length - 1]}`;
+}
+
+// The counts a competition may take on a venue of `venueCourtCount` shiaijo,
+// plus whether the venue actually narrows the full list. ONE primitive behind
+// the standing field hint, the venue-aware rejection and the import preview,
+// so no surface can offer a count the venue cannot supply while another does.
+//
+// venue 0 / NaN / undefined means "not loaded yet", NOT "the venue has none":
+// it falls back to the full list rather than inventing a constraint.
+function allowedShiaijoCounts(venueCourtCount) {
+  const venue = Number.isFinite(venueCourtCount) && venueCourtCount > 0 ? Math.floor(venueCourtCount) : 0;
+  // `1` always survives the filter for any venue >= 1, so nothing derived
+  // from this can ever read as "at least 2 shiaijo".
+  const allowed = venue ? VALID_SHIAIJO_COUNTS.filter((p) => p <= venue) : VALID_SHIAIJO_COUNTS;
+  return { venue, allowed, constrained: venue > 0 && allowed.length < VALID_SHIAIJO_COUNTS.length };
+}
+
+// The concrete answer to "so one of my three shiaijo just sits idle?" - no:
+// two competitions run side by side and cover the venue exactly. Returns the
+// sentence, or null when no exact two-way split exists.
+//
+// Only an EXACT split is offered. On a 7-shiaijo venue the best pair is 4 + 2
+// and one shiaijo really is left over, so claiming otherwise would be false
+// advice; the caller keeps the "rule about each competition" clause and drops
+// the example. A venue that is itself a legal count (1, 2, 4, 8, 16) has no
+// puzzle to answer and also returns null.
+function shiaijoVenueSplitExample(venueCourtCount) {
+  const { venue } = allowedShiaijoCounts(venueCourtCount);
+  if (!venue || VALID_SHIAIJO_COUNTS.includes(venue)) return null;
+  for (let i = VALID_SHIAIJO_COUNTS.length - 1; i >= 0; i--) {
+    const first = VALID_SHIAIJO_COUNTS[i];
+    const rest = venue - first;
+    if (first < venue && VALID_SHIAIJO_COUNTS.includes(rest)) {
+      return `With ${venue} shiaijo you can run one competition on ${first} and another on the remaining ${rest} at the same time, so all ${venue} stay busy.`;
+    }
+  }
+  return null;
+}
+
 // Shiaijo-count rule for ONE competition, mirrored from
-// helper.ValidateCourtPairing (internal/helper/court_parity.go): a
-// competition runs on 1 shiaijo, or on an EVEN number of shiaijo. An odd
-// allocation greater than 1 (3, 5, 7, ...) is invalid, because the knockout
-// draw builds one bracket region per shiaijo and pairs those regions up so
-// each pool's runner-up crosses to its court's partner. With an odd count
-// one court has no partner.
+// helper.ValidateShiaijoCount (internal/helper/shiaijo_count.go): a
+// competition whose draw builds a knockout bracket runs on 1, 2, 4, 8 or 16
+// shiaijo. Anything else (3, 5, 6, 10, ...) is invalid, because the draw
+// gives each shiaijo its own block of the bracket and merges those blocks in
+// PAIRS: the count therefore has to halve cleanly all the way down, which
+// only a power of two does. 6 halves to 3 and stops.
 //
-// 1 shiaijo is explicitly VALID (its single region splits into two
-// half-blocks that act as partner courts), so the message always offers 1
-// and must never read as "at least 2 courts".
+// 1 shiaijo is explicitly VALID (its single block splits into two halves
+// that merge like any other pair), so the message always offers 1 and must
+// never read as "at least 2 shiaijo".
 //
-// The rule is per competition, never per venue: a 5-shiaijo tournament is
-// fine and simply splits its courts across competitions (4 + 1). Nothing
-// here validates the tournament's own court list.
+// The rule is per COMPETITION, never per venue: a 3-shiaijo tournament is
+// perfectly legal and simply runs each competition on 1 or 2 of its shiaijo.
+// Nothing here validates the tournament's own court list, and a venue must
+// never be pushed to a power of two to satisfy this.
 //
 // Returns null when the count is valid, or the operator-facing message when
-// it is not, so call sites can use it as both predicate and label. The Go
-// side and this string are pinned against each other by
-// web-mobile/js/__tests__/court_parity.test.jsx and
-// internal/helper/court_parity_test.go.
-function shiaijoCountError(n) {
-  if (!Number.isFinite(n) || n <= 1 || n % 2 === 0) return null;
-  return `${n} shiaijo cannot be paired. Use ${n - 1} or ${n + 1}, or 1: the knockout draw pairs shiaijo so each pool's runner-up crosses to a partner shiaijo, and an odd number leaves one shiaijo without a partner.`;
+// it is not, so call sites can use it as both predicate and label. The
+// message names the nearest valid counts either side (capped at 16, since
+// the next power of two exceeds the A–Z label cap) and always offers 1. The
+// Go side and this string are pinned against each other by
+// web-mobile/js/__tests__/shiaijo_count.test.jsx and
+// internal/helper/shiaijo_count_test.go.
+//
+// `venueCourtCount` is OPTIONAL and changes only which counts are OFFERED.
+// Omit it (the two forms) and the message is the venue-agnostic mirror of the
+// Go one: those screens render shiaijoCountHint directly beneath, which
+// supplies the venue view, and stating it twice buries the part that changes.
+// Pass it wherever the message appears ALONE - the dashboard card, the
+// "Start all" picker, the competition header, the overview checklist - or a
+// 3-shiaijo venue is told to "use 2 or 4" when it has no 4 to give. Those
+// surfaces all reach it through competitionDrawBlockedReason, which already
+// receives the tournament's courts for the orphan check.
+function shiaijoCountError(n, venueCourtCount) {
+  if (!Number.isFinite(n) || n <= 1) return null;
+  if (VALID_SHIAIJO_COUNTS.includes(n)) return null;
+  const { venue, allowed, constrained } = allowedShiaijoCounts(venueCourtCount);
+  if (constrained) {
+    // Naming the venue's own size first is deliberate: it says the app is not
+    // asking the operator to change their hall, only this competition's slice
+    // of it.
+    return `${n} shiaijo cannot be paired down to a single bracket. This tournament has ${venue}, so this competition can use ${joinCounts(allowed)}: ${SHIAIJO_RULE_REASON}.`;
+  }
+  const below = VALID_SHIAIJO_COUNTS.filter((p) => p < n).pop();
+  const above = VALID_SHIAIJO_COUNTS.find((p) => p > n);
+  // `above` is undefined past the ceiling (17+ shiaijo): there is no higher
+  // valid count to offer, so the message names only the one below. `below`
+  // is always at least 2 here, because n > 1 and every n <= 2 is valid.
+  const options = above ? `${below} or ${above}` : `${below}`;
+  return `${n} shiaijo cannot be paired down to a single bracket. Use ${options}, or 1: ${SHIAIJO_RULE_REASON}.`;
+}
+
+// The STANDING hint for the shiaijo field: what the operator may pick, and
+// why, shown whether or not the current selection is valid. The rule used to
+// surface only as a rejection AFTER a bad pick, which reads as the app
+// changing its mind; this teaches it in place.
+//
+// VENUE-AWARE on purpose. A 3-shiaijo tournament is legal and its
+// competitions run on 1 or 2, so the hint names 1 or 2 and says the venue has
+// 3. That answers "why can't I pick all three of my shiaijo" at the field
+// instead of by refusal. A venue big enough for every valid count (16+) gets
+// no venue clause, because there is nothing to explain.
+//
+// includeReason=false drops the mechanism sentence for the case where
+// shiaijoCountError is already on screen directly above and would state it a
+// second time.
+//
+// Also carries the REASSURANCE, not just the verdict. A hint that only names
+// the counts still reads, to an organiser with exactly 3 shiaijo, as the app
+// disapproving of their hall. It does not: the venue is fine, and the two
+// clauses added here say so and show the split that keeps every shiaijo busy.
+// The mechanism sentence is what the operator needs LAST, so it stays last.
+// The reassurance survives includeReason=false, because the error above
+// states the mechanism and never the reassurance.
+function shiaijoCountHint(venueCourtCount, includeReason = true) {
+  const { venue, allowed, constrained } = allowedShiaijoCounts(venueCourtCount);
+  const head = `This competition can use ${joinCounts(allowed)} shiaijo${constrained ? ` (this tournament has ${venue})` : ""}.`;
+  const parts = [head];
+  // Only an organiser whose venue count is not itself a legal allocation is
+  // reading the rule as being about their venue. A 4-shiaijo hall never meets
+  // a refusal and needs no reassurance.
+  if (venue && shiaijoCountError(venue)) {
+    parts.push(SHIAIJO_RULE_IS_PER_COMPETITION);
+    const split = shiaijoVenueSplitExample(venue);
+    if (split) parts.push(split);
+  }
+  if (includeReason) parts.push(SHIAIJO_RULE_REASON_SENTENCE);
+  return parts.join(" ");
+}
+
+// The hint for the TOURNAMENT-level "Number of Shiaijo (courts)" field: the
+// first place an organiser types a shiaijo count, and until now the only one
+// that said nothing about the rule. They typed 3, met the refusal two screens
+// later, and read it as a verdict on their hall.
+//
+// So this states the rule's SCOPE before the rule can ever refuse anything,
+// and shows the split that keeps the odd shiaijo busy. `venueCourtCount` is
+// whatever is currently in the field, so the example is about their number,
+// not a worked one. A blank/NaN field falls back to the full list.
+function shiaijoVenueHint(venueCourtCount) {
+  const { allowed } = allowedShiaijoCounts(venueCourtCount);
+  const parts = [
+    "Pick the number your venue actually has: any number is fine.",
+    `Each competition then runs on ${joinCounts(allowed)} of them.`,
+    SHIAIJO_RULE_IS_PER_COMPETITION,
+  ];
+  const split = shiaijoVenueSplitExample(venueCourtCount);
+  if (split) parts.push(split);
+  return parts.join(" ");
 }
 
 // Scope of the shiaijo-count rule above: true when the competition's draw
@@ -417,10 +573,10 @@ function shiaijoCountError(n) {
 // rounds and never a bracket, while mixed, playoffs and a legacy record
 // with no format at all all end up building one.
 //
-// League and Swiss courts are plain parallel mats with no regions to pair,
-// so shiaijoCountError must not be applied to them. The app actively
-// recommends odd counts there (the league court hint suggests
-// floor(players/2)-1), which a format-blind rule would then reject.
+// League and Swiss courts run in parallel with no bracket blocks to merge,
+// so shiaijoCountError must not be applied to them. The league court hint
+// recommends floor(players/2)-1 courts, which is rarely a power of two, so a
+// format-blind rule would reject counts the app itself suggests.
 function formatDrawsBracket(format) {
   return format !== "league" && format !== "swiss";
 }
@@ -495,6 +651,78 @@ function orphanedShiaijoError(tournamentCourts, selectedCourts) {
   return `Shiaijo ${missing.join(", ")} ${plural ? "are" : "is"} no longer part of this tournament. Deselect ${plural ? "them" : "it"} and save: matches cannot run on a shiaijo the tournament does not have, and the draw will be refused until you do.`;
 }
 
+// THE single derived answer to "can this competition draw its bracket, or is
+// its shiaijo allocation in the way?". Null when nothing blocks it; the
+// operator-facing reason when something does.
+//
+// Lifted here (spec 007 R9) because the same question was being asked on
+// three screens and answered on ONE: the competition header derived it, while
+// the dashboard card's "Start competition →" and the tournament-level "Start
+// all" picker did not, so both offered a live button for a start the server
+// refuses with a 400 whose only trace is an 8s toast. A predicate that decides
+// whether an operator may act belongs in one place, not copied per surface.
+//
+// Combines both court rules the engine's draw pipeline applies, in the order
+// the operator can act on them. Scope notes:
+//   - the shiaijo-COUNT rule is limited to bracket-drawing formats
+//     (formatDrawsBracket); league and Swiss shiaijo run in parallel.
+//   - the orphan rule applies to EVERY format: a match on a shiaijo the
+//     tournament no longer has is invisible whatever the format.
+//   - reads the SAVED allocation, because that is what the server will draw
+//     with, INCLUDING the empty one. An empty list means "inherit the
+//     tournament's shiaijo", and the engine validates the inherited count, so
+//     on a venue whose own count is illegal an empty allocation is a refusal
+//     waiting to happen (verified live: POST generate-draw answers 400 "It has
+//     no shiaijo of its own, so the draw would run on all 3 of the
+//     tournament's"). shiaijoCountError alone cannot see this: it is handed 0
+//     and correctly stays silent, because 0 is not a competition's count.
+//
+// Call it only where a draw would actually be generated (a competition still
+// in setup). A draw-ready competition has already cleared these rules and its
+// start is a status flip, so gating that would block a start the server
+// accepts.
+function competitionDrawBlockedReason(competition, tournamentCourts) {
+  if (!competition) return null;
+  const courts = competition.courts || [];
+  // The venue count is forwarded to the count message, not just to the orphan
+  // check. Every surface that renders this reason renders it ALONE, with no
+  // venue-aware hint beneath to correct it, so the unqualified message told a
+  // 3-shiaijo venue to "use 2 or 4" - one of which it cannot supply.
+  const venue = (tournamentCourts || []).length;
+  const drawsBracket = formatDrawsBracket(competition.format);
+  // Inherited-allocation case: no shiaijo of its own, so the draw takes the
+  // whole venue. Only a problem when the venue's own count is not a legal
+  // allocation; inheriting 2 of 2 is fine and the server accepts it. venue 0
+  // is "tournament not loaded", never "the venue has none".
+  const inheritedCountErr = (drawsBracket && !courts.length && venue) ? shiaijoCountError(venue, venue) : null;
+  const inheritedErr = inheritedCountErr
+    ? `This competition has no shiaijo of its own, so the draw would run on all ${venue} of the tournament's. ${inheritedCountErr}`
+    : null;
+  const countErr = drawsBracket ? shiaijoCountError(courts.length, venue) : null;
+  return inheritedErr || countErr || orphanedShiaijoError(tournamentCourts, courts);
+}
+
+// What the dashboard's "Start all" may actually start, and what it must not
+// offer. Returns { startable: [competition], blocked: [{ comp, reason }] }.
+//
+// Eligibility (still in setup, at least 2 participants) and the court rules
+// are answered together so the picker cannot offer a competition the server
+// refuses: batching a blocked competition in produced a guaranteed entry in
+// the modal's "failed" list carrying a raw API message. Blocked competitions
+// are RETURNED rather than dropped so the modal can name them; "start all"
+// must never quietly mean "start most".
+function partitionStartableCompetitions(competitions, tournamentCourts) {
+  const startable = [];
+  const blocked = [];
+  (competitions || []).forEach((c) => {
+    if (!c || c.status !== "setup" || (c.players || []).length < 2) return;
+    const reason = competitionDrawBlockedReason(c, tournamentCourts);
+    if (reason) blocked.push({ comp: c, reason });
+    else startable.push(c);
+  });
+  return { startable, blocked };
+}
+
 // Resolves the 0-based round index from a match object. Bracket matches
 // carry m.roundIndex (stamped by compMatches/viewer.jsx); fall back to a
 // non-negative numeric m.round for any older shapes.
@@ -538,10 +766,18 @@ if (typeof window !== "undefined") {
   window.normalizeCourts = normalizeCourts;
   window.courtCount = courtCount;
   window.shiaijoCountError = shiaijoCountError;
+  window.shiaijoCountHint = shiaijoCountHint;
+  window.allowedShiaijoCounts = allowedShiaijoCounts;
+  window.shiaijoVenueSplitExample = shiaijoVenueSplitExample;
+  window.shiaijoVenueHint = shiaijoVenueHint;
+  window.SHIAIJO_RULE_IS_PER_COMPETITION = SHIAIJO_RULE_IS_PER_COMPETITION;
+  window.VALID_SHIAIJO_COUNTS = VALID_SHIAIJO_COUNTS;
   window.formatDrawsBracket = formatDrawsBracket;
   window.courtsOutsideTournament = courtsOutsideTournament;
   window.courtPillOptions = courtPillOptions;
   window.orphanedShiaijoError = orphanedShiaijoError;
+  window.competitionDrawBlockedReason = competitionDrawBlockedReason;
+  window.partitionStartableCompetitions = partitionStartableCompetitions;
 }
 
 // --- Elevated (destructive-ops) password prompt (spec 004 / mp-e21) ---
@@ -637,9 +873,17 @@ export {
   normalizeCourts,
   courtCount,
   shiaijoCountError,
+  shiaijoCountHint,
+  allowedShiaijoCounts,
+  shiaijoVenueSplitExample,
+  shiaijoVenueHint,
+  SHIAIJO_RULE_IS_PER_COMPETITION,
+  VALID_SHIAIJO_COUNTS,
   formatDrawsBracket,
   courtsOutsideTournament,
   courtPillOptions,
   orphanedShiaijoError,
+  competitionDrawBlockedReason,
+  partitionStartableCompetitions,
   resolveRoundIndex,
 };

@@ -334,6 +334,98 @@ describe('competitionNextSteps: edge cases', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Court blockers (spec 007 R9): with a shiaijo allocation the draw cannot
+// halve down, the header's "Generate draw" button is DISABLED, so the step
+// that told the operator to press it was pointing at a dead control.
+// ---------------------------------------------------------------------------
+describe('competitionNextSteps: generate step under a court block', () => {
+  const twoPlayers = () => [makePlayer(), makePlayer()];
+  const generateStep = (c, courts) => competitionNextSteps(c, courts).find(s => s.id === 'generate');
+
+  it('points at the header button when nothing blocks the draw', () => {
+    const step = generateStep(makeComp({ players: twoPlayers(), courts: ['A', 'B'] }), ['A', 'B', 'C']);
+    expect(step.detail).toBe('Use the "Generate draw" button in the header above');
+    expect(step.section).toBeNull();
+    expect(step.cta).toBeNull();
+  });
+
+  it('names the blocker and routes to Settings instead', () => {
+    const step = generateStep(makeComp({ players: twoPlayers(), courts: ['A', 'B', 'C'] }), ['A', 'B', 'C']);
+    expect(step.detail).not.toContain('Use the "Generate draw" button');
+    expect(step.detail).toContain('3 shiaijo cannot be paired down to a single bracket');
+    expect(step.detail).toContain('Reassign shiaijo in Settings first');
+    expect(step.section).toBe('settings');
+    expect(step.cta).toBe('Reassign shiaijo →');
+  });
+
+  it('still asks for participants first when there are too few', () => {
+    // The participant shortfall is the earlier blocker and stays the message:
+    // a court fix would not make the draw possible.
+    const step = generateStep(makeComp({ players: [], courts: ['A', 'B', 'C'] }), ['A', 'B', 'C']);
+    expect(step.detail).toBe('Add at least 2 participants first');
+    expect(step.section).toBeNull();
+  });
+
+  it('leaves league alone: the count rule does not govern its courts', () => {
+    const step = generateStep(makeComp({ format: 'league', players: twoPlayers(), courts: ['A', 'B', 'C'] }), ['A', 'B', 'C']);
+    expect(step.detail).toBe('Use the "Generate draw" button in the header above');
+  });
+
+  it('applies the count rule without a tournament court list', () => {
+    // The overview can render before the tournament fetch settles; the count
+    // half of the rule needs no venue data.
+    const step = generateStep(makeComp({ players: twoPlayers(), courts: ['A', 'B', 'C'] }), undefined);
+    expect(step.detail).toContain('3 shiaijo cannot be paired down to a single bracket');
+  });
+
+  it('names only counts the venue can supply', () => {
+    // The detail line renders alone, with no venue-aware hint beneath it, so
+    // a 3-shiaijo tournament must not be told to "use 2 or 4".
+    const step = generateStep(makeComp({ players: twoPlayers(), courts: ['A', 'B', 'C'] }), ['A', 'B', 'C']);
+    expect(step.detail).toContain('This tournament has 3, so this competition can use 1 or 2');
+    expect(step.detail).not.toContain('4');
+  });
+
+  // The CTA authored on this step could never render: only an `active` step
+  // draws its button, and "Review seeds & settings" is emitted non-done
+  // forever (there is no "seeds reviewed" signal), so it took `active` on
+  // every render and the generate step was always `todo`.
+  it('is the ACTIVE step while it is blocked, so its CTA can render', () => {
+    const step = generateStep(makeComp({ players: twoPlayers(), courts: ['A', 'B', 'C'] }), ['A', 'B', 'C']);
+    expect(step.cta).toBe('Reassign shiaijo →');
+    expect(step.section).toBe('settings');
+    expect(step.state).toBe('active');
+  });
+
+  it('demotes the never-completing settings step while the draw is blocked', () => {
+    // Otherwise two buttons on the same card both navigate to Settings.
+    const steps = competitionNextSteps(makeComp({ players: twoPlayers(), courts: ['A', 'B', 'C'] }), ['A', 'B', 'C']);
+    expect(steps.find(s => s.id === 'settings').state).toBe('todo');
+    expect(steps.filter(s => s.state === 'active').map(s => s.id)).toEqual(['generate']);
+  });
+
+  it('leaves the ordinary checklist alone when nothing blocks the draw', () => {
+    const steps = competitionNextSteps(makeComp({ players: twoPlayers(), courts: ['A', 'B'] }), ['A', 'B', 'C']);
+    expect(steps.filter(s => s.state === 'active').map(s => s.id)).toEqual(['settings']);
+    expect(steps.find(s => s.id === 'generate').state).toBe('todo');
+  });
+
+  it('does not jump the queue while participants are still missing', () => {
+    // A court fix would not make the draw possible yet, and the generate step
+    // carries no CTA in that state, so promoting it would show a dead row.
+    const steps = competitionNextSteps(makeComp({ players: [], courts: ['A', 'B', 'C'] }), ['A', 'B', 'C']);
+    expect(steps.filter(s => s.state === 'active').map(s => s.id)).toEqual(['participants']);
+  });
+
+  it('still promotes the blocker on a team competition, past the lineups step', () => {
+    const steps = competitionNextSteps(
+      makeComp({ kind: 'team', players: twoPlayers(), courts: ['A', 'B', 'C'] }), ['A', 'B', 'C']);
+    expect(steps.map(s => s.id)).toContain('lineups');
+    expect(steps.filter(s => s.state === 'active').map(s => s.id)).toEqual(['generate']);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // draw-ready / running / completed: pure helper is only for setup state, but
 // it should still be callable with any comp without throwing.
 // ---------------------------------------------------------------------------

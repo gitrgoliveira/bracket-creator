@@ -2186,17 +2186,23 @@ func TestCompetitionCourtsInvariant(t *testing.T) {
 
 	t.Run("empty courts inherit the tournament's courts", func(t *testing.T) {
 		r, store, _, _, _ := setupTestRouter(t)
+		// A 4-shiaijo venue, because the inherited list is now validated like
+		// any other: a competition may not reach an illegal allocation (3, 5,
+		// 6, ...) by inheriting one. The inheritance invariant this test owns
+		// is unchanged; only the venue size is, so it stays a legal allocation.
+		// The refusal side is covered by
+		// TestCreateCompetitionInheritedCourtsMatchExplicit.
 		require.NoError(t, store.SaveTournament(&state.Tournament{
-			Name: "T", Courts: []string{"A", "B", "C"},
+			Name: "T", Courts: []string{"A", "B", "C", "D"},
 		}))
 		comp := postComp(t, r, map[string]any{"name": "No Courts Comp"})
-		assert.Equal(t, []string{"A", "B", "C"}, courtsOf(comp),
+		assert.Equal(t, []string{"A", "B", "C", "D"}, courtsOf(comp),
 			"a competition created without courts must inherit the tournament's courts")
 
 		// Confirm it is persisted, not just echoed in the response.
 		reloaded, err := store.LoadCompetition(comp["id"].(string))
 		require.NoError(t, err)
-		assert.Equal(t, []string{"A", "B", "C"}, reloaded.Courts)
+		assert.Equal(t, []string{"A", "B", "C", "D"}, reloaded.Courts)
 	})
 
 	t.Run("explicit competition courts are preserved", func(t *testing.T) {

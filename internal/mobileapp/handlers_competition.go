@@ -296,6 +296,37 @@ func checkUniqueCompFields(store *state.Store, name, prefix, excludeID string) (
 	return nil, nil
 }
 
+// competitionDetail is the single-competition response: the stored competition
+// plus fields DERIVED from it that the operator console needs but that are not
+// part of the persisted record.
+//
+// The embedded pointer promotes every competition field to the top level, so
+// the body is the competition object it has always been with extra keys added;
+// existing clients are unaffected and the SPA's normalizeCompetitionDetail
+// (which spreads the payload) picks the new keys up without a change.
+//
+// DrawWarnings carries R2/D7's seed-placement warnings (engine.SeedWarnings).
+// They are recomputed per request rather than stored: they are a pure function
+// of the drawn pools and the shiaijo allocation, so a competition whose draw is
+// discarded and regenerated can never serve a stale one. Empty (and omitted)
+// for every competition with no draw, no seeds, or nothing to report.
+type competitionDetail struct {
+	*state.Competition
+	DrawWarnings []string `json:"drawWarnings,omitempty"`
+}
+
+// withDrawWarnings wraps a competition for a detail response. Kept as one
+// function so every endpoint that returns a single competition reports the
+// same warnings, whether the operator has just generated the draw or is coming
+// back to the page later.
+func withDrawWarnings(eng *engine.Engine, comp *state.Competition) competitionDetail {
+	detail := competitionDetail{Competition: comp}
+	if comp != nil && eng != nil {
+		detail.DrawWarnings = eng.SeedWarnings(comp.ID)
+	}
+	return detail
+}
+
 func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine, hub *Hub, elevated ElevatedVerifier) {
 	r.GET("/competitions", func(c *gin.Context) {
 		ids, err := store.ListCompetitions()
@@ -416,43 +447,51 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
+		// Guarantee >=1 court: empty competition courts inherit the
+		// tournament's courts so every match carries a real court label
+		// (otherwise the per-court Shiaijo operator view can't surface them).
+		//
+		// Resolved BEFORE the court validators below, not after. An omitted
+		// court list is not "no allocation", it is "the tournament's
+		// allocation", and that is the list this handler persists, so that is
+		// the list the rules have to see. Validating first let a 3-shiaijo
+		// venue create a 3-shiaijo competition simply by leaving `courts` out
+		// of the body, while the operator who spelled ["A","B","C"] out was
+		// refused: the operator who states their intent lost to the one who
+		// said nothing. R9 requires the DERIVED value to be validated wherever
+		// an allocation is derived rather than chosen.
+		comp.Courts = resolveCompetitionCourts(comp.Courts, createTourn)
+
 		// Cross-file guard symmetry with POST/PUT /tournament: same
 		// label + cap check via validateCompetitionCourts (looser than
-		// the tournament version: empty courts are allowed here because
-		// they are immediately resolved to the tournament's courts via
-		// resolveCompetitionCourts on the next line, so every match ends
-		// up with a real court label). Defense against direct API callers
-		// sending multi-character labels.
+		// the tournament version only in that it accepts an empty list,
+		// which by this point resolution has already ruled out). Defense
+		// against direct API callers sending multi-character labels.
 		//
-		// validateCompetitionCourts ALSO applies the shiaijo-count rule
-		// (1 or an even number) to a bracket-drawing competition, since a
-		// create authors a brand-new allocation and has no stored value to
-		// preserve. The settings PUT splits the two checks instead; see the
-		// comment on its call site.
+		// validateCompetitionCourts ALSO applies the shiaijo-count rule (a
+		// power of two: 1, 2, 4, 8 or 16) to a bracket-drawing competition,
+		// since a create authors a brand-new allocation and has no stored
+		// value to preserve. The settings PUT splits the two checks instead;
+		// see the comment on its call site.
 		if err := validateCompetitionCourts(comp.Courts, comp.Format); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "courts: " + err.Error()})
 			return
 		}
 
-		// A competition may only be allocated shiaijo the tournament has.
-		// Checked BEFORE resolveCompetitionCourts because an empty list means
-		// "inherit the tournament's", which is trivially a subset. The
-		// operator UI can't author an orphan (its pills come from the
-		// tournament's list), so this is defense against direct API callers;
-		// without it the create succeeds and the failure only surfaces later,
-		// at the engine's draw gate. engine.ValidateCourtsInTournament owns
-		// the message.
+		// A competition may only be allocated shiaijo the tournament has. On
+		// the resolved list this is trivially satisfied when the list was
+		// inherited, and still catches an explicit allocation naming a court
+		// the venue lacks. The operator UI can't author an orphan (its pills
+		// come from the tournament's list), so this is defense against direct
+		// API callers; without it the create succeeds and the failure only
+		// surfaces later, at the engine's draw gate.
+		// engine.ValidateCourtsInTournament owns the message.
 		if createTourn != nil {
 			if err := engine.ValidateCourtsInTournament(comp.Courts, createTourn.Courts); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "courts: " + err.Error()})
 				return
 			}
 		}
-
-		// Guarantee >=1 court: empty competition courts inherit the
-		// tournament's courts so every match carries a real court label
-		// (otherwise the per-court Shiaijo operator view can't surface them).
-		comp.Courts = resolveCompetitionCourts(comp.Courts, createTourn)
 
 		// Reject per-phase durations outside the shiai band.
 		if err := validateCompetitionDurations(&comp); err != nil {
@@ -594,7 +633,40 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
 			return
 		}
-		c.JSON(http.StatusOK, comp)
+		c.JSON(http.StatusOK, withDrawWarnings(eng, comp))
+	})
+
+	// GET /competitions/:id/draw-warnings, the seed-placement warnings for the
+	// competition's draw (R2/D7). Read-only and admin-gated: it is advice to
+	// the operator about a constraint the seeding rules had to relax, not
+	// something a spectator needs, so it is deliberately NOT on the viewer
+	// endpoints the public surfaces read.
+	//
+	// It exists as its own endpoint because the operator console loads a
+	// competition through the public viewer detail, so a field on the admin
+	// competition record would never reach the page that has to show it.
+	// Always 200 with a (possibly empty) list for a competition that exists:
+	// no seeds, no draw and nothing to relax are all normal, and none of them
+	// is an error.
+	r.GET("/competitions/:id/draw-warnings", func(c *gin.Context) {
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
+		comp, err := store.LoadCompetition(id)
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		if comp == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+			return
+		}
+		warnings := eng.SeedWarnings(id)
+		if warnings == nil {
+			warnings = []string{}
+		}
+		c.JSON(http.StatusOK, gin.H{"warnings": warnings})
 	})
 
 	// GET /competitions/:id/schedule/estimate, pre-draw schedule estimate
@@ -784,13 +856,15 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// 1-court default for competitions).
 			//
 			// This is validateCourtLabels, NOT validateCompetitionCourts:
-			// the shiaijo-pairing half of that validator needs the STORED
+			// the shiaijo-count half of that validator needs the STORED
 			// allocation to decide, so it runs inside the update transform
-			// below (search validateCompetitionCourtPairing) where `current`
-			// is loaded. A PUT that leaves an already-odd allocation alone
-			// must SUCCEED, otherwise a competition saved before the rule
-			// existed could never have its name, date or durations edited
-			// again. Only a change TO an odd allocation is rejected.
+			// below (search validateCompetitionShiaijoCount) where `current`
+			// is loaded. A PUT that leaves an already-invalid allocation
+			// alone must SUCCEED, otherwise a competition saved before the
+			// rule existed could never have its name, date or durations
+			// edited again. Only a change TO an invalid allocation is
+			// rejected. The count check downstream sees the RESOLVED list,
+			// since resolveCompetitionCourts runs just below.
 			if err := validateCourtLabels(comp.Courts); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "courts: " + err.Error()})
 				return
@@ -957,6 +1031,21 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				}
 				sameTeamMatchType := comp.TeamMatchType == current.TeamMatchType ||
 					(comp.TeamMatchType == state.TeamMatchTypeFixed && current.TeamMatchType == "")
+				// The stored allocation, resolved the same way the incoming one
+				// was. comp.Courts went through resolveCompetitionCourts in the
+				// settings-validation block above, so comparing it against the
+				// RAW current.Courts compares two different things: a record
+				// saved with no `courts` key at all (legacy, imported, or
+				// hand-edited) has current.Courts == nil, which never equals the
+				// materialised list, so every "did the courts change?" test below
+				// answered yes for a PUT that changed nothing about courts. On a
+				// 3-shiaijo venue that turned a plain rename into a 400 naming a
+				// count the operator never chose, and on a draw-ready competition
+				// into a spurious 409. Both guards use this value so they agree.
+				// Empty means the same thing on both sides of the comparison
+				// ("inherit the venue"), which is exactly what makes them
+				// comparable.
+				currentCourts := resolveCompetitionCourts(current.Courts, putTourn)
 				// Draw-ready gate: the draw artifacts (pools.csv /
 				// bracket.json) were generated from the current config.
 				// Mutating output-affecting fields while draw-ready would
@@ -990,7 +1079,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 						comp.PoolSize != current.PoolSize ||
 							comp.PoolWinners != current.PoolWinners ||
 							comp.PoolSizeMode != current.PoolSizeMode ||
-							strings.Join(comp.Courts, ",") != strings.Join(current.Courts, ",") ||
+							strings.Join(comp.Courts, ",") != strings.Join(currentCourts, ",") ||
 							comp.Format != current.Format ||
 							comp.PoolFormat != current.PoolFormat ||
 							comp.RoundRobin != current.RoundRobin ||
@@ -1036,26 +1125,39 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// validation block above because it is the one court check
 				// that needs the STORED allocation to decide.
 				//
-				// A competition must run on 1 shiaijo or an even number:
-				// the knockout draw pairs shiaijo, so an odd count leaves
-				// one without a partner (helper.ValidateCourtPairing owns
-				// the message). Existing data is validated on WRITE ONLY,
-				// so this fires only when the allocation is actually being
-				// CHANGED. A competition already saved with an odd
-				// allocation stays editable: an unrelated edit (name, date,
-				// durations, check-in) that leaves courts as they are must
-				// SUCCEED, otherwise the operator is locked out of the
-				// settings screen entirely and cannot even rename the
-				// competition. The operator UI surfaces a persistent
-				// warning on that screen instead, and the engine refuses to
-				// build a draw on an odd allocation.
+				// A competition must run on a power of two of shiaijo (1,
+				// 2, 4, 8 or 16): the knockout draw gives each shiaijo its
+				// own block of the bracket and the blocks merge in pairs,
+				// so the count has to halve cleanly
+				// (helper.ValidateShiaijoCount owns the message). Existing
+				// data is validated on WRITE ONLY, so this fires only when
+				// the allocation is actually being CHANGED. A competition
+				// already saved with an invalid allocation stays editable:
+				// an unrelated edit (name, date, durations, check-in) that
+				// leaves courts as they are must SUCCEED, otherwise the
+				// operator is locked out of the settings screen entirely
+				// and cannot even rename the competition. The operator UI
+				// surfaces a persistent warning on that screen instead, and
+				// the engine refuses to build a draw on an invalid
+				// allocation.
+				//
+				// comp.Courts is the RESOLVED list here (the handler ran
+				// resolveCompetitionCourts before taking the lock), so a
+				// PUT that omits courts on a 3-shiaijo venue is judged on
+				// the [A B C] it would actually store, exactly like the
+				// create path. The comparison against currentCourts (the
+				// stored list put through the SAME resolution, see above) is
+				// what keeps that from breaking a legacy record: a stored
+				// [A B C] round-tripped, inherited unchanged, or materialised
+				// from no stored list at all, is not a change, so it still
+				// saves.
 				//
 				// Any change to the list must land on a valid count, using
 				// the same join-comparison the draw-ready guard above uses
 				// for courts. The FORMAT is part of the trigger too: the
 				// rule is scoped to bracket-drawing formats, so switching a
 				// league on 3 shiaijo to mixed makes a stored-and-valid
-				// allocation unpairable without the court list changing at
+				// allocation illegal without the court list changing at
 				// all. Checking only the court list would let that through
 				// and leave the operator with a competition that cannot
 				// draw and no message saying why.
@@ -1068,9 +1170,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// so only a CHANGE that still names a missing court is
 				// refused. It is NOT scoped to bracket formats: a league's
 				// matches need an operator view just as much.
-				if strings.Join(comp.Courts, ",") != strings.Join(current.Courts, ",") ||
+				if strings.Join(comp.Courts, ",") != strings.Join(currentCourts, ",") ||
 					comp.Format != current.Format {
-					if err := validateCompetitionCourtPairing(comp.Courts, comp.Format); err != nil {
+					if err := validateCompetitionShiaijoCount(comp.Courts, comp.Format); err != nil {
 						validationErr = fmt.Errorf("courts: %w", err)
 						return nil, nil
 					}
@@ -1498,7 +1600,11 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 		hub.Broadcast(EventDrawGenerated, gin.H{"competitionId": id})
-		c.JSON(http.StatusOK, comp)
+		// The operator reads the result of THIS action, so the draw's seeding
+		// warnings ride back with it as well as on the detail GET they land on
+		// afterwards (R2/D7: a relaxed seed constraint is reported, never
+		// refused).
+		c.JSON(http.StatusOK, withDrawWarnings(eng, comp))
 	})
 
 	r.DELETE("/competitions/:id/draw", RequireElevatedPassword(elevated), func(c *gin.Context) {

@@ -685,6 +685,19 @@ function CompCard({ c, onOpen, onStart, tournament, showToast }) {
   const courts = c.courts || [];
   const [shareOpen, setShareOpen] = useStateA(false);
 
+  // Starting from SETUP generates the draw, so the same court rules that gate
+  // the competition header's Generate/Start buttons gate this one: one derived
+  // value (competitionDrawBlockedReason, admin_helpers.jsx) for all three
+  // surfaces. Without it this card offered a live button for a start the
+  // server refuses with a 400 whose only trace is an 8s toast, on the very
+  // screen an operator is most likely to start from.
+  //
+  // Scoped to setup: a draw-ready competition has already cleared these rules
+  // and its start is a status flip the server accepts.
+  const startBlockedReason = (!c.status || c.status === "setup")
+    ? window.competitionDrawBlockedReason(c, tournament && tournament.courts)
+    : null;
+
   const canShare = tournament && tournament.mode === "self-run"
     && c.kind !== "team"
     && (!c.status || c.status === "setup");
@@ -729,7 +742,20 @@ function CompCard({ c, onOpen, onStart, tournament, showToast }) {
         </div>
         <div className="tcard__actions">
           {(c.status === "draw-ready" || (c.status === "setup" && playerCount >= 2)) && (
-            <button type="button" className="btn btn--primary btn--sm btn--full" onClick={(e) => { e.stopPropagation(); onStart(); }}>Start competition →</button>
+            <button
+              type="button"
+              className="btn btn--primary btn--sm btn--full"
+              onClick={(e) => { e.stopPropagation(); onStart(); }}
+              disabled={!!startBlockedReason}
+            >Start competition →</button>
+          )}
+          {/* The reason, not just a dead button: the operator has to know
+              which screen fixes it. Kept on the card rather than in a tooltip
+              because the dashboard is a touch surface. */}
+          {startBlockedReason && (
+            <div className="tcard__action-note" style={{ color: "var(--red)", fontSize: 11, fontWeight: 600, lineHeight: 1.4 }} data-testid="card-shiaijo-count-block">
+              ⚠ Cannot start: {startBlockedReason} Open this competition and reassign shiaijo in Settings.
+            </div>
           )}
           {(c.status === "pools" || c.status === "playoffs") && (
             <button type="button" className="btn btn--primary btn--sm btn--full" onClick={(e) => { e.stopPropagation(); onOpen(); }}>Go to Scoring →</button>

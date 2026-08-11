@@ -95,11 +95,29 @@ A competition moves through three phases:
 
 The competition **Settings** page has an **Assigned shiai-jo (courts)** field listing every shiai-jo in the venue. Pick the ones this competition runs on; the number you pick is how many of its matches can run at the same time.
 
-Assign **1 shiai-jo, or an even number of them**. The knockout draw pairs shiai-jo so that each pool's runner-up crosses into its partner shiai-jo's part of the bracket, which keeps the two qualifiers from one pool apart until as late as possible. An odd number above 1 leaves one shiai-jo without a partner, so the draw cannot be built. A single shiai-jo is always allowed: its bracket splits into two half-blocks that act as partner shiai-jo, so the draw has the same shape as a multi-shiai-jo one.
+Assign **1, 2, 4, 8 or 16 shiai-jo**. The knockout draw gives each shiai-jo its own block of the bracket and the blocks merge in pairs, so the count has to halve cleanly all the way down. Being even is not enough on its own: six blocks pair off into three, and three cannot pair off again, so 6 and 10 are refused just as 3, 5 and 7 are. When you pick a count the rule does not allow, the settings page names the counts to use instead, and it always offers 1. A single shiai-jo is always allowed: its bracket splits into two half-blocks that act as partner shiai-jo, so the draw has the same shape as a multi-shiai-jo one. 16 is the highest, because shiai-jo are labelled A to Z. See [The knockout draw](knockout-draw.md#how-many-shiai-jo-a-competition-can-use) for the full explanation.
 
-The rule applies to each competition's own allocation, never to the venue. A five shiai-jo hall is perfectly normal: run one competition on four shiai-jo and another on one. It also applies only to the formats that produce a knockout bracket, which are playoffs and mixed. League and Swiss competitions have no bracket to pair up, so they can use any number of shiai-jo.
+**This is a rule about each competition, never about your venue.** A hall with three shiai-jo is completely normal, and nothing asks you to change it. What it means is that each competition there runs on 1 or 2 of the three, not that the third stands idle: run the seniors on 2 shiai-jo and the juniors on the remaining 1 at the same time, and all three are busy. A five shiai-jo hall works the same way, with one competition on 4 and another on 1, or two competitions of 2 alongside a third on 1.
 
-If you pick an odd number the settings page shows the valid counts to use instead, and **Generate draw** and **Start competition** stay disabled until you change it. A competition saved with an odd allocation before the rule applied keeps running and stays editable; its settings page carries a standing warning until you reassign its shiai-jo.
+A competition also cannot end up with a count the rule does not allow by inheriting one. If you create a competition without choosing its shiai-jo, it starts from the venue's list, and that inherited list is checked in exactly the same way, so on a three shiai-jo venue you are asked to pick 1 or 2 rather than being handed all three.
+
+The rule applies only to the formats that produce a knockout bracket, which are playoffs and mixed. League and Swiss competitions have no bracket to merge, so they can use any number of shiai-jo.
+
+#### If you assign more shiai-jo than the competition has pools
+
+The draw never uses more shiai-jo than the competition has pools, because a shiai-jo with no pool of its own would own an empty block of the bracket. When you assign more than that, nothing is refused and no warning is shown: the draw steps down to the largest allowed count that fits and is generated on that. A competition with seven pools assigned eight shiai-jo runs on four. The count you assign is therefore not always the count you get.
+
+The step-down applies to the whole competition, not only to the knockout, and the blocks are handed to the assigned shiai-jo in order. Assign A to H to a seven-pool competition and it runs entirely on A, B, C and D: the pools split 2 / 2 / 2 / 1 across those four, and every knockout match from the first round to the final is on them as well. Open the Shiaijo operator view for E, F, G or H and it reads "No matches on this court".
+
+So assign a count the competition can fill, and give the rest to another competition running alongside it. If you want eight shiai-jo busy, the competition needs at least eight pools.
+
+#### If a competition already has a count the rule does not allow
+
+You can meet this after an upgrade, because the rule is newer than the data folder: a competition set up on 3, 5 or 6 shiai-jo before the rule existed keeps that allocation on disk, and so does one whose data folder was edited by hand.
+
+Such a competition is not broken. It loads, its matches and results are intact, it appears to spectators as usual, and its Settings page stays fully editable, so renaming it or changing anything else on that page still saves normally. The page carries a standing warning naming the counts to use instead.
+
+What you cannot do is draw or start it. **Generate draw** and **Start competition** are disabled with the reason shown, and the app refuses the same action from anywhere else, until you reassign its shiai-jo to 1, 2, 4, 8 or 16.
 
 ### Adding participants
 

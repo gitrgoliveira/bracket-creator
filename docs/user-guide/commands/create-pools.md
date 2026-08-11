@@ -12,7 +12,7 @@ bracket-creator create-pools [flags]
 |------|-------|---------|-------------|
 | `--file` | `-f` | (none) | CSV file with participants **(required)** |
 | `--output` | `-o` | (none) | Output `.xlsx` path **(required)** |
-| `--courts` | `-c` | `2` | Number of shiai-jo (courts) to distribute pools across. Must be 1 or an even number, see [Shiai-jo count](#shiai-jo-count) |
+| `--courts` | `-c` | `2` | Number of shiai-jo (courts) to distribute pools across. Must be 1, 2, 4, 8 or 16, see [Shiai-jo count](#shiai-jo-count) |
 | `--players` | `-p` | `3` | Minimum players per pool |
 | `--max-players` | `-m` | (none) | Maximum players per pool |
 | `--pool-winners` | `-w` | `2` | Players that qualify from each pool, see [Qualifiers per pool](#qualifiers-per-pool) |
@@ -59,11 +59,15 @@ bracket-creator create-pools \
 
 ## Shiai-jo count
 
-`--courts` takes **1 or an even number**. The elimination tree gives each shiai-jo its own block of the bracket and pairs those blocks up, so each pool's runner-up crosses into the partner shiai-jo's block. An odd number above 1 leaves one shiai-jo without a partner, and the command stops with an error naming the counts to use instead.
+`--courts` takes **1, 2, 4, 8 or 16**. The elimination tree gives each shiai-jo its own block of the bracket and the blocks merge in pairs, so the count has to halve cleanly all the way down. Any other value stops the command with an error naming the counts to use instead, and the error always offers 1.
 
-A single shiai-jo is always allowed: `-c 1` splits its block into two halves that act as partner shiai-jo, producing the same bracket shape as a multi-shiai-jo run. The upper bound is 26, because shiai-jo are labelled A to Z.
+Being even is not enough on its own. With `-c 6` the six blocks pair off into three, and three cannot pair off again, so one of them would reach the final having fought a round fewer than the other two. `-c 6` and `-c 10` are therefore refused, just as `-c 3`, `-c 5` and `-c 7` are.
 
-This is a per-tournament-file rule, not a rule about your venue. A hall with five shiai-jo can generate one file for four shiai-jo and another for one.
+A single shiai-jo is always allowed: `-c 1` splits its block into two halves that act as partner shiai-jo, producing the same bracket shape as a multi-shiai-jo run. 16 is the highest, because shiai-jo are labelled A to Z, which puts 32 out of reach.
+
+The draw also never uses more shiai-jo than there are pools, because a shiai-jo with no pools of its own would own an empty block. When you ask for more, the count steps down to the largest allowed value that fits, and the file is generated without an error: with 7 pools, `-c 8` produces a draw on 4 shiai-jo.
+
+This is a per-tournament-file rule, not a rule about your venue. A hall with three shiai-jo generates one file for two shiai-jo and another for one, and runs both at the same time. See [How many shiai-jo a competition can use](../organisers/knockout-draw.md#how-many-shiai-jo-a-competition-can-use) for the full explanation.
 
 ## Qualifiers per pool
 

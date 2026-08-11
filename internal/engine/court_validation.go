@@ -37,8 +37,8 @@ func ValidateCourtCount(numPlayers, numCourts int) error {
 
 // CompetitionDrawsBracket reports whether a competition's DRAW builds a
 // knockout bracket, which is the scope of the shiaijo-count rule: the rule
-// exists because bracket regions pair up court by court, so it only binds
-// where there are bracket regions.
+// exists because the draw gives each shiaijo its own block of the bracket and
+// those blocks merge in pairs, so it only binds where there are blocks.
 //
 // It mirrors the format switch in runDrawPipeline exactly. League and Swiss
 // produce pools / rounds and never a bracket; mixed builds a preview
@@ -61,11 +61,12 @@ func CompetitionDrawsBracket(format string) bool {
 	}
 }
 
-// ValidateCourtPairing is the engine-side entry point for the shiaijo-count
-// rule: a competition runs on 1 shiaijo or an even number, never on an odd
-// number greater than 1. The rule itself (and its message) lives in
-// helper.ValidateCourtPairing so the CLI, the HTTP API, the engine and the
-// operator UI all reject exactly the same allocations.
+// ValidateShiaijoCount is the engine-side entry point for the shiaijo-count
+// rule: a competition runs on a POWER OF TWO of shiaijo -- 1, 2, 4, 8 or 16 --
+// and never on anything else, including even counts such as 6 and 10. The rule
+// itself (and its message) lives in helper.ValidateShiaijoCount so the CLI, the
+// HTTP API, the engine and the operator UI all reject exactly the same
+// allocations.
 //
 // Unlike its sibling ValidateCourtCount above, which applies only to a
 // SINGLE-pool competition (the idle-court cap depends on the roster size),
@@ -77,12 +78,43 @@ func CompetitionDrawsBracket(format string) bool {
 //   - it catches every caller, including a draw generated outside the HTTP
 //     layer, which the API-level validators cannot see;
 //   - it validates on WRITE, not on read, so a competition already saved
-//     with an odd allocation (a legacy record, or one that inherited an odd
-//     venue court list before this rule existed) keeps running and keeps
-//     serving its existing matches. Only a NEW draw is refused, and the
+//     with an invalid allocation (a legacy record, or one that inherited a
+//     3-shiaijo venue court list before this rule existed) keeps running and
+//     keeps serving its existing matches. Only a NEW draw is refused, and the
 //     operator fixes it by reassigning shiaijo in competition settings.
-func ValidateCourtPairing(numCourts int) error {
-	return helper.ValidateCourtPairing(numCourts)
+func ValidateShiaijoCount(numCourts int) error {
+	return helper.ValidateShiaijoCount(numCourts)
+}
+
+// InheritedDrawCourts materialises the shiaijo allocation a draw runs on.
+//
+// A competition's own list wins whenever it has one, untouched: that is the
+// operator's allocation, and it has its own validators at every write path
+// plus the gates in runDrawPipeline. An EMPTY list has always meant "inherit
+// the tournament's shiaijo" (validateCourtLabels documents it, and every HTTP
+// write path resolves it that way), so this returns the venue's list. The
+// ["A"] fallback covers the no-tournament-yet bootstrap edge, where the
+// generators would otherwise produce unnamed courts.
+//
+// Nothing is trimmed to a legal shiaijo count here. When a venue's court count
+// is not a legal allocation the inherited list is REFUSED by the caller's
+// count gate rather than silently reduced, because choosing which two of three
+// shiaijo a competition runs on is the operator's decision; the create path
+// makes the identical ruling, so omitting a court list and stating it reach the
+// same outcome.
+//
+// Mirrors resolveCompetitionCourts in internal/mobileapp/handlers_tournament.go,
+// which applies the same resolution on the HTTP write paths. This one exists
+// because records with no courts key still reach the engine from legacy data,
+// imported manifests and hand-edited config files.
+func InheritedDrawCourts(compCourts []string, tourn *state.Tournament) []string {
+	if len(compCourts) > 0 {
+		return compCourts
+	}
+	if tourn != nil && len(tourn.Courts) > 0 {
+		return append([]string(nil), tourn.Courts...)
+	}
+	return []string{helper.CourtLabel(0)}
 }
 
 // CourtsOutsideTournament returns, in the competition's own order, every

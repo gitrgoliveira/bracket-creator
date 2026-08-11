@@ -101,7 +101,7 @@ const clickPill = async (container, label) => {
 describe('AdminCreateCompetition shiaijo-count guard (bc-draw R9 gap 2)', () => {
   it('starts on a pairable 2-shiaijo default with the button live', async () => {
     const { container } = await mountForm();
-    expect(container.querySelector('[data-testid="odd-shiaijo-hint"]')).toBeNull();
+    expect(container.querySelector('[data-testid="shiaijo-count-error"]')).toBeNull();
     expect(submitButton(container).disabled).toBe(false);
   });
 
@@ -109,7 +109,7 @@ describe('AdminCreateCompetition shiaijo-count guard (bc-draw R9 gap 2)', () => 
     const { container, onCreate } = await mountForm();
     await clickPill(container, 'Shiaijo (court) C'); // default A+B → A, B, C
 
-    const hint = container.querySelector('[data-testid="odd-shiaijo-hint"]');
+    const hint = container.querySelector('[data-testid="shiaijo-count-error"]');
     expect(hint).not.toBeNull();
     // Same message the Settings screen and the Go side use.
     expect(hint.textContent).toContain('3 shiaijo cannot be paired');
@@ -123,32 +123,89 @@ describe('AdminCreateCompetition shiaijo-count guard (bc-draw R9 gap 2)', () => 
     await clickPill(container, 'Shiaijo (court) C');
     expect(submitButton(container).disabled).toBe(true);
     await clickPill(container, 'Shiaijo (court) D'); // → A, B, C, D
-    expect(container.querySelector('[data-testid="odd-shiaijo-hint"]')).toBeNull();
+    expect(container.querySelector('[data-testid="shiaijo-count-error"]')).toBeNull();
     expect(submitButton(container).disabled).toBe(false);
   });
 
-  it('leaves a league alone: its courts are parallel mats with nothing to pair', async () => {
+  it('leaves a league alone: its courts run in parallel with nothing to merge', async () => {
     const { container } = await mountForm();
     await act(async () => {
       fireEvent.click(Array.from(container.querySelectorAll('button.radio-pill')).find((b) => b.textContent.trim() === 'League'));
     });
     await clickPill(container, 'Shiaijo (court) C');
-    expect(container.querySelector('[data-testid="odd-shiaijo-hint"]')).toBeNull();
+    expect(container.querySelector('[data-testid="shiaijo-count-error"]')).toBeNull();
     expect(submitButton(container).disabled).toBe(false);
+  });
+});
+
+// The rule used to reach the operator ONLY as a rejection, after a bad pick.
+// The standing hint teaches it at the field, before anything can be blocked,
+// and is venue-aware so a 3-shiaijo tournament answers "why can't I pick all
+// three of my shiaijo" in place.
+describe('AdminCreateCompetition standing shiaijo hint (spec 007 R9)', () => {
+  const hintText = (container) => {
+    const el = container.querySelector('[data-testid="shiaijo-count-hint"]');
+    return el && el.textContent;
+  };
+
+  it('states the valid counts and the reason on a VALID selection', async () => {
+    const { container } = await mountForm();
+    expect(container.querySelector('[data-testid="shiaijo-count-error"]')).toBeNull();
+    const hint = hintText(container);
+    expect(hint).not.toBeNull();
+    expect(hint).toContain('can use 1, 2 or 4 shiaijo');
+    expect(hint).toContain('merge in pairs');
+    expect(hint).toContain('halve cleanly');
+  });
+
+  it('is venue-aware: a 3-shiaijo tournament offers 1 or 2', async () => {
+    const { container } = await mountForm({ tournament: makeTournament({ courts: ['A', 'B', 'C'] }) });
+    const hint = hintText(container);
+    expect(hint).toContain('can use 1 or 2 shiaijo');
+    expect(hint).toContain('this tournament has 3');
+  });
+
+  it('stays on screen once the selection goes invalid, without repeating the mechanism', async () => {
+    const { container } = await mountForm({ tournament: makeTournament({ courts: ['A', 'B', 'C'] }) });
+    await clickPill(container, 'Shiaijo (court) C'); // → A, B, C: invalid
+    expect(container.querySelector('[data-testid="shiaijo-count-error"]')).not.toBeNull();
+    const hint = hintText(container);
+    expect(hint).toContain('can use 1 or 2 shiaijo');
+    // The red error one line above already states it; twice is noise.
+    expect(hint).not.toContain('halve cleanly');
+  });
+
+  it('is absent for league, which the rule does not govern', async () => {
+    const { container } = await mountForm();
+    await act(async () => {
+      fireEvent.click(Array.from(container.querySelectorAll('button.radio-pill')).find((b) => b.textContent.trim() === 'League'));
+    });
+    expect(container.querySelector('[data-testid="shiaijo-count-hint"]')).toBeNull();
   });
 });
 
 describe('AdminCreateCompetition server-error surfacing (bc-draw R9 gap 2)', () => {
   const errorBanner = (container) => container.querySelector('.alert--error');
 
+  // The mocked rejection is the LIVE server message, verbatim: POST
+  // /api/competitions prefixes "courts: " (handlers_competition.go) onto
+  // helper.ValidateShiaijoCount's text for a 3-shiaijo allocation. Mocking a
+  // retired string (the pre-R9 "must be 1 or an even number") still proved the
+  // banner renders SOMETHING, but no longer proved a real rejection reaches it.
   it('shows the server rejection in the form banner instead of nothing', async () => {
-    const onCreate = vi.fn().mockRejectedValue(new Error('courts: courts must be 1 or an even number, got 3'));
+    const onCreate = vi.fn().mockRejectedValue(new Error(
+      'courts: shiaijo count must be a power of two (1, 2, 4, 8 or 16), got 3: use 2 or 4, or 1; '
+      + 'the knockout draw gives each shiaijo its own block of the bracket and the blocks merge in pairs, '
+      + 'so the count has to halve cleanly'));
     const { container } = await mountForm({ onCreate });
 
     await act(async () => { fireEvent.click(submitButton(container)); });
 
     await waitFor(() => expect(errorBanner(container)).not.toBeNull());
-    expect(errorBanner(container).textContent).toContain('courts must be 1 or an even number');
+    expect(errorBanner(container).textContent).toContain('shiaijo count must be a power of two');
+    // The remedy half must survive too: a truncated banner that stops at the
+    // rule leaves the operator without the counts they can actually pick.
+    expect(errorBanner(container).textContent).toContain('use 2 or 4, or 1');
     // The button comes back so the operator can retry after fixing the form.
     expect(submitButton(container).disabled).toBe(false);
   });

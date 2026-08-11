@@ -312,6 +312,18 @@ function normalizeCompetitionDetail(data) {
     // null from empty courts, so this is behavior-preserving.
     result.courts = result.courts || [];
 
+    // ...and again on the NESTED record, which is the shape the operator
+    // console actually renders: GET /api/viewer/competitions/:id answers
+    // {config, pools, poolMatches, bracket, standings}, and admin.jsx passes
+    // `detail.config` straight to AdminCompetition. Normalizing only the top
+    // level left `config.courts` null and made the claim above ("no consumer
+    // has to guard individually") false for the one path that matters. The
+    // render sites are defended too; this keeps the boundary honest so the
+    // next consumer of config.* inherits the guarantee.
+    if (result.config) {
+        result.config = { ...result.config, courts: result.config.courts || [] };
+    }
+
     // Normalize config.players (Go uses PascalCase, JS expects camelCase)
     if (result.config && result.config.players) {
         result.config = { ...result.config, players: result.config.players.map(p => {

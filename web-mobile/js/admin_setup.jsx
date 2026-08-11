@@ -435,6 +435,14 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
                 onChange={(e) => { setCourts(decideNumericUpdate(e.target.value, 1).value); setError(""); }}
               />
               <div className="field__hint">{`Enter a number (1-${MAX_COURTS}). Courts will be automatically labeled A, B, C, etc.`}</div>
+              {/* The FIRST place shiaijo are chosen said nothing about the
+                  per-competition count rule, so an organiser typed 3 here and
+                  met the refusal two screens later, reading it as a verdict on
+                  their venue. shiaijoVenueHint (admin_helpers.jsx) states the
+                  rule's SCOPE up front and, for a number like 3, shows the
+                  split that keeps every shiaijo busy. Live on the typed value,
+                  so the example is about their hall and not a worked one. */}
+              <div className="field__hint" data-testid="venue-shiaijo-hint">{window.shiaijoVenueHint(courts)}</div>
               {errorField === "courts" && error && <div className="field__error" role="alert">{error}</div>}
             </div>
           </div>
@@ -721,16 +729,23 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   useEffectA(() => () => { mountedRef.current = false; }, []);
 
   // Shiaijo-count rule (shiaijoCountError, mirrored from
-  // helper.ValidateCourtPairing), identical to the competition Settings
-  // screen: a competition whose draw builds a knockout bracket runs on 1
-  // shiaijo or an even number, and league/Swiss are out of scope
-  // (formatDrawsBracket). The server rejects an unpairable allocation on
-  // create with a 400, so without this the operator meets a live button, a
-  // failed request and a form that still looks fine. There is no
-  // stored-vs-staged distinction to make here: a create authors a brand-new
-  // allocation, so the hint and the block are the same condition.
+  // helper.ValidateShiaijoCount), identical to the competition Settings
+  // screen: a competition whose draw builds a knockout bracket runs on 1, 2,
+  // 4, 8 or 16 shiaijo, and league/Swiss are out of scope
+  // (formatDrawsBracket). The server rejects an invalid allocation on create
+  // with a 400, so without this the operator meets a live button, a failed
+  // request and a form that still looks fine. There is no stored-vs-staged
+  // distinction to make here: a create authors a brand-new allocation, so the
+  // hint and the block are the same condition.
   const courtsErr = window.formatDrawsBracket(format)
     ? window.shiaijoCountError(selectedCourts.length) : null;
+  // STANDING hint, same helper and same venue-awareness as the Settings
+  // screen: on a 3-shiaijo tournament this reads "can use 1 or 2 (this
+  // tournament has 3)" from the moment the form opens, so the operator never
+  // has to discover the rule by being refused. The mechanism sentence is
+  // dropped while the red error states it one line above.
+  const courtsHint = window.formatDrawsBracket(format)
+    ? window.shiaijoCountHint(safeCourts.length, !courtsErr) : null;
 
   // Auto-stack the default start time after the previous competition on the
   // same day. We take the latest-STARTING same-day competition and add its
@@ -912,7 +927,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     // channel every client-side guard above uses. Previously onCreate's
     // rejection was swallowed by the parent (admin.jsx) and the only trace
     // was a bottom-of-screen toast that expires after 8s, so any 400 the
-    // client didn't predict (unpairable shiaijo, duplicate prefix, a rule
+    // client didn't predict (an invalid shiaijo count, duplicate prefix, a rule
     // added server-side later) read to the operator as a dead button. The
     // toast still fires; this makes the reason persist next to the form.
     setError("");
@@ -1066,12 +1081,17 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
                 <button key={cc} className={`radio-pill ${selectedCourts.includes(cc) ? "is-active" : ""}`} type="button" onClick={() => toggleCourt(cc)}>Shiaijo (court) {cc}</button>
               ))}
             </div>
-            {/* Same hint, same wording and the same position relative to the
+            {/* Same hints, same wording and the same position relative to the
                 pills as the competition Settings screen: immediately under
                 the pills, above the concurrency hint. */}
             {courtsErr && (
-              <div className="field__hint" style={{ color: "var(--red)", fontWeight: 600 }} data-testid="odd-shiaijo-hint">
+              <div className="field__hint" style={{ color: "var(--red)", fontWeight: 600 }} data-testid="shiaijo-count-error">
                 {courtsErr}
+              </div>
+            )}
+            {courtsHint && (
+              <div className="field__hint" data-testid="shiaijo-count-hint">
+                {courtsHint}
               </div>
             )}
             <div className="field__hint">Concurrency for this competition equals the number of shiaijo (courts) assigned. Different competitions can share shiaijo (courts); the schedule prevents conflicts.</div>
@@ -1194,6 +1214,45 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
 }
 
 
+// --- Import preview / result helpers (pure, ES-exported for the vitest suite) --
+//
+// The shiaijo allocation a manifest row will ACTUALLY be saved with. Mirrors
+// resolveCompetitionCourts on the Go side (internal/mobileapp): a row that
+// omits `courts` inherits the tournament's whole list, and the inherited value
+// is validated exactly like a spelled-out one. That inheritance is why the
+// preview has to resolve rather than print `comp.courts`: on a 3-shiaijo venue
+// the commonest manifest of all - one with no courts key at all - is the one
+// that gets refused.
+function previewRowCourts(comp, venueCourts) {
+  const own = (comp && Array.isArray(comp.courts) && comp.courts.length) ? comp.courts : null;
+  return own || (Array.isArray(venueCourts) ? venueCourts : []);
+}
+
+// The shiaijo-count problem this manifest row would be refused for, or null.
+// Scoped by format the same way every other surface is (formatDrawsBracket):
+// a league or Swiss row may hold any count. Venue-aware, so the message never
+// offers a count the venue cannot supply.
+function previewRowShiaijoError(comp, venueCourts) {
+  if (!window.formatDrawsBracket((comp && comp.format) || "")) return null;
+  const venue = (Array.isArray(venueCourts) ? venueCourts : []).length;
+  return window.shiaijoCountError(previewRowCourts(comp, venueCourts).length, venue);
+}
+
+// `courts:` is the raw API field name the import handler prefixes onto the
+// shiaijo-count message. The message it introduces already opens with "shiaijo
+// count must be ...", so the prefix names nothing the operator cannot already
+// see and only lengthens an already long sentence. Stripped, then sentence-
+// cased so it reads as prose.
+//
+// Deliberately narrow. The sibling `format:` / `swissRounds:` prefixes are the
+// only part of those messages that says WHICH setting is at fault, so they
+// stay; so do the "parse participants:" / "save competition:" prefixes, which
+// say which STEP failed.
+function importRowErrorText(error) {
+  const msg = String(error || "").replace(/^courts:\s*/, "");
+  return msg ? msg.charAt(0).toUpperCase() + msg.slice(1) : msg;
+}
+
 function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMode, password }) {
   const [files, setFiles] = useStateA([]);
   const [preview, setPreview] = useStateA(null);
@@ -1291,6 +1350,11 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
   const manifestFile = files.find(f => f.name === "manifest.yaml" || f.name === "manifest.yml" || f.name === "manifest.json");
   const csvFiles = files.filter(f => f.name.endsWith(".csv"));
 
+  // The venue the preview resolves inherited allocations against, and how many
+  // previewed rows would be refused for their shiaijo count.
+  const venueCourts = (tournament && tournament.courts) || [];
+  const previewShiaijoProblems = (preview || []).filter(comp => previewRowShiaijoError(comp, venueCourts)).length;
+
   return (
     <div className="app">
       <AdminTopbar onLogout={onLogout} onViewerMode={onViewerMode} tournament={tournament} />
@@ -1329,19 +1393,47 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
             <div className="card__title">Preview ({preview.length} competitions)</div>
             <div className="card__body">
               <table className="parse-preview" style={{ width: "100%" }}>
-                <thead><tr><th>ID</th><th>Name</th><th>Format</th><th>Participants file</th><th>Seeds file</th></tr></thead>
+                {/* Shiaijo is a preview column, not just an import-time
+                    refusal. A manifest row that omits `courts` inherits the
+                    venue's whole list, and on a 3-shiaijo venue that inherited
+                    count is itself illegal, so an operator importing ten
+                    competitions had every row refused with no way to see the
+                    allocation beforehand. */}
+                <thead><tr><th>ID</th><th>Name</th><th>Format</th><th>Shiaijo</th><th>Participants file</th><th>Seeds file</th></tr></thead>
                 <tbody>
-                  {preview.map(comp => (
-                    <tr key={comp.id || comp.name}>
-                      <td>{comp.id || "-"}</td>
-                      <td>{comp.name || "-"}</td>
-                      <td>{comp.format || "-"}</td>
-                      <td className={!comp.participants ? "cell--missing" : ""}>{comp.participants || "-"}</td>
-                      <td>{comp.seeds || "-"}</td>
-                    </tr>
-                  ))}
+                  {preview.map(comp => {
+                    const rowCourts = previewRowCourts(comp, venueCourts);
+                    const rowErr = previewRowShiaijoError(comp, venueCourts);
+                    return (
+                      <tr key={comp.id || comp.name}>
+                        <td>{comp.id || "-"}</td>
+                        <td>{comp.name || "-"}</td>
+                        <td>{comp.format || "-"}</td>
+                        {/* .parse-preview cells are nowrap + ellipsis, so a
+                            16-shiaijo list is truncated on screen; the title
+                            carries the full list, or the refusal reason when
+                            there is one. */}
+                        <td className={rowErr ? "cell--missing" : ""} title={rowErr || rowCourts.join(", ") || undefined} data-testid="preview-shiaijo-cell">
+                          {rowCourts.length ? rowCourts.join(", ") : "-"}
+                          {rowCourts.length && !(comp.courts || []).length ? " (venue)" : ""}
+                        </td>
+                        <td className={!comp.participants ? "cell--missing" : ""}>{comp.participants || "-"}</td>
+                        <td>{comp.seeds || "-"}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
+              {/* Stated ONCE under the table rather than repeated per row: the
+                  reason is the same sentence every time, and ten copies of it
+                  is what made the old refusal list unreadable. */}
+              {previewShiaijoProblems > 0 && (
+                <div className="alert alert--warn" style={{ marginTop: 10 }} data-testid="preview-shiaijo-warning">
+                  ⚠ {pluralize(previewShiaijoProblems, "competition")} would be refused, shown in red.{" "}
+                  {window.shiaijoCountHint(venueCourts.length)}{" "}
+                  A row with no shiaijo of its own inherits the venue's list and is checked the same way.
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -1352,15 +1444,28 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
           <div className="card" style={{ marginBottom: 16 }}>
             <div className="card__title">Import results</div>
             <div className="card__body">
+              {/* A row error is a SENTENCE, not a tag. It used to render in
+                  .tag-badge--warn (10px, uppercase, letter-spaced) - styling
+                  for a one- or two-word label - which turned the shiaijo-count
+                  message into a 220-character all-caps banner squeezed into a
+                  flex row. Body text on its own line, under the name it
+                  belongs to. */}
               {results.map(r => (
-                <div key={r.id} style={{ padding: "6px 0", borderBottom: "1px solid var(--border)", display: "flex", gap: 8, alignItems: "center" }}>
-                  <div style={{ flex: 1 }}>
-                    <strong>{r.name || r.id}</strong>
-                    {!r.error && <span style={{ fontSize: 12, color: "var(--ink-3)", marginLeft: 8 }}>{pluralize(r.participantCount, "participant")} {r.seedCount > 0 ? `, ${pluralize(r.seedCount, "seed")}` : ""}</span>}
+                <div key={r.id} className="import-result" data-testid="import-result-row">
+                  <div className="import-result__head">
+                    <div style={{ flex: 1 }}>
+                      <strong>{r.name || r.id}</strong>
+                      {!r.error && <span style={{ fontSize: 12, color: "var(--ink-3)", marginLeft: 8 }}>{pluralize(r.participantCount, "participant")} {r.seedCount > 0 ? `, ${pluralize(r.seedCount, "seed")}` : ""}</span>}
+                    </div>
+                    {r.error
+                      ? <span className="tag-badge tag-badge--warn">✕ not imported</span>
+                      : <span className="tag-badge">✓ imported</span>}
                   </div>
-                  {r.error
-                    ? <span className="tag-badge tag-badge--warn">✕ {r.error}</span>
-                    : <span className="tag-badge">✓ imported</span>}
+                  {r.error && (
+                    <div className="import-result__error" role="alert" data-testid="import-result-error">
+                      {importRowErrorText(r.error)}
+                    </div>
+                  )}
                 </div>
               ))}
               {!results.some(r => r.error) && (
@@ -1390,4 +1495,4 @@ window.AdminImportPage = AdminImportPage;
 // The announcement-broadcast helpers (isSendAnnouncementDisabled /
 // sendAnnouncementLabel) moved to admin_announcement.jsx alongside the
 // AnnouncementComposer component they drive (mp-djc).
-export { deriveCompetitionName, validatePoolSettings, validateSwissSettings, pickStackPredecessor };
+export { deriveCompetitionName, validatePoolSettings, validateSwissSettings, pickStackPredecessor, previewRowCourts, previewRowShiaijoError, importRowErrorText };

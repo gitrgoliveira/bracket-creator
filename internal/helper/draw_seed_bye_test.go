@@ -21,18 +21,11 @@ import (
 
 // seededDrawPools builds numPools pools of mixed size from drawGoldenRoster with
 // seeds 1-4 assigned to the first four players, through the real pipeline.
+// seededDrawPoolsN (draw_seed_count_test.go) is the same thing with the seed
+// count as a parameter; four is only this file's default, never a requirement.
 func seededDrawPools(t *testing.T, numPools, numCourts int) []Pool {
 	t.Helper()
-	roster := drawGoldenRoster(numPools)
-	require.GreaterOrEqual(t, len(roster), 4)
-	for i := 1; i <= 4; i++ {
-		roster[i-1].Seed = i
-	}
-	seeded := PoolSeeding(roster, numPools, numCourts)
-	pools, err := CreatePools(seeded, drawGoldenPoolSize, true)
-	require.NoError(t, err)
-	require.Len(t, pools, numPools)
-	return ReorderPoolsForCourts(pools, numCourts)
+	return seededDrawPoolsN(t, numPools, numCourts, 4)
 }
 
 // namedBye returns the label of the block's round-1 bye: the occupant paired
@@ -75,36 +68,46 @@ func TestByeGoesToTheHighestPrecedenceOccupantSweep(t *testing.T) {
 	for _, numCourts := range []int{1, 2, 4} {
 		for numPools := 4; numPools <= 12; numPools++ {
 			for poolWinners := 1; poolWinners <= 3; poolWinners++ {
-				name := fmt.Sprintf("%dpools_%dq_%dsj", numPools, poolWinners, numCourts)
-				t.Run(name, func(t *testing.T) {
-					pools := seededDrawPools(t, numPools, numCourts)
-					draw := BuildKnockoutDraw(pools, poolWinners, numCourts)
-					require.NotNil(t, draw)
-
-					courts := EffectiveDrawCourts(len(pools), numCourts)
-					assignment, err := AssignPoolsToCourts(len(pools), courts)
-					require.NoError(t, err)
-					plan := newDrawPlan(pools, assignment, poolWinners, courts)
-					occupants := plan.route(pools, poolWinners)
-					require.Len(t, draw.blocks, len(occupants))
-
-					for b, occ := range occupants {
-						got := namedBye(draw.blocks[b])
-						if got == "" {
-							continue
-						}
-						best := occ[0]
-						for _, o := range occ[1:] {
-							if byePrecedenceLess(o, best, pools) {
-								best = o
-							}
-						}
-						assert.Equalf(t, best.label, got,
-							"block %d byed %s; R6 ranks %s first (seed %d, load %d)",
-							b, got, best.label,
-							poolSeedRank(pools[best.pool]), poolLoad(pools[best.pool]))
+				// The seed count is the operator's, so R6 has to hold at all of
+				// them, not just at the four that fully determine D6's halves
+				// and quarters. At zero seeds criterion 1 never fires and the
+				// order falls through to pool size and pool order, which is
+				// exactly the path an unseeded club event takes.
+				for _, numSeeds := range seedCounts {
+					if !rosterHolds(numPools, numSeeds) {
+						continue
 					}
-				})
+					name := fmt.Sprintf("%dpools_%dq_%dsj_%dseeds", numPools, poolWinners, numCourts, numSeeds)
+					t.Run(name, func(t *testing.T) {
+						pools := seededDrawPoolsN(t, numPools, numCourts, numSeeds)
+						draw := BuildKnockoutDraw(pools, poolWinners, numCourts)
+						require.NotNil(t, draw)
+
+						courts := EffectiveDrawCourts(len(pools), numCourts)
+						assignment, err := AssignPoolsToCourts(len(pools), courts)
+						require.NoError(t, err)
+						plan := newDrawPlan(pools, assignment, poolWinners, courts)
+						occupants := plan.route(pools, poolWinners)
+						require.Len(t, draw.blocks, len(occupants))
+
+						for b, occ := range occupants {
+							got := namedBye(draw.blocks[b])
+							if got == "" {
+								continue
+							}
+							best := occ[0]
+							for _, o := range occ[1:] {
+								if byePrecedenceLess(o, best, pools) {
+									best = o
+								}
+							}
+							assert.Equalf(t, best.label, got,
+								"block %d byed %s; R6 ranks %s first (seed %d, load %d)",
+								b, got, best.label,
+								poolSeedRank(pools[best.pool]), poolLoad(pools[best.pool]))
+						}
+					})
+				}
 			}
 		}
 	}

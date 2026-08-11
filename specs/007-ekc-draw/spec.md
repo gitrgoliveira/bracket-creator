@@ -164,10 +164,27 @@ under R4.
 
 ### R1 Seeds
 
-The operator MUST choose both the seeded competitors/teams and their **order** (ranks
-1-4). The tool MUST NOT derive seeds from previous results, and MUST NOT accept tied
-ranks: the existing distinct-rank seed model is sufficient and both
+The operator MUST choose both the seeded competitors/teams and their **order**. The tool
+MUST NOT derive seeds from previous results, and MUST NOT accept tied ranks: the
+existing distinct-rank seed model is sufficient and both
 `domain.ValidateSeedAssignments` and `helper.ApplySeeds` already reject duplicates.
+
+**How many seeds is the operator's choice: any count from zero upwards.** Ranks are
+contiguous from 1, so a set is 1..N for whatever N the operator set, and N is neither
+fixed at 4 nor capped there. Four is only the count at which **D6**'s half-and-quarter
+placement becomes fully determined, and the reference draws include a **three**-seed
+one; it is not a minimum, a maximum or a default. R2 and D6 apply to whichever ranks
+exist, in rank order.
+
+**The number of seeds MUST NOT change the shape of the draw** (operator ruling,
+2026-08-11). Which slots exist, which are byes, who crosses where and how many rounds a
+block runs are all functions of the pools, the qualifier count and the shiaijo
+allocation alone. Seeds decide only WHICH competitor occupies a slot: they choose the
+pool a competitor is drawn into (`PoolSeeding`) and they order R6's claim on a block's
+bye. A draw with no seeds at all MUST therefore satisfy R3 to R7 exactly as a seeded one
+does, and a draw with 8 seeds MUST have the same shape as the same competition with
+none. `TestSeedCountDoesNotChangeDrawShape` and `TestStructuralRulesHoldAtEverySeedCount`
+measure both claims.
 
 *Rationale:* seeding is a competitive-protection decision that belongs to the
 organising committee, not to a heuristic over data the tool does not hold.

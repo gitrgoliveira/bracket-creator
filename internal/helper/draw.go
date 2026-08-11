@@ -8,12 +8,14 @@ import (
 
 // The pool-to-knockout draw (specs/007-ekc-draw, bead bc-draw).
 //
-// The bracket is built COURT-FIRST: one subtree per shiaijo over that court's
-// region occupants, then the region subtrees are combined into the full
-// bracket. R3 ("each shiaijo's pools occupy exactly ONE contiguous region of
-// the draw, and that region MUST be a subtree") therefore holds by
-// construction, which is what lets an Excel tree page be a genuine subtree an
-// operator can pick up per court (R8).
+// The bracket is built BLOCK-FIRST: one subtree per block over that block's
+// occupants, then the block subtrees are combined into halves and the halves
+// into the full bracket. A block is a shiaijo's region at four or more shiaijo
+// and one of its subdivisions below that (planBlocks), so R3 ("each shiaijo's
+// pools occupy exactly ONE contiguous region of the draw, and that region MUST
+// be a subtree") holds by construction at every shiaijo count, which is what
+// lets an Excel tree page be a genuine subtree an operator can pick up per
+// court (R8).
 //
 // The previous construction flattened every pool finisher into one list
 // (GenerateFinals), halved it recursively (CreateBalancedTree) and then tried
@@ -24,7 +26,16 @@ import (
 // region byes the wrong occupant under recursive halving) and it was not
 // idempotent, so running it over an already-correct tree corrupted the draw.
 //
-// Rule references below (R1-R9, D1-D7) are to specs/007-ekc-draw/spec.md, which
+// A second fix-up pass was tried and removed for the same reason:
+// splitRegionQuarters dealt an already-built region's occupants into two blocks
+// after the fact, under a constraint search, and left 22 of 462 swept
+// pool-instances with two qualifiers of one pool in one quarter. The cause was
+// upstream -- below four shiaijo the plan had only two blocks, so the quarter
+// boundary fell INSIDE a block and route could not aim at it. Subdividing the
+// pool set (planBlocks) puts the quarters where route can see them. Fix the
+// structure, never the output.
+//
+// Rule references below (R1-R9, D1-D8) are to specs/007-ekc-draw/spec.md, which
 // is the definition of record.
 
 // KnockoutDraw is a built pool-to-knockout draw: the whole bracket plus the
@@ -44,6 +55,15 @@ import (
 type KnockoutDraw struct {
 	Root    *Node
 	Regions []*Node
+
+	// blocks is the partition Regions are assembled from, in block order (see
+	// planBlocks): at four or more shiaijo it is Regions itself, and below four
+	// it is the two or four sub-blocks each region spans. It is D4's unit -- the
+	// greedy layer and its one named bye belong to a block, not to a printable
+	// region -- so the bye arithmetic is checked against this rather than
+	// against Regions. Unexported because no caller outside the draw needs the
+	// finer partition: paging and court derivation are region-level.
+	blocks []*Node
 }
 
 // NumCourts is the number of shiaijo regions the draw actually has.
@@ -57,18 +77,28 @@ func (d *KnockoutDraw) NumCourts() int {
 // EffectiveDrawCourts clamps a requested shiaijo count to what the pool count
 // can actually carry. A court with no home pools has no home 1st places and
 // would own an empty region, so the draw never allocates more courts than
-// pools. R9 (1 shiaijo or an EVEN number) is preserved by the clamp: stepping
-// down to the pool count can produce an odd value, so it steps down once more.
-// The CLI applies the same clamp to its --courts flag (cmd/create-pools.go).
+// pools. The CLI applies the same clamp to its --courts flag
+// (cmd/create-pools.go).
+//
+// R9 (1, 2, 4, 8 or 16 shiaijo) is preserved BY the clamp, not merely checked
+// after it: stepping down to the pool count can land anywhere, so the step-down
+// goes to the largest legal count that fits (LargestShiaijoCountAtMost). It is
+// not enough to step down to an EVEN count -- 8 shiaijo clamped onto 7 pools
+// would give 6, which R9 rejects because 3 regions in a half cannot merge
+// pairwise. 7 pools therefore carry 4 shiaijo.
+//
+// Only the clamping branch normalises. A requested count that already fits the
+// pools is returned untouched, because that value is the caller's allocation
+// and has its own validator (ValidateShiaijoCount) at every write path;
+// silently "fixing" it here would hide an invalid allocation rather than refuse
+// it, and would give an operator a draw on a different number of shiaijo from
+// the one they assigned.
 func EffectiveDrawCourts(numPools, numCourts int) int {
 	if numCourts < 1 {
 		numCourts = 1
 	}
 	if numPools > 0 && numCourts > numPools {
-		numCourts = numPools
-		if numCourts > 1 && numCourts%2 == 1 {
-			numCourts--
-		}
+		numCourts = LargestShiaijoCountAtMost(numPools)
 	}
 	return numCourts
 }
@@ -111,23 +141,23 @@ func BuildKnockoutDrawFromAssignment(pools []Pool, poolWinners int, poolCourt []
 		numCourts = 1
 	}
 
-	plan := newDrawPlan(pools, poolCourt, numCourts)
+	plan := newDrawPlan(pools, poolCourt, poolWinners, numCourts)
 	occupants := plan.route(pools, poolWinners)
 
-	// One subtree per BLOCK. A block is a shiaijo, except on a single-shiaijo
-	// competition, where R4(e) splits the court's pools into two half-blocks
-	// that act as partner courts so the draw's shape is identical whether an
-	// event runs on 1 court or several.
+	// One subtree per BLOCK. A block is a shiaijo at four or more shiaijo; on 1
+	// or 2 the pool set is subdivided further (planBlocks) into half-blocks that
+	// act as partner courts, so the block tree -- and the draw's shape -- is the
+	// same whether an event runs on 1 court or four.
 	blockRoots := make([]*Node, plan.numBlocks)
 	for b := range blockRoots {
-		blockRoots[b] = buildRegion(occupants[b], pools)
+		blockRoots[b] = buildBlock(occupants[b], pools)
 	}
 
 	root, courtRegions := plan.combine(blockRoots)
 	if root == nil {
 		return nil
 	}
-	return &KnockoutDraw{Root: root, Regions: courtRegions}
+	return &KnockoutDraw{Root: root, Regions: courtRegions, blocks: blockRoots}
 }
 
 // NewPlayoffDraw wraps an already-built elimination tree (a standalone playoffs
@@ -213,9 +243,9 @@ func CountLeaves(node *Node) int {
 // Occupants
 // ---------------------------------------------------------------------------
 
-// drawOccupant is one qualifier placed in a region: the placeholder label the
+// drawOccupant is one qualifier placed in a block: the placeholder label the
 // bracket carries ("Pool A-1st"), the pool it came from and its finishing rank.
-// A rank-1 occupant is always a HOME occupant of its region (R4a); every other
+// A rank-1 occupant is always a HOME occupant of its block (R4a); every other
 // rank crossed in under R4b/R4c/D5.
 type drawOccupant struct {
 	label string
@@ -255,8 +285,8 @@ func poolSeedRank(p Pool) int {
 	return best
 }
 
-// byePrecedenceLess implements R6's precedence for a region's structural bye,
-// as a total order over that region's occupants (lowest = first claim):
+// byePrecedenceLess implements R6's precedence for a block's structural bye,
+// as a total order over that block's occupants (lowest = first claim):
 //
 //  1. home 1st places of SEEDED pools, in operator seed order;
 //  2. home 1st places of OVERSIZED pools, descending load (D1), ties by pool
@@ -298,13 +328,13 @@ func byeRankClass(rank int) int {
 }
 
 // ---------------------------------------------------------------------------
-// Region construction (D4)
+// Block construction (D4)
 // ---------------------------------------------------------------------------
 
-// buildRegion lays a shiaijo's occupants out inside its own subtree.
+// buildBlock lays one block's occupants out inside its own subtree.
 //
 // The layout is GREEDY (D4): the round-1 layer holds floor(q/2) real matches
-// and, when q is odd, exactly ONE named bye, which goes to the region's
+// and, when q is odd, exactly ONE named bye, which goes to the block's
 // highest-precedence occupant under R6. Every other empty slot pairs with
 // another empty slot into a phantom match that is dropped downstream and never
 // printed. Deeper byes fall to whichever slot the phantom pairs leave and are
@@ -321,15 +351,65 @@ func byeRankClass(rank int) int {
 // bye falls to W(P4 v P5) rather than to P1 -- the ladder the sheet shows, and
 // the one recursive halving provably cannot produce.
 //
-// Within the non-bye occupants the order interleaves the RANK groups, so a home
-// 1st meets a crossed-in lower finisher in round 1 rather than another home 1st
-// (EKC Junior Team Q1: P1#1 v P5#2, P2#1 v P6#2). Groups are split into two
-// side blocks first, which is what keeps a pool's own qualifiers out of the
-// same quarter when a region IS a half of the draw (see regionSideOfRank).
-func buildRegion(occ []drawOccupant, pools []Pool) *Node {
+// The BLOCK is D4's unit, not the printable region. The two coincide at every
+// shiaijo count but one, which is why D4 was first written in terms of a
+// region; on a single shiaijo the region spans two half-blocks and each carries
+// its own greedy layer, so a 1-court draw has the two named byes a 2-court draw
+// of the same pools has rather than one. R5's separation needs nothing here:
+// route already sends a pool's 1st and 2nd to different blocks, so a block
+// holds at most one of them, and from the 3rd on the blocks run out before the
+// quarters do (planBlocks).
+//
+// Within a block the order interleaves the RANK groups, so a home 1st meets a
+// crossed-in lower finisher in round 1 rather than another home 1st (EKC Junior
+// Team Q1: P1#1 v P5#2, P2#1 v P6#2).
+func buildBlock(occ []drawOccupant, pools []Pool) *Node {
 	if len(occ) == 0 {
 		return nil
 	}
+	// The slot array is longer than width only for a single-occupant block,
+	// whose [occupant, ""] pair does not fit in NextPow2(1). BuildSlotTree
+	// collapses that pair back to the lone leaf, so the tree is the same.
+	width := NextPow2(len(occ))
+	slots := make([]string, 0, width)
+	rest := append([]drawOccupant{}, occ...)
+
+	var bye *drawOccupant
+	if len(rest)%2 == 1 {
+		best := 0
+		for i := 1; i < len(rest); i++ {
+			if byePrecedenceLess(rest[i], rest[best], pools) {
+				best = i
+			}
+		}
+		b := rest[best]
+		bye = &b
+		// Remove the bye occupant BEFORE the interleave, so the remaining
+		// occupants pair up as if it had never been in the layer. (EKC Junior
+		// Team Q2: with P3#1 taken out for the bye, the leftover home 1st P4#1
+		// heads the match against the crossed-in P7#2, exactly as the sheet
+		// prints it.)
+		rest = append(rest[:best:best], rest[best+1:]...)
+	}
+
+	order := interleaveByRank(rest)
+	separateSamePoolPairs(order, bye, pools)
+
+	if bye != nil {
+		slots = append(slots, bye.label, "")
+	}
+	for _, o := range order {
+		slots = append(slots, o.label)
+	}
+	for len(slots) < width {
+		slots = append(slots, "")
+	}
+	return BuildSlotTree(slots)
+}
+
+// interleaveByRank groups a block's occupants by finishing rank and round-robins
+// over the groups, lowest rank first.
+func interleaveByRank(occ []drawOccupant) []drawOccupant {
 	byRank := map[int][]drawOccupant{}
 	ranks := []int{}
 	for _, o := range occ {
@@ -339,68 +419,23 @@ func buildRegion(occ []drawOccupant, pools []Pool) *Node {
 		byRank[o.rank] = append(byRank[o.rank], o)
 	}
 	sort.Ints(ranks)
-
-	var bye *drawOccupant
-	if len(occ)%2 == 1 {
-		best := occ[0]
-		for _, o := range occ[1:] {
-			if byePrecedenceLess(o, best, pools) {
-				best = o
-			}
-		}
-		bye = &best
-		// Remove the bye occupant from its rank group BEFORE the interleave, so
-		// the remaining occupants pair up as if it had never been in the layer.
-		// (EKC Junior Team Q2: with P3#1 taken out for the bye, the leftover
-		// home 1st P4#1 heads the match against the crossed-in P7#2, exactly as
-		// the sheet prints it.)
-		g := byRank[best.rank]
-		for i, o := range g {
-			if o.label == best.label {
-				byRank[best.rank] = append(append([]drawOccupant{}, g[:i]...), g[i+1:]...)
-				break
-			}
-		}
+	groups := make([][]drawOccupant, 0, len(ranks))
+	for _, r := range ranks {
+		groups = append(groups, byRank[r])
 	}
-
-	order := []drawOccupant{}
-	for side := 0; side < 2; side++ {
-		groups := [][]drawOccupant{}
-		for _, r := range ranks {
-			if regionSideOfRank(r) != side {
-				continue
-			}
-			if len(byRank[r]) > 0 {
-				groups = append(groups, byRank[r])
-			}
-		}
-		order = append(order, interleaveGroups(groups)...)
-	}
-	separateSamePoolPairs(order, bye)
-
-	slots := make([]string, 0, NextPow2(len(occ)))
-	if bye != nil {
-		slots = append(slots, bye.label, "")
-	}
-	for _, o := range order {
-		slots = append(slots, o.label)
-	}
-	for len(slots) < NextPow2(len(occ)) {
-		slots = append(slots, "")
-	}
-	return BuildSlotTree(slots)
+	return interleaveGroups(groups)
 }
 
 // separateSamePoolPairs repairs the one thing the rank interleave cannot avoid
 // on its own: a round-1 pairing between two qualifiers of the SAME pool.
 //
-// It arises only where a region receives two ranks from one source court and
-// the layer is too short for the side split to keep them apart. The smallest
-// case is a 2-pool competition at 3 qualifiers, where a region holds one home
-// 1st plus the other pool's 2nd AND 3rd, and those two are the only possible
-// pairing. R5 ("a pool's qualifiers MUST be separated maximally") outranks R6's
-// bye precedence, which the spec states outright: precedence is a preference,
-// R3/R4/R5 win.
+// It arises only where a block receives two ranks of one pool, which route
+// avoids up to 4 qualifiers per pool but cannot beyond that (a draw has four
+// blocks, so a 5th qualifier must double up). The 3-pool, 4-qualifier draw is
+// the other case: it has only two blocks to route over, so every pool sends two
+// qualifiers into each. R5 ("a pool's qualifiers MUST be separated maximally")
+// outranks R6's bye precedence, which the spec states outright: precedence is a
+// preference, R3/R4/R5 win.
 //
 // order (and bye, when there is one) are mutated in place. It first tries to
 // trade the offending occupant with a member of another pairing, which costs
@@ -408,7 +443,16 @@ func buildRegion(occ []drawOccupant, pools []Pool) *Node {
 // to swapping with the BYE occupant, which hands the bye to a lower finisher
 // against R6's preference. A pairing it cannot break is left alone rather than
 // shuffled pointlessly.
-func separateSamePoolPairs(order []drawOccupant, bye *drawOccupant) {
+//
+// The fallback promotes the BETTER of the two clashing occupants (R6 order),
+// not whichever happens to sit second. Both choices break the pairing equally
+// well, so taking the better one is free, and taking the worse one is the
+// inversion it looks like: 2 pools at 3 qualifiers gives a block of
+// {A-1st, B-2nd, B-3rd}, where swapping the tail byes B's THIRD place while a
+// pool winner plays. Promoting B-2nd instead costs A-1st the same bye but keeps
+// the rest of R6's order intact. This is the only configuration in the swept
+// range where the fallback fires at all.
+func separateSamePoolPairs(order []drawOccupant, bye *drawOccupant, pools []Pool) {
 	for i := 0; i+1 < len(order); i += 2 {
 		if order[i].pool != order[i+1].pool {
 			continue
@@ -429,40 +473,17 @@ func separateSamePoolPairs(order []drawOccupant, bye *drawOccupant) {
 		if swapped || bye == nil || bye.pool == order[i].pool {
 			continue
 		}
-		*bye, order[i+1] = order[i+1], *bye
+		promote := i + 1
+		if byePrecedenceLess(order[i], order[i+1], pools) {
+			promote = i
+		}
+		*bye, order[promote] = order[promote], *bye
 	}
-}
-
-// regionSideOfRank splits finishing ranks into the two halves of a region so
-// that ranks routed here FROM THE SAME COURT land in different quarters of the
-// draw (R5 / D5).
-//
-// It only ever matters when a region is itself a half of the draw, i.e. on 1 or
-// 2 shiaijo, because that is the only shape where a court sends two different
-// ranks of the same pool into one region: with two blocks, ranks 1 and 4 arrive
-// from the block's own pools and ranks 2 and 3 from its partner's (see
-// drawPlan.route). Putting {1,2} on one side and {3,4} on the other therefore
-// separates 1 from 4 and 2 from 3 while still pairing a 1st against a 2nd and a
-// 3rd against a 4th in round 1. At 4 or more shiaijo each rank arrives from a
-// different court, so the split changes the order of the layer but not a single
-// round-1 pairing.
-//
-// The guarantee stops at 4 qualifiers per pool: a draw has four quarters, so
-// from the 5th qualifier onward two of a pool's qualifiers must share one
-// (D5, pigeonhole).
-func regionSideOfRank(rank int) int {
-	if rank < 1 {
-		rank = 1
-	}
-	if (rank-1)%4 < 2 {
-		return 0
-	}
-	return 1
 }
 
 // interleaveGroups round-robins over the rank groups: group[0][0], group[1][0],
 // ..., group[0][1], ... Exhausted groups drop out. With a single group this is
-// the identity, which is what makes a 1-qualifier region pair consecutive pools
+// the identity, which is what makes a 1-qualifier block pair consecutive pools
 // (EKC male: P2 v P3, P4 v P5).
 func interleaveGroups(groups [][]drawOccupant) []drawOccupant {
 	total := 0
@@ -505,7 +526,7 @@ func interleaveGroups(groups [][]drawOccupant) []drawOccupant {
 //
 // Exported for the standalone-playoffs export path (engine.EliminationDraw),
 // which rebuilds its tree from the frozen bracket's pow2 first round; the
-// pool-fed draw reaches it through buildRegion.
+// pool-fed draw reaches it through buildBlock.
 func BuildSlotTree(slots []string) *Node {
 	if len(slots) == 0 {
 		return nil
@@ -554,38 +575,138 @@ type drawPlan struct {
 	// poolBlock[p] is pool p's block; blockCourt[b] is block b's shiaijo.
 	poolBlock  []int
 	blockCourt []int
-	// quarterOf[b] is the quarter of the draw block b belongs to. With 4 or
-	// more blocks a quarter spans whole blocks; with 2 the quarters live INSIDE
-	// each region and regionSideOfRank separates them instead, so quarterOf
-	// degrades to the block index.
+	// quarterOf[b] is the quarter of the draw block b belongs to, and it is what
+	// route aims at for R5's "no two qualifiers of one pool in the same
+	// quarter". The subdivision in planBlocks reaches four blocks whenever there
+	// are enough qualifiers to fill them, so a quarter then spans whole blocks
+	// and the rule is something route can act on. Where it does not -- too few
+	// occupants to cut that fine, or a legacy odd shiaijo count -- quarterOf
+	// degrades to the block index and the preference reads as "a different
+	// block", which at two blocks is R4's opposite halves and still delivers
+	// R5's guarantee at 2 qualifiers.
 	quarterOf []int
 	// halfOrder[h] is the order the half's blocks are combined in (D2).
 	halfOrder [2][]int
 }
 
-func newDrawPlan(pools []Pool, poolCourt []int, numCourts int) *drawPlan {
+// planBlocks is how many BLOCKS the pool set is cut into.
+//
+// A block is the unit R4 crosses between and D4 lays out. At four or more
+// shiaijo a block IS a shiaijo's region and the draw's four quarters are whole
+// blocks, which is why quarter separation is free there. Below four shiaijo the
+// same structure is reached by subdividing the POOL SET -- R4(e)'s "half-blocks
+// that act as partner courts" -- so the block tree, and with it every crossing
+// and every quarter, is the same object whatever the shiaijo count, which is
+// R4(e)'s "identical whether an event runs on 1 court or several".
+//
+// ONE limit stops the subdivision, and it is about OCCUPANTS, not pools.
+//
+// A block does not own pools; it holds QUALIFIERS, and from 2 qualifiers up
+// there are more of those than there are pools. A block with no pool of its own
+// is not a defect -- R4(f) blesses it outright and the EKC Junior Team draw
+// prints it (Q4: P3#2 v P4#2). What the subdivision must not do is manufacture
+// a bye that R6 cannot CHOOSE: a block left with a single occupant byes that
+// occupant no matter what precedence says, and cutting finer is our decision,
+// not the operator's. So the split stops while a block would still average
+// fewer than two occupants (numPools*poolWinners < 2*blocks after doubling).
+//
+// Both failures that motivated it are real and were measured:
+//
+//   - 5 pools, 1 qualifier, 1 shiaijo. Four blocks hold A1+B1 / C1 / D1 / E1,
+//     so C1 byes purely for being alone -- while pool A holds seed 1. Two
+//     blocks hold A1+B1+C1 / D1+E1, and R6 gives the odd block's bye to A1.
+//     This is the shape bc-draw names in its verification requirements.
+//   - 3 pools, 2 qualifiers. Four blocks isolate pool B's winner in one and its
+//     runner-up in another, byeing BOTH while two other pool winners play. Two
+//     blocks bye A1 and C1: two different pools' winners, by precedence.
+//
+// The limit is NOT the pool count, which is what it was first written as. At 3
+// pools and 4 qualifiers there are 12 occupants for 4 blocks, three each, and
+// capping by pools there bought nothing but the one R5 residual the spec used
+// to carve out.
+func planBlocks(numPools, poolWinners, numCourts int) int {
+	if numCourts > 2 {
+		return numCourts
+	}
+	blocks := numCourts
+	if poolWinners < 2 {
+		// R4(d): at ONE qualifier per pool nothing crosses. There is no 2nd for
+		// a partner block to receive, and R5 has nothing to separate, so a
+		// subdivision buys nothing and can only take R6's choice of bye away.
+		// Both EKC individual draws are this shape and each court's region is a
+		// single block: court A ran 5 pools and P1 -- the first, and a seeded
+		// one -- byed, which is R6 choosing from all five.
+		return blocks
+	}
+	if blocks < 2 {
+		// R4(e): a lone shiaijo has no partner court, so it is cut in two or
+		// its pools' 1sts and 2nds have nowhere to cross to and could meet in
+		// round 1 -- the whole of what R5 exists to prevent.
+		blocks = 2
+	}
+	for blocks < 4 && numPools*poolWinners >= 4*blocks {
+		blocks *= 2
+	}
+	return blocks
+}
+
+// subdivideCourts cuts each shiaijo's pools into per sub-blocks by REPEATED
+// HALVING and returns pool -> block. Blocks are numbered court-major, so block
+// b belongs to shiaijo b/per, a court's blocks are consecutive, and (for the
+// counts that subdivide at all) they sit inside one half of the draw.
+//
+// Halving rather than dividing by per in one go is what keeps the block tree
+// NESTED. AssignPoolsToCourts front-loads its remainder, so a direct 4-way
+// split of 10 pools gives 3/3/2/2 while halving gives 3/2/3/2, and only the
+// latter has the same two HALVES as the 2-way split those same 10 pools get on
+// two shiaijo. Nesting is what makes the shiaijo count select a LEVEL of one
+// fixed tree instead of drawing a different bracket.
+//
+// A pool whose court index is out of range is left in block 0, which is the
+// same clamp blockForRank applies to a home block it cannot resolve.
+func subdivideCourts(poolCourt []int, numCourts, per int) []int {
+	out := make([]int, len(poolCourt))
+	for c := 0; c < numCourts; c++ {
+		idx := []int{}
+		for pi, pc := range poolCourt {
+			if pc == c {
+				idx = append(idx, pi)
+			}
+		}
+		assignHalvedBlocks(idx, out, c*per, per)
+	}
+	return out
+}
+
+// assignHalvedBlocks writes block numbers [base, base+span) over idx by
+// repeated halving, the first half of the pools taking the first half of the
+// block range. An empty half is legitimate: a block with no pools of its own
+// simply has no home 1st and hosts crossed-in qualifiers (R4f), and a block
+// with nothing at all collapses in joinNodes.
+func assignHalvedBlocks(idx, out []int, base, span int) {
+	if span <= 1 {
+		for _, pi := range idx {
+			out[pi] = base
+		}
+		return
+	}
+	mid := (len(idx) + 1) / 2
+	assignHalvedBlocks(idx[:mid], out, base, span/2)
+	assignHalvedBlocks(idx[mid:], out, base+span/2, span/2)
+}
+
+func newDrawPlan(pools []Pool, poolCourt []int, poolWinners, numCourts int) *drawPlan {
 	p := &drawPlan{numCourts: numCourts}
 
-	// R4(e): a single-shiaijo competition emulates the two-court structure by
-	// splitting its pools into two half-blocks that act as partner courts, so
-	// the draw's shape is identical whether an event runs on 1 court or
-	// several. Both half-blocks still belong to the one shiaijo, so the
-	// competition still prints as one region.
-	if numCourts == 1 && len(pools) >= 2 {
-		blocks, err := AssignPoolsToCourts(len(pools), 2)
-		if err == nil {
-			p.numBlocks = 2
-			p.poolBlock = blocks
-			p.blockCourt = []int{0, 0}
-		}
+	p.numBlocks = planBlocks(len(pools), poolWinners, numCourts)
+	per := 1
+	if numCourts > 0 {
+		per = p.numBlocks / numCourts
 	}
-	if p.poolBlock == nil {
-		p.numBlocks = numCourts
-		p.poolBlock = poolCourt
-		p.blockCourt = make([]int, numCourts)
-		for i := range p.blockCourt {
-			p.blockCourt[i] = i
-		}
+	p.poolBlock = subdivideCourts(poolCourt, numCourts, per)
+	p.blockCourt = make([]int, p.numBlocks)
+	for b := range p.blockCourt {
+		p.blockCourt[b] = b / per
 	}
 	p.half = p.numBlocks / 2
 
@@ -696,9 +817,9 @@ func (p *drawPlan) halfOf(b int) int {
 // route places every qualifier of every pool into a block, returning the
 // occupant list per block in pool-then-rank order.
 //
-// R4a: the 1st place stays in its own court's region.
-// R4b: the 2nd place crosses to the PARTNER court's region, which is half the
-// bracket away, so a pool's two qualifiers can only meet in the final (R5).
+// R4a: the 1st place stays in its own block.
+// R4b: the 2nd place crosses to the PARTNER block, which is half the bracket
+// away, so a pool's two qualifiers can only meet in the final (R5).
 // R4c/D3/D5: from the 3rd place on, qualifiers alternate halves in the pattern
 // {1,4} in the 1st's half and {2,3} in the other, and inside the target half
 // take the region that keeps them out of a quarter their pool already occupies.
@@ -706,7 +827,7 @@ func (p *drawPlan) halfOf(b int) int {
 // (A: A,C,D,B -- and the 3rd-place column is D3's A->D, B->C, C->B, D->A
 // involution).
 //
-// R4f, structure beats preference: nothing here reserves capacity, so a region
+// R4f, structure beats preference: nothing here reserves capacity, so a block
 // short of home 1sts simply hosts more crossed-in qualifiers and two of them
 // may meet in round 1 (the EKC Junior Team draw's Q4 does exactly that).
 func (p *drawPlan) route(pools []Pool, poolWinners int) [][]drawOccupant {
@@ -767,16 +888,16 @@ func (p *drawPlan) blockForRank(pi, rank int, quarterUse, blockUse []int, occupa
 	}
 	if best < 0 {
 		// A half with no blocks at all (an odd block count degrades this way);
-		// fall back to the pool's own region rather than dropping a qualifier.
+		// fall back to the pool's own block rather than dropping a qualifier.
 		return home
 	}
 	return best
 }
 
-// betterCrossTarget reports whether block a is a better landing region than b
+// betterCrossTarget reports whether block a is a better landing block than b
 // for a crossing qualifier: first the quarter this pool has used least (R5's
-// no-two-in-a-quarter), then the region it has used least, then the region with
-// the fewest occupants so far (D3 step 3's balance), then the lower court order.
+// no-two-in-a-quarter), then the block it has used least, then the block with
+// the fewest occupants so far (D3 step 3's balance), then the lower block order.
 func betterCrossTarget(a, b int, quarterOf, quarterUse, blockUse []int, occupants [][]drawOccupant) bool {
 	if qa, qb := quarterUse[quarterOf[a]], quarterUse[quarterOf[b]]; qa != qb {
 		return qa < qb
@@ -794,8 +915,10 @@ func betterCrossTarget(a, b int, quarterOf, quarterUse, blockUse []int, occupant
 // root together with one region per SHIAIJO, indexed by court.
 //
 // Blocks are combined within a half first (so a half is a genuine subtree), and
-// the two halves then meet at the root. On a single-shiaijo competition the two
-// R4(e) half-blocks combine into the one region, which is the root.
+// the two halves then meet at the root. A region is the node at the LEVEL of
+// the block tree the shiaijo count selects, and every one of them is a node
+// inside the returned root rather than a copy, which is what R3 and the
+// page-to-shiaijo mapping rest on.
 func (p *drawPlan) combine(blockRoots []*Node) (*Node, []*Node) {
 	halves := [2]*Node{}
 	for h := 0; h < 2; h++ {
@@ -811,13 +934,19 @@ func (p *drawPlan) combine(blockRoots []*Node) (*Node, []*Node) {
 	}
 
 	regions := make([]*Node, p.numCourts)
-	if p.numCourts == 1 {
+	switch p.numCourts {
+	case 1:
+		// Every block belongs to the one shiaijo, so its region is the draw.
 		regions[0] = root
-		return root, regions
-	}
-	for b, n := range blockRoots {
-		if c := p.blockCourt[b]; c >= 0 && c < p.numCourts {
-			regions[c] = n
+	case 2:
+		// A shiaijo's blocks are exactly one half's blocks, so the half node IS
+		// the region.
+		regions[0], regions[1] = halves[0], halves[1]
+	default:
+		for b, n := range blockRoots {
+			if c := p.blockCourt[b]; c >= 0 && c < p.numCourts {
+				regions[c] = n
+			}
 		}
 	}
 	return root, regions

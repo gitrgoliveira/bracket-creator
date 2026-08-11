@@ -2,7 +2,7 @@
 
 **Bead:** bc-draw
 **Status:** Phase 0. This document is the definition of record for rules R1-R9 and
-pinned defaults D1-D7. Once agreed, divergence found later is fixed in **code**,
+pinned defaults D1-D8. Once agreed, divergence found later is fixed in **code**,
 never by quietly rewriting this spec. Phases 1-5 are checked against it.
 
 **Source of truth:** the DESCRIPTION section of bead `bc-draw`. Where the bead's
@@ -226,11 +226,44 @@ courts, each other on two. Within a pool:
   placement is pinned in **D3** below, and **D5** continues the same rotation for 4th
   and further qualifiers.
 - **(d)** At **1 qualifier** per pool nothing crosses and round-1 matches are
-  within-court, exactly as both EKC individual draws show.
-- **(e)** A **1-court** competition emulates the structure: the court's pools split into
-  two half-blocks that act as partner courts, 1sts staying in their block's half, 2nds
-  crossing to the other (operator decision, 2026-08-09). The draw's shape is then
-  identical whether an event runs on 1 court or several.
+  within-court, exactly as both EKC individual draws show. Because nothing crosses,
+  **(e) does not apply**: each shiaijo's region is a single block and **R6** picks its
+  bye from the whole region, which is what the male draw prints (court A ran 5 pools as
+  one ladder and its first, seeded pool byed).
+- **(e)** Below four courts the competition **emulates the structure** rather than
+  special-casing it: the pool set is subdivided into **half-blocks that act as partner
+  courts**, 1sts staying in their block's half, 2nds crossing to the other (operator
+  decision, 2026-08-09). The subdivision repeats towards **four blocks**, so the block
+  tree is as far as possible the same object whatever the shiaijo count and the count
+  merely selects which level of it is the printable region.
+
+  Two limits stop it.
+
+  **The occupant limit.** Subdivision continues only while every block would still
+  average **at least two occupants**. A block left holding ONE occupant byes that
+  occupant unconditionally: there is nobody to compare against, so **R6**'s precedence
+  never runs and the free round goes to whoever the partition happened to strand. At the
+  SHIAIJO level that is legitimate, because it is the operator's own court allocation
+  (the Junior Individual Female draw is exactly it), but a block below that level is the
+  tool's invention and may not manufacture a bye. Two measured failures fix the limit:
+  5 pools at 1 qualifier put A-1st and B-1st in one block and C-1st, D-1st and E-1st
+  alone in three, so C-1st byed for being alone while pool A held seed 1; and 3 pools at
+  2 qualifiers isolated pool B's winner in one block and its runner-up in another,
+  byeing BOTH while two other pool winners played.
+
+  This limit reads the **qualifier** count, not the pool count. It was first written as
+  "a block must own at least one pool", which is both too strict (3 pools sending 4
+  qualifiers each supply 12 occupants, ample for four blocks) and too loose (5 pools at
+  1 qualifier own a pool each and still strand three winners). A block does not own
+  pools; it holds qualifiers, and from 2 qualifiers up there are more of the latter
+  (operator ruling, 2026-08-10).
+
+  **The nesting limit.** The subdivision is derived by **repeatedly halving** the pool
+  list rather than dividing it in one go, because the pool-to-court allocation
+  front-loads its remainder and a direct 4-way split of 10 pools (3/3/2/2) does not nest
+  inside the 2-way split those same pools get on two courts (5/5).
+
+  See **D8** for where the "identical shape" invariant fails.
 - **(f) Structure beats preference.** A region short of home 1sts MAY host crossed-in
   qualifiers meeting each other. This is not a defect to be avoided.
 
@@ -252,17 +285,57 @@ A pool's qualifiers MUST be separated maximally.
   two of them must share one and R5 degrades to the reunion clause alone. **D5** states
   the placement rotation and where the guarantee stops.
 
+**How the guarantee is obtained.** It is **structural**, and it is obtained UPSTREAM of
+placement, in the block partition rather than in the layout of any region. The pool set
+is subdivided towards **four blocks** (**R4(e)**), so the four quarters of the draw are
+whole blocks; **R4** then sends a pool's 1st, 2nd, 3rd and 4th to four different blocks,
+and a block holds at most one qualifier of any pool. Nothing is repaired afterwards: the
+rule is a property of where the qualifiers were routed, not of how a region's occupants
+were ordered once they arrived.
+
+Two constructions that tried to obtain it downstream were removed. Ordering a region's
+occupants by rank group left 118 of a 462-instance sweep clashing, because the boundary
+between the rank groups is not the quarter boundary. Dealing an already-built region's
+occupants into two blocks under a constraint search left 22, because below four shiaijo
+there were only two blocks and the quarter boundary fell INSIDE one of them. Both are
+the fix-up-pass mistake **D4** already warns about; the fix belongs in the partition.
+
+**The guarantee is now met everywhere the rule claims anything.** The swept range is 3
+and 4 qualifiers over 2 to 12 pools on 1, 2 and 4 shiaijo, 462 pool-instances, and the
+residual is **zero**. It reached zero in two steps. Subdividing the pool set took it
+from 22 to 6. Capping that subdivision by the **occupant** count rather than the pool
+count (**R4(e)**) took the last 6, which were all one shape: 3 pools at 4 qualifiers,
+where the pool-count cap refused to make four blocks even though 12 qualifiers can fill
+them three apiece. The spec previously carried a carve-out legitimising those 6. The
+carve-out was an artefact of counting pools instead of qualifiers and has been deleted
+rather than restated.
+
+**Where R5 still loses, it loses to itself.** At 5 or more qualifiers per pool the
+pigeonhole runs out (four quarters) and only the reunion clause survives; see **D5**. And
+at **2 pools with 3 qualifiers** each block necessarily holds two qualifiers of one pool,
+so separating them in round 1 costs a bye: **R6** states outright that precedence is a
+preference and R3/R4/R5 win, so the bye passes to the better of the two clashing
+qualifiers rather than to the block's pool winner. That is the only place a bye outranks
+its R6 order, and it is bounded to that one shape.
+
 *Reference:* the Team draw, P1#1 in Q1 against P1#2 in Q3.
 
 ### R6 Byes
 
-Bye slots are **REGION-LOCAL**. Each structural bye belongs to the shiaijo region that
-owns the slot and MUST be granted to one of **that region's actual occupants**,
+Bye slots are **BLOCK-LOCAL** (the shiaijo region wherever the region is not subdivided,
+and one of its two or four blocks where it is; see **R4(e)** and **D4**). Each structural bye belongs to the block
+that owns the slot and MUST be granted to one of **that block's actual occupants**,
 including qualifiers that crossed in under R4. The 3rd-place routing therefore shifts
-which region's ladder a qualifier competes in, and its bye eligibility with it
-(operator requirement, 2026-08-09: R6 is occupant-based, not pool-based).
+which ladder a qualifier competes in, and its bye eligibility with it (operator
+requirement, 2026-08-09: R6 is occupant-based, not pool-based).
 
-Within a region, precedence for each structural bye slot:
+A block need NOT own a pool. It may hold only qualifiers that crossed in, in which case
+its bye goes to the best of those under **R7**'s ladder; **R4(f)** blesses the shape and
+the Junior Team draw prints it. What a block must have is **someone to choose between**:
+**R4(e)**'s occupant limit stops the subdivision before a block is left holding one
+occupant, because such a block byes it whatever this precedence says.
+
+Within a block, precedence for each structural bye slot:
 
 1. **Home 1st places of seeded pools**, in operator seed order (1, 2, 3, 4).
 2. **Home 1st places of oversized pools** (pools whose qualifier plays more pool
@@ -273,9 +346,9 @@ Within a region, precedence for each structural bye slot:
    then pool order); then **crossed-in 3rd places** likewise, then any further
    crossed-in ranks in rank order.
 
-Precedence is a **preference, not a guarantee**: R3, R4 and R5 win. A region with no
-structural bye MUST grant none regardless of precedence. **How many byes a region has
-is D4**; this list only decides who gets them.
+Precedence is a **preference, not a guarantee**: R3, R4 and R5 win. A block with no
+structural bye MUST grant none regardless of precedence. **How many byes a block has is
+D4**; this list only decides who gets them.
 
 *Rationale for criterion 2:* in a round-robin pool of n every competitor fights n-1
 matches, so a 4-pool winner reaches the knockout on 3 matches against a 3-pool winner's
@@ -289,13 +362,13 @@ Team draws are the criterion-1 case (byes to seeded pools' winners).
 
 ### R7 Degradation ladder
 
-When a region's structure needs more byes than it has home 1st places, the excess MUST
+When a block's structure needs more byes than it has home 1st places, the excess MUST
 flow down the R6 list: crossed-in 2nds, then crossed-in 3rds. Bye arithmetic is **PER
-REGION** under the court-first construction, not global: a region of `q` occupants
+BLOCK** under the court-first construction, not global: a block of `q` occupants
 carries `NextPow2(q) - q` empty slots.
 
 *Note, and this supersedes the earlier framing of R7:* `NextPow2(q) - q` counts a
-region's empty **leaf slots**. It is NOT the number of named byes. Most of those empty
+block's empty **leaf slots**. It is NOT the number of named byes. Most of those empty
 slots pair with each other and are never seen. The number of occupants that receive a
 named round-1 bye is `q mod 2`, pinned in **D4**, which is what R6 allocates over. Quote
 the leaf-slot formula only when talking about slot arithmetic, never when talking about
@@ -318,31 +391,69 @@ replaces `SubdivideTree`'s count-based split with a court-block splitter and mak
 
 ### R9 Shiaijo count
 
-A competition MUST be allocated **1 shiaijo or an EVEN number** of shiaijo. An odd
-allocation greater than 1 (3, 5, 7, ...) MUST be rejected. A single-shiaijo competition
-is explicitly allowed and gets the R4(e) half-block draw.
+A competition MUST be allocated a **POWER OF TWO** of shiaijo: 1, 2, 4, 8 or 16.
+Anything else (3, 5, 6, 7, 9, 10, ...) MUST be rejected. A single-shiaijo competition is
+explicitly allowed and gets the R4(e) half-block draw. 16 is the practical ceiling
+because shiaijo are labelled A to Z and `MaxCourts` is 26, so 32 is unreachable.
 
-The constraint is on the **COMPETITION's** allocation, not the venue total: a 5-shiaijo
-tournament MAY run one competition on 4 and another on 1.
+The constraint is on the **COMPETITION's** allocation, not the venue total, and it is
+NOT a rule that a venue's shiaijo must divide evenly among its competitions. **A
+3-shiaijo venue does not entitle any competition to use all three** (operator ruling,
+2026-08-10): it runs its competitions on 1 or 2. A 5-shiaijo tournament MAY run one
+competition on 4 and another on 1, but it MAY NOT run one on 5, and a competition MUST
+NOT reach an invalid allocation by INHERITING the venue's court list. Wherever an
+allocation is derived rather than chosen, the DERIVED value is what R9 validates.
 
-*Rationale:* R4 requires courts to pair up; with an odd count one court has no partner
-and its runners-up have nowhere to cross to. Even allocation is also what guarantees
-R5's opposite-halves property.
+*Rationale:* the draw is built court-first, one region per shiaijo, and those regions are
+then combined by repeated halving. Only a power of two lets every region sit at the same
+depth and every half and quarter be exact. R4's partner pairing and R5's
+opposite-halves guarantee both follow from that; an even-but-not-power-of-two count
+satisfies the pairing while still merging asymmetrically, which is why "1 or even" was
+not strict enough.
 
-Enforcement MUST land at all four entry points together, so no path can produce an
-unpairable allocation: the HTTP API, the engine, the operator UI, and the CLI
-`--courts` flag (which today enforces only the 26-court A-Z label cap). Existing data
-is validated **on write only**: a competition already saved with an odd allocation
-keeps running and shows a persistent warning on its settings screen, because blocking
-the settings PUT would lock the operator out of unrelated edits.
+*Consequence, and the reason this rule earns its strictness:* it deletes one of the two
+asymmetries this document had to legislate around, and it is important to be exact about
+which.
+
+- **Gone: region-COUNT asymmetry.** At 6, 10, 12 or 14 shiaijo a half holds 3, 5, 6 or 7
+  regions, which cannot merge pairwise, so one court's region reaches the half-final a
+  round earlier purely because of how many regions there are. That also broke R2, since
+  a quarter spanned more than one region and "one seeded pool per quarter" stopped being
+  well defined (the old Open item on 6+ courts). Under R9 none of those counts is legal:
+  regions always merge two into one, all the way up, so every half and quarter is exact
+  and R2 needs no special case.
+- **NOT gone: region-SIZE asymmetry.** Two regions merging into the same parent can
+  still hold different numbers of occupants, because `AssignPoolsToCourts` spreads pools
+  as evenly as it can but they need not divide (7 pools on 4 shiaijo gives 2, 2, 2, 1).
+  The shallower slot is then still a real advantage and still has to be allocated by
+  rule. **D2 therefore remains live**, and the Female reference draw, which runs on 4
+  shiaijo with 2/1/2/2 pools, is exactly this case.
+
+So R9 narrows D2's job to a single well-posed question, comparing two sibling regions,
+rather than an arbitrary merge of three or more.
+
+Enforcement MUST land at every entry point together, so no path can produce an invalid
+allocation: the HTTP API (including creation paths that resolve an omitted court list to
+the tournament's), the engine, the operator UI, and the CLI `--courts` flag (which
+before this rule enforced only the 26-court A-Z label cap). Any clamp that LOWERS a
+court count, such as clamping to the pool count, MUST land on a power of two rather than
+merely on an even number.
+
+Existing data is validated **on write only**: a competition already saved with an
+invalid allocation keeps running and shows a persistent warning on its settings screen,
+because blocking the settings PUT would lock the operator out of unrelated edits. That
+state is reachable in the ordinary course of events, since the rule postdates the
+on-disk format and `tournament-data/` survives a binary upgrade, so the warning path
+MUST be verified rather than assumed dead.
 
 ## Pinned defaults
 
 D1-D3 are the three the bead required to be decided here. D4-D7 close the four items
 that a first draft of this spec left open; they were ruled on by the operator on
-2026-08-10. All seven are rules, not open questions. Where a default goes beyond what
-the EKC sheets show it is labelled an extrapolation and listed again at the end of this
-document.
+2026-08-10. D8 is not a rule but a MEASUREMENT: it records where R4(e)'s "identical
+shape whatever the shiaijo count" invariant holds and where it does not. The other
+seven are rules, not open questions. Where a default goes beyond what the EKC sheets
+show it is labelled an extrapolation and listed again at the end of this document.
 
 ### D1. R6 criterion 2 under `poolFormat: "partial"`
 
@@ -383,11 +494,15 @@ definition; it simply compensates less because there is less to compensate for.
 
 ### D2. Region depth
 
-**An even court count does not make every draw symmetric.** With 6 courts each half
-holds 3 regions, and 3 regions cannot merge symmetrically: one court's occupants reach
-the half-final a round earlier than the other two. The same applies at 10, 12 and 14.
-Only 1, 2, 4, 8 and 16 courts are fully symmetric. Unequal pools per court produces the
-same asymmetry at **any** court count, including 4 (see the Female draw).
+**Scope narrowed by R9 (2026-08-10).** This default was written when an allocation only
+had to be even, so it had to cope with a half holding 3, 5, 6 or 7 regions and merging
+them in some order. R9 now requires a power of two, so regions always merge two into
+one and that case is gone. What remains, and what this default is now solely about, is
+that two SIBLING regions can hold different numbers of occupants, because pools do not
+have to divide evenly across shiaijo: 7 pools on 4 shiaijo gives 2, 2, 2, 1. The
+Female reference draw is exactly this, on 4 shiaijo with 2/1/2/2 pools. So the rule is
+live, but it now answers one well-posed question about a pair rather than an arbitrary
+merge.
 
 **Rule.** Whenever two or more regions that merge into the same parent node have
 different depths, the **shallower** slot is allocated to the court with:
@@ -462,15 +577,27 @@ as R4c says.
 **At 1 court**, R4e's half-blocks stand in for partner courts and the 2-court rule
 applies unchanged: the 3rd goes to the other half-block's other quarter.
 
-### D4. Region internal shape, and how many empty slots become named byes
+### D4. Block internal shape, and how many empty slots become named byes
 
-**Rule.** A region of `q` occupants is built **GREEDILY**. Its round-1 layer holds
+**Rule.** A **block** of `q` occupants is built **GREEDILY**. Its round-1 layer holds
 `floor(q/2)` real matches and, when `q` is odd, exactly **ONE** named bye. Every
 remaining empty slot pairs with another empty slot, forming a phantom match that is
 already dropped downstream and never printed or displayed. So:
 
-> **Round-1 byes per region = `q mod 2`**, and the named bye goes to the region's
+> **Round-1 byes per block = `q mod 2`**, and the named bye goes to the block's
 > highest-precedence occupant under R6.
+
+**The unit is the BLOCK, not the printable region.** Wherever the pool set is not
+subdivided the two are the same thing, which is why this was first written as a
+per-region rule; where **R4(e)** does subdivide, a region spans two or four blocks and
+each carries its own greedy layer, exactly as the shiaijo regions of the same
+competition drawn on four courts would. Stating it per region would contradict **R4(e)**
+directly -- the same pools at the same qualifier count would get a different number of
+byes on one shiaijo than on four -- and it was never true of the draw in any case: over
+pool counts 1-12 at 1-6 qualifiers on 1, 2 and 4 shiaijo, 18 of 437 printable regions
+already granted a bye count other than `q mod 2` before the pool set was subdivided
+(every one of them on a single shiaijo, where the region already spanned two
+half-blocks), and 61 do now. Per BLOCK the count is exact in both: 0 of 696.
 
 **Derivation.** EKC male court A has `q = 5` in an 8-slot region, so 3 empty slots. The
 sheet shows **P1 bye, P2 v P3, P4 v P5**: two round-1 matches and ONE named bye, with
@@ -558,12 +685,19 @@ Each region therefore receives crossed-in qualifiers from **exactly one source c
 rank**, so region sizes stay balanced. The 3rd-place column is exactly the A->D, B->C,
 C->B, D->A involution D3 derives independently, so the two defaults agree.
 
-At **2 courts** the four quarters are A1, A2, B1, B2: **1st** goes to a quarter of its
-own court's half, **2nd** to a quarter of the partner half, **3rd** to the partner
-half's OTHER quarter, **4th** to the pool's own half's other quarter. Where a rank has a
-choice of two quarters (the 2nd, and the 1st when its half is empty), take the one with
-fewest current occupants, ties by quarter order, which is D3's tiebreak chain reused
-unchanged.
+At **1 and 2 courts** this is the SAME table, not a second rule. **R4(e)** subdivides the
+pool set into four blocks whatever the shiaijo count, so the four quarters A, B, C, D of
+the rotation above are those four blocks: at 2 courts each court owns two of them, at 1
+court all four. A pool whose winner is in block A therefore places **1st -> A, 2nd -> C,
+3rd -> D, 4th -> B** exactly as it would on four shiaijo. Where a rank still has a
+choice of two blocks, take the one whose quarter this pool has used least, then the
+block it has used least, then the block with fewest occupants, ties by block order --
+D3's tiebreak chain reused unchanged.
+
+The rotation now reaches every shape in the swept range. It used to miss **3 pools at 4
+qualifiers**, where the subdivision was capped by the pool count and four blocks did not
+exist to rotate over; capping by the occupant count instead gives those 12 qualifiers
+four blocks of three. See **R5**.
 
 **Beyond 4 qualifiers per pool** the same rotation continues over regions in D3's
 candidate order. R5's no-two-in-a-quarter guarantee is pigeonhole-impossible from the
@@ -589,9 +723,12 @@ This preserves the operator's 2026-08-09 decision (semifinals **1 v 3** and **2 
 when the seeds hold) and generalises it. At 4 courts it yields **seed 1 -> court A,
 seed 3 -> court B, seed 2 -> court C, seed 4 -> court D**, from which "one seeded pool
 per court, each in a different quarter" follows as a **consequence** rather than as a
-separate rule. At 6 or more courts a quarter spans more than one region, so the
-half/quarter constraint is the operative one and "distinct courts" becomes the tiebreak
-that spreads seeds within a quarter.
+separate rule. At 8 and 16 courts a quarter spans several regions, so the half/quarter
+constraint is the operative one and "distinct courts" becomes the tiebreak that spreads
+seeds within a quarter. R9 removes the case that used to make this awkward: at a
+non-power-of-two count like 6 the quarters did not line up with region boundaries at
+all, so "a different quarter" and "one per court" were different constraints that could
+not both be honoured. Under R9 they can.
 
 **This deliberately differs from the conventional seeding convention.** Under both
 conventions seeds 1 and 2 are in opposite halves and can only meet in the final, and
@@ -634,15 +771,57 @@ at the pool count and ignores the surplus ranks with a warning** (R2, last bulle
 is the failure mode for constraint 4, and it is why the ladder in practice degrades
 across 1-3 only.
 
-**It MUST NEVER be an error.** Every configuration produces a draw. A competition with
-4 seeds, 2 courts and 5 pools split 3/2 is legal and must draw; it simply cannot give
-all four seeds their own quarter, so the deepest failing constraint gives way for the
-lowest-priority seed and the operator sees a warning describing what was relaxed.
+**It MUST NEVER be an error.** Every configuration produces a draw. The worked example
+is 4 seeds and 5 pools on **ONE** shiaijo: `PoolSeeding` spreads seeded pools over
+SHIAIJO, so with only one to spread over it puts seeds 1 and 4 in adjacent pools, both
+land in the draw's first block, and neither the half nor the quarter constraint can be
+honoured for that pair. The deepest failing constraint gives way and the operator sees a
+warning describing what was relaxed.
+
+*This example used to be stated at TWO shiaijo, and no longer holds there.* Since
+**R4(e)** subdivides the pool set towards four blocks whenever there are enough
+qualifiers to fill them, four distinct quarters exist to place four seeds in at any
+court count, and 4 seeds over 5 pools on 2 shiaijo now satisfies constraints 1 to 4
+outright and warns about nothing. The 1-shiaijo case survives for two reasons:
+`PoolSeeding` still keys on the shiaijo count rather than on the block count, and at 1
+qualifier per pool there is no subdivision at all. Spreading seeded pools over BLOCKS
+would close the first; the warning correctly reports the gap until it is.
 
 *Rationale:* a seeding rule that can refuse to draw is worse than a seeding rule that
 degrades predictably. The operator can always inspect the result and move a seed by
 hand; they cannot proceed at all against a hard error, and a live event has no time for
 one.
+
+### D8. Where R4(e)'s "identical shape" invariant still fails
+
+**R4(e)** claims the draw's shape is identical whether an event runs on 1 court or
+several. It is a claim about EMULATING partner courts, so it only ever applied where
+there is crossing to emulate. Measured over pool counts 2-16 at 1-4 qualifiers per pool,
+comparing the whole bracket's leaf array at 1 shiaijo against the same pools at 2 and 4:
+**85 of 112 comparisons hold** (67 before the pool set was subdivided). The 27 that do
+not fall into two groups, for two unrelated reasons.
+
+**Group 1: every 1-qualifier draw.** At one qualifier per pool nothing crosses
+(**R4(d)**), so there is no partner structure to emulate and the subdivision is switched
+off: each shiaijo's region is one block. That is deliberate and it is what the EKC
+individual draws print. It also protects **R6**: with 5 pools and one qualifier, a
+subdivided single shiaijo strands three pool winners in blocks of their own and byes one
+of them for being alone, ahead of the pool holding seed 1. The invariant is the thing
+that gives way, because it was never the point.
+
+**Group 2: pool counts congruent to 2 mod 4** -- 6, 10 and 14 -- at **four** shiaijo.
+`AssignPoolsToCourts` front-loads its remainder, so 10 pools go **5/5** on two shiaijo
+but **3/3/2/2** on four: six pools in the first half instead of five. The two allocations
+put a different set of pools in the draw's first half, and **R3** pins each region to the
+pools its shiaijo actually ran, so the draw has to follow the allocation rather than
+override it. This is a property of the POOL-TO-COURT allocation, not of the draw: closing
+it means changing which shiaijo runs which pool (allocating by repeated halving there
+too), which moves the Pool Matches sheet and the pool schedule as well and is a decision
+about the venue, not the bracket.
+
+Recorded here rather than fixed, because the invariant it breaks is worth less than the
+allocation's own contiguity guarantee and an operator's expectation that shiaijo A runs
+the first `ceil(P/n)` pools.
 
 ## What changes in the code
 
@@ -849,9 +1028,9 @@ change if the operator rules differently.
 - **D3, 3rd-place placement.** EKC never shows 3 qualifiers; if the operator prefers a
   different quarter for the 3rd, the 4-court involution (A->D, B->C, C->B, D->A) and the
   2-court partner-half rule change, and D5's rotation table changes with them.
-- **D4, greedy region shape.** If the operator wants the pad-to-`NextPow2`-and-spread
-  construction instead, a `q = 5` region prints 1 round-1 match and 3 named byes rather
-  than 2 matches and 1 bye, and R6 then allocates three byes per odd region instead of
+- **D4, greedy block shape.** If the operator wants the pad-to-`NextPow2`-and-spread
+  construction instead, a `q = 5` block prints 1 round-1 match and 3 named byes rather
+  than 2 matches and 1 bye, and R6 then allocates three byes per odd block instead of
   one.
 - **D5, 4th and later qualifiers.** EKC never shows more than 2 qualifiers; a different
   rotation changes only draws with `poolWinners >= 3`, and would require the Phase 1

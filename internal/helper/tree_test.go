@@ -1023,22 +1023,36 @@ func TestBuildKnockoutDrawDegenerateInputs(t *testing.T) {
 }
 
 // TestEffectiveDrawCourts pins the clamp that keeps a court from owning an
-// empty region, including its R9 step-down: clamping onto an odd pool count
-// would otherwise hand the draw an unpairable shiaijo allocation.
+// empty region, including its R9 step-down: clamping onto a pool count that is
+// not a power of two would otherwise hand the draw an illegal allocation.
+//
+// The 8-courts-over-7-pools row is the case the old "step down to an even
+// number" clamp got wrong: it produced 6, which R9 rejects because 3 regions in
+// a half cannot merge pairwise. Every clamped result is asserted legal below,
+// so the table cannot drift from ValidateShiaijoCount.
 func TestEffectiveDrawCourts(t *testing.T) {
 	cases := []struct{ pools, courts, want int }{
 		{pools: 8, courts: 4, want: 4},
 		{pools: 4, courts: 4, want: 4},
-		{pools: 3, courts: 4, want: 2}, // 3 would be unpairable (R9)
+		{pools: 3, courts: 4, want: 2}, // 3 is not a power of two (R9)
 		{pools: 2, courts: 4, want: 2},
 		{pools: 1, courts: 4, want: 1}, // one shiaijo is explicitly allowed
 		{pools: 5, courts: 6, want: 4},
+		{pools: 6, courts: 8, want: 4}, // 6 is even but illegal under R9
+		{pools: 7, courts: 8, want: 4}, // the old clamp gave 6 here
+		{pools: 8, courts: 16, want: 8},
+		{pools: 12, courts: 16, want: 8}, // 12 is even but illegal under R9
 		{pools: 8, courts: 0, want: 1},
 		{pools: 0, courts: 3, want: 3}, // no pools: nothing to clamp against
 	}
 	for _, c := range cases {
 		t.Run(fmt.Sprintf("%dpools_%dcourts", c.pools, c.courts), func(t *testing.T) {
-			assert.Equal(t, c.want, EffectiveDrawCourts(c.pools, c.courts))
+			got := EffectiveDrawCourts(c.pools, c.courts)
+			assert.Equal(t, c.want, got)
+			if c.pools > 0 && c.courts > c.pools {
+				assert.NoErrorf(t, ValidateShiaijoCount(got),
+					"the clamp must land on a legal allocation, got %d", got)
+			}
 		})
 	}
 }
@@ -1248,25 +1262,50 @@ func TestByesGoToPoolWinners(t *testing.T) {
 	}
 }
 
-// drawByeUnits returns the subtrees D4's per-region bye arithmetic applies to.
-// That is the shiaijo regions, EXCEPT on a single-shiaijo competition, where
-// R4(e) splits the court's pools into two half-blocks that act as partner
-// courts: each half-block is then its own ladder with its own structural bye,
-// and the region (the whole draw) is their parent.
+// drawByeUnits returns the subtrees D4's bye arithmetic applies to: the draw's
+// BLOCKS.
+//
+// At four or more shiaijo a block is a shiaijo's region, which is why D4 was
+// first written in terms of a region. Below four the pool set is subdivided
+// further (planBlocks) into two or four blocks that act as partner courts, each
+// its own ladder with its own greedy layer and its own structural bye, and a
+// printable region is their parent. Reading the arithmetic off a region there
+// would count two blocks' byes against one block's parity.
 func drawByeUnits(draw *KnockoutDraw) []*Node {
-	if draw.NumCourts() > 1 || draw.Root.LeafNode || draw.Root.Left == nil {
-		return draw.Regions
-	}
-	return []*Node{draw.Root.Left, draw.Root.Right}
+	return draw.blocks
 }
 
-// TestRegionByeCountIsQMod2 pins D4's arithmetic directly: a region of q
-// occupants grants exactly q mod 2 NAMED round-1 byes and plays floor(q/2)
-// round-1 matches. Every other empty slot pairs with another empty slot into a
-// phantom match that is never printed. Recursive halving disagrees from q=6 up
-// (it would give 2 matches and 2 byes where greedy gives 3 and 0).
-func TestRegionByeCountIsQMod2(t *testing.T) {
-	for _, numCourts := range []int{1, 2, 4} {
+// TestBlockByeNeverSkipsAHigherFinisher pins R6's class ordering and R7's
+// degradation ladder as one property: a block's named bye goes to the best
+// FINISHING POSITION present in that block. A pool winner is never passed over
+// for a runner-up, a runner-up never for a third place.
+//
+// This replaced a test asserting that every block holds a home 1st, which was
+// the "a block must own at least one pool" rule stated as an invariant. That
+// rule is gone (operator ruling, 2026-08-10): a block holds QUALIFIERS, not
+// pools, and from 2 qualifiers up there are more of the former than the latter,
+// so a block may legitimately host only crossed-in finishers. R4(f) blesses it
+// outright and R7 is the rule that says what happens then -- the bye flows down
+// the ladder to the best crossed-in occupant. Asserting it could never occur
+// both contradicted R7 and forced planBlocks to cap the subdivision by the pool
+// count, which is what stranded a lone pool winner in a block and let it bye
+// ahead of the top seed (see draw_seed_bye_test.go).
+//
+// The sweep deliberately asks for MORE shiaijo than pools (8 and 16 over as few
+// as 1 pool), because EffectiveDrawCourts' clamp is the only thing standing
+// between the request and an empty region.
+//
+// ONE shape in the swept range is exempt, and it is the spec's own precedence
+// showing through rather than a defect: at 2 pools and 3 qualifiers each block
+// holds {X-1st, Y-2nd, Y-3rd}, so byeing the pool winner would leave Y's own
+// 2nd and 3rd to fight each other in round 1. R6 states outright that
+// "precedence is a preference, not a guarantee: R3/R4/R5 win", so R5's
+// separation takes the bye and Y-2nd -- the better of the two, see
+// separateSamePoolPairs -- receives it. The exemption is asserted narrowly: the
+// bye must still be that pool's BEST remaining finisher, so the case cannot
+// quietly widen into "any bye anywhere".
+func TestBlockByeNeverSkipsAHigherFinisher(t *testing.T) {
+	for _, numCourts := range []int{1, 2, 4, 8, 16} {
 		for nPools := 1; nPools <= 12; nPools++ {
 			for poolWinners := 1; poolWinners <= 4; poolWinners++ {
 				t.Run(fmt.Sprintf("%d_pools_%d_winners_%d_courts", nPools, poolWinners, numCourts), func(t *testing.T) {
@@ -1274,9 +1313,68 @@ func TestRegionByeCountIsQMod2(t *testing.T) {
 					draw := BuildKnockoutDraw(pools, poolWinners, numCourts)
 					require.NotNil(t, draw)
 
-					for c, region := range drawByeUnits(draw) {
-						q := len(TreeLeafLabels(region))
-						slots := TreeToLeafArray(region)
+					for c, block := range drawByeUnits(draw) {
+						require.NotNilf(t, block, "block %d must exist", c)
+						labels := TreeLeafLabels(block)
+						bye := namedBye(block)
+						if bye == "" {
+							continue
+						}
+						bestRank, bestInByesPool := int64(0), int64(0)
+						for _, l := range labels {
+							r := leafRank(l)
+							if r <= 0 {
+								continue
+							}
+							if bestRank == 0 || r < bestRank {
+								bestRank = r
+							}
+							if leafPool(l) == leafPool(bye) && (bestInByesPool == 0 || r < bestInByesPool) {
+								bestInByesPool = r
+							}
+						}
+						if leafRank(bye) == bestRank {
+							continue
+						}
+						assert.Equalf(t, 3, poolWinners,
+							"block %d byed %s over a %s finisher outside the one shape R5 is allowed to override; leaves: %v",
+							c, bye, GetOrdinal(int(bestRank)), labels)
+						assert.Equalf(t, 2, nPools,
+							"block %d byed %s over a %s finisher outside the one shape R5 is allowed to override; leaves: %v",
+							c, bye, GetOrdinal(int(bestRank)), labels)
+						assert.Equalf(t, bestInByesPool, leafRank(bye),
+							"block %d gave the bye to %s when its own pool has a better finisher in the block; leaves: %v",
+							c, bye, labels)
+					}
+				})
+			}
+		}
+	}
+}
+
+// TestBlockByeCountIsQMod2 pins D4's arithmetic directly: a BLOCK of q
+// occupants grants exactly q mod 2 NAMED round-1 byes and plays floor(q/2)
+// round-1 matches. Every other empty slot pairs with another empty slot into a
+// phantom match that is never printed. Recursive halving disagrees from q=6 up
+// (it would give 2 matches and 2 byes where greedy gives 3 and 0).
+//
+// The block is the unit, not the printable region: at four or more shiaijo the
+// two coincide, and below four a region spans two or four blocks that each
+// carry their own greedy layer. The sweep runs past the 4 qualifiers the shape
+// golden covers, to 6, where a block holds several qualifiers of one pool on
+// FOUR shiaijo as well as on one or two.
+func TestBlockByeCountIsQMod2(t *testing.T) {
+	for _, numCourts := range []int{1, 2, 4} {
+		for nPools := 1; nPools <= 12; nPools++ {
+			for poolWinners := 1; poolWinners <= 6; poolWinners++ {
+				t.Run(fmt.Sprintf("%d_pools_%d_winners_%d_courts", nPools, poolWinners, numCourts), func(t *testing.T) {
+					pools, _ := makePools(nPools)
+					draw := BuildKnockoutDraw(pools, poolWinners, numCourts)
+					require.NotNil(t, draw)
+
+					for c, block := range drawByeUnits(draw) {
+						q := len(TreeLeafLabels(block))
+						slots := TreeToLeafArray(block)
 						matches, byes := 0, 0
 						for i := 0; i+1 < len(slots); i += 2 {
 							a, b := slots[i], slots[i+1]
@@ -1288,11 +1386,11 @@ func TestRegionByeCountIsQMod2(t *testing.T) {
 							}
 						}
 						if q == 1 {
-							// A one-occupant region has no round-1 layer at all.
+							// A one-occupant block has no round-1 layer at all.
 							continue
 						}
-						assert.Equalf(t, q%2, byes, "shiaijo %s: %d occupants must grant %d named byes", CourtLabel(c), q, q%2)
-						assert.Equalf(t, q/2, matches, "shiaijo %s: %d occupants must play %d round-1 matches", CourtLabel(c), q, q/2)
+						assert.Equalf(t, q%2, byes, "block %d: %d occupants must grant %d named byes", c, q, q%2)
+						assert.Equalf(t, q/2, matches, "block %d: %d occupants must play %d round-1 matches", c, q, q/2)
 					}
 				})
 			}
@@ -1300,25 +1398,9 @@ func TestRegionByeCountIsQMod2(t *testing.T) {
 	}
 }
 
-// TestSeededPoolWinnerTakesTheRegionBye is R6 criterion 1: when a region has a
-// structural bye and holds the winner of a seeded pool, that winner takes it,
-// ahead of an oversized pool's winner and ahead of pool order. The EKC Junior
-// Team and Junior Individual Female draws are the reference cases; this is the
-// same rule swept over region shapes they do not cover.
-func TestSeededPoolWinnerTakesTheRegionBye(t *testing.T) {
-	// 5 pools on one shiaijo: R4(e) splits them into half-blocks of 3 and 2, so
-	// the 3-occupant block carries the region's only structural bye.
-	pools, _ := makePools(5)
-	// Pool C is both the seeded pool and NOT first in pool order, so criterion 1
-	// has to beat criterion 3 for it to win the bye.
-	pools[2].Players = []Player{{Name: "seed one", Seed: 1}}
-	for i := range pools {
-		if i != 2 {
-			pools[i].Players = []Player{{Name: fmt.Sprintf("p%d", i)}}
-		}
-	}
-	draw := BuildKnockoutDraw(pools, 1, 1)
-	require.NotNil(t, draw)
+// drawNamedByes lists the placeholders that take a NAMED round-1 bye anywhere
+// in the draw, in leaf order.
+func drawNamedByes(draw *KnockoutDraw) []string {
 	slots := TreeToLeafArray(draw.Root)
 	byes := []string{}
 	for i := 0; i+1 < len(slots); i += 2 {
@@ -1326,37 +1408,56 @@ func TestSeededPoolWinnerTakesTheRegionBye(t *testing.T) {
 			byes = append(byes, slots[i]+slots[i+1])
 		}
 	}
-	assert.Equal(t, []string{"Pool C-1st"}, byes,
-		"the seeded pool's winner takes the only structural bye (R6-1)")
+	return byes
 }
 
-// TestOversizedPoolWinnerTakesTheRegionBye is R6 criterion 2 (D1): with no
+// TestSeededPoolWinnerTakesTheBlockBye is R6 criterion 1: when a block has a
+// structural bye and holds the winner of a seeded pool, that winner takes it,
+// ahead of an oversized pool's winner and ahead of pool order. The EKC Junior
+// Team and Junior Individual Female draws are the reference cases; this is the
+// same rule swept over block shapes they do not cover.
+func TestSeededPoolWinnerTakesTheBlockBye(t *testing.T) {
+	// 5 pools on one shiaijo subdivide into blocks of 2/1/1/1 (A+B, C, D, E).
+	// At two qualifiers per pool block 0 holds A-1st, B-1st and the crossed-in
+	// D-2nd, so it is the odd block where criterion 1 has a contest to win:
+	// two home 1sts, one bye.
+	pools, _ := makePools(5)
+	// Pool B is the seeded pool and NOT first in pool order, so criterion 1 has
+	// to beat criterion 3 for it to take the bye.
+	pools[1].Players = []Player{{Name: "seed one", Seed: 1}}
+	for i := range pools {
+		if i != 1 {
+			pools[i].Players = []Player{{Name: fmt.Sprintf("p%d", i)}}
+		}
+	}
+	draw := BuildKnockoutDraw(pools, 2, 1)
+	require.NotNil(t, draw)
+	assert.Equal(t, []string{"Pool B-1st", "Pool D-1st"}, drawNamedByes(draw),
+		"the seeded pool's winner takes its block's bye (R6-1); the other odd block has one home 1st and no contest")
+}
+
+// TestOversizedPoolWinnerTakesTheBlockBye is R6 criterion 2 (D1): with no
 // seeds in play, the bye goes to the winner of the pool whose qualifier played
 // the MOST pool matches, not to the first pool in order. It is fatigue
 // compensation, which is why it ranks below seeding and above pool order.
-func TestOversizedPoolWinnerTakesTheRegionBye(t *testing.T) {
-	// 5 pools on one shiaijo split into half-blocks of 3 (A, B, C) and 2 (D, E),
-	// so the structural bye lives in the first block and Pool C is the
-	// oversized pool competing for it.
+func TestOversizedPoolWinnerTakesTheBlockBye(t *testing.T) {
+	// The same shape as the seeded case: 5 pools on one shiaijo at two
+	// qualifiers, so block 0 (pools A and B, plus the crossed-in D-2nd) is the
+	// odd block with two home 1sts competing for its bye. Pool B is the
+	// oversized one and is second in pool order, so criterion 2 has to beat
+	// criterion 3.
 	pools, _ := makePools(5)
-	sizes := []int{3, 3, 5, 3, 3}
+	sizes := []int{3, 5, 3, 3, 3}
 	for i := range pools {
 		pools[i].Players = make([]Player, sizes[i])
 		for j := range pools[i].Players {
 			pools[i].Players[j] = Player{Name: fmt.Sprintf("p%d-%d", i, j)}
 		}
 	}
-	draw := BuildKnockoutDraw(pools, 1, 1)
+	draw := BuildKnockoutDraw(pools, 2, 1)
 	require.NotNil(t, draw)
-	slots := TreeToLeafArray(draw.Root)
-	byes := []string{}
-	for i := 0; i+1 < len(slots); i += 2 {
-		if (slots[i] == "") != (slots[i+1] == "") {
-			byes = append(byes, slots[i]+slots[i+1])
-		}
-	}
-	assert.Equal(t, []string{"Pool C-1st"}, byes,
-		"the oversized pool's winner takes the structural bye (R6-2)")
+	assert.Equal(t, []string{"Pool B-1st", "Pool D-1st"}, drawNamedByes(draw),
+		"the oversized pool's winner takes its block's bye (R6-2)")
 
 	// And the generated match count is what the rule actually reads (D1), so a
 	// pool with more MATCHES outranks a pool with more PLAYERS if they ever
@@ -1366,16 +1467,9 @@ func TestOversizedPoolWinnerTakesTheRegionBye(t *testing.T) {
 		pools[i].Matches = make([]Match, sizes[i])
 	}
 	pools[0].Matches = make([]Match, 9)
-	draw2 := BuildKnockoutDraw(pools, 1, 1)
+	draw2 := BuildKnockoutDraw(pools, 2, 1)
 	require.NotNil(t, draw2)
-	slots2 := TreeToLeafArray(draw2.Root)
-	byes2 := []string{}
-	for i := 0; i+1 < len(slots2); i += 2 {
-		if (slots2[i] == "") != (slots2[i+1] == "") {
-			byes2 = append(byes2, slots2[i]+slots2[i+1])
-		}
-	}
-	assert.Equal(t, []string{"Pool A-1st"}, byes2,
+	assert.Equal(t, []string{"Pool A-1st", "Pool D-1st"}, drawNamedByes(draw2),
 		"with pool matches drawn, the bye follows the MATCH count (D1)")
 }
 

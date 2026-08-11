@@ -5,10 +5,14 @@
 // §263 (individual: ippon-letter slots) and §277 (team: IV/PW summary row +
 // per-bout rows + Daihyosen).
 //
-// esbuild compiles each web-mobile/js/*.jsx as a separate entry and inlines
-// imported modules, so importing this from both viewer.jsx and display.jsx is
-// the established DRY mechanism (same as lineup_resolver.jsx). No window-global
-// coupling needed.
+// The build (Makefile `esbuild-jsx`) runs esbuild with --outdir and NO --bundle,
+// so each web-mobile/js/*.jsx is TRANSFORMED in place and its imports stay as
+// runtime ESM the browser resolves and caches once. Importing this from both
+// viewer.jsx and display.jsx is therefore the established DRY mechanism (same as
+// lineup_resolver.jsx) and costs one shared module fetch, not a copy per
+// importer. No window-global coupling needed. What it does cost is a fetch and
+// evaluation per module, which is why this file imports only small leaves and
+// reaches the 32 KB bracket.jsx through window globals instead.
 //
 // `variant` ("card" | "tv") only changes sizing via a CSS modifier: the markup
 // and data-testids are identical across surfaces.
@@ -155,11 +159,12 @@ function slotCells(letters, side, testid) {
 // centreMarks: the §263 inner cells: [shiro slot][shiro slot] | vs/X/(E)/(DH) | [aka slot][aka slot].
 // Hansoku ▲ shows between the offending competitor's name and that side's ippon
 // slots (FIK Table 2, p.16 Taisho row: White's ▲ far left, Red's far right, each
-// on its own name side); X marks a hikiwake; "Ht" flags hantei. For an ippon-less
-// win the winning side is otherwise invisible, so we mark the winner's slots:
-// "Ht" when decided by hantei, else the maru pair ○ ○ — one per awarded
-// point (see winCells below). Modern fusensho/kiken carry ["○","○"] ippons
-// and render through the normal slot path, so they never reach this fallback.
+// on its own name side); X marks a hikiwake. For an ippon-less DEFAULT WIN the
+// winning side is otherwise invisible, so we mark its slots with the maru pair
+// ○ ○, one per awarded point (see resultCells below). Modern fusensho/kiken
+// carry ["○","○"] ippons and render through the normal slot path, so they never
+// reach that fallback. The hantei "Ht" is NOT part of it: it is placed whatever
+// the scoreline, per `markable` and result_slot.jsx.
 // A plain helper (not a component) so it renders inline into the parent's tree.
 function centreMarks(sub, matchSideA, matchSideB) {
   // Engi (flag-count scoring) is the ONLY competition type where the centre
@@ -219,7 +224,7 @@ function centreMarks(sub, matchSideA, matchSideB) {
     }
     const cells = letters.slice(0, 2);
     const { slot, loose } = resultSlot(cells);
-    if (!loose) cells[slot] = "Ht";
+    if (slot >= 0) cells[slot] = "Ht";
     return { cells, loose };
   };
   const shiroRes = winShiro ? resultCells(lettersB) : null;

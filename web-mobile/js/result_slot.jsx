@@ -4,11 +4,14 @@
 // This is the third of a three-part display rule whose other two parts already
 // live in bracket.jsx: `sideMarks` answers WHICH mark, `placeMarks` answers
 // WHICH SIDE, and this answers WHICH SLOT. It sits in its own leaf rather than
-// beside them because match_scoreboard.jsx must NOT import bracket.jsx: esbuild
-// inlines imported modules per entry, so that would pull the whole bracket tree
-// into display.js, viewer.js and streaming_overlay.js. Small leaves imported by
-// both admin and display surfaces (pool_ids.jsx, lineup_resolver.jsx) are the
-// established shape for exactly this.
+// beside them because match_scoreboard.jsx must NOT import bracket.jsx. The
+// build (Makefile `esbuild-jsx`) runs esbuild with --outdir and NO --bundle, so
+// it is a per-file JSX transform: imports stay as runtime ESM the browser
+// resolves. Importing bracket.jsx would therefore not inline it, but it WOULD
+// add a 32 KB module fetch and evaluation to every display surface that loads
+// match_scoreboard (display.js, viewer.js, streaming_overlay.js). This leaf is
+// 173 bytes. Small leaves imported by both admin and display surfaces
+// (pool_ids.jsx, lineup_resolver.jsx) are the established shape for exactly this.
 //
 // THE RULE: a result mark behaves like a point. It fills the next FREE slot in
 // the same outside-to-inside order a point would, so a 0-0 bout puts it in the
@@ -21,10 +24,6 @@
 // the mark BESIDE the slots rather than drop it ("a result is never silently
 // dropped"). This is reachable, not theoretical: a daihyosen may be taken to
 // hantei from any tied scoreline, 2-2 included.
-//
-// Callers own the "is this side the one being marked" test, because they
-// resolve the winner differently (the scoreboard walks a sub → team-alias →
-// match-level fallback chain; the editor reads the armed hantei verdict).
 export function resultSlot(cells) {
   const pair = cells || [];
   const slot = [pair[0] || "", pair[1] || ""].findIndex(v => !v);

@@ -241,7 +241,7 @@ describe('viewer: BoutSubRow canonical layout (mp-13y)', () => {
     const tree = runtime.mount(BoutSubRow, { sub, index: 0, lineupA: null, lineupB: null, teamSize: 3, isDH: true });
     expect(collectText(tree)).not.toContain('Match -1');
     expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-row-dh')).toBeTruthy();
-    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-row-hantei')).toBeNull();
+    expect(collectText(tree)).not.toContain('Ht');
   });
 
   it('renders the "Ht" hantei marker on the winner, never in the centre', () => {
@@ -253,7 +253,11 @@ describe('viewer: BoutSubRow canonical layout (mp-13y)', () => {
       ipponsA: ['K'], ipponsB: ['M'], decidedByHantei: true, winner: 'Aka Rep',
     };
     const tree = runtime.mount(BoutSubRow, { sub, index: 0, lineupA: null, lineupB: null, teamSize: 3, isDH: true });
-    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-row-hantei')).toBeNull();
+    // The centre keeps the shared (DH) mark; the Ht is NOT in it. Asserting an
+    // absent testid would be vacuous, so assert on the centre's own contents.
+    const centre = findInTree(tree, n =>
+      typeof n?.props?.className === 'string' && /\bmsb-vs\b/.test(n.props.className));
+    expect(collectText(centre)).not.toContain('Ht');
     expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-a')).toBeTruthy();
     expect(collectText(tree)).toContain('Ht');
   });

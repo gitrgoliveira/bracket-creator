@@ -83,6 +83,13 @@ describe('match_scoreboard: teamIVPW', () => {
   });
 });
 
+// What the centre cell actually holds. Asserting that a `sub-row-hantei` testid
+// is absent would be VACUOUS: no production code emits a centre Ht any more, so
+// such an expectation can never fail and would not catch a reintroduction under
+// a different testid. Assert on the centre's contents instead.
+const centreText = (tree) => collectText(findInTree(tree, n =>
+  typeof n?.props?.className === 'string' && /\bmsb-vs\b/.test(n.props.className)));
+
 describe('match_scoreboard components', () => {
   const realReact = global.React;
   let runtime, BoutSubRow, IndividualScore, TeamScoreboard;
@@ -199,7 +206,7 @@ describe('match_scoreboard components', () => {
     // which requires a winner and disambiguates same-name pairs by uuid.
     expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-a')).toBeNull();
     expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-b')).toBeNull();
-    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-row-hantei')).toBeNull();
+    expect(centreText(tree)).toBe('vs');
     expect(collectText(tree)).not.toContain('Ht');
   });
 
@@ -214,8 +221,8 @@ describe('match_scoreboard components', () => {
       winner: { id: 'p1', name: 'Aka' },
     };
     const tree = runtime.mount(IndividualScore, { match });
-    // Never in the shared centre cell.
-    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-row-hantei')).toBeNull();
+    // Never in the shared centre cell: it stays the plain separator.
+    expect(centreText(tree)).toBe('vs');
     // The scored M survives: Ht is added, it does not replace the point.
     const text = collectText(tree);
     expect(text).toContain('Ht');
@@ -229,6 +236,28 @@ describe('match_scoreboard components', () => {
     expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-b')).toBeNull();
   });
 
+  it('IndividualScore: with both slots full the Ht rides beside them, never the centre', () => {
+    // resultSlot reports `loose` when there is no free slot. Drifted/hand-edited
+    // stored data can reach it: hantei only requires EQUAL ippon counts, so a
+    // 2-2 passes validation even though sanbon-shobu should end at 2. The mark
+    // is then rendered beside that side's slots rather than dropped, and still
+    // not in the shared centre.
+    const match = {
+      sideA: { id: 'p1', name: 'Aka' }, sideB: { id: 'p2', name: 'Shiro' },
+      ipponsA: ['M', 'K'], ipponsB: ['M', 'K'], decidedByHantei: true,
+      winner: { id: 'p1', name: 'Aka' },
+    };
+    const tree = runtime.mount(IndividualScore, { match });
+    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-ht-a')).toBeTruthy();
+    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-ht-b')).toBeNull();
+    // Both struck points survive: the mark did not overwrite either slot.
+    const text = collectText(tree);
+    expect(text).toContain('M');
+    expect(text).toContain('K');
+    expect(centreText(tree)).not.toContain('Ht');
+    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-b')).toBeNull();
+  });
+
   it('IndividualScore: ids resolve a same-name head-to-head correctly (winner side gets Ht)', () => {
     // With participant ids, the same-name pair is disambiguated and the
     // winning side's slot gets the Ht mark.
@@ -238,10 +267,10 @@ describe('match_scoreboard components', () => {
       winner: { id: 'p1', name: 'Same Name' },
     };
     const tree = runtime.mount(IndividualScore, { match });
-    // p1 = sideA = aka → win mark on aka, none on shiro, no centre fallback.
+    // p1 = sideA = aka → win mark on aka, none on shiro, plain centre.
     expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-a')).toBeTruthy();
     expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-b')).toBeNull();
-    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-row-hantei')).toBeNull();
+    expect(centreText(tree)).toBe('vs');
   });
 
   it('IndividualScore renders the ippon-letter slots (§263)', () => {
@@ -405,7 +434,7 @@ describe('match_scoreboard components', () => {
     expect(winA).toBeTruthy();
     expect(collectText(winA)).toContain('Ht');
     expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-b')).toBeNull();
-    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-row-hantei')).toBeNull();
+    expect(centreText(tree)).not.toContain('Ht');
   });
 
   it('BoutSubRow marks a non-hantei ippon-less win (fusensho/kiken) with ○ on the winner', () => {
@@ -436,7 +465,7 @@ describe('match_scoreboard components', () => {
     const winA = findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-a');
     expect(winA).toBeTruthy();
     expect(collectText(winA)).toContain('Ht');
-    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-row-hantei')).toBeNull();
+    expect(centreText(tree)).not.toContain('Ht');
   });
 
   it('TeamScoreboard threads shiroName/akaName into the Daihyosen sub as teamB/teamA', () => {

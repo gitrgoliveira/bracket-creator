@@ -61,7 +61,17 @@ function renderTeamBoutMiddle(s, t, isDaihyoRow) {
 // hanteiSlot: which of this side's two ippon slots carries the "Ht" mark, or -1
 // for none. The placement rule itself lives in result_slot.jsx and is shared
 // with the viewer/display scoreboard, so the two surfaces cannot drift; this
-// only adds the editor's "is this the side that won the hantei" test.
+// adds the editor's "is this the side that won the hantei" test.
+//
+// It also DELIBERATELY discards resultSlot's `loose` (both slots full). That is
+// a decision, not an oversight: unlike the read-only scoreboard, which would
+// otherwise lose the result and so renders a loose mark, this editor always
+// mounts a second channel for the verdict — daihyosenHanteiArmed is seeded from
+// the stored decision, so the hantei row shows the winning side's button as
+// primary regardless. And 2-2 is unreachable through the ippon buttons anyway
+// (MAX_IPPONS_PER_SIDE plus isBoutDecided disable both sides at 2), so only
+// drifted stored data reaches it. Rendering a third slot-shaped chip here would
+// claim an ippon that does not exist.
 export function hanteiSlot(isWinner, pts) {
   if (!isWinner) return -1;
   return resultSlot(pts).slot;
@@ -1951,29 +1961,32 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             // Sub-bout is decided once either side reaches 2 ippons.
             const subBoutDecided = isBoutDecided(s.aPts, s.bPts);
 
-            // Always a side key ("a"/"b") or "", never a bare false, so the
-            // comparisons below are string-to-string.
-            const dhHantei = (isDaihyoRow && daihyosenTied && daihyosenHantei) || "";
-            const htSlotB = hanteiSlot(dhHantei === "b", rowSides[0].pts);
-            const htSlotA = hanteiSlot(dhHantei === "a", rowSides[1].pts);
+            // The side key ("a"/"b") that won the hantei on this row, else "".
+            const dhHantei = isDaihyoRow && daihyosenTied ? daihyosenHantei : "";
             // Clicking the Ht undoes the hantei, the same way clicking a point
             // removes it: a mis-entered referee decision must be correctable
             // without leaving the row.
             const clearHantei = () => { setDaihyosenHanteiArmed(false); setDaihyosenHantei(""); };
-            // One shape for both sides: they differ only in slot ORDER (aka
-            // renders reversed so each side's first ippon stays on its name
-            // side) and in which slot, if any, carries the Ht.
-            const ptSlots = (rs, htSlot, testid, order) => order.map(i => {
-              const isHt = htSlot === i;
-              return (
-                <button key={i} className={`editor-side__pt ${(isHt || rs.pts[i]) ? "editor-side__pt--filled" : ""}`}
-                  data-testid={isHt ? testid : undefined}
-                  onClick={() => (isHt ? clearHantei() : rs.setPts(rs.pts.filter((_, j) => j !== i)))}
-                  title={isHt ? "Hantei winner: click to undo" : "Click to remove"}>
-                  {isHt ? "Ht" : (rs.pts[i] || "·")}
-                </button>
-              );
-            });
+            // One shape for both sides. Everything that differs is derived from
+            // the side itself rather than passed in, so a caller cannot pair a
+            // side with the other side's slot index or testid: aka renders its
+            // pair reversed (so each side's first ippon stays on its name side),
+            // and only the hantei winner carries an Ht.
+            const ptSlots = (rs) => {
+              const htSlot = hanteiSlot(dhHantei === rs.key, rs.pts);
+              const order = rs.color === "aka" ? [1, 0] : [0, 1];
+              return order.map(i => {
+                const isHt = htSlot === i;
+                return (
+                  <button key={i} className={`editor-side__pt ${(isHt || rs.pts[i]) ? "editor-side__pt--filled" : ""}`}
+                    data-testid={isHt ? `team-daihyosen-ht-${rs.color}` : undefined}
+                    onClick={() => (isHt ? clearHantei() : rs.setPts(rs.pts.filter((_, j) => j !== i)))}
+                    title={isHt ? "Hantei winner: click to undo" : "Click to remove"}>
+                    {isHt ? "Ht" : (rs.pts[i] || "·")}
+                  </button>
+                );
+              });
+            };
 
             // The centre carries the SINGLE-SOURCE boutMiddle projection only
             // (vs/X/(E)/(DH)) — never restated here, and never a result mark or
@@ -2091,7 +2104,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                                 opponent and clears this. (FIK Table 2, p.16 Taisho
                                 row; running_a_kendo_tournament.md: ▲ next to name.) */}
                             {rowSides[0].fouls >= 1 && <span className="tsm-foul-tri" title="Hansoku: 1 foul">▲</span>}
-                            {ptSlots(rowSides[0], htSlotB, "team-daihyosen-ht-shiro", [0, 1])}
+                            {ptSlots(rowSides[0])}
                           </div>
                           <div className={`team-sub-match__score ${scoreDisplay && t.winner === "b" ? "team-sub-match__score--a-win" : scoreDisplay && t.winner === "a" ? "team-sub-match__score--b-win" : ""}`}>
                             {scoreDisplay}
@@ -2102,7 +2115,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                                 Aka name, so render the slots in reverse (pts[1] then
                                 pts[0]). The pair itself stays inside, flanking the
                                 centre score (FIK Table 2, p.16). */}
-                            {ptSlots(rowSides[1], htSlotA, "team-daihyosen-ht-aka", [1, 0])}
+                            {ptSlots(rowSides[1])}
                             {/* Outstanding hansoku → red ▲ between the Aka name and
                                 that side's ippon slots, so after the reversed slots. */}
                             {rowSides[1].fouls >= 1 && <span className="tsm-foul-tri" title="Hansoku: 1 foul">▲</span>}

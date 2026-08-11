@@ -95,19 +95,6 @@ func splitPoolNameAndRank(val string) (string, string) {
 	return val[:idx], val[idx+1:]
 }
 
-func parsePoolRank(rankStr string) int64 {
-	if rankStr == "" {
-		return 0
-	}
-	// Remove ordinal suffix (st, nd, rd, th)
-	s := rankStr
-	if len(s) > 2 {
-		s = s[:len(s)-2]
-	}
-	pos, _ := strconv.ParseInt(s, 10, 64)
-	return pos
-}
-
 func CalculateDepth(node *Node) int {
 	if node == nil {
 		return 0
@@ -390,27 +377,31 @@ func ceilDiv(a, b int) int {
 	return (a + b - 1) / b
 }
 
-// TreePageLayout returns the TOTAL number of Excel tree pages for a draw:
-// len(regions) x KnockoutPagesPerCourt (R8), so the page count is always a
-// multiple of the shiaijo count and page (c*p + i) belongs to shiaijo c.
+// KnockoutPageSubtrees returns the subtrees RenderKnockoutPages will print, one
+// per Excel tree page, in page order: len(regions) x KnockoutPagesPerCourt
+// (R8), so the page count is always a multiple of the shiaijo count and page
+// (c*p + i) belongs to shiaijo c.
 //
 // singleTree (the CLI --single-tree flag) forces the whole bracket onto ONE
 // page and wins outright. It used to be silently overridden by the court
 // expansion below it, so "--single-tree" on a 4-court event still printed four
 // pages.
 //
-// It used to compute max(NextPow2(numCourts), pow2(numPlayers/16)), a number
-// that had no relationship to where the tree could actually be cut: on 3 courts
-// it asked for 4 pages and SubdivideTree answered with the whole tree as a
-// trailing duplicate page.
-func TreePageLayout(regions []*Node, singleTree bool) int {
+// This replaced TreePageLayout, which returned the page COUNT from the same
+// inputs. Once RenderKnockoutPages needed the subtrees themselves it derived
+// them inline and stopped calling the count function, which left the count
+// function with no production caller and the tests asserting against a formula
+// nothing shipped. A test that pins --single-tree has to pin the path that
+// actually prints the pages, or the flag can break in the renderer with the
+// suite still green.
+func KnockoutPageSubtrees(draw *KnockoutDraw, singleTree bool) []*Node {
+	if draw == nil || draw.Root == nil {
+		return nil
+	}
 	if singleTree {
-		return 1
+		return []*Node{draw.Root}
 	}
-	if len(regions) == 0 {
-		return 1
-	}
-	return len(regions) * KnockoutPagesPerCourt(regions)
+	return SubdivideRegions(draw.Regions, KnockoutPagesPerCourt(draw.Regions))
 }
 
 func GetOrdinal(n int) string {

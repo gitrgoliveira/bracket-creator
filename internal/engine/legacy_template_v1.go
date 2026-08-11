@@ -268,7 +268,7 @@ func v1TreeAdjustment(node *v1Node) {
 	}
 }
 
-// v1PoolRank is helper.splitPoolNameAndRank + parsePoolRank: the numeric rank in
+// v1PoolRank is helper.splitPoolNameAndRank plus an ordinal parse: the numeric rank in
 // a "Pool A-1st" label, 0 when there is none.
 func v1PoolRank(val string) int64 {
 	idx := strings.LastIndex(val, "-")

@@ -106,7 +106,7 @@ type drawShapeCase struct {
 	// oversized pools' winners, then remaining winners, then crossed-in ranks).
 	Byes []string `json:"byes"`
 
-	// NumPages is TreePageLayout(regions, false) = DrawCourts x {1,2,4}.
+	// NumPages is what RenderKnockoutPages prints: DrawCourts x {1,2,4}.
 	// NumPagesRendered is len(SubdivideRegions(...)), what the workbook
 	// actually gets. R8 makes them equal in every case; a case where they
 	// diverge is a bug, not a recorded quirk.
@@ -302,7 +302,7 @@ func buildDrawShapeCase(numPools, poolWinners, courts int) drawShapeCase {
 		}
 	}
 
-	c.NumPages = TreePageLayout(draw.Regions, false)
+	c.NumPages = len(KnockoutPageSubtrees(draw, false))
 
 	// RenderTreePages drives both court labelling and the roster overlay off
 	// len(subtrees), NOT off the requested page count, so the golden does too.

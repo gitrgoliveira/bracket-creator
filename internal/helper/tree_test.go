@@ -2,6 +2,7 @@ package helper
 
 import (
 	"fmt"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -902,9 +903,22 @@ func leafPool(val string) string {
 	return name
 }
 
+// leafRank is the numeric finishing rank in a placeholder ("Pool A-2nd" -> 2),
+// 0 when there is no rank. It lives here because nothing in production reads a
+// rank back out of a label any more: the draw carries drawOccupant.rank
+// alongside the label, so parsing one was only ever the tests' way of asking.
+// (internal/engine/legacy_template_v1.go keeps its own frozen copy on purpose.)
 func leafRank(val string) int64 {
 	_, rankStr := splitPoolNameAndRank(val)
-	return parsePoolRank(rankStr)
+	if rankStr == "" {
+		return 0
+	}
+	// Drop the ordinal suffix (st, nd, rd, th).
+	if len(rankStr) > 2 {
+		rankStr = rankStr[:len(rankStr)-2]
+	}
+	pos, _ := strconv.ParseInt(rankStr, 10, 64)
+	return pos
 }
 
 // collectOrderedLeaves returns leaf values in left-to-right (top-to-bottom) order.

@@ -292,9 +292,8 @@ func TestTreePageCountIsAMultipleOfTheShiaijoCount(t *testing.T) {
 					assert.Contains(t, []int{1, 2, 4}, pagesPerCourt,
 						"a shiaijo gets 1, 2 or 4 pages, never anything else (R8)")
 
-					pages := SubdivideRegions(draw.Regions, pagesPerCourt)
+					pages := KnockoutPageSubtrees(draw, false)
 					assert.Len(t, pages, draw.NumCourts()*pagesPerCourt)
-					assert.Equal(t, TreePageLayout(draw.Regions, false), len(pages))
 
 					// No page reprints a match another page already carries.
 					seen := map[string]int{}
@@ -321,8 +320,12 @@ func TestTreePageLayoutSingleTree(t *testing.T) {
 	draw := BuildKnockoutDraw(pools, 2, 4)
 	require.NotNil(t, draw)
 
-	assert.Equal(t, 4, TreePageLayout(draw.Regions, false))
-	assert.Equal(t, 1, TreePageLayout(draw.Regions, true))
+	assert.Len(t, KnockoutPageSubtrees(draw, false), 4)
+
+	single := KnockoutPageSubtrees(draw, true)
+	assert.Len(t, single, 1)
+	assert.Same(t, draw.Root, single[0],
+		"the one page must be the WHOLE bracket, not a region that happens to be first")
 
 	// The one page covers every court, so it names the whole shiaijo range and
 	// overlays every pool rather than claiming to be shiaijo A's.

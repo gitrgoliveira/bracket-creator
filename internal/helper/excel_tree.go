@@ -142,12 +142,7 @@ func RenderKnockoutPages(f *excelize.File, draw *KnockoutDraw, singleTree bool, 
 		return nil, 0, fmt.Errorf("render knockout pages: empty draw")
 	}
 	numCourts := draw.NumCourts()
-	var subtrees []*Node
-	if singleTree {
-		subtrees = []*Node{draw.Root}
-	} else {
-		subtrees = SubdivideRegions(draw.Regions, KnockoutPagesPerCourt(draw.Regions))
-	}
+	subtrees := KnockoutPageSubtrees(draw, singleTree)
 	if err := RenderTreePages(f, subtrees, numCourts, pools, poolCoords, playerCoords, matchWinners); err != nil {
 		return nil, 0, err
 	}

@@ -7,14 +7,18 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-// Playoff elimination-skeleton leaf derivation, shared by both workbook builders
-// so a pure-playoffs competition (no pools, so the pool-fed draw returns
-// nothing) still renders a bracket. The results export (internal/export) overlays
-// scores onto these leaves; the blank-template export (Engine.ExportCompetitionXlsx)
-// prints them empty. Both MUST derive leaves the same way or the two exports of one
-// competition would disagree (mp-ndfu). This lives in engine, the layer that owns
-// bracket generation, because internal/export already imports engine (the reverse
-// import would be a cycle).
+// Playoff elimination-skeleton derivation, shared by both workbook builders so a
+// pure-playoffs competition (no pools, so the pool-fed draw returns nothing)
+// still renders a bracket. The results export (internal/export) overlays scores
+// onto it; the blank-template export (Engine.ExportCompetitionXlsx) prints it
+// empty. Both MUST derive it the same way or the two exports of one competition
+// would disagree (mp-ndfu). This lives in engine, the layer that owns bracket
+// generation, because internal/export already imports engine (the reverse import
+// would be a cycle).
+//
+// EliminationDraw is the entry point both builders call. EliminationLeaves was
+// that entry point until the court regions were needed as well as the leaf
+// order; it is now a step inside it.
 
 // isPurePlayoffs reports whether comp runs a standalone elimination bracket with
 // no pool phase -- the case where the pool-fed draw yields nothing and the
@@ -26,11 +30,17 @@ func isPurePlayoffs(comp *state.Competition, pools []helper.Pool) bool {
 }
 
 // EliminationLeaves returns the elimination-tree leaf order for a competition's
-// knockout phase. It is the single owner of the leaf derivation so the blank-
-// template export (Engine.ExportCompetitionXlsx) and the results export
-// (internal/export) of one competition always render the identical bracket
-// (mp-ndfu) -- the invariant that prose-synchronized copies in the two callers
-// used to risk drifting.
+// knockout phase.
+//
+// Its only caller today is EliminationDraw, which owns the "both exports render
+// the identical bracket" invariant (mp-ndfu) that this function used to own. It
+// stays exported and keeps its own pool-fed branch rather than being folded in,
+// because that branch is what makes the function total for any caller: reached
+// through EliminationDraw the branch cannot fire, since EliminationDraw only
+// calls this after its own poolDraw returned nil and poolDraw's result does not
+// depend on the court count either call passes. Called directly it still answers
+// correctly for a pooled competition. Do not "simplify" it away on the strength
+// of the current single call site.
 //
 // Pooled formats (Mixed), and the League case the IsPlayoffEnabled gate later
 // drops, come straight from the court-first draw over the pool winners.

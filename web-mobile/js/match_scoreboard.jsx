@@ -15,6 +15,7 @@
 
 import { resolveMatchLineup, resolveLineupTeamId, pickFromLineup, resolveBoutSideName, kachinukiHidesLineupPosition } from './lineup_resolver.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
+import { resultSlot } from './result_slot.jsx';
 
 const { useState: useSB, useEffect: useEB } = React;
 
@@ -197,32 +198,29 @@ function centreMarks(sub, matchSideA, matchSideB) {
   // Fallback chain: sub-level side → daihyosen team alias → match-level side
   // (quick-score sub-bouts have empty sub.sideA/sideB).
   const noIppons = !lettersB.some(Boolean) && !lettersA.some(Boolean);
-  const winnerIsShiro = !!(sub.winner &&
-    (sub.winner === sub.sideB || sub.winner === sub.teamB || (matchSideB && sub.winner === matchSideB)));
-  const winnerIsAka = !!(sub.winner &&
-    (sub.winner === sub.sideA || sub.winner === sub.teamA || (matchSideA && sub.winner === matchSideA)));
   // A hantei ALWAYS names a winner and is decided from a TIED scoreline
   // (validation.go: "requires winner to be set" + "requires a tied scoreline"),
-  // so it is not gated on noIppons: sanbon-shobu ends at 2, so the only tied
-  // hantei scores are 0-0 and 1-1 and the winner always has a free slot. The
-  // maru pair for an ippon-less default win (fusensho/kiken/bye) still is
-  // gated, because there the empty letters are what make room for it.
-  const winShiro = sub.decidedByHantei ? winnerIsShiro : (noIppons && winnerIsShiro);
-  const winAka = sub.decidedByHantei ? winnerIsAka : (noIppons && winnerIsAka);
-  // Ht behaves like a point: it fills the winner's next FREE slot in the same
-  // outside-to-inside order a point would (0-0 → the outer slot, 1-1 → the
-  // inner one, giving [K][ ] vs [Ht][M]), so it always rides beside the
-  // competitor it names. `loose` is the degenerate guard for data with no free
-  // slot; it renders inboard of that side's slots, still never in the centre.
+  // so its mark is NOT gated on noIppons: a 1-1 hantei after encho is the
+  // normal case, and its slots already hold letters. The maru pair for an
+  // ippon-less default win (fusensho/kiken/bye) still is gated, because there
+  // the empty letters are what make room for it.
+  const markable = sub.decidedByHantei || noIppons;
+  const winShiro = !!(markable && sub.winner &&
+    (sub.winner === sub.sideB || sub.winner === sub.teamB || (matchSideB && sub.winner === matchSideB)));
+  const winAka = !!(markable && sub.winner &&
+    (sub.winner === sub.sideA || sub.winner === sub.teamA || (matchSideA && sub.winner === matchSideA)));
+  // Ht behaves like a point and rides beside the competitor it names; the slot
+  // it takes is the shared rule in result_slot.jsx (which the team editor uses
+  // too), so it is not restated here. `loose` means both slots were full, and
+  // the mark then renders inboard of them rather than being dropped.
   const resultCells = (letters) => {
     if (!sub.decidedByHantei) {
       return { cells: window.defaultWinMaru ? window.defaultWinMaru(sub.encho) : ["○", "○"], loose: false };
     }
-    const cells = [letters[0] || "", letters[1] || ""];
-    const free = cells.findIndex(v => !v);
-    if (free === -1) return { cells, loose: true };
-    cells[free] = "Ht";
-    return { cells, loose: false };
+    const cells = letters.slice(0, 2);
+    const { slot, loose } = resultSlot(cells);
+    if (!loose) cells[slot] = "Ht";
+    return { cells, loose };
   };
   const shiroRes = winShiro ? resultCells(lettersB) : null;
   const akaRes = winAka ? resultCells(lettersA) : null;

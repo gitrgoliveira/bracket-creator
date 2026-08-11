@@ -4809,13 +4809,11 @@ button.pool-match-row {
    Modern browsers get the subgrid alignment; old ones get the pre-change flex
    layout (mp-gmcg review F8).
 
-   This is the operator console, which runs on a tablet (iPad Air class or an
-   equivalent Android tablet) or a laptop — see the "Devices and screens" table
-   in docs/user-guide/start-here/choosing-your-setup.md for the full set of
-   screens this app targets, which also covers court and lobby displays and
-   spectator phones. A current tablet or laptop clears the subgrid bar; the
-   fallback exists for older or locked-down venue hardware, and it is the one
-   path where the ippon slots do NOT hug the centre. */
+   The operator console targets current tablets and laptops, which clear the
+   subgrid bar (see the "Devices and screens" table in
+   docs/user-guide/start-here/choosing-your-setup.md); the fallback covers older
+   or locked-down venue hardware and is the one path where the ippon slots do
+   NOT hug the centre. */
 @supports (grid-template-rows: subgrid) {
   .sb-match:has(.sb-slots) {
     grid-template-rows: 1fr auto auto auto auto 1fr;

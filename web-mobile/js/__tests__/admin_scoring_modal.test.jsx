@@ -1293,32 +1293,18 @@ describe('isKoTieBlocked (Finish gate for knockout ties)', () => {
 });
 
 
-describe('hanteiSlot (Ht rides beside the competitor, never in the centre)', () => {
-  // Operator ruling: there must be no centre hantei. Ht names ONE competitor,
-  // so it behaves like a point and fills that side's next FREE slot. The twin
-  // of resultCells in match_scoreboard.jsx.
+describe('hanteiSlot (the editor\'s winner test over the shared slot rule)', () => {
+  // The placement rule itself is pinned in result_slot.test.jsx, shared with
+  // the viewer/display scoreboard. This only covers what the editor adds: a
+  // side that did not win the hantei carries no mark.
   it('returns -1 for a side that did not win the hantei', () => {
     expect(hanteiSlot(false, [])).toBe(-1);
     expect(hanteiSlot(false, ['M'])).toBe(-1);
   });
 
-  it('takes the outer slot on a 0-0 daihyosen (the normal case)', () => {
-    // A daihyosen is one-point sudden death, so a tied one is 0-0 and both
-    // slots are free: Ht lands in slot 0, the outer/name-side one.
-    expect(hanteiSlot(true, [])).toBe(0);
-  });
-
-  it('takes the free INNER slot when a point was already struck', () => {
-    // Mirrors the 1-1 scoreboard case: the letter keeps its outer slot and Ht
-    // fills inward, giving [K][ ] vs [Ht][M] on the shared scoreboard.
-    expect(hanteiSlot(true, ['K'])).toBe(1);
-  });
-
-  it('returns -1 when both slots are full, so nothing overwrites a point', () => {
-    expect(hanteiSlot(true, ['K', 'M'])).toBe(-1);
-  });
-
-  it('tolerates a missing pts array', () => {
-    expect(hanteiSlot(true, undefined)).toBe(0);
+  it('delegates to the shared rule for the winning side', () => {
+    expect(hanteiSlot(true, [])).toBe(0);       // 0-0 → outer slot
+    expect(hanteiSlot(true, ['K'])).toBe(1);    // 1-1 → free inner slot
+    expect(hanteiSlot(true, ['K', 'M'])).toBe(-1); // full → nothing overwritten
   });
 });

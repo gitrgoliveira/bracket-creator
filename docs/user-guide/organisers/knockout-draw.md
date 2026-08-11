@@ -8,7 +8,7 @@ It describes the **Mixed** format, pools followed by a knockout. A knockout-only
 
 ## Shiai-jo blocks
 
-Each shiai-jo gets its own block of the bracket, and it gets exactly one. Pools are allocated to shiai-jo in order: the first pools to shiai-jo A, the next to B, and so on. The qualifiers from those pools fill that shiai-jo's block. On fewer than four shiai-jo that block is subdivided further, so the draw keeps the shape it would have on four; see [One or two shiai-jo](#one-or-two-shiai-jo).
+Each shiai-jo gets its own block of the bracket, and it gets exactly one. Pools are allocated to shiai-jo in order: the first pools to shiai-jo A, the next to B, and so on. The qualifiers from those pools fill that shiai-jo's block. On fewer than four shiai-jo, and with two or more qualifiers per pool, that block is subdivided further so the draw keeps the shape a larger competition would have; see [One or two shiai-jo](#one-or-two-shiai-jo).
 
 A block is a real branch of the bracket, not just a run of names printed next to each other. Everything inside a block plays itself out and produces one survivor, and that survivor then meets the survivor of another block. This is what makes a shiai-jo's pages self-contained: an official running shiai-jo C can pick up the pages for shiai-jo C, and every match printed on them belongs to shiai-jo C.
 
@@ -38,15 +38,16 @@ Winners stay, runners-up cross to the partner, and the third qualifier crosses t
 
 Beyond three qualifiers per pool the same rotation continues, but a draw only has four quarters, so from the fifth qualifier onward two of a pool's qualifiers must share one. The draw still separates them as far as it can.
 
-There is one shape where that happens a step early, and it needs a very small competition to reach: **three pools, with four qualifiers from each**. Four quarters need four blocks, and a block always has to own at least one pool, so a three-pool competition has only two blocks to work with. Each of them then receives two qualifiers from every pool, and there is no way to give all three pools a quarter each without handing out first-round byes that a block of that size is not due. One pool keeps two of its qualifiers in one quarter; they can still meet no earlier than that quarter's own final. From four pools upwards the question does not arise.
 
 ### One or two shiai-jo
 
-A competition on fewer than four shiai-jo does not get a simpler draw, it gets the same one. Its pools are split in two, and each of those in two again, until the bracket is divided into **four blocks that act as partner shiai-jo**: winners stay in their own block, runners-up cross to its partner, and a third or fourth qualifier crosses to one of the other two, exactly as they would on four real shiai-jo. On two shiai-jo each shiai-jo owns two of those blocks; on one shiai-jo the single shiai-jo owns all four.
+From two qualifiers per pool upwards, a competition on fewer than four shiai-jo does not get a simpler draw. Its pools are split in two, and where there are enough qualifiers each of those in two again, until the bracket is divided into **blocks that act as partner shiai-jo**: winners stay in their own block, runners-up cross to its partner, and a third or fourth qualifier crosses to one of the other two, exactly as they would on four real shiai-jo. On two shiai-jo each shiai-jo owns its share of those blocks; on one shiai-jo the single shiai-jo owns all of them.
 
-So a competition has the same draw whether it runs on one shiai-jo or on four, with the same first-round matches and the same byes. What the shiai-jo count changes is only which piece of the bracket is printed as a shiai-jo's own pages.
+A one-shiai-jo competition and a two-shiai-jo one with the same pools and the same number of qualifiers therefore get the same draw, with the same first-round matches and the same byes. Against four shiai-jo the match is close but not exact, because pools are allocated to shiai-jo before the draw is built and that allocation does not always divide the same way; six, ten or fourteen pools split five and five across two shiai-jo but three, three, two and two across four, which puts a different pool in the first half.
 
-Two things limit the splitting. Every block must hold at least one pool of its own, or it would have no pool winner to give its bye to, so a competition with two or three pools stops at two blocks. And the splitting is done by repeated halving rather than by cutting the pool list into four in one go, so that the two halves of the draw stay the ones a two-shiai-jo competition would have.
+Two things limit the splitting. A block is only split again while every block would still hold two competitors on average, because a block left holding a single competitor gives that competitor a bye whatever the order below says, and a bye handed out by the shape of the split rather than chosen is not one the draw should be creating. And the splitting is done by repeated halving rather than by cutting the pool list into four in one go, so that the two halves of the draw stay the ones a two-shiai-jo competition would have.
+
+At **one qualifier per pool** nothing is split at all. Nothing crosses between shiai-jo when each pool sends up a single competitor, so there is no partner structure to imitate, and each shiai-jo's block is left whole. That also lets the bye be chosen from every pool winner on that shiai-jo rather than from whichever half the split happened to leave with an odd number.
 
 Partnering is also part of why the number of shiai-jo a competition uses is restricted. That restriction has its own section below: [How many shiai-jo a competition can use](#how-many-shiai-jo-a-competition-can-use).
 
@@ -87,7 +88,7 @@ Where a block has a bye, it goes to a pool winner, in this order:
 
 The second criterion is fatigue compensation. In a round-robin pool of four, a competitor fights three matches to qualify, where a pool of three fights two. A knockout bye evens out both the total match count and the rest between matches. It ranks below seeding because seeding protects the competitive shape of the draw, which matters more.
 
-Every block holds at least one pool winner, because a competition is never drawn onto more shiai-jo than it has pools. A bye can still pass down to a crossed-in qualifier, though, because keeping a pool's own qualifiers apart outranks this order. Where the bye lands in a part of the block that holds no pool winner, it goes to the best crossed-in qualifier there instead: runners-up first, ranked by their own pool's place in the list above, then third qualifiers.
+A block does not have to hold a pool winner. From two qualifiers per pool upwards there are more qualifiers than there are pools, so a block can be filled entirely by qualifiers that crossed in from other shiai-jo. Its bye then goes to the best of those instead: runners-up first, ranked by their own pool's place in the list above, then third qualifiers. The same thing happens where a bye lands in a part of a block that holds no pool winner, and it can also happen because keeping a pool's own qualifiers apart outranks this order.
 
 In later rounds, a block with an odd number of survivors produces a bye there too. That one falls to whichever match winner reaches the empty slot, so there is nothing to allocate and nothing for you to choose.
 

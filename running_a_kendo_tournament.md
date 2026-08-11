@@ -182,7 +182,9 @@ FIK Article 7-3 also lists **chusen** (drawing lots) as a possible resolution me
 
 ### Hantei (Judges' Decision)
 
-If a match remains tied after encho (or after multiple encho periods, depending on tournament rules), the three referees make a **hantei**, upon the shushin's call, all three simultaneously raise a flag for the competitor they judge performed better (FIK Article 29-6). The competitor chosen by at least two of the three referees wins. FIK Article 7-5 specifies two criteria in order of precedence: first, **skill** (whether a competitor made datotsu nearly equal to yuko-datotsu), then **attitude** (superiority in posture and movement). There is no draw in hantei, one side must be chosen.
+When a match must produce a winner and is tied, the three referees make a **hantei**, upon the shushin's call, all three simultaneously raise a flag for the competitor they judge performed better (FIK Article 29-6). The competitor chosen by at least two of the three referees wins. FIK Article 7-5 specifies two criteria in order of precedence: first, **skill** (whether a competitor made datotsu nearly equal to yuko-datotsu), then **attitude** (superiority in posture and movement). There is no draw in hantei, one side must be chosen.
+
+**Hantei does not require encho, and does not require a daihyosen.** The usual path is encho first and hantei only if that is still tied, and many tournaments run it that way, but neither is a precondition: a tied match may be taken straight to a judges' decision. The app enforces only what the rule actually needs, a tied scoreline and a declared winner, so hantei is available at 0-0 or 1-1 with or without an overtime period. (In a **team** match the app does restrict it to the representative bout, because a tied individual bout there is simply a hikiwake and needs no decision.)
 
 The scoreboard marks the hantei winner with **Ht** on their side. **Ht** is **not** an ippon and is not one of the M/K/D/T/H scoring letters, it records that the referees' decision **settled the match**, determining the winner outright. Do not confuse **Ht** (hantei, which decides the match) with **H** (the hansoku ippon described under [Penalties](#penalties-hansoku)).
 
@@ -323,7 +325,7 @@ After all pool matches are played, a results table summarises each competitor's 
 
 ### Elimination Match Scoreboard
 
-Each individual elimination match is a self-contained block. There are no draws, if tied at time-up, encho is played, and if still tied, hantei decides.
+Each individual elimination match is a self-contained block. There are no draws: if tied at time-up, encho is normally played and hantei decides if that is still tied, though a tied match may also go straight to hantei.
 
 | Row | Name (left) | | | vs | | | Name (right) |
 |---|---|---|---|---|---|---|---|
@@ -360,7 +362,7 @@ For **team elimination matches**, the block expands with sub-bout rows and a sum
 
 1. **Within regulation time**: first to 2 points wins (sanbon-shobu), or the competitor leading at time-up wins.
 2. **Draw in pools**: if the score is level (0–0 or 1–1) at time-up, it is a hikiwake.
-3. **Draw in knockout**: encho is played. If still tied after encho, **hantei** decides the winner.
+3. **Draw in knockout**: encho is normally played, and **hantei** decides if it is still tied. Encho is not a precondition, a tied match may be taken straight to hantei.
 
 ## Pool Match Order
 

@@ -26,9 +26,9 @@ import (
 // fix-up passes over a structure that could not express the rule: below four
 // shiaijo the draw plan had only TWO blocks, so the quarter boundary fell
 // INSIDE a block and the routing could not aim at it. Subdividing the pool set
-// to four blocks at every shiaijo count (planBlocks) makes the quarters real
-// and takes the count to 6, all of them at the one pool count too small to
-// carry four blocks.
+// (planBlocks) puts the quarters where routing can see them, and capping that
+// subdivision by the OCCUPANT count rather than the pool count takes the last
+// 6 residuals with it.
 
 // leafQuarterPaths returns, for each non-empty leaf label under root, the path
 // from the root as a slice of child indices (0 = Left, 1 = Right).

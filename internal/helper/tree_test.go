@@ -1265,12 +1265,13 @@ func TestByesGoToPoolWinners(t *testing.T) {
 // drawByeUnits returns the subtrees D4's bye arithmetic applies to: the draw's
 // BLOCKS.
 //
-// At four or more shiaijo a block is a shiaijo's region, which is why D4 was
-// first written in terms of a region. Below four the pool set is subdivided
-// further (planBlocks) into two or four blocks that act as partner courts, each
-// its own ladder with its own greedy layer and its own structural bye, and a
-// printable region is their parent. Reading the arithmetic off a region there
-// would count two blocks' byes against one block's parity.
+// A block is usually a shiaijo's region, which is why D4 was first written in
+// terms of a region. Where planBlocks subdivides (1 or 2 shiaijo carrying
+// enough qualifiers to fill four blocks), the pool set is cut into two or four
+// blocks that act as partner courts, each its own ladder with its own greedy
+// layer and its own structural bye, and a printable region is their parent.
+// Reading the arithmetic off a region there would count two blocks' byes
+// against one block's parity.
 func drawByeUnits(draw *KnockoutDraw) []*Node {
 	return draw.blocks
 }
@@ -1358,11 +1359,11 @@ func TestBlockByeNeverSkipsAHigherFinisher(t *testing.T) {
 // phantom match that is never printed. Recursive halving disagrees from q=6 up
 // (it would give 2 matches and 2 byes where greedy gives 3 and 0).
 //
-// The block is the unit, not the printable region: at four or more shiaijo the
-// two coincide, and below four a region spans two or four blocks that each
-// carry their own greedy layer. The sweep runs past the 4 qualifiers the shape
-// golden covers, to 6, where a block holds several qualifiers of one pool on
-// FOUR shiaijo as well as on one or two.
+// The block is the unit, not the printable region: the two coincide wherever
+// the pool set is not subdivided, and where it is, a region spans two or four
+// blocks that each carry their own greedy layer. The sweep runs past the 4
+// qualifiers the shape golden covers, to 6, where a block holds several
+// qualifiers of one pool on FOUR shiaijo as well as on one or two.
 func TestBlockByeCountIsQMod2(t *testing.T) {
 	for _, numCourts := range []int{1, 2, 4} {
 		for nPools := 1; nPools <= 12; nPools++ {

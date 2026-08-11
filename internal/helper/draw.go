@@ -56,9 +56,11 @@ type KnockoutDraw struct {
 	Root    *Node
 	Regions []*Node
 
-	// blocks is the partition Regions are assembled from, in block order (see
-	// planBlocks): at four or more shiaijo it is Regions itself, and below four
-	// it is the two or four sub-blocks each region spans. It is D4's unit -- the
+	// blocks is the partition Regions are assembled from, in block order. It
+	// equals Regions wherever planBlocks does not subdivide (every count from
+	// four shiaijo up, and below that whenever there are too few qualifiers to
+	// cut finer); where it does, each region spans two or four of these. It is
+	// D4's unit -- the
 	// greedy layer and its one named bye belong to a block, not to a printable
 	// region -- so the bye arithmetic is checked against this rather than
 	// against Regions. Unexported because no caller outside the draw needs the
@@ -144,10 +146,11 @@ func BuildKnockoutDrawFromAssignment(pools []Pool, poolWinners int, poolCourt []
 	plan := newDrawPlan(pools, poolCourt, poolWinners, numCourts)
 	occupants := plan.route(pools, poolWinners)
 
-	// One subtree per BLOCK. A block is a shiaijo at four or more shiaijo; on 1
-	// or 2 the pool set is subdivided further (planBlocks) into half-blocks that
-	// act as partner courts, so the block tree -- and the draw's shape -- is the
-	// same whether an event runs on 1 court or four.
+	// One subtree per BLOCK. A block is usually a shiaijo's region; on 1 or 2
+	// shiaijo with enough qualifiers to fill them, planBlocks cuts the pool set
+	// into half-blocks that act as partner courts, so the block tree -- and with
+	// it the draw's shape -- is as far as possible the same object whatever the
+	// shiaijo count (R4(e); D8 records where that stops being true).
 	blockRoots := make([]*Node, plan.numBlocks)
 	for b := range blockRoots {
 		blockRoots[b] = buildBlock(occupants[b], pools)

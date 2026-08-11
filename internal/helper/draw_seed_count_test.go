@@ -192,3 +192,47 @@ func TestSeedWarningsScaleWithTheSeedCount(t *testing.T) {
 		})
 	}
 }
+
+// TestSeedIndexEqualsRankMinusOne pins the assumption seedCourtOrder rests on.
+//
+// PoolSeeding sorts the seeded players by rank and passes each one's INDEX to
+// seedCourtOrder, whose documentation is written in terms of RANK ("seed 1 -> A,
+// seed 2 -> C"). Those are the same number only because seed ranks are
+// contiguous from 1: domain.ValidateAssignments rejects a gap, so a set is
+// always 1..N.
+//
+// If that rule is relaxed -- and there is a live question about whether a gapped
+// set should draw with a warning rather than be refused -- the two stop
+// coinciding and seeds land in the wrong quarters silently. This test is the
+// tripwire: it fails the moment a gapped set can reach the draw, which is the
+// moment seedCourtOrder must key on the rank instead.
+func TestSeedIndexEqualsRankMinusOne(t *testing.T) {
+	for _, numSeeds := range seedCounts {
+		if numSeeds == 0 {
+			continue
+		}
+		t.Run(fmt.Sprintf("%d_seeds", numSeeds), func(t *testing.T) {
+			pools := seededDrawPoolsN(t, 8, 2, numSeeds)
+
+			ranks := []int{}
+			for _, p := range pools {
+				for _, pl := range p.Players {
+					if pl.Seed > 0 {
+						ranks = append(ranks, pl.Seed)
+					}
+				}
+			}
+			require.Len(t, ranks, numSeeds, "every seed set must survive pool creation")
+
+			seen := map[int]bool{}
+			for _, r := range ranks {
+				assert.Falsef(t, seen[r], "rank %d assigned twice", r)
+				seen[r] = true
+			}
+			for r := 1; r <= numSeeds; r++ {
+				assert.Truef(t, seen[r],
+					"ranks must be contiguous from 1, so a seed's index is its rank minus one; rank %d is missing", r)
+			}
+		})
+	}
+}

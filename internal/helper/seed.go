@@ -439,7 +439,20 @@ func generatePoolPriority(n int) []int {
 // and let them meet in a semifinal rather than the final.
 //
 // Ranks beyond the 4th, and any rank the court count cannot separate, fall back
-// to the round robin: there is no further structure to spread them over.
+// to the round robin: there is no further structure to spread them over. The
+// operator may set ANY number of seeds, zero included (R1); this is a function
+// of one seed's position and never reads the total.
+//
+// i is the seed's INDEX in the rank-sorted list, and every "seed n" above reads
+// it as rank n+1. Those coincide only because seed ranks are contiguous from 1:
+// domain.ValidateAssignments rejects a gap, so a set is always 1..N and
+// index == rank-1 (TestSeedIndexEqualsRankMinusOne pins it).
+//
+// That is load-bearing, not incidental. If the gapless rule is ever relaxed so a
+// gapped set draws with a warning instead of being refused, THIS is what has to
+// change with it: given ranks {1, 2, 4} the index of rank 4 is 2, so it would be
+// placed in rank 3's quarter and the draw would no longer be the one those seeds
+// describe. Key on p.Seed-1 rather than the loop index at that point.
 func seedCourtOrder(i, numCourts int) int {
 	if numCourts < 2 || i >= 4 {
 		return i % numCourts

@@ -35,29 +35,9 @@ import {
 
 import { SyncStatusPill, useDebouncedRunningWrite } from './admin_scoring_autosave.jsx';
 
-import { TeamScoreEditorModal, hanteiSlot } from './admin_scoring_team.jsx';
+import { TeamScoreEditorModal, hanteiSlot, hanteiWinnerKey } from './admin_scoring_team.jsx';
 import { EngiScoreEditorModal } from './admin_scoring_engi.jsx';
 
-// hanteiWinnerKey: which side ("a"/"b"/"") a recorded hantei verdict names.
-// Id-first (the server's authoritative identity), name fallback only when the
-// name distinguishes the sides — a same-name pair with no usable ids returns
-// "" so neither side is marked, mirroring the shared scoreboard's
-// unattributable-winner rule. Exported for tests (mounting the modal is
-// avoided: vitest.setup.js stubs its hooks).
-export function hanteiWinnerKey(m) {
-  if (!m?.winner) return "";
-  const wId = m.winner?.id || "";
-  const aId = m.sideA?.id || "";
-  const bId = m.sideB?.id || "";
-  if (wId && aId && wId === aId && wId !== bId) return "a";
-  if (wId && bId && wId === bId && wId !== aId) return "b";
-  if (wId && (aId || bId)) return ""; // id present but matches neither/both
-  const nameOf = (v) => (v && typeof v === "object" ? v.name : v) || "";
-  const wn = nameOf(m.winner), an = nameOf(m.sideA), bn = nameOf(m.sideB);
-  if (wn && wn === an && wn !== bn) return "a";
-  if (wn && wn === bn && wn !== an) return "b";
-  return "";
-}
 
 export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, onAfterDecision, prevMatch, nextMatch, onPrev, onNext, password, selfReport, variant = "modal", canClose = true }) {
   const m = match;
@@ -663,14 +643,18 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                           // winner's free slot, via the same hanteiSlot the
                           // team editor uses (which delegates to resultSlot,
                           // the one owner of which-slot) — no inline
-                          // restatement of the rule. Tie-gated on the CURRENT
-                          // pts like the scoreboard's markable: a drifted
+                          // restatement of the rule. Gated on the LIVE
+                          // decidedByHantei too, so cancelling the recorded
+                          // verdict clears the chip with it (recordedHtKey
+                          // alone kept a stale, clickable Ht after Cancel).
+                          // Tie uses the •-filtered aTotal/bTotal — the
+                          // component's one count rule — matching the
+                          // scoreboard's realIppons gate; a drifted
                           // decidedByHantei on an untied line shows letters
                           // plainly here too. Display only: the slots are
-                          // already disabled once a hantei is recorded, and
-                          // undo remains the re-edit flow.
-                          const tied = aPts.length === bPts.length;
-                          const htSlot = hanteiSlot(tied && recordedHtKey === s.key, s.pts);
+                          // disabled while the hantei stands.
+                          const htSlot = hanteiSlot(
+                            decidedByHantei && aTotal === bTotal && recordedHtKey === s.key, s.pts);
                           return [0, 1].map((i) => {
                             const isHt = htSlot === i;
                             return (
@@ -803,9 +787,14 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                   )}
                   {decidedByHantei && (
                     <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+                      {/* The recorded side renders primary, like the team
+                          panel: this row is the verdict's second channel, so
+                          it must SHOW the verdict, not just offer buttons —
+                          on a drifted 2-2 the dropped loose mark makes this
+                          highlight the only place the side is visible. */}
                       <button
                         type="button"
-                        className="btn btn--sm"
+                        className={`btn btn--sm ${recordedHtKey === "b" ? "btn--primary" : ""}`}
                         data-testid="scoring-modal-hantei-shiro"
                         onClick={() => submitHantei("b")}
                         disabled={submitting || decisionSubmitting}
@@ -814,7 +803,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                       </button>
                       <button
                         type="button"
-                        className="btn btn--sm"
+                        className={`btn btn--sm ${recordedHtKey === "a" ? "btn--primary" : ""}`}
                         data-testid="scoring-modal-hantei-aka"
                         onClick={() => submitHantei("a")}
                         disabled={submitting || decisionSubmitting}

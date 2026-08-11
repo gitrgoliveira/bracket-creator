@@ -127,11 +127,30 @@ export function useTeamLineups(match, competition, roundIndex) {
   return { lineupA, lineupB };
 }
 
-// Real ippon letters for a side (drops placeholders), capped at the 2 sanbon
-// slots; pads to exactly 2 so the slot columns always align.
+// realIppons: the ONE "what counts as a recorded ippon" filter (drops empties
+// and the "•" placeholder). Both the display pair below and the hantei tie
+// gate in centreMarks count through it, so they can never read different
+// totals from the same array.
+const realIppons = (arr) => (arr || []).filter(x => x && x !== "•");
+
+// Real ippon letters for a side, capped at the 2 sanbon slots; pads to
+// exactly 2 so the slot columns always align.
 function ipponLetters(arr) {
-  const real = (arr || []).filter(x => x && x !== "•");
+  const real = realIppons(arr);
   return [real[0] || "", real[1] || ""];
+}
+
+// subWinnerSides: does sub.winner name the shiro and/or aka side? The ONE
+// cross-level chain (sub side → daihyosen team alias → match-level side),
+// shared by centreMarks' marks and teamIVPW's IV attribution so the bout rows
+// and the summary row can never disagree about who a winner names. `both`
+// (same-name teams, or drifted mixed-level data) means unattributable:
+// consumers mark/credit neither side by name.
+function subWinnerSides(sub, matchSideA, matchSideB) {
+  const w = sub.winner;
+  const shiro = !!(w && (w === sub.sideB || w === sub.teamB || (matchSideB && w === matchSideB)));
+  const aka = !!(w && (w === sub.sideA || w === sub.teamA || (matchSideA && w === matchSideA)));
+  return { shiro, aka, both: shiro && aka };
 }
 
 // letters[0] is the OUTER ippon (the first point scored), letters[1] the inner.
@@ -215,23 +234,18 @@ function centreMarks(sub, matchSideA, matchSideB) {
   // plainly rather than fabricating a judges'-decision mark. The maru pair
   // for an ippon-less default win (fusensho/kiken/bye) still gates on
   // noIppons, because there the empty letters are what make room for it.
-  // Tied is judged on the RAW recorded ippons, not the display pair:
-  // ipponLetters caps each side at the 2 sanbon slots, so a drifted 3-2 row
-  // would compare as 2-2 and pass the gate it is meant to fail.
-  const realCount = (arr) => (arr || []).filter(x => x && x !== "•").length;
-  const lettersTied = realCount(sub.ipponsA) === realCount(sub.ipponsB);
+  // Tied is judged on the RAW recorded ippons (realIppons), not the display
+  // pair: ipponLetters caps each side at the 2 sanbon slots, so a drifted 3-2
+  // row would compare as 2-2 and pass the gate it is meant to fail.
+  const lettersTied = realIppons(sub.ipponsA).length === realIppons(sub.ipponsB).length;
   const markable = (sub.decidedByHantei && lettersTied) || noIppons;
-  const winnerIsShiro = !!(sub.winner &&
-    (sub.winner === sub.sideB || sub.winner === sub.teamB || (matchSideB && sub.winner === matchSideB)));
-  const winnerIsAka = !!(sub.winner &&
-    (sub.winner === sub.sideA || sub.winner === sub.teamA || (matchSideA && sub.winner === matchSideA)));
-  // A winner matching BOTH sides (two same-name teams meeting: the duplicate
-  // check only rejects same name AND dojo) is unattributable: mark neither
-  // side rather than assert that both won. Mirrors IndividualScore's
-  // `ambiguous` blanking, which the team path previously lacked.
-  const unattributable = winnerIsShiro && winnerIsAka;
-  const winShiro = markable && !unattributable && winnerIsShiro;
-  const winAka = markable && !unattributable && winnerIsAka;
+  // Winner attribution runs through subWinnerSides, the one cross-level chain
+  // shared with teamIVPW. `both` (same-name teams: the duplicate check only
+  // rejects same name AND dojo) is unattributable: mark neither side rather
+  // than assert that both won, mirroring IndividualScore's ambiguous blanking.
+  const wsides = subWinnerSides(sub, matchSideA, matchSideB);
+  const winShiro = markable && !wsides.both && wsides.shiro;
+  const winAka = markable && !wsides.both && wsides.aka;
   // Ht behaves like a point and rides beside the competitor it names; the slot
   // it takes is the shared rule in result_slot.jsx (which the team editor uses
   // too), so it is not restated here. `loose` means both slots were full, and
@@ -331,16 +345,14 @@ export function teamIVPW(subResults, matchSideA, matchSideB) {
     // Mirror Go backend pattern (scoring.go): check match-level side name
     // first, then sub-level side name (guarded against "" == "" false
     // positive). Quick-scored bouts have empty sub-level sides.
-    // A winner naming BOTH sides (two same-name teams) attributes to neither
-    // by name — matchSideA-first would credit every such bout to Aka while
-    // the bout rows (centreMarks' unattributable guard) mark nobody, and the
-    // two halves of one scoreboard would contradict each other. The ippon
-    // comparison below still decides the IV where the letters differ.
-    const winnerNamesBoth = s.winner &&
-      ((matchSideA && s.winner === matchSideA && s.winner === matchSideB) ||
-       (s.sideA && s.sideB && s.winner === s.sideA && s.winner === s.sideB));
-    const isAkaWin = !winnerNamesBoth && s.winner && (s.winner === matchSideA || (s.sideA && s.winner === s.sideA));
-    const isShiroWin = !winnerNamesBoth && s.winner && (s.winner === matchSideB || (s.sideB && s.winner === s.sideB));
+    // IV attribution runs through subWinnerSides — the SAME resolver the bout
+    // rows use — so the summary can never credit a side for a bout the rows
+    // display as unattributable (`both`: same-name teams or drifted
+    // mixed-level data). The ippon comparison below still decides the IV
+    // where the letters differ.
+    const wsides = subWinnerSides(s, matchSideA, matchSideB);
+    const isAkaWin = !wsides.both && wsides.aka;
+    const isShiroWin = !wsides.both && wsides.shiro;
     if (isAkaWin) ivAka++;
     else if (isShiroWin) ivShiro++;
     else if (b > a) ivShiro++;

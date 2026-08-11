@@ -87,6 +87,44 @@ export function hanteiSlot(isWinner, pts) {
   return resultSlot(pts).slot;
 }
 
+// hanteiWinnerKey: which side ("a"/"b"/"") a recorded hantei verdict names.
+// Id-first (the server's authoritative identity), name fallback only when the
+// name distinguishes the sides - a same-name pair with no usable ids returns
+// "" so callers do not guess. Shared by the individual editor's Ht chip and
+// this editor's daihyosen seed, so the exclusive-attribution rule has one
+// owner. Exported for tests.
+export function hanteiWinnerKey(m) {
+  if (!m?.winner) return "";
+  const wId = m.winner?.id || "";
+  const aId = m.sideA?.id || "";
+  const bId = m.sideB?.id || "";
+  if (wId && aId && wId === aId && wId !== bId) return "a";
+  if (wId && bId && wId === bId && wId !== aId) return "b";
+  if (wId && (aId || bId)) return ""; // id present but matches neither/both
+  const nameOf = (v) => (v && typeof v === "object" ? v.name : v) || "";
+  const wn = nameOf(m.winner), an = nameOf(m.sideA), bn = nameOf(m.sideB);
+  if (wn && wn === an && wn !== bn) return "a";
+  if (wn && wn === bn && wn !== an) return "b";
+  return "";
+}
+
+// preserveStoredDaihyosenVerdict: while a stored hantei verdict is
+// UNATTRIBUTABLE (rename drift: the stored winner name no longer matches
+// exactly one current side) and the operator has neither re-picked a side nor
+// cancelled, a correction save must NOT erase it - without this, fixing an
+// unrelated bout score on a reopened encounter silently flipped a hantei win
+// into a hikiwake (pool) or stripped a completed match's winner (knockout).
+// Withdrawal stays explicit (clearHantei un-arms and marks dirty) and
+// re-picking replaces the verdict; only the untouched in-between state passes
+// the server's own fields through verbatim. Returns the overlay or null.
+export function preserveStoredDaihyosenVerdict({ armed, pickedSide, existingDaihyosen }) {
+  if (!armed || pickedSide) return null;
+  if (!existingDaihyosen?.decidedByHantei || !existingDaihyosen.winner) return null;
+  const out = { winner: existingDaihyosen.winner, decidedByHantei: true };
+  if (existingDaihyosen.encho) out.encho = existingDaihyosen.encho;
+  return out;
+}
+
 // mp-bkg / mp-13y: resolveMatchLineup and resolveLineupTeamId are now shared
 // across all consumer surfaces (admin scoring modal, viewer, TvDisplay,
 // StreamingOverlay). The implementations live in lineup_resolver.jsx;
@@ -679,11 +717,19 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // re-states the verdict rather than the editor guessing it.
   const initialDaihyosenHantei = (() => {
     if (!existingDaihyosen?.decidedByHantei || !existingDaihyosen.winner) return "";
+    // The exclusive-attribution rule is hanteiWinnerKey (shared with the
+    // individual editor's chip), not restated here.
+    const key = hanteiWinnerKey({ winner: existingDaihyosen.winner, sideA: m.sideA, sideB: m.sideB });
+    if (key) return key;
+    // SAME-NAME teams (duplicate check rejects same name AND dojo only):
+    // display attribution is ambiguous but the round-trip is LOSSLESS -
+    // either side serializes the identical shared name - and seeding ""
+    // would strand a completed match behind "cannot mark completed with no
+    // winner". Rename drift (matches neither) stays "": the operator
+    // re-picks, and buildPatch passes the stored verdict through untouched
+    // in the meantime (preserveStoredDaihyosenVerdict).
     const nameOf = (v) => (v && typeof v === "object" ? v.name : v) || "";
-    const w = existingDaihyosen.winner, an = nameOf(m.sideA), bn = nameOf(m.sideB);
-    if (w === an && w !== bn) return "a";
-    if (w === bn && w !== an) return "b";
-    return "";
+    return existingDaihyosen.winner === nameOf(m.sideA) && existingDaihyosen.winner === nameOf(m.sideB) ? "a" : "";
   })();
   const [daihyosenHantei, setDaihyosenHantei] = useStateA(initialDaihyosenHantei);
   // Armed follows the RECORDED flag, not the resolved side, so an
@@ -700,7 +746,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // could overwrite another device's fresh edit. Picking a side stays on
   // the explicit-submit convention; it is the undo that needs the write.
   const clearHantei = () => {
-    const hadVerdict = !!daihyosenHantei;
+    // A withdrawal must reach the server when a verdict exists ANYWHERE: a
+    // locally picked side, or a stored verdict whose side could not be
+    // attributed (the armed-unpicked seed) - cancelling that panel is the
+    // operator withdrawing the SERVER's verdict, and without a queued write
+    // the server would keep a hantei the operator believes withdrawn. Only a
+    // fresh arm-then-cancel (nothing picked, nothing stored) is a true no-op
+    // and must not queue a stale-snapshot autosave.
+    const hadVerdict = !!daihyosenHantei || !!(daihyosenHanteiArmed && existingDaihyosen?.decidedByHantei);
     setDaihyosenHanteiArmed(false);
     setDaihyosenHantei("");
     if (hadVerdict) markScoringDirty();
@@ -1608,6 +1661,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       // independently: encho is optional for a hantei decision.
       if (isDaihyo) {
         Object.assign(entry, daihyosenEnchoFields({ enchoPeriodCount, daihyosenTied, daihyosenHantei }));
+        const keep = preserveStoredDaihyosenVerdict({ armed: daihyosenHanteiArmed, pickedSide: daihyosenHantei, existingDaihyosen });
+        if (keep) Object.assign(entry, keep);
       } else if (isKachinuki && s.encho > 0) {
         // mp-gmcg: numbered-bout encho is the KACHINUKI knockout-tie
         // resolution (same pair keeps fighting the same bout; daihyosen

@@ -36,8 +36,9 @@
 //   - the team editor (hanteiSlot, admin_scoring_team.jsx) drops it, because
 //     its armed hantei row is a second always-mounted channel for the verdict;
 //   - the individual editor (admin_scoring_individual.jsx) drops it too — its
-//     hantei panel shows the recorded verdict, and its slots are locked with a
-//     "hantei already recorded" title.
+//     hantei panel highlights the RECORDED side's button (btn--primary, like
+//     the team panel), and its slots are locked with a "hantei already
+//     recorded" title.
 // Change the contract and all three call sites must be re-checked (CLAUDE.md).
 // The loose case is reachable, not theoretical: a daihyosen may be taken to
 // hantei from any tied scoreline, 2-2 included.

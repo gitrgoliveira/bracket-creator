@@ -87,6 +87,18 @@ describe('match_scoreboard: teamIVPW', () => {
     expect(teamIVPW(subs, 'Seibukan', 'Seibukan')).toEqual({ ivShiro: 1, ivAka: 0, pwShiro: 3, pwAka: 1 });
   });
 
+  it('rows and summary agree on cross-level ambiguity (shared subWinnerSides)', () => {
+    // Drifted mixed-level data: the winner matches a SUB side on one flank and
+    // the MATCH side on the other. The bout row marks nobody (unattributable),
+    // so the IV summary must not credit anybody either - both go through the
+    // one subWinnerSides resolver. The ippon fallback then decides: 1-1 here,
+    // so no IV at all.
+    const subs = [
+      { position: 1, sideA: 'X', sideB: '', winner: 'X', ipponsA: ['M'], ipponsB: ['M'] },
+    ];
+    expect(teamIVPW(subs, 'Y', 'X')).toEqual({ ivShiro: 0, ivAka: 0, pwShiro: 1, pwAka: 1 });
+  });
+
   it('falls back to ippon comparison when winner matches neither side', () => {
     const subs = [
       { position: 1, sideA: 'Aka P', sideB: 'Shiro P', winner: '', ipponsB: ['M', 'K'], ipponsA: [] },

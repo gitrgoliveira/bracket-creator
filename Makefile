@@ -188,6 +188,12 @@ examples: go/build ## Build locally and create example files
 	$(BIN_PATH)/$(BIN_NAME) create-playoffs -d -z -c 2 --seeds ./test-data/seeds_medium.csv -f ./test-data/mock_data_medium_zekken.csv -o ./playoffs-example-medium-seeded.xlsx
 	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -p 3 -w 2 -c 2 --seeds ./test-data/seeds_large.csv -f ./test-data/mock_data_large_zekken.csv -o ./pools-example-large-seeded.xlsx
 	$(BIN_PATH)/$(BIN_NAME) create-playoffs -d -z -c 2 --seeds ./test-data/seeds_large.csv -f ./test-data/mock_data_large_zekken.csv -o ./playoffs-example-large-seeded.xlsx
+# 5 pools sending ONE qualifier each, seeded, on two shiaijo. Every other
+# example uses -w 2, and no 2-qualifier draw changed shape in the pool-to-
+# knockout rework, so without this the workbooks exercise none of it. Here
+# shiaijo A runs pools A, B and C (seeds 1 and 3) and its bye must fall on
+# Pool A, seed 1's pool; it used to fall on Pool C for being last in the block.
+	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -m 5 -w 1 -c 2 --seeds ./test-data/seeds_medium.csv -f ./test-data/mock_data_medium_zekken.csv -o ./pools-example-medium-seeded-one-qualifier.xlsx
 	@echo "Examples successfully created!"
 
 docker/build: ## Build Docker image

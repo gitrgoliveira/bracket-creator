@@ -23,6 +23,7 @@ import {
   isKoTieBlocked,
 } from '../admin_scoring_modal.jsx';
 import { makeSubmitDecision } from '../admin_scoring_shared.jsx';
+import { hanteiWinnerKey } from '../admin_scoring_individual.jsx';
 import { defaultWinMaru } from '../bracket.jsx';
 // teamEncounterHasResult is a module-internal helper of admin_scoring_team.jsx
 // (not part of the thin-entry consumer barrel), imported directly like the
@@ -1357,5 +1358,34 @@ describe('teamBoutIsDraw (a declared winner un-draws the bout)', () => {
 
   it('is not a draw when nothing has been scored yet', () => {
     expect(teamBoutIsDraw({ draw: false }, { aTotal: 0, bTotal: 0, winner: null })).toBe(false);
+  });
+});
+
+describe('hanteiWinnerKey (individual editor Ht chip attribution)', () => {
+  // Id-first, name fallback only when the name distinguishes the sides. A
+  // same-name pair with no usable ids returns "" so neither side is marked,
+  // mirroring the shared scoreboard's unattributable-winner rule.
+  const A = { id: 'ua', name: 'Tanaka' }, B = { id: 'ub', name: 'Suzuki' };
+
+  it('resolves by id', () => {
+    expect(hanteiWinnerKey({ winner: { id: 'ua', name: 'Tanaka' }, sideA: A, sideB: B })).toBe('a');
+    expect(hanteiWinnerKey({ winner: { id: 'ub', name: 'Suzuki' }, sideA: A, sideB: B })).toBe('b');
+  });
+
+  it('falls back to a distinguishing name when ids are absent', () => {
+    expect(hanteiWinnerKey({ winner: { id: '', name: 'Suzuki' }, sideA: { name: 'Tanaka' }, sideB: { name: 'Suzuki' } })).toBe('b');
+  });
+
+  it('returns "" for a same-name pair with no usable ids (unattributable)', () => {
+    expect(hanteiWinnerKey({ winner: { id: '', name: 'Tanaka' }, sideA: { name: 'Tanaka' }, sideB: { name: 'Tanaka' } })).toBe('');
+  });
+
+  it('returns "" when an id is present but matches neither side', () => {
+    expect(hanteiWinnerKey({ winner: { id: 'ux', name: 'Tanaka' }, sideA: A, sideB: B })).toBe('');
+  });
+
+  it('returns "" with no winner at all', () => {
+    expect(hanteiWinnerKey({ sideA: A, sideB: B })).toBe('');
+    expect(hanteiWinnerKey(null)).toBe('');
   });
 });

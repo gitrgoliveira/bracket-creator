@@ -284,6 +284,38 @@ describe('match_scoreboard components', () => {
     delete global.window.defaultWinMaru;
   });
 
+  it('does not fabricate an Ht on an UNTIED drifted scoreline', () => {
+    // validation.go and boutWinnerSide both gate hantei on equal ippon counts;
+    // the mark mirrors that. A drifted decidedByHantei on a 2-1 row renders
+    // its letters plainly instead of displaying a judges'-decision mark on a
+    // bout the ippons show was decided on points.
+    const sub = {
+      position: 1, sideA: 'Aka P', sideB: 'Shiro P',
+      ipponsA: ['M', 'K'], ipponsB: ['D'], decidedByHantei: true, winner: 'Aka P',
+    };
+    const tree = runtime.mount(BoutSubRow, { sub, index: 0, lineupA: null, lineupB: null, teamSize: 5 });
+    expect(collectText(tree)).not.toContain('Ht');
+    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-a')).toBeNull();
+  });
+
+  it('marks NEITHER side when the winner matches both (same-name teams)', () => {
+    // Two teams sharing a name (different dojos) meet: sub.winner, the shared
+    // team name, string-matches both match-level sides. Asserting both won is
+    // worse than asserting nothing, so the row is treated as unattributable,
+    // mirroring IndividualScore's ambiguous blanking.
+    const sub = {
+      position: -1, ipponsA: ['M'], ipponsB: ['M'],
+      decidedByHantei: true, winner: 'Seibukan',
+    };
+    const tree = runtime.mount(BoutSubRow, {
+      sub, index: 0, lineupA: null, lineupB: null, teamSize: 3, isDH: true,
+      matchSideA: 'Seibukan', matchSideB: 'Seibukan',
+    });
+    expect(collectText(tree)).not.toContain('Ht');
+    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-a')).toBeNull();
+    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-b')).toBeNull();
+  });
+
   it('IndividualScore: with both slots full the Ht rides beside them, never the centre', () => {
     // resultSlot reports `loose` when there is no free slot. Drifted/hand-edited
     // stored data can reach it: hantei only requires EQUAL ippon counts, so a

@@ -1327,3 +1327,48 @@ describe('API Utils', () => {
   });
 });
 
+
+describe('normalizeMatch: same-name winner is never given an arbitrary twin uuid', () => {
+  // scoring.go deliberately leaves WinnerID empty when a same-name pair ends
+  // on equal counts (hantei): the name alone cannot say WHICH twin won, and
+  // buildPlayerMap's name key holds whichever twin was added last. Stamping
+  // that uuid would attribute the win to an arbitrary side, and the scoreboard
+  // would mark the wrong competitor ~half the time.
+  const twins = buildPlayerMap({ players: [
+    { id: 'uuid-a', name: 'Tanaka', dojo: 'Kyoto' },
+    { id: 'uuid-b', name: 'Tanaka', dojo: 'Osaka' },
+  ] });
+
+  it('blanks the winner id when both sides share the winner name and no winnerId is served', () => {
+    const norm = normalizeMatch({
+      sideA: 'Tanaka', sideAId: 'uuid-a',
+      sideB: 'Tanaka', sideBId: 'uuid-b',
+      winner: 'Tanaka', status: 'completed', decidedByHantei: true,
+    }, twins);
+    expect(norm.winner.id).toBe('');
+    expect(norm.winner.name).toBe('Tanaka');
+    // The sides keep their authoritative uuids.
+    expect(norm.sideA.id).toBe('uuid-a');
+    expect(norm.sideB.id).toBe('uuid-b');
+  });
+
+  it('an explicit winnerId stays authoritative even for same-name sides', () => {
+    const norm = normalizeMatch({
+      sideA: 'Tanaka', sideAId: 'uuid-a',
+      sideB: 'Tanaka', sideBId: 'uuid-b',
+      winner: 'Tanaka', winnerId: 'uuid-b', status: 'completed',
+    }, twins);
+    expect(norm.winner.id).toBe('uuid-b');
+  });
+
+  it('a distinct-name winner still resolves through the player map', () => {
+    const map = buildPlayerMap({ players: [
+      { id: 'uuid-a', name: 'Tanaka', dojo: 'Kyoto' },
+      { id: 'uuid-s', name: 'Suzuki', dojo: 'Osaka' },
+    ] });
+    const norm = normalizeMatch({
+      sideA: 'Tanaka', sideB: 'Suzuki', winner: 'Suzuki', status: 'completed',
+    }, map);
+    expect(norm.winner.id).toBe('uuid-s');
+  });
+});

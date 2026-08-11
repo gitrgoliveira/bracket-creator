@@ -28,10 +28,13 @@
 // carries only the middle mark (vs / X / (E) / (DH)) — that centre is shared
 // between the competitors, and a mark naming one of them does not belong there.
 //
-// `loose` reports that both slots were already full, so the caller must render
-// the mark BESIDE the slots rather than drop it ("a result is never silently
-// dropped"). This is reachable, not theoretical: a daihyosen may be taken to
-// hantei from any tied scoreline, 2-2 included.
+// `loose` reports that both slots were already full. What a caller does with
+// that is ITS policy, and the two consumers deliberately differ: the read-only
+// scoreboard renders the mark beside the slots (dropping it would leave the
+// verdict visible nowhere), while the team editor drops it because its armed
+// hantei row is a second always-mounted channel for the same verdict. This is
+// reachable, not theoretical: a daihyosen may be taken to hantei from any tied
+// scoreline, 2-2 included.
 export function resultSlot(cells) {
   const pair = cells || [];
   const slot = [pair[0] || "", pair[1] || ""].findIndex(v => !v);

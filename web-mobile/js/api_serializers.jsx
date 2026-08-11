@@ -158,7 +158,20 @@ function normalizeMatch(m, playerMap) {
         norm.sideB = { id: "", name: "" };
     }
     if (typeof norm.winner === "string" && norm.winner) {
-        norm.winner = resolveSide(norm.winner, m.winnerId);
+        // A name-only winner lookup is AMBIGUOUS when both sides carry that
+        // same name (two same-name participants meeting): playerMap[name]
+        // returns whichever twin was added last, and stamping its uuid would
+        // attribute the win to an arbitrary side (~a coin flip) — the display
+        // layer would then mark the wrong competitor. scoring.go deliberately
+        // leaves WinnerID empty in exactly this case ("Equal counts
+        // (hantei/undecidable) ... leave WinnerID empty → name fallback"), so
+        // mirror it: keep the identity name-only and let display code treat
+        // the winner as unattributable rather than mis-attributed.
+        const nameAmbiguous = !m.winnerId
+            && norm.sideA?.name === norm.winner && norm.sideB?.name === norm.winner;
+        norm.winner = nameAmbiguous
+            ? { id: "", name: norm.winner }
+            : resolveSide(norm.winner, m.winnerId);
     }
     // Did sideA win? Prefer matching by stable id (sideA/winner are resolved to
     // {id,name} above with the server's authoritative flat ids), so same-name /

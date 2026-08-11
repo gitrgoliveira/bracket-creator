@@ -209,14 +209,25 @@ function centreMarks(sub, matchSideA, matchSideB) {
   // A hantei ALWAYS names a winner and is decided from a TIED scoreline
   // (validation.go: "requires winner to be set" + "requires a tied scoreline"),
   // so its mark is NOT gated on noIppons: a 1-1 hantei after encho is the
-  // normal case, and its slots already hold letters. The maru pair for an
-  // ippon-less default win (fusensho/kiken/bye) still is gated, because there
-  // the empty letters are what make room for it.
-  const markable = sub.decidedByHantei || noIppons;
-  const winShiro = !!(markable && sub.winner &&
+  // normal case, and its slots already hold letters. It IS gated on the
+  // letters actually being tied, mirroring validation and boutWinnerSide:
+  // a drifted decidedByHantei on an untied row (2-1) renders its letters
+  // plainly rather than fabricating a judges'-decision mark. The maru pair
+  // for an ippon-less default win (fusensho/kiken/bye) still gates on
+  // noIppons, because there the empty letters are what make room for it.
+  const lettersTied = lettersA.filter(Boolean).length === lettersB.filter(Boolean).length;
+  const markable = (sub.decidedByHantei && lettersTied) || noIppons;
+  const winnerIsShiro = !!(sub.winner &&
     (sub.winner === sub.sideB || sub.winner === sub.teamB || (matchSideB && sub.winner === matchSideB)));
-  const winAka = !!(markable && sub.winner &&
+  const winnerIsAka = !!(sub.winner &&
     (sub.winner === sub.sideA || sub.winner === sub.teamA || (matchSideA && sub.winner === matchSideA)));
+  // A winner matching BOTH sides (two same-name teams meeting: the duplicate
+  // check only rejects same name AND dojo) is unattributable: mark neither
+  // side rather than assert that both won. Mirrors IndividualScore's
+  // `ambiguous` blanking, which the team path previously lacked.
+  const unattributable = winnerIsShiro && winnerIsAka;
+  const winShiro = markable && !unattributable && winnerIsShiro;
+  const winAka = markable && !unattributable && winnerIsAka;
   // Ht behaves like a point and rides beside the competitor it names; the slot
   // it takes is the shared rule in result_slot.jsx (which the team editor uses
   // too), so it is not restated here. `loose` means both slots were full, and
@@ -363,9 +374,11 @@ export function IndividualScore({ match, variant, showNames, withZekkenName }) {
     hansokuA: match.hansokuA, hansokuB: match.hansokuB,
     decidedByHantei: match.decidedByHantei, score: match.score, decision: match.decision,
     // encho MUST be threaded: without it matchMiddleMark can never yield (E) on
-    // an individual row (and these rows carry no separate chip to compensate),
-    // and defaultWinMaru would award the regulation ○○ for a default win that
-    // actually happened in overtime, where the rulebook marks a single ○.
+    // an individual row, and defaultWinMaru would award the regulation ○○ for a
+    // default win that actually happened in overtime, where the rulebook marks
+    // a single ○. On the TV board and lobby the header chip also shows (E), so
+    // the mark appears twice there — the same duplication X has always had on
+    // those surfaces; the row centre is the FIK position and stays.
     encho: match.encho,
     winner: ambiguous ? "" : (sideId(match.winner) || sideName(match.winner)),
     sideA: aKey, sideB: bKey,

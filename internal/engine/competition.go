@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 
@@ -799,6 +800,15 @@ func (e *Engine) runDrawPipeline(id string) error {
 
 	seeds, err := e.store.LoadSeeds(id)
 	if err != nil {
+		// A malformed seed list is the operator's input, not our failure, so it
+		// has to reach them as a 400 carrying the reason. Reported as a 500 it
+		// reads as "the tool is broken" at exactly the moment they can fix it
+		// themselves: the seeding panel saves each rank as it is typed, so
+		// entering seed 4 before seeds 1 to 3 leaves a gapped seeds.csv that
+		// this refuses to load.
+		if errors.Is(err, domain.ErrInvalidSeedAssignments) {
+			return wrapValidationErrorf(err, "competition %s: %v", id, err)
+		}
 		return err
 	}
 	// Drop seed assignments for participants removed by check-in (PR #199

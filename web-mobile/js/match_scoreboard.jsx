@@ -9,10 +9,10 @@
 // so each web-mobile/js/*.jsx is TRANSFORMED in place and its imports stay as
 // runtime ESM the browser resolves and caches once. Importing this from both
 // viewer.jsx and display.jsx is therefore the established DRY mechanism (same as
-// lineup_resolver.jsx) and costs one shared module fetch, not a copy per
-// importer. No window-global coupling needed. What it does cost is a fetch and
-// evaluation per module, which is why this file imports only small leaves and
-// reaches the 32 KB bracket.jsx through window globals instead.
+// lineup_resolver.jsx). This file imports only small leaves and reaches
+// bracket.jsx's display primitives through window globals — for the dependency
+// reasoning (and the pre-existing bracket double-load it avoids), see the ONE
+// statement in result_slot.jsx's header; do not restate it here.
 //
 // `variant` ("card" | "tv") only changes sizing via a CSS modifier: the markup
 // and data-testids are identical across surfaces.
@@ -140,9 +140,12 @@ function ipponLetters(arr) {
 // vs (FIK Table 2, p.16). Ippons fill from each name toward the centre: shiro
 // fills left→right (its outer slot is the left), aka fills right→left (its outer
 // slot is the right), so for aka we reverse the visual cell order. The testid
-// stays on the logical outer cell (letters[0]) regardless of which side renders
-// it.
-const WAZA_NAMES = { M: "Men (head)", K: "Kote (wrist)", D: "Do (body)", T: "Tsuki (throat)", H: "Hansoku (penalty)", S: "Sune (shin)", "○": "Default win" };
+// stays on the LOGICAL OUTER cell (letters[0]) regardless of which side renders
+// it — and on a win group that is NOT necessarily the Ht cell: at 1-1 the outer
+// cell holds the winner's real letter and the Ht fills the inner one, so
+// `sub-win-*` means "the winner's outer cell", never "the mark cell". Do not
+// write selectors or assertions that expect Ht at that testid.
+const WAZA_NAMES = { M: "Men (head)", K: "Kote (wrist)", D: "Do (body)", T: "Tsuki (throat)", H: "Hansoku (penalty)", S: "Sune (shin)", "○": "Default win", Ht: "Hantei (judges' decision)" };
 
 function slotCells(letters, side, testid) {
   const cells = [0, 1].map(i => {

@@ -47,19 +47,19 @@ import { resultSlot } from './result_slot.jsx';
 // three inputs: a marked/derived tie → hikiwake, the daihyosen row →
 // "daihyosen", s.encho (a period count) → {periodCount}. X keeps its dedicated
 // styling; vs/(E)/(DH) render as the quiet centre span.
-// teamBoutIsDraw: does this bout row read as a hikiwake? Tied-and-scored is the
-// derivation, EXCEPT that a hantei declares a winner and so un-draws the bout
-// however level the scoreline. Without that exception a 1-1 daihyosen taken to
-// hantei derives hikiwake, and boutMiddle puts X in the centre — claiming a draw
-// on a knockout bout whose winner is simultaneously wearing Ht. Exported so the
-// exception is pinned without mounting the editor.
-export function teamBoutIsDraw(s, t, hanteiWinner) {
-  if (hanteiWinner) return false;
-  return !!(s.draw || (t.winner === null && (t.aTotal > 0 || t.bTotal > 0)));
+// teamBoutIsDraw: does this bout row read as a hikiwake? A declared winner
+// un-draws the bout — that is the whole rule. The hantei case needs no
+// parameter here because boutWinnerSide folds the hantei verdict into
+// t.winner (its hanteiSide input), so a 1-1 daihyosen taken to hantei
+// arrives with a winner and never derives the X that would claim a draw on
+// a bout whose winner is simultaneously wearing Ht. Exported so the
+// winner-un-draws rule is pinned without mounting the editor.
+export function teamBoutIsDraw(s, t) {
+  return t.winner === null && !!(s.draw || t.aTotal > 0 || t.bTotal > 0);
 }
 
-function renderTeamBoutMiddle(s, t, isDaihyoRow, hanteiWinner) {
-  const isDraw = teamBoutIsDraw(s, t, hanteiWinner);
+function renderTeamBoutMiddle(s, t, isDaihyoRow) {
+  const isDraw = teamBoutIsDraw(s, t);
   const mid = boutMiddle(
     isDaihyoRow ? "daihyosen" : (isDraw ? "hikiwake" : ""),
     s.encho > 0 ? { periodCount: s.encho } : null,
@@ -209,7 +209,16 @@ export function isKachinukiBoutRemovable({ boutMode, currentBoutPlayed, lastScor
 // "Last:  beat  (fusensho)" with both names blank, and could even hand the
 // bout to the side that withdrew. The fusensho side wins regardless of the
 // cells. Widen or narrow this rule in ONE place only.
-export function boutWinnerSide({ aCount = 0, bCount = 0, draw = false, fusenshoSide = "" } = {}) {
+// hanteiSide is the same class of input as fusenshoSide: a decision that names
+// the winner over what the cells read. It applies ONLY to a tied scoreline
+// (FIK 7-5 / 29-6, mirrored by validation.go's equal-ippon-counts gate) and it
+// beats an operator draw flag: a hantei declares a winner, so it un-draws the
+// bout however level the scoreline. Folding it in HERE (rather than overlaying
+// it at consumers) is what keeps every reader of subTotals[i].winner — the
+// centre chip colouring, the draw derivation, the save path — agreeing that a
+// hantei-decided bout is decided.
+export function boutWinnerSide({ aCount = 0, bCount = 0, draw = false, fusenshoSide = "", hanteiSide = "" } = {}) {
+  if ((hanteiSide === "a" || hanteiSide === "b") && aCount === bCount) return hanteiSide;
   if (draw) return null;
   if (fusenshoSide === "a" || fusenshoSide === "b") return fusenshoSide;
   if (aCount > bCount) return "a";
@@ -965,10 +974,15 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // hikiwake for IV/PW and serialises with decision="hikiwake". The winner
   // itself comes from boutWinnerSide — the one winner rule, shared with the
   // kachinuki band and End-match derivation.
-  const subTotals = subs.map(s => {
+  const subTotals = subs.map((s, i) => {
     const aT = s.aPts.length;
     const bT = s.bPts.length;
-    const winner = boutWinnerSide({ aCount: aT, bCount: bT, draw: s.draw, fusenshoSide: s.fusensho });
+    // The daihyosen row is the only bout that can carry a hantei verdict;
+    // boutWinnerSide itself enforces the tied-scoreline gate.
+    const winner = boutWinnerSide({
+      aCount: aT, bCount: bT, draw: s.draw, fusenshoSide: s.fusensho,
+      hanteiSide: i === daihyosenIdx ? daihyosenHantei : "",
+    });
     return { aTotal: aT, bTotal: bT, winner, draw: !!s.draw };
   });
 
@@ -986,9 +1000,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // Hantei applies only to a tied daihyosen scoreline (FIK 7-5 / 29-6);
   // otherwise the bout is decided by ippons like any other.
   const daihyosenTied = hasDaihyosen && subTotals[daihyosenIdx].aTotal === subTotals[daihyosenIdx].bTotal;
-  const daihyosenWinner = hasDaihyosen
-    ? ((daihyosenTied && daihyosenHantei) ? daihyosenHantei : subTotals[daihyosenIdx].winner)
-    : null;
+  // The hantei verdict is already folded into the winner by boutWinnerSide
+  // (hanteiSide input), so no overlay is needed here or at any other reader.
+  const daihyosenWinner = hasDaihyosen ? subTotals[daihyosenIdx].winner : null;
   const teamWinner = hasDaihyosen
     ? (daihyosenWinner || null)
     : (ivA > ivB ? "a" : ivB > ivA ? "b" : pwA > pwB ? "a" : pwB > pwA ? "b" : null);
@@ -1520,9 +1534,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       // Hansoku Hs already in pts arrays via applyFoulIncrement: no fold.
       const aAll = s.aPts.slice(0, MAX_IPPONS_PER_SIDE);
       const bAll = s.bPts.slice(0, MAX_IPPONS_PER_SIDE);
-      // The daihyosen winner may come from hantei (tied bout); fall back
-      // to the score-derived winner otherwise.
-      const wKey = isDaihyo ? daihyosenWinner : t.winner;
+      // t.winner already carries the hantei verdict for the daihyosen row
+      // (boutWinnerSide's hanteiSide input), so no per-row overlay is needed.
+      const wKey = t.winner;
       const w = wKey === "a" ? m.sideA : wKey === "b" ? m.sideB : null;
       // T096/FR-031: per-bout fusensho overrides the default hikiwake/fought
       // mapping. The daihyosen always carries decision="daihyosen".
@@ -1990,6 +2004,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 return (
                   <button key={i} className={`editor-side__pt ${(isHt || rs.pts[i]) ? "editor-side__pt--filled" : ""}`}
                     data-testid={isHt ? `team-daihyosen-ht-${rs.color}` : undefined}
+                    // The Ht chip mutates the hantei verdict, so it obeys the
+                    // same submit-time freeze as the arm/pick/Cancel controls;
+                    // an un-guarded click mid-save would clear the local
+                    // verdict while the in-flight patch records it.
+                    disabled={isHt && (submitting || decisionSubmitting)}
                     onClick={() => (isHt ? clearHantei() : rs.setPts(rs.pts.filter((_, j) => j !== i)))}
                     title={isHt ? "Hantei winner: click to undo" : "Click to remove"}>
                     {isHt ? "Ht" : (rs.pts[i] || "·")}
@@ -2000,9 +2019,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
 
             // The centre carries the SINGLE-SOURCE boutMiddle projection only
             // (vs/X/(E)/(DH)) — never restated here, and never a result mark or
-            // a numeric bout score (CLAUDE.md). dhHantei is passed so a hantei
-            // winner un-draws a level scoreline instead of centring an X.
-            const scoreDisplay = renderTeamBoutMiddle(s, t, isDaihyoRow, dhHantei);
+            // a numeric bout score (CLAUDE.md). A hantei winner already reaches
+            // t.winner via boutWinnerSide, so no extra argument is needed.
+            const scoreDisplay = renderTeamBoutMiddle(s, t, isDaihyoRow);
 
             return (
               <div key={idx} className={"team-sub-match" + (idx === editingDoneBoutIdx ? " team-sub-match--correcting" : "")}>

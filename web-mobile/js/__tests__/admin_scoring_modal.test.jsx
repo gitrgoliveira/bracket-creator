@@ -27,7 +27,7 @@ import { defaultWinMaru } from '../bracket.jsx';
 // teamEncounterHasResult is a module-internal helper of admin_scoring_team.jsx
 // (not part of the thin-entry consumer barrel), imported directly like the
 // resolveMatchLineup tests do.
-import { teamEncounterHasResult, resolveKachinukiBoutSides, subBoutHasBeenPlayed, fusenshoSideFromSub, hanteiSlot, teamBoutIsDraw } from '../admin_scoring_team.jsx';
+import { teamEncounterHasResult, resolveKachinukiBoutSides, subBoutHasBeenPlayed, fusenshoSideFromSub, hanteiSlot, teamBoutIsDraw, boutWinnerSide } from '../admin_scoring_team.jsx';
 import { isKikenDecision } from '../api_serializers.jsx';
 
 window.isKikenDecision = isKikenDecision;
@@ -1309,33 +1309,53 @@ describe('hanteiSlot (the editor\'s winner test over the shared slot rule)', () 
   });
 });
 
-describe('teamBoutIsDraw (a hantei un-draws a level scoreline)', () => {
-  // Regression: a daihyosen scored 1-1 and then decided by hantei used to derive
-  // "tied and scored" => hikiwake, and boutMiddle turns a hikiwake score into an
-  // X. That centred a DRAW on a knockout bout whose winner was simultaneously
-  // wearing Ht. The hantei verdict has to suppress the derivation.
-  const tied = { aTotal: 1, bTotal: 1, winner: null };
-
-  it('is a draw when tied and scored with no hantei', () => {
-    expect(teamBoutIsDraw({ draw: false }, tied, '')).toBe(true);
+describe('boutWinnerSide: hanteiSide names the winner over tied cells', () => {
+  // The hantei verdict is folded into THE winner rule itself (same class as
+  // fusenshoSide: a decision naming the winner over what the cells read), so
+  // every reader of subTotals[i].winner — the centre chip colouring, the draw
+  // derivation, the save path — agrees a hantei-decided bout is decided.
+  it('applies only to a tied scoreline (mirrors validation.go)', () => {
+    expect(boutWinnerSide({ aCount: 1, bCount: 1, hanteiSide: 'a' })).toBe('a');
+    expect(boutWinnerSide({ aCount: 0, bCount: 0, hanteiSide: 'b' })).toBe('b');
+    // Untied: the cells decide, the (drifted) verdict is ignored.
+    expect(boutWinnerSide({ aCount: 2, bCount: 1, hanteiSide: 'b' })).toBe('a');
   });
 
-  it('is NOT a draw once a hantei names a winner', () => {
-    expect(teamBoutIsDraw({ draw: false }, tied, 'b')).toBe(false);
-    expect(teamBoutIsDraw({ draw: false }, tied, 'a')).toBe(false);
+  it('beats an operator draw flag: a hantei un-draws the bout', () => {
+    expect(boutWinnerSide({ aCount: 1, bCount: 1, draw: true, hanteiSide: 'a' })).toBe('a');
   });
 
-  it('a hantei also overrides an explicitly toggled draw', () => {
-    // The editor disables the tie toggle on the daihyosen row, but a stored
-    // draw flag must not resurrect the X underneath a declared winner.
-    expect(teamBoutIsDraw({ draw: true }, tied, 'a')).toBe(false);
+  it('absent hanteiSide leaves every existing outcome unchanged', () => {
+    expect(boutWinnerSide({ aCount: 1, bCount: 1 })).toBe(null);
+    expect(boutWinnerSide({ aCount: 1, bCount: 1, draw: true })).toBe(null);
+    expect(boutWinnerSide({ aCount: 0, bCount: 0, fusenshoSide: 'b' })).toBe('b');
+  });
+});
+
+describe('teamBoutIsDraw (a declared winner un-draws the bout)', () => {
+  // Regression (via boutWinnerSide): a daihyosen scored 1-1 then decided by
+  // hantei used to derive "tied and scored" => hikiwake, and boutMiddle turned
+  // that into a centre X — a DRAW claimed on a bout whose winner wore Ht. The
+  // verdict now arrives IN t.winner, so the draw derivation needs no special
+  // case: any winner un-draws.
+  it('is a draw when tied and scored with no winner', () => {
+    expect(teamBoutIsDraw({ draw: false }, { aTotal: 1, bTotal: 1, winner: null })).toBe(true);
+  });
+
+  it('is NOT a draw once the winner field is set (hantei-decided 1-1)', () => {
+    // As produced by boutWinnerSide({aCount:1, bCount:1, hanteiSide:'a'}).
+    expect(teamBoutIsDraw({ draw: false }, { aTotal: 1, bTotal: 1, winner: 'a' })).toBe(false);
+  });
+
+  it('an operator draw flag with no winner is a draw even at 0-0', () => {
+    expect(teamBoutIsDraw({ draw: true }, { aTotal: 0, bTotal: 0, winner: null })).toBe(true);
+  });
+
+  it('a stored draw flag cannot resurrect the X under a declared winner', () => {
+    expect(teamBoutIsDraw({ draw: true }, { aTotal: 1, bTotal: 1, winner: 'a' })).toBe(false);
   });
 
   it('is not a draw when nothing has been scored yet', () => {
-    expect(teamBoutIsDraw({ draw: false }, { aTotal: 0, bTotal: 0, winner: null }, '')).toBe(false);
-  });
-
-  it('is not a draw when a side actually won on points', () => {
-    expect(teamBoutIsDraw({ draw: false }, { aTotal: 2, bTotal: 0, winner: 'a' }, '')).toBe(false);
+    expect(teamBoutIsDraw({ draw: false }, { aTotal: 0, bTotal: 0, winner: null })).toBe(false);
   });
 });

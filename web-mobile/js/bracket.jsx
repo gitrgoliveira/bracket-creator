@@ -206,8 +206,8 @@ const joinSp = (a, b) => [a, b].filter(Boolean).join(" ");
 // of the winner-resolution half of SideMarksLR in internal/export/suffix.go.
 // Companion rule: on the two-slot GRID surfaces (the shared scoreboard and the
 // team score editor) which of a side's two cells the mark takes is answered by
-// resultSlot in result_slot.jsx — a separate leaf so match_scoreboard.jsx does
-// not have to import this 32 KB module. Flat score strings have no slots, so
+// resultSlot in result_slot.jsx — a separate leaf; the dependency reasoning is
+// stated ONCE, in that file's header. Flat score strings have no slots, so
 // they concatenate instead and never call it.
 const placeMarks = (marks, firstWins, secondWins) =>
   firstWins ? [marks.winner, marks.loser] : secondWins ? [marks.loser, marks.winner] : ["", ""];

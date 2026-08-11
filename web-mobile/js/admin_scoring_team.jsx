@@ -670,11 +670,41 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // by hantei (judges' decision on a tied bout, FIK 7-5 / 29-6: encho
   // optional). Mirrors the individual ScoreEditorModal hantei flow but scoped to the
   // position DAIHYOSEN_POSITION row. "" = score-decided; "a"/"b" = hantei winner side.
-  const initialDaihyosenHantei = existingDaihyosen?.decidedByHantei
-    ? (existingDaihyosen.winner === (typeof m.sideA === "object" ? m.sideA?.name : m.sideA) ? "a" : "b")
-    : "";
+  // The seed is EXCLUSIVE-match only: the stored winner must equal exactly one
+  // current side name. The old `: "b"` fallback attributed any mismatch
+  // (renamed team, same-name pair) to SHIRO, and since the verdict now folds
+  // into boutWinnerSide -> t.winner -> buildPatch, that would silently FLIP
+  // the stored winner to the losing side on the next save. Unattributable
+  // seeds "": the panel opens ARMED with no side picked, so the operator
+  // re-states the verdict rather than the editor guessing it.
+  const initialDaihyosenHantei = (() => {
+    if (!existingDaihyosen?.decidedByHantei || !existingDaihyosen.winner) return "";
+    const nameOf = (v) => (v && typeof v === "object" ? v.name : v) || "";
+    const w = existingDaihyosen.winner, an = nameOf(m.sideA), bn = nameOf(m.sideB);
+    if (w === an && w !== bn) return "a";
+    if (w === bn && w !== an) return "b";
+    return "";
+  })();
   const [daihyosenHantei, setDaihyosenHantei] = useStateA(initialDaihyosenHantei);
-  const [daihyosenHanteiArmed, setDaihyosenHanteiArmed] = useStateA(!!initialDaihyosenHantei);
+  // Armed follows the RECORDED flag, not the resolved side, so an
+  // unattributable stored verdict still opens the panel for re-picking
+  // instead of silently reading as "no hantei".
+  const [daihyosenHanteiArmed, setDaihyosenHanteiArmed] = useStateA(!!(existingDaihyosen?.decidedByHantei || initialDaihyosenHantei));
+  // The ONE hantei undo, shared by the Ht chip and the panel Cancel so the
+  // two paths cannot drift. It marks the editor dirty ONLY when a side had
+  // actually been picked: the verdict may have been persisted incidentally
+  // (any other edit's autosave includes daihyosenEnchoFields), and an undo
+  // with no queued write would leave the server holding a hantei the
+  // operator believes withdrawn. Cancelling a merely-ARMED panel changed
+  // nothing persistable, and must not queue a stale-snapshot autosave that
+  // could overwrite another device's fresh edit. Picking a side stays on
+  // the explicit-submit convention; it is the undo that needs the write.
+  const clearHantei = () => {
+    const hadVerdict = !!daihyosenHantei;
+    setDaihyosenHanteiArmed(false);
+    setDaihyosenHantei("");
+    if (hadVerdict) markScoringDirty();
+  };
   // Same teardown-race guard as ScoreEditorModal: covers external/
   // parent-driven unmount during in-flight save.
   const mountedRef = useRefA(true);
@@ -1990,16 +2020,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
 
             // The side key ("a"/"b") that won the hantei on this row, else "".
             const dhHantei = isDaihyoRow && daihyosenTied ? daihyosenHantei : "";
-            // Clicking the Ht undoes the hantei, the same way clicking a point
-            // removes it: a mis-entered referee decision must be correctable
-            // without leaving the row. The undo marks the editor dirty: the
-            // verdict may already have been persisted incidentally (any other
-            // edit's autosave includes daihyosenEnchoFields), and an undo with
-            // no queued write would leave the server holding a hantei the
-            // operator believes withdrawn. Picking a side stays on the
-            // explicit-submit convention (autosave contract: Hantei is an
-            // explicit channel); it is the UNDO that needs the write.
-            const clearHantei = () => { setDaihyosenHanteiArmed(false); setDaihyosenHantei(""); markScoringDirty(); };
             // One shape for both sides. Everything that differs is derived from
             // the side itself rather than passed in, so a caller cannot pair a
             // side with the other side's slot index or testid: aka renders its
@@ -2351,7 +2371,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                     <button type="button" className={`btn btn--sm ${daihyosenHantei === "a" ? "btn--primary" : ""}`} data-testid="team-daihyosen-hantei-aka"
                       onClick={() => setDaihyosenHantei("a")} disabled={submitting || decisionSubmitting}>AKA wins</button>
                     <button type="button" className="btn btn--ghost btn--sm" data-testid="team-daihyosen-hantei-cancel"
-                      onClick={() => { setDaihyosenHanteiArmed(false); setDaihyosenHantei(""); markScoringDirty(); }} disabled={submitting || decisionSubmitting}>Cancel</button>
+                      onClick={clearHantei} disabled={submitting || decisionSubmitting}>Cancel</button>
                   </div>
                 )}
               </div>

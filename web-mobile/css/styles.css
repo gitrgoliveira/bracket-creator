@@ -6474,7 +6474,10 @@ button.pool-match-row {
 .msb-slot--aka { color: var(--red, #b91c1c); }
 .msb-vs { min-width: 16px; text-align: center; color: #9ca3af; font-size: 11px; font-weight: 700; }
 .msb-hansoku { color: var(--red, #dc2626); font-weight: 700; }
-.msb-ht { font-size: 10px; color: var(--ink-3); font-weight: 600; }
+/* The loose result mark (both slots full, drifted data): it is the row's ONLY
+   indication of the verdict on that surface, so it reads at slot strength.
+   The old 10px/muted values were the deleted centre chip's quiet styling. */
+.msb-ht { font-size: 12px; color: var(--ink-1); font-weight: 800; }
 /* Win indicator for an ippon-less decision (hantei "Ht" / fusensho·kiken "○"):
    the mark sits in the winning side's slot. No special colour, the slot keeps
    its side colour (Shiro dark, Aka red); only the weight is bumped so the mark

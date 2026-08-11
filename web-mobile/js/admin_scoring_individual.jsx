@@ -9,7 +9,6 @@ const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 // daihyosen-specific; the rep pickers below stay gated on m.repIsTeam (a "-TB-"
 // tiebreaker is also a rep bout, just not a daihyosen).
 import { isPoolDaihyosenBout } from './pool_ids.jsx';
-import { resultSlot } from './result_slot.jsx';
 
 import {
   MAX_IPPONS_PER_SIDE,
@@ -36,7 +35,7 @@ import {
 
 import { SyncStatusPill, useDebouncedRunningWrite } from './admin_scoring_autosave.jsx';
 
-import { TeamScoreEditorModal } from './admin_scoring_team.jsx';
+import { TeamScoreEditorModal, hanteiSlot } from './admin_scoring_team.jsx';
 import { EngiScoreEditorModal } from './admin_scoring_engi.jsx';
 
 // hanteiWinnerKey: which side ("a"/"b"/"") a recorded hantei verdict names.
@@ -123,10 +122,13 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // mark it distinctly (vs an ippon-derived win).
   const [decidedByHantei, setDecidedByHantei] = useStateA(initialDecidedByHantei);
   // Which side ("a"/"b"/"") holds a RECORDED hantei verdict, for the display
-  // chip in the slot grid. Empty while a hantei is merely armed (no winner
-  // picked yet) or when the winner is unattributable (same-name pair with no
-  // ids: mirror the scoreboard and mark neither side).
-  const recordedHtKey = decidedByHantei ? hanteiWinnerKey(m) : "";
+  // chip in the slot grid. Gated on initialDecidedByHantei — the verdict the
+  // SERVER holds — not the local armed state: arming a hantei on a reopened
+  // match must not resolve the stale m.winner and pre-mark the previous
+  // winner before the operator has picked a side. Empty when the winner is
+  // unattributable (same-name pair: mirror the scoreboard, mark neither).
+  // The tie gate is applied at the render site against the CURRENT pts.
+  const recordedHtKey = initialDecidedByHantei ? hanteiWinnerKey(m) : "";
   const [submitting, setSubmitting] = useStateA(false);
   // F5: pending-write state: set when a terminal submit resolves { queued:true }
   // (offline / transient failure). While pending the modal stays open and shows a
@@ -655,21 +657,29 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                       <div className={`sb-side__badge sb-side__badge--${s.color}`}>{s.color === "shiro" ? "Shiro" : "Aka"}</div>
                       <div className="sb-name">{s.name}</div>
                       <div className="sb-slots">
-                        {[0, 1].map((i) => {
+                        {(() => {
                           // Display parity with the shared scoreboard and the
                           // team editor: a RECORDED hantei shows Ht in the
-                          // winner's free slot (resultSlot, the one owner of
-                          // which slot), so the operator's board matches the
-                          // public display for the same match. Display only:
-                          // the slots are already disabled once a hantei is
-                          // recorded, and undo remains the re-edit flow.
-                          const isHt = recordedHtKey === s.key && resultSlot(s.pts).slot === i;
-                          return (
-                            <button key={i} className={`sb-slot ${(isHt || s.pts[i]) ? "sb-slot--filled" : ""}`} onClick={() => removePt(s.key, i)} disabled={decidedByHantei} title={decidedByHantei ? (initialDecidedByHantei ? "Locked: hantei already recorded" : "Hantei armed: choose a winner above, or cancel") : "Click to remove"}>
-                              {isHt ? "Ht" : (s.pts[i] || "·")}
-                            </button>
-                          );
-                        })}
+                          // winner's free slot, via the same hanteiSlot the
+                          // team editor uses (which delegates to resultSlot,
+                          // the one owner of which-slot) — no inline
+                          // restatement of the rule. Tie-gated on the CURRENT
+                          // pts like the scoreboard's markable: a drifted
+                          // decidedByHantei on an untied line shows letters
+                          // plainly here too. Display only: the slots are
+                          // already disabled once a hantei is recorded, and
+                          // undo remains the re-edit flow.
+                          const tied = aPts.length === bPts.length;
+                          const htSlot = hanteiSlot(tied && recordedHtKey === s.key, s.pts);
+                          return [0, 1].map((i) => {
+                            const isHt = htSlot === i;
+                            return (
+                              <button key={i} className={`sb-slot ${(isHt || s.pts[i]) ? "sb-slot--filled" : ""}`} onClick={() => removePt(s.key, i)} disabled={decidedByHantei} title={decidedByHantei ? (initialDecidedByHantei ? "Locked: hantei already recorded" : "Hantei armed: choose a winner above, or cancel") : "Click to remove"}>
+                                {isHt ? "Ht" : (s.pts[i] || "·")}
+                              </button>
+                            );
+                          });
+                        })()}
                       </div>
                       <div className="sb-points-grid">
                         {getIpponButtons(isNaginata).map((cc) => (

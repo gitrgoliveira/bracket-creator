@@ -29,12 +29,18 @@
 // between the competitors, and a mark naming one of them does not belong there.
 //
 // `loose` reports that both slots were already full. What a caller does with
-// that is ITS policy, and the two consumers deliberately differ: the read-only
-// scoreboard renders the mark beside the slots (dropping it would leave the
-// verdict visible nowhere), while the team editor drops it because its armed
-// hantei row is a second always-mounted channel for the same verdict. This is
-// reachable, not theoretical: a daihyosen may be taken to hantei from any tied
-// scoreline, 2-2 included.
+// that is ITS policy, and the three consumers deliberately differ:
+//   - the read-only scoreboard (resultCells, match_scoreboard.jsx) renders the
+//     mark beside the slots — dropping it would leave the verdict visible
+//     nowhere on that surface;
+//   - the team editor (hanteiSlot, admin_scoring_team.jsx) drops it, because
+//     its armed hantei row is a second always-mounted channel for the verdict;
+//   - the individual editor (admin_scoring_individual.jsx) drops it too — its
+//     hantei panel shows the recorded verdict, and its slots are locked with a
+//     "hantei already recorded" title.
+// Change the contract and all three call sites must be re-checked (CLAUDE.md).
+// The loose case is reachable, not theoretical: a daihyosen may be taken to
+// hantei from any tied scoreline, 2-2 included.
 export function resultSlot(cells) {
   const pair = cells || [];
   const slot = [pair[0] || "", pair[1] || ""].findIndex(v => !v);

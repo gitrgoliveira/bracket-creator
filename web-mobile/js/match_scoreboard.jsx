@@ -215,7 +215,11 @@ function centreMarks(sub, matchSideA, matchSideB) {
   // plainly rather than fabricating a judges'-decision mark. The maru pair
   // for an ippon-less default win (fusensho/kiken/bye) still gates on
   // noIppons, because there the empty letters are what make room for it.
-  const lettersTied = lettersA.filter(Boolean).length === lettersB.filter(Boolean).length;
+  // Tied is judged on the RAW recorded ippons, not the display pair:
+  // ipponLetters caps each side at the 2 sanbon slots, so a drifted 3-2 row
+  // would compare as 2-2 and pass the gate it is meant to fail.
+  const realCount = (arr) => (arr || []).filter(x => x && x !== "•").length;
+  const lettersTied = realCount(sub.ipponsA) === realCount(sub.ipponsB);
   const markable = (sub.decidedByHantei && lettersTied) || noIppons;
   const winnerIsShiro = !!(sub.winner &&
     (sub.winner === sub.sideB || sub.winner === sub.teamB || (matchSideB && sub.winner === matchSideB)));
@@ -327,8 +331,16 @@ export function teamIVPW(subResults, matchSideA, matchSideB) {
     // Mirror Go backend pattern (scoring.go): check match-level side name
     // first, then sub-level side name (guarded against "" == "" false
     // positive). Quick-scored bouts have empty sub-level sides.
-    const isAkaWin = s.winner && (s.winner === matchSideA || (s.sideA && s.winner === s.sideA));
-    const isShiroWin = s.winner && (s.winner === matchSideB || (s.sideB && s.winner === s.sideB));
+    // A winner naming BOTH sides (two same-name teams) attributes to neither
+    // by name — matchSideA-first would credit every such bout to Aka while
+    // the bout rows (centreMarks' unattributable guard) mark nobody, and the
+    // two halves of one scoreboard would contradict each other. The ippon
+    // comparison below still decides the IV where the letters differ.
+    const winnerNamesBoth = s.winner &&
+      ((matchSideA && s.winner === matchSideA && s.winner === matchSideB) ||
+       (s.sideA && s.sideB && s.winner === s.sideA && s.winner === s.sideB));
+    const isAkaWin = !winnerNamesBoth && s.winner && (s.winner === matchSideA || (s.sideA && s.winner === s.sideA));
+    const isShiroWin = !winnerNamesBoth && s.winner && (s.winner === matchSideB || (s.sideB && s.winner === s.sideB));
     if (isAkaWin) ivAka++;
     else if (isShiroWin) ivShiro++;
     else if (b > a) ivShiro++;

@@ -158,20 +158,20 @@ function normalizeMatch(m, playerMap) {
         norm.sideB = { id: "", name: "" };
     }
     if (typeof norm.winner === "string" && norm.winner) {
-        // A name-only winner lookup is AMBIGUOUS when both sides carry that
-        // same name (two same-name participants meeting): playerMap[name]
-        // returns whichever twin was added last, and stamping its uuid would
-        // attribute the win to an arbitrary side (~a coin flip) — the display
-        // layer would then mark the wrong competitor. scoring.go deliberately
-        // leaves WinnerID empty in exactly this case ("Equal counts
-        // (hantei/undecidable) ... leave WinnerID empty → name fallback"), so
-        // mirror it: keep the identity name-only and let display code treat
-        // the winner as unattributable rather than mis-attributed.
-        const nameAmbiguous = !m.winnerId
-            && norm.sideA?.name === norm.winner && norm.sideB?.name === norm.winner;
-        norm.winner = nameAmbiguous
-            ? { id: "", name: norm.winner }
-            : resolveSide(norm.winner, m.winnerId);
+        // Same-name pair with no winnerId (scoring.go deliberately leaves
+        // WinnerID empty on an equal-count hantei): the name lookup stamps an
+        // ARBITRARY twin's uuid, wrong ~half the time. Do NOT "fix" this by
+        // blanking the id — that was tried and reverted. A blanked id is not
+        // honoured uniformly: winnerSideLR and sideAWon name-fall-back to a
+        // deterministic side, MatchCard/league cells drop or double the loss,
+        // and the editor's score.ippons seeding (which keys winner.id ===
+        // side.id) matches NEITHER side, so reopening the match seeded empty
+        // slots and the next save wiped the recorded point — the 4d602de2
+        // regression class. Arbitrary-but-CONSISTENT attribution is the
+        // codebase-wide status quo (Go's SideMarksLR also picks the first
+        // name match); the truth is simply not in the data, and every
+        // surface agreeing on one side beats surfaces disagreeing.
+        norm.winner = resolveSide(norm.winner, m.winnerId);
     }
     // Did sideA win? Prefer matching by stable id (sideA/winner are resolved to
     // {id,name} above with the server's authoritative flat ids), so same-name /

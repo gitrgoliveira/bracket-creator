@@ -75,6 +75,18 @@ describe('match_scoreboard: teamIVPW', () => {
     expect(teamIVPW(subs, 'Team A', 'Team B')).toEqual({ ivShiro: 0, ivAka: 0, pwShiro: 0, pwAka: 0 });
   });
 
+  it('attributes NO IV by name when the winner matches both sides (same-name teams)', () => {
+    // matchSideA-first would credit every such bout to Aka while the bout
+    // rows mark nobody (centreMarks' unattributable guard): the summary and
+    // the rows must agree. The ippon comparison still decides where letters
+    // differ, so the second bout below goes to shiro on points.
+    const subs = [
+      { position: 1, sideA: '', sideB: '', winner: 'Seibukan', ipponsA: ['M'], ipponsB: ['M'] },
+      { position: 2, sideA: '', sideB: '', winner: 'Seibukan', ipponsA: [], ipponsB: ['M', 'K'] },
+    ];
+    expect(teamIVPW(subs, 'Seibukan', 'Seibukan')).toEqual({ ivShiro: 1, ivAka: 0, pwShiro: 3, pwAka: 1 });
+  });
+
   it('falls back to ippon comparison when winner matches neither side', () => {
     const subs = [
       { position: 1, sideA: 'Aka P', sideB: 'Shiro P', winner: '', ipponsB: ['M', 'K'], ipponsA: [] },
@@ -296,6 +308,18 @@ describe('match_scoreboard components', () => {
     const tree = runtime.mount(BoutSubRow, { sub, index: 0, lineupA: null, lineupB: null, teamSize: 5 });
     expect(collectText(tree)).not.toContain('Ht');
     expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-a')).toBeNull();
+  });
+
+  it('judges tied on RAW ippons, not the capped display pair (3-2 is untied)', () => {
+    // ipponLetters caps each side at the 2 sanbon slots, so a drifted 3-2 row
+    // would read 2-2 through the display pair and pass the tie gate. The gate
+    // counts the raw arrays instead.
+    const sub = {
+      position: 1, sideA: 'Aka P', sideB: 'Shiro P',
+      ipponsA: ['M', 'K', 'D'], ipponsB: ['M', 'K'], decidedByHantei: true, winner: 'Aka P',
+    };
+    const tree = runtime.mount(BoutSubRow, { sub, index: 0, lineupA: null, lineupB: null, teamSize: 5 });
+    expect(collectText(tree)).not.toContain('Ht');
   });
 
   it('marks NEITHER side when the winner matches both (same-name teams)', () => {

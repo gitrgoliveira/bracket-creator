@@ -543,28 +543,6 @@ describe('match_scoreboard components', () => {
     expect(text).toContain('White Team'); expect(text).toContain('Red Team');
   });
 
-  it('TeamScoreboard renders the ENCOUNTER middle mark in the summary row centre', () => {
-    // The summary row is the encounter's own FIK row, so it is where the
-    // match-level X/(E)/(DH) belongs. The bout rows carry only per-bout
-    // middles, so this centre is the encounter mark's only home on any surface
-    // that renders the row (the TV board's header chip was removed).
-    const subResults = [{ position: 1, ipponsB: ['M'], ipponsA: [] }];
-    const tree = runtime.mount(TeamScoreboard, { subResults, lineupA: null, lineupB: null, teamSize: 5, showDH: false, middle: '(E)' });
-    const centre = findInTree(tree, n => n?.props?.['data-testid'] === 'team-summary-middle');
-    expect(centre).toBeTruthy();
-    expect(collectText(centre)).toBe('(E)');
-  });
-
-  it('TeamScoreboard leaves the summary centre EMPTY when there is no special mark', () => {
-    // Not a "vs" separator: the team-name row above owns that. A blank centre
-    // keeps the summary row reading as IV/PW figures only.
-    const subResults = [{ position: 1, ipponsB: ['M'], ipponsA: [] }];
-    const tree = runtime.mount(TeamScoreboard, { subResults, lineupA: null, lineupB: null, teamSize: 5, showDH: false });
-    const centre = findInTree(tree, n => n?.props?.['data-testid'] === 'team-summary-middle');
-    expect(centre).toBeTruthy();
-    expect(collectText(centre)).toBe('');
-  });
-
   it('BoutSubRow puts the hantei "Ht" mark on the winning side, not the centre (mp-13y #3/#7)', () => {
     const sub = { position: -1, sideA: 'Aka T', sideB: 'Shiro T', winner: 'Aka T', ipponsA: [], ipponsB: [], decidedByHantei: true };
     const tree = runtime.mount(BoutSubRow, { sub, index: 0, lineupA: null, lineupB: null, teamSize: 2, isDH: true });

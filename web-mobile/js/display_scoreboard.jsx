@@ -76,10 +76,12 @@ function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, is
     // chip duplicating X/(E)/(DH) ~10cm above it was an error. The plain
     // "vs" separator stays. (The OBS streaming overlay keeps its chip: it
     // renders no scoreboard row, so the chip is the mark's only home there.)
-    // Both branches below do render that centre: IndividualScore through its
-    // synthesised sub, TeamScoreboard through the `middle` prop threaded into
-    // its summary row. Removing the chip WITHOUT that prop left team boards
-    // showing the mark nowhere, so the two must stay wired together.
+    // A TEAM board needs no replacement centre. A team bout's score renders the
+    // same way in every format: cells either side of a centre, on that BOUT's
+    // row. The summary row is an aggregate (IV/PW), not a bout, so nothing
+    // belongs in its centre. Threading the match-level mark in there was tried
+    // and reverted: it put two (E) marks on one board, stacked, since a
+    // match-level mark on a team encounter only ever mirrors a bout-level one.
     // Header subtitle: competition name + phase, joined only when both exist
     // (phaseLabel is "" for league, so no dangling " · ").
     const compName = promoted.competition?.name || "";
@@ -142,7 +144,6 @@ function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, is
                         shiroName={shiroTeam} akaName={akaTeam}
                         matchSideA={promoted.match.sideA?.name || (typeof promoted.match.sideA === "string" ? promoted.match.sideA : "")}
                         matchSideB={promoted.match.sideB?.name || (typeof promoted.match.sideB === "string" ? promoted.match.sideB : "")}
-                        middle={(typeof window.matchMiddleMark === "function" && window.matchMiddleMark(promoted.match)) || ""}
                         kachinuki={teamMatchTypeFor(promoted.competition) === "kachinuki"} />
                 </div>
             ) : (

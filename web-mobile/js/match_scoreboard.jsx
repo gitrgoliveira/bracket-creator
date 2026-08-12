@@ -438,15 +438,7 @@ export function IndividualScore({ match, variant, showNames, withZekkenName }) {
 // kachinuki (boolean, default false): when true the match uses winner-stays
 // ordering. Row count is driven by recorded bouts (never padded to teamSize)
 // and name resolution is server-bout-first (see BoutSubRow).
-// `middle` is the ENCOUNTER-level middle mark ("" | X | (E) | (DH)), which the
-// caller must obtain from matchMiddleMark(match) so the rule keeps its single
-// owner. It belongs in the §277 summary row's centre because that row IS the
-// encounter's FIK row: the bout rows below carry only their own per-bout
-// middles, so without this a team encounter's match-level X or (E) has nowhere
-// to render at all. (That was the regression from removing the TV header chip:
-// the chip was a duplicate for INDIVIDUAL boards, whose row centre already
-// showed the mark, but for team boards it had been the only home.)
-export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH, variant, shiroName, akaName, matchSideA, matchSideB, isRunning, kachinuki, middle }) {
+export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH, variant, shiroName, akaName, matchSideA, matchSideB, isRunning, kachinuki }) {
   // Real numbered bouts only: exclude the daihyosen sentinel and any malformed
   // negative position (mirrors the Go-side defensive skip).
   const regular = (subResults || []).filter(s => s.position > DAIHYOSEN_POSITION);
@@ -508,7 +500,7 @@ export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH,
             <span className="msb-slot msb-sum"><abbr className="msb-lab" title="Individual Victories">IV</abbr>{ivShiro}</span>
             <span className="msb-slot msb-sum"><abbr className="msb-lab" title="Points Won">PW</abbr>{pwShiro}</span>
           </span>
-          <span className="msb-vs" data-testid="team-summary-middle">{middle || ""}</span>
+          <span className="msb-vs" />
           <span className="msb-slots msb-slots--aka">
             <span className="msb-slot msb-slot--aka msb-sum"><abbr className="msb-lab" title="Points Won">PW</abbr>{pwAka}</span>
             <span className="msb-slot msb-slot--aka msb-sum"><abbr className="msb-lab" title="Individual Victories">IV</abbr>{ivAka}</span>

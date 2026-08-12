@@ -543,6 +543,34 @@ describe('match_scoreboard components', () => {
     expect(text).toContain('White Team'); expect(text).toContain('Red Team');
   });
 
+  it('a DRAWN team encounter leaves the summary centre bare (the mark is the drawn BOUT\'s)', () => {
+    // Operator ruling: a middle mark belongs only in the middle of an
+    // INDIVIDUAL FIGHT. The summary row is an aggregate (IV/PW), not a fight,
+    // so its centre stays bare even when the encounter itself is tied - here
+    // IV 1-1, PW 2-2, decided as a hikiwake. The X for the drawn bout 3 lives
+    // in that BOUT's centre ('BoutSubRow marks a hikiwake with X' above);
+    // nothing is echoed up to the summary. Threading a match-level mark into
+    // this spacer was tried twice and rejected both times, so pin it empty.
+    const subResults = [
+      { position: 1, sideA: 'K1', sideB: 'O1', ipponsA: ['M'], ipponsB: [], winner: 'K1' },
+      { position: 2, sideA: 'K2', sideB: 'O2', ipponsA: [], ipponsB: ['K'], winner: 'O2' },
+      { position: 3, sideA: 'K3', sideB: 'O3', ipponsA: ['M'], ipponsB: ['M'], decision: 'hikiwake' },
+    ];
+    const tree = runtime.mount(TeamScoreboard, {
+      subResults, lineupA: null, lineupB: null, teamSize: 3, showDH: false,
+      matchSideA: 'Kyoto', matchSideB: 'Osaka',
+    });
+    // Guard the fixture: the encounter really is tied, so an aggregate-level
+    // mark would have something to describe if the rule allowed one.
+    const summary = findInTree(tree, n => n?.props?.['data-testid'] === 'team-summary');
+    expect(summary).toBeTruthy();
+    expect(collectText(summary)).toContain('IV');
+    const summaryCentre = findInTree(summary, n =>
+      typeof n?.props?.className === 'string' && /\bmsb-vs\b/.test(n.props.className));
+    expect(summaryCentre).toBeTruthy();
+    expect(collectText(summaryCentre)).toBe('');
+  });
+
   it('BoutSubRow puts the hantei "Ht" mark on the winning side, not the centre (mp-13y #3/#7)', () => {
     const sub = { position: -1, sideA: 'Aka T', sideB: 'Shiro T', winner: 'Aka T', ipponsA: [], ipponsB: [], decidedByHantei: true };
     const tree = runtime.mount(BoutSubRow, { sub, index: 0, lineupA: null, lineupB: null, teamSize: 2, isDH: true });

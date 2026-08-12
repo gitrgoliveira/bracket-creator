@@ -76,12 +76,12 @@ function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, is
     // chip duplicating X/(E)/(DH) ~10cm above it was an error. The plain
     // "vs" separator stays. (The OBS streaming overlay keeps its chip: it
     // renders no scoreboard row, so the chip is the mark's only home there.)
-    // A TEAM board needs no replacement centre. A team bout's score renders the
-    // same way in every format: cells either side of a centre, on that BOUT's
-    // row. The summary row is an aggregate (IV/PW), not a bout, so nothing
-    // belongs in its centre. Threading the match-level mark in there was tried
-    // and reverted: it put two (E) marks on one board, stacked, since a
-    // match-level mark on a team encounter only ever mirrors a bout-level one.
+    // A TEAM board needs no replacement centre. A middle mark belongs only in
+    // the middle of an INDIVIDUAL FIGHT (operator ruling), for the whole set:
+    // X, (E), (DH). The summary row is an aggregate (IV/PW), not a fight, so
+    // nothing goes in its centre - not even when the encounter itself is drawn
+    // on equal IV/PW. Threading the match-level mark in there was tried and
+    // reverted: it put two (E) marks on one board, stacked.
     // Header subtitle: competition name + phase, joined only when both exist
     // (phaseLabel is "" for league, so no dangling " · ").
     const compName = promoted.competition?.name || "";

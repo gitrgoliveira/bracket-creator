@@ -726,32 +726,31 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // the stored winner to the losing side on the next save. Unattributable
   // seeds "": the panel opens ARMED with no side picked, so the operator
   // re-states the verdict rather than the editor guessing it.
-  const initialDaihyosenHantei = (() => {
+  // Frozen at MOUNT via a lazy initializer: this is the baseline the state
+  // was seeded from and isDirty compares against. Recomputing per render let
+  // an SSE-driven m prop update mid-edit move the baseline under the
+  // comparison and flip isDirty spuriously.
+  const [initialDaihyosenHantei] = useStateA(() => {
     if (!existingDaihyosen?.decidedByHantei || !existingDaihyosen.winner) return "";
     // The exclusive-attribution rule is hanteiWinnerKey (shared with the
     // individual editor's chip), not restated here.
     const key = hanteiWinnerKey({ winner: existingDaihyosen.winner, sideA: m.sideA, sideB: m.sideB });
     if (key) return key;
-    // SAME-NAME teams (duplicate check rejects same name AND dojo only):
-    // display attribution is ambiguous but the round-trip is LOSSLESS -
-    // either side serializes the identical shared name - and seeding ""
-    // would strand a completed match behind "cannot mark completed with no
-    // winner". Rename drift (matches neither) stays "": the operator
-    // re-picks, and buildPatch passes the stored verdict through untouched
-    // in the meantime (preserveStoredDaihyosenVerdict).
     if (existingDaihyosen.winner === nameOf(m.sideA) && existingDaihyosen.winner === nameOf(m.sideB)) {
-      // SAME-NAME teams: the NAME round-trips identically either way, but the
-      // match-level winner ID does not - buildPatch serializes winner as the
-      // seeded side's object and toBackendMatchResult stamps its uuid, so
-      // defaulting to "a" when team B holds the stored WinnerID would flip
-      // the persisted identity on a correction save. Prefer the side the
-      // match-level winner id names; only with no usable id default to "a".
+      // A winner naming BOTH sides is INVALID data (team names are unique by
+      // rule) handled defensively: the NAME round-trips identically either
+      // way, but the match-level winner ID does not - buildPatch serializes
+      // winner as the seeded side's object and toBackendMatchResult stamps
+      // its uuid, so defaulting to "a" when team B holds the stored WinnerID
+      // would flip the persisted identity on a correction save. Prefer the
+      // side the match-level winner id names; only with no usable id default
+      // to "a" (Go's own side-A-first order).
       const wid = m.winner?.id || "";
       if (wid && wid === (m.sideB?.id || null)) return "b";
       return "a";
     }
     return "";
-  })();
+  });
   const [daihyosenHantei, setDaihyosenHantei] = useStateA(initialDaihyosenHantei);
   // Armed follows the RECORDED flag, not the resolved side, so an
   // unattributable stored verdict still opens the panel for re-picking
@@ -1629,6 +1628,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // flagged writes (handlers_match.go scoreRequestBody).
   const buildPatch = (targetStatus, opts = {}) => {
     if (targetStatus === "scheduled") return { winner: null, status: "scheduled", score: null, ipponsA: [], ipponsB: [], subResults: [] };
+    // ONE preserve verdict for this save: the sub-row overlay and the
+    // match-level winner below must agree by construction.
+    const dhKeep = preserveStoredDaihyosenVerdict({ armed: daihyosenHanteiArmed, pickedSide: daihyosenHantei, tied: daihyosenTied, existingDaihyosen });
     let subResults = subs.map((s, idx) => {
       const t = subTotals[idx];
       const isDaihyo = idx === daihyosenIdx;
@@ -1676,8 +1678,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       // independently: encho is optional for a hantei decision.
       if (isDaihyo) {
         Object.assign(entry, daihyosenEnchoFields({ enchoPeriodCount, daihyosenTied, daihyosenHantei }));
-        const keep = preserveStoredDaihyosenVerdict({ armed: daihyosenHanteiArmed, pickedSide: daihyosenHantei, tied: daihyosenTied, existingDaihyosen });
-        if (keep) Object.assign(entry, keep);
+        if (dhKeep) Object.assign(entry, dhKeep);
       } else if (isKachinuki && s.encho > 0) {
         // mp-gmcg: numbered-bout encho is the KACHINUKI knockout-tie
         // resolution (same pair keeps fighting the same bout; daihyosen
@@ -1700,7 +1701,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // null + hikiwake here while the sub row keeps its verdict silently
     // flipped a pool encounter's W/L/T to a draw (knockout saves bounced off
     // "cannot mark completed with no winner").
-    const dhKeep = preserveStoredDaihyosenVerdict({ armed: daihyosenHanteiArmed, pickedSide: daihyosenHantei, tied: daihyosenTied, existingDaihyosen });
     const winner = teamWinner === "a" ? m.sideA : teamWinner === "b" ? m.sideB : (dhKeep ? (m.winner || null) : null);
     // correctionReason rides any write that AMENDS a finalized result: a
     // correction to a completed match, and (mp-gmcg) the write that completes

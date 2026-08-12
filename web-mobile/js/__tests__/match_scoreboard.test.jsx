@@ -75,12 +75,12 @@ describe('match_scoreboard: teamIVPW', () => {
     expect(teamIVPW(subs, 'Team A', 'Team B')).toEqual({ ivShiro: 0, ivAka: 0, pwShiro: 0, pwAka: 0 });
   });
 
-  it('credits AKA when the winner matches both sides, matching Go (same-name teams)', () => {
-    // Go's isWinForSide / TeamResultFrom / SideMarksLR all resolve a winner
-    // naming both sides to side A (aka) by check order, and the server
-    // standings and Excel export are computed from those. The JS summary must
-    // agree with them - an earlier credit-nobody rule made the on-screen
-    // summary contradict the standings table on the same page.
+  it('credits AKA when the winner matches both sides, matching Go (invalid data)', () => {
+    // A winner naming both sides is INVALID data (team names are unique by
+    // rule); this pins the DEFENSIVE resolution: Go's isWinForSide /
+    // TeamResultFrom / SideMarksLR all resolve it to side A (aka) by check
+    // order, and the JS summary must agree with the server's numbers rather
+    // than credit nobody and contradict the standings table.
     const subs = [
       { position: 1, sideA: '', sideB: '', winner: 'Seibukan', ipponsA: ['M'], ipponsB: ['M'] },
     ];
@@ -335,11 +335,12 @@ describe('match_scoreboard components', () => {
   });
 
   it('marks AKA (never both, never neither) when the winner matches both sides', () => {
-    // Two teams sharing a name (different dojos) meet: sub.winner string-
-    // matches both match-level sides. Marking BOTH asserted two winners (the
-    // original bug); marking NEITHER made the verdict invisible AND
-    // contradicted the Go-computed standings/export, which resolve this case
-    // to side A by check order. One side - the same side Go picks - wears it.
+    // A winner string-matching both match-level sides is INVALID data (team
+    // names are unique by rule; only drifted or hand-edited files produce
+    // it). Defensive resolution: marking BOTH asserted two winners (the
+    // original bug); marking NEITHER hid the verdict AND contradicted the
+    // Go-computed standings/export, which resolve this case to side A by
+    // check order. One side - the same side Go picks - wears it.
     const sub = {
       position: -1, ipponsA: ['M'], ipponsB: ['M'],
       decidedByHantei: true, winner: 'Seibukan',
@@ -354,11 +355,10 @@ describe('match_scoreboard components', () => {
   });
 
   it('IndividualScore: with both slots full the Ht rides beside them, never the centre', () => {
-    // resultSlot reports `loose` when there is no free slot. Drifted/hand-edited
-    // stored data can reach it: hantei only requires EQUAL ippon counts, so a
-    // 2-2 passes validation even though sanbon-shobu should end at 2. The mark
-    // is then rendered beside that side's slots rather than dropped, and still
-    // not in the shared centre.
+    // resultSlot reports `loose` when there is no free slot. 2-2 is IMPOSSIBLE
+    // under the rules and unreachable through any UI (ippon entry stops at 2);
+    // only hand-corrupted data reaches this branch, whose sole job is to never
+    // overwrite a recorded point and never write the shared centre.
     const match = {
       sideA: { id: 'p1', name: 'Aka' }, sideB: { id: 'p2', name: 'Shiro' },
       ipponsA: ['M', 'K'], ipponsB: ['M', 'K'], decidedByHantei: true,

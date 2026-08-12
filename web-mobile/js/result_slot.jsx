@@ -40,8 +40,10 @@
 //     the team panel), and its slots are locked with a "hantei already
 //     recorded" title.
 // Change the contract and all three call sites must be re-checked (CLAUDE.md).
-// The loose case is reachable, not theoretical: a daihyosen may be taken to
-// hantei from any tied scoreline, 2-2 included.
+// The loose case is IMPOSSIBLE under the rules (sanbon-shobu ends at 2, and
+// the editors' ippon entry stops both sides at 2, so no UI can produce 2-2;
+// server validation checks only equality, not the bound). The branch exists
+// solely so hand-corrupted data can never overwrite a recorded point.
 export function resultSlot(cells) {
   const pair = cells || [];
   const slot = [pair[0] || "", pair[1] || ""].findIndex(v => !v);

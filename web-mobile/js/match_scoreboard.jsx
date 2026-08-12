@@ -138,8 +138,9 @@ function ipponLetters(arr) {
 // cross-level chain (sub side → daihyosen team alias → match-level side),
 // shared by centreMarks' marks and teamIVPW's IV attribution so the bout rows
 // and the summary row can never disagree about who a winner names. A winner
-// matching BOTH sides (same-name teams, or drifted mixed-level data) resolves
-// to AKA — the side-A-first order Go uses everywhere for the identical case
+// matching BOTH sides is INVALID data (team names are unique by rule; only
+// drifted or hand-edited files can produce it) and resolves defensively to
+// AKA — the side-A-first order Go uses everywhere for the identical case
 // (isWinForSide in engine/scoring.go, TeamResultFrom in state/team_result.go,
 // SideMarksLR in export/suffix.go) — so the on-screen rows, the IV summary,
 // the server standings and the Excel export all agree on the SAME arbitrary
@@ -242,9 +243,9 @@ function centreMarks(sub, matchSideA, matchSideB) {
   // Winner attribution runs through subWinnerSides, the one cross-level chain
   // shared with teamIVPW (aka-first on a both-sides match, aligning every JS
   // surface with the Go standings/export for same-name teams).
-  const wsides = subWinnerSides(sub, matchSideA, matchSideB);
-  const winShiro = markable && wsides.shiro;
-  const winAka = markable && wsides.aka;
+  const wsides = markable ? subWinnerSides(sub, matchSideA, matchSideB) : { shiro: false, aka: false };
+  const winShiro = wsides.shiro;
+  const winAka = wsides.aka;
   // Ht behaves like a point and rides beside the competitor it names; the slot
   // it takes is the shared rule in result_slot.jsx (which the team editor uses
   // too), so it is not restated here. `loose` means both slots were full, and

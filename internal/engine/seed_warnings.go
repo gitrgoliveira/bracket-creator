@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"fmt"
+
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 )
 
@@ -34,4 +36,52 @@ func (e *Engine) SeedWarnings(id string) []string {
 		return nil
 	}
 	return helper.SeedPlacementWarnings(draw, pools, numCourts)
+}
+
+// seedingProblem turns a seed-validation failure into a sentence an operator can
+// act on, naming the ranks that are actually missing rather than restating the
+// rule.
+//
+// The admin console's seeding panel already says "seed gap detected: rank 1, 2,
+// 3 are missing", but the draw can be started from screens where that panel is
+// not on show, and "seed ranks must be sequential without gaps" alone does not
+// say WHICH rank to go and type. So this re-reads the stored set (raw, since the
+// validating read is what just refused it) and works out the gap.
+//
+// Falls back to the underlying error whenever the set cannot be re-read or the
+// fault is something other than a gap, e.g. a duplicate rank, which the error
+// already describes precisely.
+func (e *Engine) seedingProblem(id string, cause error) string {
+	raw, rerr := e.store.LoadSeedsRaw(id)
+	if rerr != nil || len(raw) == 0 {
+		return fmt.Sprintf("competition %s: %v", id, cause)
+	}
+
+	present := make(map[int]bool, len(raw))
+	highest := 0
+	for _, s := range raw {
+		present[s.SeedRank] = true
+		if s.SeedRank > highest {
+			highest = s.SeedRank
+		}
+	}
+	missing := []int{}
+	for r := 1; r < highest; r++ {
+		if !present[r] {
+			missing = append(missing, r)
+		}
+	}
+	if len(missing) == 0 {
+		return fmt.Sprintf("competition %s: %v", id, cause)
+	}
+	return fmt.Sprintf(
+		"Seeding is incomplete: seed rank%s %s %s not been set, but rank %d has. Set the missing rank%s or clear the seeds, then generate the draw again.",
+		helper.Plural(len(missing)), helper.RankList(missing), haveOrHas(len(missing)), highest, helper.Plural(len(missing)))
+}
+
+func haveOrHas(n int) string {
+	if n == 1 {
+		return "has"
+	}
+	return "have"
 }

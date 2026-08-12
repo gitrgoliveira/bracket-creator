@@ -93,3 +93,65 @@ func TestInvalidSeedAssignmentsSentinelKeepsItsReason(t *testing.T) {
 		})
 	}
 }
+
+// The refusal message must name the ranks the operator has to go and type.
+//
+// "seed ranks must be sequential without gaps" states the rule but not the
+// remedy, and the draw can be started from screens where the seeding panel's own
+// "rank 1, 2, 3 are missing" warning is not on show.
+func TestDrawRefusalNamesTheMissingSeedRanks(t *testing.T) {
+	cases := []struct {
+		name  string
+		seeds []domain.SeedAssignment
+		want  []string
+	}{
+		{
+			name:  "one rank typed first",
+			seeds: []domain.SeedAssignment{{Name: "Alice", SeedRank: 4}},
+			want:  []string{"1, 2 and 3", "have not been set", "rank 4 has"},
+		},
+		{
+			name:  "single missing rank",
+			seeds: []domain.SeedAssignment{{Name: "Alice", SeedRank: 1}, {Name: "Bob", SeedRank: 3}},
+			want:  []string{"seed rank 2", "has not been set", "rank 3 has"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			eng, store, _ := setupTestEngine(t)
+			compID := "seed-message"
+			createTestCompetition(t, store, compID, state.CompFormatMixed, 3)
+			saveTestParticipants(t, store, compID,
+				[]string{"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank"})
+			require.NoError(t, store.SaveSeeds(compID, tc.seeds))
+
+			err := eng.GenerateDraw(compID)
+			require.Error(t, err)
+			for _, want := range tc.want {
+				assert.Containsf(t, err.Error(), want,
+					"the operator must be told what to fix, got: %v", err)
+			}
+			assert.Contains(t, err.Error(), "generate the draw again",
+				"the message must say what to do next: %v", err)
+		})
+	}
+}
+
+// A duplicate rank is not a gap, so the message stays with the precise
+// description the validator already gives rather than inventing a missing rank.
+func TestDrawRefusalKeepsThePreciseReasonWhenItIsNotAGap(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "seed-dup-message"
+	createTestCompetition(t, store, compID, state.CompFormatMixed, 3)
+	saveTestParticipants(t, store, compID,
+		[]string{"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank"})
+	require.NoError(t, store.SaveSeeds(compID, []domain.SeedAssignment{
+		{Name: "Alice", SeedRank: 1}, {Name: "Bob", SeedRank: 1},
+	}))
+
+	err := eng.GenerateDraw(compID)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "duplicate seed rank")
+	assert.NotContains(t, err.Error(), "have not been set",
+		"a duplicate is not a gap and must not be reported as one: %v", err)
+}

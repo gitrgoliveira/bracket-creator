@@ -292,8 +292,20 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 	}
 
 	if opts.WithSeeds {
-		// Merge seeds if they exist.
-		seeds, _ := helper.ParseSeedsFile(s.compPath(compID, "seeds.csv"))
+		// Merge seeds if they exist, VALID OR NOT.
+		//
+		// This is a display read, so it must show what is actually stored. It
+		// used to validate, and a set the operator had not finished entering
+		// (seed 4 typed before 1 to 3, which the seeding panel persists as it
+		// goes) came back as an error, was discarded by the blank identifier
+		// below, and rendered as "0 seeded" with no warning anywhere. The
+		// operator was never told, and their next edit wrote that empty view
+		// back over the file. The admin console already knows how to say "seed
+		// gap detected: rank 1, 2, 3 are missing" -- it just has to be given the
+		// seeds to see it. Refusal belongs at the point seeds are USED (the draw
+		// pipeline, which returns a 400 naming the problem), not at the point
+		// they are shown.
+		seeds, _ := helper.ReadSeedsFileRaw(s.compPath(compID, "seeds.csv"))
 		if len(seeds) > 0 {
 			seedMap := make(map[string]int)
 			for _, sd := range seeds {
@@ -563,7 +575,12 @@ func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenNam
 	if oldName != players[foundIdx].Name {
 		seedsPath = s.compPath(compID, "seeds.csv")
 		var loadErr error
-		seeds, loadErr = helper.ParseSeedsFile(seedsPath)
+		// Raw, not validated: correcting a competitor's spelling must work
+		// while the seeding is still half-entered. Validating here would refuse
+		// the rename and leave seeds.csv naming a competitor who no longer
+		// exists under that name, which is a worse state than the incomplete
+		// seeding the operator is in the middle of fixing.
+		seeds, loadErr = helper.ReadSeedsFileRaw(seedsPath)
 		switch {
 		case loadErr == nil:
 			// seeds loaded; will rename below.

@@ -474,7 +474,11 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		if !ok {
 			return
 		}
-		seeds, err := store.LoadSeeds(id)
+		// Raw: this endpoint SHOWS the operator their seeds, so a set they have
+		// not finished entering has to come back as the ranks they typed rather
+		// than as an HTTP 500. The admin console warns about a gap; refusing to
+		// answer is what stopped it being able to.
+		seeds, err := store.LoadSeedsRaw(id)
 		if err != nil {
 			internalError(c, err)
 			return

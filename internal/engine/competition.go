@@ -807,7 +807,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 		// entering seed 4 before seeds 1 to 3 leaves a gapped seeds.csv that
 		// this refuses to load.
 		if errors.Is(err, domain.ErrInvalidSeedAssignments) {
-			return wrapValidationErrorf(err, "competition %s: %v", id, err)
+			return wrapValidationErrorf(err, "%s", e.seedingProblem(id, err))
 		}
 		return err
 	}

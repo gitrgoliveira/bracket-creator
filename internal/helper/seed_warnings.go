@@ -53,9 +53,9 @@ func SeedPlacementWarnings(draw *KnockoutDraw, pools []Pool, numCourts int) []st
 	if len(ignored) > 0 {
 		warnings = append(warnings, fmt.Sprintf(
 			"Seed%s %s ignored: two seeds must never share a pool, and this competition has %d pool%s for %d seed%s. The draw used seed%s %s.",
-			plural(len(ignored)), rankList(ranksOf(ignored)),
-			len(pools), plural(len(pools)), len(seeds), plural(len(seeds)),
-			plural(len(placed)), rankList(ranksOf(placed))))
+			Plural(len(ignored)), RankList(ranksOf(ignored)),
+			len(pools), Plural(len(pools)), len(seeds), Plural(len(seeds)),
+			Plural(len(placed)), RankList(ranksOf(placed))))
 	}
 	if len(placed) > maxSeedRanks {
 		placed = placed[:maxSeedRanks]
@@ -237,8 +237,11 @@ func ranksOf(seeds []seedPool) []int {
 	return out
 }
 
-// rankList renders seed ranks as "3", "3 and 4" or "3, 4 and 5".
-func rankList(ranks []int) string {
+// RankList renders seed ranks as "3", "3 and 4" or "3, 4 and 5". Exported so
+// the engine's draw-refusal message reads identically to these warnings; two
+// hand-rolled list formatters would drift and an operator would see the same
+// set of ranks written two ways.
+func RankList(ranks []int) string {
 	parts := make([]string, 0, len(ranks))
 	for _, r := range ranks {
 		parts = append(parts, fmt.Sprintf("%d", r))
@@ -252,7 +255,9 @@ func rankList(ranks []int) string {
 	return strings.Join(parts[:len(parts)-1], ", ") + " and " + parts[len(parts)-1]
 }
 
-func plural(n int) string {
+// Plural is the "s" suffix for a count, exported alongside RankList for the
+// same reason.
+func Plural(n int) string {
 	if n == 1 {
 		return ""
 	}

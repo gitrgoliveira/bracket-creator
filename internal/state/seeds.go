@@ -45,6 +45,33 @@ func (s *Store) LoadSeeds(compID string) ([]domain.SeedAssignment, error) {
 	return result, nil
 }
 
+// LoadSeedsRaw returns the stored seed assignments WITHOUT requiring them to be
+// a usable seeding, for callers that need to SHOW the operator what is on disk.
+//
+// LoadSeeds is the right call everywhere seeds are consumed: it refuses an
+// unusable set so a draw can never be built from one. But an operator halfway
+// through entering seeds has an unusable set by definition, and answering "there
+// are no seeds" (or HTTP 500) when they can plainly see the ranks they typed is
+// how the tool stops telling them anything. Show it, warn about it, and refuse
+// to draw with it.
+func (s *Store) LoadSeedsRaw(compID string) ([]domain.SeedAssignment, error) {
+	if err := ValidateCompetitionID(compID); err != nil {
+		return nil, err
+	}
+	mu := s.getCompLock(compID)
+	mu.RLock()
+	defer mu.RUnlock()
+
+	result, err := helper.ReadSeedsFileRaw(s.compPath(compID, "seeds.csv"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []domain.SeedAssignment{}, nil
+		}
+		return nil, err
+	}
+	return result, nil
+}
+
 func (s *Store) SaveSeeds(compID string, assignments []domain.SeedAssignment) error {
 	if err := ValidateCompetitionID(compID); err != nil {
 		return err

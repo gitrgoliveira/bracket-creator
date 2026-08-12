@@ -131,8 +131,8 @@ func TestSeedPlacementWarningsReportsSharedShiaijoOnlyWhenAvoidable(t *testing.T
 }
 
 func TestRankList(t *testing.T) {
-	assert.Equal(t, "none", rankList(nil))
-	assert.Equal(t, "1", rankList([]int{1}))
-	assert.Equal(t, "1 and 2", rankList([]int{1, 2}))
-	assert.Equal(t, "1, 2 and 3", rankList([]int{1, 2, 3}))
+	assert.Equal(t, "none", RankList(nil))
+	assert.Equal(t, "1", RankList([]int{1}))
+	assert.Equal(t, "1 and 2", RankList([]int{1, 2}))
+	assert.Equal(t, "1, 2 and 3", RankList([]int{1, 2, 3}))
 }

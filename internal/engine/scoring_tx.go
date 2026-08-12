@@ -104,6 +104,7 @@ func (e *Engine) recordBracketMatchResultTx(tx state.StoreTx, compID, matchID st
 					}
 					// nil = omitted (preserve stored data); non-nil [] = explicit clear.
 					if result.SubResults != nil {
+						preserveSubHantei(bracket.Rounds[rIdx][mIdx].SubResults, result.SubResults)
 						bracket.Rounds[rIdx][mIdx].SubResults = result.SubResults
 					}
 					// Project persisted sub-results back so the SSE/HTTP response

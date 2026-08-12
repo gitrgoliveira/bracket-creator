@@ -208,7 +208,7 @@ func validateSubBout(prefix string, sr *state.SubMatchResult, allowNumberedEncho
 			}
 		}
 	}
-	if !sr.DecidedByHantei {
+	if !sr.HanteiDecided() {
 		return nil
 	}
 	if sr.Position != state.DaihyosenSubPosition {

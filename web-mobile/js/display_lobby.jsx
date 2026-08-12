@@ -110,7 +110,7 @@ function LobbyMatchCell({ slot, rowKind }) {
         );
     }
 
-    const { kind, match, competition, isBracket, roundIndex, totalRounds } = slot;
+    const { match, competition, isBracket, roundIndex, totalRounds } = slot;
     const zekken = !!(competition && competition.withZekkenName);
 
     let cellBg = LOBBY_COLORS.schedBg;

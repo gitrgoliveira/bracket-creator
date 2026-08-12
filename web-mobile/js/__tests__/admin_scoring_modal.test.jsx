@@ -256,11 +256,15 @@ describe('daihyosenEnchoFields (mp-4pc encho/hantei wire gating)', () => {
       .toEqual({ encho: { periodCount: 2 }, decidedByHantei: true });
   });
 
-  it('emits encho only (no hantei) when not tied or not armed', () => {
+  it('emits an EXPLICIT decidedByHantei:false when not tied or not armed', () => {
+    // Tri-state wire contract: this editor always has a say about the
+    // verdict, so "no hantei" travels as explicit false. Omission is
+    // reserved for verdict-SILENT writers (stale snapshots, quick-score),
+    // which the server preserves a stored verdict against.
     expect(daihyosenEnchoFields({ enchoPeriodCount: 1, daihyosenTied: false, daihyosenHantei: 'a' }))
-      .toEqual({ encho: { periodCount: 1 } });
+      .toEqual({ decidedByHantei: false, encho: { periodCount: 1 } });
     expect(daihyosenEnchoFields({ enchoPeriodCount: 1, daihyosenTied: true, daihyosenHantei: '' }))
-      .toEqual({ encho: { periodCount: 1 } });
+      .toEqual({ decidedByHantei: false, encho: { periodCount: 1 } });
   });
 
   it('emits hantei WITHOUT encho when armed on a tied bout and no overtime', () => {
@@ -277,8 +281,9 @@ describe('daihyosenEnchoFields (mp-4pc encho/hantei wire gating)', () => {
       .toEqual({ decidedByHantei: true });
   });
 
-  it('emits nothing when no encho and hantei not armed', () => {
-    expect(daihyosenEnchoFields({ enchoPeriodCount: 0, daihyosenTied: false, daihyosenHantei: '' })).toEqual({});
+  it('emits only the explicit false when no encho and hantei not armed', () => {
+    expect(daihyosenEnchoFields({ enchoPeriodCount: 0, daihyosenTied: false, daihyosenHantei: '' }))
+      .toEqual({ decidedByHantei: false });
   });
 });
 

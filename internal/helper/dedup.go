@@ -130,6 +130,30 @@ func CheckDuplicateEntriesByNameDojo(entries [][2]string) []string {
 	return out
 }
 
+// CheckDuplicateEntriesByName scans for duplicate NAMES alone, ignoring dojo.
+// Team competitions use this: a team's name is its identity on the wire, in
+// standings and in sub-bout winner attribution, so two teams may not share a
+// name even from different dojos (individuals may: they are disambiguated by
+// participant uuid, which team-name references in results do not carry).
+// Same normalization as the (name, dojo) check; returns colliding names.
+func CheckDuplicateEntriesByName(names []string) []string {
+	seen := make(map[string]string, len(names))
+	seenDupes := make(map[string]bool)
+	var out []string
+	for _, n := range names {
+		k := NormalizeParticipantName(n)
+		if _, exists := seen[k]; exists {
+			if !seenDupes[k] {
+				seenDupes[k] = true
+				out = append(out, seen[k])
+			}
+		} else {
+			seen[k] = strings.TrimSpace(n)
+		}
+	}
+	return out
+}
+
 // tokenSet splits a normalized name into its whitespace-separated tokens and
 // returns them as a set.
 func tokenSet(normalized string) map[string]struct{} {

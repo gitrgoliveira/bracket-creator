@@ -115,7 +115,7 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			// bout), validateSubBout does not validate sub.Decision, so an
 			// acted-on bout can carry a decision without a winner.
 			dh := match.SubResults[dhIdx]
-			if len(dh.IpponsA) > 0 || len(dh.IpponsB) > 0 || dh.Winner != "" || dh.DecidedByHantei ||
+			if len(dh.IpponsA) > 0 || len(dh.IpponsB) > 0 || dh.Winner != "" || dh.HanteiDecided() ||
 				dh.HansokuA > 0 || dh.HansokuB > 0 ||
 				(dh.Decision != "" && dh.Decision != string(domain.DecisionDaihyosen)) {
 				scored = true

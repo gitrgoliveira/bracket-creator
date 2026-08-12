@@ -115,6 +115,44 @@ func (e *Engine) withBracketMatch(compId, matchId string, mutate func(*state.Bra
 	return nil
 }
 
+// preserveSubHantei enforces the operator ruling "all results must be
+// recorded into storage" at the store boundary: a writer that says NOTHING
+// about the daihyosen verdict (DecidedByHantei nil - a stale editor snapshot
+// opened before the verdict existed, a quick-score write, any client
+// predating the field) must not erase a recorded one. The verdict travels
+// (flag + winner) onto the incoming daihyosen row only when that row is
+// verdict-silent, names no winner of its own, and its scoreline is still
+// tied (an untied row cannot carry a hantei; validation would reject it).
+// An EXPLICIT false (the editors' withdrawal) and a named winner both pass
+// through untouched. The preserveLoserScore precedent, one bout deeper.
+func preserveSubHantei(stored, incoming []state.SubMatchResult) {
+	var prior *state.SubMatchResult
+	for i := range stored {
+		if stored[i].Position == state.DaihyosenSubPosition {
+			prior = &stored[i]
+			break
+		}
+	}
+	if prior == nil || !prior.HanteiDecided() || prior.Winner == "" {
+		return
+	}
+	for i := range incoming {
+		in := &incoming[i]
+		if in.Position != state.DaihyosenSubPosition {
+			continue
+		}
+		if in.DecidedByHantei != nil || in.Winner != "" {
+			return // the writer addressed the verdict: its word stands
+		}
+		if countScoringIppons(in.IpponsA) != countScoringIppons(in.IpponsB) {
+			return // untied now: the verdict cannot stand on this scoreline
+		}
+		in.DecidedByHantei = state.HanteiPtr(true)
+		in.Winner = prior.Winner
+		return
+	}
+}
+
 // applyHansokuIppons auto-awards ippons from accumulated hansoku counts per
 // FIK Article 20: every 2 hansoku on one side grants 1 ippon to the opponent.
 // Strips any prior 'H' entries and re-appends the correct count so that both
@@ -374,6 +412,7 @@ func (e *Engine) writeMatchResult(compId string, matchId string, result *state.M
 			result.ScheduledAt = r.ScheduledAt
 		}
 		result.Round = r.Round
+		preserveSubHantei(r.SubResults, result.SubResults)
 		*r = *result
 	})
 	if err != nil {
@@ -458,6 +497,7 @@ func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId strin
 			result.ScheduledAt = r.ScheduledAt
 		}
 		result.Round = r.Round
+		preserveSubHantei(r.SubResults, result.SubResults)
 		*r = *result
 	})
 	if err != nil {
@@ -1077,6 +1117,7 @@ func (e *Engine) recordBracketMatchResult(compId string, matchId string, result 
 					}
 					// nil = omitted (preserve stored data); non-nil [] = explicit clear.
 					if result.SubResults != nil {
+						preserveSubHantei(bracket.Rounds[rIdx][mIdx].SubResults, result.SubResults)
 						bracket.Rounds[rIdx][mIdx].SubResults = result.SubResults
 					}
 					// Project the persisted sub-results back into result so the
@@ -1215,6 +1256,7 @@ func applyBronzeMatchResult(bm *state.BracketMatch, result *state.MatchResult) e
 		bm.CorrectionReason = result.CorrectionReason
 	}
 	if result.SubResults != nil {
+		preserveSubHantei(bm.SubResults, result.SubResults)
 		bm.SubResults = result.SubResults
 	}
 	result.SubResults = bm.SubResults

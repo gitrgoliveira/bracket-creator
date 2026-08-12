@@ -122,33 +122,39 @@ func TestMatchResult_HanteiOmitempty(t *testing.T) {
 }
 
 // TestSubMatchResult_HanteiRoundTrip pins the wire/storage contract for the
-// per-bout hantei flag the viewer reads (mp-8sw). Unlike MatchResult, the
-// SubMatchResult flag is a plain bool, so omitempty omits it when false and
-// emits it when true; across both the JSON HTTP path and the YAML config.md
-// persistence path.
+// per-bout hantei flag the viewer reads (mp-8sw). The flag is TRI-STATE
+// (*bool): true and explicit false both serialize (a withdrawal must reach
+// the wire), and only nil - "this writer said nothing" - is omitted, which
+// is what lets the store preserve a recorded verdict against stale writes.
 func TestSubMatchResult_HanteiRoundTrip(t *testing.T) {
 	t.Run("true survives JSON round-trip", func(t *testing.T) {
-		sub := SubMatchResult{Position: -1, DecidedByHantei: true}
+		sub := SubMatchResult{Position: -1, DecidedByHantei: HanteiPtr(true)}
 		b, err := json.Marshal(sub)
 		require.NoError(t, err)
 		assert.Contains(t, string(b), `"decidedByHantei":true`)
 		var got SubMatchResult
 		require.NoError(t, json.Unmarshal(b, &got))
-		assert.True(t, got.DecidedByHantei)
+		assert.True(t, got.HanteiDecided())
 	})
-	t.Run("false is omitted from JSON", func(t *testing.T) {
+	t.Run("nil (verdict-silent) is omitted from JSON", func(t *testing.T) {
 		b, err := json.Marshal(SubMatchResult{Position: 1})
 		require.NoError(t, err)
 		assert.NotContains(t, string(b), "decidedByHantei")
 	})
+	t.Run("explicit false SERIALIZES (a withdrawal must reach the wire)", func(t *testing.T) {
+		explicitFalse := false // HanteiPtr is nil-for-false by design
+		b, err := json.Marshal(SubMatchResult{Position: -1, DecidedByHantei: &explicitFalse})
+		require.NoError(t, err)
+		assert.Contains(t, string(b), `"decidedByHantei":false`)
+	})
 	t.Run("true survives YAML round-trip", func(t *testing.T) {
-		sub := SubMatchResult{Position: -1, DecidedByHantei: true}
+		sub := SubMatchResult{Position: -1, DecidedByHantei: HanteiPtr(true)}
 		b, err := yaml.Marshal(sub)
 		require.NoError(t, err)
 		assert.Contains(t, string(b), "decided_by_hantei: true")
 		var got SubMatchResult
 		require.NoError(t, yaml.Unmarshal(b, &got))
-		assert.True(t, got.DecidedByHantei)
+		assert.True(t, got.HanteiDecided())
 	})
 }
 

@@ -808,6 +808,24 @@ func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, w
 		return fmt.Errorf("%w: %s", ErrDuplicateName, strings.Join(dupes, "; "))
 	}
 
+	// TEAM competitions additionally require unique NAMES regardless of dojo
+	// (operator ruling): a team's name is its identity in standings and in
+	// sub-bout winner attribution, which carry no uuid, so two same-name
+	// teams would make every result ambiguous. Individuals keep the
+	// (name, dojo) rule above; they are disambiguated by participant uuid.
+	// Same lowest-write-layer placement as the tier-1 guard so every
+	// persistence path enforces it. loadCompetitionLocked is the correct
+	// pairing here: callers of saveParticipantsNoLock hold the comp lock.
+	if comp, _ := s.loadCompetitionLocked(compID); comp != nil && (comp.Kind == "team" || comp.TeamSize > 0) {
+		names := make([]string, len(players))
+		for i, p := range players {
+			names[i] = p.Name
+		}
+		if dupes := helper.CheckDuplicateEntriesByName(names); len(dupes) > 0 {
+			return fmt.Errorf("%w: team names must be unique: %s", ErrDuplicateName, strings.Join(dupes, "; "))
+		}
+	}
+
 	// Reserved-name guard: names arriving via the bulk SaveParticipants path
 	// may be raw (neither TitleCased nor trimmed), so trim before matching to
 	// catch inputs like " Pool A-1st " that would otherwise slip through.

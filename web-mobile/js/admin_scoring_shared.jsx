@@ -422,12 +422,17 @@ function initialEnchoPeriodsForMatch(m) {
 // ONLY on the daihyosen. Encho is OPTIONAL for hantei: a tied daihyosen may
 // be taken straight to a judges' decision without overtime: so the two
 // fields are emitted independently: encho whenever the counter is > 0, and
-// decidedByHantei whenever it is armed on a tied scoreline. Returns the fields
-// to merge into the entry (possibly empty). Exported for vitest.
+// decidedByHantei ALWAYS, explicitly (tri-state wire contract, operator
+// ruling "all results must be recorded into storage"): true when armed on a
+// tied scoreline, otherwise an EXPLICIT false. The server preserves a stored
+// verdict only against writers that are verdict-SILENT (field absent - stale
+// snapshots, quick-score); this editor always has a say, so its withdrawal
+// must reach the wire as false rather than as an omission the server would
+// read as "no opinion" and preserve over. Returns the fields to merge into
+// the entry. Exported for vitest.
 function daihyosenEnchoFields({ enchoPeriodCount, daihyosenTied, daihyosenHantei }) {
-  const fields = {};
+  const fields = { decidedByHantei: !!(daihyosenTied && daihyosenHantei) };
   if (enchoPeriodCount > 0) fields.encho = { periodCount: enchoPeriodCount };
-  if (daihyosenTied && daihyosenHantei) fields.decidedByHantei = true;
   return fields;
 }
 

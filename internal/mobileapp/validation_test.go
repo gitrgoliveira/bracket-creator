@@ -893,7 +893,7 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 				{
 					Position: 1, SideA: "TeamA", SideB: "TeamB",
 					IpponsA: []string{"M"}, IpponsB: []string{"K"},
-					Winner: "TeamA", DecidedByHantei: true,
+					Winner: "TeamA", DecidedByHantei: state.HanteiPtr(true),
 				},
 			},
 		}
@@ -970,7 +970,7 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 				{
 					Position: state.DaihyosenSubPosition, SideA: "TeamA", SideB: "TeamB",
 					IpponsA: []string{"M"}, IpponsB: []string{"K"},
-					Winner: "TeamA", DecidedByHantei: true, Encho: enchoOne,
+					Winner: "TeamA", DecidedByHantei: state.HanteiPtr(true), Encho: enchoOne,
 				},
 			},
 		}
@@ -983,7 +983,7 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 				{
 					Position: state.DaihyosenSubPosition, SideA: "TeamA", SideB: "TeamB",
 					IpponsA: []string{"M"}, IpponsB: []string{"K"},
-					Winner: "", DecidedByHantei: true, Encho: enchoOne,
+					Winner: "", DecidedByHantei: state.HanteiPtr(true), Encho: enchoOne,
 				},
 			},
 		}
@@ -1000,7 +1000,7 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 				{
 					Position: -1, SideA: "TeamA", SideB: "TeamB",
 					IpponsA: []string{"M"}, IpponsB: []string{"K"},
-					Winner: "TeamA", DecidedByHantei: true, Encho: nil,
+					Winner: "TeamA", DecidedByHantei: state.HanteiPtr(true), Encho: nil,
 				},
 			},
 		}
@@ -1013,7 +1013,7 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 				{
 					Position: -1, SideA: "TeamA", SideB: "TeamB",
 					IpponsA: []string{"M", "K"}, IpponsB: []string{"D"},
-					Winner: "TeamA", DecidedByHantei: true, Encho: enchoOne,
+					Winner: "TeamA", DecidedByHantei: state.HanteiPtr(true), Encho: enchoOne,
 				},
 			},
 		}
@@ -1028,7 +1028,7 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 				{
 					Position: -1, SideA: "TeamA", SideB: "TeamB",
 					IpponsA: []string{"M"}, IpponsB: []string{"K"},
-					Winner: "TeamA", Decision: "hikiwake", DecidedByHantei: true, Encho: enchoOne,
+					Winner: "TeamA", Decision: "hikiwake", DecidedByHantei: state.HanteiPtr(true), Encho: enchoOne,
 				},
 			},
 		}
@@ -1043,7 +1043,7 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 				{
 					Position: -1, SideA: "TeamA", SideB: "TeamB",
 					IpponsA: []string{"M"}, IpponsB: []string{"K"},
-					Winner: "TeamA", Decision: "daihyosen", DecidedByHantei: true, Encho: enchoOne,
+					Winner: "TeamA", Decision: "daihyosen", DecidedByHantei: state.HanteiPtr(true), Encho: enchoOne,
 				},
 			},
 		}
@@ -1056,7 +1056,7 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 				{
 					Position: -1, SideA: "TeamA", SideB: "TeamB",
 					IpponsA: []string{"M"}, IpponsB: []string{"K"},
-					Winner: "TeamA", Decision: "fought", DecidedByHantei: true, Encho: enchoOne,
+					Winner: "TeamA", Decision: "fought", DecidedByHantei: state.HanteiPtr(true), Encho: enchoOne,
 				},
 			},
 		}
@@ -1069,7 +1069,7 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 				{
 					Position: -1, SideA: "TeamA", SideB: "TeamB",
 					IpponsA: nil, IpponsB: nil,
-					Winner: "TeamA", DecidedByHantei: true, Encho: enchoOne,
+					Winner: "TeamA", DecidedByHantei: state.HanteiPtr(true), Encho: enchoOne,
 				},
 			},
 		}
@@ -1082,12 +1082,12 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 				{
 					Position: -1, SideA: "TeamA", SideB: "TeamB",
 					IpponsA: []string{"M"}, IpponsB: []string{"K"},
-					Winner: "TeamA", DecidedByHantei: true, Encho: enchoOne,
+					Winner: "TeamA", DecidedByHantei: state.HanteiPtr(true), Encho: enchoOne,
 				},
 				{
 					Position: -1, SideA: "TeamA", SideB: "TeamB",
 					IpponsA: []string{"M", "K"}, IpponsB: []string{"K"}, // invalid: non-tied scoreline
-					Winner: "TeamA", DecidedByHantei: true, Encho: enchoOne,
+					Winner: "TeamA", DecidedByHantei: state.HanteiPtr(true), Encho: enchoOne,
 				},
 			},
 		}
@@ -1106,7 +1106,7 @@ func TestValidateBulkScoreLengths_SubBoutDecidedByHantei(t *testing.T) {
 				{
 					Position: 1, SideA: "TeamA", SideB: "TeamB",
 					IpponsA: []string{"M"}, IpponsB: []string{"K"},
-					Winner: "TeamA", DecidedByHantei: true,
+					Winner: "TeamA", DecidedByHantei: state.HanteiPtr(true),
 				},
 			},
 		}
@@ -1136,7 +1136,7 @@ func TestValidateBulkScoreLengths_SubBoutDecidedByHantei(t *testing.T) {
 				{
 					Position: -1, SideA: "TeamA", SideB: "TeamB",
 					IpponsA: []string{"M"}, IpponsB: []string{"K"},
-					Winner: "TeamA", DecidedByHantei: true, Encho: enchoOne,
+					Winner: "TeamA", DecidedByHantei: state.HanteiPtr(true), Encho: enchoOne,
 				},
 			},
 		}
@@ -1149,7 +1149,7 @@ func TestValidateBulkScoreLengths_SubBoutDecidedByHantei(t *testing.T) {
 				{
 					Position: -1, SideA: "TeamA", SideB: "TeamB",
 					IpponsA: []string{"M"}, IpponsB: []string{"K"},
-					Winner: "", DecidedByHantei: true, Encho: enchoOne,
+					Winner: "", DecidedByHantei: state.HanteiPtr(true), Encho: enchoOne,
 				},
 			},
 		}
@@ -1164,7 +1164,7 @@ func TestValidateBulkScoreLengths_SubBoutDecidedByHantei(t *testing.T) {
 				{
 					Position: -1, SideA: "TeamA", SideB: "TeamB",
 					IpponsA: []string{"M"}, IpponsB: []string{"K"},
-					Winner: "TeamA", DecidedByHantei: true, Encho: nil,
+					Winner: "TeamA", DecidedByHantei: state.HanteiPtr(true), Encho: nil,
 				},
 			},
 		}
@@ -1177,7 +1177,7 @@ func TestValidateBulkScoreLengths_SubBoutDecidedByHantei(t *testing.T) {
 				{
 					Position: -1, SideA: "TeamA", SideB: "TeamB",
 					IpponsA: []string{"M", "K"}, IpponsB: []string{"D"},
-					Winner: "TeamA", DecidedByHantei: true, Encho: enchoOne,
+					Winner: "TeamA", DecidedByHantei: state.HanteiPtr(true), Encho: enchoOne,
 				},
 			},
 		}

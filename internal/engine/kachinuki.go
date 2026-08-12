@@ -1435,7 +1435,7 @@ func isUnscoredKachinukiBout(s state.SubMatchResult) bool {
 		countScoringIppons(s.IpponsB) == 0 &&
 		s.HansokuA == 0 &&
 		s.HansokuB == 0 &&
-		!s.DecidedByHantei &&
+		!s.HanteiDecided() &&
 		!s.Encho.On()
 }
 

@@ -709,17 +709,31 @@ func IsDraw(decision string) bool {
 }
 
 type SubMatchResult struct {
-	Position        int            `json:"position"`
-	SideA           string         `json:"sideA"`
-	SideB           string         `json:"sideB"`
-	IpponsA         []string       `json:"ipponsA"`
-	IpponsB         []string       `json:"ipponsB"`
-	HansokuA        int            `json:"hansokuA"`
-	HansokuB        int            `json:"hansokuB"`
-	Winner          string         `json:"winner"`
-	Decision        string         `json:"decision"`
-	DecidedByHantei bool           `json:"decidedByHantei,omitempty" yaml:"decided_by_hantei,omitempty"`
+	Position int      `json:"position"`
+	SideA    string   `json:"sideA"`
+	SideB    string   `json:"sideB"`
+	IpponsA  []string `json:"ipponsA"`
+	IpponsB  []string `json:"ipponsB"`
+	HansokuA int      `json:"hansokuA"`
+	HansokuB int      `json:"hansokuB"`
+	Winner   string   `json:"winner"`
+	Decision string   `json:"decision"`
+	// DecidedByHantei is TRI-STATE on the wire (operator ruling: "all results
+	// must be recorded into storage" - a recorded verdict must never be lost
+	// to a write that did not address it):
+	//   true  - a hantei verdict stands on this bout;
+	//   false - the client EXPLICITLY withdrew it;
+	//   nil   - the client said NOTHING about the verdict (stale snapshot,
+	//           quick-score, any writer predating the field) and the store's
+	//           recorded verdict is preserved (engine preserveSubHantei, the
+	//           preserveLoserScore precedent). Read via HanteiDecided().
+	DecidedByHantei *bool          `json:"decidedByHantei,omitempty" yaml:"decided_by_hantei,omitempty"`
 	Encho           *EnchoMetadata `json:"encho,omitempty"           yaml:"encho,omitempty"`
+}
+
+// HanteiDecided reports whether a hantei verdict stands on this sub-bout.
+func (s *SubMatchResult) HanteiDecided() bool {
+	return s.DecidedByHantei != nil && *s.DecidedByHantei
 }
 
 type MatchResult struct {
@@ -947,6 +961,12 @@ func cloneSubResults(subs []SubMatchResult) []SubMatchResult {
 			copy(out[i].IpponsB, sr.IpponsB)
 		}
 		out[i].Encho = sr.Encho.Clone()
+		// Clone the tri-state hantei pointer too: a caller mutating a
+		// returned sub through *DecidedByHantei must not corrupt cache.
+		if sr.DecidedByHantei != nil {
+			v := *sr.DecidedByHantei
+			out[i].DecidedByHantei = &v
+		}
 	}
 	return out
 }

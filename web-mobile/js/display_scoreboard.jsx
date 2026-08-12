@@ -78,10 +78,13 @@ function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, is
     // renders no scoreboard row, so the chip is the mark's only home there.)
     // A TEAM board needs no replacement centre. A middle mark belongs only in
     // the middle of an INDIVIDUAL FIGHT (operator ruling), for the whole set:
-    // any mutating middle. In a team match that means (E) on the numbered bout
-    // kachinuki fights on, (DH) on the EXTRA appended daihyosen bout regular
-    // teams settle a tie with, and X on any drawn bout under either format -
-    // each on its own row. The summary row is an aggregate (IV/PW), not a fight, so
+    // any mutating middle. On the INDIVIDUAL branch the match IS the fight, so
+    // its own row centre carries it (encho is not team-specific: any tied match
+    // may be fought on). On the TEAM branch the encounter is not a fight, so
+    // each mark rides the bout it describes - (E) on the numbered bout kachinuki
+    // fights on, (DH) on the EXTRA appended daihyosen bout regular teams settle
+    // a tie with, X on any drawn bout under either format. The summary row is
+    // an aggregate (IV/PW), not a fight, so
     // nothing goes in its centre - not even when the encounter itself is drawn
     // on equal IV/PW. Threading the match-level mark in there was tried and
     // reverted: it put two (E) marks on one board, stacked.

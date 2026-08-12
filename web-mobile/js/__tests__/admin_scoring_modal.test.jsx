@@ -285,6 +285,38 @@ describe('daihyosenEnchoFields (mp-4pc encho/hantei wire gating)', () => {
     expect(daihyosenEnchoFields({ enchoPeriodCount: 0, daihyosenTied: false, daihyosenHantei: '' }))
       .toEqual({ decidedByHantei: false });
   });
+
+  it('goes SILENT (omits the field) when this editor has no opinion on the verdict', () => {
+    // hanteiKnown=false is the "mounted before the verdict existed" blind spot:
+    // the armed flag is frozen false and nothing about the verdict is on
+    // screen, so an explicit false would erase another device's judges'
+    // decision. Omitting keeps the field tri-state, which is what lets the
+    // server's preserve tell "no opinion" apart from "withdrawn".
+    const fields = daihyosenEnchoFields({
+      enchoPeriodCount: 0, daihyosenTied: false, daihyosenHantei: '', hanteiKnown: false,
+    });
+    expect(fields).toEqual({});
+    expect('decidedByHantei' in fields).toBe(false);
+  });
+
+  it('still emits encho while silent on the verdict', () => {
+    expect(daihyosenEnchoFields({
+      enchoPeriodCount: 2, daihyosenTied: false, daihyosenHantei: '', hanteiKnown: false,
+    })).toEqual({ encho: { periodCount: 2 } });
+  });
+
+  it('an ARMED pick is emitted even when hanteiKnown is false', () => {
+    // Silence is only ever the absence of an opinion. The operator picking a
+    // side IS an opinion, so it must reach the wire regardless.
+    expect(daihyosenEnchoFields({
+      enchoPeriodCount: 0, daihyosenTied: true, daihyosenHantei: 'a', hanteiKnown: false,
+    })).toEqual({ decidedByHantei: true });
+  });
+
+  it('defaults to the explicit contract when hanteiKnown is not passed', () => {
+    expect(daihyosenEnchoFields({ enchoPeriodCount: 0, daihyosenTied: false, daihyosenHantei: '' }))
+      .toEqual({ decidedByHantei: false });
+  });
 });
 
 describe('DecisionPrompt → /decision POST integration', () => {

@@ -6533,7 +6533,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
    hantei win group now holds the winner's REAL ippon letter beside the Ht, and
    the override rendered the winner's point smaller than the loser's. */
 /* The loose Ht (both slots full, drifted data) needs a TV size of its own or
-   it renders at the 10px base beside ~3.5vh slots. */
+   it renders at the 12px base beside ~3.5vh slots. */
 .msb--tv .msb-ht { font-size: calc(2.4vh * var(--msb-scale, 1)); }
 
 /* ---------- League Round-Robin Matrix (Viewer) ---------- */

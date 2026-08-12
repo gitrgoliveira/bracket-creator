@@ -404,8 +404,13 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // shows letters plainly here too. Display only: the slots are disabled while
   // the hantei stands.
   const slotButtons = (s) => {
+    // resultSlot is fed the SAME filtered view the tie gate above counts, not
+    // the raw pts: a legacy "•" placeholder is truthy, so raw input would make
+    // resultSlot call slot 0 occupied and render [•][Ht] — the mark in the
+    // inner slot with a non-point displayed outside it as though it were
+    // scored. The other two resultSlot consumers already pass filtered cells.
     const htSlot = hanteiSlot(
-      decidedByHantei && aTotal === bTotal && recordedHtKey === s.key, s.pts);
+      decidedByHantei && aTotal === bTotal && recordedHtKey === s.key, realIppons(s.pts));
     return [0, 1].map((i) => {
       const isHt = htSlot === i;
       return (

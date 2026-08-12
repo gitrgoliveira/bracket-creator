@@ -46,7 +46,9 @@ import { resultSlot } from './result_slot.jsx';
 // editor's local sub state has no decision string, so synthesise boutMiddle's
 // three inputs: a marked/derived tie → hikiwake, the daihyosen row →
 // "daihyosen", s.encho (a period count) → {periodCount}. X keeps its dedicated
-// styling; vs/(E)/(DH) render as the quiet centre span.
+// styling; vs/(E)/(DH) render as the quiet centre span. (Defined below
+// teamBoutIsDraw, which it calls.)
+
 // teamBoutIsDraw: does this bout row read as a hikiwake? A declared winner
 // un-draws the bout — that is the whole rule. The hantei case needs no
 // parameter here because boutWinnerSide folds the hantei verdict into
@@ -77,8 +79,12 @@ function renderTeamBoutMiddle(s, t, isDaihyoRow) {
 // a decision, not an oversight: unlike the read-only scoreboard, which would
 // otherwise lose the result and so renders a loose mark, this editor always
 // mounts a second channel for the verdict — daihyosenHanteiArmed is seeded from
-// the stored decision, so the hantei row shows the winning side's button as
-// primary regardless. And 2-2 is unreachable through the ippon buttons anyway
+// the stored decision, so the hantei row is on screen with the winning side's
+// button primary. (The one exception is a stored winner that names neither side
+// after a rename, where initialDaihyosenHantei deliberately resolves to "" and
+// the panel opens armed with no side primary; see its comment below. The mark
+// is dropped there for the same reason the scoreboard drops it: nothing
+// attributable to mark.) And 2-2 is unreachable through the ippon buttons anyway
 // (MAX_IPPONS_PER_SIDE plus isBoutDecided disable both sides at 2), so only
 // drifted stored data reaches it. Rendering a third slot-shaped chip here would
 // claim an ippon that does not exist.
@@ -1677,7 +1683,17 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       // (validation.go validateSubBout). daihyosenEnchoFields emits the two
       // independently: encho is optional for a hantei decision.
       if (isDaihyo) {
-        Object.assign(entry, daihyosenEnchoFields({ enchoPeriodCount, daihyosenTied, daihyosenHantei }));
+        // hanteiKnown is false only for the one blind spot: this editor mounted
+        // with no verdict (so the armed flag is frozen false and no Ht/Cancel
+        // is on screen), while the LIVE prop now carries one another device
+        // recorded. Sending an explicit false there would erase a verdict the
+        // operator was never shown; going silent lets the server preserve it.
+        // ORDER MATTERS below: daihyosenEnchoFields writes the field first and
+        // dhKeep restores a preserved `true` over it. Swapping the two lines
+        // re-opens the regression they exist to prevent (fixing an unrelated
+        // bout score silently flipping a hantei win into a hikiwake).
+        const hanteiKnown = !(!initialDaihyosenHanteiArmed && !daihyosenHanteiArmed && !!existingDaihyosen?.decidedByHantei);
+        Object.assign(entry, daihyosenEnchoFields({ enchoPeriodCount, daihyosenTied, daihyosenHantei, hanteiKnown }));
         if (dhKeep) Object.assign(entry, dhKeep);
       } else if (isKachinuki && s.encho > 0) {
         // mp-gmcg: numbered-bout encho is the KACHINUKI knockout-tie

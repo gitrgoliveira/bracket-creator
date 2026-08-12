@@ -163,8 +163,10 @@ function subWinnerSides(sub, matchSideA, matchSideB) {
 // stays on the LOGICAL OUTER cell (letters[0]) regardless of which side renders
 // it — and on a win group that is NOT necessarily the Ht cell: at 1-1 the outer
 // cell holds the winner's real letter and the Ht fills the inner one, so
-// `sub-win-*` means "the winner's outer cell", never "the mark cell". Do not
-// write selectors or assertions that expect Ht at that testid.
+// `sub-win-*` means "the winner's outer cell", never "the mark cell". At 0-0 the
+// Ht DOES land there (it takes the first free slot), so a selector on it proves
+// the mark's position only when the fixture's scoreline is stated too; assert on
+// the whole `.msb-slots` group when you mean "somewhere in the win group".
 const WAZA_NAMES = { M: "Men (head)", K: "Kote (wrist)", D: "Do (body)", T: "Tsuki (throat)", H: "Hansoku (penalty)", S: "Sune (shin)", "○": "Default win", Ht: "Hantei (judges' decision)" };
 
 function slotCells(letters, side, testid) {
@@ -186,8 +188,10 @@ function slotCells(letters, side, testid) {
 // winning side is otherwise invisible, so we mark its slots with the maru pair
 // ○ ○, one per awarded point (see resultCells below). Modern fusensho/kiken
 // carry ["○","○"] ippons and render through the normal slot path, so they never
-// reach that fallback. The hantei "Ht" is NOT part of it: it is placed whatever
-// the scoreline, per `markable` and result_slot.jsx.
+// reach that fallback. The hantei "Ht" is NOT part of it: it has its own gate
+// (`markable` below), which unlike the maru fallback does not require an empty
+// scoreline — a 1-1 hantei is the normal case — but DOES require the letters to
+// be tied, so a drifted untied row renders no Ht at all.
 // A plain helper (not a component) so it renders inline into the parent's tree.
 function centreMarks(sub, matchSideA, matchSideB) {
   // Engi (flag-count scoring) is the ONLY competition type where the centre
@@ -434,7 +438,15 @@ export function IndividualScore({ match, variant, showNames, withZekkenName }) {
 // kachinuki (boolean, default false): when true the match uses winner-stays
 // ordering. Row count is driven by recorded bouts (never padded to teamSize)
 // and name resolution is server-bout-first (see BoutSubRow).
-export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH, variant, shiroName, akaName, matchSideA, matchSideB, isRunning, kachinuki }) {
+// `middle` is the ENCOUNTER-level middle mark ("" | X | (E) | (DH)), which the
+// caller must obtain from matchMiddleMark(match) so the rule keeps its single
+// owner. It belongs in the §277 summary row's centre because that row IS the
+// encounter's FIK row: the bout rows below carry only their own per-bout
+// middles, so without this a team encounter's match-level X or (E) has nowhere
+// to render at all. (That was the regression from removing the TV header chip:
+// the chip was a duplicate for INDIVIDUAL boards, whose row centre already
+// showed the mark, but for team boards it had been the only home.)
+export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH, variant, shiroName, akaName, matchSideA, matchSideB, isRunning, kachinuki, middle }) {
   // Real numbered bouts only: exclude the daihyosen sentinel and any malformed
   // negative position (mirrors the Go-side defensive skip).
   const regular = (subResults || []).filter(s => s.position > DAIHYOSEN_POSITION);
@@ -496,7 +508,7 @@ export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH,
             <span className="msb-slot msb-sum"><abbr className="msb-lab" title="Individual Victories">IV</abbr>{ivShiro}</span>
             <span className="msb-slot msb-sum"><abbr className="msb-lab" title="Points Won">PW</abbr>{pwShiro}</span>
           </span>
-          <span className="msb-vs" />
+          <span className="msb-vs" data-testid="team-summary-middle">{middle || ""}</span>
           <span className="msb-slots msb-slots--aka">
             <span className="msb-slot msb-slot--aka msb-sum"><abbr className="msb-lab" title="Points Won">PW</abbr>{pwAka}</span>
             <span className="msb-slot msb-slot--aka msb-sum"><abbr className="msb-lab" title="Individual Victories">IV</abbr>{ivAka}</span>

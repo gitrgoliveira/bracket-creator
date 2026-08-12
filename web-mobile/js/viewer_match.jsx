@@ -150,6 +150,7 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true, slotLabe
             teamSize={teamSize} showDH={showDH} variant="card" isRunning={isRunning} shiroName={bName} akaName={aName}
             matchSideA={match.sideA?.name || (typeof match.sideA === "string" ? match.sideA : "")}
             matchSideB={match.sideB?.name || (typeof match.sideB === "string" ? match.sideB : "")}
+            middle={(typeof window.matchMiddleMark === "function" && window.matchMiddleMark(match)) || ""}
             kachinuki={match.teamMatchType === "kachinuki"} />
         : (isDone || isRunning) && <IndividualScore match={match} variant="card" />}
     </div>

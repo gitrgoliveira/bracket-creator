@@ -21,9 +21,11 @@ describe('resultSlot (which slot a result mark takes)', () => {
   });
 
   it('reports loose when both slots are full, so no point is overwritten', () => {
-    // Reachable, not theoretical: the editor arms hantei on ANY tied daihyosen
-    // scoreline, 2-2 included. Callers render the mark beside the slots rather
-    // than dropping it.
+    // NOT a reachable state: sanbon-shobu ends at 2, so 2-2 cannot occur, and
+    // both the editors' ippon entry and validateIpponCounts refuse it. This
+    // pins the behaviour for hand-edited files only, where the rule is that a
+    // recorded point is never overwritten to make room for a mark. Each caller
+    // then applies its own policy to `loose` (see result_slot.jsx).
     expect(resultSlot(['K', 'M'])).toEqual({ slot: -1, loose: true });
   });
 

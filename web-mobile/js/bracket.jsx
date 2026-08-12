@@ -248,10 +248,13 @@ function boutMiddle(decision, encho, score) {
 }
 
 // matchMiddleMark: the SPECIAL middle marks only ("" when the middle is the
-// plain "vs"). Consumers: the shared scoreboard's row centre (centreMarks,
-// via window) and the OBS lower-third, which renders no scoreboard row. The
-// TV header and lobby chips were REMOVED (operator ruling): a surface that
-// renders the FIK row must not duplicate the mark outside the row centre.
+// plain "vs"). Consumers: the shared scoreboard's row centre (centreMarks, via
+// window), TeamScoreboard's §277 summary-row centre (the ENCOUNTER's own FIK
+// row, passed in as `middle`), the MatchCard meta strip below, and the OBS
+// lower-third. The TV header and lobby chips were REMOVED (operator ruling):
+// a surface that renders the FIK row must not duplicate the mark outside the
+// row centre. MatchCard and the lower-third render no such row, so their chip
+// IS the mark's one home rather than a duplicate of one.
 function matchMiddleMark(match) {
   if (!match) return "";
   const mid = boutMiddle(match.decision, match.encho, match.score);

@@ -127,6 +127,37 @@ func TestCheckDuplicateEntriesByNameDojo(t *testing.T) {
 	}
 }
 
+// TestCheckDuplicateEntriesByName covers the TEAM rule: names alone collide
+// regardless of dojo (a team's name is its identity in standings and in
+// sub-bout winner attribution, neither of which carries a uuid). The dojo
+// column is deliberately absent from the input, so these cases also pin that
+// the normalization is shared with the tier-1 check rather than a plain ==.
+func TestCheckDuplicateEntriesByName(t *testing.T) {
+	cases := []struct {
+		desc  string
+		names []string
+		want  []string
+	}{
+		{desc: "distinct names", names: []string{"Kyoto", "Osaka", "Nara"}, want: nil},
+		{desc: "exact repeat", names: []string{"Seibukan", "Seibukan"}, want: []string{"Seibukan"}},
+		{desc: "case and padding differ", names: []string{"Seibukan", " seibukan "}, want: []string{"Seibukan"}},
+		{desc: "collapsed internal whitespace", names: []string{"Sei bukan", "Sei  bukan"}, want: []string{"Sei bukan"}},
+		{desc: "diacritics stripped", names: []string{"K\u014dbe", "Kobe"}, want: []string{"K\u014dbe"}},
+		{desc: "reported once for a triple", names: []string{"A", "A", "A"}, want: []string{"A"}},
+		{desc: "two separate collisions", names: []string{"A", "B", "A", "B"}, want: []string{"A", "B"}},
+		{desc: "empty list", names: []string{}, want: nil},
+		{desc: "single name", names: []string{"Solo"}, want: nil},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.desc, func(t *testing.T) {
+			// The reported label is the FIRST spelling seen, trimmed, so the
+			// operator is shown a name that appears in their own roster.
+			assert.Equal(t, tc.want, CheckDuplicateEntriesByName(tc.names))
+		})
+	}
+}
+
 // TestFindNearDupWarnings_TokenSubset tests Signal 1 (token subset).
 func TestFindNearDupWarnings_TokenSubset(t *testing.T) {
 	cases := []struct {

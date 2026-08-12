@@ -76,14 +76,18 @@ function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, is
     // chip duplicating X/(E)/(DH) ~10cm above it was an error. The plain
     // "vs" separator stays. (The OBS streaming overlay keeps its chip: it
     // renders no scoreboard row, so the chip is the mark's only home there.)
+    // Both branches below do render that centre: IndividualScore through its
+    // synthesised sub, TeamScoreboard through the `middle` prop threaded into
+    // its summary row. Removing the chip WITHOUT that prop left team boards
+    // showing the mark nowhere, so the two must stay wired together.
     // Header subtitle: competition name + phase, joined only when both exist
     // (phaseLabel is "" for league, so no dangling " · ").
     const compName = promoted.competition?.name || "";
     const compPhase = phaseLabel(promoted.match, promoted.isBracket, promoted.roundIndex, promoted.totalRounds, promoted.competition?.format);
     const headerSubtitle = [compName, compPhase].filter(Boolean).join(" · ");
     // The shared scoreboard below carries the score (IV/PW summary for teams,
-    // ippon slots for individuals), so the team-name row centre is just "vs"
-    // (+ any decision suffix).
+    // ippon slots for individuals) AND the middle mark, so this team-name row
+    // centre is a bare "vs" with no suffix branch.
     const nameCentre = <div style={{ fontSize: "2.4vh", color: "var(--ink-3)", fontWeight: 700 }}>vs</div>;
 
     return (
@@ -138,6 +142,7 @@ function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, is
                         shiroName={shiroTeam} akaName={akaTeam}
                         matchSideA={promoted.match.sideA?.name || (typeof promoted.match.sideA === "string" ? promoted.match.sideA : "")}
                         matchSideB={promoted.match.sideB?.name || (typeof promoted.match.sideB === "string" ? promoted.match.sideB : "")}
+                        middle={(typeof window.matchMiddleMark === "function" && window.matchMiddleMark(promoted.match)) || ""}
                         kachinuki={teamMatchTypeFor(promoted.competition) === "kachinuki"} />
                 </div>
             ) : (

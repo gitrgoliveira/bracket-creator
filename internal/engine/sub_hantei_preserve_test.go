@@ -11,9 +11,12 @@ import (
 
 // Operator ruling: "all results must be recorded into storage" — a recorded
 // daihyosen hantei must never be erased by a writer that did not address it.
-// preserveSubHantei runs at every SubResults replacement chokepoint; these
-// tests exercise it end-to-end through the pool write path plus the unit
-// truth table.
+// preserveSubHantei guards each forward SubResults replacement: the pool and
+// bracket writes in scoring.go, and BOTH branches of the tx twins in
+// scoring_tx.go (the pair the live /score endpoint takes). These tests cover
+// the unit truth table plus an end-to-end run through the non-tx pool path and
+// the tx pool path, because a guard present on only one of a twin pair reads as
+// covered while the endpoint's real path stays unprotected.
 func TestPreserveSubHantei(t *testing.T) {
 	dh := state.DaihyosenSubPosition
 	storedSubs := func() []state.SubMatchResult {
@@ -36,7 +39,73 @@ func TestPreserveSubHantei(t *testing.T) {
 		assert.Equal(t, []string{"M", "K"}, incoming[0].IpponsA)
 	})
 
-	t.Run("explicit false (withdrawal) passes through and clears", func(t *testing.T) {
+	t.Run("a row recording no ippons inherits the stored scoreline too", func(t *testing.T) {
+		// A writer silent about the verdict is silent about the SCORELINE the
+		// verdict rests on, so both travel. Without this the 1-1 hantei would
+		// persist as 0-0, which moves the Ht to the other slot and drops (E).
+		stored := []state.SubMatchResult{{
+			Position: dh, SideA: "Kyoto", SideB: "Osaka",
+			IpponsA: []string{"M"}, IpponsB: []string{"K"},
+			Encho:  &state.EnchoMetadata{PeriodCount: 1},
+			Winner: "Kyoto", Decision: "daihyosen", DecidedByHantei: state.HanteiPtr(true),
+		}}
+		incoming := []state.SubMatchResult{{Position: dh, SideA: "Kyoto", SideB: "Osaka"}}
+		preserveSubHantei(stored, incoming)
+		require.True(t, incoming[0].HanteiDecided())
+		assert.Equal(t, []string{"M"}, incoming[0].IpponsA)
+		assert.Equal(t, []string{"K"}, incoming[0].IpponsB)
+		require.NotNil(t, incoming[0].Encho)
+		assert.Equal(t, 1, incoming[0].Encho.PeriodCount)
+		assert.Equal(t, "daihyosen", incoming[0].Decision)
+		// Deep copy: mutating the restored row must not reach back into store state.
+		incoming[0].IpponsA[0] = "K"
+		assert.Equal(t, []string{"M"}, stored[0].IpponsA)
+		incoming[0].Encho.PeriodCount = 9
+		assert.Equal(t, 1, stored[0].Encho.PeriodCount)
+	})
+
+	t.Run("a row that records its own ippons keeps them", func(t *testing.T) {
+		stored := []state.SubMatchResult{{
+			Position: dh, SideA: "Kyoto", SideB: "Osaka",
+			IpponsA: []string{"M"}, IpponsB: []string{"K"},
+			Winner: "Kyoto", Decision: "daihyosen", DecidedByHantei: state.HanteiPtr(true),
+		}}
+		incoming := []state.SubMatchResult{{
+			Position: dh, SideA: "Kyoto", SideB: "Osaka", Decision: "daihyosen",
+			IpponsA: []string{"D"}, IpponsB: []string{"T"},
+		}}
+		preserveSubHantei(stored, incoming)
+		require.True(t, incoming[0].HanteiDecided())
+		assert.Equal(t, []string{"D"}, incoming[0].IpponsA, "the writer addressed the scoreline")
+		assert.Equal(t, []string{"T"}, incoming[0].IpponsB)
+	})
+
+	t.Run("a decision incompatible with hantei blocks the preserve", func(t *testing.T) {
+		// preserveSubHantei runs AFTER validateSubBout, so a row it mutates is
+		// never re-validated. Stamping a verdict onto a withdrawal would persist
+		// a bout that is both a kiken and a judges' decision, and SideMarksLR
+		// would then emit Kiken and Ht together.
+		for _, dec := range []string{"kiken-voluntary", "kiken-injury", "fusenpai", "hikiwake"} {
+			incoming := []state.SubMatchResult{
+				{Position: dh, SideA: "Kyoto", SideB: "Osaka", Decision: dec},
+			}
+			preserveSubHantei(storedSubs(), incoming)
+			assert.Nil(t, incoming[0].DecidedByHantei, "decision %q must not inherit a verdict", dec)
+			assert.Equal(t, "", incoming[0].Winner, "decision %q must not inherit a winner", dec)
+		}
+	})
+
+	t.Run("a dropped daihyosen row is NOT resurrected", func(t *testing.T) {
+		// DELETE /daihyosen removes the row deliberately and writes through this
+		// same path; re-appending would make an unscored rep bout undeletable.
+		incoming := []state.SubMatchResult{
+			{Position: 1, SideA: "K1", SideB: "O1", IpponsA: []string{"M"}, Winner: "K1", Decision: "fought"},
+		}
+		preserveSubHantei(storedSubs(), incoming)
+		assert.Len(t, incoming, 1, "no row is appended")
+	})
+
+	t.Run("explicit false (withdrawal) is left untouched", func(t *testing.T) {
 		// NOTE: state.HanteiPtr is nil-for-false (built for the omitempty
 		// projection), so an EXPLICIT false needs a real pointer.
 		explicitFalse := false
@@ -47,6 +116,8 @@ func TestPreserveSubHantei(t *testing.T) {
 		preserveSubHantei(storedSubs(), incoming)
 		require.NotNil(t, incoming[0].DecidedByHantei)
 		assert.False(t, *incoming[0].DecidedByHantei)
+		// Non-mutation check: the withdrawal names no winner, and the stored
+		// "Kyoto" must NOT be pulled across to fill the gap.
 		assert.Equal(t, "", incoming[0].Winner)
 	})
 
@@ -123,4 +194,98 @@ func TestPoolWrite_StaleSnapshotKeepsHantei(t *testing.T) {
 	assert.Equal(t, "Kyoto", dhRow.Winner)
 	// The correction itself landed.
 	assert.Equal(t, []string{"M", "K"}, stored[0].SubResults[0].IpponsA)
+}
+
+// Same scenario through the TX pool path, which is the one POST
+// /competitions/:id/matches/:mid/score and the bulk-score endpoint actually
+// take. Its non-tx twin already had the guard, so this pins the twin parity:
+// remove preserveSubHantei from the withPoolMatchTx closure in scoring_tx.go
+// and this goes red while every other test in the package stays green.
+func TestPoolWriteTx_StaleSnapshotKeepsHantei(t *testing.T) {
+	dir, err := os.MkdirTemp("", "engine-subhantei-tx-*")
+	require.NoError(t, err)
+	defer func() { _ = os.RemoveAll(dir) }()
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	eng := New(store)
+
+	compID := "shtx1"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "SHTX", Kind: "team", TeamSize: 3}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{{
+		ID: "P1-1", SideA: "Kyoto", SideB: "Osaka", Status: state.MatchStatusRunning,
+		SubResults: []state.SubMatchResult{
+			{Position: 1, SideA: "K1", SideB: "O1", IpponsA: []string{"M"}, Winner: "K1", Decision: "fought"},
+			{Position: state.DaihyosenSubPosition, SideA: "Kyoto", SideB: "Osaka",
+				IpponsA: []string{"M"}, IpponsB: []string{"K"},
+				Winner: "Kyoto", Decision: "daihyosen", DecidedByHantei: state.HanteiPtr(true)},
+		},
+	}}))
+
+	patch := &state.MatchResult{
+		SideA: "Kyoto", SideB: "Osaka", Status: state.MatchStatusRunning,
+		SubResults: []state.SubMatchResult{
+			{Position: 1, SideA: "K1", SideB: "O1", IpponsA: []string{"M", "K"}, Winner: "K1", Decision: "fought"},
+			{Position: state.DaihyosenSubPosition, SideA: "Kyoto", SideB: "Osaka", Decision: "daihyosen"},
+		},
+	}
+	require.NoError(t, store.WithTransaction(compID, func(tx state.StoreTx) error {
+		_, terr := eng.RecordMatchResultWithIneligibilityTx(tx, compID, "P1-1", patch)
+		return terr
+	}))
+
+	stored, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	var dhRow *state.SubMatchResult
+	for i := range stored[0].SubResults {
+		if stored[0].SubResults[i].Position == state.DaihyosenSubPosition {
+			dhRow = &stored[0].SubResults[i]
+		}
+	}
+	require.NotNil(t, dhRow)
+	assert.True(t, dhRow.HanteiDecided(), "the /score tx path must not erase a recorded verdict")
+	assert.Equal(t, "Kyoto", dhRow.Winner)
+	// The scoreline the verdict rests on travels with it, so the bout does not
+	// silently become 0-0.
+	assert.Equal(t, []string{"M"}, dhRow.IpponsA)
+	assert.Equal(t, []string{"K"}, dhRow.IpponsB)
+	assert.Equal(t, []string{"M", "K"}, stored[0].SubResults[0].IpponsA)
+}
+
+// normalizePriorForRollback must clear the hantei flag at BOTH levels. The
+// match level was already handled; the sub level is the same nil-collision one
+// bout deeper, where a nil would let preserveSubHantei read the staged forward
+// write as `stored` and re-stamp the very verdict being rolled back.
+func TestNormalizePriorForRollback(t *testing.T) {
+	prior := &state.MatchResult{
+		SubResults: []state.SubMatchResult{
+			{Position: 1},
+			{Position: state.DaihyosenSubPosition},
+		},
+	}
+	normalizePriorForRollback(prior)
+	require.NotNil(t, prior.DecidedByHantei)
+	assert.False(t, *prior.DecidedByHantei)
+	for i := range prior.SubResults {
+		require.NotNilf(t, prior.SubResults[i].DecidedByHantei, "sub %d", i)
+		assert.Falsef(t, *prior.SubResults[i].DecidedByHantei, "sub %d", i)
+	}
+
+	t.Run("nil SubResults becomes an explicit clear", func(t *testing.T) {
+		p := &state.MatchResult{}
+		normalizePriorForRollback(p)
+		assert.NotNil(t, p.SubResults)
+		assert.Empty(t, p.SubResults)
+	})
+
+	t.Run("an explicit true is left alone", func(t *testing.T) {
+		keep := true
+		p := &state.MatchResult{SubResults: []state.SubMatchResult{{Position: 1, DecidedByHantei: &keep}}}
+		normalizePriorForRollback(p)
+		assert.True(t, *p.SubResults[0].DecidedByHantei)
+	})
+
+	t.Run("nil prior is a no-op", func(t *testing.T) {
+		assert.NotPanics(t, func() { normalizePriorForRollback(nil) })
+	})
 }

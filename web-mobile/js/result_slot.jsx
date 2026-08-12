@@ -40,10 +40,12 @@
 //     the team panel), and its slots are locked with a "hantei already
 //     recorded" title.
 // Change the contract and all three call sites must be re-checked (CLAUDE.md).
-// The loose case is IMPOSSIBLE under the rules (sanbon-shobu ends at 2, and
-// the editors' ippon entry stops both sides at 2, so no UI can produce 2-2;
-// server validation checks only equality, not the bound). The branch exists
-// solely so hand-corrupted data can never overwrite a recorded point.
+// The loose case is IMPOSSIBLE under the rules (sanbon-shobu ends at 2, so a
+// 2-2 bout cannot occur), and it is closed on both sides: the editors' ippon
+// entry stops each side at 2, and validateIpponCounts (internal/mobileapp/
+// validation.go) caps each side at 2 AND rejects 2-2 outright on every sub-bout
+// and on the bulk path. The branch exists solely so a hand-edited file can
+// never overwrite a recorded point.
 export function resultSlot(cells) {
   const pair = cells || [];
   const slot = [pair[0] || "", pair[1] || ""].findIndex(v => !v);
@@ -51,10 +53,12 @@ export function resultSlot(cells) {
 }
 
 // realIppons: what counts as a RECORDED ippon (drops empties and the "\u2022"
-// placeholder). Exported so every JS surface counts the same way; the display
-// pair, the hantei tie gates and the editors' totals must never read
-// different totals from one array. (Go's validation.go compares raw lengths
-// at the wire layer; its own comment marks the pair keep-in-sync.)
+// placeholder). Exported so the surfaces that gate on a COUNT all count the
+// same way; the display pair, the hantei tie gates and the editors' totals must
+// never read different totals from one array. (Two surfaces still hand-roll the
+// same filter inline \u2014 formatIpponsScore in bracket.jsx and the OBS overlay \u2014
+// so this is not yet literally every caller. Go's validation.go compares raw
+// lengths at the wire layer; its own comment marks the pair keep-in-sync.)
 export const realIppons = (arr) => (arr || []).filter(x => x && x !== "\u2022");
 
 // hanteiTied: the ONE JS statement of "hantei applies only to a tied

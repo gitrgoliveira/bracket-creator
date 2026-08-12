@@ -121,10 +121,27 @@ func (e *Engine) withBracketMatch(compId, matchId string, mutate func(*state.Bra
 // opened before the verdict existed, a quick-score write, any client
 // predating the field) must not erase a recorded one. The verdict travels
 // (flag + winner) onto the incoming daihyosen row only when that row is
-// verdict-silent, names no winner of its own, and its scoreline is still
-// tied (an untied row cannot carry a hantei; validation would reject it).
+// verdict-silent, names no winner of its own, carries a decision hantei can
+// coexist with, and is still tied (an untied row cannot carry a hantei).
 // An EXPLICIT false (the editors' withdrawal) and a named winner both pass
 // through untouched. The preserveLoserScore precedent, one bout deeper.
+//
+// SCOPE, deliberately narrow in two directions:
+//
+//   - It PATCHES an existing position -1 row; it never RE-APPENDS one the
+//     incoming payload dropped. DELETE /daihyosen removes that row on purpose
+//     (handlers_daihyosen.go) and writes through this same path, so
+//     resurrecting a missing row would make an unscored rep bout undeletable.
+//     A writer that drops the row entirely (quick-score synthesises positions
+//     1..N only) therefore still discards it - that is the delete contract, not
+//     an oversight.
+//   - It runs in the engine, AFTER the HTTP validator, so a row it mutates is
+//     never re-validated. Every field it writes must land on a row that would
+//     have passed validateSubBout, which is why the decision allow-list below
+//     mirrors that validator exactly: without it a verdict-silent
+//     `decision:"kiken-voluntary"` row would be stamped into a bout that is
+//     simultaneously a withdrawal and a judges' decision, and SideMarksLR
+//     would then emit both `Kiken` and `Ht`.
 func preserveSubHantei(stored, incoming []state.SubMatchResult) {
 	var prior *state.SubMatchResult
 	for i := range stored {
@@ -144,12 +161,73 @@ func preserveSubHantei(stored, incoming []state.SubMatchResult) {
 		if in.DecidedByHantei != nil || in.Winner != "" {
 			return // the writer addressed the verdict: its word stands
 		}
+		// Same allow-list as validateSubBout: hantei declares a winner from a
+		// tied bout, so it cannot coexist with a decision that already settles
+		// the bout another way.
+		switch in.Decision {
+		case "", "fought", string(domain.DecisionDaihyosen):
+		default:
+			return
+		}
+		// A row that records no ippons of its own said nothing about the
+		// SCORELINE either, so the stored one travels with the verdict it
+		// rests on. Without this the verdict lands on an all-empty row and the
+		// struck ippons, the overtime marker and the sub-decision are all lost:
+		// a 1-1 hantei would persist as 0-0, which moves the `Ht` to the other
+		// slot (resultSlot fills outside-to-inside) and drops the `(E)`.
+		// Note this is also what makes the tie check below meaningful - on an
+		// empty incoming row it would otherwise compare 0 against 0 and pass
+		// vacuously, never once consulting what was actually stored.
+		if countScoringIppons(in.IpponsA) == 0 && countScoringIppons(in.IpponsB) == 0 {
+			in.IpponsA = append([]string(nil), prior.IpponsA...)
+			in.IpponsB = append([]string(nil), prior.IpponsB...)
+			in.Encho = prior.Encho.Clone()
+			if in.Decision == "" {
+				in.Decision = prior.Decision
+			}
+		}
 		if countScoringIppons(in.IpponsA) != countScoringIppons(in.IpponsB) {
 			return // untied now: the verdict cannot stand on this scoreline
 		}
 		in.DecidedByHantei = state.HanteiPtr(true)
 		in.Winner = prior.Winner
 		return
+	}
+}
+
+// normalizePriorForRollback forces a restored prior snapshot into the shape the
+// forward write primitives read as "clear this", rather than "the writer said
+// nothing". Three fields collapse a stored false/empty to nil on the way out of
+// lookupExistingResult, and every one of those nils is a PRESERVE trigger
+// downstream, so a rollback that skipped this would restore the very partial
+// write it is meant to undo:
+//   - SubResults nil -> explicit empty slice, so recordBracketMatchResult reads
+//     "clear the sub-results" instead of leaving the partial write in place.
+//   - DecidedByHantei nil -> explicit false. HanteiPtr collapses false to nil by
+//     design, so nil would hit the match-level nil-preserve branch.
+//   - each sub-bout's DecidedByHantei nil -> explicit false: the same collision
+//     one level down. preserveSubHantei would otherwise see the staged forward
+//     write as `stored` and re-stamp the exact verdict being rolled back, and
+//     since state.HanteiPtr(false) returns nil, the pointer must be taken
+//     directly rather than through it.
+//
+// Callers must hold whatever lock the following restore write requires; this
+// only rewrites the caller's own snapshot.
+func normalizePriorForRollback(prior *state.MatchResult) {
+	if prior == nil {
+		return
+	}
+	if prior.SubResults == nil {
+		prior.SubResults = []state.SubMatchResult{}
+	}
+	clearHantei := false
+	if prior.DecidedByHantei == nil {
+		prior.DecidedByHantei = &clearHantei
+	}
+	for i := range prior.SubResults {
+		if prior.SubResults[i].DecidedByHantei == nil {
+			prior.SubResults[i].DecidedByHantei = &clearHantei
+		}
 	}
 }
 
@@ -525,22 +603,7 @@ func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId strin
 			// to its prior state before returning 409 so the operator
 			// sees a clean rejection rather than a mutated match.
 			if prior != nil {
-				// Normalize nil SubResults to an explicit empty slice so the
-				// nil-preserve branch in recordBracketMatchResult treats
-				// this as "clear sub-results" rather than "leave the
-				// partially-written SubResults in place".
-				if prior.SubResults == nil {
-					prior.SubResults = []state.SubMatchResult{}
-				}
-				// Same nil-collision on the sibling field: lookupExistingResult
-				// projects DecidedByHantei through HanteiPtr, which collapses a
-				// stored false to nil. nil then hits the nil-preserve branch in
-				// recordBracketMatchResult, leaving a partially-written hantei
-				// flag in place. Force an explicit false so rollback clears it.
-				if prior.DecidedByHantei == nil {
-					clearHantei := false
-					prior.DecidedByHantei = &clearHantei
-				}
+				normalizePriorForRollback(prior)
 				_ = e.writeMatchResult(compId, matchId, prior)
 			}
 			return nil, err

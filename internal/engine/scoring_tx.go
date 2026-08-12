@@ -339,6 +339,14 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		if result.CorrectionReason == "" {
 			result.CorrectionReason = r.CorrectionReason
 		}
+		// Twin parity with scoring.go's RecordMatchResultWithIneligibility: this
+		// is the POOL branch of the path POST /score and the bulk-score endpoint
+		// actually take, and a pool/league team encounter can hold a daihyosen
+		// (findMatchForDaihyosenTx accepts pool matches). Without this a
+		// verdict-silent write from a stale second editor erases a recorded
+		// hantei, which in accrueTeamSubResults flips the bout from a win into a
+		// draw and so moves the team's IV/IL/IT tie-break figures.
+		preserveSubHantei(r.SubResults, result.SubResults)
 		*r = *result
 	})
 	if err != nil {
@@ -430,20 +438,11 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 // intents coalesced last-write-wins, so this restore supersedes the forward
 // write before Commit applies the final state. prior must be non-nil.
 //
-// It normalizes two nil-collision fields before restoring:
-//   - SubResults nil → explicit empty slice, so recordBracketMatchResultTx
-//     treats it as "clear sub-results" rather than leaving the partial write.
-//   - DecidedByHantei nil → explicit false: lookupExistingResultTx projects the
-//     flag through HanteiPtr, which collapses a stored false to nil; nil would
-//     hit the nil-preserve branch and leave the partial hantei flag in place.
+// It normalizes the nil-collision fields before restoring (SubResults and the
+// hantei flag at both match and sub-bout level); see normalizePriorForRollback
+// for why each nil would otherwise re-apply the write being rolled back.
 func (e *Engine) rollbackMatchResultTx(tx state.StoreTx, compID, matchID string, prior *state.MatchResult) {
-	if prior.SubResults == nil {
-		prior.SubResults = []state.SubMatchResult{}
-	}
-	if prior.DecidedByHantei == nil {
-		clearHantei := false
-		prior.DecidedByHantei = &clearHantei
-	}
+	normalizePriorForRollback(prior)
 	if rerr := e.recordMatchResultTx(tx, compID, matchID, prior); rerr != nil {
 		log.Printf("engine: RecordMatchResultWithIneligibilityTx rollback failed compId=%s matchId=%s: %v", compID, matchID, rerr)
 	}

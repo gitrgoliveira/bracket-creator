@@ -86,6 +86,13 @@ describe('TvWhiteBoard', () => {
     // chip used to duplicate the mark ~10cm above the row; assert on an
     // overtime match that the header carries no (E) while the row (which owns
     // the mark via matchMiddleMark) is still mounted.
+    //
+    // The stub is LOAD-BEARING: this file's import graph never reaches
+    // bracket.jsx (the only module that assigns window.matchMiddleMark) and
+    // vitest isolates per file, so without it the removed line would evaluate
+    // to "" on main too and this test could not fail. Same stub the sibling
+    // match_scoreboard / streaming_overlay suites install.
+    window.matchMiddleMark = (m) => (m?.encho?.periodCount > 0 ? '(E)' : '');
     const p = teamPromoted();
     p.match = {
       id: 'm2', round: 'Round 1',
@@ -101,6 +108,38 @@ describe('TvWhiteBoard', () => {
     expect(JSON.stringify(headerCentre)).not.toContain('(E)');
     expect(JSON.stringify(headerCentre)).toContain('vs');
     expect(findVnode(TvWhiteBoard(props), n => n.type === IndividualScore)).toBeTruthy();
+  });
+
+  it('a TEAM board still has a home for the encounter middle mark: the summary row centre', () => {
+    // Removing the header chip was only safe because the row centre below shows
+    // the mark. That premise holds for IndividualScore (whose synthesised sub
+    // carries it) but NOT for TeamScoreboard: its summary-row centre used to be
+    // an empty spacer and its bout rows carry only per-BOUT middles, so the
+    // encounter-level (E) had nowhere left to render. It is threaded in as
+    // `middle`; drop that prop and this goes red.
+    window.matchMiddleMark = (m) => (m?.encho?.periodCount > 0 ? '(E)' : '');
+    const p = teamPromoted();
+    p.match = { ...p.match, encho: { periodCount: 1 } };
+    const props = { ...base, promoted: p, isTeamMatch: true,
+      subResults: p.match.subResults, teamSize: 5 };
+    const sb = findVnode(TvWhiteBoard(props), n => n.type === TeamScoreboard);
+    expect(sb).toBeTruthy();
+    expect(sb.props.middle).toBe('(E)');
+    // And the header is still plain, so the mark has exactly ONE home.
+    const headerCentre = findVnode(TvWhiteBoard(props), n =>
+      n?.props?.style?.fontSize === '2.4vh');
+    expect(JSON.stringify(headerCentre)).not.toContain('(E)');
+  });
+
+  it('a team board with no special mark threads an empty middle, not "vs"', () => {
+    // The summary centre is not a "vs" separator (the team-name row above is);
+    // it must stay blank unless there is a real X/(E)/(DH) to show.
+    window.matchMiddleMark = () => '';
+    const p = teamPromoted();
+    const props = { ...base, promoted: p, isTeamMatch: true,
+      subResults: p.match.subResults, teamSize: 5 };
+    const sb = findVnode(TvWhiteBoard(props), n => n.type === TeamScoreboard);
+    expect(sb.props.middle).toBe('');
   });
 
   it('league board header shows just the competition name, no dangling " · " separator', () => {

@@ -23,6 +23,21 @@ var ErrParticipantNotFound = errors.New("participant not found")
 // people at different clubs), so the message names both fields.
 var ErrDuplicateName = errors.New("a participant with the same name and dojo already exists")
 
+// duplicateTeamNameError reports two teams sharing a name in a team
+// competition. It deliberately does NOT wrap ErrDuplicateName's text: that
+// sentinel says "same name and dojo", whereas this gate fires precisely when
+// the dojos DIFFER (an identical (name, dojo) pair is already caught by the
+// tier-1 check), so wrapping produced an operator-facing 409 that argued with
+// itself. Is() still reports ErrDuplicateName so every existing
+// errors.Is-based 409 mapping keeps working unchanged.
+type duplicateTeamNameError struct{ names []string }
+
+func (e *duplicateTeamNameError) Error() string {
+	return "team names must be unique, two teams cannot share a name even from different dojos: " + strings.Join(e.names, "; ")
+}
+
+func (e *duplicateTeamNameError) Is(target error) bool { return target == ErrDuplicateName }
+
 // ErrCompetitionNotInSetup is returned by the setup-gated write paths
 // (Store.AddParticipant and Store.ReplaceParticipant; both call
 // requireSetupLocked) when the competition has already advanced past the
@@ -329,6 +344,27 @@ func (s *Store) SaveParticipants(compID string, players []domain.Player) error {
 		return err
 	}
 	return s.saveParticipantsNoLock(compID, players, withZekken)
+}
+
+// SaveParticipantsRestored persists a roster recovered from an operator's own
+// archive. Identical to SaveParticipants except that the team-name uniqueness
+// rule is not applied: that rule postdates existing archives, so a backup taken
+// earlier can legally contain two same-name teams, and the grandfathering in
+// saveParticipantsNoLock cannot help here because a restore writes into a
+// freshly created competition with nothing on disk to grandfather against.
+// Refusing would make the operator's own backup permanently unimportable, since
+// the import path rolls the whole competition back when the participant save
+// fails. Fresh operator input still goes through SaveParticipants and is still
+// refused; only a restore of already-owned data is exempt.
+func (s *Store) SaveParticipantsRestored(compID string, players []domain.Player) error {
+	mu := s.getCompLock(compID)
+	mu.Lock()
+	defer mu.Unlock()
+	withZekken, err := s.withZekkenNameLocked(compID)
+	if err != nil {
+		return err
+	}
+	return s.saveParticipantsNoLockOpts(compID, players, withZekken, false)
 }
 
 // withZekkenNameLocked returns the effective zekken-column flag for compID.
@@ -794,6 +830,14 @@ func (s *Store) ReplaceParticipant(compID string, pid string, withZekkenName boo
 }
 
 func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, withZekkenName bool) error {
+	return s.saveParticipantsNoLockOpts(compID, players, withZekkenName, true)
+}
+
+// saveParticipantsNoLockOpts is saveParticipantsNoLock with the team-name
+// uniqueness rule made optional. Only the archive-restore path passes false;
+// see SaveParticipantsRestored for why. Every other caller enforces it, so the
+// rule stays unbypassable from operator input.
+func (s *Store) saveParticipantsNoLockOpts(compID string, players []domain.Player, withZekkenName bool, enforceTeamNames bool) error {
 	// Tier-1 (perfect-duplicate) guard at the lowest write layer so EVERY
 	// persistence path; the bulk PUT /competitions/:id roster import (the
 	// SPA's primary flow), single add/edit, and any future caller; rejects
@@ -816,13 +860,47 @@ func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, w
 	// Same lowest-write-layer placement as the tier-1 guard so every
 	// persistence path enforces it. loadCompetitionLocked is the correct
 	// pairing here: callers of saveParticipantsNoLock hold the comp lock.
-	if comp, _ := s.loadCompetitionLocked(compID); comp != nil && (comp.Kind == "team" || comp.TeamSize > 0) {
+	//
+	// It rejects only the duplicates this write INTRODUCES, and that
+	// grandfathering is load-bearing, not politeness. Unlike the tier-1 gate
+	// (which has always been enforced, so no legal roster can violate it),
+	// this rule is NEW: rosters written before it exist on disk with two
+	// same-name teams, and every roster rewrite funnels through here -
+	// including check-in, which is deliberately ungated so it keeps working
+	// after a competition starts. Rejecting the whole roster would turn the
+	// next check-in into an unmappable HTTP 500 with no in-app repair (the
+	// only rename path, ReplaceParticipant, is requireSetupLocked-gated), i.e.
+	// it would brick a live event over data the operator entered legally.
+	// A rename or an addition that CREATES a new collision is still refused.
+	comp, _ := s.loadCompetitionLocked(compID)
+	if enforceTeamNames && comp != nil && (comp.Kind == "team" || comp.TeamSize > 0) {
 		names := make([]string, len(players))
 		for i, p := range players {
 			names[i] = p.Name
 		}
 		if dupes := helper.CheckDuplicateEntriesByName(names); len(dupes) > 0 {
-			return fmt.Errorf("%w: team names must be unique: %s", ErrDuplicateName, strings.Join(dupes, "; "))
+			// Compare against what is already stored, keyed the same way the
+			// detector keys them so casing/diacritic drift cannot smuggle one
+			// past as "pre-existing".
+			grandfathered := make(map[string]bool)
+			if stored, lerr := s.loadParticipantsLocked(compID, withZekkenName); lerr == nil {
+				storedNames := make([]string, len(stored))
+				for i, p := range stored {
+					storedNames[i] = p.Name
+				}
+				for _, d := range helper.CheckDuplicateEntriesByName(storedNames) {
+					grandfathered[helper.NormalizeParticipantName(d)] = true
+				}
+			}
+			fresh := make([]string, 0, len(dupes))
+			for _, d := range dupes {
+				if !grandfathered[helper.NormalizeParticipantName(d)] {
+					fresh = append(fresh, d)
+				}
+			}
+			if len(fresh) > 0 {
+				return &duplicateTeamNameError{names: fresh}
+			}
 		}
 	}
 

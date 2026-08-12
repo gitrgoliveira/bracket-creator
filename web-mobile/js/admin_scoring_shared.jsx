@@ -422,16 +422,29 @@ function initialEnchoPeriodsForMatch(m) {
 // ONLY on the daihyosen. Encho is OPTIONAL for hantei: a tied daihyosen may
 // be taken straight to a judges' decision without overtime: so the two
 // fields are emitted independently: encho whenever the counter is > 0, and
-// decidedByHantei ALWAYS, explicitly (tri-state wire contract, operator
-// ruling "all results must be recorded into storage"): true when armed on a
-// tied scoreline, otherwise an EXPLICIT false. The server preserves a stored
+// decidedByHantei explicitly (tri-state wire contract, operator ruling "all
+// results must be recorded into storage"): true when armed on a tied
+// scoreline, otherwise an EXPLICIT false. The server preserves a stored
 // verdict only against writers that are verdict-SILENT (field absent - stale
-// snapshots, quick-score); this editor always has a say, so its withdrawal
-// must reach the wire as false rather than as an omission the server would
-// read as "no opinion" and preserve over. Returns the fields to merge into
-// the entry. Exported for vitest.
-function daihyosenEnchoFields({ enchoPeriodCount, daihyosenTied, daihyosenHantei }) {
-  const fields = { decidedByHantei: !!(daihyosenTied && daihyosenHantei) };
+// snapshots, quick-score), so an editor that HAS a say must send its
+// withdrawal as false rather than as an omission the server would read as
+// "no opinion" and preserve over.
+//
+// hanteiKnown is the exception, and it is what stops the tri-state collapsing
+// back to a boolean. An editor mounted BEFORE the verdict existed has its
+// armed flag frozen false (deliberately: re-seeding it from the live prop
+// would reset in-progress editing on every SSE reload), so it would otherwise
+// send an authoritative-looking false for a verdict it has never displayed and
+// the operator has never seen, silently erasing another device's judges'
+// decision on the next unrelated autosave. Pass false in exactly that case and
+// the write goes back to being SILENT, which is the truth: this editor has no
+// opinion. It defaults true so a caller that never had this ambiguity keeps
+// the explicit contract. Returns the fields to merge into the entry.
+// Exported for vitest.
+function daihyosenEnchoFields({ enchoPeriodCount, daihyosenTied, daihyosenHantei, hanteiKnown = true }) {
+  const verdict = !!(daihyosenTied && daihyosenHantei);
+  const fields = {};
+  if (verdict || hanteiKnown) fields.decidedByHantei = verdict;
   if (enchoPeriodCount > 0) fields.encho = { periodCount: enchoPeriodCount };
   return fields;
 }

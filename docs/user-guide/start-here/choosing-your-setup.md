@@ -49,7 +49,7 @@ The app runs on several screens at the same time, and each surface is designed f
 A few consequences worth planning around:
 
 - **The operator console is the one surface with a real minimum.** Scoring screens put a full team encounter, its bout rows, and the controls on one screen, so a small phone is not a practical operator device. A laptop works equally well if you have one per shiai-jo.
-- **Display screens are optional.** Without them you are at the partially connected level described above: results still reach phones, but you will still print scoreboards for the courts and tags for competitors.
+- **Display screens are optional.** Without them you are at the partially connected level described above: results still reach phones, but you will also print scoreboards for the courts. Competitor tags are printed at every level, so they are not a cost of skipping the screens.
 - **The court display is usually driven from the operator's own machine** over an HDMI cable rather than from a separate device. The console and the board are then two tabs in one browser on one computer, so scores reach the board without a network hop and it keeps updating through a Wi-Fi drop. This is a client-side arrangement at the court and holds whichever way you host the server. See [Keep the court scoreboard alive on the same machine](../../architecture/infrastructure-architecture.md#keep-the-court-scoreboard-alive-on-the-same-machine-hdmi).
 - **Spectator phones may be on cellular** rather than venue Wi-Fi when the app is cloud-hosted, so they do not add to your local network load.
 

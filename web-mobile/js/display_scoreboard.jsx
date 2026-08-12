@@ -71,9 +71,11 @@ function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, is
     const repShiro = (promoted.match.repPlayerB || "").trim();
     const repAka = (promoted.match.repPlayerA || "").trim();
     const next = queueMatches && queueMatches.length ? queueMatches[0] : null;
-    // Centre chip carries only the middle mark (X / (E) / (DH)); per-side
-    // result marks live in the score strings via matchScoreStr elsewhere.
-    const sfx = (window.matchMiddleMark && window.matchMiddleMark(promoted.match)) || "";
+    // NO middle mark here (operator ruling): the FIK row centre rendered by
+    // the shared scoreboard below is the mark's ONE home, and this header
+    // chip duplicating X/(E)/(DH) ~10cm above it was an error. The plain
+    // "vs" separator stays. (The OBS streaming overlay keeps its chip: it
+    // renders no scoreboard row, so the chip is the mark's only home there.)
     // Header subtitle: competition name + phase, joined only when both exist
     // (phaseLabel is "" for league, so no dangling " · ").
     const compName = promoted.competition?.name || "";
@@ -82,7 +84,7 @@ function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, is
     // The shared scoreboard below carries the score (IV/PW summary for teams,
     // ippon slots for individuals), so the team-name row centre is just "vs"
     // (+ any decision suffix).
-    const nameCentre = <div style={{ fontSize: "2.4vh", color: "var(--ink-3)", fontWeight: 700 }}>vs{sfx ? <span style={{ marginLeft: "1vw", color: "var(--ink-2)" }}>{sfx}</span> : null}</div>;
+    const nameCentre = <div style={{ fontSize: "2.4vh", color: "var(--ink-3)", fontWeight: 700 }}>vs</div>;
 
     return (
         <div className="tvd tvd--white" data-testid="tv-display-root" style={{

@@ -248,8 +248,10 @@ function boutMiddle(decision, encho, score) {
 }
 
 // matchMiddleMark: the SPECIAL middle marks only ("" when the middle is the
-// plain "vs") — for surfaces that render the mark as a single centre chip
-// (MatchCard meta strip, TV scoreboard header, lobby, OBS lower-third).
+// plain "vs"). Consumers: the shared scoreboard's row centre (centreMarks,
+// via window) and the OBS lower-third, which renders no scoreboard row. The
+// TV header and lobby chips were REMOVED (operator ruling): a surface that
+// renders the FIK row must not duplicate the mark outside the row centre.
 function matchMiddleMark(match) {
   if (!match) return "";
   const mid = boutMiddle(match.decision, match.encho, match.score);

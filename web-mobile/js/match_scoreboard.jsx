@@ -399,9 +399,9 @@ export function IndividualScore({ match, variant, showNames, withZekkenName }) {
     // encho MUST be threaded: without it matchMiddleMark can never yield (E) on
     // an individual row, and defaultWinMaru would award the regulation ○○ for a
     // default win that actually happened in overtime, where the rulebook marks
-    // a single ○. On the TV board and lobby the header chip also shows (E), so
-    // the mark appears twice there — the same duplication X has always had on
-    // those surfaces; the row centre is the FIK position and stays.
+    // a single ○. This row centre is the mark's ONE home (operator ruling):
+    // the TV/lobby header chips that used to duplicate X/(E)/(DH) above it
+    // were removed; only the OBS overlay, which renders no row, keeps a chip.
     encho: match.encho,
     winner: ambiguous ? "" : (sideId(match.winner) || sideName(match.winner)),
     sideA: aKey, sideB: bKey,

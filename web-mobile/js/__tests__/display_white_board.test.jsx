@@ -80,6 +80,29 @@ describe('TvWhiteBoard', () => {
     lineupA: null, lineupB: null, showDH: false, queueMatches: [], zekken: false,
   };
 
+  it('header centre is a PLAIN vs: the middle mark lives only in the row centre', () => {
+    // Operator ruling: X/(E)/(DH) appear in the FIK row centre rendered by the
+    // shared scoreboard below, and NOWHERE else on this surface. The header
+    // chip used to duplicate the mark ~10cm above the row; assert on an
+    // overtime match that the header carries no (E) while the row (which owns
+    // the mark via matchMiddleMark) is still mounted.
+    const p = teamPromoted();
+    p.match = {
+      id: 'm2', round: 'Round 1',
+      sideA: { name: 'Aka P' }, sideB: { name: 'Shiro P' },
+      ipponsA: ['M'], ipponsB: [], winner: { name: 'Aka P' },
+      encho: { periodCount: 1 },
+    };
+    p.competition = { id: 'c2', name: 'Singles', kind: 'individual' };
+    const props = { ...base, promoted: p, isTeamMatch: false, subResults: [] };
+    const headerCentre = findVnode(TvWhiteBoard(props), n =>
+      n?.props?.style?.fontSize === '2.4vh');
+    expect(headerCentre).toBeTruthy();
+    expect(JSON.stringify(headerCentre)).not.toContain('(E)');
+    expect(JSON.stringify(headerCentre)).toContain('vs');
+    expect(findVnode(TvWhiteBoard(props), n => n.type === IndividualScore)).toBeTruthy();
+  });
+
   it('league board header shows just the competition name, no dangling " · " separator', () => {
     // phaseLabel returns "" for league; the subtitle must not render "Name · ".
     const p = teamPromoted();

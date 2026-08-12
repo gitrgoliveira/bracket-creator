@@ -125,7 +125,9 @@ function LobbyMatchCell({ slot, rowKind }) {
 
     const phase = phaseLabel(match, isBracket, roundIndex, totalRounds, competition?.format);
     const compMeta = [competition?.name, phase, match.scheduledAt].filter(Boolean).join(' · ');
-    const sfx = (kind === 'running' && window.matchMiddleMark) ? window.matchMiddleMark(match) : '';
+    // NO middle-mark chip in the meta strip (operator ruling): the
+    // IndividualScore row below carries X/(E)/(DH) in its own FIK centre,
+    // the mark's ONE home; a second copy in the corner was an error.
 
     return (
         <td style={{ padding: '4px 8px', verticalAlign: 'top' }}>
@@ -138,7 +140,6 @@ function LobbyMatchCell({ slot, rowKind }) {
                 {compMeta && (
                     <div style={{ fontSize: 10, color: LOBBY_COLORS.inkMuted, marginBottom: 4, letterSpacing: '0.02em', display: 'flex', justifyContent: 'space-between', gap: 6 }}>
                         <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{compMeta}</span>
-                        {sfx && <span style={{ flexShrink: 0, fontWeight: 700, color: LOBBY_COLORS.ink }}>{sfx}</span>}
                     </div>
                 )}
                 {/* One matchup = one IndividualScore row (same component the

@@ -118,6 +118,29 @@ func validateMaxLen(field, val string, max int) error {
 	return nil
 }
 
+// The remedy clauses for a seeding refused at a WRITE boundary. Both callers
+// are holding the whole list already, so unlike the draw's refusal there is no
+// seeding panel to send them back to and nothing on disk to "clear" -- and the
+// two differ because one is fixed in a request body and the other in a file.
+const (
+	seedGapRemedyPut    = "Send the complete seeding, or an empty list to clear it."
+	seedGapRemedyImport = "Fix the seeds file or drop it from the manifest, then import again."
+)
+
+// seedRejection turns a domain.ValidateAssignments failure into the message a
+// write boundary refuses with: the gap diagnosis plus that boundary's remedy
+// when ranks are missing, and otherwise the validator's own words.
+//
+// The pass-through matters. A duplicate rank and a rank of 0 are not gaps, and
+// helper.SeedGapDiagnosis returns "" for both precisely so that neither can be
+// reported as one; err already describes them exactly.
+func seedRejection(assignments []domain.SeedAssignment, err error, remedy string) string {
+	if diagnosis := helper.SeedGapDiagnosis(assignments); diagnosis != "" {
+		return diagnosis + " " + remedy
+	}
+	return err.Error()
+}
+
 // validateHTTPURL returns a ValidationError when val is non-empty and does not
 // start with "http://" or "https://". These URL fields are rendered as raw href
 // values in the viewer SPA; rejecting non-http(s) schemes at the write boundary

@@ -514,6 +514,21 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				return
 			}
 		}
+		// A seeding that breaks the rules is refused HERE, not merely at the
+		// draw. This endpoint submits a seeding as a finished artefact -- one
+		// request carrying the whole list -- so there is no half-typed state to
+		// protect and nothing is lost by saying no.
+		//
+		// PUT /competitions/:id is deliberately NOT symmetric: it carries the
+		// roster with seeds riding along as a field of each player, and the
+		// admin console sends it on every keystroke in the seeding panel.
+		// Refusing there would make it impossible to type a 4th seed before a
+		// 1st. That path stores the half-entered set, shows it back, warns
+		// about it, and is refused by every path that USES it.
+		if err := domain.ValidateAssignments(assignments); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": seedRejection(assignments, err, seedGapRemedyPut)})
+			return
+		}
 
 		if err := store.SaveSeeds(id, assignments); err != nil {
 			internalError(c, err)

@@ -53,35 +53,19 @@ func (e *Engine) SeedWarnings(id string) []string {
 // already describes precisely.
 func (e *Engine) seedingProblem(id string, cause error) string {
 	raw, rerr := e.store.LoadSeedsRaw(id)
-	if rerr != nil || len(raw) == 0 {
+	if rerr != nil {
 		return fmt.Sprintf("competition %s: %v", id, cause)
 	}
-
-	present := make(map[int]bool, len(raw))
-	highest := 0
-	for _, s := range raw {
-		present[s.SeedRank] = true
-		if s.SeedRank > highest {
-			highest = s.SeedRank
-		}
-	}
-	missing := []int{}
-	for r := 1; r < highest; r++ {
-		if !present[r] {
-			missing = append(missing, r)
-		}
-	}
-	if len(missing) == 0 {
+	diagnosis := helper.SeedGapDiagnosis(raw)
+	if diagnosis == "" {
 		return fmt.Sprintf("competition %s: %v", id, cause)
 	}
-	return fmt.Sprintf(
-		"Seeding is incomplete: seed rank%s %s %s not been set, but rank %d has. Set the missing rank%s or clear the seeds, then generate the draw again.",
-		helper.Plural(len(missing)), helper.RankList(missing), haveOrHas(len(missing)), highest, helper.Plural(len(missing)))
+	return diagnosis + " " + seedGapRemedyDraw
 }
 
-func haveOrHas(n int) string {
-	if n == 1 {
-		return "has"
-	}
-	return "have"
-}
+// The remedy clause that rides behind helper.SeedGapDiagnosis here. Each
+// boundary names the action available AT THAT boundary, so the write endpoints
+// carry their own (internal/mobileapp/handlers_participants.go): an operator
+// refused at the draw goes back to the seeding panel, while an API client that
+// PUT a seeding is holding the list itself and has nothing to "clear".
+const seedGapRemedyDraw = "Set the missing ranks or clear the seeds, then generate the draw again."

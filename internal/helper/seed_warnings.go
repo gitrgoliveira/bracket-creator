@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 )
 
 // Seed-placement warnings (R2, D6 and D7 of specs/007-ekc-draw/spec.md).
@@ -262,6 +264,65 @@ func Plural(n int) string {
 		return ""
 	}
 	return "s"
+}
+
+// SeedGapDiagnosis names the seed ranks the operator still has to type, for a
+// set whose ranks are not contiguous from 1.
+//
+// This is the DIAGNOSIS only, with no remedy attached, because the remedy
+// depends on where the refusal happened: the draw says "then generate the draw
+// again", the seeds endpoint says "send the complete seeding", and the admin
+// console says which tab to go to. Every one of them states the fault in these
+// words, so an operator who meets it twice does not read two accounts of it.
+//
+// The set is worth diagnosing rather than merely rejecting because a hole in it
+// is the tool's OWN normal intermediate state: the seeding panel saves each
+// rank the moment it is typed, so an operator who enters seed 4 before seeds 1
+// to 3 has {4} on disk and has done nothing wrong yet. "seed ranks must be
+// sequential without gaps" restates the rule at them; this names the numbers.
+//
+// Mirrored in JS by seedGapDiagnosis (web-mobile/js/admin_helpers.jsx), which
+// blocks the draw controls before the request is made. Both are pinned to the
+// shared golden table in testdata/seed_gap_messages.json.
+//
+// Returns "" when the ranks are contiguous, when there are no seeds at all, or
+// when the fault is anything OTHER than a gap (a duplicate rank, a rank of 0).
+// Those the validator already describes precisely, and a caller must pass its
+// description through rather than mislabel it as a gap.
+func SeedGapDiagnosis(assignments []domain.SeedAssignment) string {
+	present := make(map[int]bool, len(assignments))
+	highest := 0
+	for _, a := range assignments {
+		if a.SeedRank <= 0 {
+			return ""
+		}
+		if present[a.SeedRank] {
+			return ""
+		}
+		present[a.SeedRank] = true
+		if a.SeedRank > highest {
+			highest = a.SeedRank
+		}
+	}
+	missing := []int{}
+	for r := 1; r < highest; r++ {
+		if !present[r] {
+			missing = append(missing, r)
+		}
+	}
+	if len(missing) == 0 {
+		return ""
+	}
+	return fmt.Sprintf(
+		"Seeding is incomplete: seed rank%s %s %s not been set, but rank %d has.",
+		Plural(len(missing)), RankList(missing), haveOrHas(len(missing)), highest)
+}
+
+func haveOrHas(n int) string {
+	if n == 1 {
+		return "has"
+	}
+	return "have"
 }
 
 func nilIfEmpty(s []string) []string {

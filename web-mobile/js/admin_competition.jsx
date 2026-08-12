@@ -256,7 +256,10 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   // The engine refuses such a draw anyway; disabling the buttons turns a
   // failed request into an up-front explanation pointing at the Settings tab,
   // matching the invalid-date blocker directly below.
-  const drawCourtsErr = window.competitionDrawBlockedReason(c, t.courts);
+  // Every rule that would make the server refuse this draw, with the remedy
+  // that fixes it. Not just the court rules any more: an incomplete seeding is
+  // refused the same way, and the operator has to be told which screen to open.
+  const drawBlocker = window.competitionDrawBlocker(c, t.courts);
   // Go ships a nil slice as JSON null, so a competition stored without a
   // courts key arrives as `courts: null`. The page-head subtitle read
   // c.courts.join(...) directly and took the whole console down with
@@ -328,11 +331,11 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
             {(!c.status || c.status === "setup") && (c.players || []).length >= 2 && (
               <>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <button type="button" className="btn btn--primary" onClick={generateDraw} disabled={!isDateValid(c.date) || !!drawCourtsErr || generating || starting}>
+                  <button type="button" className="btn btn--primary" onClick={generateDraw} disabled={!isDateValid(c.date) || !!drawBlocker || generating || starting}>
                     {generating && <span className="spinner" />}
                     {generating ? "Generating…" : "Generate draw"}
                   </button>
-                  <button type="button" className="btn btn--ghost" onClick={start} disabled={!isDateValid(c.date) || !!drawCourtsErr || starting || generating}>
+                  <button type="button" className="btn btn--ghost" onClick={start} disabled={!isDateValid(c.date) || !!drawBlocker || starting || generating}>
                     {starting && <span className="spinner" />}
                     {starting ? "Starting…" : "Start competition →"}
                   </button>
@@ -342,9 +345,9 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
                     ⚠ Cannot start: invalid date in Settings tab (e.g. "{c.date}")
                   </div>
                 )}
-                {drawCourtsErr && (
-                  <div style={{ color: "var(--red)", fontSize: 11, fontWeight: 600, maxWidth: 380, textAlign: "right" }} data-testid="shiaijo-count-block">
-                    ⚠ Cannot start: {drawCourtsErr} Reassign shiaijo in the Settings tab.
+                {drawBlocker && (
+                  <div style={{ color: "var(--red)", fontSize: 11, fontWeight: 600, maxWidth: 380, textAlign: "right" }} data-testid="draw-block">
+                    ⚠ Cannot start: {drawBlocker.reason} {drawBlocker.fix}
                   </div>
                 )}
                 {excludedFromDraw > 0 && (

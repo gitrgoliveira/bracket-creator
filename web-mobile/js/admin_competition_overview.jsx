@@ -110,25 +110,26 @@ function competitionNextSteps(c, tournamentCourts) {
 
   // Final step: generate draw (button is in the page-head; no section nav).
   //
-  // When a court rule blocks the draw, that header button is DISABLED, so
-  // pointing at it would be sending the operator to a dead control. The step
-  // names the blocker and the screen that fixes it instead. Reason text comes
-  // from competitionDrawBlockedReason so this row can never state the rule
-  // differently from the header block or the Settings hint.
-  const drawBlockedReason = typeof window !== "undefined" && window.competitionDrawBlockedReason
-    ? window.competitionDrawBlockedReason(c, tournamentCourts)
+  // When a rule blocks the draw, that header button is DISABLED, so pointing at
+  // it would be sending the operator to a dead control. The step names the
+  // blocker and the screen that fixes it instead. All of it comes from
+  // competitionDrawBlocker, including WHICH screen, so this row can never state
+  // the rule differently from the header block or send the operator to the
+  // wrong tab for it.
+  const drawBlocker = typeof window !== "undefined" && window.competitionDrawBlocker
+    ? window.competitionDrawBlocker(c, tournamentCourts)
     : null;
   let generateDetail = "Use the \"Generate draw\" button in the header above";
   if (!hasEnoughPlayers) generateDetail = "Add at least 2 participants first";
-  else if (drawBlockedReason) generateDetail = `${drawBlockedReason} Reassign shiaijo in Settings first: the "Generate draw" button stays disabled until you do.`;
-  const drawIsBlocked = !!drawBlockedReason && hasEnoughPlayers;
+  else if (drawBlocker) generateDetail = `${drawBlocker.reason} ${drawBlocker.fix} The "Generate draw" button stays disabled until you do.`;
+  const drawIsBlocked = !!drawBlocker && hasEnoughPlayers;
   steps.push({
     id: "generate",
     label: "Generate the draw",
     detail: generateDetail,
     state: "todo",
-    section: drawIsBlocked ? "settings" : null,
-    cta: drawIsBlocked ? "Reassign shiaijo →" : null,
+    section: drawIsBlocked ? drawBlocker.section : null,
+    cta: drawIsBlocked ? drawBlocker.cta : null,
     // `blocking` means "nothing further in this checklist can happen until
     // this is fixed", which is what promotes it past the ordering rule below.
     blocking: drawIsBlocked,

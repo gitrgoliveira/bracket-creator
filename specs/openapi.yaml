@@ -629,6 +629,13 @@ paths:
                             `parse participants: ...`. Empty when the row
                             imported successfully.
 
+                            A referenced seeds file must state a COMPLETE
+                            seeding (ranks 1..N, no gaps or duplicates); one
+                            that does not aborts its row with
+                            `seeds file "...": Seeding is incomplete: ...`
+                            and rolls the competition back off disk, so the
+                            file can be fixed and the import retried.
+
   # ── Sponsors ───────────────────────────────────────────────────────────────
 
   /api/sponsors/{file}:
@@ -975,6 +982,16 @@ paths:
         roster in one logical operation, issue two PUTs (settings
         first, then roster). Players with `seed: 0` produce no seed
         entry; sending `players: []` clears the roster.
+
+        The seed ranks in a roster save are NOT validated for
+        completeness, unlike `PUT /api/competitions/{id}/seeds`. The
+        admin console sends this request on every keystroke in its
+        seeding panel, so a half-entered seeding (rank 4 typed before
+        ranks 1-3) has to be storable; refusing it would make it
+        impossible to set a 4th seed first. It is stored and read back
+        as typed, and refused by every path that USES it: generating
+        the draw and starting the competition both answer 400 naming
+        the ranks that have not been set.
 
         Returns 404 when the competition does not exist (this endpoint
         never creates).
@@ -1668,6 +1685,23 @@ paths:
     put:
       tags: [participants]
       summary: Save seed assignments
+      description: |
+        Replaces the competition's seeding. The list must be COMPLETE: ranks
+        1..N with no gaps, no duplicates, and no rank below 1. Send `[]` to
+        clear the seeding.
+
+        This endpoint takes a seeding as a finished artefact, so an invalid one
+        is refused here with 400 rather than at the draw. The message names the
+        ranks that have not been set, e.g. "Seeding is incomplete: seed ranks 1,
+        2 and 3 have not been set, but rank 4 has."
+
+        NOT symmetric with `PUT /api/competitions/{id}`, which carries the
+        roster with seeds riding along as a field of each player. The admin
+        console sends that request on every keystroke in its seeding panel, so
+        it accepts a half-entered seeding (refusing would make it impossible to
+        type a 4th seed before a 1st). Such a seeding is stored and shown back,
+        but every path that USES it - generating the draw, starting the
+        competition - refuses it.
       security:
         - TournamentPassword: []
       parameters:
@@ -1689,6 +1723,15 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/SeedAssignment'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: |
+            A draw is pending. Discard it before changing the seeding.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   # ── Matches (Admin, requires auth) ─────────────────────────────────────────
 

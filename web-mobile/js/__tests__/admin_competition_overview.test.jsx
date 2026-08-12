@@ -353,7 +353,7 @@ describe('competitionNextSteps: generate step under a court block', () => {
     const step = generateStep(makeComp({ players: twoPlayers(), courts: ['A', 'B', 'C'] }), ['A', 'B', 'C']);
     expect(step.detail).not.toContain('Use the "Generate draw" button');
     expect(step.detail).toContain('3 shiaijo cannot be paired down to a single bracket');
-    expect(step.detail).toContain('Reassign shiaijo in Settings first');
+    expect(step.detail).toContain('Reassign shiaijo in Settings.');
     expect(step.section).toBe('settings');
     expect(step.cta).toBe('Reassign shiaijo →');
   });

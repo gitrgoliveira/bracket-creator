@@ -836,10 +836,11 @@ function normalizeCreatedRecord(created) {
 function StartAllModal({ state, onConfirm, onRetry, onClose }) {
   const dismissable = state.phase !== "running";
   // `blocked` is [{ comp, reason }] for competitions this action must NOT
-  // offer: their shiaijo allocation is one the draw cannot split, so the
-  // server would refuse the start. They are named with their reason instead
-  // of dropped, so the count in the button and the competitions on the
-  // dashboard still add up for the operator.
+  // offer: a shiaijo allocation the draw cannot split, or a seeding that is
+  // not yet complete, either of which the server would refuse the start over.
+  // They are named with their reason instead of dropped, so the count in the
+  // button and the competitions on the dashboard still add up for the operator.
+  // Each reason arrives with its own remedy attached.
   const { phase, comps = [], failed = [], blocked = [] } = state;
 
   let title = "Start all competitions";
@@ -878,7 +879,10 @@ function StartAllModal({ state, onConfirm, onRetry, onClose }) {
               {blocked.map(b => (
                 <li key={b.comp.id}>
                   <span className="start-all__failed-name">{b.comp.name}</span>
-                  <span className="start-all__failed-reason">{b.reason} Reassign shiaijo in its Settings tab.</span>
+                  {/* b.reason already carries its own remedy: the list can hold
+                      several competitions blocked for DIFFERENT reasons, so a
+                      single tail written here would be wrong for some of them. */}
+                  <span className="start-all__failed-reason">{b.reason}</span>
                 </li>
               ))}
             </ul>

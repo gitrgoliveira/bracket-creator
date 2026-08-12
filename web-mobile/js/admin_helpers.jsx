@@ -702,6 +702,123 @@ function competitionDrawBlockedReason(competition, tournamentCourts) {
   return inheritedErr || countErr || orphanedShiaijoError(tournamentCourts, courts);
 }
 
+// The remedy sentences. Each has to read correctly on all four surfaces that
+// render a blocker - the competition header, the overview checklist, the
+// dashboard card and the "Start all" picker - so they name the tab rather than
+// assuming the operator is already inside the competition.
+const SHIAIJO_FIX = "Reassign shiaijo in Settings.";
+const SEEDING_FIX = "Set the missing ranks or clear the seeds in Participants & seeds.";
+
+// rankList renders seed ranks as "3", "3 and 4" or "3, 4 and 5". Mirror of
+// helper.RankList (internal/helper/seed_warnings.go); the two exist so the
+// server's refusal and this console's block name the same ranks the same way.
+function rankList(ranks) {
+  if (!ranks.length) return "none";
+  if (ranks.length === 1) return String(ranks[0]);
+  return `${ranks.slice(0, -1).join(", ")} and ${ranks[ranks.length - 1]}`;
+}
+
+// seedGapDiagnosis names the seed ranks still to be typed, for a set whose
+// ranks are not contiguous from 1. Takes RANKS, not players, so it mirrors the
+// Go implementation exactly.
+//
+// Mirror of helper.SeedGapDiagnosis. Both are pinned to the shared golden table
+// internal/helper/testdata/seed_gap_messages.json (Go half:
+// TestSeedGapDiagnosis_GoldenTable; JS half: __tests__/seed_gap.test.jsx).
+//
+// Returns "" for a contiguous set, an empty one, AND for the faults that are
+// not gaps (a duplicate rank, a rank of 0). Those are refused by rules that
+// describe themselves precisely, and must never be reported as a gap; the
+// caller supplies their wording.
+function seedGapDiagnosis(ranks) {
+  const present = new Set();
+  let highest = 0;
+  for (const rank of ranks) {
+    if (!Number.isInteger(rank) || rank <= 0) return "";
+    if (present.has(rank)) return "";
+    present.add(rank);
+    if (rank > highest) highest = rank;
+  }
+  const missing = [];
+  for (let r = 1; r < highest; r++) {
+    if (!present.has(r)) missing.push(r);
+  }
+  if (!missing.length) return "";
+  const plural = missing.length === 1 ? "" : "s";
+  const verb = missing.length === 1 ? "has" : "have";
+  return `Seeding is incomplete: seed rank${plural} ${rankList(missing)} ${verb} not been set, but rank ${highest} has.`;
+}
+
+// seededRanks pulls the ranks an operator has actually typed off a roster.
+// Anything non-positive is UNSEEDED here rather than invalid: the seeding
+// panel's own updateSeed maps a cleared or <= 0 input to null, so a rank of 0
+// is not a state this roster can be in.
+function seededRanks(players) {
+  return (players || [])
+    .map((p) => (p && Number.isInteger(p.seed) ? p.seed : 0))
+    .filter((rank) => rank > 0);
+}
+
+// competitionSeedingBlocker is the seeding half of competitionDrawBlocker: the
+// draw refuses a seeding whose ranks are not 1..N, so the console must refuse
+// it first rather than let the operator fire a request that comes back 400.
+//
+// Covers the two ways a roster gets there. A GAP is the one an operator reaches
+// without doing anything unusual, since the panel saves each rank the moment it
+// is typed and entering seed 4 before seeds 1 to 3 leaves {4} on disk. A
+// DUPLICATE takes two rows carrying the same number, which the panel also
+// allows; it is refused by the same server-side validator, so it blocks here
+// too and keeps its own wording (it is not a gap and naming a "missing" rank
+// for it would be a lie).
+function competitionSeedingBlocker(competition) {
+  const ranks = seededRanks(competition.players);
+  const diagnosis = seedGapDiagnosis(ranks);
+  if (diagnosis) return { reason: diagnosis, fix: SEEDING_FIX, section: "participants", cta: "Fix seeding →" };
+  const seen = new Set();
+  const duplicates = [];
+  ranks.forEach((rank) => {
+    if (seen.has(rank) && !duplicates.includes(rank)) duplicates.push(rank);
+    seen.add(rank);
+  });
+  if (duplicates.length) {
+    const plural = duplicates.length === 1 ? "" : "s";
+    return {
+      reason: `Seeding is invalid: seed rank${plural} ${rankList(duplicates.sort((a, b) => a - b))} ${duplicates.length === 1 ? "is" : "are"} used more than once.`,
+      fix: SEEDING_FIX,
+      section: "participants",
+      cta: "Fix seeding →",
+    };
+  }
+  return null;
+}
+
+// competitionDrawBlocker is THE predicate for "may this competition be drawn
+// yet", returning { reason, fix, section, cta } or null.
+//
+// It returns an object rather than a bare string because every surface renders
+// the reason together with what to do about it, and those surfaces used to
+// hard-code "Reassign shiaijo in Settings" as that tail. That was true while a
+// blocker could only ever be a court rule; the moment a second kind of blocker
+// exists, a hard-coded remedy sends the operator to the wrong screen. The fix
+// and the destination now travel WITH the reason.
+//
+// Order is the order an operator can act on: the shiaijo allocation is a
+// structural property of the competition, while the seeding is a list they may
+// still be halfway through typing.
+function competitionDrawBlocker(competition, tournamentCourts) {
+  if (!competition) return null;
+  const courtsReason = competitionDrawBlockedReason(competition, tournamentCourts);
+  if (courtsReason) return { reason: courtsReason, fix: SHIAIJO_FIX, section: "settings", cta: "Reassign shiaijo →" };
+  // NOTE: only sees a seeding when the caller's competition carries one.
+  // GET /api/viewer/competitions/:id hydrates seeds (WithSeeds: true) so the
+  // competition header and its overview block correctly; the LIST payload the
+  // dashboard reads does not (WithSeeds: false), so the dashboard card and
+  // "Start all" fall back to the server's refusal, which names the missing
+  // ranks in its 400. Hydrating seeds into a public list read by every viewer
+  // to answer an admin question is the wrong trade.
+  return competitionSeedingBlocker(competition);
+}
+
 // What the dashboard's "Start all" may actually start, and what it must not
 // offer. Returns { startable: [competition], blocked: [{ comp, reason }] }.
 //
@@ -716,8 +833,10 @@ function partitionStartableCompetitions(competitions, tournamentCourts) {
   const blocked = [];
   (competitions || []).forEach((c) => {
     if (!c || c.status !== "setup" || (c.players || []).length < 2) return;
-    const reason = competitionDrawBlockedReason(c, tournamentCourts);
-    if (reason) blocked.push({ comp: c, reason });
+    // reason carries its own remedy: the modal lists several competitions at
+    // once and a single hard-coded tail cannot be right for all of them.
+    const blocker = competitionDrawBlocker(c, tournamentCourts);
+    if (blocker) blocked.push({ comp: c, reason: `${blocker.reason} ${blocker.fix}` });
     else startable.push(c);
   });
   return { startable, blocked };
@@ -777,6 +896,9 @@ if (typeof window !== "undefined") {
   window.courtPillOptions = courtPillOptions;
   window.orphanedShiaijoError = orphanedShiaijoError;
   window.competitionDrawBlockedReason = competitionDrawBlockedReason;
+  window.competitionDrawBlocker = competitionDrawBlocker;
+  window.seedGapDiagnosis = seedGapDiagnosis;
+  window.seededRanks = seededRanks;
   window.partitionStartableCompetitions = partitionStartableCompetitions;
 }
 
@@ -884,6 +1006,9 @@ export {
   courtPillOptions,
   orphanedShiaijoError,
   competitionDrawBlockedReason,
+  competitionDrawBlocker,
+  seedGapDiagnosis,
+  seededRanks,
   partitionStartableCompetitions,
   resolveRoundIndex,
 };

@@ -409,7 +409,7 @@ describe('AdminSettings orphaned shiaijo (bc-draw R9 gap 3)', () => {
     const draw = Array.from(container.querySelectorAll('button')).find((b) => b.textContent.trim() === 'Generate draw');
     expect(draw).not.toBeUndefined();
     expect(draw.disabled).toBe(true);
-    const block = container.querySelector('[data-testid="shiaijo-count-block"]');
+    const block = container.querySelector('[data-testid="draw-block"]');
     expect(block).not.toBeNull();
     expect(block.textContent).toContain('no longer part of this tournament');
   });
@@ -489,14 +489,82 @@ describe('AdminSettings stored-allocation banner (spec 007 R9)', () => {
 
   it('blocks the start of a stored 6-shiaijo competition and says why', async () => {
     const courts = ['A', 'B', 'C', 'D', 'E', 'F'];
-    const comp = makeCompetition({ courts, format: 'playoffs' });
+    // Date set on purpose: an invalid one disables the same button, so without
+    // it this would pass even with the shiaijo blocker gone.
+    const comp = makeCompetition({ courts, format: 'playoffs', date: '01-06-2026' });
     const { container } = await mountSection('overview', { comp, tournament: { courts } });
     const start = Array.from(container.querySelectorAll('button')).find((b) => b.textContent.trim() === 'Start competition →');
     expect(start).not.toBeUndefined();
     expect(start.disabled).toBe(true);
-    const block = container.querySelector('[data-testid="shiaijo-count-block"]');
+    const block = container.querySelector('[data-testid="draw-block"]');
     expect(block).not.toBeNull();
     expect(block.textContent).toContain('6 shiaijo cannot be paired down to a single bracket');
+  });
+});
+
+// An incomplete seeding is refused by the draw, so the console refuses it
+// FIRST. The operator reaches this state through the seeding panel's ordinary
+// behaviour: it saves each rank as it is typed, so entering seed 4 before seeds
+// 1 to 3 leaves the competition holding {4}. Pre-fix, both header buttons were
+// live and the only trace of the refusal was an expiring toast.
+describe('Header start blocked by an incomplete seeding', () => {
+  // A valid date is load-bearing: the same buttons are disabled by an invalid
+  // one, so a blank date would make every `disabled` assertion below pass
+  // whether or not the seeding blocker exists.
+  const halfSeeded = () => makeCompetition({
+    courts: ['A', 'B'],
+    format: 'playoffs',
+    date: '01-06-2026',
+    players: [
+      { id: 'p1', name: 'Yamada' },
+      { id: 'p2', name: 'Tanaka' },
+      { id: 'p3', name: 'Suzuki' },
+      { id: 'p4', name: 'Kobayashi', seed: 4 },
+    ],
+  });
+
+  it('disables Generate draw and Start, and names the ranks to type', async () => {
+    const { container } = await mountSection('overview', {
+      comp: halfSeeded(), tournament: { courts: ['A', 'B'] },
+    });
+    const button = (label) =>
+      Array.from(container.querySelectorAll('button')).find((b) => b.textContent.trim() === label);
+    expect(button('Generate draw').disabled).toBe(true);
+    expect(button('Start competition →').disabled).toBe(true);
+
+    const block = container.querySelector('[data-testid="draw-block"]');
+    expect(block).not.toBeNull();
+    expect(block.textContent).toContain('seed ranks 1, 2 and 3 have not been set');
+    expect(block.textContent).toContain('but rank 4 has');
+    // The remedy has to name the screen that fixes THIS blocker.
+    expect(block.textContent).toContain('Participants & seeds');
+    expect(block.textContent).not.toContain('Reassign shiaijo');
+  });
+
+  it('routes the checklist to the seeding panel, not to Settings', async () => {
+    const { container } = await mountSection('overview', {
+      comp: halfSeeded(), tournament: { courts: ['A', 'B'] },
+    });
+    const step = container.querySelector('[data-testid="step-generate"]');
+    expect(step.textContent).toContain('seed ranks 1, 2 and 3 have not been set');
+    expect(step.textContent).toContain('Fix seeding →');
+  });
+
+  it('leaves the buttons live once the seeding is complete', async () => {
+    const comp = makeCompetition({
+      courts: ['A', 'B'],
+      format: 'playoffs',
+      date: '01-06-2026',
+      players: [
+        { id: 'p1', name: 'Yamada', seed: 1 },
+        { id: 'p2', name: 'Tanaka', seed: 2 },
+        { id: 'p3', name: 'Suzuki' },
+      ],
+    });
+    const { container } = await mountSection('overview', { comp, tournament: { courts: ['A', 'B'] } });
+    const generate = Array.from(container.querySelectorAll('button')).find((b) => b.textContent.trim() === 'Generate draw');
+    expect(generate.disabled).toBe(false);
+    expect(container.querySelector('[data-testid="draw-block"]')).toBeNull();
   });
 });
 
@@ -520,7 +588,7 @@ describe('AdminCompOverview next steps under a court block (spec 007 R9)', () =>
     const text = stepText(container, 'generate');
     expect(text).not.toContain('Use the "Generate draw" button in the header above');
     expect(text).toContain('3 shiaijo cannot be paired down to a single bracket');
-    expect(text).toContain('Reassign shiaijo in Settings first');
+    expect(text).toContain('Reassign shiaijo in Settings.');
   });
 });
 
@@ -638,7 +706,7 @@ describe('Competition header + checklist name only reachable counts (U2)', () =>
   it('does not offer a 4th shiaijo to a 3-shiaijo venue in the header block', async () => {
     const comp = makeCompetition({ courts: ['A', 'B', 'C'], format: 'playoffs' });
     const { container } = await mountSection('overview', { comp, tournament: threeCourtVenue });
-    const block = container.querySelector('[data-testid="shiaijo-count-block"]');
+    const block = container.querySelector('[data-testid="draw-block"]');
     expect(block).not.toBeNull();
     expect(block.textContent).toContain('This tournament has 3, so this competition can use 1 or 2');
     expect(block.textContent).not.toContain('4');

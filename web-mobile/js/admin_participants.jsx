@@ -501,16 +501,14 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     });
     return counts;
   }, [players]);
-  const { gaps, hasGaps } = useMemoA(() => {
-    const sortedSeeds = players.filter(p => p.seed).map(p => p.seed).sort((a, b) => a - b);
-    const gaps = [];
-    if (sortedSeeds.length > 0) {
-      const maxSeed = sortedSeeds[sortedSeeds.length - 1];
-      for (let s = 1; s <= maxSeed; s++) {
-        if (!sortedSeeds.includes(s)) gaps.push(s);
-      }
-    }
-    return { gaps, hasGaps: gaps.length > 0 };
+  // The gap message comes from the shared seedGapDiagnosis (admin_helpers.jsx),
+  // which is itself mirrored in Go. Three surfaces describe this same
+  // half-typed seeding -- this banner, the header's "Cannot start" block, and
+  // the server's 400 if a draw is fired from elsewhere -- and an operator who
+  // meets it twice must not read two different accounts of it.
+  const { seedGapMessage, hasGaps } = useMemoA(() => {
+    const message = window.seedGapDiagnosis(window.seededRanks(players));
+    return { seedGapMessage: message, hasGaps: !!message };
   }, [players]);
 
   // Extracted from inline onClick so we can await + log instead of
@@ -965,8 +963,8 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
             )}
           </div>
           {hasGaps && (
-            <div className="alert alert--error" style={{ margin: "0 16px 16px" }}>
-              ❌ Seed gap detected: rank {gaps.join(", ")} {gaps.length > 1 ? "are" : "is"} missing. Seeds must be sequential (1, 2, 3…).
+            <div className="alert alert--error" style={{ margin: "0 16px 16px" }} data-testid="seed-gap-banner">
+              ❌ {seedGapMessage} The draw cannot run until the seeding is complete.
             </div>
           )}
           {seedImportResult && (

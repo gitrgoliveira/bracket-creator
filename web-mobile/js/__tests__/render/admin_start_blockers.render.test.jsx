@@ -87,7 +87,7 @@ describe('Dashboard CompCard start blocker (spec 007 R9)', () => {
   it('offers the start when the allocation is valid', async () => {
     const { container } = await mountCard();
     expect(startButton(container).disabled).toBe(false);
-    expect(container.querySelector('[data-testid="card-shiaijo-count-block"]')).toBeNull();
+    expect(container.querySelector('[data-testid="card-draw-block"]')).toBeNull();
   });
 
   it('blocks the start on a 3-shiaijo allocation and names the fix', async () => {
@@ -97,7 +97,7 @@ describe('Dashboard CompCard start blocker (spec 007 R9)', () => {
     await act(async () => { fireEvent.click(btn); });
     expect(onStart).not.toHaveBeenCalled();
 
-    const block = container.querySelector('[data-testid="card-shiaijo-count-block"]');
+    const block = container.querySelector('[data-testid="card-draw-block"]');
     expect(block).not.toBeNull();
     expect(block.textContent).toContain('3 shiaijo cannot be paired down to a single bracket');
     // The card renders the reason ALONE - no venue-aware hint beneath it - so
@@ -105,7 +105,7 @@ describe('Dashboard CompCard start blocker (spec 007 R9)', () => {
     // exist. mountCard's default tournament is exactly that venue.
     expect(block.textContent).toContain('This tournament has 3, so this competition can use 1 or 2');
     expect(block.textContent).not.toContain('4');
-    expect(block.textContent).toContain('reassign shiaijo in Settings');
+    expect(block.textContent).toContain('Reassign shiaijo in Settings.');
   });
 
   it('still offers the count above once the venue can supply it', async () => {
@@ -114,7 +114,7 @@ describe('Dashboard CompCard start blocker (spec 007 R9)', () => {
     const { container } = await mountCard({
       c: makeComp({ courts: ['A', 'B', 'C'] }), tournament: { courts: venue },
     });
-    const block = container.querySelector('[data-testid="card-shiaijo-count-block"]');
+    const block = container.querySelector('[data-testid="card-draw-block"]');
     expect(block.textContent).toContain('Use 2 or 4, or 1');
   });
 
@@ -127,7 +127,7 @@ describe('Dashboard CompCard start blocker (spec 007 R9)', () => {
   it('blocks a shiaijo the tournament no longer has', async () => {
     const { container } = await mountCard({ c: makeComp({ courts: ['A', 'D'] }) });
     expect(startButton(container).disabled).toBe(true);
-    expect(container.querySelector('[data-testid="card-shiaijo-count-block"]').textContent)
+    expect(container.querySelector('[data-testid="card-draw-block"]').textContent)
       .toContain('no longer part of this tournament');
   });
 
@@ -141,7 +141,7 @@ describe('Dashboard CompCard start blocker (spec 007 R9)', () => {
     // would be a new refusal the backend does not make.
     const { container } = await mountCard({ c: makeComp({ status: 'draw-ready', courts: ['A', 'B', 'C'] }) });
     expect(startButton(container).disabled).toBe(false);
-    expect(container.querySelector('[data-testid="card-shiaijo-count-block"]')).toBeNull();
+    expect(container.querySelector('[data-testid="card-draw-block"]')).toBeNull();
   });
 });
 
@@ -159,13 +159,18 @@ const confirmButton = (container) =>
   Array.from(container.querySelectorAll('button')).find((b) => b.textContent.trim().startsWith('Start '));
 
 describe('Start-all picker blocker (spec 007 R9)', () => {
+  // reason carries its own remedy, exactly as partitionStartableCompetitions
+  // now builds it (`${blocker.reason} ${blocker.fix}`). The modal renders it
+  // VERBATIM and appends nothing: it can list competitions blocked for
+  // different reasons, so a tail written in the modal would be wrong for some.
   const blocked = (name, reason) => ({ comp: { id: name, name }, reason });
+  const SHIAIJO_BLOCK = '3 shiaijo cannot be paired down to a single bracket. Reassign shiaijo in Settings.';
 
   it('counts only the startable competitions in the confirm button', async () => {
     const { container } = await mountStartAll({
       phase: 'confirm',
       comps: [{ id: 'c1', name: 'Mudansha' }],
-      blocked: [blocked('Yudansha', '3 shiaijo cannot be paired down to a single bracket.')],
+      blocked: [blocked('Yudansha', SHIAIJO_BLOCK)],
       failed: [],
     });
     expect(confirmButton(container).textContent).toContain('Start 1 competition');
@@ -176,14 +181,14 @@ describe('Start-all picker blocker (spec 007 R9)', () => {
     const { container } = await mountStartAll({
       phase: 'confirm',
       comps: [{ id: 'c1', name: 'Mudansha' }],
-      blocked: [blocked('Yudansha', '3 shiaijo cannot be paired down to a single bracket.')],
+      blocked: [blocked('Yudansha', SHIAIJO_BLOCK)],
       failed: [],
     });
     const panel = container.querySelector('[data-testid="start-all-blocked"]');
     expect(panel).not.toBeNull();
     expect(panel.textContent).toContain('Yudansha');
     expect(panel.textContent).toContain('3 shiaijo cannot be paired down to a single bracket');
-    expect(panel.textContent).toContain('Reassign shiaijo in its Settings tab');
+    expect(panel.textContent).toContain('Reassign shiaijo in Settings.');
     // The blocked competition is not also listed as startable.
     expect(container.querySelector('.start-all__list').textContent).not.toContain('Yudansha');
   });
@@ -192,7 +197,7 @@ describe('Start-all picker blocker (spec 007 R9)', () => {
     const { container, onConfirm } = await mountStartAll({
       phase: 'confirm',
       comps: [],
-      blocked: [blocked('Yudansha', '3 shiaijo cannot be paired down to a single bracket.')],
+      blocked: [blocked('Yudansha', SHIAIJO_BLOCK)],
       failed: [],
     });
     const btn = confirmButton(container);

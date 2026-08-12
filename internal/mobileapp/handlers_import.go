@@ -318,6 +318,20 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 				return res
 			}
 		}
+		// A seeds file states a seeding as a finished artefact, so a broken one
+		// aborts its row rather than landing a competition that no draw will
+		// accept. Same reasoning as the seeds endpoint, and it joins the checks
+		// already above: missing file, unparseable, oversized name.
+		//
+		// This bundle is hand-assembled (there is no exporter that emits a
+		// manifest, so nothing the app itself wrote can be refused here), and
+		// the row rolls back on error, so a rejection can never leave a
+		// half-imported competition behind.
+		if err := domain.ValidateAssignments(assignments); err != nil {
+			res.Error = fmt.Sprintf("seeds file %q: %s", entry.Seeds,
+				seedRejection(assignments, err, seedGapRemedyImport))
+			return res
+		}
 		if len(assignments) > 0 {
 			parsedSeeds = assignments
 		}

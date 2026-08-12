@@ -287,6 +287,46 @@ competitions:
 		assert.Nil(t, stored, "missing-seeds failure must not leave a half-written competition on disk")
 	})
 
+	// A seeds file states a seeding as a finished artefact, so one whose ranks
+	// are not contiguous from 1 aborts its row rather than landing a
+	// competition that no draw will then accept. It joins the missing-file and
+	// unparseable cases above, and rolls back for the same retry-safety reason.
+	t.Run("Import Error - Incomplete Seeding", func(t *testing.T) {
+		body := &bytes.Buffer{}
+		writer := multipart.NewWriter(body)
+		manifestPart, _ := writer.CreateFormFile("files", "manifest.yaml")
+		manifestPart.Write([]byte(`
+competitions:
+  - id: "comp-gapped-seeds"
+    name: "Gapped Seeds"
+    participants: "players-gapped.csv"
+    seeds: "gapped-seeds.csv"
+`))
+		playersPart, _ := writer.CreateFormFile("files", "players-gapped.csv")
+		playersPart.Write([]byte("Player 1,Dojo A\nPlayer 2,Dojo B"))
+		seedsPart, _ := writer.CreateFormFile("files", "gapped-seeds.csv")
+		seedsPart.Write([]byte("Rank,Name\n4,Player 1\n"))
+		writer.Close()
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/tournament/import", body)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string][]ImportResult
+		json.Unmarshal(w.Body.Bytes(), &resp)
+		require.Len(t, resp["results"], 1)
+		assert.Contains(t, resp["results"][0].Error, "seed ranks 1, 2 and 3 have not been set",
+			"the row error must name the ranks to fix, not restate the rule")
+		assert.Contains(t, resp["results"][0].Error, "gapped-seeds.csv",
+			"with several files in one bundle the error must name which one")
+		assert.Contains(t, resp["results"][0].Error, "then import again",
+			"the remedy must fit the boundary: a file to fix, not a form to retype")
+		stored, _ := store.LoadCompetition("comp-gapped-seeds")
+		assert.Nil(t, stored, "a refused seeding must not leave a half-written competition on disk")
+	})
+
 	// Empty seeds parse (header-only file, all rows malformed) is the
 	// soft path, no error, SeedCount=0. Symmetric with how the
 	// participants block treats an empty roster file. Pin so a future

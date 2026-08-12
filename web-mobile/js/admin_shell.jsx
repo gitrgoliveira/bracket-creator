@@ -694,8 +694,8 @@ function CompCard({ c, onOpen, onStart, tournament, showToast }) {
   //
   // Scoped to setup: a draw-ready competition has already cleared these rules
   // and its start is a status flip the server accepts.
-  const startBlockedReason = (!c.status || c.status === "setup")
-    ? window.competitionDrawBlockedReason(c, tournament && tournament.courts)
+  const startBlocker = (!c.status || c.status === "setup")
+    ? window.competitionDrawBlocker(c, tournament && tournament.courts)
     : null;
 
   const canShare = tournament && tournament.mode === "self-run"
@@ -746,15 +746,17 @@ function CompCard({ c, onOpen, onStart, tournament, showToast }) {
               type="button"
               className="btn btn--primary btn--sm btn--full"
               onClick={(e) => { e.stopPropagation(); onStart(); }}
-              disabled={!!startBlockedReason}
+              disabled={!!startBlocker}
             >Start competition →</button>
           )}
           {/* The reason, not just a dead button: the operator has to know
               which screen fixes it. Kept on the card rather than in a tooltip
-              because the dashboard is a touch surface. */}
-          {startBlockedReason && (
-            <div className="tcard__action-note" style={{ color: "var(--red)", fontSize: 11, fontWeight: 600, lineHeight: 1.4 }} data-testid="card-shiaijo-count-block">
-              ⚠ Cannot start: {startBlockedReason} Open this competition and reassign shiaijo in Settings.
+              because the dashboard is a touch surface. The remedy comes WITH
+              the reason (blocker.fix) rather than being written here, because
+              this card can no longer assume the blocker is a court rule. */}
+          {startBlocker && (
+            <div className="tcard__action-note" style={{ color: "var(--red)", fontSize: 11, fontWeight: 600, lineHeight: 1.4 }} data-testid="card-draw-block">
+              ⚠ Cannot start: {startBlocker.reason} Open this competition. {startBlocker.fix}
             </div>
           )}
           {(c.status === "pools" || c.status === "playoffs") && (

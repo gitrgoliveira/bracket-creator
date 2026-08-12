@@ -1,12 +1,17 @@
 package helper
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 )
 
 // seededDraw runs the REAL create-pools pipeline for numPools pools of four on
@@ -135,4 +140,72 @@ func TestRankList(t *testing.T) {
 	assert.Equal(t, "1", RankList([]int{1}))
 	assert.Equal(t, "1 and 2", RankList([]int{1, 2}))
 	assert.Equal(t, "1, 2 and 3", RankList([]int{1, 2, 3}))
+}
+
+// Go half of the shared Go/JS golden table for the incomplete-seeding message:
+// see the `_comment` in testdata/seed_gap_messages.json for why the table is
+// shared. JS half: web-mobile/js/__tests__/seed_gap.test.jsx.
+type seedGapCase struct {
+	Why       string `json:"why"`
+	Ranks     []int  `json:"ranks"`
+	Diagnosis string `json:"diagnosis"`
+}
+
+func loadSeedGapGolden(t *testing.T) []seedGapCase {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("testdata", "seed_gap_messages.json"))
+	require.NoError(t, err)
+	var table struct {
+		Cases []seedGapCase `json:"cases"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &table))
+	// Load-bearing: ranging over an empty table produces zero assertions and
+	// no red, so a degraded file needs its own failure.
+	require.NotEmpty(t, table.Cases,
+		"testdata/seed_gap_messages.json parsed to zero cases: the mirror would assert nothing")
+	return table.Cases
+}
+
+func TestSeedGapDiagnosis_GoldenTable(t *testing.T) {
+	for _, tc := range loadSeedGapGolden(t) {
+		t.Run(tc.Why, func(t *testing.T) {
+			assignments := make([]domain.SeedAssignment, 0, len(tc.Ranks))
+			for i, r := range tc.Ranks {
+				assignments = append(assignments,
+					domain.SeedAssignment{Name: fmt.Sprintf("P%d", i+1), SeedRank: r})
+			}
+			assert.Equal(t, tc.Diagnosis, SeedGapDiagnosis(assignments), tc.Why)
+		})
+	}
+}
+
+// Every case the golden table calls a gap must be one the validator actually
+// refuses, and every case it calls clean must be one the validator accepts.
+// Without this the diagnosis could describe a seeding nothing ever rejects (a
+// warning for a state that draws fine) or stay silent on one that is refused
+// with no explanation.
+func TestSeedGapGoldenTableAgreesWithTheValidator(t *testing.T) {
+	for _, tc := range loadSeedGapGolden(t) {
+		t.Run(tc.Why, func(t *testing.T) {
+			assignments := make([]domain.SeedAssignment, 0, len(tc.Ranks))
+			for i, r := range tc.Ranks {
+				assignments = append(assignments,
+					domain.SeedAssignment{Name: fmt.Sprintf("P%d", i+1), SeedRank: r})
+			}
+			err := domain.ValidateAssignments(assignments)
+			if tc.Diagnosis != "" {
+				require.Error(t, err, "a diagnosed gap must be a seeding the validator refuses")
+				assert.ErrorIs(t, err, domain.ErrInvalidSeedAssignments)
+				return
+			}
+			// The silent cases split: contiguous ranks are accepted outright,
+			// while duplicates and non-positive ranks are refused by a rule
+			// that is NOT a gap and whose own words must reach the operator.
+			if err != nil {
+				assert.ErrorIs(t, err, domain.ErrInvalidSeedAssignments)
+				assert.NotContains(t, err.Error(), "sequential without gaps",
+					"a case the diagnosis stays silent on must not be refused AS a gap: %v", err)
+			}
+		})
+	}
 }

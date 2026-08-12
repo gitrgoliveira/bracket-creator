@@ -99,6 +99,8 @@ In later rounds, a block with an odd number of survivors produces a bye there to
 
 You choose the seeds and their order. The tool never derives them from previous results, and it never accepts two competitors on the same rank. Set them in the seeding panel described in [Adding participants](run-tournament.md#adding-participants), or pass a seeds file to the command line.
 
+The ranks you set must run from 1 with no number missing. You can type them in any order, so setting your 4th seed before your 1st is fine and the panel saves it as you go, but a seeding left with a hole in it will not draw. While one is incomplete the panel shows which ranks are still unset, and the **Generate draw** and **Start competition** buttons stay disabled until you either fill them in or clear the seeds. If you start the draw from another screen, or through the API, it is refused with the same list of missing ranks.
+
 Seeds are placed so the top of the draw is spread as widely as the shape allows:
 
 - Seeds **1 and 3** land in one half of the draw, seeds **2 and 4** in the other.

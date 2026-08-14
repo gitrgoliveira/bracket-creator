@@ -102,7 +102,7 @@ func renderedPageViews(t *testing.T, nPools, poolWinners, numCourts int) []pageC
 	}
 	require.Len(t, poolByHeaderRef, nPools, "every pool must have a distinct data-sheet header to overlay")
 
-	_, numPages, err := RenderKnockoutPages(f, draw, false, pools, poolCoords, playerCoords, nil)
+	_, numPages, err := RenderKnockoutPages(f, draw, CourtLabels(draw.NumCourts()), false, pools, poolCoords, playerCoords, nil)
 	require.NoError(t, err)
 
 	sheets := treePageSheets(f)
@@ -329,7 +329,11 @@ func TestTreePageLayoutSingleTree(t *testing.T) {
 
 	// The one page covers every court, so it names the whole shiaijo range and
 	// overlays every pool rather than claiming to be shiaijo A's.
-	assert.Equal(t, "Shiaijo A-D", TreePageTitle(1, 4, 0))
+	assert.Equal(t, "Shiaijo A-D", TreePageTitle(1, CourtLabels(4), 0))
+	// ...and it names the competition's OWN shiaijo, not the first four letters:
+	// a competition allocated C-F reads "Shiaijo C-F".
+	assert.Equal(t, "Shiaijo C-F", TreePageTitle(1, []string{"C", "D", "E", "F"}, 0),
+		"the page must name the shiaijo this competition actually runs on")
 	start, end := PoolBoundsForSubtree(8, 4, 1, 0)
 	assert.Equal(t, 0, start)
 	assert.Equal(t, 8, end)

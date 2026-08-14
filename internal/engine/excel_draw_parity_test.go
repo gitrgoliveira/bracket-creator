@@ -970,3 +970,125 @@ func TestEliminationSheetBandsMatchBracketCourts(t *testing.T) {
 		})
 	}
 }
+
+// TestEliminationSheetNamesTheCompetitionsOwnShiaijo pins that the workbook is
+// titled with the shiaijo the competition actually runs on, not with the first
+// N letters of the alphabet.
+//
+// A competition need not be allocated the venue's first courts: running one
+// competition on A+B and another on C+D is how a 4-shiaijo hall is shared, and
+// it is the split the app's own shiaijo hint recommends. Naming the second one's
+// bands from their POSITION printed "Shiaijo A" and "Shiaijo B" on every sheet
+// of a competition that never touches either court, so its operators were handed
+// running orders for somebody else's shiaijo.
+func TestEliminationSheetNamesTheCompetitionsOwnShiaijo(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	const compID = "named-shiaijo"
+
+	createTestCompetition(t, store, compID, state.CompFormatMixed, 4, func(c *state.Competition) {
+		c.PoolSizeMode = "max"
+		c.PoolWinners = 2
+		c.Courts = []string{"C", "D"}
+	})
+	require.NoError(t, store.SaveParticipants(compID, playoffsParityRoster(16)))
+	require.NoError(t, eng.StartCompetition(compID))
+
+	raw, err := eng.ExportCompetitionXlsx(compID)
+	require.NoError(t, err)
+	f, err := excelize.OpenReader(bytes.NewReader(raw))
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+
+	for _, sheet := range []string{helper.SheetPoolMatches, helper.SheetEliminationMatches} {
+		rows, err := f.GetRows(sheet)
+		require.NoError(t, err)
+		bands := bctest.ReadCourtBands(rows, helper.CourtsColumnsPerCourt)
+		var got []string
+		for _, b := range bands {
+			got = append(got, b.Court)
+		}
+		assert.Equalf(t, []string{"C", "D"}, got,
+			"%s must be banded for the shiaijo this competition runs on", sheet)
+	}
+
+	// The per-shiaijo rosters and the tree pages carry the same names.
+	var nameSheets []string
+	for _, sheet := range f.GetSheetList() {
+		if strings.HasPrefix(sheet, helper.SheetNamesToPrint+" ") {
+			nameSheets = append(nameSheets, sheet)
+		}
+	}
+	slices.Sort(nameSheets)
+	assert.Equal(t, []string{helper.SheetNamesToPrint + " C", helper.SheetNamesToPrint + " D"}, nameSheets,
+		"one roster sheet per shiaijo the competition actually uses")
+
+	for _, sheet := range f.GetSheetList() {
+		if !strings.HasPrefix(sheet, "Tree ") {
+			continue
+		}
+		title, err := f.GetCellValue(sheet, "A1")
+		require.NoError(t, err)
+		if title == "" {
+			continue
+		}
+		assert.NotContainsf(t, title, "Shiaijo A",
+			"%s is titled %q: this competition has no shiaijo A", sheet, title)
+		assert.NotContainsf(t, title, "Shiaijo B",
+			"%s is titled %q: this competition has no shiaijo B", sheet, title)
+	}
+}
+
+// TestEliminationSheetFollowsOperatorCourtReassignment pins that the printed
+// sheet tracks where a bout is ACTUALLY being fought.
+//
+// A match's court is data, not geometry: the operator moves bouts between the
+// tournament's courts as the day runs (UpdateMatchCourt). The sheet used to
+// derive the court from the draw, so a reassigned bout kept printing under the
+// shiaijo it was originally drawn on while the operator console called it
+// somewhere else.
+func TestEliminationSheetFollowsOperatorCourtReassignment(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	const compID = "reassigned-shiaijo"
+
+	createTestCompetition(t, store, compID, state.CompFormatMixed, 4, func(c *state.Competition) {
+		c.PoolSizeMode = "max"
+		c.PoolWinners = 2
+		c.Courts = courtLabels(4)
+	})
+	require.NoError(t, store.SaveParticipants(compID, playoffsParityRoster(16)))
+	require.NoError(t, eng.StartCompetition(compID))
+
+	before, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	target := before.Rounds[0][0]
+	require.NotEqual(t, "D", target.Court, "the case needs a bout that is NOT already on the shiaijo it moves to")
+
+	require.NoError(t, eng.UpdateMatchCourt(compID, target.ID, "D"))
+
+	after, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.Equal(t, "D", after.Rounds[0][0].Court, "the reassignment must have landed")
+
+	raw, err := eng.ExportCompetitionXlsx(compID)
+	require.NoError(t, err)
+	f, err := excelize.OpenReader(bytes.NewReader(raw))
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+
+	rows, err := f.GetRows(helper.SheetEliminationMatches)
+	require.NoError(t, err)
+	label := fmt.Sprintf("Round 1 - Match %d", after.Rounds[0][0].MatchNumber)
+
+	var printedIn string
+	for _, b := range bctest.ReadCourtBands(rows, helper.CourtsColumnsPerCourt) {
+		for _, row := range rows[1:] {
+			for c := b.Col; c < b.Col+helper.CourtsColumnsPerCourt && c < len(row); c++ {
+				if strings.TrimSpace(row[c]) == label {
+					printedIn = b.Court
+				}
+			}
+		}
+	}
+	assert.Equalf(t, "D", printedIn,
+		"the operator moved %q to shiaijo D, so the printed running order for shiaijo D is where it must appear", label)
+}

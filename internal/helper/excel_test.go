@@ -673,7 +673,7 @@ func TestPrintPoolMatchesCourts(t *testing.T) {
 			}
 			poolCoords, pCoords := makeTestPoolCoordMaps(pools)
 
-			matchWinners := PrintPoolMatches(f, pools, 0, 1, tt.numCourts, false, poolCoords, pCoords, false)
+			matchWinners := PrintPoolMatches(f, pools, 0, 1, CourtLabels(tt.numCourts), false, poolCoords, pCoords, false)
 
 			// Must have one matchWinner per pool (position 1)
 			if len(matchWinners) != tt.numPools {
@@ -760,7 +760,7 @@ func TestCreateNamesToPrint(t *testing.T) {
 		playerCoordKey(players[1]): {cellCoord: cellCoord{sheetName: "Pool1", cell: "B3"}},
 	}
 
-	CreateNamesToPrint(f, players, false, 1, pCoords)
+	CreateNamesToPrint(f, players, false, CourtLabels(1), pCoords)
 
 	sheet := "Names to Print A"
 	valA1, _ := f.GetCellValue(sheet, "A1")
@@ -789,7 +789,7 @@ func TestCreateNamesToPrint_MultiCourt(t *testing.T) {
 		pCoords[playerCoordKey(players[i])] = playerCellCoord{cellCoord: cellCoord{sheetName: "data", cell: fmt.Sprintf("B%d", i+2)}}
 	}
 
-	CreateNamesToPrint(f, players, false, 2, pCoords)
+	CreateNamesToPrint(f, players, false, CourtLabels(2), pCoords)
 
 	rowsA, err := f.GetRows("Names to Print A")
 	assert.NoError(t, err)
@@ -823,7 +823,7 @@ func TestCreateNamesWithPoolToPrint(t *testing.T) {
 		playerCoordKey(pools[0].Players[1]): {cellCoord: cellCoord{sheetName: "Pool1", cell: "B3"}},
 	}
 
-	CreateNamesWithPoolToPrint(f, pools, false, 1, pCoords)
+	CreateNamesWithPoolToPrint(f, pools, false, CourtLabels(1), pCoords)
 
 	sheet := "Names to Print A"
 	valA1, _ := f.GetCellValue(sheet, "A1")
@@ -873,7 +873,7 @@ func TestCreateNamesWithPoolToPrint_MultiCourt(t *testing.T) {
 		pCoords[playerCoordKey(p)] = playerCellCoord{cellCoord: cellCoord{sheetName: "data", cell: cells[i]}}
 	}
 
-	CreateNamesWithPoolToPrint(f, pools, false, 2, pCoords)
+	CreateNamesWithPoolToPrint(f, pools, false, CourtLabels(2), pCoords)
 
 	rowsA, err := f.GetRows("Names to Print A")
 	assert.NoError(t, err)

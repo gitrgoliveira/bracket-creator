@@ -82,7 +82,7 @@ func scoringSetup2Players(t *testing.T, teamMatches int, engi bool) *excelize.Fi
 	t.Cleanup(func() { f.Close() })
 	f.NewSheet(SheetPoolMatches)
 	f.NewSheet(SheetPoolDraw)
-	PrintPoolMatches(f, []Pool{pool}, teamMatches, 1, 1, false, poolCoords, pCoords, engi)
+	PrintPoolMatches(f, []Pool{pool}, teamMatches, 1, CourtLabels(1), false, poolCoords, pCoords, engi)
 	return f
 }
 
@@ -126,7 +126,7 @@ func scoringSetup3PlayerRoundRobin(t *testing.T, engi bool) *excelize.File {
 	t.Cleanup(func() { f.Close() })
 	f.NewSheet(SheetPoolMatches)
 	f.NewSheet(SheetPoolDraw)
-	PrintPoolMatches(f, []Pool{pool}, 0, 1, 1, false, poolCoords, pCoords, engi)
+	PrintPoolMatches(f, []Pool{pool}, 0, 1, CourtLabels(1), false, poolCoords, pCoords, engi)
 	return f
 }
 
@@ -971,7 +971,7 @@ func TestEngiMatchHeaderFlags_Elimination(t *testing.T) {
 		f.NewSheet(SheetEliminationMatches)
 		f.NewSheet("Pool Results")
 
-		PrintTeamEliminationMatches(f, poolMatchWinners, eliminationMatchRounds, 0, testDrawFor(eliminationMatchRounds, 1), false, true)
+		PrintTeamEliminationMatches(f, poolMatchWinners, eliminationMatchRounds, 0, testDrawFor(eliminationMatchRounds, 1), nil, nil, false, true)
 
 		lV, _ := f.GetCellValue(SheetEliminationMatches, "B3")
 		rV, _ := f.GetCellValue(SheetEliminationMatches, "F3")
@@ -985,7 +985,7 @@ func TestEngiMatchHeaderFlags_Elimination(t *testing.T) {
 		f.NewSheet(SheetEliminationMatches)
 		f.NewSheet("Pool Results")
 
-		PrintTeamEliminationMatches(f, poolMatchWinners, eliminationMatchRounds, 0, testDrawFor(eliminationMatchRounds, 1), false, false)
+		PrintTeamEliminationMatches(f, poolMatchWinners, eliminationMatchRounds, 0, testDrawFor(eliminationMatchRounds, 1), nil, nil, false, false)
 
 		lV, _ := f.GetCellValue(SheetEliminationMatches, "B3")
 		rV, _ := f.GetCellValue(SheetEliminationMatches, "F3")

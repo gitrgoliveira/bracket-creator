@@ -70,7 +70,8 @@ func SetTreePageLayout(f *excelize.File, sheetName string, depth, lastRow int) {
 // The consumed SheetTree template is NOT deleted here: callers that skip
 // rendering entirely (a league has no knockout) must still delete it, so
 // ownership of the deletion stays with them.
-func RenderTreePages(f *excelize.File, subtrees []*Node, numCourts int, pools []Pool, poolCoords map[string]cellCoord, playerCoords map[string]playerCellCoord, matchWinners map[string]MatchWinner) error {
+func RenderTreePages(f *excelize.File, subtrees []*Node, courts []string, pools []Pool, poolCoords map[string]cellCoord, playerCoords map[string]playerCellCoord, matchWinners map[string]MatchWinner) error {
+	numCourts := clampCourts(len(courts))
 	hasPools := len(pools) > 0
 	templateIdx, err := f.GetSheetIndex(SheetTree)
 	if err != nil {
@@ -96,7 +97,7 @@ func RenderTreePages(f *excelize.File, subtrees []*Node, numCourts int, pools []
 		startRow := TreeTitleRows + 1
 		// The title formula prepends data!$B$1 (the user-supplied title prefix),
 		// so the page title itself is just the shiaijo label.
-		SetTreeSheetTitle(f, pageSheet, TreePageTitle(len(subtrees), numCourts, i), TreePageLastCol(depth))
+		SetTreeSheetTitle(f, pageSheet, TreePageTitle(len(subtrees), courts, i), TreePageLastCol(depth))
 		PrintLeafNodes(subtree, f, pageSheet, 2*depth, startRow, depth, matchWinners)
 
 		lastRow := TreePageLastRow(depth, startRow)
@@ -137,13 +138,14 @@ func RenderTreePages(f *excelize.File, subtrees []*Node, numCourts int, pools []
 // singleTree forces the whole bracket onto one page (the CLI --single-tree
 // flag). Deleting the consumed SheetTree template stays with the caller (see
 // RenderTreePages).
-func RenderKnockoutPages(f *excelize.File, draw *KnockoutDraw, singleTree bool, pools []Pool, poolCoords map[string]cellCoord, playerCoords map[string]playerCellCoord, matchWinners map[string]MatchWinner) ([][]*Node, int, error) {
+func RenderKnockoutPages(f *excelize.File, draw *KnockoutDraw, courts []string, singleTree bool, pools []Pool, poolCoords map[string]cellCoord, playerCoords map[string]playerCellCoord, matchWinners map[string]MatchWinner) ([][]*Node, int, error) {
 	if draw == nil || draw.Root == nil {
 		return nil, 0, fmt.Errorf("render knockout pages: empty draw")
 	}
-	numCourts := draw.NumCourts()
+	// The tree pages are banded by the draw's own regions, so they take the
+	// FIRST NumCourts() of the competition's shiaijo -- named, never positional.
 	subtrees := KnockoutPageSubtrees(draw, singleTree)
-	if err := RenderTreePages(f, subtrees, numCourts, pools, poolCoords, playerCoords, matchWinners); err != nil {
+	if err := RenderTreePages(f, subtrees, courtsPrefix(courts, clampCourts(draw.NumCourts())), pools, poolCoords, playerCoords, matchWinners); err != nil {
 		return nil, 0, err
 	}
 	rounds := BuildEliminationMatchRounds(draw.Root)

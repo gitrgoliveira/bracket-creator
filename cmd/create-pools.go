@@ -132,6 +132,10 @@ func (o *poolOptions) run(cmd *cobra.Command, args []string) error {
 }
 
 func (o *poolOptions) createPools(entries []string) error {
+	// The CLI has no NAMED shiaijo: --courts says how many the draw runs on, so
+	// the sheets are titled A, B, C by position. The live app passes the
+	// competition's own court list instead, which need not start at A.
+	courtNames := helper.CourtLabels(o.courts)
 	isMax := o.maxPlayers > 0
 	activePoolSize := o.numPlayers
 	if isMax {
@@ -241,7 +245,7 @@ func (o *poolOptions) createPools(entries []string) error {
 	} else {
 		helper.CreatePoolMatches(pools)
 	}
-	matchWinners := helper.PrintPoolMatches(f, pools, o.teamMatches, o.poolWinners, o.courts, true, poolCoords, playerCoords, o.engi)
+	matchWinners := helper.PrintPoolMatches(f, pools, o.teamMatches, o.poolWinners, courtNames, true, poolCoords, playerCoords, o.engi)
 
 	// Court-first pool-to-knockout draw (specs/007-ekc-draw): one bracket
 	// region per shiaijo, 2nd places crossing to the partner court, byes
@@ -261,13 +265,13 @@ func (o *poolOptions) createPools(entries []string) error {
 		fmt.Printf("Warning: %s\n", w)
 	}
 
-	eliminationMatchRounds, numPages, err := helper.RenderKnockoutPages(f, draw, o.singleTree, pools, poolCoords, playerCoords, matchWinners)
+	eliminationMatchRounds, numPages, err := helper.RenderKnockoutPages(f, draw, courtNames, o.singleTree, pools, poolCoords, playerCoords, matchWinners)
 	if err != nil {
 		return err
 	}
 	finishKnockoutPages(f, numPages, eliminationMatchRounds)
 
-	helper.CreateNamesWithPoolToPrint(f, pools, o.withZekkenName, o.courts, playerCoords)
+	helper.CreateNamesWithPoolToPrint(f, pools, o.withZekkenName, courtNames, playerCoords)
 
 	if err := helper.CreateTagsSheet(f, pools, ""); err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating tags sheet: %v\n", err)
@@ -278,7 +282,7 @@ func (o *poolOptions) createPools(entries []string) error {
 		totalPoolMatches += len(p.Matches)
 	}
 
-	printEliminationWithBronze(f, matchWinners, eliminationMatchRounds, o.teamMatches, draw, o.engi, o.naginata)
+	printEliminationWithBronze(f, matchWinners, eliminationMatchRounds, o.teamMatches, draw, courtNames, o.engi, o.naginata)
 	helper.FillEstimations(f, int64(len(pools)), int64(totalPoolMatches), int64(o.teamMatches), int64(len(pools)*o.poolWinners-1), o.courts)
 
 	// Apply sheet protection to all sheets except data and Time Estimator

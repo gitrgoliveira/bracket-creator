@@ -176,3 +176,54 @@ func PlayoffFinalsFromParticipants(store *state.Store, comp *state.Competition) 
 	}
 	return names
 }
+
+// ExportCourts is the shiaijo a competition's workbook is laid out for, by NAME.
+//
+// A competition's courts need not start at A: running one competition on A+B
+// and another on C+D is how a 4-shiaijo venue is shared, and it is the split the
+// app's own shiaijo hint recommends. Naming the second one's bands from their
+// POSITION would print "Shiaijo A" and "Shiaijo B" on sheets for courts that
+// competition never touches, so the names travel into the workbook rather than a
+// count. The single-court fallback matches the count fallback it replaced: a
+// competition saved without courts still lays out as one band.
+func ExportCourts(comp *state.Competition) []string {
+	if comp == nil || len(comp.Courts) == 0 {
+		return helper.CourtLabels(1)
+	}
+	return comp.Courts
+}
+
+// BracketCourtByMatchNumber maps each numbered bout in a stored bracket to the
+// shiaijo it is CURRENTLY on, for the workbook writers to band by.
+//
+// This is the whole reason the export cannot derive a bout's court from the
+// draw: the operator reassigns matches between the tournament's courts while the
+// competition runs (Engine.UpdateMatchCourt), so the draw's geometry is only the
+// INITIAL answer. Keyed by match number because that is the identity the printed
+// sheet and the stored bracket already share by contract (see
+// PlayoffLeavesFromBracket). Unnumbered entries are byes and are never printed.
+//
+// Returns nil for a nil/empty bracket, which the writers read as "no live
+// assignment, use the draw" -- the CLI's case, and a competition not yet drawn.
+func BracketCourtByMatchNumber(bracket *state.Bracket) map[int64]string {
+	if bracket == nil {
+		return nil
+	}
+	out := make(map[int64]string)
+	add := func(m *state.BracketMatch) {
+		if m == nil || m.MatchNumber == 0 || m.Court == "" {
+			return
+		}
+		out[int64(m.MatchNumber)] = m.Court
+	}
+	for _, round := range bracket.Rounds {
+		for i := range round {
+			add(&round[i])
+		}
+	}
+	add(bracket.ThirdPlaceMatch)
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}

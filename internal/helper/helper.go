@@ -110,10 +110,39 @@ func CourtLabel(i int) string {
 // The single writer of that string. The Pool Matches and Elimination Matches
 // column bands, the tree page titles and the workbook-parity reader that finds
 // bands by the "Shiaijo " prefix all have to spell it identically or a band
-// goes unrecognised, so the letter is derived here through CourtLabel rather
-// than by each caller's own arithmetic on 'A'.
-func ShiaijoLabel(i int) string {
-	return "Shiaijo " + CourtLabel(i)
+// goes unrecognised, so the name is composed here rather than by each caller.
+func ShiaijoLabel(name string) string {
+	return "Shiaijo " + name
+}
+
+// CourtLabels is the default naming for a workbook laid out for n shiaijo:
+// A, B, C ... It is what the CLI generators use, because `--courts 4` says how
+// MANY shiaijo the draw runs on and never which ones the hall calls them.
+//
+// The live app must NOT use this. A competition carries its own court list and
+// it need not start at A: sharing a 4-shiaijo venue by running one competition
+// on A+B and another on C+D is the split the app itself recommends, and naming
+// the second one's bands "Shiaijo A" and "Shiaijo B" hands its operators a
+// sheet for courts that are not theirs. Pass comp.Courts instead.
+func CourtLabels(n int) []string {
+	if n < 1 {
+		n = 1
+	}
+	out := make([]string, n)
+	for i := range out {
+		out[i] = CourtLabel(i)
+	}
+	return out
+}
+
+// courtNameAt is the name of band i, falling back to the positional letter when
+// the caller supplied no name for it. The fallback keeps a short list (or a nil
+// one) from producing an unnamed band rather than panicking mid-export.
+func courtNameAt(courts []string, i int) string {
+	if i >= 0 && i < len(courts) && courts[i] != "" {
+		return courts[i]
+	}
+	return CourtLabel(i)
 }
 
 func OrderStringsAlphabetically(strings []*Node) []*Node {
@@ -300,11 +329,12 @@ func SubtreeCourtIndex(numSubtrees, numCourts, idx int) int {
 // forced onto fewer pages than there are courts (--single-tree), the page
 // carries every court's bracket, so it names the whole range instead of
 // claiming a single shiaijo it does not own.
-func TreePageTitle(numSubtrees, numCourts, idx int) string {
+func TreePageTitle(numSubtrees int, courts []string, idx int) string {
+	numCourts := clampCourts(len(courts))
 	if numSubtrees > 0 && numSubtrees < numCourts {
-		return ShiaijoLabel(0) + "-" + CourtLabel(clampCourts(numCourts)-1)
+		return ShiaijoLabel(courtNameAt(courts, 0)) + "-" + courtNameAt(courts, numCourts-1)
 	}
-	return ShiaijoLabel(SubtreeCourtIndex(numSubtrees, numCourts, idx))
+	return ShiaijoLabel(courtNameAt(courts, SubtreeCourtIndex(numSubtrees, numCourts, idx)))
 }
 
 // ReorderPoolsForCourts deinterleaves pools so that when divided into

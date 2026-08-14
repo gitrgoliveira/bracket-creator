@@ -31,6 +31,9 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	if numCourts < 1 {
 		numCourts = 1
 	}
+	// The shiaijo BY NAME, for every sheet that prints one. A competition need
+	// not be allocated the first N courts of the venue.
+	courts := ExportCourts(comp)
 
 	f, err := excel.NewFileFromScratch()
 	if err != nil {
@@ -51,7 +54,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	// 3. Pool Matches sheet (red/white, scoring formulas, reactive name references).
 	//    numCourts is the operator's allocation; PrintPoolMatches bands the sheet
 	//    on the shiaijo count the pool phase actually runs on, clamping it itself.
-	matchWinners := helper.PrintPoolMatches(f, pools, comp.TeamSize, comp.EffectivePoolWinners(), numCourts, comp.Mirror, poolCoords, playerCoords, comp.Engi)
+	matchWinners := helper.PrintPoolMatches(f, pools, comp.TeamSize, comp.EffectivePoolWinners(), courts, comp.Mirror, poolCoords, playerCoords, comp.Engi)
 
 	// 4. Tree sheets: one visual bracket page per subtree, rendered exactly like
 	//    the CLI (cmd/create-pools.go) and the results workbook
@@ -79,6 +82,16 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 			return nil, err
 		}
 		hasBronze = bracket != nil && bracket.ThirdPlaceMatch != nil
+	} else if b, courtErr := e.store.LoadBracket(id); courtErr == nil {
+		// Not structurally required for this format, but it carries the LIVE
+		// court of every bout, which is the only correct source for the
+		// elimination sheet's bands (the operator reassigns matches between
+		// shiaijo as the day runs). Best-effort on purpose: the strict load
+		// above stays limited to the formats that cannot render without a
+		// bracket, so a corrupt bracket.json still cannot abort an export that
+		// only wanted court labels. Falling through with a nil bracket simply
+		// bands by the draw's regions, which is what this did before.
+		bracket = b
 	}
 
 	// Elimination leaves for the knockout phase, shared with the results workbook
@@ -95,13 +108,16 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		//     Elimination Matches sheet and unnumbered tree pages. The bronze
 		//     block wires its entrant slots to the semi-final losers via the
 		//     real rounds and winners, exactly as the CLI and results workbook.
-		eliminationMatchRounds, _, err := helper.RenderKnockoutPages(f, draw, false, pools, poolCoords, playerCoords, matchWinners)
+		eliminationMatchRounds, _, err := helper.RenderKnockoutPages(f, draw, courts, false, pools, poolCoords, playerCoords, matchWinners)
 		if err != nil {
 			return nil, fmt.Errorf("export: %w", err)
 		}
-		// draw.NumCourts(), not the requested court count, is the exact band
-		// count for this sheet; the reason is on KnockoutDraw.NumCourts.
-		helper.PrintEliminationWithBronze(f, matchWinners, eliminationMatchRounds, comp.TeamSize, draw, comp.Mirror, comp.Engi, hasBronze)
+		// Band each bout by the shiaijo it is CURRENTLY on, read off the stored
+		// bracket, falling back to the draw's regions where there is none. The
+		// operator reassigns matches between courts while the competition runs,
+		// and this sheet is what their shiaijo runs off.
+		helper.PrintEliminationWithBronze(f, matchWinners, eliminationMatchRounds, comp.TeamSize, draw, courts,
+			BracketCourtByMatchNumber(bracket), comp.Mirror, comp.Engi, hasBronze)
 	} else if hasBronze {
 		// Narrow fallback: a competition whose bracket has a third-place bout but
 		// yields no elimination leaves at all (no pools, no first-round entrants
@@ -124,7 +140,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 
 	// 5. Names to Print sheet, one per shiaijo. Clamps the allocation to the pool
 	//    phase's own shiaijo count internally, as step 3 does.
-	helper.CreateNamesWithPoolToPrint(f, pools, comp.EffectiveWithZekkenName(), numCourts, playerCoords)
+	helper.CreateNamesWithPoolToPrint(f, pools, comp.EffectiveWithZekkenName(), courts, playerCoords)
 
 	// 6. Tags sheet, pass publicURL so numbered tags get an embedded QR code.
 	// LoadTournament errors are silently ignored: a missing publicURL simply

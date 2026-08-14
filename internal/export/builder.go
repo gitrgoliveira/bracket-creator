@@ -111,6 +111,9 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	if numCourts == 0 {
 		numCourts = 1
 	}
+	// The shiaijo BY NAME, mirroring the blank-template export: a competition
+	// allocated C and D must not have its sheets titled A and B.
+	courts := engine.ExportCourts(comp)
 	// numCourts is the operator's ALLOCATION. The pool-banded sheet and both
 	// overlays clamp it themselves to the count the pool phase actually runs on
 	// (PrintPoolMatches and computePoolsByCourt each apply
@@ -118,7 +121,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	// handed values that disagree.
 	matchWinners := helper.PrintPoolMatches(
 		f, pools, comp.TeamSize, comp.EffectivePoolWinners(),
-		numCourts, comp.Mirror, poolCoords, playerCoords, comp.Engi,
+		courts, comp.Mirror, poolCoords, playerCoords, comp.Engi,
 	)
 	if err := overlayPoolScores(f, pools, matchResultByID, poolOrdinals, comp.TeamSize, comp.Mirror, numCourts, comp.Engi); err != nil {
 		return nil, fmt.Errorf("export: overlay pool scores: %w", err)
@@ -143,13 +146,16 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 		// are what overlayBracketScores below scans. Bronze gates on the stored
 		// bracket's ThirdPlaceMatch: the bracket is authoritative here, unlike
 		// the CLI's flag-derived NeedsBronzeBlock.
-		eliminationMatchRounds, _, err := helper.RenderKnockoutPages(f, draw, false, pools, poolCoords, playerCoords, matchWinners)
+		eliminationMatchRounds, _, err := helper.RenderKnockoutPages(f, draw, courts, false, pools, poolCoords, playerCoords, matchWinners)
 		if err != nil {
 			return nil, fmt.Errorf("export: %w", err)
 		}
-		// draw.NumCourts(), not the requested court count, is the exact band
-		// count for this sheet; the reason is on KnockoutDraw.NumCourts.
-		helper.PrintEliminationWithBronze(f, matchWinners, eliminationMatchRounds, comp.TeamSize, draw, comp.Mirror, comp.Engi,
+		// Band each bout by the shiaijo it is CURRENTLY on, read off the stored
+		// bracket the overlay below fills in, so the archived workbook records
+		// where each bout was actually fought rather than where the draw first
+		// put it.
+		helper.PrintEliminationWithBronze(f, matchWinners, eliminationMatchRounds, comp.TeamSize, draw, courts,
+			engine.BracketCourtByMatchNumber(bracket), comp.Mirror, comp.Engi,
 			bracket != nil && bracket.ThirdPlaceMatch != nil)
 
 		// Overlay literal scores from the live bracket state.
@@ -181,7 +187,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	// 5. Names to Print sheet (identical to blank-template export). Clamps the
 	//    allocation to the pool phase's own shiaijo count internally, as step 3
 	//    does.
-	helper.CreateNamesWithPoolToPrint(f, pools, comp.EffectiveWithZekkenName(), numCourts, playerCoords)
+	helper.CreateNamesWithPoolToPrint(f, pools, comp.EffectiveWithZekkenName(), courts, playerCoords)
 
 	// 6. Kachinuki Detail sheet: bout-by-bout log for kachinuki team
 	//    competitions (GAP 6). Same opt-in semantics as the blank-template

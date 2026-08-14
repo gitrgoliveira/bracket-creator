@@ -176,6 +176,10 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	if roughPages, _ := helper.RoundToPowerOf2(float64(len(names)), float64(helper.MaxPlayersPerTree)); o.courts > roughPages && roughPages > 0 {
 		o.courts = roughPages
 	}
+	// The CLI has no NAMED shiaijo: --courts says how many the draw runs on, so
+	// the sheets are titled A, B, C by position. The live app passes the
+	// competition's own court list instead, which need not start at A.
+	courtNames := helper.CourtLabels(o.courts)
 	// Create balanced tree
 	tree := helper.CreateBalancedTree(names)
 
@@ -184,7 +188,7 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	// into one region per shiaijo and paginated exactly like a pool-fed draw.
 	// nil pools skips the roster overlay.
 	draw := helper.NewPlayoffDraw(tree, o.courts)
-	eliminationMatchRounds, numPages, err := helper.RenderKnockoutPages(f, draw, o.singleTree, nil, nil, nil, nil)
+	eliminationMatchRounds, numPages, err := helper.RenderKnockoutPages(f, draw, courtNames, o.singleTree, nil, nil, nil, nil)
 	if err != nil {
 		return err
 	}
@@ -202,9 +206,9 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 
 	// Convert all players for match-winner processing
 	matchWinners = helper.ConvertPlayersToWinners(players, o.withZekkenName, playerCoords)
-	helper.CreateNamesToPrint(f, players, o.withZekkenName, o.courts, playerCoords)
+	helper.CreateNamesToPrint(f, players, o.withZekkenName, courtNames, playerCoords)
 
-	printEliminationWithBronze(f, matchWinners, eliminationMatchRounds, o.teamMatches, draw, o.engi, o.naginata)
+	printEliminationWithBronze(f, matchWinners, eliminationMatchRounds, o.teamMatches, draw, courtNames, o.engi, o.naginata)
 	helper.FillEstimations(f, 0, 0, int64(o.teamMatches), int64(len(names)-1), o.courts)
 
 	// Apply sheet protection to all sheets except data and Time Estimator

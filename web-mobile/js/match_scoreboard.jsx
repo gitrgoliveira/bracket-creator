@@ -297,7 +297,7 @@ function centreMarks(sub, matchSideA, matchSideB) {
 // names because kachinuki bouts are winner-stays, not position-keyed.
 export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state, matchSideA, matchSideB, kachinuki }) {
   const subSideName = (v) => {
-    const n = (v && v.name) || (typeof v === "string" ? v : "");
+    const n = nameOf(v);
     if (!n) return "";
     // Filter out match-level team names: when the backend stores the team
     // name in every sub-bout (quick-score path), we must fall through to the
@@ -384,8 +384,14 @@ export function withNumber(side, withZekkenName) {
 // component can derive passes them in — the viewer card resolves an unplayed
 // bracket side to its feeder label ("Winner of M1"), where withNumber below can
 // only say "TBD". Omit them and the component derives its own, as the TV boards
-// and the lobby do.
-export function IndividualScore({ match, variant, showNames, withZekkenName, shiroName, akaName }) {
+// and the lobby do. They are STRINGS: the dojo second line is this component's
+// job (showDojo), not something a caller splices into the name as a VNode.
+//
+// showDojo: render each competitor's dojo as a second line UNDER their name.
+// The rule lives here so a surface that wants it passes a flag instead of
+// reaching into these internals with its own selector — the shape that produced
+// the `.msb-sep { display: none }` bug this component just had to fix.
+export function IndividualScore({ match, variant, showNames, withZekkenName, shiroName, akaName, showDojo }) {
   // nameOf, not a local unwrap: same object-or-bare-string rule the slot leaf's
   // hanteiWinnerKey applies, so the two attribution paths cannot read a side
   // name differently.
@@ -419,8 +425,9 @@ export function IndividualScore({ match, variant, showNames, withZekkenName, shi
     flagsA: match.flagsA, flagsB: match.flagsB,
   };
   // showNames fills the (otherwise empty) name spans with the two competitors,
-  // colour-coded Shiro dark / Aka red: used by the TV pool/round list where
-  // each row IS a full match. The card leaves them empty (names render above).
+  // colour-coded Shiro dark / Aka red: used by the TV pool/round list where each
+  // row IS a full match, and by the viewer's match card, which has no name row of
+  // its own (a competitor's points must never sit under their name).
   // Always display the human NAME (never the id key used for comparison).
   // withNumber prepends the assigned competitor number (e.g. "K1 Tanaka") when
   // the competition has a numberPrefix configured; falls back to the bare name.
@@ -428,12 +435,33 @@ export function IndividualScore({ match, variant, showNames, withZekkenName, shi
   // displayName ("K1 TANAKA") instead of the canonical full name.
   const shiroDisplay = shiroName ?? withNumber(match.sideB, withZekkenName);
   const akaDisplay = akaName ?? withNumber(match.sideA, withZekkenName);
+  // Name over dojo, the same block the bracket's PlayerLine and the up-next row
+  // render. A SECOND LINE UNDER THE NAME only: the ippon slots stay on the
+  // name's row, vertically centred against the block, because a competitor's
+  // points must never sit beneath their name (operator ruling). A side with no
+  // dojo (an unresolved feeder, "Winner of M1") renders the bare name, so the
+  // row does not gain an empty line.
+  // bc-dojo carries the shared dojo type (11px, ink-3, ellipsised); msb-dojo
+  // adds only what makes it a second LINE, rather than restating those five.
+  const shiroDojo = (showDojo && match.sideB && match.sideB.dojo) || "";
+  const akaDojo = (showDojo && match.sideA && match.sideA.dojo) || "";
+  const nameCell = (display, dojo) =>
+    dojo ? <>{display}<span className="bc-dojo msb-dojo">{dojo}</span></> : display;
+  // Emphasise the decided winner's NAME. sub.winner is already id-first with a
+  // name fallback and is blanked for an indistinguishable same-name pair, so
+  // neither side lights up when the data cannot attribute the win. This is the
+  // one place the rule lives: the viewer card used to bold its own name row via
+  // .match-detail-card__side--win, which meant every other surface that renders
+  // this row marked an ordinary ippon win nowhere (.msb-slots--win only fires
+  // for an ippon-LESS result, i.e. hantei or a default win).
+  const winShiroName = !!sub.winner && sub.winner === sub.sideB;
+  const winAkaName = !!sub.winner && sub.winner === sub.sideA;
   return (
     <div className={"msb msb-individual" + (variant === "tv" ? " msb--tv" : "")} data-testid="individual-score">
       <div className="msb-row">
-        <span className="msb-name" data-testid={showNames ? "indiv-shiro-name" : undefined}>{showNames ? shiroDisplay : ""}</span>
+        <span className={"msb-name" + (shiroDojo ? " msb-name--stacked" : "") + (winShiroName ? " msb-name--win" : "")} data-testid={showNames ? "indiv-shiro-name" : undefined}>{showNames ? nameCell(shiroDisplay, shiroDojo) : ""}</span>
         {centreMarks(sub)}
-        <span className="msb-name msb-name--aka" data-testid={showNames ? "indiv-aka-name" : undefined}>{showNames ? akaDisplay : ""}</span>
+        <span className={"msb-name msb-name--aka" + (akaDojo ? " msb-name--stacked" : "") + (winAkaName ? " msb-name--win" : "")} data-testid={showNames ? "indiv-aka-name" : undefined}>{showNames ? nameCell(akaDisplay, akaDojo) : ""}</span>
       </div>
     </div>
   );

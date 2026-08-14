@@ -565,12 +565,17 @@ describe('MatchDetailCard team sub-rows (mp-8sw)', () => {
     };
     const tree = runtime.mount(MatchDetailCard, { match, onClose: null });
     const score = findVnode(tree, n => n.type === IndividualScore);
-    // Shiro is sideB, Aka is sideA.
-    const shiroDojo = findVnode(score.props.shiroName, n => n.props?.className === 'msb-dojo');
-    const akaDojo = findVnode(score.props.akaName, n => n.props?.className === 'msb-dojo');
-    expect(shiroDojo?.props.children).toBe('Osaka Budokan');
-    expect(akaDojo?.props.children).toBe('Kyoto Renmei');
+    // The card asks for the dojo with a FLAG; it does not splice markup into
+    // the name props, which are strings. Rendering the line is the scoreboard's
+    // job, so the assertion below is against its output, not the card's.
+    expect(score.props.showDojo).toBe(true);
+    expect(score.props.shiroName).toBe('Bob');
+    expect(score.props.akaName).toBe('Alice');
   });
+
+  // (The rendered half — that the dojo lands INSIDE the name cell, under the
+  // name — is asserted against real DOM in render/msb_name_cell.render.test.jsx,
+  // since this file works on vnodes.)
 
   // A side with no dojo (an unresolved bracket slot, "Winner of M1") must get
   // the bare name, not an empty line that would pad the card unevenly.

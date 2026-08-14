@@ -54,6 +54,12 @@ const LOBBY_ROWS = [
 //
 // Returns an array of exactly LOBBY_ROWS.length elements; missing
 // slots are null (rendered as an empty "-" cell).
+//
+// `kind` records WHY a slot is filled ('running' | 'upnext' | 'scheduled').
+// LobbyMatchCell no longer reads it — cell styling comes from `rowKind`, which
+// is positional (row index) — but it is not redundant with it: rowKind cannot
+// tell a genuinely running match at slot 0 from a promoted up-next, which is
+// exactly the rule the slot tests pin. Keep it as model output.
 function buildCourtSlots(competitions, court) {
     const totalSlots = LOBBY_ROWS.length;
     const running = findRunningOnCourt(competitions, court);

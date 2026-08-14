@@ -876,8 +876,13 @@ func (s *Store) checkNewTeamNameCollisions(compID string, players []domain.Playe
 	// The pure in-memory scan runs FIRST and the competition is consulted only
 	// if it finds something. Loading up front cost a config.md read plus YAML
 	// parse on EVERY participant write (loadCompetitionLocked deliberately
-	// bypasses the fileCache) - including single check-ins, individual
-	// competitions, and the restore path that discards the result.
+	// bypasses the fileCache).
+	//
+	// Note what this does and does not buy: the early return fires on a roster
+	// with NO two participants sharing a name, which is the common case but not
+	// a property of the caller. Same-name entries are legal in an individual
+	// competition (see ErrDuplicateName), so such a roster reaches the load on
+	// every write and is filtered out below by kind instead.
 	dupes := helper.CheckDuplicateEntriesByName(names)
 	if len(dupes) == 0 {
 		return nil
@@ -906,7 +911,11 @@ func (s *Store) checkNewTeamNameCollisions(compID string, players []domain.Playe
 	// or fewer is a rewrite of what is stored (check-in, a re-save, removing one
 	// of the pair); more is a new collision and is refused.
 	storedCounts := make(map[string]int)
-	if stored, lerr := s.loadParticipantsLocked(compID, withZekkenName); lerr == nil {
+	// WithSeeds:false — this counts NAMES, which seeds do not affect. It also
+	// keeps the read on the same participants-cache key the hot check-in path
+	// uses (the cache is keyed by opts), instead of populating a second
+	// _with_seeds_ entry and paying an extra seeds.csv read to build it.
+	if stored, lerr := s.loadParticipantsNoLock(compID, withZekkenName, LoadParticipantsOpts{WithSeeds: false}); lerr == nil {
 		for _, p := range stored {
 			storedCounts[helper.NormalizeParticipantName(p.Name)]++
 		}

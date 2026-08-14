@@ -387,3 +387,71 @@ func TestBracketRollbackDoesNotReapplyTheWrite(t *testing.T) {
 		assert.Len(t, bm.SubResults, 1)
 	})
 }
+
+// A verdict-silent forward write over a stored daihyosen verdict must reach
+// bm.Winner on the BRACKET branch, exactly as it does on the pool one.
+//
+// applyBracketMatchResult assigns bm field by field (the pool twin overwrites
+// the whole struct at the end), so the merge has to run before the winner is
+// derived, validated and assigned. It used to run ~30 lines after all three:
+// the restored verdict landed in bm.SubResults, but the winner deriving FROM it
+// could no longer reach bm, and validateBracketCompletion had already rejected
+// the write for having no winner at all.
+func TestBracketForwardWrite_PreservedVerdictReachesTheWinner(t *testing.T) {
+	stored := func() *state.BracketMatch {
+		return &state.BracketMatch{
+			ID: "m-r1-0", SideA: "Kyoto", SideB: "Osaka",
+			Status: state.MatchStatusRunning,
+			SubResults: []state.SubMatchResult{{
+				Position: state.DaihyosenSubPosition, SideA: "Kyoto", SideB: "Osaka",
+				Winner: "Kyoto", Decision: "daihyosen",
+				DecidedByHantei: state.HanteiExplicit(true),
+			}},
+		}
+	}
+
+	// A second editor that mounted before the verdict existed: it re-sends the
+	// rep bout saying nothing about hantei, and names no match winner.
+	silent := func() *state.MatchResult {
+		return &state.MatchResult{
+			ID: "m-r1-0", SideA: "Kyoto", SideB: "Osaka",
+			Status: state.MatchStatusCompleted,
+			SubResults: []state.SubMatchResult{{
+				Position: state.DaihyosenSubPosition, SideA: "Kyoto", SideB: "Osaka",
+				Decision: "daihyosen",
+			}},
+		}
+	}
+
+	t.Run("the completed write is accepted, not rejected as winner-less", func(t *testing.T) {
+		bm := stored()
+		applied, err := applyBracketMatchResult(bm, silent(), matchWriteForward)
+		require.NoError(t, err, "the preserved rep bout supplies the winner the completion gate needs")
+		require.True(t, applied)
+	})
+
+	t.Run("the preserved verdict decides the stored match winner", func(t *testing.T) {
+		bm := stored()
+		_, err := applyBracketMatchResult(bm, silent(), matchWriteForward)
+		require.NoError(t, err)
+		assert.Equal(t, "Kyoto", bm.Winner, "derived from the rep bout the merge restored")
+		// The rep bout keeps its verdict; the match-level flag is a separate
+		// field this payload says nothing about and the fixture never set.
+		require.Len(t, bm.SubResults, 1)
+		assert.True(t, bm.SubResults[0].HanteiDecided())
+		assert.Equal(t, "Kyoto", bm.SubResults[0].Winner)
+	})
+
+	t.Run("the pool branch agrees on the same payload", func(t *testing.T) {
+		// Pins the two branches together: this is the behaviour the bracket
+		// half was missing, so a future divergence fails here too.
+		poolStored := &state.MatchResult{
+			ID: "m-r1-0", SideA: "Kyoto", SideB: "Osaka",
+			SubResults: stored().SubResults,
+		}
+		result := silent()
+		mismatch := applyPoolWrite(poolStored, result, matchWriteForward)
+		require.False(t, mismatch)
+		assert.Equal(t, "Kyoto", poolStored.Winner)
+	})
+}

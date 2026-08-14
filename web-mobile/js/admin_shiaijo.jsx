@@ -13,6 +13,7 @@
 // local-only UI (per the brief; backend persistence is a follow-up).
 
 import { createTimerPool } from './timer_pool.jsx';
+import { realIppons } from './result_slot.jsx';
 
 const { useState: useStateSh, useMemo: useMemoSh, useEffect: useEffectSh, useRef: useRefSh, useCallback: useCallbackSh } = React;
 
@@ -823,10 +824,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // lone foul or a scored team sub-bout also locks the switch.
     const scoringStarted = (mm) => {
         if (!mm || mm.status !== "running") return false;
-        const realIppons = (arr) => (arr || []).filter((x) => x && x !== "•").length;
         const fouls = (mm.hansokuA || 0) + (mm.hansokuB || 0) + (mm.score?.fouls?.a || 0) + (mm.score?.fouls?.b || 0);
-        return realIppons(mm.ipponsA) > 0 ||
-            realIppons(mm.ipponsB) > 0 ||
+        return realIppons(mm.ipponsA).length > 0 ||
+            realIppons(mm.ipponsB).length > 0 ||
             (mm.score?.winnerPts || 0) > 0 ||
             (mm.score?.loserPts || 0) > 0 ||
             fouls > 0 ||

@@ -183,10 +183,13 @@ func subBoutNeedsNumberedEnchoAllowance(sr *state.SubMatchResult) bool {
 // pool-vs-bracket. The hantei gate is NOT relaxed: kachinuki bouts are
 // never decided by hantei.
 //
-// The winner/tied-scoreline/decision checks here intentionally mirror the
-// top-level DecidedByHantei block in ScoreRequest.Validate. Keep them in sync:
-// the sub-bout variant adds the Position guards and omits the top-level-only
-// Status/DecisionBy checks (SubMatchResult has no such fields).
+// The winner and tied-scoreline checks here are the same rules the top-level
+// DecidedByHantei block in ScoreRequest.Validate applies; both now call the
+// shared domain predicates, so that pair stays in sync by construction rather
+// than by comment. Two differences remain deliberate: the sub-bout variant adds
+// the Position guards and omits the top-level-only Status/DecisionBy checks
+// (SubMatchResult has no such fields), and it ALLOWS decision "daihyosen",
+// which the match level rejects (see the note there).
 func validateSubBout(prefix string, sr *state.SubMatchResult, allowNumberedEncho bool) error {
 	// Encho period counts are bounded two ways. A negative count is never
 	// valid on any bout (it would make Encho.On() read false below and be
@@ -530,8 +533,12 @@ func (r *ScoreRequest) validateWithOptions(allowNumberedEncho bool) error {
 	// be completed, and the scoreline must be tied (equal ippon counts). Encho
 	// is NOT required: operators may take a tied match straight to hantei
 	// without an overtime period (the encho gate was removed deliberately).
-	// The winner/tied/decision checks below mirror validateSubBout; keep both
-	// in sync.
+	// The winner and tied-scoreline checks below are the SAME rules
+	// validateSubBout applies, so both call the shared domain predicates rather
+	// than spelling them out twice (the tie test used to be a raw len() here
+	// against a placeholder-dropping count there, so ["M","•"] against ["M","K"]
+	// read tied to one enforcer and untied to the other). The decision check is
+	// deliberately NARROWER than the sub-bout one; see the note on it below.
 	if r.DecidedByHantei != nil && *r.DecidedByHantei {
 		if r.Winner == "" {
 			return &ValidationError{
@@ -545,7 +552,7 @@ func (r *ScoreRequest) validateWithOptions(allowNumberedEncho bool) error {
 				Message: "only valid on completed matches",
 			}
 		}
-		if len(r.IpponsA) != len(r.IpponsB) {
+		if !domain.HanteiTiedScoreline(r.IpponsA, r.IpponsB) {
 			return &ValidationError{
 				Field:   "decidedByHantei",
 				Message: "requires a tied scoreline, ippon counts must be equal",
@@ -556,6 +563,13 @@ func (r *ScoreRequest) validateWithOptions(allowNumberedEncho bool) error {
 		// fusenpai=no-show, daihyosen=rep-bout…) is semantically incompatible,
 		// persisting both would render contradictory suffixes like "Kiken (E) HT".
 		// Only the neutral values ("" and "fought") are allowed alongside hantei.
+		//
+		// This is domain.IsHanteiCompatibleDecisionStr MINUS "daihyosen", and the
+		// narrowing is deliberate rather than drift: a daihyosen is a bout, so the
+		// verdict rides on the rep-bout SUB-row (position -1), where validateSubBout
+		// allows it. At MATCH level the same value would claim the encounter itself
+		// was decided by judges, which is what the rep bout exists to avoid. Do not
+		// "unify" this with the domain predicate without moving that rule too.
 		switch r.Decision {
 		case "", "fought":
 			// compatible: normal fight decided by judges

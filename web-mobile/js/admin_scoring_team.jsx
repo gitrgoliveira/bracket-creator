@@ -358,7 +358,7 @@ export function kachinukiBandModel({ subs, daihyosenIdx, isComplete, matchWinner
   // separate from `matchWinner` itself: winnerSideLR needs the RAW (possibly
   // {id,name}) form to prefer id equality over name (two teams CAN share a
   // display name), so matchWinner is passed through unflattened.
-  const matchWinnerName = matchWinner && typeof matchWinner === "object" ? matchWinner.name : matchWinner;
+  const matchWinnerName = nameOf(matchWinner);
   const played = [];
   (subs || []).forEach((s, idx) => {
     if (idx === daihyosenIdx || !subBoutHasBeenPlayed(s)) return;
@@ -369,8 +369,11 @@ export function kachinukiBandModel({ subs, daihyosenIdx, isComplete, matchWinner
     const names = namesAt ? namesAt(idx) : {};
     const aName = names.aName || "";
     const bName = names.bName || "";
-    const aN = (s.aPts || []).length;
-    const bN = (s.bPts || []).length;
+    // realIppons, not raw .length: an unfilled "•" placeholder or an empty cell
+    // is not a point. Raw length here made the band announce "Aka beat Shiro"
+    // under a bout row the scoreboard was rendering as a tie.
+    const aN = realIppons(s.aPts).length;
+    const bN = realIppons(s.bPts).length;
     // Winner/loser derive from the SIDE, never from name comparison — an
     // unresolved name must not collapse both sides onto one label. The side
     // itself comes from boutWinnerSide (the one winner rule), so a fusensho
@@ -720,7 +723,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // there answered "yes I know about it" for a verdict never shown on screen,
   // so the next autosave sent an authoritative false and erased it: the exact
   // failure hanteiKnown was added to prevent.
-  const [initialDaihyosenHanteiArmed] = useStateA(() => !!(existingDaihyosen?.decidedByHantei || initialDaihyosenHantei));
+  const [initialDaihyosenHanteiArmed] = useStateA(() => !!existingDaihyosen?.decidedByHantei);
   const [daihyosenHanteiArmed, setDaihyosenHanteiArmed] = useStateA(initialDaihyosenHanteiArmed);
   // The ONE hantei undo, shared by the Ht chip and the panel Cancel so the
   // two paths cannot drift. Like the pick buttons, it is LOCAL state only:
@@ -938,8 +941,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // the canonical signal: when "fusensho", figure out which side it
   // belongs to via the recorded winner so the UI re-opens with the
   // affordance shown as active.
-  const sideAName = typeof m.sideA === "object" ? m.sideA?.name : m.sideA;
-  const sideBName = typeof m.sideB === "object" ? m.sideB?.name : m.sideB;
+  const sideAName = nameOf(m.sideA);
+  const sideBName = nameOf(m.sideB);
   // seedSubAt builds the local sub state for one position index from the
   // CURRENT match prop (existingSub is re-derived each render). Used for
   // the one-time initial seed below AND to extend the rows when the server
@@ -1619,7 +1622,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       if (isDaihyo) decision = "daihyosen";
       else if (s.fusensho) decision = "fusensho";
       else if (t.winner === null) decision = "hikiwake";
-      const teamWinnerName = w ? (typeof w === "object" ? w.name : w) : "";
+      const teamWinnerName = nameOf(w);
       // Competition-type-aware sub-bout identity: a kachinuki bout is consumed
       // per-competitor (advancement + bout-log export), so persist player-name
       // sides + winner; a fixed-position or daihyosen bout settles at the match

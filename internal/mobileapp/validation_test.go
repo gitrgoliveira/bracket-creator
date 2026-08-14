@@ -1363,3 +1363,51 @@ func TestValidateDecision_EnchoScoreline(t *testing.T) {
 		})
 	}
 }
+
+// The match-level tie gate must count ippons the way the engine does. It used
+// to compare raw len(), while validateSubBout (its declared twin) and the
+// engine's preserveSubHantei both drop the "•" unfilled-slot placeholder — so
+// one scoreline could read tied to one enforcer and untied to the other.
+func TestScoreRequestValidate_HanteiTieGateIgnoresPlaceholders(t *testing.T) {
+	req := func(a, b []string) ScoreRequest {
+		return ScoreRequest{
+			SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			Status:          state.MatchStatusCompleted,
+			DecidedByHantei: boolPtr(true),
+			IpponsA:         a, IpponsB: b,
+		}
+	}
+
+	t.Run("tied on real ippons, untied on raw length, is accepted", func(t *testing.T) {
+		// 1 real ippon each. Raw len says 2 != 1 and would reject.
+		r := req([]string{"M", "•"}, []string{"K"})
+		assert.NoError(t, r.Validate())
+	})
+
+	t.Run("an empty trailing cell counts the same way", func(t *testing.T) {
+		r := req([]string{"M", ""}, []string{"K"})
+		assert.NoError(t, r.Validate())
+	})
+
+	t.Run("untied on real ippons is still rejected", func(t *testing.T) {
+		// 0 real against 1. Raw len would call this tied (1 == 1) and accept.
+		// Kept to one slot per side so validateIpponCounts' 2-2 rule (which
+		// does count raw slots) cannot be what rejects it.
+		r := req([]string{"•"}, []string{"K"})
+		err := r.Validate()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "tied scoreline")
+	})
+
+	t.Run("the sub-bout twin agrees on the same scoreline", func(t *testing.T) {
+		sub := &state.SubMatchResult{
+			Position: state.DaihyosenSubPosition,
+			SideA:    "Alice", SideB: "Bob", Winner: "Alice",
+			Decision:        "daihyosen",
+			IpponsA:         []string{"M", "•"},
+			IpponsB:         []string{"K"},
+			DecidedByHantei: state.HanteiExplicit(true),
+		}
+		assert.NoError(t, validateSubBout("subResults[0].", sub, false))
+	})
+}

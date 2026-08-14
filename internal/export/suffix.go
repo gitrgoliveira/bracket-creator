@@ -179,7 +179,7 @@ func DefaultWinMaruAB(scoreA, scoreB, decision string, encho *state.EnchoMetadat
 func IpponsScore(ippons []string) string {
 	result := ""
 	for _, s := range ippons {
-		if s != "" && s != "•" {
+		if s != "" && s != domain.IpponPlaceholder {
 			result += s
 		}
 	}

@@ -70,12 +70,11 @@ export function resultSlot(cells) {
 // scoreboard's hantei tie test, both editors' totals, and the slot picks. It is
 // NOT the only definition in the codebase. Inline copies of the same predicate
 // still live in bracket.jsx, display_scoreboard.jsx, streaming_overlay.jsx,
-// viewer_standings.jsx, admin_shiaijo.jsx (which declares its OWN local
-// realIppons), admin_competition_bracket.jsx, api_serializers.jsx and both
-// editors. Migrating them is a separate sweep; until it happens, changing what
-// counts as a recorded ippon means grepping that literal, not just editing
-// this function. (Go's validation.go compares raw lengths at the wire layer;
-// its own comment marks the pair keep-in-sync.)
+// viewer_standings.jsx, admin_competition_bracket.jsx and api_serializers.jsx.
+// Migrating them is a separate sweep; until it happens, changing what counts as
+// a recorded ippon means grepping that literal, not just editing this function.
+// (Go's equivalent is domain.CountScoringIppons, which both the engine and the
+// wire validator now call — that pair no longer needs a keep-in-sync comment.)
 export const realIppons = (arr) => (arr || []).filter(x => x && x !== "\u2022");
 
 // hanteiTied: the ONE JS statement of "hantei applies only to a tied
@@ -83,8 +82,11 @@ export const realIppons = (arr) => (arr || []).filter(x => x && x !== "\u2022");
 // counted through realIppons.
 export const hanteiTied = (ipponsA, ipponsB) => realIppons(ipponsA).length === realIppons(ipponsB).length;
 
-// nameOf: a side may arrive as an object or a bare string; this is the one
-// unwrap for callers that must compare or display a side name.
+// nameOf: a side may arrive as an object or a bare string; this is the unwrap
+// for callers that must compare or display a side name. Same scope caveat as
+// realIppons above — the scoreboard and both editors call it, but one-line
+// copies remain in bracket.jsx, viewer_standings.jsx, admin_pools.jsx,
+// streaming_overlay.jsx and admin_scoring_engi.jsx.
 export const nameOf = (v) => (v && typeof v === "object" ? v.name : v) || "";
 
 // hanteiSlot: the EDITOR variant of resultSlot — "is this the side that won the

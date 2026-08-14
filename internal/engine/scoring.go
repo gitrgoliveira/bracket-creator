@@ -527,7 +527,7 @@ func preserveLoserScore(result, prior *state.MatchResult, decisionBy string) {
 func struckIppons(ippons []string) []string {
 	var out []string
 	for _, v := range ippons {
-		if v != "" && v != "•" && v != domain.DefaultWinIppon {
+		if v != "" && v != domain.IpponPlaceholder && v != domain.DefaultWinIppon {
 			out = append(out, v)
 		}
 	}
@@ -1224,6 +1224,19 @@ func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult, 
 	if !applyBracketWrite(result, bm.ModifiedAt) {
 		return false, nil
 	}
+	// Fold the stored daihyosen verdict into the incoming subs BEFORE the winner
+	// is derived, validated and assigned, exactly as applyPoolWrite does it
+	// before its own overwrite. Ordering matters twice here, and both bites are
+	// specific to this branch because the pool twin merges then overwrites the
+	// whole struct, while this one assigns bm field by field: a verdict restored
+	// after `bm.Winner = result.Winner` could no longer reach bm, and one
+	// restored after validateBracketCompletion could not satisfy it, so a
+	// completed verdict-silent write that the pool path accepts (deriving the
+	// winner from the preserved rep bout) was rejected here.
+	// Forward only: see the restore note on bm.SubResults below.
+	if policy == matchWriteForward && result.SubResults != nil {
+		preserveDaihyosenOutcome(bm.SubResults, result)
+	}
 	deriveDaihyosenWinner(result)
 	// Preserve incoming Status. Pre-fix this was unconditionally Completed, so
 	// the scoring modal's "Start" tap (which sends `{status: "running"}`)
@@ -1262,15 +1275,13 @@ func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult, 
 	if result.CorrectionReason != "" {
 		bm.CorrectionReason = result.CorrectionReason
 	}
-	// Forward: nil = omitted (preserve stored data), non-nil [] = explicit clear.
-	// Restore: the snapshot IS the truth, so nil means "there were none" and is
-	// written through; preserveDaihyosenOutcome is skipped for the same reason
+	// Forward: nil = omitted (preserve stored data), non-nil [] = explicit clear;
+	// the verdict merge for this case already ran above, against the still-stored
+	// bm.SubResults. Restore: the snapshot IS the truth, so nil means "there were
+	// none" and is written through, and the merge is skipped for the same reason
 	// applyPoolWrite skips it — it would re-derive a winner onto a snapshot whose
 	// captured state had none, i.e. re-apply the write being undone.
-	if policy == matchWriteRestore {
-		bm.SubResults = result.SubResults
-	} else if result.SubResults != nil {
-		preserveDaihyosenOutcome(bm.SubResults, result)
+	if policy == matchWriteRestore || result.SubResults != nil {
 		bm.SubResults = result.SubResults
 	}
 	// Project the persisted sub-results back into result so the HTTP response and

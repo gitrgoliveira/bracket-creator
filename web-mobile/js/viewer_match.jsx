@@ -96,20 +96,6 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true, slotLabe
   // degrades to the bare team name.
   const aName = slotName(withNumber(match.sideA), (match.feeders || [])[0]);
   const bName = slotName(withNumber(match.sideB), (match.feeders || [])[1]);
-  // Name over dojo, the block the bracket's PlayerLine and the up-next row
-  // already render (.n / .d). The dojo is a SECOND LINE UNDER THE NAME only:
-  // the ippon slots stay on the name's row, vertically centred against the
-  // block, because a competitor's points must never sit beneath their name
-  // (operator ruling). Returns the bare name when there is no dojo, so an
-  // unresolved bracket side ("Winner of M1") renders exactly as before.
-  //
-  // Unconditional, unlike the dense lists' tweaks.showDojo: this is the
-  // single-match detail view, so it always shows the fuller identity.
-  const nameWithDojo = (side, name) => {
-    const dojo = side?.dojo;
-    if (!dojo) return name;
-    return <>{name}<span className="msb-dojo">{dojo}</span></>;
-  };
   const isRunning = match.status === "running";
   const isDone = match.status === "completed";
 
@@ -152,6 +138,12 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true, slotLabe
           ("Winner of M1") for an unplayed bracket side, which the component
           would otherwise render as "TBD".
 
+          showDojo puts each competitor's dojo on a second line under their name.
+          Unconditional here, unlike the dense lists' tweaks.showDojo: this is the
+          single-match detail view, so it always shows the fuller identity. The
+          card passes a flag rather than splicing markup into the name props,
+          which keeps the name-cell layout owned by the component.
+
           It renders for a scheduled match too, not just a running or completed
           one: that is what shows the pairing at all now the separate name row
           is gone, and empty slots next to each name read as "upcoming" exactly
@@ -162,8 +154,8 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true, slotLabe
             matchSideA={match.sideA?.name || (typeof match.sideA === "string" ? match.sideA : "")}
             matchSideB={match.sideB?.name || (typeof match.sideB === "string" ? match.sideB : "")}
             kachinuki={match.teamMatchType === "kachinuki"} />
-        : <IndividualScore match={match} variant="card" showNames
-            shiroName={nameWithDojo(match.sideB, bName)} akaName={nameWithDojo(match.sideA, aName)} />}
+        : <IndividualScore match={match} variant="card" showNames showDojo
+            shiroName={bName} akaName={aName} />}
     </div>
   );
 }

@@ -789,13 +789,15 @@ type MatchResult struct {
 	// doesn't mention the flag from silently clearing a previously-
 	// recorded hantei decision.
 	//
-	// Preserve-on-nil applies ONLY to bracket matches (see
-	// engine/scoring.go:recordBracketMatchResult and
-	// engine/scoring_tx.go's bracket commit branch; both gate the
-	// assignment on result.DecidedByHantei != nil). Pool matches are
-	// merged with `*r = *result`, so a nil pointer there will clear any
-	// stored value. This is acceptable in practice because FIK rules
-	// don't permit hantei in pool play (see persistence caveat below).
+	// Preserve-on-nil applies ONLY to bracket matches, and only on a
+	// FORWARD write (a client payload). Both bracket writers funnel
+	// through engine.applyBracketMatchResult, which gates the assignment
+	// on result.DecidedByHantei != nil; under matchWriteRestore (the
+	// rollback replaying a trusted snapshot) there is no "omitted", so a
+	// nil is written through as false. Pool matches are merged with
+	// `*r = *result`, so a nil pointer there will clear any stored value.
+	// This is acceptable in practice because FIK rules don't permit
+	// hantei in pool play (see persistence caveat below).
 	//
 	// On READ paths that project BracketMatch.DecidedByHantei (bool) back
 	// into MatchResult for SSE / HTTP responses, use HanteiPtr below so

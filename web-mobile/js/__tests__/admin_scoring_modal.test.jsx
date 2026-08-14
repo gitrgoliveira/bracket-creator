@@ -23,12 +23,13 @@ import {
   isKoTieBlocked,
 } from '../admin_scoring_modal.jsx';
 import { makeSubmitDecision } from '../admin_scoring_shared.jsx';
-import { hanteiWinnerKey, preserveStoredDaihyosenVerdict } from '../admin_scoring_team.jsx';
+import { preserveStoredDaihyosenVerdict } from '../admin_scoring_team.jsx';
+import { hanteiWinnerKey, hanteiSlot } from '../result_slot.jsx';
 import { defaultWinMaru } from '../bracket.jsx';
 // teamEncounterHasResult is a module-internal helper of admin_scoring_team.jsx
 // (not part of the thin-entry consumer barrel), imported directly like the
 // resolveMatchLineup tests do.
-import { teamEncounterHasResult, resolveKachinukiBoutSides, subBoutHasBeenPlayed, fusenshoSideFromSub, hanteiSlot, teamBoutIsDraw, boutWinnerSide } from '../admin_scoring_team.jsx';
+import { teamEncounterHasResult, resolveKachinukiBoutSides, subBoutHasBeenPlayed, fusenshoSideFromSub, teamBoutIsDraw, boutWinnerSide } from '../admin_scoring_team.jsx';
 import { isKikenDecision } from '../api_serializers.jsx';
 
 window.isKikenDecision = isKikenDecision;

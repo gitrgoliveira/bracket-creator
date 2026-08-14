@@ -178,7 +178,20 @@ func preserveSubHantei(stored, incoming []state.SubMatchResult) {
 		// Note this is also what makes the tie check below meaningful - on an
 		// empty incoming row it would otherwise compare 0 against 0 and pass
 		// vacuously, never once consulting what was actually stored.
-		if countScoringIppons(in.IpponsA) == 0 && countScoringIppons(in.IpponsB) == 0 {
+		// Side-guarded, like the preserveLoserScore precedent: IpponsA/IpponsB
+		// are POSITIONAL, so copying them onto a row whose sides are named in
+		// the opposite order mirrors the letters and credits each side with the
+		// other's points. reconcileSides normalises at MATCH level only, never
+		// per sub-bout, so a drifted or hand-built payload can reach here
+		// swapped. An unnamed incoming row (the common stale-snapshot shape)
+		// inherits the names along with the scoreline. The verdict itself needs
+		// no such guard: Winner is a NAME, not a position.
+		sidesUsable := (in.SideA == "" && in.SideB == "") ||
+			(in.SideA == prior.SideA && in.SideB == prior.SideB)
+		if sidesUsable && countScoringIppons(in.IpponsA) == 0 && countScoringIppons(in.IpponsB) == 0 {
+			if in.SideA == "" && in.SideB == "" {
+				in.SideA, in.SideB = prior.SideA, prior.SideB
+			}
 			in.IpponsA = append([]string(nil), prior.IpponsA...)
 			in.IpponsB = append([]string(nil), prior.IpponsB...)
 			in.Encho = prior.Encho.Clone()
@@ -220,15 +233,41 @@ func normalizePriorForRollback(prior *state.MatchResult) {
 	if prior.SubResults == nil {
 		prior.SubResults = []state.SubMatchResult{}
 	}
-	clearHantei := false
+	// A SEPARATE bool per field. Sharing one &clearHantei across the match and
+	// every sub-bout would leave N structs aliasing a single bool, so a later
+	// write through any one of them (*sub.DecidedByHantei = true, the shape
+	// bracket_test.go's deep-copy test already exercises) would flip the verdict
+	// on the match and on every other bout at once.
 	if prior.DecidedByHantei == nil {
-		prior.DecidedByHantei = &clearHantei
+		prior.DecidedByHantei = new(bool)
 	}
 	for i := range prior.SubResults {
 		if prior.SubResults[i].DecidedByHantei == nil {
-			prior.SubResults[i].DecidedByHantei = &clearHantei
+			prior.SubResults[i].DecidedByHantei = new(bool)
 		}
 	}
+}
+
+// preserveDaihyosenOutcome is the call every forward SubResults replacement
+// makes: preserveSubHantei restores the bout-level verdict, then
+// deriveDaihyosenWinner re-reads it into the ENCOUNTER's winner.
+//
+// Both halves are required, and the order is why they are bundled here rather
+// than left as two calls. deriveDaihyosenWinner already runs earlier in each
+// writer, but at that point the incoming daihyosen row is still verdict-silent
+// and winner-less, so it finds nothing and leaves Winner empty; the preserve
+// then stamps the row back. Without this second pass the stored state
+// contradicts itself - the rep bout says "Kyoto won by hantei" while the match
+// records no winner - and computeStandingsFrom, which keys W/L/T off
+// MatchResult.Winner, credits BOTH teams a draw. It is idempotent: an explicit
+// winner short-circuits deriveDaihyosenWinner, so a writer that genuinely
+// names one is never overridden.
+func preserveDaihyosenOutcome(stored []state.SubMatchResult, result *state.MatchResult) {
+	if result == nil {
+		return
+	}
+	preserveSubHantei(stored, result.SubResults)
+	deriveDaihyosenWinner(result)
 }
 
 // applyHansokuIppons auto-awards ippons from accumulated hansoku counts per
@@ -490,7 +529,7 @@ func (e *Engine) writeMatchResult(compId string, matchId string, result *state.M
 			result.ScheduledAt = r.ScheduledAt
 		}
 		result.Round = r.Round
-		preserveSubHantei(r.SubResults, result.SubResults)
+		preserveDaihyosenOutcome(r.SubResults, result)
 		*r = *result
 	})
 	if err != nil {
@@ -575,7 +614,7 @@ func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId strin
 			result.ScheduledAt = r.ScheduledAt
 		}
 		result.Round = r.Round
-		preserveSubHantei(r.SubResults, result.SubResults)
+		preserveDaihyosenOutcome(r.SubResults, result)
 		*r = *result
 	})
 	if err != nil {
@@ -1180,7 +1219,7 @@ func (e *Engine) recordBracketMatchResult(compId string, matchId string, result 
 					}
 					// nil = omitted (preserve stored data); non-nil [] = explicit clear.
 					if result.SubResults != nil {
-						preserveSubHantei(bracket.Rounds[rIdx][mIdx].SubResults, result.SubResults)
+						preserveDaihyosenOutcome(bracket.Rounds[rIdx][mIdx].SubResults, result)
 						bracket.Rounds[rIdx][mIdx].SubResults = result.SubResults
 					}
 					// Project the persisted sub-results back into result so the
@@ -1319,7 +1358,7 @@ func applyBronzeMatchResult(bm *state.BracketMatch, result *state.MatchResult) e
 		bm.CorrectionReason = result.CorrectionReason
 	}
 	if result.SubResults != nil {
-		preserveSubHantei(bm.SubResults, result.SubResults)
+		preserveDaihyosenOutcome(bm.SubResults, result)
 		bm.SubResults = result.SubResults
 	}
 	result.SubResults = bm.SubResults

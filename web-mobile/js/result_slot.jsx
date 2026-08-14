@@ -5,6 +5,13 @@
 // live in bracket.jsx: `sideMarks` answers WHICH mark, `placeMarks` answers
 // WHICH SIDE, and this answers WHICH SLOT.
 //
+// `hanteiSlot` and `hanteiWinnerKey` live here too, for the reason this file
+// exists. They were briefly defined in admin_scoring_team.jsx, which meant the
+// INDIVIDUAL editor imported its Ht chip and attribution rule from the 2500-line
+// team modal - dragging in that modal's state machine and network calls for two
+// pure functions, and leaving any future surface (the viewer card, the overlay)
+// the same bad choice. A shared rule belongs in the leaf, not in one consumer.
+//
 // WHY A SEPARATE LEAF, AND NOT bracket.jsx (the ONE statement of this — the
 // other sites point here; two earlier rationales were wrong, so verify against
 // the build before writing a third): Makefile `esbuild-jsx` runs esbuild with
@@ -55,13 +62,74 @@ export function resultSlot(cells) {
 // realIppons: what counts as a RECORDED ippon (drops empties and the "\u2022"
 // placeholder). Exported so the surfaces that gate on a COUNT all count the
 // same way; the display pair, the hantei tie gates and the editors' totals must
-// never read different totals from one array. (Two surfaces still hand-roll the
-// same filter inline \u2014 formatIpponsScore in bracket.jsx and the OBS overlay \u2014
-// so this is not yet literally every caller. Go's validation.go compares raw
-// lengths at the wire layer; its own comment marks the pair keep-in-sync.)
+// never read different totals from one array.
+//
+// SCOPE, stated accurately because an earlier version of this comment was not
+// (it claimed only two callers remained; there are roughly a dozen): this leaf
+// owns the filter for the surfaces that gate a MARK on a count - the
+// scoreboard's hantei tie test, both editors' totals, and the slot picks. It is
+// NOT the only definition in the codebase. Inline copies of the same predicate
+// still live in bracket.jsx, display_scoreboard.jsx, streaming_overlay.jsx,
+// viewer_standings.jsx, admin_shiaijo.jsx (which declares its OWN local
+// realIppons), admin_competition_bracket.jsx, api_serializers.jsx and both
+// editors. Migrating them is a separate sweep; until it happens, changing what
+// counts as a recorded ippon means grepping that literal, not just editing
+// this function. (Go's validation.go compares raw lengths at the wire layer;
+// its own comment marks the pair keep-in-sync.)
 export const realIppons = (arr) => (arr || []).filter(x => x && x !== "\u2022");
 
 // hanteiTied: the ONE JS statement of "hantei applies only to a tied
 // scoreline" (FIK 7-5 / 29-6, mirroring validation.go's equal-counts gate),
 // counted through realIppons.
 export const hanteiTied = (ipponsA, ipponsB) => realIppons(ipponsA).length === realIppons(ipponsB).length;
+
+// nameOf: a side may arrive as an object or a bare string; this is the one
+// unwrap both rules below share.
+export const nameOf = (v) => (v && typeof v === "object" ? v.name : v) || "";
+
+// hanteiSlot: which of this side's two ippon slots carries the "Ht" mark, or -1
+// for none. The placement rule itself lives in result_slot.jsx and is shared
+// with the viewer/display scoreboard, so the two surfaces cannot drift; this
+// adds the editor's "is this the side that won the hantei" test.
+//
+// It also DELIBERATELY discards resultSlot's `loose` (both slots full). That is
+// a decision, not an oversight: unlike the read-only scoreboard, which would
+// otherwise lose the result and so renders a loose mark, this editor always
+// mounts a second channel for the verdict — daihyosenHanteiArmed is seeded from
+// the stored decision, so the hantei row is on screen with the winning side's
+// button primary. (The one exception is a stored winner that names neither side
+// after a rename, where initialDaihyosenHantei deliberately resolves to "" and
+// the panel opens armed with no side primary; see its comment below. The mark
+// is dropped there for the same reason the scoreboard drops it: nothing
+// attributable to mark.) And 2-2 is unreachable through the ippon buttons anyway
+// (MAX_IPPONS_PER_SIDE plus isBoutDecided disable both sides at 2), so only
+// drifted stored data reaches it. Rendering a third slot-shaped chip here would
+// claim an ippon that does not exist.
+export function hanteiSlot(isWinner, pts) {
+  if (!isWinner) return -1;
+  return resultSlot(pts).slot;
+}
+
+// hanteiWinnerKey: which side ("a"/"b"/"") a recorded hantei verdict names.
+// Id-first (the server's authoritative identity), name fallback only when the
+// name distinguishes the sides - a same-name pair with no usable ids returns
+// "" so callers do not guess. Shared by the individual editor's Ht chip and
+// this editor's daihyosen seed, so the exclusive-attribution rule has one
+// owner. Exported for tests.
+export function hanteiWinnerKey(m) {
+  if (!m?.winner) return "";
+  const wId = m.winner?.id || "";
+  const aId = m.sideA?.id || "";
+  const bId = m.sideB?.id || "";
+  if (wId && aId && wId === aId && wId !== bId) return "a";
+  if (wId && bId && wId === bId && wId !== aId) return "b";
+  // Only when BOTH sides carry ids is the id-space authoritative enough to
+  // call a non-matching winner id unattributable; with one id-less side the
+  // name fallback below can still resolve it (a replaced participant leaves
+  // one side id-less while the winner keeps its stamped uuid).
+  if (wId && aId && bId) return "";
+  const wn = nameOf(m.winner), an = nameOf(m.sideA), bn = nameOf(m.sideB);
+  if (wn && wn === an && wn !== bn) return "a";
+  if (wn && wn === bn && wn !== an) return "b";
+  return "";
+}

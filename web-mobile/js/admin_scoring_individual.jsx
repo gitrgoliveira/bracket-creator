@@ -9,7 +9,7 @@ const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 // daihyosen-specific; the rep pickers below stay gated on m.repIsTeam (a "-TB-"
 // tiebreaker is also a rep bout, just not a daihyosen).
 import { isPoolDaihyosenBout } from './pool_ids.jsx';
-import { realIppons } from './result_slot.jsx';
+import { realIppons, hanteiSlot, hanteiWinnerKey } from './result_slot.jsx';
 
 import {
   MAX_IPPONS_PER_SIDE,
@@ -36,7 +36,7 @@ import {
 
 import { SyncStatusPill, useDebouncedRunningWrite } from './admin_scoring_autosave.jsx';
 
-import { TeamScoreEditorModal, hanteiSlot, hanteiWinnerKey } from './admin_scoring_team.jsx';
+import { TeamScoreEditorModal } from './admin_scoring_team.jsx';
 import { EngiScoreEditorModal } from './admin_scoring_engi.jsx';
 
 
@@ -69,8 +69,15 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   const cellsB = m.ipponsB || (window.ipponsFromScore ? window.ipponsFromScore(m.scoreB) : []);
   const cleanA = (cellsA || []).filter(x => x && x !== "•");
   const cleanB = (cellsB || []).filter(x => x && x !== "•");
-  const seedAPts = cleanA.length ? cleanA : (m.score?.type === "ippon" && m.winner?.id === m.sideA?.id ? m.score.ippons || [] : []);
-  const seedBPts = cleanB.length ? cleanB : (m.score?.type === "ippon" && m.winner?.id === m.sideB?.id ? m.score.ippons || [] : []);
+  // The score.ippons FALLBACK is filtered like the primary path above: pts must
+  // hold only REAL points, because the slot grid indexes it directly for
+  // display while resultSlot picks the mark's slot from it. Any placeholder or
+  // empty cell would desynchronise those two (a "\u2022" in cell 0 pushes the
+  // mark to cell 1, where it then renders OVER a recorded letter, hiding a
+  // struck point). Cleaning once here keeps every downstream consumer honest.
+  const cleanFallback = (arr) => (arr || []).filter(x => x && x !== "\u2022");
+  const seedAPts = cleanA.length ? cleanA : (m.score?.type === "ippon" && m.winner?.id === m.sideA?.id ? cleanFallback(m.score.ippons) : []);
+  const seedBPts = cleanB.length ? cleanB : (m.score?.type === "ippon" && m.winner?.id === m.sideB?.id ? cleanFallback(m.score.ippons) : []);
 
   // Use ?? not || so an explicit 0 isn't treated as "unset".
   // reconcileFoulsAtOpen turns the pre-fix cumulative raw count into the
@@ -404,13 +411,13 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // shows letters plainly here too. Display only: the slots are disabled while
   // the hantei stands.
   const slotButtons = (s) => {
-    // resultSlot is fed the SAME filtered view the tie gate above counts, not
-    // the raw pts: a legacy "•" placeholder is truthy, so raw input would make
-    // resultSlot call slot 0 occupied and render [•][Ht] — the mark in the
-    // inner slot with a non-point displayed outside it as though it were
-    // scored. The other two resultSlot consumers already pass filtered cells.
+    // resultSlot gets the SAME array the render loop below indexes. Passing a
+    // filtered view instead desynchronises them: on pts ["•","M"] the filter
+    // yields ["M"] → slot 1, and cell 1 then renders "Ht" OVER the recorded
+    // men. pts is kept clean at the seed instead (see cleanFallback), so raw
+    // and filtered agree here and the mark lands in a genuinely free cell.
     const htSlot = hanteiSlot(
-      decidedByHantei && aTotal === bTotal && recordedHtKey === s.key, realIppons(s.pts));
+      decidedByHantei && aTotal === bTotal && recordedHtKey === s.key, s.pts);
     return [0, 1].map((i) => {
       const isHt = htSlot === i;
       return (

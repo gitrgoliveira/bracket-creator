@@ -37,7 +37,7 @@ import { useDebouncedRunningWrite, SyncStatusPill } from './admin_scoring_autosa
 // the editor derives its per-bout middle from it rather than restating the
 // chain (CLAUDE.md § Match Decision Types: the middle rule lives in ONE place).
 import { boutMiddle, winnerSideLR } from './bracket.jsx';
-import { resultSlot } from './result_slot.jsx';
+import { realIppons, hanteiSlot, hanteiWinnerKey, nameOf } from './result_slot.jsx';
 
 // renderTeamBoutMiddle: the ONE place the editor turns a sub-bout into its
 // centre value, for BOTH the read-only done row and the live entry row. Derives
@@ -70,57 +70,6 @@ function renderTeamBoutMiddle(s, t, isDaihyoRow) {
   return mid === "X" ? <span className="tsm-draw">X</span> : <span style={{ color: "var(--ink-3)" }}>{mid}</span>;
 }
 
-// hanteiSlot: which of this side's two ippon slots carries the "Ht" mark, or -1
-// for none. The placement rule itself lives in result_slot.jsx and is shared
-// with the viewer/display scoreboard, so the two surfaces cannot drift; this
-// adds the editor's "is this the side that won the hantei" test.
-//
-// It also DELIBERATELY discards resultSlot's `loose` (both slots full). That is
-// a decision, not an oversight: unlike the read-only scoreboard, which would
-// otherwise lose the result and so renders a loose mark, this editor always
-// mounts a second channel for the verdict — daihyosenHanteiArmed is seeded from
-// the stored decision, so the hantei row is on screen with the winning side's
-// button primary. (The one exception is a stored winner that names neither side
-// after a rename, where initialDaihyosenHantei deliberately resolves to "" and
-// the panel opens armed with no side primary; see its comment below. The mark
-// is dropped there for the same reason the scoreboard drops it: nothing
-// attributable to mark.) And 2-2 is unreachable through the ippon buttons anyway
-// (MAX_IPPONS_PER_SIDE plus isBoutDecided disable both sides at 2), so only
-// drifted stored data reaches it. Rendering a third slot-shaped chip here would
-// claim an ippon that does not exist.
-export function hanteiSlot(isWinner, pts) {
-  if (!isWinner) return -1;
-  return resultSlot(pts).slot;
-}
-
-// nameOf: the side string, whether the side is a bare name or an {id, name}
-// object. One module-level copy so the seed below and hanteiWinnerKey can
-// never normalise names differently.
-const nameOf = (v) => (v && typeof v === "object" ? v.name : v) || "";
-
-// hanteiWinnerKey: which side ("a"/"b"/"") a recorded hantei verdict names.
-// Id-first (the server's authoritative identity), name fallback only when the
-// name distinguishes the sides - a same-name pair with no usable ids returns
-// "" so callers do not guess. Shared by the individual editor's Ht chip and
-// this editor's daihyosen seed, so the exclusive-attribution rule has one
-// owner. Exported for tests.
-export function hanteiWinnerKey(m) {
-  if (!m?.winner) return "";
-  const wId = m.winner?.id || "";
-  const aId = m.sideA?.id || "";
-  const bId = m.sideB?.id || "";
-  if (wId && aId && wId === aId && wId !== bId) return "a";
-  if (wId && bId && wId === bId && wId !== aId) return "b";
-  // Only when BOTH sides carry ids is the id-space authoritative enough to
-  // call a non-matching winner id unattributable; with one id-less side the
-  // name fallback below can still resolve it (a replaced participant leaves
-  // one side id-less while the winner keeps its stamped uuid).
-  if (wId && aId && bId) return "";
-  const wn = nameOf(m.winner), an = nameOf(m.sideA), bn = nameOf(m.sideB);
-  if (wn && wn === an && wn !== bn) return "a";
-  if (wn && wn === bn && wn !== an) return "b";
-  return "";
-}
 
 // preserveStoredDaihyosenVerdict: while a stored hantei verdict is
 // UNATTRIBUTABLE (rename drift: the stored winner name no longer matches
@@ -761,7 +710,17 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // Armed follows the RECORDED flag, not the resolved side, so an
   // unattributable stored verdict still opens the panel for re-picking
   // instead of silently reading as "no hantei".
-  const initialDaihyosenHanteiArmed = !!(existingDaihyosen?.decidedByHantei || initialDaihyosenHantei);
+  // FROZEN at mount, like its twin initialDaihyosenHantei above, and for a
+  // sharper reason than baseline stability. As a plain per-render const it
+  // tracked the LIVE m prop, so when another device recorded a verdict this
+  // flipped true mid-edit - which (a) made isDirty compare false !== true and
+  // prompt "discard changes?" on an untouched editor, and (b) silently
+  // DEFEATED the hanteiKnown guard in buildPatch, whose whole job is to detect
+  // "this editor mounted before the verdict existed". Reading a live value
+  // there answered "yes I know about it" for a verdict never shown on screen,
+  // so the next autosave sent an authoritative false and erased it: the exact
+  // failure hanteiKnown was added to prevent.
+  const [initialDaihyosenHanteiArmed] = useStateA(() => !!(existingDaihyosen?.decidedByHantei || initialDaihyosenHantei));
   const [daihyosenHanteiArmed, setDaihyosenHanteiArmed] = useStateA(initialDaihyosenHanteiArmed);
   // The ONE hantei undo, shared by the Ht chip and the panel Cancel so the
   // two paths cannot drift. Like the pick buttons, it is LOCAL state only:
@@ -1081,8 +1040,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // itself comes from boutWinnerSide — the one winner rule, shared with the
   // kachinuki band and End-match derivation.
   const subTotals = subs.map((s, i) => {
-    const aT = s.aPts.length;
-    const bT = s.bPts.length;
+    // Counted through the shared realIppons filter, like the individual editor's
+    // totals, the scoreboard's hanteiTied and Go's countScoringIppons. Raw
+    // .length disagreed with all three on a row holding a placeholder or empty
+    // cell: the editor read 2-1 (hantei panel hidden, verdict dropped by
+    // boutWinnerSide) while the scoreboard read 1-1 and rendered the Ht for the
+    // very same bout.
+    const aT = realIppons(s.aPts).length;
+    const bT = realIppons(s.bPts).length;
     // The daihyosen row is the only bout that can carry a hantei verdict;
     // boutWinnerSide itself enforces the tied-scoreline gate.
     const winner = boutWinnerSide({
@@ -1780,7 +1745,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       status: "completed",
       ipponsA: [],
       ipponsB: [],
-      score: { type: (teamWinner || dhKeep) ? "ippon" : "hikiwake", winnerPts: teamWinner === "a" ? ivA : ivB, loserPts: teamWinner === "a" ? ivB : ivA, fouls: { a: 0, b: 0 }, corrected: isComplete },
+      // The third branch is the dhKeep case: a PRESERVED but unattributable
+      // verdict forces type "ippon" while teamWinner stays null, and the old
+      // two-way ternary then fell through to the SHIRO figures for both
+      // slots - labelling the loser's IV as the winner's whenever the two
+      // differ. max/min cannot name the side either, but it can never invert
+      // them, and in every reachable daihyosen IV is tied so both agree.
+      score: { type: (teamWinner || dhKeep) ? "ippon" : "hikiwake", winnerPts: teamWinner === "a" ? ivA : (teamWinner === "b" ? ivB : Math.max(ivA, ivB)), loserPts: teamWinner === "a" ? ivB : (teamWinner === "b" ? ivA : Math.min(ivA, ivB)), fouls: { a: 0, b: 0 }, corrected: isComplete },
       subResults,
       ...enchoBlock(),
       ...correctionBlock,

@@ -196,6 +196,65 @@ func TestPoolWrite_StaleSnapshotKeepsHantei(t *testing.T) {
 	assert.Equal(t, []string{"M", "K"}, stored[0].SubResults[0].IpponsA)
 }
 
+// F2: the verdict names a winner, so the ENCOUNTER must record one too.
+// deriveDaihyosenWinner runs BEFORE the preserve in every writer, when the
+// incoming row is still silent, so without the second pass the stored state
+// contradicts itself and pool standings credit a draw.
+func TestPreserveDaihyosenOutcome_DerivesMatchWinner(t *testing.T) {
+	dh := state.DaihyosenSubPosition
+	stored := []state.SubMatchResult{{
+		Position: dh, SideA: "Kyoto", SideB: "Osaka",
+		IpponsA: []string{"M"}, IpponsB: []string{"K"},
+		Winner: "Kyoto", Decision: "daihyosen", DecidedByHantei: state.HanteiPtr(true),
+	}}
+	result := &state.MatchResult{
+		SideA: "Kyoto", SideB: "Osaka", Winner: "",
+		SubResults: []state.SubMatchResult{{Position: dh, SideA: "Kyoto", SideB: "Osaka"}},
+	}
+	preserveDaihyosenOutcome(stored, result)
+	require.True(t, result.SubResults[0].HanteiDecided())
+	assert.Equal(t, "Kyoto", result.Winner, "the encounter must not read as a draw")
+
+	t.Run("an explicit winner is never overridden", func(t *testing.T) {
+		r := &state.MatchResult{
+			SideA: "Kyoto", SideB: "Osaka", Winner: "Osaka",
+			SubResults: []state.SubMatchResult{{Position: dh, SideA: "Kyoto", SideB: "Osaka"}},
+		}
+		preserveDaihyosenOutcome(stored, r)
+		assert.Equal(t, "Osaka", r.Winner)
+	})
+
+	t.Run("nil result is a no-op", func(t *testing.T) {
+		assert.NotPanics(t, func() { preserveDaihyosenOutcome(stored, nil) })
+	})
+}
+
+// F9: IpponsA/IpponsB are POSITIONAL, so the scoreline may only travel onto a
+// row naming the same sides in the same order.
+func TestPreserveSubHantei_SideGuardsTheScoreline(t *testing.T) {
+	dh := state.DaihyosenSubPosition
+	stored := []state.SubMatchResult{{
+		Position: dh, SideA: "Kyoto", SideB: "Osaka",
+		IpponsA: []string{"M"}, IpponsB: []string{"K"},
+		Winner: "Kyoto", Decision: "daihyosen", DecidedByHantei: state.HanteiPtr(true),
+	}}
+
+	t.Run("swapped sides do not inherit a mirrored scoreline", func(t *testing.T) {
+		incoming := []state.SubMatchResult{{Position: dh, SideA: "Osaka", SideB: "Kyoto"}}
+		preserveSubHantei(stored, incoming)
+		assert.Empty(t, incoming[0].IpponsA, "Kyoto's men must not be credited to Osaka")
+		assert.Empty(t, incoming[0].IpponsB)
+	})
+
+	t.Run("an unnamed row inherits the names with the scoreline", func(t *testing.T) {
+		incoming := []state.SubMatchResult{{Position: dh}}
+		preserveSubHantei(stored, incoming)
+		assert.Equal(t, "Kyoto", incoming[0].SideA)
+		assert.Equal(t, []string{"M"}, incoming[0].IpponsA)
+		assert.Equal(t, []string{"K"}, incoming[0].IpponsB)
+	})
+}
+
 // Same scenario through the TX pool path, which is the one POST
 // /competitions/:id/matches/:mid/score and the bulk-score endpoint actually
 // take. Its non-tx twin already had the guard, so this pins the twin parity:
@@ -283,6 +342,15 @@ func TestNormalizePriorForRollback(t *testing.T) {
 		p := &state.MatchResult{SubResults: []state.SubMatchResult{{Position: 1, DecidedByHantei: &keep}}}
 		normalizePriorForRollback(p)
 		assert.True(t, *p.SubResults[0].DecidedByHantei)
+	})
+
+	t.Run("each field gets its OWN pointer, not a shared bool", func(t *testing.T) {
+		p := &state.MatchResult{SubResults: []state.SubMatchResult{{Position: 1}, {Position: 2}}}
+		normalizePriorForRollback(p)
+		// Writing through one must not flip the match or the sibling bout.
+		*p.SubResults[0].DecidedByHantei = true
+		assert.False(t, *p.DecidedByHantei, "match level must not alias a sub")
+		assert.False(t, *p.SubResults[1].DecidedByHantei, "sub-bouts must not alias each other")
 	})
 
 	t.Run("nil prior is a no-op", func(t *testing.T) {

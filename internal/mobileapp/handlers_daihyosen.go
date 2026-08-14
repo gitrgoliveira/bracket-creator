@@ -142,7 +142,14 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			// would let a removed daihyosen still present as decided-by-daihyosen
 			// (or carry stale overtime) while Status is back to running.
 			u.Winner = ""
-			u.DecidedByHantei = nil
+			// EXPLICIT false, not nil: nil is the PRESERVE sentinel on the bracket
+			// write (recordBracketMatchResultTx only assigns when non-nil), so a nil
+			// here left a stored true in place and the match returned to running
+			// still advertising a judges' decision - while the pool branch, which
+			// overwrites wholesale, did clear it. state.HanteiPtr(false) is
+			// nil-for-false by design, so the pointer is taken directly.
+			clearedHantei := false
+			u.DecidedByHantei = &clearedHantei
 			u.Decision = ""
 			u.DecisionBy = ""
 			u.DecisionReason = ""

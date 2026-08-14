@@ -4,6 +4,7 @@ import (
 	"encoding/csv"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -872,7 +873,16 @@ func (s *Store) saveParticipantsNoLockOpts(compID string, players []domain.Playe
 	// only rename path, ReplaceParticipant, is requireSetupLocked-gated), i.e.
 	// it would brick a live event over data the operator entered legally.
 	// A rename or an addition that CREATES a new collision is still refused.
-	comp, _ := s.loadCompetitionLocked(compID)
+	// Logged, not propagated: a transient config read failure must not block a
+	// participant write (check-in funnels through here, and failing closed is
+	// the bricking class this grandfathering exists to avoid). But it must not
+	// pass silently either - a nil comp disables the team-name rule below, so
+	// an unreadable config would otherwise let a duplicate through with no
+	// diagnostic anywhere.
+	comp, compErr := s.loadCompetitionLocked(compID)
+	if compErr != nil {
+		log.Printf("state: saveParticipants %s: competition config unreadable, team-name uniqueness not enforced for this write: %v", compID, compErr)
+	}
 	if enforceTeamNames && comp != nil && (comp.Kind == "team" || comp.TeamSize > 0) {
 		names := make([]string, len(players))
 		for i, p := range players {
@@ -882,19 +892,29 @@ func (s *Store) saveParticipantsNoLockOpts(compID string, players []domain.Playe
 			// Compare against what is already stored, keyed the same way the
 			// detector keys them so casing/diacritic drift cannot smuggle one
 			// past as "pre-existing".
-			grandfathered := make(map[string]bool)
+			// COUNT per name, not mere membership. Keying on "this name is
+			// already duplicated" would grandfather the NAME rather than the
+			// existing collision, so a roster holding two Seibukan would then
+			// accept a third, and a fourth - each new one waved through by the
+			// pair before it, which is the opposite of the rule. The test is
+			// therefore whether this write INCREASES how many entries share a
+			// name: equal or fewer is a rewrite of what is already stored
+			// (check-in, a re-save, removing one of the pair), more is a new
+			// collision and is refused.
+			storedCounts := make(map[string]int)
 			if stored, lerr := s.loadParticipantsLocked(compID, withZekkenName); lerr == nil {
-				storedNames := make([]string, len(stored))
-				for i, p := range stored {
-					storedNames[i] = p.Name
+				for _, p := range stored {
+					storedCounts[helper.NormalizeParticipantName(p.Name)]++
 				}
-				for _, d := range helper.CheckDuplicateEntriesByName(storedNames) {
-					grandfathered[helper.NormalizeParticipantName(d)] = true
-				}
+			}
+			incomingCounts := make(map[string]int)
+			for _, n := range names {
+				incomingCounts[helper.NormalizeParticipantName(n)]++
 			}
 			fresh := make([]string, 0, len(dupes))
 			for _, d := range dupes {
-				if !grandfathered[helper.NormalizeParticipantName(d)] {
+				k := helper.NormalizeParticipantName(d)
+				if incomingCounts[k] > storedCounts[k] {
 					fresh = append(fresh, d)
 				}
 			}

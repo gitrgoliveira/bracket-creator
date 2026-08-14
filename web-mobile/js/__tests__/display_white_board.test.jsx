@@ -92,7 +92,9 @@ describe('TvWhiteBoard', () => {
     // vitest isolates per file, so without it the removed line would evaluate
     // to "" on main too and this test could not fail. Same stub the sibling
     // match_scoreboard / streaming_overlay suites install.
+    const priorMiddleMark = window.matchMiddleMark;
     window.matchMiddleMark = (m) => (m?.encho?.periodCount > 0 ? '(E)' : '');
+    try {
     const p = teamPromoted();
     p.match = {
       id: 'm2', round: 'Round 1',
@@ -108,6 +110,13 @@ describe('TvWhiteBoard', () => {
     expect(JSON.stringify(headerCentre)).not.toContain('(E)');
     expect(JSON.stringify(headerCentre)).toContain('vs');
     expect(findVnode(TvWhiteBoard(props), n => n.type === IndividualScore)).toBeTruthy();
+    } finally {
+      // Scoped: leaving the stub installed would make every later test in this
+      // file run with a middle mark defined, so one asserting "no mark here"
+      // could pass for the wrong reason and results become order-dependent.
+      if (priorMiddleMark === undefined) delete window.matchMiddleMark;
+      else window.matchMiddleMark = priorMiddleMark;
+    }
   });
 
   it('league board header shows just the competition name, no dangling " · " separator', () => {

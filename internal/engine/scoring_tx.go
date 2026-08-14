@@ -104,7 +104,7 @@ func (e *Engine) recordBracketMatchResultTx(tx state.StoreTx, compID, matchID st
 					}
 					// nil = omitted (preserve stored data); non-nil [] = explicit clear.
 					if result.SubResults != nil {
-						preserveSubHantei(bracket.Rounds[rIdx][mIdx].SubResults, result.SubResults)
+						preserveDaihyosenOutcome(bracket.Rounds[rIdx][mIdx].SubResults, result)
 						bracket.Rounds[rIdx][mIdx].SubResults = result.SubResults
 					}
 					// Project persisted sub-results back so the SSE/HTTP response
@@ -346,7 +346,7 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		// verdict-silent write from a stale second editor erases a recorded
 		// hantei, which in accrueTeamSubResults flips the bout from a win into a
 		// draw and so moves the team's IV/IL/IT tie-break figures.
-		preserveSubHantei(r.SubResults, result.SubResults)
+		preserveDaihyosenOutcome(r.SubResults, result)
 		*r = *result
 	})
 	if err != nil {

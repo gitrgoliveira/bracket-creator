@@ -118,10 +118,13 @@ function slotDisplayName(name, feederMatchNum) {
 //     round. The fallback for brackets saved before the feeder metadata
 //     existed, where there are no phantoms to see through anyway.
 // Either way the NUMBER comes from matchNumById when the caller has a display
-// model (the exact map that stamps "M<n>" on the cards, so the reference always
-// resolves against something on screen), falling back to the server's
-// match.matchNumber, which is equal-by-contract (engine.assignBracketMatchNumbers).
-// An unresolvable feeder yields 0 and slotDisplayName degrades it to "TBD".
+// model: the exact map that stamps "M<n>" on the cards, so the reference always
+// resolves against something on screen. On a numbered bracket that map holds the
+// server's match.matchNumber verbatim (buildDisplayModel consumes it instead of
+// re-deriving it), so the raw-field fallback below is not a second numbering to
+// keep in step — it serves callers that pass no model at all, e.g.
+// makeSlotLabeller(rounds, null). An unresolvable feeder yields 0 and
+// slotDisplayName degrades it to "TBD".
 function makeSlotLabeller(rounds, matchNumById) {
   const rs = Array.isArray(rounds) ? rounds : [];
   const numOf = (m) => (m ? ((matchNumById && matchNumById[m.id]) || m.matchNumber || 0) : 0);
@@ -693,26 +696,54 @@ function buildDisplayModel(rounds) {
       });
       feedersById[m.id] = resolvedFeeders;
     });
-    // Match numbers: earliest round first (highest displayRound), then LEFT TO
-    // RIGHT across the whole tree: mirrors the Excel FillInMatches order so card
-    // labels ("M1", "M2") match what referees see on the printed sheet.
+    // Match numbers: the "M1", "M2" stamped on the cards. A referee reads the
+    // printed Excel sheet and the operator's screen side by side, so "M12" here
+    // and "Match 12" there must name the same bout.
     //
-    // "Left to right" is the match's leftmost first-round slot, pos<<(roundIndex+1),
-    // NOT the position alone: one effective round can hold matches from several
-    // backend rounds at once (a shallow region's first bout shares a displayRound
-    // with a deep region's second bout), and position means a different span in
-    // each, so ordering on it interleaves them wrongly and the card number stops
-    // matching the printed sheet. Equal-by-contract with the Go walk in
-    // engine.assignBracketMatchNumbers, which sorts on the same key.
-    // id format: "m-r{ROUND}-{POS}": last segment is the 0-based within-round index.
-    const posFromId = (id) => { const p = id.split("-"); return parseInt(p[p.length - 1], 10) || 0; };
-    const leafSlotOf = (m) => posFromId(m.id) * Math.pow(2, (m.roundIndex || 0) + 1);
-    const numbered = [...real].sort((a, b) => {
-      const dr = b.displayRound - a.displayRound;
-      return dr !== 0 ? dr : leafSlotOf(a) - leafSlotOf(b);
-    });
+    // The SERVED number is the answer whenever the bracket carries one: the
+    // engine already computed it (engine.assignBracketMatchNumbers →
+    // state.BracketMatch.MatchNumber, on the wire as matchNumber) and the whole
+    // payload reaches us untouched (normalizeMatch spreads the match). Deriving
+    // it a second time here only bought a second thing to drift from the sheet,
+    // and it has drifted before (bc-draw: the app and the sheet named different
+    // bouts "Match 12"). Excel's helper.AssignMatchNumbers is the other walk;
+    // two implementations of one ordering is already one too many.
+    //
+    // Looked for on `real` — the matches that will actually carry a label —
+    // rather than on every row: a number on a match this model drops cannot name
+    // a card anyway. All-or-nothing, never per-match: a real match the engine
+    // left unnumbered is better drawn with NO number than with a locally
+    // invented one, which would either collide with a served number or point a
+    // referee at the wrong bout.
     const matchNumById = {};
-    numbered.forEach((m, i) => { matchNumById[m.id] = i + 1; });
+    const served = real.filter((m) => (m.matchNumber || 0) > 0);
+    if (served.length > 0) {
+      served.forEach((m) => { matchNumById[m.id] = m.matchNumber; });
+    } else {
+      // FALLBACK, still load-bearing: brackets persisted before MatchNumber
+      // existed carry displayRound/hidden metadata but no numbering, and they
+      // still have to render numbered cards. Same order as the Go walk: earliest
+      // round first (highest displayRound), then LEFT TO RIGHT across the whole
+      // tree, mirroring the Excel FillInMatches order.
+      //
+      // "Left to right" is the match's leftmost first-round slot, pos<<(roundIndex+1),
+      // NOT the position alone: one effective round can hold matches from several
+      // backend rounds at once (a shallow region's first bout shares a displayRound
+      // with a deep region's second bout), and position means a different span in
+      // each, so ordering on it interleaves them wrongly and the card number stops
+      // matching the printed sheet. This is now the last place the Go/JS ordering
+      // agreement is exercised at all, so the golden mirror
+      // (__tests__/bracket_match_numbers.test.jsx) drives it with matchNumber
+      // stripped out of the engine's own brackets.
+      // id format: "m-r{ROUND}-{POS}": last segment is the 0-based within-round index.
+      const posFromId = (id) => { const p = id.split("-"); return parseInt(p[p.length - 1], 10) || 0; };
+      const leafSlotOf = (m) => posFromId(m.id) * Math.pow(2, (m.roundIndex || 0) + 1);
+      const numbered = [...real].sort((a, b) => {
+        const dr = b.displayRound - a.displayRound;
+        return dr !== 0 ? dr : leafSlotOf(a) - leafSlotOf(b);
+      });
+      numbered.forEach((m, i) => { matchNumById[m.id] = i + 1; });
+    }
     return { hasMeta: true, columns, feedersById, matchNumById };
   }
   // Legacy: columns = rounds. Connectors are positional (BracketConnectors

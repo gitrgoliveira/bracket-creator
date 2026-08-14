@@ -315,38 +315,14 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 
 	var sideMismatch bool
 	err := e.withPoolMatchTx(tx, compID, matchID, func(r *state.MatchResult) {
-		if reconcileSides(result, r.SideA, r.SideB) {
+		// This is the POOL branch of the path POST /score and the bulk-score
+		// endpoint actually take. The merge itself is shared with the non-tx
+		// twins (mergeStoredPoolMatch, scoring.go) precisely because this site
+		// was once the one the hand-copied version missed.
+		if mergeStoredPoolMatch(result, r, poolWriteForward) {
 			sideMismatch = true
 			return // leave the stored match untouched
 		}
-		// Preserve generation-time participant ids + resolve winner id across
-		// the whole-struct overwrite below (the /score endpoint scores through
-		// this Tx path). See backfillMatchIdentity.
-		backfillMatchIdentity(result, r)
-		if result.Court == "" {
-			result.Court = r.Court
-		}
-		if result.ScheduledAt == "" {
-			result.ScheduledAt = r.ScheduledAt
-		}
-		result.Round = r.Round
-		// Twin parity with the bracket write in recordBracketMatchResultTx,
-		// which is set-if-non-empty and so leaves a stored reason alone. The
-		// whole-struct overwrite below would otherwise BLANK it: the kachinuki
-		// reopen path persists the operator's audit justification here, and
-		// the first "Record bout" after a reopen is a plain write carrying no
-		// reason of its own.
-		if result.CorrectionReason == "" {
-			result.CorrectionReason = r.CorrectionReason
-		}
-		// Twin parity with scoring.go's RecordMatchResultWithIneligibility: this
-		// is the POOL branch of the path POST /score and the bulk-score endpoint
-		// actually take, and a pool/league team encounter can hold a daihyosen
-		// (findMatchForDaihyosenTx accepts pool matches). Without this a
-		// verdict-silent write from a stale second editor erases a recorded
-		// hantei, which in accrueTeamSubResults flips the bout from a win into a
-		// draw and so moves the team's IV/IL/IT tie-break figures.
-		preserveDaihyosenOutcome(r.SubResults, result)
 		*r = *result
 	})
 	if err != nil {
@@ -455,29 +431,13 @@ func (e *Engine) rollbackMatchResultTx(tx state.StoreTx, compID, matchID string,
 func (e *Engine) recordMatchResultTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult) error {
 	result.ID = matchID
 	err := e.withPoolMatchTx(tx, compID, matchID, func(r *state.MatchResult) {
-		// Identity reconciliation only backfills here: this path restores a
-		// trusted prior snapshot (K3 rollback), not a client payload, so the
-		// stored sides always match, the mismatch result is intentionally
-		// ignored rather than turned into a rejection.
-		_ = reconcileSides(result, r.SideA, r.SideB)
-		// Preserve generation-time participant ids + resolve winner id across
-		// the whole-struct overwrite below (the /score endpoint scores through
-		// this Tx path). See backfillMatchIdentity.
-		backfillMatchIdentity(result, r)
-		if result.Court == "" {
-			result.Court = r.Court
-		}
-		if result.ScheduledAt == "" {
-			result.ScheduledAt = r.ScheduledAt
-		}
-		result.Round = r.Round
-		// NOTE the forward write (RecordMatchResultWithIneligibilityTx) does a
-		// set-if-empty preservation of CorrectionReason here; this rollback path
-		// deliberately does NOT. It restores a trusted prior snapshot
-		// byte-for-byte, so an empty prior reason must CLEAR the field rather
-		// than inherit the rejected partial write's reason — the same reasoning
-		// that makes rollbackMatchResultTx normalize nil SubResults/DecidedByHantei
-		// into explicit clears.
+		// poolWriteRestore, not poolWriteForward: this path replays a trusted
+		// prior snapshot (K3 rollback), not a client payload. It therefore
+		// inherits nothing the forward writers inherit — an empty prior
+		// CorrectionReason must CLEAR the field rather than pick up the
+		// rejected partial write's reason, and a side mismatch is not a client
+		// error to reject. Same reasoning as normalizePriorForRollback.
+		mergeStoredPoolMatch(result, r, poolWriteRestore)
 		*r = *result
 	})
 	if err != nil {

@@ -268,6 +268,70 @@ func preserveDaihyosenOutcome(stored []state.SubMatchResult, result *state.Match
 	deriveDaihyosenWinner(result)
 }
 
+// poolWritePolicy selects how a stored pool/league match is folded into an
+// incoming result by mergeStoredPoolMatch.
+type poolWritePolicy int
+
+const (
+	// poolWriteForward is a client-supplied score: the payload carries only what
+	// the operator entered, so stored context it omitted is inherited.
+	poolWriteForward poolWritePolicy = iota
+	// poolWriteRestore replays a trusted prior snapshot (the K3 rollback after a
+	// concurrent-ineligibility rejection). It must land as captured, so it
+	// inherits NOTHING from the rejected partial write it is undoing: an empty
+	// field in the snapshot means "this was empty", not "the writer said
+	// nothing". Same reasoning as normalizePriorForRollback.
+	poolWriteRestore
+)
+
+// mergeStoredPoolMatch folds the stored match into an incoming result, just
+// before the whole-struct `*r = *result` overwrite the pool write closures all
+// perform. It reports whether the write must be ABANDONED (the payload names a
+// pairing that is not this match's).
+//
+// This is ONE function rather than a block hand-copied into each closure
+// because the copies had already drifted, twice, in the direction that hurts:
+// preserveDaihyosenOutcome reached three of the four and missed the live
+// /score path, and the CorrectionReason inherit below existed only in the Tx
+// forward writer, so a team quick-score landing after a kachinuki reopen
+// blanked the operator's audit justification through the other two. A new
+// field that must survive the overwrite now has exactly one home.
+func mergeStoredPoolMatch(result, stored *state.MatchResult, policy poolWritePolicy) (abandon bool) {
+	// Match identity is fixed at generation; a score must not rewrite it.
+	// Backfill omitted sides, reject a payload side that disagrees. The restore
+	// policy replays sides it captured from this same match, so a mismatch there
+	// is not a client error and is deliberately ignored.
+	if reconcileSides(result, stored.SideA, stored.SideB) && policy == poolWriteForward {
+		return true
+	}
+	// Preserve generation-time participant ids + resolve winner id across the
+	// overwrite: score requests carry side NAMES only. See backfillMatchIdentity.
+	backfillMatchIdentity(result, stored)
+	if result.Court == "" {
+		result.Court = stored.Court
+	}
+	if result.ScheduledAt == "" {
+		result.ScheduledAt = stored.ScheduledAt
+	}
+	result.Round = stored.Round
+	if policy == poolWriteRestore {
+		return false
+	}
+	// Set-if-empty: the kachinuki reopen path persists the operator's audit
+	// justification here, and the first "Record bout" after a reopen is a plain
+	// write carrying no reason of its own.
+	if result.CorrectionReason == "" {
+		result.CorrectionReason = stored.CorrectionReason
+	}
+	// A pool/league team encounter can hold a daihyosen (findMatchForDaihyosen
+	// accepts pool matches). Without this a verdict-silent write from a stale
+	// second editor erases a recorded hantei, which in accrueTeamSubResults
+	// flips the bout from a win into a draw and so moves the team's IV/IL/IT
+	// tie-break figures.
+	preserveDaihyosenOutcome(stored.SubResults, result)
+	return false
+}
+
 // applyHansokuIppons auto-awards ippons from accumulated hansoku counts per
 // FIK Article 20: every 2 hansoku on one side grants 1 ippon to the opponent.
 // Strips any prior 'H' entries and re-appends the correct count so that both
@@ -506,28 +570,22 @@ func countScoringIppons(ippons []string) int {
 func (e *Engine) RecordMatchResult(compId string, matchId string, result *state.MatchResult) error {
 	result.ID = matchId // normalize ID-less payloads before overwriting
 	applyHansokuIppons(result)
-	return e.writeMatchResult(compId, matchId, result)
+	return e.writeMatchResult(compId, matchId, result, poolWriteForward)
 }
 
 // writeMatchResult persists the result without applying hansoku auto-award.
-// RecordMatchResult calls this after applyHansokuIppons; the K3 rollback
-// path calls it directly to restore the prior result byte-for-byte.
-func (e *Engine) writeMatchResult(compId string, matchId string, result *state.MatchResult) error {
+// RecordMatchResult calls this after applyHansokuIppons with poolWriteForward;
+// the K3 rollback path calls it with poolWriteRestore to put the prior result
+// back byte-for-byte. That policy argument is what makes the second half of
+// this comment true: the rollback used to run the forward merge and so could
+// derive a winner onto the snapshot it was meant to replay verbatim.
+func (e *Engine) writeMatchResult(compId string, matchId string, result *state.MatchResult, policy poolWritePolicy) error {
 	var sideMismatch bool
 	err := e.withPoolMatch(compId, matchId, func(r *state.MatchResult) {
-		if reconcileSides(result, r.SideA, r.SideB) {
+		if mergeStoredPoolMatch(result, r, policy) {
 			sideMismatch = true
 			return // leave the stored match untouched
 		}
-		backfillMatchIdentity(result, r)
-		if result.Court == "" {
-			result.Court = r.Court
-		}
-		if result.ScheduledAt == "" {
-			result.ScheduledAt = r.ScheduledAt
-		}
-		result.Round = r.Round
-		preserveDaihyosenOutcome(r.SubResults, result)
 		*r = *result
 	})
 	if err != nil {
@@ -600,19 +658,10 @@ func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId strin
 
 	var sideMismatch bool
 	err := e.withPoolMatch(compId, matchId, func(r *state.MatchResult) {
-		if reconcileSides(result, r.SideA, r.SideB) {
+		if mergeStoredPoolMatch(result, r, poolWriteForward) {
 			sideMismatch = true
 			return // leave the stored match untouched
 		}
-		backfillMatchIdentity(result, r)
-		if result.Court == "" {
-			result.Court = r.Court
-		}
-		if result.ScheduledAt == "" {
-			result.ScheduledAt = r.ScheduledAt
-		}
-		result.Round = r.Round
-		preserveDaihyosenOutcome(r.SubResults, result)
 		*r = *result
 	})
 	if err != nil {
@@ -641,7 +690,7 @@ func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId strin
 			// sees a clean rejection rather than a mutated match.
 			if prior != nil {
 				normalizePriorForRollback(prior)
-				_ = e.writeMatchResult(compId, matchId, prior)
+				_ = e.writeMatchResult(compId, matchId, prior, poolWriteRestore)
 			}
 			return nil, err
 		}

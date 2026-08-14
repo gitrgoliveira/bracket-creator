@@ -121,23 +121,14 @@ var bracketNumberCases = []struct {
 	{state.CompFormatMixed, 40, 4, true},
 }
 
-func bracketNumberGoldenPath(t *testing.T) string {
-	t.Helper()
-	return filepath.Join("testdata", "bracket_match_numbers.json")
-}
-
 func buildBracketNumberCases(t *testing.T) []bracketNumberCase {
 	t.Helper()
 	cases := make([]bracketNumberCase, 0, len(bracketNumberCases))
 	for _, c := range bracketNumberCases {
 		eng, store, _ := setupTestEngine(t)
 		compID := "match-numbers"
-		courts := make([]string, c.courts)
-		for i := range courts {
-			courts[i] = string(rune('A' + i))
-		}
 		createTestCompetition(t, store, compID, c.format, 4, func(comp *state.Competition) {
-			comp.Courts = courts
+			comp.Courts = courtLabels(c.courts)
 		})
 		require.NoError(t, store.SaveParticipants(compID, makePlayers(c.entrants)))
 		require.NoError(t, eng.GenerateDraw(compID))
@@ -162,9 +153,12 @@ func buildBracketNumberCases(t *testing.T) []bracketNumberCase {
 			}
 			rounds = append(rounds, out)
 		}
+		name := fmt.Sprintf("%s on %d shiaijo", c.format, c.courts)
+		if c.discriminating {
+			name += ", orderings disagree here"
+		}
 		cases = append(cases, bracketNumberCase{
-			Name: fmt.Sprintf("%s on %d shiaijo%s", c.format, c.courts,
-				map[bool]string{true: ", orderings disagree here", false: ""}[c.discriminating]),
+			Name:           name,
 			Entrants:       c.entrants,
 			Discriminating: c.discriminating,
 			Rounds:         rounds,
@@ -218,7 +212,7 @@ func TestBracketMatchNumbersGolden(t *testing.T) {
 	require.NoError(t, err)
 	encoded = append(encoded, '\n')
 
-	path := bracketNumberGoldenPath(t)
+	path := filepath.Join("testdata", "bracket_match_numbers.json")
 	if os.Getenv("UPDATE_GOLDEN") != "" {
 		require.NoError(t, os.WriteFile(path, encoded, 0o600))
 		t.Logf("wrote %s (%d cases)", path, len(cases))

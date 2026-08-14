@@ -13,6 +13,7 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -552,74 +553,27 @@ func assertWorkbookMatchesBracket(t *testing.T, eng *Engine, store *state.Store,
 	assertPoolBandsMatchSchedule(t, store, compID, raw, treeCourts)
 }
 
-// shiaijoHeaderPrefix is what writeCourtHeaders puts in front of the court
-// letter in a column band's row-1 header ("Shiaijo A").
-const shiaijoHeaderPrefix = "Shiaijo "
-
-// courtBand is one shiaijo column band on a court-banded sheet (Pool Matches,
-// Elimination Matches), read back off the rendered workbook.
-type courtBand struct {
-	// court is the letter in the band's row-1 header, taken from the sheet.
-	court string
-	// occupied reports whether the band carries anything at all below its
-	// header row. An UNOCCUPIED band is a shiaijo header printed over nothing:
-	// a score sheet naming a court the competition never scheduled a bout on.
-	occupied bool
-}
-
-// readCourtBands reads a sheet's shiaijo column bands back out of exported
-// workbook bytes. Each court owns one CourtsColumnsPerCourt-wide band whose
-// header sits in row 1 at the band's start column, so the header positions ARE
-// the banding an operator prints, read off the artifact rather than recomputed
-// from the code that wrote it.
-func readCourtBands(t *testing.T, raw []byte, sheet string) []courtBand {
+// bandCourts reads a court-banded sheet's shiaijo bands off an already-open
+// exported workbook (bctest.ReadCourtBands does the reading; the same reader
+// serves internal/export's results-workbook tests) and returns their letters in
+// column order, asserting on the way that every band sits on the court grid and
+// that none is empty.
+func bandCourts(t *testing.T, f *excelize.File, sheet string) []string {
 	t.Helper()
-	f, err := excelize.OpenReader(bytes.NewReader(raw))
-	require.NoError(t, err)
-	defer func() { _ = f.Close() }()
-
 	rows, err := f.GetRows(sheet)
 	require.NoError(t, err)
 	require.NotEmptyf(t, rows, "%s must carry a shiaijo header row", sheet)
 
-	var bands []courtBand
-	for col, value := range rows[0] {
-		court, ok := strings.CutPrefix(value, shiaijoHeaderPrefix)
-		if !ok {
-			continue
-		}
-		require.Zerof(t, col%helper.CourtsColumnsPerCourt,
-			"%s: header %q sits at column %d, off the %d-column court grid",
-			sheet, value, col+1, helper.CourtsColumnsPerCourt)
-		bands = append(bands, courtBand{court: court, occupied: bandHasContent(rows, col)})
-	}
-	return bands
-}
-
-// bandHasContent reports whether any row BELOW the header row carries a value
-// inside the band starting at 0-based column start.
-func bandHasContent(rows [][]string, start int) bool {
-	end := start + helper.CourtsColumnsPerCourt
-	for _, row := range rows[1:] {
-		for c := start; c < end && c < len(row); c++ {
-			if strings.TrimSpace(row[c]) != "" {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// bandCourts returns the bands' shiaijo letters in column order, asserting on
-// the way that no band is empty.
-func bandCourts(t *testing.T, bands []courtBand, sheet string) []string {
-	t.Helper()
+	bands := bctest.ReadCourtBands(rows, helper.CourtsColumnsPerCourt)
 	out := make([]string, 0, len(bands))
 	for _, b := range bands {
-		assert.Truef(t, b.occupied,
+		require.Zerof(t, b.Col%helper.CourtsColumnsPerCourt,
+			"%s: header %q sits at column %d, off the %d-column court grid",
+			sheet, bctest.ShiaijoHeaderPrefix+b.Court, b.Col+1, helper.CourtsColumnsPerCourt)
+		assert.Truef(t, b.Occupied,
 			"%s prints an empty %s%s band: the sheet sends an operator to a shiaijo nothing is scheduled on",
-			sheet, shiaijoHeaderPrefix, b.court)
-		out = append(out, b.court)
+			sheet, bctest.ShiaijoHeaderPrefix, b.Court)
+		out = append(out, b.Court)
 	}
 	return out
 }
@@ -661,12 +615,20 @@ func assertPoolBandsMatchSchedule(t *testing.T, store *state.Store, compID strin
 		return // a standalone playoffs draw has no pool phase to band
 	}
 
-	printed := bandCourts(t, readCourtBands(t, raw, helper.SheetPoolMatches), helper.SheetPoolMatches)
+	f, err := excelize.OpenReader(bytes.NewReader(raw))
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+	printed := bandCourts(t, f, helper.SheetPoolMatches)
 
-	// The pool bands must name the same shiaijo the app runs the pools on.
-	assert.Equalf(t, scheduledPoolShiaijo(t, store, compID), printed,
+	// The pool bands must name the same shiaijo the app runs the pools on. Read
+	// the schedule ONCE: testify evaluates the message arguments on every call,
+	// so naming the loader twice would re-parse pool-matches.csv on every
+	// passing case of the swept batteries and compare against a different read
+	// from the one printed.
+	scheduled := scheduledPoolShiaijo(t, store, compID)
+	assert.Equalf(t, scheduled, printed,
 		"%s is banded for shiaijo %v but the app schedules the pool phase on %v",
-		helper.SheetPoolMatches, printed, scheduledPoolShiaijo(t, store, compID))
+		helper.SheetPoolMatches, printed, scheduled)
 
 	// ...and the same shiaijo the SAME workbook's tree pages are titled for. One
 	// workbook cannot name one set of shiaijo on its pool sheets and another on
@@ -733,10 +695,7 @@ func TestExcelWorkbookMatchesEngineBracket_Playoffs(t *testing.T) {
 				eng, store, _ := setupTestEngine(t)
 				compID := fmt.Sprintf("parity-playoffs-%d-%d", size, numCourts)
 
-				courts := make([]string, numCourts)
-				for i := range courts {
-					courts[i] = helper.CourtLabel(i)
-				}
+				courts := courtLabels(numCourts)
 
 				require.NoError(t, store.SaveCompetition(&state.Competition{
 					ID:        compID,
@@ -796,25 +755,15 @@ func TestExcelExportBandsClampedShiaijo(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "clamped-bands"
 
-	// Court NAMES are the shiaijo labels the sheets print (helper.CourtLabel),
-	// so a printed band header and a stored match court compare directly.
-	courts := make([]string, allocatedCourts)
-	for i := range courts {
-		courts[i] = helper.CourtLabel(i)
-	}
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:           compID,
-		Name:         "Clamped bands",
-		Format:       state.CompFormatMixed,
-		Kind:         "individual",
-		PoolSize:     poolSize,
-		PoolSizeMode: "max",
-		PoolWinners:  2,
-		RoundRobin:   true,
-		Courts:       courts,
-		StartTime:    "09:00",
-		Status:       state.CompStatusSetup,
-	}))
+	// The canonical individual competition, with the two fields this case turns
+	// on: "max" pool sizing (which is what makes 12 competitors 3 pools) and the
+	// four-shiaijo allocation the clamp then steps down. Court NAMES are the
+	// shiaijo labels the sheets print (courtLabels -> helper.CourtLabel), so a
+	// printed band header and a stored match court compare directly.
+	createTestCompetition(t, store, compID, state.CompFormatMixed, poolSize, func(c *state.Competition) {
+		c.PoolSizeMode = "max"
+		c.Courts = courtLabels(allocatedCourts)
+	})
 	// Unique dojos per competitor keep CreatePools' conflict avoidance out of
 	// the picture, so the pool composition is deterministic.
 	require.NoError(t, store.SaveParticipants(compID, playoffsParityRoster(numParticipants)))
@@ -838,24 +787,22 @@ func TestExcelExportBandsClampedShiaijo(t *testing.T) {
 
 	raw, err := eng.ExportCompetitionXlsx(compID)
 	require.NoError(t, err)
+	f, err := excelize.OpenReader(bytes.NewReader(raw))
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
 
 	// The printed pool bands must be exactly those two shiaijo, with no empty
 	// trailing band.
-	assert.Equal(t, []string{"A", "B"},
-		bandCourts(t, readCourtBands(t, raw, helper.SheetPoolMatches), helper.SheetPoolMatches),
+	assert.Equal(t, []string{"A", "B"}, bandCourts(t, f, helper.SheetPoolMatches),
 		"%s must be banded for the shiaijo the pools actually run on", helper.SheetPoolMatches)
 
 	// The knockout sheet is banded by REGION, which is the same two shiaijo.
-	assert.Equal(t, []string{"A", "B"},
-		bandCourts(t, readCourtBands(t, raw, helper.SheetEliminationMatches), helper.SheetEliminationMatches),
+	assert.Equal(t, []string{"A", "B"}, bandCourts(t, f, helper.SheetEliminationMatches),
 		"%s must be banded for the draw's regions", helper.SheetEliminationMatches)
 
 	// Names to Print splits into one sheet per shiaijo, so the clamp decides how
 	// many sheets exist and which competitors are on each. A "Shiaijo C" sheet
 	// here would be pool C's roster filed under a shiaijo it never fights on.
-	f, err := excelize.OpenReader(bytes.NewReader(raw))
-	require.NoError(t, err)
-	defer func() { _ = f.Close() }()
 	var nameSheets []string
 	for _, sheet := range f.GetSheetList() {
 		if strings.HasPrefix(sheet, helper.SheetNamesToPrint+" ") {
@@ -892,12 +839,9 @@ func TestExcelWorkbookMatchesEngineBracket_Mixed(t *testing.T) {
 					compID := fmt.Sprintf("parity-%d-%d-%d", numPools, winners, numCourts)
 
 					// Court names ARE the shiaijo labels the tree pages print
-					// (helper.CourtLabel), so page title and match court compare
-					// directly.
-					courts := make([]string, numCourts)
-					for i := range courts {
-						courts[i] = helper.CourtLabel(i)
-					}
+					// (courtLabels -> helper.CourtLabel), so page title and match
+					// court compare directly.
+					courts := courtLabels(numCourts)
 
 					require.NoError(t, store.SaveCompetition(&state.Competition{
 						ID:           compID,

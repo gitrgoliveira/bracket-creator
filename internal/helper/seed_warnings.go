@@ -132,20 +132,16 @@ type seedPool struct {
 	pool int
 }
 
-// AnySeeded is seedPools' emptiness test without the allocation and the sort.
+// AnySeeded reports whether these pools carry any operator-assigned seed.
+//
 // SeedPlacementWarnings returns nil for an unseeded competition, but only once
 // its caller has built a whole draw to hand it, and unseeded is the common case
-// in the app. Callers use this to skip that work. Kept beside seedPools so the
-// two cannot disagree about what counts as seeded.
+// in the app; callers use this to skip that work. It is seedPools' own emptiness
+// test rather than a second scan, so the two cannot drift about what counts as
+// seeded. The allocation that buys is one empty slice on the quiet path, against
+// a draw construction saved.
 func AnySeeded(pools []Pool) bool {
-	for _, p := range pools {
-		for _, pl := range p.Players {
-			if pl.Seed > 0 {
-				return true
-			}
-		}
-	}
-	return false
+	return len(seedPools(pools)) > 0
 }
 
 // seedPools lists every operator-assigned seed with the pool it landed in,

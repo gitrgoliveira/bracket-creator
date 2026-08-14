@@ -233,6 +233,19 @@ func StandardSeeding(players []Player) []Player {
 // It assigns each seed to a court by seedCourtOrder (D6) and uses a per-court
 // priority to ensure correct bracket placement (e.g., top and bottom of the
 // court's bracket) after the pools are deinterleaved by ReorderPoolsForCourts.
+//
+// Placement is keyed on each player's RANK, never on its position among the
+// seeded players, and the set handed in does NOT have to be contiguous: seeds
+// {1, 3, 4} place rank 3 in rank 3's quarter, leaving rank 2's empty. That is
+// the same promise StandardSeedingFull makes, and it is what engine.SeedWarnings
+// reports against, so a caller that renumbers a gapped set before calling would
+// silently move seeds. engine.dropSeedAssignments produces exactly such a set
+// when a seeded competitor does not check in.
+//
+// numCourts must be the count the DRAW will run on (helper.EffectiveDrawCourts),
+// not the operator's raw allocation: it is the modulus the spread is computed
+// against, and the pool deinterleave and pool-to-shiaijo allocation have to
+// agree with it.
 func PoolSeeding(players []Player, numPools int, numCourts int) []Player {
 	if numPools <= 0 {
 		return players

@@ -61,13 +61,9 @@ describe('bracket match numbers: Go/JS mirror', () => {
     // shifts every number after it on one side only.
     expect(Object.keys(matchNumById).sort()).toEqual(Object.keys(expected).sort());
     expect(matchNumById).toEqual(expected);
-  });
 
-  // The numbers are also a dense 1..N sequence on both sides. Pinned separately
-  // because an equal-but-gapped pair of maps would satisfy the check above while
-  // meaning the walk skipped a bout.
-  it.each(table.cases)('$entrants entrants: numbers run 1..N with no gaps', ({ rounds }) => {
-    const { matchNumById } = buildDisplayModel(rounds);
+    // Dense 1..N, which the two checks above cannot see: an equal-but-gapped
+    // pair of maps satisfies both while meaning each walk skipped the same bout.
     const numbers = Object.values(matchNumById).sort((a, b) => a - b);
     expect(numbers).toEqual(numbers.map((_, i) => i + 1));
   });

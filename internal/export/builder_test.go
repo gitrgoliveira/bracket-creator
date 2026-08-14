@@ -3789,15 +3789,11 @@ func TestBuildResultsWorkbook_FixedFormatNoKachinukiSheet(t *testing.T) {
 		"fixed-format comps must not emit a Kachinuki Detail sheet")
 }
 
-// shiaijoHeaderPrefix is what writeCourtHeaders puts in front of the court
-// letter in a column band's row-1 header ("Shiaijo A").
-const shiaijoHeaderPrefix = "Shiaijo "
-
 // readCourtBandLetters reads a court-banded sheet's shiaijo band headers back
-// out of the rendered workbook, in column order, and asserts each band is
-// non-empty. Each court owns one CourtsColumnsPerCourt-wide band whose header
-// sits in row 1 at the band's start column, so the header positions ARE the
-// banding an operator prints, read off the artifact rather than recomputed.
+// out of the rendered workbook, in column order, and asserts each band sits on
+// the court grid and is non-empty. bctest.ReadCourtBands does the reading (the
+// same reader serves internal/engine's blank-template parity tests); the
+// assertions stay here because the wording is this sheet's.
 //
 // An EMPTY band is a shiaijo header printed over nothing: a score sheet naming
 // a court the competition never scheduled a bout on.
@@ -3805,29 +3801,16 @@ func readCourtBandLetters(t *testing.T, rows [][]string, sheet string) []string 
 	t.Helper()
 	require.NotEmptyf(t, rows, "%s must carry a shiaijo header row", sheet)
 
-	var bands []string
-	for col, value := range rows[0] {
-		court, ok := strings.CutPrefix(value, shiaijoHeaderPrefix)
-		if !ok {
-			continue
-		}
-		require.Zerof(t, col%helper.CourtsColumnsPerCourt,
+	found := bctest.ReadCourtBands(rows, helper.CourtsColumnsPerCourt)
+	bands := make([]string, 0, len(found))
+	for _, b := range found {
+		require.Zerof(t, b.Col%helper.CourtsColumnsPerCourt,
 			"%s: header %q sits at column %d, off the %d-column court grid",
-			sheet, value, col+1, helper.CourtsColumnsPerCourt)
-
-		occupied := false
-		end := col + helper.CourtsColumnsPerCourt
-		for _, row := range rows[1:] {
-			for c := col; c < end && c < len(row); c++ {
-				if strings.TrimSpace(row[c]) != "" {
-					occupied = true
-				}
-			}
-		}
-		assert.Truef(t, occupied,
+			sheet, bctest.ShiaijoHeaderPrefix+b.Court, b.Col+1, helper.CourtsColumnsPerCourt)
+		assert.Truef(t, b.Occupied,
 			"%s prints an empty %s%s band: the sheet sends an operator to a shiaijo nothing is scheduled on",
-			sheet, shiaijoHeaderPrefix, court)
-		bands = append(bands, court)
+			sheet, bctest.ShiaijoHeaderPrefix, b.Court)
+		bands = append(bands, b.Court)
 	}
 	return bands
 }

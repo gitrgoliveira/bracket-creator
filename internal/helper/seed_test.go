@@ -1498,28 +1498,19 @@ func seededPoolCourts(t *testing.T, ranks []int, numPools, poolSize, numCourts i
 func TestPoolSeedingPlacesByRankNotByPosition(t *testing.T) {
 	const numPools, poolSize, numCourts = 4, 4, 4
 
-	// The D6 courts for these ranks, written out rather than derived from
-	// seedCourtOrder so the expectation cannot drift with the code under test.
-	t.Run("gapped set keeps each rank on its own D6 court", func(t *testing.T) {
-		assert.Equal(t,
-			map[int]int{1: 0, 3: 1, 4: 3},
-			seededPoolCourts(t, []int{1, 3, 4}, numPools, poolSize, numCourts),
-			"ranks 1, 3 and 4 belong on shiaijo A, B and D whether or not rank 2 is present")
-	})
-
-	// The same statement as a property, and the one an operator would recognise:
-	// a seeded competitor failing to check in must not drag the OTHER seeds into
-	// different courts (and so into different halves of the draw).
-	t.Run("dropping a seed does not move the surviving seeds", func(t *testing.T) {
-		full := seededPoolCourts(t, []int{1, 2, 3, 4}, numPools, poolSize, numCourts)
-		gapped := seededPoolCourts(t, []int{1, 3, 4}, numPools, poolSize, numCourts)
-
-		for _, rank := range []int{1, 3, 4} {
-			assert.Equalf(t, full[rank], gapped[rank],
-				"seed %d moved from shiaijo %d to %d when rank 2 was dropped",
-				rank, full[rank], gapped[rank])
-		}
-	})
+	// Both placements written out rather than derived from seedCourtOrder, so the
+	// expectation cannot drift with the code under test. Reading them side by
+	// side IS the property an operator would recognise: ranks 1, 3 and 4 hold the
+	// same shiaijo in both rows, so a rank-2 no-show does not drag the surviving
+	// seeds into other courts, and so into other halves of the draw.
+	assert.Equal(t,
+		map[int]int{1: 0, 2: 2, 3: 1, 4: 3},
+		seededPoolCourts(t, []int{1, 2, 3, 4}, numPools, poolSize, numCourts),
+		"D6 with every rank present: seed 1 -> A, 2 -> C, 3 -> B, 4 -> D")
+	assert.Equal(t,
+		map[int]int{1: 0, 3: 1, 4: 3},
+		seededPoolCourts(t, []int{1, 3, 4}, numPools, poolSize, numCourts),
+		"ranks 1, 3 and 4 belong on shiaijo A, B and D whether or not rank 2 is present")
 }
 
 func TestPoolSeeding_CornerCases(t *testing.T) {

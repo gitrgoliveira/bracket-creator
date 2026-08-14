@@ -63,11 +63,35 @@ func poolDraw(comp *state.Competition, pools []helper.Pool, numCourts int) *help
 }
 
 // EliminationDraw returns the knockout tree AND its per-shiaijo regions for a
-// competition's workbook export. It is the single owner of that derivation so
+// competition's workbook export. It is the single owner of that derivation, so
 // the blank-template export (Engine.ExportCompetitionXlsx) and the results
 // export (internal/export) of one competition always render the identical
-// bracket (mp-ndfu), and so both render the SAME bracket the engine persisted
-// in bracket.json rather than a re-derivation of it.
+// bracket (mp-ndfu).
+//
+// The two paths are NOT the same in where that bracket comes from, and the
+// difference matters:
+//
+//   - PURE PLAYOFFS reads the frozen bracket (PlayoffLeavesFromBracket), so the
+//     printed sheet is the persisted bracket even if seeds.csv has since drifted.
+//   - POOL-FED (mixed) RE-DERIVES it, from the CURRENT pools, pool-winner count
+//     and comp.Courts. It equals the persisted bracket only while those three
+//     inputs are unchanged since the draw.
+//
+// So the re-derived draw is the shape of the knockout, and it is the right
+// source for the CLI, which has no stored bracket and no named shiaijo.
+//
+// It is NOT the authority on which shiaijo a bout runs on. A match's court is
+// DATA, not geometry: the operator reassigns matches between the tournament's
+// courts at will (Engine.UpdateMatchCourt), and comp.Courts itself is editable
+// while the competition runs. Anything that derives a court from this draw is
+// therefore stale the moment the operator moves a bout, and is wrong from the
+// start for a competition whose shiaijo are not the first N (a competition
+// assigned C and D is the recommended way to share a 4-shiaijo venue).
+//
+// Callers rendering a LIVE competition must read the court off the stored match
+// and only fall back to the draw's regions when there is no stored bracket.
+// This predates the court-first draw: the pre-Phase-4 export derived courts from
+// comp.Courts the same way.
 //
 // The playoffs rebuild goes through helper.BuildSlotTree, NOT CreateBalancedTree.
 // PlayoffLeavesFromBracket hands back the frozen bracket's pow2 first round, so

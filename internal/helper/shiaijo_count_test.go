@@ -174,14 +174,18 @@ func TestLargestShiaijoCountAtMost(t *testing.T) {
 // surface. Both are hand-written copies of ValidateShiaijoCount's wording, so
 // both can drift from it silently.
 //
-// Only ONE of them is covered by a suite the repo's gate actually executes:
-// web-mobile's vitest suite runs under `make js/test`, but web/'s does not,
-// because web/package.json's "test" script is still the stub
-// `echo 'no JS unit tests' && exit 0` even though web/tests/validation.spec.js
-// holds four real spec files. That stub is exactly how a stale assertion of
-// the RETIRED "1 or an even number" rule survived in web/tests until this
-// round. Pinning both mirrors from the Go side closes the hole without making
-// web/ take a devDependency: `go test ./internal/helper/` always runs.
+// Both are now covered by suites the gate executes: web-mobile's vitest suite
+// and web/'s, the latter only since web/package.json stopped stubbing "test"
+// out with `echo 'no JS unit tests' && exit 0` while four real spec files sat
+// unrun beside it. That stub is exactly how a stale assertion of the RETIRED
+// "1 or an even number" rule survived in web/tests.
+//
+// This test still earns its place, because those suites check each mirror
+// against ITSELF and cannot see the Go message at all. What it pins is the
+// cross-language agreement: the shared REASON clause, the promise that 1 is
+// always offered, and the absence of the retired rule. What it CANNOT pin is
+// the derived value -- dropping 16 from the legal set leaves every literal it
+// greps for intact -- which is precisely what the JS suites do catch.
 var shiaijoRuleJSMirrors = []struct {
 	surface string
 	path    string

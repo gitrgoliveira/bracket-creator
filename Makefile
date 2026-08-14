@@ -97,9 +97,9 @@ web-mobile/node_modules/.package-lock.json: web-mobile/package-lock.json
 	@cd web-mobile && npm ci --no-audit --no-fund
 
 js/deps: web-mobile/node_modules/.package-lock.json ## Install this worktree's JS dependencies
-	@# web/ declares no dependencies, so npm ci is a ~0.1s no-op there and
-	@# creates no node_modules, leaving no stamp file to key a rule on. Run it
-	@# unconditionally so this still works the day web/ gains a dependency.
+	@# web/ takes vitest (its four spec files are part of the gate), so unlike
+	@# web-mobile this is not keyed on a stamp file: it is cheap enough to run
+	@# unconditionally and stays correct if web/'s dependencies change again.
 	@if [ -L web/node_modules ]; then rm web/node_modules; fi
 	@cd web && npm ci --no-audit --no-fund
 

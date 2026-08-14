@@ -128,8 +128,10 @@ jobs:
   # | |_| |___) |   | |  __/\__ \ |_
   #  \___/|____/    |_|\___||___/\__|
   #
-  # Runs the web-mobile vitest suite (unit + render projects) so missing
-  # window.* references in component render paths are caught in CI.
+  # Runs both JS suites. web-mobile (unit + render projects) so missing window.*
+  # references in component render paths are caught in CI; web/ because the CLI
+  # wrapper's form validation restates rules the Go side owns (the legal shiaijo
+  # counts among them), and a restatement nothing executes drifts silently.
   test-js:
     permissions:
       contents: read
@@ -143,13 +145,21 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: web-mobile/package-lock.json
+          cache-dependency-path: |
+            web-mobile/package-lock.json
+            web/package-lock.json
 
-      - name: Install JS dependencies
+      - name: Install JS dependencies (web-mobile)
         run: cd web-mobile && npm ci
 
       - name: Run JS tests (unit + render)
         run: cd web-mobile && npm test
+
+      - name: Install JS dependencies (web)
+        run: cd web && npm ci
+
+      - name: Run web tests
+        run: cd web && npm test
 
   #   ____  ____  _____   _____         _
   #  |  _ \|  _ \|  ___| |_   _|__  ___| |_

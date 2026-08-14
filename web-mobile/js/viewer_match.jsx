@@ -96,8 +96,20 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true, slotLabe
   // degrades to the bare team name.
   const aName = slotName(withNumber(match.sideA), (match.feeders || [])[0]);
   const bName = slotName(withNumber(match.sideB), (match.feeders || [])[1]);
-  const aWin = match.winner?.id === match.sideA?.id && match.winner?.id;
-  const bWin = match.winner?.id === match.sideB?.id && match.winner?.id;
+  // Name over dojo, the block the bracket's PlayerLine and the up-next row
+  // already render (.n / .d). The dojo is a SECOND LINE UNDER THE NAME only:
+  // the ippon slots stay on the name's row, vertically centred against the
+  // block, because a competitor's points must never sit beneath their name
+  // (operator ruling). Returns the bare name when there is no dojo, so an
+  // unresolved bracket side ("Winner of M1") renders exactly as before.
+  //
+  // Unconditional, unlike the dense lists' tweaks.showDojo: this is the
+  // single-match detail view, so it always shows the fuller identity.
+  const nameWithDojo = (side, name) => {
+    const dojo = side?.dojo;
+    if (!dojo) return name;
+    return <>{name}<span className="msb-dojo">{dojo}</span></>;
+  };
   const isRunning = match.status === "running";
   const isDone = match.status === "completed";
 
@@ -125,38 +137,33 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true, slotLabe
         </div>
       </div>
 
-      {/* Individual matches show the two player names colour-coded: Shiro
-          dark (left), Aka red (right): matching the team scoreboard's
-          summary-row name colours, instead of SHIRO/AKA text badges
-          (mp-13y). Team matches carry the names in the summary row. */}
-      {!isTeam && (
-        <div className="match-detail-card__players">
-          <div className={`match-detail-card__side ${bWin ? "match-detail-card__side--win" : ""}`}>
-            <span className="match-detail-card__name match-detail-card__name--shiro">{bName}</span>
-          </div>
-          {/* No "vs" here (operator ruling): the shared scoreboard row below
-              carries the middle value in its own FIK centre, which is its one
-              home. This row used to hold a second one directly above it. The
-              div stays as the centre spacer that keeps the two names' split
-              aligned with the slot groups underneath. */}
-          <div className="match-detail-card__score" aria-hidden="true" />
-          <div className={`match-detail-card__side match-detail-card__side--right ${aWin ? "match-detail-card__side--win" : ""}`}>
-            <span className="match-detail-card__name match-detail-card__name--aka">{aName}</span>
-          </div>
-        </div>
-      )}
-
       {/* mp-13y: the ONE shared FIK scoreboard (match_scoreboard.jsx): same
           component the TV display uses. Team → team-name + IV/PW summary row +
           per-bout rows (numbered when not yet started) + Daihyosen (tie only);
-          individual → ippon-letter slots. */}
+          individual → name, ippon slots, centre, ippon slots, name.
+
+          An INDIVIDUAL match is ONE row: names, the two ippon groups and the
+          centre all on the same line (operator ruling). The card used to print
+          the names in a row of its own above this one, which put a competitor's
+          points UNDERNEATH their name and forced a second "vs" into the name
+          row. Passing showNames hands the names to the scoreboard, which is the
+          same single-line layout the TV boards and the lobby already render.
+          The resolved names go WITH them: bName/aName carry the feeder label
+          ("Winner of M1") for an unplayed bracket side, which the component
+          would otherwise render as "TBD".
+
+          It renders for a scheduled match too, not just a running or completed
+          one: that is what shows the pairing at all now the separate name row
+          is gone, and empty slots next to each name read as "upcoming" exactly
+          as they do in a lobby cell. */}
       {isTeam
         ? <TeamScoreboard subResults={match.subResults || []} lineupA={lineupA} lineupB={lineupB}
             teamSize={teamSize} showDH={showDH} variant="card" isRunning={isRunning} shiroName={bName} akaName={aName}
             matchSideA={match.sideA?.name || (typeof match.sideA === "string" ? match.sideA : "")}
             matchSideB={match.sideB?.name || (typeof match.sideB === "string" ? match.sideB : "")}
             kachinuki={match.teamMatchType === "kachinuki"} />
-        : (isDone || isRunning) && <IndividualScore match={match} variant="card" />}
+        : <IndividualScore match={match} variant="card" showNames
+            shiroName={nameWithDojo(match.sideB, bName)} akaName={nameWithDojo(match.sideA, aName)} />}
     </div>
   );
 }

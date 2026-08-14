@@ -6345,64 +6345,32 @@ button.pool-match-row {
   line-height: 1;
 }
 
-.match-detail-card__players {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-}
+/* An individual match card is ONE row: name, ippon slots, centre, ippon slots,
+   name — rendered by the shared scoreboard (`IndividualScore` with showNames),
+   the same single-line layout the TV boards and the lobby use.
 
-.match-detail-card__side {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
+   The card used to print the names in a separate row above the scoreboard,
+   which put each competitor's points UNDERNEATH their name and forced a second
+   "vs" into the name row. That row and its rules (__players, __side, __name,
+   __score) are gone; the scoreboard's own .msb-name cells carry the names, with
+   the same Shiro-dark / Aka-red colour coding they had here.
+
+   The name cell carries the dojo as a second line beneath the name (the same
+   block the bracket's PlayerLine and the up-next row render). Only the NAME
+   cell stacks: .msb-row is align-items:center, so the ippon slots stay on the
+   name's row, centred against the taller block, and a competitor's points never
+   sit under their name. Scoped to the card because the scoreboard's name cell
+   is deliberately single-line everywhere else (TV boards, lobby cells). */
+.match-detail-card .msb-individual .msb-name { white-space: normal; }
+.match-detail-card .msb-dojo {
+  display: block;
+  font-size: 11px;
   font-weight: 500;
-}
-
-.match-detail-card__side--right {
-  flex-direction: row-reverse;
-  text-align: right;
-}
-
-/* Winner: bold only, keep the side colour (Shiro dark / Aka red) so the
-   colour coding still reads after a result. */
-.match-detail-card__side--win .match-detail-card__name {
-  font-weight: 800;
-}
-
-.match-detail-card__name {
+  color: var(--ink-3);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-weight: 700;
 }
-/* Colour-coded player names (replaces the SHIRO/AKA badges), matching the
-   shared scoreboard's .msb-name / .msb-name--aka. */
-.match-detail-card__name--shiro { color: #111; }
-.match-detail-card__name--aka { color: var(--red, #b91c1c); }
-
-/* Centre spacer of the names row. It held the "vs" until that moved to the
-   scoreboard row's own FIK centre below; it stays because its width is what
-   keeps the two names splitting at the same point the slot groups do. Empty,
-   so the former type styling (mono 18px/800) is gone with the text. */
-.match-detail-card__score {
-  min-width: 40px;
-  flex-shrink: 0;
-}
-
-/* Individual match card: the two competitor names live in the players row
-   above, so the shared scoreboard renders its own name cells EMPTY. Those empty
-   cells are flex:1, which is what pinned both slot groups to the middle of the
-   row while the names sat out at the edges. Collapse them and let the marks
-   span the row instead, so each side's ippons line up under that side's NAME
-   (attribution is positional, per the FIK score sheet). Scoped to the card, so
-   the TV boards and the lobby: which pass their names THROUGH the scoreboard
-   and so need those cells: are untouched. */
-.match-detail-card .msb-individual .msb-name { display: none; }
-.match-detail-card .msb-individual .msb-marks { flex: 1; justify-content: space-between; }
-.match-detail-card .msb-individual .msb-row { padding-left: 0; padding-right: 0; }
 
 .match-detail-card__decision {
   font-size: 12px;

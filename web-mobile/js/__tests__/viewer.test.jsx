@@ -527,13 +527,12 @@ describe('MatchDetailCard team sub-rows (mp-8sw)', () => {
     expect(findVnode(tree, n => n.type === TeamScoreboard)).toBeNull();
   });
 
-  // The names row must NOT carry its own "vs" (operator ruling): the delegated
-  // IndividualScore below it renders the FIK row, whose centre is the middle
-  // value's one home. The card used to show a second "vs" directly above that
-  // one — the same stacked-duplicate shape already rejected for the TV header
-  // and lobby chips. The centre spacer div stays (it aligns the two names'
-  // split with the slot groups underneath); only the text is gone.
-  it('renders no second "vs" in the names row above the scoreboard', () => {
+  // An individual match is ONE row (operator ruling): names, ippon slots and
+  // the centre on the same line. The card used to render a separate names row
+  // above the scoreboard, which put a competitor's POINTS UNDERNEATH THEIR NAME
+  // and forced a second "vs" into the name row. The names now go through the
+  // scoreboard, which is the single-line layout the TV boards already use.
+  it('gives the names to the scoreboard instead of a separate row above it', () => {
     const match = {
       compKind: 'individual', teamSize: 0, status: 'running', court: 'A',
       phase: 'bracket', round: 'QF',
@@ -541,9 +540,67 @@ describe('MatchDetailCard team sub-rows (mp-8sw)', () => {
       ipponsA: ['M'], ipponsB: [],
     };
     const tree = runtime.mount(MatchDetailCard, { match, onClose: null });
+    // No separate name row, and so no second "vs" anywhere above the scoreboard.
+    expect(findVnode(tree, n => n.props?.className === 'match-detail-card__players')).toBeNull();
     expect(findVnode(tree, n => n.props?.className === 'match-detail-card__vs')).toBeNull();
-    // The spacer itself must survive, or the names stop lining up with the slots.
-    expect(findVnode(tree, n => n.props?.className === 'match-detail-card__score')).toBeTruthy();
+    const score = findVnode(tree, n => n.type === IndividualScore);
+    expect(score).toBeTruthy();
+    expect(score.props.showNames).toBe(true);
+    // Resolved names are passed IN: the component's own withNumber would render
+    // an unplayed bracket side as "TBD" rather than its feeder label.
+    expect(score.props.shiroName).toBe('Bob');
+    expect(score.props.akaName).toBe('Alice');
+  });
+
+  // The dojo rides WITH the name, as a second line under it (the block the
+  // bracket and up-next lists render). It must not become a third slot-shaped
+  // thing on the score row: the points stay on the name's line.
+  it('renders the dojo as a line under each name', () => {
+    const match = {
+      compKind: 'individual', teamSize: 0, status: 'running', court: 'A',
+      phase: 'bracket', round: 'QF',
+      sideA: { id: 'pA', name: 'Alice', dojo: 'Kyoto Renmei' },
+      sideB: { id: 'pB', name: 'Bob', dojo: 'Osaka Budokan' },
+      ipponsA: ['M'], ipponsB: [],
+    };
+    const tree = runtime.mount(MatchDetailCard, { match, onClose: null });
+    const score = findVnode(tree, n => n.type === IndividualScore);
+    // Shiro is sideB, Aka is sideA.
+    const shiroDojo = findVnode(score.props.shiroName, n => n.props?.className === 'msb-dojo');
+    const akaDojo = findVnode(score.props.akaName, n => n.props?.className === 'msb-dojo');
+    expect(shiroDojo?.props.children).toBe('Osaka Budokan');
+    expect(akaDojo?.props.children).toBe('Kyoto Renmei');
+  });
+
+  // A side with no dojo (an unresolved bracket slot, "Winner of M1") must get
+  // the bare name, not an empty line that would pad the card unevenly.
+  it('omits the dojo line when a side has no dojo', () => {
+    const match = {
+      compKind: 'individual', teamSize: 0, status: 'scheduled', court: 'A',
+      phase: 'bracket', round: 'Final',
+      sideA: { name: 'Winner of M1' }, sideB: { name: 'Winner of M2' },
+      ipponsA: [], ipponsB: [],
+    };
+    const tree = runtime.mount(MatchDetailCard, { match, onClose: null });
+    const score = findVnode(tree, n => n.type === IndividualScore);
+    expect(score.props.shiroName).toBe('Winner of M2');
+    expect(score.props.akaName).toBe('Winner of M1');
+  });
+
+  // The pairing has to be visible before the match starts, too. That used to be
+  // the separate names row's job; with it gone the scoreboard must render for a
+  // scheduled match rather than only for a running or completed one.
+  it('renders the scoreboard for a scheduled individual match, so the pairing still shows', () => {
+    const match = {
+      compKind: 'individual', teamSize: 0, status: 'scheduled', court: 'A',
+      phase: 'bracket', round: 'QF',
+      sideA: { id: 'pA', name: 'Alice' }, sideB: { id: 'pB', name: 'Bob' },
+      ipponsA: [], ipponsB: [],
+    };
+    const tree = runtime.mount(MatchDetailCard, { match, onClose: null });
+    const score = findVnode(tree, n => n.type === IndividualScore);
+    expect(score).toBeTruthy();
+    expect(score.props.shiroName).toBe('Bob');
   });
 });
 

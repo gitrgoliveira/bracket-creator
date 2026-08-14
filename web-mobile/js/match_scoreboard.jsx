@@ -379,7 +379,13 @@ export function withNumber(side, withZekkenName) {
   return side.number ? `${side.number} ${name}` : name;
 }
 
-export function IndividualScore({ match, variant, showNames, withZekkenName }) {
+// shiroName / akaName: optional resolved display names, mirroring the props
+// TeamScoreboard already takes. A caller that has better names than this
+// component can derive passes them in — the viewer card resolves an unplayed
+// bracket side to its feeder label ("Winner of M1"), where withNumber below can
+// only say "TBD". Omit them and the component derives its own, as the TV boards
+// and the lobby do.
+export function IndividualScore({ match, variant, showNames, withZekkenName, shiroName, akaName }) {
   // nameOf, not a local unwrap: same object-or-bare-string rule the slot leaf's
   // hanteiWinnerKey applies, so the two attribution paths cannot read a side
   // name differently.
@@ -420,8 +426,8 @@ export function IndividualScore({ match, variant, showNames, withZekkenName }) {
   // the competition has a numberPrefix configured; falls back to the bare name.
   // tri-review #2: pass withZekkenName so zekken-mode comps render the
   // displayName ("K1 TANAKA") instead of the canonical full name.
-  const shiroDisplay = withNumber(match.sideB, withZekkenName);
-  const akaDisplay = withNumber(match.sideA, withZekkenName);
+  const shiroDisplay = shiroName ?? withNumber(match.sideB, withZekkenName);
+  const akaDisplay = akaName ?? withNumber(match.sideA, withZekkenName);
   return (
     <div className={"msb msb-individual" + (variant === "tv" ? " msb--tv" : "")} data-testid="individual-score">
       <div className="msb-row">

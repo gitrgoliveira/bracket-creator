@@ -107,13 +107,11 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	//    W/L/T/RANK formula cells collapse to 0 after a store round-trip
 	//    (documented at cmd/create_handler.go:25), so we overwrite them with
 	//    literal values from the engine.
-	numCourts := len(comp.Courts)
-	if numCourts == 0 {
-		numCourts = 1
-	}
 	// The shiaijo BY NAME, mirroring the blank-template export: a competition
-	// allocated C and D must not have its sheets titled A and B.
+	// allocated C and D must not have its sheets titled A and B. The count is
+	// read off the same list rather than derived a second time.
 	courts := engine.ExportCourts(comp)
+	numCourts := len(courts)
 	// numCourts is the operator's ALLOCATION. The pool-banded sheet and both
 	// overlays clamp it themselves to the count the pool phase actually runs on
 	// (PrintPoolMatches and computePoolsByCourt each apply

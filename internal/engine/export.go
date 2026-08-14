@@ -27,13 +27,12 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	// clamped to 1 so a competition saved without courts still lays out as a
 	// single-court draw. (The court-band helpers also clamp internally, so
 	// this is layout intent, not panic avoidance.)
-	numCourts := len(comp.Courts)
-	if numCourts < 1 {
-		numCourts = 1
-	}
-	// The shiaijo BY NAME, for every sheet that prints one. A competition need
-	// not be allocated the first N courts of the venue.
+	// The shiaijo BY NAME, for every sheet that prints one: a competition need
+	// not be allocated the first N courts of the venue. The count is read off
+	// the same list rather than derived a second time, so the two can never
+	// disagree about the single-court fallback.
 	courts := ExportCourts(comp)
+	numCourts := len(courts)
 
 	f, err := excel.NewFileFromScratch()
 	if err != nil {

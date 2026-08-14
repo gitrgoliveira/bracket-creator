@@ -134,7 +134,12 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true, slotLabe
           <div className={`match-detail-card__side ${bWin ? "match-detail-card__side--win" : ""}`}>
             <span className="match-detail-card__name match-detail-card__name--shiro">{bName}</span>
           </div>
-          <div className="match-detail-card__score"><span className="match-detail-card__vs">vs</span></div>
+          {/* No "vs" here (operator ruling): the shared scoreboard row below
+              carries the middle value in its own FIK centre, which is its one
+              home. This row used to hold a second one directly above it. The
+              div stays as the centre spacer that keeps the two names' split
+              aligned with the slot groups underneath. */}
+          <div className="match-detail-card__score" aria-hidden="true" />
           <div className={`match-detail-card__side match-detail-card__side--right ${aWin ? "match-detail-card__side--win" : ""}`}>
             <span className="match-detail-card__name match-detail-card__name--aka">{aName}</span>
           </div>

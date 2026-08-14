@@ -6383,20 +6383,26 @@ button.pool-match-row {
 .match-detail-card__name--shiro { color: #111; }
 .match-detail-card__name--aka { color: var(--red, #b91c1c); }
 
+/* Centre spacer of the names row. It held the "vs" until that moved to the
+   scoreboard row's own FIK centre below; it stays because its width is what
+   keeps the two names splitting at the same point the slot groups do. Empty,
+   so the former type styling (mono 18px/800) is gone with the text. */
 .match-detail-card__score {
-  font-size: 18px;
-  font-weight: 800;
-  font-family: var(--font-mono);
-  color: var(--ink-1);
   min-width: 40px;
-  text-align: center;
+  flex-shrink: 0;
 }
 
-.match-detail-card__vs {
-  font-size: 12px;
-  color: var(--ink-4);
-  font-weight: 400;
-}
+/* Individual match card: the two competitor names live in the players row
+   above, so the shared scoreboard renders its own name cells EMPTY. Those empty
+   cells are flex:1, which is what pinned both slot groups to the middle of the
+   row while the names sat out at the edges. Collapse them and let the marks
+   span the row instead, so each side's ippons line up under that side's NAME
+   (attribution is positional, per the FIK score sheet). Scoped to the card, so
+   the TV boards and the lobby: which pass their names THROUGH the scoreboard
+   and so need those cells: are untouched. */
+.match-detail-card .msb-individual .msb-name { display: none; }
+.match-detail-card .msb-individual .msb-marks { flex: 1; justify-content: space-between; }
+.match-detail-card .msb-individual .msb-row { padding-left: 0; padding-right: 0; }
 
 .match-detail-card__decision {
   font-size: 12px;
@@ -6517,11 +6523,24 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .msb--tv .msb-marks { min-width: 22vw; gap: 0.6vw; }
 .msb--tv .msb-slot { min-width: min(calc(5vh * var(--msb-scale, 1)), 8.5vh); height: min(calc(5.6vh * var(--msb-scale, 1)), 9.5vh); font-size: calc(3.5vh * var(--msb-scale, 1)); border-radius: 0.4vh; }
 .msb--tv .msb-vs { min-width: 3vh; font-size: calc(2vh * var(--msb-scale, 1)); }
-/* Centre dash between the Shiro and Aka ippon slots. Rendered as an explicit
-   span so Preact null-children don't accidentally keep the cell non-empty.
-   Hidden on non-TV surfaces; visible only in .msb--tv context. */
-.msb-sep { display: none; }
-.msb--tv .msb-sep { display: inline; color: var(--ink-2, #3a414e); font-weight: 700; }
+/* Centre separator between the Shiro and Aka ippon slots. Rendered as an
+   explicit span so Preact null-children don't accidentally keep the cell
+   non-empty.
+
+   Visible on EVERY surface (operator ruling). "vs" is the plain MIDDLE VALUE of
+   a row that carries no mark, not decoration: a pending or unscored row reads
+   "vs" exactly as a marked row reads X / (E) / (DH), so a board that omits it
+   leaves the FIK row's centre blank. It renders only when there is no mark
+   (centreMarks picks one or the other), so it can never collide with one.
+
+   It was `display: none` off-TV because it started life as a decorative en-dash
+   whose density was unwanted in the smaller lobby cells and viewer rows. The
+   dash-to-"vs" change (3bc4229a) turned it into part of the display contract
+   and the rule outlived its reason — the lobby board was the visible symptom,
+   since it is the one display surface that passes no `variant` and so never
+   matched .msb--tv. */
+.msb-sep { display: inline; color: #9ca3af; }
+.msb--tv .msb-sep { color: var(--ink-2, #3a414e); font-weight: 700; }
 .msb--tv .msb-row--summary { border-top: 0.4vh solid #111; }
 .msb--tv .msb-row--summary .msb-slot { min-width: calc(6vh * var(--msb-scale, 1)); font-size: calc(3.4vh * var(--msb-scale, 1)); }
 .msb--tv .msb-lab { font-size: calc(1.2vh * var(--msb-scale, 1)); }

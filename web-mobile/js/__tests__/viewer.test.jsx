@@ -526,6 +526,25 @@ describe('MatchDetailCard team sub-rows (mp-8sw)', () => {
     expect(findVnode(tree, n => n.type === IndividualScore)).toBeTruthy();
     expect(findVnode(tree, n => n.type === TeamScoreboard)).toBeNull();
   });
+
+  // The names row must NOT carry its own "vs" (operator ruling): the delegated
+  // IndividualScore below it renders the FIK row, whose centre is the middle
+  // value's one home. The card used to show a second "vs" directly above that
+  // one — the same stacked-duplicate shape already rejected for the TV header
+  // and lobby chips. The centre spacer div stays (it aligns the two names'
+  // split with the slot groups underneath); only the text is gone.
+  it('renders no second "vs" in the names row above the scoreboard', () => {
+    const match = {
+      compKind: 'individual', teamSize: 0, status: 'running', court: 'A',
+      phase: 'bracket', round: 'QF',
+      sideA: { id: 'pA', name: 'Alice' }, sideB: { id: 'pB', name: 'Bob' },
+      ipponsA: ['M'], ipponsB: [],
+    };
+    const tree = runtime.mount(MatchDetailCard, { match, onClose: null });
+    expect(findVnode(tree, n => n.props?.className === 'match-detail-card__vs')).toBeNull();
+    // The spacer itself must survive, or the names stop lining up with the slots.
+    expect(findVnode(tree, n => n.props?.className === 'match-detail-card__score')).toBeTruthy();
+  });
 });
 
 // mp-116 (Copilot review follow-up): the bracket-tab and pools-tab click sites

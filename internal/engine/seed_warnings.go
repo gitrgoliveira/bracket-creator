@@ -19,11 +19,21 @@ import (
 // recomputed on read and can never go stale against a redrawn competition.
 //
 // Returns nil - no warnings, and no error - for every competition that has no
-// pools yet, no seeds, or nothing to report. A competition without seeds is a
-// normal configuration and MUST be warning-free.
+// pools yet, no seeds, no bracket to place seeds in, or nothing to report. A
+// competition without seeds is a normal configuration and MUST be warning-free.
 func (e *Engine) SeedWarnings(id string) []string {
 	comp, err := e.store.LoadCompetition(id)
 	if err != nil || comp == nil {
+		return nil
+	}
+	// Every warning here is about where a seed's qualifier LANDS IN A BRACKET:
+	// which half, which quarter, which shiaijo, and which surplus rank had to be
+	// dropped to keep two seeds out of one pool. A league or a Swiss has no
+	// bracket, so none of that describes anything the operator will ever see --
+	// and the console shows these unconditionally, under a heading about a draw.
+	// Left ungated, a league with two seeds reported "Seed 2 ignored ... The
+	// draw used seed 1" about a draw that is never built.
+	if !CompetitionDrawsBracket(comp.Format) {
 		return nil
 	}
 	pools, err := e.store.LoadPools(id)

@@ -45,6 +45,35 @@ func TestSeedWarningsReturnsNilRatherThanFailing(t *testing.T) {
 	})
 }
 
+// A format with no bracket has nothing to warn about. Every warning this
+// channel can produce describes where a seed's qualifier sits in a KNOCKOUT
+// bracket, so a league or a Swiss must be silent: the admin console renders
+// these under "the draw could not honour every rule", and a league organiser
+// who seeded two competitors was being shown "Seed 2 ignored ... The draw used
+// seed 1" about a draw that never gets built.
+func TestSeedWarningsAreSilentForFormatsWithoutABracket(t *testing.T) {
+	for _, format := range []string{state.CompFormatLeague, state.CompFormatSwiss} {
+		t.Run(format, func(t *testing.T) {
+			eng, store, _ := setupTestEngine(t)
+			compID := "warnings-" + format
+
+			createTestCompetition(t, store, compID, format, 4)
+			saveTestParticipants(t, store, compID,
+				[]string{"Alice", "Bob", "Charlie", "Dave"})
+			// Two seeds in one pool is the loudest thing this channel says, and
+			// it is exactly the sentence that made no sense for a league.
+			require.NoError(t, store.SaveSeeds(compID, []domain.SeedAssignment{
+				{Name: "Alice", SeedRank: 1},
+				{Name: "Bob", SeedRank: 2},
+			}))
+			require.NoError(t, eng.GenerateDraw(compID))
+
+			assert.Empty(t, eng.SeedWarnings(compID),
+				"a %s has no bracket, so there is no seed placement to report on", format)
+		})
+	}
+}
+
 // The other half of the contract: when the configuration genuinely cannot honour
 // a seed, the operator is TOLD, and the draw still happens.
 //

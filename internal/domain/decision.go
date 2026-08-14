@@ -43,6 +43,31 @@ func IsKikenDecision(d Decision) bool {
 	return d == DecisionKiken || d == DecisionKikenVoluntary || d == DecisionKikenInjury
 }
 
+// IsHanteiCompatibleDecision reports whether a decision can coexist with a
+// hantei verdict. Hantei declares a winner from a TIED bout, so it is
+// incompatible with any decision that already settles the bout another way
+// (a withdrawal, a no-show, a draw). "" and "fought" are ordinary play;
+// "daihyosen" is the rep-bout placeholder the verdict rides on.
+//
+// One owner because there are two enforcers at different layers: the HTTP
+// validator (validateSubBout) rejects an incompatible pairing on the way in,
+// and the engine (preserveSubHantei) must apply the SAME test on the way out,
+// since it mutates a row AFTER validation and its output is never re-checked.
+// Two copies could drift such that the engine stamps a row the validator
+// would refuse.
+func IsHanteiCompatibleDecision(d Decision) bool {
+	switch d {
+	case DecisionNone, DecisionFought, DecisionDaihyosen:
+		return true
+	}
+	return false
+}
+
+// IsHanteiCompatibleDecisionStr is the wire-string form.
+func IsHanteiCompatibleDecisionStr(s string) bool {
+	return IsHanteiCompatibleDecision(Decision(s))
+}
+
 // IsKikenDecisionStr is the string-argument twin of IsKikenDecision,
 // for call sites that hold the wire value as a string (e.g.
 // MatchResult.Decision).

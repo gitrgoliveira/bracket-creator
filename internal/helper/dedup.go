@@ -137,21 +137,17 @@ func CheckDuplicateEntriesByNameDojo(entries [][2]string) []string {
 // participant uuid, which team-name references in results do not carry).
 // Same normalization as the (name, dojo) check; returns colliding names.
 func CheckDuplicateEntriesByName(names []string) []string {
-	seen := make(map[string]string, len(names))
-	seenDupes := make(map[string]bool)
-	var out []string
-	for _, n := range names {
-		k := NormalizeParticipantName(n)
-		if _, exists := seen[k]; exists {
-			if !seenDupes[k] {
-				seenDupes[k] = true
-				out = append(out, seen[k])
-			}
-		} else {
-			seen[k] = strings.TrimSpace(n)
-		}
+	// Delegates rather than re-implementing: with an empty dojo, newDupKey
+	// keys on the normalized name alone and the label branch emits just the
+	// trimmed name (no dangling " / "), so this IS the name-only case of the
+	// tier-1 helper. Sharing the body keeps the normalization and the
+	// first-seen reporting label identical between the two rules by
+	// construction, rather than by two copies agreeing.
+	entries := make([][2]string, len(names))
+	for i, n := range names {
+		entries[i] = [2]string{n, ""}
 	}
-	return out
+	return CheckDuplicateEntriesByNameDojo(entries)
 }
 
 // tokenSet splits a normalized name into its whitespace-separated tokens and

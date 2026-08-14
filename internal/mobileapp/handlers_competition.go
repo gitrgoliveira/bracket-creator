@@ -553,7 +553,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// rolling the competition back) for input the PUT roster path
 			// answers 409 with the names — same rule, two different verdicts.
 			if errors.Is(err, state.ErrDuplicateName) {
-				c.JSON(http.StatusConflict, gin.H{"error": errors.Unwrap(err).Error()})
+				// err.Error(), NOT errors.Unwrap(err).Error(): the wrap upstream
+				// is fmt.Errorf("%w: %w", ...), whose multi-error type implements
+				// Unwrap() []error, so errors.Unwrap returns nil and the deref
+				// panicked on the very path this branch exists for. The full
+				// string already names the colliding entries.
+				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 				return
 			}
 			if errors.Is(err, errSaveParticipants) {

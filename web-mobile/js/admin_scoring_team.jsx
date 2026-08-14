@@ -1657,7 +1657,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
         // dhKeep restores a preserved `true` over it. Swapping the two lines
         // re-opens the regression they exist to prevent (fixing an unrelated
         // bout score silently flipping a hantei win into a hikiwake).
-        const hanteiKnown = !(!initialDaihyosenHanteiArmed && !daihyosenHanteiArmed && !!existingDaihyosen?.decidedByHantei);
+        const hanteiKnown = initialDaihyosenHanteiArmed || daihyosenHanteiArmed || !existingDaihyosen?.decidedByHantei;
         Object.assign(entry, daihyosenEnchoFields({ enchoPeriodCount, daihyosenTied, daihyosenHantei, hanteiKnown }));
         if (dhKeep) Object.assign(entry, dhKeep);
       } else if (isKachinuki && s.encho > 0) {
@@ -1740,18 +1740,24 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
         ...correctionBlock,
       };
     }
+    const [winnerPts, loserPts] =
+      teamWinner === "a" ? [ivA, ivB] :
+      teamWinner === "b" ? [ivB, ivA] :
+      [Math.max(ivA, ivB), Math.min(ivA, ivB)];
     return {
       winner,
       status: "completed",
       ipponsA: [],
       ipponsB: [],
-      // The third branch is the dhKeep case: a PRESERVED but unattributable
+      // ONE swap, not two mirrored ternaries that had to agree by eye - the
+      // failure the third branch below exists to document already happened once.
+      // That branch is the dhKeep case: a PRESERVED but unattributable
       // verdict forces type "ippon" while teamWinner stays null, and the old
       // two-way ternary then fell through to the SHIRO figures for both
       // slots - labelling the loser's IV as the winner's whenever the two
       // differ. max/min cannot name the side either, but it can never invert
       // them, and in every reachable daihyosen IV is tied so both agree.
-      score: { type: (teamWinner || dhKeep) ? "ippon" : "hikiwake", winnerPts: teamWinner === "a" ? ivA : (teamWinner === "b" ? ivB : Math.max(ivA, ivB)), loserPts: teamWinner === "a" ? ivB : (teamWinner === "b" ? ivA : Math.min(ivA, ivB)), fouls: { a: 0, b: 0 }, corrected: isComplete },
+      score: { type: (teamWinner || dhKeep) ? "ippon" : "hikiwake", winnerPts, loserPts, fouls: { a: 0, b: 0 }, corrected: isComplete },
       subResults,
       ...enchoBlock(),
       ...correctionBlock,

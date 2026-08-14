@@ -161,12 +161,9 @@ func preserveSubHantei(stored, incoming []state.SubMatchResult) {
 		if in.DecidedByHantei != nil || in.Winner != "" {
 			return // the writer addressed the verdict: its word stands
 		}
-		// Same allow-list as validateSubBout: hantei declares a winner from a
-		// tied bout, so it cannot coexist with a decision that already settles
-		// the bout another way.
-		switch in.Decision {
-		case "", "fought", string(domain.DecisionDaihyosen):
-		default:
+		// The SAME predicate validateSubBout enforces, shared via domain so the
+		// two cannot drift (this runs after validation and is never re-checked).
+		if !domain.IsHanteiCompatibleDecisionStr(in.Decision) {
 			return
 		}
 		// A row that records no ippons of its own said nothing about the
@@ -233,17 +230,18 @@ func normalizePriorForRollback(prior *state.MatchResult) {
 	if prior.SubResults == nil {
 		prior.SubResults = []state.SubMatchResult{}
 	}
-	// A SEPARATE bool per field. Sharing one &clearHantei across the match and
-	// every sub-bout would leave N structs aliasing a single bool, so a later
-	// write through any one of them (*sub.DecidedByHantei = true, the shape
+	// A SEPARATE bool per field. Sharing one pointer across the match and every
+	// sub-bout would leave N structs aliasing a single bool, so a later write
+	// through any one of them (*sub.DecidedByHantei = true, the shape
 	// bracket_test.go's deep-copy test already exercises) would flip the verdict
-	// on the match and on every other bout at once.
+	// on the match and on every other bout at once. state.HanteiExplicit is the
+	// constructor that can express false; HanteiPtr collapses it to nil.
 	if prior.DecidedByHantei == nil {
-		prior.DecidedByHantei = new(bool)
+		prior.DecidedByHantei = state.HanteiExplicit(false)
 	}
 	for i := range prior.SubResults {
 		if prior.SubResults[i].DecidedByHantei == nil {
-			prior.SubResults[i].DecidedByHantei = new(bool)
+			prior.SubResults[i].DecidedByHantei = state.HanteiExplicit(false)
 		}
 	}
 }

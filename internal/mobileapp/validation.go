@@ -223,10 +223,9 @@ func validateSubBout(prefix string, sr *state.SubMatchResult, allowNumberedEncho
 	if len(sr.IpponsA) != len(sr.IpponsB) {
 		return &ValidationError{Field: prefix + "decidedByHantei", Message: "requires a tied scoreline, ippon counts must be equal"}
 	}
-	switch sr.Decision {
-	case "", "fought", "daihyosen":
-		// compatible: daihyosen placeholders carry decision="daihyosen"
-	default:
+	// Shared with the engine's preserveSubHantei via domain, so a row this
+	// accepts and a row the engine may stamp can never disagree.
+	if !domain.IsHanteiCompatibleDecisionStr(sr.Decision) {
 		return &ValidationError{
 			Field:   prefix + "decidedByHantei",
 			Message: fmt.Sprintf("incompatible with decision %q, hantei declares a winner from a tied bout; use '', 'fought', or 'daihyosen'", sr.Decision),

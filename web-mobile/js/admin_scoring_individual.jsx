@@ -67,17 +67,19 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // relying on ||: an empty array is truthy and would swallow it.
   const cellsA = m.ipponsA || (window.ipponsFromScore ? window.ipponsFromScore(m.scoreA) : []);
   const cellsB = m.ipponsB || (window.ipponsFromScore ? window.ipponsFromScore(m.scoreB) : []);
-  const cleanA = (cellsA || []).filter(x => x && x !== "•");
-  const cleanB = (cellsB || []).filter(x => x && x !== "•");
+  // realIppons, not a local copy: this file imports the leaf that owns "what
+  // counts as a recorded ippon", and its own comments require these totals to
+  // read the same rule as the scoreboard's hanteiTied.
+  const cleanA = realIppons(cellsA);
+  const cleanB = realIppons(cellsB);
   // The score.ippons FALLBACK is filtered like the primary path above: pts must
   // hold only REAL points, because the slot grid indexes it directly for
   // display while resultSlot picks the mark's slot from it. Any placeholder or
-  // empty cell would desynchronise those two (a "\u2022" in cell 0 pushes the
-  // mark to cell 1, where it then renders OVER a recorded letter, hiding a
+  // empty cell would desynchronise those two (a placeholder in cell 0 pushes
+  // the mark to cell 1, where it renders OVER a recorded letter, hiding a
   // struck point). Cleaning once here keeps every downstream consumer honest.
-  const cleanFallback = (arr) => (arr || []).filter(x => x && x !== "\u2022");
-  const seedAPts = cleanA.length ? cleanA : (m.score?.type === "ippon" && m.winner?.id === m.sideA?.id ? cleanFallback(m.score.ippons) : []);
-  const seedBPts = cleanB.length ? cleanB : (m.score?.type === "ippon" && m.winner?.id === m.sideB?.id ? cleanFallback(m.score.ippons) : []);
+  const seedAPts = cleanA.length ? cleanA : (m.score?.type === "ippon" && m.winner?.id === m.sideA?.id ? realIppons(m.score.ippons) : []);
+  const seedBPts = cleanB.length ? cleanB : (m.score?.type === "ippon" && m.winner?.id === m.sideB?.id ? realIppons(m.score.ippons) : []);
 
   // Use ?? not || so an explicit 0 isn't treated as "unset".
   // reconcileFoulsAtOpen turns the pre-fix cumulative raw count into the

@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"os"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -151,12 +150,9 @@ func TestPreserveSubHantei(t *testing.T) {
 // before the verdict was recorded) saves a correction and the stored verdict
 // survives in storage.
 func TestPoolWrite_StaleSnapshotKeepsHantei(t *testing.T) {
-	dir, err := os.MkdirTemp("", "engine-subhantei-*")
-	require.NoError(t, err)
-	defer func() { _ = os.RemoveAll(dir) }()
-	store, err := state.NewStore(dir)
-	require.NoError(t, err)
-	eng := New(store)
+	// setupTestEngine (engine_test.go) already owns this preamble, with
+	// t.Cleanup rather than defer; 380+ tests in this package use it.
+	eng, store, _ := setupTestEngine(t)
 
 	compID := "sh1"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "SH", Kind: "team", TeamSize: 3}))
@@ -261,12 +257,9 @@ func TestPreserveSubHantei_SideGuardsTheScoreline(t *testing.T) {
 // remove preserveSubHantei from the withPoolMatchTx closure in scoring_tx.go
 // and this goes red while every other test in the package stays green.
 func TestPoolWriteTx_StaleSnapshotKeepsHantei(t *testing.T) {
-	dir, err := os.MkdirTemp("", "engine-subhantei-tx-*")
-	require.NoError(t, err)
-	defer func() { _ = os.RemoveAll(dir) }()
-	store, err := state.NewStore(dir)
-	require.NoError(t, err)
-	eng := New(store)
+	// setupTestEngine (engine_test.go) already owns this preamble, with
+	// t.Cleanup rather than defer; 380+ tests in this package use it.
+	eng, store, _ := setupTestEngine(t)
 
 	compID := "shtx1"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "SHTX", Kind: "team", TeamSize: 3}))

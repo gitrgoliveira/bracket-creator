@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -326,6 +327,92 @@ func TestStartCompetition_SeededNonCheckedIn_Drawable(t *testing.T) {
 	assert.Len(t, names, 4, "only the 4 checked-in players should be drawn")
 	assert.NotContains(t, names, "Eve", "non-checked-in seeded player must be excluded")
 	assert.Contains(t, names, "Alice")
+}
+
+// TestGenerateDraw_SeedGapFromCheckInKeepsD6Placement is the regression guard for
+// the seed gap this package creates and no other package can see.
+//
+// dropSeedAssignments runs AFTER LoadSeeds has validated the operator's set as
+// contiguous 1..N, so the seeds that reach helper.PoolSeeding can be GAPPED and
+// keep their raw ranks: a rank-2 competitor who does not check in leaves
+// {1, 3, 4}. Placement must key on the RANK, because
+// helper.SeedPlacementWarnings does ((a.rank-b.rank)%2 decides which seeds share
+// a half) and the two have to read one space.
+//
+// Keyed on the position in the sorted list instead, rank 3 took position 1 and
+// landed on shiaijo C while rank 4 took B: seeds 1 and 4 in one half with seed 3
+// alone in the other, so the strongest available semifinal became 1 v 4. The
+// draw then reported "Seeds could not be split into halves as 1 and 3 against 2
+// and 4 ... The draw was made anyway", blaming the operator's configuration for
+// a relaxation the tool's own check-in drop had caused.
+//
+// The helper package cannot pin this: its fixtures build their own seed sets and
+// every one of them is contiguous.
+func TestGenerateDraw_SeedGapFromCheckInKeepsD6Placement(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "checkin-seed-gap"
+
+	// Four shiaijo, because D6's halves and quarters are only fully determined
+	// with four: seed 1 -> A, 2 -> C, 3 -> B, 4 -> D.
+	courts := []string{"A", "B", "C", "D"}
+	createTestCompetition(t, store, compID, state.CompFormatMixed, 5, func(c *state.Competition) {
+		c.PoolSizeMode = "max"
+		c.Courts = courts
+		c.CheckInEnabled = true
+	})
+
+	// 20 competitors, one dojo each so that pool creation's dojo-conflict
+	// avoidance never moves anyone off the slot the seeding chose; the seeding
+	// is the only thing deciding placement here.
+	players := make([]domain.Player, 20)
+	for i := range players {
+		players[i] = domain.Player{
+			Name:      fmt.Sprintf("P%02d", i+1),
+			Dojo:      fmt.Sprintf("Dojo%02d", i+1),
+			CheckedIn: true,
+		}
+	}
+	// P02 holds rank 2 and is the no-show. Everyone else checks in, so 19
+	// competitors are drawn into 4 pools at PoolSize 5 in "max" mode.
+	players[1].CheckedIn = false
+	require.NoError(t, store.SaveParticipants(compID, players))
+	require.NoError(t, store.SaveSeeds(compID, []domain.SeedAssignment{
+		{Name: "P01", SeedRank: 1},
+		{Name: "P02", SeedRank: 2},
+		{Name: "P03", SeedRank: 3},
+		{Name: "P04", SeedRank: 4},
+	}))
+
+	require.NoError(t, eng.GenerateDraw(compID))
+
+	pools, err := store.LoadPools(compID)
+	require.NoError(t, err)
+	require.Len(t, pools, 4, "the fixture needs one pool per shiaijo for D6 to be determined")
+
+	// The same allocation generatePools uses to give each pool its shiaijo.
+	assignment, err := helper.AssignPoolsToCourts(len(pools), len(courts))
+	require.NoError(t, err)
+
+	seedCourt := map[int]string{}
+	for pi, p := range pools {
+		for _, pl := range p.Players {
+			if pl.Seed == 0 {
+				continue
+			}
+			_, dup := seedCourt[pl.Seed]
+			require.Falsef(t, dup, "seed %d was drawn twice", pl.Seed)
+			seedCourt[pl.Seed] = courts[assignment[pi]]
+		}
+	}
+
+	assert.Equal(t, map[int]string{1: "A", 3: "B", 4: "D"}, seedCourt,
+		"a rank-2 no-show must not move ranks 3 and 4 off their own D6 shiaijo")
+
+	// The reporting half. Ranks 1, 3 and 4 on A, B and D put 1 and 3 in one half
+	// and 4 in the other, which is exactly what D6 asks of the ranks that are
+	// present, so the operator must be told nothing at all.
+	assert.Empty(t, eng.SeedWarnings(compID),
+		"the draw honoured every rule the surviving seeds impose; warning here blames the operator for the tool's own check-in drop")
 }
 
 // TestGenerateSwissRound_FrozenFieldIgnoresLateCheckIn is the regression guard

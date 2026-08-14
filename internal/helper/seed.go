@@ -294,13 +294,24 @@ func PoolSeeding(players []Player, numPools int, numCourts int) []Player {
 	occupied := make(map[int]bool)
 
 	// Assign seeded players based on court-aware priority order.
-	for i, p := range seeded {
+	for _, p := range seeded {
+		// si is the seed's RANK minus one, NOT its position in the sorted
+		// list. The two coincide for a contiguous set 1..N, but the set that
+		// reaches here can be GAPPED: engine.dropSeedAssignments removes the
+		// assignments of seeds who did not check in, after the validating load
+		// has already run, and the survivors keep their raw ranks (e.g.
+		// {1, 3, 4}). Reading the position would then place rank 3 in rank 2's
+		// quarter -- and helper.SeedPlacementWarnings, which reads the RANK,
+		// would report the resulting spread as a configuration the operator
+		// chose. Both derived quantities below read the rank space, so the two
+		// stay in the same space as the warnings.
+		si := p.Seed - 1
 		// global pool rank (0 to numPools-1). Pool rank r lands on court
 		// r%numCourts (the deinterleave ReorderPoolsForCourts applies), so
 		// targeting a rank whose court is seedCourtOrder's is what puts the
 		// seed in D6's half and quarter.
-		poolRank := seedPoolRank(i, numPools, numCourts)
-		posInPool := i / numPools // which slot within the pool
+		poolRank := seedPoolRank(si, numPools, numCourts)
+		posInPool := si / numPools // which slot within the pool
 
 		placed := false
 		for offset := 0; offset < numPools && !placed; offset++ {
@@ -443,16 +454,22 @@ func generatePoolPriority(n int) []int {
 // operator may set ANY number of seeds, zero included (R1); this is a function
 // of one seed's position and never reads the total.
 //
-// i is the seed's INDEX in the rank-sorted list, and every "seed n" above reads
-// it as rank n+1. Those coincide only because seed ranks are contiguous from 1:
-// domain.ValidateAssignments rejects a gap, so a set is always 1..N and
-// index == rank-1 (TestSeedIndexEqualsRankMinusOne pins it).
+// i is the seed's RANK minus one, and every "seed n" above reads it as rank
+// n+1. Callers MUST pass p.Seed-1; the seed's INDEX in the rank-sorted list is
+// NOT a substitute, because the set reaching the draw is not always contiguous.
 //
-// That is load-bearing, not incidental. If the gapless rule is ever relaxed so a
-// gapped set draws with a warning instead of being refused, THIS is what has to
-// change with it: given ranks {1, 2, 4} the index of rank 4 is 2, so it would be
-// placed in rank 3's quarter and the draw would no longer be the one those seeds
-// describe. Key on p.Seed-1 rather than the loop index at that point.
+// domain.ValidateAssignments does reject a gap, but it only guarantees that for
+// the operator's INPUT. A gapped set still reaches placement: after that
+// validating load, engine.dropSeedAssignments (internal/engine/competition.go)
+// removes the assignments of seeded competitors who did not check in, and the
+// survivors keep their RAW ranks -- {1, 2, 3, 4} minus a rank-2 no-show is
+// {1, 3, 4}. Nothing renumbers or re-validates in between.
+//
+// Keying on the index there is not a cosmetic slip. Rank 3 would take index 1,
+// land in rank 2's quarter, and the draw would no longer be the one those seeds
+// describe; helper.SeedPlacementWarnings reads the RANK, so it would then report
+// the halves it could not honour as if the operator's configuration, rather than
+// the check-in drop, had caused it. Placement and warnings must read one space.
 func seedCourtOrder(i, numCourts int) int {
 	if numCourts < 2 || i >= 4 {
 		return i % numCourts
@@ -474,6 +491,11 @@ func seedCourtOrder(i, numCourts int) int {
 // plain round robin when the derived rank is out of range (fewer pools than
 // courts), and the placement loop's own offset search then resolves any
 // collision.
+//
+// i is the seed's RANK minus one, as in seedCourtOrder: a gapped set is
+// possible, so a sparse high rank can fall out of range here and take the round
+// robin instead. That degrades predictably (D7) and is why the fallback and the
+// caller's offset search both stay.
 func seedPoolRank(i, numPools, numCourts int) int {
 	if numCourts < 2 {
 		return i % numPools

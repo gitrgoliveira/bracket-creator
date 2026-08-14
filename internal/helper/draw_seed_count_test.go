@@ -193,19 +193,25 @@ func TestSeedWarningsScaleWithTheSeedCount(t *testing.T) {
 	}
 }
 
-// TestSeedIndexEqualsRankMinusOne pins the assumption seedCourtOrder rests on.
+// TestSeedIndexEqualsRankMinusOne pins that a seed set entering the draw
+// CONTIGUOUS comes out of pool creation contiguous: every rank survives, exactly
+// once, with no gap opened along the way.
 //
-// PoolSeeding sorts the seeded players by rank and passes each one's INDEX to
-// seedCourtOrder, whose documentation is written in terms of RANK ("seed 1 -> A,
-// seed 2 -> C"). Those are the same number only because seed ranks are
-// contiguous from 1: domain.ValidateAssignments rejects a gap, so a set is
-// always 1..N.
+// It used to carry more weight than that. PoolSeeding passed each seed's INDEX
+// in the rank-sorted list to seedCourtOrder, whose rules are written in RANKS
+// ("seed 1 -> A, seed 2 -> C"), and the two coincided only for a contiguous set.
+// This test was meant to be the tripwire for that assumption, and it could not
+// be: it builds its own seed sets, and every fixture in this package builds them
+// contiguous. The gapped set arrives from OUTSIDE the package --
+// engine.dropSeedAssignments drops a non-checked-in seed's assignment after the
+// validating load -- so the tripwire never fired while ranks 3 and 4 were being
+// placed in the wrong quarters.
 //
-// If that rule is relaxed -- and there is a live question about whether a gapped
-// set should draw with a warning rather than be refused -- the two stop
-// coinciding and seeds land in the wrong quarters silently. This test is the
-// tripwire: it fails the moment a gapped set can reach the draw, which is the
-// moment seedCourtOrder must key on the rank instead.
+// PoolSeeding now keys on p.Seed-1, so index == rank-1 is no longer load-bearing
+// anywhere. The gapped case is pinned where it can actually be seen:
+// TestPoolSeedingPlacesByRankNotByPosition (seed_test.go) at this level, and
+// TestGenerateDraw_SeedGapFromCheckInKeepsD6Placement in the engine package,
+// which drives the check-in drop that produces the gap.
 func TestSeedIndexEqualsRankMinusOne(t *testing.T) {
 	for _, numSeeds := range seedCounts {
 		if numSeeds == 0 {

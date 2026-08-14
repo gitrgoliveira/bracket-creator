@@ -99,14 +99,8 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("export: %w", err)
 		}
-		// draw.NumCourts() is the exact band count for this sheet, and this call
-		// cannot self-clamp the way the pool sheets do: it takes no pools. On the
-		// pool-fed path it equals the count those sheets clamp to; on the PURE
-		// PLAYOFFS path (where pools is empty, so EffectiveDrawCourts returns the
-		// raw count) NewPlayoffDraw -> splitIntoSubtrees can honestly yield FEWER
-		// regions than numCourts when the tree has too few splittable levels.
-		// Using it makes the elimination banding equal the tree-page count in
-		// BOTH formats.
+		// draw.NumCourts(), not the requested court count, is the exact band
+		// count for this sheet; the reason is on KnockoutDraw.NumCourts.
 		helper.PrintEliminationWithBronze(f, matchWinners, eliminationMatchRounds, comp.TeamSize, draw.NumCourts(), comp.Mirror, comp.Engi, hasBronze)
 	} else if hasBronze {
 		// Narrow fallback: a competition whose bracket has a third-place bout but

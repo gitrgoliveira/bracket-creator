@@ -492,12 +492,13 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // changes the scoring paradigm; flipping naginata affects the bronze match.
   const isStarted = !!(local.status && local.status !== "setup" && local.status !== "draw-ready");
 
-  // Shiaijo-count rule (shiaijoCountError, mirrored from
-  // helper.ValidateShiaijoCount): a competition whose draw builds a knockout
-  // bracket runs on 1, 2, 4, 8 or 16 shiaijo. League and Swiss are out of
-  // scope (formatDrawsBracket): their shiaijo run in parallel with no
-  // bracket blocks to merge, and the league hint right under these pills
-  // recommends floor(players/2)-1 courts, which is rarely a power of two.
+  // Shiaijo-count rule (shiaijoCountErrorFor, mirrored from
+  // engine.ValidateCompetitionShiaijoCount): a competition whose draw builds a
+  // knockout bracket runs on 1, 2, 4, 8 or 16 shiaijo. League and Swiss are out
+  // of scope, which is why the format is passed in rather than gated here:
+  // their shiaijo run in parallel with no bracket blocks to merge, and the
+  // league hint right under these pills recommends floor(players/2)-1 courts,
+  // which is rarely a power of two.
   //
   // Four distinct states, deliberately kept apart:
   //
@@ -521,17 +522,14 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // unrelated edit on that screen (name, date, durations, check-in), which is
   // the one outcome this rule must not cause.
   const savedCourts = c.courts || [];
-  const courtsErr = window.formatDrawsBracket(local.format)
-    ? window.shiaijoCountError((local.courts || []).length) : null;
-  const savedCourtsErr = window.formatDrawsBracket(c.format)
-    ? window.shiaijoCountError(savedCourts.length) : null;
+  const courtsErr = window.shiaijoCountErrorFor(local.format, (local.courts || []).length);
+  const savedCourtsErr = window.shiaijoCountErrorFor(c.format, savedCourts.length);
   const courtsChanged = (local.courts || []).join(",") !== savedCourts.join(",");
   const blockingCourtsErr = !!courtsErr && courtsChanged;
   // The mechanism sentence is dropped from the standing hint while the red
   // error is on screen: the error states it one line above, and printing it
   // twice buries the part that changes (which counts to pick).
-  const courtsHint = window.formatDrawsBracket(local.format)
-    ? window.shiaijoCountHint((tournament.courts || []).length, !courtsErr) : null;
+  const courtsHint = window.shiaijoCountHintFor(local.format, (tournament.courts || []).length, !courtsErr);
 
   // Shiaijo the competition holds that the tournament no longer has (the
   // operator shrank the venue's court count under a competition already

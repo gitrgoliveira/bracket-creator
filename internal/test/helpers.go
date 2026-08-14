@@ -33,9 +33,9 @@ func FindCellRow(rows [][]string, val string) int {
 	return -1
 }
 
-// ShiaijoHeaderPrefix is what the workbook writer (helper.writeCourtHeaders)
-// puts in front of the court letter in a column band's row-1 header
-// ("Shiaijo A"). One writer produces it, so one reader recognises it.
+// ShiaijoHeaderPrefix is what the workbook writer puts in front of the court
+// letter in a column band's row-1 header ("Shiaijo A"). Every producer goes
+// through helper.ShiaijoLabel, so one reader recognises them all.
 const ShiaijoHeaderPrefix = "Shiaijo "
 
 // CourtBand is one shiaijo column band on a court-banded sheet (Pool Matches,

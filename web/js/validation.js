@@ -146,12 +146,6 @@ export const VALID_SHIAIJO_COUNTS = (() => {
 // rejection message and the standing hint on the courts field in index.html).
 const SHIAIJO_RULE_REASON = 'the knockout draw gives each shiaijo its own block of the bracket and the blocks merge in pairs, so the count has to halve cleanly';
 
-// "1, 2 or 4" from [1, 2, 4].
-export function joinShiaijoCounts(list) {
-    if (list.length <= 1) return String(list[0] ?? '');
-    return `${list.slice(0, -1).join(', ')} or ${list[list.length - 1]}`;
-}
-
 // Shiaijo-count rule for one tournament, mirrored from
 // helper.ValidateShiaijoCount (internal/helper/shiaijo_count.go) and worded
 // identically to shiaijoCountError (web-mobile/js/admin_helpers.jsx): a

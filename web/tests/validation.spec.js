@@ -9,7 +9,6 @@ import {
     getParticipantValidationState,
     validateCourtsValue,
     shiaijoCountError,
-    joinShiaijoCounts,
     VALID_SHIAIJO_COUNTS,
     validatePoolSettings
 } from "../js/validation.js";
@@ -228,7 +227,14 @@ describe("validateCourtsValue", () => {
 // that copy against the derived list rather than trusting it to stay in step.
 describe("index.html courts field", () => {
     const html = readFileSync(fileURLToPath(new URL("../index.html", import.meta.url)), "utf8");
-    const counts = joinShiaijoCounts(VALID_SHIAIJO_COUNTS);
+    // Derived from the legal set rather than written out, so dropping a count
+    // from VALID_SHIAIJO_COUNTS fails here instead of leaving the form's copy
+    // quietly offering a count the validator now rejects. The joiner lives in
+    // the test because nothing the browser loads needs it: the rejection
+    // message names only the nearest counts either side.
+    const counts = VALID_SHIAIJO_COUNTS.length <= 1
+        ? String(VALID_SHIAIJO_COUNTS[0] ?? "")
+        : `${VALID_SHIAIJO_COUNTS.slice(0, -1).join(", ")} or ${VALID_SHIAIJO_COUNTS[VALID_SHIAIJO_COUNTS.length - 1]}`;
 
     it("names the valid counts in the field label", () => {
         expect(counts).toBe("1, 2, 4, 8 or 16");

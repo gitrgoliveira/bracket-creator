@@ -105,6 +105,17 @@ func CourtLabel(i int) string {
 	return string("ABCDEFGHIJKLMNOPQRSTUVWXYZ"[i])
 }
 
+// ShiaijoLabel is the operator-facing name of one shiaijo, e.g. "Shiaijo C".
+//
+// The single writer of that string. The Pool Matches and Elimination Matches
+// column bands, the tree page titles and the workbook-parity reader that finds
+// bands by the "Shiaijo " prefix all have to spell it identically or a band
+// goes unrecognised, so the letter is derived here through CourtLabel rather
+// than by each caller's own arithmetic on 'A'.
+func ShiaijoLabel(i int) string {
+	return "Shiaijo " + CourtLabel(i)
+}
+
 func OrderStringsAlphabetically(strings []*Node) []*Node {
 	sort.Slice(strings, func(i, j int) bool {
 		strA := strings[i]
@@ -291,9 +302,9 @@ func SubtreeCourtIndex(numSubtrees, numCourts, idx int) int {
 // claiming a single shiaijo it does not own.
 func TreePageTitle(numSubtrees, numCourts, idx int) string {
 	if numSubtrees > 0 && numSubtrees < numCourts {
-		return fmt.Sprintf("Shiaijo %s-%s", CourtLabel(0), CourtLabel(clampCourts(numCourts)-1))
+		return ShiaijoLabel(0) + "-" + CourtLabel(clampCourts(numCourts)-1)
 	}
-	return "Shiaijo " + CourtLabel(SubtreeCourtIndex(numSubtrees, numCourts, idx))
+	return ShiaijoLabel(SubtreeCourtIndex(numSubtrees, numCourts, idx))
 }
 
 // ReorderPoolsForCourts deinterleaves pools so that when divided into

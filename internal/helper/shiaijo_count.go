@@ -44,10 +44,12 @@ var validShiaijoCounts = []int{1, 2, 4, 8, 16}
 //
 // This is the single source of truth for every enforcement point: the CLI
 // --courts flag (cmd/create-pools.go, cmd/create-playoffs.go and the web form
-// in cmd/create_handler.go), the mobile API (validateCompetitionShiaijoCount,
-// internal/mobileapp/handlers_tournament.go) and the engine draw pipeline
-// (engine.ValidateShiaijoCount). The clamps that LOWER a count rather than
-// validate it share the same set through EffectiveDrawCourts (draw.go).
+// in cmd/create_handler.go) and, through engine.ValidateCompetitionShiaijoCount,
+// both the mobile API and the engine's draw pipeline. That one wraps this rule
+// in the competition-level exemptions (empty list, non-bracket format), so the
+// API and the pipeline cannot come to different answers. The clamps that LOWER
+// a count rather than validate it share the same set through EffectiveDrawCourts
+// (draw.go).
 //
 // TWO browser surfaces mirror this message in JS, and BOTH must be updated
 // with it: shiaijoCountError in web-mobile/js/admin_helpers.jsx (the operator

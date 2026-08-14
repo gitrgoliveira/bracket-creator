@@ -6,7 +6,6 @@ import (
 	"slices"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
-	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -671,21 +670,20 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// matches. Only a NEW draw on an invalid allocation is refused, and the
 	// operator clears it by reassigning shiaijo in competition settings.
 	//
-	// The rule and its message live in helper.ValidateShiaijoCount, called
-	// directly here, so the CLI, the HTTP API, the engine and the operator UI
-	// all reject exactly the same allocations with exactly the same wording.
-	if len(comp.Courts) > 0 && CompetitionDrawsBracket(comp.Format) {
-		if err := helper.ValidateShiaijoCount(len(comp.Courts)); err != nil {
-			// Name the inheritance when that is where the count came from,
-			// or the operator is handed a count they never chose with no
-			// clue how the competition acquired it.
-			if courtsInherited {
-				return validationErrorf(
-					"competition %s cannot generate a draw: %s. It has no shiaijo of its own, so the draw would run on all %d of the tournament's; assign it its own shiaijo in the competition's settings",
-					id, err.Error(), len(comp.Courts))
-			}
-			return validationErrorf("competition %s cannot generate a draw: %s", id, err.Error())
+	// The exemptions and the rule both live in ValidateCompetitionShiaijoCount,
+	// which the HTTP write paths call too, so the CLI, the API, the engine and
+	// the operator UI all reject exactly the same allocations with exactly the
+	// same wording. Only the framing below is this path's own.
+	if err := ValidateCompetitionShiaijoCount(comp.Courts, comp.Format); err != nil {
+		// Name the inheritance when that is where the count came from, or the
+		// operator is handed a count they never chose with no clue how the
+		// competition acquired it.
+		if courtsInherited {
+			return validationErrorf(
+				"competition %s cannot generate a draw: %s. It has no shiaijo of its own, so the draw would run on all %d of the tournament's; assign it its own shiaijo in the competition's settings",
+				id, err.Error(), len(comp.Courts))
 		}
+		return validationErrorf("competition %s cannot generate a draw: %s", id, err.Error())
 	}
 
 	// Orphaned-shiaijo gate. Same placement and the same write-time logic as

@@ -61,6 +61,49 @@ func CompetitionDrawsBracket(format string) bool {
 	}
 }
 
+// ValidateCompetitionShiaijoCount rejects a competition-level court allocation
+// that is not a power of two (helper.ValidateShiaijoCount owns the rule and its
+// message: the knockout draw gives each shiaijo its own block of the bracket and
+// the blocks merge in pairs, so the count has to halve cleanly). 1, 2, 4, 8 and
+// 16 are legal; 3, 5, 6, 7, 10 and the rest are not.
+//
+// The gate is the EXEMPTIONS plus the rule, and it lives here rather than at the
+// HTTP boundary because the draw pipeline enforces the same composite and the
+// engine is the deeper of the two. A handler-side copy would let the API accept
+// what the draw then refuses (or the reverse) the moment either exemption moves.
+//
+// An empty list passes, because it means "inherit the tournament's courts" and
+// carries no count of its own. Every caller either resolves it first (POST
+// /competitions, the manifest importer) or is comparing it against a stored
+// allocation that was itself already resolved (the settings PUT). InheritedDrawCourts
+// is what materialises the inherited value, and it must run BEFORE this check:
+// what gets persisted is what gets validated, or a 3-shiaijo venue smuggles a
+// 3-shiaijo competition in by inheritance while the operator who typed the same
+// three courts out is refused.
+//
+// Scoped by format to the competitions whose draw builds a bracket
+// (CompetitionDrawsBracket): a league or Swiss competition has no bracket blocks
+// to merge and its courts run in parallel, so the rule does not bind there. Note
+// the app itself suggests court counts like 3 for a league (SuggestedMaxCourts is
+// floor(N/2)-1), which a format-blind rule would then reject.
+//
+// Note what else is NOT validated: the TOURNAMENT's court list. The rule is per
+// competition, so a 3-, 5- or 7-shiaijo venue is perfectly legal and simply
+// cannot give all of them to one bracket competition (4 + 1 across two
+// competitions is the intended shape on a 5-court venue; a 3-court venue runs its
+// competitions on 2 and 1).
+//
+// Existing data is validated on WRITE only. A competition already saved with an
+// invalid allocation keeps running and keeps being editable; the operator UI
+// shows a persistent warning on its settings screen until the allocation is
+// changed.
+func ValidateCompetitionShiaijoCount(courts []string, format string) error {
+	if len(courts) == 0 || !CompetitionDrawsBracket(format) {
+		return nil
+	}
+	return helper.ValidateShiaijoCount(len(courts))
+}
+
 // InheritedDrawCourts materialises the shiaijo allocation a draw runs on.
 //
 // A competition's own list wins whenever it has one, untouched: that is the

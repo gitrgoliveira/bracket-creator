@@ -270,7 +270,7 @@ func TreeToLeafArray(node *Node) []string {
 	}
 	left := TreeToLeafArray(node.Left)
 	right := TreeToLeafArray(node.Right)
-	target := NextPow2(max(len(left), len(right)))
+	target := leafPadTarget(len(left), len(right))
 	for len(left) < target {
 		left = append(left, "")
 	}
@@ -278,6 +278,19 @@ func TreeToLeafArray(node *Node) []string {
 		right = append(right, "")
 	}
 	return append(left, right...)
+}
+
+// leafPadTarget is the length EACH side of a junction is padded to before the
+// two are concatenated: the next power of two that holds the wider side.
+//
+// This is the single statement of the leaf array's geometry. TreeToLeafArray
+// builds the slice with it; leafArrayWidth (draw.go) measures the same slice
+// without building it, and RegionSpans -> CourtForLeafSlot is the only source
+// of a match's shiaijo. Those two must agree exactly or matches are stamped
+// onto the wrong court with nothing to catch it, so the rule is written once
+// here rather than once per reader.
+func leafPadTarget(leftWidth, rightWidth int) int {
+	return NextPow2(max(leftWidth, rightWidth))
 }
 
 func RoundToPowerOf2(x, y float64) (int, error) {

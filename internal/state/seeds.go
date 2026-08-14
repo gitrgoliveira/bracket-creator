@@ -26,20 +26,19 @@ import (
 // seed saves for DIFFERENT comps no longer block each other on the
 // global store mutex. Same locking strategy participants.csv and
 // pools.csv already use.
+// LoadSeeds is LoadSeedsRaw plus the usability check, exactly as
+// helper.ParseSeedsFile is helper.ReadSeedsFileRaw plus that check one layer
+// down. Reading through the raw loader rather than repeating its body keeps the
+// locking, the missing-file answer and any future caching in ONE place: the
+// show path is the one a change here is least likely to be carried across, and
+// a divergence would let a draw be built from a seeding the operator has not
+// finished. Validation runs on the returned copy, outside the lock.
 func (s *Store) LoadSeeds(compID string) ([]domain.SeedAssignment, error) {
-	if err := ValidateCompetitionID(compID); err != nil {
+	result, err := s.LoadSeedsRaw(compID)
+	if err != nil {
 		return nil, err
 	}
-	mu := s.getCompLock(compID)
-	mu.RLock()
-	defer mu.RUnlock()
-
-	path := s.compPath(compID, "seeds.csv")
-	result, err := helper.ParseSeedsFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return []domain.SeedAssignment{}, nil
-		}
+	if err := domain.ValidateAssignments(result); err != nil {
 		return nil, err
 	}
 	return result, nil

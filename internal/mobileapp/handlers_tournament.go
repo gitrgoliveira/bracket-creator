@@ -215,6 +215,31 @@ func competitionsBlockingCourtRemoval(comps []*state.Competition, stored, courts
 	)
 }
 
+// guardCourtRemoval runs checkCourtRemoval and answers the request itself when
+// the write must be refused, returning false once it has. Both /tournament
+// writers apply the identical guard with the identical status mapping (500 for
+// a store failure, 400 for an orphaned shiaijo), so the mapping is stated here
+// rather than restated per handler.
+//
+// Call it BEFORE UpdateTournamentChanged, never inside its transform: that
+// primitive holds the store-wide lock, and ListCompetitions / LoadCompetition
+// take it too, so checking inside would deadlock on a non-reentrant mutex. The
+// resulting TOCTOU window (a competition claiming a court between this check
+// and the save) is covered by the engine's draw gate, which re-checks against
+// the tournament at the moment a draw is built.
+func guardCourtRemoval(c *gin.Context, store *state.Store, courts []string) bool {
+	infraErr, validationErr := checkCourtRemoval(store, courts)
+	if infraErr != nil {
+		internalError(c, infraErr)
+		return false
+	}
+	if validationErr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": validationErr.Error()})
+		return false
+	}
+	return true
+}
+
 // checkCourtRemoval is the store-walking half of the shrink guard. It returns
 // (infraErr, validationErr) like checkUniqueCompFields: infraErr means the
 // store could not be queried (caller should 500), validationErr means a live
@@ -277,47 +302,12 @@ func checkCourtRemoval(store *state.Store, courts []string) (error, error) {
 // The settings PUT deliberately does NOT call this one: it checks labels up
 // front and defers the count check to the update transform, where the
 // STORED allocation is known and the check can be limited to an allocation
-// actually being changed. See validateCompetitionShiaijoCount.
+// actually being changed. See engine.ValidateCompetitionShiaijoCount.
 func validateCompetitionCourts(courts []string, format string) error {
 	if err := validateCourtLabels(courts); err != nil {
 		return err
 	}
-	return validateCompetitionShiaijoCount(courts, format)
-}
-
-// validateCompetitionShiaijoCount rejects a competition-level court
-// allocation that is not a power of two (helper.ValidateShiaijoCount owns the
-// rule and its message: the knockout draw gives each shiaijo its own block of
-// the bracket and the blocks merge in pairs, so the count has to halve
-// cleanly). 1, 2, 4, 8 and 16 are legal; 3, 5, 6, 7, 10 and the rest are not.
-//
-// An empty list passes, because it means "inherit the tournament's courts"
-// and carries no count of its own. Every caller either resolves it first
-// (POST /competitions, the manifest importer) or is comparing it against a
-// stored allocation that was itself already resolved (the settings PUT).
-//
-// Scoped by format to the competitions whose draw builds a bracket
-// (engine.CompetitionDrawsBracket): a league or Swiss competition has no
-// bracket blocks to merge, and its courts run in parallel, so the
-// rule does not bind there. Note the app itself suggests court counts like 3
-// for a league (engine.SuggestedMaxCourts is floor(N/2)-1), which a
-// format-blind rule would then reject.
-//
-// Note what else is NOT validated: the TOURNAMENT's court list. The rule is
-// per competition, so a 3-, 5- or 7-shiaijo venue is perfectly legal and
-// simply cannot give all of them to one bracket competition (4 + 1 across
-// two competitions is the intended shape on a 5-court venue; a 3-court venue
-// runs its competitions on 2 and 1).
-//
-// Existing data is validated on WRITE only. A competition already saved with
-// an invalid allocation keeps running and keeps being editable; the operator
-// UI shows a persistent warning on its settings screen until the allocation
-// is changed.
-func validateCompetitionShiaijoCount(courts []string, format string) error {
-	if len(courts) == 0 || !engine.CompetitionDrawsBracket(format) {
-		return nil
-	}
-	return helper.ValidateShiaijoCount(len(courts))
+	return engine.ValidateCompetitionShiaijoCount(courts, format)
 }
 
 // resolveCompetitionCourts guarantees a competition resolves to at least one
@@ -607,19 +597,8 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			return
 		}
 
-		// Refuse a court list that would orphan a live competition. Runs
-		// BEFORE UpdateTournamentChanged, not inside its transform: that
-		// primitive holds the store-wide lock, and ListCompetitions /
-		// LoadCompetition take it too, so checking inside would deadlock on a
-		// non-reentrant mutex. The resulting TOCTOU window (a competition
-		// claiming a court between this check and the save) is covered by the
-		// engine's draw gate, which re-checks against the tournament at the
-		// moment a draw is built.
-		if infraErr, validationErr := checkCourtRemoval(store, t.Courts); infraErr != nil {
-			internalError(c, infraErr)
-			return
-		} else if validationErr != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": validationErr.Error()})
+		// Refuse a court list that would orphan a live competition.
+		if !guardCourtRemoval(c, store, t.Courts) {
 			return
 		}
 
@@ -903,11 +882,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		// create-only (it is re-POSTed against an existing record, see the
 		// password-preserve block below), so a court reduction can arrive
 		// here too and must be caught by the same guard.
-		if infraErr, validationErr := checkCourtRemoval(store, t.Courts); infraErr != nil {
-			internalError(c, infraErr)
-			return
-		} else if validationErr != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": validationErr.Error()})
+		if !guardCourtRemoval(c, store, t.Courts) {
 			return
 		}
 

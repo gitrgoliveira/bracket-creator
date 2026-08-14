@@ -320,17 +320,18 @@ function normalizeCompetitionDetail(data) {
     // has to guard individually") false for the one path that matters. The
     // render sites are defended too; this keeps the boundary honest so the
     // next consumer of config.* inherits the guarantee.
+    // One copy, both fields. config.players is PascalCase on the Go side and
+    // camelCase here; config.courts must never arrive null.
     if (result.config) {
-        result.config = { ...result.config, courts: result.config.courts || [] };
-    }
-
-    // Normalize config.players (Go uses PascalCase, JS expects camelCase)
-    if (result.config && result.config.players) {
-        result.config = { ...result.config, players: result.config.players.map(p => {
-            const norm = normalizePlayer(p);
-            // Preserve id and seed null (normalizePlayer maps Seed:0 → seed:0, but JS uses null for "not seeded")
-            return { ...norm, id: p.id || norm.id, seed: p.Seed || p.seed || null };
-        })};
+        const config = { ...result.config, courts: result.config.courts || [] };
+        if (config.players) {
+            config.players = config.players.map(p => {
+                const norm = normalizePlayer(p);
+                // Preserve id and seed null (normalizePlayer maps Seed:0 → seed:0, but JS uses null for "not seeded")
+                return { ...norm, id: p.id || norm.id, seed: p.Seed || p.seed || null };
+            });
+        }
+        result.config = config;
     }
 
     // Normalize pools (Go: PoolName, Players → poolName, players)

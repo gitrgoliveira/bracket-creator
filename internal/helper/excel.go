@@ -136,7 +136,7 @@ func writeCourtHeaders(f *excelize.File, sheetName string, numCourts int, header
 		courtEndCol := courtStartCol + 6
 		cStartColName := mustColumnName(courtStartCol)
 		cEndColName := mustColumnName(courtEndCol)
-		courtLabel := fmt.Sprintf("Shiaijo %c", rune('A'+c))
+		courtLabel := ShiaijoLabel(c)
 		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s1", cStartColName), courtLabel))
 		handleExcelError("MergeCell", f.MergeCell(sheetName, fmt.Sprintf("%s1", cStartColName), fmt.Sprintf("%s1", cEndColName)))
 		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s1", cStartColName), fmt.Sprintf("%s1", cEndColName), headerStyle))
@@ -776,8 +776,8 @@ func printPoolResultsTable(f *excelize.File, sheetName string, pool Pool, startR
 // EffectiveDrawCourts is idempotent, so a caller that already clamped
 // (cmd/create-pools.go) is unaffected.
 func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinners int, numCourts int, mirror bool, poolCoords map[string]cellCoord, pCoords map[string]playerCellCoord, engi bool) map[string]MatchWinner {
-	numCourts = clampCourts(numCourts)
-	// clampCourts first (0 or negative becomes 1), then the pool clamp.
+	// EffectiveDrawCourts already coerces 0/negative to 1, so it is the only
+	// clamp needed here; a clampCourts in front of it would be a no-op.
 	numCourts = EffectiveDrawCourts(len(pools), numCourts)
 
 	matchWinners := make(map[string]MatchWinner)
@@ -1534,8 +1534,8 @@ func CreateNamesToPrint(f *excelize.File, players []Player, sanitized bool, numC
 // than by the caller so no call site can pass a count that disagrees with the
 // Pool Matches skeleton.
 func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanitized bool, numCourts int, pCoords map[string]playerCellCoord) {
-	numCourts = clampCourts(numCourts)
-	// clampCourts first (0 or negative becomes 1), then the pool clamp.
+	// EffectiveDrawCourts already coerces 0/negative to 1, so it is the only
+	// clamp needed here; a clampCourts in front of it would be a no-op.
 	numCourts = EffectiveDrawCourts(len(pools), numCourts)
 	courtAssignments, _ := AssignPoolsToCourts(len(pools), numCourts)
 

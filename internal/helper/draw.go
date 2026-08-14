@@ -97,6 +97,15 @@ func (d *KnockoutDraw) PoolCourt(numPools int) []int {
 }
 
 // NumCourts is the number of shiaijo regions the draw actually has.
+//
+// This, not the requested court count, is the band count for the Elimination
+// Matches sheet. That sheet cannot self-clamp the way the pool sheets do,
+// because it takes no pools. On the pool-fed path NumCourts equals the count
+// those sheets clamp to; on the PURE PLAYOFFS path (pools empty, so
+// EffectiveDrawCourts returns the raw count) NewPlayoffDraw -> splitIntoSubtrees
+// can honestly yield FEWER regions than numCourts when the tree has too few
+// splittable levels. Using it makes the elimination banding equal the tree-page
+// count in BOTH formats, which is why both export paths pass it.
 func (d *KnockoutDraw) NumCourts() int {
 	if d == nil {
 		return 0
@@ -1041,9 +1050,10 @@ func (d *KnockoutDraw) RegionSpans() [][2]int {
 }
 
 // leafSpanWalk mirrors TreeToLeafArray's padding exactly and records the offset
-// of every region root it passes. The padding rule is not restated here: it is
-// leafArrayWidth's, so a change to TreeToLeafArray's geometry has one place to
-// land rather than two that must be edited in lockstep.
+// of every region root it passes. The padding rule is not restated here, nor in
+// leafArrayWidth: both defer to leafPadTarget (tree.go), so a change to
+// TreeToLeafArray's geometry has one place to land rather than several that
+// must be edited in lockstep.
 func leafSpanWalk(n *Node, offset int, index map[*Node]int, out [][2]int) {
 	if n == nil {
 		return
@@ -1059,7 +1069,9 @@ func leafSpanWalk(n *Node, offset int, index map[*Node]int, out [][2]int) {
 	}
 }
 
-// leafArrayWidth is len(TreeToLeafArray(n)) without building the slice.
+// leafArrayWidth is len(TreeToLeafArray(n)) without building the slice. It
+// measures with leafPadTarget, the same rule TreeToLeafArray builds with, so
+// the two cannot disagree about where a region starts.
 func leafArrayWidth(n *Node) int {
 	if n == nil {
 		return 0
@@ -1067,7 +1079,7 @@ func leafArrayWidth(n *Node) int {
 	if n.LeafNode {
 		return 1
 	}
-	return 2 * NextPow2(max(leafArrayWidth(n.Left), leafArrayWidth(n.Right)))
+	return 2 * leafPadTarget(leafArrayWidth(n.Left), leafArrayWidth(n.Right))
 }
 
 // CourtForLeafSlot returns the index of the region that owns leaf slot, given

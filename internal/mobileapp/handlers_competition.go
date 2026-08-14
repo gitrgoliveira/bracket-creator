@@ -827,7 +827,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// This is validateCourtLabels, NOT validateCompetitionCourts:
 			// the shiaijo-count half of that validator needs the STORED
 			// allocation to decide, so it runs inside the update transform
-			// below (search validateCompetitionShiaijoCount) where `current`
+			// below (search ValidateCompetitionShiaijoCount) where `current`
 			// is loaded. A PUT that leaves an already-invalid allocation
 			// alone must SUCCEED, otherwise a competition saved before the
 			// rule existed could never have its name, date or durations
@@ -1015,6 +1015,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// ("inherit the venue"), which is exactly what makes them
 				// comparable.
 				currentCourts := resolveCompetitionCourts(current.Courts, putTourn)
+				// Both guards below ask the same question -- "is this PUT actually
+				// reassigning shiaijo?" -- so it is asked once. Two independent
+				// spellings of it is how one of them ends up answering differently.
+				courtsChanged := strings.Join(comp.Courts, ",") != strings.Join(currentCourts, ",")
 				// Draw-ready gate: the draw artifacts (pools.csv /
 				// bracket.json) were generated from the current config.
 				// Mutating output-affecting fields while draw-ready would
@@ -1048,7 +1052,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 						comp.PoolSize != current.PoolSize ||
 							comp.PoolWinners != current.PoolWinners ||
 							comp.PoolSizeMode != current.PoolSizeMode ||
-							strings.Join(comp.Courts, ",") != strings.Join(currentCourts, ",") ||
+							courtsChanged ||
 							comp.Format != current.Format ||
 							comp.PoolFormat != current.PoolFormat ||
 							comp.RoundRobin != current.RoundRobin ||
@@ -1121,9 +1125,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// from no stored list at all, is not a change, so it still
 				// saves.
 				//
-				// Any change to the list must land on a valid count, using
-				// the same join-comparison the draw-ready guard above uses
-				// for courts. The FORMAT is part of the trigger too: the
+				// Any change to the list must land on a valid count, on the
+				// same courtsChanged the draw-ready guard above uses. The
+				// FORMAT is part of the trigger too: the
 				// rule is scoped to bracket-drawing formats, so switching a
 				// league on 3 shiaijo to mixed makes a stored-and-valid
 				// allocation illegal without the court list changing at
@@ -1139,9 +1143,8 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// so only a CHANGE that still names a missing court is
 				// refused. It is NOT scoped to bracket formats: a league's
 				// matches need an operator view just as much.
-				if strings.Join(comp.Courts, ",") != strings.Join(currentCourts, ",") ||
-					comp.Format != current.Format {
-					if err := validateCompetitionShiaijoCount(comp.Courts, comp.Format); err != nil {
+				if courtsChanged || comp.Format != current.Format {
+					if err := engine.ValidateCompetitionShiaijoCount(comp.Courts, comp.Format); err != nil {
 						validationErr = fmt.Errorf("courts: %w", err)
 						return nil, nil
 					}

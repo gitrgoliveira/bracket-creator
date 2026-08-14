@@ -728,24 +728,22 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
 
-  // Shiaijo-count rule (shiaijoCountError, mirrored from
-  // helper.ValidateShiaijoCount), identical to the competition Settings
-  // screen: a competition whose draw builds a knockout bracket runs on 1, 2,
-  // 4, 8 or 16 shiaijo, and league/Swiss are out of scope
-  // (formatDrawsBracket). The server rejects an invalid allocation on create
+  // Shiaijo-count rule (shiaijoCountErrorFor, mirrored from
+  // engine.ValidateCompetitionShiaijoCount), identical to the competition
+  // Settings screen: a competition whose draw builds a knockout bracket runs on
+  // 1, 2, 4, 8 or 16 shiaijo, and league/Swiss are out of scope, which is why
+  // the format is passed in. The server rejects an invalid allocation on create
   // with a 400, so without this the operator meets a live button, a failed
   // request and a form that still looks fine. There is no stored-vs-staged
   // distinction to make here: a create authors a brand-new allocation, so the
   // hint and the block are the same condition.
-  const courtsErr = window.formatDrawsBracket(format)
-    ? window.shiaijoCountError(selectedCourts.length) : null;
+  const courtsErr = window.shiaijoCountErrorFor(format, selectedCourts.length);
   // STANDING hint, same helper and same venue-awareness as the Settings
   // screen: on a 3-shiaijo tournament this reads "can use 1 or 2 (this
   // tournament has 3)" from the moment the form opens, so the operator never
   // has to discover the rule by being refused. The mechanism sentence is
   // dropped while the red error states it one line above.
-  const courtsHint = window.formatDrawsBracket(format)
-    ? window.shiaijoCountHint(safeCourts.length, !courtsErr) : null;
+  const courtsHint = window.shiaijoCountHintFor(format, safeCourts.length, !courtsErr);
 
   // Auto-stack the default start time after the previous competition on the
   // same day. We take the latest-STARTING same-day competition and add its
@@ -1216,26 +1214,24 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
 
 // --- Import preview / result helpers (pure, ES-exported for the vitest suite) --
 //
-// The shiaijo allocation a manifest row will ACTUALLY be saved with. Mirrors
-// resolveCompetitionCourts on the Go side (internal/mobileapp): a row that
-// omits `courts` inherits the tournament's whole list, and the inherited value
-// is validated exactly like a spelled-out one. That inheritance is why the
-// preview has to resolve rather than print `comp.courts`: on a 3-shiaijo venue
-// the commonest manifest of all - one with no courts key at all - is the one
-// that gets refused.
+// The shiaijo allocation a manifest row will ACTUALLY be saved with: the row's
+// own list, or the tournament's when it omits one. Defers to inheritedDrawCourts
+// (admin_helpers), the console's single mirror of engine.InheritedDrawCourts, so
+// the preview cannot resolve differently from the blockers on the dashboard. That
+// inheritance is why the preview has to resolve rather than print `comp.courts`:
+// on a 3-shiaijo venue the commonest manifest of all - one with no courts key at
+// all - is the one that gets refused.
 function previewRowCourts(comp, venueCourts) {
-  const own = (comp && Array.isArray(comp.courts) && comp.courts.length) ? comp.courts : null;
-  return own || (Array.isArray(venueCourts) ? venueCourts : []);
+  return window.inheritedDrawCourts(comp && comp.courts, venueCourts);
 }
 
 // The shiaijo-count problem this manifest row would be refused for, or null.
-// Scoped by format the same way every other surface is (formatDrawsBracket):
-// a league or Swiss row may hold any count. Venue-aware, so the message never
-// offers a count the venue cannot supply.
+// Scoped by format the same way every other surface is, because the scope
+// travels inside shiaijoCountErrorFor: a league or Swiss row may hold any count.
+// Venue-aware, so the message never offers a count the venue cannot supply.
 function previewRowShiaijoError(comp, venueCourts) {
-  if (!window.formatDrawsBracket((comp && comp.format) || "")) return null;
   const venue = (Array.isArray(venueCourts) ? venueCourts : []).length;
-  return window.shiaijoCountError(previewRowCourts(comp, venueCourts).length, venue);
+  return window.shiaijoCountErrorFor((comp && comp.format) || "", previewRowCourts(comp, venueCourts).length, venue);
 }
 
 // `courts:` is the raw API field name the import handler prefixes onto the

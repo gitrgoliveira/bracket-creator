@@ -153,3 +153,19 @@ func CreateTestTournament() domain.Tournament {
 		},
 	}
 }
+
+// LegalShiaijoCount states R9's shiaijo-count rule INDEPENDENTLY of the
+// production validator (helper.ValidateShiaijoCount), so the CLI, engine and
+// API sweeps that use it cannot agree with a broken implementation by
+// construction: a bracket-drawing competition runs on 1, 2, 4, 8 or 16 shiaijo
+// and nothing else.
+//
+// It lives here rather than three times over because three identical copies buy
+// no extra independence -- they can only drift together -- while letting the
+// CLI, engine and API sweeps disagree about what they are asserting. The
+// independence that matters is from the PRODUCTION rule, and this package keeps
+// it: internal/test imports only internal/domain, so it cannot reach
+// helper.ValidateShiaijoCount even by accident.
+func LegalShiaijoCount(n int) bool {
+	return n == 1 || n == 2 || n == 4 || n == 8 || n == 16
+}

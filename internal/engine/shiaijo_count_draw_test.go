@@ -6,16 +6,10 @@ import (
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// legalShiaijoCount is the rule spelled out independently of the production
-// validator, so these wiring tests cannot agree with a broken implementation by
-// construction: a competition runs on 1, 2, 4, 8 or 16 shiaijo and nothing else.
-func legalShiaijoCount(n int) bool {
-	return n == 1 || n == 2 || n == 4 || n == 8 || n == 16
-}
 
 // TestDrawPipelineRejectsIllegalShiaijoCount sweeps the shiaijo-count rule at
 // the engine's draw entry point, which is where a draw generated outside the
@@ -46,7 +40,7 @@ func TestDrawPipelineRejectsIllegalShiaijoCount(t *testing.T) {
 				saveTestParticipants(t, store, compID, players)
 
 				err := eng.GenerateDraw(compID)
-				if legalShiaijoCount(n) {
+				if bctest.LegalShiaijoCount(n) {
 					require.NoErrorf(t, err, "%d shiaijo must draw", n)
 					return
 				}

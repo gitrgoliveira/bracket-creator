@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -35,7 +36,7 @@ func TestPlayoffOptionsRun_ShiaijoCount(t *testing.T) {
 				courts:     n,
 			}
 			err := o.run(nil, nil)
-			if legalShiaijoCount(n) {
+			if bctest.LegalShiaijoCount(n) {
 				assert.NoErrorf(t, err, "%d courts must be accepted", n)
 				return
 			}

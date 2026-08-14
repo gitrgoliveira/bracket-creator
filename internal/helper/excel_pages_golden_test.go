@@ -128,10 +128,6 @@ var excelPageTitleLabel = regexp.MustCompile(`"Shiaijo ([A-Z])"`)
 // excelPageSheetName matches the pages RenderTreePages creates.
 var excelPageSheetName = regexp.MustCompile(`^Tree (\d+)$`)
 
-func excelPageKey(numPools, poolWinners, courts int) string {
-	return fmt.Sprintf("P%02d-W%d-C%d", numPools, poolWinners, courts)
-}
-
 // newRenderTargetFile builds the minimum workbook RenderKnockoutPages needs: a
 // data sheet for AddPoolDataToSheet's roster and the styled-page source sheet
 // RenderTreePages copies each tree page from. internal/excel owns the real
@@ -318,7 +314,7 @@ func buildExcelPagesGolden(t *testing.T) excelPagesGolden {
 	for _, numPools := range excelPagesSweepPoolCounts {
 		for _, poolWinners := range excelPagesSweepPoolWinners {
 			for _, courts := range excelPagesSweepCourts {
-				g.Cases[excelPageKey(numPools, poolWinners, courts)] = buildExcelPageCase(t, numPools, poolWinners, courts)
+				g.Cases[drawShapeKey(numPools, poolWinners, courts)] = buildExcelPageCase(t, numPools, poolWinners, courts)
 			}
 		}
 	}

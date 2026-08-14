@@ -9,23 +9,18 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// legalShiaijoCount states the rule independently of the production validator,
-// so these API wiring tests cannot agree with a broken implementation by
-// construction: a bracket-drawing competition runs on 1, 2, 4, 8 or 16 shiaijo.
-func legalShiaijoCount(n int) bool {
-	return n == 1 || n == 2 || n == 4 || n == 8 || n == 16
-}
 
 // shiaijoLabels returns n single-character court labels, A, B, C, ...
 func shiaijoLabels(n int) []string {
 	out := make([]string, n)
 	for i := range n {
-		out[i] = string(rune('A' + i))
+		out[i] = helper.CourtLabel(i)
 	}
 	return out
 }
@@ -77,7 +72,7 @@ func TestCreateCompetitionShiaijoCount(t *testing.T) {
 				"format": "mixed",
 				"courts": shiaijoLabels(n),
 			}, "")
-			if legalShiaijoCount(n) {
+			if bctest.LegalShiaijoCount(n) {
 				require.Equalf(t, http.StatusCreated, w.Code, "%d shiaijo must be accepted: %s", n, w.Body.String())
 				return
 			}
@@ -277,7 +272,7 @@ func TestImportCompetitionRejectsIllegalShiaijoCount(t *testing.T) {
 				Format: "mixed", Courts: shiaijoLabels(n),
 			}, map[string][]byte{})
 
-			if legalShiaijoCount(n) {
+			if bctest.LegalShiaijoCount(n) {
 				require.Emptyf(t, res.Error, "%d shiaijo must be accepted: %s", n, res.Error)
 				return
 			}
@@ -431,7 +426,7 @@ func TestUpdateCompetitionShiaijoCount(t *testing.T) {
 					"id": "sweep", "name": "Sweep", "format": "mixed",
 					"courts": shiaijoLabels(n), "poolSize": 4,
 				})
-				if legalShiaijoCount(n) {
+				if bctest.LegalShiaijoCount(n) {
 					require.Equalf(t, http.StatusOK, w.Code, "%d shiaijo: %s", n, w.Body.String())
 					return
 				}

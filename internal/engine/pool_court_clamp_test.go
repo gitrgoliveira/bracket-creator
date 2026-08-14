@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -125,7 +126,7 @@ func TestPoolPhaseAndBracketAgreeOnTheShiaijoCount(t *testing.T) {
 			assert.Lenf(t, poolCourts, tc.wantCourts,
 				"%d pools on %d shiaijo should run the pool phase on %d: got %v",
 				len(pools), tc.courts, tc.wantCourts, poolCourts)
-			assert.Truef(t, legalShiaijoCount(len(poolCourts)),
+			assert.Truef(t, bctest.LegalShiaijoCount(len(poolCourts)),
 				"the DERIVED pool-phase allocation must itself be a power of two, got %d (%v)",
 				len(poolCourts), poolCourts)
 			assert.Equalf(t, bracket, poolCourts,

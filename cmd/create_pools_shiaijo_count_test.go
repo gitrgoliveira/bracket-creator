@@ -7,16 +7,10 @@ import (
 	"strings"
 	"testing"
 
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// legalShiaijoCount states the rule independently of the production validator,
-// so these CLI wiring tests cannot agree with a broken implementation by
-// construction: --courts takes 1, 2, 4, 8 or 16 and nothing else.
-func legalShiaijoCount(n int) bool {
-	return n == 1 || n == 2 || n == 4 || n == 8 || n == 16
-}
 
 // poolRoster writes a CSV with n entrants, each in their own dojo, and returns
 // its path. Unique dojos keep CreatePools' dojo-conflict avoidance out of the
@@ -58,7 +52,7 @@ func TestPoolOptionsRun_ShiaijoCount(t *testing.T) {
 				determined:  true,
 			}
 			err := o.run(nil, nil)
-			if legalShiaijoCount(n) {
+			if bctest.LegalShiaijoCount(n) {
 				assert.NoErrorf(t, err, "%d courts must be accepted", n)
 				return
 			}
@@ -142,7 +136,7 @@ func TestPoolOptionsRun_ClampKeepsCourtsLegal(t *testing.T) {
 
 			assert.Equal(t, tt.wantCourts, o.courts,
 				"clamped court count must land on a power of two")
-			assert.Truef(t, legalShiaijoCount(o.courts),
+			assert.Truef(t, bctest.LegalShiaijoCount(o.courts),
 				"clamp produced an illegal %d courts", o.courts)
 		})
 	}

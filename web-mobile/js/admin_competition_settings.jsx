@@ -553,6 +553,21 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // saving belongs here, never at a call site.
   const saveDisabled = !isDirty || saving || hasDurationError || blockingCourtsErr;
 
+  // The blocking message and its precedence, shared by the header chip and the
+  // footer for the same reason saveDisabled is: the footer used to restate the
+  // chain as three spans with cascading negations, which is the shape that
+  // silently keeps rendering "● Unsaved changes" when a fourth blocker is added
+  // and one negation is missed.
+  //
+  // ONLY the blocking half is shared. The header additionally reports the
+  // transient "Saving…" and "✓ Saved at" states; the footer deliberately shows
+  // neither, so those stay where they are rather than being forced into a
+  // common value that would change what the footer renders.
+  const saveBlockMessage = saveErr ? `⚠ ${saveErr}`
+    : hasDurationError ? "⚠ Fix match duration"
+      : blockingCourtsErr ? "⚠ Fix shiaijo count" : "";
+  const saveBlocked = !!saveBlockMessage;
+
   return (
     <div className="card">
       <div className="card__head">
@@ -562,12 +577,12 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             fontSize: 12.5,
             padding: "4px 8px",
             borderRadius: 4,
-            background: (saveErr || hasDurationError || blockingCourtsErr) ? "var(--red-soft)" : isDirty ? "var(--warn-soft)" : lastSaved ? "var(--accent-soft)" : "transparent",
-            color: (saveErr || hasDurationError || blockingCourtsErr) ? "var(--red)" : isDirty ? "var(--warn-ink)" : "var(--accent)",
+            background: saveBlocked ? "var(--red-soft)" : isDirty ? "var(--warn-soft)" : lastSaved ? "var(--accent-soft)" : "transparent",
+            color: saveBlocked ? "var(--red)" : isDirty ? "var(--warn-ink)" : "var(--accent)",
             fontWeight: 600,
             transition: "all 300ms"
           }}>
-            {saveErr ? `⚠ ${saveErr}` : saving ? "Saving…" : hasDurationError ? "⚠ Fix match duration" : blockingCourtsErr ? "⚠ Fix shiaijo count" : isDirty ? "● Unsaved changes" : lastSaved ? `✓ Saved at ${lastSaved}` : ""}
+            {saving && !saveErr ? "Saving…" : saveBlocked ? saveBlockMessage : isDirty ? "● Unsaved changes" : lastSaved ? `✓ Saved at ${lastSaved}` : ""}
           </div>
           <button type="button" className="btn btn--primary" onClick={saveNow} disabled={saveDisabled}>
             {saving ? "Saving…" : "Save changes"}
@@ -963,13 +978,13 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       )}
       {/* Repeat Save at the foot of the long settings form so the operator
           doesn't have to scroll back to the header after editing. Same
-          onClick and the SAME `saveDisabled` value as the header button: the
-          two cannot drift because there is only one condition. */}
+          onClick, the SAME `saveDisabled` value and the SAME `saveBlockMessage`
+          as the header: the two cannot drift because neither the block
+          condition nor the blocking message is restated here. The transient
+          "Saving…"/"✓ Saved at" states are the header's alone, by choice. */}
       <div style={{ marginTop: 20, display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10 }}>
-        {saveErr && <span style={{ fontSize: 12.5, color: "var(--red)", fontWeight: 600 }}>⚠ {saveErr}</span>}
-        {!saveErr && hasDurationError && <span style={{ fontSize: 12.5, color: "var(--red)", fontWeight: 600 }}>⚠ Fix match duration</span>}
-        {!saveErr && !hasDurationError && blockingCourtsErr && <span style={{ fontSize: 12.5, color: "var(--red)", fontWeight: 600 }}>⚠ Fix shiaijo count</span>}
-        {!saveErr && !hasDurationError && !blockingCourtsErr && isDirty && !saving && <span style={{ fontSize: 12.5, color: "var(--warn)", fontWeight: 600 }}>● Unsaved changes</span>}
+        {saveBlocked && <span style={{ fontSize: 12.5, color: "var(--red)", fontWeight: 600 }}>{saveBlockMessage}</span>}
+        {!saveBlocked && isDirty && !saving && <span style={{ fontSize: 12.5, color: "var(--warn)", fontWeight: 600 }}>● Unsaved changes</span>}
         <button type="button" className="btn btn--primary" onClick={saveNow} disabled={saveDisabled}>
           {saving ? "Saving…" : "Save changes"}
         </button>

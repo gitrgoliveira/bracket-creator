@@ -892,16 +892,10 @@ if (typeof window !== "undefined") {
   window.courtCount = courtCount;
   window.shiaijoCountError = shiaijoCountError;
   window.shiaijoCountHint = shiaijoCountHint;
-  window.allowedShiaijoCounts = allowedShiaijoCounts;
-  window.shiaijoVenueSplitExample = shiaijoVenueSplitExample;
   window.shiaijoVenueHint = shiaijoVenueHint;
-  window.SHIAIJO_RULE_IS_PER_COMPETITION = SHIAIJO_RULE_IS_PER_COMPETITION;
-  window.VALID_SHIAIJO_COUNTS = VALID_SHIAIJO_COUNTS;
   window.formatDrawsBracket = formatDrawsBracket;
-  window.courtsOutsideTournament = courtsOutsideTournament;
   window.courtPillOptions = courtPillOptions;
   window.orphanedShiaijoError = orphanedShiaijoError;
-  window.competitionDrawBlockedReason = competitionDrawBlockedReason;
   window.competitionDrawBlocker = competitionDrawBlocker;
   window.seedGapDiagnosis = seedGapDiagnosis;
   window.seededRanks = seededRanks;

@@ -187,6 +187,26 @@ func (o *poolOptions) createPools(entries []string) error {
 		return fmt.Errorf("not enough valid participants (%d) to form a pool of size %d", len(players), activePoolSize)
 	}
 
+	// Clamp courts to the number of pools (e.g. if defaulted to 2 but only 1 pool
+	// exists). The clamp can produce a value the operator never asked for, so it
+	// has to respect the shiaijo-count rule too: clamping a legal --courts 4 onto
+	// 3 pools would otherwise silently hand the draw an illegal 3 courts. Step
+	// down to the largest power of two that fits instead (1 pool stays 1, which is
+	// the explicitly allowed single-shiaijo case; 7 pools carry 4 courts, not the
+	// merely-even 6). helper.EffectiveDrawCourts is the same rule the draw applies
+	// internally, shared so the Pool Matches and Names sheets band by the same
+	// court count the bracket regions use.
+	//
+	// It is clamped HERE, above the seed spread, because the clamped count is the
+	// modulus for all three of PoolSeeding, ReorderPoolsForCourts and the draw's
+	// own AssignPoolsToCourts; the three must agree or seeds are placed for a
+	// shiaijo layout the draw does not have. Clamping only further down left the
+	// deinterleave a no-op exactly when the clamp bit: 26 competitors at pool size
+	// 5 in max mode on 8 shiaijo gives 6 pools, which ReorderPoolsForCourts
+	// returned untouched (6 <= 8) while the draw packed them onto 4 shiaijo,
+	// handing the first both oversized pools.
+	o.courts = helper.EffectiveDrawCourts(numPools, o.courts)
+
 	// Reorder players to ensure seeded participants are distributed effectively across pools
 	players = helper.PoolSeeding(players, numPools, o.courts)
 
@@ -227,17 +247,6 @@ func (o *poolOptions) createPools(entries []string) error {
 	}
 	fmt.Printf("There will be %d finalists\n", numPools*o.poolWinners)
 
-	// Clamp courts to the number of pools (e.g. if defaulted to 2 but only 1 pool exists).
-	// The clamp can produce a value the operator never asked for, so it has to
-	// respect the shiaijo-count rule too: clamping a legal --courts 4 onto 3
-	// pools would otherwise silently hand the draw an illegal 3 courts. Step
-	// down to the largest power of two that fits instead (1 pool stays 1,
-	// which is the explicitly allowed single-shiaijo case; 7 pools carry 4
-	// courts, not the merely-even 6). helper.EffectiveDrawCourts is the same
-	// rule the draw applies internally, shared so the Pool Matches and Names
-	// sheets band by the same court count the bracket regions use.
-	o.courts = helper.EffectiveDrawCourts(numPools, o.courts)
-
 	// Create pool matches BEFORE the draw: R6's second bye criterion ranks by
 	// how many pool matches a pool's qualifier plays (D1), which helper.poolLoad
 	// reads off the drawn pool. Mirror the engine's authoritative PoolFormat ×
@@ -266,7 +275,7 @@ func (o *poolOptions) createPools(entries []string) error {
 	// output as the workbook is written, so stdout is where they read it; the
 	// workbook itself is the artifact, not a message channel. Silent on a
 	// competition with no seeds, which is a normal configuration.
-	for _, w := range helper.SeedPlacementWarnings(draw, pools, o.courts) {
+	for _, w := range helper.SeedPlacementWarnings(draw, pools) {
 		fmt.Printf("Warning: %s\n", w)
 	}
 

@@ -133,6 +133,20 @@ func (d poolDraw) courtLoad() map[string]int {
 	return load
 }
 
+// sizesInDrawOrder lists the pool sizes by pool letter, "Pool A" first. The
+// letters are re-assigned by helper.ReorderPoolsForCourts, so this reads the
+// draw order the workbook and the store actually carry.
+func (d poolDraw) sizesInDrawOrder(t *testing.T) []int {
+	t.Helper()
+	sizes := make([]int, 0, len(d.poolSize))
+	for i := 0; i < len(d.poolSize); i++ {
+		name := fmt.Sprintf("Pool %c", rune('A'+i))
+		require.Containsf(t, d.poolSize, name, "expected %d consecutively named pools", len(d.poolSize))
+		sizes = append(sizes, d.poolSize[name])
+	}
+	return sizes
+}
+
 // oversizedByCourt counts, per shiaijo, the pools larger than the competition's
 // smallest pool. Those are the pools whose qualifier fights an extra round-robin
 // match, so clustering them on one court skews that court's load and (under
@@ -417,13 +431,7 @@ func TestPoolDrawOversizedPoolsSpreadAcrossCourts(t *testing.T) {
 			roster := parityRoster(tc.players)
 			eng := enginePoolDraw(t, roster, nil, tc.poolSize, tc.courts, tc.isMax)
 
-			sizes := make([]int, 0, len(eng.poolSize))
-			for i := 0; i < len(eng.poolSize); i++ {
-				name := fmt.Sprintf("Pool %c", rune('A'+i))
-				require.Containsf(t, eng.poolSize, name, "expected %d consecutively named pools", len(eng.poolSize))
-				sizes = append(sizes, eng.poolSize[name])
-			}
-			assert.Equal(t, tc.wantSizes, sizes, "pool sizes in draw order")
+			assert.Equal(t, tc.wantSizes, eng.sizesInDrawOrder(t), "pool sizes in draw order")
 			assert.Equal(t, tc.wantLoad, eng.courtLoad(), "competitors per shiaijo")
 
 			// The load numbers above are the specific consequence; this is the
@@ -440,6 +448,63 @@ func TestPoolDrawOversizedPoolsSpreadAcrossCourts(t *testing.T) {
 			}
 			assert.LessOrEqualf(t, maxCount-minCount, 1,
 				"oversized pools must be spread across shiaijo, got %v", oversized)
+		})
+	}
+}
+
+// TestPoolDrawDeinterleavesAgainstTheClampedShiaijoCount is the CLAMPED regime
+// of the same rule: the modulus the pools are deinterleaved against must be the
+// shiaijo count the draw REALLY runs on, not the count the operator asked for.
+//
+// helper.ReorderPoolsForCourts returns its input untouched while
+// len(pools) <= numCourts, so handing it the raw allocation skipped the
+// deinterleave in exactly the configurations where the clamp then packed the
+// pools back together -- the case it matters most in.
+//
+// Worked example, 26 competitors at pool size 5 in "max" mode on 8 shiaijo. That
+// is 6 pools sized [5 5 4 4 4 4], and helper.EffectiveDrawCourts(6, 8) steps the
+// draw down to 4 regions, which helper.AssignPoolsToCourts(6, 4) fills as
+// [0 0 1 1 2 3]:
+//
+//	BEFORE (deinterleave against the raw 8): 6 <= 8, so the pools stayed in
+//	                                         creation order and shiaijo A took
+//	                                         BOTH oversized pools -- 10
+//	                                         competitors against B's 8 and 4
+//	                                         each on C and D.
+//	AFTER  (deinterleave against the clamped 4): [P0 P4 P1 P5 P2 P3], sizes
+//	                                         [5 4 5 4 4 4], and the load splits
+//	                                         9 / 9 / 4 / 4.
+//
+// Both paths are asserted because both were wrong in their own way: the CLI
+// clamped only AFTER its own PoolSeeding and reorder calls, and the engine
+// clamped for the pool-to-shiaijo allocation but never for the other two.
+func TestPoolDrawDeinterleavesAgainstTheClampedShiaijoCount(t *testing.T) {
+	const (
+		players  = 26
+		poolSize = 5
+		courts   = 8
+	)
+	// Worked out by hand above, not recomputed from the production clamp.
+	wantSizes := []int{5, 4, 5, 4, 4, 4}
+	wantLoad := map[string]int{"A": 9, "B": 9, "C": 4, "D": 4}
+
+	roster := parityRoster(players)
+	cases := []struct {
+		name  string
+		build func(*testing.T) poolDraw
+	}{
+		{"engine", func(t *testing.T) poolDraw {
+			return enginePoolDraw(t, roster, nil, poolSize, courts, true)
+		}},
+		{"cli", func(t *testing.T) poolDraw {
+			return cliPoolDraw(t, roster, nil, poolSize, courts, true)
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			draw := tc.build(t)
+			assert.Equal(t, wantSizes, draw.sizesInDrawOrder(t), "pool sizes in draw order")
+			assert.Equal(t, wantLoad, draw.courtLoad(), "competitors per shiaijo")
 		})
 	}
 }

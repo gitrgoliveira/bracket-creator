@@ -22,11 +22,12 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 
 	isMax := comp.PoolSizeMode == "max"
 
-	// numCourts is the modulus for BOTH the seed spread and the pool
-	// deinterleave, so it is derived once here. An unset court list means one
-	// unnamed court; helper.PoolSeeding and helper.ReorderPoolsForCourts each
-	// treat anything below 1 as 1, and normalising up front keeps them and the
-	// AssignPoolsToCourts call below reading off a single value.
+	// numCourts is the competition's RAW shiaijo allocation, normalised. An unset
+	// court list means one unnamed court; helper.EffectiveDrawCourts,
+	// helper.PoolSeeding and helper.ReorderPoolsForCourts each treat anything
+	// below 1 as 1, and normalising up front keeps them reading off a single
+	// value. What the pool phase is actually laid out over is drawCourts below,
+	// which is this clamped down to what the pools can carry.
 	numCourts := len(comp.Courts)
 	if numCourts == 0 {
 		numCourts = 1
@@ -52,7 +53,47 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 	//     round-robin fill lands club-mates in different pools; gating it on
 	//     seeds disabled that for every unseeded competition, which is the
 	//     common case in the app and never the case in the CLI.
-	players = helper.PoolSeeding(players, helper.PoolCount(len(players), comp.PoolSize, isMax), numCourts)
+	numPools := helper.PoolCount(len(players), comp.PoolSize, isMax)
+
+	// drawCourts is the shiaijo count the pool phase actually runs on, and it is
+	// the modulus for ALL THREE of the seed spread (helper.PoolSeeding), the pool
+	// deinterleave (helper.ReorderPoolsForCourts) and the pool-to-shiaijo
+	// allocation (helper.AssignPoolsToCourts below). The three must agree, or
+	// seeds are placed for a shiaijo layout the draw does not have.
+	//
+	// It is DERIVED, not the operator's allocation: a shiaijo with no home pool
+	// would own an empty bracket region, so the draw steps the count down to what
+	// the pools can carry (helper.EffectiveDrawCourts), landing on a power of two
+	// because R9 validates the derived value too, not merely an even number.
+	//
+	// The pool phase has to step down with it. helper.BuildKnockoutDraw applies
+	// the same clamp internally to the same pool count, so passing the RAW count
+	// spread the pool matches over MORE shiaijo than the bracket had regions: 10
+	// competitors at PoolSize 4 in max mode on 4 shiaijo gives 3 pools, so the
+	// pool phase ran on A, B and C (an allocation R9 forbids) while the bracket
+	// had two regions, A and B. Feeding the raw count to the seed spread and the
+	// deinterleave was the same fault one step earlier, and it bit exactly when
+	// the clamp did: 26 competitors at PoolSize 5 in max mode on 8 shiaijo gives 6
+	// pools of [5,5,4,4,4,4], so ReorderPoolsForCourts returned them untouched
+	// (6 <= 8) while AssignPoolsToCourts packed them onto the clamped 4 as
+	// [0,0,1,1,2,3] -- shiaijo A carrying both oversized pools, 10 competitors
+	// against C's and D's 4. Deinterleaved against 4 the same pools split 9/9/4/4.
+	// The CLI has always clamped at the equivalent point (cmd/create-pools.go,
+	// above its own PoolSeeding call), so this is also what keeps the two paths in
+	// parity.
+	//
+	// EffectiveDrawCourts(0, n) returns n untouched, so a zero pool count is safe
+	// here; helper.CreatePools errors on it a line later anyway. numPools ==
+	// len(pools) by construction, PoolCount being the function CreatePools sizes
+	// its own pool slice with.
+	//
+	// League is unaffected: it has exactly one pool, and the clamp of any count
+	// onto one pool is 1, which assigns that single pool to court 0 exactly as the
+	// raw count did. The single-pool spread further down reads comp.Courts
+	// directly and still uses every shiaijo the league was allocated.
+	drawCourts := helper.EffectiveDrawCourts(numPools, numCourts)
+
+	players = helper.PoolSeeding(players, numPools, drawCourts)
 
 	pools, err := helper.CreatePools(players, comp.PoolSize, isMax)
 	if err != nil {
@@ -69,7 +110,7 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 	// after this call, so they all see the reordered, realphabetised list: the
 	// mixed-format validation messages, AssignPlayerNumbers, SavePools, the
 	// MatchResult ID prefix and AssignPoolsToCourts.
-	pools = helper.ReorderPoolsForCourts(pools, numCourts)
+	pools = helper.ReorderPoolsForCourts(pools, drawCourts)
 
 	// A "mixed" competition is "Pools + Knockout" by definition, a single
 	// pool collapses to a round-robin with a tacked-on 2-player "final", which
@@ -132,27 +173,9 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 		}
 	}
 
-	// The shiaijo count the pool phase actually runs on. It is DERIVED, not the
-	// operator's allocation: a court with no home pool would own an empty
-	// bracket region, so the draw steps the count down to what the pools can
-	// carry (helper.EffectiveDrawCourts), landing on a power of two because R9
-	// validates the derived value too, not merely an even number.
-	//
-	// The pool phase has to step down with it. helper.BuildKnockoutDraw applies
-	// the same clamp internally to the same pool count, so passing the RAW
-	// count here spread the pool matches over MORE shiaijo than the bracket
-	// had regions: 10 competitors at PoolSize 4 in max mode on 4 shiaijo gives
-	// 3 pools, so the pool phase ran on A, B and C (an allocation R9 forbids)
-	// while the bracket had two regions, A and B. The CLI has always clamped at
-	// the equivalent point (cmd/create-pools.go, before PrintPoolMatches and
-	// BuildKnockoutDraw), so this is also what keeps the two paths in parity.
-	//
-	// League is unaffected: it has exactly one pool, and the clamp of any count
-	// onto one pool is 1, which assigns that single pool to court 0 exactly as
-	// the raw count did. The single-pool spread below reads comp.Courts
-	// directly and still uses every shiaijo the league was allocated.
-	drawCourts := helper.EffectiveDrawCourts(len(pools), numCourts)
-
+	// drawCourts, derived above, is reused rather than recomputed: this
+	// allocation, the seed spread and the deinterleave are one layout and a
+	// second derivation is a second thing to keep in step.
 	courtAssign, err := helper.AssignPoolsToCourts(len(pools), drawCourts)
 	if err != nil {
 		return fmt.Errorf("assigning pools to courts: %w", err)

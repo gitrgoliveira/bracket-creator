@@ -32,7 +32,13 @@ describe('bracket match numbers: Go/JS mirror', () => {
   // Also load-bearing, and less obvious: on most bracket shapes, ordering by
   // leaf slot and ordering by raw position agree, so a table of only those
   // shapes passes even against the pre-fix numbering. At least one case has to
-  // be able to tell them apart. See the Go half for how they were found.
+  // be able to tell them apart.
+  //
+  // This side cannot check the flag itself — it has no way to build a bracket —
+  // but it does not have to: the Go half MEASURES discrimination on the bracket
+  // the engine built and fails if the flag disagrees, so a `true` reaching this
+  // file has been earned rather than asserted. See the Go half for how the
+  // shapes were found.
   it('the table contains a case that can catch the ordering drift', () => {
     expect(
       table.cases.filter((c) => c.discriminating).length,

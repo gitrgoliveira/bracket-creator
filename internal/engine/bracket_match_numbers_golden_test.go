@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -70,8 +72,10 @@ type bracketNumberCase struct {
 	Entrants int    `json:"entrants"`
 	// Discriminating marks a case whose bracket can tell the correct ordering
 	// (by leaf slot) apart from the pre-fix one (by position within the round).
-	// The JS mirror requires at least one, so the table cannot decay into a set
-	// of shapes that passes against the bug.
+	// Both halves require at least one, so the table cannot decay into a set of
+	// shapes that passes against the bug. MEASURED by orderingsDisagree on the
+	// bracket the engine built, not copied from the expectation table, so the
+	// JS half can trust it without being able to build a bracket itself.
 	Discriminating bool                   `json:"discriminating"`
 	Rounds         [][]bracketNumberMatch `json:"rounds"`
 }
@@ -97,6 +101,16 @@ type bracketNumberGolden struct {
 // an effective round holding a DEEP match at a small position alongside a
 // SHALLOW match at a larger position. 9 entrants is the smallest.
 //
+// The flag below is an EXPECTATION, not an assertion of faith:
+// orderingsDisagree measures it on the bracket the engine actually built and
+// the test fails on any mismatch. That check is what makes the "at least one
+// discriminating case" guard mean something. Left declared-only, a case that
+// silently STOPPED discriminating -- because bracket construction moved, not
+// because anyone edited this file -- would keep its true flag, keep satisfying
+// the guard, and leave the table quietly passing against the very bug it
+// exists to catch. A hand-maintained claim cannot be the thing that guards
+// against decay.
+//
 // The rest are kept for coverage of the ordinary shapes: exact powers of two
 // have no byes at all, and 5/11/13 put byes in different places. Byes matter
 // because they are exactly the matches the two REAL-match filters disagree
@@ -119,6 +133,48 @@ var bracketNumberCases = []struct {
 	// the shape the court-region draw actually produces on several shiaijo.
 	{state.CompFormatMixed, 40, 2, true},
 	{state.CompFormatMixed, 40, 4, true},
+}
+
+// orderingsDisagree reports whether this bracket's shape can tell the CORRECT
+// numbering order (effective round, then leftmost first-round leaf slot) apart
+// from the pre-fix one (effective round, then position within the round).
+//
+// It characterises the FIXTURE, not the production walk: the question is
+// whether this shape is capable of catching the drift at all. On a shape where
+// the two orderings coincide, a passing golden proves nothing about which rule
+// is implemented, so measuring this is the difference between a table that
+// guards the contract and one that only looks like it does.
+func orderingsDisagree(rounds [][]bracketNumberMatch) bool {
+	type ref struct {
+		id            string
+		displayRound  int
+		pos, leafSlot int
+	}
+	var real []ref
+	for ri, round := range rounds {
+		for mi, m := range round {
+			if m.MatchNumber > 0 {
+				real = append(real, ref{m.ID, m.DisplayRound, mi, mi * (1 << (ri + 1))})
+			}
+		}
+	}
+	order := func(less func(a, b ref) bool) []string {
+		sorted := append([]ref(nil), real...)
+		sort.SliceStable(sorted, func(i, j int) bool {
+			if sorted[i].displayRound != sorted[j].displayRound {
+				return sorted[i].displayRound > sorted[j].displayRound
+			}
+			return less(sorted[i], sorted[j])
+		})
+		ids := make([]string, len(sorted))
+		for i, r := range sorted {
+			ids[i] = r.id
+		}
+		return ids
+	}
+	byLeafSlot := order(func(a, b ref) bool { return a.leafSlot < b.leafSlot })
+	byPosition := order(func(a, b ref) bool { return a.pos < b.pos })
+	return !slices.Equal(byLeafSlot, byPosition)
 }
 
 func buildBracketNumberCases(t *testing.T) []bracketNumberCase {
@@ -153,14 +209,25 @@ func buildBracketNumberCases(t *testing.T) []bracketNumberCase {
 			}
 			rounds = append(rounds, out)
 		}
+		// Measured, then held to the expectation above. A case that stops
+		// discriminating fails HERE, naming itself, rather than degrading the
+		// table's guard in silence.
+		discriminating := orderingsDisagree(rounds)
+		require.Equalf(t, c.discriminating, discriminating,
+			"%s, %d entrants: this shape is declared discriminating=%v but measures %v. "+
+				"If bracket construction moved, re-sweep for a shape where ordering by leaf slot "+
+				"and ordering by position genuinely disagree; without one the whole table passes "+
+				"against the pre-fix numbering",
+			c.format, c.entrants, c.discriminating, discriminating)
+
 		name := fmt.Sprintf("%s on %d shiaijo", c.format, c.courts)
-		if c.discriminating {
+		if discriminating {
 			name += ", orderings disagree here"
 		}
 		cases = append(cases, bracketNumberCase{
 			Name:           name,
 			Entrants:       c.entrants,
-			Discriminating: c.discriminating,
+			Discriminating: discriminating,
 			Rounds:         rounds,
 		})
 	}

@@ -4,7 +4,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
 import { matchMiddleMark, defaultWinMaru } from '../bracket.jsx';
-import { boutRows, findInTree, collectText } from './helpers/vdom.js';
+import { boutRows, findInTree, collectText, hasClass } from './helpers/vdom.js';
 
 describe('match_scoreboard: withNumber', () => {
   let withNumber;
@@ -111,8 +111,7 @@ describe('match_scoreboard: teamIVPW', () => {
 // is absent would be VACUOUS: no production code emits a centre Ht any more, so
 // such an expectation can never fail and would not catch a reintroduction under
 // a different testid. Assert on the centre's contents instead.
-const centreText = (tree) => collectText(findInTree(tree, n =>
-  typeof n?.props?.className === 'string' && /\bmsb-vs\b/.test(n.props.className)));
+const centreText = (tree) => collectText(findInTree(tree, n => hasClass(n, 'msb-vs')));
 
 describe('match_scoreboard components', () => {
   const realReact = global.React;
@@ -565,8 +564,7 @@ describe('match_scoreboard components', () => {
     const summary = findInTree(tree, n => n?.props?.['data-testid'] === 'team-summary');
     expect(summary).toBeTruthy();
     expect(collectText(summary)).toContain('IV');
-    const summaryCentre = findInTree(summary, n =>
-      typeof n?.props?.className === 'string' && /\bmsb-vs\b/.test(n.props.className));
+    const summaryCentre = findInTree(summary, n => hasClass(n, 'msb-vs'));
     expect(summaryCentre).toBeTruthy();
     expect(collectText(summaryCentre)).toBe('');
   });

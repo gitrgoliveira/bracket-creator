@@ -142,8 +142,8 @@ func TestSubMatchResult_HanteiRoundTrip(t *testing.T) {
 		assert.NotContains(t, string(b), "decidedByHantei")
 	})
 	t.Run("explicit false SERIALIZES (a withdrawal must reach the wire)", func(t *testing.T) {
-		explicitFalse := false // HanteiPtr is nil-for-false by design
-		b, err := json.Marshal(SubMatchResult{Position: -1, DecidedByHantei: &explicitFalse})
+		// HanteiExplicit, not &f: HanteiPtr is nil-for-false by design.
+		b, err := json.Marshal(SubMatchResult{Position: -1, DecidedByHantei: HanteiExplicit(false)})
 		require.NoError(t, err)
 		assert.Contains(t, string(b), `"decidedByHantei":false`)
 	})

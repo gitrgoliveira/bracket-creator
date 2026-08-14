@@ -71,23 +71,15 @@ function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, is
     const repShiro = (promoted.match.repPlayerB || "").trim();
     const repAka = (promoted.match.repPlayerA || "").trim();
     const next = queueMatches && queueMatches.length ? queueMatches[0] : null;
-    // NO middle mark here (operator ruling): the FIK row centre rendered by
-    // the shared scoreboard below is the mark's ONE home, and this header
-    // chip duplicating X/(E)/(DH) ~10cm above it was an error. The plain
-    // "vs" separator stays. (The OBS streaming overlay keeps its chip: it
-    // renders no scoreboard row, so the chip is the mark's only home there.)
-    // A TEAM board needs no replacement centre. A middle mark belongs only in
-    // the middle of an INDIVIDUAL FIGHT (operator ruling), for the whole set:
-    // any mutating middle. On the INDIVIDUAL branch the match IS the fight, so
-    // its own row centre carries it (encho is not team-specific: any tied match
-    // may be fought on). On the TEAM branch the encounter is not a fight, so
-    // each mark rides the bout it describes - (E) on the numbered bout kachinuki
-    // fights on, (DH) on the EXTRA appended daihyosen bout regular teams settle
-    // a tie with, X on any drawn bout under either format. The summary row is
-    // an aggregate (IV/PW), not a fight, so
-    // nothing goes in its centre - not even when the encounter itself is drawn
-    // on equal IV/PW. Threading the match-level mark in there was tried and
-    // reverted: it put two (E) marks on one board, stacked.
+    // NO middle mark here (operator ruling): the FIK row centre rendered by the
+    // shared scoreboard below is the mark's ONE home, and this header chip
+    // duplicating X/(E)/(DH) ~10cm above it was an error; the plain "vs" stays.
+    // (The OBS streaming overlay keeps its chip: it renders no scoreboard row,
+    // so there the chip IS the one home.) Threading the match-level mark into
+    // the team summary spacer instead was tried and reverted - two (E) marks on
+    // one board, stacked. Do not re-add either. Where each mark DOES land is
+    // stated once in CLAUDE.md § Match Decision Types; this file renders none of
+    // those rows, so it does not restate the rule.
     // Header subtitle: competition name + phase, joined only when both exist
     // (phaseLabel is "" for league, so no dangling " · ").
     const compName = promoted.competition?.name || "";

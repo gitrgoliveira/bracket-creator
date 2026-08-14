@@ -9,7 +9,7 @@ const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 // daihyosen-specific; the rep pickers below stay gated on m.repIsTeam (a "-TB-"
 // tiebreaker is also a rep bout, just not a daihyosen).
 import { isPoolDaihyosenBout } from './pool_ids.jsx';
-import { realIppons, hanteiSlot, hanteiWinnerKey } from './result_slot.jsx';
+import { realIppons, hanteiTied, hanteiSlot, hanteiWinnerKey } from './result_slot.jsx';
 
 import {
   MAX_IPPONS_PER_SIDE,
@@ -38,7 +38,6 @@ import { SyncStatusPill, useDebouncedRunningWrite } from './admin_scoring_autosa
 
 import { TeamScoreEditorModal } from './admin_scoring_team.jsx';
 import { EngiScoreEditorModal } from './admin_scoring_engi.jsx';
-
 
 export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, onAfterDecision, prevMatch, nextMatch, onPrev, onNext, password, selfReport, variant = "modal", canClose = true }) {
   const m = match;
@@ -416,10 +415,11 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     // resultSlot gets the SAME array the render loop below indexes. Passing a
     // filtered view instead desynchronises them: on pts ["•","M"] the filter
     // yields ["M"] → slot 1, and cell 1 then renders "Ht" OVER the recorded
-    // men. pts is kept clean at the seed instead (see cleanFallback), so raw
-    // and filtered agree here and the mark lands in a genuinely free cell.
+    // men. pts is kept clean at the seed instead (seedAPts/seedBPts run both
+    // the primary cells AND the score.ippons fallback through realIppons), so
+    // raw and filtered agree here and the mark lands in a genuinely free cell.
     const htSlot = hanteiSlot(
-      decidedByHantei && aTotal === bTotal && recordedHtKey === s.key, s.pts);
+      decidedByHantei && hanteiTied(aPts, bPts) && recordedHtKey === s.key, s.pts);
     return [0, 1].map((i) => {
       const isHt = htSlot === i;
       return (

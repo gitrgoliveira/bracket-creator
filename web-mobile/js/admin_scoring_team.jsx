@@ -37,7 +37,7 @@ import { useDebouncedRunningWrite, SyncStatusPill } from './admin_scoring_autosa
 // the editor derives its per-bout middle from it rather than restating the
 // chain (CLAUDE.md § Match Decision Types: the middle rule lives in ONE place).
 import { boutMiddle, winnerSideLR } from './bracket.jsx';
-import { realIppons, hanteiSlot, hanteiWinnerKey, nameOf } from './result_slot.jsx';
+import { realIppons, hanteiTied, hanteiSlot, hanteiWinnerKey, nameOf } from './result_slot.jsx';
 
 // renderTeamBoutMiddle: the ONE place the editor turns a sub-bout into its
 // centre value, for BOTH the read-only done row and the live entry row. Derives
@@ -956,8 +956,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       // opponent's pts are topped up (defensive against legacy/imported data).
       const rawAFouls = existing ? existing.hansokuA || 0 : 0;
       const rawBFouls = existing ? existing.hansokuB || 0 : 0;
-      const seedAPts = existing ? (existing.ipponsA || []).filter(x => x && x !== "•") : [];
-      const seedBPts = existing ? (existing.ipponsB || []).filter(x => x && x !== "•") : [];
+      const seedAPts = existing ? realIppons(existing.ipponsA) : [];
+      const seedBPts = existing ? realIppons(existing.ipponsB) : [];
       const reconA = reconcileFoulsAtOpen(rawAFouls, seedBPts);
       const reconB = reconcileFoulsAtOpen(rawBFouls, seedAPts);
       return {
@@ -1069,8 +1069,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     pwB += s.bTotal;
   });
   // Hantei applies only to a tied daihyosen scoreline (FIK 7-5 / 29-6);
-  // otherwise the bout is decided by ippons like any other.
-  const daihyosenTied = hasDaihyosen && subTotals[daihyosenIdx].aTotal === subTotals[daihyosenIdx].bTotal;
+  // otherwise the bout is decided by ippons like any other. Through the shared
+  // hanteiTied so this gate, the scoreboard's and Go's cannot answer differently.
+  const daihyosenTied = hasDaihyosen && hanteiTied(subs[daihyosenIdx].aPts, subs[daihyosenIdx].bPts);
   // The hantei verdict is already folded into the winner by boutWinnerSide
   // (hanteiSide input): subTotals[daihyosenIdx].winner IS the daihyosen
   // verdict, so no overlay variable exists to re-attach one to.

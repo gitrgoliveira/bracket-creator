@@ -900,9 +900,17 @@ type MatchResult struct {
 // (which uses *bool with omitempty) so the wire payload OMITS the field
 // for non-hantei matches rather than emitting an explicit "false".
 // Always assigning &bm.DecidedByHantei would leak a non-nil pointer for
+// every non-hantei match, defeating the omitempty contract.
+func HanteiPtr(b bool) *bool {
+	if !b {
+		return nil
+	}
+	return &b
+}
+
 // HanteiExplicit returns a pointer to the given value, INCLUDING false.
 //
-// HanteiPtr below deliberately collapses false to nil, which is right for the
+// HanteiPtr above deliberately collapses false to nil, which is right for the
 // omitempty output projections it was written for but wrong for the tri-state
 // wire: "the writer withdrew the verdict" (explicit false) and "the writer said
 // nothing" (nil) are different instructions, and only nil means preserve. Every
@@ -910,14 +918,6 @@ type MatchResult struct {
 // paragraph explaining why HanteiPtr could not be used. Use this instead.
 func HanteiExplicit(v bool) *bool {
 	return &v
-}
-
-// every non-hantei match, defeating the omitempty contract.
-func HanteiPtr(b bool) *bool {
-	if !b {
-		return nil
-	}
-	return &b
 }
 
 // EnchoMetadata records overtime / sudden-death periods played in a

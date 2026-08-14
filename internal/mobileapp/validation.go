@@ -220,11 +220,13 @@ func validateSubBout(prefix string, sr *state.SubMatchResult, allowNumberedEncho
 	if sr.Winner == "" {
 		return &ValidationError{Field: prefix + "decidedByHantei", Message: "requires winner to be set"}
 	}
-	if len(sr.IpponsA) != len(sr.IpponsB) {
+	// Both halves of this gate are shared with the engine's preserveSubHantei
+	// via domain, so a row this accepts and a row the engine may stamp can
+	// never disagree. The tie test was raw len() here and placeholder-dropping
+	// there, which is a difference an "•" or empty cell can express.
+	if !domain.HanteiTiedScoreline(sr.IpponsA, sr.IpponsB) {
 		return &ValidationError{Field: prefix + "decidedByHantei", Message: "requires a tied scoreline, ippon counts must be equal"}
 	}
-	// Shared with the engine's preserveSubHantei via domain, so a row this
-	// accepts and a row the engine may stamp can never disagree.
 	if !domain.IsHanteiCompatibleDecisionStr(sr.Decision) {
 		return &ValidationError{
 			Field:   prefix + "decidedByHantei",

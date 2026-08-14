@@ -44,7 +44,7 @@ func TestRecordBracketMatchResultTx_HappyPath(t *testing.T) {
 	}
 	var txErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		txErr = eng.recordBracketMatchResultTx(tx, compID, "M1", result)
+		txErr = eng.recordBracketMatchResultTx(tx, compID, "M1", result, matchWriteForward)
 		return nil
 	})
 	require.NoError(t, txErr)
@@ -71,7 +71,7 @@ func TestRecordBracketMatchResultTx_MatchNotFound(t *testing.T) {
 
 	var txErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		txErr = eng.recordBracketMatchResultTx(tx, compID, "GHOST", &state.MatchResult{Winner: "X"})
+		txErr = eng.recordBracketMatchResultTx(tx, compID, "GHOST", &state.MatchResult{Winner: "X"}, matchWriteForward)
 		return nil
 	})
 	require.Error(t, txErr)
@@ -88,7 +88,7 @@ func TestRecordBracketMatchResultTx_NilBracket(t *testing.T) {
 
 	var txErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		txErr = eng.recordBracketMatchResultTx(tx, compID, "M1", &state.MatchResult{Winner: "X"})
+		txErr = eng.recordBracketMatchResultTx(tx, compID, "M1", &state.MatchResult{Winner: "X"}, matchWriteForward)
 		return nil
 	})
 	require.Error(t, txErr)

@@ -359,11 +359,18 @@ describe('LobbyMatchCell: delegates body to IndividualScore (mp-0ky7 / score reu
         expect(indiv.props.showNames).toBe(true);
     });
 
-    it('comp-meta span is shrinkable (flex:1 + minWidth:0) so long text ellipsizes beside the decision suffix', () => {
+    // Asserts the truncation CONTRACT, not the box model that delivers it. The
+    // previous version required an inner <span> carrying flex:1 + minWidth:0 so
+    // the text could shrink "beside the decision suffix" - but that suffix chip
+    // was removed (the middle mark's one home is the FIK row centre), leaving a
+    // one-child flex row whose scaffolding the test was the only thing holding
+    // up. What matters is that a long competition/phase/time line stays on one
+    // line and ellipsizes.
+    it('comp-meta line truncates rather than wrapping or overflowing the cell', () => {
         const tree = LobbyMatchCell({ slot: makeRunningSlot(), rowKind: 'now' });
-        const meta = findAll(tree, n => n?.type === 'span' && n.props?.style?.textOverflow === 'ellipsis')[0];
+        const meta = findAll(tree, n => n?.props?.style?.textOverflow === 'ellipsis')[0];
         expect(meta).toBeTruthy();
-        expect(meta.props.style.flex).toBe(1);
-        expect(meta.props.style.minWidth).toBe(0);
+        expect(meta.props.style.overflow).toBe('hidden');
+        expect(meta.props.style.whiteSpace).toBe('nowrap');
     });
 });

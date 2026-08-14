@@ -84,27 +84,18 @@ export const realIppons = (arr) => (arr || []).filter(x => x && x !== "\u2022");
 export const hanteiTied = (ipponsA, ipponsB) => realIppons(ipponsA).length === realIppons(ipponsB).length;
 
 // nameOf: a side may arrive as an object or a bare string; this is the one
-// unwrap both rules below share.
+// unwrap for callers that must compare or display a side name.
 export const nameOf = (v) => (v && typeof v === "object" ? v.name : v) || "";
 
-// hanteiSlot: which of this side's two ippon slots carries the "Ht" mark, or -1
-// for none. The placement rule itself lives in result_slot.jsx and is shared
-// with the viewer/display scoreboard, so the two surfaces cannot drift; this
-// adds the editor's "is this the side that won the hantei" test.
+// hanteiSlot: the EDITOR variant of resultSlot — "is this the side that won the
+// hantei" over the shared placement rule above, so an editor and the read-only
+// scoreboard cannot put the mark in different cells.
 //
-// It also DELIBERATELY discards resultSlot's `loose` (both slots full). That is
-// a decision, not an oversight: unlike the read-only scoreboard, which would
-// otherwise lose the result and so renders a loose mark, this editor always
-// mounts a second channel for the verdict — daihyosenHanteiArmed is seeded from
-// the stored decision, so the hantei row is on screen with the winning side's
-// button primary. (The one exception is a stored winner that names neither side
-// after a rename, where initialDaihyosenHantei deliberately resolves to "" and
-// the panel opens armed with no side primary; see its comment below. The mark
-// is dropped there for the same reason the scoreboard drops it: nothing
-// attributable to mark.) And 2-2 is unreachable through the ippon buttons anyway
-// (MAX_IPPONS_PER_SIDE plus isBoutDecided disable both sides at 2), so only
-// drifted stored data reaches it. Rendering a third slot-shaped chip here would
-// claim an ippon that does not exist.
+// It DELIBERATELY discards resultSlot's `loose` (both slots full). Per the
+// header's enumeration, each editor keeps a second always-mounted channel for
+// the verdict — its hantei row, armed and seeded from the stored decision with
+// the winning side's button primary — so a dropped mark is not a lost result.
+// Rendering a third slot-shaped chip would claim an ippon that does not exist.
 export function hanteiSlot(isWinner, pts) {
   if (!isWinner) return -1;
   return resultSlot(pts).slot;
@@ -113,8 +104,9 @@ export function hanteiSlot(isWinner, pts) {
 // hanteiWinnerKey: which side ("a"/"b"/"") a recorded hantei verdict names.
 // Id-first (the server's authoritative identity), name fallback only when the
 // name distinguishes the sides - a same-name pair with no usable ids returns
-// "" so callers do not guess. Shared by the individual editor's Ht chip and
-// this editor's daihyosen seed, so the exclusive-attribution rule has one
+// "" so callers do not guess, and neither does the team editor's daihyosen
+// seed, which then opens armed with no side primary. Shared by the individual
+// editor's Ht chip and that seed, so the exclusive-attribution rule has one
 // owner. Exported for tests.
 export function hanteiWinnerKey(m) {
   if (!m?.winner) return "";

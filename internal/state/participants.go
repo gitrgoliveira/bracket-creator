@@ -346,18 +346,20 @@ func (s *Store) saveParticipantsTakingLock(compID string, players []domain.Playe
 	mu := s.getCompLock(compID)
 	mu.Lock()
 	defer mu.Unlock()
-	withZekken, err := s.withZekkenNameLocked(compID)
+	withZekken, comp, err := s.withZekkenNameLocked(compID)
 	if err != nil {
 		return err
 	}
-	return s.saveParticipantsNoLockOpts(compID, players, withZekken, enforceTeamNames)
+	// comp is handed on so the team-name gate does not re-read config.md under
+	// the lock we already read it under.
+	return s.saveParticipantsNoLock(compID, players, withZekken, teamNameRule{skip: !enforceTeamNames, comp: comp})
 }
 
 // SaveParticipantsRestored persists a roster recovered from an operator's own
 // archive. Identical to SaveParticipants except that the team-name uniqueness
 // rule is not applied: that rule postdates existing archives, so a backup taken
 // earlier can legally contain two same-name teams, and the grandfathering in
-// saveParticipantsNoLock cannot help here because a restore writes into a
+// checkNewTeamNameCollisions cannot help here because a restore writes into a
 // freshly created competition with nothing on disk to grandfather against.
 // Refusing would make the operator's own backup permanently unimportable, since
 // the import path rolls the whole competition back when the participant save
@@ -367,20 +369,25 @@ func (s *Store) SaveParticipantsRestored(compID string, players []domain.Player)
 	return s.saveParticipantsTakingLock(compID, players, false)
 }
 
-// withZekkenNameLocked returns the effective zekken-column flag for compID.
-// Caller MUST hold the per-comp lock. Returns false when the competition record
-// is missing (matches the default zero value SaveParticipants would otherwise
-// observe). Engi pairs store both member names combined in Player.Name, so
-// engi does not modify the layout.
-func (s *Store) withZekkenNameLocked(compID string) (bool, error) {
+// withZekkenNameLocked returns the effective zekken-column flag for compID and
+// the competition record it read that flag from. Caller MUST hold the per-comp
+// lock. Returns (false, nil) when the record is missing (matching the default
+// zero value SaveParticipants would otherwise observe). Engi pairs store both
+// member names combined in Player.Name, so engi does not modify the layout.
+//
+// The record is returned rather than discarded because loadCompetitionLocked
+// deliberately bypasses the fileCache, so a caller that needs it again (the
+// team-name gate) would otherwise pay a second config.md read plus YAML parse
+// inside one lock hold.
+func (s *Store) withZekkenNameLocked(compID string) (bool, *Competition, error) {
 	comp, err := s.loadCompetitionLocked(compID)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	if comp == nil {
-		return false, nil
+		return false, nil, nil
 	}
-	return comp.EffectiveWithZekkenName(), nil
+	return comp.EffectiveWithZekkenName(), comp, nil
 }
 
 // participantPairKey is the (normalizedName, normalizedDojo) identity key used
@@ -449,7 +456,7 @@ func (s *Store) BulkCheckIn(compID string, pids []string) (BulkCheckInResult, er
 	mu.Lock()
 	defer mu.Unlock()
 
-	withZekkenName, err := s.withZekkenNameLocked(compID)
+	withZekkenName, comp, err := s.withZekkenNameLocked(compID)
 	if err != nil {
 		return BulkCheckInResult{}, err
 	}
@@ -506,7 +513,9 @@ func (s *Store) BulkCheckIn(compID string, pids []string) (BulkCheckInResult, er
 	}
 
 	if result.CheckedIn > 0 {
-		if err := s.saveParticipantsNoLock(compID, players, withZekkenName); err != nil {
+		// comp comes from withZekkenNameLocked above: bulk check-in is the
+		// highest-frequency writer, so it must not re-read config.md.
+		if err := s.saveParticipantsNoLock(compID, players, withZekkenName, teamNameRule{comp: comp}); err != nil {
 			return BulkCheckInResult{}, err
 		}
 	}
@@ -649,7 +658,7 @@ func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenNam
 		}
 	}
 
-	if err := s.saveParticipantsNoLock(compID, players, withZekkenName); err != nil {
+	if err := s.saveParticipantsNoLock(compID, players, withZekkenName, teamNameRule{}); err != nil {
 		return nil, err
 	}
 	return &players[foundIdx], nil
@@ -804,7 +813,7 @@ func (s *Store) AddParticipant(compID string, p domain.Player, withZekkenName bo
 
 	players = append(players, p)
 
-	if err := s.saveParticipantsNoLock(compID, players, withZekkenName); err != nil {
+	if err := s.saveParticipantsNoLock(compID, players, withZekkenName, teamNameRule{}); err != nil {
 		return nil, err
 	}
 
@@ -829,15 +838,97 @@ func (s *Store) ReplaceParticipant(compID string, pid string, withZekkenName boo
 	return s.updateParticipantNoLock(compID, pid, withZekkenName, transform)
 }
 
-func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, withZekkenName bool) error {
-	return s.saveParticipantsNoLockOpts(compID, players, withZekkenName, true)
+// teamNameRule is the per-write context for the team-name uniqueness gate. The
+// ZERO VALUE enforces the rule and loads the competition itself, so a caller
+// that forgets the field gets the safe behaviour rather than a silent bypass.
+type teamNameRule struct {
+	// skip opts this write out entirely. Only the archive-restore path sets it;
+	// see SaveParticipantsRestored for why. Every other caller enforces, so the
+	// rule stays unbypassable from operator input.
+	skip bool
+	// comp is the competition record when the caller already loaded it under
+	// this same lock; nil means "load it, but only if the rule needs it".
+	comp *Competition
 }
 
-// saveParticipantsNoLockOpts is saveParticipantsNoLock with the team-name
-// uniqueness rule made optional. Only the archive-restore path passes false;
-// see SaveParticipantsRestored for why. Every other caller enforces it, so the
-// rule stays unbypassable from operator input.
-func (s *Store) saveParticipantsNoLockOpts(compID string, players []domain.Player, withZekkenName bool, enforceTeamNames bool) error {
+// checkNewTeamNameCollisions enforces the TEAM-only rule that names are unique
+// regardless of dojo (operator ruling): a team's name is its identity in
+// standings and in sub-bout winner attribution, which carry no uuid, so two
+// same-name teams would make every result ambiguous. Individuals keep the
+// (name, dojo) rule instead; they are disambiguated by participant uuid.
+//
+// It rejects only what this write INTRODUCES, and that is load-bearing. Unlike
+// the tier-1 gate (always enforced, so no legal roster can violate it), this
+// rule is NEW: rosters written before it exist on disk with two same-name
+// teams, and every rewrite funnels through here - including check-in,
+// deliberately ungated so it keeps working after a competition starts.
+// Rejecting the stored pair would turn the next check-in into an unmappable 500
+// with no in-app repair (the only rename path is setup-gated), i.e. brick a
+// live event over data entered legally.
+//
+// comp is the caller's already-loaded competition, or nil to load on demand.
+// Caller MUST hold the per-comp lock.
+func (s *Store) checkNewTeamNameCollisions(compID string, players []domain.Player, withZekkenName bool, comp *Competition) error {
+	names := make([]string, len(players))
+	for i, p := range players {
+		names[i] = p.Name
+	}
+	// The pure in-memory scan runs FIRST and the competition is consulted only
+	// if it finds something. Loading up front cost a config.md read plus YAML
+	// parse on EVERY participant write (loadCompetitionLocked deliberately
+	// bypasses the fileCache) - including single check-ins, individual
+	// competitions, and the restore path that discards the result.
+	dupes := helper.CheckDuplicateEntriesByName(names)
+	if len(dupes) == 0 {
+		return nil
+	}
+	if comp == nil {
+		// Logged, not propagated: a transient config read failure must not
+		// block a participant write (check-in funnels through here, and failing
+		// closed is the bricking class described above). But it must not pass
+		// silently either - an unknown kind disables the rule, so an unreadable
+		// config would otherwise let a duplicate through with no diagnostic.
+		loaded, err := s.loadCompetitionLocked(compID)
+		if err != nil {
+			log.Printf("state: saveParticipants %s: competition config unreadable, team-name uniqueness not enforced for this write: %v", compID, err)
+			return nil
+		}
+		comp = loaded
+	}
+	if comp == nil || (comp.Kind != "team" && comp.TeamSize == 0) {
+		return nil
+	}
+	// COUNT per name, not mere membership. Keying on "this name is already
+	// duplicated" would grandfather the NAME rather than the existing collision,
+	// so a roster holding two Seibukan would then accept a third, and a fourth -
+	// each waved through by the pair before it, the opposite of the rule. The
+	// test is whether this write INCREASES how many entries share a name: equal
+	// or fewer is a rewrite of what is stored (check-in, a re-save, removing one
+	// of the pair); more is a new collision and is refused.
+	storedCounts := make(map[string]int)
+	if stored, lerr := s.loadParticipantsLocked(compID, withZekkenName); lerr == nil {
+		for _, p := range stored {
+			storedCounts[helper.NormalizeParticipantName(p.Name)]++
+		}
+	}
+	incomingCounts := make(map[string]int)
+	for _, n := range names {
+		incomingCounts[helper.NormalizeParticipantName(n)]++
+	}
+	fresh := make([]string, 0, len(dupes))
+	for _, d := range dupes {
+		k := helper.NormalizeParticipantName(d)
+		if incomingCounts[k] > storedCounts[k] {
+			fresh = append(fresh, d)
+		}
+	}
+	if len(fresh) > 0 {
+		return &duplicateTeamNameError{names: fresh}
+	}
+	return nil
+}
+
+func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, withZekkenName bool, rule teamNameRule) error {
 	// Tier-1 (perfect-duplicate) guard at the lowest write layer so EVERY
 	// persistence path; the bulk PUT /competitions/:id roster import (the
 	// SPA's primary flow), single add/edit, and any future caller; rejects
@@ -852,73 +943,9 @@ func (s *Store) saveParticipantsNoLockOpts(compID string, players []domain.Playe
 		return fmt.Errorf("%w: %s", ErrDuplicateName, strings.Join(dupes, "; "))
 	}
 
-	// TEAM competitions additionally require unique NAMES regardless of dojo
-	// (operator ruling): a team's name is its identity in standings and in
-	// sub-bout winner attribution, which carry no uuid, so two same-name teams
-	// would make every result ambiguous. Individuals keep the (name, dojo) rule
-	// above; they are disambiguated by participant uuid.
-	//
-	// It rejects only what this write INTRODUCES, and that is load-bearing.
-	// Unlike the tier-1 gate (always enforced, so no legal roster can violate
-	// it), this rule is NEW: rosters written before it exist on disk with two
-	// same-name teams, and every rewrite funnels through here - including
-	// check-in, deliberately ungated so it keeps working after a competition
-	// starts. Rejecting the stored pair would turn the next check-in into an
-	// unmappable 500 with no in-app repair (the only rename path is
-	// setup-gated), i.e. brick a live event over data entered legally.
-	if enforceTeamNames {
-		names := make([]string, len(players))
-		for i, p := range players {
-			names[i] = p.Name
-		}
-		// The pure in-memory scan runs FIRST and the competition is read only
-		// if it finds something. Loading it up front cost a config.md read plus
-		// YAML parse on EVERY participant write (loadCompetitionLocked
-		// deliberately bypasses the fileCache, and SaveParticipants had already
-		// read the same file via withZekkenNameLocked) - including single
-		// check-ins, individual competitions, and the restore path that
-		// discards the result. A roster with no duplicate names now does none.
-		if dupes := helper.CheckDuplicateEntriesByName(names); len(dupes) > 0 {
-			// Logged, not propagated: a transient config read failure must not
-			// block a participant write (check-in funnels through here, and
-			// failing closed is the bricking class described above). But it
-			// must not pass silently either - a nil comp disables the rule, so
-			// an unreadable config would otherwise let a duplicate through with
-			// no diagnostic anywhere.
-			comp, compErr := s.loadCompetitionLocked(compID)
-			if compErr != nil {
-				log.Printf("state: saveParticipants %s: competition config unreadable, team-name uniqueness not enforced for this write: %v", compID, compErr)
-			}
-			if comp != nil && (comp.Kind == "team" || comp.TeamSize > 0) {
-				// COUNT per name, not mere membership. Keying on "this name is
-				// already duplicated" would grandfather the NAME rather than the
-				// existing collision, so a roster holding two Seibukan would then
-				// accept a third, and a fourth - each waved through by the pair
-				// before it, the opposite of the rule. The test is whether this
-				// write INCREASES how many entries share a name: equal or fewer
-				// is a rewrite of what is stored (check-in, a re-save, removing
-				// one of the pair); more is a new collision and is refused.
-				storedCounts := make(map[string]int)
-				if stored, lerr := s.loadParticipantsLocked(compID, withZekkenName); lerr == nil {
-					for _, p := range stored {
-						storedCounts[helper.NormalizeParticipantName(p.Name)]++
-					}
-				}
-				incomingCounts := make(map[string]int)
-				for _, n := range names {
-					incomingCounts[helper.NormalizeParticipantName(n)]++
-				}
-				fresh := make([]string, 0, len(dupes))
-				for _, d := range dupes {
-					k := helper.NormalizeParticipantName(d)
-					if incomingCounts[k] > storedCounts[k] {
-						fresh = append(fresh, d)
-					}
-				}
-				if len(fresh) > 0 {
-					return &duplicateTeamNameError{names: fresh}
-				}
-			}
+	if !rule.skip {
+		if err := s.checkNewTeamNameCollisions(compID, players, withZekkenName, rule.comp); err != nil {
+			return err
 		}
 	}
 

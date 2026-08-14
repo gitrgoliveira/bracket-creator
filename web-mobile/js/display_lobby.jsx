@@ -138,9 +138,10 @@ function LobbyMatchCell({ slot, rowKind }) {
                 border: `1px solid ${cellBorder}`,
             }}>
                 {compMeta && (
-                    <div style={{ fontSize: 10, color: LOBBY_COLORS.inkMuted, marginBottom: 4, letterSpacing: '0.02em', display: 'flex', justifyContent: 'space-between', gap: 6 }}>
-                        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{compMeta}</span>
-                    </div>
+                    // One child, so no flex row: the chip that used to sit
+                    // beside this text is gone (see the ruling above) and the
+                    // truncation moved onto the element that owns the text.
+                    <div style={{ fontSize: 10, color: LOBBY_COLORS.inkMuted, marginBottom: 4, letterSpacing: '0.02em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{compMeta}</div>
                 )}
                 {/* One matchup = one IndividualScore row (same component the
                     per-court board and viewer card use). Owns names, ippon

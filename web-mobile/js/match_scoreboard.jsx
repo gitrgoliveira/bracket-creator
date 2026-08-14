@@ -19,7 +19,7 @@
 
 import { resolveMatchLineup, resolveLineupTeamId, pickFromLineup, resolveBoutSideName, kachinukiHidesLineupPosition } from './lineup_resolver.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
-import { resultSlot, realIppons, hanteiTied } from './result_slot.jsx';
+import { resultSlot, realIppons, hanteiTied, nameOf } from './result_slot.jsx';
 
 const { useState: useSB, useEffect: useEB } = React;
 
@@ -226,9 +226,6 @@ function centreMarks(sub, matchSideA, matchSideB) {
   // plain "vs" — never a dash). Nothing else may write the middle: the centre
   // carries SHARED marks only, never a result belonging to one competitor.
   const mid = window.matchMiddleMark ? window.matchMiddleMark(sub) : "";
-  // Which side the result mark belongs to. sideB = shiro/left, sideA = aka/right.
-  // Fallback chain: sub-level side → daihyosen team alias → match-level side
-  // (quick-score sub-bouts have empty sub.sideA/sideB).
   const noIppons = !lettersB.some(Boolean) && !lettersA.some(Boolean);
   // A hantei ALWAYS names a winner and is decided from a TIED scoreline
   // (validation.go: "requires winner to be set" + "requires a tied scoreline"),
@@ -244,12 +241,14 @@ function centreMarks(sub, matchSideA, matchSideB) {
   // slots, so a drifted 3-2 row would compare as 2-2 and pass the gate it is
   // meant to fail.
   const markable = (sub.decidedByHantei && hanteiTied(sub.ipponsA, sub.ipponsB)) || noIppons;
-  // Winner attribution runs through subWinnerSides, the one cross-level chain
-  // shared with teamIVPW (aka-first on a both-sides match, aligning every JS
-  // surface with the Go standings/export for same-name teams).
-  const wsides = markable ? subWinnerSides(sub, matchSideA, matchSideB) : { shiro: false, aka: false };
-  const winShiro = wsides.shiro;
-  const winAka = wsides.aka;
+  // Which side the result mark belongs to (sideB = shiro/left, sideA = aka/right),
+  // via subWinnerSides: the one cross-level chain, shared with teamIVPW, that
+  // falls back sub-level side → daihyosen team alias → match-level side for the
+  // quick-score bouts with empty sub.sideA/sideB, and resolves a both-sides
+  // match aka-first to align every JS surface with the Go standings/export.
+  const { shiro: winShiro, aka: winAka } = markable
+    ? subWinnerSides(sub, matchSideA, matchSideB)
+    : { shiro: false, aka: false };
   // Ht behaves like a point and rides beside the competitor it names; the slot
   // it takes is the shared rule in result_slot.jsx (which the team editor uses
   // too), so it is not restated here. `loose` means both slots were full, and
@@ -381,7 +380,9 @@ export function withNumber(side, withZekkenName) {
 }
 
 export function IndividualScore({ match, variant, showNames, withZekkenName }) {
-  const sideName = (v) => v?.name || (typeof v === "string" ? v : "");
+  // nameOf, not a local unwrap: same object-or-bare-string rule the slot leaf's
+  // hanteiWinnerKey applies, so the two attribution paths cannot read a side
+  // name differently.
   const sideId = (v) => (v && v.id != null && v.id !== "") ? String(v.id) : "";
   // centreMarks marks the ippon-less (hantei/decision) winner by comparing the
   // winner key to each side's key. Prefer the participant id so a same-name
@@ -392,8 +393,8 @@ export function IndividualScore({ match, variant, showNames, withZekkenName }) {
   // so there is deliberately no centre fallback to fall back TO. Unreachable
   // through the API, which requires a winner and disambiguates same-name pairs
   // by uuid.
-  const aKey = sideId(match.sideA) || sideName(match.sideA);
-  const bKey = sideId(match.sideB) || sideName(match.sideB);
+  const aKey = sideId(match.sideA) || nameOf(match.sideA);
+  const bKey = sideId(match.sideB) || nameOf(match.sideB);
   const ambiguous = !!aKey && aKey === bKey;
   const sub = {
     ipponsA: match.ipponsA || (window.ipponsFromScore ? window.ipponsFromScore(match.scoreA) : []),
@@ -407,7 +408,7 @@ export function IndividualScore({ match, variant, showNames, withZekkenName }) {
     // the TV/lobby header chips that used to duplicate X/(E)/(DH) above it
     // were removed; only the OBS overlay, which renders no row, keeps a chip.
     encho: match.encho,
-    winner: ambiguous ? "" : (sideId(match.winner) || sideName(match.winner)),
+    winner: ambiguous ? "" : (sideId(match.winner) || nameOf(match.winner)),
     sideA: aKey, sideB: bKey,
     flagsA: match.flagsA, flagsB: match.flagsB,
   };

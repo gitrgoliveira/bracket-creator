@@ -196,53 +196,12 @@ func preserveSubHantei(stored, incoming []state.SubMatchResult) {
 				in.Decision = prior.Decision
 			}
 		}
-		if countScoringIppons(in.IpponsA) != countScoringIppons(in.IpponsB) {
+		if !domain.HanteiTiedScoreline(in.IpponsA, in.IpponsB) {
 			return // untied now: the verdict cannot stand on this scoreline
 		}
 		in.DecidedByHantei = state.HanteiPtr(true)
 		in.Winner = prior.Winner
 		return
-	}
-}
-
-// normalizePriorForRollback forces a restored prior snapshot into the shape the
-// forward write primitives read as "clear this", rather than "the writer said
-// nothing". Three fields collapse a stored false/empty to nil on the way out of
-// lookupExistingResult, and every one of those nils is a PRESERVE trigger
-// downstream, so a rollback that skipped this would restore the very partial
-// write it is meant to undo:
-//   - SubResults nil -> explicit empty slice, so recordBracketMatchResult reads
-//     "clear the sub-results" instead of leaving the partial write in place.
-//   - DecidedByHantei nil -> explicit false. HanteiPtr collapses false to nil by
-//     design, so nil would hit the match-level nil-preserve branch.
-//   - each sub-bout's DecidedByHantei nil -> explicit false: the same collision
-//     one level down. preserveSubHantei would otherwise see the staged forward
-//     write as `stored` and re-stamp the exact verdict being rolled back, and
-//     since state.HanteiPtr(false) returns nil, the pointer must be taken
-//     directly rather than through it.
-//
-// Callers must hold whatever lock the following restore write requires; this
-// only rewrites the caller's own snapshot.
-func normalizePriorForRollback(prior *state.MatchResult) {
-	if prior == nil {
-		return
-	}
-	if prior.SubResults == nil {
-		prior.SubResults = []state.SubMatchResult{}
-	}
-	// A SEPARATE bool per field. Sharing one pointer across the match and every
-	// sub-bout would leave N structs aliasing a single bool, so a later write
-	// through any one of them (*sub.DecidedByHantei = true, the shape
-	// bracket_test.go's deep-copy test already exercises) would flip the verdict
-	// on the match and on every other bout at once. state.HanteiExplicit is the
-	// constructor that can express false; HanteiPtr collapses it to nil.
-	if prior.DecidedByHantei == nil {
-		prior.DecidedByHantei = state.HanteiExplicit(false)
-	}
-	for i := range prior.SubResults {
-		if prior.SubResults[i].DecidedByHantei == nil {
-			prior.SubResults[i].DecidedByHantei = state.HanteiExplicit(false)
-		}
 	}
 }
 
@@ -268,20 +227,33 @@ func preserveDaihyosenOutcome(stored []state.SubMatchResult, result *state.Match
 	deriveDaihyosenWinner(result)
 }
 
-// poolWritePolicy selects how a stored pool/league match is folded into an
-// incoming result by applyPoolWrite.
-type poolWritePolicy int
+// matchWritePolicy selects how stored state is folded into an incoming result.
+// It governs BOTH branches of a match write - applyPoolWrite for a pool/league
+// match, applyBracketMatchResult for a knockout one - because a match id
+// resolves to one or the other at run time and the caller does not know which.
+// A policy that reached only the pool branch would silently revert to forward
+// semantics for exactly the matches that fell through.
+type matchWritePolicy int
 
 const (
-	// poolWriteForward is a client-supplied score: the payload carries only what
+	// matchWriteForward is a client-supplied score: the payload carries only what
 	// the operator entered, so stored context it omitted is inherited.
-	poolWriteForward poolWritePolicy = iota
-	// poolWriteRestore replays a trusted prior snapshot (the K3 rollback after a
+	matchWriteForward matchWritePolicy = iota
+	// matchWriteRestore replays a trusted prior snapshot (the K3 rollback after a
 	// concurrent-ineligibility rejection). It must land as captured, so it
 	// inherits NOTHING from the rejected partial write it is undoing: an empty
-	// field in the snapshot means "this was empty", not "the writer said
-	// nothing". Same reasoning as normalizePriorForRollback.
-	poolWriteRestore
+	// or nil field in the snapshot means "this was empty", not "the writer said
+	// nothing".
+	//
+	// That distinction is what makes the policy necessary rather than cosmetic.
+	// lookupExistingResult collapses a stored false/empty to nil on the way out,
+	// and every one of those nils is a PRESERVE trigger on the forward path, so
+	// replaying a snapshot forward re-applies the very write being rolled back.
+	// This used to be handled by a caller-side normalizePriorForRollback that
+	// pre-mangled the snapshot into "explicit clear" shape; it had to enumerate
+	// each nil-collision field of a primitive in another function, so adding a
+	// fourth such field to the bracket write would have silently broken rollback.
+	matchWriteRestore
 )
 
 // applyPoolWrite folds the stored match into an incoming result and then
@@ -302,7 +274,7 @@ const (
 // client must not be able to clear (ReopenPending) are re-stamped at the HTTP
 // boundary instead - see handlers_match.go - so a new field of that kind still
 // needs a decision about which layer preserves it.
-func applyPoolWrite(stored, result *state.MatchResult, policy poolWritePolicy) (mismatch bool) {
+func applyPoolWrite(stored, result *state.MatchResult, policy matchWritePolicy) (mismatch bool) {
 	// reconcileSides BACKFILLS omitted sides as a side effect and only reports
 	// the mismatch, so it must run under both policies; hoisted out of the
 	// condition below because folding it into a short-circuit would let a later
@@ -311,7 +283,7 @@ func applyPoolWrite(stored, result *state.MatchResult, policy poolWritePolicy) (
 	// Match identity is fixed at generation; a score must not rewrite it. The
 	// restore policy replays sides captured from this same match, so a mismatch
 	// there is not a client error.
-	if sidesDisagree && policy == poolWriteForward {
+	if sidesDisagree && policy == matchWriteForward {
 		return true
 	}
 	// Preserve generation-time participant ids + resolve winner id across the
@@ -324,11 +296,9 @@ func applyPoolWrite(stored, result *state.MatchResult, policy poolWritePolicy) (
 		result.ScheduledAt = stored.ScheduledAt
 	}
 	result.Round = stored.Round
-	// Everything below is forward-only; poolWriteRestore inherits nothing more.
-	if policy == poolWriteForward {
-		// Set-if-empty: the kachinuki reopen path persists the operator's audit
-		// justification here, and the first "Record bout" after a reopen is a
-		// plain write carrying no reason of its own.
+	// Everything below is forward-only; matchWriteRestore inherits nothing more.
+	if policy == matchWriteForward {
+		// Set-if-empty: see the drift note on this function.
 		if result.CorrectionReason == "" {
 			result.CorrectionReason = stored.CorrectionReason
 		}
@@ -564,33 +534,25 @@ func struckIppons(ippons []string) []string {
 	return out
 }
 
-// countScoringIppons counts real ippon marks, ignoring empty entries and the
-// "•" placeholder the UI uses for an unfilled slot. The default-win maru
-// (filled by the RecordDecision twins via domain.DefaultWinIppons) counts
-// like any struck ippon.
+// countScoringIppons is the package-local spelling of domain.CountScoringIppons
+// (real ippon marks, ignoring empties and the "•" placeholder; the default-win
+// maru counts like any struck ippon). The rule itself lives in domain so the
+// store's TeamResultFrom and the HTTP validator share this exact count.
 func countScoringIppons(ippons []string) int {
-	n := 0
-	for _, v := range ippons {
-		if v != "" && v != "•" {
-			n++
-		}
-	}
-	return n
+	return domain.CountScoringIppons(ippons)
 }
 
 func (e *Engine) RecordMatchResult(compId string, matchId string, result *state.MatchResult) error {
 	result.ID = matchId // normalize ID-less payloads before overwriting
 	applyHansokuIppons(result)
-	return e.writeMatchResult(compId, matchId, result, poolWriteForward)
+	return e.writeMatchResult(compId, matchId, result, matchWriteForward)
 }
 
 // writeMatchResult persists the result without applying hansoku auto-award.
-// RecordMatchResult calls this after applyHansokuIppons with poolWriteForward;
-// the K3 rollback path calls it with poolWriteRestore to put the prior result
-// back byte-for-byte. That policy argument is what makes the second half of
-// this comment true: the rollback used to run the forward merge and so could
-// derive a winner onto the snapshot it was meant to replay verbatim.
-func (e *Engine) writeMatchResult(compId string, matchId string, result *state.MatchResult, policy poolWritePolicy) error {
+// RecordMatchResult calls it after applyHansokuIppons with matchWriteForward;
+// the K3 rollback calls it with matchWriteRestore. The policy reaches whichever
+// branch the match id resolves to — see matchWritePolicy for what each inherits.
+func (e *Engine) writeMatchResult(compId string, matchId string, result *state.MatchResult, policy matchWritePolicy) error {
 	var sideMismatch bool
 	err := e.withPoolMatch(compId, matchId, func(r *state.MatchResult) {
 		sideMismatch = applyPoolWrite(r, result, policy)
@@ -599,7 +561,9 @@ func (e *Engine) writeMatchResult(compId string, matchId string, result *state.M
 		if !errors.Is(err, errMatchNotFound) {
 			return err
 		}
-		if err := e.recordBracketMatchResult(compId, matchId, result); err != nil {
+		// The SAME policy the pool branch just used: a match id resolves to a
+		// pool or a bracket match at run time, and the caller cannot know which.
+		if err := e.recordBracketMatchResult(compId, matchId, result, policy); err != nil {
 			return err
 		}
 	} else if sideMismatch {
@@ -665,13 +629,13 @@ func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId strin
 
 	var sideMismatch bool
 	err := e.withPoolMatch(compId, matchId, func(r *state.MatchResult) {
-		sideMismatch = applyPoolWrite(r, result, poolWriteForward)
+		sideMismatch = applyPoolWrite(r, result, matchWriteForward)
 	})
 	if err != nil {
 		if !errors.Is(err, errMatchNotFound) {
 			return nil, err
 		}
-		if err := e.recordBracketMatchResult(compId, matchId, result); err != nil {
+		if err := e.recordBracketMatchResult(compId, matchId, result, matchWriteForward); err != nil {
 			return nil, err
 		}
 	} else if sideMismatch {
@@ -692,8 +656,7 @@ func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId strin
 			// to its prior state before returning 409 so the operator
 			// sees a clean rejection rather than a mutated match.
 			if prior != nil {
-				normalizePriorForRollback(prior)
-				_ = e.writeMatchResult(compId, matchId, prior, poolWriteRestore)
+				_ = e.writeMatchResult(compId, matchId, prior, matchWriteRestore)
 			}
 			return nil, err
 		}
@@ -1187,9 +1150,9 @@ func markTiedStandingsLeague(comp *state.Competition, sorted []state.PlayerStand
 // step amplified the risk because it mutates ADJACENT bracket cells
 // (the next-round match), so a concurrent save with a stale view
 // could clobber another operator's propagation too.
-func (e *Engine) recordBracketMatchResult(compId string, matchId string, result *state.MatchResult) error {
+func (e *Engine) recordBracketMatchResult(compId string, matchId string, result *state.MatchResult, policy matchWritePolicy) error {
 	return e.store.UpdateBracket(compId, func(bracket *state.Bracket) error {
-		return e.applyBracketResultIn(bracket, compId, matchId, result)
+		return e.applyBracketResultIn(bracket, compId, matchId, result, policy)
 	})
 }
 
@@ -1237,7 +1200,7 @@ func validateBracketCompletion(matchID string, status state.MatchStatus, winner 
 // Note it does NOT touch bm.Court / bm.ScheduledAt: scheduling is owned
 // elsewhere, and the Court/ScheduledAt handling at the end is an echo BACK into
 // result for the caller's response, not a write.
-func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult) (applied bool, err error) {
+func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult, policy matchWritePolicy) (applied bool, err error) {
 	// A knockout match is playable only once both sides are resolved competitors
 	// (feeder pools/matches finished). This replaces the old bracket-wide Preview
 	// gate so the knockout fills in incrementally as pools qualify.
@@ -1299,8 +1262,14 @@ func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult) 
 	if result.CorrectionReason != "" {
 		bm.CorrectionReason = result.CorrectionReason
 	}
-	// nil = omitted (preserve stored data); non-nil [] = explicit clear.
-	if result.SubResults != nil {
+	// Forward: nil = omitted (preserve stored data), non-nil [] = explicit clear.
+	// Restore: the snapshot IS the truth, so nil means "there were none" and is
+	// written through; preserveDaihyosenOutcome is skipped for the same reason
+	// applyPoolWrite skips it — it would re-derive a winner onto a snapshot whose
+	// captured state had none, i.e. re-apply the write being undone.
+	if policy == matchWriteRestore {
+		bm.SubResults = result.SubResults
+	} else if result.SubResults != nil {
 		preserveDaihyosenOutcome(bm.SubResults, result)
 		bm.SubResults = result.SubResults
 	}
@@ -1312,8 +1281,12 @@ func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult) 
 	// DecidedByHantei uses *bool so a client that omits the field (nil) preserves
 	// the stored value, while an explicit true/false applies it. This prevents a
 	// re-score that doesn't mention the flag from silently clearing a recorded
-	// hantei win.
-	if result.DecidedByHantei != nil {
+	// hantei win. Under restore there is no "omitted": a snapshot that carries no
+	// verdict is a match that HAD no verdict, and preserving here would restore
+	// the hantei the rollback is undoing.
+	if policy == matchWriteRestore {
+		bm.DecidedByHantei = result.DecidedByHantei != nil && *result.DecidedByHantei
+	} else if result.DecidedByHantei != nil {
 		bm.DecidedByHantei = *result.DecidedByHantei
 	}
 	// Project the persisted flag back so clients (and the bracket HT chip) do not
@@ -1337,7 +1310,7 @@ func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult) 
 // completed winner. The twins differ only in which UpdateBracket they call
 // (e.store vs tx), so that dispatch is all they contain now — before this they
 // were ~105 lines that differed in two.
-func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID string, result *state.MatchResult) error {
+func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID string, result *state.MatchResult, policy matchWritePolicy) error {
 	if bracket == nil {
 		return notFoundErrorf("bracket not found for competition %s", compID)
 	}
@@ -1346,7 +1319,7 @@ func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID st
 			if bracket.Rounds[rIdx][mIdx].ID != matchID {
 				continue
 			}
-			applied, err := applyBracketMatchResult(&bracket.Rounds[rIdx][mIdx], result)
+			applied, err := applyBracketMatchResult(&bracket.Rounds[rIdx][mIdx], result, policy)
 			if err != nil {
 				return err
 			}
@@ -1364,7 +1337,7 @@ func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID st
 	// Rounds, so the scan above never finds it. There is no propagation out of
 	// bronze: it has no downstream match.
 	if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchID {
-		if _, err := applyBracketMatchResult(bracket.ThirdPlaceMatch, result); err != nil {
+		if _, err := applyBracketMatchResult(bracket.ThirdPlaceMatch, result, policy); err != nil {
 			return err
 		}
 		return nil

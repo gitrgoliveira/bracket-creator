@@ -50,9 +50,9 @@ func (e *Engine) withPoolMatchTx(tx state.StoreTx, compID, matchID string, mutat
 // recordBracketMatchResultTx is the tx-aware twin of
 // recordBracketMatchResult. Identical body modulo the tx.UpdateBracket
 // dispatch.
-func (e *Engine) recordBracketMatchResultTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult) error {
+func (e *Engine) recordBracketMatchResultTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult, policy matchWritePolicy) error {
 	return tx.UpdateBracket(compID, func(bracket *state.Bracket) error {
-		return e.applyBracketResultIn(bracket, compID, matchID, result)
+		return e.applyBracketResultIn(bracket, compID, matchID, result, policy)
 	})
 }
 
@@ -217,13 +217,13 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	err := e.withPoolMatchTx(tx, compID, matchID, func(r *state.MatchResult) {
 		// The POOL branch of the path POST /score and the bulk-score endpoint
 		// actually take - the site the hand-copied merge once missed.
-		sideMismatch = applyPoolWrite(r, result, poolWriteForward)
+		sideMismatch = applyPoolWrite(r, result, matchWriteForward)
 	})
 	if err != nil {
 		if !errors.Is(err, errMatchNotFound) {
 			return nil, err
 		}
-		if err := e.recordBracketMatchResultTx(tx, compID, matchID, result); err != nil {
+		if err := e.recordBracketMatchResultTx(tx, compID, matchID, result, matchWriteForward); err != nil {
 			return nil, err
 		}
 	} else if sideMismatch {
@@ -308,11 +308,12 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 // intents coalesced last-write-wins, so this restore supersedes the forward
 // write before Commit applies the final state. prior must be non-nil.
 //
-// It normalizes the nil-collision fields before restoring (SubResults and the
-// hantei flag at both match and sub-bout level); see normalizePriorForRollback
-// for why each nil would otherwise re-apply the write being rolled back.
+// The nil-collision fields (SubResults, and the hantei flag at both match and
+// sub-bout level) need no pre-mangling here: recordMatchResultTx replays under
+// matchWriteRestore, which reads a nil as "there was nothing" rather than as
+// "the writer said nothing". See matchWriteRestore for why the distinction is
+// what keeps a rollback from re-applying the write it is undoing.
 func (e *Engine) rollbackMatchResultTx(tx state.StoreTx, compID, matchID string, prior *state.MatchResult) {
-	normalizePriorForRollback(prior)
 	if rerr := e.recordMatchResultTx(tx, compID, matchID, prior); rerr != nil {
 		log.Printf("engine: RecordMatchResultWithIneligibilityTx rollback failed compId=%s matchId=%s: %v", compID, matchID, rerr)
 	}
@@ -325,14 +326,16 @@ func (e *Engine) rollbackMatchResultTx(tx state.StoreTx, compID, matchID string,
 func (e *Engine) recordMatchResultTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult) error {
 	result.ID = matchID
 	err := e.withPoolMatchTx(tx, compID, matchID, func(r *state.MatchResult) {
-		// K3 rollback: replay the snapshot verbatim - see poolWriteRestore.
-		_ = applyPoolWrite(r, result, poolWriteRestore)
+		// K3 rollback: replay the snapshot verbatim - see matchWriteRestore.
+		_ = applyPoolWrite(r, result, matchWriteRestore)
 	})
 	if err != nil {
 		if !errors.Is(err, errMatchNotFound) {
 			return err
 		}
-		if err := e.recordBracketMatchResultTx(tx, compID, matchID, result); err != nil {
+		// The bracket twin of the applyPoolWrite call above: same snapshot,
+		// same restore semantics, whichever branch this match id resolves to.
+		if err := e.recordBracketMatchResultTx(tx, compID, matchID, result, matchWriteRestore); err != nil {
 			return err
 		}
 	}

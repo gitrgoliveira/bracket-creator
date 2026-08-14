@@ -105,12 +105,12 @@ func TestPreserveSubHantei(t *testing.T) {
 	})
 
 	t.Run("explicit false (withdrawal) is left untouched", func(t *testing.T) {
-		// NOTE: state.HanteiPtr is nil-for-false (built for the omitempty
-		// projection), so an EXPLICIT false needs a real pointer.
-		explicitFalse := false
+		// state.HanteiExplicit, not state.HanteiPtr: the latter is
+		// nil-for-false (built for the omitempty projection), so it cannot
+		// express the withdrawal this case is about.
 		incoming := []state.SubMatchResult{
 			{Position: dh, SideA: "Kyoto", SideB: "Osaka", Decision: "daihyosen",
-				DecidedByHantei: &explicitFalse},
+				DecidedByHantei: state.HanteiExplicit(false)},
 		}
 		preserveSubHantei(storedSubs(), incoming)
 		require.NotNil(t, incoming[0].DecidedByHantei)
@@ -304,49 +304,86 @@ func TestPoolWriteTx_StaleSnapshotKeepsHantei(t *testing.T) {
 	assert.Equal(t, []string{"M", "K"}, stored[0].SubResults[0].IpponsA)
 }
 
-// normalizePriorForRollback must clear the hantei flag at BOTH levels. The
-// match level was already handled; the sub level is the same nil-collision one
-// bout deeper, where a nil would let preserveSubHantei read the staged forward
-// write as `stored` and re-stamp the very verdict being rolled back.
-func TestNormalizePriorForRollback(t *testing.T) {
-	prior := &state.MatchResult{
-		SubResults: []state.SubMatchResult{
-			{Position: 1},
-			{Position: state.DaihyosenSubPosition},
-		},
+// A bracket rollback must UNDO the write, not re-apply it. Every nil in a
+// captured snapshot (SubResults, and the hantei flag at match and sub-bout
+// level) is a PRESERVE trigger on the forward path, so replaying one forward
+// leaves the partial write standing. matchWriteRestore is what inverts that
+// reading; these cases pin each nil separately.
+//
+// This replaces a unit test of normalizePriorForRollback, the caller-side shim
+// that used to pre-mangle the snapshot into "explicit clear" shape. Asserting
+// on the write's OUTCOME rather than on the shim's mechanics is what makes the
+// test survive the fields moving into the primitive.
+func TestBracketRollbackDoesNotReapplyTheWrite(t *testing.T) {
+	// The staged forward write: a daihyosen won on hantei.
+	forward := func() *state.BracketMatch {
+		return &state.BracketMatch{
+			ID: "m-r1-0", SideA: "Kyoto", SideB: "Osaka",
+			Winner: "Kyoto", Status: state.MatchStatusCompleted,
+			DecidedByHantei: true,
+			SubResults: []state.SubMatchResult{{
+				Position: state.DaihyosenSubPosition, SideA: "Kyoto", SideB: "Osaka",
+				Winner: "Kyoto", Decision: "daihyosen",
+				DecidedByHantei: state.HanteiExplicit(true),
+			}},
+		}
 	}
-	normalizePriorForRollback(prior)
-	require.NotNil(t, prior.DecidedByHantei)
-	assert.False(t, *prior.DecidedByHantei)
-	for i := range prior.SubResults {
-		require.NotNilf(t, prior.SubResults[i].DecidedByHantei, "sub %d", i)
-		assert.Falsef(t, *prior.SubResults[i].DecidedByHantei, "sub %d", i)
+
+	// The snapshot as lookupExistingResult hands it back: an unscored match,
+	// with all three fields collapsed to nil.
+	snapshot := func() *state.MatchResult {
+		return &state.MatchResult{
+			ID: "m-r1-0", SideA: "Kyoto", SideB: "Osaka",
+			Status: state.MatchStatusScheduled,
+		}
 	}
 
-	t.Run("nil SubResults becomes an explicit clear", func(t *testing.T) {
-		p := &state.MatchResult{}
-		normalizePriorForRollback(p)
-		assert.NotNil(t, p.SubResults)
-		assert.Empty(t, p.SubResults)
+	t.Run("restore clears the sub-results the write added", func(t *testing.T) {
+		bm := forward()
+		applied, err := applyBracketMatchResult(bm, snapshot(), matchWriteRestore)
+		require.NoError(t, err)
+		require.True(t, applied)
+		assert.Empty(t, bm.SubResults, "a nil snapshot means the match HAD no bouts")
 	})
 
-	t.Run("an explicit true is left alone", func(t *testing.T) {
-		keep := true
-		p := &state.MatchResult{SubResults: []state.SubMatchResult{{Position: 1, DecidedByHantei: &keep}}}
-		normalizePriorForRollback(p)
-		assert.True(t, *p.SubResults[0].DecidedByHantei)
+	t.Run("restore clears the hantei verdict at match level", func(t *testing.T) {
+		bm := forward()
+		_, err := applyBracketMatchResult(bm, snapshot(), matchWriteRestore)
+		require.NoError(t, err)
+		assert.False(t, bm.DecidedByHantei, "the verdict being rolled back must not survive")
 	})
 
-	t.Run("each field gets its OWN pointer, not a shared bool", func(t *testing.T) {
-		p := &state.MatchResult{SubResults: []state.SubMatchResult{{Position: 1}, {Position: 2}}}
-		normalizePriorForRollback(p)
-		// Writing through one must not flip the match or the sibling bout.
-		*p.SubResults[0].DecidedByHantei = true
-		assert.False(t, *p.DecidedByHantei, "match level must not alias a sub")
-		assert.False(t, *p.SubResults[1].DecidedByHantei, "sub-bouts must not alias each other")
+	t.Run("restore does not re-derive a winner from the rolled-back bout", func(t *testing.T) {
+		bm := forward()
+		_, err := applyBracketMatchResult(bm, snapshot(), matchWriteRestore)
+		require.NoError(t, err)
+		assert.Empty(t, bm.Winner)
+		assert.Equal(t, state.MatchStatusScheduled, bm.Status)
 	})
 
-	t.Run("nil prior is a no-op", func(t *testing.T) {
-		assert.NotPanics(t, func() { normalizePriorForRollback(nil) })
+	t.Run("the SAME snapshot forward would restore the write instead", func(t *testing.T) {
+		// The mirror image, stated as a test so the policy's necessity is not
+		// prose-only: every assertion above inverts under matchWriteForward.
+		bm := forward()
+		_, err := applyBracketMatchResult(bm, snapshot(), matchWriteForward)
+		require.NoError(t, err)
+		assert.Len(t, bm.SubResults, 1, "forward reads nil as 'omitted, keep stored'")
+		assert.True(t, bm.DecidedByHantei)
+	})
+
+	t.Run("restore applies an explicit verdict the snapshot really held", func(t *testing.T) {
+		bm := &state.BracketMatch{ID: "m-r1-0", SideA: "Kyoto", SideB: "Osaka"}
+		prior := snapshot()
+		prior.Status = state.MatchStatusCompleted
+		prior.Winner = "Kyoto"
+		prior.DecidedByHantei = state.HanteiExplicit(true)
+		prior.SubResults = []state.SubMatchResult{{
+			Position: state.DaihyosenSubPosition, SideA: "Kyoto", SideB: "Osaka",
+			Winner: "Kyoto", Decision: "daihyosen", DecidedByHantei: state.HanteiExplicit(true),
+		}}
+		_, err := applyBracketMatchResult(bm, prior, matchWriteRestore)
+		require.NoError(t, err)
+		assert.True(t, bm.DecidedByHantei, "restore replays what the snapshot captured")
+		assert.Len(t, bm.SubResults, 1)
 	})
 }

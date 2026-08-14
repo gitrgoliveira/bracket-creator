@@ -9,6 +9,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
+import { hasClass } from './helpers/vdom.js';
 
 // Lineup resolver: pure utility functions
 
@@ -255,8 +256,7 @@ describe('viewer: BoutSubRow canonical layout (mp-13y)', () => {
     const tree = runtime.mount(BoutSubRow, { sub, index: 0, lineupA: null, lineupB: null, teamSize: 3, isDH: true });
     // The centre keeps the shared (DH) mark; the Ht is NOT in it. Asserting an
     // absent testid would be vacuous, so assert on the centre's own contents.
-    const centre = findInTree(tree, n =>
-      typeof n?.props?.className === 'string' && /\bmsb-vs\b/.test(n.props.className));
+    const centre = findInTree(tree, n => hasClass(n, 'msb-vs'));
     expect(collectText(centre)).not.toContain('Ht');
     expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-a')).toBeTruthy();
     expect(collectText(tree)).toContain('Ht');

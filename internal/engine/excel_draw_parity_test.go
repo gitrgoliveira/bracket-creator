@@ -474,10 +474,13 @@ func assertWorkbookMatchesBracket(t *testing.T, eng *Engine, store *state.Store,
 	}
 	// R8: the page count is a whole number of pages per shiaijo.
 	var perCourt []int
-	for _, n := range pagesPerCourt {
+	var treeCourts []string
+	for c, n := range pagesPerCourt {
 		perCourt = append(perCourt, n)
+		treeCourts = append(treeCourts, c)
 	}
 	slices.Sort(perCourt)
+	slices.Sort(treeCourts)
 	assert.Equalf(t, perCourt[0], perCourt[len(perCourt)-1],
 		"every shiaijo must get the same page count (R8), got %v", pagesPerCourt)
 
@@ -543,6 +546,134 @@ func assertWorkbookMatchesBracket(t *testing.T, eng *Engine, store *state.Store,
 				page.sheet, l.cell, l.label, entryRound, firstDR[l.label], got-offset, offsetFrom)
 		}
 	}
+
+	// 6. Pool banding, against the same workbook's tree pages and the app's own
+	//    schedule.
+	assertPoolBandsMatchSchedule(t, store, compID, raw, treeCourts)
+}
+
+// shiaijoHeaderPrefix is what writeCourtHeaders puts in front of the court
+// letter in a column band's row-1 header ("Shiaijo A").
+const shiaijoHeaderPrefix = "Shiaijo "
+
+// courtBand is one shiaijo column band on a court-banded sheet (Pool Matches,
+// Elimination Matches), read back off the rendered workbook.
+type courtBand struct {
+	// court is the letter in the band's row-1 header, taken from the sheet.
+	court string
+	// occupied reports whether the band carries anything at all below its
+	// header row. An UNOCCUPIED band is a shiaijo header printed over nothing:
+	// a score sheet naming a court the competition never scheduled a bout on.
+	occupied bool
+}
+
+// readCourtBands reads a sheet's shiaijo column bands back out of exported
+// workbook bytes. Each court owns one CourtsColumnsPerCourt-wide band whose
+// header sits in row 1 at the band's start column, so the header positions ARE
+// the banding an operator prints, read off the artifact rather than recomputed
+// from the code that wrote it.
+func readCourtBands(t *testing.T, raw []byte, sheet string) []courtBand {
+	t.Helper()
+	f, err := excelize.OpenReader(bytes.NewReader(raw))
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+
+	rows, err := f.GetRows(sheet)
+	require.NoError(t, err)
+	require.NotEmptyf(t, rows, "%s must carry a shiaijo header row", sheet)
+
+	var bands []courtBand
+	for col, value := range rows[0] {
+		court, ok := strings.CutPrefix(value, shiaijoHeaderPrefix)
+		if !ok {
+			continue
+		}
+		require.Zerof(t, col%helper.CourtsColumnsPerCourt,
+			"%s: header %q sits at column %d, off the %d-column court grid",
+			sheet, value, col+1, helper.CourtsColumnsPerCourt)
+		bands = append(bands, courtBand{court: court, occupied: bandHasContent(rows, col)})
+	}
+	return bands
+}
+
+// bandHasContent reports whether any row BELOW the header row carries a value
+// inside the band starting at 0-based column start.
+func bandHasContent(rows [][]string, start int) bool {
+	end := start + helper.CourtsColumnsPerCourt
+	for _, row := range rows[1:] {
+		for c := start; c < end && c < len(row); c++ {
+			if strings.TrimSpace(row[c]) != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// bandCourts returns the bands' shiaijo letters in column order, asserting on
+// the way that no band is empty.
+func bandCourts(t *testing.T, bands []courtBand, sheet string) []string {
+	t.Helper()
+	out := make([]string, 0, len(bands))
+	for _, b := range bands {
+		assert.Truef(t, b.occupied,
+			"%s prints an empty %s%s band: the sheet sends an operator to a shiaijo nothing is scheduled on",
+			sheet, shiaijoHeaderPrefix, b.court)
+		out = append(out, b.court)
+	}
+	return out
+}
+
+// scheduledPoolShiaijo returns the distinct shiaijo the STORED pool matches run
+// on, sorted. This is what the live app scheduled (engine.generatePools writes
+// it into pool-matches.csv off the CLAMPED court count), i.e. the answer the
+// printed score sheets have to agree with.
+func scheduledPoolShiaijo(t *testing.T, store *state.Store, compID string) []string {
+	t.Helper()
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	var courts []string
+	for _, m := range matches {
+		if m.Court != "" && !slices.Contains(courts, m.Court) {
+			courts = append(courts, m.Court)
+		}
+	}
+	slices.Sort(courts)
+	return courts
+}
+
+// assertPoolBandsMatchSchedule is parity check 6, split out because the pure
+// playoffs path has no pool phase to band.
+//
+// The Pool Matches sheet is banded by shiaijo, and those bands must be the
+// shiaijo the app actually SCHEDULED the pool phase on: the count clamped by
+// helper.EffectiveDrawCourts, which is what engine.generatePools wrote into
+// pool-matches.csv and what helper.BuildKnockoutDraw gave bracket regions to.
+// Banding on the operator's RAW allocation instead printed pool bouts under
+// shiaijo the app never scheduled them on, plus a trailing EMPTY band -- inside
+// a workbook whose own tree pages named fewer shiaijo than its pool sheets did.
+func assertPoolBandsMatchSchedule(t *testing.T, store *state.Store, compID string, raw []byte, treeCourts []string) {
+	t.Helper()
+
+	pools, err := store.LoadPools(compID)
+	require.NoError(t, err)
+	if len(pools) == 0 {
+		return // a standalone playoffs draw has no pool phase to band
+	}
+
+	printed := bandCourts(t, readCourtBands(t, raw, helper.SheetPoolMatches), helper.SheetPoolMatches)
+
+	// The pool bands must name the same shiaijo the app runs the pools on.
+	assert.Equalf(t, scheduledPoolShiaijo(t, store, compID), printed,
+		"%s is banded for shiaijo %v but the app schedules the pool phase on %v",
+		helper.SheetPoolMatches, printed, scheduledPoolShiaijo(t, store, compID))
+
+	// ...and the same shiaijo the SAME workbook's tree pages are titled for. One
+	// workbook cannot name one set of shiaijo on its pool sheets and another on
+	// its bracket pages.
+	assert.Equalf(t, treeCourts, printed,
+		"%s is banded for shiaijo %v but this workbook's tree pages are titled for %v",
+		helper.SheetPoolMatches, printed, treeCourts)
 }
 
 // mixedParityRoster builds a roster that CreatePools(roster, 4, max) splits into
@@ -623,6 +754,120 @@ func TestExcelWorkbookMatchesEngineBracket_Playoffs(t *testing.T) {
 			})
 		}
 	}
+}
+
+// TestExcelExportBandsClampedShiaijo is the worked example for the export
+// banding bug, spelled out on ONE competition rather than swept.
+//
+// 12 competitors, PoolSize 4 in "max" mode, on 4 legal shiaijo (A-D) gives
+// helper.PoolCount(12, 4, true) = 3 pools. Three pools cannot carry four
+// shiaijo, so helper.EffectiveDrawCourts(3, 4) steps the draw down to 2 and the
+// live app schedules pools A+B on shiaijo A and pool C on shiaijo B -- a bracket
+// with TWO regions.
+//
+// The export banded its pool sheets on the UNCLAMPED 4 instead, so
+// AssignPoolsToCourts(3, 4) = [0,1,2] printed Pool A under "Shiaijo A", Pool B
+// under "Shiaijo B" and Pool C under "Shiaijo C", followed by a fourth,
+// completely EMPTY "Shiaijo D" band -- sending operators to shiaijo the app
+// never scheduled a bout on, in a workbook whose own tree pages are titled only
+// Shiaijo A and Shiaijo B.
+//
+// This is the CLAMPED regime specifically: a pool count that is not a power of
+// two under a larger shiaijo allocation. A power-of-two pool count, or a pool
+// count at or above the court count, never trips the clamp and passes either
+// way.
+func TestExcelExportBandsClampedShiaijo(t *testing.T) {
+	const (
+		numParticipants = 12
+		poolSize        = 4
+		allocatedCourts = 4
+		wantPools       = 3
+	)
+
+	// The regime this test exists for; if the clamp ever stopped firing here the
+	// assertions below would pass vacuously.
+	require.Equal(t, wantPools, helper.PoolCount(numParticipants, poolSize, true))
+	wantCourts := helper.EffectiveDrawCourts(wantPools, allocatedCourts)
+	require.Equalf(t, 2, wantCourts,
+		"%d pools on %d shiaijo must clamp to 2 for this case to be in the clamped regime",
+		wantPools, allocatedCourts)
+	require.Less(t, wantCourts, allocatedCourts, "the case must actually clamp")
+
+	eng, store, _ := setupTestEngine(t)
+	compID := "clamped-bands"
+
+	// Court NAMES are the shiaijo labels the sheets print (helper.CourtLabel),
+	// so a printed band header and a stored match court compare directly.
+	courts := make([]string, allocatedCourts)
+	for i := range courts {
+		courts[i] = helper.CourtLabel(i)
+	}
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:           compID,
+		Name:         "Clamped bands",
+		Format:       state.CompFormatMixed,
+		Kind:         "individual",
+		PoolSize:     poolSize,
+		PoolSizeMode: "max",
+		PoolWinners:  2,
+		RoundRobin:   true,
+		Courts:       courts,
+		StartTime:    "09:00",
+		Status:       state.CompStatusSetup,
+	}))
+	// Unique dojos per competitor keep CreatePools' conflict avoidance out of
+	// the picture, so the pool composition is deterministic.
+	require.NoError(t, store.SaveParticipants(compID, playoffsParityRoster(numParticipants)))
+	require.NoError(t, eng.StartCompetition(compID))
+
+	pools, err := store.LoadPools(compID)
+	require.NoError(t, err)
+	require.Len(t, pools, wantPools)
+
+	// What the app scheduled: pools A and B on shiaijo A, pool C on shiaijo B.
+	poolMatches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	courtOfPool := map[string]string{}
+	for _, m := range poolMatches {
+		pool, _, ok := strings.Cut(m.ID, "-")
+		require.Truef(t, ok, "pool match ID %q must be <Pool>-<n>", m.ID)
+		courtOfPool[pool] = m.Court
+	}
+	assert.Equal(t, map[string]string{"Pool A": "A", "Pool B": "A", "Pool C": "B"}, courtOfPool,
+		"the live app must run three pools over two shiaijo")
+
+	raw, err := eng.ExportCompetitionXlsx(compID)
+	require.NoError(t, err)
+
+	// The printed pool bands must be exactly those two shiaijo, with no empty
+	// trailing band.
+	assert.Equal(t, []string{"A", "B"},
+		bandCourts(t, readCourtBands(t, raw, helper.SheetPoolMatches), helper.SheetPoolMatches),
+		"%s must be banded for the shiaijo the pools actually run on", helper.SheetPoolMatches)
+
+	// The knockout sheet is banded by REGION, which is the same two shiaijo.
+	assert.Equal(t, []string{"A", "B"},
+		bandCourts(t, readCourtBands(t, raw, helper.SheetEliminationMatches), helper.SheetEliminationMatches),
+		"%s must be banded for the draw's regions", helper.SheetEliminationMatches)
+
+	// Names to Print splits into one sheet per shiaijo, so the clamp decides how
+	// many sheets exist and which competitors are on each. A "Shiaijo C" sheet
+	// here would be pool C's roster filed under a shiaijo it never fights on.
+	f, err := excelize.OpenReader(bytes.NewReader(raw))
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+	var nameSheets []string
+	for _, sheet := range f.GetSheetList() {
+		if strings.HasPrefix(sheet, helper.SheetNamesToPrint+" ") {
+			nameSheets = append(nameSheets, sheet)
+		}
+	}
+	slices.Sort(nameSheets)
+	assert.Equal(t, []string{helper.SheetNamesToPrint + " A", helper.SheetNamesToPrint + " B"}, nameSheets,
+		"one %s sheet per shiaijo the competition actually uses", helper.SheetNamesToPrint)
+
+	// And the whole draw-parity battery, which now includes the band check.
+	assertWorkbookMatchesBracket(t, eng, store, compID)
 }
 
 // TestExcelWorkbookMatchesEngineBracket_Mixed sweeps pool-fed knockout draws and

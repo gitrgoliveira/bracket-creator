@@ -32,6 +32,26 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		numCourts = 1
 	}
 
+	// The shiaijo count the POOL PHASE actually runs on, which is what every
+	// pool-banded sheet must be laid out against. It is DERIVED, not the
+	// operator's allocation: a court with no home pool would own an empty
+	// bracket region, so the draw steps the count down to what the pools can
+	// carry (helper.EffectiveDrawCourts, the same clamp BuildKnockoutDraw
+	// applies internally and engine.generatePools applies when it writes
+	// pool-matches.csv).
+	//
+	// Banding the sheets on the RAW count printed score sheets for shiaijo the
+	// app never scheduled a bout on: 12 competitors at PoolSize 4 in max mode
+	// on 4 shiaijo gives 3 pools, so the live app runs pools A+B on shiaijo A
+	// and pool C on shiaijo B, while the export spread them one-per-court over
+	// A, B and C and emitted a fourth, entirely empty "Shiaijo D" band -- in a
+	// workbook whose own tree pages are titled only Shiaijo A and B.
+	//
+	// Deliberately NOT guarded by len(pools) > 0: EffectiveDrawCourts returns
+	// numCourts untouched when there are no pools, so a guard would only hide
+	// the intent.
+	poolCourts := helper.EffectiveDrawCourts(len(pools), numCourts)
+
 	f, err := excel.NewFileFromScratch()
 	if err != nil {
 		return nil, err
@@ -49,7 +69,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	}
 
 	// 3. Pool Matches sheet (red/white, scoring formulas, reactive name references)
-	matchWinners := helper.PrintPoolMatches(f, pools, comp.TeamSize, comp.EffectivePoolWinners(), numCourts, comp.Mirror, poolCoords, playerCoords, comp.Engi)
+	matchWinners := helper.PrintPoolMatches(f, pools, comp.TeamSize, comp.EffectivePoolWinners(), poolCourts, comp.Mirror, poolCoords, playerCoords, comp.Engi)
 
 	// 4. Tree sheets: one visual bracket page per subtree, rendered exactly like
 	//    the CLI (cmd/create-pools.go) and the results workbook
@@ -97,7 +117,14 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("export: %w", err)
 		}
-		helper.PrintEliminationWithBronze(f, matchWinners, eliminationMatchRounds, comp.TeamSize, numCourts, comp.Mirror, comp.Engi, hasBronze)
+		// draw.NumCourts() is the exact band count for this sheet: it equals
+		// poolCourts on the pool-fed path, and on the PURE PLAYOFFS path (where
+		// pools is empty, so EffectiveDrawCourts returns the raw count)
+		// NewPlayoffDraw -> splitIntoSubtrees can honestly yield FEWER regions
+		// than numCourts when the tree has too few splittable levels. Using it
+		// makes the elimination banding equal the tree-page count in BOTH
+		// formats.
+		helper.PrintEliminationWithBronze(f, matchWinners, eliminationMatchRounds, comp.TeamSize, draw.NumCourts(), comp.Mirror, comp.Engi, hasBronze)
 	} else if hasBronze {
 		// Narrow fallback: a competition whose bracket has a third-place bout but
 		// yields no elimination leaves at all (no pools, no first-round entrants
@@ -119,7 +146,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	}
 
 	// 5. Names to Print sheet
-	helper.CreateNamesWithPoolToPrint(f, pools, comp.EffectiveWithZekkenName(), numCourts, playerCoords)
+	helper.CreateNamesWithPoolToPrint(f, pools, comp.EffectiveWithZekkenName(), poolCourts, playerCoords)
 
 	// 6. Tags sheet, pass publicURL so numbered tags get an embedded QR code.
 	// LoadTournament errors are silently ignored: a missing publicURL simply

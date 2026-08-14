@@ -3788,3 +3788,140 @@ func TestBuildResultsWorkbook_FixedFormatNoKachinukiSheet(t *testing.T) {
 	assert.NotContains(t, f.GetSheetList(), helper.SheetKachinukiDetail,
 		"fixed-format comps must not emit a Kachinuki Detail sheet")
 }
+
+// shiaijoHeaderPrefix is what writeCourtHeaders puts in front of the court
+// letter in a column band's row-1 header ("Shiaijo A").
+const shiaijoHeaderPrefix = "Shiaijo "
+
+// readCourtBandLetters reads a court-banded sheet's shiaijo band headers back
+// out of the rendered workbook, in column order, and asserts each band is
+// non-empty. Each court owns one CourtsColumnsPerCourt-wide band whose header
+// sits in row 1 at the band's start column, so the header positions ARE the
+// banding an operator prints, read off the artifact rather than recomputed.
+//
+// An EMPTY band is a shiaijo header printed over nothing: a score sheet naming
+// a court the competition never scheduled a bout on.
+func readCourtBandLetters(t *testing.T, rows [][]string, sheet string) []string {
+	t.Helper()
+	require.NotEmptyf(t, rows, "%s must carry a shiaijo header row", sheet)
+
+	var bands []string
+	for col, value := range rows[0] {
+		court, ok := strings.CutPrefix(value, shiaijoHeaderPrefix)
+		if !ok {
+			continue
+		}
+		require.Zerof(t, col%helper.CourtsColumnsPerCourt,
+			"%s: header %q sits at column %d, off the %d-column court grid",
+			sheet, value, col+1, helper.CourtsColumnsPerCourt)
+
+		occupied := false
+		end := col + helper.CourtsColumnsPerCourt
+		for _, row := range rows[1:] {
+			for c := col; c < end && c < len(row); c++ {
+				if strings.TrimSpace(row[c]) != "" {
+					occupied = true
+				}
+			}
+		}
+		assert.Truef(t, occupied,
+			"%s prints an empty %s%s band: the sheet sends an operator to a shiaijo nothing is scheduled on",
+			sheet, shiaijoHeaderPrefix, court)
+		bands = append(bands, court)
+	}
+	return bands
+}
+
+// TestBuildResultsWorkbook_ClampedShiaijoBands is the results-workbook half of
+// the export banding bug (the blank-template half lives in
+// internal/engine/excel_draw_parity_test.go).
+//
+// THREE pools on a FOUR-shiaijo allocation is the clamped regime: three pools
+// cannot carry four shiaijo, so helper.EffectiveDrawCourts(3, 4) steps the draw
+// down to 2 and the live app runs pools A+B on shiaijo A and pool C on shiaijo
+// B. Banding the sheets on the raw 4 instead spread the three pools one per
+// court over A, B and C and emitted a fourth, completely EMPTY "Shiaijo D" band.
+//
+// The score placement is the sharper half of the assertion. The overlays
+// re-derive their column bands through computePoolsByCourt ->
+// AssignPoolsToCourts, so they must be handed the SAME court count as
+// PrintPoolMatches; a value that disagrees with the skeleton writes every score
+// and standing into the wrong cells. Pool C's ippon is therefore checked in the
+// court-B band by column, not merely found somewhere on the sheet.
+func TestBuildResultsWorkbook_ClampedShiaijoBands(t *testing.T) {
+	t.Parallel()
+	dir, err := os.MkdirTemp("", "export-test-clamped-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	eng := engine.New(store)
+
+	const allocatedCourts = 4
+	pools := []helper.Pool{
+		make2PlayerPool("Pool A", "Alice", "Bob"),
+		make2PlayerPool("Pool B", "Charlie", "Dave"),
+		make2PlayerPool("Pool C", "Eve", "Frank"),
+	}
+	// The regime this test exists for; without the clamp firing the assertions
+	// below would pass vacuously.
+	require.Equalf(t, 2, helper.EffectiveDrawCourts(len(pools), allocatedCourts),
+		"%d pools on %d shiaijo must clamp to 2", len(pools), allocatedCourts)
+
+	compID := "clamped-bands-comp"
+	courts := make([]string, allocatedCourts)
+	for i := range courts {
+		courts[i] = helper.CourtLabel(i)
+	}
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     compID,
+		Name:   "Clamped bands",
+		Courts: courts,
+	}))
+	require.NoError(t, store.SavePools(compID, pools))
+
+	// One completed match per pool, each with a distinct ippon letter so the
+	// score's landing column identifies the pool that produced it.
+	ipponOfPool := map[string]string{"Pool A": "M", "Pool B": "K", "Pool C": "T"}
+	var results []state.MatchResult
+	for _, p := range pools {
+		results = append(results, state.MatchResult{
+			ID:       p.PoolName + "-0",
+			SideA:    p.Players[0].Name,
+			SideB:    p.Players[1].Name,
+			SideAID:  p.Players[0].ID,
+			SideBID:  p.Players[1].ID,
+			IpponsA:  []string{ipponOfPool[p.PoolName]},
+			Decision: "fought",
+			Status:   state.MatchStatusCompleted,
+			Winner:   p.Players[0].Name,
+		})
+	}
+	require.NoError(t, store.SavePoolMatches(compID, results))
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer f.Close()
+
+	rows, err := f.GetRows(helper.SheetPoolMatches)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"A", "B"}, readCourtBandLetters(t, rows, helper.SheetPoolMatches),
+		"%s must be banded for the shiaijo the pools actually run on", helper.SheetPoolMatches)
+
+	// writeScoreRowCells puts SideA's (Red, left) score at the band's start
+	// column + 1. Band c starts at 0-based column c*CourtsColumnsPerCourt.
+	scoreCol := func(court int) int { return court*helper.CourtsColumnsPerCourt + 1 }
+	assert.Truef(t, columnContains(rows, scoreCol(0), "M"),
+		"Pool A's ippon must land in the shiaijo A band (column %d)", scoreCol(0)+1)
+	assert.Truef(t, columnContains(rows, scoreCol(0), "K"),
+		"Pool B's ippon must land in the shiaijo A band (column %d)", scoreCol(0)+1)
+	assert.Truef(t, columnContains(rows, scoreCol(1), "T"),
+		"Pool C's ippon must land in the shiaijo B band (column %d), the shiaijo the app runs it on", scoreCol(1)+1)
+	assert.Falsef(t, columnContains(rows, scoreCol(2), "T"),
+		"Pool C's ippon must NOT land in a shiaijo C band (column %d): the draw has only two shiaijo", scoreCol(2)+1)
+}

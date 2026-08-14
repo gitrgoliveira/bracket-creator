@@ -111,14 +111,27 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	if numCourts == 0 {
 		numCourts = 1
 	}
+	// The shiaijo count the POOL PHASE actually runs on -- the clamp
+	// engine.generatePools applied when it wrote pool-matches.csv and
+	// BuildKnockoutDraw applies to the bracket. Banding these sheets on the raw
+	// allocation printed pools onto shiaijo the app never scheduled them on,
+	// plus a trailing empty band (see engine/export.go for the worked example).
+	// EffectiveDrawCourts returns numCourts untouched when there are no pools,
+	// so this needs no len(pools) guard.
+	//
+	// CRITICAL: PrintPoolMatches and BOTH overlays must receive the SAME value.
+	// The overlays re-derive the column bands through computePoolsByCourt ->
+	// AssignPoolsToCourts, so a value that disagrees with the skeleton's writes
+	// every score and standing into the wrong cells.
+	poolCourts := helper.EffectiveDrawCourts(len(pools), numCourts)
 	matchWinners := helper.PrintPoolMatches(
 		f, pools, comp.TeamSize, comp.EffectivePoolWinners(),
-		numCourts, comp.Mirror, poolCoords, playerCoords, comp.Engi,
+		poolCourts, comp.Mirror, poolCoords, playerCoords, comp.Engi,
 	)
-	if err := overlayPoolScores(f, pools, matchResultByID, poolOrdinals, comp.TeamSize, comp.Mirror, numCourts, comp.Engi); err != nil {
+	if err := overlayPoolScores(f, pools, matchResultByID, poolOrdinals, comp.TeamSize, comp.Mirror, poolCourts, comp.Engi); err != nil {
 		return nil, fmt.Errorf("export: overlay pool scores: %w", err)
 	}
-	if err := overlayPoolStandings(f, pools, standings, comp.TeamSize, numCourts, comp.Engi); err != nil {
+	if err := overlayPoolStandings(f, pools, standings, comp.TeamSize, poolCourts, comp.Engi); err != nil {
 		return nil, fmt.Errorf("export: overlay standings: %w", err)
 	}
 
@@ -142,7 +155,13 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 		if err != nil {
 			return nil, fmt.Errorf("export: %w", err)
 		}
-		helper.PrintEliminationWithBronze(f, matchWinners, eliminationMatchRounds, comp.TeamSize, numCourts, comp.Mirror, comp.Engi,
+		// draw.NumCourts() is the exact band count for this sheet: it equals
+		// poolCourts on the pool-fed path, and on the PURE PLAYOFFS path (pools
+		// empty, so EffectiveDrawCourts returns the raw count) NewPlayoffDraw ->
+		// splitIntoSubtrees can honestly yield FEWER regions than numCourts when
+		// the tree has too few splittable levels. Using it makes the elimination
+		// banding equal the tree-page count in BOTH formats.
+		helper.PrintEliminationWithBronze(f, matchWinners, eliminationMatchRounds, comp.TeamSize, draw.NumCourts(), comp.Mirror, comp.Engi,
 			bracket != nil && bracket.ThirdPlaceMatch != nil)
 
 		// Overlay literal scores from the live bracket state.
@@ -172,7 +191,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	}
 
 	// 5. Names to Print sheet (identical to blank-template export).
-	helper.CreateNamesWithPoolToPrint(f, pools, comp.EffectiveWithZekkenName(), numCourts, playerCoords)
+	helper.CreateNamesWithPoolToPrint(f, pools, comp.EffectiveWithZekkenName(), poolCourts, playerCoords)
 
 	// 6. Kachinuki Detail sheet: bout-by-bout log for kachinuki team
 	//    competitions (GAP 6). Same opt-in semantics as the blank-template

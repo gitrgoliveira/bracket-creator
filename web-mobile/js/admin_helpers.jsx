@@ -401,7 +401,7 @@ const VALID_SHIAIJO_COUNTS = (() => {
 // stored-allocation banner). Kept as a bare clause so it can be embedded
 // after a colon; REASON_SENTENCE is the standalone-sentence form.
 const SHIAIJO_RULE_REASON = "the knockout draw gives each shiaijo its own block of the bracket and the blocks merge in pairs, so the count has to halve cleanly";
-const SHIAIJO_RULE_REASON_SENTENCE = "The knockout draw gives each shiaijo its own block of the bracket and the blocks merge in pairs, so the count has to halve cleanly.";
+const SHIAIJO_RULE_REASON_SENTENCE = `${SHIAIJO_RULE_REASON[0].toUpperCase()}${SHIAIJO_RULE_REASON.slice(1)}.`;
 
 // The organiser's real question, answered ONCE. Every message about this rule
 // leads with a verdict about a number, which an organiser whose venue has

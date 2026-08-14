@@ -1007,18 +1007,15 @@ func (d *KnockoutDraw) RegionSpans() [][2]int {
 	return spans
 }
 
-// leafSpanWalk mirrors TreeToLeafArray's padding exactly (each side is padded
-// to NextPow2 of the wider side before concatenation) and records the offset of
-// every region root it passes. Returns the padded width of the subtree.
-func leafSpanWalk(n *Node, offset int, index map[*Node]int, out [][2]int) int {
+// leafSpanWalk mirrors TreeToLeafArray's padding exactly and records the offset
+// of every region root it passes. The padding rule is not restated here: it is
+// leafArrayWidth's, so a change to TreeToLeafArray's geometry has one place to
+// land rather than two that must be edited in lockstep.
+func leafSpanWalk(n *Node, offset int, index map[*Node]int, out [][2]int) {
 	if n == nil {
-		return 0
+		return
 	}
-	width := 1
-	if !n.LeafNode {
-		side := NextPow2(max(leafArrayWidth(n.Left), leafArrayWidth(n.Right)))
-		width = 2 * side
-	}
+	width := leafArrayWidth(n)
 	if i, ok := index[n]; ok && i < len(out) {
 		out[i] = [2]int{offset, offset + width}
 	}
@@ -1027,7 +1024,6 @@ func leafSpanWalk(n *Node, offset int, index map[*Node]int, out [][2]int) int {
 		leafSpanWalk(n.Left, offset, index, out)
 		leafSpanWalk(n.Right, offset+side, index, out)
 	}
-	return width
 }
 
 // leafArrayWidth is len(TreeToLeafArray(n)) without building the slice.

@@ -112,6 +112,36 @@ func TestSeedPlacementWarningsSilentWhenSatisfiable(t *testing.T) {
 	}
 }
 
+// TestAnySeededAgreesWithSeedPlacementWarnings pins the invariant that
+// engine.SeedWarnings' early return rests on: every warning here is about a
+// seed, so a pool set AnySeeded rejects can never produce one, and skipping the
+// draw build for it cannot swallow anything the operator needed. If a warning
+// is ever added that fires without a seed, this is the test that catches it.
+func TestAnySeededAgreesWithSeedPlacementWarnings(t *testing.T) {
+	cases := []struct {
+		name                          string
+		numPools, numSeeds, numCourts int
+		wantSeeded                    bool
+	}{
+		{"no seeds", 6, 0, 2, false},
+		{"no seeds on one shiaijo", 5, 0, 1, false},
+		{"one seed", 6, 1, 2, true},
+		// The loudest configuration there is: more seeds than pools, which
+		// warns about surplus ranks AND about spread it could not honour.
+		{"four seeds over three pools on one shiaijo", 3, 4, 1, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			pools, draw := seededDraw(t, tc.numPools, tc.numSeeds, tc.numCourts)
+			require.Equal(t, tc.wantSeeded, AnySeeded(pools))
+			if !tc.wantSeeded {
+				assert.Empty(t, SeedPlacementWarnings(draw, pools, tc.numCourts),
+					"an unseeded pool set must have nothing to say, or the early return would hide it")
+			}
+		})
+	}
+}
+
 // TestSeedPlacementWarningsNilInputs covers the callers that ask before there
 // is anything to answer with: no draw, no pools. Neither is an error and
 // neither warns.

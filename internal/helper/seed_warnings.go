@@ -130,6 +130,22 @@ type seedPool struct {
 	pool int
 }
 
+// AnySeeded is seedPools' emptiness test without the allocation and the sort.
+// SeedPlacementWarnings returns nil for an unseeded competition, but only once
+// its caller has built a whole draw to hand it, and unseeded is the common case
+// in the app. Callers use this to skip that work. Kept beside seedPools so the
+// two cannot disagree about what counts as seeded.
+func AnySeeded(pools []Pool) bool {
+	for _, p := range pools {
+		for _, pl := range p.Players {
+			if pl.Seed > 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // seedPools lists every operator-assigned seed with the pool it landed in,
 // lowest rank first. A pool with several seeded competitors reports each of
 // them; splitSharedPoolSeeds is what decides which one counts.

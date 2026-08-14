@@ -30,6 +30,13 @@ func (e *Engine) SeedWarnings(id string) []string {
 	if err != nil || len(pools) == 0 {
 		return nil
 	}
+	// Every warning below is about a SEED, so an unseeded competition is
+	// answered without building anything. That is the common case and this runs
+	// on every admin competition read, which otherwise paid a full draw
+	// construction to be told there was nothing to say.
+	if !helper.AnySeeded(pools) {
+		return nil
+	}
 	numCourts := len(comp.Courts)
 	draw := poolDraw(comp, pools, numCourts)
 	if draw == nil {

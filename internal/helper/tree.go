@@ -255,7 +255,7 @@ func regionPages(region *Node, want int) []*Node {
 }
 
 // TreeToLeafArray converts a tree built by CreateBalancedTree into a
-// power-of-two leaf array suitable for buildBracketFromLeaves. Internal nodes
+// power-of-two leaf array suitable for buildBracketFromDraw. Internal nodes
 // recurse into left and right subtrees, padding each side to
 // NextPow2(max(len(left), len(right))) with "" (bye slots) before
 // concatenating. The result length is always NextPow2(N) where N is the

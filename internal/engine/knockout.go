@@ -152,7 +152,7 @@ func (e *Engine) completedPoolNames(compID string, comp *state.Competition) (map
 //
 // Resolution is RE-SEEDABLE, not a one-shot string replace. Each match carries
 // the label its slot held at draw time (PlaceholderA/B/Winner, written once by
-// buildBracketFromLeaves), and THAT is what the resolver keys on. So if an
+// buildBracketFromDraw), and THAT is what the resolver keys on. So if an
 // operator re-scores a completed pool match after that pool was already seeded,
 // changing the 1st/2nd finisher, the new finisher overwrites the stale name in
 // the same slot instead of being silently dropped: the live side no longer holds
@@ -161,7 +161,7 @@ func (e *Engine) completedPoolNames(compID string, comp *state.Competition) (map
 // only competitor labels.
 //
 // It used to RECOMPUTE that template instead, rerunning the whole draw and
-// buildBracketFromLeaves on every call and matching it against the live
+// buildBracketFromDraw on every call and matching it against the live
 // bracket BY POSITION. That was correct only while the placement algorithm never
 // changed: an operator who upgraded between a competition's draw and the end of
 // its pool phase (ordinary for a two-day event) would have had qualifiers written
@@ -238,11 +238,6 @@ func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 		}
 	}
 
-	poolNames := make([]string, len(pools))
-	for i, p := range pools {
-		poolNames[i] = p.PoolName
-	}
-
 	resolvedNow := 0
 	allResolved := false
 	backfilled := false
@@ -257,6 +252,14 @@ func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 		// is never persisted without the resolution it enabled, nor lost by a
 		// call that resolved nothing (see the save condition below).
 		if !bracketHasDrawPlaceholders(bracket) {
+			// Built here rather than alongside the resolver above: this is the
+			// only reader, and the branch fires at most once per competition
+			// (never at all for a bracket drawn on this version), while
+			// ResolveQualifiedPools itself runs on every pool-match score.
+			poolNames := make([]string, len(pools))
+			for i, p := range pools {
+				poolNames[i] = p.PoolName
+			}
 			backfilled = backfillDrawPlaceholdersV1(bracket, poolNames, poolWinners)
 		}
 		n := 0
@@ -293,7 +296,7 @@ func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 		}
 		// Auto-complete newly created bye matches: a resolver mapping to ""
 		// (degenerate pool) leaves a match with one empty side still
-		// Scheduled. Mirror buildBracketFromLeaves's bye logic and
+		// Scheduled. Mirror buildBracketFromDraw's bye logic and
 		// propagate winners so downstream matches become playable.
 		// Guard: only auto-complete when the non-empty side is a resolved
 		// competitor, NOT a still-unresolved placeholder (its feeder pool

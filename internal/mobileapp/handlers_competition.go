@@ -322,7 +322,7 @@ type competitionDetail struct {
 func withDrawWarnings(eng *engine.Engine, comp *state.Competition) competitionDetail {
 	detail := competitionDetail{Competition: comp}
 	if comp != nil && eng != nil {
-		detail.DrawWarnings = eng.SeedWarnings(comp.ID)
+		detail.DrawWarnings = eng.SeedWarningsFor(comp)
 	}
 	return detail
 }
@@ -662,7 +662,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
 			return
 		}
-		warnings := eng.SeedWarnings(id)
+		warnings := eng.SeedWarningsFor(comp)
 		if warnings == nil {
 			warnings = []string{}
 		}

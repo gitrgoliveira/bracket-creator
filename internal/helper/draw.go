@@ -44,7 +44,7 @@ import (
 // Regions is indexed by COURT: Regions[i] is the subtree belonging to shiaijo i
 // (court label CourtLabel(i)), and every Regions[i] is a node inside Root, not
 // a copy. Callers that paginate (RenderKnockoutPages) or derive a match's court
-// (engine.buildBracketFromLeaves) read the regions rather than re-deriving them
+// (engine.buildBracketFromDraw) read the regions rather than re-deriving them
 // from leaf arithmetic, which is what makes the page-to-shiaijo mapping and the
 // per-match court assignment exact instead of approximate.
 //
@@ -66,6 +66,28 @@ type KnockoutDraw struct {
 	// against Regions. Unexported because no caller outside the draw needs the
 	// finer partition: paging and court derivation are region-level.
 	blocks []*Node
+
+	// poolCourt[p] is the zero-based shiaijo pool p was allocated to -- the
+	// allocation this draw was actually ASSEMBLED from, kept rather than
+	// recomputed. BuildKnockoutDrawFromAssignment exists precisely because a
+	// real allocation can differ from AssignPoolsToCourts (the 34th EKC Junior
+	// Female sheet ran 7 pools as 2/1/2/2 where the derived answer is 2/2/2/1),
+	// so anything asking "which shiaijo is this pool on?" has to read what the
+	// draw used rather than re-derive an answer that may not match it.
+	//
+	// nil for a draw with no pool phase (NewPlayoffDraw).
+	poolCourt []int
+}
+
+// PoolCourt returns the zero-based shiaijo each pool was drawn onto, indexed by
+// pool. Nil when the draw has no pool phase, or when the stored allocation does
+// not cover the pools handed in: callers skip the per-shiaijo question rather
+// than guess at it.
+func (d *KnockoutDraw) PoolCourt(numPools int) []int {
+	if d == nil || numPools <= 0 || len(d.poolCourt) != numPools {
+		return nil
+	}
+	return d.poolCourt
 }
 
 // NumCourts is the number of shiaijo regions the draw actually has.
@@ -160,7 +182,12 @@ func BuildKnockoutDrawFromAssignment(pools []Pool, poolWinners int, poolCourt []
 	if root == nil {
 		return nil
 	}
-	return &KnockoutDraw{Root: root, Regions: courtRegions, blocks: blockRoots}
+	return &KnockoutDraw{
+		Root:      root,
+		Regions:   courtRegions,
+		blocks:    blockRoots,
+		poolCourt: append([]int(nil), poolCourt...),
+	}
 }
 
 // NewPlayoffDraw wraps an already-built elimination tree (a standalone playoffs
@@ -985,7 +1012,7 @@ func combinePadded(nodes []*Node) *Node {
 // RegionSpans returns, for each shiaijo region, the [start, end) slice of
 // TreeToLeafArray(Root) that region occupies. Regions are contiguous and
 // aligned by construction (R3), so a match's court is a lookup rather than an
-// estimate: engine.buildBracketFromLeaves resolves each match's first-round
+// estimate: engine.buildBracketFromDraw resolves each match's first-round
 // slot through CourtForLeafSlot instead of dividing the slot count by the court
 // count, which was only ever right when every court held the same number of
 // pools.

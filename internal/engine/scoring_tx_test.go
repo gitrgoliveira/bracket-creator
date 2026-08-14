@@ -558,10 +558,9 @@ func saveMixedCompForGuardTest(t *testing.T, teamSize int) (*Engine, *state.Stor
 
 	// Build the preview bracket from the pools.
 	draw := helper.BuildKnockoutDraw(pools, 1, 1)
-	leaves := helper.TreeToLeafArray(draw.Root)
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
-	bracket, err := eng.buildBracketFromLeaves(comp, leaves, draw.RegionSpans())
+	bracket, err := eng.buildBracketFromDraw(comp, draw)
 	require.NoError(t, err)
 	bracket.Preview = true
 	require.NoError(t, store.SaveBracket(compID, bracket))
@@ -905,7 +904,7 @@ func TestPoolRescore_CorruptBracket_FailsClosed(t *testing.T) {
 	draw := helper.BuildKnockoutDraw(pools, 1, 1)
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
-	bracket, err := eng.buildBracketFromLeaves(comp, helper.TreeToLeafArray(draw.Root), draw.RegionSpans())
+	bracket, err := eng.buildBracketFromDraw(comp, draw)
 	require.NoError(t, err)
 	require.NoError(t, store.SaveBracket(compID, bracket))
 	bracketPath := filepath.Join(dir, "competitions", compID, "bracket.json")

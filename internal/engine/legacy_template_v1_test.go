@@ -35,7 +35,7 @@ func livePlaceholderBracket(t *testing.T, eng *Engine, comp *state.Competition, 
 	}
 	draw := helper.BuildKnockoutDraw(pools, poolWinners, len(comp.Courts))
 	require.NotNil(t, draw)
-	bracket, err := eng.buildBracketFromLeaves(comp, helper.TreeToLeafArray(draw.Root), draw.RegionSpans())
+	bracket, err := eng.buildBracketFromDraw(comp, draw)
 	require.NoError(t, err)
 	return bracket
 }

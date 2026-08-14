@@ -339,14 +339,15 @@ func validateCompetitionShiaijoCount(courts []string, format string) error {
 // who typed the same three courts out was refused (R9: "wherever an
 // allocation is DERIVED rather than chosen, the DERIVED value is what gets
 // validated").
+//
+// The resolution itself is engine.InheritedDrawCourts: the HTTP write paths
+// resolve here and runDrawPipeline resolves there, on records that never came
+// through HTTP (legacy data, imported manifests, hand-edited config files).
+// What gets PERSISTED and what gets DRAWN have to be the same allocation, so
+// the rule has one owner rather than two bodies that agreed when they were
+// written.
 func resolveCompetitionCourts(compCourts []string, tourn *state.Tournament) []string {
-	if len(compCourts) > 0 {
-		return compCourts
-	}
-	if tourn != nil && len(tourn.Courts) > 0 {
-		return append([]string(nil), tourn.Courts...)
-	}
-	return []string{"A"}
+	return engine.InheritedDrawCourts(compCourts, tourn)
 }
 
 // errPasswordRequired is the sentinel the PUT /tournament transform

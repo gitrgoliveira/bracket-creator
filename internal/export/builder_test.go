@@ -1237,7 +1237,7 @@ func TestPlayoffLeavesFromBracket(t *testing.T) {
 // TestBuildResultsWorkbook_PlayoffsNonPow2TopologyMatchesBracket is the regression
 // test proving the export skeleton is derived from the FROZEN bracket, not
 // recomputed from participants. For a non-power-of-two roster the engine pads the
-// bracket to the next pow2 with byes (buildBracketFromLeaves), so a 6-entry
+// bracket to the next pow2 with byes (buildBracketFromDraw), so a 6-entry
 // playoffs is STORED as an 8-leaf, 7-node tree in which two nodes are structural
 // byes and one is an empty-vs-empty phantom.
 //

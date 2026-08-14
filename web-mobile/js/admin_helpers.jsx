@@ -410,11 +410,19 @@ const SHIAIJO_RULE_REASON_SENTENCE = `${SHIAIJO_RULE_REASON[0].toUpperCase()}${S
 // constrained. Kept verbatim from the wording the operator guide settled on.
 const SHIAIJO_RULE_IS_PER_COMPETITION = "This is a rule about each competition, never about your venue.";
 
-// "1, 2 or 4" from [1, 2, 4]. Oxford-comma-free, matching the microcopy
-// elsewhere in the console.
+// One list joiner behind every enumeration this module renders: Oxford-comma-
+// free, ", " between all but the last, the conjunction before it. The separator
+// and the singleton handling are console microcopy, so they are decided once
+// here rather than restated per message.
+function joinList(list, conjunction, empty) {
+  if (!list.length) return empty;
+  if (list.length === 1) return String(list[0] ?? "");
+  return `${list.slice(0, -1).join(", ")} ${conjunction} ${list[list.length - 1]}`;
+}
+
+// "1, 2 or 4" from [1, 2, 4].
 function joinCounts(list) {
-  if (list.length <= 1) return String(list[0] ?? "");
-  return `${list.slice(0, -1).join(", ")} or ${list[list.length - 1]}`;
+  return joinList(list, "or", "");
 }
 
 // The counts a competition may take on a venue of `venueCourtCount` shiaijo,
@@ -713,9 +721,7 @@ const SEEDING_FIX = "Set the missing ranks or clear the seeds in Participants & 
 // helper.RankList (internal/helper/seed_warnings.go); the two exist so the
 // server's refusal and this console's block name the same ranks the same way.
 function rankList(ranks) {
-  if (!ranks.length) return "none";
-  if (ranks.length === 1) return String(ranks[0]);
-  return `${ranks.slice(0, -1).join(", ")} and ${ranks[ranks.length - 1]}`;
+  return joinList(ranks, "and", "none");
 }
 
 // seedGapDiagnosis names the seed ranks still to be typed, for a set whose

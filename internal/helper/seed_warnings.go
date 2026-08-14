@@ -52,7 +52,7 @@ func SeedPlacementWarnings(draw *KnockoutDraw, pools []Pool) []string {
 		return nil
 	}
 
-	warnings := []string{}
+	var warnings []string
 	placed, ignored := splitSharedPoolSeeds(seeds)
 	if len(ignored) > 0 {
 		warnings = append(warnings, fmt.Sprintf(
@@ -78,7 +78,7 @@ func SeedPlacementWarnings(draw *KnockoutDraw, pools []Pool) []string {
 		located = append(located, seedPlacement{rank: s.rank, pool: s.pool, path: path})
 	}
 	if len(located) < 2 {
-		return nilIfEmpty(warnings)
+		return warnings
 	}
 
 	// D7 constraint 1: seeds 1 and 3 in one half, 2 and 4 in the other, so the
@@ -104,7 +104,11 @@ func SeedPlacementWarnings(draw *KnockoutDraw, pools []Pool) []string {
 	// D7 constraint 3: distinct shiaijo. Only a relaxation when there are
 	// enough shiaijo to go round; two seeds per shiaijo is the CORRECT outcome
 	// on two shiaijo and four seeds (D6), not something that gave way.
-	courts := drawCourtOfPool(pools, draw.NumCourts())
+	// The allocation the draw was ASSEMBLED from, not one re-derived from the
+	// pool count: a draw built through BuildKnockoutDrawFromAssignment may not
+	// match what AssignPoolsToCourts would have chosen, and warning about a
+	// shiaijo clash the draw does not have is worse than staying quiet.
+	courts := draw.PoolCourt(len(pools))
 	if courts != nil && draw.NumCourts() >= len(located) {
 		if pairs := seedPairsBreaking(located, func(a, b seedPlacement) bool {
 			return courts[a.pool] == courts[b.pool]
@@ -115,7 +119,7 @@ func SeedPlacementWarnings(draw *KnockoutDraw, pools []Pool) []string {
 		}
 	}
 
-	return nilIfEmpty(warnings)
+	return warnings
 }
 
 // seedPlacement is one seed's position in the built draw: the path from the
@@ -234,17 +238,6 @@ func seedPairsBreaking(placed []seedPlacement, broken func(a, b seedPlacement) b
 	return out
 }
 
-// drawCourtOfPool is the pool-to-shiaijo allocation the draw was built over.
-// Returns nil when the allocation cannot be derived, which suppresses the
-// shiaijo check rather than reporting a guess.
-func drawCourtOfPool(pools []Pool, numCourts int) []int {
-	assignment, err := AssignPoolsToCourts(len(pools), numCourts)
-	if err != nil {
-		return nil
-	}
-	return assignment
-}
-
 func ranksOf(seeds []seedPool) []int {
 	out := make([]int, 0, len(seeds))
 	for _, s := range seeds {
@@ -337,11 +330,4 @@ func haveOrHas(n int) string {
 		return "has"
 	}
 	return "have"
-}
-
-func nilIfEmpty(s []string) []string {
-	if len(s) == 0 {
-		return nil
-	}
-	return s
 }

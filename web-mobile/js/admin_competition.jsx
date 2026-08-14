@@ -67,8 +67,14 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   // loads its detail through the PUBLIC viewer endpoint, which deliberately
   // does not carry operator advice. Re-fetched on every status change, so
   // discarding a draw clears it and regenerating replaces it.
+  // Skipped entirely before there is a draw to warn about: the warnings are
+  // derived from the drawn pools, and "setup" is exactly the state in which
+  // pools.csv does not exist (DiscardDraw deletes it and reverts the status),
+  // so the answer is structurally []. Clearing rather than fetching also keeps
+  // the discard case correct: the status change back to setup empties the list.
   const [drawWarnings, setDrawWarnings] = useStateA([]);
   useEffectA(() => {
+    if (!c.status || c.status === "setup") { setDrawWarnings([]); return undefined; }
     let live = true;
     window.API.fetchDrawWarnings(c.id, password).then((w) => { if (live) setDrawWarnings(w || []); });
     return () => { live = false; };

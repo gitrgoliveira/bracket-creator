@@ -239,3 +239,46 @@ func TestSeedGapGoldenTableAgreesWithTheValidator(t *testing.T) {
 		})
 	}
 }
+
+// TestSeedPlacementWarningsUsesTheDrawsOwnAllocation pins that the per-shiaijo
+// check reads the allocation the draw was ASSEMBLED from, not one re-derived
+// from the pool count.
+//
+// BuildKnockoutDrawFromAssignment exists because a real allocation can differ
+// from AssignPoolsToCourts: the 34th EKC Junior Female sheet ran 7 pools as
+// 2/1/2/2 where the derived answer is 2/2/2/1. Here 4 pools on 2 shiaijo derive
+// to [0 0 1 1], and the draw is built from [0 1 0 1] instead. Pools A and C
+// hold the two seeds, so they SHARE a shiaijo under the allocation actually
+// used and sit on different ones under the derived allocation. Re-deriving
+// therefore stays silent about a clash the draw really has.
+func TestSeedPlacementWarningsUsesTheDrawsOwnAllocation(t *testing.T) {
+	pools := make([]Pool, 4)
+	for pi := range pools {
+		pools[pi].PoolName = fmt.Sprintf("Pool %c", 'A'+pi)
+		for i := 0; i < 4; i++ {
+			pl := Player{Name: fmt.Sprintf("P%d-%d", pi, i), Dojo: fmt.Sprintf("Dojo %d-%d", pi, i)}
+			// Seeds in pools A and C: adjacent courts under the derived
+			// allocation, the SAME court under the one supplied below.
+			if i == 0 && (pi == 0 || pi == 2) {
+				pl.Seed = pi/2 + 1
+			}
+			pools[pi].Players = append(pools[pi].Players, pl)
+		}
+	}
+
+	derived, err := AssignPoolsToCourts(len(pools), 2)
+	require.NoError(t, err)
+	require.Equal(t, []int{0, 0, 1, 1}, derived,
+		"fixture assumes the derived allocation separates pools A and C")
+
+	used := []int{0, 1, 0, 1}
+	draw := BuildKnockoutDrawFromAssignment(pools, 2, used, 2)
+	require.NotNil(t, draw)
+	require.Equal(t, used, draw.PoolCourt(len(pools)),
+		"the draw must report the allocation it was built from")
+
+	warnings := SeedPlacementWarnings(draw, pools)
+	joined := strings.Join(warnings, " | ")
+	assert.Contains(t, joined, "own shiaijo",
+		"seeds 1 and 2 share shiaijo A under the allocation the draw used, so the relaxation must be reported: %s", joined)
+}

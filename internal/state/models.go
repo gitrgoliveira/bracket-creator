@@ -1051,7 +1051,7 @@ type BracketMatch struct {
 	ModifiedAt int64 `json:"modifiedAt,omitempty"`
 	// PlaceholderA / PlaceholderB / PlaceholderWinner record what SideA / SideB /
 	// Winner held at DRAW time, before any pool resolved. They are written once,
-	// by engine.buildBracketFromLeaves, for a pool-fed (mixed) knockout whose
+	// by engine.buildBracketFromDraw, for a pool-fed (mixed) knockout whose
 	// leaves are pool-origin placeholders ("Pool A-1st", …), and are NEVER
 	// rewritten afterwards, unlike the live sides, which
 	// engine.ResolveQualifiedPools overwrites in place with real competitor

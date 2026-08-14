@@ -20,7 +20,7 @@
 // RULES
 //
 //  1. NEVER "refactor" this to call helper.GenerateFinals / CreateBalancedTree /
-//     ApplyPoolAdjustments / TreeToLeafArray, or engine.buildBracketFromLeaves.
+//     ApplyPoolAdjustments / TreeToLeafArray, or engine.buildBracketFromDraw.
 //     Delegating to the live pipeline would make this file track the algorithm it
 //     exists to be independent OF, and a legacy bracket would then be resolved
 //     with the NEW placement, writing qualifiers into the wrong slots of a live
@@ -327,7 +327,7 @@ func v1NextPow2(n int) int {
 // must reproduce the exact string the old draw wrote.
 const v1WinnerOfFormat = "Winner of r%d-m%d"
 
-// v1BuildRounds is the side/winner half of buildBracketFromLeaves: pair the pow2
+// v1BuildRounds is the side/winner half of buildBracketFromDraw: pair the pow2
 // leaves into round 0, name each later round's sides after their feeders,
 // auto-resolve byes, and propagate those bye winners upward.
 //

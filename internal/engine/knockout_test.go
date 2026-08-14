@@ -32,12 +32,11 @@ func saveMixedScaffold(t *testing.T, store *state.Store, compID string, pools []
 
 	// Build the preview bracket the same way the engine does so placeholder
 	// labels match exactly (BuildKnockoutDraw → TreeToLeafArray →
-	// buildBracketFromLeaves).
+	// buildBracketFromDraw).
 	draw := helper.BuildKnockoutDraw(pools, poolWinners, 1)
-	leaves := helper.TreeToLeafArray(draw.Root)
 	eng := New(store)
 	comp, _ := store.LoadCompetition(compID)
-	bracket, err := eng.buildBracketFromLeaves(comp, leaves, draw.RegionSpans())
+	bracket, err := eng.buildBracketFromDraw(comp, draw)
 	require.NoError(t, err)
 	bracket.Preview = true
 	require.NoError(t, store.SaveBracket(compID, bracket))

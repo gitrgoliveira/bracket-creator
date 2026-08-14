@@ -392,7 +392,7 @@ func TestStandardSeeding_Integration(t *testing.T) {
 }
 
 func TestStandardSeedingFull(t *testing.T) {
-	// buildBracketFromLeaves pairs leaf 2k with 2k+1 in round 1. A bye is an
+	// buildBracketFromDraw pairs leaf 2k with 2k+1 in round 1. A bye is an
 	// empty leaf. For a correctly seeded draw, every bye must pair with a real
 	// player (giving a top seed a bye); never two byes in the same match.
 	tests := []struct {

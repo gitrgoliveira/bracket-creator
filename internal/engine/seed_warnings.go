@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
+	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
 // SeedWarnings reports the seed-placement constraints a competition's drawn
@@ -26,6 +27,19 @@ func (e *Engine) SeedWarnings(id string) []string {
 	if err != nil || comp == nil {
 		return nil
 	}
+	return e.SeedWarningsFor(comp)
+}
+
+// SeedWarningsFor is SeedWarnings for a caller that already holds the record.
+// Both HTTP callers do: one has just loaded the competition to answer a detail
+// GET, the other to decide between 200 and 404. Taking the record rather than
+// the id saves them a second load of the identical bytes (a per-competition
+// lock, a stat and a full copy of the courts and player slices) on every admin
+// competition read.
+func (e *Engine) SeedWarningsFor(comp *state.Competition) []string {
+	if comp == nil {
+		return nil
+	}
 	// Every warning here is about where a seed's qualifier LANDS IN A BRACKET:
 	// which half, which quarter, which shiaijo, and which surplus rank had to be
 	// dropped to keep two seeds out of one pool. A league or a Swiss has no
@@ -36,7 +50,7 @@ func (e *Engine) SeedWarnings(id string) []string {
 	if !CompetitionDrawsBracket(comp.Format) {
 		return nil
 	}
-	pools, err := e.store.LoadPools(id)
+	pools, err := e.store.LoadPools(comp.ID)
 	if err != nil || len(pools) == 0 {
 		return nil
 	}

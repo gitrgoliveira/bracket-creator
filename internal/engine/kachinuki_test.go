@@ -2944,10 +2944,9 @@ func saveMixedKachinukiCompForReopenTest(t *testing.T) (*Engine, *state.Store, s
 		{ID: "Pool B-0", SideA: "B1", SideB: "B2", Status: state.MatchStatusScheduled},
 	}))
 	draw := helper.BuildKnockoutDraw(pools, 1, 1)
-	leaves := helper.TreeToLeafArray(draw.Root)
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
-	bracket, err := eng.buildBracketFromLeaves(comp, leaves, draw.RegionSpans())
+	bracket, err := eng.buildBracketFromDraw(comp, draw)
 	require.NoError(t, err)
 	bracket.Preview = true
 	require.NoError(t, store.SaveBracket(compID, bracket))

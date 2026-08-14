@@ -52,18 +52,30 @@ func (e *Engine) generatePlayoffs(comp *state.Competition, players []domain.Play
 		names[i] = p.Name
 	}
 	tree := helper.CreateBalancedTree(names)
-	leaves := helper.TreeToLeafArray(tree)
 
 	// R2-R7 leave a playoffs bracket alone, but its matches still need courts,
 	// so the seeded tree is cut into one region per shiaijo exactly as the Excel
 	// pagination cuts it (helper.NewPlayoffDraw).
 	draw := helper.NewPlayoffDraw(tree, len(comp.Courts))
-	bracket, err := e.buildBracketFromLeaves(comp, leaves, draw.RegionSpans())
+	bracket, err := e.buildBracketFromDraw(comp, draw)
 	if err != nil {
 		return err
 	}
 
 	return e.store.SaveBracket(comp.ID, bracket)
+}
+
+// bracketMatchLeafSlot is the LEFTMOST first-round slot that match (roundIdx,
+// matchIdx) is rooted above, in a pow2-padded bracket.Rounds: match (r, m)
+// covers leaves [m*2^(r+1), (m+1)*2^(r+1)).
+//
+// Two things derive from it and they MUST agree: a match's court (the region
+// owning that leaf) and the tie-break inside a DisplayRound when numbering
+// matches. They are the same quantity, so they are one function -- numbering a
+// bout by one rule and placing it by another is precisely how the printed
+// sheet's "Match 12" and the app's "Match 12" became different bouts.
+func bracketMatchLeafSlot(roundIdx, matchIdx int) int {
+	return matchIdx * (1 << (roundIdx + 1))
 }
 
 // generatePoolPreviewBracket builds the in-place knockout bracket for a mixed
@@ -98,15 +110,15 @@ func (e *Engine) generatePoolPreviewBracket(comp *state.Competition) error {
 	// Mirror the Excel create-pools path exactly: the SAME court-first draw
 	// builds both, so the preview bracket has the same topology, the same
 	// region-to-shiaijo mapping and the same byes as the printed Excel bracket
-	// (mp-5ng7). Flattening to a pow2 leaf array is TreeToLeafArray's job and
-	// re-pads the regions' structural byes as "" slots.
+	// (mp-5ng7). Flattening to a pow2 leaf array is TreeToLeafArray's job, done
+	// inside buildBracketFromDraw, and re-pads the regions' structural byes as
+	// "" slots.
 	draw := helper.BuildKnockoutDraw(pools, poolWinners, len(comp.Courts))
 	if draw == nil {
 		return nil
 	}
-	previewLeaves := helper.TreeToLeafArray(draw.Root)
 
-	bracket, err := e.buildBracketFromLeaves(comp, previewLeaves, draw.RegionSpans())
+	bracket, err := e.buildBracketFromDraw(comp, draw)
 	if err != nil {
 		return err
 	}
@@ -115,22 +127,33 @@ func (e *Engine) generatePoolPreviewBracket(comp *state.Competition) error {
 	return e.store.SaveBracket(comp.ID, bracket)
 }
 
-// buildBracketFromLeaves builds a balanced single-elimination bracket from an
-// ordered pow2 leaf array. Callers must provide a pow2-length slice produced
-// by helper.TreeToLeafArray (which mirrors the Excel bracket topology). Labels
-// may be resolved player names (live playoffs) or pool-origin placeholders
-// (preview bracket), the tree shape, court assignment, bye resolution, and
-// scheduling are identical either way. The caller persists the result (and
-// sets Preview when appropriate).
+// buildBracketFromDraw builds a balanced single-elimination bracket from a
+// built draw. Labels may be resolved player names (live playoffs) or
+// pool-origin placeholders (preview bracket); the tree shape, court
+// assignment, bye resolution and scheduling are identical either way. The
+// caller persists the result (and sets Preview when appropriate).
 //
-// regionSpans is the draw's per-shiaijo leaf spans (KnockoutDraw.RegionSpans).
-// It is what makes each match's COURT exact: a region is a contiguous, aligned
-// span of the pow2 leaf array (R3), so a match's court is the region containing
-// its first-round slot. The court used to be derived by dividing the round-1
-// slot count by the court count, which is only right when every court holds the
-// same number of pools, and which silently clamped every overflow slot onto the
-// last court. A nil/empty spans slice falls back to court 0.
-func (e *Engine) buildBracketFromLeaves(comp *state.Competition, leaves []string, regionSpans [][2]int) (*state.Bracket, error) {
+// It takes the DRAW rather than a leaf array plus a span slice because the two
+// are one object's two faces and are only correct together: the leaves are
+// helper.TreeToLeafArray(draw.Root) (which mirrors the Excel bracket topology)
+// and the spans are draw.RegionSpans(). Passing them separately admitted
+// leaves from one tree with spans from another, which nothing detects -- the
+// bracket would carry correct sides and wrong courts, and helper.CourtForLeafSlot
+// never errors because it always returns a real court.
+//
+// The spans are what make each match's COURT exact: a region is a contiguous,
+// aligned span of the pow2 leaf array (R3), so a match's court is the region
+// containing its first-round slot. The court used to be derived by dividing the
+// round-1 slot count by the court count, which is only right when every court
+// holds the same number of pools, and which silently clamped every overflow
+// slot onto the last court. A draw with no regions falls back to court 0.
+func (e *Engine) buildBracketFromDraw(comp *state.Competition, draw *helper.KnockoutDraw) (*state.Bracket, error) {
+	if draw == nil || draw.Root == nil {
+		return nil, fmt.Errorf("buildBracketFromDraw: no draw to build from")
+	}
+	leaves := helper.TreeToLeafArray(draw.Root)
+	regionSpans := draw.RegionSpans()
+
 	// NextPow2 ensures we have a balanced tree with enough slots
 	pow2 := helper.NextPow2(len(leaves))
 	leafValues := make([]string, pow2)
@@ -175,13 +198,11 @@ func (e *Engine) buildBracketFromLeaves(comp *state.Competition, leaves []string
 			// If both sides are empty (byes), we might still want to show the match
 			// but marked as completed/skipped.
 
-			// Derive court from the first-round slot this match covers.
-			// Match (rIdx, i) is rooted above LEAF slot i * 2^(rIdx+1); its
+			// Derive court from the first-round slot this match covers. Its
 			// region is the one owning that leaf. Matches above every region
 			// root (the half-finals and the final) take the leftmost region's
 			// court, which is what puts the final on shiaijo A by default.
-			leafSlot := i * (1 << (rIdx + 1))
-			courtIdx := helper.CourtForLeafSlot(regionSpans, leafSlot)
+			courtIdx := helper.CourtForLeafSlot(regionSpans, bracketMatchLeafSlot(rIdx, i))
 			court := ""
 			if len(comp.Courts) > 0 {
 				if courtIdx >= len(comp.Courts) {
@@ -398,8 +419,8 @@ func bronzeDefaultCourt(finalCourt string, courts []string) string {
 // number by descending DisplayRound (deepest/earliest round first).
 //
 // The tie-break inside a DisplayRound is the match's LEFTMOST FIRST-ROUND SLOT,
-// mi<<(ri+1) — the same expression buildBracketFromLeaves uses to find a match's
-// court. It has to be, because Excel's TraverseRounds walks each depth level
+// bracketMatchLeafSlot — the same function buildBracketFromDraw uses to find a
+// match's court. It has to be, because Excel's TraverseRounds walks each depth level
 // LEFT TO RIGHT across the whole tree, and one effective round can draw its
 // matches from several pow2 rounds at once: a shallow region's first bout and a
 // deep region's second bout share a DisplayRound while sitting in bracket.Rounds
@@ -439,7 +460,7 @@ func assignBracketMatchNumbers(b *state.Bracket) {
 			if m.SideA == "" && m.SideB == "" {
 				continue
 			}
-			real = append(real, ref{m: m, leafSlot: mi * (1 << (ri + 1))})
+			real = append(real, ref{m: m, leafSlot: bracketMatchLeafSlot(ri, mi)})
 		}
 	}
 	// Descending DisplayRound (deepest/earliest round first), then left to right

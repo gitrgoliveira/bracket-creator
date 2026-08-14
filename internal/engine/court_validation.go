@@ -103,10 +103,13 @@ func ValidateShiaijoCount(numCourts int) error {
 // makes the identical ruling, so omitting a court list and stating it reach the
 // same outcome.
 //
-// Mirrors resolveCompetitionCourts in internal/mobileapp/handlers_tournament.go,
-// which applies the same resolution on the HTTP write paths. This one exists
-// because records with no courts key still reach the engine from legacy data,
-// imported manifests and hand-edited config files.
+// This is the one owner of the rule. The HTTP write paths reach it through
+// resolveCompetitionCourts (internal/mobileapp/handlers_tournament.go), which
+// resolves an allocation before persisting it; runDrawPipeline calls it
+// directly, because records with no courts key still reach the engine from
+// legacy data, imported manifests and hand-edited config files. Both must
+// answer identically or a competition is drawn on a different allocation from
+// the one it was saved with.
 func InheritedDrawCourts(compCourts []string, tourn *state.Tournament) []string {
 	if len(compCourts) > 0 {
 		return compCourts

@@ -179,7 +179,7 @@ func TestSeedWarningsScaleWithTheSeedCount(t *testing.T) {
 			draw := BuildKnockoutDraw(pools, 2, numCourts)
 			require.NotNil(t, draw)
 
-			warnings := SeedPlacementWarnings(draw, pools, numCourts)
+			warnings := SeedPlacementWarnings(draw, pools)
 			if numSeeds <= numPools {
 				assert.Emptyf(t, warnings,
 					"%d seeds fit in %d pools, so there is nothing to warn about", numSeeds, numPools)

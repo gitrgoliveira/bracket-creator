@@ -38,10 +38,12 @@ const maxSeedRanks = 4
 // to report, which includes the no-seeds case: a competition without seeds is
 // a normal configuration and MUST be warning-free (D6).
 //
-// numCourts is the competition's shiaijo allocation; the draw's own count
-// (KnockoutDraw.NumCourts) is used where they differ, since that is what the
-// pools were actually allocated over.
-func SeedPlacementWarnings(draw *KnockoutDraw, pools []Pool, numCourts int) []string {
+// The shiaijo check reads the draw's OWN region count
+// (KnockoutDraw.NumCourts), which is the post-EffectiveDrawCourts count the
+// pools were really allocated over. The competition's requested count is
+// deliberately not an input: warning about shiaijo the draw does not have would
+// be a false alarm.
+func SeedPlacementWarnings(draw *KnockoutDraw, pools []Pool) []string {
 	if draw == nil || draw.Root == nil || len(pools) == 0 {
 		return nil
 	}

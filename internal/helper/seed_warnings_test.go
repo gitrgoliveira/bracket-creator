@@ -50,7 +50,7 @@ func seededDraw(t *testing.T, numPools, numSeeds, numCourts int) ([]Pool, *Knock
 func TestSeedPlacementWarningsSurplusRanks(t *testing.T) {
 	pools, draw := seededDraw(t, 3, 4, 2)
 
-	warnings := SeedPlacementWarnings(draw, pools, 2)
+	warnings := SeedPlacementWarnings(draw, pools)
 	require.NotEmpty(t, warnings, "4 seeds over 3 pools must warn")
 	assert.Contains(t, warnings[0], "Seed 4 ignored")
 	assert.Contains(t, warnings[0], "two seeds must never share a pool")
@@ -77,7 +77,7 @@ func TestSeedPlacementWarningsSurplusRanks(t *testing.T) {
 func TestSeedPlacementWarningsRelaxedQuarter(t *testing.T) {
 	pools, draw := seededDraw(t, 5, 4, 1)
 
-	warnings := SeedPlacementWarnings(draw, pools, 1)
+	warnings := SeedPlacementWarnings(draw, pools)
 	require.Len(t, warnings, 2, "every seed has its own pool, so only halves and quarters give way: %v", warnings)
 	assert.Contains(t, warnings[0], "could not be split into halves")
 	assert.Contains(t, warnings[1], "own quarter of the draw")
@@ -107,7 +107,7 @@ func TestSeedPlacementWarningsSilentWhenSatisfiable(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			pools, draw := seededDraw(t, tc.numPools, tc.numSeeds, tc.numCourts)
-			assert.Empty(t, SeedPlacementWarnings(draw, pools, tc.numCourts))
+			assert.Empty(t, SeedPlacementWarnings(draw, pools))
 		})
 	}
 }
@@ -135,7 +135,7 @@ func TestAnySeededAgreesWithSeedPlacementWarnings(t *testing.T) {
 			pools, draw := seededDraw(t, tc.numPools, tc.numSeeds, tc.numCourts)
 			require.Equal(t, tc.wantSeeded, AnySeeded(pools))
 			if !tc.wantSeeded {
-				assert.Empty(t, SeedPlacementWarnings(draw, pools, tc.numCourts),
+				assert.Empty(t, SeedPlacementWarnings(draw, pools),
 					"an unseeded pool set must have nothing to say, or the early return would hide it")
 			}
 		})
@@ -147,9 +147,9 @@ func TestAnySeededAgreesWithSeedPlacementWarnings(t *testing.T) {
 // neither warns.
 func TestSeedPlacementWarningsNilInputs(t *testing.T) {
 	pools, draw := seededDraw(t, 4, 2, 2)
-	assert.Nil(t, SeedPlacementWarnings(nil, pools, 2))
-	assert.Nil(t, SeedPlacementWarnings(&KnockoutDraw{}, pools, 2))
-	assert.Nil(t, SeedPlacementWarnings(draw, nil, 2))
+	assert.Nil(t, SeedPlacementWarnings(nil, pools))
+	assert.Nil(t, SeedPlacementWarnings(&KnockoutDraw{}, pools))
+	assert.Nil(t, SeedPlacementWarnings(draw, nil))
 }
 
 // TestSeedPlacementWarningsReportsSharedShiaijoOnlyWhenAvoidable is the
@@ -159,7 +159,7 @@ func TestSeedPlacementWarningsNilInputs(t *testing.T) {
 // given every seed its own is worth a warning.
 func TestSeedPlacementWarningsReportsSharedShiaijoOnlyWhenAvoidable(t *testing.T) {
 	pools, draw := seededDraw(t, 8, 4, 2)
-	for _, w := range SeedPlacementWarnings(draw, pools, 2) {
+	for _, w := range SeedPlacementWarnings(draw, pools) {
 		assert.NotContains(t, w, "own shiaijo",
 			"4 seeds on 2 shiaijo share shiaijo by design, not by relaxation")
 	}

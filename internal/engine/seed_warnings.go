@@ -52,7 +52,7 @@ func (e *Engine) SeedWarnings(id string) []string {
 	if draw == nil {
 		return nil
 	}
-	return helper.SeedPlacementWarnings(draw, pools, numCourts)
+	return helper.SeedPlacementWarnings(draw, pools)
 }
 
 // seedingProblem turns a seed-validation failure into a sentence an operator can

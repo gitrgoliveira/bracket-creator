@@ -178,46 +178,28 @@ func (o *poolOptions) createPools(entries []string) error {
 		}
 	}
 
-	// Calculate number of pools to ensure seeding distribution matches pool
-	// count. helper.PoolCount is the same function CreatePools uses below, so
-	// the count fed to PoolSeeding can never drift from the pools actually
-	// built (bc-draw Phase 2a).
-	numPools := helper.PoolCount(len(players), activePoolSize, isMax)
-	if numPools == 0 {
+	// Roster guard before the phase runs, so the operator gets a message about
+	// their entry list rather than CreatePools' internal complaint. This is the
+	// caller's job; helper.BuildPoolPhase re-derives the same count with the same
+	// function, so the two cannot disagree about whether a pool can be formed.
+	if helper.PoolCount(len(players), activePoolSize, isMax) == 0 {
 		return fmt.Errorf("not enough valid participants (%d) to form a pool of size %d", len(players), activePoolSize)
 	}
 
-	// Clamp courts to the number of pools (e.g. if defaulted to 2 but only 1 pool
-	// exists). The clamp can produce a value the operator never asked for, so it
-	// has to respect the shiaijo-count rule too: clamping a legal --courts 4 onto
-	// 3 pools would otherwise silently hand the draw an illegal 3 courts. Step
-	// down to the largest power of two that fits instead (1 pool stays 1, which is
-	// the explicitly allowed single-shiaijo case; 7 pools carry 4 courts, not the
-	// merely-even 6). helper.EffectiveDrawCourts is the same rule the draw applies
-	// internally, shared so the Pool Matches and Names sheets band by the same
-	// court count the bracket regions use.
+	// The whole pool phase, in the one order its steps are valid in, shared with
+	// internal/engine/pools.go so the two paths cannot drift again.
+	// helper.BuildPoolPhase's doc comment carries the constraints and the worked
+	// examples.
 	//
-	// It is clamped HERE, above the seed spread, because the clamped count is the
-	// modulus for all three of PoolSeeding, ReorderPoolsForCourts and the draw's
-	// own AssignPoolsToCourts; the three must agree or seeds are placed for a
-	// shiaijo layout the draw does not have. Clamping only further down left the
-	// deinterleave a no-op exactly when the clamp bit: 26 competitors at pool size
-	// 5 in max mode on 8 shiaijo gives 6 pools, which ReorderPoolsForCourts
-	// returned untouched (6 <= 8) while the draw packed them onto 4 shiaijo,
-	// handing the first both oversized pools.
-	o.courts = helper.EffectiveDrawCourts(numPools, o.courts)
-
-	// Reorder players to ensure seeded participants are distributed effectively across pools
-	players = helper.PoolSeeding(players, numPools, o.courts)
-
-	pools, err := helper.CreatePools(players, activePoolSize, isMax)
+	// o.courts is REPLACED by the count that comes back: the clamp can produce a
+	// value the operator never asked for (a shiaijo with no home pool would own an
+	// empty bracket region), and every sheet below bands against it, so the Pool
+	// Matches and Names sheets use the same shiaijo count as the bracket regions.
+	pools, drawCourts, err := helper.BuildPoolPhase(players, activePoolSize, isMax, o.courts)
 	if err != nil {
 		return err
 	}
-
-	// Reorder pools so contiguous court blocks have balanced sizes and
-	// seeds are spread across courts (deinterleave by numCourts).
-	pools = helper.ReorderPoolsForCourts(pools, o.courts)
+	o.courts = drawCourts
 
 	if o.numberPrefix != "" {
 		counter := 1
@@ -245,7 +227,7 @@ func (o *poolOptions) createPools(entries []string) error {
 	if err := helper.AddPoolsToSheet(f, pools, poolCoords, playerCoords); err != nil {
 		fmt.Fprintf(os.Stderr, "Error adding pools to sheet: %v\n", err)
 	}
-	fmt.Printf("There will be %d finalists\n", numPools*o.poolWinners)
+	fmt.Printf("There will be %d finalists\n", len(pools)*o.poolWinners)
 
 	// Create pool matches BEFORE the draw: R6's second bye criterion ranks by
 	// how many pool matches a pool's qualifier plays (D1), which helper.poolLoad
@@ -266,7 +248,7 @@ func (o *poolOptions) createPools(entries []string) error {
 	// allocated inside each region by seed then pool load.
 	draw := helper.BuildKnockoutDraw(pools, o.poolWinners, o.courts)
 	if draw == nil {
-		return fmt.Errorf("could not build a knockout draw from %d pools with %d winners per pool", numPools, o.poolWinners)
+		return fmt.Errorf("could not build a knockout draw from %d pools with %d winners per pool", len(pools), o.poolWinners)
 	}
 
 	// R2/D7: a seeding constraint the configuration cannot satisfy is a
@@ -297,7 +279,7 @@ func (o *poolOptions) createPools(entries []string) error {
 	}
 
 	printEliminationWithBronze(f, matchWinners, eliminationMatchRounds, o.teamMatches, o.courts, o.engi, o.naginata)
-	helper.FillEstimations(f, int64(len(pools)), int64(totalPoolMatches), int64(o.teamMatches), int64(numPools*o.poolWinners-1), o.courts)
+	helper.FillEstimations(f, int64(len(pools)), int64(totalPoolMatches), int64(o.teamMatches), int64(len(pools)*o.poolWinners-1), o.courts)
 
 	// Apply sheet protection to all sheets except data and Time Estimator
 	helper.ProtectAllSheets(f)

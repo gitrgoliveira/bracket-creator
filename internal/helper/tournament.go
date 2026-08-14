@@ -262,6 +262,55 @@ func PoolCount(numPlayers, poolSize int, isMax bool) int {
 	return numPlayers / poolSize
 }
 
+// BuildPoolPhase is the whole pool-phase construction, in the one order the
+// steps are valid in, returning the pools and the shiaijo count they were laid
+// out against.
+//
+// It exists because the sequence is ORDERED and its steps share a derived
+// modulus, and it used to be written out twice -- once in the CLI
+// (cmd/create-pools.go) and once in the app engine (internal/engine/pools.go).
+// Both copies have drifted before, each time silently and each time in a way
+// that misplaced real competitors:
+//
+//   - the engine handed PoolSeeding the pool SIZE where the pool COUNT is
+//     expected, so seeds landed in the wrong pools whenever the two differ;
+//   - the engine never called ReorderPoolsForCourts at all, which PoolSeeding's
+//     placement maths assumes has run, so every oversized pool piled onto the
+//     first shiaijo;
+//   - both fed the RAW shiaijo allocation to the seed spread and the
+//     deinterleave while the draw ran on the clamped one.
+//
+// The four constraints the order encodes, which is what a caller assembling
+// this by hand has to get right:
+//
+//  1. numPools comes from PoolCount, the same function CreatePools sizes its
+//     own pool slice with, so the count fed to PoolSeeding cannot drift from
+//     the pools that actually appear.
+//  2. drawCourts is EffectiveDrawCourts, not the requested allocation: a
+//     shiaijo with no home pool would own an empty bracket region, so the draw
+//     steps the count down to what the pools can carry. It is the modulus for
+//     the seed spread, the deinterleave AND the caller's pool-to-shiaijo
+//     allocation, and all three must agree.
+//  3. PoolSeeding runs BEFORE CreatePools: it reorders the roster so that
+//     CreatePools' straight fill lands seeds and club-mates where they belong.
+//     It runs whether or not anyone is seeded, because it also clusters by dojo.
+//  4. ReorderPoolsForCourts runs AFTER CreatePools and before anything reads
+//     pool order or pool names.
+//
+// Callers still own what happens either side: validating the roster before, and
+// naming, numbering, persisting and allocating pools to shiaijo after. Use the
+// returned court count for that allocation rather than re-deriving it.
+func BuildPoolPhase(players []Player, poolSize int, isMax bool, numCourts int) ([]Pool, int, error) {
+	numPools := PoolCount(len(players), poolSize, isMax)
+	drawCourts := EffectiveDrawCourts(numPools, numCourts)
+
+	pools, err := CreatePools(PoolSeeding(players, numPools, drawCourts), poolSize, isMax)
+	if err != nil {
+		return nil, 0, err
+	}
+	return ReorderPoolsForCourts(pools, drawCourts), drawCourts, nil
+}
+
 func CreatePools(players []Player, poolSize int, isMax bool) ([]Pool, error) {
 	// Guard before the division below: poolSize is the divisor in both the
 	// "max" and fixed-size branches, so a zero/negative value panics with an

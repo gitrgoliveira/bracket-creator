@@ -41,76 +41,21 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 		}
 	}
 
-	// Mirrors cmd/create-pools.go exactly (bc-draw Phase 2a). Two things about
-	// this call had drifted from the CLI:
+	// The whole pool phase, in the one order its steps are valid in, shared with
+	// cmd/create-pools.go so the two paths cannot drift again -- they have twice,
+	// each time misplacing real competitors. helper.BuildPoolPhase's doc comment
+	// carries the constraints and the worked examples.
 	//
-	//  1. The second argument is the pool COUNT, not the pool SIZE. Passing
-	//     comp.PoolSize put every seed in the wrong pool whenever the two
-	//     differ, which is almost always. helper.PoolCount is the same function
-	//     CreatePools uses to size its own pool slice, so the two cannot drift.
-	//  2. It runs UNCONDITIONALLY, not only when seeds exist. With zero seeds
-	//     PoolSeeding still clusters players by dojo so that CreatePools'
-	//     round-robin fill lands club-mates in different pools; gating it on
-	//     seeds disabled that for every unseeded competition, which is the
-	//     common case in the app and never the case in the CLI.
-	numPools := helper.PoolCount(len(players), comp.PoolSize, isMax)
-
-	// drawCourts is the shiaijo count the pool phase actually runs on, and it is
-	// the modulus for ALL THREE of the seed spread (helper.PoolSeeding), the pool
-	// deinterleave (helper.ReorderPoolsForCourts) and the pool-to-shiaijo
-	// allocation (helper.AssignPoolsToCourts below). The three must agree, or
-	// seeds are placed for a shiaijo layout the draw does not have.
-	//
-	// It is DERIVED, not the operator's allocation: a shiaijo with no home pool
-	// would own an empty bracket region, so the draw steps the count down to what
-	// the pools can carry (helper.EffectiveDrawCourts), landing on a power of two
-	// because R9 validates the derived value too, not merely an even number.
-	//
-	// The pool phase has to step down with it. helper.BuildKnockoutDraw applies
-	// the same clamp internally to the same pool count, so passing the RAW count
-	// spread the pool matches over MORE shiaijo than the bracket had regions: 10
-	// competitors at PoolSize 4 in max mode on 4 shiaijo gives 3 pools, so the
-	// pool phase ran on A, B and C (an allocation R9 forbids) while the bracket
-	// had two regions, A and B. Feeding the raw count to the seed spread and the
-	// deinterleave was the same fault one step earlier, and it bit exactly when
-	// the clamp did: 26 competitors at PoolSize 5 in max mode on 8 shiaijo gives 6
-	// pools of [5,5,4,4,4,4], so ReorderPoolsForCourts returned them untouched
-	// (6 <= 8) while AssignPoolsToCourts packed them onto the clamped 4 as
-	// [0,0,1,1,2,3] -- shiaijo A carrying both oversized pools, 10 competitors
-	// against C's and D's 4. Deinterleaved against 4 the same pools split 9/9/4/4.
-	// The CLI has always clamped at the equivalent point (cmd/create-pools.go,
-	// above its own PoolSeeding call), so this is also what keeps the two paths in
-	// parity.
-	//
-	// EffectiveDrawCourts(0, n) returns n untouched, so a zero pool count is safe
-	// here; helper.CreatePools errors on it a line later anyway. numPools ==
-	// len(pools) by construction, PoolCount being the function CreatePools sizes
-	// its own pool slice with.
-	//
-	// League is unaffected: it has exactly one pool, and the clamp of any count
-	// onto one pool is 1, which assigns that single pool to court 0 exactly as the
-	// raw count did. The single-pool spread further down reads comp.Courts
-	// directly and still uses every shiaijo the league was allocated.
-	drawCourts := helper.EffectiveDrawCourts(numPools, numCourts)
-
-	players = helper.PoolSeeding(players, numPools, drawCourts)
-
-	pools, err := helper.CreatePools(players, comp.PoolSize, isMax)
+	// drawCourts is what comes back, not what went in: a shiaijo with no home pool
+	// would own an empty bracket region, so the count steps down to what the pools
+	// can carry. Everything below reads THAT, including AssignPoolsToCourts, or
+	// seeds end up placed for a shiaijo layout the draw does not have. numCourts
+	// stays the raw allocation for the single-pool league spread further down,
+	// which really does use every shiaijo the league was given.
+	pools, drawCourts, err := helper.BuildPoolPhase(players, comp.PoolSize, isMax, numCourts)
 	if err != nil {
 		return err
 	}
-
-	// Deinterleave pools into court blocks, at the same point in the sequence
-	// the CLI does it (seed, create, reorder). PoolSeeding's placement maths
-	// assumes this has run (see the doc comment on helper.PoolSeeding), and
-	// without it helper.AssignPoolsToCourts' contiguous blocks piled every
-	// oversized pool onto the first court: 26 players at PoolSize 4 in "max"
-	// mode on 2 courts gave court A 16 players (pools 0-3, all oversized) and
-	// court B 10. Everything below that reads pool order or pool names runs
-	// after this call, so they all see the reordered, realphabetised list: the
-	// mixed-format validation messages, AssignPlayerNumbers, SavePools, the
-	// MatchResult ID prefix and AssignPoolsToCourts.
-	pools = helper.ReorderPoolsForCourts(pools, drawCourts)
 
 	// A "mixed" competition is "Pools + Knockout" by definition, a single
 	// pool collapses to a round-robin with a tacked-on 2-player "final", which

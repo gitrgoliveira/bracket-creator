@@ -149,7 +149,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 		}
 		// draw.NumCourts(), not the requested court count, is the exact band
 		// count for this sheet; the reason is on KnockoutDraw.NumCourts.
-		helper.PrintEliminationWithBronze(f, matchWinners, eliminationMatchRounds, comp.TeamSize, draw.NumCourts(), comp.Mirror, comp.Engi,
+		helper.PrintEliminationWithBronze(f, matchWinners, eliminationMatchRounds, comp.TeamSize, draw, comp.Mirror, comp.Engi,
 			bracket != nil && bracket.ThirdPlaceMatch != nil)
 
 		// Overlay literal scores from the live bracket state.

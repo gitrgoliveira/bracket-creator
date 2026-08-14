@@ -1082,6 +1082,49 @@ func leafArrayWidth(n *Node) int {
 	return 2 * leafPadTarget(leafArrayWidth(n.Left), leafArrayWidth(n.Right))
 }
 
+// NodeCourts maps every node of the draw's tree to the index of the shiaijo
+// region that owns it: the region containing that node's LEFTMOST first-round
+// slot. Nodes above every region root (the half-finals and the final) take the
+// leftmost region's court, which is what puts the final on shiaijo A.
+//
+// This is the SAME question engine.buildBracketFromDraw answers for a stored
+// bracket match, asked the same way, and the two must agree: one is what the
+// operator's screen says, the other is what the printed handout says. They are
+// both "which region owns this bout's first slot", so neither may derive it by
+// dividing a match count by a court count. That division is only right when
+// every region holds the same number of pools, and the court-first draw
+// deliberately allows unequal regions -- 4 pools over 4 shiaijo gives four
+// single-qualifier regions whose two first-round bouts belong to regions 0 and
+// 2, not 0 and 1.
+//
+// Returns nil for an empty draw, which callers read as "one band, court 0".
+func (d *KnockoutDraw) NodeCourts() map[*Node]int {
+	if d == nil || d.Root == nil {
+		return nil
+	}
+	spans := d.RegionSpans()
+	out := make(map[*Node]int)
+	nodeCourtWalk(d.Root, 0, spans, out)
+	return out
+}
+
+// nodeCourtWalk mirrors leafSpanWalk's offset arithmetic, recording a court for
+// every node rather than a span for the region roots alone. The padding rule is
+// leafPadTarget's in both, so a node's offset here is its true position in
+// TreeToLeafArray(Root).
+func nodeCourtWalk(n *Node, offset int, spans [][2]int, out map[*Node]int) {
+	if n == nil {
+		return
+	}
+	out[n] = CourtForLeafSlot(spans, offset)
+	if n.LeafNode {
+		return
+	}
+	side := leafArrayWidth(n) / 2
+	nodeCourtWalk(n.Left, offset, spans, out)
+	nodeCourtWalk(n.Right, offset+side, spans, out)
+}
+
 // CourtForLeafSlot returns the index of the region that owns leaf slot, given
 // RegionSpans' output. A slot that falls in an alignment gap between regions is
 // attributed to the last region that starts at or before it, and a slot before

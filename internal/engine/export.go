@@ -101,7 +101,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		}
 		// draw.NumCourts(), not the requested court count, is the exact band
 		// count for this sheet; the reason is on KnockoutDraw.NumCourts.
-		helper.PrintEliminationWithBronze(f, matchWinners, eliminationMatchRounds, comp.TeamSize, draw.NumCourts(), comp.Mirror, comp.Engi, hasBronze)
+		helper.PrintEliminationWithBronze(f, matchWinners, eliminationMatchRounds, comp.TeamSize, draw, comp.Mirror, comp.Engi, hasBronze)
 	} else if hasBronze {
 		// Narrow fallback: a competition whose bracket has a third-place bout but
 		// yields no elimination leaves at all (no pools, no first-round entrants

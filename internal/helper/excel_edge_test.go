@@ -1,6 +1,7 @@
 package helper
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -218,6 +219,17 @@ func TestPrintPoolMatchesMirroring(t *testing.T) {
 	})
 }
 
+// testDrawFor builds the draw a hand-written rounds slice describes: the final
+// is the root, cut into numCourts regions exactly as a playoffs draw is. The
+// elimination sheet bands by the draw's regions, so these tests need the draw
+// the rounds came from rather than a bare court count.
+func testDrawFor(rounds [][]*Node, numCourts int) *KnockoutDraw {
+	if len(rounds) == 0 || len(rounds[len(rounds)-1]) == 0 {
+		return nil
+	}
+	return NewPlayoffDraw(rounds[len(rounds)-1][0], numCourts)
+}
+
 func TestPrintTeamEliminationMatchesMirroring(t *testing.T) {
 	// LeafNode: true mirrors real construction (CreateBalancedTree always sets it
 	// for true leaves); printSingleEliminationMatch now branches on this field
@@ -238,7 +250,7 @@ func TestPrintTeamEliminationMatchesMirroring(t *testing.T) {
 		f.NewSheet(SheetEliminationMatches)
 		f.NewSheet("Pool Results")
 
-		PrintTeamEliminationMatches(f, poolMatchWinners, eliminationMatchRounds, 3, 2, true, false)
+		PrintTeamEliminationMatches(f, poolMatchWinners, eliminationMatchRounds, 3, testDrawFor(eliminationMatchRounds, 2), true, false)
 		// Match header row (Red/White labels) should be swapped: White vs Red
 		// Round header was removed, first match header at row 3
 		val, _ := f.GetCellValue(SheetEliminationMatches, "A3")
@@ -253,7 +265,7 @@ func TestPrintTeamEliminationMatchesMirroring(t *testing.T) {
 		f.NewSheet(SheetEliminationMatches)
 		f.NewSheet("Pool Results")
 
-		PrintTeamEliminationMatches(f, poolMatchWinners, eliminationMatchRounds, 3, 2, false, false)
+		PrintTeamEliminationMatches(f, poolMatchWinners, eliminationMatchRounds, 3, testDrawFor(eliminationMatchRounds, 2), false, false)
 		// Match header row should be Red vs White
 		val, _ := f.GetCellValue(SheetEliminationMatches, "A3")
 		assert.Equal(t, "Red", val, "expected Red on left (mirror=false)")
@@ -267,35 +279,64 @@ func TestPrintTeamEliminationMatchesMirroring(t *testing.T) {
 		f.NewSheet(SheetEliminationMatches)
 		f.NewSheet("Pool Results")
 
-		// 3 matches in round 1, spread across 2 courts
-		eliminationMatchRoundsMulti := [][]*Node{
-			{
-				{Left: nodeA, Right: nodeB, matchNum: 1},
-				{Left: nodeA, Right: nodeB, matchNum: 2},
-				{Left: nodeA, Right: nodeB, matchNum: 3},
-			},
+		// A REAL draw, because the band a bout is printed in is the region that
+		// owns it, not its position in the round.
+		//
+		// 4 pools sending one qualifier each over 4 shiaijo is the case that
+		// tells the two rules apart. Each region holds a single qualifier, so
+		// round 1's two bouts pair regions 0+1 and 2+3 and belong to shiaijo A
+		// and C. Dividing the match count by the court count instead answers A
+		// and B, which is what this sheet used to print while the app called
+		// the second bout to shiaijo C.
+		pools := make([]Pool, 4)
+		for i := range pools {
+			pools[i] = Pool{
+				PoolName: fmt.Sprintf("Pool %s", CourtLabel(i)),
+				Players:  []Player{{Name: fmt.Sprintf("p%da", i)}, {Name: fmt.Sprintf("p%db", i)}},
+			}
+		}
+		draw := BuildKnockoutDraw(pools, 1, 4)
+		require.NotNil(t, draw)
+		require.Equal(t, 4, draw.NumCourts())
+		eliminationMatchRoundsMulti := BuildEliminationMatchRounds(draw.Root)
+		require.Len(t, eliminationMatchRoundsMulti[0], 2, "4 qualifiers make two first-round bouts")
+
+		PrintTeamEliminationMatches(f, poolMatchWinners, eliminationMatchRoundsMulti, 0, draw, false, false)
+
+		// The band each bout is printed in must be the region that owns it.
+		courtOfNode := draw.NodeCourts()
+		wantCourts := []int{}
+		for _, m := range eliminationMatchRoundsMulti[0] {
+			wantCourts = append(wantCourts, courtOfNode[m])
+		}
+		require.Equal(t, []int{0, 2}, wantCourts,
+			"the draw itself must put these bouts on shiaijo A and C, or this case cannot "+
+				"tell the region rule apart from dividing matches by courts")
+
+		// Match numbers are assigned by RenderKnockoutPages, not here, so each
+		// bout is identified by the number its own node carries.
+		for i, c := range wantCourts {
+			m := eliminationMatchRoundsMulti[0][i]
+			col := mustColumnName(1 + c*CourtsColumnsPerCourt)
+			val, _ := f.GetCellValue(SheetEliminationMatches, fmt.Sprintf("%s2", col))
+			assert.Equalf(t, fmt.Sprintf("Round 1 - Match %d", m.matchNum), val,
+				"the bout pairing %s belongs to shiaijo %s, so it must print in that band (column %s)",
+				CourtLabel(c), CourtLabel(c), col)
 		}
 
-		PrintTeamEliminationMatches(f, poolMatchWinners, eliminationMatchRoundsMulti, 0, 2, false, false)
-
-		// Match 1 (Shiaijo A) should be at column 1
-		val, _ := f.GetCellValue(SheetEliminationMatches, "A2") // Match 1 title row
-		assert.Equal(t, "Round 1 - Match 1", val)
-
-		// Match 2 (Shiaijo B) should be at column 9
-		val, _ = f.GetCellValue(SheetEliminationMatches, "I2") // Match 2 title row (Column 9 = I)
-		assert.Equal(t, "Round 1 - Match 2", val)
-
-		// Match 3 (Shiaijo B again) should be below Match 2
-		// Verify Match 3 starts at row 10
-		val, _ = f.GetCellValue(SheetEliminationMatches, "I10")
-		assert.Equal(t, "Round 1 - Match 3", val)
+		// Shiaijo B's band must be EMPTY in round 1: nothing is scheduled there.
+		// This is the assertion the old rule failed, by printing the shiaijo-C
+		// bout under B and sending its competitors to the wrong court.
+		val, _ := f.GetCellValue(SheetEliminationMatches, "I2")
+		assert.Emptyf(t, val, "shiaijo B has no first-round bout, so its band must not carry one")
 
 		// Verify Shiaijo headers
-		val, _ = f.GetCellValue(SheetEliminationMatches, "A1")
-		assert.Equal(t, "Shiaijo A", val)
-		val, _ = f.GetCellValue(SheetEliminationMatches, "I1")
-		assert.Equal(t, "Shiaijo B", val)
+		hdrA, _ := f.GetCellValue(SheetEliminationMatches, "A1")
+		assert.Equal(t, "Shiaijo A", hdrA)
+		hdrB, _ := f.GetCellValue(SheetEliminationMatches, "I1")
+		assert.Equal(t, "Shiaijo B", hdrB)
+		hdrC, _ := f.GetCellValue(SheetEliminationMatches, "Q1")
+		assert.Equal(t, "Shiaijo C", hdrC)
 	})
 }
 
@@ -377,7 +418,7 @@ func TestEliminationMatchSameSheetFormulas(t *testing.T) {
 		rounds[depth-i] = TraverseRounds(tree, 1, i-1)
 	}
 
-	PrintTeamEliminationMatches(f, matchWinners, rounds, 0, 1, false, false)
+	PrintTeamEliminationMatches(f, matchWinners, rounds, 0, testDrawFor(rounds, 1), false, false)
 
 	// Collect all formula cells in the Elimination Matches sheet.
 	rows, err := f.GetRows(SheetEliminationMatches)
@@ -457,7 +498,7 @@ func TestPoolWinnerFormulaReferences(t *testing.T) {
 		eliminationMatchRounds[depth-i] = TraverseRounds(tree, 1, i-1)
 	}
 
-	PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, 0, 1, false, false)
+	PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, 0, testDrawFor(eliminationMatchRounds, 1), false, false)
 
 	// The first round has 2 matches; each match's player row is at startRow+2=4.
 	// Left player is in column A (col 1), right player in column G (col 7).
@@ -506,7 +547,7 @@ func TestPrintTeamEliminationMatches_CellRefLikeLeafNames(t *testing.T) {
 	}
 
 	matchWinners := ConvertPlayersToWinners(players, false, pCoords)
-	PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, 0, 1, false, false)
+	PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, 0, testDrawFor(eliminationMatchRounds, 1), false, false)
 
 	rows, err := f.GetRows(SheetEliminationMatches)
 	require.NoError(t, err)

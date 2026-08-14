@@ -1045,8 +1045,13 @@ func SetPrintArea(f *excelize.File, sheetName string, lastCol, lastRow int) {
 // Elimination Matches sheet and returns the next available start row (the row
 // immediately after the last rendered block plus any trailing space lines).
 // Callers that do not need the return values may ignore them.
-func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]MatchWinner, eliminationMatchRounds [][]*Node, numTeamMatches int, numCourts int, mirror bool, engi bool) (int, map[string]MatchWinner) {
-	numCourts = clampCourts(numCourts)
+func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]MatchWinner, eliminationMatchRounds [][]*Node, numTeamMatches int, draw *KnockoutDraw, mirror bool, engi bool) (int, map[string]MatchWinner) {
+	// The draw owns the banding, not a court count the caller carries alongside
+	// it: this sheet is a per-shiaijo handout (one band, one page break and one
+	// "Shiaijo X" header per court), so a bout printed under the wrong band
+	// sends its competitors to a shiaijo the app is not calling them to.
+	numCourts := clampCourts(draw.NumCourts())
+	courtOfNode := draw.NodeCourts()
 
 	sheetName := SheetEliminationMatches
 	matchWinners := make(map[string]MatchWinner)
@@ -1086,20 +1091,24 @@ func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]M
 
 	for roundIdx, eliminationMatchRound := range eliminationMatchRounds {
 		round := roundIdx + 1
-		numMatches := len(eliminationMatchRound)
-		matchesPerCourt := numMatches / numCourts
-		if matchesPerCourt == 0 {
-			matchesPerCourt = 1
+
+		// File each bout under the shiaijo whose region owns it. A region may
+		// hold more bouts than its neighbour (unequal regions are the whole
+		// point of the court-first draw), so the bands are ragged and a band
+		// can legitimately be empty in a given round.
+		matchesByCourt := make([][]*Node, numCourts)
+		for _, eliminationMatch := range eliminationMatchRound {
+			c := courtOfNode[eliminationMatch]
+			if c < 0 || c >= numCourts {
+				c = 0
+			}
+			matchesByCourt[c] = append(matchesByCourt[c], eliminationMatch)
 		}
 
 		numMatchRows := 0
 		for c := 0; c < numCourts; c++ {
-			matchesInThisCourt := matchesPerCourt
-			if c == numCourts-1 {
-				matchesInThisCourt = numMatches - c*matchesPerCourt
-			}
-			if matchesInThisCourt > numMatchRows {
-				numMatchRows = matchesInThisCourt
+			if len(matchesByCourt[c]) > numMatchRows {
+				numMatchRows = len(matchesByCourt[c])
 			}
 		}
 
@@ -1111,16 +1120,11 @@ func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]M
 			}
 
 			for c := 0; c < numCourts; c++ {
-				i := c*matchesPerCourt + r
-				// Ensure i is within the matches assigned to this court
-				if c < numCourts-1 && i >= (c+1)*matchesPerCourt {
-					continue
-				}
-				if i >= numMatches {
+				if r >= len(matchesByCourt[c]) {
 					continue
 				}
 
-				eliminationMatch := eliminationMatchRound[i]
+				eliminationMatch := matchesByCourt[c][r]
 				startCol := 1 + c*CourtsColumnsPerCourt
 				colNames, ok := colNamesByStartCol[startCol]
 				if !ok {
@@ -1366,10 +1370,10 @@ func PrintBronzeBlockWithPrintArea(f *excelize.File, startRow, numTeamMatches in
 // stays with the caller because it is genuinely caller-specific (the CLI
 // derives it from the naginata flag and round count via NeedsBronzeBlock; the
 // exporters from the stored bracket's ThirdPlaceMatch).
-func PrintEliminationWithBronze(f *excelize.File, matchWinners map[string]MatchWinner, rounds [][]*Node, numTeamMatches, numCourts int, mirror, engi, includeBronze bool) {
-	nextRow, elimMatchWinners := PrintTeamEliminationMatches(f, matchWinners, rounds, numTeamMatches, numCourts, mirror, engi)
+func PrintEliminationWithBronze(f *excelize.File, matchWinners map[string]MatchWinner, rounds [][]*Node, numTeamMatches int, draw *KnockoutDraw, mirror, engi, includeBronze bool) {
+	nextRow, elimMatchWinners := PrintTeamEliminationMatches(f, matchWinners, rounds, numTeamMatches, draw, mirror, engi)
 	if includeBronze {
-		PrintBronzeBlockWithPrintArea(f, nextRow, numTeamMatches, mirror, engi, numCourts, rounds, elimMatchWinners)
+		PrintBronzeBlockWithPrintArea(f, nextRow, numTeamMatches, mirror, engi, clampCourts(draw.NumCourts()), rounds, elimMatchWinners)
 	}
 }
 

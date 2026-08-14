@@ -14,8 +14,8 @@ import (
 // naginata bracket with a real semifinal round, the bronze (3rd-place) block with
 // its print area. Shared by create-pools and create-playoffs, which both run the
 // bronze on the same court set with mirror=true.
-func printEliminationWithBronze(f *excelize.File, matchWinners map[string]helper.MatchWinner, rounds [][]*helper.Node, teamMatches, courts int, engi, naginata bool) {
-	helper.PrintEliminationWithBronze(f, matchWinners, rounds, teamMatches, courts, true, engi, helper.NeedsBronzeBlock(naginata, len(rounds)))
+func printEliminationWithBronze(f *excelize.File, matchWinners map[string]helper.MatchWinner, rounds [][]*helper.Node, teamMatches int, draw *helper.KnockoutDraw, engi, naginata bool) {
+	helper.PrintEliminationWithBronze(f, matchWinners, rounds, teamMatches, draw, true, engi, helper.NeedsBronzeBlock(naginata, len(rounds)))
 }
 
 // finishKnockoutPages runs the CLI epilogue shared by create-pools and

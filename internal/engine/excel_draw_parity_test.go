@@ -869,3 +869,104 @@ func TestExcelWorkbookMatchesEngineBracket_Mixed(t *testing.T) {
 		}
 	}
 }
+
+// TestEliminationSheetBandsMatchBracketCourts pins the one thing the band
+// assertions above never checked: not WHICH shiaijo bands the Elimination
+// Matches sheet prints, but WHICH BOUT lands in each of them.
+//
+// That sheet is a per-shiaijo handout -- one "Shiaijo X" header, one column band
+// and one vertical page break per court -- so an operator running shiaijo C is
+// handed the C band and calls the bouts on it. If the sheet files a bout under a
+// different shiaijo from the one the app scheduled it on, the printed sheet and
+// the operator console call the same competitors to two different courts.
+//
+// The regression this pins: the sheet used to chunk each round's bouts uniformly
+// (match index / (matches/courts)), which agrees with the draw only when every
+// region is the same size. The court-first draw deliberately allows unequal
+// regions, so 4 pools sending one qualifier each over 4 shiaijo -- four
+// single-qualifier regions -- put round 1's two bouts on shiaijo A and C while
+// the sheet printed them under A and B, leaving C and D as empty bands.
+func TestEliminationSheetBandsMatchBracketCourts(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		participants int
+		poolSize     int
+		poolWinners  int
+		courts       int
+	}{
+		{"four single-qualifier regions over four shiaijo", 16, 4, 1, 4},
+		{"two qualifiers per pool over four shiaijo", 16, 4, 2, 4},
+		{"ragged pools over two shiaijo", 12, 4, 2, 2},
+		{"one shiaijo carries the whole draw", 16, 4, 1, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			eng, store, _ := setupTestEngine(t)
+			compID := "elim-band-" + strings.ReplaceAll(tc.name, " ", "-")
+
+			createTestCompetition(t, store, compID, state.CompFormatMixed, tc.poolSize, func(c *state.Competition) {
+				c.PoolSizeMode = "max"
+				c.PoolWinners = tc.poolWinners
+				c.Courts = courtLabels(tc.courts)
+			})
+			require.NoError(t, store.SaveParticipants(compID, playoffsParityRoster(tc.participants)))
+			require.NoError(t, eng.StartCompetition(compID))
+
+			bracket, err := store.LoadBracket(compID)
+			require.NoError(t, err)
+			require.NotNil(t, bracket)
+
+			raw, err := eng.ExportCompetitionXlsx(compID)
+			require.NoError(t, err)
+			f, err := excelize.OpenReader(bytes.NewReader(raw))
+			require.NoError(t, err)
+			defer func() { _ = f.Close() }()
+
+			rows, err := f.GetRows(helper.SheetEliminationMatches)
+			require.NoError(t, err)
+			bands := bctest.ReadCourtBands(rows, helper.CourtsColumnsPerCourt)
+			require.NotEmpty(t, bands, "the elimination sheet must carry shiaijo bands")
+
+			// Which shiaijo band each printed "Round R - Match N" header sits in.
+			bandOfLabel := map[string]string{}
+			for _, b := range bands {
+				for _, row := range rows[1:] {
+					for c := b.Col; c < b.Col+helper.CourtsColumnsPerCourt && c < len(row); c++ {
+						if label := strings.TrimSpace(row[c]); strings.HasPrefix(label, "Round ") {
+							bandOfLabel[label] = b.Court
+						}
+					}
+				}
+			}
+			require.NotEmpty(t, bandOfLabel, "no bouts were printed, so this case pins nothing")
+
+			checked := 0
+			for rIdx, round := range bracket.Rounds {
+				for _, m := range round {
+					if m.Court == "" {
+						continue
+					}
+					// An unnumbered entry is a BYE, not a bout: one side empty
+					// and already completed. The sheet correctly prints no block
+					// for it. Assert that rather than skipping on the number
+					// alone, so a genuinely missing bout cannot hide here.
+					if m.MatchNumber == 0 {
+						assert.Truef(t, m.SideA == "" || m.SideB == "",
+							"match %q vs %q on shiaijo %s carries no match number but has two sides, so it is a real bout the sheet never printed",
+							m.SideA, m.SideB, m.Court)
+						continue
+					}
+					label := fmt.Sprintf("Round %d - Match %d", rIdx+1, m.MatchNumber)
+					band, ok := bandOfLabel[label]
+					if !assert.Truef(t, ok, "%q is scheduled on shiaijo %s but is not printed on the elimination sheet at all", label, m.Court) {
+						continue
+					}
+					assert.Equalf(t, m.Court, band,
+						"%q (%s vs %s): the app calls it to shiaijo %s, the printed sheet files it under shiaijo %s",
+						label, m.SideA, m.SideB, m.Court, band)
+					checked++
+				}
+			}
+			require.NotZero(t, checked, "no bracket match was compared, so this case pins nothing")
+		})
+	}
+}

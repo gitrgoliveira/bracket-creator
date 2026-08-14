@@ -8,12 +8,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// mergeStoredPoolMatch replaced four hand-copied blocks, one per pool write
-// closure. The copies had drifted twice in the direction that hurts, so these
-// tests pin the two policies AGAINST each other rather than testing one shape:
-// a difference that is deliberate must be visible here, and a field that
-// silently reaches only one policy fails.
-func TestMergeStoredPoolMatch_Policies(t *testing.T) {
+// applyPoolWrite is the single merge-and-overwrite shared by every pool write
+// closure. These tests pin the two policies AGAINST each other rather than
+// testing one shape: a difference that is deliberate must be visible here, and
+// a field that silently reaches only one policy fails.
+func TestApplyPoolWrite_Policies(t *testing.T) {
 	dh := state.DaihyosenSubPosition
 
 	storedMatch := func() *state.MatchResult {
@@ -40,44 +39,55 @@ func TestMergeStoredPoolMatch_Policies(t *testing.T) {
 	}
 
 	t.Run("both policies inherit the schedule context a payload omits", func(t *testing.T) {
-		for name, policy := range map[string]poolWritePolicy{
-			"forward": poolWriteForward, "restore": poolWriteRestore,
-		} {
-			t.Run(name, func(t *testing.T) {
-				in := silentPayload()
-				require.False(t, mergeStoredPoolMatch(in, storedMatch(), policy))
-				assert.Equal(t, "A", in.Court)
-				assert.Equal(t, "09:00", in.ScheduledAt)
-				assert.Equal(t, 2, in.Round)
-			})
+		for _, policy := range []poolWritePolicy{poolWriteForward, poolWriteRestore} {
+			in, st := silentPayload(), storedMatch()
+			require.False(t, applyPoolWrite(st, in, policy), "policy %d", policy)
+			assert.Equal(t, "A", in.Court, "policy %d", policy)
+			assert.Equal(t, "09:00", in.ScheduledAt, "policy %d", policy)
+			assert.Equal(t, 2, in.Round, "policy %d", policy)
+		}
+	})
+
+	t.Run("both policies backfill an omitted side", func(t *testing.T) {
+		// reconcileSides backfills as a SIDE EFFECT and only reports the
+		// mismatch, so it has to run under both policies. Asserted for restore
+		// too: folding the call into a short-circuit once made it possible for a
+		// reorder to drop the backfill on this path alone, writing empty sides
+		// into the stored match.
+		for _, policy := range []poolWritePolicy{poolWriteForward, poolWriteRestore} {
+			in, st := silentPayload(), storedMatch()
+			in.SideA, in.SideB = "", ""
+			require.False(t, applyPoolWrite(st, in, policy), "policy %d", policy)
+			assert.Equal(t, "Kyoto", in.SideA, "policy %d", policy)
+			assert.Equal(t, "Osaka", in.SideB, "policy %d", policy)
 		}
 	})
 
 	t.Run("forward inherits the correction reason, restore clears it", func(t *testing.T) {
 		// Forward: the kachinuki reopen persisted the operator's audit
 		// justification and the next plain score write carries none of its own,
-		// so the whole-struct overwrite must not blank it.
+		// so the overwrite must not blank it.
 		fwd := silentPayload()
-		require.False(t, mergeStoredPoolMatch(fwd, storedMatch(), poolWriteForward))
+		require.False(t, applyPoolWrite(storedMatch(), fwd, poolWriteForward))
 		assert.Equal(t, "reopened after a mis-scored bout", fwd.CorrectionReason)
 
 		// Restore: an empty field in a trusted snapshot means "this was empty",
 		// so it must NOT pick up the rejected partial write's reason.
 		res := silentPayload()
-		require.False(t, mergeStoredPoolMatch(res, storedMatch(), poolWriteRestore))
+		require.False(t, applyPoolWrite(storedMatch(), res, poolWriteRestore))
 		assert.Empty(t, res.CorrectionReason)
 	})
 
 	t.Run("an explicit correction reason always wins", func(t *testing.T) {
 		in := silentPayload()
 		in.CorrectionReason = "this write's own reason"
-		require.False(t, mergeStoredPoolMatch(in, storedMatch(), poolWriteForward))
+		require.False(t, applyPoolWrite(storedMatch(), in, poolWriteForward))
 		assert.Equal(t, "this write's own reason", in.CorrectionReason)
 	})
 
 	t.Run("forward restores a verdict-silent daihyosen, restore replays as captured", func(t *testing.T) {
 		fwd := silentPayload()
-		require.False(t, mergeStoredPoolMatch(fwd, storedMatch(), poolWriteForward))
+		require.False(t, applyPoolWrite(storedMatch(), fwd, poolWriteForward))
 		require.True(t, fwd.SubResults[0].HanteiDecided())
 		assert.Equal(t, "Kyoto", fwd.SubResults[0].Winner)
 		// ...and the encounter records the winner the verdict names.
@@ -87,31 +97,38 @@ func TestMergeStoredPoolMatch_Policies(t *testing.T) {
 		// onto a match whose captured state had none. Before the policy split
 		// this path ran the forward merge and could do exactly that.
 		res := silentPayload()
-		require.False(t, mergeStoredPoolMatch(res, storedMatch(), poolWriteRestore))
+		require.False(t, applyPoolWrite(storedMatch(), res, poolWriteRestore))
 		assert.False(t, res.SubResults[0].HanteiDecided())
 		assert.Empty(t, res.SubResults[0].Winner)
 		assert.Empty(t, res.Winner)
 	})
 
-	t.Run("forward abandons a mismatched pairing, restore proceeds", func(t *testing.T) {
-		fwd := silentPayload()
-		fwd.SideB = "Nara" // stored says Osaka
-		assert.True(t, mergeStoredPoolMatch(fwd, storedMatch(), poolWriteForward),
+	t.Run("the merged result is written through to the stored match", func(t *testing.T) {
+		// applyPoolWrite owns the overwrite so that it is unreachable without
+		// the merge; a caller can no longer do one and forget the other.
+		in, st := silentPayload(), storedMatch()
+		in.Winner = "Kyoto"
+		require.False(t, applyPoolWrite(st, in, poolWriteForward))
+		assert.Equal(t, "Kyoto", st.Winner)
+		assert.Equal(t, "reopened after a mis-scored bout", st.CorrectionReason)
+		assert.True(t, st.SubResults[0].HanteiDecided())
+	})
+
+	t.Run("forward abandons a mismatched pairing and leaves the stored match alone", func(t *testing.T) {
+		in, st := silentPayload(), storedMatch()
+		in.SideB = "Nara" // stored says Osaka
+		in.Winner = "Nara"
+		assert.True(t, applyPoolWrite(st, in, poolWriteForward),
 			"a client payload naming the wrong pairing must be rejected")
+		assert.Empty(t, st.Winner, "an abandoned write must not touch the stored match")
+		assert.Equal(t, "Osaka", st.SideB)
 
 		// A snapshot's sides came from this same match, so a mismatch is not a
 		// client error; a rollback that silently did nothing would be worse.
-		res := silentPayload()
-		res.SideB = "Nara"
-		assert.False(t, mergeStoredPoolMatch(res, storedMatch(), poolWriteRestore))
-	})
-
-	t.Run("an omitted side is backfilled from the stored pairing", func(t *testing.T) {
-		in := silentPayload()
-		in.SideA, in.SideB = "", ""
-		require.False(t, mergeStoredPoolMatch(in, storedMatch(), poolWriteForward))
-		assert.Equal(t, "Kyoto", in.SideA)
-		assert.Equal(t, "Osaka", in.SideB)
+		in2, st2 := silentPayload(), storedMatch()
+		in2.SideB = "Nara"
+		assert.False(t, applyPoolWrite(st2, in2, poolWriteRestore))
+		assert.Equal(t, "Nara", st2.SideB, "restore replays the snapshot as captured")
 	})
 }
 
@@ -124,7 +141,11 @@ func TestQuickScoreKeepsCorrectionReason(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 
 	compID := "qs1"
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "QS", Kind: "team", TeamSize: 3}))
+	createTestCompetition(t, store, compID, "pools", 3, func(c *state.Competition) {
+		c.Name = "QS"
+		c.Kind = "team"
+		c.TeamSize = 3
+	})
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{{
 		ID: "P1-1", SideA: "Kyoto", SideB: "Osaka", Status: state.MatchStatusRunning,
 		CorrectionReason: "reopened: bout 2 recorded on the wrong side",

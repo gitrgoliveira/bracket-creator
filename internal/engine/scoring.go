@@ -269,7 +269,7 @@ func preserveDaihyosenOutcome(stored []state.SubMatchResult, result *state.Match
 }
 
 // poolWritePolicy selects how a stored pool/league match is folded into an
-// incoming result by mergeStoredPoolMatch.
+// incoming result by applyPoolWrite.
 type poolWritePolicy int
 
 const (
@@ -284,24 +284,34 @@ const (
 	poolWriteRestore
 )
 
-// mergeStoredPoolMatch folds the stored match into an incoming result, just
-// before the whole-struct `*r = *result` overwrite the pool write closures all
-// perform. It reports whether the write must be ABANDONED (the payload names a
-// pairing that is not this match's).
+// applyPoolWrite folds the stored match into an incoming result and then
+// performs the whole-struct overwrite. It reports whether the write was
+// ABANDONED (the payload names a pairing that is not this match's), in which
+// case the stored match is left untouched.
 //
-// This is ONE function rather than a block hand-copied into each closure
-// because the copies had already drifted, twice, in the direction that hurts:
-// preserveDaihyosenOutcome reached three of the four and missed the live
-// /score path, and the CorrectionReason inherit below existed only in the Tx
-// forward writer, so a team quick-score landing after a kachinuki reopen
-// blanked the operator's audit justification through the other two. A new
-// field that must survive the overwrite now has exactly one home.
-func mergeStoredPoolMatch(result, stored *state.MatchResult, policy poolWritePolicy) (abandon bool) {
-	// Match identity is fixed at generation; a score must not rewrite it.
-	// Backfill omitted sides, reject a payload side that disagrees. The restore
-	// policy replays sides it captured from this same match, so a mismatch there
-	// is not a client error and is deliberately ignored.
-	if reconcileSides(result, stored.SideA, stored.SideB) && policy == poolWriteForward {
+// It does the `*stored = *result` assignment itself rather than leaving it to
+// each caller, so that the overwrite is unreachable without the merge. This is
+// ONE function because the hand-copied version drifted twice, in the direction
+// that hurts: preserveDaihyosenOutcome reached three of the four writers and
+// missed the live /score path, and the CorrectionReason inherit existed only in
+// the Tx forward writer, so a team quick-score landing after a kachinuki reopen
+// blanked the operator's audit justification through the other two.
+//
+// SCOPE of "one home", stated precisely because the previous wording
+// overclaimed: this owns the ENGINE-side preservation. Server-owned flags a
+// client must not be able to clear (ReopenPending) are re-stamped at the HTTP
+// boundary instead - see handlers_match.go - so a new field of that kind still
+// needs a decision about which layer preserves it.
+func applyPoolWrite(stored, result *state.MatchResult, policy poolWritePolicy) (mismatch bool) {
+	// reconcileSides BACKFILLS omitted sides as a side effect and only reports
+	// the mismatch, so it must run under both policies; hoisted out of the
+	// condition below because folding it into a short-circuit would let a later
+	// tidy (cheap comparison first) silently drop the backfill.
+	sidesDisagree := reconcileSides(result, stored.SideA, stored.SideB)
+	// Match identity is fixed at generation; a score must not rewrite it. The
+	// restore policy replays sides captured from this same match, so a mismatch
+	// there is not a client error.
+	if sidesDisagree && policy == poolWriteForward {
 		return true
 	}
 	// Preserve generation-time participant ids + resolve winner id across the
@@ -314,21 +324,22 @@ func mergeStoredPoolMatch(result, stored *state.MatchResult, policy poolWritePol
 		result.ScheduledAt = stored.ScheduledAt
 	}
 	result.Round = stored.Round
-	if policy == poolWriteRestore {
-		return false
+	// Everything below is forward-only; poolWriteRestore inherits nothing more.
+	if policy == poolWriteForward {
+		// Set-if-empty: the kachinuki reopen path persists the operator's audit
+		// justification here, and the first "Record bout" after a reopen is a
+		// plain write carrying no reason of its own.
+		if result.CorrectionReason == "" {
+			result.CorrectionReason = stored.CorrectionReason
+		}
+		// A pool/league team encounter can hold a daihyosen (findMatchForDaihyosen
+		// accepts pool matches). Without this a verdict-silent write from a stale
+		// second editor erases a recorded hantei, which in accrueTeamSubResults
+		// flips the bout from a win into a draw and so moves the team's IV/IL/IT
+		// tie-break figures.
+		preserveDaihyosenOutcome(stored.SubResults, result)
 	}
-	// Set-if-empty: the kachinuki reopen path persists the operator's audit
-	// justification here, and the first "Record bout" after a reopen is a plain
-	// write carrying no reason of its own.
-	if result.CorrectionReason == "" {
-		result.CorrectionReason = stored.CorrectionReason
-	}
-	// A pool/league team encounter can hold a daihyosen (findMatchForDaihyosen
-	// accepts pool matches). Without this a verdict-silent write from a stale
-	// second editor erases a recorded hantei, which in accrueTeamSubResults
-	// flips the bout from a win into a draw and so moves the team's IV/IL/IT
-	// tie-break figures.
-	preserveDaihyosenOutcome(stored.SubResults, result)
+	*stored = *result
 	return false
 }
 
@@ -582,11 +593,7 @@ func (e *Engine) RecordMatchResult(compId string, matchId string, result *state.
 func (e *Engine) writeMatchResult(compId string, matchId string, result *state.MatchResult, policy poolWritePolicy) error {
 	var sideMismatch bool
 	err := e.withPoolMatch(compId, matchId, func(r *state.MatchResult) {
-		if mergeStoredPoolMatch(result, r, policy) {
-			sideMismatch = true
-			return // leave the stored match untouched
-		}
-		*r = *result
+		sideMismatch = applyPoolWrite(r, result, policy)
 	})
 	if err != nil {
 		if !errors.Is(err, errMatchNotFound) {
@@ -658,11 +665,7 @@ func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId strin
 
 	var sideMismatch bool
 	err := e.withPoolMatch(compId, matchId, func(r *state.MatchResult) {
-		if mergeStoredPoolMatch(result, r, poolWriteForward) {
-			sideMismatch = true
-			return // leave the stored match untouched
-		}
-		*r = *result
+		sideMismatch = applyPoolWrite(r, result, poolWriteForward)
 	})
 	if err != nil {
 		if !errors.Is(err, errMatchNotFound) {

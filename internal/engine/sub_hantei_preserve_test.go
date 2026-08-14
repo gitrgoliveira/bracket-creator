@@ -10,15 +10,12 @@ import (
 
 // Operator ruling: "all results must be recorded into storage" — a recorded
 // daihyosen hantei must never be erased by a writer that did not address it.
-// preserveSubHantei guards each forward SubResults replacement. The two bracket
-// writes call it (via preserveDaihyosenOutcome) directly; all four pool writes
-// now reach it through mergeStoredPoolMatch, the single merge shared by the
-// twins in scoring.go and scoring_tx.go — the guard was originally hand-copied
-// and the copy the live /score endpoint takes was the one that missed it. These
-// tests keep the unit truth table plus an end-to-end run through BOTH pool
-// paths: the shared merge makes that parity structural rather than a matter of
-// four blocks agreeing, but the end-to-end runs stay because they pin the
-// behaviour the operator sees, not the arrangement of the code.
+// preserveSubHantei guards each forward SubResults replacement: the bracket
+// writes call it via preserveDaihyosenOutcome, the pool writes via
+// applyPoolWrite (see that function for why it is shared). These tests are the
+// unit truth table plus an end-to-end run through BOTH pool paths; the shared
+// merge makes that parity structural, but the end-to-end runs stay because they
+// pin the behaviour the operator sees, not the arrangement of the code.
 func TestPreserveSubHantei(t *testing.T) {
 	dh := state.DaihyosenSubPosition
 	storedSubs := func() []state.SubMatchResult {
@@ -258,8 +255,7 @@ func TestPreserveSubHantei_SideGuardsTheScoreline(t *testing.T) {
 // /competitions/:id/matches/:mid/score and the bulk-score endpoint actually
 // take. Its non-tx twin already had the guard, so this pins the twin parity:
 // pass poolWriteRestore instead of poolWriteForward at the withPoolMatchTx
-// closure in scoring_tx.go (or drop the preserve from mergeStoredPoolMatch)
-// and this goes red while the unit truth table above stays green.
+// closure in scoring_tx.go and this goes red while the unit table stays green.
 func TestPoolWriteTx_StaleSnapshotKeepsHantei(t *testing.T) {
 	// setupTestEngine (engine_test.go) already owns this preamble, with
 	// t.Cleanup rather than defer; 380+ tests in this package use it.

@@ -315,15 +315,9 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 
 	var sideMismatch bool
 	err := e.withPoolMatchTx(tx, compID, matchID, func(r *state.MatchResult) {
-		// This is the POOL branch of the path POST /score and the bulk-score
-		// endpoint actually take. The merge itself is shared with the non-tx
-		// twins (mergeStoredPoolMatch, scoring.go) precisely because this site
-		// was once the one the hand-copied version missed.
-		if mergeStoredPoolMatch(result, r, poolWriteForward) {
-			sideMismatch = true
-			return // leave the stored match untouched
-		}
-		*r = *result
+		// The POOL branch of the path POST /score and the bulk-score endpoint
+		// actually take - the site the hand-copied merge once missed.
+		sideMismatch = applyPoolWrite(r, result, poolWriteForward)
 	})
 	if err != nil {
 		if !errors.Is(err, errMatchNotFound) {
@@ -431,14 +425,8 @@ func (e *Engine) rollbackMatchResultTx(tx state.StoreTx, compID, matchID string,
 func (e *Engine) recordMatchResultTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult) error {
 	result.ID = matchID
 	err := e.withPoolMatchTx(tx, compID, matchID, func(r *state.MatchResult) {
-		// poolWriteRestore, not poolWriteForward: this path replays a trusted
-		// prior snapshot (K3 rollback), not a client payload. It therefore
-		// inherits nothing the forward writers inherit — an empty prior
-		// CorrectionReason must CLEAR the field rather than pick up the
-		// rejected partial write's reason, and a side mismatch is not a client
-		// error to reject. Same reasoning as normalizePriorForRollback.
-		mergeStoredPoolMatch(result, r, poolWriteRestore)
-		*r = *result
+		// K3 rollback: replay the snapshot verbatim - see poolWriteRestore.
+		_ = applyPoolWrite(r, result, poolWriteRestore)
 	})
 	if err != nil {
 		if !errors.Is(err, errMatchNotFound) {

@@ -1189,152 +1189,7 @@ func markTiedStandingsLeague(comp *state.Competition, sorted []state.PlayerStand
 // could clobber another operator's propagation too.
 func (e *Engine) recordBracketMatchResult(compId string, matchId string, result *state.MatchResult) error {
 	return e.store.UpdateBracket(compId, func(bracket *state.Bracket) error {
-		if bracket == nil {
-			return notFoundErrorf("bracket not found for competition %s", compId)
-		}
-
-		found := false
-		for rIdx, round := range bracket.Rounds {
-			for mIdx, m := range round {
-				if m.ID == matchId {
-					// A knockout match is playable only once both sides are
-					// resolved competitors (feeder pools/matches finished). This
-					// replaces the old bracket-wide Preview gate so the knockout
-					// fills in incrementally as pools qualify.
-					if !bracketMatchPlayable(&bracket.Rounds[rIdx][mIdx]) {
-						return validationErrorf("knockout match %s is not ready to score: a feeder pool or match has not finished", matchId)
-					}
-					// Merge stored sides into result when the payload omitted
-					// them so that deriveDaihyosenWinner can map a
-					// representative player name back to the canonical team
-					// name. Must happen before deriveDaihyosenWinner and
-					// before writing result.Winner back to the bracket. A
-					// non-empty payload side that disagrees with the resolved
-					// bracket side is rejected, a score must not rewrite the
-					// seeded pairing.
-					if reconcileSides(result, m.SideA, m.SideB) {
-						return ErrMatchSideMismatch
-					}
-					// Timestamp last-write-wins (mp-y3nk): drop a write that is
-					// strictly older than the stored result (both stamped in
-					// server-relative time), so a reconnecting offline court's
-					// stale change loses to a newer one recorded elsewhere.
-					// Unstamped writes bypass it (arrival-order, as before) and a
-					// deliberate correction always applies (applyBracketWrite); the
-					// completed-never-reverted guard stays on top.
-					if !applyBracketWrite(result, m.ModifiedAt) {
-						found = true
-						break
-					}
-					deriveDaihyosenWinner(result)
-					bracket.Rounds[rIdx][mIdx].Winner = result.Winner
-					// Preserve incoming Status, pre-fix this was
-					// unconditionally set to Completed, so the scoring
-					// modal's "Start" tap (which sends
-					// `{status: "running"}`) immediately persisted the
-					// bracket match as completed with no winner. Mirrors
-					// the pool match path (recordMatchResult above) which
-					// copies the full result. Default to Completed when
-					// status is empty (backward-compat with older
-					// scoring payloads that didn't include the field).
-					status := result.Status
-					if status == "" {
-						status = state.MatchStatusCompleted
-					}
-					if err := validateBracketCompletion(matchId, status, result.Winner); err != nil {
-						return err
-					}
-					bracket.Rounds[rIdx][mIdx].Status = status
-					// Stamp the applied write's server-relative time so the next
-					// write is compared against it (mp-y3nk). Preserve a prior stamp
-					// when this write is unstamped, so an un-stamped correction does
-					// not reset the field to 0 and reopen the match to stale writes.
-					if result.ModifiedAt != 0 {
-						bracket.Rounds[rIdx][mIdx].ModifiedAt = result.ModifiedAt
-					}
-					bracket.Rounds[rIdx][mIdx].ScoreA = formatScore(result.IpponsA, result.HansokuA)
-					bracket.Rounds[rIdx][mIdx].ScoreB = formatScore(result.IpponsB, result.HansokuB)
-					bracket.Rounds[rIdx][mIdx].Decision = result.Decision
-					bracket.Rounds[rIdx][mIdx].DecisionBy = result.DecisionBy
-					bracket.Rounds[rIdx][mIdx].DecisionReason = result.DecisionReason
-					bracket.Rounds[rIdx][mIdx].Encho = result.Encho
-					if result.ResultSource != "" {
-						bracket.Rounds[rIdx][mIdx].ResultSource = result.ResultSource
-					}
-					// Twin parity with recordBracketMatchResultTx (scoring_tx.go):
-					// carry the operator correction note when set, so the non-tx
-					// write path doesn't silently drop it for a future caller.
-					if result.CorrectionReason != "" {
-						bracket.Rounds[rIdx][mIdx].CorrectionReason = result.CorrectionReason
-					}
-					// nil = omitted (preserve stored data); non-nil [] = explicit clear.
-					if result.SubResults != nil {
-						preserveDaihyosenOutcome(bracket.Rounds[rIdx][mIdx].SubResults, result)
-						bracket.Rounds[rIdx][mIdx].SubResults = result.SubResults
-					}
-					// Project the persisted sub-results back into result so the
-					// HTTP response and SSE broadcast reflect committed state,
-					// mirrors the DecidedByHantei projection below. Without this a
-					// nil-preserve re-score would keep the stored bouts on disk but
-					// emit an omitted subResults payload in the same turn.
-					result.SubResults = bracket.Rounds[rIdx][mIdx].SubResults
-					// DecidedByHantei uses *bool so that a client that omits the
-					// field (nil) preserves the stored value, while an explicit
-					// true/false applies it. This prevents a re-score that doesn't
-					// mention the flag from silently clearing a recorded hantei win.
-					if result.DecidedByHantei != nil {
-						bracket.Rounds[rIdx][mIdx].DecidedByHantei = *result.DecidedByHantei
-					}
-					// Project the persisted flag back into result so the HTTP
-					// response and SSE broadcast reflect committed state. Without
-					// this, a nil-preserve request would correctly keep a stored
-					// hantei flag on disk but emit an omitted field in the same
-					// turn, clients (and the bracket HT chip) would see the
-					// match flip non-hantei until the next refresh. HanteiPtr
-					// returns nil for false so omitempty still drops the field
-					// for non-hantei matches.
-					result.DecidedByHantei = state.HanteiPtr(bracket.Rounds[rIdx][mIdx].DecidedByHantei)
-					// Echo the persisted scheduling fields back into the result so the
-					// caller (and SSE broadcast) sees the full, correct match state
-					// rather than the empty Court/ScheduledAt the scoring UI sends.
-					if result.Court == "" {
-						result.Court = m.Court
-					}
-					if result.ScheduledAt == "" {
-						result.ScheduledAt = m.ScheduledAt
-					}
-					found = true
-
-					// Only propagate the winner when the match is
-					// actually completed. A "running" update is for
-					// live-status display only, the next round's
-					// SideA/SideB shouldn't be filled until the match
-					// has a final result.
-					if status == state.MatchStatusCompleted {
-						e.propagateBracketWinner(bracket, rIdx, mIdx)
-					}
-					break
-				}
-			}
-			if found {
-				break
-			}
-		}
-
-		// The bronze (3rd-place) playoff lives in Bracket.ThirdPlaceMatch, NOT in
-		// Rounds, so the round scan above never finds it. Resolve it here. There
-		// is no propagation out of bronze (it has no downstream match).
-		if !found && bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchId {
-			if err := applyBronzeMatchResult(bracket.ThirdPlaceMatch, result); err != nil {
-				return err
-			}
-			found = true
-		}
-
-		if !found {
-			return notFoundErrorf("bracket match %s not found", matchId)
-		}
-		return nil
+		return e.applyBracketResultIn(bracket, compId, matchId, result)
 	})
 }
 
@@ -1355,9 +1210,9 @@ func applyBracketWrite(result *state.MatchResult, storedModifiedAt int64) bool {
 // format encounter resolves via daihyosen; a tied kachinuki final bout
 // resolves via encho on that same bout (daihyosen does not exist in
 // kachinuki, mp-gmcg). Applies to all bracket match types and is the single
-// AMENDMENT 2 choke point shared by recordBracketMatchResult,
-// recordBracketMatchResultTx, and applyBronzeMatchResult so the twins cannot
-// drift.
+// AMENDMENT 2 choke point. It now has a single caller, applyBracketMatchResult,
+// which is itself the one per-match bracket write the twins and the bronze
+// fallback all share, so there are no longer twins here to drift.
 func validateBracketCompletion(matchID string, status state.MatchStatus, winner string) error {
 	if status == state.MatchStatusCompleted && winner == "" {
 		return validationErrorf("bracket match %s: cannot mark completed with no winner; resolve the tie first (daihyosen, or encho on the final kachinuki bout)", matchID)
@@ -1365,33 +1220,69 @@ func validateBracketCompletion(matchID string, status state.MatchStatus, winner 
 	return nil
 }
 
-// applyBronzeMatchResult writes result into the bronze (3rd-place) playoff
-// match, mirroring the per-round bracket-match write in recordBracketMatchResult
-// but without any downstream propagation (the bronze match has no next round).
-// Shared by the non-tx and tx record paths so the two stay in lockstep.
-func applyBronzeMatchResult(bm *state.BracketMatch, result *state.MatchResult) error {
+// applyBracketMatchResult writes result into a single bracket match — a round
+// match or the bronze (3rd-place) playoff, which are the same shape and take
+// the same rules. It reports whether the write APPLIED: false with a nil error
+// means the timestamp guard dropped it as stale, and the caller must then skip
+// anything downstream (propagation).
+//
+// This is the whole per-match write, shared by recordBracketMatchResult, its Tx
+// twin, and the bronze fallback in both. It was three copies of ~45 lines; the
+// source recorded two hand-resyncs between them ("Twin parity with
+// recordBracketMatchResultTx… so the non-tx write path doesn't silently drop
+// it", and the AMENDMENT 2 guard), and the bronze copy had to be retrofitted
+// with the mp-y3nk LWW guard the round copies already had. A new bracket-write
+// rule now has one home.
+//
+// Note it does NOT touch bm.Court / bm.ScheduledAt: scheduling is owned
+// elsewhere, and the Court/ScheduledAt handling at the end is an echo BACK into
+// result for the caller's response, not a write.
+func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult) (applied bool, err error) {
+	// A knockout match is playable only once both sides are resolved competitors
+	// (feeder pools/matches finished). This replaces the old bracket-wide Preview
+	// gate so the knockout fills in incrementally as pools qualify.
 	if !bracketMatchPlayable(bm) {
-		return validationErrorf("knockout match %s is not ready to score: a feeder pool or match has not finished", bm.ID)
+		return false, validationErrorf("knockout match %s is not ready to score: a feeder pool or match has not finished", bm.ID)
 	}
+	// Match identity is fixed at seeding; a score must not rewrite the pairing.
+	// Backfill omitted sides so deriveDaihyosenWinner can map a representative
+	// player name back to the canonical team name (it must run before that, and
+	// before Winner reaches the bracket); reject a non-empty payload side that
+	// disagrees with the resolved pairing.
 	if reconcileSides(result, bm.SideA, bm.SideB) {
-		return ErrMatchSideMismatch
+		return false, ErrMatchSideMismatch
 	}
-	// Timestamp last-write-wins (mp-y3nk): mirror the per-round write path so the
-	// bronze (3rd-place) match is not left unprotected. A stale reconnect replay
-	// is dropped; a correction always applies.
+	// Timestamp last-write-wins (mp-y3nk): drop a write strictly older than the
+	// stored result (both stamped in server-relative time), so a reconnecting
+	// offline court's stale change loses to a newer one recorded elsewhere.
+	// Unstamped writes bypass it (arrival-order, as before) and a deliberate
+	// correction always applies (applyBracketWrite); the completed-never-reverted
+	// guard stays on top.
 	if !applyBracketWrite(result, bm.ModifiedAt) {
-		return nil
+		return false, nil
 	}
 	deriveDaihyosenWinner(result)
+	// Preserve incoming Status. Pre-fix this was unconditionally Completed, so
+	// the scoring modal's "Start" tap (which sends `{status: "running"}`)
+	// immediately persisted the bracket match as completed with no winner.
+	// Default to Completed when empty, for older payloads that omitted the field.
 	status := result.Status
 	if status == "" {
 		status = state.MatchStatusCompleted
 	}
+	// Validated BEFORE the first mutation of bm. The round copies used to assign
+	// Winner first and lean on updateBracketLocked skipping the save when the
+	// mutate callback errors — true (state/bracket.go), but a non-local property
+	// nothing at the write site stated. Ordering it here makes the discard local.
 	if err := validateBracketCompletion(bm.ID, status, result.Winner); err != nil {
-		return err
+		return false, err
 	}
 	bm.Winner = result.Winner
 	bm.Status = status
+	// Stamp the applied write's server-relative time so the next write is
+	// compared against it (mp-y3nk). Preserve a prior stamp when this write is
+	// unstamped, so an un-stamped correction does not reset the field to 0 and
+	// reopen the match to stale writes.
 	if result.ModifiedAt != 0 {
 		bm.ModifiedAt = result.ModifiedAt
 	}
@@ -1404,25 +1295,81 @@ func applyBronzeMatchResult(bm *state.BracketMatch, result *state.MatchResult) e
 	if result.ResultSource != "" {
 		bm.ResultSource = result.ResultSource
 	}
+	// Carry the operator correction note when set, rather than dropping it.
 	if result.CorrectionReason != "" {
 		bm.CorrectionReason = result.CorrectionReason
 	}
+	// nil = omitted (preserve stored data); non-nil [] = explicit clear.
 	if result.SubResults != nil {
 		preserveDaihyosenOutcome(bm.SubResults, result)
 		bm.SubResults = result.SubResults
 	}
+	// Project the persisted sub-results back into result so the HTTP response and
+	// SSE broadcast reflect committed state (mirrors the DecidedByHantei
+	// projection below). Without this a nil-preserve re-score would keep the
+	// stored bouts on disk but emit an omitted subResults payload in the same turn.
 	result.SubResults = bm.SubResults
+	// DecidedByHantei uses *bool so a client that omits the field (nil) preserves
+	// the stored value, while an explicit true/false applies it. This prevents a
+	// re-score that doesn't mention the flag from silently clearing a recorded
+	// hantei win.
 	if result.DecidedByHantei != nil {
 		bm.DecidedByHantei = *result.DecidedByHantei
 	}
+	// Project the persisted flag back so clients (and the bracket HT chip) do not
+	// see the match flip non-hantei until the next refresh. HanteiPtr returns nil
+	// for false so omitempty still drops the field for non-hantei matches.
 	result.DecidedByHantei = state.HanteiPtr(bm.DecidedByHantei)
+	// Echo the persisted scheduling fields back into result so the caller (and
+	// the SSE broadcast) sees the full match state rather than the empty
+	// Court/ScheduledAt the scoring UI sends.
 	if result.Court == "" {
 		result.Court = bm.Court
 	}
 	if result.ScheduledAt == "" {
 		result.ScheduledAt = bm.ScheduledAt
 	}
-	return nil
+	return true, nil
+}
+
+// applyBracketResultIn is the body BOTH bracket write twins run inside their
+// UpdateBracket callback: locate the match, apply the write, propagate a
+// completed winner. The twins differ only in which UpdateBracket they call
+// (e.store vs tx), so that dispatch is all they contain now — before this they
+// were ~105 lines that differed in two.
+func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID string, result *state.MatchResult) error {
+	if bracket == nil {
+		return notFoundErrorf("bracket not found for competition %s", compID)
+	}
+	for rIdx := range bracket.Rounds {
+		for mIdx := range bracket.Rounds[rIdx] {
+			if bracket.Rounds[rIdx][mIdx].ID != matchID {
+				continue
+			}
+			applied, err := applyBracketMatchResult(&bracket.Rounds[rIdx][mIdx], result)
+			if err != nil {
+				return err
+			}
+			// Propagate only a genuinely completed result. A "running" update is
+			// for live-status display, so the next round's SideA/SideB must stay
+			// empty until the match has a final result; and a write the LWW guard
+			// dropped changed nothing to propagate.
+			if applied && bracket.Rounds[rIdx][mIdx].Status == state.MatchStatusCompleted {
+				e.propagateBracketWinner(bracket, rIdx, mIdx)
+			}
+			return nil
+		}
+	}
+	// The bronze (3rd-place) playoff lives in Bracket.ThirdPlaceMatch, NOT in
+	// Rounds, so the scan above never finds it. There is no propagation out of
+	// bronze: it has no downstream match.
+	if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchID {
+		if _, err := applyBracketMatchResult(bracket.ThirdPlaceMatch, result); err != nil {
+			return err
+		}
+		return nil
+	}
+	return notFoundErrorf("bracket match %s not found", matchID)
 }
 
 func (e *Engine) propagateBracketWinner(bracket *state.Bracket, rIdx, mIdx int) {

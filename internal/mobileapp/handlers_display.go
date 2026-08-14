@@ -5,7 +5,6 @@ import (
 	"log"
 	"net/http"
 	"regexp"
-	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -95,7 +94,7 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 			}
 
 			// Bracket/knockout: a running elimination bout persists its running
-			// score as the formatted ScoreA/ScoreB string (engine.formatScore),
+			// score as the formatted ScoreA/ScoreB string (domain.FormatScore),
 			// not the ippon arrays a pool MatchResult carries. parseScore turns
 			// it back into the {ippons, hansoku} shape the contract returns.
 			// Elimination matches have no representative-bout fighters.
@@ -355,32 +354,16 @@ func emptyIfNil(s []string) []string {
 	return s
 }
 
-// parseScore is the inverse of engine.formatScore (internal/engine/scoring.go):
-// "MK (H1)" → (["M","K"], 1), "MK" → (["M","K"], 0), "(H1)" → (nil, 1). Ippon
-// letters are single runes (M/K/D/T/H/S or the ○ default-win marker), so
-// splitting the non-hansoku remainder on runes recovers the slice. Used to fill
-// the ippon/hansoku fields for a RUNNING bracket match, which persists its
-// running score as the formatted ScoreA/ScoreB string rather than the ippon
-// arrays a pool MatchResult carries.
+// parseScore fills the ippon/hansoku fields for a RUNNING bracket match, which
+// persists its running score as the formatted ScoreA/ScoreB string rather than
+// the ippon arrays a pool MatchResult carries.
+//
+// The package-local spelling of domain.ParseScore. It used to be a second,
+// hand-written implementation here under a comment naming engine.formatScore as
+// its inverse — two packages holding one codec, with nothing making them agree.
+// Both halves now live in domain and are pinned by a round-trip test.
 func parseScore(s string) ([]string, int) {
-	s = strings.TrimSpace(s)
-	hansoku := 0
-	if i := strings.LastIndex(s, "(H"); i >= 0 {
-		if j := strings.Index(s[i:], ")"); j >= 0 {
-			if n, err := strconv.Atoi(s[i+2 : i+j]); err == nil {
-				hansoku = n
-			}
-			s = strings.TrimSpace(s[:i])
-		}
-	}
-	var ippons []string
-	for _, r := range s {
-		if r == ' ' {
-			continue
-		}
-		ippons = append(ippons, string(r))
-	}
-	return ippons, hansoku
+	return domain.ParseScore(s)
 }
 
 // buildSide turns a participant name (which is what MatchResult.SideA/SideB

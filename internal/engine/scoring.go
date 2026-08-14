@@ -1268,12 +1268,24 @@ func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult, 
 	bm.DecisionBy = result.DecisionBy
 	bm.DecisionReason = result.DecisionReason
 	bm.Encho = result.Encho
-	if result.ResultSource != "" {
+	// Set-if-non-empty on the FORWARD path: a client payload that omits either
+	// field is inheriting stored context, not clearing it. Under restore the
+	// snapshot is authoritative, so both are assigned straight through — an
+	// empty one means the match genuinely held no note, and leaving the
+	// rejected write's audit trail behind would misattribute it to a result
+	// that was rolled back. applyPoolWrite has always done this via its
+	// whole-struct overwrite; the bracket twin used to skip it.
+	if policy == matchWriteRestore {
 		bm.ResultSource = result.ResultSource
-	}
-	// Carry the operator correction note when set, rather than dropping it.
-	if result.CorrectionReason != "" {
 		bm.CorrectionReason = result.CorrectionReason
+	} else {
+		if result.ResultSource != "" {
+			bm.ResultSource = result.ResultSource
+		}
+		// Carry the operator correction note when set, rather than dropping it.
+		if result.CorrectionReason != "" {
+			bm.CorrectionReason = result.CorrectionReason
+		}
 	}
 	// Forward: nil = omitted (preserve stored data), non-nil [] = explicit clear;
 	// the verdict merge for this case already ran above, against the still-stored
@@ -1458,15 +1470,11 @@ func parseWinnerOf(s string, numRounds int) (int, int) {
 // fouls); the discharged pair appears as an "H" ippon in the opponent's slice
 // instead of a redundant counter on this side. Values >1 only surface when
 // reading legacy disk entries written before the shift.
+//
+// The package-local spelling of domain.FormatScore, whose inverse
+// (domain.ParseScore) bracketMatchAsResult needs to read a stored score back.
 func formatScore(ippons []string, hansoku int) string {
-	score := strings.Join(ippons, "")
-	if hansoku > 0 {
-		if score != "" {
-			score += " "
-		}
-		score += fmt.Sprintf("(H%d)", hansoku)
-	}
-	return score
+	return domain.FormatScore(ippons, hansoku)
 }
 
 // patchScheduleCourt updates the court for a single match entry in place,

@@ -455,3 +455,104 @@ func TestBracketForwardWrite_PreservedVerdictReachesTheWinner(t *testing.T) {
 		assert.Equal(t, "Kyoto", poolStored.Winner)
 	})
 }
+
+// A rollback must put the match BACK, not blank it.
+//
+// bracketMatchAsResult is what captures the "prior" snapshot the K3 rollback
+// replays. It used to omit the score entirely: a bracket match stores each
+// side as one formatted string, MatchResult carries ippon arrays, and nothing
+// decoded one into the other. So the snapshot arrived with nil ippons, and the
+// restore wrote formatScore(nil, 0) over a real scoreline. Silent data loss on
+// the one path whose whole job is to preserve state.
+func TestBracketRollbackRestoresTheScore(t *testing.T) {
+	// A match as it stands before the rejected write: 2-1 with an outstanding
+	// hansoku against Osaka.
+	scored := func() *state.BracketMatch {
+		return &state.BracketMatch{
+			ID: "m-r1-0", SideA: "Kyoto", SideB: "Osaka",
+			Winner: "Kyoto", Status: state.MatchStatusCompleted,
+			ScoreA: "MK", ScoreB: "D (H1)",
+			ResultSource: "admin",
+		}
+	}
+
+	t.Run("the snapshot carries the scoreline", func(t *testing.T) {
+		snap := bracketMatchAsResult(scored())
+		assert.Equal(t, []string{"M", "K"}, snap.IpponsA)
+		assert.Equal(t, []string{"D"}, snap.IpponsB)
+		assert.Equal(t, 0, snap.HansokuA)
+		assert.Equal(t, 1, snap.HansokuB)
+	})
+
+	t.Run("replaying it restores the score rather than blanking it", func(t *testing.T) {
+		prior := bracketMatchAsResult(scored())
+		// The state after a rejected write: a different scoreline on disk.
+		bm := scored()
+		bm.ScoreA = "MKD"
+		bm.ScoreB = ""
+		applied, err := applyBracketMatchResult(bm, prior, matchWriteRestore)
+		require.NoError(t, err)
+		require.True(t, applied)
+		assert.Equal(t, "MK", bm.ScoreA)
+		assert.Equal(t, "D (H1)", bm.ScoreB)
+	})
+
+	t.Run("a genuinely unscored match still restores as unscored", func(t *testing.T) {
+		// The nil-means-empty half of matchWriteRestore: a snapshot with no
+		// score must CLEAR one the rejected write added, not preserve it.
+		unscored := &state.BracketMatch{ID: "m-r1-0", SideA: "Kyoto", SideB: "Osaka",
+			Status: state.MatchStatusScheduled}
+		prior := bracketMatchAsResult(unscored)
+		bm := scored()
+		_, err := applyBracketMatchResult(bm, prior, matchWriteRestore)
+		require.NoError(t, err)
+		assert.Empty(t, bm.ScoreA)
+		assert.Empty(t, bm.ScoreB)
+	})
+
+	// ModifiedAt is deliberately absent from the projection: carrying the
+	// snapshot's older stamp would make the rollback lose the timestamp LWW
+	// comparison against the stamp the rejected write just left, and be
+	// dropped. Pinned so nobody "completes" the projection with it.
+	t.Run("the rollback is not dropped by the LWW guard it passes through", func(t *testing.T) {
+		// The snapshot is taken from a match stamped EARLIER than the rejected
+		// write that followed it — the real ordering, and the one that makes
+		// projecting ModifiedAt fatal: the restore would compare 1000 >= 9000000
+		// and be discarded, leaving the rejected write on disk permanently.
+		before := scored()
+		before.ModifiedAt = 1_000
+		prior := bracketMatchAsResult(before)
+		require.Zero(t, prior.ModifiedAt, "the projection must leave the stamp off")
+
+		bm := scored()
+		bm.ModifiedAt = 9_000_000 // stamped by the write being rolled back
+		applied, err := applyBracketMatchResult(bm, prior, matchWriteRestore)
+		require.NoError(t, err)
+		assert.True(t, applied, "a rollback must never lose to the write it undoes")
+		assert.Equal(t, "MK", bm.ScoreA, "and it actually landed")
+	})
+
+	// The audit pair: restore is authoritative, so it both restores a note the
+	// match held and clears one the rejected write added. applyPoolWrite has
+	// always done this through its whole-struct overwrite.
+	t.Run("the rejected write's correction note does not survive", func(t *testing.T) {
+		bm := scored()
+		bm.CorrectionReason = "typo in round 1"
+		bm.ResultSource = "self-run"
+		_, err := applyBracketMatchResult(bm, bracketMatchAsResult(scored()), matchWriteRestore)
+		require.NoError(t, err)
+		assert.Empty(t, bm.CorrectionReason, "the note belonged to the write being undone")
+		assert.Equal(t, "admin", bm.ResultSource)
+	})
+
+	t.Run("a forward write still inherits an omitted note", func(t *testing.T) {
+		bm := scored()
+		bm.CorrectionReason = "kept"
+		_, err := applyBracketMatchResult(bm, &state.MatchResult{
+			ID: "m-r1-0", SideA: "Kyoto", SideB: "Osaka",
+			Winner: "Kyoto", Status: state.MatchStatusCompleted,
+		}, matchWriteForward)
+		require.NoError(t, err)
+		assert.Equal(t, "kept", bm.CorrectionReason, "forward omission means inherit")
+	})
+}

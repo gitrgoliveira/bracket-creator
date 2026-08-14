@@ -751,8 +751,34 @@ func printPoolResultsTable(f *excelize.File, sheetName string, pool Pool, startR
 	return printIndividualResultsTableSection(ctx, headerRow, teamMatches)
 }
 
+// PrintPoolMatches lays the Pool Matches sheet: one 8-column band per shiaijo,
+// each court's pools stacked down its band in AssignPoolsToCourts order. It
+// returns the per-pool winner cells the elimination sheet links to.
+//
+// numCourts is the operator's shiaijo ALLOCATION. The sheet is banded on the
+// count the POOL PHASE actually runs on, which this function derives itself via
+// EffectiveDrawCourts rather than trusting the caller: a court with no home pool
+// would own an empty band, so the draw never allocates more courts than pools
+// and neither may the sheet. Worked example: 12 competitors at pool size 4 in
+// "max" mode on 4 shiaijo gives 3 pools, which the live app runs as pools A+B on
+// shiaijo A and pool C on shiaijo B. Banding on the raw 4 spread those three
+// pools one per court over A, B and C and printed a fourth, entirely EMPTY
+// "Shiaijo D" band, sending operators to a shiaijo nothing was scheduled on --
+// inside a workbook whose own tree pages were titled only Shiaijo A and B.
+//
+// The clamp lives HERE, not at the call sites, because it is a contract between
+// this skeleton and everything that writes onto it. The overlays that fill in
+// literal scores and standings (internal/export) re-derive the column bands from
+// the same pools and court count, so a consumer that disagrees with the count
+// used here writes every score and standing into the wrong cells --
+// computePoolsByCourt therefore applies the identical clamp. CreateNamesWithPoolToPrint
+// does the same so its per-shiaijo sheets name the same set of courts.
+// EffectiveDrawCourts is idempotent, so a caller that already clamped
+// (cmd/create-pools.go) is unaffected.
 func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinners int, numCourts int, mirror bool, poolCoords map[string]cellCoord, pCoords map[string]playerCellCoord, engi bool) map[string]MatchWinner {
 	numCourts = clampCourts(numCourts)
+	// clampCourts first (0 or negative becomes 1), then the pool clamp.
+	numCourts = EffectiveDrawCourts(len(pools), numCourts)
 
 	matchWinners := make(map[string]MatchWinner)
 	sheetName := SheetPoolMatches
@@ -1497,8 +1523,20 @@ func CreateNamesToPrint(f *excelize.File, players []Player, sanitized bool, numC
 	}
 }
 
+// CreateNamesWithPoolToPrint writes one "Names to Print <Shiaijo>" sheet per
+// court, holding that court's competitors tagged "<pool letter><position>".
+//
+// numCourts is clamped to the count the pool phase actually runs on
+// (EffectiveDrawCourts), for the same reason PrintPoolMatches clamps: a sheet
+// for a shiaijo that has no pools would file competitors under a court they
+// never fight on, and one workbook cannot name one set of shiaijo on its name
+// sheets and another on its pool sheets and tree pages. Derived here rather
+// than by the caller so no call site can pass a count that disagrees with the
+// Pool Matches skeleton.
 func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanitized bool, numCourts int, pCoords map[string]playerCellCoord) {
 	numCourts = clampCourts(numCourts)
+	// clampCourts first (0 or negative becomes 1), then the pool clamp.
+	numCourts = EffectiveDrawCourts(len(pools), numCourts)
 	courtAssignments, _ := AssignPoolsToCourts(len(pools), numCourts)
 
 	entriesByCourt := make([][]nameEntry, numCourts)

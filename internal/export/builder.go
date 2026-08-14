@@ -111,27 +111,19 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	if numCourts == 0 {
 		numCourts = 1
 	}
-	// The shiaijo count the POOL PHASE actually runs on -- the clamp
-	// engine.generatePools applied when it wrote pool-matches.csv and
-	// BuildKnockoutDraw applies to the bracket. Banding these sheets on the raw
-	// allocation printed pools onto shiaijo the app never scheduled them on,
-	// plus a trailing empty band (see engine/export.go for the worked example).
-	// EffectiveDrawCourts returns numCourts untouched when there are no pools,
-	// so this needs no len(pools) guard.
-	//
-	// CRITICAL: PrintPoolMatches and BOTH overlays must receive the SAME value.
-	// The overlays re-derive the column bands through computePoolsByCourt ->
-	// AssignPoolsToCourts, so a value that disagrees with the skeleton's writes
-	// every score and standing into the wrong cells.
-	poolCourts := helper.EffectiveDrawCourts(len(pools), numCourts)
+	// numCourts is the operator's ALLOCATION. The pool-banded sheet and both
+	// overlays clamp it themselves to the count the pool phase actually runs on
+	// (PrintPoolMatches and computePoolsByCourt each apply
+	// helper.EffectiveDrawCourts), so the skeleton and the overlays cannot be
+	// handed values that disagree.
 	matchWinners := helper.PrintPoolMatches(
 		f, pools, comp.TeamSize, comp.EffectivePoolWinners(),
-		poolCourts, comp.Mirror, poolCoords, playerCoords, comp.Engi,
+		numCourts, comp.Mirror, poolCoords, playerCoords, comp.Engi,
 	)
-	if err := overlayPoolScores(f, pools, matchResultByID, poolOrdinals, comp.TeamSize, comp.Mirror, poolCourts, comp.Engi); err != nil {
+	if err := overlayPoolScores(f, pools, matchResultByID, poolOrdinals, comp.TeamSize, comp.Mirror, numCourts, comp.Engi); err != nil {
 		return nil, fmt.Errorf("export: overlay pool scores: %w", err)
 	}
-	if err := overlayPoolStandings(f, pools, standings, comp.TeamSize, poolCourts, comp.Engi); err != nil {
+	if err := overlayPoolStandings(f, pools, standings, comp.TeamSize, numCourts, comp.Engi); err != nil {
 		return nil, fmt.Errorf("export: overlay standings: %w", err)
 	}
 
@@ -155,12 +147,14 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 		if err != nil {
 			return nil, fmt.Errorf("export: %w", err)
 		}
-		// draw.NumCourts() is the exact band count for this sheet: it equals
-		// poolCourts on the pool-fed path, and on the PURE PLAYOFFS path (pools
-		// empty, so EffectiveDrawCourts returns the raw count) NewPlayoffDraw ->
-		// splitIntoSubtrees can honestly yield FEWER regions than numCourts when
-		// the tree has too few splittable levels. Using it makes the elimination
-		// banding equal the tree-page count in BOTH formats.
+		// draw.NumCourts() is the exact band count for this sheet, and this call
+		// cannot self-clamp the way the pool sheets do: it takes no pools. On the
+		// pool-fed path it equals the count those sheets clamp to; on the PURE
+		// PLAYOFFS path (pools empty, so EffectiveDrawCourts returns the raw
+		// count) NewPlayoffDraw -> splitIntoSubtrees can honestly yield FEWER
+		// regions than numCourts when the tree has too few splittable levels.
+		// Using it makes the elimination banding equal the tree-page count in
+		// BOTH formats.
 		helper.PrintEliminationWithBronze(f, matchWinners, eliminationMatchRounds, comp.TeamSize, draw.NumCourts(), comp.Mirror, comp.Engi,
 			bracket != nil && bracket.ThirdPlaceMatch != nil)
 
@@ -190,8 +184,10 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 		return nil, fmt.Errorf("export: delete tree template sheet: %w", derr)
 	}
 
-	// 5. Names to Print sheet (identical to blank-template export).
-	helper.CreateNamesWithPoolToPrint(f, pools, comp.EffectiveWithZekkenName(), poolCourts, playerCoords)
+	// 5. Names to Print sheet (identical to blank-template export). Clamps the
+	//    allocation to the pool phase's own shiaijo count internally, as step 3
+	//    does.
+	helper.CreateNamesWithPoolToPrint(f, pools, comp.EffectiveWithZekkenName(), numCourts, playerCoords)
 
 	// 6. Kachinuki Detail sheet: bout-by-bout log for kachinuki team
 	//    competitions (GAP 6). Same opt-in semantics as the blank-template
@@ -322,6 +318,9 @@ func overlayPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[str
 	sheetName := helper.SheetPoolMatches
 
 	poolsByCourt := computePoolsByCourt(pools, numCourts)
+	// computePoolsByCourt owns the pool clamp, so its length -- not the caller's
+	// numCourts -- is the number of bands the skeleton actually printed.
+	numCourts = len(poolsByCourt)
 
 	rows, err := f.GetRows(sheetName)
 	if err != nil {
@@ -406,6 +405,9 @@ func overlayTeamPoolScores(f *excelize.File, pools []helper.Pool, resultByID map
 	sheetName := helper.SheetPoolMatches
 
 	courtMatches := buildCourtMatchJobs(pools, numCourts, poolOrdinals)
+	// buildCourtMatchJobs inherits the pool clamp from computePoolsByCourt, so
+	// its length is the band count the skeleton actually printed.
+	numCourts = len(courtMatches)
 
 	rows, err := f.GetRows(sheetName)
 	if err != nil {
@@ -458,7 +460,22 @@ func overlayTeamPoolScores(f *excelize.File, pools []helper.Pool, resultByID map
 // computePoolsByCourt groups pool indices by the court each is assigned to, using
 // the same AssignPoolsToCourts distribution PrintPoolMatches lays out. Returned
 // slice is indexed by court; each entry lists that court's pool indices in order.
+//
+// numCourts is clamped to what the pools can actually carry
+// (helper.EffectiveDrawCourts), which is exactly what PrintPoolMatches does to
+// the skeleton these overlays write onto. This is the mechanism behind the rule
+// the overlays depend on: they re-derive their column bands HERE, so a court
+// count that disagrees with the skeleton's puts every score and standing into
+// the wrong cells. Applying the clamp inside the shared derivation means the
+// four overlay paths that reach it (overlayPoolScores, overlayPoolStandings and
+// their team twins, via buildCourtMatchJobs) cannot each get it wrong, and the
+// next one added inherits it.
+//
+// The returned LENGTH is the authoritative band count: callers must scan
+// len(poolsByCourt) bands rather than the numCourts they passed in, or they
+// index past the last band the skeleton printed.
 func computePoolsByCourt(pools []helper.Pool, numCourts int) [][]int {
+	numCourts = helper.EffectiveDrawCourts(len(pools), numCourts)
 	courtAssignments, _ := helper.AssignPoolsToCourts(len(pools), numCourts)
 	poolsByCourt := make([][]int, numCourts)
 	for i, c := range courtAssignments {
@@ -475,8 +492,9 @@ func computePoolsByCourt(pools []helper.Pool, numCourts int) [][]int {
 // pool-score overlays.
 func buildCourtMatchJobs(pools []helper.Pool, numCourts int, poolOrdinals map[string][]int) [][]matchJob {
 	poolsByCourt := computePoolsByCourt(pools, numCourts)
-	courtMatches := make([][]matchJob, numCourts)
-	for c := 0; c < numCourts; c++ {
+	// Sized from the clamped grouping, never from the requested numCourts.
+	courtMatches := make([][]matchJob, len(poolsByCourt))
+	for c := range poolsByCourt {
 		for _, pi := range poolsByCourt[c] {
 			ords := poolOrdinals[pools[pi].PoolName]
 			for mi := range pools[pi].Matches {
@@ -648,6 +666,9 @@ func overlayPoolStandings(f *excelize.File, pools []helper.Pool, standings map[s
 	sheetName := helper.SheetPoolMatches
 
 	poolsByCourt := computePoolsByCourt(pools, numCourts)
+	// computePoolsByCourt owns the pool clamp, so its length -- not the caller's
+	// numCourts -- is the number of bands the skeleton actually printed.
+	numCourts = len(poolsByCourt)
 
 	rows, err := f.GetRows(sheetName)
 	if err != nil {
@@ -793,6 +814,9 @@ func overlayTeamPoolStandings(f *excelize.File, pools []helper.Pool, standings m
 	sheetName := helper.SheetPoolMatches
 
 	poolsByCourt := computePoolsByCourt(pools, numCourts)
+	// computePoolsByCourt owns the pool clamp, so its length -- not the caller's
+	// numCourts -- is the number of bands the skeleton actually printed.
+	numCourts = len(poolsByCourt)
 
 	rows, err := f.GetRows(sheetName)
 	if err != nil {

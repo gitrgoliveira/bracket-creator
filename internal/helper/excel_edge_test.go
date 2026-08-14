@@ -39,6 +39,11 @@ func TestPrintPoolMatchesEdgeCourts(t *testing.T) {
 		}
 	})
 
+	// A court with no home pool would own an empty band, so PrintPoolMatches
+	// bands on EffectiveDrawCourts(len(pools), numCourts), not on the requested
+	// allocation: one pool carries exactly one shiaijo however many were asked
+	// for. This used to print all five headers, so the sheet sent operators to
+	// four shiaijo nothing was ever scheduled on.
 	t.Run("numCourts > len(pools)", func(t *testing.T) {
 		f := excelize.NewFile()
 		defer f.Close()
@@ -47,15 +52,24 @@ func TestPrintPoolMatchesEdgeCourts(t *testing.T) {
 
 		pools := []Pool{poolA}
 		numCourts := 5
+		require.Equal(t, 1, EffectiveDrawCourts(len(pools), numCourts),
+			"one pool must clamp to one shiaijo for this case to test the clamp")
+
 		matchWinners := PrintPoolMatches(f, pools, 0, 1, numCourts, false, poolCoords, pCoords, false)
 		if len(matchWinners) != 1 {
 			t.Errorf("expected 1 match winner, got %d", len(matchWinners))
 		}
-		// Verify court 5 header exists but is empty of pools
-		colName, _ := excelize.ColumnNumberToName(1 + 4*8)
-		val, _ := f.GetCellValue(SheetPoolMatches, colName+"1")
-		if val != "Shiaijo E" {
-			t.Errorf("expected Shiaijo E header, got '%s'", val)
+
+		// The single pool's own band is printed...
+		firstCol, _ := excelize.ColumnNumberToName(1)
+		val, _ := f.GetCellValue(SheetPoolMatches, firstCol+"1")
+		assert.Equal(t, "Shiaijo A", val, "the pool's own band must be printed")
+
+		// ...and nothing beyond it, including the requested fifth court.
+		for c := 1; c < numCourts; c++ {
+			colName, _ := excelize.ColumnNumberToName(1 + c*CourtsColumnsPerCourt)
+			val, _ := f.GetCellValue(SheetPoolMatches, colName+"1")
+			assert.Emptyf(t, val, "band %d must not be printed: only one pool exists to schedule", c+1)
 		}
 	})
 }

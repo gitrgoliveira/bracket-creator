@@ -999,7 +999,6 @@ export {
   allowedShiaijoCounts,
   shiaijoVenueSplitExample,
   shiaijoVenueHint,
-  SHIAIJO_RULE_IS_PER_COMPETITION,
   VALID_SHIAIJO_COUNTS,
   formatDrawsBracket,
   courtsOutsideTournament,

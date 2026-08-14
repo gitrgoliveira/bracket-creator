@@ -63,8 +63,14 @@ type KnockoutDraw struct {
 	// D4's unit -- the
 	// greedy layer and its one named bye belong to a block, not to a printable
 	// region -- so the bye arithmetic is checked against this rather than
-	// against Regions. Unexported because no caller outside the draw needs the
-	// finer partition: paging and court derivation are region-level.
+	// against Regions.
+	//
+	// This is a TEST SEAM, and the only one on this type: nothing in
+	// production reads it, because paging and court derivation are both
+	// region-level. It is kept because D4's bye arithmetic is defined per
+	// block, so draw_seed_bye_test.go can only check the rule against this
+	// partition -- recomputing it in the test would mean duplicating
+	// planBlocks and would stop testing what the draw actually built.
 	blocks []*Node
 
 	// poolCourt[p] is the zero-based shiaijo pool p was allocated to -- the

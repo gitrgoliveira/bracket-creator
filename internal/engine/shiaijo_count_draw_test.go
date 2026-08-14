@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
@@ -120,7 +121,7 @@ func TestDrawPipelineIgnoresShiaijoCountForNonBracketFormats(t *testing.T) {
 	t.Run("suggested league court count need not be a power of two", func(t *testing.T) {
 		// The concrete case the format scope protects: 8 players suggests 3.
 		assert.Equal(t, 3, SuggestedMaxCourts(8))
-		assert.Error(t, ValidateShiaijoCount(SuggestedMaxCourts(8)),
+		assert.Error(t, helper.ValidateShiaijoCount(SuggestedMaxCourts(8)),
 			"the suggestion is illegal for a bracket, which is exactly why leagues are out of scope")
 	})
 }

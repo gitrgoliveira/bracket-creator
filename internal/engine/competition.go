@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -669,8 +670,12 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// already-running competition is untouched and keeps serving its
 	// matches. Only a NEW draw on an invalid allocation is refused, and the
 	// operator clears it by reassigning shiaijo in competition settings.
+	//
+	// The rule and its message live in helper.ValidateShiaijoCount, called
+	// directly here, so the CLI, the HTTP API, the engine and the operator UI
+	// all reject exactly the same allocations with exactly the same wording.
 	if len(comp.Courts) > 0 && CompetitionDrawsBracket(comp.Format) {
-		if err := ValidateShiaijoCount(len(comp.Courts)); err != nil {
+		if err := helper.ValidateShiaijoCount(len(comp.Courts)); err != nil {
 			// Name the inheritance when that is where the count came from,
 			// or the operator is handed a count they never chose with no
 			// clue how the competition acquired it.

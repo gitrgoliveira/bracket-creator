@@ -129,7 +129,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 
 	// 4. Elimination Matches + Tree sheets. Only for formats with a knockout
 	//    phase: the IsPlayoffEnabled gate below drops the phantom bracket a
-	//    league's placeholder finals would otherwise imply. EliminationLeaves owns
+	//    league's placeholder finals would otherwise imply. EliminationDraw owns
 	//    the leaf order -- pool winners, or the frozen bracket's own leaves for a
 	//    pure playoffs competition -- and is shared with the blank-template export
 	//    so the two exports of one competition render the identical bracket, with

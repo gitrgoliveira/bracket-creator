@@ -61,31 +61,6 @@ func CompetitionDrawsBracket(format string) bool {
 	}
 }
 
-// ValidateShiaijoCount is the engine-side entry point for the shiaijo-count
-// rule: a competition runs on a POWER OF TWO of shiaijo -- 1, 2, 4, 8 or 16 --
-// and never on anything else, including even counts such as 6 and 10. The rule
-// itself (and its message) lives in helper.ValidateShiaijoCount so the CLI, the
-// HTTP API, the engine and the operator UI all reject exactly the same
-// allocations.
-//
-// Unlike its sibling ValidateCourtCount above, which applies only to a
-// SINGLE-pool competition (the idle-court cap depends on the roster size),
-// this check applies to every competition that draws a bracket
-// (CompetitionDrawsBracket) and is enforced by runDrawPipeline, the one
-// path both GenerateDraw and StartCompetition take to build a draw. That
-// placement is deliberate:
-//
-//   - it catches every caller, including a draw generated outside the HTTP
-//     layer, which the API-level validators cannot see;
-//   - it validates on WRITE, not on read, so a competition already saved
-//     with an invalid allocation (a legacy record, or one that inherited a
-//     3-shiaijo venue court list before this rule existed) keeps running and
-//     keeps serving its existing matches. Only a NEW draw is refused, and the
-//     operator fixes it by reassigning shiaijo in competition settings.
-func ValidateShiaijoCount(numCourts int) error {
-	return helper.ValidateShiaijoCount(numCourts)
-}
-
 // InheritedDrawCourts materialises the shiaijo allocation a draw runs on.
 //
 // A competition's own list wins whenever it has one, untouched: that is the

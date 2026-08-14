@@ -82,7 +82,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	}
 
 	// Elimination leaves for the knockout phase, shared with the results workbook
-	// (EliminationLeaves) so both exports of one competition render the identical
+	// (EliminationDraw) so both exports of one competition render the identical
 	// bracket: pool winners for pooled formats, or the stored bracket's leaves for
 	// a pure playoffs competition (mp-ndfu, mp-0yd8). The IsPlayoffEnabled gate
 	// below then drops the phantom bracket a league's placeholder finals imply.

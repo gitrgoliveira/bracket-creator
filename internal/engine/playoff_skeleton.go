@@ -16,60 +16,41 @@ import (
 // generation, because internal/export already imports engine (the reverse import
 // would be a cycle).
 //
-// EliminationDraw is the entry point both builders call. EliminationLeaves was
-// that entry point until the court regions were needed as well as the leaf
-// order; it is now a step inside it.
+// EliminationDraw is the single entry point both builders call.
 
 // isPurePlayoffs reports whether comp runs a standalone elimination bracket with
 // no pool phase -- the case where the pool-fed draw yields nothing and the
 // leaves must come from the stored bracket / participant seeding instead. Both
-// the bracket-load guard (export.go) and EliminationLeaves gate on this exact
+// the bracket-load guard (export.go) and playoffLeaves gate on this exact
 // condition, so it lives in one predicate rather than two hand-copied literals.
 func isPurePlayoffs(comp *state.Competition, pools []helper.Pool) bool {
 	return len(pools) == 0 && comp.Format == state.CompFormatPlayoffs
 }
 
-// EliminationLeaves returns the elimination-tree leaf order for a competition's
-// knockout phase.
+// playoffLeaves returns the first-round leaf order for a competition with NO
+// pool phase to draw from. Its only caller is EliminationDraw, and only after
+// that function's own poolDraw returned nil.
 //
-// Its only caller today is EliminationDraw, which owns the "both exports render
-// the identical bracket" invariant (mp-ndfu) that this function used to own. It
-// stays exported and keeps its own pool-fed branch rather than being folded in,
-// because that branch is what makes the function total for any caller: reached
-// through EliminationDraw the branch cannot fire, since EliminationDraw only
-// calls this after its own poolDraw returned nil and poolDraw's result does not
-// depend on the court count either call passes. Called directly it still answers
-// correctly for a pooled competition. Do not "simplify" it away on the strength
-// of the current single call site.
+// A pure playoffs competition has no pools, so its leaves come from the frozen
+// bracket's own first-round order (PlayoffLeavesFromBracket, which cannot
+// desync from the stored bracket the score overlay fills in), falling back to
+// participant seeding only pre-start, when no bracket exists yet. bracket may
+// be nil for a non-pure-playoffs caller: it is consulted only on the
+// pure-playoffs branch, where both callers load it.
 //
-// Pooled formats (Mixed), and the League case the IsPlayoffEnabled gate later
-// drops, come straight from the court-first draw over the pool winners.
-// EffectivePoolWinners (not the raw field) is used so an unset (<=0) PoolWinners
-// still yields the 2-winner knockout the tournament actually runs (mp-0yd8). A
-// pure playoffs competition has no pools, so the draw is empty; its leaves
-// come from the frozen bracket's own first-round order
-// (PlayoffLeavesFromBracket, which cannot desync from the stored bracket the
-// score overlay fills in), falling back to participant seeding only pre-start,
-// when no bracket exists yet. bracket may be nil for any non-pure-playoffs
-// caller: it is consulted only on the pure-playoffs branch, where both callers
-// load it.
-//
-// Prefer EliminationDraw where the TREE is needed: the leaf list alone cannot
-// reproduce the court regions, and a rebuild has to go through
-// helper.BuildSlotTree to collapse the array's bye slots (see EliminationDraw).
-// CreateBalancedTree over this list would print a different bracket from the one
-// the engine persisted.
-func EliminationLeaves(store *state.Store, comp *state.Competition, pools []helper.Pool, bracket *state.Bracket) []string {
-	if draw := poolDraw(comp, pools, len(comp.Courts)); draw != nil {
-		return helper.TreeLeafLabels(draw.Root)
+// It used to be exported, and to re-run poolDraw itself so that it stayed
+// "total for any caller". There were never any such callers, and the branch was
+// unreachable through the one that exists, so what it actually bought was a
+// second exported entry into this derivation -- the thing EliminationDraw is
+// the single owner of (mp-ndfu) -- plus a redundant draw build.
+func playoffLeaves(store *state.Store, comp *state.Competition, pools []helper.Pool, bracket *state.Bracket) []string {
+	if !isPurePlayoffs(comp, pools) {
+		return nil
 	}
-	if isPurePlayoffs(comp, pools) {
-		if leaves := PlayoffLeavesFromBracket(bracket); len(leaves) > 0 {
-			return leaves
-		}
-		return PlayoffFinalsFromParticipants(store, comp)
+	if leaves := PlayoffLeavesFromBracket(bracket); len(leaves) > 0 {
+		return leaves
 	}
-	return nil
+	return PlayoffFinalsFromParticipants(store, comp)
 }
 
 // poolDraw builds the pool-fed court-first draw, or nil when the competition
@@ -108,7 +89,7 @@ func EliminationDraw(store *state.Store, comp *state.Competition, pools []helper
 	if draw := poolDraw(comp, pools, numCourts); draw != nil {
 		return draw
 	}
-	leaves := EliminationLeaves(store, comp, pools, bracket)
+	leaves := playoffLeaves(store, comp, pools, bracket)
 	if len(leaves) == 0 {
 		return nil
 	}

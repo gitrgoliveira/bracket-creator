@@ -1120,24 +1120,14 @@ paths:
         '200':
           description: |
             Draw generated; competition is now in `draw-ready` status. The body is the
-            competition, plus `drawWarnings`: the seed-placement constraints the draw
-            could not honour. A configuration that cannot satisfy every seeding rule is
-            never refused; the deepest constraint gives way and is reported here.
+            competition. The seed-placement constraints the draw could not honour are
+            served by `GET /api/competitions/{id}/draw-warnings`: a configuration that
+            cannot satisfy every seeding rule is never refused, the deepest constraint
+            gives way and is reported there.
           content:
             application/json:
               schema:
-                allOf:
-                  - $ref: '#/components/schemas/Competition'
-                  - type: object
-                    properties:
-                      drawWarnings:
-                        type: array
-                        description: |
-                          Plain-language descriptions of what the seeding rules had to
-                          relax. Omitted when there is nothing to report, which includes
-                          every competition with no seeds.
-                        items:
-                          type: string
+                $ref: '#/components/schemas/Competition'
         '400':
           $ref: '#/components/responses/BadRequest'
         '404':

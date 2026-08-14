@@ -296,37 +296,6 @@ func checkUniqueCompFields(store *state.Store, name, prefix, excludeID string) (
 	return nil, nil
 }
 
-// competitionDetail is the single-competition response: the stored competition
-// plus fields DERIVED from it that the operator console needs but that are not
-// part of the persisted record.
-//
-// The embedded pointer promotes every competition field to the top level, so
-// the body is the competition object it has always been with extra keys added;
-// existing clients are unaffected and the SPA's normalizeCompetitionDetail
-// (which spreads the payload) picks the new keys up without a change.
-//
-// DrawWarnings carries R2/D7's seed-placement warnings (engine.SeedWarnings).
-// They are recomputed per request rather than stored: they are a pure function
-// of the drawn pools and the shiaijo allocation, so a competition whose draw is
-// discarded and regenerated can never serve a stale one. Empty (and omitted)
-// for every competition with no draw, no seeds, or nothing to report.
-type competitionDetail struct {
-	*state.Competition
-	DrawWarnings []string `json:"drawWarnings,omitempty"`
-}
-
-// withDrawWarnings wraps a competition for a detail response. Kept as one
-// function so every endpoint that returns a single competition reports the
-// same warnings, whether the operator has just generated the draw or is coming
-// back to the page later.
-func withDrawWarnings(eng *engine.Engine, comp *state.Competition) competitionDetail {
-	detail := competitionDetail{Competition: comp}
-	if comp != nil && eng != nil {
-		detail.DrawWarnings = eng.SeedWarningsFor(comp)
-	}
-	return detail
-}
-
 func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine, hub *Hub, elevated ElevatedVerifier) {
 	r.GET("/competitions", func(c *gin.Context) {
 		ids, err := store.ListCompetitions()
@@ -633,7 +602,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
 			return
 		}
-		c.JSON(http.StatusOK, withDrawWarnings(eng, comp))
+		c.JSON(http.StatusOK, comp)
 	})
 
 	// GET /competitions/:id/draw-warnings, the seed-placement warnings for the
@@ -1604,7 +1573,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// warnings ride back with it as well as on the detail GET they land on
 		// afterwards (R2/D7: a relaxed seed constraint is reported, never
 		// refused).
-		c.JSON(http.StatusOK, withDrawWarnings(eng, comp))
+		c.JSON(http.StatusOK, comp)
 	})
 
 	r.DELETE("/competitions/:id/draw", RequireElevatedPassword(elevated), func(c *gin.Context) {

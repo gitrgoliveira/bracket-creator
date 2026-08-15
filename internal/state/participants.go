@@ -891,6 +891,8 @@ func (s *Store) checkNewTeamNameCollisions(compID string, players []domain.Playe
 	for i, p := range players {
 		names[i] = p.Name
 	}
+	// nameKeys comes back from the scan below so the count map further down can
+	// reuse it instead of normalizing every name a second time.
 	// The pure in-memory scan runs FIRST and the competition is consulted only
 	// if it finds something. Loading up front cost a config.md read plus YAML
 	// parse on EVERY participant write (loadCompetitionLocked deliberately
@@ -901,7 +903,7 @@ func (s *Store) checkNewTeamNameCollisions(compID string, players []domain.Playe
 	// a property of the caller. Same-name entries are legal in an individual
 	// competition (see ErrDuplicateName), so such a roster reaches the load on
 	// every write and is filtered out below by kind instead.
-	dupes := helper.CheckDuplicateEntriesByName(names)
+	dupes, nameKeys := helper.DuplicateNamesWithKeys(names)
 	if len(dupes) == 0 {
 		return nil
 	}
@@ -938,9 +940,9 @@ func (s *Store) checkNewTeamNameCollisions(compID string, players []domain.Playe
 			storedCounts[helper.NormalizeParticipantName(p.Name)]++
 		}
 	}
-	incomingCounts := make(map[string]int)
-	for _, n := range names {
-		incomingCounts[helper.NormalizeParticipantName(n)]++
+	incomingCounts := make(map[string]int, len(nameKeys))
+	for _, k := range nameKeys {
+		incomingCounts[k]++
 	}
 	fresh := make([]string, 0, len(dupes))
 	for _, d := range dupes {

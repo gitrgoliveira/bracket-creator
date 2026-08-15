@@ -46,6 +46,14 @@ type NearDupWarning struct {
 //  2. Re-NFC so the result is in canonical composed form.
 //  3. Lowercase, trim, and collapse internal whitespace.
 func NormalizeParticipantName(s string) string {
+	// Fast path. Every team roster keys on an EMPTY dojo (the name-only rule),
+	// so this is hit once per participant per write; the general path below
+	// runs two normalisation passes and two strings.Builder allocations to
+	// return "" again. Behaviourally identical, so the JS mirror needs no
+	// matching branch.
+	if s == "" {
+		return ""
+	}
 	// Step 1: NFD decompose → strip combining marks U+0300..U+036F
 	nfd := norm.NFD.String(s)
 	var stripped strings.Builder
@@ -137,17 +145,46 @@ func CheckDuplicateEntriesByNameDojo(entries [][2]string) []string {
 // participant uuid, which team-name references in results do not carry).
 // Same normalization as the (name, dojo) check; returns colliding names.
 func CheckDuplicateEntriesByName(names []string) []string {
-	// Delegates rather than re-implementing: with an empty dojo, newDupKey
-	// keys on the normalized name alone and the label branch emits just the
-	// trimmed name (no dangling " / "), so this IS the name-only case of the
-	// tier-1 helper. Sharing the body keeps the normalization and the
-	// first-seen reporting label identical between the two rules by
-	// construction, rather than by two copies agreeing.
-	entries := make([][2]string, len(names))
+	dupes, _ := DuplicateNamesWithKeys(names)
+	return dupes
+}
+
+// DuplicateNamesWithKeys is CheckDuplicateEntriesByName plus the normalized key
+// of every input, in order, for callers that need to keep counting after the
+// duplicate scan.
+//
+// It exists to stop the same names being normalized twice on the participant
+// write path: the team-name gate ran this scan and then built its own
+// name→count map, re-normalizing every entry, having already paid for an
+// n-sized [][2]string conversion whose dojo half was an empty string normalized
+// n times for nothing. NormalizeParticipantName is not free (two Unicode
+// normalisation passes and two strings.Builder allocations per call).
+//
+// This USED to delegate to CheckDuplicateEntriesByNameDojo with an empty dojo,
+// which shared the key derivation and the first-seen label by construction.
+// The key derivation is still shared - both go through NormalizeParticipantName,
+// the one owner - but the label is now produced here, so
+// TestNameOnlyDedupMatchesTheDojoHelper pins the two against each other for a
+// table of inputs rather than trusting the comment.
+func DuplicateNamesWithKeys(names []string) (dupes []string, keys []string) {
+	seen := make(map[string]string, len(names)) // key → first-seen original label
+	seenDupes := make(map[string]bool)
+	keys = make([]string, len(names))
 	for i, n := range names {
-		entries[i] = [2]string{n, ""}
+		k := NormalizeParticipantName(n)
+		keys[i] = k
+		if _, exists := seen[k]; exists {
+			if !seenDupes[k] {
+				seenDupes[k] = true
+				dupes = append(dupes, seen[k])
+			}
+			continue
+		}
+		// Same label the (name, dojo) helper emits when the dojo is empty:
+		// the trimmed name, with no dangling " / ".
+		seen[k] = strings.TrimSpace(n)
 	}
-	return CheckDuplicateEntriesByNameDojo(entries)
+	return dupes, keys
 }
 
 // tokenSet splits a normalized name into its whitespace-separated tokens and

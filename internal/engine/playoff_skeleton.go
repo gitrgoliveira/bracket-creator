@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -226,4 +227,42 @@ func BracketCourtByMatchNumber(bracket *state.Bracket) map[int64]string {
 		return nil
 	}
 	return out
+}
+
+// PoolCourtByName maps each pool to the shiaijo its matches are ACTUALLY being
+// fought on, for the workbook writers to band by.
+//
+// Same reason as BracketCourtByMatchNumber: the operator moves matches between
+// courts while the competition runs, so the drawn allocation is only the initial
+// answer, and the Pool Matches sheet is what a shiaijo scores off.
+//
+// A pool is reported ONLY when every one of its matches agrees on a court. A
+// pool split across shiaijo -- one bout moved to catch up, say -- has no single
+// band it belongs in, and filing the whole block somewhere half its bouts are
+// not would be worse than leaving it on the shiaijo it was drawn for. Those keep
+// their drawn band, and the app's schedule stays authoritative for the
+// individual bout.
+//
+// Returns nil when nothing is known, which the writers read as "use the draw".
+func PoolCourtByName(matches []state.MatchResult) map[string]string {
+	courts := make(map[string]string)
+	split := make(map[string]bool)
+	for _, m := range matches {
+		pool, _, ok := strings.Cut(m.ID, "-")
+		if !ok || pool == "" || m.Court == "" {
+			continue
+		}
+		if seen, ok := courts[pool]; ok && seen != m.Court {
+			split[pool] = true
+			continue
+		}
+		courts[pool] = m.Court
+	}
+	for pool := range split {
+		delete(courts, pool)
+	}
+	if len(courts) == 0 {
+		return nil
+	}
+	return courts
 }

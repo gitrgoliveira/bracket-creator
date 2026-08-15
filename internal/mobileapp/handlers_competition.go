@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -844,6 +845,41 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// courts so every match carries a real court label. The transform
 			// below copies comp.Courts onto current for settings-only PUTs.
 			comp.Courts = resolveCompetitionCourts(comp.Courts, putTourn)
+
+			// Refuse to drop a shiaijo this competition's own live matches are
+			// still on. Sibling of the tournament-level orphan guard, and for
+			// the same reason: a match left on a shiaijo the competition no
+			// longer uses has no operator view to be run from. Completed
+			// matches do not count, so a court frees up as its bouts finish.
+			//
+			// Runs BEFORE the update transform, never inside it: that primitive
+			// holds the per-competition lock and LoadPoolMatches / LoadBracket
+			// take it too, so checking inside would deadlock on a non-reentrant
+			// mutex -- the same constraint checkCourtRemoval documents on the
+			// tournament side. The resulting TOCTOU window is covered by the
+			// engine's own gates at scoring and draw time.
+			if stored, loadErr := store.LoadCompetition(id); loadErr == nil && stored != nil &&
+				stored.Status != state.CompStatusSetup && stored.Status != "" &&
+				strings.Join(comp.Courts, ",") != strings.Join(resolveCompetitionCourts(stored.Courts, putTourn), ",") {
+				poolMatches, poolErr := store.LoadPoolMatches(id)
+				if poolErr != nil && !os.IsNotExist(poolErr) {
+					internalError(c, poolErr)
+					return
+				}
+				bracket, brErr := store.LoadBracket(id)
+				if brErr != nil && !os.IsNotExist(brErr) {
+					internalError(c, brErr)
+					return
+				}
+				if busy := engine.CourtsStillInUse(comp.Courts, poolMatches, bracket); len(busy) > 0 {
+					c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf(
+						"courts: shiaijo %s still %s matches scheduled on %s; move them to a shiaijo this competition keeps, then remove it",
+						strings.Join(busy, ", "),
+						map[bool]string{true: "have", false: "has"}[len(busy) > 1],
+						map[bool]string{true: "them", false: "it"}[len(busy) > 1])})
+					return
+				}
+			}
 
 			// Reject negative per-phase or legacy durations.
 			if err := validateCompetitionDurations(&comp); err != nil {

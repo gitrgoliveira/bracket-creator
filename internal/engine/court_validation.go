@@ -206,3 +206,66 @@ func ValidateCourtsInTournament(compCourts, tournCourts []string) error {
 		strings.Join(missing, ", "), verb, strings.Join(tournCourts, ", "),
 	)
 }
+
+// CourtsStillInUse returns the shiaijo that scheduled or running matches of this
+// competition are on but the proposed allocation drops, in the order they appear
+// in the current allocation.
+//
+// The competition-level twin of the tournament's orphan guard: removing a court
+// a live match is still assigned to leaves that match pointing at a shiaijo the
+// competition claims not to use, which is a bout with no operator view to run it
+// from. The operator's route is the one they already have -- move those matches
+// to a shiaijo they are keeping, then drop the court.
+//
+// COMPLETED matches are deliberately ignored. They are a record of where
+// something was already fought, not work that still has to be scheduled
+// somewhere, and refusing on them would make a court unremovable for the rest of
+// the tournament.
+func CourtsStillInUse(proposed []string, poolMatches []state.MatchResult, bracket *state.Bracket) []string {
+	keep := make(map[string]bool, len(proposed))
+	for _, c := range proposed {
+		keep[c] = true
+	}
+	inUse := make(map[string]bool)
+	note := func(court string, status state.MatchStatus) {
+		if court == "" || keep[court] || status == state.MatchStatusCompleted {
+			return
+		}
+		inUse[court] = true
+	}
+	for _, m := range poolMatches {
+		note(m.Court, m.Status)
+	}
+	if bracket != nil {
+		for _, round := range bracket.Rounds {
+			for _, m := range round {
+				note(m.Court, m.Status)
+			}
+		}
+		if bracket.ThirdPlaceMatch != nil {
+			note(bracket.ThirdPlaceMatch.Court, bracket.ThirdPlaceMatch.Status)
+		}
+	}
+	if len(inUse) == 0 {
+		return nil
+	}
+	var out []string
+	seen := make(map[string]bool)
+	for _, m := range poolMatches {
+		if inUse[m.Court] && !seen[m.Court] {
+			seen[m.Court] = true
+			out = append(out, m.Court)
+		}
+	}
+	if bracket != nil {
+		for _, round := range bracket.Rounds {
+			for _, m := range round {
+				if inUse[m.Court] && !seen[m.Court] {
+					seen[m.Court] = true
+					out = append(out, m.Court)
+				}
+			}
+		}
+	}
+	return out
+}

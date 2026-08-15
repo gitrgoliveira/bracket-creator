@@ -23,6 +23,14 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		return nil, err
 	}
 
+	// Where each pool is ACTUALLY being fought. Best-effort for the same reason
+	// the bracket load below is: a competition with no pool matches on disk
+	// simply bands by the drawn allocation, which is what this did before.
+	var courtOfPool map[string]string
+	if poolMatches, poolErr := e.store.LoadPoolMatches(id); poolErr == nil {
+		courtOfPool = PoolCourtByName(poolMatches)
+	}
+
 	// Derived once for every court-count consumer, mirroring builder.go:
 	// clamped to 1 so a competition saved without courts still lays out as a
 	// single-court draw. (The court-band helpers also clamp internally, so
@@ -53,7 +61,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	// 3. Pool Matches sheet (red/white, scoring formulas, reactive name references).
 	//    numCourts is the operator's allocation; PrintPoolMatches bands the sheet
 	//    on the shiaijo count the pool phase actually runs on, clamping it itself.
-	matchWinners := helper.PrintPoolMatches(f, pools, comp.TeamSize, comp.EffectivePoolWinners(), courts, comp.Mirror, poolCoords, playerCoords, comp.Engi)
+	matchWinners := helper.PrintPoolMatches(f, pools, comp.TeamSize, comp.EffectivePoolWinners(), courts, courtOfPool, comp.Mirror, poolCoords, playerCoords, comp.Engi)
 
 	// 4. Tree sheets: one visual bracket page per subtree, rendered exactly like
 	//    the CLI (cmd/create-pools.go) and the results workbook
@@ -139,7 +147,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 
 	// 5. Names to Print sheet, one per shiaijo. Clamps the allocation to the pool
 	//    phase's own shiaijo count internally, as step 3 does.
-	helper.CreateNamesWithPoolToPrint(f, pools, comp.EffectiveWithZekkenName(), courts, playerCoords)
+	helper.CreateNamesWithPoolToPrint(f, pools, comp.EffectiveWithZekkenName(), courts, courtOfPool, playerCoords)
 
 	// 6. Tags sheet, pass publicURL so numbered tags get an embedded QR code.
 	// LoadTournament errors are silently ignored: a missing publicURL simply

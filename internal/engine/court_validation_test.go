@@ -3,6 +3,7 @@ package engine
 import (
 	"testing"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -128,5 +129,54 @@ func TestValidateCourtsInTournament(t *testing.T) {
 
 	t.Run("silent when the tournament courts are unknown", func(t *testing.T) {
 		require.NoError(t, ValidateCourtsInTournament([]string{"A"}, nil))
+	})
+}
+
+// TestCourtsStillInUse pins the competition-level twin of the tournament's
+// orphan guard: a shiaijo cannot be dropped while this competition's own live
+// matches are still assigned to it.
+func TestCourtsStillInUse(t *testing.T) {
+	t.Parallel()
+
+	poolMatches := []state.MatchResult{
+		{ID: "Pool A-1", Court: "A", Status: state.MatchStatusCompleted},
+		{ID: "Pool B-1", Court: "B", Status: state.MatchStatusScheduled},
+	}
+	bracket := &state.Bracket{Rounds: [][]state.BracketMatch{{
+		{ID: "m-r1-0", Court: "C", Status: state.MatchStatusRunning},
+		{ID: "m-r1-1", Court: "D", Status: state.MatchStatusCompleted},
+	}}}
+
+	t.Run("keeping every court is always fine", func(t *testing.T) {
+		t.Parallel()
+		assert.Empty(t, CourtsStillInUse([]string{"A", "B", "C", "D"}, poolMatches, bracket))
+	})
+
+	t.Run("a scheduled pool match blocks its shiaijo", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, []string{"B"}, CourtsStillInUse([]string{"A", "C", "D"}, poolMatches, bracket))
+	})
+
+	t.Run("a running knockout bout blocks its shiaijo", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, []string{"C"}, CourtsStillInUse([]string{"A", "B", "D"}, poolMatches, bracket))
+	})
+
+	t.Run("completed matches never block, so a court frees up as it finishes", func(t *testing.T) {
+		t.Parallel()
+		// A and D carry ONLY completed matches. Refusing on those would make a
+		// shiaijo unremovable for the rest of the tournament.
+		assert.Empty(t, CourtsStillInUse([]string{"B", "C"}, poolMatches, bracket),
+			"a shiaijo whose bouts are all fought is free to drop")
+	})
+
+	t.Run("several blocked shiaijo are reported in allocation order", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, []string{"B", "C"}, CourtsStillInUse([]string{"A", "D"}, poolMatches, bracket))
+	})
+
+	t.Run("no bracket yet is not a failure", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, []string{"B"}, CourtsStillInUse([]string{"A"}, poolMatches, nil))
 	})
 }

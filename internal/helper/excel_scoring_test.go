@@ -82,7 +82,7 @@ func scoringSetup2Players(t *testing.T, teamMatches int, engi bool) *excelize.Fi
 	t.Cleanup(func() { f.Close() })
 	f.NewSheet(SheetPoolMatches)
 	f.NewSheet(SheetPoolDraw)
-	PrintPoolMatches(f, []Pool{pool}, teamMatches, 1, CourtLabels(1), false, poolCoords, pCoords, engi)
+	PrintPoolMatches(f, []Pool{pool}, teamMatches, 1, CourtLabels(1), nil, false, poolCoords, pCoords, engi)
 	return f
 }
 
@@ -126,7 +126,7 @@ func scoringSetup3PlayerRoundRobin(t *testing.T, engi bool) *excelize.File {
 	t.Cleanup(func() { f.Close() })
 	f.NewSheet(SheetPoolMatches)
 	f.NewSheet(SheetPoolDraw)
-	PrintPoolMatches(f, []Pool{pool}, 0, 1, CourtLabels(1), false, poolCoords, pCoords, engi)
+	PrintPoolMatches(f, []Pool{pool}, 0, 1, CourtLabels(1), nil, false, poolCoords, pCoords, engi)
 	return f
 }
 

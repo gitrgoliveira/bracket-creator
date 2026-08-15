@@ -109,3 +109,45 @@ func TestSeedWarningsReportsSurplusSeedRanks(t *testing.T) {
 		assert.NotEmpty(t, w, "an empty warning string tells the operator nothing")
 	}
 }
+
+// TestDrawnCourtCount pins the source these warnings take their shiaijo count
+// from: the shiaijo the drawn pools' matches actually run on, not comp.Courts.
+//
+// comp.Courts stays editable while a competition runs (a shiaijo can be dropped
+// once its bouts are all fought), and these warnings describe where a seed's
+// qualifier LANDED. Reading the live field would let a late edit rewrite the
+// account of a draw that was already made.
+//
+// The end-to-end effect is narrow -- most warnings are about two seeds sharing a
+// POOL, which no court count can change, and the one shiaijo-spread warning is
+// itself gated on there being at least as many shiaijo as seeds -- so this pins
+// the mechanism directly rather than through a shape that happens to expose it.
+func TestDrawnCourtCount(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	const compID = "drawn-court-count"
+
+	createTestCompetition(t, store, compID, state.CompFormatMixed, 4, func(c *state.Competition) {
+		c.PoolSizeMode = "max"
+		c.PoolWinners = 2
+		c.Courts = courtLabels(4)
+	})
+
+	assert.Zero(t, eng.drawnCourtCount(compID),
+		"before the draw there are no pool matches, so there is no drawn allocation to report")
+
+	require.NoError(t, store.SaveParticipants(compID, playoffsParityRoster(16)))
+	require.NoError(t, eng.StartCompetition(compID))
+
+	assert.Equal(t, 4, eng.drawnCourtCount(compID),
+		"the pools were drawn across four shiaijo")
+
+	// Shrinking the stored allocation must not change the answer: the matches on
+	// disk still run where they were drawn.
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	comp.Courts = courtLabels(2)
+	require.NoError(t, store.SaveCompetition(comp))
+
+	assert.Equal(t, 4, eng.drawnCourtCount(compID),
+		"editing the court field must not rewrite what the draw was built on")
+}

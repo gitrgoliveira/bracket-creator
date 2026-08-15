@@ -124,6 +124,45 @@ func clampCourts(n int) int {
 	return n
 }
 
+// PoolsByCourt groups pool INDICES by the column band they print in, and is the
+// single owner of that grouping: the Pool Matches skeleton, the per-shiaijo
+// roster sheets and the results overlays all lay rows out in this order, so a
+// second derivation of it would write scores into the wrong pool's block.
+//
+// The default is AssignPoolsToCourts -- the contiguous allocation the draw and
+// the schedule use, so each band holds the pools that court actually ran.
+//
+// courtOfPool overrides it with where a pool's matches are ACTUALLY being
+// fought, for callers that have the live schedule (the exports do; the CLI
+// generates a blank workbook and passes nil). A pool whose matches an operator
+// moved to another shiaijo prints in that shiaijo's band, because the band is
+// what its operator scores off. A pool is only moved when its matches AGREE on
+// a court: a pool split across shiaijo has no single band to be in, so it keeps
+// its drawn one rather than being filed somewhere half its bouts are not.
+// A court outside the printed bands is likewise ignored.
+func PoolsByCourt(pools []Pool, courts []string, courtOfPool map[string]string) [][]int {
+	numCourts := EffectiveDrawCourts(len(pools), len(courts))
+	named := courtsPrefix(courts, numCourts)
+	assignments, _ := AssignPoolsToCourts(len(pools), numCourts)
+	out := make([][]int, numCourts)
+	for i := range pools {
+		c := 0
+		if i < len(assignments) {
+			c = assignments[i]
+		}
+		if live, ok := courtOfPool[pools[i].PoolName]; ok && live != "" {
+			if idx := slices.Index(named, live); idx >= 0 {
+				c = idx
+			}
+		}
+		if c < 0 || c >= numCourts {
+			c = 0
+		}
+		out[c] = append(out[c], i)
+	}
+	return out
+}
+
 func writeCourtHeaders(f *excelize.File, sheetName string, courts []string, headerStyle int) {
 	numCourts := clampCourts(len(courts))
 	mergedCells, _ := f.GetMergeCells(sheetName)
@@ -777,7 +816,7 @@ func printPoolResultsTable(f *excelize.File, sheetName string, pool Pool, startR
 // does the same so its per-shiaijo sheets name the same set of courts.
 // EffectiveDrawCourts is idempotent, so a caller that already clamped
 // (cmd/create-pools.go) is unaffected.
-func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinners int, courts []string, mirror bool, poolCoords map[string]cellCoord, pCoords map[string]playerCellCoord, engi bool) map[string]MatchWinner {
+func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinners int, courts []string, courtOfPool map[string]string, mirror bool, poolCoords map[string]cellCoord, pCoords map[string]playerCellCoord, engi bool) map[string]MatchWinner {
 	// EffectiveDrawCourts already coerces 0/negative to 1, so it is the only
 	// clamp needed here; a clampCourts in front of it would be a no-op. The
 	// clamp takes the FIRST n of the competition's shiaijo, so a competition on
@@ -806,11 +845,7 @@ func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinner
 
 	writeCourtHeaders(f, sheetName, courts, styles.poolHeader)
 
-	courtAssignments, _ := AssignPoolsToCourts(len(pools), numCourts)
-	poolsByCourt := make([][]int, numCourts)
-	for i, c := range courtAssignments {
-		poolsByCourt[c] = append(poolsByCourt[c], i)
-	}
+	poolsByCourt := PoolsByCourt(pools, courts, courtOfPool)
 
 	maxPoolsInCourt := 0
 	for _, pc := range poolsByCourt {
@@ -1613,22 +1648,25 @@ func CreateNamesToPrint(f *excelize.File, players []Player, sanitized bool, cour
 // sheets and another on its pool sheets and tree pages. Derived here rather
 // than by the caller so no call site can pass a count that disagrees with the
 // Pool Matches skeleton.
-func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanitized bool, courts []string, pCoords map[string]playerCellCoord) {
+func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanitized bool, courts []string, courtOfPool map[string]string, pCoords map[string]playerCellCoord) {
 	// EffectiveDrawCourts already coerces 0/negative to 1, so it is the only
 	// clamp needed here; a clampCourts in front of it would be a no-op.
 	numCourts := EffectiveDrawCourts(len(pools), len(courts))
 	courts = courtsPrefix(courts, numCourts)
-	courtAssignments, _ := AssignPoolsToCourts(len(pools), numCourts)
 
+	// Same grouping the Pool Matches skeleton uses, so a competitor's roster
+	// sheet is the shiaijo their pool is actually scored on.
 	entriesByCourt := make([][]nameEntry, numCourts)
-	for poolIdx, pool := range pools {
-		court := courtAssignments[poolIdx]
-		poolLetter := strings.TrimPrefix(pool.PoolName, "Pool ")
-		for _, player := range pool.Players {
-			entriesByCourt[court] = append(entriesByCourt[court], nameEntry{
-				player:      player,
-				fallbackTag: fmt.Sprintf("%s%d", poolLetter, player.PoolPosition),
-			})
+	for court, poolIdxs := range PoolsByCourt(pools, courts, courtOfPool) {
+		for _, poolIdx := range poolIdxs {
+			pool := pools[poolIdx]
+			poolLetter := strings.TrimPrefix(pool.PoolName, "Pool ")
+			for _, player := range pool.Players {
+				entriesByCourt[court] = append(entriesByCourt[court], nameEntry{
+					player:      player,
+					fallbackTag: fmt.Sprintf("%s%d", poolLetter, player.PoolPosition),
+				})
+			}
 		}
 	}
 

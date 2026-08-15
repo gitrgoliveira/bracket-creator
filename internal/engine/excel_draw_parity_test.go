@@ -1092,3 +1092,143 @@ func TestEliminationSheetFollowsOperatorCourtReassignment(t *testing.T) {
 	assert.Equalf(t, "D", printedIn,
 		"the operator moved %q to shiaijo D, so the printed running order for shiaijo D is where it must appear", label)
 }
+
+// TestPoolSheetFollowsPoolCourtReassignment pins that the Pool Matches sheet and
+// the per-shiaijo roster sheets band a pool by the shiaijo it is ACTUALLY being
+// fought on.
+//
+// Same rule as the elimination sheet, and the same reason: the operator moves
+// matches between courts as the day runs, and this sheet is what a shiaijo
+// scores off. A pool moved wholesale to another court used to keep printing in
+// its drawn band, so its score sheet was on the wrong court's pages.
+//
+// A pool is only moved when its matches AGREE on a court; the split case is
+// covered by TestPoolSheetKeepsASplitPoolOnItsDrawnShiaijo below.
+func TestPoolSheetFollowsPoolCourtReassignment(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	const compID = "pool-court-move"
+
+	createTestCompetition(t, store, compID, state.CompFormatMixed, 4, func(c *state.Competition) {
+		c.PoolSizeMode = "max"
+		c.PoolWinners = 2
+		c.Courts = courtLabels(2)
+	})
+	require.NoError(t, store.SaveParticipants(compID, playoffsParityRoster(16)))
+	require.NoError(t, eng.StartCompetition(compID))
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+
+	// Pool D is drawn onto the second shiaijo; move every one of its bouts to
+	// the first, as an operator rebalancing the day would.
+	const movedPool = "Pool D"
+	drawn := engine_poolCourt(t, matches, movedPool)
+	require.Equal(t, "B", drawn, "the case needs Pool D drawn onto shiaijo B")
+	moved := 0
+	for _, m := range matches {
+		if strings.HasPrefix(m.ID, movedPool+"-") {
+			require.NoError(t, eng.UpdateMatchCourt(compID, m.ID, "A"))
+			moved++
+		}
+	}
+	require.NotZero(t, moved, "the case must actually move bouts")
+
+	after, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Equal(t, "A", engine_poolCourt(t, after, movedPool), "the move must have landed")
+
+	// The grouping the workbook writers use must now place Pool D in band 0.
+	pools, err := store.LoadPools(compID)
+	require.NoError(t, err)
+	groups := helper.PoolsByCourt(pools, ExportCourts(mustComp(t, store, compID)), PoolCourtByName(after))
+	var bandOfMovedPool = -1
+	for band, idxs := range groups {
+		for _, i := range idxs {
+			if pools[i].PoolName == movedPool {
+				bandOfMovedPool = band
+			}
+		}
+	}
+	assert.Equal(t, 0, bandOfMovedPool,
+		"%s is now fought on shiaijo A, so it must print in shiaijo A's band", movedPool)
+
+	// And the roster sheet for shiaijo A must carry that pool's competitors.
+	raw, err := eng.ExportCompetitionXlsx(compID)
+	require.NoError(t, err)
+	f, err := excelize.OpenReader(bytes.NewReader(raw))
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+
+	// The per-shiaijo roster sheets follow too. The name cells are formulas into
+	// the data sheet, so this counts ENTRIES rather than reading names: with
+	// Pool D moved, shiaijo A holds three pools and shiaijo B one.
+	rowsA, err := f.GetRows(helper.SheetNamesToPrint + " A")
+	require.NoError(t, err)
+	rowsB, err := f.GetRows(helper.SheetNamesToPrint + " B")
+	require.NoError(t, err)
+
+	var movedPoolSize, totalPlayers int
+	for _, p := range pools {
+		totalPlayers += len(p.Players)
+		if p.PoolName == movedPool {
+			movedPoolSize = len(p.Players)
+		}
+	}
+	require.NotZero(t, movedPoolSize)
+	assert.Equalf(t, totalPlayers-movedPoolSize, len(rowsA),
+		"shiaijo A now runs every pool but one, so its roster sheet must list all of them")
+	assert.Equalf(t, movedPoolSize, len(rowsB),
+		"shiaijo B is left with a single pool, so its roster sheet must list only that one")
+}
+
+// TestPoolSheetKeepsASplitPoolOnItsDrawnShiaijo pins the deliberate limit: one
+// bout moved out of a pool does not move the whole block, because a pool split
+// across shiaijo has no single band it belongs in and filing it where half its
+// bouts are not would be worse than leaving it where it was drawn.
+func TestPoolSheetKeepsASplitPoolOnItsDrawnShiaijo(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	const compID = "pool-court-split"
+
+	createTestCompetition(t, store, compID, state.CompFormatMixed, 4, func(c *state.Competition) {
+		c.PoolSizeMode = "max"
+		c.PoolWinners = 2
+		c.Courts = courtLabels(2)
+	})
+	require.NoError(t, store.SaveParticipants(compID, playoffsParityRoster(16)))
+	require.NoError(t, eng.StartCompetition(compID))
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	var one string
+	for _, m := range matches {
+		if strings.HasPrefix(m.ID, "Pool D-") {
+			one = m.ID
+			break
+		}
+	}
+	require.NotEmpty(t, one)
+	require.NoError(t, eng.UpdateMatchCourt(compID, one, "A"))
+
+	after, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	assert.NotContains(t, PoolCourtByName(after), "Pool D",
+		"a pool whose bouts disagree about their shiaijo reports no single court")
+}
+
+func engine_poolCourt(t *testing.T, matches []state.MatchResult, pool string) string {
+	t.Helper()
+	for _, m := range matches {
+		if strings.HasPrefix(m.ID, pool+"-") {
+			return m.Court
+		}
+	}
+	return ""
+}
+
+func mustComp(t *testing.T, store *state.Store, id string) *state.Competition {
+	t.Helper()
+	c, err := store.LoadCompetition(id)
+	require.NoError(t, err)
+	require.NotNil(t, c)
+	return c
+}

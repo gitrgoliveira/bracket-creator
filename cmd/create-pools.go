@@ -245,7 +245,7 @@ func (o *poolOptions) createPools(entries []string) error {
 	} else {
 		helper.CreatePoolMatches(pools)
 	}
-	matchWinners := helper.PrintPoolMatches(f, pools, o.teamMatches, o.poolWinners, courtNames, true, poolCoords, playerCoords, o.engi)
+	matchWinners := helper.PrintPoolMatches(f, pools, o.teamMatches, o.poolWinners, courtNames, nil, true, poolCoords, playerCoords, o.engi)
 
 	// Court-first pool-to-knockout draw (specs/007-ekc-draw): one bracket
 	// region per shiaijo, 2nd places crossing to the partner court, byes
@@ -271,7 +271,7 @@ func (o *poolOptions) createPools(entries []string) error {
 	}
 	finishKnockoutPages(f, numPages, eliminationMatchRounds)
 
-	helper.CreateNamesWithPoolToPrint(f, pools, o.withZekkenName, courtNames, playerCoords)
+	helper.CreateNamesWithPoolToPrint(f, pools, o.withZekkenName, courtNames, nil, playerCoords)
 
 	if err := helper.CreateTagsSheet(f, pools, ""); err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating tags sheet: %v\n", err)

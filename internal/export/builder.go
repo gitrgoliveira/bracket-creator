@@ -112,6 +112,13 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	// read off the same list rather than derived a second time.
 	courts := engine.ExportCourts(comp)
 	numCourts := len(courts)
+	// Where each pool is actually being fought, so the archived workbook bands a
+	// pool under the shiaijo it was scored on.
+	courtOfPool := engine.PoolCourtByName(matchResults)
+	// Computed ONCE and handed to every overlay: the skeleton and the score
+	// writers must agree on which band each pool printed in, or a score lands
+	// in another pool's block.
+	poolsByCourt := helper.PoolsByCourt(pools, courts, courtOfPool)
 	// numCourts is the operator's ALLOCATION. The pool-banded sheet and both
 	// overlays clamp it themselves to the count the pool phase actually runs on
 	// (PrintPoolMatches and computePoolsByCourt each apply
@@ -119,12 +126,12 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	// handed values that disagree.
 	matchWinners := helper.PrintPoolMatches(
 		f, pools, comp.TeamSize, comp.EffectivePoolWinners(),
-		courts, comp.Mirror, poolCoords, playerCoords, comp.Engi,
+		courts, courtOfPool, comp.Mirror, poolCoords, playerCoords, comp.Engi,
 	)
-	if err := overlayPoolScores(f, pools, matchResultByID, poolOrdinals, comp.TeamSize, comp.Mirror, numCourts, comp.Engi); err != nil {
+	if err := overlayPoolScores(f, pools, matchResultByID, poolOrdinals, comp.TeamSize, comp.Mirror, poolsByCourt, comp.Engi); err != nil {
 		return nil, fmt.Errorf("export: overlay pool scores: %w", err)
 	}
-	if err := overlayPoolStandings(f, pools, standings, comp.TeamSize, numCourts, comp.Engi); err != nil {
+	if err := overlayPoolStandings(f, pools, standings, comp.TeamSize, poolsByCourt, comp.Engi); err != nil {
 		return nil, fmt.Errorf("export: overlay standings: %w", err)
 	}
 
@@ -185,7 +192,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	// 5. Names to Print sheet (identical to blank-template export). Clamps the
 	//    allocation to the pool phase's own shiaijo count internally, as step 3
 	//    does.
-	helper.CreateNamesWithPoolToPrint(f, pools, comp.EffectiveWithZekkenName(), courts, playerCoords)
+	helper.CreateNamesWithPoolToPrint(f, pools, comp.EffectiveWithZekkenName(), courts, courtOfPool, playerCoords)
 
 	// 6. Kachinuki Detail sheet: bout-by-bout log for kachinuki team
 	//    competitions (GAP 6). Same opt-in semantics as the blank-template
@@ -305,20 +312,19 @@ func attachPoolMatches(pools []helper.Pool, matchResults []state.MatchResult) ma
 // order). So the N-th header in a court column is the N-th pool assigned to that
 // court, and match i sits at header row + 1 + i. By default SideA (Red) is the
 // left column and SideB (White) the right; mirror swaps the two score columns.
-func overlayPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[string]state.MatchResult, poolOrdinals map[string][]int, teamSize int, mirror bool, numCourts int, engi bool) error {
+func overlayPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[string]state.MatchResult, poolOrdinals map[string][]int, teamSize int, mirror bool, poolsByCourt [][]int, engi bool) error {
 	if len(pools) == 0 {
 		return nil
 	}
 	if teamSize != 0 {
-		return overlayTeamPoolScores(f, pools, resultByID, poolOrdinals, teamSize, mirror, numCourts)
+		return overlayTeamPoolScores(f, pools, resultByID, poolOrdinals, teamSize, mirror, poolsByCourt)
 	}
 
 	sheetName := helper.SheetPoolMatches
 
-	poolsByCourt := computePoolsByCourt(pools, numCourts)
-	// computePoolsByCourt owns the pool clamp, so its length -- not the caller's
-	// numCourts -- is the number of bands the skeleton actually printed.
-	numCourts = len(poolsByCourt)
+	// helper.PoolsByCourt owns the pool clamp, so the grouping's length is the
+	// number of bands the skeleton actually printed.
+	numCourts := len(poolsByCourt)
 
 	rows, err := f.GetRows(sheetName)
 	if err != nil {
@@ -399,13 +405,13 @@ func overlayPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[str
 // It uses the same ordinal-position matching as the individual path: the N-th
 // "Red" header in a court's column band corresponds to the N-th match across
 // that court's pools, in pool order.
-func overlayTeamPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[string]state.MatchResult, poolOrdinals map[string][]int, teamSize int, mirror bool, numCourts int) error {
+func overlayTeamPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[string]state.MatchResult, poolOrdinals map[string][]int, teamSize int, mirror bool, poolsByCourt [][]int) error {
 	sheetName := helper.SheetPoolMatches
 
-	courtMatches := buildCourtMatchJobs(pools, numCourts, poolOrdinals)
-	// buildCourtMatchJobs inherits the pool clamp from computePoolsByCourt, so
+	courtMatches := buildCourtMatchJobs(pools, poolsByCourt, poolOrdinals)
+	// buildCourtMatchJobs inherits the pool clamp from helper.PoolsByCourt, so
 	// its length is the band count the skeleton actually printed.
-	numCourts = len(courtMatches)
+	numCourts := len(courtMatches)
 
 	rows, err := f.GetRows(sheetName)
 	if err != nil {
@@ -472,24 +478,13 @@ func overlayTeamPoolScores(f *excelize.File, pools []helper.Pool, resultByID map
 // The returned LENGTH is the authoritative band count: callers must scan
 // len(poolsByCourt) bands rather than the numCourts they passed in, or they
 // index past the last band the skeleton printed.
-func computePoolsByCourt(pools []helper.Pool, numCourts int) [][]int {
-	numCourts = helper.EffectiveDrawCourts(len(pools), numCourts)
-	courtAssignments, _ := helper.AssignPoolsToCourts(len(pools), numCourts)
-	poolsByCourt := make([][]int, numCourts)
-	for i, c := range courtAssignments {
-		poolsByCourt[c] = append(poolsByCourt[c], i)
-	}
-	return poolsByCourt
-}
-
 // buildCourtMatchJobs returns, per court, the ordered list of match jobs in the
 // row order PrintPoolMatches lays them out (pool 0 matches, then pool 1 matches,
 // ...). Each job carries the pool index and the match's ORIGINAL numeric suffix
 // (from poolOrdinals), so the team overlay rebuilds the correct result ID even
 // when an unresolvable match was skipped. Shared by the individual and team
 // pool-score overlays.
-func buildCourtMatchJobs(pools []helper.Pool, numCourts int, poolOrdinals map[string][]int) [][]matchJob {
-	poolsByCourt := computePoolsByCourt(pools, numCourts)
+func buildCourtMatchJobs(pools []helper.Pool, poolsByCourt [][]int, poolOrdinals map[string][]int) [][]matchJob {
 	// Sized from the clamped grouping, never from the requested numCourts.
 	courtMatches := make([][]matchJob, len(poolsByCourt))
 	for c := range poolsByCourt {
@@ -653,20 +648,19 @@ func writeTeamSubMatchScores(f *excelize.File, sheetName string, courtStartCol, 
 // Strategy: the N-th "Results" header row in each court column corresponds to the
 // N-th pool assigned to that court. We match by ordinal position, not by
 // resolved formula values (which are not evaluated by excelize's GetRows).
-func overlayPoolStandings(f *excelize.File, pools []helper.Pool, standings map[string][]state.PlayerStanding, teamSize int, numCourts int, engi bool) error {
+func overlayPoolStandings(f *excelize.File, pools []helper.Pool, standings map[string][]state.PlayerStanding, teamSize int, poolsByCourt [][]int, engi bool) error {
 	if len(pools) == 0 {
 		return nil
 	}
 	if teamSize != 0 {
-		return overlayTeamPoolStandings(f, pools, standings, numCourts)
+		return overlayTeamPoolStandings(f, pools, standings, poolsByCourt)
 	}
 
 	sheetName := helper.SheetPoolMatches
 
-	poolsByCourt := computePoolsByCourt(pools, numCourts)
-	// computePoolsByCourt owns the pool clamp, so its length -- not the caller's
-	// numCourts -- is the number of bands the skeleton actually printed.
-	numCourts = len(poolsByCourt)
+	// helper.PoolsByCourt owns the pool clamp, so the grouping's length is the
+	// number of bands the skeleton actually printed.
+	numCourts := len(poolsByCourt)
 
 	rows, err := f.GetRows(sheetName)
 	if err != nil {
@@ -808,13 +802,12 @@ func overlayRankingSections(f *excelize.File, sheetName string, rows [][]string,
 // == N-th pool assigned to that court), mirroring overlayPoolStandings, because
 // excelize does not evaluate the name formulas. Player order is identical in
 // both tables (both iterate pool.Players), so index i maps to the same team.
-func overlayTeamPoolStandings(f *excelize.File, pools []helper.Pool, standings map[string][]state.PlayerStanding, numCourts int) error {
+func overlayTeamPoolStandings(f *excelize.File, pools []helper.Pool, standings map[string][]state.PlayerStanding, poolsByCourt [][]int) error {
 	sheetName := helper.SheetPoolMatches
 
-	poolsByCourt := computePoolsByCourt(pools, numCourts)
-	// computePoolsByCourt owns the pool clamp, so its length -- not the caller's
-	// numCourts -- is the number of bands the skeleton actually printed.
-	numCourts = len(poolsByCourt)
+	// helper.PoolsByCourt owns the pool clamp, so the grouping's length is the
+	// number of bands the skeleton actually printed.
+	numCourts := len(poolsByCourt)
 
 	rows, err := f.GetRows(sheetName)
 	if err != nil {

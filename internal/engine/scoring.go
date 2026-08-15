@@ -142,6 +142,51 @@ func (e *Engine) withBracketMatch(compId, matchId string, mutate func(*state.Bra
 //     `decision:"kiken-voluntary"` row would be stamped into a bout that is
 //     simultaneously a withdrawal and a judges' decision, and SideMarksLR
 //     would then emit both `Kiken` and `Ht`.
+//
+// hanteiStillHolds reports whether a MATCH-level hantei verdict is still valid
+// for the incoming result: the two conditions the rule rests on (FIK 7-5 /
+// 29-6), read through the same domain predicates the wire validator and
+// preserveSubHantei use, so a row this accepts is one they would accept too.
+func hanteiStillHolds(r *state.MatchResult) bool {
+	return domain.IsHanteiCompatibleDecisionStr(r.Decision) &&
+		domain.HanteiTiedScoreline(r.IpponsA, r.IpponsB)
+}
+
+// preserveMatchHantei resolves the MATCH-level verdict for a FORWARD write,
+// carrying a stored one onto a verdict-silent payload — under the SAME guards
+// preserveSubHantei applies one level down, which is the whole point.
+//
+// An unguarded inherit is worse than none. RecordDecision/RecordDecisionTx build
+// their MatchResult from scratch and never set DecidedByHantei, and the decision
+// handler does not run ScoreRequest.Validate, so a kiken recorded over a stored
+// hantei arrives silent: a bare carry stamps the withdrawal as a judges'
+// decision, and export.SideMarks (which marks Ht unconditionally, by design)
+// then prints "Ht" and "Kiken" on the same encounter — the contradiction
+// validation.go refuses to persist. The same applies to a silent re-score that
+// turns a 1-1 hantei into a 2-1 ippon win: an untied scoreline cannot carry a
+// verdict, and the wire validator would 400 the state it would leave behind.
+//
+// So a stored verdict that NO LONGER HOLDS is cleared explicitly rather than
+// left nil: nil means "inherit" on the bracket branch, which would keep it.
+// Nothing is written when there is no stored verdict and the writer said
+// nothing, so an ordinary match keeps emitting an absent field.
+//
+// Forward only. matchWriteRestore replays a trusted snapshot verbatim;
+// re-testing it there would let this rewrite the state being restored.
+func preserveMatchHantei(storedHantei bool, result *state.MatchResult) {
+	if result.DecidedByHantei == nil && !storedHantei {
+		return
+	}
+	held := hanteiStillHolds(result)
+	if result.DecidedByHantei == nil {
+		result.DecidedByHantei = state.HanteiExplicit(held)
+		return
+	}
+	if *result.DecidedByHantei && !held {
+		result.DecidedByHantei = state.HanteiExplicit(false)
+	}
+}
+
 func preserveSubHantei(stored, incoming []state.SubMatchResult) {
 	var prior *state.SubMatchResult
 	for i := range stored {
@@ -256,24 +301,6 @@ const (
 	matchWriteRestore
 )
 
-// applyPoolWrite folds the stored match into an incoming result and then
-// performs the whole-struct overwrite. It reports whether the write was
-// ABANDONED (the payload names a pairing that is not this match's), in which
-// case the stored match is left untouched.
-//
-// It does the `*stored = *result` assignment itself rather than leaving it to
-// each caller, so that the overwrite is unreachable without the merge. This is
-// ONE function because the hand-copied version drifted twice, in the direction
-// that hurts: preserveDaihyosenOutcome reached three of the four writers and
-// missed the live /score path, and the CorrectionReason inherit existed only in
-// the Tx forward writer, so a team quick-score landing after a kachinuki reopen
-// blanked the operator's audit justification through the other two.
-//
-// SCOPE of "one home", stated precisely because the previous wording
-// overclaimed: this owns the ENGINE-side preservation. Server-owned flags a
-// client must not be able to clear (ReopenPending) are re-stamped at the HTTP
-// boundary instead - see handlers_match.go - so a new field of that kind still
-// needs a decision about which layer preserves it.
 // writeToPoolOrBracket performs one match write against whichever store the
 // match id resolves to, and reports whether the payload named a pairing that is
 // not this match's (a client error the caller maps to HTTP 409).
@@ -307,6 +334,24 @@ func (e *Engine) writeToPoolOrBracket(compId, matchId string, result *state.Matc
 	return false, e.recordBracketMatchResult(compId, matchId, result, policy)
 }
 
+// applyPoolWrite folds the stored match into an incoming result and then
+// performs the whole-struct overwrite. It reports whether the write was
+// ABANDONED (the payload names a pairing that is not this match's), in which
+// case the stored match is left untouched.
+//
+// It does the `*stored = *result` assignment itself rather than leaving it to
+// each caller, so that the overwrite is unreachable without the merge. This is
+// ONE function because the hand-copied version drifted twice, in the direction
+// that hurts: preserveDaihyosenOutcome reached three of the four writers and
+// missed the live /score path, and the CorrectionReason inherit existed only in
+// the Tx forward writer, so a team quick-score landing after a kachinuki reopen
+// blanked the operator's audit justification through the other two.
+//
+// SCOPE of "one home", stated precisely because the previous wording
+// overclaimed: this owns the ENGINE-side preservation. Server-owned flags a
+// client must not be able to clear (ReopenPending) are re-stamped at the HTTP
+// boundary instead - see handlers_match.go - so a new field of that kind still
+// needs a decision about which layer preserves it.
 func applyPoolWrite(stored, result *state.MatchResult, policy matchWritePolicy) (mismatch bool) {
 	// reconcileSides BACKFILLS omitted sides as a side effect and only reports
 	// the mismatch, so it must run under both policies; hoisted out of the
@@ -335,16 +380,12 @@ func applyPoolWrite(stored, result *state.MatchResult, policy matchWritePolicy) 
 		if result.CorrectionReason == "" {
 			result.CorrectionReason = stored.CorrectionReason
 		}
-		// Preserve-on-nil for the MATCH-level verdict, mirroring what
-		// applyBracketMatchResult does for a knockout match. A pool hantei now
-		// persists (encodeHanteiIntoIppons, state/pools.go), so without this the
-		// whole-struct overwrite below would let any verdict-silent re-score
-		// erase it — the same failure preserveSubHantei exists to prevent one
-		// level down, and previously written off on the grounds that a pool
-		// hantei could not be stored at all.
-		if result.DecidedByHantei == nil {
-			result.DecidedByHantei = stored.DecidedByHantei
-		}
+		// The MATCH-level verdict, under preserveMatchHantei's guards. A pool
+		// hantei now persists (encodeHanteiIntoIppons, state/pools.go), so
+		// without this the whole-struct overwrite below would let any
+		// verdict-silent re-score erase it; with a BARE carry it would instead
+		// stamp a withdrawal as a judges' decision. See that function.
+		preserveMatchHantei(stored.DecidedByHantei != nil && *stored.DecidedByHantei, result)
 		// A pool/league team encounter can hold a daihyosen (findMatchForDaihyosen
 		// accepts pool matches). Without this a verdict-silent write from a stale
 		// second editor erases a recorded hantei, which in accrueTeamSubResults
@@ -1302,17 +1343,11 @@ func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult, 
 	// rejected write's audit trail behind would misattribute it to a result
 	// that was rolled back. applyPoolWrite has always done this via its
 	// whole-struct overwrite; the bracket twin used to skip it.
-	if policy == matchWriteRestore {
+	if policy == matchWriteRestore || result.ResultSource != "" {
 		bm.ResultSource = result.ResultSource
+	}
+	if policy == matchWriteRestore || result.CorrectionReason != "" {
 		bm.CorrectionReason = result.CorrectionReason
-	} else {
-		if result.ResultSource != "" {
-			bm.ResultSource = result.ResultSource
-		}
-		// Carry the operator correction note when set, rather than dropping it.
-		if result.CorrectionReason != "" {
-			bm.CorrectionReason = result.CorrectionReason
-		}
 	}
 	// Forward: nil = omitted (preserve stored data), non-nil [] = explicit clear;
 	// the verdict merge for this case already ran above, against the still-stored
@@ -1334,10 +1369,20 @@ func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult, 
 	// hantei win. Under restore there is no "omitted": a snapshot that carries no
 	// verdict is a match that HAD no verdict, and preserving here would restore
 	// the hantei the rollback is undoing.
+	//
+	// The forward preserve runs through preserveMatchHantei, the same guarded
+	// primitive applyPoolWrite uses: an inherited verdict must still be
+	// compatible with the incoming decision and rest on a tied scoreline, or a
+	// kiken recorded over a stored hantei silently becomes a judges' decision.
+	// It resolves result.DecidedByHantei to an explicit value, so the nil branch
+	// below is now only reached when there was nothing to carry either way.
 	if policy == matchWriteRestore {
 		bm.DecidedByHantei = result.DecidedByHantei != nil && *result.DecidedByHantei
-	} else if result.DecidedByHantei != nil {
-		bm.DecidedByHantei = *result.DecidedByHantei
+	} else {
+		preserveMatchHantei(bm.DecidedByHantei, result)
+		if result.DecidedByHantei != nil {
+			bm.DecidedByHantei = *result.DecidedByHantei
+		}
 	}
 	// Project the persisted flag back so clients (and the bracket HT chip) do not
 	// see the match flip non-hantei until the next refresh. HanteiPtr returns nil

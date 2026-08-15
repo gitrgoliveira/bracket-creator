@@ -4812,7 +4812,14 @@ button.pool-match-row {
    shipped in Chrome 117 / Safari 16, so every supported browser takes this
    branch. Keeping the gate meant keeping a second, WRONG layout alive for
    browsers we do not support, and it could only be discovered by someone
-   running one. Removing it makes the FIK inner-column layout unconditional.
+   running one.
+
+   Stated precisely, because the first version of this note overclaimed: on a
+   SUPPORTED browser the FIK inner-column layout is now unconditional. On a
+   pre-subgrid engine the rules below still apply `display: grid` and land the
+   grid-row 2..5 assignments on IMPLICIT rows, so that case goes from
+   "coherent but wrong" to "misaligned". That is the intended trade — such a
+   browser is out of support — not an accident.
 
    If a future target ever predates subgrid, restore the gate AND the
    documentation of what that fallback renders — do not let a silent

@@ -29,11 +29,25 @@ const HanteiMark = "Ht"
 func CountScoringIppons(ippons []string) int {
 	n := 0
 	for _, v := range ippons {
-		if v != "" && v != IpponPlaceholder && v != HanteiMark {
+		if IsScoringIppon(v) {
 			n++
 		}
 	}
 	return n
+}
+
+// IsScoringIppon reports whether one entry of an ippon slice is a struck point.
+// An empty cell, the unfilled-slot placeholder and the judges'-decision mark
+// are all NOT points — the last because a hantei records who the referees chose,
+// not that anyone scored.
+//
+// One predicate so a counter and a renderer cannot disagree about the same
+// slice: CountScoringIppons counts through it, and export.IpponsScore draws
+// through it. They previously differed on HanteiMark, so a mark that survived
+// into an exported cell would have been printed as a struck point AND marked
+// again by SideMarks. Mirrors realIppons in web-mobile/js/result_slot.jsx.
+func IsScoringIppon(v string) bool {
+	return v != "" && v != IpponPlaceholder && v != HanteiMark
 }
 
 // HanteiTiedScoreline reports whether two ippon arrays hold an equal number of

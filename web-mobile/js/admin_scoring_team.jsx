@@ -1580,11 +1580,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             <div className="tsm-center-marks">
               <div className="tsm-center-pts tsm-center-pts--shiro">
                 {s.bFouls >= 1 && <span className="tsm-foul-tri" title="Hansoku: 1 foul">▲</span>}
-                {[0, 1].map(i => <span key={i} className={`editor-side__pt ${s.bPts[i] ? "editor-side__pt--filled" : ""}`}>{s.bPts[i] || "·"}</span>)}
+                {sideSlotOrder("shiro").map(i => <span key={i} className={`editor-side__pt ${s.bPts[i] ? "editor-side__pt--filled" : ""}`}>{s.bPts[i] || "·"}</span>)}
               </div>
               <div className="team-sub-match__score">{renderTeamBoutMiddle(s, t, false)}</div>
               <div className="tsm-center-pts tsm-center-pts--aka">
-                {[1, 0].map(i => <span key={i} className={`editor-side__pt ${s.aPts[i] ? "editor-side__pt--filled" : ""}`}>{s.aPts[i] || "·"}</span>)}
+                {sideSlotOrder("aka").map(i => <span key={i} className={`editor-side__pt ${s.aPts[i] ? "editor-side__pt--filled" : ""}`}>{s.aPts[i] || "·"}</span>)}
                 {s.aFouls >= 1 && <span className="tsm-foul-tri" title="Hansoku: 1 foul">▲</span>}
               </div>
             </div>

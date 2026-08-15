@@ -1,7 +1,6 @@
 package export
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -23,11 +22,18 @@ import (
 // bracket.jsx ↔ MiddleMark/SideMarks here), so the ruling has to be enforced
 // in BOTH languages or the export could drift away from the screen.
 func TestMiddleMarkIsAClosedSet(t *testing.T) {
-	// Every canonical wire value (CLAUDE.md § Match Decision Types) plus the
-	// junk a hand-edited file or an older client can still deliver.
+	// Every Decision constant in internal/domain/decision.go, taken from the
+	// constants rather than re-spelled, so an addition there is a compile-time
+	// prompt to sweep it here. (Hand-spelled, this list was one short:
+	// DecisionIpponShobu was missing and the guard silently skipped it.)
 	decisions := []string{
-		"", "fought", "hikiwake", "kiken", "kiken-voluntary", "kiken-injury",
-		"fusenpai", "fusensho", "daihyosen", "kachinuki-exhaustion",
+		string(domain.DecisionNone), string(domain.DecisionFought),
+		string(domain.DecisionHikiwake), string(domain.DecisionKiken),
+		string(domain.DecisionKikenVoluntary), string(domain.DecisionKikenInjury),
+		string(domain.DecisionFusenpai), string(domain.DecisionFusensho),
+		string(domain.DecisionDaihyosen), string(domain.DecisionKachinukiExhaustion),
+		string(domain.DecisionIpponShobu),
+		// Junk a hand-edited file or an older client can still deliver.
 		"HIKIWAKE", "nonsense",
 	}
 	enchos := []*state.EnchoMetadata{
@@ -77,16 +83,30 @@ func TestHanteiMarkNeverLeavesTheWinnerSide(t *testing.T) {
 // that is the mark riding with its competitor, which is the rule working. What
 // it must never do is emit a middle value, which would put a second separator
 // inside a cell.
-func TestIpponsScoreNeverEmitsAMiddleValue(t *testing.T) {
-	for _, ippons := range [][]string{
-		nil, {}, {"M"}, {"M", "K"}, {"○", "○"}, {domain.IpponPlaceholder}, {"", "M"},
-	} {
-		got := IpponsScore(ippons)
-		for _, mid := range []string{"X", "(E)", "(DH)", "vs"} {
-			assert.NotContainsf(t, got, mid,
-				"ippons %v rendered %q, which contains the middle value %q", ippons, got, mid)
-		}
-		assert.False(t, strings.Contains(got, domain.IpponPlaceholder),
-			"the unfilled-slot placeholder is not a score")
+// IpponsScore renders a side's CELL. The middle rule is not in question here
+// (a cell is not the centre); what matters is that it prints only real scoring
+// marks. Asserting a join of {M,K,○,•} lacks the string "vs" — the first
+// version of this test — could not fail.
+func TestIpponsScoreRendersOnlyScoringMarks(t *testing.T) {
+	cases := []struct {
+		in   []string
+		want string
+	}{
+		{nil, ""},
+		{[]string{}, ""},
+		{[]string{"M"}, "M"},
+		{[]string{"M", "K"}, "MK"},
+		{[]string{"○", "○"}, "○○"},
+		{[]string{domain.IpponPlaceholder}, ""},
+		{[]string{"M", domain.IpponPlaceholder}, "M"},
+		{[]string{"", "M"}, "M"},
+		// A hantei is not a scored point. It reaches a stored slice only as the
+		// pool persistence encoding (state.encodeHanteiIntoIppons), which the
+		// store strips on load — but if one ever survives, the export must not
+		// render it as though someone struck it.
+		{[]string{"M", domain.HanteiMark}, "M"},
+	}
+	for _, tc := range cases {
+		assert.Equalf(t, tc.want, IpponsScore(tc.in), "IpponsScore(%q)", tc.in)
 	}
 }

@@ -187,38 +187,53 @@ function checkScriptTagUrls() {
   const html = readFileSync(htmlPath, 'utf8');
   // Ignore commented-out tags: the file documents this very rule in comments
   // that contain example src="..." strings.
-  const htmlLive = stripComments(html.replace(/<!--[\s\S]*?-->/g, ''));
+  // Only HTML comments are stripped. Running the JS comment-stripper over HTML
+  // would delete from any "//" (e.g. inside an absolute src) to end of line,
+  // which could swallow a live <script> tag and hide a real divergence.
+  const htmlLive = html.replace(/<!--[\s\S]*?-->/g, '');
 
-  const tagged = new Map(); // stem -> full src
-  for (const m of htmlLive.matchAll(/<script[^>]+src="(\/dist\/([^"?]+)(\?[^"]*)?)"/g)) {
+  // stem -> [full src]. A LIST, not a single value: a module tagged twice is
+  // the worst case this check exists for (two tags = two evaluations even
+  // without any import), and keeping only the last would hide it.
+  const tagged = new Map();
+  for (const m of htmlLive.matchAll(/<script[^>]+src="(\/dist\/([^"?]+)(?:\?[^"]*)?)"/g)) {
     const [, fullSrc, file] = m;
-    tagged.set(file.replace(/\.[^.]+$/, ''), fullSrc);
+    const stem = file.replace(/\.[^.]+$/, '');
+    if (!tagged.has(stem)) tagged.set(stem, []);
+    tagged.get(stem).push(fullSrc);
   }
 
-  const imported = new Map(); // stem -> Map(specifierURL -> Set(importers))
+  // url -> Set(importers). The stem is derivable from the url, so one level.
+  const importedBy = new Map();
   for (const file of readdirSync(JS_DIR)) {
     if (!/\.(jsx|js)$/.test(file)) continue;
     const src = stripComments(readFileSync(resolve(JS_DIR, file), 'utf8'));
-    for (const m of src.matchAll(/from\s+['"]\.\/([^'"]+)['"]/g)) {
-      const spec = m[1];
-      const stem = spec.replace(/\.[^.]+$/, '');
-      if (!imported.has(stem)) imported.set(stem, new Map());
-      const byUrl = imported.get(stem);
-      const url = `/dist/${spec}`;
-      if (!byUrl.has(url)) byUrl.set(url, new Set());
-      byUrl.get(url).add(file);
+    // `from './x'` covers static named/default/namespace imports and re-exports;
+    // `import './x'` covers side-effect-only imports, which load the module just
+    // as surely and so must agree with any tag too.
+    for (const m of src.matchAll(/(?:from|import)\s+['"]\.\/([^'"]+)['"]/g)) {
+      const url = `/dist/${m[1]}`;
+      if (!importedBy.has(url)) importedBy.set(url, new Set());
+      importedBy.get(url).add(file);
     }
   }
+  const stemOf = (url) => url.replace(/^\/dist\//, '').replace(/\?.*$/, '').replace(/\.[^.]+$/, '');
 
   let errors = 0;
-  for (const [stem, tagSrc] of tagged) {
-    const byUrl = imported.get(stem);
-    if (!byUrl) continue; // tagged only: loads once, nothing to agree with
-    for (const [url, importers] of byUrl) {
+  for (const [stem, srcs] of tagged) {
+    if (srcs.length > 1) {
+      errors++;
+      console.error(`  ✗ ${stem}: tagged ${srcs.length} times (${srcs.join(', ')}) — each tag is its own module URL.`);
+    }
+  }
+  for (const [url, importers] of importedBy) {
+    const srcs = tagged.get(stemOf(url));
+    if (!srcs) continue; // imported only: one URL, nothing to agree with
+    for (const tagSrc of srcs) {
       if (url === tagSrc) continue;
       errors++;
       console.error(
-        `  ✗ ${stem}: <script src="${tagSrc}"> but imported as "${url}" ` +
+        `  ✗ ${stemOf(url)}: <script src="${tagSrc}"> but imported as "${url}" ` +
         `by ${[...importers].sort().join(', ')} — two module URLs, so it ` +
         `evaluates twice. Make the tag match the import specifier.`);
     }

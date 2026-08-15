@@ -46,14 +46,6 @@ type NearDupWarning struct {
 //  2. Re-NFC so the result is in canonical composed form.
 //  3. Lowercase, trim, and collapse internal whitespace.
 func NormalizeParticipantName(s string) string {
-	// Fast path. Every team roster keys on an EMPTY dojo (the name-only rule),
-	// so this is hit once per participant per write; the general path below
-	// runs two normalisation passes and two strings.Builder allocations to
-	// return "" again. Behaviourally identical, so the JS mirror needs no
-	// matching branch.
-	if s == "" {
-		return ""
-	}
 	// Step 1: NFD decompose → strip combining marks U+0300..U+036F
 	nfd := norm.NFD.String(s)
 	var stripped strings.Builder

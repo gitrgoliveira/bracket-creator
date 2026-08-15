@@ -5,6 +5,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -372,28 +373,27 @@ func encodeHanteiIntoIppons(r *MatchResult) (ipponsA, ipponsB []string) {
 // It does NOT clear an already-set flag: a caller that knows better (a bracket
 // match, or a future column) keeps its value.
 func decodeHanteiFromIppons(m *MatchResult) {
-	found := false
-	strip := func(s []string) []string {
-		out := s[:0:0]
-		for _, v := range s {
-			if v == domain.HanteiMark {
-				found = true
-				continue
+	// Detect before stripping. This runs for every match on every parse, and
+	// the overwhelmingly common case is no mark at all, so rebuilding both
+	// slices first and discarding them would allocate twice per match to
+	// discover there was nothing to do.
+	if !slices.Contains(m.IpponsA, domain.HanteiMark) &&
+		!slices.Contains(m.IpponsB, domain.HanteiMark) {
+		return
+	}
+	// splitIppons' contract: an empty field is an empty slice, never nil, so
+	// the JSON projection stays [] rather than null. A side that held only the
+	// mark must therefore come back empty, not nil.
+	strip := func(in []string) []string {
+		out := make([]string, 0, len(in))
+		for _, v := range in {
+			if v != domain.HanteiMark {
+				out = append(out, v)
 			}
-			out = append(out, v)
-		}
-		if out == nil {
-			// splitIppons' contract: an empty field is an empty slice, never
-			// nil, so the JSON projection stays [] rather than null.
-			return []string{}
 		}
 		return out
 	}
-	a, b := strip(m.IpponsA), strip(m.IpponsB)
-	if !found {
-		return
-	}
-	m.IpponsA, m.IpponsB = a, b
+	m.IpponsA, m.IpponsB = strip(m.IpponsA), strip(m.IpponsB)
 	m.DecidedByHantei = HanteiExplicit(true)
 }
 

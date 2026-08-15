@@ -21,6 +21,7 @@
 // `score` object the bracket card renderer can consume.
 
 import { realIppons } from './result_slot.jsx';
+import { ipponsFromScore } from './bracket.jsx';
 const STATUS_MAP = { "complete": "completed", "in_progress": "running" };
 
 function toBackendStatus(s) { return STATUS_MAP[s] || s; }
@@ -196,12 +197,15 @@ function normalizeMatch(m, playerMap) {
         // count length 7 and split to ["M","K"," ","(","H","1",")"], polluting
         // both the displayed score and the modal's ippon-slot seeding (which
         // falls back to score.ippons when ipponsA/B are absent for bracket
-        // matches). Mirrors web-mobile/js/bracket.jsx::ipponsFromScore: 
-        // kept inline to avoid load-order coupling with bracket.js (which
-        // window-registers its helper LATER in the script order).
-        const stripHansoku = (s) => (s || "").replace(/\s*\(H\d+\)$/, "");
-        const cleanA = stripHansoku(norm.scoreA);
-        const cleanB = stripHansoku(norm.scoreB);
+        // ipponsFromScore, the ONE decoder for this string (bracket.jsx), not a
+        // local copy of its regex. The previous comment justified the copy as
+        // avoiding "load-order coupling with bracket.js, which window-registers
+        // its helper LATER" — but this is a static ESM import, resolved before
+        // either module body runs, so that ordering was never relevant. This is
+        // the JS half of what domain.FormatScore/ParseScore fixed on the Go
+        // side: one wire format, one codec.
+        const lettersA = ipponsFromScore(norm.scoreA);
+        const lettersB = ipponsFromScore(norm.scoreB);
         const aWin = sideAWon(norm.winner, norm.sideA);
         // Recover BOTH sides' waza letters into the per-side ippon arrays (when
         // the server didn't send them for bracket matches). scoreA/scoreB are
@@ -210,13 +214,13 @@ function normalizeMatch(m, playerMap) {
         // winner's. Populating these means formatIpponsScore renders technique
         // letters for BOTH competitors ("MK–D"), never the numeric fallback.
         // Only fill when absent so server-provided arrays always win.
-        if (!norm.ipponsA?.length && cleanA) norm.ipponsA = cleanA.split("");
-        if (!norm.ipponsB?.length && cleanB) norm.ipponsB = cleanB.split("");
+        if (!norm.ipponsA?.length && lettersA.length) norm.ipponsA = lettersA;
+        if (!norm.ipponsB?.length && lettersB.length) norm.ipponsB = lettersB;
         norm.score = {
             type: "ippon",
-            winnerPts: aWin ? cleanA.length : cleanB.length,
-            loserPts: aWin ? cleanB.length : cleanA.length,
-            ippons: (aWin ? cleanA : cleanB).split(""),
+            winnerPts: aWin ? lettersA.length : lettersB.length,
+            loserPts: aWin ? lettersB.length : lettersA.length,
+            ippons: aWin ? lettersA : lettersB,
         };
     }
     // Build score from ipponsA/ipponsB for pool matches

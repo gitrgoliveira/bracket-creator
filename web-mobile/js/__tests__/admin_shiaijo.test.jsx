@@ -11,14 +11,21 @@ import { sortShiaijoMatches, partitionShiaijoMatches, shiaijoScoreCell, isTeamMa
 describe('shiaijoScoreCell; team and engi numbers are never context-free', () => {
   const orig = {};
   beforeEach(() => {
-    orig.iv = window.teamIVScore; orig.fmt = window.formatIpponsScore; orig.ip = window.ipponsFromScore; orig.engi = window.engiFlagScore;
+    orig.iv = window.teamIVScore; orig.ivpw = window.teamIVPWScore; orig.fmt = window.formatIpponsScore; orig.ip = window.ipponsFromScore; orig.engi = window.engiFlagScore;
+    // teamIVPWScore is the PRIMARY path shiaijoScoreCell takes (it only falls
+    // back to teamIVScore when the former is absent), and bracket.js publishes
+    // both on every page, so production always uses it. Stubbing only the
+    // fallback made these cases pass just because bracket.jsx was not in this
+    // file's module graph — an accident that ended the moment anything in the
+    // graph imported it.
+    window.teamIVPWScore = (m) => (m.subResults && m.subResults.length ? '2–1' : null);
     window.teamIVScore = (m) => (m.subResults && m.subResults.length ? '2–1' : null);
     window.formatIpponsScore = () => 'M–K';
     window.ipponsFromScore = () => [];
     window.engiFlagScore = (m) => (m.flagsA != null || m.flagsB != null ? `${m.flagsB || 0}–${m.flagsA || 0}` : null);
   });
   afterEach(() => {
-    window.teamIVScore = orig.iv; window.formatIpponsScore = orig.fmt; window.ipponsFromScore = orig.ip; window.engiFlagScore = orig.engi;
+    window.teamIVScore = orig.iv; window.teamIVPWScore = orig.ivpw; window.formatIpponsScore = orig.fmt; window.ipponsFromScore = orig.ip; window.engiFlagScore = orig.engi;
   });
 
   it('routes a completed team match to a labeled IV cell', () => {

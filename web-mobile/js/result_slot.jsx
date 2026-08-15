@@ -70,9 +70,11 @@ export function resultSlot(cells) {
 // It lives beside resultSlot because they are one contract seen from two
 // angles: resultSlot says WHICH slot a mark takes, this says WHERE that slot
 // appears. Splitting them is how a mark ends up logically outer and visually
-// inner. Both JS surfaces that build the pair now derive from here — the
-// read-only scoreboard (slotCells) and the team editor (ptSlots) — where they
-// previously spelled it as `cells.toReversed()` and `[1, 0]` respectively.
+// inner. All THREE JS pair-builders derive from here: the read-only scoreboard
+// (slotCells), the team editor's live slots (ptSlots), and its read-only
+// done-bout rows (renderReadOnlyBout) — previously spelled `cells.toReversed()`
+// and `[1, 0]` twice. An earlier version of this comment said "both", having
+// missed the third; a `grep -n "\[1, 0\]"` in web-mobile/js is the check.
 //
 // A THIRD expression of this rule exists and is deliberately left alone: the
 // individual score editor mirrors its Aka slots in CSS (`flex-direction:
@@ -84,8 +86,9 @@ export function sideSlotOrder(side) {
   return side === "aka" ? [1, 0] : [0, 1];
 }
 
-// realIppons: what counts as a RECORDED ippon (drops empties and the "\u2022"
-// placeholder). Exported so the surfaces that gate on a COUNT all count the
+// realIppons: what counts as a RECORDED ippon (drops empties, the "\u2022"
+// placeholder, and the "Ht" judges'-decision mark — a hantei records who the
+// referees chose, not that anyone struck). Mirrors domain.IsScoringIppon. Exported so the surfaces that gate on a COUNT all count the
 // same way; the display pair, the hantei tie gates and the editors' totals must
 // never read different totals from one array.
 //
@@ -105,7 +108,7 @@ export function sideSlotOrder(side) {
 // many ippons is this". An empty cell is not a scored ippon on any path.
 // (Go's equivalent is domain.CountScoringIppons, which both the engine and the
 // wire validator now call — that pair no longer needs a keep-in-sync comment.)
-export const realIppons = (arr) => (arr || []).filter(x => x && x !== "\u2022");
+export const realIppons = (arr) => (arr || []).filter(x => x && x !== "\u2022" && x !== "Ht");
 
 // hanteiTied: the ONE JS statement of "hantei applies only to a tied
 // scoreline" (FIK 7-5 / 29-6, mirroring validation.go's equal-counts gate),

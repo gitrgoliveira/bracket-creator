@@ -17,11 +17,13 @@ import { matchMiddleMark, matchStateCell, formatIpponsScore } from '../bracket.j
 // come here and state itself.
 const MIDDLE = ['vs', 'X', '(E)', '(DH)'];
 
-// The 10 canonical wire values (CLAUDE.md § Match Decision Types) plus the
-// junk a hand-edited file or an older client can still deliver.
+// Every Decision constant in internal/domain/decision.go, plus the junk a
+// hand-edited file or an older client can still deliver. Keep this list in step
+// with that enum: an addition must be swept here, or the guard silently stops
+// covering it (this list was one short — "ippon-shobu" — when first written).
 const DECISIONS = [
   '', 'fought', 'hikiwake', 'kiken', 'kiken-voluntary', 'kiken-injury',
-  'fusenpai', 'fusensho', 'daihyosen', 'kachinuki-exhaustion',
+  'fusenpai', 'fusensho', 'daihyosen', 'kachinuki-exhaustion', 'ippon-shobu',
   'HIKIWAKE', 'nonsense', null, undefined,
 ];
 const ENCHOS = [
@@ -36,18 +38,22 @@ const SCORES = [
   { winnerPts: 2, loserPts: 1 }, { decidedByHantei: true },
 ];
 
-describe('the middle is a closed set (operator ruling)', () => {
+describe('the middle is a closed set, and never a side result mark', () => {
   it('matchMiddleMark only ever yields a member of the set, or empty', () => {
     const seen = new Set();
     for (const decision of DECISIONS) {
       for (const encho of ENCHOS) {
         for (const score of SCORES) {
-          // decidedByHantei is swept HERE too, not only in the Ht test below:
-          // a hantei is the input that historically produced a fifth value, so
-          // the closed set has to be proved over it rather than around it.
+          // decidedByHantei is swept too: a hantei is the input that
+          // historically produced a fifth value, so the closed set has to be
+          // proved over it rather than around it.
           for (const decidedByHantei of [true, false, undefined]) {
             const mid = matchMiddleMark({ decision, encho, score, decidedByHantei });
             seen.add(mid);
+            // Membership in the closed set IS the no-side-mark guarantee:
+            // none of the five permitted values contains Ht/Kiken/Fus., so a
+            // separate sweep asserting their absence could never fail while
+            // this one passed. Kept as one assertion over one loop.
             expect(MIDDLE.concat([''])).toContain(mid);
           }
         }
@@ -60,27 +66,6 @@ describe('the middle is a closed set (operator ruling)', () => {
     expect(seen.has('(DH)')).toBe(true);
   });
 
-  it('never puts Ht — or any side result mark — in the middle', () => {
-    for (const decision of DECISIONS) {
-      for (const encho of ENCHOS) {
-        for (const score of SCORES) {
-          // decidedByHantei is threaded every way a caller could: on the
-          // match, on the score, and as the decision itself.
-          for (const hantei of [true, false, undefined]) {
-            const mid = matchMiddleMark({ decision, encho, score, decidedByHantei: hantei });
-            expect(mid).not.toContain('Ht');
-            expect(mid).not.toContain('Kiken');
-            expect(mid).not.toContain('Fus');
-          }
-        }
-      }
-    }
-  });
-
-  // matchStateCell and formatIpponsScore are the two other surfaces that
-  // compose a middle. The score string is the one place a mark may TRAIL the
-  // cells (an unattributable-winner degradation), but even there it must not
-  // land between them.
   // formatIpponsScore(ipponsLeft, ipponsRight, score, decision, encho,
   //                   decidedByHantei, winnerSide)
   // It composes the same primitives directly rather than calling boutMiddle,
@@ -111,13 +96,19 @@ describe('the middle is a closed set (operator ruling)', () => {
     expect(sawMiddle).toBe(true);
   });
 
-  it('matchStateCell stays inside the set for every status', () => {
-    for (const status of ['scheduled', 'running', 'completed', '', undefined]) {
+  // matchStateCell returns the middle for a live match, but for a COMPLETED one
+  // it returns the score STRING (matchScoreStr), which legitimately carries
+  // side marks — a hantei's "Ht" rides beside its winner there. So the middle
+  // rule applies to the non-completed statuses; the completed shape is covered
+  // by the score-string sweep above. Asserting "no Ht" across all statuses (the
+  // first version of this test) only passed because it never fed one in.
+  it('matchStateCell yields a pure middle value until the match completes', () => {
+    for (const status of ['scheduled', 'running', '', undefined]) {
       for (const decision of DECISIONS) {
-        const cell = matchStateCell({ status, decision, encho: { periodCount: 1 } });
-        const text = typeof cell === 'string' ? cell : (cell && cell.mid) || '';
-        if (!text) continue;
-        expect(String(text)).not.toContain('Ht');
+        for (const decidedByHantei of [true, false]) {
+          const cell = matchStateCell({ status, decision, decidedByHantei, encho: { periodCount: 1 } });
+          expect(MIDDLE).toContain(cell);
+        }
       }
     }
   });

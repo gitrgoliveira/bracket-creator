@@ -216,3 +216,70 @@ func TestPoolWrite_MatchLevelHanteiSurvivesASilentRescore(t *testing.T) {
 		assert.Nil(t, s.DecidedByHantei, "the rolled-back verdict must not survive")
 	})
 }
+
+// A carried verdict must still be VALID for the write that carries it. An
+// unguarded inherit is worse than none: RecordDecision builds its MatchResult
+// from scratch and never sets DecidedByHantei, and the decision handler skips
+// ScoreRequest.Validate, so a withdrawal arrives verdict-silent and a bare
+// carry stamps it as a judges' decision — which export.SideMarks then prints as
+// "Ht" and "Kiken" on one encounter.
+func TestPreserveMatchHantei_OnlyCarriesAVerdictThatStillHolds(t *testing.T) {
+	stored := func() *state.MatchResult {
+		return &state.MatchResult{
+			ID: "Pool A-1", SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			Status:  state.MatchStatusCompleted,
+			IpponsA: []string{"M"}, IpponsB: []string{"K"},
+			DecidedByHantei: state.HanteiExplicit(true),
+		}
+	}
+	silent := func(dec string, a, b []string) *state.MatchResult {
+		return &state.MatchResult{
+			ID: "Pool A-1", SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			Status: state.MatchStatusCompleted, Decision: dec,
+			IpponsA: a, IpponsB: b,
+		}
+	}
+	hantei := func(m *state.MatchResult) bool {
+		return m.DecidedByHantei != nil && *m.DecidedByHantei
+	}
+
+	t.Run("a withdrawal does not inherit the verdict", func(t *testing.T) {
+		for _, dec := range []string{"kiken-injury", "kiken-voluntary", "fusenpai", "fusensho", "hikiwake"} {
+			s := stored()
+			require.False(t, applyPoolWrite(s, silent(dec, []string{"○", "○"}, []string{"K"}), matchWriteForward))
+			assert.Falsef(t, hantei(s), "decision %q must not be recorded as a judges' decision", dec)
+		}
+	})
+
+	t.Run("an untied re-score drops it", func(t *testing.T) {
+		s := stored()
+		require.False(t, applyPoolWrite(s, silent("", []string{"M", "K"}, []string{"D"}), matchWriteForward))
+		assert.False(t, hantei(s), "a hantei rests on a tied scoreline")
+	})
+
+	t.Run("a still-tied ordinary re-score keeps it", func(t *testing.T) {
+		s := stored()
+		require.False(t, applyPoolWrite(s, silent("fought", []string{"D"}, []string{"T"}), matchWriteForward))
+		assert.True(t, hantei(s), "the verdict still holds, so a silent writer must not erase it")
+	})
+
+	t.Run("an explicit true that no longer holds is refused", func(t *testing.T) {
+		s := stored()
+		in := silent("kiken-injury", []string{"○", "○"}, []string{"K"})
+		in.DecidedByHantei = state.HanteiExplicit(true)
+		require.False(t, applyPoolWrite(s, in, matchWriteForward))
+		assert.False(t, hantei(s))
+	})
+
+	t.Run("the bracket twin applies the same guard", func(t *testing.T) {
+		// Pre-existing there: the nil branch kept bm.DecidedByHantei with no
+		// compatibility test at all.
+		bm := &state.BracketMatch{
+			ID: "m-r1-0", SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			Status: state.MatchStatusCompleted, DecidedByHantei: true,
+		}
+		_, err := applyBracketMatchResult(bm, silent("kiken-injury", []string{"○", "○"}, []string{"K"}), matchWriteForward)
+		require.NoError(t, err)
+		assert.False(t, bm.DecidedByHantei, "a withdrawal is not a judges' decision on a knockout match either")
+	})
+}

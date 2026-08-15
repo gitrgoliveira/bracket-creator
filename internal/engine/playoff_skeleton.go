@@ -177,7 +177,7 @@ func PlayoffFinalsFromParticipants(store *state.Store, comp *state.Competition) 
 	return names
 }
 
-// ExportCourts is the shiaijo a competition's workbook is laid out for, by NAME.
+// CompetitionCourts is the shiaijo a competition runs on, by NAME.
 //
 // A competition's courts need not start at A: running one competition on A+B and
 // another on C+D is how a 4-shiaijo venue is shared. Naming the bands from their
@@ -190,7 +190,7 @@ func PlayoffFinalsFromParticipants(store *state.Store, comp *state.Competition) 
 // positional answer back for exactly the legacy records that need the venue's.
 // A tournament that will not load is not fatal to an export: the resolution then
 // degrades to the competition's own list, which is what it was before.
-func ExportCourts(store *state.Store, comp *state.Competition) []string {
+func CompetitionCourts(store *state.Store, comp *state.Competition) []string {
 	if comp == nil {
 		return helper.CourtLabels(1)
 	}
@@ -290,4 +290,25 @@ func BronzeCourt(bracket *state.Bracket) string {
 		return ""
 	}
 	return bracket.ThirdPlaceMatch.Court
+}
+
+// LiveCourtPlan is the court plan for a competition with a stored bracket: where
+// every bout is ACTUALLY being fought.
+//
+// It exists so no caller assembles the plan itself. ByMatch and Bronze must come
+// from the SAME bracket and must always be paired -- the 3rd-place bout carries
+// no match number, so it cannot ride ByMatch, and an exporter that filled the
+// other three fields and forgot it would compile clean and silently print the
+// bronze under whichever shiaijo came first. That bug has already been written
+// twice; this is the assembly that cannot omit it.
+//
+// The CLI builds its own two-field plan instead: it renders a blank workbook
+// with no stored bracket, so the draw's regions are the only assignment there is.
+func LiveCourtPlan(draw *helper.KnockoutDraw, courts []string, bracket *state.Bracket) helper.CourtPlan {
+	return helper.CourtPlan{
+		Draw:    draw,
+		Courts:  courts,
+		ByMatch: BracketCourtByMatchNumber(bracket),
+		Bronze:  BronzeCourt(bracket),
+	}
 }

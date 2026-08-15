@@ -79,11 +79,7 @@ func (e *Engine) SeedWarningsFor(comp *state.Competition) []string {
 	// Counting the distinct shiaijo the pool matches run on was tried and
 	// reverted: a match's court is data the operator reassigns constantly, so
 	// moving ONE bout rewrote warnings that describe placement in the draw.
-	tourn, tournErr := e.store.LoadTournament()
-	if tournErr != nil {
-		tourn = nil
-	}
-	numCourts := len(InheritedDrawCourts(comp.Courts, tourn))
+	numCourts := len(CompetitionCourts(e.store, comp))
 	draw := poolDraw(comp, pools, numCourts)
 	if draw == nil {
 		return nil

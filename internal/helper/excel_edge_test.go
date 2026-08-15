@@ -563,3 +563,46 @@ func TestPrintTeamEliminationMatches_CellRefLikeLeafNames(t *testing.T) {
 	}
 	assert.True(t, foundFormula, "expected at least one formula cell in the elimination sheet")
 }
+
+// TestBandOrderIsOneRuleForBothSheets pins that the pool sheet and the
+// elimination sheet of one workbook order the same shiaijo the same way.
+//
+// They used to state the rule separately. With the pool clamp reducing the
+// allocated set, a shiaijo the competition owns but the clamp dropped counted as
+// an "extra" on the pool sheet and was appended in the order it was met, while
+// the elimination sheet ordered by the competition's own list. Two reassigned
+// pools therefore printed as [D C] on one sheet and [C D] on the other.
+func TestBandOrderIsOneRuleForBothSheets(t *testing.T) {
+	courts := []string{"A", "B", "C", "D"}
+	pools := []Pool{
+		{PoolName: "Pool A", Players: []Player{{Name: "a"}}},
+		{PoolName: "Pool B", Players: []Player{{Name: "b"}}},
+	}
+	// Both pools moved off the shiaijo the clamp allocated them, onto shiaijo
+	// the competition owns but the clamp dropped, in reverse order.
+	courtOfPool := map[string]string{"Pool A": "D", "Pool B": "C"}
+
+	require.Equal(t, 2, EffectiveDrawCourts(len(pools), len(courts)),
+		"the case needs the clamp to drop C and D from the allocated set")
+
+	poolBands, groups := PoolsByCourt(pools, courts, courtOfPool)
+	require.Len(t, groups, len(poolBands))
+
+	// The elimination sheet's answer for the same facts.
+	elimBands := bandOrder(courts, []string{"D", "C"})
+
+	assert.Equal(t, elimBands, poolBands,
+		"one workbook must not order the same shiaijo two ways")
+	assert.Equal(t, []string{"C", "D"}, poolBands,
+		"bands follow the competition's own court order, not the order they were met")
+
+	// And the pools still land in their own shiaijo's band.
+	byBand := map[string][]string{}
+	for b, idxs := range groups {
+		for _, i := range idxs {
+			byBand[poolBands[b]] = append(byBand[poolBands[b]], pools[i].PoolName)
+		}
+	}
+	assert.Equal(t, map[string][]string{"C": {"Pool B"}, "D": {"Pool A"}}, byBand,
+		"reordering the bands must not move a pool off its shiaijo")
+}

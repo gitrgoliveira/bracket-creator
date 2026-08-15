@@ -1053,14 +1053,11 @@ func (d *KnockoutDraw) RegionSpans() [][2]int {
 	return spans
 }
 
-// leafSpanWalk mirrors TreeToLeafArray's padding exactly and records the offset
-// of every region root it passes. The padding rule is not restated here, nor in
-// leafArrayWidth: both defer to leafPadTarget (tree.go), so a change to
-// TreeToLeafArray's geometry has one place to land rather than several that
-// must be edited in lockstep.
 // walkLeafOffsets visits every node with its offset and width in
 // TreeToLeafArray(root) -- the ONE traversal that turns the tree back into leaf
-// positions.
+// positions. The padding rule is not restated here, nor in leafArrayWidth: both
+// defer to leafPadTarget (tree.go), so a change to TreeToLeafArray's geometry
+// has one place to land.
 //
 // Both readers of that geometry go through it. They must agree exactly: one
 // (RegionSpans) decides which slots a shiaijo's region owns, the other

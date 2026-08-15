@@ -33,8 +33,8 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 
 	// The shiaijo BY NAME, for every sheet that prints one. The count is read
 	// off the same list rather than derived a second time, so the two can never
-	// disagree; ExportCourts owns the inheritance and the single-court fallback.
-	courts := ExportCourts(e.store, comp)
+	// disagree; CompetitionCourts owns the inheritance and the single-court fallback.
+	courts := CompetitionCourts(e.store, comp)
 	numCourts := len(courts)
 
 	f, err := excel.NewFileFromScratch()
@@ -119,12 +119,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		// operator reassigns matches between courts while the competition runs,
 		// and this sheet is what their shiaijo runs off.
 		helper.PrintEliminationWithBronze(f, matchWinners, eliminationMatchRounds, comp.TeamSize,
-			helper.CourtPlan{
-				Draw:    draw,
-				Courts:  courts,
-				ByMatch: BracketCourtByMatchNumber(bracket),
-				Bronze:  BronzeCourt(bracket),
-			}, comp.Mirror, comp.Engi, hasBronze)
+			LiveCourtPlan(draw, courts, bracket), comp.Mirror, comp.Engi, hasBronze)
 	} else if hasBronze {
 		// Narrow fallback: a competition whose bracket has a third-place bout but
 		// yields no elimination leaves at all (no pools, no first-round entrants

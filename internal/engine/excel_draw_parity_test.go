@@ -1140,7 +1140,7 @@ func TestPoolSheetFollowsPoolCourtReassignment(t *testing.T) {
 	// The grouping the workbook writers use must now place Pool D in band 0.
 	pools, err := store.LoadPools(compID)
 	require.NoError(t, err)
-	_, groups := helper.PoolsByCourt(pools, ExportCourts(store, mustComp(t, store, compID)), PoolCourtByName(after))
+	_, groups := helper.PoolsByCourt(pools, CompetitionCourts(store, mustComp(t, store, compID)), PoolCourtByName(after))
 	var bandOfMovedPool = -1
 	for band, idxs := range groups {
 		for _, i := range idxs {

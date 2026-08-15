@@ -5,6 +5,7 @@ import (
 	"sync"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -76,12 +77,23 @@ func TestBuildAssetETag(t *testing.T) {
 func TestSetStaticCacheHeaders(t *testing.T) {
 	fsys := fstest.MapFS{"dist/a.js": {Data: []byte("x")}}
 
-	t.Run("applies the revalidation policy to a dist asset", func(t *testing.T) {
+	t.Run("applies the caching policy to a dist asset", func(t *testing.T) {
 		resetAssetETag()
 		c, _ := gin.CreateTestContext(newRecorder())
 		setStaticCacheHeaders(c, fsys, "dist/a.js")
-		assert.Equal(t, "no-cache", c.Writer.Header().Get("Cache-Control"))
+		// Both halves, and they compose: inside the window the client makes no
+		// request at all; after it the ETag turns a re-fetch into a 0-byte 304.
+		assert.Equal(t, "public, max-age=300", c.Writer.Header().Get("Cache-Control"))
 		assert.NotEmpty(t, c.Writer.Header().Get("ETag"))
+	})
+
+	t.Run("the window is bounded so an upgrade cannot stay invisible", func(t *testing.T) {
+		// An asset cached under max-age is reused WITHOUT asking, so this bound
+		// is how long a mid-event upgrade can go unseen by a loaded client.
+		assert.LessOrEqual(t, staticAssetMaxAge, 15*time.Minute,
+			"a long window would hide a server upgrade from clients already running")
+		assert.Positive(t, staticAssetMaxAge,
+			"zero would restore one conditional request per asset per load")
 	})
 
 	t.Run("leaves non-dist paths alone", func(t *testing.T) {

@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
@@ -314,10 +315,9 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 // Computed once per process, lazily, on the first /dist/ request: one walk and
 // SHA-256 over ~1.2 MB, single-digit milliseconds, off the startup path.
 //
-// Paired with Cache-Control: no-cache, which means "store it, but revalidate
-// before every use" — NOT "do not cache". A returning client always asks and
-// gets a ~200-byte 304 when the bundle is unchanged. Correctness never rests on
-// a freshness guess, and a rebuilt bundle invalidates every asset at once.
+// Paired with Cache-Control: max-age (see staticAssetMaxAge) plus the ETag, so
+// the two regimes compose: inside the window a repeat load makes NO request at
+// all, and after it the ETag turns a re-download into a 0-byte 304.
 //
 // Before this, http.FileServer over embed.FS emitted no Cache-Control, no ETag
 // and no Last-Modified (embed's zero modtime makes ServeContent omit it), so a
@@ -354,6 +354,30 @@ func buildAssetETag(subFS fs.FS) string {
 	return assetETag
 }
 
+// staticAssetMaxAge is how long a client may reuse a compiled asset WITHOUT
+// asking. It is the deliberate trade in this policy.
+//
+// Why not 0 (revalidate always, the safest setting): correctness would be
+// perfect, but every page load still costs one conditional request per asset —
+// 69 of them here. On a LAN that is invisible; on cellular or a hotel-grade
+// operator laptop at ~100ms round-trip over HTTP/1.1 (six connections), it is
+// roughly a dozen serialised waves before anything renders. Operators and
+// spectators reported that latency as a real problem, so the window exists to
+// remove those round trips entirely for a revisit.
+//
+// Why not hours: an asset cached under max-age is used WITHOUT asking, so a
+// server upgraded mid-event is invisible to an already-loaded client until the
+// window expires. Five minutes bounds that to something an operator would not
+// notice, while covering the cases that actually recur — a tab reopened, a
+// second console window, a spectator returning to the schedule between matches.
+//
+// The ETag still backs it: once the window lapses the client revalidates and
+// gets a 0-byte 304 unless the bundle really changed, so this never costs a
+// re-download. Content-hashed filenames plus "immutable" would remove the
+// window entirely, but esbuild here runs without --bundle and does not rewrite
+// import specifiers, so hashing the names would break every `./x.jsx` import.
+const staticAssetMaxAge = 5 * time.Minute
+
 // setStaticCacheHeaders applies the revalidation policy to a compiled asset.
 // Only /dist/ is covered: index.html is deliberately no-store (it carries
 // server-rendered meta tags), and uploaded branding/sponsor images set their
@@ -366,7 +390,7 @@ func setStaticCacheHeaders(c *gin.Context, subFS fs.FS, filePath string) {
 	if etag == "" {
 		return
 	}
-	c.Header("Cache-Control", "no-cache")
+	c.Header("Cache-Control", fmt.Sprintf("public, max-age=%d", int(staticAssetMaxAge.Seconds())))
 	c.Header("ETag", etag)
 }
 

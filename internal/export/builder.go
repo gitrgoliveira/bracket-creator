@@ -110,11 +110,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	// The shiaijo BY NAME, mirroring the blank-template export: a competition
 	// allocated C and D must not have its sheets titled A and B. The count is
 	// read off the same list rather than derived a second time.
-	tourn, tournErr := store.LoadTournament()
-	if tournErr != nil {
-		tourn = nil
-	}
-	courts := engine.ExportCourts(comp, tourn)
+	courts := engine.ExportCourts(store, comp)
 	numCourts := len(courts)
 	// Where each pool is actually being fought, so the archived workbook bands a
 	// pool under the shiaijo it was scored on.
@@ -162,8 +158,13 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 		// bracket the overlay below fills in, so the archived workbook records
 		// where each bout was actually fought rather than where the draw first
 		// put it.
-		helper.PrintEliminationWithBronze(f, matchWinners, eliminationMatchRounds, comp.TeamSize, draw, courts,
-			engine.BracketCourtByMatchNumber(bracket), engine.BronzeCourt(bracket), comp.Mirror, comp.Engi,
+		helper.PrintEliminationWithBronze(f, matchWinners, eliminationMatchRounds, comp.TeamSize,
+			helper.CourtPlan{
+				Draw:    draw,
+				Courts:  courts,
+				ByMatch: engine.BracketCourtByMatchNumber(bracket),
+				Bronze:  engine.BronzeCourt(bracket),
+			}, comp.Mirror, comp.Engi,
 			bracket != nil && bracket.ThirdPlaceMatch != nil)
 
 		// Overlay literal scores from the live bracket state.

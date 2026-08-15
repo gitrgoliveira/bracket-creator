@@ -5,8 +5,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-
-	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
 // MinClashFootprintMinutes is the minimum time footprint assigned to a
@@ -61,10 +59,10 @@ func (e *Engine) DetectClashesForCompetition(compID string) ([]ClashWarning, err
 	// court list inherits the tournament's courts (or ["A"]). Without this a
 	// legacy competition saved before court materialization, nil Courts,
 	// would silently never clash even though at draw time it occupies a real
-	// court. A LoadTournament failure leaves tourn nil; resolveClashCourts
+	// court. A LoadTournament failure leaves tourn nil; InheritedDrawCourts
 	// then falls back to ["A"], matching resolveCompetitionCourts.
 	tourn, _ := e.store.LoadTournament()
-	targetCourts := resolveClashCourts(target.Courts, tourn)
+	targetCourts := InheritedDrawCourts(target.Courts, tourn)
 
 	ids, err := e.store.ListCompetitions()
 	if err != nil {
@@ -83,7 +81,7 @@ func (e *Engine) DetectClashesForCompetition(compID string) ([]ClashWarning, err
 		if !sameDate(target.Date, other.Date) {
 			continue
 		}
-		shared := sharedCourts(targetCourts, resolveClashCourts(other.Courts, tourn))
+		shared := sharedCourts(targetCourts, InheritedDrawCourts(other.Courts, tourn))
 		if len(shared) == 0 {
 			continue
 		}
@@ -145,20 +143,6 @@ func fmtHHMM(mins int) string {
 		mins = 0
 	}
 	return fmt.Sprintf("%02d:%02d", mins/60, mins%60)
-}
-
-// resolveClashCourts mirrors resolveCompetitionCourts (handlers_tournament.go):
-// an empty competition court list inherits the tournament's courts, falling
-// back to ["A"] when there is no tournament. Kept as a separate engine-local
-// copy because internal/engine cannot import internal/mobileapp (import cycle).
-func resolveClashCourts(compCourts []string, tourn *state.Tournament) []string {
-	if len(compCourts) > 0 {
-		return compCourts
-	}
-	if tourn != nil && len(tourn.Courts) > 0 {
-		return append([]string(nil), tourn.Courts...)
-	}
-	return []string{"A"}
 }
 
 // sameDate is true when both dates are non-empty and equal (after trimming).

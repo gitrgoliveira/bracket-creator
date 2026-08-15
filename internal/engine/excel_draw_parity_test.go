@@ -1140,7 +1140,7 @@ func TestPoolSheetFollowsPoolCourtReassignment(t *testing.T) {
 	// The grouping the workbook writers use must now place Pool D in band 0.
 	pools, err := store.LoadPools(compID)
 	require.NoError(t, err)
-	_, groups := helper.PoolsByCourt(pools, ExportCourts(mustComp(t, store, compID), nil), PoolCourtByName(after))
+	_, groups := helper.PoolsByCourt(pools, ExportCourts(store, mustComp(t, store, compID)), PoolCourtByName(after))
 	var bandOfMovedPool = -1
 	for band, idxs := range groups {
 		for _, i := range idxs {
@@ -1298,4 +1298,77 @@ func lastCellOfRange(t *testing.T, refersTo string) (int, int) {
 	col, row, err := excelize.CellNameToCoordinates(strings.ReplaceAll(end, "$", ""))
 	require.NoError(t, err)
 	return row, col
+}
+
+// TestEliminationSheetPrintsTheBronzeOnItsOwnShiaijo pins that the 3rd-place
+// bout gets a band of its own even when no other printed bout is on its shiaijo.
+//
+// The bronze is a SIBLING of bracket.Rounds, not a row in it, so the walk that
+// works out which shiaijo the sheet needs bands for never sees it. Looking its
+// court up in a band set it was not allowed to join means a miss, and a miss
+// used to fall back to the leftmost band -- printing the bronze under another
+// shiaijo's header, which is the exact defect the rest of this sheet was fixed
+// to stop. Reachable with one operator action: consolidate the closing bouts
+// onto one shiaijo and run the bronze in parallel on another.
+func TestEliminationSheetPrintsTheBronzeOnItsOwnShiaijo(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	const compID = "bronze-own-shiaijo"
+
+	createTestCompetition(t, store, compID, state.CompFormatMixed, 4, func(c *state.Competition) {
+		c.PoolSizeMode = "max"
+		c.PoolWinners = 2
+		c.Courts = courtLabels(2)
+		c.Naginata = true // a naginata bracket carries the 3rd-place bout
+	})
+	require.NoError(t, store.SaveParticipants(compID, playoffsParityRoster(16)))
+	require.NoError(t, eng.StartCompetition(compID))
+
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.NotNil(t, bracket.ThirdPlaceMatch, "the case needs a bronze bout")
+
+	// Every bracket bout onto shiaijo A, the bronze alone on B.
+	for _, round := range bracket.Rounds {
+		for _, m := range round {
+			if m.MatchNumber == 0 {
+				continue
+			}
+			require.NoError(t, eng.UpdateMatchCourt(compID, m.ID, "A"))
+		}
+	}
+	require.NoError(t, eng.UpdateMatchCourt(compID, bracket.ThirdPlaceMatch.ID, "B"))
+
+	after, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.Equal(t, "B", after.ThirdPlaceMatch.Court, "the bronze must be on its own shiaijo")
+
+	raw, err := eng.ExportCompetitionXlsx(compID)
+	require.NoError(t, err)
+	f, err := excelize.OpenReader(bytes.NewReader(raw))
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+
+	rows, err := f.GetRows(helper.SheetEliminationMatches)
+	require.NoError(t, err)
+	bands := bctest.ReadCourtBands(rows, helper.CourtsColumnsPerCourt)
+
+	bandCol := map[string]int{}
+	for _, b := range bands {
+		bandCol[b.Court] = b.Col
+	}
+	require.Containsf(t, bandCol, "B",
+		"shiaijo B runs the bronze, so the sheet must print a band for it; got bands %v", bandCol)
+
+	var bronzeCol = -1
+	for _, row := range rows {
+		for c, v := range row {
+			if strings.Contains(strings.ToLower(strings.TrimSpace(v)), "3rd place") {
+				bronzeCol = c
+			}
+		}
+	}
+	require.NotEqual(t, -1, bronzeCol, "the bronze block must be printed")
+	assert.Equalf(t, bandCol["B"], bronzeCol,
+		"the bronze runs on shiaijo B, so it must print in shiaijo B's band (column %d), not %d",
+		bandCol["B"]+1, bronzeCol+1)
 }

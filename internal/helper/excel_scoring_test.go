@@ -971,7 +971,7 @@ func TestEngiMatchHeaderFlags_Elimination(t *testing.T) {
 		f.NewSheet(SheetEliminationMatches)
 		f.NewSheet("Pool Results")
 
-		PrintTeamEliminationMatches(f, poolMatchWinners, eliminationMatchRounds, 0, testDrawFor(eliminationMatchRounds, 1), nil, nil, false, true)
+		PrintTeamEliminationMatches(f, poolMatchWinners, eliminationMatchRounds, 0, CourtPlan{Draw: testDrawFor(eliminationMatchRounds, 1)}, false, true)
 
 		lV, _ := f.GetCellValue(SheetEliminationMatches, "B3")
 		rV, _ := f.GetCellValue(SheetEliminationMatches, "F3")
@@ -985,7 +985,7 @@ func TestEngiMatchHeaderFlags_Elimination(t *testing.T) {
 		f.NewSheet(SheetEliminationMatches)
 		f.NewSheet("Pool Results")
 
-		PrintTeamEliminationMatches(f, poolMatchWinners, eliminationMatchRounds, 0, testDrawFor(eliminationMatchRounds, 1), nil, nil, false, false)
+		PrintTeamEliminationMatches(f, poolMatchWinners, eliminationMatchRounds, 0, CourtPlan{Draw: testDrawFor(eliminationMatchRounds, 1)}, false, false)
 
 		lV, _ := f.GetCellValue(SheetEliminationMatches, "B3")
 		rV, _ := f.GetCellValue(SheetEliminationMatches, "F3")

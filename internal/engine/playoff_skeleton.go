@@ -180,21 +180,25 @@ func PlayoffFinalsFromParticipants(store *state.Store, comp *state.Competition) 
 // ExportCourts is the shiaijo a competition's workbook is laid out for, by NAME.
 //
 // A competition's courts need not start at A: running one competition on A+B and
-// another on C+D is how a 4-shiaijo venue is shared, and it is the split the
-// app's own shiaijo hint recommends. Naming the second one's bands from their
-// POSITION would print "Shiaijo A" and "Shiaijo B" on sheets for courts that
-// competition never touches, so the names travel into the workbook rather than a
-// count.
+// another on C+D is how a 4-shiaijo venue is shared. Naming the bands from their
+// POSITION printed "Shiaijo A"/"Shiaijo B" on sheets for courts that competition
+// never touches, so the names travel into the workbook rather than a count.
 //
-// Resolution goes through InheritedDrawCourts, the single owner of "which
-// shiaijo does this competition run on": an empty list means "inherit the
-// tournament's", which is exactly the legacy/imported shape this export meets.
-// Answering ["A"] for it instead put a competition running on the venue's C and
-// D under bands titled "Shiaijo A" -- a workbook contradicting its own
-// elimination sheet, which reads the live match courts.
-func ExportCourts(comp *state.Competition, tourn *state.Tournament) []string {
+// It loads the tournament ITSELF rather than taking one. Resolution goes through
+// InheritedDrawCourts, where an empty list means "inherit the tournament's", so
+// a caller that forgot the load, or handed nil, would silently get the
+// positional answer back for exactly the legacy records that need the venue's.
+// A tournament that will not load is not fatal to an export: the resolution then
+// degrades to the competition's own list, which is what it was before.
+func ExportCourts(store *state.Store, comp *state.Competition) []string {
 	if comp == nil {
 		return helper.CourtLabels(1)
+	}
+	var tourn *state.Tournament
+	if store != nil {
+		if t, err := store.LoadTournament(); err == nil {
+			tourn = t
+		}
 	}
 	return InheritedDrawCourts(comp.Courts, tourn)
 }
@@ -227,7 +231,6 @@ func BracketCourtByMatchNumber(bracket *state.Bracket) map[int64]string {
 			add(&round[i])
 		}
 	}
-	add(bracket.ThirdPlaceMatch)
 	if len(out) == 0 {
 		return nil
 	}

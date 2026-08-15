@@ -64,21 +64,26 @@ func (e *Engine) SeedWarningsFor(comp *state.Competition) []string {
 	if !helper.AnySeeded(pools) {
 		return nil
 	}
-	// The competition's own shiaijo count. It is not a perfect record of what
-	// the draw was built on -- nothing persists that -- but it is the closest
-	// thing available, and the alternatives are worse:
+	// The shiaijo this competition runs on, resolved through InheritedDrawCourts
+	// like every other reader: an empty list MEANS "inherit the tournament's",
+	// and reading the raw field instead built a 1-shiaijo draw for exactly the
+	// legacy/imported records the rest of this bead protects -- reporting
+	// half/quarter relaxations from a draw the workbook never renders.
+	//
+	// It is not a perfect record of what the draw was built on, because nothing
+	// persists a FROZEN allocation; comp.Courts is the draw-time value for
+	// anything drawn by this code (runDrawPipeline materialises it), but a later
+	// settings PUT can still edit it. That is the remaining gap, and it is the
+	// one worth closing if these warnings ever need to be exact.
 	//
 	// Counting the distinct shiaijo the pool matches run on was tried and
-	// reverted. A match's court is data the operator reassigns constantly, so
-	// moving ONE bout to a neighbouring shiaijo changed the count and visibly
-	// rewrote these warnings, which are supposed to describe placement in the
-	// draw. comp.Courts moves far more rarely: an allocation cannot be shrunk
-	// while live matches are still on the dropped shiaijo (CourtsStillInUse), so
-	// in practice it only changes once a shiaijo's bouts are all fought.
-	//
-	// The real fix is to snapshot the allocation at draw time and read it back
-	// here; until something persists it, this is the stabler of two proxies.
-	numCourts := len(comp.Courts)
+	// reverted: a match's court is data the operator reassigns constantly, so
+	// moving ONE bout rewrote warnings that describe placement in the draw.
+	tourn, tournErr := e.store.LoadTournament()
+	if tournErr != nil {
+		tourn = nil
+	}
+	numCourts := len(InheritedDrawCourts(comp.Courts, tourn))
 	draw := poolDraw(comp, pools, numCourts)
 	if draw == nil {
 		return nil

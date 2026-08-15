@@ -31,23 +31,10 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		courtOfPool = PoolCourtByName(poolMatches)
 	}
 
-	// Derived once for every court-count consumer, mirroring builder.go:
-	// clamped to 1 so a competition saved without courts still lays out as a
-	// single-court draw. (The court-band helpers also clamp internally, so
-	// this is layout intent, not panic avoidance.)
-	// The shiaijo BY NAME, for every sheet that prints one: a competition need
-	// not be allocated the first N courts of the venue. The count is read off
-	// the same list rather than derived a second time, so the two can never
-	// disagree about the single-court fallback.
-	// Loaded once, up front: the shiaijo NAMES resolve through it (an empty
-	// competition list inherits the venue's), and step 6 below reuses it for the
-	// tags sheet's public URL. A tournament that cannot be read is not fatal to
-	// an export, so both uses degrade rather than abort.
-	tourn, tournErr := e.store.LoadTournament()
-	if tournErr != nil {
-		tourn = nil
-	}
-	courts := ExportCourts(comp, tourn)
+	// The shiaijo BY NAME, for every sheet that prints one. The count is read
+	// off the same list rather than derived a second time, so the two can never
+	// disagree; ExportCourts owns the inheritance and the single-court fallback.
+	courts := ExportCourts(e.store, comp)
 	numCourts := len(courts)
 
 	f, err := excel.NewFileFromScratch()
@@ -131,8 +118,13 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		// bracket, falling back to the draw's regions where there is none. The
 		// operator reassigns matches between courts while the competition runs,
 		// and this sheet is what their shiaijo runs off.
-		helper.PrintEliminationWithBronze(f, matchWinners, eliminationMatchRounds, comp.TeamSize, draw, courts,
-			BracketCourtByMatchNumber(bracket), BronzeCourt(bracket), comp.Mirror, comp.Engi, hasBronze)
+		helper.PrintEliminationWithBronze(f, matchWinners, eliminationMatchRounds, comp.TeamSize,
+			helper.CourtPlan{
+				Draw:    draw,
+				Courts:  courts,
+				ByMatch: BracketCourtByMatchNumber(bracket),
+				Bronze:  BronzeCourt(bracket),
+			}, comp.Mirror, comp.Engi, hasBronze)
 	} else if hasBronze {
 		// Narrow fallback: a competition whose bracket has a third-place bout but
 		// yields no elimination leaves at all (no pools, no first-round entrants
@@ -162,8 +154,8 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	// omits QR codes without aborting the export. CreateTagsSheet errors
 	// (e.g. Excel write failures) still propagate.
 	var publicURL string
-	if tourn != nil {
-		publicURL = tourn.PublicURL
+	if t, tErr := e.store.LoadTournament(); tErr == nil && t != nil {
+		publicURL = t.PublicURL
 	}
 	if err := helper.CreateTagsSheet(f, pools, publicURL); err != nil {
 		return nil, err

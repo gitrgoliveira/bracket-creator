@@ -124,6 +124,29 @@ func clampCourts(n int) int {
 	return n
 }
 
+// CourtPlan is where a sheet's bouts actually run: the shiaijo the competition
+// uses, and the live court of anything the operator has moved.
+//
+// It travels as one value because these four facts are always assembled
+// together and always used together. Threading them positionally is how the
+// bronze went wrong: adding it meant inserting a bare string into an
+// eleven-argument call in four files, next to another string and three bools,
+// and the compiler could not tell a court from a flag.
+type CourtPlan struct {
+	// Draw is the fallback: the region owning a bout, for anything with no
+	// live court recorded. The CLI has only this.
+	Draw *KnockoutDraw
+	// Courts is the competition's own shiaijo, in its own order. Band names
+	// come from here, never from a band's position.
+	Courts []string
+	// ByMatch is the live court per match number, read off the stored bracket.
+	// It wins over Draw: a match's court is data the operator reassigns.
+	ByMatch map[int64]string
+	// Bronze is the 3rd-place bout's court. It needs its own field because that
+	// bout carries no match number and so cannot ride ByMatch.
+	Bronze string
+}
+
 // PoolsByCourt returns the BANDS a pool-phase sheet prints, and the pool indices
 // in each. It is the single owner of that grouping: the Pool Matches skeleton,
 // the per-shiaijo roster sheets and the results overlays all lay rows out in
@@ -152,27 +175,37 @@ func PoolsByCourt(pools []Pool, courts []string, courtOfPool map[string]string) 
 	bands := courtsPrefix(courts, numCourts)
 	assignments, _ := AssignPoolsToCourts(len(pools), numCourts)
 
-	// Bands for shiaijo outside the drawn allocation, in first-seen pool order.
-	bandOf := make([]int, len(pools))
-	for i := range pools {
-		bandOf[i] = assignments[i]
-		live, ok := courtOfPool[pools[i].PoolName]
-		if !ok || live == "" {
-			continue
-		}
-		idx := slices.Index(bands, live)
-		if idx < 0 {
-			bands = append(bands, live)
-			idx = len(bands) - 1
-		}
-		bandOf[i] = idx
-	}
-
 	out := make([][]int, len(bands))
-	for i, band := range bandOf {
+	for i := range pools {
+		band := assignments[i]
+		if live, ok := courtOfPool[pools[i].PoolName]; ok && live != "" {
+			if band = slices.Index(bands, live); band < 0 {
+				bands = append(bands, live)
+				out = append(out, nil)
+				band = len(bands) - 1
+			}
+		}
 		out[band] = append(out[band], i)
 	}
-	return bands, out
+
+	// Drop a band nothing landed in. A shiaijo whose pools were all moved away
+	// would otherwise keep its header, its page break and its print-area column
+	// -- a printed sheet sending an operator to a court running nothing, which
+	// is the defect this clamp exists to prevent and which the elimination sheet
+	// (usedCourtBands) already refuses to produce.
+	keptBands := bands[:0:0]
+	kept := make([][]int, 0, len(out))
+	for i, idxs := range out {
+		if len(idxs) == 0 {
+			continue
+		}
+		keptBands = append(keptBands, bands[i])
+		kept = append(kept, idxs)
+	}
+	if len(kept) == 0 {
+		return courtsPrefix(courts, 1), [][]int{nil}
+	}
+	return keptBands, kept
 }
 
 func writeCourtHeaders(f *excelize.File, sheetName string, courts []string, headerStyle int) {
@@ -1096,7 +1129,7 @@ func SetPrintArea(f *excelize.File, sheetName string, lastCol, lastRow int) {
 // Elimination Matches sheet and returns the next available start row (the row
 // immediately after the last rendered block plus any trailing space lines).
 // Callers that do not need the return values may ignore them.
-func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]MatchWinner, eliminationMatchRounds [][]*Node, numTeamMatches int, draw *KnockoutDraw, courts []string, courtOfMatch map[int64]string, mirror bool, engi bool) (int, []string, map[string]MatchWinner) {
+func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]MatchWinner, eliminationMatchRounds [][]*Node, numTeamMatches int, plan CourtPlan, mirror bool, engi bool) (int, []string, map[string]MatchWinner) {
 	// This sheet is a per-shiaijo handout: one band, one page break and one
 	// "Shiaijo X" header per court. A bout printed under the wrong band sends
 	// its competitors to a shiaijo the app is not calling them to, so the band
@@ -1114,14 +1147,14 @@ func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]M
 	// leave a reassigned bout with no band to go in, and would print a band for
 	// a shiaijo nothing is scheduled on -- the same defect PrintPoolMatches
 	// already refuses to produce.
-	courtOfNode := draw.NodeCourts()
+	courtOfNode := plan.Draw.NodeCourts()
 	bandOf := func(n *Node) string {
-		if c, ok := courtOfMatch[n.matchNum]; ok && c != "" {
+		if c, ok := plan.ByMatch[n.matchNum]; ok && c != "" {
 			return c
 		}
-		return courtNameAt(courts, courtOfNode[n])
+		return courtNameAt(plan.Courts, courtOfNode[n])
 	}
-	bands := usedCourtBands(eliminationMatchRounds, courts, bandOf)
+	bands := usedCourtBands(eliminationMatchRounds, plan.Courts, []string{plan.Bronze}, bandOf)
 	numCourts := len(bands)
 	bandIndex := make(map[string]int, numCourts)
 	for i, name := range bands {
@@ -1435,11 +1468,12 @@ func PrintBronzeBlockWithPrintArea(f *excelize.File, startRow, numTeamMatches in
 	// every bout was chunked positionally and the final therefore sat there too;
 	// now that each bout follows its own court, a bronze moved to shiaijo D
 	// would print under whatever shiaijo happens to be printed first.
+	// bands already carries this court: PrintTeamEliminationMatches folds it in
+	// (CourtPlan.Bronze) precisely so the lookup cannot miss. The zero fallback
+	// is for the CLI, which prints a bronze with no stored court at all.
 	band := 0
-	if bronzeCourt != "" {
-		if i := slices.Index(bands, bronzeCourt); i >= 0 {
-			band = i
-		}
+	if i := slices.Index(bands, bronzeCourt); i >= 0 {
+		band = i
 	}
 	bronzeEndRow := PrintThirdPlaceBlock(f, 1+band*CourtsColumnsPerCourt, startRow, numTeamMatches, mirror, engi, semiA, semiB, matchWinners)
 	// The SHEET's band count, never a re-derivation of it: SetEliminationPrintArea
@@ -1455,10 +1489,10 @@ func PrintBronzeBlockWithPrintArea(f *excelize.File, startRow, numTeamMatches in
 // stays with the caller because it is genuinely caller-specific (the CLI
 // derives it from the naginata flag and round count via NeedsBronzeBlock; the
 // exporters from the stored bracket's ThirdPlaceMatch).
-func PrintEliminationWithBronze(f *excelize.File, matchWinners map[string]MatchWinner, rounds [][]*Node, numTeamMatches int, draw *KnockoutDraw, courts []string, courtOfMatch map[int64]string, bronzeCourt string, mirror, engi, includeBronze bool) {
-	nextRow, bands, elimMatchWinners := PrintTeamEliminationMatches(f, matchWinners, rounds, numTeamMatches, draw, courts, courtOfMatch, mirror, engi)
+func PrintEliminationWithBronze(f *excelize.File, matchWinners map[string]MatchWinner, rounds [][]*Node, numTeamMatches int, plan CourtPlan, mirror, engi, includeBronze bool) {
+	nextRow, bands, elimMatchWinners := PrintTeamEliminationMatches(f, matchWinners, rounds, numTeamMatches, plan, mirror, engi)
 	if includeBronze {
-		PrintBronzeBlockWithPrintArea(f, nextRow, numTeamMatches, mirror, engi, bands, bronzeCourt, rounds, elimMatchWinners)
+		PrintBronzeBlockWithPrintArea(f, nextRow, numTeamMatches, mirror, engi, bands, plan.Bronze, rounds, elimMatchWinners)
 	}
 }
 
@@ -1583,20 +1617,30 @@ func courtSheetName(courts []string, courtIdx int) string {
 // operator lists them, then any shiaijo a bout was reassigned to that is not in
 // that list, in first-seen order, so a bout can never be dropped for want of a
 // band. Always returns at least one band.
-func usedCourtBands(rounds [][]*Node, courts []string, bandOf func(*Node) string) []string {
+func usedCourtBands(rounds [][]*Node, courts []string, alsoUsed []string, bandOf func(*Node) string) []string {
 	used := make(map[string]bool)
 	var extra []string
+	note := func(name string) {
+		if name == "" || used[name] {
+			return
+		}
+		used[name] = true
+		if !slices.Contains(courts, name) {
+			extra = append(extra, name)
+		}
+	}
 	for _, round := range rounds {
 		for _, m := range round {
-			name := bandOf(m)
-			if name == "" || used[name] {
-				continue
-			}
-			used[name] = true
-			if !slices.Contains(courts, name) {
-				extra = append(extra, name)
-			}
+			note(bandOf(m))
 		}
+	}
+	// Bouts that are not rows in `rounds` still need a band to print in. The
+	// 3rd-place bout is the one such bout, and it is a SIBLING of the bracket's
+	// rounds rather than a row in them, so every rounds-only walk misses it --
+	// leaving it to be looked up in a band set it was never allowed to join,
+	// and printed under whichever shiaijo happens to come first.
+	for _, name := range alsoUsed {
+		note(name)
 	}
 	var bands []string
 	for _, name := range courts {

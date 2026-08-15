@@ -18,11 +18,9 @@ import (
 // the draw exists and reports what happened.
 //
 // Nothing is persisted: the answer is a pure function of the drawn pools and the
-// shiaijo count, so it is recomputed on read and cannot go stale against a
-// REDRAWN competition. That holds only because both inputs are taken from what
-// was actually drawn -- the pools from disk, and the count from the shiaijo
-// those pools' matches run on (drawnCourtCount), NOT from comp.Courts, which the
-// operator can still edit while the competition runs.
+// competition's shiaijo count, so it is recomputed on read and cannot go stale
+// against a REDRAWN competition. See the note at the count itself for why that
+// count is comp.Courts and not something derived from the live schedule.
 //
 // Returns nil - no warnings, and no error - for every competition that has no
 // pools yet, no seeds, no bracket to place seeds in, or nothing to report. A
@@ -66,22 +64,21 @@ func (e *Engine) SeedWarningsFor(comp *state.Competition) []string {
 	if !helper.AnySeeded(pools) {
 		return nil
 	}
-	// The shiaijo count the LIVE draw was built on, not whatever the competition
-	// is allocated at the moment of this read. These warnings describe where a
-	// seed's qualifier landed, so they have to describe the draw that actually
-	// exists: comp.Courts is editable while the competition runs (a shiaijo may
-	// be dropped once its bouts are all fought), and recomputing on the new
-	// count would report relaxations from a draw nobody ever played.
+	// The competition's own shiaijo count. It is not a perfect record of what
+	// the draw was built on -- nothing persists that -- but it is the closest
+	// thing available, and the alternatives are worse:
 	//
-	// Once pools are on disk, the number of distinct shiaijo their matches run
-	// on IS that allocation -- AssignPoolsToCourts spreads the pools over
-	// exactly the courts the draw used. Before the draw there are no pool
-	// matches, and the current allocation is the right answer, because the
-	// warning is then about the draw the operator is ABOUT to generate.
+	// Counting the distinct shiaijo the pool matches run on was tried and
+	// reverted. A match's court is data the operator reassigns constantly, so
+	// moving ONE bout to a neighbouring shiaijo changed the count and visibly
+	// rewrote these warnings, which are supposed to describe placement in the
+	// draw. comp.Courts moves far more rarely: an allocation cannot be shrunk
+	// while live matches are still on the dropped shiaijo (CourtsStillInUse), so
+	// in practice it only changes once a shiaijo's bouts are all fought.
+	//
+	// The real fix is to snapshot the allocation at draw time and read it back
+	// here; until something persists it, this is the stabler of two proxies.
 	numCourts := len(comp.Courts)
-	if drawn := e.drawnCourtCount(comp.ID); drawn > 0 {
-		numCourts = drawn
-	}
 	draw := poolDraw(comp, pools, numCourts)
 	if draw == nil {
 		return nil
@@ -120,21 +117,3 @@ func (e *Engine) seedingProblem(id string, cause error) string {
 // refused at the draw goes back to the seeding panel, while an API client that
 // PUT a seeding is holding the list itself and has nothing to "clear".
 const seedGapRemedyDraw = "Set the missing ranks or clear the seeds, then generate the draw again."
-
-// drawnCourtCount is how many distinct shiaijo this competition's pool matches
-// are spread across, or 0 when there are none to tell. That count is the
-// allocation the draw was built on, recovered from the schedule rather than
-// re-read from a field the operator can still edit.
-func (e *Engine) drawnCourtCount(compID string) int {
-	matches, err := e.store.LoadPoolMatches(compID)
-	if err != nil || len(matches) == 0 {
-		return 0
-	}
-	seen := make(map[string]bool)
-	for _, m := range matches {
-		if m.Court != "" {
-			seen[m.Court] = true
-		}
-	}
-	return len(seen)
-}

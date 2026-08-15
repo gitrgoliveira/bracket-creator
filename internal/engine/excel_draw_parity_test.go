@@ -1140,7 +1140,7 @@ func TestPoolSheetFollowsPoolCourtReassignment(t *testing.T) {
 	// The grouping the workbook writers use must now place Pool D in band 0.
 	pools, err := store.LoadPools(compID)
 	require.NoError(t, err)
-	groups := helper.PoolsByCourt(pools, ExportCourts(mustComp(t, store, compID)), PoolCourtByName(after))
+	_, groups := helper.PoolsByCourt(pools, ExportCourts(mustComp(t, store, compID), nil), PoolCourtByName(after))
 	var bandOfMovedPool = -1
 	for band, idxs := range groups {
 		for _, i := range idxs {
@@ -1231,4 +1231,71 @@ func mustComp(t *testing.T, store *state.Store, id string) *state.Competition {
 	require.NoError(t, err)
 	require.NotNil(t, c)
 	return c
+}
+
+// TestEliminationPrintAreaCoversEveryBand pins that the printed RANGE of the
+// Elimination Matches sheet covers every band the sheet actually printed.
+//
+// SetEliminationPrintArea replaces the defined name rather than extending it, so
+// the bronze block's call is the last writer and its band count wins. When that
+// number was re-derived from the draw instead of taken from the sheet, the two
+// disagreed the moment a bout was reassigned onto a shiaijo outside the drawn
+// regions: the sheet printed that band and the print area stopped short of it,
+// so a whole shiaijo's running order fell outside the printed page.
+func TestEliminationPrintAreaCoversEveryBand(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	const compID = "elim-print-area"
+
+	createTestCompetition(t, store, compID, state.CompFormatMixed, 4, func(c *state.Competition) {
+		c.PoolSizeMode = "max"
+		c.PoolWinners = 2
+		c.Courts = courtLabels(2)
+		c.Naginata = true // gives the sheet a bronze block, hence the second print-area write
+	})
+	require.NoError(t, store.SaveParticipants(compID, playoffsParityRoster(16)))
+	require.NoError(t, eng.StartCompetition(compID))
+
+	// Move a bout onto a shiaijo the draw never used, so the sheet must print a
+	// band beyond the drawn regions.
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.NoError(t, eng.UpdateMatchCourt(compID, bracket.Rounds[0][0].ID, "Z"))
+
+	raw, err := eng.ExportCompetitionXlsx(compID)
+	require.NoError(t, err)
+	f, err := excelize.OpenReader(bytes.NewReader(raw))
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+
+	rows, err := f.GetRows(helper.SheetEliminationMatches)
+	require.NoError(t, err)
+	bands := bctest.ReadCourtBands(rows, helper.CourtsColumnsPerCourt)
+	require.NotEmpty(t, bands)
+	last := bands[len(bands)-1]
+	require.Equal(t, "Z", last.Court, "the reassigned bout must have earned its own band")
+
+	var printArea string
+	for _, dn := range f.GetDefinedName() {
+		if dn.Name == "_xlnm.Print_Area" && dn.Scope == helper.SheetEliminationMatches {
+			printArea = dn.RefersTo
+		}
+	}
+	require.NotEmpty(t, printArea, "the sheet must define a print area")
+
+	_, lastCol := lastCellOfRange(t, printArea)
+	assert.GreaterOrEqualf(t, lastCol, last.Col+1,
+		"the print area %s stops before shiaijo %s's band (column %d), so that shiaijo's whole running order prints on no page",
+		printArea, last.Court, last.Col+1)
+}
+
+// lastCellOfRange returns the 1-based (row, col) of the end of an A1:B2 range.
+func lastCellOfRange(t *testing.T, refersTo string) (int, int) {
+	t.Helper()
+	_, rng, ok := strings.Cut(refersTo, "!")
+	require.Truef(t, ok, "print area %q must be sheet-qualified", refersTo)
+	_, end, ok := strings.Cut(rng, ":")
+	require.Truef(t, ok, "print area %q must be a range", refersTo)
+	col, row, err := excelize.CellNameToCoordinates(strings.ReplaceAll(end, "$", ""))
+	require.NoError(t, err)
+	return row, col
 }

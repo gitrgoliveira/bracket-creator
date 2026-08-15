@@ -39,7 +39,15 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	// not be allocated the first N courts of the venue. The count is read off
 	// the same list rather than derived a second time, so the two can never
 	// disagree about the single-court fallback.
-	courts := ExportCourts(comp)
+	// Loaded once, up front: the shiaijo NAMES resolve through it (an empty
+	// competition list inherits the venue's), and step 6 below reuses it for the
+	// tags sheet's public URL. A tournament that cannot be read is not fatal to
+	// an export, so both uses degrade rather than abort.
+	tourn, tournErr := e.store.LoadTournament()
+	if tournErr != nil {
+		tourn = nil
+	}
+	courts := ExportCourts(comp, tourn)
 	numCourts := len(courts)
 
 	f, err := excel.NewFileFromScratch()
@@ -124,7 +132,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		// operator reassigns matches between courts while the competition runs,
 		// and this sheet is what their shiaijo runs off.
 		helper.PrintEliminationWithBronze(f, matchWinners, eliminationMatchRounds, comp.TeamSize, draw, courts,
-			BracketCourtByMatchNumber(bracket), comp.Mirror, comp.Engi, hasBronze)
+			BracketCourtByMatchNumber(bracket), BronzeCourt(bracket), comp.Mirror, comp.Engi, hasBronze)
 	} else if hasBronze {
 		// Narrow fallback: a competition whose bracket has a third-place bout but
 		// yields no elimination leaves at all (no pools, no first-round entrants
@@ -135,7 +143,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		// sheet, rendered at court band 1, so numCourts=1 covers it exactly.
 		// nil rounds derive zero semi numbers, leaving both entrant slots
 		// hand-fillable.
-		helper.PrintBronzeBlockWithPrintArea(f, 2, comp.TeamSize, comp.Mirror, comp.Engi, 1, nil, nil)
+		helper.PrintBronzeBlockWithPrintArea(f, 2, comp.TeamSize, comp.Mirror, comp.Engi, helper.CourtLabels(1), "", nil, nil)
 		helper.SetSheetLayoutPortraitA4DownThenOver(f, helper.SheetEliminationMatches, 1)
 	}
 	// The bare "Tree" sheet is a layout scaffold, never output. Delete it whether
@@ -154,8 +162,8 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	// omits QR codes without aborting the export. CreateTagsSheet errors
 	// (e.g. Excel write failures) still propagate.
 	var publicURL string
-	if t, tErr := e.store.LoadTournament(); tErr == nil && t != nil {
-		publicURL = t.PublicURL
+	if tourn != nil {
+		publicURL = tourn.PublicURL
 	}
 	if err := helper.CreateTagsSheet(f, pools, publicURL); err != nil {
 		return nil, err

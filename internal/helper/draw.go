@@ -1055,18 +1055,34 @@ func (d *KnockoutDraw) RegionSpans() [][2]int {
 // TreeToLeafArray's geometry has one place to land rather than several that
 // must be edited in lockstep.
 func leafSpanWalk(n *Node, offset int, index map[*Node]int, out [][2]int) {
+	walkLeafOffsets(n, offset, func(node *Node, at, width int) {
+		if i, ok := index[node]; ok && i < len(out) {
+			out[i] = [2]int{at, at + width}
+		}
+	})
+}
+
+// walkLeafOffsets visits every node with its offset and width in
+// TreeToLeafArray(root) -- the ONE traversal that turns the tree back into leaf
+// positions.
+//
+// Both readers of that geometry go through it. They must agree exactly: one
+// (RegionSpans) decides which slots a shiaijo's region owns, the other
+// (NodeCourts) decides which shiaijo a bout prints under, and a disagreement
+// puts the operator console and the printed running order on different courts
+// with nothing to catch it. Written once for the same reason leafPadTarget is.
+func walkLeafOffsets(n *Node, offset int, visit func(node *Node, offset, width int)) {
 	if n == nil {
 		return
 	}
 	width := leafArrayWidth(n)
-	if i, ok := index[n]; ok && i < len(out) {
-		out[i] = [2]int{offset, offset + width}
+	visit(n, offset, width)
+	if n.LeafNode {
+		return
 	}
-	if !n.LeafNode {
-		side := width / 2
-		leafSpanWalk(n.Left, offset, index, out)
-		leafSpanWalk(n.Right, offset+side, index, out)
-	}
+	side := width / 2
+	walkLeafOffsets(n.Left, offset, visit)
+	walkLeafOffsets(n.Right, offset+side, visit)
 }
 
 // leafArrayWidth is len(TreeToLeafArray(n)) without building the slice. It
@@ -1108,21 +1124,13 @@ func (d *KnockoutDraw) NodeCourts() map[*Node]int {
 	return out
 }
 
-// nodeCourtWalk mirrors leafSpanWalk's offset arithmetic, recording a court for
-// every node rather than a span for the region roots alone. The padding rule is
-// leafPadTarget's in both, so a node's offset here is its true position in
-// TreeToLeafArray(Root).
+// nodeCourtWalk records a court for every node, where leafSpanWalk records a
+// span for the region roots alone. Both ride walkLeafOffsets, so neither can
+// drift from the other about where a node sits in TreeToLeafArray(Root).
 func nodeCourtWalk(n *Node, offset int, spans [][2]int, out map[*Node]int) {
-	if n == nil {
-		return
-	}
-	out[n] = CourtForLeafSlot(spans, offset)
-	if n.LeafNode {
-		return
-	}
-	side := leafArrayWidth(n) / 2
-	nodeCourtWalk(n.Left, offset, spans, out)
-	nodeCourtWalk(n.Right, offset+side, spans, out)
+	walkLeafOffsets(n, offset, func(node *Node, at, _ int) {
+		out[node] = CourtForLeafSlot(spans, at)
+	})
 }
 
 // CourtForLeafSlot returns the index of the region that owns leaf slot, given

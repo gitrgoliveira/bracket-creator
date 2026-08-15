@@ -860,7 +860,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// engine's own gates at scoring and draw time.
 			if stored, loadErr := store.LoadCompetition(id); loadErr == nil && stored != nil &&
 				stored.Status != state.CompStatusSetup && stored.Status != "" &&
-				strings.Join(comp.Courts, ",") != strings.Join(resolveCompetitionCourts(stored.Courts, putTourn), ",") {
+				// Only a REMOVAL can orphan a match, so adding or reordering
+				// shiaijo never pays for the two match loads below. courtsRemovedBy
+				// is the same predicate the tournament twin gates on.
+				len(courtsRemovedBy(resolveCompetitionCourts(stored.Courts, putTourn), comp.Courts)) > 0 {
 				poolMatches, poolErr := store.LoadPoolMatches(id)
 				if poolErr != nil && !os.IsNotExist(poolErr) {
 					internalError(c, poolErr)
@@ -871,12 +874,8 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					internalError(c, brErr)
 					return
 				}
-				if busy := engine.CourtsStillInUse(comp.Courts, poolMatches, bracket); len(busy) > 0 {
-					c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf(
-						"courts: shiaijo %s still %s matches scheduled on %s; move them to a shiaijo this competition keeps, then remove it",
-						strings.Join(busy, ", "),
-						map[bool]string{true: "have", false: "has"}[len(busy) > 1],
-						map[bool]string{true: "them", false: "it"}[len(busy) > 1])})
+				if err := engine.ValidateCourtsNotInUse(comp.Courts, poolMatches, bracket); err != nil {
+					c.JSON(http.StatusBadRequest, gin.H{"error": "courts: " + err.Error()})
 					return
 				}
 			}

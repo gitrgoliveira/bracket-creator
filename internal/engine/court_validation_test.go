@@ -175,6 +175,19 @@ func TestCourtsStillInUse(t *testing.T) {
 		assert.Equal(t, []string{"B", "C"}, CourtsStillInUse([]string{"A", "D"}, poolMatches, bracket))
 	})
 
+	t.Run("a shiaijo carrying only the bronze bout still blocks", func(t *testing.T) {
+		t.Parallel()
+		// ThirdPlaceMatch is a SIBLING of Rounds, not a row in it, so a
+		// rounds-only walk skips it and the operator is told the shiaijo is
+		// free while the 3rd-place bout is still scheduled on it.
+		bronzeOnly := &state.Bracket{
+			Rounds:          [][]state.BracketMatch{{{ID: "m-r1-0", Court: "A", Status: state.MatchStatusScheduled}}},
+			ThirdPlaceMatch: &state.BracketMatch{ID: "m-bronze", Court: "Z", Status: state.MatchStatusScheduled},
+		}
+		assert.Equal(t, []string{"Z"}, CourtsStillInUse([]string{"A"}, nil, bronzeOnly),
+			"the bronze is a bout like any other and its shiaijo cannot be dropped under it")
+	})
+
 	t.Run("no bracket yet is not a failure", func(t *testing.T) {
 		t.Parallel()
 		assert.Equal(t, []string{"B"}, CourtsStillInUse([]string{"A"}, poolMatches, nil))

@@ -110,7 +110,11 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	// The shiaijo BY NAME, mirroring the blank-template export: a competition
 	// allocated C and D must not have its sheets titled A and B. The count is
 	// read off the same list rather than derived a second time.
-	courts := engine.ExportCourts(comp)
+	tourn, tournErr := store.LoadTournament()
+	if tournErr != nil {
+		tourn = nil
+	}
+	courts := engine.ExportCourts(comp, tourn)
 	numCourts := len(courts)
 	// Where each pool is actually being fought, so the archived workbook bands a
 	// pool under the shiaijo it was scored on.
@@ -118,12 +122,11 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	// Computed ONCE and handed to every overlay: the skeleton and the score
 	// writers must agree on which band each pool printed in, or a score lands
 	// in another pool's block.
-	poolsByCourt := helper.PoolsByCourt(pools, courts, courtOfPool)
+	_, poolsByCourt := helper.PoolsByCourt(pools, courts, courtOfPool)
 	// numCourts is the operator's ALLOCATION. The pool-banded sheet and both
 	// overlays clamp it themselves to the count the pool phase actually runs on
-	// (PrintPoolMatches and computePoolsByCourt each apply
-	// helper.EffectiveDrawCourts), so the skeleton and the overlays cannot be
-	// handed values that disagree.
+	// (helper.PoolsByCourt owns the clamp and every writer reads its grouping),
+	// so the skeleton and the overlays cannot be handed values that disagree.
 	matchWinners := helper.PrintPoolMatches(
 		f, pools, comp.TeamSize, comp.EffectivePoolWinners(),
 		courts, courtOfPool, comp.Mirror, poolCoords, playerCoords, comp.Engi,
@@ -160,7 +163,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 		// where each bout was actually fought rather than where the draw first
 		// put it.
 		helper.PrintEliminationWithBronze(f, matchWinners, eliminationMatchRounds, comp.TeamSize, draw, courts,
-			engine.BracketCourtByMatchNumber(bracket), comp.Mirror, comp.Engi,
+			engine.BracketCourtByMatchNumber(bracket), engine.BronzeCourt(bracket), comp.Mirror, comp.Engi,
 			bracket != nil && bracket.ThirdPlaceMatch != nil)
 
 		// Overlay literal scores from the live bracket state.
@@ -461,23 +464,6 @@ func overlayTeamPoolScores(f *excelize.File, pools []helper.Pool, resultByID map
 	return nil
 }
 
-// computePoolsByCourt groups pool indices by the court each is assigned to, using
-// the same AssignPoolsToCourts distribution PrintPoolMatches lays out. Returned
-// slice is indexed by court; each entry lists that court's pool indices in order.
-//
-// numCourts is clamped to what the pools can actually carry
-// (helper.EffectiveDrawCourts), which is exactly what PrintPoolMatches does to
-// the skeleton these overlays write onto. This is the mechanism behind the rule
-// the overlays depend on: they re-derive their column bands HERE, so a court
-// count that disagrees with the skeleton's puts every score and standing into
-// the wrong cells. Applying the clamp inside the shared derivation means the
-// four overlay paths that reach it (overlayPoolScores, overlayPoolStandings and
-// their team twins, via buildCourtMatchJobs) cannot each get it wrong, and the
-// next one added inherits it.
-//
-// The returned LENGTH is the authoritative band count: callers must scan
-// len(poolsByCourt) bands rather than the numCourts they passed in, or they
-// index past the last band the skeleton printed.
 // buildCourtMatchJobs returns, per court, the ordered list of match jobs in the
 // row order PrintPoolMatches lays them out (pool 0 matches, then pool 1 matches,
 // ...). Each job carries the pool index and the match's ORIGINAL numeric suffix

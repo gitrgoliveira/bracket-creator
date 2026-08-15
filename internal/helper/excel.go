@@ -124,43 +124,55 @@ func clampCourts(n int) int {
 	return n
 }
 
-// PoolsByCourt groups pool INDICES by the column band they print in, and is the
-// single owner of that grouping: the Pool Matches skeleton, the per-shiaijo
-// roster sheets and the results overlays all lay rows out in this order, so a
-// second derivation of it would write scores into the wrong pool's block.
+// PoolsByCourt returns the BANDS a pool-phase sheet prints, and the pool indices
+// in each. It is the single owner of that grouping: the Pool Matches skeleton,
+// the per-shiaijo roster sheets and the results overlays all lay rows out in
+// this order, so a second derivation of it would write scores into the wrong
+// pool's block. Its length is the authoritative band count -- callers must not
+// re-derive one.
 //
-// The default is AssignPoolsToCourts -- the contiguous allocation the draw and
+// The default allocation is AssignPoolsToCourts, the contiguous one the draw and
 // the schedule use, so each band holds the pools that court actually ran.
 //
 // courtOfPool overrides it with where a pool's matches are ACTUALLY being
 // fought, for callers that have the live schedule (the exports do; the CLI
 // generates a blank workbook and passes nil). A pool whose matches an operator
-// moved to another shiaijo prints in that shiaijo's band, because the band is
-// what its operator scores off. A pool is only moved when its matches AGREE on
-// a court: a pool split across shiaijo has no single band to be in, so it keeps
-// its drawn one rather than being filed somewhere half its bouts are not.
-// A court outside the printed bands is likewise ignored.
-func PoolsByCourt(pools []Pool, courts []string, courtOfPool map[string]string) [][]int {
+// moved prints in that shiaijo's band, because the band is what its operator
+// scores off. A pool is only moved when its matches AGREE on a court: a pool
+// split across shiaijo has no single band to be in, so it keeps its drawn one
+// rather than being filed somewhere half its bouts are not.
+//
+// A pool moved to a shiaijo OUTSIDE the drawn allocation gets a band of its own,
+// appended after them. That matches what the elimination sheet does with a
+// reassigned bout (usedCourtBands): the alternative -- silently filing the block
+// back on its drawn shiaijo -- hands one operator a score sheet for a pool they
+// are not running and leaves the operator who IS running it with none.
+func PoolsByCourt(pools []Pool, courts []string, courtOfPool map[string]string) ([]string, [][]int) {
 	numCourts := EffectiveDrawCourts(len(pools), len(courts))
-	named := courtsPrefix(courts, numCourts)
+	bands := courtsPrefix(courts, numCourts)
 	assignments, _ := AssignPoolsToCourts(len(pools), numCourts)
-	out := make([][]int, numCourts)
+
+	// Bands for shiaijo outside the drawn allocation, in first-seen pool order.
+	bandOf := make([]int, len(pools))
 	for i := range pools {
-		c := 0
-		if i < len(assignments) {
-			c = assignments[i]
+		bandOf[i] = assignments[i]
+		live, ok := courtOfPool[pools[i].PoolName]
+		if !ok || live == "" {
+			continue
 		}
-		if live, ok := courtOfPool[pools[i].PoolName]; ok && live != "" {
-			if idx := slices.Index(named, live); idx >= 0 {
-				c = idx
-			}
+		idx := slices.Index(bands, live)
+		if idx < 0 {
+			bands = append(bands, live)
+			idx = len(bands) - 1
 		}
-		if c < 0 || c >= numCourts {
-			c = 0
-		}
-		out[c] = append(out[c], i)
+		bandOf[i] = idx
 	}
-	return out
+
+	out := make([][]int, len(bands))
+	for i, band := range bandOf {
+		out[band] = append(out[band], i)
+	}
+	return bands, out
 }
 
 func writeCourtHeaders(f *excelize.File, sheetName string, courts []string, headerStyle int) {
@@ -812,18 +824,18 @@ func printPoolResultsTable(f *excelize.File, sheetName string, pool Pool, startR
 // literal scores and standings (internal/export) re-derive the column bands from
 // the same pools and court count, so a consumer that disagrees with the count
 // used here writes every score and standing into the wrong cells --
-// computePoolsByCourt therefore applies the identical clamp. CreateNamesWithPoolToPrint
+// PoolsByCourt owns that clamp for every writer. CreateNamesWithPoolToPrint
 // does the same so its per-shiaijo sheets name the same set of courts.
 // EffectiveDrawCourts is idempotent, so a caller that already clamped
 // (cmd/create-pools.go) is unaffected.
 func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinners int, courts []string, courtOfPool map[string]string, mirror bool, poolCoords map[string]cellCoord, pCoords map[string]playerCellCoord, engi bool) map[string]MatchWinner {
-	// EffectiveDrawCourts already coerces 0/negative to 1, so it is the only
-	// clamp needed here; a clampCourts in front of it would be a no-op. The
-	// clamp takes the FIRST n of the competition's shiaijo, so a competition on
-	// C, D, E whose pools only fill two bands is banded "Shiaijo C" and
-	// "Shiaijo D" -- never renamed to A and B.
-	numCourts := EffectiveDrawCourts(len(pools), len(courts))
-	courts = courtsPrefix(courts, numCourts)
+	// PoolsByCourt owns the clamp AND the band names, so the headers this writes
+	// and the blocks it fills can never come from two different answers. The
+	// clamp keeps the FIRST n of the competition's shiaijo, so a competition on
+	// C, D, E whose pools fill two bands is banded "Shiaijo C" and "Shiaijo D"
+	// -- never renamed to A and B.
+	courts, poolsByCourt := PoolsByCourt(pools, courts, courtOfPool)
+	numCourts := len(courts)
 
 	matchWinners := make(map[string]MatchWinner)
 	sheetName := SheetPoolMatches
@@ -844,8 +856,6 @@ func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinner
 	}
 
 	writeCourtHeaders(f, sheetName, courts, styles.poolHeader)
-
-	poolsByCourt := PoolsByCourt(pools, courts, courtOfPool)
 
 	maxPoolsInCourt := 0
 	for _, pc := range poolsByCourt {
@@ -1086,7 +1096,7 @@ func SetPrintArea(f *excelize.File, sheetName string, lastCol, lastRow int) {
 // Elimination Matches sheet and returns the next available start row (the row
 // immediately after the last rendered block plus any trailing space lines).
 // Callers that do not need the return values may ignore them.
-func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]MatchWinner, eliminationMatchRounds [][]*Node, numTeamMatches int, draw *KnockoutDraw, courts []string, courtOfMatch map[int64]string, mirror bool, engi bool) (int, map[string]MatchWinner) {
+func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]MatchWinner, eliminationMatchRounds [][]*Node, numTeamMatches int, draw *KnockoutDraw, courts []string, courtOfMatch map[int64]string, mirror bool, engi bool) (int, []string, map[string]MatchWinner) {
 	// This sheet is a per-shiaijo handout: one band, one page break and one
 	// "Shiaijo X" header per court. A bout printed under the wrong band sends
 	// its competitors to a shiaijo the app is not calling them to, so the band
@@ -1162,19 +1172,14 @@ func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]M
 		// point of the court-first draw), so the bands are ragged and a band
 		// can legitimately be empty in a given round.
 		matchesByCourt := make([][]*Node, numCourts)
+		numMatchRows := 0
 		for _, eliminationMatch := range eliminationMatchRound {
 			c, ok := bandIndex[bandOf(eliminationMatch)]
 			if !ok {
 				c = 0
 			}
 			matchesByCourt[c] = append(matchesByCourt[c], eliminationMatch)
-		}
-
-		numMatchRows := 0
-		for c := 0; c < numCourts; c++ {
-			if len(matchesByCourt[c]) > numMatchRows {
-				numMatchRows = len(matchesByCourt[c])
-			}
+			numMatchRows = max(numMatchRows, len(matchesByCourt[c]))
 		}
 
 		for r := 0; r < numMatchRows; r++ {
@@ -1216,7 +1221,7 @@ func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]M
 	}
 
 	SetSheetLayoutPortraitA4DownThenOver(f, sheetName, numCourts)
-	return startRow, matchWinners
+	return startRow, bands, matchWinners
 }
 
 // loserCellOf returns the Excel cell address one row below the given "1." winner
@@ -1423,10 +1428,25 @@ func PrintThirdPlaceBlock(f *excelize.File, courtStartCol, startRow, numTeamMatc
 // protocol shared by every bronze render path (CLI generators, results workbook,
 // blank-template export). nil rounds derive zero semi numbers, leaving both
 // entrant slots hand-fillable.
-func PrintBronzeBlockWithPrintArea(f *excelize.File, startRow, numTeamMatches int, mirror, engi bool, numCourts int, rounds [][]*Node, matchWinners map[string]MatchWinner) {
+func PrintBronzeBlockWithPrintArea(f *excelize.File, startRow, numTeamMatches int, mirror, engi bool, bands []string, bronzeCourt string, rounds [][]*Node, matchWinners map[string]MatchWinner) {
 	semiA, semiB := SemifinalMatchNumbers(rounds)
-	bronzeEndRow := PrintThirdPlaceBlock(f, 1, startRow, numTeamMatches, mirror, engi, semiA, semiB, matchWinners)
-	SetEliminationPrintArea(f, SheetEliminationMatches, numCourts, bronzeEndRow-1)
+	// The bronze is a bout like any other on this sheet, so it prints in ITS
+	// shiaijo's band. Pinning it to the leftmost band was only ever right while
+	// every bout was chunked positionally and the final therefore sat there too;
+	// now that each bout follows its own court, a bronze moved to shiaijo D
+	// would print under whatever shiaijo happens to be printed first.
+	band := 0
+	if bronzeCourt != "" {
+		if i := slices.Index(bands, bronzeCourt); i >= 0 {
+			band = i
+		}
+	}
+	bronzeEndRow := PrintThirdPlaceBlock(f, 1+band*CourtsColumnsPerCourt, startRow, numTeamMatches, mirror, engi, semiA, semiB, matchWinners)
+	// The SHEET's band count, never a re-derivation of it: SetEliminationPrintArea
+	// replaces the defined name, so a different number here silently overrides the
+	// range the elimination blocks were printed into -- cutting a shiaijo's whole
+	// running order out of the printed page, or padding it with blank bands.
+	SetEliminationPrintArea(f, SheetEliminationMatches, clampCourts(len(bands)), bronzeEndRow-1)
 }
 
 // PrintEliminationWithBronze renders the Elimination Matches blocks and, when
@@ -1435,10 +1455,10 @@ func PrintBronzeBlockWithPrintArea(f *excelize.File, startRow, numTeamMatches in
 // stays with the caller because it is genuinely caller-specific (the CLI
 // derives it from the naginata flag and round count via NeedsBronzeBlock; the
 // exporters from the stored bracket's ThirdPlaceMatch).
-func PrintEliminationWithBronze(f *excelize.File, matchWinners map[string]MatchWinner, rounds [][]*Node, numTeamMatches int, draw *KnockoutDraw, courts []string, courtOfMatch map[int64]string, mirror, engi, includeBronze bool) {
-	nextRow, elimMatchWinners := PrintTeamEliminationMatches(f, matchWinners, rounds, numTeamMatches, draw, courts, courtOfMatch, mirror, engi)
+func PrintEliminationWithBronze(f *excelize.File, matchWinners map[string]MatchWinner, rounds [][]*Node, numTeamMatches int, draw *KnockoutDraw, courts []string, courtOfMatch map[int64]string, bronzeCourt string, mirror, engi, includeBronze bool) {
+	nextRow, bands, elimMatchWinners := PrintTeamEliminationMatches(f, matchWinners, rounds, numTeamMatches, draw, courts, courtOfMatch, mirror, engi)
 	if includeBronze {
-		PrintBronzeBlockWithPrintArea(f, nextRow, numTeamMatches, mirror, engi, clampCourts(draw.NumCourts()), rounds, elimMatchWinners)
+		PrintBronzeBlockWithPrintArea(f, nextRow, numTeamMatches, mirror, engi, bands, bronzeCourt, rounds, elimMatchWinners)
 	}
 }
 
@@ -1651,13 +1671,13 @@ func CreateNamesToPrint(f *excelize.File, players []Player, sanitized bool, cour
 func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanitized bool, courts []string, courtOfPool map[string]string, pCoords map[string]playerCellCoord) {
 	// EffectiveDrawCourts already coerces 0/negative to 1, so it is the only
 	// clamp needed here; a clampCourts in front of it would be a no-op.
-	numCourts := EffectiveDrawCourts(len(pools), len(courts))
-	courts = courtsPrefix(courts, numCourts)
+	// Same bands and same grouping the Pool Matches skeleton uses, so a
+	// competitor's roster sheet is the shiaijo their pool is actually scored on.
+	courts, poolsByCourt := PoolsByCourt(pools, courts, courtOfPool)
+	numCourts := len(courts)
 
-	// Same grouping the Pool Matches skeleton uses, so a competitor's roster
-	// sheet is the shiaijo their pool is actually scored on.
 	entriesByCourt := make([][]nameEntry, numCourts)
-	for court, poolIdxs := range PoolsByCourt(pools, courts, courtOfPool) {
+	for court, poolIdxs := range poolsByCourt {
 		for _, poolIdx := range poolIdxs {
 			pool := pools[poolIdx]
 			poolLetter := strings.TrimPrefix(pool.PoolName, "Pool ")

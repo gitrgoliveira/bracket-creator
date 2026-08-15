@@ -125,14 +125,7 @@ func ShiaijoLabel(name string) string {
 // the second one's bands "Shiaijo A" and "Shiaijo B" hands its operators a
 // sheet for courts that are not theirs. Pass comp.Courts instead.
 func CourtLabels(n int) []string {
-	if n < 1 {
-		n = 1
-	}
-	out := make([]string, n)
-	for i := range out {
-		out[i] = CourtLabel(i)
-	}
-	return out
+	return courtsPrefix(nil, clampCourts(n))
 }
 
 // courtNameAt is the name of band i, falling back to the positional letter when

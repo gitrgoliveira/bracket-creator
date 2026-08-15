@@ -3826,7 +3826,7 @@ func readCourtBandLetters(t *testing.T, rows [][]string, sheet string) []string 
 // court over A, B and C and emitted a fourth, completely EMPTY "Shiaijo D" band.
 //
 // The score placement is the sharper half of the assertion. The overlays
-// re-derive their column bands through computePoolsByCourt ->
+// take their column bands from helper.PoolsByCourt ->
 // AssignPoolsToCourts, so they must be handed the SAME court count as
 // PrintPoolMatches; a value that disagrees with the skeleton writes every score
 // and standing into the wrong cells. Pool C's ippon is therefore checked in the

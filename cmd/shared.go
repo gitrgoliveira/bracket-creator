@@ -18,7 +18,7 @@ func printEliminationWithBronze(f *excelize.File, matchWinners map[string]helper
 	// nil courtOfMatch: the CLI generates a BLANK workbook with no stored
 	// bracket behind it, so the draw's own regions are the only assignment
 	// there is. The live app passes the operator's current one instead.
-	helper.PrintEliminationWithBronze(f, matchWinners, rounds, teamMatches, draw, courtNames, nil, true, engi, helper.NeedsBronzeBlock(naginata, len(rounds)))
+	helper.PrintEliminationWithBronze(f, matchWinners, rounds, teamMatches, draw, courtNames, nil, "", true, engi, helper.NeedsBronzeBlock(naginata, len(rounds)))
 }
 
 // finishKnockoutPages runs the CLI epilogue shared by create-pools and

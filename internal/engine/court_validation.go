@@ -208,8 +208,8 @@ func ValidateCourtsInTournament(compCourts, tournCourts []string) error {
 }
 
 // CourtsStillInUse returns the shiaijo that scheduled or running matches of this
-// competition are on but the proposed allocation drops, in the order they appear
-// in the current allocation.
+// competition are on but the proposed allocation drops, in the order the first
+// blocking match on each is found (pool matches first, then the bracket).
 //
 // The competition-level twin of the tournament's orphan guard: removing a court
 // a live match is still assigned to leaves that match pointing at a shiaijo the
@@ -226,46 +226,49 @@ func CourtsStillInUse(proposed []string, poolMatches []state.MatchResult, bracke
 	for _, c := range proposed {
 		keep[c] = true
 	}
-	inUse := make(map[string]bool)
+	// ONE walk. A second pass to order the output is how the bronze got lost:
+	// ThirdPlaceMatch is a SIBLING of bracket.Rounds, not a row in it, so a
+	// rounds-only loop silently skips it and a shiaijo carrying only a live
+	// bronze bout reported as free to remove.
+	var out []string
+	seen := make(map[string]bool)
 	note := func(court string, status state.MatchStatus) {
-		if court == "" || keep[court] || status == state.MatchStatusCompleted {
+		if court == "" || keep[court] || seen[court] || status == state.MatchStatusCompleted {
 			return
 		}
-		inUse[court] = true
+		seen[court] = true
+		out = append(out, court)
 	}
 	for _, m := range poolMatches {
 		note(m.Court, m.Status)
 	}
 	if bracket != nil {
 		for _, round := range bracket.Rounds {
-			for _, m := range round {
-				note(m.Court, m.Status)
+			for i := range round {
+				note(round[i].Court, round[i].Status)
 			}
 		}
 		if bracket.ThirdPlaceMatch != nil {
 			note(bracket.ThirdPlaceMatch.Court, bracket.ThirdPlaceMatch.Status)
 		}
 	}
-	if len(inUse) == 0 {
+	return out
+}
+
+// ValidateCourtsNotInUse is CourtsStillInUse with the operator-facing refusal,
+// so the predicate and the sentence live together the way every other rule in
+// this file does (ValidateCourtsInTournament, ValidateCompetitionShiaijoCount)
+// rather than being reassembled at the HTTP boundary.
+func ValidateCourtsNotInUse(proposed []string, poolMatches []state.MatchResult, bracket *state.Bracket) error {
+	busy := CourtsStillInUse(proposed, poolMatches, bracket)
+	if len(busy) == 0 {
 		return nil
 	}
-	var out []string
-	seen := make(map[string]bool)
-	for _, m := range poolMatches {
-		if inUse[m.Court] && !seen[m.Court] {
-			seen[m.Court] = true
-			out = append(out, m.Court)
-		}
+	verb, pronoun := "has", "it"
+	if len(busy) > 1 {
+		verb, pronoun = "have", "them"
 	}
-	if bracket != nil {
-		for _, round := range bracket.Rounds {
-			for _, m := range round {
-				if inUse[m.Court] && !seen[m.Court] {
-					seen[m.Court] = true
-					out = append(out, m.Court)
-				}
-			}
-		}
-	}
-	return out
+	return fmt.Errorf(
+		"shiaijo %s still %s matches scheduled on %s; move them to a shiaijo this competition keeps, then remove %s",
+		strings.Join(busy, ", "), verb, pronoun, pronoun)
 }

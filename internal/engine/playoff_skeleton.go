@@ -2,7 +2,6 @@ package engine
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -180,18 +179,24 @@ func PlayoffFinalsFromParticipants(store *state.Store, comp *state.Competition) 
 
 // ExportCourts is the shiaijo a competition's workbook is laid out for, by NAME.
 //
-// A competition's courts need not start at A: running one competition on A+B
-// and another on C+D is how a 4-shiaijo venue is shared, and it is the split the
+// A competition's courts need not start at A: running one competition on A+B and
+// another on C+D is how a 4-shiaijo venue is shared, and it is the split the
 // app's own shiaijo hint recommends. Naming the second one's bands from their
 // POSITION would print "Shiaijo A" and "Shiaijo B" on sheets for courts that
 // competition never touches, so the names travel into the workbook rather than a
-// count. The single-court fallback matches the count fallback it replaced: a
-// competition saved without courts still lays out as one band.
-func ExportCourts(comp *state.Competition) []string {
-	if comp == nil || len(comp.Courts) == 0 {
+// count.
+//
+// Resolution goes through InheritedDrawCourts, the single owner of "which
+// shiaijo does this competition run on": an empty list means "inherit the
+// tournament's", which is exactly the legacy/imported shape this export meets.
+// Answering ["A"] for it instead put a competition running on the venue's C and
+// D under bands titled "Shiaijo A" -- a workbook contradicting its own
+// elimination sheet, which reads the live match courts.
+func ExportCourts(comp *state.Competition, tourn *state.Tournament) []string {
+	if comp == nil {
 		return helper.CourtLabels(1)
 	}
-	return comp.Courts
+	return InheritedDrawCourts(comp.Courts, tourn)
 }
 
 // BracketCourtByMatchNumber maps each numbered bout in a stored bracket to the
@@ -248,7 +253,11 @@ func PoolCourtByName(matches []state.MatchResult) map[string]string {
 	courts := make(map[string]string)
 	split := make(map[string]bool)
 	for _, m := range matches {
-		pool, _, ok := strings.Cut(m.ID, "-")
+		// poolNameFromMatchID, not a first-hyphen split: it is this package's
+		// owner of that parse and it handles the -TB-/-DH- suffixes and a pool
+		// name that itself contains a hyphen, where a naive cut silently folds
+		// two pools into one key and reports the pair as split.
+		pool, ok := poolNameFromMatchID(m.ID)
 		if !ok || pool == "" || m.Court == "" {
 			continue
 		}
@@ -265,4 +274,17 @@ func PoolCourtByName(matches []state.MatchResult) map[string]string {
 		return nil
 	}
 	return courts
+}
+
+// BronzeCourt is the shiaijo the 3rd-place bout is on, or "" when there is none.
+//
+// The bronze is a SIBLING of bracket.Rounds rather than a row in it, so every
+// rounds-only walk misses it -- the recurring mistake this repo already guards
+// against in state.findBracketMatchByID. It also carries no match number, so it
+// cannot ride BracketCourtByMatchNumber and needs its court passed on its own.
+func BronzeCourt(bracket *state.Bracket) string {
+	if bracket == nil || bracket.ThirdPlaceMatch == nil {
+		return ""
+	}
+	return bracket.ThirdPlaceMatch.Court
 }

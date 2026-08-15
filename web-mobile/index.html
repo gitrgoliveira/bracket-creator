@@ -80,8 +80,21 @@
     <script type="module" src="/dist/data.jsx"></script>
     <script type="module" src="/dist/patch.jsx"></script>
     <script type="module" src="/dist/router.js?v=5"></script>
-    <script type="module" src="/dist/bracket.js?v=6"></script>
-    <script type="module" src="/dist/ui.js?v=5"></script>
+    <!-- bracket / ui / qr carry NO "?v=" and bracket+ui use the ".jsx" form
+         deliberately: each is ALSO imported by another module
+         (admin_scoring_team.jsx, admin_scoring_engi.jsx, admin_shell.jsx), and a
+         browser keys a module by its exact URL. A tag at "/dist/ui.js?v=5"
+         against an import of "./ui.jsx" is TWO module instances of one file: it
+         evaluates twice, doubles the download/parse, and splits any
+         module-level state — the same hazard the viewer note below describes,
+         which these three had drifted into. The server rewrites "/dist/X.jsx"
+         to the compiled "dist/X.js" (server.go), so the .jsx form is what makes
+         the tag and the import agree. Adding "?v=N" back to one of these
+         re-breaks it; the dist files are served with revalidation and no
+         Cache-Control, and every IMPORTED module is already unversioned, so the
+         query was never protecting these anyway. -->
+    <script type="module" src="/dist/bracket.jsx"></script>
+    <script type="module" src="/dist/ui.jsx"></script>
     <!-- glossary_data.js is generated from internal/domain/glossary.go
          via `go generate` (runs as part of `make go/build`). glossary.jsx
          (compiled to dist/glossary.js) imports it via a relative path. -->
@@ -93,7 +106,7 @@
     <script type="module" src="/dist/sponsor_strip.js?v=5"></script>
     <!-- qr.js exposes window.renderQR; must load before display.js so the
          StreamingOverlay's QR ("scan for results") can draw. -->
-    <script type="module" src="/dist/qr.js?v=5"></script>
+    <script type="module" src="/dist/qr.js"></script>
     <!-- display.js exports queueLabel / queueLabelCompact to window for the
          viewer pills. Must load *before* viewer.js so the first viewer render
          picks up the labels. -->

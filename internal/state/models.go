@@ -795,9 +795,10 @@ type MatchResult struct {
 	// on result.DecidedByHantei != nil; under matchWriteRestore (the
 	// rollback replaying a trusted snapshot) there is no "omitted", so a
 	// nil is written through as false. Pool matches are merged with
-	// `*r = *result`, so a nil pointer there will clear any stored value.
-	// This is acceptable in practice because FIK rules don't permit
-	// hantei in pool play (see persistence caveat below).
+	// `*r = *result`, so applyPoolWrite carries the same preserve-on-nil
+	// explicitly before that overwrite. It used to rely on a pool hantei
+	// being unstorable anyway; now that it persists (see below), a
+	// verdict-silent re-score would otherwise erase it.
 	//
 	// On READ paths that project BracketMatch.DecidedByHantei (bool) back
 	// into MatchResult for SSE / HTTP responses, use HanteiPtr below so
@@ -805,15 +806,21 @@ type MatchResult struct {
 	// minimal and signalling "no hantei" by absence rather than an
 	// explicit false.
 	//
-	// Persistence caveat: pool matches are stored in pool-matches.csv,
-	// whose column layout does NOT include this field; so a hantei
-	// decision on a pool match survives in-memory and on the SSE wire,
-	// but does NOT survive a server restart. Bracket matches are stored
-	// in bracket.json, which serializes the full struct, so the flag
-	// survives there. See BracketMatch.DecidedByHantei for the mirror;
-	// pool-level hantei is a rare-enough case (FIK doesn't normally
-	// allow it in pool play) that the gap is acceptable. The yaml tag
-	// is retained for future YAML-serialised contexts.
+	// Persistence: bracket matches are stored in bracket.json, which
+	// serializes the full struct. Pool matches are stored in
+	// pool-matches.csv, whose column layout has no field for this — and
+	// does not need one. A hantei occupies a point SLOT, so it is
+	// persisted as domain.HanteiMark in the WINNER's IpponsA/IpponsB
+	// column and decoded back into this flag on load
+	// (encodeHanteiIntoIppons / decodeHanteiFromIppons in pools.go). The
+	// mark never escapes the store, so no counter or export sees it.
+	//
+	// This used to be an accepted gap: a pool hantei survived in memory
+	// and on the SSE wire but not a restart, written off because FIK does
+	// not normally allow hantei in pool play. Operators do run it
+	// (operator ruling), and the encoding costs no schema change. See
+	// BracketMatch.DecidedByHantei for the mirror. The yaml tag is
+	// retained for future YAML-serialised contexts.
 	DecidedByHantei *bool `json:"decidedByHantei,omitempty" yaml:"decided_by_hantei,omitempty"`
 	// ResultSource records how the result was submitted: "admin" (operator with
 	// password), "self-reported" (participant in self-run mode), or "" (legacy/

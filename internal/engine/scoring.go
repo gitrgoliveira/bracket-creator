@@ -335,6 +335,16 @@ func applyPoolWrite(stored, result *state.MatchResult, policy matchWritePolicy) 
 		if result.CorrectionReason == "" {
 			result.CorrectionReason = stored.CorrectionReason
 		}
+		// Preserve-on-nil for the MATCH-level verdict, mirroring what
+		// applyBracketMatchResult does for a knockout match. A pool hantei now
+		// persists (encodeHanteiIntoIppons, state/pools.go), so without this the
+		// whole-struct overwrite below would let any verdict-silent re-score
+		// erase it — the same failure preserveSubHantei exists to prevent one
+		// level down, and previously written off on the grounds that a pool
+		// hantei could not be stored at all.
+		if result.DecidedByHantei == nil {
+			result.DecidedByHantei = stored.DecidedByHantei
+		}
 		// A pool/league team encounter can hold a daihyosen (findMatchForDaihyosen
 		// accepts pool matches). Without this a verdict-silent write from a stale
 		// second editor erases a recorded hantei, which in accrueTeamSubResults

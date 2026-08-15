@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 )
 
@@ -318,6 +319,84 @@ func splitIppons(s string) []string {
 	return strings.Split(s, "|")
 }
 
+// encodeHanteiIntoIppons returns the two ippon slices as they should be
+// PERSISTED for r, with the judges'-decision mark appended to the winning
+// side's slice when the match was decided by hantei.
+//
+// pool-matches.csv has no DecidedByHantei column, and it does not need one: a
+// hantei occupies a point SLOT (domain.HanteiMark), so the existing IpponsA /
+// IpponsB columns carry it. That is the same shape every scoreboard already
+// renders, where Ht fills the winner's next free slot. Hantei is only taken
+// from a TIED scoreline and sanbon-shobu ends at 2, so the winner always has a
+// slot free for it.
+//
+// The mark is a STORAGE encoding only: decodeHanteiFromIppons strips it on the
+// way back in and restores the flag, so nothing downstream of the load ever
+// sees an "Ht" among the ippons and no counter, standings figure, tie-break or
+// export changes shape. (CountScoringIppons drops it regardless, so a
+// hand-edited file that leaves one in cannot inflate a score either.)
+//
+// Returns the originals untouched when there is nothing to encode. A hantei
+// with no attributable winner cannot be encoded — validation requires a winner,
+// so that is malformed data, and it degrades to the pre-existing behaviour of
+// losing the flag rather than guessing a side.
+func encodeHanteiIntoIppons(r *MatchResult) (ipponsA, ipponsB []string) {
+	ipponsA, ipponsB = r.IpponsA, r.IpponsB
+	if r.DecidedByHantei == nil || !*r.DecidedByHantei || r.Winner == "" {
+		return ipponsA, ipponsB
+	}
+	withMark := func(s []string) []string {
+		for _, v := range s {
+			if v == domain.HanteiMark {
+				return s // already encoded; never double-append
+			}
+		}
+		out := make([]string, len(s), len(s)+1)
+		copy(out, s)
+		return append(out, domain.HanteiMark)
+	}
+	switch r.Winner {
+	case r.SideA:
+		return withMark(ipponsA), ipponsB
+	case r.SideB:
+		return ipponsA, withMark(ipponsB)
+	}
+	return ipponsA, ipponsB
+}
+
+// decodeHanteiFromIppons is the inverse: it strips domain.HanteiMark out of a
+// loaded match's ippon slices and sets DecidedByHantei when one was present.
+// After this the in-memory shape is exactly what it was before the match was
+// written, so the encoding is invisible above the store.
+//
+// It does NOT clear an already-set flag: a caller that knows better (a bracket
+// match, or a future column) keeps its value.
+func decodeHanteiFromIppons(m *MatchResult) {
+	found := false
+	strip := func(s []string) []string {
+		out := s[:0:0]
+		for _, v := range s {
+			if v == domain.HanteiMark {
+				found = true
+				continue
+			}
+			out = append(out, v)
+		}
+		if out == nil {
+			// splitIppons' contract: an empty field is an empty slice, never
+			// nil, so the JSON projection stays [] rather than null.
+			return []string{}
+		}
+		return out
+	}
+	a, b := strip(m.IpponsA), strip(m.IpponsB)
+	if !found {
+		return
+	}
+	m.IpponsA, m.IpponsB = a, b
+	m.DecidedByHantei = HanteiExplicit(true)
+}
+
 // parsePoolMatchesRecords turns a CSV record matrix into MatchResults.
 // Extracted so the file-based and bytes-based parsers share the
 // rec-shape→struct mapping verbatim (no drift between the two).
@@ -347,6 +426,10 @@ func parsePoolMatchesRecords(records [][]string) []MatchResult {
 			Status:   MatchStatus(rec[10]),
 			Court:    rec[11],
 		}
+
+		// Restore a hantei that was persisted as a mark in the winner's score
+		// cell, and take the mark back out so nothing above the store sees it.
+		decodeHanteiFromIppons(&m)
 
 		if len(rec) > 12 && rec[12] != "" {
 			_ = json.Unmarshal([]byte(rec[12]), &m.SubResults)
@@ -471,14 +554,18 @@ func (s *Store) savePoolMatchesLocked(compID string, results []MatchResult, writ
 			subJSON = string(b)
 		}
 
+		// A hantei rides in the winner's score cell rather than in a column of
+		// its own; see encodeHanteiIntoIppons.
+		encIpponsA, encIpponsB := encodeHanteiIntoIppons(&r)
+
 		if err := writer.Write([]string{
 			poolName,
 			matchIdx,
 			r.SideA,
 			r.SideB,
 			r.Winner,
-			strings.Join(r.IpponsA, "|"),
-			strings.Join(r.IpponsB, "|"),
+			strings.Join(encIpponsA, "|"),
+			strings.Join(encIpponsB, "|"),
 			strconv.Itoa(r.HansokuA),
 			strconv.Itoa(r.HansokuB),
 			r.Decision,

@@ -4803,40 +4803,41 @@ button.pool-match-row {
    vertically centred; the name sits at the bottom of its (possibly taller)
    row so it hugs its scores. Grid items stretch by default, so the pill is
    pinned back to a hug-content chip mirrored inward. */
-/* Gated on @supports so an older Chromium WebView (subgrid shipped Chrome 117 /
-   Safari 16) falls back to the base .sb-side flex column rather than landing
-   the grid-row: 2..5 assignments on IMPLICIT rows and rendering misaligned.
-   Modern browsers get the subgrid alignment; old ones get the pre-change flex
-   layout (mp-gmcg review F8).
+/* UNGATED. This used to sit behind @supports (grid-template-rows: subgrid) so
+   an older engine fell back to the base .sb-side flex column — which was the
+   ONE path in the app where the ippon slots did not hug the centre, i.e. the
+   only surface that could still render the pre-FIK outer-edge layout.
 
-   The operator console targets current tablets and laptops, which clear the
-   subgrid bar (see the "Devices and screens" table in
-   docs/user-guide/start-here/choosing-your-setup.md); the fallback covers older
-   or locked-down venue hardware and is the one path where the ippon slots do
-   NOT hug the centre. */
-@supports (grid-template-rows: subgrid) {
-  .sb-match:has(.sb-slots) {
-    grid-template-rows: 1fr auto auto auto auto 1fr;
-  }
-  .sb-match:has(.sb-slots) > .sb-side {
-    display: grid;
-    grid-row: 1 / -1;
-    grid-template-rows: subgrid;
-  }
-  .sb-match:has(.sb-slots) > .sb-side > .sb-side__badge { grid-row: 2; }
-  .sb-match:has(.sb-slots) > .sb-side > .sb-name { grid-row: 3; align-self: end; }
-  .sb-match:has(.sb-slots) > .sb-side > .sb-slots { grid-row: 4; }
-  .sb-match:has(.sb-slots) > .sb-side > .sb-points-grid { grid-row: 5; }
-  .sb-match:has(.sb-slots) > .sb-center { grid-row: 1 / -1; }
-  .sb-match:has(.sb-slots) > .sb-side--shiro > .sb-side__badge { justify-self: end; }
-  .sb-match:has(.sb-slots) > .sb-side--aka > .sb-side__badge { justify-self: start; }
-  /* Slots hug the INSIDE (against the centre vs) via justify-self on the hug-
-     content group; the existing flex-direction (row / row-reverse) still controls
-     the outside-to-inside fill, so each side's first ippon stays on its name side
-     and fills toward the centre — the fixed FIK rule is untouched. */
-  .sb-match:has(.sb-slots) > .sb-side--shiro > .sb-slots { justify-self: end; }
-  .sb-match:has(.sb-slots) > .sb-side--aka > .sb-slots { justify-self: start; }
+   The app targets recent Chrome and Safari (operator ruling), and subgrid
+   shipped in Chrome 117 / Safari 16, so every supported browser takes this
+   branch. Keeping the gate meant keeping a second, WRONG layout alive for
+   browsers we do not support, and it could only be discovered by someone
+   running one. Removing it makes the FIK inner-column layout unconditional.
+
+   If a future target ever predates subgrid, restore the gate AND the
+   documentation of what that fallback renders — do not let a silent
+   outer-edge layout back in. */
+.sb-match:has(.sb-slots) {
+  grid-template-rows: 1fr auto auto auto auto 1fr;
 }
+.sb-match:has(.sb-slots) > .sb-side {
+  display: grid;
+  grid-row: 1 / -1;
+  grid-template-rows: subgrid;
+}
+.sb-match:has(.sb-slots) > .sb-side > .sb-side__badge { grid-row: 2; }
+.sb-match:has(.sb-slots) > .sb-side > .sb-name { grid-row: 3; align-self: end; }
+.sb-match:has(.sb-slots) > .sb-side > .sb-slots { grid-row: 4; }
+.sb-match:has(.sb-slots) > .sb-side > .sb-points-grid { grid-row: 5; }
+.sb-match:has(.sb-slots) > .sb-center { grid-row: 1 / -1; }
+.sb-match:has(.sb-slots) > .sb-side--shiro > .sb-side__badge { justify-self: end; }
+.sb-match:has(.sb-slots) > .sb-side--aka > .sb-side__badge { justify-self: start; }
+/* Slots hug the INSIDE (against the centre vs) via justify-self on the hug-
+   content group; the existing flex-direction (row / row-reverse) still controls
+   the outside-to-inside fill, so each side's first ippon stays on its name side
+   and fills toward the centre — the fixed FIK rule is untouched. */
+.sb-match:has(.sb-slots) > .sb-side--shiro > .sb-slots { justify-self: end; }
+.sb-match:has(.sb-slots) > .sb-side--aka > .sb-slots { justify-self: start; }
 
 /* the side label (".sb-dojo" historically held it) becomes the identity chip,
    one statement of the side, colour-coded, like the inline editor's chip */
@@ -4890,10 +4891,13 @@ button.pool-match-row {
 
    Shiro (left column) packs its slots to the left (outer) by default; Aka
    (right column) must mirror it, pack to the right and render pts[0] at the
-   outer (right) edge. Where the browser supports subgrid the slot group as a
-   whole also hugs the centre vs (the .sb-slots justify-self rules above); in
-   the non-subgrid fallback it does not, and only this within-group fill order
-   still holds. Fixed by FIK Table 1 (p.15), Yuko-datotsu row, which pins the
+   outer (right) edge. The slot group as a whole also hugs the centre vs (the
+   .sb-slots justify-self rules above), unconditionally now that the subgrid
+   gate is gone; this declaration owns only the WITHIN-group fill order.
+   It is the third expression of the aka mirror — the other two are
+   sideSlotOrder in result_slot.jsx (see its note) — and is kept in CSS because
+   this surface renders its cells in DOM order and flips them in the layout
+   layer. Fixed by FIK Table 1 (p.15), Yuko-datotsu row, which pins the
    mark order to the Taisho round of Table 2 (p.16). See
    running_a_kendo_tournament.md → Individual Match Scoreboard. */
 .sb-side--aka .sb-slots {

@@ -5,6 +5,18 @@ package domain
 // as it drops an empty cell.
 const IpponPlaceholder = "•"
 
+// HanteiMark is the judges'-decision mark that rides in the WINNER's score
+// cell. It is not a waza letter and never a scored point (CountScoringIppons
+// drops it, as it drops the placeholder): it records that the referees settled
+// the match, not that anyone struck.
+//
+// It occupies a point SLOT, though, which is what lets a pool match persist a
+// hantei without a new column — see encodeHanteiIntoIppons in state/pools.go.
+// A hantei is only taken from a tied scoreline, and sanbon-shobu ends at 2, so
+// the winner always has a free slot for it (the same reasoning resultSlot uses
+// in web-mobile/js/result_slot.jsx).
+const HanteiMark = "Ht"
+
 // CountScoringIppons counts the real ippon marks in an ippons slice, ignoring
 // empty entries and IpponPlaceholder. The default-win maru (written by the
 // RecordDecision twins via DefaultWinIppons) counts like any struck ippon.
@@ -17,7 +29,7 @@ const IpponPlaceholder = "•"
 func CountScoringIppons(ippons []string) int {
 	n := 0
 	for _, v := range ippons {
-		if v != "" && v != IpponPlaceholder {
+		if v != "" && v != IpponPlaceholder && v != HanteiMark {
 			n++
 		}
 	}

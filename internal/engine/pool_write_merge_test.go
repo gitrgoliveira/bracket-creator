@@ -166,3 +166,53 @@ func TestQuickScoreKeepsCorrectionReason(t *testing.T) {
 	assert.Equal(t, "reopened: bout 2 recorded on the wrong side", stored[0].CorrectionReason,
 		"the audit justification must survive a plain score write")
 }
+
+// A pool match can now hold a hantei that survives a restart, so the merge has
+// to protect the match-level verdict the way it already protects a daihyosen
+// sub-bout: a second editor that never saw the verdict must not erase it.
+func TestPoolWrite_MatchLevelHanteiSurvivesASilentRescore(t *testing.T) {
+	stored := func() *state.MatchResult {
+		return &state.MatchResult{
+			ID: "Pool A-1", SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			Status:  state.MatchStatusCompleted,
+			IpponsA: []string{"M"}, IpponsB: []string{"K"},
+			DecidedByHantei: state.HanteiExplicit(true),
+		}
+	}
+
+	t.Run("a verdict-silent forward write keeps it", func(t *testing.T) {
+		s := stored()
+		incoming := &state.MatchResult{
+			ID: "Pool A-1", SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			Status:  state.MatchStatusCompleted,
+			IpponsA: []string{"M"}, IpponsB: []string{"K"},
+		}
+		require.False(t, applyPoolWrite(s, incoming, matchWriteForward))
+		require.NotNil(t, s.DecidedByHantei, "nil means the writer said nothing")
+		assert.True(t, *s.DecidedByHantei)
+	})
+
+	t.Run("an explicit false still withdraws it", func(t *testing.T) {
+		s := stored()
+		incoming := &state.MatchResult{
+			ID: "Pool A-1", SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			Status:          state.MatchStatusCompleted,
+			DecidedByHantei: state.HanteiExplicit(false),
+		}
+		require.False(t, applyPoolWrite(s, incoming, matchWriteForward))
+		require.NotNil(t, s.DecidedByHantei)
+		assert.False(t, *s.DecidedByHantei, "an operator withdrawal must apply")
+	})
+
+	t.Run("restore inherits nothing", func(t *testing.T) {
+		// The K3 rollback replays a snapshot: a nil there means the match HAD
+		// no verdict, so preserving would re-apply the write being undone.
+		s := stored()
+		snapshot := &state.MatchResult{
+			ID: "Pool A-1", SideA: "Alice", SideB: "Bob",
+			Status: state.MatchStatusScheduled,
+		}
+		require.False(t, applyPoolWrite(s, snapshot, matchWriteRestore))
+		assert.Nil(t, s.DecidedByHantei, "the rolled-back verdict must not survive")
+	})
+}

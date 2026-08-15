@@ -680,7 +680,22 @@ func validateIpponCounts(field string, ipponsA, ipponsB []string) error {
 			Message: fmt.Sprintf("at most %d ippons per side (best-of-3), got %d", maxIpponsPerSide, len(ipponsB)),
 		}
 	}
-	if len(ipponsA) == maxIpponsPerSide && len(ipponsB) == maxIpponsPerSide {
+	// The two checks above and the one below count DIFFERENTLY, on purpose.
+	//
+	// The per-side caps are STRUCTURAL: a side has two slots, so an array with
+	// more entries than that is malformed whatever the entries are, and raw
+	// len() is the right measure.
+	//
+	// This one is SEMANTIC: "both sides scored 2" is a claim about POINTS, and
+	// an unfilled "•" placeholder or an empty cell is not a point (the same rule
+	// domain.CountScoringIppons states for the engine, the store and the hantei
+	// tie gate). Counting slots here rejected legal scorelines: ["M","•"]
+	// against ["K","D"] is 1-2, an ordinary win, but read as 2-2 and refused
+	// with a message about a rule it does not break. Unreachable from the UI —
+	// both editors strip the placeholder before sending — but this is the wire
+	// boundary, and it now agrees with every other counter in the codebase.
+	if domain.CountScoringIppons(ipponsA) == maxIpponsPerSide &&
+		domain.CountScoringIppons(ipponsB) == maxIpponsPerSide {
 		return &ValidationError{
 			Field:   field + "ippons",
 			Message: "both sides cannot have 2 ippons (best-of-3 ends at first to 2)",

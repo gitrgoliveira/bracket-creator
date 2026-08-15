@@ -19,7 +19,7 @@
 
 import { resolveMatchLineup, resolveLineupTeamId, pickFromLineup, resolveBoutSideName, kachinukiHidesLineupPosition } from './lineup_resolver.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
-import { resultSlot, realIppons, hanteiTied, nameOf } from './result_slot.jsx';
+import { resultSlot, sideSlotOrder, realIppons, hanteiTied, nameOf } from './result_slot.jsx';
 
 const { useState: useSB, useEffect: useEB } = React;
 
@@ -170,7 +170,11 @@ function subWinnerSides(sub, matchSideA, matchSideB) {
 const WAZA_NAMES = { M: "Men (head)", K: "Kote (wrist)", D: "Do (body)", T: "Tsuki (throat)", H: "Hansoku (penalty)", S: "Sune (shin)", "○": "Default win", Ht: "Hantei (judges' decision)" };
 
 function slotCells(letters, side, testid) {
-  const cells = [0, 1].map(i => {
+  // sideSlotOrder, not a local reverse: slot 0 is the OUTER (name-side) cell on
+  // both sides, and which index that is visually is the same rule resultSlot
+  // answers logically. Mapping the order directly (rather than building then
+  // reversing) keeps index 0's testid on the outer cell either way.
+  return sideSlotOrder(side).map(i => {
     const ch = letters[i] || "";
     return (
       <span key={i} className={"msb-slot" + (side === "aka" ? " msb-slot--aka" : "")}
@@ -178,7 +182,6 @@ function slotCells(letters, side, testid) {
         data-testid={i === 0 ? testid : undefined}>{ch}</span>
     );
   });
-  return side === "aka" ? cells.toReversed() : cells;
 }
 
 // centreMarks: the §263 inner cells: [shiro slot][shiro slot] | vs/X/(E)/(DH) | [aka slot][aka slot].

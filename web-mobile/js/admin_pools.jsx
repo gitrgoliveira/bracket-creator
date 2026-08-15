@@ -4,6 +4,7 @@
 // Canonical pool-id parser shared with the display surfaces (single source of
 // truth: ./pool_ids.jsx is a leaf module with no import chain).
 import { poolNameOf, isSupplementaryBout, isPoolDaihyosenBout, teamMatchTypeFor } from './pool_ids.jsx';
+import { nameOf } from './result_slot.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA } = React;
 const EmptyState = window.EmptyState;
@@ -80,8 +81,7 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
   let repRosterB = [];
   if (repIsTeam) {
     const teams = (comp && comp.config && comp.config.players) || (comp && comp.players) || [];
-    const nameOf = (s) => (typeof s === "string" ? s : (s && s.name) || "");
-    const teamByName = (nm) => teams.find(t => ((t.name || t.Name) === nm));
+        const teamByName = (nm) => teams.find(t => ((t.name || t.Name) === nm));
     const rosterFor = (window.AdminLineupHelpers && window.AdminLineupHelpers.rosterFor) || (() => []);
     repRosterA = rosterFor(teamByName(nameOf(m.sideA))) || [];
     repRosterB = rosterFor(teamByName(nameOf(m.sideB))) || [];

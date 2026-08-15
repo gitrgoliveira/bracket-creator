@@ -5,6 +5,7 @@
 import { findRunningOnCourt, findUpcomingOnCourt, countCourtMatches, sideLabel, phaseLabel, TermD, poolNameOf, isSupplementaryBout, phaseProgressOnCourt, bracketRoundSiblings, StreamingQR } from './display_helpers.jsx';
 import { teamMatchTypeFor, DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import { TeamScoreboard, IndividualScore, useTeamLineups, teamIVPW } from './match_scoreboard.jsx';
+import { realIppons } from './result_slot.jsx';
 
 const { useMemo: useMD } = React;
 
@@ -605,8 +606,8 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, linkState 
         const regularSubs = subResults.filter(s => s.position > DAIHYOSEN_POSITION);
         if (regularSubs.length === 0) return false;
         const allDone = regularSubs.every(s => {
-            const aIp = (s.ipponsA || []).filter(x => x && x !== "•");
-            const bIp = (s.ipponsB || []).filter(x => x && x !== "•");
+            const aIp = realIppons(s.ipponsA);
+            const bIp = realIppons(s.ipponsB);
             // Mirror the shared scoreboard's "scored" test: a bout can also be
             // decided with no ippon letters: fusensho/kiken (winner + decision),
             // a hansoku award, or an explicit winner. Without these, a tied

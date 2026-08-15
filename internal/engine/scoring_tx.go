@@ -213,20 +213,11 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		}
 	}
 
-	var sideMismatch bool
-	err := e.withPoolMatchTx(tx, compID, matchID, func(r *state.MatchResult) {
-		// The POOL branch of the path POST /score and the bulk-score endpoint
-		// actually take - the site the hand-copied merge once missed.
-		sideMismatch = applyPoolWrite(r, result, matchWriteForward)
-	})
+	sideMismatch, err := e.writeToPoolOrBracketTx(tx, compID, matchID, result, matchWriteForward)
 	if err != nil {
-		if !errors.Is(err, errMatchNotFound) {
-			return nil, err
-		}
-		if err := e.recordBracketMatchResultTx(tx, compID, matchID, result, matchWriteForward); err != nil {
-			return nil, err
-		}
-	} else if sideMismatch {
+		return nil, err
+	}
+	if sideMismatch {
 		// Match identity is fixed at generation; a score payload naming
 		// different competitors is rejected (HTTP 409) rather than allowed to
 		// overwrite the stored pairing. Returns before any side-effect write.
@@ -319,25 +310,37 @@ func (e *Engine) rollbackMatchResultTx(tx state.StoreTx, compID, matchID string,
 	}
 }
 
+// writeToPoolOrBracketTx is the tx-aware twin of writeToPoolOrBracket
+// (scoring.go), where the reasoning for the shared fall-through lives. The two
+// differ only in the store handle they take: the tx variants read and write
+// inside the caller's already-held per-competition lock, so they cannot call
+// the public Store methods the non-tx twin uses (the mutex is not reentrant).
+func (e *Engine) writeToPoolOrBracketTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult, policy matchWritePolicy) (mismatch bool, err error) {
+	perr := e.withPoolMatchTx(tx, compID, matchID, func(r *state.MatchResult) {
+		// The POOL branch of the path POST /score and the bulk-score endpoint
+		// actually take - the site the hand-copied merge once missed.
+		mismatch = applyPoolWrite(r, result, policy)
+	})
+	if perr == nil {
+		return mismatch, nil
+	}
+	if !errors.Is(perr, errMatchNotFound) {
+		return false, perr
+	}
+	return false, e.recordBracketMatchResultTx(tx, compID, matchID, result, policy)
+}
+
 // recordMatchResultTx is the tx-aware twin of RecordMatchResult. Used
 // exclusively by the K3 partial-write rollback inside
 // RecordMatchResultWithIneligibilityTx, the prior result is restored
 // byte-for-byte, so applyHansokuIppons is intentionally skipped here.
 func (e *Engine) recordMatchResultTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult) error {
 	result.ID = matchID
-	err := e.withPoolMatchTx(tx, compID, matchID, func(r *state.MatchResult) {
-		// K3 rollback: replay the snapshot verbatim - see matchWriteRestore.
-		_ = applyPoolWrite(r, result, matchWriteRestore)
-	})
-	if err != nil {
-		if !errors.Is(err, errMatchNotFound) {
-			return err
-		}
-		// The bracket twin of the applyPoolWrite call above: same snapshot,
-		// same restore semantics, whichever branch this match id resolves to.
-		if err := e.recordBracketMatchResultTx(tx, compID, matchID, result, matchWriteRestore); err != nil {
-			return err
-		}
+	// K3 rollback: replay the snapshot verbatim - see matchWriteRestore. The
+	// side mismatch is deliberately DISCARDED here: a snapshot replays sides
+	// captured from this same match, so a disagreement is not a client error.
+	if _, err := e.writeToPoolOrBracketTx(tx, compID, matchID, result, matchWriteRestore); err != nil {
+		return err
 	}
 	if _, err := e.recordIneligibilityFromDecisionTx(tx, compID, matchID, result); err != nil {
 		log.Printf("engine: recordIneligibilityFromDecisionTx compId=%s matchId=%s: %v", compID, matchID, err)

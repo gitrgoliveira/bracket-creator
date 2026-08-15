@@ -274,6 +274,39 @@ const (
 // client must not be able to clear (ReopenPending) are re-stamped at the HTTP
 // boundary instead - see handlers_match.go - so a new field of that kind still
 // needs a decision about which layer preserves it.
+// writeToPoolOrBracket performs one match write against whichever store the
+// match id resolves to, and reports whether the payload named a pairing that is
+// not this match's (a client error the caller maps to HTTP 409).
+//
+// A match id resolves to a pool/league match or a knockout one only at run
+// time, so every score write has to try the pool store and fall through to the
+// bracket on errMatchNotFound. That fall-through was hand-copied at four sites
+// (both non-tx writers and both tx twins), each threading `policy` into two
+// separate calls. matchWritePolicy exists precisely because a policy reaching
+// only one branch silently reverts to forward semantics for the matches that
+// fall through — so leaving the branch SELECTION duplicated kept the shape of
+// the bug one level up: a fifth write path had to re-remember it.
+//
+// The tx twin is writeToPoolOrBracketTx (scoring_tx.go); they differ only in
+// which store handle they take, which is why they are two functions rather than
+// one with a nil check. Callers keep their own error policy: `mismatch` is
+// RETURNED rather than turned into an error here, because the forward writers
+// reject it while the K3 restore deliberately ignores it (a snapshot replays
+// sides captured from this same match).
+func (e *Engine) writeToPoolOrBracket(compId, matchId string, result *state.MatchResult, policy matchWritePolicy) (mismatch bool, err error) {
+	perr := e.withPoolMatch(compId, matchId, func(r *state.MatchResult) {
+		mismatch = applyPoolWrite(r, result, policy)
+	})
+	if perr == nil {
+		return mismatch, nil
+	}
+	if !errors.Is(perr, errMatchNotFound) {
+		return false, perr
+	}
+	// The SAME policy the pool branch would have used.
+	return false, e.recordBracketMatchResult(compId, matchId, result, policy)
+}
+
 func applyPoolWrite(stored, result *state.MatchResult, policy matchWritePolicy) (mismatch bool) {
 	// reconcileSides BACKFILLS omitted sides as a side effect and only reports
 	// the mismatch, so it must run under both policies; hoisted out of the
@@ -553,20 +586,11 @@ func (e *Engine) RecordMatchResult(compId string, matchId string, result *state.
 // the K3 rollback calls it with matchWriteRestore. The policy reaches whichever
 // branch the match id resolves to — see matchWritePolicy for what each inherits.
 func (e *Engine) writeMatchResult(compId string, matchId string, result *state.MatchResult, policy matchWritePolicy) error {
-	var sideMismatch bool
-	err := e.withPoolMatch(compId, matchId, func(r *state.MatchResult) {
-		sideMismatch = applyPoolWrite(r, result, policy)
-	})
+	sideMismatch, err := e.writeToPoolOrBracket(compId, matchId, result, policy)
 	if err != nil {
-		if !errors.Is(err, errMatchNotFound) {
-			return err
-		}
-		// The SAME policy the pool branch just used: a match id resolves to a
-		// pool or a bracket match at run time, and the caller cannot know which.
-		if err := e.recordBracketMatchResult(compId, matchId, result, policy); err != nil {
-			return err
-		}
-	} else if sideMismatch {
+		return err
+	}
+	if sideMismatch {
 		return ErrMatchSideMismatch
 	}
 	// Side-effect writes are non-fatal: the match score is already on disk,
@@ -627,18 +651,11 @@ func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId strin
 		return nil, merr
 	}
 
-	var sideMismatch bool
-	err := e.withPoolMatch(compId, matchId, func(r *state.MatchResult) {
-		sideMismatch = applyPoolWrite(r, result, matchWriteForward)
-	})
+	sideMismatch, err := e.writeToPoolOrBracket(compId, matchId, result, matchWriteForward)
 	if err != nil {
-		if !errors.Is(err, errMatchNotFound) {
-			return nil, err
-		}
-		if err := e.recordBracketMatchResult(compId, matchId, result, matchWriteForward); err != nil {
-			return nil, err
-		}
-	} else if sideMismatch {
+		return nil, err
+	}
+	if sideMismatch {
 		return nil, ErrMatchSideMismatch
 	}
 	status, err := e.recordIneligibilityFromDecision(compId, matchId, result)

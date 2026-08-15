@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1409,5 +1410,50 @@ func TestScoreRequestValidate_HanteiTieGateIgnoresPlaceholders(t *testing.T) {
 			DecidedByHantei: state.HanteiExplicit(true),
 		}
 		assert.NoError(t, validateSubBout("subResults[0].", sub, false))
+	})
+}
+
+// validateIpponCounts counts two ways on purpose: the per-side caps are
+// STRUCTURAL (a side has two slots), the 2-2 rule is SEMANTIC (a claim about
+// points). Counting slots for the second rejected legal scorelines.
+func TestValidateIpponCounts_TwoTwoRuleCountsPointsNotSlots(t *testing.T) {
+	t.Run("a placeholder does not make a scoreline 2-2", func(t *testing.T) {
+		// 1-2 on real ippons: an ordinary win, previously refused as "2-2".
+		assert.NoError(t, validateIpponCounts("", []string{"M", "•"}, []string{"K", "D"}))
+	})
+
+	t.Run("an empty cell does not either", func(t *testing.T) {
+		assert.NoError(t, validateIpponCounts("", []string{"M", ""}, []string{"K", "D"}))
+	})
+
+	t.Run("a real 2-2 is still rejected", func(t *testing.T) {
+		err := validateIpponCounts("", []string{"M", "K"}, []string{"D", "T"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "both sides cannot have 2 ippons")
+	})
+
+	t.Run("the per-side cap stays structural", func(t *testing.T) {
+		// Three slots is malformed whatever the entries are: only one is a
+		// real ippon, and it is still refused.
+		err := validateIpponCounts("", []string{"M", "•", "•"}, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "at most 2 ippons per side")
+	})
+
+	t.Run("the wire gate agrees with the domain counter", func(t *testing.T) {
+		// The property that keeps this aligned: whenever the domain counter
+		// says both sides scored 2, the gate refuses; otherwise it does not.
+		for _, tc := range [][2][]string{
+			{{"M", "K"}, {"D", "T"}},
+			{{"M", "•"}, {"K", "D"}},
+			{{"M"}, {"K"}},
+			{{}, {}},
+			{{"○", "○"}, {"M", "K"}},
+		} {
+			a, b := tc[0], tc[1]
+			wantReject := domain.CountScoringIppons(a) == 2 && domain.CountScoringIppons(b) == 2
+			err := validateIpponCounts("", a, b)
+			assert.Equal(t, wantReject, err != nil, "ipponsA=%v ipponsB=%v", a, b)
+		}
 	})
 }

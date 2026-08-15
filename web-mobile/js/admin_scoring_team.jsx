@@ -37,7 +37,7 @@ import { useDebouncedRunningWrite, SyncStatusPill } from './admin_scoring_autosa
 // the editor derives its per-bout middle from it rather than restating the
 // chain (CLAUDE.md § Match Decision Types: the middle rule lives in ONE place).
 import { boutMiddle, winnerSideLR } from './bracket.jsx';
-import { realIppons, hanteiTied, hanteiSlot, hanteiWinnerKey, nameOf } from './result_slot.jsx';
+import { realIppons, hanteiTied, hanteiSlot, hanteiWinnerKey, nameOf, sideSlotOrder } from './result_slot.jsx';
 
 // renderTeamBoutMiddle: the ONE place the editor turns a sub-bout into its
 // centre value, for BOTH the read-only done row and the live entry row. Derives
@@ -2100,7 +2100,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             // and only the hantei winner carries an Ht.
             const ptSlots = (rs) => {
               const htSlot = hanteiSlot(dhHantei === rs.key, rs.pts);
-              const order = rs.color === "aka" ? [1, 0] : [0, 1];
+              // sideSlotOrder: the same visual mirror the read-only scoreboard
+              // applies, so the editor and the board can never disagree about
+              // which cell is a side's outer (name-side) one.
+              const order = sideSlotOrder(rs.color);
               return order.map(i => {
                 const isHt = htSlot === i;
                 return (

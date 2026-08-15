@@ -265,7 +265,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     if (targetStatus === "scheduled") return { winner: null, status: "scheduled", score: null, ipponsA: [], ipponsB: [], hansokuA: 0, hansokuB: 0, ...hanteiClear, ...repBlock };
     if (targetStatus === "running") return {
       status: "running", winner: null,
-      ipponsA: aPts.filter(x => x !== "•"), ipponsB: bPts.filter(x => x !== "•"),
+      ipponsA: realIppons(aPts), ipponsB: realIppons(bPts),
       hansokuA: aFouls, hansokuB: bFouls,
       score: { type: "ippon", winnerPts: aTotal, loserPts: bTotal, ippons: aPts, fouls, live: true, corrected: isComplete },
       ...enchoBlock(), ...hanteiClear, ...repBlock,
@@ -275,8 +275,8 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     // ippon. Hansoku Hs are already physically present in the pts arrays
     // (folded in by applyFoulIncrement at the 2-foul boundary), so no
     // additional H fold is needed here.
-    const aLetters = aPts.filter(x => x !== "•");
-    const bLetters = bPts.filter(x => x !== "•");
+    const aLetters = realIppons(aPts);
+    const bLetters = realIppons(bPts);
     const aFinal = aLetters.slice(0, MAX_IPPONS_PER_SIDE);
     const bFinal = bLetters.slice(0, MAX_IPPONS_PER_SIDE);
     const winnerSide = aFinal.length > bFinal.length ? "a" : bFinal.length > aFinal.length ? "b" : null;
@@ -304,8 +304,8 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // court (when onSubmitAndNext is available and this isn't a correction).
   const submitHantei = (winnerSide) => {
     const winner = winnerSide === "a" ? m.sideA : m.sideB;
-    const aFinal = aPts.filter(x => x !== "•").slice(0, MAX_IPPONS_PER_SIDE);
-    const bFinal = bPts.filter(x => x !== "•").slice(0, MAX_IPPONS_PER_SIDE);
+    const aFinal = realIppons(aPts).slice(0, MAX_IPPONS_PER_SIDE);
+    const bFinal = realIppons(bPts).slice(0, MAX_IPPONS_PER_SIDE);
     const patch = {
       winner,
       ipponsA: aFinal,

@@ -59,20 +59,50 @@ export function resultSlot(cells) {
   return { slot, loose: slot === -1 };
 }
 
+// sideSlotOrder: the VISUAL half of the same outside-to-inside rule resultSlot
+// answers logically. Slot 0 is always a side's OUTER (name-side) cell, but the
+// two sides mirror across the centre, so Aka must render its pair reversed for
+// slot 0 to land nearest the Aka name on the right (FIK Table 2, p.16).
+//
+// Returns the render order of the two slot indices: [0,1] for Shiro (left),
+// [1,0] for Aka (right).
+//
+// It lives beside resultSlot because they are one contract seen from two
+// angles: resultSlot says WHICH slot a mark takes, this says WHERE that slot
+// appears. Splitting them is how a mark ends up logically outer and visually
+// inner. Both JS surfaces that build the pair now derive from here — the
+// read-only scoreboard (slotCells) and the team editor (ptSlots) — where they
+// previously spelled it as `cells.toReversed()` and `[1, 0]` respectively.
+//
+// A THIRD expression of this rule exists and is deliberately left alone: the
+// individual score editor mirrors its Aka slots in CSS (`flex-direction:
+// row-reverse`, styles.css). That surface renders its cells in DOM order and
+// flips them in the layout layer, so there is no index to derive; converting it
+// would be a visual refactor of an operator-critical surface for no behavioural
+// gain. If you change the direction here, change that declaration too.
+export function sideSlotOrder(side) {
+  return side === "aka" ? [1, 0] : [0, 1];
+}
+
 // realIppons: what counts as a RECORDED ippon (drops empties and the "\u2022"
 // placeholder). Exported so the surfaces that gate on a COUNT all count the
 // same way; the display pair, the hantei tie gates and the editors' totals must
 // never read different totals from one array.
 //
-// SCOPE, stated accurately because an earlier version of this comment was not
-// (it claimed only two callers remained; there are roughly a dozen): this leaf
-// owns the filter for the surfaces that gate a MARK on a count - the
-// scoreboard's hantei tie test, both editors' totals, and the slot picks. It is
-// NOT the only definition in the codebase. Inline copies of the same predicate
-// still live in bracket.jsx, display_scoreboard.jsx, streaming_overlay.jsx,
-// viewer_standings.jsx, admin_competition_bracket.jsx and api_serializers.jsx.
-// Migrating them is a separate sweep; until it happens, changing what counts as
-// a recorded ippon means grepping that literal, not just editing this function.
+// SCOPE: this is now the ONLY definition in web-mobile/js. The sweep is done —
+// bracket.jsx, display_scoreboard.jsx, streaming_overlay.jsx, viewer_standings.jsx,
+// admin_competition_bracket.jsx, api_serializers.jsx, admin_shiaijo.jsx and both
+// editors all call it, so changing what counts as a recorded ippon is a
+// one-line edit here rather than a grep for the literal. A `grep -rn '!== "•"'
+// --include='*.jsx'` outside this file returning ANY production hit means a new
+// copy has appeared. (Two earlier versions of this comment were wrong in
+// opposite directions: the first claimed two callers when a dozen existed, the
+// second still listed files that had already been migrated.)
+//
+// It also unified two spellings that had drifted apart: read paths dropped
+// empties AND the placeholder (`x && x !== "•"`), while some write paths dropped
+// only the placeholder, so one file could hold three different answers to "how
+// many ippons is this". An empty cell is not a scored ippon on any path.
 // (Go's equivalent is domain.CountScoringIppons, which both the engine and the
 // wire validator now call — that pair no longer needs a keep-in-sync comment.)
 export const realIppons = (arr) => (arr || []).filter(x => x && x !== "\u2022");
@@ -83,10 +113,14 @@ export const realIppons = (arr) => (arr || []).filter(x => x && x !== "\u2022");
 export const hanteiTied = (ipponsA, ipponsB) => realIppons(ipponsA).length === realIppons(ipponsB).length;
 
 // nameOf: a side may arrive as an object or a bare string; this is the unwrap
-// for callers that must compare or display a side name. Same scope caveat as
-// realIppons above — the scoreboard and both editors call it, but one-line
-// copies remain in bracket.jsx, viewer_standings.jsx, admin_pools.jsx,
-// streaming_overlay.jsx and admin_scoring_engi.jsx.
+// for callers that must compare or display a side NAME.
+//
+// SCOPE: no plain name-unwrap copies remain. What is left in the codebase is a
+// different shape and deliberately not migrated — identity-pair extractors that
+// pull the id AND the name together to compare two sides (winnerSideLR in
+// bracket.jsx, the winner-side check in api_serializers.jsx, viewer_awards.jsx,
+// viewer_watchlist_core.jsx). Taking only their name half from here would split
+// one identity rule across two modules, which is worse than a local pair.
 export const nameOf = (v) => (v && typeof v === "object" ? v.name : v) || "";
 
 // hanteiSlot: the EDITOR variant of resultSlot — "is this the side that won the

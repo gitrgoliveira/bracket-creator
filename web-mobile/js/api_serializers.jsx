@@ -20,6 +20,7 @@
 // and produce the UI-friendly shape with object sides and a unified
 // `score` object the bracket card renderer can consume.
 
+import { realIppons } from './result_slot.jsx';
 const STATUS_MAP = { "complete": "completed", "in_progress": "running" };
 
 function toBackendStatus(s) { return STATUS_MAP[s] || s; }
@@ -37,8 +38,8 @@ function toBackendMatchResult(patch, match) {
     const winnerName = patch.winner ? (typeof patch.winner === "object" ? patch.winner.name : patch.winner) : "";
 
     const score = patch.score || {};
-    const ipponsA = (patch.ipponsA || []).filter(x => x !== "•");
-    const ipponsB = (patch.ipponsB || []).filter(x => x !== "•");
+    const ipponsA = realIppons(patch.ipponsA);
+    const ipponsB = realIppons(patch.ipponsB);
 
     const fouls = score.fouls || {};
     const result = {

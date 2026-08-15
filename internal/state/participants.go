@@ -531,14 +531,17 @@ func (s *Store) UpdateParticipant(compID string, pid string, withZekkenName bool
 	mu.Lock()
 	defer mu.Unlock()
 
-	return s.updateParticipantNoLock(compID, pid, withZekkenName, transform)
+	// nil comp: this path is deliberately NOT setup-gated (check-in toggles must
+	// keep working after the competition starts), so it has no already-loaded
+	// competition to hand on and the rule lazy-loads if it ever needs one.
+	return s.updateParticipantNoLock(compID, pid, withZekkenName, nil, transform)
 }
 
 // updateParticipantNoLock contains the full mutate-load-rewrite body of
 // UpdateParticipant. Caller MUST hold the per-comp lock. Factored out so
 // ReplaceParticipant can wrap the same logic under a status-gated lock
 // without forcing the lock-only check-in callers to pay for that gate.
-func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenName bool, transform func(p *domain.Player) error) (*domain.Player, error) {
+func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenName bool, comp *Competition, transform func(p *domain.Player) error) (*domain.Player, error) {
 	// Seeds are not merged here; check-in mutations don't need seed data.
 	players, err := s.loadParticipantsNoLock(compID, withZekkenName, LoadParticipantsOpts{WithSeeds: false})
 	if err != nil {
@@ -658,7 +661,7 @@ func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenNam
 		}
 	}
 
-	if err := s.saveParticipantsNoLock(compID, players, withZekkenName, teamNameRule{}); err != nil {
+	if err := s.saveParticipantsNoLock(compID, players, withZekkenName, teamNameRule{comp: comp}); err != nil {
 		return nil, err
 	}
 	return &players[foundIdx], nil
@@ -746,18 +749,21 @@ func marshalParticipantsCSV(players []domain.Player, withZekkenName bool) ([]byt
 // per-comp lock. Treats "missing competition" and "empty status" as setup
 // (mirroring the handler-side check), so a fresh test fixture that doesn't
 // explicitly set Status still passes.
-func (s *Store) requireSetupLocked(compID string) error {
+func (s *Store) requireSetupLocked(compID string) (*Competition, error) {
 	comp, err := s.loadCompetitionLocked(compID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if comp == nil {
-		return nil // missing file: treat as fresh / setup (matches handler semantics)
+		return nil, nil // missing file: treat as fresh / setup (matches handler semantics)
 	}
 	if comp.Status != "" && comp.Status != CompStatusSetup {
-		return ErrCompetitionNotInSetup
+		return nil, ErrCompetitionNotInSetup
 	}
-	return nil
+	// Returned, not discarded: both callers pass it straight into the
+	// team-name rule, which would otherwise re-read and re-parse config.md
+	// under this same lock a few lines later.
+	return comp, nil
 }
 
 // AddParticipant atomically loads the participant list, mints a UUIDv4 ID,
@@ -774,7 +780,8 @@ func (s *Store) AddParticipant(compID string, p domain.Player, withZekkenName bo
 	mu.Lock()
 	defer mu.Unlock()
 
-	if err := s.requireSetupLocked(compID); err != nil {
+	comp, err := s.requireSetupLocked(compID)
+	if err != nil {
 		return nil, err
 	}
 
@@ -813,7 +820,7 @@ func (s *Store) AddParticipant(compID string, p domain.Player, withZekkenName bo
 
 	players = append(players, p)
 
-	if err := s.saveParticipantsNoLock(compID, players, withZekkenName, teamNameRule{}); err != nil {
+	if err := s.saveParticipantsNoLock(compID, players, withZekkenName, teamNameRule{comp: comp}); err != nil {
 		return nil, err
 	}
 
@@ -831,11 +838,12 @@ func (s *Store) ReplaceParticipant(compID string, pid string, withZekkenName boo
 	mu.Lock()
 	defer mu.Unlock()
 
-	if err := s.requireSetupLocked(compID); err != nil {
+	comp, err := s.requireSetupLocked(compID)
+	if err != nil {
 		return nil, err
 	}
 
-	return s.updateParticipantNoLock(compID, pid, withZekkenName, transform)
+	return s.updateParticipantNoLock(compID, pid, withZekkenName, comp, transform)
 }
 
 // teamNameRule is the per-write context for the team-name uniqueness gate. The
@@ -848,6 +856,16 @@ type teamNameRule struct {
 	skip bool
 	// comp is the competition record when the caller already loaded it under
 	// this same lock; nil means "load it, but only if the rule needs it".
+	//
+	// Every caller that HAS one now passes it, which was not true when this
+	// field was added: two of the four sites passed the zero value while
+	// requireSetupLocked had loaded and discarded the very record they needed,
+	// so those writes re-read and re-parsed config.md under the same lock. The
+	// two that still pass nil are the ungated check-in paths (Store.UpdateParticipant
+	// and its tx twin), which deliberately skip requireSetupLocked so toggles
+	// keep working after a competition starts — they genuinely have nothing to
+	// hand on, and the lazy load is the correct fallback there rather than an
+	// oversight.
 	comp *Competition
 }
 

@@ -1,6 +1,9 @@
 package mobileapp
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"io/fs"
 	"log"
 	"log/slog"
@@ -9,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
@@ -252,7 +256,10 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 			// Check if file exists in FS
 			_, err := fs.Stat(subFS, filePath)
 			if err == nil {
-				// File exists, serve it
+				// File exists, serve it. http.ServeContent honours the ETag we
+				// set here against the request's If-None-Match, so an unchanged
+				// build answers 304 without a body.
+				setStaticCacheHeaders(c, subFS, filePath)
 				fileServer := http.FileServer(http.FS(subFS))
 				fileServer.ServeHTTP(c.Writer, c.Request)
 				return
@@ -270,6 +277,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 			if strings.HasPrefix(filePath, "dist/") && strings.HasSuffix(filePath, ".jsx") {
 				rewritten := strings.TrimSuffix(filePath, ".jsx") + ".js"
 				if _, err := fs.Stat(subFS, rewritten); err == nil {
+					setStaticCacheHeaders(c, subFS, rewritten)
 					c.Request.URL.Path = "/" + rewritten
 					http.FileServer(http.FS(subFS)).ServeHTTP(c.Writer, c.Request)
 					return
@@ -293,3 +301,78 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 
 	return r, hub, apiLimiter
 }
+
+// buildAssetETag is the validator for the compiled front-end under /dist/.
+//
+// Derived from the CONTENT of the embedded assets, not from the build version.
+// version.GetVersion() reads an embedded string that on a development branch is
+// the branch name: it does not change when you rebuild, so using it here would
+// serve a developer stale JavaScript after every recompile — the exact failure
+// this policy exists to prevent. Hashing the bytes is correct in development
+// and in release alike, and stays stable across restarts of the same binary.
+//
+// Computed once per process, lazily, on the first /dist/ request: one walk and
+// SHA-256 over ~1.2 MB, single-digit milliseconds, off the startup path.
+//
+// Paired with Cache-Control: no-cache, which means "store it, but revalidate
+// before every use" — NOT "do not cache". A returning client always asks and
+// gets a ~200-byte 304 when the bundle is unchanged. Correctness never rests on
+// a freshness guess, and a rebuilt bundle invalidates every asset at once.
+//
+// Before this, http.FileServer over embed.FS emitted no Cache-Control, no ETag
+// and no Last-Modified (embed's zero modtime makes ServeContent omit it), so a
+// browser had nothing to revalidate against and re-downloaded the whole
+// front-end on EVERY page load — measured at 1.17 MB across 69 files, none
+// served from cache. The "?v=N" query strings on some script tags were busting
+// a cache that never existed.
+func buildAssetETag(subFS fs.FS) string {
+	assetETagOnce.Do(func() {
+		h := sha256.New()
+		// WalkDir is deterministic (lexical order), so the same tree always
+		// hashes to the same value.
+		err := fs.WalkDir(subFS, "dist", func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return err
+			}
+			b, rerr := fs.ReadFile(subFS, path)
+			if rerr != nil {
+				return rerr
+			}
+			_, _ = h.Write([]byte(path))
+			_, _ = h.Write(b)
+			return nil
+		})
+		if err != nil {
+			// No validator is better than a wrong one: leaving it empty makes
+			// setStaticCacheHeaders skip the ETag, so responses simply go back
+			// to being uncacheable rather than cacheable-and-stale.
+			log.Printf("mobileapp: hashing /dist for the asset ETag failed, assets will not be cacheable: %v", err)
+			return
+		}
+		assetETag = fmt.Sprintf("%q", hex.EncodeToString(h.Sum(nil))[:16])
+	})
+	return assetETag
+}
+
+// setStaticCacheHeaders applies the revalidation policy to a compiled asset.
+// Only /dist/ is covered: index.html is deliberately no-store (it carries
+// server-rendered meta tags), and uploaded branding/sponsor images set their
+// own policy in their handlers.
+func setStaticCacheHeaders(c *gin.Context, subFS fs.FS, filePath string) {
+	if !strings.HasPrefix(filePath, "dist/") {
+		return
+	}
+	etag := buildAssetETag(subFS)
+	if etag == "" {
+		return
+	}
+	c.Header("Cache-Control", "no-cache")
+	c.Header("ETag", etag)
+}
+
+// assetETag caches the content hash of the embedded /dist tree for the life of
+// the process; see buildAssetETag.
+var (
+	assetETagOnce sync.Once
+	assetETag     string
+)

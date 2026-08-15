@@ -295,16 +295,25 @@ func AssignPoolsToCourts(numPools, numCourts int) ([]int, error) {
 // PoolBoundsForSubtree so that court labels are always consistent.
 //
 // numSubtrees is an EXACT multiple of numCourts (R8: SubdivideRegions emits
-// numCourts x {1,2,4} pages, one court's pages consecutively), so the division
-// below is exact and idx/pagesPerCourt can never reach numCourts. It used to
-// carry an overflow clamp that folded the leftover pages onto the last court,
-// which is what let a 3-court draw print four pages and label the duplicated
-// fourth one "Shiaijo C".
+// numCourts x {1,2,4} pages, one court's pages consecutively), so for every
+// draw this repo builds the division is exact and idx/pagesPerCourt never
+// reaches numCourts.
 //
 // The one remaining non-multiple case is --single-tree, which prints ONE page
 // for the whole draw; pagesPerCourt then floors to 0, is raised to 1, and the
 // single page reports court 0. TreePageTitle names every shiaijo on that page
 // rather than pretending it is court A's.
+//
+// The final clamp is for callers OUTSIDE that invariant: RenderTreePages is
+// exported and takes the page list as an argument, so nothing in the type
+// system stops a 5-page, 2-court call, and the quotient then addresses a court
+// the competition does not have. courtNameAt answers that by inventing a
+// positional letter, so a 2-shiaijo draw titled its last page "Shiaijo C" -- a
+// court no operator can be standing at. Folding it onto the last real court
+// instead names one that at least exists. This is not the clamp that once hid
+// R8 violations by absorbing leftover pages: that fault is fixed at its source
+// (SubdivideRegions emits the exact multiple), which is what makes this
+// unreachable for every internal caller rather than load-bearing for any.
 func SubtreeCourtIndex(numSubtrees, numCourts, idx int) int {
 	// Every current caller clamps its court count, but this is the one place a
 	// zero would actually divide, so enforce the invariant here (like
@@ -314,7 +323,11 @@ func SubtreeCourtIndex(numSubtrees, numCourts, idx int) int {
 	if pagesPerCourt < 1 {
 		pagesPerCourt = 1
 	}
-	return idx / pagesPerCourt
+	courtIdx := idx / pagesPerCourt
+	if courtIdx >= numCourts {
+		return numCourts - 1
+	}
+	return courtIdx
 }
 
 // TreePageTitle is the shiaijo title a rendered tree page carries. Normally

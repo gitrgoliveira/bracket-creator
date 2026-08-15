@@ -182,6 +182,80 @@ type CourtPlan struct {
 	Bronze string
 }
 
+// CourtOf is the shiaijo ONE bout runs on, resolved from the strongest source
+// available: the live court the operator recorded, else the draw region owning
+// it, named from the competition's own courts.
+//
+// This precedence is the whole point of the type and it is stated here alone.
+// A match's court is data the operator reassigns (UpdateMatchCourt), so nothing
+// derived may outrank it; the region is what the CLI has (no stored bracket) and
+// what a freshly drawn competition resolves to anyway.
+//
+// drawn is NodeCourts' output, passed in rather than recomputed because it walks
+// the entire draw and every caller resolves many nodes.
+func (p CourtPlan) CourtOf(n *Node, drawn map[*Node]int) string {
+	if c, ok := p.ByMatch[n.matchNum]; ok && c != "" {
+		return c
+	}
+	return courtNameAt(p.Courts, drawn[n])
+}
+
+// PageCourt is the one shiaijo an entire tree page has been MOVED to, or "" when
+// there is no such answer -- which is the normal case and means "use the page's
+// drawn region".
+//
+// A tree page is a wall chart for a whole bracket region, so unlike CourtOf it
+// cannot just take the strongest per-bout source: a page whose bouts sit on two
+// shiaijo has no single court to be titled after. Same rule the pool sheet
+// applies to a pool split across courts (PoolCourtByName): report a move only
+// when every bout agrees on it, and otherwise leave the block on the shiaijo it
+// was drawn for rather than filing it somewhere half its bouts are not.
+//
+// EVERY junction on the page must have a recorded court, not just the ones that
+// happen to be in ByMatch. A page where one bout is known to be on A and the
+// rest are unknown is not a page that moved to A, and titling it so asserts more
+// than the bracket says -- one bout's worth of evidence stands in for a whole
+// region's wall chart. Requiring full coverage means the only thing an
+// incomplete record can do is leave the drawn title in place, which is where
+// this started; a partial one could actively mislead.
+//
+// So this is inert by construction for the CLI (nil ByMatch) and for any
+// competition nobody has reassigned, because a freshly drawn bracket records
+// each bout's court AS its region's -- the title only changes once every bout on
+// the page has genuinely been moved to the same other shiaijo.
+func (p CourtPlan) PageCourt(subtree *Node) string {
+	if subtree == nil || len(p.ByMatch) == 0 {
+		return ""
+	}
+	agreed := ""
+	unresolved := false
+	var walk func(*Node)
+	walk = func(n *Node) {
+		if n == nil || unresolved {
+			return
+		}
+		// Junctions only: a leaf is an entrant slot, not a bout, and carries no
+		// match number to look up.
+		if n.Left != nil || n.Right != nil {
+			c := p.ByMatch[n.matchNum]
+			switch {
+			case c == "", agreed != "" && agreed != c:
+				unresolved = true
+				return
+			default:
+				agreed = c
+			}
+		}
+		walk(n.Left)
+		walk(n.Right)
+	}
+	walk(subtree)
+	if unresolved {
+		return ""
+	}
+	return agreed
+}
+
 // PoolsByCourt returns the BANDS a pool-phase sheet prints, and the pool indices
 // in each. It is the single owner of that grouping: the Pool Matches skeleton,
 // the per-shiaijo roster sheets and the results overlays all lay rows out in
@@ -887,15 +961,20 @@ func printPoolResultsTable(f *excelize.File, sheetName string, pool Pool, startR
 // inside a workbook whose own tree pages were titled only Shiaijo A and B.
 //
 // The clamp lives HERE, not at the call sites, because it is a contract between
-// this skeleton and everything that writes onto it. The overlays that fill in
-// literal scores and standings (internal/export) re-derive the column bands from
-// the same pools and court count, so a consumer that disagrees with the count
-// used here writes every score and standing into the wrong cells --
-// PoolsByCourt owns that clamp for every writer. CreateNamesWithPoolToPrint
-// does the same so its per-shiaijo sheets name the same set of courts.
-// EffectiveDrawCourts is idempotent, so a caller that already clamped
+// this skeleton and everything that writes onto it. A consumer that disagrees
+// with the count used here writes every score and standing into the wrong cells,
+// so PrintPoolMatches RETURNS the bands and per-band pool indices it actually
+// laid out and the overlays fill in against those. They used to call PoolsByCourt
+// again from the caller, which is deterministic and so agreed -- but only for as
+// long as both calls were handed identical arguments, with nothing enforcing it
+// and a comment one file over already claiming the grouping was "computed ONCE
+// and handed to every overlay". The elimination sibling returns its bands for the
+// same reason. CreateNamesWithPoolToPrint deliberately does NOT take them: it
+// writes separate sheets rather than onto this skeleton, so re-deriving from the
+// same pools is safe there and keeps a call site from handing it a grouping that
+// disagrees. EffectiveDrawCourts is idempotent, so a caller that already clamped
 // (cmd/create-pools.go) is unaffected.
-func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinners int, courts []string, courtOfPool map[string]string, mirror bool, poolCoords map[string]cellCoord, pCoords map[string]playerCellCoord, engi bool) map[string]MatchWinner {
+func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinners int, courts []string, courtOfPool map[string]string, mirror bool, poolCoords map[string]cellCoord, pCoords map[string]playerCellCoord, engi bool) (map[string]MatchWinner, []string, [][]int) {
 	// PoolsByCourt owns the clamp AND the band names, so the headers this writes
 	// and the blocks it fills can never come from two different answers. The
 	// clamp keeps the FIRST n of the competition's shiaijo, so a competition on
@@ -1079,7 +1158,7 @@ func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinner
 
 	SetSheetLayoutPortraitA4DownThenOver(f, sheetName, numCourts)
 
-	return matchWinners
+	return matchWinners, courts, poolsByCourt
 }
 
 func poolEntryWithStyle(startColName string, poolRow int, endColName string, f *excelize.File, sheetName string, leftSide string, rightSide string, textStyle int) {
@@ -1167,14 +1246,8 @@ func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]M
 	// This sheet is a per-shiaijo handout: one band, one page break and one
 	// "Shiaijo X" header per court. A bout printed under the wrong band sends
 	// its competitors to a shiaijo the app is not calling them to, so the band
-	// is resolved from the strongest source available, in this order:
-	//
-	//  1. courtOfMatch -- the LIVE court, read off the stored bracket. A match's
-	//     court is data the operator reassigns at will (UpdateMatchCourt), so
-	//     nothing derived can be trusted over it.
-	//  2. the draw's own region, named from the competition's courts. This is
-	//     what the CLI uses (it has no stored bracket) and what a competition
-	//     drawn but not yet touched by an operator resolves to anyway.
+	// is CourtPlan.CourtOf's answer -- live court over drawn region -- rather
+	// than a precedence chain restated here.
 	//
 	// The bands are then the shiaijo actually USED, in the competition's own
 	// order. Deriving the band count from the draw's region count instead would
@@ -1182,12 +1255,7 @@ func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]M
 	// a shiaijo nothing is scheduled on -- the same defect PrintPoolMatches
 	// already refuses to produce.
 	courtOfNode := plan.Draw.NodeCourts()
-	bandOf := func(n *Node) string {
-		if c, ok := plan.ByMatch[n.matchNum]; ok && c != "" {
-			return c
-		}
-		return courtNameAt(plan.Courts, courtOfNode[n])
-	}
+	bandOf := func(n *Node) string { return plan.CourtOf(n, courtOfNode) }
 	bands := usedCourtBands(eliminationMatchRounds, plan.Courts, plan.Bronze, bandOf)
 	numCourts := len(bands)
 	bandIndex := make(map[string]int, numCourts)
@@ -1510,8 +1578,15 @@ func PrintBronzeBlockWithPrintArea(f *excelize.File, startRow, numTeamMatches in
 	// shiaijo's header. Keep the two cases apart so they cannot be confused
 	// again: an unknown court takes the LAST band rather than masquerading as
 	// the first, which is visible on the sheet instead of plausible.
+	//
+	// The len(bands) guard is what keeps "last band" from meaning band -1. Both
+	// current callers hand over a non-empty set (usedCourtBands never returns
+	// one), but this is exported and a bandless call would otherwise compute
+	// startCol 1-CourtsColumnsPerCourt and hand mustColumnName a negative
+	// column. Band 0 is the same answer the no-court-recorded case gives, which
+	// is the only sheet position that exists when there are no bands to pick.
 	band := 0
-	if bronzeCourt != "" {
+	if bronzeCourt != "" && len(bands) > 0 {
 		if i := slices.Index(bands, bronzeCourt); i >= 0 {
 			band = i
 		} else {

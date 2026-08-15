@@ -143,6 +143,30 @@ describe('Dashboard CompCard start blocker (spec 007 R9)', () => {
     expect(startButton(container).disabled).toBe(false);
     expect(container.querySelector('[data-testid="card-draw-block"]')).toBeNull();
   });
+
+  // The note explains why the button above it is dead. The button needs two
+  // participants to be offered at all, but the blocker was computed for ANY
+  // setup competition, so a nearly-empty one showed "⚠ Cannot start: Shiaijo D
+  // is no longer part of this tournament..." attached to nothing - and ahead of
+  // the action the operator actually needs, which is adding competitors.
+  it('drops the blocker note when there is no Start button for it to explain', async () => {
+    for (const players of [[], [{ id: 'p1', name: 'Yamada' }]]) {
+      const { container } = await mountCard({ c: makeComp({ players, courts: ['A', 'D'] }) });
+      expect(startButton(container), `${players.length} participant(s)`).toBeUndefined();
+      expect(
+        container.querySelector('[data-testid="card-draw-block"]'),
+        `${players.length} participant(s): a refusal with no button to refuse`,
+      ).toBeNull();
+    }
+  });
+
+  it('still shows it as soon as the roster makes the start reachable', async () => {
+    // Guards the fix from over-correcting into "note never renders": the same
+    // broken allocation with a startable roster must still be explained.
+    const { container } = await mountCard({ c: makeComp({ courts: ['A', 'D'] }) });
+    expect(startButton(container).disabled).toBe(true);
+    expect(container.querySelector('[data-testid="card-draw-block"]')).not.toBeNull();
+  });
 });
 
 async function mountStartAll(state, { onConfirm = vi.fn() } = {}) {

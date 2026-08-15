@@ -723,11 +723,18 @@ func TestSubtreeCourtIndex(t *testing.T) {
 		{"two courts second half", 4, 2, 2, 1},
 		{"two courts last page", 4, 2, 3, 1},
 		{"more courts than pages", 2, 4, 1, 1},
-		// R8 makes numSubtrees an exact multiple of numCourts, so the old
-		// overflow clamp (which folded leftover pages onto the last court and
-		// let a 3-court draw label a duplicated fourth page "Shiaijo C") is
-		// unreachable. A non-multiple now simply divides through.
-		{"non-multiple divides through", 5, 2, 4, 2},
+		// R8 makes numSubtrees an exact multiple of numCourts for every draw
+		// this repo builds, so nothing internal reaches the branch below. But
+		// RenderTreePages is exported and takes the page list as an argument,
+		// and an out-of-range quotient makes courtNameAt invent a positional
+		// letter: 5 pages over 2 shiaijo used to title the last page "Shiaijo
+		// C" for a competition that has only A and B. Folding it onto the last
+		// REAL court is the one answer that names a court someone can stand at.
+		{"page past the court count folds onto the last court", 5, 2, 4, 1},
+		// Far past it, which is also what keeps CourtLabel inside A-Z: an
+		// unclamped quotient of 26 or more indexes off the end of the alphabet
+		// and panics.
+		{"far past the court count still lands on the last court", 60, 2, 59, 1},
 		// Regression: SubtreeCourtIndex divided by numCourts unguarded, so a
 		// zero or negative court count (a caller that skipped the clamp every
 		// current call site applies) panicked with a divide by zero. It now

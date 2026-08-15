@@ -21,9 +21,12 @@ describe('courtsOutsideTournament', () => {
     { name: 'a duplicate orphan is reported once', tourn: ['A'], sel: ['D', 'D'], want: ['D'] },
   ];
 
+  // Competition list first, venue second -- the Go mirror's own order, which
+  // this helper follows so a call shape can be copied between the two without
+  // silently inverting the predicate.
   cases.forEach(({ name, tourn, sel, want }) => {
     it(name, () => {
-      expect(courtsOutsideTournament(tourn, sel)).toEqual(want);
+      expect(courtsOutsideTournament(sel, tourn)).toEqual(want);
     });
   });
 });

@@ -411,7 +411,7 @@ func TestGenerateDraw_SeedGapFromCheckInKeepsD6Placement(t *testing.T) {
 	// The reporting half. Ranks 1, 3 and 4 on A, B and D put 1 and 3 in one half
 	// and 4 in the other, which is exactly what D6 asks of the ranks that are
 	// present, so the operator must be told nothing at all.
-	assert.Empty(t, eng.SeedWarnings(compID),
+	assert.Empty(t, seedWarningsByID(t, eng, compID),
 		"the draw honoured every rule the surviving seeds impose; warning here blames the operator for the tool's own check-in drop")
 }
 

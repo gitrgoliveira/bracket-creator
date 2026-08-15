@@ -643,9 +643,15 @@ function formatDrawsBracket(format) {
 //
 // An empty tournament list returns nothing: it means "not loaded yet", not
 // "the venue has no courts". Duplicates are reported once.
-function courtsOutsideTournament(tournamentCourts, selectedCourts) {
+//
+// Argument order is the Go function's, competition first: it is the only helper
+// here that claims to be a mirror, so its call shape has to be copyable in both
+// directions. Its neighbours (courtPillOptions, orphanedShiaijoError) take the
+// venue first because they render the venue's pills and have no Go counterpart
+// to agree with -- that difference is deliberate, not drift.
+function courtsOutsideTournament(compCourts, tournamentCourts) {
+  const sel = Array.isArray(compCourts) ? compCourts : [];
   const tourn = Array.isArray(tournamentCourts) ? tournamentCourts : [];
-  const sel = Array.isArray(selectedCourts) ? selectedCourts : [];
   if (!tourn.length || !sel.length) return [];
   const seen = new Set();
   return sel.filter((cc) => {
@@ -684,7 +690,7 @@ function courtPillOptions(tournamentCourts, selectedCourts) {
   }
   // courtsOutsideTournament has already dropped everything `tourn` holds and
   // deduped what it returns, so nothing here can collide with `seen`.
-  for (const cc of courtsOutsideTournament(tourn, sel)) {
+  for (const cc of courtsOutsideTournament(sel, tourn)) {
     out.push({ court: cc, selected: true, inTournament: false });
   }
   return out;
@@ -709,7 +715,7 @@ function inheritedDrawCourts(ownCourts, tournamentCourts) {
 // assigned shiaijo still exists. Sibling of shiaijoCountError: predicate and
 // label in one call, so no call site restates the rule.
 function orphanedShiaijoError(tournamentCourts, selectedCourts) {
-  const missing = courtsOutsideTournament(tournamentCourts, selectedCourts);
+  const missing = courtsOutsideTournament(selectedCourts, tournamentCourts);
   if (!missing.length) return null;
   const plural = missing.length > 1;
   return `Shiaijo ${missing.join(", ")} ${plural ? "are" : "is"} no longer part of this tournament. Deselect ${plural ? "them" : "it"} and save: matches cannot run on a shiaijo the tournament does not have, and the draw will be refused until you do.`;

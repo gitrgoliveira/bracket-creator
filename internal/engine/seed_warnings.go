@@ -7,7 +7,7 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-// SeedWarnings reports the seed-placement constraints a competition's drawn
+// SeedWarningsFor reports the seed-placement constraints a competition's drawn
 // pools could not honour (R2, D6 and D7 of specs/007-ekc-draw/spec.md): surplus
 // seed ranks that had to be ignored because two seeds may never share a pool,
 // and any half/quarter/shiaijo spread the configuration made impossible.
@@ -22,23 +22,17 @@ import (
 // against a REDRAWN competition. See the note at the count itself for why that
 // count is comp.Courts and not something derived from the live schedule.
 //
-// Returns nil - no warnings, and no error - for every competition that has no
-// pools yet, no seeds, no bracket to place seeds in, or nothing to report. A
-// competition without seeds is a normal configuration and MUST be warning-free.
-func (e *Engine) SeedWarnings(id string) []string {
-	comp, err := e.store.LoadCompetition(id)
-	if err != nil || comp == nil {
-		return nil
-	}
-	return e.SeedWarningsFor(comp)
-}
-
-// SeedWarningsFor is SeedWarnings for a caller that already holds the record.
-// Both HTTP callers do: one has just loaded the competition to answer a detail
-// GET, the other to decide between 200 and 404. Taking the record rather than
-// the id saves them a second load of the identical bytes (a per-competition
-// lock, a stat and a full copy of the courts and player slices) on every admin
-// competition read.
+// Returns nil - no warnings, and no error - for a nil record and for every
+// competition that has no pools yet, no seeds, no bracket to place seeds in, or
+// nothing to report. A competition without seeds is a normal configuration and
+// MUST be warning-free.
+//
+// It takes the RECORD, not the id, because the one caller
+// (GET /competitions/:id/draw-warnings) has just loaded it to decide between 200
+// and 404; an id-taking wrapper would re-load identical bytes behind a
+// per-competition lock on every admin read. There was one, exported and reached
+// only from tests, which is why this note now names the caller that exists
+// rather than a second one that never got built.
 func (e *Engine) SeedWarningsFor(comp *state.Competition) []string {
 	if comp == nil {
 		return nil

@@ -698,6 +698,14 @@ function CompCard({ c, onOpen, onStart, tournament, showToast }) {
     ? window.competitionDrawBlocker(c, tournament && tournament.courts)
     : null;
 
+  // Whether this card offers a start at all. One const for the button AND the
+  // blocker note under it: the note explains why THAT button is dead, so
+  // rendering it where no button exists attaches a refusal to nothing and puts
+  // it ahead of the real next action. A setup competition with 0 or 1
+  // participants is the case -- it has a court blocker like any other, and no
+  // button, because the roster is what it needs first.
+  const canOfferStart = c.status === "draw-ready" || (c.status === "setup" && playerCount >= 2);
+
   const canShare = tournament && tournament.mode === "self-run"
     && c.kind !== "team"
     && (!c.status || c.status === "setup");
@@ -741,7 +749,7 @@ function CompCard({ c, onOpen, onStart, tournament, showToast }) {
           {runningCount > 0 && <div className="tcard__stat"><div className="v" style={{ color: "var(--red)" }}>{runningCount}</div><div className="l">Now</div></div>}
         </div>
         <div className="tcard__actions">
-          {(c.status === "draw-ready" || (c.status === "setup" && playerCount >= 2)) && (
+          {canOfferStart && (
             <button
               type="button"
               className="btn btn--primary btn--sm btn--full"
@@ -753,8 +761,10 @@ function CompCard({ c, onOpen, onStart, tournament, showToast }) {
               which screen fixes it. Kept on the card rather than in a tooltip
               because the dashboard is a touch surface. The remedy comes WITH
               the reason (blocker.fix) rather than being written here, because
-              this card can no longer assume the blocker is a court rule. */}
-          {startBlocker && (
+              this card can no longer assume the blocker is a court rule.
+              Gated on canOfferStart with the button, so the reason can never
+              outlive the thing it is a reason for. */}
+          {canOfferStart && startBlocker && (
             <div className="tcard__action-note" style={{ color: "var(--red)", fontSize: 11, fontWeight: 600, lineHeight: 1.4 }} data-testid="card-draw-block">
               ⚠ Cannot start: {startBlocker.reason} Open this competition. {startBlocker.fix}
             </div>

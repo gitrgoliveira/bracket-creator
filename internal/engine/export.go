@@ -56,7 +56,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	// 3. Pool Matches sheet (red/white, scoring formulas, reactive name references).
 	//    numCourts is the operator's allocation; PrintPoolMatches bands the sheet
 	//    on the shiaijo count the pool phase actually runs on, clamping it itself.
-	matchWinners := helper.PrintPoolMatches(f, pools, comp.TeamSize, comp.EffectivePoolWinners(), courts, courtOfPool, comp.Mirror, poolCoords, playerCoords, comp.Engi)
+	matchWinners, _, _ := helper.PrintPoolMatches(f, pools, comp.TeamSize, comp.EffectivePoolWinners(), courts, courtOfPool, comp.Mirror, poolCoords, playerCoords, comp.Engi)
 
 	// 4. Tree sheets: one visual bracket page per subtree, rendered exactly like
 	//    the CLI (cmd/create-pools.go) and the results workbook
@@ -110,16 +110,20 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		//     Elimination Matches sheet and unnumbered tree pages. The bronze
 		//     block wires its entrant slots to the semi-final losers via the
 		//     real rounds and winners, exactly as the CLI and results workbook.
-		eliminationMatchRounds, _, err := helper.RenderKnockoutPages(f, draw, courts, false, pools, poolCoords, playerCoords, matchWinners)
-		if err != nil {
-			return nil, fmt.Errorf("export: %w", err)
-		}
 		// Band each bout by the shiaijo it is CURRENTLY on, read off the stored
 		// bracket, falling back to the draw's regions where there is none. The
 		// operator reassigns matches between courts while the competition runs,
-		// and this sheet is what their shiaijo runs off.
+		// and these sheets are what their shiaijo runs off. ONE plan for both:
+		// the tree pages are the wall chart for the very bouts the elimination
+		// sheet bands, so a workbook that resolved them separately could title a
+		// page "Shiaijo D" and print its score sheets under "Shiaijo A".
+		plan := LiveCourtPlan(draw, courts, bracket)
+		eliminationMatchRounds, _, err := helper.RenderKnockoutPages(f, plan, false, pools, poolCoords, playerCoords, matchWinners)
+		if err != nil {
+			return nil, fmt.Errorf("export: %w", err)
+		}
 		helper.PrintEliminationWithBronze(f, matchWinners, eliminationMatchRounds, comp.TeamSize,
-			LiveCourtPlan(draw, courts, bracket), comp.Mirror, comp.Engi, hasBronze)
+			plan, comp.Mirror, comp.Engi, hasBronze)
 	} else if hasBronze {
 		// Narrow fallback: a competition whose bracket has a third-place bout but
 		// yields no elimination leaves at all (no pools, no first-round entrants

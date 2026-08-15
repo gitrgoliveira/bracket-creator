@@ -102,7 +102,7 @@ func renderedPageViews(t *testing.T, nPools, poolWinners, numCourts int) []pageC
 	}
 	require.Len(t, poolByHeaderRef, nPools, "every pool must have a distinct data-sheet header to overlay")
 
-	_, numPages, err := RenderKnockoutPages(f, draw, CourtLabels(draw.NumCourts()), false, pools, poolCoords, playerCoords, nil)
+	_, numPages, err := RenderKnockoutPages(f, CourtPlan{Draw: draw, Courts: CourtLabels(draw.NumCourts())}, false, pools, poolCoords, playerCoords, nil)
 	require.NoError(t, err)
 
 	sheets := treePageSheets(f)

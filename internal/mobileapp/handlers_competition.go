@@ -1607,10 +1607,13 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 		hub.Broadcast(EventDrawGenerated, gin.H{"competitionId": id})
-		// The operator reads the result of THIS action, so the draw's seeding
-		// warnings ride back with it as well as on the detail GET they land on
-		// afterwards (R2/D7: a relaxed seed constraint is reported, never
-		// refused).
+		// The competition record alone. The draw's seeding warnings (R2/D7: a
+		// relaxed seed constraint is reported, never refused) are NOT folded in
+		// here -- they have one surface, GET /competitions/:id/draw-warnings,
+		// which the console fetches after this call returns and again on the
+		// detail screen. Recomputed on read there, so they cannot go stale
+		// against a redrawn competition the way a copy embedded in this
+		// response would.
 		c.JSON(http.StatusOK, comp)
 	})
 

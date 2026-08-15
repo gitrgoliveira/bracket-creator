@@ -53,7 +53,7 @@ func TestPrintPoolMatchesAlignment(t *testing.T) {
 		pools := []Pool{poolA, poolB}
 		numCourts := 2
 
-		matchWinners := PrintPoolMatches(f, pools, 0, 1, CourtLabels(numCourts), nil, false, poolCoords, pCoords, false)
+		matchWinners, _, _ := PrintPoolMatches(f, pools, 0, 1, CourtLabels(numCourts), nil, false, poolCoords, pCoords, false)
 		if len(matchWinners) != 2 {
 			t.Errorf("expected 2 matchWinners, got %d", len(matchWinners))
 		}

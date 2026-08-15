@@ -231,7 +231,7 @@ func buildExcelPageCase(t *testing.T, numPools, poolWinners, courts int) excelPa
 	// generators calls exactly this, with matchWinners nil here so the leaf
 	// cells hold literal labels instead of CONCATENATE formulas (the draw is
 	// independent of the pool-match cross-references).
-	_, numPages, err := RenderKnockoutPages(f, draw, CourtLabels(draw.NumCourts()), false, pools, poolCoords, playerCoords, nil)
+	_, numPages, err := RenderKnockoutPages(f, CourtPlan{Draw: draw, Courts: CourtLabels(draw.NumCourts())}, false, pools, poolCoords, playerCoords, nil)
 	if err != nil {
 		return excelPageCase{Error: "RenderKnockoutPages: " + err.Error()}
 	}

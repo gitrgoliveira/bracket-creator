@@ -67,11 +67,25 @@ func SetTreePageLayout(f *excelize.File, sheetName string, depth, lastRow int) {
 // SubtreeCourtIndex and PoolBoundsForSubtree divide by the same exact
 // pagesPerCourt.
 //
+// The page's shiaijo comes from plan: the court every bout on it has been moved
+// to (CourtPlan.PageCourt), and its drawn region when they have not been moved
+// or do not agree. Without the live half a workbook could title this wall chart
+// "Shiaijo D" while the Elimination Matches score sheets for the very same bouts
+// printed under band "Shiaijo A" -- the one file telling its two operators
+// different things. The bands are the sheet's own (usedCourtBands); this only
+// has to reach the same answer for a page, which is why both go through plan
+// rather than each reading the draw.
+//
 // The consumed SheetTree template is NOT deleted here: callers that skip
 // rendering entirely (a league has no knockout) must still delete it, so
 // ownership of the deletion stays with them.
-func RenderTreePages(f *excelize.File, subtrees []*Node, courts []string, pools []Pool, poolCoords map[string]cellCoord, playerCoords map[string]playerCellCoord, matchWinners map[string]MatchWinner) error {
-	numCourts := clampCourts(len(courts))
+func RenderTreePages(f *excelize.File, subtrees []*Node, plan CourtPlan, pools []Pool, poolCoords map[string]cellCoord, playerCoords map[string]playerCellCoord, matchWinners map[string]MatchWinner) error {
+	// The tree pages are banded by the draw's own regions, so they take the
+	// FIRST NumCourts() of the competition's shiaijo -- named, never positional.
+	// Derived here rather than by the caller so the page count, the page titles
+	// and the roster bounds cannot be handed three different court lists.
+	courts := courtsPrefix(plan.Courts, clampCourts(plan.Draw.NumCourts()))
+	numCourts := len(courts)
 	hasPools := len(pools) > 0
 	templateIdx, err := f.GetSheetIndex(SheetTree)
 	if err != nil {
@@ -97,7 +111,11 @@ func RenderTreePages(f *excelize.File, subtrees []*Node, courts []string, pools 
 		startRow := TreeTitleRows + 1
 		// The title formula prepends data!$B$1 (the user-supplied title prefix),
 		// so the page title itself is just the shiaijo label.
-		SetTreeSheetTitle(f, pageSheet, TreePageTitle(len(subtrees), courts, i), TreePageLastCol(depth))
+		title := TreePageTitle(len(subtrees), courts, i)
+		if live := plan.PageCourt(subtree); live != "" {
+			title = ShiaijoLabel(live)
+		}
+		SetTreeSheetTitle(f, pageSheet, title, TreePageLastCol(depth))
 		PrintLeafNodes(subtree, f, pageSheet, 2*depth, startRow, depth, matchWinners)
 
 		lastRow := TreePageLastRow(depth, startRow)
@@ -130,25 +148,32 @@ func RenderTreePages(f *excelize.File, subtrees []*Node, courts []string, pools 
 //     shiaijo (R3/R8). There is no placement pass any more: the draw arrives
 //     already placed, which is why RenderTreePages and PrintLeafNodes never
 //     touch the tree.
+//
 //   - Render before numbering. Rendering stamps each internal node's sheet/cell
 //     coordinates and FillInMatches writes the match numbers into them; with a
 //     FillInMatches-first order every write is silently skipped and the pages
 //     carry no numbers.
 //
+//   - Number before rendering, TOO. AssignMatchNumbers runs first so a page can
+//     look its own bouts up in plan.ByMatch (keyed by match number) while it is
+//     being titled; FillInMatches re-runs it before writing, which is safe
+//     because it is a pure renumbering of the same rounds in the same order.
+//     Only the WRITE has to come second. Nothing in rendering reads matchNum
+//     other than that lookup, so the two orders do not conflict.
+//
 // singleTree forces the whole bracket onto one page (the CLI --single-tree
 // flag). Deleting the consumed SheetTree template stays with the caller (see
 // RenderTreePages).
-func RenderKnockoutPages(f *excelize.File, draw *KnockoutDraw, courts []string, singleTree bool, pools []Pool, poolCoords map[string]cellCoord, playerCoords map[string]playerCellCoord, matchWinners map[string]MatchWinner) ([][]*Node, int, error) {
-	if draw == nil || draw.Root == nil {
+func RenderKnockoutPages(f *excelize.File, plan CourtPlan, singleTree bool, pools []Pool, poolCoords map[string]cellCoord, playerCoords map[string]playerCellCoord, matchWinners map[string]MatchWinner) ([][]*Node, int, error) {
+	if plan.Draw == nil || plan.Draw.Root == nil {
 		return nil, 0, fmt.Errorf("render knockout pages: empty draw")
 	}
-	// The tree pages are banded by the draw's own regions, so they take the
-	// FIRST NumCourts() of the competition's shiaijo -- named, never positional.
-	subtrees := KnockoutPageSubtrees(draw, singleTree)
-	if err := RenderTreePages(f, subtrees, courtsPrefix(courts, clampCourts(draw.NumCourts())), pools, poolCoords, playerCoords, matchWinners); err != nil {
+	subtrees := KnockoutPageSubtrees(plan.Draw, singleTree)
+	rounds := BuildEliminationMatchRounds(plan.Draw.Root)
+	AssignMatchNumbers(rounds)
+	if err := RenderTreePages(f, subtrees, plan, pools, poolCoords, playerCoords, matchWinners); err != nil {
 		return nil, 0, err
 	}
-	rounds := BuildEliminationMatchRounds(draw.Root)
 	FillInMatches(f, rounds)
 	return rounds, len(subtrees), nil
 }

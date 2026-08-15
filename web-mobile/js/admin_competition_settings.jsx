@@ -516,11 +516,19 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   //                  generate a draw until the operator fixes it.
   //   courtsChanged  the operator is actually reassigning shiaijo.
   //
-  // Save is blocked only for `courtsErr && courtsChanged`, exactly matching
-  // the server, which validates courts on write only. Blocking Save whenever
-  // the STORED value is invalid would lock the operator out of every
-  // unrelated edit on that screen (name, date, durations, check-in), which is
-  // the one outcome this rule must not cause.
+  // Save is blocked only for `courtsErr && courtsChanged`. The server's own
+  // gate is broader -- it revalidates the shiaijo count when the courts change
+  // OR the format does -- but this screen has no format control at all
+  // (local.format is read everywhere and staged nowhere), so the format half is
+  // unreachable from here and a courtsChanged-only block covers every edit this
+  // form can actually submit. If a format editor is ever added here, this must
+  // gain `|| local.format !== c.format` with it, or switching a league on 3
+  // shiaijo to mixed offers a live Save and takes a 400.
+  //
+  // Neither state means "the stored value is invalid" -- savedCourtsErr covers
+  // that and deliberately does NOT block, because it would lock the operator
+  // out of every unrelated edit on this screen (name, date, durations,
+  // check-in), which is the one outcome this rule must not cause.
   const savedCourts = c.courts || [];
   const courtsErr = window.shiaijoCountErrorFor(local.format, (local.courts || []).length);
   const savedCourtsErr = window.shiaijoCountErrorFor(c.format, savedCourts.length);

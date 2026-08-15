@@ -245,7 +245,7 @@ func (o *poolOptions) createPools(entries []string) error {
 	} else {
 		helper.CreatePoolMatches(pools)
 	}
-	matchWinners := helper.PrintPoolMatches(f, pools, o.teamMatches, o.poolWinners, courtNames, nil, true, poolCoords, playerCoords, o.engi)
+	matchWinners, _, _ := helper.PrintPoolMatches(f, pools, o.teamMatches, o.poolWinners, courtNames, nil, true, poolCoords, playerCoords, o.engi)
 
 	// Court-first pool-to-knockout draw (specs/007-ekc-draw): one bracket
 	// region per shiaijo, 2nd places crossing to the partner court, byes
@@ -265,7 +265,8 @@ func (o *poolOptions) createPools(entries []string) error {
 		fmt.Printf("Warning: %s\n", w)
 	}
 
-	eliminationMatchRounds, numPages, err := helper.RenderKnockoutPages(f, draw, courtNames, o.singleTree, pools, poolCoords, playerCoords, matchWinners)
+	plan := blankWorkbookCourtPlan(draw, courtNames)
+	eliminationMatchRounds, numPages, err := helper.RenderKnockoutPages(f, plan, o.singleTree, pools, poolCoords, playerCoords, matchWinners)
 	if err != nil {
 		return err
 	}
@@ -282,7 +283,7 @@ func (o *poolOptions) createPools(entries []string) error {
 		totalPoolMatches += len(p.Matches)
 	}
 
-	printEliminationWithBronze(f, matchWinners, eliminationMatchRounds, o.teamMatches, draw, courtNames, o.engi, o.naginata)
+	printEliminationWithBronze(f, matchWinners, eliminationMatchRounds, o.teamMatches, plan, o.engi, o.naginata)
 	helper.FillEstimations(f, int64(len(pools)), int64(totalPoolMatches), int64(o.teamMatches), int64(len(pools)*o.poolWinners-1), o.courts)
 
 	// Apply sheet protection to all sheets except data and Time Estimator

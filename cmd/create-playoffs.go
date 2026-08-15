@@ -188,7 +188,8 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	// into one region per shiaijo and paginated exactly like a pool-fed draw.
 	// nil pools skips the roster overlay.
 	draw := helper.NewPlayoffDraw(tree, o.courts)
-	eliminationMatchRounds, numPages, err := helper.RenderKnockoutPages(f, draw, courtNames, o.singleTree, nil, nil, nil, nil)
+	plan := blankWorkbookCourtPlan(draw, courtNames)
+	eliminationMatchRounds, numPages, err := helper.RenderKnockoutPages(f, plan, o.singleTree, nil, nil, nil, nil)
 	if err != nil {
 		return err
 	}
@@ -208,7 +209,7 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	matchWinners = helper.ConvertPlayersToWinners(players, o.withZekkenName, playerCoords)
 	helper.CreateNamesToPrint(f, players, o.withZekkenName, courtNames, playerCoords)
 
-	printEliminationWithBronze(f, matchWinners, eliminationMatchRounds, o.teamMatches, draw, courtNames, o.engi, o.naginata)
+	printEliminationWithBronze(f, matchWinners, eliminationMatchRounds, o.teamMatches, plan, o.engi, o.naginata)
 	helper.FillEstimations(f, 0, 0, int64(o.teamMatches), int64(len(names)-1), o.courts)
 
 	// Apply sheet protection to all sheets except data and Time Estimator

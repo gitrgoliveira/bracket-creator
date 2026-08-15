@@ -673,7 +673,7 @@ func TestPrintPoolMatchesCourts(t *testing.T) {
 			}
 			poolCoords, pCoords := makeTestPoolCoordMaps(pools)
 
-			matchWinners := PrintPoolMatches(f, pools, 0, 1, CourtLabels(tt.numCourts), nil, false, poolCoords, pCoords, false)
+			matchWinners, _, _ := PrintPoolMatches(f, pools, 0, 1, CourtLabels(tt.numCourts), nil, false, poolCoords, pCoords, false)
 
 			// Must have one matchWinner per pool (position 1)
 			if len(matchWinners) != tt.numPools {

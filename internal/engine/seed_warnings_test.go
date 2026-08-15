@@ -10,7 +10,23 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-// Engine.SeedWarnings is reached in production only through the mobile app's
+// seedWarningsByID is the id-taking shape SeedWarningsFor deliberately does not
+// have: its one production caller already holds the record when it asks, so an
+// exported wrapper would be reachable only from here. Keeping the convenience in
+// the test package means a reader of the engine's API cannot mistake it for a
+// supported second entry point.
+//
+// LoadCompetition answers a missing competition with (nil, nil), so the
+// no-such-competition case below still travels the real path -- through
+// SeedWarningsFor's own nil guard -- rather than being short-circuited here.
+func seedWarningsByID(t *testing.T, eng *Engine, id string) []string {
+	t.Helper()
+	comp, err := eng.store.LoadCompetition(id)
+	require.NoError(t, err)
+	return eng.SeedWarningsFor(comp)
+}
+
+// Engine.SeedWarningsFor is reached in production only through the mobile app's
 // draw-warnings endpoint, so its own package had no test for it and every
 // statement in it was uncovered. The contract worth pinning here is the one D7
 // insists on: this is a WARNING channel and it never fails a caller. Each of
@@ -20,7 +36,7 @@ import (
 func TestSeedWarningsReturnsNilRatherThanFailing(t *testing.T) {
 	t.Run("competition does not exist", func(t *testing.T) {
 		eng, _, _ := setupTestEngine(t)
-		assert.Nil(t, eng.SeedWarnings("no-such-competition"))
+		assert.Nil(t, seedWarningsByID(t, eng, "no-such-competition"))
 	})
 
 	t.Run("competition exists but has no pools yet", func(t *testing.T) {
@@ -28,7 +44,7 @@ func TestSeedWarningsReturnsNilRatherThanFailing(t *testing.T) {
 		compID := "warnings-no-pools"
 		createTestCompetition(t, store, compID, state.CompFormatMixed, 3)
 		saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie"})
-		assert.Nil(t, eng.SeedWarnings(compID),
+		assert.Nil(t, seedWarningsByID(t, eng, compID),
 			"the draw has not been generated, so there is nothing to report on")
 	})
 
@@ -40,7 +56,7 @@ func TestSeedWarningsReturnsNilRatherThanFailing(t *testing.T) {
 			[]string{"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank"})
 		require.NoError(t, eng.GenerateDraw(compID))
 
-		assert.Empty(t, eng.SeedWarnings(compID),
+		assert.Empty(t, seedWarningsByID(t, eng, compID),
 			"an unseeded competition is a normal configuration and MUST be warning-free")
 	})
 }
@@ -68,7 +84,7 @@ func TestSeedWarningsAreSilentForFormatsWithoutABracket(t *testing.T) {
 			}))
 			require.NoError(t, eng.GenerateDraw(compID))
 
-			assert.Empty(t, eng.SeedWarnings(compID),
+			assert.Empty(t, seedWarningsByID(t, eng, compID),
 				"a %s has no bracket, so there is no seed placement to report on", format)
 		})
 	}
@@ -102,7 +118,7 @@ func TestSeedWarningsReportsSurplusSeedRanks(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, pools, 3, "the fixture must produce fewer pools than seeds for this to bite")
 
-	warnings := eng.SeedWarnings(compID)
+	warnings := seedWarningsByID(t, eng, compID)
 	assert.NotEmpty(t, warnings,
 		"4 seeds over 3 pools cannot all be placed, and the operator has to be told")
 	for _, w := range warnings {

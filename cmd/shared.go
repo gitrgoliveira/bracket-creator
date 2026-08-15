@@ -14,11 +14,19 @@ import (
 // naginata bracket with a real semifinal round, the bronze (3rd-place) block with
 // its print area. Shared by create-pools and create-playoffs, which both run the
 // bronze on the same court set with mirror=true.
-func printEliminationWithBronze(f *excelize.File, matchWinners map[string]helper.MatchWinner, rounds [][]*helper.Node, teamMatches int, draw *helper.KnockoutDraw, courtNames []string, engi, naginata bool) {
-	// Draw and Courts only: the CLI generates a BLANK workbook with no stored
-	// bracket behind it, so the draw's own regions are the only assignment there
-	// is. The live app fills in the operator's current one.
-	plan := helper.CourtPlan{Draw: draw, Courts: courtNames}
+// blankWorkbookCourtPlan is the CLI's court plan: Draw and Courts only.
+//
+// The CLI generates a BLANK workbook with no stored bracket behind it, so the
+// draw's own regions are the only assignment there is -- ByMatch and Bronze
+// stay zero and every reader falls back to the region, which is exactly right
+// here. The live app's counterpart is engine.LiveCourtPlan. One assembly per
+// world, so neither the tree pages nor the elimination sheet can be handed a
+// plan the other did not get.
+func blankWorkbookCourtPlan(draw *helper.KnockoutDraw, courtNames []string) helper.CourtPlan {
+	return helper.CourtPlan{Draw: draw, Courts: courtNames}
+}
+
+func printEliminationWithBronze(f *excelize.File, matchWinners map[string]helper.MatchWinner, rounds [][]*helper.Node, teamMatches int, plan helper.CourtPlan, engi, naginata bool) {
 	helper.PrintEliminationWithBronze(f, matchWinners, rounds, teamMatches, plan, true, engi, helper.NeedsBronzeBlock(naginata, len(rounds)))
 }
 

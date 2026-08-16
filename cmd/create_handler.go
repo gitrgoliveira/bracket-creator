@@ -111,14 +111,10 @@ func createTournamentHandler(c *gin.Context) {
 	if err != nil || courts < 1 {
 		courts = 2
 	}
-	if err := helper.ValidateCourts(courts); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-	// Same shiaijo-count rule the --courts flag enforces on the CLI: this
-	// form drives the identical generator, so a count that is not a power of
-	// two would produce the same unmergeable court blocks here.
-	if err := helper.ValidateShiaijoCount(courts); err != nil {
+	// Same pair the --courts flag enforces on the CLI, through the same owner:
+	// this form drives the identical generator, so a count that is not a power
+	// of two would produce the same unmergeable court blocks here.
+	if err := helper.ValidateDrawCourtCount(courts); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}

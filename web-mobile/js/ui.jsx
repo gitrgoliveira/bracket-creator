@@ -463,6 +463,34 @@ function EmptyState({ icon, title, message, cta, ctaNote, className, style, ...a
   );
 }
 
+// The two notes that sit under a shiaijo picker: the red error for the current
+// selection, then the standing teaching hint. Either may be null.
+//
+// One component because there are two pickers -- the create form
+// (admin_setup.jsx) and competition Settings (admin_competition_settings.jsx) --
+// and they are required to look identical: same order, same styling, same test
+// ids, immediately under the pills and above the concurrency hint. That was
+// enforced by a comment on each screen asking the next editor to keep them in
+// step by hand, which is exactly what a shared component is for. The RULE
+// already has one owner (shiaijoCountErrorFor / shiaijoCountHintFor in
+// admin_helpers.jsx); this gives its presentation one too.
+function ShiaijoCountNotes({ error, hint }) {
+  return (
+    <>
+      {error && (
+        <div className="field__hint" style={{ color: "var(--red)", fontWeight: 600 }} data-testid="shiaijo-count-error">
+          {error}
+        </div>
+      )}
+      {hint && (
+        <div className="field__hint" data-testid="shiaijo-count-hint">
+          {hint}
+        </div>
+      )}
+    </>
+  );
+}
+
 function Modal({ title, onClose, children, footer, size, dismissable = true, className, style, ariaLabel }) {
   useEscapeToClose(dismissable ? onClose : undefined);
   return (
@@ -558,7 +586,7 @@ function isInteractiveTarget(el) {
   return tag === "input" || tag === "textarea" || tag === "select" || tag === "button" || tag === "a" || !!el.isContentEditable;
 }
 
-export { StatusBadge, formatDate, Toast, StableInput, pluralize, useEscapeToClose, useClickOutside, isTextEntry, isInteractiveTarget, formatAdminHeaderSub, formatViewerHeaderEyebrow, confirmDialog, promptDialog, DialogHost, Icon, LoadingSpinner, EmptyState, Modal };
+export { StatusBadge, formatDate, Toast, StableInput, pluralize, useEscapeToClose, useClickOutside, isTextEntry, isInteractiveTarget, formatAdminHeaderSub, formatViewerHeaderEyebrow, confirmDialog, promptDialog, DialogHost, Icon, LoadingSpinner, EmptyState, ShiaijoCountNotes, Modal };
 
 if (typeof window !== "undefined") {
   window.StatusBadge = StatusBadge;
@@ -580,6 +608,7 @@ if (typeof window !== "undefined") {
   window.Icon = Icon;
   window.LoadingSpinner = LoadingSpinner;
   window.EmptyState = EmptyState;
+  window.ShiaijoCountNotes = ShiaijoCountNotes;
   window.Modal = Modal;
 
   // Split a combined engi pair name ("Name 1 - Name 2") into [member1, member2].

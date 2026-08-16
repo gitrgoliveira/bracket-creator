@@ -121,7 +121,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	// write against -- taken from the skeleton rather than recomputed here, so
 	// "computed ONCE and handed to every overlay" is enforced by the call shape
 	// instead of by two calls happening to be given the same arguments.
-	matchWinners, _, poolsByCourt := helper.PrintPoolMatches(
+	matchWinners, poolsByCourt := helper.PrintPoolMatches(
 		f, pools, comp.TeamSize, comp.EffectivePoolWinners(),
 		courts, courtOfPool, comp.Mirror, poolCoords, playerCoords, comp.Engi,
 	)

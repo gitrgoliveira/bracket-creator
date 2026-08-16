@@ -148,23 +148,18 @@ function competitionNextSteps(c, tournamentCourts) {
   // avoids showing two buttons that both go to Settings ("Review settings →"
   // and "Reassign shiaijo →"), and it is the honest ordering: a competition
   // whose draw is refused has exactly one next action.
-  const blocker = steps.find((s) => s.blocking && s.state !== "done");
-  if (blocker) {
-    steps.forEach((s) => { if (s.state !== "done") s.state = "todo"; });
-    blocker.state = "active";
-    return steps;
-  }
-
-  // Resolve active/todo: the first non-done step is active; the rest are todo.
-  let foundActive = false;
-  for (const step of steps) {
-    if (step.state === "done") continue;
-    if (!foundActive) {
-      step.state = "active";
-      foundActive = true;
-    }
-    // else stays "todo"
-  }
+  // One pass, one rule: a blocking step takes `active` if there is one,
+  // otherwise the first non-done step does, and every other non-done step is
+  // `todo`. Writing the two cases as separate passes meant the blocker branch
+  // also had to re-clear the states the default branch would have set, which
+  // was a no-op for every step this checklist actually emits and would have
+  // silently stopped being one the moment a later step was pushed as "active".
+  const active = steps.find((s) => s.blocking && s.state !== "done")
+    || steps.find((s) => s.state !== "done");
+  steps.forEach((s) => {
+    if (s.state === "done") return;
+    s.state = s === active ? "active" : "todo";
+  });
 
   return steps;
 }

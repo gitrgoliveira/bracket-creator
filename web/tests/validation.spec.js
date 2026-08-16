@@ -10,6 +10,7 @@ import {
     validateCourtsValue,
     shiaijoCountError,
     VALID_SHIAIJO_COUNTS,
+    SHIAIJO_RULE_REASON,
     validatePoolSettings
 } from "../js/validation.js";
 
@@ -246,7 +247,12 @@ describe("index.html courts field", () => {
     });
 
     it("states the reason under the field, so the rule is taught not just enforced", () => {
-        expect(html).toContain('<div class="form-text" id="courtsHelp">The knockout draw gives each shiaijo its own block of the bracket and the blocks merge in pairs, so the count has to halve cleanly.</div>');
+        // Built from the exported constant, not re-typed: the hint and the
+        // rejection message are the same sentence and a reword must not be able
+        // to land in one of them. index.html is static markup, so this test is
+        // the only thing holding them together.
+        const sentenceCased = SHIAIJO_RULE_REASON.charAt(0).toUpperCase() + SHIAIJO_RULE_REASON.slice(1);
+        expect(html).toContain(`<div class="form-text" id="courtsHelp">${sentenceCased}.</div>`);
         // Wired to the input for assistive tech rather than floating loose.
         expect(html).toMatch(/id="courts"[\s\S]{0,200}aria-describedby="courtsHelp"/);
     });

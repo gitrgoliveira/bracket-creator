@@ -482,9 +482,39 @@ describe('AdminSettings stored-allocation banner (spec 007 R9)', () => {
     const { container } = await mountSection('settings', { comp, tournament: { courts } });
     const banner = container.querySelector('[data-testid="shiaijo-count-banner"]');
     expect(banner).not.toBeNull();
-    expect(banner.textContent).toContain('assigned 6 shiaijo');
-    expect(banner.textContent).toContain('Use 4 or 8, or 1');
+    expect(banner.textContent).toContain('6 shiaijo cannot be paired down');
     expect(banner.textContent).toContain('halve cleanly');
+    // Venue-aware, because this banner sits at the top of the card with no
+    // hint beside it to correct an option the venue cannot supply. The venue
+    // here has 6 shiaijo, so 8 is not on offer.
+    expect(banner.textContent).toContain('This tournament has 6, so this competition can use 1, 2 or 4');
+    expect(banner.textContent).not.toContain('or 8');
+  });
+
+  // The banner judges the RESOLVED allocation. An empty court list MEANS
+  // "inherit the tournament's shiaijo" and is what the server stores and
+  // validates, so measuring the raw list asked about a value never persisted:
+  // shiaijoCountError(0) is null, so this screen showed nothing at all while
+  // the dashboard refused the draw and sent the operator here to fix it.
+  it('warns about an INHERITED allocation the competition never chose', async () => {
+    const comp = makeCompetition({ courts: [], format: 'playoffs' });
+    const { container } = await mountSection('settings', { comp, tournament: { courts: ['A', 'B', 'C'] } });
+    const banner = container.querySelector('[data-testid="shiaijo-count-banner"]');
+    expect(banner).not.toBeNull();
+    // Names where the count came from, or the operator is handed a number they
+    // never picked and no way to connect it to anything on screen.
+    expect(banner.textContent).toContain('no shiaijo of its own');
+    expect(banner.textContent).toContain("all 3 of the tournament's");
+    expect(banner.textContent).toContain('3 shiaijo cannot be paired down');
+    // The competition's own list is empty; that must not be reported as its
+    // allocation.
+    expect(banner.textContent).not.toContain('assigned 0');
+  });
+
+  it('stays silent when the inherited count is legal', async () => {
+    const comp = makeCompetition({ courts: [], format: 'playoffs' });
+    const { container } = await mountSection('settings', { comp, tournament: { courts: ['A', 'B'] } });
+    expect(container.querySelector('[data-testid="shiaijo-count-banner"]')).toBeNull();
   });
 
   it('blocks the start of a stored 6-shiaijo competition and says why', async () => {

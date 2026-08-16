@@ -514,10 +514,13 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // seeds", and the panel it named then showed nothing at all: no banner, no
   // flagged row, no way to see which rank was wrong. The blocker covers both
   // faults, so the banner is driven by the blocker.
-  const { seedProblem, hasSeedProblem } = useMemoA(() => {
-    const blocker = window.competitionSeedingBlocker(c);
-    return { seedProblem: blocker && blocker.reason, hasSeedProblem: !!blocker };
-  }, [c]);
+  //
+  // Not memoised: `c` is a prop object whose identity changes on every SSE
+  // reload, so a [c]-keyed memo almost never hit, and the body is two Sets over
+  // the roster. One derived string, not a string plus its own truthiness --
+  // a blocker always carries a non-empty reason, so a second field could only
+  // ever disagree with the first by going stale.
+  const seedProblem = (window.competitionSeedingBlocker(c) || {}).reason || "";
 
   // Extracted from inline onClick so we can await + log instead of
   // silencing the rejection. Same pattern as updateSeed below: success
@@ -970,7 +973,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
               </div>
             )}
           </div>
-          {hasSeedProblem && (
+          {!!seedProblem && (
             <div className="alert alert--error" style={{ margin: "0 16px 16px" }} data-testid="seed-gap-banner">
               ❌ {seedProblem} The draw cannot run until the seeding is fixed.
             </div>
@@ -1195,7 +1198,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
               {rosterDirty && !isDrawReady && <span style={{ fontSize: 12.5, color: "var(--warn)", fontWeight: 600 }}>● Unsaved changes</span>}
               <button className="btn btn--sm" type="button" onClick={pasteFromExcel} disabled={isDrawReady} title={isDrawReady ? "Discard the draw to edit participants" : "Reads clipboard and converts tab-separated values (e.g. from Excel) to CSV"}>Paste clipboard</button>
-              <button className="btn btn--sm btn--primary" type="button" onClick={apply} disabled={hasSeedProblem || isDrawReady} title={isDrawReady ? "Discard the draw to apply roster changes" : undefined}>Apply changes</button>
+              <button className="btn btn--sm btn--primary" type="button" onClick={apply} disabled={!!seedProblem || isDrawReady} title={isDrawReady ? "Discard the draw to apply roster changes" : undefined}>Apply changes</button>
             </div>
           </div>
 
@@ -1307,7 +1310,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
           {lines.length > 0 && (
             <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10, marginTop: 12 }}>
               {rosterDirty && !isDrawReady && <span style={{ fontSize: 12.5, color: "var(--warn)", fontWeight: 600 }}>● Unsaved changes</span>}
-              <button className="btn btn--primary" type="button" onClick={apply} disabled={hasSeedProblem || isDrawReady} title={isDrawReady ? "Discard the draw to apply roster changes" : undefined}>Apply changes</button>
+              <button className="btn btn--primary" type="button" onClick={apply} disabled={!!seedProblem || isDrawReady} title={isDrawReady ? "Discard the draw to apply roster changes" : undefined}>Apply changes</button>
             </div>
           )}
         </div>

@@ -144,7 +144,13 @@ export const VALID_SHIAIJO_COUNTS = (() => {
 
 // The canonical reason, shared by every surface that states the rule (this
 // rejection message and the standing hint on the courts field in index.html).
-const SHIAIJO_RULE_REASON = 'the knockout draw gives each shiaijo its own block of the bracket and the blocks merge in pairs, so the count has to halve cleanly';
+//
+// Exported so the index.html copy can be pinned AGAINST IT rather than against
+// a third re-typed literal in the test: index.html is static markup and cannot
+// import a JS const, so the test is the only thing that can keep the hint the
+// operator reads and the rejection they get from drifting apart. It asserts the
+// sentence-cased form, which is the only difference between the two.
+export const SHIAIJO_RULE_REASON = 'the knockout draw gives each shiaijo its own block of the bracket and the blocks merge in pairs, so the count has to halve cleanly';
 
 // Shiaijo-count rule for one tournament, mirrored from
 // helper.ValidateShiaijoCount (internal/helper/shiaijo_count.go) and worded

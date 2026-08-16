@@ -330,6 +330,17 @@ function AllWinnersModal({ comps, onClose }) {
 function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompetition, onEditTournament, onAnnounce, onOpenSchedule, onOpenScoreEditor, onOpenImport, onOpenShiaijo, onOpenRegistration, onStartAll, onStartCompetition, onLogout, onViewerMode, onUpdate, showToast, authConfig }) {
   const t = tournament;
   const comps = t.competitions || [];
+  // Whether "Start all" has anything to offer, answered by the same helper the
+  // click handler uses (startAllCompetitions, admin.jsx) rather than by a
+  // second copy of the eligibility test. The two agreed only while their
+  // literals matched: widen eligibility in the helper and this button would
+  // either be dead on click or absent while startable work existed, which is
+  // the drift partitionStartableCompetitions was extracted to end. BLOCKED
+  // competitions count too -- the modal opens to name them, so hiding the
+  // button when every eligible competition is blocked would leave the operator
+  // with no way to find out why.
+  const startAll = window.partitionStartableCompetitions(comps, t.courts);
+  const hasStartableWork = startAll.startable.length + startAll.blocked.length > 0;
   const [exportPdfOpen, setExportPdfOpen] = useStateA(false);
   const [allWinnersOpen, setAllWinnersOpen] = useStateA(false);
   const scheduleEnabled = !!(authConfig?.scheduleEnabled);
@@ -433,7 +444,7 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
               <button type="button" className="btn" onClick={() => setAllWinnersOpen(true)}><Icon name="trophy" />All winners</button>
             )}
             <button type="button" className="btn" onClick={onEditTournament}>Edit details</button>
-            {comps.some(c => c.status === "setup" && (c.players || []).length >= 2) && (
+            {hasStartableWork && (
               <button type="button" className="btn btn--danger" onClick={onStartAll}>Start all</button>
             )}
             {/* When the tournament is empty the first-run empty state below carries

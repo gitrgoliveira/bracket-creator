@@ -938,3 +938,42 @@ func TestImportCompetition_InheritsTournamentCourts(t *testing.T) {
 		assert.Equal(t, []string{"B"}, comp.Courts)
 	})
 }
+
+// The importer runs the SAME court gate as POST /competitions, including the
+// tournament-membership rule.
+//
+// It used to run only the label and shiaijo-count halves, so a manifest naming
+// shiaijo the venue does not have persisted cleanly and failed later at the
+// engine's draw gate -- the exact outcome the create handler added the
+// membership check to prevent. The two paths both author a brand-new
+// allocation, so the set of rules must not vary between them.
+func TestImportCompetition_RefusesCourtsTheVenueLacks(t *testing.T) {
+	store, err := state.NewStore(t.TempDir())
+	require.NoError(t, err)
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name: "T", Date: "11-06-2026", Courts: []string{"A", "B"},
+	}))
+
+	t.Run("a manifest court the tournament does not have is refused", func(t *testing.T) {
+		entry := ImportManifestComp{ID: "imp-orphan", Name: "Orphan", Date: "11-06-2026", Courts: []string{"C"}}
+		res := importCompetition(store, entry, map[string][]byte{})
+		require.NotEmpty(t, res.Error, "a competition on shiaijo C cannot run at a venue with only A and B")
+		assert.Contains(t, res.Error, "courts:")
+		// Refused means NOT written: a row that fails validation must leave no
+		// competition behind for the draw gate to trip over later.
+		// LoadCompetition answers a missing id with (nil, nil), so the nil is
+		// the assertion, not the error.
+		comp, err := store.LoadCompetition("imp-orphan")
+		require.NoError(t, err)
+		assert.Nil(t, comp)
+	})
+
+	t.Run("a subset of the tournament's shiaijo still imports", func(t *testing.T) {
+		entry := ImportManifestComp{ID: "imp-subset", Name: "Subset", Date: "11-06-2026", Courts: []string{"B"}}
+		res := importCompetition(store, entry, map[string][]byte{})
+		require.Emptyf(t, res.Error, "import should succeed: %s", res.Error)
+		comp, err := store.LoadCompetition("imp-subset")
+		require.NoError(t, err)
+		assert.Equal(t, []string{"B"}, comp.Courts)
+	})
+}

@@ -628,10 +628,14 @@ func (e *Engine) runDrawPipeline(id string) error {
 		return terr
 	}
 
-	// The RAW stored allocation, kept for the drift snapshot below: the
-	// resolution on the next line may materialise a list that was never on
-	// disk, and the atomic commit has to compare stored against stored.
-	storedCourts := append([]string(nil), comp.Courts...)
+	// The RAW stored allocation, captured before the inheritance resolution
+	// below, which may materialise a list that was never on disk. The atomic
+	// commit compares it against the freshly reloaded current.Courts to detect
+	// a concurrent settings save; comparing a materialised list against the
+	// empty one still on disk would report drift on every inherited draw.
+	// Named with the other loaded* snapshots even though it is captured
+	// earlier, because it is one of them.
+	loadedCourts := append([]string(nil), comp.Courts...)
 
 	// Materialise an omitted shiaijo allocation. An empty list has always
 	// MEANT "inherit the tournament's shiaijo" (it is what every HTTP write
@@ -728,11 +732,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 	loadedRoundRobin := comp.RoundRobin
 	loadedKind := comp.Kind
 	loadedWithZekken := comp.WithZekkenName
-	// The RAW list, captured before the inheritance resolution above. The
-	// transform compares it against the freshly reloaded current.Courts to
-	// detect a concurrent settings save; comparing a materialised list against
-	// the empty one still on disk would report drift on every inherited draw.
-	loadedCourts := storedCourts
+	// loadedCourts is captured further up, before the inheritance resolution.
 	loadedTeamSize := comp.TeamSize
 	loadedCheckInEnabled := comp.CheckInEnabled
 	loadedPoolWinners := comp.PoolWinners

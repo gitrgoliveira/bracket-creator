@@ -1079,19 +1079,11 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
                 <button key={cc} className={`radio-pill ${selectedCourts.includes(cc) ? "is-active" : ""}`} type="button" onClick={() => toggleCourt(cc)}>Shiaijo (court) {cc}</button>
               ))}
             </div>
-            {/* Same hints, same wording and the same position relative to the
-                pills as the competition Settings screen: immediately under
-                the pills, above the concurrency hint. */}
-            {courtsErr && (
-              <div className="field__hint" style={{ color: "var(--red)", fontWeight: 600 }} data-testid="shiaijo-count-error">
-                {courtsErr}
-              </div>
-            )}
-            {courtsHint && (
-              <div className="field__hint" data-testid="shiaijo-count-hint">
-                {courtsHint}
-              </div>
-            )}
+            {/* Same component the competition Settings screen renders, so the
+                hints, their wording and their position relative to the pills
+                cannot drift apart: immediately under the pills, above the
+                concurrency hint. */}
+            <window.ShiaijoCountNotes error={courtsErr} hint={courtsHint} />
             <div className="field__hint">Concurrency for this competition equals the number of shiaijo (courts) assigned. Different competitions can share shiaijo (courts); the schedule prevents conflicts.</div>
           </div>
 

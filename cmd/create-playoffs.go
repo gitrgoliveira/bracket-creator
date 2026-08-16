@@ -72,16 +72,10 @@ func (o *playoffOptions) run(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no entries found in file")
 	}
 
-	if err := helper.ValidateCourts(o.courts); err != nil {
-		return err
-	}
-	// Shiaijo-count rule: a power of two (1, 2, 4, 8 or 16). The tree gives
-	// each court its own block and the blocks merge in pairs, so the count
-	// has to halve cleanly. Checked after ValidateCourts so the 26-court
-	// label cap is still reported first for a value that breaks both. The
-	// page-count clamp further down is safe by construction: it clamps to
-	// helper.RoundToPowerOf2, which is already a power of two.
-	if err := helper.ValidateShiaijoCount(o.courts); err != nil {
+	// Range rule and shiaijo-count rule, in the order ValidateDrawCourtCount
+	// owns. The page-count clamp further down is safe by construction: it
+	// clamps to helper.RoundToPowerOf2, which is already a power of two.
+	if err := helper.ValidateDrawCourtCount(o.courts); err != nil {
 		return err
 	}
 

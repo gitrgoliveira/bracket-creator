@@ -195,19 +195,18 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 	// the same manifest with the courts spelled out was refused.
 	comp.Courts = resolveCompetitionCourts(comp.Courts, importTourn)
 
-	// Cross-file guard symmetry with the POST /competitions handler, which
-	// calls validateCompetitionCourts on the same resolved list to reject
-	// multi-character / >26-court manifests and, for a bracket-drawing
-	// competition, an illegal shiaijo count (anything but 1, 2, 4, 8 or 16).
-	// Like a create, an imported row authors a brand-new allocation, so there
-	// is no stored value to preserve and the full check applies; the settings
-	// PUT is the one write path that splits the two checks. Pre-fix the import
-	// path bypassed this check and could land a Competition with court labels
-	// that no other write path would accept, e.g. a manifest row with 30
-	// courts or court="AA" would persist via SaveCompetition here while the
-	// same value via the REST API would 400. Per-row res.Error to match the
-	// other patterns.
-	if err := validateCompetitionCourts(comp.Courts, comp.Format); err != nil {
+	// The same gate POST /competitions runs, through the same function on the
+	// same resolved list: multi-character / >26-court labels, an illegal
+	// shiaijo count for a bracket-drawing competition, and shiaijo the venue
+	// does not have. Like a create, an imported row authors a brand-new
+	// allocation, so there is no stored value to preserve and the full check
+	// applies; the settings PUT is the one write path that splits the checks.
+	// Pre-fix the import path bypassed this entirely and could land a
+	// Competition with court labels that no other write path would accept,
+	// e.g. a manifest row with 30 courts or court="AA" would persist via
+	// SaveCompetition here while the same value via the REST API would 400.
+	// Per-row res.Error to match the other patterns.
+	if err := validateCompetitionCourts(comp.Courts, comp.Format, importTourn); err != nil {
 		res.Error = "courts: " + err.Error()
 		return res
 	}

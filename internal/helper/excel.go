@@ -281,13 +281,14 @@ func (p CourtPlan) PageCourt(subtree *Node) string {
 // are not running and leaves the operator who IS running it with none.
 func PoolsByCourt(pools []Pool, courts []string, courtOfPool map[string]string) ([]string, [][]int) {
 	numCourts := EffectiveDrawCourts(len(pools), len(courts))
-	allocated := courtsPrefix(courts, numCourts)
 
-	// Where each pool is actually fought, in pool order.
+	// Where each pool is actually fought, in pool order. AssignPoolsToCourts
+	// never returns an index >= numCourts, so courtNameAt reads the same name
+	// off the full list that it would off a numCourts-long prefix of it.
 	assignments, _ := AssignPoolsToCourts(len(pools), numCourts)
 	courtOf := make([]string, len(pools))
 	for i := range pools {
-		courtOf[i] = courtNameAt(allocated, assignments[i])
+		courtOf[i] = courtNameAt(courts, assignments[i])
 		if live, ok := courtOfPool[pools[i].PoolName]; ok && live != "" {
 			courtOf[i] = live
 		}
@@ -963,8 +964,8 @@ func printPoolResultsTable(f *excelize.File, sheetName string, pool Pool, startR
 // The clamp lives HERE, not at the call sites, because it is a contract between
 // this skeleton and everything that writes onto it. A consumer that disagrees
 // with the count used here writes every score and standing into the wrong cells,
-// so PrintPoolMatches RETURNS the bands and per-band pool indices it actually
-// laid out and the overlays fill in against those. They used to call PoolsByCourt
+// so PrintPoolMatches RETURNS the per-band pool indices it actually laid out and
+// the overlays fill in against those. They used to call PoolsByCourt
 // again from the caller, which is deterministic and so agreed -- but only for as
 // long as both calls were handed identical arguments, with nothing enforcing it
 // and a comment one file over already claiming the grouping was "computed ONCE
@@ -974,7 +975,7 @@ func printPoolResultsTable(f *excelize.File, sheetName string, pool Pool, startR
 // same pools is safe there and keeps a call site from handing it a grouping that
 // disagrees. EffectiveDrawCourts is idempotent, so a caller that already clamped
 // (cmd/create-pools.go) is unaffected.
-func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinners int, courts []string, courtOfPool map[string]string, mirror bool, poolCoords map[string]cellCoord, pCoords map[string]playerCellCoord, engi bool) (map[string]MatchWinner, []string, [][]int) {
+func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinners int, courts []string, courtOfPool map[string]string, mirror bool, poolCoords map[string]cellCoord, pCoords map[string]playerCellCoord, engi bool) (map[string]MatchWinner, [][]int) {
 	// PoolsByCourt owns the clamp AND the band names, so the headers this writes
 	// and the blocks it fills can never come from two different answers. The
 	// clamp keeps the FIRST n of the competition's shiaijo, so a competition on
@@ -1158,7 +1159,7 @@ func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinner
 
 	SetSheetLayoutPortraitA4DownThenOver(f, sheetName, numCourts)
 
-	return matchWinners, courts, poolsByCourt
+	return matchWinners, poolsByCourt
 }
 
 func poolEntryWithStyle(startColName string, poolRow int, endColName string, f *excelize.File, sheetName string, leftSide string, rightSide string, textStyle int) {

@@ -1,12 +1,13 @@
 package helper
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	excelize "github.com/xuri/excelize/v2"
+
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 )
 
 // The bronze prints in ITS shiaijo's band like any other bout, which means
@@ -76,7 +77,7 @@ func TestBronzeBlockBandSelection(t *testing.T) {
 func TestEliminationBandsIgnoreTheBronzeCourtWhenNoBronzePrints(t *testing.T) {
 	t.Parallel()
 
-	bandHeaders := func(t *testing.T, includeBronze bool) []string {
+	bandCourts := func(t *testing.T, includeBronze bool) []string {
 		t.Helper()
 		f := excelize.NewFile()
 		defer func() { require.NoError(t, f.Close()) }()
@@ -99,18 +100,19 @@ func TestEliminationBandsIgnoreTheBronzeCourtWhenNoBronzePrints(t *testing.T) {
 		rows, err := f.GetRows(SheetEliminationMatches)
 		require.NoError(t, err)
 		require.NotEmpty(t, rows)
-		var headers []string
-		for _, cell := range rows[0] {
-			if strings.HasPrefix(cell, "Shiaijo ") {
-				headers = append(headers, cell)
-			}
+		// bctest.ReadCourtBands is the one reader that knows how a band header
+		// is spelled, so a rename of ShiaijoLabel's prefix fails here loudly
+		// instead of quietly matching nothing and passing vacuously.
+		var courts []string
+		for _, b := range bctest.ReadCourtBands(rows, CourtsColumnsPerCourt) {
+			courts = append(courts, b.Court)
 		}
-		return headers
+		return courts
 	}
 
-	assert.NotContains(t, bandHeaders(t, false), ShiaijoLabel("C"),
+	assert.NotContains(t, bandCourts(t, false), "C",
 		"no bronze is printed, so shiaijo C has nothing on this sheet and must not get a header, a page break and a print column")
-	assert.Contains(t, bandHeaders(t, true), ShiaijoLabel("C"),
+	assert.Contains(t, bandCourts(t, true), "C",
 		"when the bronze IS printed its shiaijo must still get a band, or the block lands under another court's header")
 }
 
@@ -127,7 +129,7 @@ func TestEliminationBandsIgnoreTheBronzeCourtWhenNoBronzePrints(t *testing.T) {
 func TestEliminationRoundsToleratesANilEntry(t *testing.T) {
 	t.Parallel()
 
-	render := func(t *testing.T, injectNil bool) []string {
+	render := func(t *testing.T, injectNil bool) []bctest.CourtBand {
 		t.Helper()
 		f := excelize.NewFile()
 		defer func() { require.NoError(t, f.Close()) }()
@@ -155,13 +157,10 @@ func TestEliminationRoundsToleratesANilEntry(t *testing.T) {
 		rows, err := f.GetRows(SheetEliminationMatches)
 		require.NoError(t, err)
 		require.NotEmpty(t, rows)
-		var headers []string
-		for _, cell := range rows[0] {
-			if strings.HasPrefix(cell, "Shiaijo ") {
-				headers = append(headers, cell)
-			}
-		}
-		return headers
+		// bctest.ReadCourtBands is the one reader that knows how a band header
+		// is spelled, so a rename of ShiaijoLabel's prefix fails here loudly
+		// instead of quietly matching nothing and passing vacuously.
+		return bctest.ReadCourtBands(rows, CourtsColumnsPerCourt)
 	}
 
 	clean := render(t, false)

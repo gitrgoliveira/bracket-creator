@@ -83,17 +83,11 @@ func (o *poolOptions) run(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no entries found in file")
 	}
 
-	if err := helper.ValidateCourts(o.courts); err != nil {
-		return err
-	}
-	// Shiaijo-count rule: a power of two (1, 2, 4, 8 or 16). The tree gives
-	// each court its own block and the blocks merge in pairs, so the count
-	// has to halve cleanly. Checked after ValidateCourts so the 26-court
-	// label cap is still reported first for a value that breaks both. The
-	// pool-count clamp below can lower o.courts to a value the operator
-	// never asked for, so it steps down through helper.EffectiveDrawCourts,
-	// which lands on a legal count by construction.
-	if err := helper.ValidateShiaijoCount(o.courts); err != nil {
+	// Range rule and shiaijo-count rule, in the order ValidateDrawCourtCount
+	// owns. The pool-count clamp below can lower o.courts to a value the
+	// operator never asked for, so it steps down through
+	// helper.EffectiveDrawCourts, which lands on a legal count by construction.
+	if err := helper.ValidateDrawCourtCount(o.courts); err != nil {
 		return err
 	}
 
@@ -245,7 +239,7 @@ func (o *poolOptions) createPools(entries []string) error {
 	} else {
 		helper.CreatePoolMatches(pools)
 	}
-	matchWinners, _, _ := helper.PrintPoolMatches(f, pools, o.teamMatches, o.poolWinners, courtNames, nil, true, poolCoords, playerCoords, o.engi)
+	matchWinners, _ := helper.PrintPoolMatches(f, pools, o.teamMatches, o.poolWinners, courtNames, nil, true, poolCoords, playerCoords, o.engi)
 
 	// Court-first pool-to-knockout draw (specs/007-ekc-draw): one bracket
 	// region per shiaijo, 2nd places crossing to the partner court, byes

@@ -34,7 +34,7 @@ func TestPrintPoolMatchesEdgeCourts(t *testing.T) {
 		f.NewSheet(SheetPoolDraw)
 
 		pools := []Pool{poolA}
-		matchWinners, _, _ := PrintPoolMatches(f, pools, 0, 1, CourtLabels(0), nil, false, poolCoords, pCoords, false)
+		matchWinners, _ := PrintPoolMatches(f, pools, 0, 1, CourtLabels(0), nil, false, poolCoords, pCoords, false)
 		if len(matchWinners) == 0 {
 			t.Errorf("expected match winners even with 0 courts, got %d", len(matchWinners))
 		}
@@ -56,7 +56,7 @@ func TestPrintPoolMatchesEdgeCourts(t *testing.T) {
 		require.Equal(t, 1, EffectiveDrawCourts(len(pools), numCourts),
 			"one pool must clamp to one shiaijo for this case to test the clamp")
 
-		matchWinners, _, _ := PrintPoolMatches(f, pools, 0, 1, CourtLabels(numCourts), nil, false, poolCoords, pCoords, false)
+		matchWinners, _ := PrintPoolMatches(f, pools, 0, 1, CourtLabels(numCourts), nil, false, poolCoords, pCoords, false)
 		if len(matchWinners) != 1 {
 			t.Errorf("expected 1 match winner, got %d", len(matchWinners))
 		}
@@ -95,7 +95,7 @@ func TestPrintPoolMatchesEdgeTournament(t *testing.T) {
 			playerCoordKey(*playerA1): {cellCoord: cellCoord{sheetName: SheetPoolDraw, cell: "A1"}},
 		}
 		pools := []Pool{poolA}
-		matchWinners, _, _ := PrintPoolMatches(f, pools, 0, 1, CourtLabels(1), nil, false, poolCoords, pCoords, false)
+		matchWinners, _ := PrintPoolMatches(f, pools, 0, 1, CourtLabels(1), nil, false, poolCoords, pCoords, false)
 		if len(matchWinners) != 1 {
 			t.Errorf("expected 1 match winner, got %d", len(matchWinners))
 		}
@@ -112,7 +112,7 @@ func TestPrintPoolMatchesEdgeTournament(t *testing.T) {
 		f.NewSheet(SheetPoolDraw)
 
 		var pools []Pool
-		matchWinners, _, _ := PrintPoolMatches(f, pools, 0, 1, CourtLabels(1), nil, false, nil, nil, false)
+		matchWinners, _ := PrintPoolMatches(f, pools, 0, 1, CourtLabels(1), nil, false, nil, nil, false)
 		if len(matchWinners) != 0 {
 			t.Errorf("expected 0 match winners, got %d", len(matchWinners))
 		}
@@ -406,7 +406,7 @@ func TestEliminationMatchSameSheetFormulas(t *testing.T) {
 	f.NewSheet(SheetEliminationMatches)
 
 	poolWinners := 2
-	matchWinners, _, _ := PrintPoolMatches(f, pools, 0, poolWinners, CourtLabels(1), nil, false, poolCoords, pCoords, false)
+	matchWinners, _ := PrintPoolMatches(f, pools, 0, poolWinners, CourtLabels(1), nil, false, poolCoords, pCoords, false)
 
 	tree := BuildKnockoutDraw(pools, poolWinners, 1).Root
 	depth := CalculateDepth(tree)
@@ -485,7 +485,7 @@ func TestPoolWinnerFormulaReferences(t *testing.T) {
 	f.NewSheet(SheetEliminationMatches)
 
 	poolWinners := 2
-	matchWinners, _, _ := PrintPoolMatches(f, pools, 0, poolWinners, CourtLabels(1), nil, false, poolCoords, pCoords, false)
+	matchWinners, _ := PrintPoolMatches(f, pools, 0, poolWinners, CourtLabels(1), nil, false, poolCoords, pCoords, false)
 
 	// Build elimination tree using the same LeafVal format as in production.
 	tree := BuildKnockoutDraw(pools, poolWinners, 1).Root

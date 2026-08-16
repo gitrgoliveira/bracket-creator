@@ -162,11 +162,17 @@ describe('competitionSeedingBlocker covers what the panel must show', () => {
     expect(blocker).not.toBeNull();
     expect(blocker.reason).toContain('seed rank 2');
     expect(blocker.reason).toContain('used more than once');
+    // And gets the DUPLICATE's remedy, not the gap's. Nothing is missing here,
+    // so "set the missing ranks" sends the operator looking for a rank that is
+    // on the roster twice.
+    expect(blocker.fix).not.toContain('missing');
+    expect(blocker.fix).toContain('one competitor');
   });
 
-  it('still reports a gap', () => {
+  it('still reports a gap, with the gap remedy', () => {
     const blocker = competitionSeedingBlocker(comp(seeded(null, null, null, 4)));
     expect(blocker.reason).toContain('seed ranks 1, 2 and 3 have not been set');
+    expect(blocker.fix).toContain('missing ranks');
   });
 
   it('stays silent for a seeding that is fine, and for none at all', () => {

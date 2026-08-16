@@ -754,25 +754,45 @@ function orphanedShiaijoError(tournamentCourts, selectedCourts) {
 function competitionDrawBlockedReason(competition, tournamentCourts) {
   if (!competition) return null;
   const courts = competition.courts || [];
-  // The venue count is forwarded to the count message, not just to the orphan
-  // check. Every surface that renders this reason renders it ALONE, with no
-  // venue-aware hint beneath to correct it, so the unqualified message told a
-  // 3-shiaijo venue to "use 2 or 4" - one of which it cannot supply.
+  return resolvedShiaijoCountError(competition.format, courts, tournamentCourts)
+    || orphanedShiaijoError(tournamentCourts, courts);
+}
+
+// The shiaijo-COUNT problem with an allocation, judged on the RESOLVED list and
+// framed so an inherited count says where it came from. Null when the count is
+// fine, or when the format has no bracket to split.
+//
+// Every surface that judges an allocation has to resolve it first: an empty
+// list MEANS "inherit the tournament's shiaijo" and is what the server stores,
+// so judging the raw list answers a question about a value that is never
+// persisted. shiaijoCountError(0) is null, which is how a competition with no
+// shiaijo of its own on a 3-shiaijo venue read as fine on the Settings screen
+// while the dashboard refused its draw and sent the operator to that very
+// screen to fix it.
+//
+// The venue count is forwarded to the count message, not just to the orphan
+// check: every surface that renders this reason renders it ALONE, with no
+// venue-aware hint beneath to correct it, so the unqualified message told a
+// 3-shiaijo venue to "use 2 or 4" - one of which it cannot supply. A surface
+// that DOES print the venue-aware hint alongside (the staged error under the
+// Settings pills) calls shiaijoCountErrorFor directly instead, so the venue
+// clause is not stated twice.
+//
+// Takes format and courts rather than a competition so a screen can ask about a
+// STAGED allocation, which is on no competition object yet.
+function resolvedShiaijoCountError(format, ownCourts, tournamentCourts) {
+  const own = Array.isArray(ownCourts) ? ownCourts : [];
   const venue = (tournamentCourts || []).length;
-  // Judge the RESOLVED allocation, which is the one the server would store, so
-  // the count rule is applied once rather than once per case. Inheriting is
-  // only a problem when the venue's own count is not a legal allocation;
-  // inheriting 2 of 2 is fine and the server accepts it. venue 0 is "tournament
-  // not loaded", never "the venue has none".
-  const effective = inheritedDrawCourts(courts, tournamentCourts);
-  const inherited = !courts.length && effective.length > 0;
-  const countErr = shiaijoCountErrorFor(competition.format, effective.length, venue);
+  // Inheriting is only a problem when the venue's own count is not a legal
+  // allocation; inheriting 2 of 2 is fine and the server accepts it. venue 0 is
+  // "tournament not loaded", never "the venue has none".
+  const effective = inheritedDrawCourts(own, tournamentCourts);
+  const countErr = shiaijoCountErrorFor(format, effective.length, venue);
+  if (!countErr) return null;
   // Name the inheritance when that is where the count came from, exactly as the
   // engine's refusal does, or the operator is handed a count they never chose.
-  const err = (countErr && inherited)
-    ? `This competition has no shiaijo of its own, so the draw would run on all ${venue} of the tournament's. ${countErr}`
-    : countErr;
-  return err || orphanedShiaijoError(tournamentCourts, courts);
+  if (own.length || !effective.length) return countErr;
+  return `This competition has no shiaijo of its own, so the draw would run on all ${venue} of the tournament's. ${countErr}`;
 }
 
 // The remedy sentences. Each has to read correctly on all four surfaces that
@@ -781,6 +801,10 @@ function competitionDrawBlockedReason(competition, tournamentCourts) {
 // assuming the operator is already inside the competition.
 const SHIAIJO_FIX = "Reassign shiaijo in Settings.";
 const SEEDING_FIX = "Set the missing ranks or clear the seeds in Participants & seeds.";
+// A duplicate is not a gap, so it does not get the gap's remedy: nothing is
+// missing, and telling the operator to "set the missing ranks" sends them
+// looking for a rank that is already on the roster twice.
+const SEEDING_DUPLICATE_FIX = "Give each seed rank to one competitor, or clear the seeds in Participants & seeds.";
 
 // rankList renders seed ranks as "3", "3 and 4" or "3, 4 and 5". Mirror of
 // helper.RankList (internal/helper/seed_warnings.go); the two exist so the
@@ -855,7 +879,7 @@ function competitionSeedingBlocker(competition) {
     const plural = duplicates.length === 1 ? "" : "s";
     return {
       reason: `Seeding is invalid: seed rank${plural} ${rankList(duplicates.sort((a, b) => a - b))} ${duplicates.length === 1 ? "is" : "are"} used more than once.`,
-      fix: SEEDING_FIX,
+      fix: SEEDING_DUPLICATE_FIX,
       section: "participants",
       cta: "Fix seeding →",
     };
@@ -955,19 +979,16 @@ if (typeof window !== "undefined") {
   window.promptAdminPassword = promptAdminPassword;
   window.normalizeCourts = normalizeCourts;
   window.courtCount = courtCount;
-  window.shiaijoCountError = shiaijoCountError;
   window.shiaijoCountHint = shiaijoCountHint;
   window.shiaijoCountErrorFor = shiaijoCountErrorFor;
   window.shiaijoCountHintFor = shiaijoCountHintFor;
   window.inheritedDrawCourts = inheritedDrawCourts;
   window.shiaijoVenueHint = shiaijoVenueHint;
-  window.formatDrawsBracket = formatDrawsBracket;
   window.courtPillOptions = courtPillOptions;
   window.orphanedShiaijoError = orphanedShiaijoError;
   window.competitionDrawBlocker = competitionDrawBlocker;
   window.competitionSeedingBlocker = competitionSeedingBlocker;
-  window.seedGapDiagnosis = seedGapDiagnosis;
-  window.seededRanks = seededRanks;
+  window.resolvedShiaijoCountError = resolvedShiaijoCountError;
   window.partitionStartableCompetitions = partitionStartableCompetitions;
 }
 
@@ -1067,7 +1088,6 @@ export {
   shiaijoCountErrorFor,
   shiaijoCountHint,
   shiaijoCountHintFor,
-  isLegalShiaijoCount,
   allowedShiaijoCounts,
   shiaijoVenueSplitExample,
   shiaijoVenueHint,
@@ -1078,6 +1098,7 @@ export {
   courtPillOptions,
   orphanedShiaijoError,
   competitionDrawBlockedReason,
+  resolvedShiaijoCountError,
   competitionDrawBlocker,
   competitionSeedingBlocker,
   seedGapDiagnosis,

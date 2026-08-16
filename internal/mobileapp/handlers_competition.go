@@ -439,28 +439,13 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// against direct API callers sending multi-character labels.
 		//
 		// validateCompetitionCourts ALSO applies the shiaijo-count rule (a
-		// power of two: 1, 2, 4, 8 or 16) to a bracket-drawing competition,
-		// since a create authors a brand-new allocation and has no stored
-		// value to preserve. The settings PUT splits the two checks instead;
-		// see the comment on its call site.
-		if err := validateCompetitionCourts(comp.Courts, comp.Format); err != nil {
+		// power of two: 1, 2, 4, 8 or 16) and the tournament-membership rule
+		// to a bracket-drawing competition, since a create authors a brand-new
+		// allocation and has no stored value to preserve. The settings PUT
+		// splits the checks instead; see the comment on its call site.
+		if err := validateCompetitionCourts(comp.Courts, comp.Format, createTourn); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "courts: " + err.Error()})
 			return
-		}
-
-		// A competition may only be allocated shiaijo the tournament has. On
-		// the resolved list this is trivially satisfied when the list was
-		// inherited, and still catches an explicit allocation naming a court
-		// the venue lacks. The operator UI can't author an orphan (its pills
-		// come from the tournament's list), so this is defense against direct
-		// API callers; without it the create succeeds and the failure only
-		// surfaces later, at the engine's draw gate.
-		// engine.ValidateCourtsInTournament owns the message.
-		if createTourn != nil {
-			if err := engine.ValidateCourtsInTournament(comp.Courts, createTourn.Courts); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "courts: " + err.Error()})
-				return
-			}
 		}
 
 		// Reject per-phase durations outside the shiai band.

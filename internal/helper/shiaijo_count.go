@@ -74,6 +74,30 @@ func ValidateShiaijoCount(n int) error {
 	)
 }
 
+// ValidateDrawCourtCount answers "may a bracket-drawing generator run on n
+// shiaijo?" -- the range rule and the count rule together, in that order.
+//
+// The ORDER is the rule, not a coincidence of where the calls were written: a
+// value that breaks both (say 30) must report the 26-court label cap first,
+// because that is the ceiling the operator has to come down under before the
+// power-of-two question even applies. Owning the pair here is what keeps a
+// fourth generator entry point from calling only ValidateCourts and silently
+// dropping the shiaijo-count rule; the three that exist (the --courts flag on
+// create-pools and create-playoffs, and the web form in cmd/create_handler.go)
+// each used to restate both the pairing and the reason for the ordering.
+//
+// Not for the tournament-level court list: ValidateCourts alone is correct
+// there (handlers_tournament.go), because a VENUE may have any number of
+// shiaijo and only a COMPETITION's allocation has to halve cleanly. That
+// carve-out is the reason to compose the pair rather than fold the count rule
+// into ValidateCourts.
+func ValidateDrawCourtCount(n int) error {
+	if err := ValidateCourts(n); err != nil {
+		return err
+	}
+	return ValidateShiaijoCount(n)
+}
+
 // nearestShiaijoCounts renders the legal counts an operator can reach from an
 // illegal n: the power of two immediately below it and the one immediately
 // above. Above 16 there is no "above" to offer, because 32 exceeds the A-Z

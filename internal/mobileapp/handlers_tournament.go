@@ -284,13 +284,22 @@ func checkCourtRemoval(store *state.Store, courts []string) (error, error) {
 	return nil, competitionsBlockingCourtRemoval(comps, stored, courts)
 }
 
-// validateCompetitionCourts is the looser competition-level check:
-// 0..helper.MaxCourts entries, each (when present) a single non-empty
-// character, and a legal shiaijo count. The label and cap invariants from
-// validateCourtLabels apply, plus the R9 count rule.
+// validateCompetitionCourts is the whole gate on a NEWLY AUTHORED competition
+// allocation: 0..helper.MaxCourts entries, each (when present) a single
+// non-empty character, a legal shiaijo count, and no court the venue lacks.
+// The label and cap invariants from validateCourtLabels apply, plus the R9
+// count rule, plus engine.ValidateCourtsInTournament.
 //
-// Used where a NEW allocation is authored (POST /competitions and the
-// manifest importer), and both of those call it on the RESOLVED court list
+// All three live here rather than at the call sites because the set of rules
+// is the thing that must not vary between the two paths that author an
+// allocation. It did: the importer ran the first two and not the third, so a
+// manifest naming shiaijo the venue lacks persisted cleanly and only failed
+// later at the engine's draw gate -- the exact outcome POST /competitions
+// added the membership check to prevent. Passing tourn nil skips only the
+// membership rule, for the bootstrap case where no tournament is loaded yet.
+//
+// Used by POST /competitions and the manifest importer, and both call it on
+// the RESOLVED court list
 // -- after resolveCompetitionCourts has materialised an omitted list from
 // the tournament's courts. That ordering is load-bearing: an empty list
 // MEANS "inherit the tournament's courts", so validating it before
@@ -303,11 +312,22 @@ func checkCourtRemoval(store *state.Store, courts []string) (error, error) {
 // front and defers the count check to the update transform, where the
 // STORED allocation is known and the check can be limited to an allocation
 // actually being changed. See engine.ValidateCompetitionShiaijoCount.
-func validateCompetitionCourts(courts []string, format string) error {
+func validateCompetitionCourts(courts []string, format string, tourn *state.Tournament) error {
 	if err := validateCourtLabels(courts); err != nil {
 		return err
 	}
-	return engine.ValidateCompetitionShiaijoCount(courts, format)
+	if err := engine.ValidateCompetitionShiaijoCount(courts, format); err != nil {
+		return err
+	}
+	// On a resolved list this is trivially satisfied when the list was
+	// inherited, and still catches an explicit allocation naming a court the
+	// venue lacks. The operator UI cannot author an orphan (its pills come from
+	// the tournament's list), so this is defense against direct API callers and
+	// hand-written manifests. engine.ValidateCourtsInTournament owns the message.
+	if tourn == nil {
+		return nil
+	}
+	return engine.ValidateCourtsInTournament(courts, tourn.Courts)
 }
 
 // resolveCompetitionCourts guarantees a competition resolves to at least one

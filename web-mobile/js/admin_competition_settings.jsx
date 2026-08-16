@@ -529,9 +529,21 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // that and deliberately does NOT block, because it would lock the operator
   // out of every unrelated edit on this screen (name, date, durations,
   // check-in), which is the one outcome this rule must not cause.
+  // Both judge the RESOLVED allocation, never the raw list. An empty list MEANS
+  // "inherit the tournament's shiaijo" and is what the server stores and
+  // validates, so measuring the raw one asked about a value never persisted:
+  // shiaijoCountError(0) is null, so a competition with no shiaijo of its own on
+  // a 3-shiaijo venue showed nothing here while the dashboard refused its draw
+  // and routed the operator to this screen.
+  //
+  // courtsErr stays venue-AGNOSTIC because it renders directly above the
+  // venue-aware courtsHint; savedCourtsErr goes through
+  // resolvedShiaijoCountError, which is venue-aware and names the inheritance,
+  // because the banner it drives sits at the top of the card with nothing
+  // beside it.
   const savedCourts = c.courts || [];
-  const courtsErr = window.shiaijoCountErrorFor(local.format, (local.courts || []).length);
-  const savedCourtsErr = window.shiaijoCountErrorFor(c.format, savedCourts.length);
+  const courtsErr = window.shiaijoCountErrorFor(local.format, window.inheritedDrawCourts(local.courts, tournament.courts).length);
+  const savedCourtsErr = window.resolvedShiaijoCountError(c.format, savedCourts, tournament.courts);
   const courtsChanged = (local.courts || []).join(",") !== savedCourts.join(",");
   const blockingCourtsErr = !!courtsErr && courtsChanged;
   // The mechanism sentence is dropped from the standing hint while the red
@@ -605,8 +617,13 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           pills speak for themselves. */}
       {savedCourtsErr && !courtsChanged && (
         <div className="alert alert--warn" style={{ marginBottom: 12 }} data-testid="shiaijo-count-banner">
+          {/* The headline states only that the draw is blocked. Which count, why
+              it cannot be split and what to pick instead all live in
+              savedCourtsErr, so the verdict is not phrased a second time here --
+              and an INHERITED allocation, whose own list is empty, is not
+              announced as "assigned 0 shiaijo". */}
           <div style={{ fontWeight: 600, marginBottom: 6 }}>
-            ⚠ This competition is assigned {savedCourts.length} shiaijo, which the knockout draw cannot split.
+            ⚠ This competition's shiaijo allocation blocks the draw.
           </div>
           <div>
             {savedCourtsErr} Change the assignment below and save; the draw cannot be generated until you do.
@@ -762,25 +779,17 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           </div>
         )}
         {/* Shiaijo-count rule, shown with the other court hints below so the
-            operator reads cap, suggestion and count rule in one place.
-            Rendered for ANY invalid selection, staged or already saved, so the
-            field never looks fine while the draw is blocked. Save itself is
-            gated on blockingCourtsErr (a CHANGE to an invalid count), not on
-            this hint. */}
-        {courtsErr && (
-          <div className="field__hint" style={{ color: "var(--red)", fontWeight: 600 }} data-testid="shiaijo-count-error">
-            {courtsErr}
-          </div>
-        )}
-        {/* STANDING hint: teaches the rule before it can block anything, so
-            the operator meets "you may pick 1 or 2 here" rather than learning
-            it from a refusal. Shown for every valid AND invalid selection;
-            only league/Swiss (out of scope) drop it. */}
-        {courtsHint && (
-          <div className="field__hint" data-testid="shiaijo-count-hint">
-            {courtsHint}
-          </div>
-        )}
+            operator reads cap, suggestion and count rule in one place. The
+            error is rendered for ANY invalid selection, staged or already
+            saved, so the field never looks fine while the draw is blocked;
+            Save itself is gated on blockingCourtsErr (a CHANGE to an invalid
+            count), not on this hint. The hint is STANDING: it teaches the rule
+            before it can block anything, so the operator meets "you may pick 1
+            or 2 here" rather than learning it from a refusal, and is shown for
+            every valid AND invalid selection; only league/Swiss (out of scope)
+            drop it. Same component as the create form, which has to render
+            both notes identically. */}
+        <window.ShiaijoCountNotes error={courtsErr} hint={courtsHint} />
         {(local.format === "league" || local.poolFormat === "partial") ? (() => {
           const playerCount = (c.players || []).length;
           const ct = (n) => n === 1 ? "1 court" : `${n} courts`;

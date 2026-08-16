@@ -2,7 +2,6 @@ package mobileapp
 
 import (
 	"net/http/httptest"
-	"sync"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -24,8 +23,6 @@ import (
 // ETag alone (all 69 revalidated, no bodies), then 0 across 0 requests once the
 // max-age window was added.
 func TestBuildAssetETag(t *testing.T) {
-	// Package state, restored for whatever runs next; see resetAssetETag.
-	t.Cleanup(resetAssetETag)
 	fsA := fstest.MapFS{
 		"dist/a.js": {Data: []byte("console.log(1)")},
 		"dist/b.js": {Data: []byte("console.log(2)")},
@@ -36,11 +33,9 @@ func TestBuildAssetETag(t *testing.T) {
 		// branch is the branch name: it does not move when you rebuild, so
 		// using it would serve a developer stale JavaScript after every
 		// recompile. Changing a byte must change the validator.
-		resetAssetETag()
 		first := buildAssetETag(fsA)
 		require.NotEmpty(t, first)
 
-		resetAssetETag()
 		changed := buildAssetETag(fstest.MapFS{
 			"dist/a.js": {Data: []byte("console.log(999)")}, // one byte differs
 			"dist/b.js": {Data: []byte("console.log(2)")},
@@ -49,9 +44,7 @@ func TestBuildAssetETag(t *testing.T) {
 	})
 
 	t.Run("is stable for identical content", func(t *testing.T) {
-		resetAssetETag()
 		a := buildAssetETag(fsA)
-		resetAssetETag()
 		b := buildAssetETag(fstest.MapFS{
 			"dist/a.js": {Data: []byte("console.log(1)")},
 			"dist/b.js": {Data: []byte("console.log(2)")},
@@ -60,9 +53,7 @@ func TestBuildAssetETag(t *testing.T) {
 	})
 
 	t.Run("a file NAME change invalidates too", func(t *testing.T) {
-		resetAssetETag()
 		a := buildAssetETag(fsA)
-		resetAssetETag()
 		renamed := buildAssetETag(fstest.MapFS{
 			"dist/a.js": {Data: []byte("console.log(1)")},
 			"dist/c.js": {Data: []byte("console.log(2)")}, // same bytes, new name
@@ -71,7 +62,6 @@ func TestBuildAssetETag(t *testing.T) {
 	})
 
 	t.Run("an unreadable tree yields no validator rather than a wrong one", func(t *testing.T) {
-		resetAssetETag()
 		// No dist/ directory at all: WalkDir errors, and we must fall back to
 		// "uncacheable" rather than to a constant that would pin stale assets.
 		assert.Empty(t, buildAssetETag(fstest.MapFS{"other/x.js": {Data: []byte("x")}}))
@@ -79,13 +69,12 @@ func TestBuildAssetETag(t *testing.T) {
 }
 
 func TestSetStaticCacheHeaders(t *testing.T) {
-	t.Cleanup(resetAssetETag)
-	fsys := fstest.MapFS{"dist/a.js": {Data: []byte("x")}}
+	etag := buildAssetETag(fstest.MapFS{"dist/a.js": {Data: []byte("x")}})
+	require.NotEmpty(t, etag)
 
 	t.Run("applies the caching policy to a dist asset", func(t *testing.T) {
-		resetAssetETag()
-		c, _ := gin.CreateTestContext(newRecorder())
-		setStaticCacheHeaders(c, fsys, "dist/a.js")
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		setStaticCacheHeaders(c, etag, "dist/a.js")
 		// Both halves, and they compose: inside the window the client makes no
 		// request at all; after it the ETag turns a re-fetch into a 0-byte 304.
 		assert.Equal(t, "public, max-age=300", c.Writer.Header().Get("Cache-Control"))
@@ -104,25 +93,9 @@ func TestSetStaticCacheHeaders(t *testing.T) {
 	t.Run("leaves non-dist paths alone", func(t *testing.T) {
 		// index.html carries server-rendered meta tags and is deliberately
 		// no-store; uploaded images set their own policy in their handlers.
-		resetAssetETag()
-		c, _ := gin.CreateTestContext(newRecorder())
-		setStaticCacheHeaders(c, fsys, "index.html")
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		setStaticCacheHeaders(c, etag, "index.html")
 		assert.Empty(t, c.Writer.Header().Get("Cache-Control"))
 		assert.Empty(t, c.Writer.Header().Get("ETag"))
 	})
 }
-
-// resetAssetETag clears the once-per-process memo so each case hashes afresh.
-//
-// It mutates PACKAGE state, so every test that calls it must also register it
-// with t.Cleanup: the last subtest here deliberately leaves an empty ETag
-// behind a consumed sync.Once, and setStaticCacheHeaders short-circuits on an
-// empty validator. Left in place, that state leaks into whatever router test
-// runs next in this package, which would then assert on Cache-Control/ETag
-// against a memo it never set — passing or failing on file ordering alone.
-func resetAssetETag() {
-	assetETagOnce = sync.Once{}
-	assetETag = ""
-}
-
-func newRecorder() *httptest.ResponseRecorder { return httptest.NewRecorder() }

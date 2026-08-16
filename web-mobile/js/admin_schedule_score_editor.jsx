@@ -92,7 +92,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
   // ScoreEditorModal's onSubmit / onSubmitAndNext callbacks await
   // onEditScore (which routes through AdminApp.editMatchScore: a
   // server PUT). If AdminScoreEditor unmounts during the in-flight
-  // save (parent navigates away), the post-await setOpenMatch fires
+  // save (parent navigates away), the post-await setOpenKey fires
   // on a torn-down component. Gate via mountedRef.
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
@@ -270,7 +270,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
         // unassigned matches so the behaviour is consistent.
         const openCourt = openMatch.court || "";
         const sameCourt = filtered.filter(m => (m.court || "") === openCourt);
-        const openIdx = sameCourt.findIndex(m => `${m.compId}:${m.id}` === `${openMatch.compId}:${openMatch.id}`);
+        const openIdx = sameCourt.findIndex(m => scoreKeyOf(m) === openKey);
         const prevMatch = openIdx > 0 ? sameCourt[openIdx - 1] : null;
         const nextMatch = openIdx >= 0 && openIdx < sameCourt.length - 1 ? sameCourt[openIdx + 1] : null;
         // Finish+Start Next must only advance to a non-completed match. Without
@@ -291,7 +291,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
         // Defined at module level as window.startPatch for reuse across admin_*.jsx.
         return (
           <ScoreEditorModal
-            key={openMatch.compId + '-' + openMatch.id}
+            key={openKey}
             match={enrichedOpenMatch}
             prevMatch={prevMatch}
             nextMatch={nextMatch}

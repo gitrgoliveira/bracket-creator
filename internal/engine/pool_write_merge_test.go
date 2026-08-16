@@ -478,15 +478,24 @@ func TestTimestampGuardAppliesToBothBranches(t *testing.T) {
 			"an explicit operator correction outranks the timestamp on both branches")
 	})
 
-	t.Run("the K3 restore bypasses the guard", func(t *testing.T) {
-		// The rollback snapshot deliberately carries no stamp so it cannot lose
-		// to the very write it is undoing; the restore policy skips the guard for
-		// the same reason it inherits nothing else.
+	t.Run("the K3 restore bypasses the guard even when the snapshot is stamped", func(t *testing.T) {
+		// STAMPED on purpose, and older than what is stored: that is the real
+		// shape on this branch. The pool rollback snapshot comes from
+		// lookupExistingResult, which returns a straight COPY of the stored
+		// MatchResult, so it carries the persisted ModifiedAt — unlike the
+		// bracket's, which bracketMatchAsResult deliberately leaves at 0.
+		//
+		// So the restore is by definition older than the write it is undoing, and
+		// without the exemption in applyMatchWrite the rollback loses to that
+		// write every time and the rejected result stays on disk. An unstamped
+		// snapshot here would pass through ApplyByTimestamp's bypass and pin
+		// nothing: the guard would be mutable away undetected, which it was.
 		p := poolStored()
-		snap := incoming(0)
+		snap := incoming(older)
 		snap.Winner = "Kyoto"
 		snap.Status = state.MatchStatusScheduled
 		require.False(t, applyPoolWrite(p, snap, matchWriteRestore))
 		assert.Equal(t, state.MatchStatusScheduled, p.Status, "the rollback landed")
+		assert.Equal(t, "Kyoto", p.Winner)
 	})
 }

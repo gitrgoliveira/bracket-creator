@@ -104,6 +104,41 @@ import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 // MAX_TEAM_SIZE (admin_helpers.jsx), kept in lockstep with the team-size input
 // caps in admin_competition.jsx and admin_setup.jsx.
 
+// recordedDaihyosenSideOf resolves which SIDE a stored daihyosen hantei names:
+// "" (none, or unattributable), "a" (AKA) or "b" (SHIRO).
+//
+// EXCLUSIVE-match only. The old `: "b"` fallback attributed any mismatch (a
+// renamed team, a same-name pair) to SHIRO, and since the verdict folds into
+// boutWinnerSide -> t.winner -> buildPatch, that silently FLIPPED the stored
+// winner to the losing side on the next save. Unattributable returns "": the
+// panel then opens ARMED with no side picked, so the operator re-states the
+// verdict rather than the editor guessing it.
+//
+// Module scope, not an inline IIFE in the component: it is a pure function of
+// the stored bout plus the match's two sides, which keeps the attribution rule
+// directly testable instead of only reachable through the DOM.
+function recordedDaihyosenSideOf(existingDaihyosen, m) {
+  if (!existingDaihyosen?.decidedByHantei || !existingDaihyosen.winner) return "";
+  // The exclusive-attribution rule is hanteiWinnerKey (shared with the
+  // individual editor's chip), not restated here.
+  const key = hanteiWinnerKey({ winner: existingDaihyosen.winner, sideA: m.sideA, sideB: m.sideB });
+  if (key) return key;
+  if (existingDaihyosen.winner === nameOf(m.sideA) && existingDaihyosen.winner === nameOf(m.sideB)) {
+    // A winner naming BOTH sides is INVALID data (team names are unique by
+    // rule) handled defensively: the NAME round-trips identically either
+    // way, but the match-level winner ID does not - buildPatch serializes
+    // winner as the seeded side's object and toBackendMatchResult stamps
+    // its uuid, so defaulting to "a" when team B holds the stored WinnerID
+    // would flip the persisted identity on a correction save. Prefer the
+    // side the match-level winner id names; only with no usable id default
+    // to "a" (Go's own side-A-first order).
+    const wid = m.winner?.id || "";
+    if (wid && wid === (m.sideB?.id || null)) return "b";
+    return "a";
+  }
+  return "";
+}
+
 // T131 helper: human-friendly position label for the team-match scoring
 // modal. 5-person teams use the canonical FIK names (POS_LABELS_5 from
 // lineup_resolver.jsx, the single source of truth); non-5 sizes use the
@@ -689,27 +724,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // below). A match has ONE result and every surface asking for it shows the
   // same one; this editor is such a surface.
   const daihyosenHanteiRecorded = !!existingDaihyosen?.decidedByHantei;
-  const recordedDaihyosenSide = (() => {
-    if (!existingDaihyosen?.decidedByHantei || !existingDaihyosen.winner) return "";
-    // The exclusive-attribution rule is hanteiWinnerKey (shared with the
-    // individual editor's chip), not restated here.
-    const key = hanteiWinnerKey({ winner: existingDaihyosen.winner, sideA: m.sideA, sideB: m.sideB });
-    if (key) return key;
-    if (existingDaihyosen.winner === nameOf(m.sideA) && existingDaihyosen.winner === nameOf(m.sideB)) {
-      // A winner naming BOTH sides is INVALID data (team names are unique by
-      // rule) handled defensively: the NAME round-trips identically either
-      // way, but the match-level winner ID does not - buildPatch serializes
-      // winner as the seeded side's object and toBackendMatchResult stamps
-      // its uuid, so defaulting to "a" when team B holds the stored WinnerID
-      // would flip the persisted identity on a correction save. Prefer the
-      // side the match-level winner id names; only with no usable id default
-      // to "a" (Go's own side-A-first order).
-      const wid = m.winner?.id || "";
-      if (wid && wid === (m.sideB?.id || null)) return "b";
-      return "a";
-    }
-    return "";
-  })();
+  const recordedDaihyosenSide = recordedDaihyosenSideOf(existingDaihyosen, m);
   const [daihyosenHantei, setDaihyosenHantei] = useStateA(recordedDaihyosenSide);
   // Armed follows the RECORDED flag, not the resolved side, so an
   // unattributable stored verdict still opens the panel for re-picking

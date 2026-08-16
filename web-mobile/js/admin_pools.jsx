@@ -475,8 +475,16 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   // Resolved live, then enriched: enrichPoolMatchWithComp derives rep-player
   // rosters from `c`, so it must run on the CURRENT row, not on the row as it
   // looked when the operator clicked it.
+  // Memoized because enrichPoolMatchWithComp calls buildPlayerMap, which walks
+  // the whole roster three times and allocates an entry per participant. Without
+  // this it reruns on every render while the modal is open, i.e. on every SSE
+  // broadcast for ANY match in the tournament, and throws the map away each
+  // time. Nothing downstream depends on the object identity changing per render.
   const scoreOpenRaw = scoreOpenId ? (poolMatches || []).find((m) => m.id === scoreOpenId) || null : null;
-  const scoreOpenMatch = scoreOpenRaw ? enrichPoolMatchWithComp(scoreOpenRaw, c) : null;
+  const scoreOpenMatch = useMemoA(
+    () => (scoreOpenRaw ? enrichPoolMatchWithComp(scoreOpenRaw, c) : null),
+    [scoreOpenRaw, c]
+  );
 
   // Modal rendered alongside the PoolsViewer.
   const scoreModal = scoreOpenMatch ? (

@@ -74,28 +74,24 @@ function buildCourtSlots(competitions, court) {
 
     const slots = Array.from({ length: totalSlots }, () => null);
 
-    if (running) {
-        slots[0] = { match: running.match, competition: running.competition,
-                     isBracket: running.isBracket, roundIndex: running.roundIndex,
-                     totalRounds: running.totalRounds };
-        for (let i = 0; i < upcoming.length && i + 1 < totalSlots; i++) {
-            const m = upcoming[i];
-            slots[i + 1] = { match: m, competition: m._comp,
-                             isBracket: m._isBracket, roundIndex: m._roundIndex,
-                             totalRounds: m._totalRounds };
-        }
-    } else if (upcoming.length > 0) {
-        // Auto-promote first scheduled to "Now" slot.
-        const first = upcoming[0];
-        slots[0] = { match: first, competition: first._comp,
-                     isBracket: first._isBracket, roundIndex: first._roundIndex,
-                     totalRounds: first._totalRounds };
-        for (let i = 1; i < upcoming.length && i < totalSlots; i++) {
-            const m = upcoming[i];
-            slots[i] = { match: m, competition: m._comp,
-                         isBracket: m._isBracket, roundIndex: m._roundIndex,
-                         totalRounds: m._totalRounds };
-        }
+    // One slot shape, built from the two sources that carry the same fields
+    // under different names: findRunningOnCourt returns them expanded, while
+    // findUpcomingOnCourt tags them onto the match as _comp/_isBracket/etc.
+    const fromRunning = (r) => ({ match: r.match, competition: r.competition,
+                                  isBracket: r.isBracket, roundIndex: r.roundIndex,
+                                  totalRounds: r.totalRounds });
+    const fromUpcoming = (m) => ({ match: m, competition: m._comp,
+                                   isBracket: m._isBracket, roundIndex: m._roundIndex,
+                                   totalRounds: m._totalRounds });
+
+    // With no running match the first scheduled one auto-promotes into "Now",
+    // which is just the queue starting at slot 0 instead of slot 1. Expressing
+    // it as an offset removes the second branch: the empty case needs no guard
+    // because the loop simply does not run.
+    const start = running ? 1 : 0;
+    if (running) slots[0] = fromRunning(running);
+    for (let i = 0; i < upcoming.length && start + i < totalSlots; i++) {
+        slots[start + i] = fromUpcoming(upcoming[i]);
     }
     // If no running and no upcoming, slots stay null → empty cells.
     return slots;

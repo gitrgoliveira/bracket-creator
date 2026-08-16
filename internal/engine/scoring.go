@@ -164,11 +164,18 @@ func (e *Engine) withBracketMatch(compId, matchId string, mutate func(*state.Bra
 //     sub-bout one let a verdict-silent `decision:"daihyosen"` write inherit a
 //     match-level verdict, claiming the encounter itself was judged.
 //   - A TIED SCORELINE (FIK 7-5 / 29-6), the rule the verdict rests on.
+//   - NO DecisionBy / DecisionReason. Those two are the withdrawal audit trail
+//     (who called it, and why), so a result carrying either is recording a
+//     decision someone MADE, not a tied bout the referees judged. The validator
+//     refuses the pairing; this twin was missing both, so "IN FULL" above was an
+//     overclaim until they were added. Reachable only through the paths that do
+//     not run ScoreRequest.Validate, which is precisely why this function exists.
 func hanteiStillHolds(r *state.MatchResult) bool {
 	return r.Winner != "" &&
 		(r.Status == "" || r.Status == state.MatchStatusCompleted) &&
 		domain.IsMatchHanteiCompatibleDecisionStr(r.Decision) &&
-		domain.HanteiTiedScoreline(r.IpponsA, r.IpponsB)
+		domain.HanteiTiedScoreline(r.IpponsA, r.IpponsB) &&
+		r.DecisionBy == "" && r.DecisionReason == ""
 }
 
 // preserveMatchHantei resolves the MATCH-level verdict for a FORWARD write,
@@ -227,7 +234,7 @@ func preserveSubHantei(stored, incoming []state.SubMatchResult) {
 		}
 		// The SAME predicate validateSubBout enforces, shared via domain so the
 		// two cannot drift (this runs after validation and is never re-checked).
-		if !domain.IsHanteiCompatibleDecisionStr(in.Decision) {
+		if !domain.IsSubBoutHanteiCompatibleDecisionStr(in.Decision) {
 			return
 		}
 		// Side-guarded, like the preserveLoserScore precedent: IpponsA/IpponsB
@@ -247,10 +254,9 @@ func preserveSubHantei(stored, incoming []state.SubMatchResult) {
 		// deriveDaihyosenWinner then matches no side and leaves the encounter
 		// with a hantei-decided rep bout and no winner at all, which a bracket
 		// completion rejects and pool standings score as a draw for both teams.
-		if in.SideA != "" || in.SideB != "" {
-			if in.SideA != prior.SideA || in.SideB != prior.SideB {
-				return
-			}
+		if (in.SideA != "" || in.SideB != "") &&
+			(in.SideA != prior.SideA || in.SideB != prior.SideB) {
+			return
 		}
 		// A row that records no ippons of its own said nothing about the
 		// SCORELINE either, so the stored one travels with the verdict it
@@ -408,12 +414,12 @@ func applyPoolWrite(stored, result *state.MatchResult, policy matchWritePolicy) 
 	if sidesDisagree && policy == matchWriteForward {
 		return true
 	}
-	// Timestamp last-write-wins, the SAME guard and the same primitive the
-	// bracket branch uses: a reconnecting offline court's stale change loses to
-	// a newer result recorded elsewhere. Forward only. matchWriteRestore replays
-	// a trusted snapshot, and the snapshot deliberately carries no stamp so it
-	// cannot lose to the very write it is undoing (see bracketMatchAsResult).
-	if policy == matchWriteForward && !applyMatchWrite(result, stored.ModifiedAt) {
+	// Timestamp last-write-wins, the SAME guard, the same primitive and now the
+	// same call shape the bracket branch uses: a reconnecting offline court's
+	// stale change loses to a newer result recorded elsewhere. The restore
+	// exemption lives inside applyMatchWrite, which is load-bearing here — unlike
+	// the bracket's, this branch's rollback snapshot carries a real stamp.
+	if !applyMatchWrite(result, stored.ModifiedAt, policy) {
 		return false
 	}
 	// Preserve generation-time participant ids + resolve winner id across the
@@ -1305,7 +1311,22 @@ func (e *Engine) recordBracketMatchResult(compId string, matchId string, result 
 // and any client that does not stamp, keep exactly their previous
 // arrival-order behaviour. It only starts discriminating once a stamped write
 // has landed and been persisted.
-func applyMatchWrite(result *state.MatchResult, storedModifiedAt int64) bool {
+//
+// The POLICY is part of the guard, not of its callers. matchWriteRestore replays
+// a trusted snapshot of this same match, so it must never be weighed against the
+// stamp of the write it is undoing — that write is by definition newer, and the
+// rollback would lose to it every time. Stating that here rather than at each
+// call site is what makes the two branches identical, and it matters because the
+// two snapshot PRODUCERS differ: bracketMatchAsResult deliberately leaves
+// ModifiedAt at 0 (so the bracket bypass was inert either way), while the pool
+// snapshot is a straight copy of the stored MatchResult from
+// lookupExistingResult and carries a REAL persisted stamp. A gate stated only at
+// the pool call site was therefore load-bearing on one branch and decorative on
+// the other, which is precisely the asymmetry this primitive exists to end.
+func applyMatchWrite(result *state.MatchResult, storedModifiedAt int64, policy matchWritePolicy) bool {
+	if policy == matchWriteRestore {
+		return true
+	}
 	if result.CorrectionReason != "" {
 		return true
 	}
@@ -1375,10 +1396,10 @@ func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult, 
 	// Timestamp last-write-wins (mp-y3nk): drop a write strictly older than the
 	// stored result (both stamped in server-relative time), so a reconnecting
 	// offline court's stale change loses to a newer one recorded elsewhere.
-	// Unstamped writes bypass it (arrival-order, as before) and a deliberate
-	// correction always applies (applyMatchWrite); the completed-never-reverted
-	// guard stays on top.
-	if !applyMatchWrite(result, bm.ModifiedAt) {
+	// Unstamped writes bypass it (arrival-order, as before), a deliberate
+	// correction always applies, and a trusted restore is exempt (all three live
+	// in applyMatchWrite); the completed-never-reverted guard stays on top.
+	if !applyMatchWrite(result, bm.ModifiedAt, policy) {
 		return false, nil
 	}
 	// Fold the stored daihyosen verdict into the incoming subs BEFORE the winner

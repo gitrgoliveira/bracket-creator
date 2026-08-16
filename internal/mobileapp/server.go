@@ -228,6 +228,15 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	if err != nil {
 		log.Printf("Warning: web-mobile directory not found: %v", err)
 	} else {
+		// One validator per ROUTER, computed on first use rather than at
+		// startup, and captured by the handler below. sync.OnceValue keeps the
+		// laziness (nothing hashes unless a static asset is actually requested)
+		// without the package-level Once+string this used to need: those made a
+		// per-router value process-global, so a second FS root or an alternate
+		// asset dir would silently share one validator, and every test touching
+		// the headers had to reset package state or leak a consumed memo into
+		// whatever ran next.
+		assetETag := sync.OnceValue(func() string { return buildAssetETag(subFS) })
 		// Custom handler to serve from embedded FS with SPA fallback
 		r.NoRoute(func(c *gin.Context) {
 			path := c.Request.URL.Path
@@ -260,7 +269,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 				// File exists, serve it. http.ServeContent honours the ETag we
 				// set here against the request's If-None-Match, so an unchanged
 				// build answers 304 without a body.
-				setStaticCacheHeaders(c, subFS, filePath)
+				setStaticCacheHeaders(c, assetETag(), filePath)
 				fileServer := http.FileServer(http.FS(subFS))
 				fileServer.ServeHTTP(c.Writer, c.Request)
 				return
@@ -278,7 +287,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 			if strings.HasPrefix(filePath, "dist/") && strings.HasSuffix(filePath, ".jsx") {
 				rewritten := strings.TrimSuffix(filePath, ".jsx") + ".js"
 				if _, err := fs.Stat(subFS, rewritten); err == nil {
-					setStaticCacheHeaders(c, subFS, rewritten)
+					setStaticCacheHeaders(c, assetETag(), rewritten)
 					c.Request.URL.Path = "/" + rewritten
 					http.FileServer(http.FS(subFS)).ServeHTTP(c.Writer, c.Request)
 					return
@@ -326,32 +335,29 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 // served from cache. The "?v=N" query strings on some script tags were busting
 // a cache that never existed.
 func buildAssetETag(subFS fs.FS) string {
-	assetETagOnce.Do(func() {
-		h := sha256.New()
-		// WalkDir is deterministic (lexical order), so the same tree always
-		// hashes to the same value.
-		err := fs.WalkDir(subFS, "dist", func(path string, d fs.DirEntry, err error) error {
-			if err != nil || d.IsDir() {
-				return err
-			}
-			b, rerr := fs.ReadFile(subFS, path)
-			if rerr != nil {
-				return rerr
-			}
-			_, _ = h.Write([]byte(path))
-			_, _ = h.Write(b)
-			return nil
-		})
-		if err != nil {
-			// No validator is better than a wrong one: leaving it empty makes
-			// setStaticCacheHeaders skip the ETag, so responses simply go back
-			// to being uncacheable rather than cacheable-and-stale.
-			log.Printf("mobileapp: hashing /dist for the asset ETag failed, assets will not be cacheable: %v", err)
-			return
+	h := sha256.New()
+	// WalkDir is deterministic (lexical order), so the same tree always
+	// hashes to the same value.
+	err := fs.WalkDir(subFS, "dist", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
 		}
-		assetETag = fmt.Sprintf("%q", hex.EncodeToString(h.Sum(nil))[:16])
+		b, rerr := fs.ReadFile(subFS, path)
+		if rerr != nil {
+			return rerr
+		}
+		_, _ = h.Write([]byte(path))
+		_, _ = h.Write(b)
+		return nil
 	})
-	return assetETag
+	if err != nil {
+		// No validator is better than a wrong one: returning "" makes
+		// setStaticCacheHeaders skip the ETag, so responses simply go back
+		// to being uncacheable rather than cacheable-and-stale.
+		log.Printf("mobileapp: hashing /dist for the asset ETag failed, assets will not be cacheable: %v", err)
+		return ""
+	}
+	return fmt.Sprintf("%q", hex.EncodeToString(h.Sum(nil))[:16])
 }
 
 // staticAssetMaxAge is how long a client may reuse a compiled asset WITHOUT
@@ -382,21 +388,18 @@ const staticAssetMaxAge = 5 * time.Minute
 // Only /dist/ is covered: index.html is deliberately no-store (it carries
 // server-rendered meta tags), and uploaded branding/sponsor images set their
 // own policy in their handlers.
-func setStaticCacheHeaders(c *gin.Context, subFS fs.FS, filePath string) {
+func setStaticCacheHeaders(c *gin.Context, etag, filePath string) {
 	if !strings.HasPrefix(filePath, "dist/") {
 		return
 	}
-	etag := buildAssetETag(subFS)
 	if etag == "" {
 		return
 	}
-	c.Header("Cache-Control", fmt.Sprintf("public, max-age=%d", int(staticAssetMaxAge.Seconds())))
+	c.Header("Cache-Control", staticCacheControl)
 	c.Header("ETag", etag)
 }
 
-// assetETag caches the content hash of the embedded /dist tree for the life of
-// the process; see buildAssetETag.
-var (
-	assetETagOnce sync.Once
-	assetETag     string
-)
+// staticCacheControl is the header value built from staticAssetMaxAge, which is
+// a constant — so this string is fixed for the life of the binary and there is
+// nothing to format per request.
+var staticCacheControl = fmt.Sprintf("public, max-age=%d", int(staticAssetMaxAge.Seconds()))

@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, fireEvent, act } from '@testing-library/react';
+import { render, fireEvent, act, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 
 // OPERATOR RULING: a scoring result must read the SAME on every surface, and
@@ -29,6 +29,10 @@ import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 
 const STUBBED_GLOBALS = {
   isHikiwake: () => false,
+  // The real decoder from bracket.jsx: strips a trailing "(Hn)" and splits the
+  // remaining waza letters. Stubbed rather than imported to keep this file's
+  // globals self-contained, like every sibling render test.
+  ipponsFromScore: (s) => (s ? s.replace(/\s*\(H\d+\)$/, "").split("") : []),
   arraysEqual: (a, b) => a.length === b.length && a.every((v, i) => v === b[i]),
   isKikenDecision: () => false,
   isTextEntry: () => false,
@@ -92,7 +96,6 @@ const withVerdict = () => tiedRunningMatch({
   decidedByHantei: true, winner: { id: 'p1', name: 'Yamada' },
 });
 
-const q = (c, sel) => c.querySelector(`[data-testid="${sel}"]`);
 
 // Finish is a two-tap arm-then-confirm on a non-complete match. Both taps go
 // through act(): doSubmit is async and lands setState after the await, which
@@ -113,7 +116,7 @@ describe('the editor shows the verdict the server holds', () => {
       <ScoreEditorModal match={tiedRunningMatch()} onClose={vi.fn()} onSubmit={onSubmit} password="" />
     );
     // Before: no verdict anywhere, so the editor offers to record one.
-    expect(q(container, 'scoring-modal-hantei-arm')).toBeTruthy();
+    expect(screen.queryByTestId('scoring-modal-hantei-arm')).toBeTruthy();
 
     await act(async () => { rerender(
       <ScoreEditorModal match={withVerdict()} onClose={vi.fn()} onSubmit={onSubmit} password="" />
@@ -121,9 +124,9 @@ describe('the editor shows the verdict the server holds', () => {
 
     // After: the arm button is gone and the verdict row is showing, with the
     // recorded side marked — the same result the viewer and the board show.
-    expect(q(container, 'scoring-modal-hantei-arm')).toBeNull();
-    expect(q(container, 'scoring-modal-hantei-aka').className).toContain('btn--primary');
-    expect(q(container, 'scoring-modal-hantei-shiro').className).not.toContain('btn--primary');
+    expect(screen.queryByTestId('scoring-modal-hantei-arm')).toBeNull();
+    expect(screen.queryByTestId('scoring-modal-hantei-aka').className).toContain('btn--primary');
+    expect(screen.queryByTestId('scoring-modal-hantei-shiro').className).not.toContain('btn--primary');
     // And the Ht rides in the winner's slot, as it does on every other surface.
     expect(container.textContent).toContain('Ht');
   });
@@ -156,13 +159,39 @@ describe('the editor shows the verdict the server holds', () => {
       .toEqual(['K', '\u00b7', 'M', 'Ht']);
   });
 
+  it('adopts a BRACKET match score, which arrives as a formatted string', async () => {
+    // A bracket match persists each side as one formatted string (scoreA /
+    // scoreB) rather than an ippons array, and the editor decodes it through
+    // ipponsFromScore. The re-seed keys on the SEEDS it writes, not on the `m`
+    // fields it reads, which is what makes this case work: an earlier key
+    // enumerated m.ipponsA/m.ipponsB and so never fired for a knockout match,
+    // leaving exactly the stale board this rule exists to prevent — on the
+    // half of the tournament where a stale write matters most.
+    const bracketMatch = (over = {}) => tiedRunningMatch({
+      ipponsA: undefined, ipponsB: undefined, scoreA: 'M', scoreB: 'K', ...over,
+    });
+    const { rerender, container } = render(
+      <ScoreEditorModal match={bracketMatch()} onClose={vi.fn()} onSubmit={vi.fn()} password="" />
+    );
+    expect([...container.querySelectorAll('.sb-slot')].map(s => s.textContent))
+      .toEqual(['K', '·', 'M', '·']);
+
+    // Another device records a second point for AKA, so the match is 2-1.
+    await act(async () => { rerender(
+      <ScoreEditorModal match={bracketMatch({ scoreA: 'MK' })} onClose={vi.fn()} onSubmit={vi.fn()} password="" />
+    ); });
+
+    expect([...container.querySelectorAll('.sb-slot')].map(s => s.textContent))
+      .toEqual(['K', '·', 'M', 'K']);
+  });
+
   it('keeps UNSAVED operator edits rather than overwriting them', async () => {
     // The limit of the rule: an editor with work in it is not refreshed out
     // from under the operator. Their edits are not ours to discard — and note
-    // the server does NOT arbitrate a two-operator conflict on a pool/league
-    // match (timestamp LWW is bracket-only; ModifiedAt is not even persisted in
-    // pool-matches.csv), so this keeps a REAL conflict visible to the human who
-    // owns it rather than resolving it silently.
+    // the server ORDERS stamped writes but does not ARBITRATE a two-operator
+    // conflict: whoever saves last wins, deliberately, because more than one
+    // person may legitimately be scoring a court. So this keeps a REAL conflict
+    // visible to the human who owns it rather than resolving it silently.
     const { rerender, container } = render(
       <ScoreEditorModal
         match={tiedRunningMatch({ ipponsA: [], ipponsB: [] })}
@@ -229,7 +258,7 @@ describe('the editor shows the verdict the server holds', () => {
       <ScoreEditorModal match={withVerdict()} onClose={vi.fn()} onSubmit={onSubmit} password="" />
     );
     await act(async () => {
-      fireEvent.click(q(container, 'scoring-modal-hantei-cancel'));
+      fireEvent.click(screen.queryByTestId('scoring-modal-hantei-cancel'));
     });
     await finish(container);
     expect(onSubmit.mock.calls.at(-1)[0].decidedByHantei).toBe(false);

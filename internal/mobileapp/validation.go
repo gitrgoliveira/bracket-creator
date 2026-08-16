@@ -230,7 +230,7 @@ func validateSubBout(prefix string, sr *state.SubMatchResult, allowNumberedEncho
 	if !domain.HanteiTiedScoreline(sr.IpponsA, sr.IpponsB) {
 		return &ValidationError{Field: prefix + "decidedByHantei", Message: "requires a tied scoreline, ippon counts must be equal"}
 	}
-	if !domain.IsHanteiCompatibleDecisionStr(sr.Decision) {
+	if !domain.IsSubBoutHanteiCompatibleDecisionStr(sr.Decision) {
 		return &ValidationError{
 			Field:   prefix + "decidedByHantei",
 			Message: fmt.Sprintf("incompatible with decision %q, hantei declares a winner from a tied bout; use '', 'fought', or 'daihyosen'", sr.Decision),
@@ -668,30 +668,16 @@ const maxIpponsPerSide = 2
 // scorelines are also bounded by these rules, their own n-0 check in
 // validateDecision is strictly tighter (n ≤ 2) so this passes through.
 //
-// (Named validateIppons until the entry-shape rule joined it, at which
+// (Named validateIpponCounts until the entry-shape rule joined it, at which
 // point the name described half the job.)
 func validateIppons(field string, ipponsA, ipponsB []string) error {
 	// Entry SHAPE first: a multi-rune entry is malformed whatever the counts
 	// are, and the two failures it caused are both worse than a count error.
-	// The reasoning lives on domain.IpponFitsScoreCodec, beside the codec whose
-	// precondition this is; the short version is that FormatScore joins with no
-	// separator, so "MHt" comes back as three ippons — and on a POOL match the
-	// two-rune "Ht" is the verdict ENCODING, so accepting one from a client let
-	// a payload forge a judges' decision that appeared on the next reload.
-	for _, side := range []struct {
-		name   string
-		ippons []string
-	}{{"ipponsA", ipponsA}, {"ipponsB", ipponsB}} {
-		for _, v := range side.ippons {
-			if !domain.IpponFitsScoreCodec(v) {
-				return &ValidationError{
-					Field: field + side.name,
-					Message: fmt.Sprintf(
-						"ippon marks are single characters (a waza letter, %q or %q); got %q",
-						domain.DefaultWinIppon, domain.IpponPlaceholder, v),
-				}
-			}
-		}
+	if err := ipponEntriesWellFormed(field+"ipponsA", ipponsA); err != nil {
+		return err
+	}
+	if err := ipponEntriesWellFormed(field+"ipponsB", ipponsB); err != nil {
+		return err
 	}
 	if len(ipponsA) > maxIpponsPerSide {
 		return &ValidationError{
@@ -724,6 +710,32 @@ func validateIppons(field string, ipponsA, ipponsB []string) error {
 		return &ValidationError{
 			Field:   field + "ippons",
 			Message: "both sides cannot have 2 ippons (best-of-3 ends at first to 2)",
+		}
+	}
+	return nil
+}
+
+// ipponEntriesWellFormed rejects a multi-rune ippon entry on one side. The
+// reasoning lives on domain.IpponFitsScoreCodec, beside the codec whose
+// precondition this is; the short version is that FormatScore joins with no
+// separator, so "MHt" comes back as three ippons — and on a POOL match the
+// two-rune "Ht" is the verdict ENCODING, so accepting one from a client let a
+// payload forge a judges' decision that appeared on the next reload.
+//
+// field is the fully-qualified JSON field name, e.g. "subResults[0].ipponsA".
+func ipponEntriesWellFormed(field string, ippons []string) error {
+	for _, v := range ippons {
+		if !domain.IpponFitsScoreCodec(v) {
+			// Says SHAPE, not vocabulary, because that is what is enforced. The
+			// letters are deliberately open (naginata adds "S", and the round-trip
+			// tests pin letter-agnosticism), so naming a closed set here would
+			// promise a rule that does not exist and mislead whoever hits it.
+			return &ValidationError{
+				Field: field,
+				Message: fmt.Sprintf(
+					"each ippon mark is a single character (e.g. a waza letter, %q or %q); got %q",
+					domain.DefaultWinIppon, domain.IpponPlaceholder, v),
+			}
 		}
 	}
 	return nil

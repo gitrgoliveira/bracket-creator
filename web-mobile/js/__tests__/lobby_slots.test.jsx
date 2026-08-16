@@ -8,12 +8,12 @@ import { IndividualScore } from '../match_scoreboard.jsx';
 // Three scenarios:
 //   1. Running match present → slot[0] = running, rest = upcoming queue
 //   2. No running match → auto-promote first scheduled to slot[0]
+//   3. Fewer than LOBBY_ROWS.length scheduled matches → tail slots are null
 //
 // Slots are asserted through `slot.match.status`, the same thing a renderer
 // sees. They used to assert a `kind` tag on the slot, which no renderer read:
 // the tests were that field's only consumer, so it could have gone wrong in
 // any way that still satisfied them.
-//   3. Fewer than LOBBY_ROWS.length scheduled matches → tail slots are null
 
 // Helper: build a minimal competition with poolMatches on a given court.
 function makeComp(name, court, matches) {

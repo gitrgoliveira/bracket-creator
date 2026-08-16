@@ -595,10 +595,12 @@ func (s *Store) savePoolMatchesLocked(compID string, results []MatchResult, writ
 		// its own; see encodeHanteiIntoIppons.
 		encIpponsA, encIpponsB := encodeHanteiIntoIppons(&r)
 
-		// Encho collapses to its period count; see the parser for why only a
-		// positive value is meaningful.
+		// Encho collapses to its period count, gated on Encho.On() — the same
+		// predicate the parser cites for why only a positive value is
+		// meaningful, so the two sides of the round trip cannot disagree about
+		// what counts as overtime.
 		enchoPeriods := 0
-		if r.Encho != nil && r.Encho.PeriodCount > 0 {
+		if r.Encho.On() {
 			enchoPeriods = r.Encho.PeriodCount
 		}
 

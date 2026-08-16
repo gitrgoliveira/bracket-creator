@@ -43,11 +43,11 @@ func IsKikenDecision(d Decision) bool {
 	return d == DecisionKiken || d == DecisionKikenVoluntary || d == DecisionKikenInjury
 }
 
-// IsHanteiCompatibleDecision reports whether a decision can coexist with a
-// hantei verdict ON A SUB-BOUT. Hantei declares a winner from a TIED bout, so
-// it is incompatible with any decision that already settles the bout another
-// way (a withdrawal, a no-show, a draw). "" and "fought" are ordinary play;
-// "daihyosen" is the rep-bout placeholder the verdict rides on.
+// IsSubBoutHanteiCompatibleDecision reports whether a decision can coexist
+// with a hantei verdict ON A SUB-BOUT. Hantei declares a winner from a TIED
+// bout, so it is incompatible with any decision that already settles the bout
+// another way (a withdrawal, a no-show, a draw). "" and "fought" are ordinary
+// play; "daihyosen" is the rep-bout placeholder the verdict rides on.
 //
 // One owner because there are two enforcers at different layers: the HTTP
 // validator (validateSubBout) rejects an incompatible pairing on the way in,
@@ -55,17 +55,22 @@ func IsKikenDecision(d Decision) bool {
 // since it mutates a row AFTER validation and its output is never re-checked.
 // Two copies could drift such that the engine stamps a row the validator
 // would refuse.
-func IsHanteiCompatibleDecision(d Decision) bool {
-	switch d {
-	case DecisionNone, DecisionFought, DecisionDaihyosen:
-		return true
-	}
-	return false
+//
+// NEITHER predicate is named the unqualified "IsHanteiCompatibleDecision", on
+// purpose. That name used to belong to this one, so it read as the default at a
+// call site that had no other cue about which level it was at — and reaching for
+// the default at match level is exactly the bug the split was made to fix.
+//
+// Defined in terms of the match-level set so the two share their common part
+// rather than enumerating it twice: this is that set PLUS the rep-bout
+// placeholder, which is what the prose above says.
+func IsSubBoutHanteiCompatibleDecision(d Decision) bool {
+	return IsMatchHanteiCompatibleDecision(d) || d == DecisionDaihyosen
 }
 
-// IsHanteiCompatibleDecisionStr is the wire-string form.
-func IsHanteiCompatibleDecisionStr(s string) bool {
-	return IsHanteiCompatibleDecision(Decision(s))
+// IsSubBoutHanteiCompatibleDecisionStr is the wire-string form.
+func IsSubBoutHanteiCompatibleDecisionStr(s string) bool {
+	return IsSubBoutHanteiCompatibleDecision(Decision(s))
 }
 
 // IsMatchHanteiCompatibleDecision is the MATCH-level twin, and is deliberately

@@ -102,13 +102,11 @@
          help: it busts one tag while every IMPORT of that same module keeps its
          own unversioned URL, which is how the double-load below started.
 
-         They were also actively harmful on three tags. A browser keys a module
-         by its exact URL, so a tag at "/dist/ui.js?v=5" against an import of
-         "./ui.jsx" is TWO module instances of one file: it evaluated twice,
-         doubled the download and parse, and split any module-level state.
-         bracket, ui and qr had drifted into exactly that. The server rewrites
-         "/dist/X.jsx" to the compiled "dist/X.js", which is why the .jsx form
-         is what makes a tag agree with its import.
+         They were also actively harmful on three tags: bracket, ui and qr had
+         drifted into the exact tag-vs-import URL mismatch described in the
+         comment above the first script block, so each was evaluating twice.
+         The server rewrites "/dist/X.jsx" to the compiled "dist/X.js", which
+         is why the .jsx form is what makes a tag agree with its import.
 
          check-imports.mjs now fails the build if a tagged module's URL differs
          from how it is imported, so re-adding a query here is caught rather

@@ -76,13 +76,13 @@ func TestDefaultWinHelpers(t *testing.T) {
 // validator on the way in, and the engine's preserve on the way out, which
 // mutates a row after validation and is never re-checked. They share this
 // predicate precisely so they cannot drift; pin the membership.
-func TestIsHanteiCompatibleDecision(t *testing.T) {
+func TestIsSubBoutHanteiCompatibleDecision(t *testing.T) {
 	compatible := []domain.Decision{domain.DecisionNone, domain.DecisionFought, domain.DecisionDaihyosen}
 	for _, d := range compatible {
-		if !domain.IsHanteiCompatibleDecision(d) {
+		if !domain.IsSubBoutHanteiCompatibleDecision(d) {
 			t.Errorf("decision %q must be compatible with hantei", d)
 		}
-		if !domain.IsHanteiCompatibleDecisionStr(string(d)) {
+		if !domain.IsSubBoutHanteiCompatibleDecisionStr(string(d)) {
 			t.Errorf("string form disagrees for %q", d)
 		}
 	}
@@ -92,11 +92,11 @@ func TestIsHanteiCompatibleDecision(t *testing.T) {
 		domain.DecisionHikiwake, domain.DecisionKiken, domain.DecisionKikenVoluntary, domain.DecisionKikenInjury,
 		domain.DecisionFusenpai, domain.DecisionFusensho, domain.DecisionKachinukiExhaustion,
 	} {
-		if domain.IsHanteiCompatibleDecision(d) {
+		if domain.IsSubBoutHanteiCompatibleDecision(d) {
 			t.Errorf("decision %q must NOT be compatible with hantei", d)
 		}
 	}
-	if domain.IsHanteiCompatibleDecisionStr("not-a-decision") {
+	if domain.IsSubBoutHanteiCompatibleDecisionStr("not-a-decision") {
 		t.Error("an unknown wire value must not be compatible")
 	}
 }

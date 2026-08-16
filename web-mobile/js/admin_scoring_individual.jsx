@@ -457,9 +457,17 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // ARTIFICIAL conflicts, where an editor holding a mount-time snapshot wrote
   // back state it was never showing. What remains is a genuine disagreement
   // between two people who both typed something, which is theirs to resolve.
+  // The signature is the tuple the effect WRITES, not the `m` fields it reads.
+  // Those two lists had already drifted apart: `m.status` fed no setter (so a
+  // status-only broadcast triggered a no-op re-seed), while the bracket-match
+  // fallbacks `m.scoreA`/`m.scoreB` (via ipponsFromScore), `m.score.ippons`,
+  // `m.score.fouls` and `m.winner?.id` all feed one and were absent — so a
+  // bracket match whose score moved elsewhere did not re-seed at all. Keying on
+  // the seeds themselves cannot drift: whatever the derivation above starts
+  // reading is automatically part of the key.
   const serverScoreSig = JSON.stringify([
-    m.ipponsA || [], m.ipponsB || [], m.hansokuA ?? 0, m.hansokuB ?? 0,
-    m.encho?.periodCount || 0, m.status || "", m.score?.type || "", m.decision || "",
+    initialAPts, initialBPts, initialAFouls, initialBFouls,
+    initialEnchoPeriods, initialIsDrawToggled,
   ]);
   const wasDirtyRef = useRefA(false);
   useEffectA(() => {

@@ -1478,7 +1478,7 @@ func TestIpponEntriesMustBeSingleCharacters(t *testing.T) {
 	t.Run("the hantei mark cannot be smuggled in as a point", func(t *testing.T) {
 		err := validateIppons("", []string{"M", domain.HanteiMark}, []string{"K"})
 		require.Error(t, err, "accepting this forges a hantei verdict on the next reload")
-		assert.Contains(t, err.Error(), "single characters")
+		assert.Contains(t, err.Error(), "single character")
 	})
 
 	t.Run("any multi-character entry, on either side", func(t *testing.T) {
@@ -1502,7 +1502,7 @@ func TestIpponEntriesMustBeSingleCharacters(t *testing.T) {
 		}
 		err := r.Validate()
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "single characters")
+		assert.Contains(t, err.Error(), "single character")
 	})
 
 	t.Run("rejected on the bulk path, including a sub-bout", func(t *testing.T) {
@@ -1515,6 +1515,6 @@ func TestIpponEntriesMustBeSingleCharacters(t *testing.T) {
 		}
 		err := validateBulkScoreLengths(r, false)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "single characters")
+		assert.Contains(t, err.Error(), "single character")
 	})
 }

@@ -28,7 +28,7 @@ func bracketMatchAsResult(bm *state.BracketMatch) *state.MatchResult {
 	ipponsA, hansokuA := domain.ParseScore(bm.ScoreA)
 	ipponsB, hansokuB := domain.ParseScore(bm.ScoreB)
 	// ModifiedAt is deliberately NOT projected, and that is the one omission
-	// which is correct. The restore runs through applyBracketWrite, the
+	// which is correct. The restore runs through applyMatchWrite, the
 	// timestamp LWW guard, against the stamp the REJECTED write just left on
 	// the match. Carrying the snapshot's older stamp would make the rollback
 	// lose to the write it is undoing and be silently dropped; leaving it 0

@@ -1452,16 +1452,18 @@ func TestReopenHandler_PendingReasonEnforcedOnDecisionPoolMatch(t *testing.T) {
 	assert.Equal(t, state.MatchStatusCompleted, m.Status)
 	assert.Equal(t, reason, m.CorrectionReason, "the justification must be persisted, not just accepted")
 	assert.False(t, m.ReopenPending, "the flag must be cleared once the record exists")
-	// CorrectionReason is not a nicety here, it is the ONLY durable home for
-	// the justification on this path: participants.csv-style pool storage has
-	// no DecisionReason column (see the header in state/pools.go), so a pool
-	// match's decisionReason lives only in the response and the SSE broadcast
-	// and is gone on the next load. Requiring the reason WITHOUT copying it
-	// into a persisted field would have re-created the very bug this closes,
-	// just one reload later.
-	assert.Empty(t, m.DecisionReason,
-		"pool storage has no DecisionReason column; if that ever changes this assertion should flip, "+
-			"but the CorrectionReason copy above must stay either way")
+	// The CorrectionReason copy above stays either way, as this assertion's
+	// earlier form instructed: it is the audit field the reopen contract reads,
+	// and it must mean the same thing whichever endpoint finalized the match.
+	//
+	// What HAS changed is the other half. Pool storage now has DecisionBy and
+	// DecisionReason columns, so the justification is durable in its own right
+	// rather than surviving only as the correction note. This assertion is the
+	// flipped version the previous one asked for: the decision audit trail must
+	// now round-trip, not merely be accepted and forgotten on the next load.
+	assert.Equal(t, reason, m.DecisionReason,
+		"the decision audit trail is persisted for a pool match, as it always was for a bracket match")
+	assert.Equal(t, "shiro", m.DecisionBy, "and so is who recorded it")
 	assert.NotEmpty(t, m.SubResults, "the bout log survives the decision (FIK Art. 32)")
 }
 

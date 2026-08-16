@@ -888,14 +888,17 @@ type MatchResult struct {
 	// ModifiedAt is the SERVER-RELATIVE unix-millis timestamp of the last change
 	// to this match's result-bearing fields (mp-y3nk timestamp reconciliation).
 	// Clients stamp each score/override write with server-relative time (learned
-	// via GET /api/time). Timestamp last-write-wins currently applies to the
-	// BRACKET write path only: for a bracket match the handler drops a write
-	// whose ModifiedAt is older than the stored value (so a reconnecting offline
-	// court's stale change never overwrites a newer one), and it is persisted in
-	// bracket.json (see BracketMatch.ModifiedAt) so the comparison survives a
-	// restart. For POOL matches this field is wire-only: it is NOT written to
-	// pool-matches.csv and NOT yet used for reconciliation (a scoped follow-up),
-	// so it resets to 0 on restart and pool writes keep arrival-order behavior.
+	// via GET /api/time), and a write whose ModifiedAt is older than the stored
+	// value is dropped, so a reconnecting offline court's stale change never
+	// overwrites a newer one recorded elsewhere.
+	//
+	// It applies to BOTH match stores and is persisted by both: bracket.json
+	// via BracketMatch.ModifiedAt, pool-matches.csv via its own column. The
+	// guard needs a STORED stamp to compare against, so persistence is not a
+	// detail here, it is the precondition; this was bracket-only for exactly as
+	// long as the pool file had nowhere to put it. engine.applyMatchWrite is the
+	// one primitive both branches call.
+	//
 	// The completed-never-reverted guard stays on top regardless. 0
 	// (absent/legacy) means "unstamped": it is treated as arrival-order and still
 	// APPLIES (it does NOT lose to a stamped write), so old files and un-stamped

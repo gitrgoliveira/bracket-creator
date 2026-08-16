@@ -442,18 +442,21 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // for an untouched editor, which is the very thing being corrected. An
   // operator with unsaved work keeps it: their edits are not ours to discard.
   //
-  // Be precise about what happens if they then save over a newer result,
-  // because the server does NOT arbitrate this for a pool/league match.
-  // Timestamp LWW (mp-y3nk) is BRACKET-only — MatchResult.ModifiedAt is
-  // wire-only for pool matches, absent from pool-matches.csv, so there is
-  // nothing to compare against — and the `stale: true` response covers only a
-  // lower Rev from the SAME session or a running write arriving after
-  // completion. Two operators editing one pool match is deliberate
-  // last-write-wins (handlers_match.go says so). What this re-seed removes is
-  // the ARTIFICIAL half of that: an editor that sat on a mount-time snapshot
-  // wrote back minutes-old state it was never showing. What remains is a
-  // genuine conflict between two people who both typed something, which is
-  // theirs to resolve, not ours to silently pick a winner for.
+  // Be precise about what happens if they then save over a newer result.
+  // Timestamp last-write-wins (mp-y3nk) now covers EVERY match, pool and
+  // knockout alike, through engine.applyMatchWrite: a write stamped older than
+  // the stored result is dropped, so an editor that sat through an outage
+  // cannot bury a result recorded meanwhile. That is a floor, not a resolution
+  // protocol. Concurrent editors are still deliberately last-write-wins
+  // (handlers_match.go says so), the guard only orders writes that carry
+  // stamps, and the `stale: true` response covers a narrower case again (a
+  // lower Rev from the SAME session, or a running write arriving after
+  // completion).
+  //
+  // So this re-seed is still doing the load-bearing work: it removes the
+  // ARTIFICIAL conflicts, where an editor holding a mount-time snapshot wrote
+  // back state it was never showing. What remains is a genuine disagreement
+  // between two people who both typed something, which is theirs to resolve.
   const serverScoreSig = JSON.stringify([
     m.ipponsA || [], m.ipponsB || [], m.hansokuA ?? 0, m.hansokuB ?? 0,
     m.encho?.periodCount || 0, m.status || "", m.score?.type || "", m.decision || "",

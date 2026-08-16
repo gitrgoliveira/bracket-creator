@@ -401,3 +401,92 @@ func TestSideMismatchIsAForwardOnlyErrorInBothBranches(t *testing.T) {
 		assert.Equal(t, state.MatchStatusScheduled, target.Status, "the rollback actually landed")
 	})
 }
+
+// Timestamp last-write-wins is a property of a MATCH, not of the store its
+// phase happens to live in. It was bracket-only for one reason: the guard needs
+// a stored stamp, and pool-matches.csv had no column for one, so a reconnecting
+// court's stale change was discarded in the knockout and applied in the pool.
+// Both branches now go through applyMatchWrite.
+func TestTimestampGuardAppliesToBothBranches(t *testing.T) {
+	const stored, older, newer = 2_000, 1_000, 3_000
+
+	poolStored := func() *state.MatchResult {
+		return &state.MatchResult{
+			ID: "Pool A-1", SideA: "Kyoto", SideB: "Osaka", Winner: "Kyoto",
+			Status: state.MatchStatusCompleted, ModifiedAt: stored,
+		}
+	}
+	bracketStored := func() *state.BracketMatch {
+		return &state.BracketMatch{
+			ID: "m-r1-0", SideA: "Kyoto", SideB: "Osaka", Winner: "Kyoto",
+			Status: state.MatchStatusCompleted, ModifiedAt: stored,
+		}
+	}
+	incoming := func(at int64) *state.MatchResult {
+		return &state.MatchResult{
+			ID: "x", SideA: "Kyoto", SideB: "Osaka", Winner: "Osaka",
+			Status: state.MatchStatusCompleted, ModifiedAt: at,
+		}
+	}
+
+	t.Run("a strictly older write is dropped, in the pool too", func(t *testing.T) {
+		p := poolStored()
+		require.False(t, applyPoolWrite(p, incoming(older), matchWriteForward))
+		assert.Equal(t, "Kyoto", p.Winner, "the newer stored result stands")
+		assert.EqualValues(t, stored, p.ModifiedAt)
+
+		b := bracketStored()
+		applied, err := applyBracketMatchResult(b, incoming(older), matchWriteForward)
+		require.NoError(t, err)
+		assert.False(t, applied)
+		assert.Equal(t, "Kyoto", b.Winner, "same answer on the other branch")
+	})
+
+	t.Run("a newer write applies on both", func(t *testing.T) {
+		p := poolStored()
+		require.False(t, applyPoolWrite(p, incoming(newer), matchWriteForward))
+		assert.Equal(t, "Osaka", p.Winner)
+
+		b := bracketStored()
+		applied, err := applyBracketMatchResult(b, incoming(newer), matchWriteForward)
+		require.NoError(t, err)
+		assert.True(t, applied)
+		assert.Equal(t, "Osaka", b.Winner)
+	})
+
+	t.Run("an unstamped write still applies, so legacy clients are unaffected", func(t *testing.T) {
+		p := poolStored()
+		require.False(t, applyPoolWrite(p, incoming(0), matchWriteForward))
+		assert.Equal(t, "Osaka", p.Winner, "0 means unstamped, which never loses")
+		assert.EqualValues(t, stored, p.ModifiedAt,
+			"and it must not reset the stored stamp, or the match reopens to stale writes")
+	})
+
+	t.Run("an unstamped STORED value accepts anything, so legacy files are unaffected", func(t *testing.T) {
+		p := poolStored()
+		p.ModifiedAt = 0 // a row written before the column existed
+		require.False(t, applyPoolWrite(p, incoming(older), matchWriteForward))
+		assert.Equal(t, "Osaka", p.Winner)
+	})
+
+	t.Run("a deliberate correction is never dropped as stale", func(t *testing.T) {
+		p := poolStored()
+		corr := incoming(older)
+		corr.CorrectionReason = "scoreboard misread"
+		require.False(t, applyPoolWrite(p, corr, matchWriteForward))
+		assert.Equal(t, "Osaka", p.Winner,
+			"an explicit operator correction outranks the timestamp on both branches")
+	})
+
+	t.Run("the K3 restore bypasses the guard", func(t *testing.T) {
+		// The rollback snapshot deliberately carries no stamp so it cannot lose
+		// to the very write it is undoing; the restore policy skips the guard for
+		// the same reason it inherits nothing else.
+		p := poolStored()
+		snap := incoming(0)
+		snap.Winner = "Kyoto"
+		snap.Status = state.MatchStatusScheduled
+		require.False(t, applyPoolWrite(p, snap, matchWriteRestore))
+		assert.Equal(t, state.MatchStatusScheduled, p.Status, "the rollback landed")
+	})
+}

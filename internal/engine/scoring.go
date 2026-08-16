@@ -377,8 +377,11 @@ func (e *Engine) writeToPoolOrBracket(compId, matchId string, result *state.Matc
 
 // applyPoolWrite folds the stored match into an incoming result and then
 // performs the whole-struct overwrite. It reports whether the write was
-// ABANDONED (the payload names a pairing that is not this match's), in which
-// case the stored match is left untouched.
+// ABANDONED, in which case the stored match is left untouched. That happens two
+// ways, mirroring applyBracketMatchResult: the payload names a pairing that is
+// not this match's (a client error the caller maps to 409), or the timestamp
+// guard drops it as stale (not an error at all, the newer result simply
+// stands). Only the first is reported as a `mismatch`.
 //
 // It does the `*stored = *result` assignment itself rather than leaving it to
 // each caller, so that the overwrite is unreachable without the merge. This is
@@ -405,9 +408,24 @@ func applyPoolWrite(stored, result *state.MatchResult, policy matchWritePolicy) 
 	if sidesDisagree && policy == matchWriteForward {
 		return true
 	}
+	// Timestamp last-write-wins, the SAME guard and the same primitive the
+	// bracket branch uses: a reconnecting offline court's stale change loses to
+	// a newer result recorded elsewhere. Forward only. matchWriteRestore replays
+	// a trusted snapshot, and the snapshot deliberately carries no stamp so it
+	// cannot lose to the very write it is undoing (see bracketMatchAsResult).
+	if policy == matchWriteForward && !applyMatchWrite(result, stored.ModifiedAt) {
+		return false
+	}
 	// Preserve generation-time participant ids + resolve winner id across the
 	// overwrite: score requests carry side NAMES only. See backfillMatchIdentity.
 	backfillMatchIdentity(result, stored)
+	// Keep the stored stamp when this write is unstamped, so an un-stamped
+	// client cannot reset the field to 0 and reopen the match to stale writes.
+	// The whole-struct overwrite below would otherwise zero it; the bracket
+	// twin needs the same rule and states it at its own assignment.
+	if result.ModifiedAt == 0 {
+		result.ModifiedAt = stored.ModifiedAt
+	}
 	if result.Court == "" {
 		result.Court = stored.Court
 	}
@@ -1265,12 +1283,29 @@ func (e *Engine) recordBracketMatchResult(compId string, matchId string, result 
 	})
 }
 
-// applyBracketWrite reports whether a bracket write should apply under the
+// applyMatchWrite reports whether a match write should apply under the
 // timestamp last-write-wins guard (mp-y3nk). A deliberate operator CORRECTION
 // (CorrectionReason set) always applies: it is an explicit decision made under
 // the handler's correction-audit lock, not a reconnect replay, so it must never
 // be dropped as "stale". Otherwise it is pure timestamp LWW.
-func applyBracketWrite(result *state.MatchResult, storedModifiedAt int64) bool {
+//
+// ONE primitive for both branches, because a match is a match: which store it
+// lands in is an implementation detail of the phase it is in, and an operator
+// cannot be expected to know that a reconnecting court's stale change is
+// discarded in the knockout and applied in the pool.
+//
+// It used to be bracket-only, not by choice but by omission: the guard needs a
+// stored stamp to compare against, and pool-matches.csv had no column for one
+// (bracket.json marshals every exported field, so the bracket got it for
+// free). With that column added this became symmetrical, and both callers now
+// go through here.
+//
+// The rollout is inert on existing data: ApplyByTimestamp treats 0 on EITHER
+// side as unstamped and applies, so a file written before the column existed,
+// and any client that does not stamp, keep exactly their previous
+// arrival-order behaviour. It only starts discriminating once a stamped write
+// has landed and been persisted.
+func applyMatchWrite(result *state.MatchResult, storedModifiedAt int64) bool {
 	if result.CorrectionReason != "" {
 		return true
 	}
@@ -1341,9 +1376,9 @@ func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult, 
 	// stored result (both stamped in server-relative time), so a reconnecting
 	// offline court's stale change loses to a newer one recorded elsewhere.
 	// Unstamped writes bypass it (arrival-order, as before) and a deliberate
-	// correction always applies (applyBracketWrite); the completed-never-reverted
+	// correction always applies (applyMatchWrite); the completed-never-reverted
 	// guard stays on top.
-	if !applyBracketWrite(result, bm.ModifiedAt) {
+	if !applyMatchWrite(result, bm.ModifiedAt) {
 		return false, nil
 	}
 	// Fold the stored daihyosen verdict into the incoming subs BEFORE the winner

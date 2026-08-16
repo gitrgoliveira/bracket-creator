@@ -500,6 +500,43 @@ func parsePoolMatchesRecords(records [][]string) []MatchResult {
 				m.ReopenPending = v
 			}
 		}
+		// Decision-audit columns (appended after ReopenPending): WHO recorded a
+		// kiken/fusenpai and WHY. These were held only in memory, so the audit
+		// trail behind a withdrawal survived until the next restart and no
+		// further. The bracket kept both all along (bracket.json marshals every
+		// exported field), which is the asymmetry this closes.
+		if len(rec) > 25 {
+			m.DecisionBy = rec[25]
+		}
+		if len(rec) > 26 {
+			m.DecisionReason = rec[26]
+		}
+		// Encho (overtime) period count. Stored as a bare integer rather than a
+		// nested object because EnchoMetadata holds exactly that one field.
+		//
+		// Only a POSITIVE count rebuilds the block, which is lossless: Encho.On()
+		// is the single "did this happen in encho" predicate and it requires
+		// non-nil AND positive, so a nil block and a degenerate {PeriodCount: 0}
+		// are already indistinguishable to every consumer. A negative value is
+		// rejected at the HTTP boundary and is treated here as absent, so a
+		// hand-edited file cannot load one.
+		if len(rec) > 27 {
+			if v, err := strconv.Atoi(rec[27]); err == nil && v > 0 {
+				m.Encho = &EnchoMetadata{PeriodCount: v}
+			}
+		}
+		// ModifiedAt: the server-relative stamp the timestamp last-write-wins
+		// guard compares. It has to be PERSISTED for that guard to survive a
+		// restart, which is why the bracket has always written it and why the
+		// pool path could not reconcile without it. Unparseable or negative
+		// reads as 0, which ApplyByTimestamp treats as unstamped and therefore
+		// always-applies: a corrupt cell degrades to arrival order, never to
+		// silently dropping an operator's write.
+		if len(rec) > 28 {
+			if v, err := strconv.ParseInt(rec[28], 10, 64); err == nil && v > 0 {
+				m.ModifiedAt = v
+			}
+		}
 
 		results = append(results, m)
 	}
@@ -536,7 +573,7 @@ func (s *Store) savePoolMatchesLocked(compID string, results []MatchResult, writ
 	// the previous os.Create + streaming pattern lacked.
 	var buf bytes.Buffer
 	writer := csv.NewWriter(&buf)
-	if err := writer.Write([]string{"PoolName", "MatchIdx", "SideA", "SideB", "Winner", "IpponsA", "IpponsB", "HansokuA", "HansokuB", "Decision", "Status", "Court", "SubResults", "ScheduledAt", "ResultSource", "Round", "SideAID", "SideBID", "WinnerID", "CorrectionReason", "RepPlayerA", "RepPlayerB", "FlagsA", "FlagsB", "ReopenPending"}); err != nil {
+	if err := writer.Write([]string{"PoolName", "MatchIdx", "SideA", "SideB", "Winner", "IpponsA", "IpponsB", "HansokuA", "HansokuB", "Decision", "Status", "Court", "SubResults", "ScheduledAt", "ResultSource", "Round", "SideAID", "SideBID", "WinnerID", "CorrectionReason", "RepPlayerA", "RepPlayerB", "FlagsA", "FlagsB", "ReopenPending", "DecisionBy", "DecisionReason", "Encho", "ModifiedAt"}); err != nil {
 		return err
 	}
 
@@ -557,6 +594,13 @@ func (s *Store) savePoolMatchesLocked(compID string, results []MatchResult, writ
 		// A hantei rides in the winner's score cell rather than in a column of
 		// its own; see encodeHanteiIntoIppons.
 		encIpponsA, encIpponsB := encodeHanteiIntoIppons(&r)
+
+		// Encho collapses to its period count; see the parser for why only a
+		// positive value is meaningful.
+		enchoPeriods := 0
+		if r.Encho != nil && r.Encho.PeriodCount > 0 {
+			enchoPeriods = r.Encho.PeriodCount
+		}
 
 		if err := writer.Write([]string{
 			poolName,
@@ -584,6 +628,10 @@ func (s *Store) savePoolMatchesLocked(compID string, results []MatchResult, writ
 			strconv.Itoa(r.FlagsA),
 			strconv.Itoa(r.FlagsB),
 			strconv.FormatBool(r.ReopenPending),
+			r.DecisionBy,
+			r.DecisionReason,
+			strconv.Itoa(enchoPeriods),
+			strconv.FormatInt(r.ModifiedAt, 10),
 		}); err != nil {
 			return err
 		}

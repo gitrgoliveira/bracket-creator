@@ -268,7 +268,7 @@ classDiagram
         PoolName, Player, Position
     }
     class pool_matches_csv["pool-matches.csv"] {
-        <<CSV, 25 columns>>
+        <<CSV, one row per match>>
         MatchResult rows
     }
     class bracket_json["bracket.json"] {
@@ -352,11 +352,19 @@ sequenceDiagram
 
 **Concurrent editors are not arbitrated.** Two operators scoring the same match is treated
 as last write wins, which is intentional: more than one person may legitimately be scoring
-one court. Three narrower guards do apply. A knockout match rejects a write stamped older
-than the stored one. A running write that arrives after the match has been completed is
-discarded rather than reverting the result. An out of order write from the same client
-session is dropped. Anything beyond that is a genuine disagreement between two people and is
-left visible rather than resolved silently.
+one court. Three narrower guards do apply. A write stamped older than the stored result is
+dropped, so a court coming back from an outage cannot overwrite a newer result recorded
+elsewhere. A running write that arrives after the match has been completed is discarded
+rather than reverting the result. An out of order write from the same client session is
+dropped. Anything beyond that is a genuine disagreement between two people and is left
+visible rather than resolved silently.
+
+The stale write guard needs the timestamp of the stored result to compare against, so it
+only works where that timestamp is saved. It is saved for every match, in both files, which
+is what makes the rule the same wherever a match happens to be in the competition. A result
+written before the timestamp existed, or by a client that does not send one, counts as
+unstamped and always applies: the guard discriminates only when both sides carry a stamp,
+so it can never silently drop a legitimate change.
 
 ## 6. Where the object model and the file layout disagree
 

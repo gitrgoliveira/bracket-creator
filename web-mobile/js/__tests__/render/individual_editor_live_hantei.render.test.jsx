@@ -158,8 +158,11 @@ describe('the editor shows the verdict the server holds', () => {
 
   it('keeps UNSAVED operator edits rather than overwriting them', async () => {
     // The limit of the rule: an editor with work in it is not refreshed out
-    // from under the operator. Their edits are not ours to discard, and the
-    // write path reconciles (timestamp LWW server-side, plus `stale: true`).
+    // from under the operator. Their edits are not ours to discard — and note
+    // the server does NOT arbitrate a two-operator conflict on a pool/league
+    // match (timestamp LWW is bracket-only; ModifiedAt is not even persisted in
+    // pool-matches.csv), so this keeps a REAL conflict visible to the human who
+    // owns it rather than resolving it silently.
     const { rerender, container } = render(
       <ScoreEditorModal
         match={tiedRunningMatch({ ipponsA: [], ipponsB: [] })}

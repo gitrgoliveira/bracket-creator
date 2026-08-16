@@ -440,9 +440,20 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // isDirty — i.e. dirtiness measured before this change landed — because this
   // render's isDirty compares against the new server values and would read true
   // for an untouched editor, which is the very thing being corrected. An
-  // operator with unsaved work keeps it: their edits are not ours to discard,
-  // and the write path already reconciles (a stale write loses the timestamp
-  // LWW, and the server answers `stale: true`).
+  // operator with unsaved work keeps it: their edits are not ours to discard.
+  //
+  // Be precise about what happens if they then save over a newer result,
+  // because the server does NOT arbitrate this for a pool/league match.
+  // Timestamp LWW (mp-y3nk) is BRACKET-only — MatchResult.ModifiedAt is
+  // wire-only for pool matches, absent from pool-matches.csv, so there is
+  // nothing to compare against — and the `stale: true` response covers only a
+  // lower Rev from the SAME session or a running write arriving after
+  // completion. Two operators editing one pool match is deliberate
+  // last-write-wins (handlers_match.go says so). What this re-seed removes is
+  // the ARTIFICIAL half of that: an editor that sat on a mount-time snapshot
+  // wrote back minutes-old state it was never showing. What remains is a
+  // genuine conflict between two people who both typed something, which is
+  // theirs to resolve, not ours to silently pick a winner for.
   const serverScoreSig = JSON.stringify([
     m.ipponsA || [], m.ipponsB || [], m.hansokuA ?? 0, m.hansokuB ?? 0,
     m.encho?.periodCount || 0, m.status || "", m.score?.type || "", m.decision || "",

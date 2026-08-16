@@ -113,3 +113,62 @@ func TestEliminationBandsIgnoreTheBronzeCourtWhenNoBronzePrints(t *testing.T) {
 	assert.Contains(t, bandHeaders(t, true), ShiaijoLabel("C"),
 		"when the bronze IS printed its shiaijo must still get a band, or the block lands under another court's header")
 }
+
+// PrintTeamEliminationMatches and PrintEliminationWithBronze are exported and
+// take the rounds from their caller, so what they do with a nil entry is part of
+// their contract whether or not this repo can produce one.
+//
+// It cannot: BuildEliminationMatchRounds is the only producer and TraverseRounds
+// appends non-nil nodes only. That is exactly why this needs a test rather than
+// a walk through the call graph -- nothing else in the suite can reach the
+// branch, so without this it is a guard no run ever executes. Its two siblings
+// over the same slices (AssignMatchNumbers, FillInMatches) have always skipped
+// nils; these two dereferenced whatever they were handed.
+func TestEliminationRoundsToleratesANilEntry(t *testing.T) {
+	t.Parallel()
+
+	render := func(t *testing.T, injectNil bool) []string {
+		t.Helper()
+		f := excelize.NewFile()
+		defer func() { require.NoError(t, f.Close()) }()
+		_, err := f.NewSheet(SheetEliminationMatches)
+		require.NoError(t, err)
+
+		pools, err := CreatePools(drawGoldenRoster(2), drawGoldenPoolSize, true)
+		require.NoError(t, err)
+		draw := BuildKnockoutDraw(pools, 2, 2)
+		require.NotNil(t, draw)
+		rounds := BuildEliminationMatchRounds(draw.Root)
+		AssignMatchNumbers(rounds)
+		require.NotEmpty(t, rounds)
+
+		if injectNil {
+			// A nil beside the real bouts, and a round that is nothing but
+			// nils: both are shapes a caller could hand over.
+			rounds[0] = append([]*Node{nil}, rounds[0]...)
+			rounds = append(rounds, []*Node{nil, nil})
+		}
+
+		plan := CourtPlan{Draw: draw, Courts: []string{"A", "B"}}
+		PrintEliminationWithBronze(f, nil, rounds, 0, plan, false, false, false)
+
+		rows, err := f.GetRows(SheetEliminationMatches)
+		require.NoError(t, err)
+		require.NotEmpty(t, rows)
+		var headers []string
+		for _, cell := range rows[0] {
+			if strings.HasPrefix(cell, "Shiaijo ") {
+				headers = append(headers, cell)
+			}
+		}
+		return headers
+	}
+
+	clean := render(t, false)
+	require.NotEmpty(t, clean, "the fixture must produce bands for the comparison to mean anything")
+	// Skipped, not counted: a nil must not add a band, drop one, or reorder
+	// them. Anything else and the sheet a nil produces is quietly different
+	// from the sheet the same bouts produce on their own.
+	assert.Equal(t, clean, render(t, true),
+		"a nil entry must be skipped exactly as AssignMatchNumbers and FillInMatches skip it")
+}

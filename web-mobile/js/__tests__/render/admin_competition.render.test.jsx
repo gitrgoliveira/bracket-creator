@@ -636,6 +636,50 @@ describe('AdminCompetition draw seed warnings (spec 007 R2/D7)', () => {
     const { container } = await mountSection('overview', { comp });
     expect(banner(container)).toBeNull();
   });
+
+  // Switching between two STARTED competitions kept the previous one's
+  // sentences on screen for the length of the new fetch, under the new
+  // competition's name and the heading "the draw could not honour every rule".
+  // The effect only cleared on its setup branch, so the non-setup path went
+  // straight to the fetch with the old list still rendered. The warnings are
+  // now held with the competition id they describe and rendered only when the
+  // two match.
+  it('never shows the previous competition\'s warnings while the new fetch is in flight', async () => {
+    const first = makeCompetition({ id: 'first', name: 'Mudansha', status: 'pools', courts: ['A', 'B'] });
+    withWarnings('Seed 4 ignored: Mudansha had 3 pools for 4 seeds.');
+    const { container, rerender } = await mountSection('overview', { comp: first });
+    expect(banner(container).textContent).toContain('Seed 4 ignored');
+
+    // The second competition's fetch is held open, which is exactly the window
+    // the stale render happened in.
+    let releaseSecond;
+    window.API.fetchDrawWarnings = vi.fn(() => new Promise((resolve) => { releaseSecond = resolve; }));
+
+    const second = makeCompetition({ id: 'second', name: 'Yudansha', status: 'pools', courts: ['A', 'B'] });
+    await act(async () => {
+      rerender(
+        <AdminCompetition
+          tournament={makeTournament(second)}
+          competition={second}
+          pools={[]} poolMatches={[]} standings={[]} bracket={null}
+          section="overview"
+          onSection={noop} onBack={noop} onOpenCompetition={noop} onUpdate={noop}
+          onRefreshCompetition={noop} onMoveCourt={noop} onEditScore={noop}
+          onLogout={noop} onViewerMode={noop} tweaks={{}} password="" showToast={noop}
+        />
+      );
+    });
+
+    expect(container.textContent).toContain('Yudansha');
+    expect(banner(container), "Mudansha's warnings are still on screen under Yudansha's name").toBeNull();
+
+    // And the new competition's own warnings still arrive when they land.
+    await act(async () => {
+      releaseSecond(['Seed 2 ignored: Yudansha had 1 pool for 2 seeds.']);
+    });
+    expect(banner(container).textContent).toContain('Yudansha had 1 pool');
+    expect(banner(container).textContent).not.toContain('Mudansha');
+  });
 });
 
 // A competition stored without a courts key arrives from the API as

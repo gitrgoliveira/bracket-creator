@@ -430,21 +430,27 @@ function initialEnchoPeriodsForMatch(m) {
 // withdrawal as false rather than as an omission the server would read as
 // "no opinion" and preserve over.
 //
-// hanteiKnown is the exception, and it is what stops the tri-state collapsing
-// back to a boolean. An editor mounted BEFORE the verdict existed has its
-// armed flag frozen false (deliberately: re-seeding it from the live prop
-// would reset in-progress editing on every SSE reload), so it would otherwise
-// send an authoritative-looking false for a verdict it has never displayed and
-// the operator has never seen, silently erasing another device's judges'
-// decision on the next unrelated autosave. Pass false in exactly that case and
-// the write goes back to being SILENT, which is the truth: this editor has no
-// opinion. It defaults true so a caller that never had this ambiguity keeps
-// the explicit contract. Returns the fields to merge into the entry.
+// The verdict is ALWAYS stated here, never omitted. That is safe because of
+// where this is called from: the team editor adopts whatever verdict the
+// server holds (its adopt effect), so it can never send an authoritative false
+// about something it has not displayed.
+//
+// There used to be a `hanteiKnown` parameter for exactly that case — an editor
+// mounted before the verdict existed kept a mount-frozen armed flag, so it
+// would have erased another device's judges' decision on the next unrelated
+// autosave, and passing false made the write SILENT instead. Freezing bought
+// that safety by letting the editor show something other than the stored
+// result, which breaks the rule that a match has one result and every surface
+// shows the same one. Adoption fixes the display and removes the blind spot,
+// so the parameter had nothing left to guard.
+//
+// The tri-state is NOT collapsing back to a boolean by this: silence still
+// means "no opinion" on the wire, and the writers that genuinely have none
+// (stale snapshots, quick-score) still omit the field. This caller simply is
+// not one of them any more. Returns the fields to merge into the entry.
 // Exported for vitest.
-function daihyosenEnchoFields({ enchoPeriodCount, daihyosenTied, daihyosenHantei, hanteiKnown = true }) {
-  const verdict = !!(daihyosenTied && daihyosenHantei);
-  const fields = {};
-  if (verdict || hanteiKnown) fields.decidedByHantei = verdict;
+function daihyosenEnchoFields({ enchoPeriodCount, daihyosenTied, daihyosenHantei }) {
+  const fields = { decidedByHantei: !!(daihyosenTied && daihyosenHantei) };
   if (enchoPeriodCount > 0) fields.encho = { periodCount: enchoPeriodCount };
   return fields;
 }

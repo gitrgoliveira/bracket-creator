@@ -100,42 +100,37 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // round-trips the count via toBackendMatchResult; Slice 3 (T093+) layers
   // the decision/kiken UI on top.
   const initialEnchoPeriods = m.encho?.periodCount || 0;
-  // FROZEN at mount, exactly like the team editor's initialDaihyosenHanteiArmed
-  // and for the same reason. As a plain per-render const this tracked the LIVE m
-  // prop, so a verdict another device recorded mid-edit flipped it true — which
-  // (a) made isDirty compare false !== true and prompt "discard changes?" on an
-  // untouched editor, and (b) turned hanteiClear below into an authoritative
-  // `decidedByHantei: false` on the next write, erasing a verdict this operator
-  // was never shown. Frozen, an editor that mounted before the verdict existed
-  // stays SILENT about it and preserveMatchHantei keeps it (the individual
-  // twin of the team editor's hanteiKnown guard).
-  //
-  // This became consequential in this PR: before a pool hantei persisted
-  // (encodeHanteiIntoIppons) there was nothing on disk for a pool match to lose.
-  const [initialDecidedByHantei] = useStateA(() => !!m.decidedByHantei);
   const [aPts, setAPts] = useStateA(initialAPts);
   const [bPts, setBPts] = useStateA(initialBPts);
   const [aFouls, setAFouls] = useStateA(initialAFouls);
   const [bFouls, setBFouls] = useStateA(initialBFouls);
   const [enchoPeriodCount, setEnchoPeriodCount] = useStateA(initialEnchoPeriods);
+  // The verdict the SERVER holds right now. A match has ONE result and every
+  // surface asking for it must show the same one, and this editor is such a
+  // surface: while it is open, the viewer card, the bracket, the TV board and
+  // the Excel export are all already showing whatever this says.
+  const hanteiRecorded = !!m.decidedByHantei;
   // FIK Art. 7-5 / 29-6: an encho match that remains tied is decided by
   // referee hantei. Persisting this on MatchResult so the UI / Excel can
   // mark it distinctly (vs an ippon-derived win).
-  const [decidedByHantei, setDecidedByHantei] = useStateA(initialDecidedByHantei);
-  // The verdict the server holds RIGHT NOW, for display only — it must never
-  // reach a patch. Split from the frozen flag because the two answer different
-  // questions: "is there a verdict on the server" (this) versus "was this
-  // editor shown one, so may it rule on it" (frozen).
+  const [decidedByHantei, setDecidedByHantei] = useStateA(hanteiRecorded);
+  // ADOPT a verdict recorded on another device, so this editor cannot sit
+  // showing "Decide by hantei…" while every other surface shows the Ht.
   //
-  // Note what this does NOT do: it does not surface a verdict recorded
-  // elsewhere mid-edit. Both consumers below sit behind the LOCAL armed state,
-  // which stays frozen-initialised, so a stale editor still shows the
-  // "Decide by hantei…" button. Syncing local state from the prop is what would
-  // fix that, and it is precisely what causes the erase this split prevents (it
-  // would also clobber the operator's in-progress edits). The team editor makes
-  // the same trade. What matters is that the write is now silent rather than
-  // destructive; seeing the verdict costs a reopen.
-  const hanteiRecorded = !!m.decidedByHantei;
+  // Keyed on the VALUE, not on `m`: an SSE reload re-creates the match object
+  // on every broadcast, so a `[m]`-keyed effect would fight the operator's
+  // every tap. Keyed on the boolean it fires only when the SERVER's verdict
+  // actually flips, which leaves a local arm or cancel standing (the server
+  // value did not move) while still following a real change in either
+  // direction. It touches the verdict only: aPts/bPts and the fouls are
+  // untouched, so an edit in progress survives.
+  //
+  // The alternative — freeze at mount and stay silent about what you never saw
+  // — trades the erase for a divergence, and a result that reads differently
+  // depending on which screen you look at is the worse failure. Adopting means
+  // an explicit `false` below is always the operator ruling on something in
+  // front of them.
+  useEffectA(() => { setDecidedByHantei(hanteiRecorded); }, [hanteiRecorded]);
   // Which side ("a"/"b"/"") holds a RECORDED hantei verdict, for the display
   // chip in the slot grid. Gated on the SERVER's verdict — not the local armed
   // state: arming a hantei on a reopened match must not resolve the stale
@@ -280,12 +275,13 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // hantei-decided, so a re-edit via the normal flow removes the stale Ht
   // marker rather than preserving it on the server.
   //
-  // Keyed on the FROZEN flag, not the live prop: an explicit false is an
-  // authoritative "there is no verdict", and this editor is only entitled to
-  // say that about a verdict it was actually shown. Mounted before one existed,
-  // it emits nothing and lets the server preserve — the same rule the team
-  // editor spells as hanteiKnown.
-  const hanteiClear = initialDecidedByHantei ? { decidedByHantei: false } : {};
+  // "The server holds a verdict and this editor is showing none" — which, given
+  // the adopt effect above, means the operator pressed Cancel on a verdict that
+  // was on screen. An explicit false is an authoritative "there is no verdict",
+  // and that is exactly who should be allowed to say it. There is no
+  // mounted-before-the-verdict blind spot to guard any more: the editor adopts
+  // what the server holds, so it can never rule on something it did not show.
+  const hanteiClear = hanteiRecorded && !decidedByHantei ? { decidedByHantei: false } : {};
 
   // mp-62vr: carry the rep-player names on every write for a team rep bout so
   // the per-court display can show who fought. backfillMatchIdentity preserves
@@ -430,6 +426,39 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   const initialIsDrawToggled = window.isHikiwake(m.score?.type) || window.isHikiwake(m.decision);
   const [isDrawToggled, setIsDrawToggled] = useStateA(initialIsDrawToggled);
 
+  // RE-SEED the whole scoring state when the stored result moves and the
+  // operator has nothing unsaved — the score half of the same rule the verdict
+  // adopt effect implements. Every ippon slot, foul counter and overtime count
+  // above is local state seeded at MOUNT, so without this an editor left open
+  // kept showing the scoreline it opened with while the list behind it, the
+  // viewer, the board and the export all moved on. A verdict adopted onto a
+  // stale scoreline is worse than either alone: the Ht lands in the slot the
+  // OLD score left free, so the editor showed `Ht` at 0-0 against a stored 1-1.
+  //
+  // Keyed on a signature of the SERVER's result, so it fires when that changes
+  // and not on every SSE re-render. `wasDirtyRef` holds the PREVIOUS render's
+  // isDirty — i.e. dirtiness measured before this change landed — because this
+  // render's isDirty compares against the new server values and would read true
+  // for an untouched editor, which is the very thing being corrected. An
+  // operator with unsaved work keeps it: their edits are not ours to discard,
+  // and the write path already reconciles (a stale write loses the timestamp
+  // LWW, and the server answers `stale: true`).
+  const serverScoreSig = JSON.stringify([
+    m.ipponsA || [], m.ipponsB || [], m.hansokuA ?? 0, m.hansokuB ?? 0,
+    m.encho?.periodCount || 0, m.status || "", m.score?.type || "", m.decision || "",
+  ]);
+  const wasDirtyRef = useRefA(false);
+  useEffectA(() => {
+    if (wasDirtyRef.current) return;
+    setAPts(initialAPts);
+    setBPts(initialBPts);
+    setAFouls(initialAFouls);
+    setBFouls(initialBFouls);
+    setEnchoPeriodCount(initialEnchoPeriods);
+    setIsDrawToggled(initialIsDrawToggled);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverScoreSig]);
+
   // Arranged as [left, right]: left is always SHIRO (White), right is always AKA (Red).
   // onIncrement applies the FIK 2-foul auto-award rule via applyFoulIncrement:
   // every 2nd foul on this side discharges into a hansoku ippon ("H") for
@@ -511,6 +540,13 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   const [finishArmed, setFinishArmed] = useStateA(false);
   useEffectA(() => { setFinishArmed(false); }, [aTotal, bTotal, isDrawToggled]);
 
+  // "Has the OPERATOR changed anything", which gates the discard prompt — so
+  // the verdict term compares against what the SERVER holds, not against a
+  // mount-time snapshot. Adopting a verdict recorded elsewhere moves both sides
+  // of that comparison together and is therefore not dirty, which is right: it
+  // is not an unsaved change of theirs, and prompting "discard unsaved scoring
+  // changes?" on an editor nobody touched trains operators to dismiss the one
+  // prompt that protects real work.
   const isDirty =
     !window.arraysEqual(aPts, initialAPts) ||
     !window.arraysEqual(bPts, initialBPts) ||
@@ -518,7 +554,11 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     bFouls !== initialBFouls ||
     isDrawToggled !== initialIsDrawToggled ||
     enchoPeriodCount !== initialEnchoPeriods ||
-    decidedByHantei !== initialDecidedByHantei;
+    decidedByHantei !== hanteiRecorded;
+  // Declared AFTER the re-seed effect above so that effect reads the value from
+  // the render BEFORE the server change. It self-corrects: a re-seed makes the
+  // next render's isDirty false again.
+  useEffectA(() => { wasDirtyRef.current = isDirty; });
   const handleDismiss = async () => {
     // Don't close while any save/decision request is in flight: letting
     // the modal unmount would orphan the pending fetch and lose the

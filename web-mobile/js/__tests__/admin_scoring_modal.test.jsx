@@ -287,36 +287,33 @@ describe('daihyosenEnchoFields (mp-4pc encho/hantei wire gating)', () => {
       .toEqual({ decidedByHantei: false });
   });
 
-  it('goes SILENT (omits the field) when this editor has no opinion on the verdict', () => {
-    // hanteiKnown=false is the "mounted before the verdict existed" blind spot:
-    // the armed flag is frozen false and nothing about the verdict is on
-    // screen, so an explicit false would erase another device's judges'
-    // decision. Omitting keeps the field tri-state, which is what lets the
-    // server's preserve tell "no opinion" apart from "withdrawn".
-    const fields = daihyosenEnchoFields({
-      enchoPeriodCount: 0, daihyosenTied: false, daihyosenHantei: '', hanteiKnown: false,
-    });
-    expect(fields).toEqual({});
-    expect('decidedByHantei' in fields).toBe(false);
+  it('ALWAYS states the verdict — there is no silent variant any more', () => {
+    // A `hanteiKnown: false` parameter used to make this omit the field, for
+    // an editor mounted before the verdict existed: its armed flag was frozen
+    // false, so an explicit false would have erased another device's judges'
+    // decision. The team editor now ADOPTS the stored verdict instead (a match
+    // has one result and every surface shows the same one), so it is never
+    // ruling on something it did not display, and the guard had nothing left
+    // to protect. A stray argument must not resurrect the old behaviour.
+    for (const extra of [{}, { hanteiKnown: false }, { hanteiKnown: true }]) {
+      const fields = daihyosenEnchoFields({
+        enchoPeriodCount: 0, daihyosenTied: false, daihyosenHantei: '', ...extra,
+      });
+      expect(fields).toEqual({ decidedByHantei: false });
+      expect('decidedByHantei' in fields).toBe(true);
+    }
   });
 
-  it('still emits encho while silent on the verdict', () => {
+  it('emits encho alongside the verdict, always', () => {
     expect(daihyosenEnchoFields({
-      enchoPeriodCount: 2, daihyosenTied: false, daihyosenHantei: '', hanteiKnown: false,
-    })).toEqual({ encho: { periodCount: 2 } });
+      enchoPeriodCount: 2, daihyosenTied: false, daihyosenHantei: '',
+    })).toEqual({ decidedByHantei: false, encho: { periodCount: 2 } });
   });
 
-  it('an ARMED pick is emitted even when hanteiKnown is false', () => {
-    // Silence is only ever the absence of an opinion. The operator picking a
-    // side IS an opinion, so it must reach the wire regardless.
+  it('an ARMED pick on a tied bout is emitted as true', () => {
     expect(daihyosenEnchoFields({
-      enchoPeriodCount: 0, daihyosenTied: true, daihyosenHantei: 'a', hanteiKnown: false,
+      enchoPeriodCount: 0, daihyosenTied: true, daihyosenHantei: 'a',
     })).toEqual({ decidedByHantei: true });
-  });
-
-  it('defaults to the explicit contract when hanteiKnown is not passed', () => {
-    expect(daihyosenEnchoFields({ enchoPeriodCount: 0, daihyosenTied: false, daihyosenHantei: '' }))
-      .toEqual({ decidedByHantei: false });
   });
 });
 

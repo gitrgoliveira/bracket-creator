@@ -108,7 +108,13 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
 
 function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, password }) {
   const isLeague = c && c.format === "league";
-  const [scoreOpenMatch, setScoreOpenMatch] = useStateA(null);
+  // A KEY, re-resolved from the live poolMatches every render, never a captured
+  // object. A match has ONE result and every surface asking for it shows the
+  // same one (operator ruling); a snapshot shows the answer it was opened with
+  // for as long as it stays open, so a result recorded on another device
+  // updated the pool grid behind this modal but not the modal itself. Same
+  // pattern as AdminScoreEditor, the bracket panel and the shiaijo panel.
+  const [scoreOpenId, setScoreOpenId] = useStateA(null);
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
 
@@ -466,6 +472,12 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
     </div>
   ) : null;
 
+  // Resolved live, then enriched: enrichPoolMatchWithComp derives rep-player
+  // rosters from `c`, so it must run on the CURRENT row, not on the row as it
+  // looked when the operator clicked it.
+  const scoreOpenRaw = scoreOpenId ? (poolMatches || []).find((m) => m.id === scoreOpenId) || null : null;
+  const scoreOpenMatch = scoreOpenRaw ? enrichPoolMatchWithComp(scoreOpenRaw, c) : null;
+
   // Modal rendered alongside the PoolsViewer.
   const scoreModal = scoreOpenMatch ? (
     <ScoreEditorModal
@@ -475,11 +487,11 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
       nextMatch={null}
       onPrev={null}
       onNext={null}
-      onClose={() => setScoreOpenMatch(null)}
+      onClose={() => setScoreOpenId(null)}
       onSubmit={async (patch) => {
         try {
           await onEditScore(c.id, scoreOpenMatch.id, patch, scoreOpenMatch);
-          if (mountedRef.current) setScoreOpenMatch(null);
+          if (mountedRef.current) setScoreOpenId(null);
         } catch (_err) { /* keep modal open on error */ }
       }}
       onSubmitAndNext={null}
@@ -508,7 +520,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
             competition={c}
             poolMatches={poolMatches}
             tweaks={tweaks}
-            onMatchClick={(m) => setScoreOpenMatch(enrichPoolMatchWithComp(m, c))}
+            onMatchClick={(m) => setScoreOpenId(m.id)}
             highlightPlayers={[]}
           />
         ) : null
@@ -520,7 +532,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
             poolMatches={poolMatches}
             competition={c}
             tweaks={tweaks}
-            onMatchClick={(m) => setScoreOpenMatch(enrichPoolMatchWithComp(m, c))}
+            onMatchClick={(m) => setScoreOpenId(m.id)}
             highlightPlayers={[]}
           />
         ) : null

@@ -684,11 +684,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // the stored winner to the losing side on the next save. Unattributable
   // seeds "": the panel opens ARMED with no side picked, so the operator
   // re-states the verdict rather than the editor guessing it.
-  // Frozen at MOUNT via a lazy initializer: this is the baseline the state
-  // was seeded from and isDirty compares against. Recomputing per render let
-  // an SSE-driven m prop update mid-edit move the baseline under the
-  // comparison and flip isDirty spuriously.
-  const [initialDaihyosenHantei] = useStateA(() => {
+  // Computed LIVE from the m prop, not frozen at mount: this pair is what the
+  // server currently holds, and the editor follows it (see the adopt effect
+  // below). A match has ONE result and every surface asking for it shows the
+  // same one; this editor is such a surface.
+  const daihyosenHanteiRecorded = !!existingDaihyosen?.decidedByHantei;
+  const recordedDaihyosenSide = (() => {
     if (!existingDaihyosen?.decidedByHantei || !existingDaihyosen.winner) return "";
     // The exclusive-attribution rule is hanteiWinnerKey (shared with the
     // individual editor's chip), not restated here.
@@ -708,23 +709,35 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       return "a";
     }
     return "";
-  });
-  const [daihyosenHantei, setDaihyosenHantei] = useStateA(initialDaihyosenHantei);
+  })();
+  const [daihyosenHantei, setDaihyosenHantei] = useStateA(recordedDaihyosenSide);
   // Armed follows the RECORDED flag, not the resolved side, so an
   // unattributable stored verdict still opens the panel for re-picking
   // instead of silently reading as "no hantei".
-  // FROZEN at mount, like its twin initialDaihyosenHantei above, and for a
-  // sharper reason than baseline stability. As a plain per-render const it
-  // tracked the LIVE m prop, so when another device recorded a verdict this
-  // flipped true mid-edit - which (a) made isDirty compare false !== true and
-  // prompt "discard changes?" on an untouched editor, and (b) silently
-  // DEFEATED the hanteiKnown guard in buildPatch, whose whole job is to detect
-  // "this editor mounted before the verdict existed". Reading a live value
-  // there answered "yes I know about it" for a verdict never shown on screen,
-  // so the next autosave sent an authoritative false and erased it: the exact
-  // failure hanteiKnown was added to prevent.
-  const [initialDaihyosenHanteiArmed] = useStateA(() => !!existingDaihyosen?.decidedByHantei);
-  const [daihyosenHanteiArmed, setDaihyosenHanteiArmed] = useStateA(initialDaihyosenHanteiArmed);
+  const [daihyosenHanteiArmed, setDaihyosenHanteiArmed] = useStateA(daihyosenHanteiRecorded);
+  // ADOPT a verdict recorded on another device, so this editor cannot sit
+  // showing an un-armed hantei panel while the viewer, the bracket, the TV
+  // board and the export all show the Ht.
+  //
+  // Keyed on the two VALUES, not on `m`: an SSE reload re-creates the match
+  // object on every broadcast, so an object-keyed effect would fight the
+  // operator's every tap. Keyed on the primitives it fires only when the
+  // SERVER's verdict actually moves, which leaves a local pick or cancel
+  // standing (those do not move the server value) while still following a real
+  // change in either direction. It touches the verdict only, so the bout
+  // scores being edited are untouched.
+  //
+  // This replaces a pair of mount-frozen baselines. Freezing stopped the
+  // erase, but by making the editor show something other than the stored
+  // result — and a result that reads differently depending on which screen you
+  // look at is the worse failure. Because the editor now always shows the
+  // stored verdict, an explicit `false` from it is always the operator ruling
+  // on something in front of them, which is what let buildPatch's hanteiKnown
+  // guard go away entirely.
+  useEffectA(() => {
+    setDaihyosenHanteiArmed(daihyosenHanteiRecorded);
+    setDaihyosenHantei(recordedDaihyosenSide);
+  }, [daihyosenHanteiRecorded, recordedDaihyosenSide]);
   // The ONE hantei undo, shared by the Ht chip and the panel Cancel so the
   // two paths cannot drift. Like the pick buttons, it is LOCAL state only:
   // hantei is an explicit-submit channel (autosave contract), so the verdict
@@ -1652,17 +1665,18 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       // (validation.go validateSubBout). daihyosenEnchoFields emits the two
       // independently: encho is optional for a hantei decision.
       if (isDaihyo) {
-        // hanteiKnown is false only for the one blind spot: this editor mounted
-        // with no verdict (so the armed flag is frozen false and no Ht/Cancel
-        // is on screen), while the LIVE prop now carries one another device
-        // recorded. Sending an explicit false there would erase a verdict the
-        // operator was never shown; going silent lets the server preserve it.
+        // The verdict is always stated, never omitted: the editor adopts what
+        // the server holds, so it is never ruling on something it did not show.
+        // (There used to be a hanteiKnown guard for exactly that blind spot —
+        // an editor mounted before the verdict existed went silent rather than
+        // erase it. Adoption removes the blind spot, so the guard went too.)
         // ORDER MATTERS below: daihyosenEnchoFields writes the field first and
         // dhKeep restores a preserved `true` over it. Swapping the two lines
         // re-opens the regression they exist to prevent (fixing an unrelated
-        // bout score silently flipping a hantei win into a hikiwake).
-        const hanteiKnown = initialDaihyosenHanteiArmed || daihyosenHanteiArmed || !existingDaihyosen?.decidedByHantei;
-        Object.assign(entry, daihyosenEnchoFields({ enchoPeriodCount, daihyosenTied, daihyosenHantei, hanteiKnown }));
+        // bout score silently flipping a hantei win into a hikiwake). That is
+        // still the path an UNATTRIBUTABLE stored verdict takes: the side
+        // resolves to "" so the field below says false, and dhKeep puts it back.
+        Object.assign(entry, daihyosenEnchoFields({ enchoPeriodCount, daihyosenTied, daihyosenHantei }));
         if (dhKeep) Object.assign(entry, dhKeep);
       } else if (isKachinuki && s.encho > 0) {
         // mp-gmcg: numbered-bout encho is the KACHINUKI knockout-tie
@@ -1786,7 +1800,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // the comparison robust against array identity drift from setSubs.
   // Encho toggle is included so an operator-only encho change still
   // triggers the discard confirm.
-  const isDirty = JSON.stringify(subs) !== JSON.stringify(initSubsRef.current) || enchoPeriodCount !== initialEnchoPeriods || daihyosenHantei !== initialDaihyosenHantei || daihyosenHanteiArmed !== initialDaihyosenHanteiArmed;
+  // The verdict terms compare against what the SERVER holds, not a mount-time
+  // snapshot: adopting a verdict recorded elsewhere moves both sides together
+  // and so is not dirty, which is right — it is not an unsaved change of the
+  // operator's, and a "discard unsaved changes?" prompt on an editor nobody
+  // touched trains them to dismiss the one prompt that protects real work.
+  const isDirty = JSON.stringify(subs) !== JSON.stringify(initSubsRef.current) || enchoPeriodCount !== initialEnchoPeriods || daihyosenHantei !== recordedDaihyosenSide || daihyosenHanteiArmed !== daihyosenHanteiRecorded;
 
   // Match ScoreEditorModal's dismiss contract: never close mid-submit
   // (setState-after-unmount), AND confirm-then-discard when the user has

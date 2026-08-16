@@ -55,11 +55,16 @@ const LOBBY_ROWS = [
 // Returns an array of exactly LOBBY_ROWS.length elements; missing
 // slots are null (rendered as an empty "-" cell).
 //
-// `kind` records WHY a slot is filled ('running' | 'upnext' | 'scheduled').
-// LobbyMatchCell no longer reads it — cell styling comes from `rowKind`, which
-// is positional (row index) — but it is not redundant with it: rowKind cannot
-// tell a genuinely running match at slot 0 from a promoted up-next, which is
-// exactly the rule the slot tests pin. Keep it as model output.
+// Slot entries carry no "why it is here" tag. They used to (`kind`, one of
+// 'running' | 'upnext' | 'scheduled'), which outlived its last production
+// reader: LobbyMatchCell styles from the POSITIONAL `rowKind` (row index), and
+// nothing else read it. The comment defending it argued rowKind cannot tell a
+// genuinely running match at slot 0 from a promoted up-next — true, and beside
+// the point, because `slot.match.status` can: findRunningOnCourt admits only
+// status === 'running' and findUpcomingOnCourt only 'scheduled', so the tag was
+// derivable from the match it was attached to. What kept it alive was the slot
+// tests asserting on it, which is how a model field drifts from reality
+// unnoticed; they now assert on the status a renderer can actually see.
 function buildCourtSlots(competitions, court) {
     const totalSlots = LOBBY_ROWS.length;
     const running = findRunningOnCourt(competitions, court);
@@ -70,24 +75,24 @@ function buildCourtSlots(competitions, court) {
     const slots = Array.from({ length: totalSlots }, () => null);
 
     if (running) {
-        slots[0] = { kind: 'running', match: running.match, competition: running.competition,
+        slots[0] = { match: running.match, competition: running.competition,
                      isBracket: running.isBracket, roundIndex: running.roundIndex,
                      totalRounds: running.totalRounds };
         for (let i = 0; i < upcoming.length && i + 1 < totalSlots; i++) {
             const m = upcoming[i];
-            slots[i + 1] = { kind: 'scheduled', match: m, competition: m._comp,
+            slots[i + 1] = { match: m, competition: m._comp,
                              isBracket: m._isBracket, roundIndex: m._roundIndex,
                              totalRounds: m._totalRounds };
         }
     } else if (upcoming.length > 0) {
         // Auto-promote first scheduled to "Now" slot.
         const first = upcoming[0];
-        slots[0] = { kind: 'upnext', match: first, competition: first._comp,
+        slots[0] = { match: first, competition: first._comp,
                      isBracket: first._isBracket, roundIndex: first._roundIndex,
                      totalRounds: first._totalRounds };
         for (let i = 1; i < upcoming.length && i < totalSlots; i++) {
             const m = upcoming[i];
-            slots[i] = { kind: 'scheduled', match: m, competition: m._comp,
+            slots[i] = { match: m, competition: m._comp,
                          isBracket: m._isBracket, roundIndex: m._roundIndex,
                          totalRounds: m._totalRounds };
         }

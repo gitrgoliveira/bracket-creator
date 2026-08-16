@@ -210,8 +210,13 @@ function checkScriptTagUrls() {
     const src = stripComments(readFileSync(resolve(JS_DIR, file), 'utf8'));
     // `from './x'` covers static named/default/namespace imports and re-exports;
     // `import './x'` covers side-effect-only imports, which load the module just
-    // as surely and so must agree with any tag too.
-    for (const m of src.matchAll(/(?:from|import)\s+['"]\.\/([^'"]+)['"]/g)) {
+    // as surely and so must agree with any tag too. `import('./x')` is the same
+    // again for a DYNAMIC one: it was invisible here because the separator was
+    // written as \s+, which a "(" does not satisfy, so a module lazily importing
+    // a script-tagged sibling would evaluate twice with the build still green.
+    // \b so the now-optional whitespace cannot let an identifier ENDING in
+    // "import" (myImport('./x')) read as the keyword.
+    for (const m of src.matchAll(/\b(?:from|import)\s*\(?\s*['"]\.\/([^'"]+)['"]/g)) {
       const url = `/dist/${m[1]}`;
       if (!importedBy.has(url)) importedBy.set(url, new Set());
       importedBy.get(url).add(file);

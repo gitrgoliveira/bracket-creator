@@ -12,16 +12,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The compiled front-end under /dist/ is served with a content-derived ETag and
-// Cache-Control: no-cache, so a returning client revalidates and gets a 0-byte
-// 304 unless the bundle actually changed.
+// The compiled front-end under /dist/ is served with "Cache-Control: public,
+// max-age=300" plus a content-derived ETag. The two compose: inside the window
+// a returning client makes NO request at all, and once it lapses the ETag turns
+// the re-fetch into a 0-byte 304 unless the bundle actually changed.
 //
 // Before this, http.FileServer over embed.FS emitted no Cache-Control, no ETag
 // and no Last-Modified (embed's zero modtime makes ServeContent omit it), so a
 // browser had nothing to revalidate against: a page load transferred 1.17 MB
-// across 69 files with NONE served from cache. Measured after: 20 KB, all 69
-// revalidated with no body.
+// across 69 files with NONE served from cache. Measured after: 20 KB with the
+// ETag alone (all 69 revalidated, no bodies), then 0 across 0 requests once the
+// max-age window was added.
 func TestBuildAssetETag(t *testing.T) {
+	// Package state, restored for whatever runs next; see resetAssetETag.
+	t.Cleanup(resetAssetETag)
 	fsA := fstest.MapFS{
 		"dist/a.js": {Data: []byte("console.log(1)")},
 		"dist/b.js": {Data: []byte("console.log(2)")},
@@ -75,6 +79,7 @@ func TestBuildAssetETag(t *testing.T) {
 }
 
 func TestSetStaticCacheHeaders(t *testing.T) {
+	t.Cleanup(resetAssetETag)
 	fsys := fstest.MapFS{"dist/a.js": {Data: []byte("x")}}
 
 	t.Run("applies the caching policy to a dist asset", func(t *testing.T) {
@@ -108,6 +113,13 @@ func TestSetStaticCacheHeaders(t *testing.T) {
 }
 
 // resetAssetETag clears the once-per-process memo so each case hashes afresh.
+//
+// It mutates PACKAGE state, so every test that calls it must also register it
+// with t.Cleanup: the last subtest here deliberately leaves an empty ETag
+// behind a consumed sync.Once, and setStaticCacheHeaders short-circuits on an
+// empty validator. Left in place, that state leaks into whatever router test
+// runs next in this package, which would then assert on Cache-Control/ETag
+// against a memo it never set — passing or failing on file ordering alone.
 func resetAssetETag() {
 	assetETagOnce = sync.Once{}
 	assetETag = ""

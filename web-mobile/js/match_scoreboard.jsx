@@ -11,8 +11,8 @@
 // viewer.jsx and display.jsx is therefore the established DRY mechanism (same as
 // lineup_resolver.jsx). This file imports only small leaves and reaches
 // bracket.jsx's display primitives through window globals — for the dependency
-// reasoning (and the pre-existing bracket double-load it avoids), see the ONE
-// statement in result_slot.jsx's header; do not restate it here.
+// reasoning, see the ONE statement in result_slot.jsx's header; do not restate
+// it here.
 //
 // `variant` ("card" | "tv") only changes sizing via a CSS modifier: the markup
 // and data-testids are identical across surfaces.

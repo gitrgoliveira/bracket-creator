@@ -128,12 +128,12 @@ func TestCheckDuplicateEntriesByNameDojo(t *testing.T) {
 	}
 }
 
-// TestCheckDuplicateEntriesByName covers the TEAM rule: names alone collide
+// TestDuplicateNamesWithKeysDupes covers the TEAM rule: names alone collide
 // regardless of dojo (a team's name is its identity in standings and in
 // sub-bout winner attribution, neither of which carries a uuid). The dojo
 // column is deliberately absent from the input, so these cases also pin that
 // the normalization is shared with the tier-1 check rather than a plain ==.
-func TestCheckDuplicateEntriesByName(t *testing.T) {
+func TestDuplicateNamesWithKeysDupes(t *testing.T) {
 	cases := []struct {
 		desc  string
 		names []string
@@ -154,7 +154,8 @@ func TestCheckDuplicateEntriesByName(t *testing.T) {
 		t.Run(tc.desc, func(t *testing.T) {
 			// The reported label is the FIRST spelling seen, trimmed, so the
 			// operator is shown a name that appears in their own roster.
-			assert.Equal(t, tc.want, CheckDuplicateEntriesByName(tc.names))
+			dupes, _ := DuplicateNamesWithKeys(tc.names)
+			assert.Equal(t, tc.want, dupes)
 		})
 	}
 }
@@ -311,7 +312,7 @@ func TestIsSingleTrailingTokenDiff(t *testing.T) {
 	}
 }
 
-// CheckDuplicateEntriesByName used to be implemented by delegating to
+// DuplicateNamesWithKeys used to be implemented by delegating to
 // CheckDuplicateEntriesByNameDojo with an empty dojo, which made the two agree
 // by construction. It now has its own body (so the participant write path can
 // get the normalized keys back without a second pass), and this pins the
@@ -344,7 +345,7 @@ func TestNameOnlyDedupMatchesTheDojoHelper(t *testing.T) {
 			entries[i] = [2]string{n, ""}
 		}
 		want := CheckDuplicateEntriesByNameDojo(entries)
-		got := CheckDuplicateEntriesByName(names)
+		got, _ := DuplicateNamesWithKeys(names)
 		assert.Equalf(t, want, got, "names=%q", names)
 	}
 }

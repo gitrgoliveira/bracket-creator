@@ -130,24 +130,19 @@ func CheckDuplicateEntriesByNameDojo(entries [][2]string) []string {
 	return out
 }
 
-// CheckDuplicateEntriesByName scans for duplicate NAMES alone, ignoring dojo.
+// DuplicateNamesWithKeys scans for duplicate NAMES alone, ignoring dojo, and
+// also returns the normalized key of every input in order, for callers that
+// need to keep counting after the duplicate scan.
+//
 // Team competitions use this: a team's name is its identity on the wire, in
 // standings and in sub-bout winner attribution, so two teams may not share a
 // name even from different dojos (individuals may: they are disambiguated by
 // participant uuid, which team-name references in results do not carry).
 // Same normalization as the (name, dojo) check; returns colliding names.
-func CheckDuplicateEntriesByName(names []string) []string {
-	dupes, _ := DuplicateNamesWithKeys(names)
-	return dupes
-}
-
-// DuplicateNamesWithKeys is CheckDuplicateEntriesByName plus the normalized key
-// of every input, in order, for callers that need to keep counting after the
-// duplicate scan.
 //
-// It exists to stop the same names being normalized twice on the participant
-// write path: the team-name gate ran this scan and then built its own
-// name→count map, re-normalizing every entry, having already paid for an
+// The keys half exists to stop the same names being normalized twice on the
+// participant write path: the team-name gate ran this scan and then built its
+// own name→count map, re-normalizing every entry, having already paid for an
 // n-sized [][2]string conversion whose dojo half was an empty string normalized
 // n times for nothing. NormalizeParticipantName is not free (two Unicode
 // normalisation passes and two strings.Builder allocations per call).
@@ -158,6 +153,12 @@ func CheckDuplicateEntriesByName(names []string) []string {
 // the one owner - but the label is now produced here, so
 // TestNameOnlyDedupMatchesTheDojoHelper pins the two against each other for a
 // table of inputs rather than trusting the comment.
+//
+// (A CheckDuplicateEntriesByName wrapper returning only the dupes sat in front
+// of this. Once checkNewTeamNameCollisions started calling this directly it had
+// no production caller left, so the package advertised a team-name API nothing
+// used and the equivalence test pinned the wrapper rather than the function the
+// write path actually runs.)
 func DuplicateNamesWithKeys(names []string) (dupes []string, keys []string) {
 	seen := make(map[string]string, len(names)) // key → first-seen original label
 	seenDupes := make(map[string]bool)

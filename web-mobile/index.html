@@ -81,13 +81,26 @@
     <script type="module" src="/dist/patch.jsx"></script>
     <script type="module" src="/dist/router.js"></script>
     <!-- NO tag here carries a "?v=N" query, and that is deliberate.
-         /dist/ is now served with an ETag derived from the CONTENT of the
-         embedded assets plus Cache-Control: no-cache (internal/mobileapp/
-         server.go), so a client revalidates every asset on every load and gets
-         a 0-byte 304 unless the bundle actually changed. The version queries
-         predated that and were busting a cache that did not exist: measured
-         before the change, a page load transferred 1.17 MB across 69 files with
-         NONE served from cache, versioned and unversioned alike.
+         /dist/ is now served with "Cache-Control: public, max-age=300" plus an
+         ETag derived from the CONTENT of the embedded assets (internal/
+         mobileapp/server.go). Two regimes, in order: for five minutes a client
+         reuses an asset WITHOUT asking, and after that the ETag turns the
+         re-fetch into a 0-byte 304 unless the bundle actually changed. The
+         version queries predated both and were busting a cache that did not
+         exist: measured before the change, a page load transferred 1.17 MB
+         across 69 files with NONE served from cache, versioned and unversioned
+         alike.
+
+         Note what the max-age window means for a DEPLOY, since this comment is
+         what you are reading before you reach for "?v=N" again: index.html is
+         no-store (it carries server-rendered meta tags) while the modules are
+         not, so for up to five minutes after an upgrade a reload can pair fresh
+         HTML with cached modules. Renaming a tag — as this change did, from
+         "bracket.js" to "bracket.jsx" — makes that a MIXED graph: the new URL
+         misses the cache and loads new, the unchanged URLs stay old. Wait out
+         the window or hard-reload when verifying a deploy. A "?v=N" would not
+         help: it busts one tag while every IMPORT of that same module keeps its
+         own unversioned URL, which is how the double-load below started.
 
          They were also actively harmful on three tags. A browser keys a module
          by its exact URL, so a tag at "/dist/ui.js?v=5" against an import of

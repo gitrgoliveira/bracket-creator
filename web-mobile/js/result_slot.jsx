@@ -13,20 +13,27 @@
 // the same bad choice. A shared rule belongs in the leaf, not in one consumer.
 //
 // WHY A SEPARATE LEAF, AND NOT bracket.jsx (the ONE statement of this — the
-// other sites point here; two earlier rationales were wrong, so verify against
-// the build before writing a third): Makefile `esbuild-jsx` runs esbuild with
-// --outdir and NO --bundle, a per-file JSX transform whose imports stay as
-// runtime ESM. And bracket.jsx is ALREADY in every page's module graph — the
-// single index.html unconditionally script-tags /dist/admin_scoring_modal.js,
-// which imports admin_scoring_team.jsx, which imports ./bracket.jsx — so an
-// import from match_scoreboard.jsx would resolve to that cached module at
-// roughly zero cost. The leaf is NOT a fetch saving. It is dependency hygiene:
-// match_scoreboard is a shared display module whose imports are deliberately
-// small leaves (pool_ids.jsx, lineup_resolver.jsx), it reaches bracket's
-// display primitives through window globals, and bracket's module identity is
-// currently fragile anyway (index.html ALSO script-tags /dist/bracket.js?v=6,
-// a second module key, so the file evaluates twice and the window.* assignments
-// race — a pre-existing issue this leaf stays clear of).
+// other sites point here; THREE earlier rationales have been wrong now, so
+// verify against the build before writing a fourth): Makefile `esbuild-jsx`
+// runs esbuild with --outdir and NO --bundle, a per-file JSX transform whose
+// imports stay as runtime ESM. And bracket.jsx is ALREADY in every page's
+// module graph — the single index.html unconditionally script-tags
+// /dist/admin_scoring_modal.js, which imports admin_scoring_team.jsx, which
+// imports ./bracket.jsx — so an import from match_scoreboard.jsx would resolve
+// to that cached module at roughly zero cost. The leaf is NOT a fetch saving.
+//
+// It is dependency hygiene, and that is the WHOLE of it: match_scoreboard is a
+// shared display module whose imports are deliberately small leaves
+// (pool_ids.jsx, lineup_resolver.jsx), and it reaches bracket's display
+// primitives through window globals rather than importing that 3000-line module
+// for two pure functions.
+//
+// The third rationale, deleted here, was "bracket's module identity is fragile
+// anyway — index.html ALSO script-tags /dist/bracket.js?v=6, so the file
+// evaluates twice". That was true when written and is not any more: the tag now
+// reads /dist/bracket.jsx, matching the "./bracket.jsx" import specifier, and
+// check-imports.mjs Phase 2 fails the build if a tag and an import ever
+// disagree again. Weigh a fold-back on the hygiene argument alone.
 //
 // THE RULE: a result mark behaves like a point. It fills the next FREE slot in
 // the same outside-to-inside order a point would, so a 0-0 bout puts it in the
@@ -49,7 +56,7 @@
 // Change the contract and all three call sites must be re-checked (CLAUDE.md).
 // The loose case is IMPOSSIBLE under the rules (sanbon-shobu ends at 2, so a
 // 2-2 bout cannot occur), and it is closed on both sides: the editors' ippon
-// entry stops each side at 2, and validateIpponCounts (internal/mobileapp/
+// entry stops each side at 2, and validateIppons (internal/mobileapp/
 // validation.go) caps each side at 2 AND rejects 2-2 outright on every sub-bout
 // and on the bulk path. The branch exists solely so a hand-edited file can
 // never overwrite a recorded point.

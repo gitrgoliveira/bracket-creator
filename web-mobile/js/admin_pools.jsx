@@ -81,7 +81,7 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
   let repRosterB = [];
   if (repIsTeam) {
     const teams = (comp && comp.config && comp.config.players) || (comp && comp.players) || [];
-        const teamByName = (nm) => teams.find(t => ((t.name || t.Name) === nm));
+    const teamByName = (nm) => teams.find(t => ((t.name || t.Name) === nm));
     const rosterFor = (window.AdminLineupHelpers && window.AdminLineupHelpers.rosterFor) || (() => []);
     repRosterA = rosterFor(teamByName(nameOf(m.sideA))) || [];
     repRosterB = rosterFor(teamByName(nameOf(m.sideB))) || [];

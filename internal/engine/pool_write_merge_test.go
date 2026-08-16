@@ -283,3 +283,121 @@ func TestPreserveMatchHantei_OnlyCarriesAVerdictThatStillHolds(t *testing.T) {
 		assert.False(t, bm.DecidedByHantei, "a withdrawal is not a judges' decision on a knockout match either")
 	})
 }
+
+// hanteiStillHolds is the ENGINE-side re-application of ScoreRequest.Validate's
+// DecidedByHantei block, and it must enforce that block in full: it runs after
+// validation and nothing re-checks what it stamps. Each case below is a state
+// the wire validator refuses, which the engine could nonetheless create by
+// inheriting a stored verdict onto a verdict-silent write.
+func TestPreserveMatchHanteiOnlyKeepsAVerdictTheValidatorWouldAccept(t *testing.T) {
+	// The shape of a forward re-score that says nothing about the verdict.
+	silent := func(mutate func(*state.MatchResult)) *state.MatchResult {
+		r := &state.MatchResult{
+			SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			Status:  state.MatchStatusCompleted,
+			IpponsA: []string{"M"}, IpponsB: []string{"K"},
+		}
+		mutate(r)
+		return r
+	}
+
+	kept := func(t *testing.T, r *state.MatchResult) {
+		t.Helper()
+		preserveMatchHantei(true, r)
+		require.NotNil(t, r.DecidedByHantei)
+		assert.True(t, *r.DecidedByHantei)
+	}
+	cleared := func(t *testing.T, r *state.MatchResult, why string) {
+		t.Helper()
+		preserveMatchHantei(true, r)
+		require.NotNil(t, r.DecidedByHantei, "a stored verdict that cannot stand is cleared EXPLICITLY: nil means inherit")
+		assert.False(t, *r.DecidedByHantei, why)
+	}
+
+	t.Run("kept when every condition still holds", func(t *testing.T) {
+		kept(t, silent(func(*state.MatchResult) {}))
+	})
+	t.Run("kept when the status is unstated (defaults to completed)", func(t *testing.T) {
+		kept(t, silent(func(r *state.MatchResult) { r.Status = "" }))
+	})
+
+	t.Run("cleared without a winner", func(t *testing.T) {
+		// The reopen shape: {status:"running", winner:null}. Keeping it here was
+		// worse than losing it — encodeHanteiIntoIppons cannot attribute a
+		// winner-less verdict to a side, so the flag lived in the cache and
+		// never reached pool-matches.csv: hantei until restart, none after.
+		cleared(t, silent(func(r *state.MatchResult) { r.Winner = "" }),
+			"a hantei declares a winner")
+	})
+	t.Run("cleared on a match that is not completed", func(t *testing.T) {
+		cleared(t, silent(func(r *state.MatchResult) { r.Status = state.MatchStatusRunning }),
+			"a running match has not been decided by anyone")
+	})
+	t.Run("cleared on an untied scoreline", func(t *testing.T) {
+		cleared(t, silent(func(r *state.MatchResult) { r.IpponsA = []string{"M", "K"} }),
+			"a verdict rests on a tied scoreline (FIK 7-5 / 29-6)")
+	})
+	t.Run("cleared on a daihyosen decision", func(t *testing.T) {
+		// The MATCH level is the sub-bout allow-list MINUS daihyosen: the rep
+		// bout is where that verdict rides, and claiming it at match level says
+		// the encounter itself was judged.
+		cleared(t, silent(func(r *state.MatchResult) { r.Decision = "daihyosen" }),
+			"daihyosen is a sub-bout decision, never a match-level one")
+	})
+	t.Run("cleared on a withdrawal", func(t *testing.T) {
+		cleared(t, silent(func(r *state.MatchResult) { r.Decision = "kiken-voluntary" }),
+			"export.SideMarks marks Ht unconditionally, so this would print Ht AND Kiken")
+	})
+}
+
+// matchWritePolicy governs BOTH branches of a match write, and a side mismatch
+// is one of the things it governs: a forward payload naming a pairing that is
+// not this match's is a client error (409), while the K3 restore replays sides
+// captured from this same match and must land regardless.
+//
+// applyPoolWrite implemented that; applyBracketMatchResult returned
+// ErrMatchSideMismatch under either policy, so one policy-driven write had two
+// behaviours. It mattered because rollbackMatchResultTx only LOGS the error it
+// gets back: a bracket rollback that bailed out here left the rejected partial
+// write on disk, where the identical pool case completed the restore.
+func TestSideMismatchIsAForwardOnlyErrorInBothBranches(t *testing.T) {
+	drifted := func() *state.MatchResult {
+		return &state.MatchResult{
+			ID: "m-r1-0", SideA: "Nara", SideB: "Kobe", // NOT this match's pairing
+			Status: state.MatchStatusScheduled,
+		}
+	}
+
+	t.Run("bracket branch", func(t *testing.T) {
+		bm := func() *state.BracketMatch {
+			return &state.BracketMatch{
+				ID: "m-r1-0", SideA: "Kyoto", SideB: "Osaka",
+				Winner: "Kyoto", Status: state.MatchStatusCompleted,
+			}
+		}
+		_, err := applyBracketMatchResult(bm(), drifted(), matchWriteForward)
+		assert.ErrorIs(t, err, ErrMatchSideMismatch, "a client may not rewrite the pairing")
+
+		target := bm()
+		applied, err := applyBracketMatchResult(target, drifted(), matchWriteRestore)
+		require.NoError(t, err, "the restore replays captured sides; a mismatch is not a client error")
+		require.True(t, applied)
+		assert.Equal(t, state.MatchStatusScheduled, target.Status, "the rollback actually landed")
+		assert.Empty(t, target.Winner)
+	})
+
+	t.Run("pool branch, for the parity this is about", func(t *testing.T) {
+		stored := func() *state.MatchResult {
+			return &state.MatchResult{
+				ID: "Pool A-1", SideA: "Kyoto", SideB: "Osaka",
+				Winner: "Kyoto", Status: state.MatchStatusCompleted,
+			}
+		}
+		assert.True(t, applyPoolWrite(stored(), drifted(), matchWriteForward),
+			"forward: abandoned, and the caller maps that to 409")
+
+		target := stored()
+		require.False(t, applyPoolWrite(target, drifted(), matchWriteRestore))
+		assert.Equal(t, state.MatchStatusScheduled, target.Status, "the rollback actually landed")
+	})
+}

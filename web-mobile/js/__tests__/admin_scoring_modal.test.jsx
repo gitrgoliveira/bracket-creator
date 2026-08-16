@@ -538,7 +538,7 @@ describe('isBoutDecided / MAX_IPPONS_PER_SIDE', () => {
   // isBoutDecided drives the disabled-prop on ippon-add buttons in both
   // ScoreEditorModal and TeamScoreEditorModal: once it returns true, all
   // M/K/D/T/H buttons on BOTH sides are disabled, preventing a 2-2 entry.
-  // Server-side mirror: validateIpponCounts in internal/mobileapp/validation.go.
+  // Server-side mirror: validateIppons in internal/mobileapp/validation.go.
 
   it('exports MAX_IPPONS_PER_SIDE = 2', () => {
     expect(MAX_IPPONS_PER_SIDE).toBe(2);
@@ -565,7 +565,7 @@ describe('isBoutDecided / MAX_IPPONS_PER_SIDE', () => {
   });
 
   it('returns true for 2-2 (the impossible scoreline the fix prevents)', () => {
-    // This mirrors the server-side rejection in validateIpponCounts:
+    // This mirrors the server-side rejection in validateIppons:
     //   "both sides cannot have 2 ippons (best-of-3 ends at first to 2)"
     expect(isBoutDecided(['M', 'K'], ['D', 'T'])).toBe(true);
   });
@@ -638,7 +638,7 @@ describe('applyFoulIncrement (FIK 2-foul auto-award)', () => {
     // Bout-decided guard: if THIS side reached 2 ippons (bout already
     // won by THIS side), the 2nd foul cannot auto-award an H to opp
     // without producing an invalid 2-2 scoreline that the server's
-    // validateIpponCounts would reject. Counter still resets to 0;
+    // validateIppons would reject. Counter still resets to 0;
     // opponent's pts are left untouched.
     expect(applyFoulIncrement(1, ['X'], ['M', 'K'])).toEqual({ fouls: 0, opponentPts: ['X'] });
     expect(applyFoulIncrement(1, [], ['M', 'K'])).toEqual({ fouls: 0, opponentPts: [] });

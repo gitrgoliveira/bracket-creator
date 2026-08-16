@@ -44,9 +44,9 @@ func IsKikenDecision(d Decision) bool {
 }
 
 // IsHanteiCompatibleDecision reports whether a decision can coexist with a
-// hantei verdict. Hantei declares a winner from a TIED bout, so it is
-// incompatible with any decision that already settles the bout another way
-// (a withdrawal, a no-show, a draw). "" and "fought" are ordinary play;
+// hantei verdict ON A SUB-BOUT. Hantei declares a winner from a TIED bout, so
+// it is incompatible with any decision that already settles the bout another
+// way (a withdrawal, a no-show, a draw). "" and "fought" are ordinary play;
 // "daihyosen" is the rep-bout placeholder the verdict rides on.
 //
 // One owner because there are two enforcers at different layers: the HTTP
@@ -66,6 +66,34 @@ func IsHanteiCompatibleDecision(d Decision) bool {
 // IsHanteiCompatibleDecisionStr is the wire-string form.
 func IsHanteiCompatibleDecisionStr(s string) bool {
 	return IsHanteiCompatibleDecision(Decision(s))
+}
+
+// IsMatchHanteiCompatibleDecision is the MATCH-level twin, and is deliberately
+// NARROWER: it is the sub-bout set minus "daihyosen".
+//
+// A daihyosen IS a bout, so the verdict rides on the rep-bout sub-row
+// (position -1), where the sub-bout predicate allows it. At match level the
+// same value would claim the ENCOUNTER itself was decided by judges, which is
+// exactly what the rep bout exists to avoid.
+//
+// Split out for the same reason its sibling is shared: the match level also has
+// two enforcers that must not drift. ScoreRequest.Validate rejects the pairing
+// on the way in, and engine.hanteiStillHolds re-applies it when carrying a
+// stored verdict onto a verdict-silent write — which happens after validation
+// and is never re-checked. Those two used to be a hand-written switch and a
+// call to the SUB-bout predicate, so the engine could stamp a match-level
+// hantei onto a "daihyosen" decision that the validator would have refused.
+func IsMatchHanteiCompatibleDecision(d Decision) bool {
+	switch d {
+	case DecisionNone, DecisionFought:
+		return true
+	}
+	return false
+}
+
+// IsMatchHanteiCompatibleDecisionStr is the wire-string form.
+func IsMatchHanteiCompatibleDecisionStr(s string) bool {
+	return IsMatchHanteiCompatibleDecision(Decision(s))
 }
 
 // IsKikenDecisionStr is the string-argument twin of IsKikenDecision,

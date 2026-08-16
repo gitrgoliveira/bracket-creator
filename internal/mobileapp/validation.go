@@ -277,7 +277,7 @@ func validateBulkScoreLengths(r *state.MatchResult, allowNumberedEncho bool) err
 	if err := validateMaxLen("correctionReason", strings.TrimSpace(r.CorrectionReason), MaxLenCorrectionReason); err != nil {
 		return err
 	}
-	if err := validateIpponCounts("", r.IpponsA, r.IpponsB); err != nil {
+	if err := validateIppons("", r.IpponsA, r.IpponsB); err != nil {
 		return err
 	}
 	if r.FlagsA < 0 {
@@ -298,7 +298,7 @@ func validateBulkScoreLengths(r *state.MatchResult, allowNumberedEncho bool) err
 		if err := validateMaxLen(prefix+"winner", sr.Winner, MaxLenMatchSide); err != nil {
 			return err
 		}
-		if err := validateIpponCounts(prefix, sr.IpponsA, sr.IpponsB); err != nil {
+		if err := validateIppons(prefix, sr.IpponsA, sr.IpponsB); err != nil {
 			return err
 		}
 		if err := validateSubBout(prefix, sr, allowNumberedEncho); err != nil {
@@ -514,14 +514,14 @@ func (r *ScoreRequest) validateWithOptions(allowNumberedEncho bool) error {
 		}
 	}
 	// Best-of-3 ippon invariants on the top-level scoreline.
-	if err := validateIpponCounts("", r.IpponsA, r.IpponsB); err != nil {
+	if err := validateIppons("", r.IpponsA, r.IpponsB); err != nil {
 		return err
 	}
 	// Same invariants on each sub-bout (team-match positions).
 	for i := range r.SubResults {
 		sr := &r.SubResults[i]
 		prefix := fmt.Sprintf("subResults[%d].", i)
-		if err := validateIpponCounts(prefix, sr.IpponsA, sr.IpponsB); err != nil {
+		if err := validateIppons(prefix, sr.IpponsA, sr.IpponsB); err != nil {
 			return err
 		}
 		if err := validateSubBout(prefix, sr, allowNumberedEncho); err != nil {
@@ -564,16 +564,13 @@ func (r *ScoreRequest) validateWithOptions(allowNumberedEncho bool) error {
 		// persisting both would render contradictory suffixes like "Kiken (E) HT".
 		// Only the neutral values ("" and "fought") are allowed alongside hantei.
 		//
-		// This is domain.IsHanteiCompatibleDecisionStr MINUS "daihyosen", and the
-		// narrowing is deliberate rather than drift: a daihyosen is a bout, so the
-		// verdict rides on the rep-bout SUB-row (position -1), where validateSubBout
-		// allows it. At MATCH level the same value would claim the encounter itself
-		// was decided by judges, which is what the rep bout exists to avoid. Do not
-		// "unify" this with the domain predicate without moving that rule too.
-		switch r.Decision {
-		case "", "fought":
-			// compatible: normal fight decided by judges
-		default:
+		// The MATCH-level predicate, which is the sub-bout one minus "daihyosen";
+		// the narrowing and its reason live on the domain function. It used to be
+		// a hand-written switch here, which meant this enforcer and the engine's
+		// hanteiStillHolds spelled the same rule two different ways — and the
+		// engine's spelling was the WIDER one, so it could stamp a match-level
+		// verdict onto a decision this rejects.
+		if !domain.IsMatchHanteiCompatibleDecisionStr(r.Decision) {
 			return &ValidationError{
 				Field:   "decidedByHantei",
 				Message: fmt.Sprintf("incompatible with decision %q, hantei declares a winner from a tied bout; use '' or 'fought'", r.Decision),
@@ -657,17 +654,45 @@ func winningScoreline(ipponsA, ipponsB []string, n int) bool {
 // ended at 2-1 before either side could score a third.
 const maxIpponsPerSide = 2
 
-// validateIpponCounts enforces the best-of-3 ippon invariants on a
-// single match (or sub-bout) tally. Rules:
+// validateIppons is the ONE gate every ippon slice crosses on its way in, from
+// both the ScoreRequest path and the bulk-score path. It enforces the
+// best-of-3 invariants on a single match (or sub-bout) tally, and the shape of
+// the entries themselves. Rules:
 //
+//   - each entry is a single character (domain.IpponFitsScoreCodec)
 //   - len(ipponsA) ≤ 2 and len(ipponsB) ≤ 2
-//   - NOT (len(ipponsA) == 2 && len(ipponsB) == 2)  , the 2-2 ban
+//   - NOT (scoring(ipponsA) == 2 && scoring(ipponsB) == 2)  , the 2-2 ban
 //
 // Field is the JSON-field prefix used in error messages (e.g. "" for a
 // top-level match, "subResults[i]." for a sub-bout). Kiken/fusenpai
 // scorelines are also bounded by these rules, their own n-0 check in
 // validateDecision is strictly tighter (n ≤ 2) so this passes through.
-func validateIpponCounts(field string, ipponsA, ipponsB []string) error {
+//
+// (Named validateIppons until the entry-shape rule joined it, at which
+// point the name described half the job.)
+func validateIppons(field string, ipponsA, ipponsB []string) error {
+	// Entry SHAPE first: a multi-rune entry is malformed whatever the counts
+	// are, and the two failures it caused are both worse than a count error.
+	// The reasoning lives on domain.IpponFitsScoreCodec, beside the codec whose
+	// precondition this is; the short version is that FormatScore joins with no
+	// separator, so "MHt" comes back as three ippons — and on a POOL match the
+	// two-rune "Ht" is the verdict ENCODING, so accepting one from a client let
+	// a payload forge a judges' decision that appeared on the next reload.
+	for _, side := range []struct {
+		name   string
+		ippons []string
+	}{{"ipponsA", ipponsA}, {"ipponsB", ipponsB}} {
+		for _, v := range side.ippons {
+			if !domain.IpponFitsScoreCodec(v) {
+				return &ValidationError{
+					Field: field + side.name,
+					Message: fmt.Sprintf(
+						"ippon marks are single characters (a waza letter, %q or %q); got %q",
+						domain.DefaultWinIppon, domain.IpponPlaceholder, v),
+				}
+			}
+		}
+	}
 	if len(ipponsA) > maxIpponsPerSide {
 		return &ValidationError{
 			Field:   field + "ipponsA",

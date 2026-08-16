@@ -100,7 +100,19 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // round-trips the count via toBackendMatchResult; Slice 3 (T093+) layers
   // the decision/kiken UI on top.
   const initialEnchoPeriods = m.encho?.periodCount || 0;
-  const initialDecidedByHantei = !!m.decidedByHantei;
+  // FROZEN at mount, exactly like the team editor's initialDaihyosenHanteiArmed
+  // and for the same reason. As a plain per-render const this tracked the LIVE m
+  // prop, so a verdict another device recorded mid-edit flipped it true — which
+  // (a) made isDirty compare false !== true and prompt "discard changes?" on an
+  // untouched editor, and (b) turned hanteiClear below into an authoritative
+  // `decidedByHantei: false` on the next write, erasing a verdict this operator
+  // was never shown. Frozen, an editor that mounted before the verdict existed
+  // stays SILENT about it and preserveMatchHantei keeps it (the individual
+  // twin of the team editor's hanteiKnown guard).
+  //
+  // This became consequential in this PR: before a pool hantei persisted
+  // (encodeHanteiIntoIppons) there was nothing on disk for a pool match to lose.
+  const [initialDecidedByHantei] = useStateA(() => !!m.decidedByHantei);
   const [aPts, setAPts] = useStateA(initialAPts);
   const [bPts, setBPts] = useStateA(initialBPts);
   const [aFouls, setAFouls] = useStateA(initialAFouls);
@@ -110,14 +122,28 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // referee hantei. Persisting this on MatchResult so the UI / Excel can
   // mark it distinctly (vs an ippon-derived win).
   const [decidedByHantei, setDecidedByHantei] = useStateA(initialDecidedByHantei);
+  // The verdict the server holds RIGHT NOW, for display only — it must never
+  // reach a patch. Split from the frozen flag because the two answer different
+  // questions: "is there a verdict on the server" (this) versus "was this
+  // editor shown one, so may it rule on it" (frozen).
+  //
+  // Note what this does NOT do: it does not surface a verdict recorded
+  // elsewhere mid-edit. Both consumers below sit behind the LOCAL armed state,
+  // which stays frozen-initialised, so a stale editor still shows the
+  // "Decide by hantei…" button. Syncing local state from the prop is what would
+  // fix that, and it is precisely what causes the erase this split prevents (it
+  // would also clobber the operator's in-progress edits). The team editor makes
+  // the same trade. What matters is that the write is now silent rather than
+  // destructive; seeing the verdict costs a reopen.
+  const hanteiRecorded = !!m.decidedByHantei;
   // Which side ("a"/"b"/"") holds a RECORDED hantei verdict, for the display
-  // chip in the slot grid. Gated on initialDecidedByHantei — the verdict the
-  // SERVER holds — not the local armed state: arming a hantei on a reopened
-  // match must not resolve the stale m.winner and pre-mark the previous
-  // winner before the operator has picked a side. Empty when the winner is
-  // unattributable (same-name pair: mirror the scoreboard, mark neither).
+  // chip in the slot grid. Gated on the SERVER's verdict — not the local armed
+  // state: arming a hantei on a reopened match must not resolve the stale
+  // m.winner and pre-mark the previous winner before the operator has picked a
+  // side. Empty when the winner is unattributable (same-name pair: mirror the
+  // scoreboard, mark neither).
   // The tie gate is applied at the render site against the CURRENT pts.
-  const recordedHtKey = initialDecidedByHantei ? hanteiWinnerKey(m) : "";
+  const recordedHtKey = hanteiRecorded ? hanteiWinnerKey(m) : "";
   const [submitting, setSubmitting] = useStateA(false);
   // F5: pending-write state: set when a terminal submit resolves { queued:true }
   // (offline / transient failure). While pending the modal stays open and shows a
@@ -253,6 +279,12 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // explicitly clears the flag (sends false) when the match was previously
   // hantei-decided, so a re-edit via the normal flow removes the stale Ht
   // marker rather than preserving it on the server.
+  //
+  // Keyed on the FROZEN flag, not the live prop: an explicit false is an
+  // authoritative "there is no verdict", and this editor is only entitled to
+  // say that about a verdict it was actually shown. Mounted before one existed,
+  // it emits nothing and lets the server preserve — the same rule the team
+  // editor spells as hanteiKnown.
   const hanteiClear = initialDecidedByHantei ? { decidedByHantei: false } : {};
 
   // mp-62vr: carry the rep-player names on every write for a team rep bout so
@@ -423,7 +455,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     return [0, 1].map((i) => {
       const isHt = htSlot === i;
       return (
-        <button key={i} className={`sb-slot ${(isHt || s.pts[i]) ? "sb-slot--filled" : ""}`} onClick={() => removePt(s.key, i)} disabled={decidedByHantei} title={decidedByHantei ? (initialDecidedByHantei ? "Locked: hantei already recorded" : "Hantei armed: choose a winner above, or cancel") : "Click to remove"}>
+        <button key={i} className={`sb-slot ${(isHt || s.pts[i]) ? "sb-slot--filled" : ""}`} onClick={() => removePt(s.key, i)} disabled={decidedByHantei} title={decidedByHantei ? (hanteiRecorded ? "Locked: hantei already recorded" : "Hantei armed: choose a winner above, or cancel") : "Click to remove"}>
           {isHt ? "Ht" : (s.pts[i] || "\u00b7")}
         </button>
       );
@@ -456,7 +488,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   ];
 
   // Bout is decided once either side reaches 2 ippons: disable add-ippon
-  // buttons on BOTH sides (mirrors validateIpponCounts on the server).
+  // buttons on BOTH sides (mirrors validateIppons on the server).
   const boutDecided = isBoutDecided(aPts, bPts);
 
   // While hantei is armed the operator must commit via the dedicated SHIRO /
@@ -714,7 +746,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                             else if (r.action === "enter") { setIsDrawToggled(true); setAPts([]); setBPts([]); markScoringDirty(); } // C1
                           }}
                           disabled={decidedByHantei || (!isDrawToggled && (aTotal > 0 || bTotal > 0)) || (!isDrawToggled && isKnockoutPhase)}
-                          title={decidedByHantei ? (initialDecidedByHantei ? "Locked: hantei already recorded" : "Hantei armed: choose a winner above, or cancel") : (!isDrawToggled && isKnockoutPhase ? "Knockout matches can't draw: decide by hantei after encho" : (!isDrawToggled && (aTotal > 0 || bTotal > 0) ? "Clear scores before marking a draw" : (isDrawToggled ? "Cancel draw" : "Mark as draw (hikiwake)")))}
+                          title={decidedByHantei ? (hanteiRecorded ? "Locked: hantei already recorded" : "Hantei armed: choose a winner above, or cancel") : (!isDrawToggled && isKnockoutPhase ? "Knockout matches can't draw: decide by hantei after encho" : (!isDrawToggled && (aTotal > 0 || bTotal > 0) ? "Clear scores before marking a draw" : (isDrawToggled ? "Cancel draw" : "Mark as draw (hikiwake)")))}
                           aria-label={isDrawToggled ? "Cancel draw (hikiwake)" : "Mark as draw (hikiwake)"}
                         >{isDrawToggled ? "Cancel draw" : "Mark draw"}</button>
                       </div>

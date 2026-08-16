@@ -22,7 +22,7 @@ describe('resultSlot (which slot a result mark takes)', () => {
 
   it('reports loose when both slots are full, so no point is overwritten', () => {
     // NOT a reachable state: sanbon-shobu ends at 2, so 2-2 cannot occur, and
-    // both the editors' ippon entry and validateIpponCounts refuse it. This
+    // both the editors' ippon entry and validateIppons refuse it. This
     // pins the behaviour for hand-edited files only, where the rule is that a
     // recorded point is never overwritten to make room for a mark. Each caller
     // then applies its own policy to `loose` (see result_slot.jsx).

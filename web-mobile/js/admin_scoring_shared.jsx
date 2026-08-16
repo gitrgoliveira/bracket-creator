@@ -18,7 +18,7 @@ const MAX_IPPONS_PER_SIDE = 2;
 // The UI uses this to disable the add-ippon buttons on BOTH sides at
 // that point: the bout would have ended at first-to-2, so neither side
 // can legitimately add another ippon. Server enforces the same invariant
-// in validateIpponCounts (rejects 2-2 with HTTP 400).
+// in validateIppons (rejects 2-2 with HTTP 400).
 function isBoutDecided(aPts, bPts) {
   return (aPts?.length ?? 0) >= MAX_IPPONS_PER_SIDE
       || (bPts?.length ?? 0) >= MAX_IPPONS_PER_SIDE;
@@ -176,7 +176,7 @@ function applyFusenshoToggle(prev, side) {
 // Bout-decided guard: if EITHER side is already at maxIppons the bout is
 // over: the counter still resets to 0 on the 2nd foul but no new H is
 // awarded. This prevents an auto-award from creating an invalid 2-2
-// scoreline that the server's validateIpponCounts would reject. The UI
+// scoreline that the server's validateIppons would reject. The UI
 // also disables the `+` button via isBoutDecided as a defense in depth.
 // To undo a previously awarded H, the operator removes it from the
 // opponent's slot directly.

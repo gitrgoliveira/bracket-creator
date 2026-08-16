@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // FormatScore and ParseScore are the score-cell CODEC: an inverse pair turning
@@ -38,6 +39,29 @@ func FormatScore(ippons []string, hansoku int) string {
 		score += fmt.Sprintf("(H%d)", hansoku)
 	}
 	return score
+}
+
+// IpponFitsScoreCodec reports whether one ippon entry survives the round trip
+// above. FormatScore joins the entries with NO separator, so only a single-rune
+// entry can be recovered; an empty entry is allowed because it renders as
+// nothing and is not a scoring ippon (CountScoringIppons drops it) — the codec
+// normalises it away rather than corrupting anything.
+//
+// The round-trip comment states this as a precondition. This is that
+// precondition made enforceable, so a wire validator can hold the line the
+// codec assumes. Two things went wrong while nothing did:
+//
+//   - "MHt" decoded back as ["M","H","t"]: three ippons, one of them the
+//     hansoku letter, on the display surfaces AND in the K3 rollback snapshot
+//     built from the same decode.
+//   - Worse on a POOL match, where HanteiMark is the persistence encoding for a
+//     verdict (encodeHanteiIntoIppons, state/pools.go). A client-supplied "Ht"
+//     was written to pool-matches.csv verbatim, and decodeHanteiFromIppons then
+//     read it back as a genuine recorded judges' decision — a forged verdict on
+//     reload, from a payload that never set the flag. Being two runes, it is
+//     rejected here by the same rule.
+func IpponFitsScoreCodec(v string) bool {
+	return utf8.RuneCountInString(v) <= 1
 }
 
 // ParseScore is the inverse of FormatScore: "MK (H1)" → (["M","K"], 1),

@@ -463,6 +463,23 @@ function EmptyState({ icon, title, message, cta, ctaNote, className, style, ...a
   );
 }
 
+// A form field's red error note. Renders nothing when there is no error, so
+// callers pass the value rather than guarding at the call site.
+//
+// The red-hint styling is a rule, not a preference: an operator scanning a form
+// reads "red and bold under the control" as "this is why you are stuck", and a
+// note that misses either half stops looking like one. It was spelled out
+// inline at every site that has one, which is how the court pills ended up with
+// two error notes under them whose styling had to be kept in step by hand.
+function FieldError({ children, testId }) {
+  if (!children) return null;
+  return (
+    <div className="field__hint" style={{ color: "var(--red)", fontWeight: 600 }} data-testid={testId}>
+      {children}
+    </div>
+  );
+}
+
 // The two notes that sit under a shiaijo picker: the red error for the current
 // selection, then the standing teaching hint. Either may be null.
 //
@@ -472,16 +489,12 @@ function EmptyState({ icon, title, message, cta, ctaNote, className, style, ...a
 // ids, immediately under the pills and above the concurrency hint. That was
 // enforced by a comment on each screen asking the next editor to keep them in
 // step by hand, which is exactly what a shared component is for. The RULE
-// already has one owner (shiaijoCountErrorFor / shiaijoCountHintFor in
+// already has one owner (shiaijoPickerError / shiaijoCountHintFor in
 // admin_helpers.jsx); this gives its presentation one too.
 function ShiaijoCountNotes({ error, hint }) {
   return (
     <>
-      {error && (
-        <div className="field__hint" style={{ color: "var(--red)", fontWeight: 600 }} data-testid="shiaijo-count-error">
-          {error}
-        </div>
-      )}
+      <FieldError testId="shiaijo-count-error">{error}</FieldError>
       {hint && (
         <div className="field__hint" data-testid="shiaijo-count-hint">
           {hint}
@@ -586,7 +599,7 @@ function isInteractiveTarget(el) {
   return tag === "input" || tag === "textarea" || tag === "select" || tag === "button" || tag === "a" || !!el.isContentEditable;
 }
 
-export { StatusBadge, formatDate, Toast, StableInput, pluralize, useEscapeToClose, useClickOutside, isTextEntry, isInteractiveTarget, formatAdminHeaderSub, formatViewerHeaderEyebrow, confirmDialog, promptDialog, DialogHost, Icon, LoadingSpinner, EmptyState, ShiaijoCountNotes, Modal };
+export { FieldError, StatusBadge, formatDate, Toast, StableInput, pluralize, useEscapeToClose, useClickOutside, isTextEntry, isInteractiveTarget, formatAdminHeaderSub, formatViewerHeaderEyebrow, confirmDialog, promptDialog, DialogHost, Icon, LoadingSpinner, EmptyState, ShiaijoCountNotes, Modal };
 
 if (typeof window !== "undefined") {
   window.StatusBadge = StatusBadge;
@@ -608,6 +621,7 @@ if (typeof window !== "undefined") {
   window.Icon = Icon;
   window.LoadingSpinner = LoadingSpinner;
   window.EmptyState = EmptyState;
+  window.FieldError = FieldError;
   window.ShiaijoCountNotes = ShiaijoCountNotes;
   window.Modal = Modal;
 

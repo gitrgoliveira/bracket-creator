@@ -466,29 +466,21 @@ describe('AdminSettings standing shiaijo hint (spec 007 R9)', () => {
   // shiaijoCountError answers null for 0 by design (an empty list ON DISK does
   // mean "inherit"), so without its own rule this screen showed nothing and
   // offered a live Save that stored an allocation the operator never chose.
-  it('refuses a selection the operator has emptied, and blocks Save', async () => {
-    const comp = makeCompetition({ courts: ['A', 'B'], format: 'playoffs' });
+  //
+  // Both formats, because the emptiness rule applies whatever the format,
+  // unlike the count rule.
+  it.each(['playoffs', 'league'])('refuses a selection the operator has emptied, and blocks Save (%s)', async (format) => {
+    const comp = makeCompetition({ courts: ['A', 'B'], format });
     const { container } = await mountSection('settings', { comp, tournament: threeCourtVenue });
     await clickPill(container, 'Shiaijo (court) A');
     await clickPill(container, 'Shiaijo (court) B'); // → none selected
 
     const err = container.querySelector('[data-testid="shiaijo-count-error"]');
     expect(err).not.toBeNull();
-    expect(err.textContent).toContain('At least one shiaijo (court) must be selected');
+    expect(err.textContent).toContain(window.SHIAIJO_NONE_SELECTED);
     const save = Array.from(container.querySelectorAll('button')).find((b) => b.textContent.trim().startsWith('Save'));
     expect(save).not.toBeUndefined();
     expect(save.disabled).toBe(true);
-  });
-
-  // The emptiness rule applies whatever the format, unlike the count rule.
-  it('refuses an emptied selection on a league too', async () => {
-    const comp = makeCompetition({ courts: ['A', 'B'], format: 'league' });
-    const { container } = await mountSection('settings', { comp, tournament: threeCourtVenue });
-    await clickPill(container, 'Shiaijo (court) A');
-    await clickPill(container, 'Shiaijo (court) B');
-    const err = container.querySelector('[data-testid="shiaijo-count-error"]');
-    expect(err).not.toBeNull();
-    expect(err.textContent).toContain('At least one shiaijo (court) must be selected');
   });
 
   // A STORED empty list is the legacy/imported record that legitimately
@@ -505,6 +497,11 @@ describe('AdminSettings standing shiaijo hint (spec 007 R9)', () => {
     // only because the form is not dirty, which is why this asserts on the
     // block message rather than on `disabled`.)
     expect(container.textContent).not.toContain('Fix shiaijo allocation');
+    // And NO red rule under the pills either. The operator has not emptied
+    // anything: this is what arrived off disk, and it is legal. Demanding they
+    // "select at least one" here contradicts both the absent banner and the
+    // live Save, and points at a competition with nothing wrong with it.
+    expect(container.querySelector('[data-testid="shiaijo-count-error"]')).toBeNull();
   });
 
   it('is absent for league, whose courts the rule does not govern', async () => {

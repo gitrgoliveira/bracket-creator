@@ -438,11 +438,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// which by this point resolution has already ruled out). Defense
 		// against direct API callers sending multi-character labels.
 		//
-		// validateCompetitionCourts ALSO applies the shiaijo-count rule (a
-		// power of two: 1, 2, 4, 8 or 16) and the tournament-membership rule
-		// to a bracket-drawing competition, since a create authors a brand-new
-		// allocation and has no stored value to preserve. The settings PUT
-		// splits the checks instead; see the comment on its call site.
+		// The full gate, since a create authors a brand-new allocation and has
+		// no stored value to preserve. The settings PUT defers it instead; see
+		// the comment on its call site.
 		if err := validateCompetitionCourts(comp.Courts, comp.Format, createTourn); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "courts: " + err.Error()})
 			return
@@ -807,14 +805,14 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			}
 
 			// Cross-file guard symmetry with POST handler + POST/PUT /tournament:
-			// label + cap check (empty allowed because the engine applies a
-			// 1-court default for competitions).
+			// label + cap check (empty allowed because it MEANS "inherit the
+			// tournament's shiaijo", which resolveCompetitionCourts
+			// materialises just below).
 			//
 			// This is validateCourtLabels, NOT validateCompetitionCourts:
-			// the shiaijo-count half of that validator needs the STORED
+			// the count and membership halves of that validator need the STORED
 			// allocation to decide, so it runs inside the update transform
-			// below (search ValidateCompetitionShiaijoCount) where `current`
-			// is loaded. A PUT that leaves an already-invalid allocation
+			// below, where `current` is loaded. A PUT that leaves an already-invalid allocation
 			// alone must SUCCEED, otherwise a competition saved before the
 			// rule existed could never have its name, date or durations
 			// edited again. Only a change TO an invalid allocation is
@@ -1163,16 +1161,17 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// so only a CHANGE that still names a missing court is
 				// refused. It is NOT scoped to bracket formats: a league's
 				// matches need an operator view just as much.
+				//
+				// The same gate the two authoring paths run, through the same
+				// function: what is DEFERRED here is WHEN it runs, not which
+				// rules it applies, and listing the rules again by hand is how
+				// a fourth one would reach POST and the importer but not this
+				// path. The label check inside it is redundant (line 823 ran it
+				// on this same list) and idempotent.
 				if courtsChanged || comp.Format != current.Format {
-					if err := engine.ValidateCompetitionShiaijoCount(comp.Courts, comp.Format); err != nil {
+					if err := validateCompetitionCourts(comp.Courts, comp.Format, putTourn); err != nil {
 						validationErr = fmt.Errorf("courts: %w", err)
 						return nil, nil
-					}
-					if putTourn != nil {
-						if err := engine.ValidateCourtsInTournament(comp.Courts, putTourn.Courts); err != nil {
-							validationErr = fmt.Errorf("courts: %w", err)
-							return nil, nil
-						}
 					}
 				}
 				// Settings-only merge. Status, Players, and

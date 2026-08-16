@@ -535,27 +535,14 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // that and deliberately does NOT block, because it would lock the operator
   // out of every unrelated edit on this screen (name, date, durations,
   // check-in), which is the one outcome this rule must not cause.
-  // The two read an empty list DIFFERENTLY, and must.
-  //
-  // courtsErr judges what is on screen, where an empty list is an operator who
-  // has deselected every pill: an unfinished form, not a request to inherit. It
-  // says so (shiaijoSelectionError) rather than falling into
-  // shiaijoCountError's deliberate null for 0. It stays venue-AGNOSTIC because
-  // it renders directly above the venue-aware courtsHint.
-  //
-  // savedCourtsErr judges what is ON DISK, where an empty list DOES mean
-  // "inherit the tournament's shiaijo" -- a legal record the server
-  // materialises. So it resolves first, via resolvedShiaijoCountError, which is
-  // also venue-aware and names the inheritance because the banner it drives
-  // sits at the top of the card with nothing beside it. Judging the raw list
-  // here is how a competition with no shiaijo of its own on a 3-shiaijo venue
-  // showed nothing while the dashboard refused its draw and routed the operator
-  // to this very screen.
+  // The two read an empty list DIFFERENTLY, and must: on screen it is an
+  // operator mid-edit, on disk it is inheritance. Each helper owns its own half
+  // of that (shiaijoPickerError takes `authored`, which courtsChanged supplies;
+  // resolvedShiaijoCountError resolves before judging).
   const savedCourts = c.courts || [];
-  const courtsErr = window.shiaijoSelectionError(local.courts)
-    || window.shiaijoCountErrorFor(local.format, (local.courts || []).length);
-  const savedCourtsErr = window.resolvedShiaijoCountError(c.format, savedCourts, tournament.courts);
   const courtsChanged = (local.courts || []).join(",") !== savedCourts.join(",");
+  const courtsErr = window.shiaijoPickerError(local.format, local.courts, courtsChanged);
+  const savedCourtsErr = window.resolvedShiaijoCountError(c.format, savedCourts, tournament.courts);
   const blockingCourtsErr = !!courtsErr && courtsChanged;
   // The mechanism sentence is dropped from the standing hint while the red
   // error is on screen: the error states it one line above, and printing it
@@ -786,11 +773,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             >Shiaijo (court) {cc}{inTournament ? "" : " (not in tournament)"}</button>
           ))}
         </div>
-        {orphanedCourtsErr && (
-          <div className="field__hint" style={{ color: "var(--red)", fontWeight: 600 }} data-testid="orphan-shiaijo-hint">
-            {orphanedCourtsErr}
-          </div>
-        )}
+        <window.FieldError testId="orphan-shiaijo-hint">{orphanedCourtsErr}</window.FieldError>
         {/* Shiaijo-count rule, shown with the other court hints below so the
             operator reads cap, suggestion and count rule in one place. The
             error is rendered for ANY invalid selection, staged or already

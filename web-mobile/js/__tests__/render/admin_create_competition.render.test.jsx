@@ -132,18 +132,31 @@ describe('AdminCreateCompetition shiaijo-count guard (bc-draw R9 gap 2)', () => 
   // 4-shiaijo venue got a 1-shiaijo competition with nothing on screen saying
   // so. shiaijoCountError answers null for 0 (an empty list on a STORED record
   // legitimately means "inherit"), so nothing else was going to catch it.
-  it('refuses an empty selection instead of quietly picking a shiaijo', async () => {
-    const { container, onCreate } = await mountForm();
+  //
+  // Both formats, because the emptiness rule is NOT scoped by format the way
+  // the count rule is: a league has to run somewhere too.
+  it.each(['playoffs', 'league'])('refuses an empty selection instead of quietly picking a shiaijo (%s)', async (format) => {
+    const { container } = await mountForm();
+    if (format === 'league') {
+      await act(async () => {
+        fireEvent.click(Array.from(container.querySelectorAll('button.radio-pill')).find((b) => b.textContent.trim() === 'League'));
+      });
+    }
     await clickPill(container, 'Shiaijo (court) A');
     await clickPill(container, 'Shiaijo (court) B'); // default A+B → none
 
     const err = container.querySelector('[data-testid="shiaijo-count-error"]');
     expect(err).not.toBeNull();
-    expect(err.textContent).toContain('At least one shiaijo (court) must be selected');
+    expect(err.textContent).toContain(window.SHIAIJO_NONE_SELECTED);
     expect(submitButton(container).disabled).toBe(true);
+  });
 
-    // And the guard inside create() agrees with the disabled button, so a
-    // programmatic click cannot slip past it either.
+  // The guard inside create() agrees with the disabled button, so a programmatic
+  // click cannot slip past it either.
+  it('refuses the submit itself, not just the button', async () => {
+    const { container, onCreate } = await mountForm();
+    await clickPill(container, 'Shiaijo (court) A');
+    await clickPill(container, 'Shiaijo (court) B');
     await act(async () => { fireEvent.click(submitButton(container)); });
     expect(onCreate).not.toHaveBeenCalled();
   });
@@ -156,21 +169,6 @@ describe('AdminCreateCompetition shiaijo-count guard (bc-draw R9 gap 2)', () => 
     await clickPill(container, 'Shiaijo (court) C'); // → C alone: 1 is legal
     expect(container.querySelector('[data-testid="shiaijo-count-error"]')).toBeNull();
     expect(submitButton(container).disabled).toBe(false);
-  });
-
-  // The emptiness rule is NOT scoped by format: a league has to run somewhere
-  // too, even though its shiaijo COUNT is unconstrained.
-  it('refuses an empty selection on a league as well', async () => {
-    const { container } = await mountForm();
-    await act(async () => {
-      fireEvent.click(Array.from(container.querySelectorAll('button.radio-pill')).find((b) => b.textContent.trim() === 'League'));
-    });
-    await clickPill(container, 'Shiaijo (court) A');
-    await clickPill(container, 'Shiaijo (court) B');
-    const err = container.querySelector('[data-testid="shiaijo-count-error"]');
-    expect(err).not.toBeNull();
-    expect(err.textContent).toContain('At least one shiaijo (court) must be selected');
-    expect(submitButton(container).disabled).toBe(true);
   });
 
   it('leaves a league alone: its courts run in parallel with nothing to merge', async () => {

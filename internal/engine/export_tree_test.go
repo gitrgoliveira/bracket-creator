@@ -160,7 +160,7 @@ func TestExportCompetitionXlsx_TwoCourtsRendersEveryTreePage(t *testing.T) {
 	for i, page := range pages {
 		title, err := f.GetCellFormula(page, "A1")
 		require.NoError(t, err)
-		assert.Containsf(t, title, "Shiaijo "+helper.CourtLabel(i), "%s must be titled by its shiaijo", page)
+		assert.Containsf(t, title, helper.ShiaijoLabel(helper.CourtLabel(i)), "%s must be titled by its shiaijo", page)
 		assert.NotContainsf(t, title, "Test Competition - Test Competition", "%s must not duplicate the competition name", page)
 	}
 }

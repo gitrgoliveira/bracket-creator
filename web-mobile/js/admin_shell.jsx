@@ -331,16 +331,13 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
   const t = tournament;
   const comps = t.competitions || [];
   // Whether "Start all" has anything to offer, answered by the same helper the
-  // click handler uses (startAllCompetitions, admin.jsx) rather than by a
-  // second copy of the eligibility test. The two agreed only while their
-  // literals matched: widen eligibility in the helper and this button would
-  // either be dead on click or absent while startable work existed, which is
-  // the drift partitionStartableCompetitions was extracted to end. BLOCKED
-  // competitions count too -- the modal opens to name them, so hiding the
-  // button when every eligible competition is blocked would leave the operator
-  // with no way to find out why.
-  const startAll = window.partitionStartableCompetitions(comps, t.courts);
-  const hasStartableWork = startAll.startable.length + startAll.blocked.length > 0;
+  // click handler uses (startAllCompetitions, admin.jsx) rather than a second
+  // copy of the eligibility test, which agreed with it only while the two
+  // literals matched. BLOCKED competitions count as work too: the modal opens
+  // to name them, so hiding the button when every eligible competition is
+  // blocked would leave the operator with no way to find out why.
+  const { startable, blocked } = window.partitionStartableCompetitions(comps, t.courts);
+  const hasStartableWork = startable.length + blocked.length > 0;
   const [exportPdfOpen, setExportPdfOpen] = useStateA(false);
   const [allWinnersOpen, setAllWinnersOpen] = useStateA(false);
   const scheduleEnabled = !!(authConfig?.scheduleEnabled);

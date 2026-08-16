@@ -45,9 +45,9 @@ func validateDateDMY(date string) error {
 // and competition courts. Caller decides whether empty courts is
 // acceptable: validateCourts rejects empty (tournament must have at
 // least one court to run anything); validateCompetitionCourts accepts
-// empty (the engine applies a 1-court default for competitions whose
-// Courts list is empty, allowing tournament-wide courts to be the
-// implicit default).
+// empty, because for a competition an empty list MEANS "inherit the
+// tournament's shiaijo" -- resolveCompetitionCourts materialises it
+// before anything validates or stores it.
 func validateCourtLabels(courts []string) error {
 	if len(courts) > helper.MaxCourts {
 		return fmt.Errorf("courts must be <= %d (Shiaijo are labelled A–Z), got %d", helper.MaxCourts, len(courts))

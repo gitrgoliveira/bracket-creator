@@ -633,8 +633,6 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// commit compares it against the freshly reloaded current.Courts to detect
 	// a concurrent settings save; comparing a materialised list against the
 	// empty one still on disk would report drift on every inherited draw.
-	// Named with the other loaded* snapshots even though it is captured
-	// earlier, because it is one of them.
 	loadedCourts := append([]string(nil), comp.Courts...)
 
 	// Materialise an omitted shiaijo allocation. An empty list has always

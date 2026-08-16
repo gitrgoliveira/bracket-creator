@@ -80,11 +80,10 @@ func ValidateShiaijoCount(n int) error {
 // The ORDER is the rule, not a coincidence of where the calls were written: a
 // value that breaks both (say 30) must report the 26-court label cap first,
 // because that is the ceiling the operator has to come down under before the
-// power-of-two question even applies. Owning the pair here is what keeps a
-// fourth generator entry point from calling only ValidateCourts and silently
-// dropping the shiaijo-count rule; the three that exist (the --courts flag on
-// create-pools and create-playoffs, and the web form in cmd/create_handler.go)
-// each used to restate both the pairing and the reason for the ordering.
+// power-of-two question even applies. Owning the pair here is what keeps the
+// next generator entry point from calling only ValidateCourts and silently
+// dropping the shiaijo-count rule; every entry point that existed when this was
+// written restated both the pairing and the reason for the ordering.
 //
 // Not for the tournament-level court list: ValidateCourts alone is correct
 // there (handlers_tournament.go), because a VENUE may have any number of

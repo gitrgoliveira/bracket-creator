@@ -83,10 +83,9 @@ func (o *poolOptions) run(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no entries found in file")
 	}
 
-	// Range rule and shiaijo-count rule, in the order ValidateDrawCourtCount
-	// owns. The pool-count clamp below can lower o.courts to a value the
-	// operator never asked for, so it steps down through
-	// helper.EffectiveDrawCourts, which lands on a legal count by construction.
+	// The pool-count clamp below can lower o.courts to a value the operator
+	// never asked for, so it steps down through helper.EffectiveDrawCourts,
+	// which lands on a legal count by construction.
 	if err := helper.ValidateDrawCourtCount(o.courts); err != nil {
 		return err
 	}

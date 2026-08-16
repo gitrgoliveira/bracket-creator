@@ -72,9 +72,8 @@ func (o *playoffOptions) run(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no entries found in file")
 	}
 
-	// Range rule and shiaijo-count rule, in the order ValidateDrawCourtCount
-	// owns. The page-count clamp further down is safe by construction: it
-	// clamps to helper.RoundToPowerOf2, which is already a power of two.
+	// The page-count clamp further down is safe by construction: it clamps to
+	// helper.RoundToPowerOf2, which is already a power of two.
 	if err := helper.ValidateDrawCourtCount(o.courts); err != nil {
 		return err
 	}

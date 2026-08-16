@@ -533,26 +533,42 @@ function shiaijoCountError(n, venueCourtCount) {
   return `${n} shiaijo cannot be paired down to a single bracket. ${remedy}: ${SHIAIJO_RULE_REASON}.`;
 }
 
-// The rule shiaijoCountError deliberately does NOT cover: a picker with nothing
-// selected. Null when at least one shiaijo is selected.
-//
-// shiaijoCountError answers null for 0 on purpose, because an empty list on a
-// STORED competition means "inherit the tournament's shiaijo" -- a legal record
-// the server materialises on the next write. But an operator standing at a
-// picker is AUTHORING an allocation, and deselecting every pill is not a request
-// to inherit: it is an unfinished form. Both screens used to read the empty list
-// as "no problem" and then disagree about what to do with it -- the create form
-// silently substituted the venue's first court, so an operator who deselected
-// everything on a 4-shiaijo venue got a 1-shiaijo competition with nothing on
-// screen saying so.
-//
-// Scoped to the count rule's own vocabulary rather than folded into it: a
-// competition must name a shiaijo whatever its format, so this one is NOT
-// limited to bracket-drawing formats the way shiaijoCountErrorFor is.
 const SHIAIJO_NONE_SELECTED = "At least one shiaijo (court) must be selected.";
 
-function shiaijoSelectionError(courts) {
-  return (Array.isArray(courts) ? courts : []).length ? null : SHIAIJO_NONE_SELECTED;
+// THE answer for a shiaijo picker: what is wrong with the selection currently on
+// screen, or null. Both pickers (the create form and competition Settings) call
+// only this.
+//
+// Two rules, in the order an operator can act on them: name a shiaijo at all,
+// then name a legal number of them. The ORDER is itself the rule, so it lives
+// here rather than at each picker -- the same reason helper.ValidateDrawCourtCount
+// owns the equivalent pair on the Go side. Otherwise a third picker calls the
+// count half alone and silently drops the other.
+//
+// `authored` says this list is the operator's own current selection rather than
+// a value that arrived off disk, and it is what an EMPTY list means:
+//
+//   off disk   "inherit the tournament's shiaijo" -- a legal record the server
+//              materialises, which is why shiaijoCountError answers null for 0.
+//              Demanding "select at least one" of a competition that merely
+//              ARRIVED that way contradicts both the silent banner beside it
+//              (inheriting a legal count is fine) and its live Save button.
+//   authored   the operator turned every pill off: an unfinished form. Left
+//              unsaid, the create form silently substituted the venue's first
+//              court, so deselecting everything on a 4-shiaijo venue produced a
+//              1-shiaijo competition with nothing on screen saying so.
+//
+// The emptiness half is NOT scoped by format the way shiaijoCountErrorFor is: a
+// league has to run somewhere too, even though its shiaijo count is free.
+//
+// Venue-agnostic on purpose: both pickers render this directly above the
+// venue-aware standing hint, so passing the venue would state that clause twice.
+// resolvedShiaijoCountError is the venue-aware twin, for surfaces rendering a
+// verdict alone.
+function shiaijoPickerError(format, courts, authored) {
+  const list = Array.isArray(courts) ? courts : [];
+  if (!list.length) return authored ? SHIAIJO_NONE_SELECTED : null;
+  return shiaijoCountErrorFor(format, list.length);
 }
 
 // shiaijoCountError with the FORMAT scope applied: null for a league or Swiss
@@ -1002,7 +1018,8 @@ if (typeof window !== "undefined") {
   window.normalizeCourts = normalizeCourts;
   window.courtCount = courtCount;
   window.shiaijoCountHint = shiaijoCountHint;
-  window.shiaijoSelectionError = shiaijoSelectionError;
+  window.shiaijoPickerError = shiaijoPickerError;
+  window.SHIAIJO_NONE_SELECTED = SHIAIJO_NONE_SELECTED;
   window.shiaijoCountErrorFor = shiaijoCountErrorFor;
   window.shiaijoCountHintFor = shiaijoCountHintFor;
   window.inheritedDrawCourts = inheritedDrawCourts;
@@ -1111,7 +1128,7 @@ export {
   shiaijoCountErrorFor,
   shiaijoCountHint,
   shiaijoCountHintFor,
-  shiaijoSelectionError,
+  shiaijoPickerError,
   SHIAIJO_NONE_SELECTED,
   allowedShiaijoCounts,
   shiaijoVenueSplitExample,

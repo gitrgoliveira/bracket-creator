@@ -195,16 +195,8 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 	// the same manifest with the courts spelled out was refused.
 	comp.Courts = resolveCompetitionCourts(comp.Courts, importTourn)
 
-	// The same gate POST /competitions runs, through the same function on the
-	// same resolved list: multi-character / >26-court labels, an illegal
-	// shiaijo count for a bracket-drawing competition, and shiaijo the venue
-	// does not have. Like a create, an imported row authors a brand-new
-	// allocation, so there is no stored value to preserve and the full check
-	// applies; the settings PUT is the one write path that splits the checks.
-	// Pre-fix the import path bypassed this entirely and could land a
-	// Competition with court labels that no other write path would accept,
-	// e.g. a manifest row with 30 courts or court="AA" would persist via
-	// SaveCompetition here while the same value via the REST API would 400.
+	// The same gate POST /competitions runs, on the same resolved list: an
+	// imported row authors a brand-new allocation exactly as a create does.
 	// Per-row res.Error to match the other patterns.
 	if err := validateCompetitionCourts(comp.Courts, comp.Format, importTourn); err != nil {
 		res.Error = "courts: " + err.Error()

@@ -111,9 +111,8 @@ func createTournamentHandler(c *gin.Context) {
 	if err != nil || courts < 1 {
 		courts = 2
 	}
-	// Same pair the --courts flag enforces on the CLI, through the same owner:
-	// this form drives the identical generator, so a count that is not a power
-	// of two would produce the same unmergeable court blocks here.
+	// This form drives the identical generator as the --courts flag, so it
+	// takes the identical rules.
 	if err := helper.ValidateDrawCourtCount(courts); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

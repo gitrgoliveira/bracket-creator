@@ -358,7 +358,7 @@ func buildDrawShapeCase(numPools, poolWinners, courts int) drawShapeCase {
 			CourtLabel:         label,
 			ForeignHomeWinners: foreign,
 			Summary: fmt.Sprintf("page %d titled %q overlays %v but its bracket contains %v",
-				i+1, "Shiaijo "+label, claimed, present),
+				i+1, ShiaijoLabel(label), claimed, present),
 		})
 	}
 	c.PageCourtMismatchCount = len(c.PageCourtMismatch)

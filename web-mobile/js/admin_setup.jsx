@@ -737,12 +737,9 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   // request and a form that still looks fine. There is no stored-vs-staged
   // distinction to make here: a create authors a brand-new allocation, so the
   // hint and the block are the same condition.
-  // Two rules, in the order the operator can act on them: pick a shiaijo at
-  // all, then pick a legal number of them. The emptiness rule is not scoped by
-  // format -- a league has to run somewhere too -- so it cannot live inside
-  // shiaijoCountErrorFor, which is deliberately silent for league and Swiss.
-  const courtsErr = window.shiaijoSelectionError(selectedCourts)
-    || window.shiaijoCountErrorFor(format, selectedCourts.length);
+  // Always `authored`: this form has no stored allocation behind it, so every
+  // selection on screen is one the operator just made.
+  const courtsErr = window.shiaijoPickerError(format, selectedCourts, true);
   // STANDING hint, same helper and same venue-awareness as the Settings
   // screen: on a 3-shiaijo tournament this reads "can use 1 or 2 (this
   // tournament has 3)" from the moment the form opens, so the operator never

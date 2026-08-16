@@ -129,5 +129,6 @@ nav:
       - Contributing: dev-guide/contributing.md
       - Architecture:
           - Software: architecture/software-architecture.md
+          - Data model: architecture/data-model.md
           - Network: architecture/network-architecture.md
           - Infrastructure: architecture/infrastructure-architecture.md

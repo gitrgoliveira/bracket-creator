@@ -141,6 +141,51 @@ func seedRejection(assignments []domain.SeedAssignment, err error, remedy string
 	return err.Error()
 }
 
+// rejectSeedsOffRoster refuses a seeding that ranks a name no participant
+// carries. domain.ValidateAssignments checks the ranks as a SET (contiguous
+// from 1, no duplicates) and never looks at the roster, so a ghost name passed
+// and produced a competition whose two views of one seeding disagreed: the file
+// held a valid 1..N and drew, while every reader that merges seeds onto players
+// by name saw only the survivors and read the ghost's rank as an unclosable gap.
+//
+// Name is the join key state.loadParticipants uses when it merges seeds.csv onto
+// the roster, so matching on it here means this check and that merge can never
+// disagree about who a rank belongs to.
+//
+// An empty roster is NOT treated as "everything is a ghost": seeds for a
+// competition whose participants have not been written yet are refused only when
+// there is a roster to contradict them, so a client that saves seeds before the
+// roster still works and the draw's own validation remains the backstop.
+func rejectSeedsOffRoster(store *state.Store, compID string, assignments []domain.SeedAssignment) error {
+	if len(assignments) == 0 {
+		return nil
+	}
+	// withZekkenName only affects column layout, not the Name field this reads.
+	players, err := store.LoadParticipants(compID, false)
+	if err != nil || len(players) == 0 {
+		return nil
+	}
+	onRoster := make(map[string]bool, len(players))
+	for _, p := range players {
+		onRoster[p.Name] = true
+	}
+	var unknown []string
+	for _, a := range assignments {
+		if !onRoster[a.Name] {
+			unknown = append(unknown, fmt.Sprintf("%q (rank %d)", a.Name, a.SeedRank))
+		}
+	}
+	if len(unknown) == 0 {
+		return nil
+	}
+	verb := "is"
+	if len(unknown) > 1 {
+		verb = "are"
+	}
+	return fmt.Errorf("seeds: %s %s not on this competition's roster; a seed rank must belong to a participant. %s",
+		strings.Join(unknown, ", "), verb, seedGapRemedyPut)
+}
+
 // validateHTTPURL returns a ValidationError when val is non-empty and does not
 // start with "http://" or "https://". These URL fields are rendered as raw href
 // values in the viewer SPA; rejecting non-http(s) schemes at the write boundary

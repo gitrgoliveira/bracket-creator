@@ -152,3 +152,68 @@ func TestRosterPutStillAcceptsAHalfTypedSeeding(t *testing.T) {
 	assert.Equal(t, []domain.SeedAssignment{{Name: "Dave", SeedRank: 4}}, stored,
 		"the typed rank must persist, or the console shows 0 seeded and cannot warn")
 }
+
+// A rank assigned to nobody is not a seeding.
+//
+// The ranks are validated as a SET (contiguous from 1, no duplicates) and that
+// check never looked at the roster, so a name with no participant behind it
+// stored cleanly -- and then the same seeding read two different ways. seeds.csv
+// held a valid 1..N and the draw ran; every reader that merges seeds onto
+// players by name saw only the survivors, read the ghost's rank as a gap, and
+// the console disabled "Generate draw" with a message naming a rank no row owned
+// and no edit could close.
+func TestPutSeedsRefusesARankForSomeoneNotOnTheRoster(t *testing.T) {
+	t.Run("a ghost name is refused and named", func(t *testing.T) {
+		store, do := seedEnforcementFixture(t)
+		body, err := json.Marshal([]domain.SeedAssignment{
+			{Name: "Alice", SeedRank: 1},
+			{Name: "Ghost", SeedRank: 2},
+			{Name: "Carol", SeedRank: 3},
+		})
+		require.NoError(t, err)
+
+		w := do("PUT", "/api/competitions/c1/seeds", body)
+		require.Equal(t, http.StatusBadRequest, w.Code,
+			"a seeding whose ranks are contiguous but reference nobody must still be refused: %s", w.Body.String())
+
+		var got map[string]string
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+		assert.Contains(t, got["error"], `"Ghost"`, "the operator has to be told WHICH name has no participant")
+		assert.Contains(t, got["error"], "rank 2")
+		assert.NotContains(t, got["error"], "Alice", "a name that IS on the roster must not be blamed")
+
+		stored, err := store.LoadSeedsRaw("c1")
+		require.NoError(t, err)
+		assert.Empty(t, stored, "a refused seeding must not reach seeds.csv")
+	})
+
+	t.Run("every name on the roster still saves", func(t *testing.T) {
+		store, do := seedEnforcementFixture(t)
+		body, err := json.Marshal([]domain.SeedAssignment{
+			{Name: "Alice", SeedRank: 1}, {Name: "Bob", SeedRank: 2},
+		})
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, do("PUT", "/api/competitions/c1/seeds", body).Code)
+		stored, err := store.LoadSeeds("c1")
+		require.NoError(t, err)
+		assert.Len(t, stored, 2, "the guard must not refuse an ordinary seeding")
+	})
+
+	t.Run("no roster yet is not every name being a ghost", func(t *testing.T) {
+		// Seeds saved before participants are written have nothing to
+		// contradict them, so the roster check stays out of the way and the
+		// draw's own validation remains the backstop.
+		r, store, _, _, _ := setupTestRouter(t)
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: "empty", Name: "Empty", Format: state.CompFormatMixed, PoolSize: 3, PoolWinners: 2,
+		}))
+		body, err := json.Marshal([]domain.SeedAssignment{{Name: "Alice", SeedRank: 1}})
+		require.NoError(t, err)
+		w := httptest.NewRecorder()
+		req, err := http.NewRequest("PUT", "/api/competitions/empty/seeds", bytes.NewBuffer(body))
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code, "an empty roster must not turn every seed into a ghost: %s", w.Body.String())
+	})
+}

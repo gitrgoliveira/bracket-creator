@@ -72,13 +72,23 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   // pools.csv does not exist (DiscardDraw deletes it and reverts the status),
   // so the answer is structurally []. Clearing rather than fetching also keeps
   // the discard case correct: the status change back to setup empties the list.
-  const [drawWarnings, setDrawWarnings] = useStateA([]);
+  //
+  // Held WITH the competition id it describes, and rendered only when the two
+  // match. Clearing on the setup branch alone left the previous competition's
+  // sentences on screen while the new one's fetch was in flight: switching from
+  // one running competition to another kept X's warnings under Y's name, headed
+  // "the draw could not honour every rule". Storing the id is what makes a
+  // stale render impossible without also blanking the banner every time the
+  // SAME competition's status changes, which a bare reset at the top of the
+  // effect would do.
+  const [drawWarnings, setDrawWarnings] = useStateA({ id: null, list: [] });
   useEffectA(() => {
-    if (!c.status || c.status === "setup") { setDrawWarnings([]); return undefined; }
+    if (!c.status || c.status === "setup") { setDrawWarnings({ id: c.id, list: [] }); return undefined; }
     let live = true;
-    window.API.fetchDrawWarnings(c.id, password).then((w) => { if (live) setDrawWarnings(w || []); });
+    window.API.fetchDrawWarnings(c.id, password).then((w) => { if (live) setDrawWarnings({ id: c.id, list: w || [] }); });
     return () => { live = false; };
   }, [c.id, c.status, password]);
+  const drawWarningsForThisComp = drawWarnings.id === c.id ? drawWarnings.list : [];
 
   // Use the shared isValidDate (admin_helpers.jsx) which delegates to
   // normalizeDate for semantic validity: rejects "32-13-2026" / Feb 31 /
@@ -401,11 +411,11 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
             server per request, so the banner stays true for as long as the
             draw it describes exists and clears itself when that draw is
             discarded. */}
-        {drawWarnings.length > 0 && (
+        {drawWarningsForThisComp.length > 0 && (
           <div className="alert alert--warn" style={{ margin: "0 0 14px" }} data-testid="draw-seed-warnings">
             <strong>Seeding: the draw could not honour every rule.</strong>
             <ul style={{ margin: "6px 0 0", paddingInlineStart: 18 }}>
-              {drawWarnings.map((w) => <li key={w}>{w}</li>)}
+              {drawWarningsForThisComp.map((w) => <li key={w}>{w}</li>)}
             </ul>
           </div>
         )}

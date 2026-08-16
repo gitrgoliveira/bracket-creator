@@ -1,6 +1,7 @@
 package helper
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -62,4 +63,53 @@ func TestBronzeBlockBandSelection(t *testing.T) {
 		// "the last band" is index -1, which asks excelize for column -7.
 		assert.Equal(t, colOfBand(0), bandStartColumn(t, nil, "D"))
 	})
+}
+
+// A shiaijo gets a band because a bout PRINTS under it.
+//
+// usedCourtBands folds CourtPlan.Bronze into the band set unconditionally, and
+// has to: a bronze moved to a shiaijo no other bout uses would otherwise be
+// looked up in a set it was never allowed to join. But the bronze GATE belongs
+// to the caller, and the plan carries the court whether or not that gate passed,
+// so a stored ThirdPlaceMatch on a competition rendering no bronze block used to
+// buy a header, a page break and a print-area column with nothing underneath.
+func TestEliminationBandsIgnoreTheBronzeCourtWhenNoBronzePrints(t *testing.T) {
+	t.Parallel()
+
+	bandHeaders := func(t *testing.T, includeBronze bool) []string {
+		t.Helper()
+		f := excelize.NewFile()
+		defer func() { require.NoError(t, f.Close()) }()
+		_, err := f.NewSheet(SheetEliminationMatches)
+		require.NoError(t, err)
+
+		pools, err := CreatePools(drawGoldenRoster(2), drawGoldenPoolSize, true)
+		require.NoError(t, err)
+		draw := BuildKnockoutDraw(pools, 2, 2)
+		require.NotNil(t, draw)
+		rounds := BuildEliminationMatchRounds(draw.Root)
+		AssignMatchNumbers(rounds)
+
+		// Every bout stays on its drawn shiaijo; only the 3rd-place bout names
+		// a third one, which is the shiaijo that must not appear unless the
+		// bronze block itself does.
+		plan := CourtPlan{Draw: draw, Courts: []string{"A", "B", "C"}, Bronze: "C"}
+		PrintEliminationWithBronze(f, nil, rounds, 0, plan, false, false, includeBronze)
+
+		rows, err := f.GetRows(SheetEliminationMatches)
+		require.NoError(t, err)
+		require.NotEmpty(t, rows)
+		var headers []string
+		for _, cell := range rows[0] {
+			if strings.HasPrefix(cell, "Shiaijo ") {
+				headers = append(headers, cell)
+			}
+		}
+		return headers
+	}
+
+	assert.NotContains(t, bandHeaders(t, false), ShiaijoLabel("C"),
+		"no bronze is printed, so shiaijo C has nothing on this sheet and must not get a header, a page break and a print column")
+	assert.Contains(t, bandHeaders(t, true), ShiaijoLabel("C"),
+		"when the bronze IS printed its shiaijo must still get a band, or the block lands under another court's header")
 }

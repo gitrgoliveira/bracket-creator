@@ -501,15 +501,23 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     });
     return counts;
   }, [players]);
-  // The gap message comes from the shared seedGapDiagnosis (admin_helpers.jsx),
-  // which is itself mirrored in Go. Three surfaces describe this same
-  // half-typed seeding -- this banner, the header's "Cannot start" block, and
-  // the server's 400 if a draw is fired from elsewhere -- and an operator who
-  // meets it twice must not read two different accounts of it.
-  const { seedGapMessage, hasGaps } = useMemoA(() => {
-    const message = window.seedGapDiagnosis(window.seededRanks(players));
-    return { seedGapMessage: message, hasGaps: !!message };
-  }, [players]);
+  // THE predicate for "is this seeding fit to draw with", shared with the
+  // header's "Cannot start" block and the dashboard card
+  // (competitionSeedingBlocker, admin_helpers.jsx). Three surfaces describe the
+  // same seeding and an operator who meets it twice must not read two different
+  // accounts of it.
+  //
+  // Reading seedGapDiagnosis directly is what broke that: it answers "" for the
+  // faults that are NOT gaps, duplicates included, by design -- the caller
+  // supplies their wording. So a roster with rank 2 on two rows disabled
+  // Generate draw with "rank 2 is used more than once ... in Participants &
+  // seeds", and the panel it named then showed nothing at all: no banner, no
+  // flagged row, no way to see which rank was wrong. The blocker covers both
+  // faults, so the banner is driven by the blocker.
+  const { seedProblem, hasSeedProblem } = useMemoA(() => {
+    const blocker = window.competitionSeedingBlocker(c);
+    return { seedProblem: blocker && blocker.reason, hasSeedProblem: !!blocker };
+  }, [c]);
 
   // Extracted from inline onClick so we can await + log instead of
   // silencing the rejection. Same pattern as updateSeed below: success
@@ -962,9 +970,9 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
               </div>
             )}
           </div>
-          {hasGaps && (
+          {hasSeedProblem && (
             <div className="alert alert--error" style={{ margin: "0 16px 16px" }} data-testid="seed-gap-banner">
-              ❌ {seedGapMessage} The draw cannot run until the seeding is complete.
+              ❌ {seedProblem} The draw cannot run until the seeding is fixed.
             </div>
           )}
           {seedImportResult && (
@@ -1187,7 +1195,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
               {rosterDirty && !isDrawReady && <span style={{ fontSize: 12.5, color: "var(--warn)", fontWeight: 600 }}>● Unsaved changes</span>}
               <button className="btn btn--sm" type="button" onClick={pasteFromExcel} disabled={isDrawReady} title={isDrawReady ? "Discard the draw to edit participants" : "Reads clipboard and converts tab-separated values (e.g. from Excel) to CSV"}>Paste clipboard</button>
-              <button className="btn btn--sm btn--primary" type="button" onClick={apply} disabled={hasGaps || isDrawReady} title={isDrawReady ? "Discard the draw to apply roster changes" : undefined}>Apply changes</button>
+              <button className="btn btn--sm btn--primary" type="button" onClick={apply} disabled={hasSeedProblem || isDrawReady} title={isDrawReady ? "Discard the draw to apply roster changes" : undefined}>Apply changes</button>
             </div>
           </div>
 
@@ -1299,7 +1307,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
           {lines.length > 0 && (
             <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10, marginTop: 12 }}>
               {rosterDirty && !isDrawReady && <span style={{ fontSize: 12.5, color: "var(--warn)", fontWeight: 600 }}>● Unsaved changes</span>}
-              <button className="btn btn--primary" type="button" onClick={apply} disabled={hasGaps || isDrawReady} title={isDrawReady ? "Discard the draw to apply roster changes" : undefined}>Apply changes</button>
+              <button className="btn btn--primary" type="button" onClick={apply} disabled={hasSeedProblem || isDrawReady} title={isDrawReady ? "Discard the draw to apply roster changes" : undefined}>Apply changes</button>
             </div>
           )}
         </div>

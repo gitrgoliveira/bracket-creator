@@ -965,6 +965,7 @@ if (typeof window !== "undefined") {
   window.courtPillOptions = courtPillOptions;
   window.orphanedShiaijoError = orphanedShiaijoError;
   window.competitionDrawBlocker = competitionDrawBlocker;
+  window.competitionSeedingBlocker = competitionSeedingBlocker;
   window.seedGapDiagnosis = seedGapDiagnosis;
   window.seededRanks = seededRanks;
   window.partitionStartableCompetitions = partitionStartableCompetitions;
@@ -1078,6 +1079,7 @@ export {
   orphanedShiaijoError,
   competitionDrawBlockedReason,
   competitionDrawBlocker,
+  competitionSeedingBlocker,
   seedGapDiagnosis,
   seededRanks,
   partitionStartableCompetitions,

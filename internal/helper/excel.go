@@ -1309,6 +1309,11 @@ func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]M
 		matchesByCourt := make([][]*Node, numCourts)
 		numMatchRows := 0
 		for _, eliminationMatch := range eliminationMatchRound {
+			// Same nil skip as usedCourtBands above: the two walks read the
+			// same caller-supplied rounds and must agree on what is in them.
+			if eliminationMatch == nil {
+				continue
+			}
 			c, ok := bandIndex[bandOf(eliminationMatch)]
 			if !ok {
 				c = 0
@@ -1608,6 +1613,20 @@ func PrintBronzeBlockWithPrintArea(f *excelize.File, startRow, numTeamMatches in
 // derives it from the naginata flag and round count via NeedsBronzeBlock; the
 // exporters from the stored bracket's ThirdPlaceMatch).
 func PrintEliminationWithBronze(f *excelize.File, matchWinners map[string]MatchWinner, rounds [][]*Node, numTeamMatches int, plan CourtPlan, mirror, engi, includeBronze bool) {
+	// A shiaijo gets a band because a bout PRINTS under it. usedCourtBands folds
+	// in plan.Bronze unconditionally -- it has to, or a bronze moved to a
+	// shiaijo nothing else uses would be looked up in a band set it was never
+	// allowed to join -- so when the bronze is NOT being rendered its court must
+	// not reach that fold. Otherwise a stored ThirdPlaceMatch on shiaijo D buys
+	// a "Shiaijo D" header, a page break and a print-area column with nothing
+	// underneath: the empty band PrintPoolMatches already refuses to produce.
+	// The bronze gate is the caller's (the CLI derives it from the naginata
+	// flag, the exporters from the stored bracket), but the plan carries the
+	// court whether or not that gate passed, so the two facts are reconciled
+	// here once rather than at each call site.
+	if !includeBronze {
+		plan.Bronze = ""
+	}
 	nextRow, bands, elimMatchWinners := PrintTeamEliminationMatches(f, matchWinners, rounds, numTeamMatches, plan, mirror, engi)
 	if includeBronze {
 		PrintBronzeBlockWithPrintArea(f, nextRow, numTeamMatches, mirror, engi, bands, plan.Bronze, rounds, elimMatchWinners)
@@ -1739,6 +1758,14 @@ func usedCourtBands(rounds [][]*Node, courts []string, bronze string, bandOf fun
 	var seen []string
 	for _, round := range rounds {
 		for _, m := range round {
+			// Skip nils like AssignMatchNumbers and FillInMatches do. Nothing in
+			// this repo builds rounds holding one (BuildEliminationMatchRounds
+			// never emits nil), but PrintTeamEliminationMatches and
+			// PrintEliminationWithBronze are exported and take the rounds from
+			// their caller, and bandOf dereferences what it is given.
+			if m == nil {
+				continue
+			}
 			seen = append(seen, bandOf(m))
 		}
 	}

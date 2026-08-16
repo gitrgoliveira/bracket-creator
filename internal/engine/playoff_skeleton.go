@@ -261,7 +261,21 @@ func PoolCourtByName(matches []state.MatchResult) map[string]string {
 		// name that itself contains a hyphen, where a naive cut silently folds
 		// two pools into one key and reports the pair as split.
 		pool, ok := poolNameFromMatchID(m.ID)
-		if !ok || pool == "" || m.Court == "" {
+		if !ok || pool == "" {
+			continue
+		}
+		// An unrecorded court is UNKNOWN, not agreement. Skipping those rows
+		// instead let ONE bout with a court speak for a pool whose others had
+		// none, filing the entire block -- header, matches, standings table and
+		// the pool's roster sheet -- under a shiaijo the rest of it is not on.
+		// The contract above says a pool is reported only when EVERY one of its
+		// matches agrees, and this is the half that was missing; it is the same
+		// rule helper.CourtPlan.PageCourt applies to a tree page, for the same
+		// reason. Pool matches are created with a court (engine/pools.go), so in
+		// practice this only catches legacy or hand-edited rows -- and for those
+		// the answer it now gives is the drawn band, which is where they were.
+		if m.Court == "" {
+			split[pool] = true
 			continue
 		}
 		if seen, ok := courts[pool]; ok && seen != m.Court {

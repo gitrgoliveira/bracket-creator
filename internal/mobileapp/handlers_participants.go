@@ -529,6 +529,25 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			c.JSON(http.StatusBadRequest, gin.H{"error": seedRejection(assignments, err, seedGapRemedyPut)})
 			return
 		}
+		// A rank assigned to nobody is not a seeding. Ranks were validated as a
+		// set above, but nothing tied them to the roster, so a name with no
+		// participant behind it saved cleanly and then split the two views of
+		// the same seeding: seeds.csv held 1..N and drew fine, while the admin
+		// console -- which reads seeds MERGED ONTO PLAYERS by name
+		// (state.loadParticipants) -- saw the survivors only, read the ghost's
+		// rank as a gap, and disabled Generate draw permanently with no row the
+		// operator could edit to close it.
+		//
+		// Matched on Name exactly, the key seeds.csv itself uses and the key
+		// that merge uses, so the check cannot disagree with the consumer. This
+		// endpoint takes a seeding as a FINISHED artefact (see above), so
+		// refusing here costs nothing: the console's own path is
+		// PUT /competitions/:id, which carries the roster and its seeds together
+		// and cannot produce this state.
+		if err := rejectSeedsOffRoster(store, id, assignments); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 
 		if err := store.SaveSeeds(id, assignments); err != nil {
 			internalError(c, err)

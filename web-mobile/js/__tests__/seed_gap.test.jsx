@@ -5,6 +5,7 @@ import {
   seedGapDiagnosis,
   seededRanks,
   competitionDrawBlocker,
+  competitionSeedingBlocker,
   partitionStartableCompetitions,
 } from '../admin_helpers.jsx';
 
@@ -136,5 +137,49 @@ describe('partitionStartableCompetitions with an incomplete seeding', () => {
     // for possibly different reasons and cannot write a single tail itself.
     expect(blocked[0].reason).toContain('have not been set');
     expect(blocked[0].reason).toContain('Participants & seeds');
+  });
+});
+
+// The seeding panel's own banner has to describe every seeding the draw
+// blocker refuses, or the blocker sends the operator to a screen that says
+// nothing is wrong.
+//
+// It used to read seedGapDiagnosis directly, which answers "" for the faults
+// that are NOT gaps -- duplicates included, by design, because the caller
+// supplies their wording. So a roster with rank 2 on two rows disabled
+// "Generate draw" with "rank 2 is used more than once ... in Participants &
+// seeds", and that panel then rendered no banner, no flagged row and no way to
+// tell which rank was wrong. Both surfaces now read competitionSeedingBlocker.
+describe('competitionSeedingBlocker covers what the panel must show', () => {
+  const comp = (players) => ({ id: 'c1', name: 'C1', format: 'mixed', status: 'setup', courts: ['A', 'B'], players });
+  const seeded = (...ranks) => ranks.map((seed, i) => ({ name: `P${i + 1}`, seed }));
+
+  it('reports a duplicate rank, which seedGapDiagnosis deliberately does not', () => {
+    const players = seeded(1, 2, 2, 3);
+    // The exact divergence that produced the silent panel.
+    expect(seedGapDiagnosis(seededRanks(players))).toBe('');
+    const blocker = competitionSeedingBlocker(comp(players));
+    expect(blocker).not.toBeNull();
+    expect(blocker.reason).toContain('seed rank 2');
+    expect(blocker.reason).toContain('used more than once');
+  });
+
+  it('still reports a gap', () => {
+    const blocker = competitionSeedingBlocker(comp(seeded(null, null, null, 4)));
+    expect(blocker.reason).toContain('seed ranks 1, 2 and 3 have not been set');
+  });
+
+  it('stays silent for a seeding that is fine, and for none at all', () => {
+    expect(competitionSeedingBlocker(comp(seeded(1, 2, 3)))).toBeNull();
+    expect(competitionSeedingBlocker(comp(seeded(null, null)))).toBeNull();
+  });
+
+  it('agrees with the draw blocker on every roster, so the two surfaces cannot disagree', () => {
+    for (const players of [seeded(1, 2, 3), seeded(null, null), seeded(null, 4), seeded(1, 1), seeded(1, 2, 2, 3)]) {
+      const panel = competitionSeedingBlocker(comp(players));
+      const draw = competitionDrawBlocker(comp(players), ['A', 'B']);
+      expect(!!panel).toBe(!!draw);
+      if (panel) expect(panel.reason).toBe(draw.reason);
+    }
   });
 });

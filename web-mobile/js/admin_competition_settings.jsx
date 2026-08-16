@@ -477,7 +477,13 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     // drop a toggle.
     const cur = localRef.current.courts || [];
     const nextCourts = cur.includes(cc) ? cur.filter((x) => x !== cc) : [...cur, cc].sort();
-    if (nextCourts.length) update("courts", nextCourts);
+    // The last pill CAN be turned off. This used to drop the update instead,
+    // which enforced "at least one shiaijo" by making the click do nothing --
+    // no pill change, no message, nothing to read. The rule is real, so it is
+    // now stated where the operator is looking: courtsErr says it and Save is
+    // blocked until they pick one, the same way the create form answers the
+    // same action. A silent no-op teaches nothing and reads as a broken button.
+    update("courts", nextCourts);
   };
 
   // draw-ready lock: output-affecting fields: those that reach the Excel
@@ -529,20 +535,25 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // that and deliberately does NOT block, because it would lock the operator
   // out of every unrelated edit on this screen (name, date, durations,
   // check-in), which is the one outcome this rule must not cause.
-  // Both judge the RESOLVED allocation, never the raw list. An empty list MEANS
-  // "inherit the tournament's shiaijo" and is what the server stores and
-  // validates, so measuring the raw one asked about a value never persisted:
-  // shiaijoCountError(0) is null, so a competition with no shiaijo of its own on
-  // a 3-shiaijo venue showed nothing here while the dashboard refused its draw
-  // and routed the operator to this screen.
+  // The two read an empty list DIFFERENTLY, and must.
   //
-  // courtsErr stays venue-AGNOSTIC because it renders directly above the
-  // venue-aware courtsHint; savedCourtsErr goes through
-  // resolvedShiaijoCountError, which is venue-aware and names the inheritance,
-  // because the banner it drives sits at the top of the card with nothing
-  // beside it.
+  // courtsErr judges what is on screen, where an empty list is an operator who
+  // has deselected every pill: an unfinished form, not a request to inherit. It
+  // says so (shiaijoSelectionError) rather than falling into
+  // shiaijoCountError's deliberate null for 0. It stays venue-AGNOSTIC because
+  // it renders directly above the venue-aware courtsHint.
+  //
+  // savedCourtsErr judges what is ON DISK, where an empty list DOES mean
+  // "inherit the tournament's shiaijo" -- a legal record the server
+  // materialises. So it resolves first, via resolvedShiaijoCountError, which is
+  // also venue-aware and names the inheritance because the banner it drives
+  // sits at the top of the card with nothing beside it. Judging the raw list
+  // here is how a competition with no shiaijo of its own on a 3-shiaijo venue
+  // showed nothing while the dashboard refused its draw and routed the operator
+  // to this very screen.
   const savedCourts = c.courts || [];
-  const courtsErr = window.shiaijoCountErrorFor(local.format, window.inheritedDrawCourts(local.courts, tournament.courts).length);
+  const courtsErr = window.shiaijoSelectionError(local.courts)
+    || window.shiaijoCountErrorFor(local.format, (local.courts || []).length);
   const savedCourtsErr = window.resolvedShiaijoCountError(c.format, savedCourts, tournament.courts);
   const courtsChanged = (local.courts || []).join(",") !== savedCourts.join(",");
   const blockingCourtsErr = !!courtsErr && courtsChanged;
@@ -583,7 +594,9 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // common value that would change what the footer renders.
   const saveBlockMessage = saveErr ? `⚠ ${saveErr}`
     : hasDurationError ? "⚠ Fix match duration"
-      : blockingCourtsErr ? "⚠ Fix shiaijo count" : "";
+      // "allocation", not "count": courtsErr also covers a selection with
+      // nothing in it, which is not a counting problem.
+      : blockingCourtsErr ? "⚠ Fix shiaijo allocation" : "";
   const saveBlocked = !!saveBlockMessage;
 
   return (

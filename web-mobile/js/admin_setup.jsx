@@ -737,7 +737,12 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   // request and a form that still looks fine. There is no stored-vs-staged
   // distinction to make here: a create authors a brand-new allocation, so the
   // hint and the block are the same condition.
-  const courtsErr = window.shiaijoCountErrorFor(format, selectedCourts.length);
+  // Two rules, in the order the operator can act on them: pick a shiaijo at
+  // all, then pick a legal number of them. The emptiness rule is not scoped by
+  // format -- a league has to run somewhere too -- so it cannot live inside
+  // shiaijoCountErrorFor, which is deliberately silent for league and Swiss.
+  const courtsErr = window.shiaijoSelectionError(selectedCourts)
+    || window.shiaijoCountErrorFor(format, selectedCourts.length);
   // STANDING hint, same helper and same venue-awareness as the Settings
   // screen: on a 3-shiaijo tournament this reads "can use 1 or 2 (this
   // tournament has 3)" from the moment the form opens, so the operator never
@@ -879,7 +884,13 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
       startTime,
       date: normDate,
       teamSize: kind === "team" ? teamSize : 0,
-      courts: selectedCourts.length ? selectedCourts : [safeCourts[0] || "A"],
+      // Sent as selected, with no substitution: an empty selection is refused
+      // by courtsErr above (which disables this button and fails the guard in
+      // create()), so there is nothing left to substitute FOR. Quietly filling
+      // in the venue's first court was how deselecting every pill on a
+      // 4-shiaijo venue produced a 1-shiaijo competition with no trace of the
+      // decision anywhere on the form.
+      courts: selectedCourts,
       poolMode, poolSize, winnersPerPool: winners,
       numberPrefix: numberPrefix.trim().substring(0, 3),
       withZekkenName: kind === "individual" ? withZekken : false,

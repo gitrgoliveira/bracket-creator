@@ -533,6 +533,28 @@ function shiaijoCountError(n, venueCourtCount) {
   return `${n} shiaijo cannot be paired down to a single bracket. ${remedy}: ${SHIAIJO_RULE_REASON}.`;
 }
 
+// The rule shiaijoCountError deliberately does NOT cover: a picker with nothing
+// selected. Null when at least one shiaijo is selected.
+//
+// shiaijoCountError answers null for 0 on purpose, because an empty list on a
+// STORED competition means "inherit the tournament's shiaijo" -- a legal record
+// the server materialises on the next write. But an operator standing at a
+// picker is AUTHORING an allocation, and deselecting every pill is not a request
+// to inherit: it is an unfinished form. Both screens used to read the empty list
+// as "no problem" and then disagree about what to do with it -- the create form
+// silently substituted the venue's first court, so an operator who deselected
+// everything on a 4-shiaijo venue got a 1-shiaijo competition with nothing on
+// screen saying so.
+//
+// Scoped to the count rule's own vocabulary rather than folded into it: a
+// competition must name a shiaijo whatever its format, so this one is NOT
+// limited to bracket-drawing formats the way shiaijoCountErrorFor is.
+const SHIAIJO_NONE_SELECTED = "At least one shiaijo (court) must be selected.";
+
+function shiaijoSelectionError(courts) {
+  return (Array.isArray(courts) ? courts : []).length ? null : SHIAIJO_NONE_SELECTED;
+}
+
 // shiaijoCountError with the FORMAT scope applied: null for a league or Swiss
 // competition, whose shiaijo run in parallel with no bracket blocks to merge.
 //
@@ -980,6 +1002,7 @@ if (typeof window !== "undefined") {
   window.normalizeCourts = normalizeCourts;
   window.courtCount = courtCount;
   window.shiaijoCountHint = shiaijoCountHint;
+  window.shiaijoSelectionError = shiaijoSelectionError;
   window.shiaijoCountErrorFor = shiaijoCountErrorFor;
   window.shiaijoCountHintFor = shiaijoCountHintFor;
   window.inheritedDrawCourts = inheritedDrawCourts;
@@ -1088,6 +1111,8 @@ export {
   shiaijoCountErrorFor,
   shiaijoCountHint,
   shiaijoCountHintFor,
+  shiaijoSelectionError,
+  SHIAIJO_NONE_SELECTED,
   allowedShiaijoCounts,
   shiaijoVenueSplitExample,
   shiaijoVenueHint,

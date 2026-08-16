@@ -127,6 +127,52 @@ describe('AdminCreateCompetition shiaijo-count guard (bc-draw R9 gap 2)', () => 
     expect(submitButton(container).disabled).toBe(false);
   });
 
+  // Deselecting every pill used to be silently "fixed" at submit: the form sent
+  // [safeCourts[0] || "A"], so an operator who cleared the selection on a
+  // 4-shiaijo venue got a 1-shiaijo competition with nothing on screen saying
+  // so. shiaijoCountError answers null for 0 (an empty list on a STORED record
+  // legitimately means "inherit"), so nothing else was going to catch it.
+  it('refuses an empty selection instead of quietly picking a shiaijo', async () => {
+    const { container, onCreate } = await mountForm();
+    await clickPill(container, 'Shiaijo (court) A');
+    await clickPill(container, 'Shiaijo (court) B'); // default A+B → none
+
+    const err = container.querySelector('[data-testid="shiaijo-count-error"]');
+    expect(err).not.toBeNull();
+    expect(err.textContent).toContain('At least one shiaijo (court) must be selected');
+    expect(submitButton(container).disabled).toBe(true);
+
+    // And the guard inside create() agrees with the disabled button, so a
+    // programmatic click cannot slip past it either.
+    await act(async () => { fireEvent.click(submitButton(container)); });
+    expect(onCreate).not.toHaveBeenCalled();
+  });
+
+  it('recovers as soon as a shiaijo is picked again', async () => {
+    const { container } = await mountForm();
+    await clickPill(container, 'Shiaijo (court) A');
+    await clickPill(container, 'Shiaijo (court) B');
+    expect(submitButton(container).disabled).toBe(true);
+    await clickPill(container, 'Shiaijo (court) C'); // → C alone: 1 is legal
+    expect(container.querySelector('[data-testid="shiaijo-count-error"]')).toBeNull();
+    expect(submitButton(container).disabled).toBe(false);
+  });
+
+  // The emptiness rule is NOT scoped by format: a league has to run somewhere
+  // too, even though its shiaijo COUNT is unconstrained.
+  it('refuses an empty selection on a league as well', async () => {
+    const { container } = await mountForm();
+    await act(async () => {
+      fireEvent.click(Array.from(container.querySelectorAll('button.radio-pill')).find((b) => b.textContent.trim() === 'League'));
+    });
+    await clickPill(container, 'Shiaijo (court) A');
+    await clickPill(container, 'Shiaijo (court) B');
+    const err = container.querySelector('[data-testid="shiaijo-count-error"]');
+    expect(err).not.toBeNull();
+    expect(err.textContent).toContain('At least one shiaijo (court) must be selected');
+    expect(submitButton(container).disabled).toBe(true);
+  });
+
   it('leaves a league alone: its courts run in parallel with nothing to merge', async () => {
     const { container } = await mountForm();
     await act(async () => {

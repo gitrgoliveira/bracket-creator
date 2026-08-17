@@ -113,26 +113,6 @@ func (d *KnockoutDraw) NumCourts() int {
 	return len(d.Regions)
 }
 
-// EffectivePoolCourts is the pool phase's court count for a format that draws
-// NO bracket (league, Swiss). Same [1, MaxCourts] bound and the same "never
-// more courts than pools" step-down, but WITHOUT R9's power-of-two rule.
-//
-// R9 exists because a knockout bracket gives each shiaijo its own block and the
-// blocks merge in pairs. A league has no bracket to merge, and
-// ValidateCompetitionShiaijoCount exempts it for exactly that reason, so
-// stepping its pool phase down to a power of two idles shiaijo the operator
-// allocated: 3 pools on 4 shiaijo ran on 2 rather than 3.
-//
-// The result equals the raw count wherever the pools can carry it, so this
-// reproduces what the pool phase did before the draw was introduced.
-func EffectivePoolCourts(numPools, numCourts int) int {
-	numCourts = clampCourts(numCourts)
-	if numPools > 0 && numCourts > numPools {
-		return numPools
-	}
-	return numCourts
-}
-
 // EffectiveDrawCourts clamps a requested shiaijo count to what the pool count
 // can actually carry. A court with no home pools has no home 1st places and
 // would own an empty region, so the draw never allocates more courts than
@@ -158,12 +138,12 @@ func EffectivePoolCourts(numPools, numCourts int) int {
 // draw builds below is len numCourts or numBlocks, so an unchecked count is an
 // allocation nothing sized.
 //
-// The cap is MaxCourts, which is where a league or Swiss competition stops --
-// R9 does not govern those (ValidateCompetitionShiaijoCount exempts them) and
-// this function also sizes their Pool Matches sheet, so the bound has to be the
-// one every format shares. It coincides with the largest legal bracket
-// allocation because MaxCourts is chosen to. The step-down branch below is
-// where R9 is preserved, and it still is.
+// The step-down is R9's, and applying it to every format is correct rather than
+// merely harmless: the only bracketless format that reaches a pool phase is
+// league, which runDrawPipeline pins to a SINGLE pool, and at one pool the
+// step-down and a plain min() give the same answer at every court count. A
+// multi-pool bracketless competition -- the one shape where they would differ --
+// cannot be created.
 func EffectiveDrawCourts(numPools, numCourts int) int {
 	numCourts = clampCourts(numCourts)
 	if numPools > 0 && numCourts > numPools {

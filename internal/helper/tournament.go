@@ -286,8 +286,7 @@ func PoolCount(numPlayers, poolSize int, isMax bool) int {
 //  1. numPools comes from PoolCount, the same function CreatePools sizes its
 //     own pool slice with, so the count fed to PoolSeeding cannot drift from
 //     the pools that actually appear.
-//  2. drawCourts is EffectiveDrawCourts (EffectivePoolCourts when the format
-//     draws no bracket), not the requested allocation: a
+//  2. drawCourts is EffectiveDrawCourts, not the requested allocation: a
 //     shiaijo with no home pool would own an empty bracket region, so the draw
 //     steps the count down to what the pools can carry. It is the modulus for
 //     the seed spread, the deinterleave AND the caller's pool-to-shiaijo
@@ -301,15 +300,9 @@ func PoolCount(numPlayers, poolSize int, isMax bool) int {
 // Callers still own what happens either side: validating the roster before, and
 // naming, numbering, persisting and allocating pools to shiaijo after. Use the
 // returned court count for that allocation rather than re-deriving it.
-func BuildPoolPhase(players []Player, poolSize int, isMax bool, numCourts int, drawsBracket bool) ([]Pool, int, error) {
+func BuildPoolPhase(players []Player, poolSize int, isMax bool, numCourts int) ([]Pool, int, error) {
 	numPools := PoolCount(len(players), poolSize, isMax)
-	// R9's power-of-two step-down applies only where there is a bracket to
-	// merge. A league or Swiss competition steps down to the pool count and no
-	// further, or it idles shiaijo it was legitimately allocated.
-	drawCourts := EffectivePoolCourts(numPools, numCourts)
-	if drawsBracket {
-		drawCourts = EffectiveDrawCourts(numPools, numCourts)
-	}
+	drawCourts := EffectiveDrawCourts(numPools, numCourts)
 
 	pools, err := CreatePools(PoolSeeding(players, numPools, drawCourts), poolSize, isMax)
 	if err != nil {

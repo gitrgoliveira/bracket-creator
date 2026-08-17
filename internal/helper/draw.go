@@ -1101,9 +1101,9 @@ func leafArrayWidth(n *Node) int {
 }
 
 // NodeCourts maps every node of the draw's tree to the index of the shiaijo
-// region that owns it: the region containing that node's LEFTMOST first-round
-// slot. Nodes above every region root (the half-finals and the final) take the
-// leftmost region's court, which is what puts the final on shiaijo A.
+// that hosts it, via CourtForSpan: the region owning the node for anything
+// inside one region, and the centre-most court it spans for the half-finals and
+// the final.
 //
 // This is the SAME question engine.buildBracketFromDraw answers for a stored
 // bracket match, asked the same way, and the two must agree: one is what the
@@ -1122,10 +1122,60 @@ func (d *KnockoutDraw) NodeCourts() map[*Node]int {
 	}
 	spans := d.RegionSpans()
 	out := make(map[*Node]int)
-	walkLeafOffsets(d.Root, 0, func(node *Node, at, _ int) {
-		out[node] = CourtForLeafSlot(spans, at)
+	walkLeafOffsets(d.Root, 0, func(node *Node, at, width int) {
+		out[node] = CourtForSpan(spans, at, width)
 	})
 	return out
+}
+
+// CourtForSpan returns the shiaijo that should host a bout covering leaf slots
+// [at, at+width).
+//
+// A bout whose span lies inside ONE region takes that region's court: R3 says a
+// shiaijo's pools occupy one contiguous subtree, so every bout below the region
+// root belongs to the court that runs it.
+//
+// A bout ABOVE the regions -- the half-finals and the final -- belongs to no
+// single court, and takes the CENTRE-MOST of the courts it spans, ties to the
+// lower index. That is where a hall puts its closing bouts: on four shiaijo the
+// two semi-finals run on B and C and the final on B, not on A because A happens
+// to be leftmost. The centre is measured across the whole allocation, not
+// across the bout's own span, which is what makes the first half's inner court
+// (B) rather than its outer one (A) the answer.
+//
+// It generalises to every legal count: 2 shiaijo put the final on A, 8 put the
+// semi-finals on D and E with the final on D, and 1 puts everything on A. The
+// operator can still move any bout afterwards; this is only the default.
+func CourtForSpan(spans [][2]int, at, width int) int {
+	if width <= 0 {
+		return CourtForLeafSlot(spans, at)
+	}
+	end := at + width
+	var covered []int
+	for i, sp := range spans {
+		if sp[1] <= sp[0] {
+			continue
+		}
+		if sp[0] < end && at < sp[1] {
+			covered = append(covered, i)
+		}
+	}
+	if len(covered) < 2 {
+		return CourtForLeafSlot(spans, at)
+	}
+	// |2i - (n-1)| is the distance to the centre of the allocation, doubled to
+	// stay in integers. The first minimum wins, which is the lower-index tie.
+	best, bestDist := covered[0], 0
+	for k, i := range covered {
+		d := 2*i - (len(spans) - 1)
+		if d < 0 {
+			d = -d
+		}
+		if k == 0 || d < bestDist {
+			best, bestDist = i, d
+		}
+	}
+	return best
 }
 
 // CourtForLeafSlot returns the index of the region that owns leaf slot, given

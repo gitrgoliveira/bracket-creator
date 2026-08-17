@@ -198,11 +198,13 @@ func (e *Engine) buildBracketFromDraw(comp *state.Competition, draw *helper.Knoc
 			// If both sides are empty (byes), we might still want to show the match
 			// but marked as completed/skipped.
 
-			// Derive court from the first-round slot this match covers. Its
-			// region is the one owning that leaf. Matches above every region
-			// root (the half-finals and the final) take the leftmost region's
-			// court, which is what puts the final on shiaijo A by default.
-			courtIdx := helper.CourtForLeafSlot(regionSpans, bracketMatchLeafSlot(rIdx, i))
+			// Derive the court from the leaf slots this match covers. A match
+			// inside one region takes that region's court; the half-finals and
+			// the final take the centre-most court they span, which is where a
+			// hall runs its closing bouts. helper.CourtForSpan owns both rules
+			// and the Excel side asks it the same question (NodeCourts), so the
+			// operator's screen and the printed handout cannot disagree.
+			courtIdx := helper.CourtForSpan(regionSpans, bracketMatchLeafSlot(rIdx, i), 1<<(rIdx+1))
 			court := ""
 			if len(comp.Courts) > 0 {
 				if courtIdx >= len(comp.Courts) {

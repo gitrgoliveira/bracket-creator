@@ -306,23 +306,27 @@ func TestPrintTeamEliminationMatchesMirroring(t *testing.T) {
 		courts := []string{"C", "D", "E", "F"}
 		PrintTeamEliminationMatches(f, poolMatchWinners, eliminationMatchRoundsMulti, 0, CourtPlan{Draw: draw, Courts: courts}, false, false)
 
-		// The draw puts the two bouts in regions 0 and 2, i.e. shiaijo C and E.
+		// Every region holds ONE qualifier here, so these two bouts already merge
+		// region pairs: they are the semi-finals, and CourtForSpan puts them on
+		// the centre-most shiaijo they span -- regions 1 and 2, the middle two of
+		// C, D, E, F. Dividing two matches across four courts would answer 0 and
+		// 2, so this still tells the two rules apart.
 		courtOfNode := draw.NodeCourts()
 		var regions []int
 		for _, m := range eliminationMatchRoundsMulti[0] {
 			regions = append(regions, courtOfNode[m])
 		}
-		require.Equal(t, []int{0, 2}, regions,
-			"the draw itself must put these bouts in regions 0 and 2, or this case cannot "+
-				"tell the region rule apart from dividing matches by courts")
+		require.Equal(t, []int{1, 2}, regions,
+			"the semi-finals belong on the middle shiaijo, and never where a "+
+				"match-count division would put them")
 
 		// Only the shiaijo actually used get a band, in the competition's order,
-		// so the sheet is C then E -- never a band for a shiaijo with nothing on
+		// so the sheet is D then E -- never a band for a shiaijo with nothing on
 		// it, and never a positional "Shiaijo A".
 		hdrFirst, _ := f.GetCellValue(SheetEliminationMatches, "A1")
-		assert.Equal(t, "Shiaijo C", hdrFirst, "the first band is this competition's first used shiaijo")
+		assert.Equal(t, "Shiaijo D", hdrFirst, "the first band is the first shiaijo actually used")
 		hdrSecond, _ := f.GetCellValue(SheetEliminationMatches, "I1")
-		assert.Equal(t, "Shiaijo E", hdrSecond, "shiaijo D has no bout, so the second band is E")
+		assert.Equal(t, "Shiaijo E", hdrSecond, "shiaijo C and F have no bout, so the second band is E")
 		hdrThird, _ := f.GetCellValue(SheetEliminationMatches, "Q1")
 		assert.Empty(t, hdrThird, "only two shiaijo are in use, so only two bands are printed")
 

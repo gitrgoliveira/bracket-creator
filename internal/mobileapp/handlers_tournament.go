@@ -50,7 +50,7 @@ func validateDateDMY(date string) error {
 // before anything validates or stores it.
 func validateCourtLabels(courts []string) error {
 	if len(courts) > helper.MaxCourts {
-		return fmt.Errorf("courts must be <= %d (Shiaijo are labelled A–Z), got %d", helper.MaxCourts, len(courts))
+		return fmt.Errorf("courts must be <= %d (the most any one competition can be allocated), got %d", helper.MaxCourts, len(courts))
 	}
 	seen := make(map[string]bool, len(courts))
 	for i, label := range courts {
@@ -96,7 +96,7 @@ func validateCourtLabels(courts []string) error {
 }
 
 // validateCourts is the strict tournament-level check: between 1 and
-// helper.MaxCourts (26, the A–Z labelling cap) entries, each a single
+// helper.MaxCourts entries, each a single
 // non-empty character. Direct API callers can't bypass the admin UI's
 // per-form checks (admin_setup.jsx AdminEditTournament caps at 26
 // client-side, but a hand-crafted POST /tournament with 50 courts or

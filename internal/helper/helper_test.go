@@ -52,8 +52,8 @@ func TestValidateCourts(t *testing.T) {
 		{name: "min accepted", n: 1},
 		{name: "two accepted", n: 2},
 		{name: "max accepted", n: MaxCourts},
-		{name: "above max rejected", n: MaxCourts + 1, wantErr: "courts must be <= 26"},
-		{name: "way above max rejected", n: 100, wantErr: "courts must be <= 26"},
+		{name: "above max rejected", n: MaxCourts + 1, wantErr: "courts must be <= 16"},
+		{name: "way above max rejected", n: 100, wantErr: "courts must be <= 16"},
 	}
 
 	for _, tt := range tests {
@@ -731,7 +731,7 @@ func TestSubtreeCourtIndex(t *testing.T) {
 		// C" for a competition that has only A and B. Folding it onto the last
 		// REAL court is the one answer that names a court someone can stand at.
 		{"page past the court count folds onto the last court", 5, 2, 4, 1},
-		// Far past it, which is also what keeps CourtLabel inside A-Z: an
+		// Far past it, which is also what keeps CourtLabel inside its alphabet: an
 		// unclamped quotient of 26 or more indexes off the end of the alphabet
 		// and panics.
 		{"far past the court count still lands on the last court", 60, 2, 59, 1},

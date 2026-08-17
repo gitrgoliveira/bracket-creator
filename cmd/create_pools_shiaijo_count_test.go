@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -33,7 +34,7 @@ func poolRoster(t *testing.T, dir string, n int) string {
 // counts the retired "1 or an even number" rule wrongly accepted (6, 10, 12,
 // 14) as well as the odd ones.
 func TestPoolOptionsRun_ShiaijoCount(t *testing.T) {
-	for n := 1; n <= 17; n++ {
+	for n := 1; n <= helper.MaxCourts; n++ {
 		t.Run(fmt.Sprintf("courts=%d", n), func(t *testing.T) {
 			dir := t.TempDir()
 			// 24 entrants at the default pool size of 4 gives 6 pools. Court

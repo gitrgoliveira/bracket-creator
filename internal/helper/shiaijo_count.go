@@ -3,9 +3,10 @@ package helper
 import "fmt"
 
 // validShiaijoCounts is the complete set of legal shiaijo allocations for one
-// competition, ascending. It is exactly the powers of two that fit inside the
-// A-Z label cap: 32 would need 32 labels and MaxCourts is 26, so 16 is the
-// practical ceiling rather than an arbitrary one.
+// competition, ascending: exactly the powers of two up to MaxCourts. The two
+// meet at 16 by design -- MaxCourts is 16 BECAUSE it is the largest allocation
+// this list can hold, so no supported court count is unusable by a competition
+// and no legal allocation is unsupported.
 var validShiaijoCounts = []int{1, 2, 4, 8, 16}
 
 // ValidateShiaijoCount enforces the shiaijo-count rule (R9,
@@ -99,8 +100,8 @@ func ValidateDrawCourtCount(n int) error {
 
 // nearestShiaijoCounts renders the legal counts an operator can reach from an
 // illegal n: the power of two immediately below it and the one immediately
-// above. Above 16 there is no "above" to offer, because 32 exceeds the A-Z
-// label cap, so only the count below is named.
+// above. Above 16 there is no "above" to offer, because 32 exceeds MaxCourts,
+// so only the count below is named.
 //
 // n is always a rejected count here, so n >= 3 and the count below is always
 // >= 2. That is why the caller can append ", or 1" unconditionally without

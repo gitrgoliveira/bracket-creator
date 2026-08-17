@@ -158,7 +158,7 @@ func TestCreatePools_InvalidCourts(t *testing.T) {
 	}
 	err = o.run(nil, nil)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "courts must be <= 26")
+	assert.Contains(t, err.Error(), "courts must be <= 16")
 }
 
 func TestCreatePools_WithZekkenNames(t *testing.T) {
@@ -1098,7 +1098,7 @@ func TestCreatePools_CourtsExceedNumPages(t *testing.T) {
 }
 
 // TestCreatePools_RejectsTooManyCourts ensures the CLI rejects a court
-// count above MaxCourts (26) instead of silently truncating.
+// count above MaxCourts instead of silently truncating.
 func TestCreatePools_RejectsTooManyCourts(t *testing.T) {
 	t.Parallel()
 
@@ -1125,7 +1125,7 @@ func TestCreatePools_RejectsTooManyCourts(t *testing.T) {
 
 	err = o.run(nil, nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "courts must be <= 26")
+	assert.Contains(t, err.Error(), "courts must be <= 16")
 }
 
 // TestCreatePoolCmd_SeedsFlagOnLocalFlags confirms --seeds is registered on

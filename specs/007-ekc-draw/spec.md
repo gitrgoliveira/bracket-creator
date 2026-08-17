@@ -425,7 +425,7 @@ replaces `SubdivideTree`'s count-based split with a court-block splitter and mak
 A competition MUST be allocated a **POWER OF TWO** of shiaijo: 1, 2, 4, 8 or 16.
 Anything else (3, 5, 6, 7, 9, 10, ...) MUST be rejected. A single-shiaijo competition is
 explicitly allowed and gets the R4(e) half-block draw. 16 is the practical ceiling
-because shiaijo are labelled A to Z and `MaxCourts` is 26, so 32 is unreachable.
+because `MaxCourts` is 16, so 32 is unreachable. The two now coincide: `MaxCourts` is chosen AS the largest legal allocation.
 
 The constraint is on the **COMPETITION's** allocation, not the venue total, and it is
 NOT a rule that a venue's shiaijo must divide evenly among its competitions. **A
@@ -466,7 +466,7 @@ rather than an arbitrary merge of three or more.
 Enforcement MUST land at every entry point together, so no path can produce an invalid
 allocation: the HTTP API (including creation paths that resolve an omitted court list to
 the tournament's), the engine, the operator UI, and the CLI `--courts` flag (which
-before this rule enforced only the 26-court A-Z label cap). Any clamp that LOWERS a
+before this rule enforced only the court cap). Any clamp that LOWERS a
 court count, such as clamping to the pool count, MUST land on a power of two rather than
 merely on an even number.
 
@@ -897,7 +897,7 @@ to its expected content.
 | API, competition PUT | `internal/mobileapp/handlers_competition.go:757` |
 | The validator both call | `internal/mobileapp/handlers_tournament.go:117` `validateCompetitionCourts` (today it only delegates to `validateCourtLabels`) |
 | Engine | `internal/engine/court_validation.go:21` `ValidateCourtCount` (today only the idle-court cap) |
-| CLI `--courts` | `internal/helper/helper.go:93` `ValidateCourts` (today only the 26-court A-Z cap, `MaxCourts` at `internal/helper/constants.go:57`). **Verified: both commands do route through it**, `cmd/create-pools.go:86` and `cmd/create-playoffs.go:75`, so one change covers both. **But `create-pools` re-clamps AFTER validating**: `:225-226` sets `o.courts = numPools` when courts exceed the pool count, so a legal `--courts 4` with 3 pools silently becomes an illegal **3**. R9 must be re-checked on the clamped value there. `create-playoffs`'s clamp (`:167-168`) is safe: it clamps to `RoundToPowerOf2`, always a power of two |
+| CLI `--courts` | `internal/helper/helper.go:93` `ValidateCourts` (today only the court-range cap, `MaxCourts` at `internal/helper/constants.go`). **Verified: both commands do route through it**, `cmd/create-pools.go:86` and `cmd/create-playoffs.go:75`, so one change covers both. **But `create-pools` re-clamps AFTER validating**: `:225-226` sets `o.courts = numPools` when courts exceed the pool count, so a legal `--courts 4` with 3 pools silently becomes an illegal **3**. R9 must be re-checked on the clamped value there. `create-playoffs`'s clamp (`:167-168`) is safe: it clamps to `RoundToPowerOf2`, always a power of two |
 | UI blocker + legacy warning | `web-mobile/js/admin_competition_settings.jsx:632-659`, the "Assigned shiaijo (courts)" field: label at `:633`, court pills at `:640-644`, the existing hard-cap and suggested-court hints at `:645-658`. Requires a rebuild (`//go:embed`) and a browser screenshot of the blocked state |
 
 ### Pool composition inputs (context for R6-2)

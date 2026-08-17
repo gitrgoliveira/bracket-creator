@@ -138,12 +138,12 @@ func (d *KnockoutDraw) NumCourts() int {
 // draw builds below is len numCourts or numBlocks, so an unchecked count is an
 // allocation nothing sized.
 //
-// It is deliberately MaxCourts and not the largest legal shiaijo count. R9
-// governs a competition that DRAWS A BRACKET; this function also sizes the pool
-// sheet for leagues and Swiss, whose shiaijo run in parallel and may legally
-// number 20 (ValidateCompetitionShiaijoCount exempts them). Stepping down to 16
-// here would silently drop bands from a legal league's Pool Matches sheet. The
-// step-down branch below is where R9 is preserved, and it still is.
+// The cap is MaxCourts, which is where a league or Swiss competition stops --
+// R9 does not govern those (ValidateCompetitionShiaijoCount exempts them) and
+// this function also sizes their Pool Matches sheet, so the bound has to be the
+// one every format shares. It coincides with the largest legal bracket
+// allocation because MaxCourts is chosen to. The step-down branch below is
+// where R9 is preserved, and it still is.
 func EffectiveDrawCourts(numPools, numCourts int) int {
 	numCourts = clampCourts(numCourts)
 	if numPools > 0 && numCourts > numPools {

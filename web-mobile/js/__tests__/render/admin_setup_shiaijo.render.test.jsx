@@ -111,7 +111,9 @@ describe('Tournament venue field teaches the rule up front (U3)', () => {
 
   it('follows the number being typed', async () => {
     const { container } = await mountEdit();
-    const input = container.querySelector('input[type="number"][max="26"]');
+    // Selector derived from the constant, not a literal: the input's max IS
+    // MAX_COURTS, so a change to the cap must not quietly stop matching here.
+    const input = container.querySelector(`input[type="number"][max="${window.MAX_COURTS}"]`);
     expect(input).not.toBeNull();
     await act(async () => { fireEvent.change(input, { target: { value: '5' } }); });
     const hint = venueHint(container);

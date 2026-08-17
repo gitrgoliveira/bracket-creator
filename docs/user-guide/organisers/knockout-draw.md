@@ -67,7 +67,7 @@ Six shiai-jo shows why being even is not enough on its own. Six blocks pair off 
 
 16 is the highest count in practice. Shiai-jo are labelled A to Z, so 32 is out of reach.
 
-The rule applies to the formats that build a knockout bracket, which are mixed and playoffs. League and Swiss competitions produce no bracket to merge, so they can use any number of shiai-jo.
+The rule applies to the formats that build a knockout bracket, which are mixed and playoffs. League and Swiss competitions produce no bracket to merge, so they can use any number of shiai-jo the tournament has.
 
 It is a rule about one competition's allocation, never about your venue: a hall with three shiai-jo is perfectly normal and runs its competitions on 1 or 2 of them. See [Assigning shiai-jo](run-tournament.md#assigning-shiai-jo) for how that works in practice, and for what happens to a competition that was saved with a count the rule does not allow.
 

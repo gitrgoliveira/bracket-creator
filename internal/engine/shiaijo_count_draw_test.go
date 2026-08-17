@@ -31,7 +31,7 @@ func TestDrawPipelineRejectsIllegalShiaijoCount(t *testing.T) {
 	}
 
 	for _, format := range []string{state.CompFormatMixed, state.CompFormatPlayoffs} {
-		for n := 1; n <= 17; n++ {
+		for n := 1; n <= helper.MaxCourts; n++ {
 			t.Run(fmt.Sprintf("%s/courts=%d", format, n), func(t *testing.T) {
 				eng, store, _ := setupTestEngine(t)
 				compID := fmt.Sprintf("shiaijo-%s-%d", format, n)

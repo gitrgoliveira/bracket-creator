@@ -12,7 +12,7 @@ import (
 
 // wantShiaijoSuggestion is the "use ..." fragment the message must carry for a
 // rejected count: the powers of two either side of n, with the upper one
-// dropped above 16 because 32 exceeds the A-Z label cap. Spelled out as a
+// dropped above 16 because 32 exceeds MaxCourts. Spelled out as a
 // table rather than derived from the production helper so the test cannot
 // agree with a broken implementation by construction.
 var wantShiaijoSuggestion = map[int]string{
@@ -131,22 +131,25 @@ func TestValidateShiaijoCountNonPositive(t *testing.T) {
 
 // TestValidateShiaijoCountWithinLabelCap checks the two validators compose at
 // the top of the range. 25 is a legal label count but an illegal allocation,
-// and because 32 is beyond the A-Z cap the suggestion must name only 16 (plus
+// and because 32 is beyond MaxCourts the suggestion must name only 16 (plus
 // 1) -- suggesting a count the operator could not label would be unactionable.
 func TestValidateShiaijoCountWithinLabelCap(t *testing.T) {
 	t.Parallel()
 
-	require.NoError(t, ValidateCourts(25), "25 is within the A-Z label cap")
-	err := ValidateShiaijoCount(25)
+	// A count inside the supported court range that is still not a legal
+	// allocation: the two rules are separate, and this is the gap between them.
+	require.NoError(t, ValidateCourts(15), "15 is a supported court count")
+	err := ValidateShiaijoCount(15)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "use 16, or 1")
-	assert.NotContains(t, err.Error(), "32", "32 shiaijo cannot be labelled A-Z")
-	assert.NoError(t, ValidateCourts(16), "the suggested 16 must itself be legal")
+	assert.Contains(t, err.Error(), "use 8 or 16, or 1")
+	assert.NoError(t, ValidateCourts(MaxCourts), "the suggested 16 must itself be legal")
 
-	// 16 is the ceiling of the rule, not just of the labels: 32 is a power of
-	// two and is still refused.
-	assert.NoError(t, ValidateShiaijoCount(16))
-	assert.Error(t, ValidateShiaijoCount(32), "32 exceeds the A-Z label cap")
+	// The rule's ceiling and the court cap now COINCIDE at 16, by construction:
+	// MaxCourts is chosen as the largest legal allocation. 32 is a power of two
+	// and is still refused, because no tournament may hold that many shiaijo.
+	assert.NoError(t, ValidateShiaijoCount(MaxCourts))
+	assert.Error(t, ValidateShiaijoCount(32), "32 exceeds the supported court count")
+	assert.Error(t, ValidateCourts(32))
 }
 
 // TestLargestShiaijoCountAtMost pins the shared step-down every clamp uses. It
@@ -201,7 +204,7 @@ var shiaijoRuleJSMirrors = []struct {
 // silently break: the canonical REASON clause (identical prose on all three
 // surfaces, so an operator who meets the rule in the CLI form and again in the
 // console is told the same thing), the promise that 1 is always offered, the
-// absence of the retired "even" rule, and the A-Z cap the legal set is derived
+// absence of the retired "even" rule, and the court cap the legal set is derived
 // from. The reason is written out here as a literal rather than taken from
 // ValidateShiaijoCount so the test cannot agree with a reworded implementation
 // by construction; the first assertion is what ties the literal back to Go.
@@ -238,7 +241,7 @@ func TestShiaijoRuleJSMirrorsMatchTheGoMessage(t *testing.T) {
 			assert.NotContainsf(t, code, "1 or an even number",
 				"the retired parity rule must not survive in the %s", m.surface)
 			assert.Containsf(t, code, fmt.Sprintf("MAX_COURTS = %d", MaxCourts),
-				"the %s derives the legal counts from the A-Z cap, which must equal helper.MaxCourts", m.surface)
+				"the %s derives the legal counts from the court cap, which must equal helper.MaxCourts", m.surface)
 		})
 	}
 }

@@ -13,8 +13,8 @@ import "testing"
 // in admin_helpers.jsx (and vice versa).
 
 func TestPinMaxCourts(t *testing.T) {
-	if MaxCourts != 26 {
-		t.Fatalf("MaxCourts = %d, want 26 (anchored to A–Z labelling cap; JS MAX_COURTS must match)", MaxCourts)
+	if MaxCourts != 16 {
+		t.Fatalf("MaxCourts = %d, want 16 (the largest legal single-competition allocation; JS MAX_COURTS must match)", MaxCourts)
 	}
 }
 

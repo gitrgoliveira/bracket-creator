@@ -46,19 +46,33 @@ const (
 	DefaultCourts   = 2
 )
 
-// MaxCourts is the upper bound for the number of Shiaijo (courts).
-// It comes from the single-letter A–Z labelling used on Shiaijo headers
-// throughout the workbook. A count above it is REFUSED at every write path
-// (ValidateCourts on the CLI, validateCourtLabels in the app), so an operator
-// is never silently given a smaller layout than they asked for. The deeper
-// helpers that have no error channel -- the draw builder and the sheet
-// writers -- clamp to it instead (clampCourts), so an unvalidated caller
-// cannot make them allocate or index past the labelling.
+// courtLabelAlphabet is the complete set of Shiaijo labels, in order. Shiaijo
+// headers throughout the workbook are a single letter, so this string IS the
+// supported court set: a court that cannot be named cannot be printed, listed
+// in an operator view, or filtered on.
+const courtLabelAlphabet = "ABCDEFGHIJKLMNOP"
+
+// MaxCourts is the upper bound for the number of Shiaijo (courts), derived from
+// the labels rather than written twice -- the two cannot drift.
 //
-// Mirrored client-side as `MAX_COURTS` in web-mobile/js/admin_helpers.jsx,
-// keep the two in lockstep. The JS side is anchored by a comment back here
-// so changes are visible at both edit points.
-const MaxCourts = 26
+// SIXTEEN, not the full A–Z. 16 is the largest allocation any single
+// competition can legally hold (validShiaijoCounts, R9: a knockout draw gives
+// each shiaijo its own block and the blocks merge in pairs), so shiaijo beyond
+// the 16th could never all be given to one competition. Supporting counts no
+// competition can use bought nothing but wider allocations, bigger sheets and
+// more numbers to validate.
+//
+// A count above it is REFUSED at every write path (ValidateCourts on the CLI,
+// validateCourtLabels in the app), so an operator is never silently given a
+// smaller layout than they asked for. The deeper helpers that have no error
+// channel -- the draw builder and the sheet writers -- clamp to it instead
+// (clampCourts), so an unvalidated caller cannot make them allocate or index
+// past the labelling.
+//
+// Mirrored client-side as `MAX_COURTS` in web-mobile/js/admin_helpers.jsx and
+// web/js/validation.js; keep all three in lockstep (pinned by
+// TestPinMaxCourts and TestShiaijoRuleJSMirrorsMatchTheGoMessage).
+const MaxCourts = len(courtLabelAlphabet)
 
 // MaxRankOverride is the absolute upper bound for a manual rank override
 // submitted via PUT /api/competitions/:id/pools/:poolId/override-rank.

@@ -11,6 +11,7 @@ import {
     shiaijoCountError,
     VALID_SHIAIJO_COUNTS,
     SHIAIJO_RULE_REASON,
+    MAX_COURTS,
     validatePoolSettings
 } from "../js/validation.js";
 
@@ -127,7 +128,7 @@ describe("shiaijoCountError", () => {
         { n: 3, valid: false, below: 2, above: 4 },
         { n: 4, valid: true },
         // 5 and 6 are the regression pins for the rule change: 5 was accepted
-        // by the old "1 to 26" range check and 6 by the retired parity rule.
+        // by the old plain range check and 6 by the retired parity rule.
         { n: 5, valid: false, below: 4, above: 8 },
         { n: 6, valid: false, below: 4, above: 8 },
         { n: 7, valid: false, below: 4, above: 8 },
@@ -162,7 +163,7 @@ describe("shiaijoCountError", () => {
     });
 
     it("offers only the count below once past the ceiling", () => {
-        // 32 shiaijo cannot be labelled (A-Z caps at 26), so there is no higher
+        // 32 shiaijo is past the supported court cap, so there is no higher
         // valid count to suggest: the message must not invent one.
         const err = shiaijoCountError(20);
         expect(err).toContain("Use 16, or 1");
@@ -174,9 +175,10 @@ describe("shiaijoCountError", () => {
         expect(shiaijoCountError(undefined)).toBeNull();
     });
 
-    it("derives the valid counts from the A-Z label cap", () => {
+    it("derives the valid counts from the court cap", () => {
         expect(VALID_SHIAIJO_COUNTS).toEqual([1, 2, 4, 8, 16]);
-        expect(VALID_SHIAIJO_COUNTS[VALID_SHIAIJO_COUNTS.length - 1] * 2).toBeGreaterThan(26);
+        // The next power of two is past the cap, which is why the list stops.
+        expect(VALID_SHIAIJO_COUNTS[VALID_SHIAIJO_COUNTS.length - 1] * 2).toBeGreaterThan(MAX_COURTS);
     });
 });
 
@@ -187,7 +189,7 @@ describe("validateCourtsValue", () => {
         });
     });
 
-    it("rejects 3, which the field's 1-26 range used to accept", () => {
+    it("rejects 3, which the field's plain range check used to accept", () => {
         const result = validateCourtsValue("3");
         expect(result.ok).toBe(false);
         expect(result.error).toBe(shiaijoCountError(3));
@@ -203,12 +205,13 @@ describe("validateCourtsValue", () => {
         expect(validateCourtsValue("6").ok).toBe(false);
     });
 
-    it("rejects values above the A-Z cap of 26", () => {
-        const result = validateCourtsValue("27");
+    it("rejects values above the supported court cap", () => {
+        const result = validateCourtsValue(String(MAX_COURTS + 1));
         expect(result.ok).toBe(false);
         // The cap is checked before the power-of-two rule, matching the server's
-        // helper.ValidateCourts -> helper.ValidateShiaijoCount order.
-        expect(result.error).toMatch(/1 and 26/);
+        // helper.ValidateCourts -> helper.ValidateShiaijoCount order. Built from
+        // the constant so the cap and its message cannot drift apart.
+        expect(result.error).toMatch(new RegExp(`1 and ${MAX_COURTS}`));
     });
 
     it("rejects non-numeric input", () => {

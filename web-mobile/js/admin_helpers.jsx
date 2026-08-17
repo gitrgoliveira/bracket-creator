@@ -167,8 +167,9 @@ function isRequiredBracketMatch(m) {
 // MIN_YEAR / MAX_YEAR mirror helper.MinDateYear / helper.MaxDateYear
 // (internal/helper/constants.go): the API's validateDateDMY rejects
 // out-of-range years to keep the wire contract symmetric with the UI.
-// MAX_COURTS mirrors helper.MaxCourts (same Go file): anchored to the
-// A–Z labelling cap. MAX_RANK mirrors helper.MaxRankOverride: overflow
+// MAX_COURTS mirrors helper.MaxCourts (same Go file): 16, the largest
+// allocation any one competition can legally hold, so a venue is never given
+// shiaijo no competition could use. MAX_RANK mirrors helper.MaxRankOverride: overflow
 // guard for the override-rank handler; the real semantic constraint is
 // pool size, enforced server-side.
 //
@@ -178,7 +179,7 @@ function isRequiredBracketMatch(m) {
 const MIN_YEAR = 1900;
 const MAX_YEAR = 2100;
 const MAX_TEAM_SIZE = 9;
-const MAX_COURTS = 26;
+const MAX_COURTS = 16;
 const MAX_RANK = 1000;
 
 // Canonical date error messages. Referenced by validateAndNormalizeDate
@@ -387,7 +388,7 @@ function courtCount(courts) {
 // --- Shiaijo-count rule (spec 007 R9) --------------------------------------
 //
 // A competition's shiaijo allocation must be a POWER OF TWO. The valid
-// counts are derived from MAX_COURTS rather than written out, so the A–Z
+// counts are derived from MAX_COURTS rather than written out, so the court
 // label cap and this list can never disagree: 32 shiaijo are unlabelled and
 // therefore unreachable, which is why 16 is the practical ceiling.
 const VALID_SHIAIJO_COUNTS = (() => {

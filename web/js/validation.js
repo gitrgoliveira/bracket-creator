@@ -128,12 +128,13 @@ export function getParticipantValidationState(playerList, withZekkenName) {
 
 // --- Shiaijo-count rule (spec 007 R9) --------------------------------------
 //
-// MAX_COURTS mirrors helper.MaxCourts (internal/helper/constants.go): Shiaijo
-// are labelled A-Z, so 26 is the hard cap on the field itself.
-const MAX_COURTS = 26;
+// MAX_COURTS mirrors helper.MaxCourts (internal/helper/constants.go): 16 is
+// the largest allocation any one competition can legally hold, and so the hard
+// cap on the field itself.
+export const MAX_COURTS = 16;
 
-// The legal shiaijo allocations for ONE competition: the powers of two that
-// fit inside the A-Z label cap. Derived from MAX_COURTS rather than written
+// The legal shiaijo allocations for ONE competition: the powers of two up to
+// the court cap. Derived from MAX_COURTS rather than written
 // out, so the cap and this list can never disagree -- 32 shiaijo cannot be
 // labelled, which is why 16 is the ceiling.
 export const VALID_SHIAIJO_COUNTS = (() => {

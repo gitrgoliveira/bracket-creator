@@ -878,7 +878,7 @@ paths:
           (`team competitions require teamSize >= 2`).
         - When `kind` is not `"team"` (including omitted or `"individual"`),
           `teamSize` must be 0 (`non-team competitions require teamSize == 0`).
-        - `courts`: each label a single character, at most 26 labels, no
+        - `courts`: each label a single character, at most 16 labels, no
           duplicates, and every label must be one the tournament has.
         - `courts` COUNT, when the competition's `format` builds a knockout
           bracket (anything other than `league`/`swiss`): a power of two,
@@ -954,7 +954,7 @@ paths:
         and `teamSize` > 0 (`non-team competitions require teamSize == 0`).
 
         `courts` obeys the same rules as on create (single-character labels,
-        26-court cap, no duplicates, only shiaijo the tournament has, and a
+        16-court cap, no duplicates, only shiaijo the tournament has, and a
         power-of-two COUNT of 1, 2, 4, 8 or 16 for a bracket-drawing format),
         with one difference: the count and tournament-membership checks run
         only when the allocation or `format` is actually being CHANGED,
@@ -3397,7 +3397,7 @@ components:
             type: string
           description: >
             Court (shiaijo) labels (e.g. ["A", "B"]). Each label is a single
-            character; 26-court cap (A–Z). Duplicate labels are rejected
+            character; 16-court cap. Duplicate labels are rejected
             with 400; the frontend uses labels as identity keys (per-court
             rendering, schedule `byCourt` bucketing, filter values) and
             duplicates would collapse data structures.
@@ -3559,7 +3559,7 @@ components:
             type: string
           description: >
             Per-competition court (shiaijo) labels, a subset of
-            Tournament.courts. Each label is a single character; 26-court
+            Tournament.courts. Each label is a single character; 16-court
             cap; duplicates rejected with 400.
 
             **Count rule (R9, specs/007-ekc-draw/spec.md).** A competition
@@ -3569,7 +3569,7 @@ components:
             400, including EVEN counts such as 6 and 10, because the draw
             gives each shiaijo its own block of the bracket and those blocks
             merge in pairs, so the count has to halve cleanly all the way
-            down. 16 is the ceiling because labels are A-Z.
+            down. 16 is the ceiling because it is the supported court cap.
             helper.ValidateShiaijoCount owns the rule and its message.
 
             The rule is per COMPETITION and never per venue, which is why

@@ -71,7 +71,7 @@ func leafLabelsOnSheet(t *testing.T, f *excelize.File, sheet string) []string {
 	require.NoError(t, err)
 	var labels []string
 	for r := 1; r <= len(rows); r++ {
-		for c := 1; c <= 26; c++ {
+		for c := 1; c <= helper.MaxCourts; c++ {
 			col, cerr := excelize.ColumnNumberToName(c)
 			require.NoError(t, cerr)
 			formula, ferr := f.GetCellFormula(sheet, fmt.Sprintf("%s%d", col, r))

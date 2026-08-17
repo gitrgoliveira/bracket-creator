@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -21,7 +22,7 @@ import (
 // pairs, so a power of two (1, 2, 4, 8 or 16) is accepted and everything else
 // is refused before any file is written.
 func TestPlayoffOptionsRun_ShiaijoCount(t *testing.T) {
-	for n := 1; n <= 17; n++ {
+	for n := 1; n <= helper.MaxCourts; n++ {
 		t.Run(fmt.Sprintf("courts=%d", n), func(t *testing.T) {
 			dir := t.TempDir()
 			input := filepath.Join(dir, "input.csv")
@@ -89,7 +90,7 @@ func TestPlayoffOptionsRun_CourtCapBeforeShiaijoCount(t *testing.T) {
 	}
 	err := o.run(nil, nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "courts must be <= 26")
+	assert.Contains(t, err.Error(), "courts must be <= 16")
 	assert.NotContains(t, err.Error(), "power of two")
 }
 

@@ -5,14 +5,18 @@ import (
 	"math"
 	"time"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-// MaxCourts is the hard upper bound on the `courts` parameter accepted
-// by EstimateSchedule. Mirrors the CLI's A–Z (26) cap (CLAUDE.md) and
-// is also enforced by the handler so a hostile query-string cannot
-// trigger an excessive allocation (CodeQL go/uncontrolled-allocation-size).
-const MaxCourts = 26
+// MaxCourts is the hard upper bound on the `courts` parameter accepted by
+// EstimateSchedule. It IS helper.MaxCourts rather than a second copy of the
+// number: this endpoint estimates a schedule for a tournament the rest of the
+// system has to be able to run, so a count it accepts but no tournament can
+// hold would be a planning answer nobody could act on. Also enforced by the
+// handler so a hostile query-string cannot trigger an excessive allocation
+// (CodeQL go/uncontrolled-allocation-size).
+const MaxCourts = helper.MaxCourts
 
 // MaxTeamSize is a defensive upper bound on the `teamSize` /
 // `boutsPerTeamMatch` parameters. It is NOT a domain rule — kachinuki team

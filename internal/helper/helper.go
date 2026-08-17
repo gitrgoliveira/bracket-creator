@@ -86,16 +86,15 @@ func CheckDuplicateEntries(input []string) []string {
 	return order
 }
 
-// ValidateCourts returns an error when n is outside the supported court
-// range. Courts are labelled A–Z, so MaxCourts (26) is the hard upper
-// bound. n < 1 is also rejected so the caller does not have to guess what
-// "0 courts" should mean.
+// ValidateCourts returns an error when n is outside the supported court range,
+// [1, MaxCourts]. n < 1 is rejected so the caller does not have to guess what
+// "0 courts" should mean; see MaxCourts for why the ceiling is 16.
 func ValidateCourts(n int) error {
 	if n < 1 {
 		return fmt.Errorf("courts must be >= 1, got %d", n)
 	}
 	if n > MaxCourts {
-		return fmt.Errorf("courts must be <= %d (Shiaijo are labelled A–Z), got %d", MaxCourts, n)
+		return fmt.Errorf("courts must be <= %d (the most any one competition can be allocated), got %d", MaxCourts, n)
 	}
 	return nil
 }
@@ -105,12 +104,11 @@ func ValidateCourts(n int) error {
 // that have no error channel to refuse through (the draw builder and the sheet
 // writers, which are handed a count and must render something).
 //
-// The upper bound is the A-Z labelling cap, and it is not merely tidiness:
-// CourtLabel indexes a 26-character string, so a count past MaxCourts is an
-// out-of-range panic on the way to a pointless allocation. Every entry point
-// validates long before here, so this changes no reachable behaviour -- it
-// means no helper can be made to allocate or index off a number nothing
-// checked.
+// The upper bound is not merely tidiness: CourtLabel indexes
+// courtLabelAlphabet, so a count past MaxCourts is an out-of-range panic on the
+// way to a pointless allocation. Every entry point validates long before here,
+// so this changes no reachable behaviour -- it means no helper can be made to
+// allocate or index off a number nothing checked.
 //
 // It lives beside ValidateCourts and CourtLabel because it states the same
 // domain bound they do, and is called from the draw builder, the tree pager
@@ -125,9 +123,12 @@ func clampCourts(n int) int {
 	return n
 }
 
-// CourtLabel returns the letter label (A–Z) for a zero-based court index.
+// CourtLabel returns the letter label for a zero-based court index. It indexes
+// courtLabelAlphabet, the same string MaxCourts is derived from, so an index at
+// or past the cap panics rather than inventing a label the rest of the system
+// does not accept.
 func CourtLabel(i int) string {
-	return string("ABCDEFGHIJKLMNOPQRSTUVWXYZ"[i])
+	return string(courtLabelAlphabet[i])
 }
 
 // ShiaijoLabel is the operator-facing name of one shiaijo, e.g. "Shiaijo C".

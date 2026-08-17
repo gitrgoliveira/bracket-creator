@@ -56,16 +56,17 @@ func shiaijoPutComp(t *testing.T, r *gin.Engine, id string, body map[string]any)
 }
 
 // TestCreateCompetitionShiaijoCount sweeps the shiaijo-count rule on the
-// create path across 1..17: a competition that draws a bracket takes a power
+// create path across the whole supported court range: a competition that draws
+// a bracket takes a power
 // of two (1, 2, 4, 8 or 16), and everything else is a 400 naming the nearest
 // valid counts (and 1, so the rule never reads as "at least 2 courts"). The
 // sweep spans the counts the retired "1 or an even number" rule wrongly
 // ACCEPTED (6, 10, 12, 14) as well as the odd ones.
 func TestCreateCompetitionShiaijoCount(t *testing.T) {
-	for n := 1; n <= 17; n++ {
+	for n := 1; n <= helper.MaxCourts; n++ {
 		t.Run(fmt.Sprintf("courts=%d", n), func(t *testing.T) {
 			r, store, _, _, _ := setupTestRouter(t)
-			saveTournamentCourts(t, store, 20)
+			saveTournamentCourts(t, store, helper.MaxCourts)
 
 			w := shiaijoPostComp(t, r, map[string]any{
 				"name":   fmt.Sprintf("Comp %d", n),
@@ -256,15 +257,15 @@ func TestImportCompetitionInheritedCourtsMatchExplicit(t *testing.T) {
 }
 
 // TestImportCompetitionRejectsIllegalShiaijoCount sweeps the importer over
-// 1..17 with an explicit court list, so the manifest path carries the same
+// the supported court range with an explicit court list, so the manifest path carries the same
 // table as the REST create.
 func TestImportCompetitionRejectsIllegalShiaijoCount(t *testing.T) {
-	for n := 1; n <= 17; n++ {
+	for n := 1; n <= helper.MaxCourts; n++ {
 		t.Run(fmt.Sprintf("courts=%d", n), func(t *testing.T) {
 			store, err := state.NewStore(t.TempDir())
 			require.NoError(t, err)
 			require.NoError(t, store.SaveTournament(&state.Tournament{
-				Name: "T", Date: "11-06-2026", Courts: shiaijoLabels(20),
+				Name: "T", Date: "11-06-2026", Courts: shiaijoLabels(helper.MaxCourts),
 			}))
 
 			res := importCompetition(store, ImportManifestComp{
@@ -411,10 +412,10 @@ func TestUpdateCompetitionShiaijoCount(t *testing.T) {
 	})
 
 	t.Run("sweep: changing the allocation must land on a legal count", func(t *testing.T) {
-		for n := 1; n <= 17; n++ {
+		for n := 1; n <= helper.MaxCourts; n++ {
 			t.Run(fmt.Sprintf("courts=%d", n), func(t *testing.T) {
 				r, store, _, _, _ := setupTestRouter(t)
-				saveTournamentCourts(t, store, 20)
+				saveTournamentCourts(t, store, helper.MaxCourts)
 				// Start from a legal allocation so every case below is a change.
 				require.NoError(t, store.SaveCompetition(&state.Competition{
 					ID: "sweep", Name: "Sweep", Kind: "individual", Format: "mixed",

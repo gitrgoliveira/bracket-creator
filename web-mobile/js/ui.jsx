@@ -463,18 +463,19 @@ function EmptyState({ icon, title, message, cta, ctaNote, className, style, ...a
   );
 }
 
-// A form field's red error note. Renders nothing when there is no error, so
-// callers pass the value rather than guarding at the call site.
+// A form field's error note: the thing the operator has to fix before the
+// control they are looking at will do its job. Renders nothing when there is no
+// error, so callers pass the value rather than guarding at the call site.
 //
-// The red-hint styling is a rule, not a preference: an operator scanning a form
-// reads "red and bold under the control" as "this is why you are stuck", and a
-// note that misses either half stops looking like one. It was spelled out
-// inline at every site that has one, which is how the court pills ended up with
-// two error notes under them whose styling had to be kept in step by hand.
-function FieldError({ children, testId }) {
+// The tone itself belongs to .field__hint--error in styles.css, not here: a
+// note is red and bold because it is an ERROR, which is equally true of the
+// ones that are plain markup rather than this component. `style` is for layout
+// only (spacing from a preceding note) -- passing colour or weight through it
+// puts back the per-site drift both of these exist to end.
+function FieldError({ children, testId, style }) {
   if (!children) return null;
   return (
-    <div className="field__hint" style={{ color: "var(--red)", fontWeight: 600 }} data-testid={testId}>
+    <div className="field__hint field__hint--error" style={style} data-testid={testId}>
       {children}
     </div>
   );

@@ -518,13 +518,13 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
               />
               <div className="field__hint">The address participants reach this tournament at: used for QR codes and share links. Leave blank to use the current browser address.</div>
               {publicURL.trim() === "" && isNonPublicOrigin(window.location.origin) && (
-                <div className="field__hint" style={{ color: "var(--red)", marginTop: 4 }}>
+                <window.FieldError style={{ marginTop: 4 }}>
                   {(() => {
                     const o = window.location.origin;
                     const label = (!o || o === "null") ? "an unknown local address" : o;
                     return `Links will use this device's address (${label}), which may not be reachable by remote attendees. Set a Public URL to fix this.`;
                   })()}
-                </div>
+                </window.FieldError>
               )}
             </div>
             <div className="field">

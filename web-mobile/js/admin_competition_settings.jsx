@@ -799,8 +799,8 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           const numCourts = (local.courts || []).length;
           const hardCap = Math.max(1, Math.floor(playerCount / 2));
           const suggestedCourts = Math.max(1, hardCap - 1);
-          if (numCourts > hardCap) return <div className="field__hint" style={{ color: "var(--red)" }}>Too many courts. {hardCap} max for {pt(playerCount)} (suggested: {suggestedCourts})</div>;
-          if (numCourts === hardCap && hardCap > suggestedCourts) return <div className="field__hint" style={{ color: "#78350f" }}>No rest between fights at {numCourts} courts. Consider {ct(suggestedCourts)} for {pt(playerCount)}</div>;
+          if (numCourts > hardCap) return <window.FieldError>Too many courts. {hardCap} max for {pt(playerCount)} (suggested: {suggestedCourts})</window.FieldError>;
+          if (numCourts === hardCap && hardCap > suggestedCourts) return <div className="field__hint field__hint--warn">No rest between fights at {numCourts} courts. Consider {ct(suggestedCourts)} for {pt(playerCount)}</div>;
           return <div className="field__hint">Suggested: up to {ct(suggestedCourts)} for {pt(playerCount)}</div>;
         })() : (
           <div className="field__hint">Concurrency = number of shiaijo assigned. Schedule prevents double-booking with other competitions.</div>

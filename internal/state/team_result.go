@@ -1,6 +1,10 @@
 package state
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+)
 
 // TeamResultLine is the authoritative team-match summary attached to the wire
 // payload (HTTP responses and SSE match_updated events) so the frontend renders
@@ -14,19 +18,13 @@ type TeamResultLine struct {
 	AkaPW   int `json:"akaPW"`
 }
 
-// countScoringIppons counts real ippon marks in an ippons slice, ignoring
-// empty entries and the "•" placeholder the UI uses for an unfilled slot.
-// Mirrors engine.countScoringIppons (internal/engine/scoring.go): state
-// cannot import engine (engine already imports state), so this is a local
-// copy. Keep the two in sync if the placeholder semantics ever change.
+// countScoringIppons is the package-local spelling of domain.CountScoringIppons
+// (real ippon marks, ignoring empties and the "•" unfilled-slot placeholder).
+// It used to be a hand-copy carrying a "keep in sync with engine" note; state
+// cannot import engine, but both can import domain, so the rule now has one
+// owner instead of two copies that agreed by discipline.
 func countScoringIppons(ippons []string) int {
-	n := 0
-	for _, v := range ippons {
-		if v != "" && v != "•" {
-			n++
-		}
-	}
-	return n
+	return domain.CountScoringIppons(ippons)
 }
 
 // TeamResultFrom aggregates sub-bouts into IV and PW per side. It is the single

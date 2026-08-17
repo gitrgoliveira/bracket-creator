@@ -35,6 +35,26 @@ If you know your role at the event, the following table takes you directly to th
 | Competitor | Register and report your own results in self-run | [Self-run](../competitors/self-run.md) |
 | Spectator | Follow scores and standings | [Following a tournament](../spectators/following.md) |
 
+## Devices and screens
+
+The app runs on several screens at the same time, and each surface is designed for a different one. Nothing needs installing on any of them: every surface is a web page served by the tournament app, so each device only needs a current browser and a way to reach the server.
+
+| Surface | Who uses it | Device to plan for |
+|---|---|---|
+| Operator console | Court operators and organisers | A tablet or a laptop. For a tablet, plan on an iPad Air or better, or an Android tablet of equivalent size and age. Use it in landscape. |
+| Court display | Everyone at the shiai-jo | A screen or TV at the court, showing `/display?court=A`. Read-only, so it needs no password. |
+| Lobby display | People waiting to compete or watch | A screen in the lobby or waiting room, showing `/display?court=all` for every court at once. |
+| Viewer pages | Spectators and competitors | Their own mobile phone. These pages are designed mobile-first. |
+
+A few consequences worth planning around:
+
+- **The operator console is the one surface with a real minimum.** Scoring screens put a full team encounter, its bout rows, and the controls on one screen, so a small phone is not a practical operator device. A laptop works equally well if you have one per shiai-jo.
+- **Display screens are optional.** Without them you are at the partially connected level described above: results still reach phones, but you will also print scoreboards for the courts. Competitor tags are printed at every level, so they are not a cost of skipping the screens.
+- **The court display is usually driven from the operator's own machine** over an HDMI cable rather than from a separate device. The console and the board are then two tabs in one browser on one computer, so scores reach the board without a network hop and it keeps updating through a Wi-Fi drop. This is a client-side arrangement at the court and holds whichever way you host the server. See [Keep the court scoreboard alive on the same machine](../../architecture/infrastructure-architecture.md#keep-the-court-scoreboard-alive-on-the-same-machine-hdmi).
+- **Spectator phones may be on cellular** rather than venue Wi-Fi when the app is cloud-hosted, so they do not add to your local network load.
+
+See [Following a tournament](../spectators/following.md) for the full list of display and viewer URLs, including the streaming overlay variant.
+
 ## New to bracket-creator?
 
 If this is your first time using the app, work through [Your first tournament](first-tournament.md) for the fastest path from an empty server to real-time results on a screen.

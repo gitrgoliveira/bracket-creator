@@ -203,8 +203,10 @@ func TestCourtCurrentEmptyIpponsAreArraysNotNull(t *testing.T) {
 	assert.NotContains(t, body, `"ipponsB":null`)
 }
 
-// TestParseScore covers the inverse of engine.formatScore used by the bracket
-// branch of the current-match handler.
+// TestParseScore covers the decode used by the bracket branch of the
+// current-match handler. The codec itself (and its round-trip property against
+// domain.FormatScore) is pinned in internal/domain/score_test.go; these cases
+// stay because this handler is what the shape actually has to serve.
 func TestParseScore(t *testing.T) {
 	tests := []struct {
 		in      string

@@ -4845,35 +4845,48 @@ button.pool-match-row {
    vertically centred; the name sits at the bottom of its (possibly taller)
    row so it hugs its scores. Grid items stretch by default, so the pill is
    pinned back to a hug-content chip mirrored inward. */
-/* Gated on @supports so an older Chromium WebView (subgrid shipped Chrome 117 /
-   Safari 16) — the class of courtside Android tablet this app targets — falls
-   back to the base .sb-side flex column rather than landing the grid-row: 2..5
-   assignments on IMPLICIT rows and rendering misaligned. Modern browsers get
-   the subgrid alignment; old ones get the pre-change flex layout (mp-gmcg
-   review F8). */
-@supports (grid-template-rows: subgrid) {
-  .sb-match:has(.sb-slots) {
-    grid-template-rows: 1fr auto auto auto auto 1fr;
-  }
-  .sb-match:has(.sb-slots) > .sb-side {
-    display: grid;
-    grid-row: 1 / -1;
-    grid-template-rows: subgrid;
-  }
-  .sb-match:has(.sb-slots) > .sb-side > .sb-side__badge { grid-row: 2; }
-  .sb-match:has(.sb-slots) > .sb-side > .sb-name { grid-row: 3; align-self: end; }
-  .sb-match:has(.sb-slots) > .sb-side > .sb-slots { grid-row: 4; }
-  .sb-match:has(.sb-slots) > .sb-side > .sb-points-grid { grid-row: 5; }
-  .sb-match:has(.sb-slots) > .sb-center { grid-row: 1 / -1; }
-  .sb-match:has(.sb-slots) > .sb-side--shiro > .sb-side__badge { justify-self: end; }
-  .sb-match:has(.sb-slots) > .sb-side--aka > .sb-side__badge { justify-self: start; }
-  /* Slots hug the INSIDE (against the centre vs) via justify-self on the hug-
-     content group; the existing flex-direction (row / row-reverse) still controls
-     the outside-to-inside fill, so each side's first ippon stays on its name side
-     and fills toward the centre — the fixed FIK rule is untouched. */
-  .sb-match:has(.sb-slots) > .sb-side--shiro > .sb-slots { justify-self: end; }
-  .sb-match:has(.sb-slots) > .sb-side--aka > .sb-slots { justify-self: start; }
+/* UNGATED. This used to sit behind @supports (grid-template-rows: subgrid) so
+   an older engine fell back to the base .sb-side flex column — which was the
+   ONE path in the app where the ippon slots did not hug the centre, i.e. the
+   only surface that could still render the pre-FIK outer-edge layout.
+
+   The app targets recent Chrome and Safari (operator ruling), and subgrid
+   shipped in Chrome 117 / Safari 16, so every supported browser takes this
+   branch. Keeping the gate meant keeping a second, WRONG layout alive for
+   browsers we do not support, and it could only be discovered by someone
+   running one.
+
+   Stated precisely, because the first version of this note overclaimed: on a
+   SUPPORTED browser the FIK inner-column layout is now unconditional. On a
+   pre-subgrid engine the rules below still apply `display: grid` and land the
+   grid-row 2..5 assignments on IMPLICIT rows, so that case goes from
+   "coherent but wrong" to "misaligned". That is the intended trade — such a
+   browser is out of support — not an accident.
+
+   If a future target ever predates subgrid, restore the gate AND the
+   documentation of what that fallback renders — do not let a silent
+   outer-edge layout back in. */
+.sb-match:has(.sb-slots) {
+  grid-template-rows: 1fr auto auto auto auto 1fr;
 }
+.sb-match:has(.sb-slots) > .sb-side {
+  display: grid;
+  grid-row: 1 / -1;
+  grid-template-rows: subgrid;
+}
+.sb-match:has(.sb-slots) > .sb-side > .sb-side__badge { grid-row: 2; }
+.sb-match:has(.sb-slots) > .sb-side > .sb-name { grid-row: 3; align-self: end; }
+.sb-match:has(.sb-slots) > .sb-side > .sb-slots { grid-row: 4; }
+.sb-match:has(.sb-slots) > .sb-side > .sb-points-grid { grid-row: 5; }
+.sb-match:has(.sb-slots) > .sb-center { grid-row: 1 / -1; }
+.sb-match:has(.sb-slots) > .sb-side--shiro > .sb-side__badge { justify-self: end; }
+.sb-match:has(.sb-slots) > .sb-side--aka > .sb-side__badge { justify-self: start; }
+/* Slots hug the INSIDE (against the centre vs) via justify-self on the hug-
+   content group; the existing flex-direction (row / row-reverse) still controls
+   the outside-to-inside fill, so each side's first ippon stays on its name side
+   and fills toward the centre — the fixed FIK rule is untouched. */
+.sb-match:has(.sb-slots) > .sb-side--shiro > .sb-slots { justify-self: end; }
+.sb-match:has(.sb-slots) > .sb-side--aka > .sb-slots { justify-self: start; }
 
 /* the side label (".sb-dojo" historically held it) becomes the identity chip,
    one statement of the side, colour-coded, like the inline editor's chip */
@@ -4914,12 +4927,28 @@ button.pool-match-row {
   margin: 12px 0;
 }
 
-/* Ippon fill order is fixed OUTSIDE-TO-INSIDE: each side's first ippon sits in
-   the slot nearest that competitor's name (the board's outer edge) and fills
-   inward toward the centre. Shiro (left column) packs its slots to the left
-   (outer) by default; Aka (right column) must mirror it, pack to the right and
-   render pts[0] at the outer (right) edge. See running_a_kendo_tournament.md →
-   Individual Match Scoreboard. */
+/* Ippon fill order is fixed OUTSIDE-TO-INSIDE: pts[0] (the first point scored)
+   takes the slot FARTHEST from the centre vs, and later points fill inward
+   toward it.
+
+   State it against the CENTRE, never against the name. On the FIK plate the
+   name sits at the board's outer edge, so "outer slot" and "slot nearest the
+   name" coincide; on THIS board they do not. Both names are pinned inward
+   (.sb-side--shiro{text-align:right} / .sb-side--aka{text-align:left}), so the
+   slot nearest the name is pts[1], and reading the rule off the name inverts
+   it.
+
+   Shiro (left column) packs its slots to the left (outer) by default; Aka
+   (right column) must mirror it, pack to the right and render pts[0] at the
+   outer (right) edge. The slot group as a whole also hugs the centre vs (the
+   .sb-slots justify-self rules above), unconditionally now that the subgrid
+   gate is gone; this declaration owns only the WITHIN-group fill order.
+   It is the third expression of the aka mirror — the other two are
+   sideSlotOrder in result_slot.jsx (see its note) — and is kept in CSS because
+   this surface renders its cells in DOM order and flips them in the layout
+   layer. Fixed by FIK Table 1 (p.15), Yuko-datotsu row, which pins the
+   mark order to the Taisho round of Table 2 (p.16). See
+   running_a_kendo_tournament.md → Individual Match Scoreboard. */
 .sb-side--aka .sb-slots {
   flex-direction: row-reverse;
 }
@@ -5548,8 +5577,11 @@ button.pool-match-row {
 .team-bouts-scroll .team-sub-match__score {
   min-width: 34px;
 }
-/* Outstanding hansoku: a red ▲ on the offending side's inner edge, sitting
-   with the centre marks (canonical kendo scoresheet). A 2nd foul discharges
+/* Outstanding hansoku: a red ▲ between the offending competitor's name and
+   that side's ippon slots, sitting with the centre marks (FIK Table 2, p.16 —
+   in its Taisho row each ▲ sits at the name-side edge of that side's own score
+   column, White's against the White name and Red's against the Red name, i.e.
+   outside the ippon slots but still inboard of the name). A 2nd foul discharges
    it to an H ippon for the opponent. */
 .team-bouts-scroll .tsm-foul-tri {
   color: var(--danger);
@@ -6399,108 +6431,23 @@ button.pool-match-row {
   line-height: 1;
 }
 
-.match-detail-card__players {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-}
+/* An individual match card is ONE row: name, ippon slots, centre, ippon slots,
+   name — rendered by the shared scoreboard (`IndividualScore` with showNames),
+   the same single-line layout the TV boards and the lobby use.
 
-.match-detail-card__side {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  font-weight: 500;
-}
+   The card used to print the names in a separate row above the scoreboard,
+   which put each competitor's points UNDERNEATH their name and forced a second
+   "vs" into the name row. That row and its rules (__players, __side, __name,
+   __score) are gone; the scoreboard's own .msb-name cells carry the names, with
+   the same Shiro-dark / Aka-red colour coding they had here.
 
-.match-detail-card__side--right {
-  flex-direction: row-reverse;
-  text-align: right;
-}
+   The name cell carries the dojo as a second line beneath the name; that rule
+   belongs to the scoreboard component (IndividualScore's showDojo) and its
+   styles live with it, below. */
 
-/* Winner: bold only, keep the side colour (Shiro dark / Aka red) so the
-   colour coding still reads after a result. */
-.match-detail-card__side--win .match-detail-card__name {
-  font-weight: 800;
-}
-
-.match-detail-card__name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 700;
-}
-/* Colour-coded player names (replaces the SHIRO/AKA badges), matching the
-   shared scoreboard's .msb-name / .msb-name--aka. */
-.match-detail-card__name--shiro { color: #111; }
-.match-detail-card__name--aka { color: var(--red, #b91c1c); }
-
-.match-detail-card__score {
-  font-size: 18px;
-  font-weight: 800;
-  font-family: var(--font-mono);
-  color: var(--ink-1);
-  min-width: 40px;
-  text-align: center;
-}
-
-.match-detail-card__vs {
-  font-size: 12px;
-  color: var(--ink-4);
-  font-weight: 400;
-}
-
-.match-detail-card__decision {
-  font-size: 12px;
-  color: var(--ink-3);
-  font-weight: 600;
-}
-
-.match-detail-card__ippons {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 0 4px;
-  border-top: 1px solid var(--line-light);
-  margin-top: 4px;
-}
-
-.match-detail-card__ippons-side {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-}
-.match-detail-card__ippons-side--right { align-items: flex-end; }
-
-.match-detail-card__ippons-val {
-  font-size: 22px;
-  font-weight: 800;
-  font-family: var(--font-mono);
-  letter-spacing: 0.04em;
-}
-
-.match-detail-card__ippons-center {
-  width: 40px;
-  text-align: center;
-}
-
-.match-detail-card__fouls {
-  font-size: 11px;
-  color: var(--ink-3);
-  margin-top: 2px;
-}
-
-.match-detail-card__team-subs {
-  border-top: 1px solid var(--line-light);
-  padding-top: 8px;
-  margin-top: 4px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
+/* (__decision, __ippons*, __fouls and __team-subs stood here. They had no JSX
+   consumer left — the card has rendered its scores through the shared
+   scoreboard since mp-13y — so they went with the name row above.) */
 
 /* ---------- Shared FIK scoreboard (match_scoreboard.jsx) ----------
    ONE component for the viewer card, the self-run modal and the TV display.
@@ -6518,6 +6465,18 @@ button.pool-match-row {
 .msb-name { flex: 1; min-width: 0; font-weight: 600; color: #111;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .msb-name--aka { text-align: right; color: var(--red, #b91c1c); }
+/* The decided winner's name. .msb-slots--win marks only an ippon-LESS result
+   (hantei, or a default win), so without this an ordinary 2-0 or 1-0 win is
+   emphasised nowhere. Set by IndividualScore from the same id-first winner key
+   centreMarks uses, so an unattributable same-name pair lights up neither side. */
+.msb-name--win { font-weight: 800; }
+/* Name over dojo (IndividualScore's showDojo). Only the NAME cell stacks:
+   .msb-row is align-items:center, so the ippon slots stay on the name's row,
+   centred against the taller block — a competitor's points must never sit under
+   their name (operator ruling). --stacked rides with the dojo rather than being
+   selected per surface, because the name cell is single-line without one. */
+.msb-name--stacked { white-space: normal; }
+.msb-dojo { display: block; font-weight: 500; }
 .msb-marks { flex-shrink: 0; display: flex; align-items: center; justify-content: center;
   gap: 4px; min-width: 104px; }
 .msb-slots { display: flex; align-items: center; gap: 2px; }
@@ -6528,7 +6487,10 @@ button.pool-match-row {
 .msb-slot--aka { color: var(--red, #b91c1c); }
 .msb-vs { min-width: 16px; text-align: center; color: #9ca3af; font-size: 11px; font-weight: 700; }
 .msb-hansoku { color: var(--red, #dc2626); font-weight: 700; }
-.msb-ht { font-size: 10px; color: var(--ink-3); font-weight: 600; }
+/* The loose result mark (both slots full, drifted data): it is the row's ONLY
+   indication of the verdict on that surface, so it reads at slot strength.
+   The old 10px/muted values were the deleted centre chip's quiet styling. */
+.msb-ht { font-size: 12px; color: var(--ink-1); font-weight: 800; }
 /* Win indicator for an ippon-less decision (hantei "Ht" / fusensho·kiken "○"):
    the mark sits in the winning side's slot. No special colour, the slot keeps
    its side colour (Shiro dark, Aka red); only the weight is bumped so the mark
@@ -6568,19 +6530,41 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .msb--tv .msb-marks { min-width: 22vw; gap: 0.6vw; }
 .msb--tv .msb-slot { min-width: min(calc(5vh * var(--msb-scale, 1)), 8.5vh); height: min(calc(5.6vh * var(--msb-scale, 1)), 9.5vh); font-size: calc(3.5vh * var(--msb-scale, 1)); border-radius: 0.4vh; }
 .msb--tv .msb-vs { min-width: 3vh; font-size: calc(2vh * var(--msb-scale, 1)); }
-/* Centre dash between the Shiro and Aka ippon slots. Rendered as an explicit
-   span so Preact null-children don't accidentally keep the cell non-empty.
-   Hidden on non-TV surfaces; visible only in .msb--tv context. */
-.msb-sep { display: none; }
-.msb--tv .msb-sep { display: inline; color: var(--ink-2, #3a414e); font-weight: 700; }
+/* Centre separator between the Shiro and Aka ippon slots. Rendered as an
+   explicit span so Preact null-children don't accidentally keep the cell
+   non-empty.
+
+   Visible on EVERY surface (operator ruling). "vs" is the plain MIDDLE VALUE of
+   a row that carries no mark, not decoration: a pending or unscored row reads
+   "vs" exactly as a marked row reads X / (E) / (DH), so a board that omits it
+   leaves the FIK row's centre blank. It renders only when there is no mark
+   (centreMarks picks one or the other), so it can never collide with one.
+
+   It was `display: none` off-TV because it started life as a decorative en-dash
+   whose density was unwanted in the smaller lobby cells and viewer rows. The
+   dash-to-"vs" change (3bc4229a) turned it into part of the display contract
+   and the rule outlived its reason — the lobby board was the visible symptom,
+   since it is the one display surface that passes no `variant` and so never
+   matched .msb--tv. */
+/* The centre separator ("vs") needs NO base rule: a span is already inline and
+   .msb-vs above sets the colour it inherits. It carried `display: none` for a
+   year, which blanked the centre of every board that is not .msb--tv (the lobby
+   passes no variant at all) — so if a base rule reappears here, check it is not
+   hiding the middle value again. Only the TV contrast lift is real. */
+.msb--tv .msb-sep { color: var(--ink-2, #3a414e); font-weight: 700; }
 .msb--tv .msb-row--summary { border-top: 0.4vh solid #111; }
 .msb--tv .msb-row--summary .msb-slot { min-width: calc(6vh * var(--msb-scale, 1)); font-size: calc(3.4vh * var(--msb-scale, 1)); }
 .msb--tv .msb-lab { font-size: calc(1.2vh * var(--msb-scale, 1)); }
 .msb--tv .msb-hansoku { font-size: calc(2.8vh * var(--msb-scale, 1)); font-weight: 900; }
 .msb--tv .msb-row--dh { border-top: 0.3vh solid #111; }
-/* TV bout decisiveness: winning side's filled slots are slightly bolder
-   so spectators can read the match result at a glance from distance. */
-.msb--tv .msb-slots--win .msb-slot { font-size: calc(3.2vh * var(--msb-scale, 1)); }
+/* TV bout decisiveness comes from the base .msb-slots--win weight bump alone.
+   There is deliberately NO font-size override here: one existed (3.2vh, below
+   the 3.5vh base) from when a --win group could only hold Ht/maru marks, but a
+   hantei win group now holds the winner's REAL ippon letter beside the Ht, and
+   the override rendered the winner's point smaller than the loser's. */
+/* The loose Ht (both slots full, drifted data) needs a TV size of its own or
+   it renders at the 12px base beside ~3.5vh slots. */
+.msb--tv .msb-ht { font-size: calc(2.4vh * var(--msb-scale, 1)); }
 
 /* ---------- League Round-Robin Matrix (Viewer) ---------- */
 .league-matrix-wrap {

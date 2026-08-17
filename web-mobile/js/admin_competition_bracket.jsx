@@ -3,6 +3,7 @@
 // Split out of admin_competition.jsx (mp-hpe3). buildRunningIpponResult and
 // loadScoreboardPoints are ES-exported and re-exported by the entry for tests.
 
+import { realIppons } from './result_slot.jsx';
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
 const hasBothSides = window.hasBothSides;
@@ -87,8 +88,8 @@ function buildRunningIpponResult(winnerSide, sideA, sideB, winnerIppons, loserIp
 function loadScoreboardPoints(match) {
   if (!match) return { aPoints: [], bPoints: [] };
   return {
-    aPoints: (match.ipponsA || []).filter(x => x && x !== "•"),
-    bPoints: (match.ipponsB || []).filter(x => x && x !== "•"),
+    aPoints: realIppons(match.ipponsA),
+    bPoints: realIppons(match.ipponsB),
   };
 }
 

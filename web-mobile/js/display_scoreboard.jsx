@@ -5,6 +5,7 @@
 import { findRunningOnCourt, findUpcomingOnCourt, countCourtMatches, sideLabel, phaseLabel, TermD, poolNameOf, isSupplementaryBout, phaseProgressOnCourt, bracketRoundSiblings, StreamingQR } from './display_helpers.jsx';
 import { teamMatchTypeFor, DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import { TeamScoreboard, IndividualScore, useTeamLineups, teamIVPW } from './match_scoreboard.jsx';
+import { realIppons } from './result_slot.jsx';
 
 const { useMemo: useMD } = React;
 
@@ -71,18 +72,24 @@ function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, is
     const repShiro = (promoted.match.repPlayerB || "").trim();
     const repAka = (promoted.match.repPlayerA || "").trim();
     const next = queueMatches && queueMatches.length ? queueMatches[0] : null;
-    // Centre chip carries only the middle mark (X / (E) / (DH)); per-side
-    // result marks live in the score strings via matchScoreStr elsewhere.
-    const sfx = (window.matchMiddleMark && window.matchMiddleMark(promoted.match)) || "";
+    // NO middle mark here (operator ruling): the FIK row centre rendered by the
+    // shared scoreboard below is the mark's ONE home, and this header chip
+    // duplicating X/(E)/(DH) ~10cm above it was an error; the plain "vs" stays.
+    // (The OBS streaming overlay keeps its chip: it renders no scoreboard row,
+    // so there the chip IS the one home.) Threading the match-level mark into
+    // the team summary spacer instead was tried and reverted - two (E) marks on
+    // one board, stacked. Do not re-add either. Where each mark DOES land is
+    // stated once in CLAUDE.md § Match Decision Types; this file renders none of
+    // those rows, so it does not restate the rule.
     // Header subtitle: competition name + phase, joined only when both exist
     // (phaseLabel is "" for league, so no dangling " · ").
     const compName = promoted.competition?.name || "";
     const compPhase = phaseLabel(promoted.match, promoted.isBracket, promoted.roundIndex, promoted.totalRounds, promoted.competition?.format);
     const headerSubtitle = [compName, compPhase].filter(Boolean).join(" · ");
     // The shared scoreboard below carries the score (IV/PW summary for teams,
-    // ippon slots for individuals), so the team-name row centre is just "vs"
-    // (+ any decision suffix).
-    const nameCentre = <div style={{ fontSize: "2.4vh", color: "var(--ink-3)", fontWeight: 700 }}>vs{sfx ? <span style={{ marginLeft: "1vw", color: "var(--ink-2)" }}>{sfx}</span> : null}</div>;
+    // ippon slots for individuals) AND the middle mark, so this team-name row
+    // centre is a bare "vs" with no suffix branch.
+    const nameCentre = <div style={{ fontSize: "2.4vh", color: "var(--ink-3)", fontWeight: 700 }}>vs</div>;
 
     return (
         <div className="tvd tvd--white" data-testid="tv-display-root" style={{
@@ -599,8 +606,8 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, linkState 
         const regularSubs = subResults.filter(s => s.position > DAIHYOSEN_POSITION);
         if (regularSubs.length === 0) return false;
         const allDone = regularSubs.every(s => {
-            const aIp = (s.ipponsA || []).filter(x => x && x !== "•");
-            const bIp = (s.ipponsB || []).filter(x => x && x !== "•");
+            const aIp = realIppons(s.ipponsA);
+            const bIp = realIppons(s.ipponsB);
             // Mirror the shared scoreboard's "scored" test: a bout can also be
             // decided with no ippon letters: fusensho/kiken (winner + decision),
             // a hansoku award, or an explicit winner. Without these, a tied

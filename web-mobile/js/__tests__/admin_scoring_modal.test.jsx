@@ -23,11 +23,13 @@ import {
   isKoTieBlocked,
 } from '../admin_scoring_modal.jsx';
 import { makeSubmitDecision } from '../admin_scoring_shared.jsx';
+import { preserveStoredDaihyosenVerdict } from '../admin_scoring_team.jsx';
+import { hanteiWinnerKey, hanteiSlot } from '../result_slot.jsx';
 import { defaultWinMaru } from '../bracket.jsx';
 // teamEncounterHasResult is a module-internal helper of admin_scoring_team.jsx
 // (not part of the thin-entry consumer barrel), imported directly like the
 // resolveMatchLineup tests do.
-import { teamEncounterHasResult, resolveKachinukiBoutSides, subBoutHasBeenPlayed, fusenshoSideFromSub } from '../admin_scoring_team.jsx';
+import { teamEncounterHasResult, resolveKachinukiBoutSides, subBoutHasBeenPlayed, fusenshoSideFromSub, teamBoutIsDraw, boutWinnerSide } from '../admin_scoring_team.jsx';
 import { isKikenDecision } from '../api_serializers.jsx';
 
 window.isKikenDecision = isKikenDecision;
@@ -255,11 +257,15 @@ describe('daihyosenEnchoFields (mp-4pc encho/hantei wire gating)', () => {
       .toEqual({ encho: { periodCount: 2 }, decidedByHantei: true });
   });
 
-  it('emits encho only (no hantei) when not tied or not armed', () => {
+  it('emits an EXPLICIT decidedByHantei:false when not tied or not armed', () => {
+    // Tri-state wire contract: this editor always has a say about the
+    // verdict, so "no hantei" travels as explicit false. Omission is
+    // reserved for verdict-SILENT writers (stale snapshots, quick-score),
+    // which the server preserves a stored verdict against.
     expect(daihyosenEnchoFields({ enchoPeriodCount: 1, daihyosenTied: false, daihyosenHantei: 'a' }))
-      .toEqual({ encho: { periodCount: 1 } });
+      .toEqual({ decidedByHantei: false, encho: { periodCount: 1 } });
     expect(daihyosenEnchoFields({ enchoPeriodCount: 1, daihyosenTied: true, daihyosenHantei: '' }))
-      .toEqual({ encho: { periodCount: 1 } });
+      .toEqual({ decidedByHantei: false, encho: { periodCount: 1 } });
   });
 
   it('emits hantei WITHOUT encho when armed on a tied bout and no overtime', () => {
@@ -276,8 +282,38 @@ describe('daihyosenEnchoFields (mp-4pc encho/hantei wire gating)', () => {
       .toEqual({ decidedByHantei: true });
   });
 
-  it('emits nothing when no encho and hantei not armed', () => {
-    expect(daihyosenEnchoFields({ enchoPeriodCount: 0, daihyosenTied: false, daihyosenHantei: '' })).toEqual({});
+  it('emits only the explicit false when no encho and hantei not armed', () => {
+    expect(daihyosenEnchoFields({ enchoPeriodCount: 0, daihyosenTied: false, daihyosenHantei: '' }))
+      .toEqual({ decidedByHantei: false });
+  });
+
+  it('ALWAYS states the verdict — there is no silent variant any more', () => {
+    // A `hanteiKnown: false` parameter used to make this omit the field, for
+    // an editor mounted before the verdict existed: its armed flag was frozen
+    // false, so an explicit false would have erased another device's judges'
+    // decision. The team editor now ADOPTS the stored verdict instead (a match
+    // has one result and every surface shows the same one), so it is never
+    // ruling on something it did not display, and the guard had nothing left
+    // to protect. A stray argument must not resurrect the old behaviour.
+    for (const extra of [{}, { hanteiKnown: false }, { hanteiKnown: true }]) {
+      const fields = daihyosenEnchoFields({
+        enchoPeriodCount: 0, daihyosenTied: false, daihyosenHantei: '', ...extra,
+      });
+      expect(fields).toEqual({ decidedByHantei: false });
+      expect('decidedByHantei' in fields).toBe(true);
+    }
+  });
+
+  it('emits encho alongside the verdict, always', () => {
+    expect(daihyosenEnchoFields({
+      enchoPeriodCount: 2, daihyosenTied: false, daihyosenHantei: '',
+    })).toEqual({ decidedByHantei: false, encho: { periodCount: 2 } });
+  });
+
+  it('an ARMED pick on a tied bout is emitted as true', () => {
+    expect(daihyosenEnchoFields({
+      enchoPeriodCount: 0, daihyosenTied: true, daihyosenHantei: 'a',
+    })).toEqual({ decidedByHantei: true });
   });
 });
 
@@ -499,7 +535,7 @@ describe('isBoutDecided / MAX_IPPONS_PER_SIDE', () => {
   // isBoutDecided drives the disabled-prop on ippon-add buttons in both
   // ScoreEditorModal and TeamScoreEditorModal: once it returns true, all
   // M/K/D/T/H buttons on BOTH sides are disabled, preventing a 2-2 entry.
-  // Server-side mirror: validateIpponCounts in internal/mobileapp/validation.go.
+  // Server-side mirror: validateIppons in internal/mobileapp/validation.go.
 
   it('exports MAX_IPPONS_PER_SIDE = 2', () => {
     expect(MAX_IPPONS_PER_SIDE).toBe(2);
@@ -526,7 +562,7 @@ describe('isBoutDecided / MAX_IPPONS_PER_SIDE', () => {
   });
 
   it('returns true for 2-2 (the impossible scoreline the fix prevents)', () => {
-    // This mirrors the server-side rejection in validateIpponCounts:
+    // This mirrors the server-side rejection in validateIppons:
     //   "both sides cannot have 2 ippons (best-of-3 ends at first to 2)"
     expect(isBoutDecided(['M', 'K'], ['D', 'T'])).toBe(true);
   });
@@ -599,7 +635,7 @@ describe('applyFoulIncrement (FIK 2-foul auto-award)', () => {
     // Bout-decided guard: if THIS side reached 2 ippons (bout already
     // won by THIS side), the 2nd foul cannot auto-award an H to opp
     // without producing an invalid 2-2 scoreline that the server's
-    // validateIpponCounts would reject. Counter still resets to 0;
+    // validateIppons would reject. Counter still resets to 0;
     // opponent's pts are left untouched.
     expect(applyFoulIncrement(1, ['X'], ['M', 'K'])).toEqual({ fouls: 0, opponentPts: ['X'] });
     expect(applyFoulIncrement(1, [], ['M', 'K'])).toEqual({ fouls: 0, opponentPts: [] });
@@ -1292,3 +1328,149 @@ describe('isKoTieBlocked (Finish gate for knockout ties)', () => {
   });
 });
 
+
+describe('hanteiSlot (the editor\'s winner test over the shared slot rule)', () => {
+  // The placement rule itself is pinned in result_slot.test.jsx, shared with
+  // the viewer/display scoreboard. This only covers what the editor adds: a
+  // side that did not win the hantei carries no mark.
+  it('returns -1 for a side that did not win the hantei', () => {
+    expect(hanteiSlot(false, [])).toBe(-1);
+    expect(hanteiSlot(false, ['M'])).toBe(-1);
+  });
+
+  it('delegates to the shared rule for the winning side', () => {
+    expect(hanteiSlot(true, [])).toBe(0);       // 0-0 → outer slot
+    expect(hanteiSlot(true, ['K'])).toBe(1);    // 1-1 → free inner slot
+    expect(hanteiSlot(true, ['K', 'M'])).toBe(-1); // full → nothing overwritten
+  });
+});
+
+describe('boutWinnerSide: hanteiSide names the winner over tied cells', () => {
+  // The hantei verdict is folded into THE winner rule itself (same class as
+  // fusenshoSide: a decision naming the winner over what the cells read), so
+  // every reader of subTotals[i].winner — the centre chip colouring, the draw
+  // derivation, the save path — agrees a hantei-decided bout is decided.
+  it('applies only to a tied scoreline (mirrors validation.go)', () => {
+    expect(boutWinnerSide({ aCount: 1, bCount: 1, hanteiSide: 'a' })).toBe('a');
+    expect(boutWinnerSide({ aCount: 0, bCount: 0, hanteiSide: 'b' })).toBe('b');
+    // Untied: the cells decide, the (drifted) verdict is ignored.
+    expect(boutWinnerSide({ aCount: 2, bCount: 1, hanteiSide: 'b' })).toBe('a');
+  });
+
+  it('beats an operator draw flag: a hantei un-draws the bout', () => {
+    expect(boutWinnerSide({ aCount: 1, bCount: 1, draw: true, hanteiSide: 'a' })).toBe('a');
+  });
+
+  it('absent hanteiSide leaves every existing outcome unchanged', () => {
+    expect(boutWinnerSide({ aCount: 1, bCount: 1 })).toBe(null);
+    expect(boutWinnerSide({ aCount: 1, bCount: 1, draw: true })).toBe(null);
+    expect(boutWinnerSide({ aCount: 0, bCount: 0, fusenshoSide: 'b' })).toBe('b');
+  });
+});
+
+describe('teamBoutIsDraw (a declared winner un-draws the bout)', () => {
+  // Regression (via boutWinnerSide): a daihyosen scored 1-1 then decided by
+  // hantei used to derive "tied and scored" => hikiwake, and boutMiddle turned
+  // that into a centre X — a DRAW claimed on a bout whose winner wore Ht. The
+  // verdict now arrives IN t.winner, so the draw derivation needs no special
+  // case: any winner un-draws.
+  it('is a draw when tied and scored with no winner', () => {
+    expect(teamBoutIsDraw({ draw: false }, { aTotal: 1, bTotal: 1, winner: null })).toBe(true);
+  });
+
+  it('is NOT a draw once the winner field is set (hantei-decided 1-1)', () => {
+    // As produced by boutWinnerSide({aCount:1, bCount:1, hanteiSide:'a'}).
+    expect(teamBoutIsDraw({ draw: false }, { aTotal: 1, bTotal: 1, winner: 'a' })).toBe(false);
+  });
+
+  it('an operator draw flag with no winner is a draw even at 0-0', () => {
+    expect(teamBoutIsDraw({ draw: true }, { aTotal: 0, bTotal: 0, winner: null })).toBe(true);
+  });
+
+  it('a stored draw flag cannot resurrect the X under a declared winner', () => {
+    expect(teamBoutIsDraw({ draw: true }, { aTotal: 1, bTotal: 1, winner: 'a' })).toBe(false);
+  });
+
+  it('is not a draw when nothing has been scored yet', () => {
+    expect(teamBoutIsDraw({ draw: false }, { aTotal: 0, bTotal: 0, winner: null })).toBe(false);
+  });
+});
+
+describe('hanteiWinnerKey (individual editor Ht chip attribution)', () => {
+  // Id-first, name fallback only when the name distinguishes the sides. A
+  // same-name pair with no usable ids returns "" so neither side is marked,
+  // mirroring the shared scoreboard's unattributable-winner rule.
+  const A = { id: 'ua', name: 'Tanaka' }, B = { id: 'ub', name: 'Suzuki' };
+
+  it('resolves by id', () => {
+    expect(hanteiWinnerKey({ winner: { id: 'ua', name: 'Tanaka' }, sideA: A, sideB: B })).toBe('a');
+    expect(hanteiWinnerKey({ winner: { id: 'ub', name: 'Suzuki' }, sideA: A, sideB: B })).toBe('b');
+  });
+
+  it('falls back to a distinguishing name when ids are absent', () => {
+    expect(hanteiWinnerKey({ winner: { id: '', name: 'Suzuki' }, sideA: { name: 'Tanaka' }, sideB: { name: 'Suzuki' } })).toBe('b');
+  });
+
+  it('returns "" for a same-name pair with no usable ids (unattributable)', () => {
+    expect(hanteiWinnerKey({ winner: { id: '', name: 'Tanaka' }, sideA: { name: 'Tanaka' }, sideB: { name: 'Tanaka' } })).toBe('');
+  });
+
+  it('returns "" when an id is present but matches neither side', () => {
+    expect(hanteiWinnerKey({ winner: { id: 'ux', name: 'Tanaka' }, sideA: A, sideB: B })).toBe('');
+  });
+
+  it('falls to the name when only ONE side carries an id (replaced participant)', () => {
+    // A replaced/deleted participant leaves one side id-less while the winner
+    // keeps its stamped uuid: the id-space is not authoritative then, and the
+    // distinguishing name still resolves the side.
+    expect(hanteiWinnerKey({
+      winner: { id: 'uuid-b', name: 'Suzuki' },
+      sideA: { id: 'uuid-a', name: 'Tanaka' },
+      sideB: { id: '', name: 'Suzuki' },
+    })).toBe('b');
+  });
+
+  it('returns "" with no winner at all', () => {
+    expect(hanteiWinnerKey({ sideA: A, sideB: B })).toBe('');
+    expect(hanteiWinnerKey(null)).toBe('');
+  });
+});
+
+describe('preserveStoredDaihyosenVerdict (unattributable verdict survives correction saves)', () => {
+  // Rename drift can leave a stored hantei whose winner name matches neither
+  // current side: the seed then arms the panel with no side picked. Until the
+  // operator re-picks, cancels, or edits the daihyosen row itself, a
+  // correction save passes the SERVER's verdict through verbatim - without
+  // this, fixing an unrelated bout score silently flipped a hantei win into
+  // a hikiwake (pool) or stripped the completed match's winner (knockout).
+  const stored = { decidedByHantei: true, winner: 'Old Team Name', encho: { periodCount: 1 } };
+
+  it('passes the stored verdict through while armed, unpicked and still tied', () => {
+    // encho is deliberately ABSENT from the overlay: the editor seeds its
+    // encho counter from the stored row, so daihyosenEnchoFields already
+    // round-trips an untouched value, and carrying it here would overwrite
+    // an operator's encho edit.
+    expect(preserveStoredDaihyosenVerdict({ armed: true, pickedSide: '', tied: true, existingDaihyosen: stored }))
+      .toEqual({ winner: 'Old Team Name', decidedByHantei: true });
+  });
+
+  it('yields to a re-picked side', () => {
+    expect(preserveStoredDaihyosenVerdict({ armed: true, pickedSide: 'a', tied: true, existingDaihyosen: stored })).toBe(null);
+  });
+
+  it('yields to an explicit cancel (panel un-armed)', () => {
+    expect(preserveStoredDaihyosenVerdict({ armed: false, pickedSide: '', tied: true, existingDaihyosen: stored })).toBe(null);
+  });
+
+  it('yields when the operator unties the daihyosen row itself', () => {
+    // Re-asserting decidedByHantei onto an untied row would have the server
+    // reject the whole save ("requires a tied scoreline"), blocking the very
+    // correction the operator is making.
+    expect(preserveStoredDaihyosenVerdict({ armed: true, pickedSide: '', tied: false, existingDaihyosen: stored })).toBe(null);
+  });
+
+  it('does nothing when the server holds no verdict', () => {
+    expect(preserveStoredDaihyosenVerdict({ armed: true, pickedSide: '', tied: true, existingDaihyosen: { decidedByHantei: false } })).toBe(null);
+    expect(preserveStoredDaihyosenVerdict({ armed: true, pickedSide: '', tied: true, existingDaihyosen: null })).toBe(null);
+  });
+});

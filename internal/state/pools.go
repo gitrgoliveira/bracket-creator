@@ -5,10 +5,12 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 )
 
@@ -318,6 +320,83 @@ func splitIppons(s string) []string {
 	return strings.Split(s, "|")
 }
 
+// encodeHanteiIntoIppons returns the two ippon slices as they should be
+// PERSISTED for r, with the judges'-decision mark appended to the winning
+// side's slice when the match was decided by hantei.
+//
+// pool-matches.csv has no DecidedByHantei column, and it does not need one: a
+// hantei occupies a point SLOT (domain.HanteiMark), so the existing IpponsA /
+// IpponsB columns carry it. That is the same shape every scoreboard already
+// renders, where Ht fills the winner's next free slot. Hantei is only taken
+// from a TIED scoreline and sanbon-shobu ends at 2, so the winner always has a
+// slot free for it.
+//
+// The mark is a STORAGE encoding only: decodeHanteiFromIppons strips it on the
+// way back in and restores the flag, so nothing downstream of the load ever
+// sees an "Ht" among the ippons and no counter, standings figure, tie-break or
+// export changes shape. (CountScoringIppons drops it regardless, so a
+// hand-edited file that leaves one in cannot inflate a score either.)
+//
+// Returns the originals untouched when there is nothing to encode. A hantei
+// with no attributable winner cannot be encoded — validation requires a winner,
+// so that is malformed data, and it degrades to the pre-existing behaviour of
+// losing the flag rather than guessing a side.
+func encodeHanteiIntoIppons(r *MatchResult) (ipponsA, ipponsB []string) {
+	ipponsA, ipponsB = r.IpponsA, r.IpponsB
+	if r.DecidedByHantei == nil || !*r.DecidedByHantei || r.Winner == "" {
+		return ipponsA, ipponsB
+	}
+	withMark := func(s []string) []string {
+		for _, v := range s {
+			if v == domain.HanteiMark {
+				return s // already encoded; never double-append
+			}
+		}
+		out := make([]string, len(s), len(s)+1)
+		copy(out, s)
+		return append(out, domain.HanteiMark)
+	}
+	switch r.Winner {
+	case r.SideA:
+		return withMark(ipponsA), ipponsB
+	case r.SideB:
+		return ipponsA, withMark(ipponsB)
+	}
+	return ipponsA, ipponsB
+}
+
+// decodeHanteiFromIppons is the inverse: it strips domain.HanteiMark out of a
+// loaded match's ippon slices and sets DecidedByHantei when one was present.
+// After this the in-memory shape is exactly what it was before the match was
+// written, so the encoding is invisible above the store.
+//
+// It does NOT clear an already-set flag: a caller that knows better (a bracket
+// match, or a future column) keeps its value.
+func decodeHanteiFromIppons(m *MatchResult) {
+	// Detect before stripping. This runs for every match on every parse, and
+	// the overwhelmingly common case is no mark at all, so rebuilding both
+	// slices first and discarding them would allocate twice per match to
+	// discover there was nothing to do.
+	if !slices.Contains(m.IpponsA, domain.HanteiMark) &&
+		!slices.Contains(m.IpponsB, domain.HanteiMark) {
+		return
+	}
+	// splitIppons' contract: an empty field is an empty slice, never nil, so
+	// the JSON projection stays [] rather than null. A side that held only the
+	// mark must therefore come back empty, not nil.
+	strip := func(in []string) []string {
+		out := make([]string, 0, len(in))
+		for _, v := range in {
+			if v != domain.HanteiMark {
+				out = append(out, v)
+			}
+		}
+		return out
+	}
+	m.IpponsA, m.IpponsB = strip(m.IpponsA), strip(m.IpponsB)
+	m.DecidedByHantei = HanteiExplicit(true)
+}
+
 // parsePoolMatchesRecords turns a CSV record matrix into MatchResults.
 // Extracted so the file-based and bytes-based parsers share the
 // rec-shape→struct mapping verbatim (no drift between the two).
@@ -347,6 +426,10 @@ func parsePoolMatchesRecords(records [][]string) []MatchResult {
 			Status:   MatchStatus(rec[10]),
 			Court:    rec[11],
 		}
+
+		// Restore a hantei that was persisted as a mark in the winner's score
+		// cell, and take the mark back out so nothing above the store sees it.
+		decodeHanteiFromIppons(&m)
 
 		if len(rec) > 12 && rec[12] != "" {
 			_ = json.Unmarshal([]byte(rec[12]), &m.SubResults)
@@ -417,6 +500,43 @@ func parsePoolMatchesRecords(records [][]string) []MatchResult {
 				m.ReopenPending = v
 			}
 		}
+		// Decision-audit columns (appended after ReopenPending): WHO recorded a
+		// kiken/fusenpai and WHY. These were held only in memory, so the audit
+		// trail behind a withdrawal survived until the next restart and no
+		// further. The bracket kept both all along (bracket.json marshals every
+		// exported field), which is the asymmetry this closes.
+		if len(rec) > 25 {
+			m.DecisionBy = rec[25]
+		}
+		if len(rec) > 26 {
+			m.DecisionReason = rec[26]
+		}
+		// Encho (overtime) period count. Stored as a bare integer rather than a
+		// nested object because EnchoMetadata holds exactly that one field.
+		//
+		// Only a POSITIVE count rebuilds the block, which is lossless: Encho.On()
+		// is the single "did this happen in encho" predicate and it requires
+		// non-nil AND positive, so a nil block and a degenerate {PeriodCount: 0}
+		// are already indistinguishable to every consumer. A negative value is
+		// rejected at the HTTP boundary and is treated here as absent, so a
+		// hand-edited file cannot load one.
+		if len(rec) > 27 {
+			if v, err := strconv.Atoi(rec[27]); err == nil && v > 0 {
+				m.Encho = &EnchoMetadata{PeriodCount: v}
+			}
+		}
+		// ModifiedAt: the server-relative stamp the timestamp last-write-wins
+		// guard compares. It has to be PERSISTED for that guard to survive a
+		// restart, which is why the bracket has always written it and why the
+		// pool path could not reconcile without it. Unparseable or negative
+		// reads as 0, which ApplyByTimestamp treats as unstamped and therefore
+		// always-applies: a corrupt cell degrades to arrival order, never to
+		// silently dropping an operator's write.
+		if len(rec) > 28 {
+			if v, err := strconv.ParseInt(rec[28], 10, 64); err == nil && v > 0 {
+				m.ModifiedAt = v
+			}
+		}
 
 		results = append(results, m)
 	}
@@ -453,7 +573,7 @@ func (s *Store) savePoolMatchesLocked(compID string, results []MatchResult, writ
 	// the previous os.Create + streaming pattern lacked.
 	var buf bytes.Buffer
 	writer := csv.NewWriter(&buf)
-	if err := writer.Write([]string{"PoolName", "MatchIdx", "SideA", "SideB", "Winner", "IpponsA", "IpponsB", "HansokuA", "HansokuB", "Decision", "Status", "Court", "SubResults", "ScheduledAt", "ResultSource", "Round", "SideAID", "SideBID", "WinnerID", "CorrectionReason", "RepPlayerA", "RepPlayerB", "FlagsA", "FlagsB", "ReopenPending"}); err != nil {
+	if err := writer.Write([]string{"PoolName", "MatchIdx", "SideA", "SideB", "Winner", "IpponsA", "IpponsB", "HansokuA", "HansokuB", "Decision", "Status", "Court", "SubResults", "ScheduledAt", "ResultSource", "Round", "SideAID", "SideBID", "WinnerID", "CorrectionReason", "RepPlayerA", "RepPlayerB", "FlagsA", "FlagsB", "ReopenPending", "DecisionBy", "DecisionReason", "Encho", "ModifiedAt"}); err != nil {
 		return err
 	}
 
@@ -471,14 +591,27 @@ func (s *Store) savePoolMatchesLocked(compID string, results []MatchResult, writ
 			subJSON = string(b)
 		}
 
+		// A hantei rides in the winner's score cell rather than in a column of
+		// its own; see encodeHanteiIntoIppons.
+		encIpponsA, encIpponsB := encodeHanteiIntoIppons(&r)
+
+		// Encho collapses to its period count, gated on Encho.On() — the same
+		// predicate the parser cites for why only a positive value is
+		// meaningful, so the two sides of the round trip cannot disagree about
+		// what counts as overtime.
+		enchoPeriods := 0
+		if r.Encho.On() {
+			enchoPeriods = r.Encho.PeriodCount
+		}
+
 		if err := writer.Write([]string{
 			poolName,
 			matchIdx,
 			r.SideA,
 			r.SideB,
 			r.Winner,
-			strings.Join(r.IpponsA, "|"),
-			strings.Join(r.IpponsB, "|"),
+			strings.Join(encIpponsA, "|"),
+			strings.Join(encIpponsB, "|"),
 			strconv.Itoa(r.HansokuA),
 			strconv.Itoa(r.HansokuB),
 			r.Decision,
@@ -497,6 +630,10 @@ func (s *Store) savePoolMatchesLocked(compID string, results []MatchResult, writ
 			strconv.Itoa(r.FlagsA),
 			strconv.Itoa(r.FlagsB),
 			strconv.FormatBool(r.ReopenPending),
+			r.DecisionBy,
+			r.DecisionReason,
+			strconv.Itoa(enchoPeriods),
+			strconv.FormatInt(r.ModifiedAt, 10),
 		}); err != nil {
 			return err
 		}

@@ -546,6 +546,21 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
+			// Checked BEFORE the errSaveParticipants branch, which would bury it
+			// as a generic 500: a duplicate roster entry is the operator's to
+			// fix, and the message names the colliding entries. Without this the
+			// create path answered 500 "failed to save participants" (after
+			// rolling the competition back) for input the PUT roster path
+			// answers 409 with the names — same rule, two different verdicts.
+			if errors.Is(err, state.ErrDuplicateName) {
+				// err.Error(), NOT errors.Unwrap(err).Error(): the wrap upstream
+				// is fmt.Errorf("%w: %w", ...), whose multi-error type implements
+				// Unwrap() []error, so errors.Unwrap returns nil and the deref
+				// panicked on the very path this branch exists for. The full
+				// string already names the colliding entries.
+				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+				return
+			}
 			if errors.Is(err, errSaveParticipants) {
 				// Safe label to the client; the wrapped cause is logged, not returned.
 				internalError(c, err, "failed to save participants")

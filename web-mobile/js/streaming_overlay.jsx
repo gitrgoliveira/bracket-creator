@@ -5,6 +5,7 @@ import { findRunningOnCourt, sideLabel, TermD, StreamingQR } from './display_hel
 import { useTeamLineups, teamIVPW } from './match_scoreboard.jsx';
 import { pickFromLineup, resolveBoutSideName, POS_LABELS_5, kachinukiHidesLineupPosition } from './lineup_resolver.jsx';
 import { isPoolDaihyosenBout, teamMatchTypeFor, DAIHYOSEN_POSITION } from './pool_ids.jsx';
+import { realIppons, nameOf } from './result_slot.jsx';
 
 const { useEffect: useED, useMemo: useMD } = React;
 
@@ -40,8 +41,7 @@ function findCurrentBoutIndex(subResults) {
     const regular = subResults.filter(s => s.position > DAIHYOSEN_POSITION);
     for (let i = 0; i < regular.length; i++) {
         const s = regular[i];
-        const hasIppon = (s.ipponsA && s.ipponsA.some(x => x && x !== "•")) ||
-            (s.ipponsB && s.ipponsB.some(x => x && x !== "•"));
+        const hasIppon = realIppons(s.ipponsA).length > 0 || realIppons(s.ipponsB).length > 0;
         const hasFoul = s.hansokuA || s.hansokuB;
         const hasHantei = s.decidedByHantei;
         const hasOutcome = !!s.winner || (typeof s.decision === "string" && s.decision !== "");
@@ -147,7 +147,7 @@ function StreamingOverlay({ court, position, competitions }) {
     // (Senpo/Jiho/...), else "Daihyosen" when the rep bout is pending; never
     // the team name (that flanks the QR above).
     const isKachinukiOvl = teamMatchTypeFor(comp) === "kachinuki";
-    const subSideName = (v) => (v && v.name) || (typeof v === "string" ? v : "");
+    const subSideName = nameOf;
     const boutPosLabel = currentSub ? overlayPositionLabel(teamSizeOvl, currentBoutIdx, currentSub) : (dhPending ? 'Daihyosen' : '');
     let boutShiroName, boutAkaName;
     if (isTeamMatch && currentSub) {
@@ -172,8 +172,8 @@ function StreamingOverlay({ court, position, competitions }) {
 
     // Bout score for the current sub: ippon letters, "-" (not "0") for an
     // empty side so a kendo score never reads "M – 0".
-    const boutIpponsB = currentSub ? ((currentSub.ipponsB || []).filter(x => x && x !== "•").join('') || '-') : '-';
-    const boutIpponsA = currentSub ? ((currentSub.ipponsA || []).filter(x => x && x !== "•").join('') || '-') : '-';
+    const boutIpponsB = currentSub ? (realIppons(currentSub.ipponsB).join('') || '-') : '-';
+    const boutIpponsA = currentSub ? (realIppons(currentSub.ipponsA).join('') || '-') : '-';
 
     // Team names (outer flanks of QR in team mode).
     const shiroTeamName = hasRunning ? sideLabel(running.match.sideB, zekken) : '';
@@ -182,8 +182,25 @@ function StreamingOverlay({ court, position, competitions }) {
     // Individual match data (non-team).
     const shiro = hasRunning && !isTeamMatch ? sideLabel(running.match.sideB, zekken) : '';
     const aka = hasRunning && !isTeamMatch ? sideLabel(running.match.sideA, zekken) : '';
-    const ipponsB = hasRunning && !isTeamMatch ? ((running.match.ipponsB || []).filter(x => x && x !== "•").join('') || '0') : '';
-    const ipponsA = hasRunning && !isTeamMatch ? ((running.match.ipponsA || []).filter(x => x && x !== "•").join('') || '0') : '';
+    // ipponsFromScore is the same fallback IndividualScore applies: a BRACKET
+    // match persists its running score as the formatted scoreA/scoreB string,
+    // not the ippon arrays a pool match carries, so reading the arrays alone
+    // left this lower-third showing "0 - 0" through a scored knockout bout
+    // while the board beside it read "K D vs M". (Go's own half of this is
+    // domain.ParseScore; the display handler already parses for its endpoint.)
+    //
+    // "-" for an empty side, not "0": a kendo score never reads "M - 0", and
+    // the middle/cell contract is explicit that a cell with no points shows a
+    // dash and NEVER a digit. The bout line below has always done this; the
+    // match line disagreed with it.
+    const ovlIppons = (arr, scoreStr) => {
+        const real = realIppons(arr);
+        if (real.length) return real.join('');
+        const parsed = window.ipponsFromScore ? realIppons(window.ipponsFromScore(scoreStr)) : [];
+        return parsed.join('') || '-';
+    };
+    const ipponsB = hasRunning && !isTeamMatch ? ovlIppons(running.match.ipponsB, running.match.scoreB) : '';
+    const ipponsA = hasRunning && !isTeamMatch ? ovlIppons(running.match.ipponsA, running.match.scoreA) : '';
     // T097: the middle mark (X / (E) / (DH)) on the OBS lower-third. Computed
     // off the running match so it disappears the moment the overlay fades out.
     const decSfx = hasRunning && !isTeamMatch && window.matchMiddleMark ? window.matchMiddleMark(running.match) : '';

@@ -37,6 +37,7 @@ import { useDebouncedRunningWrite, SyncStatusPill } from './admin_scoring_autosa
 // the editor derives its per-bout middle from it rather than restating the
 // chain (CLAUDE.md § Match Decision Types: the middle rule lives in ONE place).
 import { boutMiddle, winnerSideLR } from './bracket.jsx';
+import { realIppons, hanteiTied, hanteiSlot, hanteiWinnerKey, nameOf, sideSlotOrder } from './result_slot.jsx';
 
 // renderTeamBoutMiddle: the ONE place the editor turns a sub-bout into its
 // centre value, for BOTH the read-only done row and the live entry row. Derives
@@ -45,16 +46,49 @@ import { boutMiddle, winnerSideLR } from './bracket.jsx';
 // editor's local sub state has no decision string, so synthesise boutMiddle's
 // three inputs: a marked/derived tie → hikiwake, the daihyosen row →
 // "daihyosen", s.encho (a period count) → {periodCount}. X keeps its dedicated
-// styling; vs/(E)/(DH) render as the quiet centre span.
+// styling; vs/(E)/(DH) render as the quiet centre span. (Defined below
+// teamBoutIsDraw, which it calls.)
+
+// teamBoutIsDraw: does this bout row read as a hikiwake? A declared winner
+// un-draws the bout — that is the whole rule. The hantei case needs no
+// parameter here because boutWinnerSide folds the hantei verdict into
+// t.winner (its hanteiSide input), so a 1-1 daihyosen taken to hantei
+// arrives with a winner and never derives the X that would claim a draw on
+// a bout whose winner is simultaneously wearing Ht. Exported so the
+// winner-un-draws rule is pinned without mounting the editor.
+export function teamBoutIsDraw(s, t) {
+  return t.winner === null && !!(s.draw || t.aTotal > 0 || t.bTotal > 0);
+}
+
 function renderTeamBoutMiddle(s, t, isDaihyoRow) {
-  const scored = t.aTotal > 0 || t.bTotal > 0;
-  const isDraw = s.draw || (t.winner === null && scored);
+  const isDraw = teamBoutIsDraw(s, t);
   const mid = boutMiddle(
     isDaihyoRow ? "daihyosen" : (isDraw ? "hikiwake" : ""),
     s.encho > 0 ? { periodCount: s.encho } : null,
     isDraw ? { type: "hikiwake" } : null,
   );
   return mid === "X" ? <span className="tsm-draw">X</span> : <span style={{ color: "var(--ink-3)" }}>{mid}</span>;
+}
+
+
+// preserveStoredDaihyosenVerdict: while a stored hantei verdict is
+// UNATTRIBUTABLE (rename drift: the stored winner name no longer matches
+// exactly one current side) and the operator has neither re-picked a side nor
+// cancelled, a correction save must NOT erase it - without this, fixing an
+// unrelated bout score on a reopened encounter silently flipped a hantei win
+// into a hikiwake (pool) or stripped a completed match's winner (knockout).
+// It preserves ONLY the untouched state: withdrawal is explicit (clearHantei),
+// re-picking replaces the verdict, and editing the daihyosen row itself
+// yields too - `tied` must reflect the CURRENT local scoreline, because
+// re-asserting decidedByHantei onto a row the operator just untied would
+// have the server reject the whole save ("requires a tied scoreline").
+// encho is deliberately NOT carried: the editor seeds its encho counter from
+// the stored row, so daihyosenEnchoFields already round-trips an untouched
+// value, and carrying it here would overwrite an operator's encho edit.
+export function preserveStoredDaihyosenVerdict({ armed, pickedSide, tied, existingDaihyosen }) {
+  if (!armed || pickedSide || !tied) return null;
+  if (!existingDaihyosen?.decidedByHantei || !existingDaihyosen.winner) return null;
+  return { winner: existingDaihyosen.winner, decidedByHantei: true };
 }
 
 // mp-bkg / mp-13y: resolveMatchLineup and resolveLineupTeamId are now shared
@@ -69,6 +103,41 @@ import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 // from teamSize and any persisted kachinuki bouts; the upper bound everywhere is
 // MAX_TEAM_SIZE (admin_helpers.jsx), kept in lockstep with the team-size input
 // caps in admin_competition.jsx and admin_setup.jsx.
+
+// recordedDaihyosenSideOf resolves which SIDE a stored daihyosen hantei names:
+// "" (none, or unattributable), "a" (AKA) or "b" (SHIRO).
+//
+// EXCLUSIVE-match only. The old `: "b"` fallback attributed any mismatch (a
+// renamed team, a same-name pair) to SHIRO, and since the verdict folds into
+// boutWinnerSide -> t.winner -> buildPatch, that silently FLIPPED the stored
+// winner to the losing side on the next save. Unattributable returns "": the
+// panel then opens ARMED with no side picked, so the operator re-states the
+// verdict rather than the editor guessing it.
+//
+// Module scope, not an inline IIFE in the component: it is a pure function of
+// the stored bout plus the match's two sides, which keeps the attribution rule
+// directly testable instead of only reachable through the DOM.
+function recordedDaihyosenSideOf(existingDaihyosen, m) {
+  if (!existingDaihyosen?.decidedByHantei || !existingDaihyosen.winner) return "";
+  // The exclusive-attribution rule is hanteiWinnerKey (shared with the
+  // individual editor's chip), not restated here.
+  const key = hanteiWinnerKey({ winner: existingDaihyosen.winner, sideA: m.sideA, sideB: m.sideB });
+  if (key) return key;
+  if (existingDaihyosen.winner === nameOf(m.sideA) && existingDaihyosen.winner === nameOf(m.sideB)) {
+    // A winner naming BOTH sides is INVALID data (team names are unique by
+    // rule) handled defensively: the NAME round-trips identically either
+    // way, but the match-level winner ID does not - buildPatch serializes
+    // winner as the seeded side's object and toBackendMatchResult stamps
+    // its uuid, so defaulting to "a" when team B holds the stored WinnerID
+    // would flip the persisted identity on a correction save. Prefer the
+    // side the match-level winner id names; only with no usable id default
+    // to "a" (Go's own side-A-first order).
+    const wid = m.winner?.id || "";
+    if (wid && wid === (m.sideB?.id || null)) return "b";
+    return "a";
+  }
+  return "";
+}
 
 // T131 helper: human-friendly position label for the team-match scoring
 // modal. 5-person teams use the canonical FIK names (POS_LABELS_5 from
@@ -179,7 +248,19 @@ export function isKachinukiBoutRemovable({ boutMode, currentBoutPlayed, lastScor
 // "Last:  beat  (fusensho)" with both names blank, and could even hand the
 // bout to the side that withdrew. The fusensho side wins regardless of the
 // cells. Widen or narrow this rule in ONE place only.
-export function boutWinnerSide({ aCount = 0, bCount = 0, draw = false, fusenshoSide = "" } = {}) {
+// hanteiSide is the same class of input as fusenshoSide: a decision that names
+// the winner over what the cells read. It applies ONLY to a tied scoreline
+// (FIK 7-5 / 29-6, mirrored by validation.go's equal-ippon-counts gate) and it
+// beats an operator draw flag: a hantei declares a winner, so it un-draws the
+// bout however level the scoreline. It also outranks fusenshoSide on tied
+// cells (a stale reopened hantei plus a new fusensho keeps the hantei side) —
+// not a new choice, the same precedence the old daihyosenWinner overlay had;
+// stated here so the ordering reads as intentional. Folding it in HERE (rather than overlaying
+// it at consumers) is what keeps every reader of subTotals[i].winner — the
+// centre chip colouring, the draw derivation, the save path — agreeing that a
+// hantei-decided bout is decided.
+export function boutWinnerSide({ aCount = 0, bCount = 0, draw = false, fusenshoSide = "", hanteiSide = "" } = {}) {
+  if ((hanteiSide === "a" || hanteiSide === "b") && aCount === bCount) return hanteiSide;
   if (draw) return null;
   if (fusenshoSide === "a" || fusenshoSide === "b") return fusenshoSide;
   if (aCount > bCount) return "a";
@@ -312,7 +393,7 @@ export function kachinukiBandModel({ subs, daihyosenIdx, isComplete, matchWinner
   // separate from `matchWinner` itself: winnerSideLR needs the RAW (possibly
   // {id,name}) form to prefer id equality over name (two teams CAN share a
   // display name), so matchWinner is passed through unflattened.
-  const matchWinnerName = matchWinner && typeof matchWinner === "object" ? matchWinner.name : matchWinner;
+  const matchWinnerName = nameOf(matchWinner);
   const played = [];
   (subs || []).forEach((s, idx) => {
     if (idx === daihyosenIdx || !subBoutHasBeenPlayed(s)) return;
@@ -323,8 +404,11 @@ export function kachinukiBandModel({ subs, daihyosenIdx, isComplete, matchWinner
     const names = namesAt ? namesAt(idx) : {};
     const aName = names.aName || "";
     const bName = names.bName || "";
-    const aN = (s.aPts || []).length;
-    const bN = (s.bPts || []).length;
+    // realIppons, not raw .length: an unfilled "•" placeholder or an empty cell
+    // is not a point. Raw length here made the band announce "Aka beat Shiro"
+    // under a bout row the scoreboard was rendering as a tie.
+    const aN = realIppons(s.aPts).length;
+    const bN = realIppons(s.bPts).length;
     // Winner/loser derive from the SIDE, never from name comparison — an
     // unresolved name must not collapse both sides onto one label. The side
     // itself comes from boutWinnerSide (the one winner rule), so a fusensho
@@ -628,11 +712,62 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // by hantei (judges' decision on a tied bout, FIK 7-5 / 29-6: encho
   // optional). Mirrors the individual ScoreEditorModal hantei flow but scoped to the
   // position DAIHYOSEN_POSITION row. "" = score-decided; "a"/"b" = hantei winner side.
-  const initialDaihyosenHantei = existingDaihyosen?.decidedByHantei
-    ? (existingDaihyosen.winner === (typeof m.sideA === "object" ? m.sideA?.name : m.sideA) ? "a" : "b")
-    : "";
-  const [daihyosenHantei, setDaihyosenHantei] = useStateA(initialDaihyosenHantei);
-  const [daihyosenHanteiArmed, setDaihyosenHanteiArmed] = useStateA(!!initialDaihyosenHantei);
+  // The seed is EXCLUSIVE-match only: the stored winner must equal exactly one
+  // current side name. The old `: "b"` fallback attributed any mismatch
+  // (renamed team, same-name pair) to SHIRO, and since the verdict now folds
+  // into boutWinnerSide -> t.winner -> buildPatch, that would silently FLIP
+  // the stored winner to the losing side on the next save. Unattributable
+  // seeds "": the panel opens ARMED with no side picked, so the operator
+  // re-states the verdict rather than the editor guessing it.
+  // Computed LIVE from the m prop, not frozen at mount: this pair is what the
+  // server currently holds, and the editor follows it (see the adopt effect
+  // below). A match has ONE result and every surface asking for it shows the
+  // same one; this editor is such a surface.
+  const daihyosenHanteiRecorded = !!existingDaihyosen?.decidedByHantei;
+  const recordedDaihyosenSide = recordedDaihyosenSideOf(existingDaihyosen, m);
+  const [daihyosenHantei, setDaihyosenHantei] = useStateA(recordedDaihyosenSide);
+  // Armed follows the RECORDED flag, not the resolved side, so an
+  // unattributable stored verdict still opens the panel for re-picking
+  // instead of silently reading as "no hantei".
+  const [daihyosenHanteiArmed, setDaihyosenHanteiArmed] = useStateA(daihyosenHanteiRecorded);
+  // ADOPT a verdict recorded on another device, so this editor cannot sit
+  // showing an un-armed hantei panel while the viewer, the bracket, the TV
+  // board and the export all show the Ht.
+  //
+  // Keyed on the two VALUES, not on `m`: an SSE reload re-creates the match
+  // object on every broadcast, so an object-keyed effect would fight the
+  // operator's every tap. Keyed on the primitives it fires only when the
+  // SERVER's verdict actually moves, which leaves a local pick or cancel
+  // standing (those do not move the server value) while still following a real
+  // change in either direction. It touches the verdict only, so the bout
+  // scores being edited are untouched.
+  //
+  // This replaces a pair of mount-frozen baselines. Freezing stopped the
+  // erase, but by making the editor show something other than the stored
+  // result — and a result that reads differently depending on which screen you
+  // look at is the worse failure. Because the editor now always shows the
+  // stored verdict, an explicit `false` from it is always the operator ruling
+  // on something in front of them, which is what let buildPatch's hanteiKnown
+  // guard go away entirely.
+  useEffectA(() => {
+    setDaihyosenHanteiArmed(daihyosenHanteiRecorded);
+    setDaihyosenHantei(recordedDaihyosenSide);
+  }, [daihyosenHanteiRecorded, recordedDaihyosenSide]);
+  // The ONE hantei undo, shared by the Ht chip and the panel Cancel so the
+  // two paths cannot drift. Like the pick buttons, it is LOCAL state only:
+  // hantei is an explicit-submit channel (autosave contract), so the verdict
+  // - picked, re-picked or withdrawn - rides the NEXT write of this match
+  // (any point edit's autosave, Finish, or Save correction) as part of the
+  // full subResults snapshot. Deliberately NO markScoringDirty here: a
+  // cancel-then-repick must not race a strip write against a repick that
+  // writes nothing, and a lone dirty-mark was dead on completed matches
+  // anyway (the debounced write only fires while running). If the operator
+  // abandons the editor entirely, the server keeps its verdict and the chip
+  // re-seeds from it on reopen - same as every other unsaved local edit.
+  const clearHantei = () => {
+    setDaihyosenHanteiArmed(false);
+    setDaihyosenHantei("");
+  };
   // Same teardown-race guard as ScoreEditorModal: covers external/
   // parent-driven unmount during in-flight save.
   const mountedRef = useRefA(true);
@@ -834,8 +969,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // the canonical signal: when "fusensho", figure out which side it
   // belongs to via the recorded winner so the UI re-opens with the
   // affordance shown as active.
-  const sideAName = typeof m.sideA === "object" ? m.sideA?.name : m.sideA;
-  const sideBName = typeof m.sideB === "object" ? m.sideB?.name : m.sideB;
+  const sideAName = nameOf(m.sideA);
+  const sideBName = nameOf(m.sideB);
   // seedSubAt builds the local sub state for one position index from the
   // CURRENT match prop (existingSub is re-derived each render). Used for
   // the one-time initial seed below AND to extend the rows when the server
@@ -852,8 +987,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       // opponent's pts are topped up (defensive against legacy/imported data).
       const rawAFouls = existing ? existing.hansokuA || 0 : 0;
       const rawBFouls = existing ? existing.hansokuB || 0 : 0;
-      const seedAPts = existing ? (existing.ipponsA || []).filter(x => x && x !== "•") : [];
-      const seedBPts = existing ? (existing.ipponsB || []).filter(x => x && x !== "•") : [];
+      const seedAPts = existing ? realIppons(existing.ipponsA) : [];
+      const seedBPts = existing ? realIppons(existing.ipponsB) : [];
       const reconA = reconcileFoulsAtOpen(rawAFouls, seedBPts);
       const reconB = reconcileFoulsAtOpen(rawBFouls, seedAPts);
       return {
@@ -935,10 +1070,21 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // hikiwake for IV/PW and serialises with decision="hikiwake". The winner
   // itself comes from boutWinnerSide — the one winner rule, shared with the
   // kachinuki band and End-match derivation.
-  const subTotals = subs.map(s => {
-    const aT = s.aPts.length;
-    const bT = s.bPts.length;
-    const winner = boutWinnerSide({ aCount: aT, bCount: bT, draw: s.draw, fusenshoSide: s.fusensho });
+  const subTotals = subs.map((s, i) => {
+    // Counted through the shared realIppons filter, like the individual editor's
+    // totals, the scoreboard's hanteiTied and Go's countScoringIppons. Raw
+    // .length disagreed with all three on a row holding a placeholder or empty
+    // cell: the editor read 2-1 (hantei panel hidden, verdict dropped by
+    // boutWinnerSide) while the scoreboard read 1-1 and rendered the Ht for the
+    // very same bout.
+    const aT = realIppons(s.aPts).length;
+    const bT = realIppons(s.bPts).length;
+    // The daihyosen row is the only bout that can carry a hantei verdict;
+    // boutWinnerSide itself enforces the tied-scoreline gate.
+    const winner = boutWinnerSide({
+      aCount: aT, bCount: bT, draw: s.draw, fusenshoSide: s.fusensho,
+      hanteiSide: i === daihyosenIdx ? daihyosenHantei : "",
+    });
     return { aTotal: aT, bTotal: bT, winner, draw: !!s.draw };
   });
 
@@ -954,13 +1100,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     pwB += s.bTotal;
   });
   // Hantei applies only to a tied daihyosen scoreline (FIK 7-5 / 29-6);
-  // otherwise the bout is decided by ippons like any other.
-  const daihyosenTied = hasDaihyosen && subTotals[daihyosenIdx].aTotal === subTotals[daihyosenIdx].bTotal;
-  const daihyosenWinner = hasDaihyosen
-    ? ((daihyosenTied && daihyosenHantei) ? daihyosenHantei : subTotals[daihyosenIdx].winner)
-    : null;
+  // otherwise the bout is decided by ippons like any other. Through the shared
+  // hanteiTied so this gate, the scoreboard's and Go's cannot answer differently.
+  const daihyosenTied = hasDaihyosen && hanteiTied(subs[daihyosenIdx].aPts, subs[daihyosenIdx].bPts);
+  // The hantei verdict is already folded into the winner by boutWinnerSide
+  // (hanteiSide input): subTotals[daihyosenIdx].winner IS the daihyosen
+  // verdict, so no overlay variable exists to re-attach one to.
   const teamWinner = hasDaihyosen
-    ? (daihyosenWinner || null)
+    ? (subTotals[daihyosenIdx].winner || null)
     : (ivA > ivB ? "a" : ivB > ivA ? "b" : pwA > pwB ? "a" : pwB > pwA ? "b" : null);
 
   // Finish guard: recording a team result is the highest-stakes action here, so
@@ -1461,11 +1608,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             <div className="tsm-center-marks">
               <div className="tsm-center-pts tsm-center-pts--shiro">
                 {s.bFouls >= 1 && <span className="tsm-foul-tri" title="Hansoku: 1 foul">▲</span>}
-                {[0, 1].map(i => <span key={i} className={`editor-side__pt ${s.bPts[i] ? "editor-side__pt--filled" : ""}`}>{s.bPts[i] || "·"}</span>)}
+                {sideSlotOrder("shiro").map(i => <span key={i} className={`editor-side__pt ${s.bPts[i] ? "editor-side__pt--filled" : ""}`}>{s.bPts[i] || "·"}</span>)}
               </div>
               <div className="team-sub-match__score">{renderTeamBoutMiddle(s, t, false)}</div>
               <div className="tsm-center-pts tsm-center-pts--aka">
-                {[1, 0].map(i => <span key={i} className={`editor-side__pt ${s.aPts[i] ? "editor-side__pt--filled" : ""}`}>{s.aPts[i] || "·"}</span>)}
+                {sideSlotOrder("aka").map(i => <span key={i} className={`editor-side__pt ${s.aPts[i] ? "editor-side__pt--filled" : ""}`}>{s.aPts[i] || "·"}</span>)}
                 {s.aFouls >= 1 && <span className="tsm-foul-tri" title="Hansoku: 1 foul">▲</span>}
               </div>
             </div>
@@ -1484,15 +1631,18 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // flagged writes (handlers_match.go scoreRequestBody).
   const buildPatch = (targetStatus, opts = {}) => {
     if (targetStatus === "scheduled") return { winner: null, status: "scheduled", score: null, ipponsA: [], ipponsB: [], subResults: [] };
+    // ONE preserve verdict for this save: the sub-row overlay and the
+    // match-level winner below must agree by construction.
+    const dhKeep = preserveStoredDaihyosenVerdict({ armed: daihyosenHanteiArmed, pickedSide: daihyosenHantei, tied: daihyosenTied, existingDaihyosen });
     let subResults = subs.map((s, idx) => {
       const t = subTotals[idx];
       const isDaihyo = idx === daihyosenIdx;
       // Hansoku Hs already in pts arrays via applyFoulIncrement: no fold.
       const aAll = s.aPts.slice(0, MAX_IPPONS_PER_SIDE);
       const bAll = s.bPts.slice(0, MAX_IPPONS_PER_SIDE);
-      // The daihyosen winner may come from hantei (tied bout); fall back
-      // to the score-derived winner otherwise.
-      const wKey = isDaihyo ? daihyosenWinner : t.winner;
+      // t.winner already carries the hantei verdict for the daihyosen row
+      // (boutWinnerSide's hanteiSide input), so no per-row overlay is needed.
+      const wKey = t.winner;
       const w = wKey === "a" ? m.sideA : wKey === "b" ? m.sideB : null;
       // T096/FR-031: per-bout fusensho overrides the default hikiwake/fought
       // mapping. The daihyosen always carries decision="daihyosen".
@@ -1500,7 +1650,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       if (isDaihyo) decision = "daihyosen";
       else if (s.fusensho) decision = "fusensho";
       else if (t.winner === null) decision = "hikiwake";
-      const teamWinnerName = w ? (typeof w === "object" ? w.name : w) : "";
+      const teamWinnerName = nameOf(w);
       // Competition-type-aware sub-bout identity: a kachinuki bout is consumed
       // per-competitor (advancement + bout-log export), so persist player-name
       // sides + winner; a fixed-position or daihyosen bout settles at the match
@@ -1530,7 +1680,19 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       // (validation.go validateSubBout). daihyosenEnchoFields emits the two
       // independently: encho is optional for a hantei decision.
       if (isDaihyo) {
+        // The verdict is always stated, never omitted: the editor adopts what
+        // the server holds, so it is never ruling on something it did not show.
+        // (There used to be a hanteiKnown guard for exactly that blind spot —
+        // an editor mounted before the verdict existed went silent rather than
+        // erase it. Adoption removes the blind spot, so the guard went too.)
+        // ORDER MATTERS below: daihyosenEnchoFields writes the field first and
+        // dhKeep restores a preserved `true` over it. Swapping the two lines
+        // re-opens the regression they exist to prevent (fixing an unrelated
+        // bout score silently flipping a hantei win into a hikiwake). That is
+        // still the path an UNATTRIBUTABLE stored verdict takes: the side
+        // resolves to "" so the field below says false, and dhKeep puts it back.
         Object.assign(entry, daihyosenEnchoFields({ enchoPeriodCount, daihyosenTied, daihyosenHantei }));
+        if (dhKeep) Object.assign(entry, dhKeep);
       } else if (isKachinuki && s.encho > 0) {
         // mp-gmcg: numbered-bout encho is the KACHINUKI knockout-tie
         // resolution (same pair keeps fighting the same bout; daihyosen
@@ -1548,7 +1710,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     if (isKachinuki) {
       subResults = subResults.filter((_entry, idx) => idx === daihyosenIdx || subBoutHasBeenPlayed(subs[idx]));
     }
-    const winner = teamWinner === "a" ? m.sideA : teamWinner === "b" ? m.sideB : null;
+    // While an unattributable stored verdict is being preserved (armed,
+    // unpicked), the MATCH-level result must survive too: deriving winner
+    // null + hikiwake here while the sub row keeps its verdict silently
+    // flipped a pool encounter's W/L/T to a draw (knockout saves bounced off
+    // "cannot mark completed with no winner").
+    const winner = teamWinner === "a" ? m.sideA : teamWinner === "b" ? m.sideB : (dhKeep ? (m.winner || null) : null);
     // correctionReason rides any write that AMENDS a finalized result: a
     // correction to a completed match, and (mp-gmcg) the write that completes
     // a REOPENED one, which the server refuses without it. Same field, same
@@ -1606,12 +1773,24 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
         ...correctionBlock,
       };
     }
+    const [winnerPts, loserPts] =
+      teamWinner === "a" ? [ivA, ivB] :
+      teamWinner === "b" ? [ivB, ivA] :
+      [Math.max(ivA, ivB), Math.min(ivA, ivB)];
     return {
       winner,
       status: "completed",
       ipponsA: [],
       ipponsB: [],
-      score: { type: teamWinner ? "ippon" : "hikiwake", winnerPts: teamWinner === "a" ? ivA : ivB, loserPts: teamWinner === "a" ? ivB : ivA, fouls: { a: 0, b: 0 }, corrected: isComplete },
+      // ONE swap, not two mirrored ternaries that had to agree by eye - the
+      // failure the third branch below exists to document already happened once.
+      // That branch is the dhKeep case: a PRESERVED but unattributable
+      // verdict forces type "ippon" while teamWinner stays null, and the old
+      // two-way ternary then fell through to the SHIRO figures for both
+      // slots - labelling the loser's IV as the winner's whenever the two
+      // differ. max/min cannot name the side either, but it can never invert
+      // them, and in every reachable daihyosen IV is tied so both agree.
+      score: { type: (teamWinner || dhKeep) ? "ippon" : "hikiwake", winnerPts, loserPts, fouls: { a: 0, b: 0 }, corrected: isComplete },
       subResults,
       ...enchoBlock(),
       ...correctionBlock,
@@ -1636,7 +1815,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // the comparison robust against array identity drift from setSubs.
   // Encho toggle is included so an operator-only encho change still
   // triggers the discard confirm.
-  const isDirty = JSON.stringify(subs) !== JSON.stringify(initSubsRef.current) || enchoPeriodCount !== initialEnchoPeriods || daihyosenHantei !== initialDaihyosenHantei;
+  // The verdict terms compare against what the SERVER holds, not a mount-time
+  // snapshot: adopting a verdict recorded elsewhere moves both sides together
+  // and so is not dirty, which is right — it is not an unsaved change of the
+  // operator's, and a "discard unsaved changes?" prompt on an editor nobody
+  // touched trains them to dismiss the one prompt that protects real work.
+  const isDirty = JSON.stringify(subs) !== JSON.stringify(initSubsRef.current) || enchoPeriodCount !== initialEnchoPeriods || daihyosenHantei !== recordedDaihyosenSide || daihyosenHanteiArmed !== daihyosenHanteiRecorded;
 
   // Match ScoreEditorModal's dismiss contract: never close mid-submit
   // (setState-after-unmount), AND confirm-then-discard when the user has
@@ -1941,16 +2125,42 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             // Sub-bout is decided once either side reaches 2 ippons.
             const subBoutDecided = isBoutDecided(s.aPts, s.bPts);
 
-            const scoreDisplay = (() => {
-              // mp-4pc: a hantei-decided daihyosen has a tied scoreline but
-              // a declared winner: show the winner + (Ht) rather than X.
-              if (isDaihyoRow && daihyosenTied && daihyosenHantei) {
-                return <span>{`${t.bTotal}–${t.aTotal}`} <span style={{ fontSize: 11, opacity: 0.7 }}>(Ht)</span></span>;
-              }
-              // Everything else derives from the SINGLE-SOURCE boutMiddle via the
-              // shared helper (vs/X/(E)/(DH)) — never restated here (CLAUDE.md).
-              return renderTeamBoutMiddle(s, t, isDaihyoRow);
-            })();
+            // The side key ("a"/"b") that won the hantei on this row, else "".
+            const dhHantei = isDaihyoRow && daihyosenTied ? daihyosenHantei : "";
+            // One shape for both sides. Everything that differs is derived from
+            // the side itself rather than passed in, so a caller cannot pair a
+            // side with the other side's slot index or testid: aka renders its
+            // pair reversed (so each side's first ippon stays on its name side),
+            // and only the hantei winner carries an Ht.
+            const ptSlots = (rs) => {
+              const htSlot = hanteiSlot(dhHantei === rs.key, rs.pts);
+              // sideSlotOrder: the same visual mirror the read-only scoreboard
+              // applies, so the editor and the board can never disagree about
+              // which cell is a side's outer (name-side) one.
+              const order = sideSlotOrder(rs.color);
+              return order.map(i => {
+                const isHt = htSlot === i;
+                return (
+                  <button key={i} className={`editor-side__pt ${(isHt || rs.pts[i]) ? "editor-side__pt--filled" : ""}`}
+                    data-testid={isHt ? `team-daihyosen-ht-${rs.color}` : undefined}
+                    // The Ht chip mutates the hantei verdict, so it obeys the
+                    // same submit-time freeze as the arm/pick/Cancel controls;
+                    // an un-guarded click mid-save would clear the local
+                    // verdict while the in-flight patch records it.
+                    disabled={isHt && (submitting || decisionSubmitting)}
+                    onClick={() => (isHt ? clearHantei() : rs.setPts(rs.pts.filter((_, j) => j !== i)))}
+                    title={isHt ? "Hantei winner: click to undo" : "Click to remove"}>
+                    {isHt ? "Ht" : (rs.pts[i] || "·")}
+                  </button>
+                );
+              });
+            };
+
+            // The centre carries the SINGLE-SOURCE boutMiddle projection only
+            // (vs/X/(E)/(DH)) — never restated here, and never a result mark or
+            // a numeric bout score (CLAUDE.md). A hantei winner already reaches
+            // t.winner via boutWinnerSide, so no extra argument is needed.
+            const scoreDisplay = renderTeamBoutMiddle(s, t, isDaihyoRow);
 
             return (
               <div key={idx} className={"team-sub-match" + (idx === editingDoneBoutIdx ? " team-sub-match--correcting" : "")}>
@@ -2057,33 +2267,26 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                         <div className="team-sub-match__center">
                           <div className="tsm-center-marks">
                           <div className="tsm-center-pts tsm-center-pts--shiro">
-                            {/* Outstanding hansoku → red ▲ next to the name (the
-                                outer edge), rendered before the slots. A 2nd foul
-                                discharges to an H ippon for the opponent and clears
-                                this. (running_a_kendo_tournament.md: ▲ next to name.) */}
+                            {/* Outstanding hansoku → red ▲ between the competitor's
+                                name and that side's ippon slots, so rendered before
+                                the slots. A 2nd foul discharges to an H ippon for the
+                                opponent and clears this. (FIK Table 2, p.16 Taisho
+                                row; running_a_kendo_tournament.md: ▲ next to name.) */}
                             {rowSides[0].fouls >= 1 && <span className="tsm-foul-tri" title="Hansoku: 1 foul">▲</span>}
-                            {[0, 1].map(i => (
-                              <button key={i} className={`editor-side__pt ${rowSides[0].pts[i] ? "editor-side__pt--filled" : ""}`}
-                                onClick={() => rowSides[0].setPts(rowSides[0].pts.filter((_, j) => j !== i))} title="Click to remove">
-                                {rowSides[0].pts[i] || "·"}
-                              </button>
-                            ))}
+                            {ptSlots(rowSides[0])}
                           </div>
                           <div className={`team-sub-match__score ${scoreDisplay && t.winner === "b" ? "team-sub-match__score--a-win" : scoreDisplay && t.winner === "a" ? "team-sub-match__score--b-win" : ""}`}>
                             {scoreDisplay}
                           </div>
                           <div className="tsm-center-pts tsm-center-pts--aka">
-                            {/* Aka fills outside-in: its first ippon sits on the
-                                outer (right) edge nearest the Aka name, so render
-                                the slots in reverse (pts[1] then pts[0]). */}
-                            {[1, 0].map(i => (
-                              <button key={i} className={`editor-side__pt ${rowSides[1].pts[i] ? "editor-side__pt--filled" : ""}`}
-                                onClick={() => rowSides[1].setPts(rowSides[1].pts.filter((_, j) => j !== i))} title="Click to remove">
-                                {rowSides[1].pts[i] || "·"}
-                              </button>
-                            ))}
-                            {/* Outstanding hansoku → red ▲ next to the Aka name
-                                (the outer/right edge), after the reversed slots. */}
+                            {/* Aka fills outside-in: its first ippon sits in the
+                                outer (right) one of its OWN two slots, nearest the
+                                Aka name, so render the slots in reverse (pts[1] then
+                                pts[0]). The pair itself stays inside, flanking the
+                                centre score (FIK Table 2, p.16). */}
+                            {ptSlots(rowSides[1])}
+                            {/* Outstanding hansoku → red ▲ between the Aka name and
+                                that side's ippon slots, so after the reversed slots. */}
                             {rowSides[1].fouls >= 1 && <span className="tsm-foul-tri" title="Hansoku: 1 foul">▲</span>}
                           </div>
                           </div>
@@ -2278,7 +2481,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                     <button type="button" className={`btn btn--sm ${daihyosenHantei === "a" ? "btn--primary" : ""}`} data-testid="team-daihyosen-hantei-aka"
                       onClick={() => setDaihyosenHantei("a")} disabled={submitting || decisionSubmitting}>AKA wins</button>
                     <button type="button" className="btn btn--ghost btn--sm" data-testid="team-daihyosen-hantei-cancel"
-                      onClick={() => { setDaihyosenHanteiArmed(false); setDaihyosenHantei(""); }} disabled={submitting || decisionSubmitting}>Cancel</button>
+                      onClick={clearHantei} disabled={submitting || decisionSubmitting}>Cancel</button>
                   </div>
                 )}
               </div>

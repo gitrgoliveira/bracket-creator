@@ -3,8 +3,8 @@
 // delegation tests in viewer.test.jsx / display_white_board.test.jsx don't see.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
-import { matchMiddleMark } from '../bracket.jsx';
-import { boutRows, findInTree, collectText } from './helpers/vdom.js';
+import { matchMiddleMark, defaultWinMaru } from '../bracket.jsx';
+import { boutRows, findInTree, collectText, hasClass } from './helpers/vdom.js';
 
 describe('match_scoreboard: withNumber', () => {
   let withNumber;
@@ -75,6 +75,30 @@ describe('match_scoreboard: teamIVPW', () => {
     expect(teamIVPW(subs, 'Team A', 'Team B')).toEqual({ ivShiro: 0, ivAka: 0, pwShiro: 0, pwAka: 0 });
   });
 
+  it('credits AKA when the winner matches both sides, matching Go (invalid data)', () => {
+    // A winner naming both sides is INVALID data (team names are unique by
+    // rule); this pins the DEFENSIVE resolution: Go's isWinForSide /
+    // TeamResultFrom / SideMarksLR all resolve it to side A (aka) by check
+    // order, and the JS summary must agree with the server's numbers rather
+    // than credit nobody and contradict the standings table.
+    const subs = [
+      { position: 1, sideA: '', sideB: '', winner: 'Seibukan', ipponsA: ['M'], ipponsB: ['M'] },
+    ];
+    expect(teamIVPW(subs, 'Seibukan', 'Seibukan')).toEqual({ ivShiro: 0, ivAka: 1, pwShiro: 1, pwAka: 1 });
+  });
+
+  it('rows and summary agree on cross-level ambiguity (shared subWinnerSides)', () => {
+    // Drifted mixed-level data: the winner matches a SUB side on one flank and
+    // the MATCH side on the other. Both the bout row and the IV summary go
+    // through the one subWinnerSides resolver, which is aka-first like Go's
+    // isWinForSide - so both attribute AKA, and neither can contradict the
+    // other or the server's numbers.
+    const subs = [
+      { position: 1, sideA: 'X', sideB: '', winner: 'X', ipponsA: ['M'], ipponsB: ['M'] },
+    ];
+    expect(teamIVPW(subs, 'Y', 'X')).toEqual({ ivShiro: 0, ivAka: 1, pwShiro: 1, pwAka: 1 });
+  });
+
   it('falls back to ippon comparison when winner matches neither side', () => {
     const subs = [
       { position: 1, sideA: 'Aka P', sideB: 'Shiro P', winner: '', ipponsB: ['M', 'K'], ipponsA: [] },
@@ -82,6 +106,12 @@ describe('match_scoreboard: teamIVPW', () => {
     expect(teamIVPW(subs)).toEqual({ ivShiro: 1, ivAka: 0, pwShiro: 2, pwAka: 0 });
   });
 });
+
+// What the centre cell actually holds. Asserting that a `sub-row-hantei` testid
+// is absent would be VACUOUS: no production code emits a centre Ht any more, so
+// such an expectation can never fail and would not catch a reintroduction under
+// a different testid. Assert on the centre's contents instead.
+const centreText = (tree) => collectText(findInTree(tree, n => hasClass(n, 'msb-vs')));
 
 describe('match_scoreboard components', () => {
   const realReact = global.React;
@@ -193,10 +223,155 @@ describe('match_scoreboard components', () => {
       winner: 'Same Name',
     };
     const tree = runtime.mount(IndividualScore, { match });
-    // Neither side wears the win mark; the centre Ht fallback still appears.
+    // Neither side wears the win mark. There is NO centre Ht either: the centre
+    // carries shared marks only, so an unattributable winner gets no mark at
+    // all rather than one in the shared cell. Unreachable through the API,
+    // which requires a winner and disambiguates same-name pairs by uuid.
     expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-a')).toBeNull();
     expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-b')).toBeNull();
-    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-row-hantei')).toBeTruthy();
+    expect(centreText(tree)).toBe('vs');
+    expect(collectText(tree)).not.toContain('Ht');
+  });
+
+  it('IndividualScore: a 1-1 hantei puts Ht in the winner\'s free slot, never the centre', () => {
+    // A hantei is decided from a TIED scoreline (validation.go), so 1-1 is the
+    // normal case after encho and both of the winner's slots are NOT free.
+    // Ht fills the next free slot in the same outside-to-inside order a point
+    // would, giving [K][ ] vs [Ht][M] with Aka (sideA) the hantei winner.
+    const match = {
+      sideA: { id: 'p1', name: 'Aka' }, sideB: { id: 'p2', name: 'Shiro' },
+      ipponsA: ['M'], ipponsB: ['K'], decidedByHantei: true,
+      winner: { id: 'p1', name: 'Aka' },
+    };
+    const tree = runtime.mount(IndividualScore, { match });
+    // Never in the shared centre cell: it stays the plain separator.
+    expect(centreText(tree)).toBe('vs');
+    // The scored M survives: Ht is added, it does not replace the point.
+    const text = collectText(tree);
+    expect(text).toContain('Ht');
+    expect(text).toContain('M');
+    expect(text).toContain('K');
+    // Aka's group renders inner-to-outer, so the free INNER slot holds Ht and
+    // the outer (name-side) slot keeps M: reading left to right, Ht then M.
+    expect(text.indexOf('Ht')).toBeLessThan(text.lastIndexOf('M'));
+    // The win mark rides on Aka, not Shiro.
+    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-a')).toBeTruthy();
+    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-b')).toBeNull();
+  });
+
+  it('IndividualScore threads encho: the centre can read (E)', () => {
+    // Regression: the synthesised sub dropped `encho`, so matchMiddleMark could
+    // never produce (E) on an individual row — and these rows carry no separate
+    // centre chip to compensate, so the overtime was invisible.
+    const match = {
+      sideA: { id: 'p1', name: 'Aka' }, sideB: { id: 'p2', name: 'Shiro' },
+      ipponsA: ['M'], ipponsB: [], winner: { id: 'p1', name: 'Aka' },
+      encho: { periodCount: 1 },
+    };
+    const tree = runtime.mount(IndividualScore, { match });
+    expect(centreText(tree)).toBe('(E)');
+  });
+
+  it('IndividualScore threads encho: a default win in overtime is ONE maru', () => {
+    // FIK marks a default win with one maru per awarded point: two in
+    // regulation, ONE in encho. Without the encho passthrough every default win
+    // rendered the regulation pair.
+    global.window.defaultWinMaru = defaultWinMaru;
+    const match = {
+      sideA: { id: 'p1', name: 'Aka' }, sideB: { id: 'p2', name: 'Shiro' },
+      ipponsA: [], ipponsB: [], winner: { id: 'p1', name: 'Aka' },
+      decision: 'fusensho', encho: { periodCount: 1 },
+    };
+    // Collect the whole aka SLOT GROUP: the sub-win-a testid sits on cell 0
+    // only, which reads a single maru in both cases and would not distinguish.
+    const tree = runtime.mount(IndividualScore, { match });
+    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-a')).toBeTruthy();
+    expect(collectText(findInTree(tree, n =>
+      typeof n?.props?.className === 'string' && n.props.className.includes('msb-slots--aka')))).toBe('\u25cb');
+    delete global.window.defaultWinMaru;
+  });
+
+  it('IndividualScore: a default win in REGULATION is the maru pair', () => {
+    // The control for the test above: same match without encho keeps ○○, so
+    // the single ○ there is attributable to the passthrough and not to the
+    // helper always returning one.
+    global.window.defaultWinMaru = defaultWinMaru;
+    const match = {
+      sideA: { id: 'p1', name: 'Aka' }, sideB: { id: 'p2', name: 'Shiro' },
+      ipponsA: [], ipponsB: [], winner: { id: 'p1', name: 'Aka' },
+      decision: 'fusensho', encho: null,
+    };
+    const tree = runtime.mount(IndividualScore, { match });
+    expect(collectText(findInTree(tree, n =>
+      typeof n?.props?.className === 'string' && n.props.className.includes('msb-slots--aka')))).toBe('\u25cb\u25cb');
+    delete global.window.defaultWinMaru;
+  });
+
+  it('does not fabricate an Ht on an UNTIED drifted scoreline', () => {
+    // validation.go and boutWinnerSide both gate hantei on equal ippon counts;
+    // the mark mirrors that. A drifted decidedByHantei on a 2-1 row renders
+    // its letters plainly instead of displaying a judges'-decision mark on a
+    // bout the ippons show was decided on points.
+    const sub = {
+      position: 1, sideA: 'Aka P', sideB: 'Shiro P',
+      ipponsA: ['M', 'K'], ipponsB: ['D'], decidedByHantei: true, winner: 'Aka P',
+    };
+    const tree = runtime.mount(BoutSubRow, { sub, index: 0, lineupA: null, lineupB: null, teamSize: 5 });
+    expect(collectText(tree)).not.toContain('Ht');
+    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-a')).toBeNull();
+  });
+
+  it('judges tied on RAW ippons, not the capped display pair (3-2 is untied)', () => {
+    // ipponLetters caps each side at the 2 sanbon slots, so a drifted 3-2 row
+    // would read 2-2 through the display pair and pass the tie gate. The gate
+    // counts the raw arrays instead.
+    const sub = {
+      position: 1, sideA: 'Aka P', sideB: 'Shiro P',
+      ipponsA: ['M', 'K', 'D'], ipponsB: ['M', 'K'], decidedByHantei: true, winner: 'Aka P',
+    };
+    const tree = runtime.mount(BoutSubRow, { sub, index: 0, lineupA: null, lineupB: null, teamSize: 5 });
+    expect(collectText(tree)).not.toContain('Ht');
+  });
+
+  it('marks AKA (never both, never neither) when the winner matches both sides', () => {
+    // A winner string-matching both match-level sides is INVALID data (team
+    // names are unique by rule; only drifted or hand-edited files produce
+    // it). Defensive resolution: marking BOTH asserted two winners (the
+    // original bug); marking NEITHER hid the verdict AND contradicted the
+    // Go-computed standings/export, which resolve this case to side A by
+    // check order. One side - the same side Go picks - wears it.
+    const sub = {
+      position: -1, ipponsA: ['M'], ipponsB: ['M'],
+      decidedByHantei: true, winner: 'Seibukan',
+    };
+    const tree = runtime.mount(BoutSubRow, {
+      sub, index: 0, lineupA: null, lineupB: null, teamSize: 3, isDH: true,
+      matchSideA: 'Seibukan', matchSideB: 'Seibukan',
+    });
+    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-a')).toBeTruthy();
+    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-b')).toBeNull();
+    expect(centreText(tree)).not.toContain('Ht');
+  });
+
+  it('IndividualScore: with both slots full the Ht rides beside them, never the centre', () => {
+    // resultSlot reports `loose` when there is no free slot. 2-2 is IMPOSSIBLE
+    // under the rules and unreachable through any UI (ippon entry stops at 2);
+    // only hand-corrupted data reaches this branch, whose sole job is to never
+    // overwrite a recorded point and never write the shared centre.
+    const match = {
+      sideA: { id: 'p1', name: 'Aka' }, sideB: { id: 'p2', name: 'Shiro' },
+      ipponsA: ['M', 'K'], ipponsB: ['M', 'K'], decidedByHantei: true,
+      winner: { id: 'p1', name: 'Aka' },
+    };
+    const tree = runtime.mount(IndividualScore, { match });
+    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-ht-a')).toBeTruthy();
+    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-ht-b')).toBeNull();
+    // Both struck points survive: the mark did not overwrite either slot.
+    const text = collectText(tree);
+    expect(text).toContain('M');
+    expect(text).toContain('K');
+    expect(centreText(tree)).not.toContain('Ht');
+    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-b')).toBeNull();
   });
 
   it('IndividualScore: ids resolve a same-name head-to-head correctly (winner side gets Ht)', () => {
@@ -208,10 +383,10 @@ describe('match_scoreboard components', () => {
       winner: { id: 'p1', name: 'Same Name' },
     };
     const tree = runtime.mount(IndividualScore, { match });
-    // p1 = sideA = aka → win mark on aka, none on shiro, no centre fallback.
+    // p1 = sideA = aka → win mark on aka, none on shiro, plain centre.
     expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-a')).toBeTruthy();
     expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-b')).toBeNull();
-    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-row-hantei')).toBeNull();
+    expect(centreText(tree)).toBe('vs');
   });
 
   it('IndividualScore renders the ippon-letter slots (§263)', () => {
@@ -367,6 +542,33 @@ describe('match_scoreboard components', () => {
     expect(text).toContain('White Team'); expect(text).toContain('Red Team');
   });
 
+  it('a DRAWN team encounter leaves the summary centre bare (the mark is the drawn BOUT\'s)', () => {
+    // Operator ruling: a middle mark belongs only in the middle of an
+    // INDIVIDUAL FIGHT. The summary row is an aggregate (IV/PW), not a fight,
+    // so its centre stays bare even when the encounter itself is tied - here
+    // IV 1-1, PW 2-2, decided as a hikiwake. The X for the drawn bout 3 lives
+    // in that BOUT's centre ('BoutSubRow marks a hikiwake with X' above);
+    // nothing is echoed up to the summary. Threading a match-level mark into
+    // this spacer was tried twice and rejected both times, so pin it empty.
+    const subResults = [
+      { position: 1, sideA: 'K1', sideB: 'O1', ipponsA: ['M'], ipponsB: [], winner: 'K1' },
+      { position: 2, sideA: 'K2', sideB: 'O2', ipponsA: [], ipponsB: ['K'], winner: 'O2' },
+      { position: 3, sideA: 'K3', sideB: 'O3', ipponsA: ['M'], ipponsB: ['M'], decision: 'hikiwake' },
+    ];
+    const tree = runtime.mount(TeamScoreboard, {
+      subResults, lineupA: null, lineupB: null, teamSize: 3, showDH: false,
+      matchSideA: 'Kyoto', matchSideB: 'Osaka',
+    });
+    // Guard the fixture: the encounter really is tied, so an aggregate-level
+    // mark would have something to describe if the rule allowed one.
+    const summary = findInTree(tree, n => n?.props?.['data-testid'] === 'team-summary');
+    expect(summary).toBeTruthy();
+    expect(collectText(summary)).toContain('IV');
+    const summaryCentre = findInTree(summary, n => hasClass(n, 'msb-vs'));
+    expect(summaryCentre).toBeTruthy();
+    expect(collectText(summaryCentre)).toBe('');
+  });
+
   it('BoutSubRow puts the hantei "Ht" mark on the winning side, not the centre (mp-13y #3/#7)', () => {
     const sub = { position: -1, sideA: 'Aka T', sideB: 'Shiro T', winner: 'Aka T', ipponsA: [], ipponsB: [], decidedByHantei: true };
     const tree = runtime.mount(BoutSubRow, { sub, index: 0, lineupA: null, lineupB: null, teamSize: 2, isDH: true });
@@ -375,7 +577,7 @@ describe('match_scoreboard components', () => {
     expect(winA).toBeTruthy();
     expect(collectText(winA)).toContain('Ht');
     expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-b')).toBeNull();
-    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-row-hantei')).toBeNull();
+    expect(centreText(tree)).not.toContain('Ht');
   });
 
   it('BoutSubRow marks a non-hantei ippon-less win (fusensho/kiken) with ○ on the winner', () => {
@@ -406,7 +608,7 @@ describe('match_scoreboard components', () => {
     const winA = findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-a');
     expect(winA).toBeTruthy();
     expect(collectText(winA)).toContain('Ht');
-    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-row-hantei')).toBeNull();
+    expect(centreText(tree)).not.toContain('Ht');
   });
 
   it('TeamScoreboard threads shiroName/akaName into the Daihyosen sub as teamB/teamA', () => {

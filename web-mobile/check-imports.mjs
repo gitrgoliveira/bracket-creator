@@ -12,7 +12,7 @@
 // Exit 0   all imports resolved
 // Exit 1   one or more named imports missing from their source module
 
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { resolve, dirname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -158,6 +158,99 @@ for (const modName of CHECK_MODULES) {
 
 if (totalErrors > 0) {
   console.error(`\n${totalErrors} import mismatch(es), fix exports or imports before merging.`);
+  process.exit(1);
+}
+
+
+// ---------------------------------------------------------------------------
+// Phase 2: script-tag / import URL agreement (the double-evaluation guard)
+// ---------------------------------------------------------------------------
+//
+// A browser keys an ES module by its EXACT URL. A module that is both
+// <script type="module" src="...">-tagged in index.html AND imported by another
+// module therefore loads TWICE unless the two URLs match character for
+// character — once per key. The file evaluates twice, doubling its download and
+// parse, and any module-level state (a cache, a counter, a singleton) exists in
+// two independent copies while `window.*` assignments race.
+//
+// It is easy to reintroduce because the two halves live apart and each looks
+// right on its own: a "?v=N" cache-bust added to a tag, or a new import of a
+// module that happens to be tagged. index.html already carried a note about
+// this for the viewer modules; bracket, ui and qr had drifted into it anyway,
+// which is why the rule is checked here rather than described again.
+//
+// The server rewrites "/dist/X.jsx" to the compiled "dist/X.js"
+// (internal/mobileapp/server.go), so tagging the ".jsx" form is what makes a
+// tag agree with an import of "./X.jsx".
+function checkScriptTagUrls() {
+  const htmlPath = resolve(dirname(fileURLToPath(import.meta.url)), 'index.html');
+  const html = readFileSync(htmlPath, 'utf8');
+  // Ignore commented-out tags: the file documents this very rule in comments
+  // that contain example src="..." strings.
+  // Only HTML comments are stripped. Running the JS comment-stripper over HTML
+  // would delete from any "//" (e.g. inside an absolute src) to end of line,
+  // which could swallow a live <script> tag and hide a real divergence.
+  const htmlLive = html.replace(/<!--[\s\S]*?-->/g, '');
+
+  // stem -> [full src]. A LIST, not a single value: a module tagged twice is
+  // the worst case this check exists for (two tags = two evaluations even
+  // without any import), and keeping only the last would hide it.
+  const tagged = new Map();
+  for (const m of htmlLive.matchAll(/<script[^>]+src="(\/dist\/([^"?]+)(?:\?[^"]*)?)"/g)) {
+    const [, fullSrc, file] = m;
+    const stem = file.replace(/\.[^.]+$/, '');
+    if (!tagged.has(stem)) tagged.set(stem, []);
+    tagged.get(stem).push(fullSrc);
+  }
+
+  // url -> Set(importers). The stem is derivable from the url, so one level.
+  const importedBy = new Map();
+  for (const file of readdirSync(JS_DIR)) {
+    if (!/\.(jsx|js)$/.test(file)) continue;
+    const src = stripComments(readFileSync(resolve(JS_DIR, file), 'utf8'));
+    // `from './x'` covers static named/default/namespace imports and re-exports;
+    // `import './x'` covers side-effect-only imports, which load the module just
+    // as surely and so must agree with any tag too. `import('./x')` is the same
+    // again for a DYNAMIC one: it was invisible here because the separator was
+    // written as \s+, which a "(" does not satisfy, so a module lazily importing
+    // a script-tagged sibling would evaluate twice with the build still green.
+    // \b so the now-optional whitespace cannot let an identifier ENDING in
+    // "import" (myImport('./x')) read as the keyword.
+    for (const m of src.matchAll(/\b(?:from|import)\s*\(?\s*['"]\.\/([^'"]+)['"]/g)) {
+      const url = `/dist/${m[1]}`;
+      if (!importedBy.has(url)) importedBy.set(url, new Set());
+      importedBy.get(url).add(file);
+    }
+  }
+  const stemOf = (url) => url.replace(/^\/dist\//, '').replace(/\?.*$/, '').replace(/\.[^.]+$/, '');
+
+  let errors = 0;
+  for (const [stem, srcs] of tagged) {
+    if (srcs.length > 1) {
+      errors++;
+      console.error(`  ✗ ${stem}: tagged ${srcs.length} times (${srcs.join(', ')}) — each tag is its own module URL.`);
+    }
+  }
+  for (const [url, importers] of importedBy) {
+    const srcs = tagged.get(stemOf(url));
+    if (!srcs) continue; // imported only: one URL, nothing to agree with
+    for (const tagSrc of srcs) {
+      if (url === tagSrc) continue;
+      errors++;
+      console.error(
+        `  ✗ ${stemOf(url)}: <script src="${tagSrc}"> but imported as "${url}" ` +
+        `by ${[...importers].sort().join(', ')} — two module URLs, so it ` +
+        `evaluates twice. Make the tag match the import specifier.`);
+    }
+  }
+  if (errors === 0) console.log('  ✓ every script tag agrees with its import URL');
+  return errors;
+}
+
+console.log('\nChecking script-tag / import URL agreement...');
+const tagErrors = checkScriptTagUrls();
+if (tagErrors > 0) {
+  console.error(`\n${tagErrors} module(s) would load twice, fix index.html before merging.`);
   process.exit(1);
 }
 

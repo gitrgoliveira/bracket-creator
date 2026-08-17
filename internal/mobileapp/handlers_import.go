@@ -372,7 +372,7 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 	if len(parsedPlayers) > 0 {
 		// helper.Player is a type alias for domain.Player (NFR-007); the
 		// parser output flows straight into SaveParticipants.
-		if err := store.SaveParticipants(entry.ID, parsedPlayers); err != nil {
+		if err := store.SaveParticipantsRestored(entry.ID, parsedPlayers); err != nil {
 			_ = store.DeleteCompetition(entry.ID) // best-effort rollback
 			res.Error = "save participants: " + err.Error()
 			return res

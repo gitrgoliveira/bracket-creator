@@ -4,6 +4,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -750,4 +751,115 @@ func TestParsePoolMatchesRecords_ClampsNegativeFlags(t *testing.T) {
 	require.Len(t, got, 1)
 	assert.Equal(t, 3, got[0].FlagsA)
 	assert.Equal(t, 2, got[0].FlagsB)
+}
+
+// A pool-match hantei used to survive in memory and on the SSE wire but not a
+// restart: pool-matches.csv has no DecidedByHantei column, and the gap was
+// written off because FIK does not normally allow hantei in pool play.
+// Operators do run it, though, and no column is needed — a hantei occupies a
+// point SLOT, so the existing IpponsA/IpponsB columns carry it.
+func TestPoolMatchHanteiSurvivesARestart(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	compID := "cup"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Cup"}))
+
+	// A 1-1 pool match taken to a judges' decision: the tied scoreline the
+	// rule requires, with Alice declared the winner.
+	require.NoError(t, store.SavePoolMatches(compID, []MatchResult{{
+		ID: "Pool A-1", SideA: "Alice", SideB: "Bob", Winner: "Alice",
+		Status:  MatchStatusCompleted,
+		IpponsA: []string{"M"}, IpponsB: []string{"K"},
+		DecidedByHantei: HanteiExplicit(true),
+	}}))
+
+	// A fresh Store over the same directory: nothing survives but the files.
+	reopened, err := NewStore(dir)
+	require.NoError(t, err)
+	got, err := reopened.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+
+	assert.True(t, got[0].DecidedByHantei != nil && *got[0].DecidedByHantei,
+		"the judges' decision must survive the restart")
+	assert.Equal(t, "Alice", got[0].Winner)
+	// The mark is a STORAGE encoding: above the store the ippons are exactly
+	// what was written, so no counter, standings figure or export sees an "Ht".
+	assert.Equal(t, []string{"M"}, got[0].IpponsA)
+	assert.Equal(t, []string{"K"}, got[0].IpponsB)
+	assert.Equal(t, 1, domain.CountScoringIppons(got[0].IpponsA))
+	assert.Equal(t, 1, domain.CountScoringIppons(got[0].IpponsB))
+	// Still tied, so the verdict it rests on is still valid after the trip.
+	assert.True(t, domain.HanteiTiedScoreline(got[0].IpponsA, got[0].IpponsB))
+}
+
+func TestPoolMatchHanteiEncoding(t *testing.T) {
+	t.Run("the mark rides the winner's side", func(t *testing.T) {
+		r := &MatchResult{SideA: "Alice", SideB: "Bob", Winner: "Bob",
+			IpponsA: []string{"M"}, IpponsB: []string{"K"},
+			DecidedByHantei: HanteiExplicit(true)}
+		a, b := encodeHanteiIntoIppons(r)
+		assert.Equal(t, []string{"M"}, a)
+		assert.Equal(t, []string{"K", domain.HanteiMark}, b)
+		// The struct itself is untouched: the encoding is for the writer only.
+		assert.Equal(t, []string{"K"}, r.IpponsB)
+	})
+
+	t.Run("a 0-0 hantei still has a slot for it", func(t *testing.T) {
+		r := &MatchResult{SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			IpponsA: []string{}, IpponsB: []string{},
+			DecidedByHantei: HanteiExplicit(true)}
+		a, _ := encodeHanteiIntoIppons(r)
+		assert.Equal(t, []string{domain.HanteiMark}, a)
+	})
+
+	t.Run("no hantei, no mark", func(t *testing.T) {
+		r := &MatchResult{SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			IpponsA: []string{"M", "K"}, DecidedByHantei: HanteiExplicit(false)}
+		a, b := encodeHanteiIntoIppons(r)
+		assert.Equal(t, []string{"M", "K"}, a)
+		assert.Empty(t, b)
+	})
+
+	t.Run("an unattributable winner is not guessed at", func(t *testing.T) {
+		r := &MatchResult{SideA: "Alice", SideB: "Bob", Winner: "Carol",
+			IpponsA: []string{"M"}, IpponsB: []string{"K"},
+			DecidedByHantei: HanteiExplicit(true)}
+		a, b := encodeHanteiIntoIppons(r)
+		assert.Equal(t, []string{"M"}, a)
+		assert.Equal(t, []string{"K"}, b)
+	})
+
+	t.Run("re-saving a loaded match does not double the mark", func(t *testing.T) {
+		r := &MatchResult{SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"K"},
+			DecidedByHantei: HanteiExplicit(true)}
+		a, _ := encodeHanteiIntoIppons(r)
+		assert.Equal(t, []string{"M", domain.HanteiMark}, a)
+	})
+
+	t.Run("decode strips the mark and raises the flag", func(t *testing.T) {
+		m := &MatchResult{IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"K"}}
+		decodeHanteiFromIppons(m)
+		assert.Equal(t, []string{"M"}, m.IpponsA)
+		assert.Equal(t, []string{"K"}, m.IpponsB)
+		require.NotNil(t, m.DecidedByHantei)
+		assert.True(t, *m.DecidedByHantei)
+	})
+
+	t.Run("decode leaves an unmarked match alone", func(t *testing.T) {
+		m := &MatchResult{IpponsA: []string{"M"}, IpponsB: []string{}}
+		decodeHanteiFromIppons(m)
+		assert.Nil(t, m.DecidedByHantei, "absence must stay absence, not an explicit false")
+		assert.Equal(t, []string{"M"}, m.IpponsA)
+	})
+
+	t.Run("a mark-only side decodes to an empty slice, never nil", func(t *testing.T) {
+		// splitIppons' contract: the JSON projection must stay [] not null.
+		m := &MatchResult{IpponsA: []string{domain.HanteiMark}, IpponsB: []string{}}
+		decodeHanteiFromIppons(m)
+		require.NotNil(t, m.IpponsA)
+		assert.Empty(t, m.IpponsA)
+	})
 }

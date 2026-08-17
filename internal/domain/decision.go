@@ -43,6 +43,64 @@ func IsKikenDecision(d Decision) bool {
 	return d == DecisionKiken || d == DecisionKikenVoluntary || d == DecisionKikenInjury
 }
 
+// IsSubBoutHanteiCompatibleDecision reports whether a decision can coexist
+// with a hantei verdict ON A SUB-BOUT. Hantei declares a winner from a TIED
+// bout, so it is incompatible with any decision that already settles the bout
+// another way (a withdrawal, a no-show, a draw). "" and "fought" are ordinary
+// play; "daihyosen" is the rep-bout placeholder the verdict rides on.
+//
+// One owner because there are two enforcers at different layers: the HTTP
+// validator (validateSubBout) rejects an incompatible pairing on the way in,
+// and the engine (preserveSubHantei) must apply the SAME test on the way out,
+// since it mutates a row AFTER validation and its output is never re-checked.
+// Two copies could drift such that the engine stamps a row the validator
+// would refuse.
+//
+// NEITHER predicate is named the unqualified "IsHanteiCompatibleDecision", on
+// purpose. That name used to belong to this one, so it read as the default at a
+// call site that had no other cue about which level it was at — and reaching for
+// the default at match level is exactly the bug the split was made to fix.
+//
+// Defined in terms of the match-level set so the two share their common part
+// rather than enumerating it twice: this is that set PLUS the rep-bout
+// placeholder, which is what the prose above says.
+func IsSubBoutHanteiCompatibleDecision(d Decision) bool {
+	return IsMatchHanteiCompatibleDecision(d) || d == DecisionDaihyosen
+}
+
+// IsSubBoutHanteiCompatibleDecisionStr is the wire-string form.
+func IsSubBoutHanteiCompatibleDecisionStr(s string) bool {
+	return IsSubBoutHanteiCompatibleDecision(Decision(s))
+}
+
+// IsMatchHanteiCompatibleDecision is the MATCH-level twin, and is deliberately
+// NARROWER: it is the sub-bout set minus "daihyosen".
+//
+// A daihyosen IS a bout, so the verdict rides on the rep-bout sub-row
+// (position -1), where the sub-bout predicate allows it. At match level the
+// same value would claim the ENCOUNTER itself was decided by judges, which is
+// exactly what the rep bout exists to avoid.
+//
+// Split out for the same reason its sibling is shared: the match level also has
+// two enforcers that must not drift. ScoreRequest.Validate rejects the pairing
+// on the way in, and engine.hanteiStillHolds re-applies it when carrying a
+// stored verdict onto a verdict-silent write — which happens after validation
+// and is never re-checked. Those two used to be a hand-written switch and a
+// call to the SUB-bout predicate, so the engine could stamp a match-level
+// hantei onto a "daihyosen" decision that the validator would have refused.
+func IsMatchHanteiCompatibleDecision(d Decision) bool {
+	switch d {
+	case DecisionNone, DecisionFought:
+		return true
+	}
+	return false
+}
+
+// IsMatchHanteiCompatibleDecisionStr is the wire-string form.
+func IsMatchHanteiCompatibleDecisionStr(s string) bool {
+	return IsMatchHanteiCompatibleDecision(Decision(s))
+}
+
 // IsKikenDecisionStr is the string-argument twin of IsKikenDecision,
 // for call sites that hold the wire value as a string (e.g.
 // MatchResult.Decision).

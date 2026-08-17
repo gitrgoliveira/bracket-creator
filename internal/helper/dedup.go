@@ -130,6 +130,56 @@ func CheckDuplicateEntriesByNameDojo(entries [][2]string) []string {
 	return out
 }
 
+// DuplicateNamesWithKeys scans for duplicate NAMES alone, ignoring dojo, and
+// also returns the normalized key of every input in order, for callers that
+// need to keep counting after the duplicate scan.
+//
+// Team competitions use this: a team's name is its identity on the wire, in
+// standings and in sub-bout winner attribution, so two teams may not share a
+// name even from different dojos (individuals may: they are disambiguated by
+// participant uuid, which team-name references in results do not carry).
+// Same normalization as the (name, dojo) check; returns colliding names.
+//
+// The keys half exists to stop the same names being normalized twice on the
+// participant write path: the team-name gate ran this scan and then built its
+// own name→count map, re-normalizing every entry, having already paid for an
+// n-sized [][2]string conversion whose dojo half was an empty string normalized
+// n times for nothing. NormalizeParticipantName is not free (two Unicode
+// normalisation passes and two strings.Builder allocations per call).
+//
+// This USED to delegate to CheckDuplicateEntriesByNameDojo with an empty dojo,
+// which shared the key derivation and the first-seen label by construction.
+// The key derivation is still shared - both go through NormalizeParticipantName,
+// the one owner - but the label is now produced here, so
+// TestNameOnlyDedupMatchesTheDojoHelper pins the two against each other for a
+// table of inputs rather than trusting the comment.
+//
+// (A CheckDuplicateEntriesByName wrapper returning only the dupes sat in front
+// of this. Once checkNewTeamNameCollisions started calling this directly it had
+// no production caller left, so the package advertised a team-name API nothing
+// used and the equivalence test pinned the wrapper rather than the function the
+// write path actually runs.)
+func DuplicateNamesWithKeys(names []string) (dupes []string, keys []string) {
+	seen := make(map[string]string, len(names)) // key → first-seen original label
+	seenDupes := make(map[string]bool)
+	keys = make([]string, len(names))
+	for i, n := range names {
+		k := NormalizeParticipantName(n)
+		keys[i] = k
+		if _, exists := seen[k]; exists {
+			if !seenDupes[k] {
+				seenDupes[k] = true
+				dupes = append(dupes, seen[k])
+			}
+			continue
+		}
+		// Same label the (name, dojo) helper emits when the dojo is empty:
+		// the trimmed name, with no dangling " / ".
+		seen[k] = strings.TrimSpace(n)
+	}
+	return dupes, keys
+}
+
 // tokenSet splits a normalized name into its whitespace-separated tokens and
 // returns them as a set.
 func tokenSet(normalized string) map[string]struct{} {

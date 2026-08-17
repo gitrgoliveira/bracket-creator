@@ -7,8 +7,13 @@ import { IndividualScore } from '../match_scoreboard.jsx';
 //
 // Three scenarios:
 //   1. Running match present → slot[0] = running, rest = upcoming queue
-//   2. No running match → auto-promote first scheduled to slot[0] (kind: 'upnext')
+//   2. No running match → auto-promote first scheduled to slot[0]
 //   3. Fewer than LOBBY_ROWS.length scheduled matches → tail slots are null
+//
+// Slots are asserted through `slot.match.status`, the same thing a renderer
+// sees. They used to assert a `kind` tag on the slot, which no renderer read:
+// the tests were that field's only consumer, so it could have gone wrong in
+// any way that still satisfied them.
 
 // Helper: build a minimal competition with poolMatches on a given court.
 function makeComp(name, court, matches) {
@@ -50,13 +55,13 @@ describe('buildCourtSlots', () => {
         const slots = buildCourtSlots(comps, 'A');
 
         expect(slots[0]).not.toBeNull();
-        expect(slots[0].kind).toBe('running');
+        expect(slots[0].match.status).toBe('running');
         expect(slots[1]).not.toBeNull();
-        expect(slots[1].kind).toBe('scheduled');
+        expect(slots[1].match.status).toBe('scheduled');
         expect(slots[2]).not.toBeNull();
-        expect(slots[2].kind).toBe('scheduled');
+        expect(slots[2].match.status).toBe('scheduled');
         expect(slots[3]).not.toBeNull();
-        expect(slots[3].kind).toBe('scheduled');
+        expect(slots[3].match.status).toBe('scheduled');
         // Remaining slots should be null (only 3 upcoming, total = 6)
         for (let i = 4; i < TOTAL; i++) {
             expect(slots[i]).toBeNull();
@@ -73,12 +78,14 @@ describe('buildCourtSlots', () => {
         const slots = buildCourtSlots(comps, 'B');
 
         expect(slots[0]).not.toBeNull();
-        expect(slots[0].kind).toBe('upnext');
+        // Promoted, not running: slot 0 holds a SCHEDULED match. That contrast
+        // with the running case above IS the auto-promote rule.
+        expect(slots[0].match.status).toBe('scheduled');
         expect(slots[0].match.sideA.name).toBe('First A');
         expect(slots[1]).not.toBeNull();
-        expect(slots[1].kind).toBe('scheduled');
+        expect(slots[1].match.status).toBe('scheduled');
         expect(slots[2]).not.toBeNull();
-        expect(slots[2].kind).toBe('scheduled');
+        expect(slots[2].match.status).toBe('scheduled');
         for (let i = 3; i < TOTAL; i++) {
             expect(slots[i]).toBeNull();
         }
@@ -101,8 +108,8 @@ describe('buildCourtSlots', () => {
         const comps = [makeComp('Small', 'A', matches)];
         const slots = buildCourtSlots(comps, 'A');
 
-        expect(slots[0].kind).toBe('running');
-        expect(slots[1].kind).toBe('scheduled');
+        expect(slots[0].match.status).toBe('running');
+        expect(slots[1].match.status).toBe('scheduled');
         for (let i = 2; i < TOTAL; i++) {
             expect(slots[i]).toBeNull();
         }
@@ -128,7 +135,7 @@ describe('buildCourtSlots', () => {
 
         // No running → auto-promote. Only 1 scheduled match available.
         expect(slots[0]).not.toBeNull();
-        expect(slots[0].kind).toBe('upnext');
+        expect(slots[0].match.status).toBe('scheduled'); // promoted, not running
         for (let i = 1; i < TOTAL; i++) {
             expect(slots[i]).toBeNull();
         }
@@ -149,9 +156,9 @@ function treeStr(node) { return JSON.stringify(node); }
 // Minimal slot factories for LobbyMatchCell rendering tests.
 function makeRunningSlot(overrides = {}) {
     return {
-        kind: 'running',
         match: {
             id: 'r1',
+            status: 'running',
             sideA: { name: 'Aka Fighter' },
             sideB: { name: 'Shiro Fighter' },
             ipponsA: ['M'],
@@ -170,9 +177,9 @@ function makeRunningSlot(overrides = {}) {
 
 function makeScheduledSlot() {
     return {
-        kind: 'scheduled',
         match: {
             id: 's1',
+            status: 'scheduled',
             sideA: { name: 'Aka Next' },
             sideB: { name: 'Shiro Next' },
             ipponsA: [],
@@ -359,11 +366,18 @@ describe('LobbyMatchCell: delegates body to IndividualScore (mp-0ky7 / score reu
         expect(indiv.props.showNames).toBe(true);
     });
 
-    it('comp-meta span is shrinkable (flex:1 + minWidth:0) so long text ellipsizes beside the decision suffix', () => {
+    // Asserts the truncation CONTRACT, not the box model that delivers it. The
+    // previous version required an inner <span> carrying flex:1 + minWidth:0 so
+    // the text could shrink "beside the decision suffix" - but that suffix chip
+    // was removed (the middle mark's one home is the FIK row centre), leaving a
+    // one-child flex row whose scaffolding the test was the only thing holding
+    // up. What matters is that a long competition/phase/time line stays on one
+    // line and ellipsizes.
+    it('comp-meta line truncates rather than wrapping or overflowing the cell', () => {
         const tree = LobbyMatchCell({ slot: makeRunningSlot(), rowKind: 'now' });
-        const meta = findAll(tree, n => n?.type === 'span' && n.props?.style?.textOverflow === 'ellipsis')[0];
+        const meta = findAll(tree, n => n?.props?.style?.textOverflow === 'ellipsis')[0];
         expect(meta).toBeTruthy();
-        expect(meta.props.style.flex).toBe(1);
-        expect(meta.props.style.minWidth).toBe(0);
+        expect(meta.props.style.overflow).toBe('hidden');
+        expect(meta.props.style.whiteSpace).toBe('nowrap');
     });
 });

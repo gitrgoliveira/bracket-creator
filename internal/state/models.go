@@ -709,17 +709,31 @@ func IsDraw(decision string) bool {
 }
 
 type SubMatchResult struct {
-	Position        int            `json:"position"`
-	SideA           string         `json:"sideA"`
-	SideB           string         `json:"sideB"`
-	IpponsA         []string       `json:"ipponsA"`
-	IpponsB         []string       `json:"ipponsB"`
-	HansokuA        int            `json:"hansokuA"`
-	HansokuB        int            `json:"hansokuB"`
-	Winner          string         `json:"winner"`
-	Decision        string         `json:"decision"`
-	DecidedByHantei bool           `json:"decidedByHantei,omitempty" yaml:"decided_by_hantei,omitempty"`
+	Position int      `json:"position"`
+	SideA    string   `json:"sideA"`
+	SideB    string   `json:"sideB"`
+	IpponsA  []string `json:"ipponsA"`
+	IpponsB  []string `json:"ipponsB"`
+	HansokuA int      `json:"hansokuA"`
+	HansokuB int      `json:"hansokuB"`
+	Winner   string   `json:"winner"`
+	Decision string   `json:"decision"`
+	// DecidedByHantei is TRI-STATE on the wire (operator ruling: "all results
+	// must be recorded into storage" - a recorded verdict must never be lost
+	// to a write that did not address it):
+	//   true  - a hantei verdict stands on this bout;
+	//   false - the client EXPLICITLY withdrew it;
+	//   nil   - the client said NOTHING about the verdict (stale snapshot,
+	//           quick-score, any writer predating the field) and the store's
+	//           recorded verdict is preserved (engine preserveSubHantei, the
+	//           preserveLoserScore precedent). Read via HanteiDecided().
+	DecidedByHantei *bool          `json:"decidedByHantei,omitempty" yaml:"decided_by_hantei,omitempty"`
 	Encho           *EnchoMetadata `json:"encho,omitempty"           yaml:"encho,omitempty"`
+}
+
+// HanteiDecided reports whether a hantei verdict stands on this sub-bout.
+func (s *SubMatchResult) HanteiDecided() bool {
+	return s.DecidedByHantei != nil && *s.DecidedByHantei
 }
 
 type MatchResult struct {
@@ -775,13 +789,16 @@ type MatchResult struct {
 	// doesn't mention the flag from silently clearing a previously-
 	// recorded hantei decision.
 	//
-	// Preserve-on-nil applies ONLY to bracket matches (see
-	// engine/scoring.go:recordBracketMatchResult and
-	// engine/scoring_tx.go's bracket commit branch; both gate the
-	// assignment on result.DecidedByHantei != nil). Pool matches are
-	// merged with `*r = *result`, so a nil pointer there will clear any
-	// stored value. This is acceptable in practice because FIK rules
-	// don't permit hantei in pool play (see persistence caveat below).
+	// Preserve-on-nil applies ONLY to bracket matches, and only on a
+	// FORWARD write (a client payload). Both bracket writers funnel
+	// through engine.applyBracketMatchResult, which gates the assignment
+	// on result.DecidedByHantei != nil; under matchWriteRestore (the
+	// rollback replaying a trusted snapshot) there is no "omitted", so a
+	// nil is written through as false. Pool matches are merged with
+	// `*r = *result`, so applyPoolWrite carries the same preserve-on-nil
+	// explicitly before that overwrite. It used to rely on a pool hantei
+	// being unstorable anyway; now that it persists (see below), a
+	// verdict-silent re-score would otherwise erase it.
 	//
 	// On READ paths that project BracketMatch.DecidedByHantei (bool) back
 	// into MatchResult for SSE / HTTP responses, use HanteiPtr below so
@@ -789,15 +806,21 @@ type MatchResult struct {
 	// minimal and signalling "no hantei" by absence rather than an
 	// explicit false.
 	//
-	// Persistence caveat: pool matches are stored in pool-matches.csv,
-	// whose column layout does NOT include this field; so a hantei
-	// decision on a pool match survives in-memory and on the SSE wire,
-	// but does NOT survive a server restart. Bracket matches are stored
-	// in bracket.json, which serializes the full struct, so the flag
-	// survives there. See BracketMatch.DecidedByHantei for the mirror;
-	// pool-level hantei is a rare-enough case (FIK doesn't normally
-	// allow it in pool play) that the gap is acceptable. The yaml tag
-	// is retained for future YAML-serialised contexts.
+	// Persistence: bracket matches are stored in bracket.json, which
+	// serializes the full struct. Pool matches are stored in
+	// pool-matches.csv, whose column layout has no field for this — and
+	// does not need one. A hantei occupies a point SLOT, so it is
+	// persisted as domain.HanteiMark in the WINNER's IpponsA/IpponsB
+	// column and decoded back into this flag on load
+	// (encodeHanteiIntoIppons / decodeHanteiFromIppons in pools.go). The
+	// mark never escapes the store, so no counter or export sees it.
+	//
+	// This used to be an accepted gap: a pool hantei survived in memory
+	// and on the SSE wire but not a restart, written off because FIK does
+	// not normally allow hantei in pool play. Operators do run it
+	// (operator ruling), and the encoding costs no schema change. See
+	// BracketMatch.DecidedByHantei for the mirror. The yaml tag is
+	// retained for future YAML-serialised contexts.
 	DecidedByHantei *bool `json:"decidedByHantei,omitempty" yaml:"decided_by_hantei,omitempty"`
 	// ResultSource records how the result was submitted: "admin" (operator with
 	// password), "self-reported" (participant in self-run mode), or "" (legacy/
@@ -865,14 +888,17 @@ type MatchResult struct {
 	// ModifiedAt is the SERVER-RELATIVE unix-millis timestamp of the last change
 	// to this match's result-bearing fields (mp-y3nk timestamp reconciliation).
 	// Clients stamp each score/override write with server-relative time (learned
-	// via GET /api/time). Timestamp last-write-wins currently applies to the
-	// BRACKET write path only: for a bracket match the handler drops a write
-	// whose ModifiedAt is older than the stored value (so a reconnecting offline
-	// court's stale change never overwrites a newer one), and it is persisted in
-	// bracket.json (see BracketMatch.ModifiedAt) so the comparison survives a
-	// restart. For POOL matches this field is wire-only: it is NOT written to
-	// pool-matches.csv and NOT yet used for reconciliation (a scoped follow-up),
-	// so it resets to 0 on restart and pool writes keep arrival-order behavior.
+	// via GET /api/time), and a write whose ModifiedAt is older than the stored
+	// value is dropped, so a reconnecting offline court's stale change never
+	// overwrites a newer one recorded elsewhere.
+	//
+	// It applies to BOTH match stores and is persisted by both: bracket.json
+	// via BracketMatch.ModifiedAt, pool-matches.csv via its own column. The
+	// guard needs a STORED stamp to compare against, so persistence is not a
+	// detail here, it is the precondition; this was bracket-only for exactly as
+	// long as the pool file had nowhere to put it. engine.applyMatchWrite is the
+	// one primitive both branches call.
+	//
 	// The completed-never-reverted guard stays on top regardless. 0
 	// (absent/legacy) means "unstamped": it is treated as arrival-order and still
 	// APPLIES (it does NOT lose to a stamped write), so old files and un-stamped
@@ -892,6 +918,18 @@ func HanteiPtr(b bool) *bool {
 		return nil
 	}
 	return &b
+}
+
+// HanteiExplicit returns a pointer to the given value, INCLUDING false.
+//
+// HanteiPtr above deliberately collapses false to nil, which is right for the
+// omitempty output projections it was written for but wrong for the tri-state
+// wire: "the writer withdrew the verdict" (explicit false) and "the writer said
+// nothing" (nil) are different instructions, and only nil means preserve. Every
+// site that needs a real false previously hand-rolled `f := false; &f` with a
+// paragraph explaining why HanteiPtr could not be used. Use this instead.
+func HanteiExplicit(v bool) *bool {
+	return &v
 }
 
 // EnchoMetadata records overtime / sudden-death periods played in a
@@ -947,6 +985,12 @@ func cloneSubResults(subs []SubMatchResult) []SubMatchResult {
 			copy(out[i].IpponsB, sr.IpponsB)
 		}
 		out[i].Encho = sr.Encho.Clone()
+		// Clone the tri-state hantei pointer too: a caller mutating a
+		// returned sub through *DecidedByHantei must not corrupt cache.
+		if sr.DecidedByHantei != nil {
+			v := *sr.DecidedByHantei
+			out[i].DecidedByHantei = &v
+		}
 	}
 	return out
 }

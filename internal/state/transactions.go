@@ -550,7 +550,8 @@ func (t *storeTx) UpdateParticipant(compID, pid string, withZekkenName bool, tra
 	if err := t.checkCompID(compID); err != nil {
 		return nil, err
 	}
-	return t.store.updateParticipantNoLock(compID, pid, withZekkenName, transform)
+	// nil comp: see Store.UpdateParticipant — the ungated check-in path.
+	return t.store.updateParticipantNoLock(compID, pid, withZekkenName, nil, transform)
 }
 
 // UpdatePoolMatchByID dispatches to a lock-free body that mirrors

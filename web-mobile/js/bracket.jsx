@@ -5,6 +5,7 @@
 const { useRef, useLayoutEffect: useLayoutEffectBC, useState: useStateBC, useEffect: useEffectBC } = React;
 
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
+import { realIppons } from './result_slot.jsx';
 
 // TermBC: kendo-glossary tooltip wrapper. Lazy lookup so the script
 // load order between glossary.jsx and this module doesn't matter.
@@ -204,6 +205,11 @@ const joinSp = (a, b) => [a, b].filter(Boolean).join(" ");
 // known to have won, no marks are placed; each caller owns that fallback
 // (score strings trail the marks, match cards drop them). The JS analogue
 // of the winner-resolution half of SideMarksLR in internal/export/suffix.go.
+// Companion rule: on the two-slot GRID surfaces (the shared scoreboard and the
+// team score editor) which of a side's two cells the mark takes is answered by
+// resultSlot in result_slot.jsx — a separate leaf; the dependency reasoning is
+// stated ONCE, in that file's header. Flat score strings have no slots, so
+// they concatenate instead and never call it.
 const placeMarks = (marks, firstWins, secondWins) =>
   firstWins ? [marks.winner, marks.loser] : secondWins ? [marks.loser, marks.winner] : ["", ""];
 
@@ -243,8 +249,11 @@ function boutMiddle(decision, encho, score) {
 }
 
 // matchMiddleMark: the SPECIAL middle marks only ("" when the middle is the
-// plain "vs") — for surfaces that render the mark as a single centre chip
-// (MatchCard meta strip, TV scoreboard header, lobby, OBS lower-third).
+// plain "vs"). Consumers: the shared scoreboard's row centre (centreMarks, via
+// window), the MatchCard meta strip below, and the OBS lower-third. The TV header and lobby chips were REMOVED (operator ruling):
+// a surface that renders the FIK row must not duplicate the mark outside the
+// row centre. MatchCard and the lower-third render no such row, so their chip
+// IS the mark's one home rather than a duplicate of one.
 function matchMiddleMark(match) {
   if (!match) return "";
   const mid = boutMiddle(match.decision, match.encho, match.score);
@@ -323,8 +332,8 @@ function formatIpponsScore(ipponsLeft, ipponsRight, score, decision, encho, deci
   // lets callers that omit the arg safely get false without sending undefined.
   const hantei = typeof decidedByHantei === "boolean" ? decidedByHantei : false;
   if (score?.type === "bye") return "BYE";
-  let aStr = (ipponsLeft || []).filter(x => x && x !== "•").join("");
-  let bStr = (ipponsRight || []).filter(x => x && x !== "•").join("");
+  let aStr = realIppons(ipponsLeft).join("");
+  let bStr = realIppons(ipponsRight).join("");
   // A default win (fusensho / fusenpai / any kiken) awards the match points
   // without a technique — one maru "○" per awarded point: the full
   // two-point win in regulation, exactly one deciding point in encho

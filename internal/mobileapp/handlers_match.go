@@ -1049,7 +1049,7 @@ func enforceSelfRunPolicy(c *gin.Context, tl TournamentLoader, verifier Password
 	}
 	for i := range req.SubResults {
 		sub := &req.SubResults[i]
-		if !IsSelfRunReportableSubDecision(sub.Decision, sub.DecidedByHantei, sub.Position) {
+		if !IsSelfRunReportableSubDecision(sub.Decision, sub.HanteiDecided(), sub.Position) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("subResults[%d]: decision type not allowed in self-run mode without admin password", i)})
 			return "", false
 		}

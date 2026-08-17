@@ -1825,7 +1825,7 @@ func TestReopenKachinukiMatch_DiscardsVerdictKeepsBoutLog(t *testing.T) {
 			Position: 1, SideA: "R-1", SideB: "W-1",
 			IpponsA: []string{"M"}, IpponsB: []string{"K"},
 			HansokuB: 1, Winner: "R-1", Decision: "fought",
-			DecidedByHantei: true, Encho: &state.EnchoMetadata{PeriodCount: 2},
+			DecidedByHantei: state.HanteiPtr(true), Encho: &state.EnchoMetadata{PeriodCount: 2},
 		},
 		{
 			Position: 2, SideA: "R-1", SideB: "W-2",

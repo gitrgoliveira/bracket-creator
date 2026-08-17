@@ -286,7 +286,8 @@ func PoolCount(numPlayers, poolSize int, isMax bool) int {
 //  1. numPools comes from PoolCount, the same function CreatePools sizes its
 //     own pool slice with, so the count fed to PoolSeeding cannot drift from
 //     the pools that actually appear.
-//  2. drawCourts is EffectiveDrawCourts, not the requested allocation: a
+//  2. drawCourts is EffectiveDrawCourts (EffectivePoolCourts when the format
+//     draws no bracket), not the requested allocation: a
 //     shiaijo with no home pool would own an empty bracket region, so the draw
 //     steps the count down to what the pools can carry. It is the modulus for
 //     the seed spread, the deinterleave AND the caller's pool-to-shiaijo

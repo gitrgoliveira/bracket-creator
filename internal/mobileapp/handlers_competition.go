@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -856,35 +855,22 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// mutex -- the same constraint checkCourtRemoval documents on the
 			// tournament side. The resulting TOCTOU window is covered by the
 			// engine's own gates at scoring and draw time.
+			// Only a REMOVAL can orphan a match, so adding or reordering shiaijo
+			// never pays for the match loads below. courtsRemovedBy is the same
+			// predicate the tournament twin gates on, and its answer is what the
+			// refusal is narrowed to, so it is computed once.
+			var removed []string
 			if stored, loadErr := store.LoadCompetition(id); loadErr == nil && stored != nil &&
-				stored.Status != state.CompStatusSetup && stored.Status != "" &&
-				// Only a REMOVAL can orphan a match, so adding or reordering
-				// shiaijo never pays for the two match loads below. courtsRemovedBy
-				// is the same predicate the tournament twin gates on.
-				len(courtsRemovedBy(resolveCompetitionCourts(stored.Courts, putTourn), comp.Courts)) > 0 {
-				poolMatches, poolErr := store.LoadPoolMatches(id)
-				if poolErr != nil && !os.IsNotExist(poolErr) {
-					internalError(c, poolErr)
+				stored.Status != state.CompStatusSetup && stored.Status != "" {
+				removed = courtsRemovedBy(resolveCompetitionCourts(stored.Courts, putTourn), comp.Courts)
+			}
+			if len(removed) > 0 {
+				poolMatches, bracket, loadErr := loadCompMatches(store, id)
+				if loadErr != nil {
+					internalError(c, loadErr)
 					return
 				}
-				bracket, brErr := store.LoadBracket(id)
-				if brErr != nil && !os.IsNotExist(brErr) {
-					internalError(c, brErr)
-					return
-				}
-				// Narrowed to the shiaijo THIS request removes, exactly as the
-				// tournament twin narrows its own answer (see
-				// competitionsBlockingCourtRemoval). Unnarrowed, the check asks
-				// "is any live bout on a court outside the NEW list", which is a
-				// different question: a bout moved onto a shiaijo the
-				// competition never held -- the move-court picker offers the
-				// tournament's shiaijo, not the competition's -- was reported
-				// when the operator removed some unrelated court, naming a
-				// shiaijo this request never touched. A pre-existing orphan is
-				// not this write's to refuse; the draw gate still refuses to
-				// USE one.
-				removed := courtsRemovedBy(resolveCompetitionCourts(stored.Courts, putTourn), comp.Courts)
-				if err := validateRemovedCourtsNotInUse(removed, comp.Courts, poolMatches, bracket); err != nil {
+				if err := validateRemovedCourtsNotInUse(removed, poolMatches, bracket); err != nil {
 					c.JSON(http.StatusBadRequest, gin.H{"error": "courts: " + err.Error()})
 					return
 				}

@@ -75,7 +75,7 @@ func TestPlayoffOptionsRun_RejectsEvenNonPowerOfTwo(t *testing.T) {
 }
 
 // TestPlayoffOptionsRun_CourtCapBeforeShiaijoCount pins the order of the two
-// court checks: 27 breaks both the A-Z label cap and the shiaijo-count rule,
+// court checks: 27 breaks both the court-range cap and the shiaijo-count rule,
 // and the cap is the one an operator needs to hear about first.
 func TestPlayoffOptionsRun_CourtCapBeforeShiaijoCount(t *testing.T) {
 	dir := t.TempDir()

@@ -51,7 +51,7 @@ func validateDateDMY(date string) error {
 // before anything validates or stores it.
 func validateCourtLabels(courts []string) error {
 	if len(courts) > helper.MaxCourts {
-		return fmt.Errorf("courts must be <= %d (the most any one competition can be allocated), got %d", helper.MaxCourts, len(courts))
+		return fmt.Errorf("courts must be <= %d, got %d", helper.MaxCourts, len(courts))
 	}
 	seen := make(map[string]bool, len(courts))
 	for i, label := range courts {
@@ -99,7 +99,7 @@ func validateCourtLabels(courts []string) error {
 // validateCourts is the strict tournament-level check: between 1 and
 // helper.MaxCourts entries, each a single
 // non-empty character. Direct API callers can't bypass the admin UI's
-// per-form checks (admin_setup.jsx AdminEditTournament caps at 26
+// per-form checks (admin_setup.jsx AdminEditTournament caps at MAX_COURTS
 // client-side, but a hand-crafted POST /tournament with 50 courts or
 // multi-character labels was previously persisted as-is).
 func validateCourts(courts []string) error {
@@ -107,6 +107,34 @@ func validateCourts(courts []string) error {
 		return err
 	}
 	return validateCourtLabels(courts)
+}
+
+// compMatchLoader hands the court-removal guard a competition's matches. It is
+// a parameter rather than a store call so the guard stays a pure predicate over
+// (competitions, matches) and can be tested without a data directory.
+type compMatchLoader func(compID string) ([]state.MatchResult, *state.Bracket, error)
+
+// loadCompMatches reads a competition's pool matches and bracket, treating a
+// missing file as empty: a competition that has not been drawn yet simply has
+// no matches to strand. Both court-removal guards need exactly this pair and
+// both used to spell the two not-exist tolerances out themselves.
+func loadCompMatches(store *state.Store, compID string) ([]state.MatchResult, *state.Bracket, error) {
+	poolMatches, perr := store.LoadPoolMatches(compID)
+	if perr != nil && !os.IsNotExist(perr) {
+		return nil, nil, fmt.Errorf("load pool matches %s: %w", compID, perr)
+	}
+	bracket, berr := store.LoadBracket(compID)
+	if berr != nil && !os.IsNotExist(berr) {
+		return nil, nil, fmt.Errorf("load bracket %s: %w", compID, berr)
+	}
+	return poolMatches, bracket, nil
+}
+
+// compMatchesFrom binds a store into the loader the guard takes.
+func compMatchesFrom(store *state.Store) compMatchLoader {
+	return func(compID string) ([]state.MatchResult, *state.Bracket, error) {
+		return loadCompMatches(store, compID)
+	}
 }
 
 // courtsRemovedBy returns the shiaijo the incoming list DROPS from the stored
@@ -172,11 +200,6 @@ func courtsRemovedBy(stored, incoming []string) []string {
 //
 // Returns nil when nothing blocks. The message names every blocker so the
 // operator can fix them in one pass rather than one 400 at a time.
-// compMatchLoader hands the court-removal guard a competition's matches. It is
-// a parameter rather than a store call so the guard stays a pure predicate over
-// (competitions, matches) and can be tested without a data directory.
-type compMatchLoader func(compID string) ([]state.MatchResult, *state.Bracket, error)
-
 func competitionsBlockingCourtRemoval(comps []*state.Competition, stored, courts []string, matchesOf compMatchLoader) error {
 	removed := courtsRemovedBy(stored, courts)
 	if len(removed) == 0 {
@@ -203,25 +226,17 @@ func competitionsBlockingCourtRemoval(comps []*state.Competition, stored, courts
 				missing = append(missing, cc)
 			}
 		}
-		// Where its matches actually ARE, not just where it is allocated. The
-		// two differ because the move-court picker offers the TOURNAMENT's
-		// shiaijo, not the competition's, so an operator can legitimately move
-		// a live bout onto a shiaijo this competition was never allocated. The
-		// allocation check above cannot see that bout, and dropping its
-		// shiaijo left it with no per-court operator view for the rest of the
-		// event (/admin/shiaijo/:court is listed from the tournament's courts).
-		//
-		// Same narrowing as above: a bout already sitting outside the
-		// tournament is a pre-existing orphan and is not this request's to
-		// refuse. CourtsStillInUse ignores completed bouts, so finished work
-		// never blocks a venue shrink.
-		if matchesOf != nil {
+		// Where its matches actually ARE, not just where it is allocated: the
+		// move-court picker offers the TOURNAMENT's shiaijo, so a live bout can sit
+		// on one this competition was never allocated and the check above cannot
+		// see it. engine.CourtsStillInUseAmong owns the narrowing and the reason.
+		{
 			poolMatches, bracket, lerr := matchesOf(comp.ID)
 			if lerr != nil {
 				return lerr
 			}
-			for _, cc := range engine.CourtsStillInUse(courts, poolMatches, bracket) {
-				if dropped[cc] && !slices.Contains(missing, cc) {
+			for _, cc := range engine.CourtsStillInUseAmong(removed, poolMatches, bracket) {
+				if !slices.Contains(missing, cc) {
 					missing = append(missing, cc)
 				}
 			}
@@ -313,18 +328,7 @@ func checkCourtRemoval(store *state.Store, courts []string) (error, error) {
 	// Loaded lazily, per competition, and only for the live ones the guard
 	// actually reaches: this whole path already short-circuits unless a shiaijo
 	// is being removed.
-	matchesOf := func(compID string) ([]state.MatchResult, *state.Bracket, error) {
-		poolMatches, perr := store.LoadPoolMatches(compID)
-		if perr != nil && !os.IsNotExist(perr) {
-			return nil, nil, fmt.Errorf("load pool matches %s: %w", compID, perr)
-		}
-		bracket, berr := store.LoadBracket(compID)
-		if berr != nil && !os.IsNotExist(berr) {
-			return nil, nil, fmt.Errorf("load bracket %s: %w", compID, berr)
-		}
-		return poolMatches, bracket, nil
-	}
-	return nil, competitionsBlockingCourtRemoval(comps, stored, courts, matchesOf)
+	return nil, competitionsBlockingCourtRemoval(comps, stored, courts, compMatchesFrom(store))
 }
 
 // validateCompetitionCourts is the whole gate on a NEWLY AUTHORED competition

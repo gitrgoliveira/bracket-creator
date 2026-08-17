@@ -13,6 +13,10 @@ import "testing"
 // in admin_helpers.jsx (and vice versa).
 
 func TestPinMaxCourts(t *testing.T) {
+	if len(courtLabelAlphabet) != MaxCourts {
+		t.Fatalf("courtLabelAlphabet has %d letters, MaxCourts is %d: every supported court must have a label, and CourtLabel must panic past the cap rather than invent one",
+			len(courtLabelAlphabet), MaxCourts)
+	}
 	if MaxCourts != 16 {
 		t.Fatalf("MaxCourts = %d, want 16 (the largest legal single-competition allocation; JS MAX_COURTS must match)", MaxCourts)
 	}

@@ -250,9 +250,8 @@ func PoolSeeding(players []Player, numPools int, numCourts int) []Player {
 	if numPools <= 0 {
 		return players
 	}
-	if numCourts < 1 {
-		numCourts = 1
-	}
+	// Both ends, through the one owner: numCourts is the spread modulus below.
+	numCourts = clampCourts(numCourts)
 
 	seeded := make([]Player, 0)
 	unseeded := make([]Player, 0)

@@ -255,12 +255,39 @@ func CourtsStillInUse(proposed []string, poolMatches []state.MatchResult, bracke
 	return out
 }
 
-// ValidateCourtsNotInUse is CourtsStillInUse with the operator-facing refusal,
-// so the predicate and the sentence live together the way every other rule in
-// this file does (ValidateCourtsInTournament, ValidateCompetitionShiaijoCount)
-// rather than being reassembled at the HTTP boundary.
-func ValidateCourtsNotInUse(proposed []string, poolMatches []state.MatchResult, bracket *state.Bracket) error {
-	return CourtsInUseError(CourtsStillInUse(proposed, poolMatches, bracket))
+// CourtsStillInUseAmong answers "which of these shiaijo still carry a live
+// bout" -- the question BOTH court-removal guards ask, once each had to narrow
+// CourtsStillInUse's broader answer to the shiaijo its own write takes away.
+//
+// The narrowing is the rule, not a detail of either caller: a bout may sit on a
+// shiaijo its competition never held, because the move-court picker offers the
+// TOURNAMENT's shiaijo rather than the competition's. Reporting such a bout as
+// the reason for refusing an unrelated removal names a shiaijo the operator did
+// not touch, and a pre-existing orphan is not a write's to refuse -- the draw
+// gate still refuses to USE one. Both guards spelled that filter out
+// separately; this is where it lives.
+//
+// Completed bouts never count: CourtsStillInUse ignores them, so finished work
+// can always be tidied away.
+func CourtsStillInUseAmong(courts []string, poolMatches []state.MatchResult, bracket *state.Bracket) []string {
+	if len(courts) == 0 {
+		return nil
+	}
+	// CourtsStillInUse reports the courts NOT in the list it is given, so the
+	// set to keep out is everything except the ones asked about. Passing the
+	// complement is what turns "which are outside this allocation" into "which
+	// of these specific shiaijo are busy".
+	wanted := make(map[string]bool, len(courts))
+	for _, c := range courts {
+		wanted[c] = true
+	}
+	var busy []string
+	for _, c := range CourtsStillInUse(nil, poolMatches, bracket) {
+		if wanted[c] {
+			busy = append(busy, c)
+		}
+	}
+	return busy
 }
 
 // CourtsInUseError is the operator-facing refusal for a set of shiaijo that

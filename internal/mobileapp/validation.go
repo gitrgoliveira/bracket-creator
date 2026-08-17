@@ -161,19 +161,17 @@ func rejectSeedsOffRoster(store *state.Store, compID string, assignments []domai
 	if len(assignments) == 0 {
 		return nil
 	}
-	// The competition's OWN zekken flag, like every other LoadParticipants call
-	// site. It is true that the flag cannot change the Name this reads, which is
-	// why a literal false looked safe -- but the read is CACHED, so passing a
-	// flag the competition does not use once left every later reader (the
-	// participants list, eligibility, Swiss, ranking, the dojo-conflict
-	// avoidance in pool creation) seeing the zekken string as the dojo. The
-	// cache key now covers the flag as well, so this is belt and braces; a
-	// validator must still ask for the roster the competition actually has.
-	comp, err := store.LoadCompetition(compID)
-	if err != nil || comp == nil {
-		return nil
+	// Ask for the roster this competition actually has: the flag changes the
+	// parse, and the load is cached (see participantsCacheKey).
+	// A load failure falls back rather than skipping the check: the Name this
+	// matches on is the same column under either flag, so the wrong flag costs a
+	// second cache entry, not a wrong answer -- whereas returning early here
+	// would let an unvalidated seeding through on a transient read error.
+	withZekken := false
+	if comp, cerr := store.LoadCompetition(compID); cerr == nil && comp != nil {
+		withZekken = comp.EffectiveWithZekkenName()
 	}
-	players, err := store.LoadParticipants(compID, comp.EffectiveWithZekkenName())
+	players, err := store.LoadParticipants(compID, withZekken)
 	if err != nil || len(players) == 0 {
 		return nil
 	}
@@ -891,31 +889,7 @@ func IsSelfRunReportableSubDecision(decision string, decidedByHantei bool, posit
 
 // validateRemovedCourtsNotInUse refuses a competition court change that would
 // strand a live bout on a shiaijo the change TAKES AWAY.
-//
-// engine.CourtsStillInUse answers the broader question ("which shiaijo carry a
-// live bout but are not in this list"), which includes shiaijo the competition
-// never held: the move-court picker offers the TOURNAMENT's shiaijo, so a bout
-// can legitimately sit outside its competition's allocation. Reporting those
-// here refused an unrelated edit and named a shiaijo the operator had not
-// touched, so the answer is narrowed to `removed` -- the same narrowing
-// competitionsBlockingCourtRemoval applies on the tournament side, for the same
-// reason: a pre-existing orphan is not this write's to refuse, and the engine's
-// draw gate still refuses to USE one.
-//
-// Completed bouts never block; CourtsStillInUse ignores them.
-func validateRemovedCourtsNotInUse(removed, proposed []string, poolMatches []state.MatchResult, bracket *state.Bracket) error {
-	if len(removed) == 0 {
-		return nil
-	}
-	dropped := make(map[string]bool, len(removed))
-	for _, cc := range removed {
-		dropped[cc] = true
-	}
-	var busy []string
-	for _, cc := range engine.CourtsStillInUse(proposed, poolMatches, bracket) {
-		if dropped[cc] {
-			busy = append(busy, cc)
-		}
-	}
-	return engine.CourtsInUseError(busy)
+// engine.CourtsStillInUseAmong owns the narrowing and says why.
+func validateRemovedCourtsNotInUse(removed []string, poolMatches []state.MatchResult, bracket *state.Bracket) error {
+	return engine.CourtsInUseError(engine.CourtsStillInUseAmong(removed, poolMatches, bracket))
 }

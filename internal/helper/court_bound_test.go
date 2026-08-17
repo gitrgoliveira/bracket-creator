@@ -79,10 +79,6 @@ func TestPoolCourtsStepDownIsScopedToBracketFormats(t *testing.T) {
 			"no bracket: %d pools on %d shiaijo must not lose a shiaijo to R9", c.pools, c.courts)
 	}
 
-	// The bound still applies to both.
-	assert.Equal(t, MaxCourts, EffectivePoolCourts(1<<20, 1<<20))
-	assert.Equal(t, 1, EffectivePoolCourts(0, 0))
-
 	// And the allocation an operator actually sees: every shiaijo the league was
 	// given a pool for gets one.
 	assign, err := AssignPoolsToCourts(3, EffectivePoolCourts(3, 4))

@@ -496,7 +496,7 @@ function shiaijoVenueSplitExample(venueCourtCount) {
 // Returns null when the count is valid, or the operator-facing message when
 // it is not, so call sites can use it as both predicate and label. The
 // message names the nearest valid counts either side (capped at 16, since
-// the next power of two exceeds the A–Z label cap) and always offers 1. The
+// the next power of two exceeds the court cap) and always offers 1. The
 // Go side and this string are pinned against each other by
 // web-mobile/js/__tests__/shiaijo_count.test.jsx and
 // internal/helper/shiaijo_count_test.go.
@@ -814,10 +814,9 @@ function competitionDrawBlockedReason(competition, tournamentCourts) {
 // The venue count is forwarded to the count message, not just to the orphan
 // check: every surface that renders this reason renders it ALONE, with no
 // venue-aware hint beneath to correct it, so the unqualified message told a
-// 3-shiaijo venue to "use 2 or 4" - one of which it cannot supply. A surface
-// that DOES print the venue-aware hint alongside (the staged error under the
-// Settings pills) calls shiaijoCountErrorFor directly instead, so the venue
-// clause is not stated twice.
+// 3-shiaijo venue to "use 2 or 4" - one of which it cannot supply. The pickers
+// pass it too (shiaijoPickerError): a remedy the venue cannot carry out is a
+// worse fault than repeating the venue clause under the pills.
 //
 // Takes format and courts rather than a competition so a screen can ask about a
 // STAGED allocation, which is on no competition object yet.

@@ -102,7 +102,7 @@ function validateForm() {
         }
     }
 
-    // Courts: A–Z labels, hard-cap at 26, and the shiaijo count itself must be
+    // Courts: capped at MAX_COURTS, and the shiaijo count itself must be
     // a power of two (1, 2, 4, 8 or 16). The server enforces the same rule but
     // answers with a JSON body, and this is a native form POST: without this
     // check the browser would navigate away to raw JSON and the operator would

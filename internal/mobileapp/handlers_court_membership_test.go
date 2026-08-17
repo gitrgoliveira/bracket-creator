@@ -22,6 +22,12 @@ import (
 // on read leaves the stored value (which the draw uses) wrong. The refusal
 // names the blocking competitions so the operator can fix them in one pass.
 
+// noCompMatches is the loader for a competition with nothing drawn yet. The
+// allocation half of the guard is what these cases exercise; saying so
+// explicitly beats passing a nil loader, which used to switch the other half
+// off entirely.
+func noCompMatches(string) ([]state.MatchResult, *state.Bracket, error) { return nil, nil, nil }
+
 // membershipPutTournament PUTs a tournament body and returns the recorder.
 func membershipPutTournament(t *testing.T, r *gin.Engine, body map[string]any) *httptest.ResponseRecorder {
 	t.Helper()
@@ -256,7 +262,7 @@ func TestCompetitionsBlockingCourtRemoval(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.desc, func(t *testing.T) {
-			err := competitionsBlockingCourtRemoval(tc.comps, tc.stored, tc.courts, nil)
+			err := competitionsBlockingCourtRemoval(tc.comps, tc.stored, tc.courts, noCompMatches)
 			if tc.blocked {
 				require.Error(t, err)
 				return
@@ -275,7 +281,7 @@ func TestCompetitionsBlockingCourtRemovalNamesOnlyTheRemovedShiaijo(t *testing.T
 		[]*state.Competition{{ID: "mudansha", Name: "Mudansha", Courts: []string{"A", "C", "Z"}, Status: state.CompStatusSetup}},
 		[]string{"A", "B", "C"},
 		[]string{"A", "B"},
-		nil,
+		noCompMatches,
 	)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "still runs on shiaijo C")
@@ -290,7 +296,7 @@ func TestCompetitionsBlockingCourtRemovalFallsBackToTheID(t *testing.T) {
 		[]*state.Competition{{ID: "mudansha", Courts: []string{"D"}, Status: state.CompStatusSetup}},
 		[]string{"A", "D"},
 		[]string{"A"},
-		nil,
+		noCompMatches,
 	)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "mudansha")
@@ -422,17 +428,16 @@ func TestSettingsPutNamesOnlyTheShiaijoItRemoves(t *testing.T) {
 	}
 
 	// Removing B, while a bout also sits on E (never in the allocation).
-	err := validateRemovedCourtsNotInUse(
-		[]string{"B"}, []string{"A"}, poolMatches, nil)
+	err := validateRemovedCourtsNotInUse([]string{"B"}, poolMatches, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "shiaijo B")
 	assert.NotContains(t, err.Error(), "E",
 		"E is a pre-existing orphan this request never removed")
 
 	// Removing nothing cannot refuse anything, however the bouts are placed.
-	require.NoError(t, validateRemovedCourtsNotInUse(nil, []string{"A"}, poolMatches, nil))
+	require.NoError(t, validateRemovedCourtsNotInUse(nil, poolMatches, nil))
 
 	// And a removal whose bouts are all finished still passes.
 	done := []state.MatchResult{{ID: "Pool A-1", Court: "B", Status: state.MatchStatusCompleted, Winner: "X"}}
-	require.NoError(t, validateRemovedCourtsNotInUse([]string{"B"}, []string{"A"}, done, nil))
+	require.NoError(t, validateRemovedCourtsNotInUse([]string{"B"}, done, nil))
 }

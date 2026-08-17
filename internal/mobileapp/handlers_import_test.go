@@ -699,10 +699,10 @@ competitions:
 
 	// Cross-file guard symmetry: POST /competitions and PUT /competitions/:id
 	// call validateCompetitionCourts to reject empty / multi-character /
-	// >26-court manifests. Pre-fix, the import path bypassed this check,
+	// oversized manifests. Pre-fix, the import path bypassed this check,
 	// so a manifest row could persist court labels that no other write
 	// path would accept. Two failure modes to cover: multi-character label
-	// (court="AA"), and >26 courts.
+	// (court="AA"), and too many courts.
 	t.Run("Invalid Courts Rejected Per Row", func(t *testing.T) {
 		// Multi-character court label
 		body := &bytes.Buffer{}
@@ -733,7 +733,7 @@ competitions:
 		stored, _ := store.LoadCompetition("bad-court-label")
 		assert.Nil(t, stored, "bad-court-label must not have been persisted")
 
-		// Too many courts (>26)
+		// Too many courts (over the cap)
 		body2 := &bytes.Buffer{}
 		writer2 := multipart.NewWriter(body2)
 		manifestPart2, _ := writer2.CreateFormFile("files", "manifest.yaml")
@@ -757,7 +757,7 @@ competitions:
 		require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &resp2))
 		require.Len(t, resp2.Results, 1)
 		assert.Contains(t, resp2.Results[0].Error, "courts",
-			">26 courts should be rejected by validateCompetitionCourts")
+			"too many courts should be rejected by validateCompetitionCourts")
 		stored2, _ := store.LoadCompetition("too-many-courts")
 		assert.Nil(t, stored2, "too-many-courts must not have been persisted")
 

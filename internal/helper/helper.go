@@ -104,15 +104,9 @@ func ValidateCourts(n int) error {
 // that have no error channel to refuse through (the draw builder and the sheet
 // writers, which are handed a count and must render something).
 //
-// The upper bound is not merely tidiness: CourtLabel indexes
-// courtLabelAlphabet, so a count past MaxCourts is an out-of-range panic on the
-// way to a pointless allocation. Every entry point validates long before here,
-// so this changes no reachable behaviour -- it means no helper can be made to
-// allocate or index off a number nothing checked.
-//
-// It lives beside ValidateCourts and CourtLabel because it states the same
-// domain bound they do, and is called from the draw builder, the tree pager
-// and the sheet writers alike.
+// Every entry point validates long before here, so this changes no reachable
+// behaviour -- it means no helper can be made to allocate or index off a number
+// nothing checked (see CourtLabel for what indexing past the cap does).
 func clampCourts(n int) int {
 	if n < 1 {
 		return 1
@@ -293,9 +287,9 @@ func ReadCSVFile(filePath string) ([][]string, error) {
 // error return is kept for callers that already handle one and for future
 // validation.
 func AssignPoolsToCourts(numPools, numCourts int) ([]int, error) {
-	if numCourts < 1 {
-		numCourts = 1
-	}
+	// Both ends, through the one owner: this loops numCourts times, so an
+	// unvalidated count is a no-op loop rather than a bound the caller checked.
+	numCourts = clampCourts(numCourts)
 	if numPools == 0 {
 		return []int{}, nil
 	}

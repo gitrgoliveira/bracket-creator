@@ -64,7 +64,7 @@ describe('shiaijoCountError', () => {
   });
 
   it('offers only the count below once past the ceiling', () => {
-    // 32 shiaijo cannot be labelled (A–Z caps at 26), so there is no higher
+    // 32 shiaijo is past the court cap, so there is no higher
     // valid count to suggest: the message must not invent one.
     const err = shiaijoCountError(20);
     expect(err).toContain('Use 16, or 1');
@@ -79,7 +79,7 @@ describe('shiaijoCountError', () => {
     expect(shiaijoCountError(undefined)).toBeNull();
   });
 
-  it('derives the valid counts from the A–Z label cap', () => {
+  it('derives the valid counts from the court cap', () => {
     // 16 is the ceiling because 32 exceeds MAX_COURTS, not because it was
     // typed into a list somewhere.
     expect(VALID_SHIAIJO_COUNTS).toEqual([1, 2, 4, 8, 16]);

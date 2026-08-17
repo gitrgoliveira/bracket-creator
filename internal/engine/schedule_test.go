@@ -947,7 +947,7 @@ func TestEstimateForCounts_NegativeCountsClamped(t *testing.T) {
 }
 
 // TestEstimateForCounts_CourtsClampedToMax verifies an oversized Courts slice is
-// clamped to MaxCourts (the A–Z cap), guarding the per-court allocations against
+// clamped to MaxCourts, guarding the per-court allocations against
 // a malformed/hostile Competition, same defensive bound as EstimateSchedule
 // (Copilot review #3328458139).
 func TestEstimateForCounts_CourtsClampedToMax(t *testing.T) {

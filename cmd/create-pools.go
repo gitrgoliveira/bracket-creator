@@ -192,7 +192,9 @@ func (o *poolOptions) createPools(entries []string) error {
 	// value the operator never asked for (a shiaijo with no home pool would own an
 	// empty bracket region), and every sheet below bands against it, so the Pool
 	// Matches and Names sheets use the same shiaijo count as the bracket regions.
-	pools, drawCourts, err := helper.BuildPoolPhase(players, activePoolSize, isMax, o.courts)
+	// create-pools always produces a knockout bracket from its pools, so R9's
+	// power-of-two step-down applies.
+	pools, drawCourts, err := helper.BuildPoolPhase(players, activePoolSize, isMax, o.courts, true)
 	if err != nil {
 		return err
 	}

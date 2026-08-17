@@ -65,7 +65,7 @@ The reason is the block structure described above. The draw gives each shiai-jo 
 
 Six shiai-jo shows why being even is not enough on its own. Six blocks pair off into three survivors, and three cannot pair off again: one of them would reach the final having fought a round fewer than the other two, purely because of how many blocks there were. Four blocks become two, and two become one, with no such gap.
 
-16 is the highest count in practice. Shiai-jo are labelled A to Z, so 32 is out of reach.
+16 is the highest count. It is also the most shiai-jo a tournament can have, so 32 is out of reach.
 
 The rule applies to the formats that build a knockout bracket, which are mixed and playoffs. League and Swiss competitions produce no bracket to merge, so they can use any number of shiai-jo the tournament has.
 

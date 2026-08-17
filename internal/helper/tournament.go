@@ -300,9 +300,15 @@ func PoolCount(numPlayers, poolSize int, isMax bool) int {
 // Callers still own what happens either side: validating the roster before, and
 // naming, numbering, persisting and allocating pools to shiaijo after. Use the
 // returned court count for that allocation rather than re-deriving it.
-func BuildPoolPhase(players []Player, poolSize int, isMax bool, numCourts int) ([]Pool, int, error) {
+func BuildPoolPhase(players []Player, poolSize int, isMax bool, numCourts int, drawsBracket bool) ([]Pool, int, error) {
 	numPools := PoolCount(len(players), poolSize, isMax)
-	drawCourts := EffectiveDrawCourts(numPools, numCourts)
+	// R9's power-of-two step-down applies only where there is a bracket to
+	// merge. A league or Swiss competition steps down to the pool count and no
+	// further, or it idles shiaijo it was legitimately allocated.
+	drawCourts := EffectivePoolCourts(numPools, numCourts)
+	if drawsBracket {
+		drawCourts = EffectiveDrawCourts(numPools, numCourts)
+	}
 
 	pools, err := CreatePools(PoolSeeding(players, numPools, drawCourts), poolSize, isMax)
 	if err != nil {

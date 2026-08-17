@@ -52,7 +52,7 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 	// seeds end up placed for a shiaijo layout the draw does not have. numCourts
 	// stays the raw allocation for the single-pool league spread further down,
 	// which really does use every shiaijo the league was given.
-	pools, drawCourts, err := helper.BuildPoolPhase(players, comp.PoolSize, isMax, numCourts)
+	pools, drawCourts, err := helper.BuildPoolPhase(players, comp.PoolSize, isMax, numCourts, CompetitionDrawsBracket(comp.Format))
 	if err != nil {
 		return err
 	}

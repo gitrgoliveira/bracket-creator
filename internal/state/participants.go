@@ -66,11 +66,21 @@ type LoadParticipantsOpts struct {
 }
 
 // participantsCacheKey returns a virtual filename used as the cache key
-// for a participants load. Splits by both WithSeeds and HasIDs parse
-// mode so the three mutually-exclusive parses don't poison each other's
+// for a participants load. Splits by WithSeeds, HasIDs parse mode AND
+// withZekkenName so the mutually-exclusive parses don't poison each other's
 // cache entries (mp-p7n Copilot PR #185 round-6).
-func participantsCacheKey(opts LoadParticipantsOpts) string {
+//
+// withZekkenName is part of the key because it CHANGES THE PARSE, not just the
+// caller's view: with it off, column 3 of a zekken roster is read as the dojo,
+// so a single load with the wrong flag left every later reader seeing the
+// zekken string as the dojo (eligibility, Swiss, ranking and the dojo-conflict
+// avoidance in pool creation) until some write invalidated the entry. Keying on
+// it makes a caller that passes the wrong flag wrong only for itself.
+func participantsCacheKey(withZekkenName bool, opts LoadParticipantsOpts) string {
 	base := "participants"
+	if withZekkenName {
+		base += "_zekken"
+	}
 	if opts.WithSeeds {
 		base += "_with_seeds"
 	}
@@ -89,14 +99,16 @@ func participantsCacheKey(opts LoadParticipantsOpts) string {
 // participantsCacheKey can produce. Used by saveParticipantsNoLock to
 // invalidate all parse-mode variants in one pass on write.
 func allParticipantsCacheKeys() []string {
-	keys := make([]string, 0, 6)
-	for _, withSeeds := range []bool{false, true} {
-		trueP, falseP := true, false
-		for _, hint := range []*bool{nil, &trueP, &falseP} {
-			keys = append(keys, participantsCacheKey(LoadParticipantsOpts{
-				WithSeeds: withSeeds,
-				HasIDs:    hint,
-			}))
+	keys := make([]string, 0, 12)
+	for _, zekken := range []bool{false, true} {
+		for _, withSeeds := range []bool{false, true} {
+			trueP, falseP := true, false
+			for _, hint := range []*bool{nil, &trueP, &falseP} {
+				keys = append(keys, participantsCacheKey(zekken, LoadParticipantsOpts{
+					WithSeeds: withSeeds,
+					HasIDs:    hint,
+				}))
+			}
 		}
 	}
 	return keys
@@ -131,7 +143,7 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 	// stripping column 0. Splitting the cache key by parse mode means
 	// each mode's parse is cached independently. saveParticipantsNoLock
 	// invalidates all variants below to keep them coherent on write.
-	cacheKey := participantsCacheKey(opts)
+	cacheKey := participantsCacheKey(withZekkenName, opts)
 
 	cache := s.getFileCache(compID, cacheKey)
 	cache.mu.RLock()

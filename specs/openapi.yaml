@@ -2910,7 +2910,7 @@ paths:
           schema:
             type: integer
             minimum: 1
-            maximum: 26
+            maximum: 16
         - in: query
           name: teamSize
           required: false

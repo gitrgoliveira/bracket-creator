@@ -13,7 +13,7 @@ const MAX_TOURNAMENT_DURATION_DAYS = window.MAX_TOURNAMENT_DURATION_DAYS;
 const MIN_YEAR = window.MIN_YEAR;
 const MAX_YEAR = window.MAX_YEAR;
 // Canonical courts cap (admin_helpers.jsx): mirrors helper.MaxCourts
-// on the Go side. Anchored to the A–Z labelling used on Shiaijo headers.
+// on the Go side. Anchored to the most shiaijo a competition can be allocated.
 const MAX_COURTS = window.MAX_COURTS;
 const pluralize = window.pluralize;
 const AdminTopbar = window.AdminTopbar;
@@ -739,7 +739,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   // hint and the block are the same condition.
   // Always `authored`: this form has no stored allocation behind it, so every
   // selection on screen is one the operator just made.
-  const courtsErr = window.shiaijoPickerError(format, selectedCourts, true);
+  const courtsErr = window.shiaijoPickerError(format, selectedCourts, true, safeCourts.length);
   // STANDING hint, same helper and same venue-awareness as the Settings
   // screen: on a 3-shiaijo tournament this reads "can use 1 or 2 (this
   // tournament has 3)" from the moment the form opens, so the operator never

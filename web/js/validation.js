@@ -188,7 +188,7 @@ export function shiaijoCountError(n) {
     return `${n} shiaijo cannot be paired down to a single bracket. Use ${options}, or 1: ${SHIAIJO_RULE_REASON}.`;
 }
 
-// Pure validator for the courts (Shiaijo) field: A-Z hard cap at 26, then the
+// Pure validator for the courts (Shiaijo) field: the court cap, then the
 // power-of-two rule above. The cap is checked FIRST so the order matches the
 // server's (helper.ValidateCourts then helper.ValidateShiaijoCount), which
 // keeps the message an operator sees the same whichever side rejects.

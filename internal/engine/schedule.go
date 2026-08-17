@@ -244,7 +244,7 @@ func EstimateSchedule(in EstimateInput) ScheduleEstimate {
 	// Courts is clamped to [1, MaxCourts] so a malformed or hostile
 	// input cannot trigger a giant slice allocation downstream (CodeQL
 	// go/uncontrolled-allocation-size) nor divide by zero. MaxCourts
-	// matches the CLI's A–Z hard cap (CLAUDE.md, FR limit).
+	// matches the CLI's hard court cap (helper.MaxCourts).
 	courts := in.NumCourts
 	if courts < 1 {
 		courts = 1
@@ -384,7 +384,7 @@ func EstimateForCounts(poolCount, playoffCount int, comp *state.Competition, tou
 		numCourts = 1
 	}
 	if numCourts > MaxCourts {
-		// Clamp to the A–Z (26) cap, the same defensive bound EstimateSchedule
+		// Clamp to the court cap, the same defensive bound EstimateSchedule
 		// applies. A malformed/hostile Competition with an oversized Courts
 		// slice would otherwise drive large per-court allocations
 		// (courtCursor/matchMin/perCourtList), CodeQL go/uncontrolled-allocation-size.

@@ -63,7 +63,7 @@ bracket-creator create-pools \
 
 Being even is not enough on its own. With `-c 6` the six blocks pair off into three, and three cannot pair off again, so one of them would reach the final having fought a round fewer than the other two. `-c 6` and `-c 10` are therefore refused, just as `-c 3`, `-c 5` and `-c 7` are.
 
-A single shiai-jo is always allowed. With two or more qualifiers per pool (`-w 2` and above), `-c 1` splits its block into two halves that act as partner shiai-jo, producing the same bracket shape as a `-c 2` run; with `-w 1` nothing crosses between shiai-jo, so the block is left whole and each bye is chosen from every pool winner on it. 16 is the highest, because shiai-jo are labelled A to Z, which puts 32 out of reach.
+A single shiai-jo is always allowed. With two or more qualifiers per pool (`-w 2` and above), `-c 1` splits its block into two halves that act as partner shiai-jo, producing the same bracket shape as a `-c 2` run; with `-w 1` nothing crosses between shiai-jo, so the block is left whole and each bye is chosen from every pool winner on it. 16 is the highest, and it is also the most shiai-jo a tournament can have, which puts 32 out of reach.
 
 The draw also never uses more shiai-jo than there are pools, because a shiai-jo with no pools of its own would own an empty block. When you ask for more, the count steps down to the largest allowed value that fits, and the file is generated without an error: with 7 pools, `-c 8` produces a draw on 4 shiai-jo.
 

@@ -160,8 +160,19 @@ func rejectSeedsOffRoster(store *state.Store, compID string, assignments []domai
 	if len(assignments) == 0 {
 		return nil
 	}
-	// withZekkenName only affects column layout, not the Name field this reads.
-	players, err := store.LoadParticipants(compID, false)
+	// The competition's OWN zekken flag, like every other LoadParticipants call
+	// site. It is true that the flag cannot change the Name this reads, which is
+	// why a literal false looked safe -- but the read is CACHED, so passing a
+	// flag the competition does not use once left every later reader (the
+	// participants list, eligibility, Swiss, ranking, the dojo-conflict
+	// avoidance in pool creation) seeing the zekken string as the dojo. The
+	// cache key now covers the flag as well, so this is belt and braces; a
+	// validator must still ask for the roster the competition actually has.
+	comp, err := store.LoadCompetition(compID)
+	if err != nil || comp == nil {
+		return nil
+	}
+	players, err := store.LoadParticipants(compID, comp.EffectiveWithZekkenName())
 	if err != nil || len(players) == 0 {
 		return nil
 	}

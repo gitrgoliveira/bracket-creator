@@ -144,6 +144,26 @@ func (d *KnockoutDraw) NumCourts() int {
 // one every format shares. It coincides with the largest legal bracket
 // allocation because MaxCourts is chosen to. The step-down branch below is
 // where R9 is preserved, and it still is.
+// EffectivePoolCourts is the pool phase's court count for a format that draws
+// NO bracket (league, Swiss). Same [1, MaxCourts] bound and the same "never
+// more courts than pools" step-down, but WITHOUT R9's power-of-two rule.
+//
+// R9 exists because a knockout bracket gives each shiaijo its own block and the
+// blocks merge in pairs. A league has no bracket to merge, and
+// ValidateCompetitionShiaijoCount exempts it for exactly that reason, so
+// stepping its pool phase down to a power of two idles shiaijo the operator
+// allocated: 3 pools on 4 shiaijo ran on 2 rather than 3.
+//
+// The result equals the raw count wherever the pools can carry it, so this
+// reproduces what the pool phase did before the draw was introduced.
+func EffectivePoolCourts(numPools, numCourts int) int {
+	numCourts = clampCourts(numCourts)
+	if numPools > 0 && numCourts > numPools {
+		return numPools
+	}
+	return numCourts
+}
+
 func EffectiveDrawCourts(numPools, numCourts int) int {
 	numCourts = clampCourts(numCourts)
 	if numPools > 0 && numCourts > numPools {

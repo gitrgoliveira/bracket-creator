@@ -562,14 +562,16 @@ const SHIAIJO_NONE_SELECTED = "At least one shiaijo (court) must be selected.";
 // The emptiness half is NOT scoped by format the way shiaijoCountErrorFor is: a
 // league has to run somewhere too, even though its shiaijo count is free.
 //
-// Venue-agnostic on purpose: both pickers render this directly above the
-// venue-aware standing hint, so passing the venue would state that clause twice.
-// resolvedShiaijoCountError is the venue-aware twin, for surfaces rendering a
-// verdict alone.
-function shiaijoPickerError(format, courts, authored) {
+// Venue-AWARE, like every other surface that states a remedy. It costs a little
+// repetition against the standing hint below it, which names the same allowed
+// counts, and that is the cheaper of the two mistakes: without the venue the
+// count rule offers the nearest legal counts either side, so a 3-shiaijo venue
+// was told to "Use 2 or 4" directly above a hint reading "can use 1 or 2 (this
+// tournament has 3)". One of those is a court the hall does not have.
+function shiaijoPickerError(format, courts, authored, venueCourtCount) {
   const list = Array.isArray(courts) ? courts : [];
   if (!list.length) return authored ? SHIAIJO_NONE_SELECTED : null;
-  return shiaijoCountErrorFor(format, list.length);
+  return shiaijoCountErrorFor(format, list.length, venueCourtCount);
 }
 
 // shiaijoCountError with the FORMAT scope applied: null for a league or Swiss

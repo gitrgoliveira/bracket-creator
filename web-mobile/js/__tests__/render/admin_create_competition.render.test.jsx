@@ -111,9 +111,10 @@ describe('AdminCreateCompetition shiaijo-count guard (bc-draw R9 gap 2)', () => 
 
     const hint = container.querySelector('[data-testid="shiaijo-count-error"]');
     expect(hint).not.toBeNull();
-    // Same message the Settings screen and the Go side use.
+    // Same message the Settings screen and the Go side use, with the venue's
+    // own counts: this fixture has 4 shiaijo, so 4 is genuinely on offer.
     expect(hint.textContent).toContain('3 shiaijo cannot be paired');
-    expect(hint.textContent).toContain('Use 2 or 4, or 1');
+    expect(hint.textContent).toContain('This tournament has 4, so this competition can use 1, 2 or 4');
     expect(submitButton(container).disabled).toBe(true);
     expect(onCreate).not.toHaveBeenCalled();
   });
@@ -125,6 +126,23 @@ describe('AdminCreateCompetition shiaijo-count guard (bc-draw R9 gap 2)', () => 
     await clickPill(container, 'Shiaijo (court) D'); // → A, B, C, D
     expect(container.querySelector('[data-testid="shiaijo-count-error"]')).toBeNull();
     expect(submitButton(container).disabled).toBe(false);
+  });
+
+  // The remedy must be reachable AT THIS VENUE. Venue-blind, the count rule
+  // offers the nearest legal counts either side, so a 3-shiaijo hall was told
+  // to "Use 2 or 4" directly above a hint reading "can use 1 or 2 (this
+  // tournament has 3)". One of those is a court the hall does not have.
+  it('never offers a count the venue cannot supply', async () => {
+    const { container } = await mountForm({ tournament: makeTournament({ courts: ['A', 'B', 'C'] }) });
+    await clickPill(container, 'Shiaijo (court) C'); // default A+B -> A, B, C
+
+    const err = container.querySelector('[data-testid="shiaijo-count-error"]');
+    expect(err).not.toBeNull();
+    expect(err.textContent).toContain('This tournament has 3, so this competition can use 1 or 2');
+    expect(err.textContent).not.toContain('4');
+    // And it agrees with the standing hint rendered directly below it.
+    const standing = container.querySelector('[data-testid="shiaijo-count-hint"]');
+    expect(standing.textContent).toContain('can use 1 or 2 shiaijo');
   });
 
   // Deselecting every pill used to be silently "fixed" at submit: the form sent

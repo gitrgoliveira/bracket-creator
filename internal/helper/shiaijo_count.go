@@ -79,7 +79,7 @@ func ValidateShiaijoCount(n int) error {
 // shiaijo?" -- the range rule and the count rule together, in that order.
 //
 // The ORDER is the rule, not a coincidence of where the calls were written: a
-// value that breaks both (say 30) must report the 26-court label cap first,
+// value that breaks both (say 30) must report the court-range cap first,
 // because that is the ceiling the operator has to come down under before the
 // power-of-two question even applies. Owning the pair here is what keeps the
 // next generator entry point from calling only ValidateCourts and silently

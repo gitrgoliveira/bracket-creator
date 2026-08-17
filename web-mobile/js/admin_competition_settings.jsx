@@ -541,7 +541,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // resolvedShiaijoCountError resolves before judging).
   const savedCourts = c.courts || [];
   const courtsChanged = (local.courts || []).join(",") !== savedCourts.join(",");
-  const courtsErr = window.shiaijoPickerError(local.format, local.courts, courtsChanged);
+  const courtsErr = window.shiaijoPickerError(local.format, local.courts, courtsChanged, (tournament.courts || []).length);
   const savedCourtsErr = window.resolvedShiaijoCountError(c.format, savedCourts, tournament.courts);
   const blockingCourtsErr = !!courtsErr && courtsChanged;
   // The mechanism sentence is dropped from the standing hint while the red

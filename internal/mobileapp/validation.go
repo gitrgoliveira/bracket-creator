@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
@@ -886,4 +887,35 @@ func IsSelfRunReportableSubDecision(decision string, decidedByHantei bool, posit
 	default:
 		return false
 	}
+}
+
+// validateRemovedCourtsNotInUse refuses a competition court change that would
+// strand a live bout on a shiaijo the change TAKES AWAY.
+//
+// engine.CourtsStillInUse answers the broader question ("which shiaijo carry a
+// live bout but are not in this list"), which includes shiaijo the competition
+// never held: the move-court picker offers the TOURNAMENT's shiaijo, so a bout
+// can legitimately sit outside its competition's allocation. Reporting those
+// here refused an unrelated edit and named a shiaijo the operator had not
+// touched, so the answer is narrowed to `removed` -- the same narrowing
+// competitionsBlockingCourtRemoval applies on the tournament side, for the same
+// reason: a pre-existing orphan is not this write's to refuse, and the engine's
+// draw gate still refuses to USE one.
+//
+// Completed bouts never block; CourtsStillInUse ignores them.
+func validateRemovedCourtsNotInUse(removed, proposed []string, poolMatches []state.MatchResult, bracket *state.Bracket) error {
+	if len(removed) == 0 {
+		return nil
+	}
+	dropped := make(map[string]bool, len(removed))
+	for _, cc := range removed {
+		dropped[cc] = true
+	}
+	var busy []string
+	for _, cc := range engine.CourtsStillInUse(proposed, poolMatches, bracket) {
+		if dropped[cc] {
+			busy = append(busy, cc)
+		}
+	}
+	return engine.CourtsInUseError(busy)
 }

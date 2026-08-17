@@ -260,7 +260,14 @@ func CourtsStillInUse(proposed []string, poolMatches []state.MatchResult, bracke
 // this file does (ValidateCourtsInTournament, ValidateCompetitionShiaijoCount)
 // rather than being reassembled at the HTTP boundary.
 func ValidateCourtsNotInUse(proposed []string, poolMatches []state.MatchResult, bracket *state.Bracket) error {
-	busy := CourtsStillInUse(proposed, poolMatches, bracket)
+	return CourtsInUseError(CourtsStillInUse(proposed, poolMatches, bracket))
+}
+
+// CourtsInUseError is the operator-facing refusal for a set of shiaijo that
+// still carry live bouts, or nil for an empty set. Split out so a caller that
+// NARROWS the set first (the settings PUT, which reports only the shiaijo its
+// own edit removes) words the refusal identically to one that does not.
+func CourtsInUseError(busy []string) error {
 	if len(busy) == 0 {
 		return nil
 	}

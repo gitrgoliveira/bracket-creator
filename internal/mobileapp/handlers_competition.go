@@ -872,7 +872,19 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					internalError(c, brErr)
 					return
 				}
-				if err := engine.ValidateCourtsNotInUse(comp.Courts, poolMatches, bracket); err != nil {
+				// Narrowed to the shiaijo THIS request removes, exactly as the
+				// tournament twin narrows its own answer (see
+				// competitionsBlockingCourtRemoval). Unnarrowed, the check asks
+				// "is any live bout on a court outside the NEW list", which is a
+				// different question: a bout moved onto a shiaijo the
+				// competition never held -- the move-court picker offers the
+				// tournament's shiaijo, not the competition's -- was reported
+				// when the operator removed some unrelated court, naming a
+				// shiaijo this request never touched. A pre-existing orphan is
+				// not this write's to refuse; the draw gate still refuses to
+				// USE one.
+				removed := courtsRemovedBy(resolveCompetitionCourts(stored.Courts, putTourn), comp.Courts)
+				if err := validateRemovedCourtsNotInUse(removed, comp.Courts, poolMatches, bracket); err != nil {
 					c.JSON(http.StatusBadRequest, gin.H{"error": "courts: " + err.Error()})
 					return
 				}

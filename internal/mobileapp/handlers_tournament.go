@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -171,7 +172,12 @@ func courtsRemovedBy(stored, incoming []string) []string {
 //
 // Returns nil when nothing blocks. The message names every blocker so the
 // operator can fix them in one pass rather than one 400 at a time.
-func competitionsBlockingCourtRemoval(comps []*state.Competition, stored, courts []string) error {
+// compMatchLoader hands the court-removal guard a competition's matches. It is
+// a parameter rather than a store call so the guard stays a pure predicate over
+// (competitions, matches) and can be tested without a data directory.
+type compMatchLoader func(compID string) ([]state.MatchResult, *state.Bracket, error)
+
+func competitionsBlockingCourtRemoval(comps []*state.Competition, stored, courts []string, matchesOf compMatchLoader) error {
 	removed := courtsRemovedBy(stored, courts)
 	if len(removed) == 0 {
 		return nil
@@ -195,6 +201,29 @@ func competitionsBlockingCourtRemoval(comps []*state.Competition, stored, courts
 		for _, cc := range engine.CourtsOutsideTournament(comp.Courts, courts) {
 			if dropped[cc] {
 				missing = append(missing, cc)
+			}
+		}
+		// Where its matches actually ARE, not just where it is allocated. The
+		// two differ because the move-court picker offers the TOURNAMENT's
+		// shiaijo, not the competition's, so an operator can legitimately move
+		// a live bout onto a shiaijo this competition was never allocated. The
+		// allocation check above cannot see that bout, and dropping its
+		// shiaijo left it with no per-court operator view for the rest of the
+		// event (/admin/shiaijo/:court is listed from the tournament's courts).
+		//
+		// Same narrowing as above: a bout already sitting outside the
+		// tournament is a pre-existing orphan and is not this request's to
+		// refuse. CourtsStillInUse ignores completed bouts, so finished work
+		// never blocks a venue shrink.
+		if matchesOf != nil {
+			poolMatches, bracket, lerr := matchesOf(comp.ID)
+			if lerr != nil {
+				return lerr
+			}
+			for _, cc := range engine.CourtsStillInUse(courts, poolMatches, bracket) {
+				if dropped[cc] && !slices.Contains(missing, cc) {
+					missing = append(missing, cc)
+				}
 			}
 		}
 		if len(missing) == 0 {
@@ -281,7 +310,21 @@ func checkCourtRemoval(store *state.Store, courts []string) (error, error) {
 		}
 		comps = append(comps, comp)
 	}
-	return nil, competitionsBlockingCourtRemoval(comps, stored, courts)
+	// Loaded lazily, per competition, and only for the live ones the guard
+	// actually reaches: this whole path already short-circuits unless a shiaijo
+	// is being removed.
+	matchesOf := func(compID string) ([]state.MatchResult, *state.Bracket, error) {
+		poolMatches, perr := store.LoadPoolMatches(compID)
+		if perr != nil && !os.IsNotExist(perr) {
+			return nil, nil, fmt.Errorf("load pool matches %s: %w", compID, perr)
+		}
+		bracket, berr := store.LoadBracket(compID)
+		if berr != nil && !os.IsNotExist(berr) {
+			return nil, nil, fmt.Errorf("load bracket %s: %w", compID, berr)
+		}
+		return poolMatches, bracket, nil
+	}
+	return nil, competitionsBlockingCourtRemoval(comps, stored, courts, matchesOf)
 }
 
 // validateCompetitionCourts is the whole gate on a NEWLY AUTHORED competition

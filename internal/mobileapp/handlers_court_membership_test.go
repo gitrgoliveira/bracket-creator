@@ -256,7 +256,7 @@ func TestCompetitionsBlockingCourtRemoval(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.desc, func(t *testing.T) {
-			err := competitionsBlockingCourtRemoval(tc.comps, tc.stored, tc.courts)
+			err := competitionsBlockingCourtRemoval(tc.comps, tc.stored, tc.courts, nil)
 			if tc.blocked {
 				require.Error(t, err)
 				return
@@ -275,6 +275,7 @@ func TestCompetitionsBlockingCourtRemovalNamesOnlyTheRemovedShiaijo(t *testing.T
 		[]*state.Competition{{ID: "mudansha", Name: "Mudansha", Courts: []string{"A", "C", "Z"}, Status: state.CompStatusSetup}},
 		[]string{"A", "B", "C"},
 		[]string{"A", "B"},
+		nil,
 	)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "still runs on shiaijo C")
@@ -289,6 +290,7 @@ func TestCompetitionsBlockingCourtRemovalFallsBackToTheID(t *testing.T) {
 		[]*state.Competition{{ID: "mudansha", Courts: []string{"D"}, Status: state.CompStatusSetup}},
 		[]string{"A", "D"},
 		[]string{"A"},
+		nil,
 	)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "mudansha")
@@ -356,4 +358,81 @@ func TestUpdateCompetitionStaysEditableWhileOrphaned(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, []string{"A", "B"}, comp.Courts)
 	})
+}
+
+// The guard has to judge where a competition's matches ACTUALLY are, not only
+// where it is allocated. The move-court picker offers the TOURNAMENT's shiaijo
+// (admin_competition_bracket.jsx, admin_schedule_score_editor.jsx), so an
+// operator can move a live bout onto a shiaijo the competition was never
+// allocated. Dropping that shiaijo then left the bout with no per-court
+// operator view for the rest of the event, because /admin/shiaijo/:court is
+// listed from the tournament's own courts.
+func TestPutTournamentRefusesToOrphanAMatchMovedOffTheAllocation(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name: "Venue Cup", Password: "pw", Courts: []string{"A", "B", "C", "D", "E"},
+	}))
+	// Allocated A+B only, so the allocation check alone cannot see shiaijo E.
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: "mudansha", Name: "Mudansha", Kind: "individual", Format: state.CompFormatLeague,
+		Courts: []string{"A", "B"}, StartTime: "09:00", Status: state.CompStatusPools,
+	}))
+	require.NoError(t, store.SavePoolMatches("mudansha", []state.MatchResult{
+		{ID: "Pool A-1", Court: "E", Status: state.MatchStatusScheduled},
+	}))
+
+	w := membershipPutTournament(t, r, map[string]any{
+		"name": "Venue Cup", "password": "pw", "courts": []string{"A", "B", "C", "D"},
+	})
+
+	require.Equalf(t, http.StatusBadRequest, w.Code,
+		"removing E must be refused while a live bout sits on it: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "still runs on shiaijo E")
+}
+
+// A FINISHED bout on a removed shiaijo is history and must not wedge the venue
+// shrink; CourtsStillInUse ignores completed matches.
+func TestPutTournamentAllowsRemovingAShiaijoWhoseMatchesAreDone(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name: "Venue Cup", Password: "pw", Courts: []string{"A", "B", "E"},
+	}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: "mudansha", Name: "Mudansha", Kind: "individual", Format: state.CompFormatLeague,
+		Courts: []string{"A", "B"}, StartTime: "09:00", Status: state.CompStatusPools,
+	}))
+	require.NoError(t, store.SavePoolMatches("mudansha", []state.MatchResult{
+		{ID: "Pool A-1", Court: "E", Status: state.MatchStatusCompleted, Winner: "X"},
+	}))
+
+	w := membershipPutTournament(t, r, map[string]any{
+		"name": "Venue Cup", "password": "pw", "courts": []string{"A", "B"},
+	})
+	require.Equalf(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+}
+
+// The competition-level twin narrows the same way. Unnarrowed it asked "is any
+// live bout on a shiaijo outside the NEW list", which reported a bout the
+// operator had moved onto a shiaijo this competition never held, as the reason
+// for refusing the removal of an unrelated one.
+func TestSettingsPutNamesOnlyTheShiaijoItRemoves(t *testing.T) {
+	poolMatches := []state.MatchResult{
+		{ID: "Pool A-1", Court: "B", Status: state.MatchStatusScheduled},
+		{ID: "Pool A-2", Court: "E", Status: state.MatchStatusScheduled},
+	}
+
+	// Removing B, while a bout also sits on E (never in the allocation).
+	err := validateRemovedCourtsNotInUse(
+		[]string{"B"}, []string{"A"}, poolMatches, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "shiaijo B")
+	assert.NotContains(t, err.Error(), "E",
+		"E is a pre-existing orphan this request never removed")
+
+	// Removing nothing cannot refuse anything, however the bouts are placed.
+	require.NoError(t, validateRemovedCourtsNotInUse(nil, []string{"A"}, poolMatches, nil))
+
+	// And a removal whose bouts are all finished still passes.
+	done := []state.MatchResult{{ID: "Pool A-1", Court: "B", Status: state.MatchStatusCompleted, Winner: "X"}}
+	require.NoError(t, validateRemovedCourtsNotInUse([]string{"B"}, []string{"A"}, done, nil))
 }

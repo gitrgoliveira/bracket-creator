@@ -121,6 +121,16 @@ func clampCourts(n int) int {
 	if n < 1 {
 		return 1
 	}
+	// Bounded ABOVE as well, at the A-Z labelling cap. Courts are named by
+	// CourtLabel, which indexes a 26-character string, so a count past MaxCourts
+	// is not merely too big to be sensible -- it is a panic waiting for the
+	// first caller that reaches the 27th band. Every entry point validates the
+	// count long before here (ValidateCourts, validateCourtLabels), so this
+	// clamp changes no reachable behaviour; it means the sheet writers cannot be
+	// made to allocate or index off a number nothing checked.
+	if n > MaxCourts {
+		return MaxCourts
+	}
 	return n
 }
 

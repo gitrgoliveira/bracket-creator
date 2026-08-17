@@ -133,10 +133,10 @@ export function getParticipantValidationState(playerList, withZekkenName) {
 // cap on the field itself.
 export const MAX_COURTS = 16;
 
-// The legal shiaijo allocations for ONE competition: the powers of two up to
-// the court cap. Derived from MAX_COURTS rather than written
-// out, so the cap and this list can never disagree -- 32 shiaijo cannot be
-// labelled, which is why 16 is the ceiling.
+// The legal shiaijo allocations for ONE competition: the powers of two up to the
+// court cap. Derived from MAX_COURTS rather than written out, so the cap and
+// this list can never disagree. 16 is the cap BECAUSE it is the largest entry
+// this list can hold (internal/helper/constants.go), not because of labelling.
 export const VALID_SHIAIJO_COUNTS = (() => {
     const out = [];
     for (let p = 1; p <= MAX_COURTS; p *= 2) out.push(p);

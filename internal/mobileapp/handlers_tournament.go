@@ -198,12 +198,16 @@ func courtsRemovedBy(stored, incoming []string) []string {
 // competition can never be DRAWN onto a court the tournament lacks, including
 // for records orphaned before this guard existed.
 //
-// Returns nil when nothing blocks. The message names every blocker so the
-// operator can fix them in one pass rather than one 400 at a time.
-func competitionsBlockingCourtRemoval(comps []*state.Competition, stored, courts []string, matchesOf compMatchLoader) error {
+// Returns (infraErr, validationErr), the same pair checkCourtRemoval hands its
+// caller: reading a competition's matches can fail for reasons that are not the
+// operator's fault, and a store failure must 500 with a logged cause rather than
+// 400 with the raw error echoed back. Both nil when nothing blocks. The
+// validation message names every blocker so the operator can fix them in one
+// pass rather than one 400 at a time.
+func competitionsBlockingCourtRemoval(comps []*state.Competition, stored, courts []string, matchesOf compMatchLoader) (error, error) {
 	removed := courtsRemovedBy(stored, courts)
 	if len(removed) == 0 {
-		return nil
+		return nil, nil
 	}
 	dropped := make(map[string]bool, len(removed))
 	for _, cc := range removed {
@@ -233,7 +237,7 @@ func competitionsBlockingCourtRemoval(comps []*state.Competition, stored, courts
 		{
 			poolMatches, bracket, lerr := matchesOf(comp.ID)
 			if lerr != nil {
-				return lerr
+				return lerr, nil
 			}
 			for _, cc := range engine.CourtsStillInUseAmong(removed, poolMatches, bracket) {
 				if !slices.Contains(missing, cc) {
@@ -251,9 +255,9 @@ func competitionsBlockingCourtRemoval(comps []*state.Competition, stored, courts
 		blockers = append(blockers, fmt.Sprintf("%q still runs on shiaijo %s", name, strings.Join(missing, ", ")))
 	}
 	if len(blockers) == 0 {
-		return nil
+		return nil, nil
 	}
-	return fmt.Errorf(
+	return nil, fmt.Errorf(
 		"cannot set the tournament's shiaijo to %s: %s. Reassign those shiaijo in the competition's settings first, then change the tournament",
 		strings.Join(courts, ", "), strings.Join(blockers, "; "),
 	)
@@ -328,7 +332,7 @@ func checkCourtRemoval(store *state.Store, courts []string) (error, error) {
 	// Loaded lazily, per competition, and only for the live ones the guard
 	// actually reaches: this whole path already short-circuits unless a shiaijo
 	// is being removed.
-	return nil, competitionsBlockingCourtRemoval(comps, stored, courts, compMatchesFrom(store))
+	return competitionsBlockingCourtRemoval(comps, stored, courts, compMatchesFrom(store))
 }
 
 // validateCompetitionCourts is the whole gate on a NEWLY AUTHORED competition

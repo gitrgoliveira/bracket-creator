@@ -622,9 +622,10 @@ describe('numeric bounds constants', () => {
     // Pin the courts cap. 16 is the largest allocation any one competition can
     // legally hold (the shiaijo-count rule), so a venue is never given shiaijo
     // no competition could use. The Go side declares the same value at
-    // internal/helper/constants.go as `MaxCourts`, derived there from the court
-    // label alphabet. Bumping it here without bumping there (or vice versa)
-    // would let the UI offer values the backend rejects.
+    // internal/helper/constants.go as `MaxCourts`, with the court label
+    // alphabet sized TO it rather than the other way round. Bumping it here
+    // without bumping there (or vice versa) would let the UI offer values the
+    // backend rejects.
     expect(MAX_COURTS).toBe(16);
   });
 

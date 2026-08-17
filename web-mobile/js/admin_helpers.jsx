@@ -387,10 +387,11 @@ function courtCount(courts) {
 
 // --- Shiaijo-count rule (spec 007 R9) --------------------------------------
 //
-// A competition's shiaijo allocation must be a POWER OF TWO. The valid
-// counts are derived from MAX_COURTS rather than written out, so the court
-// label cap and this list can never disagree: 32 shiaijo are unlabelled and
-// therefore unreachable, which is why 16 is the practical ceiling.
+// A competition's shiaijo allocation must be a POWER OF TWO. The valid counts
+// are derived from MAX_COURTS rather than written out, so the cap and this list
+// can never disagree. The causality runs that way on the Go side too
+// (internal/helper/constants.go): 16 is the cap BECAUSE it is the largest entry
+// this list can hold, not because of what can be labelled.
 const VALID_SHIAIJO_COUNTS = (() => {
   const out = [];
   for (let p = 1; p <= MAX_COURTS; p *= 2) out.push(p);
@@ -501,15 +502,13 @@ function shiaijoVenueSplitExample(venueCourtCount) {
 // web-mobile/js/__tests__/shiaijo_count.test.jsx and
 // internal/helper/shiaijo_count_test.go.
 //
-// `venueCourtCount` is OPTIONAL and changes only which counts are OFFERED.
-// Omit it (the two forms) and the message is the venue-agnostic mirror of the
-// Go one: those screens render shiaijoCountHint directly beneath, which
-// supplies the venue view, and stating it twice buries the part that changes.
-// Pass it wherever the message appears ALONE - the dashboard card, the
-// "Start all" picker, the competition header, the overview checklist - or a
-// 3-shiaijo venue is told to "use 2 or 4" when it has no 4 to give. Those
-// surfaces all reach it through competitionDrawBlockedReason, which already
-// receives the tournament's courts for the orphan check.
+// `venueCourtCount` changes which counts are OFFERED, and every production
+// surface passes it. Without it the remedy names the nearest legal counts either
+// side, so a 3-shiaijo venue is told to "use 2 or 4" when it has no 4 to give.
+// That is worse than the repetition it costs under the court pills, where the
+// standing hint names the same counts a line below (shiaijoPickerError passes it
+// for exactly that reason). Omitting it is for a caller with no venue in hand;
+// 0 and undefined both mean "not loaded" and fall back to the full list.
 function shiaijoCountError(n, venueCourtCount) {
   if (!Number.isFinite(n) || n <= 1) return null;
   if (isLegalShiaijoCount(n)) return null;

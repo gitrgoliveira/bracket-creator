@@ -3,6 +3,7 @@ package mobileapp
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -262,7 +263,8 @@ func TestCompetitionsBlockingCourtRemoval(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.desc, func(t *testing.T) {
-			err := competitionsBlockingCourtRemoval(tc.comps, tc.stored, tc.courts, noCompMatches)
+			infraErr, err := competitionsBlockingCourtRemoval(tc.comps, tc.stored, tc.courts, noCompMatches)
+			require.NoError(t, infraErr)
 			if tc.blocked {
 				require.Error(t, err)
 				return
@@ -277,12 +279,13 @@ func TestCompetitionsBlockingCourtRemoval(t *testing.T) {
 // listed as a reason for a refusal it did not cause, or the operator is sent
 // to fix the wrong shiaijo.
 func TestCompetitionsBlockingCourtRemovalNamesOnlyTheRemovedShiaijo(t *testing.T) {
-	err := competitionsBlockingCourtRemoval(
+	infraErr, err := competitionsBlockingCourtRemoval(
 		[]*state.Competition{{ID: "mudansha", Name: "Mudansha", Courts: []string{"A", "C", "Z"}, Status: state.CompStatusSetup}},
 		[]string{"A", "B", "C"},
 		[]string{"A", "B"},
 		noCompMatches,
 	)
+	require.NoError(t, infraErr)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "still runs on shiaijo C")
 	assert.NotContains(t, err.Error(), "Z",
@@ -292,12 +295,13 @@ func TestCompetitionsBlockingCourtRemovalNamesOnlyTheRemovedShiaijo(t *testing.T
 func TestCompetitionsBlockingCourtRemovalFallsBackToTheID(t *testing.T) {
 	// A record with no display name still has to be identifiable in the
 	// message, otherwise the operator is told to fix "".
-	err := competitionsBlockingCourtRemoval(
+	infraErr, err := competitionsBlockingCourtRemoval(
 		[]*state.Competition{{ID: "mudansha", Courts: []string{"D"}, Status: state.CompStatusSetup}},
 		[]string{"A", "D"},
 		[]string{"A"},
 		noCompMatches,
 	)
+	require.NoError(t, infraErr)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "mudansha")
 }
@@ -440,4 +444,26 @@ func TestSettingsPutNamesOnlyTheShiaijoItRemoves(t *testing.T) {
 	// And a removal whose bouts are all finished still passes.
 	done := []state.MatchResult{{ID: "Pool A-1", Court: "B", Status: state.MatchStatusCompleted, Winner: "X"}}
 	require.NoError(t, validateRemovedCourtsNotInUse([]string{"B"}, done, nil))
+}
+
+// A store failure while reading a competition's matches is NOT the operator's
+// fault. It used to travel back through the guard's validation slot, so an
+// unreadable bracket.json answered a venue edit with 400 plus the raw internal
+// error (paths included) and nothing in the server log. checkCourtRemoval's
+// contract is (infraErr, validationErr) and this half has to honour it.
+func TestCourtRemovalGuardReportsAStoreFailureAsInfrastructure(t *testing.T) {
+	boom := errors.New("bracket.json: unexpected end of JSON input")
+	failing := func(string) ([]state.MatchResult, *state.Bracket, error) { return nil, nil, boom }
+
+	infraErr, validationErr := competitionsBlockingCourtRemoval(
+		[]*state.Competition{{ID: "mudansha", Name: "Mudansha", Courts: []string{"A", "B"}, Status: state.CompStatusPools}},
+		[]string{"A", "B", "C"},
+		[]string{"A", "B"},
+		failing,
+	)
+
+	require.Error(t, infraErr, "a read failure must come back as infrastructure, so the handler 500s and logs it")
+	assert.ErrorIs(t, infraErr, boom)
+	assert.NoError(t, validationErr,
+		"and must NOT be reported as a validation failure, which would 400 and echo the raw error to the client")
 }

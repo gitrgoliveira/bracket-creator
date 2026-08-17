@@ -469,13 +469,14 @@ function EmptyState({ icon, title, message, cta, ctaNote, className, style, ...a
 //
 // The tone itself belongs to .field__hint--error in styles.css, not here: a
 // note is red and bold because it is an ERROR, which is equally true of the
-// ones that are plain markup rather than this component. `style` is for layout
-// only (spacing from a preceding note) -- passing colour or weight through it
-// puts back the per-site drift both of these exist to end.
-function FieldError({ children, testId, style }) {
+// ones that are plain markup rather than this component. Deliberately NO style
+// escape hatch: spacing between stacked notes is the .field container's job
+// (flex, gap 6px), and a prop for it is the crack the per-site colour drift
+// would come back through.
+function FieldError({ children, testId }) {
   if (!children) return null;
   return (
-    <div className="field__hint field__hint--error" style={style} data-testid={testId}>
+    <div className="field__hint field__hint--error" data-testid={testId}>
       {children}
     </div>
   );

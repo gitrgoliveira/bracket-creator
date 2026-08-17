@@ -518,7 +518,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
               />
               <div className="field__hint">The address participants reach this tournament at: used for QR codes and share links. Leave blank to use the current browser address.</div>
               {publicURL.trim() === "" && isNonPublicOrigin(window.location.origin) && (
-                <window.FieldError style={{ marginTop: 4 }}>
+                <window.FieldError>
                   {(() => {
                     const o = window.location.origin;
                     const label = (!o || o === "null") ? "an unknown local address" : o;

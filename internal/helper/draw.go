@@ -132,20 +132,20 @@ func (d *KnockoutDraw) NumCourts() int {
 // silently "fixing" it here would hide an invalid allocation rather than refuse
 // it, and would give an operator a draw on a different number of shiaijo from
 // the one they assigned.
-// The A-Z cap is the one exception to "returned untouched", and it is not a
-// normalisation: MaxCourts is 26 while the largest count ANY validator accepts
-// is 16 (ValidateShiaijoCount), so nothing above it is a legal allocation that
-// this could silently rewrite. It is a hard bound on what the draw will size
-// itself from -- every slice below is len numCourts or numBlocks, and
-// CourtLabel indexes a 26-character string, so an unchecked count past the cap
-// is an out-of-range panic on the way to a pointless allocation.
+//
+// The [1, MaxCourts] bound (clampCourts) is the one exception to "returned
+// untouched", and it is a bound rather than a normalisation: every slice the
+// draw builds below is len numCourts or numBlocks, so an unchecked count is an
+// allocation nothing sized.
+//
+// It is deliberately MaxCourts and not the largest legal shiaijo count. R9
+// governs a competition that DRAWS A BRACKET; this function also sizes the pool
+// sheet for leagues and Swiss, whose shiaijo run in parallel and may legally
+// number 20 (ValidateCompetitionShiaijoCount exempts them). Stepping down to 16
+// here would silently drop bands from a legal league's Pool Matches sheet. The
+// step-down branch below is where R9 is preserved, and it still is.
 func EffectiveDrawCourts(numPools, numCourts int) int {
-	if numCourts < 1 {
-		numCourts = 1
-	}
-	if numCourts > MaxCourts {
-		numCourts = MaxCourts
-	}
+	numCourts = clampCourts(numCourts)
 	if numPools > 0 && numCourts > numPools {
 		numCourts = LargestShiaijoCountAtMost(numPools)
 	}
@@ -186,11 +186,9 @@ func BuildKnockoutDrawFromAssignment(pools []Pool, poolWinners int, poolCourt []
 	if len(pools) == 0 || poolWinners <= 0 || len(poolCourt) != len(pools) {
 		return nil
 	}
-	// Floor AND cap, through the one owner of that bound. Not
-	// EffectiveDrawCourts: that also steps a count down to the pool count, which
-	// would desync from the poolCourt assignment the caller has already built
-	// for numCourts. This is exported and reachable without BuildKnockoutDraw's
-	// clamp in front of it, and everything below sizes itself from the result.
+	// Not EffectiveDrawCourts: that also steps a count down to the pool count,
+	// which would desync from the poolCourt assignment the caller has already
+	// built for numCourts.
 	numCourts = clampCourts(numCourts)
 
 	plan := newDrawPlan(pools, poolCourt, poolWinners, numCourts)
@@ -231,8 +229,6 @@ func NewPlayoffDraw(root *Node, numCourts int) *KnockoutDraw {
 	if root == nil {
 		return nil
 	}
-	// Same bound as the pool-fed entry point: exported, and splitIntoSubtrees
-	// sizes its work from this.
 	numCourts = clampCourts(numCourts)
 	return &KnockoutDraw{Root: root, Regions: splitIntoSubtrees(root, numCourts)}
 }

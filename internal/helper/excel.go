@@ -114,26 +114,6 @@ func getMatchSides(sideA, sideB string, mirror bool) (left, right string) {
 	return sideA, sideB
 }
 
-// clampCourts coerces court counts that fall below 1 to 1. Values exceeding
-// MaxCourts are rejected upstream by ValidateCourts, so this function is only
-// a defensive guard against zero/negative numCourts in deeper helper paths.
-func clampCourts(n int) int {
-	if n < 1 {
-		return 1
-	}
-	// Bounded ABOVE as well, at the A-Z labelling cap. Courts are named by
-	// CourtLabel, which indexes a 26-character string, so a count past MaxCourts
-	// is not merely too big to be sensible -- it is a panic waiting for the
-	// first caller that reaches the 27th band. Every entry point validates the
-	// count long before here (ValidateCourts, validateCourtLabels), so this
-	// clamp changes no reachable behaviour; it means the sheet writers cannot be
-	// made to allocate or index off a number nothing checked.
-	if n > MaxCourts {
-		return MaxCourts
-	}
-	return n
-}
-
 // bandOrder is the single rule for which shiaijo a court-banded sheet prints and
 // in what order: the competition's OWN order for the shiaijo that are used, then
 // any shiaijo used but not allocated, in the order they were first seen. Never

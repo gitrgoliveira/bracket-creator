@@ -48,8 +48,12 @@ const (
 
 // MaxCourts is the upper bound for the number of Shiaijo (courts).
 // It comes from the single-letter A–Z labelling used on Shiaijo headers
-// throughout the workbook; values above this are rejected up front by
-// ValidateCourts so we never silently truncate a user-requested layout.
+// throughout the workbook. A count above it is REFUSED at every write path
+// (ValidateCourts on the CLI, validateCourtLabels in the app), so an operator
+// is never silently given a smaller layout than they asked for. The deeper
+// helpers that have no error channel -- the draw builder and the sheet
+// writers -- clamp to it instead (clampCourts), so an unvalidated caller
+// cannot make them allocate or index past the labelling.
 //
 // Mirrored client-side as `MAX_COURTS` in web-mobile/js/admin_helpers.jsx,
 // keep the two in lockstep. The JS side is anchored by a comment back here

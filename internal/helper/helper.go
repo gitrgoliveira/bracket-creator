@@ -100,6 +100,31 @@ func ValidateCourts(n int) error {
 	return nil
 }
 
+// clampCourts bounds a court count to the supported range, [1, MaxCourts]. It
+// is the coercing counterpart of ValidateCourts: the same range, for the paths
+// that have no error channel to refuse through (the draw builder and the sheet
+// writers, which are handed a count and must render something).
+//
+// The upper bound is the A-Z labelling cap, and it is not merely tidiness:
+// CourtLabel indexes a 26-character string, so a count past MaxCourts is an
+// out-of-range panic on the way to a pointless allocation. Every entry point
+// validates long before here, so this changes no reachable behaviour -- it
+// means no helper can be made to allocate or index off a number nothing
+// checked.
+//
+// It lives beside ValidateCourts and CourtLabel because it states the same
+// domain bound they do, and is called from the draw builder, the tree pager
+// and the sheet writers alike.
+func clampCourts(n int) int {
+	if n < 1 {
+		return 1
+	}
+	if n > MaxCourts {
+		return MaxCourts
+	}
+	return n
+}
+
 // CourtLabel returns the letter label (A–Z) for a zero-based court index.
 func CourtLabel(i int) string {
 	return string("ABCDEFGHIJKLMNOPQRSTUVWXYZ"[i])

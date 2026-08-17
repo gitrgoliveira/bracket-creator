@@ -751,12 +751,10 @@ a:hover {
   color: var(--ink-3);
 }
 
-/* Tone modifiers for a field note. An operator scanning a form reads colour
-   and weight as severity, so both live here rather than being spelled inline
-   at each note: the court field alone had a bold red one, a non-bold red one
-   and an amber one whose colour was the --warn-ink hex re-typed by hand.
-   --error is something the operator must fix, --warn is something they should
-   know. Anything advisory keeps the plain .field__hint. */
+/* Tone modifiers for a field note. An operator scanning a form reads colour and
+   weight as severity, so both live here rather than being spelled inline at each
+   note. --error is something the operator must fix, --warn is something they
+   should know; anything advisory keeps the plain .field__hint. */
 .field__hint--error {
   color: var(--red);
   font-weight: 600;

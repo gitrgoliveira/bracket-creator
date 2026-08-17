@@ -389,7 +389,106 @@ protection**) rather than above it.
 
 *Reference:* the Male draw is the criterion-3/structural case (courts A and B, 5 pools
 each, one bye each to P1 and P6; courts C and D, 4 pools each, none). The Female and
-Team draws are the criterion-1 case (byes to seeded pools' winners).
+Team draws are CONSISTENT with criterion 1 (their byes did land on seeded pools'
+winners) but do not witness it -- see R6(b).
+
+#### R6(a) Two layers: structure decides WHERE, precedence decides WHO
+
+Bye placement is the composition of two independent rules, in this order, and reading
+either one alone produces a wrong model of the draw:
+
+| Layer | Question | Owner | Rule |
+| --- | --- | --- | --- |
+| 1 | Which blocks carry a bye at all? | occupant count, plus **D2** for the shallow region | a block of `q` occupants owes `NextPow2(q) - q` empty slots (**R7**), of which `q % 2` are NAMED round-1 byes; the shallow slot goes to the court with the fewest pools |
+| 2 | Which occupant of such a block takes it? | **R6** | seeded pools' home 1sts, then oversized, then pool order, then crossed-in ranks |
+
+Layer 1 is pure structure: it counts occupants and balances the match load across
+shiaijo. It knows nothing about seeding. Layer 2 never creates a bye, it only allocates
+one that layer 1 has already produced.
+
+The two bye figures in that first row are NOT interchangeable and diverge from `q = 5`
+up: a 5-occupant block owes three empty slots but prints ONE named bye, because D4's
+greedy layer puts the later byes on match WINNERS rather than on competitors (the Male
+draw's round-2 bye falls to W(P4 v P5), not to P1). The named count is what an operator
+sees on the sheet, and it is the one this section's tables report.
+`TestByeCountMatchesBlockParity` pins the parity figure and says why it is not R7's.
+
+**Corroboration across all three reference draws.** Every bye on the 34th EKC sheets is
+explained by the two layers together, and none needs a third rule:
+
+| Draw | Region | Occupants | Bye | Taken by | Layer 1 says | Layer 2 says |
+| --- | --- | --- | --- | --- | --- | --- |
+| Female | A, C, D | 2 pools each | no | n/a | even, no bye | not consulted |
+| Female | B | 1 pool | yes | P3 | D2: fewest pools → shallow | only occupant |
+| Male | A | 5 pools | yes | P1 | odd → one bye | first pool |
+| Male | B | 5 pools | yes | P6 | odd → one bye | first pool |
+| Male | C, D | 4 pools each | no | n/a | even, no bye | not consulted |
+| Team | A, C | 4 occupants | no | n/a | even, no bye | not consulted |
+| Team | B | 3 occupants | yes | P3 1st | short → one bye | first home 1st |
+| Team | D | 3 occupants | yes | P7 1st | short → one bye | only home 1st |
+
+Layer 1 accounts for every "no" row on its own, and no seeding assignment can turn one
+into a "yes" -- which is the whole content of this section. Note that the layer-2 column
+never needs to invoke seeding: that is **R6(b)**, and it is a limitation of the reference
+data rather than of the rule.
+
+**Do NOT try to make the seeds bye.** "The top seeds get the byes" is an OUTCOME of the
+two layers on most fields, not an independent requirement, and treating it as one leads
+directly to two changes that are both wrong:
+
+- Moving seed placement (**R2**) so seeds land in the blocks that happen to be short.
+  Seed placement answers a different question (separation, **R5**) and rearranging it to
+  chase byes breaks the reference allocations.
+- Resizing pools (**D1**) so a seeded pool's block comes out odd. Pool sizing follows
+  from the entry count; bending it to manufacture a bye inverts layer 1's purpose, which
+  is to EVEN the match load, not to hand an advantage to a chosen competitor.
+
+When a seeded pool's winner does not bye, the correct reading is that layer 1 left that
+block full. Nothing is violated.
+
+**Rank class outranks seeding within layer 2.** Criterion 4 sits below criteria 1-3
+wholesale, so an unseeded pool's home 1st byes ahead of a *seeded* pool's crossed-in
+2nd. A pool winner outranks a runner-up whatever the runner-up's pool was seeded. The
+Team draw prints this: P7's 1st byes in court D while P3's 2nd, which crossed in from a
+seeded pool, does not.
+
+#### R6(b) Criterion 1 is an operator requirement, NOT a decoded one
+
+**No reference draw discriminates criterion 1 from criterion 3.** In every one of the
+three sheets the seeded pool is also the lowest-numbered pool in its block, so "seeds
+first" and "pool order" predict the same bye and the data cannot separate them.
+Rebuilding all three reference draws with every seed STRIPPED reproduces their byes
+exactly (pinned by `TestEKCReferenceByesSurviveSeedStripping`):
+
+| Draw | Block | Bye | Why it does not discriminate |
+| --- | --- | --- | --- |
+| Female | B | P3 | the block's ONLY occupant; forced whatever the precedence says |
+| Male | A, B | P1, P6 | each is its block's first pool, so criteria 1 and 3 agree |
+| Team | B | P3 1st | seeded AND first in pool order among the block's home 1sts |
+| Team | D | P7 1st | the block's only home 1st; decided by rank class, not by seeding |
+
+So criterion 1 rests on the operator requirement of 2026-08-09 (competitive protection:
+a seeded competitor should not have to fight an extra round to reach the same point of
+the draw), and is corroborated by nothing on the sheets. That is a sound basis for the
+rule -- it is the same basis as R1 and R2 -- but it MUST NOT be presented as decoded
+from the reference data, and a future decoder must not "confirm" it by pointing at these
+draws. What the sheets do pin hard is layer 1: which blocks carry a bye at all.
+
+**The coincidence is not confined to the reference data.** `PoolSeeding` places each
+block's top seed in that block's FIRST pool, so criteria 1 and 3 agree on the natural
+output of the pipeline too. A test that seeds through `CreatePools` and then checks the
+bye landed on the top seed's pool therefore passes whether or not criterion 1 exists.
+Confirmed by fault injection: with criterion 1 deleted from `byePrecedenceLess`, the
+whole `helper` suite still passes except three cases, and neither
+`TestByeGoesToTheHighestPrecedenceOccupantSweep` nor
+`TestSixPoolsOneQualifierByesTheTopSeeds` is among them despite both being named for it.
+
+Criterion 1 is therefore witnessed ONLY where the seed-to-pool mapping is set against
+pool order: `TestSeededPoolWinnerTakesTheBlockBye` (a hand-built block),
+`TestByePrecedenceSeedBeatsPoolOrder` and the seeded rows of
+`TestByePlacementLayer2AllocatesOnlyWithinAByeBearingBlock`. When changing R6, run the
+injection rather than trusting a green suite: most of the bye coverage is insensitive to
+this criterion by construction.
 
 ### R7 Degradation ladder
 
@@ -557,6 +656,10 @@ the result is reproducible.
 is court B that got the shallow region: P3 byes straight into the half-final F4 while
 court A's occupants play F1 first. The same draw also shows the bye landing on that
 court's seeded pool, which is R6-1 doing its job inside the shallow region.
+
+This default is layer 1 of the pair described in **R6(a)**: it decides WHICH region is
+shallow, on match load alone, and never on who is seeded there. R6 then decides who
+inside that region takes the resulting bye.
 
 ### D3. Third-place quarter assignment (R4c)
 

@@ -58,6 +58,12 @@ func namedBye(block *Node) string {
 // where the pool sizes, the seed-to-pool mapping and the block partition are all
 // whatever CreatePools and the deinterleave actually produce.
 //
+// Which is exactly why this sweep does NOT itself pin criterion 1: the pipeline
+// seeds each block's first pool, so criteria 1 and 3 agree at every point it
+// visits and it passes with criterion 1 deleted (spec R6(b)). What it covers is
+// the rest of the precedence list and the block partition, across a range no
+// hand-built case reaches. Do not read a green run here as criterion 1 holding.
+//
 // This is the defect bc-draw was raised on, and the one the pool-count cap on
 // planBlocks reintroduced: at 6 pools and 1 qualifier on two shiaijo the byes
 // landed on Pool C and Pool F, the LAST pool of each block, while pools A and D
@@ -161,6 +167,14 @@ func TestSubdivisionNeverStrandsALoneOccupant(t *testing.T) {
 // deinterleave put seed 1 in Pool A and seed 3 in Pool C on shiaijo A, seed 2 in
 // Pool D and seed 4 in Pool F on shiaijo B. Each block holds three pool winners
 // and so carries exactly one bye, and both must go to the better-seeded pool.
+//
+// It does NOT discriminate R6 criterion 1 from criterion 3, despite the name:
+// PoolSeeding puts each block's top seed in that block's FIRST pool, so "seeds
+// first" and "pool order" name the same bye here and this case passes with
+// criterion 1 deleted (spec R6(b)). It is a regression guard for the bc-draw
+// defect, which is a real job -- just not that one. The witnesses for criterion
+// 1 are TestSeededPoolWinnerTakesTheBlockBye (tree_test.go) and
+// TestByePrecedenceSeedBeatsPoolOrder (draw_bye_layers_test.go).
 func TestSixPoolsOneQualifierByesTheTopSeeds(t *testing.T) {
 	pools := seededDrawPools(t, 6, 2)
 

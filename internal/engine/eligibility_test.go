@@ -868,11 +868,16 @@ func TestRollback_BracketSubResults_Cleared(t *testing.T) {
 	// Deterministically target whoever the generator placed as SideA of the
 	// SECOND bracket match, and pre-mark that competitor ineligible from a
 	// DIFFERENT match (the first match). This is what makes the test always
-	// exercise the BRACKET rollback path (recordBracketMatchResultTx), the
-	// path the nil-preserve bug lives in, regardless of how the generator
-	// seeds sides. (The earlier version fell back to a pool-match rollback
-	// when Alice happened not to land in the second match, which silently
-	// stopped proving the bracket behaviour.)
+	// exercise the BRACKET rollback path, the path the nil-preserve bug lives
+	// in, regardless of how the generator seeds sides. (The earlier version
+	// fell back to a pool-match rollback when Alice happened not to land in the
+	// second match, which silently stopped proving the bracket behaviour.)
+	//
+	// This is the NON-tx twin: RecordMatchResultWithIneligibility rolls back
+	// through writeMatchResult. The comment here used to name
+	// recordBracketMatchResultTx, which this test never reaches — a mutation of
+	// the tx twin's rollback policy survived the whole suite on the strength of
+	// that claim. TestRollback_BracketSubResults_ClearedTx covers the other one.
 	targetName := secondMatch.SideA
 	targetID := idByName[targetName]
 	require.NotEmpty(t, targetID, "second bracket match SideA must map to a known participant")
@@ -919,6 +924,82 @@ func TestRollback_BracketSubResults_Cleared(t *testing.T) {
 				found = true
 				assert.Empty(t, bm.SubResults, "SubResults must be cleared by rollback when the prior had none")
 				assert.False(t, bm.DecidedByHantei, "DecidedByHantei must be cleared by rollback when the prior was false")
+			}
+		}
+	}
+	require.True(t, found, "second match must exist in bracket after rollback")
+}
+
+// TestRollback_BracketSubResults_ClearedTx is the tx twin of the test above.
+// It exists because a mutation flipping rollbackMatchResultTx's write policy
+// from restore to forward survived the ENTIRE suite: every bracket-rollback
+// assertion went through the non-tx path, while the tx path — the one the score
+// and decision HTTP handlers actually take, since they wrap the write in
+// Store.WithTransaction — had none. Both twins now fail if either loses the
+// restore policy.
+func TestRollback_BracketSubResults_ClearedTx(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "bracket-rollback-subs-tx"
+
+	createTestCompetition(t, store, compID, "playoffs", 3)
+
+	players := []domain.Player{
+		{ID: helper.NewUUID4(), Name: "Alice", Dojo: "A"},
+		{ID: helper.NewUUID4(), Name: "Bob", Dojo: "B"},
+		{ID: helper.NewUUID4(), Name: "Carol", Dojo: "C"},
+		{ID: helper.NewUUID4(), Name: "Dave", Dojo: "D"},
+	}
+	require.NoError(t, store.SaveParticipants(compID, players))
+	idByName := make(map[string]string, len(players))
+	for _, p := range players {
+		idByName[p.Name] = p.ID
+	}
+	require.NoError(t, eng.StartCompetition(compID))
+
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	firstMatchID := bracket.Rounds[0][0].ID
+	secondMatch := bracket.Rounds[0][1]
+
+	targetID := idByName[secondMatch.SideA]
+	require.NotEmpty(t, targetID)
+	require.NoError(t, store.SetCompetitorStatus(compID, domain.CompetitorStatus{
+		PlayerID: targetID,
+		Eligible: false,
+		Reason:   "kiken in an earlier match",
+		MatchID:  firstMatchID,
+	}))
+
+	var recErr error
+	require.NoError(t, store.WithTransaction(compID, func(tx state.StoreTx) error {
+		_, recErr = eng.RecordMatchResultWithIneligibilityTx(tx, compID, secondMatch.ID, &state.MatchResult{
+			Winner:          secondMatch.SideB,
+			Status:          state.MatchStatusCompleted,
+			Decision:        "kiken",
+			DecisionBy:      "aka",
+			DecidedByHantei: state.HanteiPtr(true),
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: secondMatch.SideA, Winner: secondMatch.SideA},
+				{Position: 2, SideA: secondMatch.SideA, IpponsB: []string{"M"}},
+			},
+		})
+		// Commit whatever the rollback left behind: the point of the tx twin is
+		// that the restore write supersedes the forward one WITHIN the tx, so
+		// the committed state must show the rollback, not the partial write.
+		return nil
+	}))
+	var alreadyErr *AlreadyIneligibleError
+	require.ErrorAs(t, recErr, &alreadyErr)
+
+	bracket, err = store.LoadBracket(compID)
+	require.NoError(t, err)
+	found := false
+	for _, round := range bracket.Rounds {
+		for _, bm := range round {
+			if bm.ID == secondMatch.ID {
+				found = true
+				assert.Empty(t, bm.SubResults, "SubResults must be cleared by the tx rollback when the prior had none")
+				assert.False(t, bm.DecidedByHantei, "DecidedByHantei must be cleared by the tx rollback")
 			}
 		}
 	}

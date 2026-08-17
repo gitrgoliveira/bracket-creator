@@ -526,6 +526,87 @@ describe('MatchDetailCard team sub-rows (mp-8sw)', () => {
     expect(findVnode(tree, n => n.type === IndividualScore)).toBeTruthy();
     expect(findVnode(tree, n => n.type === TeamScoreboard)).toBeNull();
   });
+
+  // An individual match is ONE row (operator ruling): names, ippon slots and
+  // the centre on the same line. The card used to render a separate names row
+  // above the scoreboard, which put a competitor's POINTS UNDERNEATH THEIR NAME
+  // and forced a second "vs" into the name row. The names now go through the
+  // scoreboard, which is the single-line layout the TV boards already use.
+  it('gives the names to the scoreboard instead of a separate row above it', () => {
+    const match = {
+      compKind: 'individual', teamSize: 0, status: 'running', court: 'A',
+      phase: 'bracket', round: 'QF',
+      sideA: { id: 'pA', name: 'Alice' }, sideB: { id: 'pB', name: 'Bob' },
+      ipponsA: ['M'], ipponsB: [],
+    };
+    const tree = runtime.mount(MatchDetailCard, { match, onClose: null });
+    // No separate name row, and so no second "vs" anywhere above the scoreboard.
+    expect(findVnode(tree, n => n.props?.className === 'match-detail-card__players')).toBeNull();
+    expect(findVnode(tree, n => n.props?.className === 'match-detail-card__vs')).toBeNull();
+    const score = findVnode(tree, n => n.type === IndividualScore);
+    expect(score).toBeTruthy();
+    expect(score.props.showNames).toBe(true);
+    // Resolved names are passed IN: the component's own withNumber would render
+    // an unplayed bracket side as "TBD" rather than its feeder label.
+    expect(score.props.shiroName).toBe('Bob');
+    expect(score.props.akaName).toBe('Alice');
+  });
+
+  // The dojo rides WITH the name, as a second line under it (the block the
+  // bracket and up-next lists render). It must not become a third slot-shaped
+  // thing on the score row: the points stay on the name's line.
+  it('renders the dojo as a line under each name', () => {
+    const match = {
+      compKind: 'individual', teamSize: 0, status: 'running', court: 'A',
+      phase: 'bracket', round: 'QF',
+      sideA: { id: 'pA', name: 'Alice', dojo: 'Kyoto Renmei' },
+      sideB: { id: 'pB', name: 'Bob', dojo: 'Osaka Budokan' },
+      ipponsA: ['M'], ipponsB: [],
+    };
+    const tree = runtime.mount(MatchDetailCard, { match, onClose: null });
+    const score = findVnode(tree, n => n.type === IndividualScore);
+    // The card asks for the dojo with a FLAG; it does not splice markup into
+    // the name props, which are strings. Rendering the line is the scoreboard's
+    // job, so the assertion below is against its output, not the card's.
+    expect(score.props.showDojo).toBe(true);
+    expect(score.props.shiroName).toBe('Bob');
+    expect(score.props.akaName).toBe('Alice');
+  });
+
+  // (The rendered half — that the dojo lands INSIDE the name cell, under the
+  // name — is asserted against real DOM in render/msb_name_cell.render.test.jsx,
+  // since this file works on vnodes.)
+
+  // A side with no dojo (an unresolved bracket slot, "Winner of M1") must get
+  // the bare name, not an empty line that would pad the card unevenly.
+  it('omits the dojo line when a side has no dojo', () => {
+    const match = {
+      compKind: 'individual', teamSize: 0, status: 'scheduled', court: 'A',
+      phase: 'bracket', round: 'Final',
+      sideA: { name: 'Winner of M1' }, sideB: { name: 'Winner of M2' },
+      ipponsA: [], ipponsB: [],
+    };
+    const tree = runtime.mount(MatchDetailCard, { match, onClose: null });
+    const score = findVnode(tree, n => n.type === IndividualScore);
+    expect(score.props.shiroName).toBe('Winner of M2');
+    expect(score.props.akaName).toBe('Winner of M1');
+  });
+
+  // The pairing has to be visible before the match starts, too. That used to be
+  // the separate names row's job; with it gone the scoreboard must render for a
+  // scheduled match rather than only for a running or completed one.
+  it('renders the scoreboard for a scheduled individual match, so the pairing still shows', () => {
+    const match = {
+      compKind: 'individual', teamSize: 0, status: 'scheduled', court: 'A',
+      phase: 'bracket', round: 'QF',
+      sideA: { id: 'pA', name: 'Alice' }, sideB: { id: 'pB', name: 'Bob' },
+      ipponsA: [], ipponsB: [],
+    };
+    const tree = runtime.mount(MatchDetailCard, { match, onClose: null });
+    const score = findVnode(tree, n => n.type === IndividualScore);
+    expect(score).toBeTruthy();
+    expect(score.props.shiroName).toBe('Bob');
+  });
 });
 
 // mp-116 (Copilot review follow-up): the bracket-tab and pools-tab click sites

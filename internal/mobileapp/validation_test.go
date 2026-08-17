@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -96,7 +97,7 @@ func TestScoreRequestValidate(t *testing.T) {
 }
 
 // TestScoreRequestValidate_IpponCounts covers the best-of-3 invariants
-// added by validateIpponCounts: max 2 ippons per side, and 2-2 is
+// added by validateIppons: max 2 ippons per side, and 2-2 is
 // rejected (impossible because the bout ends at first to 2). 1-1 and
 // 2-1 must remain valid (time-out draw / regulation winner).
 func TestScoreRequestValidate_IpponCounts(t *testing.T) {
@@ -658,13 +659,13 @@ func TestCompetitorStatusRequestValidate(t *testing.T) {
 }
 
 // TestSuneIpponRoundTrips confirms that "S" (Sune, shin strike, valid in
-// Naginata) is accepted by validateIpponCounts and ScoreRequest.Validate.
+// Naginata) is accepted by validateIppons and ScoreRequest.Validate.
 // The server's ippon-count validator is letter-agnostic (counts only, it
 // does not filter by allowed letter); so "S" must not cause a validation
 // error regardless of competition type.
 func TestSuneIpponRoundTrips(t *testing.T) {
-	t.Run("S in ipponsA passes validateIpponCounts", func(t *testing.T) {
-		err := validateIpponCounts("", []string{"S"}, []string{})
+	t.Run("S in ipponsA passes validateIppons", func(t *testing.T) {
+		err := validateIppons("", []string{"S"}, []string{})
 		assert.NoError(t, err, "Sune ippon must pass the count-only validator")
 	})
 
@@ -688,7 +689,7 @@ func TestSuneIpponRoundTrips(t *testing.T) {
 	})
 
 	t.Run("three S ippons still exceeds best-of-3 cap", func(t *testing.T) {
-		err := validateIpponCounts("", []string{"S", "S", "S"}, []string{})
+		err := validateIppons("", []string{"S", "S", "S"}, []string{})
 		require.Error(t, err, "three ippons must be rejected")
 		var verr *ValidationError
 		require.True(t, errors.As(err, &verr))
@@ -893,7 +894,7 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 				{
 					Position: 1, SideA: "TeamA", SideB: "TeamB",
 					IpponsA: []string{"M"}, IpponsB: []string{"K"},
-					Winner: "TeamA", DecidedByHantei: true,
+					Winner: "TeamA", DecidedByHantei: state.HanteiPtr(true),
 				},
 			},
 		}
@@ -970,7 +971,7 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 				{
 					Position: state.DaihyosenSubPosition, SideA: "TeamA", SideB: "TeamB",
 					IpponsA: []string{"M"}, IpponsB: []string{"K"},
-					Winner: "TeamA", DecidedByHantei: true, Encho: enchoOne,
+					Winner: "TeamA", DecidedByHantei: state.HanteiPtr(true), Encho: enchoOne,
 				},
 			},
 		}
@@ -983,7 +984,7 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 				{
 					Position: state.DaihyosenSubPosition, SideA: "TeamA", SideB: "TeamB",
 					IpponsA: []string{"M"}, IpponsB: []string{"K"},
-					Winner: "", DecidedByHantei: true, Encho: enchoOne,
+					Winner: "", DecidedByHantei: state.HanteiPtr(true), Encho: enchoOne,
 				},
 			},
 		}
@@ -1000,7 +1001,7 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 				{
 					Position: -1, SideA: "TeamA", SideB: "TeamB",
 					IpponsA: []string{"M"}, IpponsB: []string{"K"},
-					Winner: "TeamA", DecidedByHantei: true, Encho: nil,
+					Winner: "TeamA", DecidedByHantei: state.HanteiPtr(true), Encho: nil,
 				},
 			},
 		}
@@ -1013,7 +1014,7 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 				{
 					Position: -1, SideA: "TeamA", SideB: "TeamB",
 					IpponsA: []string{"M", "K"}, IpponsB: []string{"D"},
-					Winner: "TeamA", DecidedByHantei: true, Encho: enchoOne,
+					Winner: "TeamA", DecidedByHantei: state.HanteiPtr(true), Encho: enchoOne,
 				},
 			},
 		}
@@ -1028,7 +1029,7 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 				{
 					Position: -1, SideA: "TeamA", SideB: "TeamB",
 					IpponsA: []string{"M"}, IpponsB: []string{"K"},
-					Winner: "TeamA", Decision: "hikiwake", DecidedByHantei: true, Encho: enchoOne,
+					Winner: "TeamA", Decision: "hikiwake", DecidedByHantei: state.HanteiPtr(true), Encho: enchoOne,
 				},
 			},
 		}
@@ -1043,7 +1044,7 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 				{
 					Position: -1, SideA: "TeamA", SideB: "TeamB",
 					IpponsA: []string{"M"}, IpponsB: []string{"K"},
-					Winner: "TeamA", Decision: "daihyosen", DecidedByHantei: true, Encho: enchoOne,
+					Winner: "TeamA", Decision: "daihyosen", DecidedByHantei: state.HanteiPtr(true), Encho: enchoOne,
 				},
 			},
 		}
@@ -1056,7 +1057,7 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 				{
 					Position: -1, SideA: "TeamA", SideB: "TeamB",
 					IpponsA: []string{"M"}, IpponsB: []string{"K"},
-					Winner: "TeamA", Decision: "fought", DecidedByHantei: true, Encho: enchoOne,
+					Winner: "TeamA", Decision: "fought", DecidedByHantei: state.HanteiPtr(true), Encho: enchoOne,
 				},
 			},
 		}
@@ -1069,7 +1070,7 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 				{
 					Position: -1, SideA: "TeamA", SideB: "TeamB",
 					IpponsA: nil, IpponsB: nil,
-					Winner: "TeamA", DecidedByHantei: true, Encho: enchoOne,
+					Winner: "TeamA", DecidedByHantei: state.HanteiPtr(true), Encho: enchoOne,
 				},
 			},
 		}
@@ -1082,12 +1083,12 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 				{
 					Position: -1, SideA: "TeamA", SideB: "TeamB",
 					IpponsA: []string{"M"}, IpponsB: []string{"K"},
-					Winner: "TeamA", DecidedByHantei: true, Encho: enchoOne,
+					Winner: "TeamA", DecidedByHantei: state.HanteiPtr(true), Encho: enchoOne,
 				},
 				{
 					Position: -1, SideA: "TeamA", SideB: "TeamB",
 					IpponsA: []string{"M", "K"}, IpponsB: []string{"K"}, // invalid: non-tied scoreline
-					Winner: "TeamA", DecidedByHantei: true, Encho: enchoOne,
+					Winner: "TeamA", DecidedByHantei: state.HanteiPtr(true), Encho: enchoOne,
 				},
 			},
 		}
@@ -1106,7 +1107,7 @@ func TestValidateBulkScoreLengths_SubBoutDecidedByHantei(t *testing.T) {
 				{
 					Position: 1, SideA: "TeamA", SideB: "TeamB",
 					IpponsA: []string{"M"}, IpponsB: []string{"K"},
-					Winner: "TeamA", DecidedByHantei: true,
+					Winner: "TeamA", DecidedByHantei: state.HanteiPtr(true),
 				},
 			},
 		}
@@ -1136,7 +1137,7 @@ func TestValidateBulkScoreLengths_SubBoutDecidedByHantei(t *testing.T) {
 				{
 					Position: -1, SideA: "TeamA", SideB: "TeamB",
 					IpponsA: []string{"M"}, IpponsB: []string{"K"},
-					Winner: "TeamA", DecidedByHantei: true, Encho: enchoOne,
+					Winner: "TeamA", DecidedByHantei: state.HanteiPtr(true), Encho: enchoOne,
 				},
 			},
 		}
@@ -1149,7 +1150,7 @@ func TestValidateBulkScoreLengths_SubBoutDecidedByHantei(t *testing.T) {
 				{
 					Position: -1, SideA: "TeamA", SideB: "TeamB",
 					IpponsA: []string{"M"}, IpponsB: []string{"K"},
-					Winner: "", DecidedByHantei: true, Encho: enchoOne,
+					Winner: "", DecidedByHantei: state.HanteiPtr(true), Encho: enchoOne,
 				},
 			},
 		}
@@ -1164,7 +1165,7 @@ func TestValidateBulkScoreLengths_SubBoutDecidedByHantei(t *testing.T) {
 				{
 					Position: -1, SideA: "TeamA", SideB: "TeamB",
 					IpponsA: []string{"M"}, IpponsB: []string{"K"},
-					Winner: "TeamA", DecidedByHantei: true, Encho: nil,
+					Winner: "TeamA", DecidedByHantei: state.HanteiPtr(true), Encho: nil,
 				},
 			},
 		}
@@ -1177,7 +1178,7 @@ func TestValidateBulkScoreLengths_SubBoutDecidedByHantei(t *testing.T) {
 				{
 					Position: -1, SideA: "TeamA", SideB: "TeamB",
 					IpponsA: []string{"M", "K"}, IpponsB: []string{"D"},
-					Winner: "TeamA", DecidedByHantei: true, Encho: enchoOne,
+					Winner: "TeamA", DecidedByHantei: state.HanteiPtr(true), Encho: enchoOne,
 				},
 			},
 		}
@@ -1362,4 +1363,158 @@ func TestValidateDecision_EnchoScoreline(t *testing.T) {
 			rejectScoreline(t, build([]string{"○"}, &state.EnchoMetadata{PeriodCount: 0}), "degenerate periodCount-0 block is not encho")
 		})
 	}
+}
+
+// The match-level tie gate must count ippons the way the engine does. It used
+// to compare raw len(), while validateSubBout (its declared twin) and the
+// engine's preserveSubHantei both drop the "•" unfilled-slot placeholder — so
+// one scoreline could read tied to one enforcer and untied to the other.
+func TestScoreRequestValidate_HanteiTieGateIgnoresPlaceholders(t *testing.T) {
+	req := func(a, b []string) ScoreRequest {
+		return ScoreRequest{
+			SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			Status:          state.MatchStatusCompleted,
+			DecidedByHantei: boolPtr(true),
+			IpponsA:         a, IpponsB: b,
+		}
+	}
+
+	t.Run("tied on real ippons, untied on raw length, is accepted", func(t *testing.T) {
+		// 1 real ippon each. Raw len says 2 != 1 and would reject.
+		r := req([]string{"M", "•"}, []string{"K"})
+		assert.NoError(t, r.Validate())
+	})
+
+	t.Run("an empty trailing cell counts the same way", func(t *testing.T) {
+		r := req([]string{"M", ""}, []string{"K"})
+		assert.NoError(t, r.Validate())
+	})
+
+	t.Run("untied on real ippons is still rejected", func(t *testing.T) {
+		// 0 real against 1. Raw len would call this tied (1 == 1) and accept.
+		// Kept to one slot per side so validateIppons' 2-2 rule (which
+		// does count raw slots) cannot be what rejects it.
+		r := req([]string{"•"}, []string{"K"})
+		err := r.Validate()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "tied scoreline")
+	})
+
+	t.Run("the sub-bout twin agrees on the same scoreline", func(t *testing.T) {
+		sub := &state.SubMatchResult{
+			Position: state.DaihyosenSubPosition,
+			SideA:    "Alice", SideB: "Bob", Winner: "Alice",
+			Decision:        "daihyosen",
+			IpponsA:         []string{"M", "•"},
+			IpponsB:         []string{"K"},
+			DecidedByHantei: state.HanteiExplicit(true),
+		}
+		assert.NoError(t, validateSubBout("subResults[0].", sub, false))
+	})
+}
+
+// validateIppons counts two ways on purpose: the per-side caps are
+// STRUCTURAL (a side has two slots), the 2-2 rule is SEMANTIC (a claim about
+// points). Counting slots for the second rejected legal scorelines.
+func TestValidateIpponCounts_TwoTwoRuleCountsPointsNotSlots(t *testing.T) {
+	t.Run("a placeholder does not make a scoreline 2-2", func(t *testing.T) {
+		// 1-2 on real ippons: an ordinary win, previously refused as "2-2".
+		assert.NoError(t, validateIppons("", []string{"M", "•"}, []string{"K", "D"}))
+	})
+
+	t.Run("an empty cell does not either", func(t *testing.T) {
+		assert.NoError(t, validateIppons("", []string{"M", ""}, []string{"K", "D"}))
+	})
+
+	t.Run("a real 2-2 is still rejected", func(t *testing.T) {
+		err := validateIppons("", []string{"M", "K"}, []string{"D", "T"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "both sides cannot have 2 ippons")
+	})
+
+	t.Run("the per-side cap stays structural", func(t *testing.T) {
+		// Three slots is malformed whatever the entries are: only one is a
+		// real ippon, and it is still refused.
+		err := validateIppons("", []string{"M", "•", "•"}, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "at most 2 ippons per side")
+	})
+
+	t.Run("the wire gate agrees with the domain counter", func(t *testing.T) {
+		// The property that keeps this aligned: whenever the domain counter
+		// says both sides scored 2, the gate refuses; otherwise it does not.
+		for _, tc := range [][2][]string{
+			{{"M", "K"}, {"D", "T"}},
+			{{"M", "•"}, {"K", "D"}},
+			{{"M"}, {"K"}},
+			{{}, {}},
+			{{"○", "○"}, {"M", "K"}},
+		} {
+			a, b := tc[0], tc[1]
+			wantReject := domain.CountScoringIppons(a) == 2 && domain.CountScoringIppons(b) == 2
+			err := validateIppons("", a, b)
+			assert.Equal(t, wantReject, err != nil, "ipponsA=%v ipponsB=%v", a, b)
+		}
+	})
+}
+
+// An ippon entry must be a single character. The rule is domain's
+// (IpponFitsScoreCodec, stated beside the FormatScore/ParseScore pair whose
+// precondition it is); this pins that the wire boundary actually enforces it,
+// on BOTH the ScoreRequest path and the bulk path, at match level and on a
+// sub-bout.
+//
+// Two things went wrong while nothing enforced it. A bracket match persists
+// each side as ONE joined string, so ["M","Ht"] became "MHt" and decoded back
+// as three ippons, one of them the hansoku letter — into the display surfaces
+// and into the K3 rollback snapshot built from the same decode. And on a POOL
+// match, domain.HanteiMark IS the storage encoding for a verdict
+// (encodeHanteiIntoIppons): a client-supplied "Ht" was written to
+// pool-matches.csv verbatim and decodeHanteiFromIppons read it back as a
+// genuine recorded judges' decision — a verdict forged by a payload that never
+// set the flag. Being two runes, it is refused by the same rule as any other
+// multi-character entry.
+func TestIpponEntriesMustBeSingleCharacters(t *testing.T) {
+	t.Run("the hantei mark cannot be smuggled in as a point", func(t *testing.T) {
+		err := validateIppons("", []string{"M", domain.HanteiMark}, []string{"K"})
+		require.Error(t, err, "accepting this forges a hantei verdict on the next reload")
+		assert.Contains(t, err.Error(), "single character")
+	})
+
+	t.Run("any multi-character entry, on either side", func(t *testing.T) {
+		assert.Error(t, validateIppons("", []string{"MK"}, nil))
+		assert.Error(t, validateIppons("", nil, []string{"MK"}))
+		assert.Error(t, validateIppons("", []string{"(H1)"}, nil), "the codec's hansoku suffix is not an ippon")
+	})
+
+	t.Run("every legal entry still passes", func(t *testing.T) {
+		// Waza letters (S is naginata), the default-win maru, the unfilled-slot
+		// placeholder, and the empty cell the editors can send.
+		for _, v := range []string{"M", "K", "D", "T", "H", "S", domain.DefaultWinIppon, domain.IpponPlaceholder, ""} {
+			assert.NoErrorf(t, validateIppons("", []string{v}, nil), "entry %q", v)
+		}
+	})
+
+	t.Run("rejected on the ScoreRequest path", func(t *testing.T) {
+		r := &ScoreRequest{
+			Winner: "Alice", Status: state.MatchStatusCompleted,
+			IpponsA: []string{domain.HanteiMark}, IpponsB: []string{"K"},
+		}
+		err := r.Validate()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "single character")
+	})
+
+	t.Run("rejected on the bulk path, including a sub-bout", func(t *testing.T) {
+		r := &state.MatchResult{
+			SideA: "Kyoto", SideB: "Osaka", Winner: "Kyoto",
+			SubResults: []state.SubMatchResult{{
+				Position: 1, SideA: "K1", SideB: "O1",
+				IpponsA: []string{domain.HanteiMark},
+			}},
+		}
+		err := validateBulkScoreLengths(r, false)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "single character")
+	})
 }

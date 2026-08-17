@@ -1,6 +1,9 @@
 package mobileapp
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"io/fs"
 	"log"
 	"log/slog"
@@ -9,6 +12,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
@@ -223,6 +228,15 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	if err != nil {
 		log.Printf("Warning: web-mobile directory not found: %v", err)
 	} else {
+		// One validator per ROUTER, computed on first use rather than at
+		// startup, and captured by the handler below. sync.OnceValue keeps the
+		// laziness (nothing hashes unless a static asset is actually requested)
+		// without the package-level Once+string this used to need: those made a
+		// per-router value process-global, so a second FS root or an alternate
+		// asset dir would silently share one validator, and every test touching
+		// the headers had to reset package state or leak a consumed memo into
+		// whatever ran next.
+		assetETag := sync.OnceValue(func() string { return buildAssetETag(subFS) })
 		// Custom handler to serve from embedded FS with SPA fallback
 		r.NoRoute(func(c *gin.Context) {
 			path := c.Request.URL.Path
@@ -252,7 +266,10 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 			// Check if file exists in FS
 			_, err := fs.Stat(subFS, filePath)
 			if err == nil {
-				// File exists, serve it
+				// File exists, serve it. http.ServeContent honours the ETag we
+				// set here against the request's If-None-Match, so an unchanged
+				// build answers 304 without a body.
+				setStaticCacheHeaders(c, assetETag(), filePath)
 				fileServer := http.FileServer(http.FS(subFS))
 				fileServer.ServeHTTP(c.Writer, c.Request)
 				return
@@ -270,6 +287,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 			if strings.HasPrefix(filePath, "dist/") && strings.HasSuffix(filePath, ".jsx") {
 				rewritten := strings.TrimSuffix(filePath, ".jsx") + ".js"
 				if _, err := fs.Stat(subFS, rewritten); err == nil {
+					setStaticCacheHeaders(c, assetETag(), rewritten)
 					c.Request.URL.Path = "/" + rewritten
 					http.FileServer(http.FS(subFS)).ServeHTTP(c.Writer, c.Request)
 					return
@@ -293,3 +311,95 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 
 	return r, hub, apiLimiter
 }
+
+// buildAssetETag is the validator for the compiled front-end under /dist/.
+//
+// Derived from the CONTENT of the embedded assets, not from the build version.
+// version.GetVersion() reads an embedded string that on a development branch is
+// the branch name: it does not change when you rebuild, so using it here would
+// serve a developer stale JavaScript after every recompile — the exact failure
+// this policy exists to prevent. Hashing the bytes is correct in development
+// and in release alike, and stays stable across restarts of the same binary.
+//
+// Computed once per process, lazily, on the first /dist/ request: one walk and
+// SHA-256 over ~1.2 MB, single-digit milliseconds, off the startup path.
+//
+// Paired with Cache-Control: max-age (see staticAssetMaxAge) plus the ETag, so
+// the two regimes compose: inside the window a repeat load makes NO request at
+// all, and after it the ETag turns a re-download into a 0-byte 304.
+//
+// Before this, http.FileServer over embed.FS emitted no Cache-Control, no ETag
+// and no Last-Modified (embed's zero modtime makes ServeContent omit it), so a
+// browser had nothing to revalidate against and re-downloaded the whole
+// front-end on EVERY page load — measured at 1.17 MB across 69 files, none
+// served from cache. The "?v=N" query strings on some script tags were busting
+// a cache that never existed.
+func buildAssetETag(subFS fs.FS) string {
+	h := sha256.New()
+	// WalkDir is deterministic (lexical order), so the same tree always
+	// hashes to the same value.
+	err := fs.WalkDir(subFS, "dist", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		b, rerr := fs.ReadFile(subFS, path)
+		if rerr != nil {
+			return rerr
+		}
+		_, _ = h.Write([]byte(path))
+		_, _ = h.Write(b)
+		return nil
+	})
+	if err != nil {
+		// No validator is better than a wrong one: returning "" makes
+		// setStaticCacheHeaders skip the ETag, so responses simply go back
+		// to being uncacheable rather than cacheable-and-stale.
+		log.Printf("mobileapp: hashing /dist for the asset ETag failed, assets will not be cacheable: %v", err)
+		return ""
+	}
+	return fmt.Sprintf("%q", hex.EncodeToString(h.Sum(nil))[:16])
+}
+
+// staticAssetMaxAge is how long a client may reuse a compiled asset WITHOUT
+// asking. It is the deliberate trade in this policy.
+//
+// Why not 0 (revalidate always, the safest setting): correctness would be
+// perfect, but every page load still costs one conditional request per asset —
+// 69 of them here. On a LAN that is invisible; on cellular or a hotel-grade
+// operator laptop at ~100ms round-trip over HTTP/1.1 (six connections), it is
+// roughly a dozen serialised waves before anything renders. Operators and
+// spectators reported that latency as a real problem, so the window exists to
+// remove those round trips entirely for a revisit.
+//
+// Why not hours: an asset cached under max-age is used WITHOUT asking, so a
+// server upgraded mid-event is invisible to an already-loaded client until the
+// window expires. Five minutes bounds that to something an operator would not
+// notice, while covering the cases that actually recur — a tab reopened, a
+// second console window, a spectator returning to the schedule between matches.
+//
+// The ETag still backs it: once the window lapses the client revalidates and
+// gets a 0-byte 304 unless the bundle really changed, so this never costs a
+// re-download. Content-hashed filenames plus "immutable" would remove the
+// window entirely, but esbuild here runs without --bundle and does not rewrite
+// import specifiers, so hashing the names would break every `./x.jsx` import.
+const staticAssetMaxAge = 5 * time.Minute
+
+// setStaticCacheHeaders applies the revalidation policy to a compiled asset.
+// Only /dist/ is covered: index.html is deliberately no-store (it carries
+// server-rendered meta tags), and uploaded branding/sponsor images set their
+// own policy in their handlers.
+func setStaticCacheHeaders(c *gin.Context, etag, filePath string) {
+	if !strings.HasPrefix(filePath, "dist/") {
+		return
+	}
+	if etag == "" {
+		return
+	}
+	c.Header("Cache-Control", staticCacheControl)
+	c.Header("ETag", etag)
+}
+
+// staticCacheControl is the header value built from staticAssetMaxAge, which is
+// a constant — so this string is fixed for the life of the binary and there is
+// nothing to format per request.
+var staticCacheControl = fmt.Sprintf("public, max-age=%d", int(staticAssetMaxAge.Seconds()))

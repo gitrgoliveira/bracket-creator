@@ -50,108 +50,9 @@ func (e *Engine) withPoolMatchTx(tx state.StoreTx, compID, matchID string, mutat
 // recordBracketMatchResultTx is the tx-aware twin of
 // recordBracketMatchResult. Identical body modulo the tx.UpdateBracket
 // dispatch.
-func (e *Engine) recordBracketMatchResultTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult) error {
+func (e *Engine) recordBracketMatchResultTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult, policy matchWritePolicy) error {
 	return tx.UpdateBracket(compID, func(bracket *state.Bracket) error {
-		if bracket == nil {
-			return notFoundErrorf("bracket not found for competition %s", compID)
-		}
-
-		found := false
-		for rIdx, round := range bracket.Rounds {
-			for mIdx, m := range round {
-				if m.ID == matchID {
-					if !bracketMatchPlayable(&bracket.Rounds[rIdx][mIdx]) {
-						return validationErrorf("knockout match %s is not ready to score: a feeder pool or match has not finished", matchID)
-					}
-					// Match identity is fixed at seeding; a score must not
-					// rewrite it. Backfill omitted sides; reject a non-empty
-					// payload side that disagrees with the resolved pairing.
-					if reconcileSides(result, m.SideA, m.SideB) {
-						return ErrMatchSideMismatch
-					}
-					// Timestamp last-write-wins (mp-y3nk); see recordBracketMatchResult.
-					if !applyBracketWrite(result, m.ModifiedAt) {
-						found = true
-						break
-					}
-					deriveDaihyosenWinner(result)
-					bracket.Rounds[rIdx][mIdx].Winner = result.Winner
-					status := result.Status
-					if status == "" {
-						status = state.MatchStatusCompleted
-					}
-					// AMENDMENT 2 twin parity with recordBracketMatchResult
-					// (scoring.go): the production score handler routes through
-					// this tx twin, so the guard must live on both paths.
-					if err := validateBracketCompletion(matchID, status, result.Winner); err != nil {
-						return err
-					}
-					bracket.Rounds[rIdx][mIdx].Status = status
-					if result.ModifiedAt != 0 {
-						bracket.Rounds[rIdx][mIdx].ModifiedAt = result.ModifiedAt
-					}
-					bracket.Rounds[rIdx][mIdx].ScoreA = formatScore(result.IpponsA, result.HansokuA)
-					bracket.Rounds[rIdx][mIdx].ScoreB = formatScore(result.IpponsB, result.HansokuB)
-					bracket.Rounds[rIdx][mIdx].Decision = result.Decision
-					bracket.Rounds[rIdx][mIdx].DecisionBy = result.DecisionBy
-					bracket.Rounds[rIdx][mIdx].DecisionReason = result.DecisionReason
-					bracket.Rounds[rIdx][mIdx].Encho = result.Encho
-					if result.ResultSource != "" {
-						bracket.Rounds[rIdx][mIdx].ResultSource = result.ResultSource
-					}
-					if result.CorrectionReason != "" {
-						bracket.Rounds[rIdx][mIdx].CorrectionReason = result.CorrectionReason
-					}
-					// nil = omitted (preserve stored data); non-nil [] = explicit clear.
-					if result.SubResults != nil {
-						bracket.Rounds[rIdx][mIdx].SubResults = result.SubResults
-					}
-					// Project persisted sub-results back so the SSE/HTTP response
-					// reflects committed state (see scoring.go for the full
-					// rationale, mirrors the DecidedByHantei projection below).
-					result.SubResults = bracket.Rounds[rIdx][mIdx].SubResults
-					// See scoring.go for the DecidedByHantei *bool semantics.
-					if result.DecidedByHantei != nil {
-						bracket.Rounds[rIdx][mIdx].DecidedByHantei = *result.DecidedByHantei
-					}
-					// Project persisted flag back so the SSE/HTTP response
-					// reflects committed state (see scoring.go for the full
-					// rationale, nil-preserve would otherwise drop the
-					// stored true from the same-turn response).
-					result.DecidedByHantei = state.HanteiPtr(bracket.Rounds[rIdx][mIdx].DecidedByHantei)
-					if result.Court == "" {
-						result.Court = m.Court
-					}
-					if result.ScheduledAt == "" {
-						result.ScheduledAt = m.ScheduledAt
-					}
-					found = true
-
-					if status == state.MatchStatusCompleted {
-						e.propagateBracketWinner(bracket, rIdx, mIdx)
-					}
-					break
-				}
-			}
-			if found {
-				break
-			}
-		}
-
-		// Bronze (3rd-place) playoff lives in Bracket.ThirdPlaceMatch, outside
-		// Rounds; resolve it here (twin of recordBracketMatchResult). No
-		// propagation out of bronze.
-		if !found && bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchID {
-			if err := applyBronzeMatchResult(bracket.ThirdPlaceMatch, result); err != nil {
-				return err
-			}
-			found = true
-		}
-
-		if !found {
-			return notFoundErrorf("bracket match %s not found", matchID)
-		}
-		return nil
+		return e.applyBracketResultIn(bracket, compID, matchID, result, policy)
 	})
 }
 
@@ -312,42 +213,11 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		}
 	}
 
-	var sideMismatch bool
-	err := e.withPoolMatchTx(tx, compID, matchID, func(r *state.MatchResult) {
-		if reconcileSides(result, r.SideA, r.SideB) {
-			sideMismatch = true
-			return // leave the stored match untouched
-		}
-		// Preserve generation-time participant ids + resolve winner id across
-		// the whole-struct overwrite below (the /score endpoint scores through
-		// this Tx path). See backfillMatchIdentity.
-		backfillMatchIdentity(result, r)
-		if result.Court == "" {
-			result.Court = r.Court
-		}
-		if result.ScheduledAt == "" {
-			result.ScheduledAt = r.ScheduledAt
-		}
-		result.Round = r.Round
-		// Twin parity with the bracket write in recordBracketMatchResultTx,
-		// which is set-if-non-empty and so leaves a stored reason alone. The
-		// whole-struct overwrite below would otherwise BLANK it: the kachinuki
-		// reopen path persists the operator's audit justification here, and
-		// the first "Record bout" after a reopen is a plain write carrying no
-		// reason of its own.
-		if result.CorrectionReason == "" {
-			result.CorrectionReason = r.CorrectionReason
-		}
-		*r = *result
-	})
+	sideMismatch, err := e.writeToPoolOrBracketTx(tx, compID, matchID, result, matchWriteForward)
 	if err != nil {
-		if !errors.Is(err, errMatchNotFound) {
-			return nil, err
-		}
-		if err := e.recordBracketMatchResultTx(tx, compID, matchID, result); err != nil {
-			return nil, err
-		}
-	} else if sideMismatch {
+		return nil, err
+	}
+	if sideMismatch {
 		// Match identity is fixed at generation; a score payload naming
 		// different competitors is rejected (HTTP 409) rather than allowed to
 		// overwrite the stored pairing. Returns before any side-effect write.
@@ -429,23 +299,35 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 // intents coalesced last-write-wins, so this restore supersedes the forward
 // write before Commit applies the final state. prior must be non-nil.
 //
-// It normalizes two nil-collision fields before restoring:
-//   - SubResults nil → explicit empty slice, so recordBracketMatchResultTx
-//     treats it as "clear sub-results" rather than leaving the partial write.
-//   - DecidedByHantei nil → explicit false: lookupExistingResultTx projects the
-//     flag through HanteiPtr, which collapses a stored false to nil; nil would
-//     hit the nil-preserve branch and leave the partial hantei flag in place.
+// The nil-collision fields (SubResults, and the hantei flag at both match and
+// sub-bout level) need no pre-mangling here: recordMatchResultTx replays under
+// matchWriteRestore, which reads a nil as "there was nothing" rather than as
+// "the writer said nothing". See matchWriteRestore for why the distinction is
+// what keeps a rollback from re-applying the write it is undoing.
 func (e *Engine) rollbackMatchResultTx(tx state.StoreTx, compID, matchID string, prior *state.MatchResult) {
-	if prior.SubResults == nil {
-		prior.SubResults = []state.SubMatchResult{}
-	}
-	if prior.DecidedByHantei == nil {
-		clearHantei := false
-		prior.DecidedByHantei = &clearHantei
-	}
 	if rerr := e.recordMatchResultTx(tx, compID, matchID, prior); rerr != nil {
 		log.Printf("engine: RecordMatchResultWithIneligibilityTx rollback failed compId=%s matchId=%s: %v", compID, matchID, rerr)
 	}
+}
+
+// writeToPoolOrBracketTx is the tx-aware twin of writeToPoolOrBracket
+// (scoring.go), where the reasoning for the shared fall-through lives. The two
+// differ only in the store handle they take: the tx variants read and write
+// inside the caller's already-held per-competition lock, so they cannot call
+// the public Store methods the non-tx twin uses (the mutex is not reentrant).
+func (e *Engine) writeToPoolOrBracketTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult, policy matchWritePolicy) (mismatch bool, err error) {
+	perr := e.withPoolMatchTx(tx, compID, matchID, func(r *state.MatchResult) {
+		// The POOL branch of the path POST /score and the bulk-score endpoint
+		// actually take - the site the hand-copied merge once missed.
+		mismatch = applyPoolWrite(r, result, policy)
+	})
+	if perr == nil {
+		return mismatch, nil
+	}
+	if !errors.Is(perr, errMatchNotFound) {
+		return false, perr
+	}
+	return false, e.recordBracketMatchResultTx(tx, compID, matchID, result, policy)
 }
 
 // recordMatchResultTx is the tx-aware twin of RecordMatchResult. Used
@@ -454,39 +336,11 @@ func (e *Engine) rollbackMatchResultTx(tx state.StoreTx, compID, matchID string,
 // byte-for-byte, so applyHansokuIppons is intentionally skipped here.
 func (e *Engine) recordMatchResultTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult) error {
 	result.ID = matchID
-	err := e.withPoolMatchTx(tx, compID, matchID, func(r *state.MatchResult) {
-		// Identity reconciliation only backfills here: this path restores a
-		// trusted prior snapshot (K3 rollback), not a client payload, so the
-		// stored sides always match, the mismatch result is intentionally
-		// ignored rather than turned into a rejection.
-		_ = reconcileSides(result, r.SideA, r.SideB)
-		// Preserve generation-time participant ids + resolve winner id across
-		// the whole-struct overwrite below (the /score endpoint scores through
-		// this Tx path). See backfillMatchIdentity.
-		backfillMatchIdentity(result, r)
-		if result.Court == "" {
-			result.Court = r.Court
-		}
-		if result.ScheduledAt == "" {
-			result.ScheduledAt = r.ScheduledAt
-		}
-		result.Round = r.Round
-		// NOTE the forward write (RecordMatchResultWithIneligibilityTx) does a
-		// set-if-empty preservation of CorrectionReason here; this rollback path
-		// deliberately does NOT. It restores a trusted prior snapshot
-		// byte-for-byte, so an empty prior reason must CLEAR the field rather
-		// than inherit the rejected partial write's reason — the same reasoning
-		// that makes rollbackMatchResultTx normalize nil SubResults/DecidedByHantei
-		// into explicit clears.
-		*r = *result
-	})
-	if err != nil {
-		if !errors.Is(err, errMatchNotFound) {
-			return err
-		}
-		if err := e.recordBracketMatchResultTx(tx, compID, matchID, result); err != nil {
-			return err
-		}
+	// K3 rollback: replay the snapshot verbatim - see matchWriteRestore. The
+	// side mismatch is deliberately DISCARDED here: a snapshot replays sides
+	// captured from this same match, so a disagreement is not a client error.
+	if _, err := e.writeToPoolOrBracketTx(tx, compID, matchID, result, matchWriteRestore); err != nil {
+		return err
 	}
 	if _, err := e.recordIneligibilityFromDecisionTx(tx, compID, matchID, result); err != nil {
 		log.Printf("engine: recordIneligibilityFromDecisionTx compId=%s matchId=%s: %v", compID, matchID, err)

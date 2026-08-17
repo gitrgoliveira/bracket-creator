@@ -187,12 +187,16 @@ describe('mount site: admin_pools.jsx (pools tab)', () => {
     window.PoolsViewer = (props) => (
       <button data-testid="open-pool-match" onClick={() => props.onMatchClick(rawPoolMatch)}>open</button>
     );
+    // rawPoolMatch must be IN poolMatches below: the real PoolsViewer renders
+    // its rows from that list, and AdminPools now re-resolves the open match
+    // out of it every render rather than keeping the clicked object, so a
+    // fixture clicking a match the list does not contain opens nothing.
     await act(async () => {
       render(
         <AdminPools
           c={{ id: 'c1', name: 'Comp', format: 'mixed', kind: 'individual', status: 'started' }}
           pools={[{ name: 'Pool 1', players: [] }]}
-          poolMatches={[]}
+          poolMatches={[rawPoolMatch]}
           standings={[]}
           tweaks={{}}
           onEditScore={vi.fn()}

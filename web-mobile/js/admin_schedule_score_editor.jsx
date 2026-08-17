@@ -68,14 +68,31 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
   const [filter, setFilter] = useStateA("");
   const [compFilter, setCompFilter] = useStateA(restrictToCompId || "all");
   const [statusFilter, setStatusFilter] = useStateA("all");
-  const [openMatch, setOpenMatch] = useStateA(null);
+  // The open match is held as a KEY and re-resolved from live data on every
+  // render, never captured as an object. A match has ONE result and every
+  // surface asking for it shows the same one (operator ruling) — an editor
+  // holding a snapshot is asking once and then showing that answer forever.
+  //
+  // It used to be `useState(match)`, set from the row that was clicked, and the
+  // source said so: "SSE only refreshes the list, never this snapshot". The
+  // effect was visible on one screen: record a result on a second device and
+  // the list BEHIND the modal updated while the modal itself kept the state it
+  // was opened with. Several `setOpenMatch(prev => ({...prev, ...}))` patches
+  // existed to hand-forward the fields that mattered most, which is the same
+  // information arriving twice by two routes, one of them partial.
+  //
+  // This is the pattern the other two mount sites already use — the bracket
+  // panel resolves `selected.matchId` out of `bracket.rounds`, the shiaijo
+  // panel resolves `pickedKey`/`correctingKey` out of `sorted` — so it is a
+  // third site joining them rather than a new idea.
+  const [openKey, setOpenKey] = useStateA(null);
   // mp-bkg: per-match lineup panel state. lineupMatch holds the match
   // currently open in the lineup panel (null = panel closed).
   const [lineupMatch, setLineupMatch] = useStateA(null);
   // ScoreEditorModal's onSubmit / onSubmitAndNext callbacks await
   // onEditScore (which routes through AdminApp.editMatchScore: a
   // server PUT). If AdminScoreEditor unmounts during the in-flight
-  // save (parent navigates away), the post-await setOpenMatch fires
+  // save (parent navigates away), the post-await setOpenKey fires
   // on a torn-down component. Gate via mountedRef.
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
@@ -85,6 +102,12 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
     () => tournament.competitions.flatMap((cc) => window.compMatches(cc)).filter(hasBothSides),
     [tournament]
   );
+  // Resolved against allMatches, NOT the filtered list: a match that completes
+  // while the operator has the "Scheduled" filter on drops out of `filtered`,
+  // and closing their editor underneath them because of a list filter would be
+  // its own bug. Nav (prev/next) still scopes to the filtered same-court slice.
+  const scoreKeyOf = (m) => `${m.compId}:${m.id}`;
+  const openMatch = openKey ? allMatches.find((m) => scoreKeyOf(m) === openKey) || null : null;
 
   const f = filter.trim().toLowerCase();
   const filtered = allMatches.filter((m) => {
@@ -201,7 +224,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                 {m.status === "completed" && <span style={{ fontSize: 10, color: "var(--ink-3)" }}>{isCorrection ? "Corrected" : "Final"}</span>}
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <button type="button" className={getScoreBtnClass(m.status)} onClick={() => setOpenMatch(m)}>
+                <button type="button" className={getScoreBtnClass(m.status)} onClick={() => setOpenKey(scoreKeyOf(m))}>
                   {m.status === "completed" ? "Correct" : "Score"}
                 </button>
                 {/* mp-bkg: show Lineup button only for team competitions */}
@@ -247,7 +270,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
         // unassigned matches so the behaviour is consistent.
         const openCourt = openMatch.court || "";
         const sameCourt = filtered.filter(m => (m.court || "") === openCourt);
-        const openIdx = sameCourt.findIndex(m => `${m.compId}:${m.id}` === `${openMatch.compId}:${openMatch.id}`);
+        const openIdx = sameCourt.findIndex(m => scoreKeyOf(m) === openKey);
         const prevMatch = openIdx > 0 ? sameCourt[openIdx - 1] : null;
         const nextMatch = openIdx >= 0 && openIdx < sameCourt.length - 1 ? sameCourt[openIdx + 1] : null;
         // Finish+Start Next must only advance to a non-completed match. Without
@@ -268,13 +291,13 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
         // Defined at module level as window.startPatch for reuse across admin_*.jsx.
         return (
           <ScoreEditorModal
-            key={openMatch.compId + '-' + openMatch.id}
+            key={openKey}
             match={enrichedOpenMatch}
             prevMatch={prevMatch}
             nextMatch={nextMatch}
-            onPrev={() => setOpenMatch(prevMatch)}
-            onNext={() => setOpenMatch(nextMatch)}
-            onClose={() => setOpenMatch(null)}
+            onPrev={() => setOpenKey(scoreKeyOf(prevMatch))}
+            onNext={() => setOpenKey(scoreKeyOf(nextMatch))}
+            onClose={() => setOpenKey(null)}
             onSubmit={async (patch) => {
               try {
                 const res = await onEditScore(openMatch.compId, openMatch.id, patch, openMatch);
@@ -294,14 +317,15 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                 // mp-gmcg: a kachinuki Record-bout write (kachinukiBoutFinal)
                 // comes back with the POST-advance bout log: the server
                 // appended the next pairing (winner stays / stays-on slot).
-                // Adopt it into the open match so the editor shows the new
-                // bout without a close/reopen (SSE only refreshes the list,
-                // never this snapshot).
+                //
+                // Nothing is hand-forwarded onto the open match any more: it is
+                // resolved from live data every render, and editMatchScore
+                // AWAITS its own refresh before resolving, so by this line the
+                // started/advanced match is already what openMatch reads. The
+                // two `setOpenMatch(prev => ({...prev, status:"running"}))`
+                // patches that used to sit here (and the freshSubs they carried)
+                // were compensating for the snapshot, partially.
                 if (patch.status === "running" && !patch.winner) {
-                  const freshSubs = patch.kachinukiBoutFinal && res && Array.isArray(res.subResults)
-                    ? { subResults: res.subResults }
-                    : {};
-                  setOpenMatch(prev => prev ? { ...prev, status: "running", ...freshSubs } : prev);
                   // mp-gmcg review C1: also hand `res` back to the modal itself. A
                   // prior [Remove this bout] can leave the modal's local
                   // matchOverride shadowing THIS prop, and a Record-bout append can
@@ -313,7 +337,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                   // dependency on this prop ever visibly changing.
                   return res;
                 } else {
-                  setOpenMatch(null);
+                  setOpenKey(null);
                 }
               } catch (_err) {
                 // Error handled by onEditScore/toast, but we catch here to keep modal open
@@ -332,11 +356,11 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                 // gating runs server-side (StartMatchTx); a 409 throws: we
                 // catch it so the operator still lands on the next match (in
                 // pre-match) to resolve the eligibility issue manually.
-                setOpenMatch(nextActiveMatch);
+                setOpenKey(scoreKeyOf(nextActiveMatch));
                 if (nextActiveMatch.status === "scheduled") {
                   try {
                     await onEditScore(nextActiveMatch.compId, nextActiveMatch.id, startPatch(), nextActiveMatch);
-                    if (mountedRef.current) setOpenMatch(prev => prev ? { ...prev, status: "running" } : prev);
+                    /* the live lookup shows the started match: editMatchScore awaits its refresh */
                   } catch (_startErr) { /* gate rejected the start; stay on the next match in pre-match */ }
                 }
               } catch (_err) { /* keep modal open on error */ }
@@ -349,7 +373,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
               if (nextActiveMatch.status === "scheduled") {
                 try {
                   await onEditScore(nextActiveMatch.compId, nextActiveMatch.id, startPatch(), nextActiveMatch);
-                  if (mountedRef.current) setOpenMatch(nextActiveMatch);
+                  if (mountedRef.current) setOpenKey(scoreKeyOf(nextActiveMatch));
                 } catch (_startErr) { /* gate rejected the start; leave the operator where they are */ }
               }
             } : null}

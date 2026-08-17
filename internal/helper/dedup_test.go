@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestNormalizeParticipantName covers the core normalization semantics required
@@ -123,6 +124,38 @@ func TestCheckDuplicateEntriesByNameDojo(t *testing.T) {
 		t.Run(tc.desc, func(t *testing.T) {
 			got := CheckDuplicateEntriesByNameDojo(tc.entries)
 			assert.Lenf(t, got, tc.wantLen, "entries=%v", tc.entries)
+		})
+	}
+}
+
+// TestDuplicateNamesWithKeysDupes covers the TEAM rule: names alone collide
+// regardless of dojo (a team's name is its identity in standings and in
+// sub-bout winner attribution, neither of which carries a uuid). The dojo
+// column is deliberately absent from the input, so these cases also pin that
+// the normalization is shared with the tier-1 check rather than a plain ==.
+func TestDuplicateNamesWithKeysDupes(t *testing.T) {
+	cases := []struct {
+		desc  string
+		names []string
+		want  []string
+	}{
+		{desc: "distinct names", names: []string{"Kyoto", "Osaka", "Nara"}, want: nil},
+		{desc: "exact repeat", names: []string{"Seibukan", "Seibukan"}, want: []string{"Seibukan"}},
+		{desc: "case and padding differ", names: []string{"Seibukan", " seibukan "}, want: []string{"Seibukan"}},
+		{desc: "collapsed internal whitespace", names: []string{"Sei bukan", "Sei  bukan"}, want: []string{"Sei bukan"}},
+		{desc: "diacritics stripped", names: []string{"K\u014dbe", "Kobe"}, want: []string{"K\u014dbe"}},
+		{desc: "reported once for a triple", names: []string{"A", "A", "A"}, want: []string{"A"}},
+		{desc: "two separate collisions", names: []string{"A", "B", "A", "B"}, want: []string{"A", "B"}},
+		{desc: "empty list", names: []string{}, want: nil},
+		{desc: "single name", names: []string{"Solo"}, want: nil},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.desc, func(t *testing.T) {
+			// The reported label is the FIRST spelling seen, trimmed, so the
+			// operator is shown a name that appears in their own roster.
+			dupes, _ := DuplicateNamesWithKeys(tc.names)
+			assert.Equal(t, tc.want, dupes)
 		})
 	}
 }
@@ -277,4 +310,66 @@ func TestIsSingleTrailingTokenDiff(t *testing.T) {
 		got := isSingleTrailingTokenDiff(tc.a, tc.b)
 		assert.Equalf(t, tc.want, got, "isSingleTrailingTokenDiff(%q, %q)", tc.a, tc.b)
 	}
+}
+
+// DuplicateNamesWithKeys used to be implemented by delegating to
+// CheckDuplicateEntriesByNameDojo with an empty dojo, which made the two agree
+// by construction. It now has its own body (so the participant write path can
+// get the normalized keys back without a second pass), and this pins the
+// equivalence that the shared body used to guarantee: for every input, the
+// name-only rule must report exactly what the (name, dojo) rule reports when
+// every dojo is empty.
+func TestNameOnlyDedupMatchesTheDojoHelper(t *testing.T) {
+	cases := [][]string{
+		{},
+		{"Seibukan"},
+		{"Seibukan", "Seibukan"},
+		{"Seibukan", "seibukan"},   // normalization: case
+		{"Seibukan", " Seibukan "}, // normalization: surrounding space
+		// The FIRST-seen entry is the untrimmed one here, which is what makes
+		// these discriminating: the reported label is the first occurrence, so
+		// a body that forgot to trim it would pass the pair above and fail
+		// these two.
+		{" Seibukan ", "Seibukan"},
+		{"\tSeibukan\n", "Seibukan"},
+		{"Seibukan  A", "Seibukan A"}, // normalization: collapsed whitespace
+		{"Müller", "Muller"},          // normalization: diacritics folded
+		{"がくえん", "がくえん"},              // dakuten preserved, still equal
+		{"A", "B", "A", "C", "B"},     // two distinct collisions
+		{"", ""},                      // empty names collide with each other
+		{"Kyoto", "Osaka", "Nara"},    // no collision
+	}
+	for _, names := range cases {
+		entries := make([][2]string, len(names))
+		for i, n := range names {
+			entries[i] = [2]string{n, ""}
+		}
+		want := CheckDuplicateEntriesByNameDojo(entries)
+		got, _ := DuplicateNamesWithKeys(names)
+		assert.Equalf(t, want, got, "names=%q", names)
+	}
+}
+
+// The keys are the whole reason the second return value exists: they must be
+// the same normalization the scan itself keyed on, in input order.
+func TestDuplicateNamesWithKeysReturnsTheKeysItScannedOn(t *testing.T) {
+	names := []string{"Seibukan", " SEIBUKAN ", "Müller", ""}
+	dupes, keys := DuplicateNamesWithKeys(names)
+
+	require.Len(t, keys, len(names), "one key per input, in order")
+	for i, n := range names {
+		assert.Equal(t, NormalizeParticipantName(n), keys[i], "key %d", i)
+	}
+	// And the scan still found the collision those keys imply.
+	assert.Equal(t, []string{"Seibukan"}, dupes)
+	assert.Equal(t, keys[0], keys[1], "the pair that collided shares a key")
+}
+
+// The empty-string fast path must not change what the function returns.
+func TestNormalizeParticipantNameEmptyFastPath(t *testing.T) {
+	assert.Equal(t, "", NormalizeParticipantName(""))
+	// Whitespace-only is NOT the fast path and must still normalize to empty,
+	// which is what makes a blank dojo key the same as an absent one.
+	assert.Equal(t, "", NormalizeParticipantName("   "))
+	assert.Equal(t, "", NormalizeParticipantName("\t\n "))
 }

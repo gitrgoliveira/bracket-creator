@@ -5,16 +5,21 @@
 // §263 (individual: ippon-letter slots) and §277 (team: IV/PW summary row +
 // per-bout rows + Daihyosen).
 //
-// esbuild compiles each web-mobile/js/*.jsx as a separate entry and inlines
-// imported modules, so importing this from both viewer.jsx and display.jsx is
-// the established DRY mechanism (same as lineup_resolver.jsx). No window-global
-// coupling needed.
+// The build (Makefile `esbuild-jsx`) runs esbuild with --outdir and NO --bundle,
+// so each web-mobile/js/*.jsx is TRANSFORMED in place and its imports stay as
+// runtime ESM the browser resolves and caches once. Importing this from both
+// viewer.jsx and display.jsx is therefore the established DRY mechanism (same as
+// lineup_resolver.jsx). This file imports only small leaves and reaches
+// bracket.jsx's display primitives through window globals — for the dependency
+// reasoning, see the ONE statement in result_slot.jsx's header; do not restate
+// it here.
 //
 // `variant` ("card" | "tv") only changes sizing via a CSS modifier: the markup
 // and data-testids are identical across surfaces.
 
 import { resolveMatchLineup, resolveLineupTeamId, pickFromLineup, resolveBoutSideName, kachinukiHidesLineupPosition } from './lineup_resolver.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
+import { resultSlot, sideSlotOrder, realIppons, hanteiTied, nameOf } from './result_slot.jsx';
 
 const { useState: useSB, useEffect: useEB } = React;
 
@@ -122,22 +127,54 @@ export function useTeamLineups(match, competition, roundIndex) {
   return { lineupA, lineupB };
 }
 
-// Real ippon letters for a side (drops placeholders), capped at the 2 sanbon
-// slots; pads to exactly 2 so the slot columns always align.
+// Real ippon letters for a side (realIppons, the shared leaf filter), capped
+// at the 2 sanbon slots; pads to exactly 2 so the slot columns always align.
 function ipponLetters(arr) {
-  const real = (arr || []).filter(x => x && x !== "•");
+  const real = realIppons(arr);
   return [real[0] || "", real[1] || ""];
 }
 
+// subWinnerSides: does sub.winner name the shiro or aka side? The ONE
+// cross-level chain (sub side → daihyosen team alias → match-level side),
+// shared by centreMarks' marks and teamIVPW's IV attribution so the bout rows
+// and the summary row can never disagree about who a winner names. A winner
+// matching BOTH sides is INVALID data (team names are unique by rule; only
+// drifted or hand-edited files can produce it) and resolves defensively to
+// AKA — the side-A-first order Go uses everywhere for the identical case
+// (isWinForSide in engine/scoring.go, TeamResultFrom in state/team_result.go,
+// SideMarksLR in export/suffix.go) — so the on-screen rows, the IV summary,
+// the server standings and the Excel export all agree on the SAME arbitrary
+// side. Never both: asserting two winners was the bug; disagreeing with the
+// server's numbers was the fix's bug. The truth is not in the data
+// (arbitrary-but-consistent, see api_serializers.jsx).
+function subWinnerSides(sub, matchSideA, matchSideB) {
+  const w = sub.winner;
+  const aka = !!(w && (w === sub.sideA || w === sub.teamA || (matchSideA && w === matchSideA)));
+  const shiro = !aka && !!(w && (w === sub.sideB || w === sub.teamB || (matchSideB && w === matchSideB)));
+  return { shiro, aka };
+}
+
 // letters[0] is the OUTER ippon (the first point scored), letters[1] the inner.
-// Ippons fill from the OUTSIDE toward the centre: shiro fills left→right (its
-// outer edge is the left), aka fills right→left (its outer edge is the right),
-// so for aka we reverse the visual cell order. The testid stays on the logical
-// outer cell (letters[0]) regardless of which side renders it.
-const WAZA_NAMES = { M: "Men (head)", K: "Kote (wrist)", D: "Do (body)", T: "Tsuki (throat)", H: "Hansoku (penalty)", S: "Sune (shin)", "○": "Default win" };
+// "Outer"/"inner" are relative to that side's OWN TWO SLOTS, never to the board:
+// the names hold the board's outer edges and both slot groups flank the centre
+// vs (FIK Table 2, p.16). Ippons fill from each name toward the centre: shiro
+// fills left→right (its outer slot is the left), aka fills right→left (its outer
+// slot is the right), so for aka we reverse the visual cell order. The testid
+// stays on the LOGICAL OUTER cell (letters[0]) regardless of which side renders
+// it — and on a win group that is NOT necessarily the Ht cell: at 1-1 the outer
+// cell holds the winner's real letter and the Ht fills the inner one, so
+// `sub-win-*` means "the winner's outer cell", never "the mark cell". At 0-0 the
+// Ht DOES land there (it takes the first free slot), so a selector on it proves
+// the mark's position only when the fixture's scoreline is stated too; assert on
+// the whole `.msb-slots` group when you mean "somewhere in the win group".
+const WAZA_NAMES = { M: "Men (head)", K: "Kote (wrist)", D: "Do (body)", T: "Tsuki (throat)", H: "Hansoku (penalty)", S: "Sune (shin)", "○": "Default win", Ht: "Hantei (judges' decision)" };
 
 function slotCells(letters, side, testid) {
-  const cells = [0, 1].map(i => {
+  // sideSlotOrder, not a local reverse: slot 0 is the OUTER (name-side) cell on
+  // both sides, and which index that is visually is the same rule resultSlot
+  // answers logically. Mapping the order directly (rather than building then
+  // reversing) keeps index 0's testid on the outer cell either way.
+  return sideSlotOrder(side).map(i => {
     const ch = letters[i] || "";
     return (
       <span key={i} className={"msb-slot" + (side === "aka" ? " msb-slot--aka" : "")}
@@ -145,16 +182,19 @@ function slotCells(letters, side, testid) {
         data-testid={i === 0 ? testid : undefined}>{ch}</span>
     );
   });
-  return side === "aka" ? cells.toReversed() : cells;
 }
 
 // centreMarks: the §263 inner cells: [shiro slot][shiro slot] | vs/X/(E)/(DH) | [aka slot][aka slot].
-// Hansoku ▲ shows on the offending side, on the OUTER edge of the slots (away
-// from centre); X marks a hikiwake; "Ht" flags hantei. For an ippon-less win
-// the winning side is otherwise invisible, so we mark the winner's slots:
-// "Ht" when decided by hantei, else the maru pair ○ ○ — one per awarded
-// point (see winCells below). Modern fusensho/kiken carry ["○","○"] ippons
-// and render through the normal slot path, so they never reach this fallback.
+// Hansoku ▲ shows between the offending competitor's name and that side's ippon
+// slots (FIK Table 2, p.16 Taisho row: White's ▲ far left, Red's far right, each
+// on its own name side); X marks a hikiwake. For an ippon-less DEFAULT WIN the
+// winning side is otherwise invisible, so we mark its slots with the maru pair
+// ○ ○, one per awarded point (see resultCells below). Modern fusensho/kiken
+// carry ["○","○"] ippons and render through the normal slot path, so they never
+// reach that fallback. The hantei "Ht" is NOT part of it: it has its own gate
+// (`markable` below), which unlike the maru fallback does not require an empty
+// scoreline — a 1-1 hantei is the normal case — but DOES require the letters to
+// be tied, so a drifted untied row renders no Ht at all.
 // A plain helper (not a component) so it renders inline into the parent's tree.
 function centreMarks(sub, matchSideA, matchSideB) {
   // Engi (flag-count scoring) is the ONLY competition type where the centre
@@ -186,38 +226,61 @@ function centreMarks(sub, matchSideA, matchSideB) {
   const foulA = boutHansokuMark(sub.hansokuA);
   // The centre chip comes from the single middle-value source's chip
   // projection (matchMiddleMark: X / (E) / (DH), "" when the middle is the
-  // plain "vs" — never a dash); only the unattributable-hantei fallback
-  // below may replace the plain separator with a centre Ht.
+  // plain "vs" — never a dash). Nothing else may write the middle: the centre
+  // carries SHARED marks only, never a result belonging to one competitor.
   const mid = window.matchMiddleMark ? window.matchMiddleMark(sub) : "";
-  // Win mark only when there are no ippon letters (otherwise the letters
-  // already show who won). sideB = shiro/left, sideA = aka/right.
-  // Fallback chain: sub-level side → daihyosen team alias → match-level side
-  // (quick-score sub-bouts have empty sub.sideA/sideB).
   const noIppons = !lettersB.some(Boolean) && !lettersA.some(Boolean);
-  const winShiro = !!(noIppons && sub.winner &&
-    (sub.winner === sub.sideB || sub.winner === sub.teamB || (matchSideB && sub.winner === matchSideB)));
-  const winAka = !!(noIppons && sub.winner &&
-    (sub.winner === sub.sideA || sub.winner === sub.teamA || (matchSideA && sub.winner === matchSideA)));
-  // The mark sits on the WINNING side, not in the centre: "Ht" for a hantei
-  // decision, else the defaultWinMaru cells for an ippon-less default win
-  // (fusensho/kiken/bye). Only when the hantei winner is unknown does "Ht"
-  // fall back to the centre cell.
-  const winCells = sub.decidedByHantei ? ["Ht", ""]
-    : (window.defaultWinMaru ? window.defaultWinMaru(sub.encho) : ["○", "○"]);
-  const hasWinSide = winShiro || winAka;
+  // A hantei ALWAYS names a winner and is decided from a TIED scoreline
+  // (validation.go: "requires winner to be set" + "requires a tied scoreline"),
+  // so its mark is NOT gated on noIppons: a 1-1 hantei after encho is the
+  // normal case, and its slots already hold letters. It IS gated on the
+  // letters actually being tied, mirroring validation and boutWinnerSide:
+  // a drifted decidedByHantei on an untied row (2-1) renders its letters
+  // plainly rather than fabricating a judges'-decision mark. The maru pair
+  // for an ippon-less default win (fusensho/kiken/bye) still gates on
+  // noIppons, because there the empty letters are what make room for it.
+  // Tied is judged on the RAW recorded ippons via the shared hanteiTied leaf
+  // rule, not the display pair: ipponLetters caps each side at the 2 sanbon
+  // slots, so a drifted 3-2 row would compare as 2-2 and pass the gate it is
+  // meant to fail.
+  const markable = (sub.decidedByHantei && hanteiTied(sub.ipponsA, sub.ipponsB)) || noIppons;
+  // Which side the result mark belongs to (sideB = shiro/left, sideA = aka/right),
+  // via subWinnerSides: the one cross-level chain, shared with teamIVPW, that
+  // falls back sub-level side → daihyosen team alias → match-level side for the
+  // quick-score bouts with empty sub.sideA/sideB, and resolves a both-sides
+  // match aka-first to align every JS surface with the Go standings/export.
+  const { shiro: winShiro, aka: winAka } = markable
+    ? subWinnerSides(sub, matchSideA, matchSideB)
+    : { shiro: false, aka: false };
+  // Ht behaves like a point and rides beside the competitor it names; the slot
+  // it takes is the shared rule in result_slot.jsx (which the team editor uses
+  // too), so it is not restated here. `loose` means both slots were full, and
+  // the mark then renders inboard of them rather than being dropped.
+  const resultCells = (letters) => {
+    if (!sub.decidedByHantei) {
+      return { cells: window.defaultWinMaru ? window.defaultWinMaru(sub.encho) : ["○", "○"], loose: false };
+    }
+    const cells = letters.slice(0, 2);
+    const { slot, loose } = resultSlot(cells);
+    if (slot >= 0) cells[slot] = "Ht";
+    return { cells, loose };
+  };
+  const shiroRes = winShiro ? resultCells(lettersB) : null;
+  const akaRes = winAka ? resultCells(lettersA) : null;
   return (
     <span className="msb-marks" data-testid="sub-marks">
       <span className={"msb-slots" + (winShiro ? " msb-slots--win" : "")}>
         {foulB && <span className="msb-hansoku" data-testid="foul-mark-b">{foulB}</span>}
-        {winShiro ? slotCells(winCells, "shiro", "sub-win-b") : slotCells(lettersB, "shiro")}
+        {shiroRes ? slotCells(shiroRes.cells, "shiro", "sub-win-b") : slotCells(lettersB, "shiro")}
+        {shiroRes?.loose && <span className="msb-ht" data-testid="sub-ht-b">Ht</span>}
       </span>
       <span className="msb-vs">
         {mid ? <span data-testid="sub-row-mid">{mid}</span>
-          : sub.decidedByHantei && !hasWinSide ? <span className="msb-ht" data-testid="sub-row-hantei">Ht</span>
           : <span className="msb-sep" aria-hidden="true">vs</span>}
       </span>
       <span className={"msb-slots msb-slots--aka" + (winAka ? " msb-slots--win" : "")}>
-        {winAka ? slotCells(winCells, "aka", "sub-win-a") : slotCells(lettersA, "aka")}
+        {akaRes?.loose && <span className="msb-ht" data-testid="sub-ht-a">Ht</span>}
+        {akaRes ? slotCells(akaRes.cells, "aka", "sub-win-a") : slotCells(lettersA, "aka")}
         {foulA && <span className="msb-hansoku" data-testid="foul-mark-a">{foulA}</span>}
       </span>
     </span>
@@ -237,7 +300,7 @@ function centreMarks(sub, matchSideA, matchSideB) {
 // names because kachinuki bouts are winner-stays, not position-keyed.
 export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state, matchSideA, matchSideB, kachinuki }) {
   const subSideName = (v) => {
-    const n = (v && v.name) || (typeof v === "string" ? v : "");
+    const n = nameOf(v);
     if (!n) return "";
     // Filter out match-level team names: when the backend stores the team
     // name in every sub-bout (quick-score path), we must fall through to the
@@ -288,8 +351,13 @@ export function teamIVPW(subResults, matchSideA, matchSideB) {
     // Mirror Go backend pattern (scoring.go): check match-level side name
     // first, then sub-level side name (guarded against "" == "" false
     // positive). Quick-scored bouts have empty sub-level sides.
-    const isAkaWin = s.winner && (s.winner === matchSideA || (s.sideA && s.winner === s.sideA));
-    const isShiroWin = s.winner && (s.winner === matchSideB || (s.sideB && s.winner === s.sideB));
+    // IV attribution runs through subWinnerSides — the SAME resolver the bout
+    // rows use, aka-first on a both-sides match like Go's isWinForSide — so
+    // rows, summary, server standings and the Excel export all agree. The
+    // ippon comparison below still decides where the winner names nobody.
+    const wsides = subWinnerSides(s, matchSideA, matchSideB);
+    const isAkaWin = wsides.aka;
+    const isShiroWin = wsides.shiro;
     if (isAkaWin) ivAka++;
     else if (isShiroWin) ivShiro++;
     else if (b > a) ivShiro++;
@@ -314,43 +382,89 @@ export function withNumber(side, withZekkenName) {
   return side.number ? `${side.number} ${name}` : name;
 }
 
-export function IndividualScore({ match, variant, showNames, withZekkenName }) {
-  const sideName = (v) => v?.name || (typeof v === "string" ? v : "");
+// shiroName / akaName: optional resolved display names, mirroring the props
+// TeamScoreboard already takes. A caller that has better names than this
+// component can derive passes them in — the viewer card resolves an unplayed
+// bracket side to its feeder label ("Winner of M1"), where withNumber below can
+// only say "TBD". Omit them and the component derives its own, as the TV boards
+// and the lobby do. They are STRINGS: the dojo second line is this component's
+// job (showDojo), not something a caller splices into the name as a VNode.
+//
+// showDojo: render each competitor's dojo as a second line UNDER their name.
+// The rule lives here so a surface that wants it passes a flag instead of
+// reaching into these internals with its own selector — the shape that produced
+// the `.msb-sep { display: none }` bug this component just had to fix.
+export function IndividualScore({ match, variant, showNames, withZekkenName, shiroName, akaName, showDojo }) {
+  // nameOf, not a local unwrap: same object-or-bare-string rule the slot leaf's
+  // hanteiWinnerKey applies, so the two attribution paths cannot read a side
+  // name differently.
   const sideId = (v) => (v && v.id != null && v.id !== "") ? String(v.id) : "";
   // centreMarks marks the ippon-less (hantei/decision) winner by comparing the
   // winner key to each side's key. Prefer the participant id so a same-name
   // head-to-head (two players sharing a name) isn't flagged a win on BOTH
   // sides; fall back to the name. When the two sides are indistinguishable
-  // (same name, no ids), blank the winner so neither side is marked: the
-  // centre Ht/○ fallback still conveys the result.
-  const aKey = sideId(match.sideA) || sideName(match.sideA);
-  const bKey = sideId(match.sideB) || sideName(match.sideB);
+  // (same name, no ids), blank the winner so neither side is marked. Nothing
+  // then reports the result on this row: the centre carries shared marks only,
+  // so there is deliberately no centre fallback to fall back TO. Unreachable
+  // through the API, which requires a winner and disambiguates same-name pairs
+  // by uuid.
+  const aKey = sideId(match.sideA) || nameOf(match.sideA);
+  const bKey = sideId(match.sideB) || nameOf(match.sideB);
   const ambiguous = !!aKey && aKey === bKey;
   const sub = {
     ipponsA: match.ipponsA || (window.ipponsFromScore ? window.ipponsFromScore(match.scoreA) : []),
     ipponsB: match.ipponsB || (window.ipponsFromScore ? window.ipponsFromScore(match.scoreB) : []),
     hansokuA: match.hansokuA, hansokuB: match.hansokuB,
     decidedByHantei: match.decidedByHantei, score: match.score, decision: match.decision,
-    winner: ambiguous ? "" : (sideId(match.winner) || sideName(match.winner)),
+    // encho MUST be threaded: without it matchMiddleMark can never yield (E) on
+    // an individual row, and defaultWinMaru would award the regulation ○○ for a
+    // default win that actually happened in overtime, where the rulebook marks
+    // a single ○. This row centre is the mark's ONE home (operator ruling):
+    // the TV/lobby header chips that used to duplicate X/(E)/(DH) above it
+    // were removed; only the OBS overlay, which renders no row, keeps a chip.
+    encho: match.encho,
+    winner: ambiguous ? "" : (sideId(match.winner) || nameOf(match.winner)),
     sideA: aKey, sideB: bKey,
     flagsA: match.flagsA, flagsB: match.flagsB,
   };
   // showNames fills the (otherwise empty) name spans with the two competitors,
-  // colour-coded Shiro dark / Aka red: used by the TV pool/round list where
-  // each row IS a full match. The card leaves them empty (names render above).
+  // colour-coded Shiro dark / Aka red: used by the TV pool/round list where each
+  // row IS a full match, and by the viewer's match card, which has no name row of
+  // its own (a competitor's points must never sit under their name).
   // Always display the human NAME (never the id key used for comparison).
   // withNumber prepends the assigned competitor number (e.g. "K1 Tanaka") when
   // the competition has a numberPrefix configured; falls back to the bare name.
   // tri-review #2: pass withZekkenName so zekken-mode comps render the
   // displayName ("K1 TANAKA") instead of the canonical full name.
-  const shiroDisplay = withNumber(match.sideB, withZekkenName);
-  const akaDisplay = withNumber(match.sideA, withZekkenName);
+  const shiroDisplay = shiroName ?? withNumber(match.sideB, withZekkenName);
+  const akaDisplay = akaName ?? withNumber(match.sideA, withZekkenName);
+  // Name over dojo, the same block the bracket's PlayerLine and the up-next row
+  // render. A SECOND LINE UNDER THE NAME only: the ippon slots stay on the
+  // name's row, vertically centred against the block, because a competitor's
+  // points must never sit beneath their name (operator ruling). A side with no
+  // dojo (an unresolved feeder, "Winner of M1") renders the bare name, so the
+  // row does not gain an empty line.
+  // bc-dojo carries the shared dojo type (11px, ink-3, ellipsised); msb-dojo
+  // adds only what makes it a second LINE, rather than restating those five.
+  const shiroDojo = (showDojo && match.sideB && match.sideB.dojo) || "";
+  const akaDojo = (showDojo && match.sideA && match.sideA.dojo) || "";
+  const nameCell = (display, dojo) =>
+    dojo ? <>{display}<span className="bc-dojo msb-dojo">{dojo}</span></> : display;
+  // Emphasise the decided winner's NAME. sub.winner is already id-first with a
+  // name fallback and is blanked for an indistinguishable same-name pair, so
+  // neither side lights up when the data cannot attribute the win. This is the
+  // one place the rule lives: the viewer card used to bold its own name row via
+  // .match-detail-card__side--win, which meant every other surface that renders
+  // this row marked an ordinary ippon win nowhere (.msb-slots--win only fires
+  // for an ippon-LESS result, i.e. hantei or a default win).
+  const winShiroName = !!sub.winner && sub.winner === sub.sideB;
+  const winAkaName = !!sub.winner && sub.winner === sub.sideA;
   return (
     <div className={"msb msb-individual" + (variant === "tv" ? " msb--tv" : "")} data-testid="individual-score">
       <div className="msb-row">
-        <span className="msb-name" data-testid={showNames ? "indiv-shiro-name" : undefined}>{showNames ? shiroDisplay : ""}</span>
+        <span className={"msb-name" + (shiroDojo ? " msb-name--stacked" : "") + (winShiroName ? " msb-name--win" : "")} data-testid={showNames ? "indiv-shiro-name" : undefined}>{showNames ? nameCell(shiroDisplay, shiroDojo) : ""}</span>
         {centreMarks(sub)}
-        <span className="msb-name msb-name--aka" data-testid={showNames ? "indiv-aka-name" : undefined}>{showNames ? akaDisplay : ""}</span>
+        <span className={"msb-name msb-name--aka" + (akaDojo ? " msb-name--stacked" : "") + (winAkaName ? " msb-name--win" : "")} data-testid={showNames ? "indiv-aka-name" : undefined}>{showNames ? nameCell(akaDisplay, akaDojo) : ""}</span>
       </div>
     </div>
   );

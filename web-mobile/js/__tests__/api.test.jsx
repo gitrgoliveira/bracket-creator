@@ -1327,3 +1327,52 @@ describe('API Utils', () => {
   });
 });
 
+
+describe('normalizeMatch: same-name winner attribution is arbitrary but CONSISTENT', () => {
+  // scoring.go leaves WinnerID empty when a same-name pair ends on equal
+  // counts (hantei): the data genuinely cannot say which twin won. The
+  // serializer stamps the name-keyed map entry's uuid anyway — arbitrary, but
+  // the SAME arbitrary side on every surface (score strings, cards, league
+  // matrix, editor seeding, and Go's SideMarksLR all then agree). Blanking
+  // the id instead was tried and REVERTED: consumers fall back divergently,
+  // and the editor's score.ippons seeding (winner.id === side.id) matched
+  // neither side, wiping a recorded point on reopen+save (the 4d602de2
+  // regression class). This test pins the stamp so the blanking is not
+  // quietly re-introduced.
+  const twins = buildPlayerMap({ players: [
+    { id: 'uuid-a', name: 'Tanaka', dojo: 'Kyoto' },
+    { id: 'uuid-b', name: 'Tanaka', dojo: 'Osaka' },
+  ] });
+
+  it('stamps a uuid (the map entry) even for a same-name pair with no winnerId', () => {
+    const norm = normalizeMatch({
+      sideA: 'Tanaka', sideAId: 'uuid-a',
+      sideB: 'Tanaka', sideBId: 'uuid-b',
+      winner: 'Tanaka', status: 'completed', decidedByHantei: true,
+    }, twins);
+    // The last-added twin's entry: arbitrary, but stable and side-matching.
+    expect(norm.winner.id).toBe('uuid-b');
+    expect(norm.sideA.id).toBe('uuid-a');
+    expect(norm.sideB.id).toBe('uuid-b');
+  });
+
+  it('an explicit winnerId stays authoritative even for same-name sides', () => {
+    const norm = normalizeMatch({
+      sideA: 'Tanaka', sideAId: 'uuid-a',
+      sideB: 'Tanaka', sideBId: 'uuid-b',
+      winner: 'Tanaka', winnerId: 'uuid-a', status: 'completed',
+    }, twins);
+    expect(norm.winner.id).toBe('uuid-a');
+  });
+
+  it('a distinct-name winner resolves through the player map', () => {
+    const map = buildPlayerMap({ players: [
+      { id: 'uuid-a', name: 'Tanaka', dojo: 'Kyoto' },
+      { id: 'uuid-s', name: 'Suzuki', dojo: 'Osaka' },
+    ] });
+    const norm = normalizeMatch({
+      sideA: 'Tanaka', sideB: 'Suzuki', winner: 'Suzuki', status: 'completed',
+    }, map);
+    expect(norm.winner.id).toBe('uuid-s');
+  });
+});

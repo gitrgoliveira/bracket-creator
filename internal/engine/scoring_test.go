@@ -1777,9 +1777,9 @@ func TestRecordMatchResultTx_BracketCompletedWithNoWinnerRejected(t *testing.T) 
 	assert.Empty(t, stored.Rounds[0][0].Winner, "winner must still be empty")
 }
 
-// TestRecordMatchResult_BronzeCompletedWithNoWinnerRejected covers the third
-// write site sharing validateBracketCompletion: the bronze (3rd-place) match
-// goes through applyBronzeMatchResult on both the tx and non-tx paths.
+// TestRecordMatchResult_BronzeCompletedWithNoWinnerRejected covers the bronze
+// (3rd-place) match, which reaches validateBracketCompletion through the same
+// applyBracketMatchResult as every round match, on both tx and non-tx paths.
 func TestRecordMatchResult_BronzeCompletedWithNoWinnerRejected(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 

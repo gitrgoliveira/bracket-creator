@@ -598,7 +598,7 @@ func writeTeamSubMatchScores(f *excelize.File, sheetName string, courtStartCol, 
 		if mirror {
 			leftScore, rightScore = scoreB, scoreA
 		}
-		lMark, rMark := SideMarksLR(sub.Decision, sub.DecidedByHantei, sub.Winner, sub.SideA, sub.SideB, mirror)
+		lMark, rMark := SideMarksLR(sub.Decision, sub.HanteiDecided(), sub.Winner, sub.SideA, sub.SideB, mirror)
 		if lScore := joinSp(leftScore, lMark); lScore != "" {
 			setCellStr(f, sheetName, lVCol, excelRow, lScore)
 		}

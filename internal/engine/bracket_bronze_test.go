@@ -412,10 +412,10 @@ func TestBronze_OverrideBracketWinnerOnBronze(t *testing.T) {
 	assert.Equal(t, state.MatchStatusCompleted, bracket.ThirdPlaceMatch.Status, "OverrideBracketWinner must complete bronze")
 }
 
-// tri-review findings 1/3/5: the bronze (3rd-place) match write path
-// (applyBronzeMatchResult) must honour the timestamp last-write-wins guard just
-// like the per-round path, so a stale offline replay of a bronze score cannot
-// clobber a newer result.
+// tri-review findings 1/3/5: the bronze (3rd-place) match write path must
+// honour the timestamp last-write-wins guard just like the per-round path, so a
+// stale offline replay of a bronze score cannot clobber a newer result. Both now
+// run the same applyBracketMatchResult, which is what makes that structural.
 func TestBronze_RecordResultTimestampLWW(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "bronze-ts"

@@ -48,6 +48,23 @@ func ekcPools(numPools int, seededPools ...int) []Pool {
 	return pools
 }
 
+// courtsByRound reads the shiaijo the draw assigns to every bout, round by
+// round, in the same order BuildEliminationMatchRounds emits them. The 34th EKC
+// sheets print a shiaijo letter on every bout, so a reference draw pins the
+// court assignment as strictly as it pins the pairings.
+func courtsByRound(draw *KnockoutDraw) [][]string {
+	nc := draw.NodeCourts()
+	var out [][]string
+	for _, round := range BuildEliminationMatchRounds(draw.Root) {
+		row := make([]string, 0, len(round))
+		for _, m := range round {
+			row = append(row, CourtLabel(nc[m]))
+		}
+		out = append(out, row)
+	}
+	return out
+}
+
 // regionRound1 returns a region's round-1 layer exactly as D4 defines it: the
 // slot array paired (2i, 2i+1), with both-real pairs reported as matches, a
 // one-real pair as a NAMED BYE, and both-empty pairs (phantoms) dropped
@@ -177,6 +194,15 @@ func TestEKCJuniorIndividualFemale(t *testing.T) {
 	sheetAllocation := []int{0, 0, 1, 2, 2, 3, 3} // A(1,2) B(3) C(4,5) D(6,7)
 
 	draw := BuildKnockoutDrawFromAssignment(pools, 1, sheetAllocation, 4)
+
+	// The sheet's shiaijo: F1 on A, F2 on C, F3 on D, then F4 on B, F5 on C and
+	// the final F6 on B.
+	assert.Equal(t, [][]string{
+		{"A", "C", "D"},
+		{"B", "C"},
+		{"B"},
+	}, courtsByRound(draw), "the shiaijo printed on every bout of the Junior Individual Female sheet")
+
 	assertEKCRegions(t, draw, []ekcRegion{
 		{court: "A", matches: []string{"Pool 1-1st v Pool 2-1st"}, byes: []string{}}, // F1
 		{court: "B", matches: []string{}, byes: []string{"Pool 3-1st"}},              // byes to F4
@@ -229,6 +255,18 @@ func TestEKCJuniorTeam(t *testing.T) {
 		"the sheet's court blocks A(1,2) B(3,4) C(5,6) D(7)")
 
 	draw := BuildKnockoutDraw(pools, 2, 4)
+
+	// The sheet's shiaijo, bout by bout: F1-F3 on A, F4-F5 on B, F6-F8 on C,
+	// F9-F10 on D, then F11 on B, F12 on C and the final F13 on B. The closing
+	// bouts run on the MIDDLE shiaijo, which is what CourtForSpan encodes; the
+	// leftmost-region answer this replaced would have put F11 and F13 on A.
+	assert.Equal(t, [][]string{
+		{"A", "A", "B", "C", "C", "D"},
+		{"A", "B", "C", "D"},
+		{"B", "C"},
+		{"B"},
+	}, courtsByRound(draw), "the shiaijo printed on every bout of the Junior Team sheet")
+
 	assertEKCRegions(t, draw, []ekcRegion{
 		{court: "A", matches: []string{"Pool 1-1st v Pool 5-2nd", "Pool 2-1st v Pool 6-2nd"}, byes: []string{}},
 		{court: "B", matches: []string{"Pool 4-1st v Pool 7-2nd"}, byes: []string{"Pool 3-1st"}},

@@ -399,19 +399,19 @@ either one alone produces a wrong model of the draw:
 
 | Layer | Question | Owner | Rule |
 | --- | --- | --- | --- |
-| 1 | Which blocks carry a bye at all? | occupant count, plus **D2** for the shallow region | a block of `q` occupants owes `NextPow2(q) - q` empty slots (**R7**), of which `q % 2` are NAMED round-1 byes; the shallow slot goes to the court with the fewest pools |
+| 1 | Which blocks carry a bye at all? | occupant count, plus **D2** for the shallow region | a block of `q` occupants owes `NextPow2(q) - q` empty slots (**R7**), distributed over its sub-blocks; the shallow slot goes to the court with the fewest pools |
 | 2 | Which occupant of such a block takes it? | **R6** | seeded pools' home 1sts, then oversized, then pool order, then crossed-in ranks |
 
 Layer 1 is pure structure: it counts occupants and balances the match load across
 shiaijo. It knows nothing about seeding. Layer 2 never creates a bye, it only allocates
 one that layer 1 has already produced.
 
-The two bye figures in that first row are NOT interchangeable and diverge from `q = 5`
-up: a 5-occupant block owes three empty slots but prints ONE named bye, because D4's
-greedy layer puts the later byes on match WINNERS rather than on competitors (the Male
-draw's round-2 bye falls to W(P4 v P5), not to P1). The named count is what an operator
-sees on the sheet, and it is the one this section's tables report.
-`TestByeCountMatchesBlockParity` pins the parity figure and says why it is not R7's.
+The two bye figures in that first row are NOT interchangeable, and neither is a
+universal formula for the NAMED round-1 byes an operator sees on the sheet. A block is
+split recursively into sub-blocks, and a named bye appears wherever a sub-block comes out
+odd: 5 occupants split 3+2 and print ONE named bye (the 2-side's winner takes a later-
+round bye instead), while 6 split 3+3 and print TWO. Count the split, do not apply a
+formula. **Our implementation does not reproduce the 3+3 split -- see R6(c).**
 
 **Corroboration across all three reference draws.** Every bye on the 34th EKC sheets is
 explained by the two layers together, and none needs a third rule:
@@ -489,6 +489,49 @@ pool order: `TestSeededPoolWinnerTakesTheBlockBye` (a hand-built block),
 `TestByePlacementLayer2AllocatesOnlyWithinAByeBearingBlock`. When changing R6, run the
 injection rather than trusting a green suite: most of the bye coverage is insensitive to
 this criterion by construction.
+
+#### R6(c) OPEN DEFECT: even-sized blocks misallocate their byes
+
+**Status: our implementation does not reproduce two of the seven 34th EKC reference
+draws.** Found 2026-08-18 by decoding the full drawings PDF (all seven events, not just
+the three Junior ones originally decoded).
+
+A block whose occupant count is EVEN and not a power of two (6, 10, 12, 14, ...) gives
+its byes to the LAST pools and puts the seeded pool's home 1st into round 1. Odd counts
+and powers of two are correct.
+
+Reference case, Men Team court A (12 pools, 2 qualifiers, 4 shiaijo -> 6 occupants per
+block, seeds on pools 1, 4, 7, 10):
+
+| | round 1 | round 2 | byes |
+| --- | --- | --- | --- |
+| sheet | P7#2 v P8#2, P3#1 v P9#2 | P1#1 v W, P2#1 v W | **P1#1 (seeded), P2#1** |
+| ours | P1#1 v P7#2, P2#1 v P8#2 | W v W, P3#1 v P9#2 | **P3#1, P9#2** |
+
+Both have five matches in three rounds and identical per-round shiaijo assignment. The
+difference is the SPLIT: the sheet divides 6 into 3+3, so each half owes one bye and R6
+hands it to that half's top occupant. Ours divides into 4+2, so the 2-side's occupants
+both skip round 1 and meet each other, and the seeded pool gets nothing.
+
+This is the SAME defect class bc-draw was raised on -- byes landing on a block's last
+pools while the seeds play -- surviving for even block sizes after the odd ones were
+fixed.
+
+**Reference draws affected:** Men Team (blocks of 6) and Men Individual (court A holds
+12: 11 home 1sts plus a crossed-in 2nd). The other five reproduce correctly, because
+their blocks are odd or powers of two: Junior Individual Female (2,1,2,2), Junior
+Individual Male (5,5,4,4), Junior Team (4,3,4,3), Ladies Team (4,4,4,4), Ladies
+Individual (9,8,8,9).
+
+**Do not fix this by special-casing even counts.** The sheet's rule is one rule: split a
+block into sub-blocks as evenly as the tree allows, then apply R6 inside each. 5 -> 3+2
+and 6 -> 3+3 are the same rule, and our 5 -> 3+2 is already right; it is the even branch
+that departs from it.
+
+*Caution on measurement:* `regionRound1` in the test suite pairs a FLAT leaf array and
+mis-reports any block whose leaves sit at different depths -- it reads the 6-occupant
+block above as three round-1 matches and no byes. Verify layout changes against
+`BuildEliminationMatchRounds`, which walks the real tree.
 
 ### R7 Degradation ladder
 

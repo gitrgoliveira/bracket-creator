@@ -1,7 +1,6 @@
 package helper
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -210,32 +209,4 @@ func TestByePrecedenceRankClassOutranksSeeding(t *testing.T) {
 
 	assert.Equal(t, []string{"Pool 7-1st"}, byes["D"],
 		"an unseeded home 1st outranks a seeded pool's crossed-in 2nd (R6-3 over R6-4)")
-}
-
-// TestByeCountMatchesBlockParity states layer 1 as arithmetic rather than by
-// example, across the pool counts an operator can reach on 4 shiaijo: a block
-// of q occupants carries exactly q%2 NAMED round-1 byes. Odd blocks carry one,
-// even blocks carry none, and seeding is nowhere in that sentence.
-//
-// Note this is NOT R7's NextPow2(q)-q, which counts every empty slot in the
-// block including later rounds. The two differ from q=5 up, and the difference
-// is D4's greedy layout: a 5-occupant block has three empty slots but prints
-// ONE named bye, because the round-2 bye falls to a match winner rather than to
-// a competitor (see TestEKCJuniorIndividualMale, where it lands on W(P4 v P5)).
-// Asserting the R7 figure here would be pinning the pad-to-NextPow2 layout that
-// D4 explicitly rejects.
-func TestByeCountMatchesBlockParity(t *testing.T) {
-	for numPools := 4; numPools <= 24; numPools++ {
-		t.Run(fmt.Sprintf("%d pools", numPools), func(t *testing.T) {
-			draw := BuildKnockoutDraw(ekcPools(numPools), 1, 4)
-			require.NotNil(t, draw)
-			for i, region := range draw.Regions {
-				occupants := len(TreeLeafLabels(region))
-				_, byes := regionRound1(region)
-				assert.Len(t, byes, occupants%2,
-					"shiaijo %s holds %d occupants, so its round-1 layer owes %d named bye(s)",
-					CourtLabel(i), occupants, occupants%2)
-			}
-		})
-	}
 }

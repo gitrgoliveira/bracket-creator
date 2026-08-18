@@ -583,6 +583,47 @@ Junior Individual Female (2,1,2,2), Junior Individual Male (5,5,4,4), Junior Tea
 (4,3,4,3) and Ladies Team (4,4,4,4). Ladies Individual (10,8,8,10) would also be safe on
 block size alone, but is blocked by the qualifier rule.
 
+**The rule, derived from four instances across two years.** A 6-occupant block is two
+blocks of 3. Each then follows the EXISTING rule unchanged (one bye by R6 precedence,
+bye removed before the rank interleave), so the fix is in the block PARTITION, not in
+the layout:
+
+| | sub-block 1 | sub-block 2 |
+| --- | --- | --- |
+| membership | H1 (byes), C1, C2 | H2 (byes), H3, C3 |
+| 2025 + 2026 court A | P1#1; P7#2 v P8#2 | P2#1; P3#1 v P9#2 |
+| 2025 + 2026 court C | P7#1; P1#2 v P2#2 | P8#1; P9#1 v P3#2 |
+
+H = home 1st in pool order, C = crossed-in 2nd. The 33rd EKC 2025 Men Team draw (11
+pools, 2 qualifiers, so blocks of 6/5/6/5) prints courts A and C bout-for-bout
+IDENTICALLY to the 34th EKC 2026 draw, which is what makes this a rule rather than one
+sheet's arrangement.
+
+**Two 2026 blocks deviate and are NOT explained.** Men Team courts B and D bye H1 and
+**H3** (B: P4#1 and P6#1, with P5#1 playing round 1; D: P10#1 and P12#1, with P11#1
+playing). Courts A and B have IDENTICAL structure -- three home 1sts of equal pool size,
+three crossed-in 2nds, the first pool seeded -- so no rule expressed in seeding, pool
+size, pool order or rank class can produce H1,H2 for one and H1,H3 for the other. 2025
+has no 6-occupant B/D block to compare against. Treat A/C as the rule and B/D as
+unexplained (a hand adjustment is the likeliest reading); do not contort the algorithm
+to reproduce them.
+
+**Where the fix goes.** `planBlocks` returns `numCourts` unchanged above 2 shiaijo, so a
+court is never subdivided there. The occupant limit it already documents gives the right
+answer if it is allowed to run: double while a block would hold MORE than 4 occupants.
+That yields 8 blocks for Men Team (3 each), and leaves Ladies Team (4 each), Junior Team
+(3.5 avg) and both Junior individual draws untouched -- verified, those four still pass
+with the change in place.
+
+The second half is `combine`, and it is why this is not a one-line fix. Its `default`
+branch does `regions[c] = n` per block, one region per court; with two blocks per court
+the second silently overwrites the first. A court's region must become the node spanning
+BOTH its blocks, and `Regions[i]` is required to be a real node inside `Root` rather than
+a copy, so the court region has to be assembled BEFORE the halves are joined, not
+recovered afterwards. R3 makes that sound -- a shiaijo's blocks are contiguous and form a
+subtree by definition -- but it reorders `combine` around court-level units instead of
+block-level ones.
+
 **Do not fix this by special-casing even counts.** The sheet's rule is one rule: split a
 block into sub-blocks as evenly as the tree allows, then apply R6 inside each. 5 -> 3+2
 and 6 -> 3+3 are the same rule, and our 5 -> 3+2 is already right; it is the even branch

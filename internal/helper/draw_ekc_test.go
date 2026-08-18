@@ -282,15 +282,7 @@ func TestEKCJuniorTeam(t *testing.T) {
 	for _, p := range []int{1, 2, 3, 4, 5, 6, 7} {
 		a := fmt.Sprintf("Pool %d-1st", p)
 		b := fmt.Sprintf("Pool %d-2nd", p)
-		inFirst := func(xs []string, want string) bool {
-			for _, x := range xs {
-				if x == want {
-					return true
-				}
-			}
-			return false
-		}
-		assert.NotEqual(t, inFirst(first, a), inFirst(first, b),
+		assert.NotEqual(t, holdsLabel(first, a), holdsLabel(first, b),
 			"pool %d's two qualifiers must sit in opposite halves (R5)", p)
 	}
 
@@ -425,4 +417,21 @@ func TestSeedsLandInD6HalvesAndQuarters(t *testing.T) {
 			})
 		}
 	}
+}
+
+// poolLabel names a pool's qualifier the way the draw labels its leaves.
+func poolLabel(pool int, rank string) string {
+	return fmt.Sprintf("Pool %d-%s", pool, rank)
+}
+
+// holdsLabel reports whether xs holds want. The reference cases compare half
+// membership, where the useful assertion is "in exactly one of the two halves"
+// rather than a position, so a plain membership test is what they need.
+func holdsLabel(xs []string, want string) bool {
+	for _, x := range xs {
+		if x == want {
+			return true
+		}
+	}
+	return false
 }

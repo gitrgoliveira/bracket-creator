@@ -51,10 +51,66 @@ wrong is the pool-to-slot mapping, the bye allocation, and the page-to-shiaijo
 correspondence. R3, R4, R6 and R8 are violated today (R5 additionally at 3+
 qualifiers); R9 is unenforced.
 
+## Sources
+
+Primary documents. Everything in this spec that is called "the sheet" or "the reference
+draw" is decoded from these; anything not traceable to one of them is an operator
+decision or an extrapolation, and says so where it appears.
+
+| What | Link |
+| --- | --- |
+| 34th EKC 2026 (Podgorica) draw sheets, all 7 events | <https://ekc2026.me/wp-content/uploads/2026/05/34ekc2026_podgorica-drawings.pdf> |
+| 33rd EKC 2025 draw sheets | <https://www.ekf-eu.com/documents/33EKC2025-DRAWINGS.pdf> |
+| 33rd EKC 2025 final placings (the 2026 seeding input) | <https://www.kendo-fik.org/tournament/8473> |
+
+The 2026 PDF is SCANNED -- it carries no text layer, so `pdftotext` returns nothing.
+Render it to images (`pdftoppm -r 200 -png`) and read the pages. Layout: 14 pages, one
+pools page then one draw page for each of the 7 events, in the order Junior Individual
+Female, Junior Individual Male, Junior Team, Ladies Individual, Ladies Team, Men
+Individual, Men Team. On a pools page the SEEDED pool is the row highlighted in blue; on
+a draw page red/white is the aka/shiro side assignment and carries no seeding meaning.
+
+**Seeding is the previous year's medallists.** Verified across all seven 2026 events
+against the 2025 placings: every seeded pool holds a 2025 medallist and every 2025
+medallist who entered is seeded (the one absence is Junior Individual Female's 2nd
+place, who did not return). Each seeded pool is also its shiaijo's FIRST pool, which is
+the structural reason R6 criteria 1 and 3 agree on all real data -- see R6(b).
+
 ## Reference draws (34th EKC 2026, Podgorica)
 
-All three official draw sheets were decoded. All three run on **4 courts**, so none of
-them settles a non-power-of-two court count; see the pinned defaults for that.
+All seven official draw sheets have been decoded: the three Junior events first, and the
+four senior events on 2026-08-18. All seven run on **4 courts**, so none of them settles
+a non-power-of-two court count; see the pinned defaults for that.
+
+| Event | Pools | Qualifiers | Blocks | Reproduced? |
+| --- | --- | --- | --- | --- |
+| Junior Individual Female | 7 | 1 | 2,1,2,2 | yes |
+| Junior Individual Male | 18 | 1 | 5,5,4,4 | yes |
+| Junior Team | 7 | 2 | 4,3,4,3 | yes |
+| Ladies Team | 8 | 2 | 4,4,4,4 | yes |
+| Ladies Individual | 34 | **per-pool** | 10,8,8,10 | NO -- per-pool qualifiers |
+| Men Team | 12 | 2 | 6,6,6,6 | NO -- **R6(c)** |
+| Men Individual | 45 | **per-pool** | A=13; B/C/D hold 11/11/12 (order not decoded) | NO -- both of the above |
+
+Two gaps, both recorded where the rule they break is defined:
+
+- **R6(c)**: a block whose occupant count is even and not a power of two misallocates
+  its byes. Confirmed on Men Team (blocks of 6). Men Individual holds a block of 12
+  among B/C/D and would be expected to hit it too, but that is UNVERIFIED: the event
+  cannot be built at all today, so there is nothing to compare against the sheet.
+- **Per-pool qualifier counts**: the two large individual events send **2** qualifiers
+  from a 4-person pool and **1** from a 3-person pool, so the occupant count is neither
+  the pool count nor twice it (Ladies 34 pools -> 36 occupants; Men 45 -> 47).
+  `BuildKnockoutDraw` takes one `poolWinners` for the whole competition and cannot
+  express this. Pinned by `TestEKCIndividualEventsUsePerPoolQualifierCounts`.
+
+*Undecided, and deliberately not guessed:* where those few crossing 2nds go. In all four
+TEAM events every 2nd crosses to the R4 partner shiaijo (A<->C, B<->D), and the sheets
+show it plainly. In the two individual events only two 2nds cross in the whole draw, and
+both observed cases went B -> A (Ladies pool 16, Men pool 22), which the partner rule
+does not predict. Two crossings across two events is not enough to decide between "a
+different partner map for individuals" and "fill wherever the bracket has room", so R4
+is NOT extended to cover them here. Decode more sheets before writing a rule.
 
 Round-1 pairings and byes below are transcribed exactly as recorded in the bead. They
 are the observed sheet layout, not a derivation.
@@ -517,11 +573,15 @@ This is the SAME defect class bc-draw was raised on -- byes landing on a block's
 pools while the seeds play -- surviving for even block sizes after the odd ones were
 fixed.
 
-**Reference draws affected:** Men Team (blocks of 6) and Men Individual (court A holds
-12: 11 home 1sts plus a crossed-in 2nd). The other five reproduce correctly, because
-their blocks are odd or powers of two: Junior Individual Female (2,1,2,2), Junior
-Individual Male (5,5,4,4), Junior Team (4,3,4,3), Ladies Team (4,4,4,4), Ladies
-Individual (9,8,8,9).
+**Reference draws affected:** confirmed on Men Team (four blocks of 6), pinned by
+`TestEKCMenTeamByes`. Men Individual holds a block of 12 among shiaijo B/C/D and would
+be expected to hit it as well, but that is unverified -- per-pool qualifier counts stop
+the event being built at all, so there is no output to compare.
+
+Four of the seven reproduce correctly, because every block is odd or a power of two:
+Junior Individual Female (2,1,2,2), Junior Individual Male (5,5,4,4), Junior Team
+(4,3,4,3) and Ladies Team (4,4,4,4). Ladies Individual (10,8,8,10) would also be safe on
+block size alone, but is blocked by the qualifier rule.
 
 **Do not fix this by special-casing even counts.** The sheet's rule is one rule: split a
 block into sub-blocks as evenly as the tree allows, then apply R6 inside each. 5 -> 3+2

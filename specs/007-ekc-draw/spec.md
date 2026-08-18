@@ -462,12 +462,12 @@ Layer 1 is pure structure: it counts occupants and balances the match load acros
 shiaijo. It knows nothing about seeding. Layer 2 never creates a bye, it only allocates
 one that layer 1 has already produced.
 
-The two bye figures in that first row are NOT interchangeable, and neither is a
-universal formula for the NAMED round-1 byes an operator sees on the sheet. A block is
-split recursively into sub-blocks, and a named bye appears wherever a sub-block comes out
-odd: 5 occupants split 3+2 and print ONE named bye (the 2-side's winner takes a later-
-round bye instead), while 6 split 3+3 and print TWO. Count the split, do not apply a
-formula. **Our implementation does not reproduce the 3+3 split -- see R6(c).**
+The two bye figures in that first row are NOT interchangeable, and the named count
+depends on the QUALIFIER MODE (R6(c)): at 2+ qualifiers every empty slot pairs with a
+real occupant, so the named count IS NextPow2(q)-q (a 6-occupant block prints two named
+byes, a 5-occupant one three); at 1 qualifier empties pack into phantom pairs and a
+5-occupant block prints ONE (Junior Individual Male). **Our implementation reproduces
+only the 1-qualifier mode -- see R6(c).**
 
 **Corroboration across all three reference draws.** Every bye on the 34th EKC sheets is
 explained by the two layers together, and none needs a third rule:
@@ -523,6 +523,11 @@ exactly (pinned by `TestEKCReferenceByesSurviveSeedStripping`):
 | Team | B | P3 1st | seeded AND first in pool order among the block's home 1sts |
 | Team | D | P7 1st | the block's only home 1st; decided by rank class, not by seeding |
 
+The 2025 sheets extend the coincidence rather than breaking it: the 33rd EKC Men Team
+seeds (blue rows) are pools 1, 4, 7 and 10 -- POL, FRA, BEL, ESP -- again each the first
+pool of its shiaijo, so criteria 1 and 3 agree there too. (What 2025 DOES discriminate
+is the crossed-bye direction, and it goes AGAINST seeding -- see R6(c).)
+
 So criterion 1 rests on the operator requirement of 2026-08-09 (competitive protection:
 a seeded competitor should not have to fight an extra round to reach the same point of
 the draw), and is corroborated by nothing on the sheets. That is a sound basis for the
@@ -546,93 +551,92 @@ pool order: `TestSeededPoolWinnerTakesTheBlockBye` (a hand-built block),
 injection rather than trusting a green suite: most of the bye coverage is insensitive to
 this criterion by construction.
 
-#### R6(c) OPEN DEFECT: even-sized blocks misallocate their byes
+#### R6(c) OPEN DEFECT: blocks above four occupants are laid out wrong at 2+ qualifiers
 
-**Status: our implementation does not reproduce two of the seven 34th EKC reference
-draws.** Found 2026-08-18 by decoding the full drawings PDF (all seven events, not just
-the three Junior ones originally decoded).
+**Status: our draw reproduces neither year's Men Team sheet.** Found 2026-08-18 by
+decoding the senior events; the full layout rule was then recovered from ALL EIGHT Men
+Team blocks across 2025 and 2026, plus both years' seeding highlights. The defect is not
+parity-scoped ("even blocks") as an earlier revision said: a 5-occupant block at 2
+qualifiers is wrong too, differently.
 
-A block whose occupant count is EVEN and not a power of two (6, 10, 12, 14, ...) gives
-its byes to the LAST pools and puts the seeded pool's home 1st into round 1. Odd counts
-and powers of two are correct.
+**The template.** At two qualifiers, a block of up to six occupants is TWO sub-blocks,
+each headed by a home 1st who byes into the sub-block final:
 
-Reference case, Men Team court A (12 pools, 2 qualifiers, 4 shiaijo -> 6 occupants per
-block, seeds on pools 1, 4, 7, 10):
+```
+first court of a half:   [h1 BYE | c1 v c2]   [h2 BYE | h3 v c3]
+second court of a half:  [h1 BYE | c1 v h2]   [h3 BYE | c2 v c3]
+```
 
-| | round 1 | round 2 | byes |
-| --- | --- | --- | --- |
-| sheet | P7#2 v P8#2, P3#1 v P9#2 | P1#1 v W, P2#1 v W | **P1#1 (seeded), P2#1** |
-| ours | P1#1 v P7#2, P2#1 v P8#2 | W v W, P3#1 v P9#2 | **P3#1, P9#2** |
+h = home 1sts in pool order, c = the partner court's 2nds in pool order. The second
+court's template is the first's mirror, and its mixed pair also swaps aka/shiro (the
+crossed 2nd takes the top box). Verified bout-for-bout: all four 2026 blocks and 2025
+courts A and C (blocks of 6).
 
-Both have five matches in three rounds and identical per-round shiaijo assignment. The
-difference is the SPLIT: the sheet divides 6 into 3+3, so each half owes one bye and R6
-hands it to that half's top occupant. Ours divides into 4+2, so the 2-side's occupants
-both skip round 1 and meet each other, and the seeded pool gets nothing.
+**Vacancies (5-occupant blocks), verified on 2025 courts B and D.** A missing occupant
+vacates a PLAYING slot -- bye-head slots are always filled -- and its would-be opponent
+byes, so a 5-occupant block prints THREE named byes and ONE round-1 match:
 
-This is the SAME defect class bc-draw was raised on -- byes landing on a block's last
-pools while the seeds play -- surviving for even block sizes after the odd ones were
-fixed.
+| | homes | crossed | slots | byes | match |
+| --- | --- | --- | --- | --- | --- |
+| B | 4,5,6 | 10,11 | `[H4,"",C10,H5] [H6,"",C11,""]` | P4#1, P6#1, **P11#2** | P10#2 v P5#1 |
+| D | 10,11 | 4,5,6 | `[H10,"",C6,""] [H11,"",C5,C4]` | P10#1, **P6#2**, P11#1 | P5#2 v P4#2 |
 
-**Reference draws affected:** confirmed on Men Team (four blocks of 6), pinned by
-`TestEKCMenTeamByes`. Men Individual holds a block of 12 among shiaijo B/C/D and would
-be expected to hit it as well, but that is unverified -- per-pool qualifier counts stop
-the event being built at all, so there is no output to compare.
+On B the short rank is crossed, so the last crossed playing slot (c3) empties; on D it
+is homes, so the home playing slot (h2) empties and both home 1sts take the bye heads.
 
-Four of the seven reproduce correctly, because every block is odd or a power of two:
-Junior Individual Female (2,1,2,2), Junior Individual Male (5,5,4,4), Junior Team
-(4,3,4,3) and Ladies Team (4,4,4,4). Ladies Individual (10,8,8,10) would also be safe on
-block size alone, but is blocked by the qualifier rule.
+**The crossed bye goes to the WEAKEST crossed.** Both vacancy byes above landed on the
+lowest-precedence crossed and both passed over a SEEDED pool's 2nd (B: P11#2 over
+P10#2, Spain seeded; D: P6#2 over P4#2, France seeded -- highlights confirmed on the
+pools pages). R6-4's forward ranking ("crossed ranked by their own pool's precedence")
+is therefore CONTRADICTED for bye allocation, on two independent cells. Whether R7's
+degradation ladder ranks forward or backward when byes MUST flow to crossed remains
+open -- no sheet shows that case. One residue rests on a single cell: after a crossed
+bye is granted, 2025 D fills its remaining playing pair weakest-first (P5#2 above
+P4#2). Cosmetic (aka/shiro of one all-crossed pair), pinned in the test, low
+confidence.
 
-**The rule, derived from four instances across two years.** A 6-occupant block is two
-blocks of 3. Each then follows the EXISTING rule unchanged (one bye by R6 precedence,
-bye removed before the rank interleave), so the fix is in the block PARTITION, not in
-the layout:
+With those rules, 8/8 blocks reproduce exactly (structure, byes, sides). The named-bye
+count is NextPow2(q)-q -- at 2+ qualifiers every empty slot pairs with a real occupant
+as a named bye, while at 1 qualifier empties pack into phantom pairs (Junior Individual
+Male court A, q=5: ONE named bye). R7's slot arithmetic is unchanged either way.
 
-| | sub-block 1 | sub-block 2 |
-| --- | --- | --- |
-| membership | H1 (byes), C1, C2 | H2 (byes), H3, C3 |
-| 2025 + 2026 court A | P1#1; P7#2 v P8#2 | P2#1; P3#1 v P9#2 |
-| 2025 + 2026 court C | P7#1; P1#2 v P2#2 | P8#1; P9#1 v P3#2 |
+**Withdrawn claims** (each was committed to this spec and is recorded here so it is not
+re-derived):
 
-H = home 1st in pool order, C = crossed-in 2nd. The 33rd EKC 2025 Men Team draw (11
-pools, 2 qualifiers, so blocks of 6/5/6/5) prints courts A and C bout-for-bout
-IDENTICALLY to the 34th EKC 2026 draw, which is what makes this a rule rather than one
-sheet's arrangement.
+- *"B/D are unexplained, likely hand adjustments"* -- they are the mirrored orientation
+  of the same template, consistent across both years.
+- *"The fix is planBlocks subdivision plus a combine restructure"* -- wrong twice. At
+  sub-block granularity partnerBlock crossing deals the wrong 2nds: court A's first
+  sub-block holds {P7#2, P8#2}, two pools whose homes sit in DIFFERENT partner
+  sub-blocks, a shape sub-block partnering cannot produce; crossing is court-level and
+  the sub-deal is the template's. And Regions never needed restructuring, because the
+  template lives INSIDE a court's block.
+- *"2025 court B matches our greedy layout"* -- its pairings coincide, its tree does
+  not: F7 (P6#1 v P11#2) sits in the round-2 column, so both its entrants byed. Column
+  position IS round depth on these sheets; read it before calling a layout confirmed.
+- *"The 3+3 split alone reproduces the sheet"* -- it fixes the bye count but allocates
+  within halves, giving P1/P3 where the sheet byes P1/P2.
 
-**Two 2026 blocks deviate and are NOT explained.** Men Team courts B and D bye H1 and
-**H3** (B: P4#1 and P6#1, with P5#1 playing round 1; D: P10#1 and P12#1, with P11#1
-playing). Courts A and B have IDENTICAL structure -- three home 1sts of equal pool size,
-three crossed-in 2nds, the first pool seeded -- so no rule expressed in seeding, pool
-size, pool order or rank class can produce H1,H2 for one and H1,H3 for the other. 2025
-has no 6-occupant B/D block to compare against. Treat A/C as the rule and B/D as
-unexplained (a hand adjustment is the likeliest reading); do not contort the algorithm
-to reproduce them.
+**Where the fix goes.** Inside the block layout (`buildBlock` or a sibling), keyed on an
+orientation the caller derives from the court's position in its half. `planBlocks`,
+`route`, `combine`, `partnerBlock` and `Regions` are all untouched. Blocks of four or
+fewer occupants and all 1-qualifier draws keep their current sheet-verified layouts.
+Above six occupants no sheet constrains the shape (Men Individual's 13-occupant block
+exists but is unbuildable pending per-pool qualifiers); if implemented now, generalize
+the template recursively and mark it extrapolated.
 
-**Where the fix goes.** `planBlocks` returns `numCourts` unchanged above 2 shiaijo, so a
-court is never subdivided there. The occupant limit it already documents gives the right
-answer if it is allowed to run: double while a block would hold MORE than 4 occupants.
-That yields 8 blocks for Men Team (3 each), and leaves Ladies Team (4 each), Junior Team
-(3.5 avg) and both Junior individual draws untouched -- verified, those four still pass
-with the change in place.
+**Implementation hazards, from the 2026-08-18 review:**
 
-The second half is `combine`, and it is why this is not a one-line fix. Its `default`
-branch does `regions[c] = n` per block, one region per court; with two blocks per court
-the second silently overwrites the first. A court's region must become the node spanning
-BOTH its blocks, and `Regions[i]` is required to be a real node inside `Root` rather than
-a copy, so the court region has to be assembled BEFORE the halves are joined, not
-recovered afterwards. R3 makes that sound -- a shiaijo's blocks are contiguous and form a
-subtree by definition -- but it reorders `combine` around court-level units instead of
-block-level ones.
-
-**Do not fix this by special-casing even counts.** The sheet's rule is one rule: split a
-block into sub-blocks as evenly as the tree allows, then apply R6 inside each. 5 -> 3+2
-and 6 -> 3+3 are the same rule, and our 5 -> 3+2 is already right; it is the even branch
-that departs from it.
-
-*Caution on measurement:* `regionRound1` in the test suite pairs a FLAT leaf array and
-mis-reports any block whose leaves sit at different depths -- it reads the 6-occupant
-block above as three round-1 matches and no byes. Verify layout changes against
-`BuildEliminationMatchRounds`, which walks the real tree.
+- `TestByeGoesToTheHighestPrecedenceOccupantSweep` reads `draw.blocks` and today passes
+  VACUOUSLY on >4 blocks at 2q (no byes to check); after the fix it must understand
+  sub-block heads, and the weakest-crossed rule inverts its expectation for crossed
+  byes.
+- `make examples` output changes for any shape holding a >4 block at 2+ qualifiers;
+  regenerate and inspect page breaks and seeding.
+- `regionRound1` pads collapsed byes back into slot positions and reports the POST-FIX
+  uniform trees correctly; it is the CURRENT 4+2 trees it mis-reads.
+- Acceptance gates: `TestEKCMenTeamByes` (2026) and `TestEKC2025MenTeamByes` (2025),
+  both skipped; delete the skips with the fix and watch red turn green.
 
 ### R7 Degradation ladder
 

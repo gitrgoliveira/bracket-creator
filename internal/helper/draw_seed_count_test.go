@@ -220,7 +220,7 @@ func TestSeedWarningsScaleWithTheSeedCount(t *testing.T) {
 //
 // It used to carry more weight than that. PoolSeeding passed each seed's INDEX
 // in the rank-sorted list to seedCourtOrder, whose rules are written in RANKS
-// ("seed 1 -> A, seed 2 -> C"), and the two coincided only for a contiguous set.
+// ("seed 1 -> B, seed 2 -> C"), and the two coincided only for a contiguous set.
 // This test was meant to be the tripwire for that assumption, and it could not
 // be: it builds its own seed sets, and every fixture in this package builds them
 // contiguous. The gapped set arrives from OUTSIDE the package --

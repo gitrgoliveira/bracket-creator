@@ -353,7 +353,7 @@ func TestGenerateDraw_SeedGapFromCheckInKeepsD6Placement(t *testing.T) {
 	compID := "checkin-seed-gap"
 
 	// Four shiaijo, because D6's halves and quarters are only fully determined
-	// with four: seed 1 -> A, 2 -> C, 3 -> B, 4 -> D.
+	// with four: seed 1 -> B, 2 -> C, 3 -> A, 4 -> D (the decoded EKF order, spec D6).
 	courts := []string{"A", "B", "C", "D"}
 	createTestCompetition(t, store, compID, state.CompFormatMixed, 5, func(c *state.Competition) {
 		c.PoolSizeMode = "max"
@@ -405,7 +405,7 @@ func TestGenerateDraw_SeedGapFromCheckInKeepsD6Placement(t *testing.T) {
 		}
 	}
 
-	assert.Equal(t, map[int]string{1: "A", 3: "B", 4: "D"}, seedCourt,
+	assert.Equal(t, map[int]string{1: "B", 3: "A", 4: "D"}, seedCourt,
 		"a rank-2 no-show must not move ranks 3 and 4 off their own D6 shiaijo")
 
 	// The reporting half. Ranks 1, 3 and 4 on A, B and D put 1 and 3 in one half

@@ -62,6 +62,12 @@ decision or an extrapolation, and says so where it appears.
 | 34th EKC 2026 (Podgorica) draw sheets, all 7 events | <https://ekc2026.me/wp-content/uploads/2026/05/34ekc2026_podgorica-drawings.pdf> |
 | 33rd EKC 2025 draw sheets | <https://www.ekf-eu.com/documents/33EKC2025-DRAWINGS.pdf> |
 | 33rd EKC 2025 final placings (the 2026 seeding input) | <https://www.kendo-fik.org/tournament/8473> |
+| EKF championship history (all editions' placings; the 2025 seeding input) | <https://www.ekf-eu.com/downloads/ec_history%20-%20kendo.pdf> |
+| 19WKC 2024 (Milan) draw sheets, all 4 events | <http://www.kendo-fik.org/wp-content/uploads/2024/05/19WKC-draw-results-20240515.pdf> |
+| 17WKC 2018 (Incheon) draw sheets | <https://kendo-fik.org/news/2085> |
+| 19WKC 2024 results | <https://wkc2024.com/match-results/> |
+| 17WKC 2018 results | <https://kendojidai.com/2018/09/18/result-of-wkc17/> |
+| 16WKC 2015 results (the 17WKC seeding input) | <http://www.kendo-fik.org/wkc/16wkc> |
 
 The 2026 PDF is SCANNED -- it carries no text layer, so `pdftotext` returns nothing.
 Render it to images (`pdftoppm -r 200 -png`) and read the pages. Layout: 14 pages, one
@@ -281,8 +287,8 @@ give way.
 
 *Reference:* the Female draw places its **three** seeds on three different courts
 (A, B, C) and gives one of them the half's only bye. It is a 3-seed draw, so it
-corroborates "distinct courts, distinct quarters" but does not pin the rank-to-court
-mapping.
+corroborates "distinct courts, distinct quarters"; the rank-to-court mapping is pinned
+by D6's rank-matching evidence table.
 
 ### R3 Court blocks
 
@@ -1038,15 +1044,51 @@ nothing until they are regenerated.
 **Rule, covering every court count, and the normative form of R2:**
 
 > Seeds **1 and 3** fall in one half of the draw and seeds **2 and 4** in the other,
-> each of the four in a **distinct quarter**, and, subject to that, on **distinct
-> courts** and in **distinct pools**.
+> each of the four in a **distinct quarter**; within each half the TOP seed of the
+> pair takes the **INNER quarter** (adjacent to the draw's centre) and the lower seed
+> the outer; and, subject to that, seeds sit on **distinct courts** and in **distinct
+> pools**.
 
 This preserves the operator's 2026-08-09 decision (semifinals **1 v 3** and **2 v 4**
-when the seeds hold) and generalises it. At 4 courts it yields **seed 1 -> court A,
-seed 3 -> court B, seed 2 -> court C, seed 4 -> court D**, from which "one seeded pool
+when the seeds hold) and generalises it. At 4 courts it yields **seed 1 -> court B,
+seed 3 -> court A, seed 2 -> court C, seed 4 -> court D**, from which "one seeded pool
 per court, each in a different quarter" follows as a **consequence** rather than as a
-separate rule. At 8 and 16 courts a quarter spans several regions, so the half/quarter
-constraint is the operative one and "distinct courts" becomes the tiebreak that spreads
+separate rule.
+
+**The inner-quarter order is DECODED, not chosen (2026-08-18).** The sheets mark which
+pools are seeded but not their ranks; rank-matching the seeded pools against the
+previous edition's results pins the mapping, across four team draws and two years:
+
+| Draw | 1st | 2nd | 3rds (joint) |
+| --- | --- | --- | --- |
+| 33rd EKC 2025 Men Team | FRA -> B | BEL -> C | POL -> A, ESP -> D |
+| 34th EKC 2026 Men Team | FRA -> B | SUI -> C | ITA -> A, ESP -> D |
+| 34th EKC 2026 Ladies Team | FRA -> B | ITA -> C | POL -> A, NED -> D |
+| 34th EKC 2026 Junior Team | GBR -> B | ESP -> C | FRA -> A, NED -> D |
+
+(2025 prior results from the 32nd EKC 2023 Beauvais: FRA/BEL/POL+ESP, per the EKF's
+championship history document; 2026 priors are the 33rd EKC results.) The champion's
+pool sits on court B and the runner-up's on C in every case; the joint 3rds take the
+outer courts. Which 3rd goes to A versus D is not decodable (they are unranked), so
+seed 3 -> A, seed 4 -> D stays our convention. An earlier revision placed seed 1 on
+court A; both mappings give identical halves, quarters, pairings and byes, so the
+sheets are the only authority there is, and they say inner. State the PATTERN as fact
+and no more: no source gives a reason, and none is needed (operator ruling,
+2026-08-18: the WKC and EKC draws decide).
+
+**The WKC does the same at the tree level, with the opposite within-half geometry.**
+Rank-matching the 17WKC and 19WKC men's and women's team draws against their prior
+editions shows previous medallists at blocks **1 / 16 / 8 / 9** of the 16-block linear
+bracket -- champion and runner-up at the OUTER edges, 3rds folded inward -- the same
+meeting graph (final 1 v 2, each semifinal a top seed against a 3rd, one seed per
+quarter), seeded implicitly with no marking. That geometry belongs to a bracket without
+court regions and is recorded here for the future WKC-style draw, not implemented.
+
+Composed with the middle-court rule for the closing bouts (CourtForSpan: semifinals on
+B and C, final on B), the inner-quarter order means the top two seeds fight their whole
+campaign on the courts that host the semifinals and final; at 1 and 2 courts the order
+is arithmetically invisible and nothing changes. At 8 and 16 courts a quarter spans
+several regions, so the half/quarter constraint is the operative one and "distinct courts" becomes the tiebreak that spreads
 seeds within a quarter. R9 removes the case that used to make this awkward: at a
 non-power-of-two count like 6 the quarters did not line up with region boundaries at
 all, so "a different quarter" and "one per court" were different constraints that could
@@ -1068,9 +1110,9 @@ its quarter; with **none** it is vacuous and R4 plus R6 place everything. Zero s
 MUST be a normal, warning-free configuration.
 
 *Reference:* the Female draw, three seeds on three distinct courts (A, B, C), one of
-them taking the half's only bye. It corroborates the distinctness constraints but not
-the rank-to-court mapping, since the bead records which pools are seeded and not their
-ranks.
+them taking the half's only bye, corroborating the distinctness constraints; and the
+four team draws in the evidence table above, which pin the rank-to-court mapping by
+rank-matching (the sheets alone could not, recording seeded pools but not ranks).
 
 ### D7. R2 when the constraints cannot all be satisfied
 

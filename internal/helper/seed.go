@@ -447,12 +447,24 @@ func generatePoolPriority(n int) []int {
 //
 // Courts [0, k) are the draw's first half and [k, 2k) its second (k =
 // numCourts/2), and within a half the first k/2 courts are one quarter and the
-// rest the other, which is exactly how the draw combines regions. So seeds
-// alternate halves by parity and step a quarter every two ranks:
+// rest the other, which is exactly how the draw combines regions. Seeds
+// alternate halves by parity; within each half the TOP seed of the pair takes
+// the INNER quarter (the one adjacent to the draw's centre) and the lower seed
+// the outer:
 //
-//	4 courts: seed 1 -> A, seed 2 -> C, seed 3 -> B, seed 4 -> D
+//	4 courts: seed 1 -> B, seed 2 -> C, seed 3 -> A, seed 4 -> D
 //	2 courts: seeds 1 and 3 -> A, seeds 2 and 4 -> B (two seeded pools per court)
 //	1 court:  every seed on the one court; the quarters are inside its region
+//
+// The inner-quarter order is the EKF's, decoded by rank-matching seeded pools
+// against the previous edition's results across six draws and two years (spec
+// D6's evidence table): the reigning champion's pool sits on court B and the
+// runner-up's on C in every 4-court EKC team draw of 2025 and 2026. The two
+// mappings differ in nothing functional -- same halves, same quarters, same
+// semifinal pairings -- so the sheets are the only authority there is, and
+// they say inner. (The WKC's linear bracket seeds its outer edges instead,
+// blocks 1/16/8/9; that geometry belongs to a bracket without court regions
+// and is recorded in the spec, not implemented here.)
 //
 // This deliberately differs from the conventional bracket, which groups seed 4
 // with 1 and 3 with 2 and gives semifinals 1 v 4 and 2 v 3. The operator chose
@@ -489,9 +501,17 @@ func seedCourtOrder(i, numCourts int) int {
 	k := numCourts / 2
 	// Step of one QUARTER inside a half. With a single court per half the two
 	// quarters live inside that court's own region, so there is nowhere to step
-	// to and seeds 1 and 3 share the court (D6's two-court case).
+	// to and seeds 1 and 3 share the court (D6's two-court case; quarter is 0
+	// there, which is also why the inner/outer flip below only manifests at
+	// four courts and up -- exactly where the sheets are).
 	quarter := k / 2
-	court := (i%2)*k + (i/2)*quarter
+	step := i / 2
+	if i%2 == 0 {
+		// First half: the top seed of the pair takes the INNER quarter, the
+		// last quarter of the half; its partner seed takes the outer.
+		step = 1 - step
+	}
+	court := (i%2)*k + step*quarter
 	if court >= numCourts {
 		court = numCourts - 1
 	}

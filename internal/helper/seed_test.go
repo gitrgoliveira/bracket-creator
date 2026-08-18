@@ -1489,7 +1489,7 @@ func seededPoolCourts(t *testing.T, ranks []int, numPools, poolSize, numCourts i
 // competitors who did not check in. The survivors keep their raw ranks, so
 // {1, 2, 3, 4} minus a rank-2 no-show arrives here as {1, 3, 4}.
 //
-// D6 is stated in RANKS ("seed 1 -> A, seed 2 -> C, seed 3 -> B, seed 4 -> D"),
+// D6 is stated in RANKS ("seed 1 -> B, seed 2 -> C, seed 3 -> A, seed 4 -> D"),
 // and so is helper.SeedPlacementWarnings, which reads (a.rank-b.rank)%2 to decide
 // which seeds should share a half. Placement therefore has to read the rank too:
 // keyed on the position in the sorted list, rank 3 takes position 1 and lands in
@@ -1504,13 +1504,13 @@ func TestPoolSeedingPlacesByRankNotByPosition(t *testing.T) {
 	// same shiaijo in both rows, so a rank-2 no-show does not drag the surviving
 	// seeds into other courts, and so into other halves of the draw.
 	assert.Equal(t,
-		map[int]int{1: 0, 2: 2, 3: 1, 4: 3},
+		map[int]int{1: 1, 2: 2, 3: 0, 4: 3},
 		seededPoolCourts(t, []int{1, 2, 3, 4}, numPools, poolSize, numCourts),
-		"D6 with every rank present: seed 1 -> A, 2 -> C, 3 -> B, 4 -> D")
+		"D6 with every rank present: seed 1 -> B, 2 -> C, 3 -> A, 4 -> D")
 	assert.Equal(t,
-		map[int]int{1: 0, 3: 1, 4: 3},
+		map[int]int{1: 1, 3: 0, 4: 3},
 		seededPoolCourts(t, []int{1, 3, 4}, numPools, poolSize, numCourts),
-		"ranks 1, 3 and 4 belong on shiaijo A, B and D whether or not rank 2 is present")
+		"ranks 1, 3 and 4 belong on shiaijo B, A and D whether or not rank 2 is present")
 }
 
 func TestPoolSeeding_CornerCases(t *testing.T) {

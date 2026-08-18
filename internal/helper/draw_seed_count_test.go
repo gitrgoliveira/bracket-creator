@@ -140,11 +140,18 @@ func TestStructuralRulesHoldAtEverySeedCount(t *testing.T) {
 								"R5 must hold with seeds set, not only in the unseeded sweep")
 						}
 
-						// D4: a block of q occupants grants exactly q mod 2
-						// named byes, whoever R6 picked to receive one.
+						// D4: the block's named-bye count follows its layout
+						// mode (blockLayoutArithmetic), whoever R6 picked to
+						// receive one. Vacancy blocks are pinned by
+						// TestEKC2025MenTeamByes instead.
 						for b, block := range drawByeUnits(draw) {
-							q := len(TreeLeafLabels(block))
+							leaves := TreeLeafLabels(block)
+							q := len(leaves)
 							if q <= 1 {
+								continue
+							}
+							wantByes, _, skip := blockLayoutArithmetic(leaves)
+							if skip {
 								continue
 							}
 							slots := TreeToLeafArray(block)
@@ -154,8 +161,8 @@ func TestStructuralRulesHoldAtEverySeedCount(t *testing.T) {
 									byes++
 								}
 							}
-							assert.Equalf(t, q%2, byes,
-								"block %d: %d occupants must grant %d named byes at any seed count", b, q, q%2)
+							assert.Equalf(t, wantByes, byes,
+								"block %d: %d occupants must grant %d named byes at any seed count", b, q, wantByes)
 						}
 					})
 				}

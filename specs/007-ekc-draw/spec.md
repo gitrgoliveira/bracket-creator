@@ -89,15 +89,13 @@ a non-power-of-two court count; see the pinned defaults for that.
 | Junior Team | 7 | 2 | 4,3,4,3 | yes |
 | Ladies Team | 8 | 2 | 4,4,4,4 | yes |
 | Ladies Individual | 34 | **per-pool** | 10,8,8,10 | NO -- per-pool qualifiers |
-| Men Team | 12 | 2 | 6,6,6,6 | NO -- **R6(c)** |
+| Men Team | 12 | 2 | 6,6,6,6 | yes (R6(c) template, fixed 2026-08-18) |
 | Men Individual | 45 | **per-pool** | A=13; B/C/D hold 11/11/12 (order not decoded) | NO -- both of the above |
 
-Two gaps, both recorded where the rule they break is defined:
+One gap remains, recorded where the rule it breaks is defined (**R6(c)** was a second
+gap -- blocks above four occupants misallocating byes at 2+ qualifiers -- found
+2026-08-18 and fixed the same day; see that section for the template and its tests):
 
-- **R6(c)**: a block whose occupant count is even and not a power of two misallocates
-  its byes. Confirmed on Men Team (blocks of 6). Men Individual holds a block of 12
-  among B/C/D and would be expected to hit it too, but that is UNVERIFIED: the event
-  cannot be built at all today, so there is nothing to compare against the sheet.
 - **Per-pool qualifier counts**: the two large individual events send **2** qualifiers
   from a 4-person pool and **1** from a 3-person pool, so the occupant count is neither
   the pool count nor twice it (Ladies 34 pools -> 36 occupants; Men 45 -> 47).
@@ -466,8 +464,8 @@ The two bye figures in that first row are NOT interchangeable, and the named cou
 depends on the QUALIFIER MODE (R6(c)): at 2+ qualifiers every empty slot pairs with a
 real occupant, so the named count IS NextPow2(q)-q (a 6-occupant block prints two named
 byes, a 5-occupant one three); at 1 qualifier empties pack into phantom pairs and a
-5-occupant block prints ONE (Junior Individual Male). **Our implementation reproduces
-only the 1-qualifier mode -- see R6(c).**
+5-occupant block prints ONE (Junior Individual Male). Both modes are implemented --
+see R6(c).
 
 **Corroboration across all three reference draws.** Every bye on the 34th EKC sheets is
 explained by the two layers together, and none needs a third rule:
@@ -551,13 +549,17 @@ pool order: `TestSeededPoolWinnerTakesTheBlockBye` (a hand-built block),
 injection rather than trusting a green suite: most of the bye coverage is insensitive to
 this criterion by construction.
 
-#### R6(c) OPEN DEFECT: blocks above four occupants are laid out wrong at 2+ qualifiers
+#### R6(c) The block template (defect found and FIXED 2026-08-18)
 
-**Status: our draw reproduces neither year's Men Team sheet.** Found 2026-08-18 by
-decoding the senior events; the full layout rule was then recovered from ALL EIGHT Men
-Team blocks across 2025 and 2026, plus both years' seeding highlights. The defect is not
-parity-scoped ("even blocks") as an earlier revision said: a 5-occupant block at 2
-qualifiers is wrong too, differently.
+**Status: implemented; both Men Team sheets reproduce bout-for-bout, sides included.**
+The defect was found 2026-08-18 by decoding the senior events; the layout rule was
+recovered from ALL EIGHT Men Team blocks across 2025 and 2026 plus both years' seeding
+highlights, and implemented the same day (`templateSlots` in helper/draw.go, orientation
+from `drawPlan.mirroredBlock`). The defect was not parity-scoped ("even blocks") as an
+earlier revision said: a 5-occupant block at 2 qualifiers was wrong too, differently.
+Acceptance is `TestEKCMenTeamByes` (2026) and `TestEKC2025MenTeamByes` (2025), formerly
+skipped, now green; fault injection confirms exactly those two fail with the template
+disabled and only B/D fail with the mirror disabled.
 
 **The template.** At two qualifiers, a block of up to six occupants is TWO sub-blocks,
 each headed by a home 1st who byes into the sub-block final:
@@ -617,26 +619,46 @@ re-derived):
 - *"The 3+3 split alone reproduces the sheet"* -- it fixes the bye count but allocates
   within halves, giving P1/P3 where the sheet byes P1/P2.
 
-**Where the fix goes.** Inside the block layout (`buildBlock` or a sibling), keyed on an
-orientation the caller derives from the court's position in its half. `planBlocks`,
-`route`, `combine`, `partnerBlock` and `Regions` are all untouched. Blocks of four or
-fewer occupants and all 1-qualifier draws keep their current sheet-verified layouts.
-Above six occupants no sheet constrains the shape (Men Individual's 13-occupant block
-exists but is unbuildable pending per-pool qualifiers); if implemented now, generalize
-the template recursively and mark it extrapolated.
+**Where the fix lives.** Inside the block layout: `templateSlots` (helper/draw.go),
+keyed on an orientation `buildBlock`'s caller derives from the block's position in its
+half (`mirroredBlock`, read off `halfOrder` so a D2 reorder moves orientation with
+printed position). `planBlocks`, `route`, `combine`, `partnerBlock` and `Regions` are
+all untouched. Scope is the EVIDENCED shapes: 5-6 occupants with 2-3 home 1sts and 2-3
+crossed. Blocks of four or fewer, all 1-qualifier draws, and rank mixes outside that
+scope (e.g. 2 homes + 4 crossed at 3 qualifiers) keep the greedy layout. Above six
+occupants no sheet constrains the shape (Men Individual's 13-occupant block exists but
+is unbuildable pending per-pool qualifiers): deliberately NOT extrapolated.
 
-**Implementation hazards, from the 2026-08-18 review:**
+**What the fix touched besides the layout (2026-08-18):**
 
-- `TestByeGoesToTheHighestPrecedenceOccupantSweep` reads `draw.blocks` and today passes
-  VACUOUSLY on >4 blocks at 2q (no byes to check); after the fix it must understand
-  sub-block heads, and the weakest-crossed rule inverts its expectation for crossed
-  byes.
-- `make examples` output changes for any shape holding a >4 block at 2+ qualifiers;
-  regenerate and inspect page breaks and seeding.
-- `regionRound1` pads collapsed byes back into slot positions and reports the POST-FIX
-  uniform trees correctly; it is the CURRENT 4+2 trees it mis-reads.
-- Acceptance gates: `TestEKCMenTeamByes` (2026) and `TestEKC2025MenTeamByes` (2025),
-  both skipped; delete the skips with the fix and watch red turn green.
+- The named-bye/phantom AMBIGUITY is real and permanent: a vacancy block's two byed
+  occupants collapse into a shallow leaf-leaf match that no flat leaf array can tell
+  from a phantom-risen round-1 pair (Junior Male's P4 v P5). Every consumer that counts
+  byes had to pick a view. `regionRound1` stays flat (correct for 6-blocks and all
+  greedy shapes); the 2025 test asserts through `regionRounds`, the
+  `BuildEliminationMatchRounds` walk production itself uses, which also pins the round
+  each bout is PLAYED in.
+- `TestByeGoesToTheHighestPrecedenceOccupantSweep` previously asserted "THE bye = the
+  top occupant", which is wrong under the template (several byes by design, and the
+  weakest-crossed rule inverts it for crossed byes). It now asserts R6-1's protection
+  property across both modes: when a block grants a named bye (a leaf paired with a
+  winner slot in a later round), the occupant R6 ranks first never plays round 1.
+- `TestBlockByeCountMatchesTheLayout` (was ...IsQMod2) and the D4 check in
+  `TestStructuralRulesHoldAtEverySeedCount` assert per-mode arithmetic via
+  `blockLayoutArithmetic`: q%2 greedy, `NextPow2(q)-q` for the 6-template; vacancy
+  blocks are skipped there and pinned by the 2025 reference test instead.
+- Goldens regenerated and REVIEWED: 20 of 132 draw-shape cases changed, exactly the
+  template-scoped shapes, every new bye a home 1st (P12-W2-C4 -- the Men Team shape --
+  went from NO byes to the sheet's 8, two per court in the h1/h2, h1/h3 pattern);
+  `bracket_match_numbers.json` regenerated, the SPA's JS mirror suite passing.
+
+**One decoded observation left alone:** the 2026 Junior Male sheet prints its
+phantom-risen pair (F2, P4 v P5) in the ROUND-1 column, while our rounds walk schedules
+that bout in round 2 (root-distance classification). Same tree, different column. The
+vacancy blocks need the round-2 placement (it is what makes their byes visible) and get
+it from the same classification, so aligning the phantom case with its sheet would need
+the collapse to distinguish the two -- which the tree cannot. Presentational,
+pre-existing, recorded; not changed here.
 
 ### R7 Degradation ladder
 

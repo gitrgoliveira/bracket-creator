@@ -3,6 +3,7 @@ package helper
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -1367,18 +1368,48 @@ func TestBlockByeNeverSkipsAHigherFinisher(t *testing.T) {
 	}
 }
 
-// TestBlockByeCountIsQMod2 pins D4's arithmetic directly: a BLOCK of q
-// occupants grants exactly q mod 2 NAMED round-1 byes and plays floor(q/2)
-// round-1 matches. Every other empty slot pairs with another empty slot into a
-// phantom match that is never printed. Recursive halving disagrees from q=6 up
-// (it would give 2 matches and 2 byes where greedy gives 3 and 0).
+// blockLayoutArithmetic is D4's per-block arithmetic, template-aware (R6(c)).
+// It restates templateSlots' firing condition from the block's leaf labels ON
+// PURPOSE: the condition is the documented scope of the sheet evidence, so a
+// drift between the two is a real finding rather than test noise.
+//
+// Greedy blocks grant q%2 named round-1 byes and play floor(q/2) round-1
+// matches; a 6-occupant template block grants 2 and plays 2. The q=5 template
+// block (a VACANCY block) is reported skip=true: its bye pair collapses into a
+// shallow leaf-leaf match that a flat leaf array cannot reconstruct, so its
+// layout is pinned bout-for-bout by TestEKC2025MenTeamByes on the rounds view
+// instead of arithmetically here.
+func blockLayoutArithmetic(leaves []string) (byes, matches int, skip bool) {
+	q := len(leaves)
+	homes := 0
+	for _, l := range leaves {
+		if strings.HasSuffix(l, "-1st") {
+			homes++
+		}
+	}
+	crossed := q - homes
+	if (q == 5 || q == 6) && homes >= 2 && homes <= 3 && crossed >= 2 && crossed <= 3 {
+		if q == 5 {
+			return 0, 0, true
+		}
+		return 2, 2, false
+	}
+	return q % 2, q / 2, false
+}
+
+// TestBlockByeCountMatchesTheLayout pins D4's arithmetic directly, per block
+// and per layout mode. Greedy: q mod 2 NAMED round-1 byes, floor(q/2) round-1
+// matches, every other empty slot phantom-paired and never printed. Template
+// (R6(c), the Men Team sheets): every empty slot pairs with a real occupant,
+// so a 6-occupant block grants TWO named byes -- its sub-block heads -- and
+// plays two round-1 matches. Recursive halving disagrees with both from q=6 up.
 //
 // The block is the unit, not the printable region: the two coincide wherever
 // the pool set is not subdivided, and where it is, a region spans two or four
-// blocks that each carry their own greedy layer. The sweep runs past the 4
+// blocks that each carry their own layout. The sweep runs past the 4
 // qualifiers the shape golden covers, to 6, where a block holds several
 // qualifiers of one pool on FOUR shiaijo as well as on one or two.
-func TestBlockByeCountIsQMod2(t *testing.T) {
+func TestBlockByeCountMatchesTheLayout(t *testing.T) {
 	for _, numCourts := range []int{1, 2, 4} {
 		for nPools := 1; nPools <= 12; nPools++ {
 			for poolWinners := 1; poolWinners <= 6; poolWinners++ {
@@ -1404,8 +1435,12 @@ func TestBlockByeCountIsQMod2(t *testing.T) {
 							// A one-occupant block has no round-1 layer at all.
 							continue
 						}
-						assert.Equalf(t, q%2, byes, "block %d: %d occupants must grant %d named byes", c, q, q%2)
-						assert.Equalf(t, q/2, matches, "block %d: %d occupants must play %d round-1 matches", c, q, q/2)
+						wantByes, wantMatches, skip := blockLayoutArithmetic(TreeLeafLabels(block))
+						if skip {
+							continue
+						}
+						assert.Equalf(t, wantByes, byes, "block %d: %d occupants must grant %d named byes", c, q, wantByes)
+						assert.Equalf(t, wantMatches, matches, "block %d: %d occupants must play %d round-1 matches", c, q, wantMatches)
 					}
 				})
 			}

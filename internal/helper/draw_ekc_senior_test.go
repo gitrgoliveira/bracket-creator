@@ -18,13 +18,11 @@ import (
 // structural reason criteria 1 and 3 of R6 agree on real data (spec R6(b)).
 // Source links are in the spec's Sources section.
 //
-// Two of these four are NOT reproducible today, and each is pinned below by the
-// narrowest test that states the gap:
+// Men Team reproduces bout-for-bout under R6(c)'s template (fixed 2026-08-18;
+// TestEKCMenTeamByes and TestEKC2025MenTeamByes are the acceptance tests and
+// no longer skip). The two large individual events remain out of reach for a
+// different reason, pinned by the narrowest test that states the gap:
 //
-//   - Men Team: blocks of 6 hit the R6(c) layout defect (the sheet's
-//     sub-block template vs our single 4+2 block). Its shiaijo assignment IS
-//     correct and is asserted; its bye allocation is asserted in tests that
-//     skip until R6(c) is fixed (2026 and 2025 sheets).
 //   - Men Individual and Ladies Individual: both use PER-POOL qualifier counts
 //     (a 4-person pool sends 2, a 3-person pool sends 1), which the uniform
 //     poolWinners parameter cannot express at all.
@@ -75,16 +73,16 @@ func TestEKCLadiesTeam(t *testing.T) {
 	assert.Len(t, second, 8)
 }
 
-// TestEKCMenTeamShiaijoAssignment is the half of the Men Team sheet we DO
-// reproduce: 12 pools, 2 qualifiers, courts A(1,2,3) B(4,5,6) C(7,8,9)
-// D(10,11,12), seeds on pools 1, 4, 7 and 10 (Italy, France, Switzerland,
-// Spain -- the 2025 placings 3rd, 1st, 2nd, 3rd).
+// TestEKCMenTeamShiaijoAssignment pins the sheet's court half: 12 pools, 2
+// qualifiers, courts A(1,2,3) B(4,5,6) C(7,8,9) D(10,11,12), seeds on pools
+// 1, 4, 7 and 10 (Italy, France, Switzerland, Spain -- the 2025 placings 3rd,
+// 1st, 2nd, 3rd).
 //
 // Every bout runs on the shiaijo the sheet prints, including the closing bouts
-// on the middle courts. Asserting this separately from the regions matters:
-// R6(c) is a defect in WHICH occupant sits where inside a block, not in the
-// block structure or the court derivation, and keeping the correct half pinned
-// stops a fix for R6(c) from regressing it.
+// on the middle courts. Asserted separately from the regions on purpose:
+// R6(c) was a defect in WHICH occupant sits where inside a block, not in the
+// block structure or the court derivation, and pinning this half separately
+// stopped the R6(c) fix from being able to regress it unnoticed.
 func TestEKCMenTeamShiaijoAssignment(t *testing.T) {
 	assignment, err := AssignPoolsToCourts(12, 4)
 	require.NoError(t, err)
@@ -113,19 +111,19 @@ func TestEKCMenTeamShiaijoAssignment(t *testing.T) {
 	}
 }
 
-// TestEKCMenTeamByes is the OTHER half, and it currently fails: see spec R6(c).
+// TestEKCMenTeamByes is the OTHER half: the occupant layout inside each block.
 //
 // Each shiaijo holds 6 occupants (3 home 1sts + 3 crossed-in 2nds). The sheet
 // lays a 6-occupant block out as TWO SUB-BLOCKS, each headed by a home 1st who
-// byes into the sub-block final (R6(c)'s template, mirrored on the second court
-// of each half). We build one 4+2 block instead, so the byes land on P3#1 and
-// P9#2 while the seeded pool plays.
+// byes into the sub-block final (R6(c)'s template, mirrored on the second
+// court of each half). Before the 2026-08-18 fix we built one 4+2 block, so
+// the byes landed on P3#1 and P9#2 while the seeded pool played; this test
+// encoded the sheet and skipped until templateSlots made it green.
 //
-// The expectations below are the SHEET, which is the definition of record. When
-// R6(c) is fixed, delete the t.Skip and this test verifies the fix. Do NOT
-// "fix" the test by writing our current output into it.
+// The expectations below are the SHEET, which is the definition of record --
+// including aka/shiro: regionRound1 emits slot order, so a side flip fails
+// here. Do NOT rewrite them from our output.
 func TestEKCMenTeamByes(t *testing.T) {
-	t.Skip("known defect R6(c): even-sized blocks (here 6) misallocate byes; see specs/007-ekc-draw/spec.md")
 
 	draw := BuildKnockoutDraw(ekcPools(12, 1, 4, 7, 10), 2, 4)
 
@@ -199,59 +197,84 @@ func TestEKCIndividualEventsUsePerPoolQualifierCounts(t *testing.T) {
 	}
 }
 
+// regionRounds reads a region the way production does -- BuildEliminationMatchRounds,
+// the walk behind the Excel columns and the engine's match rounds -- and formats
+// each bout as "left v right" with W for a winner slot. The 33rd EKC sheet's
+// columns map one-to-one onto these rounds, so asserting them pins the round a
+// bout is PLAYED in, which the flat regionRound1 cannot do: a vacancy block's
+// two byed occupants collapse into a shallow leaf-leaf match that a flat leaf
+// array is unable to tell from a round-1 pairing.
+func regionRounds(region *Node) [][]string {
+	var out [][]string
+	for _, round := range BuildEliminationMatchRounds(region) {
+		row := make([]string, 0, len(round))
+		for _, m := range round {
+			row = append(row, roundSideLabel(m.Left)+" v "+roundSideLabel(m.Right))
+		}
+		out = append(out, row)
+	}
+	return out
+}
+
+func roundSideLabel(n *Node) string {
+	if n != nil && n.LeafNode {
+		return n.LeafVal
+	}
+	return "W"
+}
+
 // TestEKC2025MenTeamByes replays the 33rd EKC 2025 (Leiden) Men Team draw: 11
 // pools, 2 qualifiers, courts A(1,2,3) B(4,5,6) C(7,8,9) D(10,11), seeds on
 // pools 1, 4, 7 and 10 (POL, FRA, BEL, ESP -- the blue rows on the pools page).
-// Skipped for the same defect as TestEKCMenTeamByes, and worth having as well
-// as it because its five-occupant courts pin what a plain 3+3 reading cannot:
+// Worth having alongside the 2026 case because its five-occupant courts pin
+// what the 6-occupant blocks cannot:
 //
 //   - Courts A and C (6 occupants) print bout-for-bout IDENTICALLY to the 34th
 //     EKC 2026 draw, which is what makes the template a rule rather than one
 //     sheet's arrangement.
-//   - Courts B and D (5 occupants) are the template with a VACANCY: the missing
-//     occupant's playing slot stays empty and its would-be opponent byes, so
-//     each prints THREE named byes and ONE round-1 match. F7 and F16 sit in the
-//     sheet's round-2 column -- column position is round depth.
+//   - Courts B and D (5 occupants) are the template with a VACANCY: the
+//     missing occupant's playing slot stays empty and its would-be opponent
+//     byes, so each prints THREE named byes and ONE round-1 bout, with the
+//     byed pairs (P6#1 v P11#2; P10#1 v P6#2) fought in the ROUND-2 column.
 //   - Both vacancy byes land on the WEAKEST crossed 2nd, each passing over a
 //     SEEDED pool's 2nd (P11#2 over Spain's P10#2; P6#2 over France's P4#2).
 //
-// The D expectations pin one further sheet detail on a single cell: after the
-// crossed bye is granted, the remaining playing pair fills weakest-first
-// (P5#2 above P4#2). That side order is aka/shiro-cosmetic and low-confidence;
-// if a future sheet contradicts it, re-read spec R6(c) before touching it.
-//
-// The knockout rounds beyond the court finals (F19-F21) were NOT decoded from
-// the sheet, so this test deliberately asserts regions only, not courtsByRound.
+// Asserted through regionRounds, so the round each bout is played in and its
+// aka/shiro side order are both pinned exactly as printed. The sheet's
+// F-NUMBERS are not asserted -- only structure. One cell rests on a single
+// observation: court D's remaining pair fills weakest-first (P5#2 taking aka
+// over P4#2); if a future sheet contradicts it, re-read spec R6(c) first.
 func TestEKC2025MenTeamByes(t *testing.T) {
-	t.Skip("known defect R6(c): >4-occupant blocks at 2+ qualifiers use the wrong layout; see specs/007-ekc-draw/spec.md")
-
 	assignment, err := AssignPoolsToCourts(11, 4)
 	require.NoError(t, err)
 	assert.Equal(t, []int{0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3}, assignment,
 		"the sheet's court blocks A(1-3) B(4-6) C(7-9) D(10,11)")
 
 	draw := BuildKnockoutDraw(ekcPools(11, 1, 4, 7, 10), 2, 4)
+	require.NotNil(t, draw)
+	require.Len(t, draw.Regions, 4)
 
-	assertEKCRegions(t, draw, []ekcRegion{
-		{
-			court:   "A",
-			matches: []string{"Pool 7-2nd v Pool 8-2nd", "Pool 3-1st v Pool 9-2nd"},
-			byes:    []string{"Pool 1-1st", "Pool 2-1st"},
-		},
-		{
-			court:   "B",
-			matches: []string{"Pool 10-2nd v Pool 5-1st"},
-			byes:    []string{"Pool 4-1st", "Pool 6-1st", "Pool 11-2nd"},
-		},
-		{
-			court:   "C",
-			matches: []string{"Pool 1-2nd v Pool 2-2nd", "Pool 9-1st v Pool 3-2nd"},
-			byes:    []string{"Pool 7-1st", "Pool 8-1st"},
-		},
-		{
-			court:   "D",
-			matches: []string{"Pool 5-2nd v Pool 4-2nd"},
-			byes:    []string{"Pool 10-1st", "Pool 6-2nd", "Pool 11-1st"},
-		},
-	})
+	assert.Equal(t, [][]string{
+		{"Pool 7-2nd v Pool 8-2nd", "Pool 3-1st v Pool 9-2nd"}, // F1, F2
+		{"Pool 1-1st v W", "Pool 2-1st v W"},                   // F3, F4
+		{"W v W"},                                              // F5
+	}, regionRounds(draw.Regions[0]), "shiaijo A")
+
+	assert.Equal(t, [][]string{
+		{"Pool 10-2nd v Pool 5-1st"},                   // F6
+		{"Pool 4-1st v W", "Pool 6-1st v Pool 11-2nd"}, // F8, F7
+		{"W v W"}, // F9
+	}, regionRounds(draw.Regions[1]), "shiaijo B")
+
+	assert.Equal(t, [][]string{
+		{"Pool 1-2nd v Pool 2-2nd", "Pool 9-1st v Pool 3-2nd"}, // F10, F11
+		{"Pool 7-1st v W", "Pool 8-1st v W"},                   // F12, F13
+		{"W v W"},                                              // F14
+	}, regionRounds(draw.Regions[2]), "shiaijo C")
+
+	assert.Equal(t, [][]string{
+		{"Pool 5-2nd v Pool 4-2nd"},                     // F15
+		{"Pool 10-1st v Pool 6-2nd", "Pool 11-1st v W"}, // F16, F17
+		{"W v W"}, // F18
+	}, regionRounds(draw.Regions[3]), "shiaijo D")
 }

@@ -60,10 +60,9 @@ type KnockoutDraw struct {
 	// equals Regions wherever planBlocks does not subdivide (every count from
 	// four shiaijo up, and below that whenever there are too few qualifiers to
 	// cut finer); where it does, each region spans two or four of these. It is
-	// D4's unit -- the
-	// greedy layer and its one named bye belong to a block, not to a printable
-	// region -- so the bye arithmetic is checked against this rather than
-	// against Regions.
+	// D4's unit -- a block's layout (greedy, or the R6(c) template) and its
+	// named byes belong to the block, not to a printable region -- so the bye
+	// arithmetic is checked against this rather than against Regions.
 	//
 	// This is a TEST SEAM, and the only one on this type: nothing in
 	// production reads it, because paging and court derivation are both
@@ -201,7 +200,7 @@ func BuildKnockoutDrawFromAssignment(pools []Pool, poolWinners int, poolCourt []
 	// shiaijo count (R4(e); D8 records where that stops being true).
 	blockRoots := make([]*Node, plan.numBlocks)
 	for b := range blockRoots {
-		blockRoots[b] = buildBlock(occupants[b], pools)
+		blockRoots[b] = buildBlock(occupants[b], pools, plan.mirroredBlock(b))
 	}
 
 	root, courtRegions := plan.combine(blockRoots)
@@ -417,9 +416,17 @@ func byeRankClass(rank int) int {
 // Within a block the order interleaves the RANK groups, so a home 1st meets a
 // crossed-in lower finisher in round 1 rather than another home 1st (EKC Junior
 // Team Q1: P1#1 v P5#2, P2#1 v P6#2).
-func buildBlock(occ []drawOccupant, pools []Pool) *Node {
+//
+// mirrored is the block's position in its half: false for the half's first
+// (outer-top) block, true for its second. It matters only to the R6(c)
+// template, which lays the second block out as the first's vertical mirror --
+// the shape both Men Team sheets print on shiaijo B and D.
+func buildBlock(occ []drawOccupant, pools []Pool, mirrored bool) *Node {
 	if len(occ) == 0 {
 		return nil
+	}
+	if slots := templateSlots(occ, pools, mirrored); slots != nil {
+		return BuildSlotTree(slots)
 	}
 	// The slot array is longer than width only for a single-occupant block,
 	// whose [occupant, ""] pair does not fit in NextPow2(1). BuildSlotTree
@@ -459,6 +466,115 @@ func buildBlock(occ []drawOccupant, pools []Pool) *Node {
 		slots = append(slots, "")
 	}
 	return BuildSlotTree(slots)
+}
+
+// templateSlots is R6(c)'s block layout, decoded from all eight Men Team
+// blocks of the 33rd (2025) and 34th (2026) EKC draw sheets. A qualifying
+// block is TWO sub-blocks, each headed by a home 1st who byes into the
+// sub-block final:
+//
+//	first block of a half:   [h1 BYE | c1 v c2]   [h2 BYE | h3 v c3]
+//	second block of a half:  [h1 BYE | c1 v h2]   [h3 BYE | c2 v c3]
+//
+// h = home 1sts strongest-first (byePrecedenceLess), c = crossed qualifiers
+// likewise. The second block is the first's vertical mirror, aka/shiro
+// included: its mixed pair lists the crossed qualifier first. Note what the
+// mirror does to the heads: position-order fill puts h1 and h3 on the second
+// block's heads, so shiaijo B byes P4 and P6 while P5 plays -- exactly the
+// sheet, and not a precedence anomaly.
+//
+// A missing occupant (the 5-occupant blocks of the 2025 sheet) vacates a
+// PLAYING slot -- head slots are always filled -- and its would-be opponent
+// byes, so such a block prints THREE named byes and ONE round-1 match. A
+// crossed bye created this way goes to the WEAKEST crossed: both 2025 vacancy
+// byes passed over a seeded pool's 2nd (P11#2 over Spain's P10#2, P6#2 over
+// France's P4#2), so this is the sheets' rule, not an inversion slip. The swap
+// is positional: the weakest trades slots with whoever held the bye slot,
+// which is also what prints 2025 shiaijo D's remaining pair as P5#2 v P4#2.
+//
+// Scope is the EVIDENCED shapes only: 5 or 6 occupants, 2-3 home 1sts, 2-3
+// crossed. Anything else (1-qualifier blocks, which have no crossed; rank
+// mixes like 2 homes + 4 crossed at 3 qualifiers; blocks of 7+) returns nil
+// and keeps the greedy layout -- no sheet constrains those, and the Junior
+// Individual Male sheets pin greedy for the 1-qualifier case.
+func templateSlots(occ []drawOccupant, pools []Pool, mirrored bool) []string {
+	if len(occ) < 5 || len(occ) > 6 {
+		return nil
+	}
+	var homes, crossed []drawOccupant
+	for _, o := range occ {
+		if o.rank <= 1 {
+			homes = append(homes, o)
+		} else {
+			crossed = append(crossed, o)
+		}
+	}
+	if len(homes) < 2 || len(homes) > 3 || len(crossed) < 2 || len(crossed) > 3 {
+		return nil
+	}
+	sort.SliceStable(homes, func(i, j int) bool { return byePrecedenceLess(homes[i], homes[j], pools) })
+	sort.SliceStable(crossed, func(i, j int) bool { return byePrecedenceLess(crossed[i], crossed[j], pools) })
+
+	// Role positions. Slots 1 and 5 are the head gaps; 0 and 4 the heads.
+	hSlots, cSlots := []int{0, 4, 6}, []int{2, 3, 7}
+	if mirrored {
+		hSlots, cSlots = []int{0, 3, 4}, []int{2, 6, 7}
+	}
+	slots := make([]string, 8)
+	fillRankSlots(slots, homes, hSlots)
+	fillRankSlots(slots, crossed, cSlots)
+
+	// A crossed slot whose pair slot is empty is a vacancy-created bye; the
+	// weakest crossed claims it (trading slots with the incumbent).
+	for _, i := range cSlots {
+		if slots[i] == "" || slots[i^1] != "" {
+			continue
+		}
+		weakest := i
+		for _, j := range cSlots {
+			if slots[j] != "" && slots[j^1] != "" && byePrecedenceLess(occAt(crossed, slots[weakest]), occAt(crossed, slots[j]), pools) {
+				weakest = j
+			}
+		}
+		slots[i], slots[weakest] = slots[weakest], slots[i]
+	}
+	return slots
+}
+
+// fillRankSlots places one rank group, strongest first, into its role slots in
+// position order. A short group gives up its PLAYING slots from the tail --
+// head slots (whose pair is a permanent gap) are always filled, because an
+// unheaded sub-block would bye nobody where the sheet byes a home 1st.
+func fillRankSlots(slots []string, occ []drawOccupant, positions []int) {
+	drop := len(positions) - len(occ)
+	keep := make([]int, 0, len(positions))
+	for i := len(positions) - 1; i >= 0; i-- {
+		p := positions[i]
+		if drop > 0 && p != 0 && p != 4 {
+			drop--
+			continue
+		}
+		keep = append(keep, p)
+	}
+	for i, j := 0, len(keep)-1; i < j; i, j = i+1, j-1 {
+		keep[i], keep[j] = keep[j], keep[i]
+	}
+	for i, o := range occ {
+		if i < len(keep) {
+			slots[keep[i]] = o.label
+		}
+	}
+}
+
+// occAt maps a slot label back to its occupant so the weakest-crossed swap can
+// compare precedence; the labels in a block are unique by construction.
+func occAt(occ []drawOccupant, label string) drawOccupant {
+	for _, o := range occ {
+		if o.label == label {
+			return o
+		}
+	}
+	return drawOccupant{}
 }
 
 // interleaveByRank groups a block's occupants by finishing rank and round-robins
@@ -641,6 +757,24 @@ type drawPlan struct {
 	quarterOf []int
 	// halfOrder[h] is the order the half's blocks are combined in (D2).
 	halfOrder [2][]int
+}
+
+// mirroredBlock reports whether block b sits in the SECOND (inner-bottom)
+// position of its half, which is the position both Men Team sheets print as
+// the first block's vertical mirror (R6(c)). Position is read from halfOrder,
+// so a D2 reorder moves a block's orientation with its printed position. The
+// four-court reference sheets pin exactly two blocks per half; longer halves
+// (subdivided low-court draws, 8+ shiaijo) mirror their second half by the
+// same outside-in reading, extrapolated.
+func (p *drawPlan) mirroredBlock(b int) bool {
+	for h := range p.halfOrder {
+		for i, bb := range p.halfOrder[h] {
+			if bb == b {
+				return i >= (len(p.halfOrder[h])+1)/2
+			}
+		}
+	}
+	return false
 }
 
 // planBlocks is how many BLOCKS the pool set is cut into.

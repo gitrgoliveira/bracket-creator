@@ -51,7 +51,11 @@ func namedBye(block *Node) string {
 }
 
 // TestByeGoesToTheHighestPrecedenceOccupantSweep sweeps the shapes an operator
-// actually runs and asserts every named bye went to the occupant R6 ranks first.
+// actually runs and asserts R6-1's protection property: a block that grants a
+// named bye never sends the occupant R6 ranks first into round 1. (Under the
+// R6(c) template a block byes several occupants by design, so the older "THE
+// bye = the top occupant" form is asserted only where a single bye exists --
+// see the loop body.)
 //
 // TestSeededPoolWinnerTakesTheBlockBye (tree_test.go) pins criterion 1 on one
 // hand-built block; this drives the production pipeline over the whole range,
@@ -97,9 +101,48 @@ func TestByeGoesToTheHighestPrecedenceOccupantSweep(t *testing.T) {
 						require.Len(t, draw.blocks, len(occupants))
 
 						for b, occ := range occupants {
-							got := namedBye(draw.blocks[b])
-							if got == "" {
+							// Read byes the way production does, from the round
+							// walk. A NAMED bye is a leaf paired with a WINNER
+							// slot in round 2 or later: the competitor stands
+							// alone in a later column awaiting a bout's
+							// winner. A leaf-leaf pair sitting shallow is NOT
+							// a trigger -- at 1 qualifier it is a phantom-risen
+							// pair (Junior Male's P4 v P5, column 1 on the
+							// sheet), at 2+ it is a vacancy block's two byes
+							// meeting (2025 Men Team F16), and the tree cannot
+							// tell them apart (spec R6(c)).
+							//
+							// Under the template a block byes SEVERAL
+							// occupants by design (its sub-block heads, plus
+							// the weakest crossed on a vacancy), so asserting
+							// "THE bye = the top occupant" is wrong there. The
+							// invariant the whole range shares is R6-1's
+							// protection: when a block grants a named bye, the
+							// occupant R6 ranks FIRST never plays round 1.
+							rounds := BuildEliminationMatchRounds(draw.blocks[b])
+							if len(rounds) < 2 {
 								continue
+							}
+							hasNamedBye := false
+							for _, round := range rounds[1:] {
+								for _, m := range round {
+									l := m.Left != nil && m.Left.LeafNode
+									r := m.Right != nil && m.Right.LeafNode
+									if l != r {
+										hasNamedBye = true
+									}
+								}
+							}
+							if !hasNamedBye {
+								continue
+							}
+							inRound1 := map[string]bool{}
+							for _, m := range rounds[0] {
+								for _, side := range []*Node{m.Left, m.Right} {
+									if side != nil && side.LeafNode {
+										inRound1[side.LeafVal] = true
+									}
+								}
 							}
 							best := occ[0]
 							for _, o := range occ[1:] {
@@ -107,9 +150,9 @@ func TestByeGoesToTheHighestPrecedenceOccupantSweep(t *testing.T) {
 									best = o
 								}
 							}
-							assert.Equalf(t, best.label, got,
-								"block %d byed %s; R6 ranks %s first (seed %d, load %d)",
-								b, got, best.label,
+							assert.Falsef(t, inRound1[best.label],
+								"block %d grants a named bye but %s, whom R6 ranks first (seed %d, load %d), plays round 1",
+								b, best.label,
 								poolSeedRank(pools[best.pool]), poolLoad(pools[best.pool]))
 						}
 					})

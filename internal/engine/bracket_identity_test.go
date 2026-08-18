@@ -210,11 +210,14 @@ func excelRoundSizes(players []domain.Player) []int {
 	for i, p := range seeded {
 		names[i] = p.Name
 	}
-	tree := helper.CreateBalancedTree(names)
-	depth := helper.CalculateDepth(tree)
+	// Normalize through the slot codec exactly as NewPlayoffDraw does for the
+	// printed workbook: the raw CreateBalancedTree tree is riseless and
+	// classifies a phantom-risen pair a round late, which is the old geometry
+	// this test would otherwise re-assert.
+	tree := helper.BuildSlotTree(helper.SlotArray(helper.CreateBalancedTree(names)))
 	var sizes []int
-	for i := depth; i > 1; i-- {
-		sizes = append(sizes, len(helper.TraverseRounds(tree, 1, i-1)))
+	for _, round := range helper.BuildEliminationMatchRounds(tree) {
+		sizes = append(sizes, len(round))
 	}
 	return sizes
 }
@@ -283,8 +286,12 @@ func TestBracketDisplayMetadata_MatchesExcelRounds(t *testing.T) {
 
 // TestBracketDisplayMetadata_Feeders verifies the feeder graph is well formed
 // across roster sizes (including deep multi-level bye chains, e.g. 24 players):
-// every feeder ID resolves to a real, non-hidden match one DisplayRound deeper,
-// and every real match except the final is referenced exactly once as a feeder.
+// every feeder ID resolves to a real, non-hidden match STRICTLY deeper in
+// DisplayRound, and every real match except the final is referenced exactly
+// once as a feeder. Strictly deeper, not exactly one: a phantom-risen pair
+// fights in round 1 and its winner byes across the skipped column straight
+// into a much later bout, exactly as the reference sheets draw the long
+// winner line (34th EKC Junior Male F2 into F4).
 func TestBracketDisplayMetadata_Feeders(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -324,8 +331,8 @@ func TestBracketDisplayMetadata_Feeders(t *testing.T) {
 					f, ok := byID[fid]
 					require.Truef(t, ok, "feeder %s must exist", fid)
 					assert.Falsef(t, f.Hidden, "feeder %s must be a real match", fid)
-					assert.Equal(t, m.DisplayRound+1, f.DisplayRound,
-						"feeder must be one DisplayRound deeper than its parent")
+					assert.Greaterf(t, f.DisplayRound, m.DisplayRound,
+						"feeder %s must be strictly deeper than its parent", fid)
 					refCount[fid]++
 				}
 			}

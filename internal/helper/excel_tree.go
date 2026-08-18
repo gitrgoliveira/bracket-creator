@@ -107,7 +107,9 @@ func RenderTreePages(f *excelize.File, subtrees []*Node, plan CourtPlan, pools [
 			return fmt.Errorf("copy tree template to %s: %w", pageSheet, err)
 		}
 
-		depth := CalculateDepth(subtree)
+		// Slot depth: a risen page subtree spans more printed columns than
+		// physical levels (its bout fights early and the winner byes across).
+		depth := slotDepth(subtree)
 		startRow := TreeTitleRows + 1
 		// The title formula prepends data!$B$1 (the user-supplied title prefix),
 		// so the page title itself is just the shiaijo label.

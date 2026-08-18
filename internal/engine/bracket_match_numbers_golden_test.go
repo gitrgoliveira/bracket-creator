@@ -99,7 +99,12 @@ type bracketNumberGolden struct {
 // The marked cases were found by sweeping formats, entrant counts and shiaijo
 // counts for a bracket where the two orderings genuinely disagree; each one has
 // an effective round holding a DEEP match at a small position alongside a
-// SHALLOW match at a larger position. 9 entrants is the smallest.
+// SHALLOW match at a larger position. Slot-true display rounds (Node.risen,
+// 2026-08-18) removed that mixture from every PLAYOFFS shape -- a sweep of
+// 3-32 entrants found none -- because a playoffs tree's effective rounds now
+// ARE its slot rounds. The pool-fed mixed draw still mixes (one effective
+// round can hold matches from several pow2 rounds), so the discriminating
+// fixture lives there.
 //
 // The flag below is an EXPECTATION, not an assertion of faith:
 // orderingsDisagree measures it on the bracket the engine actually built and
@@ -124,15 +129,15 @@ var bracketNumberCases = []struct {
 	{state.CompFormatPlayoffs, 4, 1, false},
 	{state.CompFormatPlayoffs, 5, 1, false},
 	{state.CompFormatPlayoffs, 8, 1, false},
-	{state.CompFormatPlayoffs, 9, 1, true},
+	{state.CompFormatPlayoffs, 9, 1, false},
 	{state.CompFormatPlayoffs, 11, 1, false},
 	{state.CompFormatPlayoffs, 13, 1, false},
 	{state.CompFormatPlayoffs, 16, 1, false},
-	{state.CompFormatPlayoffs, 19, 1, true},
+	{state.CompFormatPlayoffs, 19, 1, false},
 	// Mixed preview brackets: pool-origin placeholders rather than players, and
 	// the shape the court-region draw actually produces on several shiaijo.
 	{state.CompFormatMixed, 40, 2, true},
-	{state.CompFormatMixed, 40, 4, true},
+	{state.CompFormatMixed, 40, 4, false},
 }
 
 // orderingsDisagree reports whether this bracket's shape can tell the CORRECT

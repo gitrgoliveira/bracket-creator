@@ -178,6 +178,19 @@ func TestEKCJuniorIndividualMale(t *testing.T) {
 		_, byes := regionRound1(draw.Regions[i])
 		assert.Empty(t, byes, "a 4-occupant region has no bye to give")
 	}
+
+	// The sheet's COLUMNS, not just its pairings: F1 and F2 both sit in the
+	// round-1 column, so P4 v P5 is fought in round 1 even though its winner
+	// then byes round 2. The phantom collapse used to lift that bout into
+	// round 2 on every surface that reads rounds (Node.risen records the lift
+	// and TraverseRounds counts it back); the vacancy blocks of the 2025 Men
+	// Team sheet are the shape that must NOT be pulled forward the same way,
+	// and TestEKC2025MenTeamByes pins them.
+	assert.Equal(t, [][]string{
+		{"Pool 2-1st v Pool 3-1st", "Pool 4-1st v Pool 5-1st"}, // F1, F2
+		{"Pool 1-1st v W"}, // F3
+		{"W v W"},          // F4
+	}, regionRounds(regionA), "the round each court-A bout is fought in, as the sheet prints it")
 }
 
 // TestEKCJuniorIndividualFemale is reference draw B: 7 pools, 1 qualifier,

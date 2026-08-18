@@ -51,15 +51,12 @@ func excelNumberBySignature(players []domain.Player) map[string]int {
 	for i, p := range seeded {
 		names[i] = p.Name
 	}
-	tree := helper.CreateBalancedTree(names)
-	depth := helper.CalculateDepth(tree)
-
-	// Same construction as cmd/create-playoffs.go:
-	// eliminationMatchRounds[depth-i] = TraverseRounds(tree, 1, i-1).
-	rounds := make([][]*helper.Node, depth-1)
-	for i := depth; i > 1; i-- {
-		rounds[depth-i] = helper.TraverseRounds(tree, 1, i-1)
-	}
+	// Same construction as cmd/create-playoffs.go: NewPlayoffDraw normalizes
+	// the tree through the slot codec (a phantom-risen pair fights in round 1,
+	// as the reference sheets print), and the workbook numbers the rounds of
+	// THAT tree.
+	tree := helper.BuildSlotTree(helper.SlotArray(helper.CreateBalancedTree(names)))
+	rounds := helper.BuildEliminationMatchRounds(tree)
 
 	helper.AssignMatchNumbers(rounds)
 

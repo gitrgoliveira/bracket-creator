@@ -513,8 +513,39 @@ func assertWorkbookMatchesBracket(t *testing.T, eng *Engine, store *state.Store,
 	// last numbers.
 	assert.Equalf(t, len(engineBouts)-(len(pages)-1), len(printed),
 		"every bout except the %d above the page roots must be printed", len(pages)-1)
-	for num := 1; num <= len(printed); num++ {
-		assert.Containsf(t, printed, num, "Match %d is on no tree page", num)
+	// A bout prints on a tree page exactly when its whole subtree lies on
+	// that page. The numbering follows the risen-aware walk, so a cross-page
+	// bout can hold ANY number -- including Match 1, when two lone-leaf pages'
+	// occupants fight in round 1 -- which is why this is a set equality
+	// against the bracket rather than a 1..N contiguity check.
+	pageOfEntrant := map[string]string{}
+	for _, page := range pages {
+		for _, l := range page.leaves {
+			pageOfEntrant[l.label] = page.sheet
+		}
+	}
+	for _, round := range bracket.Rounds {
+		for _, m := range round {
+			if m.Hidden || m.MatchNumber == 0 {
+				continue
+			}
+			onePage := true
+			first := ""
+			for _, label := range leafSets[m.ID] {
+				if first == "" {
+					first = pageOfEntrant[label]
+				} else if pageOfEntrant[label] != first {
+					onePage = false
+				}
+			}
+			if onePage && first != "" {
+				assert.Containsf(t, printed, m.MatchNumber,
+					"Match %d (%v) sits wholly on %s but is printed on no tree page", m.MatchNumber, leafSets[m.ID], first)
+			} else {
+				assert.NotContainsf(t, printed, m.MatchNumber,
+					"Match %d (%v) spans pages and must print on the Elimination sheet, not a tree page", m.MatchNumber, leafSets[m.ID])
+			}
+		}
 	}
 
 	// 5. Byes: an entrant that byes is drawn one bracket column further right
@@ -534,7 +565,12 @@ func assertWorkbookMatchesBracket(t *testing.T, eng *Engine, store *state.Store,
 			// The entrant's first bout is its parent junction, one level up,
 			// whose round counted from the page's own final is exactly the
 			// leaf's level. Level 0 (a page that is a lone entrant) means the
-			// first bout is above the page entirely.
+			// first bout is above the page entirely -- the page cannot say
+			// which round that bout fights in (a cross-page pair may fight in
+			// round 1 under the risen walk), so it carries no offset evidence.
+			if l.level == 0 {
+				continue
+			}
 			entryRound := l.level
 			got := firstDR[l.label] - entryRound
 			if offset < 0 {

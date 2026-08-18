@@ -228,6 +228,17 @@ func NewPlayoffDraw(root *Node, numCourts int) *KnockoutDraw {
 	if root == nil {
 		return nil
 	}
+	// Normalize through the slot codec so every playoffs consumer sees ONE
+	// geometry. CreateBalancedTree gives a ragged roster a riseless tree whose
+	// shallow pairs classify a round late; the skeleton export rebuilds from
+	// the bracket's slots and gets the risen tree, which fights those pairs in
+	// round 1 as the reference sheets print (Node.risen). Without this, the
+	// CLI's printed rounds and the app export's disagree about the same draw.
+	// BuildSlotTree(SlotArray(x)) is idempotent on slot-built trees.
+	root = BuildSlotTree(SlotArray(root))
+	if root == nil {
+		return nil
+	}
 	numCourts = clampCourts(numCourts)
 	return &KnockoutDraw{Root: root, Regions: splitIntoSubtrees(root, numCourts)}
 }
@@ -428,9 +439,14 @@ func buildBlock(occ []drawOccupant, pools []Pool, mirrored bool) *Node {
 	if slots := templateSlots(occ, pools, mirrored); slots != nil {
 		return BuildSlotTree(slots)
 	}
-	// The slot array is longer than width only for a single-occupant block,
-	// whose [occupant, ""] pair does not fit in NextPow2(1). BuildSlotTree
-	// collapses that pair back to the lone leaf, so the tree is the same.
+	if len(occ) == 1 {
+		// A lone occupant IS its block: emit the leaf directly. Building the
+		// old [occupant, ""] pair instead would mark a rise, and the rise
+		// would read as a real empty slot downstream -- SlotArray doubled
+		// every single-pool region of a 4-court draw and shifted each bout
+		// one shiaijo over.
+		return &Node{LeafNode: true, LeafVal: occ[0].label, Val: 1}
+	}
 	width := NextPow2(len(occ))
 	slots := make([]string, 0, width)
 	rest := append([]drawOccupant{}, occ...)
@@ -710,6 +726,25 @@ func BuildSlotTree(slots []string) *Node {
 	mid := len(slots) / 2
 	left := BuildSlotTree(slots[:mid])
 	right := BuildSlotTree(slots[mid:])
+	// A SLOT-level collapse marks the survivor as RISEN so round
+	// classification can put it back at the level it was built at (see
+	// Node.risen): without the mark, a phantom-risen match schedules a round
+	// late on every surface that reads rounds -- the Excel columns, the match
+	// numbers and the app's bracket -- where the sheet fights it in round 1.
+	// The mark belongs HERE and not in joinNodes: combine's assembly joins
+	// (a lone block against an empty half, say) collapse structure, not empty
+	// slots, and marking those lifted a 2-entrant draw's only match clean out
+	// of every round.
+	switch {
+	case left == nil:
+		if right != nil {
+			right.risenBefore++
+		}
+		return right
+	case right == nil:
+		left.risenAfter++
+		return left
+	}
 	return joinNodes(left, right)
 }
 
@@ -1212,11 +1247,21 @@ func walkLeafOffsets(n *Node, offset int, visit func(node *Node, offset, width i
 		return
 	}
 	width := leafArrayWidth(n)
+	// Rises occupy real empty slots: the node's content sits at the top of
+	// its widened band when the collapsed sibling trailed it, at the bottom
+	// when it led, so offsets below stay slot-true (SlotArray is the same
+	// reading; before- and after-rises never mix on one node in practice).
+	content := width >> (n.risenAfter + n.risenBefore)
+	level := width
+	for i := 0; i < n.risenBefore; i++ {
+		level /= 2
+		offset += level
+	}
 	visit(n, offset, width)
 	if n.LeafNode {
 		return
 	}
-	side := width / 2
+	side := content / 2
 	walkLeafOffsets(n.Left, offset, visit)
 	walkLeafOffsets(n.Right, offset+side, visit)
 }
@@ -1224,14 +1269,73 @@ func walkLeafOffsets(n *Node, offset int, visit func(node *Node, offset, width i
 // leafArrayWidth is len(TreeToLeafArray(n)) without building the slice. It
 // measures with leafPadTarget, the same rule TreeToLeafArray builds with, so
 // the two cannot disagree about where a region starts.
+// SlotRoundMatch locates one bout of a draw in pow2-bracket terms: the slot
+// offset and entrant width of its first-round window, plus the round the
+// risen-aware walk (BuildEliminationMatchRounds) fights it in, 0-based from
+// the first round. The engine uses this to stamp DisplayRound on its pow2
+// bracket matches: neither the pow2 row (which tail-pads an assembly-level
+// late bout into round-1 adjacency) nor the feeder graph (which defers a
+// phantom-risen pair the sheets fight in round 1) can tell those two shapes
+// apart on their own -- the risen tree is the one place the distinction
+// lives, so its walk is the one source of a bout's round.
+type SlotRoundMatch struct {
+	Offset       int
+	EntrantWidth int
+	Round        int
+}
+
+// SlotRoundMatches maps every bout of the draw tree through walkLeafOffsets'
+// slot geometry. EntrantWidth is the bout's content width (its slot width
+// with the rises stripped), i.e. the width of the pow2 round row the bout's
+// entrants sit in.
+func SlotRoundMatches(root *Node) []SlotRoundMatch {
+	type geo struct{ offset, content int }
+	geos := map[*Node]geo{}
+	walkLeafOffsets(root, 0, func(n *Node, offset, width int) {
+		geos[n] = geo{offset, width >> (n.risenAfter + n.risenBefore)}
+	})
+	var out []SlotRoundMatch
+	for roundIdx, round := range BuildEliminationMatchRounds(root) {
+		for _, m := range round {
+			if g, ok := geos[m]; ok {
+				out = append(out, SlotRoundMatch{Offset: g.offset, EntrantWidth: g.content, Round: roundIdx})
+			}
+		}
+	}
+	return out
+}
+
+// slotDepth is the tree depth in SLOT levels: the depth CalculateDepth would
+// report had no empty sibling ever been collapsed. The two differ exactly on
+// trees whose top carries rises -- a split page holding one risen block, say --
+// where physical depth under-counts and would drop the block's bout from every
+// round (its virtual level exceeds the physical target range). leafArrayWidth
+// is always a power of two, so this is log2(width)+1 computed by bit length.
+func slotDepth(n *Node) int {
+	if n == nil {
+		return 0
+	}
+	w := leafArrayWidth(n)
+	d := 0
+	for w > 0 {
+		d++
+		w >>= 1
+	}
+	return d
+}
+
 func leafArrayWidth(n *Node) int {
 	if n == nil {
 		return 0
 	}
-	if n.LeafNode {
-		return 1
+	w := 1
+	if !n.LeafNode {
+		w = 2 * leafPadTarget(leafArrayWidth(n.Left), leafArrayWidth(n.Right))
 	}
-	return 2 * leafPadTarget(leafArrayWidth(n.Left), leafArrayWidth(n.Right))
+	// A rise doubles the node's slot footprint per level: the empty sibling's
+	// slots are real positions (SlotArray emits them), and the spans/court
+	// arithmetic must measure the same array the engine bracket is built from.
+	return w << (n.risenAfter + n.risenBefore)
 }
 
 // NodeCourts maps every node of the draw's tree to the index of the shiaijo

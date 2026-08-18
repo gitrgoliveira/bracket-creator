@@ -652,13 +652,31 @@ is unbuildable pending per-pool qualifiers): deliberately NOT extrapolated.
   went from NO byes to the sheet's 8, two per court in the h1/h2, h1/h3 pattern);
   `bracket_match_numbers.json` regenerated, the SPA's JS mirror suite passing.
 
-**One decoded observation left alone:** the 2026 Junior Male sheet prints its
-phantom-risen pair (F2, P4 v P5) in the ROUND-1 column, while our rounds walk schedules
-that bout in round 2 (root-distance classification). Same tree, different column. The
-vacancy blocks need the round-2 placement (it is what makes their byes visible) and get
-it from the same classification, so aligning the phantom case with its sheet would need
-the collapse to distinguish the two -- which the tree cannot. Presentational,
-pre-existing, recorded; not changed here.
+**The phantom-column divergence is FIXED (2026-08-18, second pass).** The 2026 Junior
+Male sheet prints its phantom-risen pair (F2, P4 v P5) in the ROUND-1 column; our
+root-distance classification scheduled it a round late, on every surface. The collapse
+now RECORDS what it erased: `BuildSlotTree` marks a survivor with the slot levels it
+was lifted past and the side the empty sibling sat on (`Node.risen*`), so:
+
+- `TraverseRounds` classifies a risen bout at the slot level it was built at -- round 1
+  for the phantom pair, while a vacancy block's bye pair (built AT its own level, never
+  risen) keeps its round-2 column. Pinned by `regionRounds` assertions in both Men Team
+  tests and the Junior Male case.
+- `SlotArray` is `BuildSlotTree`'s exact inverse, empties included, and the engine
+  builds its pow2 bracket from it, so the app's rounds, match numbers and columns equal
+  the printed sheet by construction (`applySlotDisplayRounds` stamps DisplayRound from
+  the risen walk -- neither the pow2 row nor the old feeder-graph walk can distinguish
+  the phantom and assembly-late shapes on their own).
+- The tree pages draw a risen bout in its slot column with the winner line crossing the
+  skipped round, exactly as the sheets draw it; byed names keep printing beside the
+  bout they first fight, which was already the sheets' convention.
+- `NewPlayoffDraw` normalizes every playoffs tree through the slot codec so the CLI
+  workbook, the app export and the stored bracket describe one geometry.
+
+A consequence worth knowing: with slot-true rounds, PLAYOFFS brackets no longer contain
+any shape where numbering by leaf slot and numbering by round-position disagree (swept
+3-32 entrants); the pool-fed mixed draw on 2 shiaijo remains the discriminating fixture
+guarding the numbering tie-break.
 
 ### R7 Degradation ladder
 

@@ -140,6 +140,20 @@ func TestStructuralRulesHoldAtEverySeedCount(t *testing.T) {
 								"R5 must hold with seeds set, not only in the unseeded sweep")
 						}
 
+						// Rounds must partition the matches: a draw of n
+						// entrants plays n-1, and every one must classify
+						// into exactly one round. This is the guard on
+						// Node.risen's virtual depth -- a risen match whose
+						// virtual level exceeded the tree depth would fall
+						// out of every round and silently vanish from the
+						// sheet.
+						totalMatches := 0
+						for _, r := range BuildEliminationMatchRounds(draw.Root) {
+							totalMatches += len(r)
+						}
+						assert.Equal(t, len(TreeLeafLabels(draw.Root))-1, totalMatches,
+							"every match must appear in exactly one round")
+
 						// D4: the block's named-bye count follows its layout
 						// mode (blockLayoutArithmetic), whoever R6 picked to
 						// receive one. Vacancy blocks are pinned by

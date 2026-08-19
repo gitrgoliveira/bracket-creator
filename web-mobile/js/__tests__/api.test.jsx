@@ -476,6 +476,37 @@ describe('API Utils', () => {
     });
   });
 
+  // bc-qual LP-5a: ExtraQualifiers carries `json:"extraQualifiers,omitempty"`
+  // on the Go side, so the default/standard value ("") is DROPPED from the
+  // wire entirely rather than sent as "". Same round-trip contract as
+  // courts (absent -> a defined default), same single fetch boundary.
+  describe('normalizeCompetitionDetail extraQualifiers normalization', () => {
+    it('defaults a missing top-level extraQualifiers to ""', () => {
+      const out = normalizeCompetitionDetail({ id: 'x', name: 'X' });
+      expect(out.extraQualifiers).toBe('');
+    });
+
+    it('preserves a non-standard top-level extraQualifiers value', () => {
+      const out = normalizeCompetitionDetail({ id: 'x', name: 'X', extraQualifiers: 'larger-pools' });
+      expect(out.extraQualifiers).toBe('larger-pools');
+    });
+
+    it('defaults a missing nested config.extraQualifiers to ""', () => {
+      const out = normalizeCompetitionDetail({ config: { id: 'x', name: 'X' }, pools: [] });
+      expect(out.config.extraQualifiers).toBe('');
+    });
+
+    it('preserves a non-standard nested config.extraQualifiers value', () => {
+      const out = normalizeCompetitionDetail({ config: { id: 'x', name: 'X', extraQualifiers: 'fill-bracket' } });
+      expect(out.config.extraQualifiers).toBe('fill-bracket');
+    });
+
+    it('returns falsy input unchanged (no crash)', () => {
+      expect(normalizeCompetitionDetail(null)).toBeNull();
+      expect(normalizeCompetitionDetail(undefined)).toBeUndefined();
+    });
+  });
+
   describe('API object', () => {
 
     it('fetchTournament should throw on error', async () => {

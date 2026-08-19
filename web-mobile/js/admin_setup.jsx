@@ -109,6 +109,18 @@ function validateSwissSettings(format, swissRounds) {
 import { normalizeTheme } from './admin_branding.jsx';
 import { timeToMinutes } from './admin_schedule_utils.jsx';
 import { teamMatchTypeHint } from './pool_ids.jsx';
+// bc-qual LP-5a: the qualifier-preview arithmetic AND the pool-size/winners
+// form-coupling rules are shared with admin_competition_settings.jsx (the
+// competition Settings page renders the same "Knockout qualifiers" radio),
+// so both screens import the same functions from this one module rather
+// than each carrying its own copy. See qualifier_preview.jsx's own doc
+// comment on the coupling helpers for the shared rationale.
+import {
+  EXTRA_QUALIFIERS_STANDARD, EXTRA_QUALIFIERS_LARGER_POOLS, EXTRA_QUALIFIERS_FILL_BRACKET,
+  computeQualifierPreview, formatQualifierPreviewLine,
+  extraQualifiersRadioVisible, resetExtraQualifiersOnPoolModeChange,
+  winnersForExtraQualifiersChange, winnersInputDisabled,
+} from './qualifier_preview.jsx';
 
 function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerMode, authConfig, password, showToast }) {
   // In locked mode the on-disk Password is irrelevant: auth comes
@@ -688,6 +700,10 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   const [poolMode, setPoolMode] = useStateA("max");
   const [poolSize, setPoolSize] = useStateA(3);
   const [winners, setWinners] = useStateA(2);
+  // Knockout qualifiers (bc-qual LP-5a): "" (standard, default), "larger-pools",
+  // or "fill-bracket". Only meaningful under poolMode === "min"; see
+  // extraQualifiersRadioVisible / resetExtraQualifiersOnPoolModeChange above.
+  const [extraQualifiers, setExtraQualifiers] = useStateA(EXTRA_QUALIFIERS_STANDARD);
   // T190 (FR-050a): Swiss round count. Default 4 is the canonical
   // Swiss tournament size for ~16 players (log2 of typical field): 
   // matches the example in spec.md US13. Only used when format=swiss.
@@ -902,6 +918,15 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     if (format === "mixed" || format === "league") {
       c.poolFormat = poolFormat;
     }
+    // Knockout qualifiers (bc-qual LP-5a). Same post-construction pattern as
+    // poolFormat above. Only meaningful for "mixed" (pools + knockout); the
+    // radio itself only renders under poolMode === "min", and
+    // resetExtraQualifiersOnPoolModeChange keeps the stored value at
+    // standard ("") whenever poolMode isn't "min", so this is never a
+    // non-standard value outside the shape ValidateExtraQualifiers accepts.
+    if (format === "mixed") {
+      c.extraQualifiers = extraQualifiers;
+    }
     // League joint-3rd convention (kendo two joint 3rds vs naginata single 3rd).
     // Emit only for leagues; the backend uses `omitempty` so it stays invisible
     // on other formats. Same post-construction pattern as poolFormat above.
@@ -1100,7 +1125,15 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
               <div className="field">
                 <label className="field__label">Pool size is a</label>
                 <div className="radio-group">
-                  <button className={`radio-pill ${poolMode === "max" ? "is-active" : ""}`} type="button" onClick={() => setPoolMode("max")}>maximum</button>
+                  <button className={`radio-pill ${poolMode === "max" ? "is-active" : ""}`} type="button" onClick={() => {
+                    // Leaving minimum-players-per-pool sizing hides the
+                    // "Knockout qualifiers" radio below; reset its value to
+                    // standard so it can't persist as a stale non-standard
+                    // selection under a mode it's no longer valid for. See
+                    // resetExtraQualifiersOnPoolModeChange's own comment.
+                    setPoolMode("max");
+                    setExtraQualifiers((eq) => resetExtraQualifiersOnPoolModeChange("max", eq));
+                  }}>maximum</button>
                   <button className={`radio-pill ${poolMode === "min" ? "is-active" : ""}`} type="button" onClick={() => setPoolMode("min")}>minimum</button>
                 </div>
                 <div className="field__hint">
@@ -1124,15 +1157,78 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
                   value={Number.isFinite(poolSize) ? poolSize : ""}
                   onChange={(e) => setPoolSize(decideNumericUpdate(e.target.value, 3).value)}
                 /></div>
-                <div className="field"><label className="field__label">Winners per pool</label><input
-                  className="input"
-                  type="number"
-                  min="1"
-                  step="1"
-                  value={Number.isFinite(winners) ? winners : ""}
-                  onChange={(e) => setWinners(decideNumericUpdate(e.target.value, 1).value)}
-                /></div>
+                <div className="field">
+                  <label className="field__label">Winners per pool</label>
+                  <input
+                    className="input"
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={Number.isFinite(winners) ? winners : ""}
+                    onChange={(e) => setWinners(decideNumericUpdate(e.target.value, 1).value)}
+                    disabled={winnersInputDisabled(extraQualifiers)}
+                  />
+                  {winnersInputDisabled(extraQualifiers) && (
+                    <div className="field__hint">Set to 1 by the knockout qualifiers setting below.</div>
+                  )}
+                </div>
               </div>
+
+              {/* Knockout qualifiers (bc-qual LP-5a): only meaningful under
+                  minimum-players-per-pool sizing (poolMode === "min"); see
+                  extraQualifiersRadioVisible. Federation-neutral copy per
+                  operator ruling: no federation names anywhere in this UI. */}
+              {extraQualifiersRadioVisible(format, poolMode) && (() => {
+                // n=0: this is the competition CREATE form, which has no
+                // roster yet (participants are added in a separate step
+                // after creation, see the sampleRoster:null comment at the
+                // buildCompetition call below). computeQualifierPreview
+                // guards n<=0 by returning all-null shapes, so the preview
+                // line below gracefully falls back to a placeholder instead
+                // of a misleading "0 pools" line. A future settings-page
+                // wiring of this same radio (post-creation, roster known)
+                // can pass the real roster length here instead of 0.
+                const preview = computeQualifierPreview(0, poolSize, winners);
+                const activeShape = extraQualifiers === EXTRA_QUALIFIERS_LARGER_POOLS
+                  ? preview.largerPools
+                  : extraQualifiers === EXTRA_QUALIFIERS_FILL_BRACKET
+                    ? preview.fillBracket
+                    : preview.standard;
+                const previewLine = formatQualifierPreviewLine(activeShape);
+                return (
+                  <div className="field">
+                    <label className="field__label">Knockout qualifiers</label>
+                    <div className="radio-group">
+                      <button
+                        className={`radio-pill ${extraQualifiers === EXTRA_QUALIFIERS_STANDARD ? "is-active" : ""}`}
+                        type="button"
+                        onClick={() => setExtraQualifiers(EXTRA_QUALIFIERS_STANDARD)}
+                      >Standard</button>
+                      <button
+                        className={`radio-pill ${extraQualifiers === EXTRA_QUALIFIERS_LARGER_POOLS ? "is-active" : ""}`}
+                        type="button"
+                        onClick={() => { setExtraQualifiers(EXTRA_QUALIFIERS_LARGER_POOLS); setWinners((w) => winnersForExtraQualifiersChange(EXTRA_QUALIFIERS_LARGER_POOLS, w)); }}
+                      >Oversized pools send one extra</button>
+                      <button
+                        className={`radio-pill ${extraQualifiers === EXTRA_QUALIFIERS_FILL_BRACKET ? "is-active" : ""}`}
+                        type="button"
+                        onClick={() => { setExtraQualifiers(EXTRA_QUALIFIERS_FILL_BRACKET); setWinners((w) => winnersForExtraQualifiersChange(EXTRA_QUALIFIERS_FILL_BRACKET, w)); }}
+                      >Fit the knockout exactly</button>
+                    </div>
+                    <div className="field__hint">
+                      {extraQualifiers === EXTRA_QUALIFIERS_STANDARD &&
+                        "Every pool sends the same number of qualifiers to the knockout. Unfilled bracket slots become byes."}
+                      {extraQualifiers === EXTRA_QUALIFIERS_LARGER_POOLS &&
+                        "A pool with more members than the minimum sends one additional qualifier. The extra qualifier is placed in a different part of the bracket from the pool winner and always fights in the first round, with no bye. This offsets the extra pool matches an oversized pool fights."}
+                      {extraQualifiers === EXTRA_QUALIFIERS_FILL_BRACKET &&
+                        "Fewer, larger pools are formed so that the qualifiers exactly fill the bracket. Nobody gets a bye and every qualifier fights in the first round."}
+                    </div>
+                    <div className="field__hint" data-testid="qualifier-preview-line">
+                      {previewLine || "Preview appears once this competition has participants."}
+                    </div>
+                  </div>
+                );
+              })()}
             </>
           )}
 
@@ -1491,4 +1587,7 @@ window.AdminImportPage = AdminImportPage;
 // The announcement-broadcast helpers (isSendAnnouncementDisabled /
 // sendAnnouncementLabel) moved to admin_announcement.jsx alongside the
 // AnnouncementComposer component they drive (mp-djc).
-export { deriveCompetitionName, validatePoolSettings, validateSwissSettings, pickStackPredecessor, previewRowCourts, previewRowShiaijoError, importRowErrorText };
+export {
+  deriveCompetitionName, validatePoolSettings, validateSwissSettings, pickStackPredecessor,
+  previewRowCourts, previewRowShiaijoError, importRowErrorText,
+};

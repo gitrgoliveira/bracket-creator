@@ -205,6 +205,16 @@ func normalizePoolConfig(comp *state.Competition) {
 	case state.CompFormatLeague, state.CompFormatPlayoffs:
 		comp.PoolSize = 0
 		comp.PoolWinners = 0
+		// ExtraQualifiers (bc-qual LP-5a) only has meaning for "mixed"
+		// (pools + knockout): league has no knockout stage and playoffs has
+		// no pool stage, so internal/engine's own gate
+		// (`if comp.Format == state.CompFormatMixed` in pools.go) never
+		// reaches it for either. Zeroing here keeps stored config.md
+		// consistent with what the engine actually uses, mirroring
+		// PoolSize/PoolWinners above, and means ValidateExtraQualifiers
+		// below always sees "" for these formats rather than depending on
+		// the admin UI to have hidden/reset the field itself.
+		comp.ExtraQualifiers = state.ExtraQualifiersNone
 	}
 }
 
@@ -337,6 +347,13 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		comp.Format = strings.TrimSpace(comp.Format)
 		comp.PoolFormat = strings.TrimSpace(comp.PoolFormat)
 		comp.PoolSizeMode = strings.TrimSpace(comp.PoolSizeMode)
+		// bc-qual LP-5a: same defense-in-depth trim as the other enum-style
+		// fields above/below. The admin UI (admin_setup.jsx) only ever sends
+		// one of the three canonical values via radio buttons, but a
+		// hand-crafted request could pad it (" larger-pools ") and get an
+		// "unknown extraQualifiers" 400 from ValidateExtraQualifiers below
+		// instead of silently mismatching the switch on the engine side.
+		comp.ExtraQualifiers = strings.TrimSpace(comp.ExtraQualifiers)
 		comp.StartTime = strings.TrimSpace(comp.StartTime)
 		comp.Date = strings.TrimSpace(comp.Date)
 
@@ -486,6 +503,22 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 
 		// Team competitions require at least 2 members per team.
 		if err := state.ValidateCompetitionTeamSize(comp.Kind, comp.TeamSize); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Knockout qualifiers (bc-qual LP-5a): "" is always valid;
+		// larger-pools/fill-bracket additionally require minimum-players-
+		// per-pool sizing and poolWinners == 1. normalizePoolConfig above
+		// already zeroed ExtraQualifiers for league/playoffs, so this only
+		// ever rejects a genuinely invalid combination for "mixed" (or a
+		// hand-crafted request for another format). EffectivePoolWinners()
+		// resolves an unset/<=0 PoolWinners to the same default of 2 the
+		// draw/schedule layers use, so a request that omits poolWinners
+		// entirely is judged on the value it will actually run with, not on
+		// the raw possibly-zero field (see ValidateExtraQualifiers's own
+		// doc comment on why passing the raw field would be wrong).
+		if err := state.ValidateExtraQualifiers(comp.ExtraQualifiers, comp.PoolSizeMode, comp.EffectivePoolWinners()); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -736,6 +769,13 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		comp.Format = strings.TrimSpace(comp.Format)
 		comp.PoolFormat = strings.TrimSpace(comp.PoolFormat)
 		comp.PoolSizeMode = strings.TrimSpace(comp.PoolSizeMode)
+		// bc-qual LP-5a: same defense-in-depth trim as the other enum-style
+		// fields above/below. The admin UI (admin_setup.jsx) only ever sends
+		// one of the three canonical values via radio buttons, but a
+		// hand-crafted request could pad it (" larger-pools ") and get an
+		// "unknown extraQualifiers" 400 from ValidateExtraQualifiers below
+		// instead of silently mismatching the switch on the engine side.
+		comp.ExtraQualifiers = strings.TrimSpace(comp.ExtraQualifiers)
 		comp.StartTime = strings.TrimSpace(comp.StartTime)
 		comp.Date = strings.TrimSpace(comp.Date)
 
@@ -923,6 +963,14 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
+
+			// Knockout qualifiers (bc-qual LP-5a). Same rule/rationale as
+			// the POST handler above; settings-only PUT (comp.Players ==
+			// nil) gate matches the other validators in this block.
+			if err := state.ValidateExtraQualifiers(comp.ExtraQualifiers, comp.PoolSizeMode, comp.EffectivePoolWinners()); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
 		}
 
 		// Atomic uniqueness-check + 404-on-missing + settings-only merge
@@ -1083,6 +1131,16 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 						comp.PoolSize != current.PoolSize ||
 							comp.PoolWinners != current.PoolWinners ||
 							comp.PoolSizeMode != current.PoolSizeMode ||
+							// bc-qual LP-5a: ExtraQualifiers selects which
+							// draw builder runs (standard/larger-pools/
+							// fill-bracket) and, for fill-bracket, changes
+							// how many pools are even CUT (helper.
+							// FillBracketPoolCount vs helper.PoolCount) --
+							// exactly the same "changes what the draw
+							// builds" reasoning as PoolSize/PoolWinners/
+							// PoolSizeMode immediately above, so it belongs
+							// in the same output-affecting set.
+							comp.ExtraQualifiers != current.ExtraQualifiers ||
 							courtsChanged ||
 							comp.Format != current.Format ||
 							comp.PoolFormat != current.PoolFormat ||
@@ -1201,6 +1259,11 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				current.PoolSize = comp.PoolSize
 				current.PoolWinners = comp.PoolWinners
 				current.PoolSizeMode = comp.PoolSizeMode
+				// bc-qual LP-5a: sibling of PoolSize/PoolWinners/PoolSizeMode
+				// immediately above. Already validated (ValidateExtraQualifiers,
+				// settings-validation block above) and, while draw-ready, gated
+				// by outputAffectingChanged just above this merge.
+				current.ExtraQualifiers = comp.ExtraQualifiers
 				// comp.Courts was already defaulted to >=1 court (tournament
 				// fallback) in the settings-validation block above.
 				current.Courts = comp.Courts

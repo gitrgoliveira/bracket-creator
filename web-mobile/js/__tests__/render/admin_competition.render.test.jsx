@@ -878,3 +878,139 @@ describe('AdminCompOverview blocked-draw CTA is reachable (U5)', () => {
     expect(container.querySelector('[data-testid="step-generate-cta"]')).toBeNull();
   });
 });
+
+// bc-qual LP-5a (round 2): the competition SETTINGS page (AdminSettings)
+// renders the same "Pool size is a" selection the CREATE form does, so per
+// the operator ruling ("the UI shows the 3 options whenever minimum-per-pool
+// is selected") it must show the "Knockout qualifiers" radio too, not just
+// round-trip the field. Covers: gating on poolSizeMode, the pool-winners
+// coupling in both directions, the reset-to-standard on leaving min sizing,
+// the draw-ready lock (matching poolSizeMode/poolSize/poolWinners' own
+// disabled state), and the live preview line computed from the REAL roster
+// (c.players.length), which the create form never has at creation time.
+describe('AdminSettings Knockout qualifiers (bc-qual LP-5a)', () => {
+  const clickPill = async (container, label) => {
+    const pill = Array.from(container.querySelectorAll('button.radio-pill'))
+      .find((b) => b.textContent.trim() === label);
+    expect(pill, `pill "${label}" not found`).not.toBeUndefined();
+    await act(async () => { fireEvent.click(pill); });
+    return pill;
+  };
+
+  const findPill = (container, label) =>
+    Array.from(container.querySelectorAll('button.radio-pill'))
+      .find((b) => b.textContent.trim() === label);
+
+  const winnersInput = (container) => {
+    const label = Array.from(container.querySelectorAll('label.field__label'))
+      .find((l) => l.textContent.trim() === 'Winners per pool');
+    expect(label, 'Winners per pool label not found').not.toBeUndefined();
+    return label.parentElement.querySelector('input');
+  };
+
+  // 11 named players: matches the bc-qual known-arithmetic table (n=11,
+  // minSize=3, poolWinners=1 -> standard 3/3, larger-pools 3/5, fill-bracket
+  // 3+1draft/4) so the preview assertions below are pinned against the same
+  // numbers qualifier_preview.test.jsx verifies the arithmetic against.
+  const elevenPlayers = Array.from({ length: 11 }, (_, i) => ({ id: `p${i}`, name: `Player ${i}` }));
+
+  const mixedMinComp = (overrides = {}) => makeCompetition({
+    format: 'mixed', poolSizeMode: 'min', poolSize: 3, poolWinners: 1,
+    players: elevenPlayers,
+    ...overrides,
+  });
+
+  it('hidden when poolSizeMode is "max"', async () => {
+    const comp = mixedMinComp({ poolSizeMode: 'max' });
+    const { container } = await mountSection('settings', { comp });
+    expect(Array.from(container.querySelectorAll('label.field__label')).some((l) => l.textContent.trim() === 'Knockout qualifiers')).toBe(false);
+  });
+
+  it('shown when poolSizeMode is "min" on a mixed competition', async () => {
+    const comp = mixedMinComp();
+    const { container } = await mountSection('settings', { comp });
+    expect(Array.from(container.querySelectorAll('label.field__label')).some((l) => l.textContent.trim() === 'Knockout qualifiers')).toBe(true);
+    expect(findPill(container, 'Standard')).not.toBeUndefined();
+    expect(findPill(container, 'Oversized pools send one extra')).not.toBeUndefined();
+    expect(findPill(container, 'Fit the knockout exactly')).not.toBeUndefined();
+  });
+
+  it('switching poolSizeMode to "min" shows it appear (via re-render), switching to "max" hides it and resets the stored selection', async () => {
+    const comp = mixedMinComp({ extraQualifiers: 'larger-pools' });
+    const { container } = await mountSection('settings', { comp });
+    expect(findPill(container, 'Oversized pools send one extra').className).toContain('is-active');
+
+    await clickPill(container, 'maximum');
+    expect(Array.from(container.querySelectorAll('label.field__label')).some((l) => l.textContent.trim() === 'Knockout qualifiers')).toBe(false);
+
+    // Switch back to "min" to re-reveal the radio; it must show Standard now
+    // (resetExtraQualifiersOnPoolModeChange fired on the "max" click above),
+    // not the stale "larger-pools" the competition was seeded with.
+    await clickPill(container, 'minimum');
+    expect(findPill(container, 'Standard').className).toContain('is-active');
+    expect(findPill(container, 'Oversized pools send one extra').className).not.toContain('is-active');
+  });
+
+  it('selecting a non-standard option forces Winners per pool to 1 and disables the input', async () => {
+    const comp = mixedMinComp({ poolWinners: 2 });
+    const { container } = await mountSection('settings', { comp });
+    expect(winnersInput(container).disabled).toBe(false);
+    expect(winnersInput(container).value).toBe('2');
+
+    await clickPill(container, 'Oversized pools send one extra');
+    expect(winnersInput(container).value).toBe('1');
+    expect(winnersInput(container).disabled).toBe(true);
+    expect(container.textContent).toContain('Set to 1 by the knockout qualifiers setting');
+  });
+
+  it('switching back to standard re-enables Winners per pool', async () => {
+    const comp = mixedMinComp({ extraQualifiers: 'fill-bracket', poolWinners: 1 });
+    const { container } = await mountSection('settings', { comp });
+    expect(winnersInput(container).disabled).toBe(true);
+
+    await clickPill(container, 'Standard');
+    expect(winnersInput(container).disabled).toBe(false);
+  });
+
+  it('draw-ready disables all three pills, matching poolSizeMode/poolSize/poolWinners', async () => {
+    const comp = mixedMinComp({ status: 'draw-ready', extraQualifiers: 'larger-pools', poolWinners: 1 });
+    const { container } = await mountSection('settings', { comp });
+    expect(findPill(container, 'Standard').disabled).toBe(true);
+    expect(findPill(container, 'Oversized pools send one extra').disabled).toBe(true);
+    expect(findPill(container, 'Fit the knockout exactly').disabled).toBe(true);
+    // Winners is disabled by BOTH draw-ready and the non-standard coupling;
+    // either alone is sufficient, but it must be disabled either way.
+    expect(winnersInput(container).disabled).toBe(true);
+  });
+
+  it('preview line shows real numbers for Standard mode (11 players, min 3, 1 winner -> 3 pools/3 qualifiers)', async () => {
+    const comp = mixedMinComp();
+    const { container } = await mountSection('settings', { comp });
+    const preview = container.querySelector('[data-testid="qualifier-preview-line"]');
+    expect(preview).not.toBeNull();
+    expect(preview.textContent).toBe('3 pools -> 3 qualifiers -> 4-slot knockout (1 bye)');
+  });
+
+  it('preview line updates to larger-pools numbers on selection (3 pools/5 qualifiers, 8-slot, 3 byes)', async () => {
+    const comp = mixedMinComp();
+    const { container } = await mountSection('settings', { comp });
+    await clickPill(container, 'Oversized pools send one extra');
+    const preview = container.querySelector('[data-testid="qualifier-preview-line"]');
+    expect(preview.textContent).toBe('3 pools -> 5 qualifiers -> 8-slot knockout (3 byes)');
+  });
+
+  it('preview line updates to fill-bracket numbers on selection (3 pools + 1 draft = 4 qualifiers, zero byes)', async () => {
+    const comp = mixedMinComp();
+    const { container } = await mountSection('settings', { comp });
+    await clickPill(container, 'Fit the knockout exactly');
+    const preview = container.querySelector('[data-testid="qualifier-preview-line"]');
+    expect(preview.textContent).toBe('3 pools -> 4 qualifiers -> 4-slot knockout (no byes)');
+  });
+
+  it('preview line falls back gracefully when the competition has no roster', async () => {
+    const comp = mixedMinComp({ players: [] });
+    const { container } = await mountSection('settings', { comp });
+    const preview = container.querySelector('[data-testid="qualifier-preview-line"]');
+    expect(preview.textContent).toContain('Preview appears once this competition has participants');
+  });
+});

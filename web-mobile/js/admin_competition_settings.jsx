@@ -6,6 +6,17 @@
 import { teamMatchTypeHint } from './pool_ids.jsx';
 import { DurationInput } from './duration.jsx';
 import { EstimateHeadline } from './admin_schedule_utils.jsx';
+// bc-qual LP-5a: the "Knockout qualifiers" preview arithmetic AND the
+// pool-size/winners form-coupling rules are shared with admin_setup.jsx
+// (the competition CREATE form renders the same "Pool size is a" /
+// "Knockout qualifiers" radios); both screens import the same functions
+// from qualifier_preview.jsx rather than each carrying its own copy.
+import {
+  EXTRA_QUALIFIERS_STANDARD, EXTRA_QUALIFIERS_LARGER_POOLS, EXTRA_QUALIFIERS_FILL_BRACKET,
+  computeQualifierPreview, formatQualifierPreviewLine,
+  extraQualifiersRadioVisible, resetExtraQualifiersOnPoolModeChange,
+  winnersForExtraQualifiersChange, winnersInputDisabled,
+} from './qualifier_preview.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -302,6 +313,13 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       // competition's value to "" (fixed) on any save. Round-trip it like
       // `mirror` above to preserve the stored value.
       teamMatchType: effective.teamMatchType || latestC.teamMatchType || "",
+      // bc-qual LP-5a: knockout qualifiers. No Settings-screen control edits
+      // this yet (only the competition CREATE form does), but the backend
+      // transform unconditionally applies `current.ExtraQualifiers =
+      // comp.ExtraQualifiers`, so omitting it here would clobber a
+      // previously-set non-standard value to "" (Go's zero value) on every
+      // settings save, same hazard as mirror/teamMatchType/naginata above.
+      extraQualifiers: effective.extraQualifiers || latestC.extraQualifiers || "",
     };
     // Snapshot the VALUE of each edited field we're about to persist (not just
     // the field name). On success we clear a field only if its current staged
@@ -812,7 +830,21 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             <label className="field__label">Pool size is a</label>
             {/* draw-ready lock: poolSizeMode, poolSize, poolWinners are output-affecting. */}
             <div className="radio-group">
-              <button className={`radio-pill ${local.poolSizeMode === "max" ? "is-active" : ""}`} type="button" onClick={() => update("poolSizeMode", "max")} disabled={isDrawReady}>maximum</button>
+              <button
+                className={`radio-pill ${local.poolSizeMode === "max" ? "is-active" : ""}`}
+                type="button"
+                onClick={() => {
+                  // bc-qual LP-5a: leaving minimum-players-per-pool sizing
+                  // hides the "Knockout qualifiers" radio below; reset its
+                  // value to standard so it can't persist as a stale
+                  // non-standard selection under a mode it's no longer
+                  // valid for (same reset admin_setup.jsx's create form
+                  // applies on the same transition).
+                  update("poolSizeMode", "max");
+                  update("extraQualifiers", resetExtraQualifiersOnPoolModeChange("max", local.extraQualifiers));
+                }}
+                disabled={isDrawReady}
+              >maximum</button>
               <button className={`radio-pill ${local.poolSizeMode === "min" ? "is-active" : ""}`} type="button" onClick={() => update("poolSizeMode", "min")} disabled={isDrawReady}>minimum</button>
             </div>
           </div>
@@ -828,15 +860,89 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
               onChange={(e) => updateNumber("poolSize", e.target.value, 3)}
               disabled={isDrawReady}
             /></div>
-            <div className="field"><label className="field__label">Winners per pool</label><input
-              className="input"
-              type="number"
-              min="1"
-              value={Number.isFinite(local.poolWinners) ? local.poolWinners : ""}
-              onChange={(e) => updateNumber("poolWinners", e.target.value, 1)}
-              disabled={isDrawReady}
-            /></div>
+            <div className="field">
+              <label className="field__label">Winners per pool</label>
+              <input
+                className="input"
+                type="number"
+                min="1"
+                value={Number.isFinite(local.poolWinners) ? local.poolWinners : ""}
+                onChange={(e) => updateNumber("poolWinners", e.target.value, 1)}
+                disabled={isDrawReady || winnersInputDisabled(local.extraQualifiers)}
+              />
+              {/* bc-qual LP-5a: same coupling hint as the create form; */}
+              {/* draw-ready already has its own standing note above the */}
+              {/* "Pool size is a" pills, so it isn't repeated per-field here. */}
+              {!isDrawReady && winnersInputDisabled(local.extraQualifiers) && (
+                <div className="field__hint">Set to 1 by the knockout qualifiers setting below.</div>
+              )}
+            </div>
           </div>
+
+          {/* Knockout qualifiers (bc-qual LP-5a): only meaningful under
+              minimum-players-per-pool sizing (poolSizeMode === "min"); see
+              extraQualifiersRadioVisible. Same three options, same copy,
+              and the same draw-ready lock as poolSizeMode/poolSize/
+              poolWinners immediately above (this field is in the
+              server-side outputAffectingChanged set alongside them).
+              Federation-neutral copy per operator ruling: no federation
+              names anywhere in this UI. */}
+          {extraQualifiersRadioVisible(local.format, local.poolSizeMode) && (() => {
+            // Real roster count (c.players, not local.players): settings
+            // pool-config edits don't change the roster, and c is the
+            // server-confirmed competition, the same source playerCount
+            // above (courts hint) already reads from.
+            const rosterCount = (c.players || []).length;
+            const preview = computeQualifierPreview(rosterCount, local.poolSize, local.poolWinners);
+            const activeShape = local.extraQualifiers === EXTRA_QUALIFIERS_LARGER_POOLS
+              ? preview.largerPools
+              : local.extraQualifiers === EXTRA_QUALIFIERS_FILL_BRACKET
+                ? preview.fillBracket
+                : preview.standard;
+            const previewLine = formatQualifierPreviewLine(activeShape);
+            return (
+              <div className="field">
+                <label className="field__label">Knockout qualifiers</label>
+                <div className="radio-group">
+                  <button
+                    className={`radio-pill ${!local.extraQualifiers ? "is-active" : ""}`}
+                    type="button"
+                    onClick={() => update("extraQualifiers", EXTRA_QUALIFIERS_STANDARD)}
+                    disabled={isDrawReady}
+                  >Standard</button>
+                  <button
+                    className={`radio-pill ${local.extraQualifiers === EXTRA_QUALIFIERS_LARGER_POOLS ? "is-active" : ""}`}
+                    type="button"
+                    onClick={() => {
+                      update("extraQualifiers", EXTRA_QUALIFIERS_LARGER_POOLS);
+                      update("poolWinners", winnersForExtraQualifiersChange(EXTRA_QUALIFIERS_LARGER_POOLS, local.poolWinners));
+                    }}
+                    disabled={isDrawReady}
+                  >Oversized pools send one extra</button>
+                  <button
+                    className={`radio-pill ${local.extraQualifiers === EXTRA_QUALIFIERS_FILL_BRACKET ? "is-active" : ""}`}
+                    type="button"
+                    onClick={() => {
+                      update("extraQualifiers", EXTRA_QUALIFIERS_FILL_BRACKET);
+                      update("poolWinners", winnersForExtraQualifiersChange(EXTRA_QUALIFIERS_FILL_BRACKET, local.poolWinners));
+                    }}
+                    disabled={isDrawReady}
+                  >Fit the knockout exactly</button>
+                </div>
+                <div className="field__hint">
+                  {!local.extraQualifiers &&
+                    "Every pool sends the same number of qualifiers to the knockout. Unfilled bracket slots become byes."}
+                  {local.extraQualifiers === EXTRA_QUALIFIERS_LARGER_POOLS &&
+                    "A pool with more members than the minimum sends one additional qualifier. The extra qualifier is placed in a different part of the bracket from the pool winner and always fights in the first round, with no bye. This offsets the extra pool matches an oversized pool fights."}
+                  {local.extraQualifiers === EXTRA_QUALIFIERS_FILL_BRACKET &&
+                    "Fewer, larger pools are formed so that the qualifiers exactly fill the bracket. Nobody gets a bye and every qualifier fights in the first round."}
+                </div>
+                <div className="field__hint" data-testid="qualifier-preview-line">
+                  {previewLine || "Preview appears once this competition has participants."}
+                </div>
+              </div>
+            );
+          })()}
         </>
       )}
       {/* FR-052..FR-054 / T047: per-phase match-duration inputs. */}

@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { deriveCompetitionName, validatePoolSettings, validateSwissSettings, pickStackPredecessor, previewRowCourts, previewRowShiaijoError, importRowErrorText } from '../admin_setup.jsx';
+import {
+  deriveCompetitionName, validatePoolSettings, validateSwissSettings, pickStackPredecessor,
+  previewRowCourts, previewRowShiaijoError, importRowErrorText,
+} from '../admin_setup.jsx';
 import { normalizeTheme } from '../admin_branding.jsx';
 
 describe('pickStackPredecessor', () => {
@@ -263,6 +266,13 @@ describe('validateSwissSettings (T190 / FR-050a)', () => {
     });
   });
 });
+
+// bc-qual LP-5a: the "Knockout qualifiers" form-coupling pure functions
+// (extraQualifiersRadioVisible / resetExtraQualifiersOnPoolModeChange /
+// winnersForExtraQualifiersChange / winnersInputDisabled) moved to
+// qualifier_preview.jsx -- shared by admin_setup.jsx (create form) AND
+// admin_competition_settings.jsx (settings page), so their tests live in
+// qualifier_preview.test.jsx now too.
 
 describe('normalizeTheme (mp-sspn dirty tracking)', () => {
   // Copilot PR #266 round 2: branding colours/title ride on "Save changes" via

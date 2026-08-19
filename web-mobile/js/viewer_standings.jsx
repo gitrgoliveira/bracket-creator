@@ -677,6 +677,46 @@ export const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick, isEngi }
 });
 PoolNumberedMatchRow.displayName = "PoolNumberedMatchRow";
 
+// qualifiersForPool: how many top-ranked finishers in `pool` advance to the
+// knockout (bc-qual LP-5a). PoolsViewer uses this PER POOL instead of a
+// single count across every pool, so an oversized pool's extra qualifier
+// (state.ExtraQualifiersLargerPools) is highlighted correctly, e.g. a
+// 4-person pool at minimum size 3 with poolWinners=1 highlights its top 2,
+// not just its winner.
+//
+// Mirrors state.Competition.QualifiersForPool's OVERSIZED test exactly (the
+// "trivial larger-pools size test" this client-side module is allowed to
+// duplicate, per the mp-3abe-adjacent rule against re-deriving the engine's
+// own oversized/draft logic in JS): a pool is oversized when it holds more
+// players than the competition's configured minimum PoolSize.
+// competition.poolWinners is the RAW field (may be 0/unset); default to 2
+// exactly like EffectivePoolWinners() does, since this payload doesn't
+// expose that method.
+//
+// Deliberately does NOT attempt the fill-bracket drafted-2nd calculation
+// (helper.SelectFillBracketDrafts): which pool's 2nd is drafted depends on
+// comparing seed ranks across every oversized pool in the WHOLE competition
+// at once, information this per-pool viewer payload (pools[].players +
+// standings) does not carry -- there is no draft-index list on the wire.
+// Under fill-bracket this therefore returns the uniform EffectivePoolWinners()
+// count, so only rank 1 (never a drafted rank 2) is ever highlighted as
+// advancing here; the residue is a deliberate accepted gap, not a bug: a
+// correct highlight needs the server to say WHICH pools were drafted, which
+// is future work if this becomes worth wiring (bc-qual LP-5a report).
+export function qualifiersForPool(competition, pool) {
+  const base = (competition && competition.poolWinners) || 2;
+  if (
+    competition &&
+    competition.extraQualifiers === "larger-pools" &&
+    competition.poolSize > 0 &&
+    pool && Array.isArray(pool.players) &&
+    pool.players.length > competition.poolSize
+  ) {
+    return base + 1;
+  }
+  return base;
+}
+
 export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMatchClick, highlightPlayers }) {
   const isTeam = competition && (competition.kind === "team" || competition.teamSize > 0);
   // Engi-Kyogi (kata competition): flag-count scoring. Standings show
@@ -690,13 +730,15 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
   if (!pools || pools.length === 0) {
     return <EmptyState icon="⏳" title={isLeague ? "League not drawn yet" : "Pools not drawn yet"} />;
   }
-  const poolWinners = competition ? (competition.poolWinners || 2) : 2;
   const compTMT = teamMatchTypeFor(competition);
 
   return (
     <div className="pools-grid">
       {pools.map((pool) => {
         const poolStandings = standings ? standings[pool.poolName] : null;
+        // bc-qual LP-5a: PER-POOL qualifier count (see qualifiersForPool's
+        // own doc comment above for what this does and does not cover).
+        const poolQualifiers = qualifiersForPool(competition, pool);
         // Match ids belong to this pool by EXACT parsed pool name, not a raw
         // prefix: startsWith("Pool A-") would also swallow "Pool A-East-…"
         // ids when pool names overlap by prefix. poolNameOf strips any DH/TB
@@ -780,7 +822,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                   const lookup = rankByPlayerKey.get(p.id || `${p.name}||${p.dojo || ""}`);
                   const s = lookup ? lookup.standing : null;
                   const rank = lookup ? lookup.rank : null;
-                  const isAdvancing = !isLeague && poolHasResults && rank !== null && rank <= poolWinners;
+                  const isAdvancing = !isLeague && poolHasResults && rank !== null && rank <= poolQualifiers;
 
                   const rowClasses = [
                     isPlayerWatched(p, highlightPlayers) ? "pool__row--me" : "",

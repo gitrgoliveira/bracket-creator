@@ -470,6 +470,13 @@ describe('AdminSettings.saveNow payload whitelist', () => {
     // Round-tripped (no UI control) to avoid clobbering a kachinuki
     // competition's value to "" on a settings save.
     'teamMatchType',
+    // bc-qual LP-5a: knockout qualifiers ("" standard / "larger-pools" /
+    // "fill-bracket"). No Settings-screen UI control yet (only the
+    // competition CREATE form, admin_setup.jsx, exposes the radio); still
+    // round-tripped here to avoid clobbering a previously-set non-standard
+    // value to "" (Go's zero value) on every unrelated settings save, same
+    // hazard class as mirror/teamMatchType/naginata above.
+    'extraQualifiers',
   ]);
   // Fields that MUST NOT appear in the PUT body: pinning the
   // negative invariant explicitly so a careless re-add is caught.

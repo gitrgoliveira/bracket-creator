@@ -168,11 +168,12 @@ func createTournamentHandler(c *gin.Context) {
 			courts:         courts,
 			titlePrefix:    titlePrefix,
 			numberPrefix:   numberPrefix,
-			// bc-qual: "" (standard, default) or "larger-pools". Validated
-			// inside createPools via state.ValidateExtraQualifiers (the same
-			// rule the --extra-qualifiers CLI flag and internal/engine use),
-			// so an invalid combination surfaces below as the same 400 every
-			// other createPools validation failure does.
+			// bc-qual: "" (standard, default), "larger-pools", or
+			// "fill-bracket" (bc-qual LP-4). Validated inside createPools via
+			// state.ValidateExtraQualifiers (the same rule the
+			// --extra-qualifiers CLI flag and internal/engine use), so an
+			// invalid combination surfaces below as the same 400 every other
+			// createPools validation failure does.
 			extraQualifiers: c.PostForm("extraQualifiers"),
 			SeedAssignments: seedAssignments,
 		}

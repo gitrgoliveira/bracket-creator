@@ -70,11 +70,18 @@ func TestCreatePools_ExtraQualifiers_ValidationErrors(t *testing.T) {
 			expectedError:   "currently requires pool winners = 1",
 		},
 		{
-			name:            "fill-bracket rejected outright (LP-4 not implemented)",
-			numPlayers:      3,
+			name:            "fill-bracket rejected under max-players (max) mode",
+			maxPlayers:      3,
 			poolWinners:     1,
 			extraQualifiers: "fill-bracket",
-			expectedError:   "not yet supported",
+			expectedError:   "requires minimum-players-per-pool sizing",
+		},
+		{
+			name:            "fill-bracket rejected when pool winners >= 2",
+			numPlayers:      3,
+			poolWinners:     2,
+			extraQualifiers: "fill-bracket",
+			expectedError:   "currently requires pool winners = 1",
 		},
 		{
 			name:            "unknown value rejected",
@@ -264,6 +271,158 @@ func TestCreatePools_ExtraQualifiers_LargerPools_OutOfScopeSingleCourt(t *testin
 	assert.Contains(t, err.Error(), "could not build a larger-pools knockout draw")
 }
 
+// --- fill-bracket (bc-qual LP-4) ---
+
+// TestCreatePools_ExtraQualifiers_FillBracket_TrivialSuccess proves the CLI
+// wiring reaches helper.BuildPoolPhaseFillBracket / BuildKnockoutDrawFillBracket
+// and succeeds for a fill-bracket competition with ZERO drafts needed: 60
+// entrants at minimum pool size 3 forms exactly 16 pools (12 of 4, 4 of 3;
+// see FillBracketPoolCount's doc comment, the 19WKC Men's Team shape), a
+// power of two on its own, so no 2nd is drafted at all.
+func TestCreatePools_ExtraQualifiers_FillBracket_TrivialSuccess(t *testing.T) {
+	t.Parallel()
+
+	var b bytes.Buffer
+	writer := bufio.NewWriter(&b)
+
+	entries := make([]string, 0, 60)
+	for i := 0; i < 60; i++ {
+		entries = append(entries, fmt.Sprintf("Player%02d,Dojo%02d", i, i))
+	}
+
+	o := &poolOptions{
+		outputWriter:    writer,
+		outputPath:      "dummy.xlsx",
+		numPlayers:      3,
+		poolWinners:     1,
+		courts:          4,
+		extraQualifiers: "fill-bracket",
+		determined:      true,
+	}
+
+	err := o.createPools(entries)
+	require.NoError(t, err)
+	require.NoError(t, writer.Flush())
+	assert.NotZero(t, b.Len(), "a workbook must have been written")
+}
+
+// TestCreatePools_ExtraQualifiers_FillBracket_DraftSuccess forces the real
+// draft-and-cross shape through the CLI's own pool-formation pipeline: 45
+// entrants at minimum pool size 3 forms 14 pools (11 of 3, 3 of 4; the
+// 19WKC Women's Team shape, FillBracketPoolCount's doc comment) needing D=2
+// drafted 2nds to fill a 16-leaf bracket with zero byes. Mirrors
+// TestCreatePools_ExtraQualifiers_LargerPools_CrossingSuccess's formula-pin
+// pattern: the drafted 2nd's Tree/Elimination-sheet cell must be a LIVE
+// formula referencing the pool's actual result, not inert literal text or a
+// broken CONCATENATE formula.
+func TestCreatePools_ExtraQualifiers_FillBracket_DraftSuccess(t *testing.T) {
+	t.Parallel()
+
+	var b bytes.Buffer
+	writer := bufio.NewWriter(&b)
+
+	entries := make([]string, 0, 45)
+	for i := 0; i < 45; i++ {
+		entries = append(entries, fmt.Sprintf("Player%03d,Dojo%03d", i, i))
+	}
+
+	o := &poolOptions{
+		outputWriter:    writer,
+		outputPath:      "dummy.xlsx",
+		numPlayers:      3,
+		poolWinners:     1,
+		courts:          4,
+		extraQualifiers: "fill-bracket",
+		determined:      true,
+	}
+
+	err := o.createPools(entries)
+	require.NoError(t, err, "45 entrants at minimum pool size 3 on 4 courts must build a fill-bracket draw, not report out of scope")
+	require.NoError(t, writer.Flush())
+	assert.NotZero(t, b.Len(), "a workbook must have been written")
+
+	wb, err := excelize.OpenReader(bytes.NewReader(b.Bytes()))
+	require.NoError(t, err)
+	defer wb.Close()
+
+	foundDraftedFormula := false
+	for _, sheet := range wb.GetSheetList() {
+		if !strings.HasPrefix(sheet, "Tree") && sheet != "Elimination Matches" {
+			continue
+		}
+		rows, err := wb.GetRows(sheet)
+		require.NoError(t, err)
+		for r := range rows {
+			for c := 0; c < 40; c++ {
+				addr, _ := excelize.CoordinatesToCellName(c+1, r+1)
+				formula, ferr := wb.GetCellFormula(sheet, addr)
+				require.NoError(t, ferr)
+				if formula == "" {
+					continue
+				}
+				require.NotContainsf(t, formula, "''!", "broken CONCATENATE formula (empty sheet/cell ref) at %s!%s: %s", sheet, addr, formula)
+				if strings.Contains(formula, "-2nd") && strings.Contains(formula, "'Pool Matches'!") {
+					foundDraftedFormula = true
+				}
+			}
+		}
+	}
+	assert.True(t, foundDraftedFormula, "expected a live CONCATENATE(\"Pool <X>-2nd \",'Pool Matches'!<cell>) formula for a drafted 2nd qualifier")
+}
+
+// TestCreatePools_ExtraQualifiers_FillBracket_OutOfScope proves fill-bracket
+// fails loudly rather than guessing when the pool/court shape does not
+// resolve into a zero-bye draw (bc-qual LP-4 scope discipline).
+//
+// This is NOT the "homes split 7/7" shape a first cut of this feature used
+// here: that cut required each court's home-pool count to ALREADY be a
+// power of two, which a review caught as disagreeing with
+// FillBracketPoolCount's own formation promise (n=45 at 2 shiaijo -- 14
+// pools split 7/7 -- is one of the review's three named counterexamples,
+// and now legitimately SUCCEEDS: see
+// TestCreatePools_ExtraQualifiers_FillBracket_DraftSuccess's neighbour for
+// the reworked algorithm). The genuinely out-of-scope case after the rework
+// is DATA-DEPENDENT rather than shape-dependent: the drafted pools' own
+// halves must supply exactly what the opposite half's short courts need,
+// which is not guaranteed even when the formation and per-court target
+// arithmetic both check out. A THIRD review made SelectFillBracketDrafts
+// itself capacity-aware (skip a candidate whose destination half is full,
+// keep scanning, rather than committing to strict order), which dropped the
+// swept range's refusal count from 123/867 to 21/867 -- ALL 21 now at
+// courts=4 only (see TestFillBracketFormationAndBuilderAgree,
+// internal/helper, which sweeps this and pins the exact residual list). 18
+// entrants at minimum pool size 3, 4 shiaijo is one of those 21 (P=5, D=3),
+// reproduced through the real CLI pipeline rather than asserted from the
+// helper layer alone. The failure point also MOVED with this rework: it is
+// now SelectFillBracketDrafts itself (before any placement is attempted),
+// not BuildKnockoutDrawFillBracket.
+func TestCreatePools_ExtraQualifiers_FillBracket_OutOfScope(t *testing.T) {
+	t.Parallel()
+
+	var b bytes.Buffer
+	writer := bufio.NewWriter(&b)
+
+	entries := make([]string, 0, 18)
+	for i := 0; i < 18; i++ {
+		entries = append(entries, fmt.Sprintf("Player%03d,Dojo%03d", i, i))
+	}
+
+	o := &poolOptions{
+		outputWriter:    writer,
+		outputPath:      "dummy.xlsx",
+		numPlayers:      3,
+		poolWinners:     1,
+		courts:          4, // 18 entrants at minimum 3 -> 5 pools, 3 drafts: a half-capacity mismatch at 4 shiaijo
+		extraQualifiers: "fill-bracket",
+		determined:      true,
+	}
+
+	err := o.createPools(entries)
+	require.Error(t, err, "an out-of-scope fill-bracket shape must fail cleanly, not silently fall back to the uniform draw")
+	assert.Contains(t, err.Error(), "could not select fill-bracket drafts")
+	assert.Contains(t, err.Error(), "cannot supply both halves of the bracket")
+}
+
 // --- web /create form field wiring (createTournamentHandler) ---
 
 // extraQualifiersForm builds the minimal "pools" tournamentType payload
@@ -290,6 +449,28 @@ func extraQualifiersForm(playerList string, winnersPerPool, playersPerPool int, 
 func TestCreateHandler_ExtraQualifiers_LargerPools_Success(t *testing.T) {
 	roster := "A, D1\nB, D2\nC, D3\nD, D4\nE, D5\nF, D6\nG, D7\nH, D8\nI, D9" // 9 -> 3 pools of 3
 	form := extraQualifiersForm(roster, 1, 3, "min", "2", "larger-pools")
+
+	f := postCreate(t, form)
+	rows, err := f.GetRows("Pool Draw")
+	require.NoError(t, err)
+	assert.NotEmpty(t, rows, "a workbook with pool data must have been generated")
+}
+
+// TestCreateHandler_ExtraQualifiers_FillBracket_Success is
+// TestCreateHandler_ExtraQualifiers_LargerPools_Success's fill-bracket
+// counterpart (bc-qual LP-4): the web /create form's extraQualifiers field
+// reaches poolOptions and a valid fill-bracket request succeeds end to end
+// through the HTTP handler. 12 entrants at minimum pool size 3 forms
+// exactly 4 pools (FillBracketPoolCount: maxP=4, and 4 is already a power
+// of two so 0 drafts are needed) -- the trivial case, proven through the
+// HTTP boundary rather than createPools directly. (9 entrants, the plain
+// larger-pools test's roster size, does NOT work here: FillBracketPoolCount
+// has no valid pool count for 9 entrants at minimum size 3 -- the only
+// candidate, 3 pools of exactly 3, needs 1 draft to reach a 4-leaf bracket
+// but has zero oversized pools to draft from.)
+func TestCreateHandler_ExtraQualifiers_FillBracket_Success(t *testing.T) {
+	roster := "A, D1\nB, D2\nC, D3\nD, D4\nE, D5\nF, D6\nG, D7\nH, D8\nI, D9\nJ, D10\nK, D11\nL, D12" // 12 -> 4 pools of 3
+	form := extraQualifiersForm(roster, 1, 3, "min", "2", "fill-bracket")
 
 	f := postCreate(t, form)
 	rows, err := f.GetRows("Pool Draw")

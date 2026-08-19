@@ -65,7 +65,7 @@ func TestBuildPoolFedDraw_StandardModeMatchesUniformBuilder(t *testing.T) {
 	pools := uniformTestPools(4, 3)
 	comp := &state.Competition{ExtraQualifiers: state.ExtraQualifiersNone, PoolWinners: 2}
 
-	got, outOfScope := buildPoolFedDraw(comp, pools, 2)
+	got, outOfScope, _ := buildPoolFedDraw(comp, pools, 2)
 	require.False(t, outOfScope)
 	require.NotNil(t, got)
 
@@ -101,9 +101,13 @@ func TestBuildPoolFedDraw_LargerPools_OutOfScope_NeverFallsBackToUniform(t *test
 
 	// A single court: crossNeighbourCourt(0, 1) has no neighbour (odd count),
 	// so the per-pool builder returns nil for this shape.
-	got, outOfScope := buildPoolFedDraw(comp, pools, 1)
+	got, outOfScope, reason := buildPoolFedDraw(comp, pools, 1)
 	assert.True(t, outOfScope, "a single-court larger-pools draw with an oversized pool is out of scope")
 	assert.Nil(t, got, "an out-of-scope shape must return no draw, never the uniform builder's output")
+	// larger-pools has no finer-grained reason than nil from
+	// BuildKnockoutDrawPerPool, so buildPoolFedDraw reports it empty and
+	// the caller falls back to its own generic message.
+	assert.Empty(t, reason)
 
 	// The negative half of "never falls back": confirm the uniform builder
 	// WOULD have produced something non-nil for this same input, so a silent

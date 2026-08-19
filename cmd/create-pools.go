@@ -33,11 +33,11 @@ type poolOptions struct {
 	numberPrefix   string
 	// extraQualifiers selects how many finishers a pool sends to the
 	// knockout beyond poolWinners (bc-qual, --extra-qualifiers): "" (default,
-	// state.ExtraQualifiersNone) or "larger-pools"
-	// (state.ExtraQualifiersLargerPools). Validated by
+	// state.ExtraQualifiersNone), "larger-pools"
+	// (state.ExtraQualifiersLargerPools), or "fill-bracket"
+	// (state.ExtraQualifiersFillBracket, bc-qual LP-4). Validated by
 	// state.ValidateExtraQualifiers, the same function internal/engine and
-	// internal/state use, so the rule is stated once (state.ExtraQualifiersFillBracket
-	// is a recognised value there but always rejected: LP-4 is not implemented).
+	// internal/state use, so the rule is stated once.
 	extraQualifiers string
 	SeedAssignments []domain.SeedAssignment
 }
@@ -68,7 +68,7 @@ func newCreatePoolCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&o.titlePrefix, "title-prefix", "", "", "title prefix for the tournament (default \"\")")
 	cmd.Flags().StringVarP(&o.seedsPath, "seeds", "", "", "CSV file mapping exact participant names to their initial seed rank")
 	cmd.Flags().StringVarP(&o.numberPrefix, "number-prefix", "n", "", "Assign consecutive numbers with this letter prefix (e.g. 'K' produces K1, K2, ...)")
-	cmd.Flags().StringVarP(&o.extraQualifiers, "extra-qualifiers", "", "", "how many finishers each pool sends to the knockout: \"\" (standard, default) or \"larger-pools\" (a pool larger than the minimum sends one extra qualifier, crossed to a neighbouring shiaijo); requires minimum-players-per-pool sizing (--players, not --max-players) and --pool-winners 1")
+	cmd.Flags().StringVarP(&o.extraQualifiers, "extra-qualifiers", "", "", "how many finishers each pool sends to the knockout: \"\" (standard, default), \"larger-pools\" (a pool larger than the minimum sends one extra qualifier, crossed to a neighbouring shiaijo), or \"fill-bracket\" (pools are cut so winners plus a handful of drafted 2nd places exactly fill the knockout with no byes); requires minimum-players-per-pool sizing (--players, not --max-players) and --pool-winners 1")
 
 	cmd.MarkFlagsMutuallyExclusive("players", "max-players")
 
@@ -155,8 +155,8 @@ func (o *poolOptions) createPools(entries []string) error {
 	// extraQualifiers is validated up front, against the CLI's own view of
 	// pool-size mode (isMax) and pool-winners count, via state's single
 	// owner of the rule (state.ValidateExtraQualifiers) rather than
-	// restating it here: min-mode-only, poolWinners==1 for larger-pools, and
-	// fill-bracket rejected outright (LP-4 not yet implemented).
+	// restating it here: min-mode-only, poolWinners==1 for both larger-pools
+	// and fill-bracket (bc-qual LP-4).
 	poolSizeModeForValidation := "min"
 	if isMax {
 		poolSizeModeForValidation = "max"
@@ -202,7 +202,13 @@ func (o *poolOptions) createPools(entries []string) error {
 	// their entry list rather than CreatePools' internal complaint. This is the
 	// caller's job; helper.BuildPoolPhase re-derives the same count with the same
 	// function, so the two cannot disagree about whether a pool can be formed.
-	if helper.PoolCount(len(players), activePoolSize, isMax) == 0 {
+	//
+	// Skipped under fill-bracket: its pool count is FillBracketPoolCount's
+	// formation objective, not floor(n/activePoolSize) (bc-qual LP-4), so
+	// this guard's own arithmetic does not apply -- BuildPoolPhaseFillBracket
+	// below reports its own clean, actionable error (naming the entrant
+	// count and minimum pool size) when no pool count fits.
+	if o.extraQualifiers != state.ExtraQualifiersFillBracket && helper.PoolCount(len(players), activePoolSize, isMax) == 0 {
 		return fmt.Errorf("not enough valid participants (%d) to form a pool of size %d", len(players), activePoolSize)
 	}
 
@@ -215,7 +221,19 @@ func (o *poolOptions) createPools(entries []string) error {
 	// value the operator never asked for (a shiaijo with no home pool would own an
 	// empty bracket region), and every sheet below bands against it, so the Pool
 	// Matches and Names sheets use the same shiaijo count as the bracket regions.
-	pools, drawCourts, err := helper.BuildPoolPhase(players, activePoolSize, isMax, o.courts)
+	//
+	// --extra-qualifiers fill-bracket (bc-qual LP-4) forms pools via a
+	// DIFFERENT objective (helper.BuildPoolPhaseFillBracket), beside
+	// helper.BuildPoolPhase rather than a mutation of it (state.ValidateExtraQualifiers
+	// above already rejected the combination with "max" sizing, so isMax is
+	// never relevant on this branch).
+	var pools []helper.Pool
+	var drawCourts int
+	if o.extraQualifiers == state.ExtraQualifiersFillBracket {
+		pools, drawCourts, err = helper.BuildPoolPhaseFillBracket(players, activePoolSize, o.courts)
+	} else {
+		pools, drawCourts, err = helper.BuildPoolPhase(players, activePoolSize, isMax, o.courts)
+	}
 	if err != nil {
 		return err
 	}
@@ -289,14 +307,21 @@ func (o *poolOptions) createPools(entries []string) error {
 	// state.Competition.QualifiersForPool -- the single owner of the
 	// oversized-pool arithmetic -- via cliExtraQualifierOverrides, rather
 	// than restating that rule here.
+	//
+	// state.ExtraQualifiersFillBracket (bc-qual LP-4) instead drafts a 2nd
+	// from the most senior oversized pools (helper.SelectFillBracketDrafts)
+	// and crosses each to the OPPOSITE half of the draw from its own pool
+	// (helper.BuildKnockoutDrawFillBracket) -- see that function's doc
+	// comment for the evidence and scope.
 	var draw *helper.KnockoutDraw
 	// totalQualifiers feeds the Time Estimator sheet below (FillEstimations
 	// derives elimination-round match count from finalist count - 1); it
-	// starts at the uniform count and larger-pools mode adds each oversized
-	// pool's extra qualifier on top, so the estimate reflects the actual
-	// draw size rather than silently under-counting the extras.
+	// starts at the uniform count and larger-pools/fill-bracket mode adds
+	// each extra/drafted qualifier on top, so the estimate reflects the
+	// actual draw size rather than silently under-counting the extras.
 	totalQualifiers := len(pools) * o.poolWinners
-	if o.extraQualifiers == state.ExtraQualifiersLargerPools {
+	switch o.extraQualifiers {
+	case state.ExtraQualifiersLargerPools:
 		overrides := cliExtraQualifierOverrides(pools, activePoolSize, o.poolWinners)
 		for _, w := range overrides {
 			totalQualifiers += w - o.poolWinners
@@ -311,7 +336,33 @@ func (o *poolOptions) createPools(entries []string) error {
 			// supports; report it plainly instead of guessing.
 			return fmt.Errorf("could not build a larger-pools knockout draw from %d pools with %d winner(s) per pool on %d shiaijo (this pool/shiaijo shape is outside what --extra-qualifiers larger-pools currently supports; adjust --courts/pool sizing, or drop --extra-qualifiers)", len(pools), o.poolWinners, o.courts)
 		}
-	} else {
+	case state.ExtraQualifiersFillBracket:
+		drafts := helper.NextPow2(len(pools)) - len(pools)
+		// Capacity-aware selection (bc-qual LP-4, second review rework):
+		// FillBracketDraftCapacity computes each pool's home half and each
+		// half's remaining draft capacity BEFORE any pool is chosen, so
+		// SelectFillBracketDrafts can skip an oversized pool whose
+		// opposite-half destination is already full instead of taking it
+		// and stranding the build (helper.SelectFillBracketDrafts' own doc
+		// comment has the mechanism and the 19WKC sheet verification).
+		poolHalf, capacityByHalf, capOK := helper.FillBracketDraftCapacity(pools, drafts, o.courts)
+		if !capOK {
+			return fmt.Errorf("could not build a fill-bracket knockout draw: the per-court target arithmetic is not achievable for %d pools across %d shiaijo", len(pools), o.courts)
+		}
+		draftIdx, derr := helper.SelectFillBracketDrafts(pools, activePoolSize, poolHalf, capacityByHalf)
+		if derr != nil {
+			return fmt.Errorf("could not select fill-bracket drafts: %w", derr)
+		}
+		totalQualifiers += len(draftIdx)
+		draw = helper.BuildKnockoutDrawFillBracket(pools, draftIdx, o.courts)
+		if draw == nil {
+			// Same discipline as larger-pools above: NEVER fall back to the
+			// uniform builder. This shape (e.g. drafts that do not split
+			// evenly across opposite halves for this court count) is
+			// outside what fill-bracket currently supports.
+			return fmt.Errorf("could not build a fill-bracket knockout draw from %d pools with %d draft(s) on %d shiaijo (this pool/shiaijo shape is outside what --extra-qualifiers fill-bracket currently supports; adjust --courts/pool sizing, or drop --extra-qualifiers)", len(pools), len(draftIdx), o.courts)
+		}
+	default:
 		draw = helper.BuildKnockoutDraw(pools, o.poolWinners, o.courts)
 		if draw == nil {
 			return fmt.Errorf("could not build a knockout draw from %d pools with %d winners per pool", len(pools), o.poolWinners)

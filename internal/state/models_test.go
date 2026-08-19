@@ -419,10 +419,12 @@ func TestValidateExtraQualifiers(t *testing.T) {
 		{"larger-pools rejected under unset mode, 2 winners", ExtraQualifiersLargerPools, "", 2, true},
 		{"larger-pools rejected under min mode, 3 winners", ExtraQualifiersLargerPools, "min", 3, true},
 		{"larger-pools rejected under max mode AND 2 winners (both reasons)", ExtraQualifiersLargerPools, "max", 2, true},
-		{"fill-bracket rejected under min mode, 1 winner (not yet supported)", ExtraQualifiersFillBracket, "min", 1, true},
-		{"fill-bracket rejected under max mode, 1 winner (not yet supported)", ExtraQualifiersFillBracket, "max", 1, true},
-		{"fill-bracket rejected under unset mode, 1 winner (not yet supported)", ExtraQualifiersFillBracket, "", 1, true},
-		{"fill-bracket rejected under min mode, 2 winners (not yet supported)", ExtraQualifiersFillBracket, "min", 2, true},
+		{"fill-bracket valid under min mode, 1 winner", ExtraQualifiersFillBracket, "min", 1, false},
+		{"fill-bracket valid under unset (default) mode, 1 winner", ExtraQualifiersFillBracket, "", 1, false},
+		{"fill-bracket rejected under max mode, 1 winner", ExtraQualifiersFillBracket, "max", 1, true},
+		{"fill-bracket rejected under min mode, 2 winners", ExtraQualifiersFillBracket, "min", 2, true},
+		{"fill-bracket rejected under unset mode, 2 winners", ExtraQualifiersFillBracket, "", 2, true},
+		{"fill-bracket rejected under max mode AND 2 winners (both reasons)", ExtraQualifiersFillBracket, "max", 2, true},
 		{"unknown value rejected", "bogus", "min", 1, true},
 		{"unknown value rejected even under max mode", "bogus", "max", 1, true},
 	}
@@ -667,13 +669,15 @@ func TestQualifiersForPool_UnsetPoolSizeDegradesToUniform(t *testing.T) {
 		"PoolSize=0 must not make a 4-player pool read as oversized")
 }
 
-// TestMatchWinnerRanksNeeded pins the bc-qual LP-3c Excel-rendering fix: the
-// numWinners bound helper.PrintPoolMatches needs to register a
-// matchWinners["<pool>-2nd"] entry for an oversized pool under larger-pools,
+// TestMatchWinnerRanksNeeded pins the bc-qual LP-3c Excel-rendering fix
+// (extended to fill-bracket in LP-4): the numWinners bound
+// helper.PrintPoolMatches needs to register a matchWinners["<pool>-2nd"]
+// entry for an oversized/drafted pool under larger-pools or fill-bracket,
 // GLOBALLY (one bound for every pool, since PrintPoolMatches takes a single
 // int, not a per-pool map) -- +1 over EffectivePoolWinners() whenever
-// ExtraQualifiers is larger-pools, unconditionally (BuildKnockoutDrawPerPool
-// never sends more than one extra), unchanged in standard mode.
+// ExtraQualifiers is larger-pools or fill-bracket, unconditionally (neither
+// builder ever sends more than one extra/drafted qualifier from a pool),
+// unchanged in standard mode.
 func TestMatchWinnerRanksNeeded(t *testing.T) {
 	tests := []struct {
 		name string
@@ -698,6 +702,16 @@ func TestMatchWinnerRanksNeeded(t *testing.T) {
 		{
 			name: "larger-pools with default PoolWinners still adds one",
 			comp: Competition{ExtraQualifiers: ExtraQualifiersLargerPools},
+			want: 3, // default 2 + 1
+		},
+		{
+			name: "fill-bracket, PoolWinners=1 (the only currently-valid combination)",
+			comp: Competition{ExtraQualifiers: ExtraQualifiersFillBracket, PoolWinners: 1},
+			want: 2,
+		},
+		{
+			name: "fill-bracket with default PoolWinners still adds one",
+			comp: Competition{ExtraQualifiers: ExtraQualifiersFillBracket},
 			want: 3, // default 2 + 1
 		},
 	}

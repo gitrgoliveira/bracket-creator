@@ -52,9 +52,29 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 	// seeds end up placed for a shiaijo layout the draw does not have. numCourts
 	// stays the raw allocation for the single-pool league spread further down,
 	// which really does use every shiaijo the league was given.
-	pools, drawCourts, err := helper.BuildPoolPhase(players, comp.PoolSize, isMax, numCourts)
-	if err != nil {
-		return err
+	var pools []helper.Pool
+	var drawCourts int
+	var err error
+	if comp.ExtraQualifiers == state.ExtraQualifiersFillBracket {
+		// bc-qual LP-4: pool COUNT comes from a different formation
+		// objective (helper.FillBracketPoolCount) than the standard
+		// min-mode floor(n/PoolSize) -- helper.BuildPoolPhase's own path is
+		// untouched beside it (see that function's doc comment). isMax is
+		// irrelevant here: fill-bracket is gated to minimum-players-per-pool
+		// sizing by state.ValidateExtraQualifiers, checked below.
+		pools, drawCourts, err = helper.BuildPoolPhaseFillBracket(players, comp.PoolSize, numCourts)
+		if err != nil {
+			// FillBracketPoolCount's own error already names the entrant
+			// count and minimum pool size, so it is wrapped as a clean,
+			// actionable *ValidationError (-> HTTP 400) rather than
+			// restated.
+			return wrapValidationErrorf(err, "competition %s cannot start: %s", comp.ID, err.Error())
+		}
+	} else {
+		pools, drawCourts, err = helper.BuildPoolPhase(players, comp.PoolSize, isMax, numCourts)
+		if err != nil {
+			return err
+		}
 	}
 
 	// A "mixed" competition is "Pools + Knockout" by definition, a single

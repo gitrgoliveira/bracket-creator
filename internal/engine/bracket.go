@@ -120,16 +120,25 @@ func (e *Engine) generatePoolPreviewBracket(comp *state.Competition) error {
 	// (mp-5ng7). Flattening to a pow2 leaf array is TreeToLeafArray's job, done
 	// inside buildBracketFromDraw, and re-pads the regions' structural byes as
 	// "" slots.
-	draw, outOfScope := buildPoolFedDraw(comp, pools, len(comp.Courts))
+	draw, outOfScope, reason := buildPoolFedDraw(comp, pools, len(comp.Courts))
 	if outOfScope {
-		// bc-qual LP-3a review item (b): BuildKnockoutDrawPerPool returned nil
-		// for a shape draw_perpool.go's file comment marks out of scope (e.g.
-		// a court count with no same-half neighbour to cross an oversized
-		// pool's extra qualifier to). NEVER fall back to the uniform builder
-		// here -- that would silently seat the wrong number of qualifiers per
-		// pool and drop the crossing the operator asked for. Surface it as a
-		// clean, actionable *ValidationError instead.
-		return validationErrorf("competition %s: the larger-pools qualifier draw could not be built for %d pools across %d court(s); this shape is outside what larger-pools currently supports (see BuildKnockoutDrawPerPool's scope), adjust courts/pools or switch extraQualifiers back to standard", comp.ID, len(pools), len(comp.Courts))
+		// bc-qual LP-3a review item (b), extended to fill-bracket in LP-4:
+		// the mode's builder (BuildKnockoutDrawPerPool or
+		// BuildKnockoutDrawFillBracket) returned nil / an error for a shape
+		// its file comment marks out of scope (e.g. a court count with no
+		// same-half neighbour to cross an oversized pool's extra qualifier
+		// to, or drafts that do not split evenly across opposite halves).
+		// NEVER fall back to the uniform builder here -- that would
+		// silently seat the wrong number of qualifiers per pool and drop
+		// the crossing the operator asked for. Surface it as a clean,
+		// actionable *ValidationError instead -- naming the SPECIFIC cause
+		// (third review) when buildPoolFedDraw supplied one, rather than
+		// the generic "outside what extraQualifiers currently supports"
+		// for every shape alike.
+		if reason != "" {
+			return validationErrorf("competition %s: the %s qualifier draw could not be built for %d pools across %d court(s): %s", comp.ID, comp.ExtraQualifiers, len(pools), len(comp.Courts), reason)
+		}
+		return validationErrorf("competition %s: the %s qualifier draw could not be built for %d pools across %d court(s); this shape is outside what extraQualifiers %q currently supports, adjust courts/pools or switch extraQualifiers back to standard", comp.ID, comp.ExtraQualifiers, len(pools), len(comp.Courts), comp.ExtraQualifiers)
 	}
 	if draw == nil {
 		return nil

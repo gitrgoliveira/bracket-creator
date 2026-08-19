@@ -311,6 +311,41 @@ func BuildPoolPhase(players []Player, poolSize int, isMax bool, numCourts int) (
 	return ReorderPoolsForCourts(pools, drawCourts), drawCourts, nil
 }
 
+// BuildPoolPhaseFillBracket is BuildPoolPhase's fill-bracket counterpart
+// (bc-qual LP-4), beside the existing min path rather than a mutation of
+// it: the pool COUNT comes from FillBracketPoolCount's formation objective
+// instead of PoolCount's floor(n/minSize) -- the two can and do diverge (45
+// entrants at minimum pool size 3 forms 14 pools here, not floor(45/3)=15;
+// see FillBracketPoolCount's doc comment) -- and pool CUTTING goes through
+// CreatePoolsForCount (an explicit pool count, min-size targets) instead of
+// CreatePools. Every other step mirrors BuildPoolPhase's, in the same order
+// and for the same reasons (see its doc comment): PoolSeeding runs first so
+// seeds land in the pools they belong in, ReorderPoolsForCourts runs after
+// so oversized pools spread across shiaijo instead of clustering on the
+// first (bc-draw Phase 2a).
+//
+// numCourts is the RAW requested shiaijo allocation; the returned int is
+// EffectiveDrawCourts(pools, numCourts), exactly as BuildPoolPhase's is --
+// use it, not the input, for anything downstream that bands by court.
+//
+// minSize is always the MINIMUM pool size: fill-bracket has no "max
+// players per pool" mode (state.ValidateExtraQualifiers gates it to
+// minimum-players-per-pool sizing), so unlike BuildPoolPhase there is no
+// isMax parameter here at all.
+func BuildPoolPhaseFillBracket(players []Player, minSize int, numCourts int) ([]Pool, int, error) {
+	numPools, _, err := FillBracketPoolCount(len(players), minSize)
+	if err != nil {
+		return nil, 0, err
+	}
+	drawCourts := EffectiveDrawCourts(numPools, numCourts)
+
+	pools, err := CreatePoolsForCount(PoolSeeding(players, numPools, drawCourts), minSize, numPools)
+	if err != nil {
+		return nil, 0, err
+	}
+	return ReorderPoolsForCourts(pools, drawCourts), drawCourts, nil
+}
+
 func CreatePools(players []Player, poolSize int, isMax bool) ([]Pool, error) {
 	// Guard before the division below: poolSize is the divisor in both the
 	// "max" and fixed-size branches, so a zero/negative value panics with an
@@ -325,8 +360,6 @@ func CreatePools(players []Player, poolSize int, isMax bool) ([]Pool, error) {
 	if totalPools == 0 && len(players) > 0 {
 		return nil, fmt.Errorf("cannot create pools: player count (%d) is less than pool size (%d)", len(players), poolSize)
 	}
-
-	pools := make([]Pool, totalPools)
 
 	targetSizes := make([]int, totalPools)
 	if isMax && totalPools > 0 {
@@ -344,6 +377,68 @@ func CreatePools(players []Player, poolSize int, isMax bool) ([]Pool, error) {
 			targetSizes[i] = poolSize
 		}
 	}
+
+	return assignPlayersToPools(players, targetSizes), nil
+}
+
+// CreatePoolsForCount is CreatePools with the pool COUNT supplied directly
+// instead of derived from poolSize+isMax via PoolCount. It always sizes
+// pools the MIN-MODE way: every pool's target is poolSize, and the
+// len(players) - poolSize*totalPools remainder players force one extra into
+// `totalPools`'s outer-to-inner pools exactly as CreatePools' own min-mode
+// branch does (assignPlayersToPools' forcePoolSize fallback) -- the two
+// share that one code path, so a caller of either gets the identical
+// remainder-spread behaviour.
+//
+// It exists for the "fill-bracket" qualifier formation (bc-qual LP-4,
+// FillBracketPoolCount), whose pool count is deliberately NOT
+// floor(n/poolSize): FillBracketPoolCount can (and for 45 entrants at
+// minimum pool size 3 does) choose FEWER, partly-oversized pools than the
+// naive division, so the oversized remainder can supply drafted 2nd-place
+// qualifiers that exactly fill a power-of-two knockout bracket (see
+// BuildKnockoutDrawFillBracket). This function does the CUTTING half of
+// that; it has no opinion on how totalPools was chosen.
+//
+// Preconditions, enforced below rather than trusted: poolSize >= 1,
+// totalPools >= 1, and poolSize*totalPools <= len(players) <=
+// (poolSize+1)*totalPools -- every pool must reach the minimum and no pool
+// would need to grow by more than one over it. FillBracketPoolCount's own
+// search only ever proposes a totalPools satisfying this, but a caller
+// reaching this function some other way gets a clean error rather than a
+// silently short-filled pool or a forcePoolSize fallback with nowhere
+// correct to put the overflow.
+func CreatePoolsForCount(players []Player, poolSize, totalPools int) ([]Pool, error) {
+	if poolSize <= 0 {
+		return nil, fmt.Errorf("cannot create pools: pool size must be at least 1, got %d", poolSize)
+	}
+	if totalPools <= 0 {
+		return nil, fmt.Errorf("cannot create pools: pool count must be at least 1, got %d", totalPools)
+	}
+	if len(players) < poolSize*totalPools {
+		return nil, fmt.Errorf("cannot create %d pool(s) of minimum size %d: only %d player(s) available (need at least %d)", totalPools, poolSize, len(players), poolSize*totalPools)
+	}
+	if len(players) > (poolSize+1)*totalPools {
+		return nil, fmt.Errorf("cannot create %d pool(s) of minimum size %d: %d player(s) would need at least one pool larger than %d+1", totalPools, poolSize, len(players), poolSize)
+	}
+
+	targetSizes := make([]int, totalPools)
+	for i := range targetSizes {
+		targetSizes[i] = poolSize
+	}
+	return assignPlayersToPools(players, targetSizes), nil
+}
+
+// assignPlayersToPools is CreatePools' and CreatePoolsForCount's shared
+// assignment body: given the target size for each of len(targetSizes)
+// pools, distribute players into them avoiding dojo/name conflicts where
+// possible, falling back to forceSameDojo then forcePoolSize when a
+// conflict-free placement does not exist, and name the pools alphabetically
+// in the order they end up in. Extracted so the two callers cannot drift on
+// how a remainder is spread; only what pool COUNT and target sizes they hand
+// in differs.
+func assignPlayersToPools(players []Player, targetSizes []int) []Pool {
+	totalPools := len(targetSizes)
+	pools := make([]Pool, totalPools)
 
 	// Per-pool sets for O(1) dojo-conflict and duplicate-name detection.
 	dojoSets := make([]map[string]bool, totalPools)
@@ -378,7 +473,7 @@ func CreatePools(players []Player, poolSize int, isMax bool) ([]Pool, error) {
 		pools[i].PoolName = fmt.Sprintf("Pool %s", char)
 	}
 
-	return pools, nil
+	return pools
 }
 
 func discoverPool(pools []Pool, dojoSets, nameSets []map[string]bool, player Player, targetSizes []int, startIndex int) int {

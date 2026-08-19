@@ -9,6 +9,7 @@ const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 // daihyosen-specific; the rep pickers below stay gated on m.repIsTeam (a "-TB-"
 // tiebreaker is also a rep bout, just not a daihyosen).
 import { isPoolDaihyosenBout } from './pool_ids.jsx';
+import { realIppons, hanteiTied, hanteiSlot, hanteiWinnerKey } from './result_slot.jsx';
 
 import {
   MAX_IPPONS_PER_SIDE,
@@ -65,10 +66,19 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // relying on ||: an empty array is truthy and would swallow it.
   const cellsA = m.ipponsA || (window.ipponsFromScore ? window.ipponsFromScore(m.scoreA) : []);
   const cellsB = m.ipponsB || (window.ipponsFromScore ? window.ipponsFromScore(m.scoreB) : []);
-  const cleanA = (cellsA || []).filter(x => x && x !== "•");
-  const cleanB = (cellsB || []).filter(x => x && x !== "•");
-  const seedAPts = cleanA.length ? cleanA : (m.score?.type === "ippon" && m.winner?.id === m.sideA?.id ? m.score.ippons || [] : []);
-  const seedBPts = cleanB.length ? cleanB : (m.score?.type === "ippon" && m.winner?.id === m.sideB?.id ? m.score.ippons || [] : []);
+  // realIppons, not a local copy: this file imports the leaf that owns "what
+  // counts as a recorded ippon", and its own comments require these totals to
+  // read the same rule as the scoreboard's hanteiTied.
+  const cleanA = realIppons(cellsA);
+  const cleanB = realIppons(cellsB);
+  // The score.ippons FALLBACK is filtered like the primary path above: pts must
+  // hold only REAL points, because the slot grid indexes it directly for
+  // display while resultSlot picks the mark's slot from it. Any placeholder or
+  // empty cell would desynchronise those two (a placeholder in cell 0 pushes
+  // the mark to cell 1, where it renders OVER a recorded letter, hiding a
+  // struck point). Cleaning once here keeps every downstream consumer honest.
+  const seedAPts = cleanA.length ? cleanA : (m.score?.type === "ippon" && m.winner?.id === m.sideA?.id ? realIppons(m.score.ippons) : []);
+  const seedBPts = cleanB.length ? cleanB : (m.score?.type === "ippon" && m.winner?.id === m.sideB?.id ? realIppons(m.score.ippons) : []);
 
   // Use ?? not || so an explicit 0 isn't treated as "unset".
   // reconcileFoulsAtOpen turns the pre-fix cumulative raw count into the
@@ -90,16 +100,45 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // round-trips the count via toBackendMatchResult; Slice 3 (T093+) layers
   // the decision/kiken UI on top.
   const initialEnchoPeriods = m.encho?.periodCount || 0;
-  const initialDecidedByHantei = !!m.decidedByHantei;
   const [aPts, setAPts] = useStateA(initialAPts);
   const [bPts, setBPts] = useStateA(initialBPts);
   const [aFouls, setAFouls] = useStateA(initialAFouls);
   const [bFouls, setBFouls] = useStateA(initialBFouls);
   const [enchoPeriodCount, setEnchoPeriodCount] = useStateA(initialEnchoPeriods);
+  // The verdict the SERVER holds right now. A match has ONE result and every
+  // surface asking for it must show the same one, and this editor is such a
+  // surface: while it is open, the viewer card, the bracket, the TV board and
+  // the Excel export are all already showing whatever this says.
+  const hanteiRecorded = !!m.decidedByHantei;
   // FIK Art. 7-5 / 29-6: an encho match that remains tied is decided by
   // referee hantei. Persisting this on MatchResult so the UI / Excel can
   // mark it distinctly (vs an ippon-derived win).
-  const [decidedByHantei, setDecidedByHantei] = useStateA(initialDecidedByHantei);
+  const [decidedByHantei, setDecidedByHantei] = useStateA(hanteiRecorded);
+  // ADOPT a verdict recorded on another device, so this editor cannot sit
+  // showing "Decide by hantei…" while every other surface shows the Ht.
+  //
+  // Keyed on the VALUE, not on `m`: an SSE reload re-creates the match object
+  // on every broadcast, so a `[m]`-keyed effect would fight the operator's
+  // every tap. Keyed on the boolean it fires only when the SERVER's verdict
+  // actually flips, which leaves a local arm or cancel standing (the server
+  // value did not move) while still following a real change in either
+  // direction. It touches the verdict only: aPts/bPts and the fouls are
+  // untouched, so an edit in progress survives.
+  //
+  // The alternative — freeze at mount and stay silent about what you never saw
+  // — trades the erase for a divergence, and a result that reads differently
+  // depending on which screen you look at is the worse failure. Adopting means
+  // an explicit `false` below is always the operator ruling on something in
+  // front of them.
+  useEffectA(() => { setDecidedByHantei(hanteiRecorded); }, [hanteiRecorded]);
+  // Which side ("a"/"b"/"") holds a RECORDED hantei verdict, for the display
+  // chip in the slot grid. Gated on the SERVER's verdict — not the local armed
+  // state: arming a hantei on a reopened match must not resolve the stale
+  // m.winner and pre-mark the previous winner before the operator has picked a
+  // side. Empty when the winner is unattributable (same-name pair: mirror the
+  // scoreboard, mark neither).
+  // The tie gate is applied at the render site against the CURRENT pts.
+  const recordedHtKey = hanteiRecorded ? hanteiWinnerKey(m) : "";
   const [submitting, setSubmitting] = useStateA(false);
   // F5: pending-write state: set when a terminal submit resolves { queued:true }
   // (offline / transient failure). While pending the modal stays open and shows a
@@ -200,8 +239,13 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // Hansoku Hs are now physically present in the opponent's pts array
   // (folded in at the 2-foul boundary by applyFoulIncrement). The counter
   // is "outstanding fouls": no derived addends needed.
-  const aTotal = aPts.filter((x) => x !== "•").length;
-  const bTotal = bPts.filter((x) => x !== "•").length;
+  // Counted through the shared realIppons filter (drops empties AND the "•"
+  // placeholder): the raw score.ippons seed path can inject either, and no
+  // entry path ever adds "" as a point, so every consumer of these totals -
+  // the hantei gates, winner derivation, buildPatch - reads the same rule as
+  // the scoreboard's hanteiTied.
+  const aTotal = realIppons(aPts).length;
+  const bTotal = realIppons(bPts).length;
 
   const addPt = (side, letter) => {
     // No-op when the side is already at the 2-ippon max: don't mark dirty or
@@ -230,7 +274,14 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // explicitly clears the flag (sends false) when the match was previously
   // hantei-decided, so a re-edit via the normal flow removes the stale Ht
   // marker rather than preserving it on the server.
-  const hanteiClear = initialDecidedByHantei ? { decidedByHantei: false } : {};
+  //
+  // "The server holds a verdict and this editor is showing none" — which, given
+  // the adopt effect above, means the operator pressed Cancel on a verdict that
+  // was on screen. An explicit false is an authoritative "there is no verdict",
+  // and that is exactly who should be allowed to say it. There is no
+  // mounted-before-the-verdict blind spot to guard any more: the editor adopts
+  // what the server holds, so it can never rule on something it did not show.
+  const hanteiClear = hanteiRecorded && !decidedByHantei ? { decidedByHantei: false } : {};
 
   // mp-62vr: carry the rep-player names on every write for a team rep bout so
   // the per-court display can show who fought. backfillMatchIdentity preserves
@@ -242,7 +293,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     if (targetStatus === "scheduled") return { winner: null, status: "scheduled", score: null, ipponsA: [], ipponsB: [], hansokuA: 0, hansokuB: 0, ...hanteiClear, ...repBlock };
     if (targetStatus === "running") return {
       status: "running", winner: null,
-      ipponsA: aPts.filter(x => x !== "•"), ipponsB: bPts.filter(x => x !== "•"),
+      ipponsA: realIppons(aPts), ipponsB: realIppons(bPts),
       hansokuA: aFouls, hansokuB: bFouls,
       score: { type: "ippon", winnerPts: aTotal, loserPts: bTotal, ippons: aPts, fouls, live: true, corrected: isComplete },
       ...enchoBlock(), ...hanteiClear, ...repBlock,
@@ -252,8 +303,8 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     // ippon. Hansoku Hs are already physically present in the pts arrays
     // (folded in by applyFoulIncrement at the 2-foul boundary), so no
     // additional H fold is needed here.
-    const aLetters = aPts.filter(x => x !== "•");
-    const bLetters = bPts.filter(x => x !== "•");
+    const aLetters = realIppons(aPts);
+    const bLetters = realIppons(bPts);
     const aFinal = aLetters.slice(0, MAX_IPPONS_PER_SIDE);
     const bFinal = bLetters.slice(0, MAX_IPPONS_PER_SIDE);
     const winnerSide = aFinal.length > bFinal.length ? "a" : bFinal.length > aFinal.length ? "b" : null;
@@ -281,8 +332,8 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // court (when onSubmitAndNext is available and this isn't a correction).
   const submitHantei = (winnerSide) => {
     const winner = winnerSide === "a" ? m.sideA : m.sideB;
-    const aFinal = aPts.filter(x => x !== "•").slice(0, MAX_IPPONS_PER_SIDE);
-    const bFinal = bPts.filter(x => x !== "•").slice(0, MAX_IPPONS_PER_SIDE);
+    const aFinal = realIppons(aPts).slice(0, MAX_IPPONS_PER_SIDE);
+    const bFinal = realIppons(bPts).slice(0, MAX_IPPONS_PER_SIDE);
     const patch = {
       winner,
       ipponsA: aFinal,
@@ -375,10 +426,93 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   const initialIsDrawToggled = window.isHikiwake(m.score?.type) || window.isHikiwake(m.decision);
   const [isDrawToggled, setIsDrawToggled] = useStateA(initialIsDrawToggled);
 
+  // RE-SEED the whole scoring state when the stored result moves and the
+  // operator has nothing unsaved — the score half of the same rule the verdict
+  // adopt effect implements. Every ippon slot, foul counter and overtime count
+  // above is local state seeded at MOUNT, so without this an editor left open
+  // kept showing the scoreline it opened with while the list behind it, the
+  // viewer, the board and the export all moved on. A verdict adopted onto a
+  // stale scoreline is worse than either alone: the Ht lands in the slot the
+  // OLD score left free, so the editor showed `Ht` at 0-0 against a stored 1-1.
+  //
+  // Keyed on a signature of the SERVER's result, so it fires when that changes
+  // and not on every SSE re-render. `wasDirtyRef` holds the PREVIOUS render's
+  // isDirty — i.e. dirtiness measured before this change landed — because this
+  // render's isDirty compares against the new server values and would read true
+  // for an untouched editor, which is the very thing being corrected. An
+  // operator with unsaved work keeps it: their edits are not ours to discard.
+  //
+  // Be precise about what happens if they then save over a newer result.
+  // Timestamp last-write-wins (mp-y3nk) now covers EVERY match, pool and
+  // knockout alike, through engine.applyMatchWrite: a write stamped older than
+  // the stored result is dropped, so an editor that sat through an outage
+  // cannot bury a result recorded meanwhile. That is a floor, not a resolution
+  // protocol. Concurrent editors are still deliberately last-write-wins
+  // (handlers_match.go says so), the guard only orders writes that carry
+  // stamps, and the `stale: true` response covers a narrower case again (a
+  // lower Rev from the SAME session, or a running write arriving after
+  // completion).
+  //
+  // So this re-seed is still doing the load-bearing work: it removes the
+  // ARTIFICIAL conflicts, where an editor holding a mount-time snapshot wrote
+  // back state it was never showing. What remains is a genuine disagreement
+  // between two people who both typed something, which is theirs to resolve.
+  // The signature is the tuple the effect WRITES, not the `m` fields it reads.
+  // Those two lists had already drifted apart: `m.status` fed no setter (so a
+  // status-only broadcast triggered a no-op re-seed), while the bracket-match
+  // fallbacks `m.scoreA`/`m.scoreB` (via ipponsFromScore), `m.score.ippons`,
+  // `m.score.fouls` and `m.winner?.id` all feed one and were absent — so a
+  // bracket match whose score moved elsewhere did not re-seed at all. Keying on
+  // the seeds themselves cannot drift: whatever the derivation above starts
+  // reading is automatically part of the key.
+  const serverScoreSig = JSON.stringify([
+    initialAPts, initialBPts, initialAFouls, initialBFouls,
+    initialEnchoPeriods, initialIsDrawToggled,
+  ]);
+  const wasDirtyRef = useRefA(false);
+  useEffectA(() => {
+    if (wasDirtyRef.current) return;
+    setAPts(initialAPts);
+    setBPts(initialBPts);
+    setAFouls(initialAFouls);
+    setBFouls(initialBFouls);
+    setEnchoPeriodCount(initialEnchoPeriods);
+    setIsDrawToggled(initialIsDrawToggled);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverScoreSig]);
+
   // Arranged as [left, right]: left is always SHIRO (White), right is always AKA (Red).
   // onIncrement applies the FIK 2-foul auto-award rule via applyFoulIncrement:
   // every 2nd foul on this side discharges into a hansoku ippon ("H") for
   // the OPPONENT and resets this side's counter to 0.
+  // slotButtons: one side's two ippon slots. Display parity with the shared
+  // scoreboard and the team editor: a RECORDED hantei shows Ht in the winner's
+  // free slot via the same hanteiSlot the team editor uses (delegating to
+  // resultSlot, the one owner of which-slot). Gated on the LIVE decidedByHantei
+  // too, so cancelling the recorded verdict clears the chip with it, and on the
+  // shared tie rule (aTotal/bTotal count through realIppons, like the
+  // scoreboard's hanteiTied): a drifted decidedByHantei on an untied line
+  // shows letters plainly here too. Display only: the slots are disabled while
+  // the hantei stands.
+  const slotButtons = (s) => {
+    // resultSlot gets the SAME array the render loop below indexes. Passing a
+    // filtered view instead desynchronises them: on pts ["•","M"] the filter
+    // yields ["M"] → slot 1, and cell 1 then renders "Ht" OVER the recorded
+    // men. pts is kept clean at the seed instead (seedAPts/seedBPts run both
+    // the primary cells AND the score.ippons fallback through realIppons), so
+    // raw and filtered agree here and the mark lands in a genuinely free cell.
+    const htSlot = hanteiSlot(
+      decidedByHantei && hanteiTied(aPts, bPts) && recordedHtKey === s.key, s.pts);
+    return [0, 1].map((i) => {
+      const isHt = htSlot === i;
+      return (
+        <button key={i} className={`sb-slot ${(isHt || s.pts[i]) ? "sb-slot--filled" : ""}`} onClick={() => removePt(s.key, i)} disabled={decidedByHantei} title={decidedByHantei ? (hanteiRecorded ? "Locked: hantei already recorded" : "Hantei armed: choose a winner above, or cancel") : "Click to remove"}>
+          {isHt ? "Ht" : (s.pts[i] || "\u00b7")}
+        </button>
+      );
+    });
+  };
+
   const sides = [
     {
       key: "b", name: m.sideB?.name, dojo: m.sideB?.dojo, pts: bPts, fouls: bFouls,
@@ -405,7 +539,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   ];
 
   // Bout is decided once either side reaches 2 ippons: disable add-ippon
-  // buttons on BOTH sides (mirrors validateIpponCounts on the server).
+  // buttons on BOTH sides (mirrors validateIppons on the server).
   const boutDecided = isBoutDecided(aPts, bPts);
 
   // While hantei is armed the operator must commit via the dedicated SHIRO /
@@ -428,6 +562,13 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   const [finishArmed, setFinishArmed] = useStateA(false);
   useEffectA(() => { setFinishArmed(false); }, [aTotal, bTotal, isDrawToggled]);
 
+  // "Has the OPERATOR changed anything", which gates the discard prompt — so
+  // the verdict term compares against what the SERVER holds, not against a
+  // mount-time snapshot. Adopting a verdict recorded elsewhere moves both sides
+  // of that comparison together and is therefore not dirty, which is right: it
+  // is not an unsaved change of theirs, and prompting "discard unsaved scoring
+  // changes?" on an editor nobody touched trains operators to dismiss the one
+  // prompt that protects real work.
   const isDirty =
     !window.arraysEqual(aPts, initialAPts) ||
     !window.arraysEqual(bPts, initialBPts) ||
@@ -435,7 +576,11 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     bFouls !== initialBFouls ||
     isDrawToggled !== initialIsDrawToggled ||
     enchoPeriodCount !== initialEnchoPeriods ||
-    decidedByHantei !== initialDecidedByHantei;
+    decidedByHantei !== hanteiRecorded;
+  // Declared AFTER the re-seed effect above so that effect reads the value from
+  // the render BEFORE the server change. It self-corrects: a re-seed makes the
+  // next render's isDirty false again.
+  useEffectA(() => { wasDirtyRef.current = isDirty; });
   const handleDismiss = async () => {
     // Don't close while any save/decision request is in flight: letting
     // the modal unmount would orphan the pending fetch and lose the
@@ -628,11 +773,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                       <div className={`sb-side__badge sb-side__badge--${s.color}`}>{s.color === "shiro" ? "Shiro" : "Aka"}</div>
                       <div className="sb-name">{s.name}</div>
                       <div className="sb-slots">
-                        {[0, 1].map((i) => (
-                          <button key={i} className={`sb-slot ${s.pts[i] ? "sb-slot--filled" : ""}`} onClick={() => removePt(s.key, i)} disabled={decidedByHantei} title={decidedByHantei ? (initialDecidedByHantei ? "Locked: hantei already recorded" : "Hantei armed: choose a winner above, or cancel") : "Click to remove"}>
-                            {s.pts[i] || "·"}
-                          </button>
-                        ))}
+                        {slotButtons(s)}
                       </div>
                       <div className="sb-points-grid">
                         {getIpponButtons(isNaginata).map((cc) => (
@@ -667,7 +808,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                             else if (r.action === "enter") { setIsDrawToggled(true); setAPts([]); setBPts([]); markScoringDirty(); } // C1
                           }}
                           disabled={decidedByHantei || (!isDrawToggled && (aTotal > 0 || bTotal > 0)) || (!isDrawToggled && isKnockoutPhase)}
-                          title={decidedByHantei ? (initialDecidedByHantei ? "Locked: hantei already recorded" : "Hantei armed: choose a winner above, or cancel") : (!isDrawToggled && isKnockoutPhase ? "Knockout matches can't draw: decide by hantei after encho" : (!isDrawToggled && (aTotal > 0 || bTotal > 0) ? "Clear scores before marking a draw" : (isDrawToggled ? "Cancel draw" : "Mark as draw (hikiwake)")))}
+                          title={decidedByHantei ? (hanteiRecorded ? "Locked: hantei already recorded" : "Hantei armed: choose a winner above, or cancel") : (!isDrawToggled && isKnockoutPhase ? "Knockout matches can't draw: decide by hantei after encho" : (!isDrawToggled && (aTotal > 0 || bTotal > 0) ? "Clear scores before marking a draw" : (isDrawToggled ? "Cancel draw" : "Mark as draw (hikiwake)")))}
                           aria-label={isDrawToggled ? "Cancel draw (hikiwake)" : "Mark as draw (hikiwake)"}
                         >{isDrawToggled ? "Cancel draw" : "Mark draw"}</button>
                       </div>
@@ -756,9 +897,14 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                   )}
                   {decidedByHantei && (
                     <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+                      {/* The recorded side renders primary, like the team
+                          panel: this row is the verdict's second channel, so
+                          it must SHOW the verdict, not just offer buttons —
+                          on a drifted 2-2 the dropped loose mark makes this
+                          highlight the only place the side is visible. */}
                       <button
                         type="button"
-                        className="btn btn--sm"
+                        className={`btn btn--sm ${recordedHtKey === "b" ? "btn--primary" : ""}`}
                         data-testid="scoring-modal-hantei-shiro"
                         onClick={() => submitHantei("b")}
                         disabled={submitting || decisionSubmitting}
@@ -767,7 +913,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                       </button>
                       <button
                         type="button"
-                        className="btn btn--sm"
+                        className={`btn btn--sm ${recordedHtKey === "a" ? "btn--primary" : ""}`}
                         data-testid="scoring-modal-hantei-aka"
                         onClick={() => submitHantei("a")}
                         disabled={submitting || decisionSubmitting}

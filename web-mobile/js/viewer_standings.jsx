@@ -16,6 +16,7 @@
 import { withNumber } from './match_scoreboard.jsx';
 import { matchParticipantIds, matchParticipantNames, isPlayerWatched } from './viewer_watchlist_core.jsx';
 import { poolNameOf, isSupplementaryBout, isPoolDaihyosenBout, teamMatchTypeFor } from './pool_ids.jsx';
+import { realIppons } from './result_slot.jsx';
 
 const { useState, useMemo } = React;
 const EmptyState = window.EmptyState;
@@ -533,8 +534,8 @@ export function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPla
                   </td>;
                 }
 
-                const ipponsA = (m.ipponsA || []).filter(x => x && x !== "•");
-                const ipponsB = (m.ipponsB || []).filter(x => x && x !== "•");
+                const ipponsA = realIppons(m.ipponsA);
+                const ipponsB = realIppons(m.ipponsB);
                 const rowIppons = rowIsAka ? ipponsA : ipponsB;
                 // Engi (flag-count scoring) is the ONLY competition type
                 // where a matrix cell shows a NUMBER; every other type shows

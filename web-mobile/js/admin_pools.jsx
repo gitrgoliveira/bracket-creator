@@ -4,6 +4,7 @@
 // Canonical pool-id parser shared with the display surfaces (single source of
 // truth: ./pool_ids.jsx is a leaf module with no import chain).
 import { poolNameOf, isSupplementaryBout, isPoolDaihyosenBout, teamMatchTypeFor } from './pool_ids.jsx';
+import { nameOf } from './result_slot.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA } = React;
 const EmptyState = window.EmptyState;
@@ -80,7 +81,6 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
   let repRosterB = [];
   if (repIsTeam) {
     const teams = (comp && comp.config && comp.config.players) || (comp && comp.players) || [];
-    const nameOf = (s) => (typeof s === "string" ? s : (s && s.name) || "");
     const teamByName = (nm) => teams.find(t => ((t.name || t.Name) === nm));
     const rosterFor = (window.AdminLineupHelpers && window.AdminLineupHelpers.rosterFor) || (() => []);
     repRosterA = rosterFor(teamByName(nameOf(m.sideA))) || [];
@@ -108,7 +108,13 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
 
 function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, password }) {
   const isLeague = c && c.format === "league";
-  const [scoreOpenMatch, setScoreOpenMatch] = useStateA(null);
+  // A KEY, re-resolved from the live poolMatches every render, never a captured
+  // object. A match has ONE result and every surface asking for it shows the
+  // same one (operator ruling); a snapshot shows the answer it was opened with
+  // for as long as it stays open, so a result recorded on another device
+  // updated the pool grid behind this modal but not the modal itself. Same
+  // pattern as AdminScoreEditor, the bracket panel and the shiaijo panel.
+  const [scoreOpenId, setScoreOpenId] = useStateA(null);
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
 
@@ -466,6 +472,20 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
     </div>
   ) : null;
 
+  // Resolved live, then enriched: enrichPoolMatchWithComp derives rep-player
+  // rosters from `c`, so it must run on the CURRENT row, not on the row as it
+  // looked when the operator clicked it.
+  // Memoized because enrichPoolMatchWithComp calls buildPlayerMap, which walks
+  // the whole roster three times and allocates an entry per participant. Without
+  // this it reruns on every render while the modal is open, i.e. on every SSE
+  // broadcast for ANY match in the tournament, and throws the map away each
+  // time. Nothing downstream depends on the object identity changing per render.
+  const scoreOpenRaw = scoreOpenId ? (poolMatches || []).find((m) => m.id === scoreOpenId) || null : null;
+  const scoreOpenMatch = useMemoA(
+    () => (scoreOpenRaw ? enrichPoolMatchWithComp(scoreOpenRaw, c) : null),
+    [scoreOpenRaw, c]
+  );
+
   // Modal rendered alongside the PoolsViewer.
   const scoreModal = scoreOpenMatch ? (
     <ScoreEditorModal
@@ -475,11 +495,11 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
       nextMatch={null}
       onPrev={null}
       onNext={null}
-      onClose={() => setScoreOpenMatch(null)}
+      onClose={() => setScoreOpenId(null)}
       onSubmit={async (patch) => {
         try {
           await onEditScore(c.id, scoreOpenMatch.id, patch, scoreOpenMatch);
-          if (mountedRef.current) setScoreOpenMatch(null);
+          if (mountedRef.current) setScoreOpenId(null);
         } catch (_err) { /* keep modal open on error */ }
       }}
       onSubmitAndNext={null}
@@ -508,7 +528,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
             competition={c}
             poolMatches={poolMatches}
             tweaks={tweaks}
-            onMatchClick={(m) => setScoreOpenMatch(enrichPoolMatchWithComp(m, c))}
+            onMatchClick={(m) => setScoreOpenId(m.id)}
             highlightPlayers={[]}
           />
         ) : null
@@ -520,7 +540,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
             poolMatches={poolMatches}
             competition={c}
             tweaks={tweaks}
-            onMatchClick={(m) => setScoreOpenMatch(enrichPoolMatchWithComp(m, c))}
+            onMatchClick={(m) => setScoreOpenId(m.id)}
             highlightPlayers={[]}
           />
         ) : null

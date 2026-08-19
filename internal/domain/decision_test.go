@@ -71,3 +71,32 @@ func TestDefaultWinHelpers(t *testing.T) {
 	assert.Equal(t, []string{"○", "○"}, domain.DefaultWinIppons(false))
 	assert.Equal(t, []string{"○"}, domain.DefaultWinIppons(true))
 }
+
+// The hantei-compatible set has TWO enforcers at different layers - the HTTP
+// validator on the way in, and the engine's preserve on the way out, which
+// mutates a row after validation and is never re-checked. They share this
+// predicate precisely so they cannot drift; pin the membership.
+func TestIsSubBoutHanteiCompatibleDecision(t *testing.T) {
+	compatible := []domain.Decision{domain.DecisionNone, domain.DecisionFought, domain.DecisionDaihyosen}
+	for _, d := range compatible {
+		if !domain.IsSubBoutHanteiCompatibleDecision(d) {
+			t.Errorf("decision %q must be compatible with hantei", d)
+		}
+		if !domain.IsSubBoutHanteiCompatibleDecisionStr(string(d)) {
+			t.Errorf("string form disagrees for %q", d)
+		}
+	}
+	// Anything that already settles the bout another way is incompatible: a
+	// hantei declares a winner from a TIED bout.
+	for _, d := range []domain.Decision{
+		domain.DecisionHikiwake, domain.DecisionKiken, domain.DecisionKikenVoluntary, domain.DecisionKikenInjury,
+		domain.DecisionFusenpai, domain.DecisionFusensho, domain.DecisionKachinukiExhaustion,
+	} {
+		if domain.IsSubBoutHanteiCompatibleDecision(d) {
+			t.Errorf("decision %q must NOT be compatible with hantei", d)
+		}
+	}
+	if domain.IsSubBoutHanteiCompatibleDecisionStr("not-a-decision") {
+		t.Error("an unknown wire value must not be compatible")
+	}
+}

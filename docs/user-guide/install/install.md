@@ -115,7 +115,7 @@ go install github.com/gitrgoliveira/bracket-creator@latest
 If you prefer to compile from source, `bracket-creator` is written in [Go](https://golang.org/).
 
 Prerequisites:
-- [Go 1.26.5+](https://golang.org/doc/install)
+- [Go 1.26.6+](https://golang.org/doc/install)
 - [Node.js](https://nodejs.org/) (`make go/build` runs `npx esbuild` to compile the web assets)
 - `curl` (used to fetch the vendored frontend runtime)
 

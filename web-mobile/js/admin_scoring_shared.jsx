@@ -18,7 +18,7 @@ const MAX_IPPONS_PER_SIDE = 2;
 // The UI uses this to disable the add-ippon buttons on BOTH sides at
 // that point: the bout would have ended at first-to-2, so neither side
 // can legitimately add another ippon. Server enforces the same invariant
-// in validateIpponCounts (rejects 2-2 with HTTP 400).
+// in validateIppons (rejects 2-2 with HTTP 400).
 function isBoutDecided(aPts, bPts) {
   return (aPts?.length ?? 0) >= MAX_IPPONS_PER_SIDE
       || (bPts?.length ?? 0) >= MAX_IPPONS_PER_SIDE;
@@ -176,7 +176,7 @@ function applyFusenshoToggle(prev, side) {
 // Bout-decided guard: if EITHER side is already at maxIppons the bout is
 // over: the counter still resets to 0 on the 2nd foul but no new H is
 // awarded. This prevents an auto-award from creating an invalid 2-2
-// scoreline that the server's validateIpponCounts would reject. The UI
+// scoreline that the server's validateIppons would reject. The UI
 // also disables the `+` button via isBoutDecided as a defense in depth.
 // To undo a previously awarded H, the operator removes it from the
 // opponent's slot directly.
@@ -422,12 +422,36 @@ function initialEnchoPeriodsForMatch(m) {
 // ONLY on the daihyosen. Encho is OPTIONAL for hantei: a tied daihyosen may
 // be taken straight to a judges' decision without overtime: so the two
 // fields are emitted independently: encho whenever the counter is > 0, and
-// decidedByHantei whenever it is armed on a tied scoreline. Returns the fields
-// to merge into the entry (possibly empty). Exported for vitest.
+// decidedByHantei explicitly (tri-state wire contract, operator ruling "all
+// results must be recorded into storage"): true when armed on a tied
+// scoreline, otherwise an EXPLICIT false. The server preserves a stored
+// verdict only against writers that are verdict-SILENT (field absent - stale
+// snapshots, quick-score), so an editor that HAS a say must send its
+// withdrawal as false rather than as an omission the server would read as
+// "no opinion" and preserve over.
+//
+// The verdict is ALWAYS stated here, never omitted. That is safe because of
+// where this is called from: the team editor adopts whatever verdict the
+// server holds (its adopt effect), so it can never send an authoritative false
+// about something it has not displayed.
+//
+// There used to be a `hanteiKnown` parameter for exactly that case — an editor
+// mounted before the verdict existed kept a mount-frozen armed flag, so it
+// would have erased another device's judges' decision on the next unrelated
+// autosave, and passing false made the write SILENT instead. Freezing bought
+// that safety by letting the editor show something other than the stored
+// result, which breaks the rule that a match has one result and every surface
+// shows the same one. Adoption fixes the display and removes the blind spot,
+// so the parameter had nothing left to guard.
+//
+// The tri-state is NOT collapsing back to a boolean by this: silence still
+// means "no opinion" on the wire, and the writers that genuinely have none
+// (stale snapshots, quick-score) still omit the field. This caller simply is
+// not one of them any more. Returns the fields to merge into the entry.
+// Exported for vitest.
 function daihyosenEnchoFields({ enchoPeriodCount, daihyosenTied, daihyosenHantei }) {
-  const fields = {};
+  const fields = { decidedByHantei: !!(daihyosenTied && daihyosenHantei) };
   if (enchoPeriodCount > 0) fields.encho = { periodCount: enchoPeriodCount };
-  if (daihyosenTied && daihyosenHantei) fields.decidedByHantei = true;
   return fields;
 }
 

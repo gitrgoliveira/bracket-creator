@@ -54,6 +54,17 @@ const LOBBY_ROWS = [
 //
 // Returns an array of exactly LOBBY_ROWS.length elements; missing
 // slots are null (rendered as an empty "-" cell).
+//
+// Slot entries carry no "why it is here" tag. They used to (`kind`, one of
+// 'running' | 'upnext' | 'scheduled'), which outlived its last production
+// reader: LobbyMatchCell styles from the POSITIONAL `rowKind` (row index), and
+// nothing else read it. The comment defending it argued rowKind cannot tell a
+// genuinely running match at slot 0 from a promoted up-next — true, and beside
+// the point, because `slot.match.status` can: findRunningOnCourt admits only
+// status === 'running' and findUpcomingOnCourt only 'scheduled', so the tag was
+// derivable from the match it was attached to. What kept it alive was the slot
+// tests asserting on it, which is how a model field drifts from reality
+// unnoticed; they now assert on the status a renderer can actually see.
 function buildCourtSlots(competitions, court) {
     const totalSlots = LOBBY_ROWS.length;
     const running = findRunningOnCourt(competitions, court);
@@ -63,28 +74,24 @@ function buildCourtSlots(competitions, court) {
 
     const slots = Array.from({ length: totalSlots }, () => null);
 
-    if (running) {
-        slots[0] = { kind: 'running', match: running.match, competition: running.competition,
-                     isBracket: running.isBracket, roundIndex: running.roundIndex,
-                     totalRounds: running.totalRounds };
-        for (let i = 0; i < upcoming.length && i + 1 < totalSlots; i++) {
-            const m = upcoming[i];
-            slots[i + 1] = { kind: 'scheduled', match: m, competition: m._comp,
-                             isBracket: m._isBracket, roundIndex: m._roundIndex,
-                             totalRounds: m._totalRounds };
-        }
-    } else if (upcoming.length > 0) {
-        // Auto-promote first scheduled to "Now" slot.
-        const first = upcoming[0];
-        slots[0] = { kind: 'upnext', match: first, competition: first._comp,
-                     isBracket: first._isBracket, roundIndex: first._roundIndex,
-                     totalRounds: first._totalRounds };
-        for (let i = 1; i < upcoming.length && i < totalSlots; i++) {
-            const m = upcoming[i];
-            slots[i] = { kind: 'scheduled', match: m, competition: m._comp,
-                         isBracket: m._isBracket, roundIndex: m._roundIndex,
-                         totalRounds: m._totalRounds };
-        }
+    // One slot shape, built from the two sources that carry the same fields
+    // under different names: findRunningOnCourt returns them expanded, while
+    // findUpcomingOnCourt tags them onto the match as _comp/_isBracket/etc.
+    const fromRunning = (r) => ({ match: r.match, competition: r.competition,
+                                  isBracket: r.isBracket, roundIndex: r.roundIndex,
+                                  totalRounds: r.totalRounds });
+    const fromUpcoming = (m) => ({ match: m, competition: m._comp,
+                                   isBracket: m._isBracket, roundIndex: m._roundIndex,
+                                   totalRounds: m._totalRounds });
+
+    // With no running match the first scheduled one auto-promotes into "Now",
+    // which is just the queue starting at slot 0 instead of slot 1. Expressing
+    // it as an offset removes the second branch: the empty case needs no guard
+    // because the loop simply does not run.
+    const start = running ? 1 : 0;
+    if (running) slots[0] = fromRunning(running);
+    for (let i = 0; i < upcoming.length && start + i < totalSlots; i++) {
+        slots[start + i] = fromUpcoming(upcoming[i]);
     }
     // If no running and no upcoming, slots stay null → empty cells.
     return slots;
@@ -110,7 +117,7 @@ function LobbyMatchCell({ slot, rowKind }) {
         );
     }
 
-    const { kind, match, competition, isBracket, roundIndex, totalRounds } = slot;
+    const { match, competition, isBracket, roundIndex, totalRounds } = slot;
     const zekken = !!(competition && competition.withZekkenName);
 
     let cellBg = LOBBY_COLORS.schedBg;
@@ -125,7 +132,9 @@ function LobbyMatchCell({ slot, rowKind }) {
 
     const phase = phaseLabel(match, isBracket, roundIndex, totalRounds, competition?.format);
     const compMeta = [competition?.name, phase, match.scheduledAt].filter(Boolean).join(' · ');
-    const sfx = (kind === 'running' && window.matchMiddleMark) ? window.matchMiddleMark(match) : '';
+    // NO middle-mark chip in the meta strip (operator ruling): the
+    // IndividualScore row below carries X/(E)/(DH) in its own FIK centre,
+    // the mark's ONE home; a second copy in the corner was an error.
 
     return (
         <td style={{ padding: '4px 8px', verticalAlign: 'top' }}>
@@ -136,10 +145,10 @@ function LobbyMatchCell({ slot, rowKind }) {
                 border: `1px solid ${cellBorder}`,
             }}>
                 {compMeta && (
-                    <div style={{ fontSize: 10, color: LOBBY_COLORS.inkMuted, marginBottom: 4, letterSpacing: '0.02em', display: 'flex', justifyContent: 'space-between', gap: 6 }}>
-                        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{compMeta}</span>
-                        {sfx && <span style={{ flexShrink: 0, fontWeight: 700, color: LOBBY_COLORS.ink }}>{sfx}</span>}
-                    </div>
+                    // One child, so no flex row: the chip that used to sit
+                    // beside this text is gone (see the ruling above) and the
+                    // truncation moved onto the element that owns the text.
+                    <div style={{ fontSize: 10, color: LOBBY_COLORS.inkMuted, marginBottom: 4, letterSpacing: '0.02em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{compMeta}</div>
                 )}
                 {/* One matchup = one IndividualScore row (same component the
                     per-court board and viewer card use). Owns names, ippon

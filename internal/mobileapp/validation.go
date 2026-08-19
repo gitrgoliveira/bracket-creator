@@ -183,10 +183,13 @@ func subBoutNeedsNumberedEnchoAllowance(sr *state.SubMatchResult) bool {
 // pool-vs-bracket. The hantei gate is NOT relaxed: kachinuki bouts are
 // never decided by hantei.
 //
-// The winner/tied-scoreline/decision checks here intentionally mirror the
-// top-level DecidedByHantei block in ScoreRequest.Validate. Keep them in sync:
-// the sub-bout variant adds the Position guards and omits the top-level-only
-// Status/DecisionBy checks (SubMatchResult has no such fields).
+// The winner and tied-scoreline checks here are the same rules the top-level
+// DecidedByHantei block in ScoreRequest.Validate applies; both now call the
+// shared domain predicates, so that pair stays in sync by construction rather
+// than by comment. Two differences remain deliberate: the sub-bout variant adds
+// the Position guards and omits the top-level-only Status/DecisionBy checks
+// (SubMatchResult has no such fields), and it ALLOWS decision "daihyosen",
+// which the match level rejects (see the note there).
 func validateSubBout(prefix string, sr *state.SubMatchResult, allowNumberedEncho bool) error {
 	// Encho period counts are bounded two ways. A negative count is never
 	// valid on any bout (it would make Encho.On() read false below and be
@@ -208,7 +211,7 @@ func validateSubBout(prefix string, sr *state.SubMatchResult, allowNumberedEncho
 			}
 		}
 	}
-	if !sr.DecidedByHantei {
+	if !sr.HanteiDecided() {
 		return nil
 	}
 	if sr.Position != state.DaihyosenSubPosition {
@@ -220,13 +223,14 @@ func validateSubBout(prefix string, sr *state.SubMatchResult, allowNumberedEncho
 	if sr.Winner == "" {
 		return &ValidationError{Field: prefix + "decidedByHantei", Message: "requires winner to be set"}
 	}
-	if len(sr.IpponsA) != len(sr.IpponsB) {
+	// Both halves of this gate are shared with the engine's preserveSubHantei
+	// via domain, so a row this accepts and a row the engine may stamp can
+	// never disagree. The tie test was raw len() here and placeholder-dropping
+	// there, which is a difference an "•" or empty cell can express.
+	if !domain.HanteiTiedScoreline(sr.IpponsA, sr.IpponsB) {
 		return &ValidationError{Field: prefix + "decidedByHantei", Message: "requires a tied scoreline, ippon counts must be equal"}
 	}
-	switch sr.Decision {
-	case "", "fought", "daihyosen":
-		// compatible: daihyosen placeholders carry decision="daihyosen"
-	default:
+	if !domain.IsSubBoutHanteiCompatibleDecisionStr(sr.Decision) {
 		return &ValidationError{
 			Field:   prefix + "decidedByHantei",
 			Message: fmt.Sprintf("incompatible with decision %q, hantei declares a winner from a tied bout; use '', 'fought', or 'daihyosen'", sr.Decision),
@@ -273,7 +277,7 @@ func validateBulkScoreLengths(r *state.MatchResult, allowNumberedEncho bool) err
 	if err := validateMaxLen("correctionReason", strings.TrimSpace(r.CorrectionReason), MaxLenCorrectionReason); err != nil {
 		return err
 	}
-	if err := validateIpponCounts("", r.IpponsA, r.IpponsB); err != nil {
+	if err := validateIppons("", r.IpponsA, r.IpponsB); err != nil {
 		return err
 	}
 	if r.FlagsA < 0 {
@@ -294,7 +298,7 @@ func validateBulkScoreLengths(r *state.MatchResult, allowNumberedEncho bool) err
 		if err := validateMaxLen(prefix+"winner", sr.Winner, MaxLenMatchSide); err != nil {
 			return err
 		}
-		if err := validateIpponCounts(prefix, sr.IpponsA, sr.IpponsB); err != nil {
+		if err := validateIppons(prefix, sr.IpponsA, sr.IpponsB); err != nil {
 			return err
 		}
 		if err := validateSubBout(prefix, sr, allowNumberedEncho); err != nil {
@@ -510,14 +514,14 @@ func (r *ScoreRequest) validateWithOptions(allowNumberedEncho bool) error {
 		}
 	}
 	// Best-of-3 ippon invariants on the top-level scoreline.
-	if err := validateIpponCounts("", r.IpponsA, r.IpponsB); err != nil {
+	if err := validateIppons("", r.IpponsA, r.IpponsB); err != nil {
 		return err
 	}
 	// Same invariants on each sub-bout (team-match positions).
 	for i := range r.SubResults {
 		sr := &r.SubResults[i]
 		prefix := fmt.Sprintf("subResults[%d].", i)
-		if err := validateIpponCounts(prefix, sr.IpponsA, sr.IpponsB); err != nil {
+		if err := validateIppons(prefix, sr.IpponsA, sr.IpponsB); err != nil {
 			return err
 		}
 		if err := validateSubBout(prefix, sr, allowNumberedEncho); err != nil {
@@ -529,8 +533,12 @@ func (r *ScoreRequest) validateWithOptions(allowNumberedEncho bool) error {
 	// be completed, and the scoreline must be tied (equal ippon counts). Encho
 	// is NOT required: operators may take a tied match straight to hantei
 	// without an overtime period (the encho gate was removed deliberately).
-	// The winner/tied/decision checks below mirror validateSubBout; keep both
-	// in sync.
+	// The winner and tied-scoreline checks below are the SAME rules
+	// validateSubBout applies, so both call the shared domain predicates rather
+	// than spelling them out twice (the tie test used to be a raw len() here
+	// against a placeholder-dropping count there, so ["M","•"] against ["M","K"]
+	// read tied to one enforcer and untied to the other). The decision check is
+	// deliberately NARROWER than the sub-bout one; see the note on it below.
 	if r.DecidedByHantei != nil && *r.DecidedByHantei {
 		if r.Winner == "" {
 			return &ValidationError{
@@ -544,7 +552,7 @@ func (r *ScoreRequest) validateWithOptions(allowNumberedEncho bool) error {
 				Message: "only valid on completed matches",
 			}
 		}
-		if len(r.IpponsA) != len(r.IpponsB) {
+		if !domain.HanteiTiedScoreline(r.IpponsA, r.IpponsB) {
 			return &ValidationError{
 				Field:   "decidedByHantei",
 				Message: "requires a tied scoreline, ippon counts must be equal",
@@ -555,10 +563,14 @@ func (r *ScoreRequest) validateWithOptions(allowNumberedEncho bool) error {
 		// fusenpai=no-show, daihyosen=rep-bout…) is semantically incompatible,
 		// persisting both would render contradictory suffixes like "Kiken (E) HT".
 		// Only the neutral values ("" and "fought") are allowed alongside hantei.
-		switch r.Decision {
-		case "", "fought":
-			// compatible: normal fight decided by judges
-		default:
+		//
+		// The MATCH-level predicate, which is the sub-bout one minus "daihyosen";
+		// the narrowing and its reason live on the domain function. It used to be
+		// a hand-written switch here, which meant this enforcer and the engine's
+		// hanteiStillHolds spelled the same rule two different ways — and the
+		// engine's spelling was the WIDER one, so it could stamp a match-level
+		// verdict onto a decision this rejects.
+		if !domain.IsMatchHanteiCompatibleDecisionStr(r.Decision) {
 			return &ValidationError{
 				Field:   "decidedByHantei",
 				Message: fmt.Sprintf("incompatible with decision %q, hantei declares a winner from a tied bout; use '' or 'fought'", r.Decision),
@@ -642,17 +654,31 @@ func winningScoreline(ipponsA, ipponsB []string, n int) bool {
 // ended at 2-1 before either side could score a third.
 const maxIpponsPerSide = 2
 
-// validateIpponCounts enforces the best-of-3 ippon invariants on a
-// single match (or sub-bout) tally. Rules:
+// validateIppons is the ONE gate every ippon slice crosses on its way in, from
+// both the ScoreRequest path and the bulk-score path. It enforces the
+// best-of-3 invariants on a single match (or sub-bout) tally, and the shape of
+// the entries themselves. Rules:
 //
+//   - each entry is a single character (domain.IpponFitsScoreCodec)
 //   - len(ipponsA) ≤ 2 and len(ipponsB) ≤ 2
-//   - NOT (len(ipponsA) == 2 && len(ipponsB) == 2)  , the 2-2 ban
+//   - NOT (scoring(ipponsA) == 2 && scoring(ipponsB) == 2)  , the 2-2 ban
 //
 // Field is the JSON-field prefix used in error messages (e.g. "" for a
 // top-level match, "subResults[i]." for a sub-bout). Kiken/fusenpai
 // scorelines are also bounded by these rules, their own n-0 check in
 // validateDecision is strictly tighter (n ≤ 2) so this passes through.
-func validateIpponCounts(field string, ipponsA, ipponsB []string) error {
+//
+// (Named validateIpponCounts until the entry-shape rule joined it, at which
+// point the name described half the job.)
+func validateIppons(field string, ipponsA, ipponsB []string) error {
+	// Entry SHAPE first: a multi-rune entry is malformed whatever the counts
+	// are, and the two failures it caused are both worse than a count error.
+	if err := ipponEntriesWellFormed(field+"ipponsA", ipponsA); err != nil {
+		return err
+	}
+	if err := ipponEntriesWellFormed(field+"ipponsB", ipponsB); err != nil {
+		return err
+	}
 	if len(ipponsA) > maxIpponsPerSide {
 		return &ValidationError{
 			Field:   field + "ipponsA",
@@ -665,10 +691,51 @@ func validateIpponCounts(field string, ipponsA, ipponsB []string) error {
 			Message: fmt.Sprintf("at most %d ippons per side (best-of-3), got %d", maxIpponsPerSide, len(ipponsB)),
 		}
 	}
-	if len(ipponsA) == maxIpponsPerSide && len(ipponsB) == maxIpponsPerSide {
+	// The two checks above and the one below count DIFFERENTLY, on purpose.
+	//
+	// The per-side caps are STRUCTURAL: a side has two slots, so an array with
+	// more entries than that is malformed whatever the entries are, and raw
+	// len() is the right measure.
+	//
+	// This one is SEMANTIC: "both sides scored 2" is a claim about POINTS, and
+	// an unfilled "•" placeholder or an empty cell is not a point (the same rule
+	// domain.CountScoringIppons states for the engine, the store and the hantei
+	// tie gate). Counting slots here rejected legal scorelines: ["M","•"]
+	// against ["K","D"] is 1-2, an ordinary win, but read as 2-2 and refused
+	// with a message about a rule it does not break. Unreachable from the UI —
+	// both editors strip the placeholder before sending — but this is the wire
+	// boundary, and it now agrees with every other counter in the codebase.
+	if domain.CountScoringIppons(ipponsA) == maxIpponsPerSide &&
+		domain.CountScoringIppons(ipponsB) == maxIpponsPerSide {
 		return &ValidationError{
 			Field:   field + "ippons",
 			Message: "both sides cannot have 2 ippons (best-of-3 ends at first to 2)",
+		}
+	}
+	return nil
+}
+
+// ipponEntriesWellFormed rejects a multi-rune ippon entry on one side. The
+// reasoning lives on domain.IpponFitsScoreCodec, beside the codec whose
+// precondition this is; the short version is that FormatScore joins with no
+// separator, so "MHt" comes back as three ippons — and on a POOL match the
+// two-rune "Ht" is the verdict ENCODING, so accepting one from a client let a
+// payload forge a judges' decision that appeared on the next reload.
+//
+// field is the fully-qualified JSON field name, e.g. "subResults[0].ipponsA".
+func ipponEntriesWellFormed(field string, ippons []string) error {
+	for _, v := range ippons {
+		if !domain.IpponFitsScoreCodec(v) {
+			// Says SHAPE, not vocabulary, because that is what is enforced. The
+			// letters are deliberately open (naginata adds "S", and the round-trip
+			// tests pin letter-agnosticism), so naming a closed set here would
+			// promise a rule that does not exist and mislead whoever hits it.
+			return &ValidationError{
+				Field: field,
+				Message: fmt.Sprintf(
+					"each ippon mark is a single character (e.g. a waza letter, %q or %q); got %q",
+					domain.DefaultWinIppon, domain.IpponPlaceholder, v),
+			}
 		}
 	}
 	return nil

@@ -182,7 +182,9 @@ FIK Article 7-3 also lists **chusen** (drawing lots) as a possible resolution me
 
 ### Hantei (Judges' Decision)
 
-If a match remains tied after encho (or after multiple encho periods, depending on tournament rules), the three referees make a **hantei**, upon the shushin's call, all three simultaneously raise a flag for the competitor they judge performed better (FIK Article 29-6). The competitor chosen by at least two of the three referees wins. FIK Article 7-5 specifies two criteria in order of precedence: first, **skill** (whether a competitor made datotsu nearly equal to yuko-datotsu), then **attitude** (superiority in posture and movement). There is no draw in hantei, one side must be chosen.
+When a match must produce a winner and is tied, the three referees make a **hantei**, upon the shushin's call, all three simultaneously raise a flag for the competitor they judge performed better (FIK Article 29-6). The competitor chosen by at least two of the three referees wins. FIK Article 7-5 specifies two criteria in order of precedence: first, **skill** (whether a competitor made datotsu nearly equal to yuko-datotsu), then **attitude** (superiority in posture and movement). There is no draw in hantei, one side must be chosen.
+
+**Hantei does not require encho, and does not require a daihyosen.** The usual path is encho first and hantei only if that is still tied, and many tournaments run it that way, but neither is a precondition: a tied match may be taken straight to a judges' decision. The app enforces only what the rule actually needs, a tied scoreline and a declared winner, so hantei is available at 0-0 or 1-1 with or without an overtime period. (In a **team** match the app does restrict it to the representative bout, because a tied individual bout there is simply a hikiwake and needs no decision.)
 
 The scoreboard marks the hantei winner with **Ht** on their side. **Ht** is **not** an ippon and is not one of the M/K/D/T/H scoring letters, it records that the referees' decision **settled the match**, determining the winner outright. Do not confuse **Ht** (hantei, which decides the match) with **H** (the hansoku ippon described under [Penalties](#penalties-hansoku)).
 
@@ -271,13 +273,16 @@ Each match has a 7-column row (plus an 8th spacer column between courts). The op
 
 Each competitor's marks read **outward-to-inward**, from their own name toward the centre `vs` column, and the two sides mirror across that centre.
 
+Both the column layout and the mark order come from the FIK *Regulations of Kendo Shiai and Shinpan* (EN, Jul 2023): **Table 2** (printed p.16), "An Example of Scoreboard Use for Dantai-shiai", lays the board out as `Order | Team name | White | Red | Team name`, and **Table 1** (printed p.15) pins the mark order by stating that "the order of placement of Yuko-datotsu marks shall be as shown in the Taisho round on Table 2".
+
+- **Slot columns are the inner ones**, the names sit on the board's outer edges and both pairs of ippon slots sit **inside**, flanking the centre `vs`. The centre line itself carries only the shared marks (**X** for hikiwake, the encho and daihyosen markers), never a competitor's points.
 - **Two scoring slots per side**, in sanbon-shobu, filling both means an outright win (2 ippon). The match winner is determined by who has more total ippon. If one side has 1 ippon and the other has 0 at time-up, the side with 1 wins.
-- **Ippon fill order, outside to inside (fixed rule)**, each side's ippons **start at the slot nearest that competitor's name (the outer edge) and fill inward toward the centre `vs`**. White's first ippon lands in its leftmost (name-side) slot and fills rightward; Red's first ippon lands in its rightmost (name-side) slot and fills leftward. Both scores therefore grow from each name toward the middle, mirrored across `vs`. This ordering is fixed and not configurable, it must never fill centre-outward on either side. (In the example above Tanaka has M then K reading inward from the left; Suzuki has D in his outer, name-side slot.)
-- **Hansoku triangle position**, the outstanding-hansoku **▲** is placed **immediately beside the competitor's name, on the inner side of the name** (between the name and that side's ippon slots). It is never mixed into the ippon slots; it hugs the name so the slots stay free to fill outward-to-inward.
+- **Ippon fill order, outside to inside (fixed rule)**, each side's ippons **start at the slot nearest that competitor's name and fill inward toward the centre `vs`**. "Outer" here means the outer of that side's **own two slots**, not the outer edge of the board (that edge carries the name). White's first ippon lands in its leftmost (name-side) slot and fills rightward; Red's first ippon lands in its rightmost (name-side) slot and fills leftward. Both scores therefore grow from each name toward the middle, mirrored across `vs`. This ordering is fixed and not configurable, it must never fill centre-outward on either side. (In the example above Tanaka has M then K reading inward from the left; Suzuki has D in his outer, name-side slot.) Table 2's Taisho row shows exactly this: Red's cell reads `T M` left to right with Red's name on the right, and the plate's own callouts label **M the first point** and **T the third**, so Red's first point is the one nearest the Red name. (The ordinals count the bout's points in the order they were scored across both competitors: Red scored the first and third, White the second, so Red still holds just two ippons in its two slots.)
+- **Hansoku triangle position**, the outstanding-hansoku **▲** is placed **between the competitor's name and that side's ippon slots**. It is never mixed into the ippon slots; it hugs the name so the slots stay free to fill outward-to-inward. In Table 2's Taisho row each ▲ sits at the name-side edge of that side's own score column, White's against the White name and Red's against the Red name, so it is outside the ippon slots but still inboard of the name.
 - **vs**, centre column, normally blank. **X** marks a hikiwake (draw).
-- **Fouls**, hansoku are tracked per side. A single outstanding hansoku displays as the **red upward triangle (▲)** next to the offending competitor's name (FIK Shinpan Management p.15, Table 1; position as above). On the second hansoku the **▲ is deleted** and 1 ippon is awarded to the opponent (recorded as **H** in one of the opponent's slots, filling outside-to-inside like any ippon), so the outstanding count is always 0 or 1, a competitor never shows two triangles. In sosai (simultaneous mutual hansoku) the ▲ marks are left in place.
+- **Fouls**, hansoku are tracked per side. A single outstanding hansoku displays as the **red upward triangle (▲)** next to the offending competitor's name (FIK Table 1, p.15, defines the ▲ mark; its placement is shown in Table 2's Taisho row: position as above, between the name and that side's slots). On the second hansoku the **▲ is deleted** and 1 ippon is awarded to the opponent (recorded as **H** in one of the opponent's slots, filling outside-to-inside like any ippon), so the outstanding count is always 0 or 1, a competitor never shows two triangles. In sosai (simultaneous mutual hansoku) the ▲ marks are left in place.
 - **Draw**, an **X** in the "vs" column, or both sides finishing with equal total ippon, marks a hikiwake. Draws only occur in pool matches.
-- **Hantei**, if a knockout match is decided by judges' decision, an **Ht** mark is placed on the winner's side to show the referees **decided the match**. **Ht** is not an ippon (distinct from **H**, the hansoku ippon), it records the match outcome, not a scored point.
+- **Hantei**, if a knockout match is decided by judges' decision, an **Ht** mark is placed on the winner's side to show the referees **decided the match**. A hantei is only taken from a tied scoreline, and since sanbon-shobu ends at 2 that means 0-0 or 1-1, so the winner always has a free slot. On the app's on-screen scoreboard **Ht** fills that slot in the same outside-to-inside order a point would, and at 1-1 the board reads `[K][ ] vs [Ht][M]`; it never sits on the centre line, which carries shared marks only. The exported Excel scoresheet writes each side's score as one cell, so there the mark trails the letters in the winner's cell (`M Ht`) rather than occupying a slot. **Ht** is not an ippon (distinct from **H**, the hansoku ippon), it records the match outcome, not a scored point.
 
 ### Team Match Scoreboard
 
@@ -291,7 +296,7 @@ A team match block has one row per individual bout plus a **summary row**. Each 
 | ... | ... | | | | | | ... |
 
 - **Summary row**, shows the aggregated **IV** (Individual Victories) and **PW** (Points Won) for each team. These are computed automatically from the bout rows below.
-- **Bout rows**, the bout number appears in both name columns. The four inner cells are ippon scoring slots (two per side), and the centre column marks draws with **X**. Each bout row follows the same individual-scoreboard conventions: ippons fill **outside-to-inside** (from each name toward the centre) and the outstanding-hansoku **▲** sits **next to the name on its inner side** (see [Individual Match Scoreboard](#individual-match-scoreboard)).
+- **Bout rows**, the bout number appears in both name columns. The four inner cells are ippon scoring slots (two per side), and the centre column marks draws with **X**. Each bout row follows the same individual-scoreboard conventions: ippons fill **outside-to-inside** (from each name toward the centre) and the outstanding-hansoku **▲** sits **between the name and that side's ippon slots** (see [Individual Match Scoreboard](#individual-match-scoreboard)).
 - If both IV and PW are equal: in pools it is a **draw**; in knockout, a **daihyosen** (representative match) is recorded as an additional bout row below the regular bouts.
 
 ### Pool Results Table
@@ -306,13 +311,13 @@ After all pool matches are played, a results table summarises each competitor's 
 
 **Team pools** use two tables stacked, ranking uses all columns hierarchically (W > L > T > IV > IL > IT > PW > PL):
 
-*Table 1, Team-level results:*
+*Team-level results:*
 
 | Team | W | L | T | Rank |
 |------|---|---|---|------|
 | (name) | team wins | team losses | team draws | auto-calculated |
 
-*Table 2, Individual aggregate stats:*
+*Individual aggregate stats:*
 
 | Team | IV | IL | IT | PW | PL |
 |------|----|----|----|----|-----|
@@ -320,7 +325,7 @@ After all pool matches are played, a results table summarises each competitor's 
 
 ### Elimination Match Scoreboard
 
-Each individual elimination match is a self-contained block. There are no draws, if tied at time-up, encho is played, and if still tied, hantei decides.
+Each individual elimination match is a self-contained block. There are no draws: if tied at time-up, encho is normally played and hantei decides if that is still tied, though a tied match may also go straight to hantei.
 
 | Row | Name (left) | | | vs | | | Name (right) |
 |---|---|---|---|---|---|---|---|
@@ -357,7 +362,7 @@ For **team elimination matches**, the block expands with sub-bout rows and a sum
 
 1. **Within regulation time**: first to 2 points wins (sanbon-shobu), or the competitor leading at time-up wins.
 2. **Draw in pools**: if the score is level (0–0 or 1–1) at time-up, it is a hikiwake.
-3. **Draw in knockout**: encho is played. If still tied after encho, **hantei** decides the winner.
+3. **Draw in knockout**: encho is normally played, and **hantei** decides if it is still tied. Encho is not a precondition, a tied match may be taken straight to hantei.
 
 ## Pool Match Order
 

@@ -6,6 +6,55 @@ This page explains how those slots are worked out, so you can check a draw befor
 
 It describes the **Mixed** format, pools followed by a knockout. A knockout-only competition has no pool finishers to place, so it seeds competitors into the bracket directly; the shiai-jo pages and the [shiai-jo count rule](#how-many-shiai-jo-a-competition-can-use) below still apply to it.
 
+## How many qualify from each pool
+
+Everything below this section assumes you already know how many competitors each pool sends up. This section is about where that number comes from.
+
+By default, every pool sends the same number of qualifiers, set by **Winners per pool** in competition setup. When pool size is set to a **minimum** number of players rather than a maximum, so pools can come out different sizes, two further options let some pools send an extra qualifier instead of leaving the difference as byes. Choose between the three under **Knockout qualifiers**, which only appears for **Mixed** competitions under that pool-size setting. See [Knockout qualifiers](run-tournament.md#knockout-qualifiers) for where this lives in the app.
+
+### Standard
+
+Every pool sends the same number of qualifiers. If those qualifiers don't fill every bracket slot, the rest are byes, allocated as described in [Byes](#byes) above. This is the default, and the only option available when pool size is set to a maximum.
+
+### Oversized pools send one extra
+
+A pool with more members than the smallest pool in the competition sends one additional qualifier, on top of the usual number. The extra qualifier is placed in a different part of the bracket from its own pool's other qualifier, and always fights in the first round: it never receives a bye. This offsets the extra pool matches that pool's members had to play in order to qualify.
+
+The [oversized-pool bye priority](#byes) described above does not apply under this option. Being oversized earns a pool's winner no priority for an ordinary bye; the extra qualifier is the pool's compensation instead.
+
+Requires **Winners per pool** set to 1. Because it needs somewhere in the bracket to place that extra qualifier without disturbing the rest of it, this option currently needs a competition with enough pools on each shiai-jo to work with. On a small competition it may not be able to build a draw at all; when that happens, the app tells you so rather than guessing a placement, and Standard or Fit the knockout exactly are both still available.
+
+### Fit the knockout exactly
+
+Pool sizes are chosen so that pool winners, plus a second place drafted from a handful of the largest pools, exactly fill the bracket. Nobody gets a bye, and every qualifier fights in the first round.
+
+Requires **Winners per pool** set to 1. At four shiai-jo, a small set of entrant counts cannot be built this way, because the drafted second places cannot be split evenly between the two halves of the bracket. If your entrant count hits this, the app explains what's wrong; adding or removing one entrant, or changing the shiai-jo count, resolves it.
+
+### Worked examples: how many qualify
+
+These figures are taken directly from the generator, at a minimum pool size of 3.
+
+#### 11 entrants, 2 shiai-jo
+
+| Mode | Pools | Qualifiers | Bracket size | Byes | Rounds |
+|---|---|---|---|---|---|
+| Standard | 3 | 3 | 4 | 1 | 2 |
+| Oversized pools send one extra | 3 | see note below | n/a | n/a | n/a |
+| Fit the knockout exactly | 3 | 4 | 4 | 0 | 2 |
+
+!!! note "Why the middle row has no numbers"
+    Two of these three pools are oversized, and there are only two shiai-jo to spread them across, so both end up hosted by the same one. That leaves nowhere to place the extra qualifier without disturbing the rest of that shiai-jo's bracket, so the app refuses the draw and explains why rather than guessing a placement. Standard and Fit the knockout exactly both build correctly at this size; the next example shows Oversized pools send one extra working on a bigger field. Under Fit the knockout exactly here, one of the three pools sends a second qualifier (drafted rather than crossed in), which is what keeps the bracket at 4 slots with no byes instead of growing to 8.
+
+#### 104 entrants, 4 shiai-jo
+
+| Mode | Pools | Qualifiers | Bracket size | Byes | Rounds |
+|---|---|---|---|---|---|
+| Standard | 34 | 34 | 64 | 30 | 6 |
+| Oversized pools send one extra | 34 | 36 | 64 | 28 | 6 |
+| Fit the knockout exactly | 32 | 32 | 32 | 0 | 5 |
+
+At this size, two of the 34 pools are oversized. Oversized pools send one extra keeps all 34 pools and adds their two extra qualifiers, shrinking the bye count from 30 to 28 without changing the bracket size. Fit the knockout exactly instead forms 32 pools rather than 34, which happens to be a power of two on its own, so no second places need drafting and byes drop to zero with a smaller, one-round-shorter bracket.
+
 ## Shiai-jo blocks
 
 Each shiai-jo gets its own block of the bracket, and it gets exactly one. Pools are allocated to shiai-jo in order: the first pools to shiai-jo A, the next to B, and so on. The qualifiers from those pools fill that shiai-jo's block. On fewer than four shiai-jo, and with two or more qualifiers per pool, that block is subdivided further so the draw keeps the shape a larger competition would have; see [One or two shiai-jo](#one-or-two-shiai-jo).

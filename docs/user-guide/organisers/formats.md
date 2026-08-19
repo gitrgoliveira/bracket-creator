@@ -36,6 +36,8 @@ Because those blocks merge in pairs, a mixed competition must be assigned **1, 2
 
 This applies to the competition's own allocation, not to the venue. A hall with three shiai-jo is normal and stays as it is: it runs each of its competitions on 1 or 2 of the three, and can run two competitions side by side to keep all three busy. Playoffs competitions follow the same rule, because they also split their bracket across shiai-jo. League and Swiss competitions produce no bracket and can use any number the tournament has. See [How many shiai-jo a competition can use](knockout-draw.md#how-many-shiai-jo-a-competition-can-use).
 
+By default every pool sends the same number of qualifiers, set by **Winners per pool**. With pool size set to a minimum, two further options let oversized pools send an extra qualifier instead of leaving the difference as byes, or let pool sizes be chosen so the qualifiers fill the bracket exactly. See [How many qualify from each pool](knockout-draw.md#how-many-qualify-from-each-pool).
+
 ## League
 
 League is a full round-robin: every competitor meets every other competitor. Final standings come from the accumulated results across all matches; there is no knockout stage.

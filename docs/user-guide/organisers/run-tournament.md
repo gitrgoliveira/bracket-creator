@@ -119,6 +119,12 @@ Such a competition is not broken. It loads, its matches and results are intact, 
 
 What you cannot do is draw or start it. **Generate draw** and **Start competition** are disabled with the reason shown, and the app refuses the same action from anywhere else, until you reassign its shiai-jo to 1, 2, 4, 8 or 16.
 
+### Knockout qualifiers
+
+For a **Mixed** competition with **Pool size is a** set to **minimum**, a **Knockout qualifiers** control appears alongside **Players per pool** and **Winners per pool**, on both the competition create form and its Settings page. It offers three options: **Standard** (every pool sends the same number of qualifiers), **Oversized pools send one extra**, and **Fit the knockout exactly**. See [How many qualify from each pool](knockout-draw.md#how-many-qualify-from-each-pool) for what each one does, with worked examples.
+
+Selecting either of the two non-standard options sets **Winners per pool** to 1 and disables the field, because both currently require it; switching back to Standard makes the field editable again. Below the options, a preview line updates as you adjust pool size and roster, reading something like "34 pools -> 36 qualifiers -> 64-slot knockout (28 byes)" for whichever option is selected. On the create form the preview is a placeholder until the competition has participants; on the Settings page it previews against the real roster, and is locked once the competition reaches `draw-ready`, alongside the rest of the pool configuration.
+
 ### Adding participants
 
 The participant setup view has two panels.

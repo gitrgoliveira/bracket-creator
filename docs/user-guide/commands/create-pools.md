@@ -16,6 +16,7 @@ bracket-creator create-pools [flags]
 | `--players` | `-p` | `3` | Minimum players per pool |
 | `--max-players` | `-m` | (none) | Maximum players per pool |
 | `--pool-winners` | `-w` | `2` | Players that qualify from each pool, see [Qualifiers per pool](#qualifiers-per-pool) |
+| `--extra-qualifiers` | (none) | `""` | Send extra qualifiers from oversized pools, or fit pool sizes exactly to the bracket, see [Extra qualifiers](#extra-qualifiers) |
 | `--round-robin` | `-r` | `false` | Force full round-robin in every pool |
 | `--team-matches` | `-t` | `0` | Players per team (0 = individual tournament) |
 | `--with-zekken-name` | `-z` | `false` | Use second CSV column as zekken display name |
@@ -82,6 +83,26 @@ This is a per-tournament-file rule, not a rule about your venue. A hall with thr
 Higher values continue the same rotation, but a bracket has only four quarters, so from the fifth qualifier per pool onward two of a pool's qualifiers must share one.
 
 Byes follow from the size of each block rather than from the total field: a block with an even number of competitors gets none at all, and a block with an odd number gets exactly one, awarded first to a seeded pool's winner. See [The knockout draw](../organisers/knockout-draw.md) for the full rules and worked examples.
+
+## Extra qualifiers
+
+`--extra-qualifiers` changes how many finishers each pool sends up, instead of every pool sending the same number:
+
+| Value | Behaviour |
+|-------|-----------|
+| `""` (default) | Standard: every pool sends `--pool-winners` qualifiers; unfilled bracket slots become byes. |
+| `larger-pools` | A pool larger than the minimum pool size sends one extra qualifier, crossed to a neighbouring shiai-jo, on top of the usual number. It always fights in the first round and never byes. |
+| `fill-bracket` | Pools are cut so that pool winners, plus a second place drafted from a handful of the largest pools, exactly fill the bracket with no byes. |
+
+Both `larger-pools` and `fill-bracket` require `-p` (minimum pool size, not `-m`) and `-w 1`; the command refuses any other combination. See [How many qualify from each pool](../organisers/knockout-draw.md#how-many-qualify-from-each-pool) for the full explanation and worked examples, including when each mode can and cannot build a draw for a given entrant count and shiai-jo count.
+
+Minimum pool size 3, one qualifier per pool, oversized pools send one extra:
+
+```bash
+bracket-creator create-pools \
+  -f participants.csv -o tournament.xlsx \
+  -p 3 -w 1 -c 4 --extra-qualifiers larger-pools
+```
 
 ## Seeding
 

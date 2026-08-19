@@ -206,7 +206,9 @@ func buildPerPoolDraw(pools []Pool, defaultWinners int, overrides map[int]int, p
 // qualifier elsewhere never disturbs another court's own layout -- Men court
 // B, which hosts oversized pool 22's own winner but never its crossed-out
 // 2nd, must stay on uniformBigBlockSlots exactly as LP-2 left it); a court
-// with a crossed-in occupant goes through the LP-3a mixed-rank layout below.
+// with a crossed-in occupant goes through the LP-3a mixed-rank layout below,
+// falling back to LP-3b's small-block layout when the destination is too
+// small for that (crossedBigBlockSlots' own domain is total >= 9).
 func buildPerPoolCourtBlock(home []drawOccupant, crossed *drawOccupant, pools []Pool, court, numCourts int) *Node {
 	if crossed == nil {
 		return buildBlock(home, pools, false)
@@ -214,11 +216,11 @@ func buildPerPoolCourtBlock(home []drawOccupant, crossed *drawOccupant, pools []
 	if len(home) == 0 {
 		return nil // a lone crossed occupant with no home pools: unevidenced
 	}
-	slots := crossedBigBlockSlots(home, *crossed, crossedHalfIsTop(court, numCourts), pools)
-	if slots == nil {
-		return nil
+	top := crossedHalfIsTop(court, numCourts)
+	if slots := crossedBigBlockSlots(home, *crossed, top, pools); slots != nil {
+		return BuildSlotTree(slots)
 	}
-	return BuildSlotTree(slots)
+	return buildSmallCrossedCourtBlock(home, *crossed, top, pools)
 }
 
 // crossedHalfIsTop reports whether the INBOARD half of a crossed-hosting
@@ -309,9 +311,25 @@ func crossedBigBlockSlots(homes []drawOccupant, crossed drawOccupant, crossedHal
 // their mirror orientations (h=6 bottom, h=7 top) are consequently
 // EXTRAPOLATED from bigBlockHalfRoles' own mirroring, not independently
 // verified by any sheet.
+//
+// The placement rule itself (pairs[0]-for-top/pairs[last]-for-bottom, crossed
+// takes the higher slot) is factored out to spliceCrossedIntoRoles so LP-3b's
+// crossedPortionSlots (below) shares it rather than re-deriving it at the
+// smaller, quarter-scale role table.
 func crossedHalfSlots(homes []drawOccupant, crossed drawOccupant, top bool) []string {
-	h := len(homes) + 1
-	roles := bigBlockHalfRoles(h, top)
+	return spliceCrossedIntoRoles(bigBlockHalfRoles(len(homes)+1, top), homes, crossed, top)
+}
+
+// spliceCrossedIntoRoles seats crossed into whichever role table it is
+// handed -- bigBlockHalfRoles (crossedHalfSlots, 9-16 occupant blocks) or
+// smallCrossedPortionRoles (crossedPortionSlots, LP-3b, <=8 occupant blocks)
+// -- by the SAME rule either scale uses: find the round-1 MATCH pairs (both
+// slots real), take the one nearest this half/portion's own OUTER edge
+// (pairs[0] for top, pairs[len-1] for bottom -- exactly where the role
+// table's own named byes already sit at the finer scale too), and give
+// crossed that pair's HIGHER occupant-index slot. See crossedHalfSlots'
+// comment for where this was verified.
+func spliceCrossedIntoRoles(roles []int, homes []drawOccupant, crossed drawOccupant, top bool) []string {
 	if roles == nil {
 		return nil
 	}
@@ -323,7 +341,7 @@ func crossedHalfSlots(homes []drawOccupant, crossed drawOccupant, top bool) []st
 		}
 	}
 	if len(pairs) == 0 {
-		return nil // no round-1 fighting slot in this half at all (e.g. h=4)
+		return nil // no round-1 fighting slot in this half/portion at all (e.g. h=4)
 	}
 	chosen := pairs[0]
 	if !top {
@@ -336,7 +354,7 @@ func crossedHalfSlots(homes []drawOccupant, crossed drawOccupant, top bool) []st
 		hi = chosen[0]
 	}
 
-	labels := make([]string, h)
+	labels := make([]string, len(homes)+1)
 	next := 0
 	for i := range labels {
 		if i == hi {
@@ -357,4 +375,150 @@ func crossedHalfSlots(homes []drawOccupant, crossed drawOccupant, top bool) []st
 		}
 	}
 	return out
+}
+
+// ---------------------------------------------------------------------------
+// Small crossed-hosting blocks (bead bc-qual, phase LP-3b)
+// ---------------------------------------------------------------------------
+//
+// crossedBigBlockSlots (above) needs bigBlockHalfRoles' h in [4,8] on BOTH
+// the crossed-hosting half AND its sibling at once -- it splits a block into
+// two halves of up to 8 occupants each, so it only has room to operate from
+// total = 9 up. A destination court whose TOTAL (home 1sts plus the one
+// crossed-in qualifier) is 8 or fewer therefore returned nil and the whole
+// larger-pools draw refused to build, even though the 33rd EKC 2025 Junior
+// Individual Male sheet (jim2025draw-04.png) witnesses exactly this shape:
+// 18 pools, courts A(1-5) B(6-9) C(10-13) D(14-18), oversized pools 8
+// (court B) and 11 (court C) whose 2nds cross B->A and C->D, giving 6-total
+// destination blocks (5 home + 1 crossed) on both A and D.
+//
+// buildSmallCrossedCourtBlock is buildPerPoolCourtBlock's fallback for this
+// size range: it splits the total into a QUARTER-sized top portion
+// (floor(total/2)) and bottom portion (ceil(total/2)) -- one level finer
+// than crossedBigBlockSlots' half split, since a total this small fits in a
+// SINGLE 8-slot region rather than two -- and builds each portion
+// independently before joining them. The portion WITHOUT the crossed
+// occupant is unchanged buildBlock (it already handles any home-only count
+// correctly; the pure-home court blocks B and C on the same sheet already
+// went through it unmodified). The portion WITH the crossed occupant goes
+// through crossedPortionSlots, this size range's counterpart of
+// crossedHalfSlots, built on smallCrossedPortionRoles rather than
+// bigBlockHalfRoles.
+//
+// Evidenced ONLY at total=6: court A splits 3 (home-only, byes P1) + 3 (2
+// home + 1 crossed, byes P4), court D splits 3 (2 home + 1 crossed, byes
+// P14) + 3 (home-only, byes P16). Both give the crossed-hosting portion
+// exactly 3 occupants -- smallCrossedPortionRoles' floor. Nothing smaller
+// is evidenced, and nothing smaller COULD satisfy rule 3 (bc-qual): seating
+// the crossed occupant in a fighting slot while a DIFFERENT, home occupant
+// takes that portion's bye needs a bye-home, a fighting-home and the
+// crossed occupant all at once -- three real occupants minimum. A
+// 2-occupant portion (1 home + 1 crossed) has no home left over for the
+// bye once the crossed occupant's fighting partner is assigned, so it would
+// have to either bye the crossed occupant outright (rule 3 forbids this) or,
+// by the same "half-full quadrant" shape bigBlockHalfRoles' own h=4 case
+// uses, pair it into a LEAF-LEAF riser that skips round 1 entirely (rule 3
+// forbids this too). A 1-occupant portion (the crossed occupant alone, no
+// home at all) has no fighting partner full stop. Both are refused via
+// smallCrossedPortionRoles rather than guessing at an unevidenced shape.
+// m=4 (a fully-packed portion, no bye slot to misassign) is the one
+// extension past direct evidence: nothing remains ambiguous once a portion
+// is completely full of real occupants, so it reuses spliceCrossedIntoRoles'
+// own pairs[0]-for-top/pairs[last]-for-bottom/higher-slot convention rather
+// than leaving a structurally trivial case unbuilt.
+//
+// The floor in TOTAL terms (this function's whole domain is total <= 8; an
+// out-of-range total is refused up front) is asymmetric: total >= 5 when the
+// crossed occupant lands in the BOTTOM portion, which always gets the
+// larger ceil(total/2) share; total >= 6 when it lands in the smaller,
+// floor(total/2) TOP share. crossedHalfIsTop (shared with
+// crossedBigBlockSlots) names which. Both evidenced courts sit at the
+// tighter bound with an even 3/3 split, so the asymmetry itself falls
+// straight out of the size arithmetic rather than being independently
+// chosen or tested.
+//
+// ONE cell diverges from the sheet on aka/shiro order, the same class of
+// divergence draw_ekc_2026_individual_test.go's F9 comment already accepts:
+// court A's crossed-hosting quarter prints "P8-2nd v P5-1st" (crossed
+// FIRST) on the sheet, but court D's structurally identical quarter prints
+// "P15-1st v P11-2nd" (crossed SECOND -- spliceCrossedIntoRoles' own
+// "always the higher slot" rule). The two cells of this ONE sheet disagree
+// with each other, so a single rule cannot match both; production keeps the
+// established, majority convention (crossed always the higher/later slot,
+// matching all four 2026 cells plus this sheet's own court D) and accepts
+// the one-cell flip against court A. Side order carries no seeding meaning
+// on these sheets.
+func buildSmallCrossedCourtBlock(homes []drawOccupant, crossed drawOccupant, crossedTop bool, pools []Pool) *Node {
+	sorted := sortBySeedThenPoolOrder(homes, pools)
+	total := len(sorted) + 1
+	if total > 8 {
+		return nil // crossedBigBlockSlots' domain, not this function's
+	}
+	topCount, bottomCount := total/2, total-total/2
+
+	var topHomeCount, bottomHomeCount int
+	if crossedTop {
+		topHomeCount, bottomHomeCount = topCount-1, bottomCount
+	} else {
+		topHomeCount, bottomHomeCount = topCount, bottomCount-1
+	}
+	if topHomeCount < 0 || bottomHomeCount < 0 || topHomeCount+bottomHomeCount != len(sorted) {
+		return nil
+	}
+	top, bottom := sorted[:topHomeCount], sorted[topHomeCount:]
+
+	var topNode, bottomNode *Node
+	if crossedTop {
+		slots := crossedPortionSlots(top, crossed, true)
+		if slots == nil {
+			return nil
+		}
+		topNode = BuildSlotTree(slots)
+		bottomNode = buildBlock(bottom, pools, false)
+	} else {
+		topNode = buildBlock(top, pools, false)
+		slots := crossedPortionSlots(bottom, crossed, false)
+		if slots == nil {
+			return nil
+		}
+		bottomNode = BuildSlotTree(slots)
+	}
+	return joinNodes(topNode, bottomNode)
+}
+
+// crossedPortionSlots is crossedHalfSlots' LP-3b counterpart at quarter
+// scale: it seats one crossed occupant among a QUARTER's home 1sts (up to 4
+// occupants, not up to 8) via smallCrossedPortionRoles and
+// spliceCrossedIntoRoles.
+func crossedPortionSlots(homes []drawOccupant, crossed drawOccupant, top bool) []string {
+	return spliceCrossedIntoRoles(smallCrossedPortionRoles(len(homes)+1), homes, crossed, top)
+}
+
+// smallCrossedPortionRoles is bigBlockHalfRoles' LP-3b counterpart, scaled
+// down from an 8-slot half to a 4-slot QUARTER: the per-occupant-count (m)
+// shape of one portion of a buildSmallCrossedCourtBlock block, as a 4-slot
+// array of occupant indices (-1 for an empty slot), occupants numbered
+// 0..m-1 in sortBySeedThenPoolOrder order.
+//
+//   - m=3: one named bye plus one round-1 match -- the ONLY evidenced shape
+//     (both courts of the 33rd EKC 2025 Junior Individual Male sheet), and
+//     the SAME array regardless of top/bottom: both evidenced cells (court
+//     A's bottom-hosted quarter, court D's top-hosted quarter) place the bye
+//     first and the match second, so there is nothing to mirror -- unlike
+//     bigBlockHalfRoles' h=5, no leaf-leaf component exists at this size for
+//     an orientation flip to act on.
+//   - m=4: two round-1 matches, no bye at all (trivial; not exercised by the
+//     sheet, whose only destination-block total is 6, but a fully-packed
+//     quarter has no bye to misplace and needs no table entry beyond this).
+//
+// m=1 and m=2 return nil: see buildSmallCrossedCourtBlock's doc comment for
+// why neither can seat a crossed occupant without breaking rule 3.
+func smallCrossedPortionRoles(m int) []int {
+	switch m {
+	case 3:
+		return []int{0, -1, 1, 2}
+	case 4:
+		return []int{0, 1, 2, 3}
+	}
+	return nil
 }

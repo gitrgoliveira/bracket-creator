@@ -154,20 +154,26 @@ func createTournamentHandler(c *gin.Context) {
 		}
 
 		o := &poolOptions{
-			singleTree:      singleTree,
-			withZekkenName:  withZekkenName,
-			engi:            engi,
-			naginata:        naginata,
-			determined:      determined,
-			teamMatches:     teamMatches,
-			roundRobin:      roundRobin,
-			poolFormat:      poolFormat,
-			numPlayers:      numPlayers,
-			maxPlayers:      maxPlayers,
-			poolWinners:     winnersPerPool,
-			courts:          courts,
-			titlePrefix:     titlePrefix,
-			numberPrefix:    numberPrefix,
+			singleTree:     singleTree,
+			withZekkenName: withZekkenName,
+			engi:           engi,
+			naginata:       naginata,
+			determined:     determined,
+			teamMatches:    teamMatches,
+			roundRobin:     roundRobin,
+			poolFormat:     poolFormat,
+			numPlayers:     numPlayers,
+			maxPlayers:     maxPlayers,
+			poolWinners:    winnersPerPool,
+			courts:         courts,
+			titlePrefix:    titlePrefix,
+			numberPrefix:   numberPrefix,
+			// bc-qual: "" (standard, default) or "larger-pools". Validated
+			// inside createPools via state.ValidateExtraQualifiers (the same
+			// rule the --extra-qualifiers CLI flag and internal/engine use),
+			// so an invalid combination surfaces below as the same 400 every
+			// other createPools validation failure does.
+			extraQualifiers: c.PostForm("extraQualifiers"),
 			SeedAssignments: seedAssignments,
 		}
 		o.outputWriter = inMemoryWriter

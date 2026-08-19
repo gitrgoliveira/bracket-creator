@@ -121,8 +121,14 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	// write against -- taken from the skeleton rather than recomputed here, so
 	// "computed ONCE and handed to every overlay" is enforced by the call shape
 	// instead of by two calls happening to be given the same arguments.
+	// MatchWinnerRanksNeeded (not EffectivePoolWinners() directly): mirrors
+	// the blank-template export (internal/engine/export.go) so the two
+	// exports of one competition register the SAME matchWinners ranks --
+	// under bc-qual larger-pools, an oversized pool's crossed 2nd needs a
+	// matchWinners["<pool>-2nd"] entry too, or its cell renders as inert
+	// literal text (or a broken CONCATENATE formula) instead of a live link.
 	matchWinners, poolsByCourt := helper.PrintPoolMatches(
-		f, pools, comp.TeamSize, comp.EffectivePoolWinners(),
+		f, pools, comp.TeamSize, comp.MatchWinnerRanksNeeded(),
 		courts, courtOfPool, comp.Mirror, poolCoords, playerCoords, comp.Engi,
 	)
 	if err := overlayPoolScores(f, pools, matchResultByID, poolOrdinals, comp.TeamSize, comp.Mirror, poolsByCourt, comp.Engi); err != nil {

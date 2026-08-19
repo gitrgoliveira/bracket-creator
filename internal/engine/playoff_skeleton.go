@@ -55,11 +55,86 @@ func playoffLeaves(store *state.Store, comp *state.Competition, pools []helper.P
 
 // poolDraw builds the pool-fed court-first draw, or nil when the competition
 // has no pool phase to draw from.
+//
+// Re-derivation at EXPORT time (this function's only caller, EliminationDraw)
+// is best-effort by contract (see EliminationDraw's doc comment: it "equals
+// the persisted bracket only while [pools, poolWinners, courts] are
+// unchanged since the draw"), so a larger-pools shape that buildPoolFedDraw
+// cannot build (outOfScope) degrades to nil here -- "nothing to render",
+// the same contract every other empty/undrawable case on this path already
+// has -- rather than an error this function has no way to report. The one
+// invariant that MUST hold is bc-qual LP-3a review item (b)'s: never
+// silently substitute the UNIFORM builder for a failed per-pool one, which
+// would render an Excel sheet that seats the wrong number of qualifiers per
+// pool and drops the crossing without telling anyone. buildPoolFedDraw
+// enforces that by construction: its larger-pools branch only ever calls
+// BuildKnockoutDrawPerPool, never BuildKnockoutDraw as a fallback.
 func poolDraw(comp *state.Competition, pools []helper.Pool, numCourts int) *helper.KnockoutDraw {
 	if len(pools) == 0 {
 		return nil
 	}
-	return helper.BuildKnockoutDraw(pools, comp.EffectivePoolWinners(), numCourts)
+	draw, _ := buildPoolFedDraw(comp, pools, numCourts)
+	return draw
+}
+
+// buildPoolFedDraw is the SINGLE place a pool-fed knockout draw is built from
+// a state.Competition plus its currently loaded pools, honoring
+// comp.ExtraQualifiers (bc-qual LP-3c). Both callers (poolDraw above, for
+// export re-derivation, and generatePoolPreviewBracket in bracket.go, for
+// the generate-draw / preview-bracket persist path) go through this so they
+// cannot independently drift on which builder a given competition uses --
+// the same invariant mp-ndfu already enforces for the plain uniform builder.
+//
+// Standard mode ("" / state.ExtraQualifiersNone) is exactly the pre-bc-qual
+// call: helper.BuildKnockoutDraw with one poolWinners for every pool. This
+// branch is untouched by bc-qual (same function, same arguments), which is
+// what keeps every existing uniform-mode draw byte-identical to before.
+//
+// state.ExtraQualifiersLargerPools instead builds a pool-index ->
+// qualifier-count override map from comp.QualifiersForPool (state's single
+// owner of the oversized-pool arithmetic, bc-qual LP-3b) and calls
+// helper.BuildKnockoutDrawPerPool. A pool whose QualifiersForPool differs
+// from the uniform poolWinners is included in the map; every other pool is
+// omitted, which BuildKnockoutDrawPerPool's own perPoolWinners already
+// treats identically to an explicit entry equal to the default
+// (draw_perpool.go).
+//
+// outOfScope is true exactly when larger-pools was requested and the
+// per-pool builder returned nil for a shape draw_perpool.go's file comment
+// marks out of scope (more than one extra qualifier from a single pool, a
+// court count with no same-half neighbour to cross to, two crossings into
+// one destination court, ...). Callers MUST NOT treat that nil as "nothing
+// to draw" and fall back to the uniform builder -- see poolDraw and
+// generatePoolPreviewBracket's own handling of it.
+func buildPoolFedDraw(comp *state.Competition, pools []helper.Pool, numCourts int) (draw *helper.KnockoutDraw, outOfScope bool) {
+	poolWinners := comp.EffectivePoolWinners()
+	if comp.ExtraQualifiers != state.ExtraQualifiersLargerPools {
+		return helper.BuildKnockoutDraw(pools, poolWinners, numCourts), false
+	}
+	overrides := extraQualifierOverrides(comp, pools, poolWinners)
+	d := helper.BuildKnockoutDrawPerPool(pools, poolWinners, overrides, numCourts)
+	return d, d == nil
+}
+
+// extraQualifierOverrides builds the pool-index -> qualifier-count map
+// helper.BuildKnockoutDrawPerPool expects, from comp.QualifiersForPool
+// (state's single owner of the oversized-pool arithmetic; see its doc
+// comment for the exact oversized test). A pool is included only when its
+// count differs from the uniform poolWinners -- an entry that repeats the
+// default would be redundant, not wrong (BuildKnockoutDrawPerPool's
+// perPoolWinners falls back to the default for anything absent from the
+// map), but omitting it keeps the map as small as the "overrides" name implies.
+func extraQualifierOverrides(comp *state.Competition, pools []helper.Pool, poolWinners int) map[int]int {
+	var overrides map[int]int
+	for i, p := range pools {
+		if w := comp.QualifiersForPool(p); w != poolWinners {
+			if overrides == nil {
+				overrides = make(map[int]int, len(pools))
+			}
+			overrides[i] = w
+		}
+	}
+	return overrides
 }
 
 // EliminationDraw returns the knockout tree AND its per-shiaijo regions for a

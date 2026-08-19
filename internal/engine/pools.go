@@ -81,6 +81,19 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 				return validationErrorf("mixed (Pools + Knockout) competition %s: pool %q has only %d participant(s) but %d advance to the knockout (PoolWinners=%d), every pool needs at least PoolWinners participants; reduce PoolWinners, adjust PoolSize/pool-size-mode, or add participants", comp.ID, p.PoolName, len(p.Players), poolWinners, poolWinners)
 			}
 		}
+
+		// bc-qual LP-3c: defense-in-depth boundary check. ExtraQualifiers has
+		// no handler-side validation yet (bc-qual LP-5 adds the admin PUT
+		// path), so this generate-draw pipeline -- the one place a mixed
+		// competition's knockout actually gets built -- MUST validate it
+		// itself rather than trust it arrived pre-checked. Runs here, not
+		// earlier, so the message can cite the pools that were actually
+		// formed; it must still run BEFORE SavePools below, so an invalid
+		// setting aborts before anything is persisted (matching the two
+		// checks above).
+		if err := state.ValidateExtraQualifiers(comp.ExtraQualifiers, comp.PoolSizeMode, poolWinners); err != nil {
+			return wrapValidationErrorf(err, "competition %s cannot start: %s", comp.ID, err.Error())
+		}
 	}
 
 	if comp.NumberPrefix != "" {

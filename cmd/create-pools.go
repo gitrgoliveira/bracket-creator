@@ -8,28 +8,37 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/excel"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
+	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/spf13/cobra"
 )
 
 type poolOptions struct {
-	numPlayers      int
-	maxPlayers      int
-	poolWinners     int
-	teamMatches     int
-	courts          int
-	filePath        string
-	outputPath      string
-	seedsPath       string
-	outputWriter    *bufio.Writer
-	roundRobin      bool
-	poolFormat      string // "" / "full" → legacy roundRobin switch; "partial" → path-graph
-	withZekkenName  bool
-	singleTree      bool
-	determined      bool
-	engi            bool // engi (kata) competition: pair rosters + engi standings formulas. Set ONLY by the web /create handler (mobile-app blank-template download); deliberately NOT a CLI flag (owner decision: no new CLI options).
-	naginata        bool // naginata: adds a 3rd-place bronze block after elimination matches. Web-handler-only, same as engi.
-	titlePrefix     string
-	numberPrefix    string
+	numPlayers     int
+	maxPlayers     int
+	poolWinners    int
+	teamMatches    int
+	courts         int
+	filePath       string
+	outputPath     string
+	seedsPath      string
+	outputWriter   *bufio.Writer
+	roundRobin     bool
+	poolFormat     string // "" / "full" → legacy roundRobin switch; "partial" → path-graph
+	withZekkenName bool
+	singleTree     bool
+	determined     bool
+	engi           bool // engi (kata) competition: pair rosters + engi standings formulas. Set ONLY by the web /create handler (mobile-app blank-template download); deliberately NOT a CLI flag (owner decision: no new CLI options).
+	naginata       bool // naginata: adds a 3rd-place bronze block after elimination matches. Web-handler-only, same as engi.
+	titlePrefix    string
+	numberPrefix   string
+	// extraQualifiers selects how many finishers a pool sends to the
+	// knockout beyond poolWinners (bc-qual, --extra-qualifiers): "" (default,
+	// state.ExtraQualifiersNone) or "larger-pools"
+	// (state.ExtraQualifiersLargerPools). Validated by
+	// state.ValidateExtraQualifiers, the same function internal/engine and
+	// internal/state use, so the rule is stated once (state.ExtraQualifiersFillBracket
+	// is a recognised value there but always rejected: LP-4 is not implemented).
+	extraQualifiers string
 	SeedAssignments []domain.SeedAssignment
 }
 
@@ -59,6 +68,7 @@ func newCreatePoolCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&o.titlePrefix, "title-prefix", "", "", "title prefix for the tournament (default \"\")")
 	cmd.Flags().StringVarP(&o.seedsPath, "seeds", "", "", "CSV file mapping exact participant names to their initial seed rank")
 	cmd.Flags().StringVarP(&o.numberPrefix, "number-prefix", "n", "", "Assign consecutive numbers with this letter prefix (e.g. 'K' produces K1, K2, ...)")
+	cmd.Flags().StringVarP(&o.extraQualifiers, "extra-qualifiers", "", "", "how many finishers each pool sends to the knockout: \"\" (standard, default) or \"larger-pools\" (a pool larger than the minimum sends one extra qualifier, crossed to a neighbouring shiaijo); requires minimum-players-per-pool sizing (--players, not --max-players) and --pool-winners 1")
 
 	cmd.MarkFlagsMutuallyExclusive("players", "max-players")
 
@@ -141,6 +151,19 @@ func (o *poolOptions) createPools(entries []string) error {
 	}
 
 	// validation
+	//
+	// extraQualifiers is validated up front, against the CLI's own view of
+	// pool-size mode (isMax) and pool-winners count, via state's single
+	// owner of the rule (state.ValidateExtraQualifiers) rather than
+	// restating it here: min-mode-only, poolWinners==1 for larger-pools, and
+	// fill-bracket rejected outright (LP-4 not yet implemented).
+	poolSizeModeForValidation := "min"
+	if isMax {
+		poolSizeModeForValidation = "max"
+	}
+	if err := state.ValidateExtraQualifiers(o.extraQualifiers, poolSizeModeForValidation, o.poolWinners); err != nil {
+		return err
+	}
 	if len(entries) < o.poolWinners {
 		return fmt.Errorf("number of entries must be higher than number of winners per pool")
 	}
@@ -238,14 +261,61 @@ func (o *poolOptions) createPools(entries []string) error {
 	} else {
 		helper.CreatePoolMatches(pools)
 	}
-	matchWinners, _ := helper.PrintPoolMatches(f, pools, o.teamMatches, o.poolWinners, courtNames, nil, true, poolCoords, playerCoords, o.engi)
+	// MatchWinnerRanksNeeded, not o.poolWinners directly: under
+	// --extra-qualifiers larger-pools, an oversized pool's crossed 2nd needs
+	// a matchWinners["<pool>-2nd"] entry too, or the Tree/Elimination sheets
+	// print it as inert literal text (or a broken CONCATENATE formula on the
+	// Elimination Matches sheet) instead of a live link to the pool's actual
+	// result. Reuses state's single owner of the rule (mirrors the engine's
+	// two Excel export paths) rather than restating "+1" here.
+	// MatchWinnerRanksNeeded, not o.poolWinners directly: under
+	// --extra-qualifiers larger-pools, an oversized pool's crossed 2nd needs
+	// a matchWinners["<pool>-2nd"] entry too, or the Tree/Elimination sheets
+	// print it as inert literal text (or a broken CONCATENATE formula on the
+	// Elimination Matches sheet) instead of a live link to the pool's actual
+	// result. Reuses state's single owner of the rule (mirrors the engine's
+	// two Excel export paths) rather than restating "+1" here.
+	printPoolMatchesWinners := (state.Competition{PoolWinners: o.poolWinners, ExtraQualifiers: o.extraQualifiers}).MatchWinnerRanksNeeded()
+	matchWinners, _ := helper.PrintPoolMatches(f, pools, o.teamMatches, printPoolMatchesWinners, courtNames, nil, true, poolCoords, playerCoords, o.engi)
 
 	// Court-first pool-to-knockout draw (specs/007-ekc-draw): one bracket
 	// region per shiaijo, 2nd places crossing to the partner court, byes
 	// allocated inside each region by seed then pool load.
-	draw := helper.BuildKnockoutDraw(pools, o.poolWinners, o.courts)
-	if draw == nil {
-		return fmt.Errorf("could not build a knockout draw from %d pools with %d winners per pool", len(pools), o.poolWinners)
+	//
+	// state.ExtraQualifiersLargerPools (bc-qual --extra-qualifiers) sends a
+	// SECOND qualifier from every oversized pool, crossed to a neighbouring
+	// shiaijo (helper.BuildKnockoutDrawPerPool), instead of the uniform
+	// one-qualifier-per-pool draw. The per-pool qualifier counts reuse
+	// state.Competition.QualifiersForPool -- the single owner of the
+	// oversized-pool arithmetic -- via cliExtraQualifierOverrides, rather
+	// than restating that rule here.
+	var draw *helper.KnockoutDraw
+	// totalQualifiers feeds the Time Estimator sheet below (FillEstimations
+	// derives elimination-round match count from finalist count - 1); it
+	// starts at the uniform count and larger-pools mode adds each oversized
+	// pool's extra qualifier on top, so the estimate reflects the actual
+	// draw size rather than silently under-counting the extras.
+	totalQualifiers := len(pools) * o.poolWinners
+	if o.extraQualifiers == state.ExtraQualifiersLargerPools {
+		overrides := cliExtraQualifierOverrides(pools, activePoolSize, o.poolWinners)
+		for _, w := range overrides {
+			totalQualifiers += w - o.poolWinners
+		}
+		draw = helper.BuildKnockoutDrawPerPool(pools, o.poolWinners, overrides, o.courts)
+		if draw == nil {
+			// bc-qual LP-3a review item (b): NEVER fall back to the uniform
+			// builder here -- that would silently seat the wrong number of
+			// qualifiers per pool and drop the crossing the operator asked
+			// for. This shape (e.g. a court count with no same-half
+			// neighbour to cross to) is outside what larger-pools currently
+			// supports; report it plainly instead of guessing.
+			return fmt.Errorf("could not build a larger-pools knockout draw from %d pools with %d winner(s) per pool on %d shiaijo (this pool/shiaijo shape is outside what --extra-qualifiers larger-pools currently supports; adjust --courts/pool sizing, or drop --extra-qualifiers)", len(pools), o.poolWinners, o.courts)
+		}
+	} else {
+		draw = helper.BuildKnockoutDraw(pools, o.poolWinners, o.courts)
+		if draw == nil {
+			return fmt.Errorf("could not build a knockout draw from %d pools with %d winners per pool", len(pools), o.poolWinners)
+		}
 	}
 
 	// R2/D7: a seeding constraint the configuration cannot satisfy is a
@@ -277,7 +347,7 @@ func (o *poolOptions) createPools(entries []string) error {
 	}
 
 	printEliminationWithBronze(f, matchWinners, eliminationMatchRounds, o.teamMatches, plan, o.engi, o.naginata)
-	helper.FillEstimations(f, int64(len(pools)), int64(totalPoolMatches), int64(o.teamMatches), int64(len(pools)*o.poolWinners-1), o.courts)
+	helper.FillEstimations(f, int64(len(pools)), int64(totalPoolMatches), int64(o.teamMatches), int64(totalQualifiers-1), o.courts)
 
 	// Apply sheet protection to all sheets except data and Time Estimator
 	helper.ProtectAllSheets(f)
@@ -289,6 +359,33 @@ func (o *poolOptions) createPools(entries []string) error {
 	}
 
 	return nil
+}
+
+// cliExtraQualifierOverrides builds the pool-index -> qualifier-count map
+// helper.BuildKnockoutDrawPerPool expects for --extra-qualifiers
+// larger-pools, reusing state.Competition.QualifiersForPool (the single
+// owner of the oversized-pool arithmetic, bc-qual LP-3b) rather than
+// restating its rule here -- the CLI has no state.Store-backed Competition of
+// its own, so a throwaway value carrying just the fields QualifiersForPool
+// reads (PoolSize, PoolWinners, ExtraQualifiers) is enough. poolSize is the
+// minimum-mode pool size (createPools' activePoolSize) QualifiersForPool
+// compares each pool's membership against.
+func cliExtraQualifierOverrides(pools []helper.Pool, poolSize, poolWinners int) map[int]int {
+	comp := state.Competition{
+		PoolSize:        poolSize,
+		PoolWinners:     poolWinners,
+		ExtraQualifiers: state.ExtraQualifiersLargerPools,
+	}
+	var overrides map[int]int
+	for i, p := range pools {
+		if w := comp.QualifiersForPool(p); w != poolWinners {
+			if overrides == nil {
+				overrides = make(map[int]int, len(pools))
+			}
+			overrides[i] = w
+		}
+	}
+	return overrides
 }
 
 func init() {

@@ -388,32 +388,47 @@ func TestValidateCompetitionTeamSize(t *testing.T) {
 // --- ExtraQualifiers (bc-qual) ---
 
 // TestValidateExtraQualifiers covers every branch of the switch: the empty
-// default, both recognised non-empty values under both pool-size modes, and
-// an unknown value. fill-bracket must be rejected unconditionally (LP-4 not
-// yet implemented) even under minimum-mode sizing where it would otherwise
-// be legal.
+// default, both recognised non-empty values under both pool-size modes and
+// both sides of the poolWinners boundary, and an unknown value. fill-bracket
+// must be rejected unconditionally (LP-4 not yet implemented) even under
+// minimum-mode sizing / poolWinners=1 where it would otherwise be legal.
+//
+// The poolWinners >= 2 rejection (bc-qual LP-3a review item (a): the draw
+// engine has no crossing support yet for a pool sending two-or-more home
+// qualifiers plus an oversized extra) is independent of poolSizeMode: it
+// must fire under min mode exactly like the max-mode rejection, and empty
+// (ExtraQualifiersNone) must stay valid at ANY poolWinners since it never
+// reaches the per-pool draw builder.
 func TestValidateExtraQualifiers(t *testing.T) {
 	tests := []struct {
 		name         string
 		value        string
 		poolSizeMode string
+		poolWinners  int
 		wantErr      bool
 	}{
-		{"empty is always valid, min mode", "", "min", false},
-		{"empty is always valid, max mode", "", "max", false},
-		{"empty is always valid, unset mode", "", "", false},
-		{"larger-pools valid under min mode", ExtraQualifiersLargerPools, "min", false},
-		{"larger-pools valid under unset (default) mode", ExtraQualifiersLargerPools, "", false},
-		{"larger-pools rejected under max mode", ExtraQualifiersLargerPools, "max", true},
-		{"fill-bracket rejected under min mode (not yet supported)", ExtraQualifiersFillBracket, "min", true},
-		{"fill-bracket rejected under max mode (not yet supported)", ExtraQualifiersFillBracket, "max", true},
-		{"fill-bracket rejected under unset mode (not yet supported)", ExtraQualifiersFillBracket, "", true},
-		{"unknown value rejected", "bogus", "min", true},
-		{"unknown value rejected even under max mode", "bogus", "max", true},
+		{"empty is always valid, min mode, 1 winner", "", "min", 1, false},
+		{"empty is always valid, max mode, 1 winner", "", "max", 1, false},
+		{"empty is always valid, unset mode, 1 winner", "", "", 1, false},
+		{"empty is always valid, min mode, 2 winners", "", "min", 2, false},
+		{"empty is always valid, max mode, 2 winners", "", "max", 2, false},
+		{"larger-pools valid under min mode, 1 winner", ExtraQualifiersLargerPools, "min", 1, false},
+		{"larger-pools valid under unset (default) mode, 1 winner", ExtraQualifiersLargerPools, "", 1, false},
+		{"larger-pools rejected under max mode, 1 winner", ExtraQualifiersLargerPools, "max", 1, true},
+		{"larger-pools rejected under min mode, 2 winners", ExtraQualifiersLargerPools, "min", 2, true},
+		{"larger-pools rejected under unset mode, 2 winners", ExtraQualifiersLargerPools, "", 2, true},
+		{"larger-pools rejected under min mode, 3 winners", ExtraQualifiersLargerPools, "min", 3, true},
+		{"larger-pools rejected under max mode AND 2 winners (both reasons)", ExtraQualifiersLargerPools, "max", 2, true},
+		{"fill-bracket rejected under min mode, 1 winner (not yet supported)", ExtraQualifiersFillBracket, "min", 1, true},
+		{"fill-bracket rejected under max mode, 1 winner (not yet supported)", ExtraQualifiersFillBracket, "max", 1, true},
+		{"fill-bracket rejected under unset mode, 1 winner (not yet supported)", ExtraQualifiersFillBracket, "", 1, true},
+		{"fill-bracket rejected under min mode, 2 winners (not yet supported)", ExtraQualifiersFillBracket, "min", 2, true},
+		{"unknown value rejected", "bogus", "min", 1, true},
+		{"unknown value rejected even under max mode", "bogus", "max", 1, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			err := ValidateExtraQualifiers(tc.value, tc.poolSizeMode)
+			err := ValidateExtraQualifiers(tc.value, tc.poolSizeMode, tc.poolWinners)
 			if tc.wantErr {
 				assert.Error(t, err)
 			} else {
@@ -650,4 +665,45 @@ func TestQualifiersForPool_UnsetPoolSizeDegradesToUniform(t *testing.T) {
 	pool := helper.Pool{Players: []helper.Player{{Name: "a"}, {Name: "b"}, {Name: "c"}, {Name: "d"}}}
 	assert.Equal(t, 1, c.QualifiersForPool(pool),
 		"PoolSize=0 must not make a 4-player pool read as oversized")
+}
+
+// TestMatchWinnerRanksNeeded pins the bc-qual LP-3c Excel-rendering fix: the
+// numWinners bound helper.PrintPoolMatches needs to register a
+// matchWinners["<pool>-2nd"] entry for an oversized pool under larger-pools,
+// GLOBALLY (one bound for every pool, since PrintPoolMatches takes a single
+// int, not a per-pool map) -- +1 over EffectivePoolWinners() whenever
+// ExtraQualifiers is larger-pools, unconditionally (BuildKnockoutDrawPerPool
+// never sends more than one extra), unchanged in standard mode.
+func TestMatchWinnerRanksNeeded(t *testing.T) {
+	tests := []struct {
+		name string
+		comp Competition
+		want int
+	}{
+		{
+			name: "standard mode, default PoolWinners",
+			comp: Competition{ExtraQualifiers: ExtraQualifiersNone},
+			want: 2, // EffectivePoolWinners() default
+		},
+		{
+			name: "standard mode, explicit PoolWinners",
+			comp: Competition{ExtraQualifiers: ExtraQualifiersNone, PoolWinners: 3},
+			want: 3,
+		},
+		{
+			name: "larger-pools, PoolWinners=1 (the only currently-valid combination)",
+			comp: Competition{ExtraQualifiers: ExtraQualifiersLargerPools, PoolWinners: 1},
+			want: 2,
+		},
+		{
+			name: "larger-pools with default PoolWinners still adds one",
+			comp: Competition{ExtraQualifiers: ExtraQualifiersLargerPools},
+			want: 3, // default 2 + 1
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, tc.comp.MatchWinnerRanksNeeded())
+		})
+	}
 }

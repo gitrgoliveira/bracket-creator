@@ -96,6 +96,15 @@ func bracketMatchLeafSlot(roundIdx, matchIdx int) int {
 // ResolveQualifiedPools) rather than treated as "skip", a mixed source with the
 // field unset still has a knockout to preview, and matching the resolver default
 // ensures the preview shape equals the live knockout bracket.
+//
+// bc-qual LP-3c: this is the "generate-draw" boundary (runDrawPipeline ->
+// generatePools -> generatePoolPreviewBracket) that actually PERSISTS
+// bracket.json, so it is where an out-of-scope larger-pools shape must
+// become a clean, operator-facing error rather than silently writing no
+// bracket at all (a mixed competition would otherwise reach CompStatusPools
+// with pools.csv on disk and no knockout to score into). Draw building goes
+// through buildPoolFedDraw (playoff_skeleton.go), shared with the export
+// path's poolDraw, so both agree on which builder a given competition uses.
 func (e *Engine) generatePoolPreviewBracket(comp *state.Competition) error {
 	pools, err := e.store.LoadPools(comp.ID)
 	if err != nil {
@@ -105,15 +114,23 @@ func (e *Engine) generatePoolPreviewBracket(comp *state.Competition) error {
 		return nil
 	}
 
-	poolWinners := comp.EffectivePoolWinners()
-
 	// Mirror the Excel create-pools path exactly: the SAME court-first draw
 	// builds both, so the preview bracket has the same topology, the same
 	// region-to-shiaijo mapping and the same byes as the printed Excel bracket
 	// (mp-5ng7). Flattening to a pow2 leaf array is TreeToLeafArray's job, done
 	// inside buildBracketFromDraw, and re-pads the regions' structural byes as
 	// "" slots.
-	draw := helper.BuildKnockoutDraw(pools, poolWinners, len(comp.Courts))
+	draw, outOfScope := buildPoolFedDraw(comp, pools, len(comp.Courts))
+	if outOfScope {
+		// bc-qual LP-3a review item (b): BuildKnockoutDrawPerPool returned nil
+		// for a shape draw_perpool.go's file comment marks out of scope (e.g.
+		// a court count with no same-half neighbour to cross an oversized
+		// pool's extra qualifier to). NEVER fall back to the uniform builder
+		// here -- that would silently seat the wrong number of qualifiers per
+		// pool and drop the crossing the operator asked for. Surface it as a
+		// clean, actionable *ValidationError instead.
+		return validationErrorf("competition %s: the larger-pools qualifier draw could not be built for %d pools across %d court(s); this shape is outside what larger-pools currently supports (see BuildKnockoutDrawPerPool's scope), adjust courts/pools or switch extraQualifiers back to standard", comp.ID, len(pools), len(comp.Courts))
+	}
 	if draw == nil {
 		return nil
 	}

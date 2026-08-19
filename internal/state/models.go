@@ -633,6 +633,10 @@ const (
 	// sends EffectivePoolWinners()+1 qualifiers. See QualifiersForPool for
 	// the oversized test this layer uses. Crossing/placement of the extra
 	// qualifier is a draw-time (helper/engine) concern, not modeled here.
+	// ValidateExtraQualifiers additionally requires EffectivePoolWinners()
+	// == 1 (bc-qual LP-3a review item (a)): the draw engine has no defined
+	// crossing behaviour yet for a pool that sends two or more HOME
+	// qualifiers plus an oversized extra.
 	ExtraQualifiersLargerPools = "larger-pools"
 
 	// ExtraQualifiersFillBracket ("Fit the knockout exactly") is a LATER
@@ -646,23 +650,41 @@ const (
 )
 
 // ValidateExtraQualifiers reports whether value is an acceptable
-// Competition.ExtraQualifiers setting given the competition's PoolSizeMode.
+// Competition.ExtraQualifiers setting given the competition's PoolSizeMode
+// and its pool-winners count.
 //
-//   - "" (ExtraQualifiersNone) is always valid, regardless of PoolSizeMode.
+//   - "" (ExtraQualifiersNone) is always valid, regardless of PoolSizeMode or
+//     poolWinners.
 //   - ExtraQualifiersLargerPools requires minimum-players-per-pool sizing:
 //     poolSizeMode must not be "max" (empty or any value other than "max"
 //     is minimum mode, mirroring the `isMax := PoolSizeMode == "max"` check
-//     used throughout internal/helper and internal/engine).
+//     used throughout internal/helper and internal/engine). It ALSO
+//     currently requires poolWinners == 1 (bc-qual LP-3a review item (a)):
+//     helper.BuildKnockoutDrawPerPool's block-and-crossing construction is
+//     only defined for a competition whose pools each send a single home
+//     qualifier plus, for an oversized pool, one crossed extra -- at
+//     poolWinners >= 2 there is no drawn-sheet evidence for how a pool's
+//     SECOND-and-later home ranks interact with a crossed occupant, and the
+//     builder itself refuses that shape (draw_perpool.go's numBlocks guard)
+//     rather than guess. Rejecting the combination here, in the one function
+//     every layer (state, engine, CLI) calls, means no caller has to
+//     rediscover that gap by hitting the builder's nil return.
 //   - ExtraQualifiersFillBracket is a recognised value but NOT YET
 //     SUPPORTED (bc-qual LP-4); it is rejected unconditionally, independent
-//     of poolSizeMode.
+//     of poolSizeMode or poolWinners.
 //   - Any other value is unknown and rejected.
 //
-// This is a pure function over the two relevant scalar fields, matching the
-// style of ValidateTeamMatchType/ValidateCompetitionTeamSize above: it does
-// not read or mutate a Competition, so handlers can validate a proposed
+// poolWinners should be the competition's EFFECTIVE pool-winners count (i.e.
+// Competition.EffectivePoolWinners(), which coerces an unset/<=0 PoolWinners
+// to the default of 2) -- callers that have not yet resolved a default
+// should pass that, not the raw possibly-zero field, or an unset PoolWinners
+// would read as poolWinners=0 and incorrectly pass this check.
+//
+// This is a pure function over the three relevant scalar fields, matching
+// the style of ValidateTeamMatchType/ValidateCompetitionTeamSize above: it
+// does not read or mutate a Competition, so handlers can validate a proposed
 // value before it is merged into a stored record.
-func ValidateExtraQualifiers(value, poolSizeMode string) error {
+func ValidateExtraQualifiers(value, poolSizeMode string, poolWinners int) error {
 	switch value {
 	case ExtraQualifiersNone:
 		return nil
@@ -671,6 +693,9 @@ func ValidateExtraQualifiers(value, poolSizeMode string) error {
 	case ExtraQualifiersLargerPools:
 		if poolSizeMode == "max" {
 			return fmt.Errorf("extraQualifiers %q requires minimum-players-per-pool sizing (poolSizeMode must not be %q)", value, "max")
+		}
+		if poolWinners >= 2 {
+			return fmt.Errorf("extraQualifiers %q currently requires pool winners = 1 (got %d): draw support for larger-pools with two or more pool winners does not exist yet", value, poolWinners)
 		}
 		return nil
 	default:
@@ -714,6 +739,44 @@ func (c Competition) QualifiersForPool(pool helper.Pool) int {
 	// engine rejects starting with an unset PoolSize) but cheap to make safe
 	// against drifted or hand-edited config.md data.
 	if c.ExtraQualifiers == ExtraQualifiersLargerPools && c.PoolSize > 0 && len(pool.Players) > c.PoolSize {
+		return base + 1
+	}
+	return base
+}
+
+// MatchWinnerRanksNeeded returns the highest per-pool qualifier rank the
+// Excel renderer's matchWinners lookup map (helper.PrintPoolMatches'
+// numWinners parameter) must cover for c, so an oversized pool's crossed
+// EXTRA qualifier (bc-qual, ExtraQualifiersLargerPools) gets a live
+// CONCATENATE formula link to the pool's actual result instead of the
+// literal placeholder text "Pool X-2nd" frozen forever on the printed sheet.
+//
+// helper.PrintPoolMatches (excel.go) only registers a
+// matchWinners["<pool>-<ordinal>"] entry for ranks 1..numWinners, PER POOL,
+// regardless of that pool's own size -- the loop is bounded by numWinners,
+// not by whether the pool actually sends that many qualifiers. QualifiersForPool
+// (above) computes the PER-POOL count for the draw itself, but the Excel
+// renderer needs one GLOBAL numWinners bound covering every pool at once
+// (helper.PrintPoolMatches takes a single int, not a per-pool map), so this
+// is deliberately NOT "QualifiersForPool for the worst pool" -- it is
+// EffectivePoolWinners()+1 whenever ExtraQualifiers is
+// ExtraQualifiersLargerPools, unconditionally: BuildKnockoutDrawPerPool's own
+// scope guard (draw_perpool.go, "winners > defaultWinners+1 ... out of
+// scope") caps every pool at AT MOST one extra beyond the uniform count, so
+// +1 always covers the worst case, and registering an unused rank+1 entry
+// for a pool that isn't actually oversized is harmless: nothing ever looks
+// it up (no leaf label references it), and printSinglePool's ranking table
+// already lists every player regardless of numWinners.
+//
+// Standard mode (ExtraQualifiersNone) returns EffectivePoolWinners()
+// unchanged: this method exists so the CLI (cmd/create-pools.go, via its own
+// mirrored logic since it has no state.Competition) and both Excel export
+// paths (internal/engine/export.go, internal/export/builder.go) compute the
+// SAME numWinners for a given competition, rather than three call sites
+// separately reasoning about the +1.
+func (c Competition) MatchWinnerRanksNeeded() int {
+	base := c.EffectivePoolWinners()
+	if c.ExtraQualifiers == ExtraQualifiersLargerPools {
 		return base + 1
 	}
 	return base

@@ -654,7 +654,7 @@ func TestLoadCompetition_LegacyConfigWithoutExtraQualifiers(t *testing.T) {
 	require.NotNil(t, got)
 	assert.Equal(t, ExtraQualifiersNone, got.ExtraQualifiers,
 		"a legacy config.md with no extra_qualifiers key must load as standard mode")
-	assert.NoError(t, ValidateExtraQualifiers(got.ExtraQualifiers, got.PoolSizeMode),
+	assert.NoError(t, ValidateExtraQualifiers(got.ExtraQualifiers, got.PoolSizeMode, got.EffectivePoolWinners()),
 		"the loaded default must itself be a valid setting")
 	assert.Equal(t, 2, got.EffectivePoolWinners())
 }

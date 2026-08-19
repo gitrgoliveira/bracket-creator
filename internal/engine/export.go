@@ -56,7 +56,13 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	// 3. Pool Matches sheet (red/white, scoring formulas, reactive name references).
 	//    numCourts is the operator's allocation; PrintPoolMatches bands the sheet
 	//    on the shiaijo count the pool phase actually runs on, clamping it itself.
-	matchWinners, _ := helper.PrintPoolMatches(f, pools, comp.TeamSize, comp.EffectivePoolWinners(), courts, courtOfPool, comp.Mirror, poolCoords, playerCoords, comp.Engi)
+	//    MatchWinnerRanksNeeded (not EffectivePoolWinners() directly): under
+	//    bc-qual larger-pools, an oversized pool's crossed 2nd needs a
+	//    matchWinners["<pool>-2nd"] entry too, or the Tree/Elimination sheets
+	//    print it as inert literal text (or a broken CONCATENATE formula on
+	//    the Elimination Matches sheet) instead of a live link to the pool's
+	//    actual result.
+	matchWinners, _ := helper.PrintPoolMatches(f, pools, comp.TeamSize, comp.MatchWinnerRanksNeeded(), courts, courtOfPool, comp.Mirror, poolCoords, playerCoords, comp.Engi)
 
 	// 4. Tree sheets: one visual bracket page per subtree, rendered exactly like
 	//    the CLI (cmd/create-pools.go) and the results workbook

@@ -120,6 +120,7 @@ import {
   computeQualifierPreview, formatQualifierPreviewLine,
   extraQualifiersRadioVisible, resetExtraQualifiersOnPoolModeChange,
   winnersForExtraQualifiersChange, winnersInputDisabled,
+  extraQualifiersHint,
 } from './qualifier_preview.jsx';
 
 function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerMode, authConfig, password, showToast }) {
@@ -1208,20 +1209,15 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
                         className={`radio-pill ${extraQualifiers === EXTRA_QUALIFIERS_LARGER_POOLS ? "is-active" : ""}`}
                         type="button"
                         onClick={() => { setExtraQualifiers(EXTRA_QUALIFIERS_LARGER_POOLS); setWinners((w) => winnersForExtraQualifiersChange(EXTRA_QUALIFIERS_LARGER_POOLS, w)); }}
-                      >Oversized pools send one extra</button>
+                      >Oversized send +1</button>
                       <button
                         className={`radio-pill ${extraQualifiers === EXTRA_QUALIFIERS_FILL_BRACKET ? "is-active" : ""}`}
                         type="button"
                         onClick={() => { setExtraQualifiers(EXTRA_QUALIFIERS_FILL_BRACKET); setWinners((w) => winnersForExtraQualifiersChange(EXTRA_QUALIFIERS_FILL_BRACKET, w)); }}
-                      >Fit the knockout exactly</button>
+                      >Fit the knockout</button>
                     </div>
                     <div className="field__hint">
-                      {extraQualifiers === EXTRA_QUALIFIERS_STANDARD &&
-                        "Every pool sends the same number of qualifiers to the knockout. Unfilled bracket slots become byes."}
-                      {extraQualifiers === EXTRA_QUALIFIERS_LARGER_POOLS &&
-                        "A pool with more members than the minimum sends one additional qualifier. The extra qualifier is placed in a different part of the bracket from the pool winner and always fights in the first round, with no bye. This offsets the extra pool matches an oversized pool fights."}
-                      {extraQualifiers === EXTRA_QUALIFIERS_FILL_BRACKET &&
-                        "Fewer, larger pools are formed so that the qualifiers exactly fill the bracket. Nobody gets a bye and every qualifier fights in the first round."}
+                      {extraQualifiersHint(extraQualifiers, poolSize)}
                     </div>
                     <div className="field__hint" data-testid="qualifier-preview-line">
                       {previewLine || "Preview appears once this competition has participants."}

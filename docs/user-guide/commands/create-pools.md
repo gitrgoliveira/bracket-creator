@@ -96,7 +96,7 @@ Byes follow from the size of each block rather than from the total field: a bloc
 
 Both `larger-pools` and `fill-bracket` require `-p` (minimum pool size, not `-m`) and `-w 1`; the command refuses any other combination. See [How many qualify from each pool](../organisers/knockout-draw.md#how-many-qualify-from-each-pool) for the full explanation and worked examples, including when each mode can and cannot build a draw for a given entrant count and shiai-jo count.
 
-Minimum pool size 3, one qualifier per pool, oversized pools send one extra:
+Minimum pool size 3, one qualifier per pool, with the Oversized send +1 behaviour:
 
 ```bash
 bracket-creator create-pools \

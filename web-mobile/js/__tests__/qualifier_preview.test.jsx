@@ -4,6 +4,7 @@ import {
   EXTRA_QUALIFIERS_STANDARD, EXTRA_QUALIFIERS_LARGER_POOLS, EXTRA_QUALIFIERS_FILL_BRACKET,
   extraQualifiersRadioVisible, resetExtraQualifiersOnPoolModeChange,
   winnersForExtraQualifiersChange, winnersInputDisabled,
+  extraQualifiersLabel, extraQualifiersHint,
 } from '../qualifier_preview.jsx';
 
 // bc-qual LP-5a: this module mirrors three Go pure functions
@@ -246,5 +247,21 @@ describe('winnersInputDisabled', () => {
   it('enabled (not disabled) for undefined/null, same as standard', () => {
     expect(winnersInputDisabled(undefined)).toBe(false);
     expect(winnersInputDisabled(null)).toBe(false);
+  });
+});
+
+
+describe('extraQualifiersLabel / extraQualifiersHint (operator copy, 2026-08-19)', () => {
+  it('labels match the operator wording', () => {
+    expect(extraQualifiersLabel(EXTRA_QUALIFIERS_STANDARD)).toBe('Standard');
+    expect(extraQualifiersLabel(EXTRA_QUALIFIERS_LARGER_POOLS)).toBe('Oversized send +1');
+    expect(extraQualifiersLabel(EXTRA_QUALIFIERS_FILL_BRACKET)).toBe('Fit the knockout');
+  });
+  it('hints match the operator wording, with the oversized size derived from the minimum', () => {
+    expect(extraQualifiersHint(EXTRA_QUALIFIERS_STANDARD, 3)).toBe('Every pool sends the same top-N; the bracket is padded with byes.');
+    expect(extraQualifiersHint(EXTRA_QUALIFIERS_LARGER_POOLS, 3)).toBe('Same pools; 4-person pools send their top 2.');
+    expect(extraQualifiersHint(EXTRA_QUALIFIERS_LARGER_POOLS, 4)).toBe('Same pools; 5-person pools send their top 2.');
+    expect(extraQualifiersHint(EXTRA_QUALIFIERS_FILL_BRACKET, 3)).toBe('Fewer, fatter pools; the bracket fills exactly, no byes.');
+    expect(extraQualifiersHint(undefined, 3)).toBe('Every pool sends the same top-N; the bracket is padded with byes.');
   });
 });

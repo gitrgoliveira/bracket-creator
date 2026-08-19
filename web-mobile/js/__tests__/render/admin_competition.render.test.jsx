@@ -931,14 +931,14 @@ describe('AdminSettings Knockout qualifiers (bc-qual LP-5a)', () => {
     const { container } = await mountSection('settings', { comp });
     expect(Array.from(container.querySelectorAll('label.field__label')).some((l) => l.textContent.trim() === 'Knockout qualifiers')).toBe(true);
     expect(findPill(container, 'Standard')).not.toBeUndefined();
-    expect(findPill(container, 'Oversized pools send one extra')).not.toBeUndefined();
-    expect(findPill(container, 'Fit the knockout exactly')).not.toBeUndefined();
+    expect(findPill(container, 'Oversized send +1')).not.toBeUndefined();
+    expect(findPill(container, 'Fit the knockout')).not.toBeUndefined();
   });
 
   it('switching poolSizeMode to "min" shows it appear (via re-render), switching to "max" hides it and resets the stored selection', async () => {
     const comp = mixedMinComp({ extraQualifiers: 'larger-pools' });
     const { container } = await mountSection('settings', { comp });
-    expect(findPill(container, 'Oversized pools send one extra').className).toContain('is-active');
+    expect(findPill(container, 'Oversized send +1').className).toContain('is-active');
 
     await clickPill(container, 'maximum');
     expect(Array.from(container.querySelectorAll('label.field__label')).some((l) => l.textContent.trim() === 'Knockout qualifiers')).toBe(false);
@@ -948,7 +948,7 @@ describe('AdminSettings Knockout qualifiers (bc-qual LP-5a)', () => {
     // not the stale "larger-pools" the competition was seeded with.
     await clickPill(container, 'minimum');
     expect(findPill(container, 'Standard').className).toContain('is-active');
-    expect(findPill(container, 'Oversized pools send one extra').className).not.toContain('is-active');
+    expect(findPill(container, 'Oversized send +1').className).not.toContain('is-active');
   });
 
   it('selecting a non-standard option forces Winners per pool to 1 and disables the input', async () => {
@@ -957,7 +957,7 @@ describe('AdminSettings Knockout qualifiers (bc-qual LP-5a)', () => {
     expect(winnersInput(container).disabled).toBe(false);
     expect(winnersInput(container).value).toBe('2');
 
-    await clickPill(container, 'Oversized pools send one extra');
+    await clickPill(container, 'Oversized send +1');
     expect(winnersInput(container).value).toBe('1');
     expect(winnersInput(container).disabled).toBe(true);
     expect(container.textContent).toContain('Set to 1 by the knockout qualifiers setting');
@@ -976,8 +976,8 @@ describe('AdminSettings Knockout qualifiers (bc-qual LP-5a)', () => {
     const comp = mixedMinComp({ status: 'draw-ready', extraQualifiers: 'larger-pools', poolWinners: 1 });
     const { container } = await mountSection('settings', { comp });
     expect(findPill(container, 'Standard').disabled).toBe(true);
-    expect(findPill(container, 'Oversized pools send one extra').disabled).toBe(true);
-    expect(findPill(container, 'Fit the knockout exactly').disabled).toBe(true);
+    expect(findPill(container, 'Oversized send +1').disabled).toBe(true);
+    expect(findPill(container, 'Fit the knockout').disabled).toBe(true);
     // Winners is disabled by BOTH draw-ready and the non-standard coupling;
     // either alone is sufficient, but it must be disabled either way.
     expect(winnersInput(container).disabled).toBe(true);
@@ -994,7 +994,7 @@ describe('AdminSettings Knockout qualifiers (bc-qual LP-5a)', () => {
   it('preview line updates to larger-pools numbers on selection (3 pools/5 qualifiers, 8-slot, 3 byes)', async () => {
     const comp = mixedMinComp();
     const { container } = await mountSection('settings', { comp });
-    await clickPill(container, 'Oversized pools send one extra');
+    await clickPill(container, 'Oversized send +1');
     const preview = container.querySelector('[data-testid="qualifier-preview-line"]');
     expect(preview.textContent).toBe('3 pools -> 5 qualifiers -> 8-slot knockout (3 byes)');
   });
@@ -1002,7 +1002,7 @@ describe('AdminSettings Knockout qualifiers (bc-qual LP-5a)', () => {
   it('preview line updates to fill-bracket numbers on selection (3 pools + 1 draft = 4 qualifiers, zero byes)', async () => {
     const comp = mixedMinComp();
     const { container } = await mountSection('settings', { comp });
-    await clickPill(container, 'Fit the knockout exactly');
+    await clickPill(container, 'Fit the knockout');
     const preview = container.querySelector('[data-testid="qualifier-preview-line"]');
     expect(preview.textContent).toBe('3 pools -> 4 qualifiers -> 4-slot knockout (no byes)');
   });

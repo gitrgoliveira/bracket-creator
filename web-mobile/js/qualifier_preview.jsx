@@ -229,3 +229,27 @@ export function winnersForExtraQualifiersChange(newExtraQualifiers, currentWinne
 export function winnersInputDisabled(extraQualifiers) {
   return (extraQualifiers || EXTRA_QUALIFIERS_STANDARD) !== EXTRA_QUALIFIERS_STANDARD;
 }
+
+// extraQualifiersLabel / extraQualifiersHint are the ONE home of the radio's
+// operator-facing copy (operator wording, 2026-08-19), imported by both the
+// create form (admin_setup.jsx) and the settings page
+// (admin_competition_settings.jsx) so the two surfaces cannot drift.
+// The oversized hint derives its pool size from the configured minimum
+// ("4-person" at the default minimum of 3), so it stays truthful when an
+// operator raises the minimum.
+export function extraQualifiersLabel(extraQualifiers) {
+  if (extraQualifiers === EXTRA_QUALIFIERS_LARGER_POOLS) return "Oversized send +1";
+  if (extraQualifiers === EXTRA_QUALIFIERS_FILL_BRACKET) return "Fit the knockout";
+  return "Standard";
+}
+
+export function extraQualifiersHint(extraQualifiers, minSize) {
+  if (extraQualifiers === EXTRA_QUALIFIERS_LARGER_POOLS) {
+    const over = Number.isInteger(minSize) && minSize > 0 ? minSize + 1 : 4;
+    return `Same pools; ${over}-person pools send their top 2.`;
+  }
+  if (extraQualifiers === EXTRA_QUALIFIERS_FILL_BRACKET) {
+    return "Fewer, fatter pools; the bracket fills exactly, no byes.";
+  }
+  return "Every pool sends the same top-N; the bracket is padded with byes.";
+}

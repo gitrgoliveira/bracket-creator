@@ -285,6 +285,24 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   // the one page that must survive the shape. Same reason c.players is read
   // through a default below.
   const courtList = c.courts || [];
+  // What the subtitle says when the competition holds no shiaijo of its own.
+  // "No shiaijo assigned" alone is true but incomplete, and incomplete in the
+  // direction that matters: an empty list MEANS "inherit the tournament's"
+  // (engine.InheritedDrawCourts, mirrored by window.inheritedDrawCourts), so
+  // the draw runs on every shiaijo the venue has. Left unsaid, the operator
+  // reads this page -- the documented remedy for shiaijo problems -- as
+  // "nothing is set" and never learns which courts the draw will actually
+  // take. resolvedShiaijoCountError cannot cover it: it stays silent when the
+  // inherited count is legal, which is the ordinary case.
+  //
+  // Derived through the shared helper rather than `t.courts` directly, so
+  // this line and every allocation judgement resolve inheritance identically.
+  const inheritedCourts = window.inheritedDrawCourts(courtList, t.courts);
+  const courtsSummary = courtList.length
+    ? courtList.join(", ")
+    : inheritedCourts.length
+      ? `No shiaijo of its own, draw would use ${inheritedCourts.join(", ")}`
+      : "No shiaijo assigned";
   // Compute the other-competitions list once (used for both the render guard
   // and the map below).
   const otherComps = (t.competitions || []).filter((cc) => cc.id !== c.id);
@@ -340,7 +358,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
             </div>
             <div className="page-head__sub">
               {window.competitionKindLabel(c)} · {(c.players || []).length} {c.kind === "team" ? "teams" : "players"} ·
-              {c.date && ` ${formatDate(c.date)} at `} {c.startTime} · {courtList.length ? courtList.join(", ") : "No shiaijo assigned"}
+              {c.date && ` ${formatDate(c.date)} at `} {c.startTime} · {courtsSummary}
             </div>
           </div>
           <div className="page-head__actions" style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>

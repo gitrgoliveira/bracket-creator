@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'fs';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import {
   nextPow2, fillBracketPoolCount, computeQualifierPreview, formatQualifierPreviewLine,
   EXTRA_QUALIFIERS_STANDARD, EXTRA_QUALIFIERS_LARGER_POOLS, EXTRA_QUALIFIERS_FILL_BRACKET,
@@ -6,6 +9,8 @@ import {
   winnersForExtraQualifiersChange, winnersInputDisabled,
   extraQualifiersLabel, extraQualifiersHint,
 } from '../qualifier_preview.jsx';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // bc-qual LP-5a: this module mirrors three Go pure functions
 // (helper.PoolCount's floor(n/minSize) branch, state.Competition.
@@ -263,5 +268,66 @@ describe('extraQualifiersLabel / extraQualifiersHint (operator copy, 2026-08-19)
     expect(extraQualifiersHint(EXTRA_QUALIFIERS_LARGER_POOLS, 4)).toBe('Same pools; 5-person pools send their top 2.');
     expect(extraQualifiersHint(EXTRA_QUALIFIERS_FILL_BRACKET, 3)).toBe('Fewer, fatter pools; the bracket fills exactly, no byes.');
     expect(extraQualifiersHint(undefined, 3)).toBe('Every pool sends the same top-N; the bracket is padded with byes.');
+  });
+});
+
+// Drift guard (bc-qual review round). extraQualifiersLabel's doc comment claims
+// to be the ONE home of the radio's operator-facing copy, "imported by both the
+// create form and the settings page". It was not: neither screen imported it,
+// both spelled the three labels inline, and the only coverage pinned the copy
+// nothing rendered -- so renaming a pill on one screen passed the whole suite
+// while the two surfaces silently drifted apart.
+//
+// Read as SOURCE rather than through a render, deliberately: the render tests
+// find pills BY TEXT, so they pin what each screen shows but cannot see WHERE
+// that text came from, and would stay green against a re-inlined literal that
+// happens to still match today. The single home IS the rule being tested.
+describe('radio copy has a single home (both screens render extraQualifiersLabel)', () => {
+  const screens = ['admin_setup.jsx', 'admin_competition_settings.jsx'];
+  // The two labels distinctive enough to grep for. "Standard" is too common a
+  // word to test this way, so it is covered by the call-count assertion.
+  const INLINE_LABELS = ['Oversized send +1', 'Fit the knockout'];
+
+  const read = (f) => readFileSync(resolve(__dirname, '..', f), 'utf8');
+
+  for (const screen of screens) {
+    it(`${screen} renders all three pill labels through the helper`, () => {
+      const calls = read(screen).match(/extraQualifiersLabel\(/g) || [];
+      expect(
+        calls.length,
+        `${screen} must call extraQualifiersLabel() once per pill (3), got ${calls.length}`
+      ).toBe(3);
+    });
+
+    it(`${screen} does not spell the pill copy inline`, () => {
+      const src = read(screen);
+      for (const label of INLINE_LABELS) {
+        expect(
+          src.includes(label),
+          `${screen} contains the literal "${label}": operator copy belongs in extraQualifiersLabel (qualifier_preview.jsx), which both screens import, or the two surfaces drift`
+        ).toBe(false);
+      }
+    });
+  }
+});
+
+// The create form has no roster by construction (participants are added after
+// creation), so every computeQualifierPreview result there is null and the
+// preview line can only ever be the placeholder. Computing it anyway was dead
+// arithmetic that read as live behaviour to the next editor; this pins that it
+// stays gone, and that the SETTINGS page -- which does have a roster -- keeps
+// computing it.
+describe('preview arithmetic is only wired where a roster exists', () => {
+  const read = (f) => readFileSync(resolve(__dirname, '..', f), 'utf8');
+
+  it('the create form does not call computeQualifierPreview', () => {
+    expect(
+      /computeQualifierPreview\s*\(/.test(read('admin_setup.jsx')),
+      'admin_setup.jsx calls computeQualifierPreview: the create form has no roster, so every result is null and the branch selecting a shape by mode is unreachable'
+    ).toBe(false);
+  });
+
+  it('the settings page does call computeQualifierPreview', () => {
+    expect(/computeQualifierPreview\s*\(/.test(read('admin_competition_settings.jsx'))).toBe(true);
   });
 });

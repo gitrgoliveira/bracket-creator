@@ -205,15 +205,27 @@ func normalizePoolConfig(comp *state.Competition) {
 	case state.CompFormatLeague, state.CompFormatPlayoffs:
 		comp.PoolSize = 0
 		comp.PoolWinners = 0
-		// ExtraQualifiers (bc-qual LP-5a) only has meaning for "mixed"
-		// (pools + knockout): league has no knockout stage and playoffs has
-		// no pool stage, so internal/engine's own gate
-		// (`if comp.Format == state.CompFormatMixed` in pools.go) never
-		// reaches it for either. Zeroing here keeps stored config.md
-		// consistent with what the engine actually uses, mirroring
-		// PoolSize/PoolWinners above, and means ValidateExtraQualifiers
-		// below always sees "" for these formats rather than depending on
-		// the admin UI to have hidden/reset the field itself.
+	}
+	normalizeExtraQualifiers(comp)
+}
+
+// normalizeExtraQualifiers zeroes ExtraQualifiers (bc-qual LP-5a) for the
+// formats it cannot mean anything for: league has no knockout stage and
+// playoffs has no pool stage, so internal/engine's own gate (poolFedKnockout
+// in pools.go) never reaches it for either. Zeroing keeps stored config.md
+// consistent with what the engine actually uses, and means
+// ValidateExtraQualifiers always sees "" for these formats rather than
+// depending on the admin UI to have hidden/reset the field itself.
+//
+// Split out of normalizePoolConfig so the tournament-import path can apply
+// THIS rule without also applying the PoolSize/PoolWinners zeroing: that path
+// has always defaulted PoolSize for every format (handlers_import.go), and
+// changing what it stores for a league is not this rule's business. Both
+// callers therefore share one statement of what ExtraQualifiers means per
+// format instead of each carrying its own switch.
+func normalizeExtraQualifiers(comp *state.Competition) {
+	switch comp.Format {
+	case state.CompFormatLeague, state.CompFormatPlayoffs:
 		comp.ExtraQualifiers = state.ExtraQualifiersNone
 	}
 }

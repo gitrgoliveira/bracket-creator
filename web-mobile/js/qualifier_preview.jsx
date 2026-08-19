@@ -1,7 +1,11 @@
 // qualifier_preview.jsx: client-side mirror of the "knockout qualifiers"
 // pool/qualifier COUNT arithmetic (bead bc-qual, phase LP-5a), used to drive
-// the live preview line under the "Knockout qualifiers" radio in
-// admin_setup.jsx (AdminCreateCompetition). Pure functions, no window/React
+// the live preview line under the "Knockout qualifiers" radio on the
+// competition SETTINGS page (admin_competition_settings.jsx), the one surface
+// that renders the radio next to a known roster. The competition CREATE form
+// (admin_setup.jsx) renders the same radio from the copy + coupling helpers at
+// the bottom of this file but shows a static placeholder instead of a preview:
+// it has no roster to compute one from. Pure functions, no window/React
 // dependency, so this stays safe to import from anywhere including tests.
 //
 // Deliberately NOT a port of the actual pool-BUILDING code
@@ -27,11 +31,11 @@
 //
 // See ValidateExtraQualifiers (internal/state/models.go) for the coupling
 // rule this preview does not itself enforce: both non-standard modes are
-// only VALID at poolWinners == 1. The caller (admin_setup.jsx) forces
-// poolWinners to 1 the moment a non-standard option is selected, so by the
-// time a non-standard preview is ever shown, `poolWinners` passed in here is
-// already 1 -- this module has no opinion on that, it just multiplies
-// whatever poolWinners value it is given.
+// only VALID at poolWinners == 1. Both screens force poolWinners to 1 (via
+// winnersForExtraQualifiersChange below) the moment a non-standard option is
+// selected, so by the time a non-standard preview is ever shown,
+// `poolWinners` passed in here is already 1 -- this module has no opinion on
+// that, it just multiplies whatever poolWinners value it is given.
 
 // EXTRA_QUALIFIERS_* mirror state.ExtraQualifiersNone / ...LargerPools /
 // ...FillBracket (internal/state/models.go) byte-for-byte (the wire values,
@@ -101,11 +105,13 @@ function bracketShape(qualifiers) {
 //     send the extra qualifier); fillBracket additionally carries `drafts`
 //     (how many pools' 2nd place is drafted).
 //
-// Guards n <= 0 / non-finite / minSize <= 0 by returning all-null: this is
-// the common case on the competition CREATE form (admin_setup.jsx
-// AdminCreateCompetition), which has no roster yet -- participants are
-// added in a separate step after creation. Callers render a neutral
-// "add participants to preview" state rather than a misleading 0-pool line.
+// Guards n <= 0 / non-finite / minSize <= 0 by returning all-null: the
+// settings page renders this radio from the moment a mixed competition
+// exists, and a competition created a moment ago has an empty roster.
+// Callers render a neutral "add participants to preview" state rather than a
+// misleading 0-pool line. The create form does not call this at all -- it has
+// no roster by construction, so every result would be null; it renders the
+// placeholder directly.
 export function computeQualifierPreview(n, minSize, poolWinners) {
   const roster = Number.isFinite(n) ? Math.trunc(n) : 0;
   const winners = Number.isInteger(poolWinners) && poolWinners > 0 ? poolWinners : 1;

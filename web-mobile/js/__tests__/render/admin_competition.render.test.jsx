@@ -773,8 +773,24 @@ describe('AdminCompetition survives a null courts list (U1)', () => {
   });
 
   it('says the allocation is empty rather than printing nothing', async () => {
+    // U1's guarantee is that the subtitle SAYS something about an absent
+    // allocation instead of rendering a blank where the shiaijo go. What it
+    // says was sharpened in the bc-qual review round: an empty list MEANS
+    // "inherit the tournament's", so on a venue that has shiaijo the line names
+    // the ones the draw would actually run on rather than implying none.
     const comp = makeCompetition({ courts: null });
     const { container } = await mountSection('overview', { comp });
+    const sub = container.querySelector('.page-head__sub').textContent;
+    expect(sub).toContain('No shiaijo of its own');
+    expect(sub).toContain('A, B');
+  });
+
+  it('falls back to "No shiaijo assigned" when the venue has none either', async () => {
+    // Nothing to inherit: the tournament itself carries no shiaijo (a record
+    // mid-setup, or one whose venue list was cleared). Naming an inherited
+    // allocation here would be a lie, so the plain statement stands.
+    const comp = makeCompetition({ courts: null });
+    const { container } = await mountSection('overview', { comp, tournament: { courts: [] } });
     expect(container.querySelector('.page-head__sub').textContent).toContain('No shiaijo assigned');
   });
 

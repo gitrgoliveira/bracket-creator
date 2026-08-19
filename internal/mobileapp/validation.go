@@ -18,6 +18,7 @@
 package mobileapp
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -142,6 +143,14 @@ func seedRejection(assignments []domain.SeedAssignment, err error, remedy string
 	return err.Error()
 }
 
+// errSeedRosterUnreadable marks a rejectSeedsOffRoster failure the SUBMITTED
+// SEEDING did not cause: the roster it has to be checked against could not be
+// read. The distinction is the caller's whole reason to care -- every other
+// failure this function returns is the client's and answers 400, while this one
+// is the server's and must answer 500, so a monitored 5xx is raised and the
+// operator is not told their seeding is wrong when nobody has checked it.
+var errSeedRosterUnreadable = errors.New("seed roster could not be read")
+
 // rejectSeedsOffRoster refuses a seeding that ranks a name no participant
 // carries. domain.ValidateAssignments checks the ranks as a SET (contiguous
 // from 1, no duplicates) and never looks at the roster, so a ghost name passed
@@ -156,23 +165,32 @@ func seedRejection(assignments []domain.SeedAssignment, err error, remedy string
 // An empty roster is NOT treated as "everything is a ghost": seeds for a
 // competition whose participants have not been written yet are refused only when
 // there is a roster to contradict them, so a client that saves seeds before the
-// roster still works and the draw's own validation remains the backstop.
+// roster still works and the draw's own validation remains the backstop. A
+// missing participants.csv IS that state and reads as an empty roster, not as
+// an error (state.loadParticipants maps os.IsNotExist to an empty slice), so a
+// non-nil error here is a genuine read or parse failure and the check FAILS
+// CLOSED via errSeedRosterUnreadable rather than accepting an unvalidated
+// seeding.
 func rejectSeedsOffRoster(store *state.Store, compID string, assignments []domain.SeedAssignment) error {
 	if len(assignments) == 0 {
 		return nil
 	}
 	// Ask for the roster this competition actually has: the flag changes the
 	// parse, and the load is cached (see participantsCacheKey).
-	// A load failure falls back rather than skipping the check: the Name this
-	// matches on is the same column under either flag, so the wrong flag costs a
-	// second cache entry, not a wrong answer -- whereas returning early here
-	// would let an unvalidated seeding through on a transient read error.
+	// A competition-load failure falls back to withZekken=false rather than
+	// aborting: the Name this matches on is the same column under either flag,
+	// so the wrong flag costs a second cache entry, not a wrong answer. The
+	// PARTICIPANT load below has no such harmless fallback, which is why it
+	// fails closed instead.
 	withZekken := false
 	if comp, cerr := store.LoadCompetition(compID); cerr == nil && comp != nil {
 		withZekken = comp.EffectiveWithZekkenName()
 	}
 	players, err := store.LoadParticipants(compID, withZekken)
-	if err != nil || len(players) == 0 {
+	if err != nil {
+		return fmt.Errorf("%w: %v", errSeedRosterUnreadable, err)
+	}
+	if len(players) == 0 {
 		return nil
 	}
 	onRoster := make(map[string]bool, len(players))

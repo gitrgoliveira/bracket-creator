@@ -22,6 +22,35 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 
 	isMax := comp.PoolSizeMode == "max"
 
+	// bc-qual: ExtraQualifiers is only meaningful for "mixed" (pools feeding a
+	// knockout). generatePools also runs for "league", which has a single
+	// implicit pool and no knockout at all, so a stored non-standard value on
+	// a league record (a hand-edited config.md, or a format switched outside
+	// the HTTP layer, which normalizePoolConfig would have zeroed) must not
+	// steer pool FORMATION.
+	//
+	// poolFedKnockout gates BOTH halves, and both gates have to be the same
+	// expression. The fill-bracket formation branch below used to dispatch on
+	// ExtraQualifiers alone while its own comment claimed the setting was
+	// "gated to minimum-players-per-pool sizing by state.ValidateExtraQualifiers,
+	// checked below" -- but that check ran AFTER formation and only inside the
+	// `mixed` arm, so for a league it never ran at all and for a mixed
+	// competition it ran too late to protect the branch it was cited by. A
+	// league in maximum sizing therefore formed its pools through the
+	// fill-bracket objective, reading PoolSize as a MINIMUM, and survived only
+	// because runDrawPipeline coincidentally pins league PoolSize to
+	// len(players), which makes FillBracketPoolCount return exactly one pool.
+	//
+	// Validating here, before anything reads the value, also means an invalid
+	// setting is reported as itself rather than as whatever formation error it
+	// happens to provoke, and still aborts before SavePools persists anything.
+	poolFedKnockout := comp.Format == state.CompFormatMixed
+	if poolFedKnockout {
+		if err := state.ValidateExtraQualifiers(comp.ExtraQualifiers, comp.PoolSizeMode, comp.EffectivePoolWinners()); err != nil {
+			return wrapValidationErrorf(err, "competition %s cannot start: %s", comp.ID, err.Error())
+		}
+	}
+
 	// numCourts is the competition's RAW shiaijo allocation, normalised. An unset
 	// court list means one unnamed court; helper.EffectiveDrawCourts,
 	// helper.PoolSeeding and helper.ReorderPoolsForCourts each treat anything
@@ -55,13 +84,14 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 	var pools []helper.Pool
 	var drawCourts int
 	var err error
-	if comp.ExtraQualifiers == state.ExtraQualifiersFillBracket {
+	if poolFedKnockout && comp.ExtraQualifiers == state.ExtraQualifiersFillBracket {
 		// bc-qual LP-4: pool COUNT comes from a different formation
 		// objective (helper.FillBracketPoolCount) than the standard
 		// min-mode floor(n/PoolSize) -- helper.BuildPoolPhase's own path is
 		// untouched beside it (see that function's doc comment). isMax is
 		// irrelevant here: fill-bracket is gated to minimum-players-per-pool
-		// sizing by state.ValidateExtraQualifiers, checked below.
+		// sizing by the state.ValidateExtraQualifiers call above, which now
+		// runs BEFORE this dispatch reads the setting.
 		pools, drawCourts, err = helper.BuildPoolPhaseFillBracket(players, comp.PoolSize, numCourts)
 		if err != nil {
 			// FillBracketPoolCount's own error already names the entrant
@@ -101,19 +131,11 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 				return validationErrorf("mixed (Pools + Knockout) competition %s: pool %q has only %d participant(s) but %d advance to the knockout (PoolWinners=%d), every pool needs at least PoolWinners participants; reduce PoolWinners, adjust PoolSize/pool-size-mode, or add participants", comp.ID, p.PoolName, len(p.Players), poolWinners, poolWinners)
 			}
 		}
-
-		// bc-qual LP-3c: defense-in-depth boundary check. ExtraQualifiers has
-		// no handler-side validation yet (bc-qual LP-5 adds the admin PUT
-		// path), so this generate-draw pipeline -- the one place a mixed
-		// competition's knockout actually gets built -- MUST validate it
-		// itself rather than trust it arrived pre-checked. Runs here, not
-		// earlier, so the message can cite the pools that were actually
-		// formed; it must still run BEFORE SavePools below, so an invalid
-		// setting aborts before anything is persisted (matching the two
-		// checks above).
-		if err := state.ValidateExtraQualifiers(comp.ExtraQualifiers, comp.PoolSizeMode, poolWinners); err != nil {
-			return wrapValidationErrorf(err, "competition %s cannot start: %s", comp.ID, err.Error())
-		}
+		// bc-qual LP-3c's defense-in-depth ValidateExtraQualifiers check used
+		// to sit here. It has moved ABOVE the pool-formation dispatch (see
+		// poolFedKnockout): a check that a formation branch cites as its own
+		// precondition cannot run after that branch has already formed the
+		// pools.
 	}
 
 	if comp.NumberPrefix != "" {

@@ -117,10 +117,9 @@ import { teamMatchTypeHint } from './pool_ids.jsx';
 // comment on the coupling helpers for the shared rationale.
 import {
   EXTRA_QUALIFIERS_STANDARD, EXTRA_QUALIFIERS_LARGER_POOLS, EXTRA_QUALIFIERS_FILL_BRACKET,
-  computeQualifierPreview, formatQualifierPreviewLine,
   extraQualifiersRadioVisible, resetExtraQualifiersOnPoolModeChange,
   winnersForExtraQualifiersChange, winnersInputDisabled,
-  extraQualifiersHint,
+  extraQualifiersLabel, extraQualifiersHint,
 } from './qualifier_preview.jsx';
 
 function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerMode, authConfig, password, showToast }) {
@@ -1179,52 +1178,43 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
                   minimum-players-per-pool sizing (poolMode === "min"); see
                   extraQualifiersRadioVisible. Federation-neutral copy per
                   operator ruling: no federation names anywhere in this UI. */}
-              {extraQualifiersRadioVisible(format, poolMode) && (() => {
-                // n=0: this is the competition CREATE form, which has no
-                // roster yet (participants are added in a separate step
-                // after creation, see the sampleRoster:null comment at the
-                // buildCompetition call below). computeQualifierPreview
-                // guards n<=0 by returning all-null shapes, so the preview
-                // line below gracefully falls back to a placeholder instead
-                // of a misleading "0 pools" line. A future settings-page
-                // wiring of this same radio (post-creation, roster known)
-                // can pass the real roster length here instead of 0.
-                const preview = computeQualifierPreview(0, poolSize, winners);
-                const activeShape = extraQualifiers === EXTRA_QUALIFIERS_LARGER_POOLS
-                  ? preview.largerPools
-                  : extraQualifiers === EXTRA_QUALIFIERS_FILL_BRACKET
-                    ? preview.fillBracket
-                    : preview.standard;
-                const previewLine = formatQualifierPreviewLine(activeShape);
-                return (
-                  <div className="field">
-                    <label className="field__label">Knockout qualifiers</label>
-                    <div className="radio-group">
-                      <button
-                        className={`radio-pill ${extraQualifiers === EXTRA_QUALIFIERS_STANDARD ? "is-active" : ""}`}
-                        type="button"
-                        onClick={() => setExtraQualifiers(EXTRA_QUALIFIERS_STANDARD)}
-                      >Standard</button>
-                      <button
-                        className={`radio-pill ${extraQualifiers === EXTRA_QUALIFIERS_LARGER_POOLS ? "is-active" : ""}`}
-                        type="button"
-                        onClick={() => { setExtraQualifiers(EXTRA_QUALIFIERS_LARGER_POOLS); setWinners((w) => winnersForExtraQualifiersChange(EXTRA_QUALIFIERS_LARGER_POOLS, w)); }}
-                      >Oversized send +1</button>
-                      <button
-                        className={`radio-pill ${extraQualifiers === EXTRA_QUALIFIERS_FILL_BRACKET ? "is-active" : ""}`}
-                        type="button"
-                        onClick={() => { setExtraQualifiers(EXTRA_QUALIFIERS_FILL_BRACKET); setWinners((w) => winnersForExtraQualifiersChange(EXTRA_QUALIFIERS_FILL_BRACKET, w)); }}
-                      >Fit the knockout</button>
-                    </div>
-                    <div className="field__hint">
-                      {extraQualifiersHint(extraQualifiers, poolSize)}
-                    </div>
-                    <div className="field__hint" data-testid="qualifier-preview-line">
-                      {previewLine || "Preview appears once this competition has participants."}
-                    </div>
+              {extraQualifiersRadioVisible(format, poolMode) && (
+                <div className="field">
+                  <label className="field__label">Knockout qualifiers</label>
+                  <div className="radio-group">
+                    <button
+                      className={`radio-pill ${extraQualifiers === EXTRA_QUALIFIERS_STANDARD ? "is-active" : ""}`}
+                      type="button"
+                      onClick={() => setExtraQualifiers(EXTRA_QUALIFIERS_STANDARD)}
+                    >{extraQualifiersLabel(EXTRA_QUALIFIERS_STANDARD)}</button>
+                    <button
+                      className={`radio-pill ${extraQualifiers === EXTRA_QUALIFIERS_LARGER_POOLS ? "is-active" : ""}`}
+                      type="button"
+                      onClick={() => { setExtraQualifiers(EXTRA_QUALIFIERS_LARGER_POOLS); setWinners((w) => winnersForExtraQualifiersChange(EXTRA_QUALIFIERS_LARGER_POOLS, w)); }}
+                    >{extraQualifiersLabel(EXTRA_QUALIFIERS_LARGER_POOLS)}</button>
+                    <button
+                      className={`radio-pill ${extraQualifiers === EXTRA_QUALIFIERS_FILL_BRACKET ? "is-active" : ""}`}
+                      type="button"
+                      onClick={() => { setExtraQualifiers(EXTRA_QUALIFIERS_FILL_BRACKET); setWinners((w) => winnersForExtraQualifiersChange(EXTRA_QUALIFIERS_FILL_BRACKET, w)); }}
+                    >{extraQualifiersLabel(EXTRA_QUALIFIERS_FILL_BRACKET)}</button>
                   </div>
-                );
-              })()}
+                  <div className="field__hint">
+                    {extraQualifiersHint(extraQualifiers, poolSize)}
+                  </div>
+                  {/* No live preview here, only the placeholder: this is the
+                      CREATE form and the competition has no roster yet
+                      (participants are added in a separate step after
+                      creation, see the sampleRoster:null comment at the
+                      buildCompetition call below). computeQualifierPreview's
+                      documented n<=0 guard returns all-null shapes, so
+                      computing it would be unreachable arithmetic that reads
+                      as live behaviour. The SETTINGS page renders the real
+                      preview from the same helpers once a roster exists. */}
+                  <div className="field__hint" data-testid="qualifier-preview-line">
+                    Preview appears once this competition has participants.
+                  </div>
+                </div>
+              )}
             </>
           )}
 

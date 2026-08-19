@@ -302,9 +302,15 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
   // The ASSIGNED count, not courtCount(). courtCount floors at 1 on purpose
   // (a running competition always occupies at least one shiaijo, and the
   // schedule surfaces divide by it), but this box sits one line under a page
-  // head that now reads "No shiaijo assigned" for a record stored without a
-  // courts key, and "1 Court" directly contradicted it. The dashboard card
-  // already reports 0 for the same record; this brings the two into line.
+  // head that reports the same record's allocation, and "1 Court" directly
+  // contradicted it. The dashboard card already reports 0 for the same
+  // record; this brings the three into line.
+  //
+  // 0 here means "none of its own", NOT "the draw has no shiaijo": an empty
+  // list inherits the tournament's. That fact belongs on the page head, which
+  // has the room to name the inherited shiaijo (admin_competition.jsx's
+  // courtsSummary); a two-line stat box can only carry the count, and the
+  // count it must carry is the one the operator chose.
   const numCourts = Array.isArray(c.courts) ? c.courts.length : 0;
 
   const formatCompMinutes = (typeof window !== "undefined" && window.formatCompMinutes)

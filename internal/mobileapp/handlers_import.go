@@ -36,6 +36,18 @@ type ImportManifestComp struct {
 	// SwissRounds, number of Swiss rounds to play when format=swiss
 	// (FR-050a). Ignored for other formats.
 	SwissRounds int `yaml:"swiss_rounds"`
+	// ExtraQualifiers, how many finishers each pool sends to the knockout
+	// (bc-qual): "", "larger-pools" or "fill-bracket". Same key and same
+	// values as the competition's own config.md, so a manifest states it the
+	// way the file it produces does. Only meaningful for format=mixed;
+	// normalizeExtraQualifiers zeroes it for the rest, and
+	// state.ValidateExtraQualifiers rejects an unknown value or one paired
+	// with maximum sizing / pool_winners >= 2, exactly as POST /competitions
+	// does. Carried here because every other pool-config field already is:
+	// without it, a competition an operator set up with a non-default
+	// knockout-qualifier mode could not be expressed as a manifest at all,
+	// and a manifest that tried would have the key silently dropped.
+	ExtraQualifiers string `yaml:"extra_qualifiers"`
 	// File names relative to the uploaded set
 	Participants string `yaml:"participants"`
 	Seeds        string `yaml:"seeds"`
@@ -161,7 +173,11 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 		StartTime:      strings.TrimSpace(entry.StartTime),
 		Date:           strings.TrimSpace(entry.Date),
 		SwissRounds:    entry.SwissRounds,
-		Status:         state.CompStatusSetup,
+		// bc-qual: trimmed like every other free-text field above, so a
+		// manifest with `extra_qualifiers: " larger-pools "` matches the
+		// canonical value rather than being rejected as unknown.
+		ExtraQualifiers: strings.TrimSpace(entry.ExtraQualifiers),
+		Status:          state.CompStatusSetup,
 	}
 	// Cross-file guard symmetry with handlers_competition.go (POST + PUT):
 	// reject oversized string fields before they land on disk. Without
@@ -241,6 +257,35 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 	if comp.PoolSizeMode == "" {
 		comp.PoolSizeMode = "max"
 	}
+
+	// Cross-file guard symmetry with POST /competitions and PUT
+	// /competitions/:id: a knockout-qualifier mode a manifest states must pass
+	// exactly the rule the REST API applies, or an import could persist a
+	// competition whose settings the API would refuse and whose draw
+	// generatePools then rejects with an error about pool FORMATION rather
+	// than about the setting that caused it.
+	//
+	// Runs AFTER the PoolSizeMode default above, deliberately: an omitted
+	// `pool_size_mode` becomes "max" here, and validating before the default
+	// would read the empty value as minimum sizing, accept a non-standard
+	// mode, and then store the pair the rule forbids.
+	normalizeExtraQualifiers(comp)
+	if err := state.ValidateExtraQualifiers(comp.ExtraQualifiers, comp.PoolSizeMode, comp.EffectivePoolWinners()); err != nil {
+		res.Error = "extraQualifiers: " + err.Error()
+		return res
+	}
+
+	// Cross-file guard symmetry with POST /competitions and PUT
+	// /competitions/:id: a knockout-qualifier mode a manifest states must pass
+	// exactly the rule the REST API applies, or an import could persist a
+	// competition whose settings the API would refuse and whose draw
+	// generatePools then rejects with an error about pool FORMATION rather
+	// than about the setting that caused it.
+	//
+	// Runs AFTER the PoolSizeMode default above, deliberately: an omitted
+	// `pool_size_mode` becomes "max" here, and validating before the default
+	// would read the empty value as minimum sizing, accept a non-standard
+	// mode, and then store the pair the rule forbids.
 
 	// Parse participants AND seeds BEFORE saving the competition config.
 	// Pre-fix, the config was saved first and the participants parse

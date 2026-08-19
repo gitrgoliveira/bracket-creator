@@ -16,7 +16,7 @@ import {
   computeQualifierPreview, formatQualifierPreviewLine,
   extraQualifiersRadioVisible, resetExtraQualifiersOnPoolModeChange,
   winnersForExtraQualifiersChange, winnersInputDisabled,
-  extraQualifiersHint,
+  extraQualifiersLabel, extraQualifiersHint,
 } from './qualifier_preview.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
@@ -314,13 +314,25 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       // competition's value to "" (fixed) on any save. Round-trip it like
       // `mirror` above to preserve the stored value.
       teamMatchType: effective.teamMatchType || latestC.teamMatchType || "",
-      // bc-qual LP-5a: knockout qualifiers. No Settings-screen control edits
-      // this yet (only the competition CREATE form does), but the backend
-      // transform unconditionally applies `current.ExtraQualifiers =
-      // comp.ExtraQualifiers`, so omitting it here would clobber a
-      // previously-set non-standard value to "" (Go's zero value) on every
-      // settings save, same hazard as mirror/teamMatchType/naginata above.
-      extraQualifiers: effective.extraQualifiers || latestC.extraQualifiers || "",
+      // bc-qual LP-5a: knockout qualifiers, edited by the "Knockout
+      // qualifiers" pills below. Included for the same reason as
+      // mirror/teamMatchType/naginata above: the backend transform
+      // unconditionally applies `current.ExtraQualifiers =
+      // comp.ExtraQualifiers`, so omitting the field would clobber a stored
+      // non-standard value to "" on every settings save.
+      //
+      // NO `|| latestC.extraQualifiers` fallback: "" is this field's STANDARD
+      // value, not "unset". A falsy-coalescing chain reads the operator's
+      // "Standard" pick as absent and re-sends the stored non-standard value,
+      // which makes Standard unreachable from this screen -- and worse on the
+      // sibling path, where switching "Pool size is a" to maximum stages
+      // poolSizeMode="max" AND extraQualifiers="" together: the chain would
+      // ship max sizing with the old non-standard value, which
+      // state.ValidateExtraQualifiers rejects, 400ing every settings save with
+      // no control able to clear it. `effective` is latestC overlaid with the
+      // edited fields, so it already carries the stored value for an untouched
+      // field; the `|| ""` only normalizes a legacy record's undefined.
+      extraQualifiers: effective.extraQualifiers || "",
     };
     // Snapshot the VALUE of each edited field we're about to persist (not just
     // the field name). On success we clear a field only if its current staged
@@ -910,7 +922,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
                     type="button"
                     onClick={() => update("extraQualifiers", EXTRA_QUALIFIERS_STANDARD)}
                     disabled={isDrawReady}
-                  >Standard</button>
+                  >{extraQualifiersLabel(EXTRA_QUALIFIERS_STANDARD)}</button>
                   <button
                     className={`radio-pill ${local.extraQualifiers === EXTRA_QUALIFIERS_LARGER_POOLS ? "is-active" : ""}`}
                     type="button"
@@ -919,7 +931,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
                       update("poolWinners", winnersForExtraQualifiersChange(EXTRA_QUALIFIERS_LARGER_POOLS, local.poolWinners));
                     }}
                     disabled={isDrawReady}
-                  >Oversized send +1</button>
+                  >{extraQualifiersLabel(EXTRA_QUALIFIERS_LARGER_POOLS)}</button>
                   <button
                     className={`radio-pill ${local.extraQualifiers === EXTRA_QUALIFIERS_FILL_BRACKET ? "is-active" : ""}`}
                     type="button"
@@ -928,7 +940,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
                       update("poolWinners", winnersForExtraQualifiersChange(EXTRA_QUALIFIERS_FILL_BRACKET, local.poolWinners));
                     }}
                     disabled={isDrawReady}
-                  >Fit the knockout</button>
+                  >{extraQualifiersLabel(EXTRA_QUALIFIERS_FILL_BRACKET)}</button>
                 </div>
                 <div className="field__hint">
                   {extraQualifiersHint(local.extraQualifiers, local.poolSize)}

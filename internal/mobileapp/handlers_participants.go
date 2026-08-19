@@ -544,7 +544,16 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// refusing here costs nothing: the console's own path is
 		// PUT /competitions/:id, which carries the roster and its seeds together
 		// and cannot produce this state.
+		//
+		// A roster that cannot be READ is not a bad seeding: it is answered
+		// 500, so the operator is not told their submission is wrong when
+		// nothing has actually checked it, and the failure surfaces as a 5xx
+		// instead of hiding among ordinary client rejections.
 		if err := rejectSeedsOffRoster(store, id, assignments); err != nil {
+			if errors.Is(err, errSeedRosterUnreadable) {
+				internalError(c, err)
+				return
+			}
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}

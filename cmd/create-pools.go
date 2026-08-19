@@ -135,10 +135,6 @@ func (o *poolOptions) run(cmd *cobra.Command, args []string) error {
 }
 
 func (o *poolOptions) createPools(entries []string) error {
-	// The CLI has no NAMED shiaijo: --courts says how many the draw runs on, so
-	// the sheets are titled A, B, C by position. The live app passes the
-	// competition's own court list instead, which need not start at A.
-	courtNames := helper.CourtLabels(o.courts)
 	isMax := o.maxPlayers > 0
 	activePoolSize := o.numPlayers
 	if isMax {
@@ -161,7 +157,18 @@ func (o *poolOptions) createPools(entries []string) error {
 	if isMax {
 		poolSizeModeForValidation = "max"
 	}
-	if err := state.ValidateExtraQualifiers(o.extraQualifiers, poolSizeModeForValidation, o.poolWinners); err != nil {
+	// EffectivePoolWinners(), not the raw flag. ValidateExtraQualifiers' doc
+	// comment says so explicitly: its poolWinners == 1 gate reads a RESOLVED
+	// count, and an unresolved 0 (`--pool-winners 0`, or a poolOptions built
+	// directly in a test) is < 2 and slips straight through. The operator then
+	// reaches BuildKnockoutDrawPerPool with defaultWinners=0, which refuses
+	// with the generic "this pool/shiaijo shape is outside what
+	// --extra-qualifiers larger-pools currently supports" instead of the
+	// accurate "requires pool winners = 1". Resolved through state's own
+	// accessor rather than a local `if <= 0 { 2 }`, so the CLI and the app
+	// cannot disagree about what an unset pool-winners count means.
+	effectivePoolWinners := (state.Competition{PoolWinners: o.poolWinners}).EffectivePoolWinners()
+	if err := state.ValidateExtraQualifiers(o.extraQualifiers, poolSizeModeForValidation, effectivePoolWinners); err != nil {
 		return err
 	}
 	if len(entries) < o.poolWinners {
@@ -239,6 +246,22 @@ func (o *poolOptions) createPools(entries []string) error {
 	}
 	o.courts = drawCourts
 
+	// The CLI has no NAMED shiaijo: --courts says how many the draw runs on, so
+	// the sheets are titled A, B, C by position. The live app passes the
+	// competition's own court list instead, which need not start at A.
+	//
+	// Derived AFTER the clamp above, never before. o.courts is not the number
+	// the operator typed: it is raised to the default when unset and lowered by
+	// BuildPoolPhase to what the pools can actually carry, so labelling the
+	// pre-clamp value hands every consumer a band list that disagrees with the
+	// draw (`-c 4 -p 3` on 7 competitors forms 2 pools and returned [A B C D]).
+	// The workbook only survived that because PrintPoolMatches,
+	// blankWorkbookCourtPlan and CreateNamesWithPoolToPrint each re-derive the
+	// real count themselves; a consumer that reads len(plan.Courts) as the band
+	// count -- the natural reading, and what TreePageTitle does with its own
+	// argument -- would silently title a two-shiaijo draw "Shiaijo A-D".
+	courtNames := helper.CourtLabels(o.courts)
+
 	if o.numberPrefix != "" {
 		counter := 1
 		for i := range pools {
@@ -279,13 +302,6 @@ func (o *poolOptions) createPools(entries []string) error {
 	} else {
 		helper.CreatePoolMatches(pools)
 	}
-	// MatchWinnerRanksNeeded, not o.poolWinners directly: under
-	// --extra-qualifiers larger-pools, an oversized pool's crossed 2nd needs
-	// a matchWinners["<pool>-2nd"] entry too, or the Tree/Elimination sheets
-	// print it as inert literal text (or a broken CONCATENATE formula on the
-	// Elimination Matches sheet) instead of a live link to the pool's actual
-	// result. Reuses state's single owner of the rule (mirrors the engine's
-	// two Excel export paths) rather than restating "+1" here.
 	// MatchWinnerRanksNeeded, not o.poolWinners directly: under
 	// --extra-qualifiers larger-pools, an oversized pool's crossed 2nd needs
 	// a matchWinners["<pool>-2nd"] entry too, or the Tree/Elimination sheets

@@ -439,6 +439,9 @@ func buildBlock(occ []drawOccupant, pools []Pool, mirrored bool) *Node {
 	if slots := templateSlots(occ, pools, mirrored); slots != nil {
 		return BuildSlotTree(slots)
 	}
+	if slots := uniformBigBlockSlots(occ, pools); slots != nil {
+		return BuildSlotTree(slots)
+	}
 	if len(occ) == 1 {
 		// A lone occupant IS its block: emit the leaf directly. Building the
 		// old [occupant, ""] pair instead would mark a rise, and the rise
@@ -509,10 +512,13 @@ func buildBlock(occ []drawOccupant, pools []Pool, mirrored bool) *Node {
 // which is also what prints 2025 shiaijo D's remaining pair as P5#2 v P4#2.
 //
 // Scope is the EVIDENCED shapes only: 5 or 6 occupants, 2-3 home 1sts, 2-3
-// crossed. Anything else (1-qualifier blocks, which have no crossed; rank
-// mixes like 2 homes + 4 crossed at 3 qualifiers; blocks of 7+) returns nil
-// and keeps the greedy layout -- no sheet constrains those, and the Junior
-// Individual Male sheets pin greedy for the 1-qualifier case.
+// crossed. Anything else (1-qualifier blocks, which have no crossed by
+// definition; rank mixes like 2 homes + 4 crossed at 3 qualifiers; blocks of
+// 7+) returns nil HERE -- no sheet constrains those shapes for a MIXED-rank
+// block. A same-size block with no crossed at all (every occupant a home
+// 1st) falls through instead to uniformBigBlockSlots for 9-16 occupants
+// (LP-2), or the greedy layout otherwise; the Junior Individual Male sheets
+// pin greedy for the 1-qualifier case.
 func templateSlots(occ []drawOccupant, pools []Pool, mirrored bool) []string {
 	if len(occ) < 5 || len(occ) > 6 {
 		return nil
@@ -591,6 +597,133 @@ func occAt(occ []drawOccupant, label string) drawOccupant {
 		}
 	}
 	return drawOccupant{}
+}
+
+// uniformBigBlockSlots is the LP-2 extension of R6(c) to blocks of 9-16
+// occupants, decoded from the 33rd EKC 2025 Ladies and Men Individual sheets
+// (draw_ekc_2025_individual_test.go): 4-court events whose per-court block
+// sizes (10/10/9/9 and 12/12/12/11) are the next size up from the 5-6
+// occupant Men Team blocks templateSlots already covers.
+//
+// Scope is UNIFORM qualifiers only (every occupant a home 1st, poolWinners
+// effectively 1): a block containing any crossed-in occupant is out of scope
+// -- LP-3 will handle those -- and returns nil here, leaving the greedy
+// fallback untouched. Blocks of 8 or fewer are also left alone: they fall
+// through to the existing template (5-6) or greedy (<=4, 7, 8) paths, and 7
+// and 8 do not need a new template at all -- see the note below.
+//
+// The shape: split q occupants into a TOP half of floor(q/2) and a BOTTOM
+// half of ceil(q/2) (the smaller half on top -- sheet-verified at q=9 (4+5)
+// and q=11 (5+6); halves are equal at 10 and 12), then lay each half out in
+// an 8-slot quadrant pair per bigBlockHalfRoles. This only has slot room to
+// operate at q in [9,16] (NextPow2(q)=16, so each half gets its own 8-slot
+// half rather than sharing a single 4-slot one): at q = 7 or 8 the total
+// width is only 8, so each half gets 4 slots, and the existing GREEDY
+// fallback already produces exactly this shape by construction (worked
+// through by hand for q=7: bye=highest-precedence occupant, remaining 6
+// interleaved -- the width-8 slot array splits into a 3-occupant left
+// quarter [bye,"",o1,o2] and a 4-occupant right quarter [o3,o4,o5,o6], the
+// same floor(7/2)=3 top / ceil(7/2)=4 bottom split this rule states, and at
+// width 4 there is no room for a leaf-leaf riser pair to begin with). So 7
+// and 8 are deliberately left on the greedy path rather than routed through
+// a second, unverified width-4 template.
+func uniformBigBlockSlots(occ []drawOccupant, pools []Pool) []string {
+	if len(occ) < 9 || len(occ) > 16 {
+		return nil
+	}
+	for _, o := range occ {
+		if o.rank != 1 {
+			// Crossed-in qualifier: mixed-rank big blocks are LP-3's job.
+			return nil
+		}
+	}
+	// Deliberately NOT byePrecedenceLess: its load term is R6 criterion 2
+	// (oversized pools ahead of pool order), and the 2026 Men Individual
+	// sheet contradicts exactly that in a uniform big block -- court B lays
+	// pools 13-23 consecutively and the oversized pool 22's winner FIGHTS
+	// round 1 while ordinary pools 17/18/23 bye (operator ruling 4 on
+	// bc-qual; pinned in draw_ekc_2026_individual_test.go). Big blocks lay
+	// consecutively, seeds first (criterion 1 stands; on every decoded sheet
+	// the seeded pool is its court's first pool, so this equals plain pool
+	// order there).
+	sorted := append([]drawOccupant{}, occ...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		as, bs := poolSeedRank(pools[sorted[i].pool]), poolSeedRank(pools[sorted[j].pool])
+		if as != bs {
+			return as < bs
+		}
+		return sorted[i].pool < sorted[j].pool
+	})
+
+	top, bottom := sorted[:len(sorted)/2], sorted[len(sorted)/2:]
+	slots := make([]string, 0, 16)
+	slots = append(slots, bigBlockHalfSlots(top, true)...)
+	slots = append(slots, bigBlockHalfSlots(bottom, false)...)
+	return slots
+}
+
+// bigBlockHalfSlots fills one half's 8-slot quadrant pair from its occupants
+// (already in byePrecedenceLess order) via bigBlockHalfRoles.
+func bigBlockHalfSlots(half []drawOccupant, top bool) []string {
+	roles := bigBlockHalfRoles(len(half), top)
+	out := make([]string, len(roles))
+	for i, r := range roles {
+		if r >= 0 {
+			out[i] = half[r].label
+		}
+	}
+	return out
+}
+
+// bigBlockHalfRoles is the per-occupant-count (h) shape of one half of a
+// uniformBigBlockSlots block, as an 8-slot array of occupant indices (-1 for
+// an empty slot), occupants numbered 0..h-1 in byePrecedenceLess order.
+//
+// Each half is two 4-slot quadrants. A "leaf-leaf" quadrant [x,"",y,""] has
+// two occupants who both skip round 1 (their round-1 partner slot is empty)
+// and meet EACH OTHER in round 2 -- the round-1-column never shows them. A
+// "bye+match" quadrant has one real round-1 match plus one occupant who
+// skips round 1 and meets that match's WINNER in round 2. Riser (leaf-leaf)
+// quadrants sit at the block's OUTER edge, named byes sit INBOARD (nearer
+// the boundary between the top and bottom halves) -- top and bottom are
+// therefore mirrors of each other, reflected around that boundary, except at
+// h=6 (byes at both quadrant edges, its own mirror) and h=4/h=8 (no bye at
+// all, nothing to mirror).
+//
+//   - h=4: two leaf-leaf pairs, no round-1 match at all (Ladies 2025 courts C
+//     and D top sub-blocks, pools 21-24 / 30-33).
+//   - h=5: outer quadrant is the leaf-leaf pair, inner quadrant is the
+//     match+bye (top half: pools 1-5 and 11-15 of the same sheet; bottom
+//     half, mirrored: pools 6-10 and 16-20).
+//   - h=6: named bye, match, match, named bye -- byes at both edges, the same
+//     array for top or bottom (Men 2025 courts A-C, both sub-blocks each).
+//   - h=7: sheet-observed only as a BOTTOM half (Men 2025 court D does not
+//     reach this size, so no sheet shows it either; this is carried over
+//     from the phase's decoded rule, not independently re-verified here).
+//     The TOP-half mirror is a further EXTRAPOLATION with no sheet evidence
+//     at all -- flag it as such wherever it is relied on.
+//   - h=8: four round-1 matches, no empties at all (trivial; not exercised by
+//     either 2025 sheet, whose largest block is 12).
+func bigBlockHalfRoles(h int, top bool) []int {
+	switch h {
+	case 4:
+		return []int{0, -1, 1, -1, 2, -1, 3, -1}
+	case 5:
+		if top {
+			return []int{0, -1, 1, -1, 2, 3, 4, -1}
+		}
+		return []int{0, -1, 1, 2, 3, -1, 4, -1}
+	case 6:
+		return []int{0, -1, 1, 2, 3, 4, 5, -1}
+	case 7:
+		if top {
+			return []int{0, -1, 1, 2, 3, 4, 5, 6}
+		}
+		return []int{0, 1, 2, 3, 4, 5, 6, -1}
+	case 8:
+		return []int{0, 1, 2, 3, 4, 5, 6, 7}
+	}
+	return nil
 }
 
 // interleaveByRank groups a block's occupants by finishing rank and round-robins

@@ -1394,6 +1394,35 @@ func blockLayoutArithmetic(leaves []string) (byes, matches int, skip bool) {
 		}
 		return 2, 2, false
 	}
+	// LP-2's uniform big-block template (uniformBigBlockSlots, draw.go):
+	// every occupant a home 1st, 9-16 of them, split into a floor(q/2) TOP
+	// half and a ceil(q/2) BOTTOM half, each its own 8-slot sub-block
+	// (bigBlockHalfRoles). Per half of h occupants the template holds two
+	// 4-slot quadrants; for h in {6,7,8} each quadrant that is short a real
+	// occupant grants that occupant a NAMED bye rather than phantom-pairing
+	// it, so byes = 8-h and matches = h-4 (h=6 is the exact arithmetic
+	// templateSlots' own h=6 case already uses, two quadrants of one bye
+	// plus one match each; h=7 and h=8 add a quadrant with no bye at all).
+	//
+	// h=4 and h=5 halves instead contain a LEAF-LEAF quadrant: two occupants
+	// who BOTH skip round 1 individually and meet EACH OTHER in round 2.
+	// TreeToLeafArray cannot reconstruct that -- the same class of gap as
+	// the q=5 vacancy case just above (leafPadTarget pads a narrow side at
+	// its TAIL, so two equal-width risen leaves collapse together instead of
+	// each keeping its own gap) -- so it reads as one fake round-1 match
+	// plus one uncounted phantom pair rather than two named byes. It is
+	// measurable only via the rise-aware SlotArray/rounds view, which is
+	// what TestEKC2025LadiesIndividual and TestEKC2025MenIndividual
+	// (draw_ekc_2025_individual_test.go) pin bout-for-bout for q = 9, 10, 11
+	// and 12 instead. So a block with an h=4 or h=5 half (q in {9,10,11}) is
+	// skipped here too.
+	if q >= 9 && q <= 16 && crossed == 0 {
+		top, bottom := q/2, q-q/2
+		if top <= 5 || bottom <= 5 {
+			return 0, 0, true
+		}
+		return (8 - top) + (8 - bottom), (top - 4) + (bottom - 4), false
+	}
 	return q % 2, q / 2, false
 }
 

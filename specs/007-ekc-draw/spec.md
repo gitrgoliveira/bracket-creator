@@ -631,9 +631,20 @@ half (`mirroredBlock`, read off `halfOrder` so a D2 reorder moves orientation wi
 printed position). `planBlocks`, `route`, `combine`, `partnerBlock` and `Regions` are
 all untouched. Scope is the EVIDENCED shapes: 5-6 occupants with 2-3 home 1sts and 2-3
 crossed. Blocks of four or fewer, all 1-qualifier draws, and rank mixes outside that
-scope (e.g. 2 homes + 4 crossed at 3 qualifiers) keep the greedy layout. Above six
-occupants no sheet constrains the shape (Men Individual's 13-occupant block exists but
-is unbuildable pending per-pool qualifiers): deliberately NOT extrapolated.
+scope (e.g. 2 homes + 4 crossed at 3 qualifiers) keep the greedy layout.
+
+*Update (2026-08-19, bc-qual LP-2):* the sentence that stood here ("above six occupants
+no sheet constrains the shape") was falsified by the 2025 sheets: the Ladies and Men
+Individual draws print UNIFORM 1-qualifier blocks of 9, 10, 11 and 12 occupants, and
+`uniformBigBlockSlots` (draw.go) now lays those from the decoded half-templates
+(`bigBlockHalfRoles`: halves of floor/ceil(q/2), smaller half on top; leaf-leaf riser
+pairs at the block's outer edges, named byes inboard; pinned bout-for-bout by
+`draw_ekc_2025_individual_test.go`). Its scope is 9-16 occupants ALL home 1sts, laid
+consecutively (seeds first; NO criterion-2 load priority - the 2026 Men court B block
+lays pool 22's winner into a fighting slot, see the operator ruling pinned by
+`TestUniformBigBlockLaysConsecutivelyNotByLoad`). MIXED-rank blocks above six (a
+crossed 2nd inside a big block, e.g. Men Individual 2026's 13-occupant court A) remain
+unextrapolated here and are the per-pool qualifier phase's job (bead bc-qual LP-3).
 
 **What the fix touched besides the layout (2026-08-18):**
 

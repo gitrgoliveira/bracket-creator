@@ -1,6 +1,7 @@
 package helper
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -13,11 +14,11 @@ import (
 // whose per-court block sizes are far larger than anything draw_ekc_test.go
 // or draw_ekc_senior_test.go replay: Ladies runs 10/10/9/9 occupants per
 // court and Men runs 12/12/12/11. TestEKC2025MenTeamByes already showed the
-// production layout tops out at a 6-occupant block (two 3-occupant
-// sub-blocks); these two sheets are the next size up and are expected to fail
-// for the same reason, so both tests are committed red and skipped, exactly
-// as TestEKCMenTeamByes was before its fix landed (bc-qual phase LP-1a; the
-// big-block templates are LP-2).
+// production layout topped out at a 6-occupant block (two 3-occupant
+// sub-blocks); these two sheets are the next size up and were committed red
+// and skipped for the same reason, exactly as TestEKCMenTeamByes was before
+// its fix landed (bc-qual phase LP-1a; the big-block templates landed in
+// LP-2 as uniformBigBlockSlots in draw.go, which both tests below now pin).
 //
 // Every court in both sheets shares one recurring shape: SOME pools sit in a
 // genuine round-1 match (two pool winners meeting head-on), while the
@@ -48,8 +49,6 @@ import (
 // pairs) plus one 5-occupant sub-block, again matching the same one-round-1
 // -match template.
 func TestEKC2025LadiesIndividual(t *testing.T) {
-	t.Skip("pending big-block templates, bc-qual LP-2")
-
 	assignment, err := AssignPoolsToCourts(38, 4)
 	require.NoError(t, err)
 	assert.Equal(t, []int{
@@ -117,8 +116,6 @@ func TestEKC2025LadiesIndividual(t *testing.T) {
 // four, so its round-2 layer picks up one leaf-leaf pair (the two pools that
 // never got a round-1 opponent) alongside three mixed pairs.
 func TestEKC2025MenIndividual(t *testing.T) {
-	t.Skip("pending big-block templates, bc-qual LP-2")
-
 	assignment, err := AssignPoolsToCourts(47, 4)
 	require.NoError(t, err)
 	assert.Equal(t, []int{
@@ -172,4 +169,38 @@ func TestEKC2025MenIndividual(t *testing.T) {
 		{"W v W", "W v W"}, // F41, F42
 		{"W v W"},          // F43
 	}, regionRounds(draw.Regions[3]), "shiaijo D")
+}
+
+// TestUniformBigBlockLaysConsecutivelyNotByLoad pins operator ruling 4
+// (bead bc-qual) inside the uniform big-block template: an oversized pool in
+// a 9-16 occupant single-qualifier block gets NO bye priority. The 2026 Men
+// Individual sheet is the witness -- its court B lays pools 13-23
+// consecutively and the oversized pool 22's winner fights round 1 while
+// ordinary pools 17, 18 and 23 bye (see draw_ekc_2026_individual_test.go).
+// Here: 9 pools of 3 with pool 6 oversized at 4. Pool 6 sits on a ROUND-1
+// FIGHTING slot under consecutive layout; sorting by R6 criterion 2 (load)
+// would instead pull it to the front of the block and hand it a leaf-leaf
+// rise. The expected shape is therefore identical to an all-uniform 9-pool
+// block, oversized pool or not.
+func TestUniformBigBlockLaysConsecutivelyNotByLoad(t *testing.T) {
+	pools := make([]Pool, 9)
+	for i := range pools {
+		size := 3
+		if i == 5 { // Pool 6 is the oversized one
+			size = 4
+		}
+		pools[i] = ekcPool(fmt.Sprintf("Pool %d", i+1), size, 0)
+	}
+
+	draw := BuildKnockoutDraw(pools, 1, 1)
+	require.NotNil(t, draw)
+	require.Len(t, draw.Regions, 1)
+
+	assert.Equal(t, [][]string{
+		{"Pool 6-1st v Pool 7-1st"},
+		{"Pool 1-1st v Pool 2-1st", "Pool 3-1st v Pool 4-1st", "Pool 5-1st v W", "Pool 8-1st v Pool 9-1st"},
+		{"W v W", "W v W"},
+		{"W v W"},
+	}, regionRounds(draw.Regions[0]),
+		"the oversized pool 6 must keep its consecutive round-1 fighting slot, not rise on load")
 }

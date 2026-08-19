@@ -607,8 +607,13 @@ func occAt(occ []drawOccupant, label string) drawOccupant {
 //
 // Scope is UNIFORM qualifiers only (every occupant a home 1st, poolWinners
 // effectively 1): a block containing any crossed-in occupant is out of scope
-// -- LP-3 will handle those -- and returns nil here, leaving the greedy
-// fallback untouched. Blocks of 8 or fewer are also left alone: they fall
+// and returns nil here, leaving the greedy fallback untouched. A block with
+// exactly one crossed-in occupant (an oversized neighbour pool's 2nd, R4
+// crossing at per-pool qualifier counts) is crossedBigBlockSlots' job instead
+// (draw_perpool.go, bead bc-qual phase LP-3a); this function does not call
+// it and is unchanged by its existence, which is what keeps every uniform
+// sweep case on the code path this comment and draw_ekc_2025_individual_test.go
+// already pin. Blocks of 8 or fewer are also left alone: they fall
 // through to the existing template (5-6) or greedy (<=4, 7, 8) paths, and 7
 // and 8 do not need a new template at all -- see the note below.
 //
@@ -633,7 +638,8 @@ func uniformBigBlockSlots(occ []drawOccupant, pools []Pool) []string {
 	}
 	for _, o := range occ {
 		if o.rank != 1 {
-			// Crossed-in qualifier: mixed-rank big blocks are LP-3's job.
+			// Crossed-in qualifier: mixed-rank big blocks are
+			// crossedBigBlockSlots' job (draw_perpool.go, LP-3a).
 			return nil
 		}
 	}
@@ -646,6 +652,21 @@ func uniformBigBlockSlots(occ []drawOccupant, pools []Pool) []string {
 	// consecutively, seeds first (criterion 1 stands; on every decoded sheet
 	// the seeded pool is its court's first pool, so this equals plain pool
 	// order there).
+	sorted := sortBySeedThenPoolOrder(occ, pools)
+
+	top, bottom := sorted[:len(sorted)/2], sorted[len(sorted)/2:]
+	slots := make([]string, 0, 16)
+	slots = append(slots, bigBlockHalfSlots(top, true)...)
+	slots = append(slots, bigBlockHalfSlots(bottom, false)...)
+	return slots
+}
+
+// sortBySeedThenPoolOrder is the "lay consecutively, seeds first" ordering
+// uniformBigBlockSlots uses (operator ruling 4, bc-qual: no criterion-2 load
+// priority in a big block), factored out so LP-3a's crossedBigBlockSlots
+// (draw_perpool.go) sorts a crossed-hosting block's HOME occupants the exact
+// same way rather than restating the comparator.
+func sortBySeedThenPoolOrder(occ []drawOccupant, pools []Pool) []drawOccupant {
 	sorted := append([]drawOccupant{}, occ...)
 	sort.SliceStable(sorted, func(i, j int) bool {
 		as, bs := poolSeedRank(pools[sorted[i].pool]), poolSeedRank(pools[sorted[j].pool])
@@ -654,12 +675,7 @@ func uniformBigBlockSlots(occ []drawOccupant, pools []Pool) []string {
 		}
 		return sorted[i].pool < sorted[j].pool
 	})
-
-	top, bottom := sorted[:len(sorted)/2], sorted[len(sorted)/2:]
-	slots := make([]string, 0, 16)
-	slots = append(slots, bigBlockHalfSlots(top, true)...)
-	slots = append(slots, bigBlockHalfSlots(bottom, false)...)
-	return slots
+	return sorted
 }
 
 // bigBlockHalfSlots fills one half's 8-slot quadrant pair from its occupants

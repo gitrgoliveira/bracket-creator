@@ -94,27 +94,38 @@ a non-power-of-two court count; see the pinned defaults for that.
 | Junior Individual Male | 18 | 1 | 5,5,4,4 | yes |
 | Junior Team | 7 | 2 | 4,3,4,3 | yes |
 | Ladies Team | 8 | 2 | 4,4,4,4 | yes |
-| Ladies Individual | 34 | **per-pool** | 10,8,8,10 | NO -- per-pool qualifiers |
+| Ladies Individual | 34 | **per-pool** | 10,8,8,10 | yes (per-pool, bc-qual LP-3a, 2026-08-19) |
 | Men Team | 12 | 2 | 6,6,6,6 | yes (R6(c) template, fixed 2026-08-18) |
-| Men Individual | 45 | **per-pool** | A=13; B/C/D hold 11/11/12 (order not decoded) | NO -- both of the above |
+| Men Individual | 45 | **per-pool** | 13,11,11,12 (order decoded 2026-08-19) | yes (per-pool, bc-qual LP-3a) |
 
-One gap remains, recorded where the rule it breaks is defined (**R6(c)** was a second
-gap -- blocks above four occupants misallocating byes at 2+ qualifiers -- found
-2026-08-18 and fixed the same day; see that section for the template and its tests):
+*Resolved 2026-08-19 (bead bc-qual, Phase 0 decode + LP-3a):* both former gaps closed.
 
 - **Per-pool qualifier counts**: the two large individual events send **2** qualifiers
-  from a 4-person pool and **1** from a 3-person pool, so the occupant count is neither
-  the pool count nor twice it (Ladies 34 pools -> 36 occupants; Men 45 -> 47).
-  `BuildKnockoutDraw` takes one `poolWinners` for the whole competition and cannot
-  express this. Pinned by `TestEKCIndividualEventsUsePerPoolQualifierCounts`.
+  from a 4-person pool and **1** from a 3-person pool (Ladies 34 pools -> 36 occupants;
+  Men 45 -> 47), a rule witnessed in BOTH years (the 2025 juniors had 4-person pools
+  sending 2nds; the 2025 seniors, uniform pools of 3, sent zero 2nds).
+  `BuildKnockoutDrawPerPool`/`BuildKnockoutDrawPerPoolFromAssignment`
+  (`internal/helper/draw_perpool.go`) express this; `BuildKnockoutDraw` keeps its
+  single-`poolWinners` signature untouched. Pinned by
+  `TestEKCIndividualEventsUsePerPoolQualifierCounts` (both halves: the uniform builder
+  cannot reach the sheet counts, the per-pool builder does) and bout-for-bout by
+  `draw_ekc_2026_individual_test.go`.
+- **Where the crossing 2nds go** (formerly "undecided, deliberately not guessed"): the
+  full decode found SEVEN crossings, not two. Six agree on the SAME-HALF NEIGHBOUR
+  (B->A, C->D: both 2026 events x2, plus 2025 Junior Ind. Male x2), unlike the TEAM
+  events' partner map (A<->C, B<->D); the seventh (2025 Junior Ind. Female, a
+  degenerate 6-occupant draw, went B->D) is ignored by operator ruling: the rule is
+  uniform at every draw size, no small-draw special case. Implemented as
+  `crossNeighbourCourt` (court^1); the A->B / D->C direction is the unwitnessed
+  symmetric involution, labelled an extrapolation (oversized pools always sit
+  mid-list, so no sheet ever shows an outer-court source). Every crossed 2nd takes a
+  round-1 FIGHTING slot, never a bye (`crossedHalfSlots`).
 
-*Undecided, and deliberately not guessed:* where those few crossing 2nds go. In all four
-TEAM events every 2nd crosses to the R4 partner shiaijo (A<->C, B<->D), and the sheets
-show it plainly. In the two individual events only two 2nds cross in the whole draw, and
-both observed cases went B -> A (Ladies pool 16, Men pool 22), which the partner rule
-does not predict. Two crossings across two events is not enough to decide between "a
-different partner map for individuals" and "fill wherever the bracket has room", so R4
-is NOT extended to cover them here. Decode more sheets before writing a rule.
+Two recorded residues: the 2026 Ladies sheet allocates pools 9/8/8/9 where
+`AssignPoolsToCourts` front-loads 9/9/8/8, so replaying that exact sheet feeds the
+allocation explicitly (`BuildKnockoutDrawPerPoolFromAssignment`); and one aka/shiro
+cell (2026 Men F9) is deliberately flipped against the page because the 2025 and 2026
+sheets are mutually inconsistent at that position (see the fixture comment).
 
 Round-1 pairings and byes below are transcribed exactly as recorded in the bead. They
 are the observed sheet layout, not a derivation.
@@ -644,7 +655,7 @@ consecutively (seeds first; NO criterion-2 load priority - the 2026 Men court B 
 lays pool 22's winner into a fighting slot, see the operator ruling pinned by
 `TestUniformBigBlockLaysConsecutivelyNotByLoad`). MIXED-rank blocks above six (a
 crossed 2nd inside a big block, e.g. Men Individual 2026's 13-occupant court A) remain
-unextrapolated here and are the per-pool qualifier phase's job (bead bc-qual LP-3).
+unextrapolated here; the per-pool phase landed as crossedBigBlockSlots/crossedHalfSlots (draw_perpool.go, bc-qual LP-3a), covering exactly the witnessed one-crossed-occupant shapes.
 
 **What the fix touched besides the layout (2026-08-18):**
 

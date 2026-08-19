@@ -20,12 +20,14 @@ import (
 //
 // Men Team reproduces bout-for-bout under R6(c)'s template (fixed 2026-08-18;
 // TestEKCMenTeamByes and TestEKC2025MenTeamByes are the acceptance tests and
-// no longer skip). The two large individual events remain out of reach for a
-// different reason, pinned by the narrowest test that states the gap:
-//
-//   - Men Individual and Ladies Individual: both use PER-POOL qualifier counts
-//     (a 4-person pool sends 2, a 3-person pool sends 1), which the uniform
-//     poolWinners parameter cannot express at all.
+// no longer skip). The two large individual events used PER-POOL qualifier
+// counts (a 4-person pool sends 2, a 3-person pool sends 1), which the
+// uniform poolWinners parameter cannot express at all --
+// TestEKCIndividualEventsUsePerPoolQualifierCounts below is the narrowest
+// test that states the gap, and BuildKnockoutDrawPerPool (draw_perpool.go,
+// bead bc-qual phase LP-3a) is what closes it; the full bout-for-bout
+// acceptance tests are draw_ekc_2026_individual_test.go's
+// TestEKC2026LadiesIndividualDrawShape and TestEKC2026MenIndividualDrawShape.
 
 // TestEKCLadiesTeam is reference draw D: 8 pools, 2 qualifiers, courts A(1,2)
 // B(3,4) C(5,6) D(7,8), seeds on pools 1, 3, 5 and 7 (Poland, France, Italy,
@@ -165,24 +167,40 @@ func TestEKCMenTeamByes(t *testing.T) {
 // ISR-2, PRT-3) is one of the two 4-person pools, and P16 #2 appears in shiaijo
 // A's block having crossed over from B. Every 3-person pool sends only its 1st.
 //
-// BuildKnockoutDraw takes ONE poolWinners for the whole competition, so neither
-// value can produce the sheet. This test states that as arithmetic rather than
-// as a comment, so it starts failing the moment per-pool qualifiers are
-// supported and the event becomes expressible.
+// BuildKnockoutDraw takes ONE poolWinners for the whole competition, so
+// neither a uniform 1 nor a uniform 2 can produce the sheet -- both remain
+// pinned below as the negative half of the claim. BuildKnockoutDrawPerPool
+// (draw_perpool.go, bead bc-qual phase LP-3a) is what closes the gap: the
+// positive half now builds the SAME two events with only the two 4-person
+// pools sending a 2nd, and asserts the result reaches the sheet's own
+// occupant count exactly. draw_ekc_2026_individual_test.go is the fuller
+// acceptance test (bout-for-bout, not just a leaf count); this one stays
+// narrow on purpose, as the arithmetic statement of the gap this test always
+// was.
 func TestEKCIndividualEventsUsePerPoolQualifierCounts(t *testing.T) {
 	cases := []struct {
 		name            string
 		numPools        int
 		sheetOccupants  int
 		fourPersonPools int
+		oversizedPools  []int // 1-based pool numbers that send a 2nd
+		courtSizes      []int // the sheet's own court blocks, pool counts A..D
 	}{
-		{"Ladies Individual", 34, 36, 2},
-		{"Men Individual", 45, 47, 2},
+		// Ladies' 9/8/8/9 is the sheet's own SYMMETRIC split, not
+		// AssignPoolsToCourts(34, 4)'s front-loaded 9/9/8/8 (same mismatch
+		// class as the Junior Individual Female draw in draw_ekc_test.go) --
+		// fed explicitly so this stays a per-pool-qualifier test rather than
+		// an allocation one. Men's 12/11/11/11 is what AssignPoolsToCourts
+		// already gives at 45 pools over 4 courts, stated explicitly anyway
+		// so both cases build the same way.
+		{"Ladies Individual", 34, 36, 2, []int{16, 19}, []int{9, 8, 8, 9}},
+		{"Men Individual", 45, 47, 2, []int{22, 25}, []int{12, 11, 11, 11}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			require.Equal(t, tc.numPools+tc.fourPersonPools, tc.sheetOccupants,
 				"the sheet's occupant count is one per pool plus one per 4-person pool")
+			require.Len(t, tc.oversizedPools, tc.fourPersonPools)
 
 			atOne := len(TreeLeafLabels(BuildKnockoutDraw(ekcPools(tc.numPools), 1, 4).Root))
 			atTwo := len(TreeLeafLabels(BuildKnockoutDraw(ekcPools(tc.numPools), 2, 4).Root))
@@ -193,6 +211,23 @@ func TestEKCIndividualEventsUsePerPoolQualifierCounts(t *testing.T) {
 				"a uniform 1 qualifier cannot reach the sheet's %d occupants", tc.sheetOccupants)
 			assert.NotEqual(t, tc.sheetOccupants, atTwo,
 				"a uniform 2 qualifiers cannot reach the sheet's %d occupants", tc.sheetOccupants)
+
+			overrides := map[int]int{}
+			for _, p := range tc.oversizedPools {
+				overrides[p-1] = 2 // 0-based pool index
+			}
+			var assignment []int
+			for court, n := range tc.courtSizes {
+				for i := 0; i < n; i++ {
+					assignment = append(assignment, court)
+				}
+			}
+			require.Len(t, assignment, tc.numPools)
+			perPoolDraw := BuildKnockoutDrawPerPoolFromAssignment(ekcPools(tc.numPools), 1, overrides, assignment, 4)
+			require.NotNil(t, perPoolDraw)
+			atPerPool := len(TreeLeafLabels(perPoolDraw.Root))
+			assert.Equal(t, tc.sheetOccupants, atPerPool,
+				"a per-pool draw -- 1 qualifier per pool, +1 for the %d oversized pools -- reaches the sheet's own occupant count", tc.fourPersonPools)
 		})
 	}
 }

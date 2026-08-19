@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
@@ -384,6 +385,119 @@ func TestValidateCompetitionTeamSize(t *testing.T) {
 	}
 }
 
+// --- ExtraQualifiers (bc-qual) ---
+
+// TestValidateExtraQualifiers covers every branch of the switch: the empty
+// default, both recognised non-empty values under both pool-size modes, and
+// an unknown value. fill-bracket must be rejected unconditionally (LP-4 not
+// yet implemented) even under minimum-mode sizing where it would otherwise
+// be legal.
+func TestValidateExtraQualifiers(t *testing.T) {
+	tests := []struct {
+		name         string
+		value        string
+		poolSizeMode string
+		wantErr      bool
+	}{
+		{"empty is always valid, min mode", "", "min", false},
+		{"empty is always valid, max mode", "", "max", false},
+		{"empty is always valid, unset mode", "", "", false},
+		{"larger-pools valid under min mode", ExtraQualifiersLargerPools, "min", false},
+		{"larger-pools valid under unset (default) mode", ExtraQualifiersLargerPools, "", false},
+		{"larger-pools rejected under max mode", ExtraQualifiersLargerPools, "max", true},
+		{"fill-bracket rejected under min mode (not yet supported)", ExtraQualifiersFillBracket, "min", true},
+		{"fill-bracket rejected under max mode (not yet supported)", ExtraQualifiersFillBracket, "max", true},
+		{"fill-bracket rejected under unset mode (not yet supported)", ExtraQualifiersFillBracket, "", true},
+		{"unknown value rejected", "bogus", "min", true},
+		{"unknown value rejected even under max mode", "bogus", "max", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateExtraQualifiers(tc.value, tc.poolSizeMode)
+			if tc.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+// TestQualifiersForPool covers the arithmetic across all three modes and
+// both the exact-minimum and oversized boundary, plus the PoolWinners
+// default fallback (EffectivePoolWinners() == 2 when PoolWinners <= 0).
+func TestQualifiersForPool(t *testing.T) {
+	poolOfSize := func(n int) helper.Pool {
+		p := helper.Pool{PoolName: "P1"}
+		for i := 0; i < n; i++ {
+			p.Players = append(p.Players, helper.Player{Name: "player"})
+		}
+		return p
+	}
+
+	tests := []struct {
+		name string
+		comp Competition
+		pool helper.Pool
+		want int
+	}{
+		{
+			name: "standard mode ignores pool size, uses EffectivePoolWinners default",
+			comp: Competition{ExtraQualifiers: ExtraQualifiersNone, PoolSize: 3},
+			pool: poolOfSize(6),
+			want: 2,
+		},
+		{
+			name: "standard mode with explicit PoolWinners",
+			comp: Competition{ExtraQualifiers: ExtraQualifiersNone, PoolSize: 3, PoolWinners: 3},
+			pool: poolOfSize(6),
+			want: 3,
+		},
+		{
+			name: "larger-pools: pool exactly at minimum size sends the base count",
+			comp: Competition{ExtraQualifiers: ExtraQualifiersLargerPools, PoolSize: 4},
+			pool: poolOfSize(4),
+			want: 2,
+		},
+		{
+			name: "larger-pools: pool below minimum size (short pool) still sends the base count",
+			comp: Competition{ExtraQualifiers: ExtraQualifiersLargerPools, PoolSize: 4},
+			pool: poolOfSize(3),
+			want: 2,
+		},
+		{
+			name: "larger-pools: pool one over minimum sends one extra",
+			comp: Competition{ExtraQualifiers: ExtraQualifiersLargerPools, PoolSize: 4},
+			pool: poolOfSize(5),
+			want: 3,
+		},
+		{
+			name: "larger-pools: pool well over minimum still sends exactly one extra",
+			comp: Competition{ExtraQualifiers: ExtraQualifiersLargerPools, PoolSize: 4},
+			pool: poolOfSize(8),
+			want: 3,
+		},
+		{
+			name: "larger-pools with explicit PoolWinners, oversized pool",
+			comp: Competition{ExtraQualifiers: ExtraQualifiersLargerPools, PoolSize: 4, PoolWinners: 1},
+			pool: poolOfSize(5),
+			want: 2,
+		},
+		{
+			name: "empty pool never counts as oversized",
+			comp: Competition{ExtraQualifiers: ExtraQualifiersLargerPools, PoolSize: 0},
+			pool: helper.Pool{PoolName: "empty"},
+			want: 2,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.comp.QualifiersForPool(tc.pool)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
 // --- Sponsors (mp-c38) ---
 
 // TestTournament_SponsorsRoundTrip pins the YAML round-trip contract:
@@ -524,4 +638,16 @@ func TestMatchResult_RoundRoundtrip(t *testing.T) {
 	assert.NoError(t, err)
 
 	assert.Equal(t, 3, got.Round)
+}
+
+// TestQualifiersForPool_UnsetPoolSizeDegradesToUniform pins the guard for
+// drifted or hand-edited config data: with PoolSize unset (0) there is no
+// minimum to be over, so larger-pools mode must NOT mark every pool
+// oversized -- it degrades to the uniform count. A started competition can
+// never hit this (the engine refuses to start with an unset PoolSize).
+func TestQualifiersForPool_UnsetPoolSizeDegradesToUniform(t *testing.T) {
+	c := Competition{PoolWinners: 1, ExtraQualifiers: ExtraQualifiersLargerPools}
+	pool := helper.Pool{Players: []helper.Player{{Name: "a"}, {Name: "b"}, {Name: "c"}, {Name: "d"}}}
+	assert.Equal(t, 1, c.QualifiersForPool(pool),
+		"PoolSize=0 must not make a 4-player pool read as oversized")
 }

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 )
 
 type Tournament struct {
@@ -301,15 +302,28 @@ type FightingSpiritAward struct {
 }
 
 type Competition struct {
-	ID                string            `yaml:"id" json:"id"`
-	Name              string            `yaml:"name" json:"name"`
-	Kind              string            `yaml:"kind" json:"kind"`
-	Format            string            `yaml:"format" json:"format"`
-	PoolFormat        string            `yaml:"pool_format,omitempty" json:"poolFormat,omitempty"` // "full" (default) | "partial"
-	TeamSize          int               `yaml:"team_size" json:"teamSize"`
-	PoolSize          int               `yaml:"pool_size" json:"poolSize"`
-	PoolSizeMode      string            `yaml:"pool_size_mode" json:"poolSizeMode"`
-	PoolWinners       int               `yaml:"pool_winners" json:"poolWinners"`
+	ID           string `yaml:"id" json:"id"`
+	Name         string `yaml:"name" json:"name"`
+	Kind         string `yaml:"kind" json:"kind"`
+	Format       string `yaml:"format" json:"format"`
+	PoolFormat   string `yaml:"pool_format,omitempty" json:"poolFormat,omitempty"` // "full" (default) | "partial"
+	TeamSize     int    `yaml:"team_size" json:"teamSize"`
+	PoolSize     int    `yaml:"pool_size" json:"poolSize"`
+	PoolSizeMode string `yaml:"pool_size_mode" json:"poolSizeMode"`
+	PoolWinners  int    `yaml:"pool_winners" json:"poolWinners"`
+	// ExtraQualifiers selects how many finishers a pool sends to the
+	// knockout stage beyond the standard EffectivePoolWinners() count
+	// (bc-qual, successor to bc-draw's Phase 0). "" (default, ExtraQualifiersNone)
+	// is today's behaviour, unchanged: every pool sends EffectivePoolWinners(),
+	// unfilled bracket slots become byes. Old config.md files predating this
+	// field have no extra_qualifiers key and load with the zero value, which
+	// IS the default, so no migration is needed (additive-only).
+	// See ExtraQualifiersLargerPools / ExtraQualifiersFillBracket,
+	// ValidateExtraQualifiers, and QualifiersForPool below. Valid for BOTH
+	// team and individual competitions (operator ruling 2, bc-qual); only
+	// meaningful under minimum-players-per-pool sizing (PoolSizeMode != "max"),
+	// which ValidateExtraQualifiers enforces.
+	ExtraQualifiers   string            `yaml:"extra_qualifiers,omitempty" json:"extraQualifiers,omitempty"`
 	RoundRobin        bool              `yaml:"round_robin" json:"roundRobin"`
 	Courts            []string          `yaml:"courts" json:"courts"`
 	StartTime         string            `yaml:"start_time" json:"startTime"`
@@ -603,6 +617,106 @@ func (c Competition) EffectivePoolWinners() int {
 		return c.PoolWinners
 	}
 	return 2
+}
+
+// Competition.ExtraQualifiers values (bc-qual). Only meaningful under
+// minimum-players-per-pool sizing (PoolSizeMode != "max"); see
+// ValidateExtraQualifiers.
+const (
+	// ExtraQualifiersNone is the default / standard mode: every pool sends
+	// EffectivePoolWinners() qualifiers to the knockout; unfilled bracket
+	// slots become byes. Today's behaviour, unchanged.
+	ExtraQualifiersNone = ""
+
+	// ExtraQualifiersLargerPools ("Oversized pools send one extra"): pools
+	// are cut exactly as in standard mode, but a pool that is OVERSIZED
+	// sends EffectivePoolWinners()+1 qualifiers. See QualifiersForPool for
+	// the oversized test this layer uses. Crossing/placement of the extra
+	// qualifier is a draw-time (helper/engine) concern, not modeled here.
+	ExtraQualifiersLargerPools = "larger-pools"
+
+	// ExtraQualifiersFillBracket ("Fit the knockout exactly") is a LATER
+	// PHASE (bc-qual LP-4: a different pool-formation objective plus
+	// drafted second qualifiers, so the qualifiers exactly fill a
+	// power-of-two bracket with zero byes). The constant exists now so
+	// callers have a stable symbol to reference, but it is deliberately
+	// inert: ValidateExtraQualifiers rejects it outright, so no config can
+	// activate it yet.
+	ExtraQualifiersFillBracket = "fill-bracket"
+)
+
+// ValidateExtraQualifiers reports whether value is an acceptable
+// Competition.ExtraQualifiers setting given the competition's PoolSizeMode.
+//
+//   - "" (ExtraQualifiersNone) is always valid, regardless of PoolSizeMode.
+//   - ExtraQualifiersLargerPools requires minimum-players-per-pool sizing:
+//     poolSizeMode must not be "max" (empty or any value other than "max"
+//     is minimum mode, mirroring the `isMax := PoolSizeMode == "max"` check
+//     used throughout internal/helper and internal/engine).
+//   - ExtraQualifiersFillBracket is a recognised value but NOT YET
+//     SUPPORTED (bc-qual LP-4); it is rejected unconditionally, independent
+//     of poolSizeMode.
+//   - Any other value is unknown and rejected.
+//
+// This is a pure function over the two relevant scalar fields, matching the
+// style of ValidateTeamMatchType/ValidateCompetitionTeamSize above: it does
+// not read or mutate a Competition, so handlers can validate a proposed
+// value before it is merged into a stored record.
+func ValidateExtraQualifiers(value, poolSizeMode string) error {
+	switch value {
+	case ExtraQualifiersNone:
+		return nil
+	case ExtraQualifiersFillBracket:
+		return fmt.Errorf("extraQualifiers %q is not yet supported", value)
+	case ExtraQualifiersLargerPools:
+		if poolSizeMode == "max" {
+			return fmt.Errorf("extraQualifiers %q requires minimum-players-per-pool sizing (poolSizeMode must not be %q)", value, "max")
+		}
+		return nil
+	default:
+		return fmt.Errorf("unknown extraQualifiers %q (expected %q, %q, or %q)",
+			value, ExtraQualifiersNone, ExtraQualifiersLargerPools, ExtraQualifiersFillBracket)
+	}
+}
+
+// QualifiersForPool returns the number of finishers pool promotes to the
+// knockout stage, extending EffectivePoolWinners() per c.ExtraQualifiers:
+//
+//   - ExtraQualifiersNone (default): always EffectivePoolWinners().
+//   - ExtraQualifiersLargerPools: EffectivePoolWinners()+1 when pool is
+//     OVERSIZED, else EffectivePoolWinners().
+//
+// The oversized test AT THIS LAYER is by participant count alone:
+// len(pool.Players) > c.PoolSize, where c.PoolSize is the competition's
+// minimum pool size under minimum-players-per-pool sizing. This is a
+// simpler proxy than the draw engine's eventual D1 metric (oversized = the
+// pool's qualifier would play more pool matches than the lightest pool's;
+// bc-qual plan LP-3) — state only holds the roster (pools.csv, via
+// Store.LoadPools), not match schedules, so match-count-based oversizing is
+// out of reach here. Callers that need the D1 metric compute it themselves
+// (e.g. from LoadPoolMatches) rather than relying on this helper for that.
+//
+// pool is a helper.Pool exactly as returned by Store.LoadPools /
+// LoadPoolsLocked, so a caller iterating a loaded []helper.Pool can pass
+// each element straight through without reshaping — the least-surprising
+// signature given what this package already holds pool data as.
+//
+// Does not itself check PoolSizeMode or re-validate ExtraQualifiers; callers
+// are expected to have gone through ValidateExtraQualifiers first (draw-time
+// code only reaches ExtraQualifiersLargerPools on an already-validated
+// Competition, since minimum-mode is a precondition of the value existing
+// at all).
+func (c Competition) QualifiersForPool(pool helper.Pool) int {
+	base := c.EffectivePoolWinners()
+	// PoolSize <= 0 means there is no minimum to be over: without a baseline
+	// the oversized test would mark EVERY pool oversized, so degrade to the
+	// uniform count instead. Unreachable for a started competition (the
+	// engine rejects starting with an unset PoolSize) but cheap to make safe
+	// against drifted or hand-edited config.md data.
+	if c.ExtraQualifiers == ExtraQualifiersLargerPools && c.PoolSize > 0 && len(pool.Players) > c.PoolSize {
+		return base + 1
+	}
+	return base
 }
 
 type CompetitionStatus string

@@ -261,7 +261,7 @@ classDiagram
     }
     class seeds_csv["seeds.csv"] {
         <<CSV>>
-        Rank, Name
+        Rank, Name, Dojo
     }
     class pools_csv["pools.csv"] {
         <<CSV>>
@@ -394,3 +394,29 @@ If the storage were rebuilt around queries rather than around people reading it,
 would differ: a match side table would replace the paired columns, and sub bouts would be
 rows rather than an embedded document. That would trade away the inspect and repair
 properties in section 1, which is the reason it has not been done.
+
+## 7. Decisions of record
+
+The disagreements above were reviewed as a whole rather than inherited, and the flat row is
+the shape of record: a match side object exists in the diagram as the honest way to read
+twelve paired columns, and stays out of the code and the file, where it would trade the
+spreadsheet readable pairing for structure only a query engine would benefit from. The same
+holds for the nested sub bouts and the judges' decision mark: both stay as they are, because
+they mirror how a paper score sheet records the same facts.
+
+What changed as a result of the review is enforcement, not shape:
+
+* **The results file's layout is defined once.** The header, the row writer and the reader
+  all derive from a single ordered column list, so the three cannot disagree; before, each
+  kept its own hand maintained copy, and nothing failed when a new field missed one of them.
+  A golden test pins the exact bytes. The ordered list, never Go struct order, is the
+  on disk contract.
+* **Every CSV file has a round trip guard.** Each guard sweeps the persisted struct's
+  fields and fails when a field neither survives a save and reload nor appears in an
+  allow list with the reason it is legitimately transient. Four fields of the match row
+  were once lost silently for lack of exactly this. The files persisted by marshalling a
+  whole structure are immune by construction, and a companion test pins the property that
+  makes them immune.
+* **The seed list stores the dojo alongside the name.** A seed is matched to its
+  participant by name and dojo together, because two competitors may share a name across
+  dojos; a file that stored only the name could not say which of them the rank belonged to.

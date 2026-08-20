@@ -71,6 +71,8 @@ func processEntries(entries []string, determined bool, withZekkenName bool) ([]h
 	// already been rejected above.
 	entries = helper.RemoveDuplicates(entries)
 	if !determined {
+		// #nosec G404, draw-order shuffle: sporting fairness, not key
+		// material (the global source is runtime-seeded since Go 1.20).
 		rand.Shuffle(len(entries), func(i, j int) {
 			entries[i], entries[j] = entries[j], entries[i]
 		})

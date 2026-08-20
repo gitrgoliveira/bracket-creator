@@ -275,18 +275,6 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 		return res
 	}
 
-	// Cross-file guard symmetry with POST /competitions and PUT
-	// /competitions/:id: a knockout-qualifier mode a manifest states must pass
-	// exactly the rule the REST API applies, or an import could persist a
-	// competition whose settings the API would refuse and whose draw
-	// generatePools then rejects with an error about pool FORMATION rather
-	// than about the setting that caused it.
-	//
-	// Runs AFTER the PoolSizeMode default above, deliberately: an omitted
-	// `pool_size_mode` becomes "max" here, and validating before the default
-	// would read the empty value as minimum sizing, accept a non-standard
-	// mode, and then store the pair the rule forbids.
-
 	// Parse participants AND seeds BEFORE saving the competition config.
 	// Pre-fix, the config was saved first and the participants parse
 	// happened after, so a malformed participants file left a half-

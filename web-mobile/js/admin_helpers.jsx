@@ -944,12 +944,12 @@ function competitionDrawBlocker(competition, tournamentCourts) {
   const courtsReason = competitionDrawBlockedReason(competition, tournamentCourts);
   if (courtsReason) return { reason: courtsReason, fix: SHIAIJO_FIX, section: "settings", cta: "Reassign shiaijo →" };
   // NOTE: only sees a seeding when the caller's competition carries one.
-  // GET /api/viewer/competitions/:id hydrates seeds (WithSeeds: true) so the
-  // competition header and its overview block correctly; the LIST payload the
-  // dashboard reads does not (WithSeeds: false), so the dashboard card and
-  // "Start all" fall back to the server's refusal, which names the missing
-  // ranks in its 400. Hydrating seeds into a public list read by every viewer
-  // to answer an admin question is the wrong trade.
+  // Both viewer payloads hydrate seeds (WithSeeds: true on the detail AND
+  // the list build -- handlers_viewer.go, where the list was flipped so the
+  // qualifier preview's seed supply survives the admin SPA's aggregate
+  // fallback), so the dashboard card and "Start all" see the same seeding
+  // this blocker checks. The server's 400, which names the missing ranks,
+  // remains the backstop for writes that bypass the UI.
   return competitionSeedingBlocker(competition);
 }
 

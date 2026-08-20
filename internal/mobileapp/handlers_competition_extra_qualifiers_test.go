@@ -130,8 +130,9 @@ func TestPOSTCompetition_ExtraQualifiers_Validation(t *testing.T) {
 }
 
 // TestPOSTCompetition_ExtraQualifiers_ZeroedForNonPoolFormats verifies
-// normalizePoolConfig zeroes ExtraQualifiers for league/playoffs (mirroring
-// PoolSize/PoolWinners) BEFORE ValidateExtraQualifiers runs, so a stray
+// normalizePoolConfig zeroes ExtraQualifiers for every non-pool-fed format
+// (league, playoffs, swiss; TestPUTCompetition_Swiss_StaleExtraQualifiers
+// covers the swiss settings path) BEFORE ValidateExtraQualifiers runs, so a stray
 // non-standard value sent for a format with no pool phase is silently
 // dropped rather than rejected or persisted: ExtraQualifiers only has
 // meaning for "mixed" (internal/engine/pools.go gates its own use of it on
@@ -159,6 +160,56 @@ func TestPOSTCompetition_ExtraQualifiers_ZeroedForNonPoolFormats(t *testing.T) {
 	require.NotNil(t, saved)
 	assert.Equal(t, state.ExtraQualifiersNone, saved.ExtraQualifiers,
 		"ExtraQualifiers must be zeroed for a format with no pool phase, mirroring PoolSize/PoolWinners")
+}
+
+// TestPUTCompetition_Swiss_StaleExtraQualifiers is the wedge the missing
+// swiss case caused (review finding on this PR). A swiss record can hold a
+// stale non-standard ExtraQualifiers (a hand-edited config.md, or an import
+// manifest row with format: swiss + extra_qualifiers: larger-pools, which
+// importCompetition validated without zeroing). The admin settings page PUTs
+// its FULL local state, so the stale value rides along on every save; with
+// pool_winners 0/absent, EffectivePoolWinners() reads 2 and
+// ValidateExtraQualifiers 400s even a plain rename -- over a radio the UI
+// only renders for mixed, so the operator has no control to clear it. The
+// PUT must succeed and zero the value.
+// Red-verified: removing CompFormatSwiss from normalizeExtraQualifiers's
+// switch turns the 200 into a 400.
+func TestPUTCompetition_Swiss_StaleExtraQualifiers(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+
+	const cid = "swiss-stale-eq"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:              cid,
+		Name:            "Swiss Stale EQ",
+		Kind:            "individual",
+		Format:          state.CompFormatSwiss,
+		SwissRounds:     4,
+		Status:          state.CompStatusSetup,
+		PoolSizeMode:    "min",
+		ExtraQualifiers: state.ExtraQualifiersLargerPools, // stale; PoolWinners 0 -> effective 2 -> validate rejects the pair
+	}))
+
+	// The SPA PUTs its whole local state, so the stale value is in the body.
+	body, _ := json.Marshal(map[string]any{
+		"id":              cid,
+		"name":            "Swiss Stale EQ (renamed)",
+		"format":          state.CompFormatSwiss,
+		"kind":            "individual",
+		"swissRounds":     4,
+		"poolSizeMode":    "min",
+		"extraQualifiers": state.ExtraQualifiersLargerPools,
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code,
+		"a settings PUT on a swiss record with a stale extraQualifiers must not wedge; response: %s", w.Body.String())
+
+	saved, err := store.LoadCompetition(cid)
+	require.NoError(t, err)
+	assert.Equal(t, state.ExtraQualifiersNone, saved.ExtraQualifiers,
+		"the stale value must be zeroed, exactly as league/playoffs are")
 }
 
 // TestPUTCompetition_ExtraQualifiers_SettingsOnlyRoundTrip verifies the

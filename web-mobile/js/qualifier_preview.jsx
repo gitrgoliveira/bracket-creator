@@ -122,9 +122,11 @@ function bracketShape(qualifiers) {
 // computeQualifierPreview computes the pool/qualifier/bracket arithmetic for
 // all three "Knockout qualifiers" modes at once, given the current roster
 // count n, the minimum-players-per-pool size minSize, the pool-winners
-// count poolWinners (the EFFECTIVE value -- callers that have not resolved
-// an unset/<=0 poolWinners to the default of 2 should do that before
-// calling, same contract as state.Competition.EffectivePoolWinners()), and
+// count poolWinners -- an unset/<=0 value resolves to the DEFAULT OF 2
+// inside this function, mirroring state.Competition.EffectivePoolWinners(),
+// so no caller can understate the server by passing a legacy record's raw
+// pool_winners: 0 (the non-standard modes always store an explicit 1, so
+// the default only ever applies to standard mode) -- and
 // seedRanks, the roster's seed ranks -- which feed the fill-bracket supply
 // rule ONLY (drafted 2nds come from seeded pools first), so the standard and
 // larger-pools shapes never depend on them. The settings page derives them
@@ -152,7 +154,9 @@ function bracketShape(qualifiers) {
 // placeholder directly.
 export function computeQualifierPreview(n, minSize, poolWinners, seedRanks) {
   const roster = Number.isFinite(n) ? Math.trunc(n) : 0;
-  const winners = Number.isInteger(poolWinners) && poolWinners > 0 ? poolWinners : 1;
+  // 2 is Go's EffectivePoolWinners default; resolving to 1 here (as an
+  // earlier cut did) halved the preview for a legacy pool_winners: 0 record.
+  const winners = Number.isInteger(poolWinners) && poolWinners > 0 ? poolWinners : 2;
 
   if (!Number.isInteger(minSize) || minSize <= 0 || roster <= 0 || roster < minSize) {
     return { standard: null, largerPools: null, fillBracket: null };

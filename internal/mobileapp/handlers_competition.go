@@ -210,12 +210,18 @@ func normalizePoolConfig(comp *state.Competition) {
 }
 
 // normalizeExtraQualifiers zeroes ExtraQualifiers (bc-qual LP-5a) for the
-// formats it cannot mean anything for: league has no knockout stage and
-// playoffs has no pool stage, so internal/engine's own gate (poolFedKnockout
-// in pools.go) never reaches it for either. Zeroing keeps stored config.md
+// formats it cannot mean anything for: league has no knockout stage,
+// playoffs has no pool stage, and swiss pairs each round by standings --
+// internal/engine's own gate (poolFedKnockout in pools.go) is mixed-only,
+// so it never reaches any of them. Zeroing keeps stored config.md
 // consistent with what the engine actually uses, and means
 // ValidateExtraQualifiers always sees "" for these formats rather than
-// depending on the admin UI to have hidden/reset the field itself.
+// depending on the admin UI to have hidden/reset the field itself. Swiss
+// was missing from this switch at first (review finding): a swiss record
+// carrying a stale non-standard value -- e.g. a mixed larger-pools
+// competition later switched to swiss -- then failed
+// ValidateExtraQualifiers on every settings PUT over a field the UI hides
+// for swiss, so the operator had no way to clear it.
 //
 // Split out of normalizePoolConfig so the tournament-import path can apply
 // THIS rule without also applying the PoolSize/PoolWinners zeroing: that path
@@ -225,7 +231,7 @@ func normalizePoolConfig(comp *state.Competition) {
 // format instead of each carrying its own switch.
 func normalizeExtraQualifiers(comp *state.Competition) {
 	switch comp.Format {
-	case state.CompFormatLeague, state.CompFormatPlayoffs:
+	case state.CompFormatLeague, state.CompFormatPlayoffs, state.CompFormatSwiss:
 		comp.ExtraQualifiers = state.ExtraQualifiersNone
 	}
 }

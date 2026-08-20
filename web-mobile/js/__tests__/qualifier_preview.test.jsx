@@ -168,15 +168,16 @@ describe('computeQualifierPreview: known table (bc-qual LP-5a)', () => {
     expect(computeQualifierPreview(60, 0, 1)).toEqual({ standard: null, largerPools: null, fillBracket: null });
   });
 
-  it('treats an unset/<=0 poolWinners as 1, same as the caller coupling forces for non-standard modes', () => {
-    const withOne = computeQualifierPreview(11, 3, 1);
+  it('resolves an unset/<=0 poolWinners to 2, mirroring Go EffectivePoolWinners (review finding: 1 understated the server by half)', () => {
+    const withTwo = computeQualifierPreview(11, 3, 2);
     const withZero = computeQualifierPreview(11, 3, 0);
     const withUndefined = computeQualifierPreview(11, 3, undefined);
-    expect(withZero.standard).toEqual(withOne.standard);
-    expect(withUndefined.standard).toEqual(withOne.standard);
+    expect(withZero.standard).toEqual(withTwo.standard);
+    expect(withUndefined.standard).toEqual(withTwo.standard);
+    expect(withZero.standard.qualifiers).toBe(6);
   });
 
-  it('standard mode multiplies by the given poolWinners (e.g. 2, the default when unset elsewhere)', () => {
+  it('standard mode multiplies by the given poolWinners', () => {
     const r = computeQualifierPreview(11, 3, 2);
     expect(r.standard).toMatchObject({ pools: 3, qualifiers: 6, bracketSize: 8, byes: 2 });
   });

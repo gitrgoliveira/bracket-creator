@@ -1281,6 +1281,38 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// immediately above. Already validated (ValidateExtraQualifiers,
 				// settings-validation block above) and, while draw-ready, gated
 				// by outputAffectingChanged just above this merge.
+				//
+				// ACCEPTED HAZARD (review finding, recorded rather than fixed):
+				// this merge cannot tell "the client chose Standard" from "the
+				// client never sent the field", because "" is BOTH the JSON
+				// zero value and the meaningful Standard value. A client that
+				// omits it therefore clears a stored larger-pools/fill-bracket
+				// to Standard silently (the next generate-draw runs the uniform
+				// builder), and on a draw-ready competition trips a spurious
+				// 409 from the ExtraQualifiers comparison above for a PUT that
+				// changed nothing.
+				//
+				// TeamMatchType a few lines up solves its version of this with
+				// "omitted keeps stored", and that trick is NOT available here:
+				// there, legacy "" is equivalent to "fixed", so nothing is lost
+				// by treating "" as an omission. Here "" is a value an operator
+				// can deliberately choose, and treating it as an omission would
+				// make switching a competition BACK to Standard impossible --
+				// strictly worse than the hazard it would close.
+				//
+				// Not reachable from this app: api_serializers.jsx normalizes
+				// the field to an explicit "" on every read (see its
+				// ExtraQualifiers comment) and the settings page PUTs its whole
+				// local state, so the SPA always sends the key. The exposure is
+				// a third-party API client written against the pre-LP-5a
+				// contract, or a browser tab cached from before this feature
+				// shipped that saves settings after a newer tab set the mode.
+				//
+				// The real fix is a distinguishable wire encoding -- *string on
+				// the request DTO, nil meaning "keep stored" -- which is a
+				// contract change rippling through the state model and every
+				// reader. Worth doing if this field ever gains a non-SPA client;
+				// not worth it while the only writer normalizes the key in.
 				current.ExtraQualifiers = comp.ExtraQualifiers
 				// comp.Courts was already defaulted to >=1 court (tournament
 				// fallback) in the settings-validation block above.

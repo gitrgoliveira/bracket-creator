@@ -117,6 +117,17 @@ func perPoolWinners(overrides map[int]int, pi, defaultWinners int) int {
 // to) is what survives; "neighbouring court" is the multi-court expression of
 // it, not the rule itself.
 //
+// That reading is an OPERATOR RULING (2026-08-20, amendment to bc-qual
+// ruling 3, recorded on the bead): "uniform crossing, no small-draw special
+// case" fixes the DESTINATION wherever a neighbour court exists -- it
+// rejects the 2025 JIF sheet's team-map deviation -- and at one shiaijo,
+// where the map has no referent, the opposite-half seating IS the uniform
+// rule at its degenerate size (on 2 shiaijo, "cross to the neighbour" and
+// "opposite half of the whole bracket" are the same move). The literal
+// alternative, refusing wherever the map has no referent, was put to the
+// operator with both layouts drawn out and REJECTED; do not re-propose it as
+// a ruling-3 violation.
+//
 // Nothing else needs adding, because a COMPETITION's shiaijo allocation is
 // always a power of two -- 1, 2, 4, 8 or 16, enforced by
 // ValidateShiaijoCount (R9) at every entry point and clamped by

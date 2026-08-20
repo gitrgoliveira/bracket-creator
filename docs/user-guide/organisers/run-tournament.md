@@ -203,7 +203,7 @@ For naginata and Engi-kyogi divisions, see [Naginata](naginata.md).
 The public viewer shows a competition's podium when it finishes, and a provisional ranking while it is still in progress:
 
 - **Kendo knockout** (default): 1st place, 2nd place, and two equal 3rd places. There is no bronze match; both semi-final losers share third.
-- **Naginata**: a single 3rd place is decided by a playoff. See [Naginata](naginata.md) for naginata-specific configuration.
+- **Naginata**: a single 3rd place is decided by a bronze match. See [Naginata](naginata.md) for naginata-specific configuration.
 - **Mixed format** (still in its pool phase): the viewer shows a provisional cross-pool ranking until the knockout decides the final places.
 
 Operators see an all-competition winners view from the dashboard. You can also record optional **fighting-spirit** (敢闘賞) awards as free text; these appear on the viewer for all spectators. Saving awards requires the destructive-ops password in self-run mode; see [Operating modes](operating-modes.md#destructive-ops-password).

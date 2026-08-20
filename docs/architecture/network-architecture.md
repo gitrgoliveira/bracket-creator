@@ -146,7 +146,7 @@ flowchart TD
     req["Request with X-Tournament-Password"] --> verifier{"PasswordVerifier<br/>(auth_source.go)"}
     verifier -->|file mode| md["plaintext compare vs tournament.md"]
     verifier -->|locked mode| bcrypt["bcrypt compare vs TOURNAMENT_PASSWORD_HASH (env)"]
-    md --> ok["authorized → handler"]
+    md --> ok["authorised → handler"]
     bcrypt --> ok
     note["locked mode also 404s POST /api/tournament/reset"]
 ```

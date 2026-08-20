@@ -66,7 +66,7 @@ TOURNAMENT_PASSWORD_HASH='$2a$10$...' \
 
 ## Competition configuration
 
-A competition's pool and knockout settings live in its `competitions/<id>/config.md` YAML front matter, and are exposed by the API in JSON. Key names differ between the two:
+A competition's pool and knockout settings are stored in its `competitions/<id>/config.md` YAML front matter, and are exposed by the API in JSON. Key names differ between the two:
 
 | `config.md` key | JSON API key | Values | Default | Description |
 |---|---|---|---|---|

@@ -17,7 +17,7 @@ template: home.html
   </a>
 </p>
 
-**bracket-creator** lets any club or organisation run kendo tournaments at whatever level of digitization fits the venue. Give it a CSV of participants and it produces fully formatted, print-ready Excel brackets (pool draws, match schedules, and elimination trees), and it can run pools and scores on the day. Choose how digital you go.
+**bracket-creator** lets any club or organisation run kendo tournaments at whatever level of digitisation fits the venue. Give it a CSV of participants and it produces fully formatted, print-ready Excel brackets (pool draws, match schedules, and elimination trees), and it can run pools and scores on the day. Choose how digital you go.
 
 !!! tip "New here? Start with these"
     Not sure where to begin? [Choosing your setup](user-guide/start-here/choosing-your-setup.md) narrows it down in two questions, and [Your first tournament](user-guide/start-here/first-tournament.md) walks you from an empty folder to results on a screen.

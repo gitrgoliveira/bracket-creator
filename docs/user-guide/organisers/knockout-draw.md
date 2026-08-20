@@ -26,7 +26,7 @@ Same pools; 4-person pools send their top 2 (at the default minimum of 3; in gen
 
 ![Oversized send +1: the 4-person pool also sends its second place, which never takes a bye](../../screenshots/qualifiers-oversized.svg)
 
-A pool with more members than the smallest pool in the competition sends one additional qualifier, on top of the usual number. The extra qualifier is placed in a different part of the bracket from its own pool's other qualifier, and always fights in the first round: it never receives a bye. This offsets the extra pool matches that pool's members had to play in order to qualify.
+A pool with more members than the smallest pool in the competition sends one additional qualifier, on top of the usual number. The extra qualifier is placed in a different part of the bracket from its own pool's other qualifier, and always fights in the first round: it never receives a bye. This offsets the extra pool matches that pool's members had to play to qualify.
 
 The [oversized-pool bye priority](#byes) described above does not apply under this option. Being oversized earns a pool's winner no priority for an ordinary bye; the extra qualifier is the pool's compensation instead.
 
@@ -174,7 +174,7 @@ So if the seeds hold, the semi-finals are **seed 1 against seed 3** and **seed 2
 !!! note "This differs from the common seeding convention"
     Many published seeding tables pair 1 with 4 and 2 with 3, giving semi-finals of 1 v 4 and 2 v 3. This tool pairs 1 with 3 and 2 with 4. Under both conventions seeds 1 and 2 are in opposite halves and can only meet in the final. If you compare an output against a standard seeding table, expect this difference; it is intended.
 
-Fewer than four seeds is a normal configuration, and so is none at all. The rule applies to whichever ranks you have set, in rank order, so with three seeds one quarter simply has no seed in it, and with no seeds the draw is built from crossing and block shape alone. A competition without seeds produces no warning.
+Fewer than four seeds is a normal configuration, and so is none at all. The rule applies to whichever ranks you have set, in rank order, so with three seeds one quarter has no seed in it, and with no seeds the draw is built from crossing and block shape alone. A competition without seeds produces no warning.
 
 Some configurations cannot satisfy every constraint at once, for example four seeds across two shiai-jo and five pools. The draw always happens: the deepest constraint that cannot be met gives way, for the lowest-priority seed first, and you get a warning describing what was relaxed. Two seeds never share a pool. If you set more seeds than there are pools, the surplus ranks are ignored with a warning rather than refused.
 

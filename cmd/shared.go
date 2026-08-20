@@ -2,8 +2,9 @@ package cmd
 
 import (
 	"bufio"
+	"crypto/rand"
 	"fmt"
-	"math/rand"
+	"math/big"
 	"os"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
@@ -59,13 +60,29 @@ func processEntries(entries []string, determined bool, withZekkenName bool) ([]h
 	// already been rejected above.
 	entries = helper.RemoveDuplicates(entries)
 	if !determined {
-		rand.Shuffle(len(entries), func(i, j int) {
-			entries[i], entries[j] = entries[j], entries[i]
-		})
+		if err := shuffleStrings(entries); err != nil {
+			return nil, fmt.Errorf("shuffling entries: %w", err)
+		}
 	}
 	players, err := helper.CreatePlayers(entries, withZekkenName)
 	if err != nil {
 		return nil, err
 	}
 	return players, nil
+}
+
+// shuffleStrings randomizes s in place via Fisher-Yates, using crypto/rand
+// rather than math/rand: gosec (G404) flags math/rand and math/rand/v2
+// unconditionally regardless of context, and crypto/rand.Int costs nothing
+// meaningful here (this runs once per CLI invocation over an entry list sized
+// in the tens to low hundreds, not in a hot path).
+func shuffleStrings(s []string) error {
+	for i := len(s) - 1; i > 0; i-- {
+		j, err := rand.Int(rand.Reader, big.NewInt(int64(i+1)))
+		if err != nil {
+			return err
+		}
+		s[i], s[int(j.Int64())] = s[int(j.Int64())], s[i]
+	}
+	return nil
 }

@@ -5,6 +5,11 @@
 // shell via window.*.
 
 import { EstimateHeadline } from './admin_schedule_utils.jsx';
+// seededRanks: the one owner of "which seed ranks has this roster actually
+// got" (integer > 0 normalization), shared with the seeding blocker and the
+// settings preview so this stat, the checklist and the preview cannot
+// disagree about what counts as seeded.
+import { seededRanks } from './admin_helpers.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -54,7 +59,7 @@ function competitionNextSteps(c, tournamentCourts) {
   const numPlayers = players.length;
   const isTeam = c && c.kind === "team";
   const hasEnoughPlayers = numPlayers >= 2;
-  const seededCount = players.filter(p => p && p.seed).length;
+  const seededCount = seededRanks(players).length;
 
   const steps = [];
 
@@ -298,7 +303,7 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
   // ---------------------------------------------------------------------------
   const participantLabel = c.kind === "team" ? "Teams" : "Participants";
   const numPlayers = (c.players || []).length;
-  const seededCount = (c.players || []).filter(p => p && p.seed).length;
+  const seededCount = seededRanks(c.players).length;
   // The ASSIGNED count, not courtCount(). courtCount floors at 1 on purpose
   // (a running competition always occupies at least one shiaijo, and the
   // schedule surfaces divide by it), but this box sits one line under a page

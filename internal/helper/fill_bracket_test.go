@@ -1,8 +1,10 @@
 package helper
 
 import (
+	"encoding/json"
 	"fmt"
-	"math"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -21,102 +23,109 @@ import (
 
 // TestFillBracketPoolCount_WKCShapes pins the formation objective (smallest
 // reachable bracket; largest supplied even-D pool count, then largest
-// supplied odd-D; supply = seeded pools first, oversized as fallback)
-// against every verified WKC event plus the hand-worked cases. seededPools
-// is 4 for the sheet-backed rows because that is what every WKC sheet
-// carries (two named seeds plus two by draw); the small cases state their
-// own.
+// supplied odd-D; supply = seed ranks low enough to land their own pool,
+// with oversized pools as fallback) against every verified WKC event plus
+// the hand-worked and gapped cases.
 //
-//   - 60 entrants (19WKC Men's Team) -> 16 pools (12 of 4, 4 of 3), 0 drafts.
-//   - 45 (19WKC Women's Team) -> 14 pools (11 of 3, 3 of 4), 2 drafts -- the
-//     naive floor(45/3)=15 also uses every entrant and IS supplied (four
-//     seeds cover its single draft), but D=1 is odd; 14 is the largest
-//     even-D count, and 14 is what the sheet cut.
-//   - 49 (17WKC Men's Team) -> 16 pools, 0 drafts.
-//   - 38 (17WKC Women's Team) -> 12 pools (10 of 3, 2 of 4), 4 drafts, the
-//     event the oversized-only supply rule could never reach (2 oversized
-//     pools, 4 drafts needed; the sheet's own footnote names the four
-//     SEEDED blocks as the suppliers).
-//   - 38 UNSEEDED -> 10 pools, 6 drafts: with no seeds, supply is oversized
-//     pools alone (8 at P=10), and the even-D preference still holds.
-//   - 203 (19WKC Women's Individual) -> 64 pools (53 of 3, 11 of 4), 0 drafts.
-//   - 242 (19WKC Men's Individual) -> 64 pools (14 of 3, 50 of 4), 0 drafts.
-//   - 11 (hand-worked, unseeded) -> 3 pools (one of 3, two of 4), 1 draft:
-//     the only P in range, odd-D, supplied by its two oversized pools --
-//     the odd-D fallback the evenness PREFERENCE exists to permit.
-//   - 9 (hand-worked): unseeded it is a clean supply error (P=3 needs 1
-//     draft, zero oversized pools, zero seeds); ONE seed makes the same cut
-//     legal, which is the seeding-as-remedy path the error message names.
+// The rows live in testdata/fill_bracket_shapes.json, which the JS preview
+// mirror's suite (web-mobile/js/__tests__/qualifier_preview.test.jsx) reads
+// too -- the encho_labels.json precedent -- so the Go original and the
+// preview pin the SAME table and cannot drift by one side missing a case.
+// Result kinds: pools/drafts = the accepted cut; "unsupplied" = legal cuts
+// exist but nothing supplies the drafts (here: the "seed more pools" error;
+// JS: the {unsupplied:true} sentinel); "invalid" = no legal cut at all
+// (here: the other errors; JS: null).
 //
 // Fault injection (manually verified, reverted after): dropping the
 // `%2 == wantOdd` parity split (taking the largest supplied P regardless)
-// turns the 45-entrant case red with P=15 -- the sheet itself pins the
-// preference ORDER, not just the arithmetic. Dropping the seeded half of
-// the supply max (oversized-only supply) turns the 38-with-seeds case red
-// with 10 pools. Changing `p >= minP` to `p > minP` turns the n=11 case
-// red (its only legal P is minP itself) and the "n exactly at minSize"
-// case red (same reason, minP==maxP==1).
+// turns the 45-entrant rows red with P=15 -- the sheet itself pins the
+// preference ORDER, not just the arithmetic. Counting EVERY rank instead of
+// only ranks <= p (the scalar-count bug the gapped rows exist for) turns
+// both gapped rows red with the over-promised cut. Changing `p >= minP` to
+// `p > minP` turns the n=11 row red (its only legal P is minP itself) and
+// the "n exactly at minSize" row red (same reason, minP==maxP==1).
 func TestFillBracketPoolCount_WKCShapes(t *testing.T) {
-	tests := []struct {
-		name        string
-		n, minSize  int
-		seededPools int
-		wantPools   int
-		wantDrafts  int
-		wantErr     bool
-		errContains string
-		errNamesN   bool // whether the error is required to mention n (not all are: an invalid minSize is rejected before n is ever consulted)
-	}{
-		{name: "19WKC Men's Team: 60 entrants, min 3 -> 16 pools, 0 drafts", n: 60, minSize: 3, seededPools: 4, wantPools: 16, wantDrafts: 0},
-		{name: "19WKC Women's Team: 45 entrants, min 3 -> 14 pools, 2 drafts", n: 45, minSize: 3, seededPools: 4, wantPools: 14, wantDrafts: 2},
-		{name: "17WKC Men's Team: 49 entrants, min 3 -> 16 pools, 0 drafts", n: 49, minSize: 3, seededPools: 4, wantPools: 16, wantDrafts: 0},
-		{name: "17WKC Women's Team: 38 entrants, min 3, 4 seeds -> 12 pools, 4 drafts", n: 38, minSize: 3, seededPools: 4, wantPools: 12, wantDrafts: 4},
-		{name: "38 entrants UNSEEDED: supply is oversized pools alone -> 10 pools, 6 drafts", n: 38, minSize: 3, seededPools: 0, wantPools: 10, wantDrafts: 6},
-		{name: "19WKC Women's Individual: 203 entrants, min 3 -> 64 pools, 0 drafts", n: 203, minSize: 3, seededPools: 4, wantPools: 64, wantDrafts: 0},
-		{name: "19WKC Men's Individual: 242 entrants, min 3 -> 64 pools, 0 drafts", n: 242, minSize: 3, seededPools: 4, wantPools: 64, wantDrafts: 0},
-		{name: "hand-worked: 11 entrants, min 3, unseeded -> 3 pools, 1 draft (odd-D fallback)", n: 11, minSize: 3, wantPools: 3, wantDrafts: 1},
-		{name: "invalid minSize (0) is a clean error naming it", n: 60, minSize: 0, wantErr: true, errContains: "minimum pool size"},
-		{name: "invalid minSize (negative) is a clean error naming it", n: 60, minSize: -1, wantErr: true, errContains: "minimum pool size"},
-		{name: "n below minSize is a clean error naming both", n: 2, minSize: 3, wantErr: true, errContains: "fewer than the minimum pool size", errNamesN: true},
-		{name: "n exactly at minSize forms one pool, 0 drafts (NextPow2(1)-1=0)", n: 3, minSize: 3, wantPools: 1, wantDrafts: 0},
-		{name: "9 entrants unseeded: P=3 needs 1 draft, no seeded or oversized pool supplies it", n: 9, minSize: 3, wantErr: true, errContains: "no pool count fits", errNamesN: true},
-		{name: "9 entrants with ONE seed: the same cut becomes legal (seeding is the remedy the error names)", n: 9, minSize: 3, seededPools: 1, wantPools: 3, wantDrafts: 1},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			pools, drafts, err := FillBracketPoolCount(tc.n, tc.minSize, tc.seededPools)
-			if tc.wantErr {
+	for _, tc := range loadFillBracketShapes(t) {
+		t.Run(tc.Name, func(t *testing.T) {
+			pools, drafts, err := FillBracketPoolCount(tc.N, tc.MinSize, tc.SeedRanks)
+			switch tc.Result {
+			case "unsupplied":
 				require.Error(t, err)
-				if tc.errContains != "" {
-					assert.Contains(t, err.Error(), tc.errContains)
-				}
-				if tc.errNamesN {
-					// The task requires this class of error to name n and minSize.
-					assert.Contains(t, err.Error(), fmt.Sprintf("%d", tc.n))
-				}
+				assert.Contains(t, err.Error(), "seed more pools",
+					"an unsupplied cut must name seeding as the remedy")
+				assert.Contains(t, err.Error(), fmt.Sprintf("%d", tc.N))
+				return
+			case "invalid":
+				require.Error(t, err)
+				assert.NotContains(t, err.Error(), "seed more pools",
+					"an impossible cut must not prescribe seeding, which cannot fix it")
 				return
 			}
 			require.NoError(t, err)
-			assert.Equal(t, tc.wantPools, pools, "pool count")
-			assert.Equal(t, tc.wantDrafts, drafts, "draft count")
+			assert.Equal(t, tc.Pools, pools, "pool count")
+			assert.Equal(t, tc.Drafts, drafts, "draft count")
 			// The arithmetic invariants, restated independently of the
 			// function under test: winners + drafts must exactly fill a
 			// power-of-two bracket, the pool sizes must account for every
 			// entrant, and the drafts must fit rule 4's guaranteed supply
-			// (seeded pools or oversized pools, whichever is more -- the max,
-			// never the sum, since a seeded pool can also be the oversized
-			// one).
+			// (seed ranks landing their own pool, or oversized pools,
+			// whichever is more -- the max, never the sum, since a seeded
+			// pool can also be the oversized one).
 			assert.Equal(t, NextPow2(pools), pools+drafts, "winners + drafts must exactly fill a power-of-two bracket")
-			remainder := tc.n - tc.minSize*pools
+			remainder := tc.N - tc.MinSize*pools
 			assert.GreaterOrEqual(t, remainder, 0)
 			assert.LessOrEqual(t, remainder, pools, "no pool can need to grow by more than one over the minimum")
-			supply := remainder
-			if s := min(tc.seededPools, pools); s > supply {
-				supply = s
+			seedSupply := 0
+			for _, r := range tc.SeedRanks {
+				if r >= 1 && r <= pools {
+					seedSupply++
+				}
 			}
-			assert.GreaterOrEqual(t, supply, drafts, "the guaranteed seeded-or-oversized candidate count must cover the drafts")
+			assert.GreaterOrEqual(t, max(seedSupply, remainder), drafts,
+				"the guaranteed candidate count (seed ranks landing their own pool, or oversized pools) must cover the drafts")
 		})
 	}
+}
+
+// fillBracketShapeCase is one row of testdata/fill_bracket_shapes.json.
+type fillBracketShapeCase struct {
+	Name      string `json:"name"`
+	N         int    `json:"n"`
+	MinSize   int    `json:"minSize"`
+	SeedRanks []int  `json:"seedRanks"`
+	Pools     int    `json:"pools"`
+	Drafts    int    `json:"drafts"`
+	Result    string `json:"result"` // "" (a cut), "unsupplied", or "invalid"
+}
+
+func loadFillBracketShapes(t *testing.T) []fillBracketShapeCase {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("testdata", "fill_bracket_shapes.json"))
+	require.NoError(t, err)
+	var doc struct {
+		Cases []fillBracketShapeCase `json:"cases"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &doc))
+	require.NotEmpty(t, doc.Cases, "fixture parsed to zero cases: the mirror pin would assert nothing")
+	return doc.Cases
+}
+
+// TestFillBracketPoolCount_ErrorNamesInputs keeps the Go-only message
+// details the shared fixture's kind field cannot express: which inputs each
+// error class names.
+func TestFillBracketPoolCount_ErrorNamesInputs(t *testing.T) {
+	_, _, err := FillBracketPoolCount(2, 3, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "fewer than the minimum pool size")
+	assert.Contains(t, err.Error(), "2")
+
+	_, _, err = FillBracketPoolCount(60, 0, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "minimum pool size must be at least 1")
+
+	_, _, err = FillBracketPoolCount(5, 3, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no pool count fits 5 entrants")
 }
 
 // TestFillBracketPoolCount_EvenDraftsOutrankLargestP isolates WHY 45 entrants
@@ -138,7 +147,7 @@ func TestFillBracketPoolCount_EvenDraftsOutrankLargestP(t *testing.T) {
 	require.GreaterOrEqual(t, p15SeededSupply, p15Need,
 		"P=15 IS supplied at the sheet's seed count: supply cannot be what rejects it")
 
-	pools, drafts, err := FillBracketPoolCount(n, minSize, 4)
+	pools, drafts, err := FillBracketPoolCount(n, minSize, []int{1, 2, 3, 4})
 	require.NoError(t, err)
 	assert.Equal(t, 14, pools, "the largest EVEN-draft count must win over the larger odd-draft 15")
 	assert.Equal(t, 2, drafts)
@@ -201,7 +210,7 @@ func selectFillBracketDraftsForCourts(t *testing.T, pools []Pool, minSize, draft
 // scan order is pool order, exactly the oversized-only rule's.
 //
 // Fault injection (manually verified, reverted after): swapping the sort
-// comparator's tiebreak from `oversized[i].idx < oversized[j].idx` to `>`
+// comparator's tiebreak from `cands[i].idx < cands[j].idx` to `>`
 // turns "unseeded: pool order breaks ties" AND "a third oversized pool
 // sends nothing" red (both depend on ascending pool-index order among
 // unseeded candidates; only "seeded: best seed rank wins" stays green,
@@ -210,7 +219,7 @@ func selectFillBracketDraftsForCourts(t *testing.T, pools []Pool, minSize, draft
 // blocked candidate instead of trying the next one -- the mutation the
 // third review specifically asked to be fault-injected) turns FOUR
 // independent tests red: this file's own "capacity-aware: a blocked
-// candidate is skipped, not failed" subtest, the sheet-compatibility
+// candidate is skipped, not failed" subtest, the routing-mechanics
 // TestSelectFillBracketDrafts_CapacitySkipUnseeded, the "7/7 split now RECOVERS"
 // subtest of TestBuildKnockoutDrawFillBracket_OutOfScope, and the property
 // sweep TestFillBracketFormationAndBuilderAgree (whose refusal count jumps
@@ -236,7 +245,7 @@ func TestSelectFillBracketDrafts(t *testing.T) {
 		assert.Equal(t, []int{1, 3}, got, "with no seeds, oversized pools are chosen in pool-index order")
 	})
 
-	t.Run("a third oversized pool sends nothing (19WKC evidence)", func(t *testing.T) {
+	t.Run("a third oversized pool sends nothing when only two drafts are needed", func(t *testing.T) {
 		// 14 pools / 4 courts: homeCount=[4,4,3,3], capacityByHalf=[0,2]
 		// (courts A,B already full; C,D need 1 each, both sourced from the
 		// opposite half A/B). Pools 0 and 4 (both home half 0) take both
@@ -493,8 +502,8 @@ func TestBuildKnockoutDrawFillBracket_OutOfScope(t *testing.T) {
 
 	t.Run("a hand-fed draftPoolIdx sourced from the wrong (same) half is still refused by the builder directly", func(t *testing.T) {
 		// Bypasses SelectFillBracketDrafts (which would itself now refuse
-		// this shape -- see TestSelectFillBracketDrafts' "error when
-		// oversized pools cannot supply both halves") to confirm the
+		// this shape -- see TestSelectFillBracketDrafts' "error when the
+		// candidates cannot supply both halves") to confirm the
 		// builder's own belt-and-braces capacity check still catches a
 		// hand-fed, rule-3-violating draftPoolIdx directly.
 		pools := poolsWithOversizedAt(14, 3, map[int]bool{8: true, 11: true}, nil)
@@ -855,31 +864,47 @@ func TestFillBracketFormationAndBuilderAgree(t *testing.T) {
 
 	// Measured residue per regime, re-derived whenever the formation or
 	// selection rule changes, with the movement explained in the commit that
-	// moves it. Every member of both sets is the SAME structural class: an
+	// moves it. Every member of every set is the SAME structural class: an
 	// ODD draft count at courts=4, off by exactly one ("need D, only D-1
 	// could be placed") -- odd D forces an uneven ceil/floor split across two
 	// symmetric-capacity halves, and when the candidate pools split evenly
 	// too, no ordering closes a gap that is genuinely one pool short on one
 	// side. Unseeded: n=18 (D=3) plus the just-past-a-bracket-boundary
 	// fields n=34/66/130/258 (P=bracket/2+1, so nearly every pool's 2nd is
-	// drafted -- shapes no sheet remotely resembles). Four seeds clears
-	// n=18 (its D=3 fits under the four seeded candidates' routing) and
-	// leaves only the boundary fields.
+	// drafted -- shapes no sheet remotely resembles). Both seeded regimes
+	// clear n=18 by RE-CUTTING it, not by routing D=3: with seeds counted
+	// (four contiguous, or the wrapped regime's two live ranks) the even-D
+	// count P=6/D=2 becomes supplied and the odd-D shape is never formed,
+	// leaving only the boundary fields. The wrapped regime exists for rule
+	// 4's rank filter: its ranks 301/302 exceed every P this sweep can cut,
+	// so formation may count only the two live ranks -- a scalar seed COUNT
+	// (the bug this regime pins) would promise four. One corner stays
+	// unswept by construction: seeded pools clustering in ONE half with no
+	// oversized supply, which PoolSeeding's court-aware placement
+	// (seedCourtOrder spreads the top seeds across halves by design) does
+	// not produce from any roster this sweep can write; a hand-fed
+	// allocation reaching it is the selector error's ordinary case.
 	for _, regime := range []struct {
 		name         string
-		seeds        int
+		ranks        []int
 		wantRefusals int
 	}{
-		{name: "unseeded (drafts from oversized pools alone)", seeds: 0, wantRefusals: 5},
-		{name: "four seeds (the WKC sheets' own count)", seeds: 4, wantRefusals: 4},
+		{name: "unseeded (drafts from oversized pools alone)", wantRefusals: 5},
+		{name: "four seeds (the WKC sheets' own count)", ranks: []int{1, 2, 3, 4}, wantRefusals: 4},
+		// Wrapped ranks: two live seeds plus two ranks beyond every P this
+		// sweep can cut (maxP <= 100 at n <= 300), so rule 4 must count 2,
+		// never 4 -- the scalar-count bug's whole input class. Same residue
+		// as two contiguous seeds would give, by construction.
+		{name: "gapped ranks, two live and two wrapped", ranks: []int{1, 2, 301, 302}, wantRefusals: 4},
 	} {
 		t.Run(regime.name, func(t *testing.T) {
+			t.Parallel() // regimes share no state; runs the sweeps concurrently
 			tested := 0
 			routingRefusals := 0
 			var refusalDetails []string
 
 			for n := 2 * minSize; n <= maxN; n++ {
-				p, d, err := FillBracketPoolCount(n, minSize, regime.seeds)
+				p, d, err := FillBracketPoolCount(n, minSize, regime.ranks)
 				if err != nil {
 					continue // formation itself declined this n: nothing to agree on
 				}
@@ -887,8 +912,10 @@ func TestFillBracketFormationAndBuilderAgree(t *testing.T) {
 
 				for _, courts := range []int{1, 2, 4} {
 					players := makeUniquePlayers(n)
-					for i := 0; i < regime.seeds && i < len(players); i++ {
-						players[i].Seed = i + 1
+					for i, r := range regime.ranks {
+						if i < len(players) {
+							players[i].Seed = r
+						}
 					}
 					pools, drawCourts, ferr := BuildPoolPhaseFillBracket(players, minSize, courts)
 					require.NoErrorf(t, ferr, "n=%d courts=%d: formation succeeded (P=%d D=%d) but the full pool phase failed: %v", n, courts, p, d, ferr)
@@ -944,10 +971,7 @@ func fillBracketSupplyHolds(t *testing.T, pools []Pool, minSize, drafts, n, cour
 	t.Helper()
 	candidates := 0
 	for _, p := range pools {
-		if len(p.Players) < 2 {
-			continue
-		}
-		if poolSeedRank(p) != math.MaxInt || len(p.Players) > minSize {
+		if fillBracketDraftCandidate(p, minSize) {
 			candidates++
 		}
 	}

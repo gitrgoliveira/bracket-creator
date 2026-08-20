@@ -358,10 +358,11 @@ func (o *poolOptions) createPools(entries []string) error {
 		// Capacity-aware selection (bc-qual LP-4, second review rework):
 		// FillBracketDraftCapacity computes each pool's home half and each
 		// half's remaining draft capacity BEFORE any pool is chosen, so
-		// SelectFillBracketDrafts can skip an oversized pool whose
-		// opposite-half destination is already full instead of taking it
-		// and stranding the build (helper.SelectFillBracketDrafts' own doc
-		// comment has the mechanism and the 19WKC sheet verification).
+		// SelectFillBracketDrafts can skip a candidate pool (seeded first,
+		// oversized as fallback -- WKC's own rule) whose opposite-half
+		// destination is already full instead of taking it and stranding
+		// the build. helper.SelectFillBracketDrafts' own doc comment has the
+		// mechanism; the sheet replays live in helper's draw_wkc_test.go.
 		poolHalf, capacityByHalf, capOK := helper.FillBracketDraftCapacity(pools, drafts, o.courts)
 		if !capOK {
 			return fmt.Errorf("could not build a fill-bracket knockout draw: the per-court target arithmetic is not achievable for %d pools across %d shiaijo", len(pools), o.courts)

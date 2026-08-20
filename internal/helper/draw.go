@@ -349,6 +349,14 @@ func poolSeedRank(p Pool) int {
 	return best
 }
 
+// poolIsSeeded names poolSeedRank's no-seed sentinel ONCE: a pool is seeded
+// exactly when its best rank is finite. Compare through this, never against
+// math.MaxInt at a call site, so a change to the sentinel has one place to
+// land instead of a grep across files.
+func poolIsSeeded(p Pool) bool {
+	return poolSeedRank(p) != math.MaxInt
+}
+
 // byePrecedenceLess implements R6's precedence for a block's structural bye,
 // as a total order over that block's occupants (lowest = first claim):
 //

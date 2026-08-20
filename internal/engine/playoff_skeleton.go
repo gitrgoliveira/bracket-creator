@@ -112,9 +112,10 @@ func poolDraw(comp *state.Competition, pools []helper.Pool, numCourts int) *help
 //
 // reason names the SPECIFIC cause in operator terms when one is available
 // (bc-qual LP-4, third review): fill-bracket's own SelectFillBracketDrafts
-// error already reads "the oversized pools' draw positions cannot supply
-// both halves of the bracket" rather than a generic "out of scope", so this
-// is threaded up rather than discarded -- an operator hitting the
+// error already names the shortfall and its remedy ("the draw needs N
+// drafted 2nd(s)... seed more pools...") rather than a generic "out of
+// scope", so this is threaded up rather than discarded -- an operator
+// hitting the
 // data-dependent residual case (see helper.FillBracketDraftCapacity's and
 // TestFillBracketFormationAndBuilderAgree's doc comments for how rare that
 // now is) gets told WHY, not just that it failed. reason is empty when no
@@ -165,8 +166,8 @@ func buildPoolFedDraw(comp *state.Competition, pools []helper.Pool, numCourts in
 // to be effectively unreachable given a power-of-two numCourts -- see
 // BuildKnockoutDrawFillBracket's doc comment), and the genuinely
 // data-dependent case SelectFillBracketDrafts itself now names in its own
-// error message ("the oversized pools' draw positions cannot supply both
-// halves of the bracket").
+// error message (the "seed more pools" shortfall, threaded to the operator
+// unmodified -- the engine tests grep it end to end).
 func fillBracketDraftIndices(comp *state.Competition, pools []helper.Pool, numCourts int) ([]int, error) {
 	drafts := helper.NextPow2(len(pools)) - len(pools)
 	poolHalf, capacityByHalf, ok := helper.FillBracketDraftCapacity(pools, drafts, numCourts)

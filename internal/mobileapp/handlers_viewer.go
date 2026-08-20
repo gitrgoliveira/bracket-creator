@@ -195,7 +195,15 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 		t := true
 		hasIDsHint = &t
 	}
-	players, plErr := store.LoadParticipantsOpt(compID, comp.EffectiveWithZekkenName(), state.LoadParticipantsOpts{WithSeeds: false, HasIDs: hasIDsHint})
+	// WithSeeds: true, matching the single-competition detail endpoint below.
+	// The admin SPA renders AdminCompetition off THIS aggregate object until
+	// (and permanently, if) the detail fetch fails (admin.jsx's
+	// `detail?.config || c` fallback), and the fill-bracket settings preview
+	// derives its supply from the roster's seed ranks -- an aggregate without
+	// them briefly showed the UNSEEDED pool cut, a different pool COUNT, not
+	// just a missing annotation. Seeds leak nothing the detail endpoint does
+	// not already serve publicly, and the load is cached per mtime.
+	players, plErr := store.LoadParticipantsOpt(compID, comp.EffectiveWithZekkenName(), state.LoadParticipantsOpts{WithSeeds: true, HasIDs: hasIDsHint})
 	if plErr != nil {
 		log.Printf("mobileapp: viewer payload %s: load participants: %v", compID, plErr)
 	}

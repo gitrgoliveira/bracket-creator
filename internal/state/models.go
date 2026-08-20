@@ -716,12 +716,14 @@ func ValidateExtraQualifiers(value, poolSizeMode string, poolWinners int) error 
 //
 // ExtraQualifiersFillBracket (bc-qual LP-4) is deliberately NOT handled
 // here: whether a pool's 2nd is drafted is not a per-pool-independent
-// decision (it depends on comparing every oversized pool's seed rank
-// against every other's, and stops once D = NextPow2(numPools)-numPools
-// drafts are chosen), so it has no per-pool test this method's
-// single-pool signature could express. Callers building a fill-bracket
-// draw use helper.SelectFillBracketDrafts (over the WHOLE pool set) instead
-// of this method.
+// decision. Drafts go to the SEEDED pools in seed order -- a drafted pool
+// need not be oversized at all -- with oversized pools as the fallback,
+// and the scan stops once D = NextPow2(numPools)-numPools drafts are
+// chosen, so the answer for one pool depends on every other pool's seeds
+// and on the running count; no per-pool test this method's single-pool
+// signature could express exists. Callers building a fill-bracket draw use
+// helper.SelectFillBracketDrafts (over the WHOLE pool set) instead of this
+// method.
 //
 // The oversized test AT THIS LAYER is by participant count alone:
 // len(pool.Players) > c.PoolSize, where c.PoolSize is the competition's

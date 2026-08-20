@@ -13,11 +13,12 @@ import { EstimateHeadline } from './admin_schedule_utils.jsx';
 // from qualifier_preview.jsx rather than each carrying its own copy.
 import {
   EXTRA_QUALIFIERS_STANDARD, EXTRA_QUALIFIERS_LARGER_POOLS, EXTRA_QUALIFIERS_FILL_BRACKET,
-  computeQualifierPreview, formatQualifierPreviewLine,
+  computeQualifierPreview, formatQualifierPreviewLine, effectiveDrawPlayers,
   extraQualifiersRadioVisible, resetExtraQualifiersOnPoolModeChange,
   winnersForExtraQualifiersChange, winnersInputDisabled,
   extraQualifiersLabel, extraQualifiersHint,
 } from './qualifier_preview.jsx';
+import { seededRanks } from './admin_helpers.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -901,18 +902,22 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
               Federation-neutral copy per operator ruling: no federation
               names anywhere in this UI. */}
           {extraQualifiersRadioVisible(local.format, local.poolSizeMode) && (() => {
-            // Real roster count (c.players, not local.players): settings
-            // pool-config edits don't change the roster, and c is the
-            // server-confirmed competition, the same source playerCount
-            // above (courts hint) already reads from.
-            const rosterCount = (c.players || []).length;
-            // The seeded count feeds fill-bracket's supply rule (drafted
-            // 2nds come from seeded pools first, WKC's own method), so that
-            // mode's preview can genuinely change when the operator seeds
-            // another participant. Derived from the same server-confirmed
-            // c.players the roster count reads.
-            const seededCount = (c.players || []).filter((p) => p && p.seed).length;
-            const preview = computeQualifierPreview(rosterCount, local.poolSize, local.poolWinners, seededCount);
+            // The EFFECTIVE draw roster (c.players, not local.players,
+            // masked by the same check-in opt-in rule the engine applies):
+            // settings pool-config edits don't change the roster, c is the
+            // server-confirmed competition, and generate-draw both counts
+            // entrants and drops absent players' seeds AFTER check-in
+            // filtering -- so a preview computed off the raw list promises
+            // a cut the draw will not make whenever a seeded participant is
+            // a no-show.
+            const drawPlayers = effectiveDrawPlayers(c.players, c.checkInEnabled);
+            // Seed RANKS, not a count: fill-bracket's supply rule only
+            // credits a rank low enough to land its own pool, so that
+            // mode's preview genuinely changes as the operator seeds.
+            // seededRanks (admin_helpers) is the one owner of "which ranks
+            // has this roster actually got" -- the same reader the seeding
+            // blocker validates with.
+            const preview = computeQualifierPreview(drawPlayers.length, local.poolSize, local.poolWinners, seededRanks(drawPlayers));
             const activeShape = local.extraQualifiers === EXTRA_QUALIFIERS_LARGER_POOLS
               ? preview.largerPools
               : local.extraQualifiers === EXTRA_QUALIFIERS_FILL_BRACKET

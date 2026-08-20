@@ -694,15 +694,18 @@ PoolNumberedMatchRow.displayName = "PoolNumberedMatchRow";
 // expose that method.
 //
 // Deliberately does NOT attempt the fill-bracket drafted-2nd calculation
-// (helper.SelectFillBracketDrafts): which pool's 2nd is drafted depends on
-// comparing seed ranks across every oversized pool in the WHOLE competition
-// at once, information this per-pool viewer payload (pools[].players +
-// standings) does not carry -- there is no draft-index list on the wire.
-// Under fill-bracket this therefore returns the uniform EffectivePoolWinners()
-// count, so only rank 1 (never a drafted rank 2) is ever highlighted as
-// advancing here; the residue is a deliberate accepted gap, not a bug: a
-// correct highlight needs the server to say WHICH pools were drafted, which
-// is future work if this becomes worth wiring (bc-qual LP-5a report).
+// (helper.SelectFillBracketDrafts): drafts go to the SEEDED pools in seed
+// order (oversized as fallback), stopping once the bracket's shortfall is
+// met and skipping a candidate whose opposite half is full -- a WHOLE-
+// competition scan over the pool set plus the court layout, which no
+// per-pool test can reproduce. The per-pool seed ranks ARE on this wire
+// (pools[].players[].seed comes through pools.csv), so it is the cross-pool
+// stop-and-skip state that is missing, not the seed data. Under fill-bracket
+// this therefore returns the uniform EffectivePoolWinners() count, so only
+// rank 1 (never a drafted rank 2) is ever highlighted as advancing here; the
+// residue is a deliberate accepted gap, not a bug: a correct highlight needs
+// the server to say WHICH pools were drafted, which is future work if this
+// becomes worth wiring (bc-qual LP-5a report).
 export function qualifiersForPool(competition, pool) {
   const base = (competition && competition.poolWinners) || 2;
   if (

@@ -47,56 +47,44 @@ describe('nextPow2', () => {
   });
 });
 
-describe('fillBracketPoolCount (mirrors helper.FillBracketPoolCount)', () => {
-  it('19WKC Men\'s Team: 60 entrants, min 3 -> 16 pools, 0 drafts', () => {
-    expect(fillBracketPoolCount(60, 3)).toEqual({ pools: 16, drafts: 0 });
+// The formation table itself lives in internal/helper/testdata/
+// fill_bracket_shapes.json, read by BOTH this suite and Go's
+// TestFillBracketPoolCount_WKCShapes (the encho_labels.json precedent), so
+// the mirror and the original pin the SAME rows and cannot drift by one side
+// missing a case. Result mapping: pools/drafts = the cut; "unsupplied" = the
+// {unsupplied:true} sentinel (Go: the "seed more pools" error); "invalid" =
+// null (Go: the other errors).
+describe('fillBracketPoolCount (mirrors helper.FillBracketPoolCount via the shared fixture)', () => {
+  const doc = JSON.parse(
+    readFileSync(
+      resolve(__dirname, '..', '..', '..', 'internal', 'helper', 'testdata', 'fill_bracket_shapes.json'),
+      'utf8'
+    )
+  );
+  it('fixture parses to a non-empty table', () => {
+    expect(doc.cases.length).toBeGreaterThan(0);
   });
-  it('19WKC Women\'s Team: 45 entrants, min 3 -> 14 pools, 2 drafts', () => {
-    expect(fillBracketPoolCount(45, 3)).toEqual({ pools: 14, drafts: 2 });
-  });
-  it('19WKC Women\'s Individual: 203 entrants, min 3 -> 64 pools, 0 drafts', () => {
-    expect(fillBracketPoolCount(203, 3)).toEqual({ pools: 64, drafts: 0 });
-  });
-  it('19WKC Men\'s Individual: 242 entrants, min 3 -> 64 pools, 0 drafts', () => {
-    expect(fillBracketPoolCount(242, 3)).toEqual({ pools: 64, drafts: 0 });
-  });
-  it('hand-worked: 11 entrants, min 3 -> 3 pools, 1 draft', () => {
-    expect(fillBracketPoolCount(11, 3)).toEqual({ pools: 3, drafts: 1 });
-  });
-  it('n exactly at minSize forms one pool, 0 drafts', () => {
-    expect(fillBracketPoolCount(3, 3)).toEqual({ pools: 1, drafts: 0 });
-  });
-  it('returns null for invalid minSize', () => {
-    expect(fillBracketPoolCount(60, 0)).toBeNull();
-    expect(fillBracketPoolCount(60, -1)).toBeNull();
-  });
-  it('returns null when n is below minSize', () => {
-    expect(fillBracketPoolCount(2, 3)).toBeNull();
-  });
-  it('returns null when no pool count fits (9 entrants at min 3, unseeded)', () => {
-    // Only P=3 is in range; needs 1 draft, and an unseeded roster with 0
-    // oversized pools (9 = 3*3 exactly) has nothing to supply it.
-    expect(fillBracketPoolCount(9, 3)).toBeNull();
-  });
+  for (const c of doc.cases) {
+    it(c.name, () => {
+      const got = fillBracketPoolCount(c.n, c.minSize, c.seedRanks);
+      if (c.result === 'invalid') {
+        expect(got).toBeNull();
+      } else if (c.result === 'unsupplied') {
+        expect(got).toEqual({ unsupplied: true });
+      } else {
+        expect(got).toEqual({ pools: c.pools, drafts: c.drafts });
+      }
+    });
+  }
 
-  // The WKC-derived seeded-supply rule (mirrors Go's rule 4; the sheet
-  // evidence lives in internal/helper/draw_wkc_test.go):
-  it('17WKC Women\'s Team: 38 entrants, min 3, 4 seeds -> 12 pools, 4 drafts', () => {
-    expect(fillBracketPoolCount(38, 3, 4)).toEqual({ pools: 12, drafts: 4 });
-  });
-  it('38 entrants unseeded: supply is oversized pools alone -> 10 pools, 6 drafts', () => {
-    expect(fillBracketPoolCount(38, 3)).toEqual({ pools: 10, drafts: 6 });
-    expect(fillBracketPoolCount(38, 3, 0)).toEqual({ pools: 10, drafts: 6 });
-  });
-  it('17WKC Men\'s Team: 49 entrants, min 3 -> 16 pools, 0 drafts', () => {
-    expect(fillBracketPoolCount(49, 3, 4)).toEqual({ pools: 16, drafts: 0 });
-  });
-  it('9 entrants with one seed: the same cut becomes legal', () => {
-    expect(fillBracketPoolCount(9, 3, 1)).toEqual({ pools: 3, drafts: 1 });
-  });
-  it('45 entrants: even drafts outrank the larger odd-draft P=15 even when seeds supply it', () => {
-    // P=15 (D=1) is supplied at 4 seeds; the sheet still cut 14 (D=2).
-    expect(fillBracketPoolCount(45, 3, 4)).toEqual({ pools: 14, drafts: 2 });
+  // JS-only input normalization: what the pure mirror must tolerate that the
+  // typed Go signature cannot receive.
+  it('ignores non-integer, non-positive and duplicate ranks instead of flipping regimes', () => {
+    expect(fillBracketPoolCount(38, 3, [1, 2, 3, 4])).toEqual({ pools: 12, drafts: 4 });
+    expect(fillBracketPoolCount(38, 3, ['1', 2.5, -1, 0, null, 1, 1, 2, 3, 4]))
+      .toEqual({ pools: 12, drafts: 4 });
+    expect(fillBracketPoolCount(38, 3, undefined)).toEqual({ pools: 10, drafts: 6 });
+    expect(fillBracketPoolCount(38, 3, 4)).toEqual({ pools: 10, drafts: 6 }); // a scalar is NOT a rank list
   });
 });
 
@@ -108,13 +96,23 @@ describe('computeQualifierPreview: known table (bc-qual LP-5a)', () => {
     expect(r.fillBracket).toMatchObject({ pools: 3, drafts: 1, qualifiers: 4, bracketSize: 4, byes: 0 });
   });
 
-  it('seededCount reaches fill-bracket only: 38 players, 4 seeds changes the fill shape and nothing else', () => {
+  it('seedRanks reach fill-bracket only: 38 players, ranks 1-4 change the fill shape and nothing else', () => {
     const unseeded = computeQualifierPreview(38, 3, 1);
-    const seeded = computeQualifierPreview(38, 3, 1, 4);
+    const seeded = computeQualifierPreview(38, 3, 1, [1, 2, 3, 4]);
     expect(unseeded.fillBracket).toMatchObject({ pools: 10, drafts: 6 });
     expect(seeded.fillBracket).toMatchObject({ pools: 12, drafts: 4, bracketSize: 16, byes: 0 });
     expect(seeded.standard).toEqual(unseeded.standard);
     expect(seeded.largerPools).toEqual(unseeded.largerPools);
+  });
+
+  it('an unsupplied fill cut passes the sentinel through and renders the seeding remedy', () => {
+    const r = computeQualifierPreview(9, 3, 1);
+    expect(r.fillBracket).toEqual({ unsupplied: true });
+    expect(formatQualifierPreviewLine(r.fillBracket)).toContain('seed a pool');
+    // Distinguishable from a roster with no cut at all, which stays null and
+    // falls back to the neutral placeholder.
+    expect(computeQualifierPreview(2, 3, 1).fillBracket).toBeNull();
+    expect(formatQualifierPreviewLine(null)).toBeNull();
   });
 
   it('n=5, minSize=3 (degenerate: one pool of 5): oversized counts POOLS, not remainder players', () => {

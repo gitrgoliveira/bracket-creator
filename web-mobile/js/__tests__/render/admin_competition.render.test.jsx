@@ -1029,4 +1029,47 @@ describe('AdminSettings Knockout qualifiers (bc-qual LP-5a)', () => {
     const preview = container.querySelector('[data-testid="qualifier-preview-line"]');
     expect(preview.textContent).toContain('Preview appears once this competition has participants');
   });
+
+  // --- WKC-method supply wiring (code-review round): the fill preview reads
+  // the roster's SEED RANKS off the EFFECTIVE (check-in-masked) roster, the
+  // same inputs generate-draw uses. 9 entrants at min 3 is the sharpest
+  // fixture: the only cut (3 pools, 1 draft) has zero oversized pools, so
+  // whether it previews at all is decided entirely by the seeds.
+  const ninePlayers = (tweak = () => ({})) =>
+    Array.from({ length: 9 }, (_, i) => ({
+      id: `p${i + 1}`, name: `Player ${i + 1}`, ...tweak(i),
+    }));
+
+  it('unseeded 9-entrant roster shows the seeding remedy for the fill option, not the neutral placeholder', async () => {
+    const comp = mixedMinComp({ players: ninePlayers(), extraQualifiers: 'fill-bracket' });
+    const { container } = await mountSection('settings', { comp });
+    const preview = container.querySelector('[data-testid="qualifier-preview-line"]');
+    expect(preview.textContent).toContain('Needs seeded pools');
+    expect(preview.textContent).toContain('seed a pool');
+  });
+
+  it('one seed makes the same 9-entrant cut previewable', async () => {
+    const comp = mixedMinComp({
+      players: ninePlayers((i) => (i === 0 ? { seed: 1 } : {})),
+      extraQualifiers: 'fill-bracket',
+    });
+    const { container } = await mountSection('settings', { comp });
+    const preview = container.querySelector('[data-testid="qualifier-preview-line"]');
+    expect(preview.textContent).toBe('3 pools -> 4 qualifiers -> 4-slot knockout (no byes)');
+  });
+
+  it('a seeded no-show drops out of the preview when check-in is enabled, exactly as generate-draw will drop them', async () => {
+    // 10 registered, 9 checked in; the ONLY seed is the no-show. The
+    // effective roster is the 9 checked-in unseeded players, so the fill
+    // preview must show the remedy -- a preview computed off the raw roster
+    // would promise the seeded cut the draw will not make.
+    const players = [
+      { id: 'p0', name: 'No Show', seed: 1, checkedIn: false },
+      ...ninePlayers(() => ({ checkedIn: true })),
+    ];
+    const comp = mixedMinComp({ players, checkInEnabled: true, extraQualifiers: 'fill-bracket' });
+    const { container } = await mountSection('settings', { comp });
+    const preview = container.querySelector('[data-testid="qualifier-preview-line"]');
+    expect(preview.textContent).toContain('Needs seeded pools');
+  });
 });

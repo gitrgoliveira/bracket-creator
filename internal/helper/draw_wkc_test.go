@@ -109,38 +109,36 @@ func countWKCPlayers(pools []Pool) int {
 func TestWKCTeamFormationAgainstTheSheets(t *testing.T) {
 	t.Parallel()
 
+	// One expectation pair per row: the sheet's numbers ARE the wanted
+	// numbers (an earlier revision carried a second want pair plus a `note`
+	// mechanism for recording divergences; the last divergence became rule 4
+	// and the mechanism went with it).
 	cases := []struct {
 		name        string
 		entrants    int
 		minSize     int
 		sheetPools  int
 		sheetDrafts int
-		wantPools   int
-		wantDrafts  int
 	}{
 		{
 			name:     "19WKC Men's Team: 60 teams, 16 blocks, no draft slots",
 			entrants: 60, minSize: 3,
 			sheetPools: 16, sheetDrafts: 0,
-			wantPools: 16, wantDrafts: 0,
 		},
 		{
 			name:     "17WKC Men's Team: 49 teams, 16 blocks, no draft slots",
 			entrants: 49, minSize: 3,
 			sheetPools: 16, sheetDrafts: 0,
-			wantPools: 16, wantDrafts: 0,
 		},
 		{
 			name:     "19WKC Women's Team: 45 teams, 14 blocks plus 2 draft slots",
 			entrants: 45, minSize: 3,
 			sheetPools: 14, sheetDrafts: 2,
-			wantPools: 14, wantDrafts: 2,
 		},
 		{
 			name:     "17WKC Women's Team: 38 teams, 12 blocks plus 4 draft slots",
 			entrants: 38, minSize: 3,
 			sheetPools: 12, sheetDrafts: 4,
-			wantPools: 12, wantDrafts: 4,
 			// The row that forced rule 4: P=12's four drafts exceed its two
 			// oversized blocks, and the sheet takes the other two from
 			// seeded blocks 8 and 9 (three teams each). Under the original
@@ -151,18 +149,15 @@ func TestWKCTeamFormationAgainstTheSheets(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			pools, drafts, err := FillBracketPoolCount(tc.entrants, tc.minSize, 4)
+			pools, drafts, err := FillBracketPoolCount(tc.entrants, tc.minSize, []int{1, 2, 3, 4})
 			require.NoError(t, err)
-			assert.Equal(t, tc.wantPools, pools, "pool count")
-			assert.Equal(t, tc.wantDrafts, drafts, "draft count")
+			assert.Equal(t, tc.sheetPools, pools, "matches the sheet's block count")
+			assert.Equal(t, tc.sheetDrafts, drafts, "matches the sheet's draft-slot count")
 
 			// Whatever the objective chose, the two numbers must fill a
 			// power-of-two bracket exactly -- that IS the objective.
 			assert.Equal(t, NextPow2(pools), pools+drafts,
 				"winners plus drafted 2nds must exactly fill the bracket, with no byes")
-
-			assert.Equal(t, tc.sheetPools, pools, "matches the sheet's block count")
-			assert.Equal(t, tc.sheetDrafts, drafts, "matches the sheet's draft-slot count")
 		})
 	}
 }
@@ -398,7 +393,7 @@ func TestWKCIndividualFormationAgainstTheSheets(t *testing.T) {
 			{"Women's Individual, 203 entrants", 203},
 			{"Men's Individual, 242 entrants", 242},
 		} {
-			pools, drafts, err := FillBracketPoolCount(tc.entrants, 3, 4)
+			pools, drafts, err := FillBracketPoolCount(tc.entrants, 3, []int{1, 2, 3, 4})
 			require.NoErrorf(t, err, tc.name)
 			assert.Equalf(t, 64, pools, "%s: the sheet prints 64 blocks", tc.name)
 			assert.Equalf(t, 0, drafts, "%s: the sheet prints no draft slot", tc.name)
@@ -428,7 +423,7 @@ func TestWKCIndividualFormationAgainstTheSheets(t *testing.T) {
 			// Neither formation path this package offers produces that layout:
 			// fill-bracket lands on a different block count, and minimum-size
 			// cutting never emits a block below the minimum.
-			fillPools, _, err := FillBracketPoolCount(tc.entrants, 3, 4)
+			fillPools, _, err := FillBracketPoolCount(tc.entrants, 3, []int{1, 2, 3, 4})
 			require.NoErrorf(t, err, tc.name)
 			assert.NotEqualf(t, tc.sheetBlocks, fillPools,
 				"%s: recorded as a divergence; if fill-bracket now reproduces the sheet, this case is stale", tc.name)

@@ -333,18 +333,20 @@ func BuildPoolPhase(players []Player, poolSize int, isMax bool, numCourts int) (
 // minimum-players-per-pool sizing), so unlike BuildPoolPhase there is no
 // isMax parameter here at all.
 func BuildPoolPhaseFillBracket(players []Player, minSize int, numCourts int) ([]Pool, int, error) {
-	// The roster's seed count feeds formation's supply rule (rule 4 in
+	// The roster's seed RANKS feed formation's supply rule (rule 4 in
 	// FillBracketPoolCount's doc comment): drafted 2nds come from seeded
-	// pools first, and each seed rank lands in its own pool (R2), so the
-	// count of seeded PLAYERS here is the count of seeded POOLS after the
-	// cut, capped at the pool count inside the function.
-	seededPools := 0
-	for _, p := range players {
-		if p.Seed > 0 {
-			seededPools++
-		}
+	// pools first, and only a rank at most the pool count is guaranteed its
+	// own pool (a higher rank wraps into an already-seeded one, so a gapped
+	// survivor set must not be counted as one seeded pool per player -- see
+	// the rule-4 comment for the failure that taught this). partitionSeeded
+	// is the same split the seeding pass itself uses, so what formation
+	// counts is what placement will see.
+	seeded, _ := partitionSeeded(players)
+	seedRanks := make([]int, len(seeded))
+	for i, p := range seeded {
+		seedRanks[i] = p.Seed
 	}
-	numPools, _, err := FillBracketPoolCount(len(players), minSize, seededPools)
+	numPools, _, err := FillBracketPoolCount(len(players), minSize, seedRanks)
 	if err != nil {
 		return nil, 0, err
 	}

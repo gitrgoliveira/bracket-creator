@@ -2,7 +2,6 @@ package helper
 
 import (
 	"fmt"
-	"math"
 	"sort"
 )
 
@@ -91,25 +90,43 @@ import (
 // The rule above says nothing about WHERE the D drafted 2nds come from --
 // that is SelectFillBracketDrafts' job (seeded pools first, then oversized).
 // But formation cannot IGNORE supply either: the largest even-D count can
-// demand more drafts than any roster could deliver (a field just past a
+// demand more drafts than the roster can deliver (a field just past a
 // bracket boundary, say 70 teams -> 22 pools wanting 10 drafts, with 4
-// oversized pools and however many seeds), and returning a count whose
-// selection is doomed just moves the refusal somewhere less actionable. The
+// oversized pools -- deliverable only by a roster seeded that deep), and
+// returning a count whose
+// selection would be doomed just moves the refusal somewhere less
+// actionable. The
 // WKC sheets never face this -- their entrant counts sit close enough to
 // their brackets that <=4 seeds always cover the shortfall -- so what
 // formation does beyond them is this package's own extension:
 //
-//  4. seededPools is the number of seed ranks the roster carries (each lands
-//     in its own pool, R2). A candidate P is SUPPLIED when D fits the
-//     guaranteed candidate count max(min(seededPools, P), n - minSize*P) --
-//     the max, not the sum, because a seeded pool can also be the oversized
-//     one and must not be counted twice. Preference: the largest SUPPLIED
-//     even-D count, then the largest SUPPLIED odd-D count, then a clean
-//     error naming seeding as the remedy.
+//  4. seedRanks is the roster's seed ranks. Only ranks AT MOST P are
+//     guaranteed their own pool at pool count P: PoolSeeding places rank r
+//     in its own pool for r <= P (R2), while a rank past the pool count
+//     wraps into row 1 of an already-seeded pool (seedPoolRank's i%numPools
+//     fallback) -- reachable whenever check-in no-shows leave a gapped
+//     survivor set (engine.dropSeedAssignments keeps raw ranks) or the
+//     operator simply seeds more players than pools form. A candidate P is
+//     therefore SUPPLIED when D fits max(|{r in seedRanks : r <= P}|,
+//     n - minSize*P) -- the max, not the sum, because a seeded pool can
+//     also be the oversized one and must not be counted twice; and the seed
+//     term is zero when minSize < 2, since a minimum-size pool of one has
+//     no 2nd place to draft. Preference: the largest SUPPLIED even-D count,
+//     then the largest SUPPLIED odd-D count, then a clean error naming
+//     seeding as the remedy.
+//
+//     (An earlier cut took a scalar seeded-player COUNT and capped it at P.
+//     That over-promised on gapped rank sets: {1,2,13,14} on 38 entrants
+//     counted 4 while only ranks 1 and 2 land distinct pools at P=12, so
+//     formation accepted a cut whose drafts selection then refused with
+//     "seed more pools" -- at a roster the operator DID seed. Pinned by
+//     TestFillBracketPoolCount_WKCShapes' gapped rows and the wrapped-rank
+//     sweep regime.)
 //
 // The 45-team sheet pins that preference ORDER, not just the arithmetic:
-// P=15 (D=1, odd) is supplied there too -- three oversized pools at P=15
-// would be zero, but four seeds cover one draft -- yet the sheet cut 14, so
+// P=15 (D=1, odd) is supplied there too -- oversized pools at P=15
+// would be zero, but the sheet's four contiguous seeds cover one draft --
+// yet the sheet cut 14, so
 // even-D must outrank largest-P. An unseeded roster degrades gracefully:
 // supply is then oversized pools alone, which slides P down toward the
 // fatter-pool shapes the first cut of this function produced (e.g. 38
@@ -124,7 +141,7 @@ import (
 // all (minSize invalid, n too small for even one pool, no P uses every
 // entrant, or no supplied P) -- scope discipline: fail loudly rather than
 // guess a shape no sheet evidences.
-func FillBracketPoolCount(n, minSize, seededPools int) (pools, drafts int, err error) {
+func FillBracketPoolCount(n, minSize int, seedRanks []int) (pools, drafts int, err error) {
 	if minSize <= 0 {
 		return 0, 0, fmt.Errorf("fill-bracket: minimum pool size must be at least 1, got %d", minSize)
 	}
@@ -141,25 +158,29 @@ func FillBracketPoolCount(n, minSize, seededPools int) (pools, drafts int, err e
 	// NextPow2 is nondecreasing in P, so the smallest reachable bracket is
 	// minP's, and every P at or below that bracket's size reaches it.
 	bracket := NextPow2(minP)
-	top := maxP
-	if bracket < top {
-		top = bracket
-	}
+	top := min(maxP, bracket)
 
-	// Rule 4's guaranteed draft-candidate count at pool count p: seeded
-	// pools (each seed rank lands in its own pool, capped at p) or oversized
-	// pools, whichever is MORE -- the worst case is that every seeded pool
-	// is also an oversized one.
+	// Distinct positive seed ranks, sorted, so rule 4's |{r <= p}| is one
+	// binary scan per candidate. ApplySeeds already guarantees distinct
+	// ranks; the dedupe is defensive against a hand-fed list.
+	ranks := make([]int, 0, len(seedRanks))
+	seen := make(map[int]bool, len(seedRanks))
+	for _, r := range seedRanks {
+		if r > 0 && !seen[r] {
+			seen[r] = true
+			ranks = append(ranks, r)
+		}
+	}
+	sort.Ints(ranks)
+
+	// Rule 4's guaranteed draft-candidate count at pool count p; see the doc
+	// comment for why only ranks <= p count and why the terms combine by max.
 	supplied := func(p int) bool {
-		seeds := seededPools
-		if seeds > p {
-			seeds = p
+		seedSupply := 0
+		if minSize >= 2 {
+			seedSupply = len(rankLE(ranks, p))
 		}
-		supply := n - minSize*p // oversized pool count at this p
-		if seeds > supply {
-			supply = seeds
-		}
-		return bracket-p <= supply
+		return bracket-p <= max(seedSupply, n-minSize*p)
 	}
 
 	// Largest supplied even-D count first, then largest supplied odd-D.
@@ -170,7 +191,13 @@ func FillBracketPoolCount(n, minSize, seededPools int) (pools, drafts int, err e
 			}
 		}
 	}
-	return 0, 0, fmt.Errorf("fill-bracket: no pool count fits %d entrants at minimum pool size %d: every cut needs more drafted 2nds than the roster's %d seeded pool(s) and its oversized pools can supply; seed more pools, or adjust the entrant count or minimum pool size", n, minSize, seededPools)
+	return 0, 0, fmt.Errorf("fill-bracket: no pool count fits %d entrants at minimum pool size %d: every cut needs more drafted 2nd places than the roster's seeded pools (%d seed rank(s) low enough to land their own pool at the largest cut) and its oversized pools can supply; seed more pools, or adjust the entrant count or minimum pool size", n, minSize, len(rankLE(ranks, top)))
+}
+
+// rankLE returns the ranks at most p; split out so the error message and the
+// supply rule cannot count differently.
+func rankLE(ranks []int, p int) []int {
+	return ranks[:sort.SearchInts(ranks, p+1)]
 }
 
 // fillBracketCourtLayout is the per-court/per-half target arithmetic shared
@@ -317,6 +344,20 @@ func FillBracketDraftCapacity(pools []Pool, drafts, numCourts int) (poolHalf []i
 	return layout.poolHalf, layout.capacityByHalf, true
 }
 
+// fillBracketDraftCandidate is THE membership rule for the draft-candidate
+// set: a pool with a 2nd place to give (at least two members) that is either
+// seeded or oversized. One owner, used by SelectFillBracketDrafts' scan AND
+// by the sweep's fillBracketSupplyHolds re-check (fill_bracket_test.go), so
+// the "is this refusal a supply bug or routing residue" classifier can never
+// drift from the rule it classifies against -- the previous hand-copied test
+// predicate had already dropped the minSize guard.
+func fillBracketDraftCandidate(p Pool, minSize int) bool {
+	if len(p.Players) < 2 {
+		return false // no 2nd place to draft
+	}
+	return poolIsSeeded(p) || (minSize > 0 && len(p.Players) > minSize)
+}
+
 // SelectFillBracketDrafts returns the zero-based pool indices whose 2nd
 // place is DRAFTED into the fill-bracket knockout (rule 2, bc-qual LP-4).
 //
@@ -377,38 +418,31 @@ func SelectFillBracketDrafts(pools []Pool, minSize int, poolHalf []int, capacity
 	}
 
 	type candidate struct {
-		idx    int
-		seed   int
-		seeded bool
+		idx  int
+		seed int
 	}
 	var cands []candidate
 	seededCount, oversizedCount := 0, 0
 	for i, p := range pools {
-		if len(p.Players) < 2 {
-			continue // no 2nd place to draft
+		if !fillBracketDraftCandidate(p, minSize) {
+			continue
 		}
-		seeded := poolSeedRank(p) != math.MaxInt
-		over := minSize > 0 && len(p.Players) > minSize
-		if seeded {
+		if poolIsSeeded(p) {
 			seededCount++
 		}
-		if over {
+		if minSize > 0 && len(p.Players) > minSize {
 			oversizedCount++
 		}
-		if seeded || over {
-			cands = append(cands, candidate{idx: i, seed: poolSeedRank(p), seeded: seeded})
-		}
+		cands = append(cands, candidate{idx: i, seed: poolSeedRank(p)})
 	}
 
-	// SEEDED pools first, in seed order, then oversized pools in pool order
-	// (the seed key is math.MaxInt for every unseeded pool, so within the
-	// unseeded tail it decides nothing and the idx tiebreak is the order).
-	// A pool that is both seeded and oversized is one candidate, ranked as
-	// seeded.
+	// SEEDED pools first, in seed order, then oversized pools in pool order.
+	// The seed key alone carries all of that: poolSeedRank returns
+	// math.MaxInt for an unseeded pool, so every finite (seeded) key sorts
+	// ahead of the whole unseeded tail, in which the key decides nothing and
+	// the idx tiebreak is the pool order. A pool that is both seeded and
+	// oversized is one candidate, ranked as seeded.
 	sort.SliceStable(cands, func(i, j int) bool {
-		if cands[i].seeded != cands[j].seeded {
-			return cands[i].seeded
-		}
 		if cands[i].seed != cands[j].seed {
 			return cands[i].seed < cands[j].seed
 		}

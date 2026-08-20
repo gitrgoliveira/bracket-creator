@@ -214,6 +214,17 @@ func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 		return 0, false, err
 	}
 	poolWinners := comp.EffectivePoolWinners()
+	// MatchWinnerRanksNeeded, not poolWinners: under the extra-qualifier
+	// modes (bc-qual) the bracket seats "Pool X-2nd" placeholders while
+	// PoolWinners is pinned to 1, so a resolver bounded by poolWinners never
+	// builds a -2nd key and those slots stay placeholders forever -- every
+	// pool done, the drafted/crossed matches never playable, the competition
+	// stuck in pools status. This is the same bug the Excel export hit first
+	// (a crossed 2nd rendered as inert text), fixed by the same single owner
+	// of "how many ranks can a placeholder reference". Keys for pools that
+	// send no 2nd are inert: the resolver is only ever consulted with the
+	// labels the draw actually seated.
+	ranksNeeded := comp.MatchWinnerRanksNeeded()
 
 	// Build a label→player resolver for COMPLETED pools only. Incomplete pools
 	// contribute nothing, so their placeholders survive untouched.
@@ -223,14 +234,14 @@ func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 			continue
 		}
 		ps := standings[pool.PoolName]
-		for rank := 1; rank <= poolWinners; rank++ {
+		for rank := 1; rank <= ranksNeeded; rank++ {
 			key := fmt.Sprintf("%s-%s", pool.PoolName, helper.GetOrdinal(rank))
 			if rank-1 >= len(ps) {
 				// Degenerate pool (hand-edited data / legacy import): fewer
 				// finishers than PoolWinners. Map the unfillable placeholder
 				// to "" (bye) so the bracket slot auto-resolves. Draw-time
 				// validation prevents this in supported flows.
-				log.Printf("engine.ResolveQualifiedPools: pool %q has only %d ranked finisher(s) but PoolWinners=%d; treating rank %d as bye", pool.PoolName, len(ps), poolWinners, rank)
+				log.Printf("engine.ResolveQualifiedPools: pool %q has only %d ranked finisher(s) but placeholders may reference %d rank(s); treating rank %d as bye", pool.PoolName, len(ps), ranksNeeded, rank)
 				resolver[key] = ""
 				continue
 			}
@@ -260,6 +271,10 @@ func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 			for i, p := range pools {
 				poolNames[i] = p.PoolName
 			}
+			// poolWinners, not ranksNeeded: a v1 bracket predates the
+			// extra-qualifier modes by construction (they shipped after the
+			// placeholder fields), so its geometry is always the uniform
+			// pools-times-winners layout this backfill reconstructs.
 			backfilled = backfillDrawPlaceholdersV1(bracket, poolNames, poolWinners)
 		}
 		n := 0

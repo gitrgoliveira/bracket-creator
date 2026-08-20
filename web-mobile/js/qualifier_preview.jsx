@@ -22,15 +22,16 @@
 //     the configured minimum size, and an oversized pool sends one extra
 //     qualifier. At pool-formation time (PoolCount's floor + remainder),
 //     the number of oversized pools is exactly `n - minSize*pools`.
-//   - internal/helper.FillBracketPoolCount(n, minSize, seededPools): WKC's
+//   - internal/helper.FillBracketPoolCount(n, minSize, seedRanks): WKC's
 //     own formation rule (see that function's doc comment for the sheet
 //     derivation) -- pools of size minSize/minSize+1 that use every entrant,
 //     the SMALLEST reachable power-of-two bracket, and within it the largest
 //     SUPPLIED even-draft pool count, then the largest supplied odd-draft
 //     one. Supply is seeded pools first (drafted 2nds come from the seeded
-//     pools, oversized ones as fallback), which is why this mirror needs the
-//     roster's seeded count and the preview can genuinely CHANGE when the
-//     operator seeds another pool.
+//     pools, oversized ones as fallback), and only a seed rank at most the
+//     pool count guarantees its own pool -- which is why this mirror takes
+//     the roster's seed RANKS, not a count, and the preview can genuinely
+//     CHANGE when the operator seeds another pool.
 //   - internal/helper.NextPow2.
 //
 // See ValidateExtraQualifiers (internal/state/models.go) for the coupling
@@ -58,31 +59,42 @@ export function nextPow2(n) {
 }
 
 // fillBracketPoolCount mirrors internal/helper.FillBracketPoolCount(n,
-// minSize, seededPools): returns { pools, drafts } under the WKC formation
-// rule, or null when no pool count exists (invalid n/minSize, or no count
-// whose drafts the seeded and oversized pools can supply) -- mirrors the Go
-// function's error return, just without the message text, since this is
-// preview-only and never shown as a submit-time rejection.
+// minSize, seedRanks). Returns:
+//   - { pools, drafts } for the chosen cut;
+//   - { unsupplied: true } when legal cuts exist but none can be supplied by
+//     this roster's seeded and oversized pools -- the Go original's
+//     "seed more pools" error, kept distinguishable from plain null so the
+//     settings preview can surface the remedy BEFORE the operator hits the
+//     same message as a 400 at generate-draw time;
+//   - null for invalid inputs or an empty cut range, mirroring the Go
+//     function's other errors without their message text.
 //
 // The rule, kept in lockstep with the Go original (which carries the sheet
 // evidence): P in [ceil(n/(minSize+1)), floor(n/minSize)]; the bracket is the
 // smallest power of two that range reaches (nextPow2 of the range's bottom);
 // within it, the largest SUPPLIED even-draft P, then the largest supplied
 // odd-draft P. A P is supplied when its draft count fits
-// max(min(seededPools, P), n - minSize*P) -- the max, never the sum, because
-// a seeded pool can also be the oversized one.
-export function fillBracketPoolCount(n, minSize, seededPools) {
+// max(|{rank <= P}|, n - minSize*P) -- only a seed rank at most the pool
+// count guarantees its own pool (a higher rank wraps into an already-seeded
+// one), the max never the sum because a seeded pool can also be the
+// oversized one, and the seed term is zero when minSize < 2 (a minimum-size
+// pool of one has no 2nd place to draft).
+export function fillBracketPoolCount(n, minSize, seedRanks) {
   if (!Number.isInteger(minSize) || minSize <= 0) return null;
   if (!Number.isInteger(n) || n < minSize) return null;
-  const seeds = Number.isInteger(seededPools) && seededPools > 0 ? seededPools : 0;
+  // Distinct positive integer ranks; anything else in a hand-fed array is
+  // ignored rather than silently flipping the whole answer to the unseeded
+  // regime.
+  const ranks = [...new Set((Array.isArray(seedRanks) ? seedRanks : [])
+    .filter((r) => Number.isInteger(r) && r > 0))];
   const maxP = Math.floor(n / minSize);
   const minP = Math.ceil(n / (minSize + 1));
-  if (minP > maxP || minP < 1) return null;
+  if (minP > maxP) return null;
   const bracket = nextPow2(minP);
   const top = Math.min(maxP, bracket);
   const supplied = (p) => {
-    const supply = Math.max(Math.min(seeds, p), n - minSize * p);
-    return bracket - p <= supply;
+    const seedSupply = minSize >= 2 ? ranks.filter((r) => r <= p).length : 0;
+    return bracket - p <= Math.max(seedSupply, n - minSize * p);
   };
   for (const wantOdd of [0, 1]) {
     for (let p = top; p >= minP; p--) {
@@ -91,7 +103,7 @@ export function fillBracketPoolCount(n, minSize, seededPools) {
       }
     }
   }
-  return null;
+  return { unsupplied: true };
 }
 
 // bracketShape derives the knockout bracket size/byes/rounds for a given
@@ -113,11 +125,14 @@ function bracketShape(qualifiers) {
 // count poolWinners (the EFFECTIVE value -- callers that have not resolved
 // an unset/<=0 poolWinners to the default of 2 should do that before
 // calling, same contract as state.Competition.EffectivePoolWinners()), and
-// seededCount, the number of participants carrying a seed rank -- which
-// feeds the fill-bracket supply rule ONLY (drafted 2nds come from seeded
-// pools first), so the standard and larger-pools shapes never depend on it.
-// The settings page derives it from the same c.players it derives n from;
-// omitting it (undefined) previews the unseeded regime.
+// seedRanks, the roster's seed ranks -- which feed the fill-bracket supply
+// rule ONLY (drafted 2nds come from seeded pools first), so the standard and
+// larger-pools shapes never depend on them. The settings page derives them
+// from the same effective roster it derives n from (see effectiveDrawPlayers
+// below); omitting the argument previews the unseeded regime. The
+// fillBracket shape can also be { unsupplied: true } -- see
+// fillBracketPoolCount -- which formatQualifierPreviewLine renders as the
+// seeding remedy rather than the neutral placeholder.
 //
 // Returns { standard, largerPools, fillBracket }, each either:
 //   - null, when that mode has no defined shape for these inputs (n < minSize,
@@ -135,7 +150,7 @@ function bracketShape(qualifiers) {
 // misleading 0-pool line. The create form does not call this at all -- it has
 // no roster by construction, so every result would be null; it renders the
 // placeholder directly.
-export function computeQualifierPreview(n, minSize, poolWinners, seededCount) {
+export function computeQualifierPreview(n, minSize, poolWinners, seedRanks) {
   const roster = Number.isFinite(n) ? Math.trunc(n) : 0;
   const winners = Number.isInteger(poolWinners) && poolWinners > 0 ? poolWinners : 1;
 
@@ -158,10 +173,10 @@ export function computeQualifierPreview(n, minSize, poolWinners, seededCount) {
   const largerQualifiers = standardQualifiers + oversized;
   const largerPools = { pools, oversized, qualifiers: largerQualifiers, ...bracketShape(largerQualifiers) };
 
-  const fill = fillBracketPoolCount(roster, minSize, seededCount);
-  const fillBracket = fill
+  const fill = fillBracketPoolCount(roster, minSize, seedRanks);
+  const fillBracket = fill && !fill.unsupplied
     ? { pools: fill.pools, drafts: fill.drafts, qualifiers: fill.pools * winners + fill.drafts, ...bracketShape(fill.pools * winners + fill.drafts) }
-    : null;
+    : fill; // null, or the { unsupplied: true } sentinel, both passed through
 
   return { standard, largerPools, fillBracket };
 }
@@ -173,8 +188,32 @@ export function computeQualifierPreview(n, minSize, poolWinners, seededCount) {
 // so the caller can fall back to a neutral placeholder.
 export function formatQualifierPreviewLine(shape) {
   if (!shape) return null;
+  if (shape.unsupplied) {
+    // The Go generate-draw error's remedy, surfaced where the operator can
+    // still act on it cheaply. Deliberately not the neutral placeholder:
+    // legal cuts exist for this roster, only the drafted 2nd places have no
+    // pool to come from yet.
+    return "Needs seeded pools to draft second places from: seed a pool or two, or adjust the participant count or pool size.";
+  }
   const byesText = shape.byes === 0 ? "no byes" : `${shape.byes} bye${shape.byes === 1 ? "" : "s"}`;
   return `${shape.pools} pool${shape.pools === 1 ? "" : "s"} -> ${shape.qualifiers} qualifier${shape.qualifiers === 1 ? "" : "s"} -> ${shape.bracketSize}-slot knockout (${byesText})`;
+}
+
+// effectiveDrawPlayers is the roster the DRAW will actually run on: the
+// client-side mirror of engine.filterCheckedIn's opt-in rule (internal/
+// engine/competition.go). When the competition tracks check-in AND at least
+// one participant is checked in, only checked-in participants are drawn;
+// otherwise everyone is. Every preview input derived from the roster --
+// entrant count AND seed ranks -- must come off this list, or the preview
+// computes a cut for a field generate-draw will not use (a seeded no-show
+// changes not just the entrant count but, under fill-bracket, the POOL
+// count).
+export function effectiveDrawPlayers(players, checkInEnabled) {
+  const roster = Array.isArray(players) ? players.filter(Boolean) : [];
+  if (!checkInEnabled) return roster;
+  const anyCheckedIn = roster.some((p) => p.checkedIn);
+  if (!anyCheckedIn) return roster;
+  return roster.filter((p) => p.checkedIn);
 }
 
 // --- Knockout qualifiers form coupling (bc-qual LP-5a) ---

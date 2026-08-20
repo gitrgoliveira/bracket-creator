@@ -641,8 +641,10 @@ const (
 
 	// ExtraQualifiersFillBracket ("Fit the knockout exactly", bc-qual LP-4):
 	// a different pool-formation objective (helper.FillBracketPoolCount)
-	// plus drafted second qualifiers from the most senior oversized pools
-	// (helper.SelectFillBracketDrafts), so the qualifiers exactly fill a
+	// plus drafted second qualifiers from the seeded pools in seed order,
+	// with oversized pools as the fallback for a roster without enough seeds
+	// (helper.SelectFillBracketDrafts -- WKC's own rule, decoded from its
+	// sheets' footnotes), so the qualifiers exactly fill a
 	// power-of-two knockout bracket with zero byes
 	// (helper.BuildKnockoutDrawFillBracket). Same gate as
 	// ExtraQualifiersLargerPools below (minimum-players-per-pool sizing,

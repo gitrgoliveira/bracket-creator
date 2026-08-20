@@ -387,13 +387,15 @@ func TestCreatePools_ExtraQualifiers_FillBracket_DraftSuccess(t *testing.T) {
 // which is not guaranteed even when the formation and per-court target
 // arithmetic both check out. A THIRD review made SelectFillBracketDrafts
 // itself capacity-aware (skip a candidate whose destination half is full,
-// keep scanning, rather than committing to strict order), which dropped the
-// swept range's refusal count from 123/867 to 21/867 -- ALL 21 now at
-// courts=4 only (see TestFillBracketFormationAndBuilderAgree,
-// internal/helper, which sweeps this and pins the exact residual list). 18
-// entrants at minimum pool size 3, 4 shiaijo is one of those 21 (P=5, D=3),
-// reproduced through the real CLI pipeline rather than asserted from the
-// helper layer alone. The failure point also MOVED with this rework: it is
+// keep scanning, rather than committing to strict order), and the
+// WKC-derived seeded-first rework then shrank the swept residue further:
+// see TestFillBracketFormationAndBuilderAgree (internal/helper), which
+// sweeps both supply regimes and pins the exact residual lists. 18 entrants
+// at minimum pool size 3, 4 shiaijo, UNSEEDED (this CLI has no --seeds here)
+// is in the unseeded residue (P=5, D=3), reproduced through the real CLI
+// pipeline rather than asserted from the helper layer alone -- and the
+// error's own remedy is real at this layer too: the same roster with seeds
+// routes fine. The failure point also MOVED with the capacity rework: it is
 // now SelectFillBracketDrafts itself (before any placement is attempted),
 // not BuildKnockoutDrawFillBracket.
 func TestCreatePools_ExtraQualifiers_FillBracket_OutOfScope(t *testing.T) {
@@ -420,7 +422,9 @@ func TestCreatePools_ExtraQualifiers_FillBracket_OutOfScope(t *testing.T) {
 	err := o.createPools(entries)
 	require.Error(t, err, "an out-of-scope fill-bracket shape must fail cleanly, not silently fall back to the uniform draw")
 	assert.Contains(t, err.Error(), "could not select fill-bracket drafts")
-	assert.Contains(t, err.Error(), "cannot supply both halves of the bracket")
+	assert.Contains(t, err.Error(), "opposite half of the bracket")
+	assert.Contains(t, err.Error(), "seed more pools",
+		"the message must name the remedy that actually clears this shape")
 }
 
 // --- web /create form field wiring (createTournamentHandler) ---

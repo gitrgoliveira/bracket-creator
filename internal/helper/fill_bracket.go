@@ -2,38 +2,45 @@ package helper
 
 import (
 	"fmt"
+	"math"
 	"sort"
 )
 
 // The "fill-bracket" qualifier mode (bead bc-qual, phase LP-4: "Fit the
 // knockout exactly"). Successor to LP-3a/LP-3c's ExtraQualifiersLargerPools,
-// decoded from the 19th WKC 2024 (Milan) draw sheets rather than the EKC
-// ones -- evidence recorded in bead bc-draw's Phase 0 comments dated
-// 2026-08-19 (all four 19WKC events verified).
+// decoded from the WKC combination tables rather than the EKC sheets --
+// originally the 19WKC 2024 (Milan) events, then re-derived 2026-08-19 the
+// moment the 17WKC 2018 (Incheon) tables were added: the 17WKC Women's Team
+// sheet is the one event whose drafts DISCRIMINATE between candidate rules,
+// and it overturned the first cut's "oversized pools supply the drafts"
+// reading (draw_wkc_test.go holds the sheet-by-sheet evidence).
 //
 // Where larger-pools cuts pools EXACTLY as standard mode and lets an
 // oversized pool send one extra qualifier (leaving the shortfall as byes
 // unless the extra fills one), fill-bracket changes how pools are CUT in
 // the first place: FillBracketPoolCount picks the pool count so that pool
-// winners, plus a handful of DRAFTED 2nd places from the most senior
-// oversized pools, exactly fill a power-of-two knockout bracket with ZERO
-// byes. SelectFillBracketDrafts chooses which pools' 2nds are drafted;
+// winners, plus a handful of DRAFTED 2nd places, exactly fill a power-of-two
+// knockout bracket with ZERO byes. SelectFillBracketDrafts chooses which
+// pools' 2nds are drafted -- SEEDED pools in seed order, exactly as both WKC
+// sheets footnote and fill their draft slots, with oversized pools as this
+// package's fallback for a roster without enough seeds;
 // BuildKnockoutDrawFillBracket places them.
 //
 // Placement (rule 3, bc-qual): a drafted 2nd crosses to the OPPOSITE HALF
 // of the draw from its own pool's winner -- team-style separation
 // (drawPlan.partnerBlock's own R4b crossing rule), NOT larger-pools'
-// same-half-neighbour rule (draw_perpool.go's crossNeighbourCourt). The
-// 19WKC women's team sheet (45 entrants, the only witnessed fill-bracket
-// instance) shows this at slots 5 and 12 of a flat 16-leaf bracket -- WKC's
-// own outer-edge seed geometry, explicitly OUT OF SCOPE here (spec D6
-// records it as future work). This package's court-region machinery is
-// what stays: blocks per shiaijo, halves, semis on the middle court. The
-// exact WITHIN-half slot a draft lands in beyond "opposite half, round-1
-// fighting slot, never a bye" is this file's own EXTRAPOLATION, driven by
-// the existing greedy block layout (buildBlock/interleaveByRank) rather
-// than a replication of WKC's specific seating -- labelled on
-// BuildKnockoutDrawFillBracket's own doc comment.
+// same-half-neighbour rule (draw_perpool.go's crossNeighbourCourt). Six
+// independent observations across the two championships show it (2 on the
+// 19WKC women's team sheet at slots 5 and 12 of a flat 16-leaf bracket, 4 on
+// the 17WKC one at slots 4, 5, 12 and 13) -- WKC's own outer-edge seed
+// geometry stays explicitly OUT OF SCOPE (spec D6 records it as future
+// work). This package's court-region machinery is what stays: blocks per
+// shiaijo, halves, semis on the middle court. The exact WITHIN-half slot a
+// draft lands in beyond "opposite half, round-1 fighting slot, never a bye"
+// is this file's own EXTRAPOLATION, driven by the existing greedy block
+// layout (buildBlock/interleaveByRank) rather than a replication of WKC's
+// specific seating -- labelled on BuildKnockoutDrawFillBracket's own doc
+// comment.
 //
 // SELECTION is CAPACITY-AWARE (second review rework): the placement side
 // alone cannot rescue a shape where strict seed-then-pool-order drafting
@@ -48,33 +55,76 @@ import (
 // 19WKC sheet verification.
 
 // FillBracketPoolCount implements the fill-bracket pool-formation
-// objective: the LARGEST pool count P such that pools of minimum size
-// minSize (a remainder of them one larger, size minSize+1 -- "oversized")
-// use every entrant (minSize*P <= n <= (minSize+1)*P) AND the P pool
-// winners, plus one drafted 2nd from each of D = NextPow2(P) - P oversized
-// pools, exactly fill a power-of-two knockout bracket: D must not exceed
-// the number of oversized pools available to draft from, n - minSize*P.
+// objective, which is WKC's own (decoded 2026-08-19 from the 19WKC 2024 and
+// 17WKC 2018 combination tables -- all six events that filled a bracket, four
+// team and two individual, reproduce under this rule):
 //
-// Verified against every 19WKC 2024 event (all four; evidence in bead
-// bc-draw's Phase 0 comments dated 2026-08-19):
+//  1. P must use every entrant in pools of size minSize or minSize+1
+//     ("oversized"): ceil(n/(minSize+1)) <= P <= floor(n/minSize).
+//  2. The bracket is the SMALLEST power of two any such P can reach,
+//     B = NextPow2(ceil(n/(minSize+1))) -- never a bracket a round bigger
+//     than the field forces.
+//  3. Within that bracket, P is the LARGEST count whose draft requirement
+//     D = B - P is EVEN, falling back to an odd-D count only when no even-D
+//     count is supplied (rule 4 below).
 //
-//   - 60 entrants at minSize 3 -> P=16 (12 pools of 4, 4 of 3), D=0.
-//   - 45 -> P=14 (11 of 3, 3 of 4), D=2. A same-size P=15 (all pools of
-//     exactly 3) also uses every entrant, but has ZERO oversized pools to
-//     draft a missing bracket slot from -- that absence is WHY 14 wins over
-//     the naive floor(45/3)=15.
-//   - 203 -> P=64 (53 of 3, 11 of 4), D=0.
-//   - 242 -> P=64 (14 of 3, 50 of 4), D=0.
+// The evenness preference is not curve-fitting: both sheets that drafted at
+// all placed their draft slots mirror-symmetrically, one per half (19WKC
+// Women's Team, D=2) or two per half (17WKC Women's Team, D=4), so each half
+// of the draw sends exactly as many 2nds as it receives. An odd D cannot do
+// that. It stays a PREFERENCE rather than a hard rule so that a range with
+// only one legal P (e.g. 11 entrants at minSize 3 -> P=3, D=1) still forms
+// rather than refusing a field the builder handles fine -- the asymmetric
+// D=1 shape is this package's own extension, no sheet witnesses it.
 //
-// Also checked against 11 entrants -> P=3 (one pool of 3, two of 4), D=1.
+// The six verified events, all at minSize 3:
 //
-// Returns a clean, actionable error naming n and minSize when NO P in the
-// legal range satisfies both constraints (e.g. minSize itself is invalid,
-// or n is too small relative to minSize for any pool count to both use
-// every entrant and supply enough oversized pools for the shortfall) --
-// scope discipline: fail loudly rather than guess a shape no sheet
-// evidences.
-func FillBracketPoolCount(n, minSize int) (pools, drafts int, err error) {
+//   - 60  (19WKC Men's Team)         -> P=16, D=0
+//   - 49  (17WKC Men's Team)         -> P=16, D=0
+//   - 45  (19WKC Women's Team)       -> P=14, D=2. P=15 also uses every
+//     entrant, but D=1 is odd; 14 is the largest even-D count, and 14 is
+//     what the sheet cut.
+//   - 38  (17WKC Women's Team)       -> P=12, D=4.
+//   - 203 (19WKC Women's Individual) -> P=64, D=0
+//   - 242 (19WKC Men's Individual)   -> P=64, D=0
+//
+// The rule above says nothing about WHERE the D drafted 2nds come from --
+// that is SelectFillBracketDrafts' job (seeded pools first, then oversized).
+// But formation cannot IGNORE supply either: the largest even-D count can
+// demand more drafts than any roster could deliver (a field just past a
+// bracket boundary, say 70 teams -> 22 pools wanting 10 drafts, with 4
+// oversized pools and however many seeds), and returning a count whose
+// selection is doomed just moves the refusal somewhere less actionable. The
+// WKC sheets never face this -- their entrant counts sit close enough to
+// their brackets that <=4 seeds always cover the shortfall -- so what
+// formation does beyond them is this package's own extension:
+//
+//  4. seededPools is the number of seed ranks the roster carries (each lands
+//     in its own pool, R2). A candidate P is SUPPLIED when D fits the
+//     guaranteed candidate count max(min(seededPools, P), n - minSize*P) --
+//     the max, not the sum, because a seeded pool can also be the oversized
+//     one and must not be counted twice. Preference: the largest SUPPLIED
+//     even-D count, then the largest SUPPLIED odd-D count, then a clean
+//     error naming seeding as the remedy.
+//
+// The 45-team sheet pins that preference ORDER, not just the arithmetic:
+// P=15 (D=1, odd) is supplied there too -- three oversized pools at P=15
+// would be zero, but four seeds cover one draft -- yet the sheet cut 14, so
+// even-D must outrank largest-P. An unseeded roster degrades gracefully:
+// supply is then oversized pools alone, which slides P down toward the
+// fatter-pool shapes the first cut of this function produced (e.g. 38
+// unseeded -> 10 pools, 6 drafts from 8 oversized), instead of refusing.
+//
+// (The previous cut of this function required D <= oversized outright,
+// because drafts then came only from oversized pools. That constraint made
+// 38 entrants cut 11 pools where the 17WKC sheet cut 12, and fell with the
+// oversized-only draft rule itself.)
+//
+// Returns a clean, actionable error naming n and minSize when no P exists at
+// all (minSize invalid, n too small for even one pool, no P uses every
+// entrant, or no supplied P) -- scope discipline: fail loudly rather than
+// guess a shape no sheet evidences.
+func FillBracketPoolCount(n, minSize, seededPools int) (pools, drafts int, err error) {
 	if minSize <= 0 {
 		return 0, 0, fmt.Errorf("fill-bracket: minimum pool size must be at least 1, got %d", minSize)
 	}
@@ -84,14 +134,43 @@ func FillBracketPoolCount(n, minSize int) (pools, drafts int, err error) {
 
 	maxP := n / minSize
 	minP := (n + minSize) / (minSize + 1) // ceil(n / (minSize+1))
-	for p := maxP; p >= minP && p >= 1; p-- {
-		remainder := n - minSize*p // number of oversized (minSize+1) pools at this P
-		need := NextPow2(p) - p    // drafts required to fill the bracket
-		if need <= remainder {
-			return p, need, nil
+	if minP > maxP {
+		return 0, 0, fmt.Errorf("fill-bracket: no pool count fits %d entrants at minimum pool size %d into pools of %d or %d that use every entrant; adjust the entrant count or minimum pool size", n, minSize, minSize, minSize+1)
+	}
+
+	// NextPow2 is nondecreasing in P, so the smallest reachable bracket is
+	// minP's, and every P at or below that bracket's size reaches it.
+	bracket := NextPow2(minP)
+	top := maxP
+	if bracket < top {
+		top = bracket
+	}
+
+	// Rule 4's guaranteed draft-candidate count at pool count p: seeded
+	// pools (each seed rank lands in its own pool, capped at p) or oversized
+	// pools, whichever is MORE -- the worst case is that every seeded pool
+	// is also an oversized one.
+	supplied := func(p int) bool {
+		seeds := seededPools
+		if seeds > p {
+			seeds = p
+		}
+		supply := n - minSize*p // oversized pool count at this p
+		if seeds > supply {
+			supply = seeds
+		}
+		return bracket-p <= supply
+	}
+
+	// Largest supplied even-D count first, then largest supplied odd-D.
+	for _, wantOdd := range []int{0, 1} {
+		for p := top; p >= minP; p-- {
+			if (bracket-p)%2 == wantOdd && supplied(p) {
+				return p, bracket - p, nil
+			}
 		}
 	}
-	return 0, 0, fmt.Errorf("fill-bracket: no pool count fits %d entrants at minimum pool size %d into a power-of-two knockout bracket with the oversized pools available; adjust the entrant count or minimum pool size", n, minSize)
+	return 0, 0, fmt.Errorf("fill-bracket: no pool count fits %d entrants at minimum pool size %d: every cut needs more drafted 2nds than the roster's %d seeded pool(s) and its oversized pools can supply; seed more pools, or adjust the entrant count or minimum pool size", n, minSize, seededPools)
 }
 
 // fillBracketCourtLayout is the per-court/per-half target arithmetic shared
@@ -239,32 +318,40 @@ func FillBracketDraftCapacity(pools []Pool, drafts, numCourts int) (poolHalf []i
 }
 
 // SelectFillBracketDrafts returns the zero-based pool indices whose 2nd
-// place is DRAFTED into the fill-bracket knockout (rule 2, bc-qual LP-4),
-// CAPACITY-AWARE (second review rework): oversized pools (a pool with more
-// than minSize members) are considered in seed-then-pool-order -- "chosen
-// in seed-then-pool-order among oversized pools", unchanged from the first
-// cut -- but a candidate is taken ONLY if the OPPOSITE half from its own
-// home (rule 3) still has remaining draft capacity; a candidate whose
-// destination half is already full is SKIPPED, not a hard failure, and the
-// scan continues down the order. This is what closes the "invisible,
-// data-dependent refusal" the placement-only rework left: strict
-// seed-then-pool-order alone can (and empirically did, in roughly 14% of a
-// swept range) pick two pools whose homes are BOTH in the same half when
-// the draw has only one destination slot left in the opposite half -- a
-// shape FillBracketPoolCount already promised was fine, refused only
-// because selection had no way to route around it.
+// place is DRAFTED into the fill-bracket knockout (rule 2, bc-qual LP-4).
 //
-// Verified sheet-compatible: on the 19WKC women's team draw (bead bc-draw
-// Phase 0, 2026-08-19) the three oversized pools are blocks 1, 9 and 16,
-// with capacityByHalf = [1, 1] (one destination slot per half). In
-// seed-then-pool order (1, 9, 16): block 1 (home half 1) takes half 2's
-// only slot; block 9 (home half 1, the SAME side as block 1) finds half
-// 2's slot already gone and is SKIPPED -- not because of seed order (it
-// still comes before block 16 in the scan), but because capacity ran out;
-// block 16 (home half 2) takes half 1's only remaining slot. The two pools
-// selected -- 1 and 16 -- are exactly the two the sheet drafted, and the
-// capacity-exhaustion skip of block 9 is exactly why the sheet drafts
-// nothing from it. See TestSelectFillBracketDrafts_19WKCWomenTeam.
+// Candidates are the SEEDED pools, in seed order, then the OVERSIZED pools
+// (more than minSize members) in pool order; a pool that is both is one
+// candidate, ranked as seeded. Seeded-first is WKC's own rule, and the only
+// reading both championships' sheets support:
+//
+//   - 19WKC Women's Team needs 2 drafts and takes them from blocks 1 and 16
+//     -- the two NAMED seeds (Japan, Korea). Block 9 is oversized too and
+//     sends nothing: it is seed 3 or 4, and only two were needed. Seed order
+//     explains that; size cannot.
+//   - 17WKC Women's Team needs 4 and takes them from blocks 1, 16, 8 and 9
+//     -- exactly the four blocks its own footnote seeds ("Seed 1a: Japan,
+//     16a: Korea / Seed 8a,9a: USA & Brasil by Draw"), and blocks 8 and 9
+//     hold THREE teams each, so two of the four drafted blocks are not
+//     oversized at all. This is the sheet that killed the first cut's
+//     oversized-only rule, which could never reach it and refused the whole
+//     shape.
+//
+// The oversized tail is this package's own fallback, no sheet witnesses it:
+// a roster with fewer seeds than drafts would otherwise refuse outright,
+// when an oversized pool has a spare competitor to give. Unseeded rosters
+// therefore behave exactly as the first cut did (every candidate is
+// unseeded-oversized, taken in pool order).
+//
+// Selection is CAPACITY-AWARE (second review rework): a candidate is taken
+// ONLY if the OPPOSITE half from its own home (rule 3) still has remaining
+// draft capacity; a candidate whose destination half is already full is
+// SKIPPED, not a hard failure, and the scan continues down the order. This
+// is what closes the "invisible, data-dependent refusal" the placement-only
+// rework left: strict priority order alone can pick two pools whose homes
+// are BOTH in the same half when the draw has only one destination slot
+// left in the opposite half -- a shape FillBracketPoolCount already promised
+// was fine, refused only because selection had no way to route around it.
 //
 // poolHalf and capacityByHalf come from FillBracketDraftCapacity, computed
 // over the SAME pool set before any pool is chosen; a caller that hands in
@@ -274,17 +361,15 @@ func FillBracketDraftCapacity(pools []Pool, drafts, numCourts int) (poolHalf []i
 // BuildKnockoutDrawFillBracket, which re-derives and re-checks its own
 // capacity independently regardless.
 //
-// Returns an error (never a partial/short list) only when the scan ends
-// having placed fewer than the total capacity
-// (capacityByHalf[0]+capacityByHalf[1]) drafts -- i.e. not enough oversized
-// pools exist, or too many of them share a half that has no remaining
-// capacity to receive them. FillBracketPoolCount's own formation
-// constraint rules the first case out for a pool set it produced; the
-// second is the genuinely data-dependent residue
-// TestFillBracketFormationAndBuilderAgree sweeps and reports -- the error
-// message names it in those terms rather than "out of scope", since by
-// this point the shape IS a legal formation, just one whose actual oversized
-// pools cannot be routed to fill both halves.
+// Returns an error (never a partial/short list) when the scan ends having
+// placed fewer than the total capacity (capacityByHalf[0]+capacityByHalf[1])
+// drafts: not enough seeded-or-oversized pools exist, or too many of them
+// share a half that has no remaining capacity to receive them. Unlike the
+// first cut, FillBracketPoolCount does NOT rule the first case out -- its
+// formation no longer depends on draft supply, because supply now turns on
+// seeding, which formation cannot see. The error therefore names seeding as
+// the operator's remedy: seeding more pools fixes the supply without
+// re-cutting anything.
 func SelectFillBracketDrafts(pools []Pool, minSize int, poolHalf []int, capacityByHalf [2]int) ([]int, error) {
 	total := capacityByHalf[0] + capacityByHalf[1]
 	if total <= 0 {
@@ -292,26 +377,47 @@ func SelectFillBracketDrafts(pools []Pool, minSize int, poolHalf []int, capacity
 	}
 
 	type candidate struct {
-		idx  int
-		seed int
+		idx    int
+		seed   int
+		seeded bool
 	}
-	var oversized []candidate
+	var cands []candidate
+	seededCount, oversizedCount := 0, 0
 	for i, p := range pools {
-		if minSize > 0 && len(p.Players) > minSize {
-			oversized = append(oversized, candidate{idx: i, seed: poolSeedRank(p)})
+		if len(p.Players) < 2 {
+			continue // no 2nd place to draft
+		}
+		seeded := poolSeedRank(p) != math.MaxInt
+		over := minSize > 0 && len(p.Players) > minSize
+		if seeded {
+			seededCount++
+		}
+		if over {
+			oversizedCount++
+		}
+		if seeded || over {
+			cands = append(cands, candidate{idx: i, seed: poolSeedRank(p), seeded: seeded})
 		}
 	}
 
-	sort.SliceStable(oversized, func(i, j int) bool {
-		if oversized[i].seed != oversized[j].seed {
-			return oversized[i].seed < oversized[j].seed
+	// SEEDED pools first, in seed order, then oversized pools in pool order
+	// (the seed key is math.MaxInt for every unseeded pool, so within the
+	// unseeded tail it decides nothing and the idx tiebreak is the order).
+	// A pool that is both seeded and oversized is one candidate, ranked as
+	// seeded.
+	sort.SliceStable(cands, func(i, j int) bool {
+		if cands[i].seeded != cands[j].seeded {
+			return cands[i].seeded
 		}
-		return oversized[i].idx < oversized[j].idx
+		if cands[i].seed != cands[j].seed {
+			return cands[i].seed < cands[j].seed
+		}
+		return cands[i].idx < cands[j].idx
 	})
 
 	remaining := capacityByHalf // [2]int is a value type: this copies, leaving the caller's untouched
 	out := make([]int, 0, total)
-	for _, c := range oversized {
+	for _, c := range cands {
 		if len(out) >= total {
 			break
 		}
@@ -328,7 +434,7 @@ func SelectFillBracketDrafts(pools []Pool, minSize int, poolHalf []int, capacity
 	}
 
 	if len(out) < total {
-		return nil, fmt.Errorf("fill-bracket: the oversized pools' draw positions cannot supply both halves of the bracket (need %d drafted 2nd(s), only %d could be placed with capacity remaining in the opposite half; %d oversized pool(s) exist)", total, len(out), len(oversized))
+		return nil, fmt.Errorf("fill-bracket: the draw needs %d drafted 2nd(s) and only %d could be supplied (drafts come from seeded pools in seed order, then oversized pools, each landing in the opposite half of the bracket from its own pool; %d seeded and %d oversized pool(s) exist); seed more pools, or adjust the entrant count or minimum pool size", total, len(out), seededCount, oversizedCount)
 	}
 	return out, nil
 }

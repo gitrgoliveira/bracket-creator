@@ -146,7 +146,8 @@ func buildPoolFedDraw(comp *state.Competition, pools []helper.Pool, numCourts in
 
 // fillBracketDraftIndices resolves WHICH pools' 2nds are drafted for a
 // fill-bracket competition (bc-qual LP-4, rule 2): D = NextPow2(numPools) -
-// numPools of the most senior oversized pools, via CAPACITY-AWARE selection
+// numPools drafts, from the seeded pools in seed order with oversized pools
+// as fallback (WKC's own rule), via CAPACITY-AWARE selection
 // (second review rework) -- helper.FillBracketDraftCapacity computes the
 // per-pool home half and per-half draft capacity from the pool/draft
 // counts alone (before any pool is chosen), and

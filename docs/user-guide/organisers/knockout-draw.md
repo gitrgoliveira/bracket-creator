@@ -38,9 +38,11 @@ Fewer, fatter pools; the bracket fills exactly, no byes.
 
 ![Fit the knockout: the same entrants cut as fewer, fatter pools so the bracket fills exactly](../../screenshots/qualifiers-fit.svg)
 
-Pool sizes are chosen so that pool winners, plus a second place drafted from a handful of the largest pools, exactly fill the bracket. Nobody gets a bye, and every qualifier fights in the first round.
+Pool sizes are chosen so that pool winners, plus a handful of drafted second places, exactly fill the bracket. Nobody gets a bye, and every qualifier fights in the first round. This is how the sport's largest international championships cut their pools.
 
-Requires **Winners per pool** set to 1. At four shiai-jo, a small set of entrant counts cannot be built this way, because the drafted second places cannot be split evenly between the two halves of the bracket. If your entrant count hits this, the app explains what's wrong; adding or removing one entrant, or changing the shiai-jo count, resolves it.
+The drafted second places come from your **seeded pools, in seed order**; a pool larger than the minimum can also supply one when there are not enough seeds. Seeding therefore does more under this option than place your favourites: it decides which pools send a second qualifier, and can change how the pools are cut. A drafted second place is always placed in the opposite half of the bracket from its own pool's winner, so the two can only meet again in the final.
+
+Requires **Winners per pool** set to 1. Some entrant counts cannot be built this way, most often on an unseeded competition whose pools cannot supply the drafted second places the bracket needs, and a small set of counts at four shiai-jo where the drafts cannot be split across the two halves of the bracket. If your entrant count hits this, the app explains what's wrong; seeding one or two more pools, adding or removing one entrant, or changing the shiai-jo count resolves it.
 
 ### Worked examples: how many qualify
 

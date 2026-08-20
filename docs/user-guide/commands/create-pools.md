@@ -92,7 +92,7 @@ Byes follow from the size of each block rather than from the total field: a bloc
 |-------|-----------|
 | `""` (default) | Standard: every pool sends `--pool-winners` qualifiers; unfilled bracket slots become byes. |
 | `larger-pools` | A pool larger than the minimum pool size sends one extra qualifier, crossed to a neighbouring shiai-jo, on top of the usual number. It always fights in the first round and never byes. |
-| `fill-bracket` | Pools are cut so that pool winners, plus a second place drafted from a handful of the largest pools, exactly fill the bracket with no byes. |
+| `fill-bracket` | Pools are cut so that pool winners, plus a handful of drafted second places, exactly fill the bracket with no byes. The drafts come from seeded pools in seed order (`--seeds`), with pools larger than the minimum as the fallback when there are not enough seeds. |
 
 Both `larger-pools` and `fill-bracket` require `-p` (minimum pool size, not `-m`) and `-w 1`; the command refuses any other combination. See [How many qualify from each pool](../organisers/knockout-draw.md#how-many-qualify-from-each-pool) for the full explanation and worked examples, including when each mode can and cannot build a draw for a given entrant count and shiai-jo count.
 

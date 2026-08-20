@@ -333,7 +333,18 @@ func BuildPoolPhase(players []Player, poolSize int, isMax bool, numCourts int) (
 // minimum-players-per-pool sizing), so unlike BuildPoolPhase there is no
 // isMax parameter here at all.
 func BuildPoolPhaseFillBracket(players []Player, minSize int, numCourts int) ([]Pool, int, error) {
-	numPools, _, err := FillBracketPoolCount(len(players), minSize)
+	// The roster's seed count feeds formation's supply rule (rule 4 in
+	// FillBracketPoolCount's doc comment): drafted 2nds come from seeded
+	// pools first, and each seed rank lands in its own pool (R2), so the
+	// count of seeded PLAYERS here is the count of seeded POOLS after the
+	// cut, capped at the pool count inside the function.
+	seededPools := 0
+	for _, p := range players {
+		if p.Seed > 0 {
+			seededPools++
+		}
+	}
+	numPools, _, err := FillBracketPoolCount(len(players), minSize, seededPools)
 	if err != nil {
 		return nil, 0, err
 	}

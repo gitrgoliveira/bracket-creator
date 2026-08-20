@@ -286,13 +286,13 @@ func TestExportCompetitionXlsx_FillBracket_DraftedQualifierHasLiveFormula(t *tes
 // advanced past CompStatusSetup (the atomic status commit, further down in
 // runDrawPipeline, is never reached).
 //
-// 18 entrants at minimum pool size 3, 4 shiaijo is one of the capacity-aware
-// rework's own residual pairs (third review: making SelectFillBracketDrafts
-// capacity-aware dropped the swept range's refusal count from 123/867 to
-// 21/867, ALL 21 now at courts=4 only -- see
-// TestFillBracketFormationAndBuilderAgree's pinned list, internal/helper,
-// and the identical n/courts pair in the CLI-level
-// TestCreatePools_ExtraQualifiers_FillBracket_OutOfScope, cmd/).
+// 18 entrants at minimum pool size 3, 4 shiaijo, UNSEEDED, is one of the
+// residual half-routing pairs (see TestFillBracketFormationAndBuilderAgree's
+// pinned per-regime lists, internal/helper, and the identical n/courts pair
+// in the CLI-level TestCreatePools_ExtraQualifiers_FillBracket_OutOfScope,
+// cmd/). Under the WKC-derived seeded-first rule the SAME roster with four
+// seeds routes fine -- the refusal is a property of the unseeded regime,
+// which is exactly what the error's "seed more pools" remedy says.
 //
 // This is a PRE-EXISTING pipeline characteristic (runDrawPipeline's own doc
 // comment already states "A failure mid-pipeline leaves partial state on
@@ -333,7 +333,9 @@ func TestStartCompetition_FillBracket_HalfCapacityRefusal_ObservedPipelineState(
 	// Third review: the operator sees the SPECIFIC cause, not a generic
 	// "out of scope" -- SelectFillBracketDrafts' own error is threaded
 	// through buildPoolFedDraw/generatePoolPreviewBracket unmodified.
-	assert.Contains(t, err.Error(), "cannot supply both halves of the bracket")
+	assert.Contains(t, err.Error(), "opposite half of the bracket")
+	assert.Contains(t, err.Error(), "seed more pools",
+		"the operator-facing remedy must survive the buildPoolFedDraw threading")
 
 	// Observed state 1: pools.csv/pool-matches.csv ARE on disk, formed by
 	// generatePools before generatePoolPreviewBracket ever ran.

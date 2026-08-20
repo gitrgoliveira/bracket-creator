@@ -22,11 +22,15 @@
 //     the configured minimum size, and an oversized pool sends one extra
 //     qualifier. At pool-formation time (PoolCount's floor + remainder),
 //     the number of oversized pools is exactly `n - minSize*pools`.
-//   - internal/helper.FillBracketPoolCount(n, minSize): the LARGEST pool
-//     count P (searched from floor(n/minSize) down to ceil(n/(minSize+1)))
-//     such that pools of size minSize/minSize+1 use every entrant AND P
-//     winners plus NextPow2(P)-P drafted 2nds (taken from oversized pools)
-//     exactly fill a power-of-two knockout bracket.
+//   - internal/helper.FillBracketPoolCount(n, minSize, seededPools): WKC's
+//     own formation rule (see that function's doc comment for the sheet
+//     derivation) -- pools of size minSize/minSize+1 that use every entrant,
+//     the SMALLEST reachable power-of-two bracket, and within it the largest
+//     SUPPLIED even-draft pool count, then the largest supplied odd-draft
+//     one. Supply is seeded pools first (drafted 2nds come from the seeded
+//     pools, oversized ones as fallback), which is why this mirror needs the
+//     roster's seeded count and the preview can genuinely CHANGE when the
+//     operator seeds another pool.
 //   - internal/helper.NextPow2.
 //
 // See ValidateExtraQualifiers (internal/state/models.go) for the coupling
@@ -54,23 +58,37 @@ export function nextPow2(n) {
 }
 
 // fillBracketPoolCount mirrors internal/helper.FillBracketPoolCount(n,
-// minSize): returns { pools, drafts } for the largest pool count P in
-// [ceil(n/(minSize+1)), floor(n/minSize)] whose drafted-2nd requirement
-// (NextPow2(P)-P) does not exceed the oversized-pool supply at that P
-// (n - minSize*P), or null when no such P exists (including invalid
-// n/minSize) -- mirrors the Go function's error return, just without the
-// message text, since this is preview-only and never shown as a submit-time
-// rejection.
-export function fillBracketPoolCount(n, minSize) {
+// minSize, seededPools): returns { pools, drafts } under the WKC formation
+// rule, or null when no pool count exists (invalid n/minSize, or no count
+// whose drafts the seeded and oversized pools can supply) -- mirrors the Go
+// function's error return, just without the message text, since this is
+// preview-only and never shown as a submit-time rejection.
+//
+// The rule, kept in lockstep with the Go original (which carries the sheet
+// evidence): P in [ceil(n/(minSize+1)), floor(n/minSize)]; the bracket is the
+// smallest power of two that range reaches (nextPow2 of the range's bottom);
+// within it, the largest SUPPLIED even-draft P, then the largest supplied
+// odd-draft P. A P is supplied when its draft count fits
+// max(min(seededPools, P), n - minSize*P) -- the max, never the sum, because
+// a seeded pool can also be the oversized one.
+export function fillBracketPoolCount(n, minSize, seededPools) {
   if (!Number.isInteger(minSize) || minSize <= 0) return null;
   if (!Number.isInteger(n) || n < minSize) return null;
+  const seeds = Number.isInteger(seededPools) && seededPools > 0 ? seededPools : 0;
   const maxP = Math.floor(n / minSize);
   const minP = Math.ceil(n / (minSize + 1));
-  for (let p = maxP; p >= minP && p >= 1; p--) {
-    const remainder = n - minSize * p; // oversized pools available to draft from at this P
-    const need = nextPow2(p) - p; // drafts required to fill the bracket
-    if (need <= remainder) {
-      return { pools: p, drafts: need };
+  if (minP > maxP || minP < 1) return null;
+  const bracket = nextPow2(minP);
+  const top = Math.min(maxP, bracket);
+  const supplied = (p) => {
+    const supply = Math.max(Math.min(seeds, p), n - minSize * p);
+    return bracket - p <= supply;
+  };
+  for (const wantOdd of [0, 1]) {
+    for (let p = top; p >= minP; p--) {
+      if ((bracket - p) % 2 === wantOdd && supplied(p)) {
+        return { pools: p, drafts: bracket - p };
+      }
     }
   }
   return null;
@@ -91,10 +109,15 @@ function bracketShape(qualifiers) {
 
 // computeQualifierPreview computes the pool/qualifier/bracket arithmetic for
 // all three "Knockout qualifiers" modes at once, given the current roster
-// count n, the minimum-players-per-pool size minSize, and the pool-winners
+// count n, the minimum-players-per-pool size minSize, the pool-winners
 // count poolWinners (the EFFECTIVE value -- callers that have not resolved
 // an unset/<=0 poolWinners to the default of 2 should do that before
-// calling, same contract as state.Competition.EffectivePoolWinners()).
+// calling, same contract as state.Competition.EffectivePoolWinners()), and
+// seededCount, the number of participants carrying a seed rank -- which
+// feeds the fill-bracket supply rule ONLY (drafted 2nds come from seeded
+// pools first), so the standard and larger-pools shapes never depend on it.
+// The settings page derives it from the same c.players it derives n from;
+// omitting it (undefined) previews the unseeded regime.
 //
 // Returns { standard, largerPools, fillBracket }, each either:
 //   - null, when that mode has no defined shape for these inputs (n < minSize,
@@ -112,7 +135,7 @@ function bracketShape(qualifiers) {
 // misleading 0-pool line. The create form does not call this at all -- it has
 // no roster by construction, so every result would be null; it renders the
 // placeholder directly.
-export function computeQualifierPreview(n, minSize, poolWinners) {
+export function computeQualifierPreview(n, minSize, poolWinners, seededCount) {
   const roster = Number.isFinite(n) ? Math.trunc(n) : 0;
   const winners = Number.isInteger(poolWinners) && poolWinners > 0 ? poolWinners : 1;
 
@@ -135,7 +158,7 @@ export function computeQualifierPreview(n, minSize, poolWinners) {
   const largerQualifiers = standardQualifiers + oversized;
   const largerPools = { pools, oversized, qualifiers: largerQualifiers, ...bracketShape(largerQualifiers) };
 
-  const fill = fillBracketPoolCount(roster, minSize);
+  const fill = fillBracketPoolCount(roster, minSize, seededCount);
   const fillBracket = fill
     ? { pools: fill.pools, drafts: fill.drafts, qualifiers: fill.pools * winners + fill.drafts, ...bracketShape(fill.pools * winners + fill.drafts) }
     : null;

@@ -906,7 +906,13 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             // server-confirmed competition, the same source playerCount
             // above (courts hint) already reads from.
             const rosterCount = (c.players || []).length;
-            const preview = computeQualifierPreview(rosterCount, local.poolSize, local.poolWinners);
+            // The seeded count feeds fill-bracket's supply rule (drafted
+            // 2nds come from seeded pools first, WKC's own method), so that
+            // mode's preview can genuinely change when the operator seeds
+            // another participant. Derived from the same server-confirmed
+            // c.players the roster count reads.
+            const seededCount = (c.players || []).filter((p) => p && p.seed).length;
+            const preview = computeQualifierPreview(rosterCount, local.poolSize, local.poolWinners, seededCount);
             const activeShape = local.extraQualifiers === EXTRA_QUALIFIERS_LARGER_POOLS
               ? preview.largerPools
               : local.extraQualifiers === EXTRA_QUALIFIERS_FILL_BRACKET

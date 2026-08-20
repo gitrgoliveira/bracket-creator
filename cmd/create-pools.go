@@ -325,10 +325,11 @@ func (o *poolOptions) createPools(entries []string) error {
 	// than restating that rule here.
 	//
 	// state.ExtraQualifiersFillBracket (bc-qual LP-4) instead drafts a 2nd
-	// from the most senior oversized pools (helper.SelectFillBracketDrafts)
-	// and crosses each to the OPPOSITE half of the draw from its own pool
-	// (helper.BuildKnockoutDrawFillBracket) -- see that function's doc
-	// comment for the evidence and scope.
+	// from the SEEDED pools in seed order, then oversized pools as fallback
+	// (helper.SelectFillBracketDrafts -- WKC's own rule, per its sheets'
+	// footnotes), and crosses each to the OPPOSITE half of the draw from its
+	// own pool (helper.BuildKnockoutDrawFillBracket) -- see that function's
+	// doc comment for the evidence and scope.
 	var draw *helper.KnockoutDraw
 	// totalQualifiers feeds the Time Estimator sheet below (FillEstimations
 	// derives elimination-round match count from finalist count - 1); it

@@ -468,7 +468,7 @@ func buildBlock(occ []drawOccupant, pools []Pool, mirrored bool) *Node {
 // the bye, since the alternative would be to break the rule the filter states.
 func layOutBlock(occ []drawOccupant, pools []Pool, byeEligible func(drawOccupant) bool) *Node {
 	if len(occ) == 0 {
-		return nil
+		return nil // defensive: no current caller can reach this
 	}
 	if len(occ) == 1 {
 		// A lone occupant IS its block: emit the leaf directly. Building the

@@ -1,6 +1,7 @@
 package helper
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -26,56 +27,62 @@ import (
 
 // perPoolSmallDraw runs the real pool phase and marks every oversized pool as
 // sending one extra qualifier, exactly as the engine's
-// extraQualifierOverrides does for a live competition.
-func perPoolSmallDraw(t *testing.T, entrants, minSize, numCourts int) ([]Pool, *KnockoutDraw) {
+// extraQualifierOverrides does for a live competition. It returns the
+// oversized pools it identified so no caller has to restate the rule --
+// poolIsOversized (fill_bracket.go) is the package's owner of it.
+func perPoolSmallDraw(t *testing.T, entrants, minSize, numCourts int) (pools []Pool, oversized []Pool, draw *KnockoutDraw) {
 	t.Helper()
 	pools, _, err := BuildPoolPhase(makeUniquePlayers(entrants), minSize, false, numCourts)
 	require.NoError(t, err)
 	overrides := map[int]int{}
 	for i, p := range pools {
-		if len(p.Players) > minSize {
+		if poolIsOversized(p, minSize) {
 			overrides[i] = 2
+			oversized = append(oversized, p)
 		}
 	}
-	require.NotEmpty(t, overrides, "fixture must have at least one oversized pool")
-	return pools, BuildKnockoutDrawPerPool(pools, 1, overrides, numCourts)
+	require.NotEmpty(t, oversized, "fixture must have at least one oversized pool")
+	return pools, oversized, BuildKnockoutDrawPerPool(pools, 1, overrides, numCourts)
 }
 
-// leafLabels collects every occupant label under n, in tree order.
-func leafLabels(n *Node) []string {
-	if n == nil {
-		return nil
-	}
-	if n.LeafNode {
-		if n.LeafVal == "" {
-			return nil
+// assertEveryExtraFightsInRoundOne sweeps a whole draw for rule 3: every
+// seated extra qualifier ("-2nd") must fight in round 1 of its own shiaijo's
+// block.
+func assertEveryExtraFightsInRoundOne(t *testing.T, draw *KnockoutDraw) {
+	t.Helper()
+	for _, region := range draw.Regions {
+		rounds := regionRounds(region)
+		for _, label := range TreeLeafLabels(region) {
+			if strings.HasSuffix(label, "-2nd") {
+				assertFightsInRoundOne(t, rounds, label)
+			}
 		}
-		return []string{n.LeafVal}
 	}
-	return append(leafLabels(n.Left), leafLabels(n.Right)...)
 }
 
 // assertFightsInRoundOne is rule 3 made executable: label must appear in a
 // round-1 bout with a real opponent on the other side, never as a bye and
 // never rising from a later round.
-func assertFightsInRoundOne(t *testing.T, region *Node, label string) {
+//
+// rounds comes from regionRounds, whose bouts read "left v right" with "W"
+// for a winner slot. Deliberately an INDEPENDENT oracle of production's
+// crossedFightInRoundOne rather than a call to it -- a post-condition that
+// validates itself pins nothing.
+func assertFightsInRoundOne(t *testing.T, rounds [][]string, label string) {
 	t.Helper()
-	rounds := regionRounds(region)
 	require.NotEmpty(t, rounds, "region has no rounds")
 	for _, bout := range rounds[0] {
-		sides := strings.SplitN(bout, " v ", 2)
-		if len(sides) != 2 {
+		left, right, ok := strings.Cut(bout, " v ")
+		if !ok || (left != label && right != label) {
 			continue
 		}
-		if sides[0] == label || sides[1] == label {
-			other := sides[0]
-			if sides[0] == label {
-				other = sides[1]
-			}
-			assert.NotEmpty(t, other, "%s must have a real round-1 opponent", label)
-			assert.NotEqual(t, "W", other, "%s must fight in round 1, not a riser", label)
-			return
+		other := right
+		if right == label {
+			other = left
 		}
+		assert.NotEmptyf(t, other, "%s must have a real round-1 opponent", label)
+		assert.NotEqualf(t, "W", other, "%s must fight in round 1, not a riser", label)
+		return
 	}
 	t.Fatalf("rule 3: %s never appears in a round-1 bout; rounds=%v", label, rounds)
 }
@@ -89,27 +96,22 @@ func assertFightsInRoundOne(t *testing.T, region *Node, label string) {
 // final.
 func TestPerPoolSingleShiaijoSeatsTheExtraQualifier(t *testing.T) {
 	t.Parallel()
-	pools, draw := perPoolSmallDraw(t, 10, 3, 1)
+	pools, oversized, draw := perPoolSmallDraw(t, 10, 3, 1)
 	require.NotNil(t, draw, "a single-shiaijo oversized field must produce a draw")
+	require.Len(t, oversized, 1, "10 entrants at minimum 3 forms exactly one oversized pool")
 
-	var oversized string
-	for _, p := range pools {
-		if len(p.Players) > 3 {
-			oversized = p.PoolName
-		}
-	}
-	first, second := oversized+"-1st", oversized+"-2nd"
+	first, second := oversized[0].PoolName+"-1st", oversized[0].PoolName+"-2nd"
 
-	all := leafLabels(draw.Root)
+	all := TreeLeafLabels(draw.Root)
 	assert.Contains(t, all, second, "the oversized pool's 2nd must be seated")
 	assert.Len(t, all, len(pools)+1, "every pool's 1st plus the one extra qualifier")
 
-	assertFightsInRoundOne(t, draw.Root, second)
+	assertEveryExtraFightsInRoundOne(t, draw)
 
-	left, right := leafLabels(draw.Root.Left), leafLabels(draw.Root.Right)
+	left, right := TreeLeafLabels(draw.Root.Left), TreeLeafLabels(draw.Root.Right)
 	assert.Truef(t,
-		(sliceHas(left, first) && sliceHas(right, second)) ||
-			(sliceHas(right, first) && sliceHas(left, second)),
+		(slices.Contains(left, first) && slices.Contains(right, second)) ||
+			(slices.Contains(right, first) && slices.Contains(left, second)),
 		"the extra qualifier must sit in the opposite half from its own pool's winner; left=%v right=%v", left, right)
 }
 
@@ -131,27 +133,50 @@ func TestPerPoolSmallReceivingCourtSeatsTheExtraQualifier(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			pools, draw := perPoolSmallDraw(t, tc.entrants, 3, tc.courts)
+			pools, oversized, draw := perPoolSmallDraw(t, tc.entrants, 3, tc.courts)
 			require.NotNilf(t, draw, "%d entrants on %d shiaijo must produce a draw", tc.entrants, tc.courts)
 
-			seated := leafLabels(draw.Root)
-			oversized := 0
-			for _, p := range pools {
-				if len(p.Players) > 3 {
-					oversized++
-					assert.Containsf(t, seated, p.PoolName+"-2nd", "%s is oversized and must send its 2nd", p.PoolName)
-				}
+			seated := TreeLeafLabels(draw.Root)
+			for _, p := range oversized {
+				assert.Containsf(t, seated, p.PoolName+"-2nd", "%s is oversized and must send its 2nd", p.PoolName)
 			}
-			assert.Len(t, seated, len(pools)+oversized)
-			for _, region := range draw.Regions {
-				for _, l := range leafLabels(region) {
-					if strings.HasSuffix(l, "-2nd") {
-						assertFightsInRoundOne(t, region, l)
-					}
-				}
-			}
+			assert.Len(t, seated, len(pools)+len(oversized))
+			assertEveryExtraFightsInRoundOne(t, draw)
 		})
 	}
+}
+
+// TestCrossedFightInRoundOneRejectsAByedExtra pins the rule-3 post-condition
+// itself, directly.
+//
+// It has to be tested directly because no roster reaches it: byePrecedenceLess
+// already ranks a home 1st ahead of a crossed 2nd for the bye, so every layout
+// the builders currently produce satisfies rule 3 on its own and the check
+// never fires end to end. Deleting the check therefore breaks no other test --
+// verified by neutering it, whereupon the whole suite stays green. That makes
+// it a safety net for a rule stated in prose across several hand-transcribed
+// role tables, and an unpinned safety net is one a later refactor can silently
+// remove, so its logic is pinned here instead of nowhere.
+func TestCrossedFightInRoundOneRejectsAByedExtra(t *testing.T) {
+	t.Parallel()
+
+	crossed := []drawOccupant{{label: "Pool C-2nd", pool: 2, rank: 2}}
+
+	// The extra qualifier fights a named opponent in round 1: rule 3 holds.
+	ok := BuildSlotTree([]string{"Pool A-1st", "Pool B-1st", "Pool C-2nd", "Pool D-1st"})
+	assert.True(t, crossedFightInRoundOne(ok, crossed),
+		"a crossed 2nd paired against a named opponent in round 1 satisfies rule 3")
+
+	// The same occupants, but the extra qualifier holds the BYE slot: the
+	// layout rule 3 exists to forbid.
+	byed := BuildSlotTree([]string{"Pool C-2nd", "", "Pool A-1st", "Pool B-1st"})
+	assert.False(t, crossedFightInRoundOne(byed, crossed),
+		"a byed crossed 2nd must be rejected: rule 3 gives it a fighting slot, never a bye")
+
+	// And when it is not seated at all.
+	absent := BuildSlotTree([]string{"Pool A-1st", "Pool B-1st"})
+	assert.False(t, crossedFightInRoundOne(absent, crossed),
+		"an unseated crossed 2nd cannot satisfy a rule about where it fights")
 }
 
 // TestPerPoolCrossingMapOnlyAnswersLegalShiaijoCounts guards the boundary of
@@ -200,29 +225,12 @@ func TestPerPoolCrossingMapOnlyAnswersLegalShiaijoCounts(t *testing.T) {
 // and refusing it stranded every field of this shape.
 func TestPerPoolTwoOversizedPoolsSharingACourt(t *testing.T) {
 	t.Parallel()
-	pools, draw := perPoolSmallDraw(t, 11, 3, 2)
+	_, oversized, draw := perPoolSmallDraw(t, 11, 3, 2)
 	require.NotNil(t, draw, "two oversized pools on one shiaijo must still produce a draw")
 
-	seated := leafLabels(draw.Root)
-	for _, p := range pools {
-		if len(p.Players) > 3 {
-			assert.Contains(t, seated, p.PoolName+"-2nd")
-		}
+	seated := TreeLeafLabels(draw.Root)
+	for _, p := range oversized {
+		assert.Contains(t, seated, p.PoolName+"-2nd")
 	}
-	for _, region := range draw.Regions {
-		for _, l := range leafLabels(region) {
-			if strings.HasSuffix(l, "-2nd") {
-				assertFightsInRoundOne(t, region, l)
-			}
-		}
-	}
-}
-
-func sliceHas(hay []string, needle string) bool {
-	for _, h := range hay {
-		if h == needle {
-			return true
-		}
-	}
-	return false
+	assertEveryExtraFightsInRoundOne(t, draw)
 }

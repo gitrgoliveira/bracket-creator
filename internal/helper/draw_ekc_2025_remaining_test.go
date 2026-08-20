@@ -333,17 +333,12 @@ func TestEKC2025JuniorIndividualFemaleCrossesToTheFarShiaijo(t *testing.T) {
 	// (B->D). Asserting the seated block makes the divergence explicit
 	// instead of leaving it implied by the rule alone.
 	extra := pools[2].PoolName + "-2nd"
-	assert.Containsf(t, blockOccupantLabels(draw.Regions[0]), extra,
+	assert.Containsf(t, TreeLeafLabels(draw.Regions[0]), extra,
 		"the uniform rule seats pool 3's extra on shiaijo A")
-	assert.NotContainsf(t, blockOccupantLabels(draw.Regions[sheetDestination]), extra,
+	assert.NotContainsf(t, TreeLeafLabels(draw.Regions[sheetDestination]), extra,
 		"the sheet seats it on shiaijo D; recorded, not adopted")
 
 	// Rule 3 still holds for the shape the sheet does not cover: the extra
 	// qualifier fights in round 1 rather than taking a bye.
-	assertFightsInRoundOne(t, draw.Regions[0], extra)
-}
-
-// blockOccupantLabels lists the occupant labels seated in one shiaijo's block.
-func blockOccupantLabels(region *Node) []string {
-	return leafLabels(region)
+	assertFightsInRoundOne(t, regionRounds(draw.Regions[0]), extra)
 }

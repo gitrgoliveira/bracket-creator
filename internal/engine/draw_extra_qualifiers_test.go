@@ -101,27 +101,13 @@ func TestBuildPoolFedDraw_LargerPools_SingleShiaijo_IsItsOwnDrawNotTheUniformOne
 	require.NotNil(t, got)
 	assert.Empty(t, reason)
 
-	assert.Contains(t, drawOccupantLabels(got.Root), pools[0].PoolName+"-2nd",
+	assert.Contains(t, helper.TreeLeafLabels(got.Root), pools[0].PoolName+"-2nd",
 		"the oversized pool's extra qualifier must be seated")
 
 	uniform := helper.BuildKnockoutDraw(pools, 1, 1)
 	require.NotNil(t, uniform, "sanity: the uniform builder also handles this shape")
 	assert.NotEqual(t, uniform, got,
 		"larger-pools must return its OWN draw; equality here would mean the uniform builder was substituted and the extra qualifier silently dropped")
-}
-
-// drawOccupantLabels lists every seated occupant label in a built draw.
-func drawOccupantLabels(n *helper.Node) []string {
-	if n == nil {
-		return nil
-	}
-	if n.LeafNode {
-		if n.LeafVal == "" {
-			return nil
-		}
-		return []string{n.LeafVal}
-	}
-	return append(drawOccupantLabels(n.Left), drawOccupantLabels(n.Right)...)
 }
 
 // TestStartCompetition_LargerPools_RejectsPoolWinnersAtLeast2 exercises the

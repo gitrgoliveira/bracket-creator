@@ -103,24 +103,24 @@ func perPoolWinners(overrides map[int]int, pi, defaultWinners int) int {
 // (A->B, D->C) is its unwitnessed symmetric extrapolation, needed only so the
 // map is total.
 //
-// LP-3d extends it to the court counts the sheets never use, because refusing
-// them made the whole mode unavailable to ordinary club fields (operator
-// ruling: the mode must work at the sizes people actually run):
+// LP-3d adds the ONE court count the sheets never use but clubs constantly
+// run: a single shiaijo. There is no other court to cross to, so the extra
+// qualifier stays in the only block there is and the separation becomes a
+// HALF one -- the crossed 2nd is seated in the opposite half from its own
+// pool's winner, exactly as "Fit the knockout" seats a drafted 2nd on a
+// single shiaijo (BuildKnockoutDrawFillBracket). Rule 3's purpose (the two
+// qualifiers of one pool must not meet before they have to) is what
+// survives; "neighbouring court" is the multi-court expression of it, not
+// the rule itself.
 //
-//   - ONE shiaijo has no other court to cross to, so the extra qualifier
-//     stays in the only block there is and the separation becomes a HALF
-//     one -- the crossed 2nd is seated in the opposite half from its own
-//     pool's winner, exactly as "Fit the knockout" seats a drafted 2nd on a
-//     single shiaijo (BuildKnockoutDrawFillBracket). Rule 3's purpose (the
-//     two qualifiers of one pool must not meet before they have to) is what
-//     survives; "neighbouring court" is the multi-court expression of it,
-//     not the rule itself.
-//   - An ODD count above one pairs off as usual and leaves the LAST court
-//     without a partner, so that one crosses to the court below it. Any
-//     other choice would either send it back into its own block while a
-//     genuine neighbour exists, or leave the map partial again.
-//
-// Returns -1 only for a nonsensical court count.
+// Nothing else needs adding, because a COMPETITION's shiaijo allocation is
+// always a power of two -- 1, 2, 4, 8 or 16, enforced by
+// ValidateShiaijoCount (R9) at every entry point and clamped by
+// EffectiveDrawCourts. A venue may well have 3 or 5 shiaijo, but it gives a
+// single competition 1, 2 or 4 of them and never all 3, so court^1 is always
+// a real court here and an odd count above one is not a shape this map has
+// to answer for. Passing one anyway returns an out-of-range index, which the
+// caller refuses rather than papering over with an invented neighbour.
 func crossNeighbourCourt(court, numCourts int) int {
 	if numCourts <= 0 || court < 0 || court >= numCourts {
 		return -1
@@ -128,10 +128,7 @@ func crossNeighbourCourt(court, numCourts int) int {
 	if numCourts == 1 {
 		return 0 // self: the separation is by half, see buildCrossedBlockHalved
 	}
-	if dest := court ^ 1; dest < numCourts {
-		return dest
-	}
-	return court - 1 // odd count: the unpaired last court crosses downwards
+	return court ^ 1
 }
 
 // buildPerPoolDraw is BuildKnockoutDrawPerPool with the pool-to-court

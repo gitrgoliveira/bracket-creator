@@ -154,6 +154,45 @@ func TestPerPoolSmallReceivingCourtSeatsTheExtraQualifier(t *testing.T) {
 	}
 }
 
+// TestPerPoolCrossingMapOnlyAnswersLegalShiaijoCounts guards the boundary of
+// LP-3d's widening.
+//
+// A COMPETITION's shiaijo allocation is always a power of two (R9,
+// ValidateShiaijoCount): a venue may have 3 or 5 shiaijo, but it gives one
+// competition 1, 2 or 4 of them and never all 3. So the crossing map only has
+// to answer for 1, 2, 4, 8 and 16, and at every one of those court^1 is a
+// real court.
+//
+// This test exists because the first cut of LP-3d invented an answer for odd
+// counts above one (the unpaired last court crossing downwards). That was
+// dead code for a shape a competition cannot hold, and inventing a neighbour
+// for an illegal allocation would draw it as though it were legal instead of
+// refusing. An out-of-range index is the correct answer: buildPerPoolDraw
+// treats it as out of scope.
+func TestPerPoolCrossingMapOnlyAnswersLegalShiaijoCounts(t *testing.T) {
+	t.Parallel()
+
+	for _, courts := range validShiaijoCounts {
+		for court := 0; court < courts; court++ {
+			dest := crossNeighbourCourt(court, courts)
+			require.GreaterOrEqualf(t, dest, 0, "%d shiaijo, court %d: every legal allocation has a destination", courts, court)
+			require.Lessf(t, dest, courts, "%d shiaijo, court %d: the destination must be a real court", courts, court)
+			if courts == 1 {
+				assert.Equal(t, 0, dest, "a single shiaijo crosses into its own block, separated by half")
+			} else {
+				assert.Equal(t, court^1, dest, "%d shiaijo: the evidenced same-half neighbour", courts)
+				assert.NotEqual(t, court, dest, "a multi-shiaijo crossing must leave its own court")
+			}
+		}
+	}
+
+	// An ILLEGAL allocation (3 is a legal venue but never one competition's
+	// share) must not be answered with an invented neighbour: the index falls
+	// outside the court range, which the builder refuses.
+	assert.GreaterOrEqual(t, crossNeighbourCourt(2, 3), 3,
+		"an out-of-range index is what makes buildPerPoolDraw decline an illegal allocation")
+}
+
 // TestPerPoolTwoOversizedPoolsSharingACourt pins the third refusal: both
 // oversized pools live on the same shiaijo, so both extra qualifiers cross to
 // the same destination. LP-3a allowed one crossed occupant per destination

@@ -278,14 +278,25 @@ func TestEKC2025LadiesTeamFiveOccupantBlocksDiverge(t *testing.T) {
 // the only sheet in the suite that does: the 2026 Ladies and Men Individual
 // sheets cross B->A and C->D across six observations between them.
 //
-// The consequence for this package is concrete and is asserted below: with the
-// extra sent to A, the shape has no build, and BuildKnockoutDrawPerPool
-// declines rather than guessing. That refusal is the documented contract for
-// an out-of-scope shape (never fall back to the uniform builder), so this test
-// pins the refusal and states the sheet it cannot reproduce.
-//
 // Keeping the crossing rule uniform is an operator ruling. This test exists to
 // hold the evidence, not to argue with it.
+//
+// The consequence used to be a refusal: with the extra sent to A rather than
+// D, court A held two home pools plus one crossed occupant, which was below
+// the floor of the role tables LP-3a transcribed from the bigger sheets, so
+// BuildKnockoutDrawPerPool declined. That refusal was STRUCTURAL, not a
+// deference to this sheet -- the builder had no layout for a crossed-hosting
+// block that small, and declining was the documented contract for a shape it
+// could not lay out (never fall back to the uniform builder, which would drop
+// the crossing silently).
+//
+// LP-3d gives that block a layout (buildGeneralCrossedBlock), so the shape
+// now BUILDS, and the latent disagreement with this sheet becomes visible
+// rather than hidden behind a refusal: the app seats pool 3's extra on A,
+// where the uniform rule sends it, and this one sheet seats it on D. That is
+// what the operator ruling chose, so the test asserts both halves of it --
+// the sheet's destination is still recorded here, and the draw the app builds
+// is still the uniform one.
 func TestEKC2025JuniorIndividualFemaleCrossesToTheFarShiaijo(t *testing.T) {
 	t.Parallel()
 
@@ -315,7 +326,24 @@ func TestEKC2025JuniorIndividualFemaleCrossesToTheFarShiaijo(t *testing.T) {
 		"the sheet crosses B to D, the TEAM partner; recorded, not adopted")
 
 	draw := BuildKnockoutDrawPerPool(pools, 1, map[int]int{2: 2}, 4)
-	assert.Nil(t, draw,
-		"5 pools over 4 shiaijo with one crossed extra is a shape the per-pool builder declines; "+
-			"it must never fall back to the uniform builder, which would drop the crossing silently")
+	require.NotNil(t, draw,
+		"LP-3d gives this small crossed-hosting block a layout, so the shape builds instead of being declined")
+
+	// The crossing that gets built is the uniform one (B->A), NOT the sheet's
+	// (B->D). Asserting the seated block makes the divergence explicit
+	// instead of leaving it implied by the rule alone.
+	extra := pools[2].PoolName + "-2nd"
+	assert.Containsf(t, blockOccupantLabels(draw.Regions[0]), extra,
+		"the uniform rule seats pool 3's extra on shiaijo A")
+	assert.NotContainsf(t, blockOccupantLabels(draw.Regions[sheetDestination]), extra,
+		"the sheet seats it on shiaijo D; recorded, not adopted")
+
+	// Rule 3 still holds for the shape the sheet does not cover: the extra
+	// qualifier fights in round 1 rather than taking a bye.
+	assertFightsInRoundOne(t, draw.Regions[0], extra)
+}
+
+// blockOccupantLabels lists the occupant labels seated in one shiaijo's block.
+func blockOccupantLabels(region *Node) []string {
+	return leafLabels(region)
 }

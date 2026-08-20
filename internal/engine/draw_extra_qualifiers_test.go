@@ -73,22 +73,19 @@ func TestBuildPoolFedDraw_StandardModeMatchesUniformBuilder(t *testing.T) {
 	assert.Equal(t, want, got, "standard mode must be a pure passthrough to the uniform builder")
 }
 
-// TestBuildPoolFedDraw_LargerPools_OutOfScope_NeverFallsBackToUniform pins
-// bc-qual LP-3a review item (b): a single-shiaijo competition has no
-// same-half neighbour court for an oversized pool's extra qualifier to cross
-// to (crossNeighbourCourt requires an even court count), so
-// BuildKnockoutDrawPerPool correctly refuses to guess and returns nil.
-// buildPoolFedDraw must report that as outOfScope=true and MUST NOT
-// substitute the uniform builder's output -- that would silently seat the
-// wrong number of qualifiers for the oversized pool.
+// TestBuildPoolFedDraw_LargerPools_SingleShiaijo_IsItsOwnDrawNotTheUniformOne
+// still pins bc-qual LP-3a review item (b) -- larger-pools must never be
+// served by the uniform builder -- but at the shape LP-3d changed.
 //
-// Fault injection (manually verified, reverted after): changing
-// buildPoolFedDraw's larger-pools branch to
-// `if d := helper.BuildKnockoutDrawPerPool(...); d != nil { return d, false };
-// return helper.BuildKnockoutDraw(pools, poolWinners, numCourts), false` (the
-// silent-fallback shape this test exists to forbid) turns this test red: got
-// is no longer nil and outOfScope is false.
-func TestBuildPoolFedDraw_LargerPools_OutOfScope_NeverFallsBackToUniform(t *testing.T) {
+// A single-shiaijo competition used to be refused outright: with no other
+// court to cross to, BuildKnockoutDrawPerPool returned nil and this test
+// asserted the refusal. It now BUILDS (the extra qualifier is seated in the
+// opposite half of the only block there is), so the "never falls back"
+// contract is asserted the direct way instead: the draw that comes back must
+// contain the oversized pool's 2nd AND must differ from what the uniform
+// builder produces for the same input. A silent fallback fails both halves,
+// which is strictly more than the old nil-check could catch.
+func TestBuildPoolFedDraw_LargerPools_SingleShiaijo_IsItsOwnDrawNotTheUniformOne(t *testing.T) {
 	pools := uniformTestPools(3, 3)
 	// Pool 0 is oversized (4 > PoolSize 3), so it sends an extra qualifier.
 	pools[0].Players = append(pools[0].Players, domain.Player{Name: "Extra", Dojo: "DojoExtra"})
@@ -99,22 +96,32 @@ func TestBuildPoolFedDraw_LargerPools_OutOfScope_NeverFallsBackToUniform(t *test
 		PoolSize:        3,
 	}
 
-	// A single court: crossNeighbourCourt(0, 1) has no neighbour (odd count),
-	// so the per-pool builder returns nil for this shape.
 	got, outOfScope, reason := buildPoolFedDraw(comp, pools, 1)
-	assert.True(t, outOfScope, "a single-court larger-pools draw with an oversized pool is out of scope")
-	assert.Nil(t, got, "an out-of-scope shape must return no draw, never the uniform builder's output")
-	// larger-pools has no finer-grained reason than nil from
-	// BuildKnockoutDrawPerPool, so buildPoolFedDraw reports it empty and
-	// the caller falls back to its own generic message.
+	require.False(t, outOfScope, "a single-shiaijo larger-pools draw is in scope since LP-3d")
+	require.NotNil(t, got)
 	assert.Empty(t, reason)
 
-	// The negative half of "never falls back": confirm the uniform builder
-	// WOULD have produced something non-nil for this same input, so a silent
-	// fallback (if buildPoolFedDraw regressed to one) would have gone
-	// undetected by a bare "got == nil" check alone.
+	assert.Contains(t, drawOccupantLabels(got.Root), pools[0].PoolName+"-2nd",
+		"the oversized pool's extra qualifier must be seated")
+
 	uniform := helper.BuildKnockoutDraw(pools, 1, 1)
-	require.NotNil(t, uniform, "sanity: the uniform builder does handle this shape")
+	require.NotNil(t, uniform, "sanity: the uniform builder also handles this shape")
+	assert.NotEqual(t, uniform, got,
+		"larger-pools must return its OWN draw; equality here would mean the uniform builder was substituted and the extra qualifier silently dropped")
+}
+
+// drawOccupantLabels lists every seated occupant label in a built draw.
+func drawOccupantLabels(n *helper.Node) []string {
+	if n == nil {
+		return nil
+	}
+	if n.LeafNode {
+		if n.LeafVal == "" {
+			return nil
+		}
+		return []string{n.LeafVal}
+	}
+	return append(drawOccupantLabels(n.Left), drawOccupantLabels(n.Right)...)
 }
 
 // TestStartCompetition_LargerPools_RejectsPoolWinnersAtLeast2 exercises the
@@ -157,26 +164,17 @@ func TestStartCompetition_LargerPools_RejectsPoolWinnersAtLeast2(t *testing.T) {
 	assert.Equal(t, state.CompStatusSetup, comp.Status, "a rejected draw must not transition the competition")
 }
 
-// TestStartCompetition_LargerPools_OutOfScopeSingleCourt_ReturnsValidationError
-// proves the full generate-draw path (bc-qual LP-3c wiring point 2b) end to
-// end: a real mixed competition, single court, whose actual pool formation
-// produces an oversized pool, must fail with a clean *ValidationError rather
-// than silently persisting an empty/wrong bracket.
+// TestStartCompetition_LargerPools_SingleShiaijo_DrawsAndSeatsTheExtra is the
+// end-to-end counterpart of the shape LP-3d opened up: a real single-shiaijo
+// mixed competition, run through the actual generate-draw pipeline, must now
+// START rather than fail, and must persist a bracket that holds the oversized
+// pool's second qualifier.
 //
-// PoolSize=3 min mode with 10 participants (unique dojos, so
-// helper.CreatePools' dojo-conflict avoidance never perturbs placement)
-// yields exactly 3 pools of 3 (9 slots) plus one leftover participant, whom
-// CreatePools' forcePoolSize fallback seats into "Pool A" (index 0),
-// producing exactly one oversized (4-player) pool -- see forcePoolSize's
-// scan order in internal/helper/tournament.go.
-//
-// Fault injection (manually verified, reverted after): removing the
-// outOfScope handling in generatePoolPreviewBracket (bracket.go) and letting
-// `draw == nil` fall through to its pre-existing "return nil" (no-op) turns
-// this test red -- StartCompetition then SUCCEEDS with CompStatusPools and
-// no bracket.json at all, silently dropping the knockout phase instead of
-// telling the operator why.
-func TestStartCompetition_LargerPools_OutOfScopeSingleCourt_ReturnsValidationError(t *testing.T) {
+// It used to assert the opposite (a ValidationError and no bracket), because
+// a single shiaijo had no neighbouring court to cross to. Clubs run exactly
+// this shape, so the operator ruling was to make it work; the separation the
+// crossing used to buy is now a half separation inside the one block.
+func TestStartCompetition_LargerPools_SingleShiaijo_DrawsAndSeatsTheExtra(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "larger-pools-single-court"
 
@@ -184,7 +182,7 @@ func TestStartCompetition_LargerPools_OutOfScopeSingleCourt_ReturnsValidationErr
 		c.PoolSizeMode = "min"
 		c.PoolWinners = 1
 		c.ExtraQualifiers = state.ExtraQualifiersLargerPools
-		c.Courts = []string{"A"} // single court: no same-half neighbour to cross to
+		c.Courts = []string{"A"} // single shiaijo: the extra stays in this block
 	})
 
 	var players []domain.Player
@@ -196,20 +194,27 @@ func TestStartCompetition_LargerPools_OutOfScopeSingleCourt_ReturnsValidationErr
 	}
 	require.NoError(t, store.SaveParticipants(compID, players))
 
-	err := eng.StartCompetition(compID)
-	require.Error(t, err, "an out-of-scope larger-pools shape must fail, not silently drop the knockout phase")
-	var ve *ValidationError
-	require.ErrorAs(t, err, &ve, "must surface as a ValidationError (-> HTTP 400)")
+	require.NoError(t, eng.StartCompetition(compID),
+		"a single-shiaijo larger-pools competition must start since LP-3d")
 
-	// LoadBracket returns a non-nil-but-empty Bracket{} for a competition with
-	// no bracket.json on disk (matches the "not yet drawn" state elsewhere in
-	// this package), so assert on its content rather than on the pointer.
 	bracket, err := store.LoadBracket(compID)
 	require.NoError(t, err)
-	if bracket != nil {
-		assert.Empty(t, bracket.Rounds, "no bracket rounds must be persisted for a rejected larger-pools draw")
-		assert.Nil(t, bracket.ThirdPlaceMatch)
+	require.NotNil(t, bracket)
+	require.NotEmpty(t, bracket.Rounds, "the knockout must be drawn, not dropped")
+
+	var seated []string
+	for _, round := range bracket.Rounds {
+		for _, m := range round {
+			seated = append(seated, m.PlaceholderA, m.PlaceholderB)
+		}
 	}
+	var extras int
+	for _, sname := range seated {
+		if strings.HasSuffix(sname, "-2nd") {
+			extras++
+		}
+	}
+	assert.Positivef(t, extras, "the oversized pool's 2nd must be seated; got %v", seated)
 }
 
 // TestStartCompetition_LargerPools_CrossesOversizedPoolToNeighbourCourt is

@@ -450,6 +450,26 @@ func buildBlock(occ []drawOccupant, pools []Pool, mirrored bool) *Node {
 	if slots := uniformBigBlockSlots(occ, pools); slots != nil {
 		return BuildSlotTree(slots)
 	}
+	return layOutBlock(occ, pools, nil)
+}
+
+// layOutBlock is buildBlock's general tail: pick the bye (when the count is
+// odd), interleave the rest by rank, separate any same-pool round-1 pairing,
+// and emit the slot array. Split out so LP-3d's crossed-block fallback can
+// reuse the SAME layout rather than hand-copying it -- the copy would be the
+// one place a future change to bye precedence or same-pool separation could
+// silently miss.
+//
+// byeEligible, when non-nil, restricts which occupants may take the bye. Its
+// only caller passes rule 3 (bc-qual): a crossed 2nd takes a round-1 fighting
+// slot, never a bye. nil means "any occupant", which is buildBlock's own
+// long-standing behaviour and what every evidenced sheet replay exercises.
+// Returns nil when the count is odd and no eligible occupant exists to take
+// the bye, since the alternative would be to break the rule the filter states.
+func layOutBlock(occ []drawOccupant, pools []Pool, byeEligible func(drawOccupant) bool) *Node {
+	if len(occ) == 0 {
+		return nil
+	}
 	if len(occ) == 1 {
 		// A lone occupant IS its block: emit the leaf directly. Building the
 		// old [occupant, ""] pair instead would mark a rise, and the rise
@@ -464,11 +484,17 @@ func buildBlock(occ []drawOccupant, pools []Pool, mirrored bool) *Node {
 
 	var bye *drawOccupant
 	if len(rest)%2 == 1 {
-		best := 0
-		for i := 1; i < len(rest); i++ {
-			if byePrecedenceLess(rest[i], rest[best], pools) {
+		best := -1
+		for i := range rest {
+			if byeEligible != nil && !byeEligible(rest[i]) {
+				continue
+			}
+			if best < 0 || byePrecedenceLess(rest[i], rest[best], pools) {
 				best = i
 			}
+		}
+		if best < 0 {
+			return nil
 		}
 		b := rest[best]
 		bye = &b

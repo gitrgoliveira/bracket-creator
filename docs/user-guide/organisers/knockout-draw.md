@@ -30,7 +30,7 @@ A pool with more members than the smallest pool in the competition sends one add
 
 The [oversized-pool bye priority](#byes) described above does not apply under this option. Being oversized earns a pool's winner no priority for an ordinary bye; the extra qualifier is the pool's compensation instead.
 
-Requires **Winners per pool** set to 1. Because it needs somewhere in the bracket to place that extra qualifier without disturbing the rest of it, this option currently needs a competition with enough pools on each shiai-jo to work with. On a small competition it may not be able to build a draw at all; when that happens, the app tells you so rather than guessing a placement, and Standard or Fit the knockout are both still available.
+Requires **Winners per pool** set to 1. It works at any size, including a competition on a single shiai-jo: where there is more than one shiai-jo the extra qualifier is drawn onto a neighbouring one, and where there is only one it stays in that shiai-jo's bracket but in the opposite half from its own pool's winner. Either way the two qualifiers from the same pool cannot meet before the final, and the extra qualifier always fights in the first round.
 
 ### Fit the knockout
 
@@ -53,11 +53,10 @@ These figures are taken directly from the generator, at a minimum pool size of 3
 | Mode | Pools | Qualifiers | Bracket size | Byes | Rounds |
 |---|---|---|---|---|---|
 | Standard | 3 | 3 | 4 | 1 | 2 |
-| Oversized send +1 | 3 | see note below | n/a | n/a | n/a |
+| Oversized send +1 | 3 | 5 | 8 | 3 | 3 |
 | Fit the knockout | 3 | 4 | 4 | 0 | 2 |
 
-!!! note "Why the middle row has no numbers"
-    Two of these three pools are oversized, and there are only two shiai-jo to spread them across, so both end up hosted by the same one. That leaves nowhere to place the extra qualifier without disturbing the rest of that shiai-jo's bracket, so the app refuses the draw and explains why rather than guessing a placement. Standard and Fit the knockout both build correctly at this size; the next example shows Oversized send +1 working on a bigger field. Under Fit the knockout here, one of the three pools sends a second qualifier (drafted rather than crossed in), which is what keeps the bracket at 4 slots with no byes instead of growing to 8.
+Two of these three pools hold four competitors, so under Oversized send +1 both send a second qualifier: five qualifiers need an eight-slot bracket, which costs three byes and an extra round. Fit the knockout reaches the same three pools but drafts only one second place, which is what keeps the bracket at four slots with no byes. Standard sends only the three pool winners.
 
 #### 104 entrants, 4 shiai-jo
 

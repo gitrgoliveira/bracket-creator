@@ -232,20 +232,17 @@ func TestCreatePools_ExtraQualifiers_LargerPools_CrossingSuccess(t *testing.T) {
 	assert.True(t, foundCrossedFormula, "expected a live CONCATENATE(\"Pool <X>-2nd \",'Pool Matches'!<cell>) formula for the oversized pool's crossed qualifier")
 }
 
-// TestCreatePools_ExtraQualifiers_LargerPools_OutOfScopeSingleCourt proves
-// bc-qual LP-3a review item (b) at the CLI layer: a single-shiaijo
-// competition has no same-half neighbour court for an oversized pool's extra
-// qualifier to cross to, so helper.BuildKnockoutDrawPerPool correctly
-// returns nil, and the CLI must report a clean, actionable error -- never
-// silently fall back to the uniform builder (which would seat the wrong
-// number of qualifiers for the oversized pool) and never panic.
+// TestCreatePools_ExtraQualifiers_LargerPools_SingleShiaijoBuilds covers the
+// CLI at the shape LP-3d opened up. A single-shiaijo larger-pools run used to
+// fail with "could not build a larger-pools knockout draw", because the extra
+// qualifier had no neighbouring court to cross to; it now builds, seating the
+// extra in the opposite half of the only block there is.
 //
-// 10 entries, pool size 3 min mode, unique dojos -> 3 pools of 3 plus one
-// leftover seated by forcePoolSize into pool index 0, producing exactly one
-// oversized (4-player) pool (same arithmetic as
-// TestStartCompetition_LargerPools_OutOfScopeSingleCourt_ReturnsValidationError,
-// internal/engine).
-func TestCreatePools_ExtraQualifiers_LargerPools_OutOfScopeSingleCourt(t *testing.T) {
+// The refusal path itself is still wired (buildPoolFedDraw reports
+// outOfScope and createPools turns that into an error rather than falling
+// back to the uniform draw) -- it is simply no longer reachable at this
+// shape. helper's own tests own what remains out of scope.
+func TestCreatePools_ExtraQualifiers_LargerPools_SingleShiaijoBuilds(t *testing.T) {
 	t.Parallel()
 
 	var b bytes.Buffer
@@ -261,14 +258,13 @@ func TestCreatePools_ExtraQualifiers_LargerPools_OutOfScopeSingleCourt(t *testin
 		outputPath:      "dummy.xlsx",
 		numPlayers:      3,
 		poolWinners:     1,
-		courts:          1, // single shiaijo: no same-half neighbour to cross to
+		courts:          1, // single shiaijo: the extra stays in this block
 		extraQualifiers: "larger-pools",
 		determined:      true,
 	}
 
-	err := o.createPools(entries)
-	require.Error(t, err, "an out-of-scope larger-pools shape must fail cleanly, not silently fall back to the uniform draw")
-	assert.Contains(t, err.Error(), "could not build a larger-pools knockout draw")
+	require.NoError(t, o.createPools(entries),
+		"a single-shiaijo larger-pools run must build since LP-3d")
 }
 
 // --- fill-bracket (bc-qual LP-4) ---

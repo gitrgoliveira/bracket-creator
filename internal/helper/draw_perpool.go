@@ -101,13 +101,37 @@ func perPoolWinners(overrides map[int]int, pi, defaultWinners int) int {
 // court's same-half neighbour under the fixed 4-court adjacency (0<->1,
 // 2<->3). B->A and C->D are witnessed on both 2026 sheets; the involution
 // (A->B, D->C) is its unwitnessed symmetric extrapolation, needed only so the
-// map is total. Returns -1 when numCourts is not even (no neighbour to pair
-// with), which the caller treats as out of scope.
+// map is total.
+//
+// LP-3d extends it to the court counts the sheets never use, because refusing
+// them made the whole mode unavailable to ordinary club fields (operator
+// ruling: the mode must work at the sizes people actually run):
+//
+//   - ONE shiaijo has no other court to cross to, so the extra qualifier
+//     stays in the only block there is and the separation becomes a HALF
+//     one -- the crossed 2nd is seated in the opposite half from its own
+//     pool's winner, exactly as "Fit the knockout" seats a drafted 2nd on a
+//     single shiaijo (BuildKnockoutDrawFillBracket). Rule 3's purpose (the
+//     two qualifiers of one pool must not meet before they have to) is what
+//     survives; "neighbouring court" is the multi-court expression of it,
+//     not the rule itself.
+//   - An ODD count above one pairs off as usual and leaves the LAST court
+//     without a partner, so that one crosses to the court below it. Any
+//     other choice would either send it back into its own block while a
+//     genuine neighbour exists, or leave the map partial again.
+//
+// Returns -1 only for a nonsensical court count.
 func crossNeighbourCourt(court, numCourts int) int {
-	if numCourts <= 0 || numCourts%2 != 0 {
+	if numCourts <= 0 || court < 0 || court >= numCourts {
 		return -1
 	}
-	return court ^ 1
+	if numCourts == 1 {
+		return 0 // self: the separation is by half, see buildCrossedBlockHalved
+	}
+	if dest := court ^ 1; dest < numCourts {
+		return dest
+	}
+	return court - 1 // odd count: the unpaired last court crosses downwards
 }
 
 // buildPerPoolDraw is BuildKnockoutDrawPerPool with the pool-to-court
@@ -148,7 +172,12 @@ func buildPerPoolDraw(pools []Pool, defaultWinners int, overrides map[int]int, p
 		}
 	}
 
-	crossedByCourt := make([]*drawOccupant, numCourts)
+	// A court may receive MORE than one crossed occupant (LP-3d): with few
+	// courts, several oversized pools share a home court and therefore share
+	// a destination. The sheets only ever show one, so the evidenced layout
+	// path below still takes exactly one; the general fallback handles the
+	// rest rather than refusing the field outright.
+	crossedByCourt := make([][]drawOccupant, numCourts)
 	for _, pi := range extraPool {
 		home := poolCourt[pi]
 		if home < 0 || home >= numCourts {
@@ -156,25 +185,19 @@ func buildPerPoolDraw(pools []Pool, defaultWinners int, overrides map[int]int, p
 		}
 		dest := crossNeighbourCourt(home, numCourts)
 		if dest < 0 || dest >= numCourts {
-			return nil // no same-half neighbour to cross to: out of scope
-		}
-		if crossedByCourt[dest] != nil {
-			// Two oversized pools crossing into the same destination court:
-			// unevidenced, and buildPerPoolCourtBlock only has room for one.
 			return nil
 		}
-		o := drawOccupant{
+		crossedByCourt[dest] = append(crossedByCourt[dest], drawOccupant{
 			label: fmt.Sprintf("%s-%s", pools[pi].PoolName, GetOrdinal(defaultWinners+1)),
 			pool:  pi,
 			rank:  defaultWinners + 1,
-		}
-		crossedByCourt[dest] = &o
+		})
 	}
 
 	regions := make([]*Node, numCourts)
 	for c := 0; c < numCourts; c++ {
 		regions[c] = buildPerPoolCourtBlock(homeByCourt[c], crossedByCourt[c], pools, c, numCourts)
-		if regions[c] == nil && (len(homeByCourt[c]) > 0 || crossedByCourt[c] != nil) {
+		if regions[c] == nil && (len(homeByCourt[c]) > 0 || len(crossedByCourt[c]) > 0) {
 			return nil // a non-empty court failed to build: fail loud, not partially
 		}
 	}
@@ -209,18 +232,177 @@ func buildPerPoolDraw(pools []Pool, defaultWinners int, overrides map[int]int, p
 // with a crossed-in occupant goes through the LP-3a mixed-rank layout below,
 // falling back to LP-3b's small-block layout when the destination is too
 // small for that (crossedBigBlockSlots' own domain is total >= 9).
-func buildPerPoolCourtBlock(home []drawOccupant, crossed *drawOccupant, pools []Pool, court, numCourts int) *Node {
-	if crossed == nil {
+func buildPerPoolCourtBlock(home []drawOccupant, crossed []drawOccupant, pools []Pool, court, numCourts int) *Node {
+	if len(crossed) == 0 {
 		return buildBlock(home, pools, false)
 	}
-	if len(home) == 0 {
-		return nil // a lone crossed occupant with no home pools: unevidenced
+	// The EVIDENCED layouts, unchanged and still tried first, so every sheet
+	// replay keeps printing exactly what it printed before LP-3d: one crossed
+	// occupant, at least one home pool, and a block big enough for the role
+	// tables transcribed from the sheets.
+	if len(crossed) == 1 && len(home) > 0 {
+		top := crossedHalfIsTop(court, numCourts)
+		if slots := crossedBigBlockSlots(home, crossed[0], top, pools); slots != nil {
+			return BuildSlotTree(slots)
+		}
+		if n := buildSmallCrossedCourtBlock(home, crossed[0], top, pools); n != nil {
+			return n
+		}
 	}
-	top := crossedHalfIsTop(court, numCourts)
-	if slots := crossedBigBlockSlots(home, *crossed, top, pools); slots != nil {
-		return BuildSlotTree(slots)
+	return buildGeneralCrossedBlock(home, crossed, pools)
+}
+
+// buildGeneralCrossedBlock is LP-3d's fallback for the crossed-hosting blocks
+// the sheet-derived layouts above refuse: a destination court holding only
+// one or two pools of its own, a court receiving MORE than one crossed
+// occupant, and the single-shiaijo draw where the crossed 2nd has no other
+// court to go to and stays in its own block.
+//
+// It does not invent a new layout. It reuses layOutBlock -- the same bye
+// precedence, rank interleave and same-pool separation every other block in
+// this package gets -- under the one constraint that distinguishes a crossed
+// occupant, rule 3 (bc-qual): the crossed 2nd takes a round-1 FIGHTING slot,
+// never a bye. Two shapes need different handling:
+//
+//   - When this block also holds a crossed occupant's OWN pool winner (the
+//     single-shiaijo case, where the pool's 1st and 2nd are necessarily in
+//     the same block), the two must be seated in opposite halves so they can
+//     only meet in the final. That is buildCrossedBlockHalved.
+//   - Otherwise every crossed occupant came from another court and its own
+//     winner is elsewhere, so the block lays out flat.
+//
+// Whichever path runs, the result is CHECKED against rule 3 before it is
+// returned, and refused if it does not hold. That is what makes widening the
+// scope safe: an unevidenced shape that cannot satisfy the rule still fails
+// loudly instead of printing a draw that byes the extra qualifier.
+//
+// It takes no court index because crossedHalfIsTop's inboard-half convention
+// does not reach here: that is a detail read off the big sheet blocks, which
+// still go through crossedBigBlockSlots above. The blocks this function lays
+// out are smaller than anything a sheet shows, so there is no inboard
+// observation to honour -- only rule 3, which it checks outright.
+func buildGeneralCrossedBlock(home, crossed []drawOccupant, pools []Pool) *Node {
+	if len(home)+len(crossed) < 2 {
+		return nil // a lone occupant has nobody to fight
 	}
-	return buildSmallCrossedCourtBlock(home, *crossed, top, pools)
+	notCrossed := func(o drawOccupant) bool { return !occupantIsCrossed(o, crossed) }
+
+	var block *Node
+	if blockHoldsOwnPoolWinner(home, crossed) {
+		block = buildCrossedBlockHalved(home, crossed, pools, notCrossed)
+	} else {
+		block = layOutBlock(append(append([]drawOccupant{}, home...), crossed...), pools, notCrossed)
+	}
+	if block == nil || !crossedFightInRoundOne(block, crossed) {
+		return nil
+	}
+	return block
+}
+
+// buildCrossedBlockHalved seats a block whose crossed occupants share it with
+// their own pool's winner -- the single-shiaijo draw, where there is no other
+// court to cross to. The pool's two qualifiers go in opposite halves, which is
+// the separation "crossing" buys on a multi-court draw and the same one
+// BuildKnockoutDrawFillBracket applies to a drafted 2nd at one shiaijo.
+//
+// Home winners are snaked across the halves in precedence order (strongest to
+// the top, next to the bottom, and so on) so the two halves stay balanced and
+// the strongest pools are spread rather than stacked. Each crossed occupant
+// then goes to the half that does NOT hold its own winner; one that has no
+// winner here (a genuine cross-court arrival sharing a block with a
+// self-crossing one) goes to the lighter half.
+func buildCrossedBlockHalved(home, crossed []drawOccupant, pools []Pool, byeEligible func(drawOccupant) bool) *Node {
+	sorted := sortBySeedThenPoolOrder(home, pools)
+	var topHome, bottomHome []drawOccupant
+	for i, o := range sorted {
+		if i%2 == 0 {
+			topHome = append(topHome, o)
+		} else {
+			bottomHome = append(bottomHome, o)
+		}
+	}
+
+	top := append([]drawOccupant{}, topHome...)
+	bottom := append([]drawOccupant{}, bottomHome...)
+	for _, c := range crossed {
+		switch {
+		case holdsPool(topHome, c.pool):
+			bottom = append(bottom, c)
+		case holdsPool(bottomHome, c.pool):
+			top = append(top, c)
+		case len(top) <= len(bottom):
+			top = append(top, c)
+		default:
+			bottom = append(bottom, c)
+		}
+	}
+
+	topNode := layOutBlock(top, pools, byeEligible)
+	bottomNode := layOutBlock(bottom, pools, byeEligible)
+	if topNode == nil || bottomNode == nil {
+		return nil
+	}
+	return joinNodes(topNode, bottomNode)
+}
+
+// crossedFightInRoundOne is rule 3 as a post-condition: every crossed
+// occupant must appear in a round-1 bout facing a named opponent. A byed
+// crossed occupant never appears in round 1 at all, and one paired into a
+// riser faces a winner slot rather than a name, so both fail here.
+func crossedFightInRoundOne(block *Node, crossed []drawOccupant) bool {
+	rounds := BuildEliminationMatchRounds(block)
+	if len(rounds) == 0 {
+		return false
+	}
+	opponent := map[string]string{}
+	for _, m := range rounds[0] {
+		left, right := blockLeafLabel(m.Left), blockLeafLabel(m.Right)
+		if left == "" || right == "" {
+			continue
+		}
+		opponent[left] = right
+		opponent[right] = left
+	}
+	for _, c := range crossed {
+		if opponent[c.label] == "" {
+			return false
+		}
+	}
+	return true
+}
+
+func blockLeafLabel(n *Node) string {
+	if n == nil || !n.LeafNode {
+		return ""
+	}
+	return n.LeafVal
+}
+
+func occupantIsCrossed(o drawOccupant, crossed []drawOccupant) bool {
+	for _, c := range crossed {
+		if c.label == o.label {
+			return true
+		}
+	}
+	return false
+}
+
+func blockHoldsOwnPoolWinner(home, crossed []drawOccupant) bool {
+	for _, c := range crossed {
+		if holdsPool(home, c.pool) {
+			return true
+		}
+	}
+	return false
+}
+
+func holdsPool(occ []drawOccupant, pool int) bool {
+	for _, o := range occ {
+		if o.pool == pool {
+			return true
+		}
+	}
+	return false
 }
 
 // crossedHalfIsTop reports whether the INBOARD half of a crossed-hosting

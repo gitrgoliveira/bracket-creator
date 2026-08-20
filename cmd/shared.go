@@ -59,7 +59,10 @@ func processEntries(entries []string, determined bool, withZekkenName bool) ([]h
 	// already been rejected above.
 	entries = helper.RemoveDuplicates(entries)
 	if !determined {
-		rand.Shuffle(len(entries), func(i, j int) {
+		// math/rand is fine here: this randomizes the ORDER entries are drawn
+		// into a blind pool/bracket, a fairness concern, not a security one.
+		// No auth, token, or crypto material touches this value.
+		rand.Shuffle(len(entries), func(i, j int) { //nolint:gosec // G404: non-cryptographic draw-order shuffle
 			entries[i], entries[j] = entries[j], entries[i]
 		})
 	}

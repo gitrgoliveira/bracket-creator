@@ -460,6 +460,23 @@ type Competition struct {
 	Players []domain.Player `yaml:"-" json:"players"`
 }
 
+// ParticipantIDsHint returns the LoadParticipantsOpts.HasIDs hint for this
+// competition: true when it records UUID-prefixed participants, nil (unset)
+// otherwise so the reader's auto-detect still runs -- for competitions
+// created before the flag existed AND for the narrow window where a deferred
+// HasParticipantIDs flip fails after SaveParticipants succeeded (the file
+// has UUIDs but the flag is still false on disk). Only ever true-or-nil: an
+// explicit false would suppress auto-detect and misclassify those files.
+// One owner for a rule that was hand-derived at every LoadParticipantsOpt
+// call site.
+func (c *Competition) ParticipantIDsHint() *bool {
+	if !c.HasParticipantIDs {
+		return nil
+	}
+	t := true
+	return &t
+}
+
 // EffectiveWithZekkenName reports whether the participant CSV reader/writer
 // must use the 4-column [id, Name, DisplayName, Dojo] layout. It is currently
 // identical to WithZekkenName (engi pairs store both member names combined in

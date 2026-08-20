@@ -1,6 +1,11 @@
 // Participants section of a competition: paste/import roster, edit seeds.
 // See web-mobile/admin_split_plan.md.
 
+// seededRanks (admin_helpers): the one owner of "what counts as seeded"
+// (integer > 0), shared with the overview stat, the seeding blocker and the
+// settings preview so this card's count cannot disagree with them.
+import { seededRanks } from './admin_helpers.jsx';
+
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
 
 const pluralize = window.pluralize;
@@ -922,7 +927,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
             <div>
               <div className="card__title">{c.checkInEnabled ? "Check-in & Seeding" : "Seeding"}</div>
               <div className="card__sub">
-                {c.checkInEnabled && `${players.filter(p => p.checkedIn).length} / ${players.length} checked in · `}{players.filter((p) => p.seed).length} seeded
+                {c.checkInEnabled && `${players.filter(p => p.checkedIn).length} / ${players.length} checked in · `}{seededRanks(players).length} seeded
               </div>
             </div>
             <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>

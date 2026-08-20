@@ -913,9 +913,7 @@ func TestFillBracketFormationAndBuilderAgree(t *testing.T) {
 				for _, courts := range []int{1, 2, 4} {
 					players := makeUniquePlayers(n)
 					for i, r := range regime.ranks {
-						if i < len(players) {
-							players[i].Seed = r
-						}
+						players[i].Seed = r // n >= 2*minSize > len(regime.ranks) in every regime
 					}
 					pools, drawCourts, ferr := BuildPoolPhaseFillBracket(players, minSize, courts)
 					require.NoErrorf(t, ferr, "n=%d courts=%d: formation succeeded (P=%d D=%d) but the full pool phase failed: %v", n, courts, p, d, ferr)

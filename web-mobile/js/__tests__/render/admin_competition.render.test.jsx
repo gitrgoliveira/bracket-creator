@@ -924,11 +924,14 @@ describe('AdminSettings Knockout qualifiers (bc-qual LP-5a)', () => {
     return label.parentElement.querySelector('input');
   };
 
+  const makePlayers = (n, tweak = () => ({})) =>
+    Array.from({ length: n }, (_, i) => ({ id: `p${i}`, name: `Player ${i}`, ...tweak(i) }));
+
   // 11 named players: matches the bc-qual known-arithmetic table (n=11,
   // minSize=3, poolWinners=1 -> standard 3/3, larger-pools 3/5, fill-bracket
   // 3+1draft/4) so the preview assertions below are pinned against the same
   // numbers qualifier_preview.test.jsx verifies the arithmetic against.
-  const elevenPlayers = Array.from({ length: 11 }, (_, i) => ({ id: `p${i}`, name: `Player ${i}` }));
+  const elevenPlayers = makePlayers(11);
 
   const mixedMinComp = (overrides = {}) => makeCompetition({
     format: 'mixed', poolSizeMode: 'min', poolSize: 3, poolWinners: 1,
@@ -1035,13 +1038,8 @@ describe('AdminSettings Knockout qualifiers (bc-qual LP-5a)', () => {
   // same inputs generate-draw uses. 9 entrants at min 3 is the sharpest
   // fixture: the only cut (3 pools, 1 draft) has zero oversized pools, so
   // whether it previews at all is decided entirely by the seeds.
-  const ninePlayers = (tweak = () => ({})) =>
-    Array.from({ length: 9 }, (_, i) => ({
-      id: `p${i + 1}`, name: `Player ${i + 1}`, ...tweak(i),
-    }));
-
   it('unseeded 9-entrant roster shows the seeding remedy for the fill option, not the neutral placeholder', async () => {
-    const comp = mixedMinComp({ players: ninePlayers(), extraQualifiers: 'fill-bracket' });
+    const comp = mixedMinComp({ players: makePlayers(9), extraQualifiers: 'fill-bracket' });
     const { container } = await mountSection('settings', { comp });
     const preview = container.querySelector('[data-testid="qualifier-preview-line"]');
     expect(preview.textContent).toContain('Needs seeded pools');
@@ -1050,7 +1048,7 @@ describe('AdminSettings Knockout qualifiers (bc-qual LP-5a)', () => {
 
   it('one seed makes the same 9-entrant cut previewable', async () => {
     const comp = mixedMinComp({
-      players: ninePlayers((i) => (i === 0 ? { seed: 1 } : {})),
+      players: makePlayers(9, (i) => (i === 0 ? { seed: 1 } : {})),
       extraQualifiers: 'fill-bracket',
     });
     const { container } = await mountSection('settings', { comp });
@@ -1064,12 +1062,33 @@ describe('AdminSettings Knockout qualifiers (bc-qual LP-5a)', () => {
     // preview must show the remedy -- a preview computed off the raw roster
     // would promise the seeded cut the draw will not make.
     const players = [
-      { id: 'p0', name: 'No Show', seed: 1, checkedIn: false },
-      ...ninePlayers(() => ({ checkedIn: true })),
+      { id: 'noshow', name: 'No Show', seed: 1, checkedIn: false },
+      ...makePlayers(9, () => ({ checkedIn: true })),
     ];
     const comp = mixedMinComp({ players, checkInEnabled: true, extraQualifiers: 'fill-bracket' });
     const { container } = await mountSection('settings', { comp });
     const preview = container.querySelector('[data-testid="qualifier-preview-line"]');
     expect(preview.textContent).toContain('Needs seeded pools');
+  });
+
+  it('toggling check-in tracking in the form updates the preview before saving', async () => {
+    // Same roster, but check-in tracking OFF on the server: the seeded
+    // no-show still counts, so the fill cut previews. Ticking the checkbox
+    // must flip the preview IMMEDIATELY -- it reads the PENDING
+    // local.checkInEnabled exactly like its sibling pool-config inputs, not
+    // the last-saved value.
+    const players = [
+      { id: 'noshow', name: 'No Show', seed: 1, checkedIn: false },
+      ...makePlayers(9, () => ({ checkedIn: true })),
+    ];
+    const comp = mixedMinComp({ players, checkInEnabled: false, extraQualifiers: 'fill-bracket' });
+    const { container } = await mountSection('settings', { comp });
+    const preview = () => container.querySelector('[data-testid="qualifier-preview-line"]');
+    expect(preview().textContent).toBe('3 pools -> 4 qualifiers -> 4-slot knockout (no byes)');
+    const checkbox = Array.from(container.querySelectorAll('label.checkbox'))
+      .find((l) => l.textContent.includes('Check-in tracking'))
+      .querySelector('input');
+    await act(async () => { fireEvent.click(checkbox); });
+    expect(preview().textContent).toContain('Needs seeded pools');
   });
 });

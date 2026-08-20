@@ -101,7 +101,7 @@ func poolDraw(comp *state.Competition, pools []helper.Pool, numCourts int) *help
 // (draw_perpool.go).
 //
 // state.ExtraQualifiersFillBracket (bc-qual LP-4) resolves the draft
-// selection via fillBracketDraftIndices below and calls
+// selection via helper.SelectFillBracketDraftIndices and calls
 // helper.BuildKnockoutDrawFillBracket.
 //
 // outOfScope is true exactly when a non-standard mode was requested and its
@@ -115,8 +115,8 @@ func poolDraw(comp *state.Competition, pools []helper.Pool, numCourts int) *help
 // error already names the shortfall and its remedy ("the draw needs N
 // drafted 2nd(s)... seed more pools...") rather than a generic "out of
 // scope", so this is threaded up rather than discarded -- an operator
-// hitting the
-// data-dependent residual case (see helper.FillBracketDraftCapacity's and
+// hitting the data-dependent residual case (see
+// helper.FillBracketDraftCapacity's and
 // TestFillBracketFormationAndBuilderAgree's doc comments for how rare that
 // now is) gets told WHY, not just that it failed. reason is empty when no
 // finer-grained cause exists (larger-pools' BuildKnockoutDrawPerPool has no
@@ -131,7 +131,19 @@ func buildPoolFedDraw(comp *state.Competition, pools []helper.Pool, numCourts in
 		d := helper.BuildKnockoutDrawPerPool(pools, poolWinners, overrides, numCourts)
 		return d, d == nil, ""
 	case state.ExtraQualifiersFillBracket:
-		draftIdx, err := fillBracketDraftIndices(comp, pools, numCourts)
+		// helper.SelectFillBracketDraftIndices owns the whole draft
+		// pipeline (D, capacity, seeded-first selection), shared with
+		// cmd/create-pools.go so the CLI and app paths cannot drift. state
+		// has no per-pool equivalent of QualifiersForPool for this mode --
+		// see that method's doc comment -- so it re-derives from the whole
+		// pool set every time, exactly as extraQualifierOverrides does for
+		// larger-pools. Both of its failure modes collapse to outOfScope
+		// with the error as the operator-facing reason: its own messages
+		// name the cause (the data-dependent "seed more pools" shortfall,
+		// threaded unmodified -- the engine tests grep it end to end; and
+		// the per-court arithmetic check, expected to be effectively
+		// unreachable for a power-of-two court count).
+		draftIdx, err := helper.SelectFillBracketDraftIndices(pools, comp.PoolSize, numCourts)
 		if err != nil {
 			return nil, true, err.Error()
 		}
@@ -143,38 +155,6 @@ func buildPoolFedDraw(comp *state.Competition, pools []helper.Pool, numCourts in
 	default:
 		return helper.BuildKnockoutDraw(pools, poolWinners, numCourts), false, ""
 	}
-}
-
-// fillBracketDraftIndices resolves WHICH pools' 2nds are drafted for a
-// fill-bracket competition (bc-qual LP-4, rule 2): D = NextPow2(numPools) -
-// numPools drafts, from the seeded pools in seed order with oversized pools
-// as fallback (WKC's own rule), via CAPACITY-AWARE selection
-// (second review rework) -- helper.FillBracketDraftCapacity computes the
-// per-pool home half and per-half draft capacity from the pool/draft
-// counts alone (before any pool is chosen), and
-// helper.SelectFillBracketDrafts skips a candidate whose destination half
-// has no remaining capacity rather than taking it and stranding the build.
-// state has no per-pool equivalent of QualifiersForPool for this mode --
-// see that method's doc comment -- so this is computed fresh from the
-// whole pool set every time, exactly as extraQualifierOverrides re-derives
-// larger-pools' map every time.
-//
-// outOfScope reasons collapse to a single error return here (buildPoolFedDraw's
-// caller only distinguishes "outOfScope" from "built"), covering both: the
-// per-court target arithmetic FillBracketDraftCapacity checks is not
-// achievable for this (pools, drafts, numCourts) triple (ok=false, expected
-// to be effectively unreachable given a power-of-two numCourts -- see
-// BuildKnockoutDrawFillBracket's doc comment), and the genuinely
-// data-dependent case SelectFillBracketDrafts itself now names in its own
-// error message (the "seed more pools" shortfall, threaded to the operator
-// unmodified -- the engine tests grep it end to end).
-func fillBracketDraftIndices(comp *state.Competition, pools []helper.Pool, numCourts int) ([]int, error) {
-	drafts := helper.NextPow2(len(pools)) - len(pools)
-	poolHalf, capacityByHalf, ok := helper.FillBracketDraftCapacity(pools, drafts, numCourts)
-	if !ok {
-		return nil, fmt.Errorf("fill-bracket: the per-court target arithmetic is not achievable for %d pools across %d shiaijo", len(pools), numCourts)
-	}
-	return helper.SelectFillBracketDrafts(pools, comp.PoolSize, poolHalf, capacityByHalf)
 }
 
 // extraQualifierOverrides builds the pool-index -> qualifier-count map

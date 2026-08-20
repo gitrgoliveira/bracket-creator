@@ -761,16 +761,9 @@ func (e *Engine) runDrawPipeline(id string) error {
 		comp.TeamSize = 5 // Default for Kendo
 	}
 
-	// Only pass HasIDs hint when explicitly true; false means unset (let
-	// auto-detect run) to avoid misclassifying UUID-prefixed files.
-	var hasIDsHint *bool
-	if comp.HasParticipantIDs {
-		t := true
-		hasIDsHint = &t
-	}
 	players, err := e.store.LoadParticipantsOpt(id, comp.EffectiveWithZekkenName(), state.LoadParticipantsOpts{
 		WithSeeds: true,
-		HasIDs:    hasIDsHint,
+		HasIDs:    comp.ParticipantIDsHint(),
 	})
 	if err != nil {
 		return err

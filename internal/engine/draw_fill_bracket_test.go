@@ -18,7 +18,8 @@ import (
 //
 // buildPoolFedDraw (playoff_skeleton.go) gains a fill-bracket branch beside
 // larger-pools' (bc-qual LP-3c): it resolves the draft selection via
-// fillBracketDraftIndices and calls helper.BuildKnockoutDrawFillBracket. The
+// helper.SelectFillBracketDraftIndices and calls
+// helper.BuildKnockoutDrawFillBracket. The
 // same two invariants larger-pools already pins apply here:
 //
 //   - ExtraQualifiersNone (untouched by this file) remains a byte-for-byte

@@ -12,6 +12,7 @@
 // block below reads them. Settings/bracket/swiss are pulled in via their
 // helper re-exports; overview has no pure helper, so it needs a side-effect import.
 import './admin_competition_overview.jsx';
+import { effectiveDrawPlayers } from './qualifier_preview.jsx';
 export { formatCompMinutes } from './admin_competition_settings.jsx';
 export { buildRunningIpponResult, loadScoreboardPoints } from './admin_competition_bracket.jsx';
 export {
@@ -99,16 +100,14 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   const isDateValid = isValidDate;
 
   // mp-w7x: surface how many participants will be excluded from the draw
-  // because they have not checked in. Mirror the engine's rule
-  // (filterCheckedIn in internal/engine/competition.go): only applies when the
-  // competition has check-in tracking enabled (c.checkInEnabled): consistent
-  // with the rest of the UI, which masks checkedIn behind that flag. Within an
-  // enabled competition, opt-in semantics apply: only exclude when at least one
-  // participant is checked in. Empty roster (e.g. a playoffs-from-source
-  // competition resolved server-side) yields 0.
+  // because they have not checked in. effectiveDrawPlayers (qualifier_preview)
+  // is the client's one owner of the engine's check-in opt-in rule
+  // (filterCheckedIn, internal/engine/competition.go); counting off it keeps
+  // this confirm, the settings preview and the draw itself on the same
+  // roster. Empty roster (e.g. a playoffs-from-source competition resolved
+  // server-side) yields 0.
   const drawPlayers = c.players || [];
-  const anyCheckedIn = drawPlayers.some(p => p.checkedIn);
-  const excludedFromDraw = (c.checkInEnabled && anyCheckedIn) ? drawPlayers.filter(p => !p.checkedIn).length : 0;
+  const excludedFromDraw = drawPlayers.length - effectiveDrawPlayers(drawPlayers, c.checkInEnabled).length;
 
   // Confirm before a draw/start that would drop non-checked-in participants.
   // Returns false when the operator cancels.

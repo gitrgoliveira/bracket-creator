@@ -354,20 +354,13 @@ func (o *poolOptions) createPools(entries []string) error {
 			return fmt.Errorf("could not build a larger-pools knockout draw from %d pools with %d winner(s) per pool on %d shiaijo (this pool/shiaijo shape is outside what --extra-qualifiers larger-pools currently supports; adjust --courts/pool sizing, or drop --extra-qualifiers)", len(pools), o.poolWinners, o.courts)
 		}
 	case state.ExtraQualifiersFillBracket:
-		drafts := helper.NextPow2(len(pools)) - len(pools)
-		// Capacity-aware selection (bc-qual LP-4, second review rework):
-		// FillBracketDraftCapacity computes each pool's home half and each
-		// half's remaining draft capacity BEFORE any pool is chosen, so
-		// SelectFillBracketDrafts can skip a candidate pool (seeded first,
-		// oversized as fallback -- WKC's own rule) whose opposite-half
-		// destination is already full instead of taking it and stranding
-		// the build. helper.SelectFillBracketDrafts' own doc comment has the
-		// mechanism; the sheet replays live in helper's draw_wkc_test.go.
-		poolHalf, capacityByHalf, capOK := helper.FillBracketDraftCapacity(pools, drafts, o.courts)
-		if !capOK {
-			return fmt.Errorf("could not build a fill-bracket knockout draw: the per-court target arithmetic is not achievable for %d pools across %d shiaijo", len(pools), o.courts)
-		}
-		draftIdx, derr := helper.SelectFillBracketDrafts(pools, activePoolSize, poolHalf, capacityByHalf)
+		// helper.SelectFillBracketDraftIndices owns the whole draft
+		// pipeline -- D = NextPow2(pools) - pools, per-half capacity,
+		// capacity-aware seeded-first selection (WKC's own rule) -- shared
+		// with the engine's buildPoolFedDraw so the CLI and app paths
+		// cannot drift. Its doc comment has the mechanism; the sheet
+		// replays live in helper's draw_wkc_test.go.
+		draftIdx, derr := helper.SelectFillBracketDraftIndices(pools, activePoolSize, o.courts)
 		if derr != nil {
 			return fmt.Errorf("could not select fill-bracket drafts: %w", derr)
 		}

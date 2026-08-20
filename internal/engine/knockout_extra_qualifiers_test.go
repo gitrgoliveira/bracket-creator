@@ -74,13 +74,13 @@ func assertBracketFullyResolved(t *testing.T, store *state.Store, compID string)
 	sawSecond := false
 	for ri, round := range b.Rounds {
 		for mi, m := range round {
-			for side, v := range map[string]string{"A": m.SideA, "B": m.SideB} {
-				if strings.HasSuffix(m.PlaceholderA, "-2nd") || strings.HasSuffix(m.PlaceholderB, "-2nd") {
-					sawSecond = true
-				}
-				assert.Falsef(t, helper.IsPoolFinalistPlaceholder(v),
+			if strings.HasSuffix(m.PlaceholderA, "-2nd") || strings.HasSuffix(m.PlaceholderB, "-2nd") {
+				sawSecond = true
+			}
+			for _, s := range [...]struct{ side, v string }{{"A", m.SideA}, {"B", m.SideB}} {
+				assert.Falsef(t, helper.IsPoolFinalistPlaceholder(s.v),
 					"r%d m%d side %s still reads %q after every pool completed: the resolver never built a key for it and this match can never become playable",
-					ri, mi, side, v)
+					ri, mi, s.side, s.v)
 			}
 		}
 	}
@@ -96,11 +96,9 @@ func startExtraQualifiersComp(t *testing.T, eng *Engine, store *state.Store, com
 		c.ExtraQualifiers = mode
 		c.Courts = courts
 	})
-	players := make([]domain.Player, entrants)
 	names := make([]string, entrants)
-	for i := range players {
-		players[i] = domain.Player{Name: fmt.Sprintf("Player%02d", i), Dojo: fmt.Sprintf("Dojo%02d", i)}
-		names[i] = players[i].Name
+	for i := range names {
+		names[i] = fmt.Sprintf("Player%02d", i)
 	}
 	saveTestParticipants(t, store, compID, names)
 	require.NoError(t, eng.StartCompetition(compID))

@@ -186,15 +186,6 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 		return nil
 	}
 
-	// Only pass HasIDs=true hint; false means unset so auto-detect runs for
-	// competitions created before the flag existed AND for the narrow window
-	// where a deferred HasParticipantIDs flip fails after SaveParticipants
-	// succeeded (file has UUIDs but flag is still false on disk).
-	var hasIDsHint *bool
-	if comp.HasParticipantIDs {
-		t := true
-		hasIDsHint = &t
-	}
 	// WithSeeds: true, matching the single-competition detail endpoint below.
 	// The admin SPA renders AdminCompetition off THIS aggregate object until
 	// (and permanently, if) the detail fetch fails (admin.jsx's
@@ -203,7 +194,7 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 	// them briefly showed the UNSEEDED pool cut, a different pool COUNT, not
 	// just a missing annotation. Seeds leak nothing the detail endpoint does
 	// not already serve publicly, and the load is cached per mtime.
-	players, plErr := store.LoadParticipantsOpt(compID, comp.EffectiveWithZekkenName(), state.LoadParticipantsOpts{WithSeeds: true, HasIDs: hasIDsHint})
+	players, plErr := store.LoadParticipantsOpt(compID, comp.EffectiveWithZekkenName(), state.LoadParticipantsOpts{WithSeeds: true, HasIDs: comp.ParticipantIDsHint()})
 	if plErr != nil {
 		log.Printf("mobileapp: viewer payload %s: load participants: %v", compID, plErr)
 	}
@@ -331,16 +322,9 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			var wg sync.WaitGroup
 			var panicRef atomic.Pointer[recoveredPanic]
 			safeGo(&wg, &panicRef, func() {
-				// Only pass HasIDs=true hint; false means unset so auto-detect
-				// still runs for competitions created before the flag existed.
-				var hasIDsHint *bool
-				if comp.HasParticipantIDs {
-					t := true
-					hasIDsHint = &t
-				}
 				p, e := store.LoadParticipantsOpt(id, comp.EffectiveWithZekkenName(), state.LoadParticipantsOpts{
 					WithSeeds: true,
-					HasIDs:    hasIDsHint,
+					HasIDs:    comp.ParticipantIDsHint(),
 				})
 				comp.Players = p
 				playersErr = e

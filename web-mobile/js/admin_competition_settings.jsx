@@ -20,7 +20,7 @@ import {
 } from './qualifier_preview.jsx';
 import { seededRanks } from './admin_helpers.jsx';
 
-const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
+const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA } = React;
 
 const dmyToIso = window.dmyToIso;
 const isoToDmy = window.isoToDmy;
@@ -56,6 +56,25 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // save already committed; when present we stay on the page to show them
   // instead of returning to the dashboard.
   const [clashWarnings, setClashWarnings] = useStateA(null);
+
+  // Knockout-qualifiers preview (bc-qual): computed off the EFFECTIVE draw
+  // roster -- server-confirmed c.players (settings edits don't change the
+  // roster) masked by the same check-in opt-in rule the engine applies
+  // (effectiveDrawPlayers), read against the PENDING local.checkInEnabled so
+  // the preview tracks the form exactly like its sibling pool-config inputs;
+  // generate-draw both counts entrants and drops absent players' seeds AFTER
+  // check-in filtering, so a preview computed off the raw list promises a
+  // cut the draw will not make whenever a seeded participant is a no-show.
+  // Seed RANKS, not a count: fill-bracket's supply rule only credits a rank
+  // low enough to land its own pool; seededRanks (admin_helpers) is the one
+  // owner of "which ranks has this roster actually got" -- the same reader
+  // the seeding blocker validates with. Memoized because this walks the
+  // roster and runs the full formation scan, and AdminSettings re-renders on
+  // every keystroke of any settings field.
+  const qualifierPreview = useMemoA(() => {
+    const drawPlayers = effectiveDrawPlayers(c.players, local.checkInEnabled);
+    return computeQualifierPreview(drawPlayers.length, local.poolSize, local.poolWinners, seededRanks(drawPlayers));
+  }, [c.players, local.checkInEnabled, local.poolSize, local.poolWinners]);
 
   // Schedule estimate (mp-zoh Phase 4): fetch per-competition estimate and
   // display it inline near the duration inputs. Re-fetches whenever the
@@ -902,27 +921,11 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
               Federation-neutral copy per operator ruling: no federation
               names anywhere in this UI. */}
           {extraQualifiersRadioVisible(local.format, local.poolSizeMode) && (() => {
-            // The EFFECTIVE draw roster (c.players, not local.players,
-            // masked by the same check-in opt-in rule the engine applies):
-            // settings pool-config edits don't change the roster, c is the
-            // server-confirmed competition, and generate-draw both counts
-            // entrants and drops absent players' seeds AFTER check-in
-            // filtering -- so a preview computed off the raw list promises
-            // a cut the draw will not make whenever a seeded participant is
-            // a no-show.
-            const drawPlayers = effectiveDrawPlayers(c.players, c.checkInEnabled);
-            // Seed RANKS, not a count: fill-bracket's supply rule only
-            // credits a rank low enough to land its own pool, so that
-            // mode's preview genuinely changes as the operator seeds.
-            // seededRanks (admin_helpers) is the one owner of "which ranks
-            // has this roster actually got" -- the same reader the seeding
-            // blocker validates with.
-            const preview = computeQualifierPreview(drawPlayers.length, local.poolSize, local.poolWinners, seededRanks(drawPlayers));
             const activeShape = local.extraQualifiers === EXTRA_QUALIFIERS_LARGER_POOLS
-              ? preview.largerPools
+              ? qualifierPreview.largerPools
               : local.extraQualifiers === EXTRA_QUALIFIERS_FILL_BRACKET
-                ? preview.fillBracket
-                : preview.standard;
+                ? qualifierPreview.fillBracket
+                : qualifierPreview.standard;
             const previewLine = formatQualifierPreviewLine(activeShape);
             return (
               <div className="field">

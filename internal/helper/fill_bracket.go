@@ -93,12 +93,11 @@ import (
 // demand more drafts than the roster can deliver (a field just past a
 // bracket boundary, say 70 teams -> 22 pools wanting 10 drafts, with 4
 // oversized pools -- deliverable only by a roster seeded that deep), and
-// returning a count whose
-// selection would be doomed just moves the refusal somewhere less
-// actionable. The
-// WKC sheets never face this -- their entrant counts sit close enough to
-// their brackets that <=4 seeds always cover the shortfall -- so what
-// formation does beyond them is this package's own extension:
+// returning a count whose selection would be doomed just moves the refusal
+// somewhere less actionable. The WKC sheets never face this -- their entrant
+// counts sit close enough to their brackets that <=4 seeds always cover the
+// shortfall -- so what formation does beyond them is this package's own
+// extension:
 //
 //  4. seedRanks is the roster's seed ranks. Only ranks AT MOST P are
 //     guaranteed their own pool at pool count P: PoolSeeding places rank r
@@ -124,10 +123,10 @@ import (
 //     sweep regime.)
 //
 // The 45-team sheet pins that preference ORDER, not just the arithmetic:
-// P=15 (D=1, odd) is supplied there too -- oversized pools at P=15
-// would be zero, but the sheet's four contiguous seeds cover one draft --
-// yet the sheet cut 14, so
-// even-D must outrank largest-P. An unseeded roster degrades gracefully:
+// P=15 (D=1, odd) is supplied there too -- oversized pools at P=15 would be
+// zero, but the sheet's four contiguous seeds cover one draft -- yet the
+// sheet cut 14, so even-D must outrank largest-P. An unseeded roster
+// degrades gracefully:
 // supply is then oversized pools alone, which slides P down toward the
 // fatter-pool shapes the first cut of this function produced (e.g. 38
 // unseeded -> 10 pools, 6 drafts from 8 oversized), instead of refusing.
@@ -178,7 +177,7 @@ func FillBracketPoolCount(n, minSize int, seedRanks []int) (pools, drafts int, e
 	supplied := func(p int) bool {
 		seedSupply := 0
 		if minSize >= 2 {
-			seedSupply = len(rankLE(ranks, p))
+			seedSupply = ranksAtMost(ranks, p)
 		}
 		return bracket-p <= max(seedSupply, n-minSize*p)
 	}
@@ -191,13 +190,13 @@ func FillBracketPoolCount(n, minSize int, seedRanks []int) (pools, drafts int, e
 			}
 		}
 	}
-	return 0, 0, fmt.Errorf("fill-bracket: no pool count fits %d entrants at minimum pool size %d: every cut needs more drafted 2nd places than the roster's seeded pools (%d seed rank(s) low enough to land their own pool at the largest cut) and its oversized pools can supply; seed more pools, or adjust the entrant count or minimum pool size", n, minSize, len(rankLE(ranks, top)))
+	return 0, 0, fmt.Errorf("fill-bracket: no pool count fits %d entrants at minimum pool size %d: every cut needs more drafted 2nd places than the roster's seeded pools (%d seed rank(s) low enough to land their own pool at the largest cut) and its oversized pools can supply; seed more pools, or adjust the entrant count or minimum pool size", n, minSize, ranksAtMost(ranks, top))
 }
 
-// rankLE returns the ranks at most p; split out so the error message and the
-// supply rule cannot count differently.
-func rankLE(ranks []int, p int) []int {
-	return ranks[:sort.SearchInts(ranks, p+1)]
+// ranksAtMost returns |{r in ranks : r <= p}| for sorted ranks; split out so
+// the error message and the supply rule cannot count differently.
+func ranksAtMost(ranks []int, p int) int {
+	return sort.SearchInts(ranks, p+1)
 }
 
 // fillBracketCourtLayout is the per-court/per-half target arithmetic shared
@@ -355,7 +354,15 @@ func fillBracketDraftCandidate(p Pool, minSize int) bool {
 	if len(p.Players) < 2 {
 		return false // no 2nd place to draft
 	}
-	return poolIsSeeded(p) || (minSize > 0 && len(p.Players) > minSize)
+	return poolIsSeeded(p) || poolIsOversized(p, minSize)
+}
+
+// poolIsOversized is the spare-competitor half of that rule: more members
+// than the minimum pool size. Named (as poolIsSeeded's peer) so
+// SelectFillBracketDrafts' error-message counters cannot restate -- and
+// drift from -- the membership test they explain.
+func poolIsOversized(p Pool, minSize int) bool {
+	return minSize > 0 && len(p.Players) > minSize
 }
 
 // SelectFillBracketDrafts returns the zero-based pool indices whose 2nd
@@ -430,7 +437,7 @@ func SelectFillBracketDrafts(pools []Pool, minSize int, poolHalf []int, capacity
 		if poolIsSeeded(p) {
 			seededCount++
 		}
-		if minSize > 0 && len(p.Players) > minSize {
+		if poolIsOversized(p, minSize) {
 			oversizedCount++
 		}
 		cands = append(cands, candidate{idx: i, seed: poolSeedRank(p)})
@@ -471,6 +478,26 @@ func SelectFillBracketDrafts(pools []Pool, minSize int, poolHalf []int, capacity
 		return nil, fmt.Errorf("fill-bracket: the draw needs %d drafted 2nd(s) and only %d could be supplied (drafts come from seeded pools in seed order, then oversized pools, each landing in the opposite half of the bracket from its own pool; %d seeded and %d oversized pool(s) exist); seed more pools, or adjust the entrant count or minimum pool size", total, len(out), seededCount, oversizedCount)
 	}
 	return out, nil
+}
+
+// SelectFillBracketDraftIndices resolves the WHOLE fill-bracket draft
+// pipeline for a built pool set: D = NextPow2(len(pools)) - len(pools)
+// drafts, per-half capacity via FillBracketDraftCapacity, then the
+// capacity-aware seeded-first scan of SelectFillBracketDrafts. One owner for
+// the CLI (cmd/create-pools.go) and the engine (buildPoolFedDraw) -- the
+// hand-copied pipeline was the same CLI/engine drift class the shared
+// BuildPoolPhase* helpers exist to close. The capacity error is expected to
+// be effectively unreachable for a power-of-two court count (see
+// BuildKnockoutDrawFillBracket's doc comment); the selection error is the
+// data-dependent "seed more pools" shortfall, returned unmodified so callers
+// can thread its remedy to the operator.
+func SelectFillBracketDraftIndices(pools []Pool, minSize, numCourts int) ([]int, error) {
+	drafts := NextPow2(len(pools)) - len(pools)
+	poolHalf, capacityByHalf, ok := FillBracketDraftCapacity(pools, drafts, numCourts)
+	if !ok {
+		return nil, fmt.Errorf("fill-bracket: the per-court target arithmetic is not achievable for %d pools across %d shiaijo", len(pools), numCourts)
+	}
+	return SelectFillBracketDrafts(pools, minSize, poolHalf, capacityByHalf)
 }
 
 // BuildKnockoutDrawFillBracket builds a court-first, ZERO-BYE knockout draw

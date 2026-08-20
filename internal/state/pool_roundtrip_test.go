@@ -1,7 +1,6 @@
 package state
 
 import (
-	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -50,29 +49,10 @@ func TestPoolMatchRoundTripIsComplete(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, s.SaveCompetition(&Competition{ID: "c", Name: "C"}))
 
-	// A match with every persisted field set to something distinguishable from
-	// its zero value. Hantei rides in the ippons (encodeHanteiIntoIppons), so a
-	// tied scoreline plus a named winner is the shape that carries it.
-	in := MatchResult{
-		ID: "Pool A-1", SideA: "Kyoto", SideB: "Osaka", Winner: "Kyoto",
-		SideAID: "id-a", SideBID: "id-b", WinnerID: "id-a",
-		IpponsA: []string{"M"}, IpponsB: []string{"K"},
-		HansokuA: 1, HansokuB: 2,
-		Decision: "fought", DecisionBy: "Referee Tanaka", DecisionReason: "call recorded",
-		Status: MatchStatusCompleted, Court: "B", Round: 3,
-		ScheduledAt: "09:45",
-		SubResults: []SubMatchResult{{
-			Position: 1, SideA: "K1", SideB: "O1", IpponsA: []string{"D"}, Winner: "K1",
-		}},
-		Encho:            &EnchoMetadata{PeriodCount: 2},
-		DecidedByHantei:  HanteiPtr(true),
-		ResultSource:     "admin",
-		CorrectionReason: "scoreboard misread",
-		RepPlayerA:       "Rep A", RepPlayerB: "Rep B",
-		FlagsA: 2, FlagsB: 1,
-		ReopenPending: true,
-		ModifiedAt:    1737000000000,
-	}
+	// The fully-populated fixture is shared with the golden-bytes test, which
+	// documents the "every persisted field non-zero" contract both rely on:
+	// one fixture to update when a column is appended, not two that must agree.
+	in := poolMatchesGoldenInput()[0]
 	require.NoError(t, s.SavePoolMatches("c", []MatchResult{in}))
 
 	fresh, err := NewStore(dir)
@@ -82,44 +62,11 @@ func TestPoolMatchRoundTripIsComplete(t *testing.T) {
 	require.Len(t, loaded, 1)
 	got := loaded[0]
 
-	inV, gotV := reflect.ValueOf(in), reflect.ValueOf(got)
-	typ := inV.Type()
-	for i := range typ.NumField() {
-		f := typ.Field(i)
-		if !f.IsExported() {
-			continue
-		}
-		if reason, skip := notPersistedInPoolCSV[f.Name]; skip {
-			assert.NotEmptyf(t, reason, "%s needs a reason, not an empty string", f.Name)
-			continue
-		}
-		want, have := inV.Field(i).Interface(), gotV.Field(i).Interface()
-		// Pointer fields compare by value: the round trip rebuilds them.
-		switch f.Name {
-		case "Encho":
-			require.NotNilf(t, got.Encho, "Encho was not persisted")
-			assert.Equal(t, in.Encho.PeriodCount, got.Encho.PeriodCount)
-			continue
-		case "DecidedByHantei":
-			require.NotNilf(t, got.DecidedByHantei, "the hantei verdict was not persisted")
-			assert.True(t, *got.DecidedByHantei)
-			continue
-		}
-		assert.Equalf(t, want, have,
-			"MatchResult.%s did not survive a pool save/reload. Either persist it in "+
-				"savePoolMatchesLocked + parsePoolMatchesRecords, or add it to "+
-				"notPersistedInPoolCSV with the reason it is transient.", f.Name)
-	}
-}
-
-// The allow-list must name real fields: a rename that leaves a stale entry
-// behind would silently stop covering the field it was meant to exempt.
-func TestNotPersistedListNamesRealFields(t *testing.T) {
-	typ := reflect.TypeOf(MatchResult{})
-	for name := range notPersistedInPoolCSV {
-		_, ok := typ.FieldByName(name)
-		assert.Truef(t, ok, "notPersistedInPoolCSV names %q, which is not a MatchResult field", name)
-	}
+	// sweepFields (file_roundtrip_guards_test.go) is the shared sweep every CSV
+	// guard uses, and it also asserts the allow-list names only real fields, so
+	// a rename that strands an entry fails here rather than silently narrowing
+	// what this test covers.
+	sweepFields(t, "pool-matches.csv", in, got, notPersistedInPoolCSV)
 }
 
 // Files written before the columns existed must still load. The parser reads

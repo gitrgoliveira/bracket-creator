@@ -411,6 +411,14 @@ What changed as a result of the review is enforcement, not shape:
   kept its own hand maintained copy, and nothing failed when a new field missed one of them.
   A golden test pins the exact bytes. The ordered list, never Go struct order, is the
   on disk contract.
+
+    Only the results file is built this way, because only it earns the machinery: it is by
+    far the widest, it is the one that grows a column whenever the rules do, and it is the
+    one that has actually lost fields. Of the others, two could not use a positional column
+    list at all (the roster file's layout varies by row, and the seed file is read by column
+    name rather than position) and one derives a column from row order rather than from a
+    field. The schedule file is the only genuine candidate, and at eight long stable columns
+    it is not yet worth converting; the guard below is what protects it in the meantime.
 * **Every CSV file has a round trip guard.** Each guard sweeps the persisted struct's
   fields and fails when a field neither survives a save and reload nor appears in an
   allow list with the reason it is legitimately transient. Four fields of the match row

@@ -440,12 +440,13 @@ type poolMatchColumn struct {
 // poolMatchIDParts splits a pool match ID ("Pool A-3", "Pool B-DH-1") at the
 // FIRST dash into the PoolName and MatchIdx columns. An ID without a dash
 // stores an empty MatchIdx.
+//
+// strings.Cut rather than SplitN: it returns substrings of the original string
+// instead of allocating a slice, and the PoolName and MatchIdx puts each call
+// this once per row.
 func poolMatchIDParts(id string) (pool, idx string) {
-	parts := strings.SplitN(id, "-", 2)
-	if len(parts) > 1 {
-		return parts[0], parts[1]
-	}
-	return parts[0], ""
+	pool, idx, _ = strings.Cut(id, "-")
+	return pool, idx
 }
 
 var poolMatchColumns = []poolMatchColumn{
@@ -646,9 +647,7 @@ func parsePoolMatchesRecords(records [][]string) []MatchResult {
 			continue
 		}
 
-		// Round: -1 is the absent-column default (see the Round entry in
-		// poolMatchColumns); a row written before a later column existed
-		// simply stops early and leaves that field at its documented default.
+		// Round: -1 is the absent-column default (see poolMatchColumns).
 		m := MatchResult{Round: -1}
 		for c, col := range poolMatchColumns {
 			if c >= len(rec) {
@@ -702,8 +701,10 @@ func (s *Store) savePoolMatchesLocked(compID string, results []MatchResult, writ
 
 	for _, r := range results {
 		// A hantei rides in the winner's score cell rather than in a column of
-		// its own (see encodeHanteiIntoIppons); encode it into a COPY so the
-		// caller's slice is untouched, then let each column project the copy.
+		// its own (see encodeHanteiIntoIppons). `enc` is the row as it should be
+		// PERSISTED, which is what keeps every put a pure field projection: the
+		// one cross-column codec is applied here, before the loop, rather than
+		// hidden inside a column.
 		enc := r
 		enc.IpponsA, enc.IpponsB = encodeHanteiIntoIppons(&r)
 

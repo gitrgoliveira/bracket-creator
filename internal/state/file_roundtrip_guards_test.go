@@ -199,19 +199,21 @@ func TestSeedAssignmentRoundTripIsComplete(t *testing.T) {
 // forces the same decision-in-the-open the pool guard forces, via an
 // allow-list naming each opted-out field and why it is transient.
 func TestMarshalledStructsStayFullyMarshalled(t *testing.T) {
-	notMarshalled := map[string]map[string]string{
-		"SubMatchResult": {},
-		"BracketMatch":   {},
-		"Bracket":        {},
+	// One row per marshalled type: the type itself, and the fields it may
+	// legitimately opt out of marshalling (with the reason). Every allow-list
+	// is empty today; the column exists so that adding a `json:"-"` field
+	// forces the reason into this table rather than into a silent tag.
+	swept := []struct {
+		typ   reflect.Type
+		allow map[string]string
+	}{
+		{reflect.TypeOf(SubMatchResult{}), nil},
+		{reflect.TypeOf(BracketMatch{}), nil},
+		{reflect.TypeOf(Bracket{}), nil},
 	}
 
-	for _, typ := range []reflect.Type{
-		reflect.TypeOf(SubMatchResult{}),
-		reflect.TypeOf(BracketMatch{}),
-		reflect.TypeOf(Bracket{}),
-	} {
-		allow := notMarshalled[typ.Name()]
-		require.NotNilf(t, allow, "add %s to the notMarshalled table", typ.Name())
+	for _, s := range swept {
+		typ, allow := s.typ, s.allow
 		for i := range typ.NumField() {
 			f := typ.Field(i)
 			if !f.IsExported() {

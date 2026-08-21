@@ -217,8 +217,19 @@ func TestPreserveSubHantei(t *testing.T) {
 }
 
 // End-to-end through the pool write path: device B's stale snapshot (opened
-// before the verdict was recorded) saves a correction and the stored verdict
-// survives in storage.
+// before the verdict was recorded, its SSE adoption never landing) saves a
+// correction and the stored verdict survives in storage.
+//
+// The incoming patch below hand-builds the exact wire shape
+// web-mobile/js/admin_scoring_team.jsx buildPatch now sends for a daihyosen
+// row that is untouched THIS session and carries nothing known locally (its
+// `daihyosenSilent` gate): ipponsA/ipponsB simply absent from the JSON, which
+// decodes to nil. Before that gate existed, buildPatch stated the row's
+// ippons unconditionally (an explicit `[]`), so this exact shape was reached
+// only by a hand-built Go payload, never a real client — see the sibling
+// TestPreserveSubHantei_ZeroZeroWithdrawalIsNotSilence for the payload a real
+// (pre-gate) client DID send, and how that shape must still clear the
+// verdict rather than restore it.
 func TestPoolWrite_StaleSnapshotKeepsHantei(t *testing.T) {
 	// setupTestEngine (engine_test.go) already owns this preamble, with
 	// t.Cleanup rather than defer; 380+ tests in this package use it.
@@ -744,18 +755,23 @@ func TestPreserveSubHanteiRestoresOutstandingHansoku(t *testing.T) {
 // A review finding on PR #389: withdrawing a 0-0 daihyosen hantei was
 // impossible because the verdict resurrected on save. The team editor's
 // withdrawal reaches the wire as an EXPLICIT empty ippon array on both
-// sides (web-mobile/js/admin_scoring_team.jsx buildPatch always builds
-// ipponsA/ipponsB from the bout's own point totals, and api_serializers.jsx's
-// toBackendMatchResult folds decidedByHantei into the ippons rather than
-// forwarding the flag), not as an omitted key. preserveSubHantei used to
-// judge scoreline-silence by scoring-ippon COUNT (countScoringIppons == 0
-// for both an omitted key and an explicit `[]`), so a 0-0 withdrawal was
-// indistinguishable from a genuinely silent stale-snapshot write and the
-// stored verdict was copied straight back onto the row the operator had
-// just cleared. The fix judges silence on nil-ness instead: a present `[]`
-// decodes to a non-nil empty slice (SubMatchResult.IpponsA/IpponsB carry no
-// `omitempty`), so it is now treated as the writer speaking for the
-// scoreline, exactly like a 1-1 withdrawal already was.
+// sides (web-mobile/js/admin_scoring_team.jsx buildPatch builds
+// ipponsA/ipponsB from the bout's own point totals whenever the operator has
+// touched the daihyosen row or its verdict/score is already known locally,
+// and api_serializers.jsx's toBackendMatchResult folds decidedByHantei into
+// the ippons rather than forwarding the flag), not as an omitted key.
+// preserveSubHantei used to judge scoreline-silence by scoring-ippon COUNT
+// (countScoringIppons == 0 for both an omitted key and an explicit `[]`), so
+// a 0-0 withdrawal was indistinguishable from a genuinely silent
+// stale-snapshot write and the stored verdict was copied straight back onto
+// the row the operator had just cleared. The fix judges silence on nil-ness
+// instead: a present `[]` decodes to a non-nil empty slice
+// (SubMatchResult.IpponsA/IpponsB carry no `omitempty`), so it is now
+// treated as the writer speaking for the scoreline, exactly like a 1-1
+// withdrawal already was. buildPatch's own genuine-silence gate
+// (daihyosenSilent) is the second review round's fix: it omits the arrays
+// entirely - the only shape this nil-ness check restores from - when the
+// row is untouched AND nothing is known about it locally.
 func TestPreserveSubHantei_ZeroZeroWithdrawalIsNotSilence(t *testing.T) {
 	dh := state.DaihyosenSubPosition
 	stored := func() []state.SubMatchResult {
@@ -782,9 +798,14 @@ func TestPreserveSubHantei_ZeroZeroWithdrawalIsNotSilence(t *testing.T) {
 	})
 
 	t.Run("omitted (nil) arrays + no winner still restores the mark and winner: the stale-snapshot case must not regress", func(t *testing.T) {
-		// A genuinely silent writer (stale second-device snapshot opened
-		// before the verdict existed) omits the ippons keys entirely, which
-		// decodes to nil, not [].
+		// A genuinely silent writer omits the ippons keys entirely, which
+		// decodes to nil, not []. This is now a REAL client shape, not just a
+		// hand-built one: web-mobile/js/admin_scoring_team.jsx buildPatch
+		// sends exactly this (daihyosenSilent gate) for a daihyosen row that
+		// is untouched THIS session and carries nothing known locally (no
+		// recorded verdict, no score, no fouls, no overtime) - the case of a
+		// stale second-device snapshot opened before the verdict existed,
+		// whose SSE adoption never landed.
 		incoming := []state.SubMatchResult{
 			{Position: dh, SideA: "Taro", SideB: "Jiro", Decision: "daihyosen"},
 		}

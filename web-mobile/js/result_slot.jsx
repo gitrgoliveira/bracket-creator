@@ -22,8 +22,13 @@
 // if-chains duplicated across that file's two write paths. IPPON_PLACEHOLDER
 // ("•", U+2022 BULLET) and HANTEI_MARK ("Ht") are this file's two literal
 // tokens, spelled once each and mirrored byte-for-byte by Go's
-// internal/domain/ippon.go (IpponPlaceholder / HanteiMark) — pinned by
-// __tests__/result_slot_constants.test.jsx.
+// internal/domain/ippon.go (IpponPlaceholder / HanteiMark). Both languages'
+// values are drawn from one shared fixture, internal/domain/testdata/
+// ippon_marks.json (the same pattern encho_labels.json uses for enchoLabel):
+// __tests__/result_slot_constants.test.jsx reads it for the JS side and
+// internal/domain/ippon_test.go's TestIpponMarks_GoldenFixture reads it for
+// the Go side, so a divergence between the two languages — not just a drift
+// within one of them — fails a test.
 //
 // WHY A SEPARATE LEAF, AND NOT bracket.jsx (the ONE statement of this — the
 // other sites point here; THREE earlier rationales have been wrong now, so

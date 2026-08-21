@@ -117,32 +117,53 @@ func (e *Engine) withBracketMatch(compId, matchId string, mutate func(*state.Bra
 
 // preserveSubHantei enforces the operator ruling "all results must be
 // recorded into storage" at the store boundary: a writer that says NOTHING
-// about the daihyosen verdict (DecidedByHantei nil - a stale editor snapshot
-// opened before the verdict existed, a quick-score write, any client
-// predating the field) must not erase a recorded one. The verdict travels
-// (flag + winner) onto the incoming daihyosen row only when that row is
-// verdict-silent, names no winner of its own, carries a decision hantei can
-// coexist with, and is still tied (an untied row cannot carry a hantei).
-// An EXPLICIT false and a named winner both pass through untouched.
-// The preserveLoserScore precedent, one bout deeper.
+// about the daihyosen verdict (DecidedByHantei nil) must not erase a
+// recorded one. The verdict travels (flag + winner) onto the incoming
+// daihyosen row only when that row is verdict-silent, names no winner of its
+// own, carries a decision hantei can coexist with, and is still tied (an
+// untied row cannot carry a hantei). An EXPLICIT false and a named winner
+// both pass through untouched. The preserveLoserScore precedent, one bout
+// deeper.
 //
 // NIL vs EMPTY on IpponsA/IpponsB is the other half of "verdict-silent":
 // scoreline-silence is judged on whether the writer sent an ippon array AT
 // ALL (nil, the key absent from the payload), never on whether the array is
-// empty of SCORING ippons. The two are not the same thing. A genuinely
-// silent writer (a stale snapshot, quick-score) omits the key and
-// unmarshals to nil. But the team editor's 0-0 daihyosen withdrawal is not
-// silent: it sends an explicit `ipponsA: []` for both sides (built from the
-// bout's own point totals in web-mobile/js/admin_scoring_team.jsx buildPatch,
-// then round-tripped through api_serializers.jsx's toBackendMatchResult,
-// which folds the editor's decidedByHantei flag into the ippons and never
-// forwards the flag itself onto the wire) - a 0-0 scoreline the writer DID
-// state, same as a 1-1 withdrawal states "D"/"T". Testing scoring-ippon
-// COUNT instead of nil-ness could not tell the two apart: an empty slice and
-// a nil slice both count zero scoring ippons, so a 0-0 withdrawal read as
-// silence and the verdict was copied right back onto the row the operator
-// had just cleared. See countScoringIppons below for the (correct, separate)
-// job that helper still does: tallying points, not detecting silence.
+// empty of SCORING ippons. The two are not the same thing.
+//
+// WHO ACTUALLY SENDS NIL. The team editor (web-mobile/js/admin_scoring_team.jsx
+// buildPatch) is the one client this engine has to reason about, and it is
+// NOT silent by default: it states the daihyosen row's ippons explicitly
+// (built from the bout's own point totals, then round-tripped through
+// api_serializers.jsx's toBackendMatchResult, which folds the editor's
+// decidedByHantei flag into the ippons and never forwards the flag itself
+// onto the wire) whenever the operator has touched that row THIS session, or
+// the row's stored verdict/score/overtime is already known locally (an
+// editor that mounted after a verdict existed re-states what it was shown,
+// same behaviour as before). buildPatch omits ipponsA/ipponsB entirely -
+// the genuine-silence shape this function relies on - ONLY when BOTH hold:
+// the row is untouched (identical to its mount-time seed, including the
+// hantei arm/pick and the daihyosen encho counter) AND nothing about it is
+// known locally (no recorded verdict, no scored points/fouls/draw, no
+// overtime). That is exactly the stale-editor case this preserve exists for
+// (an SSE gap or an offline-queue replay landing after a verdict was
+// recorded elsewhere): the editor genuinely has nothing to say about the
+// row, so it says nothing, and this function restores the stored verdict.
+// A deliberate 0-0 withdrawal is the row-is-known-locally branch: it still
+// sends an explicit `ipponsA: []` for both sides - a 0-0 scoreline the
+// writer DID state, same as a 1-1 withdrawal states "D"/"T" - so it is never
+// mistaken for silence.
+//
+// quick-score (handlers_match.go) is a SEPARATE, already-documented gap, not
+// a nil-ippons case: it synthesises positions 1..N only and never emits a
+// position -1 row at all, so this function's per-row loop simply never
+// matches it (see the SCOPE note below on the delete contract).
+//
+// Testing scoring-ippon COUNT instead of nil-ness could not tell a silent
+// write apart from a 0-0 withdrawal: an empty slice and a nil slice both
+// count zero scoring ippons, so a 0-0 withdrawal would read as silence and
+// the verdict would be copied right back onto the row the operator just
+// cleared. See countScoringIppons below for the (correct, separate) job
+// that helper still does: tallying points, not detecting silence.
 //
 // SCOPE, deliberately narrow in two directions:
 //

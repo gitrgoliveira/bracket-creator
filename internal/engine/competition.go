@@ -596,6 +596,30 @@ func checkInExcludedKeys(players []domain.Player) map[string]bool {
 // A seed assignment that resolves to nobody on the full roster (a ghost
 // name) is left in place, unexcluded, so it still flows through to
 // ApplySeeds and surfaces the same error as before.
+//
+// AMBIGUOUS dojo-less rows (a legacy row whose bare name matches TWO OR MORE
+// players on the full roster -- RosterIndex.Lookup refuses to guess and
+// returns not-found) need a THIRD outcome beyond keep/drop, not just the two
+// above. This roster (the FULL one) is not the roster helper.ApplySeeds
+// resolves against: the caller applies this function's output against
+// filterCheckedIn's narrower roster (players.go / bracket.go), and filtering
+// can turn a name that was ambiguous HERE into a name that is unique THERE.
+// Keeping an ambiguous row unconditionally -- the plain Lookup-fails-so-keep
+// rule above -- would let ApplySeeds silently attach the rank to WHICHEVER
+// namesake happens to survive check-in, which may not be the one the
+// operator meant to seed at all (reachable in production: a dojo-less row is
+// written verbatim by the tournament-import seeds parser, and separately can
+// be stranded dojo-less forever by the legacy upgrade's once-per-process
+// gate, which never revisits a row once stamped, so a namesake registering
+// later leaves it ambiguous for the rest of the process). So: when a row is
+// ambiguous on the full roster AND at least one of the players sharing that
+// name is excluded, drop it -- we cannot safely resolve it to a single
+// participant, and keeping it either wrong-attaches the rank (if exactly one
+// namesake survives) or degrades ApplySeeds' plain "not found" into a 500 if
+// none do (both namesakes failed to check in). An ambiguous row where NO
+// candidate is excluded is untouched by check-in and stays kept: filtering
+// doesn't change the ambiguity, so ApplySeeds fails on it exactly as it
+// would have before check-in was a factor at all.
 func dropSeedAssignments(players []domain.Player, seeds []domain.SeedAssignment, excluded map[string]bool) []domain.SeedAssignment {
 	if len(excluded) == 0 {
 		return seeds
@@ -603,10 +627,41 @@ func dropSeedAssignments(players []domain.Player, seeds []domain.SeedAssignment,
 	roster := domain.NewRosterIndex(players)
 	out := make([]domain.SeedAssignment, 0, len(seeds))
 	for _, a := range seeds {
-		if p, ok := roster.Lookup(a.Name, a.Dojo); ok && excluded[domain.SeedKey(p.Name, p.Dojo)] {
+		if p, ok := roster.Lookup(a.Name, a.Dojo); ok {
+			if excluded[domain.SeedKey(p.Name, p.Dojo)] {
+				continue
+			}
+			out = append(out, a)
 			continue
 		}
-		out = append(out, a)
+		// Lookup failed. A dojo-qualified row that doesn't resolve is a ghost
+		// (the exact competitor it names doesn't exist) -- the fallback below
+		// only ever applies to dojo-less rows, so this can never be the
+		// ambiguous case, and it keeps flowing through unexcluded (unchanged
+		// behavior).
+		if a.Dojo != "" {
+			out = append(out, a)
+			continue
+		}
+		// Dojo-less and unresolved: distinguish a genuine ghost (nobody on
+		// the full roster shares this name) from an ambiguous row (2+ do) by
+		// counting name-sharers directly, and check whether any of them
+		// failed to check in.
+		nameMatches := 0
+		anyCandidateExcluded := false
+		for i := range players {
+			if players[i].Name != a.Name {
+				continue
+			}
+			nameMatches++
+			if excluded[domain.SeedKey(players[i].Name, players[i].Dojo)] {
+				anyCandidateExcluded = true
+			}
+		}
+		if nameMatches >= 2 && anyCandidateExcluded {
+			continue // ambiguous, and at least one namesake didn't check in: drop
+		}
+		out = append(out, a) // genuine ghost, or ambiguous with nobody excluded
 	}
 	return out
 }

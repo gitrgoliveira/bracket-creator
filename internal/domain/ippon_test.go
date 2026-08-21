@@ -1,9 +1,13 @@
 package domain_test
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 )
@@ -51,4 +55,29 @@ func TestCountScoringIppons(t *testing.T) {
 			assert.Equal(t, tc.want, domain.CountScoringIppons(tc.ippons))
 		})
 	}
+}
+
+// TestIpponMarks_GoldenFixture pins domain.IpponPlaceholder and
+// domain.HanteiMark against the shared Go/JS fixture — see the `_comment` in
+// testdata/ippon_marks.json for why the values are shared rather than each
+// suite restating its own literal. JS half:
+// web-mobile/js/__tests__/result_slot_constants.test.jsx.
+func TestIpponMarks_GoldenFixture(t *testing.T) {
+	t.Parallel()
+
+	raw, err := os.ReadFile(filepath.Join("testdata", "ippon_marks.json"))
+	require.NoError(t, err, "shared Go/JS golden fixture is missing")
+
+	var fixture struct {
+		IpponPlaceholder string `json:"ipponPlaceholder"`
+		HanteiMark       string `json:"hanteiMark"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &fixture))
+	require.NotEmpty(t, fixture.IpponPlaceholder, "golden fixture parsed to an empty placeholder: it would assert nothing")
+	require.NotEmpty(t, fixture.HanteiMark, "golden fixture parsed to an empty hantei mark: it would assert nothing")
+
+	assert.Equal(t, fixture.IpponPlaceholder, domain.IpponPlaceholder,
+		"domain.IpponPlaceholder disagrees with the shared fixture; update BOTH renderers, not just this one")
+	assert.Equal(t, fixture.HanteiMark, domain.HanteiMark,
+		"domain.HanteiMark disagrees with the shared fixture; update BOTH renderers, not just this one")
 }

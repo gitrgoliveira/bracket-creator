@@ -245,8 +245,19 @@ describe('API Utils', () => {
       it('strips it via the existing-match decidedByHantei fallback too (no explicit patch flag)', () => {
         // Same unattributable-winner shape, but the boolean comes from the
         // stored match (a re-save that doesn't touch the verdict) rather
-        // than an explicit patch field. This is the court-reassignment case:
-        // the save must go through, markless, not 400.
+        // than an explicit patch field.
+        //
+        // At MATCH level this save 400s either way: toBackendMatchResult
+        // always sets result.sideA/sideB from the match, and
+        // validateWithOptions (internal/mobileapp/validation.go ~774)
+        // independently rejects any winner naming neither side whenever both
+        // sides are present, mark or no mark. Stripping the mark here only
+        // changes WHICH validator rejects the save (a bare "must equal sideA
+        // or sideB" instead of a hantei-placement error), not the outcome.
+        // The strip's real end-to-end value is on SUB rows (see the
+        // 'subResults hantei conversion' describe below): validateSubBout has
+        // no equivalent unconditional winner-names-a-side check, so a
+        // markless drifted sub row genuinely passes there.
         const match = { sideA: 'Alice', sideB: 'Bob', decidedByHantei: true };
         const result = toBackendMatchResult({
           winner: 'Charlie',

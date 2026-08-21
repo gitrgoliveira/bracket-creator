@@ -74,15 +74,6 @@ classDiagram
         +Player[] Players
     }
 
-    class ScheduleEntry {
-        +string MatchType
-        +string MatchRef
-        +string Court
-        +string ScheduledAt
-        +bool IsBreak
-        +string Label
-    }
-
     class CompetitorStatus {
         +string PlayerID
         +bool Eligible
@@ -107,7 +98,6 @@ classDiagram
     Tournament "1" o-- "0..*" Competition
     Competition "1" o-- "0..*" Player
     Competition "1" o-- "0..*" Pool
-    Competition "1" o-- "0..*" ScheduleEntry
     Competition "1" o-- "0..*" CompetitorStatus
     Competition "1" o-- "0..*" TeamLineup
     Competition "1" o-- "0..1" Overrides
@@ -197,6 +187,7 @@ classDiagram
         +string[] Feeders
         +bool IsOverridden
         +bool Hidden
+        +bool DecidedByHantei (legacy, read-only)
         +long ModifiedAt
     }
 
@@ -429,6 +420,8 @@ What changed as a result of the review is enforcement, not shape:
 * **The seed list stores the dojo alongside the name.** A seed is matched to its
   participant by name and dojo together, because two competitors may share a name across
   dojos; a file that stored only the name could not say which of them the rank belonged to.
+  A row without a dojo still matches by name alone when that name is unique in the roster,
+  and a file from before the dojo column is completed from the roster on first load.
 * **schedule.csv was removed.** It was a write only projection: a generator copied court,
   time and status off the pool matches and the bracket into a second file, and the only
   reader of that file was the same generator keeping it in sync on every court or time

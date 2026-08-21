@@ -116,7 +116,23 @@ func extractSeeds(players []domain.Player) []domain.SeedAssignment {
 			// a seed for either of two same-named players cannot be resolved
 			// after a reload, which is exactly the case the seeds.csv Dojo
 			// column exists for.
-			out = append(out, domain.SeedAssignment{Name: p.Name, Dojo: p.Dojo, SeedRank: p.Seed})
+			//
+			// BOTH halves are written in the CANONICAL form the roster will
+			// read back as, because seeds.csv is resolved against the roster by
+			// exact key and is NOT itself canonicalized on load. participants
+			// .csv keeps the raw request name, but CreatePlayersFromRecords
+			// Title-cases the name and TrimSpaces every field on every parse,
+			// so writing the raw name here produces a seed row that no longer
+			// resolves against its own participant: an operator who retypes a
+			// seeded competitor's name in different casing in the roster box
+			// gets a 200 and silently loses the seed, with only "0 seeded" in
+			// the panel to show for it. Canonicalizing at this write boundary
+			// keeps seeds.csv in the one form every reader resolves against.
+			out = append(out, domain.SeedAssignment{
+				Name:     helper.TitleCaseName(p.Name),
+				Dojo:     strings.TrimSpace(p.Dojo),
+				SeedRank: p.Seed,
+			})
 		}
 	}
 	return out

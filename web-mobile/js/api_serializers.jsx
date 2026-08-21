@@ -115,8 +115,20 @@ function toBackendMatchResult(patch, match) {
     // placement and were otherwise discarded - so a same-name pair's
     // correctly id-attributed mark could be rejected by the server's
     // name-only fallback. Omitted (not sent as "") when a side carries no
-    // id (e.g. a bracket match, which persists none), matching every other
-    // optional field in this payload.
+    // id at all, matching every other optional field in this payload.
+    //
+    // These are not always participant UUIDs. normalizeMatch's resolveSide
+    // falls back to `{ id: flatId || name }`, so a match the server sends
+    // WITHOUT flat side ids - a bracket match, which persists none - yields
+    // sides whose id IS the name, and that is what goes on the wire here.
+    // Harmless, because the fallback applies to all three values at once:
+    // domain.AttributeWinnerSide's id branch then compares name against
+    // name and returns exactly what its name branch would have, including
+    // the sideA-first resolution for a same-name pair. But it does mean the
+    // server's backfill is suppressed for those matches (it only fills an
+    // EMPTY id), which costs nothing today since the stored bracket ids are
+    // empty too. Do not read "sideAId is present" as "the server has a real
+    // participant id for this side.
     if (sideAId) result.sideAId = sideAId;
     if (sideBId) result.sideBId = sideBId;
     // Engi (kata) matches score by referee flag count, not ippons: carry

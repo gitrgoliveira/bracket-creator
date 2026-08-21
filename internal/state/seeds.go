@@ -1,12 +1,12 @@
 package state
 
 import (
+	"bytes"
 	"encoding/csv"
 	"fmt"
 	"os"
 	"sort"
 	"strconv"
-	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
@@ -113,8 +113,8 @@ func (s *Store) SaveSeeds(compID string, assignments []domain.SeedAssignment) er
 // (e.g. "Smith, John") are properly escaped; hand-formatted rows would emit
 // broken CSV that ParseSeedsFile then mis-splits, silently dropping seeds.
 func marshalSeedsCSV(assignments []domain.SeedAssignment) ([]byte, error) {
-	var sb strings.Builder
-	w := csv.NewWriter(&sb)
+	var buf bytes.Buffer
+	w := csv.NewWriter(&buf)
 	if err := w.Write([]string{"Rank", "Name", "Dojo"}); err != nil {
 		return nil, fmt.Errorf("writing seeds CSV header: %w", err)
 	}
@@ -127,5 +127,5 @@ func marshalSeedsCSV(assignments []domain.SeedAssignment) ([]byte, error) {
 	if err := w.Error(); err != nil {
 		return nil, fmt.Errorf("flushing seeds CSV: %w", err)
 	}
-	return []byte(sb.String()), nil
+	return buf.Bytes(), nil
 }

@@ -449,6 +449,46 @@ func poolMatchIDParts(id string) (pool, idx string) {
 	return pool, idx
 }
 
+// strCol builds the plain pass-through column: put reads the field, take
+// writes the cell back into it verbatim. Both directions go through ONE
+// accessor, so a put that reads SideAID next to a take that writes SideBID --
+// a two-character copy-paste slip that reads as correct -- cannot be written.
+func strCol(name string, field func(m *MatchResult) *string) poolMatchColumn {
+	return poolMatchColumn{
+		name: name,
+		put:  func(r *MatchResult) string { return *field(r) },
+		take: func(m *MatchResult, cell string) { *field(m) = cell },
+	}
+}
+
+// intCol is strCol for a plain numeric column: an unparseable cell leaves the
+// field at its seeded zero.
+func intCol(name string, field func(m *MatchResult) *int) poolMatchColumn {
+	return poolMatchColumn{
+		name: name,
+		put:  func(r *MatchResult) string { return strconv.Itoa(*field(r)) },
+		take: func(m *MatchResult, cell string) {
+			if v, err := strconv.Atoi(cell); err == nil {
+				*field(m) = v
+			}
+		},
+	}
+}
+
+// clampedIntCol is intCol restricted to positive values: non-numeric,
+// zero and negative cells all read as the seeded 0.
+func clampedIntCol(name string, field func(m *MatchResult) *int) poolMatchColumn {
+	return poolMatchColumn{
+		name: name,
+		put:  func(r *MatchResult) string { return strconv.Itoa(*field(r)) },
+		take: func(m *MatchResult, cell string) {
+			if v, err := strconv.Atoi(cell); err == nil && v > 0 {
+				*field(m) = v
+			}
+		},
+	}
+}
+
 var poolMatchColumns = []poolMatchColumn{
 	{name: "PoolName",
 		put:  func(r *MatchResult) string { p, _ := poolMatchIDParts(r.ID); return p },
@@ -456,15 +496,9 @@ var poolMatchColumns = []poolMatchColumn{
 	{name: "MatchIdx",
 		put:  func(r *MatchResult) string { _, idx := poolMatchIDParts(r.ID); return idx },
 		take: func(m *MatchResult, cell string) { m.ID += "-" + cell }},
-	{name: "SideA",
-		put:  func(r *MatchResult) string { return r.SideA },
-		take: func(m *MatchResult, cell string) { m.SideA = cell }},
-	{name: "SideB",
-		put:  func(r *MatchResult) string { return r.SideB },
-		take: func(m *MatchResult, cell string) { m.SideB = cell }},
-	{name: "Winner",
-		put:  func(r *MatchResult) string { return r.Winner },
-		take: func(m *MatchResult, cell string) { m.Winner = cell }},
+	strCol("SideA", func(m *MatchResult) *string { return &m.SideA }),
+	strCol("SideB", func(m *MatchResult) *string { return &m.SideB }),
+	strCol("Winner", func(m *MatchResult) *string { return &m.Winner }),
 	// The ippon cells hold the PERSISTED slices: waza letters joined with "|",
 	// plus the judges'-decision mark in the winner's cell when the match was
 	// decided by hantei (encoded by the writer, stripped again by the reader;
@@ -475,21 +509,13 @@ var poolMatchColumns = []poolMatchColumn{
 	{name: "IpponsB",
 		put:  func(r *MatchResult) string { return strings.Join(r.IpponsB, "|") },
 		take: func(m *MatchResult, cell string) { m.IpponsB = splitIppons(cell) }},
-	{name: "HansokuA",
-		put:  func(r *MatchResult) string { return strconv.Itoa(r.HansokuA) },
-		take: func(m *MatchResult, cell string) { m.HansokuA, _ = strconv.Atoi(cell) }},
-	{name: "HansokuB",
-		put:  func(r *MatchResult) string { return strconv.Itoa(r.HansokuB) },
-		take: func(m *MatchResult, cell string) { m.HansokuB, _ = strconv.Atoi(cell) }},
-	{name: "Decision",
-		put:  func(r *MatchResult) string { return r.Decision },
-		take: func(m *MatchResult, cell string) { m.Decision = cell }},
+	intCol("HansokuA", func(m *MatchResult) *int { return &m.HansokuA }),
+	intCol("HansokuB", func(m *MatchResult) *int { return &m.HansokuB }),
+	strCol("Decision", func(m *MatchResult) *string { return &m.Decision }),
 	{name: "Status",
 		put:  func(r *MatchResult) string { return string(r.Status) },
 		take: func(m *MatchResult, cell string) { m.Status = MatchStatus(cell) }},
-	{name: "Court",
-		put:  func(r *MatchResult) string { return r.Court },
-		take: func(m *MatchResult, cell string) { m.Court = cell }},
+	strCol("Court", func(m *MatchResult) *string { return &m.Court }),
 	// A team encounter's sub-bouts nest as a JSON document inside this one
 	// cell, keeping the file to one row per match. Marshalling the whole
 	// struct means every SubMatchResult field is persisted the moment it is
@@ -509,63 +535,29 @@ var poolMatchColumns = []poolMatchColumn{
 				_ = json.Unmarshal([]byte(cell), &m.SubResults)
 			}
 		}},
-	{name: "ScheduledAt",
-		put:  func(r *MatchResult) string { return r.ScheduledAt },
-		take: func(m *MatchResult, cell string) { m.ScheduledAt = cell }},
-	{name: "ResultSource",
-		put:  func(r *MatchResult) string { return r.ResultSource },
-		take: func(m *MatchResult, cell string) { m.ResultSource = cell }},
-	// Round reads -1 for "unknown": an empty or unparseable cell, or (via the
-	// reader's seed value) a row too short to hold the column at all.
-	{name: "Round",
-		put: func(r *MatchResult) string { return strconv.Itoa(r.Round) },
-		take: func(m *MatchResult, cell string) {
-			if v, err := strconv.Atoi(cell); err == nil && cell != "" {
-				m.Round = v
-			} else {
-				m.Round = -1
-			}
-		}},
+	strCol("ScheduledAt", func(m *MatchResult) *string { return &m.ScheduledAt }),
+	strCol("ResultSource", func(m *MatchResult) *string { return &m.ResultSource }),
+	// Round reads -1 for "unknown" in every failure shape -- an empty or
+	// unparseable cell, or a row too short to hold the column at all -- by
+	// leaving the reader's seed value (Round: -1) alone, like every other
+	// column with an absent-default.
+	intCol("Round", func(m *MatchResult) *int { return &m.Round }),
 	// Participant-id columns. Absent in files written before they existed;
 	// ids stay empty and consumers fall back to name matching.
-	{name: "SideAID",
-		put:  func(r *MatchResult) string { return r.SideAID },
-		take: func(m *MatchResult, cell string) { m.SideAID = cell }},
-	{name: "SideBID",
-		put:  func(r *MatchResult) string { return r.SideBID },
-		take: func(m *MatchResult, cell string) { m.SideBID = cell }},
-	{name: "WinnerID",
-		put:  func(r *MatchResult) string { return r.WinnerID },
-		take: func(m *MatchResult, cell string) { m.WinnerID = cell }},
-	{name: "CorrectionReason",
-		put:  func(r *MatchResult) string { return r.CorrectionReason },
-		take: func(m *MatchResult, cell string) { m.CorrectionReason = cell }},
+	strCol("SideAID", func(m *MatchResult) *string { return &m.SideAID }),
+	strCol("SideBID", func(m *MatchResult) *string { return &m.SideBID }),
+	strCol("WinnerID", func(m *MatchResult) *string { return &m.WinnerID }),
+	strCol("CorrectionReason", func(m *MatchResult) *string { return &m.CorrectionReason }),
 	// Rep-player columns (mp-62vr): the individual fighters each team fields
 	// for a pool/league daihyosen/tiebreaker rep bout.
-	{name: "RepPlayerA",
-		put:  func(r *MatchResult) string { return r.RepPlayerA },
-		take: func(m *MatchResult, cell string) { m.RepPlayerA = cell }},
-	{name: "RepPlayerB",
-		put:  func(r *MatchResult) string { return r.RepPlayerB },
-		take: func(m *MatchResult, cell string) { m.RepPlayerB = cell }},
+	strCol("RepPlayerA", func(m *MatchResult) *string { return &m.RepPlayerA }),
+	strCol("RepPlayerB", func(m *MatchResult) *string { return &m.RepPlayerB }),
 	// Engi referee flag counts. A non-numeric value is treated as 0 and a
 	// negative value is clamped to 0: flags are validated non-negative at the
 	// HTTP boundary, so a corrupted / hand-edited file must not load negative
 	// counts that would break engi standings/rendering.
-	{name: "FlagsA",
-		put: func(r *MatchResult) string { return strconv.Itoa(r.FlagsA) },
-		take: func(m *MatchResult, cell string) {
-			if v, err := strconv.Atoi(cell); err == nil && v > 0 {
-				m.FlagsA = v
-			}
-		}},
-	{name: "FlagsB",
-		put: func(r *MatchResult) string { return strconv.Itoa(r.FlagsB) },
-		take: func(m *MatchResult, cell string) {
-			if v, err := strconv.Atoi(cell); err == nil && v > 0 {
-				m.FlagsB = v
-			}
-		}},
+	clampedIntCol("FlagsA", func(m *MatchResult) *int { return &m.FlagsA }),
+	clampedIntCol("FlagsB", func(m *MatchResult) *int { return &m.FlagsB }),
 	// The "reopened without an audit reason yet" flag (mp-gmcg). A non-boolean
 	// value reads as false: a hand-edited CSV must not be able to wedge a
 	// match behind a justification it can never satisfy.
@@ -580,12 +572,8 @@ var poolMatchColumns = []poolMatchColumn{
 	// were held only in memory once, so the audit trail behind a withdrawal
 	// survived until the next restart and no further, while the bracket kept
 	// both all along (bracket.json marshals every exported field).
-	{name: "DecisionBy",
-		put:  func(r *MatchResult) string { return r.DecisionBy },
-		take: func(m *MatchResult, cell string) { m.DecisionBy = cell }},
-	{name: "DecisionReason",
-		put:  func(r *MatchResult) string { return r.DecisionReason },
-		take: func(m *MatchResult, cell string) { m.DecisionReason = cell }},
+	strCol("DecisionBy", func(m *MatchResult) *string { return &m.DecisionBy }),
+	strCol("DecisionReason", func(m *MatchResult) *string { return &m.DecisionReason }),
 	// Encho (overtime) collapses to its period count, gated on Encho.On() in
 	// BOTH directions: only a positive count is written and only a positive
 	// count rebuilds the block, which is lossless because On() requires
@@ -706,7 +694,7 @@ func (s *Store) savePoolMatchesLocked(compID string, results []MatchResult, writ
 		// one cross-column codec is applied here, before the loop, rather than
 		// hidden inside a column.
 		enc := r
-		enc.IpponsA, enc.IpponsB = encodeHanteiIntoIppons(&r)
+		enc.IpponsA, enc.IpponsB = encodeHanteiIntoIppons(&enc)
 
 		row := make([]string, len(poolMatchColumns))
 		for c, col := range poolMatchColumns {

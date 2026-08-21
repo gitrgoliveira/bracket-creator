@@ -23,9 +23,10 @@ import (
 // and ModifiedAt were lost from pool-matches.csv, and how SeedAssignment.Dojo
 // was lost from seeds.csv while the (name, dojo) matching in ApplySeeds
 // depended on it. The struct-marshalled files (bracket.json, config.md,
-// competitor-status.yaml, lineups.yaml, overrides.json) are immune by
-// construction and need no guard here; TestMarshalledStructsStayFullyMarshalled
-// below pins the property that makes them immune.
+// competitor-status.yaml, lineups.yaml, overrides.json, tournament.md) are
+// immune by construction and need no per-field guard here;
+// TestMarshalledStructsStayFullyMarshalled below pins the property that makes
+// them immune, checking each type against the tag its file marshals under.
 
 // sweepFields compares in against got field-by-field, consulting allowlist for
 // fields that are legitimately not persisted in this file.
@@ -188,32 +189,49 @@ func TestSeedAssignmentRoundTripIsComplete(t *testing.T) {
 }
 
 // TestMarshalledStructsStayFullyMarshalled pins the property that exempts the
-// JSON-persisted match structures from the guards above: they are persisted by
-// marshalling the WHOLE struct (bracket.json for Bracket/BracketMatch; the
-// SubResults cell of pool-matches.csv for SubMatchResult), so a new field is
-// persisted the moment it is declared, with no column code to forget.
+// struct-marshalled files from the guards above: they persist by marshalling
+// the WHOLE struct (bracket.json for Bracket/BracketMatch, the SubResults cell
+// of pool-matches.csv for SubMatchResult, config.md front-matter for
+// Competition, tournament.md for Tournament, competitor-status.yaml and
+// lineups.yaml for their domain payloads, overrides.json for Overrides), so a
+// new field is persisted the moment it is declared, with no column code to
+// forget.
 //
-// That immunity holds exactly as long as no field opts out of marshalling. A
-// `json:"-"` tag is that opt-out, and it is sometimes right (MatchResult's
-// WinnerSide is a transient handler hint), so this test does not forbid it; it
-// forces the same decision-in-the-open the pool guard forces, via an
-// allow-list naming each opted-out field and why it is transient.
+// That immunity holds exactly as long as no field opts out of marshalling
+// UNDER THE TAG ITS FILE USES: `yaml:"-"` on a YAML-persisted struct is the
+// same silent loss as `json:"-"` on a JSON-persisted one, and a json-only
+// sweep cannot see it. The opt-out is sometimes right (Competition.Players is
+// a view assembled from participants.csv, not config.md data), so this test
+// does not forbid it; it forces the same decision-in-the-open the pool guard
+// forces, via an allow-list naming each opted-out field and why.
 func TestMarshalledStructsStayFullyMarshalled(t *testing.T) {
-	// One row per marshalled type: the type itself, and the fields it may
-	// legitimately opt out of marshalling (with the reason). Every allow-list
-	// is empty today; the column exists so that adding a `json:"-"` field
-	// forces the reason into this table rather than into a silent tag.
-	swept := []struct {
+	// One row per marshalled type: the type, the tag key its file marshals
+	// under, and the fields it may legitimately opt out of marshalling (with
+	// the reason). Adding a `<tag>:"-"` field to any of these types fails
+	// this test until the reason lands in this table rather than in a
+	// silent tag.
+	notMarshalled := []struct {
 		typ   reflect.Type
+		tag   string
 		allow map[string]string
 	}{
-		{reflect.TypeOf(SubMatchResult{}), nil},
-		{reflect.TypeOf(BracketMatch{}), nil},
-		{reflect.TypeOf(Bracket{}), nil},
+		{reflect.TypeOf(SubMatchResult{}), "json", nil},
+		{reflect.TypeOf(BracketMatch{}), "json", nil},
+		{reflect.TypeOf(Bracket{}), "json", nil},
+		{reflect.TypeOf(Overrides{}), "json", nil},
+		{reflect.TypeOf(Tournament{}), "yaml", nil},
+		{reflect.TypeOf(domain.CompetitorStatus{}), "yaml", nil},
+		{reflect.TypeOf(domain.TeamLineup{}), "yaml", nil},
+		{reflect.TypeOf(Competition{}), "yaml", map[string]string{
+			"Players": "a view, not config data: the roster is assembled onto " +
+				"the struct from participants.csv (and seeds.csv) at load time; " +
+				"marshalling it into config.md front-matter would store a second " +
+				"copy that the next roster write silently outdates.",
+		}},
 	}
 
-	for _, s := range swept {
-		typ, allow := s.typ, s.allow
+	for _, row := range notMarshalled {
+		typ, tagKey, allow := row.typ, row.tag, row.allow
 		for i := range typ.NumField() {
 			f := typ.Field(i)
 			if !f.IsExported() {
@@ -223,12 +241,13 @@ func TestMarshalledStructsStayFullyMarshalled(t *testing.T) {
 				assert.NotEmptyf(t, reason, "%s.%s needs a reason", typ.Name(), f.Name)
 				continue
 			}
-			tag := f.Tag.Get("json")
+			tag := f.Tag.Get(tagKey)
 			name, _, _ := strings.Cut(tag, ",")
 			assert.NotEqualf(t, "-", name,
-				"%s.%s is json:\"-\" and therefore NOT persisted, silently. If that "+
-					"is intended, add it to notMarshalled with the reason; if not, it "+
-					"must carry a real json tag.", typ.Name(), f.Name)
+				"%s.%s is %s:\"-\" and therefore NOT persisted, silently. If that "+
+					"is intended, add it to the notMarshalled allow-list with the "+
+					"reason; if not, it must carry a real %s tag.",
+				typ.Name(), f.Name, tagKey, tagKey)
 		}
 	}
 }

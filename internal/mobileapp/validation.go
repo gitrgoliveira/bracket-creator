@@ -158,9 +158,11 @@ var errSeedRosterUnreadable = errors.New("seed roster could not be read")
 // held a valid 1..N and drew, while every reader that merges seeds onto players
 // by name saw only the survivors and read the ghost's rank as an unclosable gap.
 //
-// Name is the join key state.loadParticipants uses when it merges seeds.csv onto
-// the roster, so matching on it here means this check and that merge can never
-// disagree about who a rank belongs to.
+// Name is checked on its own here, deliberately COARSER than the
+// domain.SeedKey (name, dojo) pair the matchers and the state.loadParticipants
+// merge key on: any assignment those would attach names a participant that
+// this check finds by name, so nothing the merge accepts is refused here,
+// while a ghost naming nobody is refused either way.
 //
 // An empty roster is NOT treated as "everything is a ghost": seeds for a
 // competition whose participants have not been written yet are refused only when

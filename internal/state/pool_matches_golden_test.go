@@ -2,7 +2,6 @@ package state
 
 import (
 	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -67,10 +66,21 @@ func TestPoolMatchesGoldenBytes(t *testing.T) {
 	require.NoError(t, s.SaveCompetition(&Competition{ID: "c", Name: "C"}))
 
 	require.NoError(t, s.SavePoolMatches("c", poolMatchesGoldenInput()))
-	b, err := os.ReadFile(filepath.Join(dir, "competitions", "c", "pool-matches.csv"))
+	b, err := os.ReadFile(s.compPath("c", "pool-matches.csv"))
 	require.NoError(t, err)
 	assert.Equal(t, poolMatchesGolden, string(b),
-		"pool-matches.csv bytes changed; column position is the on-disk contract")
+		"pool-matches.csv bytes changed; column position is the on-disk "+
+			"contract. Only a NEW APPENDED column may do this: regenerate the "+
+			"golden tail per the poolMatchesGolden doc comment.")
+
+	// poolMatchesLegacyCoreColumns is defined as the width of the original
+	// pre-append layout; pin that meaning to the table so the constant cannot
+	// silently drift from the columns it counts.
+	assert.Equal(t,
+		[]string{"PoolName", "MatchIdx", "SideA", "SideB", "Winner", "IpponsA",
+			"IpponsB", "HansokuA", "HansokuB", "Decision", "Status", "Court"},
+		poolMatchHeader()[:poolMatchesLegacyCoreColumns],
+		"the legacy minimum must keep naming the original 12 columns")
 }
 
 // TestPoolMatchesGoldenLoads proves the pinned bytes load back into the same
@@ -95,6 +105,5 @@ func TestPoolMatchesGoldenLoads(t *testing.T) {
 	// a nil ippon slice loads as the empty slice (splitIppons of ""), and the
 	// sub-result's nil IpponsB comes back nil through JSON.
 	want[1].IpponsA, want[1].IpponsB = []string{}, []string{}
-	assert.Equal(t, want[0], loaded[0])
-	assert.Equal(t, want[1], loaded[1])
+	assert.Equal(t, want, loaded)
 }

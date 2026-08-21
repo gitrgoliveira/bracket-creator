@@ -334,12 +334,28 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 		// they are shown.
 		seeds, _ := helper.ReadSeedsFileRaw(s.compPath(compID, "seeds.csv"))
 		if len(seeds) > 0 {
-			seedMap := make(map[string]int)
+			// Merge keyed the way the matchers match (domain.SeedKey, i.e.
+			// name+dojo, with the shared bare-name fallback for legacy rows
+			// naming a unique participant). Keying on the name alone attached
+			// a seed to EVERY same-named player, so the console displayed a
+			// seeding that domain.AssignSeeds would refuse to draw.
+			byKey := make(map[string]int)
+			byName := make(map[string]int)
 			for _, sd := range seeds {
-				seedMap[sd.Name] = sd.SeedRank
+				if sd.Dojo != "" {
+					byKey[domain.SeedKey(sd.Name, sd.Dojo)] = sd.SeedRank
+				} else {
+					byName[sd.Name] = sd.SeedRank
+				}
+			}
+			nameCount := make(map[string]int, len(players))
+			for i := range players {
+				nameCount[players[i].Name]++
 			}
 			for i := range players {
-				if seed, ok := seedMap[players[i].Name]; ok {
+				if seed, ok := byKey[domain.SeedKey(players[i].Name, players[i].Dojo)]; ok {
+					players[i].Seed = seed
+				} else if seed, ok := byName[players[i].Name]; ok && nameCount[players[i].Name] == 1 {
 					players[i].Seed = seed
 				}
 			}

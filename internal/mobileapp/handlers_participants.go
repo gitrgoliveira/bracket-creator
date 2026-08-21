@@ -533,13 +533,14 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// set above, but nothing tied them to the roster, so a name with no
 		// participant behind it saved cleanly and then split the two views of
 		// the same seeding: seeds.csv held 1..N and drew fine, while the admin
-		// console -- which reads seeds MERGED ONTO PLAYERS by name
-		// (state.loadParticipants) -- saw the survivors only, read the ghost's
+		// console -- which reads seeds MERGED ONTO PLAYERS (domain.SeedKey in
+		// state.loadParticipants) -- saw the survivors only, read the ghost's
 		// rank as a gap, and disabled Generate draw permanently with no row the
 		// operator could edit to close it.
 		//
-		// Matched on Name exactly, the key seeds.csv itself uses and the key
-		// that merge uses, so the check cannot disagree with the consumer. This
+		// Matched on Name, deliberately coarser than the merge's (name, dojo)
+		// key (see rejectSeedsOffRoster), so a ghost is refused without this
+		// check ever refusing an assignment the merge would attach. This
 		// endpoint takes a seeding as a FINISHED artefact (see above), so
 		// refusing here costs nothing: the console's own path is
 		// PUT /competitions/:id, which carries the roster and its seeds together

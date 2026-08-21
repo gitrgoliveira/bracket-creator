@@ -12,8 +12,17 @@ type SeedAssignment struct {
 	SeedRank int    `json:"seedRank"`
 }
 
-// seedKey returns the composite lookup key for a seed assignment.
-func seedKey(name, dojo string) string {
+// SeedKey is the composite key that identifies a seeded competitor: names are
+// not unique within a competition (only same name AND same dojo is rejected),
+// so a seed is matched to its participant by the (name, dojo) pair. Exported
+// because every producer, matcher and merger of seed assignments must compose
+// the pair the same way -- AssignSeeds here, helper.ApplySeeds, and the
+// seeds.csv-onto-roster merge in state.loadParticipants all key on it.
+//
+// Matchers that consult it also share one fallback for legacy rows: an
+// assignment with NO dojo matches by bare name, but only when that name is
+// unique in the roster.
+func SeedKey(name, dojo string) string {
 	return name + "|" + dojo
 }
 
@@ -71,7 +80,7 @@ func AssignSeeds(players []Player, assignments []SeedAssignment) error {
 	playerMap := make(map[string]*Player, len(players))
 	nameCount := make(map[string]int, len(players))
 	for i := range players {
-		playerMap[seedKey(players[i].Name, players[i].Dojo)] = &players[i]
+		playerMap[SeedKey(players[i].Name, players[i].Dojo)] = &players[i]
 		nameCount[players[i].Name]++
 	}
 
@@ -85,7 +94,7 @@ func AssignSeeds(players []Player, assignments []SeedAssignment) error {
 	}
 
 	for _, a := range assignments {
-		p, ok := playerMap[seedKey(a.Name, a.Dojo)]
+		p, ok := playerMap[SeedKey(a.Name, a.Dojo)]
 		if !ok && a.Dojo == "" && nameCount[a.Name] == 1 {
 			for i := range players {
 				if players[i].Name == a.Name {

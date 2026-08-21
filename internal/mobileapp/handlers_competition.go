@@ -112,7 +112,11 @@ func extractSeeds(players []domain.Player) []domain.SeedAssignment {
 	var out []domain.SeedAssignment
 	for _, p := range players {
 		if p.Seed > 0 {
-			out = append(out, domain.SeedAssignment{Name: p.Name, SeedRank: p.Seed})
+			// Dojo is half of the seed's identity (domain.SeedKey): without it
+			// a seed for either of two same-named players cannot be resolved
+			// after a reload, which is exactly the case the seeds.csv Dojo
+			// column exists for.
+			out = append(out, domain.SeedAssignment{Name: p.Name, Dojo: p.Dojo, SeedRank: p.Seed})
 		}
 	}
 	return out

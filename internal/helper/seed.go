@@ -547,8 +547,7 @@ func ApplySeeds(players []Player, assignments []domain.SeedAssignment) error {
 	playerMap := make(map[string]*Player, len(players))
 	nameCount := make(map[string]int, len(players))
 	for i := range players {
-		key := players[i].Name + "|" + players[i].Dojo
-		playerMap[key] = &players[i]
+		playerMap[domain.SeedKey(players[i].Name, players[i].Dojo)] = &players[i]
 		nameCount[players[i].Name]++
 	}
 
@@ -571,8 +570,7 @@ func ApplySeeds(players []Player, assignments []domain.SeedAssignment) error {
 		}
 
 		titleName := c.String(a.Name)
-		key := titleName + "|" + a.Dojo
-		p, ok := playerMap[key]
+		p, ok := playerMap[domain.SeedKey(titleName, a.Dojo)]
 		if !ok && a.Dojo == "" && nameCount[titleName] == 1 {
 			for i := range players {
 				if players[i].Name == titleName {

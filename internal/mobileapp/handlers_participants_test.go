@@ -434,6 +434,98 @@ func TestBatchPostBlankDojo_400(t *testing.T) {
 	assert.Empty(t, players, "no participants should be saved when a batch is rejected")
 }
 
+// TestBatchPostOrphaningSeedRejected is the regression guard for the bc-389
+// review finding: the bulk roster-replace endpoint (POST
+// /competitions/:id/participants with a players[] body) carries no seed data
+// of its own, unlike PUT /competitions/:id (which derives seeds.csv fresh
+// from each player's Seed field every save). Editing a seeded participant's
+// dojo through this endpoint used to save cleanly and silently orphan their
+// seeds.csv row -- the operator only discovered it, much later, when
+// generate-draw 400'd with "seeded participant not found in main list".
+func TestBatchPostOrphaningSeedRejected(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "comp-batch-seed-orphan"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     compID,
+		Name:   "Batch Seed Orphan Test",
+		Status: state.CompStatusSetup,
+	}))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "Alice Smith", Dojo: "Wakaba"},
+		{Name: "Bob Jones", Dojo: "Tora"},
+	}))
+	require.NoError(t, store.SaveSeeds(compID, []domain.SeedAssignment{
+		{Name: "Alice Smith", Dojo: "Wakaba", SeedRank: 1},
+	}))
+
+	// Replace the roster, correcting Alice's dojo -- this is the exact edit
+	// that used to silently orphan her seed.
+	body, _ := json.Marshal(map[string]any{"players": []map[string]string{
+		{"name": "Alice Smith", "dojo": "Cooper Dojo"},
+		{"name": "Bob Jones", "dojo": "Tora"},
+	}})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusConflict, w.Code,
+		"a bulk replace that would orphan an already-seeded participant must be refused, not silently persisted")
+
+	// Neither the roster nor the seed should have changed.
+	players := mustLoad(t, store, compID)
+	require.Len(t, players, 2)
+	dojos := map[string]string{}
+	for _, p := range players {
+		dojos[p.Name] = p.Dojo
+	}
+	assert.Equal(t, "Wakaba", dojos["Alice Smith"], "roster must not change when the replace is refused")
+
+	seeds, err := store.LoadSeeds(compID)
+	require.NoError(t, err)
+	require.Len(t, seeds, 1)
+	assert.Equal(t, "Wakaba", seeds[0].Dojo, "the existing seed must be untouched by a refused replace")
+}
+
+// TestBatchPostPreservingSeedIdentityAccepted is the companion case: a bulk
+// replace that leaves every seeded participant's (name, dojo) untouched must
+// still succeed, even though other, unseeded rows in the same batch change.
+func TestBatchPostPreservingSeedIdentityAccepted(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "comp-batch-seed-preserved"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     compID,
+		Name:   "Batch Seed Preserved Test",
+		Status: state.CompStatusSetup,
+	}))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "Alice Smith", Dojo: "Wakaba"},
+		{Name: "Bob Jones", Dojo: "Tora"},
+	}))
+	require.NoError(t, store.SaveSeeds(compID, []domain.SeedAssignment{
+		{Name: "Alice Smith", Dojo: "Wakaba", SeedRank: 1},
+	}))
+
+	// Bob's dojo changes; Alice (seeded) is untouched.
+	body, _ := json.Marshal(map[string]any{"players": []map[string]string{
+		{"name": "Alice Smith", "dojo": "Wakaba"},
+		{"name": "Bob Jones", "dojo": "Cooper Dojo"},
+	}})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code, "a replace that preserves every seeded identity must be accepted")
+
+	seeds, err := store.LoadSeeds(compID)
+	require.NoError(t, err)
+	require.Len(t, seeds, 1)
+	assert.Equal(t, "Wakaba", seeds[0].Dojo)
+}
+
 // TestReplaceDoesNotInheritOldDisplayName ensures that replacing a participant
 // with displayName:"" (the corrected JS payload) writes a clean 2-column CSV
 // row, not a 3-column row that carries the old slot's stale SanitizeName value.

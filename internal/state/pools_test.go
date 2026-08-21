@@ -6,6 +6,7 @@ import (
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -817,7 +818,7 @@ func TestLegacyHanteiNormalize(t *testing.T) {
 	t.Run("a legacy flag folds into the winner's side", func(t *testing.T) {
 		m := &MatchResult{SideA: "Alice", SideB: "Bob", Winner: "Bob",
 			IpponsA: []string{"M"}, IpponsB: []string{"K"},
-			DecidedByHantei: HanteiExplicit(true)}
+			DecidedByHantei: bctest.HanteiExplicit(true)}
 		m.NormalizeLegacyHantei()
 		assert.Equal(t, []string{"M"}, m.IpponsA)
 		assert.Equal(t, []string{"K", domain.HanteiMark}, m.IpponsB)
@@ -828,7 +829,7 @@ func TestLegacyHanteiNormalize(t *testing.T) {
 	t.Run("a 0-0 hantei still has a slot for it", func(t *testing.T) {
 		m := &MatchResult{SideA: "Alice", SideB: "Bob", Winner: "Alice",
 			IpponsA: []string{}, IpponsB: []string{},
-			DecidedByHantei: HanteiExplicit(true)}
+			DecidedByHantei: bctest.HanteiExplicit(true)}
 		m.NormalizeLegacyHantei()
 		assert.Equal(t, []string{domain.HanteiMark}, m.IpponsA)
 	})
@@ -836,7 +837,7 @@ func TestLegacyHanteiNormalize(t *testing.T) {
 	t.Run("the mark takes a placeholder slot before growing the slice", func(t *testing.T) {
 		m := &MatchResult{SideA: "Alice", SideB: "Bob", Winner: "Alice",
 			IpponsA: []string{"M", domain.IpponPlaceholder}, IpponsB: []string{"K", domain.IpponPlaceholder},
-			DecidedByHantei: HanteiExplicit(true)}
+			DecidedByHantei: bctest.HanteiExplicit(true)}
 		m.NormalizeLegacyHantei()
 		assert.Equal(t, []string{"M", domain.HanteiMark}, m.IpponsA)
 	})
@@ -844,7 +845,7 @@ func TestLegacyHanteiNormalize(t *testing.T) {
 	t.Run("a legacy explicit false strips the mark", func(t *testing.T) {
 		m := &MatchResult{SideA: "Alice", SideB: "Bob", Winner: "Alice",
 			IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"K"},
-			DecidedByHantei: HanteiExplicit(false)}
+			DecidedByHantei: bctest.HanteiExplicit(false)}
 		m.NormalizeLegacyHantei()
 		assert.Equal(t, []string{"M"}, m.IpponsA)
 		assert.False(t, m.HanteiDecided())
@@ -853,7 +854,7 @@ func TestLegacyHanteiNormalize(t *testing.T) {
 	t.Run("an unattributable winner is not guessed at", func(t *testing.T) {
 		m := &MatchResult{SideA: "Alice", SideB: "Bob", Winner: "Carol",
 			IpponsA: []string{"M"}, IpponsB: []string{"K"},
-			DecidedByHantei: HanteiExplicit(true)}
+			DecidedByHantei: bctest.HanteiExplicit(true)}
 		m.NormalizeLegacyHantei()
 		assert.Equal(t, []string{"M"}, m.IpponsA)
 		assert.Equal(t, []string{"K"}, m.IpponsB)
@@ -863,7 +864,7 @@ func TestLegacyHanteiNormalize(t *testing.T) {
 	t.Run("normalising twice does not double the mark", func(t *testing.T) {
 		m := &MatchResult{SideA: "Alice", SideB: "Bob", Winner: "Alice",
 			IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"K"},
-			DecidedByHantei: HanteiExplicit(true)}
+			DecidedByHantei: bctest.HanteiExplicit(true)}
 		m.NormalizeLegacyHantei()
 		assert.Equal(t, []string{"M", domain.HanteiMark}, m.IpponsA)
 	})
@@ -883,7 +884,7 @@ func TestLegacyHanteiNormalize(t *testing.T) {
 	t.Run("a sides-less payload cannot be attributed by the fold alone", func(t *testing.T) {
 		m := &MatchResult{Winner: "Alice",
 			IpponsA: []string{"M"}, IpponsB: []string{"K"},
-			DecidedByHantei: HanteiExplicit(true)}
+			DecidedByHantei: bctest.HanteiExplicit(true)}
 		m.NormalizeLegacyHantei()
 		assert.Equal(t, []string{"M"}, m.IpponsA)
 		assert.Equal(t, []string{"K"}, m.IpponsB)
@@ -895,7 +896,7 @@ func TestLegacyHanteiNormalize(t *testing.T) {
 		m := &MatchResult{SubResults: []SubMatchResult{{
 			Position: -1, SideA: "T1", SideB: "T2", Winner: "T2",
 			IpponsA: []string{}, IpponsB: []string{"M"},
-			DecidedByHantei: HanteiExplicit(true),
+			DecidedByHantei: bctest.HanteiExplicit(true),
 		}}}
 		m.NormalizeLegacyHantei()
 		assert.Equal(t, []string{"M", domain.HanteiMark}, m.SubResults[0].IpponsB)

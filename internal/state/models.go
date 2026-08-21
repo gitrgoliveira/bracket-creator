@@ -1091,16 +1091,6 @@ func (m *MatchResult) HanteiDecided() bool {
 	return domain.ContainsHantei(m.IpponsA) || domain.ContainsHantei(m.IpponsB)
 }
 
-// HanteiExplicit returns a pointer to the given value, INCLUDING false.
-// Legacy test-fixture constructor: production code never sets the legacy
-// DecidedByHantei fields (see legacy_hantei.go), so this exists only so tests
-// can construct a legacy payload shape (explicit true/false, as opposed to a
-// nil "writer said nothing") without hand-rolling `f := false; &f` at each
-// call site.
-func HanteiExplicit(v bool) *bool {
-	return &v
-}
-
 // EnchoMetadata records overtime / sudden-death periods played in a
 // match. Read/persisted only in Slice 1; the score endpoint accepts it
 // but does not yet act on it. Slice 3 (T076) will wire it into the

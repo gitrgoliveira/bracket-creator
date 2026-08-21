@@ -21,7 +21,7 @@
 // the wire) and produce the UI-friendly shape with object sides and a
 // unified `score` object the bracket card renderer can consume.
 
-import { realIppons, containsHt, placeHt, stripHt } from './result_slot.jsx';
+import { realIppons, hanteiDecided, placeHtForWinner, stripHt } from './result_slot.jsx';
 const STATUS_MAP = { "complete": "completed", "in_progress": "running" };
 
 function toBackendStatus(s) { return STATUS_MAP[s] || s; }
@@ -33,14 +33,17 @@ function isKikenDecision(v) { return v === "kiken" || v === "kiken-voluntary" ||
 // Translate UI score patch into backend MatchResult shape.
 // UI sends: { winner: {id,name,...}, status, score: {type,winnerPts,loserPts,ippons,fouls,...} }
 // The judges'-decision verdict is recorded as the "Ht" entry in the WINNER's
-// ippon list (the mark IS the record; Go: domain.HanteiMark). containsHt is
-// the read predicate, placeHt the write placement (fill a free placeholder
-// slot before growing, mirroring domain.AppendHantei so the mark lands in
-// the winner's next free slot); stripHt drops a stored mark without
-// touching any other letter. All three now live in result_slot.jsx (the
-// declared owner of the Ht slot rule) alongside realIppons - this file was
-// a fourth consumer with its own copies, which is exactly the drift that
-// primitive is meant to prevent.
+// ippon list (the mark IS the record; Go: domain.HanteiMark). hanteiDecided
+// is the read predicate (does this match/sub carry the mark on either
+// side); placeHtForWinner is the write placement - given a winner name and
+// the two side names, it places the mark on whichever side's name matches
+// (mirroring domain.AppendHantei so the mark lands in the winner's next
+// free slot), or leaves both arrays untouched when the winner names
+// neither side; stripHt drops a stored mark without touching any other
+// letter. All four now live in result_slot.jsx (the declared owner of the
+// Ht slot rule) alongside realIppons - this file was a fourth consumer
+// with its own copies, which is exactly the drift that primitive is meant
+// to prevent.
 
 // Backend expects: { winner: string, ipponsA: [], ipponsB: [], hansokuA: int, hansokuB: int, decision: "", status: "completed"|"running"|"scheduled" }
 function toBackendMatchResult(patch, match) {
@@ -109,18 +112,15 @@ function toBackendMatchResult(patch, match) {
             const { decidedByHantei, ...rest } = sub;
             let a = stripHt(rest.ipponsA), b = stripHt(rest.ipponsB);
             if (decidedByHantei) {
-                if (rest.winner && rest.winner === rest.sideA) {
-                    a = placeHt(a);
-                } else if (rest.winner && rest.winner === rest.sideB) {
-                    b = placeHt(b);
-                }
-                // Else the winner names NEITHER side (no winner, or a
-                // rename-drifted name): the mark has no side to ride on, so
-                // both arrays stay markless. This is CLAUDE.md's accepted
-                // no-mark class (ii), and it is also the only shape the
-                // server accepts - validateHanteiMarkPlacement rejects a mark
-                // whose winner is not that side's name, so echoing one back
-                // would 400 every later save of the match.
+                // If the winner names NEITHER side (no winner, or a
+                // rename-drifted name), placeHtForWinner leaves both arrays
+                // untouched: the mark has no side to ride on, so both stay
+                // markless. This is CLAUDE.md's accepted no-mark class (ii),
+                // and it is also the only shape the server accepts -
+                // validateHanteiMarkPlacement rejects a mark whose winner is
+                // not that side's name, so echoing one back would 400 every
+                // later save of the match.
+                [a, b] = placeHtForWinner(rest.winner, rest.sideA, rest.sideB, a, b);
             }
             return { ...rest, ipponsA: a, ipponsB: b };
         });
@@ -154,13 +154,10 @@ function toBackendMatchResult(patch, match) {
         ? patch.decidedByHantei
         : !!match?.decidedByHantei;
     if (wantHantei) {
-        if (winnerName && winnerName === sideAName) {
-            result.ipponsA = placeHt(result.ipponsA);
-        } else if (winnerName && winnerName === sideBName) {
-            result.ipponsB = placeHt(result.ipponsB);
-        }
-        // Else the winner names NEITHER side: no mark is placed, per the same
-        // rule as the sub-bout branch above.
+        // Same placeHtForWinner rule as the sub-bout branch above: a winner
+        // naming neither side leaves both arrays untouched, so no mark is
+        // placed.
+        [result.ipponsA, result.ipponsB] = placeHtForWinner(winnerName, sideAName, sideBName, result.ipponsA, result.ipponsB);
     }
     return result;
 }
@@ -259,15 +256,15 @@ function normalizeMatch(m, playerMap) {
     // Deriving it here keeps every display surface and editor reading the
     // property they always read, off the one place the verdict actually
     // lives. Per-sub likewise.
-    norm.decidedByHantei = containsHt(norm.ipponsA) || containsHt(norm.ipponsB);
+    norm.decidedByHantei = hanteiDecided(norm);
     // Pre-check with .some() before mapping: most matches carry no hantei
     // sub at all (a daihyosen/hantei bout is the exception, not the rule),
     // so allocating a fresh array on every normalizeMatch call would be a
     // needless copy on the common path. When no sub carries the mark, the
     // original array identity is preserved rather than an unmodified clone.
-    if (Array.isArray(norm.subResults) && norm.subResults.some((sub) => sub && (containsHt(sub.ipponsA) || containsHt(sub.ipponsB)))) {
+    if (Array.isArray(norm.subResults) && norm.subResults.some((sub) => sub && hanteiDecided(sub))) {
         norm.subResults = norm.subResults.map((sub) =>
-            sub && (containsHt(sub.ipponsA) || containsHt(sub.ipponsB))
+            sub && hanteiDecided(sub)
                 ? { ...sub, decidedByHantei: true }
                 : sub);
     }

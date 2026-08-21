@@ -158,11 +158,18 @@ var errSeedRosterUnreadable = errors.New("seed roster could not be read")
 // held a valid 1..N and drew, while every reader that merges seeds onto players
 // by name saw only the survivors and read the ghost's rank as an unclosable gap.
 //
-// Name is checked on its own here, deliberately COARSER than the
-// domain.SeedKey (name, dojo) pair the matchers and the state.loadParticipants
-// merge key on: any assignment those would attach names a participant that
-// this check finds by name, so nothing the merge accepts is refused here,
-// while a ghost naming nobody is refused either way.
+// Checked via domain.RosterIndex.Lookup, the SAME (name, dojo)-with-
+// unique-bare-name-fallback resolver the merge (state.loadParticipants) and
+// every other matcher use, so this gate and the merge can never disagree.
+// It used to check Name alone, deliberately coarser than the pair, on the
+// reasoning that "anything the merge attaches, this finds by name too" -- but
+// that reasoning broke once seeds carry a dojo (bc-389): a row naming a
+// roster name with the WRONG dojo passes a name-only check yet the merge can
+// never attach it (exact key misses, and the bare-name fallback is disabled
+// whenever the row carries a non-empty dojo), so seeds.csv saved cleanly with
+// an unattached rank and only generate-draw failed, minutes or hours later,
+// with "seeded participant not found in main list" -- exactly the split-views
+// failure this gate exists to catch at write time instead.
 //
 // An empty roster is NOT treated as "everything is a ghost": seeds for a
 // competition whose participants have not been written yet are refused only when
@@ -195,13 +202,10 @@ func rejectSeedsOffRoster(store *state.Store, compID string, assignments []domai
 	if len(players) == 0 {
 		return nil
 	}
-	onRoster := make(map[string]bool, len(players))
-	for _, p := range players {
-		onRoster[p.Name] = true
-	}
+	roster := domain.NewRosterIndex(players)
 	var unknown []string
 	for _, a := range assignments {
-		if !onRoster[a.Name] {
+		if _, ok := roster.Lookup(a.Name, a.Dojo); !ok {
 			unknown = append(unknown, fmt.Sprintf("%q (rank %d)", a.Name, a.SeedRank))
 		}
 	}
@@ -214,6 +218,48 @@ func rejectSeedsOffRoster(store *state.Store, compID string, assignments []domai
 	}
 	return fmt.Errorf("seeds: %s %s not on this competition's roster; a seed rank must belong to a participant. %s",
 		strings.Join(unknown, ", "), verb, seedGapRemedyPut)
+}
+
+// seedsOrphanedByRosterReplace reports which of the CURRENTLY resolvable
+// seed assignments would stop resolving if oldPlayers were replaced by
+// newPlayers -- the set POST /competitions/:id/participants (the bulk
+// roster-replace endpoint) would silently strand, since that endpoint
+// carries no seed data of its own and so has no way to rewrite seeds.csv
+// alongside an identity change (bc-389 review finding). Both rosters are
+// resolved via domain.RosterIndex, the same (name, dojo)-with-unique-
+// bare-name-fallback resolver every other seed matcher uses, so "would
+// this still resolve" here means exactly what it means to generate-draw.
+//
+// A seed row that is ALREADY unresolvable against oldPlayers (a
+// pre-existing ghost, e.g. seeds entered before the roster) is not
+// reported: this replace does not make that row any less broken than it
+// already was, and refusing on its account would block an unrelated
+// roster edit for a problem the operator did not just create.
+//
+// Returned as ready-to-display "name (dojo) rank N" labels rather than raw
+// domain.SeedAssignment values; callers needing the structured form should
+// re-derive it rather than parse this slice.
+func seedsOrphanedByRosterReplace(oldPlayers, newPlayers []domain.Player, seeds []domain.SeedAssignment) []string {
+	if len(seeds) == 0 {
+		return nil
+	}
+	oldRoster := domain.NewRosterIndex(oldPlayers)
+	newRoster := domain.NewRosterIndex(newPlayers)
+	var orphaned []string
+	for _, a := range seeds {
+		if _, ok := oldRoster.Lookup(a.Name, a.Dojo); !ok {
+			continue // already unresolvable; this replace doesn't make it worse
+		}
+		if _, ok := newRoster.Lookup(a.Name, a.Dojo); ok {
+			continue // still resolves after the replace
+		}
+		label := a.Name
+		if a.Dojo != "" {
+			label = fmt.Sprintf("%s (%s)", a.Name, a.Dojo)
+		}
+		orphaned = append(orphaned, fmt.Sprintf("%s rank %d", label, a.SeedRank))
+	}
+	return orphaned
 }
 
 // validateHTTPURL returns a ValidationError when val is non-empty and does not
@@ -337,22 +383,26 @@ func validateSubBout(prefix string, sr *state.SubMatchResult, allowNumberedEncho
 	return nil
 }
 
+// countHantei counts how many entries of a single ippon slice carry the
+// judges'-decision mark. Kept local (not domain.CountHantei) rather than
+// widening the domain package for this PR; validateHanteiMarkPlacement sums
+// it over both sides instead of hand-rolling the same loop twice.
+func countHantei(ippons []string) int {
+	n := 0
+	for _, v := range ippons {
+		if v == domain.HanteiMark {
+			n++
+		}
+	}
+	return n
+}
+
 // validateHanteiMarkPlacement enforces the STRUCTURAL half of the hantei
 // rules, shared by the match-level and sub-bout blocks: the judges'-decision
 // mark appears at most once, only in the WINNER's slice (it names the
 // competitor the referees chose), and a winner must be named for it to name.
 func validateHanteiMarkPlacement(prefix string, ipponsA, ipponsB []string, sideA, sideB, winner string) error {
-	marks := 0
-	for _, v := range ipponsA {
-		if v == domain.HanteiMark {
-			marks++
-		}
-	}
-	for _, v := range ipponsB {
-		if v == domain.HanteiMark {
-			marks++
-		}
-	}
+	marks := countHantei(ipponsA) + countHantei(ipponsB)
 	if marks > 1 {
 		return &ValidationError{Field: prefix + "ippons", Message: "at most one hantei mark per bout"}
 	}
@@ -399,7 +449,7 @@ func hanteiTiedScorelineError(prefix string) *ValidationError {
 // NARROWER than the sub-bout one (it excludes "daihyosen", which only a
 // representative bout can carry); see domain.IsMatchHanteiCompatibleDecisionStr.
 func validateMatchHantei(r *state.MatchResult) error {
-	if !domain.ContainsHantei(r.IpponsA) && !domain.ContainsHantei(r.IpponsB) {
+	if !r.HanteiDecided() {
 		return nil
 	}
 	if err := validateHanteiMarkPlacement("", r.IpponsA, r.IpponsB, r.SideA, r.SideB, r.Winner); err != nil {
@@ -824,7 +874,7 @@ const maxIpponsPerSide = 2
 // best-of-3 invariants on a single match (or sub-bout) tally, and the shape of
 // the entries themselves. Rules:
 //
-//   - each entry is a single character (domain.IpponFitsScoreCodec)
+//   - each entry is a single character (domain.IsValidIpponEntry)
 //   - len(ipponsA) ≤ 2 and len(ipponsB) ≤ 2
 //   - NOT (scoring(ipponsA) == 2 && scoring(ipponsB) == 2)  , the 2-2 ban
 //
@@ -881,16 +931,16 @@ func validateIppons(field string, ipponsA, ipponsB []string) error {
 }
 
 // ipponEntriesWellFormed rejects a multi-rune ippon entry on one side. The
-// reasoning lives on domain.IpponFitsScoreCodec, beside the codec whose
-// precondition this is; the short version is that FormatScore joins with no
-// separator, so "MHt" comes back as three ippons — and on a POOL match the
-// two-rune "Ht" is the verdict ENCODING, so accepting one from a client let a
-// payload forge a judges' decision that appeared on the next reload.
+// reasoning lives on domain.IsValidIpponEntry, beside the invariant it
+// enforces; the short version is that a POOL match's two-rune "Ht" is the
+// verdict ENCODING, so accepting an arbitrary multi-rune entry from a client
+// would let a payload forge a judges' decision that appeared on the next
+// reload.
 //
 // field is the fully-qualified JSON field name, e.g. "subResults[0].ipponsA".
 func ipponEntriesWellFormed(field string, ippons []string) error {
 	for _, v := range ippons {
-		if !domain.IpponFitsScoreCodec(v) {
+		if !domain.IsValidIpponEntry(v) {
 			// Says SHAPE, not vocabulary, because that is what is enforced. The
 			// letters are deliberately open (naginata adds "S", and the round-trip
 			// tests pin letter-agnosticism), so naming a closed set here would

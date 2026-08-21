@@ -108,21 +108,63 @@ func TestDropSeedAssignments_CaseSensitive(t *testing.T) {
 		{Name: "alice", CheckedIn: false},
 		{Name: "Bob", CheckedIn: true},
 	}
-	excluded := checkInExcludedNames(players)
-	require.Contains(t, excluded, "alice")
-	require.NotContains(t, excluded, "Alice", "checked-in Alice must not be in the excluded set")
+	excluded := checkInExcludedKeys(players)
+	require.Contains(t, excluded, domain.SeedKey("alice", ""))
+	require.NotContains(t, excluded, domain.SeedKey("Alice", ""), "checked-in Alice must not be in the excluded set")
 
 	seeds := []domain.SeedAssignment{
 		{Name: "Alice", SeedRank: 1},
 		{Name: "Bob", SeedRank: 2},
 	}
-	out := dropSeedAssignments(seeds, excluded)
+	out := dropSeedAssignments(players, seeds, excluded)
 	require.Len(t, out, 2, "checked-in Alice's seed must survive an excluded case-variant 'alice'")
 	got := map[string]bool{}
 	for _, a := range out {
 		got[a.Name] = true
 	}
 	assert.True(t, got["Alice"] && got["Bob"])
+}
+
+// TestDropSeedAssignments_NamesakeDojoDisambiguates is the regression guard
+// for the bc-389 review finding: a bare-name exclusion set used to drop BOTH
+// namesakes' seeds whenever only one of them failed to check in, silently
+// undoing a correctly seeded, checked-in competitor's seed. Two participants
+// share the name "John Smith" from different dojos; only the Tora one fails
+// to check in. The Wakaba seed (rank 1) must survive.
+func TestDropSeedAssignments_NamesakeDojoDisambiguates(t *testing.T) {
+	players := []domain.Player{
+		{Name: "John Smith", Dojo: "Wakaba", CheckedIn: true},
+		{Name: "John Smith", Dojo: "Tora", CheckedIn: false},
+	}
+	excluded := checkInExcludedKeys(players)
+	require.Contains(t, excluded, domain.SeedKey("John Smith", "Tora"))
+	require.NotContains(t, excluded, domain.SeedKey("John Smith", "Wakaba"))
+
+	seeds := []domain.SeedAssignment{
+		{Name: "John Smith", Dojo: "Wakaba", SeedRank: 1},
+	}
+	out := dropSeedAssignments(players, seeds, excluded)
+	require.Len(t, out, 1, "the checked-in namesake's seed must survive excluding the OTHER namesake")
+	assert.Equal(t, "Wakaba", out[0].Dojo)
+}
+
+// TestDropSeedAssignments_LegacyEmptyDojoStillDroppable pins the CAREFUL note
+// from the bc-389 review: a legacy seed row with no dojo must still be
+// droppable when its unique-name owner is excluded (the RosterIndex
+// unique-bare-name fallback), not just when the row carries a dojo.
+func TestDropSeedAssignments_LegacyEmptyDojoStillDroppable(t *testing.T) {
+	players := []domain.Player{
+		{Name: "Solo Smith", Dojo: "OnlyDojo", CheckedIn: false},
+		{Name: "Bob", Dojo: "BobDojo", CheckedIn: true},
+	}
+	excluded := checkInExcludedKeys(players)
+	seeds := []domain.SeedAssignment{
+		{Name: "Solo Smith", SeedRank: 1}, // legacy row: no dojo
+		{Name: "Bob", SeedRank: 2},
+	}
+	out := dropSeedAssignments(players, seeds, excluded)
+	require.Len(t, out, 1, "the legacy no-dojo row for the excluded unique-name owner must still be dropped")
+	assert.Equal(t, "Bob", out[0].Name)
 }
 
 // TestStartCompetition_MixedFormat_ExcludesNonCheckedIn verifies that when

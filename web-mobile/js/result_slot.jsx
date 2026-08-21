@@ -12,6 +12,19 @@
 // pure functions, and leaving any future surface (the viewer card, the overlay)
 // the same bad choice. A shared rule belongs in the leaf, not in one consumer.
 //
+// `containsHt`, `hanteiDecided`, `placeHt`, `placeHtForWinner` and `stripHt`
+// are the wire-serializer's slice of the same rule: api_serializers.jsx's
+// toBackendMatchResult and normalizeMatch are the consumers. `hanteiDecided`
+// answers "does this match/sub carry the mark" (mirrors Go's
+// HanteiDecided()); `placeHtForWinner` answers "which side does an armed
+// verdict's mark go on" (winner names sideA/sideB/neither) — both replaced
+// literal `containsHt(x.ipponsA) || containsHt(x.ipponsB)` / winner-name
+// if-chains duplicated across that file's two write paths. IPPON_PLACEHOLDER
+// ("•", U+2022 BULLET) and HANTEI_MARK ("Ht") are this file's two literal
+// tokens, spelled once each and mirrored byte-for-byte by Go's
+// internal/domain/ippon.go (IpponPlaceholder / HanteiMark) — pinned by
+// __tests__/result_slot_constants.test.jsx.
+//
 // WHY A SEPARATE LEAF, AND NOT bracket.jsx (the ONE statement of this — the
 // other sites point here; THREE earlier rationales have been wrong now, so
 // verify against the build before writing a fourth): Makefile `esbuild-jsx`
@@ -61,17 +74,29 @@
 // and on the bulk path. The branch exists solely so a hand-edited file can
 // never overwrite a recorded point.
 
+// IPPON_PLACEHOLDER / HANTEI_MARK: the two literal tokens this file's rules
+// are built from, spelled ONCE each and used everywhere below instead of
+// raw string literals. Mirrors Go's internal/domain/ippon.go exactly —
+// IpponPlaceholder ("•", U+2022 BULLET) and HanteiMark ("Ht") — so a
+// divergence between the two languages fails a test
+// (result_slot_constants.test.jsx) rather than silently drifting apart.
+// Exported so that test can assert on the literal values directly, rather
+// than inferring them indirectly through behaviour.
+export const IPPON_PLACEHOLDER = "•";
+export const HANTEI_MARK = "Ht";
+
 // isFreeSlot: a slot is free when it holds no letter — an empty string OR
-// the "•" no-strike placeholder. Mirrors Go's domain.AppendHantei (both
-// treat "" and "•" as free). Shared by resultSlot (which slot a mark takes
-// in a 2-cell pair) and placeHt below (which slot a mark takes in a
-// growable ippon array) so there is exactly one definition of "free" in
-// this file — previously resultSlot's own inline predicate treated "•" as
-// OCCUPIED, a paper divergence from placeHt's that never fired in practice
-// (every real input reaching resultSlot is pre-stripped of the placeholder
-// by realIppons before display), but still left two answers to the same
-// question in one dependency chain.
-const isFreeSlot = (v) => !v || v === "•";
+// the IPPON_PLACEHOLDER no-strike placeholder. Mirrors Go's
+// domain.AppendHantei (both treat "" and the placeholder as free). Shared
+// by resultSlot (which slot a mark takes in a 2-cell pair) and placeHt
+// below (which slot a mark takes in a growable ippon array) so there is
+// exactly one definition of "free" in this file — previously resultSlot's
+// own inline predicate treated the placeholder as OCCUPIED, a paper
+// divergence from placeHt's that never fired in practice (every real input
+// reaching resultSlot is pre-stripped of the placeholder by realIppons
+// before display), but still left two answers to the same question in one
+// dependency chain.
+const isFreeSlot = (v) => !v || v === IPPON_PLACEHOLDER;
 
 export function resultSlot(cells) {
   const pair = cells || [];
@@ -106,9 +131,10 @@ export function sideSlotOrder(side) {
   return side === "aka" ? [1, 0] : [0, 1];
 }
 
-// realIppons: what counts as a RECORDED ippon (drops empties, the "\u2022"
-// placeholder, and the "Ht" judges'-decision mark — a hantei records who the
-// referees chose, not that anyone struck). Mirrors domain.IsScoringIppon. Exported so the surfaces that gate on a COUNT all count the
+// realIppons: what counts as a RECORDED ippon (drops empties, the
+// IPPON_PLACEHOLDER, and the HANTEI_MARK judges'-decision mark — a hantei
+// records who the referees chose, not that anyone struck). Mirrors
+// domain.IsScoringIppon. Exported so the surfaces that gate on a COUNT all count the
 // same way; the display pair, the hantei tie gates and the editors' totals must
 // never read different totals from one array.
 //
@@ -128,7 +154,7 @@ export function sideSlotOrder(side) {
 // many ippons is this". An empty cell is not a scored ippon on any path.
 // (Go's equivalent is domain.CountScoringIppons, which both the engine and the
 // wire validator now call — that pair no longer needs a keep-in-sync comment.)
-export const realIppons = (arr) => (arr || []).filter(x => x && x !== "\u2022" && x !== "Ht");
+export const realIppons = (arr) => (arr || []).filter(x => x && x !== IPPON_PLACEHOLDER && x !== HANTEI_MARK);
 
 // containsHt / placeHt / stripHt: the wire-serializer's half of the same
 // Ht-as-a-real-ippon-slice-entry contract realIppons reads. Moved here from
@@ -137,7 +163,7 @@ export const realIppons = (arr) => (arr || []).filter(x => x && x !== "\u2022" &
 // above), each with its own copy of "what counts as a free slot" or "what
 // counts as the mark". Consolidating means placeHt's free-slot search shares
 // isFreeSlot with resultSlot (defined above), and containsHt/stripHt share
-// the "Ht" literal with realIppons, so there is exactly one definition of
+// HANTEI_MARK with realIppons, so there is exactly one definition of
 // each, not four. api_serializers.jsx already imports realIppons from here
 // via a static ES import, so importing these three follows the identical,
 // already-established route.
@@ -145,26 +171,55 @@ export const realIppons = (arr) => (arr || []).filter(x => x && x !== "\u2022" &
 // containsHt: the read predicate - does this ippon array already carry the
 // mark. The wire never sends a separate flag, so this is the ONLY way to
 // detect a stored verdict on an array.
-export const containsHt = (arr) => Array.isArray(arr) && arr.includes("Ht");
+export const containsHt = (arr) => Array.isArray(arr) && arr.includes(HANTEI_MARK);
+
+// hanteiDecided: whether a match/sub-shaped object (anything with an
+// ipponsA/ipponsB pair) carries the mark on either side. Mirrors Go's
+// HanteiDecided() on MatchResult and SubMatchResult (internal/state/models.go)
+// — one predicate, not `containsHt(x.ipponsA) || containsHt(x.ipponsB)`
+// spelled out at each call site (api_serializers.jsx's normalizeMatch used to
+// spell it three times: once for the match itself, once in a .some() gate,
+// once again inside the following .map()).
+export const hanteiDecided = (obj) => containsHt(obj?.ipponsA) || containsHt(obj?.ipponsB);
 
 // placeHt: the write placement - fill a free placeholder slot before
 // growing, mirroring domain.AppendHantei so the mark lands in the winner's
 // next free slot (0-0 -> outer, 1-1 -> inner), never overwriting a struck
-// point. A no-op if the array already carries the mark (never double-place).
+// point. A no-op if the array already carries the mark (never double-place):
+// checked BEFORE copying, so the common re-save-of-an-already-marked-match
+// path returns the input array unchanged instead of allocating a throwaway
+// copy just to discover there was nothing to place.
 export function placeHt(arr) {
+  if ((arr || []).includes(HANTEI_MARK)) return arr || [];
   const out = [...(arr || [])];
-  if (out.includes("Ht")) return out;
   const free = out.findIndex(isFreeSlot);
-  if (free >= 0) { out[free] = "Ht"; return out; }
-  out.push("Ht");
+  if (free >= 0) { out[free] = HANTEI_MARK; return out; }
+  out.push(HANTEI_MARK);
   return out;
 }
 
-// stripHt: drop a stored "Ht" entry from an ippon array without touching any
-// other letter. Used where a caller must re-derive placement (e.g. re-adding
-// the mark to a different, still-attributable side) rather than simply
-// reading past it the way realIppons does for display/counting.
-export const stripHt = (arr) => (arr || []).filter((v) => v !== "Ht");
+// stripHt: drop a stored HANTEI_MARK entry from an ippon array without
+// touching any other letter. Used where a caller must re-derive placement
+// (e.g. re-adding the mark to a different, still-attributable side) rather
+// than simply reading past it the way realIppons does for display/counting.
+export const stripHt = (arr) => (arr || []).filter((v) => v !== HANTEI_MARK);
+
+// placeHtForWinner: the ONE statement of "which side gets the mark" - winner
+// names sideA -> place it on A; names sideB -> place it on B; names NEITHER
+// (no winner, or a rename-drifted/unattributable name) -> leave both arrays
+// exactly as given. api_serializers.jsx's toBackendMatchResult had this same
+// three-way switch written out twice (once for the top-level match, once per
+// sub-bout), which is exactly the kind of copy this file exists to prevent
+// for the rest of the Ht rules. It takes the already-prepared ipponsA/ipponsB
+// (callers decide separately whether to stripHt first: the top-level caller's
+// arrays already arrive pre-stripped via realIppons, the sub-bout caller
+// strips explicitly) and returns [newA, newB], unchanged on whichever side it
+// did not touch.
+export function placeHtForWinner(winner, sideA, sideB, ipponsA, ipponsB) {
+  if (winner && winner === sideA) return [placeHt(ipponsA), ipponsB];
+  if (winner && winner === sideB) return [ipponsA, placeHt(ipponsB)];
+  return [ipponsA, ipponsB];
+}
 
 // hanteiTied: the ONE JS statement of "hantei applies only to a tied
 // scoreline" (FIK 7-5 / 29-6, mirroring validation.go's equal-counts gate),

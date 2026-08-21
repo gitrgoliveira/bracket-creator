@@ -10,6 +10,7 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
@@ -112,7 +113,7 @@ func TestMatchResult_HanteiOmitempty(t *testing.T) {
 		assert.NotContains(t, string(b), "decidedByHantei", "wire payload must omit the field when nothing set it")
 	})
 	t.Run("legacy explicit true emits true", func(t *testing.T) {
-		mr := &MatchResult{ID: "m1", DecidedByHantei: HanteiExplicit(true)}
+		mr := &MatchResult{ID: "m1", DecidedByHantei: bctest.HanteiExplicit(true)}
 		b, err := json.Marshal(mr)
 		require.NoError(t, err)
 		assert.Contains(t, string(b), `"decidedByHantei":true`)
@@ -148,7 +149,7 @@ func TestSubMatchResult_HanteiRoundTrip(t *testing.T) {
 	t.Run("a legacy explicit false strips a stale mark on normalize", func(t *testing.T) {
 		got := SubMatchResult{Position: -1, SideA: "A", SideB: "B", Winner: "A",
 			IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"K"},
-			DecidedByHantei: HanteiExplicit(false)}
+			DecidedByHantei: bctest.HanteiExplicit(false)}
 		got.normalizeLegacyHantei()
 		assert.False(t, got.HanteiDecided())
 		assert.Equal(t, []string{"M"}, got.IpponsA)

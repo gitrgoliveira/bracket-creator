@@ -7,6 +7,7 @@ import (
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -1512,7 +1513,7 @@ func TestScoreRequestValidate_HanteiTieGateIgnoresPlaceholders(t *testing.T) {
 			Decision:        "daihyosen",
 			IpponsA:         []string{"M", "•"},
 			IpponsB:         []string{"K"},
-			DecidedByHantei: state.HanteiExplicit(true),
+			DecidedByHantei: bctest.HanteiExplicit(true),
 		}
 		assert.NoError(t, validateSubBout("subResults[0].", sub, false))
 	})
@@ -1564,8 +1565,7 @@ func TestValidateIpponCounts_TwoTwoRuleCountsPointsNotSlots(t *testing.T) {
 }
 
 // An ippon entry must be a single character. The rule is domain's
-// (IpponFitsScoreCodec, stated beside the FormatScore/ParseScore pair whose
-// precondition it is); this pins that the wire boundary actually enforces it,
+// (IsValidIpponEntry); this pins that the wire boundary actually enforces it,
 // on BOTH the ScoreRequest path and the bulk path, at match level and on a
 // sub-bout.
 //
@@ -1582,8 +1582,8 @@ func TestValidateIpponCounts_TwoTwoRuleCountsPointsNotSlots(t *testing.T) {
 func TestIpponEntriesMustBeSingleCharacters(t *testing.T) {
 	// Semantic flip (rule 4): the mark is no longer "smuggled in as a point" —
 	// domain.HanteiMark IS the verdict record (operator ruling 2026-08-21),
-	// and domain.IpponFitsScoreCodec deliberately admits it as the ONE
-	// multi-rune token the codec understands. validateIppons therefore
+	// and domain.IsValidIpponEntry deliberately admits it as the ONE
+	// multi-rune entry the invariant allows. validateIppons therefore
 	// accepts it structurally; PLACEMENT (at most one mark, only in the
 	// winner's slice, tied scoreline) is a separate rule
 	// (validateHanteiMarkPlacement), exercised by TestScoreRequestValidate_Hantei

@@ -2,6 +2,7 @@ package engine
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"sync"
 	"testing"
@@ -1112,6 +1113,147 @@ func TestHansokuHanteiConflict(t *testing.T) {
 	})
 }
 
+// TestHansokuHanteiConflict_SubResults pins the sub-bout (daihyosen) twin of
+// TestHansokuHanteiConflict: applyHansokuIppons folds hansoku into every
+// SubResults row too (scoring.go's applyOneSide loop), so the same untying
+// hazard exists there, and nothing downstream catches it — stripInvalidHantei
+// and preserveSubHantei both operate at the match level only. Before the fix,
+// checkHansokuHanteiConflict tested only result.HanteiDecided()/
+// HanteiTiedScoreline on the TOP-level ippons, so a daihyosen sub row like
+// {ipponsA:[M,Ht], ipponsB:[M], hansokuB:2} (tied 1-1 pre-fold) sailed through
+// RecordMatchResult with a nil error and persisted [M,Ht,H] vs [M] — untied,
+// mark still standing, AND already over the best-of-3 per-side cap. The next
+// full-echo save of that match (mobileapp's ScoreRequest.Validate walks every
+// SubResults row) would then 400 on the len>2 check, wedging the editor with
+// no clear path back, since the poisoned row was never rejected at write time.
+func TestHansokuHanteiConflict_SubResults(t *testing.T) {
+	mark := domain.HanteiMark
+
+	newTeamComp := func(t *testing.T, id string) (*Engine, *state.Store) {
+		t.Helper()
+		eng, store, _ := setupTestEngine(t)
+		require.NoError(t, store.SaveCompetition(&state.Competition{ID: id, Name: "HH-sub", Kind: "team"}))
+		require.NoError(t, store.SavePoolMatches(id, []state.MatchResult{
+			{ID: "P1-1", SideA: "TeamA", SideB: "TeamB", Status: state.MatchStatusScheduled},
+		}))
+		return eng, store
+	}
+
+	// The exact reviewer-verified shape: a daihyosen sub row tied 1-1
+	// (Ht is non-scoring) that HansokuB:2 folds into 2-1 while the mark
+	// still stands on the winner's side.
+	untyingSubPatch := func() *state.MatchResult {
+		return &state.MatchResult{
+			SideA: "TeamA", SideB: "TeamB", Winner: "TeamA",
+			Status: state.MatchStatusCompleted,
+			SubResults: []state.SubMatchResult{
+				{
+					Position: state.DaihyosenSubPosition,
+					SideA:    "TeamA", SideB: "TeamB",
+					IpponsA:  []string{"M", mark},
+					IpponsB:  []string{"M"},
+					HansokuB: 2,
+					Winner:   "TeamA",
+					Decision: "daihyosen",
+				},
+			},
+		}
+	}
+
+	t.Run("non-tx: RecordMatchResult rejects the untying sub-row award", func(t *testing.T) {
+		eng, store := newTeamComp(t, "hh-sub-nontx")
+		err := eng.RecordMatchResult("hh-sub-nontx", "P1-1", untyingSubPatch())
+		require.Error(t, err)
+		var verr *ValidationError
+		require.True(t, errors.As(err, &verr), "must be a *ValidationError so handlers map it to 400")
+		assert.Contains(t, verr.Msg, "subResults[0]")
+		assert.Contains(t, verr.Msg, "hantei requires a tied scoreline")
+
+		// The poisoned row must never have reached disk.
+		stored, loadErr := store.LoadPoolMatches("hh-sub-nontx")
+		require.NoError(t, loadErr)
+		require.Len(t, stored, 1)
+		assert.Empty(t, stored[0].SubResults, "rejected write must not persist the sub row")
+	})
+
+	t.Run("tx: RecordMatchResultWithIneligibilityTx (the production score route) rejects the untying sub-row award", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		const compID = "hh-sub-tx"
+		require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "HH-sub", Kind: "team"}))
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "P1-1", SideA: "TeamA", SideB: "TeamB", Status: state.MatchStatusScheduled},
+		}))
+		err := store.WithTransaction(compID, func(tx state.StoreTx) error {
+			_, terr := eng.RecordMatchResultWithIneligibilityTx(tx, compID, "P1-1", untyingSubPatch())
+			return terr
+		})
+		require.Error(t, err)
+		var verr *ValidationError
+		require.True(t, errors.As(err, &verr), "must be a *ValidationError so handlers map it to 400")
+		assert.Contains(t, verr.Msg, "subResults[0]")
+	})
+
+	t.Run("RecordMatchResultWithIneligibility (the third call site) rejects the untying sub-row award", func(t *testing.T) {
+		eng, _ := newTeamComp(t, "hh-sub-ineligibility")
+		_, err := eng.RecordMatchResultWithIneligibility("hh-sub-ineligibility", "P1-1", untyingSubPatch())
+		require.Error(t, err)
+		var verr *ValidationError
+		require.True(t, errors.As(err, &verr), "must be a *ValidationError so handlers map it to 400")
+		assert.Contains(t, verr.Msg, "subResults[0]")
+	})
+
+	t.Run("overflow shape: a sub row already at the cap plus a folded H is rejected even without a mark", func(t *testing.T) {
+		eng, _ := newTeamComp(t, "hh-sub-overflow")
+		patch := &state.MatchResult{
+			SideA: "TeamA", SideB: "TeamB", Winner: "TeamA",
+			Status: state.MatchStatusCompleted,
+			SubResults: []state.SubMatchResult{
+				{
+					Position: state.DaihyosenSubPosition,
+					SideA:    "TeamA", SideB: "TeamB",
+					IpponsA:  []string{"M", "K"}, // already at the best-of-3 cap
+					IpponsB:  []string{},
+					HansokuB: 2, // folds one more "H" onto IpponsA -> len 3
+					Winner:   "TeamA",
+					Decision: "daihyosen",
+				},
+			},
+		}
+		err := eng.RecordMatchResult("hh-sub-overflow", "P1-1", patch)
+		require.Error(t, err)
+		var verr *ValidationError
+		require.True(t, errors.As(err, &verr), "must be a *ValidationError so handlers map it to 400")
+		assert.Contains(t, verr.Msg, "subResults[0]")
+		assert.Contains(t, verr.Msg, "at most 2 ippons per side")
+	})
+
+	t.Run("a markless, non-overflowing sub-row hansoku award is unaffected", func(t *testing.T) {
+		eng, store := newTeamComp(t, "hh-sub-ok")
+		patch := &state.MatchResult{
+			SideA: "TeamA", SideB: "TeamB", Winner: "TeamA",
+			Status: state.MatchStatusCompleted,
+			SubResults: []state.SubMatchResult{
+				{
+					Position: state.DaihyosenSubPosition,
+					SideA:    "TeamA", SideB: "TeamB",
+					IpponsA:  []string{"M"},
+					IpponsB:  []string{},
+					HansokuB: 2,
+					Winner:   "TeamA",
+					Decision: "daihyosen",
+				},
+			},
+		}
+		require.NoError(t, eng.RecordMatchResult("hh-sub-ok", "P1-1", patch))
+
+		stored, err := store.LoadPoolMatches("hh-sub-ok")
+		require.NoError(t, err)
+		require.Len(t, stored, 1)
+		require.Len(t, stored[0].SubResults, 1)
+		assert.Equal(t, []string{"M", "H"}, stored[0].SubResults[0].IpponsA)
+	})
+}
+
 // TestHansokuCarriesIntoEncho pins FIK Article 17/20: hansoku are cumulative
 // for the duration of the shiai, including encho. applyHansokuIppons must
 // apply the 2-hansoku→ippon rule regardless of the Encho field value.
@@ -1884,4 +2026,68 @@ func TestRecordMatchResult_BronzeCompletedWithNoWinnerRejected(t *testing.T) {
 	require.NoError(t, err2)
 	assert.Equal(t, state.MatchStatusRunning, stored.ThirdPlaceMatch.Status, "bronze status must not change")
 	assert.Empty(t, stored.ThirdPlaceMatch.Winner, "bronze winner must still be empty")
+}
+
+// legacyStruckIppon is the four-term predicate struckIppons used before it
+// was composed from domain.IsScoringIppon. Kept here, inline, ONLY so this
+// test can prove the two are exactly equivalent over the real vocabulary; it
+// must never be called from production code.
+func legacyStruckIppon(v string) bool {
+	return v != "" && v != domain.IpponPlaceholder && v != domain.DefaultWinIppon && v != domain.HanteiMark
+}
+
+// TestStruckIppons_MatchesLegacyPredicateExhaustively pins the finding-2
+// simplification: struckIppons was rewritten from an inline four-term
+// condition to domain.IsScoringIppon(v) && v != domain.DefaultWinIppon. This
+// exhaustively checks every token in the real vocabulary (ordinary waza
+// letters, the two multi-meaning tokens HanteiMark and DefaultWinIppon, the
+// UI placeholder, and empty) against the pre-simplification predicate,
+// single and in a mixed slice, so a future non-scoring token added to
+// domain.IsScoringIppon (as HanteiMark itself once was) cannot silently
+// diverge struckIppons from the domain definition without this test catching
+// it.
+func TestStruckIppons_MatchesLegacyPredicateExhaustively(t *testing.T) {
+	vocabulary := []string{
+		"M", "K", "D", "T", "H", "S", // ordinary waza letters (kendo + naginata)
+		domain.HanteiMark,       // "Ht" - a verdict, not a strike
+		domain.DefaultWinIppon,  // "○" - awarded maru, not a struck point
+		domain.IpponPlaceholder, // "•" - unfilled UI slot
+		"",                      // empty entry
+	}
+
+	t.Run("single-entry slices agree with the legacy predicate", func(t *testing.T) {
+		for _, v := range vocabulary {
+			t.Run(fmt.Sprintf("%q", v), func(t *testing.T) {
+				got := struckIppons([]string{v})
+				want := legacyStruckIppon(v)
+				if want {
+					assert.Equal(t, []string{v}, got)
+				} else {
+					assert.Empty(t, got)
+				}
+			})
+		}
+	})
+
+	t.Run("a mixed slice over the whole vocabulary agrees with the legacy predicate entry-by-entry", func(t *testing.T) {
+		// Build the slice from the vocabulary plus one repeat of each waza
+		// letter, so the mix exercises adjacency (a struck point next to a
+		// mark, a mark next to a maru, etc.) rather than just isolated tokens.
+		input := append(append([]string{}, vocabulary...), vocabulary...)
+
+		var want []string
+		for _, v := range input {
+			if legacyStruckIppon(v) {
+				want = append(want, v)
+			}
+		}
+
+		got := struckIppons(input)
+		assert.Equal(t, want, got)
+	})
+
+	t.Run("nil and empty slices are both no-ops", func(t *testing.T) {
+		assert.Empty(t, struckIppons(nil))
+		assert.Empty(t, struckIppons([]string{}))
+	})
 }

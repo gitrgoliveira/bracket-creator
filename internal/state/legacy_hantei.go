@@ -111,12 +111,13 @@ func (b *BracketMatch) NormalizeLegacy() {
 	// 2. Legacy hantei flag -> mark. The bool flag has no explicit-false to
 	// honour: false was always simply "not a hantei", so this composes the
 	// shared fold only for the flagged==true case rather than plumbing a
-	// bool through foldLegacyHantei's signature.
+	// bool through foldLegacyHantei's signature. No winner pre-check here:
+	// foldLegacyHantei's own `case "":` already drops an unattributable
+	// winner untouched, so gating the call on b.Winner != "" would only
+	// duplicate that rule at a second enforcement point.
 	if b.DecidedByHantei {
 		b.DecidedByHantei = false
-		if b.Winner != "" {
-			b.IpponsA, b.IpponsB = foldLegacyHantei(true, b.Winner, b.SideA, b.SideB, b.IpponsA, b.IpponsB)
-		}
+		b.IpponsA, b.IpponsB = foldLegacyHantei(true, b.Winner, b.SideA, b.SideB, b.IpponsA, b.IpponsB)
 	}
 	for i := range b.SubResults {
 		b.SubResults[i].normalizeLegacyHantei()

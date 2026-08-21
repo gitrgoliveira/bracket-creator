@@ -5,6 +5,7 @@ import (
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -169,7 +170,7 @@ func TestPreserveSubHantei(t *testing.T) {
 	})
 
 	t.Run("explicit false (withdrawal) is left untouched", func(t *testing.T) {
-		// state.HanteiExplicit, because a plain nil pointer cannot
+		// bctest.HanteiExplicit, because a plain nil pointer cannot
 		// express the withdrawal this case is about. DecidedByHantei is a
 		// LEGACY READ-ONLY channel on SubMatchResult, but preserveSubHantei
 		// still reads a non-nil value as "the writer addressed the verdict" —
@@ -178,7 +179,7 @@ func TestPreserveSubHantei(t *testing.T) {
 		// exactly like a mark or a named winner would.
 		incoming := []state.SubMatchResult{
 			{Position: dh, SideA: "Kyoto", SideB: "Osaka", Decision: "daihyosen",
-				DecidedByHantei: state.HanteiExplicit(false)},
+				DecidedByHantei: bctest.HanteiExplicit(false)},
 		}
 		preserveSubHantei(storedSubs(), incoming)
 		require.NotNil(t, incoming[0].DecidedByHantei)

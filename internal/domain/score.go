@@ -20,17 +20,13 @@ import (
 // Format read by ParseScore: ippon letters joined with no separator, then the
 // outstanding-hansoku count in parentheses. "MK (H1)", "MK", "(H1)", "".
 //
-// IpponFitsScoreCodec reports whether one ippon entry can round-trip through
-// this format: only a single-rune entry (or the two-rune HanteiMark, see
-// below) survives it, since entries are joined with no separator. An empty
-// entry is allowed because it renders as nothing and is not a scoring ippon
-// (CountScoringIppons drops it). validation.go's wire gate on freshly-written
-// ippon slices still calls this — the legacy string format is gone, but a
-// slice that could never have round-tripped through it is still malformed
-// shape, and a stray two-rune entry alongside a genuine HanteiMark would
-// desync any future re-introduction of the format the same way it once
-// desynced a client-supplied "Ht" being read back as a forged verdict.
-func IpponFitsScoreCodec(v string) bool {
+// IsValidIpponEntry reports whether v is a well-formed single ippon entry: one
+// rune, the two-rune HanteiMark, or empty (an unfilled slot, not a scoring
+// ippon; CountScoringIppons drops it). validation.go's wire gate on
+// freshly-written ippon slices calls this to reject anything else, in
+// particular any other multi-rune string — a client-forged two-rune entry
+// alongside a genuine HanteiMark would be ambiguous with it.
+func IsValidIpponEntry(v string) bool {
 	return utf8.RuneCountInString(v) <= 1 || v == HanteiMark
 }
 
@@ -73,7 +69,7 @@ func ParseScore(s string) ([]string, int) {
 			continue
 		}
 		// The hantei mark is the codec's one two-rune token; see
-		// IpponFitsScoreCodec for why the lookahead cannot misfire.
+		// IsValidIpponEntry for why the lookahead cannot misfire.
 		if r == 'H' && i+1 < len(s) && s[i+1] == 't' {
 			ippons = append(ippons, HanteiMark)
 			skipNext = true

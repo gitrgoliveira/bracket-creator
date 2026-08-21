@@ -18,6 +18,7 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -317,7 +318,7 @@ func TestScoreHandler_SidesLessLegacyHanteiRecordsVerdict(t *testing.T) {
 		IpponsA:         []string{"M"},
 		IpponsB:         []string{"K"},
 		Status:          state.MatchStatusCompleted,
-		DecidedByHantei: state.HanteiExplicit(true),
+		DecidedByHantei: bctest.HanteiExplicit(true),
 	})
 	require.NoError(t, err)
 
@@ -359,7 +360,7 @@ func TestScoreHandler_SidesPresentUnattributableHanteiStillDrops(t *testing.T) {
 		IpponsA:         []string{"M"},
 		IpponsB:         []string{"K"},
 		Status:          state.MatchStatusCompleted,
-		DecidedByHantei: state.HanteiExplicit(true),
+		DecidedByHantei: bctest.HanteiExplicit(true),
 	})
 	require.NoError(t, err)
 
@@ -393,7 +394,7 @@ func TestBulkScoreHandler_SidesLessLegacyHanteiRecordsVerdict(t *testing.T) {
 		IpponsA:         []string{"M"},
 		IpponsB:         []string{"K"},
 		Status:          state.MatchStatusCompleted,
-		DecidedByHantei: state.HanteiExplicit(true),
+		DecidedByHantei: bctest.HanteiExplicit(true),
 	}})
 	require.NoError(t, err)
 
@@ -461,8 +462,8 @@ func (f *fixedSidesCompetitionStore) MatchSidesByID(string, string) (string, str
 // the existing drop-never-guess fold still applies downstream); and
 // idempotency - calling the backfill twice is the same as calling it once.
 func TestBackfillMatchLevelSidesForLegacyHantei(t *testing.T) {
-	trueFlag := state.HanteiExplicit(true)
-	falseFlag := state.HanteiExplicit(false)
+	trueFlag := bctest.HanteiExplicit(true)
+	falseFlag := bctest.HanteiExplicit(false)
 
 	tests := []struct {
 		name          string

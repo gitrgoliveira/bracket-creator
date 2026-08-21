@@ -555,18 +555,53 @@ func applyHansokuIppons(result *state.MatchResult) {
 // have gotten had it pre-computed the award itself and sent the untied
 // scoreline directly.
 //
-// A no-op when the result carries no mark: this must never change behaviour
-// for the overwhelming majority of hansoku awards, which carry no verdict at
-// all.
+// applyHansokuIppons folds hansoku into EVERY SubResults row too (the
+// daihyosen representative bout can carry both hansoku counts and its own
+// hantei mark), so this check must cover those rows as well: neither
+// stripInvalidHantei nor preserveSubHantei runs on the sub level, so an
+// untied sub row's mark would otherwise persist unrejected. It also checks
+// the len>2-per-side overflow the fold can create on a sub row (a row already
+// at the best-of-3 cap plus a folded "H" exceeds it) — mirroring
+// mobileapp.validateIppons's structural cap so the operator gets the same 400
+// on the next echo save that they would have gotten by sending the
+// post-award scoreline directly, instead of the request wedging silently on
+// disk until a later, harder-to-diagnose validation failure.
+//
+// A no-op when a row carries no mark and no overflow: this must never change
+// behaviour for the overwhelming majority of hansoku awards, which carry
+// neither.
 func checkHansokuHanteiConflict(result *state.MatchResult) error {
-	if result == nil || !result.HanteiDecided() {
+	if result == nil {
 		return nil
 	}
-	if domain.HanteiTiedScoreline(result.IpponsA, result.IpponsB) {
-		return nil
+	if result.HanteiDecided() && !domain.HanteiTiedScoreline(result.IpponsA, result.IpponsB) {
+		return validationErrorf("hantei requires a tied scoreline after hansoku ippon award")
 	}
-	return validationErrorf("hantei requires a tied scoreline after hansoku ippon award")
+	for i := range result.SubResults {
+		sr := &result.SubResults[i]
+		// The hantei check runs before the overflow check: a row that
+		// triggers both (the illustrative case — a mark riding on a
+		// scoreline the fold both unties AND pushes over the cap) surfaces
+		// the more actionable message naming the verdict conflict, rather
+		// than a bare count error that leaves the operator to work out why.
+		if sr.HanteiDecided() && !domain.HanteiTiedScoreline(sr.IpponsA, sr.IpponsB) {
+			return validationErrorf("subResults[%d]: hantei requires a tied scoreline after hansoku ippon award", i)
+		}
+		// subHansokuMaxIppons mirrors mobileapp.maxIpponsPerSide (the
+		// best-of-3 structural cap): engine sits below mobileapp in the
+		// layering and cannot import it, so the value is restated here. Keep
+		// the two in sync if the cap itself ever changes.
+		if len(sr.IpponsA) > subHansokuMaxIppons || len(sr.IpponsB) > subHansokuMaxIppons {
+			return validationErrorf("subResults[%d]: at most %d ippons per side (best-of-3) after hansoku ippon award, got %d/%d", i, subHansokuMaxIppons, len(sr.IpponsA), len(sr.IpponsB))
+		}
+	}
+	return nil
 }
+
+// subHansokuMaxIppons is the kendo best-of-3 cap applied per sub-bout side by
+// checkHansokuHanteiConflict's overflow guard. See the comment there for why
+// this restates mobileapp.maxIpponsPerSide rather than importing it.
+const subHansokuMaxIppons = 2
 
 // isWinForSide reports whether subWinner indicates a win for the given
 // match-level side. It checks both the canonical match side name and the
@@ -750,10 +785,16 @@ func preserveLoserScore(result, prior *state.MatchResult, decisionBy string) {
 // anyway; stripInvalidHantei would remove it downstream, this just keeps the
 // preserved slice honest at the source). Distinct from countScoringIppons,
 // which counts the maru as a scoring ippon by design.
+//
+// Composed from domain.IsScoringIppon (which already drops "", the
+// placeholder and HanteiMark) plus the one deliberate extra exclusion, the
+// maru: this keeps struckIppons in lockstep with the domain definition by
+// construction, so a future non-scoring token added there (as HanteiMark
+// itself once was) does not also need remembering here.
 func struckIppons(ippons []string) []string {
 	var out []string
 	for _, v := range ippons {
-		if v != "" && v != domain.IpponPlaceholder && v != domain.DefaultWinIppon && v != domain.HanteiMark {
+		if domain.IsScoringIppon(v) && v != domain.DefaultWinIppon {
 			out = append(out, v)
 		}
 	}

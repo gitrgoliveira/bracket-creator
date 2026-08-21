@@ -379,7 +379,9 @@ two point match reads `M|K` rather than occupying two columns.
 
 **The judges' decision rides in the score.** A match won on referee decision has no column
 of its own. The mark occupies a point slot in the winner's score field, which is exactly how
-it is drawn on a paper score sheet, and it is removed again when the file is read.
+it is drawn on a paper score sheet, and it stays there when the file is read: the mark is
+part of the recorded score, and everything that counts points knows to skip it, so it can
+never inflate a result.
 
 Two consequences follow, and both are deliberate:
 

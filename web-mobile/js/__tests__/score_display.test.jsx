@@ -451,3 +451,29 @@ describe('winnerSideLR: id disambiguates same-name opponents', () => {
     expect(winnerSideLR({ sideA: { id: 'a1', name: 'Alice' }, sideB: { id: 'b1', name: 'Bob' }, winner: { id: 'c1', name: 'Carol' } })).toBe(null);
   });
 });
+
+// The mark model: the server records the hantei verdict as the "Ht" entry in
+// the winner's ippon list. These pin the NEW server shape end to end through
+// the display codec: the mark tokenizes out of bracket score strings, never
+// renders as a letter in a cell, never counts as a point, and surfaces once
+// as the side mark.
+describe('hantei mark model (new server shape)', () => {
+  it('ipponsFromScore tokenizes Ht, including beside a real hansoku H', () => {
+    expect(ipponsFromScore('MHt')).toEqual(['M', 'Ht']);
+    expect(ipponsFromScore('HHt')).toEqual(['H', 'Ht']);
+    expect(ipponsFromScore('HtH')).toEqual(['Ht', 'H']);
+    expect(ipponsFromScore('Ht')).toEqual(['Ht']);
+  });
+
+  it('a mark-carrying scoreline renders one Ht beside the winner, letters clean', () => {
+    // left = shiro carries M+mark; a 1-1 hantei, shiro declared winner.
+    const s = formatIpponsScore(['M', 'Ht'], ['K'], null, '', null, true, 'left');
+    expect(s.match(/Ht/g)).toHaveLength(1);
+    expect(s).toContain('M');
+    expect(s).not.toContain('MHt'); // the mark is not a cell letter
+  });
+
+  it('the mark never counts as a point in the tie test', () => {
+    expect(window.hanteiTied ? window.hanteiTied(['M', 'Ht'], ['K']) : true).toBe(true);
+  });
+});

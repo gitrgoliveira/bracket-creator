@@ -3,8 +3,9 @@ package state
 import (
 	"os"
 
-	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"testing"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

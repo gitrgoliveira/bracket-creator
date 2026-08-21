@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 
 	excelize "github.com/xuri/excelize/v2"
 

@@ -3941,12 +3941,15 @@ components:
             $ref: '#/components/schemas/SubMatchResult'
         decidedByHantei:
           type: boolean
+          deprecated: true
           description: >
-            True when the winner was declared by referee hantei on a tied bout
-            (FIK Art. 7-5 / 29-6). Overtime is not required; a tied scoreline may be
-            taken straight to a judges' decision. On a bracket-match score request,
-            omitting the field preserves the stored value; sending an explicit
-            true/false applies it.
+            LEGACY input only. The judges'-decision verdict is recorded as the
+            "Ht" entry in the WINNER's ippon list (FIK Art. 7-5 / 29-6;
+            overtime is not required, a tied scoreline may be taken straight
+            to a judges' decision). The mark occupies a point slot but never
+            counts as a point. The server still accepts this flag from older
+            clients and folds it into the mark on receipt; responses never
+            carry it.
         kachinukiBoutFinal:
           type: boolean
           writeOnly: true
@@ -4021,20 +4024,24 @@ components:
             (per-bout default win). The daihyosen representative bout
             (`position: -1`) always carries `"daihyosen"`; including when its
             winner is declared by hantei on a tied bout (the frontend emits
-            `decision: "daihyosen"` together with `decidedByHantei: true`). The
-            server also tolerates `""` or `"fought"` alongside hantei, but
-            `"daihyosen"` is the canonical persisted value for the rep bout.
+            `decision: "daihyosen"` with the "Ht" mark in the winner's ippon
+            list). The server also tolerates `""` or `"fought"` alongside
+            hantei, but `"daihyosen"` is the canonical persisted value for the
+            rep bout.
         decidedByHantei:
           type: boolean
+          deprecated: true
           description: >
-            True when this sub-bout's winner was declared by referee hantei on a
-            tied bout. Valid ONLY for the daihyosen representative bout (`position: -1`);
-            regular numbered bouts have fixed regulation time and are never decided by
-            hantei. Overtime is NOT required; a tied daihyosen may be decided by judges
-            directly (`encho` is optional). The accompanying `decision` is `"daihyosen"`
-            (the value the frontend persists for the rep bout); the server additionally
-            accepts `""` or `"fought"`. `winner` must be set and the scoreline must be
-            tied; the server rejects hantei with any other decision code.
+            LEGACY input only; folded into the "Ht" mark on receipt. The
+            verdict is recorded as the "Ht" entry in the winner's ippon list,
+            valid ONLY for the daihyosen representative bout (`position: -1`);
+            regular numbered bouts have fixed regulation time and are never
+            decided by hantei. Overtime is NOT required (`encho` is optional).
+            `winner` must be set, must carry the mark, and the scoreline must
+            be tied (the mark itself never counts); the accompanying
+            `decision` is `"daihyosen"` (the server additionally accepts `""`
+            or `"fought"` and rejects any other code). Responses never carry
+            this field.
         encho:
           allOf:
             - $ref: '#/components/schemas/EnchoMetadata'

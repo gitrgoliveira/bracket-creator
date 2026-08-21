@@ -2,10 +2,11 @@ package state
 
 import (
 	"errors"
-	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

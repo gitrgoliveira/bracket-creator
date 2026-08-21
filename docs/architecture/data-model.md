@@ -139,7 +139,7 @@ classDiagram
         +string Decision
         +string DecisionBy
         +string DecisionReason
-        +bool DecidedByHantei
+        +bool DecidedByHantei (legacy, read-only)
         +string ResultSource
         +string CorrectionReason
         +bool ReopenPending
@@ -172,7 +172,7 @@ classDiagram
         +int HansokuB
         +string Winner
         +string Decision
-        +bool DecidedByHantei
+        +bool DecidedByHantei (legacy, read-only)
     }
 
     class EnchoMetadata {
@@ -234,9 +234,13 @@ to the queue by a score write; corrections are made through the score editor, wh
 new completed result with a `CorrectionReason`.
 
 `Decision` records how a match ended when it was not simply fought to a score: a draw, a
-withdrawal, a no show, a representative bout, or exhaustion in a kachinuki encounter. It is
-independent of `DecidedByHantei`, which records that the referees chose a winner from a
-level scoreline.
+withdrawal, a no show, a representative bout, or exhaustion in a kachinuki encounter. A
+judges' decision (hantei) is recorded separately, as the `Ht` entry in the winner's ippon
+list: the mark occupies a point slot on the score sheet but never counts as a point, and
+the winner it sits beside is the winner the referees chose from a level scoreline. The
+`DecidedByHantei` fields in the diagrams are legacy read-only channels: files written
+before the mark model load through a conversion that moves the flag into the mark, and
+nothing writes them any more.
 
 ## 4. On disk layout
 

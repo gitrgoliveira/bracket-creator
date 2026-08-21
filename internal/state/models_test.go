@@ -2,11 +2,12 @@ package state
 
 import (
 	"encoding/json"
-	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/stretchr/testify/assert"

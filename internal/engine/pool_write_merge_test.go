@@ -1,8 +1,9 @@
 package engine
 
 import (
-	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"testing"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"

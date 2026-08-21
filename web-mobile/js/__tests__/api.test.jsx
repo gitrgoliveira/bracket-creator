@@ -207,6 +207,35 @@ describe('API Utils', () => {
   });
 
   describe('normalizeMatch', () => {
+    it('derives decidedByHantei from the Ht mark (match, sub, and bracket score string)', () => {
+      // NEW server shape: the verdict is the mark inside the ippon lists /
+      // score strings; no flag arrives on the wire. The derivation keeps
+      // every consumer reading the property it always read.
+      const pool = normalizeMatch({
+        sideA: 'A', sideB: 'B', winner: 'A', status: 'completed',
+        ipponsA: ['M', 'Ht'], ipponsB: ['K'],
+        subResults: [{ position: -1, sideA: 'A', sideB: 'B', winner: 'B', ipponsA: [], ipponsB: ['Ht'] }],
+      }, {});
+      expect(pool.decidedByHantei).toBe(true);
+      expect(pool.subResults[0].decidedByHantei).toBe(true);
+      expect(pool.score.winnerPts).toBe(1);
+      expect(pool.score.loserPts).toBe(1); // the mark occupies a slot, never a point
+
+      const bracket = normalizeMatch({
+        sideA: 'A', sideB: 'B', winner: 'B', status: 'completed',
+        scoreA: 'M', scoreB: 'KHt',
+      }, {});
+      expect(bracket.decidedByHantei).toBe(true);
+      expect(bracket.ipponsB).toEqual(['K', 'Ht']);
+      expect(bracket.score.winnerPts).toBe(1);
+
+      const plain = normalizeMatch({
+        sideA: 'A', sideB: 'B', winner: 'A', status: 'completed',
+        ipponsA: ['M'], ipponsB: [],
+      }, {});
+      expect(plain.decidedByHantei).toBe(false);
+    });
+
     it('should normalize string sides to objects using playerMap', () => {
       const playerMap = { 'Alice': { id: 'Alice', name: 'Alice', dojo: 'Dojo A' } };
       const match = { sideA: 'Alice', sideB: 'Bob', status: 'scheduled' };

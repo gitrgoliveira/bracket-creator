@@ -391,7 +391,8 @@ func overlayPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[str
 					// touches engi flag counts.
 					scoreA, scoreB = DefaultWinMaruAB(
 						IpponsScore(mr.IpponsA), IpponsScore(mr.IpponsB),
-						mr.Decision, mr.Encho, mr.Winner, mr.SideA, mr.SideB)
+						mr.Decision, mr.Encho, mr.WinnerID, mr.SideAID, mr.SideBID,
+						mr.Winner, mr.SideA, mr.SideB)
 				}
 				writeScoreRowCells(f, sheetName, courtStartCol, excelRow, scoreA, scoreB, mr, mirror)
 			}
@@ -616,20 +617,22 @@ func writeTeamSubMatchScores(f *excelize.File, sheetName string, courtStartCol, 
 		// Sub-match row for Position P is the P-th sub row (1-based Position).
 		excelRow := subStartExcelRow + (sub.Position - 1)
 
+		// SubMatchResult persists no ids, so names are all there is and both
+		// calls below are always the name-fallback branch, resolved by the
+		// documented sideA-first convention. Note the limit of that: a
+		// numbered team bout names individual PLAYERS, whose names are not
+		// unique by rule (only name+dojo is), so a same-named pair on opposing
+		// lineups is separated by convention rather than by identity.
+		// Unchanged from before ids existed, and not fixable here without
+		// persisting ids per sub row.
 		scoreA, scoreB := DefaultWinMaruAB(
 			IpponsScore(sub.IpponsA), IpponsScore(sub.IpponsB),
-			sub.Decision, sub.Encho, sub.Winner, sub.SideA, sub.SideB)
+			sub.Decision, sub.Encho, "", "", "",
+			sub.Winner, sub.SideA, sub.SideB)
 		leftScore, rightScore := scoreA, scoreB
 		if mirror {
 			leftScore, rightScore = scoreB, scoreA
 		}
-		// SubMatchResult persists no ids, so names are all there is and this is
-		// always the name-fallback branch, resolved by the documented
-		// sideA-first convention. Note the limit of that: a numbered team bout
-		// names individual PLAYERS, whose names are not unique by rule (only
-		// name+dojo is), so a same-named pair on opposing lineups is separated
-		// by convention rather than by identity. Unchanged from before ids
-		// existed, and not fixable here without persisting ids per sub row.
 		lMark, rMark := SideMarksLR(sub.Decision, sub.HanteiDecided(), "", "", "", sub.Winner, sub.SideA, sub.SideB, mirror)
 		if lScore := joinSp(leftScore, lMark); lScore != "" {
 			setCellStr(f, sheetName, lVCol, excelRow, lScore)
@@ -957,9 +960,14 @@ func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMa
 				// as the pool path (overlayPoolScores) already does — the
 				// mark then rides ONLY through the appended SideMarksLR
 				// suffix, matching the pool cell's "M Ht".
+				// BracketMatch carries no WinnerID/SideAID/SideBID (see
+				// bracketMatchResultView above), so this is always the
+				// name-fallback branch, matching the SideMarksLR call in
+				// writeScoreRowCells below.
 				scoreA, scoreB = DefaultWinMaruAB(
 					IpponsScore(mrView.IpponsA), IpponsScore(mrView.IpponsB),
-					bm.Decision, bm.Encho, bm.Winner, bm.SideA, bm.SideB)
+					bm.Decision, bm.Encho, "", "", "",
+					bm.Winner, bm.SideA, bm.SideB)
 			}
 
 			writeScoreRowCells(f, sheetName, courtStartCol, excelRow, scoreA, scoreB, mrView, mirror)

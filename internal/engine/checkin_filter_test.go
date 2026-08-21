@@ -276,6 +276,34 @@ func TestDropSeedAssignments_AmbiguousRosterMismatch(t *testing.T) {
 				"pre-existing operator-data problem the check-in filter must not touch -- it stays kept " +
 				"and ApplySeeds will fail on it exactly as it would have before check-in was a factor",
 		},
+		{
+			// PR review mutation-survival gap: the previous case above has an
+			// EMPTY excluded set (both John Smiths checked in), so
+			// dropSeedAssignments takes its `len(excluded) == 0` early return
+			// before the ambiguity branch -- and anyCandidateExcluded -- ever
+			// run. Making that branch's drop unconditional still passed every
+			// suite because of that early return. Adding an unrelated
+			// NOT-checked-in player (Zoe) makes excluded non-empty, forcing
+			// execution into the per-name loop with nameMatches>=2 and
+			// anyCandidateExcluded==false, the one combination that actually
+			// exercises the `&&` and not just the outer guard.
+			name: "ambiguous row with an unrelated absentee stays kept (both namesakes present)",
+			players: []domain.Player{
+				{Name: "John Smith", Dojo: "Wakaba", CheckedIn: true},
+				{Name: "John Smith", Dojo: "Tora", CheckedIn: true},
+				{Name: "Zoe", Dojo: "ZoeDojo", CheckedIn: false}, // unrelated absentee: makes excluded non-empty
+			},
+			seeds: []domain.SeedAssignment{
+				{Name: "John Smith", SeedRank: 1},
+			},
+			wantKept: []domain.SeedAssignment{
+				{Name: "John Smith", SeedRank: 1},
+			},
+			explain: "excluded is non-empty (Zoe), so the early return is bypassed and the ambiguous " +
+				"John Smith row reaches the per-name loop; both namesakes checked in, so " +
+				"anyCandidateExcluded is false and the row must stay KEPT rather than dropped -- " +
+				"this is the case that actually exercises `nameMatches >= 2 && anyCandidateExcluded`",
+		},
 	}
 
 	for _, tt := range tests {

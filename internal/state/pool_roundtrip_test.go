@@ -39,6 +39,13 @@ var notPersistedInPoolCSV = map[string]string{
 		"(DeriveQueuePositions), never authored, so persisting it would create a " +
 		"second source of truth that could disagree with the schedule.",
 	"WinnerSide": "derived: the winner name compared against SideA/SideB.",
+	"DecidedByHantei": "LEGACY READ-ONLY compatibility channel (models.go doc " +
+		"comment above the field): the verdict is the domain.HanteiMark entry " +
+		"in the winner's IpponsA/IpponsB, and writers must never set this flag. " +
+		"It has no CSV column; a legacy YAML/pre-ruling load is the only path " +
+		"that ever populates it, and normalization folds it into the mark on " +
+		"read, so a fresh save/reload round trip legitimately never sees it " +
+		"persist.",
 }
 
 // TestPoolMatchRoundTripIsComplete sweeps every exported MatchResult field,

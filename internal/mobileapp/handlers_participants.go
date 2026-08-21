@@ -264,7 +264,37 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			internalError(c, serr, "failed to load seeds")
 			return
 		}
-		if orphaned := seedsOrphanedByRosterReplace(existing, players, seeds); len(orphaned) > 0 {
+		// Canonicalize a COPY of the new roster's names before checking for
+		// orphaned seeds, to match what LoadParticipants will read back after
+		// this save. CreatePlayersFromRecords Title-cases Name on every parse,
+		// but saveParticipantsNoLock deliberately writes the raw request name
+		// (see its comment: "names arriving via the bulk SaveParticipants path
+		// may be raw"), so seeds.csv (which holds the canonical form written by
+		// the seeding panel / PUT /participants/:pid, both of which
+		// TitleCaseName before saving) and this raw newPlayers slice could
+		// disagree on casing alone -- e.g. a stored seed for "Van Der Berg"
+		// against a re-submitted "van der berg" -- even though the two names
+		// resolve to the very same participant on the next load. Without this,
+		// RosterIndex.Lookup's exact-key match missed on casing and refused a
+		// same-identity resubmission as a spurious 409 orphan.
+		//
+		// Only this orphan-check roster is canonicalized; the raw `players`
+		// slice saved below is untouched, so today's bulk-save behavior
+		// (skip TitleCase, let the next load canonicalize) is unchanged.
+		// Dojo is canonicalized too, and by TrimSpace alone: the loader
+		// Title-cases only the name (CreatePlayersFromRecords assigns
+		// player.Name = c.String(line[0])) but TrimSpaces EVERY field, so the
+		// canonical dojo is the trimmed one. Normalizing only the name would
+		// leave the other half of the (name, dojo) seed key raw and let a
+		// stray space around the dojo produce exactly the same spurious 409
+		// this guard is being fixed for.
+		canonicalPlayers := make([]domain.Player, len(players))
+		copy(canonicalPlayers, players)
+		for i := range canonicalPlayers {
+			canonicalPlayers[i].Name = helper.TitleCaseName(canonicalPlayers[i].Name)
+			canonicalPlayers[i].Dojo = strings.TrimSpace(canonicalPlayers[i].Dojo)
+		}
+		if orphaned := seedsOrphanedByRosterReplace(existing, canonicalPlayers, seeds); len(orphaned) > 0 {
 			c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf(
 				"this replace would orphan %d already-seeded participant(s): %s; keep their name and dojo unchanged, or update seeds via PUT /competitions/:id/participants/:pid or the seeding panel first",
 				len(orphaned), strings.Join(orphaned, ", "))})

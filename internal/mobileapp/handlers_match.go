@@ -205,10 +205,28 @@ func allowNumberedEnchoFromStore(store CompetitionStore, compID string, hasNumbe
 	return comp.IsKachinuki()
 }
 
+// hanteiAttributionNeedsBackfill reports whether a score payload needs its
+// stored pairing consulted ahead of hantei validation: either the deprecated
+// match-level decidedByHantei flag is set, or the payload already carries
+// the "Ht" mark itself (the modern shape - no flag required, per
+// specs/openapi.yaml). Shared by backfillMatchLevelSidesForLegacyHantei and
+// backfillMatchLevelIDsForHanteiAttribution below so the two cannot drift
+// into two different gates again: that exact drift (this function gated on
+// the flag alone, the ids twin already widened to `legacyFlagged ||
+// req.HanteiDecided()`) is what let a modern minimal hantei payload
+// (winner + ipponsA/ipponsB carrying the mark, no sides, no ids, no legacy
+// flag - legal per the OpenAPI contract, since the engine's reconcileSides
+// backfills sides/ids from the stored match anyway) 400 with "the hantei
+// mark belongs in the winner's ippon list", while the identical payload plus
+// decidedByHantei:true was backfilled and accepted (bc-dmsr review).
+func hanteiAttributionNeedsBackfill(req *state.MatchResult) bool {
+	legacyFlagged := req.DecidedByHantei != nil && *req.DecidedByHantei
+	return legacyFlagged || req.HanteiDecided()
+}
+
 // backfillMatchLevelSidesForLegacyHantei backfills an omitted sideA/sideB on
-// a score payload from the STORED pairing, but only when the payload actually
-// carries a flagged legacy hantei verdict (decidedByHantei: true) and would
-// otherwise be unattributable.
+// a score payload from the STORED pairing, but only when the payload would
+// otherwise be unattributable for hantei (see hanteiAttributionNeedsBackfill).
 //
 // Why this exists: the request-boundary fold (state.MatchResult.
 // NormalizeLegacyHantei, called from ScoreRequest.validateWithOptions /
@@ -218,28 +236,33 @@ func allowNumberedEnchoFromStore(store CompetitionStore, compID string, hasNumbe
 // reconcileSides (internal/engine/scoring.go) backfills an omitted side from
 // the stored match, exactly so a minimal payload (winner + ippons only)
 // still writes cleanly. But that backfill runs AFTER the request-boundary
-// fold, so a legacy client sending {winner, decidedByHantei:true, ipponsA,
-// ipponsB} with no sides used to have its verdict correctly attributed once
-// the pre-array bracket_result.go path read the flag against stored sides at
+// fold, so a client sending {winner, ipponsA/ipponsB carrying the mark}
+// with no sides used to have its verdict correctly attributed once the
+// pre-array bracket_result.go path read the flag against stored sides at
 // RENDER time (sides are always populated by then); the array-mark
 // representation now needs the sides at FOLD time, before they exist on the
 // wire payload, so foldLegacyHantei's drop-never-guess default silently
-// erases the verdict with a 200 (bc-qual review).
+// erases the verdict with a 200 (bc-qual review) — or, for a payload with no
+// legacy flag at all, 400s at validation instead (bc-dmsr review: this
+// gate used to be narrower than the ids twin's and only covered the flagged
+// case).
 //
 // This backfill runs BEFORE validateWithOptions/validateBulkScoreLengths so
-// the fold sees the real pairing. It is deliberately narrow: only when the
-// payload carries a TRUE match-level decidedByHantei flag and at least one
-// side is empty, so the hot ordinary-score path (the overwhelming majority of
-// writes, which never sets this deprecated flag) never pays a store read.
+// the fold sees the real pairing. It only runs when
+// hanteiAttributionNeedsBackfill is true and at least one side is empty, so
+// the hot ordinary-score path (the overwhelming majority of writes, which
+// carries no mark at all) never pays a store read.
 // It only fills an EMPTY side (never overwrites a client-supplied one), the
 // same "backfill, never overwrite" rule reconcileSides itself applies, so a
 // genuine sideA/sideB mismatch is still caught by reconcileSides afterwards
 // exactly as before; this cannot weaken that guard, only let attribution see
 // what reconcileSides was always going to fill in anyway. On a store read
 // failure, sides are left empty and the fold keeps its existing
-// drop-never-guess behaviour (fail closed on attribution, not on the write).
+// drop-never-guess behaviour (fail closed on attribution, not on the write;
+// deliberate, unlike the ids twin below which now logs its own store-read
+// failure).
 func backfillMatchLevelSidesForLegacyHantei(store CompetitionStore, compID, matchID string, req *state.MatchResult) {
-	if req.DecidedByHantei == nil || !*req.DecidedByHantei {
+	if !hanteiAttributionNeedsBackfill(req) {
 		return
 	}
 	if req.SideA != "" && req.SideB != "" {
@@ -260,8 +283,8 @@ func backfillMatchLevelSidesForLegacyHantei(store CompetitionStore, compID, matc
 // backfillMatchLevelIDsForHanteiAttribution backfills an omitted
 // sideAID/sideBID on a score payload from the STORED pairing, mirroring how
 // backfillMatchLevelSidesForLegacyHantei above already backfills the omitted
-// side NAMES, but gated on hantei attribution generally rather than only the
-// deprecated boolean flag.
+// side NAMES. Both twins now share ONE gate, hanteiAttributionNeedsBackfill,
+// rather than two hand-copied conditions that can drift apart again.
 //
 // Why this exists (bc-dmsr review, two threads sharing one root cause): the
 // SPA sends winnerId (state.MatchResult.WinnerID) but never sideAId/sideBId
@@ -295,16 +318,33 @@ func backfillMatchLevelSidesForLegacyHantei(store CompetitionStore, compID, matc
 // bracket match's stored ids are always "" (BracketMatch persists no ids at
 // all), so this is a no-op there and the name-fallback path for bracket
 // hantei is unchanged.
+//
+// Store-read failure: unlike the sides twin above, whose fail-closed swallow
+// is deliberate (a name-attribution 400 is preferable to guessing a side),
+// this function's doc identifies a distinct failure mode - a transient
+// MatchSidesByID error here leaves the validator on the name fallback while
+// the engine's stripInvalidHantei (running after backfillMatchIdentity has
+// since filled in the real ids) attributes by id, so a mark validation
+// accepted can still be silently stripped at write time: exactly the
+// 200-with-verdict-gone divergence this function exists to close. The error
+// is therefore logged (mirroring allowNumberedEnchoFromStore's log-then-fail-
+// closed pattern above) rather than swallowed outright, so the divergence at
+// least leaves a trace to investigate; the request itself still proceeds on
+// the name fallback rather than 500ing the operator's score write over a
+// transient store hiccup.
 func backfillMatchLevelIDsForHanteiAttribution(store CompetitionStore, compID, matchID string, req *state.MatchResult) {
-	legacyFlagged := req.DecidedByHantei != nil && *req.DecidedByHantei
-	if !legacyFlagged && !req.HanteiDecided() {
+	if !hanteiAttributionNeedsBackfill(req) {
 		return
 	}
 	if req.SideAID != "" && req.SideBID != "" {
 		return
 	}
 	_, _, storedAID, storedBID, found, err := store.MatchSidesByID(compID, matchID)
-	if err != nil || !found {
+	if err != nil {
+		log.Printf("MatchSidesByID(%s, %s) for hantei id attribution: %v; falling back to name attribution", compID, matchID, err)
+		return
+	}
+	if !found {
 		return
 	}
 	if req.SideAID == "" {

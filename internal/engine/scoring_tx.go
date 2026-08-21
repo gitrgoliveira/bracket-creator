@@ -151,8 +151,8 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		return nil, nil
 	}
 
-	applyHansokuIppons(result)
-	if err := checkHansokuHanteiConflict(result); err != nil {
+	fold := applyHansokuIppons(result)
+	if err := checkHansokuHanteiConflict(result, fold); err != nil {
 		return nil, err
 	}
 	deriveDaihyosenWinner(result)

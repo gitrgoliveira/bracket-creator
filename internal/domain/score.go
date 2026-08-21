@@ -20,13 +20,32 @@ import (
 // Format read by ParseScore: ippon letters joined with no separator, then the
 // outstanding-hansoku count in parentheses. "MK (H1)", "MK", "(H1)", "".
 //
+// IpponFieldSeparator is the byte internal/state's pool-matches CSV codec
+// joins/splits an ippon slice on (state/pools.go: splitIppons,
+// poolMatchColumns' IpponsA/IpponsB put funcs). It lives here, not in
+// internal/state, because domain is the dependency leaf (zero internal
+// deps) and may not import state; state already imports domain, so it is
+// state's job to point its codec literals at this constant rather than
+// domain's to reach up. Defined so IsValidIpponEntry can refuse it below —
+// without this, a wire-legal single-rune entry silently corrupts the
+// persisted slice: {"M", "|"} passes validation, joins to the CSV cell
+// "M||", and reloads as {"M", "", ""} (strings.Split of a string containing
+// the separator produces extra empty elements), disagreeing with what was
+// validated and broadcast before the restart.
+const IpponFieldSeparator = "|"
+
 // IsValidIpponEntry reports whether v is a well-formed single ippon entry: one
-// rune, the two-rune HanteiMark, or empty (an unfilled slot, not a scoring
-// ippon; CountScoringIppons drops it). validation.go's wire gate on
-// freshly-written ippon slices calls this to reject anything else, in
-// particular any other multi-rune string — a client-forged two-rune entry
-// alongside a genuine HanteiMark would be ambiguous with it.
+// rune (and not the pool-CSV IpponFieldSeparator, which would corrupt the
+// persisted slice on the next save/load round trip), the two-rune HanteiMark,
+// or empty (an unfilled slot, not a scoring ippon; CountScoringIppons drops
+// it). validation.go's wire gate on freshly-written ippon slices calls this to
+// reject anything else, in particular any other multi-rune string — a
+// client-forged two-rune entry alongside a genuine HanteiMark would be
+// ambiguous with it.
 func IsValidIpponEntry(v string) bool {
+	if v == IpponFieldSeparator {
+		return false
+	}
 	return utf8.RuneCountInString(v) <= 1 || v == HanteiMark
 }
 

@@ -3871,11 +3871,35 @@ components:
         winner:
           type: string
           maxLength: 100
+        sideAId:
+          type: string
+          description: >
+            Participant UUID for side A, when known. Sides are otherwise
+            stored by name, but a name is not unique within a competition
+            (two participants from different dojos may share one); this id
+            disambiguates side A precisely. Omitted for legacy data or
+            payloads that carry no ids.
+        sideBId:
+          type: string
+          description: The side B counterpart of `sideAId`.
+        winnerId:
+          type: string
+          description: >
+            Participant UUID of the winner, when known. When `winnerId`,
+            `sideAId`, and `sideBId` are all present, winner attribution
+            prefers the ids over comparing names, so a same-name pair's
+            winner (for example a hantei verdict) is attributed to the
+            correct side even though both share a name. Falls back to
+            comparing names when any of the three ids is absent.
         ipponsA:
           type: array
           items:
             type: string
-          description: "Ippon types scored by side A (M, K, D, T, H)."
+          description: >
+            Side A's ippon slots: waza letters (M/K/D/T/H), the "○" (maru)
+            awarded per point on a default win, the non-scoring "Ht"
+            judges'-decision mark on the winner's side, or "•" for an
+            unfilled slot.
         ipponsB:
           type: array
           items:

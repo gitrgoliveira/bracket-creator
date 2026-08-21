@@ -289,6 +289,13 @@ describe('boutMiddle: the only four middle values', () => {
     expect(boutMiddle('hikiwake', null, null)).toBe('X');
     expect(boutMiddle(null, null, { type: 'hikiwake' })).toBe('X');
     expect(boutMiddle('hikiwake', { periodCount: 2 }, null)).toBe('X');
+    // A match that went to encho cannot end tied, so X beats (E) — this must
+    // hold even when the ONLY signal for the tie is the client-derived
+    // score.type (a quick-scored draw sets no `decision`, just
+    // score.type: 'hikiwake'), with stale/leftover encho metadata present.
+    // Pins the isDrawResult-vs-middleMark precedence in boutMiddle itself,
+    // not just middleMark's own internal decision === 'hikiwake' check.
+    expect(boutMiddle('', { periodCount: 1 }, { type: 'hikiwake' })).toBe('X');
   });
   it('overtime → bare (E)', () => {
     expect(boutMiddle(null, { periodCount: 1 }, null)).toBe('(E)');

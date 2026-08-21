@@ -162,17 +162,25 @@ func FlagsScorePair(a, b int) (string, string) {
 // itself — this fallback covers results recorded before that fill or
 // imported without it. Never applies to engi flag counts (callers gate)
 // or the loser.
-func DefaultWinMaruAB(scoreA, scoreB, decision string, encho *state.EnchoMetadata, winner, sideA, sideB string) (string, string) {
+//
+// winnerID/sideAID/sideBID are the participant UUIDs (pass "" for all three
+// when unavailable — bracket rows and sub-bouts carry no ids) and are
+// resolved through domain.AttributeWinnerSide, the SAME owner SideMarksLR
+// uses: the two helpers compose one cell (score + result mark) and must
+// agree on which side won, or a same-name pair whose ids disagree with the
+// name order could print the maru fallback in one side's cell and the
+// Kiken/Fus. mark in the other's.
+func DefaultWinMaruAB(scoreA, scoreB, decision string, encho *state.EnchoMetadata, winnerID, sideAID, sideBID, winner, sideA, sideB string) (string, string) {
 	if winner == "" || !domain.IsDefaultWinDecisionStr(decision) {
 		return scoreA, scoreB
 	}
 	maru := strings.Join(domain.DefaultWinIppons(encho.On()), "")
-	switch winner {
-	case sideA:
+	switch domain.AttributeWinnerSide(winnerID, sideAID, sideBID, winner, sideA, sideB) {
+	case domain.MatchSideA:
 		if scoreA == "" {
 			scoreA = maru
 		}
-	case sideB:
+	case domain.MatchSideB:
 		if scoreB == "" {
 			scoreB = maru
 		}

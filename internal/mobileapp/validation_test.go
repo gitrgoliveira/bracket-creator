@@ -951,6 +951,48 @@ func TestValidateHanteiMarkPlacement_IDsOverrideNames(t *testing.T) {
 	})
 }
 
+// TestValidateHanteiMarkPlacement_UnpinnedGates pins two validateHanteiMark-
+// Placement gates that a full mutation sweep of the mobileapp test suite
+// found UNPINNED (bc-dmsr review): no existing test exercised either gate's
+// one non-redundant case, so mutating the gate away left the whole suite
+// green.
+//
+//  1. `marks > 1`: relaxed to `marks > 2`, this still passed every test.
+//     No test sends two hantei marks in the SAME winner's ippon slice, and
+//     a double mark there still reads "tied" under domain.
+//     CountScoringIppons (the mark is non-scoring), so nothing downstream
+//     catches the duplicate either.
+//  2. `winner == ""`: deleting this early return also passed every test.
+//     Its one non-redundant case is a winnerID that matches a side id
+//     while the winner NAME is empty: domain.AttributeWinnerSide takes the
+//     id branch whenever winnerID/sideAID/sideBID are ALL non-empty,
+//     regardless of the name, so without this gate the mark would be
+//     ACCEPTED here and then silently stripped later by the engine's
+//     hanteiStillHolds (which requires a winner NAME) - the
+//     200-with-verdict-gone divergence this codebase works hard to avoid
+//     elsewhere (see backfillMatchLevelIDsForHanteiAttribution's doc).
+func TestValidateHanteiMarkPlacement_UnpinnedGates(t *testing.T) {
+	t.Run("two hantei marks in the same winner's ippon slice is rejected", func(t *testing.T) {
+		err := validateHanteiMarkPlacement("",
+			[]string{domain.HanteiMark, domain.HanteiMark}, []string{},
+			"", "", "", "Alice", "Bob", "Alice")
+		require.Error(t, err)
+		var verr *ValidationError
+		require.True(t, errors.As(err, &verr))
+		assert.Equal(t, "at most one hantei mark per bout", verr.Message)
+	})
+
+	t.Run("winnerId matches a side id but winner name is empty: rejected on the name gate before id attribution ever runs", func(t *testing.T) {
+		err := validateHanteiMarkPlacement("",
+			[]string{}, []string{domain.HanteiMark},
+			"id-b", "id-a", "id-b", "Alice", "Bob", "")
+		require.Error(t, err)
+		var verr *ValidationError
+		require.True(t, errors.As(err, &verr))
+		assert.Equal(t, "hantei requires winner to be set", verr.Message)
+	})
+}
+
 // TestValidateHanteiMarkPlacement_IDLessCompatibility proves the CRITICAL
 // COMPATIBILITY requirement for bc-dmsr: an id-less match (legacy files,
 // older clients, bracket rows, sub-bouts) must validate EXACTLY as it did

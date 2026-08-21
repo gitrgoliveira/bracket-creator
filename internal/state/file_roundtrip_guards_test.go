@@ -30,6 +30,16 @@ import (
 
 // sweepFields compares in against got field-by-field, consulting allowlist for
 // fields that are legitimately not persisted in this file.
+//
+// A field left at its zero value in the fixture "survives" a save/reload
+// whether or not anything actually persists it: in and got are trivially
+// equal at the zero value either way. That is exactly how this guard could
+// miss a newly declared MatchResult field with no CSV column and no
+// allow-list entry (reproduced against a scratch field during bc-dmsr triage:
+// it passed the entire state suite). So every non-allow-listed field must
+// also be asserted non-zero on the fixture: declaring a field then forces the
+// column/allow-list decision this file's doc comment promises, rather than
+// letting it default to "untested and unnoticed."
 func sweepFields[T any](t *testing.T, file string, in, got T, allowlist map[string]string) {
 	t.Helper()
 	inV, gotV := reflect.ValueOf(in), reflect.ValueOf(got)
@@ -43,6 +53,12 @@ func sweepFields[T any](t *testing.T, file string, in, got T, allowlist map[stri
 			assert.NotEmptyf(t, reason, "%s needs a reason, not an empty string", f.Name)
 			continue
 		}
+		assert.Falsef(t, inV.Field(i).IsZero(),
+			"%s.%s is zero in the %q fixture, so a save/reload cannot prove "+
+				"anything about it either way. Give it a distinctive non-zero "+
+				"value, or add it to the allow-list with the reason it is "+
+				"legitimately not persisted.",
+			typ.Name(), f.Name, file)
 		assert.Equalf(t, inV.Field(i).Interface(), gotV.Field(i).Interface(),
 			"%s.%s did not survive a %s save/reload. Either persist it or add it "+
 				"to this guard's allow-list with the reason it is transient.",

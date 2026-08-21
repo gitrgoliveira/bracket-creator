@@ -95,12 +95,13 @@ func TestSideMarks(t *testing.T) {
 func TestDefaultWinMaruAB(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name           string
-		scoreA, scoreB string
-		decision       string
-		encho          *state.EnchoMetadata
-		winner         string
-		wantA, wantB   string
+		name                       string
+		scoreA, scoreB             string
+		decision                   string
+		encho                      *state.EnchoMetadata
+		winnerID, sideAID, sideBID string
+		winner                     string
+		wantA, wantB               string
 	}{
 		{name: "regulation kiken fills the winner pair", decision: "kiken-voluntary", winner: "Alice", wantA: "○○"},
 		{name: "legacy bare kiken fills too", decision: "kiken", winner: "Bob", wantB: "○○"},
@@ -111,12 +112,39 @@ func TestDefaultWinMaruAB(t *testing.T) {
 		{name: "a recorded score stands", scoreA: "M", decision: "kiken-injury", winner: "Alice", wantA: "M"},
 		{name: "non-default decision untouched", decision: "fought", winner: "Alice"},
 		{name: "no winner untouched", decision: "kiken-voluntary"},
-		{name: "unmatched winner untouched", decision: "kiken-voluntary", winner: "Carol"},
+		{name: "unmatched winner untouched, no ids", decision: "kiken-voluntary", winner: "Carol"},
+		// bc-dmsr fix: ids win over names, even on a same-name pair (legal:
+		// two participants from different dojos may share a name). Both cells
+		// start EMPTY, so before this fix the name-only switch (sideA-first)
+		// always filled side A's cell here regardless of what WinnerID said,
+		// printing the maru fallback in the withdrawn side's cell right next
+		// to the id-attributed "Kiken" mark (from SideMarksLR) on the real
+		// winner's side. DefaultWinMaruAB must resolve through the SAME
+		// domain.AttributeWinnerSide owner SideMarksLR uses, so the maru
+		// lands on the id-attributed WINNER's cell (B), not name-first A.
+		{
+			name:     "same-name pair with ids: winner is B, maru lands on B not name-first A",
+			decision: "kiken-voluntary",
+			winnerID: "id-b", sideAID: "id-a", sideBID: "id-b",
+			winner: "Alice", wantB: "○○",
+		},
+		{
+			name:     "same-name pair with ids: winner is A",
+			decision: "kiken-voluntary",
+			winnerID: "id-a", sideAID: "id-a", sideBID: "id-b",
+			winner: "Alice", wantA: "○○",
+		},
+		{
+			name:     "ids present but winnerID matches neither side: unattributable, untouched",
+			decision: "kiken-voluntary",
+			winnerID: "id-x", sideAID: "id-a", sideBID: "id-b",
+			winner: "Alice",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			gotA, gotB := DefaultWinMaruAB(tt.scoreA, tt.scoreB, tt.decision, tt.encho, tt.winner, "Alice", "Bob")
+			gotA, gotB := DefaultWinMaruAB(tt.scoreA, tt.scoreB, tt.decision, tt.encho, tt.winnerID, tt.sideAID, tt.sideBID, tt.winner, "Alice", "Bob")
 			assert.Equal(t, tt.wantA, gotA)
 			assert.Equal(t, tt.wantB, gotB)
 		})

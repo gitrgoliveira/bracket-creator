@@ -2236,3 +2236,141 @@ func TestStruckIppons_MatchesLegacyPredicateExhaustively(t *testing.T) {
 		assert.Empty(t, struckIppons([]string{}))
 	})
 }
+
+// TestHansokuFoldGuardIsScopedToThisWrite pins the scoping half of
+// checkHansokuHanteiConflict: it reports only the damage THIS call's fold
+// caused, never a defect the write inherited from the store.
+//
+// The decision twins build a fresh result and then take the encounter's
+// stored sub-bouts wholesale (preserveLoserScore, FIK Article 32) BEFORE the
+// fold runs, so an unscoped guard re-validates rows the kiken payload never
+// carried. An over-cap row is persistable (the wire caps ippons per side but
+// nothing caps the hansoku counts that the fold turns into further ippons, and
+// before this guard existed nothing rejected the post-fold result), so real
+// data can hold one; rejecting the kiken would then strand the operator, since
+// no decision endpoint can repair the row and the editor's echo save fails the
+// same cap check. applyKachinukiMerge is the same precedent in the other
+// direction: stored bout logs merge AFTER the check for exactly this reason.
+func TestHansokuFoldGuardIsScopedToThisWrite(t *testing.T) {
+	// IpponsA [M,K,H] with HansokuB:2 is already folded: the fold strips the
+	// "H" and re-appends one, reproducing the same three entries. Over the
+	// best-of-3 cap, but not by anything this write did.
+	storedOverCapRow := func() []state.SubMatchResult {
+		return []state.SubMatchResult{{
+			Position: 1, SideA: "A1", SideB: "B1",
+			IpponsA: []string{"M", "K", "H"}, HansokuB: 2, Winner: "A1",
+		}}
+	}
+
+	t.Run("a kiken is not blocked by an over-cap row already on disk", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		const compID = "fold-scope-kiken"
+		require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "FS", Kind: "team"}))
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{{
+			ID: "P1-1", SideA: "TeamA", SideB: "TeamB",
+			Status:     state.MatchStatusRunning,
+			SubResults: storedOverCapRow(),
+		}}))
+
+		_, _, err := eng.RecordDecision(compID, "P1-1", "kiken-voluntary", "shiro", "withdrew", nil, false)
+		require.NoError(t, err, "the kiken payload carries no sub rows and no hansoku; the stored row is not this write's error to report")
+	})
+
+	t.Run("but the same row IS rejected when this write's payload carries it", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		const compID = "fold-scope-payload"
+		require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "FS", Kind: "team"}))
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "P1-1", SideA: "TeamA", SideB: "TeamB", Status: state.MatchStatusScheduled},
+		}))
+
+		// Pre-fold the row is [M,K] (at the cap); HansokuB:2 is what pushes it
+		// over, so this fold IS the cause and the guard must fire.
+		err := eng.RecordMatchResult(compID, "P1-1", &state.MatchResult{
+			SideA: "TeamA", SideB: "TeamB", Winner: "TeamA",
+			Status: state.MatchStatusCompleted,
+			SubResults: []state.SubMatchResult{{
+				Position: 1, SideA: "A1", SideB: "B1",
+				IpponsA: []string{"M", "K"}, HansokuB: 2, Winner: "A1",
+			}},
+		})
+		require.Error(t, err)
+		var verr *ValidationError
+		require.True(t, errors.As(err, &verr), "must be a *ValidationError so handlers map it to 400")
+		assert.Contains(t, verr.Msg, "subResults[0]")
+		assert.Contains(t, verr.Msg, "at most 2 ippons per side")
+	})
+}
+
+// TestHansokuHanteiConflict_MatchLevelOverflow pins the match-level half of
+// checkFoldedRow's overflow guard. The fold folds hansoku into the match's own
+// ippons exactly as it does into every sub row, and nothing caps the hansoku
+// counts at the wire, so {ipponsA:[M,K], hansokuB:4} passes validation, gains
+// two "H" entries, and used to persist a four-entry side. Every subsequent
+// echo save of that match then 400s at mobileapp.validateIppons ("at most 2
+// ippons per side"), wedging the editor on a row nothing rejected at write
+// time - the sub level rejected this shape from the start, the match level did
+// not.
+func TestHansokuHanteiConflict_MatchLevelOverflow(t *testing.T) {
+	overflowPatch := func() *state.MatchResult {
+		return &state.MatchResult{
+			SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			IpponsA:  []string{"M", "K"},
+			HansokuB: 4, // two more ippons to Alice: [M,K,H,H]
+			Status:   state.MatchStatusCompleted,
+		}
+	}
+
+	t.Run("non-tx: RecordMatchResult rejects it and persists nothing", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		const compID = "hh-match-overflow"
+		require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "HH"}))
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "P1-1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled},
+		}))
+
+		err := eng.RecordMatchResult(compID, "P1-1", overflowPatch())
+		require.Error(t, err)
+		var verr *ValidationError
+		require.True(t, errors.As(err, &verr), "must be a *ValidationError so handlers map it to 400")
+		assert.Contains(t, verr.Msg, "at most 2 ippons per side")
+
+		stored, loadErr := store.LoadPoolMatches(compID)
+		require.NoError(t, loadErr)
+		require.Len(t, stored, 1)
+		assert.LessOrEqual(t, len(stored[0].IpponsA), 2, "the over-cap side must never reach disk")
+	})
+
+	t.Run("tx: the production score route rejects it too", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		const compID = "hh-match-overflow-tx"
+		require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "HH"}))
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "P1-1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled},
+		}))
+		err := store.WithTransaction(compID, func(tx state.StoreTx) error {
+			_, terr := eng.RecordMatchResultWithIneligibilityTx(tx, compID, "P1-1", overflowPatch())
+			return terr
+		})
+		require.Error(t, err)
+		var verr *ValidationError
+		require.True(t, errors.As(err, &verr), "must be a *ValidationError so handlers map it to 400")
+		assert.Contains(t, verr.Msg, "at most 2 ippons per side")
+	})
+
+	t.Run("a hansoku award that stays within the cap is unaffected", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		const compID = "hh-match-overflow-ok"
+		require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "HH"}))
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "P1-1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled},
+		}))
+		require.NoError(t, eng.RecordMatchResult(compID, "P1-1", &state.MatchResult{
+			SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			IpponsA:  []string{"M"},
+			IpponsB:  []string{"K"},
+			HansokuB: 2, // [M,H] vs [K]: at the cap, not over it
+			Status:   state.MatchStatusCompleted,
+		}))
+	})
+}

@@ -339,6 +339,57 @@ func TestScoreHandler_SidesLessLegacyHanteiRecordsVerdict(t *testing.T) {
 	assert.Nil(t, m.DecidedByHantei, "the legacy flag is never persisted, only the mark")
 }
 
+// TestScoreHandler_SidesLessModernHanteiRecordsVerdict pins the bc-dmsr
+// fix: backfillMatchLevelSidesForLegacyHantei used to gate its sides
+// backfill on the deprecated decidedByHantei flag ALONE, while its id twin
+// (backfillMatchLevelIDsForHanteiAttribution) had already been widened to
+// `legacyFlagged || req.HanteiDecided()`. A MODERN minimal payload - winner
+// + ipponsA/ipponsB already carrying the "Ht" mark, no sideA/sideB, no ids,
+// and NO legacy flag at all - is legal per specs/openapi.yaml (sides are
+// optional; the engine's reconcileSides backfills them from the stored
+// match) but used to 400 with "the hantei mark belongs in the winner's
+// ippon list", because validateHanteiMarkPlacement saw empty sides/ids and
+// an empty-string name fallback attributed the mark to MatchSideNone. The
+// identical payload plus decidedByHantei:true was backfilled and accepted.
+// Both twins now share one gate (hanteiAttributionNeedsBackfill), so the
+// modern payload is backfilled and accepted exactly like its legacy-flagged
+// sibling.
+func TestScoreHandler_SidesLessModernHanteiRecordsVerdict(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	store.SaveCompetition(&state.Competition{ID: "smh"})
+	require.NoError(t, store.SavePoolMatches("smh", []state.MatchResult{
+		{ID: "PoolA-1", SideA: "Alice", SideB: "Bob"},
+	}))
+
+	// No sideA/sideB, no sideAID/sideBID, no decidedByHantei flag - just a
+	// winner and the mark already present in the winner's ippon slice.
+	payload, err := json.Marshal(state.MatchResult{
+		ID:      "PoolA-1",
+		Winner:  "Alice",
+		IpponsA: []string{"M", domain.HanteiMark},
+		IpponsB: []string{"M"},
+		Status:  state.MatchStatusCompleted,
+	})
+	require.NoError(t, err)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/smh/matches/PoolA-1/score", bytes.NewBuffer(payload))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+
+	stored, err := store.LoadPoolMatches("smh")
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	m := stored[0]
+	assert.Equal(t, "Alice", m.SideA, "the backfilled side must persist")
+	assert.Equal(t, "Bob", m.SideB)
+	assert.True(t, m.HanteiDecided(), "the verdict must survive a sides-less MODERN payload, not just the legacy-flagged one")
+	assert.Contains(t, m.IpponsA, domain.HanteiMark, "the mark must land on the winner's side, not vanish")
+}
+
 // TestScoreHandler_SidesPresentUnattributableHanteiStillDrops pins the other
 // half of the drop-never-guess rule: when the sides ARE known (no backfill
 // needed) and the payload's winner names neither of them, the verdict must

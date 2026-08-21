@@ -1218,10 +1218,10 @@ type BracketMatch struct {
 	DecisionBy     string         `json:"decisionBy,omitempty"`
 	DecisionReason string         `json:"decisionReason,omitempty"`
 	Encho          *EnchoMetadata `json:"encho,omitempty"`
-	// DecidedByHantei is a LEGACY READ-ONLY channel (see legacy_hantei.go):
-	// the verdict is the domain.HanteiMark entry inside the winner's rendered
-	// score string. Kept only so pre-ruling bracket.json files normalise on
-	// read; writers must never set it.
+	// DecidedByHantei is a LEGACY READ-ONLY channel, exactly as on MatchResult
+	// (see there and legacy_hantei.go): the verdict is the domain.HanteiMark
+	// entry in the winner's IpponsA/IpponsB. Kept only so pre-ruling
+	// bracket.json files normalise on read; writers must never set it.
 	// YAML tag included for parity with MatchResult and future YAML-serialised contexts.
 	DecidedByHantei bool `json:"decidedByHantei,omitempty" yaml:"decided_by_hantei,omitempty"`
 	// SubResults persists per-bout results for team bracket matches so the

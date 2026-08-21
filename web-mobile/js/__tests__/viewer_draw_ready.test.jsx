@@ -51,7 +51,7 @@ describe('ViewerCompetition draw-ready exposure (mp-rrd)', () => {
   const STUBBED = [
     'StatusBadge', 'formatDate', 'formatLabel', 'pluralize', 'Term',
     'BracketTree', 'buildBracket', 'roundLabel', 'bracketRoundLabel', 'formatIpponsScore',
-    'ipponsFromScore', 'isHikiwake', 'hasBothSides', 'compareDmy',
+    'isHikiwake', 'hasBothSides', 'compareDmy',
     'queueLabel', 'queueLabelCompact', 'teamIVScore', 'matchScoreStr',
     'EmptyState',
   ];
@@ -101,7 +101,6 @@ describe('ViewerCompetition draw-ready exposure (mp-rrd)', () => {
     global.window.matchScoreStr = (m) =>
       (global.window.teamIVScore(m)) ||
       global.window.formatIpponsScore(m?.ipponsB || [], m?.ipponsA || [], m?.score, m?.decision, m?.encho, m?.decidedByHantei);
-    global.window.ipponsFromScore = () => [];
     global.window.isHikiwake = () => false;
     global.window.hasBothSides = (m) => !!(m && m.sideA && m.sideB);
     global.window.compareDmy = (a, b) => String(a).localeCompare(String(b));
@@ -194,7 +193,7 @@ describe('ViewerOverview pre-start messaging (mp-rrd)', () => {
   let runtime;
   let ViewerOverview;
   const savedGlobals = {};
-  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'ipponsFromScore', 'teamIVScore', 'matchScoreStr', 'EmptyState'];
+  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'teamIVScore', 'matchScoreStr', 'EmptyState'];
 
   beforeEach(async () => {
     runtime = makeReactive();
@@ -213,7 +212,6 @@ describe('ViewerOverview pre-start messaging (mp-rrd)', () => {
     global.window.matchScoreStr = (m) =>
       (global.window.teamIVScore(m)) ||
       global.window.formatIpponsScore(m?.ipponsB || [], m?.ipponsA || [], m?.score, m?.decision, m?.encho, m?.decidedByHantei);
-    global.window.ipponsFromScore = () => [];
     vi.resetModules();
     ({ ViewerOverview } = await import('../viewer.jsx'));
   });

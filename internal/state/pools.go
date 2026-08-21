@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 )
 
@@ -303,8 +304,9 @@ func parsePoolMatchesBytes(raw []byte) ([]MatchResult, error) {
 	return parsePoolMatchesRecords(records), nil
 }
 
-// splitIppons parses a "|"-joined ippon field into a slice, mapping an
-// EMPTY field to an empty slice. strings.Split("", "|") returns [""] (a
+// splitIppons parses a domain.IpponFieldSeparator-joined ippon field into a
+// slice, mapping an EMPTY field to an empty slice. strings.Split("", sep)
+// returns [""] (a
 // one-element slice holding the empty string), which len() then counts as a
 // phantom ippon, inflating points-won/lost in standings and corrupting
 // individual pool tie detection (two players who actually tied read as
@@ -316,7 +318,7 @@ func splitIppons(s string) []string {
 	if s == "" {
 		return []string{}
 	}
-	return strings.Split(s, "|")
+	return strings.Split(s, domain.IpponFieldSeparator)
 }
 
 // poolMatchColumn describes ONE column of pool-matches.csv: the header name,
@@ -426,16 +428,17 @@ var poolMatchColumns = []poolMatchColumn{
 	strCol("SideA", func(m *MatchResult) *string { return &m.SideA }),
 	strCol("SideB", func(m *MatchResult) *string { return &m.SideB }),
 	strCol("Winner", func(m *MatchResult) *string { return &m.Winner }),
-	// The ippon cells hold the PERSISTED slices: waza letters joined with "|",
+	// The ippon cells hold the PERSISTED slices: waza letters joined with
+	// domain.IpponFieldSeparator,
 	// plus the judges'-decision mark in the winner's cell when the match was
 	// decided by hantei. The mark (domain.HanteiMark) is a real entry in that
 	// slice — the mark IS the record — so it round-trips through this column
 	// like any other letter, with no wrapping codec on either side.
 	{name: "IpponsA",
-		put:  func(r *MatchResult) string { return strings.Join(r.IpponsA, "|") },
+		put:  func(r *MatchResult) string { return strings.Join(r.IpponsA, domain.IpponFieldSeparator) },
 		take: func(m *MatchResult, cell string) { m.IpponsA = splitIppons(cell) }},
 	{name: "IpponsB",
-		put:  func(r *MatchResult) string { return strings.Join(r.IpponsB, "|") },
+		put:  func(r *MatchResult) string { return strings.Join(r.IpponsB, domain.IpponFieldSeparator) },
 		take: func(m *MatchResult, cell string) { m.IpponsB = splitIppons(cell) }},
 	intCol("HansokuA", func(m *MatchResult) *int { return &m.HansokuA }),
 	intCol("HansokuB", func(m *MatchResult) *int { return &m.HansokuB }),

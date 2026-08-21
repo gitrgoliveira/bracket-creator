@@ -8,6 +8,30 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 )
 
+// TestIsValidIpponEntry pins the wire-level predicate against the pool CSV's
+// ippon join separator (IpponFieldSeparator, "|"). Before this test's fix,
+// the separator is a single rune and passed as a well-formed entry even
+// though internal/state's codec (pools.go: splitIppons, poolMatchColumns)
+// uses that exact byte to delimit a joined slice — so {"M", "|"} validated,
+// persisted as the CSV cell "M||", and reloaded as {"M", "", ""}, silently
+// disagreeing with what was validated and broadcast before the round trip.
+func TestIsValidIpponEntry(t *testing.T) {
+	assert.False(t, domain.IsValidIpponEntry(domain.IpponFieldSeparator),
+		"the CSV join separator must never validate as a well-formed ippon entry")
+	assert.False(t, domain.IsValidIpponEntry("|"),
+		"pinned against the literal byte, independent of the constant's value")
+
+	// Every other previously-legal shape must keep passing: waza letters, the
+	// default-win maru, the unfilled-slot placeholder, the hantei mark, and
+	// empty.
+	for _, v := range []string{"M", "K", "D", "T", "H", "S", "○", domain.IpponPlaceholder, domain.HanteiMark, ""} {
+		assert.Truef(t, domain.IsValidIpponEntry(v), "entry %q should remain valid", v)
+	}
+
+	// Any other multi-rune string is still rejected (unchanged behaviour).
+	assert.False(t, domain.IsValidIpponEntry("MK"))
+}
+
 func TestParseScore(t *testing.T) {
 	tests := []struct {
 		name        string

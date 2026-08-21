@@ -50,7 +50,7 @@ describe('ViewerCompetition bracket-tab shell width modifier', () => {
   const STUBBED = [
     'StatusBadge', 'formatDate', 'formatLabel', 'pluralize', 'Term',
     'BracketTree', 'MatchCard', 'buildBracket', 'roundLabel', 'bracketRoundLabel',
-    'formatIpponsScore', 'ipponsFromScore', 'isHikiwake', 'hasBothSides',
+    'formatIpponsScore', 'isHikiwake', 'hasBothSides',
     'compareDmy', 'queueLabel', 'queueLabelCompact', 'teamIVScore',
     'matchScoreStr', 'EmptyState', 'bronzeUnderFinalStyle',
   ];
@@ -118,7 +118,6 @@ describe('ViewerCompetition bracket-tab shell width modifier', () => {
     global.window.formatIpponsScore = () => '';
     global.window.teamIVScore = () => null;
     global.window.matchScoreStr = () => '';
-    global.window.ipponsFromScore = () => [];
     global.window.isHikiwake = () => false;
     global.window.hasBothSides = (m) => !!(m && m.sideA && m.sideB);
     global.window.compareDmy = (a, b) => String(a).localeCompare(String(b));

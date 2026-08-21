@@ -74,7 +74,7 @@ describe('ViewerCompetition bronze / 3rd-place match rendering (mp-gy6g)', () =>
   const STUBBED = [
     'StatusBadge', 'formatDate', 'formatLabel', 'pluralize', 'Term',
     'BracketTree', 'MatchCard', 'buildBracket', 'roundLabel', 'bracketRoundLabel', 'formatIpponsScore',
-    'ipponsFromScore', 'isHikiwake', 'hasBothSides', 'compareDmy',
+    'isHikiwake', 'hasBothSides', 'compareDmy',
     'queueLabel', 'queueLabelCompact', 'teamIVScore', 'matchScoreStr',
     'EmptyState', 'bronzeUnderFinalStyle',
   ];
@@ -152,7 +152,6 @@ describe('ViewerCompetition bronze / 3rd-place match rendering (mp-gy6g)', () =>
     global.window.formatIpponsScore = () => '';
     global.window.teamIVScore = () => null;
     global.window.matchScoreStr = () => '';
-    global.window.ipponsFromScore = () => [];
     global.window.isHikiwake = () => false;
     global.window.hasBothSides = (m) => !!(m && m.sideA && m.sideB);
     global.window.compareDmy = (a, b) => String(a).localeCompare(String(b));

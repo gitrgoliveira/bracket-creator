@@ -526,6 +526,100 @@ func TestBatchPostPreservingSeedIdentityAccepted(t *testing.T) {
 	assert.Equal(t, "Wakaba", seeds[0].Dojo)
 }
 
+// TestBatchPostSeedIdentityCasingResubmissionAccepted is a companion
+// regression to TestBatchPostOrphaningSeedRejected/
+// TestBatchPostPreservingSeedIdentityAccepted: a legitimate re-submission of
+// the SAME roster, differing only in the casing of a seeded participant's
+// name, must not be refused as orphaning.
+//
+// seeds.csv and participants.csv both store whatever casing
+// TitleCaseName produces (the seeding panel and the single-participant PUT
+// path canonicalize on save; LoadParticipants Title-cases on every parse).
+// The bulk replace endpoint's own write deliberately skips that
+// canonicalization (saveParticipantsNoLock persists the raw request name,
+// relying on the next load to canonicalize), so before this fix the orphan
+// check compared the RAW re-submitted name against the CANONICAL stored
+// seed and refused a same-identity resubmission with a spurious 409.
+func TestBatchPostSeedIdentityCasingResubmissionAccepted(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "comp-batch-seed-casing"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     compID,
+		Name:   "Batch Seed Casing Test",
+		Status: state.CompStatusSetup,
+	}))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "Van Der Berg", Dojo: "DojoA"},
+		{Name: "Bob Jones", Dojo: "Tora"},
+	}))
+	require.NoError(t, store.SaveSeeds(compID, []domain.SeedAssignment{
+		{Name: "Van Der Berg", Dojo: "DojoA", SeedRank: 1},
+	}))
+
+	// Re-submit the identical roster, but typed in lower case. Same
+	// (name, dojo) identity once canonicalized; must be accepted.
+	body, _ := json.Marshal(map[string]any{"players": []map[string]string{
+		{"name": "van der berg", "dojo": "DojoA"},
+		{"name": "Bob Jones", "dojo": "Tora"},
+	}})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code,
+		"a re-submission differing only in casing from the canonical stored seed identity must not be refused as orphaning: %s", w.Body.String())
+
+	seeds, err := store.LoadSeeds(compID)
+	require.NoError(t, err)
+	require.Len(t, seeds, 1)
+	assert.Equal(t, "DojoA", seeds[0].Dojo)
+}
+
+// TestBatchPostSeedIdentityDojoWhitespaceResubmissionAccepted is the DOJO half
+// of TestBatchPostSeedIdentityCasingResubmissionAccepted. The seed key is
+// (name, dojo), and the loader canonicalizes both halves - but differently:
+// CreatePlayersFromRecords Title-cases only the name while TrimSpacing EVERY
+// field, so a dojo typed with a stray surrounding space canonicalizes to the
+// stored one just as surely as lower-cased name does, and must not be refused
+// as orphaning either. Normalizing only the name would leave this half of the
+// key raw and reopen the same spurious 409 one field over.
+func TestBatchPostSeedIdentityDojoWhitespaceResubmissionAccepted(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "comp-batch-seed-dojo-ws"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     compID,
+		Name:   "Batch Seed Dojo Whitespace Test",
+		Status: state.CompStatusSetup,
+	}))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "Van Der Berg", Dojo: "DojoA"},
+		{Name: "Bob Jones", Dojo: "Tora"},
+	}))
+	require.NoError(t, store.SaveSeeds(compID, []domain.SeedAssignment{
+		{Name: "Van Der Berg", Dojo: "DojoA", SeedRank: 1},
+	}))
+
+	body, _ := json.Marshal(map[string]any{"players": []map[string]string{
+		{"name": "Van Der Berg", "dojo": "  DojoA  "},
+		{"name": "Bob Jones", "dojo": "Tora"},
+	}})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code,
+		"a re-submission differing only in dojo whitespace from the canonical stored seed identity must not be refused as orphaning: %s", w.Body.String())
+
+	seeds, err := store.LoadSeeds(compID)
+	require.NoError(t, err)
+	require.Len(t, seeds, 1)
+	assert.Equal(t, "DojoA", seeds[0].Dojo)
+}
+
 // TestReplaceDoesNotInheritOldDisplayName ensures that replacing a participant
 // with displayName:"" (the corrected JS payload) writes a clean 2-column CSV
 // row, not a 3-column row that carries the old slot's stale SanitizeName value.

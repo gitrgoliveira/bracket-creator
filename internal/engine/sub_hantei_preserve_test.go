@@ -208,6 +208,40 @@ func TestPreserveSubHantei(t *testing.T) {
 		assert.False(t, incoming[0].HanteiDecided())
 	})
 
+	t.Run("a stored untied hantei prior does not stamp a winner on a silent row", func(t *testing.T) {
+		// PR review mutation-survival gap: the test above ("an untied incoming
+		// row cannot inherit the verdict") supplies its OWN non-nil ippons
+		// (IpponsB: []string{}), so it returns at the EARLIER "the writer
+		// addressed the verdict" guard (in.IpponsA != nil || in.IpponsB !=
+		// nil) and never reaches the post-copy HanteiTiedScoreline recheck
+		// near the bottom of the function at all. That recheck only fires
+		// for a STORED daihyosen prior whose own scoreline carries the mark
+		// on an UNTIED count -- drifted/hand-edited data no validated write
+		// can ever persist (validateSubBout/the tied-scoreline check refuse
+		// it on the way in) -- copied wholesale onto a row that supplies
+		// NOTHING of its own (nil IpponsA/IpponsB, not empty slices: the
+		// nil-vs-empty distinction is load-bearing throughout this file).
+		stored := []state.SubMatchResult{{
+			Position: dh, SideA: "Kyoto", SideB: "Osaka",
+			// Untied by construction: 2 scoring ippons (M, M) plus the
+			// non-scoring hantei mark on the A side, only 1 (K) on B.
+			IpponsA: []string{"M", "M", domain.HanteiMark}, IpponsB: []string{"K"},
+			Winner: "Kyoto", Decision: "daihyosen",
+		}}
+		incoming := []state.SubMatchResult{
+			{Position: dh, SideA: "Kyoto", SideB: "Osaka", Decision: "daihyosen"},
+			// IpponsA/IpponsB left as their zero value (nil), never assigned:
+			// a fully silent row, not an explicit `[]string{}`.
+		}
+		require.Nil(t, incoming[0].IpponsA, "the incoming row must be nil, not an empty slice, to reach the copy branch")
+		require.Nil(t, incoming[0].IpponsB)
+
+		preserveSubHantei(stored, incoming)
+
+		assert.Equal(t, "", incoming[0].Winner,
+			"the copied scoreline is untied, so the recheck must block the winner stamp even though prior named one")
+	})
+
 	t.Run("no stored verdict: nothing to preserve", func(t *testing.T) {
 		stored := []state.SubMatchResult{{Position: dh, SideA: "Kyoto", SideB: "Osaka", Decision: "daihyosen"}}
 		incoming := []state.SubMatchResult{{Position: dh, SideA: "Kyoto", SideB: "Osaka", Decision: "daihyosen"}}

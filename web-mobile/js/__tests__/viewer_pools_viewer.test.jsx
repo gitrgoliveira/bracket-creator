@@ -28,7 +28,7 @@ describe('PoolsViewer draw-order standings (mp-938b)', () => {
   let runtime;
   let PoolsViewer;
   const savedGlobals = {};
-  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'teamIVScore', 'matchScoreStr', 'matchStateCell', 'ipponsFromScore', 'queueLabel', 'queueLabelCompact'];
+  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'teamIVScore', 'matchScoreStr', 'matchStateCell', 'queueLabel', 'queueLabelCompact'];
 
   const baseComp = { kind: 'individual', teamSize: 0, format: 'mixed', poolWinners: 2 };
   const tweaks = { showDojo: false };
@@ -76,7 +76,6 @@ describe('PoolsViewer draw-order standings (mp-938b)', () => {
     // Mirror the real matchStateCell (bracket.jsx): completed → score||"vs", otherwise "vs".
     global.window.matchStateCell = (m) =>
       m?.status === 'completed' ? (global.window.matchScoreStr(m) || 'vs') : 'vs';
-    global.window.ipponsFromScore = () => [];
     global.window.queueLabel = () => '';
     global.window.queueLabelCompact = () => null;
     vi.resetModules();
@@ -317,7 +316,7 @@ describe('PoolsViewer per-pool qualifier highlighting (bc-qual LP-5a)', () => {
   let runtime;
   let PoolsViewer;
   const savedGlobals = {};
-  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'teamIVScore', 'matchScoreStr', 'matchStateCell', 'ipponsFromScore', 'queueLabel', 'queueLabelCompact'];
+  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'teamIVScore', 'matchScoreStr', 'matchStateCell', 'queueLabel', 'queueLabelCompact'];
 
   // Pool A: 4 players, OVERSIZED relative to a minimum pool size of 3.
   const poolA = {
@@ -371,7 +370,6 @@ describe('PoolsViewer per-pool qualifier highlighting (bc-qual LP-5a)', () => {
       global.window.formatIpponsScore(m?.ipponsB || [], m?.ipponsA || [], m?.score, m?.decision, m?.encho, m?.decidedByHantei);
     global.window.matchStateCell = (m) =>
       m?.status === 'completed' ? (global.window.matchScoreStr(m) || 'vs') : 'vs';
-    global.window.ipponsFromScore = () => [];
     global.window.queueLabel = () => '';
     global.window.queueLabelCompact = () => null;
     vi.resetModules();
@@ -438,7 +436,7 @@ describe('PoolNumberedMatchRow team IV score (mp-o4xl)', () => {
   let runtime;
   let PoolNumberedMatchRow;
   const savedGlobals = {};
-  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'teamIVScore', 'matchScoreStr', 'matchStateCell', 'ipponsFromScore', 'queueLabel', 'queueLabelCompact'];
+  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'teamIVScore', 'matchScoreStr', 'matchStateCell', 'queueLabel', 'queueLabelCompact'];
 
   beforeEach(async () => {
     runtime = makeReactive();
@@ -459,7 +457,6 @@ describe('PoolNumberedMatchRow team IV score (mp-o4xl)', () => {
     // Mirror the real matchStateCell (bracket.jsx): completed → score||"vs", otherwise "vs".
     global.window.matchStateCell = (m) =>
       m?.status === 'completed' ? (global.window.matchScoreStr(m) || 'vs') : 'vs';
-    global.window.ipponsFromScore = () => [];
     global.window.queueLabel = () => '';
     global.window.queueLabelCompact = () => null;
     vi.resetModules();
@@ -577,7 +574,7 @@ describe('PoolNumberedMatchRow engi stacked pair names (mp-gy6g)', () => {
   let runtime;
   let PoolNumberedMatchRow;
   const savedGlobals = {};
-  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'teamIVScore', 'matchScoreStr', 'matchStateCell', 'ipponsFromScore', 'queueLabel', 'queueLabelCompact', 'engiPairParts'];
+  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'teamIVScore', 'matchScoreStr', 'matchStateCell', 'queueLabel', 'queueLabelCompact', 'engiPairParts'];
 
   beforeEach(async () => {
     runtime = makeReactive();
@@ -597,7 +594,6 @@ describe('PoolNumberedMatchRow engi stacked pair names (mp-gy6g)', () => {
       global.window.formatIpponsScore(m?.ipponsB || [], m?.ipponsA || [], m?.score, m?.decision, m?.encho, m?.decidedByHantei);
     global.window.matchStateCell = (m) =>
       m?.status === 'completed' ? (global.window.matchScoreStr(m) || 'vs') : 'vs';
-    global.window.ipponsFromScore = () => [];
     global.window.queueLabel = () => '';
     global.window.queueLabelCompact = () => null;
     // Stub the engi pair-name splitter (real impl lives in ui.jsx, not imported
@@ -681,7 +677,7 @@ describe('PoolsViewer engi stacked pair names in standings (mp-gy6g)', () => {
   let runtime;
   let PoolsViewer;
   const savedGlobals = {};
-  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'teamIVScore', 'matchScoreStr', 'matchStateCell', 'ipponsFromScore', 'queueLabel', 'queueLabelCompact', 'engiPairParts'];
+  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'teamIVScore', 'matchScoreStr', 'matchStateCell', 'queueLabel', 'queueLabelCompact', 'engiPairParts'];
 
   const tweaks = { showDojo: false };
   const engiComp = { format: 'league', kind: 'individual', teamSize: 0, engi: true, poolWinners: 2 };
@@ -720,7 +716,6 @@ describe('PoolsViewer engi stacked pair names in standings (mp-gy6g)', () => {
       global.window.formatIpponsScore(m?.ipponsB || [], m?.ipponsA || [], m?.score, m?.decision, m?.encho, m?.decidedByHantei);
     global.window.matchStateCell = (m) =>
       m?.status === 'completed' ? (global.window.matchScoreStr(m) || 'vs') : 'vs';
-    global.window.ipponsFromScore = () => [];
     global.window.queueLabel = () => '';
     global.window.queueLabelCompact = () => null;
     // Stub the engi pair-name splitter (real impl lives in ui.jsx, not imported

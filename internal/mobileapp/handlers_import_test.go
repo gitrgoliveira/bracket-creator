@@ -1019,3 +1019,63 @@ func TestImportCompetition_RefusesCourtsTheVenueLacks(t *testing.T) {
 		assert.Equal(t, []string{"B"}, comp.Courts)
 	})
 }
+
+// The importer runs the SAME seeds-roster gate PUT /seeds runs
+// (rejectSeedsOffRoster, internal/mobileapp/validation.go), so a wrong-dojo
+// or ghost seed row cannot land through the manifest path just because the
+// endpoint validated seeds as a rank SET (domain.ValidateAssignments) and
+// never consulted the roster.
+//
+// Pre-fix this saved cleanly with SeedCount>0 and only failed later, at
+// generate-draw time, with "seeded participant not found in main list" --
+// exactly the split-views failure the PUT gate exists to catch at write
+// time instead.
+func TestImportCompetition_RejectsSeedsOffRoster(t *testing.T) {
+	store, err := state.NewStore(t.TempDir())
+	require.NoError(t, err)
+
+	files := map[string][]byte{
+		"participants.csv": []byte("Alice,DojoA\nBob,DojoB\n"),
+		"seeds.csv":        []byte("Rank,Name,Dojo\n1,Alice,WrongDojo\n2,Bob,DojoB\n"),
+	}
+
+	t.Run("a wrong-dojo seed row is refused, not silently imported", func(t *testing.T) {
+		entry := ImportManifestComp{
+			ID:           "imp-wrong-dojo",
+			Name:         "Wrong Dojo",
+			Date:         "11-06-2026",
+			Participants: "participants.csv",
+			Seeds:        "seeds.csv",
+		}
+		res := importCompetition(store, entry, files)
+		require.NotEmpty(t, res.Error, "a seed naming Alice under the wrong dojo must not import cleanly")
+		assert.Contains(t, res.Error, "not on this competition's roster")
+		assert.Contains(t, res.Error, `"Alice" (rank 1)`)
+		assert.Zero(t, res.SeedCount)
+		assert.Zero(t, res.ParticipantCount)
+
+		// Refused means NOT written at all -- parse-before-save means a
+		// rejected row leaves no half-imported competition behind.
+		comp, err := store.LoadCompetition("imp-wrong-dojo")
+		require.NoError(t, err)
+		assert.Nil(t, comp)
+	})
+
+	t.Run("the same roster with the correct dojo imports cleanly", func(t *testing.T) {
+		okFiles := map[string][]byte{
+			"participants.csv": files["participants.csv"],
+			"seeds.csv":        []byte("Rank,Name,Dojo\n1,Alice,DojoA\n2,Bob,DojoB\n"),
+		}
+		entry := ImportManifestComp{
+			ID:           "imp-right-dojo",
+			Name:         "Right Dojo",
+			Date:         "11-06-2026",
+			Participants: "participants.csv",
+			Seeds:        "seeds.csv",
+		}
+		res := importCompetition(store, entry, okFiles)
+		require.Emptyf(t, res.Error, "import should succeed: %s", res.Error)
+		assert.Equal(t, 2, res.SeedCount)
+		assert.Equal(t, 2, res.ParticipantCount)
+	})
+}

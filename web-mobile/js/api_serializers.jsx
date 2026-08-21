@@ -330,13 +330,37 @@ function normalizeCompetitionDetail(data) {
     // null from empty courts, so this is behavior-preserving.
     result.courts = result.courts || [];
 
-    // Normalize config.players (Go uses PascalCase, JS expects camelCase)
-    if (result.config && result.config.players) {
-        result.config = { ...result.config, players: result.config.players.map(p => {
-            const norm = normalizePlayer(p);
-            // Preserve id and seed null (normalizePlayer maps Seed:0 → seed:0, but JS uses null for "not seeded")
-            return { ...norm, id: p.id || norm.id, seed: p.Seed || p.seed || null };
-        })};
+    // ExtraQualifiers (bc-qual LP-5a): `json:"extraQualifiers,omitempty"` on
+    // the Go side drops the key entirely for the default/standard value
+    // (""), so a competition without a non-standard selection arrives with
+    // `extraQualifiers: undefined` rather than "". Normalize to "" here so
+    // every consumer (admin_setup.jsx's radio, viewer_standings.jsx's
+    // per-pool qualifier count) can compare against "" directly without an
+    // `|| ""` of its own. This top-level field covers the bare-Competition
+    // responses (start/generate-draw/complete); the nested `result.config`
+    // case (GET /viewer/competitions/:id) is normalized separately below.
+    result.extraQualifiers = result.extraQualifiers || "";
+
+    // ...and again on the NESTED record, which is the shape the operator
+    // console actually renders: GET /api/viewer/competitions/:id answers
+    // {config, pools, poolMatches, bracket, standings}, and admin.jsx passes
+    // `detail.config` straight to AdminCompetition. Normalizing only the top
+    // level left `config.courts` null and made the claim above ("no consumer
+    // has to guard individually") false for the one path that matters. The
+    // render sites are defended too; this keeps the boundary honest so the
+    // next consumer of config.* inherits the guarantee.
+    // One copy, both fields. config.players is PascalCase on the Go side and
+    // camelCase here; config.courts must never arrive null.
+    if (result.config) {
+        const config = { ...result.config, courts: result.config.courts || [], extraQualifiers: result.config.extraQualifiers || "" };
+        if (config.players) {
+            config.players = config.players.map(p => {
+                const norm = normalizePlayer(p);
+                // Preserve id and seed null (normalizePlayer maps Seed:0 → seed:0, but JS uses null for "not seeded")
+                return { ...norm, id: p.id || norm.id, seed: p.Seed || p.seed || null };
+            });
+        }
+        result.config = config;
     }
 
     // Normalize pools (Go: PoolName, Players → poolName, players)

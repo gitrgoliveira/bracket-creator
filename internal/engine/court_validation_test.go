@@ -3,6 +3,7 @@ package engine
 import (
 	"testing"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -71,4 +72,124 @@ func TestValidateCourtCount(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestCourtsOutsideTournament pins the orphaned-shiaijo predicate: a
+// competition's courts are a SUBSET of the tournament's, and reducing the
+// venue's court count leaves the competition holding one that no longer
+// exists. Mirrored client-side by
+// web-mobile/js/__tests__/court_membership.test.jsx.
+func TestCourtsOutsideTournament(t *testing.T) {
+	tests := []struct {
+		desc   string
+		comp   []string
+		tourn  []string
+		expect []string
+	}{
+		{"every court still exists", []string{"A", "B"}, []string{"A", "B", "C"}, nil},
+		{"one dropped court", []string{"A", "B", "C", "D"}, []string{"A", "B", "C"}, []string{"D"}},
+		{"reports in the competition's order", []string{"A", "D", "B"}, []string{"A"}, []string{"D", "B"}},
+		{"identical lists", []string{"A", "B"}, []string{"A", "B"}, nil},
+		// Empty comp courts mean "inherit the tournament's", which is
+		// trivially a subset (resolveCompetitionCourts materialises it).
+		{"no allocation yet", nil, []string{"A", "B"}, nil},
+		// Empty tournament courts mean "not known yet" (bootstrap), NOT
+		// "the venue has no courts": flagging here would reject everything.
+		{"tournament courts unknown", []string{"A"}, nil, nil},
+		{"duplicate orphan reported once", []string{"D", "D"}, []string{"A"}, []string{"D"}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.desc, func(t *testing.T) {
+			assert.Equal(t, tc.expect, CourtsOutsideTournament(tc.comp, tc.tourn))
+		})
+	}
+}
+
+// TestValidateCourtsInTournament pins the operator-facing message: it names
+// the missing shiaijo, the courts that DO exist, and both ways out.
+func TestValidateCourtsInTournament(t *testing.T) {
+	t.Run("accepts a subset", func(t *testing.T) {
+		require.NoError(t, ValidateCourtsInTournament([]string{"A", "B"}, []string{"A", "B", "C"}))
+	})
+
+	t.Run("names a single missing shiaijo", func(t *testing.T) {
+		err := ValidateCourtsInTournament([]string{"A", "B", "C", "D"}, []string{"A", "B", "C"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "shiaijo D is not part of this tournament")
+		assert.Contains(t, err.Error(), "the tournament has A, B, C")
+		assert.Contains(t, err.Error(), "reassign")
+	})
+
+	t.Run("agrees in the plural", func(t *testing.T) {
+		err := ValidateCourtsInTournament([]string{"A", "C", "D"}, []string{"A"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "shiaijo C, D are not part of this tournament")
+	})
+
+	t.Run("silent when the tournament courts are unknown", func(t *testing.T) {
+		require.NoError(t, ValidateCourtsInTournament([]string{"A"}, nil))
+	})
+}
+
+// TestCourtsStillInUse pins the competition-level twin of the tournament's
+// orphan guard: a shiaijo cannot be dropped while this competition's own live
+// matches are still assigned to it.
+func TestCourtsStillInUse(t *testing.T) {
+	t.Parallel()
+
+	poolMatches := []state.MatchResult{
+		{ID: "Pool A-1", Court: "A", Status: state.MatchStatusCompleted},
+		{ID: "Pool B-1", Court: "B", Status: state.MatchStatusScheduled},
+	}
+	bracket := &state.Bracket{Rounds: [][]state.BracketMatch{{
+		{ID: "m-r1-0", Court: "C", Status: state.MatchStatusRunning},
+		{ID: "m-r1-1", Court: "D", Status: state.MatchStatusCompleted},
+	}}}
+
+	t.Run("keeping every court is always fine", func(t *testing.T) {
+		t.Parallel()
+		assert.Empty(t, CourtsStillInUse([]string{"A", "B", "C", "D"}, poolMatches, bracket))
+	})
+
+	t.Run("a scheduled pool match blocks its shiaijo", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, []string{"B"}, CourtsStillInUse([]string{"A", "C", "D"}, poolMatches, bracket))
+	})
+
+	t.Run("a running knockout bout blocks its shiaijo", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, []string{"C"}, CourtsStillInUse([]string{"A", "B", "D"}, poolMatches, bracket))
+	})
+
+	t.Run("completed matches never block, so a court frees up as it finishes", func(t *testing.T) {
+		t.Parallel()
+		// A and D carry ONLY completed matches. Refusing on those would make a
+		// shiaijo unremovable for the rest of the tournament.
+		assert.Empty(t, CourtsStillInUse([]string{"B", "C"}, poolMatches, bracket),
+			"a shiaijo whose bouts are all fought is free to drop")
+	})
+
+	t.Run("several blocked shiaijo are reported in allocation order", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, []string{"B", "C"}, CourtsStillInUse([]string{"A", "D"}, poolMatches, bracket))
+	})
+
+	t.Run("a shiaijo carrying only the bronze bout still blocks", func(t *testing.T) {
+		t.Parallel()
+		// ThirdPlaceMatch is a SIBLING of Rounds, not a row in it, so a
+		// rounds-only walk skips it and the operator is told the shiaijo is
+		// free while the 3rd-place bout is still scheduled on it.
+		bronzeOnly := &state.Bracket{
+			Rounds:          [][]state.BracketMatch{{{ID: "m-r1-0", Court: "A", Status: state.MatchStatusScheduled}}},
+			ThirdPlaceMatch: &state.BracketMatch{ID: "m-bronze", Court: "Z", Status: state.MatchStatusScheduled},
+		}
+		assert.Equal(t, []string{"Z"}, CourtsStillInUse([]string{"A"}, nil, bronzeOnly),
+			"the bronze is a bout like any other and its shiaijo cannot be dropped under it")
+	})
+
+	t.Run("no bracket yet is not a failure", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, []string{"B"}, CourtsStillInUse([]string{"A"}, poolMatches, nil))
+	})
 }

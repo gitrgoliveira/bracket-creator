@@ -1,6 +1,6 @@
 import React from 'react';
 import { render, act, fireEvent, waitFor } from '@testing-library/react';
-import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest';
 
 // mp-hpe3 Phase 0 safety net: RENDER-SMOKE characterization of the sections
 // inside admin_competition.jsx that the upcoming split moves into their own
@@ -65,6 +65,9 @@ const STUBBED_GLOBALS = {
     swissGenerateRound: vi.fn().mockResolvedValue(null),
     updateCompetitionAwards: vi.fn().mockResolvedValue(null),
     completeCompetition: vi.fn().mockResolvedValue({ status: 'completed' }),
+    // Advisory fetch made on every competition mount; per-test overrides in the
+    // draw-warning suite below.
+    fetchDrawWarnings: vi.fn().mockResolvedValue([]),
   },
 };
 
@@ -121,8 +124,8 @@ function makeTournament(comp, overrides = {}) {
 // fetch) flush and settle their state updates inside the act boundary: the
 // render harness fails the test on the "not wrapped in act(...)" console.error
 // otherwise. Returns the render result; a throw during mount fails the test.
-async function mountSection(section, { comp = makeCompetition(), tweaks = {}, bracket = null } = {}) {
-  const t = makeTournament(comp);
+async function mountSection(section, { comp = makeCompetition(), tweaks = {}, bracket = null, tournament = {} } = {}) {
+  const t = makeTournament(comp, tournament);
   let result;
   await act(async () => {
     result = render(
@@ -302,5 +305,790 @@ describe('AdminCompetition "Complete competition" action (mp-gy6g)', () => {
     await act(async () => { fireEvent.click(btn); });
 
     expect(window.API.completeCompetition).not.toHaveBeenCalled();
+  });
+});
+
+// bc-draw R9 UAT gap 1: the settings screen renders Save TWICE (header and
+// foot of a long form) and the two disabled conditions had drifted. The footer
+// copy omitted both hasDurationError and blockingCourtsErr, so with an
+// unpairable shiaijo count the header greyed out while the footer stayed live,
+// fired the PUT and took a 400. Both now read one derived `saveDisabled`.
+describe('AdminSettings Save buttons (bc-draw R9 gap 1)', () => {
+  const saveButtons = (container) =>
+    Array.from(container.querySelectorAll('button')).filter((b) => b.textContent.trim().startsWith('Save changes'));
+
+  const clickPill = async (container, label) => {
+    const pill = Array.from(container.querySelectorAll('button.radio-pill'))
+      .find((b) => b.textContent.trim() === label);
+    expect(pill, `pill "${label}" not found`).not.toBeUndefined();
+    await act(async () => { fireEvent.click(pill); });
+  };
+
+  it('renders exactly two Save buttons, both disabled while nothing is dirty', async () => {
+    const { container } = await mountSection('settings');
+    const saves = saveButtons(container);
+    expect(saves).toHaveLength(2);
+    saves.forEach((b) => expect(b.disabled).toBe(true));
+  });
+
+  it('enables BOTH Save buttons after a valid court change', async () => {
+    // Guards the fix from over-correcting into "footer always disabled":
+    // A + B is a pairable allocation, so both buttons must go live.
+    const comp = makeCompetition({ courts: ['A'], format: 'playoffs' });
+    const { container } = await mountSection('settings', { comp, tournament: { courts: ['A', 'B', 'C'] } });
+    await clickPill(container, 'Shiaijo (court) B');
+    const saves = saveButtons(container);
+    expect(saves).toHaveLength(2);
+    saves.forEach((b) => expect(b.disabled).toBe(false));
+  });
+
+  it('disables BOTH Save buttons on an unpairable shiaijo count', async () => {
+    const comp = makeCompetition({ courts: ['A', 'B'], format: 'playoffs' });
+    const { container } = await mountSection('settings', { comp, tournament: { courts: ['A', 'B', 'C'] } });
+    await clickPill(container, 'Shiaijo (court) C'); // → A, B, C: 3 shiaijo
+    expect(container.querySelector('[data-testid="shiaijo-count-error"]')).not.toBeNull();
+    const saves = saveButtons(container);
+    expect(saves).toHaveLength(2);
+    saves.forEach((b) => expect(b.disabled).toBe(true));
+  });
+});
+
+// bc-draw R9 UAT gap 3: shrinking the tournament's shiaijo count left the
+// competition holding a court the venue no longer has. The pills were built
+// from tournament.courts alone, so a competition storing [A B C D] under a
+// 3-shiaijo tournament rendered three selected pills while four were on disk:
+// the screen showed one allocation and would have saved another, and no rule
+// fired because the SHOWN count (3) was not the STORED count (4).
+describe('AdminSettings orphaned shiaijo (bc-draw R9 gap 3)', () => {
+  const pillLabels = (container) =>
+    Array.from(container.querySelectorAll('button.radio-pill'))
+      .map((b) => b.textContent.trim())
+      .filter((t) => t.startsWith('Shiaijo'));
+
+  const orphanComp = () => makeCompetition({ courts: ['A', 'B', 'C', 'D'], format: 'playoffs' });
+  const threeCourtVenue = { courts: ['A', 'B', 'C'] };
+
+  it('renders a flagged pill for a court the tournament no longer has', async () => {
+    const { container } = await mountSection('settings', { comp: orphanComp(), tournament: threeCourtVenue });
+    const labels = pillLabels(container);
+    // Four pills for four stored courts: what is shown equals what is stored.
+    expect(labels).toHaveLength(4);
+    expect(labels[3]).toContain('D');
+    expect(labels[3]).toContain('not in tournament');
+    expect(container.querySelector('[data-testid="orphan-court-D"]')).not.toBeNull();
+  });
+
+  it('every rendered pill is selected, matching the stored allocation exactly', async () => {
+    const { container } = await mountSection('settings', { comp: orphanComp(), tournament: threeCourtVenue });
+    const selected = Array.from(container.querySelectorAll('button.radio-pill.is-active'))
+      .map((b) => b.textContent.trim())
+      .filter((t) => t.startsWith('Shiaijo'));
+    expect(selected).toHaveLength(4);
+  });
+
+  it('explains the orphaned shiaijo instead of silently hiding it', async () => {
+    const { container } = await mountSection('settings', { comp: orphanComp(), tournament: threeCourtVenue });
+    const hint = container.querySelector('[data-testid="orphan-shiaijo-hint"]');
+    expect(hint).not.toBeNull();
+    expect(hint.textContent).toContain('D');
+    expect(hint.textContent).toContain('no longer part of this tournament');
+  });
+
+  it('says nothing when every assigned shiaijo still exists', async () => {
+    const comp = makeCompetition({ courts: ['A', 'B'], format: 'playoffs' });
+    const { container } = await mountSection('settings', { comp, tournament: threeCourtVenue });
+    expect(container.querySelector('[data-testid="orphan-shiaijo-hint"]')).toBeNull();
+    expect(pillLabels(container)).toHaveLength(3);
+  });
+
+  it('blocks Generate draw and explains why, rather than letting it 400', async () => {
+    // The engine refuses a draw onto a shiaijo the tournament lacks, so the
+    // overview must not offer the button. Needs >=2 players and status setup.
+    const comp = orphanComp();
+    const { container } = await mountSection('overview', { comp, tournament: threeCourtVenue });
+    const draw = Array.from(container.querySelectorAll('button')).find((b) => b.textContent.trim() === 'Generate draw');
+    expect(draw).not.toBeUndefined();
+    expect(draw.disabled).toBe(true);
+    const block = container.querySelector('[data-testid="draw-block"]');
+    expect(block).not.toBeNull();
+    expect(block.textContent).toContain('no longer part of this tournament');
+  });
+});
+
+// The rule reached the operator ONLY as a rejection: pick a bad count, get a
+// red line. The standing hint states what may be picked, and why, before
+// anything is blocked, and is venue-aware so a 3-shiaijo tournament answers
+// "why can't I pick all three of my shiaijo" at the field.
+describe('AdminSettings standing shiaijo hint (spec 007 R9)', () => {
+  const threeCourtVenue = { courts: ['A', 'B', 'C'] };
+  const hintText = (container) => {
+    const el = container.querySelector('[data-testid="shiaijo-count-hint"]');
+    return el && el.textContent;
+  };
+  const clickPill = async (container, label) => {
+    const pill = Array.from(container.querySelectorAll('button.radio-pill'))
+      .find((b) => b.textContent.trim() === label);
+    expect(pill, `pill "${label}" not found`).not.toBeUndefined();
+    await act(async () => { fireEvent.click(pill); });
+  };
+
+  it('shows on a VALID allocation, stating the counts and the reason', async () => {
+    const comp = makeCompetition({ courts: ['A', 'B'], format: 'playoffs' });
+    const { container } = await mountSection('settings', { comp, tournament: threeCourtVenue });
+    expect(container.querySelector('[data-testid="shiaijo-count-error"]')).toBeNull();
+    const hint = hintText(container);
+    expect(hint).not.toBeNull();
+    expect(hint).toContain('can use 1 or 2 shiaijo');
+    expect(hint).toContain('this tournament has 3');
+    expect(hint).toContain('merge in pairs');
+    expect(hint).toContain('halve cleanly');
+  });
+
+  it('names every valid count a bigger venue allows', async () => {
+    const comp = makeCompetition({ courts: ['A', 'B'], format: 'playoffs' });
+    const { container } = await mountSection('settings', {
+      comp, tournament: { courts: ['A', 'B', 'C', 'D', 'E'] },
+    });
+    expect(hintText(container)).toContain('can use 1, 2 or 4 shiaijo');
+  });
+
+  it('survives the selection going invalid, without restating the mechanism', async () => {
+    const comp = makeCompetition({ courts: ['A', 'B'], format: 'playoffs' });
+    const { container } = await mountSection('settings', { comp, tournament: threeCourtVenue });
+    await clickPill(container, 'Shiaijo (court) C'); // → A, B, C
+    expect(container.querySelector('[data-testid="shiaijo-count-error"]')).not.toBeNull();
+    const hint = hintText(container);
+    expect(hint).toContain('can use 1 or 2 shiaijo');
+    expect(hint).not.toContain('halve cleanly');
+  });
+
+  // Deselecting every pill is an unfinished form, not a request to inherit.
+  // shiaijoCountError answers null for 0 by design (an empty list ON DISK does
+  // mean "inherit"), so without its own rule this screen showed nothing and
+  // offered a live Save that stored an allocation the operator never chose.
+  //
+  // Both formats, because the emptiness rule applies whatever the format,
+  // unlike the count rule.
+  it.each(['playoffs', 'league'])('refuses a selection the operator has emptied, and blocks Save (%s)', async (format) => {
+    const comp = makeCompetition({ courts: ['A', 'B'], format });
+    const { container } = await mountSection('settings', { comp, tournament: threeCourtVenue });
+    await clickPill(container, 'Shiaijo (court) A');
+    await clickPill(container, 'Shiaijo (court) B'); // → none selected
+
+    const err = container.querySelector('[data-testid="shiaijo-count-error"]');
+    expect(err).not.toBeNull();
+    expect(err.textContent).toContain(window.SHIAIJO_NONE_SELECTED);
+    const save = Array.from(container.querySelectorAll('button')).find((b) => b.textContent.trim().startsWith('Save'));
+    expect(save).not.toBeUndefined();
+    expect(save.disabled).toBe(true);
+  });
+
+  // A STORED empty list is the legacy/imported record that legitimately
+  // inherits, and inheriting a legal count is fine. The hint tells the operator
+  // to make it explicit, but Save must stay live: blocking here would lock them
+  // out of every unrelated edit on this screen, which is the one outcome this
+  // rule must not cause.
+  it('does not block Save on a record that merely arrived with no shiaijo', async () => {
+    const comp = makeCompetition({ courts: [], format: 'playoffs' });
+    const { container } = await mountSection('settings', { comp, tournament: { courts: ['A', 'B'] } });
+    // Inheriting 2 of 2 is a legal allocation, so no banner...
+    expect(container.querySelector('[data-testid="shiaijo-count-banner"]')).toBeNull();
+    // ...and nothing is blocking a save. (The Save buttons are disabled here
+    // only because the form is not dirty, which is why this asserts on the
+    // block message rather than on `disabled`.)
+    expect(container.textContent).not.toContain('Fix shiaijo allocation');
+    // And NO red rule under the pills either. The operator has not emptied
+    // anything: this is what arrived off disk, and it is legal. Demanding they
+    // "select at least one" here contradicts both the absent banner and the
+    // live Save, and points at a competition with nothing wrong with it.
+    expect(container.querySelector('[data-testid="shiaijo-count-error"]')).toBeNull();
+  });
+
+  it('is absent for league, whose courts the rule does not govern', async () => {
+    const comp = makeCompetition({ courts: ['A', 'B', 'C'], format: 'league' });
+    const { container } = await mountSection('settings', { comp, tournament: threeCourtVenue });
+    expect(hintText(container)).toBeNull();
+    expect(container.querySelector('[data-testid="shiaijo-count-error"]')).toBeNull();
+  });
+});
+
+// The stored-allocation banner and the blocked-start explanation both carry
+// the rule, so both move with it. Their test ids used to say "odd", which the
+// power-of-two rule made wrong (6 is even and still invalid).
+describe('AdminSettings stored-allocation banner (spec 007 R9)', () => {
+  it('warns about a stored 6-shiaijo allocation the old parity rule allowed', async () => {
+    // Exactly the tolerated case: a record written by a pre-rule binary must
+    // keep loading and rendering, with the banner explaining the block.
+    const courts = ['A', 'B', 'C', 'D', 'E', 'F'];
+    const comp = makeCompetition({ courts, format: 'playoffs' });
+    const { container } = await mountSection('settings', { comp, tournament: { courts } });
+    const banner = container.querySelector('[data-testid="shiaijo-count-banner"]');
+    expect(banner).not.toBeNull();
+    expect(banner.textContent).toContain('6 shiaijo cannot be paired down');
+    expect(banner.textContent).toContain('halve cleanly');
+    // Venue-aware, because this banner sits at the top of the card with no
+    // hint beside it to correct an option the venue cannot supply. The venue
+    // here has 6 shiaijo, so 8 is not on offer.
+    expect(banner.textContent).toContain('This tournament has 6, so this competition can use 1, 2 or 4');
+    expect(banner.textContent).not.toContain('or 8');
+  });
+
+  // The banner judges the RESOLVED allocation. An empty court list MEANS
+  // "inherit the tournament's shiaijo" and is what the server stores and
+  // validates, so measuring the raw list asked about a value never persisted:
+  // shiaijoCountError(0) is null, so this screen showed nothing at all while
+  // the dashboard refused the draw and sent the operator here to fix it.
+  it('warns about an INHERITED allocation the competition never chose', async () => {
+    const comp = makeCompetition({ courts: [], format: 'playoffs' });
+    const { container } = await mountSection('settings', { comp, tournament: { courts: ['A', 'B', 'C'] } });
+    const banner = container.querySelector('[data-testid="shiaijo-count-banner"]');
+    expect(banner).not.toBeNull();
+    // Names where the count came from, or the operator is handed a number they
+    // never picked and no way to connect it to anything on screen.
+    expect(banner.textContent).toContain('no shiaijo of its own');
+    expect(banner.textContent).toContain("all 3 of the tournament's");
+    expect(banner.textContent).toContain('3 shiaijo cannot be paired down');
+    // The competition's own list is empty; that must not be reported as its
+    // allocation.
+    expect(banner.textContent).not.toContain('assigned 0');
+  });
+
+  it('stays silent when the inherited count is legal', async () => {
+    const comp = makeCompetition({ courts: [], format: 'playoffs' });
+    const { container } = await mountSection('settings', { comp, tournament: { courts: ['A', 'B'] } });
+    expect(container.querySelector('[data-testid="shiaijo-count-banner"]')).toBeNull();
+  });
+
+  it('blocks the start of a stored 6-shiaijo competition and says why', async () => {
+    const courts = ['A', 'B', 'C', 'D', 'E', 'F'];
+    // Date set on purpose: an invalid one disables the same button, so without
+    // it this would pass even with the shiaijo blocker gone.
+    const comp = makeCompetition({ courts, format: 'playoffs', date: '01-06-2026' });
+    const { container } = await mountSection('overview', { comp, tournament: { courts } });
+    const start = Array.from(container.querySelectorAll('button')).find((b) => b.textContent.trim() === 'Start competition →');
+    expect(start).not.toBeUndefined();
+    expect(start.disabled).toBe(true);
+    const block = container.querySelector('[data-testid="draw-block"]');
+    expect(block).not.toBeNull();
+    expect(block.textContent).toContain('6 shiaijo cannot be paired down to a single bracket');
+  });
+});
+
+// An incomplete seeding is refused by the draw, so the console refuses it
+// FIRST. The operator reaches this state through the seeding panel's ordinary
+// behaviour: it saves each rank as it is typed, so entering seed 4 before seeds
+// 1 to 3 leaves the competition holding {4}. Pre-fix, both header buttons were
+// live and the only trace of the refusal was an expiring toast.
+describe('Header start blocked by an incomplete seeding', () => {
+  // A valid date is load-bearing: the same buttons are disabled by an invalid
+  // one, so a blank date would make every `disabled` assertion below pass
+  // whether or not the seeding blocker exists.
+  const halfSeeded = () => makeCompetition({
+    courts: ['A', 'B'],
+    format: 'playoffs',
+    date: '01-06-2026',
+    players: [
+      { id: 'p1', name: 'Yamada' },
+      { id: 'p2', name: 'Tanaka' },
+      { id: 'p3', name: 'Suzuki' },
+      { id: 'p4', name: 'Kobayashi', seed: 4 },
+    ],
+  });
+
+  it('disables Generate draw and Start, and names the ranks to type', async () => {
+    const { container } = await mountSection('overview', {
+      comp: halfSeeded(), tournament: { courts: ['A', 'B'] },
+    });
+    const button = (label) =>
+      Array.from(container.querySelectorAll('button')).find((b) => b.textContent.trim() === label);
+    expect(button('Generate draw').disabled).toBe(true);
+    expect(button('Start competition →').disabled).toBe(true);
+
+    const block = container.querySelector('[data-testid="draw-block"]');
+    expect(block).not.toBeNull();
+    expect(block.textContent).toContain('seed ranks 1, 2 and 3 have not been set');
+    expect(block.textContent).toContain('but rank 4 has');
+    // The remedy has to name the screen that fixes THIS blocker.
+    expect(block.textContent).toContain('Participants & seeds');
+    expect(block.textContent).not.toContain('Reassign shiaijo');
+  });
+
+  it('routes the checklist to the seeding panel, not to Settings', async () => {
+    const { container } = await mountSection('overview', {
+      comp: halfSeeded(), tournament: { courts: ['A', 'B'] },
+    });
+    const step = container.querySelector('[data-testid="step-generate"]');
+    expect(step.textContent).toContain('seed ranks 1, 2 and 3 have not been set');
+    expect(step.textContent).toContain('Fix seeding →');
+  });
+
+  it('leaves the buttons live once the seeding is complete', async () => {
+    const comp = makeCompetition({
+      courts: ['A', 'B'],
+      format: 'playoffs',
+      date: '01-06-2026',
+      players: [
+        { id: 'p1', name: 'Yamada', seed: 1 },
+        { id: 'p2', name: 'Tanaka', seed: 2 },
+        { id: 'p3', name: 'Suzuki' },
+      ],
+    });
+    const { container } = await mountSection('overview', { comp, tournament: { courts: ['A', 'B'] } });
+    const generate = Array.from(container.querySelectorAll('button')).find((b) => b.textContent.trim() === 'Generate draw');
+    expect(generate.disabled).toBe(false);
+    expect(container.querySelector('[data-testid="draw-block"]')).toBeNull();
+  });
+});
+
+// "Next steps" told the operator to press a button the court rule had just
+// disabled. A checklist that points at a dead control is worse than silent.
+describe('AdminCompOverview next steps under a court block (spec 007 R9)', () => {
+  const stepText = (container, id) => {
+    const el = container.querySelector(`[data-testid="step-${id}"]`);
+    return el && el.textContent;
+  };
+
+  it('points at the Generate draw button when nothing blocks it', async () => {
+    const comp = makeCompetition({ courts: ['A', 'B'], format: 'playoffs' });
+    const { container } = await mountSection('overview', { comp, tournament: { courts: ['A', 'B', 'C'] } });
+    expect(stepText(container, 'generate')).toContain('Use the "Generate draw" button in the header above');
+  });
+
+  it('points at Settings instead when the shiaijo count blocks the draw', async () => {
+    const comp = makeCompetition({ courts: ['A', 'B', 'C'], format: 'playoffs' });
+    const { container } = await mountSection('overview', { comp, tournament: { courts: ['A', 'B', 'C'] } });
+    const text = stepText(container, 'generate');
+    expect(text).not.toContain('Use the "Generate draw" button in the header above');
+    expect(text).toContain('3 shiaijo cannot be paired down to a single bracket');
+    expect(text).toContain('Reassign shiaijo in Settings.');
+  });
+});
+
+// The draw's seed-placement warnings (spec 007 R2/D7). The seeding rules never
+// refuse a draw: a constraint the configuration cannot satisfy gives way and
+// the operator is TOLD what was relaxed. The banner is therefore an advisory
+// that sits alongside the generated draw, never a blocker, and it must not
+// appear at all for a competition that had nothing to relax.
+describe('AdminCompetition draw seed warnings (spec 007 R2/D7)', () => {
+  const banner = (container) => container.querySelector('[data-testid="draw-seed-warnings"]');
+  const withWarnings = (...warnings) => {
+    window.API.fetchDrawWarnings = vi.fn().mockResolvedValue(warnings);
+  };
+
+  afterEach(() => {
+    window.API.fetchDrawWarnings = vi.fn().mockResolvedValue([]);
+  });
+
+  it('renders every warning the draw reported', async () => {
+    withWarnings(
+      'Seed 4 ignored: two seeds must never share a pool, and this competition has 3 pools for 4 seeds. The draw used seeds 1, 2 and 3.',
+      'Not every seed could be given its own quarter of the draw (seeds 2 and 4). The draw was made anyway.',
+    );
+    const comp = makeCompetition({ status: 'draw-ready', courts: ['A', 'B'] });
+    const { container } = await mountSection('overview', { comp });
+    const el = banner(container);
+    expect(el).not.toBeNull();
+    expect(el.querySelectorAll('li').length).toBe(2);
+    expect(el.textContent).toContain('Seed 4 ignored');
+    expect(el.textContent).toContain('own quarter of the draw');
+  });
+
+  it('does not block the draw: Start competition stays enabled', async () => {
+    withWarnings('Not every seed could be given its own quarter of the draw (seeds 2 and 4). The draw was made anyway.');
+    const comp = makeCompetition({ status: 'draw-ready', courts: ['A', 'B'] });
+    const { container } = await mountSection('overview', { comp });
+    expect(banner(container)).not.toBeNull();
+    const start = Array.from(container.querySelectorAll('button')).find((b) => b.textContent.trim() === 'Start competition \u2192');
+    expect(start).not.toBeUndefined();
+    expect(start.disabled).toBe(false);
+  });
+
+  it('renders nothing when the draw had nothing to relax', async () => {
+    const comp = makeCompetition({ status: 'draw-ready', courts: ['A', 'B'] });
+    const { container } = await mountSection('overview', { comp });
+    expect(banner(container)).toBeNull();
+  });
+
+  // Switching between two STARTED competitions kept the previous one's
+  // sentences on screen for the length of the new fetch, under the new
+  // competition's name and the heading "the draw could not honour every rule".
+  // The effect only cleared on its setup branch, so the non-setup path went
+  // straight to the fetch with the old list still rendered. The warnings are
+  // now held with the competition id they describe and rendered only when the
+  // two match.
+  it('never shows the previous competition\'s warnings while the new fetch is in flight', async () => {
+    const first = makeCompetition({ id: 'first', name: 'Mudansha', status: 'pools', courts: ['A', 'B'] });
+    withWarnings('Seed 4 ignored: Mudansha had 3 pools for 4 seeds.');
+    const { container, rerender } = await mountSection('overview', { comp: first });
+    expect(banner(container).textContent).toContain('Seed 4 ignored');
+
+    // The second competition's fetch is held open, which is exactly the window
+    // the stale render happened in.
+    let releaseSecond;
+    window.API.fetchDrawWarnings = vi.fn(() => new Promise((resolve) => { releaseSecond = resolve; }));
+
+    const second = makeCompetition({ id: 'second', name: 'Yudansha', status: 'pools', courts: ['A', 'B'] });
+    await act(async () => {
+      rerender(
+        <AdminCompetition
+          tournament={makeTournament(second)}
+          competition={second}
+          pools={[]} poolMatches={[]} standings={[]} bracket={null}
+          section="overview"
+          onSection={noop} onBack={noop} onOpenCompetition={noop} onUpdate={noop}
+          onRefreshCompetition={noop} onMoveCourt={noop} onEditScore={noop}
+          onLogout={noop} onViewerMode={noop} tweaks={{}} password="" showToast={noop}
+        />
+      );
+    });
+
+    expect(container.textContent).toContain('Yudansha');
+    expect(banner(container), "Mudansha's warnings are still on screen under Yudansha's name").toBeNull();
+
+    // And the new competition's own warnings still arrive when they land.
+    await act(async () => {
+      releaseSecond(['Seed 2 ignored: Yudansha had 1 pool for 2 seeds.']);
+    });
+    expect(banner(container).textContent).toContain('Yudansha had 1 pool');
+    expect(banner(container).textContent).not.toContain('Mudansha');
+  });
+});
+
+// A competition stored without a courts key arrives from the API as
+// `courts: null` (Go ships a nil slice as JSON null). The page head read
+// `c.courts.join(", ")` directly, so the WHOLE console died with "Cannot read
+// properties of null (reading 'join')" and every section became unreachable -
+// on the one screen whose Settings tab is the documented remedy for that
+// record. The render harness fails on any console.error, so an unguarded read
+// surfaces here as a hard failure rather than a silent blank.
+describe('AdminCompetition survives a null courts list (U1)', () => {
+  const SECTIONS = ['overview', 'settings', 'participants', 'export'];
+
+  SECTIONS.forEach((section) => {
+    it(`renders the ${section} section with courts: null`, async () => {
+      const comp = makeCompetition({ courts: null });
+      const { container } = await mountSection(section, { comp });
+      expect(container.querySelector('[data-stub="AdminTopbar"]')).not.toBeNull();
+    });
+  });
+
+  it('says the allocation is empty rather than printing nothing', async () => {
+    // U1's guarantee is that the subtitle SAYS something about an absent
+    // allocation instead of rendering a blank where the shiaijo go. What it
+    // says was sharpened in the bc-qual review round: an empty list MEANS
+    // "inherit the tournament's", so on a venue that has shiaijo the line names
+    // the ones the draw would actually run on rather than implying none.
+    const comp = makeCompetition({ courts: null });
+    const { container } = await mountSection('overview', { comp });
+    const sub = container.querySelector('.page-head__sub').textContent;
+    expect(sub).toContain('No shiaijo of its own');
+    expect(sub).toContain('A, B');
+  });
+
+  it('falls back to "No shiaijo assigned" when the venue has none either', async () => {
+    // Nothing to inherit: the tournament itself carries no shiaijo (a record
+    // mid-setup, or one whose venue list was cleared). Naming an inherited
+    // allocation here would be a lie, so the plain statement stands.
+    const comp = makeCompetition({ courts: null });
+    const { container } = await mountSection('overview', { comp, tournament: { courts: [] } });
+    expect(container.querySelector('.page-head__sub').textContent).toContain('No shiaijo assigned');
+  });
+
+  it('does not report 1 Court one line under "No shiaijo assigned"', async () => {
+    // courtCount() floors at 1 by design (the schedule divides by it), which
+    // read as a flat contradiction of the page head on this record. The
+    // dashboard card already showed 0 for the same competition.
+    const comp = makeCompetition({ courts: null });
+    const { container } = await mountSection('overview', { comp });
+    const box = Array.from(container.querySelectorAll('.stat-box'))
+      .find((b) => /Courts?$/.test(b.querySelector('.l').textContent));
+    expect(box.querySelector('.v').textContent).toBe('0');
+    expect(box.textContent).toContain('Courts');
+  });
+
+  it('still reports a real allocation unchanged', async () => {
+    const comp = makeCompetition({ courts: ['A', 'B'] });
+    const { container } = await mountSection('overview', { comp });
+    const box = Array.from(container.querySelectorAll('.stat-box'))
+      .find((b) => /Courts?$/.test(b.querySelector('.l').textContent));
+    expect(box.querySelector('.v').textContent).toBe('2');
+  });
+
+  it('renders the league/partial court hint, the sibling read that was unguarded', async () => {
+    // `local.courts.length` in the league suggestion branch of the settings
+    // screen: guarding only the page head would have moved the crash here.
+    const comp = makeCompetition({ courts: null, format: 'league' });
+    const { container } = await mountSection('settings', { comp });
+    expect(container.querySelector('[data-stub="AdminTopbar"]')).not.toBeNull();
+  });
+
+  it('renders with a null players list too', async () => {
+    const comp = makeCompetition({ courts: null, players: null });
+    const { container } = await mountSection('overview', { comp });
+    expect(container.querySelector('[data-stub="AdminTopbar"]')).not.toBeNull();
+  });
+});
+
+// The header block, the checklist row and their siblings all render the rule
+// with nothing beneath them to correct it, so the counts they name have to be
+// counts the venue can actually supply.
+describe('Competition header + checklist name only reachable counts (U2)', () => {
+  const threeCourtVenue = { courts: ['A', 'B', 'C'] };
+
+  it('does not offer a 4th shiaijo to a 3-shiaijo venue in the header block', async () => {
+    const comp = makeCompetition({ courts: ['A', 'B', 'C'], format: 'playoffs' });
+    const { container } = await mountSection('overview', { comp, tournament: threeCourtVenue });
+    const block = container.querySelector('[data-testid="draw-block"]');
+    expect(block).not.toBeNull();
+    expect(block.textContent).toContain('This tournament has 3, so this competition can use 1 or 2');
+    expect(block.textContent).not.toContain('4');
+  });
+
+  it('does not offer a 4th shiaijo in the next-steps checklist either', async () => {
+    const comp = makeCompetition({ courts: ['A', 'B', 'C'], format: 'playoffs' });
+    const { container } = await mountSection('overview', { comp, tournament: threeCourtVenue });
+    const step = container.querySelector('[data-testid="step-generate"]');
+    expect(step.textContent).toContain('This tournament has 3, so this competition can use 1 or 2');
+    expect(step.textContent).not.toContain('4');
+  });
+});
+
+// The "Reassign shiaijo →" call to action authored on the generate step could
+// never render: only an `active` step draws its button, and "Review seeds &
+// settings" is emitted non-done forever, so it held `active` on every render.
+describe('AdminCompOverview blocked-draw CTA is reachable (U5)', () => {
+  it('renders the Reassign shiaijo button and navigates to Settings', async () => {
+    const onSection = vi.fn();
+    const comp = makeCompetition({ courts: ['A', 'B', 'C'], format: 'playoffs' });
+    const t = makeTournament(comp, { courts: ['A', 'B', 'C'] });
+    let container;
+    await act(async () => {
+      ({ container } = render(
+        <AdminCompetition
+          tournament={t} competition={comp} pools={[]} poolMatches={[]} standings={[]}
+          bracket={null} section="overview" onSection={onSection} onBack={noop}
+          onOpenCompetition={noop} onUpdate={noop} onRefreshCompetition={noop}
+          onMoveCourt={noop} onEditScore={noop} onLogout={noop} onViewerMode={noop}
+          tweaks={{}} password="" showToast={noop}
+        />
+      ));
+    });
+    const cta = container.querySelector('[data-testid="step-generate-cta"]');
+    expect(cta).not.toBeNull();
+    expect(cta.textContent).toBe('Reassign shiaijo →');
+    await act(async () => { fireEvent.click(cta); });
+    expect(onSection).toHaveBeenCalledWith('settings');
+  });
+
+  it('shows exactly one Settings call to action, not two', async () => {
+    const comp = makeCompetition({ courts: ['A', 'B', 'C'], format: 'playoffs' });
+    const { container } = await mountSection('overview', { comp, tournament: { courts: ['A', 'B', 'C'] } });
+    expect(container.querySelector('[data-testid="step-settings-cta"]')).toBeNull();
+    expect(container.querySelector('[data-testid="step-generate-cta"]')).not.toBeNull();
+  });
+
+  it('leaves the ordinary checklist CTA alone when nothing blocks the draw', async () => {
+    const comp = makeCompetition({ courts: ['A', 'B'], format: 'playoffs' });
+    const { container } = await mountSection('overview', { comp, tournament: { courts: ['A', 'B', 'C'] } });
+    expect(container.querySelector('[data-testid="step-settings-cta"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="step-generate-cta"]')).toBeNull();
+  });
+});
+
+// bc-qual LP-5a (round 2): the competition SETTINGS page (AdminSettings)
+// renders the same "Pool size is a" selection the CREATE form does, so per
+// the operator ruling ("the UI shows the 3 options whenever minimum-per-pool
+// is selected") it must show the "Knockout qualifiers" radio too, not just
+// round-trip the field. Covers: gating on poolSizeMode, the pool-winners
+// coupling in both directions, the reset-to-standard on leaving min sizing,
+// the draw-ready lock (matching poolSizeMode/poolSize/poolWinners' own
+// disabled state), and the live preview line computed from the REAL roster
+// (c.players.length), which the create form never has at creation time.
+describe('AdminSettings Knockout qualifiers (bc-qual LP-5a)', () => {
+  const clickPill = async (container, label) => {
+    const pill = Array.from(container.querySelectorAll('button.radio-pill'))
+      .find((b) => b.textContent.trim() === label);
+    expect(pill, `pill "${label}" not found`).not.toBeUndefined();
+    await act(async () => { fireEvent.click(pill); });
+    return pill;
+  };
+
+  const findPill = (container, label) =>
+    Array.from(container.querySelectorAll('button.radio-pill'))
+      .find((b) => b.textContent.trim() === label);
+
+  const winnersInput = (container) => {
+    const label = Array.from(container.querySelectorAll('label.field__label'))
+      .find((l) => l.textContent.trim() === 'Winners per pool');
+    expect(label, 'Winners per pool label not found').not.toBeUndefined();
+    return label.parentElement.querySelector('input');
+  };
+
+  const makePlayers = (n, tweak = () => ({})) =>
+    Array.from({ length: n }, (_, i) => ({ id: `p${i}`, name: `Player ${i}`, ...tweak(i) }));
+
+  // 11 named players: matches the bc-qual known-arithmetic table (n=11,
+  // minSize=3, poolWinners=1 -> standard 3/3, larger-pools 3/5, fill-bracket
+  // 3+1draft/4) so the preview assertions below are pinned against the same
+  // numbers qualifier_preview.test.jsx verifies the arithmetic against.
+  const elevenPlayers = makePlayers(11);
+
+  const mixedMinComp = (overrides = {}) => makeCompetition({
+    format: 'mixed', poolSizeMode: 'min', poolSize: 3, poolWinners: 1,
+    players: elevenPlayers,
+    ...overrides,
+  });
+
+  it('hidden when poolSizeMode is "max"', async () => {
+    const comp = mixedMinComp({ poolSizeMode: 'max' });
+    const { container } = await mountSection('settings', { comp });
+    expect(Array.from(container.querySelectorAll('label.field__label')).some((l) => l.textContent.trim() === 'Knockout qualifiers')).toBe(false);
+  });
+
+  it('shown when poolSizeMode is "min" on a mixed competition', async () => {
+    const comp = mixedMinComp();
+    const { container } = await mountSection('settings', { comp });
+    expect(Array.from(container.querySelectorAll('label.field__label')).some((l) => l.textContent.trim() === 'Knockout qualifiers')).toBe(true);
+    expect(findPill(container, 'Standard')).not.toBeUndefined();
+    expect(findPill(container, 'Oversized send +1')).not.toBeUndefined();
+    expect(findPill(container, 'Fit the knockout')).not.toBeUndefined();
+  });
+
+  it('switching poolSizeMode to "min" shows it appear (via re-render), switching to "max" hides it and resets the stored selection', async () => {
+    const comp = mixedMinComp({ extraQualifiers: 'larger-pools' });
+    const { container } = await mountSection('settings', { comp });
+    expect(findPill(container, 'Oversized send +1').className).toContain('is-active');
+
+    await clickPill(container, 'maximum');
+    expect(Array.from(container.querySelectorAll('label.field__label')).some((l) => l.textContent.trim() === 'Knockout qualifiers')).toBe(false);
+
+    // Switch back to "min" to re-reveal the radio; it must show Standard now
+    // (resetExtraQualifiersOnPoolModeChange fired on the "max" click above),
+    // not the stale "larger-pools" the competition was seeded with.
+    await clickPill(container, 'minimum');
+    expect(findPill(container, 'Standard').className).toContain('is-active');
+    expect(findPill(container, 'Oversized send +1').className).not.toContain('is-active');
+  });
+
+  it('selecting a non-standard option forces Winners per pool to 1 and disables the input', async () => {
+    const comp = mixedMinComp({ poolWinners: 2 });
+    const { container } = await mountSection('settings', { comp });
+    expect(winnersInput(container).disabled).toBe(false);
+    expect(winnersInput(container).value).toBe('2');
+
+    await clickPill(container, 'Oversized send +1');
+    expect(winnersInput(container).value).toBe('1');
+    expect(winnersInput(container).disabled).toBe(true);
+    expect(container.textContent).toContain('Set to 1 by the knockout qualifiers setting');
+  });
+
+  it('switching back to standard re-enables Winners per pool', async () => {
+    const comp = mixedMinComp({ extraQualifiers: 'fill-bracket', poolWinners: 1 });
+    const { container } = await mountSection('settings', { comp });
+    expect(winnersInput(container).disabled).toBe(true);
+
+    await clickPill(container, 'Standard');
+    expect(winnersInput(container).disabled).toBe(false);
+  });
+
+  it('draw-ready disables all three pills, matching poolSizeMode/poolSize/poolWinners', async () => {
+    const comp = mixedMinComp({ status: 'draw-ready', extraQualifiers: 'larger-pools', poolWinners: 1 });
+    const { container } = await mountSection('settings', { comp });
+    expect(findPill(container, 'Standard').disabled).toBe(true);
+    expect(findPill(container, 'Oversized send +1').disabled).toBe(true);
+    expect(findPill(container, 'Fit the knockout').disabled).toBe(true);
+    // Winners is disabled by BOTH draw-ready and the non-standard coupling;
+    // either alone is sufficient, but it must be disabled either way.
+    expect(winnersInput(container).disabled).toBe(true);
+  });
+
+  it('preview line shows real numbers for Standard mode (11 players, min 3, 1 winner -> 3 pools/3 qualifiers)', async () => {
+    const comp = mixedMinComp();
+    const { container } = await mountSection('settings', { comp });
+    const preview = container.querySelector('[data-testid="qualifier-preview-line"]');
+    expect(preview).not.toBeNull();
+    expect(preview.textContent).toBe('3 pools -> 3 qualifiers -> 4-slot knockout (1 bye)');
+  });
+
+  it('preview line updates to larger-pools numbers on selection (3 pools/5 qualifiers, 8-slot, 3 byes)', async () => {
+    const comp = mixedMinComp();
+    const { container } = await mountSection('settings', { comp });
+    await clickPill(container, 'Oversized send +1');
+    const preview = container.querySelector('[data-testid="qualifier-preview-line"]');
+    expect(preview.textContent).toBe('3 pools -> 5 qualifiers -> 8-slot knockout (3 byes)');
+  });
+
+  it('preview line updates to fill-bracket numbers on selection (3 pools + 1 draft = 4 qualifiers, zero byes)', async () => {
+    const comp = mixedMinComp();
+    const { container } = await mountSection('settings', { comp });
+    await clickPill(container, 'Fit the knockout');
+    const preview = container.querySelector('[data-testid="qualifier-preview-line"]');
+    expect(preview.textContent).toBe('3 pools -> 4 qualifiers -> 4-slot knockout (no byes)');
+  });
+
+  it('preview line falls back gracefully when the competition has no roster', async () => {
+    const comp = mixedMinComp({ players: [] });
+    const { container } = await mountSection('settings', { comp });
+    const preview = container.querySelector('[data-testid="qualifier-preview-line"]');
+    expect(preview.textContent).toContain('Preview appears once this competition has participants');
+  });
+
+  // --- WKC-method supply wiring (code-review round): the fill preview reads
+  // the roster's SEED RANKS off the EFFECTIVE (check-in-masked) roster, the
+  // same inputs generate-draw uses. 9 entrants at min 3 is the sharpest
+  // fixture: the only cut (3 pools, 1 draft) has zero oversized pools, so
+  // whether it previews at all is decided entirely by the seeds.
+  it('unseeded 9-entrant roster shows the seeding remedy for the fill option, not the neutral placeholder', async () => {
+    const comp = mixedMinComp({ players: makePlayers(9), extraQualifiers: 'fill-bracket' });
+    const { container } = await mountSection('settings', { comp });
+    const preview = container.querySelector('[data-testid="qualifier-preview-line"]');
+    expect(preview.textContent).toContain('Needs seeded pools');
+    expect(preview.textContent).toContain('seed a pool');
+  });
+
+  it('one seed makes the same 9-entrant cut previewable', async () => {
+    const comp = mixedMinComp({
+      players: makePlayers(9, (i) => (i === 0 ? { seed: 1 } : {})),
+      extraQualifiers: 'fill-bracket',
+    });
+    const { container } = await mountSection('settings', { comp });
+    const preview = container.querySelector('[data-testid="qualifier-preview-line"]');
+    expect(preview.textContent).toBe('3 pools -> 4 qualifiers -> 4-slot knockout (no byes)');
+  });
+
+  it('a seeded no-show drops out of the preview when check-in is enabled, exactly as generate-draw will drop them', async () => {
+    // 10 registered, 9 checked in; the ONLY seed is the no-show. The
+    // effective roster is the 9 checked-in unseeded players, so the fill
+    // preview must show the remedy -- a preview computed off the raw roster
+    // would promise the seeded cut the draw will not make.
+    const players = [
+      { id: 'noshow', name: 'No Show', seed: 1, checkedIn: false },
+      ...makePlayers(9, () => ({ checkedIn: true })),
+    ];
+    const comp = mixedMinComp({ players, checkInEnabled: true, extraQualifiers: 'fill-bracket' });
+    const { container } = await mountSection('settings', { comp });
+    const preview = container.querySelector('[data-testid="qualifier-preview-line"]');
+    expect(preview.textContent).toContain('Needs seeded pools');
+  });
+
+  it('toggling check-in tracking in the form updates the preview before saving', async () => {
+    // Same roster, but check-in tracking OFF on the server: the seeded
+    // no-show still counts, so the fill cut previews. Ticking the checkbox
+    // must flip the preview IMMEDIATELY -- it reads the PENDING
+    // local.checkInEnabled exactly like its sibling pool-config inputs, not
+    // the last-saved value.
+    const players = [
+      { id: 'noshow', name: 'No Show', seed: 1, checkedIn: false },
+      ...makePlayers(9, () => ({ checkedIn: true })),
+    ];
+    const comp = mixedMinComp({ players, checkInEnabled: false, extraQualifiers: 'fill-bracket' });
+    const { container } = await mountSection('settings', { comp });
+    const preview = () => container.querySelector('[data-testid="qualifier-preview-line"]');
+    expect(preview().textContent).toBe('3 pools -> 4 qualifiers -> 4-slot knockout (no byes)');
+    const checkbox = Array.from(container.querySelectorAll('label.checkbox'))
+      .find((l) => l.textContent.includes('Check-in tracking'))
+      .querySelector('input');
+    await act(async () => { fireEvent.click(checkbox); });
+    expect(preview().textContent).toContain('Needs seeded pools');
   });
 });

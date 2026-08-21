@@ -629,6 +629,13 @@ paths:
                             `parse participants: ...`. Empty when the row
                             imported successfully.
 
+                            A referenced seeds file must state a COMPLETE
+                            seeding (ranks 1..N, no gaps or duplicates); one
+                            that does not aborts its row with
+                            `seeds file "...": Seeding is incomplete: ...`
+                            and rolls the competition back off disk, so the
+                            file can be fixed and the import retried.
+
   # ── Sponsors ───────────────────────────────────────────────────────────────
 
   /api/sponsors/{file}:
@@ -871,6 +878,21 @@ paths:
           (`team competitions require teamSize >= 2`).
         - When `kind` is not `"team"` (including omitted or `"individual"`),
           `teamSize` must be 0 (`non-team competitions require teamSize == 0`).
+        - `courts`: each label a single character, at most 16 labels, no
+          duplicates, and every label must be one the tournament has.
+        - `courts` COUNT, when the competition's `format` builds a knockout
+          bracket (anything other than `league`/`swiss`): a power of two,
+          i.e. 1, 2, 4, 8 or 16 (`shiaijo count must be a power of two (1, 2,
+          4, 8 or 16), got N: ...`). 6 and 10 are refused like 3, 5 and 7.
+          See `Competition.courts` for why.
+        - `courts` is RESOLVED before it is validated. An omitted or empty
+          array means "inherit the tournament's courts", and it is that
+          inherited list which is stored and which the two rules above are
+          applied to. **Behaviour change:** on a 3-shiaijo venue, a create
+          that omits `courts` used to return 201 with all three courts and
+          now returns 400, the same answer an explicit ["A", "B", "C"] gets.
+          Send an explicit legal allocation (for example ["A", "B"]) to
+          create a competition on such a venue.
 
         String fields are trimmed server-side: `name`, `numberPrefix`, `kind`,
         `format`, `poolSizeMode`, `startTime`, `date`.
@@ -931,6 +953,23 @@ paths:
         or if `kind` is not `"team"` (including omitted or `"individual"`)
         and `teamSize` > 0 (`non-team competitions require teamSize == 0`).
 
+        `courts` obeys the same rules as on create (single-character labels,
+        16-court cap, no duplicates, only shiaijo the tournament has, and a
+        power-of-two COUNT of 1, 2, 4, 8 or 16 for a bracket-drawing format),
+        with one difference: the count and tournament-membership checks run
+        only when the allocation or `format` is actually being CHANGED,
+        compared against the stored record. That keeps a competition already
+        stored with an illegal or orphaned allocation editable, so an
+        unrelated settings edit returns 200 and the operator still has a
+        route back to a legal allocation. Any change that lands on an illegal
+        count is rejected with 400, and so is a `format` change that brings
+        the rule into scope without touching `courts` at all (a `league` on 3
+        shiaijo switched to `mixed`). As on create, an omitted or empty
+        `courts` array is resolved to the tournament's courts BEFORE it is
+        compared and validated, so a PUT that omits `courts` on a 3-shiaijo
+        venue is judged on the ["A", "B", "C"] it would store; a stored list
+        round-tripped unchanged is not a change and still saves.
+
         **Roster-save (body INCLUDES `players`, even an empty array):**
         The server writes `participants.csv` (and clears or extracts
         `seeds.csv` from each player's `seed` field) and IGNORES all
@@ -943,6 +982,16 @@ paths:
         roster in one logical operation, issue two PUTs (settings
         first, then roster). Players with `seed: 0` produce no seed
         entry; sending `players: []` clears the roster.
+
+        The seed ranks in a roster save are NOT validated for
+        completeness, unlike `PUT /api/competitions/{id}/seeds`. The
+        admin console sends this request on every keystroke in its
+        seeding panel, so a half-entered seeding (rank 4 typed before
+        ranks 1-3) has to be storable; refusing it would make it
+        impossible to set a 4th seed first. It is stored and read back
+        as typed, and refused by every path that USES it: generating
+        the draw and starting the competition both answer 400 naming
+        the ranks that have not been set.
 
         Returns 404 when the competition does not exist (this endpoint
         never creates).
@@ -1069,13 +1118,52 @@ paths:
         - $ref: '#/components/parameters/CompetitionId'
       responses:
         '200':
-          description: Draw generated; competition is now in `draw-ready` status.
+          description: |
+            Draw generated; competition is now in `draw-ready` status. The body is the
+            competition. The seed-placement constraints the draw could not honour are
+            served by `GET /api/competitions/{id}/draw-warnings`: a configuration that
+            cannot satisfy every seeding rule is never refused, the deepest constraint
+            gives way and is reported there.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Competition'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/competitions/{id}/draw-warnings:
+    get:
+      tags: [competitions]
+      summary: Seed-placement warnings for the competition's draw
+      description: |
+        The seed-placement constraints the draw could not honour: surplus seed ranks
+        that had to be ignored because two seeds may never share a pool, and any
+        half/quarter/shiaijo spread the configuration made impossible.
+
+        Advisory and admin-only. It is recomputed from the drawn pools on every request,
+        never stored, so a discarded and regenerated draw can never serve a stale
+        warning. A competition with no draw, no seeds or nothing to report answers 200
+        with an empty list; none of those is an error.
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+      responses:
+        '200':
+          description: The warnings, possibly empty.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  warnings:
+                    type: array
+                    items:
+                      type: string
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -1587,6 +1675,23 @@ paths:
     put:
       tags: [participants]
       summary: Save seed assignments
+      description: |
+        Replaces the competition's seeding. The list must be COMPLETE: ranks
+        1..N with no gaps, no duplicates, and no rank below 1. Send `[]` to
+        clear the seeding.
+
+        This endpoint takes a seeding as a finished artefact, so an invalid one
+        is refused here with 400 rather than at the draw. The message names the
+        ranks that have not been set, e.g. "Seeding is incomplete: seed ranks 1,
+        2 and 3 have not been set, but rank 4 has."
+
+        NOT symmetric with `PUT /api/competitions/{id}`, which carries the
+        roster with seeds riding along as a field of each player. The admin
+        console sends that request on every keystroke in its seeding panel, so
+        it accepts a half-entered seeding (refusing would make it impossible to
+        type a 4th seed before a 1st). Such a seeding is stored and shown back,
+        but every path that USES it - generating the draw, starting the
+        competition - refuses it.
       security:
         - TournamentPassword: []
       parameters:
@@ -1608,6 +1713,15 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/SeedAssignment'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: |
+            A draw is pending. Discard it before changing the seeding.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   # ── Matches (Admin, requires auth) ─────────────────────────────────────────
 
@@ -2796,7 +2910,7 @@ paths:
           schema:
             type: integer
             minimum: 1
-            maximum: 26
+            maximum: 16
         - in: query
           name: teamSize
           required: false
@@ -3282,11 +3396,29 @@ components:
           items:
             type: string
           description: >
-            Court labels (e.g. ["A", "B"]). Each label is a single
-            character; 26-court cap (A–Z). Duplicate labels are rejected
+            Court (shiaijo) labels (e.g. ["A", "B"]). Each label is a single
+            character; 16-court cap. Duplicate labels are rejected
             with 400; the frontend uses labels as identity keys (per-court
             rendering, schedule `byCourt` bucketing, filter values) and
             duplicates would collapse data structures.
+
+            The COUNT is unconstrained: the power-of-two rule on
+            `Competition.courts` is per competition, never per venue, so a
+            3-, 5- or 7-shiaijo tournament is legal and is expected.
+
+            **Removing a shiaijo a live competition still holds is refused
+            with 400** (on POST as well as PUT, since POST is re-POSTed
+            against an existing record). The message names every blocking
+            competition and the shiaijo it still runs on, and nothing is
+            written; reassign those competitions' shiaijo in competition
+            settings first. Only LIVE competitions block: `completed` and
+            `invalid` ones are history and are ignored, so a multi-day event
+            that ran the morning on 4 shiaijo can still shrink to 2 for the
+            afternoon. The refusal stops an orphan being CREATED; records
+            orphaned before it existed, or by a hand-edited config.md or an
+            imported manifest, are caught instead by the draw gate, which is
+            what makes "a competition is never drawn onto a shiaijo the
+            tournament does not have" true rather than likely.
         password:
           type: string
           maxLength: 256
@@ -3426,11 +3558,71 @@ components:
           items:
             type: string
           description: >
-            Per-competition court labels (subset of Tournament.courts).
-            Each label is a single character; 26-court cap; duplicates
-            rejected with 400. Empty array means "use the tournament
-            default"; the engine defaults a competition with no Courts
-            to 1 court.
+            Per-competition court (shiaijo) labels, a subset of
+            Tournament.courts. Each label is a single character; 16-court
+            cap; duplicates rejected with 400.
+
+            **Count rule (R9, specs/007-ekc-draw/spec.md).** A competition
+            whose draw builds a knockout bracket (every `format` except
+            `league` and `swiss`) must be allocated a POWER OF TWO of
+            shiaijo: 1, 2, 4, 8 or 16. Every other count is rejected with
+            400, including EVEN counts such as 6 and 10, because the draw
+            gives each shiaijo its own block of the bracket and those blocks
+            merge in pairs, so the count has to halve cleanly all the way
+            down. 16 is the ceiling because it is the supported court cap.
+            helper.ValidateShiaijoCount owns the rule and its message.
+
+            The rule is per COMPETITION and never per venue, which is why
+            `Tournament.courts` is deliberately NOT constrained by it: a 3-,
+            5- or 7-shiaijo venue is a perfectly legal tournament and simply
+            never gives all of its shiaijo to one bracket competition.
+
+            **An omitted or empty array does not opt out of the count rule.**
+            It means "inherit the tournament's courts", and every write path
+            (POST /api/competitions, PUT /api/competitions/{id}, and the
+            competition rows of POST /api/tournament/import) MATERIALISES
+            that inheritance BEFORE validating, so the resolved list is both
+            what gets stored and what the rules are applied to. On a
+            3-shiaijo venue, a create that omits `courts` therefore returns
+            400 exactly like one that spells out ["A", "B", "C"]; before the
+            count rule existed the same request returned 201. The only
+            remaining single-court fallback is the bootstrap window before
+            POST /api/tournament, where an omitted list resolves to ["A"].
+
+            The draw pipeline resolves the same way, so an EMPTY LIST ON DISK
+            (legacy data, an imported manifest, a hand-edited config.md) is
+            not "one unnamed court" either: it inherits the tournament's
+            shiaijo, is validated against the count rule, and on a 3-shiaijo
+            venue is refused with a message naming the inheritance as the
+            source of the count. The inherited list is deliberately NOT
+            trimmed to a legal count: choosing WHICH two of three shiaijo a
+            competition runs on is the operator's call.
+
+            Validated on WRITE only. A competition already stored with an
+            illegal count (a legacy record, an imported manifest, a
+            hand-edited config.md) keeps running and stays editable: the
+            settings PUT re-checks the count only when the court list or
+            `format` is actually being CHANGED, so an unrelated settings edit
+            still succeeds. What such a competition cannot do is draw:
+            POST /api/competitions/{id}/generate-draw and
+            POST /api/competitions/{id}/start refuse it with 400 until the
+            allocation is fixed.
+
+            A competition may also only name shiaijo the tournament has.
+            An allocation naming one it does not is rejected with 400 on
+            create and import, on a settings PUT that changes the list, and
+            again at the draw gate.
+
+            **This list is the ALLOCATION, not necessarily what the draw runs
+            on.** A shiaijo with no pool of its own would own an empty bracket
+            region, so the draw steps the count down to the largest legal
+            count that does not exceed the POOL count
+            (helper.EffectiveDrawCourts), and the pool phase steps down with
+            it. A 7-pool competition allocated 8 shiaijo keeps all 8 labels in
+            this field while every generated match, pool and bracket alike,
+            carries one of the first 4; the other 4 get no matches at all.
+            The step-down is silent: no error, and no warning field on the
+            competition.
         startTime:
           type: string
           maxLength: 8
@@ -3958,6 +4150,26 @@ components:
           readOnly: true
           allOf:
             - $ref: '#/components/schemas/TeamResultLine'
+        placeholderA:
+          type: string
+          readOnly: true
+          description: >
+            The pool-origin label this slot held at draw time (e.g. "Pool A-1st"),
+            for a mixed (pools then knockout) competition. Written once when the
+            bracket is drawn and never rewritten, unlike `sideA`, which is replaced
+            with the real competitor as that pool finishes. Absent on a standalone
+            playoffs bracket (its leaves are real competitors) and on a bracket
+            drawn before this field existed.
+        placeholderB:
+          type: string
+          readOnly: true
+          description: The draw-time counterpart of `sideB`. See `placeholderA`.
+        placeholderWinner:
+          type: string
+          readOnly: true
+          description: >
+            The draw-time counterpart of `winner`, non-empty only where the draw
+            pre-filled a bye winner. See `placeholderA`.
 
     CourtMatchSide:
       type: object

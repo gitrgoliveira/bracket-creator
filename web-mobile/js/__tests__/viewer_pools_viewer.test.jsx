@@ -305,6 +305,132 @@ describe('PoolsViewer draw-order standings (mp-938b)', () => {
 });
 
 // ------------------------------------------------------------------
+// bc-qual LP-5a: per-pool qualifier highlighting. PoolsViewer used to
+// highlight a single UNIFORM top-N (competition.poolWinners) across every
+// pool; qualifiersForPool (viewer_standings.jsx) now computes the count
+// PER POOL so an oversized pool under ExtraQualifiersLargerPools highlights
+// one extra row, mirroring state.Competition.QualifiersForPool's oversized
+// test (pool.players.length > competition.poolSize).
+// ------------------------------------------------------------------
+describe('PoolsViewer per-pool qualifier highlighting (bc-qual LP-5a)', () => {
+  const realReact = global.React;
+  let runtime;
+  let PoolsViewer;
+  const savedGlobals = {};
+  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'teamIVScore', 'matchScoreStr', 'matchStateCell', 'ipponsFromScore', 'queueLabel', 'queueLabelCompact'];
+
+  // Pool A: 4 players, OVERSIZED relative to a minimum pool size of 3.
+  const poolA = {
+    poolName: 'Pool A',
+    players: [
+      { name: 'A1', dojo: 'D1' },
+      { name: 'A2', dojo: 'D1' },
+      { name: 'A3', dojo: 'D1' },
+      { name: 'A4', dojo: 'D1' },
+    ],
+  };
+  // Pool B: 3 players, exactly the minimum, NOT oversized.
+  const poolB = {
+    poolName: 'Pool B',
+    players: [
+      { name: 'B1', dojo: 'D2' },
+      { name: 'B2', dojo: 'D2' },
+      { name: 'B3', dojo: 'D2' },
+    ],
+  };
+  const standings = {
+    'Pool A': [
+      { player: { name: 'A1', dojo: 'D1' }, rank: 1, wins: 3, losses: 0, draws: 0 },
+      { player: { name: 'A2', dojo: 'D1' }, rank: 2, wins: 2, losses: 1, draws: 0 },
+      { player: { name: 'A3', dojo: 'D1' }, rank: 3, wins: 1, losses: 2, draws: 0 },
+      { player: { name: 'A4', dojo: 'D1' }, rank: 4, wins: 0, losses: 3, draws: 0 },
+    ],
+    'Pool B': [
+      { player: { name: 'B1', dojo: 'D2' }, rank: 1, wins: 2, losses: 0, draws: 0 },
+      { player: { name: 'B2', dojo: 'D2' }, rank: 2, wins: 1, losses: 1, draws: 0 },
+      { player: { name: 'B3', dojo: 'D2' }, rank: 3, wins: 0, losses: 2, draws: 0 },
+    ],
+  };
+  const tweaks = { showDojo: false };
+
+  beforeEach(async () => {
+    runtime = makeReactive();
+    global.React = runtime.React;
+    global.window = global.window || {};
+    STUBBED.forEach(k => {
+      savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k)
+        ? { had: true, val: global.window[k] }
+        : { had: false };
+    });
+    global.window.Term = function Term(props) { return { type: 'span', props, children: props?.children }; };
+    global.window.isHikiwake = () => false;
+    global.window.formatIpponsScore = () => '';
+    global.window.teamIVScore = () => null;
+    global.window.matchScoreStr = (m) =>
+      (global.window.teamIVScore(m)) ||
+      global.window.formatIpponsScore(m?.ipponsB || [], m?.ipponsA || [], m?.score, m?.decision, m?.encho, m?.decidedByHantei);
+    global.window.matchStateCell = (m) =>
+      m?.status === 'completed' ? (global.window.matchScoreStr(m) || 'vs') : 'vs';
+    global.window.ipponsFromScore = () => [];
+    global.window.queueLabel = () => '';
+    global.window.queueLabelCompact = () => null;
+    vi.resetModules();
+    ({ PoolsViewer } = await import('../viewer.jsx'));
+  });
+
+  afterEach(() => {
+    runtime.unmount();
+    global.React = realReact;
+    STUBBED.forEach(k => {
+      if (savedGlobals[k]?.had) global.window[k] = savedGlobals[k].val;
+      else delete global.window[k];
+    });
+    vi.restoreAllMocks();
+    vi.resetModules();
+  });
+
+  function advancingRowTexts(tree) {
+    const rows = findAll(tree, n => {
+      const cls = n.props?.className;
+      return n.type === 'tr' && typeof cls === 'string' && cls.includes('advancing');
+    });
+    return rows.map(r => collectText(r));
+  }
+
+  it('standard mode: poolWinners=1 highlights only rank 1 in every pool, regardless of size', () => {
+    const comp = { kind: 'individual', teamSize: 0, format: 'mixed', poolWinners: 1, poolSize: 3, extraQualifiers: '' };
+    const tree = runtime.mount(PoolsViewer, { pools: [poolA, poolB], standings, poolMatches: [], tweaks, competition: comp });
+    const rows = advancingRowTexts(tree);
+    expect(rows).toHaveLength(2);
+    expect(rows.some(t => t.includes('A1'))).toBe(true);
+    expect(rows.some(t => t.includes('B1'))).toBe(true);
+  });
+
+  it('larger-pools mode: an oversized pool (4 players, min size 3) highlights top 2; a minimum-size pool highlights only 1', () => {
+    const comp = { kind: 'individual', teamSize: 0, format: 'mixed', poolWinners: 1, poolSize: 3, extraQualifiers: 'larger-pools' };
+    const tree = runtime.mount(PoolsViewer, { pools: [poolA, poolB], standings, poolMatches: [], tweaks, competition: comp });
+    const rows = advancingRowTexts(tree);
+    // Pool A (oversized): top 2 (A1, A2). Pool B (exactly minimum): top 1 (B1) only.
+    expect(rows).toHaveLength(3);
+    expect(rows.some(t => t.includes('A1'))).toBe(true);
+    expect(rows.some(t => t.includes('A2'))).toBe(true);
+    expect(rows.some(t => t.includes('A3'))).toBe(false);
+    expect(rows.some(t => t.includes('B1'))).toBe(true);
+    expect(rows.some(t => t.includes('B2'))).toBe(false);
+  });
+
+  it('fill-bracket mode: only rank 1 highlights even in an oversized pool (drafted-2nd is a documented residue: the payload carries no draft-index list)', () => {
+    const comp = { kind: 'individual', teamSize: 0, format: 'mixed', poolWinners: 1, poolSize: 3, extraQualifiers: 'fill-bracket' };
+    const tree = runtime.mount(PoolsViewer, { pools: [poolA, poolB], standings, poolMatches: [], tweaks, competition: comp });
+    const rows = advancingRowTexts(tree);
+    expect(rows).toHaveLength(2);
+    expect(rows.some(t => t.includes('A1'))).toBe(true);
+    expect(rows.some(t => t.includes('A2'))).toBe(false);
+    expect(rows.some(t => t.includes('B1'))).toBe(true);
+  });
+});
+
+// ------------------------------------------------------------------
 // mp-o4xl: PoolNumberedMatchRow shows IV aggregate for team matches
 // ------------------------------------------------------------------
 describe('PoolNumberedMatchRow team IV score (mp-o4xl)', () => {

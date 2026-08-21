@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 
@@ -622,6 +623,94 @@ func (e *Engine) runDrawPipeline(id string) error {
 		return notFoundErrorf("competition %s not found", id)
 	}
 
+	tourn, terr := e.store.LoadTournament()
+	if terr != nil {
+		return terr
+	}
+
+	// The RAW stored allocation, captured before the inheritance resolution
+	// below, which may materialise a list that was never on disk. The atomic
+	// commit compares it against the freshly reloaded current.Courts to detect
+	// a concurrent settings save; comparing a materialised list against the
+	// empty one still on disk would report drift on every inherited draw.
+	loadedCourts := append([]string(nil), comp.Courts...)
+
+	// Materialise an omitted shiaijo allocation. An empty list has always
+	// MEANT "inherit the tournament's shiaijo" (it is what every HTTP write
+	// path resolves it to), but the generators never materialised it: they
+	// read the empty list as one UNNAMED court and stamped every generated
+	// match with Court "". The per-court operator view is built from the
+	// tournament's labels and filters on that field, so those matches were
+	// invisible for the whole event, which is the exact failure the HTTP-side
+	// resolution exists to prevent. Records with no courts key are reachable
+	// from legacy data, an imported manifest and a hand-edited config.md, so
+	// the resolution has to live here as well, on the one path both
+	// GenerateDraw and StartCompetition take.
+	//
+	// Resolve BEFORE the two gates below, never after: what gets validated has
+	// to be what the draw actually runs on (R9: "wherever an allocation is
+	// DERIVED rather than chosen, the DERIVED value is what R9 validates").
+	// The inherited list is NOT trimmed to a legal count here, deliberately.
+	// Choosing WHICH two of a venue's three shiaijo a competition runs on is
+	// the operator's call, not the server's, which is the same ruling the
+	// create path already applies: omitting the courts must reach the same
+	// outcome as stating them.
+	courtsInherited := len(comp.Courts) == 0
+	comp.Courts = InheritedDrawCourts(comp.Courts, tourn)
+
+	// Shiaijo-count gate. runDrawPipeline is the single path both
+	// GenerateDraw and StartCompetition take to build a draw, so checking
+	// here covers every caller, including callers that never touch the HTTP
+	// layer (the API validators cannot see those).
+	//
+	// Scoped to formats that actually build a bracket: the rule exists
+	// because the draw's per-shiaijo blocks merge in pairs, and a league or
+	// Swiss competition has no blocks to merge.
+	//
+	// This is a write-time check, not a read-time one: an already-drawn or
+	// already-running competition is untouched and keeps serving its
+	// matches. Only a NEW draw on an invalid allocation is refused, and the
+	// operator clears it by reassigning shiaijo in competition settings.
+	//
+	// The exemptions and the rule both live in ValidateCompetitionShiaijoCount,
+	// which the HTTP write paths call too, so the CLI, the API, the engine and
+	// the operator UI all reject exactly the same allocations with exactly the
+	// same wording. Only the framing below is this path's own.
+	if err := ValidateCompetitionShiaijoCount(comp.Courts, comp.Format); err != nil {
+		// Name the inheritance when that is where the count came from, or the
+		// operator is handed a count they never chose with no clue how the
+		// competition acquired it.
+		if courtsInherited {
+			return validationErrorf(
+				"competition %s cannot generate a draw: %s. It has no shiaijo of its own, so the draw would run on all %d of the tournament's; assign it its own shiaijo in the competition's settings",
+				id, err.Error(), len(comp.Courts))
+		}
+		return validationErrorf("competition %s cannot generate a draw: %s", id, err.Error())
+	}
+
+	// Orphaned-shiaijo gate. Same placement and the same write-time logic as
+	// the shiaijo-count gate above, for the same reason: this is the one path both
+	// GenerateDraw and StartCompetition take, so it catches every caller.
+	//
+	// A competition may only be drawn onto shiaijo the tournament actually
+	// has. Without this, shrinking the venue's court count (PUT /tournament)
+	// left the competition's stored list untouched, and the draw happily
+	// scheduled matches onto a court with no operator view: invisible matches
+	// for the whole event. The tournament-side refusal in
+	// handlers_tournament.go stops that happening through the UI; this gate
+	// covers records that are ALREADY orphaned (saved before the guard
+	// existed, imported, or hand-edited) and any caller below the HTTP layer.
+	//
+	// Unlike the shiaijo-count rule this one applies to EVERY format: a league
+	// or Swiss competition has no bracket blocks to merge, but its matches still
+	// need a court an operator can open. It reads comp.Courts, the same list
+	// the generators below assign from, so what is validated is what is used.
+	if tourn != nil {
+		if err := ValidateCourtsInTournament(comp.Courts, tourn.Courts); err != nil {
+			return validationErrorf("competition %s cannot generate a draw: %s", id, err.Error())
+		}
+	}
+
 	// Snapshot the loaded config BEFORE the pipeline mutates anything.
 	// The atomic-commit transform below compares `current` (freshly
 	// reloaded under the lock) to THESE snapshots, not to the
@@ -641,7 +730,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 	loadedRoundRobin := comp.RoundRobin
 	loadedKind := comp.Kind
 	loadedWithZekken := comp.WithZekkenName
-	loadedCourts := append([]string(nil), comp.Courts...)
+	// loadedCourts is captured further up, before the inheritance resolution.
 	loadedTeamSize := comp.TeamSize
 	loadedCheckInEnabled := comp.CheckInEnabled
 	loadedPoolWinners := comp.PoolWinners
@@ -672,16 +761,9 @@ func (e *Engine) runDrawPipeline(id string) error {
 		comp.TeamSize = 5 // Default for Kendo
 	}
 
-	// Only pass HasIDs hint when explicitly true; false means unset (let
-	// auto-detect run) to avoid misclassifying UUID-prefixed files.
-	var hasIDsHint *bool
-	if comp.HasParticipantIDs {
-		t := true
-		hasIDsHint = &t
-	}
 	players, err := e.store.LoadParticipantsOpt(id, comp.EffectiveWithZekkenName(), state.LoadParticipantsOpts{
 		WithSeeds: true,
-		HasIDs:    hasIDsHint,
+		HasIDs:    comp.ParticipantIDsHint(),
 	})
 	if err != nil {
 		return err
@@ -712,6 +794,15 @@ func (e *Engine) runDrawPipeline(id string) error {
 
 	seeds, err := e.store.LoadSeeds(id)
 	if err != nil {
+		// A malformed seed list is the operator's input, not our failure, so it
+		// has to reach them as a 400 carrying the reason. Reported as a 500 it
+		// reads as "the tool is broken" at exactly the moment they can fix it
+		// themselves: the seeding panel saves each rank as it is typed, so
+		// entering seed 4 before seeds 1 to 3 leaves a gapped seeds.csv that
+		// this refuses to load.
+		if errors.Is(err, domain.ErrInvalidSeedAssignments) {
+			return wrapValidationErrorf(err, "%s", e.seedingProblem(id, err))
+		}
 		return err
 	}
 	// Drop seed assignments for participants removed by check-in (PR #199
@@ -923,6 +1014,16 @@ func (e *Engine) runDrawPipeline(id string) error {
 				current.RoundRobin = true
 			}
 		}
+		// Persist a materialised allocation. When the stored list was empty the
+		// pipeline inherited the tournament's shiaijo and stamped every
+		// generated match with those labels; leaving config.md empty would
+		// leave the settings screen claiming the competition has no shiaijo
+		// while its matches name three, and the next draw would silently
+		// re-derive against whatever the venue looks like by then. The drift
+		// check above already established current.Courts == loadedCourts (the
+		// RAW stored list), so this only ever writes the resolution of a list
+		// nobody changed underneath us. It is a no-op when courts were stored.
+		current.Courts = comp.Courts
 		current.Status = comp.Status
 		if comp.Format == state.CompFormatSwiss {
 			current.SwissCurrentRound = comp.SwissCurrentRound

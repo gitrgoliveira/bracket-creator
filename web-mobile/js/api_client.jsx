@@ -1141,6 +1141,27 @@ const API = {
         const data = await res.json();
         return normalizeCompetitionDetail(data);
     },
+    // fetchDrawWarnings: GET /competitions/:id/draw-warnings. The seeding rules
+    // never refuse a draw; where a configuration cannot satisfy them all, the
+    // deepest constraint gives way and the operator is told what was relaxed.
+    // This is that advice, and it is admin-only (the public viewer surfaces
+    // deliberately do not carry it).
+    //
+    // Advisory, so a failure is swallowed into an empty list: a competition
+    // page must never break, or lose its draw, over a warning it could not
+    // fetch.
+    async fetchDrawWarnings(id, password) {
+        try {
+            const res = await fetch(`/api/competitions/${id}/draw-warnings`, {
+                headers: password ? { 'X-Tournament-Password': password } : {}
+            });
+            if (!res.ok) return [];
+            const data = await res.json();
+            return data.warnings || [];
+        } catch {
+            return [];
+        }
+    },
     async discardDraw(id, password, adminPassword) {
         const res = await fetch(`/api/competitions/${id}/draw`, {
             method: 'DELETE',

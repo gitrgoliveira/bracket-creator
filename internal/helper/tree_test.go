@@ -2,6 +2,7 @@ package helper
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -9,57 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 	excelize "github.com/xuri/excelize/v2"
 )
-
-func TestSubdivideTree(t *testing.T) {
-	// Create a sample tree
-	root := &Node{
-		Val: 5,
-		Left: &Node{
-			Val: 3,
-			Left: &Node{
-				Val:      2,
-				LeafNode: true,
-				LeafVal:  "2",
-			},
-			Right: &Node{
-				Val:      4,
-				LeafNode: true,
-				LeafVal:  "4",
-			},
-		},
-		Right: &Node{
-			Val: 7,
-			Left: &Node{
-				Val:      6,
-				LeafNode: true,
-				LeafVal:  "6",
-			},
-			Right: &Node{
-				Val:      8,
-				LeafNode: true,
-				LeafVal:  "8",
-			},
-		},
-	}
-
-	// Call the SubdivideTree function
-	subtrees := SubdivideTree(root, 4)
-
-	// Assert the number of subtrees
-	assert.Len(t, subtrees, 4)
-
-	// Create a map for easier lookup
-	subtreeMap := make(map[int64]bool)
-	for _, subtree := range subtrees {
-		subtreeMap[subtree.Val] = true
-	}
-
-	// Assert the values of the subtrees
-	expectedValues := []int64{2, 4, 6, 8} // These should be the leaf nodes
-	for _, expectedValue := range expectedValues {
-		assert.Truef(t, subtreeMap[expectedValue], "Expected value %d not found in subtrees", expectedValue)
-	}
-}
 
 func TestRoundToPowerOf2_1(t *testing.T) {
 	// Test cases
@@ -130,8 +80,7 @@ func TestPrintLeafNodes(t *testing.T) {
 	f.NewSheet("Sheet1")
 	f.NewSheet("Sheet2")
 
-	// Test with pools set to true
-	PrintLeafNodes(node, f, "Sheet1", 10, 1, 3, true, nil)
+	PrintLeafNodes(node, f, "Sheet1", 10, 1, 3, nil)
 
 	// Verify leaf values were written to expected cells
 	cellChecks := map[string]string{
@@ -146,8 +95,10 @@ func TestPrintLeafNodes(t *testing.T) {
 		assert.Equal(t, expected, value)
 	}
 
-	// Test with pools set to false
-	PrintLeafNodes(node, f, "Sheet2", 10, 1, 3, false, nil)
+	// Rendering is pure: drawing the same tree again on another sheet writes
+	// the same labels to the same cells, and the tree is not reordered by
+	// having been drawn.
+	PrintLeafNodes(node, f, "Sheet2", 10, 1, 3, nil)
 	for cell, expected := range cellChecks {
 		value, err := f.GetCellValue("Sheet2", cell)
 		require.NoError(t, err)
@@ -155,133 +106,26 @@ func TestPrintLeafNodes(t *testing.T) {
 	}
 }
 
-func TestGenerateFinals(t *testing.T) {
-	tests := []struct {
-		name        string
-		pools       []Pool
-		poolWinners int
-		validate    func(t *testing.T, finalists []string)
-	}{
-		{
-			name: "2 pools with 2 winners each",
-			pools: []Pool{
-				{PoolName: "Pool A"},
-				{PoolName: "Pool B"},
-			},
-			poolWinners: 2,
-			validate: func(t *testing.T, finalists []string) {
-				if len(finalists) != 4 {
-					t.Errorf("Expected 4 finalists, got %d", len(finalists))
-				}
-				// Check that we have the expected format
-				expectedFormats := []string{"Pool A-1st", "Pool A-2nd", "Pool B-1st", "Pool B-2nd"}
-				formatMap := make(map[string]bool)
-				for _, f := range finalists {
-					formatMap[f] = true
-				}
-				for _, expected := range expectedFormats {
-					if !formatMap[expected] {
-						t.Errorf("Expected finalist %s not found", expected)
-					}
-				}
-			},
-		},
-		{
-			name: "3 pools with 1 winner each",
-			pools: []Pool{
-				{PoolName: "Pool A"},
-				{PoolName: "Pool B"},
-				{PoolName: "Pool C"},
-			},
-			poolWinners: 1,
-			validate: func(t *testing.T, finalists []string) {
-				if len(finalists) != 3 {
-					t.Errorf("Expected 3 finalists, got %d", len(finalists))
-				}
-			},
-		},
-		{
-			name: "4 pools with 3 winners each",
-			pools: []Pool{
-				{PoolName: "Pool A"},
-				{PoolName: "Pool B"},
-				{PoolName: "Pool C"},
-				{PoolName: "Pool D"},
-			},
-			poolWinners: 3,
-			validate: func(t *testing.T, finalists []string) {
-				if len(finalists) != 12 {
-					t.Errorf("Expected 12 finalists, got %d", len(finalists))
-				}
-			},
-		},
-		{
-			name: "4 pools 2 winners - cross-pool matchup ordering",
-			pools: []Pool{
-				{PoolName: "Pool A"},
-				{PoolName: "Pool B"},
-				{PoolName: "Pool C"},
-				{PoolName: "Pool D"},
-			},
-			poolWinners: 2,
-			validate: func(t *testing.T, finalists []string) {
-				// The interleaving must pair 1st-place finishers against
-				// 2nd-place finishers from other pools. Adjacent pairs in
-				// the result become bracket matchups via CreateBalancedTree.
-				expected := []string{
-					"Pool A-1st", "Pool B-2nd", "Pool C-1st", "Pool D-2nd",
-					"Pool A-2nd", "Pool B-1st", "Pool C-2nd", "Pool D-1st",
-				}
-				assert.Equal(t, expected, finalists)
-			},
-		},
-	}
+// TestPrintLeafNodesDoesNotReorderTree pins the pure-renderer contract
+// directly: placement belongs to BuildKnockoutDraw, so drawing a page must
+// leave the leaf order untouched even when that order is one the retired
+// placement fix-up would have changed.
+func TestPrintLeafNodesDoesNotReorderTree(t *testing.T) {
+	// "Pool A-2nd" above "Pool B-1st" is exactly the pairing the old
+	// treeAdjustment swapped, so a renderer that still adjusted is caught here.
+	tree := CreateBalancedTree([]string{"Pool A-2nd", "Pool B-1st"})
+	before := collectOrderedLeaves(tree)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			finalists := GenerateFinals(tt.pools, tt.poolWinners)
-			tt.validate(t, finalists)
-		})
-	}
-}
+	f := excelize.NewFile()
+	defer f.Close()
+	_, err := f.NewSheet("Tree 1")
+	require.NoError(t, err)
 
-// TestGenerateFinals_NoDuplicatesOrMissing sweeps poolWinners 1..6 × pool counts
-// 2..10 and asserts the output multiset is EXACTLY {each pool} × {1st..poolWinners},
-// every placeholder present exactly once, none duplicated, none missing. This
-// is the invariant the old `len(pools)%poolWinners` round-gate violated for
-// non-coprime combos (e.g. poolWinners>=4 with 2/6/10 pools), which silently
-// corrupted the live in-place knockout (mp-turx). The previous tests only checked
-// length/membership and happened to use clean combos, so they missed it.
-func TestGenerateFinals_NoDuplicatesOrMissing(t *testing.T) {
-	for poolWinners := 1; poolWinners <= 6; poolWinners++ {
-		for poolCount := 2; poolCount <= 10; poolCount++ {
-			name := fmt.Sprintf("%dpools_%dwinners", poolCount, poolWinners)
-			t.Run(name, func(t *testing.T) {
-				pools := make([]Pool, poolCount)
-				want := make(map[string]int, poolCount*poolWinners)
-				for p := 0; p < poolCount; p++ {
-					pools[p] = Pool{PoolName: fmt.Sprintf("Pool %c", 'A'+p)}
-					for rank := 1; rank <= poolWinners; rank++ {
-						want[fmt.Sprintf("Pool %c-%s", 'A'+p, GetOrdinal(rank))] = 1
-					}
-				}
+	PrintLeafNodes(tree, f, "Tree 1", 4, 1, 2, nil)
 
-				finals := GenerateFinals(pools, poolWinners)
-				require.Len(t, finals, poolCount*poolWinners,
-					"output length must equal poolCount*poolWinners")
-
-				got := make(map[string]int, len(finals))
-				for _, f := range finals {
-					got[f]++
-				}
-				for label := range got {
-					assert.LessOrEqual(t, got[label], 1, "placeholder %q appears %d times (must be exactly once)", label, got[label])
-				}
-				assert.Equal(t, want, got,
-					"multiset of finalists must be exactly each pool × each rank, with no dups/missing")
-			})
-		}
-	}
+	assert.Equal(t, before, collectOrderedLeaves(tree), "rendering must not reorder the tree")
+	assert.Equal(t, []string{"Pool A-2nd", "Pool B-1st"}, collectOrderedLeaves(tree),
+		"placement belongs to BuildKnockoutDraw; nothing downstream may re-place a built draw")
 }
 
 func TestCalculateDepth(t *testing.T) {
@@ -641,136 +485,6 @@ func countLeaves(node *Node) int {
 	return countLeaves(node.Left) + countLeaves(node.Right)
 }
 
-func TestSubdivideTreeEdgeCases(t *testing.T) {
-	tests := []struct {
-		name         string
-		setupTree    func() *Node
-		numSubtrees  int
-		validateFunc func(t *testing.T, subtrees []*Node)
-	}{
-		{
-			name: "nil node",
-			setupTree: func() *Node {
-				return nil
-			},
-			numSubtrees: 4,
-			validateFunc: func(t *testing.T, subtrees []*Node) {
-				if subtrees != nil {
-					t.Errorf("Expected nil result for nil node, got %d subtrees", len(subtrees))
-				}
-			},
-		},
-		{
-			name: "zero subtrees requested",
-			setupTree: func() *Node {
-				return &Node{Val: 1, LeafNode: true, LeafVal: "A"}
-			},
-			numSubtrees: 0,
-			validateFunc: func(t *testing.T, subtrees []*Node) {
-				if subtrees != nil {
-					t.Errorf("Expected nil result for 0 subtrees, got %d subtrees", len(subtrees))
-				}
-			},
-		},
-		{
-			name: "negative subtrees requested",
-			setupTree: func() *Node {
-				return &Node{Val: 1, LeafNode: true, LeafVal: "A"}
-			},
-			numSubtrees: -1,
-			validateFunc: func(t *testing.T, subtrees []*Node) {
-				if subtrees != nil {
-					t.Errorf("Expected nil result for negative subtrees, got %d subtrees", len(subtrees))
-				}
-			},
-		},
-		{
-			name: "single leaf node with subdivision",
-			setupTree: func() *Node {
-				return &Node{Val: 1, LeafNode: true, LeafVal: "A"}
-			},
-			numSubtrees: 2,
-			validateFunc: func(t *testing.T, subtrees []*Node) {
-				if len(subtrees) != 1 {
-					t.Errorf("Expected 1 subtree (the node itself), got %d", len(subtrees))
-				}
-			},
-		},
-		{
-			name: "request more subtrees than available",
-			setupTree: func() *Node {
-				return CreateBalancedTree([]string{"A", "B"})
-			},
-			numSubtrees: 8,
-			validateFunc: func(t *testing.T, subtrees []*Node) {
-				// Should return what's available
-				if len(subtrees) == 0 {
-					t.Error("Expected at least some subtrees")
-				}
-			},
-		},
-		{
-			name: "subdivision equals number of leaves",
-			setupTree: func() *Node {
-				return CreateBalancedTree([]string{"A", "B", "C", "D"})
-			},
-			numSubtrees: 4,
-			validateFunc: func(t *testing.T, subtrees []*Node) {
-				if len(subtrees) != 4 {
-					t.Errorf("Expected 4 subtrees, got %d", len(subtrees))
-				}
-				// All should be leaf nodes
-				for i, st := range subtrees {
-					if !st.LeafNode {
-						t.Errorf("Subtree %d should be a leaf node", i)
-					}
-				}
-			},
-		},
-		{
-			name: "unbalanced tree subdivision",
-			setupTree: func() *Node {
-				// Create an unbalanced tree
-				return &Node{
-					Val: 3,
-					Left: &Node{
-						Val:      1,
-						LeafNode: true,
-						LeafVal:  "A",
-					},
-					Right: &Node{
-						Val: 2,
-						Left: &Node{
-							Val:      1,
-							LeafNode: true,
-							LeafVal:  "B",
-						},
-						Right: &Node{
-							Val:      1,
-							LeafNode: true,
-							LeafVal:  "C",
-						},
-					},
-				}
-			},
-			numSubtrees: 2,
-			validateFunc: func(t *testing.T, subtrees []*Node) {
-				if len(subtrees) == 0 {
-					t.Error("Expected at least one subtree")
-				}
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tree := tt.setupTree()
-			subtrees := SubdivideTree(tree, tt.numSubtrees)
-			tt.validateFunc(t, subtrees)
-		})
-	}
-}
-
 func TestRoundToPowerOf2EdgeCases(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -938,127 +652,6 @@ func TestNextPow2(t *testing.T) {
 	}
 }
 
-func TestGenerateFinalsEdgeCases(t *testing.T) {
-	tests := []struct {
-		name        string
-		pools       []Pool
-		poolWinners int
-		validate    func(t *testing.T, finalists []string)
-	}{
-		{
-			name:        "empty pools",
-			pools:       []Pool{},
-			poolWinners: 2,
-			validate: func(t *testing.T, finalists []string) {
-				if len(finalists) != 0 {
-					t.Errorf("Expected 0 finalists from empty pools, got %d", len(finalists))
-				}
-			},
-		},
-		{
-			name: "single pool with one winner",
-			pools: []Pool{
-				{PoolName: "Pool A"},
-			},
-			poolWinners: 1,
-			validate: func(t *testing.T, finalists []string) {
-				if len(finalists) != 1 {
-					t.Errorf("Expected 1 finalist, got %d", len(finalists))
-				}
-				if finalists[0] != "Pool A-1st" {
-					t.Errorf("Expected 'Pool A-1st', got %s", finalists[0])
-				}
-			},
-		},
-		{
-			name: "zero winners per pool",
-			pools: []Pool{
-				{PoolName: "Pool A"},
-				{PoolName: "Pool B"},
-			},
-			poolWinners: 0,
-			validate: func(t *testing.T, finalists []string) {
-				if len(finalists) != 0 {
-					t.Errorf("Expected 0 finalists with 0 winners, got %d", len(finalists))
-				}
-			},
-		},
-		{
-			name: "many pools with many winners",
-			pools: []Pool{
-				{PoolName: "Pool A"},
-				{PoolName: "Pool B"},
-				{PoolName: "Pool C"},
-				{PoolName: "Pool D"},
-				{PoolName: "Pool E"},
-			},
-			poolWinners: 4,
-			validate: func(t *testing.T, finalists []string) {
-				expectedCount := 5 * 4 // 5 pools * 4 winners
-				if len(finalists) != expectedCount {
-					t.Errorf("Expected %d finalists, got %d", expectedCount, len(finalists))
-				}
-				// Verify format of entries
-				for i, finalist := range finalists {
-					if !strings.Contains(finalist, "Pool") || !strings.Contains(finalist, "-") {
-						t.Errorf("Finalist %d has invalid format: %s", i, finalist)
-					}
-				}
-			},
-		},
-		{
-			name: "verify distribution pattern - 3 pools, 2 winners",
-			pools: []Pool{
-				{PoolName: "Pool A"},
-				{PoolName: "Pool B"},
-				{PoolName: "Pool C"},
-			},
-			poolWinners: 2,
-			validate: func(t *testing.T, finalists []string) {
-				if len(finalists) != 6 {
-					t.Errorf("Expected 6 finalists (3*2), got %d", len(finalists))
-				}
-				// Verify all expected finalists are present
-				expectedSet := map[string]bool{
-					"Pool A-1st": true, "Pool A-2nd": true,
-					"Pool B-1st": true, "Pool B-2nd": true,
-					"Pool C-1st": true, "Pool C-2nd": true,
-				}
-				for _, f := range finalists {
-					if !expectedSet[f] {
-						t.Errorf("Unexpected finalist: %s", f)
-					}
-				}
-			},
-		},
-		{
-			name: "single pool with multiple winners",
-			pools: []Pool{
-				{PoolName: "Pool X"},
-			},
-			poolWinners: 5,
-			validate: func(t *testing.T, finalists []string) {
-				if len(finalists) != 5 {
-					t.Errorf("Expected 5 finalists, got %d", len(finalists))
-				}
-				for i := range 5 {
-					expected := fmt.Sprintf("Pool X-%s", GetOrdinal(i+1))
-					if finalists[i] != expected {
-						t.Errorf("Position %d: expected %s, got %s", i, expected, finalists[i])
-					}
-				}
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			finalists := GenerateFinals(tt.pools, tt.poolWinners)
-			tt.validate(t, finalists)
-		})
-	}
-}
-
 func TestTraverseRoundsExtended(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -1150,16 +743,16 @@ func TestPrintLeafNodesEdgeCases(t *testing.T) {
 	tests := []struct {
 		name         string
 		setupTree    func() *Node
-		pools        bool
 		matchWinners map[string]MatchWinner
 		shouldPanic  bool
 	}{
 		{
-			name: "single leaf with pools enabled",
+			// A page whose root is a single leaf: the page splitter produces these
+			// whenever the requested page count is deeper than the tree.
+			name: "single leaf page",
 			setupTree: func() *Node {
 				return &Node{Val: 1, LeafNode: true, LeafVal: "A-1st"}
 			},
-			pools:        true,
 			matchWinners: nil,
 			shouldPanic:  false,
 		},
@@ -1168,7 +761,6 @@ func TestPrintLeafNodesEdgeCases(t *testing.T) {
 			setupTree: func() *Node {
 				return CreateBalancedTree([]string{"Winner1", "Winner2"})
 			},
-			pools: false,
 			matchWinners: map[string]MatchWinner{
 				"Winner1": {cellCoord: cellCoord{sheetName: "Sheet1", cell: "A1"}},
 				"Winner2": {cellCoord: cellCoord{sheetName: "Sheet1", cell: "A2"}},
@@ -1195,7 +787,7 @@ func TestPrintLeafNodesEdgeCases(t *testing.T) {
 			depth := CalculateDepth(tree)
 
 			// Should not panic
-			PrintLeafNodes(tree, f, "TestSheet", 10, 1, depth, tt.pools, tt.matchWinners)
+			PrintLeafNodes(tree, f, "TestSheet", 10, 1, depth, tt.matchWinners)
 
 			// If we got here without panic, test passes
 			if !tt.shouldPanic {
@@ -1307,20 +899,27 @@ func TestTreeToLeafArray(t *testing.T) {
 	}
 }
 
-// applyTreeAdjustments delegates to the exported ApplyPoolAdjustments so
-// test helpers stay in sync with the production traversal.
-func applyTreeAdjustments(node *Node) {
-	ApplyPoolAdjustments(node)
-}
-
 func leafPool(val string) string {
 	name, _ := splitPoolNameAndRank(val)
 	return name
 }
 
+// leafRank is the numeric finishing rank in a placeholder ("Pool A-2nd" -> 2),
+// 0 when there is no rank. It lives here because nothing in production reads a
+// rank back out of a label any more: the draw carries drawOccupant.rank
+// alongside the label, so parsing one was only ever the tests' way of asking.
+// (internal/engine/legacy_template_v1.go keeps its own frozen copy on purpose.)
 func leafRank(val string) int64 {
 	_, rankStr := splitPoolNameAndRank(val)
-	return parsePoolRank(rankStr)
+	if rankStr == "" {
+		return 0
+	}
+	// Drop the ordinal suffix (st, nd, rd, th).
+	if len(rankStr) > 2 {
+		rankStr = rankStr[:len(rankStr)-2]
+	}
+	pos, _ := strconv.ParseInt(rankStr, 10, 64)
+	return pos
 }
 
 // collectOrderedLeaves returns leaf values in left-to-right (top-to-bottom) order.
@@ -1352,31 +951,6 @@ func findLeafMatches(node *Node) []bracketMatch {
 	return matches
 }
 
-// findByes returns leaf values at nodes where one child is a leaf and the other
-// is an internal node (the leaf gets a bye).
-func findByeLeaves(node *Node) []string {
-	if node == nil || node.LeafNode {
-		return nil
-	}
-	var byes []string
-	if node.Left.LeafNode && !node.Right.LeafNode {
-		byes = append(byes, node.Left.LeafVal)
-	}
-	if !node.Left.LeafNode && node.Right.LeafNode {
-		byes = append(byes, node.Right.LeafVal)
-	}
-	byes = append(byes, findByeLeaves(node.Left)...)
-	byes = append(byes, findByeLeaves(node.Right)...)
-	return byes
-}
-
-func buildAdjustedTree(pools []Pool, poolWinners int) *Node {
-	finals := GenerateFinals(pools, poolWinners)
-	tree := CreateBalancedTree(finals)
-	applyTreeAdjustments(tree)
-	return tree
-}
-
 func makePools(n int) ([]Pool, []string) {
 	pools := make([]Pool, n)
 	names := make([]string, n)
@@ -1388,118 +962,594 @@ func makePools(n int) ([]Pool, []string) {
 	return pools, names
 }
 
+// buildDrawTree is the whole draw for n pools on numCourts shiaijo, which is
+// what every bracket-property test below inspects. It replaced the old
+// GenerateFinals -> CreateBalancedTree -> ApplyPoolAdjustments chain: placement
+// is now by construction, so there is no separate adjustment step to run.
+func buildDrawTree(pools []Pool, poolWinners, numCourts int) *Node {
+	d := BuildKnockoutDraw(pools, poolWinners, numCourts)
+	if d == nil {
+		return nil
+	}
+	return d.Root
+}
+
+// TestDrawEmitsEveryPlaceholderExactlyOnce sweeps poolWinners 1..6 x pool counts
+// 1..12 x 1/2/4 shiaijo and asserts the draw's leaf multiset is EXACTLY
+// {each pool} x {1st..poolWinners}: every placeholder present once, none
+// duplicated, none missing.
+//
+// This is the invariant that made the flat draw's rank rotation dangerous
+// (mp-turx: a gated round counter aliased the rotation for non-coprime
+// combinations and silently duplicated some placeholders while dropping
+// others). Since these placeholders are the leaves of the LIVE in-place
+// knockout, a duplicate corrupts real results, so the property is re-pinned
+// against the court-first construction across a wider sweep.
+func TestDrawEmitsEveryPlaceholderExactlyOnce(t *testing.T) {
+	for poolWinners := 1; poolWinners <= 6; poolWinners++ {
+		for poolCount := 1; poolCount <= 12; poolCount++ {
+			for _, courts := range []int{1, 2, 4} {
+				name := fmt.Sprintf("%dpools_%dwinners_%dcourts", poolCount, poolWinners, courts)
+				t.Run(name, func(t *testing.T) {
+					pools, poolNames := makePools(poolCount)
+					want := make(map[string]int, poolCount*poolWinners)
+					for _, p := range poolNames {
+						for rank := 1; rank <= poolWinners; rank++ {
+							want[fmt.Sprintf("%s-%s", p, GetOrdinal(rank))] = 1
+						}
+					}
+
+					tree := buildDrawTree(pools, poolWinners, courts)
+					require.NotNil(t, tree)
+					leaves := TreeLeafLabels(tree)
+					require.Len(t, leaves, poolCount*poolWinners,
+						"leaf count must equal poolCount*poolWinners")
+
+					got := make(map[string]int, len(leaves))
+					for _, f := range leaves {
+						got[f]++
+					}
+					assert.Equal(t, want, got,
+						"the draw's leaves must be exactly each pool x each rank, with no dups/missing")
+				})
+			}
+		}
+	}
+}
+
+// TestBuildKnockoutDrawDegenerateInputs pins the inputs that produce no draw at
+// all, so a caller can rely on a nil return rather than on a half-built tree.
+func TestBuildKnockoutDrawDegenerateInputs(t *testing.T) {
+	pools, _ := makePools(4)
+	assert.Nil(t, BuildKnockoutDraw(nil, 2, 2), "no pools, no draw")
+	assert.Nil(t, BuildKnockoutDraw([]Pool{}, 2, 2), "no pools, no draw")
+	assert.Nil(t, BuildKnockoutDraw(pools, 0, 2), "zero qualifiers per pool, no draw")
+	assert.Nil(t, BuildKnockoutDraw(pools, -1, 2), "negative qualifiers, no draw")
+	assert.Nil(t, BuildKnockoutDrawFromAssignment(pools, 2, []int{0, 0}, 2),
+		"an allocation that does not cover every pool is refused rather than guessed at")
+
+	// A single pool is a legal, if degenerate, draw: one region, one leaf per
+	// qualifier, and courts clamped to the pool count.
+	one, _ := makePools(1)
+	d := BuildKnockoutDraw(one, 1, 4)
+	require.NotNil(t, d)
+	assert.Equal(t, 1, d.NumCourts())
+	assert.Equal(t, []string{"Pool A-1st"}, TreeLeafLabels(d.Root))
+}
+
+// TestEffectiveDrawCourts pins the clamp that keeps a court from owning an
+// empty region, including its R9 step-down: clamping onto a pool count that is
+// not a power of two would otherwise hand the draw an illegal allocation.
+//
+// The 8-courts-over-7-pools row is the case the old "step down to an even
+// number" clamp got wrong: it produced 6, which R9 rejects because 3 regions in
+// a half cannot merge pairwise. Every clamped result is asserted legal below,
+// so the table cannot drift from ValidateShiaijoCount.
+func TestEffectiveDrawCourts(t *testing.T) {
+	cases := []struct{ pools, courts, want int }{
+		{pools: 8, courts: 4, want: 4},
+		{pools: 4, courts: 4, want: 4},
+		{pools: 3, courts: 4, want: 2}, // 3 is not a power of two (R9)
+		{pools: 2, courts: 4, want: 2},
+		{pools: 1, courts: 4, want: 1}, // one shiaijo is explicitly allowed
+		{pools: 5, courts: 6, want: 4},
+		{pools: 6, courts: 8, want: 4}, // 6 is even but illegal under R9
+		{pools: 7, courts: 8, want: 4}, // the old clamp gave 6 here
+		{pools: 8, courts: 16, want: 8},
+		{pools: 12, courts: 16, want: 8}, // 12 is even but illegal under R9
+		{pools: 8, courts: 0, want: 1},
+		{pools: 0, courts: 3, want: 3}, // no pools: nothing to clamp against
+	}
+	for _, c := range cases {
+		t.Run(fmt.Sprintf("%dpools_%dcourts", c.pools, c.courts), func(t *testing.T) {
+			got := EffectiveDrawCourts(c.pools, c.courts)
+			assert.Equal(t, c.want, got)
+			if c.pools > 0 && c.courts > c.pools {
+				assert.NoErrorf(t, ValidateShiaijoCount(got),
+					"the clamp must land on a legal allocation, got %d", got)
+			}
+		})
+	}
+}
+
+// TestSubdivideRegions pins the court-block splitter: each region contributes
+// exactly pagesPerCourt pages, in court order, and each page is a genuine
+// subtree of its region.
+func TestSubdivideRegions(t *testing.T) {
+	pools, _ := makePools(8)
+	draw := BuildKnockoutDraw(pools, 2, 4)
+	require.NotNil(t, draw)
+
+	t.Run("one page per court", func(t *testing.T) {
+		pages := SubdivideRegions(draw.Regions, 1)
+		require.Len(t, pages, 4)
+		for i, p := range pages {
+			assert.Same(t, draw.Regions[i], p, "page %d is shiaijo %s's whole region", i+1, CourtLabel(i))
+		}
+	})
+
+	t.Run("two pages per court are the region's children", func(t *testing.T) {
+		pages := SubdivideRegions(draw.Regions, 2)
+		require.Len(t, pages, 8)
+		for c, r := range draw.Regions {
+			assert.Same(t, r.Left, pages[c*2])
+			assert.Same(t, r.Right, pages[c*2+1])
+		}
+	})
+
+	t.Run("four pages per court are the region's grandchildren", func(t *testing.T) {
+		pages := SubdivideRegions(draw.Regions, 4)
+		require.Len(t, pages, 16)
+		for c, r := range draw.Regions {
+			assert.Same(t, r.Left.Left, pages[c*4])
+			assert.Same(t, r.Left.Right, pages[c*4+1])
+			assert.Same(t, r.Right.Left, pages[c*4+2])
+			assert.Same(t, r.Right.Right, pages[c*4+3])
+		}
+	})
+
+	t.Run("degenerate inputs", func(t *testing.T) {
+		assert.Empty(t, SubdivideRegions(nil, 2))
+		// A page count below 1 is a caller bug, not a request for zero pages.
+		assert.Len(t, SubdivideRegions(draw.Regions, 0), 4)
+		// A leaf region cannot be cut; the page count stays an exact multiple.
+		leaf := &Node{LeafNode: true, LeafVal: "Pool A-1st", Val: 1}
+		assert.Len(t, SubdivideRegions([]*Node{leaf}, 4), 4)
+	})
+}
+
+// TestKnockoutPagesPerCourt pins R8's page-count rule: 1, 2 or 4 pages per
+// shiaijo, the smallest that keeps a page inside MaxPlayersPerTree, clamped to
+// what the regions can actually be cut into.
+func TestKnockoutPagesPerCourt(t *testing.T) {
+	region := func(n int) *Node {
+		labels := make([]string, n)
+		for i := range labels {
+			labels[i] = fmt.Sprintf("Pool %c-1st", 'A'+i%26)
+		}
+		return CreateBalancedTree(labels)
+	}
+	cases := []struct {
+		name    string
+		regions []*Node
+		want    int
+	}{
+		{name: "no regions", regions: nil, want: 1},
+		{name: "small regions fit one page", regions: []*Node{region(8), region(8)}, want: 1},
+		{name: "exactly MaxPlayersPerTree fits one page", regions: []*Node{region(MaxPlayersPerTree)}, want: 1},
+		{name: "one over MaxPlayersPerTree splits in two", regions: []*Node{region(MaxPlayersPerTree + 1)}, want: 2},
+		{name: "over the limit splits in two", regions: []*Node{region(24), region(24)}, want: 2},
+		{name: "far over the limit splits in four", regions: []*Node{region(64)}, want: 4},
+		{name: "clamped by the region that cannot be cut", regions: []*Node{region(64), region(1)}, want: 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, KnockoutPagesPerCourt(c.regions))
+		})
+	}
+}
+
+// TestBracketSamePoolSeparation is R5 at 2 qualifiers, stated as the guarantee
+// the spec says it is: a pool's 1st and 2nd sit in OPPOSITE halves, so they can
+// only meet in the final. Under the court-first draw this follows from R4b
+// alone - the 2nd crosses to the partner court and partner courts are half the
+// bracket apart - so it now holds for every pool count and every shiaijo count,
+// not just the ones where the old flat interleave happened to work out.
 func TestBracketSamePoolSeparation(t *testing.T) {
-	poolCounts := []int{2, 3, 4, 5, 6, 8}
+	poolCounts := []int{2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}
 
-	for _, nPools := range poolCounts {
-		t.Run(fmt.Sprintf("%d_pools_2_winners", nPools), func(t *testing.T) {
-			pools, poolNames := makePools(nPools)
-			tree := buildAdjustedTree(pools, 2)
+	for _, numCourts := range []int{1, 2, 4} {
+		for _, nPools := range poolCounts {
+			t.Run(fmt.Sprintf("%d_pools_2_winners_%d_courts", nPools, numCourts), func(t *testing.T) {
+				pools, poolNames := makePools(nPools)
+				tree := buildDrawTree(pools, 2, numCourts)
+				require.NotNil(t, tree)
 
-			leaves := collectOrderedLeaves(tree)
-			mid := len(leaves) / 2
-			topHalf := leaves[:mid]
-			bottomHalf := leaves[mid:]
+				leaves := TreeToLeafArray(tree)
+				mid := len(leaves) / 2
+				topHalf := leaves[:mid]
+				bottomHalf := leaves[mid:]
 
-			for _, pool := range poolNames {
-				topCount := 0
-				bottomCount := 0
-				for _, l := range topHalf {
-					if leafPool(l) == pool {
-						topCount++
+				for _, pool := range poolNames {
+					topCount := 0
+					bottomCount := 0
+					for _, l := range topHalf {
+						if l != "" && leafPool(l) == pool {
+							topCount++
+						}
 					}
-				}
-				for _, l := range bottomHalf {
-					if leafPool(l) == pool {
-						bottomCount++
+					for _, l := range bottomHalf {
+						if l != "" && leafPool(l) == pool {
+							bottomCount++
+						}
 					}
+					assert.Equalf(t, 1, topCount, "%s should have exactly 1 qualifier in the top half", pool)
+					assert.Equalf(t, 1, bottomCount, "%s should have exactly 1 qualifier in the bottom half", pool)
 				}
-				assert.Equalf(t, 1, topCount, "%s should have exactly 1 player in top half", pool)
-				assert.Equalf(t, 1, bottomCount, "%s should have exactly 1 player in bottom half", pool)
-			}
-		})
+			})
+		}
 	}
 }
 
+// TestBracketNoSamePoolFirstRoundMatch sweeps 1-4 qualifiers over 2-12 pools on
+// 1/2/4 shiaijo: two qualifiers of the SAME pool must never meet in round 1,
+// whatever the configuration. The old draw held this only at 2 qualifiers.
 func TestBracketNoSamePoolFirstRoundMatch(t *testing.T) {
-	poolCounts := []int{2, 3, 4, 5, 6, 8}
+	for _, numCourts := range []int{1, 2, 4} {
+		for nPools := 2; nPools <= 12; nPools++ {
+			for poolWinners := 1; poolWinners <= 4; poolWinners++ {
+				t.Run(fmt.Sprintf("%d_pools_%d_winners_%d_courts", nPools, poolWinners, numCourts), func(t *testing.T) {
+					pools, _ := makePools(nPools)
+					tree := buildDrawTree(pools, poolWinners, numCourts)
+					require.NotNil(t, tree)
 
-	for _, nPools := range poolCounts {
-		t.Run(fmt.Sprintf("%d_pools_2_winners", nPools), func(t *testing.T) {
-			pools, _ := makePools(nPools)
-			tree := buildAdjustedTree(pools, 2)
-
-			for _, m := range findLeafMatches(tree) {
-				topPool := leafPool(m.top)
-				bottomPool := leafPool(m.bottom)
-				assert.NotEqual(t, topPool, bottomPool,
-					"same-pool first-round match: %s vs %s", m.top, m.bottom)
+					for _, m := range findLeafMatches(tree) {
+						assert.NotEqual(t, leafPool(m.top), leafPool(m.bottom),
+							"same-pool first-round match: %s vs %s", m.top, m.bottom)
+					}
+				})
 			}
-		})
+		}
 	}
 }
 
-func TestBracketCrossPoolMatching(t *testing.T) {
-	// For power-of-2 pool counts, every first-round match should be 1st vs 2nd.
-	poolCounts := []int{2, 4, 8}
+// TestByesGoToPoolWinners is R6 as a sweep: at 1 and 2 qualifiers per pool
+// EVERY named round-1 bye goes to a pool WINNER, because a region always holds
+// at least one home 1st and criteria 1-3 rank all of them above any crossed-in
+// rank. The old draw broke this at 3 and 4 qualifiers, where a 2nd or 3rd byed
+// while pool winners played round 1 (measured at 2, 6, 7, 8, 9, 11 and 12
+// pools). At 3+ qualifiers a bye can still legitimately fall to a crossed-in
+// rank (R7's degradation ladder) when a region holds no home 1st at all, so
+// that case asserts the weaker, correct property: a region with a home 1st
+// never byes anything else.
+func TestByesGoToPoolWinners(t *testing.T) {
+	for _, numCourts := range []int{1, 2, 4} {
+		for nPools := 2; nPools <= 12; nPools++ {
+			for poolWinners := 1; poolWinners <= 4; poolWinners++ {
+				t.Run(fmt.Sprintf("%d_pools_%d_winners_%d_courts", nPools, poolWinners, numCourts), func(t *testing.T) {
+					pools, _ := makePools(nPools)
+					draw := BuildKnockoutDraw(pools, poolWinners, numCourts)
+					require.NotNil(t, draw)
 
-	for _, nPools := range poolCounts {
-		t.Run(fmt.Sprintf("%d_pools_2_winners", nPools), func(t *testing.T) {
-			pools, _ := makePools(nPools)
-			tree := buildAdjustedTree(pools, 2)
-
-			matches := findLeafMatches(tree)
-			require.NotEmpty(t, matches)
-
-			for _, m := range matches {
-				topRank := leafRank(m.top)
-				bottomRank := leafRank(m.bottom)
-				assert.NotEqual(t, topRank, bottomRank,
-					"expected 1st-vs-2nd cross-pool match, got %s vs %s", m.top, m.bottom)
+					for c, region := range draw.Regions {
+						slots := TreeToLeafArray(region)
+						hasHomeWinner := false
+						perPool := map[string]int{}
+						for _, l := range TreeLeafLabels(region) {
+							if leafRank(l) == 1 {
+								hasHomeWinner = true
+							}
+							perPool[leafPool(l)]++
+						}
+						// A region holding two qualifiers of one pool may have
+						// had to hand the bye to a lower finisher to keep them
+						// out of a round-1 match: R5 outranks R6's precedence.
+						crowded := false
+						for _, n := range perPool {
+							if n > 1 {
+								crowded = true
+							}
+						}
+						if crowded {
+							continue
+						}
+						for i := 0; i+1 < len(slots); i += 2 {
+							a, b := slots[i], slots[i+1]
+							bye := ""
+							if a != "" && b == "" {
+								bye = a
+							} else if a == "" && b != "" {
+								bye = b
+							}
+							if bye == "" {
+								continue
+							}
+							if hasHomeWinner {
+								assert.Equal(t, int64(1), leafRank(bye),
+									"shiaijo %s holds a home winner, so its bye cannot go to %s (R6)",
+									CourtLabel(c), bye)
+							}
+						}
+					}
+				})
 			}
-		})
+		}
 	}
 }
 
-func TestTreeAdjustmentRankOrdering(t *testing.T) {
-	// In every first-round match, the top (left) player should have rank <= bottom (right).
-	poolCounts := []int{2, 3, 4, 5, 6, 8}
+// drawByeUnits returns the subtrees D4's bye arithmetic applies to: the draw's
+// BLOCKS.
+//
+// A block is usually a shiaijo's region, which is why D4 was first written in
+// terms of a region. Where planBlocks subdivides (1 or 2 shiaijo carrying
+// enough qualifiers to fill four blocks), the pool set is cut into two or four
+// blocks that act as partner courts, each its own ladder with its own greedy
+// layer and its own structural bye, and a printable region is their parent.
+// Reading the arithmetic off a region there would count two blocks' byes
+// against one block's parity.
+func drawByeUnits(draw *KnockoutDraw) []*Node {
+	return draw.blocks
+}
 
-	for _, nPools := range poolCounts {
-		t.Run(fmt.Sprintf("%d_pools_2_winners", nPools), func(t *testing.T) {
-			pools, _ := makePools(nPools)
-			tree := buildAdjustedTree(pools, 2)
+// TestBlockByeNeverSkipsAHigherFinisher pins R6's class ordering and R7's
+// degradation ladder as one property: a block's named bye goes to the best
+// FINISHING POSITION present in that block. A pool winner is never passed over
+// for a runner-up, a runner-up never for a third place.
+//
+// This replaced a test asserting that every block holds a home 1st, which was
+// the "a block must own at least one pool" rule stated as an invariant. That
+// rule is gone (operator ruling, 2026-08-10): a block holds QUALIFIERS, not
+// pools, and from 2 qualifiers up there are more of the former than the latter,
+// so a block may legitimately host only crossed-in finishers. R4(f) blesses it
+// outright and R7 is the rule that says what happens then -- the bye flows down
+// the ladder to the best crossed-in occupant. Asserting it could never occur
+// both contradicted R7 and forced planBlocks to cap the subdivision by the pool
+// count, which is what stranded a lone pool winner in a block and let it bye
+// ahead of the top seed (see draw_seed_bye_test.go).
+//
+// The sweep deliberately asks for MORE shiaijo than pools (8 and 16 over as few
+// as 1 pool), because EffectiveDrawCourts' clamp is the only thing standing
+// between the request and an empty region.
+//
+// ONE shape in the swept range is exempt, and it is the spec's own precedence
+// showing through rather than a defect: at 2 pools and 3 qualifiers each block
+// holds {X-1st, Y-2nd, Y-3rd}, so byeing the pool winner would leave Y's own
+// 2nd and 3rd to fight each other in round 1. R6 states outright that
+// "precedence is a preference, not a guarantee: R3/R4/R5 win", so R5's
+// separation takes the bye and Y-2nd -- the better of the two, see
+// separateSamePoolPairs -- receives it. The exemption is asserted narrowly: the
+// bye must still be that pool's BEST remaining finisher, so the case cannot
+// quietly widen into "any bye anywhere".
+func TestBlockByeNeverSkipsAHigherFinisher(t *testing.T) {
+	for _, numCourts := range []int{1, 2, 4, 8, 16} {
+		for nPools := 1; nPools <= 12; nPools++ {
+			for poolWinners := 1; poolWinners <= 4; poolWinners++ {
+				t.Run(fmt.Sprintf("%d_pools_%d_winners_%d_courts", nPools, poolWinners, numCourts), func(t *testing.T) {
+					pools, _ := makePools(nPools)
+					draw := BuildKnockoutDraw(pools, poolWinners, numCourts)
+					require.NotNil(t, draw)
 
-			for _, m := range findLeafMatches(tree) {
-				topRank := leafRank(m.top)
-				bottomRank := leafRank(m.bottom)
-				assert.LessOrEqual(t, topRank, bottomRank,
-					"1st-place finisher should be on top: got %s (rank %d) above %s (rank %d)",
-					m.top, topRank, m.bottom, bottomRank)
+					for c, block := range drawByeUnits(draw) {
+						require.NotNilf(t, block, "block %d must exist", c)
+						labels := TreeLeafLabels(block)
+						bye := namedBye(block)
+						if bye == "" {
+							continue
+						}
+						bestRank, bestInByesPool := int64(0), int64(0)
+						for _, l := range labels {
+							r := leafRank(l)
+							if r <= 0 {
+								continue
+							}
+							if bestRank == 0 || r < bestRank {
+								bestRank = r
+							}
+							if leafPool(l) == leafPool(bye) && (bestInByesPool == 0 || r < bestInByesPool) {
+								bestInByesPool = r
+							}
+						}
+						if leafRank(bye) == bestRank {
+							continue
+						}
+						assert.Equalf(t, 3, poolWinners,
+							"block %d byed %s over a %s finisher outside the one shape R5 is allowed to override; leaves: %v",
+							c, bye, GetOrdinal(int(bestRank)), labels)
+						assert.Equalf(t, 2, nPools,
+							"block %d byed %s over a %s finisher outside the one shape R5 is allowed to override; leaves: %v",
+							c, bye, GetOrdinal(int(bestRank)), labels)
+						assert.Equalf(t, bestInByesPool, leafRank(bye),
+							"block %d gave the bye to %s when its own pool has a better finisher in the block; leaves: %v",
+							c, bye, labels)
+					}
+				})
 			}
-		})
+		}
 	}
 }
 
-func TestTreeAdjustmentByeAllocation(t *testing.T) {
-	// For non-power-of-2 finalist counts, byes should go to 1st-place finishers.
-	poolCounts := []int{3, 5, 6}
-
-	for _, nPools := range poolCounts {
-		t.Run(fmt.Sprintf("%d_pools_2_winners", nPools), func(t *testing.T) {
-			pools, _ := makePools(nPools)
-			tree := buildAdjustedTree(pools, 2)
-
-			byes := findByeLeaves(tree)
-			require.NotEmptyf(t, byes, "expected byes for %d pools (non-power-of-2 finalists)", nPools)
-
-			for _, b := range byes {
-				rank := leafRank(b)
-				assert.Equal(t, int64(1), rank,
-					"bye should go to a 1st-place finisher, got %s (rank %d)", b, rank)
-			}
-		})
+// blockLayoutArithmetic is D4's per-block arithmetic, template-aware (R6(c)).
+// It restates templateSlots' firing condition from the block's leaf labels ON
+// PURPOSE: the condition is the documented scope of the sheet evidence, so a
+// drift between the two is a real finding rather than test noise.
+//
+// Greedy blocks grant q%2 named round-1 byes and play floor(q/2) round-1
+// matches; a 6-occupant template block grants 2 and plays 2. The q=5 template
+// block (a VACANCY block) is reported skip=true: its bye pair collapses into a
+// shallow leaf-leaf match that a flat leaf array cannot reconstruct, so its
+// layout is pinned bout-for-bout by TestEKC2025MenTeamByes on the rounds view
+// instead of arithmetically here.
+func blockLayoutArithmetic(leaves []string) (byes, matches int, skip bool) {
+	q := len(leaves)
+	homes := 0
+	for _, l := range leaves {
+		if strings.HasSuffix(l, "-1st") {
+			homes++
+		}
 	}
+	crossed := q - homes
+	if (q == 5 || q == 6) && homes >= 2 && homes <= 3 && crossed >= 2 && crossed <= 3 {
+		if q == 5 {
+			return 0, 0, true
+		}
+		return 2, 2, false
+	}
+	// LP-2's uniform big-block template (uniformBigBlockSlots, draw.go):
+	// every occupant a home 1st, 9-16 of them, split into a floor(q/2) TOP
+	// half and a ceil(q/2) BOTTOM half, each its own 8-slot sub-block
+	// (bigBlockHalfRoles). Per half of h occupants the template holds two
+	// 4-slot quadrants; for h in {6,7,8} each quadrant that is short a real
+	// occupant grants that occupant a NAMED bye rather than phantom-pairing
+	// it, so byes = 8-h and matches = h-4 (h=6 is the exact arithmetic
+	// templateSlots' own h=6 case already uses, two quadrants of one bye
+	// plus one match each; h=7 and h=8 add a quadrant with no bye at all).
+	//
+	// h=4 and h=5 halves instead contain a LEAF-LEAF quadrant: two occupants
+	// who BOTH skip round 1 individually and meet EACH OTHER in round 2.
+	// TreeToLeafArray cannot reconstruct that -- the same class of gap as
+	// the q=5 vacancy case just above (leafPadTarget pads a narrow side at
+	// its TAIL, so two equal-width risen leaves collapse together instead of
+	// each keeping its own gap) -- so it reads as one fake round-1 match
+	// plus one uncounted phantom pair rather than two named byes. It is
+	// measurable only via the rise-aware SlotArray/rounds view, which is
+	// what TestEKC2025LadiesIndividual and TestEKC2025MenIndividual
+	// (draw_ekc_2025_individual_test.go) pin bout-for-bout for q = 9, 10, 11
+	// and 12 instead. So a block with an h=4 or h=5 half (q in {9,10,11}) is
+	// skipped here too.
+	if q >= 9 && q <= 16 && crossed == 0 {
+		top, bottom := q/2, q-q/2
+		if top <= 5 || bottom <= 5 {
+			return 0, 0, true
+		}
+		return (8 - top) + (8 - bottom), (top - 4) + (bottom - 4), false
+	}
+	return q % 2, q / 2, false
+}
+
+// TestBlockByeCountMatchesTheLayout pins D4's arithmetic directly, per block
+// and per layout mode. Greedy: q mod 2 NAMED round-1 byes, floor(q/2) round-1
+// matches, every other empty slot phantom-paired and never printed. Template
+// (R6(c), the Men Team sheets): every empty slot pairs with a real occupant,
+// so a 6-occupant block grants TWO named byes -- its sub-block heads -- and
+// plays two round-1 matches. Recursive halving disagrees with both from q=6 up.
+//
+// The block is the unit, not the printable region: the two coincide wherever
+// the pool set is not subdivided, and where it is, a region spans two or four
+// blocks that each carry their own layout. The sweep runs past the 4
+// qualifiers the shape golden covers, to 6, where a block holds several
+// qualifiers of one pool on FOUR shiaijo as well as on one or two.
+func TestBlockByeCountMatchesTheLayout(t *testing.T) {
+	for _, numCourts := range []int{1, 2, 4} {
+		for nPools := 1; nPools <= 12; nPools++ {
+			for poolWinners := 1; poolWinners <= 6; poolWinners++ {
+				t.Run(fmt.Sprintf("%d_pools_%d_winners_%d_courts", nPools, poolWinners, numCourts), func(t *testing.T) {
+					pools, _ := makePools(nPools)
+					draw := BuildKnockoutDraw(pools, poolWinners, numCourts)
+					require.NotNil(t, draw)
+
+					for c, block := range drawByeUnits(draw) {
+						q := len(TreeLeafLabels(block))
+						slots := TreeToLeafArray(block)
+						matches, byes := 0, 0
+						for i := 0; i+1 < len(slots); i += 2 {
+							a, b := slots[i], slots[i+1]
+							switch {
+							case a != "" && b != "":
+								matches++
+							case a != "" || b != "":
+								byes++
+							}
+						}
+						if q == 1 {
+							// A one-occupant block has no round-1 layer at all.
+							continue
+						}
+						wantByes, wantMatches, skip := blockLayoutArithmetic(TreeLeafLabels(block))
+						if skip {
+							continue
+						}
+						assert.Equalf(t, wantByes, byes, "block %d: %d occupants must grant %d named byes", c, q, wantByes)
+						assert.Equalf(t, wantMatches, matches, "block %d: %d occupants must play %d round-1 matches", c, q, wantMatches)
+					}
+				})
+			}
+		}
+	}
+}
+
+// drawNamedByes lists the placeholders that take a NAMED round-1 bye anywhere
+// in the draw, in leaf order.
+func drawNamedByes(draw *KnockoutDraw) []string {
+	slots := TreeToLeafArray(draw.Root)
+	byes := []string{}
+	for i := 0; i+1 < len(slots); i += 2 {
+		if (slots[i] == "") != (slots[i+1] == "") {
+			byes = append(byes, slots[i]+slots[i+1])
+		}
+	}
+	return byes
+}
+
+// TestSeededPoolWinnerTakesTheBlockBye is R6 criterion 1: when a block has a
+// structural bye and holds the winner of a seeded pool, that winner takes it,
+// ahead of an oversized pool's winner and ahead of pool order. The EKC Junior
+// Team and Junior Individual Female draws are the reference cases; this is the
+// same rule swept over block shapes they do not cover.
+func TestSeededPoolWinnerTakesTheBlockBye(t *testing.T) {
+	// 5 pools on one shiaijo subdivide into blocks of 2/1/1/1 (A+B, C, D, E).
+	// At two qualifiers per pool block 0 holds A-1st, B-1st and the crossed-in
+	// D-2nd, so it is the odd block where criterion 1 has a contest to win:
+	// two home 1sts, one bye.
+	pools, _ := makePools(5)
+	// Pool B is the seeded pool and NOT first in pool order, so criterion 1 has
+	// to beat criterion 3 for it to take the bye.
+	pools[1].Players = []Player{{Name: "seed one", Seed: 1}}
+	for i := range pools {
+		if i != 1 {
+			pools[i].Players = []Player{{Name: fmt.Sprintf("p%d", i)}}
+		}
+	}
+	draw := BuildKnockoutDraw(pools, 2, 1)
+	require.NotNil(t, draw)
+	assert.Equal(t, []string{"Pool B-1st", "Pool D-1st"}, drawNamedByes(draw),
+		"the seeded pool's winner takes its block's bye (R6-1); the other odd block has one home 1st and no contest")
+}
+
+// TestOversizedPoolWinnerTakesTheBlockBye is R6 criterion 2 (D1): with no
+// seeds in play, the bye goes to the winner of the pool whose qualifier played
+// the MOST pool matches, not to the first pool in order. It is fatigue
+// compensation, which is why it ranks below seeding and above pool order.
+func TestOversizedPoolWinnerTakesTheBlockBye(t *testing.T) {
+	// The same shape as the seeded case: 5 pools on one shiaijo at two
+	// qualifiers, so block 0 (pools A and B, plus the crossed-in D-2nd) is the
+	// odd block with two home 1sts competing for its bye. Pool B is the
+	// oversized one and is second in pool order, so criterion 2 has to beat
+	// criterion 3.
+	pools, _ := makePools(5)
+	sizes := []int{3, 5, 3, 3, 3}
+	for i := range pools {
+		pools[i].Players = make([]Player, sizes[i])
+		for j := range pools[i].Players {
+			pools[i].Players[j] = Player{Name: fmt.Sprintf("p%d-%d", i, j)}
+		}
+	}
+	draw := BuildKnockoutDraw(pools, 2, 1)
+	require.NotNil(t, draw)
+	assert.Equal(t, []string{"Pool B-1st", "Pool D-1st"}, drawNamedByes(draw),
+		"the oversized pool's winner takes its block's bye (R6-2)")
+
+	// And the generated match count is what the rule actually reads (D1), so a
+	// pool with more MATCHES outranks a pool with more PLAYERS if they ever
+	// disagree. They cannot today - both metrics are strictly increasing in
+	// pool size - but the criterion is defined on the match count.
+	for i := range pools {
+		pools[i].Matches = make([]Match, sizes[i])
+	}
+	pools[0].Matches = make([]Match, 9)
+	draw2 := BuildKnockoutDraw(pools, 2, 1)
+	require.NotNil(t, draw2)
+	assert.Equal(t, []string{"Pool A-1st", "Pool D-1st"}, drawNamedByes(draw2),
+		"with pool matches drawn, the bye follows the MATCH count (D1)")
 }
 
 func TestNeedsBronzeBlock(t *testing.T) {
@@ -1520,57 +1570,6 @@ func TestNeedsBronzeBlock(t *testing.T) {
 			assert.Equal(t, tc.want, NeedsBronzeBlock(tc.naginata, tc.rounds))
 		})
 	}
-}
-
-func TestTreeAdjustmentSwapsBothLeaves(t *testing.T) {
-	// Direct test: when both children are leaves with 2nd on left and 1st on right,
-	// treeAdjustment should swap them.
-	node := &Node{
-		Left:  &Node{LeafNode: true, LeafVal: "Pool A-2nd"},
-		Right: &Node{LeafNode: true, LeafVal: "Pool B-1st"},
-	}
-	treeAdjustment(node)
-	assert.Equal(t, "Pool B-1st", node.Left.LeafVal, "1st-place should be swapped to top")
-	assert.Equal(t, "Pool A-2nd", node.Right.LeafVal, "2nd-place should be swapped to bottom")
-}
-
-func TestTreeAdjustmentNoSwapWhenCorrect(t *testing.T) {
-	node := &Node{
-		Left:  &Node{LeafNode: true, LeafVal: "Pool A-1st"},
-		Right: &Node{LeafNode: true, LeafVal: "Pool B-2nd"},
-	}
-	treeAdjustment(node)
-	assert.Equal(t, "Pool A-1st", node.Left.LeafVal)
-	assert.Equal(t, "Pool B-2nd", node.Right.LeafVal)
-}
-
-func TestTreeAdjustmentByeSwap(t *testing.T) {
-	// When left child is a leaf (bye position) with rank 2, and right child is an
-	// internal node whose top-left leaf has rank 1, treeAdjustment should swap
-	// so the 1st-place finisher gets the bye.
-	node := &Node{
-		Left: &Node{LeafNode: true, LeafVal: "Pool A-2nd"},
-		Right: &Node{
-			Left:  &Node{LeafNode: true, LeafVal: "Pool B-1st"},
-			Right: &Node{LeafNode: true, LeafVal: "Pool C-2nd"},
-		},
-	}
-	treeAdjustment(node)
-	assert.Equal(t, "Pool B-1st", node.Left.LeafVal, "1st-place should get the bye (left/top position)")
-	assert.Equal(t, "Pool A-2nd", node.Right.Left.LeafVal, "2nd-place should be pushed into the match")
-}
-
-func TestTreeAdjustmentByeNoSwapWhenCorrect(t *testing.T) {
-	node := &Node{
-		Left: &Node{LeafNode: true, LeafVal: "Pool A-1st"},
-		Right: &Node{
-			Left:  &Node{LeafNode: true, LeafVal: "Pool B-2nd"},
-			Right: &Node{LeafNode: true, LeafVal: "Pool C-2nd"},
-		},
-	}
-	treeAdjustment(node)
-	assert.Equal(t, "Pool A-1st", node.Left.LeafVal, "1st-place already in bye position, no swap")
-	assert.Equal(t, "Pool B-2nd", node.Right.Left.LeafVal)
 }
 
 // TestSemifinalMatchNumbers pins the semifinal derivation shared by the two

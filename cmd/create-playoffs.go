@@ -47,7 +47,7 @@ func newCreatePlayoffCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&o.withZekkenName, "with-zekken-name", "z", false, "Use the second column of the input CSV as the participant's display name on the zekken. Falls back to sanitized name if empty.")
 	cmd.Flags().BoolVarP(&o.singleTree, "single-tree", "", false, "Create a single tree instead of dividing into multiple sheets (default false)")
 	cmd.Flags().IntVarP(&o.teamMatches, "team-matches", "t", 0, "create team matches with x players per team (default 0)")
-	cmd.Flags().IntVarP(&o.courts, "courts", "c", 2, "number of Shiaijo (courts) to distribute tree pages across (default 2)")
+	cmd.Flags().IntVarP(&o.courts, "courts", "c", 2, "number of Shiaijo (courts) to distribute tree pages across: 1, 2, 4, 8 or 16 (default 2)")
 	cmd.Flags().StringVarP(&o.titlePrefix, "title-prefix", "", "", "title prefix for the tournament (default \"\")")
 	cmd.Flags().StringVarP(&o.numberPrefix, "number-prefix", "n", "", "Assign consecutive numbers with this letter prefix (e.g. 'K' produces K1, K2, ...)")
 
@@ -72,7 +72,9 @@ func (o *playoffOptions) run(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no entries found in file")
 	}
 
-	if err := helper.ValidateCourts(o.courts); err != nil {
+	// The page-count clamp further down is safe by construction: it clamps to
+	// helper.RoundToPowerOf2, which is already a power of two.
+	if err := helper.ValidateDrawCourtCount(o.courts); err != nil {
 		return err
 	}
 
@@ -167,12 +169,20 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	if roughPages, _ := helper.RoundToPowerOf2(float64(len(names)), float64(helper.MaxPlayersPerTree)); o.courts > roughPages && roughPages > 0 {
 		o.courts = roughPages
 	}
+	// The CLI has no NAMED shiaijo: --courts says how many the draw runs on, so
+	// the sheets are titled A, B, C by position. The live app passes the
+	// competition's own court list instead, which need not start at A.
+	courtNames := helper.CourtLabels(o.courts)
 	// Create balanced tree
 	tree := helper.CreateBalancedTree(names)
 
-	// A playoffs bracket has no pools: nil pools skips the roster overlay and
-	// the pool-winner tree adjustment.
-	eliminationMatchRounds, numPages, err := helper.RenderKnockoutPages(f, tree, len(names), o.courts, o.singleTree, nil, nil, nil, nil)
+	// A playoffs bracket has no pools, so R2-R7 do not apply: its placement is
+	// StandardSeeding's and stays untouched. R8 does apply, so the tree is cut
+	// into one region per shiaijo and paginated exactly like a pool-fed draw.
+	// nil pools skips the roster overlay.
+	draw := helper.NewPlayoffDraw(tree, o.courts)
+	plan := blankWorkbookCourtPlan(draw, courtNames)
+	eliminationMatchRounds, numPages, err := helper.RenderKnockoutPages(f, plan, o.singleTree, nil, nil, nil, nil)
 	if err != nil {
 		return err
 	}
@@ -190,9 +200,9 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 
 	// Convert all players for match-winner processing
 	matchWinners = helper.ConvertPlayersToWinners(players, o.withZekkenName, playerCoords)
-	helper.CreateNamesToPrint(f, players, o.withZekkenName, o.courts, playerCoords)
+	helper.CreateNamesToPrint(f, players, o.withZekkenName, courtNames, playerCoords)
 
-	printEliminationWithBronze(f, matchWinners, eliminationMatchRounds, o.teamMatches, o.courts, o.engi, o.naginata)
+	printEliminationWithBronze(f, matchWinners, eliminationMatchRounds, o.teamMatches, plan, o.engi, o.naginata)
 	helper.FillEstimations(f, 0, 0, int64(o.teamMatches), int64(len(names)-1), o.courts)
 
 	// Apply sheet protection to all sheets except data and Time Estimator

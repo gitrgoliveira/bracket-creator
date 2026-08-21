@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 )
 
 type Tournament struct {
@@ -301,15 +302,28 @@ type FightingSpiritAward struct {
 }
 
 type Competition struct {
-	ID                string            `yaml:"id" json:"id"`
-	Name              string            `yaml:"name" json:"name"`
-	Kind              string            `yaml:"kind" json:"kind"`
-	Format            string            `yaml:"format" json:"format"`
-	PoolFormat        string            `yaml:"pool_format,omitempty" json:"poolFormat,omitempty"` // "full" (default) | "partial"
-	TeamSize          int               `yaml:"team_size" json:"teamSize"`
-	PoolSize          int               `yaml:"pool_size" json:"poolSize"`
-	PoolSizeMode      string            `yaml:"pool_size_mode" json:"poolSizeMode"`
-	PoolWinners       int               `yaml:"pool_winners" json:"poolWinners"`
+	ID           string `yaml:"id" json:"id"`
+	Name         string `yaml:"name" json:"name"`
+	Kind         string `yaml:"kind" json:"kind"`
+	Format       string `yaml:"format" json:"format"`
+	PoolFormat   string `yaml:"pool_format,omitempty" json:"poolFormat,omitempty"` // "full" (default) | "partial"
+	TeamSize     int    `yaml:"team_size" json:"teamSize"`
+	PoolSize     int    `yaml:"pool_size" json:"poolSize"`
+	PoolSizeMode string `yaml:"pool_size_mode" json:"poolSizeMode"`
+	PoolWinners  int    `yaml:"pool_winners" json:"poolWinners"`
+	// ExtraQualifiers selects how many finishers a pool sends to the
+	// knockout stage beyond the standard EffectivePoolWinners() count
+	// (bc-qual, successor to bc-draw's Phase 0). "" (default, ExtraQualifiersNone)
+	// is today's behaviour, unchanged: every pool sends EffectivePoolWinners(),
+	// unfilled bracket slots become byes. Old config.md files predating this
+	// field have no extra_qualifiers key and load with the zero value, which
+	// IS the default, so no migration is needed (additive-only).
+	// See ExtraQualifiersLargerPools / ExtraQualifiersFillBracket,
+	// ValidateExtraQualifiers, and QualifiersForPool below. Valid for BOTH
+	// team and individual competitions (operator ruling 2, bc-qual); only
+	// meaningful under minimum-players-per-pool sizing (PoolSizeMode != "max"),
+	// which ValidateExtraQualifiers enforces.
+	ExtraQualifiers   string            `yaml:"extra_qualifiers,omitempty" json:"extraQualifiers,omitempty"`
 	RoundRobin        bool              `yaml:"round_robin" json:"roundRobin"`
 	Courts            []string          `yaml:"courts" json:"courts"`
 	StartTime         string            `yaml:"start_time" json:"startTime"`
@@ -444,6 +458,23 @@ type Competition struct {
 	LeagueTiebreakFinalized bool `yaml:"league_tiebreak_finalized,omitempty" json:"leagueTiebreakFinalized,omitempty"`
 
 	Players []domain.Player `yaml:"-" json:"players"`
+}
+
+// ParticipantIDsHint returns the LoadParticipantsOpts.HasIDs hint for this
+// competition: true when it records UUID-prefixed participants, nil (unset)
+// otherwise so the reader's auto-detect still runs -- for competitions
+// created before the flag existed AND for the narrow window where a deferred
+// HasParticipantIDs flip fails after SaveParticipants succeeded (the file
+// has UUIDs but the flag is still false on disk). Only ever true-or-nil: an
+// explicit false would suppress auto-detect and misclassify those files.
+// One owner for a rule that was hand-derived at every LoadParticipantsOpt
+// call site.
+func (c *Competition) ParticipantIDsHint() *bool {
+	if !c.HasParticipantIDs {
+		return nil
+	}
+	t := true
+	return &t
 }
 
 // EffectiveWithZekkenName reports whether the participant CSV reader/writer
@@ -603,6 +634,186 @@ func (c Competition) EffectivePoolWinners() int {
 		return c.PoolWinners
 	}
 	return 2
+}
+
+// Competition.ExtraQualifiers values (bc-qual). Only meaningful under
+// minimum-players-per-pool sizing (PoolSizeMode != "max"); see
+// ValidateExtraQualifiers.
+const (
+	// ExtraQualifiersNone is the default / standard mode: every pool sends
+	// EffectivePoolWinners() qualifiers to the knockout; unfilled bracket
+	// slots become byes. Today's behaviour, unchanged.
+	ExtraQualifiersNone = ""
+
+	// ExtraQualifiersLargerPools ("Oversized pools send one extra"): pools
+	// are cut exactly as in standard mode, but a pool that is OVERSIZED
+	// sends EffectivePoolWinners()+1 qualifiers. See QualifiersForPool for
+	// the oversized test this layer uses. Crossing/placement of the extra
+	// qualifier is a draw-time (helper/engine) concern, not modeled here.
+	// ValidateExtraQualifiers additionally requires EffectivePoolWinners()
+	// == 1 (bc-qual LP-3a review item (a)): the draw engine has no defined
+	// crossing behaviour yet for a pool that sends two or more HOME
+	// qualifiers plus an oversized extra.
+	ExtraQualifiersLargerPools = "larger-pools"
+
+	// ExtraQualifiersFillBracket ("Fit the knockout exactly", bc-qual LP-4):
+	// a different pool-formation objective (helper.FillBracketPoolCount)
+	// plus drafted second qualifiers from the seeded pools in seed order,
+	// with oversized pools as the fallback for a roster without enough seeds
+	// (helper.SelectFillBracketDrafts -- WKC's own rule, decoded from its
+	// sheets' footnotes), so the qualifiers exactly fill a
+	// power-of-two knockout bracket with zero byes
+	// (helper.BuildKnockoutDrawFillBracket). Same gate as
+	// ExtraQualifiersLargerPools below (minimum-players-per-pool sizing,
+	// poolWinners == 1): the draw builder's crossing is only defined for a
+	// competition whose pools each send a single home qualifier plus, for
+	// a drafted pool, one crossed 2nd.
+	ExtraQualifiersFillBracket = "fill-bracket"
+)
+
+// ValidateExtraQualifiers reports whether value is an acceptable
+// Competition.ExtraQualifiers setting given the competition's PoolSizeMode
+// and its pool-winners count.
+//
+//   - "" (ExtraQualifiersNone) is always valid, regardless of PoolSizeMode or
+//     poolWinners.
+//   - ExtraQualifiersLargerPools and ExtraQualifiersFillBracket both require
+//     minimum-players-per-pool sizing: poolSizeMode must not be "max"
+//     (empty or any value other than "max" is minimum mode, mirroring the
+//     `isMax := PoolSizeMode == "max"` check used throughout
+//     internal/helper and internal/engine). Both ALSO require
+//     poolWinners == 1 (bc-qual LP-3a review item (a), extended to
+//     fill-bracket in LP-4): helper.BuildKnockoutDrawPerPool's and
+//     helper.BuildKnockoutDrawFillBracket's block-and-crossing constructions
+//     are only defined for a competition whose pools each send a single
+//     home qualifier plus, for a qualifying pool, one crossed extra -- at
+//     poolWinners >= 2 there is no drawn-sheet evidence for how a pool's
+//     SECOND-and-later home ranks interact with a crossed occupant, and
+//     both builders refuse that shape (draw_perpool.go's and
+//     fill_bracket.go's numBlocks guards) rather than guess. Rejecting the
+//     combination here, in the one function every layer (state, engine,
+//     CLI) calls, means no caller has to rediscover that gap by hitting a
+//     builder's nil return.
+//   - Any other value is unknown and rejected.
+//
+// poolWinners should be the competition's EFFECTIVE pool-winners count (i.e.
+// Competition.EffectivePoolWinners(), which coerces an unset/<=0 PoolWinners
+// to the default of 2) -- callers that have not yet resolved a default
+// should pass that, not the raw possibly-zero field, or an unset PoolWinners
+// would read as poolWinners=0 and incorrectly pass this check.
+//
+// This is a pure function over the three relevant scalar fields, matching
+// the style of ValidateTeamMatchType/ValidateCompetitionTeamSize above: it
+// does not read or mutate a Competition, so handlers can validate a proposed
+// value before it is merged into a stored record.
+func ValidateExtraQualifiers(value, poolSizeMode string, poolWinners int) error {
+	switch value {
+	case ExtraQualifiersNone:
+		return nil
+	case ExtraQualifiersLargerPools, ExtraQualifiersFillBracket:
+		if poolSizeMode == "max" {
+			return fmt.Errorf("extraQualifiers %q requires minimum-players-per-pool sizing (poolSizeMode must not be %q)", value, "max")
+		}
+		if poolWinners >= 2 {
+			return fmt.Errorf("extraQualifiers %q currently requires pool winners = 1 (got %d): draw support for %s with two or more pool winners does not exist yet", value, poolWinners, value)
+		}
+		return nil
+	default:
+		return fmt.Errorf("unknown extraQualifiers %q (expected %q, %q, or %q)",
+			value, ExtraQualifiersNone, ExtraQualifiersLargerPools, ExtraQualifiersFillBracket)
+	}
+}
+
+// QualifiersForPool returns the number of finishers pool promotes to the
+// knockout stage, extending EffectivePoolWinners() per c.ExtraQualifiers:
+//
+//   - ExtraQualifiersNone (default): always EffectivePoolWinners().
+//   - ExtraQualifiersLargerPools: EffectivePoolWinners()+1 when pool is
+//     OVERSIZED, else EffectivePoolWinners().
+//
+// ExtraQualifiersFillBracket (bc-qual LP-4) is deliberately NOT handled
+// here: whether a pool's 2nd is drafted is not a per-pool-independent
+// decision. Drafts go to the SEEDED pools in seed order -- a drafted pool
+// need not be oversized at all -- with oversized pools as the fallback,
+// and the scan stops once D = NextPow2(numPools)-numPools drafts are
+// chosen, so the answer for one pool depends on every other pool's seeds
+// and on the running count; no per-pool test this method's single-pool
+// signature could express exists. Callers building a fill-bracket draw use
+// helper.SelectFillBracketDrafts (over the WHOLE pool set) instead of this
+// method.
+//
+// The oversized test AT THIS LAYER is by participant count alone:
+// len(pool.Players) > c.PoolSize, where c.PoolSize is the competition's
+// minimum pool size under minimum-players-per-pool sizing. This is a
+// simpler proxy than the draw engine's eventual D1 metric (oversized = the
+// pool's qualifier would play more pool matches than the lightest pool's;
+// bc-qual plan LP-3) — state only holds the roster (pools.csv, via
+// Store.LoadPools), not match schedules, so match-count-based oversizing is
+// out of reach here. Callers that need the D1 metric compute it themselves
+// (e.g. from LoadPoolMatches) rather than relying on this helper for that.
+//
+// pool is a helper.Pool exactly as returned by Store.LoadPools /
+// LoadPoolsLocked, so a caller iterating a loaded []helper.Pool can pass
+// each element straight through without reshaping — the least-surprising
+// signature given what this package already holds pool data as.
+//
+// Does not itself check PoolSizeMode or re-validate ExtraQualifiers; callers
+// are expected to have gone through ValidateExtraQualifiers first (draw-time
+// code only reaches ExtraQualifiersLargerPools on an already-validated
+// Competition, since minimum-mode is a precondition of the value existing
+// at all).
+func (c Competition) QualifiersForPool(pool helper.Pool) int {
+	base := c.EffectivePoolWinners()
+	// PoolSize <= 0 means there is no minimum to be over: without a baseline
+	// the oversized test would mark EVERY pool oversized, so degrade to the
+	// uniform count instead. Unreachable for a started competition (the
+	// engine rejects starting with an unset PoolSize) but cheap to make safe
+	// against drifted or hand-edited config.md data.
+	if c.ExtraQualifiers == ExtraQualifiersLargerPools && c.PoolSize > 0 && len(pool.Players) > c.PoolSize {
+		return base + 1
+	}
+	return base
+}
+
+// MatchWinnerRanksNeeded returns the highest per-pool qualifier rank the
+// Excel renderer's matchWinners lookup map (helper.PrintPoolMatches'
+// numWinners parameter) must cover for c, so an oversized pool's crossed
+// EXTRA qualifier (bc-qual, ExtraQualifiersLargerPools) or a drafted 2nd
+// (bc-qual LP-4, ExtraQualifiersFillBracket) gets a live CONCATENATE formula
+// link to the pool's actual result instead of the literal placeholder text
+// "Pool X-2nd" frozen forever on the printed sheet.
+//
+// helper.PrintPoolMatches (excel.go) only registers a
+// matchWinners["<pool>-<ordinal>"] entry for ranks 1..numWinners, PER POOL,
+// regardless of that pool's own size -- the loop is bounded by numWinners,
+// not by whether the pool actually sends that many qualifiers. QualifiersForPool
+// (above) computes the PER-POOL count for the draw itself, but the Excel
+// renderer needs one GLOBAL numWinners bound covering every pool at once
+// (helper.PrintPoolMatches takes a single int, not a per-pool map), so this
+// is deliberately NOT "QualifiersForPool for the worst pool" -- it is
+// EffectivePoolWinners()+1 whenever ExtraQualifiers is
+// ExtraQualifiersLargerPools OR ExtraQualifiersFillBracket, unconditionally:
+// BuildKnockoutDrawPerPool's and BuildKnockoutDrawFillBracket's own scope
+// guards each cap every pool at AT MOST one extra beyond the uniform count,
+// so +1 always covers the worst case (fill-bracket's ANY pool could in
+// principle be the one drafted, so the bound cannot be narrower than "every
+// pool might need a rank-2 entry"), and registering an unused rank+1 entry
+// for a pool that isn't actually oversized/drafted is harmless: nothing
+// ever looks it up (no leaf label references it), and printSinglePool's
+// ranking table already lists every player regardless of numWinners.
+//
+// Standard mode (ExtraQualifiersNone) returns EffectivePoolWinners()
+// unchanged: this method exists so the CLI (cmd/create-pools.go, via its own
+// mirrored logic since it has no state.Competition) and both Excel export
+// paths (internal/engine/export.go, internal/export/builder.go) compute the
+// SAME numWinners for a given competition, rather than three call sites
+// separately reasoning about the +1.
+func (c Competition) MatchWinnerRanksNeeded() int {
+	base := c.EffectivePoolWinners()
+	if c.ExtraQualifiers == ExtraQualifiersLargerPools || c.ExtraQualifiers == ExtraQualifiersFillBracket {
+		return base + 1
+	}
+	return base
 }
 
 type CompetitionStatus string
@@ -1093,6 +1304,34 @@ type BracketMatch struct {
 	// 0 = unstamped/legacy: arrival-order, still applies (never dropped). See
 	// domain.ApplyByTimestamp.
 	ModifiedAt int64 `json:"modifiedAt,omitempty"`
+	// PlaceholderA / PlaceholderB / PlaceholderWinner record what SideA / SideB /
+	// Winner held at DRAW time, before any pool resolved. They are written once,
+	// by engine.buildBracketFromDraw, for a pool-fed (mixed) knockout whose
+	// leaves are pool-origin placeholders ("Pool A-1st", …), and are NEVER
+	// rewritten afterwards, unlike the live sides, which
+	// engine.ResolveQualifiedPools overwrites in place with real competitor
+	// names as each pool finishes.
+	//
+	// They exist so the resolver can map "which pool finisher belongs in this
+	// slot" WITHOUT recomputing the draw. Before this, it rebuilt the whole
+	// placeholder template from the live draw algorithm on every pool completion
+	// and matched it against the running bracket BY POSITION, which is correct
+	// only while the placement algorithm never changes; an operator upgrading
+	// between a competition's draw and the end of its pool phase would have had
+	// qualifiers written into the wrong slots of a live knockout, undetected
+	// (the structural guards only catch differing round/match counts).
+	//
+	// Additive and backward compatible in BOTH directions: omitempty keeps them
+	// out of every non-pool bracket (standalone playoffs leaves are real names,
+	// so nothing is recorded), an older binary ignores them, and a bracket drawn
+	// before they existed carries none, which is exactly how the resolver detects
+	// a legacy file (see engine/legacy_template_v1.go). The bronze
+	// (ThirdPlaceMatch) carries them too for uniformity; in every current draw
+	// they are empty there, because its sides are filled from the semifinal
+	// losers well after the bracket is built.
+	PlaceholderA      string `json:"placeholderA,omitempty"`
+	PlaceholderB      string `json:"placeholderB,omitempty"`
+	PlaceholderWinner string `json:"placeholderWinner,omitempty"`
 }
 
 type Bracket struct {

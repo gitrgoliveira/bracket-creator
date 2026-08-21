@@ -1,6 +1,6 @@
 # Operating modes and access control
 
-The app uses the word "mode" in three different contexts. This page covers two of them: **tournament mode** (who may act during the event) and **authentication mode** (how the admin password is stored and verified). The third, the digitization level you choose on the home screen, is described in [Three ways to run a tournament](../../index.md#three-ways-to-run-a-tournament).
+The app uses the word "mode" in three different contexts. This page covers two of them: **tournament mode** (who may act during the event) and **authentication mode** (how the admin password is stored and verified). The third, the digitisation level you choose on the home screen, is described in [Three ways to run a tournament](../../index.md#three-ways-to-run-a-tournament).
 
 ## Tournament mode
 

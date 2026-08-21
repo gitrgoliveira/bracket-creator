@@ -458,6 +458,53 @@ describe('API Utils', () => {
       expect(normalizeCompetitionDetail(null)).toBeNull();
       expect(normalizeCompetitionDetail(undefined)).toBeUndefined();
     });
+
+    // The NESTED record is the shape the operator console actually renders:
+    // GET /api/viewer/competitions/:id answers {config, pools, ...} and
+    // admin.jsx passes `detail.config` straight to AdminCompetition. Only the
+    // top level was normalized, so config.courts stayed null and the claim
+    // that no consumer has to guard was false for the one path that matters.
+    it('coerces null courts on the nested config record too', () => {
+      const out = normalizeCompetitionDetail({ config: { id: 'x', name: 'X', courts: null }, pools: [] });
+      expect(out.config.courts).toEqual([]);
+    });
+
+    it('preserves a populated nested courts list and the rest of config', () => {
+      const out = normalizeCompetitionDetail({ config: { id: 'x', name: 'X', courts: ['A', 'B'], format: 'mixed' } });
+      expect(out.config.courts).toEqual(['A', 'B']);
+      expect(out.config.format).toBe('mixed');
+    });
+  });
+
+  // bc-qual LP-5a: ExtraQualifiers carries `json:"extraQualifiers,omitempty"`
+  // on the Go side, so the default/standard value ("") is DROPPED from the
+  // wire entirely rather than sent as "". Same round-trip contract as
+  // courts (absent -> a defined default), same single fetch boundary.
+  describe('normalizeCompetitionDetail extraQualifiers normalization', () => {
+    it('defaults a missing top-level extraQualifiers to ""', () => {
+      const out = normalizeCompetitionDetail({ id: 'x', name: 'X' });
+      expect(out.extraQualifiers).toBe('');
+    });
+
+    it('preserves a non-standard top-level extraQualifiers value', () => {
+      const out = normalizeCompetitionDetail({ id: 'x', name: 'X', extraQualifiers: 'larger-pools' });
+      expect(out.extraQualifiers).toBe('larger-pools');
+    });
+
+    it('defaults a missing nested config.extraQualifiers to ""', () => {
+      const out = normalizeCompetitionDetail({ config: { id: 'x', name: 'X' }, pools: [] });
+      expect(out.config.extraQualifiers).toBe('');
+    });
+
+    it('preserves a non-standard nested config.extraQualifiers value', () => {
+      const out = normalizeCompetitionDetail({ config: { id: 'x', name: 'X', extraQualifiers: 'fill-bracket' } });
+      expect(out.config.extraQualifiers).toBe('fill-bracket');
+    });
+
+    it('returns falsy input unchanged (no crash)', () => {
+      expect(normalizeCompetitionDetail(null)).toBeNull();
+      expect(normalizeCompetitionDetail(undefined)).toBeUndefined();
+    });
   });
 
   describe('API object', () => {

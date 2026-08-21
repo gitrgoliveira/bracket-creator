@@ -64,6 +64,14 @@ TOURNAMENT_PASSWORD_HASH='$2a$10$...' \
 - **Locked mode has no bcrypt brute-force protection.** The server runs a full bcrypt comparison (`bcrypt.DefaultCost` approx 50-100 ms) on every `X-Tournament-Password` header, but does not throttle repeated failed attempts. For internet-exposed locked-mode deployments, add a reverse proxy that rate-limits authenticated routes (for example, nginx's `limit_req`) in addition to `POST /api/tournament/reset`.
 - **Mode switching preserves the stored password.** Switching from file mode to locked mode does NOT erase `tournament.md`'s `password` field; auth stops consulting it. A later switch back to file mode resurrects the original password. This is a deliberate rollback feature, but anyone with filesystem access can still read the value. To fully retire a file-mode credential before going locked, `POST /api/tournament/reset` it to a one-time throwaway first.
 
+## Competition configuration
+
+A competition's pool and knockout settings are stored in its `competitions/<id>/config.md` YAML front matter, and are exposed by the API in JSON. Key names differ between the two:
+
+| `config.md` key | JSON API key | Values | Default | Description |
+|---|---|---|---|---|
+| `extra_qualifiers` | `extraQualifiers` | `""`, `"larger-pools"`, `"fill-bracket"` | `""` (standard) | How many finishers each pool sends to the knockout. Only meaningful for a Mixed competition with a minimum-players-per-pool size; requires `pool_winners: 1` (`poolWinners: 1` in JSON) for either non-default value. See [How many qualify from each pool](../organisers/knockout-draw.md#how-many-qualify-from-each-pool). When updating a competition through the API, leaving the JSON key out keeps whatever is already stored; send the key with an empty string to set a competition back to standard. |
+
 ## Examples
 
 ```bash

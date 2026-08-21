@@ -150,16 +150,31 @@ func (e *Engine) completedPoolNames(compID string, comp *state.Competition) (map
 // gate: a knockout match becomes playable the moment both its feeder pools have
 // finished, while other pools are still running.
 //
-// Resolution is RE-SEEDABLE, not a one-shot string replace. It recomputes the
-// deterministic placeholder template (the same GenerateFinals → CreateBalancedTree
-// → ApplyPoolAdjustments → TreeToLeafArray pipeline used at draw) and resolves the
-// running bracket against it BY POSITION. So if an operator re-scores a completed
-// pool match after that pool was already seeded, changing the 1st/2nd finisher,
-// the new finisher overwrites the stale name in the same slot, instead of being
-// silently dropped (the live side no longer holds the placeholder string, but the
-// template still does). Pools and PoolWinners are fixed after the draw, so the
-// template's shape is identical to the running bracket's. The bracket's court/time
-// slots are assigned at draw time and never change here, only competitor labels.
+// Resolution is RE-SEEDABLE, not a one-shot string replace. Each match carries
+// the label its slot held at draw time (PlaceholderA/B/Winner, written once by
+// buildBracketFromDraw), and THAT is what the resolver keys on. So if an
+// operator re-scores a completed pool match after that pool was already seeded,
+// changing the 1st/2nd finisher, the new finisher overwrites the stale name in
+// the same slot instead of being silently dropped: the live side no longer holds
+// the placeholder string, but the match's own record of it is immutable. The
+// bracket's court/time slots are assigned at draw time and never change here,
+// only competitor labels.
+//
+// It used to RECOMPUTE that template instead, rerunning the whole draw and
+// buildBracketFromDraw on every call and matching it against the live
+// bracket BY POSITION. That was correct only while the placement algorithm never
+// changed: an operator who upgraded between a competition's draw and the end of
+// its pool phase (ordinary for a two-day event) would have had qualifiers written
+// into the WRONG slots of a live knockout, with nothing to detect it — the
+// structural guards it carried only caught differing round/match COUNTS, which a
+// placement change does not alter. Reading the persisted placeholder removes the
+// dependency on the draw algorithm entirely, for this transition and every future
+// one, and takes a full bracket rebuild off a path that runs on every pool-match
+// completion. Do not reintroduce the recompute.
+//
+// A bracket drawn BEFORE those fields existed carries none, which is exactly how
+// such a file is detected; it is reconstructed once from the frozen v1 builder
+// (legacy_template_v1.go) and the fields are backfilled and saved on first use.
 //
 // Known limitation (mp-e2k1): re-seeding repaints round-0 leaves and
 // bye-propagated sides, but does NOT invalidate a DOWNSTREAM knockout match that
@@ -199,6 +214,17 @@ func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 		return 0, false, err
 	}
 	poolWinners := comp.EffectivePoolWinners()
+	// MatchWinnerRanksNeeded, not poolWinners: under the extra-qualifier
+	// modes (bc-qual) the bracket seats "Pool X-2nd" placeholders while
+	// PoolWinners is pinned to 1, so a resolver bounded by poolWinners never
+	// builds a -2nd key and those slots stay placeholders forever -- every
+	// pool done, the drafted/crossed matches never playable, the competition
+	// stuck in pools status. This is the same bug the Excel export hit first
+	// (a crossed 2nd rendered as inert text), fixed by the same single owner
+	// of "how many ranks can a placeholder reference". Keys for pools that
+	// send no 2nd are inert: the resolver is only ever consulted with the
+	// labels the draw actually seated.
+	ranksNeeded := comp.MatchWinnerRanksNeeded()
 
 	// Build a label→player resolver for COMPLETED pools only. Incomplete pools
 	// contribute nothing, so their placeholders survive untouched.
@@ -208,14 +234,14 @@ func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 			continue
 		}
 		ps := standings[pool.PoolName]
-		for rank := 1; rank <= poolWinners; rank++ {
+		for rank := 1; rank <= ranksNeeded; rank++ {
 			key := fmt.Sprintf("%s-%s", pool.PoolName, helper.GetOrdinal(rank))
 			if rank-1 >= len(ps) {
 				// Degenerate pool (hand-edited data / legacy import): fewer
 				// finishers than PoolWinners. Map the unfillable placeholder
 				// to "" (bye) so the bracket slot auto-resolves. Draw-time
 				// validation prevents this in supported flows.
-				log.Printf("engine.ResolveQualifiedPools: pool %q has only %d ranked finisher(s) but PoolWinners=%d; treating rank %d as bye", pool.PoolName, len(ps), poolWinners, rank)
+				log.Printf("engine.ResolveQualifiedPools: pool %q has only %d ranked finisher(s) but placeholders may reference %d rank(s); treating rank %d as bye", pool.PoolName, len(ps), ranksNeeded, rank)
 				resolver[key] = ""
 				continue
 			}
@@ -223,57 +249,69 @@ func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 		}
 	}
 
-	// Recompute the deterministic placeholder template so seeding is re-seedable
-	// (see the doc comment): we resolve the running bracket by POSITION against this
-	// template, whose sides still hold the original "Pool X-Nth" placeholders even
-	// after the live sides have been replaced with real names.
-	finals := helper.GenerateFinals(pools, poolWinners)
-	tree := helper.CreateBalancedTree(finals)
-	helper.ApplyPoolAdjustments(tree)
-	template, terr := e.buildBracketFromLeaves(comp, helper.TreeToLeafArray(tree))
-	if terr != nil {
-		return 0, false, fmt.Errorf("rebuilding placeholder template for %s: %w", compID, terr)
-	}
-
 	resolvedNow := 0
 	allResolved := false
+	backfilled := false
 	uerr := e.store.UpdateBracket(compID, func(bracket *state.Bracket) error {
 		if bracket == nil || len(bracket.Rounds) == 0 {
 			return errMatchNotFound // nothing to resolve; signal no-save
 		}
+		// Pre-Phase-4 bracket: no slot remembers its draw-time label. Rebuild
+		// them ONCE from the frozen v1 draw and write them in, so from here on
+		// this competition resolves off its own record like any new bracket.
+		// The write is part of this same UpdateBracket mutation, so a backfill
+		// is never persisted without the resolution it enabled, nor lost by a
+		// call that resolved nothing (see the save condition below).
+		if !bracketHasDrawPlaceholders(bracket) {
+			// Built here rather than alongside the resolver above: this is the
+			// only reader, and the branch fires at most once per competition
+			// (never at all for a bracket drawn on this version), while
+			// ResolveQualifiedPools itself runs on every pool-match score.
+			poolNames := make([]string, len(pools))
+			for i, p := range pools {
+				poolNames[i] = p.PoolName
+			}
+			// poolWinners, not ranksNeeded: a v1 bracket predates the
+			// extra-qualifier modes by construction (they shipped after the
+			// placeholder fields), so its geometry is always the uniform
+			// pools-times-winners layout this backfill reconstructs.
+			backfilled = backfillDrawPlaceholdersV1(bracket, poolNames, poolWinners)
+		}
 		n := 0
+		resolveMatch := func(m *state.BracketMatch) {
+			// PlaceholderA/B/Winner hold the ORIGINAL draw labels (or
+			// "Winner of …"/""), stable across re-scores. Only completed-pool
+			// placeholders are resolver keys; "Winner of" and "" never are, so
+			// already-scored knockout sides and unresolved feeders are untouched.
+			// Compare against the current value so an unchanged re-run is a no-op.
+			if name, ok := resolver[m.PlaceholderA]; ok && m.SideA != name {
+				m.SideA = name
+				n++
+			}
+			if name, ok := resolver[m.PlaceholderB]; ok && m.SideB != name {
+				m.SideB = name
+				n++
+			}
+			if name, ok := resolver[m.PlaceholderWinner]; ok && m.Winner != name {
+				m.Winner = name
+				n++ // count Winner-only changes so a bye-propagated Winner fix is persisted
+			}
+		}
 		for ri := range bracket.Rounds {
-			if ri >= len(template.Rounds) {
-				break // structural mismatch guard; templates are normally identical
-			}
 			for mi := range bracket.Rounds[ri] {
-				if mi >= len(template.Rounds[ri]) {
-					break
-				}
-				m := &bracket.Rounds[ri][mi]
-				tpl := template.Rounds[ri][mi]
-				// tpl.SideA/SideB/Winner hold the ORIGINAL placeholder labels (or
-				// "Winner of …"/""), stable across re-scores. Only completed-pool
-				// placeholders are resolver keys; "Winner of" and "" never are, so
-				// already-scored knockout sides and unresolved feeders are untouched.
-				// Compare against the current value so an unchanged re-run is a no-op.
-				if name, ok := resolver[tpl.SideA]; ok && m.SideA != name {
-					m.SideA = name
-					n++
-				}
-				if name, ok := resolver[tpl.SideB]; ok && m.SideB != name {
-					m.SideB = name
-					n++
-				}
-				if name, ok := resolver[tpl.Winner]; ok && m.Winner != name {
-					m.Winner = name
-					n++ // count Winner-only changes so a bye-propagated Winner fix is persisted
-				}
+				resolveMatch(&bracket.Rounds[ri][mi])
 			}
+		}
+		if bracket.ThirdPlaceMatch != nil {
+			// Inert in every current draw: the bronze is fed by semifinal
+			// losers, so its placeholders are empty and no lookup can hit.
+			// Present so a bronze that ever DOES carry one is not the single
+			// slot the resolver skips.
+			resolveMatch(bracket.ThirdPlaceMatch)
 		}
 		// Auto-complete newly created bye matches: a resolver mapping to ""
 		// (degenerate pool) leaves a match with one empty side still
-		// Scheduled. Mirror buildBracketFromLeaves's bye logic and
+		// Scheduled. Mirror buildBracketFromDraw's bye logic and
 		// propagate winners so downstream matches become playable.
 		// Guard: only auto-complete when the non-empty side is a resolved
 		// competitor, NOT a still-unresolved placeholder (its feeder pool
@@ -307,13 +345,16 @@ func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 		}
 
 		allResolved = !bracketHasPoolPlaceholders(bracket)
-		if n == 0 {
+		if n == 0 && !backfilled {
 			return errMatchNotFound // no effective change → skip the rewrite
 		}
 		resolvedNow = n
-		// The bracket is now (partially) live; the legacy global Preview flag is
-		// obsolete, playability is per-match from here on.
-		bracket.Preview = false
+		if n > 0 {
+			// The bracket is now (partially) live; the legacy global Preview flag
+			// is obsolete, playability is per-match from here on. A backfill-only
+			// call resolved nothing, so it must not flip this.
+			bracket.Preview = false
+		}
 		return nil
 	})
 	if uerr != nil && !errors.Is(uerr, errMatchNotFound) {

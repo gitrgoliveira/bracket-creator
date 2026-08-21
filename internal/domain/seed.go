@@ -17,13 +17,25 @@ func seedKey(name, dojo string) string {
 	return name + "|" + dojo
 }
 
+// ErrInvalidSeedAssignments marks every rejection below as a complaint about
+// the OPERATOR'S INPUT rather than a failure of the tool.
+//
+// Callers need the distinction because a seed list arrives from two places that
+// fail differently: a --seeds CSV the operator wrote by hand, and seeds.csv,
+// which the app writes from its own seeding panel. Reading either can also fail
+// for real I/O reasons, and the two must not be reported alike. Without a
+// sentinel the mobile app answered a mistyped seed rank with HTTP 500, which
+// tells an operator mid-event that the tool is broken when the fix is one
+// number in a form.
+var ErrInvalidSeedAssignments = errors.New("invalid seed assignments")
+
 // Validate checks if the seed assignment is valid.
 func (s *SeedAssignment) Validate() error {
 	if s.SeedRank <= 0 {
-		return errors.New("seed rank must be greater than 0")
+		return fmt.Errorf("%w: seed rank must be greater than 0", ErrInvalidSeedAssignments)
 	}
 	if s.Name == "" {
-		return errors.New("name cannot be empty")
+		return fmt.Errorf("%w: name cannot be empty", ErrInvalidSeedAssignments)
 	}
 	return nil
 }
@@ -38,7 +50,7 @@ func ValidateAssignments(assignments []SeedAssignment) error {
 			return err
 		}
 		if seen[a.SeedRank] {
-			return errors.New("duplicate seed rank detected")
+			return fmt.Errorf("%w: duplicate seed rank detected", ErrInvalidSeedAssignments)
 		}
 		seen[a.SeedRank] = true
 		if a.SeedRank > maxRank {
@@ -47,7 +59,7 @@ func ValidateAssignments(assignments []SeedAssignment) error {
 	}
 
 	if len(seen) > 0 && len(seen) != maxRank {
-		return errors.New("seed ranks must be sequential without gaps")
+		return fmt.Errorf("%w: seed ranks must be sequential without gaps", ErrInvalidSeedAssignments)
 	}
 
 	return nil

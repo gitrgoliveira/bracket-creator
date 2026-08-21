@@ -93,3 +93,47 @@ func TestFindCellRow(t *testing.T) {
 	}
 	assert.Equal(t, -1, FindCellRow(nil, "a"), "nil rows")
 }
+
+func TestReadCourtBands(t *testing.T) {
+	// A miniature court-banded sheet on a 4-column grid: two shiaijo headers in
+	// row 1, the first band carrying a bout below it and the second carrying
+	// nothing but whitespace.
+	const columnsPerCourt = 4
+	rows := [][]string{
+		{ShiaijoHeaderPrefix + "A", "", "", "", ShiaijoHeaderPrefix + "B"},
+		{"", "Ryu Ichiro", "", "", "", "   "},
+		{"vs"}, // ragged: shorter than either band
+	}
+
+	bands := ReadCourtBands(rows, columnsPerCourt)
+	require.Len(t, bands, 2)
+
+	assert.Equal(t, CourtBand{Court: "A", Col: 0, Occupied: true}, bands[0])
+	assert.Equal(t, CourtBand{Court: "B", Col: 4, Occupied: false}, bands[1],
+		"a band holding only blanks is unoccupied")
+
+	t.Run("no rows", func(t *testing.T) {
+		assert.Nil(t, ReadCourtBands(nil, columnsPerCourt))
+		assert.Nil(t, ReadCourtBands([][]string{}, columnsPerCourt))
+	})
+
+	t.Run("header row only", func(t *testing.T) {
+		got := ReadCourtBands([][]string{{ShiaijoHeaderPrefix + "A"}}, columnsPerCourt)
+		require.Len(t, got, 1)
+		assert.False(t, got[0].Occupied, "a header with no rows under it is unoccupied")
+	})
+
+	t.Run("off-grid header is reported, not hidden", func(t *testing.T) {
+		got := ReadCourtBands([][]string{
+			{"", ShiaijoHeaderPrefix + "A"},
+			{"", "Ryu Ichiro"},
+		}, columnsPerCourt)
+		require.Len(t, got, 1)
+		assert.Equal(t, 1, got[0].Col,
+			"the caller needs the column to say the printed layout moved")
+	})
+
+	t.Run("non-header cells are ignored", func(t *testing.T) {
+		assert.Empty(t, ReadCourtBands([][]string{{"Pool A", "Shiaijo", "shiaijo A"}}, columnsPerCourt))
+	})
+}

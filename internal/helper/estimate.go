@@ -126,16 +126,12 @@ func estimateMixed(in EstimateMatchCountsInput) (poolMatchCount, playoffMatchCou
 		return 0, 0, fmt.Errorf("EstimateMatchCounts: PoolSize must be > 0 for mixed format, got %d", in.PoolSize)
 	}
 
-	// --- Pool count (mirrors CreatePools, tournament.go:213-278) ---
-	// isMax == true  → ceil division  (PoolSizeMode == "max")
-	// isMax == false → floor division (all other values)
+	// --- Pool count ---
+	// PoolCount is the same function CreatePools uses, so the estimate can
+	// never drift from the draw it is estimating (bc-draw Phase 2a; this was
+	// the third hand-rolled copy of the ceil/floor split).
 	isMax := in.PoolSizeMode == "max"
-	var numPools int
-	if isMax {
-		numPools = (in.PlayerCount + in.PoolSize - 1) / in.PoolSize
-	} else {
-		numPools = in.PlayerCount / in.PoolSize
-	}
+	numPools := PoolCount(in.PlayerCount, in.PoolSize, isMax)
 	if numPools == 0 {
 		// Fewer players than pool size in min mode, mirrors CreatePools'
 		// error at tournament.go:222.

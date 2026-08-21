@@ -13,7 +13,7 @@ Before implementing features or making architectural decisions, read the project
 - **Binary Trees:** Brackets are recursive binary trees (`Node` struct in `helper/tree.go`).
 - **Paging:** `helper.MaxPlayersPerTree = 16`. Brackets larger than 16 are subdivided into multiple sheets (pages) unless `--single-tree` is used.
 - **Embedding:** Both `web/*` and `web-mobile/*` are embedded via `//go:embed` in `main.go`. Rebuild with `make go/build` after modifying any web assets.
-- **Court limit:** A–Z labels mean `--courts` is rejected if greater than 26.
+- **Court limit:** `--courts` is rejected if greater than 16 (`helper.MaxCourts`), the most any one competition can legally be allocated.
 - **Excel Layout:** Standardized on an **8-column per court** structure. Column A (Red Name) and Column G (White Name/Rank) are set to 30 units wide. Columns B–F and H are 5 units wide.
 - **Pool Spacing:** There is exactly one blank row of space between the end of one pool's ranking summary and the start of the next pool's header.
 - **API Documentation:** The OpenAPI specification for the web API is located in `specs/openapi.yaml` and is fully synchronized with the backend implementation.

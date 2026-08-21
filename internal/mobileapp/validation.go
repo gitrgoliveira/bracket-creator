@@ -18,11 +18,13 @@
 package mobileapp
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
@@ -116,6 +118,100 @@ func validateMaxLen(field, val string, max int) error {
 		}
 	}
 	return nil
+}
+
+// The remedy clauses for a seeding refused at a WRITE boundary. Both callers
+// are holding the whole list already, so unlike the draw's refusal there is no
+// seeding panel to send them back to and nothing on disk to "clear" -- and the
+// two differ because one is fixed in a request body and the other in a file.
+const (
+	seedGapRemedyPut    = "Send the complete seeding, or an empty list to clear it."
+	seedGapRemedyImport = "Fix the seeds file or drop it from the manifest, then import again."
+)
+
+// seedRejection turns a domain.ValidateAssignments failure into the message a
+// write boundary refuses with: the gap diagnosis plus that boundary's remedy
+// when ranks are missing, and otherwise the validator's own words.
+//
+// The pass-through matters. A duplicate rank and a rank of 0 are not gaps, and
+// helper.SeedGapDiagnosis returns "" for both precisely so that neither can be
+// reported as one; err already describes them exactly.
+func seedRejection(assignments []domain.SeedAssignment, err error, remedy string) string {
+	if diagnosis := helper.SeedGapDiagnosis(assignments); diagnosis != "" {
+		return diagnosis + " " + remedy
+	}
+	return err.Error()
+}
+
+// errSeedRosterUnreadable marks a rejectSeedsOffRoster failure the SUBMITTED
+// SEEDING did not cause: the roster it has to be checked against could not be
+// read. The distinction is the caller's whole reason to care -- every other
+// failure this function returns is the client's and answers 400, while this one
+// is the server's and must answer 500, so a monitored 5xx is raised and the
+// operator is not told their seeding is wrong when nobody has checked it.
+var errSeedRosterUnreadable = errors.New("seed roster could not be read")
+
+// rejectSeedsOffRoster refuses a seeding that ranks a name no participant
+// carries. domain.ValidateAssignments checks the ranks as a SET (contiguous
+// from 1, no duplicates) and never looks at the roster, so a ghost name passed
+// and produced a competition whose two views of one seeding disagreed: the file
+// held a valid 1..N and drew, while every reader that merges seeds onto players
+// by name saw only the survivors and read the ghost's rank as an unclosable gap.
+//
+// Name is the join key state.loadParticipants uses when it merges seeds.csv onto
+// the roster, so matching on it here means this check and that merge can never
+// disagree about who a rank belongs to.
+//
+// An empty roster is NOT treated as "everything is a ghost": seeds for a
+// competition whose participants have not been written yet are refused only when
+// there is a roster to contradict them, so a client that saves seeds before the
+// roster still works and the draw's own validation remains the backstop. A
+// missing participants.csv IS that state and reads as an empty roster, not as
+// an error (state.loadParticipants maps os.IsNotExist to an empty slice), so a
+// non-nil error here is a genuine read or parse failure and the check FAILS
+// CLOSED via errSeedRosterUnreadable rather than accepting an unvalidated
+// seeding.
+func rejectSeedsOffRoster(store *state.Store, compID string, assignments []domain.SeedAssignment) error {
+	if len(assignments) == 0 {
+		return nil
+	}
+	// Ask for the roster this competition actually has: the flag changes the
+	// parse, and the load is cached (see participantsCacheKey).
+	// A competition-load failure falls back to withZekken=false rather than
+	// aborting: the Name this matches on is the same column under either flag,
+	// so the wrong flag costs a second cache entry, not a wrong answer. The
+	// PARTICIPANT load below has no such harmless fallback, which is why it
+	// fails closed instead.
+	withZekken := false
+	if comp, cerr := store.LoadCompetition(compID); cerr == nil && comp != nil {
+		withZekken = comp.EffectiveWithZekkenName()
+	}
+	players, err := store.LoadParticipants(compID, withZekken)
+	if err != nil {
+		return fmt.Errorf("%w: %v", errSeedRosterUnreadable, err)
+	}
+	if len(players) == 0 {
+		return nil
+	}
+	onRoster := make(map[string]bool, len(players))
+	for _, p := range players {
+		onRoster[p.Name] = true
+	}
+	var unknown []string
+	for _, a := range assignments {
+		if !onRoster[a.Name] {
+			unknown = append(unknown, fmt.Sprintf("%q (rank %d)", a.Name, a.SeedRank))
+		}
+	}
+	if len(unknown) == 0 {
+		return nil
+	}
+	verb := "is"
+	if len(unknown) > 1 {
+		verb = "are"
+	}
+	return fmt.Errorf("seeds: %s %s not on this competition's roster; a seed rank must belong to a participant. %s",
+		strings.Join(unknown, ", "), verb, seedGapRemedyPut)
 }
 
 // validateHTTPURL returns a ValidationError when val is non-empty and does not
@@ -807,4 +903,11 @@ func IsSelfRunReportableSubDecision(decision string, decidedByHantei bool, posit
 	default:
 		return false
 	}
+}
+
+// validateRemovedCourtsNotInUse refuses a competition court change that would
+// strand a live bout on a shiaijo the change TAKES AWAY.
+// engine.CourtsStillInUseAmong owns the narrowing and says why.
+func validateRemovedCourtsNotInUse(removed []string, poolMatches []state.MatchResult, bracket *state.Bracket) error {
+	return engine.CourtsInUseError(engine.CourtsStillInUseAmong(removed, poolMatches, bracket))
 }

@@ -14,6 +14,8 @@ Then open [http://localhost:8080](http://localhost:8080) in your browser.
 
 Configure the tournament on the main screen. Choose the format, either Pools and Playoffs or Playoffs (Knockout Tournament), then set the number of courts, pool sizes, and other options. Upload your participant CSV directly from the browser.
 
+Both formats build a knockout bracket, so the number of courts must be 1, 2, 4, 8 or 16. The bracket is split into one block per shiai-jo and those blocks merge in pairs, so the count has to halve cleanly all the way down; any other number is refused with the counts to use instead. See [Shiai-jo count](../commands/create-pools.md#shiai-jo-count).
+
 ![Web UI main screen](../../screenshots/webui-main.png)
 
 ## Participant list

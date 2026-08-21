@@ -739,3 +739,75 @@ func TestPreserveSubHanteiRestoresOutstandingHansoku(t *testing.T) {
 		"the outstanding foul is part of the restored scoreline")
 	assert.Equal(t, 0, incoming[0].HansokuA)
 }
+
+// A review finding on PR #389: withdrawing a 0-0 daihyosen hantei was
+// impossible because the verdict resurrected on save. The team editor's
+// withdrawal reaches the wire as an EXPLICIT empty ippon array on both
+// sides (web-mobile/js/admin_scoring_team.jsx buildPatch always builds
+// ipponsA/ipponsB from the bout's own point totals, and api_serializers.jsx's
+// toBackendMatchResult folds decidedByHantei into the ippons rather than
+// forwarding the flag), not as an omitted key. preserveSubHantei used to
+// judge scoreline-silence by scoring-ippon COUNT (countScoringIppons == 0
+// for both an omitted key and an explicit `[]`), so a 0-0 withdrawal was
+// indistinguishable from a genuinely silent stale-snapshot write and the
+// stored verdict was copied straight back onto the row the operator had
+// just cleared. The fix judges silence on nil-ness instead: a present `[]`
+// decodes to a non-nil empty slice (SubMatchResult.IpponsA/IpponsB carry no
+// `omitempty`), so it is now treated as the writer speaking for the
+// scoreline, exactly like a 1-1 withdrawal already was.
+func TestPreserveSubHantei_ZeroZeroWithdrawalIsNotSilence(t *testing.T) {
+	dh := state.DaihyosenSubPosition
+	stored := func() []state.SubMatchResult {
+		return []state.SubMatchResult{
+			{Position: dh, SideA: "Taro", SideB: "Jiro",
+				IpponsA: []string{}, IpponsB: []string{domain.HanteiMark},
+				Winner: "Taro", Decision: "daihyosen"},
+		}
+	}
+
+	t.Run("explicit empty arrays + cleared winner is a withdrawal: verdict and winner gone", func(t *testing.T) {
+		// This is exactly the wire shape toBackendMatchResult produces for the
+		// team editor's 0-0 daihyosen "cancel": both sides present, both
+		// empty, no winner named.
+		incoming := []state.SubMatchResult{
+			{Position: dh, SideA: "Taro", SideB: "Jiro", Decision: "daihyosen",
+				Winner: "", IpponsA: []string{}, IpponsB: []string{}},
+		}
+		require.NotNil(t, incoming[0].IpponsA, "the wire sends an explicit [], never a nil, for this row")
+		require.NotNil(t, incoming[0].IpponsB)
+		preserveSubHantei(stored(), incoming)
+		assert.False(t, incoming[0].HanteiDecided(), "the withdrawal must not resurrect the mark")
+		assert.Equal(t, "", incoming[0].Winner, "the withdrawal must not resurrect the winner")
+	})
+
+	t.Run("omitted (nil) arrays + no winner still restores the mark and winner: the stale-snapshot case must not regress", func(t *testing.T) {
+		// A genuinely silent writer (stale second-device snapshot opened
+		// before the verdict existed) omits the ippons keys entirely, which
+		// decodes to nil, not [].
+		incoming := []state.SubMatchResult{
+			{Position: dh, SideA: "Taro", SideB: "Jiro", Decision: "daihyosen"},
+		}
+		require.Nil(t, incoming[0].IpponsA)
+		require.Nil(t, incoming[0].IpponsB)
+		preserveSubHantei(stored(), incoming)
+		require.True(t, incoming[0].HanteiDecided(), "a genuinely silent write must not erase the recorded verdict")
+		assert.Equal(t, "Taro", incoming[0].Winner)
+	})
+
+	t.Run("the existing 1-1 withdrawal (own markless scoreline) still clears the verdict", func(t *testing.T) {
+		tiedStored := []state.SubMatchResult{{
+			Position: dh, SideA: "Taro", SideB: "Jiro",
+			IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"K"},
+			Winner: "Taro", Decision: "daihyosen",
+		}}
+		incoming := []state.SubMatchResult{{
+			Position: dh, SideA: "Taro", SideB: "Jiro", Decision: "daihyosen",
+			Winner: "", IpponsA: []string{"M"}, IpponsB: []string{"K"},
+		}}
+		preserveSubHantei(tiedStored, incoming)
+		assert.False(t, incoming[0].HanteiDecided(), "a row supplying its own (still-tied) scoreline spoke for itself")
+		assert.Equal(t, "", incoming[0].Winner)
+		assert.Equal(t, []string{"M"}, incoming[0].IpponsA, "the writer's own scoreline is untouched")
+		assert.Equal(t, []string{"K"}, incoming[0].IpponsB)
+	})
+}

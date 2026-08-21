@@ -205,6 +205,58 @@ func allowNumberedEnchoFromStore(store CompetitionStore, compID string, hasNumbe
 	return comp.IsKachinuki()
 }
 
+// backfillMatchLevelSidesForLegacyHantei backfills an omitted sideA/sideB on
+// a score payload from the STORED pairing, but only when the payload actually
+// carries a flagged legacy hantei verdict (decidedByHantei: true) and would
+// otherwise be unattributable.
+//
+// Why this exists: the request-boundary fold (state.MatchResult.
+// NormalizeLegacyHantei, called from ScoreRequest.validateWithOptions /
+// validateBulkScoreLengths) attributes the "Ht" mark by comparing the
+// payload's Winner against its SideA/SideB. Per specs/openapi.yaml,
+// MatchResult.sideA/sideB are NOT required on a score write — the engine's
+// reconcileSides (internal/engine/scoring.go) backfills an omitted side from
+// the stored match, exactly so a minimal payload (winner + ippons only)
+// still writes cleanly. But that backfill runs AFTER the request-boundary
+// fold, so a legacy client sending {winner, decidedByHantei:true, ipponsA,
+// ipponsB} with no sides used to have its verdict correctly attributed once
+// the pre-array bracket_result.go path read the flag against stored sides at
+// RENDER time (sides are always populated by then); the array-mark
+// representation now needs the sides at FOLD time, before they exist on the
+// wire payload, so foldLegacyHantei's drop-never-guess default silently
+// erases the verdict with a 200 (bc-qual review).
+//
+// This backfill runs BEFORE validateWithOptions/validateBulkScoreLengths so
+// the fold sees the real pairing. It is deliberately narrow: only when the
+// payload carries a TRUE match-level decidedByHantei flag and at least one
+// side is empty, so the hot ordinary-score path (the overwhelming majority of
+// writes, which never sets this deprecated flag) never pays a store read.
+// It only fills an EMPTY side (never overwrites a client-supplied one), the
+// same "backfill, never overwrite" rule reconcileSides itself applies, so a
+// genuine sideA/sideB mismatch is still caught by reconcileSides afterwards
+// exactly as before; this cannot weaken that guard, only let attribution see
+// what reconcileSides was always going to fill in anyway. On a store read
+// failure, sides are left empty and the fold keeps its existing
+// drop-never-guess behaviour (fail closed on attribution, not on the write).
+func backfillMatchLevelSidesForLegacyHantei(store CompetitionStore, compID, matchID string, req *state.MatchResult) {
+	if req.DecidedByHantei == nil || !*req.DecidedByHantei {
+		return
+	}
+	if req.SideA != "" && req.SideB != "" {
+		return
+	}
+	storedA, storedB, found, err := store.MatchSidesByID(compID, matchID)
+	if err != nil || !found {
+		return
+	}
+	if req.SideA == "" {
+		req.SideA = storedA
+	}
+	if req.SideB == "" {
+		req.SideB = storedB
+	}
+}
+
 // tryAutoCompletePools runs the auto-complete check after a successful score
 // write. The score itself has already been recorded, so we don't fail the
 // request when the auto-complete check errors; instead we log full details
@@ -317,6 +369,9 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			// it cannot freeze the match against later legitimate writes (mp-y3nk).
 			results[i].ModifiedAt = clampClientModifiedAt(results[i].ModifiedAt)
 
+			// bc-qual: same backfill as the single-score path, ahead of the
+			// legacy-hantei fold inside validateBulkScoreLengths.
+			backfillMatchLevelSidesForLegacyHantei(store, id, results[i].ID, &results[i])
 			if err := validateBulkScoreLengths(&results[i], allowNumberedEncho); err != nil {
 				errs = append(errs, scoreError{MatchID: results[i].ID, Error: err.Error()})
 				continue
@@ -1559,6 +1614,11 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		// logged by allowNumberedEnchoFromStore, which the bulk-score path
 		// shares so the gate and its diagnostics stay identical.
 		allowNumberedEncho := allowNumberedEnchoFromStore(store, id, anyNumberedBoutHasEncho(req.SubResults))
+		// bc-qual: backfill omitted sides from the stored pairing BEFORE
+		// validation folds a legacy decidedByHantei flag, so a sides-less
+		// legacy payload's verdict is attributable instead of silently
+		// dropped. See backfillMatchLevelSidesForLegacyHantei.
+		backfillMatchLevelSidesForLegacyHantei(store, id, mid, (*state.MatchResult)(&req))
 		if err := req.validateWithOptions(allowNumberedEncho); err != nil {
 			// Map ValidationError → 400 with the validator's message.
 			// Engine errors below remain 500 (they surface I/O / state

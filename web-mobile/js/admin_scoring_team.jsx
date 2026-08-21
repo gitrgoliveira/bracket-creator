@@ -1688,9 +1688,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
         // ORDER MATTERS below: daihyosenEnchoFields writes the field first and
         // dhKeep restores a preserved `true` over it. Swapping the two lines
         // re-opens the regression they exist to prevent (fixing an unrelated
-        // bout score silently flipping a hantei win into a hikiwake). That is
-        // still the path an UNATTRIBUTABLE stored verdict takes: the side
-        // resolves to "" so the field below says false, and dhKeep puts it back.
+        // bout score silently flipping a hantei win into a hikiwake). Note the
+        // limit of that restoration: dhKeep puts the BOOLEAN back, and the
+        // serializer turns a boolean into a mark only when the winner names a
+        // side. For an UNATTRIBUTABLE stored verdict (a winner matching
+        // neither side, i.e. rename-drifted or hand-edited data) there is no
+        // side to mark, so the row goes out markless - CLAUDE.md's accepted
+        // no-mark class (ii), and the only shape the server takes, since
+        // validateHanteiMarkPlacement rejects a mark it cannot attribute.
         Object.assign(entry, daihyosenEnchoFields({ enchoPeriodCount, daihyosenTied, daihyosenHantei }));
         if (dhKeep) Object.assign(entry, dhKeep);
       } else if (isKachinuki && s.encho > 0) {

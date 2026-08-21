@@ -868,6 +868,29 @@ func TestLegacyHanteiNormalize(t *testing.T) {
 		assert.Equal(t, []string{"M", domain.HanteiMark}, m.IpponsA)
 	})
 
+	// bc-qual: a sides-less payload cannot be attributed by the fold ALONE -
+	// this function has no store to consult, so an empty sideA/sideB looks
+	// exactly like "no side was named" and the drop-never-guess default
+	// (correctly) applies. This is not a bug in foldLegacyHantei itself: a
+	// score request is allowed to omit sideA/sideB (specs/openapi.yaml,
+	// backfilled by the engine's reconcileSides), so the CALLER at the
+	// request boundary must backfill the real sides from the stored match
+	// before invoking NormalizeLegacyHantei, or the verdict is lost with a
+	// 200 (mobileapp.backfillMatchLevelSidesForLegacyHantei does this ahead
+	// of ScoreRequest.validateWithOptions / validateBulkScoreLengths; see
+	// TestScoreHandler_SidesLessLegacyHanteiRecordsVerdict for the fixed
+	// end-to-end path).
+	t.Run("a sides-less payload cannot be attributed by the fold alone", func(t *testing.T) {
+		m := &MatchResult{Winner: "Alice",
+			IpponsA: []string{"M"}, IpponsB: []string{"K"},
+			DecidedByHantei: HanteiExplicit(true)}
+		m.NormalizeLegacyHantei()
+		assert.Equal(t, []string{"M"}, m.IpponsA)
+		assert.Equal(t, []string{"K"}, m.IpponsB)
+		assert.False(t, m.HanteiDecided(),
+			"the fold has no sides to compare Winner against; the caller must backfill them first")
+	})
+
 	t.Run("legacy sub-bout flags fold too", func(t *testing.T) {
 		m := &MatchResult{SubResults: []SubMatchResult{{
 			Position: -1, SideA: "T1", SideB: "T2", Winner: "T2",

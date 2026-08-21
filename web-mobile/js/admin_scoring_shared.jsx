@@ -422,13 +422,20 @@ function initialEnchoPeriodsForMatch(m) {
 // ONLY on the daihyosen. Encho is OPTIONAL for hantei: a tied daihyosen may
 // be taken straight to a judges' decision without overtime: so the two
 // fields are emitted independently: encho whenever the counter is > 0, and
-// decidedByHantei explicitly (tri-state wire contract, operator ruling "all
-// results must be recorded into storage"): true when armed on a tied
-// scoreline, otherwise an EXPLICIT false. The server preserves a stored
-// verdict only against writers that are verdict-SILENT (field absent - stale
-// snapshots, quick-score), so an editor that HAS a say must send its
-// withdrawal as false rather than as an omission the server would read as
-// "no opinion" and preserve over.
+// decidedByHantei explicitly (operator ruling "all results must be recorded
+// into storage"): true when armed on a tied scoreline, otherwise an EXPLICIT
+// false. That boolean is a LOCAL signal, not a wire field: toBackendMatchResult
+// (api_serializers.jsx) consumes it and states the verdict as the "Ht" mark in
+// the winner's ippon list instead - true places the mark, false leaves the
+// arrays markless - so the flag itself never reaches the server.
+//
+// What the server reads as verdict-SILENCE is therefore the ippons, and the
+// discriminator is nil versus empty: a writer that omits the arrays entirely
+// (stale snapshots, quick-score) said nothing and has its stored verdict
+// preserved, while this editor always states both arrays, so an explicit []
+// says "zero points" and withdraws a 0-0 verdict rather than being read as
+// silence (engine preserveSubHantei). Emitting the false is what drives that
+// stripping, so an editor that HAS a say still must state it.
 //
 // The verdict is ALWAYS stated here, never omitted. That is safe because of
 // where this is called from: the team editor adopts whatever verdict the
@@ -444,10 +451,9 @@ function initialEnchoPeriodsForMatch(m) {
 // shows the same one. Adoption fixes the display and removes the blind spot,
 // so the parameter had nothing left to guard.
 //
-// The tri-state is NOT collapsing back to a boolean by this: silence still
-// means "no opinion" on the wire, and the writers that genuinely have none
-// (stale snapshots, quick-score) still omit the field. This caller simply is
-// not one of them any more. Returns the fields to merge into the entry.
+// Silence is still expressible, and still means "no opinion": the writers that
+// genuinely have none omit their ippon arrays, as described above. This caller
+// simply is not one of them any more. Returns the fields to merge into the entry.
 // Exported for vitest.
 function daihyosenEnchoFields({ enchoPeriodCount, daihyosenTied, daihyosenHantei }) {
   const fields = { decidedByHantei: !!(daihyosenTied && daihyosenHantei) };

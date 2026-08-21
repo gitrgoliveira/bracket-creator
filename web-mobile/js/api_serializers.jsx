@@ -41,24 +41,6 @@ function isKikenDecision(v) { return v === "kiken" || v === "kiken-voluntary" ||
 // declared owner of the Ht slot rule) alongside realIppons - this file was
 // a fourth consumer with its own copies, which is exactly the drift that
 // primitive is meant to prevent.
-//
-// preserveUnattributableHt: a rename-drifted or same-name-no-id winner can
-// leave wantHantei true while winnerName matches NEITHER side - the mark was
-// recorded, but this write can no longer say on whose ippons. realIppons
-// above (and stripHt in the subResults branch) already dropped any echoed
-// "Ht" from the outgoing arrays before this runs, so doing nothing here
-// would silently erase a stored verdict on the next unrelated save. Instead,
-// re-place it on whichever side's RAW (pre-strip) incoming array carried it
-// - that is the side the caller (an editor round-tripping its own read, per
-// CLAUDE.md's dhKeep) actually held the mark on, even though the name check
-// can no longer confirm it. Checks A before B and returns on the first hit,
-// so at most one mark is ever placed; if neither raw array carried it, no
-// mark is added - drop-never-guess for a verdict this function never saw.
-function preserveUnattributableHt(rawA, rawB, outA, outB) {
-    if (containsHt(rawA)) return { ipponsA: placeHt(outA), ipponsB: outB };
-    if (containsHt(rawB)) return { ipponsA: outA, ipponsB: placeHt(outB) };
-    return { ipponsA: outA, ipponsB: outB };
-}
 
 // Backend expects: { winner: string, ipponsA: [], ipponsB: [], hansokuA: int, hansokuB: int, decision: "", status: "completed"|"running"|"scheduled" }
 function toBackendMatchResult(patch, match) {
@@ -131,14 +113,14 @@ function toBackendMatchResult(patch, match) {
                     a = placeHt(a);
                 } else if (rest.winner && rest.winner === rest.sideB) {
                     b = placeHt(b);
-                } else {
-                    // Unattributable (no winner, or a rename-drifted winner
-                    // matching neither side): preserve an echoed mark rather
-                    // than silently dropping the stored verdict.
-                    const preserved = preserveUnattributableHt(rest.ipponsA, rest.ipponsB, a, b);
-                    a = preserved.ipponsA;
-                    b = preserved.ipponsB;
                 }
+                // Else the winner names NEITHER side (no winner, or a
+                // rename-drifted name): the mark has no side to ride on, so
+                // both arrays stay markless. This is CLAUDE.md's accepted
+                // no-mark class (ii), and it is also the only shape the
+                // server accepts - validateHanteiMarkPlacement rejects a mark
+                // whose winner is not that side's name, so echoing one back
+                // would 400 every later save of the match.
             }
             return { ...rest, ipponsA: a, ipponsB: b };
         });
@@ -176,16 +158,9 @@ function toBackendMatchResult(patch, match) {
             result.ipponsA = placeHt(result.ipponsA);
         } else if (winnerName && winnerName === sideBName) {
             result.ipponsB = placeHt(result.ipponsB);
-        } else {
-            // Unattributable (no winner, or a rename-drifted winner matching
-            // neither side): preserve an echoed mark on whichever side's RAW
-            // incoming array carried it, rather than silently erasing the
-            // stored verdict on the next unrelated save (see
-            // preserveUnattributableHt above).
-            const preserved = preserveUnattributableHt(patch.ipponsA, patch.ipponsB, result.ipponsA, result.ipponsB);
-            result.ipponsA = preserved.ipponsA;
-            result.ipponsB = preserved.ipponsB;
         }
+        // Else the winner names NEITHER side: no mark is placed, per the same
+        // rule as the sub-bout branch above.
     }
     return result;
 }

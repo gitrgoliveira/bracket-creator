@@ -123,8 +123,26 @@ func (e *Engine) withBracketMatch(compId, matchId string, mutate func(*state.Bra
 // (flag + winner) onto the incoming daihyosen row only when that row is
 // verdict-silent, names no winner of its own, carries a decision hantei can
 // coexist with, and is still tied (an untied row cannot carry a hantei).
-// An EXPLICIT false (the editors' withdrawal) and a named winner both pass
-// through untouched. The preserveLoserScore precedent, one bout deeper.
+// An EXPLICIT false and a named winner both pass through untouched.
+// The preserveLoserScore precedent, one bout deeper.
+//
+// NIL vs EMPTY on IpponsA/IpponsB is the other half of "verdict-silent":
+// scoreline-silence is judged on whether the writer sent an ippon array AT
+// ALL (nil, the key absent from the payload), never on whether the array is
+// empty of SCORING ippons. The two are not the same thing. A genuinely
+// silent writer (a stale snapshot, quick-score) omits the key and
+// unmarshals to nil. But the team editor's 0-0 daihyosen withdrawal is not
+// silent: it sends an explicit `ipponsA: []` for both sides (built from the
+// bout's own point totals in web-mobile/js/admin_scoring_team.jsx buildPatch,
+// then round-tripped through api_serializers.jsx's toBackendMatchResult,
+// which folds the editor's decidedByHantei flag into the ippons and never
+// forwards the flag itself onto the wire) - a 0-0 scoreline the writer DID
+// state, same as a 1-1 withdrawal states "D"/"T". Testing scoring-ippon
+// COUNT instead of nil-ness could not tell the two apart: an empty slice and
+// a nil slice both count zero scoring ippons, so a 0-0 withdrawal read as
+// silence and the verdict was copied right back onto the row the operator
+// had just cleared. See countScoringIppons below for the (correct, separate)
+// job that helper still does: tallying points, not detecting silence.
 //
 // SCOPE, deliberately narrow in two directions:
 //
@@ -257,7 +275,7 @@ func preserveSubHantei(stored, incoming []state.SubMatchResult) {
 			(in.SideA != prior.SideA || in.SideB != prior.SideB) {
 			return
 		}
-		// A row that records no ippons of its own said nothing about the
+		// A row that supplies NEITHER ippon array said nothing about the
 		// SCORELINE either, so the stored one travels with the verdict it
 		// rests on. Without this the verdict lands on an all-empty row and the
 		// struck ippons, the outstanding fouls, the overtime marker and the
@@ -265,20 +283,33 @@ func preserveSubHantei(stored, incoming []state.SubMatchResult) {
 		// moves the `Ht` to the other slot (resultSlot fills outside-to-inside)
 		// and drops the `(E)`.
 		//
-		// A row that DOES record its own ippons — even a stale second-device
-		// replay whose own scoreline happens to still read tied, e.g. a
-		// markless 1-1 offline-queue replay — has spoken for the scoreline
-		// itself, and the verdict must not travel onto it: the mark lives IN
-		// the copied ippons (see below), so stamping the winner without also
-		// copying the mark-carrying scoreline would split the two
-		// permanently. The referees' record would be gone from disk while its
-		// consequence, the winner, survived — and once this write lands as
-		// the new stored row, a future preserve has no mark left to
-		// re-attach. ABANDON here, before any field is touched, rather than
-		// letting the tie check below decide: that check answers "is this
-		// scoreline still tied", not "did the writer supply it", so it cannot
-		// distinguish an own tied scoreline from the copied one.
-		if countScoringIppons(in.IpponsA) != 0 || countScoringIppons(in.IpponsB) != 0 {
+		// A row that DOES supply an ippon array — even one that is EMPTY, and
+		// even a stale second-device replay whose own scoreline happens to
+		// still read tied, e.g. a markless 1-1 offline-queue replay — has
+		// spoken for the scoreline itself, and the verdict must not travel
+		// onto it: the mark lives IN the copied ippons (see below), so
+		// stamping the winner without also copying the mark-carrying
+		// scoreline would split the two permanently. The referees' record
+		// would be gone from disk while its consequence, the winner, survived
+		// — and once this write lands as the new stored row, a future
+		// preserve has no mark left to re-attach. ABANDON here, before any
+		// field is touched, rather than letting the tie check below decide:
+		// that check answers "is this scoreline still tied", not "did the
+		// writer supply it", so it cannot distinguish an own tied scoreline
+		// from the copied one.
+		//
+		// This is a NIL check, deliberately not a scoring-ippon COUNT: an
+		// explicit `[]` (the team editor's 0-0 daihyosen withdrawal - see the
+		// function doc) and an omitted key (a genuinely silent stale
+		// snapshot) both count zero scoring ippons, but only the second one
+		// is silence. countScoringIppons cannot tell them apart; nil-ness
+		// can, because Go's JSON decoder only produces nil for an absent key
+		// (SubMatchResult.IpponsA/IpponsB carry no `omitempty`, so a present
+		// `[]` always decodes to a non-nil empty slice). A bug fixed here:
+		// treating an explicit 0-0 withdrawal as silence resurrected the
+		// verdict the operator had just cleared, because the copy branch
+		// below would then run and copy the stored Ht mark straight back.
+		if in.IpponsA != nil || in.IpponsB != nil {
 			return
 		}
 		if in.SideA == "" && in.SideB == "" {

@@ -286,6 +286,278 @@ func TestBulkScoreHandler_HanteiValidation(t *testing.T) {
 	})
 }
 
+// TestScoreHandler_SidesLessLegacyHanteiRecordsVerdict pins the bc-qual
+// review fix: a legacy client may send a score payload that omits
+// sideA/sideB (specs/openapi.yaml does not require them; the engine's
+// reconcileSides backfills an omitted side from the stored pairing before
+// the write lands). Before the fix, state.MatchResult.NormalizeLegacyHantei
+// ran at the request boundary (ScoreRequest.validateWithOptions), BEFORE
+// that backfill, so it compared Winner against two empty strings, could not
+// attribute the mark to either side, and silently dropped the verdict with
+// an HTTP 200 - while specs/openapi.yaml promises decidedByHantei is "folded
+// into the mark on receipt". backfillMatchLevelSidesForLegacyHantei now
+// backfills the payload's sides from the stored match, ahead of validation,
+// whenever the payload carries a true legacy flag and a side is missing.
+func TestScoreHandler_SidesLessLegacyHanteiRecordsVerdict(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	store.SaveCompetition(&state.Competition{ID: "slh"})
+	require.NoError(t, store.SavePoolMatches("slh", []state.MatchResult{
+		{ID: "PoolA-1", SideA: "Alice", SideB: "Bob"},
+	}))
+
+	// A minimal legacy payload: winner + a tied scoreline + the deprecated
+	// flag, no sideA/sideB at all - exactly the shape the OpenAPI contract
+	// permits and the offline replay queue can carry for hours after an
+	// upgrade.
+	payload, err := json.Marshal(state.MatchResult{
+		ID:              "PoolA-1",
+		Winner:          "Alice",
+		IpponsA:         []string{"M"},
+		IpponsB:         []string{"K"},
+		Status:          state.MatchStatusCompleted,
+		DecidedByHantei: state.HanteiExplicit(true),
+	})
+	require.NoError(t, err)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/slh/matches/PoolA-1/score", bytes.NewBuffer(payload))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+
+	stored, err := store.LoadPoolMatches("slh")
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	m := stored[0]
+	assert.Equal(t, "Alice", m.SideA, "the backfilled side must persist")
+	assert.Equal(t, "Bob", m.SideB)
+	assert.True(t, m.HanteiDecided(), "the verdict must survive a sides-less legacy payload")
+	assert.Contains(t, m.IpponsA, domain.HanteiMark, "the mark must land on the winner's side, not vanish")
+	assert.Nil(t, m.DecidedByHantei, "the legacy flag is never persisted, only the mark")
+}
+
+// TestScoreHandler_SidesPresentUnattributableHanteiStillDrops pins the other
+// half of the drop-never-guess rule: when the sides ARE known (no backfill
+// needed) and the payload's winner names neither of them, the verdict must
+// still be dropped rather than guessed. The fix backfills MISSING sides; it
+// must not relax the guard for a genuinely malformed payload that already
+// has sides.
+func TestScoreHandler_SidesPresentUnattributableHanteiStillDrops(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	store.SaveCompetition(&state.Competition{ID: "sud"})
+	require.NoError(t, store.SavePoolMatches("sud", []state.MatchResult{
+		{ID: "PoolA-1", SideA: "Alice", SideB: "Bob"},
+	}))
+
+	payload, err := json.Marshal(state.MatchResult{
+		ID: "PoolA-1", SideA: "Alice", SideB: "Bob",
+		Winner:          "Carol", // names neither stored side
+		IpponsA:         []string{"M"},
+		IpponsB:         []string{"K"},
+		Status:          state.MatchStatusCompleted,
+		DecidedByHantei: state.HanteiExplicit(true),
+	})
+	require.NoError(t, err)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/sud/matches/PoolA-1/score", bytes.NewBuffer(payload))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	// Winner "Carol" also fails the plain "winner must name a side" check
+	// (validateWithOptions, line ~724), so this is rejected outright rather
+	// than silently written without the mark - a stronger guarantee than a
+	// silent drop, and still never a guessed attribution.
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// TestBulkScoreHandler_SidesLessLegacyHanteiRecordsVerdict is the bulk-score
+// twin of TestScoreHandler_SidesLessLegacyHanteiRecordsVerdict: the same
+// backfill must run ahead of validateBulkScoreLengths, which has its own
+// NormalizeLegacyHantei call independent of ScoreRequest.validateWithOptions.
+func TestBulkScoreHandler_SidesLessLegacyHanteiRecordsVerdict(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	store.SaveCompetition(&state.Competition{ID: "blh"})
+	require.NoError(t, store.SavePoolMatches("blh", []state.MatchResult{
+		{ID: "PoolA-1", SideA: "Alice", SideB: "Bob"},
+	}))
+
+	payload, err := json.Marshal([]state.MatchResult{{
+		ID:              "PoolA-1",
+		Winner:          "Alice",
+		IpponsA:         []string{"M"},
+		IpponsB:         []string{"K"},
+		Status:          state.MatchStatusCompleted,
+		DecidedByHantei: state.HanteiExplicit(true),
+	}})
+	require.NoError(t, err)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/blh/matches/bulk-score", bytes.NewBuffer(payload))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+
+	var resp struct {
+		Succeeded int `json:"succeeded"`
+		Errors    []struct {
+			MatchID string `json:"matchId"`
+			Error   string `json:"error"`
+		} `json:"errors"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Equal(t, 1, resp.Succeeded, "errors: %+v", resp.Errors)
+
+	stored, err := store.LoadPoolMatches("blh")
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	assert.True(t, stored[0].HanteiDecided(), "the verdict must survive a sides-less legacy bulk payload")
+	assert.Contains(t, stored[0].IpponsA, domain.HanteiMark)
+}
+
+// fixedSidesCompetitionStore is a minimal CompetitionStore fake for unit
+// testing backfillMatchLevelSidesForLegacyHantei in isolation, without
+// spinning up a real Store. sidesErr, when non-nil, makes MatchSidesByID
+// fail (fail-closed probe); otherwise it returns (sideA, sideB, found, nil).
+type fixedSidesCompetitionStore struct {
+	sideA, sideB string
+	found        bool
+	sidesErr     error
+	sidesCalls   int
+}
+
+func (fixedSidesCompetitionStore) LoadCompetition(string) (*state.Competition, error) {
+	return nil, nil
+}
+
+func (fixedSidesCompetitionStore) LoadPoolMatches(string) ([]state.MatchResult, error) {
+	return nil, nil
+}
+
+func (fixedSidesCompetitionStore) LoadBracket(string) (*state.Bracket, error) {
+	return nil, nil
+}
+
+func (fixedSidesCompetitionStore) MatchStatusByID(string, string) (state.MatchStatus, bool, error) {
+	return "", false, nil
+}
+
+func (f *fixedSidesCompetitionStore) MatchSidesByID(string, string) (string, string, bool, error) {
+	f.sidesCalls++
+	return f.sideA, f.sideB, f.found, f.sidesErr
+}
+
+// TestBackfillMatchLevelSidesForLegacyHantei is a table-driven unit test of
+// the helper in isolation, covering: the hot path never touches the store
+// (no flag, or flag explicitly false); a fully-empty payload backfills both
+// sides; a partially-filled payload backfills only the empty side (never
+// overwrites a client-supplied one, mirroring reconcileSides's own rule); a
+// store error or not-found leaves sides empty (fail closed on attribution,
+// the existing drop-never-guess fold still applies downstream); and
+// idempotency - calling the backfill twice is the same as calling it once.
+func TestBackfillMatchLevelSidesForLegacyHantei(t *testing.T) {
+	trueFlag := state.HanteiExplicit(true)
+	falseFlag := state.HanteiExplicit(false)
+
+	tests := []struct {
+		name          string
+		req           state.MatchResult
+		store         *fixedSidesCompetitionStore
+		wantSideA     string
+		wantSideB     string
+		wantStoreCall bool
+	}{
+		{
+			name:          "no flag: store is never consulted",
+			req:           state.MatchResult{SideA: "", SideB: ""},
+			store:         &fixedSidesCompetitionStore{sideA: "Alice", sideB: "Bob", found: true},
+			wantSideA:     "",
+			wantSideB:     "",
+			wantStoreCall: false,
+		},
+		{
+			name:          "flag explicitly false: store is never consulted",
+			req:           state.MatchResult{SideA: "", SideB: "", DecidedByHantei: falseFlag},
+			store:         &fixedSidesCompetitionStore{sideA: "Alice", sideB: "Bob", found: true},
+			wantSideA:     "",
+			wantSideB:     "",
+			wantStoreCall: false,
+		},
+		{
+			name:          "both sides already present: store is never consulted",
+			req:           state.MatchResult{SideA: "Alice", SideB: "Bob", DecidedByHantei: trueFlag},
+			store:         &fixedSidesCompetitionStore{sideA: "Someone", sideB: "Else", found: true},
+			wantSideA:     "Alice",
+			wantSideB:     "Bob",
+			wantStoreCall: false,
+		},
+		{
+			name:          "both sides empty: both backfilled from the store",
+			req:           state.MatchResult{SideA: "", SideB: "", DecidedByHantei: trueFlag},
+			store:         &fixedSidesCompetitionStore{sideA: "Alice", sideB: "Bob", found: true},
+			wantSideA:     "Alice",
+			wantSideB:     "Bob",
+			wantStoreCall: true,
+		},
+		{
+			name:          "one side present: only the empty one is backfilled, the client's is never overwritten",
+			req:           state.MatchResult{SideA: "Alice", SideB: "", DecidedByHantei: trueFlag},
+			store:         &fixedSidesCompetitionStore{sideA: "Someone Else Entirely", sideB: "Bob", found: true},
+			wantSideA:     "Alice",
+			wantSideB:     "Bob",
+			wantStoreCall: true,
+		},
+		{
+			name:          "store error: sides stay empty, fail closed on attribution",
+			req:           state.MatchResult{SideA: "", SideB: "", DecidedByHantei: trueFlag},
+			store:         &fixedSidesCompetitionStore{sidesErr: fmt.Errorf("boom")},
+			wantSideA:     "",
+			wantSideB:     "",
+			wantStoreCall: true,
+		},
+		{
+			name:          "match not found: sides stay empty",
+			req:           state.MatchResult{SideA: "", SideB: "", DecidedByHantei: trueFlag},
+			store:         &fixedSidesCompetitionStore{found: false},
+			wantSideA:     "",
+			wantSideB:     "",
+			wantStoreCall: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := tc.req
+			backfillMatchLevelSidesForLegacyHantei(tc.store, "comp", "m1", &req)
+			assert.Equal(t, tc.wantSideA, req.SideA)
+			assert.Equal(t, tc.wantSideB, req.SideB)
+			if tc.wantStoreCall {
+				assert.Equal(t, 1, tc.store.sidesCalls)
+			} else {
+				assert.Equal(t, 0, tc.store.sidesCalls)
+			}
+
+			// Idempotency: calling it again on the (already backfilled) result
+			// must be a no-op - both sides are now non-empty (or the store
+			// genuinely has nothing to offer), so a second call changes
+			// nothing and, once both sides are filled, must not even touch
+			// the store again.
+			before := req
+			beforeCalls := tc.store.sidesCalls
+			backfillMatchLevelSidesForLegacyHantei(tc.store, "comp", "m1", &req)
+			assert.Equal(t, before, req, "a second call must not change an already-backfilled result")
+			if before.SideA != "" && before.SideB != "" {
+				assert.Equal(t, beforeCalls, tc.store.sidesCalls, "once both sides are known, a second call must not re-consult the store")
+			}
+		})
+	}
+}
+
 func TestQuickScoreHandler(t *testing.T) {
 	r, store, eng, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
@@ -1447,6 +1719,10 @@ func (f failingCompetitionStore) LoadBracket(string) (*state.Bracket, error) {
 
 func (f failingCompetitionStore) MatchStatusByID(string, string) (state.MatchStatus, bool, error) {
 	return "", false, f.err
+}
+
+func (f failingCompetitionStore) MatchSidesByID(string, string) (string, string, bool, error) {
+	return "", "", false, f.err
 }
 
 // TestAnnotateQueuePositions_NonEmpty verifies that annotateQueuePositions

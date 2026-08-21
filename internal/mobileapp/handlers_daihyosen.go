@@ -143,9 +143,9 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			// (or carry stale overtime) while Status is back to running.
 			u.Winner = ""
 			// The judges'-decision mark travels IN the ippons: stripping it here
-			// clears the verdict on both store branches alike (the bracket write
-			// renders ScoreA/ScoreB from these slices, the pool write persists
-			// them as the cells).
+			// clears the verdict on both store branches alike, each of which
+			// persists these slices natively (the bracket write copies them onto
+			// BracketMatch.IpponsA/B, the pool write stores them as the cells).
 			u.IpponsA = domain.StripHantei(u.IpponsA)
 			u.IpponsB = domain.StripHantei(u.IpponsB)
 			u.Decision = ""

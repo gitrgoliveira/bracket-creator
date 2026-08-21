@@ -191,14 +191,19 @@ describe('API Utils', () => {
       expect(result.winnerId).toBe('id-b');
     });
 
-    // Unattributable-winner hardening: a rename-drifted (or same-name,
-    // no-id) stored winner can leave wantHantei true while the winner name
-    // matches NEITHER match side. realIppons already strips any echoed "Ht"
-    // from the outgoing arrays before this point, so without this guard the
-    // stored verdict would be silently erased on the very next unrelated
-    // save (e.g. a court reassignment). See preserveUnattributableHt.
+    // Unattributable winner: a rename-drifted (or same-name, no-id) stored
+    // winner can leave wantHantei true while the winner name matches NEITHER
+    // side. The mark then has no side to ride on and NO mark is emitted -
+    // CLAUDE.md's accepted no-mark class (ii), and the only shape the server
+    // takes: validateHanteiMarkPlacement (validation.go) 400s a mark whose
+    // winner is not that side's name, on both the single and bulk paths, so
+    // echoing the stored mark back would fail every later save of the match
+    // (a court reassignment included). An earlier revision of this PR did
+    // echo it back, via a preserveUnattributableHt helper; it was removed
+    // once the server-side placement validation landed. Do not reinstate it
+    // without relaxing that validator first.
     describe('unattributable hantei winner (rename-drifted stored verdict)', () => {
-      it('preserves an echoed mark on sideA when the raw incoming ipponsA carried it', () => {
+      it('strips an echoed mark on sideA rather than emitting a payload the server rejects', () => {
         const match = { sideA: 'Alice', sideB: 'Bob' };
         const result = toBackendMatchResult({
           winner: 'Charlie', // matches neither sideA nor sideB
@@ -207,11 +212,11 @@ describe('API Utils', () => {
           ipponsB: ['K'],
           decidedByHantei: true,
         }, match);
-        expect(result.ipponsA).toEqual(['M', 'Ht']);
+        expect(result.ipponsA).toEqual(['M']);
         expect(result.ipponsB).toEqual(['K']);
       });
 
-      it('preserves an echoed mark on sideB when the raw incoming ipponsB carried it', () => {
+      it('strips an echoed mark on sideB the same way', () => {
         const match = { sideA: 'Alice', sideB: 'Bob' };
         const result = toBackendMatchResult({
           winner: 'Charlie',
@@ -221,7 +226,7 @@ describe('API Utils', () => {
           decidedByHantei: true,
         }, match);
         expect(result.ipponsA).toEqual(['M']);
-        expect(result.ipponsB).toEqual(['K', 'Ht']);
+        expect(result.ipponsB).toEqual(['K']);
       });
 
       it('emits no mark when neither incoming array carried one (drop-never-guess)', () => {
@@ -237,10 +242,11 @@ describe('API Utils', () => {
         expect(result.ipponsB).toEqual(['K']);
       });
 
-      it('preserves an echoed mark via the existing-match decidedByHantei fallback (no explicit patch flag)', () => {
+      it('strips it via the existing-match decidedByHantei fallback too (no explicit patch flag)', () => {
         // Same unattributable-winner shape, but the boolean comes from the
         // stored match (a re-save that doesn't touch the verdict) rather
-        // than an explicit patch field.
+        // than an explicit patch field. This is the court-reassignment case:
+        // the save must go through, markless, not 400.
         const match = { sideA: 'Alice', sideB: 'Bob', decidedByHantei: true };
         const result = toBackendMatchResult({
           winner: 'Charlie',
@@ -248,12 +254,12 @@ describe('API Utils', () => {
           ipponsA: ['M', 'Ht'],
           ipponsB: ['K'],
         }, match);
-        expect(result.ipponsA).toEqual(['M', 'Ht']);
+        expect(result.ipponsA).toEqual(['M']);
       });
     });
 
     // subResults: the daihyosen/per-bout editor twin of the top-level branch
-    // above. Same unattributable-winner hole, same fix.
+    // above, under the same unattributable-winner rule.
     describe('subResults hantei conversion', () => {
       it('places the mark on the sub winner side when attributable', () => {
         const match = { sideA: 'A', sideB: 'B' };
@@ -275,13 +281,13 @@ describe('API Utils', () => {
         expect(result.subResults[0].ipponsB).toEqual([]);
       });
 
-      it('preserves an echoed mark on the raw-carrying side when the sub winner is unattributable', () => {
+      it('strips an echoed mark when the sub winner is unattributable', () => {
         const match = { sideA: 'A', sideB: 'B' };
         const result = toBackendMatchResult({
           status: 'complete',
           subResults: [{ position: -1, sideA: 'Kenji', sideB: 'Taro', winner: 'Renamed', ipponsA: ['K', 'Ht'], ipponsB: [], decidedByHantei: true }],
         }, match);
-        expect(result.subResults[0].ipponsA).toEqual(['K', 'Ht']);
+        expect(result.subResults[0].ipponsA).toEqual(['K']);
         expect(result.subResults[0].ipponsB).toEqual([]);
       });
 
@@ -295,13 +301,15 @@ describe('API Utils', () => {
         expect(result.subResults[0].ipponsB).toEqual([]);
       });
 
-      it('preserves an echoed mark when a sub has no winner at all', () => {
+      it('strips an echoed mark when a sub has no winner at all', () => {
+        // A winner-less mark cannot name anyone, and the server rejects it
+        // outright ("hantei requires winner to be set").
         const match = { sideA: 'A', sideB: 'B' };
         const result = toBackendMatchResult({
           status: 'complete',
           subResults: [{ position: -1, sideA: 'Kenji', sideB: 'Taro', winner: '', ipponsA: [], ipponsB: ['Ht'], decidedByHantei: true }],
         }, match);
-        expect(result.subResults[0].ipponsB).toEqual(['Ht']);
+        expect(result.subResults[0].ipponsB).toEqual([]);
       });
 
       it('passes through a sub with no decidedByHantei boolean unchanged', () => {

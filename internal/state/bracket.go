@@ -335,6 +335,46 @@ func (s *Store) MatchStatusByID(compID, matchID string) (MatchStatus, bool, erro
 	return "", false, nil
 }
 
+// MatchSidesByID returns the STORED pairing (sideA, sideB) for the match with
+// the given ID, searching pool matches first then the bracket (rounds, then
+// the bronze sibling), or found=false. Same no-copy cached-read shape as
+// MatchStatusByID and for the same reason: a caller that only wants the two
+// side names should not pay for a deep SubResults/bracket clone.
+//
+// Purpose: a score payload is allowed to omit sideA/sideB (the engine's
+// reconcileSides backfills them from the stored pairing before any write
+// lands), but the request-boundary legacy-hantei fold
+// (state.MatchResult.NormalizeLegacyHantei) runs BEFORE that backfill and
+// needs to know the real sides to attribute a flagged verdict to a
+// competitor. Handlers call this to backfill the payload's sides for
+// attribution purposes only, ahead of validation; the engine's own
+// reconcileSides still runs its normal (redundant, idempotent) backfill
+// and mismatch check afterwards, so this read cannot weaken that guard.
+func (s *Store) MatchSidesByID(compID, matchID string) (sideA, sideB string, found bool, err error) {
+	if err := ValidateCompetitionID(compID); err != nil {
+		return "", "", false, err
+	}
+	results, err := s.cachedPoolMatches(compID)
+	if err != nil {
+		return "", "", false, err
+	}
+	for i := range results {
+		if results[i].ID == matchID {
+			return results[i].SideA, results[i].SideB, true, nil
+		}
+	}
+	b, err := s.cachedBracket(compID)
+	if err != nil {
+		return "", "", false, err
+	}
+	if b != nil {
+		if bm := findBracketMatchByID(b, matchID); bm != nil {
+			return bm.SideA, bm.SideB, true, nil
+		}
+	}
+	return "", "", false, nil
+}
+
 // UpdateBracketMatchByID finds the bracket match with the given ID (via
 // findBracketMatchByID, so rounds AND the bronze sibling), applies mutate, and
 // saves. Returns found=false with NO write when no match has that ID. This is

@@ -20,7 +20,7 @@
 // and produce the UI-friendly shape with object sides and a unified
 // `score` object the bracket card renderer can consume.
 
-import { realIppons } from './result_slot.jsx';
+import { realIppons, containsHt, placeHt, stripHt } from './result_slot.jsx';
 import { ipponsFromScore } from './bracket.jsx';
 const STATUS_MAP = { "complete": "completed", "in_progress": "running" };
 
@@ -33,19 +33,31 @@ function isKikenDecision(v) { return v === "kiken" || v === "kiken-voluntary" ||
 // Translate UI score patch into backend MatchResult shape.
 // UI sends: { winner: {id,name,...}, status, score: {type,winnerPts,loserPts,ippons,fouls,...} }
 // The judges'-decision verdict is recorded as the "Ht" entry in the WINNER's
-// ippon list (the mark IS the record; Go: domain.HanteiMark). These two are
-// the serializer-side halves of that contract: containsHt is the read
-// predicate, placeHt the write placement (fill a free placeholder slot
-// before growing, mirroring domain.AppendHantei so the mark lands in the
-// winner's next free slot).
-const containsHt = (arr) => (arr || []).includes("Ht");
-function placeHt(arr) {
-    const out = [...(arr || [])];
-    if (out.includes("Ht")) return out;
-    const free = out.findIndex((v) => !v || v === "\u2022");
-    if (free >= 0) { out[free] = "Ht"; return out; }
-    out.push("Ht");
-    return out;
+// ippon list (the mark IS the record; Go: domain.HanteiMark). containsHt is
+// the read predicate, placeHt the write placement (fill a free placeholder
+// slot before growing, mirroring domain.AppendHantei so the mark lands in
+// the winner's next free slot); stripHt drops a stored mark without
+// touching any other letter. All three now live in result_slot.jsx (the
+// declared owner of the Ht slot rule) alongside realIppons - this file was
+// a fourth consumer with its own copies, which is exactly the drift that
+// primitive is meant to prevent.
+//
+// preserveUnattributableHt: a rename-drifted or same-name-no-id winner can
+// leave wantHantei true while winnerName matches NEITHER side - the mark was
+// recorded, but this write can no longer say on whose ippons. realIppons
+// above (and stripHt in the subResults branch) already dropped any echoed
+// "Ht" from the outgoing arrays before this runs, so doing nothing here
+// would silently erase a stored verdict on the next unrelated save. Instead,
+// re-place it on whichever side's RAW (pre-strip) incoming array carried it
+// - that is the side the caller (an editor round-tripping its own read, per
+// CLAUDE.md's dhKeep) actually held the mark on, even though the name check
+// can no longer confirm it. Checks A before B and returns on the first hit,
+// so at most one mark is ever placed; if neither raw array carried it, no
+// mark is added - drop-never-guess for a verdict this function never saw.
+function preserveUnattributableHt(rawA, rawB, outA, outB) {
+    if (containsHt(rawA)) return { ipponsA: placeHt(outA), ipponsB: outB };
+    if (containsHt(rawB)) return { ipponsA: outA, ipponsB: placeHt(outB) };
+    return { ipponsA: outA, ipponsB: outB };
 }
 
 // Backend expects: { winner: string, ipponsA: [], ipponsB: [], hansokuA: int, hansokuB: int, decision: "", status: "completed"|"running"|"scheduled" }
@@ -113,11 +125,20 @@ function toBackendMatchResult(patch, match) {
         result.subResults = patch.subResults.map((sub) => {
             if (typeof sub.decidedByHantei !== "boolean") return sub;
             const { decidedByHantei, ...rest } = sub;
-            const strip = (arr) => (arr || []).filter((v) => v !== "Ht");
-            let a = strip(rest.ipponsA), b = strip(rest.ipponsB);
-            if (decidedByHantei && rest.winner) {
-                if (rest.winner === rest.sideA) a = placeHt(a);
-                else if (rest.winner === rest.sideB) b = placeHt(b);
+            let a = stripHt(rest.ipponsA), b = stripHt(rest.ipponsB);
+            if (decidedByHantei) {
+                if (rest.winner && rest.winner === rest.sideA) {
+                    a = placeHt(a);
+                } else if (rest.winner && rest.winner === rest.sideB) {
+                    b = placeHt(b);
+                } else {
+                    // Unattributable (no winner, or a rename-drifted winner
+                    // matching neither side): preserve an echoed mark rather
+                    // than silently dropping the stored verdict.
+                    const preserved = preserveUnattributableHt(rest.ipponsA, rest.ipponsB, a, b);
+                    a = preserved.ipponsA;
+                    b = preserved.ipponsB;
+                }
             }
             return { ...rest, ipponsA: a, ipponsB: b };
         });
@@ -150,9 +171,21 @@ function toBackendMatchResult(patch, match) {
     const wantHantei = typeof patch.decidedByHantei === "boolean"
         ? patch.decidedByHantei
         : !!match?.decidedByHantei;
-    if (wantHantei && winnerName) {
-        if (winnerName === sideAName) result.ipponsA = placeHt(result.ipponsA);
-        else if (winnerName === sideBName) result.ipponsB = placeHt(result.ipponsB);
+    if (wantHantei) {
+        if (winnerName && winnerName === sideAName) {
+            result.ipponsA = placeHt(result.ipponsA);
+        } else if (winnerName && winnerName === sideBName) {
+            result.ipponsB = placeHt(result.ipponsB);
+        } else {
+            // Unattributable (no winner, or a rename-drifted winner matching
+            // neither side): preserve an echoed mark on whichever side's RAW
+            // incoming array carried it, rather than silently erasing the
+            // stored verdict on the next unrelated save (see
+            // preserveUnattributableHt above).
+            const preserved = preserveUnattributableHt(patch.ipponsA, patch.ipponsB, result.ipponsA, result.ipponsB);
+            result.ipponsA = preserved.ipponsA;
+            result.ipponsB = preserved.ipponsB;
+        }
     }
     return result;
 }
@@ -255,24 +288,28 @@ function normalizeMatch(m, playerMap) {
         if (!norm.ipponsB?.length && lettersB.length) norm.ipponsB = lettersB;
         // Counts and the seeding array go through realIppons: the "Ht" mark
         // (now a real ippon-slice entry) occupies a slot but is not a point,
-        // so a 1-1 hantei must read 1-1 here, not 2-1.
+        // so a 1-1 hantei must read 1-1 here, not 2-1. Hoisted once: the
+        // winner's stripped array is otherwise filtered twice per match
+        // (once for winnerPts.length, once for the ippons array itself).
+        const winnerIppons = realIppons(aWin ? lettersA : lettersB);
         norm.score = {
             type: "ippon",
-            winnerPts: realIppons(aWin ? lettersA : lettersB).length,
+            winnerPts: winnerIppons.length,
             loserPts: realIppons(aWin ? lettersB : lettersA).length,
-            ippons: realIppons(aWin ? lettersA : lettersB),
+            ippons: winnerIppons,
         };
     }
     // Build score from ipponsA/ipponsB for pool matches
     if (!norm.score && (norm.ipponsA?.length || norm.ipponsB?.length) && norm.status === "completed") {
         const aWin = sideAWon(norm.winner, norm.sideA);
-        // Same realIppons discipline as the bracket branch above: the mark
-        // occupies a slot, never a point.
+        // Same realIppons discipline (and single-filter hoist) as the
+        // bracket branch above: the mark occupies a slot, never a point.
+        const winnerIppons = realIppons(aWin ? norm.ipponsA : norm.ipponsB);
         norm.score = {
             type: isHikiwake(norm.decision) ? "hikiwake" : "ippon",
-            winnerPts: realIppons(aWin ? norm.ipponsA : norm.ipponsB).length,
+            winnerPts: winnerIppons.length,
             loserPts: realIppons(aWin ? norm.ipponsB : norm.ipponsA).length,
-            ippons: realIppons(aWin ? norm.ipponsA : norm.ipponsB),
+            ippons: winnerIppons,
         };
     }
     // Carry engi flag counts through (additive, no kendo code reads these).
@@ -286,7 +323,12 @@ function normalizeMatch(m, playerMap) {
     // bracket scoreA string above; ipponsFromScore tokenizes "Ht", so the
     // derivation sees it either way.)
     norm.decidedByHantei = containsHt(norm.ipponsA) || containsHt(norm.ipponsB);
-    if (Array.isArray(norm.subResults)) {
+    // Pre-check with .some() before mapping: most matches carry no hantei
+    // sub at all (a daihyosen/hantei bout is the exception, not the rule),
+    // so allocating a fresh array on every normalizeMatch call would be a
+    // needless copy on the common path. When no sub carries the mark, the
+    // original array identity is preserved rather than an unmodified clone.
+    if (Array.isArray(norm.subResults) && norm.subResults.some((sub) => sub && (containsHt(sub.ipponsA) || containsHt(sub.ipponsB)))) {
         norm.subResults = norm.subResults.map((sub) =>
             sub && (containsHt(sub.ipponsA) || containsHt(sub.ipponsB))
                 ? { ...sub, decidedByHantei: true }

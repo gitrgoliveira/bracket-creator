@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestValidateAssignments(t *testing.T) {
@@ -184,4 +185,75 @@ func TestAssignSeeds_AmbiguousNameNoDojo(t *testing.T) {
 	err := AssignSeeds(players, assignments)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
+}
+
+// TestRosterIndex_Lookup pins the ONE shared fallback rule (see SeedKey's and
+// RosterIndex's doc comments) directly against the primitive itself, rather
+// than only indirectly through AssignSeeds/ApplySeeds/the state-package
+// matchers that now all call it: exact (name, dojo) match; a legacy row
+// with no dojo falls back to a bare-name match ONLY when that name is
+// unique in the roster; anything else resolves to false rather than
+// guessing.
+func TestRosterIndex_Lookup(t *testing.T) {
+	t.Run("exact name and dojo match", func(t *testing.T) {
+		players := []Player{
+			{Name: "Yuki Tanaka", Dojo: "Seibukan"},
+			{Name: "Yuki Tanaka", Dojo: "Tobukan"},
+		}
+		idx := NewRosterIndex(players)
+
+		p, ok := idx.Lookup("Yuki Tanaka", "Tobukan")
+		require.True(t, ok)
+		assert.Equal(t, "Tobukan", p.Dojo)
+
+		p, ok = idx.Lookup("Yuki Tanaka", "Seibukan")
+		require.True(t, ok)
+		assert.Equal(t, "Seibukan", p.Dojo)
+	})
+
+	t.Run("empty-dojo row falls back to bare name when unique", func(t *testing.T) {
+		players := []Player{
+			{Name: "Rin Sato", Dojo: "Seibukan"},
+			{Name: "Other Player", Dojo: "Tobukan"},
+		}
+		idx := NewRosterIndex(players)
+
+		p, ok := idx.Lookup("Rin Sato", "")
+		require.True(t, ok, "a legacy row naming a unique roster player must resolve")
+		assert.Equal(t, "Seibukan", p.Dojo)
+	})
+
+	t.Run("empty-dojo row stays unresolved when the name is ambiguous", func(t *testing.T) {
+		players := []Player{
+			{Name: "Yuki Tanaka", Dojo: "Seibukan"},
+			{Name: "Yuki Tanaka", Dojo: "Tobukan"},
+		}
+		idx := NewRosterIndex(players)
+
+		_, ok := idx.Lookup("Yuki Tanaka", "")
+		assert.False(t, ok, "an ambiguous bare name must never be guessed")
+	})
+
+	t.Run("non-empty dojo mismatch never falls back to bare name", func(t *testing.T) {
+		// The fallback is documented as applying ONLY when the row's dojo is
+		// empty; a row that names a real (but wrong) dojo must not silently
+		// match some other player sharing the name.
+		players := []Player{
+			{Name: "Rin Sato", Dojo: "Seibukan"},
+		}
+		idx := NewRosterIndex(players)
+
+		_, ok := idx.Lookup("Rin Sato", "Some Other Dojo")
+		assert.False(t, ok)
+	})
+
+	t.Run("unknown name never matches", func(t *testing.T) {
+		players := []Player{
+			{Name: "Rin Sato", Dojo: "Seibukan"},
+		}
+		idx := NewRosterIndex(players)
+
+		_, ok := idx.Lookup("Nobody Here", "")
+		assert.False(t, ok)
+	})
 }

@@ -3,6 +3,7 @@ package state
 import (
 	"log"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 )
 
@@ -31,26 +32,20 @@ import (
 //     caught it; do not reintroduce a read-side roster rewrite without an
 //     unambiguous discriminator.
 //
-// upgradeLegacyOnce runs BEFORE loadParticipants takes its read lock, once
+// EnsureLegacyUpgraded runs BEFORE loadParticipants takes its read lock, once
 // per competition per process: the conversion needs the per-comp WRITE lock,
 // and writing from under the reader's RLock would race the other readers
 // doing the same. Callers that FINGERPRINT files before their first load
-// (StartCompetition's drift guard) call EnsureLegacyUpgraded first, or the
-// conversion lands between snapshot and re-check and reads as operator drift.
+// (StartCompetition's drift guard, via ParticipantsFingerprint below) must run
+// this first, or the conversion lands between snapshot and re-check and reads
+// as operator drift.
 //
 // Failure policy: a failed conversion is logged and NOT retried until the
 // next process start (the once-map is stamped regardless). The file stays in
 // its legacy shape, which every reader still parses, so degradation is "the
 // fallback keeps working", never a lost read; retrying on every load would
 // hammer a broken disk from the hot viewer path.
-
-// EnsureLegacyUpgraded runs the once-per-process legacy conversion for compID
-// immediately; see above for who needs to call it explicitly.
 func (s *Store) EnsureLegacyUpgraded(compID string) {
-	s.upgradeLegacyOnce(compID)
-}
-
-func (s *Store) upgradeLegacyOnce(compID string) {
 	if _, done := s.legacyUpgraded.Load(compID); done {
 		return
 	}
@@ -64,6 +59,20 @@ func (s *Store) upgradeLegacyOnce(compID string) {
 		log.Printf("state: legacy seed-dojo upgrade for %s: %v", compID, err)
 	}
 	s.legacyUpgraded.Store(compID, struct{}{})
+}
+
+// ParticipantsFingerprint stats participants.csv and seeds.csv for compID,
+// running EnsureLegacyUpgraded first so the two mtimes it returns are the
+// POST-upgrade files, never a pre-upgrade snapshot that a later lazy upgrade
+// (triggered by the first LoadParticipants call) would then race against and
+// misreport as operator drift. This is the one chokepoint a drift guard
+// should call to capture a participants/seeds baseline -- folding the
+// ordering requirement in here means a future caller cannot forget it the
+// way engine.StartCompetition's hand-wired EnsureLegacyUpgraded call could
+// have been forgotten or reordered.
+func (s *Store) ParticipantsFingerprint(compID string) (participantsMtime, seedsMtime int64) {
+	s.EnsureLegacyUpgraded(compID)
+	return s.FileMtime(compID, "participants.csv"), s.FileMtime(compID, "seeds.csv")
 }
 
 // upgradeSeedDojosLocked completes legacy (name-only) seeds.csv rows with the
@@ -96,19 +105,20 @@ func (s *Store) upgradeSeedDojosLocked(compID string) error {
 	if err != nil || len(players) == 0 {
 		return err
 	}
-	nameCount := make(map[string]int, len(players))
-	dojoByName := make(map[string]string, len(players))
-	for i := range players {
-		nameCount[players[i].Name]++
-		dojoByName[players[i].Name] = players[i].Dojo
-	}
+	// Same shared resolver every other matcher uses (domain.RosterIndex):
+	// Lookup(name, "") tries the exact (name, "") key first, then falls back
+	// to the unique-bare-name match. Either way the guard below only ever
+	// completes a row from a NON-empty roster dojo, so a legacy row that
+	// matches a roster entry whose own dojo is also blank is correctly left
+	// alone (nothing to backfill).
+	roster := domain.NewRosterIndex(players)
 	changed := false
 	for i := range seeds {
 		if seeds[i].Dojo != "" {
 			continue
 		}
-		if dojo := dojoByName[seeds[i].Name]; dojo != "" && nameCount[seeds[i].Name] == 1 {
-			seeds[i].Dojo = dojo
+		if p, ok := roster.Lookup(seeds[i].Name, ""); ok && p.Dojo != "" {
+			seeds[i].Dojo = p.Dojo
 			changed = true
 		}
 	}

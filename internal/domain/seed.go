@@ -21,9 +21,69 @@ type SeedAssignment struct {
 //
 // Matchers that consult it also share one fallback for legacy rows: an
 // assignment with NO dojo matches by bare name, but only when that name is
-// unique in the roster.
+// unique in the roster. RosterIndex below is the ONE implementation of that
+// fallback; every matcher builds one over its roster and calls Lookup rather
+// than re-deriving the rule.
 func SeedKey(name, dojo string) string {
 	return name + "|" + dojo
+}
+
+// RosterIndex resolves a seed row's (name, dojo) key against a roster of
+// players, implementing the ONE shared fallback described on SeedKey above:
+// an exact (name, dojo) match first, and -- ONLY when the row carries no
+// dojo -- a bare-name match, but only when that name is unique in the
+// roster. An ambiguous bare name (or an exact-key miss with a non-empty
+// dojo) resolves to false rather than guessing.
+//
+// This was previously reimplemented independently in four places (this
+// package's AssignSeeds, helper.ApplySeeds, the seeds.csv-onto-roster merge
+// in state.loadParticipants, and the legacy dojo-backfill in
+// state.upgradeSeedDojosLocked), which is exactly the kind of drift SeedKey's
+// doc comment warned about without anything actually shared. All four now
+// build one RosterIndex over their roster and call Lookup.
+//
+// Build once per roster with NewRosterIndex; the returned pointers alias the
+// slice passed in, so mutating through them (as AssignSeeds and ApplySeeds
+// do) mutates the caller's slice directly.
+type RosterIndex struct {
+	byKey  map[string]*Player
+	byName map[string]*Player // only names unique in the roster
+}
+
+// NewRosterIndex builds a RosterIndex over players. players must not be
+// reallocated (e.g. via append past its length) while the index is in use;
+// the index holds pointers into its backing array.
+func NewRosterIndex(players []Player) *RosterIndex {
+	nameCount := make(map[string]int, len(players))
+	for i := range players {
+		nameCount[players[i].Name]++
+	}
+	idx := &RosterIndex{
+		byKey:  make(map[string]*Player, len(players)),
+		byName: make(map[string]*Player, len(players)),
+	}
+	for i := range players {
+		idx.byKey[SeedKey(players[i].Name, players[i].Dojo)] = &players[i]
+		if nameCount[players[i].Name] == 1 {
+			idx.byName[players[i].Name] = &players[i]
+		}
+	}
+	return idx
+}
+
+// Lookup resolves (name, dojo) to a roster player using the shared fallback
+// documented on RosterIndex: exact key first, then -- only when dojo=="" --
+// the unique-bare-name fallback.
+func (idx *RosterIndex) Lookup(name, dojo string) (*Player, bool) {
+	if p, ok := idx.byKey[SeedKey(name, dojo)]; ok {
+		return p, true
+	}
+	if dojo == "" {
+		if p, ok := idx.byName[name]; ok {
+			return p, true
+		}
+	}
+	return nil, false
 }
 
 // ErrInvalidSeedAssignments marks every rejection below as a complaint about
@@ -77,12 +137,7 @@ func ValidateAssignments(assignments []SeedAssignment) error {
 // AssignSeeds applies valid seed assignments to a list of players
 // It swaps seeds if a collision occurs. Returns error if a seeded participant is not found.
 func AssignSeeds(players []Player, assignments []SeedAssignment) error {
-	playerMap := make(map[string]*Player, len(players))
-	nameCount := make(map[string]int, len(players))
-	for i := range players {
-		playerMap[SeedKey(players[i].Name, players[i].Dojo)] = &players[i]
-		nameCount[players[i].Name]++
-	}
+	roster := NewRosterIndex(players)
 
 	// Build a seed→player reverse index for O(1) collision detection.
 	// Only non-zero seeds are tracked.
@@ -94,16 +149,7 @@ func AssignSeeds(players []Player, assignments []SeedAssignment) error {
 	}
 
 	for _, a := range assignments {
-		p, ok := playerMap[SeedKey(a.Name, a.Dojo)]
-		if !ok && a.Dojo == "" && nameCount[a.Name] == 1 {
-			for i := range players {
-				if players[i].Name == a.Name {
-					p = &players[i]
-					ok = true
-					break
-				}
-			}
-		}
+		p, ok := roster.Lookup(a.Name, a.Dojo)
 		if !ok {
 			return fmt.Errorf("seeded participant not found in main list: %s", a.Name)
 		}

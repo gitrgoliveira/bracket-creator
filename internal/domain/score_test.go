@@ -52,6 +52,15 @@ func TestParseScore(t *testing.T) {
 		// Persisted data on a live path: an unreadable count degrades to 0
 		// rather than failing the read and blanking the match.
 		{"malformed hansoku count", "M (Hx)", []string{"M"}, 0},
+		// Pinning the byte-lookahead rewrite: the mark sits between two bare
+		// letters/points, so a wrong skip index would eat or duplicate a
+		// neighbour.
+		{"mark between two hansoku ippons", "HtH", []string{"Ht", "H"}, 0},
+		{"mark sandwiched between points", "MHtM", []string{"M", "Ht", "M"}, 0},
+		// Non-ASCII passthrough: a multi-byte maru next to the 'H' lookahead
+		// must not desync the byte offsets the lookahead relies on.
+		{"maru before a bare hansoku ippon", "○H", []string{"○", "H"}, 0},
+		{"bare hansoku ippon before a maru", "H○", []string{"H", "○"}, 0},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -86,6 +95,8 @@ func TestScoreCodecRoundTrip(t *testing.T) {
 		{[]string{"K", "Ht"}, 0},
 		{[]string{"H", "Ht"}, 0},
 		{[]string{"Ht", "H"}, 1},
+		{[]string{"Ht", "H"}, 0},
+		{[]string{"M", "Ht", "M"}, 0},
 	}
 	for _, tc := range cases {
 		encoded := domain.FormatScore(tc.ippons, tc.hansoku)

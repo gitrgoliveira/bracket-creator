@@ -190,6 +190,127 @@ describe('API Utils', () => {
       const result = toBackendMatchResult({ winner: 'Player B', status: 'complete', ipponsA: [], ipponsB: ['K'] }, match);
       expect(result.winnerId).toBe('id-b');
     });
+
+    // Unattributable-winner hardening: a rename-drifted (or same-name,
+    // no-id) stored winner can leave wantHantei true while the winner name
+    // matches NEITHER match side. realIppons already strips any echoed "Ht"
+    // from the outgoing arrays before this point, so without this guard the
+    // stored verdict would be silently erased on the very next unrelated
+    // save (e.g. a court reassignment). See preserveUnattributableHt.
+    describe('unattributable hantei winner (rename-drifted stored verdict)', () => {
+      it('preserves an echoed mark on sideA when the raw incoming ipponsA carried it', () => {
+        const match = { sideA: 'Alice', sideB: 'Bob' };
+        const result = toBackendMatchResult({
+          winner: 'Charlie', // matches neither sideA nor sideB
+          status: 'complete',
+          ipponsA: ['M', 'Ht'],
+          ipponsB: ['K'],
+          decidedByHantei: true,
+        }, match);
+        expect(result.ipponsA).toEqual(['M', 'Ht']);
+        expect(result.ipponsB).toEqual(['K']);
+      });
+
+      it('preserves an echoed mark on sideB when the raw incoming ipponsB carried it', () => {
+        const match = { sideA: 'Alice', sideB: 'Bob' };
+        const result = toBackendMatchResult({
+          winner: 'Charlie',
+          status: 'complete',
+          ipponsA: ['M'],
+          ipponsB: ['K', 'Ht'],
+          decidedByHantei: true,
+        }, match);
+        expect(result.ipponsA).toEqual(['M']);
+        expect(result.ipponsB).toEqual(['K', 'Ht']);
+      });
+
+      it('emits no mark when neither incoming array carried one (drop-never-guess)', () => {
+        const match = { sideA: 'Alice', sideB: 'Bob' };
+        const result = toBackendMatchResult({
+          winner: 'Charlie',
+          status: 'complete',
+          ipponsA: ['M'],
+          ipponsB: ['K'],
+          decidedByHantei: true,
+        }, match);
+        expect(result.ipponsA).toEqual(['M']);
+        expect(result.ipponsB).toEqual(['K']);
+      });
+
+      it('preserves an echoed mark via the existing-match decidedByHantei fallback (no explicit patch flag)', () => {
+        // Same unattributable-winner shape, but the boolean comes from the
+        // stored match (a re-save that doesn't touch the verdict) rather
+        // than an explicit patch field.
+        const match = { sideA: 'Alice', sideB: 'Bob', decidedByHantei: true };
+        const result = toBackendMatchResult({
+          winner: 'Charlie',
+          status: 'complete',
+          ipponsA: ['M', 'Ht'],
+          ipponsB: ['K'],
+        }, match);
+        expect(result.ipponsA).toEqual(['M', 'Ht']);
+      });
+    });
+
+    // subResults: the daihyosen/per-bout editor twin of the top-level branch
+    // above. Same unattributable-winner hole, same fix.
+    describe('subResults hantei conversion', () => {
+      it('places the mark on the sub winner side when attributable', () => {
+        const match = { sideA: 'A', sideB: 'B' };
+        const result = toBackendMatchResult({
+          status: 'complete',
+          subResults: [{ position: -1, sideA: 'Kenji', sideB: 'Taro', winner: 'Taro', ipponsA: ['M'], ipponsB: [], decidedByHantei: true }],
+        }, match);
+        expect(result.subResults[0].ipponsB).toEqual(['Ht']);
+        expect(result.subResults[0].ipponsA).toEqual(['M']);
+        expect('decidedByHantei' in result.subResults[0]).toBe(false);
+      });
+
+      it('leaves a false sub decidedByHantei markless (strips any echoed mark)', () => {
+        const match = { sideA: 'A', sideB: 'B' };
+        const result = toBackendMatchResult({
+          status: 'complete',
+          subResults: [{ position: -1, sideA: 'Kenji', sideB: 'Taro', winner: 'Taro', ipponsA: [], ipponsB: ['Ht'], decidedByHantei: false }],
+        }, match);
+        expect(result.subResults[0].ipponsB).toEqual([]);
+      });
+
+      it('preserves an echoed mark on the raw-carrying side when the sub winner is unattributable', () => {
+        const match = { sideA: 'A', sideB: 'B' };
+        const result = toBackendMatchResult({
+          status: 'complete',
+          subResults: [{ position: -1, sideA: 'Kenji', sideB: 'Taro', winner: 'Renamed', ipponsA: ['K', 'Ht'], ipponsB: [], decidedByHantei: true }],
+        }, match);
+        expect(result.subResults[0].ipponsA).toEqual(['K', 'Ht']);
+        expect(result.subResults[0].ipponsB).toEqual([]);
+      });
+
+      it('emits no mark for an unattributable sub winner when neither incoming array carried one', () => {
+        const match = { sideA: 'A', sideB: 'B' };
+        const result = toBackendMatchResult({
+          status: 'complete',
+          subResults: [{ position: -1, sideA: 'Kenji', sideB: 'Taro', winner: 'Renamed', ipponsA: ['K'], ipponsB: [], decidedByHantei: true }],
+        }, match);
+        expect(result.subResults[0].ipponsA).toEqual(['K']);
+        expect(result.subResults[0].ipponsB).toEqual([]);
+      });
+
+      it('preserves an echoed mark when a sub has no winner at all', () => {
+        const match = { sideA: 'A', sideB: 'B' };
+        const result = toBackendMatchResult({
+          status: 'complete',
+          subResults: [{ position: -1, sideA: 'Kenji', sideB: 'Taro', winner: '', ipponsA: [], ipponsB: ['Ht'], decidedByHantei: true }],
+        }, match);
+        expect(result.subResults[0].ipponsB).toEqual(['Ht']);
+      });
+
+      it('passes through a sub with no decidedByHantei boolean unchanged', () => {
+        const match = { sideA: 'A', sideB: 'B' };
+        const sub = { position: 1, sideA: 'Kenji', sideB: 'Taro', winner: 'Taro', ipponsA: ['M'], ipponsB: ['K'] };
+        const result = toBackendMatchResult({ status: 'complete', subResults: [sub] }, match);
+        expect(result.subResults[0]).toEqual(sub);
+      });
+    });
   });
 
   describe('isHikiwake', () => {
@@ -234,6 +355,31 @@ describe('API Utils', () => {
         ipponsA: ['M'], ipponsB: [],
       }, {});
       expect(plain.decidedByHantei).toBe(false);
+    });
+
+    it('preserves subResults array identity when no sub carries the Ht mark', () => {
+      // Efficiency finding: the derived-hantei step used to .map() every
+      // call even when nothing changed, allocating a fresh (behaviorally
+      // identical) array on the common no-hantei path. A .some() pre-check
+      // now skips the map entirely in that case.
+      const subs = [{ position: 1, sideA: 'A', sideB: 'B', winner: 'A', ipponsA: ['M'], ipponsB: [] }];
+      const norm = normalizeMatch({
+        sideA: 'A', sideB: 'B', winner: 'A', status: 'completed',
+        ipponsA: ['M'], ipponsB: [],
+        subResults: subs,
+      }, {});
+      expect(norm.subResults).toBe(subs); // same reference, not a copy
+    });
+
+    it('still replaces subResults with a new array when a sub carries the Ht mark', () => {
+      const subs = [{ position: -1, sideA: 'A', sideB: 'B', winner: 'B', ipponsA: [], ipponsB: ['Ht'] }];
+      const norm = normalizeMatch({
+        sideA: 'A', sideB: 'B', winner: 'A', status: 'completed',
+        ipponsA: ['M'], ipponsB: [],
+        subResults: subs,
+      }, {});
+      expect(norm.subResults).not.toBe(subs);
+      expect(norm.subResults[0].decidedByHantei).toBe(true);
     });
 
     it('should normalize string sides to objects using playerMap', () => {

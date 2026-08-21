@@ -415,8 +415,7 @@ func daihyosenBracketResult(bm *state.BracketMatch) *state.MatchResult {
 	// A BracketMatch persists each side's scoreline as one rendered string;
 	// the MatchResult view carries it as ippon slices, and the judges'-
 	// decision mark (an ippon entry) rides along through the codec.
-	res.IpponsA, res.HansokuA = domain.ParseScore(bm.ScoreA)
-	res.IpponsB, res.HansokuB = domain.ParseScore(bm.ScoreB)
+	res.IpponsA, res.IpponsB, res.HansokuA, res.HansokuB = bm.DecodedScorelines()
 	return res
 }
 

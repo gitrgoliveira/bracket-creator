@@ -90,6 +90,56 @@ func TestPreserveSubHantei(t *testing.T) {
 		assert.False(t, incoming[0].HanteiDecided(), "own markless ippons carry no verdict")
 		assert.Equal(t, []string{"D"}, incoming[0].IpponsA, "the writer's own scoreline is untouched")
 		assert.Equal(t, []string{"T"}, incoming[0].IpponsB)
+		// The verdict and its consequence move as ONE atomic unit: a row that
+		// supplied its own scoreline (even a tied one, as here — "D"/"T" is
+		// 1-1) gets no mark, so it must get no winner either. Before the fix
+		// this still fell through to `in.Winner = prior.Winner`, so a stale
+		// second-device replay would silently persist "Kyoto" as the winner
+		// on a row with no referee record backing it, and the mark could
+		// never be recovered by a later preserve once this write landed as
+		// the new stored row.
+		assert.Equal(t, "", incoming[0].Winner, "no mark means no winner stamp either")
+	})
+
+	t.Run("a stale replay of the pre-hantei tied scoreline inherits neither mark nor winner", func(t *testing.T) {
+		// The exact reachable shape the finding describes: a second device (or
+		// the offline write queue) queued its request BEFORE the hantei was
+		// recorded, while the bout still read a plain tied 1-1 with no mark and
+		// no winner. That request is replayed hours later, after `stored` above
+		// already carries the referees' verdict. The replayed row supplies its
+		// OWN scoreline (1-1, markless), so per the atomic-pairing rule it must
+		// come out exactly as it went in: no mark, no winner.
+		stored := []state.SubMatchResult{{
+			Position: dh, SideA: "Kyoto", SideB: "Osaka",
+			IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"K"},
+			Winner: "Kyoto", Decision: "daihyosen",
+		}}
+		incoming := []state.SubMatchResult{{
+			Position: dh, SideA: "Kyoto", SideB: "Osaka", Decision: "daihyosen",
+			IpponsA: []string{"M"}, IpponsB: []string{"K"}, // pre-hantei 1-1, no mark
+		}}
+		preserveSubHantei(stored, incoming)
+		assert.False(t, incoming[0].HanteiDecided(), "own tied markless scoreline carries no verdict")
+		assert.Equal(t, "", incoming[0].Winner, "and therefore no winner stamp")
+		assert.Equal(t, []string{"M"}, incoming[0].IpponsA, "the replay's own scoreline is untouched")
+		assert.Equal(t, []string{"K"}, incoming[0].IpponsB)
+	})
+
+	t.Run("a scoreline-silent row still restores mark and winner together", func(t *testing.T) {
+		// The mirror image of the two cases above, restated here so the
+		// atomic-pairing rule is pinned by a single test alongside them: a row
+		// that supplies NO ippons of its own (true scoreline silence, not just
+		// a winner omission) inherits the stored scoreline wholesale, mark
+		// included, and the winner it names travels with it in the same call.
+		stored := []state.SubMatchResult{{
+			Position: dh, SideA: "Kyoto", SideB: "Osaka",
+			IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"K"},
+			Winner: "Kyoto", Decision: "daihyosen",
+		}}
+		incoming := []state.SubMatchResult{{Position: dh, SideA: "Kyoto", SideB: "Osaka", Decision: "daihyosen"}}
+		preserveSubHantei(stored, incoming)
+		assert.True(t, incoming[0].HanteiDecided(), "the copied scoreline carries the mark")
+		assert.Equal(t, "Kyoto", incoming[0].Winner, "and the winner it names travels with it")
 	})
 
 	t.Run("a decision incompatible with hantei blocks the preserve", func(t *testing.T) {
@@ -119,8 +169,7 @@ func TestPreserveSubHantei(t *testing.T) {
 	})
 
 	t.Run("explicit false (withdrawal) is left untouched", func(t *testing.T) {
-		// state.HanteiExplicit, not state.HanteiPtr: the latter is
-		// nil-for-false (built for the omitempty projection), so it cannot
+		// state.HanteiExplicit, because a plain nil pointer cannot
 		// express the withdrawal this case is about. DecidedByHantei is a
 		// LEGACY READ-ONLY channel on SubMatchResult, but preserveSubHantei
 		// still reads a non-nil value as "the writer addressed the verdict" —

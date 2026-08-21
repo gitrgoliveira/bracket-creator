@@ -907,6 +907,48 @@ func TestParseSeedsBytes(t *testing.T) {
 		assert.Equal(t, "Player B", seeds[1].Name)
 		assert.Equal(t, 2, seeds[1].SeedRank)
 	})
+
+	// The store's own writer (marshalSeedsCSV, internal/state/seeds.go)
+	// always emits a "Rank,Name,Dojo" header followed by rank,name,dojo
+	// rows. A round-trip through export -> manifest import must not drop
+	// the dojo the way a 2-column-only parser would.
+	t.Run("Canonical Three Column Carries Dojo", func(t *testing.T) {
+		data := []byte("Rank,Name,Dojo\n1,Player A,Seibukan\n2,Player B,Tobukan\n")
+		seeds, err := parseSeedsBytes(data)
+		require.NoError(t, err)
+		require.Len(t, seeds, 2)
+		assert.Equal(t, "Player A", seeds[0].Name)
+		assert.Equal(t, 1, seeds[0].SeedRank)
+		assert.Equal(t, "Seibukan", seeds[0].Dojo)
+		assert.Equal(t, "Player B", seeds[1].Name)
+		assert.Equal(t, 2, seeds[1].SeedRank)
+		assert.Equal(t, "Tobukan", seeds[1].Dojo)
+	})
+
+	// A hand-written 2-column file (no Dojo column at all) must still parse
+	// exactly as it always has: Dojo comes back empty, not an error.
+	t.Run("Two Column File Has No Dojo", func(t *testing.T) {
+		data := []byte("rank,name\n1,Player A\n")
+		seeds, err := parseSeedsBytes(data)
+		require.NoError(t, err)
+		require.Len(t, seeds, 1)
+		assert.Equal(t, "Player A", seeds[0].Name)
+		assert.Equal(t, "", seeds[0].Dojo)
+	})
+
+	// marshalSeedsCSV uses encoding/csv, which quotes a name containing a
+	// comma (e.g. "Smith, John"). A naive strings.Split(line, ",") parser
+	// would tear that one field into two and misread the row; this pins
+	// that the RFC 4180 quoting round-trips through parseSeedsBytes intact.
+	t.Run("Quoted Name With Embedded Comma", func(t *testing.T) {
+		data := []byte("Rank,Name,Dojo\n1,\"Smith, John\",Seibukan\n")
+		seeds, err := parseSeedsBytes(data)
+		require.NoError(t, err)
+		require.Len(t, seeds, 1)
+		assert.Equal(t, "Smith, John", seeds[0].Name)
+		assert.Equal(t, 1, seeds[0].SeedRank)
+		assert.Equal(t, "Seibukan", seeds[0].Dojo)
+	})
 }
 
 // TestImportCompetition_InheritsTournamentCourts locks in that the manifest

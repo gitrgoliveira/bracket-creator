@@ -3,6 +3,7 @@ package mobileapp
 import (
 	"bufio"
 	"bytes"
+	"encoding/csv"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -498,27 +499,55 @@ func csvLines(data []byte) []string {
 	return lines
 }
 
+// parseSeedsBytes parses a manifest seeds file. It accepts two shapes: the
+// store's own canonical output (marshalSeedsCSV, "Rank,Name,Dojo" header
+// then rank,name,dojo rows) and a hand-written 2-column file in either
+// column order ("rank,name" or "name,rank", with or without a header). The
+// Dojo column is optional in both cases; a row with only two fields carries
+// no dojo, exactly as this parser has always accepted.
 func parseSeedsBytes(data []byte) ([]domain.SeedAssignment, error) {
 	var assignments []domain.SeedAssignment
 	for i, line := range csvLines(data) {
-		parts := strings.Split(line, ",")
-		if i == 0 && len(parts) >= 2 && strings.ToLower(strings.TrimSpace(parts[0])) == "rank" {
-			continue // skip header
+		parts := splitSeedCSVLine(line)
+		if i == 0 && len(parts) >= 1 && strings.EqualFold(strings.TrimSpace(parts[0]), "rank") {
+			continue // skip header (2- or 3-column)
 		}
 		if len(parts) < 2 {
 			continue
 		}
 		rank := 0
 		name := ""
-		// Support both "rank,name" and "name,rank" formats
+		// Support both "rank,name" and "name,rank" formats. marshalSeedsCSV
+		// always writes rank,name[,dojo], which the first branch matches.
 		if _, err := fmt.Sscanf(strings.TrimSpace(parts[0]), "%d", &rank); err == nil {
 			name = strings.TrimSpace(parts[1])
 		} else if _, err := fmt.Sscanf(strings.TrimSpace(parts[1]), "%d", &rank); err == nil {
 			name = strings.TrimSpace(parts[0])
 		}
-		if rank > 0 && name != "" {
-			assignments = append(assignments, domain.SeedAssignment{Name: name, SeedRank: rank})
+		if rank <= 0 || name == "" {
+			continue
 		}
+		dojo := ""
+		if len(parts) >= 3 {
+			dojo = strings.TrimSpace(parts[2])
+		}
+		assignments = append(assignments, domain.SeedAssignment{Name: name, SeedRank: rank, Dojo: dojo})
 	}
 	return assignments, nil
+}
+
+// splitSeedCSVLine splits one seeds-file line into fields, honoring RFC 4180
+// quoting so a name marshalSeedsCSV had to quote (e.g. "Smith, John",
+// written because the name itself contains a comma) round-trips as ONE
+// field rather than being torn in two by a naive comma split. A line that
+// isn't validly quoted (a hand-written file with no quoting concerns at
+// all) falls back to a plain comma split, which is what every 2-column
+// manifest file has always been parsed with.
+func splitSeedCSVLine(line string) []string {
+	r := csv.NewReader(strings.NewReader(line))
+	fields, err := r.Read()
+	if err != nil {
+		return strings.Split(line, ",")
+	}
+	return fields
 }

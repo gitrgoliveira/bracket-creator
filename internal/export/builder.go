@@ -8,8 +8,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gitrgoliveira/bracket-creator/internal/domain"
-
 	excelize "github.com/xuri/excelize/v2"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
@@ -582,9 +580,8 @@ func bracketMatchResultView(bm *state.BracketMatch) state.MatchResult {
 		SubResults: bm.SubResults,
 	}
 	// The scoreline (and with it the judges'-decision mark, an ippon entry)
-	// rides the rendered score strings through the codec.
-	mr.IpponsA, mr.HansokuA = domain.ParseScore(bm.ScoreA)
-	mr.IpponsB, mr.HansokuB = domain.ParseScore(bm.ScoreB)
+	// rides the rendered score strings through the shared codec.
+	mr.IpponsA, mr.IpponsB, mr.HansokuA, mr.HansokuB = bm.DecodedScorelines()
 	return mr
 }
 
@@ -935,16 +932,27 @@ func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMa
 			// ScoreA/ScoreB hold ippon letters that do not apply. Render the
 			// flag count via FlagsScorePair instead, matching
 			// overlayPoolScores.
+			mrView := bracketMatchResultView(&bm)
 			var scoreA, scoreB string
 			if engi {
 				scoreA, scoreB = FlagsScorePair(bm.FlagsA, bm.FlagsB)
 			} else {
-				// Maru fallback at score derivation, like overlayPoolScores.
-				scoreA, scoreB = DefaultWinMaruAB(bm.ScoreA, bm.ScoreB,
+				// bm.ScoreA/ScoreB are the RAW rendered strings, which embed
+				// the judges'-decision mark as a literal "Ht" ippon entry
+				// (domain.HanteiMark). writeScoreRowCells below ALSO appends
+				// that mark via SideMarksLR (reading it off mrView), so
+				// writing bm.ScoreA verbatim double-printed it: "MHt Ht".
+				// Decode first and render through IpponsScore, which filters
+				// non-scoring entries (the mark, the bye placeholder) exactly
+				// as the pool path (overlayPoolScores) already does — the
+				// mark then rides ONLY through the appended SideMarksLR
+				// suffix, matching the pool cell's "M Ht".
+				scoreA, scoreB = DefaultWinMaruAB(
+					IpponsScore(mrView.IpponsA), IpponsScore(mrView.IpponsB),
 					bm.Decision, bm.Encho, bm.Winner, bm.SideA, bm.SideB)
 			}
 
-			writeScoreRowCells(f, sheetName, courtStartCol, excelRow, scoreA, scoreB, bracketMatchResultView(&bm), mirror)
+			writeScoreRowCells(f, sheetName, courtStartCol, excelRow, scoreA, scoreB, mrView, mirror)
 
 			if bm.Winner != "" {
 				writeWinnerCell(f, sheetName, rows, scoreRowIdx, headerCol, bm.Winner)

@@ -100,10 +100,10 @@ func TestIpponsScoreRendersOnlyScoringMarks(t *testing.T) {
 		{[]string{domain.IpponPlaceholder}, ""},
 		{[]string{"M", domain.IpponPlaceholder}, "M"},
 		{[]string{"", "M"}, "M"},
-		// A hantei is not a scored point. It reaches a stored slice only as the
-		// judges'-decision mark as recorded in the winner's cell, which the
-		// store strips on load — but if one ever survives, the export must not
-		// render it as though someone struck it.
+		// A hantei is not a scored point. It reaches a stored slice as the
+		// judges'-decision mark recorded in the winner's cell (the mark IS
+		// the record, and stays there — nothing strips it on load), so the
+		// export must not render it as though someone struck it.
 		{[]string{"M", domain.HanteiMark}, "M"},
 	}
 	for _, tc := range cases {

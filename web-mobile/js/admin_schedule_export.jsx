@@ -40,9 +40,15 @@ export function buildXlsxBody(cfg, cName, players) {
     : [csvField(p.name), csvField(p.dojo || "NA")].join(", ");
   const playerList = players.map(rosterLine).join("\n");
 
+  // dojo must match the roster line's dojo (p.dojo || "NA", same fallback as
+  // rosterLine above): domain.SeedKey matches a seed to its participant by
+  // the (name, dojo) COMPOSITE key, so a same-name pair (two competitors
+  // sharing a display name, distinguished only by dojo) needs the dojo here
+  // or /create 400s with "seeded participant not found" (domain.SeedAssignment's
+  // json tags are name/dojo/seedRank; see internal/domain/seed.go).
   const seeded = players
     .filter((p) => p.seed && p.seed > 0)
-    .map((p) => ({ name: p.name, seedRank: p.seed }));
+    .map((p) => ({ name: p.name, dojo: p.dojo || "NA", seedRank: p.seed }));
 
   const courtsCount = Array.isArray(cfg.courts) ? cfg.courts.length : 0;
   const body = new URLSearchParams({

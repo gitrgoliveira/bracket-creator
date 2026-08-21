@@ -153,11 +153,10 @@ func (e *Engine) withBracketMatch(compId, matchId string, mutate func(*state.Bra
 //
 //   - A NAMED WINNER. A hantei declares one; the validator refuses the pairing
 //     without it. Omitting it here let a `{status:"running", winner:null}`
-//     reopen inherit the verdict, and the result was worse than losing it: the
-//     mark cannot be attributed: a winner-less
-//     verdict to a side, so it silently dropped the mark while the in-memory
-//     cache kept the flag — every read said "hantei" until the process
-//     restarted, and none did afterwards.
+//     reopen inherit the verdict, and a mark with no winner is unattributable
+//     to either side — stripInvalidHantei then strips it (drop-never-guess,
+//     the same policy an unattributable winner-less verdict gets everywhere
+//     else in this file).
 //   - COMPLETED (or unstated, which applyBracketMatchResult defaults to
 //     completed). A match still running has not been decided by anyone.
 //   - A COMPATIBLE DECISION, through the MATCH-level predicate. Using the
@@ -265,35 +264,50 @@ func preserveSubHantei(stored, incoming []state.SubMatchResult) {
 		// sub-decision are all lost: a 1-1 hantei would persist as 0-0, which
 		// moves the `Ht` to the other slot (resultSlot fills outside-to-inside)
 		// and drops the `(E)`.
-		// Note this is also what makes the tie check below meaningful - on an
-		// empty incoming row it would otherwise compare 0 against 0 and pass
-		// vacuously, never once consulting what was actually stored.
-		if countScoringIppons(in.IpponsA) == 0 && countScoringIppons(in.IpponsB) == 0 {
-			if in.SideA == "" && in.SideB == "" {
-				in.SideA, in.SideB = prior.SideA, prior.SideB
-			}
-			in.IpponsA = append([]string(nil), prior.IpponsA...)
-			in.IpponsB = append([]string(nil), prior.IpponsB...)
-			// Hansoku travels WITH the ippons, not separately: an outstanding
-			// foul is part of the same scoreline, and the two are coupled
-			// (every second one discharges into an "H" ippon for the opponent,
-			// applyHansokuIppons). Restoring the letters but not the counts
-			// left a coherent stored pair as an incoherent restored one -
-			// prior's discharged H's beside the incoming zero - so the
-			// referee's outstanding ▲ vanished from every scoreboard and the
-			// next foul on that side no longer discharged.
-			in.HansokuA, in.HansokuB = prior.HansokuA, prior.HansokuB
-			in.Encho = prior.Encho.Clone()
-			if in.Decision == "" {
-				in.Decision = prior.Decision
-			}
+		//
+		// A row that DOES record its own ippons — even a stale second-device
+		// replay whose own scoreline happens to still read tied, e.g. a
+		// markless 1-1 offline-queue replay — has spoken for the scoreline
+		// itself, and the verdict must not travel onto it: the mark lives IN
+		// the copied ippons (see below), so stamping the winner without also
+		// copying the mark-carrying scoreline would split the two
+		// permanently. The referees' record would be gone from disk while its
+		// consequence, the winner, survived — and once this write lands as
+		// the new stored row, a future preserve has no mark left to
+		// re-attach. ABANDON here, before any field is touched, rather than
+		// letting the tie check below decide: that check answers "is this
+		// scoreline still tied", not "did the writer supply it", so it cannot
+		// distinguish an own tied scoreline from the copied one.
+		if countScoringIppons(in.IpponsA) != 0 || countScoringIppons(in.IpponsB) != 0 {
+			return
+		}
+		if in.SideA == "" && in.SideB == "" {
+			in.SideA, in.SideB = prior.SideA, prior.SideB
+		}
+		in.IpponsA = append([]string(nil), prior.IpponsA...)
+		in.IpponsB = append([]string(nil), prior.IpponsB...)
+		// Hansoku travels WITH the ippons, not separately: an outstanding
+		// foul is part of the same scoreline, and the two are coupled
+		// (every second one discharges into an "H" ippon for the opponent,
+		// applyHansokuIppons). Restoring the letters but not the counts
+		// left a coherent stored pair as an incoherent restored one -
+		// prior's discharged H's beside the incoming zero - so the
+		// referee's outstanding ▲ vanished from every scoreboard and the
+		// next foul on that side no longer discharged.
+		in.HansokuA, in.HansokuB = prior.HansokuA, prior.HansokuB
+		in.Encho = prior.Encho.Clone()
+		if in.Decision == "" {
+			in.Decision = prior.Decision
 		}
 		if !domain.HanteiTiedScoreline(in.IpponsA, in.IpponsB) {
 			return // untied now: the verdict cannot stand on this scoreline
 		}
 		// The verdict itself travelled with the copied scoreline: prior's
 		// ippons carry the domain.HanteiMark entry, so there is no flag left
-		// to raise — only the winner the mark names.
+		// to raise — only the winner the mark names. Reached ONLY when the
+		// scoreline above was copied wholesale from prior (the early return
+		// two blocks up guards it): the mark and the winner it names move as
+		// one atomic unit, never separately.
 		in.Winner = prior.Winner
 		return
 	}
@@ -493,6 +507,34 @@ func applyHansokuIppons(result *state.MatchResult) {
 		applyOneSide(result.SubResults[i].HansokuA, &result.SubResults[i].IpponsB)
 		applyOneSide(result.SubResults[i].HansokuB, &result.SubResults[i].IpponsA)
 	}
+}
+
+// checkHansokuHanteiConflict runs immediately after applyHansokuIppons, at
+// every one of its three call sites, and rejects the raw-API case where the
+// hansoku auto-award UNTIES a scoreline a hantei mark is still riding on.
+// ScoreRequest.Validate checks the tied-scoreline precondition on the
+// payload as the client sent it, before hansoku counts are folded into
+// ippons; a payload can arrive tied (e.g. ipponsA:[M,Ht], ipponsB:[K],
+// hansokuB:2) and pass that check, then applyHansokuIppons appends an "H" to
+// ipponsA and the RESULT is untied while the mark still stands. Falling
+// through silently hands that row to stripInvalidHantei, which discards the
+// mark with no error reaching the caller — the operator's hansoku award
+// would silently overrule a verdict the same payload also carried. Returning
+// a *ValidationError here instead surfaces the same 400 the client would
+// have gotten had it pre-computed the award itself and sent the untied
+// scoreline directly.
+//
+// A no-op when the result carries no mark: this must never change behaviour
+// for the overwhelming majority of hansoku awards, which carry no verdict at
+// all.
+func checkHansokuHanteiConflict(result *state.MatchResult) error {
+	if result == nil || !result.HanteiDecided() {
+		return nil
+	}
+	if domain.HanteiTiedScoreline(result.IpponsA, result.IpponsB) {
+		return nil
+	}
+	return validationErrorf("hantei requires a tied scoreline after hansoku ippon award")
 }
 
 // isWinForSide reports whether subWinner indicates a win for the given
@@ -698,6 +740,9 @@ func countScoringIppons(ippons []string) int {
 func (e *Engine) RecordMatchResult(compId string, matchId string, result *state.MatchResult) error {
 	result.ID = matchId // normalize ID-less payloads before overwriting
 	applyHansokuIppons(result)
+	if err := checkHansokuHanteiConflict(result); err != nil {
+		return err
+	}
 	return e.writeMatchResult(compId, matchId, result, matchWriteForward)
 }
 
@@ -753,6 +798,9 @@ func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId strin
 	}
 
 	applyHansokuIppons(result)
+	if err := checkHansokuHanteiConflict(result); err != nil {
+		return nil, err
+	}
 	deriveDaihyosenWinner(result)
 
 	// T105/CHK047: capture the prior result so we can rollback if the atomic

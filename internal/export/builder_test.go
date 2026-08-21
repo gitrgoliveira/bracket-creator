@@ -326,6 +326,65 @@ func TestBuildResultsWorkbook_BracketScores(t *testing.T) {
 		"elimination matches sheet must exist when bracket has rounds")
 }
 
+// TestBuildResultsWorkbook_BracketHanteiScoreCell pins the bracket-overlay
+// fix for a double-printed judges'-decision mark. A BracketMatch persists its
+// scoreline as one rendered string (ScoreA/ScoreB), and the live scoring path
+// embeds the mark inline as a literal domain.HanteiMark ippon entry
+// ("M"+"Ht" = "MHt"). writeScoreRowCells separately appends "Ht" again via
+// SideMarksLR (which reads the mark off the decoded MatchResult view), so
+// writing bm.ScoreA verbatim rendered "MHt Ht" -- the mark twice. The pool
+// path (TestBuildResultsWorkbook_ResultMarksInScoreCells) already decodes and
+// filters through IpponsScore first, rendering "M Ht"; the bracket overlay
+// must match it exactly, not double the mark.
+func TestBuildResultsWorkbook_BracketHanteiScoreCell(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	setCompFormat(t, store, compID, state.CompFormatMixed)
+
+	pools := makePools()
+	require.NoError(t, store.SavePools(compID, pools))
+	require.NoError(t, store.SavePoolMatches(compID, nil))
+
+	// Alice beats Charlie, decided by hantei: her rendered score string
+	// carries the mark inline, exactly as the live scoring path writes it.
+	bracket := &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				{
+					ID:          "B1",
+					SideA:       "Alice",
+					SideB:       "Charlie",
+					Winner:      "Alice",
+					Status:      state.MatchStatusCompleted,
+					ScoreA:      "M" + domain.HanteiMark,
+					ScoreB:      "",
+					Decision:    "fought",
+					MatchNumber: 1,
+				},
+			},
+		},
+	}
+	require.NoError(t, store.SaveBracket(compID, bracket))
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer f.Close()
+
+	rows, err := f.GetRows(helper.SheetEliminationMatches)
+	require.NoError(t, err)
+
+	left, _ := bracketVictoryCells(t, rows, "Round 1 - Match 1")
+	assert.Equal(t, "M Ht", left,
+		"the winner's bracket cell must render the score plus one Ht mark, mirroring the pool cell")
+	assert.False(t, sheetContainsCell(rows, "MHt Ht"),
+		"the judges'-decision mark must not be double-printed")
+}
+
 func TestBuildResultsWorkbook_NoPools(t *testing.T) {
 	// A competition with no pools should still return a valid workbook without error.
 	t.Parallel()

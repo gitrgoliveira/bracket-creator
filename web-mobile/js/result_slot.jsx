@@ -60,9 +60,22 @@
 // validation.go) caps each side at 2 AND rejects 2-2 outright on every sub-bout
 // and on the bulk path. The branch exists solely so a hand-edited file can
 // never overwrite a recorded point.
+
+// isFreeSlot: a slot is free when it holds no letter — an empty string OR
+// the "•" no-strike placeholder. Mirrors Go's domain.AppendHantei (both
+// treat "" and "•" as free). Shared by resultSlot (which slot a mark takes
+// in a 2-cell pair) and placeHt below (which slot a mark takes in a
+// growable ippon array) so there is exactly one definition of "free" in
+// this file — previously resultSlot's own inline predicate treated "•" as
+// OCCUPIED, a paper divergence from placeHt's that never fired in practice
+// (every real input reaching resultSlot is pre-stripped of the placeholder
+// by realIppons before display), but still left two answers to the same
+// question in one dependency chain.
+const isFreeSlot = (v) => !v || v === "•";
+
 export function resultSlot(cells) {
   const pair = cells || [];
-  const slot = [pair[0] || "", pair[1] || ""].findIndex(v => !v);
+  const slot = [pair[0] || "", pair[1] || ""].findIndex(isFreeSlot);
   return { slot, loose: slot === -1 };
 }
 
@@ -116,6 +129,42 @@ export function sideSlotOrder(side) {
 // (Go's equivalent is domain.CountScoringIppons, which both the engine and the
 // wire validator now call — that pair no longer needs a keep-in-sync comment.)
 export const realIppons = (arr) => (arr || []).filter(x => x && x !== "\u2022" && x !== "Ht");
+
+// containsHt / placeHt / stripHt: the wire-serializer's half of the same
+// Ht-as-a-real-ippon-slice-entry contract realIppons reads. Moved here from
+// api_serializers.jsx: that made the serializer a fourth consumer of this
+// file's Ht rule (alongside the read-only scoreboard and both editors listed
+// above), each with its own copy of "what counts as a free slot" or "what
+// counts as the mark". Consolidating means placeHt's free-slot search shares
+// isFreeSlot with resultSlot (defined above), and containsHt/stripHt share
+// the "Ht" literal with realIppons, so there is exactly one definition of
+// each, not four. api_serializers.jsx already imports realIppons from here
+// via a static ES import, so importing these three follows the identical,
+// already-established route.
+//
+// containsHt: the read predicate - does this ippon array already carry the
+// mark. The wire never sends a separate flag, so this is the ONLY way to
+// detect a stored verdict on an array.
+export const containsHt = (arr) => Array.isArray(arr) && arr.includes("Ht");
+
+// placeHt: the write placement - fill a free placeholder slot before
+// growing, mirroring domain.AppendHantei so the mark lands in the winner's
+// next free slot (0-0 -> outer, 1-1 -> inner), never overwriting a struck
+// point. A no-op if the array already carries the mark (never double-place).
+export function placeHt(arr) {
+  const out = [...(arr || [])];
+  if (out.includes("Ht")) return out;
+  const free = out.findIndex(isFreeSlot);
+  if (free >= 0) { out[free] = "Ht"; return out; }
+  out.push("Ht");
+  return out;
+}
+
+// stripHt: drop a stored "Ht" entry from an ippon array without touching any
+// other letter. Used where a caller must re-derive placement (e.g. re-adding
+// the mark to a different, still-attributable side) rather than simply
+// reading past it the way realIppons does for display/counting.
+export const stripHt = (arr) => (arr || []).filter((v) => v !== "Ht");
 
 // hanteiTied: the ONE JS statement of "hantei applies only to a tied
 // scoreline" (FIK 7-5 / 29-6, mirroring validation.go's equal-counts gate),

@@ -97,27 +97,22 @@ func TestApplyTournamentDefaults_Idempotent(t *testing.T) {
 	assert.Equal(t, 10, tour.SlowestCourtBufferPct)
 }
 
-func TestHanteiPtr(t *testing.T) {
-	assert.Nil(t, HanteiPtr(false), "false should map to nil so omitempty omits the field")
-	got := HanteiPtr(true)
-	require.NotNil(t, got)
-	assert.True(t, *got, "true should map to a non-nil pointer to true")
-}
-
-// TestMatchResult_HanteiOmitempty pins the wire contract: a MatchResult
-// projected from a non-hantei BracketMatch using HanteiPtr must NOT emit
-// the field. Regression for the bug where `&bm.DecidedByHantei` (always
-// non-nil) leaked `"decidedByHantei": false` into every SSE payload and
-// every HTTP response, defeating the omitempty contract.
+// TestMatchResult_HanteiOmitempty pins the wire contract for the legacy
+// DecidedByHantei channel: a MatchResult with the field left nil (the "writer
+// said nothing" case every current write path produces) must NOT emit it,
+// while a legacy fixture built with an explicit true does. Regression for the
+// bug where `&bm.DecidedByHantei` (always non-nil) leaked
+// `"decidedByHantei": false` into every SSE payload and every HTTP response,
+// defeating the omitempty contract.
 func TestMatchResult_HanteiOmitempty(t *testing.T) {
-	t.Run("non-hantei projection omits field", func(t *testing.T) {
-		mr := &MatchResult{ID: "m1", DecidedByHantei: HanteiPtr(false)}
+	t.Run("nil field omits it", func(t *testing.T) {
+		mr := &MatchResult{ID: "m1"}
 		b, err := json.Marshal(mr)
 		require.NoError(t, err)
-		assert.NotContains(t, string(b), "decidedByHantei", "wire payload must omit the field for non-hantei matches")
+		assert.NotContains(t, string(b), "decidedByHantei", "wire payload must omit the field when nothing set it")
 	})
-	t.Run("hantei projection emits true", func(t *testing.T) {
-		mr := &MatchResult{ID: "m1", DecidedByHantei: HanteiPtr(true)}
+	t.Run("legacy explicit true emits true", func(t *testing.T) {
+		mr := &MatchResult{ID: "m1", DecidedByHantei: HanteiExplicit(true)}
 		b, err := json.Marshal(mr)
 		require.NoError(t, err)
 		assert.Contains(t, string(b), `"decidedByHantei":true`)

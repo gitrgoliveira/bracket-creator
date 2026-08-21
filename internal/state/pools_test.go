@@ -233,6 +233,25 @@ func TestPoolMatches_ReopenPendingCorruptValueIsFalse(t *testing.T) {
 	}
 }
 
+// TestPoolMatches_SubResultsCorruptCellLoadsEmpty pins the corrupt-JSON
+// fallback for the SubResults column: a hand-edited or truncated cell must
+// not fail the whole row (the rest of the match's data is still good), so it
+// degrades to an empty slice rather than aborting the parse. The column now
+// logs the failure (see poolMatchColumns' SubResults take) instead of
+// silently swallowing it; the log call itself is exercised here but not
+// asserted on, since pinning slog's exact output would couple this test to a
+// logging implementation detail rather than the on-disk contract.
+func TestPoolMatches_SubResultsCorruptCellLoadsEmpty(t *testing.T) {
+	rec := make([]string, len(poolMatchColumns))
+	rec[0], rec[1], rec[2], rec[3] = "Pool A", "0", "X", "Y"
+	rec[12] = "{not valid json" // SubResults column
+
+	got := parsePoolMatchesRecords([][]string{rec})
+	require.Len(t, got, 1)
+	assert.Empty(t, got[0].SubResults, "a corrupt cell must degrade to an empty slice, not panic or abort the row")
+	assert.Equal(t, "Pool A-0", got[0].ID, "the rest of the row must still load")
+}
+
 // TestPools_PlayerIDRoundTrip verifies the appended participant-id column in
 // pools.csv survives a save→load cycle so pool.players carry .ID for the
 // league matrix.

@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -25,8 +24,7 @@ func bracketMatchAsResult(bm *state.BracketMatch) *state.MatchResult {
 	// MatchResult carries the ippon arrays. Without decoding it the snapshot has
 	// no ippons at all, and the restore writes formatScore(nil, 0) — blanking
 	// the score of the match it is supposed to be putting back.
-	ipponsA, hansokuA := domain.ParseScore(bm.ScoreA)
-	ipponsB, hansokuB := domain.ParseScore(bm.ScoreB)
+	ipponsA, ipponsB, hansokuA, hansokuB := bm.DecodedScorelines()
 	// ModifiedAt is deliberately NOT projected, and that is the one omission
 	// which is correct. The restore runs through applyMatchWrite, the
 	// timestamp LWW guard, against the stamp the REJECTED write just left on

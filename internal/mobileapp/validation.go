@@ -326,7 +326,7 @@ func validateSubBout(prefix string, sr *state.SubMatchResult, allowNumberedEncho
 	// never disagree. The tie test was raw len() here and placeholder-dropping
 	// there, which is a difference an "•" or empty cell can express.
 	if !domain.HanteiTiedScoreline(sr.IpponsA, sr.IpponsB) {
-		return &ValidationError{Field: prefix + "ippons", Message: "hantei requires a tied scoreline, ippon counts must be equal"}
+		return hanteiTiedScorelineError(prefix)
 	}
 	if !domain.IsSubBoutHanteiCompatibleDecisionStr(sr.Decision) {
 		return &ValidationError{
@@ -368,6 +368,78 @@ func validateHanteiMarkPlacement(prefix string, ipponsA, ipponsB []string, sideA
 	return nil
 }
 
+// hanteiTiedScorelineError is the ONE spelling of the tied-scoreline message,
+// shared by validateSubBout and validateMatchHantei so a wording tweak lands
+// in both places by construction rather than by remembering to edit two call
+// sites carrying the same string.
+func hanteiTiedScorelineError(prefix string) *ValidationError {
+	return &ValidationError{Field: prefix + "ippons", Message: "hantei requires a tied scoreline, ippon counts must be equal"}
+}
+
+// validateMatchHantei enforces the FULL MATCH-level hantei rule set: mark
+// placement, completed status, tied scoreline, compatible decision, and the
+// DecisionBy/DecisionReason-empty withdrawal-audit-trail check. A no-op when
+// neither ippon slice carries the mark.
+//
+// Shared by validateWithOptions (the single-score PUT path) and
+// validateBulkScoreLengths (the bulk-score path, which writes through
+// RecordMatchResult and so never runs Validate at all) so the two cannot
+// drift. Before this extraction the bulk path ran only mark-placement +
+// tied-scoreline, omitting the completed-status, compatible-decision, and
+// DecisionBy/DecisionReason checks below: a row shaped
+// {winner, ippons: [..., "Ht"], tied, decision: "hikiwake"} passed bulk with a
+// nil error and the batch response counted it as succeeded, while the single
+// endpoint 400s the identical payload. The engine's stripInvalidHantei then
+// silently discarded the mark bulk had just accepted, so the operator's
+// verdict vanished with no error surfaced anywhere.
+//
+// The winner and tied-scoreline checks are the SAME rules validateSubBout
+// applies at the sub-bout level; both call the shared domain predicates
+// rather than spelling them out twice. The decision check is deliberately
+// NARROWER than the sub-bout one (it excludes "daihyosen", which only a
+// representative bout can carry); see domain.IsMatchHanteiCompatibleDecisionStr.
+func validateMatchHantei(r *state.MatchResult) error {
+	if !domain.ContainsHantei(r.IpponsA) && !domain.ContainsHantei(r.IpponsB) {
+		return nil
+	}
+	if err := validateHanteiMarkPlacement("", r.IpponsA, r.IpponsB, r.SideA, r.SideB, r.Winner); err != nil {
+		return err
+	}
+	if r.Status != "" && r.Status != state.MatchStatusCompleted {
+		return &ValidationError{
+			Field:   "ippons",
+			Message: "hantei is only valid on completed matches",
+		}
+	}
+	if !domain.HanteiTiedScoreline(r.IpponsA, r.IpponsB) {
+		return hanteiTiedScorelineError("")
+	}
+	// Hantei is a referee judges' decision that produces a winner from a
+	// tied bout. Any other special decision (hikiwake=draw, kiken=withdrawal,
+	// fusenpai=no-show, daihyosen=rep-bout…) is semantically incompatible,
+	// persisting both would render contradictory suffixes like "Kiken (E) HT".
+	// Only the neutral values ("" and "fought") are allowed alongside hantei.
+	if !domain.IsMatchHanteiCompatibleDecisionStr(r.Decision) {
+		return &ValidationError{
+			Field:   "ippons",
+			Message: fmt.Sprintf("hantei is incompatible with decision %q, it declares a winner from a tied bout; use '' or 'fought'", r.Decision),
+		}
+	}
+	if r.DecisionBy != "" {
+		return &ValidationError{
+			Field:   "ippons",
+			Message: "decisionBy must be empty on a hantei result",
+		}
+	}
+	if r.DecisionReason != "" {
+		return &ValidationError{
+			Field:   "ippons",
+			Message: "decisionReason must be empty on a hantei result",
+		}
+	}
+	return nil
+}
+
 // validateBulkScoreLengths enforces persisted-string caps on a single
 // MatchResult before it lands in the engine. Used by the bulk-score
 // endpoint, which writes through RecordMatchResult and so bypasses
@@ -376,18 +448,15 @@ func validateHanteiMarkPlacement(prefix string, ipponsA, ipponsB []string, sideA
 // allowNumberedEncho mirrors validateSubBout's kachinuki exception; the
 // bulk handler derives it from the competition it already loads.
 func validateBulkScoreLengths(r *state.MatchResult, allowNumberedEncho bool) error {
-	// Same legacy fold + hantei placement rules as validateWithOptions: this
-	// path writes through RecordMatchResult and nothing downstream re-checks,
-	// so a misplaced judges'-decision mark (or a pre-ruling decidedByHantei
-	// flag) must be caught or converted here too.
+	// Same legacy fold + FULL hantei rule set as validateWithOptions (via the
+	// shared validateMatchHantei): this path writes through RecordMatchResult
+	// and nothing downstream re-checks, so a misplaced judges'-decision mark
+	// (or a pre-ruling decidedByHantei flag), an incompatible decision, or a
+	// withdrawal-audit field alongside a hantei verdict must be caught here
+	// too, not just placement + tied-scoreline.
 	r.NormalizeLegacyHantei()
-	if domain.ContainsHantei(r.IpponsA) || domain.ContainsHantei(r.IpponsB) {
-		if err := validateHanteiMarkPlacement("", r.IpponsA, r.IpponsB, r.SideA, r.SideB, r.Winner); err != nil {
-			return err
-		}
-		if !domain.HanteiTiedScoreline(r.IpponsA, r.IpponsB) {
-			return &ValidationError{Field: "ippons", Message: "hantei requires a tied scoreline, ippon counts must be equal"}
-		}
+	if err := validateMatchHantei(r); err != nil {
+		return err
 	}
 	if err := validateMaxLen("sideA", r.SideA, MaxLenMatchSide); err != nil {
 		return err
@@ -676,63 +745,14 @@ func (r *ScoreRequest) validateWithOptions(allowNumberedEncho bool) error {
 		}
 	}
 	// The domain.HanteiMark ippon entry records a referee judges' decision
-	// that declares a winner from a tied bout. A winner must be present (and
-	// carry the mark), the status (if supplied) must be completed, and the
-	// scoreline must be tied (equal SCORING ippon counts; the mark itself
-	// never counts). Encho is NOT required: operators may take a tied match
-	// straight to hantei without an overtime period (deliberate).
-	// The winner and tied-scoreline checks below are the SAME rules
-	// validateSubBout applies, so both call the shared domain predicates rather
-	// than spelling them out twice (the tie test used to be a raw len() here
-	// against a placeholder-dropping count there, so ["M","•"] against ["M","K"]
-	// read tied to one enforcer and untied to the other). The decision check is
-	// deliberately NARROWER than the sub-bout one; see the note on it below.
-	if domain.ContainsHantei(r.IpponsA) || domain.ContainsHantei(r.IpponsB) {
-		if err := validateHanteiMarkPlacement("", r.IpponsA, r.IpponsB, r.SideA, r.SideB, r.Winner); err != nil {
-			return err
-		}
-		if r.Status != "" && r.Status != state.MatchStatusCompleted {
-			return &ValidationError{
-				Field:   "ippons",
-				Message: "hantei is only valid on completed matches",
-			}
-		}
-		if !domain.HanteiTiedScoreline(r.IpponsA, r.IpponsB) {
-			return &ValidationError{
-				Field:   "ippons",
-				Message: "hantei requires a tied scoreline, ippon counts must be equal",
-			}
-		}
-		// Hantei is a referee judges' decision that produces a winner from a
-		// tied bout. Any other special decision (hikiwake=draw, kiken=withdrawal,
-		// fusenpai=no-show, daihyosen=rep-bout…) is semantically incompatible,
-		// persisting both would render contradictory suffixes like "Kiken (E) HT".
-		// Only the neutral values ("" and "fought") are allowed alongside hantei.
-		//
-		// The MATCH-level predicate, which is the sub-bout one minus "daihyosen";
-		// the narrowing and its reason live on the domain function. It used to be
-		// a hand-written switch here, which meant this enforcer and the engine's
-		// hanteiStillHolds spelled the same rule two different ways — and the
-		// engine's spelling was the WIDER one, so it could stamp a match-level
-		// verdict onto a decision this rejects.
-		if !domain.IsMatchHanteiCompatibleDecisionStr(r.Decision) {
-			return &ValidationError{
-				Field:   "ippons",
-				Message: fmt.Sprintf("hantei is incompatible with decision %q, it declares a winner from a tied bout; use '' or 'fought'", r.Decision),
-			}
-		}
-		if r.DecisionBy != "" {
-			return &ValidationError{
-				Field:   "ippons",
-				Message: "decisionBy must be empty on a hantei result",
-			}
-		}
-		if r.DecisionReason != "" {
-			return &ValidationError{
-				Field:   "ippons",
-				Message: "decisionReason must be empty on a hantei result",
-			}
-		}
+	// that declares a winner from a tied bout. Encho is NOT required:
+	// operators may take a tied match straight to hantei without an overtime
+	// period (deliberate). The full rule set (placement, completed status,
+	// tied scoreline, compatible decision, DecisionBy/DecisionReason empty)
+	// is shared with the bulk-score path via validateMatchHantei, so the two
+	// entry points cannot drift.
+	if err := validateMatchHantei((*state.MatchResult)(r)); err != nil {
+		return err
 	}
 	return r.validateDecision()
 }

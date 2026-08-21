@@ -201,6 +201,91 @@ func TestBulkScoreHandler_CorrectionGate(t *testing.T) {
 	})
 }
 
+// TestBulkScoreHandler_HanteiValidation pins that the bulk-score endpoint
+// rejects the FULL match-level hantei rule set, not just mark placement and
+// tied-scoreline. Before this fix a row carrying the domain.HanteiMark
+// alongside an incompatible decision (e.g. "hikiwake") passed
+// validateBulkScoreLengths with a nil error, so the response counted it as
+// succeeded — and the engine's stripInvalidHantei then silently discarded
+// the verdict the operator had just recorded, with no error surfaced
+// anywhere. It must now land in `errors`, never in `succeeded`, exactly like
+// the single-score endpoint (PUT .../matches/:mid/score) already does for
+// the identical payload.
+func TestBulkScoreHandler_HanteiValidation(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	store.SaveCompetition(&state.Competition{ID: "hv"})
+	store.SavePoolMatches("hv", []state.MatchResult{
+		{ID: "PoolA-1", SideA: "P1", SideB: "P2"},
+		{ID: "PoolA-2", SideA: "P3", SideB: "P4"},
+	})
+
+	post := func(t *testing.T, payload []state.MatchResult) (int, struct {
+		Succeeded int `json:"succeeded"`
+		Errors    []struct {
+			MatchID string `json:"matchId"`
+			Error   string `json:"error"`
+		} `json:"errors"`
+	}) {
+		t.Helper()
+		body, _ := json.Marshal(payload)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions/hv/matches/bulk-score", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		var resp struct {
+			Succeeded int `json:"succeeded"`
+			Errors    []struct {
+				MatchID string `json:"matchId"`
+				Error   string `json:"error"`
+			} `json:"errors"`
+		}
+		assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		return w.Code, resp
+	}
+
+	t.Run("mark + incompatible decision (hikiwake) is rejected, not silently persisted", func(t *testing.T) {
+		mark := domain.HanteiMark
+		code, resp := post(t, []state.MatchResult{
+			{
+				ID: "PoolA-1", SideA: "P1", SideB: "P2", Winner: "P1",
+				IpponsA: []string{"M", mark}, IpponsB: []string{"K"},
+				Decision: "hikiwake", Status: state.MatchStatusCompleted,
+			},
+		})
+		assert.Equal(t, http.StatusOK, code, "bulk-score's partial-success shape returns 200 with per-item errors")
+		assert.Equal(t, 0, resp.Succeeded, "the row must not be counted as succeeded")
+		require.Len(t, resp.Errors, 1)
+		assert.Equal(t, "PoolA-1", resp.Errors[0].MatchID)
+		assert.Contains(t, resp.Errors[0].Error, "hantei is incompatible with decision")
+
+		stored, err := store.LoadPoolMatches("hv")
+		assert.NoError(t, err)
+		for _, m := range stored {
+			if m.ID == "PoolA-1" {
+				assert.Empty(t, m.Winner, "the rejected write must not have landed")
+			}
+		}
+	})
+
+	t.Run("mark + decisionBy is rejected, not silently persisted", func(t *testing.T) {
+		mark := domain.HanteiMark
+		code, resp := post(t, []state.MatchResult{
+			{
+				ID: "PoolA-2", SideA: "P3", SideB: "P4", Winner: "P3",
+				IpponsA: []string{"M", mark}, IpponsB: []string{"K"},
+				DecisionBy: "shiro", Status: state.MatchStatusCompleted,
+			},
+		})
+		assert.Equal(t, http.StatusOK, code)
+		assert.Equal(t, 0, resp.Succeeded)
+		require.Len(t, resp.Errors, 1)
+		assert.Equal(t, "PoolA-2", resp.Errors[0].MatchID)
+		assert.Contains(t, resp.Errors[0].Error, "decisionBy must be empty on a hantei result")
+	})
+}
+
 func TestQuickScoreHandler(t *testing.T) {
 	r, store, eng, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)

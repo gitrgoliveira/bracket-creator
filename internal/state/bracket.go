@@ -3,6 +3,8 @@ package state
 import (
 	"encoding/json"
 	"os"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 )
 
 func (s *Store) LoadBracket(compID string) (*Bracket, error) {
@@ -62,6 +64,22 @@ func parseBracketBytes(raw []byte) (*Bracket, error) {
 		b.ThirdPlaceMatch.NormalizeLegacyHantei()
 	}
 	return &b, nil
+}
+
+// DecodedScorelines decodes bm's two rendered score strings (ScoreA/ScoreB)
+// into the ippon-slice + outstanding-hansoku shape MatchResult carries, via
+// the domain.ParseScore codec. The judges'-decision mark (domain.HanteiMark)
+// rides through unchanged, as one entry in the winner's slice.
+//
+// A BracketMatch persists each side's scoreline as one formatted string;
+// MatchResult carries ippon arrays. Every projection from the former to the
+// latter (the engine's rollback snapshot, the results-export overlay, the
+// daihyosen scoring path) needs the identical decode, so it lives here once
+// rather than as three hand-rolled `domain.ParseScore(bm.ScoreA/B)` pastes.
+func (bm *BracketMatch) DecodedScorelines() (ipponsA, ipponsB []string, hansokuA, hansokuB int) {
+	ipponsA, hansokuA = domain.ParseScore(bm.ScoreA)
+	ipponsB, hansokuB = domain.ParseScore(bm.ScoreB)
+	return ipponsA, ipponsB, hansokuA, hansokuB
 }
 
 // clampBracketMatchFlags forces negative engi flag counts to 0 (see

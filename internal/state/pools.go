@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/csv"
 	"encoding/json"
+	"log/slog"
 	"os"
 	"sort"
 	"strconv"
@@ -343,15 +344,20 @@ func splitIppons(s string) []string {
 //     TestPoolMatchRoundTripIsComplete forces that judgement into the open
 //     for every new MatchResult field.
 //
-// put runs against the row as it should be PERSISTED (the caller has already
-// applied a hantei codec to a copy), so every put is a pure field
-// projection. takes run in column order against a zero MatchResult seeded
-// with Round: -1 (the absent-column default), so MatchIdx's take may build on
-// the ID PoolName's take just set; a short row simply stops early, which is
-// how files written before a column existed load with that field at its
-// documented default. Row-level codecs that span columns (the hantei mark in
-// the winner's score cell as the domain.HanteiMark ippon entry it is)
-// stay outside the table, wrapped around the column loop.
+// put runs against the row as it should be PERSISTED, so every put is a pure
+// field projection against the MatchResult as stored — no codec wraps around
+// it. The judges'-decision mark is a real entry in the winner's IpponsA/
+// IpponsB slice (domain.HanteiMark), so the IpponsA/IpponsB columns persist
+// it exactly like any other ippon letter; nothing here needs to know it is
+// special. takes run in column order against a zero MatchResult seeded with
+// Round: -1 (the absent-column default), so MatchIdx's take may build on the
+// ID PoolName's take just set; a short row simply stops early, which is how
+// files written before a column existed load with that field at its
+// documented default. The one thing that DOES run outside the column loop is
+// legacy-flag folding: parsePoolMatchesRecords calls NormalizeLegacyHantei
+// after the loop to fold an old decidedByHantei boolean (nested in the
+// SubResults JSON cell) into the mark for pre-ruling files; that is a
+// read-side upgrade, not a codec the table's own columns need to know about.
 type poolMatchColumn struct {
 	name string
 	put  func(r *MatchResult) string
@@ -422,9 +428,9 @@ var poolMatchColumns = []poolMatchColumn{
 	strCol("Winner", func(m *MatchResult) *string { return &m.Winner }),
 	// The ippon cells hold the PERSISTED slices: waza letters joined with "|",
 	// plus the judges'-decision mark in the winner's cell when the match was
-	// decided by hantei (encoded by the writer, stripped again by the reader;
-	// recorded as the domain.HanteiMark entry in the winner's cell — the mark
-	// IS the record; no codec strips or restores it any more).
+	// decided by hantei. The mark (domain.HanteiMark) is a real entry in that
+	// slice — the mark IS the record — so it round-trips through this column
+	// like any other letter, with no wrapping codec on either side.
 	{name: "IpponsA",
 		put:  func(r *MatchResult) string { return strings.Join(r.IpponsA, "|") },
 		take: func(m *MatchResult, cell string) { m.IpponsA = splitIppons(cell) }},
@@ -449,12 +455,31 @@ var poolMatchColumns = []poolMatchColumn{
 			if len(r.SubResults) == 0 {
 				return ""
 			}
-			b, _ := json.Marshal(r.SubResults)
+			b, err := json.Marshal(r.SubResults)
+			if err != nil {
+				// The column type is string, not (string, error): every other
+				// put in this table is infallible (strconv formatting never
+				// fails), so there is no error path to propagate this into.
+				// Log it so a marshal failure on live team-match data is at
+				// least visible instead of silently writing an empty cell.
+				slog.Error("state: pool match SubResults marshal failed; writing empty cell",
+					"matchID", r.ID, "error", err)
+				return ""
+			}
 			return string(b)
 		},
 		take: func(m *MatchResult, cell string) {
-			if cell != "" {
-				_ = json.Unmarshal([]byte(cell), &m.SubResults)
+			if cell == "" {
+				return
+			}
+			if err := json.Unmarshal([]byte(cell), &m.SubResults); err != nil {
+				// Same infallible-signature constraint as put above: a
+				// corrupt cell must not fail the whole row read (the rest of
+				// the match is still good), but it must not load in silence
+				// either, or a hand-edited/truncated cell reads back as an
+				// empty team encounter with no trace of the data loss.
+				slog.Error("state: pool match SubResults cell corrupt; loading as empty",
+					"matchID", m.ID, "error", err)
 			}
 		}},
 	strCol("ScheduledAt", func(m *MatchResult) *string { return &m.ScheduledAt }),
@@ -566,11 +591,11 @@ func parsePoolMatchesRecords(records [][]string) []MatchResult {
 			col.take(&m, rec[c])
 		}
 
-		// Restore a hantei that was persisted as a mark in the winner's score
-		// cell, and take the mark back out so nothing above the store sees it.
-		// The judges'-decision mark loads as the ippon entry it is; only the
-		// LEGACY decidedByHantei flags inside the SubResults JSON cell need
-		// folding into the mark (legacy_hantei.go).
+		// The judges'-decision mark loads as the plain ippon entry it is (the
+		// IpponsA/IpponsB take above already read it, verbatim, into the
+		// slice). NormalizeLegacyHantei's only remaining job here is folding
+		// LEGACY decidedByHantei flags nested in the SubResults JSON cell
+		// (pre-ruling files) into that same mark form; see legacy_hantei.go.
 		m.NormalizeLegacyHantei()
 
 		results = append(results, m)

@@ -746,13 +746,14 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// the fresh roster. FileMtime returns 0 if the file does not exist,
 	// which is a valid "no participants yet" state, we snapshot the
 	// same 0 and the comparison still works.
-	// Legacy shapes convert on first read (state/legacy_upgrade.go); force
-	// that conversion BEFORE fingerprinting, or the load below performs it
-	// between snapshot and re-check and the guard reads our own one-time
-	// rewrite as a concurrent operator write.
-	e.store.EnsureLegacyUpgraded(id)
-	loadedParticipantsMtime := e.store.FileMtime(id, "participants.csv")
-	loadedSeedsMtime := e.store.FileMtime(id, "seeds.csv")
+	// ParticipantsFingerprint runs the legacy seed-dojo upgrade (state/
+	// legacy_upgrade.go) BEFORE stat'ing, so these mtimes are the post-
+	// upgrade files rather than a snapshot the load below could still
+	// convert between here and the re-check, which would then read our own
+	// one-time rewrite as a concurrent operator write. The upgrade ordering
+	// is folded into the store method itself so this call site cannot get
+	// it wrong by omission.
+	loadedParticipantsMtime, loadedSeedsMtime := e.store.ParticipantsFingerprint(id)
 
 	if comp.Kind == "team" && comp.TeamSize == 0 {
 		comp.TeamSize = 5 // Default for Kendo

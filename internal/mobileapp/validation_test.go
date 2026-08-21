@@ -1223,6 +1223,74 @@ func TestValidateBulkScoreLengths_SubBoutHantei(t *testing.T) {
 	})
 }
 
+// TestValidateBulkScoreLengths_MatchLevelHantei is the match-level twin of
+// TestValidateBulkScoreLengths_SubBoutHantei. Before this fix,
+// validateBulkScoreLengths ran only mark placement + tied-scoreline (via an
+// inline ContainsHantei block), omitting the completed-status check, the
+// compatible-decision check, and the DecisionBy/DecisionReason-empty checks
+// that ScoreRequest.validateWithOptions runs on the single-score path. A row
+// shaped {winner, ippons carrying the mark, tied, decision: hikiwake} (or one
+// naming decisionBy) therefore passed bulk with a nil error while the single
+// endpoint 400s the identical payload, and the batch response counted the row
+// as succeeded — the engine's stripInvalidHantei then silently discarded the
+// verdict bulk had just accepted, with no error surfaced anywhere. Both paths
+// now share validateMatchHantei, so they must reject the same payload with
+// the exact same message.
+func TestValidateBulkScoreLengths_MatchLevelHantei(t *testing.T) {
+	mark := domain.HanteiMark
+
+	t.Run("mark + incompatible decision (hikiwake) rejected identically on both paths", func(t *testing.T) {
+		mr := state.MatchResult{
+			SideA: "TeamA", SideB: "TeamB", Winner: "TeamA",
+			IpponsA: []string{"M", mark}, IpponsB: []string{"K"},
+			Decision: "hikiwake", Status: state.MatchStatusCompleted,
+		}
+
+		bulkErr := validateBulkScoreLengths(&mr, false)
+		require.Error(t, bulkErr, "bulk must reject a mark alongside an incompatible decision")
+
+		sr := ScoreRequest(mr)
+		singleErr := sr.Validate()
+		require.Error(t, singleErr, "single-score path must reject the identical payload")
+
+		assert.Equal(t, singleErr.Error(), bulkErr.Error(), "bulk and single must reject with the SAME message")
+	})
+
+	t.Run("mark + decisionBy rejected identically on both paths", func(t *testing.T) {
+		mr := state.MatchResult{
+			SideA: "TeamA", SideB: "TeamB", Winner: "TeamA",
+			IpponsA: []string{"M", mark}, IpponsB: []string{"K"},
+			DecisionBy: "shiro", Status: state.MatchStatusCompleted,
+		}
+
+		bulkErr := validateBulkScoreLengths(&mr, false)
+		require.Error(t, bulkErr, "bulk must reject a mark alongside a decisionBy audit field")
+
+		sr := ScoreRequest(mr)
+		singleErr := sr.Validate()
+		require.Error(t, singleErr, "single-score path must reject the identical payload")
+
+		assert.Equal(t, singleErr.Error(), bulkErr.Error(), "bulk and single must reject with the SAME message")
+	})
+
+	t.Run("mark on a non-completed status rejected identically on both paths", func(t *testing.T) {
+		mr := state.MatchResult{
+			SideA: "TeamA", SideB: "TeamB", Winner: "TeamA",
+			IpponsA: []string{"M", mark}, IpponsB: []string{"K"},
+			Status: state.MatchStatusRunning,
+		}
+
+		bulkErr := validateBulkScoreLengths(&mr, false)
+		require.Error(t, bulkErr, "bulk must reject a mark on a still-running match")
+
+		sr := ScoreRequest(mr)
+		singleErr := sr.Validate()
+		require.Error(t, singleErr, "single-score path must reject the identical payload")
+
+		assert.Equal(t, singleErr.Error(), bulkErr.Error(), "bulk and single must reject with the SAME message")
+	})
+}
+
 // TestIsSelfRunReportableDecision covers the allowlist and rejection cases
 // for participant self-reporting in self-run tournaments.
 //

@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"errors"
 	"os"
 	"sync"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
@@ -1027,6 +1029,86 @@ func TestRecordMatchResult_HansokuAutoAward(t *testing.T) {
 		require.Len(t, stored, 1)
 		assert.Equal(t, []string{"H"}, stored[0].IpponsA)
 		assert.Equal(t, []string{"K"}, stored[0].IpponsB)
+	})
+}
+
+// TestHansokuHanteiConflict pins the ordering fix in checkHansokuHanteiConflict:
+// a payload that arrives at the engine already tied and carrying the
+// domain.HanteiMark can still be UNTIED by the hansoku auto-award, since
+// applyHansokuIppons runs after the wire's own tied-scoreline check (which
+// only ever sees the payload as the client sent it, before the award). Only
+// reachable through the raw engine API — a client that pre-computes hansoku
+// counts so the wire validator sees a pre-award tied scoreline, or any caller
+// that bypasses ScoreRequest.Validate — because the normal PUT /score path
+// validates the payload BEFORE hansoku is folded in and never sees the
+// post-award result. Before the fix this fell straight through to
+// stripInvalidHantei, which silently discarded the mark with a nil error:
+// the operator's hansoku award would silently overrule a verdict the same
+// payload carried, and neither engine caller ever surfaced it.
+func TestHansokuHanteiConflict(t *testing.T) {
+	mark := domain.HanteiMark
+
+	newHansokuHanteiComp := func(t *testing.T, id string) *Engine {
+		t.Helper()
+		eng, store, _ := setupTestEngine(t)
+		require.NoError(t, store.SaveCompetition(&state.Competition{ID: id, Name: "HH"}))
+		require.NoError(t, store.SavePoolMatches(id, []state.MatchResult{
+			{ID: "P1-1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled},
+		}))
+		return eng
+	}
+
+	// ipponsA:[M,Ht] vs ipponsB:[K] reads 1-1 (the mark is not a scoring
+	// ippon), a valid tied hantei scoreline. hansokuB:2 then makes
+	// applyHansokuIppons append an "H" to ipponsA (HansokuB awards the
+	// OPPONENT, Alice/SideA, an ippon per FIK Article 20), producing 2-1 —
+	// untied — while the mark still stands on Alice's side.
+	untyingPatch := func() *state.MatchResult {
+		return &state.MatchResult{
+			SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			IpponsA:  []string{"M", mark},
+			IpponsB:  []string{"K"},
+			HansokuB: 2,
+			Status:   state.MatchStatusCompleted,
+		}
+	}
+
+	t.Run("non-tx: RecordMatchResult rejects the untying award", func(t *testing.T) {
+		eng := newHansokuHanteiComp(t, "hh-nontx")
+		err := eng.RecordMatchResult("hh-nontx", "P1-1", untyingPatch())
+		require.Error(t, err)
+		var verr *ValidationError
+		require.True(t, errors.As(err, &verr), "must be a *ValidationError so handlers map it to 400")
+		assert.Contains(t, verr.Msg, "hantei requires a tied scoreline")
+	})
+
+	t.Run("tx: RecordMatchResultWithIneligibilityTx (the production score route) rejects the untying award", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		const compID = "hh-tx"
+		require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "HH"}))
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "P1-1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled},
+		}))
+		err := store.WithTransaction(compID, func(tx state.StoreTx) error {
+			_, terr := eng.RecordMatchResultWithIneligibilityTx(tx, compID, "P1-1", untyingPatch())
+			return terr
+		})
+		require.Error(t, err)
+		var verr *ValidationError
+		require.True(t, errors.As(err, &verr), "must be a *ValidationError so handlers map it to 400")
+		assert.Contains(t, verr.Msg, "hantei requires a tied scoreline")
+	})
+
+	t.Run("a markless hansoku award is unaffected", func(t *testing.T) {
+		eng := newHansokuHanteiComp(t, "hh-markless")
+		patch := &state.MatchResult{
+			SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			IpponsA:  []string{"M"},
+			IpponsB:  []string{"K"},
+			HansokuB: 2,
+			Status:   state.MatchStatusCompleted,
+		}
+		require.NoError(t, eng.RecordMatchResult("hh-markless", "P1-1", patch))
 	})
 }
 

@@ -529,8 +529,12 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
   // above carries only the middle marks (X / (E) / (DH)).
   const cardMarks = isDone ? sideMarks(match.decision, !!match.decidedByHantei) : { winner: "", loser: "" };
   const [aMark, bMark] = placeMarks(cardMarks, aWin, bWin);
-  const aScore = isDone ? (joinSp(isEngiMatch ? String(match.flagsA || 0) : ipponsA.join(""), aMark) || null) : null;
-  const bScore = isDone ? (joinSp(isEngiMatch ? String(match.flagsB || 0) : ipponsB.join(""), bMark) || null) : null;
+  // realIppons strips the "Ht" mark from the letters before joining: the mark
+  // is re-attached separately via cardMarks/aMark/bMark (sideMarks + placeMarks),
+  // so joining the raw array here would double it (a 1-1 hantei match would
+  // read "MHt Ht" instead of "M Ht"). Mirrors matchScoreStr's realIppons join above.
+  const aScore = isDone ? (joinSp(isEngiMatch ? String(match.flagsA || 0) : realIppons(ipponsA).join(""), aMark) || null) : null;
+  const bScore = isDone ? (joinSp(isEngiMatch ? String(match.flagsB || 0) : realIppons(ipponsB).join(""), bMark) || null) : null;
 
   const aTBD = match.sideA && typeof match.sideA.id === "string" && match.sideA.id.startsWith("tbd-");
   const bTBD = match.sideB && typeof match.sideB.id === "string" && match.sideB.id.startsWith("tbd-");

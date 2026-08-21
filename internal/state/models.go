@@ -1091,27 +1091,12 @@ func (m *MatchResult) HanteiDecided() bool {
 	return domain.ContainsHantei(m.IpponsA) || domain.ContainsHantei(m.IpponsB)
 }
 
-// HanteiPtr returns &b when b is true, nil otherwise. Use on READ paths
-// that project a BracketMatch.DecidedByHantei (bool) into a MatchResult
-// (which uses *bool with omitempty) so the wire payload OMITS the field
-// for non-hantei matches rather than emitting an explicit "false".
-// Always assigning &bm.DecidedByHantei would leak a non-nil pointer for
-// every non-hantei match, defeating the omitempty contract.
-func HanteiPtr(b bool) *bool {
-	if !b {
-		return nil
-	}
-	return &b
-}
-
 // HanteiExplicit returns a pointer to the given value, INCLUDING false.
-//
-// HanteiPtr above deliberately collapses false to nil, which is right for the
-// omitempty output projections it was written for but wrong for the tri-state
-// wire: "the writer withdrew the verdict" (explicit false) and "the writer said
-// nothing" (nil) are different instructions, and only nil means preserve. Every
-// site that needs a real false previously hand-rolled `f := false; &f` with a
-// paragraph explaining why HanteiPtr could not be used. Use this instead.
+// Legacy test-fixture constructor: production code never sets the legacy
+// DecidedByHantei fields (see legacy_hantei.go), so this exists only so tests
+// can construct a legacy payload shape (explicit true/false, as opposed to a
+// nil "writer said nothing") without hand-rolling `f := false; &f` at each
+// call site.
 func HanteiExplicit(v bool) *bool {
 	return &v
 }

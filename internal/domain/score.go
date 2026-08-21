@@ -92,18 +92,26 @@ func ParseScore(s string) ([]string, int) {
 			s = strings.TrimSpace(s[:i])
 		}
 	}
+	// Byte lookahead, not []rune(s): 'H' and 't' are both ASCII (one byte
+	// each), so s[i+1] safely peeks the byte right after a rune-range 'H'
+	// without decoding the whole string up front. skipNext consumes the 't'
+	// that was already folded into the HanteiMark token, so the next
+	// range step (which lands exactly on that byte) does not re-tokenize it.
 	var ippons []string
-	runes := []rune(s)
-	for i := 0; i < len(runes); i++ {
-		r := runes[i]
+	skipNext := false
+	for i, r := range s {
+		if skipNext {
+			skipNext = false
+			continue
+		}
 		if r == ' ' {
 			continue
 		}
 		// The hantei mark is the codec's one two-rune token; see
 		// IpponFitsScoreCodec for why the lookahead cannot misfire.
-		if r == 'H' && i+1 < len(runes) && runes[i+1] == 't' {
+		if r == 'H' && i+1 < len(s) && s[i+1] == 't' {
 			ippons = append(ippons, HanteiMark)
-			i++
+			skipNext = true
 			continue
 		}
 		ippons = append(ippons, string(r))

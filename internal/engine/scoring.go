@@ -242,10 +242,16 @@ func stripInvalidHantei(result *state.MatchResult) {
 		return
 	}
 	// Winner-side pin: the mark names the competitor the referees chose.
-	if domain.ContainsHantei(result.IpponsA) && result.Winner != result.SideA {
+	// Attribution goes through domain.AttributeWinnerSide, the one owner of
+	// "which side won" (ids win over names, so a same-name pair - legal:
+	// two participants from different dojos may share a name - can't send
+	// the mark to the wrong side just because names alone couldn't tell
+	// them apart).
+	side := domain.AttributeWinnerSide(result.WinnerID, result.SideAID, result.SideBID, result.Winner, result.SideA, result.SideB)
+	if domain.ContainsHantei(result.IpponsA) && side != domain.MatchSideA {
 		result.IpponsA = domain.StripHantei(result.IpponsA)
 	}
-	if domain.ContainsHantei(result.IpponsB) && result.Winner != result.SideB {
+	if domain.ContainsHantei(result.IpponsB) && side != domain.MatchSideB {
 		result.IpponsB = domain.StripHantei(result.IpponsB)
 	}
 }

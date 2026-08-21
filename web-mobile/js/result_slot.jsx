@@ -12,14 +12,18 @@
 // pure functions, and leaving any future surface (the viewer card, the overlay)
 // the same bad choice. A shared rule belongs in the leaf, not in one consumer.
 //
-// `containsHt`, `hanteiDecided`, `placeHt`, `placeHtForWinner` and `stripHt`
-// are the wire-serializer's slice of the same rule: api_serializers.jsx's
-// toBackendMatchResult and normalizeMatch are the consumers. `hanteiDecided`
-// answers "does this match/sub carry the mark" (mirrors Go's
-// HanteiDecided()); `placeHtForWinner` answers "which side does an armed
-// verdict's mark go on" (winner names sideA/sideB/neither) — both replaced
-// literal `containsHt(x.ipponsA) || containsHt(x.ipponsB)` / winner-name
-// if-chains duplicated across that file's two write paths. IPPON_PLACEHOLDER
+// `containsHt`, `hanteiDecided`, `placeHt`, `placeHtForWinner`, `stripHt`
+// and `attributeWinnerSide` are the wire-serializer's slice of the same rule:
+// api_serializers.jsx's toBackendMatchResult and normalizeMatch are the
+// consumers. `hanteiDecided` answers "does this match/sub carry the mark"
+// (mirrors Go's HanteiDecided()); `attributeWinnerSide` answers "which side
+// does a winner name" - id-first when a winnerId/sideAId/sideBId triple is
+// available, name fallback (sideA-first) otherwise - mirroring Go's
+// internal/domain.AttributeWinnerSide exactly; `placeHtForWinner` answers
+// "which side does an armed verdict's mark go on" by delegating to that
+// helper and then placing the mark in the free slot — this replaced literal
+// `containsHt(x.ipponsA) || containsHt(x.ipponsB)` / winner-name if-chains
+// duplicated across that file's two write paths. IPPON_PLACEHOLDER
 // ("•", U+2022 BULLET) and HANTEI_MARK ("Ht") are this file's two literal
 // tokens, spelled once each and mirrored byte-for-byte by Go's
 // internal/domain/ippon.go (IpponPlaceholder / HanteiMark). Both languages'
@@ -209,20 +213,64 @@ export function placeHt(arr) {
 // than simply reading past it the way realIppons does for display/counting.
 export const stripHt = (arr) => (arr || []).filter((v) => v !== HANTEI_MARK);
 
-// placeHtForWinner: the ONE statement of "which side gets the mark" - winner
-// names sideA -> place it on A; names sideB -> place it on B; names NEITHER
-// (no winner, or a rename-drifted/unattributable name) -> leave both arrays
-// exactly as given. api_serializers.jsx's toBackendMatchResult had this same
-// three-way switch written out twice (once for the top-level match, once per
-// sub-bout), which is exactly the kind of copy this file exists to prevent
-// for the rest of the Ht rules. It takes the already-prepared ipponsA/ipponsB
-// (callers decide separately whether to stripHt first: the top-level caller's
-// arrays already arrive pre-stripped via realIppons, the sub-bout caller
-// strips explicitly) and returns [newA, newB], unchanged on whichever side it
-// did not touch.
-export function placeHtForWinner(winner, sideA, sideB, ipponsA, ipponsB) {
-  if (winner && winner === sideA) return [placeHt(ipponsA), ipponsB];
-  if (winner && winner === sideB) return [ipponsA, placeHt(ipponsB)];
+// attributeWinnerSide: the ONE statement of "which side does a winner name",
+// id-first. Mirrors Go's internal/domain.AttributeWinnerSide exactly (that
+// function is this one's twin - a divergence between the two is a bug, not a
+// style choice):
+//   - when winnerId, sideAId AND sideBId are ALL non-empty, ids are
+//     AUTHORITATIVE and win over names when they disagree: winnerId ===
+//     sideAId -> "a", winnerId === sideBId -> "b", matches neither -> null
+//     (unattributable - do NOT fall back to names in this branch: a
+//     same-name/different-dojo pair is exactly the case ids exist to
+//     disambiguate, so a name fallback here would silently reintroduce the
+//     bug this function fixes).
+//   - otherwise (any id missing - legacy data, id-less payloads, sub-bout
+//     rows that carry no ids at all) fall back to the name comparison this
+//     file has always used: an empty winner name is unattributable, then
+//     sideA-first when the winner name matches BOTH sides (CLAUDE.md's
+//     documented defensive AKA/sideA-first convention), so id-less data
+//     stays byte-identical to before this function existed.
+// The id branch is checked FIRST and unconditionally - it does not require a
+// non-empty winner NAME, only a non-empty winnerId matching all three ids'
+// presence. This mirrors Go's ordering exactly (AttributeWinnerSide checks
+// the id triple before its `winner == ""` guard, which belongs to the name
+// fallback only); do not hoist an empty-winner-name guard above the id
+// branch, which would silently disagree with the Go twin whenever a caller
+// has an id but no name.
+// Exported so a caller that only needs "which side", not "place the mark",
+// can use it directly (e.g. a future consumer that isn't ippon-shaped).
+export function attributeWinnerSide({ winnerId, sideAId, sideBId, winner, sideA, sideB } = {}) {
+  if (winnerId && sideAId && sideBId) {
+    if (winnerId === sideAId) return "a";
+    if (winnerId === sideBId) return "b";
+    return null;
+  }
+  if (!winner) return null;
+  if (winner === sideA) return "a";
+  if (winner === sideB) return "b";
+  return null;
+}
+
+// placeHtForWinner: the ONE statement of "place the mark on the side a winner
+// names" - delegates the WHICH SIDE question to attributeWinnerSide above and
+// only decides WHICH SLOT (via placeHt). api_serializers.jsx's
+// toBackendMatchResult had this same three-way switch written out twice (once
+// for the top-level match, once per sub-bout), which is exactly the kind of
+// copy this file exists to prevent for the rest of the Ht rules. It takes the
+// already-prepared ipponsA/ipponsB (callers decide separately whether to
+// stripHt first: the top-level caller's arrays already arrive pre-stripped
+// via realIppons, the sub-bout caller strips explicitly) and returns [newA,
+// newB], unchanged on whichever side it did not touch.
+//
+// winnerId/sideAId/sideBId are OPTIONAL trailing args: the sub-bout call site
+// (api_serializers.jsx, sub rows carry no ids at all) omits them, so
+// attributeWinnerSide's id branch never fires there and that path stays on
+// the name fallback exactly as before this function existed. The top-level
+// match call site threads the ids it already has in scope.
+export function placeHtForWinner(winner, sideA, sideB, ipponsA, ipponsB, winnerId, sideAId, sideBId) {
+  const side = attributeWinnerSide({ winnerId, sideAId, sideBId, winner, sideA, sideB });
+  if (side === "a") return [placeHt(ipponsA), ipponsB];
+  if (side === "b") return [ipponsA, placeHt(ipponsB)];
   return [ipponsA, ipponsB];
 }
 

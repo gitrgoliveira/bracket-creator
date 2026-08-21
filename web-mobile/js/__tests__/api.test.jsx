@@ -191,6 +191,57 @@ describe('API Utils', () => {
       expect(result.winnerId).toBe('id-b');
     });
 
+    // bc-dmsr follow-up: the Ht mark's side ATTRIBUTION (which array the "Ht"
+    // token lands in) was previously done by NAME everywhere, sideA-first.
+    // Same-name/different-dojo sides are legal (the duplicate guard keys
+    // name+dojo), so when both sides of an individual match share a name, the
+    // mark was written to sideA even when the id-carrying winnerId named
+    // sideB. winnerId was already correctly derived (see the tests above)
+    // but was discarded for mark placement - this is the fix and its pin.
+    describe('Ht mark placement attributes by id, not name (bc-dmsr follow-up)', () => {
+      it('same-name pair: places the mark on sideB when the id says so (the bug, now fixed)', () => {
+        const match = { sideA: { id: 'id-kenshikan', name: 'Tanaka Kenji' }, sideB: { id: 'id-mumeishi', name: 'Tanaka Kenji' } };
+        const result = toBackendMatchResult({
+          winner: { id: 'id-mumeishi', name: 'Tanaka Kenji' },
+          status: 'complete',
+          ipponsA: ['M'], ipponsB: ['M'],
+          score: { type: 'ippon' },
+          decidedByHantei: true,
+        }, match);
+        expect(result.winnerId).toBe('id-mumeishi');
+        expect(result.ipponsA).toEqual(['M']);
+        expect(result.ipponsB).toEqual(['M', 'Ht']);
+      });
+
+      it('ids present but the winner id matches neither side: unattributable, no mark placed', () => {
+        const match = { sideA: { id: 'id-a', name: 'Player A' }, sideB: { id: 'id-b', name: 'Player B' } };
+        const result = toBackendMatchResult({
+          winner: { id: 'id-drifted', name: 'Player A' }, // id names neither side
+          status: 'complete',
+          ipponsA: ['M'], ipponsB: ['K'],
+          decidedByHantei: true,
+        }, match);
+        expect(result.ipponsA).toEqual(['M']);
+        expect(result.ipponsB).toEqual(['K']);
+      });
+
+      it('id-less same-name pair: falls back to the sideA-first name convention unchanged', () => {
+        // Neither side carries an id (bare-string sides): the id branch can
+        // never fire, so this must place the mark on sideA exactly as before
+        // this fix, per CLAUDE.md's documented defensive convention.
+        const match = { sideA: 'Tanaka Kenji', sideB: 'Tanaka Kenji' };
+        const result = toBackendMatchResult({
+          winner: 'Tanaka Kenji',
+          status: 'complete',
+          ipponsA: ['M'], ipponsB: ['M'],
+          score: { type: 'ippon' },
+          decidedByHantei: true,
+        }, match);
+        expect(result.ipponsA).toEqual(['M', 'Ht']);
+        expect(result.ipponsB).toEqual(['M']);
+      });
+    });
+
     // Unattributable winner: a rename-drifted (or same-name, no-id) stored
     // winner can leave wantHantei true while the winner name matches NEITHER
     // side. The mark then has no side to ride on and NO mark is emitted -

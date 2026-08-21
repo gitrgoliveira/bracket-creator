@@ -104,6 +104,72 @@ func IsScoringIppon(v string) bool {
 	return v != "" && v != IpponPlaceholder && v != HanteiMark
 }
 
+// MatchSide is the three-value result of attributing a match's winner to a
+// named side: MatchSideA, MatchSideB, or MatchSideNone when the winner
+// cannot be attributed to either (empty winner, or a name/id that matches
+// neither side). See AttributeWinnerSide, the one function that produces it.
+type MatchSide string
+
+const (
+	MatchSideNone MatchSide = ""
+	MatchSideA    MatchSide = "A"
+	MatchSideB    MatchSide = "B"
+)
+
+// AttributeWinnerSide is the ONE owner of "which side won", used everywhere a
+// hantei mark (or any other winner-attributed result) is placed, validated,
+// or exported at MATCH level. It exists because the mark's side used to be
+// decided by NAME alone, and a name is not unique within a competition: two
+// participants from different dojos may share a name
+// (CheckDuplicateEntriesByNameDojo only rejects same-name AND same-dojo), so
+// a same-name pair let the mark land on the wrong side whenever the actual
+// WinnerID named side B but names alone picked side A.
+//
+// Rule:
+//
+//   - If winnerID, sideAID and sideBID are ALL non-empty, attribute by id:
+//     winnerID==sideAID -> MatchSideA; winnerID==sideBID -> MatchSideB;
+//     matches neither -> MatchSideNone. Ids WIN over names when they
+//     disagree; that is the point of this function.
+//   - Otherwise (any of the three ids empty: legacy data, id-less payloads,
+//     bracket rows, or a sub-bout, which carries no ids at all), fall back
+//     to the name comparison: winner==sideA -> MatchSideA; else
+//     winner==sideB -> MatchSideB; matches neither -> MatchSideNone. sideA
+//     is checked first, so a winner name that matches BOTH sides (invalid
+//     data - see the same convention documented for team aggregation)
+//     resolves to MatchSideA, exactly as the equivalent name-only checks
+//     elsewhere in this codebase (e.g. the switch order in
+//     export.SideMarksLR) always have. This keeps id-less data byte-for-byte
+//     identical to pre-id-threading behaviour.
+//   - An empty winner is always MatchSideNone: it must never string-match an
+//     empty sideA/sideB (e.g. an unset field), so this is checked before any
+//     comparison.
+//
+// Mirrored in JS (bracket.jsx) with the same semantics; keep both in sync.
+func AttributeWinnerSide(winnerID, sideAID, sideBID, winner, sideA, sideB string) MatchSide {
+	if winnerID != "" && sideAID != "" && sideBID != "" {
+		switch winnerID {
+		case sideAID:
+			return MatchSideA
+		case sideBID:
+			return MatchSideB
+		default:
+			return MatchSideNone
+		}
+	}
+	if winner == "" {
+		return MatchSideNone
+	}
+	switch winner {
+	case sideA:
+		return MatchSideA
+	case sideB:
+		return MatchSideB
+	default:
+		return MatchSideNone
+	}
+}
+
 // HanteiTiedScoreline reports whether two ippon arrays hold an equal number of
 // scoring ippons, which is the precondition a hantei verdict rests on
 // (FIK 7-5 / 29-6). Encho is NOT a precondition; a tied scoreline is.

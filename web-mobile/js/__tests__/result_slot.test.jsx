@@ -3,7 +3,7 @@
 // (admin_scoring_team.jsx): a result mark naming one competitor fills that
 // side's next FREE ippon slot, outside-to-inside, and never the shared centre.
 import { describe, it, expect } from 'vitest';
-import { resultSlot, sideSlotOrder } from '../result_slot.jsx';
+import { resultSlot, sideSlotOrder, attributeWinnerSide, placeHtForWinner } from '../result_slot.jsx';
 
 describe('resultSlot (which slot a result mark takes)', () => {
   it('takes the outer slot when the side has no points (a 0-0 bout)', () => {
@@ -76,5 +76,107 @@ describe('sideSlotOrder (where a side\'s slots appear)', () => {
     expect(slot).toBe(1);
     expect(sideSlotOrder('aka').indexOf(slot)).toBe(0);
     expect(sideSlotOrder('shiro').indexOf(slot)).toBe(1);
+  });
+});
+
+// attributeWinnerSide (bc-dmsr follow-up): "which side does a winner name",
+// id-first. Mirrors Go's internal/domain.AttributeWinnerSide exactly. This is
+// the fix for the finding that the Ht mark's side attribution was NAME-only,
+// sideA-first, everywhere - so a same-name/different-dojo pair (legal: the
+// duplicate guard keys name+dojo) placed the mark on sideA even when the
+// id-carrying winnerId named sideB.
+describe('attributeWinnerSide (id-first winner attribution)', () => {
+  it('SAME NAME, ids disagree with name-first: attributes to B by id (the bug, now fixed)', () => {
+    // Both sides are named "Tanaka Kenji" (different dojos). The id-carrying
+    // winnerId names sideB; the old name-only rule (sideA-first on a name
+    // collision) would have wrongly picked "a".
+    const side = attributeWinnerSide({
+      winnerId: 'id-mumeishi', sideAId: 'id-kenshikan', sideBId: 'id-mumeishi',
+      winner: 'Tanaka Kenji', sideA: 'Tanaka Kenji', sideB: 'Tanaka Kenji',
+    });
+    expect(side).toBe('b');
+  });
+
+  it('ids present but winnerId matches neither side: unattributable, no mark', () => {
+    const side = attributeWinnerSide({
+      winnerId: 'id-someone-else', sideAId: 'id-a', sideBId: 'id-b',
+      winner: 'Someone Else', sideA: 'Player A', sideB: 'Player B',
+    });
+    expect(side).toBeNull();
+  });
+
+  it('ids win over names even when they disagree (distinct names, id says B)', () => {
+    const side = attributeWinnerSide({
+      winnerId: 'id-b', sideAId: 'id-a', sideBId: 'id-b',
+      winner: 'Player A', sideA: 'Player A', sideB: 'Player B',
+    });
+    expect(side).toBe('b');
+  });
+
+  it('the id branch fires even with an empty winner NAME, matching Go\'s unconditional ordering', () => {
+    // Go's AttributeWinnerSide checks the id triple before its `winner == ""`
+    // guard (the guard belongs to the name-fallback branch only). A caller
+    // with an id but no name must still attribute by id, not fall through to
+    // the name path's empty-winner short-circuit.
+    const side = attributeWinnerSide({
+      winnerId: 'id-b', sideAId: 'id-a', sideBId: 'id-b',
+      winner: '', sideA: 'Player A', sideB: 'Player B',
+    });
+    expect(side).toBe('b');
+  });
+
+  it('any id missing falls back to the name comparison unchanged', () => {
+    // sideBId missing (legacy/id-less data): the id branch never fires even
+    // though winnerId and sideAId are both present.
+    const side = attributeWinnerSide({
+      winnerId: 'id-a', sideAId: 'id-a', sideBId: '',
+      winner: 'Player A', sideA: 'Player A', sideB: 'Player B',
+    });
+    expect(side).toBe('a');
+  });
+
+  it('id-less: winner name matches sideA -> "a"', () => {
+    expect(attributeWinnerSide({ winner: 'A', sideA: 'A', sideB: 'B' })).toBe('a');
+  });
+
+  it('id-less: winner name matches sideB -> "b"', () => {
+    expect(attributeWinnerSide({ winner: 'B', sideA: 'A', sideB: 'B' })).toBe('b');
+  });
+
+  it('id-less: winner name matches BOTH sides resolves sideA-first (unchanged convention)', () => {
+    expect(attributeWinnerSide({ winner: 'Tanaka Kenji', sideA: 'Tanaka Kenji', sideB: 'Tanaka Kenji' })).toBe('a');
+  });
+
+  it('id-less: winner names neither side -> unattributable', () => {
+    expect(attributeWinnerSide({ winner: 'Charlie', sideA: 'Alice', sideB: 'Bob' })).toBeNull();
+  });
+
+  it('an empty winner is always unattributable, ids or not', () => {
+    expect(attributeWinnerSide({ winner: '', sideA: 'A', sideB: 'B', winnerId: '', sideAId: 'id-a', sideBId: 'id-b' })).toBeNull();
+    expect(attributeWinnerSide()).toBeNull();
+  });
+});
+
+describe('placeHtForWinner (delegates side attribution to attributeWinnerSide)', () => {
+  it('places the mark on B when ids attribute there despite a same-name sideA-first collision', () => {
+    const [a, b] = placeHtForWinner(
+      'Tanaka Kenji', 'Tanaka Kenji', 'Tanaka Kenji', ['M'], ['M'],
+      'id-mumeishi', 'id-kenshikan', 'id-mumeishi');
+    expect(a).toEqual(['M']);
+    expect(b).toEqual(['M', 'Ht']);
+  });
+
+  it('leaves both arrays untouched when ids attribute to neither side', () => {
+    const [a, b] = placeHtForWinner(
+      'Someone Else', 'Player A', 'Player B', ['M'], ['K'],
+      'id-x', 'id-a', 'id-b');
+    expect(a).toEqual(['M']);
+    expect(b).toEqual(['K']);
+  });
+
+  it('id-less call site (no trailing args) behaves exactly as before', () => {
+    const [a, b] = placeHtForWinner('A', 'A', 'B', ['M'], ['K']);
+    expect(a).toEqual(['M', 'Ht']);
+    expect(b).toEqual(['K']);
   });
 });

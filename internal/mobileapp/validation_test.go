@@ -2,6 +2,7 @@ package mobileapp
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -892,6 +893,158 @@ func TestScoreRequestValidate_Hantei(t *testing.T) {
 	t.Run("legacy decidedByHantei=false is always valid", func(t *testing.T) {
 		req := ScoreRequest{DecidedByHantei: boolPtr(false)}
 		assert.NoError(t, req.Validate())
+	})
+}
+
+// TestValidateHanteiMarkPlacement_IDsOverrideNames pins the bc-dmsr fix: the
+// hantei mark's side attribution goes through domain.AttributeWinnerSide (the
+// ONE owner of "which side won" at match level), so when the participant ids
+// disagree with a naive name match, the ids win. Reachable because a name is
+// not unique within a competition: two participants from different dojos may
+// share a name (CheckDuplicateEntriesByNameDojo only rejects same-name AND
+// same-dojo), so a same-name pair used to let the mark land on whichever
+// side the (sideA-first) name comparison picked, even when WinnerID named
+// the other side.
+func TestValidateHanteiMarkPlacement_IDsOverrideNames(t *testing.T) {
+	t.Run("same-name pair: mark correctly placed on B (per ids) is accepted", func(t *testing.T) {
+		req := ScoreRequest{
+			SideA: "Alice", SideB: "Alice",
+			SideAID: "dojo-x-alice", SideBID: "dojo-y-alice",
+			Winner: "Alice", WinnerID: "dojo-y-alice",
+			Status:  state.MatchStatusCompleted,
+			IpponsA: []string{}, IpponsB: []string{domain.HanteiMark},
+		}
+		assert.NoError(t, req.Validate())
+	})
+
+	t.Run("same-name pair: mark placed on A is rejected when the ids say B actually won", func(t *testing.T) {
+		// Before the fix this passed: "Alice" == sideA name-wise, so the
+		// name-only check never looked at WinnerID and accepted the mark on
+		// the wrong participant.
+		req := ScoreRequest{
+			SideA: "Alice", SideB: "Alice",
+			SideAID: "dojo-x-alice", SideBID: "dojo-y-alice",
+			Winner: "Alice", WinnerID: "dojo-y-alice",
+			Status:  state.MatchStatusCompleted,
+			IpponsA: []string{domain.HanteiMark}, IpponsB: []string{},
+		}
+		err := req.Validate()
+		require.Error(t, err)
+		var verr *ValidationError
+		require.True(t, errors.As(err, &verr))
+		assert.Contains(t, verr.Message, "hantei mark belongs in the winner's ippon list")
+	})
+
+	t.Run("ids present but winnerID matches neither side: unattributable, rejected even though the name matches sideA", func(t *testing.T) {
+		req := ScoreRequest{
+			SideA: "Alice", SideB: "Bob",
+			SideAID: "id-a", SideBID: "id-b",
+			Winner: "Alice", WinnerID: "id-x",
+			Status:  state.MatchStatusCompleted,
+			IpponsA: []string{domain.HanteiMark}, IpponsB: []string{},
+		}
+		err := req.Validate()
+		require.Error(t, err)
+		var verr *ValidationError
+		require.True(t, errors.As(err, &verr))
+		assert.Contains(t, verr.Message, "hantei mark belongs in the winner's ippon list")
+	})
+}
+
+// TestValidateHanteiMarkPlacement_IDLessCompatibility proves the CRITICAL
+// COMPATIBILITY requirement for bc-dmsr: an id-less match (legacy files,
+// older clients, bracket rows, sub-bouts) must validate EXACTLY as it did
+// before ids were threaded through validateHanteiMarkPlacement. It runs a
+// corpus of realistic id-less combinations (distinct sideA/sideB names)
+// through the current req.Validate() and compares against
+// oldNameOnlyAccepts, a literal reproduction of the PRE-FIX
+// validateHanteiMarkPlacement logic (independent per-side name comparison,
+// no ids, no single-owner attribution).
+func TestValidateHanteiMarkPlacement_IDLessCompatibility(t *testing.T) {
+	type combo struct {
+		sideA, sideB, winner string
+		markOnA, markOnB     bool
+	}
+	oldNameOnlyAccepts := func(c combo) bool {
+		if c.winner == "" {
+			return false
+		}
+		if c.markOnA && c.winner != c.sideA {
+			return false
+		}
+		if c.markOnB && c.winner != c.sideB {
+			return false
+		}
+		return true
+	}
+
+	combos := []combo{
+		{sideA: "Alice", sideB: "Bob", winner: "Alice", markOnA: true},
+		{sideA: "Alice", sideB: "Bob", winner: "Bob", markOnB: true},
+		{sideA: "Alice", sideB: "Bob", winner: "Alice", markOnB: true},
+		{sideA: "Alice", sideB: "Bob", winner: "Bob", markOnA: true},
+		{sideA: "Alice", sideB: "Bob", winner: "Carol", markOnA: true},
+		{sideA: "Alice", sideB: "Bob", winner: "Carol", markOnB: true},
+		{sideA: "Alice", sideB: "Bob", winner: "", markOnA: true},
+	}
+
+	for _, c := range combos {
+		c := c
+		t.Run(fmt.Sprintf("sideA=%q sideB=%q winner=%q markOnA=%v markOnB=%v", c.sideA, c.sideB, c.winner, c.markOnA, c.markOnB), func(t *testing.T) {
+			ipponsA, ipponsB := []string{}, []string{}
+			if c.markOnA {
+				ipponsA = []string{domain.HanteiMark}
+			}
+			if c.markOnB {
+				ipponsB = []string{domain.HanteiMark}
+			}
+			req := ScoreRequest{
+				SideA: c.sideA, SideB: c.sideB, Winner: c.winner,
+				Status:  state.MatchStatusCompleted,
+				IpponsA: ipponsA, IpponsB: ipponsB,
+			}
+			err := req.Validate()
+			wantAccept := oldNameOnlyAccepts(c)
+			assert.Equalf(t, wantAccept, err == nil, "err=%v", err)
+		})
+	}
+}
+
+// TestValidateHanteiMarkPlacement_SameNameBothSidesIdLess documents a
+// DELIBERATE, narrow behaviour change for id-less data: when a winner name
+// matches BOTH sides (only reachable when sideA == sideB, e.g. two
+// same-name participants and no ids to disambiguate), the OLD independent
+// per-side check accepted the mark on WHICHEVER side carried it (both
+// checks degenerate to true). The new single-owner domain.AttributeWinnerSide
+// resolves the ambiguity to sideA first — the SAME convention already used
+// everywhere else winner-name ambiguity is resolved (export.SideMarksLR's
+// switch, and the team aggregation rule documented on CheckDuplicateEntries/
+// TeamResultFrom) — so a mark on side B in this exact degenerate shape is now
+// rejected instead of silently accepted. This is a consistency fix, not a
+// compatibility break: it only affects data with NO way to disambiguate two
+// identically-named sides, which every other winner-attribution rule in this
+// codebase already treats as sideA by convention.
+func TestValidateHanteiMarkPlacement_SameNameBothSidesIdLess(t *testing.T) {
+	t.Run("mark on sideA (the resolved side) is accepted", func(t *testing.T) {
+		req := ScoreRequest{
+			SideA: "Alice", SideB: "Alice", Winner: "Alice",
+			Status:  state.MatchStatusCompleted,
+			IpponsA: []string{domain.HanteiMark}, IpponsB: []string{},
+		}
+		assert.NoError(t, req.Validate())
+	})
+
+	t.Run("mark on sideB is now rejected (sideA-first convention, no ids to disambiguate)", func(t *testing.T) {
+		req := ScoreRequest{
+			SideA: "Alice", SideB: "Alice", Winner: "Alice",
+			Status:  state.MatchStatusCompleted,
+			IpponsA: []string{}, IpponsB: []string{domain.HanteiMark},
+		}
+		err := req.Validate()
+		require.Error(t, err)
+		var verr *ValidationError
+		require.True(t, errors.As(err, &verr))
+		assert.Contains(t, verr.Message, "hantei mark belongs in the winner's ippon list")
 	})
 }
 

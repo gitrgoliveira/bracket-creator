@@ -508,7 +508,7 @@ func writeTeamSummaryCells(f *excelize.File, sheetName string, courtStartCol, ex
 	rPCol := colNum(courtStartCol + 4)
 	rVCol := colNum(courtStartCol + 5)
 
-	lMark, rMark := SideMarksLR(mr.Decision, hanteiOf(mr), mr.Winner, mr.SideA, mr.SideB, mirror)
+	lMark, rMark := SideMarksLR(mr.Decision, hanteiOf(mr), mr.WinnerID, mr.SideAID, mr.SideBID, mr.Winner, mr.SideA, mr.SideB, mirror)
 
 	line := state.TeamResultFrom(mr.SubResults, mr.SideA, mr.SideB)
 	if line != nil {
@@ -547,7 +547,7 @@ func writeScoreRowCells(f *excelize.File, sheetName string, courtStartCol, excel
 	if mirror {
 		leftScore, rightScore = scoreB, scoreA
 	}
-	lMark, rMark := SideMarksLR(mr.Decision, hanteiOf(mr), mr.Winner, mr.SideA, mr.SideB, mirror)
+	lMark, rMark := SideMarksLR(mr.Decision, hanteiOf(mr), mr.WinnerID, mr.SideAID, mr.SideBID, mr.Winner, mr.SideA, mr.SideB, mirror)
 	setCellStr(f, sheetName, colNum(courtStartCol+1), excelRow, joinSp(leftScore, lMark))
 	setCellStr(f, sheetName, colNum(courtStartCol+5), excelRow, joinSp(rightScore, rMark))
 	writeMiddleMarkCell(f, sheetName, courtStartCol, excelRow, mr.Decision, mr.Encho)
@@ -623,7 +623,9 @@ func writeTeamSubMatchScores(f *excelize.File, sheetName string, courtStartCol, 
 		if mirror {
 			leftScore, rightScore = scoreB, scoreA
 		}
-		lMark, rMark := SideMarksLR(sub.Decision, sub.HanteiDecided(), sub.Winner, sub.SideA, sub.SideB, mirror)
+		// SubMatchResult carries no ids (team sub-bout sides are named, and
+		// team names are unique by rule): always the name-fallback branch.
+		lMark, rMark := SideMarksLR(sub.Decision, sub.HanteiDecided(), "", "", "", sub.Winner, sub.SideA, sub.SideB, mirror)
 		if lScore := joinSp(leftScore, lMark); lScore != "" {
 			setCellStr(f, sheetName, lVCol, excelRow, lScore)
 		}

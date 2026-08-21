@@ -1254,6 +1254,134 @@ func TestHansokuHanteiConflict_SubResults(t *testing.T) {
 	})
 }
 
+// TestStripInvalidHantei_IDsOverrideNames pins the bc-dmsr fix at MATCH
+// level: stripInvalidHantei attributes the hantei mark's side through
+// domain.AttributeWinnerSide (the one owner of "which side won"), so a
+// same-name pair (legal: two participants from different dojos may share a
+// name — CheckDuplicateEntriesByNameDojo only rejects same-name AND
+// same-dojo) can no longer keep a wrongly-placed mark just because the name
+// comparison alone couldn't tell the two sides apart.
+//
+// Reached only through the raw engine API (RecordMatchResult), like
+// TestHansokuHanteiConflict above: the normal PUT /score path is validated
+// first by mobileapp.validateHanteiMarkPlacement (converted by the same
+// fix), which would already reject a wrongly-placed mark with a 400 before
+// it ever reaches the engine. This pins the engine-side re-application of
+// the same attribution rule for writers that bypass ScoreRequest.Validate
+// (bulk score, quick-score, any direct engine caller).
+func TestStripInvalidHantei_IDsOverrideNames(t *testing.T) {
+	mark := domain.HanteiMark
+
+	newSameNameComp := func(t *testing.T, id string) (*Engine, *state.Store) {
+		t.Helper()
+		eng, store, _ := setupTestEngine(t)
+		require.NoError(t, store.SaveCompetition(&state.Competition{ID: id, Name: "SN"}))
+		require.NoError(t, store.SavePoolMatches(id, []state.MatchResult{
+			{
+				ID: "P1-1", SideA: "Alice", SideB: "Alice",
+				SideAID: "dojo-x-alice", SideBID: "dojo-y-alice",
+				Status: state.MatchStatusScheduled,
+			},
+		}))
+		return eng, store
+	}
+
+	t.Run("mark on the id-correct side (B) survives", func(t *testing.T) {
+		eng, store := newSameNameComp(t, "sn-correct")
+		patch := &state.MatchResult{
+			SideA: "Alice", SideB: "Alice", Winner: "Alice", WinnerID: "dojo-y-alice",
+			IpponsA: []string{}, IpponsB: []string{mark},
+			Status: state.MatchStatusCompleted,
+		}
+		require.NoError(t, eng.RecordMatchResult("sn-correct", "P1-1", patch))
+
+		stored, err := store.LoadPoolMatches("sn-correct")
+		require.NoError(t, err)
+		require.Len(t, stored, 1)
+		assert.True(t, domain.ContainsHantei(stored[0].IpponsB), "the mark on the winner's (id-correct) side must survive")
+		assert.False(t, domain.ContainsHantei(stored[0].IpponsA))
+	})
+
+	t.Run("mark on the id-wrong side (A) is stripped, even though the name matches", func(t *testing.T) {
+		// Before the fix: name-only attribution saw Winner("Alice") ==
+		// SideA("Alice") and left the mark standing on A, even though
+		// WinnerID names side B (dojo-y-alice) as the actual winner.
+		eng, store := newSameNameComp(t, "sn-wrong")
+		patch := &state.MatchResult{
+			SideA: "Alice", SideB: "Alice", Winner: "Alice", WinnerID: "dojo-y-alice",
+			IpponsA: []string{mark}, IpponsB: []string{},
+			Status: state.MatchStatusCompleted,
+		}
+		require.NoError(t, eng.RecordMatchResult("sn-wrong", "P1-1", patch))
+
+		stored, err := store.LoadPoolMatches("sn-wrong")
+		require.NoError(t, err)
+		require.Len(t, stored, 1)
+		assert.False(t, domain.ContainsHantei(stored[0].IpponsA), "the mark must be stripped: WinnerID names side B, not side A")
+		assert.False(t, domain.ContainsHantei(stored[0].IpponsB))
+	})
+}
+
+// TestStripInvalidHantei_IDLessCompatibility proves stripInvalidHantei's
+// id-less behaviour (legacy data with no participant ids: SideAID/SideBID/
+// WinnerID all empty) is unchanged by the ids-aware attribution. oldStrip is
+// a literal reproduction of the PRE-FIX stripInvalidHantei logic
+// (independent per-side name comparison, no domain.AttributeWinnerSide);
+// the corpus below (realistic id-less data: distinct sideA/sideB names)
+// must produce identical results before and after.
+func TestStripInvalidHantei_IDLessCompatibility(t *testing.T) {
+	mark := domain.HanteiMark
+	markSlices := func(markA, markB bool) (a, b []string) {
+		a, b = []string{}, []string{}
+		if markA {
+			a = []string{mark}
+		}
+		if markB {
+			b = []string{mark}
+		}
+		return
+	}
+	oldStrip := func(result *state.MatchResult) (stillA, stillB bool) {
+		hadA, hadB := domain.ContainsHantei(result.IpponsA), domain.ContainsHantei(result.IpponsB)
+		if !hadA && !hadB {
+			return false, false
+		}
+		if !hanteiStillHolds(result) {
+			return false, false
+		}
+		stillA = hadA && result.Winner == result.SideA
+		stillB = hadB && result.Winner == result.SideB
+		return
+	}
+
+	combos := []struct {
+		name         string
+		sideA, sideB string
+		winner       string
+		markA, markB bool
+	}{
+		{"mark on A, winner is A", "Alice", "Bob", "Alice", true, false},
+		{"mark on B, winner is B", "Alice", "Bob", "Bob", false, true},
+		{"mark on B, winner is A (wrong side, stripped)", "Alice", "Bob", "Alice", false, true},
+		{"mark on A, winner is B (wrong side, stripped)", "Alice", "Bob", "Bob", true, false},
+	}
+	for _, c := range combos {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			ipponsA, ipponsB := markSlices(c.markA, c.markB)
+			result := &state.MatchResult{
+				SideA: c.sideA, SideB: c.sideB, Winner: c.winner,
+				IpponsA: ipponsA, IpponsB: ipponsB,
+				Status: state.MatchStatusCompleted,
+			}
+			wantA, wantB := oldStrip(result)
+			stripInvalidHantei(result)
+			assert.Equal(t, wantA, domain.ContainsHantei(result.IpponsA), "sideA mark presence")
+			assert.Equal(t, wantB, domain.ContainsHantei(result.IpponsB), "sideB mark presence")
+		})
+	}
+}
+
 // TestHansokuCarriesIntoEncho pins FIK Article 17/20: hansoku are cumulative
 // for the duration of the shiai, including encho. applyHansokuIppons must
 // apply the 2-hansoku→ippon rule regardless of the Encho field value.

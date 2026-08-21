@@ -364,7 +364,10 @@ func validateSubBout(prefix string, sr *state.SubMatchResult, allowNumberedEncho
 			Message: "hantei is only valid for the daihyosen representative bout (position -1)",
 		}
 	}
-	if err := validateHanteiMarkPlacement(prefix, sr.IpponsA, sr.IpponsB, sr.SideA, sr.SideB, sr.Winner); err != nil {
+	// SubMatchResult carries no ids (team sub-bout sides are named, and team
+	// names are unique by rule), so this call always takes the name-fallback
+	// branch of validateHanteiMarkPlacement/domain.AttributeWinnerSide.
+	if err := validateHanteiMarkPlacement(prefix, sr.IpponsA, sr.IpponsB, "", "", "", sr.SideA, sr.SideB, sr.Winner); err != nil {
 		return err
 	}
 	// Both halves of this gate are shared with the engine's preserveSubHantei
@@ -401,7 +404,15 @@ func countHantei(ippons []string) int {
 // rules, shared by the match-level and sub-bout blocks: the judges'-decision
 // mark appears at most once, only in the WINNER's slice (it names the
 // competitor the referees chose), and a winner must be named for it to name.
-func validateHanteiMarkPlacement(prefix string, ipponsA, ipponsB []string, sideA, sideB, winner string) error {
+//
+// Side attribution goes through domain.AttributeWinnerSide, the one owner of
+// "which side won": winnerID/sideAID/sideBID are the participant UUIDs
+// (state.MatchResult carries them; a SubMatchResult does not, so sub-bout
+// callers pass "" and take the name-fallback branch). Ids win over names
+// when both are available, so a same-name pair (legal: two participants
+// from different dojos may share a name) no longer lets the mark land on
+// the wrong side just because names alone couldn't tell them apart.
+func validateHanteiMarkPlacement(prefix string, ipponsA, ipponsB []string, winnerID, sideAID, sideBID, sideA, sideB, winner string) error {
 	marks := countHantei(ipponsA) + countHantei(ipponsB)
 	if marks > 1 {
 		return &ValidationError{Field: prefix + "ippons", Message: "at most one hantei mark per bout"}
@@ -409,10 +420,11 @@ func validateHanteiMarkPlacement(prefix string, ipponsA, ipponsB []string, sideA
 	if winner == "" {
 		return &ValidationError{Field: prefix + "ippons", Message: "hantei requires winner to be set"}
 	}
-	if domain.ContainsHantei(ipponsA) && winner != sideA {
+	side := domain.AttributeWinnerSide(winnerID, sideAID, sideBID, winner, sideA, sideB)
+	if domain.ContainsHantei(ipponsA) && side != domain.MatchSideA {
 		return &ValidationError{Field: prefix + "ippons", Message: "the hantei mark belongs in the winner's ippon list"}
 	}
-	if domain.ContainsHantei(ipponsB) && winner != sideB {
+	if domain.ContainsHantei(ipponsB) && side != domain.MatchSideB {
 		return &ValidationError{Field: prefix + "ippons", Message: "the hantei mark belongs in the winner's ippon list"}
 	}
 	return nil
@@ -452,7 +464,7 @@ func validateMatchHantei(r *state.MatchResult) error {
 	if !r.HanteiDecided() {
 		return nil
 	}
-	if err := validateHanteiMarkPlacement("", r.IpponsA, r.IpponsB, r.SideA, r.SideB, r.Winner); err != nil {
+	if err := validateHanteiMarkPlacement("", r.IpponsA, r.IpponsB, r.WinnerID, r.SideAID, r.SideBID, r.SideA, r.SideB, r.Winner); err != nil {
 		return err
 	}
 	if r.Status != "" && r.Status != state.MatchStatusCompleted {

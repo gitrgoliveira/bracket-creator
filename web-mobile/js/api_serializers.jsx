@@ -35,21 +35,37 @@ function isKikenDecision(v) { return v === "kiken" || v === "kiken-voluntary" ||
 // The judges'-decision verdict is recorded as the "Ht" entry in the WINNER's
 // ippon list (the mark IS the record; Go: domain.HanteiMark). hanteiDecided
 // is the read predicate (does this match/sub carry the mark on either
-// side); placeHtForWinner is the write placement - given a winner name and
-// the two side names, it places the mark on whichever side's name matches
-// (mirroring domain.AppendHantei so the mark lands in the winner's next
-// free slot), or leaves both arrays untouched when the winner names
-// neither side; stripHt drops a stored mark without touching any other
-// letter. All four now live in result_slot.jsx (the declared owner of the
-// Ht slot rule) alongside realIppons - this file was a fourth consumer
-// with its own copies, which is exactly the drift that primitive is meant
-// to prevent.
+// side); placeHtForWinner is the write placement - given a winner (name, and
+// optionally id) and the two sides (names, and optionally ids), it attributes
+// the mark to whichever side matches (attributeWinnerSide: id-first when a
+// winnerId/sideAId/sideBId triple is available, mirroring domain.
+// AttributeWinnerSide - ids win over names when they disagree, since a
+// same-name/different-dojo pair is exactly the case ids exist to
+// disambiguate; name fallback, sideA-first, otherwise) and places it there
+// (mirroring domain.AppendHantei so the mark lands in the winner's next free
+// slot), or leaves both arrays untouched when the winner matches neither
+// side; stripHt drops a stored mark without touching any other letter. All
+// five now live in result_slot.jsx (the declared owner of the Ht slot rule)
+// alongside realIppons - this file was a fourth consumer with its own
+// copies, which is exactly the drift that primitive is meant to prevent.
+// The MATCH-level call site below threads winnerId/sideAId/sideBId (already
+// in scope); the SUB-BOUT call site does not - sub rows carry no ids at
+// all, team names are unique by rule, so that path stays on the name
+// fallback exactly as before.
 
 // Backend expects: { winner: string, ipponsA: [], ipponsB: [], hansokuA: int, hansokuB: int, decision: "", status: "completed"|"running"|"scheduled" }
 function toBackendMatchResult(patch, match) {
     const sideAName = typeof match?.sideA === "object" ? match.sideA?.name : match?.sideA;
     const sideBName = typeof match?.sideB === "object" ? match.sideB?.name : match?.sideB;
     const winnerName = patch.winner ? (typeof patch.winner === "object" ? patch.winner.name : patch.winner) : "";
+    // Side ids, when the match carries object-shaped sides (post-normalizeMatch
+    // the common case). Used both to derive winnerId below and, further down,
+    // to attribute the Ht mark's placement by id rather than name (bc-dmsr
+    // follow-up: a same-name/different-dojo pair previously placed the mark by
+    // NAME, sideA-first, even when the id-carrying winnerId named the other
+    // side).
+    const sideAId = (typeof match?.sideA === "object" ? match.sideA?.id : null) || "";
+    const sideBId = (typeof match?.sideB === "object" ? match.sideB?.id : null) || "";
 
     const score = patch.score || {};
     const ipponsA = realIppons(patch.ipponsA);
@@ -85,10 +101,8 @@ function toBackendMatchResult(patch, match) {
     if (patch.winner && typeof patch.winner === "object" && patch.winner.id) {
         winnerId = patch.winner.id;
     } else if (winnerName) {
-        const aId = (typeof match?.sideA === "object" ? match.sideA.id : null);
-        const bId = (typeof match?.sideB === "object" ? match.sideB.id : null);
-        if (winnerName === sideAName && winnerName !== sideBName) winnerId = aId || "";
-        else if (winnerName === sideBName && winnerName !== sideAName) winnerId = bId || "";
+        if (winnerName === sideAName && winnerName !== sideBName) winnerId = sideAId || "";
+        else if (winnerName === sideBName && winnerName !== sideAName) winnerId = sideBId || "";
     }
     if (winnerId) result.winnerId = winnerId;
     // Engi (kata) matches score by referee flag count, not ippons: carry
@@ -154,10 +168,15 @@ function toBackendMatchResult(patch, match) {
         ? patch.decidedByHantei
         : !!match?.decidedByHantei;
     if (wantHantei) {
-        // Same placeHtForWinner rule as the sub-bout branch above: a winner
-        // naming neither side leaves both arrays untouched, so no mark is
-        // placed.
-        [result.ipponsA, result.ipponsB] = placeHtForWinner(winnerName, sideAName, sideBName, result.ipponsA, result.ipponsB);
+        // Same placeHtForWinner rule as the sub-bout branch above, but this
+        // call site DOES have ids in scope (winnerId/sideAId/sideBId, derived
+        // above), so it threads them through: placeHtForWinner attributes by
+        // id whenever all three are present, falling back to the name
+        // comparison only when one is missing. A winner naming/matching
+        // neither side leaves both arrays untouched, so no mark is placed.
+        [result.ipponsA, result.ipponsB] = placeHtForWinner(
+            winnerName, sideAName, sideBName, result.ipponsA, result.ipponsB,
+            winnerId, sideAId, sideBId);
     }
     return result;
 }

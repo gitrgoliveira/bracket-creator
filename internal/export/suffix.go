@@ -74,16 +74,24 @@ func SideMarks(decision string, decidedByHantei bool) (winnerMark, loserMark str
 // swaps at the call sites. A missing or unmatchable winner (a draw, an
 // unfinished match, or drifted data) yields no marks: result marks hang off
 // a winner by definition.
-func SideMarksLR(decision string, decidedByHantei bool, winner, sideA, sideB string, mirror bool) (left, right string) {
+//
+// winnerID/sideAID/sideBID are the participant UUIDs, threaded from
+// state.MatchResult where available; pass "" for all three (bracket rows,
+// sub-bouts) to fall back to the pre-existing name comparison. Side
+// attribution goes through domain.AttributeWinnerSide, the one owner of
+// "which side won": ids win over names when a same-name pair (legal: two
+// participants from different dojos may share a name) would otherwise pick
+// the wrong side.
+func SideMarksLR(decision string, decidedByHantei bool, winnerID, sideAID, sideBID, winner, sideA, sideB string, mirror bool) (left, right string) {
 	winnerMark, loserMark := SideMarks(decision, decidedByHantei)
 	if winner == "" {
 		return "", "" // an empty winner must not string-match an empty side
 	}
 	var aMark, bMark string
-	switch winner {
-	case sideA:
+	switch domain.AttributeWinnerSide(winnerID, sideAID, sideBID, winner, sideA, sideB) {
+	case domain.MatchSideA:
 		aMark, bMark = winnerMark, loserMark
-	case sideB:
+	case domain.MatchSideB:
 		aMark, bMark = loserMark, winnerMark
 	default:
 		return "", ""

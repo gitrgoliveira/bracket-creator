@@ -127,15 +127,15 @@ func TestSideMarksLR(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name      string
-		decision  string
-		hantei    bool
-		winner    string
-		mirror    bool
-		wantLeft  string
-		wantRight string
+		name                       string
+		decision                   string
+		hantei                     bool
+		winnerID, sideAID, sideBID string
+		winner                     string
+		mirror                     bool
+		wantLeft, wantRight        string
 	}{
-		// Default layout: SideA (Aka) left, SideB right.
+		// Default layout: SideA (Aka) left, SideB right. No ids: name fallback.
 		{name: "hantei, A wins", decision: "fought", hantei: true, winner: "A", wantLeft: "Ht", wantRight: ""},
 		{name: "hantei, B wins", decision: "fought", hantei: true, winner: "B", wantLeft: "", wantRight: "Ht"},
 		{name: "hantei, B wins, mirrored", decision: "fought", hantei: true, winner: "B", mirror: true, wantLeft: "Ht", wantRight: ""},
@@ -143,13 +143,36 @@ func TestSideMarksLR(t *testing.T) {
 		{name: "kiken, A wins, mirrored", decision: "kiken-voluntary", winner: "A", mirror: true, wantLeft: "Kiken", wantRight: ""},
 		{name: "no winner recorded: marks have no home", decision: "kiken-voluntary", winner: "", wantLeft: "", wantRight: ""},
 		{name: "drifted winner name: no marks rather than a guess", decision: "kiken-voluntary", winner: "C", wantLeft: "", wantRight: ""},
+		// Ids present: ids win over names, even on a same-name pair (legal:
+		// two participants from different dojos may share a name). This is
+		// the bc-dmsr fix: without ids threaded through, a same-name pair
+		// would always resolve to sideA regardless of who the WinnerID says
+		// actually won.
+		{
+			name:     "same-name pair: ids attribute the mark to B, not A",
+			decision: "fought", hantei: true,
+			winnerID: "id-b", sideAID: "id-a", sideBID: "id-b",
+			winner: "A", wantLeft: "", wantRight: "Ht",
+		},
+		{
+			name:     "same-name pair: ids attribute the mark to A",
+			decision: "fought", hantei: true,
+			winnerID: "id-a", sideAID: "id-a", sideBID: "id-b",
+			winner: "A", wantLeft: "Ht", wantRight: "",
+		},
+		{
+			name:     "ids present but winnerID matches neither side: unattributable",
+			decision: "fought", hantei: true,
+			winnerID: "id-x", sideAID: "id-a", sideBID: "id-b",
+			winner: "A", wantLeft: "", wantRight: "",
+		},
 	}
 
 	for _, tc := range tests {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			l, r := SideMarksLR(tc.decision, tc.hantei, tc.winner, "A", "B", tc.mirror)
+			l, r := SideMarksLR(tc.decision, tc.hantei, tc.winnerID, tc.sideAID, tc.sideBID, tc.winner, "A", "B", tc.mirror)
 			assert.Equal(t, tc.wantLeft, l, "left mark")
 			assert.Equal(t, tc.wantRight, r, "right mark")
 		})

@@ -391,7 +391,7 @@ Two consequences follow, and both are deliberate:
 If the storage were rebuilt around queries rather than around people reading it, the shape
 would differ: a match side table would replace the paired columns, and sub bouts would be
 rows rather than an embedded document. That would trade away the inspect and repair
-properties in section 1, which is the reason it has not been done.
+properties in [section 1](#1-why-files), so the storage stays shaped for people.
 
 ## 7. How the layout is enforced
 

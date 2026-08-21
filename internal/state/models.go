@@ -929,22 +929,27 @@ type SubMatchResult struct {
 	HansokuB int      `json:"hansokuB"`
 	Winner   string   `json:"winner"`
 	Decision string   `json:"decision"`
-	// DecidedByHantei is TRI-STATE on the wire (operator ruling: "all results
-	// must be recorded into storage" - a recorded verdict must never be lost
-	// to a write that did not address it):
-	//   true  - a hantei verdict stands on this bout;
-	//   false - the client EXPLICITLY withdrew it;
-	//   nil   - the client said NOTHING about the verdict (stale snapshot,
-	//           quick-score, any writer predating the field) and the store's
-	//           recorded verdict is preserved (engine preserveSubHantei, the
-	//           preserveLoserScore precedent). Read via HanteiDecided().
+	// DecidedByHantei is a LEGACY READ-ONLY channel. The verdict is recorded
+	// as domain.HanteiMark in the WINNER's ippon slice (the mark IS the
+	// record; see legacy_hantei.go for the ruling and the conversion). This
+	// field exists so files and queued payloads written before that ruling
+	// still read: normalizeLegacyHantei folds it into the mark at every read
+	// boundary. Writers must never set it. The old tri-state maps onto the
+	// unified shape: true → the mark; explicit false → no mark; nil → the
+	// ippons say whatever they say, and a writer that omits the ippons has
+	// said nothing about the verdict either (the verdict travels WITH the
+	// scoreline it rests on, so verdict-silence and scoreline-silence are
+	// the same thing — which is what lets the preserve machinery treat them
+	// uniformly).
 	DecidedByHantei *bool          `json:"decidedByHantei,omitempty" yaml:"decided_by_hantei,omitempty"`
 	Encho           *EnchoMetadata `json:"encho,omitempty"           yaml:"encho,omitempty"`
 }
 
-// HanteiDecided reports whether a hantei verdict stands on this sub-bout.
+// HanteiDecided reports whether a hantei verdict stands on this sub-bout:
+// the judges'-decision mark is present in an ippon slice. Validation pins
+// the mark to the winner's side, at most once.
 func (s *SubMatchResult) HanteiDecided() bool {
-	return s.DecidedByHantei != nil && *s.DecidedByHantei
+	return domain.ContainsHantei(s.IpponsA) || domain.ContainsHantei(s.IpponsB)
 }
 
 type MatchResult struct {
@@ -987,51 +992,12 @@ type MatchResult struct {
 	SubResults     []SubMatchResult `json:"subResults,omitempty"`
 	Encho          *EnchoMetadata   `json:"encho,omitempty" yaml:"encho,omitempty"`
 	QueuePosition  int              `json:"queuePosition,omitempty" yaml:"-"`
-	// DecidedByHantei is true when the winner was declared by referee
-	// hantei on a tied bout (FIK Article 7-5 / 29-6). Overtime is not a
-	// precondition: a tied scoreline may be taken straight to a judges'
-	// decision. Distinguishes a judges' decision from an ippon-derived win
-	// for stats, audit, and display. Zero value omitted from the wire.
-	//
-	// Pointer semantics at the API boundary: when a client omits the
-	// field (nil) on a BRACKET-match score request, the engine preserves
-	// whatever value is already stored; when the client explicitly sends
-	// true or false the engine applies it. This prevents a re-score that
-	// doesn't mention the flag from silently clearing a previously-
-	// recorded hantei decision.
-	//
-	// Preserve-on-nil applies ONLY to bracket matches, and only on a
-	// FORWARD write (a client payload). Both bracket writers funnel
-	// through engine.applyBracketMatchResult, which gates the assignment
-	// on result.DecidedByHantei != nil; under matchWriteRestore (the
-	// rollback replaying a trusted snapshot) there is no "omitted", so a
-	// nil is written through as false. Pool matches are merged with
-	// `*r = *result`, so applyPoolWrite carries the same preserve-on-nil
-	// explicitly before that overwrite. It used to rely on a pool hantei
-	// being unstorable anyway; now that it persists (see below), a
-	// verdict-silent re-score would otherwise erase it.
-	//
-	// On READ paths that project BracketMatch.DecidedByHantei (bool) back
-	// into MatchResult for SSE / HTTP responses, use HanteiPtr below so
-	// non-hantei matches emit nil (omitempty), keeping the wire payload
-	// minimal and signalling "no hantei" by absence rather than an
-	// explicit false.
-	//
-	// Persistence: bracket matches are stored in bracket.json, which
-	// serializes the full struct. Pool matches are stored in
-	// pool-matches.csv, whose column layout has no field for this — and
-	// does not need one. A hantei occupies a point SLOT, so it is
-	// persisted as domain.HanteiMark in the WINNER's IpponsA/IpponsB
-	// column and decoded back into this flag on load
-	// (encodeHanteiIntoIppons / decodeHanteiFromIppons in pools.go). The
-	// mark never escapes the store, so no counter or export sees it.
-	//
-	// This used to be an accepted gap: a pool hantei survived in memory
-	// and on the SSE wire but not a restart, written off because FIK does
-	// not normally allow hantei in pool play. Operators do run it
-	// (operator ruling), and the encoding costs no schema change. See
-	// BracketMatch.DecidedByHantei for the mirror. The yaml tag is
-	// retained for future YAML-serialised contexts.
+	// DecidedByHantei is a LEGACY READ-ONLY channel, exactly as on
+	// SubMatchResult (see there and legacy_hantei.go): the verdict is the
+	// domain.HanteiMark entry in the winner's IpponsA/IpponsB. A hantei on a
+	// tied bout (FIK Article 7-5 / 29-6; overtime NOT a precondition) is
+	// recorded by the mark alone; this field only remains so pre-ruling
+	// payloads and files normalise on read. Writers must never set it.
 	DecidedByHantei *bool `json:"decidedByHantei,omitempty" yaml:"decided_by_hantei,omitempty"`
 	// ResultSource records how the result was submitted: "admin" (operator with
 	// password), "self-reported" (participant in self-run mode), or "" (legacy/
@@ -1116,6 +1082,13 @@ type MatchResult struct {
 	// clients behave exactly as before rather than having a legitimate change
 	// silently dropped. See domain.ApplyByTimestamp.
 	ModifiedAt int64 `json:"modifiedAt,omitempty" yaml:"-"`
+}
+
+// HanteiDecided reports whether a hantei verdict stands on this match: the
+// judges'-decision mark is present in an ippon slice. The sub-bout twin's
+// doc has the winner-side pin.
+func (m *MatchResult) HanteiDecided() bool {
+	return domain.ContainsHantei(m.IpponsA) || domain.ContainsHantei(m.IpponsB)
 }
 
 // HanteiPtr returns &b when b is true, nil otherwise. Use on READ paths
@@ -1255,7 +1228,10 @@ type BracketMatch struct {
 	DecisionBy     string         `json:"decisionBy,omitempty"`
 	DecisionReason string         `json:"decisionReason,omitempty"`
 	Encho          *EnchoMetadata `json:"encho,omitempty"`
-	// DecidedByHantei mirrors MatchResult.DecidedByHantei for bracket reads.
+	// DecidedByHantei is a LEGACY READ-ONLY channel (see legacy_hantei.go):
+	// the verdict is the domain.HanteiMark entry inside the winner's rendered
+	// score string. Kept only so pre-ruling bracket.json files normalise on
+	// read; writers must never set it.
 	// YAML tag included for parity with MatchResult and future YAML-serialised contexts.
 	DecidedByHantei bool `json:"decidedByHantei,omitempty" yaml:"decided_by_hantei,omitempty"`
 	// SubResults persists per-bout results for team bracket matches so the

@@ -101,7 +101,7 @@ func TestIpponsScoreRendersOnlyScoringMarks(t *testing.T) {
 		{[]string{"M", domain.IpponPlaceholder}, "M"},
 		{[]string{"", "M"}, "M"},
 		// A hantei is not a scored point. It reaches a stored slice only as the
-		// pool persistence encoding (state.encodeHanteiIntoIppons), which the
+		// judges'-decision mark as recorded in the winner's cell, which the
 		// store strips on load — but if one ever survives, the export must not
 		// render it as though someone struck it.
 		{[]string{"M", domain.HanteiMark}, "M"},

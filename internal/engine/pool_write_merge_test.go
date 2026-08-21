@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -23,7 +24,7 @@ func TestApplyPoolWrite_Policies(t *testing.T) {
 			SubResults: []state.SubMatchResult{{
 				Position: dh, SideA: "Kyoto", SideB: "Osaka",
 				Winner: "Kyoto", Decision: "daihyosen",
-				DecidedByHantei: state.HanteiPtr(true),
+				IpponsA: []string{domain.HanteiMark}, IpponsB: []string{},
 			}},
 		}
 	}
@@ -167,20 +168,36 @@ func TestQuickScoreKeepsCorrectionReason(t *testing.T) {
 		"the audit justification must survive a plain score write")
 }
 
-// A pool match can now hold a hantei that survives a restart, so the merge has
-// to protect the match-level verdict the way it already protects a daihyosen
-// sub-bout: a second editor that never saw the verdict must not erase it.
-func TestPoolWrite_MatchLevelHanteiSurvivesASilentRescore(t *testing.T) {
+// The verdict is the domain.HanteiMark entry in the winner's ippon slice, so
+// it travels WITH the scoreline: a writer that supplies ippons has addressed
+// the verdict (mark present = it stands, mark absent = it does not), and the
+// old flag-carry machinery has nothing left to carry. The one write shape
+// that loses a verdict it arguably "did not address" is a stale pre-ruling
+// client re-scoring a hantei match with markless ippons inside the offline
+// queue's replay window; accepted and documented in state/legacy_hantei.go.
+func TestPoolWrite_HanteiTravelsWithTheScoreline(t *testing.T) {
 	stored := func() *state.MatchResult {
 		return &state.MatchResult{
 			ID: "Pool A-1", SideA: "Alice", SideB: "Bob", Winner: "Alice",
 			Status:  state.MatchStatusCompleted,
-			IpponsA: []string{"M"}, IpponsB: []string{"K"},
-			DecidedByHantei: state.HanteiExplicit(true),
+			IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"K"},
 		}
 	}
 
-	t.Run("a verdict-silent forward write keeps it", func(t *testing.T) {
+	t.Run("a re-score echoing the mark keeps the verdict", func(t *testing.T) {
+		// The real SPA shape: clients echo the ippons they were served, mark
+		// included, so an untouched verdict round-trips by construction.
+		s := stored()
+		incoming := &state.MatchResult{
+			ID: "Pool A-1", SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			Status:  state.MatchStatusCompleted,
+			IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"K"},
+		}
+		require.False(t, applyPoolWrite(s, incoming, matchWriteForward))
+		assert.True(t, s.HanteiDecided())
+	})
+
+	t.Run("a markless re-score clears it", func(t *testing.T) {
 		s := stored()
 		incoming := &state.MatchResult{
 			ID: "Pool A-1", SideA: "Alice", SideB: "Bob", Winner: "Alice",
@@ -188,165 +205,111 @@ func TestPoolWrite_MatchLevelHanteiSurvivesASilentRescore(t *testing.T) {
 			IpponsA: []string{"M"}, IpponsB: []string{"K"},
 		}
 		require.False(t, applyPoolWrite(s, incoming, matchWriteForward))
-		require.NotNil(t, s.DecidedByHantei, "nil means the writer said nothing")
-		assert.True(t, *s.DecidedByHantei)
+		assert.False(t, s.HanteiDecided(),
+			"the ippons are the verdict channel; a writer that replaces them has spoken")
 	})
 
-	t.Run("an explicit false still withdraws it", func(t *testing.T) {
-		s := stored()
-		incoming := &state.MatchResult{
-			ID: "Pool A-1", SideA: "Alice", SideB: "Bob", Winner: "Alice",
-			Status:          state.MatchStatusCompleted,
-			DecidedByHantei: state.HanteiExplicit(false),
-		}
-		require.False(t, applyPoolWrite(s, incoming, matchWriteForward))
-		require.NotNil(t, s.DecidedByHantei)
-		assert.False(t, *s.DecidedByHantei, "an operator withdrawal must apply")
-	})
-
-	t.Run("restore inherits nothing", func(t *testing.T) {
-		// The K3 rollback replays a snapshot: a nil there means the match HAD
-		// no verdict, so preserving would re-apply the write being undone.
+	t.Run("restore replays the snapshot's scoreline verbatim", func(t *testing.T) {
 		s := stored()
 		snapshot := &state.MatchResult{
 			ID: "Pool A-1", SideA: "Alice", SideB: "Bob",
 			Status: state.MatchStatusScheduled,
 		}
 		require.False(t, applyPoolWrite(s, snapshot, matchWriteRestore))
-		assert.Nil(t, s.DecidedByHantei, "the rolled-back verdict must not survive")
+		assert.False(t, s.HanteiDecided(), "the rolled-back verdict must not survive")
 	})
 }
 
-// A carried verdict must still be VALID for the write that carries it. An
-// unguarded inherit is worse than none: RecordDecision builds its MatchResult
-// from scratch and never sets DecidedByHantei, and the decision handler skips
-// ScoreRequest.Validate, so a withdrawal arrives verdict-silent and a bare
-// carry stamps it as a judges' decision — which export.SideMarks then prints as
-// "Ht" and "Kiken" on one encounter.
-func TestPreserveMatchHantei_OnlyCarriesAVerdictThatStillHolds(t *testing.T) {
-	stored := func() *state.MatchResult {
-		return &state.MatchResult{
+// A mark that reaches a merge must still be VALID for the write carrying it.
+// RecordDecision builds its MatchResult from scratch and inherits stored
+// ippons through preserveLoserScore, so a kiken recorded over a stored hantei
+// arrives with the old winner's marked slice on what is now the LOSER's side
+// — which export.SideMarks would print as "Ht" and "Kiken" on one encounter.
+// stripInvalidHantei (both branches, forward only) strips a mark whose
+// preconditions fail or that sits on a non-winner's side: points stay, the
+// verdict goes.
+func TestStripInvalidHantei_GuardsTheNonValidatedPaths(t *testing.T) {
+	t.Run("kiken over a stored hantei drops the mark, keeps the points", func(t *testing.T) {
+		s := &state.MatchResult{
 			ID: "Pool A-1", SideA: "Alice", SideB: "Bob", Winner: "Alice",
 			Status:  state.MatchStatusCompleted,
-			IpponsA: []string{"M"}, IpponsB: []string{"K"},
-			DecidedByHantei: state.HanteiExplicit(true),
+			IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"K"},
 		}
-	}
-	silent := func(dec string, a, b []string) *state.MatchResult {
-		return &state.MatchResult{
+		// Alice (the hantei winner) withdraws: the decision path names Bob the
+		// winner, fills his maru, and preserves Alice's struck score - which
+		// still carries the now-contradictory mark.
+		incoming := &state.MatchResult{
+			ID: "Pool A-1", SideA: "Alice", SideB: "Bob", Winner: "Bob",
+			Status: state.MatchStatusCompleted, Decision: "kiken-voluntary",
+			DecisionBy: "shiro", DecisionReason: "injured shoulder",
+			IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"○", "○"},
+		}
+		require.False(t, applyPoolWrite(s, incoming, matchWriteForward))
+		assert.False(t, s.HanteiDecided(), "a withdrawal is not a judges' decision")
+		assert.Equal(t, []string{"M"}, s.IpponsA, "the withdrawer's point remains valid (FIK Art. 32)")
+	})
+
+	t.Run("a mark that lands untied is dropped", func(t *testing.T) {
+		s := &state.MatchResult{ID: "Pool A-1", SideA: "Alice", SideB: "Bob"}
+		incoming := &state.MatchResult{
 			ID: "Pool A-1", SideA: "Alice", SideB: "Bob", Winner: "Alice",
-			Status: state.MatchStatusCompleted, Decision: dec,
-			IpponsA: a, IpponsB: b,
+			Status:  state.MatchStatusCompleted,
+			IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{},
 		}
-	}
-	hantei := func(m *state.MatchResult) bool {
-		return m.DecidedByHantei != nil && *m.DecidedByHantei
-	}
+		require.False(t, applyPoolWrite(s, incoming, matchWriteForward))
+		assert.False(t, s.HanteiDecided(), "a verdict rests on a tied scoreline (FIK 7-5 / 29-6)")
+		assert.Equal(t, []string{"M"}, s.IpponsA)
+	})
 
-	t.Run("a withdrawal does not inherit the verdict", func(t *testing.T) {
-		for _, dec := range []string{"kiken-injury", "kiken-voluntary", "fusenpai", "fusensho", "hikiwake"} {
-			s := stored()
-			require.False(t, applyPoolWrite(s, silent(dec, []string{"○", "○"}, []string{"K"}), matchWriteForward))
-			assert.Falsef(t, hantei(s), "decision %q must not be recorded as a judges' decision", dec)
+	t.Run("a mark on the loser's side is dropped from that side only", func(t *testing.T) {
+		s := &state.MatchResult{ID: "Pool A-1", SideA: "Alice", SideB: "Bob"}
+		incoming := &state.MatchResult{
+			ID: "Pool A-1", SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			Status:  state.MatchStatusCompleted,
+			IpponsA: []string{"M"}, IpponsB: []string{"K", domain.HanteiMark},
 		}
+		require.False(t, applyPoolWrite(s, incoming, matchWriteForward))
+		assert.False(t, s.HanteiDecided(), "the mark names the winner; it cannot sit on the loser")
+		assert.Equal(t, []string{"K"}, s.IpponsB)
 	})
 
-	t.Run("an untied re-score drops it", func(t *testing.T) {
-		s := stored()
-		require.False(t, applyPoolWrite(s, silent("", []string{"M", "K"}, []string{"D"}), matchWriteForward))
-		assert.False(t, hantei(s), "a hantei rests on a tied scoreline")
+	t.Run("a winner-less reopen shape cannot keep a verdict", func(t *testing.T) {
+		s := &state.MatchResult{ID: "Pool A-1", SideA: "Alice", SideB: "Bob"}
+		incoming := &state.MatchResult{
+			ID: "Pool A-1", SideA: "Alice", SideB: "Bob",
+			Status:  state.MatchStatusRunning,
+			IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"K"},
+		}
+		require.False(t, applyPoolWrite(s, incoming, matchWriteForward))
+		assert.False(t, s.HanteiDecided(), "a hantei declares a winner; a running match has none")
 	})
 
-	t.Run("a still-tied ordinary re-score keeps it", func(t *testing.T) {
-		s := stored()
-		require.False(t, applyPoolWrite(s, silent("fought", []string{"D"}, []string{"T"}), matchWriteForward))
-		assert.True(t, hantei(s), "the verdict still holds, so a silent writer must not erase it")
-	})
-
-	t.Run("an explicit true that no longer holds is refused", func(t *testing.T) {
-		s := stored()
-		in := silent("kiken-injury", []string{"○", "○"}, []string{"K"})
-		in.DecidedByHantei = state.HanteiExplicit(true)
-		require.False(t, applyPoolWrite(s, in, matchWriteForward))
-		assert.False(t, hantei(s))
+	t.Run("a valid mark passes untouched", func(t *testing.T) {
+		s := &state.MatchResult{ID: "Pool A-1", SideA: "Alice", SideB: "Bob"}
+		incoming := &state.MatchResult{
+			ID: "Pool A-1", SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			Status:  state.MatchStatusCompleted,
+			IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"K"},
+		}
+		require.False(t, applyPoolWrite(s, incoming, matchWriteForward))
+		assert.True(t, s.HanteiDecided())
 	})
 
 	t.Run("the bracket twin applies the same guard", func(t *testing.T) {
-		// Pre-existing there: the nil branch kept bm.DecidedByHantei with no
-		// compatibility test at all.
 		bm := &state.BracketMatch{
-			ID: "m-r1-0", SideA: "Alice", SideB: "Bob", Winner: "Alice",
-			Status: state.MatchStatusCompleted, DecidedByHantei: true,
+			ID: "m-r1-0", SideA: "Alice", SideB: "Bob",
+			Status: state.MatchStatusRunning,
 		}
-		_, err := applyBracketMatchResult(bm, silent("kiken-injury", []string{"○", "○"}, []string{"K"}), matchWriteForward)
+		in := &state.MatchResult{
+			ID: "m-r1-0", SideA: "Alice", SideB: "Bob", Winner: "Bob",
+			Status: state.MatchStatusCompleted, Decision: "kiken-voluntary",
+			DecisionBy: "shiro", DecisionReason: "injured shoulder",
+			IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"○", "○"},
+		}
+		_, err := applyBracketMatchResult(bm, in, matchWriteForward)
 		require.NoError(t, err)
-		assert.False(t, bm.DecidedByHantei, "a withdrawal is not a judges' decision on a knockout match either")
-	})
-}
-
-// hanteiStillHolds is the ENGINE-side re-application of ScoreRequest.Validate's
-// DecidedByHantei block, and it must enforce that block in full: it runs after
-// validation and nothing re-checks what it stamps. Each case below is a state
-// the wire validator refuses, which the engine could nonetheless create by
-// inheriting a stored verdict onto a verdict-silent write.
-func TestPreserveMatchHanteiOnlyKeepsAVerdictTheValidatorWouldAccept(t *testing.T) {
-	// The shape of a forward re-score that says nothing about the verdict.
-	silent := func(mutate func(*state.MatchResult)) *state.MatchResult {
-		r := &state.MatchResult{
-			SideA: "Alice", SideB: "Bob", Winner: "Alice",
-			Status:  state.MatchStatusCompleted,
-			IpponsA: []string{"M"}, IpponsB: []string{"K"},
-		}
-		mutate(r)
-		return r
-	}
-
-	kept := func(t *testing.T, r *state.MatchResult) {
-		t.Helper()
-		preserveMatchHantei(true, r)
-		require.NotNil(t, r.DecidedByHantei)
-		assert.True(t, *r.DecidedByHantei)
-	}
-	cleared := func(t *testing.T, r *state.MatchResult, why string) {
-		t.Helper()
-		preserveMatchHantei(true, r)
-		require.NotNil(t, r.DecidedByHantei, "a stored verdict that cannot stand is cleared EXPLICITLY: nil means inherit")
-		assert.False(t, *r.DecidedByHantei, why)
-	}
-
-	t.Run("kept when every condition still holds", func(t *testing.T) {
-		kept(t, silent(func(*state.MatchResult) {}))
-	})
-	t.Run("kept when the status is unstated (defaults to completed)", func(t *testing.T) {
-		kept(t, silent(func(r *state.MatchResult) { r.Status = "" }))
-	})
-
-	t.Run("cleared without a winner", func(t *testing.T) {
-		// The reopen shape: {status:"running", winner:null}. Keeping it here was
-		// worse than losing it — encodeHanteiIntoIppons cannot attribute a
-		// winner-less verdict to a side, so the flag lived in the cache and
-		// never reached pool-matches.csv: hantei until restart, none after.
-		cleared(t, silent(func(r *state.MatchResult) { r.Winner = "" }),
-			"a hantei declares a winner")
-	})
-	t.Run("cleared on a match that is not completed", func(t *testing.T) {
-		cleared(t, silent(func(r *state.MatchResult) { r.Status = state.MatchStatusRunning }),
-			"a running match has not been decided by anyone")
-	})
-	t.Run("cleared on an untied scoreline", func(t *testing.T) {
-		cleared(t, silent(func(r *state.MatchResult) { r.IpponsA = []string{"M", "K"} }),
-			"a verdict rests on a tied scoreline (FIK 7-5 / 29-6)")
-	})
-	t.Run("cleared on a daihyosen decision", func(t *testing.T) {
-		// The MATCH level is the sub-bout allow-list MINUS daihyosen: the rep
-		// bout is where that verdict rides, and claiming it at match level says
-		// the encounter itself was judged.
-		cleared(t, silent(func(r *state.MatchResult) { r.Decision = "daihyosen" }),
-			"daihyosen is a sub-bout decision, never a match-level one")
-	})
-	t.Run("cleared on a withdrawal", func(t *testing.T) {
-		cleared(t, silent(func(r *state.MatchResult) { r.Decision = "kiken-voluntary" }),
-			"export.SideMarks marks Ht unconditionally, so this would print Ht AND Kiken")
+		assert.Equal(t, "M", bm.ScoreA, "the mark must not be rendered into the score string")
+		assert.NotContains(t, bm.ScoreB, domain.HanteiMark)
 	})
 }
 

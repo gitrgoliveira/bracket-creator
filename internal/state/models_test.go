@@ -2,6 +2,7 @@ package state
 
 import (
 	"encoding/json"
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"os"
 	"path/filepath"
 	"strings"
@@ -128,34 +129,43 @@ func TestMatchResult_HanteiOmitempty(t *testing.T) {
 // the wire), and only nil - "this writer said nothing" - is omitted, which
 // is what lets the store preserve a recorded verdict against stale writes.
 func TestSubMatchResult_HanteiRoundTrip(t *testing.T) {
-	t.Run("true survives JSON round-trip", func(t *testing.T) {
-		sub := SubMatchResult{Position: -1, DecidedByHantei: HanteiPtr(true)}
+	t.Run("the mark round-trips as the ippon entry it is", func(t *testing.T) {
+		sub := SubMatchResult{Position: -1, SideA: "A", SideB: "B", Winner: "A",
+			IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"K"}}
 		b, err := json.Marshal(sub)
 		require.NoError(t, err)
-		assert.Contains(t, string(b), `"decidedByHantei":true`)
+		assert.NotContains(t, string(b), "decidedByHantei",
+			"writers never emit the legacy field")
 		var got SubMatchResult
 		require.NoError(t, json.Unmarshal(b, &got))
 		assert.True(t, got.HanteiDecided())
 	})
-	t.Run("nil (verdict-silent) is omitted from JSON", func(t *testing.T) {
-		b, err := json.Marshal(SubMatchResult{Position: 1})
-		require.NoError(t, err)
-		assert.NotContains(t, string(b), "decidedByHantei")
-	})
-	t.Run("explicit false SERIALIZES (a withdrawal must reach the wire)", func(t *testing.T) {
-		// HanteiExplicit, not &f: HanteiPtr is nil-for-false by design.
-		b, err := json.Marshal(SubMatchResult{Position: -1, DecidedByHantei: HanteiExplicit(false)})
-		require.NoError(t, err)
-		assert.Contains(t, string(b), `"decidedByHantei":false`)
-	})
-	t.Run("true survives YAML round-trip", func(t *testing.T) {
-		sub := SubMatchResult{Position: -1, DecidedByHantei: HanteiPtr(true)}
-		b, err := yaml.Marshal(sub)
-		require.NoError(t, err)
-		assert.Contains(t, string(b), "decided_by_hantei: true")
+	t.Run("a legacy JSON flag folds into the mark on normalize", func(t *testing.T) {
 		var got SubMatchResult
-		require.NoError(t, yaml.Unmarshal(b, &got))
+		require.NoError(t, json.Unmarshal(
+			[]byte(`{"position":-1,"sideA":"A","sideB":"B","winner":"B","ipponsA":[],"ipponsB":["M"],"decidedByHantei":true}`), &got))
+		got.normalizeLegacyHantei()
 		assert.True(t, got.HanteiDecided())
+		assert.Equal(t, []string{"M", domain.HanteiMark}, got.IpponsB)
+		assert.Nil(t, got.DecidedByHantei)
+	})
+	t.Run("a legacy explicit false strips a stale mark on normalize", func(t *testing.T) {
+		got := SubMatchResult{Position: -1, SideA: "A", SideB: "B", Winner: "A",
+			IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"K"},
+			DecidedByHantei: HanteiExplicit(false)}
+		got.normalizeLegacyHantei()
+		assert.False(t, got.HanteiDecided())
+		assert.Equal(t, []string{"M"}, got.IpponsA)
+	})
+	t.Run("a legacy YAML flag reads and folds", func(t *testing.T) {
+		var got SubMatchResult
+		require.NoError(t, yaml.Unmarshal(
+			[]byte("position: -1\nsidea: A\nsideb: B\nwinner: A\nipponsa: [M]\nipponsb: [K]\ndecided_by_hantei: true\n"), &got))
+		// Only decided_by_hantei carries an explicit yaml tag; the untagged
+		// fields read under yaml's default lowercased keys.
+		got.normalizeLegacyHantei()
+		assert.True(t, got.HanteiDecided())
+		assert.Equal(t, []string{"M", domain.HanteiMark}, got.IpponsA)
 	})
 }
 

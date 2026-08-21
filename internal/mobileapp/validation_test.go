@@ -697,195 +697,216 @@ func TestSuneIpponRoundTrips(t *testing.T) {
 	})
 }
 
-func TestScoreRequestValidate_DecidedByHantei(t *testing.T) {
+// TestScoreRequestValidate_Hantei covers the request-shape rules for a
+// judges'-decision verdict. The verdict is the domain.HanteiMark entry in the
+// WINNER's ippon slice (operator ruling 2026-08-21), not the legacy
+// DecidedByHantei *bool, so every subtest here supplies the mark directly in
+// IpponsA/IpponsB rather than going through the legacy flag. The one
+// exception is the dedicated legacy-acceptance subtest at the end (rule:
+// tests that specifically pin the offline-queue compat channel may still
+// send the flag). Error field names moved from "decidedByHantei" to "ippons"
+// (validateHanteiMarkPlacement), since the mark now lives inside the ippons
+// the request already carries.
+func TestScoreRequestValidate_Hantei(t *testing.T) {
 	encho1 := &state.EnchoMetadata{PeriodCount: 1}
+	// A 0-0 hantei: the winner's slice holds just the mark, per the "a hantei
+	// only needs a free slot" reasoning in domain.HanteiMark's doc comment.
+	winnerMark := []string{domain.HanteiMark}
 
 	t.Run("valid hantei: completed with winner and encho", func(t *testing.T) {
 		req := ScoreRequest{
-			SideA:           "Alice",
-			SideB:           "Bob",
-			Winner:          "Alice",
-			Status:          state.MatchStatusCompleted,
-			DecidedByHantei: boolPtr(true),
-			Encho:           encho1,
+			SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			Status:  state.MatchStatusCompleted,
+			Encho:   encho1,
+			IpponsA: winnerMark, IpponsB: []string{},
 		}
 		assert.NoError(t, req.Validate())
 	})
 
 	t.Run("valid hantei: no status supplied (partial update) with encho", func(t *testing.T) {
 		req := ScoreRequest{
-			SideA:           "Alice",
-			SideB:           "Bob",
-			Winner:          "Alice",
-			DecidedByHantei: boolPtr(true),
-			Encho:           encho1,
+			SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			Encho:   encho1,
+			IpponsA: winnerMark, IpponsB: []string{},
 		}
 		assert.NoError(t, req.Validate())
 	})
 
 	t.Run("invalid hantei: no winner", func(t *testing.T) {
 		req := ScoreRequest{
-			SideA:           "Alice",
-			SideB:           "Bob",
-			Status:          state.MatchStatusCompleted,
-			DecidedByHantei: boolPtr(true),
-			Encho:           encho1,
+			SideA: "Alice", SideB: "Bob",
+			Status:  state.MatchStatusCompleted,
+			Encho:   encho1,
+			IpponsA: winnerMark, IpponsB: []string{},
 		}
 		err := req.Validate()
 		require.Error(t, err)
 		var verr *ValidationError
 		require.True(t, errors.As(err, &verr))
-		assert.Equal(t, "decidedByHantei", verr.Field)
+		assert.Equal(t, "ippons", verr.Field)
 	})
 
 	t.Run("invalid hantei: status is running, not completed", func(t *testing.T) {
 		req := ScoreRequest{
-			SideA:           "Alice",
-			SideB:           "Bob",
-			Winner:          "Alice",
-			Status:          state.MatchStatusRunning,
-			DecidedByHantei: boolPtr(true),
-			Encho:           encho1,
+			SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			Status:  state.MatchStatusRunning,
+			Encho:   encho1,
+			IpponsA: winnerMark, IpponsB: []string{},
 		}
 		err := req.Validate()
 		require.Error(t, err)
 		var verr *ValidationError
 		require.True(t, errors.As(err, &verr))
-		assert.Equal(t, "decidedByHantei", verr.Field)
+		assert.Equal(t, "ippons", verr.Field)
 	})
 
 	t.Run("valid hantei: no encho set (encho is not required)", func(t *testing.T) {
 		// Encho was decoupled from hantei, a tied match may be taken straight
 		// to a judges' decision without an overtime period.
 		req := ScoreRequest{
-			SideA:           "Alice",
-			SideB:           "Bob",
-			Winner:          "Alice",
-			Status:          state.MatchStatusCompleted,
-			DecidedByHantei: boolPtr(true),
+			SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			Status:  state.MatchStatusCompleted,
+			IpponsA: winnerMark, IpponsB: []string{},
 		}
 		assert.NoError(t, req.Validate())
 	})
 
 	t.Run("valid hantei: encho period count is zero", func(t *testing.T) {
 		req := ScoreRequest{
-			SideA:           "Alice",
-			SideB:           "Bob",
-			Winner:          "Alice",
-			Status:          state.MatchStatusCompleted,
-			DecidedByHantei: boolPtr(true),
-			Encho:           &state.EnchoMetadata{PeriodCount: 0},
+			SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			Status:  state.MatchStatusCompleted,
+			Encho:   &state.EnchoMetadata{PeriodCount: 0},
+			IpponsA: winnerMark, IpponsB: []string{},
 		}
 		assert.NoError(t, req.Validate())
 	})
 
 	t.Run("valid hantei: tied 1-1 scoreline", func(t *testing.T) {
 		req := ScoreRequest{
-			SideA:           "Alice",
-			SideB:           "Bob",
-			Winner:          "Alice",
-			Status:          state.MatchStatusCompleted,
-			DecidedByHantei: boolPtr(true),
-			Encho:           encho1,
-			IpponsA:         []string{"M"},
-			IpponsB:         []string{"K"},
+			SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			Status:  state.MatchStatusCompleted,
+			Encho:   encho1,
+			IpponsA: []string{"M", domain.HanteiMark},
+			IpponsB: []string{"K"},
 		}
 		assert.NoError(t, req.Validate())
 	})
 
-	t.Run("invalid hantei: non-tied scoreline (2-0)", func(t *testing.T) {
+	t.Run("invalid hantei: non-tied scoreline (0-1)", func(t *testing.T) {
+		// A hantei match can only ever be 0-0 or 1-1 (sanbon-shobu ends at 2,
+		// so a side with 2 real ippons already won without judges): there is
+		// no structurally valid way to combine 2 real ippons with the mark on
+		// the same side (that would be 3 entries, rejected by the per-side
+		// cap before the tie check even runs). This shape — mark alone
+		// against one real ippon — untied 0-vs-1 without hitting that cap.
 		req := ScoreRequest{
-			SideA:           "Alice",
-			SideB:           "Bob",
-			Winner:          "Alice",
-			Status:          state.MatchStatusCompleted,
-			DecidedByHantei: boolPtr(true),
-			Encho:           encho1,
-			IpponsA:         []string{"M", "K"},
-			IpponsB:         nil,
+			SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			Status:  state.MatchStatusCompleted,
+			Encho:   encho1,
+			IpponsA: winnerMark,
+			IpponsB: []string{"K"},
 		}
 		err := req.Validate()
 		require.Error(t, err)
 		var verr *ValidationError
 		require.True(t, errors.As(err, &verr))
-		assert.Equal(t, "decidedByHantei", verr.Field)
+		assert.Equal(t, "ippons", verr.Field)
+		assert.Contains(t, verr.Message, "tied scoreline")
 	})
 
 	for _, decision := range []string{"hikiwake", "kiken-voluntary", "kiken-injury", "fusenpai", "daihyosen", "kachinuki-exhaustion"} {
 		decision := decision
 		t.Run("invalid hantei: decision "+decision+" incompatible", func(t *testing.T) {
 			req := ScoreRequest{
-				SideA:           "Alice",
-				SideB:           "Bob",
-				Winner:          "Alice",
-				Status:          state.MatchStatusCompleted,
-				DecidedByHantei: boolPtr(true),
-				Encho:           encho1,
-				Decision:        decision,
+				SideA: "Alice", SideB: "Bob", Winner: "Alice",
+				Status:   state.MatchStatusCompleted,
+				Encho:    encho1,
+				Decision: decision,
+				IpponsA:  winnerMark, IpponsB: []string{},
 			}
 			err := req.Validate()
 			require.Error(t, err)
 			var verr *ValidationError
 			require.True(t, errors.As(err, &verr))
-			assert.Equal(t, "decidedByHantei", verr.Field)
+			assert.Equal(t, "ippons", verr.Field)
 		})
 	}
 
 	t.Run("invalid hantei: decisionBy set", func(t *testing.T) {
 		req := ScoreRequest{
-			SideA:           "Alice",
-			SideB:           "Bob",
-			Winner:          "Alice",
-			Status:          state.MatchStatusCompleted,
-			DecidedByHantei: boolPtr(true),
-			Encho:           encho1,
-			DecisionBy:      "aka",
+			SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			Status:     state.MatchStatusCompleted,
+			Encho:      encho1,
+			DecisionBy: "aka",
+			IpponsA:    winnerMark, IpponsB: []string{},
 		}
 		err := req.Validate()
 		require.Error(t, err)
 		var verr *ValidationError
 		require.True(t, errors.As(err, &verr))
-		assert.Equal(t, "decidedByHantei", verr.Field)
+		assert.Equal(t, "ippons", verr.Field)
 	})
 
 	t.Run("invalid hantei: decisionReason set", func(t *testing.T) {
 		req := ScoreRequest{
-			SideA:           "Alice",
-			SideB:           "Bob",
-			Winner:          "Alice",
-			Status:          state.MatchStatusCompleted,
-			DecidedByHantei: boolPtr(true),
-			Encho:           encho1,
-			DecisionReason:  "injury",
+			SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			Status:         state.MatchStatusCompleted,
+			Encho:          encho1,
+			DecisionReason: "injury",
+			IpponsA:        winnerMark, IpponsB: []string{},
 		}
 		err := req.Validate()
 		require.Error(t, err)
 		var verr *ValidationError
 		require.True(t, errors.As(err, &verr))
-		assert.Equal(t, "decidedByHantei", verr.Field)
+		assert.Equal(t, "ippons", verr.Field)
 	})
 
 	t.Run("valid hantei: decision fought is compatible", func(t *testing.T) {
 		req := ScoreRequest{
-			SideA:           "Alice",
-			SideB:           "Bob",
-			Winner:          "Alice",
-			Status:          state.MatchStatusCompleted,
-			DecidedByHantei: boolPtr(true),
-			Encho:           encho1,
-			Decision:        "fought",
+			SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			Status:   state.MatchStatusCompleted,
+			Encho:    encho1,
+			Decision: "fought",
+			IpponsA:  winnerMark, IpponsB: []string{},
 		}
 		assert.NoError(t, req.Validate())
 	})
 
-	t.Run("decidedByHantei false is always valid", func(t *testing.T) {
+	// Legacy-acceptance pins (rule: the offline queue can replay a pre-ruling
+	// payload for hours after a binary upgrade, so ScoreRequest.Validate must
+	// still accept the *bool channel and fold it into the mark).
+	t.Run("legacy decidedByHantei=true is normalized into the mark", func(t *testing.T) {
+		req := ScoreRequest{
+			SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			Status:          state.MatchStatusCompleted,
+			DecidedByHantei: boolPtr(true),
+		}
+		require.NoError(t, req.Validate())
+		assert.True(t, domain.ContainsHantei(req.IpponsA),
+			"the legacy flag must fold into the winner's ippon slice")
+		assert.Nil(t, req.DecidedByHantei, "normalization clears the legacy field")
+	})
+
+	t.Run("legacy decidedByHantei=false is always valid", func(t *testing.T) {
 		req := ScoreRequest{DecidedByHantei: boolPtr(false)}
 		assert.NoError(t, req.Validate())
 	})
 }
 
-func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
+// TestScoreRequestValidate_SubBoutHantei pins the sub-bout hantei rules. As
+// with the match-level twin, the verdict is domain.HanteiMark inside the
+// WINNER's ippon slice, so fixtures inject it directly rather than through
+// the legacy DecidedByHantei *bool — sending the flag alone hits two edges
+// the new model doesn't have an equivalent for: normalizeLegacyHantei DROPS
+// an unattributable (winner-less) verdict rather than guessing a side, and
+// AppendHantei onto an already-full 2-entry ippon slice grows it to 3 (a
+// STRUCTURAL cap violation, a different error than the one being pinned).
+// Both are why "without winner" and "non-tied scoreline" below place the mark
+// directly rather than round-tripping it through the flag.
+func TestScoreRequestValidate_SubBoutHantei(t *testing.T) {
 	enchoOne := &state.EnchoMetadata{PeriodCount: 1}
+	mark := domain.HanteiMark
 
 	// Hantei is only valid on the daihyosen representative bout (Position == -1).
 	t.Run("invalid: hantei on regular bout position", func(t *testing.T) {
@@ -893,14 +914,14 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 			SubResults: []state.SubMatchResult{
 				{
 					Position: 1, SideA: "TeamA", SideB: "TeamB",
-					IpponsA: []string{"M"}, IpponsB: []string{"K"},
-					Winner: "TeamA", DecidedByHantei: state.HanteiPtr(true),
+					IpponsA: []string{"M", mark}, IpponsB: []string{"K"},
+					Winner: "TeamA",
 				},
 			},
 		}
 		verr := req.Validate()
 		require.IsType(t, &ValidationError{}, verr)
-		assert.Equal(t, "subResults[0].decidedByHantei", verr.(*ValidationError).Field)
+		assert.Equal(t, "subResults[0].ippons", verr.(*ValidationError).Field)
 	})
 
 	t.Run("invalid: encho on regular bout position", func(t *testing.T) {
@@ -970,8 +991,8 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 			SubResults: []state.SubMatchResult{
 				{
 					Position: state.DaihyosenSubPosition, SideA: "TeamA", SideB: "TeamB",
-					IpponsA: []string{"M"}, IpponsB: []string{"K"},
-					Winner: "TeamA", DecidedByHantei: state.HanteiPtr(true), Encho: enchoOne,
+					IpponsA: []string{"M", mark}, IpponsB: []string{"K"},
+					Winner: "TeamA", Encho: enchoOne,
 				},
 			},
 		}
@@ -983,14 +1004,14 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 			SubResults: []state.SubMatchResult{
 				{
 					Position: state.DaihyosenSubPosition, SideA: "TeamA", SideB: "TeamB",
-					IpponsA: []string{"M"}, IpponsB: []string{"K"},
-					Winner: "", DecidedByHantei: state.HanteiPtr(true), Encho: enchoOne,
+					IpponsA: []string{"M", mark}, IpponsB: []string{"K"},
+					Winner: "", Encho: enchoOne,
 				},
 			},
 		}
 		verr := req.Validate()
 		require.IsType(t, &ValidationError{}, verr)
-		assert.Equal(t, "subResults[0].decidedByHantei", verr.(*ValidationError).Field)
+		assert.Equal(t, "subResults[0].ippons", verr.(*ValidationError).Field)
 	})
 
 	t.Run("valid: daihyosen hantei without encho (encho not required)", func(t *testing.T) {
@@ -1000,8 +1021,8 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 			SubResults: []state.SubMatchResult{
 				{
 					Position: -1, SideA: "TeamA", SideB: "TeamB",
-					IpponsA: []string{"M"}, IpponsB: []string{"K"},
-					Winner: "TeamA", DecidedByHantei: state.HanteiPtr(true), Encho: nil,
+					IpponsA: []string{"M", mark}, IpponsB: []string{"K"},
+					Winner: "TeamA", Encho: nil,
 				},
 			},
 		}
@@ -1009,18 +1030,23 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 	})
 
 	t.Run("invalid: daihyosen hantei with non-tied scoreline", func(t *testing.T) {
+		// The mark occupies a slot, and sanbon-shobu caps a side at 2 entries,
+		// so a hantei sub-bout can only be 0-0 or 1-1: this puts the mark alone
+		// on the winner's side (0 real ippons) against 2 real ippons on the
+		// other, untied without hitting that structural cap.
 		req := ScoreRequest{
 			SubResults: []state.SubMatchResult{
 				{
 					Position: -1, SideA: "TeamA", SideB: "TeamB",
-					IpponsA: []string{"M", "K"}, IpponsB: []string{"D"},
-					Winner: "TeamA", DecidedByHantei: state.HanteiPtr(true), Encho: enchoOne,
+					IpponsA: []string{mark}, IpponsB: []string{"D", "T"},
+					Winner: "TeamA", Encho: enchoOne,
 				},
 			},
 		}
 		verr := req.Validate()
 		require.IsType(t, &ValidationError{}, verr)
-		assert.Equal(t, "subResults[0].decidedByHantei", verr.(*ValidationError).Field)
+		assert.Equal(t, "subResults[0].ippons", verr.(*ValidationError).Field)
+		assert.Contains(t, verr.Error(), "tied scoreline")
 	})
 
 	t.Run("invalid: daihyosen hantei incompatible with hikiwake decision", func(t *testing.T) {
@@ -1028,14 +1054,14 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 			SubResults: []state.SubMatchResult{
 				{
 					Position: -1, SideA: "TeamA", SideB: "TeamB",
-					IpponsA: []string{"M"}, IpponsB: []string{"K"},
-					Winner: "TeamA", Decision: "hikiwake", DecidedByHantei: state.HanteiPtr(true), Encho: enchoOne,
+					IpponsA: []string{"M", mark}, IpponsB: []string{"K"},
+					Winner: "TeamA", Decision: "hikiwake", Encho: enchoOne,
 				},
 			},
 		}
 		verr := req.Validate()
 		require.IsType(t, &ValidationError{}, verr)
-		assert.Equal(t, "subResults[0].decidedByHantei", verr.(*ValidationError).Field)
+		assert.Equal(t, "subResults[0].ippons", verr.(*ValidationError).Field)
 	})
 
 	t.Run("valid: daihyosen hantei with decision daihyosen is compatible", func(t *testing.T) {
@@ -1043,8 +1069,8 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 			SubResults: []state.SubMatchResult{
 				{
 					Position: -1, SideA: "TeamA", SideB: "TeamB",
-					IpponsA: []string{"M"}, IpponsB: []string{"K"},
-					Winner: "TeamA", Decision: "daihyosen", DecidedByHantei: state.HanteiPtr(true), Encho: enchoOne,
+					IpponsA: []string{"M", mark}, IpponsB: []string{"K"},
+					Winner: "TeamA", Decision: "daihyosen", Encho: enchoOne,
 				},
 			},
 		}
@@ -1056,8 +1082,8 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 			SubResults: []state.SubMatchResult{
 				{
 					Position: -1, SideA: "TeamA", SideB: "TeamB",
-					IpponsA: []string{"M"}, IpponsB: []string{"K"},
-					Winner: "TeamA", Decision: "fought", DecidedByHantei: state.HanteiPtr(true), Encho: enchoOne,
+					IpponsA: []string{"M", mark}, IpponsB: []string{"K"},
+					Winner: "TeamA", Decision: "fought", Encho: enchoOne,
 				},
 			},
 		}
@@ -1069,8 +1095,8 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 			SubResults: []state.SubMatchResult{
 				{
 					Position: -1, SideA: "TeamA", SideB: "TeamB",
-					IpponsA: nil, IpponsB: nil,
-					Winner: "TeamA", DecidedByHantei: state.HanteiPtr(true), Encho: enchoOne,
+					IpponsA: []string{mark}, IpponsB: []string{},
+					Winner: "TeamA", Encho: enchoOne,
 				},
 			},
 		}
@@ -1082,38 +1108,47 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 			SubResults: []state.SubMatchResult{
 				{
 					Position: -1, SideA: "TeamA", SideB: "TeamB",
-					IpponsA: []string{"M"}, IpponsB: []string{"K"},
-					Winner: "TeamA", DecidedByHantei: state.HanteiPtr(true), Encho: enchoOne,
+					IpponsA: []string{"M", mark}, IpponsB: []string{"K"},
+					Winner: "TeamA", Encho: enchoOne,
 				},
 				{
 					Position: -1, SideA: "TeamA", SideB: "TeamB",
-					IpponsA: []string{"M", "K"}, IpponsB: []string{"K"}, // invalid: non-tied scoreline
-					Winner: "TeamA", DecidedByHantei: state.HanteiPtr(true), Encho: enchoOne,
+					// invalid: non-tied scoreline (0 real vs 2 real, same
+					// cap-avoiding shape as the standalone test above)
+					IpponsA: []string{mark}, IpponsB: []string{"K", "D"},
+					Winner: "TeamA", Encho: enchoOne,
 				},
 			},
 		}
 		verr := req.Validate()
 		require.IsType(t, &ValidationError{}, verr)
-		assert.Equal(t, "subResults[1].decidedByHantei", verr.(*ValidationError).Field)
+		assert.Equal(t, "subResults[1].ippons", verr.(*ValidationError).Field)
 	})
 }
 
-func TestValidateBulkScoreLengths_SubBoutDecidedByHantei(t *testing.T) {
+// TestValidateBulkScoreLengths_SubBoutHantei pins the bulk-import path.
+// validateBulkScoreLengths has no NormalizeLegacyHantei call of its own (only
+// parsePoolMatchesRecords, LoadBracket, and ScoreRequest.validateWithOptions
+// are conversion sites — state/legacy_hantei.go), so the legacy
+// DecidedByHantei *bool is genuinely inert here: fixtures place the mark in
+// ippons directly, exactly as the single-score twin's tests do.
+func TestValidateBulkScoreLengths_SubBoutHantei(t *testing.T) {
 	enchoOne := &state.EnchoMetadata{PeriodCount: 1}
+	mark := domain.HanteiMark
 
 	t.Run("invalid: hantei on regular position rejected on bulk path", func(t *testing.T) {
 		r := &state.MatchResult{
 			SubResults: []state.SubMatchResult{
 				{
 					Position: 1, SideA: "TeamA", SideB: "TeamB",
-					IpponsA: []string{"M"}, IpponsB: []string{"K"},
-					Winner: "TeamA", DecidedByHantei: state.HanteiPtr(true),
+					IpponsA: []string{"M", mark}, IpponsB: []string{"K"},
+					Winner: "TeamA",
 				},
 			},
 		}
 		verr := validateBulkScoreLengths(r, false)
 		require.IsType(t, &ValidationError{}, verr)
-		assert.Equal(t, "subResults[0].decidedByHantei", verr.(*ValidationError).Field)
+		assert.Equal(t, "subResults[0].ippons", verr.(*ValidationError).Field)
 	})
 
 	t.Run("invalid: encho on regular position rejected on bulk path", func(t *testing.T) {
@@ -1136,8 +1171,8 @@ func TestValidateBulkScoreLengths_SubBoutDecidedByHantei(t *testing.T) {
 			SubResults: []state.SubMatchResult{
 				{
 					Position: -1, SideA: "TeamA", SideB: "TeamB",
-					IpponsA: []string{"M"}, IpponsB: []string{"K"},
-					Winner: "TeamA", DecidedByHantei: state.HanteiPtr(true), Encho: enchoOne,
+					IpponsA: []string{"M", mark}, IpponsB: []string{"K"},
+					Winner: "TeamA", Encho: enchoOne,
 				},
 			},
 		}
@@ -1149,14 +1184,14 @@ func TestValidateBulkScoreLengths_SubBoutDecidedByHantei(t *testing.T) {
 			SubResults: []state.SubMatchResult{
 				{
 					Position: -1, SideA: "TeamA", SideB: "TeamB",
-					IpponsA: []string{"M"}, IpponsB: []string{"K"},
-					Winner: "", DecidedByHantei: state.HanteiPtr(true), Encho: enchoOne,
+					IpponsA: []string{"M", mark}, IpponsB: []string{"K"},
+					Winner: "", Encho: enchoOne,
 				},
 			},
 		}
 		verr := validateBulkScoreLengths(r, false)
 		require.IsType(t, &ValidationError{}, verr)
-		assert.Equal(t, "subResults[0].decidedByHantei", verr.(*ValidationError).Field)
+		assert.Equal(t, "subResults[0].ippons", verr.(*ValidationError).Field)
 	})
 
 	t.Run("valid: daihyosen hantei without encho accepted on bulk path", func(t *testing.T) {
@@ -1164,8 +1199,8 @@ func TestValidateBulkScoreLengths_SubBoutDecidedByHantei(t *testing.T) {
 			SubResults: []state.SubMatchResult{
 				{
 					Position: -1, SideA: "TeamA", SideB: "TeamB",
-					IpponsA: []string{"M"}, IpponsB: []string{"K"},
-					Winner: "TeamA", DecidedByHantei: state.HanteiPtr(true), Encho: nil,
+					IpponsA: []string{"M", mark}, IpponsB: []string{"K"},
+					Winner: "TeamA", Encho: nil,
 				},
 			},
 		}
@@ -1177,28 +1212,31 @@ func TestValidateBulkScoreLengths_SubBoutDecidedByHantei(t *testing.T) {
 			SubResults: []state.SubMatchResult{
 				{
 					Position: -1, SideA: "TeamA", SideB: "TeamB",
-					IpponsA: []string{"M", "K"}, IpponsB: []string{"D"},
-					Winner: "TeamA", DecidedByHantei: state.HanteiPtr(true), Encho: enchoOne,
+					IpponsA: []string{mark}, IpponsB: []string{"D", "T"},
+					Winner: "TeamA", Encho: enchoOne,
 				},
 			},
 		}
 		verr := validateBulkScoreLengths(r, false)
 		require.IsType(t, &ValidationError{}, verr)
-		assert.Equal(t, "subResults[0].decidedByHantei", verr.(*ValidationError).Field)
+		assert.Equal(t, "subResults[0].ippons", verr.(*ValidationError).Field)
 	})
 }
 
 // TestIsSelfRunReportableDecision covers the allowlist and rejection cases
 // for participant self-reporting in self-run tournaments.
+//
+// The second parameter used to be the legacy *bool decidedByHantei tri-state;
+// it is now hanteiDecided, a plain bool computed from
+// MatchResult.HanteiDecided() (the domain.HanteiMark presence test) at the
+// call site (handlers_match.go). There is no third "nil" state any more: the
+// mark either is or is not in the ippons.
 func TestIsSelfRunReportableDecision(t *testing.T) {
-	f := false
-	tr := true
-
 	tests := []struct {
-		name            string
-		decision        string
-		decidedByHantei *bool
-		want            bool
+		name          string
+		decision      string
+		hanteiDecided bool
+		want          bool
 	}{
 		{name: "empty decision allowed", decision: "", want: true},
 		{name: "fought allowed", decision: "fought", want: true},
@@ -1210,13 +1248,12 @@ func TestIsSelfRunReportableDecision(t *testing.T) {
 		{name: "daihyosen rejected", decision: "daihyosen", want: false},
 		{name: "kachinuki-exhaustion rejected", decision: "kachinuki-exhaustion", want: false},
 		{name: "unknown decision rejected", decision: "magic", want: false},
-		{name: "decidedByHantei=true rejects even allowed decision", decision: "fought", decidedByHantei: &tr, want: false},
-		{name: "decidedByHantei=false is ok (nil-vs-false are the same signal)", decision: "fought", decidedByHantei: &f, want: true},
-		{name: "decidedByHantei nil is ok", decision: "fought", decidedByHantei: nil, want: true},
+		{name: "hanteiDecided=true rejects even allowed decision", decision: "fought", hanteiDecided: true, want: false},
+		{name: "hanteiDecided=false is ok", decision: "fought", hanteiDecided: false, want: true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := IsSelfRunReportableDecision(tc.decision, tc.decidedByHantei)
+			got := IsSelfRunReportableDecision(tc.decision, tc.hanteiDecided)
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -1469,19 +1506,25 @@ func TestValidateIpponCounts_TwoTwoRuleCountsPointsNotSlots(t *testing.T) {
 // as three ippons, one of them the hansoku letter — into the display surfaces
 // and into the K3 rollback snapshot built from the same decode. And on a POOL
 // match, domain.HanteiMark IS the storage encoding for a verdict
-// (encodeHanteiIntoIppons): a client-supplied "Ht" was written to
-// pool-matches.csv verbatim and decodeHanteiFromIppons read it back as a
+// as an ippon entry: before the placement rules a client-supplied "Ht" was
+// written to pool-matches.csv verbatim and read back as a
 // genuine recorded judges' decision — a verdict forged by a payload that never
 // set the flag. Being two runes, it is refused by the same rule as any other
 // multi-character entry.
 func TestIpponEntriesMustBeSingleCharacters(t *testing.T) {
-	t.Run("the hantei mark cannot be smuggled in as a point", func(t *testing.T) {
-		err := validateIppons("", []string{"M", domain.HanteiMark}, []string{"K"})
-		require.Error(t, err, "accepting this forges a hantei verdict on the next reload")
-		assert.Contains(t, err.Error(), "single character")
+	// Semantic flip (rule 4): the mark is no longer "smuggled in as a point" —
+	// domain.HanteiMark IS the verdict record (operator ruling 2026-08-21),
+	// and domain.IpponFitsScoreCodec deliberately admits it as the ONE
+	// multi-rune token the codec understands. validateIppons therefore
+	// accepts it structurally; PLACEMENT (at most one mark, only in the
+	// winner's slice, tied scoreline) is a separate rule
+	// (validateHanteiMarkPlacement), exercised by TestScoreRequestValidate_Hantei
+	// and TestScoreRequestValidate_SubBoutHantei.
+	t.Run("the hantei mark is a legitimate ippon-slice entry, not a smuggled point", func(t *testing.T) {
+		assert.NoError(t, validateIppons("", []string{"M", domain.HanteiMark}, []string{"K"}))
 	})
 
-	t.Run("any multi-character entry, on either side", func(t *testing.T) {
+	t.Run("any OTHER multi-character entry, on either side, is still rejected", func(t *testing.T) {
 		assert.Error(t, validateIppons("", []string{"MK"}, nil))
 		assert.Error(t, validateIppons("", nil, []string{"MK"}))
 		assert.Error(t, validateIppons("", []string{"(H1)"}, nil), "the codec's hansoku suffix is not an ippon")
@@ -1495,17 +1538,29 @@ func TestIpponEntriesMustBeSingleCharacters(t *testing.T) {
 		}
 	})
 
-	t.Run("rejected on the ScoreRequest path", func(t *testing.T) {
+	t.Run("a correctly-placed mark is accepted on the ScoreRequest path", func(t *testing.T) {
+		r := &ScoreRequest{
+			SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			Status:  state.MatchStatusCompleted,
+			IpponsA: []string{domain.HanteiMark}, IpponsB: []string{},
+		}
+		assert.NoError(t, r.Validate())
+	})
+
+	t.Run("a mark not attributable to the winner is rejected on the ScoreRequest path", func(t *testing.T) {
+		// This fixture never sets SideA/SideB, so the mark in IpponsA cannot be
+		// attributed to Winner "Alice": rejected by validateHanteiMarkPlacement,
+		// not by the (now-gone) single-character check.
 		r := &ScoreRequest{
 			Winner: "Alice", Status: state.MatchStatusCompleted,
 			IpponsA: []string{domain.HanteiMark}, IpponsB: []string{"K"},
 		}
 		err := r.Validate()
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "single character")
+		assert.Contains(t, err.Error(), "hantei mark belongs in the winner's ippon list")
 	})
 
-	t.Run("rejected on the bulk path, including a sub-bout", func(t *testing.T) {
+	t.Run("rejected on the bulk path when the sub-bout mark is on a regular position", func(t *testing.T) {
 		r := &state.MatchResult{
 			SideA: "Kyoto", SideB: "Osaka", Winner: "Kyoto",
 			SubResults: []state.SubMatchResult{{
@@ -1515,6 +1570,6 @@ func TestIpponEntriesMustBeSingleCharacters(t *testing.T) {
 		}
 		err := validateBulkScoreLengths(r, false)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "single character")
+		assert.Contains(t, err.Error(), "daihyosen representative bout")
 	})
 }

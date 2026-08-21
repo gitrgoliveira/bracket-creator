@@ -55,20 +55,27 @@ func FormatScore(ippons []string, hansoku int) string {
 //     hansoku letter, on the display surfaces AND in the K3 rollback snapshot
 //     built from the same decode.
 //   - Worse on a POOL match, where HanteiMark is the persistence encoding for a
-//     verdict (encodeHanteiIntoIppons, state/pools.go). A client-supplied "Ht"
-//     was written to pool-matches.csv verbatim, and decodeHanteiFromIppons then
+//     verdict recorded in the winner's cell. A client-supplied "Ht"
+//     was written to pool-matches.csv verbatim, and the pre-mark-model reader
 //     read it back as a genuine recorded judges' decision — a forged verdict on
 //     reload, from a payload that never set the flag. Being two runes, it is
 //     rejected here by the same rule.
+//
+// HanteiMark is the ONE multi-rune entry the codec admits: "t" is not a
+// letter that can stand alone in a score, so ParseScore can consume the
+// "Ht" pair unambiguously (an "H" ippon is only read as bare hansoku-H when
+// NOT followed by "t").
 func IpponFitsScoreCodec(v string) bool {
-	return utf8.RuneCountInString(v) <= 1
+	return utf8.RuneCountInString(v) <= 1 || v == HanteiMark
 }
 
 // ParseScore is the inverse of FormatScore: "MK (H1)" → (["M","K"], 1),
 // "MK" → (["M","K"], 0), "(H1)" → (nil, 1), "" → (nil, 0).
 //
 // The round trip is exact for any slice FormatScore can render distinctly,
-// i.e. one whose entries are single runes. Two deliberate normalisations:
+// i.e. one whose entries are single runes plus the two-rune HanteiMark,
+// which is recovered by the same no-lone-"t" argument stated on
+// IpponFitsScoreCodec. Two deliberate normalisations:
 // an empty-string entry is dropped (it renders as nothing, and is not a
 // scoring ippon — see CountScoringIppons), and an absent hansoku count comes
 // back as 0 rather than a negative. A malformed count parses as 0 rather than
@@ -86,8 +93,17 @@ func ParseScore(s string) ([]string, int) {
 		}
 	}
 	var ippons []string
-	for _, r := range s {
+	runes := []rune(s)
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
 		if r == ' ' {
+			continue
+		}
+		// The hantei mark is the codec's one two-rune token; see
+		// IpponFitsScoreCodec for why the lookahead cannot misfire.
+		if r == 'H' && i+1 < len(runes) && runes[i+1] == 't' {
+			ippons = append(ippons, HanteiMark)
+			i++
 			continue
 		}
 		ippons = append(ippons, string(r))

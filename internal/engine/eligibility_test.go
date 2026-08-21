@@ -890,17 +890,15 @@ func TestRollback_BracketSubResults_Cleared(t *testing.T) {
 	}))
 
 	// Score the second bracket match with a kiken on the target (SideA →
-	// decisionBy "aka" makes SideA the loser) plus SubResults and a hantei
-	// flag. The engine writes the partial bracket result, then
-	// recordIneligibilityFromDecisionTx detects the target is already
-	// ineligible from firstMatchID and returns *AlreadyIneligibleError,
-	// triggering the rollback.
+	// decisionBy "aka" makes SideA the loser) plus SubResults. The engine
+	// writes the partial bracket result, then recordIneligibilityFromDecisionTx
+	// detects the target is already ineligible from firstMatchID and returns
+	// *AlreadyIneligibleError, triggering the rollback.
 	_, err = eng.RecordMatchResultWithIneligibility(compID, secondMatchID, &state.MatchResult{
-		Winner:          secondMatch.SideB,
-		Status:          state.MatchStatusCompleted,
-		Decision:        "kiken",
-		DecisionBy:      "aka",
-		DecidedByHantei: state.HanteiPtr(true),
+		Winner:     secondMatch.SideB,
+		Status:     state.MatchStatusCompleted,
+		Decision:   "kiken",
+		DecisionBy: "aka",
 		SubResults: []state.SubMatchResult{
 			{Position: 1, SideA: secondMatch.SideA, Winner: secondMatch.SideA},
 			{Position: 2, SideA: secondMatch.SideA, IpponsB: []string{"M"}},
@@ -910,11 +908,10 @@ func TestRollback_BracketSubResults_Cleared(t *testing.T) {
 	var alreadyErr *AlreadyIneligibleError
 	require.ErrorAs(t, err, &alreadyErr)
 
-	// The bracket match must have been rolled back. Critically, both
-	// nil-preserve fields written as part of the failed score attempt
-	// must NOT persist, the prior had nil SubResults and (via HanteiPtr)
-	// nil DecidedByHantei, and the rollback must normalize those to an
-	// explicit empty slice / false to clear them.
+	// The bracket match must have been rolled back. Critically, the
+	// nil-preserve field written as part of the failed score attempt must NOT
+	// persist: the prior had nil SubResults, and the rollback must normalize
+	// that to an explicit empty slice to clear it.
 	bracket, err = store.LoadBracket(compID)
 	require.NoError(t, err)
 	found := false
@@ -923,7 +920,7 @@ func TestRollback_BracketSubResults_Cleared(t *testing.T) {
 			if bm.ID == secondMatchID {
 				found = true
 				assert.Empty(t, bm.SubResults, "SubResults must be cleared by rollback when the prior had none")
-				assert.False(t, bm.DecidedByHantei, "DecidedByHantei must be cleared by rollback when the prior was false")
+				assert.False(t, bm.DecidedByHantei, "legacy read-only field: production code never writes it")
 			}
 		}
 	}
@@ -973,11 +970,10 @@ func TestRollback_BracketSubResults_ClearedTx(t *testing.T) {
 	var recErr error
 	require.NoError(t, store.WithTransaction(compID, func(tx state.StoreTx) error {
 		_, recErr = eng.RecordMatchResultWithIneligibilityTx(tx, compID, secondMatch.ID, &state.MatchResult{
-			Winner:          secondMatch.SideB,
-			Status:          state.MatchStatusCompleted,
-			Decision:        "kiken",
-			DecisionBy:      "aka",
-			DecidedByHantei: state.HanteiPtr(true),
+			Winner:     secondMatch.SideB,
+			Status:     state.MatchStatusCompleted,
+			Decision:   "kiken",
+			DecisionBy: "aka",
 			SubResults: []state.SubMatchResult{
 				{Position: 1, SideA: secondMatch.SideA, Winner: secondMatch.SideA},
 				{Position: 2, SideA: secondMatch.SideA, IpponsB: []string{"M"}},
@@ -999,7 +995,7 @@ func TestRollback_BracketSubResults_ClearedTx(t *testing.T) {
 			if bm.ID == secondMatch.ID {
 				found = true
 				assert.Empty(t, bm.SubResults, "SubResults must be cleared by the tx rollback when the prior had none")
-				assert.False(t, bm.DecidedByHantei, "DecidedByHantei must be cleared by the tx rollback")
+				assert.False(t, bm.DecidedByHantei, "legacy read-only field: production code never writes it")
 			}
 		}
 	}

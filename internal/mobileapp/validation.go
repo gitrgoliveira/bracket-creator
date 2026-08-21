@@ -314,25 +314,56 @@ func validateSubBout(prefix string, sr *state.SubMatchResult, allowNumberedEncho
 	}
 	if sr.Position != state.DaihyosenSubPosition {
 		return &ValidationError{
-			Field:   prefix + "decidedByHantei",
+			Field:   prefix + "ippons",
 			Message: "hantei is only valid for the daihyosen representative bout (position -1)",
 		}
 	}
-	if sr.Winner == "" {
-		return &ValidationError{Field: prefix + "decidedByHantei", Message: "requires winner to be set"}
+	if err := validateHanteiMarkPlacement(prefix, sr.IpponsA, sr.IpponsB, sr.SideA, sr.SideB, sr.Winner); err != nil {
+		return err
 	}
 	// Both halves of this gate are shared with the engine's preserveSubHantei
 	// via domain, so a row this accepts and a row the engine may stamp can
 	// never disagree. The tie test was raw len() here and placeholder-dropping
 	// there, which is a difference an "•" or empty cell can express.
 	if !domain.HanteiTiedScoreline(sr.IpponsA, sr.IpponsB) {
-		return &ValidationError{Field: prefix + "decidedByHantei", Message: "requires a tied scoreline, ippon counts must be equal"}
+		return &ValidationError{Field: prefix + "ippons", Message: "hantei requires a tied scoreline, ippon counts must be equal"}
 	}
 	if !domain.IsSubBoutHanteiCompatibleDecisionStr(sr.Decision) {
 		return &ValidationError{
-			Field:   prefix + "decidedByHantei",
-			Message: fmt.Sprintf("incompatible with decision %q, hantei declares a winner from a tied bout; use '', 'fought', or 'daihyosen'", sr.Decision),
+			Field:   prefix + "ippons",
+			Message: fmt.Sprintf("hantei is incompatible with decision %q, it declares a winner from a tied bout; use '', 'fought', or 'daihyosen'", sr.Decision),
 		}
+	}
+	return nil
+}
+
+// validateHanteiMarkPlacement enforces the STRUCTURAL half of the hantei
+// rules, shared by the match-level and sub-bout blocks: the judges'-decision
+// mark appears at most once, only in the WINNER's slice (it names the
+// competitor the referees chose), and a winner must be named for it to name.
+func validateHanteiMarkPlacement(prefix string, ipponsA, ipponsB []string, sideA, sideB, winner string) error {
+	marks := 0
+	for _, v := range ipponsA {
+		if v == domain.HanteiMark {
+			marks++
+		}
+	}
+	for _, v := range ipponsB {
+		if v == domain.HanteiMark {
+			marks++
+		}
+	}
+	if marks > 1 {
+		return &ValidationError{Field: prefix + "ippons", Message: "at most one hantei mark per bout"}
+	}
+	if winner == "" {
+		return &ValidationError{Field: prefix + "ippons", Message: "hantei requires winner to be set"}
+	}
+	if domain.ContainsHantei(ipponsA) && winner != sideA {
+		return &ValidationError{Field: prefix + "ippons", Message: "the hantei mark belongs in the winner's ippon list"}
+	}
+	if domain.ContainsHantei(ipponsB) && winner != sideB {
+		return &ValidationError{Field: prefix + "ippons", Message: "the hantei mark belongs in the winner's ippon list"}
 	}
 	return nil
 }
@@ -345,6 +376,19 @@ func validateSubBout(prefix string, sr *state.SubMatchResult, allowNumberedEncho
 // allowNumberedEncho mirrors validateSubBout's kachinuki exception; the
 // bulk handler derives it from the competition it already loads.
 func validateBulkScoreLengths(r *state.MatchResult, allowNumberedEncho bool) error {
+	// Same legacy fold + hantei placement rules as validateWithOptions: this
+	// path writes through RecordMatchResult and nothing downstream re-checks,
+	// so a misplaced judges'-decision mark (or a pre-ruling decidedByHantei
+	// flag) must be caught or converted here too.
+	r.NormalizeLegacyHantei()
+	if domain.ContainsHantei(r.IpponsA) || domain.ContainsHantei(r.IpponsB) {
+		if err := validateHanteiMarkPlacement("", r.IpponsA, r.IpponsB, r.SideA, r.SideB, r.Winner); err != nil {
+			return err
+		}
+		if !domain.HanteiTiedScoreline(r.IpponsA, r.IpponsB) {
+			return &ValidationError{Field: "ippons", Message: "hantei requires a tied scoreline, ippon counts must be equal"}
+		}
+	}
 	if err := validateMaxLen("sideA", r.SideA, MaxLenMatchSide); err != nil {
 		return err
 	}
@@ -533,6 +577,11 @@ func (r *ScoreRequest) Validate() error {
 // fought to a result is operator discretion. Every other caller keeps
 // the strict daihyosen-only gate via Validate().
 func (r *ScoreRequest) validateWithOptions(allowNumberedEncho bool) error {
+	// LEGACY payloads first: the offline write queue can replay a pre-ruling
+	// payload carrying decidedByHantei flags for hours after a binary
+	// upgrade; fold them into the domain.HanteiMark ippon entry so every rule
+	// below sees one representation (state/legacy_hantei.go). Idempotent.
+	(*state.MatchResult)(r).NormalizeLegacyHantei()
 	if r.Status != "" {
 		switch r.Status {
 		case state.MatchStatusScheduled, state.MatchStatusRunning, state.MatchStatusCompleted:
@@ -626,34 +675,32 @@ func (r *ScoreRequest) validateWithOptions(allowNumberedEncho bool) error {
 			return err
 		}
 	}
-	// DecidedByHantei records a referee judges' decision that declares a winner
-	// from a tied bout. A winner must be present, the status (if supplied) must
-	// be completed, and the scoreline must be tied (equal ippon counts). Encho
-	// is NOT required: operators may take a tied match straight to hantei
-	// without an overtime period (the encho gate was removed deliberately).
+	// The domain.HanteiMark ippon entry records a referee judges' decision
+	// that declares a winner from a tied bout. A winner must be present (and
+	// carry the mark), the status (if supplied) must be completed, and the
+	// scoreline must be tied (equal SCORING ippon counts; the mark itself
+	// never counts). Encho is NOT required: operators may take a tied match
+	// straight to hantei without an overtime period (deliberate).
 	// The winner and tied-scoreline checks below are the SAME rules
 	// validateSubBout applies, so both call the shared domain predicates rather
 	// than spelling them out twice (the tie test used to be a raw len() here
 	// against a placeholder-dropping count there, so ["M","•"] against ["M","K"]
 	// read tied to one enforcer and untied to the other). The decision check is
 	// deliberately NARROWER than the sub-bout one; see the note on it below.
-	if r.DecidedByHantei != nil && *r.DecidedByHantei {
-		if r.Winner == "" {
-			return &ValidationError{
-				Field:   "decidedByHantei",
-				Message: "requires winner to be set",
-			}
+	if domain.ContainsHantei(r.IpponsA) || domain.ContainsHantei(r.IpponsB) {
+		if err := validateHanteiMarkPlacement("", r.IpponsA, r.IpponsB, r.SideA, r.SideB, r.Winner); err != nil {
+			return err
 		}
 		if r.Status != "" && r.Status != state.MatchStatusCompleted {
 			return &ValidationError{
-				Field:   "decidedByHantei",
-				Message: "only valid on completed matches",
+				Field:   "ippons",
+				Message: "hantei is only valid on completed matches",
 			}
 		}
 		if !domain.HanteiTiedScoreline(r.IpponsA, r.IpponsB) {
 			return &ValidationError{
-				Field:   "decidedByHantei",
-				Message: "requires a tied scoreline, ippon counts must be equal",
+				Field:   "ippons",
+				Message: "hantei requires a tied scoreline, ippon counts must be equal",
 			}
 		}
 		// Hantei is a referee judges' decision that produces a winner from a
@@ -670,20 +717,20 @@ func (r *ScoreRequest) validateWithOptions(allowNumberedEncho bool) error {
 		// verdict onto a decision this rejects.
 		if !domain.IsMatchHanteiCompatibleDecisionStr(r.Decision) {
 			return &ValidationError{
-				Field:   "decidedByHantei",
-				Message: fmt.Sprintf("incompatible with decision %q, hantei declares a winner from a tied bout; use '' or 'fought'", r.Decision),
+				Field:   "ippons",
+				Message: fmt.Sprintf("hantei is incompatible with decision %q, it declares a winner from a tied bout; use '' or 'fought'", r.Decision),
 			}
 		}
 		if r.DecisionBy != "" {
 			return &ValidationError{
-				Field:   "decidedByHantei",
-				Message: "decisionBy must be empty when decidedByHantei is true",
+				Field:   "ippons",
+				Message: "decisionBy must be empty on a hantei result",
 			}
 		}
 		if r.DecisionReason != "" {
 			return &ValidationError{
-				Field:   "decidedByHantei",
-				Message: "decisionReason must be empty when decidedByHantei is true",
+				Field:   "ippons",
+				Message: "decisionReason must be empty on a hantei result",
 			}
 		}
 	}
@@ -875,8 +922,8 @@ func (r *ScoreRequest) AsMatchResult() *state.MatchResult {
 // "kachinuki-exhaustion", "fusensho", referee/operator rulings with
 // eligibility side-effects or official designation requirements. Also
 // rejected when decidedByHantei is explicitly true (judges' panel decision).
-func IsSelfRunReportableDecision(decision string, decidedByHantei *bool) bool {
-	if decidedByHantei != nil && *decidedByHantei {
+func IsSelfRunReportableDecision(decision string, hanteiDecided bool) bool {
+	if hanteiDecided {
 		return false
 	}
 	switch decision {

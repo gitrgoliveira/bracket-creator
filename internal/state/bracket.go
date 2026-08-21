@@ -52,10 +52,14 @@ func parseBracketBytes(raw []byte) (*Bracket, error) {
 	for i := range b.Rounds {
 		for j := range b.Rounds[i] {
 			clampBracketMatchFlags(&b.Rounds[i][j])
+			// Legacy decidedByHantei flags fold into the mark inside the
+			// winner's score string on load (legacy_hantei.go).
+			b.Rounds[i][j].NormalizeLegacyHantei()
 		}
 	}
 	if b.ThirdPlaceMatch != nil {
 		clampBracketMatchFlags(b.ThirdPlaceMatch)
+		b.ThirdPlaceMatch.NormalizeLegacyHantei()
 	}
 	return &b, nil
 }

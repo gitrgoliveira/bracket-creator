@@ -663,11 +663,23 @@ func TestRecordBracketMatchResult_PropagatesWinner(t *testing.T) {
 	assert.Equal(t, state.MatchStatusCompleted, bracket.Rounds[0][0].Status)
 }
 
-func TestRecordBracketMatchResult_DecidedByHantei_RoundTrips(t *testing.T) {
+// Semantic flip (rule 4): this used to pin BracketMatch.DecidedByHantei (a
+// *bool carried across a silent re-score). That flag channel no longer
+// exists in production — it is LEGACY READ-ONLY (state/legacy_hantei.go) and
+// no writer sets it any more. The verdict is now the domain.HanteiMark entry
+// in the WINNER's ippon slice, rendered into BracketMatch.ScoreA/ScoreB via
+// domain.FormatScore, so it rides with the scoreline through the disk
+// round-trip like any other ippon. There is no longer a separate "preserve
+// the flag across a silent write" mechanism: a real client (the SPA) always
+// echoes the full ippons it was served, so "keeping the mark" is "echoing
+// it again", and a write that supplies markless ippons genuinely clears it
+// (stripInvalidHantei only strips a mark the incoming payload carries; it
+// never restores one a payload omitted).
+func TestRecordBracketMatchResult_Hantei_RoundTrips(t *testing.T) {
 	// FIK Art. 7-5 / 29-6: a knockout match that remains tied after encho is
-	// decided by referee hantei. The flag must survive the disk round-trip
-	// and surface on both the MatchResult and the propagated BracketMatch
-	// so the UI and Excel export can mark hantei wins explicitly.
+	// decided by referee hantei. The mark must survive the disk round-trip
+	// inside BracketMatch.ScoreA/ScoreB so the UI and Excel export can mark
+	// hantei wins explicitly.
 	eng, store, _ := setupTestEngine(t)
 	compID := "bracket-hantei"
 
@@ -678,41 +690,67 @@ func TestRecordBracketMatchResult_DecidedByHantei_RoundTrips(t *testing.T) {
 	bracket, err := store.LoadBracket(compID)
 	require.NoError(t, err)
 
-	firstMatchID := bracket.Rounds[0][0].ID
-	hantei := true
+	first := bracket.Rounds[0][0]
+	firstMatchID := first.ID
+	// Alice's side is decided by the seeding, not this test; find it rather
+	// than assuming SideA.
+	ipponsA, ipponsB := []string{}, []string{domain.HanteiMark}
+	if first.SideA == "Alice" {
+		ipponsA, ipponsB = []string{domain.HanteiMark}, []string{}
+	}
+	aliceScore := func(bm state.BracketMatch) string {
+		if bm.SideA == "Alice" {
+			return bm.ScoreA
+		}
+		return bm.ScoreB
+	}
+
 	err = eng.RecordMatchResult(compID, firstMatchID, &state.MatchResult{
-		Winner:          "Alice",
-		Status:          state.MatchStatusCompleted,
-		Encho:           &state.EnchoMetadata{PeriodCount: 1},
-		DecidedByHantei: &hantei,
+		Winner:  "Alice",
+		Status:  state.MatchStatusCompleted,
+		Encho:   &state.EnchoMetadata{PeriodCount: 1},
+		IpponsA: ipponsA, IpponsB: ipponsB,
 	})
 	require.NoError(t, err)
 
 	bracket, err = store.LoadBracket(compID)
 	require.NoError(t, err)
-	assert.True(t, bracket.Rounds[0][0].DecidedByHantei, "BracketMatch.DecidedByHantei must reflect the MatchResult flag")
-	// Zero-value baseline: the un-scored second semi-final must NOT have the flag set.
+	assert.Contains(t, aliceScore(bracket.Rounds[0][0]), domain.HanteiMark,
+		"the winner's rendered score carries the mark")
+	// Zero-value baseline: the un-scored second semi-final must NOT carry it.
+	assert.NotContains(t, bracket.Rounds[0][1].ScoreA, domain.HanteiMark)
+	assert.NotContains(t, bracket.Rounds[0][1].ScoreB, domain.HanteiMark)
 	assert.False(t, bracket.Rounds[0][1].DecidedByHantei, "untouched bracket match must remain non-hantei")
 
-	// A re-score that omits DecidedByHantei (nil *bool) must PRESERVE the stored
-	// flag rather than silently clearing it, the *bool tri-state API contract.
-	// Additionally, the engine must PROJECT the persisted value back into the
-	// in-memory result so the HTTP response + SSE broadcast reflect committed
-	// state (without projection, clients would see the match flip non-hantei
-	// for one turn after a nil-preserve re-score).
-	rescore := &state.MatchResult{
-		Winner:          "Alice",
-		Status:          state.MatchStatusCompleted,
-		Encho:           &state.EnchoMetadata{PeriodCount: 1},
-		DecidedByHantei: nil, // intentionally omitted
-	}
-	err = eng.RecordMatchResult(compID, firstMatchID, rescore)
-	require.NoError(t, err)
-	bracket, err = store.LoadBracket(compID)
-	require.NoError(t, err)
-	assert.True(t, bracket.Rounds[0][0].DecidedByHantei, "nil DecidedByHantei must preserve the stored true value")
-	require.NotNil(t, rescore.DecidedByHantei, "result.DecidedByHantei must be projected back from storage so SSE/HTTP response reflects committed state")
-	assert.True(t, *rescore.DecidedByHantei, "projected value must reflect the preserved stored true")
+	t.Run("a re-score echoing the mark keeps it", func(t *testing.T) {
+		err = eng.RecordMatchResult(compID, firstMatchID, &state.MatchResult{
+			Winner:  "Alice",
+			Status:  state.MatchStatusCompleted,
+			Encho:   &state.EnchoMetadata{PeriodCount: 1},
+			IpponsA: ipponsA, IpponsB: ipponsB,
+		})
+		require.NoError(t, err)
+		b, err := store.LoadBracket(compID)
+		require.NoError(t, err)
+		assert.Contains(t, aliceScore(b.Rounds[0][0]), domain.HanteiMark)
+	})
+
+	t.Run("a markless re-score clears it", func(t *testing.T) {
+		// The ippons are the verdict channel: a writer that replaces them
+		// with a markless scoreline has spoken, and the old flag had nothing
+		// left to carry.
+		err = eng.RecordMatchResult(compID, firstMatchID, &state.MatchResult{
+			Winner:  "Alice",
+			Status:  state.MatchStatusCompleted,
+			IpponsA: []string{}, IpponsB: []string{},
+		})
+		require.NoError(t, err)
+		b, err := store.LoadBracket(compID)
+		require.NoError(t, err)
+		got := b.Rounds[0][0]
+		assert.NotContains(t, got.ScoreA, domain.HanteiMark)
+		assert.NotContains(t, got.ScoreB, domain.HanteiMark)
+	})
 }
 
 func TestRecordBracketMatchResult_SubResults_RoundTrips(t *testing.T) {

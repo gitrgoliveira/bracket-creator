@@ -2,6 +2,7 @@ package state
 
 import (
 	"errors"
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"os"
 	"path/filepath"
 	"testing"
@@ -454,12 +455,12 @@ func TestLoadBracket_DeepCopyIsolation(t *testing.T) {
 					Encho: &EnchoMetadata{PeriodCount: 1},
 					SubResults: []SubMatchResult{
 						{
-							SideA:           "A1",
-							SideB:           "B1",
-							IpponsA:         []string{"M"},
-							IpponsB:         []string{"K"},
-							Encho:           &EnchoMetadata{PeriodCount: 2},
-							DecidedByHantei: HanteiPtr(true),
+							SideA:   "A1",
+							SideB:   "B1",
+							Winner:  "A1",
+							IpponsA: []string{"M", domain.HanteiMark},
+							IpponsB: []string{"K"},
+							Encho:   &EnchoMetadata{PeriodCount: 2},
 						},
 					},
 				},
@@ -481,11 +482,10 @@ func TestLoadBracket_DeepCopyIsolation(t *testing.T) {
 	first.Rounds[0][0].SubResults[0].IpponsA[0] = "MUTATED"
 	first.Rounds[0][0].SubResults[0].IpponsB[0] = "MUTATED"
 	first.Rounds[0][0].SubResults[0].Encho.PeriodCount = 99
-	// The *bool hantei flag is the newest reference field on the sub, and it
-	// needs its own mutation: a shallow struct copy would carry the SAME
-	// pointer, so writing through it corrupts the cached bracket while every
-	// other assertion here still passes.
-	*first.Rounds[0][0].SubResults[0].DecidedByHantei = false
+	// The hantei verdict rides in the ippon slice, so the IpponsA mutation
+	// above already covers its isolation; overwrite the mark entry too so a
+	// shared backing array cannot hide behind an untouched second element.
+	first.Rounds[0][0].SubResults[0].IpponsA[1] = "MUTATED"
 
 	// A fresh load must reflect the saved state, not the in-place mutation.
 	second, err := store.LoadBracket(compID)
@@ -493,7 +493,7 @@ func TestLoadBracket_DeepCopyIsolation(t *testing.T) {
 	require.Len(t, second.Rounds[0][0].SubResults, 1)
 	assert.Equal(t, 1, second.Rounds[0][0].Encho.PeriodCount)
 	assert.Equal(t, "A1", second.Rounds[0][0].SubResults[0].SideA)
-	assert.Equal(t, []string{"M"}, second.Rounds[0][0].SubResults[0].IpponsA)
+	assert.Equal(t, []string{"M", domain.HanteiMark}, second.Rounds[0][0].SubResults[0].IpponsA)
 	assert.Equal(t, []string{"K"}, second.Rounds[0][0].SubResults[0].IpponsB)
 	assert.Equal(t, 2, second.Rounds[0][0].SubResults[0].Encho.PeriodCount)
 	assert.True(t, second.Rounds[0][0].SubResults[0].HanteiDecided())

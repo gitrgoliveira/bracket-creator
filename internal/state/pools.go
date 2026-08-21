@@ -5,12 +5,10 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"os"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
 
-	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 )
 
@@ -320,91 +318,6 @@ func splitIppons(s string) []string {
 	return strings.Split(s, "|")
 }
 
-// encodeHanteiIntoIppons returns the two ippon slices as they should be
-// PERSISTED for r, with the judges'-decision mark appended to the winning
-// side's slice when the match was decided by hantei.
-//
-// pool-matches.csv has no DecidedByHantei column, and it does not need one: a
-// hantei occupies a point SLOT (domain.HanteiMark), so the existing IpponsA /
-// IpponsB columns carry it. That is the same shape every scoreboard already
-// renders, where Ht fills the winner's next free slot. Hantei is only taken
-// from a TIED scoreline and sanbon-shobu ends at 2, so the winner always has a
-// slot free for it.
-//
-// The mark is a STORAGE encoding only: decodeHanteiFromIppons strips it on the
-// way back in and restores the flag, so nothing downstream of the load ever
-// sees an "Ht" among the ippons and no counter, standings figure, tie-break or
-// export changes shape. (CountScoringIppons drops it regardless, so a
-// hand-edited file that leaves one in cannot inflate a score either.)
-//
-// Returns the originals untouched when there is nothing to encode. A hantei
-// with no attributable winner cannot be encoded — validation requires a winner,
-// so that is malformed data, and it degrades to the pre-existing behaviour of
-// losing the flag rather than guessing a side.
-//
-// The mark is binary, so the tri-state narrows on a round trip: an explicit
-// false (the operator ruled "not a hantei") reloads as nil ("no writer said
-// anything"). Deliberate: at MATCH level the two are indistinguishable to
-// every consumer — preserveMatchHantei (engine) takes the stored verdict as a
-// plain bool, and display/validation treat both as "no hantei" — unlike the
-// SUB-bout tri-state, which preserveSubHantei distinguishes and which nests
-// through the SubResults JSON cell where *bool survives faithfully.
-func encodeHanteiIntoIppons(r *MatchResult) (ipponsA, ipponsB []string) {
-	ipponsA, ipponsB = r.IpponsA, r.IpponsB
-	if r.DecidedByHantei == nil || !*r.DecidedByHantei || r.Winner == "" {
-		return ipponsA, ipponsB
-	}
-	withMark := func(s []string) []string {
-		for _, v := range s {
-			if v == domain.HanteiMark {
-				return s // already encoded; never double-append
-			}
-		}
-		out := make([]string, len(s), len(s)+1)
-		copy(out, s)
-		return append(out, domain.HanteiMark)
-	}
-	switch r.Winner {
-	case r.SideA:
-		return withMark(ipponsA), ipponsB
-	case r.SideB:
-		return ipponsA, withMark(ipponsB)
-	}
-	return ipponsA, ipponsB
-}
-
-// decodeHanteiFromIppons is the inverse: it strips domain.HanteiMark out of a
-// loaded match's ippon slices and sets DecidedByHantei when one was present.
-// After this the in-memory shape is exactly what it was before the match was
-// written, so the encoding is invisible above the store.
-//
-// It does NOT clear an already-set flag: a caller that knows better (a bracket
-// match, or a future column) keeps its value.
-func decodeHanteiFromIppons(m *MatchResult) {
-	// Detect before stripping. This runs for every match on every parse, and
-	// the overwhelmingly common case is no mark at all, so rebuilding both
-	// slices first and discarding them would allocate twice per match to
-	// discover there was nothing to do.
-	if !slices.Contains(m.IpponsA, domain.HanteiMark) &&
-		!slices.Contains(m.IpponsB, domain.HanteiMark) {
-		return
-	}
-	// splitIppons' contract: an empty field is an empty slice, never nil, so
-	// the JSON projection stays [] rather than null. A side that held only the
-	// mark must therefore come back empty, not nil.
-	strip := func(in []string) []string {
-		out := make([]string, 0, len(in))
-		for _, v := range in {
-			if v != domain.HanteiMark {
-				out = append(out, v)
-			}
-		}
-		return out
-	}
-	m.IpponsA, m.IpponsB = strip(m.IpponsA), strip(m.IpponsB)
-	m.DecidedByHantei = HanteiExplicit(true)
-}
-
 // poolMatchColumn describes ONE column of pool-matches.csv: the header name,
 // how a match renders into the cell (put) and how a cell reads back (take).
 //
@@ -431,13 +344,13 @@ func decodeHanteiFromIppons(m *MatchResult) {
 //     for every new MatchResult field.
 //
 // put runs against the row as it should be PERSISTED (the caller has already
-// applied encodeHanteiIntoIppons to a copy), so every put is a pure field
+// applied a hantei codec to a copy), so every put is a pure field
 // projection. takes run in column order against a zero MatchResult seeded
 // with Round: -1 (the absent-column default), so MatchIdx's take may build on
 // the ID PoolName's take just set; a short row simply stops early, which is
 // how files written before a column existed load with that field at its
 // documented default. Row-level codecs that span columns (the hantei mark in
-// the winner's score cell, see encodeHanteiIntoIppons/decodeHanteiFromIppons)
+// the winner's score cell as the domain.HanteiMark ippon entry it is)
 // stay outside the table, wrapped around the column loop.
 type poolMatchColumn struct {
 	name string
@@ -510,7 +423,8 @@ var poolMatchColumns = []poolMatchColumn{
 	// The ippon cells hold the PERSISTED slices: waza letters joined with "|",
 	// plus the judges'-decision mark in the winner's cell when the match was
 	// decided by hantei (encoded by the writer, stripped again by the reader;
-	// see encodeHanteiIntoIppons / decodeHanteiFromIppons around the loops).
+	// recorded as the domain.HanteiMark entry in the winner's cell — the mark
+	// IS the record; no codec strips or restores it any more).
 	{name: "IpponsA",
 		put:  func(r *MatchResult) string { return strings.Join(r.IpponsA, "|") },
 		take: func(m *MatchResult, cell string) { m.IpponsA = splitIppons(cell) }},
@@ -654,7 +568,10 @@ func parsePoolMatchesRecords(records [][]string) []MatchResult {
 
 		// Restore a hantei that was persisted as a mark in the winner's score
 		// cell, and take the mark back out so nothing above the store sees it.
-		decodeHanteiFromIppons(&m)
+		// The judges'-decision mark loads as the ippon entry it is; only the
+		// LEGACY decidedByHantei flags inside the SubResults JSON cell need
+		// folding into the mark (legacy_hantei.go).
+		m.NormalizeLegacyHantei()
 
 		results = append(results, m)
 	}
@@ -696,17 +613,9 @@ func (s *Store) savePoolMatchesLocked(compID string, results []MatchResult, writ
 	}
 
 	for _, r := range results {
-		// A hantei rides in the winner's score cell rather than in a column of
-		// its own (see encodeHanteiIntoIppons). `enc` is the row as it should be
-		// PERSISTED, which is what keeps every put a pure field projection: the
-		// one cross-column codec is applied here, before the loop, rather than
-		// hidden inside a column.
-		enc := r
-		enc.IpponsA, enc.IpponsB = encodeHanteiIntoIppons(&enc)
-
 		row := make([]string, len(poolMatchColumns))
 		for c, col := range poolMatchColumns {
-			row[c] = col.put(&enc)
+			row[c] = col.put(&r)
 		}
 		if err := writer.Write(row); err != nil {
 			return err

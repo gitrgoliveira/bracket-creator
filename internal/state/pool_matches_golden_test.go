@@ -2,6 +2,8 @@ package state
 
 import (
 	"os"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -33,7 +35,7 @@ func poolMatchesGoldenInput() []MatchResult {
 		{
 			ID: "Pool A-1", SideA: "Kyoto", SideB: "Osaka", Winner: "Kyoto",
 			SideAID: "id-a", SideBID: "id-b", WinnerID: "id-a",
-			IpponsA: []string{"M"}, IpponsB: []string{"K"},
+			IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"K"},
 			HansokuA: 1, HansokuB: 2,
 			Decision: "fought", DecisionBy: "Referee Tanaka", DecisionReason: "call recorded",
 			Status: MatchStatusCompleted, Court: "B", Round: 3,
@@ -42,7 +44,6 @@ func poolMatchesGoldenInput() []MatchResult {
 				Position: 1, SideA: "K1", SideB: "O1", IpponsA: []string{"D"}, Winner: "K1",
 			}},
 			Encho:            &EnchoMetadata{PeriodCount: 2},
-			DecidedByHantei:  HanteiPtr(true),
 			ResultSource:     "admin",
 			CorrectionReason: "scoreboard misread",
 			RepPlayerA:       "Rep A", RepPlayerB: "Rep B",

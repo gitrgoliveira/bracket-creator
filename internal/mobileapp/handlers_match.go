@@ -1043,7 +1043,7 @@ func enforceSelfRunPolicy(c *gin.Context, tl TournamentLoader, verifier Password
 
 	// Anonymous caller in self-run mode: enforce decision allowlist on
 	// the top-level decision AND every sub-result decision.
-	if !IsSelfRunReportableDecision(req.Decision, req.DecidedByHantei) {
+	if !IsSelfRunReportableDecision(req.Decision, (*state.MatchResult)(req).HanteiDecided()) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "decision type not allowed in self-run mode without admin password"})
 		return "", false
 	}

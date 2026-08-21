@@ -35,20 +35,19 @@ func bracketMatchAsResult(bm *state.BracketMatch) *state.MatchResult {
 	// takes ApplyByTimestamp's unstamped bypass, so the rollback always
 	// applies. Do not "complete" the projection with this field.
 	return &state.MatchResult{
-		ID:              bm.ID,
-		SideA:           bm.SideA,
-		SideB:           bm.SideB,
-		Winner:          bm.Winner,
-		Status:          bm.Status,
-		Decision:        bm.Decision,
-		DecisionBy:      bm.DecisionBy,
-		DecisionReason:  bm.DecisionReason,
-		Encho:           bm.Encho,
-		DecidedByHantei: state.HanteiExplicit(bm.DecidedByHantei),
-		IpponsA:         ipponsA,
-		IpponsB:         ipponsB,
-		HansokuA:        hansokuA,
-		HansokuB:        hansokuB,
+		ID:             bm.ID,
+		SideA:          bm.SideA,
+		SideB:          bm.SideB,
+		Winner:         bm.Winner,
+		Status:         bm.Status,
+		Decision:       bm.Decision,
+		DecisionBy:     bm.DecisionBy,
+		DecisionReason: bm.DecisionReason,
+		Encho:          bm.Encho,
+		IpponsA:        ipponsA,
+		IpponsB:        ipponsB,
+		HansokuA:       hansokuA,
+		HansokuB:       hansokuB,
 		// The operator-audit pair. Carried so a rollback restores the note the
 		// match actually held, and — because applyBracketMatchResult assigns
 		// them unconditionally under restore — clears one the rejected write

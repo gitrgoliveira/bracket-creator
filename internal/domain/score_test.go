@@ -79,6 +79,13 @@ func TestScoreCodecRoundTrip(t *testing.T) {
 		{[]string{"○", "○"}, 0},
 		{[]string{"H"}, 1},
 		{[]string{"S"}, 0},
+		// The codec's one two-rune token: the hantei mark, alone, after a
+		// point, and adjacent to a real "H" ippon in both orders (the
+		// no-lone-"t" lookahead must not eat a neighbouring hansoku letter).
+		{[]string{"Ht"}, 0},
+		{[]string{"K", "Ht"}, 0},
+		{[]string{"H", "Ht"}, 0},
+		{[]string{"Ht", "H"}, 1},
 	}
 	for _, tc := range cases {
 		encoded := domain.FormatScore(tc.ippons, tc.hansoku)

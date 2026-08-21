@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"sort"
 	"strconv"
 	"strings"
@@ -562,23 +563,28 @@ func writeMiddleMarkCell(f *excelize.File, sheetName string, courtStartCol, exce
 	}
 }
 
-// hanteiOf reads MatchResult's *bool hantei flag as a plain bool.
+// hanteiOf reports whether the judges'-decision mark stands on the match:
+// the mark is an entry in the winner's ippon slice (the mark IS the record).
 func hanteiOf(mr state.MatchResult) bool {
-	return mr.DecidedByHantei != nil && *mr.DecidedByHantei
+	return mr.HanteiDecided()
 }
 
 // bracketMatchResultView adapts a BracketMatch to the MatchResult shape the
 // shared row writers consume (they read only the result fields).
 func bracketMatchResultView(bm *state.BracketMatch) state.MatchResult {
-	return state.MatchResult{
-		SideA:           bm.SideA,
-		SideB:           bm.SideB,
-		Winner:          bm.Winner,
-		Decision:        bm.Decision,
-		Encho:           bm.Encho,
-		DecidedByHantei: state.HanteiPtr(bm.DecidedByHantei),
-		SubResults:      bm.SubResults,
+	mr := state.MatchResult{
+		SideA:      bm.SideA,
+		SideB:      bm.SideB,
+		Winner:     bm.Winner,
+		Decision:   bm.Decision,
+		Encho:      bm.Encho,
+		SubResults: bm.SubResults,
 	}
+	// The scoreline (and with it the judges'-decision mark, an ippon entry)
+	// rides the rendered score strings through the codec.
+	mr.IpponsA, mr.HansokuA = domain.ParseScore(bm.ScoreA)
+	mr.IpponsB, mr.HansokuB = domain.ParseScore(bm.ScoreB)
+	return mr
 }
 
 // setIVCellWithMark writes a team IV count, appending a result mark

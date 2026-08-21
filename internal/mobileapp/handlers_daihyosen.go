@@ -142,14 +142,12 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			// would let a removed daihyosen still present as decided-by-daihyosen
 			// (or carry stale overtime) while Status is back to running.
 			u.Winner = ""
-			// EXPLICIT false, not nil: nil is the PRESERVE sentinel on the bracket
-			// write (recordBracketMatchResultTx only assigns when non-nil), so a nil
-			// here left a stored true in place and the match returned to running
-			// still advertising a judges' decision - while the pool branch, which
-			// overwrites wholesale, did clear it. state.HanteiPtr(false) is
-			// nil-for-false by design; HanteiExplicit is the constructor that
-			// can express it.
-			u.DecidedByHantei = state.HanteiExplicit(false)
+			// The judges'-decision mark travels IN the ippons: stripping it here
+			// clears the verdict on both store branches alike (the bracket write
+			// renders ScoreA/ScoreB from these slices, the pool write persists
+			// them as the cells).
+			u.IpponsA = domain.StripHantei(u.IpponsA)
+			u.IpponsB = domain.StripHantei(u.IpponsB)
 			u.Decision = ""
 			u.DecisionBy = ""
 			u.DecisionReason = ""
@@ -400,21 +398,26 @@ func findMatchForDaihyosenTx(tx state.StoreTx, compID, matchID string) (*state.M
 // not as an incidental side effect of how the one current call site happens to
 // build its own copy before appending.
 func daihyosenBracketResult(bm *state.BracketMatch) *state.MatchResult {
-	return &state.MatchResult{
-		ID:              bm.ID,
-		SideA:           bm.SideA,
-		SideB:           bm.SideB,
-		Winner:          bm.Winner,
-		Status:          bm.Status,
-		Court:           bm.Court,
-		ScheduledAt:     bm.ScheduledAt,
-		Decision:        bm.Decision,
-		DecisionBy:      bm.DecisionBy,
-		DecisionReason:  bm.DecisionReason,
-		Encho:           bm.Encho,
-		DecidedByHantei: state.HanteiPtr(bm.DecidedByHantei),
-		SubResults:      append([]state.SubMatchResult(nil), bm.SubResults...),
+	res := &state.MatchResult{
+		ID:             bm.ID,
+		SideA:          bm.SideA,
+		SideB:          bm.SideB,
+		Winner:         bm.Winner,
+		Status:         bm.Status,
+		Court:          bm.Court,
+		ScheduledAt:    bm.ScheduledAt,
+		Decision:       bm.Decision,
+		DecisionBy:     bm.DecisionBy,
+		DecisionReason: bm.DecisionReason,
+		Encho:          bm.Encho,
+		SubResults:     append([]state.SubMatchResult(nil), bm.SubResults...),
 	}
+	// A BracketMatch persists each side's scoreline as one rendered string;
+	// the MatchResult view carries it as ippon slices, and the judges'-
+	// decision mark (an ippon entry) rides along through the codec.
+	res.IpponsA, res.HansokuA = domain.ParseScore(bm.ScoreA)
+	res.IpponsB, res.HansokuB = domain.ParseScore(bm.ScoreB)
+	return res
 }
 
 // countEligibleForSides counts, for each named side, how many roster

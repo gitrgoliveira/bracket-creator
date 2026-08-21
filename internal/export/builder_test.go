@@ -243,22 +243,25 @@ func TestBuildResultsWorkbook_ResultMarksInScoreCells(t *testing.T) {
 	pools := makePools()
 	require.NoError(t, store.SavePools(compID, pools))
 
-	// Alice beats Bob by kiken-voluntary in encho, decided by hantei.
+	// Alice beats Bob by kiken-voluntary in encho, decided by hantei. The
+	// verdict is domain.HanteiMark inside the WINNER's (Alice's) ippon slice
+	// (operator ruling 2026-08-21), not the legacy DecidedByHantei *bool: pool
+	// matches have no CSV column for that top-level flag (only sub-bout
+	// DecidedByHantei round-trips, via the SubResults JSON cell), and
+	// SavePoolMatches's cache-refresh keeps this exact in-memory value without
+	// ever running it through NormalizeLegacyHantei, so the legacy field would
+	// silently never fold into a mark here.
 	results := []state.MatchResult{
 		{
 			ID:       "Pool A-0",
 			SideA:    "Alice",
 			SideB:    "Bob",
-			IpponsA:  []string{"M"},
+			IpponsA:  []string{"M", domain.HanteiMark},
 			IpponsB:  []string{},
 			Decision: "kiken-voluntary",
 			Encho:    &state.EnchoMetadata{PeriodCount: 1},
-			DecidedByHantei: func() *bool {
-				b := true
-				return &b
-			}(),
-			Status: state.MatchStatusCompleted,
-			Winner: "Alice",
+			Status:   state.MatchStatusCompleted,
+			Winner:   "Alice",
 		},
 	}
 	require.NoError(t, store.SavePoolMatches(compID, results))

@@ -154,7 +154,7 @@ func (e *Engine) withBracketMatch(compId, matchId string, mutate func(*state.Bra
 //   - A NAMED WINNER. A hantei declares one; the validator refuses the pairing
 //     without it. Omitting it here let a `{status:"running", winner:null}`
 //     reopen inherit the verdict, and the result was worse than losing it: the
-//     pool encoding (encodeHanteiIntoIppons) cannot attribute a winner-less
+//     mark cannot be attributed: a winner-less
 //     verdict to a side, so it silently dropped the mark while the in-memory
 //     cache kept the flag — every read said "hantei" until the process
 //     restarted, and none did afterwards.
@@ -178,38 +178,37 @@ func hanteiStillHolds(r *state.MatchResult) bool {
 		r.DecisionBy == "" && r.DecisionReason == ""
 }
 
-// preserveMatchHantei resolves the MATCH-level verdict for a FORWARD write,
-// carrying a stored one onto a verdict-silent payload — under the SAME guards
-// preserveSubHantei applies one level down, which is the whole point.
-//
-// An unguarded inherit is worse than none. RecordDecision/RecordDecisionTx build
-// their MatchResult from scratch and never set DecidedByHantei, and the decision
-// handler does not run ScoreRequest.Validate, so a kiken recorded over a stored
-// hantei arrives silent: a bare carry stamps the withdrawal as a judges'
-// decision, and export.SideMarks (which marks Ht unconditionally, by design)
-// then prints "Ht" and "Kiken" on the same encounter — the contradiction
-// validation.go refuses to persist. The same applies to a silent re-score that
-// turns a 1-1 hantei into a 2-1 ippon win: an untied scoreline cannot carry a
-// verdict, and the wire validator would 400 the state it would leave behind.
-//
-// So a stored verdict that NO LONGER HOLDS is cleared explicitly rather than
-// left nil: nil means "inherit" on the bracket branch, which would keep it.
-// Nothing is written when there is no stored verdict and the writer said
-// nothing, so an ordinary match keeps emitting an absent field.
+// stripInvalidHantei enforces the mark's validity on a FORWARD write from the
+// paths that do not run ScoreRequest.Validate. The verdict rides in the
+// winner's ippon slice, so a re-score replaces it atomically with the
+// scoreline it rests on and there is no separate flag to carry — what remains
+// is the CONTRADICTION guard preserveMatchHantei used to provide:
+// RecordDecision/RecordDecisionTx merge stored ippons through
+// preserveLoserScore, so a kiken recorded over a stored hantei would keep the
+// mark beside the withdrawal and export.SideMarks (which marks Ht
+// unconditionally, by design) would print "Ht" and "Kiken" on the same
+// encounter — the contradiction validation.go refuses to persist. A mark that
+// no longer satisfies its own preconditions (hanteiStillHolds), or that sits
+// on a side that is not the winner's, is stripped: the points stay, the
+// verdict goes.
 //
 // Forward only. matchWriteRestore replays a trusted snapshot verbatim;
 // re-testing it there would let this rewrite the state being restored.
-func preserveMatchHantei(storedHantei bool, result *state.MatchResult) {
-	if result.DecidedByHantei == nil && !storedHantei {
+func stripInvalidHantei(result *state.MatchResult) {
+	if !result.HanteiDecided() {
 		return
 	}
-	held := hanteiStillHolds(result)
-	if result.DecidedByHantei == nil {
-		result.DecidedByHantei = state.HanteiExplicit(held)
+	if !hanteiStillHolds(result) {
+		result.IpponsA = domain.StripHantei(result.IpponsA)
+		result.IpponsB = domain.StripHantei(result.IpponsB)
 		return
 	}
-	if *result.DecidedByHantei && !held {
-		result.DecidedByHantei = state.HanteiExplicit(false)
+	// Winner-side pin: the mark names the competitor the referees chose.
+	if domain.ContainsHantei(result.IpponsA) && result.Winner != result.SideA {
+		result.IpponsA = domain.StripHantei(result.IpponsA)
+	}
+	if domain.ContainsHantei(result.IpponsB) && result.Winner != result.SideB {
+		result.IpponsB = domain.StripHantei(result.IpponsB)
 	}
 }
 
@@ -229,7 +228,8 @@ func preserveSubHantei(stored, incoming []state.SubMatchResult) {
 		if in.Position != state.DaihyosenSubPosition {
 			continue
 		}
-		if in.DecidedByHantei != nil || in.Winner != "" {
+		if in.Winner != "" || in.DecidedByHantei != nil ||
+			domain.ContainsHantei(in.IpponsA) || domain.ContainsHantei(in.IpponsB) {
 			return // the writer addressed the verdict: its word stands
 		}
 		// The SAME predicate validateSubBout enforces, shared via domain so the
@@ -291,7 +291,9 @@ func preserveSubHantei(stored, incoming []state.SubMatchResult) {
 		if !domain.HanteiTiedScoreline(in.IpponsA, in.IpponsB) {
 			return // untied now: the verdict cannot stand on this scoreline
 		}
-		in.DecidedByHantei = state.HanteiPtr(true)
+		// The verdict itself travelled with the copied scoreline: prior's
+		// ippons carry the domain.HanteiMark entry, so there is no flag left
+		// to raise — only the winner the mark names.
 		in.Winner = prior.Winner
 		return
 	}
@@ -445,12 +447,11 @@ func applyPoolWrite(stored, result *state.MatchResult, policy matchWritePolicy) 
 		if result.CorrectionReason == "" {
 			result.CorrectionReason = stored.CorrectionReason
 		}
-		// The MATCH-level verdict, under preserveMatchHantei's guards. A pool
-		// hantei now persists (encodeHanteiIntoIppons, state/pools.go), so
-		// without this the whole-struct overwrite below would let any
-		// verdict-silent re-score erase it; with a BARE carry it would instead
-		// stamp a withdrawal as a judges' decision. See that function.
-		preserveMatchHantei(stored.DecidedByHantei != nil && *stored.DecidedByHantei, result)
+		// The MATCH-level verdict travels inside the ippons the writer sent
+		// (or inherited through preserveLoserScore on the decision paths);
+		// what needs enforcing here is only that an inherited mark cannot
+		// contradict the incoming result. See stripInvalidHantei.
+		stripInvalidHantei(result)
 		// A pool/league team encounter can hold a daihyosen (findMatchForDaihyosen
 		// accepts pool matches). Without this a verdict-silent write from a stale
 		// second editor erases a recorded hantei, which in accrueTeamSubResults
@@ -1440,6 +1441,12 @@ func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult, 
 	if result.ModifiedAt != 0 {
 		bm.ModifiedAt = result.ModifiedAt
 	}
+	// The verdict rides in the ippons about to be rendered; forward writes
+	// from non-validated paths must not persist a mark that contradicts the
+	// result (see stripInvalidHantei). Restore replays the snapshot verbatim.
+	if policy == matchWriteForward {
+		stripInvalidHantei(result)
+	}
 	bm.ScoreA = formatScore(result.IpponsA, result.HansokuA)
 	bm.ScoreB = formatScore(result.IpponsB, result.HansokuB)
 	bm.Decision = result.Decision
@@ -1473,31 +1480,6 @@ func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult, 
 	// projection below). Without this a nil-preserve re-score would keep the
 	// stored bouts on disk but emit an omitted subResults payload in the same turn.
 	result.SubResults = bm.SubResults
-	// DecidedByHantei uses *bool so a client that omits the field (nil) preserves
-	// the stored value, while an explicit true/false applies it. This prevents a
-	// re-score that doesn't mention the flag from silently clearing a recorded
-	// hantei win. Under restore there is no "omitted": a snapshot that carries no
-	// verdict is a match that HAD no verdict, and preserving here would restore
-	// the hantei the rollback is undoing.
-	//
-	// The forward preserve runs through preserveMatchHantei, the same guarded
-	// primitive applyPoolWrite uses: an inherited verdict must still be
-	// compatible with the incoming decision and rest on a tied scoreline, or a
-	// kiken recorded over a stored hantei silently becomes a judges' decision.
-	// It resolves result.DecidedByHantei to an explicit value, so the nil branch
-	// below is now only reached when there was nothing to carry either way.
-	if policy == matchWriteRestore {
-		bm.DecidedByHantei = result.DecidedByHantei != nil && *result.DecidedByHantei
-	} else {
-		preserveMatchHantei(bm.DecidedByHantei, result)
-		if result.DecidedByHantei != nil {
-			bm.DecidedByHantei = *result.DecidedByHantei
-		}
-	}
-	// Project the persisted flag back so clients (and the bracket HT chip) do not
-	// see the match flip non-hantei until the next refresh. HanteiPtr returns nil
-	// for false so omitempty still drops the field for non-hantei matches.
-	result.DecidedByHantei = state.HanteiPtr(bm.DecidedByHantei)
 	// Echo the persisted scheduling fields back into result so the caller (and
 	// the SSE broadcast) sees the full match state rather than the empty
 	// Court/ScheduledAt the scoring UI sends.
@@ -1828,7 +1810,6 @@ func (e *Engine) RevertMatchToQueue(compId, matchId string) error {
 		r.SubResults = nil
 		r.FlagsA = 0
 		r.FlagsB = 0
-		r.DecidedByHantei = nil
 		r.ResultSource = ""
 		r.CorrectionReason = ""
 		// ReopenPending is a match-level verdict field a kachinuki result can
@@ -1876,7 +1857,6 @@ func (e *Engine) RevertMatchToQueue(compId, matchId string) error {
 		m.SubResults = nil
 		m.FlagsA = 0
 		m.FlagsB = 0
-		m.DecidedByHantei = false
 		m.IsOverridden = false
 		m.ResultSource = ""
 		m.CorrectionReason = ""

@@ -214,9 +214,9 @@ pairing, score, decision, overtime and judges' decision. A five person team enco
 five of them, plus an optional representative bout at position `-1`. Ranking figures such as
 individual victories and points won are derived from these, never stored separately.
 
-**Sides carry both a name and an id.** Names are the historical identity and are still what
-results are written against; participant ids were added later and now travel alongside.
-Both are kept because a rename must not orphan a recorded result.
+**Sides carry both a name and an id.** Results are written against the name, and the
+participant id travels alongside it. Both are kept because a rename must not orphan a
+recorded result.
 
 ### Match status and decision
 
@@ -229,9 +229,9 @@ withdrawal, a no show, a representative bout, or exhaustion in a kachinuki encou
 judges' decision (hantei) is recorded separately, as the `Ht` entry in the winner's ippon
 list: the mark occupies a point slot on the score sheet but never counts as a point, and
 the winner it sits beside is the winner the referees chose from a level scoreline. The
-`DecidedByHantei` fields in the diagrams are legacy read-only channels: files written
-before the mark model load through a conversion that moves the flag into the mark, and
-nothing writes them any more.
+`DecidedByHantei` fields in the diagrams are legacy read-only channels: a file that
+carries the old flag loads through a conversion that moves it into the mark, and nothing
+writes them.
 
 ## 4. On disk layout
 
@@ -305,6 +305,12 @@ Three formats are in use, and the choice is deliberate in each case:
 | Markdown with YAML front matter | tournament and competition settings | Human readable and editable, and the body can hold notes |
 | CSV | participants, seeds, pools, pool and league matches | Opens in a spreadsheet; one row per record diffs cleanly |
 | JSON and YAML | bracket, eligibility, lineups, overrides | Tree shaped data that does not fit a row |
+
+The seed list stores the dojo alongside the name, and a seed is matched to its participant
+by name and dojo together, because two competitors may share a name across dojos; a file
+that stored only the name could not say which of them the rank belonged to. A row without a
+dojo still matches by name alone when that name is unique in the roster, and a file without
+the dojo column is completed from the roster on first load.
 
 ## 5. Write guarantees
 
@@ -387,44 +393,27 @@ would differ: a match side table would replace the paired columns, and sub bouts
 rows rather than an embedded document. That would trade away the inspect and repair
 properties in section 1, which is the reason it has not been done.
 
-## 7. Decisions of record
+## 7. How the layout is enforced
 
-The disagreements above were reviewed as a whole rather than inherited, and the flat row is
-the shape of record: a match side object exists in the diagram as the honest way to read
-twelve paired columns, and stays out of the code and the file, where it would trade the
-spreadsheet readable pairing for structure only a query engine would benefit from. The same
-holds for the nested sub bouts and the judges' decision mark: both stay as they are, because
-they mirror how a paper score sheet records the same facts.
-
-What changed as a result of the review is enforcement, not shape:
+The flat row is a decision, not an accident: a match side object exists in the diagram as
+the honest way to read twelve paired columns, and stays out of the code and the file, where
+it would trade the spreadsheet readable pairing for structure only a query engine would
+benefit from. The same holds for the nested sub bouts and the judges' decision mark: both
+mirror how a paper score sheet records the same facts. Two mechanisms hold the layout to
+its contract:
 
 * **The results file's layout is defined once.** The header, the row writer and the reader
-  all derive from a single ordered column list, so the three cannot disagree; before, each
-  kept its own hand maintained copy, and nothing failed when a new field missed one of them.
-  A golden test pins the exact bytes. The ordered list, never Go struct order, is the
-  on disk contract.
+  all derive from a single ordered column list, so the three cannot disagree. A golden test
+  pins the exact bytes. The ordered list, never Go struct order, is the on disk contract.
 
     Only the results file is built this way, because only it earns the machinery: it is by
-    far the widest, it is the one that grows a column whenever the rules do, and it is the
-    one that has actually lost fields. Of the others, two could not use a positional column
-    list at all (the roster file's layout varies by row, and the seed file is read by column
-    name rather than position) and one derives a column from row order rather than from a
-    field (pools.csv); none is left as a genuine candidate for the same machinery, and the
-    round trip guard below is what protects each of them in the meantime.
+    far the widest, and it is the one that grows a column whenever the rules do. Of the
+    others, two could not use a positional column list at all (the roster file's layout
+    varies by row, and the seed file is read by column name rather than position) and one
+    derives a column from row order rather than from a field (pools.csv); the round trip
+    guard below is what protects each of them.
 * **Every CSV file has a round trip guard.** Each guard sweeps the persisted struct's
   fields and fails when a field neither survives a save and reload nor appears in an
-  allow list with the reason it is legitimately transient. Four fields of the match row
-  were once lost silently for lack of exactly this. The files persisted by marshalling a
-  whole structure are immune by construction, and a companion test pins the property that
-  makes them immune.
-* **The seed list stores the dojo alongside the name.** A seed is matched to its
-  participant by name and dojo together, because two competitors may share a name across
-  dojos; a file that stored only the name could not say which of them the rank belonged to.
-  A row without a dojo still matches by name alone when that name is unique in the roster,
-  and a file from before the dojo column is completed from the roster on first load.
-* **schedule.csv was removed.** It was a write only projection: a generator copied court,
-  time and status off the pool matches and the bracket into a second file, and the only
-  reader of that file was the same generator keeping it in sync on every court or time
-  change. Nothing else on the server or in the app ever read it. Court and time already
-  live on the match and bracket records that own them, so the projection added a second
-  copy of the same facts with no consumer to justify keeping it up to date.
+  allow list with the reason it is legitimately transient. The files persisted by
+  marshalling a whole structure are immune by construction, and a companion test pins the
+  property that makes them immune.

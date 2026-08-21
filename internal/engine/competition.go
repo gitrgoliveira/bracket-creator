@@ -746,6 +746,11 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// the fresh roster. FileMtime returns 0 if the file does not exist,
 	// which is a valid "no participants yet" state, we snapshot the
 	// same 0 and the comparison still works.
+	// Legacy shapes convert on first read (state/legacy_upgrade.go); force
+	// that conversion BEFORE fingerprinting, or the load below performs it
+	// between snapshot and re-check and the guard reads our own one-time
+	// rewrite as a concurrent operator write.
+	e.store.EnsureLegacyUpgraded(id)
 	loadedParticipantsMtime := e.store.FileMtime(id, "participants.csv")
 	loadedSeedsMtime := e.store.FileMtime(id, "seeds.csv")
 

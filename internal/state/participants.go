@@ -124,6 +124,9 @@ func (s *Store) LoadParticipantsOpt(compID string, withZekkenName bool, opts Loa
 }
 
 func (s *Store) loadParticipants(compID string, withZekkenName bool, opts LoadParticipantsOpts) ([]domain.Player, error) {
+	// Before the read lock: legacy shapes convert on first read, under the
+	// WRITE lock (legacy_upgrade.go). No-op after the first call per comp.
+	s.upgradeLegacyOnce(compID)
 	mu := s.getCompLock(compID)
 	mu.RLock()
 	defer mu.RUnlock()

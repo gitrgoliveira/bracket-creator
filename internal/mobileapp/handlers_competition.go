@@ -209,6 +209,26 @@ func normalizePoolConfig(comp *state.Competition) {
 	normalizeExtraQualifiers(comp)
 }
 
+// competitionUpdateRequest is the PUT /competitions/:id body.
+//
+// It exists for ONE field. Every other setting can be merged from the decoded
+// state.Competition directly, because either its zero value is not a value an
+// operator can choose, or a sibling sentinel already distinguishes the two
+// (TeamMatchType's legacy "" is equivalent to "fixed"). ExtraQualifiers has
+// neither property: "" IS the Standard selection, so an omitted key and a
+// deliberate switch back to Standard decode identically.
+//
+// Embedding state.Competition and re-declaring the field at the outer level
+// shadows it during decode -- encoding/json prefers the shallower tag -- so
+// Competition.ExtraQualifiers stays empty and the pointer carries the truth:
+// nil means the key was absent, non-nil means the client sent a value
+// (including an explicit ""). The handler resolves the two immediately after
+// binding and again against the stored record inside the transform.
+type competitionUpdateRequest struct {
+	state.Competition
+	ExtraQualifiers *string `json:"extraQualifiers"`
+}
+
 // normalizeExtraQualifiers zeroes ExtraQualifiers (bc-qual LP-5a) for the
 // formats it cannot mean anything for: league has no knockout stage,
 // playoffs has no pool stage, and swiss pairs each round by standings --
@@ -744,10 +764,14 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		if !ok {
 			return
 		}
-		var comp state.Competition
-		if err := c.ShouldBindJSON(&comp); err != nil {
+		var req competitionUpdateRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
+		}
+		comp := req.Competition
+		if req.ExtraQualifiers != nil {
+			comp.ExtraQualifiers = *req.ExtraQualifiers
 		}
 		// Reject mismatched body.ID rather than silently overriding it.
 		// Pre-fix, a caller doing `PUT /api/competitions/comp-a` with
@@ -1095,6 +1119,36 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				if comp.TeamMatchType == "" {
 					comp.TeamMatchType = current.TeamMatchType
 				}
+				// ExtraQualifiers (bc-qual LP-5a) needs the same "omitted
+				// keeps stored" contract as TeamMatchType above, but cannot
+				// detect an omission the same way: "" is a REAL value here
+				// (Standard), not a legacy blank, so a client switching a
+				// competition back to Standard sends exactly what a client
+				// that never heard of the field sends. competitionUpdateRequest
+				// therefore carries the presence of the JSON key itself, and
+				// this is the one place that distinguishes the two.
+				//
+				// Without it, an omitting client (a non-SPA API caller on the
+				// pre-LP-5a contract, or a browser tab cached from before the
+				// field shipped) silently cleared a stored larger-pools /
+				// fill-bracket to Standard -- the next generate-draw quietly
+				// ran the uniform builder -- and, while draw-ready, tripped a
+				// spurious 409 from the comparison below for a PUT that
+				// changed nothing.
+				if req.ExtraQualifiers == nil {
+					comp.ExtraQualifiers = current.ExtraQualifiers
+					// Re-validate the EFFECTIVE pair. The settings block above
+					// validated the incoming "" against this PUT's pool sizing,
+					// which says nothing about the value just restored: a PUT
+					// that omits extraQualifiers while switching poolSizeMode
+					// to "max" would otherwise store a non-standard mode with
+					// maximum sizing, a combination ValidateExtraQualifiers
+					// exists to forbid and that no path validated.
+					if err := state.ValidateExtraQualifiers(comp.ExtraQualifiers, comp.PoolSizeMode, comp.EffectivePoolWinners()); err != nil {
+						validationErr = fmt.Errorf("extraQualifiers: %w", err)
+						return nil, nil
+					}
+				}
 				sameTeamMatchType := comp.TeamMatchType == current.TeamMatchType ||
 					(comp.TeamMatchType == state.TeamMatchTypeFixed && current.TeamMatchType == "")
 				// The stored allocation, resolved the same way the incoming one
@@ -1281,38 +1335,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// immediately above. Already validated (ValidateExtraQualifiers,
 				// settings-validation block above) and, while draw-ready, gated
 				// by outputAffectingChanged just above this merge.
-				//
-				// ACCEPTED HAZARD (review finding, recorded rather than fixed):
-				// this merge cannot tell "the client chose Standard" from "the
-				// client never sent the field", because "" is BOTH the JSON
-				// zero value and the meaningful Standard value. A client that
-				// omits it therefore clears a stored larger-pools/fill-bracket
-				// to Standard silently (the next generate-draw runs the uniform
-				// builder), and on a draw-ready competition trips a spurious
-				// 409 from the ExtraQualifiers comparison above for a PUT that
-				// changed nothing.
-				//
-				// TeamMatchType a few lines up solves its version of this with
-				// "omitted keeps stored", and that trick is NOT available here:
-				// there, legacy "" is equivalent to "fixed", so nothing is lost
-				// by treating "" as an omission. Here "" is a value an operator
-				// can deliberately choose, and treating it as an omission would
-				// make switching a competition BACK to Standard impossible --
-				// strictly worse than the hazard it would close.
-				//
-				// Not reachable from this app: api_serializers.jsx normalizes
-				// the field to an explicit "" on every read (see its
-				// ExtraQualifiers comment) and the settings page PUTs its whole
-				// local state, so the SPA always sends the key. The exposure is
-				// a third-party API client written against the pre-LP-5a
-				// contract, or a browser tab cached from before this feature
-				// shipped that saves settings after a newer tab set the mode.
-				//
-				// The real fix is a distinguishable wire encoding -- *string on
-				// the request DTO, nil meaning "keep stored" -- which is a
-				// contract change rippling through the state model and every
-				// reader. Worth doing if this field ever gains a non-SPA client;
-				// not worth it while the only writer normalizes the key in.
+				// comp.ExtraQualifiers is the EFFECTIVE value by now: an
+				// omitted key was resolved to the stored one, and re-validated,
+				// where TeamMatchType is resolved above.
 				current.ExtraQualifiers = comp.ExtraQualifiers
 				// comp.Courts was already defaulted to >=1 court (tournament
 				// fallback) in the settings-validation block above.

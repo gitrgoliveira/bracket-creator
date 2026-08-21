@@ -70,7 +70,7 @@ A competition's pool and knockout settings are stored in its `competitions/<id>/
 
 | `config.md` key | JSON API key | Values | Default | Description |
 |---|---|---|---|---|
-| `extra_qualifiers` | `extraQualifiers` | `""`, `"larger-pools"`, `"fill-bracket"` | `""` (standard) | How many finishers each pool sends to the knockout. Only meaningful for a Mixed competition with a minimum-players-per-pool size; requires `pool_winners: 1` (`poolWinners: 1` in JSON) for either non-default value. See [How many qualify from each pool](../organisers/knockout-draw.md#how-many-qualify-from-each-pool). |
+| `extra_qualifiers` | `extraQualifiers` | `""`, `"larger-pools"`, `"fill-bracket"` | `""` (standard) | How many finishers each pool sends to the knockout. Only meaningful for a Mixed competition with a minimum-players-per-pool size; requires `pool_winners: 1` (`poolWinners: 1` in JSON) for either non-default value. See [How many qualify from each pool](../organisers/knockout-draw.md#how-many-qualify-from-each-pool). When updating a competition through the API, leaving the JSON key out keeps whatever is already stored; send the key with an empty string to set a competition back to standard. |
 
 ## Examples
 

@@ -162,6 +162,151 @@ func TestPOSTCompetition_ExtraQualifiers_ZeroedForNonPoolFormats(t *testing.T) {
 		"ExtraQualifiers must be zeroed for a format with no pool phase, mirroring PoolSize/PoolWinners")
 }
 
+// --- omitted-vs-explicit wire contract (review finding, second round) ---
+//
+// "" is BOTH the JSON zero value and the Standard selection, so the PUT body
+// alone cannot say whether a client chose Standard or never knew the field
+// existed. competitionUpdateRequest carries the key's presence to tell them
+// apart. These three tests pin both halves of that contract plus the
+// re-validation, because getting the first half right at the cost of the
+// second (making Standard unreachable) would be worse than the bug.
+
+// TestPUTCompetition_OmittedExtraQualifiers_KeepsStoredMode: a settings PUT
+// that never mentions extraQualifiers must leave a stored non-standard mode
+// alone. Before the fix this cleared it to Standard silently, and the next
+// generate-draw ran the uniform builder with nothing logged anywhere.
+// Red-verified: reverting the restore stores "".
+func TestPUTCompetition_OmittedExtraQualifiers_KeepsStoredMode(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+
+	const cid = "eq-omitted-keeps"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:              cid,
+		Name:            "EQ Omitted Keeps",
+		Kind:            "individual",
+		Format:          state.CompFormatMixed,
+		Status:          state.CompStatusSetup,
+		PoolSize:        3,
+		PoolSizeMode:    "min",
+		PoolWinners:     1,
+		ExtraQualifiers: state.ExtraQualifiersFillBracket,
+	}))
+
+	// A client on the pre-LP-5a contract: every settings field it knows
+	// about, and no extraQualifiers key at all.
+	body, _ := json.Marshal(map[string]any{
+		"id":           cid,
+		"name":         "EQ Omitted Keeps (renamed)",
+		"format":       state.CompFormatMixed,
+		"kind":         "individual",
+		"poolSize":     3,
+		"poolSizeMode": "min",
+		"poolWinners":  1,
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	saved, err := store.LoadCompetition(cid)
+	require.NoError(t, err)
+	assert.Equal(t, state.ExtraQualifiersFillBracket, saved.ExtraQualifiers,
+		"an omitted extraQualifiers must keep the stored mode, not silently clear it to Standard")
+	assert.Equal(t, "EQ Omitted Keeps (renamed)", saved.Name, "the rest of the PUT must still apply")
+}
+
+// TestPUTCompetition_ExplicitStandard_ClearsStoredMode is the other half, and
+// the reason the TeamMatchType trick could not simply be copied: an EXPLICIT
+// "" is a real operator choice and must still switch a competition back to
+// Standard. A fix that made omitted-keeps-stored by treating "" as absent
+// would make Standard unreachable, which is worse than the bug it closes.
+// Red-verified: treating "" as an omission leaves fill-bracket stored.
+func TestPUTCompetition_ExplicitStandard_ClearsStoredMode(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+
+	const cid = "eq-explicit-standard"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:              cid,
+		Name:            "EQ Explicit Standard",
+		Kind:            "individual",
+		Format:          state.CompFormatMixed,
+		Status:          state.CompStatusSetup,
+		PoolSize:        3,
+		PoolSizeMode:    "min",
+		PoolWinners:     1,
+		ExtraQualifiers: state.ExtraQualifiersFillBracket,
+	}))
+
+	// What the SPA sends when the operator picks Standard: the key, empty.
+	body, _ := json.Marshal(map[string]any{
+		"id":              cid,
+		"name":            "EQ Explicit Standard",
+		"format":          state.CompFormatMixed,
+		"kind":            "individual",
+		"poolSize":        3,
+		"poolSizeMode":    "min",
+		"poolWinners":     1,
+		"extraQualifiers": "",
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	saved, err := store.LoadCompetition(cid)
+	require.NoError(t, err)
+	assert.Equal(t, state.ExtraQualifiersNone, saved.ExtraQualifiers,
+		"an explicit \"\" is the Standard selection and must clear the stored mode")
+}
+
+// TestPUTCompetition_OmittedExtraQualifiers_RevalidatesAgainstNewPoolSizing
+// pins the hazard the restore itself introduces. The settings block validates
+// the INCOMING value, which is "" for an omitting client and always passes.
+// Restoring a non-standard mode afterwards therefore pairs it with pool
+// sizing nothing validated it against: here the PUT switches to maximum
+// sizing, which ValidateExtraQualifiers forbids for a non-standard mode. The
+// re-validation inside the transform must 400 rather than persist the pair.
+// Red-verified: dropping the re-validation stores fill-bracket + "max".
+func TestPUTCompetition_OmittedExtraQualifiers_RevalidatesAgainstNewPoolSizing(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+
+	const cid = "eq-omitted-revalidate"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:              cid,
+		Name:            "EQ Omitted Revalidate",
+		Kind:            "individual",
+		Format:          state.CompFormatMixed,
+		Status:          state.CompStatusSetup,
+		PoolSize:        3,
+		PoolSizeMode:    "min",
+		PoolWinners:     1,
+		ExtraQualifiers: state.ExtraQualifiersFillBracket,
+	}))
+
+	body, _ := json.Marshal(map[string]any{
+		"id":           cid,
+		"name":         "EQ Omitted Revalidate",
+		"format":       state.CompFormatMixed,
+		"kind":         "individual",
+		"poolSize":     4,
+		"poolSizeMode": "max", // fill-bracket requires minimum sizing
+		"poolWinners":  1,
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusBadRequest, w.Code,
+		"restoring a non-standard mode onto maximum sizing must be refused, not persisted; response: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "extraQualifiers")
+
+	saved, err := store.LoadCompetition(cid)
+	require.NoError(t, err)
+	assert.Equal(t, "min", saved.PoolSizeMode, "the refused PUT must not have persisted any of its changes")
+}
+
 // TestPUTCompetition_Swiss_StaleExtraQualifiers is the wedge the missing
 // swiss case caused (review finding on this PR). A swiss record can hold a
 // stale non-standard ExtraQualifiers (a hand-edited config.md, or an import

@@ -357,47 +357,26 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 				seedRejection(assignments, err, seedGapRemedyImport))
 			return res
 		}
-		// Roster gate symmetry with PUT /seeds' rejectSeedsOffRoster:
-		// domain.ValidateAssignments above only checks the ranks as a SET
-		// (contiguous from 1, no duplicates) and never looks at the roster, so
-		// a row naming a participant nobody on this roster matches -- a ghost
-		// name, or a real name paired with the WRONG dojo -- passed silently.
-		// The dojo-aware parseSeedsBytes above makes wrong-dojo rows
+		// Roster gate symmetry with PUT /seeds' rejectSeedsOffRoster: both
+		// call the same pure gate, seedsOffRoster (domain.ValidateAssignments
+		// above only checks the ranks as a SET -- contiguous from 1, no
+		// duplicates -- and never looks at the roster, so a row naming a
+		// participant nobody on this roster matches -- a ghost name, or a
+		// real name paired with the WRONG dojo -- passed silently; the
+		// dojo-aware parseSeedsBytes above makes wrong-dojo rows
 		// representable, and the merge's bare-name fallback is disabled
 		// whenever a row carries a non-empty dojo, so such a row saved
 		// cleanly here and only failed later at generate-draw with "seeded
-		// participant not found in main list".
+		// participant not found in main list").
 		//
-		// Resolved via domain.RosterIndex.Lookup, the SAME (name,
-		// dojo)-with-unique-bare-name-fallback resolver rejectSeedsOffRoster
-		// and the seeds-onto-roster merge use, so this gate can never
-		// disagree with either. Built from parsedPlayers (already parsed
-		// above, in memory) rather than a store read: at this point in the
-		// flow the competition has not been saved yet, so LoadParticipants
-		// would either 404 or, on a retried/colliding ID, read a stale prior
-		// roster instead of the roster this row is actually about.
-		//
-		// Empty-roster pass-through mirrors rejectSeedsOffRoster: a manifest
-		// row can name seeds without a participants file (participants added
-		// later by another means), so there is nothing yet to contradict them.
-		if len(parsedPlayers) > 0 {
-			roster := domain.NewRosterIndex(parsedPlayers)
-			var unknown []string
-			for _, a := range assignments {
-				if _, ok := roster.Lookup(a.Name, a.Dojo); !ok {
-					unknown = append(unknown, fmt.Sprintf("%q (rank %d)", a.Name, a.SeedRank))
-				}
-			}
-			if len(unknown) > 0 {
-				verb := "is"
-				if len(unknown) > 1 {
-					verb = "are"
-				}
-				res.Error = fmt.Sprintf(
-					"seeds file %q: seeds: %s %s not on this competition's roster; a seed rank must belong to a participant. %s",
-					entry.Seeds, strings.Join(unknown, ", "), verb, seedGapRemedyImport)
-				return res
-			}
+		// Passed parsedPlayers (already parsed above, in memory) rather than
+		// a store read: at this point in the flow the competition has not
+		// been saved yet, so LoadParticipants would either 404 or, on a
+		// retried/colliding ID, read a stale prior roster instead of the
+		// roster this row is actually about.
+		if err := seedsOffRoster(parsedPlayers, assignments, seedGapRemedyImport); err != nil {
+			res.Error = fmt.Sprintf("seeds file %q: %s", entry.Seeds, err)
+			return res
 		}
 		if len(assignments) > 0 {
 			parsedSeeds = assignments

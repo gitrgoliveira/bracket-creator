@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -144,7 +145,10 @@ func TestDefaultWinMaruAB(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			gotA, gotB := DefaultWinMaruAB(tt.scoreA, tt.scoreB, tt.decision, tt.encho, tt.winnerID, tt.sideAID, tt.sideBID, tt.winner, "Alice", "Bob")
+			gotA, gotB := DefaultWinMaruAB(tt.scoreA, tt.scoreB, tt.decision, tt.encho, domain.WinnerAttribution{
+				WinnerID: tt.winnerID, SideAID: tt.sideAID, SideBID: tt.sideBID,
+				Winner: tt.winner, SideA: "Alice", SideB: "Bob",
+			})
 			assert.Equal(t, tt.wantA, gotA)
 			assert.Equal(t, tt.wantB, gotB)
 		})
@@ -200,7 +204,10 @@ func TestSideMarksLR(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			l, r := SideMarksLR(tc.decision, tc.hantei, tc.winnerID, tc.sideAID, tc.sideBID, tc.winner, "A", "B", tc.mirror)
+			l, r := SideMarksLR(tc.decision, tc.hantei, domain.WinnerAttribution{
+				WinnerID: tc.winnerID, SideAID: tc.sideAID, SideBID: tc.sideBID,
+				Winner: tc.winner, SideA: "A", SideB: "B",
+			}, tc.mirror)
 			assert.Equal(t, tc.wantLeft, l, "left mark")
 			assert.Equal(t, tc.wantRight, r, "right mark")
 		})

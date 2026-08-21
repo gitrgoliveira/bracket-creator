@@ -877,7 +877,7 @@ func TestLegacyHanteiNormalize(t *testing.T) {
 	// backfilled by the engine's reconcileSides), so the CALLER at the
 	// request boundary must backfill the real sides from the stored match
 	// before invoking NormalizeLegacyHantei, or the verdict is lost with a
-	// 200 (mobileapp.backfillMatchLevelSidesForLegacyHantei does this ahead
+	// 200 (mobileapp.backfillMatchIdentityForHantei does this ahead
 	// of ScoreRequest.validateWithOptions / validateBulkScoreLengths; see
 	// TestScoreHandler_SidesLessLegacyHanteiRecordsVerdict for the fixed
 	// end-to-end path).

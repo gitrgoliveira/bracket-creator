@@ -21,6 +21,18 @@ const IpponPlaceholder = "•"
 // them.
 const HanteiMark = "Ht"
 
+// MaxIpponsPerSide is the kendo best-of-3 (sanbon-shobu) structural cap: each
+// fighter can score at most 2 ippons, because the 2nd wins the match.
+//
+// One owner, in the leaf package both enforcers already import, because the
+// cap is checked at two layers that must agree: mobileapp.validateIppons
+// judges the payload as the client sent it, and the engine re-checks a row
+// AFTER applyHansokuIppons has folded in an auto-awarded ippon (which the
+// wire validator could not have seen). Two spellings of one rule let the
+// engine accept a row the wire validator then 400s on every later save,
+// wedging the editor on a scoreline nothing rejected at write time.
+const MaxIpponsPerSide = 2
+
 // ContainsHantei reports whether an ippon slice carries the judges'-decision
 // mark. Validation guarantees at most one mark per match, on the winner's
 // side only, so "either side contains it" is the match-level verdict test.
@@ -149,24 +161,43 @@ const (
 // declared owner of the Ht rules, which names this function as its twin);
 // keep both in sync. Not bracket.jsx — that file holds only the name-based
 // display helpers (winnerSideLR, subWinnerSides).
-func AttributeWinnerSide(winnerID, sideAID, sideBID, winner, sideA, sideB string) MatchSide {
-	if winnerID != "" && sideAID != "" && sideBID != "" {
-		switch winnerID {
-		case sideAID:
+// WinnerAttribution carries everything AttributeWinnerSide needs to name a
+// side: the participant ids when the record has them, and the names it always
+// has. It is a struct rather than six positional strings because all six are
+// the same type and mutually assignable, so a transposed pair compiles clean
+// and silently marks the wrong competitor. That hazard was not theoretical -
+// two functions implementing this one rule had already drifted into two
+// different string orders (winner fourth in one, winner last in the other).
+//
+// The zero value means "this record has no ids", which SubMatchResult and
+// BracketMatch both are (they persist names only); a partially-filled id set
+// takes the name path too, per the rule below.
+//
+// Mirrored in JS as attributeWinnerSide's options object in
+// web-mobile/js/result_slot.jsx, which took an object from the start.
+type WinnerAttribution struct {
+	WinnerID, SideAID, SideBID string
+	Winner, SideA, SideB       string
+}
+
+func AttributeWinnerSide(a WinnerAttribution) MatchSide {
+	if a.WinnerID != "" && a.SideAID != "" && a.SideBID != "" {
+		switch a.WinnerID {
+		case a.SideAID:
 			return MatchSideA
-		case sideBID:
+		case a.SideBID:
 			return MatchSideB
 		default:
 			return MatchSideNone
 		}
 	}
-	if winner == "" {
+	if a.Winner == "" {
 		return MatchSideNone
 	}
-	switch winner {
-	case sideA:
+	switch a.Winner {
+	case a.SideA:
 		return MatchSideA
-	case sideB:
+	case a.SideB:
 		return MatchSideB
 	default:
 		return MatchSideNone

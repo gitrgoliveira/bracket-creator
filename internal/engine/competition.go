@@ -644,24 +644,25 @@ func dropSeedAssignments(players []domain.Player, seeds []domain.SeedAssignment,
 			continue
 		}
 		// Dojo-less and unresolved: distinguish a genuine ghost (nobody on
-		// the full roster shares this name) from an ambiguous row (2+ do) by
-		// counting name-sharers directly, and check whether any of them
-		// failed to check in.
-		nameMatches := 0
+		// the full roster shares this name) from an ambiguous row (2+ do).
+		// Ambiguity is the index's own rule, so read it off the index rather
+		// than recounting: a failed Lookup on a dojo-less row means the name
+		// was not unique, so count 0 is a genuine ghost and 2+ is ambiguous.
+		if roster.NameCount(a.Name) < 2 {
+			out = append(out, a) // genuine ghost
+			continue
+		}
 		anyCandidateExcluded := false
 		for i := range players {
-			if players[i].Name != a.Name {
-				continue
-			}
-			nameMatches++
-			if excluded[domain.SeedKey(players[i].Name, players[i].Dojo)] {
+			if players[i].Name == a.Name && excluded[domain.SeedKey(players[i].Name, players[i].Dojo)] {
 				anyCandidateExcluded = true
+				break
 			}
 		}
-		if nameMatches >= 2 && anyCandidateExcluded {
+		if anyCandidateExcluded {
 			continue // ambiguous, and at least one namesake didn't check in: drop
 		}
-		out = append(out, a) // genuine ghost, or ambiguous with nobody excluded
+		out = append(out, a) // ambiguous with nobody excluded
 	}
 	return out
 }

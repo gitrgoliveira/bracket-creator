@@ -970,12 +970,12 @@ func TestValidateHanteiMarkPlacement_IDsOverrideNames(t *testing.T) {
 //     ACCEPTED here and then silently stripped later by the engine's
 //     hanteiStillHolds (which requires a winner NAME) - the
 //     200-with-verdict-gone divergence this codebase works hard to avoid
-//     elsewhere (see backfillMatchLevelIDsForHanteiAttribution's doc).
+//     elsewhere (see backfillMatchIdentityForHantei's doc).
 func TestValidateHanteiMarkPlacement_UnpinnedGates(t *testing.T) {
 	t.Run("two hantei marks in the same winner's ippon slice is rejected", func(t *testing.T) {
 		err := validateHanteiMarkPlacement("",
 			[]string{domain.HanteiMark, domain.HanteiMark}, []string{},
-			"", "", "", "Alice", "Bob", "Alice")
+			domain.WinnerAttribution{Winner: "Alice", SideA: "Alice", SideB: "Bob"})
 		require.Error(t, err)
 		var verr *ValidationError
 		require.True(t, errors.As(err, &verr))
@@ -985,7 +985,10 @@ func TestValidateHanteiMarkPlacement_UnpinnedGates(t *testing.T) {
 	t.Run("winnerId matches a side id but winner name is empty: rejected on the name gate before id attribution ever runs", func(t *testing.T) {
 		err := validateHanteiMarkPlacement("",
 			[]string{}, []string{domain.HanteiMark},
-			"id-b", "id-a", "id-b", "Alice", "Bob", "")
+			domain.WinnerAttribution{
+				WinnerID: "id-b", SideAID: "id-a", SideBID: "id-b",
+				Winner: "", SideA: "Alice", SideB: "Bob",
+			})
 		require.Error(t, err)
 		var verr *ValidationError
 		require.True(t, errors.As(err, &verr))

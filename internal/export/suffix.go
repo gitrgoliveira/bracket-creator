@@ -75,20 +75,21 @@ func SideMarks(decision string, decidedByHantei bool) (winnerMark, loserMark str
 // unfinished match, or drifted data) yields no marks: result marks hang off
 // a winner by definition.
 //
-// winnerID/sideAID/sideBID are the participant UUIDs, threaded from
-// state.MatchResult where available; pass "" for all three (bracket rows,
-// sub-bouts) to fall back to the pre-existing name comparison. Side
-// attribution goes through domain.AttributeWinnerSide, the one owner of
-// "which side won": ids win over names when a same-name pair (legal: two
-// participants from different dojos may share a name) would otherwise pick
-// the wrong side.
-func SideMarksLR(decision string, decidedByHantei bool, winnerID, sideAID, sideBID, winner, sideA, sideB string, mirror bool) (left, right string) {
+// att carries the participant UUIDs, threaded from state.MatchResult where
+// available, and the names it always has. Pass the zero domain.WinnerAttribution{}
+// (bracket rows, sub-bouts) to fall back to the pre-existing name comparison —
+// that is clearer than a "", "", "" triple, which could not be told apart from
+// a genuine empty id. Side attribution goes through domain.AttributeWinnerSide,
+// the one owner of "which side won": ids win over names when a same-name pair
+// (legal: two participants from different dojos may share a name) would
+// otherwise pick the wrong side.
+func SideMarksLR(decision string, decidedByHantei bool, att domain.WinnerAttribution, mirror bool) (left, right string) {
 	winnerMark, loserMark := SideMarks(decision, decidedByHantei)
-	if winner == "" {
+	if att.Winner == "" {
 		return "", "" // an empty winner must not string-match an empty side
 	}
 	var aMark, bMark string
-	switch domain.AttributeWinnerSide(winnerID, sideAID, sideBID, winner, sideA, sideB) {
+	switch domain.AttributeWinnerSide(att) {
 	case domain.MatchSideA:
 		aMark, bMark = winnerMark, loserMark
 	case domain.MatchSideB:
@@ -163,19 +164,19 @@ func FlagsScorePair(a, b int) (string, string) {
 // imported without it. Never applies to engi flag counts (callers gate)
 // or the loser.
 //
-// winnerID/sideAID/sideBID are the participant UUIDs (pass "" for all three
-// when unavailable — bracket rows and sub-bouts carry no ids) and are
-// resolved through domain.AttributeWinnerSide, the SAME owner SideMarksLR
-// uses: the two helpers compose one cell (score + result mark) and must
-// agree on which side won, or a same-name pair whose ids disagree with the
-// name order could print the maru fallback in one side's cell and the
-// Kiken/Fus. mark in the other's.
-func DefaultWinMaruAB(scoreA, scoreB, decision string, encho *state.EnchoMetadata, winnerID, sideAID, sideBID, winner, sideA, sideB string) (string, string) {
-	if winner == "" || !domain.IsDefaultWinDecisionStr(decision) {
+// att carries the participant UUIDs (the zero domain.WinnerAttribution{} when
+// unavailable — bracket rows and sub-bouts carry no ids) and the names it
+// always has, resolved through domain.AttributeWinnerSide, the SAME owner
+// SideMarksLR uses: the two helpers compose one cell (score + result mark)
+// and must agree on which side won, or a same-name pair whose ids disagree
+// with the name order could print the maru fallback in one side's cell and
+// the Kiken/Fus. mark in the other's.
+func DefaultWinMaruAB(scoreA, scoreB, decision string, encho *state.EnchoMetadata, att domain.WinnerAttribution) (string, string) {
+	if att.Winner == "" || !domain.IsDefaultWinDecisionStr(decision) {
 		return scoreA, scoreB
 	}
 	maru := strings.Join(domain.DefaultWinIppons(encho.On()), "")
-	switch domain.AttributeWinnerSide(winnerID, sideAID, sideBID, winner, sideA, sideB) {
+	switch domain.AttributeWinnerSide(att) {
 	case domain.MatchSideA:
 		if scoreA == "" {
 			scoreA = maru

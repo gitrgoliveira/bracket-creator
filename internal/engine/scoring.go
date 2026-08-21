@@ -248,7 +248,10 @@ func stripInvalidHantei(result *state.MatchResult) {
 	// two participants from different dojos may share a name - can't send
 	// the mark to the wrong side just because names alone couldn't tell
 	// them apart).
-	side := domain.AttributeWinnerSide(result.WinnerID, result.SideAID, result.SideBID, result.Winner, result.SideA, result.SideB)
+	side := domain.AttributeWinnerSide(domain.WinnerAttribution{
+		WinnerID: result.WinnerID, SideAID: result.SideAID, SideBID: result.SideBID,
+		Winner: result.Winner, SideA: result.SideA, SideB: result.SideB,
+	})
 	if domain.ContainsHantei(result.IpponsA) && side != domain.MatchSideA {
 		result.IpponsA = domain.StripHantei(result.IpponsA)
 	}
@@ -536,35 +539,68 @@ func applyPoolWrite(stored, result *state.MatchResult, policy matchWritePolicy) 
 	return false
 }
 
-// hansokuFold records which ippon slices applyHansokuIppons actually REWROTE
-// in one call, so checkHansokuHanteiConflict can report only the damage THIS
-// fold caused. Contents-compared, not identity-compared: the fold rebuilds
-// every slice it looks at (strip 'H', re-append the awarded count), so a row
-// whose award was already folded in on a previous write comes back with an
-// equal-but-new slice and must count as UNCHANGED.
-//
-// This is what keeps the guard answerable for the writer's own payload rather
-// than for whatever was already on disk. The decision twins inherit the
-// encounter's stored sub-bouts wholesale (preserveLoserScore) before the fold
-// runs, so without this scoping an operator's kiken would be rejected for an
-// over-cap row that a much earlier write persisted and that the kiken payload
-// never carried, with no endpoint able to repair it. Same reasoning as
-// applyKachinukiMerge running AFTER the check.
-type hansokuFold struct {
-	matchA, matchB bool
-	subA, subB     []bool // indexed by SubResults position
-}
-
 // applyHansokuIppons auto-awards ippons from accumulated hansoku counts per
 // FIK Article 20: every 2 hansoku on one side grants 1 ippon to the opponent.
 // Strips any prior 'H' entries and re-appends the correct count so that both
 // increases and decreases in hansoku are handled correctly on re-scores.
 // Idempotent by construction, which is why re-folding an already-folded row
 // reports no change.
-func applyHansokuIppons(result *state.MatchResult) hansokuFold {
-	var fold hansokuFold
+//
+// The fold and the post-fold guard used to be two steps - applyHansokuIppons
+// returning a hansokuFold recording which slices it actually REWROTE, and a
+// separate checkHansokuHanteiConflict taking that fold - with all three call
+// sites required to chain them by hand. That is now inside this one function,
+// so a new caller cannot fold without checking: there is no fold value left
+// to forget to check.
+//
+// The check answers for what THIS fold rewrote, not for whatever was already
+// on disk: it is contents-compared, not identity-compared, so a row whose
+// award was already folded in on a previous write comes back with an
+// equal-but-new slice and counts as UNCHANGED. That scoping matters because
+// the decision twins inherit the encounter's stored sub-bouts wholesale
+// (preserveLoserScore) before the fold runs, so without it an operator's
+// kiken would be rejected for an over-cap row that a much earlier write
+// persisted and that the kiken payload never carried, with no endpoint able
+// to repair it. Same reasoning as applyKachinukiMerge running AFTER the
+// check.
+//
+// It rejects two things the auto-award can do to a scoreline that the wire
+// validator, which only ever sees the payload as the client sent it, cannot
+// have checked:
+//
+//   - The award UNTIES a scoreline a hantei mark is still riding on. A
+//     payload can arrive tied (e.g. ipponsA:[M,Ht], ipponsB:[K],
+//     hansokuB:2) and pass ScoreRequest.Validate's tied-scoreline
+//     precondition, then the fold appends an "H" to ipponsA and the RESULT
+//     is untied while the mark still stands. Falling through silently hands
+//     that row to stripInvalidHantei, which discards the mark with no error
+//     reaching the caller, so the operator's hansoku award would quietly
+//     overrule a verdict the same payload also carried.
+//   - The award pushes a side past the best-of-3 cap. A row already at the
+//     cap plus a folded "H" exceeds it, and nothing downstream rejects it, so
+//     the write lands on disk and every subsequent echo save of that match
+//     400s at mobileapp.validateIppons - wedging the editor on a row that was
+//     never rejected at write time.
+//
+// Both checks apply at MATCH level and to every SubResults row, because the
+// fold applies to both (a daihyosen representative bout carries its own
+// hansoku counts and its own mark) and neither stripInvalidHantei nor
+// preserveSubHantei runs on the sub level. The returned *ValidationError
+// surfaces the same 400 the client would have gotten had it pre-computed the
+// award itself and sent the post-award scoreline directly.
+//
+// A payload that ALREADY carries an over-cap or untied-marked row (pre-folded
+// by the caller) is damage the wire validator can see for itself, and
+// mobileapp.validateIppons rejects it at both levels before the engine is
+// reached; what only the engine can see is the state AFTER the award, which
+// is why this check lives here and covers exactly that.
+//
+// A no-op when the fold changed nothing, and when a changed row carries
+// neither a mark nor an overflow: this must never change behaviour for the
+// overwhelming majority of hansoku awards, which carry neither.
+func applyHansokuIppons(result *state.MatchResult) error {
 	if result == nil {
-		return fold
+		return nil
 	}
 	applyOneSide := func(hansoku int, ippons *[]string) bool {
 		expected := hansoku / 2
@@ -586,68 +622,16 @@ func applyHansokuIppons(result *state.MatchResult) hansokuFold {
 	}
 	// HansokuA awards the OPPONENT (side B) an ippon, and vice versa, so each
 	// count's "changed" bool belongs to the slice it rewrote.
-	fold.matchB = applyOneSide(result.HansokuA, &result.IpponsB)
-	fold.matchA = applyOneSide(result.HansokuB, &result.IpponsA)
-	if n := len(result.SubResults); n > 0 {
-		fold.subA = make([]bool, n)
-		fold.subB = make([]bool, n)
-	}
-	for i := range result.SubResults {
-		fold.subB[i] = applyOneSide(result.SubResults[i].HansokuA, &result.SubResults[i].IpponsB)
-		fold.subA[i] = applyOneSide(result.SubResults[i].HansokuB, &result.SubResults[i].IpponsA)
-	}
-	return fold
-}
-
-// checkHansokuHanteiConflict runs immediately after applyHansokuIppons, at
-// every one of its three call sites, taking that call's hansokuFold so it
-// judges only the slices the fold actually rewrote.
-//
-// It rejects two things the auto-award can do to a scoreline that the wire
-// validator, which only ever sees the payload as the client sent it, cannot
-// have checked:
-//
-//   - The award UNTIES a scoreline a hantei mark is still riding on. A
-//     payload can arrive tied (e.g. ipponsA:[M,Ht], ipponsB:[K],
-//     hansokuB:2) and pass ScoreRequest.Validate's tied-scoreline
-//     precondition, then applyHansokuIppons appends an "H" to ipponsA and
-//     the RESULT is untied while the mark still stands. Falling through
-//     silently hands that row to stripInvalidHantei, which discards the mark
-//     with no error reaching the caller, so the operator's hansoku award
-//     would quietly overrule a verdict the same payload also carried.
-//   - The award pushes a side past the best-of-3 cap. A row already at the
-//     cap plus a folded "H" exceeds it, and nothing downstream rejects it, so
-//     the write lands on disk and every subsequent echo save of that match
-//     400s at mobileapp.validateIppons - wedging the editor on a row that was
-//     never rejected at write time.
-//
-// Both checks apply at MATCH level and to every SubResults row, because
-// applyHansokuIppons folds hansoku into both (a daihyosen representative bout
-// carries its own hansoku counts and its own mark) and neither
-// stripInvalidHantei nor preserveSubHantei runs on the sub level. Returning a
-// *ValidationError surfaces the same 400 the client would have gotten had it
-// pre-computed the award itself and sent the post-award scoreline directly.
-//
-// Scoping to the fold deliberately narrows this guard, and the boundary is
-// the point: a payload that ALREADY carries an over-cap or untied-marked row
-// (pre-folded by the caller) is damage the wire validator can see for itself,
-// and mobileapp.validateIppons rejects it at both levels before the engine is
-// reached. What only the engine can see is the state AFTER the award, which
-// is why this check lives here and covers exactly that.
-//
-// A no-op when the fold changed nothing, and when a changed row carries
-// neither a mark nor an overflow: this must never change behaviour for the
-// overwhelming majority of hansoku awards, which carry neither.
-func checkHansokuHanteiConflict(result *state.MatchResult, fold hansokuFold) error {
-	if result == nil {
-		return nil
-	}
-	if err := checkFoldedRow("", fold.matchA, fold.matchB, result.HanteiDecided(), result.IpponsA, result.IpponsB); err != nil {
+	matchB := applyOneSide(result.HansokuA, &result.IpponsB)
+	matchA := applyOneSide(result.HansokuB, &result.IpponsA)
+	if err := checkFoldedRow("", matchA, matchB, result.HanteiDecided(), result.IpponsA, result.IpponsB); err != nil {
 		return err
 	}
 	for i := range result.SubResults {
 		sr := &result.SubResults[i]
-		if err := checkFoldedRow(fmt.Sprintf("subResults[%d]: ", i), fold.subA[i], fold.subB[i], sr.HanteiDecided(), sr.IpponsA, sr.IpponsB); err != nil {
+		subB := applyOneSide(sr.HansokuA, &sr.IpponsB)
+		subA := applyOneSide(sr.HansokuB, &sr.IpponsA)
+		if err := checkFoldedRow(fmt.Sprintf("subResults[%d]: ", i), subA, subB, sr.HanteiDecided(), sr.IpponsA, sr.IpponsB); err != nil {
 			return err
 		}
 	}
@@ -670,18 +654,11 @@ func checkFoldedRow(prefix string, changedA, changedB, hanteiDecided bool, ippon
 		// what untied it.
 		return validationErrorf("%shantei requires a tied scoreline after hansoku ippon award", prefix)
 	}
-	if (changedA && len(ipponsA) > hansokuMaxIppons) || (changedB && len(ipponsB) > hansokuMaxIppons) {
-		return validationErrorf("%sat most %d ippons per side (best-of-3) after hansoku ippon award, got %d/%d", prefix, hansokuMaxIppons, len(ipponsA), len(ipponsB))
+	if (changedA && len(ipponsA) > domain.MaxIpponsPerSide) || (changedB && len(ipponsB) > domain.MaxIpponsPerSide) {
+		return validationErrorf("%sat most %d ippons per side (best-of-3) after hansoku ippon award, got %d/%d", prefix, domain.MaxIpponsPerSide, len(ipponsA), len(ipponsB))
 	}
 	return nil
 }
-
-// hansokuMaxIppons is the kendo best-of-3 cap applied per side by
-// checkFoldedRow's overflow guard. It mirrors mobileapp.maxIpponsPerSide (the
-// same structural cap): engine sits below mobileapp in the layering and cannot
-// import it, so the value is restated here. Keep the two in sync if the cap
-// itself ever changes.
-const hansokuMaxIppons = 2
 
 // isWinForSide reports whether subWinner indicates a win for the given
 // match-level side. It checks both the canonical match side name and the
@@ -891,8 +868,7 @@ func countScoringIppons(ippons []string) int {
 
 func (e *Engine) RecordMatchResult(compId string, matchId string, result *state.MatchResult) error {
 	result.ID = matchId // normalize ID-less payloads before overwriting
-	fold := applyHansokuIppons(result)
-	if err := checkHansokuHanteiConflict(result, fold); err != nil {
+	if err := applyHansokuIppons(result); err != nil {
 		return err
 	}
 	return e.writeMatchResult(compId, matchId, result, matchWriteForward)
@@ -949,8 +925,7 @@ func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId strin
 		return nil, nil
 	}
 
-	fold := applyHansokuIppons(result)
-	if err := checkHansokuHanteiConflict(result, fold); err != nil {
+	if err := applyHansokuIppons(result); err != nil {
 		return nil, err
 	}
 	deriveDaihyosenWinner(result)

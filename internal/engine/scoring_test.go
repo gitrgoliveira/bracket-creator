@@ -1033,8 +1033,9 @@ func TestRecordMatchResult_HansokuAutoAward(t *testing.T) {
 	})
 }
 
-// TestHansokuHanteiConflict pins the ordering fix in checkHansokuHanteiConflict:
-// a payload that arrives at the engine already tied and carrying the
+// TestHansokuHanteiConflict pins the ordering fix in applyHansokuIppons's
+// post-fold guard: a payload that arrives at the engine already tied and
+// carrying the
 // domain.HanteiMark can still be UNTIED by the hansoku auto-award, since
 // applyHansokuIppons runs after the wire's own tied-scoreline check (which
 // only ever sees the payload as the client sent it, before the award). Only
@@ -1118,14 +1119,14 @@ func TestHansokuHanteiConflict(t *testing.T) {
 // SubResults row too (scoring.go's applyOneSide loop), so the same untying
 // hazard exists there, and nothing downstream catches it — stripInvalidHantei
 // and preserveSubHantei both operate at the match level only. Before the fix,
-// checkHansokuHanteiConflict tested only result.HanteiDecided()/
-// HanteiTiedScoreline on the TOP-level ippons, so a daihyosen sub row like
-// {ipponsA:[M,Ht], ipponsB:[M], hansokuB:2} (tied 1-1 pre-fold) sailed through
-// RecordMatchResult with a nil error and persisted [M,Ht,H] vs [M] — untied,
-// mark still standing, AND already over the best-of-3 per-side cap. The next
-// full-echo save of that match (mobileapp's ScoreRequest.Validate walks every
-// SubResults row) would then 400 on the len>2 check, wedging the editor with
-// no clear path back, since the poisoned row was never rejected at write time.
+// the guard tested only result.HanteiDecided()/HanteiTiedScoreline on the
+// TOP-level ippons, so a daihyosen sub row like {ipponsA:[M,Ht], ipponsB:[M],
+// hansokuB:2} (tied 1-1 pre-fold) sailed through RecordMatchResult with a nil
+// error and persisted [M,Ht,H] vs [M] — untied, mark still standing, AND
+// already over the best-of-3 per-side cap. The next full-echo save of that
+// match (mobileapp's ScoreRequest.Validate walks every SubResults row) would
+// then 400 on the len>2 check, wedging the editor with no clear path back,
+// since the poisoned row was never rejected at write time.
 func TestHansokuHanteiConflict_SubResults(t *testing.T) {
 	mark := domain.HanteiMark
 
@@ -1278,7 +1279,7 @@ func TestHansokuHanteiConflict_SubResults(t *testing.T) {
 // exact payload fell back to the name comparison, was ACCEPTED with a 200,
 // and only THEN silently lost its mark here at the engine — a live
 // regression found by review, not a hypothetical. It was closed by
-// mobileapp.backfillMatchLevelIDsForHanteiAttribution, which now backfills
+// mobileapp.backfillMatchIdentityForHantei, which now backfills
 // sideAID/sideBID from the stored match ahead of validation at both
 // request-boundary sites.
 //
@@ -2238,7 +2239,7 @@ func TestStruckIppons_MatchesLegacyPredicateExhaustively(t *testing.T) {
 }
 
 // TestHansokuFoldGuardIsScopedToThisWrite pins the scoping half of
-// checkHansokuHanteiConflict: it reports only the damage THIS call's fold
+// applyHansokuIppons's post-fold guard: it reports only the damage THIS call's fold
 // caused, never a defect the write inherited from the store.
 //
 // The decision twins build a fresh result and then take the encounter's

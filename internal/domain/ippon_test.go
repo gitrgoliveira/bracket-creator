@@ -171,7 +171,10 @@ func TestAttributeWinnerSide(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := domain.AttributeWinnerSide(tc.winnerID, tc.sideAID, tc.sideBID, tc.winner, tc.sideA, tc.sideB)
+			got := domain.AttributeWinnerSide(domain.WinnerAttribution{
+				WinnerID: tc.winnerID, SideAID: tc.sideAID, SideBID: tc.sideBID,
+				Winner: tc.winner, SideA: tc.sideA, SideB: tc.sideB,
+			})
 			assert.Equal(t, tc.want, got)
 		})
 	}

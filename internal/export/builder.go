@@ -10,6 +10,7 @@ import (
 
 	excelize "github.com/xuri/excelize/v2"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/excel"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
@@ -391,8 +392,10 @@ func overlayPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[str
 					// touches engi flag counts.
 					scoreA, scoreB = DefaultWinMaruAB(
 						IpponsScore(mr.IpponsA), IpponsScore(mr.IpponsB),
-						mr.Decision, mr.Encho, mr.WinnerID, mr.SideAID, mr.SideBID,
-						mr.Winner, mr.SideA, mr.SideB)
+						mr.Decision, mr.Encho, domain.WinnerAttribution{
+							WinnerID: mr.WinnerID, SideAID: mr.SideAID, SideBID: mr.SideBID,
+							Winner: mr.Winner, SideA: mr.SideA, SideB: mr.SideB,
+						})
 				}
 				writeScoreRowCells(f, sheetName, courtStartCol, excelRow, scoreA, scoreB, mr, mirror)
 			}
@@ -509,7 +512,10 @@ func writeTeamSummaryCells(f *excelize.File, sheetName string, courtStartCol, ex
 	rPCol := colNum(courtStartCol + 4)
 	rVCol := colNum(courtStartCol + 5)
 
-	lMark, rMark := SideMarksLR(mr.Decision, hanteiOf(mr), mr.WinnerID, mr.SideAID, mr.SideBID, mr.Winner, mr.SideA, mr.SideB, mirror)
+	lMark, rMark := SideMarksLR(mr.Decision, mr.HanteiDecided(), domain.WinnerAttribution{
+		WinnerID: mr.WinnerID, SideAID: mr.SideAID, SideBID: mr.SideBID,
+		Winner: mr.Winner, SideA: mr.SideA, SideB: mr.SideB,
+	}, mirror)
 
 	line := state.TeamResultFrom(mr.SubResults, mr.SideA, mr.SideB)
 	if line != nil {
@@ -548,7 +554,10 @@ func writeScoreRowCells(f *excelize.File, sheetName string, courtStartCol, excel
 	if mirror {
 		leftScore, rightScore = scoreB, scoreA
 	}
-	lMark, rMark := SideMarksLR(mr.Decision, hanteiOf(mr), mr.WinnerID, mr.SideAID, mr.SideBID, mr.Winner, mr.SideA, mr.SideB, mirror)
+	lMark, rMark := SideMarksLR(mr.Decision, mr.HanteiDecided(), domain.WinnerAttribution{
+		WinnerID: mr.WinnerID, SideAID: mr.SideAID, SideBID: mr.SideBID,
+		Winner: mr.Winner, SideA: mr.SideA, SideB: mr.SideB,
+	}, mirror)
 	setCellStr(f, sheetName, colNum(courtStartCol+1), excelRow, joinSp(leftScore, lMark))
 	setCellStr(f, sheetName, colNum(courtStartCol+5), excelRow, joinSp(rightScore, rMark))
 	writeMiddleMarkCell(f, sheetName, courtStartCol, excelRow, mr.Decision, mr.Encho)
@@ -561,12 +570,6 @@ func writeMiddleMarkCell(f *excelize.File, sheetName string, courtStartCol, exce
 	if mid := MiddleMark(decision, encho); mid != "" {
 		setCellStr(f, sheetName, colNum(courtStartCol+3), excelRow, mid)
 	}
-}
-
-// hanteiOf reports whether the judges'-decision mark stands on the match:
-// the mark is an entry in the winner's ippon slice (the mark IS the record).
-func hanteiOf(mr state.MatchResult) bool {
-	return mr.HanteiDecided()
 }
 
 // bracketMatchResultView adapts a BracketMatch to the MatchResult shape the
@@ -627,13 +630,16 @@ func writeTeamSubMatchScores(f *excelize.File, sheetName string, courtStartCol, 
 		// persisting ids per sub row.
 		scoreA, scoreB := DefaultWinMaruAB(
 			IpponsScore(sub.IpponsA), IpponsScore(sub.IpponsB),
-			sub.Decision, sub.Encho, "", "", "",
-			sub.Winner, sub.SideA, sub.SideB)
+			sub.Decision, sub.Encho, domain.WinnerAttribution{
+				Winner: sub.Winner, SideA: sub.SideA, SideB: sub.SideB,
+			})
 		leftScore, rightScore := scoreA, scoreB
 		if mirror {
 			leftScore, rightScore = scoreB, scoreA
 		}
-		lMark, rMark := SideMarksLR(sub.Decision, sub.HanteiDecided(), "", "", "", sub.Winner, sub.SideA, sub.SideB, mirror)
+		lMark, rMark := SideMarksLR(sub.Decision, sub.HanteiDecided(), domain.WinnerAttribution{
+			Winner: sub.Winner, SideA: sub.SideA, SideB: sub.SideB,
+		}, mirror)
 		if lScore := joinSp(leftScore, lMark); lScore != "" {
 			setCellStr(f, sheetName, lVCol, excelRow, lScore)
 		}
@@ -966,8 +972,9 @@ func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMa
 				// writeScoreRowCells below.
 				scoreA, scoreB = DefaultWinMaruAB(
 					IpponsScore(mrView.IpponsA), IpponsScore(mrView.IpponsB),
-					bm.Decision, bm.Encho, "", "", "",
-					bm.Winner, bm.SideA, bm.SideB)
+					bm.Decision, bm.Encho, domain.WinnerAttribution{
+						Winner: bm.Winner, SideA: bm.SideA, SideB: bm.SideB,
+					})
 			}
 
 			writeScoreRowCells(f, sheetName, courtStartCol, excelRow, scoreA, scoreB, mrView, mirror)

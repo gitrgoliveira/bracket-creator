@@ -40,14 +40,19 @@ func SeedKey(name, dojo string) string {
 // in state.loadParticipants, and the legacy dojo-backfill in
 // state.upgradeSeedDojosLocked), which is exactly the kind of drift SeedKey's
 // doc comment warned about without anything actually shared. All four now
-// build one RosterIndex over their roster and call Lookup.
+// build one RosterIndex over their roster and call Lookup. A fifth case is a
+// failed Lookup itself: a caller that needs to tell a GHOST name (absent from
+// the roster entirely) from an AMBIGUOUS one (present, but under 2+ dojos)
+// reads that distinction off NameCount rather than re-deriving it with its
+// own roster scan.
 //
 // Build once per roster with NewRosterIndex; the returned pointers alias the
 // slice passed in, so mutating through them (as AssignSeeds and ApplySeeds
 // do) mutates the caller's slice directly.
 type RosterIndex struct {
-	byKey  map[string]*Player
-	byName map[string]*Player // only names unique in the roster
+	byKey     map[string]*Player
+	byName    map[string]*Player // only names unique in the roster
+	nameCount map[string]int
 }
 
 // NewRosterIndex builds a RosterIndex over players. players must not be
@@ -59,8 +64,9 @@ func NewRosterIndex(players []Player) *RosterIndex {
 		nameCount[players[i].Name]++
 	}
 	idx := &RosterIndex{
-		byKey:  make(map[string]*Player, len(players)),
-		byName: make(map[string]*Player, len(players)),
+		byKey:     make(map[string]*Player, len(players)),
+		byName:    make(map[string]*Player, len(players)),
+		nameCount: nameCount,
 	}
 	for i := range players {
 		idx.byKey[SeedKey(players[i].Name, players[i].Dojo)] = &players[i]
@@ -85,6 +91,14 @@ func (idx *RosterIndex) Lookup(name, dojo string) (*Player, bool) {
 	}
 	return nil, false
 }
+
+// NameCount reports how many roster players carry this exact name. It is the
+// raw input to the uniqueness rule Lookup applies (a name is usable as a
+// bare-name fallback only at count 1), exposed so callers that need to tell a
+// GHOST name (count 0) from an AMBIGUOUS one (count 2+) after a failed Lookup
+// read that distinction off the index instead of re-deriving it with their
+// own roster scan — which is exactly the drift this type was extracted to end.
+func (idx *RosterIndex) NameCount(name string) int { return idx.nameCount[name] }
 
 // ErrInvalidSeedAssignments marks every rejection below as a complaint about
 // the OPERATOR'S INPUT rather than a failure of the tool.

@@ -770,6 +770,30 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     setDaihyosenHanteiArmed(daihyosenHanteiRecorded);
     setDaihyosenHantei(recordedDaihyosenSide);
   }, [daihyosenHanteiRecorded, recordedDaihyosenSide]);
+  // Shared by daihyosenTouched (buildPatch) and isDirty: whether the operator
+  // has moved the daihyosen VERDICT (encho count, hantei pick, or hantei arm)
+  // away from what the SERVER currently holds. The verdict terms compare
+  // against the server's value, not a mount-time snapshot: adopting a
+  // verdict recorded on another device moves both sides together and so is
+  // not "dirty" here either, which is right - it is not an unsaved change of
+  // this operator's.
+  //
+  // These two callers must never drift: daihyosenTouched feeds
+  // daihyosenSilent, which decides whether buildPatch OMITS the daihyosen
+  // row's ippon arrays - and an omitted (nil) array tells the server's
+  // engine.preserveSubHantei to RESTORE the stored verdict over whatever the
+  // patch would otherwise write. If a future verdict-state control were added
+  // to isDirty but forgotten here, an operator's real edit to that control
+  // would read as untouched, the arrays would be omitted, and the server
+  // would silently restore the OLD verdict over the operator's change while
+  // returning 200 - the exact inversion daihyosenSilent exists to prevent,
+  // and invisible on the wire. Hoisting the shared terms into this one const
+  // makes that impossible: both callers see the same verdict-dirty answer by
+  // construction.
+  const daihyosenVerdictDirty =
+    enchoPeriodCount !== initialEnchoPeriods ||
+    daihyosenHantei !== recordedDaihyosenSide ||
+    daihyosenHanteiArmed !== daihyosenHanteiRecorded;
   // The ONE hantei undo, shared by the Ht chip and the panel Cancel so the
   // two paths cannot drift. Like the pick buttons, it is LOCAL state only:
   // hantei is an explicit-submit channel (autosave contract), so the verdict
@@ -1676,9 +1700,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // introduces), not a gap this gate closes.
     const daihyosenTouched = hasDaihyosen && (
       JSON.stringify(subs[daihyosenIdx]) !== JSON.stringify(initSubsRef.current[daihyosenIdx]) ||
-      enchoPeriodCount !== initialEnchoPeriods ||
-      daihyosenHantei !== recordedDaihyosenSide ||
-      daihyosenHanteiArmed !== daihyosenHanteiRecorded
+      daihyosenVerdictDirty
     );
     const daihyosenKnownLocally = hasDaihyosen && (
       daihyosenHanteiRecorded ||
@@ -1884,14 +1906,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // discarding multi-sub-match edits. Team scoring typically has 3–9 sub
   // entries; the JSON serialize approach is fine for that size and keeps
   // the comparison robust against array identity drift from setSubs.
-  // Encho toggle is included so an operator-only encho change still
-  // triggers the discard confirm.
-  // The verdict terms compare against what the SERVER holds, not a mount-time
-  // snapshot: adopting a verdict recorded elsewhere moves both sides together
-  // and so is not dirty, which is right — it is not an unsaved change of the
-  // operator's, and a "discard unsaved changes?" prompt on an editor nobody
-  // touched trains them to dismiss the one prompt that protects real work.
-  const isDirty = JSON.stringify(subs) !== JSON.stringify(initSubsRef.current) || enchoPeriodCount !== initialEnchoPeriods || daihyosenHantei !== recordedDaihyosenSide || daihyosenHanteiArmed !== daihyosenHanteiRecorded;
+  // Encho toggle is included (via daihyosenVerdictDirty) so an operator-only
+  // encho change still triggers the discard confirm. A "discard unsaved
+  // changes?" prompt on an editor nobody touched would train operators to
+  // dismiss the one prompt that protects real work, which is why
+  // daihyosenVerdictDirty's server-compare (not mount-time-snapshot) behaviour
+  // matters here too.
+  const isDirty = JSON.stringify(subs) !== JSON.stringify(initSubsRef.current) || daihyosenVerdictDirty;
 
   // Match ScoreEditorModal's dismiss contract: never close mid-submit
   // (setState-after-unmount), AND confirm-then-discard when the user has

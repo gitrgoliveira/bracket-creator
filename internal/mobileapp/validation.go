@@ -152,9 +152,46 @@ func seedRejection(assignments []domain.SeedAssignment, err error, remedy string
 var errSeedRosterUnreadable = errors.New("seed roster could not be read")
 
 // rejectSeedsOffRoster refuses a seeding that ranks a name no participant
-// carries. domain.ValidateAssignments checks the ranks as a SET (contiguous
-// from 1, no duplicates) and never looks at the roster, so a ghost name passed
-// and produced a competition whose two views of one seeding disagreed: the file
+// carries, checked against the roster loaded fresh from disk for compID.
+// This is the STORE-READ shell around the pure gate, seedsOffRoster: it
+// resolves the roster (a competition-load failure falls back to
+// withZekken=false rather than aborting -- the Name this matches on is the
+// same column under either flag, so the wrong flag costs a second cache
+// entry, not a wrong answer) and fails CLOSED via errSeedRosterUnreadable
+// when the participant load itself errors, rather than accepting an
+// unvalidated seeding (see errSeedRosterUnreadable's doc for why that one
+// failure alone answers 500, not 400).
+//
+// The len(assignments) == 0 short-circuit runs here, BEFORE the store read
+// (not just in seedsOffRoster's own copy of that check), so that clearing a
+// seeding (PUT /seeds with an empty list) can never fail on an unreadable
+// roster it doesn't even need to consult.
+func rejectSeedsOffRoster(store *state.Store, compID string, assignments []domain.SeedAssignment) error {
+	if len(assignments) == 0 {
+		return nil
+	}
+	// Ask for the roster this competition actually has: the flag changes the
+	// parse, and the load is cached (see participantsCacheKey).
+	withZekken := false
+	if comp, cerr := store.LoadCompetition(compID); cerr == nil && comp != nil {
+		withZekken = comp.EffectiveWithZekkenName()
+	}
+	players, err := store.LoadParticipants(compID, withZekken)
+	if err != nil {
+		return fmt.Errorf("%w: %v", errSeedRosterUnreadable, err)
+	}
+	return seedsOffRoster(players, assignments, seedGapRemedyPut)
+}
+
+// seedsOffRoster is the roster gate itself, over a roster the caller already
+// holds. Split from rejectSeedsOffRoster so the tournament-import path can
+// apply the IDENTICAL gate to a roster it parsed in memory (the competition
+// is not saved yet, so a store read would 404 or, on a retried/colliding ID,
+// read a stale prior roster). remedy is the caller's fix-it sentence.
+//
+// domain.ValidateAssignments checks the ranks as a SET (contiguous from 1, no
+// duplicates) and never looks at the roster, so a ghost name passed and
+// produced a competition whose two views of one seeding disagreed: the file
 // held a valid 1..N and drew, while every reader that merges seeds onto players
 // by name saw only the survivors and read the ghost's rank as an unclosable gap.
 //
@@ -174,30 +211,15 @@ var errSeedRosterUnreadable = errors.New("seed roster could not be read")
 // An empty roster is NOT treated as "everything is a ghost": seeds for a
 // competition whose participants have not been written yet are refused only when
 // there is a roster to contradict them, so a client that saves seeds before the
-// roster still works and the draw's own validation remains the backstop. A
-// missing participants.csv IS that state and reads as an empty roster, not as
-// an error (state.loadParticipants maps os.IsNotExist to an empty slice), so a
-// non-nil error here is a genuine read or parse failure and the check FAILS
-// CLOSED via errSeedRosterUnreadable rather than accepting an unvalidated
-// seeding.
-func rejectSeedsOffRoster(store *state.Store, compID string, assignments []domain.SeedAssignment) error {
+// roster still works and the draw's own validation remains the backstop. For
+// the store-backed caller, a missing participants.csv IS that state and reads
+// as an empty roster, not as an error (state.loadParticipants maps
+// os.IsNotExist to an empty slice); a genuine read/parse failure there is
+// instead turned into errSeedRosterUnreadable before this function is ever
+// called, so `players` here is never "empty because the read failed".
+func seedsOffRoster(players []domain.Player, assignments []domain.SeedAssignment, remedy string) error {
 	if len(assignments) == 0 {
 		return nil
-	}
-	// Ask for the roster this competition actually has: the flag changes the
-	// parse, and the load is cached (see participantsCacheKey).
-	// A competition-load failure falls back to withZekken=false rather than
-	// aborting: the Name this matches on is the same column under either flag,
-	// so the wrong flag costs a second cache entry, not a wrong answer. The
-	// PARTICIPANT load below has no such harmless fallback, which is why it
-	// fails closed instead.
-	withZekken := false
-	if comp, cerr := store.LoadCompetition(compID); cerr == nil && comp != nil {
-		withZekken = comp.EffectiveWithZekkenName()
-	}
-	players, err := store.LoadParticipants(compID, withZekken)
-	if err != nil {
-		return fmt.Errorf("%w: %v", errSeedRosterUnreadable, err)
 	}
 	if len(players) == 0 {
 		return nil
@@ -217,7 +239,7 @@ func rejectSeedsOffRoster(store *state.Store, compID string, assignments []domai
 		verb = "are"
 	}
 	return fmt.Errorf("seeds: %s %s not on this competition's roster; a seed rank must belong to a participant. %s",
-		strings.Join(unknown, ", "), verb, seedGapRemedyPut)
+		strings.Join(unknown, ", "), verb, remedy)
 }
 
 // seedsOrphanedByRosterReplace reports which of the CURRENTLY resolvable
@@ -370,7 +392,7 @@ func validateSubBout(prefix string, sr *state.SubMatchResult, allowNumberedEncho
 	// documented sideA-first convention. This call always takes the
 	// name-fallback branch of validateHanteiMarkPlacement/
 	// domain.AttributeWinnerSide.
-	if err := validateHanteiMarkPlacement(prefix, sr.IpponsA, sr.IpponsB, "", "", "", sr.SideA, sr.SideB, sr.Winner); err != nil {
+	if err := validateHanteiMarkPlacement(prefix, sr.IpponsA, sr.IpponsB, domain.WinnerAttribution{Winner: sr.Winner, SideA: sr.SideA, SideB: sr.SideB}); err != nil {
 		return err
 	}
 	// Both halves of this gate are shared with the engine's preserveSubHantei
@@ -409,21 +431,28 @@ func countHantei(ippons []string) int {
 // competitor the referees chose), and a winner must be named for it to name.
 //
 // Side attribution goes through domain.AttributeWinnerSide, the one owner of
-// "which side won": winnerID/sideAID/sideBID are the participant UUIDs
-// (state.MatchResult carries them; a SubMatchResult does not, so sub-bout
-// callers pass "" and take the name-fallback branch). Ids win over names
-// when both are available, so a same-name pair (legal: two participants
-// from different dojos may share a name) no longer lets the mark land on
-// the wrong side just because names alone couldn't tell them apart.
-func validateHanteiMarkPlacement(prefix string, ipponsA, ipponsB []string, winnerID, sideAID, sideBID, sideA, sideB, winner string) error {
+// "which side won", and takes that owner's own domain.WinnerAttribution
+// rather than restating its six fields: state.MatchResult carries the
+// participant UUIDs, a SubMatchResult does not, so a sub-bout caller passes
+// only the names and takes the name-fallback branch. Ids win over names when
+// both are available, so a same-name pair (legal: two participants from
+// different dojos may share a name) no longer lets the mark land on the wrong
+// side just because names alone couldn't tell them apart.
+//
+// Taking the struct also closed a split this function itself had opened: its
+// parameters ran ...sideA, sideB, winner (winner LAST) while the owner it
+// wraps runs ...winner, sideA, sideB (winner FOURTH) - one rule, two orders,
+// every value the same assignable type. Named fields make that class of slip
+// a compile error instead of a silently mismarked competitor.
+func validateHanteiMarkPlacement(prefix string, ipponsA, ipponsB []string, att domain.WinnerAttribution) error {
 	marks := countHantei(ipponsA) + countHantei(ipponsB)
 	if marks > 1 {
 		return &ValidationError{Field: prefix + "ippons", Message: "at most one hantei mark per bout"}
 	}
-	if winner == "" {
+	if att.Winner == "" {
 		return &ValidationError{Field: prefix + "ippons", Message: "hantei requires winner to be set"}
 	}
-	side := domain.AttributeWinnerSide(winnerID, sideAID, sideBID, winner, sideA, sideB)
+	side := domain.AttributeWinnerSide(att)
 	if domain.ContainsHantei(ipponsA) && side != domain.MatchSideA {
 		return &ValidationError{Field: prefix + "ippons", Message: "the hantei mark belongs in the winner's ippon list"}
 	}
@@ -467,7 +496,10 @@ func validateMatchHantei(r *state.MatchResult) error {
 	if !r.HanteiDecided() {
 		return nil
 	}
-	if err := validateHanteiMarkPlacement("", r.IpponsA, r.IpponsB, r.WinnerID, r.SideAID, r.SideBID, r.SideA, r.SideB, r.Winner); err != nil {
+	if err := validateHanteiMarkPlacement("", r.IpponsA, r.IpponsB, domain.WinnerAttribution{
+		WinnerID: r.WinnerID, SideAID: r.SideAID, SideBID: r.SideBID,
+		Winner: r.Winner, SideA: r.SideA, SideB: r.SideB,
+	}); err != nil {
 		return err
 	}
 	if r.Status != "" && r.Status != state.MatchStatusCompleted {
@@ -878,25 +910,20 @@ func winningScoreline(ipponsA, ipponsB []string, n int) bool {
 	return (a == n && b == 0) || (a == 0 && b == n)
 }
 
-// maxIpponsPerSide is the kendo best-of-3 cap: each fighter can score
-// at most 2 ippons in regulation (the bout ends when one side reaches
-// 2). 2-2 is therefore an impossible scoreline, the match would have
-// ended at 2-1 before either side could score a third.
-const maxIpponsPerSide = 2
-
 // validateIppons is the ONE gate every ippon slice crosses on its way in, from
 // both the ScoreRequest path and the bulk-score path. It enforces the
 // best-of-3 invariants on a single match (or sub-bout) tally, and the shape of
 // the entries themselves. Rules:
 //
 //   - each entry is a single character (domain.IsValidIpponEntry)
-//   - len(ipponsA) ≤ 2 and len(ipponsB) ≤ 2
-//   - NOT (scoring(ipponsA) == 2 && scoring(ipponsB) == 2)  , the 2-2 ban
+//   - len(ipponsA) ≤ domain.MaxIpponsPerSide and len(ipponsB) ≤ domain.MaxIpponsPerSide
+//   - NOT (scoring(ipponsA) == domain.MaxIpponsPerSide && scoring(ipponsB) == domain.MaxIpponsPerSide), the 2-2 ban
 //
 // Field is the JSON-field prefix used in error messages (e.g. "" for a
 // top-level match, "subResults[i]." for a sub-bout). Kiken/fusenpai
 // scorelines are also bounded by these rules, their own n-0 check in
-// validateDecision is strictly tighter (n ≤ 2) so this passes through.
+// validateDecision is strictly tighter (n ≤ domain.MaxIpponsPerSide) so this
+// passes through.
 //
 // (Named validateIpponCounts until the entry-shape rule joined it, at which
 // point the name described half the job.)
@@ -909,16 +936,16 @@ func validateIppons(field string, ipponsA, ipponsB []string) error {
 	if err := ipponEntriesWellFormed(field+"ipponsB", ipponsB); err != nil {
 		return err
 	}
-	if len(ipponsA) > maxIpponsPerSide {
+	if len(ipponsA) > domain.MaxIpponsPerSide {
 		return &ValidationError{
 			Field:   field + "ipponsA",
-			Message: fmt.Sprintf("at most %d ippons per side (best-of-3), got %d", maxIpponsPerSide, len(ipponsA)),
+			Message: fmt.Sprintf("at most %d ippons per side (best-of-3), got %d", domain.MaxIpponsPerSide, len(ipponsA)),
 		}
 	}
-	if len(ipponsB) > maxIpponsPerSide {
+	if len(ipponsB) > domain.MaxIpponsPerSide {
 		return &ValidationError{
 			Field:   field + "ipponsB",
-			Message: fmt.Sprintf("at most %d ippons per side (best-of-3), got %d", maxIpponsPerSide, len(ipponsB)),
+			Message: fmt.Sprintf("at most %d ippons per side (best-of-3), got %d", domain.MaxIpponsPerSide, len(ipponsB)),
 		}
 	}
 	// The two checks above and the one below count DIFFERENTLY, on purpose.
@@ -927,16 +954,23 @@ func validateIppons(field string, ipponsA, ipponsB []string) error {
 	// more entries than that is malformed whatever the entries are, and raw
 	// len() is the right measure.
 	//
-	// This one is SEMANTIC: "both sides scored 2" is a claim about POINTS, and
-	// an unfilled "•" placeholder or an empty cell is not a point (the same rule
-	// domain.CountScoringIppons states for the engine, the store and the hantei
-	// tie gate). Counting slots here rejected legal scorelines: ["M","•"]
-	// against ["K","D"] is 1-2, an ordinary win, but read as 2-2 and refused
-	// with a message about a rule it does not break. Unreachable from the UI —
-	// both editors strip the placeholder before sending — but this is the wire
-	// boundary, and it now agrees with every other counter in the codebase.
-	if domain.CountScoringIppons(ipponsA) == maxIpponsPerSide &&
-		domain.CountScoringIppons(ipponsB) == maxIpponsPerSide {
+	// This one is SEMANTIC: "both sides scored domain.MaxIpponsPerSide" is a
+	// claim about POINTS, and an unfilled "•" placeholder or an empty cell is
+	// not a point (the same rule domain.CountScoringIppons states for the
+	// engine, the store and the hantei tie gate). Counting slots here
+	// rejected legal scorelines: ["M","•"] against ["K","D"] is 1-2, an
+	// ordinary win, but read as 2-2 and refused with a message about a rule
+	// it does not break. Unreachable from the UI — both editors strip the
+	// placeholder before sending — but this is the wire boundary, and it now
+	// agrees with every other counter in the codebase.
+	//
+	// 2-2 is an impossible scoreline in regulation play regardless: the bout
+	// ends the instant one side reaches domain.MaxIpponsPerSide, so the match
+	// would already have ended at 2-1 before either side could score a third
+	// — this check exists to reject a malformed/hand-edited payload claiming
+	// otherwise, not a scoreline regulation play could ever produce.
+	if domain.CountScoringIppons(ipponsA) == domain.MaxIpponsPerSide &&
+		domain.CountScoringIppons(ipponsB) == domain.MaxIpponsPerSide {
 		return &ValidationError{
 			Field:   field + "ippons",
 			Message: "both sides cannot have 2 ippons (best-of-3 ends at first to 2)",

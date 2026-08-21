@@ -49,7 +49,12 @@ import "github.com/gitrgoliveira/bracket-creator/internal/domain"
 //
 // AppendHantei is idempotent (never doubles the mark), so calling this
 // twice on the same slices is safe.
-func foldLegacyHantei(flagged bool, ids sideIDs, winner, sideA, sideB string, ipponsA, ipponsB []string) ([]string, []string) {
+//
+// att carries the participant ids for an attribution, so this signature does
+// not grow three more bare strings that are easy to transpose at a call
+// site — the zero domain.WinnerAttribution{} means "this record has no ids"
+// (SubMatchResult and BracketMatch both persist names only).
+func foldLegacyHantei(flagged bool, att domain.WinnerAttribution, ipponsA, ipponsB []string) ([]string, []string) {
 	if !flagged {
 		return domain.StripHantei(ipponsA), domain.StripHantei(ipponsB)
 	}
@@ -59,7 +64,7 @@ func foldLegacyHantei(flagged bool, ids sideIDs, winner, sideA, sideB string, ip
 	// only separable that way), else by name with the sideA-first fallback.
 	// Callers without ids (sub-bouts, bracket matches) pass the zero value and
 	// take the name path, which is byte-identical to the pre-id behaviour.
-	switch domain.AttributeWinnerSide(ids.winner, ids.sideA, ids.sideB, winner, sideA, sideB) {
+	switch domain.AttributeWinnerSide(att) {
 	case domain.MatchSideA:
 		return domain.AppendHantei(ipponsA), ipponsB
 	case domain.MatchSideB:
@@ -69,12 +74,6 @@ func foldLegacyHantei(flagged bool, ids sideIDs, winner, sideA, sideB string, ip
 	}
 }
 
-// sideIDs carries the participant ids for an attribution, so the fold's
-// signature does not grow three more bare strings that are easy to transpose
-// at a call site. The zero value means "this record has no ids" (SubMatchResult
-// and BracketMatch both persist names only).
-type sideIDs struct{ winner, sideA, sideB string }
-
 // normalizeLegacyHantei folds a legacy sub-bout flag into the mark.
 func (s *SubMatchResult) normalizeLegacyHantei() {
 	if s.DecidedByHantei == nil {
@@ -82,7 +81,7 @@ func (s *SubMatchResult) normalizeLegacyHantei() {
 	}
 	flagged := *s.DecidedByHantei
 	s.DecidedByHantei = nil
-	s.IpponsA, s.IpponsB = foldLegacyHantei(flagged, sideIDs{}, s.Winner, s.SideA, s.SideB, s.IpponsA, s.IpponsB)
+	s.IpponsA, s.IpponsB = foldLegacyHantei(flagged, domain.WinnerAttribution{Winner: s.Winner, SideA: s.SideA, SideB: s.SideB}, s.IpponsA, s.IpponsB)
 }
 
 // NormalizeLegacyHantei folds legacy flags into the mark, match-level and
@@ -92,7 +91,11 @@ func (m *MatchResult) NormalizeLegacyHantei() {
 	if m.DecidedByHantei != nil {
 		flagged := *m.DecidedByHantei
 		m.DecidedByHantei = nil
-		m.IpponsA, m.IpponsB = foldLegacyHantei(flagged, sideIDs{winner: m.WinnerID, sideA: m.SideAID, sideB: m.SideBID}, m.Winner, m.SideA, m.SideB, m.IpponsA, m.IpponsB)
+		att := domain.WinnerAttribution{
+			WinnerID: m.WinnerID, SideAID: m.SideAID, SideBID: m.SideBID,
+			Winner: m.Winner, SideA: m.SideA, SideB: m.SideB,
+		}
+		m.IpponsA, m.IpponsB = foldLegacyHantei(flagged, att, m.IpponsA, m.IpponsB)
 	}
 	for i := range m.SubResults {
 		m.SubResults[i].normalizeLegacyHantei()
@@ -122,12 +125,13 @@ func (b *BracketMatch) NormalizeLegacy() {
 	// honour: false was always simply "not a hantei", so this composes the
 	// shared fold only for the flagged==true case rather than plumbing a
 	// bool through foldLegacyHantei's signature. No winner pre-check here:
-	// foldLegacyHantei's own `case "":` already drops an unattributable
+	// foldLegacyHantei's own `default:` arm already drops an unattributable
 	// winner untouched, so gating the call on b.Winner != "" would only
 	// duplicate that rule at a second enforcement point.
 	if b.DecidedByHantei {
 		b.DecidedByHantei = false
-		b.IpponsA, b.IpponsB = foldLegacyHantei(true, sideIDs{}, b.Winner, b.SideA, b.SideB, b.IpponsA, b.IpponsB)
+		att := domain.WinnerAttribution{Winner: b.Winner, SideA: b.SideA, SideB: b.SideB}
+		b.IpponsA, b.IpponsB = foldLegacyHantei(true, att, b.IpponsA, b.IpponsB)
 	}
 	for i := range b.SubResults {
 		b.SubResults[i].normalizeLegacyHantei()

@@ -587,18 +587,15 @@ func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenNam
 
 	oldName := players[foundIdx].Name
 	oldDojo := players[foundIdx].Dojo
-	// Count BEFORE transform mutates players[foundIdx]: this is the roster's
-	// view of oldName at the moment of the edit, needed below to mirror the
-	// unique-bare-name fallback every other seed matcher applies
-	// (domain.RosterIndex). Recomputing it AFTER the rename would silently
-	// undercount by one, since the participant being edited no longer carries
-	// oldName in the post-transform slice.
-	oldNameCount := 0
-	for i := range players {
-		if players[i].Name == oldName {
-			oldNameCount++
-		}
-	}
+	// Build the seed matcher over the PRE-EDIT roster and capture the target
+	// by pointer: RosterIndex aliases the slice, so the keys captured here
+	// still resolve to this element after transform mutates it in place, and
+	// "does this seed row name the participant being edited" becomes the
+	// index's own exact-key-then-unique-bare-name rule rather than a fourth
+	// hand-spelling of it. Must run BEFORE transform: rebuilding afterwards
+	// would key the index on the NEW identity and never match the old rows.
+	preEditRoster := domain.NewRosterIndex(players)
+	target := &players[foundIdx]
 
 	if err := transform(&players[foundIdx]); err != nil {
 		return nil, err
@@ -685,19 +682,15 @@ func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenNam
 	// retryable; the old identity is gone from participants so the seeds
 	// rewrite can never be applied again.
 	if identityChanged && seeds != nil {
-		// A row refers to THIS participant iff its (name, dojo) key exactly
-		// matches the pre-edit identity, or -- the legacy-row case -- it
-		// carries no dojo, names oldName, and oldName was unique in the
-		// pre-edit roster (mirrors the merge fallback's own uniqueness
-		// condition, domain.RosterIndex). Matching on bare oldName alone,
-		// with no dojo filter, rewrote EVERY same-named row on a rename;
-		// this keys the match so two same-named players' seeds don't cross.
-		oldKey := domain.SeedKey(oldName, oldDojo)
+		// A row refers to THIS participant iff domain.RosterIndex.Lookup
+		// (built over the pre-edit roster above) resolves its (name, dojo) to
+		// this same participant. Matching on bare oldName alone, with no
+		// dojo filter, rewrote EVERY same-named row on a rename; this keys
+		// the match so two same-named players' seeds don't cross.
 		changed := false
 		for i := range seeds {
-			refersToParticipant := domain.SeedKey(seeds[i].Name, seeds[i].Dojo) == oldKey ||
-				(seeds[i].Dojo == "" && seeds[i].Name == oldName && oldNameCount == 1)
-			if !refersToParticipant {
+			p, ok := preEditRoster.Lookup(seeds[i].Name, seeds[i].Dojo)
+			if !ok || p != target {
 				continue
 			}
 			// Both fields are written even when only one changed: this also

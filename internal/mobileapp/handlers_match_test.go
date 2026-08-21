@@ -296,9 +296,9 @@ func TestBulkScoreHandler_HanteiValidation(t *testing.T) {
 // that backfill, so it compared Winner against two empty strings, could not
 // attribute the mark to either side, and silently dropped the verdict with
 // an HTTP 200 - while specs/openapi.yaml promises decidedByHantei is "folded
-// into the mark on receipt". backfillMatchLevelSidesForLegacyHantei now
-// backfills the payload's sides from the stored match, ahead of validation,
-// whenever the payload carries a true legacy flag and a side is missing.
+// into the mark on receipt". backfillMatchIdentityForHantei now backfills
+// the payload's sides (and ids) from the stored match, ahead of validation,
+// whenever the payload carries a true legacy flag and a field is missing.
 func TestScoreHandler_SidesLessLegacyHanteiRecordsVerdict(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
@@ -340,18 +340,20 @@ func TestScoreHandler_SidesLessLegacyHanteiRecordsVerdict(t *testing.T) {
 }
 
 // TestScoreHandler_SidesLessModernHanteiRecordsVerdict pins the bc-dmsr
-// fix: backfillMatchLevelSidesForLegacyHantei used to gate its sides
-// backfill on the deprecated decidedByHantei flag ALONE, while its id twin
-// (backfillMatchLevelIDsForHanteiAttribution) had already been widened to
-// `legacyFlagged || req.HanteiDecided()`. A MODERN minimal payload - winner
-// + ipponsA/ipponsB already carrying the "Ht" mark, no sideA/sideB, no ids,
-// and NO legacy flag at all - is legal per specs/openapi.yaml (sides are
-// optional; the engine's reconcileSides backfills them from the stored
-// match) but used to 400 with "the hantei mark belongs in the winner's
-// ippon list", because validateHanteiMarkPlacement saw empty sides/ids and
-// an empty-string name fallback attributed the mark to MatchSideNone. The
-// identical payload plus decidedByHantei:true was backfilled and accepted.
-// Both twins now share one gate (hanteiAttributionNeedsBackfill), so the
+// fix: the sides backfill (now part of backfillMatchIdentityForHantei, and
+// before the bc-dmsr merge one of the two twins, backfillMatchLevelSidesForLegacyHantei)
+// used to gate on the deprecated decidedByHantei flag ALONE, while the id
+// half (formerly backfillMatchLevelIDsForHanteiAttribution) had already been
+// widened to `legacyFlagged || req.HanteiDecided()`. A MODERN minimal
+// payload - winner + ipponsA/ipponsB already carrying the "Ht" mark, no
+// sideA/sideB, no ids, and NO legacy flag at all - is legal per
+// specs/openapi.yaml (sides are optional; the engine's reconcileSides
+// backfills them from the stored match) but used to 400 with "the hantei
+// mark belongs in the winner's ippon list", because validateHanteiMarkPlacement
+// saw empty sides/ids and an empty-string name fallback attributed the mark
+// to MatchSideNone. The identical payload plus decidedByHantei:true was
+// backfilled and accepted. Both halves now share one gate
+// (hanteiAttributionNeedsBackfill) inside the single merged function, so the
 // modern payload is backfilled and accepted exactly like its legacy-flagged
 // sibling.
 func TestScoreHandler_SidesLessModernHanteiRecordsVerdict(t *testing.T) {
@@ -476,7 +478,7 @@ func TestBulkScoreHandler_SidesLessLegacyHanteiRecordsVerdict(t *testing.T) {
 // bulk-score twin of TestScoreHandler_NameDriftedSameNamePairHanteiNow400s
 // (bc-dmsr review, consequence 2): validateBulkScoreLengths shares
 // validateMatchHantei with the single-score path, so the same
-// backfillMatchLevelIDsForHanteiAttribution call ahead of it must produce
+// backfillMatchIdentityForHantei call ahead of it must produce
 // the same outcome - the row lands in `errors`, never `succeeded`, rather
 // than being accepted and having its mark silently stripped downstream by
 // the engine.
@@ -523,11 +525,9 @@ func TestBulkScoreHandler_NameDriftedSameNamePairHanteiNow400s(t *testing.T) {
 }
 
 // fixedSidesCompetitionStore is a minimal CompetitionStore fake for unit
-// testing backfillMatchLevelSidesForLegacyHantei and
-// backfillMatchLevelIDsForHanteiAttribution in isolation, without spinning
-// up a real Store. sidesErr, when non-nil, makes MatchSidesByID fail
-// (fail-closed probe); otherwise it returns (sideA, sideB, sideAID, sideBID,
-// found, nil).
+// testing backfillMatchIdentityForHantei in isolation, without spinning up a
+// real Store. sidesErr, when non-nil, makes MatchSidesByID fail (fail-closed
+// probe); otherwise it returns (sideA, sideB, sideAID, sideBID, found, nil).
 type fixedSidesCompetitionStore struct {
 	sideA, sideB     string
 	sideAID, sideBID string
@@ -557,15 +557,34 @@ func (f *fixedSidesCompetitionStore) MatchSidesByID(string, string) (string, str
 	return f.sideA, f.sideB, f.sideAID, f.sideBID, f.found, f.sidesErr
 }
 
-// TestBackfillMatchLevelSidesForLegacyHantei is a table-driven unit test of
-// the helper in isolation, covering: the hot path never touches the store
-// (no flag, or flag explicitly false); a fully-empty payload backfills both
-// sides; a partially-filled payload backfills only the empty side (never
-// overwrites a client-supplied one, mirroring reconcileSides's own rule); a
-// store error or not-found leaves sides empty (fail closed on attribution,
-// the existing drop-never-guess fold still applies downstream); and
-// idempotency - calling the backfill twice is the same as calling it once.
-func TestBackfillMatchLevelSidesForLegacyHantei(t *testing.T) {
+// TestBackfillMatchIdentityForHantei is a table-driven unit test of the
+// merged helper (bc-qual + bc-dmsr reviews; this replaced two hand-copied
+// twins, backfillMatchLevelSidesForLegacyHantei which backfilled only
+// sideA/sideB and backfillMatchLevelIDsForHanteiAttribution which backfilled
+// only sideAID/sideBID - both driven by the same underlying
+// store.MatchSidesByID call, so testing them separately meant asserting on
+// only half of what a single call now fills). It covers: the hot path never
+// touches the store (no flag, no mark, or flag explicitly false); a
+// fully-empty payload backfills all four fields; a partially-filled payload
+// backfills only the empty fields (never overwrites a client-supplied one,
+// mirroring reconcileSides's own rule); a store error or not-found leaves
+// every field empty (fail closed on attribution, the existing
+// drop-never-guess fold still applies downstream); and idempotency - calling
+// the backfill twice is the same as calling it once.
+//
+// One gating behaviour is DIFFERENT from the old twins, by design, and is
+// exercised explicitly below: the merged function reads all four fields in
+// ONE store call, so it only skips the store when ALL FOUR of
+// sideA/sideB/sideAID/sideBID are already non-empty. Under the old twins, a
+// payload with both sides present but no ids (or vice versa) skipped ITS
+// twin's call but still triggered the OTHER twin's call at the shared call
+// sites - the two calls together already touched the store once in that
+// case. The merged function reaches the same net "one store read, sides
+// preserved, ids backfilled" outcome through a single call rather than two,
+// so this is not a behaviour change visible from the call sites, only from
+// this unit test's more granular wantStoreCall bookkeeping.
+func TestBackfillMatchIdentityForHantei(t *testing.T) {
+	mark := domain.HanteiMark
 	trueFlag := bctest.HanteiExplicit(true)
 	falseFlag := bctest.HanteiExplicit(false)
 
@@ -575,62 +594,103 @@ func TestBackfillMatchLevelSidesForLegacyHantei(t *testing.T) {
 		store         *fixedSidesCompetitionStore
 		wantSideA     string
 		wantSideB     string
+		wantSideAID   string
+		wantSideBID   string
 		wantStoreCall bool
 	}{
 		{
-			name:          "no flag: store is never consulted",
-			req:           state.MatchResult{SideA: "", SideB: ""},
-			store:         &fixedSidesCompetitionStore{sideA: "Alice", sideB: "Bob", found: true},
-			wantSideA:     "",
-			wantSideB:     "",
+			name:          "no flag and no mark: store is never consulted",
+			req:           state.MatchResult{},
+			store:         &fixedSidesCompetitionStore{sideA: "Alice", sideB: "Bob", sideAID: "id-a", sideBID: "id-b", found: true},
 			wantStoreCall: false,
 		},
 		{
-			name:          "flag explicitly false: store is never consulted",
-			req:           state.MatchResult{SideA: "", SideB: "", DecidedByHantei: falseFlag},
-			store:         &fixedSidesCompetitionStore{sideA: "Alice", sideB: "Bob", found: true},
-			wantSideA:     "",
-			wantSideB:     "",
+			name:          "flag explicitly false and no mark: store is never consulted",
+			req:           state.MatchResult{DecidedByHantei: falseFlag},
+			store:         &fixedSidesCompetitionStore{sideA: "Alice", sideB: "Bob", sideAID: "id-a", sideBID: "id-b", found: true},
 			wantStoreCall: false,
 		},
 		{
-			name:          "both sides already present: store is never consulted",
+			name:          "all four fields already present: store is never consulted",
+			req:           state.MatchResult{SideA: "Alice", SideB: "Bob", SideAID: "client-a", SideBID: "client-b", DecidedByHantei: trueFlag},
+			store:         &fixedSidesCompetitionStore{sideA: "Someone", sideB: "Else", sideAID: "someone-else", sideBID: "and-else", found: true},
+			wantSideA:     "Alice",
+			wantSideB:     "Bob",
+			wantSideAID:   "client-a",
+			wantSideBID:   "client-b",
+			wantStoreCall: false,
+		},
+		{
+			name:          "all four fields empty: all four backfilled from the store",
+			req:           state.MatchResult{DecidedByHantei: trueFlag},
+			store:         &fixedSidesCompetitionStore{sideA: "Alice", sideB: "Bob", sideAID: "id-a", sideBID: "id-b", found: true},
+			wantSideA:     "Alice",
+			wantSideB:     "Bob",
+			wantSideAID:   "id-a",
+			wantSideBID:   "id-b",
+			wantStoreCall: true,
+		},
+		{
+			name: "direct mark present, everything else empty: all four backfilled from the store",
+			req:  state.MatchResult{IpponsA: []string{mark}, IpponsB: []string{}},
+			store: &fixedSidesCompetitionStore{
+				sideA: "Alice", sideB: "Bob", sideAID: "id-a", sideBID: "id-b", found: true,
+			},
+			wantSideA:     "Alice",
+			wantSideB:     "Bob",
+			wantSideAID:   "id-a",
+			wantSideBID:   "id-b",
+			wantStoreCall: true,
+		},
+		{
+			// This is the case whose expectation CHANGED by the merge: under
+			// the old sides-only twin this would have reported "store never
+			// consulted" (both sides present), but the merged gate requires
+			// ALL FOUR fields to skip the store, so the ids are still
+			// missing and the store IS consulted - filling only the ids,
+			// never touching the client-supplied sides.
+			name:          "sides present, ids empty: store is consulted to fill only the ids",
 			req:           state.MatchResult{SideA: "Alice", SideB: "Bob", DecidedByHantei: trueFlag},
-			store:         &fixedSidesCompetitionStore{sideA: "Someone", sideB: "Else", found: true},
+			store:         &fixedSidesCompetitionStore{sideA: "Someone Else Entirely", sideB: "Also Ignored", sideAID: "id-a", sideBID: "id-b", found: true},
 			wantSideA:     "Alice",
 			wantSideB:     "Bob",
-			wantStoreCall: false,
-		},
-		{
-			name:          "both sides empty: both backfilled from the store",
-			req:           state.MatchResult{SideA: "", SideB: "", DecidedByHantei: trueFlag},
-			store:         &fixedSidesCompetitionStore{sideA: "Alice", sideB: "Bob", found: true},
-			wantSideA:     "Alice",
-			wantSideB:     "Bob",
+			wantSideAID:   "id-a",
+			wantSideBID:   "id-b",
 			wantStoreCall: true,
 		},
 		{
-			name:          "one side present: only the empty one is backfilled, the client's is never overwritten",
-			req:           state.MatchResult{SideA: "Alice", SideB: "", DecidedByHantei: trueFlag},
-			store:         &fixedSidesCompetitionStore{sideA: "Someone Else Entirely", sideB: "Bob", found: true},
+			// Mirror of the case above: ids present, sides empty. Also a
+			// changed expectation vs the old ids-only twin for the same
+			// reason.
+			name:          "ids present, sides empty: store is consulted to fill only the sides",
+			req:           state.MatchResult{SideAID: "client-a", SideBID: "client-b", DecidedByHantei: trueFlag},
+			store:         &fixedSidesCompetitionStore{sideA: "Alice", sideB: "Bob", sideAID: "someone-else", sideBID: "and-else", found: true},
 			wantSideA:     "Alice",
 			wantSideB:     "Bob",
+			wantSideAID:   "client-a",
+			wantSideBID:   "client-b",
 			wantStoreCall: true,
 		},
 		{
-			name:          "store error: sides stay empty, fail closed on attribution",
-			req:           state.MatchResult{SideA: "", SideB: "", DecidedByHantei: trueFlag},
+			name:          "one field of each pair present: only the empty ones are backfilled, the client's are never overwritten",
+			req:           state.MatchResult{SideA: "Alice", SideAID: "client-a", DecidedByHantei: trueFlag},
+			store:         &fixedSidesCompetitionStore{sideA: "Someone Else Entirely", sideB: "Bob", sideAID: "someone-else-entirely", sideBID: "id-b", found: true},
+			wantSideA:     "Alice",
+			wantSideB:     "Bob",
+			wantSideAID:   "client-a",
+			wantSideBID:   "id-b",
+			wantStoreCall: true,
+		},
+		{
+			name:          "store error: every field stays empty, fail closed on attribution",
+			req:           state.MatchResult{DecidedByHantei: trueFlag},
 			store:         &fixedSidesCompetitionStore{sidesErr: fmt.Errorf("boom")},
-			wantSideA:     "",
-			wantSideB:     "",
 			wantStoreCall: true,
 		},
 		{
-			name:          "match not found: sides stay empty",
-			req:           state.MatchResult{SideA: "", SideB: "", DecidedByHantei: trueFlag},
+			name:          "match not found: every field stays empty",
+			req:           state.MatchResult{DecidedByHantei: trueFlag},
 			store:         &fixedSidesCompetitionStore{found: false},
-			wantSideA:     "",
-			wantSideB:     "",
 			wantStoreCall: true,
 		},
 	}
@@ -638,9 +698,11 @@ func TestBackfillMatchLevelSidesForLegacyHantei(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			req := tc.req
-			backfillMatchLevelSidesForLegacyHantei(tc.store, "comp", "m1", &req)
+			backfillMatchIdentityForHantei(tc.store, "comp", "m1", &req)
 			assert.Equal(t, tc.wantSideA, req.SideA)
 			assert.Equal(t, tc.wantSideB, req.SideB)
+			assert.Equal(t, tc.wantSideAID, req.SideAID)
+			assert.Equal(t, tc.wantSideBID, req.SideBID)
 			if tc.wantStoreCall {
 				assert.Equal(t, 1, tc.store.sidesCalls)
 			} else {
@@ -648,118 +710,15 @@ func TestBackfillMatchLevelSidesForLegacyHantei(t *testing.T) {
 			}
 
 			// Idempotency: calling it again on the (already backfilled) result
-			// must be a no-op - both sides are now non-empty (or the store
-			// genuinely has nothing to offer), so a second call changes
-			// nothing and, once both sides are filled, must not even touch
-			// the store again.
+			// must be a no-op - once all four fields are non-empty (or the
+			// store genuinely has nothing to offer), a second call changes
+			// nothing and must not even touch the store again.
 			before := req
 			beforeCalls := tc.store.sidesCalls
-			backfillMatchLevelSidesForLegacyHantei(tc.store, "comp", "m1", &req)
+			backfillMatchIdentityForHantei(tc.store, "comp", "m1", &req)
 			assert.Equal(t, before, req, "a second call must not change an already-backfilled result")
-			if before.SideA != "" && before.SideB != "" {
-				assert.Equal(t, beforeCalls, tc.store.sidesCalls, "once both sides are known, a second call must not re-consult the store")
-			}
-		})
-	}
-}
-
-// TestBackfillMatchLevelIDsForHanteiAttribution is the id-backfill twin of
-// TestBackfillMatchLevelSidesForLegacyHantei above (bc-dmsr review): it
-// backfills sideAID/sideBID rather than sideA/sideB, and is gated on hantei
-// attribution generally (a direct mark in ipponsA/ipponsB, OR the legacy
-// flag) rather than only the deprecated boolean flag - because the SPA sends
-// a direct mark (via winnerId) and never the legacy flag at all, so the
-// narrower legacy-only gate would never fire for the actual regression
-// payload shape.
-func TestBackfillMatchLevelIDsForHanteiAttribution(t *testing.T) {
-	mark := domain.HanteiMark
-	trueFlag := bctest.HanteiExplicit(true)
-	falseFlag := bctest.HanteiExplicit(false)
-
-	tests := []struct {
-		name          string
-		req           state.MatchResult
-		store         *fixedSidesCompetitionStore
-		wantSideAID   string
-		wantSideBID   string
-		wantStoreCall bool
-	}{
-		{
-			name:          "no mark and no flag: store is never consulted",
-			req:           state.MatchResult{IpponsA: []string{}, IpponsB: []string{}},
-			store:         &fixedSidesCompetitionStore{sideAID: "id-a", sideBID: "id-b", found: true},
-			wantSideAID:   "",
-			wantSideBID:   "",
-			wantStoreCall: false,
-		},
-		{
-			name:          "flag explicitly false and no mark: store is never consulted",
-			req:           state.MatchResult{DecidedByHantei: falseFlag},
-			store:         &fixedSidesCompetitionStore{sideAID: "id-a", sideBID: "id-b", found: true},
-			wantSideAID:   "",
-			wantSideBID:   "",
-			wantStoreCall: false,
-		},
-		{
-			name:          "both ids already present: store is never consulted",
-			req:           state.MatchResult{IpponsA: []string{mark}, IpponsB: []string{}, SideAID: "client-a", SideBID: "client-b"},
-			store:         &fixedSidesCompetitionStore{sideAID: "someone-else", sideBID: "and-else", found: true},
-			wantSideAID:   "client-a",
-			wantSideBID:   "client-b",
-			wantStoreCall: false,
-		},
-		{
-			name:          "direct mark present, both ids empty: both backfilled from the store",
-			req:           state.MatchResult{IpponsA: []string{mark}, IpponsB: []string{}},
-			store:         &fixedSidesCompetitionStore{sideAID: "id-a", sideBID: "id-b", found: true},
-			wantSideAID:   "id-a",
-			wantSideBID:   "id-b",
-			wantStoreCall: true,
-		},
-		{
-			name:          "legacy flag true, no direct mark yet: ids still backfilled ahead of the fold",
-			req:           state.MatchResult{DecidedByHantei: trueFlag},
-			store:         &fixedSidesCompetitionStore{sideAID: "id-a", sideBID: "id-b", found: true},
-			wantSideAID:   "id-a",
-			wantSideBID:   "id-b",
-			wantStoreCall: true,
-		},
-		{
-			name:          "one id present: only the empty one is backfilled, the client's is never overwritten",
-			req:           state.MatchResult{IpponsA: []string{}, IpponsB: []string{mark}, SideAID: "client-a"},
-			store:         &fixedSidesCompetitionStore{sideAID: "someone-else-entirely", sideBID: "id-b", found: true},
-			wantSideAID:   "client-a",
-			wantSideBID:   "id-b",
-			wantStoreCall: true,
-		},
-		{
-			name:          "store error: ids stay empty, fail closed",
-			req:           state.MatchResult{IpponsA: []string{mark}, IpponsB: []string{}},
-			store:         &fixedSidesCompetitionStore{sidesErr: fmt.Errorf("boom")},
-			wantSideAID:   "",
-			wantSideBID:   "",
-			wantStoreCall: true,
-		},
-		{
-			name:          "match not found: ids stay empty",
-			req:           state.MatchResult{IpponsA: []string{mark}, IpponsB: []string{}},
-			store:         &fixedSidesCompetitionStore{found: false},
-			wantSideAID:   "",
-			wantSideBID:   "",
-			wantStoreCall: true,
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			req := tc.req
-			backfillMatchLevelIDsForHanteiAttribution(tc.store, "comp", "m1", &req)
-			assert.Equal(t, tc.wantSideAID, req.SideAID)
-			assert.Equal(t, tc.wantSideBID, req.SideBID)
-			if tc.wantStoreCall {
-				assert.Equal(t, 1, tc.store.sidesCalls)
-			} else {
-				assert.Equal(t, 0, tc.store.sidesCalls)
+			if before.SideA != "" && before.SideB != "" && before.SideAID != "" && before.SideBID != "" {
+				assert.Equal(t, beforeCalls, tc.store.sidesCalls, "once all four fields are known, a second call must not re-consult the store")
 			}
 		})
 	}

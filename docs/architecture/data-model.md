@@ -18,6 +18,8 @@ That leads to three properties worth more here than normalisation:
 * **Repairable.** A wrong cell can be corrected by hand and the app picks it up on reload.
 * **Diffable.** The whole tournament state can be committed to version control or copied to
   a USB stick as a backup, and two copies can be compared line by line.
+  One exception: `tournament.md` holds the tournament and admin passwords in plain text, so
+  strip or change them before sharing a copy.
 
 The trade this makes is described honestly in [section 6](#6-how-the-model-maps-onto-rows).
 
@@ -129,13 +131,13 @@ classDiagram
         +string Decision
         +string DecisionBy
         +string DecisionReason
-        +bool DecidedByHantei (legacy, read-only)
+        +bool? DecidedByHantei (legacy, read-only, unset = writer said nothing)
         +string ResultSource
         +string CorrectionReason
         +bool ReopenPending
     }
 
-    class MatchSide {
+    class CompetitorSide {
         <<value pair, stored as A and B columns>>
         +string Name
         +string ParticipantID
@@ -162,7 +164,7 @@ classDiagram
         +int HansokuB
         +string Winner
         +string Decision
-        +bool DecidedByHantei (legacy, read-only)
+        +bool? DecidedByHantei (legacy, read-only, unset = writer said nothing)
     }
 
     class EnchoMetadata {
@@ -195,7 +197,7 @@ classDiagram
         +long ModifiedAt
     }
 
-    MatchResult "1" *-- "2" MatchSide : shiro and aka
+    MatchResult "1" *-- "2" CompetitorSide : shiro and aka
     MatchResult "1" *-- "1" Outcome
     MatchResult "1" *-- "0..*" SubMatchResult : team bouts
     MatchResult "1" *-- "0..1" EnchoMetadata
@@ -207,7 +209,8 @@ classDiagram
 
 Three points the diagram makes that the raw field list hides.
 
-**`MatchSide` is a value object that the storage flattens.** Everything a competitor brings
+**`CompetitorSide` is a value object that the storage flattens.** The name is this page's
+own, chosen for clarity: no such type exists in the code. Everything a competitor brings
 to a match (name, participant id, struck points, outstanding fouls, flags, and the
 representative player for a team tie breaker) exists twice, once per side. In the object
 model those are `SideA`/`SideB`, `IpponsA`/`IpponsB`, `HansokuA`/`HansokuB` and so on. They
@@ -266,7 +269,7 @@ classDiagram
     }
     class pools_csv["pools.csv"] {
         <<CSV>>
-        PoolName, Player, Position
+        PoolName, Name, Position, DisplayName, Dojo, Seed, Number, ID
     }
     class pool_matches_csv["pool-matches.csv"] {
         <<CSV, one row per match>>
@@ -334,6 +337,8 @@ example recording a withdrawal writes the match result, the competitor eligibili
 and the updated bracket. Those run as a transaction: the intended writes are collected,
 committed to a write ahead log, and only then applied. If the process stops midway the log
 is replayed at the next startup, so the group either lands completely or not at all.
+One write sits outside this: a participant edit lands by atomic rename rather than through the
+log, so it is crash safe on its own but is not rolled back if the rest of the group fails.
 
 ```mermaid
 sequenceDiagram
@@ -391,7 +396,8 @@ never inflate a result.
 Two consequences follow, and both are deliberate:
 
 * Column position is the contract. New fields are appended, and a file written by an older
-  version stays readable because the reader treats missing trailing columns as empty.
+  version stays readable because the reader leaves each missing trailing column at its
+  documented default, empty for most and `-1` for the round number, which means unknown.
 * Some fields are useful only in flight and are not written at all. Client revision markers
   used to discard out of order writes are the clearest example: they exist to order writes
   within one session and carry no meaning once the result has landed.
@@ -403,12 +409,7 @@ properties in [section 1](#1-why-files), so the storage stays shaped for people.
 
 ## 7. How the layout is enforced
 
-The flat row is a decision, not an accident: a match side object exists in the diagram as
-the honest way to read twelve paired columns, and stays out of the code and the file, where
-it would trade the spreadsheet readable pairing for structure only a query engine would
-benefit from. The same holds for the nested sub bouts and the judges' decision mark: both
-mirror how a paper score sheet records the same facts. Two mechanisms hold the layout to
-its contract:
+Two mechanisms hold the layout to its contract:
 
 * **The results file's layout is defined once.** The header, the row writer and the reader
   all derive from a single ordered column list, so the three cannot disagree. A golden test

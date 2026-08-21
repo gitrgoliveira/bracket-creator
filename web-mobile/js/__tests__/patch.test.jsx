@@ -85,7 +85,10 @@ describe('applyPatch', () => {
     expect(next.poolMatches[0].winner).toEqual({ id: "FromArray", name: "FromArray" });
   });
 
-  it('maps ipponsA/B to scoreA/B on bracket-round matches', () => {
+  it('merges ipponsA/B straight through on bracket-round matches, no scoreA/B synthesis', () => {
+    // Pool and bracket matches share one wire shape (ipponsA/ipponsB arrays;
+    // scoreA/scoreB strings never appear), so applyPatch hands the patch to
+    // mergeMatchPatch with no per-kind translation for either.
     const prev = makeState();
     const next = applyPatch(prev, {
       data: {
@@ -93,10 +96,10 @@ describe('applyPatch', () => {
       },
     });
     expect(next.bracket.rounds[0][0].winner).toEqual({ id: "Alice", name: "Alice" });
-    expect(next.bracket.rounds[0][0].scoreA).toBe("MK");
-    expect(next.bracket.rounds[0][0].scoreB).toBe("D");
-    // ipponsA/B copied through too (the patch spread carries them)
     expect(next.bracket.rounds[0][0].ipponsA).toEqual(["M", "K"]);
+    expect(next.bracket.rounds[0][0].ipponsB).toEqual(["D"]);
+    expect(next.bracket.rounds[0][0].scoreA).toBeUndefined();
+    expect(next.bracket.rounds[0][0].scoreB).toBeUndefined();
   });
 
   it('preserves court/scheduledAt via the imported mergeMatchPatch (regression: pre-fix the spread fallback would overwrite)', () => {
@@ -529,9 +532,9 @@ describe('recomputeBracketQueuePositions', () => {
       },
     };
     const next = applyPatch(prev, {
-      data: { result: { id: "b1", scoreA: "M" } },
+      data: { result: { id: "b1", ipponsA: ["M"] } },
     });
-    expect(next.bracket.rounds[0][0].scoreA).toBe("M");
+    expect(next.bracket.rounds[0][0].ipponsA).toEqual(["M"]);
     // sibling untouched: same reference
     expect(next.bracket.rounds[0][1]).toBe(prev.bracket.rounds[0][1]);
   });
@@ -587,7 +590,8 @@ describe('applyPatch: naginata bronze (thirdPlaceMatch)', () => {
     const next = applyPatch(prev, { data: { result: { id: "m-bronze", status: "completed", winner: "Alice", ipponsA: ["M"] } } });
     expect(next).not.toBe(prev);
     expect(next.bracket.thirdPlaceMatch.status).toBe("completed");
-    expect(next.bracket.thirdPlaceMatch.scoreA).toBe("M"); // ippons→score mapping
+    expect(next.bracket.thirdPlaceMatch.ipponsA).toEqual(["M"]); // no scoreA/B synthesis
+    expect(next.bracket.thirdPlaceMatch.scoreA).toBeUndefined();
   });
 
   it('preserves bronze identity when the event targets a different match', () => {

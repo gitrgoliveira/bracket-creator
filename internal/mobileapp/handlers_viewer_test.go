@@ -213,7 +213,11 @@ func TestViewerAggregator_StripsPreviewBracket(t *testing.T) {
 	preview := &state.Bracket{
 		Preview: true,
 		Rounds: [][]state.BracketMatch{{
-			{ID: "m-r1-0", SideA: "Pool A-1st", SideB: "Pool B-2nd", Court: "A", Status: state.MatchStatusScheduled, ScheduledAt: "09:30"},
+			{
+				ID: "m-r1-0", SideA: "Pool A-1st", SideB: "Pool B-2nd", Court: "A",
+				Status: state.MatchStatusScheduled, ScheduledAt: "09:30",
+				IpponsA: []string{"M"}, HansokuB: 1,
+			},
 		}},
 	}
 	require.NoError(t, store.SaveBracket("mixed", preview))
@@ -240,4 +244,13 @@ func TestViewerAggregator_StripsPreviewBracket(t *testing.T) {
 	assert.Equal(t, true, bracketField["preview"], "preview flag must be present on the detail payload")
 	rounds, _ := bracketField["rounds"].([]any)
 	assert.NotEmpty(t, rounds, "preview bracket rounds must be present on the detail payload")
+	// Wire contract: a bracket match carries ipponsA/hansokuB directly, never
+	// the legacy scoreA/scoreB rendered-string fields.
+	round0, _ := rounds[0].([]any)
+	require.NotEmpty(t, round0)
+	match0, _ := round0[0].(map[string]any)
+	assert.Equal(t, []any{"M"}, match0["ipponsA"])
+	assert.Equal(t, float64(1), match0["hansokuB"])
+	assert.NotContains(t, match0, "scoreA")
+	assert.NotContains(t, match0, "scoreB")
 }

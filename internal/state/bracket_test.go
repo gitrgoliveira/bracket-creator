@@ -58,6 +58,72 @@ func TestParseBracketBytes(t *testing.T) {
 		assert.Equal(t, 1, b.ThirdPlaceMatch.FlagsA, "non-negative bronze FlagsA preserved")
 		assert.Equal(t, 0, b.ThirdPlaceMatch.FlagsB, "negative bronze FlagsB clamped to 0")
 	})
+
+	// A pre-array bracket.json: two matches, one carrying only the legacy
+	// rendered score strings, the other ALSO carrying a legacy decidedByHantei
+	// flag on top of a legacy string. Both legacies must fold on load, in
+	// order (string -> arrays, then flag -> mark), and the legacy fields must
+	// come back empty/false so nothing downstream can observe the old shape.
+	t.Run("legacy score strings and hantei flag fold together on load", func(t *testing.T) {
+		raw := []byte(`{"rounds":[[
+			{"id":"m1","sideA":"Alice","sideB":"Bob","winner":"","scoreA":"MHt","scoreB":"K(H1)"},
+			{"id":"m2","sideA":"Alice","sideB":"Bob","winner":"Alice","scoreA":"K","scoreB":"","decidedByHantei":true}
+		]]}`)
+		b, err := parseBracketBytes(raw)
+		require.NoError(t, err)
+		require.Len(t, b.Rounds[0], 2)
+
+		m1 := b.Rounds[0][0]
+		assert.Equal(t, []string{"M", domain.HanteiMark}, m1.IpponsA)
+		assert.Equal(t, []string{"K"}, m1.IpponsB)
+		assert.Equal(t, 0, m1.HansokuA)
+		assert.Equal(t, 1, m1.HansokuB)
+		assert.Empty(t, m1.ScoreA, "legacy string cleared")
+		assert.Empty(t, m1.ScoreB, "legacy string cleared")
+
+		m2 := b.Rounds[0][1]
+		assert.Equal(t, []string{"K", domain.HanteiMark}, m2.IpponsA,
+			"the legacy string folds into an array BEFORE the hantei flag folds into the mark")
+		assert.Empty(t, m2.IpponsB)
+		assert.False(t, m2.DecidedByHantei, "legacy flag cleared")
+		assert.Empty(t, m2.ScoreA, "legacy string cleared")
+		assert.Empty(t, m2.ScoreB, "legacy string cleared")
+	})
+}
+
+// TestLegacyBracketRoundTripSave pins the wire contract end to end: loading a
+// legacy bracket.json (rendered score strings) and saving it back must
+// produce bytes with ipponsA/hansokuA/etc keys and NO scoreA/scoreB keys —
+// the legacy fields are read-only, never re-persisted once folded.
+func TestLegacyBracketRoundTripSave(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-bracket-legacy-test-*")
+	require.NoError(t, err)
+	defer func() { _ = os.RemoveAll(dir) }()
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	compID := "legacy-comp"
+	compDir := filepath.Join(dir, "competitions", compID)
+	require.NoError(t, os.MkdirAll(compDir, 0755))
+
+	raw := []byte(`{"rounds":[[{"id":"m1","sideA":"Alice","sideB":"Bob","winner":"Alice","scoreA":"MHt","scoreB":"K(H1)"}]]}`)
+	require.NoError(t, os.WriteFile(filepath.Join(compDir, "bracket.json"), raw, 0600))
+
+	b, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.Len(t, b.Rounds[0], 1)
+	assert.Equal(t, []string{"M", domain.HanteiMark}, b.Rounds[0][0].IpponsA)
+	assert.Empty(t, b.Rounds[0][0].ScoreA)
+
+	require.NoError(t, store.SaveBracket(compID, b))
+
+	saved, err := os.ReadFile(filepath.Join(compDir, "bracket.json"))
+	require.NoError(t, err)
+	assert.Contains(t, string(saved), `"ipponsA"`)
+	assert.Contains(t, string(saved), `"hansokuB"`)
+	assert.NotContains(t, string(saved), `"scoreA"`, "legacy field must never be re-persisted")
+	assert.NotContains(t, string(saved), `"scoreB"`, "legacy field must never be re-persisted")
 }
 
 func TestUpdateBracket_Basic(t *testing.T) {

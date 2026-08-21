@@ -304,8 +304,8 @@ func TestBuildResultsWorkbook_BracketScores(t *testing.T) {
 					SideB:       "Charlie",
 					Winner:      "Alice",
 					Status:      state.MatchStatusCompleted,
-					ScoreA:      "MK",
-					ScoreB:      "M",
+					IpponsA:     []string{"M", "K"},
+					IpponsB:     []string{"M"},
 					Decision:    "fought",
 					MatchNumber: 1,
 				},
@@ -327,15 +327,15 @@ func TestBuildResultsWorkbook_BracketScores(t *testing.T) {
 }
 
 // TestBuildResultsWorkbook_BracketHanteiScoreCell pins the bracket-overlay
-// fix for a double-printed judges'-decision mark. A BracketMatch persists its
-// scoreline as one rendered string (ScoreA/ScoreB), and the live scoring path
-// embeds the mark inline as a literal domain.HanteiMark ippon entry
-// ("M"+"Ht" = "MHt"). writeScoreRowCells separately appends "Ht" again via
-// SideMarksLR (which reads the mark off the decoded MatchResult view), so
-// writing bm.ScoreA verbatim rendered "MHt Ht" -- the mark twice. The pool
-// path (TestBuildResultsWorkbook_ResultMarksInScoreCells) already decodes and
-// filters through IpponsScore first, rendering "M Ht"; the bracket overlay
-// must match it exactly, not double the mark.
+// fix for a double-printed judges'-decision mark. A BracketMatch carries its
+// scoreline as ippon arrays, and the live scoring path embeds the mark
+// inline as a literal domain.HanteiMark entry in the winner's slice.
+// writeScoreRowCells separately appends "Ht" again via SideMarksLR (which
+// reads the mark off the MatchResult view), so rendering the array verbatim
+// would render "MHt Ht" -- the mark twice. The pool path
+// (TestBuildResultsWorkbook_ResultMarksInScoreCells) already filters through
+// IpponsScore first, rendering "M Ht"; the bracket overlay must match it
+// exactly, not double the mark.
 func TestBuildResultsWorkbook_BracketHanteiScoreCell(t *testing.T) {
 	t.Parallel()
 	dir, store, eng, compID := testSetup(t)
@@ -347,8 +347,8 @@ func TestBuildResultsWorkbook_BracketHanteiScoreCell(t *testing.T) {
 	require.NoError(t, store.SavePools(compID, pools))
 	require.NoError(t, store.SavePoolMatches(compID, nil))
 
-	// Alice beats Charlie, decided by hantei: her rendered score string
-	// carries the mark inline, exactly as the live scoring path writes it.
+	// Alice beats Charlie, decided by hantei: her ippon array carries the
+	// mark inline, exactly as the live scoring path writes it.
 	bracket := &state.Bracket{
 		Rounds: [][]state.BracketMatch{
 			{
@@ -358,8 +358,7 @@ func TestBuildResultsWorkbook_BracketHanteiScoreCell(t *testing.T) {
 					SideB:       "Charlie",
 					Winner:      "Alice",
 					Status:      state.MatchStatusCompleted,
-					ScoreA:      "M" + domain.HanteiMark,
-					ScoreB:      "",
+					IpponsA:     []string{"M", domain.HanteiMark},
 					Decision:    "fought",
 					MatchNumber: 1,
 				},
@@ -951,8 +950,8 @@ func TestBuildResultsWorkbook_BracketTwoCourts(t *testing.T) {
 	bracket := &state.Bracket{
 		Rounds: [][]state.BracketMatch{
 			{
-				{ID: "sf1", SideA: "Alice", SideB: "Charlie", Winner: "Alice", Status: state.MatchStatusCompleted, ScoreA: "MK", ScoreB: "", Decision: "fought", MatchNumber: 1},
-				{ID: "sf2", SideA: "Eve", SideB: "Grace", Winner: "Eve", Status: state.MatchStatusCompleted, ScoreA: "DT", ScoreB: "", Decision: "fought", MatchNumber: 2},
+				{ID: "sf1", SideA: "Alice", SideB: "Charlie", Winner: "Alice", Status: state.MatchStatusCompleted, IpponsA: []string{"M", "K"}, Decision: "fought", MatchNumber: 1},
+				{ID: "sf2", SideA: "Eve", SideB: "Grace", Winner: "Eve", Status: state.MatchStatusCompleted, IpponsA: []string{"D", "T"}, Decision: "fought", MatchNumber: 2},
 			},
 		},
 	}
@@ -992,8 +991,8 @@ func TestBuildResultsWorkbook_BracketScoresWithWinner(t *testing.T) {
 					SideB:       "Charlie",
 					Winner:      "Alice",
 					Status:      state.MatchStatusCompleted,
-					ScoreA:      "MK",
-					ScoreB:      "M",
+					IpponsA:     []string{"M", "K"},
+					IpponsB:     []string{"M"},
 					Decision:    "fought",
 					MatchNumber: 1,
 				},
@@ -1003,8 +1002,8 @@ func TestBuildResultsWorkbook_BracketScoresWithWinner(t *testing.T) {
 					SideB:       "Dave",
 					Winner:      "Dave",
 					Status:      state.MatchStatusCompleted,
-					ScoreA:      "M",
-					ScoreB:      "MK",
+					IpponsA:     []string{"M"},
+					IpponsB:     []string{"M", "K"},
 					Decision:    "fought",
 					MatchNumber: 2,
 				},
@@ -1059,8 +1058,7 @@ func TestBuildResultsWorkbook_BracketKiken(t *testing.T) {
 					SideB:       "Charlie",
 					Winner:      "Alice",
 					Status:      state.MatchStatusCompleted,
-					ScoreA:      "M",
-					ScoreB:      "",
+					IpponsA:     []string{"M"},
 					Decision:    "kiken-voluntary",
 					MatchNumber: 1,
 				},
@@ -1348,7 +1346,8 @@ func TestBuildResultsWorkbook_PlayoffsNonPow2TopologyMatchesBracket(t *testing.T
 		for mi := range br.Rounds[ri] {
 			m := &br.Rounds[ri][mi]
 			if m.SideA != "" && m.SideB != "" {
-				m.Winner, m.Status, m.ScoreA, m.Decision = m.SideA, state.MatchStatusCompleted, "MK", "fought"
+				m.Winner, m.Status, m.Decision = m.SideA, state.MatchStatusCompleted, "fought"
+				m.IpponsA = []string{"M", "K"}
 			}
 		}
 	}
@@ -1636,8 +1635,8 @@ func TestBuildResultsWorkbook_RaggedPlayoffsScoresLandInTheRightBlocks(t *testin
 
 			assert.Equal(t, bm.SideA, nameA, "Match %d left entrant", num)
 			assert.Equal(t, bm.SideB, nameB, "Match %d right entrant", num)
-			assert.Equal(t, bm.ScoreA, scoreA, "Match %d left score", num)
-			assert.Equal(t, bm.ScoreB, scoreB, "Match %d right score", num)
+			assert.Equal(t, IpponsScore(bm.IpponsA), scoreA, "Match %d left score", num)
+			assert.Equal(t, IpponsScore(bm.IpponsB), scoreB, "Match %d right score", num)
 			checked++
 		}
 	}
@@ -1670,7 +1669,7 @@ func TestBuildResultsWorkbook_PlayoffsBracket(t *testing.T) {
 			if m.SideA != "" && m.SideB != "" {
 				m.Winner = m.SideA
 				m.Status = state.MatchStatusCompleted
-				m.ScoreA = "MK"
+				m.IpponsA = []string{"M", "K"}
 				m.Decision = "fought"
 			}
 		}
@@ -1725,7 +1724,7 @@ func TestBuildResultsWorkbook_PlayoffsCellRefLikeNames(t *testing.T) {
 			if m.SideA != "" && m.SideB != "" {
 				m.Winner = m.SideA
 				m.Status = state.MatchStatusCompleted
-				m.ScoreA = "MK"
+				m.IpponsA = []string{"M", "K"}
 				m.Decision = "fought"
 			}
 		}
@@ -2010,7 +2009,7 @@ func TestBuildResultsWorkbook_PlayoffsPartialBracket(t *testing.T) {
 		if m.SideA != "" && m.SideB != "" {
 			m.Winner = m.SideA
 			m.Status = state.MatchStatusCompleted
-			m.ScoreA = "MK"
+			m.IpponsA = []string{"M", "K"}
 			m.Decision = "fought"
 		}
 	}
@@ -2709,7 +2708,7 @@ func bracketVictoryCells(t *testing.T, rows [][]string, label string) (left, rig
 // TestBuildResultsWorkbook_EngiBracketFlagScoreCells verifies that for an engi
 // elimination bracket match with FlagsA=3 and FlagsB=2, the Elimination Matches
 // sheet renders the flag counts ("3"/"2") in the victory cells, NOT the ippon
-// letters carried in ScoreA/ScoreB (which do not apply to engi). The assertion is
+// letters carried in IpponsA/IpponsB (which do not apply to engi). The assertion is
 // column-precise (it reads the exact victory cell under the match header) so an
 // incidental "3"/"2" elsewhere cannot mask a regression. Both the default
 // (non-mirror) and mirror layouts are exercised: mirror swaps which victory
@@ -2726,20 +2725,20 @@ func TestBuildResultsWorkbook_EngiBracketFlagScoreCells(t *testing.T) {
 		mirror            bool
 		flagsA            int
 		flagsB            int
-		scoreA            string
-		scoreB            string
+		ipponsA           []string
+		ipponsB           []string
 		wantLeft          string
 		wantRight         string
 		forbiddenIpponVal string
 	}{
 		// Default (non-mirror): left column (Red/SideA) carries FlagsA=3, right
 		// column (White/SideB) carries FlagsB=2.
-		{name: "default", mirror: false, flagsA: 3, flagsB: 2, scoreA: "MK", scoreB: "M", wantLeft: "3", wantRight: "2", forbiddenIpponVal: "MK"},
+		{name: "default", mirror: false, flagsA: 3, flagsB: 2, ipponsA: []string{"M", "K"}, ipponsB: []string{"M"}, wantLeft: "3", wantRight: "2", forbiddenIpponVal: "MK"},
 		// Mirror: the two victory columns are swapped, so left carries FlagsB=2
 		// and right carries FlagsA=3.
-		{name: "mirror", mirror: true, flagsA: 3, flagsB: 2, scoreA: "MK", scoreB: "M", wantLeft: "2", wantRight: "3", forbiddenIpponVal: "MK"},
+		{name: "mirror", mirror: true, flagsA: 3, flagsB: 2, ipponsA: []string{"M", "K"}, ipponsB: []string{"M"}, wantLeft: "2", wantRight: "3", forbiddenIpponVal: "MK"},
 		// 5-0 shutout: the loser's cell must be "0", not blank (pairwise write rule).
-		{name: "5-0 shutout", mirror: false, flagsA: 5, flagsB: 0, scoreA: "MK", scoreB: "", wantLeft: "5", wantRight: "0", forbiddenIpponVal: "MK"},
+		{name: "5-0 shutout", mirror: false, flagsA: 5, flagsB: 0, ipponsA: []string{"M", "K"}, wantLeft: "5", wantRight: "0", forbiddenIpponVal: "MK"},
 	}
 
 	for _, tc := range cases {
@@ -2761,7 +2760,7 @@ func TestBuildResultsWorkbook_EngiBracketFlagScoreCells(t *testing.T) {
 			require.NoError(t, store.SavePools(compID, pools))
 			require.NoError(t, store.SavePoolMatches(compID, nil))
 
-			// Engi bracket match: pair1 beats pair2 on referee flags. ScoreA/ScoreB
+			// Engi bracket match: pair1 beats pair2 on referee flags. IpponsA/IpponsB
 			// carry ippon letters that MUST NOT render for engi; if the engi branch
 			// is skipped, the ippon value would leak into the left victory cell.
 			bracket := &state.Bracket{
@@ -2775,8 +2774,8 @@ func TestBuildResultsWorkbook_EngiBracketFlagScoreCells(t *testing.T) {
 							Status:      state.MatchStatusCompleted,
 							FlagsA:      tc.flagsA,
 							FlagsB:      tc.flagsB,
-							ScoreA:      tc.scoreA,
-							ScoreB:      tc.scoreB,
+							IpponsA:     tc.ipponsA,
+							IpponsB:     tc.ipponsB,
 							Decision:    "fought",
 							MatchNumber: 1,
 						},
@@ -2801,7 +2800,7 @@ func TestBuildResultsWorkbook_EngiBracketFlagScoreCells(t *testing.T) {
 			assert.Equal(t, tc.wantRight, right,
 				"right victory cell must render the engi flag count, not an ippon letter")
 
-			// The ippon-letter score (ScoreA="MK") must never leak into any cell:
+			// The ippon-letter score ("MK") must never leak into any cell:
 			// engi is flag-scored, so the ippon path must be fully bypassed.
 			assert.False(t, sheetContainsCell(rows, tc.forbiddenIpponVal),
 				"elimination sheet must NOT contain ippon letters (%q) for an engi bracket", tc.forbiddenIpponVal)

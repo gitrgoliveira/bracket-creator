@@ -667,18 +667,19 @@ func TestRecordBracketMatchResult_PropagatesWinner(t *testing.T) {
 // *bool carried across a silent re-score). That flag channel no longer
 // exists in production — it is LEGACY READ-ONLY (state/legacy_hantei.go) and
 // no writer sets it any more. The verdict is now the domain.HanteiMark entry
-// in the WINNER's ippon slice, rendered into BracketMatch.ScoreA/ScoreB via
-// domain.FormatScore, so it rides with the scoreline through the disk
-// round-trip like any other ippon. There is no longer a separate "preserve
-// the flag across a silent write" mechanism: a real client (the SPA) always
-// echoes the full ippons it was served, so "keeping the mark" is "echoing
-// it again", and a write that supplies markless ippons genuinely clears it
-// (stripInvalidHantei only strips a mark the incoming payload carries; it
-// never restores one a payload omitted).
+// in the WINNER's ippon slice, carried natively in BracketMatch.IpponsA/
+// IpponsB (the same shape MatchResult carries), so it rides with the
+// scoreline through the disk round-trip like any other ippon. There is no
+// longer a separate "preserve the flag across a silent write" mechanism: a
+// real client (the SPA) always echoes the full ippons it was served, so
+// "keeping the mark" is "echoing it again", and a write that supplies
+// markless ippons genuinely clears it (stripInvalidHantei only strips a
+// mark the incoming payload carries; it never restores one a payload
+// omitted).
 func TestRecordBracketMatchResult_Hantei_RoundTrips(t *testing.T) {
 	// FIK Art. 7-5 / 29-6: a knockout match that remains tied after encho is
 	// decided by referee hantei. The mark must survive the disk round-trip
-	// inside BracketMatch.ScoreA/ScoreB so the UI and Excel export can mark
+	// inside BracketMatch.IpponsA/IpponsB so the UI and Excel export can mark
 	// hantei wins explicitly.
 	eng, store, _ := setupTestEngine(t)
 	compID := "bracket-hantei"
@@ -698,11 +699,11 @@ func TestRecordBracketMatchResult_Hantei_RoundTrips(t *testing.T) {
 	if first.SideA == "Alice" {
 		ipponsA, ipponsB = []string{domain.HanteiMark}, []string{}
 	}
-	aliceScore := func(bm state.BracketMatch) string {
+	aliceIppons := func(bm state.BracketMatch) []string {
 		if bm.SideA == "Alice" {
-			return bm.ScoreA
+			return bm.IpponsA
 		}
-		return bm.ScoreB
+		return bm.IpponsB
 	}
 
 	err = eng.RecordMatchResult(compID, firstMatchID, &state.MatchResult{
@@ -715,11 +716,11 @@ func TestRecordBracketMatchResult_Hantei_RoundTrips(t *testing.T) {
 
 	bracket, err = store.LoadBracket(compID)
 	require.NoError(t, err)
-	assert.Contains(t, aliceScore(bracket.Rounds[0][0]), domain.HanteiMark,
-		"the winner's rendered score carries the mark")
+	assert.Contains(t, aliceIppons(bracket.Rounds[0][0]), domain.HanteiMark,
+		"the winner's ippon array carries the mark")
 	// Zero-value baseline: the un-scored second semi-final must NOT carry it.
-	assert.NotContains(t, bracket.Rounds[0][1].ScoreA, domain.HanteiMark)
-	assert.NotContains(t, bracket.Rounds[0][1].ScoreB, domain.HanteiMark)
+	assert.NotContains(t, bracket.Rounds[0][1].IpponsA, domain.HanteiMark)
+	assert.NotContains(t, bracket.Rounds[0][1].IpponsB, domain.HanteiMark)
 	assert.False(t, bracket.Rounds[0][1].DecidedByHantei, "untouched bracket match must remain non-hantei")
 
 	t.Run("a re-score echoing the mark keeps it", func(t *testing.T) {
@@ -732,7 +733,7 @@ func TestRecordBracketMatchResult_Hantei_RoundTrips(t *testing.T) {
 		require.NoError(t, err)
 		b, err := store.LoadBracket(compID)
 		require.NoError(t, err)
-		assert.Contains(t, aliceScore(b.Rounds[0][0]), domain.HanteiMark)
+		assert.Contains(t, aliceIppons(b.Rounds[0][0]), domain.HanteiMark)
 	})
 
 	t.Run("a markless re-score clears it", func(t *testing.T) {
@@ -748,8 +749,8 @@ func TestRecordBracketMatchResult_Hantei_RoundTrips(t *testing.T) {
 		b, err := store.LoadBracket(compID)
 		require.NoError(t, err)
 		got := b.Rounds[0][0]
-		assert.NotContains(t, got.ScoreA, domain.HanteiMark)
-		assert.NotContains(t, got.ScoreB, domain.HanteiMark)
+		assert.NotContains(t, got.IpponsA, domain.HanteiMark)
+		assert.NotContains(t, got.IpponsB, domain.HanteiMark)
 	})
 }
 
@@ -1644,25 +1645,6 @@ func TestOverrideBracketWinner_NotFound(t *testing.T) {
 }
 
 // --- Scoring and Standing Logic Tests ---
-
-func TestFormatScore_HansokuOnly(t *testing.T) {
-	// Legacy disk values: hansoku used to be cumulative, so values >1 still
-	// appear when reading old saves. The renderer must keep displaying them.
-	score := formatScore([]string{}, 2)
-	assert.Equal(t, "(H2)", score)
-
-	score = formatScore([]string{"M"}, 1)
-	assert.Equal(t, "M (H1)", score)
-
-	// Post-PR-#110 saves: the discharged foul pair is recorded as an "H" ippon
-	// on the opponent's slice and HansokuA resets to 0. No redundant "(H...)"
-	// suffix should appear alongside the H ippon.
-	score = formatScore([]string{"H"}, 0)
-	assert.Equal(t, "H", score)
-
-	score = formatScore([]string{"M", "H"}, 0)
-	assert.Equal(t, "MH", score)
-}
 
 func TestCalculatePoolStandings_WithManualOverrides(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)

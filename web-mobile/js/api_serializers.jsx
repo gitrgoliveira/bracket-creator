@@ -16,12 +16,12 @@
 // integers. toBackendMatchResult() bridges those representations.
 //
 // normalizeMatch() goes the other way: take a match as the Go server
-// emits it (string sides, flat scoreA/scoreB or ipponsA/ipponsB arrays)
-// and produce the UI-friendly shape with object sides and a unified
-// `score` object the bracket card renderer can consume.
+// emits it (string sides, ipponsA/ipponsB arrays — pool and bracket
+// matches share this one shape; scoreA/scoreB strings never appear on
+// the wire) and produce the UI-friendly shape with object sides and a
+// unified `score` object the bracket card renderer can consume.
 
 import { realIppons, containsHt, placeHt, stripHt } from './result_slot.jsx';
-import { ipponsFromScore } from './bracket.jsx';
 const STATUS_MAP = { "complete": "completed", "in_progress": "running" };
 
 function toBackendStatus(s) { return STATUS_MAP[s] || s; }
@@ -259,51 +259,15 @@ function normalizeMatch(m, playerMap) {
         const an = typeof a === "object" ? a.name : a;
         return wn === an;
     };
-    // Build score object from flat scoreA/scoreB if needed (bracket matches)
-    if (!norm.score && (norm.scoreA || norm.scoreB) && norm.status === "completed") {
-        // Strip the trailing "(HN)" hansoku suffix (with optional separator
-        // space: see engine/scoring.go::formatScore) before measuring length
-        // or splitting into ippon chars. Without this, scoreA="MK (H1)" would
-        // count length 7 and split to ["M","K"," ","(","H","1",")"], polluting
-        // both the displayed score and the modal's ippon-slot seeding (which
-        // falls back to score.ippons when ipponsA/B are absent for bracket
-        // ipponsFromScore, the ONE decoder for this string (bracket.jsx), not a
-        // local copy of its regex. The previous comment justified the copy as
-        // avoiding "load-order coupling with bracket.js, which window-registers
-        // its helper LATER" — but this is a static ESM import, resolved before
-        // either module body runs, so that ordering was never relevant. This is
-        // the JS half of what domain.FormatScore/ParseScore fixed on the Go
-        // side: one wire format, one codec.
-        const lettersA = ipponsFromScore(norm.scoreA);
-        const lettersB = ipponsFromScore(norm.scoreB);
-        const aWin = sideAWon(norm.winner, norm.sideA);
-        // Recover BOTH sides' waza letters into the per-side ippon arrays (when
-        // the server didn't send them for bracket matches). scoreA/scoreB are
-        // each formatScore(IpponsA/B) on the server: i.e. both sides' letters: 
-        // so this is loss-free, unlike score.ippons which keeps only the
-        // winner's. Populating these means formatIpponsScore renders technique
-        // letters for BOTH competitors ("MK–D"), never the numeric fallback.
-        // Only fill when absent so server-provided arrays always win.
-        if (!norm.ipponsA?.length && lettersA.length) norm.ipponsA = lettersA;
-        if (!norm.ipponsB?.length && lettersB.length) norm.ipponsB = lettersB;
-        // Counts and the seeding array go through realIppons: the "Ht" mark
-        // (now a real ippon-slice entry) occupies a slot but is not a point,
-        // so a 1-1 hantei must read 1-1 here, not 2-1. Hoisted once: the
-        // winner's stripped array is otherwise filtered twice per match
-        // (once for winnerPts.length, once for the ippons array itself).
-        const winnerIppons = realIppons(aWin ? lettersA : lettersB);
-        norm.score = {
-            type: "ippon",
-            winnerPts: winnerIppons.length,
-            loserPts: realIppons(aWin ? lettersB : lettersA).length,
-            ippons: winnerIppons,
-        };
-    }
-    // Build score from ipponsA/ipponsB for pool matches
+    // Build score from ipponsA/ipponsB. Pool and bracket matches converge on
+    // this one shape (both carry ipponsA/ipponsB arrays; scoreA/scoreB
+    // strings never appear on the wire), so one branch covers both.
     if (!norm.score && (norm.ipponsA?.length || norm.ipponsB?.length) && norm.status === "completed") {
         const aWin = sideAWon(norm.winner, norm.sideA);
-        // Same realIppons discipline (and single-filter hoist) as the
-        // bracket branch above: the mark occupies a slot, never a point.
+        // realIppons discipline, hoisted once: the "Ht" mark occupies a slot
+        // but is never a point, so a 1-1 hantei must read 1-1 here, not 2-1.
+        // The winner's stripped array is otherwise filtered twice per match
+        // (once for winnerPts.length, once for the ippons array itself).
         const winnerIppons = realIppons(aWin ? norm.ipponsA : norm.ipponsB);
         norm.score = {
             type: isHikiwake(norm.decision) ? "hikiwake" : "ippon",
@@ -319,9 +283,7 @@ function normalizeMatch(m, playerMap) {
     // verdict as the "Ht" entry in the winner's ippon list and sends no flag.
     // Deriving it here keeps every display surface and editor reading the
     // property they always read, off the one place the verdict actually
-    // lives. Per-sub likewise. (norm.ipponsA may have been recovered from a
-    // bracket scoreA string above; ipponsFromScore tokenizes "Ht", so the
-    // derivation sees it either way.)
+    // lives. Per-sub likewise.
     norm.decidedByHantei = containsHt(norm.ipponsA) || containsHt(norm.ipponsB);
     // Pre-check with .some() before mapping: most matches carry no hantei
     // sub at all (a daihyosen/hantei bout is the exception, not the rule),

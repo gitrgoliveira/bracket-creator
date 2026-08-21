@@ -29,10 +29,6 @@ import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 
 const STUBBED_GLOBALS = {
   isHikiwake: () => false,
-  // The real decoder from bracket.jsx: strips a trailing "(Hn)" and splits the
-  // remaining waza letters. Stubbed rather than imported to keep this file's
-  // globals self-contained, like every sibling render test.
-  ipponsFromScore: (s) => (s ? s.replace(/\s*\(H\d+\)$/, "").split("") : []),
   arraysEqual: (a, b) => a.length === b.length && a.every((v, i) => v === b[i]),
   isKikenDecision: () => false,
   isTextEntry: () => false,
@@ -157,32 +153,6 @@ describe('the editor shows the verdict the server holds', () => {
     // against the running app, which produces exactly this array.)
     expect([...container.querySelectorAll('.sb-slot')].map(s => s.textContent))
       .toEqual(['K', '\u00b7', 'M', 'Ht']);
-  });
-
-  it('adopts a BRACKET match score, which arrives as a formatted string', async () => {
-    // A bracket match persists each side as one formatted string (scoreA /
-    // scoreB) rather than an ippons array, and the editor decodes it through
-    // ipponsFromScore. The re-seed keys on the SEEDS it writes, not on the `m`
-    // fields it reads, which is what makes this case work: an earlier key
-    // enumerated m.ipponsA/m.ipponsB and so never fired for a knockout match,
-    // leaving exactly the stale board this rule exists to prevent — on the
-    // half of the tournament where a stale write matters most.
-    const bracketMatch = (over = {}) => tiedRunningMatch({
-      ipponsA: undefined, ipponsB: undefined, scoreA: 'M', scoreB: 'K', ...over,
-    });
-    const { rerender, container } = render(
-      <ScoreEditorModal match={bracketMatch()} onClose={vi.fn()} onSubmit={vi.fn()} password="" />
-    );
-    expect([...container.querySelectorAll('.sb-slot')].map(s => s.textContent))
-      .toEqual(['K', '·', 'M', '·']);
-
-    // Another device records a second point for AKA, so the match is 2-1.
-    await act(async () => { rerender(
-      <ScoreEditorModal match={bracketMatch({ scoreA: 'MK' })} onClose={vi.fn()} onSubmit={vi.fn()} password="" />
-    ); });
-
-    expect([...container.querySelectorAll('.sb-slot')].map(s => s.textContent))
-      .toEqual(['K', '·', 'M', 'K']);
   });
 
   it('keeps UNSAVED operator edits rather than overwriting them', async () => {

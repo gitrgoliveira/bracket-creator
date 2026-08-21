@@ -571,18 +571,21 @@ func hanteiOf(mr state.MatchResult) bool {
 // bracketMatchResultView adapts a BracketMatch to the MatchResult shape the
 // shared row writers consume (they read only the result fields).
 func bracketMatchResultView(bm *state.BracketMatch) state.MatchResult {
-	mr := state.MatchResult{
+	return state.MatchResult{
 		SideA:      bm.SideA,
 		SideB:      bm.SideB,
 		Winner:     bm.Winner,
 		Decision:   bm.Decision,
 		Encho:      bm.Encho,
 		SubResults: bm.SubResults,
+		// The scoreline (and with it the judges'-decision mark, an ippon
+		// entry) is a direct field read: BracketMatch persists ippon arrays
+		// natively, the same shape as MatchResult.
+		IpponsA:  bm.IpponsA,
+		IpponsB:  bm.IpponsB,
+		HansokuA: bm.HansokuA,
+		HansokuB: bm.HansokuB,
 	}
-	// The scoreline (and with it the judges'-decision mark, an ippon entry)
-	// rides the rendered score strings through the shared codec.
-	mr.IpponsA, mr.IpponsB, mr.HansokuA, mr.HansokuB = bm.DecodedScorelines()
-	return mr
 }
 
 // setIVCellWithMark writes a team IV count, appending a result mark
@@ -937,12 +940,12 @@ func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMa
 			if engi {
 				scoreA, scoreB = FlagsScorePair(bm.FlagsA, bm.FlagsB)
 			} else {
-				// bm.ScoreA/ScoreB are the RAW rendered strings, which embed
-				// the judges'-decision mark as a literal "Ht" ippon entry
+				// bm.IpponsA/IpponsB (via mrView) carry the raw ippon entries,
+				// including the judges'-decision mark as a literal "Ht" entry
 				// (domain.HanteiMark). writeScoreRowCells below ALSO appends
 				// that mark via SideMarksLR (reading it off mrView), so
-				// writing bm.ScoreA verbatim double-printed it: "MHt Ht".
-				// Decode first and render through IpponsScore, which filters
+				// rendering the array verbatim would double-print it:
+				// "MHt Ht". Render through IpponsScore instead, which filters
 				// non-scoring entries (the mark, the bye placeholder) exactly
 				// as the pool path (overlayPoolScores) already does — the
 				// mark then rides ONLY through the appended SideMarksLR

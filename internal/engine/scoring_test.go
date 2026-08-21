@@ -1641,7 +1641,7 @@ func TestRevertMatchToQueue(t *testing.T) {
 			Rounds: [][]state.BracketMatch{
 				{
 					{ID: "B-run", SideA: "Carol", SideB: "Dave",
-						Status: state.MatchStatusRunning, ScoreA: "M", Decision: "fought"},
+						Status: state.MatchStatusRunning, IpponsA: []string{"M"}, Decision: "fought"},
 					{ID: "B-other", SideA: "Eve", SideB: "Frank",
 						Status: state.MatchStatusScheduled},
 				},
@@ -1656,7 +1656,7 @@ func TestRevertMatchToQueue(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, state.MatchStatusScheduled, updated.Rounds[0][0].Status)
 		assert.Empty(t, updated.Rounds[0][0].Winner)
-		assert.Empty(t, updated.Rounds[0][0].ScoreA)
+		assert.Nil(t, updated.Rounds[0][0].IpponsA)
 		assert.Empty(t, updated.Rounds[0][0].Decision)
 		assert.Equal(t, "Carol", updated.Rounds[0][0].SideA)
 		assert.Equal(t, "Dave", updated.Rounds[0][0].SideB)

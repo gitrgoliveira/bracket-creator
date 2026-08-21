@@ -880,14 +880,49 @@ func TestLegacyHanteiNormalize(t *testing.T) {
 		assert.True(t, m.SubResults[0].HanteiDecided())
 	})
 
-	t.Run("a legacy bracket flag folds into the winner's score string", func(t *testing.T) {
+	t.Run("a legacy bracket flag folds into the winner's ippon array", func(t *testing.T) {
 		bm := &BracketMatch{SideA: "Alice", SideB: "Bob", Winner: "Alice",
 			ScoreA: "K", ScoreB: "M", DecidedByHantei: true}
-		bm.NormalizeLegacyHantei()
-		assert.Equal(t, "KHt", bm.ScoreA)
-		assert.Equal(t, "M", bm.ScoreB)
+		bm.NormalizeLegacy()
+		assert.Equal(t, []string{"K", domain.HanteiMark}, bm.IpponsA)
+		assert.Equal(t, []string{"M"}, bm.IpponsB)
 		assert.False(t, bm.DecidedByHantei)
-		a, _ := domain.ParseScore(bm.ScoreA)
-		assert.Equal(t, []string{"K", domain.HanteiMark}, a, "the string round-trips through the codec")
+		assert.Empty(t, bm.ScoreA, "legacy string is cleared once folded")
+		assert.Empty(t, bm.ScoreB, "legacy string is cleared once folded")
+	})
+
+	t.Run("a legacy bracket score string folds into arrays and hansoku", func(t *testing.T) {
+		bm := &BracketMatch{SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			ScoreA: "MHt", ScoreB: "K(H1)"}
+		bm.NormalizeLegacy()
+		assert.Equal(t, []string{"M", domain.HanteiMark}, bm.IpponsA)
+		assert.Equal(t, []string{"K"}, bm.IpponsB)
+		assert.Equal(t, 0, bm.HansokuA)
+		assert.Equal(t, 1, bm.HansokuB)
+		assert.Empty(t, bm.ScoreA)
+		assert.Empty(t, bm.ScoreB)
+	})
+
+	t.Run("arrays win when a hand-edited file carries both", func(t *testing.T) {
+		bm := &BracketMatch{SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			ScoreA:  "totally different legacy string",
+			ScoreB:  "also different",
+			IpponsA: []string{"M"}, IpponsB: []string{"K"},
+			HansokuA: 0, HansokuB: 0,
+		}
+		bm.NormalizeLegacy()
+		assert.Equal(t, []string{"M"}, bm.IpponsA, "arrays are authoritative, never overwritten by a stale string")
+		assert.Equal(t, []string{"K"}, bm.IpponsB)
+		assert.Empty(t, bm.ScoreA, "the stale string is cleared, not decoded")
+		assert.Empty(t, bm.ScoreB)
+	})
+
+	t.Run("normalising a bracket match twice does not double the mark or reintroduce the string", func(t *testing.T) {
+		bm := &BracketMatch{SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			ScoreA: "K", ScoreB: "M", DecidedByHantei: true}
+		bm.NormalizeLegacy()
+		bm.NormalizeLegacy()
+		assert.Equal(t, []string{"K", domain.HanteiMark}, bm.IpponsA)
+		assert.Empty(t, bm.ScoreA)
 	})
 }

@@ -19,7 +19,7 @@ That leads to three properties worth more here than normalisation:
 * **Diffable.** The whole tournament state can be committed to version control or copied to
   a USB stick as a backup, and two copies can be compared line by line.
 
-The trade this makes is described honestly in [section 6](#6-where-the-object-model-and-the-file-layout-disagree).
+The trade this makes is described honestly in [section 6](#6-how-the-model-maps-onto-rows).
 
 ## 2. Tournament and competition structure
 
@@ -180,8 +180,12 @@ classDiagram
         +string SideA
         +string SideB
         +string Winner
-        +string ScoreA
-        +string ScoreB
+        +string[] IpponsA
+        +string[] IpponsB
+        +int HansokuA
+        +int HansokuB
+        +string ScoreA (legacy, read-only)
+        +string ScoreB (legacy, read-only)
         +int MatchNumber
         +int DisplayRound
         +string[] Feeders
@@ -231,7 +235,9 @@ list: the mark occupies a point slot on the score sheet but never counts as a po
 the winner it sits beside is the winner the referees chose from a level scoreline. The
 `DecidedByHantei` fields in the diagrams are legacy read-only channels: a file that
 carries the old flag loads through a conversion that moves it into the mark, and nothing
-writes them.
+writes them. The bracket `ScoreA`/`ScoreB` strings are the same kind of channel: a file
+that rendered each side's scoreline as one string loads through a conversion into the
+ippon arrays, and every match record holds its score the same way.
 
 ## 4. On disk layout
 
@@ -362,10 +368,12 @@ written before the timestamp existed, or by a client that does not send one, cou
 unstamped and always applies: the guard discriminates only when both sides carry a stamp,
 so it can never silently drop a legitimate change.
 
-## 6. Where the object model and the file layout disagree
+## 6. How the model maps onto rows
 
-The results file is row oriented, and a match is not flat. Reading `pool-matches.csv` alone,
-three things are worth knowing.
+The results file is row oriented, and a match is not flat. The mapping between the two is
+mechanical: every persisted fact has exactly one representation, and the file holds the
+same facts as the structs, encoded for a spreadsheet rather than for a parser. Reading
+`pool-matches.csv` alone, three encodings are worth knowing.
 
 **A team match nests.** The sub bouts are stored as a JSON document inside a single CSV
 cell. That keeps the file to one row per match, at the cost of the richest data in a team

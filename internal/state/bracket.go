@@ -3,8 +3,6 @@ package state
 import (
 	"encoding/json"
 	"os"
-
-	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 )
 
 func (s *Store) LoadBracket(compID string) (*Bracket, error) {
@@ -54,32 +52,17 @@ func parseBracketBytes(raw []byte) (*Bracket, error) {
 	for i := range b.Rounds {
 		for j := range b.Rounds[i] {
 			clampBracketMatchFlags(&b.Rounds[i][j])
-			// Legacy decidedByHantei flags fold into the mark inside the
-			// winner's score string on load (legacy_hantei.go).
-			b.Rounds[i][j].NormalizeLegacyHantei()
+			// Legacy score strings fold into ippon arrays, and legacy
+			// decidedByHantei flags fold into the mark inside them, on load
+			// (legacy_hantei.go).
+			b.Rounds[i][j].NormalizeLegacy()
 		}
 	}
 	if b.ThirdPlaceMatch != nil {
 		clampBracketMatchFlags(b.ThirdPlaceMatch)
-		b.ThirdPlaceMatch.NormalizeLegacyHantei()
+		b.ThirdPlaceMatch.NormalizeLegacy()
 	}
 	return &b, nil
-}
-
-// DecodedScorelines decodes bm's two rendered score strings (ScoreA/ScoreB)
-// into the ippon-slice + outstanding-hansoku shape MatchResult carries, via
-// the domain.ParseScore codec. The judges'-decision mark (domain.HanteiMark)
-// rides through unchanged, as one entry in the winner's slice.
-//
-// A BracketMatch persists each side's scoreline as one formatted string;
-// MatchResult carries ippon arrays. Every projection from the former to the
-// latter (the engine's rollback snapshot, the results-export overlay, the
-// daihyosen scoring path) needs the identical decode, so it lives here once
-// rather than as three hand-rolled `domain.ParseScore(bm.ScoreA/B)` pastes.
-func (bm *BracketMatch) DecodedScorelines() (ipponsA, ipponsB []string, hansokuA, hansokuB int) {
-	ipponsA, hansokuA = domain.ParseScore(bm.ScoreA)
-	ipponsB, hansokuB = domain.ParseScore(bm.ScoreB)
-	return ipponsA, ipponsB, hansokuA, hansokuB
 }
 
 // clampBracketMatchFlags forces negative engi flag counts to 0 (see
@@ -105,26 +88,40 @@ func (s *Store) copyBracket(b *Bracket) *Bracket {
 		res.Rounds[i] = make([]BracketMatch, len(round))
 		copy(res.Rounds[i], round)
 		// The shallow copy above aliases the Encho pointer, SubResults slice
-		// (and its nested IpponsA/B/Encho), and the Feeders slice with the
-		// cached bracket; so a caller mutating a returned match could corrupt
-		// cached state without going through SaveBracket/UpdateBracket.
-		// Deep-copy them to match the pool match copy path (copyMatchResults).
+		// (and its nested IpponsA/B/Encho), the Feeders slice, and the match's
+		// own IpponsA/IpponsB slices with the cached bracket; so a caller
+		// mutating a returned match could corrupt cached state without going
+		// through SaveBracket/UpdateBracket. Deep-copy them to match the pool
+		// match copy path (copyMatchResults).
 		for j := range res.Rounds[i] {
 			res.Rounds[i][j].Encho = round[j].Encho.Clone()
 			res.Rounds[i][j].SubResults = cloneSubResults(round[j].SubResults)
 			if round[j].Feeders != nil {
 				res.Rounds[i][j].Feeders = append([]string(nil), round[j].Feeders...)
 			}
+			if round[j].IpponsA != nil {
+				res.Rounds[i][j].IpponsA = append([]string(nil), round[j].IpponsA...)
+			}
+			if round[j].IpponsB != nil {
+				res.Rounds[i][j].IpponsB = append([]string(nil), round[j].IpponsB...)
+			}
 		}
 	}
 	// Deep-copy the optional bronze match so a returned bracket never aliases the
-	// cached ThirdPlaceMatch pointer (or its nested Encho/SubResults/Feeders).
+	// cached ThirdPlaceMatch pointer (or its nested Encho/SubResults/Feeders/
+	// IpponsA/B).
 	if b.ThirdPlaceMatch != nil {
 		tpm := *b.ThirdPlaceMatch
 		tpm.Encho = b.ThirdPlaceMatch.Encho.Clone()
 		tpm.SubResults = cloneSubResults(b.ThirdPlaceMatch.SubResults)
 		if b.ThirdPlaceMatch.Feeders != nil {
 			tpm.Feeders = append([]string(nil), b.ThirdPlaceMatch.Feeders...)
+		}
+		if b.ThirdPlaceMatch.IpponsA != nil {
+			tpm.IpponsA = append([]string(nil), b.ThirdPlaceMatch.IpponsA...)
+		}
+		if b.ThirdPlaceMatch.IpponsB != nil {
+			tpm.IpponsB = append([]string(nil), b.ThirdPlaceMatch.IpponsB...)
 		}
 		res.ThirdPlaceMatch = &tpm
 	}

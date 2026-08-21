@@ -4,12 +4,13 @@ import { describe, it, expect, beforeAll } from 'vitest';
 
 // MatchCard (bracket.jsx) builds each side's score by joining that side's
 // ippon letters with its result mark (Ht / Kiken / Fus.). Since the "Ht"
-// judges'-decision mark became a real entry inside the ippon array itself
-// (ipponsFromScore tokenizes "MHt" -> ["M","Ht"]), the letters MUST be
-// stripped of any embedded "Ht" via realIppons before the mark is
-// re-appended - otherwise a hantei match doubles the mark ("MHt Ht" or,
-// for a 0-0 hantei, "Ht Ht"). matchScoreStr (the shared score-string path)
-// already does this; this pins the MatchCard side-score path too.
+// judges'-decision mark is a real entry inside the ippon array itself
+// (the wire carries it directly in ipponsA/ipponsB, same shape for pool
+// and bracket matches), the letters MUST be stripped of any embedded "Ht"
+// via realIppons before the mark is re-appended - otherwise a hantei match
+// doubles the mark ("MHt Ht" or, for a 0-0 hantei, "Ht Ht"). matchScoreStr
+// (the shared score-string path) already does this; this pins the
+// MatchCard side-score path too.
 
 let MatchCard;
 

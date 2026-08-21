@@ -1197,10 +1197,25 @@ type BracketMatch struct {
 	Court       string      `json:"court"`
 	ScheduledAt string      `json:"scheduledAt"`
 	// Additional fields from design
-	ScoreA        string `json:"scoreA"`
-	ScoreB        string `json:"scoreB"`
-	IsOverridden  bool   `json:"isOverridden"`
-	QueuePosition int    `json:"queuePosition,omitempty"`
+	//
+	// ScoreA/ScoreB are LEGACY READ-ONLY channels (see legacy_hantei.go): a
+	// pre-array bracket.json rendered each side's scoreline as one string via
+	// the (now-removed) domain.FormatScore codec. NormalizeLegacy folds a
+	// non-empty string into IpponsA/IpponsB/HansokuA/HansokuB on every read
+	// boundary and clears both strings; writers must never set them.
+	ScoreA string `json:"scoreA,omitempty"`
+	ScoreB string `json:"scoreB,omitempty"`
+	// IpponsA/IpponsB carry each side's ippons as waza letters (M/K/D/T/H,
+	// plus S for naginata), and may include the non-scoring domain.HanteiMark
+	// entry. HansokuA/HansokuB carry each side's outstanding (undischarged)
+	// hansoku count. These mirror SubMatchResult's shape so a bracket match
+	// needs no codec to move between the two.
+	IpponsA       []string `json:"ipponsA,omitempty"`
+	IpponsB       []string `json:"ipponsB,omitempty"`
+	HansokuA      int      `json:"hansokuA,omitempty"`
+	HansokuB      int      `json:"hansokuB,omitempty"`
+	IsOverridden  bool     `json:"isOverridden"`
+	QueuePosition int      `json:"queuePosition,omitempty"`
 	// MatchNumber is the sequential bracket match number, matching the
 	// "Match N" label printed on the Excel tree sheet. 0 means unset; for a
 	// BracketMatch that is a hidden/bye placeholder, or a legacy bracket saved

@@ -1498,8 +1498,13 @@ func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult, 
 	if policy == matchWriteForward {
 		stripInvalidHantei(result)
 	}
-	bm.ScoreA = formatScore(result.IpponsA, result.HansokuA)
-	bm.ScoreB = formatScore(result.IpponsB, result.HansokuB)
+	// Defensive copies: bm must not alias result's slices, mirroring the
+	// pattern used everywhere else a MatchResult's ippons are projected
+	// onto stored state (see copyMatchResults / copyBracket).
+	bm.IpponsA = append([]string(nil), result.IpponsA...)
+	bm.IpponsB = append([]string(nil), result.IpponsB...)
+	bm.HansokuA = result.HansokuA
+	bm.HansokuB = result.HansokuB
 	bm.Decision = result.Decision
 	bm.DecisionBy = result.DecisionBy
 	bm.DecisionReason = result.DecisionReason
@@ -1678,18 +1683,6 @@ func parseWinnerOf(s string, numRounds int) (int, int) {
 	// rounds are 0..numRounds-1.
 	// depth d = round index (numRounds - d).
 	return numRounds - depth, matchIdx
-}
-
-// formatScore renders a side's ippons plus any "(HN)" hansoku suffix for the
-// Excel bracket cell. Since PR #110 hansoku is 0 or 1 (outstanding undischarged
-// fouls); the discharged pair appears as an "H" ippon in the opponent's slice
-// instead of a redundant counter on this side. Values >1 only surface when
-// reading legacy disk entries written before the shift.
-//
-// The package-local spelling of domain.FormatScore, whose inverse
-// (domain.ParseScore) bracketMatchAsResult needs to read a stored score back.
-func formatScore(ippons []string, hansoku int) string {
-	return domain.FormatScore(ippons, hansoku)
 }
 
 func (e *Engine) UpdateMatchCourt(compId string, matchId string, newCourt string) error {
@@ -1899,8 +1892,10 @@ func (e *Engine) RevertMatchToQueue(compId, matchId string) error {
 		// even if it was already scheduled.
 		m.Status = state.MatchStatusScheduled
 		m.Winner = ""
-		m.ScoreA = ""
-		m.ScoreB = ""
+		m.IpponsA = nil
+		m.IpponsB = nil
+		m.HansokuA = 0
+		m.HansokuB = 0
 		m.Decision = ""
 		m.DecisionBy = ""
 		m.DecisionReason = ""

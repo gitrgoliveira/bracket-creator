@@ -2,14 +2,25 @@ package state
 
 import "github.com/gitrgoliveira/bracket-creator/internal/domain"
 
-// The hantei verdict is recorded as domain.HanteiMark in the WINNER's ippon
-// slice (operator ruling 2026-08-21: "Ht should be recorded as just another
-// ippon"). The decidedByHantei fields on MatchResult, SubMatchResult and
-// BracketMatch are LEGACY READ-ONLY channels: everything below converts a
-// flagged verdict into the mark at a read boundary, in line with the same
-// day's legacy policy (converted upon reading, not supported as a standing
-// dual representation). Writers never set the fields; new files and payloads
-// never carry them.
+// This file folds TWO legacies, in order, at every bracket read boundary:
+//
+//  1. The rendered score STRING. A pre-array bracket.json rendered each
+//     side's scoreline as one ScoreA/ScoreB string via the (now-removed)
+//     domain.FormatScore codec; a current file carries ippon arrays plus
+//     hansoku ints directly, the same shape as SubMatchResult. BracketMatch's
+//     NormalizeLegacy decodes a non-empty legacy string into the arrays via
+//     domain.ParseScore and clears both strings. Arrays WIN when a
+//     hand-edited file carries both: the strings are cleared whenever the
+//     arrays are already populated too, so the two representations can never
+//     diverge after a normalize pass.
+//  2. The hantei verdict, recorded as domain.HanteiMark in the WINNER's
+//     ippon slice (operator ruling 2026-08-21: "Ht should be recorded as
+//     just another ippon"). The decidedByHantei fields on MatchResult,
+//     SubMatchResult and BracketMatch are LEGACY READ-ONLY channels:
+//     everything below converts a flagged verdict into the mark at a read
+//     boundary, in line with the same day's legacy policy (converted upon
+//     reading, not supported as a standing dual representation). Writers
+//     never set the fields; new files and payloads never carry them.
 //
 // Conversion sites: parsePoolMatchesRecords (SubResults JSON inside the CSV
 // cell), LoadBracket (bracket.json matches and their sub-bouts), and the
@@ -78,21 +89,33 @@ func (m *MatchResult) NormalizeLegacyHantei() {
 	}
 }
 
-// NormalizeLegacyHantei folds a legacy bracket flag into the mark inside the
-// winner's rendered score string (BracketMatch persists each side's ippons
-// as one domain.FormatScore string). The bool flag has no explicit-false to
-// honour: false was always simply "not a hantei", so this composes the
-// shared fold with the score codec only for the flagged==true case rather
-// than plumbing a bool through a rendered-string signature.
-func (b *BracketMatch) NormalizeLegacyHantei() {
+// NormalizeLegacy folds both bracket-level legacies described in this file's
+// header, in order: first the rendered score strings into the ippon arrays,
+// then the legacy hantei flag into the mark inside those arrays. Idempotent,
+// like every fold in this file, so it is safe at every read boundary a
+// bracket match might cross twice.
+func (b *BracketMatch) NormalizeLegacy() {
+	// 1. Score strings -> arrays. Arrays win: whenever they are already
+	// populated the strings are cleared without being decoded, so a
+	// hand-edited file carrying both legacy strings and current arrays can
+	// never have the two diverge after this pass.
+	if b.IpponsA != nil || b.IpponsB != nil {
+		b.ScoreA = ""
+		b.ScoreB = ""
+	} else if b.ScoreA != "" || b.ScoreB != "" {
+		b.IpponsA, b.HansokuA = domain.ParseScore(b.ScoreA)
+		b.IpponsB, b.HansokuB = domain.ParseScore(b.ScoreB)
+		b.ScoreA = ""
+		b.ScoreB = ""
+	}
+	// 2. Legacy hantei flag -> mark. The bool flag has no explicit-false to
+	// honour: false was always simply "not a hantei", so this composes the
+	// shared fold only for the flagged==true case rather than plumbing a
+	// bool through foldLegacyHantei's signature.
 	if b.DecidedByHantei {
 		b.DecidedByHantei = false
 		if b.Winner != "" {
-			ipponsA, hansokuA := domain.ParseScore(b.ScoreA)
-			ipponsB, hansokuB := domain.ParseScore(b.ScoreB)
-			ipponsA, ipponsB = foldLegacyHantei(true, b.Winner, b.SideA, b.SideB, ipponsA, ipponsB)
-			b.ScoreA = domain.FormatScore(ipponsA, hansokuA)
-			b.ScoreB = domain.FormatScore(ipponsB, hansokuB)
+			b.IpponsA, b.IpponsB = foldLegacyHantei(true, b.Winner, b.SideA, b.SideB, b.IpponsA, b.IpponsB)
 		}
 	}
 	for i := range b.SubResults {

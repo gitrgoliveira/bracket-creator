@@ -387,16 +387,16 @@ func TestPoolWriteTx_StaleSnapshotKeepsHantei(t *testing.T) {
 //
 // The match-level BracketMatch.DecidedByHantei *bool this test used to pin is
 // gone: it is a LEGACY READ-ONLY field production code never writes (the
-// verdict lives in bm.ScoreA/ScoreB via the mark). assert.False on it below is
-// kept only as a "never written" pin; the real assertions are on the rendered
-// score string.
+// verdict lives in bm.IpponsA/IpponsB via the mark). assert.False on it below
+// is kept only as a "never written" pin; the real assertions are on the
+// ippon array.
 func TestBracketRollbackDoesNotReapplyTheWrite(t *testing.T) {
 	// The staged forward write: a daihyosen won on hantei.
 	forward := func() *state.BracketMatch {
 		return &state.BracketMatch{
 			ID: "m-r1-0", SideA: "Kyoto", SideB: "Osaka",
 			Winner: "Kyoto", Status: state.MatchStatusCompleted,
-			ScoreA: domain.HanteiMark,
+			IpponsA: []string{domain.HanteiMark},
 			SubResults: []state.SubMatchResult{{
 				Position: state.DaihyosenSubPosition, SideA: "Kyoto", SideB: "Osaka",
 				Winner: "Kyoto", Decision: "daihyosen",
@@ -427,8 +427,8 @@ func TestBracketRollbackDoesNotReapplyTheWrite(t *testing.T) {
 		_, err := applyBracketMatchResult(bm, snapshot(), matchWriteRestore)
 		require.NoError(t, err)
 		assert.False(t, bm.DecidedByHantei, "production code never writes this legacy field")
-		assert.Empty(t, bm.ScoreA, "the verdict being rolled back must not survive")
-		assert.NotContains(t, bm.ScoreA, domain.HanteiMark)
+		assert.Empty(t, bm.IpponsA, "the verdict being rolled back must not survive")
+		assert.NotContains(t, bm.IpponsA, domain.HanteiMark)
 	})
 
 	t.Run("restore does not re-derive a winner from the rolled-back bout", func(t *testing.T) {
@@ -449,10 +449,10 @@ func TestBracketRollbackDoesNotReapplyTheWrite(t *testing.T) {
 		// The match-level MARK does not invert on this particular snapshot,
 		// and that is a second rule rather than a hole in the first: the
 		// snapshot reverts the match to scheduled with no winner and no
-		// ippons, and formatScore(nil, 0) renders empty — there is nothing
+		// ippons, and a nil array copies through as nil — there is nothing
 		// left to carry the mark even if there were a restore mechanism for
 		// it (there is not; see the file doc comment).
-		assert.Empty(t, bm.ScoreA,
+		assert.Empty(t, bm.IpponsA,
 			"a reversion to scheduled cannot carry the verdict, under either policy")
 	})
 
@@ -475,8 +475,8 @@ func TestBracketRollbackDoesNotReapplyTheWrite(t *testing.T) {
 		_, err := applyBracketMatchResult(bm, silent, matchWriteForward)
 		require.NoError(t, err)
 		assert.False(t, bm.DecidedByHantei, "production code never writes this legacy field")
-		assert.NotContains(t, bm.ScoreA, domain.HanteiMark)
-		assert.NotContains(t, bm.ScoreB, domain.HanteiMark)
+		assert.NotContains(t, bm.IpponsA, domain.HanteiMark)
+		assert.NotContains(t, bm.IpponsB, domain.HanteiMark)
 	})
 
 	t.Run("restore applies an explicit verdict the snapshot really held", func(t *testing.T) {
@@ -494,7 +494,7 @@ func TestBracketRollbackDoesNotReapplyTheWrite(t *testing.T) {
 		_, err := applyBracketMatchResult(bm, prior, matchWriteRestore)
 		require.NoError(t, err)
 		assert.False(t, bm.DecidedByHantei, "production code never writes this legacy field")
-		assert.Contains(t, bm.ScoreA, domain.HanteiMark, "restore replays what the snapshot captured")
+		assert.Contains(t, bm.IpponsA, domain.HanteiMark, "restore replays what the snapshot captured")
 		assert.Len(t, bm.SubResults, 1)
 	})
 }
@@ -502,11 +502,14 @@ func TestBracketRollbackDoesNotReapplyTheWrite(t *testing.T) {
 // A rollback must put the match BACK, not blank it.
 //
 // bracketMatchAsResult is what captures the "prior" snapshot the K3 rollback
-// replays. It used to omit the score entirely: a bracket match stores each
-// side as one formatted string, MatchResult carries ippon arrays, and nothing
+// replays. It used to omit the score entirely: a bracket match stored each
+// side as one formatted string, MatchResult carried ippon arrays, and nothing
 // decoded one into the other. So the snapshot arrived with nil ippons, and the
-// restore wrote formatScore(nil, 0) over a real scoreline. Silent data loss on
-// the one path whose whole job is to preserve state.
+// restore wrote a blank score over a real scoreline. Silent data loss on the
+// one path whose whole job is to preserve state. Both now carry ippon arrays
+// natively, so the projection is a direct (defensive-copy) field read; this
+// test still pins the OUTCOME, not the mechanism, so a future regression that
+// drops the ippons on the way through is still caught.
 func TestBracketRollbackRestoresTheScore(t *testing.T) {
 	// A match as it stands before the rejected write: 2-1 with an outstanding
 	// hansoku against Osaka.
@@ -514,7 +517,7 @@ func TestBracketRollbackRestoresTheScore(t *testing.T) {
 		return &state.BracketMatch{
 			ID: "m-r1-0", SideA: "Kyoto", SideB: "Osaka",
 			Winner: "Kyoto", Status: state.MatchStatusCompleted,
-			ScoreA: "MK", ScoreB: "D (H1)",
+			IpponsA: []string{"M", "K"}, IpponsB: []string{"D"}, HansokuB: 1,
 			ResultSource: "admin",
 		}
 	}
@@ -531,13 +534,15 @@ func TestBracketRollbackRestoresTheScore(t *testing.T) {
 		prior := bracketMatchAsResult(scored())
 		// The state after a rejected write: a different scoreline on disk.
 		bm := scored()
-		bm.ScoreA = "MKD"
-		bm.ScoreB = ""
+		bm.IpponsA = []string{"M", "K", "D"}
+		bm.IpponsB = nil
+		bm.HansokuB = 0
 		applied, err := applyBracketMatchResult(bm, prior, matchWriteRestore)
 		require.NoError(t, err)
 		require.True(t, applied)
-		assert.Equal(t, "MK", bm.ScoreA)
-		assert.Equal(t, "D (H1)", bm.ScoreB)
+		assert.Equal(t, []string{"M", "K"}, bm.IpponsA)
+		assert.Equal(t, []string{"D"}, bm.IpponsB)
+		assert.Equal(t, 1, bm.HansokuB)
 	})
 
 	t.Run("a genuinely unscored match still restores as unscored", func(t *testing.T) {
@@ -549,8 +554,8 @@ func TestBracketRollbackRestoresTheScore(t *testing.T) {
 		bm := scored()
 		_, err := applyBracketMatchResult(bm, prior, matchWriteRestore)
 		require.NoError(t, err)
-		assert.Empty(t, bm.ScoreA)
-		assert.Empty(t, bm.ScoreB)
+		assert.Empty(t, bm.IpponsA)
+		assert.Empty(t, bm.IpponsB)
 	})
 
 	// ModifiedAt is deliberately absent from the projection: carrying the
@@ -572,7 +577,7 @@ func TestBracketRollbackRestoresTheScore(t *testing.T) {
 		applied, err := applyBracketMatchResult(bm, prior, matchWriteRestore)
 		require.NoError(t, err)
 		assert.True(t, applied, "a rollback must never lose to the write it undoes")
-		assert.Equal(t, "MK", bm.ScoreA, "and it actually landed")
+		assert.Equal(t, []string{"M", "K"}, bm.IpponsA, "and it actually landed")
 	})
 
 	// The audit pair: restore is authoritative, so it both restores a note the

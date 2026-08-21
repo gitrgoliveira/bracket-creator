@@ -309,8 +309,8 @@ func TestStripInvalidHantei_GuardsTheNonValidatedPaths(t *testing.T) {
 		}
 		_, err := applyBracketMatchResult(bm, in, matchWriteForward)
 		require.NoError(t, err)
-		assert.Equal(t, "M", bm.ScoreA, "the mark must not be rendered into the score string")
-		assert.NotContains(t, bm.ScoreB, domain.HanteiMark)
+		assert.Equal(t, []string{"M"}, bm.IpponsA, "the mark must not be rendered into the ippon array")
+		assert.False(t, domain.ContainsHantei(bm.IpponsB))
 	})
 }
 

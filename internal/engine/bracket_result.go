@@ -20,11 +20,6 @@ import (
 // is not preserved on rollback — it is actively cleared. A partial projection
 // is therefore silent data loss, not a missing optimisation.
 func bracketMatchAsResult(bm *state.BracketMatch) *state.MatchResult {
-	// A bracket match persists each side's score as one formatted string, while
-	// MatchResult carries the ippon arrays. Without decoding it the snapshot has
-	// no ippons at all, and the restore writes formatScore(nil, 0) — blanking
-	// the score of the match it is supposed to be putting back.
-	ipponsA, ipponsB, hansokuA, hansokuB := bm.DecodedScorelines()
 	// ModifiedAt is deliberately NOT projected, and that is the one omission
 	// which is correct. The restore runs through applyMatchWrite, the
 	// timestamp LWW guard, against the stamp the REJECTED write just left on
@@ -42,10 +37,13 @@ func bracketMatchAsResult(bm *state.BracketMatch) *state.MatchResult {
 		DecisionBy:     bm.DecisionBy,
 		DecisionReason: bm.DecisionReason,
 		Encho:          bm.Encho,
-		IpponsA:        ipponsA,
-		IpponsB:        ipponsB,
-		HansokuA:       hansokuA,
-		HansokuB:       hansokuB,
+		// BracketMatch persists ippon arrays natively (the same shape as
+		// MatchResult), so this is a direct field copy; defensive so the
+		// snapshot never aliases bm's backing arrays.
+		IpponsA:  append([]string(nil), bm.IpponsA...),
+		IpponsB:  append([]string(nil), bm.IpponsB...),
+		HansokuA: bm.HansokuA,
+		HansokuB: bm.HansokuB,
 		// The operator-audit pair. Carried so a rollback restores the note the
 		// match actually held, and — because applyBracketMatchResult assigns
 		// them unconditionally under restore — clears one the rejected write

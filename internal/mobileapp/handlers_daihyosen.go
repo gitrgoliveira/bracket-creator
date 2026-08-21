@@ -398,7 +398,7 @@ func findMatchForDaihyosenTx(tx state.StoreTx, compID, matchID string) (*state.M
 // not as an incidental side effect of how the one current call site happens to
 // build its own copy before appending.
 func daihyosenBracketResult(bm *state.BracketMatch) *state.MatchResult {
-	res := &state.MatchResult{
+	return &state.MatchResult{
 		ID:             bm.ID,
 		SideA:          bm.SideA,
 		SideB:          bm.SideB,
@@ -411,12 +411,14 @@ func daihyosenBracketResult(bm *state.BracketMatch) *state.MatchResult {
 		DecisionReason: bm.DecisionReason,
 		Encho:          bm.Encho,
 		SubResults:     append([]state.SubMatchResult(nil), bm.SubResults...),
+		// BracketMatch persists ippon arrays natively (the same shape as
+		// MatchResult), so the scoreline and the judges'-decision mark
+		// (an ippon entry) are direct field copies.
+		IpponsA:  append([]string(nil), bm.IpponsA...),
+		IpponsB:  append([]string(nil), bm.IpponsB...),
+		HansokuA: bm.HansokuA,
+		HansokuB: bm.HansokuB,
 	}
-	// A BracketMatch persists each side's scoreline as one rendered string;
-	// the MatchResult view carries it as ippon slices, and the judges'-
-	// decision mark (an ippon entry) rides along through the codec.
-	res.IpponsA, res.IpponsB, res.HansokuA, res.HansokuB = bm.DecodedScorelines()
-	return res
 }
 
 // countEligibleForSides counts, for each named side, how many roster

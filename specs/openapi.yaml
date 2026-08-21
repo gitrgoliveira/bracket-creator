@@ -4055,8 +4055,8 @@ components:
             to be defeated) is the operator's call, never derived from
             pool-vs-bracket. For all non-kachinuki competitions the server
             rejects a non-zero `periodCount` on any numbered bout (fixed
-            regulation time, no overtime). `decidedByHantei` is NOT relaxed
-            for kachinuki: hantei remains daihyosen-only.
+            regulation time, no overtime). Hantei is NOT relaxed for
+            kachinuki: it remains daihyosen-only.
 
     BracketMatch:
       type: object
@@ -4081,10 +4081,35 @@ components:
         scheduledAt:
           type: string
           maxLength: 32
+        ipponsA:
+          type: array
+          items:
+            type: string
+          description: >
+            Side A's struck ippons as waza letters (M/K/D/T/H, maru for a
+            default win), plus the non-scoring "Ht" judges'-decision mark on
+            the winner's side. The same shape as `MatchResult.ipponsA`.
+        ipponsB:
+          type: array
+          items:
+            type: string
+        hansokuA:
+          type: integer
+          description: Outstanding (undischarged) hansoku count for side A. Omitted when 0.
+        hansokuB:
+          type: integer
         scoreA:
           type: string
+          deprecated: true
+          description: >
+            LEGACY input only. Older bracket files rendered each side's
+            scoreline as one string ("MK", "K(H1)"); the server folds a
+            string into `ipponsA`/`hansokuA` on read. Responses never
+            carry it.
         scoreB:
           type: string
+          deprecated: true
+          description: LEGACY input only, folded into `ipponsB`/`hansokuB` on read. Responses never carry it.
         isOverridden:
           type: boolean
         queuePosition:
@@ -4102,7 +4127,11 @@ components:
           $ref: '#/components/schemas/EnchoMetadata'
         decidedByHantei:
           type: boolean
-          description: True when the match winner was declared by referee hantei on a tied bout (overtime not required).
+          deprecated: true
+          description: >
+            LEGACY input only. The judges'-decision verdict is recorded as
+            the "Ht" entry in the winner's ippon list; the server folds this
+            flag into the mark on read. Responses never carry it.
         reopenPending:
           type: boolean
           readOnly: true

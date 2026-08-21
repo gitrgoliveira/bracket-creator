@@ -303,23 +303,6 @@ function winnerSideLR(m) {
   return null;
 }
 
-// Derive an ippon array from a Go-formatted scoreA/scoreB string.
-// The backend formatScore() appends "(HN)" for outstanding hansoku, e.g.
-// "MK(H1)": and inserts a SPACE separator between ippons and the suffix
-// when both are present, e.g. "MK (H1)" (see engine/scoring.go:715-724).
-// Splitting the raw string would inject "(", "H", "1", ")": plus a
-// stray " " for the spaced shape: as bogus ippon letters. This helper
-// strips the suffix AND the separator space first.
-function ipponsFromScore(scoreStr) {
-  if (!scoreStr) return [];
-  // "Ht" is the codec's ONE two-rune token (the judges'-decision mark, a
-  // real ippon-slice entry since the mark became the record): match it
-  // before the per-character fallback, mirroring domain.ParseScore's
-  // lookahead — "t" is not a letter that stands alone in a score, so the
-  // tokenization cannot misread a real hansoku "H".
-  return scoreStr.replace(/\s*\(H\d+\)$/, "").match(/Ht|[^\s]/g) || [];
-}
-
 // Format ippons as a readable score string: ["M","K"] → "MK", [] → ""
 // Returns something like "MM vs K", "M (E) –", "M X K", "X", "BYE".
 //
@@ -387,9 +370,9 @@ function formatIpponsScore(ipponsLeft, ipponsRight, score, decision, encho, deci
 
   // Numbers are NOT a valid display for ippon: the per-side waza-letter
   // arrays are the only source of an ippon score. There is deliberately no
-  // winnerPts/loserPts fallback here (callers derive the arrays from
-  // scoreA/scoreB via ipponsFromScore, so real data always has letters;
-  // count-only data renders no score rather than invalid digits).
+  // winnerPts/loserPts fallback here (callers pass ipponsA/ipponsB directly —
+  // pool and bracket matches share that one wire shape — so real data always
+  // has letters; count-only data renders no score rather than invalid digits).
   if (!aStr && !bStr && !leftMark && !rightMark) {
     // Nothing to put in either cell: collapse to the bare middle mark plus
     // any loose result marks ("(E)", "Kiken").
@@ -504,8 +487,8 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
   const running = match.status === "running";
   // score.type === "bye" is CLIENT-ONLY: the sole producers are the sample-data
   // generators in data.jsx (advanceByes / simulateRounds), never a server
-  // payload — Go's BracketMatch/Match carry scoreA/scoreB strings and no `score`
-  // object, and api_serializers.normalizeMatch only ever synthesizes
+  // payload — Go's BracketMatch/Match carry ipponsA/ipponsB arrays and no
+  // `score` object, and api_serializers.normalizeMatch only ever synthesizes
   // type "ippon" or "hikiwake". Kept because it is the ONLY bye cue a MatchCard
   // has (the card builds its per-side scores from ippon arrays and never calls
   // matchScoreStr, so removing this leaves such a card completely unlabelled).
@@ -515,8 +498,8 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
   // as the bc-bye-slot placeholder in BracketTreeMeta below.
   const isBye = match.score?.type === "bye";
 
-  const ipponsA = match.ipponsA || ipponsFromScore(match.scoreA);
-  const ipponsB = match.ipponsB || ipponsFromScore(match.scoreB);
+  const ipponsA = match.ipponsA || [];
+  const ipponsB = match.ipponsB || [];
   const isDone = match.status === "completed";
   // Engi is the ONLY competition type where a per-side score is numeric (a
   // referee flag count); every other type shows the ippon letters joined
@@ -1199,18 +1182,16 @@ function BracketTreeLegacy({ rounds, slotLabel, variant = 1, showDojo = true, on
 //
 // The ippon arrays are derived here, never passed in — a positional
 // (B, A) parameter pair was the left/right-inversion trap this hoist
-// removed. The derivation is load-bearing: bracket matches carry
-// scoreA/scoreB strings rather than ipponsA/B arrays, the waza-letter
-// arrays are the ONLY source of an ippon score string (numbers are never
-// a valid ippon display, there is no numeric fallback), and
-// ipponsFromScore strips Go formatScore's trailing "(HN)" hansoku suffix
-// so it doesn't split into bogus ippon letters.
+// removed. Pool and bracket matches share one wire shape (ipponsA/B
+// arrays; scoreA/scoreB strings never appear), and the waza-letter
+// arrays are the ONLY source of an ippon score string — numbers are
+// never a valid ippon display, there is no numeric fallback.
 function matchScoreStr(m) {
   return engiFlagScore(m)
     || teamIVPWScore(m)
     || formatIpponsScore(
-      m.ipponsB || ipponsFromScore(m.scoreB),
-      m.ipponsA || ipponsFromScore(m.scoreA),
+      m.ipponsB || [],
+      m.ipponsA || [],
       m.score, m.decision, m.encho, m.decidedByHantei, winnerSideLR(m));
 }
 
@@ -1278,6 +1259,5 @@ window.enchoOn = enchoOn;
 window.matchMiddleMark = matchMiddleMark;
 window.winnerSideLR = winnerSideLR;
 window.sideLabel = sideLabel;
-window.ipponsFromScore = ipponsFromScore;
 
-export { formatIpponsScore, enchoLabel, boutMiddle, defaultWinMaru, matchMiddleMark, winnerSideLR, sideLabel, roundLabel, bracketRoundLabel, ipponsFromScore, teamIVScore, teamIVPWScore, engiFlagScore, matchScoreStr, matchStateCell, buildDisplayModel, computeMetaTops, bronzeUnderFinalStyle, PlayerLine, slotDisplayName, makeSlotLabeller, bracketSlotLabeller, MatchCard, BracketTree };
+export { formatIpponsScore, enchoLabel, boutMiddle, defaultWinMaru, matchMiddleMark, winnerSideLR, sideLabel, roundLabel, bracketRoundLabel, teamIVScore, teamIVPWScore, engiFlagScore, matchScoreStr, matchStateCell, buildDisplayModel, computeMetaTops, bronzeUnderFinalStyle, PlayerLine, slotDisplayName, makeSlotLabeller, bracketSlotLabeller, MatchCard, BracketTree };

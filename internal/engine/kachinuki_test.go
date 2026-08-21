@@ -1818,7 +1818,7 @@ func TestOverrideBracketWinner_ClearsReopenPending(t *testing.T) {
 //
 // Both homes are checked because they carry the verdict in different fields
 // (MatchResult keeps ippons + WinnerID + rep nominations; BracketMatch keeps
-// rendered ScoreA/ScoreB and IsOverridden) and drifted before.
+// its own IpponsA/IpponsB and IsOverridden) and drifted before.
 func TestReopenKachinukiMatch_DiscardsVerdictKeepsBoutLog(t *testing.T) {
 	// boutLog[0]'s hantei is recorded as domain.HanteiMark inside the
 	// WINNER's (R-1's) ippon slice — the mark IS the record (operator ruling
@@ -1887,7 +1887,7 @@ func TestReopenKachinukiMatch_DiscardsVerdictKeepsBoutLog(t *testing.T) {
 				{{
 					ID: "F0", SideA: "RedTeam", SideB: "WhiteTeam",
 					Status: state.MatchStatusCompleted, Winner: "RedTeam",
-					ScoreA: "2", ScoreB: "1",
+					IpponsA: []string{"○", "○"}, IpponsB: []string{"○"},
 					Decision: "kiken-voluntary", DecisionBy: "shiro", DecisionReason: "withdrew",
 					Encho:        &state.EnchoMetadata{PeriodCount: 1},
 					IsOverridden: true, ResultSource: "admin",
@@ -1907,8 +1907,8 @@ func TestReopenKachinukiMatch_DiscardsVerdictKeepsBoutLog(t *testing.T) {
 
 		assert.Equal(t, state.MatchStatusRunning, bm.Status)
 		assert.Empty(t, bm.Winner)
-		assert.Empty(t, bm.ScoreA, "the rendered scoreline described the discarded result")
-		assert.Empty(t, bm.ScoreB)
+		assert.Empty(t, bm.IpponsA, "the scoreline described the discarded result")
+		assert.Empty(t, bm.IpponsB)
 		assert.Empty(t, bm.Decision)
 		assert.Empty(t, bm.DecisionBy)
 		assert.Empty(t, bm.DecisionReason)

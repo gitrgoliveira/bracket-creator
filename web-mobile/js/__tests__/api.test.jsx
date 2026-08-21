@@ -328,10 +328,12 @@ describe('API Utils', () => {
   });
 
   describe('normalizeMatch', () => {
-    it('derives decidedByHantei from the Ht mark (match, sub, and bracket score string)', () => {
-      // NEW server shape: the verdict is the mark inside the ippon lists /
-      // score strings; no flag arrives on the wire. The derivation keeps
-      // every consumer reading the property it always read.
+    it('derives decidedByHantei from the Ht mark (match, sub, and bracket-shaped payload)', () => {
+      // NEW server shape: the verdict is the mark inside the ippon list
+      // arrays; no flag arrives on the wire. The derivation keeps every
+      // consumer reading the property it always read. Pool and bracket
+      // matches share one wire shape (ipponsA/ipponsB arrays; scoreA/scoreB
+      // strings never appear), so both are exercised the same way here.
       const pool = normalizeMatch({
         sideA: 'A', sideB: 'B', winner: 'A', status: 'completed',
         ipponsA: ['M', 'Ht'], ipponsB: ['K'],
@@ -344,7 +346,7 @@ describe('API Utils', () => {
 
       const bracket = normalizeMatch({
         sideA: 'A', sideB: 'B', winner: 'B', status: 'completed',
-        scoreA: 'M', scoreB: 'KHt',
+        ipponsA: ['M'], ipponsB: ['K', 'Ht'],
       }, {});
       expect(bracket.decidedByHantei).toBe(true);
       expect(bracket.ipponsB).toEqual(['K', 'Ht']);
@@ -355,6 +357,44 @@ describe('API Utils', () => {
         ipponsA: ['M'], ipponsB: [],
       }, {});
       expect(plain.decidedByHantei).toBe(false);
+    });
+
+    // The wire contract: bracket matches now carry ipponsA/ipponsB (and
+    // hansokuA/hansokuB, omitted when zero) exactly like pool matches;
+    // scoreA/scoreB strings never appear in any response. This pins
+    // normalizeMatch end to end on that shape, including the Ht mark and
+    // an outstanding hansoku together, with no scoreA/scoreB present at all.
+    it('normalizes a bracket-shaped payload from ipponsA/ipponsB alone, with hansoku and Ht, no scoreA/scoreB', () => {
+      const match = {
+        sideA: 'A', sideB: 'B', winner: 'A', status: 'completed',
+        ipponsA: ['M', 'Ht'], ipponsB: ['K'],
+        hansokuA: 0, hansokuB: 1,
+      };
+      expect(match.scoreA).toBeUndefined();
+      expect(match.scoreB).toBeUndefined();
+      const norm = normalizeMatch(match, {});
+      expect(norm.decidedByHantei).toBe(true);
+      expect(norm.ipponsA).toEqual(['M', 'Ht']);
+      expect(norm.ipponsB).toEqual(['K']);
+      expect(norm.hansokuA).toBe(0);
+      expect(norm.hansokuB).toBe(1);
+      expect(norm.scoreA).toBeUndefined();
+      expect(norm.scoreB).toBeUndefined();
+      expect(norm.score).toEqual({
+        type: 'ippon',
+        winnerPts: 1, // realIppons strips the Ht mark: it occupies a slot, never a point
+        loserPts: 1,
+        ippons: ['M'],
+      });
+    });
+
+    // Regression guard for the removed codec: a payload carrying ONLY
+    // scoreA/scoreB (the pre-fix bracket wire shape) derives NO score at
+    // all now — that shape never arrives from the real server any more, and
+    // normalizeMatch must not silently resurrect a parser for it.
+    it('does not derive a score from scoreA/scoreB alone (that shape never arrives on the wire)', () => {
+      const norm = normalizeMatch({ sideA: 'A', sideB: 'B', winner: 'A', status: 'completed', scoreA: 'MK', scoreB: 'D' }, {});
+      expect(norm.score).toBeUndefined();
     });
 
     it('preserves subResults array identity when no sub carries the Ht mark', () => {
@@ -426,67 +466,6 @@ describe('API Utils', () => {
       });
     });
 
-    // Bracket matches carry scoreA/scoreB strings (no ipponsA/B arrays). The
-    // backend formatScore() emits "MK (H1)" when ippons coexist with an
-    // outstanding hansoku, so normalizeMatch must strip the suffix + leading
-    // space before splitting; otherwise score.ippons leaks " ", "(", "H",
-    // "1", ")" tokens. score.ippons seeds the admin scoring modal's slot
-    // editor when the modal opens on a bracket match.
-    it('strips hansoku "(HN)" suffix from bracket scoreA/scoreB when building score.ippons', () => {
-      const match = {
-        sideA: 'A', sideB: 'B', winner: 'A',
-        status: 'completed',
-        scoreA: 'MK (H1)', scoreB: 'M',
-      };
-      const norm = normalizeMatch(match, {});
-      expect(norm.score).toEqual({
-        type: 'ippon',
-        winnerPts: 2,
-        loserPts: 1,
-        ippons: ['M', 'K'],
-      });
-      // Both sides' waza letters recovered into per-side arrays (loss-free),
-      // so the schedule/bracket render technique letters for BOTH competitors
-      // ("MK–M") rather than the numeric fallback. Hansoku suffix stripped.
-      expect(norm.ipponsA).toEqual(['M', 'K']);
-      expect(norm.ipponsB).toEqual(['M']);
-    });
-
-    it('recovers BOTH sides waza letters into ipponsA/ipponsB from bracket scoreA/scoreB', () => {
-      const match = {
-        sideA: 'A', sideB: 'B', winner: 'A',
-        status: 'completed',
-        scoreA: 'MK', scoreB: 'D',
-      };
-      const norm = normalizeMatch(match, {});
-      expect(norm.ipponsA).toEqual(['M', 'K']);
-      expect(norm.ipponsB).toEqual(['D']);
-    });
-
-    it('does not overwrite server-provided ipponsA/ipponsB with scoreA/scoreB', () => {
-      const match = {
-        sideA: 'A', sideB: 'B', winner: 'A',
-        status: 'completed',
-        scoreA: 'MK', scoreB: 'D',
-        ipponsA: ['K', 'M'], ipponsB: ['T'], // server arrays must win
-      };
-      const norm = normalizeMatch(match, {});
-      expect(norm.ipponsA).toEqual(['K', 'M']);
-      expect(norm.ipponsB).toEqual(['T']);
-    });
-
-    it('strips no-space "(HN)" suffix from bracket scoreA/scoreB too', () => {
-      const match = {
-        sideA: 'A', sideB: 'B', winner: 'B',
-        status: 'completed',
-        scoreA: '(H1)', scoreB: 'MD(H2)',
-      };
-      const norm = normalizeMatch(match, {});
-      // B wins: ippons come from cleaned scoreB
-      expect(norm.score.ippons).toEqual(['M', 'D']);
-      expect(norm.score.winnerPts).toBe(2);
-      expect(norm.score.loserPts).toBe(0);
-    });
   });
 
   describe('buildPlayerMap', () => {

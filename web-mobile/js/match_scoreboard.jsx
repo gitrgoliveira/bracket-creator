@@ -412,8 +412,8 @@ export function IndividualScore({ match, variant, showNames, withZekkenName, shi
   const bKey = sideId(match.sideB) || nameOf(match.sideB);
   const ambiguous = !!aKey && aKey === bKey;
   const sub = {
-    ipponsA: match.ipponsA || (window.ipponsFromScore ? window.ipponsFromScore(match.scoreA) : []),
-    ipponsB: match.ipponsB || (window.ipponsFromScore ? window.ipponsFromScore(match.scoreB) : []),
+    ipponsA: match.ipponsA || [],
+    ipponsB: match.ipponsB || [],
     hansokuA: match.hansokuA, hansokuB: match.hansokuB,
     decidedByHantei: match.decidedByHantei, score: match.score, decision: match.decision,
     // encho MUST be threaded: without it matchMiddleMark can never yield (E) on

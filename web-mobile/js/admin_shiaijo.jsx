@@ -243,8 +243,8 @@ export function shiaijoScoreCell(m) {
         const iv = window.teamIVPWScore ? window.teamIVPWScore(m) : (window.teamIVScore ? window.teamIVScore(m) : null);
         return iv ? { kind: "team", iv } : { kind: "none" };
     }
-    const ipponsA = m.ipponsA || (window.ipponsFromScore ? window.ipponsFromScore(m.scoreA) : []);
-    const ipponsB = m.ipponsB || (window.ipponsFromScore ? window.ipponsFromScore(m.scoreB) : []);
+    const ipponsA = m.ipponsA || [];
+    const ipponsB = m.ipponsB || [];
     const s = window.formatIpponsScore
         ? window.formatIpponsScore(ipponsB, ipponsA, m.score, m.decision, m.encho, m.decidedByHantei,
             window.winnerSideLR ? window.winnerSideLR(m) : null)
@@ -1797,7 +1797,7 @@ function ShiaijoContext({ match, competitions, court, nextPoolName, tweaks, open
     // league-standings one) has a transient failure.
     const poolSig = useMemoSh(() => {
         const pms = (comp && comp.poolMatches) || [];
-        return pms.map((m) => `${m.id}:${m.status}:${m.scoreA || ""}:${m.scoreB || ""}`).join("|");
+        return pms.map((m) => `${m.id}:${m.status}:${(m.ipponsA || []).join("")}:${(m.ipponsB || []).join("")}`).join("|");
     }, [comp]);
     const [detail, setDetail] = useStateSh(null);
     const [detailErr, setDetailErr] = useStateSh(false);

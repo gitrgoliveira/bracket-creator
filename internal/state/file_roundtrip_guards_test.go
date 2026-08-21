@@ -12,8 +12,8 @@ import (
 )
 
 // This file extends TestPoolMatchRoundTripIsComplete's guarantee to the other
-// hand-maintained CSV files: participants.csv, pools.csv, schedule.csv and
-// seeds.csv. Each guard sweeps the persisted struct's exported fields via
+// hand-maintained CSV files: participants.csv, pools.csv and seeds.csv. Each
+// guard sweeps the persisted struct's exported fields via
 // reflection, gives every field a distinctive value, and fails when a field
 // neither survives a save + reload from a FRESH store nor appears in that
 // file's allow-list with the reason it is legitimately absent.
@@ -135,35 +135,6 @@ func TestPoolPlayerRoundTripIsComplete(t *testing.T) {
 	assert.Equal(t, "Pool A", pools[0].PoolName)
 
 	sweepFields(t, "pools.csv", in, pools[0].Players[0], notPersisted)
-}
-
-func TestScheduleEntryRoundTripIsComplete(t *testing.T) {
-	dir := t.TempDir()
-	s, err := NewStore(dir)
-	require.NoError(t, err)
-	require.NoError(t, s.SaveCompetition(&Competition{ID: "c", Name: "C"}))
-
-	in := ScheduleEntry{
-		MatchType:   "pool",
-		MatchRef:    "Pool A-1",
-		Court:       "B",
-		Date:        "21-08-2026",
-		ScheduledAt: "09:45",
-		Status:      "scheduled",
-		IsBreak:     true,
-		Label:       "Lunch",
-	}
-	_, err = s.SaveScheduleChanged("c", []ScheduleEntry{in})
-	require.NoError(t, err)
-
-	fresh, err := NewStore(dir)
-	require.NoError(t, err)
-	loaded, err := fresh.LoadSchedule("c")
-	require.NoError(t, err)
-	require.Len(t, loaded, 1)
-
-	// Every ScheduleEntry field is persisted; no allow-list.
-	sweepFields(t, "schedule.csv", in, loaded[0], nil)
 }
 
 func TestSeedAssignmentRoundTripIsComplete(t *testing.T) {

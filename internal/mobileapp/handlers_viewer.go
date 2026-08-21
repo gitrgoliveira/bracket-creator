@@ -314,9 +314,8 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 				poolMatches []state.MatchResult
 				standings   any
 				bracket     *state.Bracket
-				schedule    any
 
-				playersErr, poolsErr, poolMatchesErr, standingsErr, bracketErr, scheduleErr error
+				playersErr, poolsErr, poolMatchesErr, standingsErr, bracketErr error
 			)
 
 			var wg sync.WaitGroup
@@ -341,16 +340,13 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			safeGo(&wg, &panicRef, func() {
 				bracket, bracketErr = store.LoadBracket(id)
 			})
-			safeGo(&wg, &panicRef, func() {
-				schedule, scheduleErr = store.LoadSchedule(id)
-			})
 			wg.Wait()
 
 			if p := panicRef.Load(); p != nil {
 				return nil, p
 			}
 
-			for _, e := range []error{playersErr, poolsErr, poolMatchesErr, standingsErr, bracketErr, scheduleErr} {
+			for _, e := range []error{playersErr, poolsErr, poolMatchesErr, standingsErr, bracketErr} {
 				if e != nil {
 					return nil, e
 				}
@@ -376,7 +372,6 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 				"poolMatches": poolMatches,
 				"standings":   standings,
 				"bracket":     bracket,
-				"schedule":    schedule,
 			})
 		})
 
@@ -385,42 +380,5 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			return
 		}
 		serveSingleFlightJSON(c, data, err)
-	})
-
-	r.GET("/schedule", func(c *gin.Context) {
-		ids, err := store.ListCompetitions()
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		// Pre-allocate one slot per competition so goroutines write to unique
-		// indices without a mutex. wg.Wait() provides the happens-before for
-		// the reads below.
-		perComp := make([][]state.ScheduleEntry, len(ids))
-		var wg sync.WaitGroup
-		var panicRef atomic.Pointer[recoveredPanic]
-		for i, id := range ids {
-			idx, compID := i, id
-			safeGo(&wg, &panicRef, func() {
-				// Same soft-degrade contract as buildViewerCompetitionPayload:
-				// a comp whose schedule fails to read is dropped from the
-				// aggregate, with a breadcrumb, rather than failing the board.
-				s, sErr := store.LoadSchedule(compID)
-				if sErr != nil {
-					log.Printf("mobileapp: viewer schedule %s: %v", compID, sErr)
-				}
-				perComp[idx] = s
-			})
-		}
-		wg.Wait()
-		if p := panicRef.Load(); p != nil {
-			internalError(c, p)
-			return
-		}
-		allEntries := []state.ScheduleEntry{}
-		for _, s := range perComp {
-			allEntries = append(allEntries, s...)
-		}
-		c.JSON(http.StatusOK, allEntries)
 	})
 }

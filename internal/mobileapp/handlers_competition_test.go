@@ -224,19 +224,6 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		}
 	})
 
-	t.Run("Save Schedule", func(t *testing.T) {
-		comp := state.Competition{ID: "sched-comp"}
-		store.SaveCompetition(&comp)
-
-		entries := []state.ScheduleEntry{{MatchRef: "m1", Court: "A"}}
-		reqBody, _ := json.Marshal(entries)
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/competitions/sched-comp/schedule", bytes.NewBuffer(reqBody))
-		req.Header.Set("Content-Type", "application/json")
-		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusOK, w.Code)
-	})
-
 	t.Run("Reset Overrides", func(t *testing.T) {
 		comp := state.Competition{ID: "reset-comp"}
 		store.SaveCompetition(&comp)

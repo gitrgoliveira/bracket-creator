@@ -275,10 +275,6 @@ classDiagram
         <<JSON>>
         Bracket
     }
-    class schedule_csv["schedule.csv"] {
-        <<CSV>>
-        ScheduleEntry rows
-    }
     class status_yaml["competitor-status.yaml"] {
         <<YAML>>
         CompetitorStatus list
@@ -302,7 +298,6 @@ classDiagram
     config_md --> pools_csv
     config_md --> pool_matches_csv
     config_md --> bracket_json
-    config_md --> schedule_csv
     config_md --> status_yaml
     config_md --> lineups_yaml
     config_md --> overrides_json
@@ -313,7 +308,7 @@ Three formats are in use, and the choice is deliberate in each case:
 | Format | Used for | Why |
 | --- | --- | --- |
 | Markdown with YAML front matter | tournament and competition settings | Human readable and editable, and the body can hold notes |
-| CSV | participants, seeds, pools, pool and league matches, schedule | Opens in a spreadsheet; one row per record diffs cleanly |
+| CSV | participants, seeds, pools, pool and league matches | Opens in a spreadsheet; one row per record diffs cleanly |
 | JSON and YAML | bracket, eligibility, lineups, overrides | Tree shaped data that does not fit a row |
 
 ## 5. Write guarantees
@@ -417,8 +412,8 @@ What changed as a result of the review is enforcement, not shape:
     one that has actually lost fields. Of the others, two could not use a positional column
     list at all (the roster file's layout varies by row, and the seed file is read by column
     name rather than position) and one derives a column from row order rather than from a
-    field. The schedule file is the only genuine candidate, and at eight long stable columns
-    it is not yet worth converting; the guard below is what protects it in the meantime.
+    field (pools.csv); none is left as a genuine candidate for the same machinery, and the
+    round trip guard below is what protects each of them in the meantime.
 * **Every CSV file has a round trip guard.** Each guard sweeps the persisted struct's
   fields and fails when a field neither survives a save and reload nor appears in an
   allow list with the reason it is legitimately transient. Four fields of the match row
@@ -428,3 +423,9 @@ What changed as a result of the review is enforcement, not shape:
 * **The seed list stores the dojo alongside the name.** A seed is matched to its
   participant by name and dojo together, because two competitors may share a name across
   dojos; a file that stored only the name could not say which of them the rank belonged to.
+* **schedule.csv was removed.** It was a write only projection: a generator copied court,
+  time and status off the pool matches and the bracket into a second file, and the only
+  reader of that file was the same generator keeping it in sync on every court or time
+  change. Nothing else on the server or in the app ever read it. Court and time already
+  live on the match and bracket records that own them, so the projection added a second
+  copy of the same facts with no consumer to justify keeping it up to date.

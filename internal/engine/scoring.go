@@ -1659,39 +1659,19 @@ func formatScore(ippons []string, hansoku int) string {
 	return domain.FormatScore(ippons, hansoku)
 }
 
-// patchScheduleCourt updates the court for a single match entry in place,
-// avoiding a full schedule regeneration on every court change.
-func (e *Engine) patchScheduleCourt(compId, matchId, newCourt string) error {
-	entries, err := e.store.LoadSchedule(compId)
-	if err != nil {
-		return err
-	}
-	for i := range entries {
-		// Pool + bronze entries: MatchRef == matchId; round bracket entries:
-		// MatchRef == "R{n}-M{matchId}".
-		if entries[i].MatchRef == matchId || strings.HasSuffix(entries[i].MatchRef, "-M"+matchId) {
-			entries[i].Court = newCourt
-		}
-	}
-	return e.store.SaveSchedule(compId, entries)
-}
-
 func (e *Engine) UpdateMatchCourt(compId string, matchId string, newCourt string) error {
 	err := e.withPoolMatch(compId, matchId, func(r *state.MatchResult) {
 		r.Court = newCourt
 	})
 	if err == nil {
-		return e.patchScheduleCourt(compId, matchId, newCourt)
+		return nil
 	}
 	if !errors.Is(err, errMatchNotFound) {
 		return err
 	}
-	if err = e.withBracketMatch(compId, matchId, func(m *state.BracketMatch) {
+	return e.withBracketMatch(compId, matchId, func(m *state.BracketMatch) {
 		m.Court = newCourt
-	}); err != nil {
-		return err
-	}
-	return e.patchScheduleCourt(compId, matchId, newCourt)
+	})
 }
 
 // OverrideBracketWinner atomically loads the bracket, locates the

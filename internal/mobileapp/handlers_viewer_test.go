@@ -192,11 +192,6 @@ func TestViewerHandlers_Standalone(t *testing.T) {
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusNotFound, w.Code)
 
-	// 7. GET /api/viewer/schedule
-	w = httptest.NewRecorder()
-	req, _ = http.NewRequest("GET", "/api/viewer/schedule", nil)
-	r.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusOK, w.Code)
 }
 
 // TestViewerAggregator_StripsPreviewBracket asserts that a Preview bracket

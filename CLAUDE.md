@@ -82,7 +82,6 @@ tournament-data/
     ├── pools.csv                  Pool assignments after start
     ├── pool-matches.csv           Pool phase match results
     ├── bracket.json               Elimination bracket structure + results
-    ├── schedule.csv               Court/time assignments
     ├── competitor-status.yaml     Eligibility records (kiken/fusenpai)
     ├── lineups.yaml               Team lineups, keyed by round
     └── overrides.json             Manual ranking overrides

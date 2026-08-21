@@ -266,7 +266,7 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 			}
 			e.standingsCache.Delete(compID)
 			e.standingsFlight.Delete(compID)
-			return nil, e.GenerateSchedule(compID)
+			return nil, nil
 		}
 		return nil, nil
 	}
@@ -381,5 +381,5 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 	e.standingsCache.Delete(compID)
 	e.standingsFlight.Delete(compID)
 
-	return injected, e.GenerateSchedule(compID)
+	return injected, nil
 }

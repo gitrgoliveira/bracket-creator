@@ -2006,28 +2006,6 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		c.JSON(http.StatusOK, gin.H{"candidates": out})
 	})
 
-	r.PUT("/competitions/:id/schedule", func(c *gin.Context) {
-		id, ok := requireValidCompID(c)
-		if !ok {
-			return
-		}
-		var entries []state.ScheduleEntry
-		if err := c.ShouldBindJSON(&entries); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		changed, err := store.SaveScheduleChanged(id, entries)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		if changed {
-			hub.Broadcast(EventScheduleUpdated, nil)
-		}
-		c.Status(http.StatusOK)
-	})
-
 	r.DELETE("/competitions/:id/overrides", RequireElevatedPassword(elevated), func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {

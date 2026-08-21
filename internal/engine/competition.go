@@ -416,20 +416,14 @@ func (e *Engine) StartCompetition(id string) error {
 	}
 	switch comp.Status {
 	case state.CompStatusDrawReady:
-		// Draw already exists; only flip status and generate schedule.
-		if err := e.transitionDrawToRunning(id); err != nil {
-			return err
-		}
-		return e.GenerateSchedule(id)
+		// Draw already exists; only flip status.
+		return e.transitionDrawToRunning(id)
 	case state.CompStatusSetup, "":
 		// One-click path: generate draw then transition.
 		if err := e.runDrawPipeline(id); err != nil {
 			return err
 		}
-		if err := e.transitionDrawToRunning(id); err != nil {
-			return err
-		}
-		return e.GenerateSchedule(id)
+		return e.transitionDrawToRunning(id)
 	default:
 		return validationErrorf("competition %s already started", id)
 	}
@@ -603,9 +597,7 @@ func dropSeedAssignments(seeds []domain.SeedAssignment, excluded map[string]bool
 }
 
 // runDrawPipeline runs the full draw-generation pipeline for a Setup
-// competition and commits CompStatusDrawReady. It does NOT generate the
-// schedule; callers must call GenerateSchedule after transitioning to a
-// running status.
+// competition and commits CompStatusDrawReady.
 //
 // Pipeline limitations (pre-existing):
 //   - Pool/bracket generation (writes pools.csv / bracket.json) runs

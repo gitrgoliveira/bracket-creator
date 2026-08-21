@@ -237,7 +237,8 @@ paths:
         - `tournament_updated`: tournament-level config change (a competition
           was created/updated/deleted, participants updated, etc.).
           `data: null`; clients should refresh full state.
-        - `schedule_updated`: a competition's schedule was saved.
+        - `schedule_updated`: a match's court or scheduled time was moved, or a
+          tiebreaker/daihyosen bout was injected into the pool or league phase.
         - `password_reset`: the admin password was changed. Emitted
           from three sources (file mode only; never emitted in locked mode):
           1. `POST /api/tournament/reset`; the public recovery endpoint.
@@ -1334,26 +1335,6 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalError'
-
-  /api/competitions/{id}/schedule:
-    put:
-      tags: [competitions]
-      summary: Save schedule
-      security:
-        - TournamentPassword: []
-      parameters:
-        - $ref: '#/components/parameters/CompetitionId'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: array
-              items:
-                $ref: '#/components/schemas/ScheduleEntry'
-      responses:
-        '200':
-          description: Schedule saved.
 
   /api/competitions/{id}/pools/{poolId}/override-rank:
     put:
@@ -3012,7 +2993,7 @@ paths:
     get:
       tags: [viewer]
       summary: Get full competition state
-      description: Returns config, pools, pool matches, standings, bracket, and schedule.
+      description: Returns config, pools, pool matches, standings, and bracket.
       parameters:
         - $ref: '#/components/parameters/CompetitionId'
       responses:
@@ -3024,22 +3005,6 @@ paths:
                 $ref: '#/components/schemas/CompetitionDetail'
         '404':
           $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalError'
-
-  /api/viewer/schedule:
-    get:
-      tags: [viewer]
-      summary: Get combined schedule for all competitions
-      responses:
-        '200':
-          description: Aggregated schedule entries.
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/ScheduleEntry'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -3480,7 +3445,7 @@ components:
             - **self-run**: there is no dedicated table operator. Operational actions
               (scoring, check-in, start, complete, swiss round generation) are public; no
               password required. Organiser-setup mutations (tournament/competition config,
-              seeds, override edits (set/change result), announcements, schedule, court
+              seeds, override edits (set/change result), announcements, court
               assignment, export) remain behind the main password. Destructive actions
               (delete competition, discard draw, delete/discard overrides, import, participant
               roster mutations) require the separate `X-Admin-Password` elevated credential.
@@ -4005,7 +3970,7 @@ components:
       readOnly: true
       description: >
         Server-computed team-match summary attached to every team match on read
-        paths (pool matches, bracket matches, schedule, SSE match_updated):
+        paths (pool matches, bracket matches, SSE match_updated):
         individual victories (IV) and points won (PW) per side. Shiro is sideB
         (rendered left), Aka is sideA (rendered right). The daihyosen
         (position -1) sub-bout is excluded, so a representative-bout-decided
@@ -4245,33 +4210,6 @@ components:
         pointsLost:
           type: integer
 
-    ScheduleEntry:
-      type: object
-      properties:
-        matchType:
-          type: string
-          enum: [pool, bracket, break]
-        matchRef:
-          type: string
-          description: >
-            Match identifier (empty for breaks). This value corresponds to the `{mid}` path
-            parameter used in match scoring and update endpoints (e.g. PUT /api/competitions/{id}/matches/{mid}/score).
-        court:
-          type: string
-        date:
-          type: string
-          description: DD-MM-YYYY
-        scheduledAt:
-          type: string
-          description: HH:MM
-        status:
-          type: string
-        isBreak:
-          type: boolean
-        label:
-          type: string
-          description: Display label for break entries.
-
     CompetitionDetail:
       type: object
       description: Full competition state returned by the viewer endpoint.
@@ -4295,10 +4233,6 @@ components:
           description: Map of pool name to ordered standings.
         bracket:
           $ref: '#/components/schemas/Bracket'
-        schedule:
-          type: array
-          items:
-            $ref: '#/components/schemas/ScheduleEntry'
 
     EnchoMetadata:
       type: object

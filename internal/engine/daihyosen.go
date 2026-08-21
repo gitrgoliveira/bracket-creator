@@ -308,7 +308,7 @@ func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult,
 	e.standingsCache.Delete(compID)
 	e.standingsFlight.Delete(compID)
 
-	return injected, e.GenerateSchedule(compID)
+	return injected, nil
 }
 
 // ComputeTeamSummary aggregates SubMatchResult entries into TeamSummary

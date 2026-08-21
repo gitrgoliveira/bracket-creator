@@ -79,7 +79,6 @@ func TestUpdateMatchCourt(t *testing.T) {
 		{ID: "P1-1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled, Court: "A"},
 	}
 	require.NoError(t, store.SavePoolMatches(compID, matches))
-	require.NoError(t, store.SaveSchedule(compID, []state.ScheduleEntry{{MatchRef: "P1-1", Court: "A"}}))
 
 	// Update court
 	err = eng.UpdateMatchCourt(compID, "P1-1", "B")
@@ -88,27 +87,18 @@ func TestUpdateMatchCourt(t *testing.T) {
 	// Verify updated
 	updatedMatches, _ := store.LoadPoolMatches(compID)
 	assert.Equal(t, "B", updatedMatches[0].Court)
-	schedule, _ := store.LoadSchedule(compID)
-	assert.Equal(t, "B", schedule[0].Court)
 
 	// Setup bracket match
 	bracket := &state.Bracket{
 		Rounds: [][]state.BracketMatch{{{ID: "B1", SideA: "Alice", SideB: "Bob", Court: "A"}}},
 	}
 	require.NoError(t, store.SaveBracket(compID, bracket))
-	// Save both entries to avoid overwriting
-	require.NoError(t, store.SaveSchedule(compID, []state.ScheduleEntry{
-		{MatchRef: "P1-1", Court: "B"},
-		{MatchRef: "R1-MB1", Court: "A"},
-	}))
 
 	err = eng.UpdateMatchCourt(compID, "B1", "C")
 	require.NoError(t, err)
 
 	updatedBracket, _ := store.LoadBracket(compID)
 	assert.Equal(t, "C", updatedBracket.Rounds[0][0].Court)
-	schedule, _ = store.LoadSchedule(compID)
-	assert.Equal(t, "C", schedule[1].Court)
 }
 
 func TestUpdateMatchTime(t *testing.T) {

@@ -1250,42 +1250,6 @@ func TestCalculatePoolStandings_TeamScoring(t *testing.T) {
 	}
 }
 
-// --- Schedule Tests ---
-
-func TestGenerateSchedule_Pools(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "schedule-pools"
-
-	createTestCompetition(t, store, compID, "league", 3)
-	saveTestParticipants(t, store, compID, []string{"A", "B", "C", "D", "E", "F"})
-	require.NoError(t, eng.StartCompetition(compID))
-
-	schedule, err := store.LoadSchedule(compID)
-	require.NoError(t, err)
-	assert.NotEmpty(t, schedule)
-
-	for _, s := range schedule {
-		assert.Equal(t, "pool", s.MatchType)
-	}
-}
-
-func TestGenerateSchedule_Bracket(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "schedule-bracket"
-
-	createTestCompetition(t, store, compID, "playoffs", 3)
-	saveTestParticipants(t, store, compID, []string{"A", "B", "C", "D"})
-	require.NoError(t, eng.StartCompetition(compID))
-
-	schedule, err := store.LoadSchedule(compID)
-	require.NoError(t, err)
-	assert.NotEmpty(t, schedule)
-
-	for _, s := range schedule {
-		assert.Equal(t, "bracket", s.MatchType)
-	}
-}
-
 // --- Bracket with Larger Player Counts ---
 
 func TestStartCompetition_PlayoffsFormat_16Players(t *testing.T) {
@@ -1456,19 +1420,6 @@ func TestUpdateMatchCourt_Pool(t *testing.T) {
 		}
 	}
 	assert.True(t, found)
-
-	// Verify persistence in schedule
-	schedule, err := store.LoadSchedule(compID)
-	require.NoError(t, err)
-	found = false
-	for _, s := range schedule {
-		if s.MatchRef == matchID {
-			assert.Equal(t, "Court Z", s.Court)
-			found = true
-			break
-		}
-	}
-	assert.True(t, found)
 }
 
 func TestUpdateMatchCourt_Bracket(t *testing.T) {
@@ -1490,19 +1441,6 @@ func TestUpdateMatchCourt_Bracket(t *testing.T) {
 	reloaded, err := store.LoadBracket(compID)
 	require.NoError(t, err)
 	assert.Equal(t, "Court X", reloaded.Rounds[0][0].Court)
-
-	// Verify persistence in schedule
-	schedule, err := store.LoadSchedule(compID)
-	require.NoError(t, err)
-	found := false
-	for _, s := range schedule {
-		if s.MatchRef == "R1-M"+matchID {
-			assert.Equal(t, "Court X", s.Court)
-			found = true
-			break
-		}
-	}
-	assert.True(t, found)
 }
 
 func TestUpdateMatchCourt_NotFound(t *testing.T) {

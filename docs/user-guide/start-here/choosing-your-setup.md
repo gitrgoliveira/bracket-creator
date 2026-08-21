@@ -2,11 +2,11 @@
 
 Two independent questions shape every tournament you run with bracket-creator. First, how digital your venue is: whether you print and score on paper, keep one device per shiai-jo, or run fully on-screen scoreboards with real-time mobile pages. Second, who runs and scores the matches: trained staff behind an admin password (officiated) or competitors scoring their own bouts with no password required (self-run). Because these questions are independent, you choose each one separately and combine them however suits your event.
 
-## Digitization level
+## Digitisation level
 
-How far you digitize determines which surfaces you use on the day. See [Three ways to run a tournament](../../index.md#three-ways-to-run-a-tournament) for a full explanation of each level.
+How far you digitise determines which surfaces you use on the day. See [Three ways to run a tournament](../../index.md#three-ways-to-run-a-tournament) for a full explanation of each level.
 
-- **Offline.** Print the Excel brackets and score on paper. No networked devices are needed at ringside.
+- **Offline.** Print the Excel brackets and score on paper. No networked devices are needed at the courts.
 - **Partially connected.** One device per shiai-jo keeps courts in sync through the tournament app.
 - **Fully digital.** On-screen scoreboards and real-time mobile pages show scores and standings to everyone in the hall.
 
@@ -18,7 +18,7 @@ The operating model controls who can record scores and advance matches. In **off
 
 The following table maps common event configurations to the right starting point.
 
-| Scenario | Digitization | Who scores | Start here |
+| Scenario | Digitisation | Who scores | Start here |
 |---|---|---|---|
 | Print and run on paper | Offline | Staff | [Generate brackets](../organisers/web-ui.md) |
 | Officiated event | Partial or full | Staff | [Run a tournament](../organisers/run-tournament.md) |

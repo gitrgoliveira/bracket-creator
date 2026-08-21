@@ -463,6 +463,49 @@ function EmptyState({ icon, title, message, cta, ctaNote, className, style, ...a
   );
 }
 
+// A form field's error note: the thing the operator has to fix before the
+// control they are looking at will do its job. Renders nothing when there is no
+// error, so callers pass the value rather than guarding at the call site.
+//
+// The tone itself belongs to .field__hint--error in styles.css, not here: a
+// note is red and bold because it is an ERROR, which is equally true of the
+// ones that are plain markup rather than this component. Deliberately NO style
+// escape hatch: spacing between stacked notes is the .field container's job
+// (flex, gap 6px), and a prop for it is the crack the per-site colour drift
+// would come back through.
+function FieldError({ children, testId }) {
+  if (!children) return null;
+  return (
+    <div className="field__hint field__hint--error" data-testid={testId}>
+      {children}
+    </div>
+  );
+}
+
+// The two notes that sit under a shiaijo picker: the red error for the current
+// selection, then the standing teaching hint. Either may be null.
+//
+// One component because there are two pickers -- the create form
+// (admin_setup.jsx) and competition Settings (admin_competition_settings.jsx) --
+// and they are required to look identical: same order, same styling, same test
+// ids, immediately under the pills and above the concurrency hint. That was
+// enforced by a comment on each screen asking the next editor to keep them in
+// step by hand, which is exactly what a shared component is for. The RULE
+// already has one owner (shiaijoPickerError / shiaijoCountHintFor in
+// admin_helpers.jsx); this gives its presentation one too.
+function ShiaijoCountNotes({ error, hint }) {
+  return (
+    <>
+      <FieldError testId="shiaijo-count-error">{error}</FieldError>
+      {hint && (
+        <div className="field__hint" data-testid="shiaijo-count-hint">
+          {hint}
+        </div>
+      )}
+    </>
+  );
+}
+
 function Modal({ title, onClose, children, footer, size, dismissable = true, className, style, ariaLabel }) {
   useEscapeToClose(dismissable ? onClose : undefined);
   return (
@@ -558,7 +601,7 @@ function isInteractiveTarget(el) {
   return tag === "input" || tag === "textarea" || tag === "select" || tag === "button" || tag === "a" || !!el.isContentEditable;
 }
 
-export { StatusBadge, formatDate, Toast, StableInput, pluralize, useEscapeToClose, useClickOutside, isTextEntry, isInteractiveTarget, formatAdminHeaderSub, formatViewerHeaderEyebrow, confirmDialog, promptDialog, DialogHost, Icon, LoadingSpinner, EmptyState, Modal };
+export { FieldError, StatusBadge, formatDate, Toast, StableInput, pluralize, useEscapeToClose, useClickOutside, isTextEntry, isInteractiveTarget, formatAdminHeaderSub, formatViewerHeaderEyebrow, confirmDialog, promptDialog, DialogHost, Icon, LoadingSpinner, EmptyState, ShiaijoCountNotes, Modal };
 
 if (typeof window !== "undefined") {
   window.StatusBadge = StatusBadge;
@@ -580,6 +623,8 @@ if (typeof window !== "undefined") {
   window.Icon = Icon;
   window.LoadingSpinner = LoadingSpinner;
   window.EmptyState = EmptyState;
+  window.FieldError = FieldError;
+  window.ShiaijoCountNotes = ShiaijoCountNotes;
   window.Modal = Modal;
 
   // Split a combined engi pair name ("Name 1 - Name 2") into [member1, member2].

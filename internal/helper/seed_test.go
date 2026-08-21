@@ -392,7 +392,7 @@ func TestStandardSeeding_Integration(t *testing.T) {
 }
 
 func TestStandardSeedingFull(t *testing.T) {
-	// buildBracketFromLeaves pairs leaf 2k with 2k+1 in round 1. A bye is an
+	// buildBracketFromDraw pairs leaf 2k with 2k+1 in round 1. A bye is an
 	// empty leaf. For a correctly seeded draw, every bye must pair with a real
 	// player (giving a top seed a bye); never two byes in the same match.
 	tests := []struct {
@@ -1438,6 +1438,79 @@ func TestPoolSeeding(t *testing.T) {
 		assert.Equal(t, 6, pools[3].Players[1].Seed)
 		assert.Equal(t, 10, pools[3].Players[2].Seed)
 	})
+}
+
+// seededPoolCourts runs the operator-visible pool chain - PoolSeeding,
+// CreatePools, ReorderPoolsForCourts, AssignPoolsToCourts - over a roster of
+// numPools*poolSize competitors carrying the given seed RANKS, and reports the
+// court index each rank ended up on. Every competitor gets their own dojo so
+// CreatePools' dojo-conflict avoidance never moves anyone off the slot the
+// seeding chose; only the seeding decides placement here.
+func seededPoolCourts(t *testing.T, ranks []int, numPools, poolSize, numCourts int) map[int]int {
+	t.Helper()
+
+	players := make([]Player, numPools*poolSize)
+	for i := range players {
+		players[i] = Player{Name: fmt.Sprintf("p%03d", i), Dojo: fmt.Sprintf("dojo%03d", i)}
+	}
+	for i, r := range ranks {
+		players[i].Seed = r
+	}
+
+	pools, err := CreatePools(PoolSeeding(players, numPools, numCourts), poolSize, false)
+	require.NoError(t, err)
+	require.Len(t, pools, numPools)
+	pools = ReorderPoolsForCourts(pools, numCourts)
+
+	assignment, err := AssignPoolsToCourts(numPools, numCourts)
+	require.NoError(t, err)
+
+	courts := map[int]int{}
+	for pi, p := range pools {
+		for _, pl := range p.Players {
+			if pl.Seed == 0 {
+				continue
+			}
+			_, dup := courts[pl.Seed]
+			require.Falsef(t, dup, "seed %d was placed twice", pl.Seed)
+			courts[pl.Seed] = assignment[pi]
+		}
+	}
+	require.Len(t, courts, len(ranks), "every seed must survive pool creation")
+	return courts
+}
+
+// TestPoolSeedingPlacesByRankNotByPosition pins the invariant seedCourtOrder's
+// doc comment rests on, at the level the comment is written for.
+//
+// A GAPPED seed set reaches PoolSeeding in production: domain.ValidateAssignments
+// only holds the operator's input to a contiguous 1..N, and after that
+// validating load engine.dropSeedAssignments removes the assignments of seeded
+// competitors who did not check in. The survivors keep their raw ranks, so
+// {1, 2, 3, 4} minus a rank-2 no-show arrives here as {1, 3, 4}.
+//
+// D6 is stated in RANKS ("seed 1 -> B, seed 2 -> C, seed 3 -> A, seed 4 -> D"),
+// and so is helper.SeedPlacementWarnings, which reads (a.rank-b.rank)%2 to decide
+// which seeds should share a half. Placement therefore has to read the rank too:
+// keyed on the position in the sorted list, rank 3 takes position 1 and lands in
+// rank 2's quarter, and the warnings then blame the operator's configuration for
+// a spread the check-in drop caused.
+func TestPoolSeedingPlacesByRankNotByPosition(t *testing.T) {
+	const numPools, poolSize, numCourts = 4, 4, 4
+
+	// Both placements written out rather than derived from seedCourtOrder, so the
+	// expectation cannot drift with the code under test. Reading them side by
+	// side IS the property an operator would recognise: ranks 1, 3 and 4 hold the
+	// same shiaijo in both rows, so a rank-2 no-show does not drag the surviving
+	// seeds into other courts, and so into other halves of the draw.
+	assert.Equal(t,
+		map[int]int{1: 1, 2: 2, 3: 0, 4: 3},
+		seededPoolCourts(t, []int{1, 2, 3, 4}, numPools, poolSize, numCourts),
+		"D6 with every rank present: seed 1 -> B, 2 -> C, 3 -> A, 4 -> D")
+	assert.Equal(t,
+		map[int]int{1: 1, 3: 0, 4: 3},
+		seededPoolCourts(t, []int{1, 3, 4}, numPools, poolSize, numCourts),
+		"ranks 1, 3 and 4 belong on shiaijo B, A and D whether or not rank 2 is present")
 }
 
 func TestPoolSeeding_CornerCases(t *testing.T) {

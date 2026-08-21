@@ -518,3 +518,71 @@ func TestLoadBracketLocked_InvalidCompID(t *testing.T) {
 	_, err = store.loadBracketLocked("")
 	assert.Error(t, err)
 }
+
+// TestBracketMatchPlaceholders_RoundTrip covers the draw-time placeholder fields
+// (bc-draw): they must survive save/load, stay out of the file when unset, and a
+// bracket.json written before they existed must still parse (as zero values, the
+// signal the engine's legacy backfill keys on).
+func TestBracketMatchPlaceholders_RoundTrip(t *testing.T) {
+	t.Run("persisted through save and load", func(t *testing.T) {
+		dir := t.TempDir()
+		store, err := NewStore(dir)
+		require.NoError(t, err)
+		compID := "placeholder-roundtrip"
+		require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Test"}))
+
+		require.NoError(t, store.SaveBracket(compID, &Bracket{
+			Rounds: [][]BracketMatch{
+				{{
+					ID: "m-r1-0", SideA: "Alice", SideB: "Bob", Winner: "Alice",
+					PlaceholderA: "Pool A-1st", PlaceholderB: "Pool B-2nd", PlaceholderWinner: "Pool A-1st",
+				}},
+			},
+			ThirdPlaceMatch: &BracketMatch{ID: "m-bronze", PlaceholderA: "Pool C-1st"},
+		}))
+
+		loaded, err := store.LoadBracket(compID)
+		require.NoError(t, err)
+		require.Len(t, loaded.Rounds, 1)
+		require.Len(t, loaded.Rounds[0], 1)
+		m := loaded.Rounds[0][0]
+		assert.Equal(t, "Pool A-1st", m.PlaceholderA)
+		assert.Equal(t, "Pool B-2nd", m.PlaceholderB)
+		assert.Equal(t, "Pool A-1st", m.PlaceholderWinner)
+		assert.Equal(t, "Alice", m.SideA, "the live side is independent of the placeholder")
+		require.NotNil(t, loaded.ThirdPlaceMatch)
+		assert.Equal(t, "Pool C-1st", loaded.ThirdPlaceMatch.PlaceholderA)
+
+		raw, err := os.ReadFile(filepath.Join(dir, "competitions", compID, "bracket.json"))
+		require.NoError(t, err)
+		assert.Contains(t, string(raw), `"placeholderA": "Pool A-1st"`)
+	})
+
+	t.Run("omitted from the file when unset", func(t *testing.T) {
+		dir := t.TempDir()
+		store, err := NewStore(dir)
+		require.NoError(t, err)
+		compID := "placeholder-omitted"
+		require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Test"}))
+		require.NoError(t, store.SaveBracket(compID, &Bracket{
+			Rounds: [][]BracketMatch{{{ID: "m-r1-0", SideA: "Alice", SideB: "Bob"}}},
+		}))
+
+		raw, err := os.ReadFile(filepath.Join(dir, "competitions", compID, "bracket.json"))
+		require.NoError(t, err)
+		assert.NotContains(t, string(raw), "placeholder",
+			"omitempty must keep a non-pool bracket byte-identical to before the fields existed")
+	})
+
+	t.Run("a pre-Phase-4 file without the fields still parses", func(t *testing.T) {
+		raw := []byte(`{"rounds":[[{"id":"m-r1-0","sideA":"Pool A-1st","sideB":"Pool B-2nd","status":"scheduled"}]]}`)
+		b, err := parseBracketBytes(raw)
+		require.NoError(t, err)
+		require.Len(t, b.Rounds, 1)
+		require.Len(t, b.Rounds[0], 1)
+		assert.Equal(t, "Pool A-1st", b.Rounds[0][0].SideA)
+		assert.Empty(t, b.Rounds[0][0].PlaceholderA, "absence is the legacy marker; it must read as empty, not fail")
+		assert.Empty(t, b.Rounds[0][0].PlaceholderB)
+		assert.Empty(t, b.Rounds[0][0].PlaceholderWinner)
+	})
+}

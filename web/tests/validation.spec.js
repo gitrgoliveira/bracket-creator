@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import {
     escapeHtml,
     getIssueLineNumber,
@@ -6,6 +8,10 @@ import {
     normalizeNameForValidation,
     getParticipantValidationState,
     validateCourtsValue,
+    shiaijoCountError,
+    VALID_SHIAIJO_COUNTS,
+    SHIAIJO_RULE_REASON,
+    MAX_COURTS,
     validatePoolSettings
 } from "../js/validation.js";
 
@@ -106,15 +112,106 @@ describe("getParticipantValidationState", () => {
     });
 });
 
-describe("validateCourtsValue", () => {
-    it("accepts the in-range value 5", () => {
-        expect(validateCourtsValue("5")).toEqual({ ok: true, value: 5 });
+// Mirrors internal/helper/shiaijo_count_test.go and
+// web-mobile/js/__tests__/shiaijo_count.test.jsx. A tournament's shiaijo
+// allocation must be a POWER OF TWO: the draw gives each shiaijo its own block
+// of the bracket and merges those blocks in PAIRS, so the count has to halve
+// cleanly all the way down. 6 halves to 3 and stops.
+//
+// This form posts natively to /create and the server answers a bad count with
+// a JSON body, so anything this validator lets through replaces the page with
+// raw JSON and destroys the operator's pasted participant list and seeds.
+describe("shiaijoCountError", () => {
+    const cases = [
+        { n: 1, valid: true },  // a single-shiaijo tournament is explicitly allowed
+        { n: 2, valid: true },
+        { n: 3, valid: false, below: 2, above: 4 },
+        { n: 4, valid: true },
+        // 5 and 6 are the regression pins for the rule change: 5 was accepted
+        // by the old plain range check and 6 by the retired parity rule.
+        { n: 5, valid: false, below: 4, above: 8 },
+        { n: 6, valid: false, below: 4, above: 8 },
+        { n: 7, valid: false, below: 4, above: 8 },
+        { n: 8, valid: true },
+        { n: 10, valid: false, below: 8, above: 16 },
+        { n: 12, valid: false, below: 8, above: 16 },
+        { n: 16, valid: true },
+    ];
+
+    cases.forEach(({ n, valid, below, above }) => {
+        it(`${valid ? "accepts" : "rejects"} ${n} shiaijo`, () => {
+            const err = shiaijoCountError(n);
+            if (valid) {
+                expect(err).toBeNull();
+                return;
+            }
+            expect(err).toContain(`${n} shiaijo cannot be paired down to a single bracket`);
+            // Names the nearest valid counts either side, and always offers 1.
+            expect(err).toContain(`Use ${below} or ${above}, or 1`);
+            // The canonical reason, shared with the Go message and the console.
+            expect(err).toContain("each shiaijo its own block of the bracket");
+            expect(err).toContain("merge in pairs");
+            expect(err).toContain("halve cleanly");
+        });
     });
 
-    it("rejects values above the A-Z cap of 26", () => {
-        const result = validateCourtsValue("27");
+    it("never reads as \"at least 2 shiaijo\"", () => {
+        const err = shiaijoCountError(6).toLowerCase();
+        expect(err).toContain(", or 1");
+        expect(err).not.toContain("at least 2");
+        expect(err).not.toContain("at least two");
+    });
+
+    it("offers only the count below once past the ceiling", () => {
+        // 32 shiaijo is past the supported court cap, so there is no higher
+        // valid count to suggest: the message must not invent one.
+        const err = shiaijoCountError(20);
+        expect(err).toContain("Use 16, or 1");
+        expect(err).not.toContain("32");
+    });
+
+    it("stays silent for non-counts", () => {
+        expect(shiaijoCountError(NaN)).toBeNull();
+        expect(shiaijoCountError(undefined)).toBeNull();
+    });
+
+    it("derives the valid counts from the court cap", () => {
+        expect(VALID_SHIAIJO_COUNTS).toEqual([1, 2, 4, 8, 16]);
+        // The next power of two is past the cap, which is why the list stops.
+        expect(VALID_SHIAIJO_COUNTS[VALID_SHIAIJO_COUNTS.length - 1] * 2).toBeGreaterThan(MAX_COURTS);
+    });
+});
+
+describe("validateCourtsValue", () => {
+    it("accepts every power of two up to the cap", () => {
+        VALID_SHIAIJO_COUNTS.forEach((n) => {
+            expect(validateCourtsValue(String(n))).toEqual({ ok: true, value: n });
+        });
+    });
+
+    it("rejects 3, which the field's plain range check used to accept", () => {
+        const result = validateCourtsValue("3");
         expect(result.ok).toBe(false);
-        expect(result.error).toMatch(/1 and 26/);
+        expect(result.error).toBe(shiaijoCountError(3));
+        expect(result.error).toContain("3 shiaijo cannot be paired down to a single bracket");
+        expect(result.error).toContain("Use 2 or 4, or 1");
+    });
+
+    it("rejects 5 and 6, so the client refuses exactly what the server refuses", () => {
+        // 5 was asserted VALID by this suite under the retired rule, and 6 was
+        // valid under the "1 or an even number" rule before that. Both now hit
+        // helper.ValidateShiaijoCount server-side, whose 400 is a JSON body.
+        expect(validateCourtsValue("5").ok).toBe(false);
+        expect(validateCourtsValue("6").ok).toBe(false);
+    });
+
+    it("rejects values above the supported court cap", () => {
+        const result = validateCourtsValue(String(MAX_COURTS + 1));
+        expect(result.ok).toBe(false);
+        // The cap is checked before the power-of-two rule, matching the server's
+        // helper.ValidateCourts -> helper.ValidateShiaijoCount order. Built from
+        // the constant so the cap and its message cannot drift apart.
+        expect(result.error).toMatch(new RegExp(`1 and ${MAX_COURTS}`));
     });
 
     it("rejects non-numeric input", () => {
@@ -125,6 +222,42 @@ describe("validateCourtsValue", () => {
     it("rejects values below 1", () => {
         const result = validateCourtsValue("0");
         expect(result.ok).toBe(false);
+    });
+});
+
+// The rule has to be visible at the field, not only after a rejection: this
+// form is the operator's one shot at a workbook and a bad count costs them the
+// whole pasted roster. index.html carries the counts as static copy, so pin
+// that copy against the derived list rather than trusting it to stay in step.
+describe("index.html courts field", () => {
+    const html = readFileSync(fileURLToPath(new URL("../index.html", import.meta.url)), "utf8");
+    // Derived from the legal set rather than written out, so dropping a count
+    // from VALID_SHIAIJO_COUNTS fails here instead of leaving the form's copy
+    // quietly offering a count the validator now rejects. The joiner lives in
+    // the test because nothing the browser loads needs it: the rejection
+    // message names only the nearest counts either side.
+    const counts = VALID_SHIAIJO_COUNTS.length <= 1
+        ? String(VALID_SHIAIJO_COUNTS[0] ?? "")
+        : `${VALID_SHIAIJO_COUNTS.slice(0, -1).join(", ")} or ${VALID_SHIAIJO_COUNTS[VALID_SHIAIJO_COUNTS.length - 1]}`;
+
+    it("names the valid counts in the field label", () => {
+        expect(counts).toBe("1, 2, 4, 8 or 16");
+        expect(html).toContain(`Number of Shiaijo (courts), ${counts}:`);
+    });
+
+    it("names the valid counts in the field tooltip", () => {
+        expect(html).toContain(`use ${counts}.`);
+    });
+
+    it("states the reason under the field, so the rule is taught not just enforced", () => {
+        // Built from the exported constant, not re-typed: the hint and the
+        // rejection message are the same sentence and a reword must not be able
+        // to land in one of them. index.html is static markup, so this test is
+        // the only thing holding them together.
+        const sentenceCased = SHIAIJO_RULE_REASON.charAt(0).toUpperCase() + SHIAIJO_RULE_REASON.slice(1);
+        expect(html).toContain(`<div class="form-text" id="courtsHelp">${sentenceCased}.</div>`);
+        // Wired to the input for assistive tech rather than floating loose.
+        expect(html).toMatch(/id="courts"[\s\S]{0,200}aria-describedby="courtsHelp"/);
     });
 });
 

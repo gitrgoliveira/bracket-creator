@@ -1,6 +1,11 @@
 // Participants section of a competition: paste/import roster, edit seeds.
 // See web-mobile/admin_split_plan.md.
 
+// seededRanks (admin_helpers): the one owner of "what counts as seeded"
+// (integer > 0), shared with the overview stat, the seeding blocker and the
+// settings preview so this card's count cannot disagree with them.
+import { seededRanks } from './admin_helpers.jsx';
+
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
 
 const pluralize = window.pluralize;
@@ -501,17 +506,26 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     });
     return counts;
   }, [players]);
-  const { gaps, hasGaps } = useMemoA(() => {
-    const sortedSeeds = players.filter(p => p.seed).map(p => p.seed).sort((a, b) => a - b);
-    const gaps = [];
-    if (sortedSeeds.length > 0) {
-      const maxSeed = sortedSeeds[sortedSeeds.length - 1];
-      for (let s = 1; s <= maxSeed; s++) {
-        if (!sortedSeeds.includes(s)) gaps.push(s);
-      }
-    }
-    return { gaps, hasGaps: gaps.length > 0 };
-  }, [players]);
+  // THE predicate for "is this seeding fit to draw with", shared with the
+  // header's "Cannot start" block and the dashboard card
+  // (competitionSeedingBlocker, admin_helpers.jsx). Three surfaces describe the
+  // same seeding and an operator who meets it twice must not read two different
+  // accounts of it.
+  //
+  // Reading seedGapDiagnosis directly is what broke that: it answers "" for the
+  // faults that are NOT gaps, duplicates included, by design -- the caller
+  // supplies their wording. So a roster with rank 2 on two rows disabled
+  // Generate draw with "rank 2 is used more than once ... in Participants &
+  // seeds", and the panel it named then showed nothing at all: no banner, no
+  // flagged row, no way to see which rank was wrong. The blocker covers both
+  // faults, so the banner is driven by the blocker.
+  //
+  // Not memoised: `c` is a prop object whose identity changes on every SSE
+  // reload, so a [c]-keyed memo almost never hit, and the body is two Sets over
+  // the roster. One derived string, not a string plus its own truthiness --
+  // a blocker always carries a non-empty reason, so a second field could only
+  // ever disagree with the first by going stale.
+  const seedProblem = (window.competitionSeedingBlocker(c) || {}).reason || "";
 
   // Extracted from inline onClick so we can await + log instead of
   // silencing the rejection. Same pattern as updateSeed below: success
@@ -913,7 +927,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
             <div>
               <div className="card__title">{c.checkInEnabled ? "Check-in & Seeding" : "Seeding"}</div>
               <div className="card__sub">
-                {c.checkInEnabled && `${players.filter(p => p.checkedIn).length} / ${players.length} checked in · `}{players.filter((p) => p.seed).length} seeded
+                {c.checkInEnabled && `${players.filter(p => p.checkedIn).length} / ${players.length} checked in · `}{seededRanks(players).length} seeded
               </div>
             </div>
             <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
@@ -964,9 +978,9 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
               </div>
             )}
           </div>
-          {hasGaps && (
-            <div className="alert alert--error" style={{ margin: "0 16px 16px" }}>
-              ❌ Seed gap detected: rank {gaps.join(", ")} {gaps.length > 1 ? "are" : "is"} missing. Seeds must be sequential (1, 2, 3…).
+          {!!seedProblem && (
+            <div className="alert alert--error" style={{ margin: "0 16px 16px" }} data-testid="seed-gap-banner">
+              ❌ {seedProblem} The draw cannot run until the seeding is fixed.
             </div>
           )}
           {seedImportResult && (
@@ -1189,7 +1203,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
               {rosterDirty && !isDrawReady && <span style={{ fontSize: 12.5, color: "var(--warn)", fontWeight: 600 }}>● Unsaved changes</span>}
               <button className="btn btn--sm" type="button" onClick={pasteFromExcel} disabled={isDrawReady} title={isDrawReady ? "Discard the draw to edit participants" : "Reads clipboard and converts tab-separated values (e.g. from Excel) to CSV"}>Paste clipboard</button>
-              <button className="btn btn--sm btn--primary" type="button" onClick={apply} disabled={hasGaps || isDrawReady} title={isDrawReady ? "Discard the draw to apply roster changes" : undefined}>Apply changes</button>
+              <button className="btn btn--sm btn--primary" type="button" onClick={apply} disabled={!!seedProblem || isDrawReady} title={isDrawReady ? "Discard the draw to apply roster changes" : undefined}>Apply changes</button>
             </div>
           </div>
 
@@ -1301,7 +1315,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
           {lines.length > 0 && (
             <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10, marginTop: 12 }}>
               {rosterDirty && !isDrawReady && <span style={{ fontSize: 12.5, color: "var(--warn)", fontWeight: 600 }}>● Unsaved changes</span>}
-              <button className="btn btn--primary" type="button" onClick={apply} disabled={hasGaps || isDrawReady} title={isDrawReady ? "Discard the draw to apply roster changes" : undefined}>Apply changes</button>
+              <button className="btn btn--primary" type="button" onClick={apply} disabled={!!seedProblem || isDrawReady} title={isDrawReady ? "Discard the draw to apply roster changes" : undefined}>Apply changes</button>
             </div>
           )}
         </div>

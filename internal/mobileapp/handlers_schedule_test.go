@@ -316,7 +316,7 @@ func TestScheduleEstimateEndpoint(t *testing.T) {
 			nil)
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assert.Contains(t, w.Body.String(), "courts must be between 1 and 26")
+		assert.Contains(t, w.Body.String(), fmt.Sprintf("courts must be between 1 and %d", engine.MaxCourts))
 	})
 
 	t.Run("courts=27 returns 400", func(t *testing.T) {
@@ -326,7 +326,7 @@ func TestScheduleEstimateEndpoint(t *testing.T) {
 			nil)
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assert.Contains(t, w.Body.String(), "courts must be between 1 and 26")
+		assert.Contains(t, w.Body.String(), fmt.Sprintf("courts must be between 1 and %d", engine.MaxCourts))
 	})
 }
 

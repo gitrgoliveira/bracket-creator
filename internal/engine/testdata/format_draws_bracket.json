@@ -1,0 +1,72 @@
+{
+  "_comment": [
+    "The single source of truth for WHICH COMPETITION FORMATS DRAW A KNOCKOUT",
+    "BRACKET, shared by both language implementations:",
+    "internal/engine/court_validation.go CompetitionDrawsBracket (which scopes",
+    "the server's shiaijo-count refusal, via ValidateCompetitionShiaijoCount) and",
+    "web-mobile/js/admin_helpers.jsx formatDrawsBracket (which scopes the",
+    "console's, via shiaijoCountErrorFor).",
+    "",
+    "THE CONTRACT: the answer follows the DRAW PIPELINE's format switch, not the",
+    "UI's idea of which formats are 'playoff-ish'. League and Swiss produce pools",
+    "or rounds and never a bracket; mixed builds one after its pools; playoffs and",
+    "any UNRECOGNISED value (including a legacy record carrying no format at all)",
+    "fall to the pipeline's default branch, which builds a standalone playoffs",
+    "bracket. That default is why the unknown-format cases below are true rather",
+    "than false, and it is the half a hand-written mirror gets wrong.",
+    "",
+    "WHY THIS TABLE EXISTS: the two implementations run in different processes and",
+    "cannot import each other, and the drift is SILENT in both directions. Flip a",
+    "format here and forget the console, and it keeps applying the power-of-two",
+    "rule to a format the server exempts, disabling Create and Start and printing",
+    "a red error for an allocation the server would accept. Flip the console and",
+    "forget the server, and the operator is offered a count the draw then refuses.",
+    "Neither shows up in either suite unless both read this file.",
+    "",
+    "COVERAGE IS ENFORCED: the Go half asserts that every state.CompFormat*",
+    "constant appears below, so adding a format without deciding this question",
+    "fails the build rather than defaulting quietly."
+  ],
+  "cases": [
+    {
+      "why": "playoffs is a bracket from the first bout",
+      "format": "playoffs",
+      "drawsBracket": true
+    },
+    {
+      "why": "mixed builds a knockout after its pools, so the rule binds",
+      "format": "mixed",
+      "drawsBracket": true
+    },
+    {
+      "why": "league is a full round-robin: its shiaijo run in parallel with no blocks to merge",
+      "format": "league",
+      "drawsBracket": false
+    },
+    {
+      "why": "swiss pairs each round afresh and never builds a bracket",
+      "format": "swiss",
+      "drawsBracket": false
+    },
+    {
+      "why": "a legacy record with no format at all takes the pipeline's default branch",
+      "format": "",
+      "drawsBracket": true
+    },
+    {
+      "why": "an unrecognised format takes that same default, so it is held to the rule",
+      "format": "not-a-format",
+      "drawsBracket": true
+    },
+    {
+      "why": "the match is exact: a format is not league merely by containing it",
+      "format": "league-playoffs",
+      "drawsBracket": true
+    },
+    {
+      "why": "and it is case-sensitive, matching the stored lowercase wire values",
+      "format": "League",
+      "drawsBracket": true
+    }
+  ]
+}

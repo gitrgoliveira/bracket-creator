@@ -24,8 +24,8 @@ func IsReservedParticipantName(name string) bool {
 }
 
 // IsPoolFinalistPlaceholder reports whether s is a pool-origin finalist
-// placeholder ("Pool A-1st", "Pool B-2nd", etc.) as emitted by
-// helper.GenerateFinals. Unlike IsReservedParticipantName, this does NOT
+// placeholder ("Pool A-1st", "Pool B-2nd", etc.) as emitted by the
+// pool-to-knockout draw. Unlike IsReservedParticipantName, this does NOT
 // match next-round feeder labels ("Winner of r1-m3"), callers that need
 // to distinguish the two patterns (e.g. bracketHasPoolPlaceholders) should
 // use this instead.

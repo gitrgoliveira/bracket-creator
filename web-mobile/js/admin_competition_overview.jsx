@@ -5,6 +5,11 @@
 // shell via window.*.
 
 import { EstimateHeadline } from './admin_schedule_utils.jsx';
+// seededRanks: the one owner of "which seed ranks has this roster actually
+// got" (integer > 0 normalization), shared with the seeding blocker and the
+// settings preview so this stat, the checklist and the preview cannot
+// disagree about what counts as seeded.
+import { seededRanks } from './admin_helpers.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -19,7 +24,8 @@ const compMatchStats = window.compMatchStats;
 //
 // Shape:
 //   { id: string, label: string, detail: string, cta: string|null,
-//     state: 'done'|'active'|'todo', section: string|null }
+//     state: 'done'|'active'|'todo', section: string|null,
+//     blocking?: boolean }
 //
 // Rules:
 //   - "Create competition" is always done (the comp already exists).
@@ -35,15 +41,25 @@ const compMatchStats = window.compMatchStats;
 //     the checklist's logical setup order; the sidebar lists lineups after
 //     participants but before settings, which differs from this ordering.
 //   - "Generate the draw" is always non-done (the button is in the page-head).
+//     Its detail line points at that button, EXCEPT when a court rule has
+//     disabled it: then it names the blocker and routes to Settings, because
+//     telling an operator to press a greyed-out button is worse than saying
+//     nothing. `tournamentCourts` is optional and only feeds that check (the
+//     orphaned-shiaijo half of it); omit it and only the count rule applies.
 //   - The FIRST non-done step is promoted to "active"; the rest stay "todo".
+//     EXCEPT when a step is `blocking` (today only "Generate the draw", when a
+//     court rule has disabled it): that one is promoted instead, because
+//     nothing further in the checklist can happen until it is fixed, and
+//     because "Review seeds & settings" never completes and would otherwise
+//     hold `active` forever and hide the blocker's CTA.
 //
 // Exported on window.competitionNextSteps AND in the ES export block below.
-function competitionNextSteps(c) {
+function competitionNextSteps(c, tournamentCourts) {
   const players = (c && c.players) || [];
   const numPlayers = players.length;
   const isTeam = c && c.kind === "team";
   const hasEnoughPlayers = numPlayers >= 2;
-  const seededCount = players.filter(p => p && p.seed).length;
+  const seededCount = seededRanks(players).length;
 
   const steps = [];
 
@@ -98,27 +114,57 @@ function competitionNextSteps(c) {
   }
 
   // Final step: generate draw (button is in the page-head; no section nav).
+  //
+  // When a rule blocks the draw, that header button is DISABLED, so pointing at
+  // it would be sending the operator to a dead control. The step names the
+  // blocker and the screen that fixes it instead. All of it comes from
+  // competitionDrawBlocker, including WHICH screen, so this row can never state
+  // the rule differently from the header block or send the operator to the
+  // wrong tab for it.
+  const drawBlocker = typeof window !== "undefined" && window.competitionDrawBlocker
+    ? window.competitionDrawBlocker(c, tournamentCourts)
+    : null;
+  let generateDetail = "Use the \"Generate draw\" button in the header above";
+  if (!hasEnoughPlayers) generateDetail = "Add at least 2 participants first";
+  else if (drawBlocker) generateDetail = `${drawBlocker.reason} ${drawBlocker.fix} The "Generate draw" button stays disabled until you do.`;
+  const drawIsBlocked = !!drawBlocker && hasEnoughPlayers;
   steps.push({
     id: "generate",
     label: "Generate the draw",
-    detail: hasEnoughPlayers
-      ? "Use the \"Generate draw\" button in the header above"
-      : "Add at least 2 participants first",
+    detail: generateDetail,
     state: "todo",
-    section: null,
-    cta: null,
+    section: drawIsBlocked ? drawBlocker.section : null,
+    cta: drawIsBlocked ? drawBlocker.cta : null,
+    // `blocking` means "nothing further in this checklist can happen until
+    // this is fixed", which is what promotes it past the ordering rule below.
+    blocking: drawIsBlocked,
   });
 
-  // Resolve active/todo: the first non-done step is active; the rest are todo.
-  let foundActive = false;
-  for (const step of steps) {
-    if (step.state === "done") continue;
-    if (!foundActive) {
-      step.state = "active";
-      foundActive = true;
-    }
-    // else stays "todo"
-  }
+  // A blocking step JUMPS THE QUEUE.
+  //
+  // The default rule (first non-done becomes active) can never reach the
+  // generate step: "Review seeds & settings" is deliberately emitted non-done
+  // forever, because there is no "seeds reviewed" signal, so it takes `active`
+  // on every render and everything after it stays `todo`. Only an active step
+  // renders its CTA, so the "Reassign shiaijo →" button authored above was
+  // unreachable in every state the checklist can be in.
+  //
+  // Promoting the blocker instead of relaxing the CTA's render condition also
+  // avoids showing two buttons that both go to Settings ("Review settings →"
+  // and "Reassign shiaijo →"), and it is the honest ordering: a competition
+  // whose draw is refused has exactly one next action.
+  // One pass, one rule: a blocking step takes `active` if there is one,
+  // otherwise the first non-done step does, and every other non-done step is
+  // `todo`. Writing the two cases as separate passes meant the blocker branch
+  // also had to re-clear the states the default branch would have set, which
+  // was a no-op for every step this checklist actually emits and would have
+  // silently stopped being one the moment a later step was pushed as "active".
+  const active = steps.find((s) => s.blocking && s.state !== "done")
+    || steps.find((s) => s.state !== "done");
+  steps.forEach((s) => {
+    if (s.state === "done") return;
+    s.state = s === active ? "active" : "todo";
+  });
 
   return steps;
 }
@@ -257,10 +303,20 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
   // ---------------------------------------------------------------------------
   const participantLabel = c.kind === "team" ? "Teams" : "Participants";
   const numPlayers = (c.players || []).length;
-  const seededCount = (c.players || []).filter(p => p && p.seed).length;
-  const numCourts = (typeof window !== "undefined" && window.courtCount)
-    ? window.courtCount(c.courts)
-    : (Array.isArray(c.courts) ? c.courts.length : 0) || 1;
+  const seededCount = seededRanks(c.players).length;
+  // The ASSIGNED count, not courtCount(). courtCount floors at 1 on purpose
+  // (a running competition always occupies at least one shiaijo, and the
+  // schedule surfaces divide by it), but this box sits one line under a page
+  // head that reports the same record's allocation, and "1 Court" directly
+  // contradicted it. The dashboard card already reports 0 for the same
+  // record; this brings the three into line.
+  //
+  // 0 here means "none of its own", NOT "the draw has no shiaijo": an empty
+  // list inherits the tournament's. That fact belongs on the page head, which
+  // has the room to name the inherited shiaijo (admin_competition.jsx's
+  // courtsSummary); a two-line stat box can only carry the count, and the
+  // count it must carry is the one the operator chose.
+  const numCourts = Array.isArray(c.courts) ? c.courts.length : 0;
 
   const formatCompMinutes = (typeof window !== "undefined" && window.formatCompMinutes)
     ? window.formatCompMinutes
@@ -397,7 +453,7 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
   function renderPrimaryContent() {
     // --- setup ---
     if (isSetup) {
-      const steps = competitionNextSteps(c);
+      const steps = competitionNextSteps(c, tournament && tournament.courts);
       return (
         <div className="card" style={{ marginBottom: 16 }} data-testid="next-steps-card">
           <div className="card__head">

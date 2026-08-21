@@ -200,7 +200,7 @@ func TestPlayoffOptionsRun_EmptyFile(t *testing.T) {
 }
 
 // TestPlayoffOptionsRun_InvalidCourts verifies that an invalid court count
-// (over the 26-court cap) returns an error from ValidateCourts.
+// (over the court cap) returns an error from ValidateCourts.
 func TestPlayoffOptionsRun_InvalidCourts(t *testing.T) {
 	tmpInput, err := os.CreateTemp("", "input-*.csv")
 	require.NoError(t, err)
@@ -217,7 +217,7 @@ func TestPlayoffOptionsRun_InvalidCourts(t *testing.T) {
 	o := &playoffOptions{
 		filePath:   tmpInput.Name(),
 		outputPath: tmpOutput.Name(),
-		courts:     27, // exceeds 26-court cap
+		courts:     27, // exceeds the court cap
 	}
 	err = o.run(nil, nil)
 	assert.Error(t, err)

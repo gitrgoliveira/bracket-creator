@@ -134,13 +134,16 @@ func TestSetTreeSheetTitle(t *testing.T) {
 // too. Both helpers are in fact exact for every CreateBalancedTree shape: the
 // root's bracket line always lands in column 2*depth+1, and the split
 // (mid = len/2) always puts a deepest chain on the right-most descent, whose
-// row offsets sum to 2^depth - 1. The pools variant is exercised separately
-// below because treeAdjustment may swap a bye pair, moving the deepest chain
-// off the right-most path and leaving the last rows of the envelope unused.
+// row offsets sum to 2^depth - 1. The DRAW variant is exercised separately
+// because a court-first draw (BuildKnockoutDraw) places its region byes at the
+// FRONT of a region, which moves the deepest chain off the right-most path and
+// can leave the last rows of the envelope unused. That is the shape the
+// workbook actually prints, so it is the one that has to stay inside the
+// envelope.
 func TestTreePageGeometry(t *testing.T) {
 	for _, leaves := range []int{1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 13, 16} {
-		for _, pools := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%d leaves pools=%v", leaves, pools), func(t *testing.T) {
+		for _, fromDraw := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%d leaves fromDraw=%v", leaves, fromDraw), func(t *testing.T) {
 				f := excelize.NewFile()
 				defer f.Close()
 				const sheet = "Tree 1"
@@ -149,14 +152,21 @@ func TestTreePageGeometry(t *testing.T) {
 
 				names := make([]string, leaves)
 				for i := range names {
-					// Pool-style labels so the pools=true treeAdjustment pass
-					// exercises its real reordering logic.
 					names[i] = fmt.Sprintf("Pool %c-%s", 'A'+rune(i/2), GetOrdinal(i%2+1))
 				}
 				tree := CreateBalancedTree(names)
+				if fromDraw {
+					// One qualifier per pool on two shiaijo: the region byes
+					// land at the front of each region, which is exactly the
+					// asymmetry the envelope has to tolerate.
+					pools, _ := makePools(leaves)
+					d := BuildKnockoutDraw(pools, 1, 2)
+					require.NotNil(t, d)
+					tree = d.Root
+				}
 				depth := CalculateDepth(tree)
 				startRow := TreeTitleRows + 1
-				PrintLeafNodes(tree, f, sheet, 2*depth, startRow, depth, pools, nil)
+				PrintLeafNodes(tree, f, sheet, 2*depth, startRow, depth, nil)
 
 				maxRow, maxCol := 0, 0
 				for r := 1; r <= 80; r++ {
@@ -174,9 +184,9 @@ func TestTreePageGeometry(t *testing.T) {
 					}
 				}
 
-				if pools {
-					// treeAdjustment may park a bye above the deep chain, so the
-					// render can end short of the envelope, never past it.
+				if fromDraw {
+					// A region bye sits above the deep chain, so the render can
+					// end short of the envelope, never past it.
 					assert.LessOrEqual(t, maxCol, TreePageLastCol(depth), "depth %d: used columns must stay inside the envelope", depth)
 					assert.LessOrEqual(t, maxRow, TreePageLastRow(depth, startRow), "depth %d: used rows must stay inside the envelope", depth)
 					// The root's bracket line pins the last column regardless.
@@ -208,7 +218,7 @@ func TestWriteTreeValue_ByeLeafLabelSpan(t *testing.T) {
 	tree := CreateBalancedTree([]string{"Pool A-1st", "Pool B-1st", "Pool C-1st"})
 	depth := CalculateDepth(tree)
 	startRow := TreeTitleRows + 1
-	PrintLeafNodes(tree, f, sheet, 2*depth, startRow, depth, false, nil)
+	PrintLeafNodes(tree, f, sheet, 2*depth, startRow, depth, nil)
 
 	byeVal, err := f.GetCellValue(sheet, "E6")
 	require.NoError(t, err)

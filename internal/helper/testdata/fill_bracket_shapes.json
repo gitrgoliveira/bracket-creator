@@ -1,0 +1,37 @@
+{
+  "_comment": [
+    "The fill-bracket formation table, shared by the Go original",
+    "(helper.FillBracketPoolCount, TestFillBracketPoolCount_WKCShapes) and its",
+    "JS preview mirror (qualifier_preview.jsx fillBracketPoolCount,",
+    "qualifier_preview.test.jsx) so the two suites pin the SAME rows and the",
+    "mirrors cannot drift by one side missing a case -- the encho_labels.json /",
+    "seed_gap_messages.json precedent. Rows with pools/drafts are accepted",
+    "cuts; result=unsupplied means legal cuts exist but the roster's seeded",
+    "and oversized pools cannot supply the drafts (Go: the 'seed more pools'",
+    "error; JS: the {unsupplied:true} sentinel); result=invalid means no",
+    "legal cut exists at all (Go: the other errors; JS: null).",
+    "seedRanks {1,2,3,4} on the sheet-backed rows is what every WKC sheet",
+    "carries: two named seeds plus two by draw."
+  ],
+  "cases": [
+    {"name": "19WKC Men's Team: 60 entrants", "n": 60, "minSize": 3, "seedRanks": [1, 2, 3, 4], "pools": 16, "drafts": 0},
+    {"name": "19WKC Women's Team: 45 entrants", "n": 45, "minSize": 3, "seedRanks": [1, 2, 3, 4], "pools": 14, "drafts": 2},
+    {"name": "17WKC Men's Team: 49 entrants", "n": 49, "minSize": 3, "seedRanks": [1, 2, 3, 4], "pools": 16, "drafts": 0},
+    {"name": "17WKC Women's Team: 38 entrants, 4 seeds", "n": 38, "minSize": 3, "seedRanks": [1, 2, 3, 4], "pools": 12, "drafts": 4},
+    {"name": "38 entrants unseeded: supply is oversized pools alone", "n": 38, "minSize": 3, "seedRanks": [], "pools": 10, "drafts": 6},
+    {"name": "19WKC Women's Individual: 203 entrants", "n": 203, "minSize": 3, "seedRanks": [1, 2, 3, 4], "pools": 64, "drafts": 0},
+    {"name": "19WKC Men's Individual: 242 entrants", "n": 242, "minSize": 3, "seedRanks": [1, 2, 3, 4], "pools": 64, "drafts": 0},
+    {"name": "hand-worked: 11 entrants unseeded (odd-D fallback)", "n": 11, "minSize": 3, "seedRanks": [], "pools": 3, "drafts": 1},
+    {"name": "n exactly at minSize forms one pool", "n": 3, "minSize": 3, "seedRanks": [], "pools": 1, "drafts": 0},
+    {"name": "even drafts outrank the larger odd-draft P=15 even when seeds supply it", "n": 45, "minSize": 3, "seedRanks": [1], "pools": 14, "drafts": 2},
+    {"name": "GAPPED ranks past the pool count do not count: 38 with {1,2,13,14}", "n": 38, "minSize": 3, "seedRanks": [1, 2, 13, 14], "pools": 10, "drafts": 6},
+    {"name": "gapped survivors {1,7} at 18 entrants: rank 7 wraps at every P in range", "n": 18, "minSize": 3, "seedRanks": [1, 7], "pools": 5, "drafts": 3},
+    {"name": "18 entrants with two live ranks re-cuts to the even-D shape", "n": 18, "minSize": 3, "seedRanks": [1, 2], "pools": 6, "drafts": 2},
+    {"name": "9 entrants unseeded: nothing supplies the one draft", "n": 9, "minSize": 3, "seedRanks": [], "result": "unsupplied"},
+    {"name": "9 entrants with ONE seed: the same cut becomes legal", "n": 9, "minSize": 3, "seedRanks": [1], "pools": 3, "drafts": 1},
+    {"name": "9 entrants with only a WRAPPED rank: rank 4 exceeds every P in range", "n": 9, "minSize": 3, "seedRanks": [4], "result": "unsupplied"},
+    {"name": "n below minSize is invalid", "n": 2, "minSize": 3, "seedRanks": [], "result": "invalid"},
+    {"name": "5 entrants at min 3: no pool count uses every entrant", "n": 5, "minSize": 3, "seedRanks": [], "result": "invalid"},
+    {"name": "invalid minSize", "n": 60, "minSize": 0, "seedRanks": [], "result": "invalid"}
+  ]
+}

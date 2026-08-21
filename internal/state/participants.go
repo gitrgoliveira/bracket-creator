@@ -65,11 +65,21 @@ type LoadParticipantsOpts struct {
 }
 
 // participantsCacheKey returns a virtual filename used as the cache key
-// for a participants load. Splits by both WithSeeds and HasIDs parse
-// mode so the three mutually-exclusive parses don't poison each other's
+// for a participants load. Splits by WithSeeds, HasIDs parse mode AND
+// withZekkenName so the mutually-exclusive parses don't poison each other's
 // cache entries (mp-p7n Copilot PR #185 round-6).
-func participantsCacheKey(opts LoadParticipantsOpts) string {
+//
+// withZekkenName is part of the key because it CHANGES THE PARSE, not just the
+// caller's view: with it off, column 3 of a zekken roster is read as the dojo,
+// so a single load with the wrong flag left every later reader seeing the
+// zekken string as the dojo (eligibility, Swiss, ranking and the dojo-conflict
+// avoidance in pool creation) until some write invalidated the entry. Keying on
+// it makes a caller that passes the wrong flag wrong only for itself.
+func participantsCacheKey(withZekkenName bool, opts LoadParticipantsOpts) string {
 	base := "participants"
+	if withZekkenName {
+		base += "_zekken"
+	}
 	if opts.WithSeeds {
 		base += "_with_seeds"
 	}
@@ -88,14 +98,16 @@ func participantsCacheKey(opts LoadParticipantsOpts) string {
 // participantsCacheKey can produce. Used by saveParticipantsNoLock to
 // invalidate all parse-mode variants in one pass on write.
 func allParticipantsCacheKeys() []string {
-	keys := make([]string, 0, 6)
-	for _, withSeeds := range []bool{false, true} {
-		trueP, falseP := true, false
-		for _, hint := range []*bool{nil, &trueP, &falseP} {
-			keys = append(keys, participantsCacheKey(LoadParticipantsOpts{
-				WithSeeds: withSeeds,
-				HasIDs:    hint,
-			}))
+	keys := make([]string, 0, 12)
+	for _, zekken := range []bool{false, true} {
+		for _, withSeeds := range []bool{false, true} {
+			trueP, falseP := true, false
+			for _, hint := range []*bool{nil, &trueP, &falseP} {
+				keys = append(keys, participantsCacheKey(zekken, LoadParticipantsOpts{
+					WithSeeds: withSeeds,
+					HasIDs:    hint,
+				}))
+			}
 		}
 	}
 	return keys
@@ -130,7 +142,7 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 	// stripping column 0. Splitting the cache key by parse mode means
 	// each mode's parse is cached independently. saveParticipantsNoLock
 	// invalidates all variants below to keep them coherent on write.
-	cacheKey := participantsCacheKey(opts)
+	cacheKey := participantsCacheKey(withZekkenName, opts)
 
 	cache := s.getFileCache(compID, cacheKey)
 	cache.mu.RLock()
@@ -307,8 +319,20 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 	}
 
 	if opts.WithSeeds {
-		// Merge seeds if they exist.
-		seeds, _ := helper.ParseSeedsFile(s.compPath(compID, "seeds.csv"))
+		// Merge seeds if they exist, VALID OR NOT.
+		//
+		// This is a display read, so it must show what is actually stored. It
+		// used to validate, and a set the operator had not finished entering
+		// (seed 4 typed before 1 to 3, which the seeding panel persists as it
+		// goes) came back as an error, was discarded by the blank identifier
+		// below, and rendered as "0 seeded" with no warning anywhere. The
+		// operator was never told, and their next edit wrote that empty view
+		// back over the file. The admin console already knows how to say "seed
+		// gap detected: rank 1, 2, 3 are missing" -- it just has to be given the
+		// seeds to see it. Refusal belongs at the point seeds are USED (the draw
+		// pipeline, which returns a 400 naming the problem), not at the point
+		// they are shown.
+		seeds, _ := helper.ReadSeedsFileRaw(s.compPath(compID, "seeds.csv"))
 		if len(seeds) > 0 {
 			seedMap := make(map[string]int)
 			for _, sd := range seeds {
@@ -610,7 +634,12 @@ func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenNam
 	if oldName != players[foundIdx].Name {
 		seedsPath = s.compPath(compID, "seeds.csv")
 		var loadErr error
-		seeds, loadErr = helper.ParseSeedsFile(seedsPath)
+		// Raw, not validated: correcting a competitor's spelling must work
+		// while the seeding is still half-entered. Validating here would refuse
+		// the rename and leave seeds.csv naming a competitor who no longer
+		// exists under that name, which is a worse state than the incomplete
+		// seeding the operator is in the middle of fixing.
+		seeds, loadErr = helper.ReadSeedsFileRaw(seedsPath)
 		switch {
 		case loadErr == nil:
 			// seeds loaded; will rename below.

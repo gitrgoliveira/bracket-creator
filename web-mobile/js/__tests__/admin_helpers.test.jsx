@@ -618,14 +618,15 @@ describe('numeric bounds constants', () => {
     expect(MAX_TEAM_SIZE).toBe(9);
   });
 
-  it('MAX_COURTS matches A–Z labelling cap (lockstep with helper.MaxCourts)', () => {
-    // Pin the courts cap. Anchored to the single-letter A..Z labelling
-    // used on Shiaijo headers in the Excel output and in
-    // CourtPicker / admin_setup.jsx's courts input. The Go side
-    // declares the same value at internal/helper/constants.go as
-    // `MaxCourts`. Bumping past 26 here without bumping there (or
-    // vice versa) would let the UI offer values the backend rejects.
-    expect(MAX_COURTS).toBe(26);
+  it('MAX_COURTS matches the supported court cap (lockstep with helper.MaxCourts)', () => {
+    // Pin the courts cap. 16 is the largest allocation any one competition can
+    // legally hold (the shiaijo-count rule), so a venue is never given shiaijo
+    // no competition could use. The Go side declares the same value at
+    // internal/helper/constants.go as `MaxCourts`, with the court label
+    // alphabet sized TO it rather than the other way round. Bumping it here
+    // without bumping there (or vice versa) would let the UI offer values the
+    // backend rejects.
+    expect(MAX_COURTS).toBe(16);
   });
 
   it('MAX_RANK matches helper.MaxRankOverride (Go-side overflow cap)', () => {

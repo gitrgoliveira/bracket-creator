@@ -2,20 +2,33 @@ package cmd
 
 import (
 	"bufio"
+	"crypto/rand"
 	"fmt"
-	"math/rand"
+	"math/big"
 	"os"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	excelize "github.com/xuri/excelize/v2"
 )
 
+// blankWorkbookCourtPlan is the CLI's court plan: Draw and Courts only.
+//
+// The CLI generates a BLANK workbook with no stored bracket behind it, so the
+// draw's own regions are the only assignment there is -- ByMatch and Bronze
+// stay zero and every reader falls back to the region, which is exactly right
+// here. The live app's counterpart is engine.LiveCourtPlan. One assembly per
+// world, so neither the tree pages nor the elimination sheet can be handed a
+// plan the other did not get.
+func blankWorkbookCourtPlan(draw *helper.KnockoutDraw, courtNames []string) helper.CourtPlan {
+	return helper.CourtPlan{Draw: draw, Courts: courtNames}
+}
+
 // printEliminationWithBronze renders the team elimination sheet and, for a
 // naginata bracket with a real semifinal round, the bronze (3rd-place) block with
 // its print area. Shared by create-pools and create-playoffs, which both run the
 // bronze on the same court set with mirror=true.
-func printEliminationWithBronze(f *excelize.File, matchWinners map[string]helper.MatchWinner, rounds [][]*helper.Node, teamMatches, courts int, engi, naginata bool) {
-	helper.PrintEliminationWithBronze(f, matchWinners, rounds, teamMatches, courts, true, engi, helper.NeedsBronzeBlock(naginata, len(rounds)))
+func printEliminationWithBronze(f *excelize.File, matchWinners map[string]helper.MatchWinner, rounds [][]*helper.Node, teamMatches int, plan helper.CourtPlan, engi, naginata bool) {
+	helper.PrintEliminationWithBronze(f, matchWinners, rounds, teamMatches, plan, true, engi, helper.NeedsBronzeBlock(naginata, len(rounds)))
 }
 
 // finishKnockoutPages runs the CLI epilogue shared by create-pools and
@@ -59,13 +72,29 @@ func processEntries(entries []string, determined bool, withZekkenName bool) ([]h
 	// already been rejected above.
 	entries = helper.RemoveDuplicates(entries)
 	if !determined {
-		rand.Shuffle(len(entries), func(i, j int) {
-			entries[i], entries[j] = entries[j], entries[i]
-		})
+		if err := shuffleStrings(entries); err != nil {
+			return nil, fmt.Errorf("shuffling entries: %w", err)
+		}
 	}
 	players, err := helper.CreatePlayers(entries, withZekkenName)
 	if err != nil {
 		return nil, err
 	}
 	return players, nil
+}
+
+// shuffleStrings randomizes s in place via Fisher-Yates, using crypto/rand
+// rather than math/rand: gosec (G404) flags math/rand and math/rand/v2
+// unconditionally regardless of context, and crypto/rand.Int costs nothing
+// meaningful here (this runs once per CLI invocation over an entry list sized
+// in the tens to low hundreds, not in a hot path).
+func shuffleStrings(s []string) error {
+	for i := len(s) - 1; i > 0; i-- {
+		j, err := rand.Int(rand.Reader, big.NewInt(int64(i+1)))
+		if err != nil {
+			return err
+		}
+		s[i], s[int(j.Int64())] = s[int(j.Int64())], s[i]
+	}
+	return nil
 }

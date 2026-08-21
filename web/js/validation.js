@@ -126,11 +126,80 @@ export function getParticipantValidationState(playerList, withZekkenName) {
 }
 
 
-// Pure validator for the courts (Shiaijo) field, A-Z hard cap at 26.
+// --- Shiaijo-count rule (spec 007 R9) --------------------------------------
+//
+// MAX_COURTS mirrors helper.MaxCourts (internal/helper/constants.go): 16 is
+// the largest allocation any one competition can legally hold, and so the hard
+// cap on the field itself.
+export const MAX_COURTS = 16;
+
+// The legal shiaijo allocations for ONE competition: the powers of two up to the
+// court cap. Derived from MAX_COURTS rather than written out, so the cap and
+// this list can never disagree. 16 is the cap BECAUSE it is the largest entry
+// this list can hold (internal/helper/constants.go), not because of labelling.
+export const VALID_SHIAIJO_COUNTS = (() => {
+    const out = [];
+    for (let p = 1; p <= MAX_COURTS; p *= 2) out.push(p);
+    return out;
+})();
+
+// The canonical reason, shared by every surface that states the rule (this
+// rejection message and the standing hint on the courts field in index.html).
+//
+// Exported so the index.html copy can be pinned AGAINST IT rather than against
+// a third re-typed literal in the test: index.html is static markup and cannot
+// import a JS const, so the test is the only thing that can keep the hint the
+// operator reads and the rejection they get from drifting apart. It asserts the
+// sentence-cased form, which is the only difference between the two.
+export const SHIAIJO_RULE_REASON = 'the knockout draw gives each shiaijo its own block of the bracket and the blocks merge in pairs, so the count has to halve cleanly';
+
+// Shiaijo-count rule for one tournament, mirrored from
+// helper.ValidateShiaijoCount (internal/helper/shiaijo_count.go) and worded
+// identically to shiaijoCountError (web-mobile/js/admin_helpers.jsx): a
+// tournament that builds a knockout bracket runs on 1, 2, 4, 8 or 16 shiaijo.
+// Anything else (3, 5, 6, 10, ...) is invalid, because the draw gives each
+// shiaijo its own block of the bracket and merges those blocks in PAIRS: the
+// count has to halve cleanly all the way down, which only a power of two
+// does. 6 halves to 3 and stops.
+//
+// 1 shiaijo is explicitly VALID (its single block splits into two halves that
+// merge like any other pair), so the message always offers 1 and must never
+// read as "at least 2 shiaijo".
+//
+// This form posts to /create, which runs the SAME generator as the CLI and
+// enforces the same rule server-side (helper.ValidateShiaijoCount, called
+// from cmd/create_handler.go). The server's rejection is a JSON body and this
+// is a native <form> POST, so an unvalidated bad count REPLACES the page with
+// raw JSON and destroys the pasted participant list, the seeds and every
+// other option. Catching it here is what keeps the form on screen.
+//
+// Pinned against the Go message by web/tests/validation.spec.js, which
+// asserts the same fragments as internal/helper/shiaijo_count_test.go and
+// web-mobile/js/__tests__/shiaijo_count.test.jsx.
+export function shiaijoCountError(n) {
+    if (!Number.isFinite(n) || n <= 1) return null;
+    if (VALID_SHIAIJO_COUNTS.includes(n)) return null;
+    const below = VALID_SHIAIJO_COUNTS.filter((p) => p < n).pop();
+    const above = VALID_SHIAIJO_COUNTS.find((p) => p > n);
+    // `above` is undefined past the ceiling (17+ shiaijo): there is no higher
+    // valid count to offer, so the message names only the one below. `below`
+    // is always at least 2 here, because n > 1 and every n <= 2 is valid.
+    const options = above ? `${below} or ${above}` : `${below}`;
+    return `${n} shiaijo cannot be paired down to a single bracket. Use ${options}, or 1: ${SHIAIJO_RULE_REASON}.`;
+}
+
+// Pure validator for the courts (Shiaijo) field: the court cap, then the
+// power-of-two rule above. The cap is checked FIRST so the order matches the
+// server's (helper.ValidateCourts then helper.ValidateShiaijoCount), which
+// keeps the message an operator sees the same whichever side rejects.
 export function validateCourtsValue(rawCourts) {
     const courts = parseInt(rawCourts, 10);
-    if (Number.isNaN(courts) || courts < 1 || courts > 26) {
-        return { ok: false, error: 'Number of Shiaijo (courts) must be between 1 and 26' };
+    if (Number.isNaN(courts) || courts < 1 || courts > MAX_COURTS) {
+        return { ok: false, error: `Number of Shiaijo (courts) must be between 1 and ${MAX_COURTS}` };
+    }
+    const ruleError = shiaijoCountError(courts);
+    if (ruleError) {
+        return { ok: false, error: ruleError };
     }
     return { ok: true, value: courts };
 }

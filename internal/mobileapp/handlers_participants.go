@@ -474,7 +474,11 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		if !ok {
 			return
 		}
-		seeds, err := store.LoadSeeds(id)
+		// Raw: this endpoint SHOWS the operator their seeds, so a set they have
+		// not finished entering has to come back as the ranks they typed rather
+		// than as an HTTP 500. The admin console warns about a gap; refusing to
+		// answer is what stopped it being able to.
+		seeds, err := store.LoadSeedsRaw(id)
 		if err != nil {
 			internalError(c, err)
 			return
@@ -509,6 +513,49 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
+		}
+		// A seeding that breaks the rules is refused HERE, not merely at the
+		// draw. This endpoint submits a seeding as a finished artefact -- one
+		// request carrying the whole list -- so there is no half-typed state to
+		// protect and nothing is lost by saying no.
+		//
+		// PUT /competitions/:id is deliberately NOT symmetric: it carries the
+		// roster with seeds riding along as a field of each player, and the
+		// admin console sends it on every keystroke in the seeding panel.
+		// Refusing there would make it impossible to type a 4th seed before a
+		// 1st. That path stores the half-entered set, shows it back, warns
+		// about it, and is refused by every path that USES it.
+		if err := domain.ValidateAssignments(assignments); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": seedRejection(assignments, err, seedGapRemedyPut)})
+			return
+		}
+		// A rank assigned to nobody is not a seeding. Ranks were validated as a
+		// set above, but nothing tied them to the roster, so a name with no
+		// participant behind it saved cleanly and then split the two views of
+		// the same seeding: seeds.csv held 1..N and drew fine, while the admin
+		// console -- which reads seeds MERGED ONTO PLAYERS by name
+		// (state.loadParticipants) -- saw the survivors only, read the ghost's
+		// rank as a gap, and disabled Generate draw permanently with no row the
+		// operator could edit to close it.
+		//
+		// Matched on Name exactly, the key seeds.csv itself uses and the key
+		// that merge uses, so the check cannot disagree with the consumer. This
+		// endpoint takes a seeding as a FINISHED artefact (see above), so
+		// refusing here costs nothing: the console's own path is
+		// PUT /competitions/:id, which carries the roster and its seeds together
+		// and cannot produce this state.
+		//
+		// A roster that cannot be READ is not a bad seeding: it is answered
+		// 500, so the operator is not told their submission is wrong when
+		// nothing has actually checked it, and the failure surfaces as a 5xx
+		// instead of hiding among ordinary client rejections.
+		if err := rejectSeedsOffRoster(store, id, assignments); err != nil {
+			if errors.Is(err, errSeedRosterUnreadable) {
+				internalError(c, err)
+				return
+			}
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
 		}
 
 		if err := store.SaveSeeds(id, assignments); err != nil {

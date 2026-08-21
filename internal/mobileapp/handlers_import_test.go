@@ -287,6 +287,46 @@ competitions:
 		assert.Nil(t, stored, "missing-seeds failure must not leave a half-written competition on disk")
 	})
 
+	// A seeds file states a seeding as a finished artefact, so one whose ranks
+	// are not contiguous from 1 aborts its row rather than landing a
+	// competition that no draw will then accept. It joins the missing-file and
+	// unparseable cases above, and rolls back for the same retry-safety reason.
+	t.Run("Import Error - Incomplete Seeding", func(t *testing.T) {
+		body := &bytes.Buffer{}
+		writer := multipart.NewWriter(body)
+		manifestPart, _ := writer.CreateFormFile("files", "manifest.yaml")
+		manifestPart.Write([]byte(`
+competitions:
+  - id: "comp-gapped-seeds"
+    name: "Gapped Seeds"
+    participants: "players-gapped.csv"
+    seeds: "gapped-seeds.csv"
+`))
+		playersPart, _ := writer.CreateFormFile("files", "players-gapped.csv")
+		playersPart.Write([]byte("Player 1,Dojo A\nPlayer 2,Dojo B"))
+		seedsPart, _ := writer.CreateFormFile("files", "gapped-seeds.csv")
+		seedsPart.Write([]byte("Rank,Name\n4,Player 1\n"))
+		writer.Close()
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/tournament/import", body)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string][]ImportResult
+		json.Unmarshal(w.Body.Bytes(), &resp)
+		require.Len(t, resp["results"], 1)
+		assert.Contains(t, resp["results"][0].Error, "seed ranks 1, 2 and 3 have not been set",
+			"the row error must name the ranks to fix, not restate the rule")
+		assert.Contains(t, resp["results"][0].Error, "gapped-seeds.csv",
+			"with several files in one bundle the error must name which one")
+		assert.Contains(t, resp["results"][0].Error, "then import again",
+			"the remedy must fit the boundary: a file to fix, not a form to retype")
+		stored, _ := store.LoadCompetition("comp-gapped-seeds")
+		assert.Nil(t, stored, "a refused seeding must not leave a half-written competition on disk")
+	})
+
 	// Empty seeds parse (header-only file, all rows malformed) is the
 	// soft path, no error, SeedCount=0. Symmetric with how the
 	// participants block treats an empty roster file. Pin so a future
@@ -659,10 +699,10 @@ competitions:
 
 	// Cross-file guard symmetry: POST /competitions and PUT /competitions/:id
 	// call validateCompetitionCourts to reject empty / multi-character /
-	// >26-court manifests. Pre-fix, the import path bypassed this check,
+	// oversized manifests. Pre-fix, the import path bypassed this check,
 	// so a manifest row could persist court labels that no other write
 	// path would accept. Two failure modes to cover: multi-character label
-	// (court="AA"), and >26 courts.
+	// (court="AA"), and too many courts.
 	t.Run("Invalid Courts Rejected Per Row", func(t *testing.T) {
 		// Multi-character court label
 		body := &bytes.Buffer{}
@@ -693,7 +733,7 @@ competitions:
 		stored, _ := store.LoadCompetition("bad-court-label")
 		assert.Nil(t, stored, "bad-court-label must not have been persisted")
 
-		// Too many courts (>26)
+		// Too many courts (over the cap)
 		body2 := &bytes.Buffer{}
 		writer2 := multipart.NewWriter(body2)
 		manifestPart2, _ := writer2.CreateFormFile("files", "manifest.yaml")
@@ -717,7 +757,7 @@ competitions:
 		require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &resp2))
 		require.Len(t, resp2.Results, 1)
 		assert.Contains(t, resp2.Results[0].Error, "courts",
-			">26 courts should be rejected by validateCompetitionCourts")
+			"too many courts should be rejected by validateCompetitionCourts")
 		stored2, _ := store.LoadCompetition("too-many-courts")
 		assert.Nil(t, stored2, "too-many-courts must not have been persisted")
 
@@ -894,6 +934,45 @@ func TestImportCompetition_InheritsTournamentCourts(t *testing.T) {
 		res := importCompetition(store, entry, map[string][]byte{})
 		require.Emptyf(t, res.Error, "import should succeed: %s", res.Error)
 		comp, err := store.LoadCompetition("imp-one-court")
+		require.NoError(t, err)
+		assert.Equal(t, []string{"B"}, comp.Courts)
+	})
+}
+
+// The importer runs the SAME court gate as POST /competitions, including the
+// tournament-membership rule.
+//
+// It used to run only the label and shiaijo-count halves, so a manifest naming
+// shiaijo the venue does not have persisted cleanly and failed later at the
+// engine's draw gate -- the exact outcome the create handler added the
+// membership check to prevent. The two paths both author a brand-new
+// allocation, so the set of rules must not vary between them.
+func TestImportCompetition_RefusesCourtsTheVenueLacks(t *testing.T) {
+	store, err := state.NewStore(t.TempDir())
+	require.NoError(t, err)
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name: "T", Date: "11-06-2026", Courts: []string{"A", "B"},
+	}))
+
+	t.Run("a manifest court the tournament does not have is refused", func(t *testing.T) {
+		entry := ImportManifestComp{ID: "imp-orphan", Name: "Orphan", Date: "11-06-2026", Courts: []string{"C"}}
+		res := importCompetition(store, entry, map[string][]byte{})
+		require.NotEmpty(t, res.Error, "a competition on shiaijo C cannot run at a venue with only A and B")
+		assert.Contains(t, res.Error, "courts:")
+		// Refused means NOT written: a row that fails validation must leave no
+		// competition behind for the draw gate to trip over later.
+		// LoadCompetition answers a missing id with (nil, nil), so the nil is
+		// the assertion, not the error.
+		comp, err := store.LoadCompetition("imp-orphan")
+		require.NoError(t, err)
+		assert.Nil(t, comp)
+	})
+
+	t.Run("a subset of the tournament's shiaijo still imports", func(t *testing.T) {
+		entry := ImportManifestComp{ID: "imp-subset", Name: "Subset", Date: "11-06-2026", Courts: []string{"B"}}
+		res := importCompetition(store, entry, map[string][]byte{})
+		require.Emptyf(t, res.Error, "import should succeed: %s", res.Error)
+		comp, err := store.LoadCompetition("imp-subset")
 		require.NoError(t, err)
 		assert.Equal(t, []string{"B"}, comp.Courts)
 	})

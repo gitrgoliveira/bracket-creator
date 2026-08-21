@@ -612,9 +612,9 @@ func TestReinstateHandler_InternalError(t *testing.T) {
 // Viewer, competitions with HasParticipantIDs=true
 // ---------------------------------------------------------------------------
 
-// TestViewerCompetitions_HasParticipantIDs covers the hasIDsHint-set branch
-// (lines 67-70 in handlers_viewer.go) via GET /api/viewer/competitions and
-// (lines 158-161) via GET /api/viewer/competitions/:id.
+// TestViewerCompetitions_HasParticipantIDs covers the
+// comp.ParticipantIDsHint() hint-set path in handlers_viewer.go via
+// GET /api/viewer/competitions and GET /api/viewer/competitions/:id.
 func TestViewerCompetitions_HasParticipantIDs(t *testing.T) {
 	r, store, _, _, _ := setupTestRouter(t)
 	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: ""}))
@@ -731,8 +731,8 @@ func TestCourtCurrent_MatchNotRunning(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 }
 
-// TestCourtCurrent_HasParticipantIDs covers the comp.HasParticipantIDs hasIDsHint
-// branch (lines 80-83 in handlers_display.go) when finding a running match.
+// TestCourtCurrent_HasParticipantIDs covers the comp.ParticipantIDsHint()
+// hint-set path in handlers_display.go when finding a running match.
 func TestCourtCurrent_HasParticipantIDs(t *testing.T) {
 	r, store, _, _, _ := setupTestRouter(t)
 	require.NoError(t, store.SaveTournament(&state.Tournament{

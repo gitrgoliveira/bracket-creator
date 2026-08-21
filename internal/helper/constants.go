@@ -46,15 +46,35 @@ const (
 	DefaultCourts   = 2
 )
 
-// MaxCourts is the upper bound for the number of Shiaijo (courts).
-// It comes from the single-letter A–Z labelling used on Shiaijo headers
-// throughout the workbook; values above this are rejected up front by
-// ValidateCourts so we never silently truncate a user-requested layout.
+// MaxCourts is the upper bound on the number of Shiaijo (courts) a tournament
+// may have.
 //
-// Mirrored client-side as `MAX_COURTS` in web-mobile/js/admin_helpers.jsx,
-// keep the two in lockstep. The JS side is anchored by a comment back here
-// so changes are visible at both edit points.
-const MaxCourts = 26
+// SIXTEEN, and it is a decision about the sport rather than about labelling: 16
+// is the largest allocation any single competition can legally hold
+// (validShiaijoCounts, R9 -- a knockout draw gives each shiaijo its own block
+// and the blocks merge in pairs), so shiaijo beyond the 16th could never all be
+// given to one competition. Supporting counts no competition can use bought
+// nothing but wider allocations, bigger sheets and more numbers to validate.
+//
+// A count above it is REFUSED at every write path (ValidateCourts on the CLI,
+// validateCourtLabels in the app), so an operator is never silently given a
+// smaller layout than they asked for. The deeper helpers that have no error
+// channel -- the draw builder and the sheet writers -- clamp to it instead
+// (clampCourts), so an unvalidated caller cannot make them allocate or index
+// past it.
+//
+// Mirrored client-side as `MAX_COURTS` in web-mobile/js/admin_helpers.jsx and
+// web/js/validation.js; keep all three in lockstep (pinned by TestPinMaxCourts
+// and TestShiaijoRuleJSMirrorsMatchTheGoMessage).
+const MaxCourts = 16
+
+// courtLabelAlphabet names the shiaijo, in order: one letter per supported
+// court, so CourtLabel cannot produce a name for a court the rest of the system
+// would refuse. Sized TO MaxCourts rather than the other way round -- the cap is
+// the decision, this is its vocabulary -- and TestPinMaxCourts asserts the two
+// agree, which is what keeps an index past the cap a panic rather than a letter
+// nothing else accepts.
+const courtLabelAlphabet = "ABCDEFGHIJKLMNOP"
 
 // MaxRankOverride is the absolute upper bound for a manual rank override
 // submitted via PUT /api/competitions/:id/pools/:poolId/override-rank.

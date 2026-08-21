@@ -1,6 +1,6 @@
 # Data model
 
-The tournament app keeps all live state in plain files under a single data folder. There is
+The tournament app keeps all tournament state in plain files under a single data folder. There is
 no database. This page describes the entities, how they relate, and how they are laid out on
 disk.
 
@@ -375,7 +375,7 @@ three things are worth knowing.
 cell. That keeps the file to one row per match, at the cost of the richest data in a team
 competition not being readable as columns.
 
-**Lists live inside cells.** A side's struck points are joined with `|` in one field, so a
+**Lists sit inside cells.** A side's struck points are joined with `|` in one field, so a
 two point match reads `M|K` rather than occupying two columns.
 
 **The judges' decision rides in the score.** A match won on referee decision has no column

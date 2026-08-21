@@ -94,8 +94,10 @@ describe('makeSlotLabeller: resolves a slot to the number the bracket prints', (
   });
 
   it('uses the server matchNumber when no display model is supplied', () => {
-    // Legacy/no-metadata callers: state.BracketMatch.MatchNumber is
-    // equal-by-contract with matchNumById (engine.assignBracketMatchNumbers).
+    // Callers that hold no display model, e.g. bracketSlotLabeller. There is no
+    // second numbering to reconcile any more: on a numbered bracket
+    // buildDisplayModel's matchNumById holds match.matchNumber verbatim, so this
+    // path reads the same served field one step earlier.
     const rounds = [
       [{ id: 'a0', sideA: 'P1', sideB: 'P2', matchNumber: 7 }],
       [{ id: 'b0', sideA: 'Winner of r2-m0', sideB: 'P3' }],

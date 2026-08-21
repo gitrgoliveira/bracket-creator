@@ -36,6 +36,18 @@ type ImportManifestComp struct {
 	// SwissRounds, number of Swiss rounds to play when format=swiss
 	// (FR-050a). Ignored for other formats.
 	SwissRounds int `yaml:"swiss_rounds"`
+	// ExtraQualifiers, how many finishers each pool sends to the knockout
+	// (bc-qual): "", "larger-pools" or "fill-bracket". Same key and same
+	// values as the competition's own config.md, so a manifest states it the
+	// way the file it produces does. Only meaningful for format=mixed;
+	// normalizeExtraQualifiers zeroes it for the rest, and
+	// state.ValidateExtraQualifiers rejects an unknown value or one paired
+	// with maximum sizing / pool_winners >= 2, exactly as POST /competitions
+	// does. Carried here because every other pool-config field already is:
+	// without it, a competition an operator set up with a non-default
+	// knockout-qualifier mode could not be expressed as a manifest at all,
+	// and a manifest that tried would have the key silently dropped.
+	ExtraQualifiers string `yaml:"extra_qualifiers"`
 	// File names relative to the uploaded set
 	Participants string `yaml:"participants"`
 	Seeds        string `yaml:"seeds"`
@@ -161,7 +173,11 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 		StartTime:      strings.TrimSpace(entry.StartTime),
 		Date:           strings.TrimSpace(entry.Date),
 		SwissRounds:    entry.SwissRounds,
-		Status:         state.CompStatusSetup,
+		// bc-qual: trimmed like every other free-text field above, so a
+		// manifest with `extra_qualifiers: " larger-pools "` matches the
+		// canonical value rather than being rejected as unknown.
+		ExtraQualifiers: strings.TrimSpace(entry.ExtraQualifiers),
+		Status:          state.CompStatusSetup,
 	}
 	// Cross-file guard symmetry with handlers_competition.go (POST + PUT):
 	// reject oversized string fields before they land on disk. Without
@@ -172,17 +188,33 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 		return res
 	}
 
-	// Cross-file guard symmetry with the POST /competitions and
-	// PUT /competitions/:id handlers, which call validateCompetitionCourts
-	// to reject empty / multi-character / >26-court manifests. Pre-fix the
-	// import path bypassed this check and could land a Competition with
-	// court labels that no other write path would accept, e.g. a manifest
-	// row with 30 courts or court="AA" would persist via SaveCompetition
-	// here while the same value via the REST API would 400. Empty courts
-	// are permitted here, resolveCompetitionCourts (below, once the
-	// tournament is loaded) inherits the tournament's courts, matching the
-	// POST/PUT handlers. Per-row res.Error to match the other patterns.
-	if err := validateCompetitionCourts(comp.Courts); err != nil {
+	// Load the tournament once per row; the cost is a file stat + cache hit
+	// after the first row. It feeds three checks below (shiaijo inheritance,
+	// the court validators and the date-range check). Failures are soft
+	// (res.Error, not HTTP abort) matching all other per-row validation
+	// patterns.
+	importTourn, importTournErr := store.LoadTournament()
+	if importTournErr != nil {
+		res.Error = "load tournament: " + importTournErr.Error()
+		return res
+	}
+
+	// Guarantee >=1 court: a manifest row that omits courts inherits the
+	// tournament's courts, identical to the POST /competitions and PUT
+	// settings handlers (resolveCompetitionCourts). Keeps all three write
+	// paths on one rule instead of a special-case "A" default for imports.
+	//
+	// Resolved BEFORE the court validator below, matching POST /competitions.
+	// A manifest that simply omits the optional `courts:` key is the ORDINARY
+	// case, so validating the pre-resolution list meant the commonest import
+	// on a 3-shiaijo venue silently persisted a 3-shiaijo competition, while
+	// the same manifest with the courts spelled out was refused.
+	comp.Courts = resolveCompetitionCourts(comp.Courts, importTourn)
+
+	// The same gate POST /competitions runs, on the same resolved list: an
+	// imported row authors a brand-new allocation exactly as a create does.
+	// Per-row res.Error to match the other patterns.
+	if err := validateCompetitionCourts(comp.Courts, comp.Format, importTourn); err != nil {
 		res.Error = "courts: " + err.Error()
 		return res
 	}
@@ -198,24 +230,10 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 
 	// Cross-file guard symmetry with POST/PUT /competitions: reject a
 	// competition date that falls outside the tournament's day range.
-	// Load the tournament once per row; the cost is a file stat + cache
-	// hit after the first row. Failures are soft (res.Error, not HTTP
-	// abort) matching all other per-row validation patterns.
-	importTourn, importTournErr := store.LoadTournament()
-	if importTournErr != nil {
-		res.Error = "load tournament: " + importTournErr.Error()
-		return res
-	}
 	if err := validateCompetitionDateInTournament(comp, importTourn); err != nil {
 		res.Error = err.Error()
 		return res
 	}
-
-	// Guarantee >=1 court: a manifest row that omits courts inherits the
-	// tournament's courts, identical to the POST /competitions and PUT
-	// settings handlers (resolveCompetitionCourts). Keeps all three write
-	// paths on one rule instead of a special-case "A" default for imports.
-	comp.Courts = resolveCompetitionCourts(comp.Courts, importTourn)
 
 	// Cross-file guard symmetry with POST /competitions and PUT
 	// /competitions/:id (handlers_competition.go): reject unknown formats
@@ -238,6 +256,23 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 	}
 	if comp.PoolSizeMode == "" {
 		comp.PoolSizeMode = "max"
+	}
+
+	// Cross-file guard symmetry with POST /competitions and PUT
+	// /competitions/:id: a knockout-qualifier mode a manifest states must pass
+	// exactly the rule the REST API applies, or an import could persist a
+	// competition whose settings the API would refuse and whose draw
+	// generatePools then rejects with an error about pool FORMATION rather
+	// than about the setting that caused it.
+	//
+	// Runs AFTER the PoolSizeMode default above, deliberately: an omitted
+	// `pool_size_mode` becomes "max" here, and validating before the default
+	// would read the empty value as minimum sizing, accept a non-standard
+	// mode, and then store the pair the rule forbids.
+	normalizeExtraQualifiers(comp)
+	if err := state.ValidateExtraQualifiers(comp.ExtraQualifiers, comp.PoolSizeMode, comp.EffectivePoolWinners()); err != nil {
+		res.Error = "extraQualifiers: " + err.Error()
+		return res
 	}
 
 	// Parse participants AND seeds BEFORE saving the competition config.
@@ -306,6 +341,20 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 				res.Error = err.Error()
 				return res
 			}
+		}
+		// A seeds file states a seeding as a finished artefact, so a broken one
+		// aborts its row rather than landing a competition that no draw will
+		// accept. Same reasoning as the seeds endpoint, and it joins the checks
+		// already above: missing file, unparseable, oversized name.
+		//
+		// This bundle is hand-assembled (there is no exporter that emits a
+		// manifest, so nothing the app itself wrote can be refused here), and
+		// the row rolls back on error, so a rejection can never leave a
+		// half-imported competition behind.
+		if err := domain.ValidateAssignments(assignments); err != nil {
+			res.Error = fmt.Sprintf("seeds file %q: %s", entry.Seeds,
+				seedRejection(assignments, err, seedGapRemedyImport))
+			return res
 		}
 		if len(assignments) > 0 {
 			parsedSeeds = assignments

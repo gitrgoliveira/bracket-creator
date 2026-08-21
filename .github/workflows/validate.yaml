@@ -54,7 +54,15 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          # Pinned, not "latest": a floating pin means CI's linter (and its
+          # bundled gosec ruleset) can change overnight with zero commits in
+          # this repo. That is exactly what broke every open PR's gate on
+          # 2026-08-20 -- v2.13.1 was built the same day this stopped
+          # passing, and it newly flags rand.Shuffle (G404) that v2.12.2
+          # (the Makefile's pin, used by `make go/lint` locally) did not.
+          # Keep this in lockstep with the `go install` version in
+          # Makefile's go/lint target so a local green run predicts CI.
+          version: v2.13.1
 
       #   ____             _
       #  |  _ \  ___   ___| | _____ _ __
@@ -128,8 +136,10 @@ jobs:
   # | |_| |___) |   | |  __/\__ \ |_
   #  \___/|____/    |_|\___||___/\__|
   #
-  # Runs the web-mobile vitest suite (unit + render projects) so missing
-  # window.* references in component render paths are caught in CI.
+  # Runs both JS suites. web-mobile (unit + render projects) so missing window.*
+  # references in component render paths are caught in CI; web/ because the CLI
+  # wrapper's form validation restates rules the Go side owns (the legal shiaijo
+  # counts among them), and a restatement nothing executes drifts silently.
   test-js:
     permissions:
       contents: read
@@ -143,13 +153,21 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: web-mobile/package-lock.json
+          cache-dependency-path: |
+            web-mobile/package-lock.json
+            web/package-lock.json
 
-      - name: Install JS dependencies
+      - name: Install JS dependencies (web-mobile)
         run: cd web-mobile && npm ci
 
       - name: Run JS tests (unit + render)
         run: cd web-mobile && npm test
+
+      - name: Install JS dependencies (web)
+        run: cd web && npm ci
+
+      - name: Run web tests
+        run: cd web && npm test
 
   #   ____  ____  _____   _____         _
   #  |  _ \|  _ \|  ___| |_   _|__  ___| |_

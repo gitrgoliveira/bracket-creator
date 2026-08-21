@@ -316,10 +316,22 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
 
   // Opens the confirm modal (does NOT start anything). The dashboard's
   // "Start all" button calls this; confirmation happens inside the modal.
+  //
+  // A competition whose shiaijo allocation the draw cannot split is SPLIT OUT
+  // rather than offered: the server refuses its start with a 400, so batching
+  // it in produced a guaranteed entry in the "failed" list and a raw API
+  // message. Same derived value as the competition header and the dashboard
+  // card (competitionDrawBlockedReason, admin_helpers.jsx). They are listed in
+  // the modal with their reason instead of being silently dropped, so "start
+  // all" never quietly means "start most".
   const startAllCompetitions = () => {
-    const setupComps = (t.competitions || []).filter(c => c.status === "setup" && (c.players || []).length >= 2);
-    if (setupComps.length === 0) return;
-    setStartAll({ phase: "confirm", comps: setupComps, failed: [] });
+    const { startable, blocked } = window.partitionStartableCompetitions(t.competitions, t.courts);
+    // Nothing to say at all: no eligible competitions.
+    if (startable.length === 0 && blocked.length === 0) return;
+    // When EVERY eligible competition is blocked, still open the modal.
+    // Returning early would leave the dashboard's "Start all" button dead on
+    // click with no explanation anywhere.
+    setStartAll({ phase: "confirm", comps: startable, blocked, failed: [] });
   };
 
   // Runs the actual start for a given set of competitions. Used both for the
@@ -367,6 +379,13 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     showToast(`${c.name} started`);
   };
 
+  // Re-throws after surfacing the error toast, exactly like updateCompetition
+  // and addCompetition above, so the Edit-details form can put the server's
+  // reason in its own banner. It used to swallow the rejection into a `false`
+  // return, which left an 8-second toast as the only trace of, say, the
+  // orphaned-shiaijo refusal — long gone by the time the operator scrolled
+  // back to the Save button. `false` still means "component unmounted mid-PUT"
+  // (nothing to report to), which is why the boolean survives.
   const updateTournament = async (patch) => {
     try {
       // Surface a new password to the parent BEFORE the API call so the
@@ -407,7 +426,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     } catch (e) {
       if (!mountedRef.current) return false;
       showToast(e.message, "error");
-      return false;
+      throw e;
     }
   };
 
@@ -637,22 +656,23 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       tournament={t}
       onCancel={() => setView({ kind: "dashboard" })}
       onCreate={async (c) => {
+        // Deliberately NOT wrapped in try/catch: addCompetition already
+        // toasts the failure, and the rejection must reach
+        // AdminCreateCompetition so the form can put the server's reason in
+        // its own error banner. Swallowing it here left the operator with a
+        // button that did nothing visible once the toast expired.
+        const created = await addCompetition(c);
+        // Non-blocking court-clash check: warn if the new competition lands
+        // on a shiaijo already in use at the same time. The create still
+        // proceeds; the operator can adjust its start time / courts after.
         try {
-          const created = await addCompetition(c);
-          // Non-blocking court-clash check: warn if the new competition lands
-          // on a shiaijo already in use at the same time. The create still
-          // proceeds; the operator can adjust its start time / courts after.
-          try {
-            const clashes = await window.API.getScheduleClashes(created.id, password);
-            if (Array.isArray(clashes) && clashes.length > 0) {
-              const names = clashes.map((w) => w.otherCompName).join(", ");
-              showToast(`Heads up: court clash with ${names}. Adjust start time or courts in Settings`, "error");
-            }
-          } catch { /* clash check is best-effort; never block creation */ }
-          setView({ kind: "competition", id: created.id, section: "participants" });
-        } catch {
-          // error already alerted inside addCompetition
-        }
+          const clashes = await window.API.getScheduleClashes(created.id, password);
+          if (Array.isArray(clashes) && clashes.length > 0) {
+            const names = clashes.map((w) => w.otherCompName).join(", ");
+            showToast(`Heads up: court clash with ${names}. Adjust start time or courts in Settings`, "error");
+          }
+        } catch { /* clash check is best-effort; never block creation */ }
+        setView({ kind: "competition", id: created.id, section: "participants" });
       }}
       onLogout={onLogout}
       onViewerMode={onViewerMode}
@@ -815,7 +835,13 @@ function normalizeCreatedRecord(created) {
 // while phase === "running".
 function StartAllModal({ state, onConfirm, onRetry, onClose }) {
   const dismissable = state.phase !== "running";
-  const { phase, comps = [], failed = [] } = state;
+  // `blocked` is [{ comp, reason }] for competitions this action must NOT
+  // offer: a shiaijo allocation the draw cannot split, or a seeding that is
+  // not yet complete, either of which the server would refuse the start over.
+  // They are named with their reason instead of dropped, so the count in the
+  // button and the competitions on the dashboard still add up for the operator.
+  // Each reason arrives with its own remedy attached.
+  const { phase, comps = [], failed = [], blocked = [] } = state;
 
   let title = "Start all competitions";
   if (phase === "running") title = "Starting competitions…";
@@ -824,7 +850,7 @@ function StartAllModal({ state, onConfirm, onRetry, onClose }) {
   const footer = <>
     {phase === "confirm" && <>
       <button type="button" className="btn btn--ghost" onClick={onClose}>Cancel</button>
-      <button type="button" className="btn btn--primary" onClick={onConfirm}>Start {window.pluralize(comps.length, "competition")}</button>
+      <button type="button" className="btn btn--primary" onClick={onConfirm} disabled={comps.length === 0}>Start {window.pluralize(comps.length, "competition")}</button>
     </>}
     {phase === "result" && <>
       {failed.length > 0 && <button type="button" className="btn btn--primary" onClick={onRetry}>Retry failed</button>}
@@ -836,12 +862,32 @@ function StartAllModal({ state, onConfirm, onRetry, onClose }) {
     <Modal title={title} onClose={onClose} dismissable={dismissable} footer={footer}>
       {phase === "confirm" && <>
         <p className="start-all__lead">
-          This will start {window.pluralize(comps.length, "competition")} now. Once a
-          competition starts, its pools and bracket are generated and scoring opens.
+          {comps.length === 0
+            ? "Nothing can be started yet."
+            : <>This will start {window.pluralize(comps.length, "competition")} now. Once a
+              competition starts, its pools and bracket are generated and scoring opens.</>}
         </p>
         <ul className="start-all__list">
           {comps.map(c => <li key={c.id}>{c.name}</li>)}
         </ul>
+        {blocked.length > 0 && (
+          <div data-testid="start-all-blocked">
+            <p className="start-all__lead">
+              {window.pluralize(blocked.length, "competition")} will NOT be started:
+            </p>
+            <ul className="start-all__list start-all__list--failed">
+              {blocked.map(b => (
+                <li key={b.comp.id}>
+                  <span className="start-all__failed-name">{b.comp.name}</span>
+                  {/* b.reason already carries its own remedy: the list can hold
+                      several competitions blocked for DIFFERENT reasons, so a
+                      single tail written here would be wrong for some of them. */}
+                  <span className="start-all__failed-reason">{b.reason}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </>}
       {phase === "running" && (
         <div className="start-all__running">
@@ -874,4 +920,8 @@ window.mergeCompetitionsIntoTournament = mergeCompetitionsIntoTournament;
 window.mergeTournamentPatch = mergeTournamentPatch;
 window.normalizeCreatedRecord = normalizeCreatedRecord;
 
-export { mergeCompetitionsIntoTournament, mergeTournamentPatch, normalizeCreatedRecord };
+// StartAllModal is exported for the render suite only: it is a module-internal
+// component with no window binding, and its confirm phase now carries the
+// "will NOT be started" list, which is the surface that stops "Start all"
+// offering a competition the server would refuse.
+export { mergeCompetitionsIntoTournament, mergeTournamentPatch, normalizeCreatedRecord, StartAllModal };

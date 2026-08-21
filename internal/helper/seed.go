@@ -230,16 +230,28 @@ func StandardSeeding(players []Player) []Player {
 // PoolSeeding reorders players for pool distribution so that top seeds land
 // in pools that are appropriately spread across the given number of courts.
 //
-// It assigns seeds to courts in a round-robin fashion and uses a per-court
+// It assigns each seed to a court by seedCourtOrder (D6) and uses a per-court
 // priority to ensure correct bracket placement (e.g., top and bottom of the
 // court's bracket) after the pools are deinterleaved by ReorderPoolsForCourts.
+//
+// Placement is keyed on each player's RANK, never on its position among the
+// seeded players, and the set handed in does NOT have to be contiguous: seeds
+// {1, 3, 4} place rank 3 in rank 3's quarter, leaving rank 2's empty. That is
+// the same promise StandardSeedingFull makes, and it is what engine.SeedWarnings
+// reports against, so a caller that renumbers a gapped set before calling would
+// silently move seeds. engine.dropSeedAssignments produces exactly such a set
+// when a seeded competitor does not check in.
+//
+// numCourts must be the count the DRAW will run on (helper.EffectiveDrawCourts),
+// not the operator's raw allocation: it is the modulus the spread is computed
+// against, and the pool deinterleave and pool-to-shiaijo allocation have to
+// agree with it.
 func PoolSeeding(players []Player, numPools int, numCourts int) []Player {
 	if numPools <= 0 {
 		return players
 	}
-	if numCourts < 1 {
-		numCourts = 1
-	}
+	// Both ends, through the one owner: numCourts is the spread modulus below.
+	numCourts = clampCourts(numCourts)
 
 	seeded := make([]Player, 0)
 	unseeded := make([]Player, 0)
@@ -294,10 +306,24 @@ func PoolSeeding(players []Player, numPools int, numCourts int) []Player {
 	occupied := make(map[int]bool)
 
 	// Assign seeded players based on court-aware priority order.
-	for i, p := range seeded {
-		// global pool rank (0 to numPools-1)
-		poolRank := i % numPools
-		posInPool := i / numPools // which slot within the pool
+	for _, p := range seeded {
+		// si is the seed's RANK minus one, NOT its position in the sorted
+		// list. The two coincide for a contiguous set 1..N, but the set that
+		// reaches here can be GAPPED: engine.dropSeedAssignments removes the
+		// assignments of seeds who did not check in, after the validating load
+		// has already run, and the survivors keep their raw ranks (e.g.
+		// {1, 3, 4}). Reading the position would then place rank 3 in rank 2's
+		// quarter -- and helper.SeedPlacementWarnings, which reads the RANK,
+		// would report the resulting spread as a configuration the operator
+		// chose. Both derived quantities below read the rank space, so the two
+		// stay in the same space as the warnings.
+		si := p.Seed - 1
+		// global pool rank (0 to numPools-1). Pool rank r lands on court
+		// r%numCourts (the deinterleave ReorderPoolsForCourts applies), so
+		// targeting a rank whose court is seedCourtOrder's is what puts the
+		// seed in D6's half and quarter.
+		poolRank := seedPoolRank(si, numPools, numCourts)
+		posInPool := si / numPools // which slot within the pool
 
 		placed := false
 		for offset := 0; offset < numPools && !placed; offset++ {
@@ -413,6 +439,104 @@ func generatePoolPriority(n int) []int {
 	}
 
 	return priority
+}
+
+// seedCourtOrder returns the court seed rank i+1 (0-based i) belongs on, per
+// D6: seeds 1 and 3 fall in one HALF of the draw and seeds 2 and 4 in the
+// other, each of the four in a distinct QUARTER.
+//
+// Courts [0, k) are the draw's first half and [k, 2k) its second (k =
+// numCourts/2), and within a half the first k/2 courts are one quarter and the
+// rest the other, which is exactly how the draw combines regions. Seeds
+// alternate halves by parity; within each half the TOP seed of the pair takes
+// the INNER quarter (the one adjacent to the draw's centre) and the lower seed
+// the outer:
+//
+//	4 courts: seed 1 -> B, seed 2 -> C, seed 3 -> A, seed 4 -> D
+//	2 courts: seeds 1 and 3 -> A, seeds 2 and 4 -> B (two seeded pools per court)
+//	1 court:  every seed on the one court; the quarters are inside its region
+//
+// The inner-quarter order is the EKF's, decoded by rank-matching seeded pools
+// against the previous edition's results across six draws and two years (spec
+// D6's evidence table): the reigning champion's pool sits on court B and the
+// runner-up's on C in every 4-court EKC team draw of 2025 and 2026. The two
+// mappings differ in nothing functional -- same halves, same quarters, same
+// semifinal pairings -- so the sheets are the only authority there is, and
+// they say inner. (The WKC's linear bracket seeds its outer edges instead,
+// blocks 1/16/8/9; that geometry belongs to a bracket without court regions
+// and is recorded in the spec, not implemented here.)
+//
+// This deliberately differs from the conventional bracket, which groups seed 4
+// with 1 and 3 with 2 and gives semifinals 1 v 4 and 2 v 3. The operator chose
+// 1 with 3 and 2 with 4, so the semifinals are 1 v 3 and 2 v 4 when the seeds
+// hold. It used to be a plain round robin over courts (seed 1 -> A, 2 -> B,
+// 3 -> C, 4 -> D), which put seeds 1 and 2 in the SAME half of a 4-court draw
+// and let them meet in a semifinal rather than the final.
+//
+// Ranks beyond the 4th, and any rank the court count cannot separate, fall back
+// to the round robin: there is no further structure to spread them over. The
+// operator may set ANY number of seeds, zero included (R1); this is a function
+// of one seed's position and never reads the total.
+//
+// i is the seed's RANK minus one, and every "seed n" above reads it as rank
+// n+1. Callers MUST pass p.Seed-1; the seed's INDEX in the rank-sorted list is
+// NOT a substitute, because the set reaching the draw is not always contiguous.
+//
+// domain.ValidateAssignments does reject a gap, but it only guarantees that for
+// the operator's INPUT. A gapped set still reaches placement: after that
+// validating load, engine.dropSeedAssignments (internal/engine/competition.go)
+// removes the assignments of seeded competitors who did not check in, and the
+// survivors keep their RAW ranks -- {1, 2, 3, 4} minus a rank-2 no-show is
+// {1, 3, 4}. Nothing renumbers or re-validates in between.
+//
+// Keying on the index there is not a cosmetic slip. Rank 3 would take index 1,
+// land in rank 2's quarter, and the draw would no longer be the one those seeds
+// describe; helper.SeedPlacementWarnings reads the RANK, so it would then report
+// the halves it could not honour as if the operator's configuration, rather than
+// the check-in drop, had caused it. Placement and warnings must read one space.
+func seedCourtOrder(i, numCourts int) int {
+	if numCourts < 2 || i >= 4 {
+		return i % numCourts
+	}
+	k := numCourts / 2
+	// Step of one QUARTER inside a half. With a single court per half the two
+	// quarters live inside that court's own region, so there is nowhere to step
+	// to and seeds 1 and 3 share the court (D6's two-court case; quarter is 0
+	// there, which is also why the inner/outer flip below only manifests at
+	// four courts and up -- exactly where the sheets are).
+	quarter := k / 2
+	step := i / 2
+	if i%2 == 0 {
+		// First half: the top seed of the pair takes the INNER quarter, the
+		// last quarter of the half; its partner seed takes the outer.
+		step = 1 - step
+	}
+	court := (i%2)*k + step*quarter
+	if court >= numCourts {
+		court = numCourts - 1
+	}
+	return court
+}
+
+// seedPoolRank maps a seed to the pool rank whose court is seedCourtOrder's,
+// keeping seeds that share a court on different pools of it. Falls back to the
+// plain round robin when the derived rank is out of range (fewer pools than
+// courts), and the placement loop's own offset search then resolves any
+// collision.
+//
+// i is the seed's RANK minus one, as in seedCourtOrder: a gapped set is
+// possible, so a sparse high rank can fall out of range here and take the round
+// robin instead. That degrades predictably (D7) and is why the fallback and the
+// caller's offset search both stay.
+func seedPoolRank(i, numPools, numCourts int) int {
+	if numCourts < 2 {
+		return i % numPools
+	}
+	rank := (i/numCourts)*numCourts + seedCourtOrder(i, numCourts)
+	if rank >= numPools {
+		return i % numPools
+	}
+	return rank
 }
 
 // ApplySeeds assigns seeds to the helper players, handling swaps if needed

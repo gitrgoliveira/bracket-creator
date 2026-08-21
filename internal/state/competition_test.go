@@ -565,3 +565,96 @@ func TestStore_HandEditedOutOfBandDurationIsPinnedOnLoad(t *testing.T) {
 	assert.Equal(t, MaxMatchDurationSeconds, got.PoolMatchDurationSeconds,
 		"a hand-edited out-of-band value must be pinned on load, or every later save 400s")
 }
+
+// --- ExtraQualifiers (bc-qual) round-trip ---
+
+// TestExtraQualifiersFieldRoundTrip mirrors TestNaginataFieldPersists: the
+// field must survive a front-matter round-trip for each valid value, an
+// absent key must default to "" (ExtraQualifiersNone), and an empty value
+// must be omitted from the written YAML (omitempty) so standard-mode
+// config.md files stay clean and byte-identical to before this field
+// existed.
+func TestExtraQualifiersFieldRoundTrip(t *testing.T) {
+	t.Run("larger-pools round-trips through front-matter", func(t *testing.T) {
+		original := Competition{
+			ID:              "lp-comp",
+			Name:            "Larger Pools Test",
+			ExtraQualifiers: ExtraQualifiersLargerPools,
+		}
+		data, err := writeFrontMatter(&original)
+		require.NoError(t, err)
+		assert.Contains(t, string(data), "extra_qualifiers: larger-pools")
+
+		var loaded Competition
+		require.NoError(t, parseFrontMatter(data, &loaded))
+		assert.Equal(t, ExtraQualifiersLargerPools, loaded.ExtraQualifiers)
+	})
+
+	t.Run("fill-bracket round-trips through front-matter (constant exists, storage is inert)", func(t *testing.T) {
+		// Storage round-trip is independent of ValidateExtraQualifiers: the
+		// YAML layer must not silently drop a value that validation would
+		// reject, or a stored-then-reloaded record would mutate itself.
+		original := Competition{
+			ID:              "fb-comp",
+			Name:            "Fill Bracket Test",
+			ExtraQualifiers: ExtraQualifiersFillBracket,
+		}
+		data, err := writeFrontMatter(&original)
+		require.NoError(t, err)
+		assert.Contains(t, string(data), "extra_qualifiers: fill-bracket")
+
+		var loaded Competition
+		require.NoError(t, parseFrontMatter(data, &loaded))
+		assert.Equal(t, ExtraQualifiersFillBracket, loaded.ExtraQualifiers)
+	})
+
+	t.Run("absent key defaults to standard (empty string)", func(t *testing.T) {
+		yamlText := []byte("---\nid: legacy-comp\nname: Legacy Comp\n---\n")
+		var c Competition
+		require.NoError(t, parseFrontMatter(yamlText, &c))
+		assert.Equal(t, ExtraQualifiersNone, c.ExtraQualifiers,
+			"an absent extra_qualifiers key must default to standard (\"\")")
+	})
+
+	t.Run("empty value omitted from written YAML", func(t *testing.T) {
+		original := Competition{
+			ID:              "std-comp",
+			Name:            "Standard Comp",
+			ExtraQualifiers: ExtraQualifiersNone,
+		}
+		data, err := writeFrontMatter(&original)
+		require.NoError(t, err)
+		assert.NotContains(t, string(data), "extra_qualifiers",
+			"omitempty: the standard/default value must not appear in config.md")
+	})
+}
+
+// TestLoadCompetition_LegacyConfigWithoutExtraQualifiers proves the
+// end-to-end additive-migration claim through the real store: a config.md
+// written before this field existed (no extra_qualifiers key at all) loads
+// successfully and reports standard-mode behaviour, exactly like every
+// other field added to Competition after this store format was in
+// production use.
+func TestLoadCompetition_LegacyConfigWithoutExtraQualifiers(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "competitions", "pre-bc-qual"), 0o700))
+	// A representative pre-bc-qual config.md: no extra_qualifiers key, plus a
+	// handful of fields from other eras to look like a genuine legacy file
+	// rather than a synthetic minimal one.
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "competitions", "pre-bc-qual", "config.md"),
+		[]byte("---\nid: pre-bc-qual\nname: Pre BC-Qual Comp\nformat: mixed\n"+
+			"pool_size: 4\npool_size_mode: min\npool_winners: 2\n---\n"),
+		0o600))
+
+	got, err := store.LoadCompetition("pre-bc-qual")
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, ExtraQualifiersNone, got.ExtraQualifiers,
+		"a legacy config.md with no extra_qualifiers key must load as standard mode")
+	assert.NoError(t, ValidateExtraQualifiers(got.ExtraQualifiers, got.PoolSizeMode, got.EffectivePoolWinners()),
+		"the loaded default must itself be a valid setting")
+	assert.Equal(t, 2, got.EffectivePoolWinners())
+}

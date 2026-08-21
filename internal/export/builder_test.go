@@ -3,6 +3,7 @@ package export
 import (
 	"bytes"
 	"fmt"
+	"maps"
 	"os"
 	"slices"
 	"strconv"
@@ -753,7 +754,7 @@ func columnContains(rows [][]string, col int, want string) bool {
 }
 
 // TestBuildResultsWorkbook_LeagueNoPhantomBracket is the regression test for the
-// phantom-bracket bug: GenerateFinals returns placeholder "Pool A-1st" finalist
+// phantom-bracket bug: the draw returns placeholder "Pool A-1st" finalist
 // labels even for a League (which has no knockout phase), so without the
 // IsPlayoffEnabled() gate the export emitted an Elimination Matches sheet full of
 // "Round N - Match N" headers and finalist placeholders, plus "Tree 1" pages,
@@ -1236,12 +1237,31 @@ func TestPlayoffLeavesFromBracket(t *testing.T) {
 // TestBuildResultsWorkbook_PlayoffsNonPow2TopologyMatchesBracket is the regression
 // test proving the export skeleton is derived from the FROZEN bracket, not
 // recomputed from participants. For a non-power-of-two roster the engine pads the
-// bracket to the next pow2 with byes (buildBracketFromLeaves), so a 6-entry
-// playoffs is stored as an 8-leaf (7-node) tree. The previous implementation
-// recomputed an UNPADDED 6-leaf (5-node) tree at export time, a different topology
-// and match numbering than the stored bracket, which misplaces overlaid scores.
-// The export's rendered match-block count must equal the stored bracket's node
-// count (7), not the recomputed 5.
+// bracket to the next pow2 with byes (buildBracketFromDraw), so a 6-entry
+// playoffs is STORED as an 8-leaf, 7-node tree in which two nodes are structural
+// byes and one is an empty-vs-empty phantom.
+//
+// The printed sheet must carry a block per REAL bout and no more. A 6-entrant
+// knockout is 6-1 = 5 bouts, because every bout eliminates exactly one entrant;
+// the stored bracket agrees, numbering exactly those 5 (MatchNumber > 0) and
+// leaving the byes/phantoms Hidden at 0.
+//
+// This assertion used to read `bracketNodes` (7), which counted the stored byes
+// and phantoms as printable blocks. That was the defect this file's own fixture
+// had frozen (bc-cse): the export rebuilt the pow2 leaf array with
+// helper.CreateBalancedTree, which gives every "" slot a node, so it drew and
+// numbered a junction for each phantom pair and printed 7 blocks numbered 1-7
+// against a bracket numbered 1-5. Blocks 6 and 7 named no match at all and
+// blocks 1-5 named the WRONG ones, so overlayBracketScores -- which matches
+// blocks to matches BY printed number -- wrote every result into the wrong
+// block. The fix rebuilds through helper.BuildSlotTree, which collapses an
+// all-empty half exactly as the pool-fed draw does.
+//
+// The count alone no longer distinguishes the frozen bracket from a recompute
+// off participants.csv (both are 5 nodes), so the mp-ndfu guard the test exists
+// for is carried by the two assertions below it instead: the printed NUMBERS
+// must be the stored bracket's own, and a bracket carrying an entrant name that
+// participants.csv does not have must still be what the pages print.
 func TestBuildResultsWorkbook_PlayoffsNonPow2TopologyMatchesBracket(t *testing.T) {
 	t.Parallel()
 	dir, store, eng, compID := testSetup(t)
@@ -1270,13 +1290,37 @@ func TestBuildResultsWorkbook_PlayoffsNonPow2TopologyMatchesBracket(t *testing.T
 			}
 		}
 	}
+	// Rename one round-1 entrant IN THE BRACKET ONLY. participants.csv still says
+	// "P1", so a skeleton recomputed from the participants could not know this
+	// name; the tree page printing it is what proves the frozen bracket is the
+	// source (mp-ndfu). Renaming rather than reordering keeps the draw's shape,
+	// and therefore every other assertion here, untouched.
+	frozenOnlyName := "Zulu-Only-In-The-Bracket"
+	renamed := false
+	for mi := range br.Rounds[0] {
+		m := &br.Rounds[0][mi]
+		if m.SideA == "P1" {
+			m.SideA, renamed = frozenOnlyName, true
+			break
+		}
+	}
+	require.True(t, renamed, "fixture must find P1 in the stored first round")
 	require.NoError(t, store.SaveBracket(compID, br))
 
-	// Total match nodes in the stored (pow2-padded) bracket.
-	bracketNodes := 0
+	// The bracket's own numbering: exactly the real bouts, byes and phantoms at 0.
+	bracketNumbers := []int{}
 	for _, round := range br.Rounds {
-		bracketNodes += len(round)
+		for _, m := range round {
+			if m.MatchNumber > 0 {
+				bracketNumbers = append(bracketNumbers, m.MatchNumber)
+			}
+		}
 	}
+	slices.Sort(bracketNumbers)
+	// Pinned from first principles, not from what the code emits: N entrants are
+	// eliminated down to one champion by exactly N-1 bouts.
+	require.Equal(t, len(players)-1, len(bracketNumbers),
+		"a %d-entrant knockout is %d bouts", len(players), len(players)-1)
 
 	data, err := BuildResultsWorkbook(store, eng, compID)
 	require.NoError(t, err)
@@ -1286,17 +1330,256 @@ func TestBuildResultsWorkbook_PlayoffsNonPow2TopologyMatchesBracket(t *testing.T
 	rows, err := f.GetRows(helper.SheetEliminationMatches)
 	require.NoError(t, err)
 
-	headers := 0
+	printed := []int{}
 	for _, row := range rows {
 		for _, cell := range row {
-			if parseRoundMatchLabel(cell) > 0 {
-				headers++
+			if n := parseRoundMatchLabel(cell); n > 0 {
+				printed = append(printed, n)
 			}
 		}
 	}
-	assert.Equal(t, bracketNodes, headers,
-		"export match-block count must equal the stored bracket's node count (topology derived from the frozen bracket, not recomputed unpadded)")
+	slices.Sort(printed)
+	assert.Equal(t, bracketNumbers, printed,
+		"the printed match blocks must be exactly the stored bracket's numbered bouts: "+
+			"a block numbering a bye, a phantom or a number the bracket never issued sends "+
+			"overlayBracketScores' by-number lookup into the wrong block")
+
+	treeRows, err := f.GetRows("Tree 1")
+	require.NoError(t, err)
+	assert.True(t, sheetContainsCell(treeRows, frozenOnlyName),
+		"the bracket page must print the STORED bracket's entrant, not one recomputed from participants.csv")
 	assertNoBrokenFormulas(t, f, helper.SheetEliminationMatches)
+}
+
+// treeNodeRowSpan returns the sheet rows a tree-page node's subtree occupies,
+// by inverting PrintLeafNodes' placement for the cell at (col, row). ok is false
+// when the cell sits on no node position at all.
+//
+// PrintLeafNodes halves the row span and steps the column left by 2 per level,
+// so the node at column c = 2d+1 and index i within its level lands at row
+// first + i*2^d + 2^(d-1), and its subtree covers the rows
+// first + i*2^d + 1 .. first + (i+1)*2^d, which is the inclusive (lo, hi) pair
+// returned here. Both kinds of content sit at that one
+// cell: a leaf's label (writeTreeValue) and an internal node's junction
+// connector, which is where FillInMatches writes the printed match number. So a
+// junction's entrants are exactly the leaf cells whose row falls in its span,
+// which is what lets a rendered page be read back as "which bout is numbered
+// what" instead of recomputed from the code that drew it.
+func treeNodeRowSpan(col, row int) (lo, hi int, ok bool) {
+	const first = helper.TreeTitleRows + 1 // RenderTreePages' page start row
+	if col%2 == 0 {
+		return 0, 0, false
+	}
+	d := (col - 1) / 2
+	if d < 1 {
+		return 0, 0, false
+	}
+	span, off := 1<<d, 1<<(d-1)
+	rel := row - first - off
+	if rel < 0 || rel%span != 0 {
+		return 0, 0, false
+	}
+	i := rel / span
+	return first + i*span + 1, first + (i+1)*span, true
+}
+
+// TestBuildResultsWorkbook_RaggedPlayoffsScoresLandInTheRightBlocks is the
+// corruption test for bc-cse. overlayBracketScores and overlayPlayoffBracketNames
+// both find a match's score block BY ITS PRINTED NUMBER, so the printed numbering
+// is the only thing tying a result to a bout. If the Tree page numbers a
+// different bout N than the bracket does, the delivered workbook is silently
+// wrong: the block headed "Match N" carries some other pair's names and score
+// while the tree junction numbered N sits over this pair.
+//
+// A ragged (non-power-of-two) roster is the case that breaks, because only then
+// does the leaf array carry "" bye slots for a tree builder to mistake for
+// entrants. At 5 entrants the export used to print 7 junctions for a 4-bout
+// draw, and the tree's Match 1 (P001 v P002) collided with the bracket's Match 1
+// (P004 v P005), so P004/P005's score was written into the block the tree points
+// at for P001/P002.
+//
+// The check is made on the ARTIFACT, both sheets of the one workbook: every
+// score block must name competitors that the tree's junction of the same number
+// actually sits above, and must carry that bracket match's scores.
+func TestBuildResultsWorkbook_RaggedPlayoffsScoresLandInTheRightBlocks(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	comp.Kind = "individual"
+	comp.Format = state.CompFormatPlayoffs
+	comp.Status = "setup"
+	require.NoError(t, store.SaveCompetition(comp))
+
+	// 5 entrants: the smallest roster with byes at two different depths, so a
+	// bye-blind rebuild mis-numbers rather than merely mis-counting.
+	players := make([]domain.Player, 5)
+	for i := range players {
+		players[i] = domain.Player{Name: fmt.Sprintf("P%03d", i+1), Dojo: fmt.Sprintf("D%d", i+1)}
+	}
+	require.NoError(t, store.SaveParticipants(compID, players))
+	require.NoError(t, eng.StartCompetition(compID))
+
+	// Score every real bout THROUGH THE ENGINE, round by round, so each winner
+	// propagates into the next round's slots and the later blocks carry resolved
+	// names rather than "Winner of ..." placeholders. Each bout gets a DISTINCT
+	// score, so a result written into the wrong block shows up as a wrong value
+	// and not merely a wrong position.
+	br, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.NotNil(t, br)
+	ippons := [][]string{{"M"}, {"K"}, {"D"}, {"T"}}
+	for ri := range br.Rounds {
+		br, err = store.LoadBracket(compID) // pick up the previous round's propagation
+		require.NoError(t, err)
+		for _, m := range br.Rounds[ri] {
+			if m.MatchNumber <= 0 {
+				continue
+			}
+			require.LessOrEqual(t, m.MatchNumber, len(ippons), "fixture needs a distinct score per bout")
+			require.NoError(t, eng.RecordMatchResult(compID, m.ID, &state.MatchResult{
+				SideA:    m.SideA,
+				SideB:    m.SideB,
+				Winner:   m.SideA,
+				IpponsA:  ippons[m.MatchNumber-1],
+				Decision: "fought",
+				Status:   state.MatchStatusCompleted,
+			}))
+		}
+	}
+
+	br, err = store.LoadBracket(compID)
+	require.NoError(t, err)
+	byNumber := map[int]state.BracketMatch{}
+	for _, round := range br.Rounds {
+		for _, m := range round {
+			if m.MatchNumber > 0 {
+				require.Equalf(t, state.MatchStatusCompleted, m.Status,
+					"fixture must score every bout; Match %d is %q", m.MatchNumber, m.Status)
+				byNumber[m.MatchNumber] = m
+			}
+		}
+	}
+	require.Len(t, byNumber, len(players)-1,
+		"a %d-entrant knockout is %d bouts", len(players), len(players)-1)
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer f.Close()
+
+	// (1) Read the rendered tree page back: junction number -> the entrants
+	//     printed under it. One court, so the whole draw is on "Tree 1".
+	treeRows, err := f.GetRows("Tree 1")
+	require.NoError(t, err)
+	type node struct{ lo, hi int }
+	junctions := map[int]node{}
+	type leaf struct {
+		row   int
+		label string
+	}
+	var leaves []leaf
+	for r, row := range treeRows {
+		for c, value := range row {
+			col, rowNum := c+1, r+1
+			if value == "" || col < helper.TreeLabelCol {
+				continue
+			}
+			lo, hi, ok := treeNodeRowSpan(col, rowNum)
+			if !ok {
+				continue
+			}
+			if n, convErr := strconv.Atoi(value); convErr == nil {
+				// A bare integer on a node position is a printed match number;
+				// an entrant label never parses as one.
+				_, dup := junctions[n]
+				require.Falsef(t, dup, "match number %d printed twice on Tree 1", n)
+				junctions[n] = node{lo: lo, hi: hi}
+				continue
+			}
+			leaves = append(leaves, leaf{row: rowNum, label: value})
+		}
+	}
+	entrantNames := make([]string, len(players))
+	for i, p := range players {
+		entrantNames[i] = p.Name
+	}
+	printedLabels := make([]string, 0, len(leaves))
+	for _, l := range leaves {
+		printedLabels = append(printedLabels, l.label)
+	}
+	require.ElementsMatch(t, entrantNames, printedLabels,
+		"the scan must find exactly the roster, or the comparisons below are vacuous")
+
+	printedNumbers := make([]int, 0, len(junctions))
+	for n := range junctions {
+		printedNumbers = append(printedNumbers, n)
+	}
+	slices.Sort(printedNumbers)
+	bracketNumbers := make([]int, 0, len(byNumber))
+	for n := range byNumber {
+		bracketNumbers = append(bracketNumbers, n)
+	}
+	slices.Sort(bracketNumbers)
+	require.Equal(t, bracketNumbers, printedNumbers,
+		"the tree page must number exactly the bracket's bouts: an extra junction is a bye's "+
+			"empty slots drawn as a bout, and it shifts every number after it")
+
+	// (2) Read the score blocks back and check each against the bout the TREE
+	//     says carries that number. Individual layout, one court: the header at
+	//     row H puts entrant names in columns A and G of row H+2, with their
+	//     scores in B and F (overlayPlayoffBracketNames / writeScoreRowCells).
+	elimRows, err := f.GetRows(helper.SheetEliminationMatches)
+	require.NoError(t, err)
+	cellAt := func(row, col int) string {
+		if row < 0 || row >= len(elimRows) || col < 0 || col >= len(elimRows[row]) {
+			return ""
+		}
+		return elimRows[row][col]
+	}
+	checked := 0
+	for rowIdx, row := range elimRows {
+		for headerCol, cell := range row {
+			num := parseRoundMatchLabel(cell)
+			if num <= 0 {
+				continue
+			}
+			bm, ok := byNumber[num]
+			require.Truef(t, ok, "block %q names a match the bracket never numbered", cell)
+			j, ok := junctions[num]
+			require.Truef(t, ok, "block %q has no junction on the tree page", cell)
+
+			scoreRow := rowIdx + 2 // header, Red/White labels, then names+scores
+			nameA := cellAt(scoreRow, headerCol)
+			nameB := cellAt(scoreRow, headerCol+6)
+			scoreA := cellAt(scoreRow, headerCol+1)
+			scoreB := cellAt(scoreRow, headerCol+5)
+
+			// The block's competitors must be ones the tree's junction of this
+			// number sits above. This is the assertion the defect broke: under
+			// it, block 1 named P004/P005 while junction 1 spanned P001/P002.
+			under := map[string]bool{}
+			for _, l := range leaves {
+				if l.row >= j.lo && l.row <= j.hi {
+					under[l.label] = true
+				}
+			}
+			for _, name := range []string{nameA, nameB} {
+				assert.Truef(t, under[name], "%q is printed in the block for Match %d, but the tree's "+
+					"junction %d sits above %v instead", name, num, num, slices.Sorted(maps.Keys(under)))
+			}
+
+			assert.Equal(t, bm.SideA, nameA, "Match %d left entrant", num)
+			assert.Equal(t, bm.SideB, nameB, "Match %d right entrant", num)
+			assert.Equal(t, bm.ScoreA, scoreA, "Match %d left score", num)
+			assert.Equal(t, bm.ScoreB, scoreB, "Match %d right score", num)
+			checked++
+		}
+	}
+	assert.Equal(t, len(byNumber), checked, "every bout must have exactly one score block")
 }
 
 func TestBuildResultsWorkbook_PlayoffsBracket(t *testing.T) {
@@ -1464,7 +1747,7 @@ func TestBuildResultsWorkbook_MixedEndToEnd(t *testing.T) {
 	assert.True(t, sheetContainsCell(rows, "MK"),
 		"mixed pool grid must show the literal ippon score 'MK'")
 	assertNoBrokenFormulas(t, f, helper.SheetPoolMatches)
-	// Mixed advances pool winners into a bracket: GenerateFinals renders finalist
+	// Mixed advances pool winners into a bracket: the draw renders finalist
 	// slots as "Pool-Ordinal" (e.g. "Pool A-1st"), so the Elimination Matches
 	// sheet is populated too and must be equally free of broken formulas.
 	assertNoBrokenFormulas(t, f, helper.SheetEliminationMatches)
@@ -3504,4 +3787,124 @@ func TestBuildResultsWorkbook_FixedFormatNoKachinukiSheet(t *testing.T) {
 
 	assert.NotContains(t, f.GetSheetList(), helper.SheetKachinukiDetail,
 		"fixed-format comps must not emit a Kachinuki Detail sheet")
+}
+
+// readCourtBandLetters reads a court-banded sheet's shiaijo band headers back
+// out of the rendered workbook, in column order, and asserts each band sits on
+// the court grid and is non-empty. bctest.ReadCourtBands does the reading (the
+// same reader serves internal/engine's blank-template parity tests); the
+// assertions stay here because the wording is this sheet's.
+//
+// An EMPTY band is a shiaijo header printed over nothing: a score sheet naming
+// a court the competition never scheduled a bout on.
+func readCourtBandLetters(t *testing.T, rows [][]string, sheet string) []string {
+	t.Helper()
+	require.NotEmptyf(t, rows, "%s must carry a shiaijo header row", sheet)
+
+	found := bctest.ReadCourtBands(rows, helper.CourtsColumnsPerCourt)
+	bands := make([]string, 0, len(found))
+	for _, b := range found {
+		require.Zerof(t, b.Col%helper.CourtsColumnsPerCourt,
+			"%s: header %q sits at column %d, off the %d-column court grid",
+			sheet, bctest.ShiaijoHeaderPrefix+b.Court, b.Col+1, helper.CourtsColumnsPerCourt)
+		assert.Truef(t, b.Occupied,
+			"%s prints an empty %s%s band: the sheet sends an operator to a shiaijo nothing is scheduled on",
+			sheet, bctest.ShiaijoHeaderPrefix, b.Court)
+		bands = append(bands, b.Court)
+	}
+	return bands
+}
+
+// TestBuildResultsWorkbook_ClampedShiaijoBands is the results-workbook half of
+// the export banding bug (the blank-template half lives in
+// internal/engine/excel_draw_parity_test.go).
+//
+// THREE pools on a FOUR-shiaijo allocation is the clamped regime: three pools
+// cannot carry four shiaijo, so helper.EffectiveDrawCourts(3, 4) steps the draw
+// down to 2 and the live app runs pools A+B on shiaijo A and pool C on shiaijo
+// B. Banding the sheets on the raw 4 instead spread the three pools one per
+// court over A, B and C and emitted a fourth, completely EMPTY "Shiaijo D" band.
+//
+// The score placement is the sharper half of the assertion. The overlays
+// take their column bands from helper.PoolsByCourt ->
+// AssignPoolsToCourts, so they must be handed the SAME court count as
+// PrintPoolMatches; a value that disagrees with the skeleton writes every score
+// and standing into the wrong cells. Pool C's ippon is therefore checked in the
+// court-B band by column, not merely found somewhere on the sheet.
+func TestBuildResultsWorkbook_ClampedShiaijoBands(t *testing.T) {
+	t.Parallel()
+	dir, err := os.MkdirTemp("", "export-test-clamped-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	eng := engine.New(store)
+
+	const allocatedCourts = 4
+	pools := []helper.Pool{
+		make2PlayerPool("Pool A", "Alice", "Bob"),
+		make2PlayerPool("Pool B", "Charlie", "Dave"),
+		make2PlayerPool("Pool C", "Eve", "Frank"),
+	}
+	// The regime this test exists for; without the clamp firing the assertions
+	// below would pass vacuously.
+	require.Equalf(t, 2, helper.EffectiveDrawCourts(len(pools), allocatedCourts),
+		"%d pools on %d shiaijo must clamp to 2", len(pools), allocatedCourts)
+
+	compID := "clamped-bands-comp"
+	courts := make([]string, allocatedCourts)
+	for i := range courts {
+		courts[i] = helper.CourtLabel(i)
+	}
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     compID,
+		Name:   "Clamped bands",
+		Courts: courts,
+	}))
+	require.NoError(t, store.SavePools(compID, pools))
+
+	// One completed match per pool, each with a distinct ippon letter so the
+	// score's landing column identifies the pool that produced it.
+	ipponOfPool := map[string]string{"Pool A": "M", "Pool B": "K", "Pool C": "T"}
+	var results []state.MatchResult
+	for _, p := range pools {
+		results = append(results, state.MatchResult{
+			ID:       p.PoolName + "-0",
+			SideA:    p.Players[0].Name,
+			SideB:    p.Players[1].Name,
+			SideAID:  p.Players[0].ID,
+			SideBID:  p.Players[1].ID,
+			IpponsA:  []string{ipponOfPool[p.PoolName]},
+			Decision: "fought",
+			Status:   state.MatchStatusCompleted,
+			Winner:   p.Players[0].Name,
+		})
+	}
+	require.NoError(t, store.SavePoolMatches(compID, results))
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer f.Close()
+
+	rows, err := f.GetRows(helper.SheetPoolMatches)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"A", "B"}, readCourtBandLetters(t, rows, helper.SheetPoolMatches),
+		"%s must be banded for the shiaijo the pools actually run on", helper.SheetPoolMatches)
+
+	// writeScoreRowCells puts SideA's (Red, left) score at the band's start
+	// column + 1. Band c starts at 0-based column c*CourtsColumnsPerCourt.
+	scoreCol := func(court int) int { return court*helper.CourtsColumnsPerCourt + 1 }
+	assert.Truef(t, columnContains(rows, scoreCol(0), "M"),
+		"Pool A's ippon must land in the shiaijo A band (column %d)", scoreCol(0)+1)
+	assert.Truef(t, columnContains(rows, scoreCol(0), "K"),
+		"Pool B's ippon must land in the shiaijo A band (column %d)", scoreCol(0)+1)
+	assert.Truef(t, columnContains(rows, scoreCol(1), "T"),
+		"Pool C's ippon must land in the shiaijo B band (column %d), the shiaijo the app runs it on", scoreCol(1)+1)
+	assert.Falsef(t, columnContains(rows, scoreCol(2), "T"),
+		"Pool C's ippon must NOT land in a shiaijo C band (column %d): the draw has only two shiaijo", scoreCol(2)+1)
 }

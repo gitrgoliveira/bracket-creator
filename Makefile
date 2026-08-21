@@ -40,7 +40,12 @@ local/deps: hooks/install js/deps ## Install project dependencies
 	go mod tidy
 	go install github.com/spf13/cobra-cli@v1.3.0
 	go install github.com/goreleaser/goreleaser/v2@latest
-	go install github.com/golangci/golangci-lint/cmd/golangci-lint@v2.12.2
+	# /v2/ is required in the module path for golangci-lint 2.x (Go module major-
+	# version convention); the path used to omit it and silently resolved anyway
+	# because GOPATH/bin already held an older cached binary (see the note above
+	# go/lint). Keep this version in lockstep with the pin in
+	# .github/workflows/validate.yaml so a local green run predicts CI.
+	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.1
 	go install github.com/securego/gosec/v2/cmd/gosec@v2.25.0
 	go install golang.org/x/vuln/cmd/govulncheck@latest
 	python3 -m pip install -r docs/requirements.txt
@@ -97,9 +102,9 @@ web-mobile/node_modules/.package-lock.json: web-mobile/package-lock.json
 	@cd web-mobile && npm ci --no-audit --no-fund
 
 js/deps: web-mobile/node_modules/.package-lock.json ## Install this worktree's JS dependencies
-	@# web/ declares no dependencies, so npm ci is a ~0.1s no-op there and
-	@# creates no node_modules, leaving no stamp file to key a rule on. Run it
-	@# unconditionally so this still works the day web/ gains a dependency.
+	@# web/ takes vitest (its four spec files are part of the gate), so unlike
+	@# web-mobile this is not keyed on a stamp file: it is cheap enough to run
+	@# unconditionally and stays correct if web/'s dependencies change again.
 	@if [ -L web/node_modules ]; then rm web/node_modules; fi
 	@cd web && npm ci --no-audit --no-fund
 
@@ -188,6 +193,12 @@ examples: go/build ## Build locally and create example files
 	$(BIN_PATH)/$(BIN_NAME) create-playoffs -d -z -c 2 --seeds ./test-data/seeds_medium.csv -f ./test-data/mock_data_medium_zekken.csv -o ./playoffs-example-medium-seeded.xlsx
 	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -p 3 -w 2 -c 2 --seeds ./test-data/seeds_large.csv -f ./test-data/mock_data_large_zekken.csv -o ./pools-example-large-seeded.xlsx
 	$(BIN_PATH)/$(BIN_NAME) create-playoffs -d -z -c 2 --seeds ./test-data/seeds_large.csv -f ./test-data/mock_data_large_zekken.csv -o ./playoffs-example-large-seeded.xlsx
+# 5 pools sending ONE qualifier each, seeded, on two shiaijo. Every other
+# example uses -w 2, and no 2-qualifier draw changed shape in the pool-to-
+# knockout rework, so without this the workbooks exercise none of it. Here
+# shiaijo A runs pools A, B and C (seeds 1 and 3) and its bye must fall on
+# Pool A, seed 1's pool; it used to fall on Pool C for being last in the block.
+	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -m 5 -w 1 -c 2 --seeds ./test-data/seeds_medium.csv -f ./test-data/mock_data_medium_zekken.csv -o ./pools-example-medium-seeded-one-qualifier.xlsx
 	@echo "Examples successfully created!"
 
 docker/build: ## Build Docker image

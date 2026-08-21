@@ -1,5 +1,5 @@
 mkdocs==1.6.1
-mkdocs-material==9.7.6
+mkdocs-material==9.7.7
 # Held at 1.2.2 deliberately: 1.2.3 was published from the ProperDocs fork
 # ecosystem and pulls in `properdocs` (an MkDocs fork) alongside mkdocs.
 # Do not bump without re-verifying the release comes from

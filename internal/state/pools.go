@@ -341,6 +341,14 @@ func splitIppons(s string) []string {
 // with no attributable winner cannot be encoded — validation requires a winner,
 // so that is malformed data, and it degrades to the pre-existing behaviour of
 // losing the flag rather than guessing a side.
+//
+// The mark is binary, so the tri-state narrows on a round trip: an explicit
+// false (the operator ruled "not a hantei") reloads as nil ("no writer said
+// anything"). Deliberate: at MATCH level the two are indistinguishable to
+// every consumer — preserveMatchHantei (engine) takes the stored verdict as a
+// plain bool, and display/validation treat both as "no hantei" — unlike the
+// SUB-bout tri-state, which preserveSubHantei distinguishes and which nests
+// through the SubResults JSON cell where *bool survives faithfully.
 func encodeHanteiIntoIppons(r *MatchResult) (ipponsA, ipponsB []string) {
 	ipponsA, ipponsB = r.IpponsA, r.IpponsB
 	if r.DecidedByHantei == nil || !*r.DecidedByHantei || r.Winner == "" {

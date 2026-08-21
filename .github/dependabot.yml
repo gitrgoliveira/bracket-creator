@@ -24,3 +24,18 @@ updates:
       time: "05:00"
     labels:
       - "dependencies"
+  - package-ecosystem: "pip"
+    directory: "/docs"
+    schedule:
+      interval: "weekly"
+      day: saturday
+      time: "05:00"
+    labels:
+      - "dependencies"
+    ignore:
+      # Held at 1.2.2 deliberately: see the comment in docs/requirements.txt.
+      # 1.2.3 was published from the ProperDocs fork ecosystem and pulls in
+      # `properdocs` (an MkDocs fork) alongside mkdocs. Any bump here must be
+      # done by hand after re-verifying the release comes from
+      # https://github.com/mkdocs/mkdocs-redirects, not auto-merged.
+      - dependency-name: "mkdocs-redirects"

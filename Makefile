@@ -40,7 +40,12 @@ local/deps: hooks/install js/deps ## Install project dependencies
 	go mod tidy
 	go install github.com/spf13/cobra-cli@v1.3.0
 	go install github.com/goreleaser/goreleaser/v2@latest
-	go install github.com/golangci/golangci-lint/cmd/golangci-lint@v2.12.2
+	# /v2/ is required in the module path for golangci-lint 2.x (Go module major-
+	# version convention); the path used to omit it and silently resolved anyway
+	# because GOPATH/bin already held an older cached binary (see the note above
+	# go/lint). Keep this version in lockstep with the pin in
+	# .github/workflows/validate.yaml so a local green run predicts CI.
+	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.1
 	go install github.com/securego/gosec/v2/cmd/gosec@v2.25.0
 	go install golang.org/x/vuln/cmd/govulncheck@latest
 	python3 -m pip install -r docs/requirements.txt

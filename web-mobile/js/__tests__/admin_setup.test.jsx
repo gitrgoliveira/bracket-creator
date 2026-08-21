@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { deriveCompetitionName, validatePoolSettings, validateSwissSettings, pickStackPredecessor } from '../admin_setup.jsx';
+import {
+  deriveCompetitionName, validatePoolSettings, validateSwissSettings, pickStackPredecessor,
+  previewRowCourts, previewRowShiaijoError, importRowErrorText,
+} from '../admin_setup.jsx';
 import { normalizeTheme } from '../admin_branding.jsx';
 
 describe('pickStackPredecessor', () => {
@@ -264,6 +267,13 @@ describe('validateSwissSettings (T190 / FR-050a)', () => {
   });
 });
 
+// bc-qual LP-5a: the "Knockout qualifiers" form-coupling pure functions
+// (extraQualifiersRadioVisible / resetExtraQualifiersOnPoolModeChange /
+// winnersForExtraQualifiersChange / winnersInputDisabled) moved to
+// qualifier_preview.jsx -- shared by admin_setup.jsx (create form) AND
+// admin_competition_settings.jsx (settings page), so their tests live in
+// qualifier_preview.test.jsx now too.
+
 describe('normalizeTheme (mp-sspn dirty tracking)', () => {
   // Copilot PR #266 round 2: branding colours/title ride on "Save changes" via
   // theme, so they must count toward the dirty cue; but the raw tournament.theme
@@ -289,5 +299,82 @@ describe('normalizeTheme (mp-sspn dirty tracking)', () => {
       .toEqual({ primaryColor: '#111', accentSoftColor: '#222', windowTitle: 'Cup' });
     expect(normalizeTheme({ windowTitle: 'Cup' }))
       .toEqual({ primaryColor: '#1d3557', accentSoftColor: '#e7eaf3', windowTitle: 'Cup' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Import preview: the shiaijo allocation, shown BEFORE every row is refused
+// ---------------------------------------------------------------------------
+// A manifest row that omits `courts` inherits the tournament's whole list, and
+// the inherited count is validated exactly like a spelled-out one. On a
+// 3-shiaijo venue that makes the commonest manifest of all - one with no
+// courts key - the one that gets refused, and the preview table showed no
+// allocation at all, so the operator learned it one row at a time from the
+// results list.
+describe('previewRowCourts', () => {
+  const venue = ['A', 'B', 'C'];
+
+  it("uses the row's own shiaijo when it has them", () => {
+    expect(previewRowCourts({ courts: ['A', 'B'] }, venue)).toEqual(['A', 'B']);
+  });
+
+  it('inherits the venue when the row omits courts, matching the server', () => {
+    expect(previewRowCourts({}, venue)).toEqual(venue);
+    expect(previewRowCourts({ courts: [] }, venue)).toEqual(venue);
+    expect(previewRowCourts({ courts: null }, venue)).toEqual(venue);
+  });
+
+  it('survives a missing venue list', () => {
+    expect(previewRowCourts({}, undefined)).toEqual([]);
+    expect(previewRowCourts(null, venue)).toEqual(venue);
+  });
+});
+
+describe('previewRowShiaijoError', () => {
+  const venue = ['A', 'B', 'C'];
+
+  it('flags the inherited 3-shiaijo allocation the server will refuse', () => {
+    const err = previewRowShiaijoError({ name: 'Mudansha', format: 'mixed' }, venue);
+    expect(err).toContain('3 shiaijo cannot be paired down to a single bracket');
+  });
+
+  it('offers only counts the venue can supply', () => {
+    const err = previewRowShiaijoError({ format: 'mixed', courts: ['A', 'B', 'C'] }, venue);
+    expect(err).toContain('This tournament has 3, so this competition can use 1 or 2');
+    expect(err).not.toContain('4');
+  });
+
+  it('passes a row that spelled out a legal allocation', () => {
+    expect(previewRowShiaijoError({ format: 'mixed', courts: ['A', 'B'] }, venue)).toBeNull();
+  });
+
+  it('leaves league and Swiss rows alone, as every other surface does', () => {
+    expect(previewRowShiaijoError({ format: 'league' }, venue)).toBeNull();
+    expect(previewRowShiaijoError({ format: 'swiss' }, venue)).toBeNull();
+  });
+
+  it('treats a row with no format as bracket-drawing, matching the importer', () => {
+    expect(previewRowShiaijoError({}, venue)).toContain('cannot be paired down');
+  });
+});
+
+describe('importRowErrorText', () => {
+  it('strips the raw courts: API prefix and reads as a sentence', () => {
+    const raw = 'courts: shiaijo count must be a power of two (1, 2, 4, 8 or 16), got 3: use 2 or 4, or 1';
+    const out = importRowErrorText(raw);
+    expect(out.startsWith('Shiaijo count must be a power of two')).toBe(true);
+    expect(out).not.toContain('courts:');
+  });
+
+  it('keeps prefixes that are the only thing naming the faulty setting or step', () => {
+    expect(importRowErrorText('format: unknown format "kachinuki"')).toBe('Format: unknown format "kachinuki"');
+    expect(importRowErrorText('swissRounds: must be at least 1')).toBe('SwissRounds: must be at least 1');
+    expect(importRowErrorText('parse participants: bad line 3')).toBe('Parse participants: bad line 3');
+  });
+
+  it('survives an empty or missing error', () => {
+    expect(importRowErrorText('')).toBe('');
+    expect(importRowErrorText(undefined)).toBe('');
+    expect(importRowErrorText(null)).toBe('');
   });
 });

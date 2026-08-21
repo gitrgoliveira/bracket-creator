@@ -1,0 +1,164 @@
+package helper
+
+import (
+	"fmt"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// D1 (specs/007-ekc-draw/spec.md) is R6 criterion 2's load metric: a pool is
+// oversized when its qualifier plays MORE pool matches than the lightest pool's
+// qualifier, counted per pool format - participant count under `full` (round
+// robin), generated match count under `partial`. poolLoad implements it.
+//
+// The synthetic half of D1 is pinned by TestOversizedPoolWinnerTakesTheRegionBye
+// (tree_test.go), which hand-fills a pool's Matches slice. What was missing is
+// the format that makes the two units differ in the first place: nothing drove
+// the draw with pools built by CreatePartialPoolMatches, the generator both live
+// callers use (cmd/create-pools.go and internal/engine/pools.go, each of which
+// runs it BEFORE BuildKnockoutDraw precisely so poolLoad can read it).
+
+// poolOfSize builds one pool of n competitors, named so a failure names them.
+func poolOfSize(name string, n int) Pool {
+	p := Pool{PoolName: name, Players: make([]Player, n)}
+	for i := range p.Players {
+		p.Players[i] = Player{Name: fmt.Sprintf("%s player %d", name, i+1)}
+	}
+	return p
+}
+
+// regionByes returns the placeholders that receive a NAMED round-1 bye: the
+// non-empty side of a round-1 pair whose other side is a structural bye.
+func regionByes(draw *KnockoutDraw) []string {
+	slots := TreeToLeafArray(draw.Root)
+	byes := []string{}
+	for i := 0; i+1 < len(slots); i += 2 {
+		if (slots[i] == "") != (slots[i+1] == "") {
+			byes = append(byes, slots[i]+slots[i+1])
+		}
+	}
+	return byes
+}
+
+// TestPoolLoadUnitsPerPoolFormat pins the metric itself, in the three shapes a
+// pool reaches poolLoad in.
+func TestPoolLoadUnitsPerPoolFormat(t *testing.T) {
+	t.Run("no matches drawn yet reports the participant count", func(t *testing.T) {
+		// The engine's own draw path: pools come back from pools.csv, which
+		// stores players only, so the fallback is the metric there.
+		assert.Equal(t, 4, poolLoad(poolOfSize("Pool A", 4)))
+	})
+
+	t.Run("full round robin reports its generated match count", func(t *testing.T) {
+		pools := []Pool{poolOfSize("Pool A", 4)}
+		CreatePoolRoundRobinMatches(pools)
+		require.Len(t, pools[0].Matches, 6, "a round robin of 4 generates 4*3/2 matches")
+		assert.Equal(t, 6, poolLoad(pools[0]),
+			"D1 defines `full` as the participant count, but the drawn match count "+
+				"is read where it exists and induces the same ordering")
+	})
+
+	t.Run("the legacy non-round-robin match set reports its own count", func(t *testing.T) {
+		// CreatePoolMatches is the CLI default when --round-robin is off: a
+		// fixed pairing set, n matches from 3 players up, not n(n-1)/2.
+		pools := []Pool{poolOfSize("Pool A", 4)}
+		CreatePoolMatches(pools)
+		require.Len(t, pools[0].Matches, 4)
+		assert.Equal(t, 4, poolLoad(pools[0]))
+	})
+
+	t.Run("partial pools report their generated match count", func(t *testing.T) {
+		pools := []Pool{poolOfSize("Pool A", 4)}
+		CreatePartialPoolMatches(pools)
+		require.Len(t, pools[0].Matches, 3, "a partial pool of 4 generates n-1 matches")
+		assert.Equal(t, 3, poolLoad(pools[0]),
+			"D1 reads the drawn match count, not the pool size recomputed")
+	})
+
+	t.Run("every format ranks pools of 2 and up in the same order", func(t *testing.T) {
+		// This is why the golden files can be built from one format and still
+		// describe another's byes: n, n(n-1)/2 and n-1 are all strictly
+		// increasing from 2 up, so every reading induces one ordering, and R6
+		// criterion 2 only ever compares pools with each other.
+		//
+		// It is asserted from 2 rather than from 1 because that is where it
+		// stops being true: a 1-competitor pool reports 1 under every format
+		// (partial and round robin generate nothing for it and fall back to the
+		// participant count; the legacy set generates one self-match), tying
+		// with a 2-competitor pool's single match. See
+		// TestCreatePartialPoolMatchesSkipsPoolsUnderTwoPlayers.
+		series := map[string][]int{}
+		for n := 2; n <= 8; n++ {
+			series["participants"] = append(series["participants"], poolLoad(poolOfSize("Pool A", n)))
+
+			legacy := []Pool{poolOfSize("Pool A", n)}
+			CreatePoolMatches(legacy)
+			series["legacy"] = append(series["legacy"], poolLoad(legacy[0]))
+
+			rr := []Pool{poolOfSize("Pool A", n)}
+			CreatePoolRoundRobinMatches(rr)
+			series["round robin"] = append(series["round robin"], poolLoad(rr[0]))
+
+			pp := []Pool{poolOfSize("Pool A", n)}
+			CreatePartialPoolMatches(pp)
+			series["partial"] = append(series["partial"], poolLoad(pp[0]))
+		}
+		for name, s := range series {
+			for i := 1; i < len(s); i++ {
+				assert.Greaterf(t, s[i], s[i-1],
+					"%s must be strictly increasing in pool size, got %v", name, s)
+			}
+		}
+	})
+}
+
+// TestPartialFormatPoolsDriveTheRegionBye is R6 criterion 2 end to end on the
+// `partial` path: the draw is built from pools whose Matches were generated by
+// CreatePartialPoolMatches, exactly as cmd/create-pools.go --pool-format partial
+// does, and the region's only structural bye goes to the pool whose qualifier
+// played the most of them - NOT to the first pool in order.
+func TestPartialFormatPoolsDriveTheRegionBye(t *testing.T) {
+	// 5 pools on one shiaijo: R4(e) splits them into half-blocks of 3 (A, B, C)
+	// and 2 (D, E), so the region's single bye lives in the first block and Pool
+	// C is the only heavier pool competing for it.
+	sizes := []int{3, 3, 5, 3, 3}
+	pools := make([]Pool, len(sizes))
+	for i, n := range sizes {
+		pools[i] = poolOfSize(fmt.Sprintf("Pool %c", 'A'+i), n)
+	}
+	CreatePartialPoolMatches(pools)
+	for i, n := range sizes {
+		require.Lenf(t, pools[i].Matches, n-1, "partial pool %d", i)
+	}
+
+	draw := BuildKnockoutDraw(pools, 1, 1)
+	require.NotNil(t, draw)
+	assert.Equal(t, []string{"Pool C-1st"}, regionByes(draw),
+		"the pool with the most GENERATED matches takes the region's bye (R6-2 under poolFormat partial)")
+}
+
+// TestCreatePartialPoolMatchesSkipsPoolsUnderTwoPlayers records the one place
+// D1's two units genuinely disagree.
+//
+// A pool of fewer than 2 competitors has no adjacent pairing to generate, so
+// CreatePartialPoolMatches skips it and it ends the pool phase with an EMPTY
+// Matches slice - indistinguishable, to poolLoad, from a pool whose matches
+// have not been drawn yet. It therefore falls back to the participant count and
+// reports 1, which is exactly what a 2-competitor pool's single match reports,
+// where D1's own units rank the smaller pool strictly below under BOTH formats
+// (0 against 1 under partial, 1 against 2 under full). R6 criterion 2 then
+// breaks that tie by pool order, so the smaller pool can take a bye off the
+// larger one when it happens to come first.
+//
+// Only the generator's half is asserted here. What poolLoad should do with a
+// pool it cannot tell apart from an undrawn one is a production question, not a
+// test-file one.
+func TestCreatePartialPoolMatchesSkipsPoolsUnderTwoPlayers(t *testing.T) {
+	pools := []Pool{poolOfSize("Pool A", 1), poolOfSize("Pool B", 2)}
+	CreatePartialPoolMatches(pools)
+
+	assert.Empty(t, pools[0].Matches, "a 1-competitor pool has no pairing to generate")
+	assert.Len(t, pools[1].Matches, 1, "a 2-competitor pool generates its single match")
+}

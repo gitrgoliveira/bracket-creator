@@ -12,6 +12,7 @@
 // block below reads them. Settings/bracket/swiss are pulled in via their
 // helper re-exports; overview has no pure helper, so it needs a side-effect import.
 import './admin_competition_overview.jsx';
+import { effectiveDrawPlayers } from './qualifier_preview.jsx';
 export { formatCompMinutes } from './admin_competition_settings.jsx';
 export { buildRunningIpponResult, loadScoreboardPoints } from './admin_competition_bracket.jsx';
 export {
@@ -60,6 +61,36 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
 
+  // Seed-placement warnings for the generated draw. The seeding rules cannot
+  // refuse a draw: a constraint the configuration cannot satisfy gives way and
+  // the operator is TOLD what was relaxed, so this is advice and never a
+  // blocker. Fetched rather than read off the competition because this page
+  // loads its detail through the PUBLIC viewer endpoint, which deliberately
+  // does not carry operator advice. Re-fetched on every status change, so
+  // discarding a draw clears it and regenerating replaces it.
+  // Skipped entirely before there is a draw to warn about: the warnings are
+  // derived from the drawn pools, and "setup" is exactly the state in which
+  // pools.csv does not exist (DiscardDraw deletes it and reverts the status),
+  // so the answer is structurally []. Clearing rather than fetching also keeps
+  // the discard case correct: the status change back to setup empties the list.
+  //
+  // Held WITH the competition id it describes, and rendered only when the two
+  // match. Clearing on the setup branch alone left the previous competition's
+  // sentences on screen while the new one's fetch was in flight: switching from
+  // one running competition to another kept X's warnings under Y's name, headed
+  // "the draw could not honour every rule". Storing the id is what makes a
+  // stale render impossible without also blanking the banner every time the
+  // SAME competition's status changes, which a bare reset at the top of the
+  // effect would do.
+  const [drawWarnings, setDrawWarnings] = useStateA({ id: null, list: [] });
+  useEffectA(() => {
+    if (!c.status || c.status === "setup") { setDrawWarnings({ id: c.id, list: [] }); return undefined; }
+    let live = true;
+    window.API.fetchDrawWarnings(c.id, password).then((w) => { if (live) setDrawWarnings({ id: c.id, list: w || [] }); });
+    return () => { live = false; };
+  }, [c.id, c.status, password]);
+  const drawWarningsForThisComp = drawWarnings.id === c.id ? drawWarnings.list : [];
+
   // Use the shared isValidDate (admin_helpers.jsx) which delegates to
   // normalizeDate for semantic validity: rejects "32-13-2026" / Feb 31 /
   // Feb 29 in non-leap years. Without this, the Start button would enable
@@ -69,16 +100,14 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   const isDateValid = isValidDate;
 
   // mp-w7x: surface how many participants will be excluded from the draw
-  // because they have not checked in. Mirror the engine's rule
-  // (filterCheckedIn in internal/engine/competition.go): only applies when the
-  // competition has check-in tracking enabled (c.checkInEnabled): consistent
-  // with the rest of the UI, which masks checkedIn behind that flag. Within an
-  // enabled competition, opt-in semantics apply: only exclude when at least one
-  // participant is checked in. Empty roster (e.g. a playoffs-from-source
-  // competition resolved server-side) yields 0.
+  // because they have not checked in. effectiveDrawPlayers (qualifier_preview)
+  // is the client's one owner of the engine's check-in opt-in rule
+  // (filterCheckedIn, internal/engine/competition.go); counting off it keeps
+  // this confirm, the settings preview and the draw itself on the same
+  // roster. Empty roster (e.g. a playoffs-from-source competition resolved
+  // server-side) yields 0.
   const drawPlayers = c.players || [];
-  const anyCheckedIn = drawPlayers.some(p => p.checkedIn);
-  const excludedFromDraw = (c.checkInEnabled && anyCheckedIn) ? drawPlayers.filter(p => !p.checkedIn).length : 0;
+  const excludedFromDraw = drawPlayers.length - effectiveDrawPlayers(drawPlayers, c.checkInEnabled).length;
 
   // Confirm before a draw/start that would drop non-checked-in participants.
   // Returns false when the operator cancels.
@@ -230,6 +259,49 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   const canComplete = c.status !== "setup" && c.status !== "draw-ready" &&
     c.status !== "completed" && c.status !== "invalid" &&
     bracketFullyComplete(bracket);
+  // Court blocker for the draw: the shiaijo-count rule (a bracket-drawing
+  // competition runs on 1, 2, 4, 8 or 16 shiaijo) plus the orphaned-shiaijo
+  // rule (the competition still lists a court the tournament no longer has).
+  // Both live in competitionDrawBlockedReason (admin_helpers.jsx) so this
+  // header, the dashboard card's "Start competition →" and the
+  // tournament-level "Start all" picker read ONE derived value: the two
+  // latter surfaces used to ignore the rule entirely and let the operator
+  // fire a request the server refuses with a transient toast.
+  //
+  // The engine refuses such a draw anyway; disabling the buttons turns a
+  // failed request into an up-front explanation pointing at the Settings tab,
+  // matching the invalid-date blocker directly below.
+  // Every rule that would make the server refuse this draw, with the remedy
+  // that fixes it. Not just the court rules any more: an incomplete seeding is
+  // refused the same way, and the operator has to be told which screen to open.
+  const drawBlocker = window.competitionDrawBlocker(c, t.courts);
+  // Go ships a nil slice as JSON null, so a competition stored without a
+  // courts key arrives as `courts: null`. The page-head subtitle read
+  // c.courts.join(...) directly and took the whole console down with
+  // "Cannot read properties of null (reading 'join')" - every section, not
+  // just the subtitle. This screen is the documented remedy for exactly that
+  // record (its Settings tab is where the operator assigns shiaijo), so it is
+  // the one page that must survive the shape. Same reason c.players is read
+  // through a default below.
+  const courtList = c.courts || [];
+  // What the subtitle says when the competition holds no shiaijo of its own.
+  // "No shiaijo assigned" alone is true but incomplete, and incomplete in the
+  // direction that matters: an empty list MEANS "inherit the tournament's"
+  // (engine.InheritedDrawCourts, mirrored by window.inheritedDrawCourts), so
+  // the draw runs on every shiaijo the venue has. Left unsaid, the operator
+  // reads this page -- the documented remedy for shiaijo problems -- as
+  // "nothing is set" and never learns which courts the draw will actually
+  // take. resolvedShiaijoCountError cannot cover it: it stays silent when the
+  // inherited count is legal, which is the ordinary case.
+  //
+  // Derived through the shared helper rather than `t.courts` directly, so
+  // this line and every allocation judgement resolve inheritance identically.
+  const inheritedCourts = window.inheritedDrawCourts(courtList, t.courts);
+  const courtsSummary = courtList.length
+    ? courtList.join(", ")
+    : inheritedCourts.length
+      ? `No shiaijo of its own, draw would use ${inheritedCourts.join(", ")}`
+      : "No shiaijo assigned";
   // Compute the other-competitions list once (used for both the render guard
   // and the map below).
   const otherComps = (t.competitions || []).filter((cc) => cc.id !== c.id);
@@ -284,19 +356,19 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
               <StatusBadge status={localStatus ?? c.status} format={c.format} />
             </div>
             <div className="page-head__sub">
-              {window.competitionKindLabel(c)} · {c.players.length} {c.kind === "team" ? "teams" : "players"} ·
-              {c.date && ` ${formatDate(c.date)} at `} {c.startTime} · {c.courts.join(", ")}
+              {window.competitionKindLabel(c)} · {(c.players || []).length} {c.kind === "team" ? "teams" : "players"} ·
+              {c.date && ` ${formatDate(c.date)} at `} {c.startTime} · {courtsSummary}
             </div>
           </div>
           <div className="page-head__actions" style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
-            {(!c.status || c.status === "setup") && c.players.length >= 2 && (
+            {(!c.status || c.status === "setup") && (c.players || []).length >= 2 && (
               <>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <button type="button" className="btn btn--primary" onClick={generateDraw} disabled={!isDateValid(c.date) || generating || starting}>
+                  <button type="button" className="btn btn--primary" onClick={generateDraw} disabled={!isDateValid(c.date) || !!drawBlocker || generating || starting}>
                     {generating && <span className="spinner" />}
                     {generating ? "Generating…" : "Generate draw"}
                   </button>
-                  <button type="button" className="btn btn--ghost" onClick={start} disabled={!isDateValid(c.date) || starting || generating}>
+                  <button type="button" className="btn btn--ghost" onClick={start} disabled={!isDateValid(c.date) || !!drawBlocker || starting || generating}>
                     {starting && <span className="spinner" />}
                     {starting ? "Starting…" : "Start competition →"}
                   </button>
@@ -304,6 +376,11 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
                 {!isDateValid(c.date) && (
                   <div style={{ color: "var(--red)", fontSize: 11, fontWeight: 600 }}>
                     ⚠ Cannot start: invalid date in Settings tab (e.g. "{c.date}")
+                  </div>
+                )}
+                {drawBlocker && (
+                  <div style={{ color: "var(--red)", fontSize: 11, fontWeight: 600, maxWidth: 380, textAlign: "right" }} data-testid="draw-block">
+                    ⚠ Cannot start: {drawBlocker.reason} {drawBlocker.fix}
                   </div>
                 )}
                 {excludedFromDraw > 0 && (
@@ -346,6 +423,19 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
             )}
           </div>
         </div>
+
+        {/* Seed-placement warnings for the generated draw. Derived on the
+            server per request, so the banner stays true for as long as the
+            draw it describes exists and clears itself when that draw is
+            discarded. */}
+        {drawWarningsForThisComp.length > 0 && (
+          <div className="alert alert--warn" style={{ margin: "0 0 14px" }} data-testid="draw-seed-warnings">
+            <strong>Seeding: the draw could not honour every rule.</strong>
+            <ul style={{ margin: "6px 0 0", paddingInlineStart: 18 }}>
+              {drawWarningsForThisComp.map((w) => <li key={w}>{w}</li>)}
+            </ul>
+          </div>
+        )}
 
         <div className="workspace">
           {/* Left column stacks the per-competition nav and, as a SEPARATE

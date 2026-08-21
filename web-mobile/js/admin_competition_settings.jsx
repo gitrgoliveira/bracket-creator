@@ -6,8 +6,21 @@
 import { teamMatchTypeHint } from './pool_ids.jsx';
 import { DurationInput } from './duration.jsx';
 import { EstimateHeadline } from './admin_schedule_utils.jsx';
+// bc-qual LP-5a: the "Knockout qualifiers" preview arithmetic AND the
+// pool-size/winners form-coupling rules are shared with admin_setup.jsx
+// (the competition CREATE form renders the same "Pool size is a" /
+// "Knockout qualifiers" radios); both screens import the same functions
+// from qualifier_preview.jsx rather than each carrying its own copy.
+import {
+  EXTRA_QUALIFIERS_STANDARD, EXTRA_QUALIFIERS_LARGER_POOLS, EXTRA_QUALIFIERS_FILL_BRACKET,
+  computeQualifierPreview, formatQualifierPreviewLine, effectiveDrawPlayers,
+  extraQualifiersRadioVisible, resetExtraQualifiersOnPoolModeChange,
+  winnersForExtraQualifiersChange, winnersInputDisabled,
+  extraQualifiersLabel, extraQualifiersHint,
+} from './qualifier_preview.jsx';
+import { seededRanks } from './admin_helpers.jsx';
 
-const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
+const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA } = React;
 
 const dmyToIso = window.dmyToIso;
 const isoToDmy = window.isoToDmy;
@@ -43,6 +56,25 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // save already committed; when present we stay on the page to show them
   // instead of returning to the dashboard.
   const [clashWarnings, setClashWarnings] = useStateA(null);
+
+  // Knockout-qualifiers preview (bc-qual): computed off the EFFECTIVE draw
+  // roster -- server-confirmed c.players (settings edits don't change the
+  // roster) masked by the same check-in opt-in rule the engine applies
+  // (effectiveDrawPlayers), read against the PENDING local.checkInEnabled so
+  // the preview tracks the form exactly like its sibling pool-config inputs;
+  // generate-draw both counts entrants and drops absent players' seeds AFTER
+  // check-in filtering, so a preview computed off the raw list promises a
+  // cut the draw will not make whenever a seeded participant is a no-show.
+  // Seed RANKS, not a count: fill-bracket's supply rule only credits a rank
+  // low enough to land its own pool; seededRanks (admin_helpers) is the one
+  // owner of "which ranks has this roster actually got" -- the same reader
+  // the seeding blocker validates with. Memoized because this walks the
+  // roster and runs the full formation scan, and AdminSettings re-renders on
+  // every keystroke of any settings field.
+  const qualifierPreview = useMemoA(() => {
+    const drawPlayers = effectiveDrawPlayers(c.players, local.checkInEnabled);
+    return computeQualifierPreview(drawPlayers.length, local.poolSize, local.poolWinners, seededRanks(drawPlayers));
+  }, [c.players, local.checkInEnabled, local.poolSize, local.poolWinners]);
 
   // Schedule estimate (mp-zoh Phase 4): fetch per-competition estimate and
   // display it inline near the duration inputs. Re-fetches whenever the
@@ -302,6 +334,25 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       // competition's value to "" (fixed) on any save. Round-trip it like
       // `mirror` above to preserve the stored value.
       teamMatchType: effective.teamMatchType || latestC.teamMatchType || "",
+      // bc-qual LP-5a: knockout qualifiers, edited by the "Knockout
+      // qualifiers" pills below. Included for the same reason as
+      // mirror/teamMatchType/naginata above: the backend transform
+      // unconditionally applies `current.ExtraQualifiers =
+      // comp.ExtraQualifiers`, so omitting the field would clobber a stored
+      // non-standard value to "" on every settings save.
+      //
+      // NO `|| latestC.extraQualifiers` fallback: "" is this field's STANDARD
+      // value, not "unset". A falsy-coalescing chain reads the operator's
+      // "Standard" pick as absent and re-sends the stored non-standard value,
+      // which makes Standard unreachable from this screen -- and worse on the
+      // sibling path, where switching "Pool size is a" to maximum stages
+      // poolSizeMode="max" AND extraQualifiers="" together: the chain would
+      // ship max sizing with the old non-standard value, which
+      // state.ValidateExtraQualifiers rejects, 400ing every settings save with
+      // no control able to clear it. `effective` is latestC overlaid with the
+      // edited fields, so it already carries the stored value for an untouched
+      // field; the `|| ""` only normalizes a legacy record's undefined.
+      extraQualifiers: effective.extraQualifiers || "",
     };
     // Snapshot the VALUE of each edited field we're about to persist (not just
     // the field name). On success we clear a field only if its current staged
@@ -477,7 +528,13 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     // drop a toggle.
     const cur = localRef.current.courts || [];
     const nextCourts = cur.includes(cc) ? cur.filter((x) => x !== cc) : [...cur, cc].sort();
-    if (nextCourts.length) update("courts", nextCourts);
+    // The last pill CAN be turned off. This used to drop the update instead,
+    // which enforced "at least one shiaijo" by making the click do nothing --
+    // no pill change, no message, nothing to read. The rule is real, so it is
+    // now stated where the operator is looking: courtsErr says it and Save is
+    // blocked until they pick one, the same way the create form answers the
+    // same action. A silent no-op teaches nothing and reads as a broken button.
+    update("courts", nextCourts);
   };
 
   // draw-ready lock: output-affecting fields: those that reach the Excel
@@ -492,6 +549,94 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // changes the scoring paradigm; flipping naginata affects the bronze match.
   const isStarted = !!(local.status && local.status !== "setup" && local.status !== "draw-ready");
 
+  // Shiaijo-count rule (shiaijoCountErrorFor, mirrored from
+  // engine.ValidateCompetitionShiaijoCount): a competition whose draw builds a
+  // knockout bracket runs on 1, 2, 4, 8 or 16 shiaijo. League and Swiss are out
+  // of scope, which is why the format is passed in rather than gated here:
+  // their shiaijo run in parallel with no bracket blocks to merge, and the
+  // league hint right under these pills recommends floor(players/2)-1 courts,
+  // which is rarely a power of two.
+  //
+  // Four distinct states, deliberately kept apart:
+  //
+  //   courtsHint     the STANDING teaching hint: which counts this operator
+  //                  may pick and why, shown whether or not the current
+  //                  selection is valid. Venue-aware, so a 3-shiaijo
+  //                  tournament reads "can use 1 or 2 (this tournament has
+  //                  3)" instead of learning the rule from a refusal.
+  //   courtsErr      the CURRENT selection is invalid, drives the red hint
+  //                  under the court pills.
+  //   savedCourtsErr the allocation ON DISK is invalid, drives the persistent
+  //                  warning banner. A competition saved before this rule
+  //                  existed (or one that inherited a 3-shiaijo venue court
+  //                  list) lands here and keeps running; it just cannot
+  //                  generate a draw until the operator fixes it.
+  //   courtsChanged  the operator is actually reassigning shiaijo.
+  //
+  // Save is blocked only for `courtsErr && courtsChanged`. The server's own
+  // gate is broader -- it revalidates the shiaijo count when the courts change
+  // OR the format does -- but this screen has no format control at all
+  // (local.format is read everywhere and staged nowhere), so the format half is
+  // unreachable from here and a courtsChanged-only block covers every edit this
+  // form can actually submit. If a format editor is ever added here, this must
+  // gain `|| local.format !== c.format` with it, or switching a league on 3
+  // shiaijo to mixed offers a live Save and takes a 400.
+  //
+  // Neither state means "the stored value is invalid" -- savedCourtsErr covers
+  // that and deliberately does NOT block, because it would lock the operator
+  // out of every unrelated edit on this screen (name, date, durations,
+  // check-in), which is the one outcome this rule must not cause.
+  // The two read an empty list DIFFERENTLY, and must: on screen it is an
+  // operator mid-edit, on disk it is inheritance. Each helper owns its own half
+  // of that (shiaijoPickerError takes `authored`, which courtsChanged supplies;
+  // resolvedShiaijoCountError resolves before judging).
+  const savedCourts = c.courts || [];
+  const courtsChanged = (local.courts || []).join(",") !== savedCourts.join(",");
+  const courtsErr = window.shiaijoPickerError(local.format, local.courts, courtsChanged, (tournament.courts || []).length);
+  const savedCourtsErr = window.resolvedShiaijoCountError(c.format, savedCourts, tournament.courts);
+  const blockingCourtsErr = !!courtsErr && courtsChanged;
+  // The mechanism sentence is dropped from the standing hint while the red
+  // error is on screen: the error states it one line above, and printing it
+  // twice buries the part that changes (which counts to pick).
+  const courtsHint = window.shiaijoCountHintFor(local.format, (tournament.courts || []).length, !courtsErr);
+
+  // Shiaijo the competition holds that the tournament no longer has (the
+  // operator shrank the venue's court count under a competition already
+  // assigned the removed court). Drives the flagged pill + hint below;
+  // courtPillOptions is what keeps the rendered selection equal to
+  // local.courts, so the screen can never show one allocation and save
+  // another. NOT a Save blocker, for the same reason savedCourtsErr isn't:
+  // the stored value is already in this state and every unrelated edit on
+  // this screen must stay possible. The server refuses the tournament change
+  // that would create this, and refuses to draw while it stands.
+  const courtOptions = window.courtPillOptions(tournament.courts, local.courts);
+  const orphanedCourtsErr = window.orphanedShiaijoError(tournament.courts, local.courts);
+
+  // The single disabled-condition for BOTH Save buttons (header and footer).
+  // Derived once on purpose: the footer button used to repeat the expression
+  // and had drifted, omitting hasDurationError AND blockingCourtsErr, so with
+  // an invalid shiaijo count the header button greyed out while the footer
+  // one stayed live, fired the PUT and took a 400. Anything that should block
+  // saving belongs here, never at a call site.
+  const saveDisabled = !isDirty || saving || hasDurationError || blockingCourtsErr;
+
+  // The blocking message and its precedence, shared by the header chip and the
+  // footer for the same reason saveDisabled is: the footer used to restate the
+  // chain as three spans with cascading negations, which is the shape that
+  // silently keeps rendering "● Unsaved changes" when a fourth blocker is added
+  // and one negation is missed.
+  //
+  // ONLY the blocking half is shared. The header additionally reports the
+  // transient "Saving…" and "✓ Saved at" states; the footer deliberately shows
+  // neither, so those stay where they are rather than being forced into a
+  // common value that would change what the footer renders.
+  const saveBlockMessage = saveErr ? `⚠ ${saveErr}`
+    : hasDurationError ? "⚠ Fix match duration"
+      // "allocation", not "count": courtsErr also covers a selection with
+      // nothing in it, which is not a counting problem.
+      : blockingCourtsErr ? "⚠ Fix shiaijo allocation" : "";
+  const saveBlocked = !!saveBlockMessage;
+
   return (
     <div className="card">
       <div className="card__head">
@@ -501,18 +646,41 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             fontSize: 12.5,
             padding: "4px 8px",
             borderRadius: 4,
-            background: (saveErr || hasDurationError) ? "var(--red-soft)" : isDirty ? "var(--warn-soft)" : lastSaved ? "var(--accent-soft)" : "transparent",
-            color: (saveErr || hasDurationError) ? "var(--red)" : isDirty ? "var(--warn-ink)" : "var(--accent)",
+            background: saveBlocked ? "var(--red-soft)" : isDirty ? "var(--warn-soft)" : lastSaved ? "var(--accent-soft)" : "transparent",
+            color: saveBlocked ? "var(--red)" : isDirty ? "var(--warn-ink)" : "var(--accent)",
             fontWeight: 600,
             transition: "all 300ms"
           }}>
-            {saveErr ? `⚠ ${saveErr}` : saving ? "Saving…" : hasDurationError ? "⚠ Fix match duration" : isDirty ? "● Unsaved changes" : lastSaved ? `✓ Saved at ${lastSaved}` : ""}
+            {saving && !saveErr ? "Saving…" : saveBlocked ? saveBlockMessage : isDirty ? "● Unsaved changes" : lastSaved ? `✓ Saved at ${lastSaved}` : ""}
           </div>
-          <button type="button" className="btn btn--primary" onClick={saveNow} disabled={!isDirty || saving || hasDurationError}>
+          <button type="button" className="btn btn--primary" onClick={saveNow} disabled={saveDisabled}>
             {saving ? "Saving…" : "Save changes"}
           </button>
         </div>
       </div>
+      {/* Persistent warning for an allocation ALREADY on disk that the draw
+          cannot halve down. Not a blocker: the competition keeps running and
+          the rest of this screen stays editable (the server validates courts
+          on write only), which is what lets a record written before this rule
+          existed keep loading and rendering. It stays visible until the
+          allocation is changed, because the draw cannot be generated while it
+          stands. Suppressed once the operator has staged a fix, where the
+          pills speak for themselves. */}
+      {savedCourtsErr && !courtsChanged && (
+        <div className="alert alert--warn" style={{ marginBottom: 12 }} data-testid="shiaijo-count-banner">
+          {/* The headline states only that the draw is blocked. Which count, why
+              it cannot be split and what to pick instead all live in
+              savedCourtsErr, so the verdict is not phrased a second time here --
+              and an INHERITED allocation, whose own list is empty, is not
+              announced as "assigned 0 shiaijo". */}
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>
+            ⚠ This competition's shiaijo allocation blocks the draw.
+          </div>
+          <div>
+            {savedCourtsErr} Change the assignment below and save; the draw cannot be generated until you do.
+          </div>
+        </div>
+      )}
       {clashWarnings && clashWarnings.length > 0 && (
         <div className="alert alert--warn" style={{ marginBottom: 12 }} data-testid="clash-banner">
           <div style={{ fontWeight: 600, marginBottom: 6 }}>
@@ -637,21 +805,53 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             Discard the draw to change pools, courts, or format.
           </div>
         )}
+        {/* Pills come from courtPillOptions, not from tournament.courts, so
+            the rendered selection always equals local.courts: a shiaijo this
+            competition still holds after the tournament dropped it gets its
+            own flagged pill instead of vanishing from the screen while
+            staying on disk. Deselecting it is the fix, so the pill stays
+            clickable. */}
         <div className="radio-group">
-          {tournament.courts.map((cc) => (
-            <button key={cc} className={`radio-pill ${local.courts.includes(cc) ? "is-active" : ""}`} type="button" onClick={() => toggleCourt(cc)} disabled={isDrawReady}>Shiaijo (court) {cc}</button>
+          {courtOptions.map(({ court: cc, selected, inTournament }) => (
+            <button
+              key={cc}
+              className={`radio-pill ${selected ? "is-active" : ""}`}
+              type="button"
+              onClick={() => toggleCourt(cc)}
+              disabled={isDrawReady}
+              style={inTournament ? undefined : { borderColor: "var(--red)", color: selected ? undefined : "var(--red)" }}
+              data-testid={inTournament ? undefined : `orphan-court-${cc}`}
+            >Shiaijo (court) {cc}{inTournament ? "" : " (not in tournament)"}</button>
           ))}
         </div>
+        <window.FieldError testId="orphan-shiaijo-hint">{orphanedCourtsErr}</window.FieldError>
+        {/* Shiaijo-count rule, shown with the other court hints below so the
+            operator reads cap, suggestion and count rule in one place. The
+            error is rendered for ANY invalid selection, staged or already
+            saved, so the field never looks fine while the draw is blocked;
+            Save itself is gated on blockingCourtsErr (a CHANGE to an invalid
+            count), not on this hint. The hint is STANDING: it teaches the rule
+            before it can block anything, so the operator meets "you may pick 1
+            or 2 here" rather than learning it from a refusal, and is shown for
+            every valid AND invalid selection; only league/Swiss (out of scope)
+            drop it. Same component as the create form, which has to render
+            both notes identically. */}
+        <window.ShiaijoCountNotes error={courtsErr} hint={courtsHint} />
         {(local.format === "league" || local.poolFormat === "partial") ? (() => {
           const playerCount = (c.players || []).length;
           const ct = (n) => n === 1 ? "1 court" : `${n} courts`;
           const pt = (n) => n === 1 ? "1 player" : `${n} players`;
           if (playerCount < 2) return <div className="field__hint">Suggested: up to {ct(Math.max(1, Math.floor(playerCount / 2) - 1))} for {pt(playerCount)}</div>;
-          const numCourts = local.courts.length;
+          // `local.courts` is seeded from the competition record, which Go
+          // ships as `courts: null` when it was stored without a courts key.
+          // Every other read on this screen already defaults it; this one did
+          // not, so the league/partial-pool branch alone crashed the settings
+          // tab - the very screen an operator opens to assign the shiaijo.
+          const numCourts = (local.courts || []).length;
           const hardCap = Math.max(1, Math.floor(playerCount / 2));
           const suggestedCourts = Math.max(1, hardCap - 1);
-          if (numCourts > hardCap) return <div className="field__hint" style={{ color: "var(--red)" }}>Too many courts. {hardCap} max for {pt(playerCount)} (suggested: {suggestedCourts})</div>;
-          if (numCourts === hardCap && hardCap > suggestedCourts) return <div className="field__hint" style={{ color: "#78350f" }}>No rest between fights at {numCourts} courts. Consider {ct(suggestedCourts)} for {pt(playerCount)}</div>;
+          if (numCourts > hardCap) return <window.FieldError>Too many courts. {hardCap} max for {pt(playerCount)} (suggested: {suggestedCourts})</window.FieldError>;
+          if (numCourts === hardCap && hardCap > suggestedCourts) return <div className="field__hint field__hint--warn">No rest between fights at {numCourts} courts. Consider {ct(suggestedCourts)} for {pt(playerCount)}</div>;
           return <div className="field__hint">Suggested: up to {ct(suggestedCourts)} for {pt(playerCount)}</div>;
         })() : (
           <div className="field__hint">Concurrency = number of shiaijo assigned. Schedule prevents double-booking with other competitions.</div>
@@ -663,7 +863,21 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             <label className="field__label">Pool size is a</label>
             {/* draw-ready lock: poolSizeMode, poolSize, poolWinners are output-affecting. */}
             <div className="radio-group">
-              <button className={`radio-pill ${local.poolSizeMode === "max" ? "is-active" : ""}`} type="button" onClick={() => update("poolSizeMode", "max")} disabled={isDrawReady}>maximum</button>
+              <button
+                className={`radio-pill ${local.poolSizeMode === "max" ? "is-active" : ""}`}
+                type="button"
+                onClick={() => {
+                  // bc-qual LP-5a: leaving minimum-players-per-pool sizing
+                  // hides the "Knockout qualifiers" radio below; reset its
+                  // value to standard so it can't persist as a stale
+                  // non-standard selection under a mode it's no longer
+                  // valid for (same reset admin_setup.jsx's create form
+                  // applies on the same transition).
+                  update("poolSizeMode", "max");
+                  update("extraQualifiers", resetExtraQualifiersOnPoolModeChange("max", local.extraQualifiers));
+                }}
+                disabled={isDrawReady}
+              >maximum</button>
               <button className={`radio-pill ${local.poolSizeMode === "min" ? "is-active" : ""}`} type="button" onClick={() => update("poolSizeMode", "min")} disabled={isDrawReady}>minimum</button>
             </div>
           </div>
@@ -679,15 +893,78 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
               onChange={(e) => updateNumber("poolSize", e.target.value, 3)}
               disabled={isDrawReady}
             /></div>
-            <div className="field"><label className="field__label">Winners per pool</label><input
-              className="input"
-              type="number"
-              min="1"
-              value={Number.isFinite(local.poolWinners) ? local.poolWinners : ""}
-              onChange={(e) => updateNumber("poolWinners", e.target.value, 1)}
-              disabled={isDrawReady}
-            /></div>
+            <div className="field">
+              <label className="field__label">Winners per pool</label>
+              <input
+                className="input"
+                type="number"
+                min="1"
+                value={Number.isFinite(local.poolWinners) ? local.poolWinners : ""}
+                onChange={(e) => updateNumber("poolWinners", e.target.value, 1)}
+                disabled={isDrawReady || winnersInputDisabled(local.extraQualifiers)}
+              />
+              {/* bc-qual LP-5a: same coupling hint as the create form; */}
+              {/* draw-ready already has its own standing note above the */}
+              {/* "Pool size is a" pills, so it isn't repeated per-field here. */}
+              {!isDrawReady && winnersInputDisabled(local.extraQualifiers) && (
+                <div className="field__hint">Set to 1 by the knockout qualifiers setting below.</div>
+              )}
+            </div>
           </div>
+
+          {/* Knockout qualifiers (bc-qual LP-5a): only meaningful under
+              minimum-players-per-pool sizing (poolSizeMode === "min"); see
+              extraQualifiersRadioVisible. Same three options, same copy,
+              and the same draw-ready lock as poolSizeMode/poolSize/
+              poolWinners immediately above (this field is in the
+              server-side outputAffectingChanged set alongside them).
+              Federation-neutral copy per operator ruling: no federation
+              names anywhere in this UI. */}
+          {extraQualifiersRadioVisible(local.format, local.poolSizeMode) && (() => {
+            const activeShape = local.extraQualifiers === EXTRA_QUALIFIERS_LARGER_POOLS
+              ? qualifierPreview.largerPools
+              : local.extraQualifiers === EXTRA_QUALIFIERS_FILL_BRACKET
+                ? qualifierPreview.fillBracket
+                : qualifierPreview.standard;
+            const previewLine = formatQualifierPreviewLine(activeShape);
+            return (
+              <div className="field">
+                <label className="field__label">Knockout qualifiers</label>
+                <div className="radio-group">
+                  <button
+                    className={`radio-pill ${!local.extraQualifiers ? "is-active" : ""}`}
+                    type="button"
+                    onClick={() => update("extraQualifiers", EXTRA_QUALIFIERS_STANDARD)}
+                    disabled={isDrawReady}
+                  >{extraQualifiersLabel(EXTRA_QUALIFIERS_STANDARD)}</button>
+                  <button
+                    className={`radio-pill ${local.extraQualifiers === EXTRA_QUALIFIERS_LARGER_POOLS ? "is-active" : ""}`}
+                    type="button"
+                    onClick={() => {
+                      update("extraQualifiers", EXTRA_QUALIFIERS_LARGER_POOLS);
+                      update("poolWinners", winnersForExtraQualifiersChange(EXTRA_QUALIFIERS_LARGER_POOLS, local.poolWinners));
+                    }}
+                    disabled={isDrawReady}
+                  >{extraQualifiersLabel(EXTRA_QUALIFIERS_LARGER_POOLS)}</button>
+                  <button
+                    className={`radio-pill ${local.extraQualifiers === EXTRA_QUALIFIERS_FILL_BRACKET ? "is-active" : ""}`}
+                    type="button"
+                    onClick={() => {
+                      update("extraQualifiers", EXTRA_QUALIFIERS_FILL_BRACKET);
+                      update("poolWinners", winnersForExtraQualifiersChange(EXTRA_QUALIFIERS_FILL_BRACKET, local.poolWinners));
+                    }}
+                    disabled={isDrawReady}
+                  >{extraQualifiersLabel(EXTRA_QUALIFIERS_FILL_BRACKET)}</button>
+                </div>
+                <div className="field__hint">
+                  {extraQualifiersHint(local.extraQualifiers, local.poolSize)}
+                </div>
+                <div className="field__hint" data-testid="qualifier-preview-line">
+                  {previewLine || "Preview appears once this competition has participants."}
+                </div>
+              </div>
+            );
+          })()}
         </>
       )}
       {/* FR-052..FR-054 / T047: per-phase match-duration inputs. */}
@@ -839,12 +1116,15 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
         </div>
       )}
       {/* Repeat Save at the foot of the long settings form so the operator
-          doesn't have to scroll back to the header after editing. Same handler
-          and disabled rules as the header button. */}
+          doesn't have to scroll back to the header after editing. Same
+          onClick, the SAME `saveDisabled` value and the SAME `saveBlockMessage`
+          as the header: the two cannot drift because neither the block
+          condition nor the blocking message is restated here. The transient
+          "Saving…"/"✓ Saved at" states are the header's alone, by choice. */}
       <div style={{ marginTop: 20, display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10 }}>
-        {saveErr && <span style={{ fontSize: 12.5, color: "var(--red)", fontWeight: 600 }}>⚠ {saveErr}</span>}
-        {!saveErr && isDirty && !saving && <span style={{ fontSize: 12.5, color: "var(--warn)", fontWeight: 600 }}>● Unsaved changes</span>}
-        <button type="button" className="btn btn--primary" onClick={saveNow} disabled={!isDirty || saving}>
+        {saveBlocked && <span style={{ fontSize: 12.5, color: "var(--red)", fontWeight: 600 }}>{saveBlockMessage}</span>}
+        {!saveBlocked && isDirty && !saving && <span style={{ fontSize: 12.5, color: "var(--warn)", fontWeight: 600 }}>● Unsaved changes</span>}
+        <button type="button" className="btn btn--primary" onClick={saveNow} disabled={saveDisabled}>
           {saving ? "Saving…" : "Save changes"}
         </button>
       </div>

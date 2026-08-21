@@ -91,6 +91,40 @@ A competition moves through three phases:
 
 ![Competition setup overview](../../screenshots/mobile-participants.png)
 
+### Assigning shiai-jo
+
+The competition **Settings** page has an **Assigned shiai-jo (courts)** field listing every shiai-jo in the venue. Pick the ones this competition runs on; the number you pick is how many of its matches can run at the same time.
+
+Assign **1, 2, 4, 8 or 16 shiai-jo**. The knockout draw gives each shiai-jo its own block of the bracket and the blocks merge in pairs, so the count has to halve cleanly all the way down. Being even is not enough on its own: six blocks pair off into three, and three cannot pair off again, so 6 and 10 are refused just as 3, 5 and 7 are. When you pick a count the rule does not allow, the settings page names the counts to use instead, and it always offers 1. A single shiai-jo is always allowed. Where a competition sends two or more qualifiers up from each pool, its bracket splits into two half-blocks that act as partner shiai-jo, so the draw has the same shape as a two-shiai-jo one; where each pool sends up a single competitor, nothing crosses between shiai-jo and the bracket is left whole. 16 is the highest, and it is also the most shiai-jo a tournament can have, so no shiai-jo you can add is one a competition could not be given. See [The knockout draw](knockout-draw.md#how-many-shiai-jo-a-competition-can-use) for the full explanation.
+
+**This is a rule about each competition, never about your venue.** A hall with three shiai-jo is completely normal, and nothing asks you to change it. What it means is that each competition there runs on 1 or 2 of the three, not that the third stands idle: run the seniors on 2 shiai-jo and the juniors on the remaining 1 at the same time, and all three are busy. A five shiai-jo hall works the same way, with one competition on 4 and another on 1, or two competitions of 2 alongside a third on 1.
+
+A competition also cannot end up with a count the rule does not allow by inheriting one. If you create a competition without choosing its shiai-jo, it starts from the venue's list, and that inherited list is checked in exactly the same way, so on a three shiai-jo venue you are asked to pick 1 or 2 rather than being handed all three.
+
+The rule applies only to the formats that produce a knockout bracket, which are playoffs and mixed. League and Swiss competitions have no bracket to merge, so they can use any number of shiai-jo the tournament has.
+
+#### If you assign more shiai-jo than the competition has pools
+
+The draw never uses more shiai-jo than the competition has pools, because a shiai-jo with no pool of its own would own an empty block of the bracket. When you assign more than that, nothing is refused and no warning is shown: the draw steps down to the largest allowed count that fits and is generated on that. A competition with seven pools assigned eight shiai-jo runs on four. The count you assign is therefore not always the count you get.
+
+The step-down applies to the whole competition, not only to the knockout, and the blocks are handed to the assigned shiai-jo in order. Assign A to H to a seven-pool competition and it runs entirely on A, B, C and D: the pools split 2 / 2 / 2 / 1 across those four, and every knockout match from the first round to the final is on them as well. Open the Shiaijo operator view for E, F, G or H and it reads "No matches on this court".
+
+So assign a count the competition can fill, and give the rest to another competition running alongside it. If you want eight shiai-jo busy, the competition needs at least eight pools.
+
+#### If a competition already has a count the rule does not allow
+
+You can meet this after an upgrade, because the rule is newer than the data folder: a competition set up on 3, 5 or 6 shiai-jo before the rule existed keeps that allocation on disk, and so does one whose data folder was edited by hand.
+
+Such a competition is not broken. It loads, its matches and results are intact, it appears to spectators as usual, and its Settings page stays fully editable, so renaming it or changing anything else on that page still saves normally. The page carries a standing warning naming the counts to use instead.
+
+What you cannot do is draw or start it. **Generate draw** and **Start competition** are disabled with the reason shown, and the app refuses the same action from anywhere else, until you reassign its shiai-jo to 1, 2, 4, 8 or 16.
+
+### Knockout qualifiers
+
+For a **Mixed** competition with **Pool size is a** set to **minimum**, a **Knockout qualifiers** control appears alongside **Players per pool** and **Winners per pool**, on both the competition create form and its Settings page. It offers three options: **Standard** (every pool sends the same number of qualifiers), **Oversized send +1**, and **Fit the knockout**. See [How many qualify from each pool](knockout-draw.md#how-many-qualify-from-each-pool) for what each one does, with worked examples.
+
+Selecting either of the two non-standard options sets **Winners per pool** to 1 and disables the field, because both currently require it; switching back to Standard makes the field editable again. Below the options, a preview line updates as you adjust pool size and roster, reading something like "34 pools -> 36 qualifiers -> 64-slot knockout (28 byes)" for whichever option is selected. On the create form the preview is a placeholder until the competition has participants; on the Settings page it previews against the real roster, and is locked once the competition reaches `draw-ready`, alongside the rest of the pool configuration.
+
 ### Adding participants
 
 The participant setup view has two panels.
@@ -109,6 +143,10 @@ The **Check-in & Seeding** panel (labelled **Seeding** when check-in is disabled
 - Drag rows to assign seeds, or type a rank number directly.
 - Click **Shuffle unseeded** to randomise unranked positions.
 - Click **Import seeds (CSV)** to load a seed file, or **Clear seeds** to remove all ranks.
+
+The order you rank the seeds in is used, not just the set of seeded competitors: seeds 1 and 3 land in one half of the knockout draw and seeds 2 and 4 in the other, each in its own quarter, and a seeded pool's winner is first in line for any bye in its shiai-jo's block. Fewer than four seeds, including none at all, is a normal configuration. See [Seeding in the knockout draw](knockout-draw.md#seeding).
+
+Ranks must run from 1 with none missing. You can enter them in any order and each is saved as you type it, so a partly-entered seeding is expected; while it has a hole in it the panel names the ranks still to set and the **Generate draw** and **Start competition** buttons are disabled. Fill in the missing ranks, or click **Clear seeds** to start again.
 
 #### Editing a single competitor
 
@@ -165,7 +203,7 @@ For naginata and Engi-kyogi divisions, see [Naginata](naginata.md).
 The public viewer shows a competition's podium when it finishes, and a provisional ranking while it is still in progress:
 
 - **Kendo knockout** (default): 1st place, 2nd place, and two equal 3rd places. There is no bronze match; both semi-final losers share third.
-- **Naginata**: a single 3rd place is decided by a playoff. See [Naginata](naginata.md) for naginata-specific configuration.
+- **Naginata**: a single 3rd place is decided by a bronze match. See [Naginata](naginata.md) for naginata-specific configuration.
 - **Mixed format** (still in its pool phase): the viewer shows a provisional cross-pool ranking until the knockout decides the final places.
 
 Operators see an all-competition winners view from the dashboard. You can also record optional **fighting-spirit** (敢闘賞) awards as free text; these appear on the viewer for all spectators. Saving awards requires the destructive-ops password in self-run mode; see [Operating modes](operating-modes.md#destructive-ops-password).

@@ -20,19 +20,91 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 		return validationErrorf("competition %s cannot start: pool size must be at least 1, got %d, set a pool size before starting", comp.ID, comp.PoolSize)
 	}
 
+	isMax := comp.PoolSizeMode == "max"
+
+	// bc-qual: ExtraQualifiers is only meaningful for "mixed" (pools feeding a
+	// knockout). generatePools also runs for "league", which has a single
+	// implicit pool and no knockout at all, so a stored non-standard value on
+	// a league record (a hand-edited config.md, or a format switched outside
+	// the HTTP layer, which normalizePoolConfig would have zeroed) must not
+	// steer pool FORMATION.
+	//
+	// poolFedKnockout gates BOTH halves, and both gates have to be the same
+	// expression. The fill-bracket formation branch below used to dispatch on
+	// ExtraQualifiers alone while its own comment claimed the setting was
+	// "gated to minimum-players-per-pool sizing by state.ValidateExtraQualifiers,
+	// checked below" -- but that check ran AFTER formation and only inside the
+	// `mixed` arm, so for a league it never ran at all and for a mixed
+	// competition it ran too late to protect the branch it was cited by. A
+	// league in maximum sizing therefore formed its pools through the
+	// fill-bracket objective, reading PoolSize as a MINIMUM, and survived only
+	// because runDrawPipeline coincidentally pins league PoolSize to
+	// len(players), which makes FillBracketPoolCount return exactly one pool.
+	//
+	// Validating here, before anything reads the value, also means an invalid
+	// setting is reported as itself rather than as whatever formation error it
+	// happens to provoke, and still aborts before SavePools persists anything.
+	poolFedKnockout := comp.Format == state.CompFormatMixed
+	if poolFedKnockout {
+		if err := state.ValidateExtraQualifiers(comp.ExtraQualifiers, comp.PoolSizeMode, comp.EffectivePoolWinners()); err != nil {
+			return wrapValidationErrorf(err, "competition %s cannot start: %s", comp.ID, err.Error())
+		}
+	}
+
+	// numCourts is the competition's RAW shiaijo allocation, normalised. An unset
+	// court list means one unnamed court; helper.EffectiveDrawCourts,
+	// helper.PoolSeeding and helper.ReorderPoolsForCourts each treat anything
+	// below 1 as 1, and normalising up front keeps them reading off a single
+	// value. What the pool phase is actually laid out over is drawCourts below,
+	// which is this clamped down to what the pools can carry.
+	numCourts := len(comp.Courts)
+	if numCourts == 0 {
+		numCourts = 1
+	}
+
 	// helper.Player is a type alias for domain.Player (NFR-007); the
 	// Excel-coupled helpers accept domain values directly.
 	if len(seeds) > 0 {
 		if err := helper.ApplySeeds(players, seeds); err != nil {
 			return fmt.Errorf("applying seeds: %w", err)
 		}
-		players = helper.PoolSeeding(players, comp.PoolSize, len(comp.Courts))
 	}
 
-	isMax := comp.PoolSizeMode == "max"
-	pools, err := helper.CreatePools(players, comp.PoolSize, isMax)
-	if err != nil {
-		return err
+	// The whole pool phase, in the one order its steps are valid in, shared with
+	// cmd/create-pools.go so the two paths cannot drift again -- they have twice,
+	// each time misplacing real competitors. helper.BuildPoolPhase's doc comment
+	// carries the constraints and the worked examples.
+	//
+	// drawCourts is what comes back, not what went in: a shiaijo with no home pool
+	// would own an empty bracket region, so the count steps down to what the pools
+	// can carry. Everything below reads THAT, including AssignPoolsToCourts, or
+	// seeds end up placed for a shiaijo layout the draw does not have. numCourts
+	// stays the raw allocation for the single-pool league spread further down,
+	// which really does use every shiaijo the league was given.
+	var pools []helper.Pool
+	var drawCourts int
+	var err error
+	if poolFedKnockout && comp.ExtraQualifiers == state.ExtraQualifiersFillBracket {
+		// bc-qual LP-4: pool COUNT comes from a different formation
+		// objective (helper.FillBracketPoolCount) than the standard
+		// min-mode floor(n/PoolSize) -- helper.BuildPoolPhase's own path is
+		// untouched beside it (see that function's doc comment). isMax is
+		// irrelevant here: fill-bracket is gated to minimum-players-per-pool
+		// sizing by the state.ValidateExtraQualifiers call above, which now
+		// runs BEFORE this dispatch reads the setting.
+		pools, drawCourts, err = helper.BuildPoolPhaseFillBracket(players, comp.PoolSize, numCourts)
+		if err != nil {
+			// FillBracketPoolCount's own error already names the entrant
+			// count and minimum pool size, so it is wrapped as a clean,
+			// actionable *ValidationError (-> HTTP 400) rather than
+			// restated.
+			return wrapValidationErrorf(err, "competition %s cannot start: %s", comp.ID, err.Error())
+		}
+	} else {
+		pools, drawCourts, err = helper.BuildPoolPhase(players, comp.PoolSize, isMax, numCourts)
+		if err != nil {
+			return err
+		}
 	}
 
 	// A "mixed" competition is "Pools + Knockout" by definition, a single
@@ -59,6 +131,11 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 				return validationErrorf("mixed (Pools + Knockout) competition %s: pool %q has only %d participant(s) but %d advance to the knockout (PoolWinners=%d), every pool needs at least PoolWinners participants; reduce PoolWinners, adjust PoolSize/pool-size-mode, or add participants", comp.ID, p.PoolName, len(p.Players), poolWinners, poolWinners)
 			}
 		}
+		// bc-qual LP-3c's defense-in-depth ValidateExtraQualifiers check used
+		// to sit here. It has moved ABOVE the pool-formation dispatch (see
+		// poolFedKnockout): a check that a formation branch cites as its own
+		// precondition cannot run after that branch has already formed the
+		// pools.
 	}
 
 	if comp.NumberPrefix != "" {
@@ -90,18 +167,16 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 		return err
 	}
 
-	numCourts := len(comp.Courts)
-	if numCourts == 0 {
-		numCourts = 1
-	}
-
 	if len(pools) == 1 && numCourts > 1 {
 		if err := ValidateCourtCount(len(players), numCourts); err != nil {
 			return err
 		}
 	}
 
-	courtAssign, err := helper.AssignPoolsToCourts(len(pools), numCourts)
+	// drawCourts, derived above, is reused rather than recomputed: this
+	// allocation, the seed spread and the deinterleave are one layout and a
+	// second derivation is a second thing to keep in step.
+	courtAssign, err := helper.AssignPoolsToCourts(len(pools), drawCourts)
 	if err != nil {
 		return fmt.Errorf("assigning pools to courts: %w", err)
 	}

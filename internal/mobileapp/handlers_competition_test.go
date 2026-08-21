@@ -2186,17 +2186,23 @@ func TestCompetitionCourtsInvariant(t *testing.T) {
 
 	t.Run("empty courts inherit the tournament's courts", func(t *testing.T) {
 		r, store, _, _, _ := setupTestRouter(t)
+		// A 4-shiaijo venue, because the inherited list is now validated like
+		// any other: a competition may not reach an illegal allocation (3, 5,
+		// 6, ...) by inheriting one. The inheritance invariant this test owns
+		// is unchanged; only the venue size is, so it stays a legal allocation.
+		// The refusal side is covered by
+		// TestCreateCompetitionInheritedCourtsMatchExplicit.
 		require.NoError(t, store.SaveTournament(&state.Tournament{
-			Name: "T", Courts: []string{"A", "B", "C"},
+			Name: "T", Courts: []string{"A", "B", "C", "D"},
 		}))
 		comp := postComp(t, r, map[string]any{"name": "No Courts Comp"})
-		assert.Equal(t, []string{"A", "B", "C"}, courtsOf(comp),
+		assert.Equal(t, []string{"A", "B", "C", "D"}, courtsOf(comp),
 			"a competition created without courts must inherit the tournament's courts")
 
 		// Confirm it is persisted, not just echoed in the response.
 		reloaded, err := store.LoadCompetition(comp["id"].(string))
 		require.NoError(t, err)
-		assert.Equal(t, []string{"A", "B", "C"}, reloaded.Courts)
+		assert.Equal(t, []string{"A", "B", "C", "D"}, reloaded.Courts)
 	})
 
 	t.Run("explicit competition courts are preserved", func(t *testing.T) {
@@ -3205,5 +3211,81 @@ func TestCompetitionAPI_RejectsOutOfBandNeverClamps(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+	})
+}
+
+// TestUpdateCompetition_CourtStillRunningMatches pins the competition-level twin
+// of the tournament's orphaned-shiaijo guard: a competition cannot drop a
+// shiaijo its own live matches are still assigned to, because such a match has
+// no operator view left to be run from.
+func TestUpdateCompetition_CourtStillRunningMatches(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name: "Court Drop", Date: "20-08-2026", Courts: []string{"A", "B"}, Password: "pw",
+	}))
+
+	const cid = "court-drop"
+	save := func(status state.CompetitionStatus) {
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: cid, Name: "Court Drop", Format: state.CompFormatMixed,
+			Courts: []string{"A", "B"}, PoolSize: 4, PoolWinners: 2, Status: status,
+		}))
+	}
+	put := func(courts []string) *httptest.ResponseRecorder {
+		body, _ := json.Marshal(map[string]any{
+			"id": cid, "name": "Court Drop", "format": state.CompFormatMixed,
+			"courts": courts, "poolSize": 4, "poolWinners": 2,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	t.Run("REJECT dropping a shiaijo a scheduled match is on", func(t *testing.T) {
+		save(state.CompStatusPools)
+		require.NoError(t, store.SavePoolMatches(cid, []state.MatchResult{
+			{ID: "Pool A-1", Court: "A", Status: state.MatchStatusCompleted},
+			{ID: "Pool B-1", Court: "B", Status: state.MatchStatusScheduled},
+		}))
+
+		w := put([]string{"A"})
+		assert.Equal(t, http.StatusBadRequest, w.Code,
+			"dropping shiaijo B while a bout is scheduled on it must be refused: %s", w.Body.String())
+		assert.Contains(t, w.Body.String(), "shiaijo B",
+			"the refusal must name the shiaijo the operator has to clear")
+
+		stored, err := store.LoadCompetition(cid)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"A", "B"}, stored.Courts, "the allocation must not change after the refusal")
+	})
+
+	t.Run("ALLOW dropping a shiaijo whose bouts are all fought", func(t *testing.T) {
+		save(state.CompStatusPools)
+		require.NoError(t, store.SavePoolMatches(cid, []state.MatchResult{
+			{ID: "Pool A-1", Court: "A", Status: state.MatchStatusScheduled},
+			{ID: "Pool B-1", Court: "B", Status: state.MatchStatusCompleted},
+		}))
+
+		w := put([]string{"A"})
+		assert.Equal(t, http.StatusOK, w.Code,
+			"a shiaijo whose bouts are all fought must be free to drop: %s", w.Body.String())
+
+		stored, err := store.LoadCompetition(cid)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"A"}, stored.Courts)
+	})
+
+	t.Run("ALLOW the same edit before the competition starts", func(t *testing.T) {
+		save(state.CompStatusSetup)
+		require.NoError(t, store.SavePoolMatches(cid, []state.MatchResult{
+			{ID: "Pool B-1", Court: "B", Status: state.MatchStatusScheduled},
+		}))
+
+		w := put([]string{"A"})
+		assert.Equal(t, http.StatusOK, w.Code,
+			"nothing is live before the draw, so the allocation is still the operator's to set: %s", w.Body.String())
 	})
 }

@@ -83,7 +83,7 @@ Editing these frontend sources and refreshing the browser does **not** pick up c
 
 ## Create a commit
 
-Commit messages should be well formatted, and to make that "standardized", we
+Commit messages should be well formatted, and to make that "standardised", we
 are using Conventional Commits.
 
 You can follow the documentation on

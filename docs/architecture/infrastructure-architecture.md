@@ -102,7 +102,7 @@ of `terraform apply`. `terraform destroy` removes everything (run it after the e
 
 The cloud and host setup is only half the picture. On the venue floor, every operator console,
 display screen, and spectator phone is a **browser** reaching that one app over the network.
-A typical four-court (shiaijo A–D) layout:
+A typical four-court (shiai-jo A–D) layout:
 
 ```mermaid
 flowchart TB
@@ -139,7 +139,7 @@ flowchart TB
 
 | Device | What it runs | Notes |
 |---|---|---|
-| Operator console (1 per court) | admin scoring SPA | tablet/desktop surface; authenticates with the tournament password; scores its own shiaijo |
+| Operator console (1 per court) | admin scoring SPA | tablet/desktop surface; authenticates with the tournament password; scores its own shiai-jo |
 | Display screen (1 per court, optional) | public display / scoreboard view | a browser at a display URL; read-only, no auth. **Preferred: drive it from the operator console's own machine** via an HDMI cable to a TV or monitor, so the board survives a Wi-Fi outage (see [Keep the court scoreboard alive on the same machine](#keep-the-court-scoreboard-alive-on-the-same-machine-hdmi) below). A standalone smart-TV browser or separate mini-PC also works but loses that offline path |
 | Spectator phones | public viewer (mobile-first) | can be on cellular; they don't need venue Wi-Fi when the app is cloud-hosted |
 

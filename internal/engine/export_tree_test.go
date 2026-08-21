@@ -71,7 +71,7 @@ func leafLabelsOnSheet(t *testing.T, f *excelize.File, sheet string) []string {
 	require.NoError(t, err)
 	var labels []string
 	for r := 1; r <= len(rows); r++ {
-		for c := 1; c <= 26; c++ {
+		for c := 1; c <= helper.MaxCourts; c++ {
 			col, cerr := excelize.ColumnNumberToName(c)
 			require.NoError(t, cerr)
 			formula, ferr := f.GetCellFormula(sheet, fmt.Sprintf("%s%d", col, r))
@@ -160,7 +160,7 @@ func TestExportCompetitionXlsx_TwoCourtsRendersEveryTreePage(t *testing.T) {
 	for i, page := range pages {
 		title, err := f.GetCellFormula(page, "A1")
 		require.NoError(t, err)
-		assert.Containsf(t, title, "Shiaijo "+helper.CourtLabel(i), "%s must be titled by its shiaijo", page)
+		assert.Containsf(t, title, helper.ShiaijoLabel(helper.CourtLabel(i)), "%s must be titled by its shiaijo", page)
 		assert.NotContainsf(t, title, "Test Competition - Test Competition", "%s must not duplicate the competition name", page)
 	}
 }
@@ -358,7 +358,7 @@ func TestExportCompetitionXlsx_LeagueHasNoTreeSheet(t *testing.T) {
 }
 
 // TestExportCompetitionXlsx_PurePlayoffsRendersBracket pins mp-ndfu: a pure
-// playoffs competition has NO pools, so helper.GenerateFinals returns nothing and
+// playoffs competition has NO pools, so the pool-fed draw returns nothing and
 // the blank-template export used to skip the entire knockout block -- shipping a
 // workbook (and PDF booklet) with no tree pages and an empty Elimination Matches
 // sheet. The fix derives the elimination leaves from the stored bracket
@@ -436,7 +436,7 @@ func TestExportTournamentWorkbooks_MultiPageTree(t *testing.T) {
 // TestExportCompetitionXlsx_UnsetPoolWinnersRendersKnockout pins mp-0yd8: an
 // unset (<=0) PoolWinners runs a 2-winner knockout everywhere else in the
 // engine via EffectivePoolWinners, but the blank-template export fed the raw
-// zero into GenerateFinals, rendering a workbook with no tree pages for the
+// zero into the draw, rendering a workbook with no tree pages for the
 // knockout the tournament is actually running.
 func TestExportCompetitionXlsx_UnsetPoolWinnersRendersKnockout(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)

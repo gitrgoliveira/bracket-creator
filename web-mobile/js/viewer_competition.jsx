@@ -283,7 +283,12 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
 
   return (
     <div className="viewer">
-      <div className="viewer__shell">
+      {/* The bracket tab is the only viewer surface that is a wide diagram
+          rather than a reading column, so it (and only it) drops the shell's
+          reading-width cap: see .viewer__shell--bracket in styles.css. Keyed
+          off effectiveTab, not `tabs`, so a deep link to /bracket that falls
+          back to Overview keeps the normal cap. */}
+      <div className={`viewer__shell${effectiveTab === "bracket" ? " viewer__shell--bracket" : ""}`}>
         <div className="viewer__head">
           <button type="button" className="viewer__back" onClick={onBack} aria-label="Back">←</button>
           <div className="viewer__title-block">

@@ -86,23 +86,76 @@ func CheckDuplicateEntries(input []string) []string {
 	return order
 }
 
-// ValidateCourts returns an error when n is outside the supported court
-// range. Courts are labelled A–Z, so MaxCourts (26) is the hard upper
-// bound. n < 1 is also rejected so the caller does not have to guess what
-// "0 courts" should mean.
+// ValidateCourts returns an error when n is outside the supported court range,
+// [1, MaxCourts]. n < 1 is rejected so the caller does not have to guess what
+// "0 courts" should mean; see MaxCourts for why the ceiling is 16.
 func ValidateCourts(n int) error {
 	if n < 1 {
 		return fmt.Errorf("courts must be >= 1, got %d", n)
 	}
 	if n > MaxCourts {
-		return fmt.Errorf("courts must be <= %d (Shiaijo are labelled A–Z), got %d", MaxCourts, n)
+		return fmt.Errorf("courts must be <= %d (the most any one competition can be allocated), got %d", MaxCourts, n)
 	}
 	return nil
 }
 
-// CourtLabel returns the letter label (A–Z) for a zero-based court index.
+// clampCourts bounds a court count to the supported range, [1, MaxCourts]. It
+// is the coercing counterpart of ValidateCourts: the same range, for the paths
+// that have no error channel to refuse through (the draw builder and the sheet
+// writers, which are handed a count and must render something).
+//
+// Every entry point validates long before here, so this changes no reachable
+// behaviour -- it means no helper can be made to allocate or index off a number
+// nothing checked (see CourtLabel for what indexing past the cap does).
+func clampCourts(n int) int {
+	if n < 1 {
+		return 1
+	}
+	if n > MaxCourts {
+		return MaxCourts
+	}
+	return n
+}
+
+// CourtLabel returns the letter label for a zero-based court index. It indexes
+// courtLabelAlphabet, the same string MaxCourts is derived from, so an index at
+// or past the cap panics rather than inventing a label the rest of the system
+// does not accept.
 func CourtLabel(i int) string {
-	return string("ABCDEFGHIJKLMNOPQRSTUVWXYZ"[i])
+	return string(courtLabelAlphabet[i])
+}
+
+// ShiaijoLabel is the operator-facing name of one shiaijo, e.g. "Shiaijo C".
+//
+// The single writer of that string. The Pool Matches and Elimination Matches
+// column bands, the tree page titles and the workbook-parity reader that finds
+// bands by the "Shiaijo " prefix all have to spell it identically or a band
+// goes unrecognised, so the name is composed here rather than by each caller.
+func ShiaijoLabel(name string) string {
+	return "Shiaijo " + name
+}
+
+// CourtLabels is the default naming for a workbook laid out for n shiaijo:
+// A, B, C ... It is what the CLI generators use, because `--courts 4` says how
+// MANY shiaijo the draw runs on and never which ones the hall calls them.
+//
+// The live app must NOT use this. A competition carries its own court list and
+// it need not start at A: sharing a 4-shiaijo venue by running one competition
+// on A+B and another on C+D is the split the app itself recommends, and naming
+// the second one's bands "Shiaijo A" and "Shiaijo B" hands its operators a
+// sheet for courts that are not theirs. Pass comp.Courts instead.
+func CourtLabels(n int) []string {
+	return courtsPrefix(nil, clampCourts(n))
+}
+
+// courtNameAt is the name of band i, falling back to the positional letter when
+// the caller supplied no name for it. The fallback keeps a short list (or a nil
+// one) from producing an unnamed band rather than panicking mid-export.
+func courtNameAt(courts []string, i int) string {
+	if i >= 0 && i < len(courts) && courts[i] != "" {
+		return courts[i]
+	}
+	return CourtLabel(i)
 }
 
 func OrderStringsAlphabetically(strings []*Node) []*Node {
@@ -226,11 +279,17 @@ func ReadCSVFile(filePath string) ([][]string, error) {
 // AssignPoolsToCourts distributes numPools pools across numCourts courts using
 // contiguous blocks that match the tree sheet grouping. The first court gets
 // ceil(numPools/numCourts) pools, subsequent courts get the remainder.
-// Returns an error when numCourts exceeds numPools.
+//
+// Every court gets at least one pool WHEN numCourts <= numPools, which is what
+// makes a draw's blocks all non-empty (EffectiveDrawCourts is the clamp that
+// guarantees the precondition, and every draw goes through it). Asked for more
+// courts than pools it does not error, it leaves the trailing courts empty; the
+// error return is kept for callers that already handle one and for future
+// validation.
 func AssignPoolsToCourts(numPools, numCourts int) ([]int, error) {
-	if numCourts < 1 {
-		numCourts = 1
-	}
+	// Both ends, through the one owner: this loops numCourts times, so an
+	// unvalidated count is a no-op loop rather than a bound the caller checked.
+	numCourts = clampCourts(numCourts)
 	if numPools == 0 {
 		return []int{}, nil
 	}
@@ -253,7 +312,28 @@ func AssignPoolsToCourts(numPools, numCourts int) ([]int, error) {
 
 // SubtreeCourtIndex returns the zero-based court index for tree subtree idx
 // when numSubtrees are spread across numCourts. Mirrors the grouping used by
-// poolBoundsForSubtree so that court labels are always consistent.
+// PoolBoundsForSubtree so that court labels are always consistent.
+//
+// numSubtrees is an EXACT multiple of numCourts (R8: SubdivideRegions emits
+// numCourts x {1,2,4} pages, one court's pages consecutively), so for every
+// draw this repo builds the division is exact and idx/pagesPerCourt never
+// reaches numCourts.
+//
+// The one remaining non-multiple case is --single-tree, which prints ONE page
+// for the whole draw; pagesPerCourt then floors to 0, is raised to 1, and the
+// single page reports court 0. TreePageTitle names every shiaijo on that page
+// rather than pretending it is court A's.
+//
+// The final clamp is for callers OUTSIDE that invariant: RenderTreePages is
+// exported and takes the page list as an argument, so nothing in the type
+// system stops a 5-page, 2-court call, and the quotient then addresses a court
+// the competition does not have. courtNameAt answers that by inventing a
+// positional letter, so a 2-shiaijo draw titled its last page "Shiaijo C" -- a
+// court no operator can be standing at. Folding it onto the last real court
+// instead names one that at least exists. This is not the clamp that once hid
+// R8 violations by absorbing leftover pages: that fault is fixed at its source
+// (SubdivideRegions emits the exact multiple), which is what makes this
+// unreachable for every internal caller rather than load-bearing for any.
 func SubtreeCourtIndex(numSubtrees, numCourts, idx int) int {
 	// Every current caller clamps its court count, but this is the one place a
 	// zero would actually divide, so enforce the invariant here (like
@@ -265,9 +345,22 @@ func SubtreeCourtIndex(numSubtrees, numCourts, idx int) int {
 	}
 	courtIdx := idx / pagesPerCourt
 	if courtIdx >= numCourts {
-		courtIdx = numCourts - 1
+		return numCourts - 1
 	}
 	return courtIdx
+}
+
+// TreePageTitle is the shiaijo title a rendered tree page carries. Normally
+// that is the one court whose region the page prints. When the whole draw is
+// forced onto fewer pages than there are courts (--single-tree), the page
+// carries every court's bracket, so it names the whole range instead of
+// claiming a single shiaijo it does not own.
+func TreePageTitle(numSubtrees int, courts []string, idx int) string {
+	numCourts := clampCourts(len(courts))
+	if numSubtrees > 0 && numSubtrees < numCourts {
+		return ShiaijoLabel(courtNameAt(courts, 0)) + "-" + courtNameAt(courts, numCourts-1)
+	}
+	return ShiaijoLabel(courtNameAt(courts, SubtreeCourtIndex(numSubtrees, numCourts, idx)))
 }
 
 // ReorderPoolsForCourts deinterleaves pools so that when divided into

@@ -206,6 +206,54 @@ func normalizePoolConfig(comp *state.Competition) {
 		comp.PoolSize = 0
 		comp.PoolWinners = 0
 	}
+	normalizeExtraQualifiers(comp)
+}
+
+// competitionUpdateRequest is the PUT /competitions/:id body.
+//
+// It exists for ONE field. Every other setting can be merged from the decoded
+// state.Competition directly, because either its zero value is not a value an
+// operator can choose, or a sibling sentinel already distinguishes the two
+// (TeamMatchType's legacy "" is equivalent to "fixed"). ExtraQualifiers has
+// neither property: "" IS the Standard selection, so an omitted key and a
+// deliberate switch back to Standard decode identically.
+//
+// Embedding state.Competition and re-declaring the field at the outer level
+// shadows it during decode -- encoding/json prefers the shallower tag -- so
+// Competition.ExtraQualifiers stays empty and the pointer carries the truth:
+// nil means the key was absent, non-nil means the client sent a value
+// (including an explicit ""). The handler resolves the two immediately after
+// binding and again against the stored record inside the transform.
+type competitionUpdateRequest struct {
+	state.Competition
+	ExtraQualifiers *string `json:"extraQualifiers"`
+}
+
+// normalizeExtraQualifiers zeroes ExtraQualifiers (bc-qual LP-5a) for the
+// formats it cannot mean anything for: league has no knockout stage,
+// playoffs has no pool stage, and swiss pairs each round by standings --
+// internal/engine's own gate (poolFedKnockout in pools.go) is mixed-only,
+// so it never reaches any of them. Zeroing keeps stored config.md
+// consistent with what the engine actually uses, and means
+// ValidateExtraQualifiers always sees "" for these formats rather than
+// depending on the admin UI to have hidden/reset the field itself. Swiss
+// was missing from this switch at first (review finding): a swiss record
+// carrying a stale non-standard value -- e.g. a mixed larger-pools
+// competition later switched to swiss -- then failed
+// ValidateExtraQualifiers on every settings PUT over a field the UI hides
+// for swiss, so the operator had no way to clear it.
+//
+// Split out of normalizePoolConfig so the tournament-import path can apply
+// THIS rule without also applying the PoolSize/PoolWinners zeroing: that path
+// has always defaulted PoolSize for every format (handlers_import.go), and
+// changing what it stores for a league is not this rule's business. Both
+// callers therefore share one statement of what ExtraQualifiers means per
+// format instead of each carrying its own switch.
+func normalizeExtraQualifiers(comp *state.Competition) {
+	switch comp.Format {
+	case state.CompFormatLeague, state.CompFormatPlayoffs, state.CompFormatSwiss:
+		comp.ExtraQualifiers = state.ExtraQualifiersNone
+	}
 }
 
 // validateSwissConfig enforces FR-050a: when Format == swiss, SwissRounds
@@ -337,6 +385,13 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		comp.Format = strings.TrimSpace(comp.Format)
 		comp.PoolFormat = strings.TrimSpace(comp.PoolFormat)
 		comp.PoolSizeMode = strings.TrimSpace(comp.PoolSizeMode)
+		// bc-qual LP-5a: same defense-in-depth trim as the other enum-style
+		// fields above/below. The admin UI (admin_setup.jsx) only ever sends
+		// one of the three canonical values via radio buttons, but a
+		// hand-crafted request could pad it (" larger-pools ") and get an
+		// "unknown extraQualifiers" 400 from ValidateExtraQualifiers below
+		// instead of silently mismatching the switch on the engine side.
+		comp.ExtraQualifiers = strings.TrimSpace(comp.ExtraQualifiers)
 		comp.StartTime = strings.TrimSpace(comp.StartTime)
 		comp.Date = strings.TrimSpace(comp.Date)
 
@@ -416,22 +471,34 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		// Cross-file guard symmetry with POST/PUT /tournament: same
-		// label + cap check via validateCompetitionCourts (looser than
-		// the tournament version: empty courts are allowed here because
-		// they are immediately resolved to the tournament's courts via
-		// resolveCompetitionCourts on the next line, so every match ends
-		// up with a real court label). Defense against direct API callers
-		// sending multi-character labels.
-		if err := validateCompetitionCourts(comp.Courts); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "courts: " + err.Error()})
-			return
-		}
-
 		// Guarantee >=1 court: empty competition courts inherit the
 		// tournament's courts so every match carries a real court label
 		// (otherwise the per-court Shiaijo operator view can't surface them).
+		//
+		// Resolved BEFORE the court validators below, not after. An omitted
+		// court list is not "no allocation", it is "the tournament's
+		// allocation", and that is the list this handler persists, so that is
+		// the list the rules have to see. Validating first let a 3-shiaijo
+		// venue create a 3-shiaijo competition simply by leaving `courts` out
+		// of the body, while the operator who spelled ["A","B","C"] out was
+		// refused: the operator who states their intent lost to the one who
+		// said nothing. R9 requires the DERIVED value to be validated wherever
+		// an allocation is derived rather than chosen.
 		comp.Courts = resolveCompetitionCourts(comp.Courts, createTourn)
+
+		// Cross-file guard symmetry with POST/PUT /tournament: same
+		// label + cap check via validateCompetitionCourts (looser than
+		// the tournament version only in that it accepts an empty list,
+		// which by this point resolution has already ruled out). Defense
+		// against direct API callers sending multi-character labels.
+		//
+		// The full gate, since a create authors a brand-new allocation and has
+		// no stored value to preserve. The settings PUT defers it instead; see
+		// the comment on its call site.
+		if err := validateCompetitionCourts(comp.Courts, comp.Format, createTourn); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "courts: " + err.Error()})
+			return
+		}
 
 		// Reject per-phase durations outside the shiai band.
 		if err := validateCompetitionDurations(&comp); err != nil {
@@ -474,6 +541,22 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 
 		// Team competitions require at least 2 members per team.
 		if err := state.ValidateCompetitionTeamSize(comp.Kind, comp.TeamSize); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Knockout qualifiers (bc-qual LP-5a): "" is always valid;
+		// larger-pools/fill-bracket additionally require minimum-players-
+		// per-pool sizing and poolWinners == 1. normalizePoolConfig above
+		// already zeroed ExtraQualifiers for league/playoffs, so this only
+		// ever rejects a genuinely invalid combination for "mixed" (or a
+		// hand-crafted request for another format). EffectivePoolWinners()
+		// resolves an unset/<=0 PoolWinners to the same default of 2 the
+		// draw/schedule layers use, so a request that omits poolWinners
+		// entirely is judged on the value it will actually run with, not on
+		// the raw possibly-zero field (see ValidateExtraQualifiers's own
+		// doc comment on why passing the raw field would be wrong).
+		if err := state.ValidateExtraQualifiers(comp.ExtraQualifiers, comp.PoolSizeMode, comp.EffectivePoolWinners()); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -591,6 +674,39 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		c.JSON(http.StatusOK, comp)
 	})
 
+	// GET /competitions/:id/draw-warnings, the seed-placement warnings for the
+	// competition's draw (R2/D7). Read-only and admin-gated: it is advice to
+	// the operator about a constraint the seeding rules had to relax, not
+	// something a spectator needs, so it is deliberately NOT on the viewer
+	// endpoints the public surfaces read.
+	//
+	// It exists as its own endpoint because the operator console loads a
+	// competition through the public viewer detail, so a field on the admin
+	// competition record would never reach the page that has to show it.
+	// Always 200 with a (possibly empty) list for a competition that exists:
+	// no seeds, no draw and nothing to relax are all normal, and none of them
+	// is an error.
+	r.GET("/competitions/:id/draw-warnings", func(c *gin.Context) {
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
+		comp, err := store.LoadCompetition(id)
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		if comp == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+			return
+		}
+		warnings := eng.SeedWarningsFor(comp)
+		if warnings == nil {
+			warnings = []string{}
+		}
+		c.JSON(http.StatusOK, gin.H{"warnings": warnings})
+	})
+
 	// GET /competitions/:id/schedule/estimate, pre-draw schedule estimate
 	// for a specific competition. Read-only; main-password gated (registered
 	// under adminGroup via RegisterCompetitionHandlers) but does NOT require
@@ -648,10 +764,14 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		if !ok {
 			return
 		}
-		var comp state.Competition
-		if err := c.ShouldBindJSON(&comp); err != nil {
+		var req competitionUpdateRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
+		}
+		comp := req.Competition
+		if req.ExtraQualifiers != nil {
+			comp.ExtraQualifiers = *req.ExtraQualifiers
 		}
 		// Reject mismatched body.ID rather than silently overriding it.
 		// Pre-fix, a caller doing `PUT /api/competitions/comp-a` with
@@ -691,6 +811,13 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		comp.Format = strings.TrimSpace(comp.Format)
 		comp.PoolFormat = strings.TrimSpace(comp.PoolFormat)
 		comp.PoolSizeMode = strings.TrimSpace(comp.PoolSizeMode)
+		// bc-qual LP-5a: same defense-in-depth trim as the other enum-style
+		// fields above/below. The admin UI (admin_setup.jsx) only ever sends
+		// one of the three canonical values via radio buttons, but a
+		// hand-crafted request could pad it (" larger-pools ") and get an
+		// "unknown extraQualifiers" 400 from ValidateExtraQualifiers below
+		// instead of silently mismatching the switch on the engine side.
+		comp.ExtraQualifiers = strings.TrimSpace(comp.ExtraQualifiers)
 		comp.StartTime = strings.TrimSpace(comp.StartTime)
 		comp.Date = strings.TrimSpace(comp.Date)
 
@@ -728,6 +855,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// these behind `comp.Players == nil` keeps the defense-in-depth
 		// against bad settings PUTs and unblocks roster saves on legacy
 		// state.
+		// Declared out here (not in the settings branch that loads it) so the
+		// update transform below can read it for the orphaned-shiaijo check,
+		// which needs the STORED allocation and therefore runs inside the
+		// transform. Stays nil on the roster-only path, where no court is
+		// being written.
+		var putTourn *state.Tournament
 		if comp.Players == nil {
 			// Reject whitespace-only Name (see POST handler above). The
 			// admin SETTINGS edit path (AdminSettings.saveNow in
@@ -756,20 +889,32 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// (the worst case is a missed tournament date update, which
 			// would just skip the range check, a harmless skip vs. a
 			// deadlock is the right trade-off).
-			putTourn, putTournErr := store.LoadTournament()
+			loadedTourn, putTournErr := store.LoadTournament()
 			if putTournErr != nil {
 				internalError(c, putTournErr)
 				return
 			}
+			putTourn = loadedTourn
 			if err := validateCompetitionDateInTournament(&comp, putTourn); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
 
 			// Cross-file guard symmetry with POST handler + POST/PUT /tournament:
-			// validateCompetitionCourts label + cap check (empty allowed
-			// because the engine applies a 1-court default for competitions).
-			if err := validateCompetitionCourts(comp.Courts); err != nil {
+			// label + cap check (empty allowed because it MEANS "inherit the
+			// tournament's shiaijo", which resolveCompetitionCourts
+			// materialises just below).
+			//
+			// This is validateCourtLabels, NOT validateCompetitionCourts:
+			// the count and membership halves of that validator need the STORED
+			// allocation to decide, so it runs inside the update transform
+			// below, where `current` is loaded. A PUT that leaves an already-invalid allocation
+			// alone must SUCCEED, otherwise a competition saved before the
+			// rule existed could never have its name, date or durations
+			// edited again. Only a change TO an invalid allocation is
+			// rejected. The count check downstream sees the RESOLVED list,
+			// since resolveCompetitionCourts runs just below.
+			if err := validateCourtLabels(comp.Courts); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "courts: " + err.Error()})
 				return
 			}
@@ -779,6 +924,39 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// courts so every match carries a real court label. The transform
 			// below copies comp.Courts onto current for settings-only PUTs.
 			comp.Courts = resolveCompetitionCourts(comp.Courts, putTourn)
+
+			// Refuse to drop a shiaijo this competition's own live matches are
+			// still on. Sibling of the tournament-level orphan guard, and for
+			// the same reason: a match left on a shiaijo the competition no
+			// longer uses has no operator view to be run from. Completed
+			// matches do not count, so a court frees up as its bouts finish.
+			//
+			// Runs BEFORE the update transform, never inside it: that primitive
+			// holds the per-competition lock and LoadPoolMatches / LoadBracket
+			// take it too, so checking inside would deadlock on a non-reentrant
+			// mutex -- the same constraint checkCourtRemoval documents on the
+			// tournament side. The resulting TOCTOU window is covered by the
+			// engine's own gates at scoring and draw time.
+			// Only a REMOVAL can orphan a match, so adding or reordering shiaijo
+			// never pays for the match loads below. courtsRemovedBy is the same
+			// predicate the tournament twin gates on, and its answer is what the
+			// refusal is narrowed to, so it is computed once.
+			var removed []string
+			if stored, loadErr := store.LoadCompetition(id); loadErr == nil && stored != nil &&
+				stored.Status != state.CompStatusSetup && stored.Status != "" {
+				removed = courtsRemovedBy(resolveCompetitionCourts(stored.Courts, putTourn), comp.Courts)
+			}
+			if len(removed) > 0 {
+				poolMatches, bracket, loadErr := loadCompMatches(store, id)
+				if loadErr != nil {
+					internalError(c, loadErr)
+					return
+				}
+				if err := validateRemovedCourtsNotInUse(removed, poolMatches, bracket); err != nil {
+					c.JSON(http.StatusBadRequest, gin.H{"error": "courts: " + err.Error()})
+					return
+				}
+			}
 
 			// Reject negative per-phase or legacy durations.
 			if err := validateCompetitionDurations(&comp); err != nil {
@@ -824,6 +1002,14 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 
 			// Team competitions require at least 2 members per team.
 			if err := state.ValidateCompetitionTeamSize(comp.Kind, comp.TeamSize); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+
+			// Knockout qualifiers (bc-qual LP-5a). Same rule/rationale as
+			// the POST handler above; settings-only PUT (comp.Players ==
+			// nil) gate matches the other validators in this block.
+			if err := state.ValidateExtraQualifiers(comp.ExtraQualifiers, comp.PoolSizeMode, comp.EffectivePoolWinners()); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
@@ -933,8 +1119,57 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				if comp.TeamMatchType == "" {
 					comp.TeamMatchType = current.TeamMatchType
 				}
+				// ExtraQualifiers (bc-qual LP-5a) needs the same "omitted
+				// keeps stored" contract as TeamMatchType above, but cannot
+				// detect an omission the same way: "" is a REAL value here
+				// (Standard), not a legacy blank, so a client switching a
+				// competition back to Standard sends exactly what a client
+				// that never heard of the field sends. competitionUpdateRequest
+				// therefore carries the presence of the JSON key itself, and
+				// this is the one place that distinguishes the two.
+				//
+				// Without it, an omitting client (a non-SPA API caller on the
+				// pre-LP-5a contract, or a browser tab cached from before the
+				// field shipped) silently cleared a stored larger-pools /
+				// fill-bracket to Standard -- the next generate-draw quietly
+				// ran the uniform builder -- and, while draw-ready, tripped a
+				// spurious 409 from the comparison below for a PUT that
+				// changed nothing.
+				if req.ExtraQualifiers == nil {
+					comp.ExtraQualifiers = current.ExtraQualifiers
+					// Re-validate the EFFECTIVE pair. The settings block above
+					// validated the incoming "" against this PUT's pool sizing,
+					// which says nothing about the value just restored: a PUT
+					// that omits extraQualifiers while switching poolSizeMode
+					// to "max" would otherwise store a non-standard mode with
+					// maximum sizing, a combination ValidateExtraQualifiers
+					// exists to forbid and that no path validated.
+					if err := state.ValidateExtraQualifiers(comp.ExtraQualifiers, comp.PoolSizeMode, comp.EffectivePoolWinners()); err != nil {
+						validationErr = fmt.Errorf("extraQualifiers: %w", err)
+						return nil, nil
+					}
+				}
 				sameTeamMatchType := comp.TeamMatchType == current.TeamMatchType ||
 					(comp.TeamMatchType == state.TeamMatchTypeFixed && current.TeamMatchType == "")
+				// The stored allocation, resolved the same way the incoming one
+				// was. comp.Courts went through resolveCompetitionCourts in the
+				// settings-validation block above, so comparing it against the
+				// RAW current.Courts compares two different things: a record
+				// saved with no `courts` key at all (legacy, imported, or
+				// hand-edited) has current.Courts == nil, which never equals the
+				// materialised list, so every "did the courts change?" test below
+				// answered yes for a PUT that changed nothing about courts. On a
+				// 3-shiaijo venue that turned a plain rename into a 400 naming a
+				// count the operator never chose, and on a draw-ready competition
+				// into a spurious 409. Both guards use this value so they agree.
+				// Empty means the same thing on both sides of the comparison
+				// ("inherit the venue"), which is exactly what makes them
+				// comparable.
+				currentCourts := resolveCompetitionCourts(current.Courts, putTourn)
+				// Both guards below ask the same question -- "is this PUT actually
+				// reassigning shiaijo?" -- so it is asked once. Two independent
+				// spellings of it is how one of them ends up answering differently.
+				courtsChanged := strings.Join(comp.Courts, ",") != strings.Join(currentCourts, ",")
 				// Draw-ready gate: the draw artifacts (pools.csv /
 				// bracket.json) were generated from the current config.
 				// Mutating output-affecting fields while draw-ready would
@@ -968,7 +1203,17 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 						comp.PoolSize != current.PoolSize ||
 							comp.PoolWinners != current.PoolWinners ||
 							comp.PoolSizeMode != current.PoolSizeMode ||
-							strings.Join(comp.Courts, ",") != strings.Join(current.Courts, ",") ||
+							// bc-qual LP-5a: ExtraQualifiers selects which
+							// draw builder runs (standard/larger-pools/
+							// fill-bracket) and, for fill-bracket, changes
+							// how many pools are even CUT (helper.
+							// FillBracketPoolCount vs helper.PoolCount) --
+							// exactly the same "changes what the draw
+							// builds" reasoning as PoolSize/PoolWinners/
+							// PoolSizeMode immediately above, so it belongs
+							// in the same output-affecting set.
+							comp.ExtraQualifiers != current.ExtraQualifiers ||
+							courtsChanged ||
 							comp.Format != current.Format ||
 							comp.PoolFormat != current.PoolFormat ||
 							comp.RoundRobin != current.RoundRobin ||
@@ -1010,6 +1255,68 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				if validationErr != nil {
 					return nil, nil
 				}
+				// Shiaijo-count rule, deferred here from the settings
+				// validation block above because it is the one court check
+				// that needs the STORED allocation to decide.
+				//
+				// A competition must run on a power of two of shiaijo (1,
+				// 2, 4, 8 or 16): the knockout draw gives each shiaijo its
+				// own block of the bracket and the blocks merge in pairs,
+				// so the count has to halve cleanly
+				// (helper.ValidateShiaijoCount owns the message). Existing
+				// data is validated on WRITE ONLY, so this fires only when
+				// the allocation is actually being CHANGED. A competition
+				// already saved with an invalid allocation stays editable:
+				// an unrelated edit (name, date, durations, check-in) that
+				// leaves courts as they are must SUCCEED, otherwise the
+				// operator is locked out of the settings screen entirely
+				// and cannot even rename the competition. The operator UI
+				// surfaces a persistent warning on that screen instead, and
+				// the engine refuses to build a draw on an invalid
+				// allocation.
+				//
+				// comp.Courts is the RESOLVED list here (the handler ran
+				// resolveCompetitionCourts before taking the lock), so a
+				// PUT that omits courts on a 3-shiaijo venue is judged on
+				// the [A B C] it would actually store, exactly like the
+				// create path. The comparison against currentCourts (the
+				// stored list put through the SAME resolution, see above) is
+				// what keeps that from breaking a legacy record: a stored
+				// [A B C] round-tripped, inherited unchanged, or materialised
+				// from no stored list at all, is not a change, so it still
+				// saves.
+				//
+				// Any change to the list must land on a valid count, on the
+				// same courtsChanged the draw-ready guard above uses. The
+				// FORMAT is part of the trigger too: the
+				// rule is scoped to bracket-drawing formats, so switching a
+				// league on 3 shiaijo to mixed makes a stored-and-valid
+				// allocation illegal without the court list changing at
+				// all. Checking only the court list would let that through
+				// and leave the operator with a competition that cannot
+				// draw and no message saying why.
+				//
+				// The orphaned-shiaijo rule rides on the same trigger and for
+				// the same reason: a competition left holding a court the
+				// tournament no longer has must stay editable (that is exactly
+				// the operator's route back to a valid allocation, and the
+				// settings screen renders the orphan as a deselectable pill),
+				// so only a CHANGE that still names a missing court is
+				// refused. It is NOT scoped to bracket formats: a league's
+				// matches need an operator view just as much.
+				//
+				// The same gate the two authoring paths run, through the same
+				// function: what is DEFERRED here is WHEN it runs, not which
+				// rules it applies, and listing the rules again by hand is how
+				// a fourth one would reach POST and the importer but not this
+				// path. The label check inside it is redundant (line 823 ran it
+				// on this same list) and idempotent.
+				if courtsChanged || comp.Format != current.Format {
+					if err := validateCompetitionCourts(comp.Courts, comp.Format, putTourn); err != nil {
+						validationErr = fmt.Errorf("courts: %w", err)
+						return nil, nil
+					}
+				}
 				// Settings-only merge. Status, Players, and
 				// HasParticipantIDs are deliberately not copied from
 				// the body. Status is managed via dedicated endpoints
@@ -1024,6 +1331,14 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				current.PoolSize = comp.PoolSize
 				current.PoolWinners = comp.PoolWinners
 				current.PoolSizeMode = comp.PoolSizeMode
+				// bc-qual LP-5a: sibling of PoolSize/PoolWinners/PoolSizeMode
+				// immediately above. Already validated (ValidateExtraQualifiers,
+				// settings-validation block above) and, while draw-ready, gated
+				// by outputAffectingChanged just above this merge.
+				// comp.ExtraQualifiers is the EFFECTIVE value by now: an
+				// omitted key was resolved to the stored one, and re-validated,
+				// where TeamMatchType is resolved above.
+				current.ExtraQualifiers = comp.ExtraQualifiers
 				// comp.Courts was already defaulted to >=1 court (tournament
 				// fallback) in the settings-validation block above.
 				current.Courts = comp.Courts
@@ -1427,6 +1742,13 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 		hub.Broadcast(EventDrawGenerated, gin.H{"competitionId": id})
+		// The competition record alone. The draw's seeding warnings (R2/D7: a
+		// relaxed seed constraint is reported, never refused) are NOT folded in
+		// here -- they have one surface, GET /competitions/:id/draw-warnings,
+		// which the console fetches after this call returns and again on the
+		// detail screen. Recomputed on read there, so they cannot go stale
+		// against a redrawn competition the way a copy embedded in this
+		// response would.
 		c.JSON(http.StatusOK, comp)
 	})
 

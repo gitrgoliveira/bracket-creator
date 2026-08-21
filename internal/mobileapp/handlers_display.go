@@ -301,12 +301,7 @@ func matchesPresentOnCourt(poolMatches []state.MatchResult, bracket *state.Brack
 // can include "number" in the polled OBS/vMix overlay payload; the pools.csv
 // read is skipped entirely otherwise (the common case).
 func currentMatchPlayers(store *state.Store, comp *state.Competition) []domain.Player {
-	var hasIDsHint *bool
-	if comp.HasParticipantIDs {
-		t := true
-		hasIDsHint = &t
-	}
-	players, _ := store.LoadParticipantsOpt(comp.ID, comp.EffectiveWithZekkenName(), state.LoadParticipantsOpts{WithSeeds: false, HasIDs: hasIDsHint})
+	players, _ := store.LoadParticipantsOpt(comp.ID, comp.EffectiveWithZekkenName(), state.LoadParticipantsOpts{WithSeeds: false, HasIDs: comp.ParticipantIDsHint()})
 	if comp.NumberPrefix != "" {
 		pools, _ := store.LoadPools(comp.ID)
 		mergePoolNumbersIntoPlayersSlice(comp.NumberPrefix, players, pools, comp.Format)

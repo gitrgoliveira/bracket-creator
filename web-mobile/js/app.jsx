@@ -1670,6 +1670,11 @@ function CreateTournament({ onCreated, authConfig }) {
               required
             />
             <div className="field__hint">{`Enter a number (1-${window.MAX_COURTS}). Courts will be automatically labeled A, B, C, etc.`}</div>
+            {/* Same standing note as the edit-tournament form: this is where a
+                shiaijo count is typed for the very first time, and it used to
+                say nothing about the per-competition count rule. See
+                shiaijoVenueHint (admin_helpers.jsx). */}
+            <div className="field__hint" data-testid="venue-shiaijo-hint">{window.shiaijoVenueHint(courts)}</div>
           </div>
           {/* Tournament mode selector (mp-7h7). Chosen once at creation;
               immutable after that. Default is officiated (existing behaviour). */}

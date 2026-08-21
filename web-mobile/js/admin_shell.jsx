@@ -330,6 +330,14 @@ function AllWinnersModal({ comps, onClose }) {
 function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompetition, onEditTournament, onAnnounce, onOpenSchedule, onOpenScoreEditor, onOpenImport, onOpenShiaijo, onOpenRegistration, onStartAll, onStartCompetition, onLogout, onViewerMode, onUpdate, showToast, authConfig }) {
   const t = tournament;
   const comps = t.competitions || [];
+  // Whether "Start all" has anything to offer, answered by the same helper the
+  // click handler uses (startAllCompetitions, admin.jsx) rather than a second
+  // copy of the eligibility test, which agreed with it only while the two
+  // literals matched. BLOCKED competitions count as work too: the modal opens
+  // to name them, so hiding the button when every eligible competition is
+  // blocked would leave the operator with no way to find out why.
+  const { startable, blocked } = window.partitionStartableCompetitions(comps, t.courts);
+  const hasStartableWork = startable.length + blocked.length > 0;
   const [exportPdfOpen, setExportPdfOpen] = useStateA(false);
   const [allWinnersOpen, setAllWinnersOpen] = useStateA(false);
   const scheduleEnabled = !!(authConfig?.scheduleEnabled);
@@ -433,7 +441,7 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
               <button type="button" className="btn" onClick={() => setAllWinnersOpen(true)}><Icon name="trophy" />All winners</button>
             )}
             <button type="button" className="btn" onClick={onEditTournament}>Edit details</button>
-            {comps.some(c => c.status === "setup" && (c.players || []).length >= 2) && (
+            {hasStartableWork && (
               <button type="button" className="btn btn--danger" onClick={onStartAll}>Start all</button>
             )}
             {/* When the tournament is empty the first-run empty state below carries
@@ -685,6 +693,27 @@ function CompCard({ c, onOpen, onStart, tournament, showToast }) {
   const courts = c.courts || [];
   const [shareOpen, setShareOpen] = useStateA(false);
 
+  // Starting from SETUP generates the draw, so the same court rules that gate
+  // the competition header's Generate/Start buttons gate this one: one derived
+  // value (competitionDrawBlockedReason, admin_helpers.jsx) for all three
+  // surfaces. Without it this card offered a live button for a start the
+  // server refuses with a 400 whose only trace is an 8s toast, on the very
+  // screen an operator is most likely to start from.
+  //
+  // Scoped to setup: a draw-ready competition has already cleared these rules
+  // and its start is a status flip the server accepts.
+  const startBlocker = (!c.status || c.status === "setup")
+    ? window.competitionDrawBlocker(c, tournament && tournament.courts)
+    : null;
+
+  // Whether this card offers a start at all. One const for the button AND the
+  // blocker note under it: the note explains why THAT button is dead, so
+  // rendering it where no button exists attaches a refusal to nothing and puts
+  // it ahead of the real next action. A setup competition with 0 or 1
+  // participants is the case -- it has a court blocker like any other, and no
+  // button, because the roster is what it needs first.
+  const canOfferStart = c.status === "draw-ready" || (c.status === "setup" && playerCount >= 2);
+
   const canShare = tournament && tournament.mode === "self-run"
     && c.kind !== "team"
     && (!c.status || c.status === "setup");
@@ -728,8 +757,25 @@ function CompCard({ c, onOpen, onStart, tournament, showToast }) {
           {runningCount > 0 && <div className="tcard__stat"><div className="v" style={{ color: "var(--red)" }}>{runningCount}</div><div className="l">Now</div></div>}
         </div>
         <div className="tcard__actions">
-          {(c.status === "draw-ready" || (c.status === "setup" && playerCount >= 2)) && (
-            <button type="button" className="btn btn--primary btn--sm btn--full" onClick={(e) => { e.stopPropagation(); onStart(); }}>Start competition →</button>
+          {canOfferStart && (
+            <button
+              type="button"
+              className="btn btn--primary btn--sm btn--full"
+              onClick={(e) => { e.stopPropagation(); onStart(); }}
+              disabled={!!startBlocker}
+            >Start competition →</button>
+          )}
+          {/* The reason, not just a dead button: the operator has to know
+              which screen fixes it. Kept on the card rather than in a tooltip
+              because the dashboard is a touch surface. The remedy comes WITH
+              the reason (blocker.fix) rather than being written here, because
+              this card can no longer assume the blocker is a court rule.
+              Gated on canOfferStart with the button, so the reason can never
+              outlive the thing it is a reason for. */}
+          {canOfferStart && startBlocker && (
+            <div className="tcard__action-note" style={{ color: "var(--red)", fontSize: 11, fontWeight: 600, lineHeight: 1.4 }} data-testid="card-draw-block">
+              ⚠ Cannot start: {startBlocker.reason} Open this competition. {startBlocker.fix}
+            </div>
           )}
           {(c.status === "pools" || c.status === "playoffs") && (
             <button type="button" className="btn btn--primary btn--sm btn--full" onClick={(e) => { e.stopPropagation(); onOpen(); }}>Go to Scoring →</button>

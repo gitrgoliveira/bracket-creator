@@ -293,6 +293,9 @@ describe('AdminCompetition: page-head has no Start-knockout affordance (mp-turx)
       startCompetition: vi.fn(() => Promise.resolve({})),
       generateDraw: vi.fn(() => Promise.resolve({})),
       discardDraw: vi.fn(() => Promise.resolve({})),
+      // Called on every AdminCompetition mount (the draw's seed-placement
+      // warnings), so it has to exist even for tests that never look at it.
+      fetchDrawWarnings: vi.fn(() => Promise.resolve([])),
     };
 
     vi.resetModules();
@@ -535,6 +538,9 @@ describe('AdminBracket: per-match playability (mp-turx)', () => {
       startCompetition: vi.fn(() => Promise.resolve({})),
       generateDraw: vi.fn(() => Promise.resolve({})),
       discardDraw: vi.fn(() => Promise.resolve({})),
+      // Called on every AdminCompetition mount (the draw's seed-placement
+      // warnings), so it has to exist even for tests that never look at it.
+      fetchDrawWarnings: vi.fn(() => Promise.resolve([])),
     };
 
     vi.resetModules();

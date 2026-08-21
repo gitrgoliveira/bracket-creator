@@ -1,0 +1,1756 @@
+{
+  "_comment": [
+    "Bracket match numbers as internal/engine persists them, and the pin for the",
+    "SPA's independent re-derivation in web-mobile/js/bracket.jsx (buildDisplayModel).",
+    "A card labelled M\u003cn\u003e and the printed Excel sheet's Match \u003cn\u003e must name the same",
+    "bout. Both sides read this file: Go in bracket_match_numbers_golden_test.go,",
+    "JS in web-mobile/js/__tests__/bracket_match_numbers.test.jsx.",
+    "Do NOT hand-edit. Regenerate with:",
+    "UPDATE_GOLDEN=1 go test ./internal/engine/ -run TestBracketMatchNumbersGolden"
+  ],
+  "cases": [
+    {
+      "name": "playoffs on 1 shiaijo",
+      "entrants": 4,
+      "discriminating": false,
+      "rounds": [
+        [
+          {
+            "id": "m-r1-0",
+            "sideA": "Player01",
+            "sideB": "Player02",
+            "displayRound": 2,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 1
+          },
+          {
+            "id": "m-r1-1",
+            "sideA": "Player03",
+            "sideB": "Player04",
+            "displayRound": 2,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 2
+          }
+        ],
+        [
+          {
+            "id": "m-r2-0",
+            "sideA": "Winner of r2-m0",
+            "sideB": "Winner of r2-m1",
+            "displayRound": 1,
+            "feeders": [
+              "m-r1-0",
+              "m-r1-1"
+            ],
+            "matchNumber": 3
+          }
+        ]
+      ]
+    },
+    {
+      "name": "playoffs on 1 shiaijo",
+      "entrants": 5,
+      "discriminating": false,
+      "rounds": [
+        [
+          {
+            "id": "m-r1-0",
+            "sideA": "Player01",
+            "sideB": "Player02",
+            "displayRound": 3,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 1
+          },
+          {
+            "id": "m-r1-1",
+            "sideA": "",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r1-2",
+            "sideA": "Player03",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r1-3",
+            "sideA": "Player04",
+            "sideB": "Player05",
+            "displayRound": 3,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 2
+          }
+        ],
+        [
+          {
+            "id": "m-r2-0",
+            "sideA": "Winner of r3-m0",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r2-1",
+            "sideA": "Player03",
+            "sideB": "Winner of r3-m3",
+            "displayRound": 2,
+            "feeders": [
+              "",
+              "m-r1-3"
+            ],
+            "matchNumber": 3
+          }
+        ],
+        [
+          {
+            "id": "m-r3-0",
+            "sideA": "Winner of r2-m0",
+            "sideB": "Winner of r2-m1",
+            "displayRound": 1,
+            "feeders": [
+              "m-r1-0",
+              "m-r2-1"
+            ],
+            "matchNumber": 4
+          }
+        ]
+      ]
+    },
+    {
+      "name": "playoffs on 1 shiaijo",
+      "entrants": 8,
+      "discriminating": false,
+      "rounds": [
+        [
+          {
+            "id": "m-r1-0",
+            "sideA": "Player01",
+            "sideB": "Player02",
+            "displayRound": 3,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 1
+          },
+          {
+            "id": "m-r1-1",
+            "sideA": "Player03",
+            "sideB": "Player04",
+            "displayRound": 3,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 2
+          },
+          {
+            "id": "m-r1-2",
+            "sideA": "Player05",
+            "sideB": "Player06",
+            "displayRound": 3,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 3
+          },
+          {
+            "id": "m-r1-3",
+            "sideA": "Player07",
+            "sideB": "Player08",
+            "displayRound": 3,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 4
+          }
+        ],
+        [
+          {
+            "id": "m-r2-0",
+            "sideA": "Winner of r3-m0",
+            "sideB": "Winner of r3-m1",
+            "displayRound": 2,
+            "feeders": [
+              "m-r1-0",
+              "m-r1-1"
+            ],
+            "matchNumber": 5
+          },
+          {
+            "id": "m-r2-1",
+            "sideA": "Winner of r3-m2",
+            "sideB": "Winner of r3-m3",
+            "displayRound": 2,
+            "feeders": [
+              "m-r1-2",
+              "m-r1-3"
+            ],
+            "matchNumber": 6
+          }
+        ],
+        [
+          {
+            "id": "m-r3-0",
+            "sideA": "Winner of r2-m0",
+            "sideB": "Winner of r2-m1",
+            "displayRound": 1,
+            "feeders": [
+              "m-r2-0",
+              "m-r2-1"
+            ],
+            "matchNumber": 7
+          }
+        ]
+      ]
+    },
+    {
+      "name": "playoffs on 1 shiaijo",
+      "entrants": 9,
+      "discriminating": false,
+      "rounds": [
+        [
+          {
+            "id": "m-r1-0",
+            "sideA": "Player01",
+            "sideB": "Player02",
+            "displayRound": 4,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 1
+          },
+          {
+            "id": "m-r1-1",
+            "sideA": "Player03",
+            "sideB": "Player04",
+            "displayRound": 4,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 2
+          },
+          {
+            "id": "m-r1-2",
+            "sideA": "",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r1-3",
+            "sideA": "",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r1-4",
+            "sideA": "Player05",
+            "sideB": "Player06",
+            "displayRound": 4,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 3
+          },
+          {
+            "id": "m-r1-5",
+            "sideA": "",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r1-6",
+            "sideA": "Player07",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r1-7",
+            "sideA": "Player08",
+            "sideB": "Player09",
+            "displayRound": 4,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 4
+          }
+        ],
+        [
+          {
+            "id": "m-r2-0",
+            "sideA": "Winner of r4-m0",
+            "sideB": "Winner of r4-m1",
+            "displayRound": 3,
+            "feeders": [
+              "m-r1-0",
+              "m-r1-1"
+            ],
+            "matchNumber": 5
+          },
+          {
+            "id": "m-r2-1",
+            "sideA": "",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r2-2",
+            "sideA": "Winner of r4-m4",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r2-3",
+            "sideA": "Player07",
+            "sideB": "Winner of r4-m7",
+            "displayRound": 3,
+            "feeders": [
+              "",
+              "m-r1-7"
+            ],
+            "matchNumber": 6
+          }
+        ],
+        [
+          {
+            "id": "m-r3-0",
+            "sideA": "Winner of r3-m0",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r3-1",
+            "sideA": "Winner of r3-m2",
+            "sideB": "Winner of r3-m3",
+            "displayRound": 2,
+            "feeders": [
+              "m-r1-4",
+              "m-r2-3"
+            ],
+            "matchNumber": 7
+          }
+        ],
+        [
+          {
+            "id": "m-r4-0",
+            "sideA": "Winner of r2-m0",
+            "sideB": "Winner of r2-m1",
+            "displayRound": 1,
+            "feeders": [
+              "m-r2-0",
+              "m-r3-1"
+            ],
+            "matchNumber": 8
+          }
+        ]
+      ]
+    },
+    {
+      "name": "playoffs on 1 shiaijo",
+      "entrants": 11,
+      "discriminating": false,
+      "rounds": [
+        [
+          {
+            "id": "m-r1-0",
+            "sideA": "Player01",
+            "sideB": "Player02",
+            "displayRound": 4,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 1
+          },
+          {
+            "id": "m-r1-1",
+            "sideA": "",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r1-2",
+            "sideA": "Player03",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r1-3",
+            "sideA": "Player04",
+            "sideB": "Player05",
+            "displayRound": 4,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 2
+          },
+          {
+            "id": "m-r1-4",
+            "sideA": "Player06",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r1-5",
+            "sideA": "Player07",
+            "sideB": "Player08",
+            "displayRound": 4,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 3
+          },
+          {
+            "id": "m-r1-6",
+            "sideA": "Player09",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r1-7",
+            "sideA": "Player10",
+            "sideB": "Player11",
+            "displayRound": 4,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 4
+          }
+        ],
+        [
+          {
+            "id": "m-r2-0",
+            "sideA": "Winner of r4-m0",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r2-1",
+            "sideA": "Player03",
+            "sideB": "Winner of r4-m3",
+            "displayRound": 3,
+            "feeders": [
+              "",
+              "m-r1-3"
+            ],
+            "matchNumber": 5
+          },
+          {
+            "id": "m-r2-2",
+            "sideA": "Player06",
+            "sideB": "Winner of r4-m5",
+            "displayRound": 3,
+            "feeders": [
+              "",
+              "m-r1-5"
+            ],
+            "matchNumber": 6
+          },
+          {
+            "id": "m-r2-3",
+            "sideA": "Player09",
+            "sideB": "Winner of r4-m7",
+            "displayRound": 3,
+            "feeders": [
+              "",
+              "m-r1-7"
+            ],
+            "matchNumber": 7
+          }
+        ],
+        [
+          {
+            "id": "m-r3-0",
+            "sideA": "Winner of r3-m0",
+            "sideB": "Winner of r3-m1",
+            "displayRound": 2,
+            "feeders": [
+              "m-r1-0",
+              "m-r2-1"
+            ],
+            "matchNumber": 8
+          },
+          {
+            "id": "m-r3-1",
+            "sideA": "Winner of r3-m2",
+            "sideB": "Winner of r3-m3",
+            "displayRound": 2,
+            "feeders": [
+              "m-r2-2",
+              "m-r2-3"
+            ],
+            "matchNumber": 9
+          }
+        ],
+        [
+          {
+            "id": "m-r4-0",
+            "sideA": "Winner of r2-m0",
+            "sideB": "Winner of r2-m1",
+            "displayRound": 1,
+            "feeders": [
+              "m-r3-0",
+              "m-r3-1"
+            ],
+            "matchNumber": 10
+          }
+        ]
+      ]
+    },
+    {
+      "name": "playoffs on 1 shiaijo",
+      "entrants": 13,
+      "discriminating": false,
+      "rounds": [
+        [
+          {
+            "id": "m-r1-0",
+            "sideA": "Player01",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r1-1",
+            "sideA": "Player02",
+            "sideB": "Player03",
+            "displayRound": 4,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 1
+          },
+          {
+            "id": "m-r1-2",
+            "sideA": "Player04",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r1-3",
+            "sideA": "Player05",
+            "sideB": "Player06",
+            "displayRound": 4,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 2
+          },
+          {
+            "id": "m-r1-4",
+            "sideA": "Player07",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r1-5",
+            "sideA": "Player08",
+            "sideB": "Player09",
+            "displayRound": 4,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 3
+          },
+          {
+            "id": "m-r1-6",
+            "sideA": "Player10",
+            "sideB": "Player11",
+            "displayRound": 4,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 4
+          },
+          {
+            "id": "m-r1-7",
+            "sideA": "Player12",
+            "sideB": "Player13",
+            "displayRound": 4,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 5
+          }
+        ],
+        [
+          {
+            "id": "m-r2-0",
+            "sideA": "Player01",
+            "sideB": "Winner of r4-m1",
+            "displayRound": 3,
+            "feeders": [
+              "",
+              "m-r1-1"
+            ],
+            "matchNumber": 6
+          },
+          {
+            "id": "m-r2-1",
+            "sideA": "Player04",
+            "sideB": "Winner of r4-m3",
+            "displayRound": 3,
+            "feeders": [
+              "",
+              "m-r1-3"
+            ],
+            "matchNumber": 7
+          },
+          {
+            "id": "m-r2-2",
+            "sideA": "Player07",
+            "sideB": "Winner of r4-m5",
+            "displayRound": 3,
+            "feeders": [
+              "",
+              "m-r1-5"
+            ],
+            "matchNumber": 8
+          },
+          {
+            "id": "m-r2-3",
+            "sideA": "Winner of r4-m6",
+            "sideB": "Winner of r4-m7",
+            "displayRound": 3,
+            "feeders": [
+              "m-r1-6",
+              "m-r1-7"
+            ],
+            "matchNumber": 9
+          }
+        ],
+        [
+          {
+            "id": "m-r3-0",
+            "sideA": "Winner of r3-m0",
+            "sideB": "Winner of r3-m1",
+            "displayRound": 2,
+            "feeders": [
+              "m-r2-0",
+              "m-r2-1"
+            ],
+            "matchNumber": 10
+          },
+          {
+            "id": "m-r3-1",
+            "sideA": "Winner of r3-m2",
+            "sideB": "Winner of r3-m3",
+            "displayRound": 2,
+            "feeders": [
+              "m-r2-2",
+              "m-r2-3"
+            ],
+            "matchNumber": 11
+          }
+        ],
+        [
+          {
+            "id": "m-r4-0",
+            "sideA": "Winner of r2-m0",
+            "sideB": "Winner of r2-m1",
+            "displayRound": 1,
+            "feeders": [
+              "m-r3-0",
+              "m-r3-1"
+            ],
+            "matchNumber": 12
+          }
+        ]
+      ]
+    },
+    {
+      "name": "playoffs on 1 shiaijo",
+      "entrants": 16,
+      "discriminating": false,
+      "rounds": [
+        [
+          {
+            "id": "m-r1-0",
+            "sideA": "Player01",
+            "sideB": "Player02",
+            "displayRound": 4,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 1
+          },
+          {
+            "id": "m-r1-1",
+            "sideA": "Player03",
+            "sideB": "Player04",
+            "displayRound": 4,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 2
+          },
+          {
+            "id": "m-r1-2",
+            "sideA": "Player05",
+            "sideB": "Player06",
+            "displayRound": 4,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 3
+          },
+          {
+            "id": "m-r1-3",
+            "sideA": "Player07",
+            "sideB": "Player08",
+            "displayRound": 4,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 4
+          },
+          {
+            "id": "m-r1-4",
+            "sideA": "Player09",
+            "sideB": "Player10",
+            "displayRound": 4,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 5
+          },
+          {
+            "id": "m-r1-5",
+            "sideA": "Player11",
+            "sideB": "Player12",
+            "displayRound": 4,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 6
+          },
+          {
+            "id": "m-r1-6",
+            "sideA": "Player13",
+            "sideB": "Player14",
+            "displayRound": 4,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 7
+          },
+          {
+            "id": "m-r1-7",
+            "sideA": "Player15",
+            "sideB": "Player16",
+            "displayRound": 4,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 8
+          }
+        ],
+        [
+          {
+            "id": "m-r2-0",
+            "sideA": "Winner of r4-m0",
+            "sideB": "Winner of r4-m1",
+            "displayRound": 3,
+            "feeders": [
+              "m-r1-0",
+              "m-r1-1"
+            ],
+            "matchNumber": 9
+          },
+          {
+            "id": "m-r2-1",
+            "sideA": "Winner of r4-m2",
+            "sideB": "Winner of r4-m3",
+            "displayRound": 3,
+            "feeders": [
+              "m-r1-2",
+              "m-r1-3"
+            ],
+            "matchNumber": 10
+          },
+          {
+            "id": "m-r2-2",
+            "sideA": "Winner of r4-m4",
+            "sideB": "Winner of r4-m5",
+            "displayRound": 3,
+            "feeders": [
+              "m-r1-4",
+              "m-r1-5"
+            ],
+            "matchNumber": 11
+          },
+          {
+            "id": "m-r2-3",
+            "sideA": "Winner of r4-m6",
+            "sideB": "Winner of r4-m7",
+            "displayRound": 3,
+            "feeders": [
+              "m-r1-6",
+              "m-r1-7"
+            ],
+            "matchNumber": 12
+          }
+        ],
+        [
+          {
+            "id": "m-r3-0",
+            "sideA": "Winner of r3-m0",
+            "sideB": "Winner of r3-m1",
+            "displayRound": 2,
+            "feeders": [
+              "m-r2-0",
+              "m-r2-1"
+            ],
+            "matchNumber": 13
+          },
+          {
+            "id": "m-r3-1",
+            "sideA": "Winner of r3-m2",
+            "sideB": "Winner of r3-m3",
+            "displayRound": 2,
+            "feeders": [
+              "m-r2-2",
+              "m-r2-3"
+            ],
+            "matchNumber": 14
+          }
+        ],
+        [
+          {
+            "id": "m-r4-0",
+            "sideA": "Winner of r2-m0",
+            "sideB": "Winner of r2-m1",
+            "displayRound": 1,
+            "feeders": [
+              "m-r3-0",
+              "m-r3-1"
+            ],
+            "matchNumber": 15
+          }
+        ]
+      ]
+    },
+    {
+      "name": "playoffs on 1 shiaijo",
+      "entrants": 19,
+      "discriminating": false,
+      "rounds": [
+        [
+          {
+            "id": "m-r1-0",
+            "sideA": "Player01",
+            "sideB": "Player02",
+            "displayRound": 5,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 1
+          },
+          {
+            "id": "m-r1-1",
+            "sideA": "Player03",
+            "sideB": "Player04",
+            "displayRound": 5,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 2
+          },
+          {
+            "id": "m-r1-2",
+            "sideA": "",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r1-3",
+            "sideA": "",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r1-4",
+            "sideA": "Player05",
+            "sideB": "Player06",
+            "displayRound": 5,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 3
+          },
+          {
+            "id": "m-r1-5",
+            "sideA": "",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r1-6",
+            "sideA": "Player07",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r1-7",
+            "sideA": "Player08",
+            "sideB": "Player09",
+            "displayRound": 5,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 4
+          },
+          {
+            "id": "m-r1-8",
+            "sideA": "Player10",
+            "sideB": "Player11",
+            "displayRound": 5,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 5
+          },
+          {
+            "id": "m-r1-9",
+            "sideA": "",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r1-10",
+            "sideA": "Player12",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r1-11",
+            "sideA": "Player13",
+            "sideB": "Player14",
+            "displayRound": 5,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 6
+          },
+          {
+            "id": "m-r1-12",
+            "sideA": "Player15",
+            "sideB": "Player16",
+            "displayRound": 5,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 7
+          },
+          {
+            "id": "m-r1-13",
+            "sideA": "",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r1-14",
+            "sideA": "Player17",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r1-15",
+            "sideA": "Player18",
+            "sideB": "Player19",
+            "displayRound": 5,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 8
+          }
+        ],
+        [
+          {
+            "id": "m-r2-0",
+            "sideA": "Winner of r5-m0",
+            "sideB": "Winner of r5-m1",
+            "displayRound": 4,
+            "feeders": [
+              "m-r1-0",
+              "m-r1-1"
+            ],
+            "matchNumber": 9
+          },
+          {
+            "id": "m-r2-1",
+            "sideA": "",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r2-2",
+            "sideA": "Winner of r5-m4",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r2-3",
+            "sideA": "Player07",
+            "sideB": "Winner of r5-m7",
+            "displayRound": 4,
+            "feeders": [
+              "",
+              "m-r1-7"
+            ],
+            "matchNumber": 10
+          },
+          {
+            "id": "m-r2-4",
+            "sideA": "Winner of r5-m8",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r2-5",
+            "sideA": "Player12",
+            "sideB": "Winner of r5-m11",
+            "displayRound": 4,
+            "feeders": [
+              "",
+              "m-r1-11"
+            ],
+            "matchNumber": 11
+          },
+          {
+            "id": "m-r2-6",
+            "sideA": "Winner of r5-m12",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r2-7",
+            "sideA": "Player17",
+            "sideB": "Winner of r5-m15",
+            "displayRound": 4,
+            "feeders": [
+              "",
+              "m-r1-15"
+            ],
+            "matchNumber": 12
+          }
+        ],
+        [
+          {
+            "id": "m-r3-0",
+            "sideA": "Winner of r4-m0",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r3-1",
+            "sideA": "Winner of r4-m2",
+            "sideB": "Winner of r4-m3",
+            "displayRound": 3,
+            "feeders": [
+              "m-r1-4",
+              "m-r2-3"
+            ],
+            "matchNumber": 13
+          },
+          {
+            "id": "m-r3-2",
+            "sideA": "Winner of r4-m4",
+            "sideB": "Winner of r4-m5",
+            "displayRound": 3,
+            "feeders": [
+              "m-r1-8",
+              "m-r2-5"
+            ],
+            "matchNumber": 14
+          },
+          {
+            "id": "m-r3-3",
+            "sideA": "Winner of r4-m6",
+            "sideB": "Winner of r4-m7",
+            "displayRound": 3,
+            "feeders": [
+              "m-r1-12",
+              "m-r2-7"
+            ],
+            "matchNumber": 15
+          }
+        ],
+        [
+          {
+            "id": "m-r4-0",
+            "sideA": "Winner of r3-m0",
+            "sideB": "Winner of r3-m1",
+            "displayRound": 2,
+            "feeders": [
+              "m-r2-0",
+              "m-r3-1"
+            ],
+            "matchNumber": 16
+          },
+          {
+            "id": "m-r4-1",
+            "sideA": "Winner of r3-m2",
+            "sideB": "Winner of r3-m3",
+            "displayRound": 2,
+            "feeders": [
+              "m-r3-2",
+              "m-r3-3"
+            ],
+            "matchNumber": 17
+          }
+        ],
+        [
+          {
+            "id": "m-r5-0",
+            "sideA": "Winner of r2-m0",
+            "sideB": "Winner of r2-m1",
+            "displayRound": 1,
+            "feeders": [
+              "m-r4-0",
+              "m-r4-1"
+            ],
+            "matchNumber": 18
+          }
+        ]
+      ]
+    },
+    {
+      "name": "mixed on 2 shiaijo, orderings disagree here",
+      "entrants": 40,
+      "discriminating": true,
+      "rounds": [
+        [
+          {
+            "id": "m-r1-0",
+            "sideA": "Pool A-1st",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r1-1",
+            "sideA": "Pool F-2nd",
+            "sideB": "Pool G-2nd",
+            "displayRound": 5,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 1
+          },
+          {
+            "id": "m-r1-2",
+            "sideA": "Pool B-1st",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r1-3",
+            "sideA": "Pool C-1st",
+            "sideB": "Pool H-2nd",
+            "displayRound": 5,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 2
+          },
+          {
+            "id": "m-r1-4",
+            "sideA": "Pool D-1st",
+            "sideB": "Pool I-2nd",
+            "displayRound": 4,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 7
+          },
+          {
+            "id": "m-r1-5",
+            "sideA": "Pool E-1st",
+            "sideB": "Pool J-2nd",
+            "displayRound": 4,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 8
+          },
+          {
+            "id": "m-r1-6",
+            "sideA": "",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r1-7",
+            "sideA": "",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r1-8",
+            "sideA": "Pool F-1st",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r1-9",
+            "sideA": "Pool A-2nd",
+            "sideB": "Pool B-2nd",
+            "displayRound": 5,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 3
+          },
+          {
+            "id": "m-r1-10",
+            "sideA": "Pool G-1st",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r1-11",
+            "sideA": "Pool H-1st",
+            "sideB": "Pool C-2nd",
+            "displayRound": 5,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 4
+          },
+          {
+            "id": "m-r1-12",
+            "sideA": "Pool I-1st",
+            "sideB": "Pool D-2nd",
+            "displayRound": 4,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 11
+          },
+          {
+            "id": "m-r1-13",
+            "sideA": "Pool J-1st",
+            "sideB": "Pool E-2nd",
+            "displayRound": 4,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 12
+          },
+          {
+            "id": "m-r1-14",
+            "sideA": "",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r1-15",
+            "sideA": "",
+            "sideB": "",
+            "hidden": true
+          }
+        ],
+        [
+          {
+            "id": "m-r2-0",
+            "sideA": "Pool A-1st",
+            "sideB": "Winner of r5-m1",
+            "displayRound": 4,
+            "feeders": [
+              "",
+              "m-r1-1"
+            ],
+            "matchNumber": 5
+          },
+          {
+            "id": "m-r2-1",
+            "sideA": "Pool B-1st",
+            "sideB": "Winner of r5-m3",
+            "displayRound": 4,
+            "feeders": [
+              "",
+              "m-r1-3"
+            ],
+            "matchNumber": 6
+          },
+          {
+            "id": "m-r2-2",
+            "sideA": "Winner of r5-m4",
+            "sideB": "Winner of r5-m5",
+            "displayRound": 3,
+            "feeders": [
+              "m-r1-4",
+              "m-r1-5"
+            ],
+            "matchNumber": 14
+          },
+          {
+            "id": "m-r2-3",
+            "sideA": "",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r2-4",
+            "sideA": "Pool F-1st",
+            "sideB": "Winner of r5-m9",
+            "displayRound": 4,
+            "feeders": [
+              "",
+              "m-r1-9"
+            ],
+            "matchNumber": 9
+          },
+          {
+            "id": "m-r2-5",
+            "sideA": "Pool G-1st",
+            "sideB": "Winner of r5-m11",
+            "displayRound": 4,
+            "feeders": [
+              "",
+              "m-r1-11"
+            ],
+            "matchNumber": 10
+          },
+          {
+            "id": "m-r2-6",
+            "sideA": "Winner of r5-m12",
+            "sideB": "Winner of r5-m13",
+            "displayRound": 3,
+            "feeders": [
+              "m-r1-12",
+              "m-r1-13"
+            ],
+            "matchNumber": 16
+          },
+          {
+            "id": "m-r2-7",
+            "sideA": "",
+            "sideB": "",
+            "hidden": true
+          }
+        ],
+        [
+          {
+            "id": "m-r3-0",
+            "sideA": "Winner of r4-m0",
+            "sideB": "Winner of r4-m1",
+            "displayRound": 3,
+            "feeders": [
+              "m-r2-0",
+              "m-r2-1"
+            ],
+            "matchNumber": 13
+          },
+          {
+            "id": "m-r3-1",
+            "sideA": "Winner of r4-m2",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r3-2",
+            "sideA": "Winner of r4-m4",
+            "sideB": "Winner of r4-m5",
+            "displayRound": 3,
+            "feeders": [
+              "m-r2-4",
+              "m-r2-5"
+            ],
+            "matchNumber": 15
+          },
+          {
+            "id": "m-r3-3",
+            "sideA": "Winner of r4-m6",
+            "sideB": "",
+            "hidden": true
+          }
+        ],
+        [
+          {
+            "id": "m-r4-0",
+            "sideA": "Winner of r3-m0",
+            "sideB": "Winner of r3-m1",
+            "displayRound": 2,
+            "feeders": [
+              "m-r3-0",
+              "m-r2-2"
+            ],
+            "matchNumber": 17
+          },
+          {
+            "id": "m-r4-1",
+            "sideA": "Winner of r3-m2",
+            "sideB": "Winner of r3-m3",
+            "displayRound": 2,
+            "feeders": [
+              "m-r3-2",
+              "m-r2-6"
+            ],
+            "matchNumber": 18
+          }
+        ],
+        [
+          {
+            "id": "m-r5-0",
+            "sideA": "Winner of r2-m0",
+            "sideB": "Winner of r2-m1",
+            "displayRound": 1,
+            "feeders": [
+              "m-r4-0",
+              "m-r4-1"
+            ],
+            "matchNumber": 19
+          }
+        ]
+      ]
+    },
+    {
+      "name": "mixed on 4 shiaijo",
+      "entrants": 40,
+      "discriminating": false,
+      "rounds": [
+        [
+          {
+            "id": "m-r1-0",
+            "sideA": "Pool A-1st",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r1-1",
+            "sideA": "Pool G-2nd",
+            "sideB": "Pool H-2nd",
+            "displayRound": 5,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 1
+          },
+          {
+            "id": "m-r1-2",
+            "sideA": "Pool B-1st",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r1-3",
+            "sideA": "Pool C-1st",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r1-4",
+            "sideA": "Pool D-1st",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r1-5",
+            "sideA": "Pool I-2nd",
+            "sideB": "Pool E-1st",
+            "displayRound": 5,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 2
+          },
+          {
+            "id": "m-r1-6",
+            "sideA": "Pool F-1st",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r1-7",
+            "sideA": "Pool J-2nd",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r1-8",
+            "sideA": "Pool G-1st",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r1-9",
+            "sideA": "Pool A-2nd",
+            "sideB": "Pool B-2nd",
+            "displayRound": 5,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 3
+          },
+          {
+            "id": "m-r1-10",
+            "sideA": "Pool H-1st",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r1-11",
+            "sideA": "",
+            "sideB": "Pool C-2nd",
+            "hidden": true
+          },
+          {
+            "id": "m-r1-12",
+            "sideA": "Pool I-1st",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r1-13",
+            "sideA": "Pool F-2nd",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r1-14",
+            "sideA": "Pool J-1st",
+            "sideB": "",
+            "hidden": true
+          },
+          {
+            "id": "m-r1-15",
+            "sideA": "Pool E-2nd",
+            "sideB": "Pool D-2nd",
+            "displayRound": 5,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 4
+          }
+        ],
+        [
+          {
+            "id": "m-r2-0",
+            "sideA": "Pool A-1st",
+            "sideB": "Winner of r5-m1",
+            "displayRound": 4,
+            "feeders": [
+              "",
+              "m-r1-1"
+            ],
+            "matchNumber": 5
+          },
+          {
+            "id": "m-r2-1",
+            "sideA": "Pool B-1st",
+            "sideB": "Pool C-1st",
+            "displayRound": 4,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 6
+          },
+          {
+            "id": "m-r2-2",
+            "sideA": "Pool D-1st",
+            "sideB": "Winner of r5-m5",
+            "displayRound": 4,
+            "feeders": [
+              "",
+              "m-r1-5"
+            ],
+            "matchNumber": 7
+          },
+          {
+            "id": "m-r2-3",
+            "sideA": "Pool F-1st",
+            "sideB": "Pool J-2nd",
+            "displayRound": 4,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 8
+          },
+          {
+            "id": "m-r2-4",
+            "sideA": "Pool G-1st",
+            "sideB": "Winner of r5-m9",
+            "displayRound": 4,
+            "feeders": [
+              "",
+              "m-r1-9"
+            ],
+            "matchNumber": 9
+          },
+          {
+            "id": "m-r2-5",
+            "sideA": "Pool H-1st",
+            "sideB": "Pool C-2nd",
+            "displayRound": 4,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 10
+          },
+          {
+            "id": "m-r2-6",
+            "sideA": "Pool I-1st",
+            "sideB": "Pool F-2nd",
+            "displayRound": 4,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 11
+          },
+          {
+            "id": "m-r2-7",
+            "sideA": "Pool J-1st",
+            "sideB": "Winner of r5-m15",
+            "displayRound": 4,
+            "feeders": [
+              "",
+              "m-r1-15"
+            ],
+            "matchNumber": 12
+          }
+        ],
+        [
+          {
+            "id": "m-r3-0",
+            "sideA": "Winner of r4-m0",
+            "sideB": "Winner of r4-m1",
+            "displayRound": 3,
+            "feeders": [
+              "m-r2-0",
+              "m-r2-1"
+            ],
+            "matchNumber": 13
+          },
+          {
+            "id": "m-r3-1",
+            "sideA": "Winner of r4-m2",
+            "sideB": "Winner of r4-m3",
+            "displayRound": 3,
+            "feeders": [
+              "m-r2-2",
+              "m-r2-3"
+            ],
+            "matchNumber": 14
+          },
+          {
+            "id": "m-r3-2",
+            "sideA": "Winner of r4-m4",
+            "sideB": "Winner of r4-m5",
+            "displayRound": 3,
+            "feeders": [
+              "m-r2-4",
+              "m-r2-5"
+            ],
+            "matchNumber": 15
+          },
+          {
+            "id": "m-r3-3",
+            "sideA": "Winner of r4-m6",
+            "sideB": "Winner of r4-m7",
+            "displayRound": 3,
+            "feeders": [
+              "m-r2-6",
+              "m-r2-7"
+            ],
+            "matchNumber": 16
+          }
+        ],
+        [
+          {
+            "id": "m-r4-0",
+            "sideA": "Winner of r3-m0",
+            "sideB": "Winner of r3-m1",
+            "displayRound": 2,
+            "feeders": [
+              "m-r3-0",
+              "m-r3-1"
+            ],
+            "matchNumber": 17
+          },
+          {
+            "id": "m-r4-1",
+            "sideA": "Winner of r3-m2",
+            "sideB": "Winner of r3-m3",
+            "displayRound": 2,
+            "feeders": [
+              "m-r3-2",
+              "m-r3-3"
+            ],
+            "matchNumber": 18
+          }
+        ],
+        [
+          {
+            "id": "m-r5-0",
+            "sideA": "Winner of r2-m0",
+            "sideB": "Winner of r2-m1",
+            "displayRound": 1,
+            "feeders": [
+              "m-r4-0",
+              "m-r4-1"
+            ],
+            "matchNumber": 19
+          }
+        ]
+      ]
+    }
+  ]
+}

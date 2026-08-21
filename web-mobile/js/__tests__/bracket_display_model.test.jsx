@@ -111,6 +111,51 @@ describe('buildDisplayModel', () => {
     expect(model.matchNumById['m-r3-0']).toBe(4); // Final
   });
 
+  // bc-draw Phase 5. One effective round can hold matches from SEVERAL backend
+  // rounds at once: a shallow region's first bout shares a displayRound with a
+  // deep region's second bout. The printed Excel sheet numbers each effective
+  // round left to right across the whole tree, so the tie-break has to be the
+  // match's leftmost first-round slot, pos<<(backendRound+1) - not the position
+  // alone, which spans two slots in one round and four in the next. The fixture
+  // below is the smallest bracket where the two disagree: m-r1-4 (slot 8) is left
+  // of m-r2-3 (slot 12) but its position, 4, is to the right of 3.
+  const interleavedRounds = () => {
+    const real = (id, sideA, sideB, displayRound, feeders = ['', '']) => ({ id, sideA, sideB, displayRound, feeders });
+    const dead = (id, sideA = '', sideB = '') => ({ id, sideA, sideB, hidden: true });
+    return [
+      [
+        real('m-r1-0', 'A1', 'A2', 4), real('m-r1-1', 'A3', 'A4', 4),
+        real('m-r1-2', 'A5', 'A6', 4), real('m-r1-3', 'A7', 'A8', 4),
+        real('m-r1-4', 'B1', 'B2', 3), dead('m-r1-5'),
+        real('m-r1-6', 'C1', 'C2', 4), real('m-r1-7', 'C3', 'C4', 4),
+      ],
+      [
+        real('m-r2-0', 'Winner of r4-m0', 'Winner of r4-m1', 3, ['m-r1-0', 'm-r1-1']),
+        real('m-r2-1', 'Winner of r4-m2', 'Winner of r4-m3', 3, ['m-r1-2', 'm-r1-3']),
+        dead('m-r2-2', 'Winner of r4-m4', ''),
+        real('m-r2-3', 'Winner of r4-m6', 'Winner of r4-m7', 3, ['m-r1-6', 'm-r1-7']),
+      ],
+      [
+        real('m-r3-0', 'Winner of r3-m0', 'Winner of r3-m1', 2, ['m-r2-0', 'm-r2-1']),
+        real('m-r3-1', 'Winner of r3-m2', 'Winner of r3-m3', 2, ['m-r1-4', 'm-r2-3']),
+      ],
+      [real('m-r4-0', 'Winner of r2-m0', 'Winner of r2-m1', 1, ['m-r3-0', 'm-r3-1'])],
+    ];
+  };
+
+  it('numbers an effective round left-to-right across backend rounds (matchNumById)', () => {
+    const nums = buildDisplayModel(interleavedRounds()).matchNumById;
+    // Deepest effective round first, in slot order.
+    expect([nums['m-r1-0'], nums['m-r1-1'], nums['m-r1-2'], nums['m-r1-3'], nums['m-r1-6'], nums['m-r1-7']])
+      .toEqual([1, 2, 3, 4, 5, 6]);
+    // The interleaved round: m-r1-4 sits between m-r2-1 and m-r2-3 on the sheet.
+    expect(nums['m-r2-0']).toBe(7);
+    expect(nums['m-r2-1']).toBe(8);
+    expect(nums['m-r1-4']).toBe(9);
+    expect(nums['m-r2-3']).toBe(10);
+    expect([nums['m-r3-0'], nums['m-r3-1'], nums['m-r4-0']]).toEqual([11, 12, 13]);
+  });
+
   it('falls back to balanced rounds unchanged when no metadata', () => {
     // 4-player balanced bracket with no displayRound/hidden fields. The legacy
     // renderer draws connectors positionally inside BracketConnectors (from

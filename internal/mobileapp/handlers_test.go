@@ -67,7 +67,7 @@ func TestTournamentHandlers(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	// Create initial tournament (no longer auto-created by store init).
-	// Courts is required by the POST/PUT validateCourts guard (1..26
+	// Courts is required by the POST/PUT validateCourts guard (1..MaxCourts
 	// single-character labels); the test PUTs below reuse this `tour`
 	// so we need it populated to satisfy the new contract.
 	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Initial Tournament", Password: "", Courts: []string{"A"}}))
@@ -1533,7 +1533,7 @@ func TestPOSTCompetition_RollbackOnSaveParticipantsFailure(t *testing.T) {
 }
 
 // TestPOSTTournament_ValidatesCourts pins Copilot #8: POST and PUT
-// /api/tournament now call validateCourts (1..26 single-char labels)
+// /api/tournament now call validateCourts (1..MaxCourts single-char labels)
 // matching the spec. Direct API callers can no longer persist >26
 // courts or multi-character labels.
 func TestPOSTTournament_ValidatesCourts(t *testing.T) {
@@ -1548,7 +1548,7 @@ func TestPOSTTournament_ValidatesCourts(t *testing.T) {
 		// JSON-encoded responses escape `<` and `>` as `<`/`>`,
 		// so the assertion strings test for the unique unescaped tokens.
 		{"empty courts", []string{}, "courts must be"},
-		{"27 courts (over A-Z cap)", func() []string {
+		{"27 courts (over the court cap)", func() []string {
 			c := make([]string, 27)
 			for i := range c {
 				c[i] = string(rune('A' + i%26))

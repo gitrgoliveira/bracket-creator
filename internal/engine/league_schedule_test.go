@@ -34,11 +34,13 @@ func buildLeagueMatches(n int) []state.MatchResult {
 	return matches
 }
 
-// courtLabels returns the first n uppercase letter labels starting from "A".
+// courtLabels returns the first n shiaijo labels ("A", "B", ...). The labels
+// come from helper.CourtLabel, which is what the workbook and the scheduler
+// print, so a test's court names and a rendered sheet's compare directly.
 func courtLabels(n int) []string {
 	labels := make([]string, n)
 	for i := range n {
-		labels[i] = string(rune('A' + i))
+		labels[i] = helper.CourtLabel(i)
 	}
 	return labels
 }

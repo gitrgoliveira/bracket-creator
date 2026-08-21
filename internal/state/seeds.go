@@ -26,7 +26,34 @@ import (
 // seed saves for DIFFERENT comps no longer block each other on the
 // global store mutex. Same locking strategy participants.csv and
 // pools.csv already use.
+// LoadSeeds is LoadSeedsRaw plus the usability check, exactly as
+// helper.ParseSeedsFile is helper.ReadSeedsFileRaw plus that check one layer
+// down. Reading through the raw loader rather than repeating its body keeps the
+// locking, the missing-file answer and any future caching in ONE place: the
+// show path is the one a change here is least likely to be carried across, and
+// a divergence would let a draw be built from a seeding the operator has not
+// finished. Validation runs on the returned copy, outside the lock.
 func (s *Store) LoadSeeds(compID string) ([]domain.SeedAssignment, error) {
+	result, err := s.LoadSeedsRaw(compID)
+	if err != nil {
+		return nil, err
+	}
+	if err := domain.ValidateAssignments(result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// LoadSeedsRaw returns the stored seed assignments WITHOUT requiring them to be
+// a usable seeding, for callers that need to SHOW the operator what is on disk.
+//
+// LoadSeeds is the right call everywhere seeds are consumed: it refuses an
+// unusable set so a draw can never be built from one. But an operator halfway
+// through entering seeds has an unusable set by definition, and answering "there
+// are no seeds" (or HTTP 500) when they can plainly see the ranks they typed is
+// how the tool stops telling them anything. Show it, warn about it, and refuse
+// to draw with it.
+func (s *Store) LoadSeedsRaw(compID string) ([]domain.SeedAssignment, error) {
 	if err := ValidateCompetitionID(compID); err != nil {
 		return nil, err
 	}
@@ -34,8 +61,7 @@ func (s *Store) LoadSeeds(compID string) ([]domain.SeedAssignment, error) {
 	mu.RLock()
 	defer mu.RUnlock()
 
-	path := s.compPath(compID, "seeds.csv")
-	result, err := helper.ParseSeedsFile(path)
+	result, err := helper.ReadSeedsFileRaw(s.compPath(compID, "seeds.csv"))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return []domain.SeedAssignment{}, nil

@@ -489,7 +489,7 @@ func TestScoreHandler_KachinukiEarlyCompletionAccepted(t *testing.T) {
 // A completed write whose final bout carries the encho marker and a
 // winner must round-trip the marker + winner through the store and
 // propagate the match winner to the next round. The fixture uses
-// production-shaped bracket IDs ("m-r{N}-{POS}", buildBracketFromLeaves).
+// production-shaped bracket IDs ("m-r{N}-{POS}", buildBracketFromDraw).
 func TestScoreHandler_KachinukiEnchoFinalBoutPersists(t *testing.T) {
 	compID := "kachinuki-encho-final-bout"
 	r, store := setupKachinukiScoreServer(t, compID)

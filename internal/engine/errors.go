@@ -11,12 +11,30 @@ import (
 // competitor).
 type ValidationError struct {
 	Msg string
+	// Err is the cause, when there is one worth keeping. Reclassifying an
+	// error as a ValidationError otherwise DISCARDS it: the Msg is a string,
+	// so any sentinel underneath stops being findable and a caller that
+	// wanted to distinguish two client errors has only prose to match on.
+	// Nil for the many call sites that raise a ValidationError from scratch.
+	Err error
 }
 
 func (e *ValidationError) Error() string { return e.Msg }
 
+// Unwrap exposes the cause to errors.Is and errors.As. Safe when Err is nil:
+// errors.Unwrap treats a nil return as "no cause", which is what the
+// constructed-from-scratch case means.
+func (e *ValidationError) Unwrap() error { return e.Err }
+
 func validationErrorf(format string, args ...any) *ValidationError {
 	return &ValidationError{Msg: fmt.Sprintf(format, args...)}
+}
+
+// wrapValidationErrorf is validationErrorf for a cause being RECLASSIFIED, so
+// the message reads for the operator while the original error stays reachable
+// underneath. Use it whenever the error being converted carries a sentinel.
+func wrapValidationErrorf(cause error, format string, args ...any) *ValidationError {
+	return &ValidationError{Msg: fmt.Sprintf(format, args...), Err: cause}
 }
 
 // NotFoundError represents a missing resource. Handlers should return HTTP 404.

@@ -5,8 +5,8 @@ the scoring console), with naginata-specific rules the app handles for you.
 Naginata has two competition forms:
 
 - **Combat** (shiai): armoured matches scored by ippon, with one extra target,
-  Sune (a strike to the shin), and a single 3rd place decided by a playoff
-  instead of kendo's two joint 3rds.
+  Sune (a strike to the shin), and a single 3rd place decided by a bronze
+  match instead of kendo's two joint 3rds.
 - **Engi-kyogi**: the kata form, in which a pair perform choreographed forms
   scored by referee flags rather than ippon.
 
@@ -15,7 +15,7 @@ locked once the draw is generated:
 
 | Checkbox | What it does | Available for |
 |--------|--------------|---------------|
-| **Naginata competition** | Turns on the combat rules: the Sune ippon and the 3rd-place playoff | Individual and team |
+| **Naginata competition** | Turns on the combat rules: the Sune ippon and the 3rd-place match | Individual and team |
 | **Engi (kata competition)** | Selects the Engi-kyogi kata form: flag-count scoring | Individual only |
 
 Because Engi-kyogi is itself a naginata competition, a kata division usually has
@@ -37,18 +37,19 @@ same way as any other waza:
 Everything else about a naginata shiai bout (time, hikiwake, kiken, encho) works
 exactly as it does for kendo.
 
-## Third-place playoff
+## Third-place match
 
 Kendo awards two equal 3rd places to the beaten semi-finalists and plays no
-bronze match. Naginata instead plays a 3rd-place playoff between the two
-semi-final losers, and only the top three positions receive medals.
+bronze match. Naginata instead plays one, between the two semi-final
+losers, and only the top three positions receive medals.
 
-Once both semi-finals are complete, the app adds the playoff to the knockout
-bracket, labelled **3rd Place**. By convention it runs on the same shiaijo as the
+Once both semi-finals are complete, the app adds the bronze match to the
+knockout bracket, labelled **3rd Place**. By convention it runs on the same
+shiai-jo as the
 final and immediately before it, so it also appears in that court's queue. Score
 it like any other bout:
 
-- The winner of the playoff takes 3rd place.
+- The winner takes 3rd place.
 - The loser finishes 4th and does not appear on the awards podium.
 
 The public podium reflects this automatically: a naginata competition shows a
@@ -65,7 +66,7 @@ draws.
 
 Turn on **Engi (kata competition)** on an individual competition's Settings
 tab to switch its score editor to flag counting. Combine it with **Naginata
-competition** so the kata division also gets the single 3rd-place playoff.
+competition** so the kata division also gets the single 3rd-place match.
 
 !!! note "Quick-score and overrides are off for Engi"
     Because every Engi result comes from the flag editor, the kendo shortcuts,

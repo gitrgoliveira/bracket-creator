@@ -49,9 +49,10 @@ function isKikenDecision(v) { return v === "kiken" || v === "kiken-voluntary" ||
 // alongside realIppons - this file was a fourth consumer with its own
 // copies, which is exactly the drift that primitive is meant to prevent.
 // The MATCH-level call site below threads winnerId/sideAId/sideBId (already
-// in scope); the SUB-BOUT call site does not - sub rows carry no ids at
-// all, team names are unique by rule, so that path stays on the name
-// fallback exactly as before.
+// in scope); the SUB-BOUT call site does not - a numbered team bout names
+// the two individual PLAYERS fielded, and player names are not unique (only
+// (name, dojo) is), so sub rows carry no ids at all and that path stays on
+// the name fallback exactly as before.
 
 // Backend expects: { winner: string, ipponsA: [], ipponsB: [], hansokuA: int, hansokuB: int, decision: "", status: "completed"|"running"|"scheduled" }
 function toBackendMatchResult(patch, match) {
@@ -105,6 +106,19 @@ function toBackendMatchResult(patch, match) {
         else if (winnerName === sideBName && winnerName !== sideAName) winnerId = sideBId || "";
     }
     if (winnerId) result.winnerId = winnerId;
+    // Belt and braces (bc-dmsr review): emit the side ids alongside
+    // winnerId so the server's validateHanteiMarkPlacement sees the SAME
+    // triple this function just used to place the mark above, rather than
+    // relying solely on the server backfilling them from the stored match.
+    // Without this the server never learned the ids on the wire at all -
+    // sideAId/sideBId are computed above purely for this function's own
+    // placement and were otherwise discarded - so a same-name pair's
+    // correctly id-attributed mark could be rejected by the server's
+    // name-only fallback. Omitted (not sent as "") when a side carries no
+    // id (e.g. a bracket match, which persists none), matching every other
+    // optional field in this payload.
+    if (sideAId) result.sideAId = sideAId;
+    if (sideBId) result.sideBId = sideBId;
     // Engi (kata) matches score by referee flag count, not ippons: carry
     // flagsA/flagsB through when the patch sets them (EngiScoreEditorModal's
     // submit payload). Omitted otherwise so non-engi payloads stay minimal.

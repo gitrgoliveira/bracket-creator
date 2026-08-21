@@ -623,8 +623,13 @@ func writeTeamSubMatchScores(f *excelize.File, sheetName string, courtStartCol, 
 		if mirror {
 			leftScore, rightScore = scoreB, scoreA
 		}
-		// SubMatchResult carries no ids (team sub-bout sides are named, and
-		// team names are unique by rule): always the name-fallback branch.
+		// SubMatchResult persists no ids, so names are all there is and this is
+		// always the name-fallback branch, resolved by the documented
+		// sideA-first convention. Note the limit of that: a numbered team bout
+		// names individual PLAYERS, whose names are not unique by rule (only
+		// name+dojo is), so a same-named pair on opposing lineups is separated
+		// by convention rather than by identity. Unchanged from before ids
+		// existed, and not fixable here without persisting ids per sub row.
 		lMark, rMark := SideMarksLR(sub.Decision, sub.HanteiDecided(), "", "", "", sub.Winner, sub.SideA, sub.SideB, mirror)
 		if lScore := joinSp(leftScore, lMark); lScore != "" {
 			setCellStr(f, sheetName, lVCol, excelRow, lScore)

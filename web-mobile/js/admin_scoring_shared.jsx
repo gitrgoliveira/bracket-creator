@@ -432,28 +432,36 @@ function initialEnchoPeriodsForMatch(m) {
 // What the server reads as verdict-SILENCE is therefore the ippons, and the
 // discriminator is nil versus empty: a writer that omits the arrays entirely
 // (stale snapshots, quick-score) said nothing and has its stored verdict
-// preserved, while this editor always states both arrays, so an explicit []
-// says "zero points" and withdraws a 0-0 verdict rather than being read as
-// silence (engine preserveSubHantei). Emitting the false is what drives that
-// stripping, so an editor that HAS a say still must state it.
+// preserved, while an explicit [] says "zero points" and withdraws a 0-0
+// verdict rather than being read as silence (engine preserveSubHantei).
+// Emitting the false is what drives that stripping, so a caller that HAS a
+// say still must state it.
 //
-// The verdict is ALWAYS stated here, never omitted. That is safe because of
-// where this is called from: the team editor adopts whatever verdict the
-// server holds (its adopt effect), so it can never send an authoritative false
-// about something it has not displayed.
+// This builder itself always states the boolean when it runs, never omits
+// it: that is safe because of where it is called from - the team editor
+// adopts whatever verdict the server holds (its adopt effect), so a call
+// into this function can never state an authoritative false about something
+// it has not displayed. But `buildPatch` (admin_scoring_team.jsx) now has a
+// SILENT branch (`daihyosenSilent`) that skips this builder entirely for a
+// daihyosen row that is untouched this session AND nothing about it is known
+// locally - that omission, not a call into this function, is how genuine
+// silence reaches the wire today. This builder is still the ONLY caller that
+// states the boolean, and it is still the case that when it runs, it commits
+// to a boolean rather than a third "unknown" state - that part of the
+// adoption argument still holds; it is simply no longer unconditional, since
+// `buildPatch` may choose not to call it at all.
 //
-// There used to be a `hanteiKnown` parameter for exactly that case — an editor
-// mounted before the verdict existed kept a mount-frozen armed flag, so it
-// would have erased another device's judges' decision on the next unrelated
-// autosave, and passing false made the write SILENT instead. Freezing bought
-// that safety by letting the editor show something other than the stored
-// result, which breaks the rule that a match has one result and every surface
-// shows the same one. Adoption fixes the display and removes the blind spot,
-// so the parameter had nothing left to guard.
-//
-// Silence is still expressible, and still means "no opinion": the writers that
-// genuinely have none omit their ippon arrays, as described above. This caller
-// simply is not one of them any more. Returns the fields to merge into the entry.
+// There used to be a `hanteiKnown` parameter for exactly the case where an
+// editor mounted before the verdict existed kept a mount-frozen armed flag,
+// so it would have erased another device's judges' decision on the next
+// unrelated autosave, and passing false made the write SILENT instead.
+// Freezing bought that safety by letting the editor show something other
+// than the stored result, which breaks the rule that a match has one result
+// and every surface shows the same one. Adoption fixes the display and
+// removes THAT blind spot (a mounted-and-stale editor), which is why the
+// parameter was removed from this function; the untouched-and-never-yet-seen
+// case is instead handled one layer up, by `buildPatch` choosing not to call
+// this builder at all. Returns the fields to merge into the entry.
 // Exported for vitest.
 function daihyosenEnchoFields({ enchoPeriodCount, daihyosenTied, daihyosenHantei }) {
   const fields = { decidedByHantei: !!(daihyosenTied && daihyosenHantei) };

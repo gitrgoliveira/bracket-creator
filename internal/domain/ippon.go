@@ -145,7 +145,10 @@ const (
 //     empty sideA/sideB (e.g. an unset field), so this is checked before any
 //     comparison.
 //
-// Mirrored in JS (bracket.jsx) with the same semantics; keep both in sync.
+// Mirrored in JS as attributeWinnerSide in web-mobile/js/result_slot.jsx (the
+// declared owner of the Ht rules, which names this function as its twin);
+// keep both in sync. Not bracket.jsx — that file holds only the name-based
+// display helpers (winnerSideLR, subWinnerSides).
 func AttributeWinnerSide(winnerID, sideAID, sideBID, winner, sideA, sideB string) MatchSide {
 	if winnerID != "" && sideAID != "" && sideBID != "" {
 		switch winnerID {

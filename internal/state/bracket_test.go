@@ -422,6 +422,77 @@ func TestMatchStatusByID(t *testing.T) {
 	})
 }
 
+// TestMatchSidesByID_ReturnsIDs pins the bc-dmsr widened return signature
+// (mobileapp review): MatchSidesByID now returns sideAID/sideBID alongside
+// the existing sideA/sideB, sourced from the SAME pool-match/bracket lookup,
+// so a caller backfilling ids ahead of hantei-mark validation sees exactly
+// the ids the engine will later use. A pool match carries real ids; a
+// bracket match (BracketMatch persists no ids at all) must always report
+// empty ids while still resolving sideA/sideB by name, so the pre-existing
+// legacy-hantei name backfill caller's behaviour for bracket matches is
+// unchanged.
+func TestMatchSidesByID_ReturnsIDs(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-match-sides-*")
+	require.NoError(t, err)
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	compID := "test-comp"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Test"}))
+	require.NoError(t, store.SavePoolMatches(compID, []MatchResult{
+		{ID: "P1-0", SideA: "Alice", SideB: "Alice", SideAID: "dojo-x-alice", SideBID: "dojo-y-alice"},
+	}))
+	require.NoError(t, store.SaveBracket(compID, &Bracket{
+		Rounds:          [][]BracketMatch{{{ID: "B1", SideA: "Carol", SideB: "Dave"}}},
+		ThirdPlaceMatch: &BracketMatch{ID: "BRONZE", SideA: "Eve", SideB: "Frank"},
+	}))
+
+	t.Run("pool match: sideAID/sideBID resolve from the stored pairing", func(t *testing.T) {
+		sideA, sideB, sideAID, sideBID, found, err := store.MatchSidesByID(compID, "P1-0")
+		require.NoError(t, err)
+		require.True(t, found)
+		assert.Equal(t, "Alice", sideA)
+		assert.Equal(t, "Alice", sideB)
+		assert.Equal(t, "dojo-x-alice", sideAID)
+		assert.Equal(t, "dojo-y-alice", sideBID)
+	})
+
+	t.Run("bracket round match: names resolve, ids are always empty", func(t *testing.T) {
+		sideA, sideB, sideAID, sideBID, found, err := store.MatchSidesByID(compID, "B1")
+		require.NoError(t, err)
+		require.True(t, found)
+		assert.Equal(t, "Carol", sideA)
+		assert.Equal(t, "Dave", sideB)
+		assert.Empty(t, sideAID, "BracketMatch persists no ids")
+		assert.Empty(t, sideBID, "BracketMatch persists no ids")
+	})
+
+	t.Run("BRONZE sibling match: names resolve, ids are always empty", func(t *testing.T) {
+		sideA, sideB, sideAID, sideBID, found, err := store.MatchSidesByID(compID, "BRONZE")
+		require.NoError(t, err)
+		require.True(t, found)
+		assert.Equal(t, "Eve", sideA)
+		assert.Equal(t, "Frank", sideB)
+		assert.Empty(t, sideAID)
+		assert.Empty(t, sideBID)
+	})
+
+	t.Run("unknown match: found=false, everything empty", func(t *testing.T) {
+		sideA, sideB, sideAID, sideBID, found, err := store.MatchSidesByID(compID, "nope")
+		require.NoError(t, err)
+		assert.False(t, found)
+		assert.Empty(t, sideA)
+		assert.Empty(t, sideB)
+		assert.Empty(t, sideAID)
+		assert.Empty(t, sideBID)
+	})
+
+	t.Run("invalid compID errors", func(t *testing.T) {
+		_, _, _, _, _, err := store.MatchSidesByID("../traversal", "P1-0")
+		assert.Error(t, err)
+	})
+}
+
 func TestLoadBracketLocked_ViaTransaction(t *testing.T) {
 	dir, err := os.MkdirTemp("", "state-bracket-locked-*")
 	require.NoError(t, err)

@@ -1668,6 +1668,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // verdict/score existed is not silent even if untouched - it is
     // re-stating what it was shown, which is the existing, correct
     // behaviour (daihyosenEnchoFields below re-derives and re-sends it).
+    // Scope: the restore this omission enables only protects a stored
+    // HANTEI verdict - preserveSubHantei bails when the stored row's
+    // `HanteiDecided()` is false, so a rep bout settled by a real strike is
+    // still blanked by a stale silent save. That is unchanged from the
+    // pre-gate explicit-[] behaviour (not a regression this change
+    // introduces), not a gap this gate closes.
     const daihyosenTouched = hasDaihyosen && (
       JSON.stringify(subs[daihyosenIdx]) !== JSON.stringify(initSubsRef.current[daihyosenIdx]) ||
       enchoPeriodCount !== initialEnchoPeriods ||

@@ -335,11 +335,12 @@ func (s *Store) MatchStatusByID(compID, matchID string) (MatchStatus, bool, erro
 	return "", false, nil
 }
 
-// MatchSidesByID returns the STORED pairing (sideA, sideB) for the match with
-// the given ID, searching pool matches first then the bracket (rounds, then
-// the bronze sibling), or found=false. Same no-copy cached-read shape as
-// MatchStatusByID and for the same reason: a caller that only wants the two
-// side names should not pay for a deep SubResults/bracket clone.
+// MatchSidesByID returns the STORED pairing (sideA, sideB, sideAID, sideBID)
+// for the match with the given ID, searching pool matches first then the
+// bracket (rounds, then the bronze sibling), or found=false. Same no-copy
+// cached-read shape as MatchStatusByID and for the same reason: a caller
+// that only wants the side identity should not pay for a deep
+// SubResults/bracket clone.
 //
 // Purpose: a score payload is allowed to omit sideA/sideB (the engine's
 // reconcileSides backfills them from the stored pairing before any write
@@ -350,29 +351,46 @@ func (s *Store) MatchStatusByID(compID, matchID string) (MatchStatus, bool, erro
 // attribution purposes only, ahead of validation; the engine's own
 // reconcileSides still runs its normal (redundant, idempotent) backfill
 // and mismatch check afterwards, so this read cannot weaken that guard.
-func (s *Store) MatchSidesByID(compID, matchID string) (sideA, sideB string, found bool, err error) {
+//
+// sideAID/sideBID are the bc-dmsr follow-up (mobileapp review): the SPA
+// sends winnerId but never sideAId/sideBId (it computes them locally for its
+// own mark placement and discards them - api_serializers.jsx), so
+// validateHanteiMarkPlacement never saw all three ids and fell back to a
+// name comparison the engine's later id-aware stripInvalidHantei could
+// disagree with. Handlers backfill the omitted ids from here the same way
+// they already backfill the omitted names, so the validator and the engine
+// attribute by the SAME triple. Pool matches carry ids (SideAID/SideBID);
+// BracketMatch persists no ids at all, so sideAID/sideBID are always "" for
+// a bracket result and that path stays on the name fallback unchanged - this
+// widened return does not alter the existing sideA/sideB behaviour for the
+// legacy-hantei name backfill caller, which keeps ignoring the two new
+// values.
+func (s *Store) MatchSidesByID(compID, matchID string) (sideA, sideB, sideAID, sideBID string, found bool, err error) {
 	if err := ValidateCompetitionID(compID); err != nil {
-		return "", "", false, err
+		return "", "", "", "", false, err
 	}
 	results, err := s.cachedPoolMatches(compID)
 	if err != nil {
-		return "", "", false, err
+		return "", "", "", "", false, err
 	}
 	for i := range results {
 		if results[i].ID == matchID {
-			return results[i].SideA, results[i].SideB, true, nil
+			return results[i].SideA, results[i].SideB, results[i].SideAID, results[i].SideBID, true, nil
 		}
 	}
 	b, err := s.cachedBracket(compID)
 	if err != nil {
-		return "", "", false, err
+		return "", "", "", "", false, err
 	}
 	if b != nil {
 		if bm := findBracketMatchByID(b, matchID); bm != nil {
-			return bm.SideA, bm.SideB, true, nil
+			// BracketMatch has no SideAID/SideBID fields: a bracket result
+			// always returns empty ids here, matching AttributeWinnerSide's
+			// existing name-only fallback for bracket matches.
+			return bm.SideA, bm.SideB, "", "", true, nil
 		}
 	}
-	return "", "", false, nil
+	return "", "", "", "", false, nil
 }
 
 // UpdateBracketMatchByID finds the bracket match with the given ID (via

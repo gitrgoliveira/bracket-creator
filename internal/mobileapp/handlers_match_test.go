@@ -421,15 +421,68 @@ func TestBulkScoreHandler_SidesLessLegacyHanteiRecordsVerdict(t *testing.T) {
 	assert.Contains(t, stored[0].IpponsA, domain.HanteiMark)
 }
 
+// TestBulkScoreHandler_NameDriftedSameNamePairHanteiNow400s is the
+// bulk-score twin of TestScoreHandler_NameDriftedSameNamePairHanteiNow400s
+// (bc-dmsr review, consequence 2): validateBulkScoreLengths shares
+// validateMatchHantei with the single-score path, so the same
+// backfillMatchLevelIDsForHanteiAttribution call ahead of it must produce
+// the same outcome - the row lands in `errors`, never `succeeded`, rather
+// than being accepted and having its mark silently stripped downstream by
+// the engine.
+func TestBulkScoreHandler_NameDriftedSameNamePairHanteiNow400s(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	store.SaveCompetition(&state.Competition{ID: "bulkspa"})
+	require.NoError(t, store.SavePoolMatches("bulkspa", []state.MatchResult{
+		{ID: "P1-1", SideA: "Alice", SideB: "Alice", SideAID: "dojo-x-alice", SideBID: "dojo-y-alice"},
+	}))
+
+	payload, err := json.Marshal([]state.MatchResult{{
+		ID: "P1-1", SideA: "Alice", SideB: "Alice",
+		Winner: "Alice", WinnerID: "dojo-y-alice",
+		IpponsA: []string{domain.HanteiMark}, IpponsB: []string{},
+		Status: state.MatchStatusCompleted,
+	}})
+	require.NoError(t, err)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/bulkspa/matches/bulk-score", bytes.NewBuffer(payload))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "bulk-score's partial-success shape returns 200 with per-item errors")
+
+	var resp struct {
+		Succeeded int `json:"succeeded"`
+		Errors    []struct {
+			MatchID string `json:"matchId"`
+			Error   string `json:"error"`
+		} `json:"errors"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, 0, resp.Succeeded, "the row must not be counted as succeeded")
+	require.Len(t, resp.Errors, 1)
+	assert.Equal(t, "P1-1", resp.Errors[0].MatchID)
+	assert.Contains(t, resp.Errors[0].Error, "hantei mark belongs in the winner's ippon list")
+
+	stored, err := store.LoadPoolMatches("bulkspa")
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	assert.NotEqual(t, state.MatchStatusCompleted, stored[0].Status, "the rejected write must not have landed")
+}
+
 // fixedSidesCompetitionStore is a minimal CompetitionStore fake for unit
-// testing backfillMatchLevelSidesForLegacyHantei in isolation, without
-// spinning up a real Store. sidesErr, when non-nil, makes MatchSidesByID
-// fail (fail-closed probe); otherwise it returns (sideA, sideB, found, nil).
+// testing backfillMatchLevelSidesForLegacyHantei and
+// backfillMatchLevelIDsForHanteiAttribution in isolation, without spinning
+// up a real Store. sidesErr, when non-nil, makes MatchSidesByID fail
+// (fail-closed probe); otherwise it returns (sideA, sideB, sideAID, sideBID,
+// found, nil).
 type fixedSidesCompetitionStore struct {
-	sideA, sideB string
-	found        bool
-	sidesErr     error
-	sidesCalls   int
+	sideA, sideB     string
+	sideAID, sideBID string
+	found            bool
+	sidesErr         error
+	sidesCalls       int
 }
 
 func (fixedSidesCompetitionStore) LoadCompetition(string) (*state.Competition, error) {
@@ -448,9 +501,9 @@ func (fixedSidesCompetitionStore) MatchStatusByID(string, string) (state.MatchSt
 	return "", false, nil
 }
 
-func (f *fixedSidesCompetitionStore) MatchSidesByID(string, string) (string, string, bool, error) {
+func (f *fixedSidesCompetitionStore) MatchSidesByID(string, string) (string, string, string, string, bool, error) {
 	f.sidesCalls++
-	return f.sideA, f.sideB, f.found, f.sidesErr
+	return f.sideA, f.sideB, f.sideAID, f.sideBID, f.found, f.sidesErr
 }
 
 // TestBackfillMatchLevelSidesForLegacyHantei is a table-driven unit test of
@@ -557,6 +610,196 @@ func TestBackfillMatchLevelSidesForLegacyHantei(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestBackfillMatchLevelIDsForHanteiAttribution is the id-backfill twin of
+// TestBackfillMatchLevelSidesForLegacyHantei above (bc-dmsr review): it
+// backfills sideAID/sideBID rather than sideA/sideB, and is gated on hantei
+// attribution generally (a direct mark in ipponsA/ipponsB, OR the legacy
+// flag) rather than only the deprecated boolean flag - because the SPA sends
+// a direct mark (via winnerId) and never the legacy flag at all, so the
+// narrower legacy-only gate would never fire for the actual regression
+// payload shape.
+func TestBackfillMatchLevelIDsForHanteiAttribution(t *testing.T) {
+	mark := domain.HanteiMark
+	trueFlag := bctest.HanteiExplicit(true)
+	falseFlag := bctest.HanteiExplicit(false)
+
+	tests := []struct {
+		name          string
+		req           state.MatchResult
+		store         *fixedSidesCompetitionStore
+		wantSideAID   string
+		wantSideBID   string
+		wantStoreCall bool
+	}{
+		{
+			name:          "no mark and no flag: store is never consulted",
+			req:           state.MatchResult{IpponsA: []string{}, IpponsB: []string{}},
+			store:         &fixedSidesCompetitionStore{sideAID: "id-a", sideBID: "id-b", found: true},
+			wantSideAID:   "",
+			wantSideBID:   "",
+			wantStoreCall: false,
+		},
+		{
+			name:          "flag explicitly false and no mark: store is never consulted",
+			req:           state.MatchResult{DecidedByHantei: falseFlag},
+			store:         &fixedSidesCompetitionStore{sideAID: "id-a", sideBID: "id-b", found: true},
+			wantSideAID:   "",
+			wantSideBID:   "",
+			wantStoreCall: false,
+		},
+		{
+			name:          "both ids already present: store is never consulted",
+			req:           state.MatchResult{IpponsA: []string{mark}, IpponsB: []string{}, SideAID: "client-a", SideBID: "client-b"},
+			store:         &fixedSidesCompetitionStore{sideAID: "someone-else", sideBID: "and-else", found: true},
+			wantSideAID:   "client-a",
+			wantSideBID:   "client-b",
+			wantStoreCall: false,
+		},
+		{
+			name:          "direct mark present, both ids empty: both backfilled from the store",
+			req:           state.MatchResult{IpponsA: []string{mark}, IpponsB: []string{}},
+			store:         &fixedSidesCompetitionStore{sideAID: "id-a", sideBID: "id-b", found: true},
+			wantSideAID:   "id-a",
+			wantSideBID:   "id-b",
+			wantStoreCall: true,
+		},
+		{
+			name:          "legacy flag true, no direct mark yet: ids still backfilled ahead of the fold",
+			req:           state.MatchResult{DecidedByHantei: trueFlag},
+			store:         &fixedSidesCompetitionStore{sideAID: "id-a", sideBID: "id-b", found: true},
+			wantSideAID:   "id-a",
+			wantSideBID:   "id-b",
+			wantStoreCall: true,
+		},
+		{
+			name:          "one id present: only the empty one is backfilled, the client's is never overwritten",
+			req:           state.MatchResult{IpponsA: []string{}, IpponsB: []string{mark}, SideAID: "client-a"},
+			store:         &fixedSidesCompetitionStore{sideAID: "someone-else-entirely", sideBID: "id-b", found: true},
+			wantSideAID:   "client-a",
+			wantSideBID:   "id-b",
+			wantStoreCall: true,
+		},
+		{
+			name:          "store error: ids stay empty, fail closed",
+			req:           state.MatchResult{IpponsA: []string{mark}, IpponsB: []string{}},
+			store:         &fixedSidesCompetitionStore{sidesErr: fmt.Errorf("boom")},
+			wantSideAID:   "",
+			wantSideBID:   "",
+			wantStoreCall: true,
+		},
+		{
+			name:          "match not found: ids stay empty",
+			req:           state.MatchResult{IpponsA: []string{mark}, IpponsB: []string{}},
+			store:         &fixedSidesCompetitionStore{found: false},
+			wantSideAID:   "",
+			wantSideBID:   "",
+			wantStoreCall: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := tc.req
+			backfillMatchLevelIDsForHanteiAttribution(tc.store, "comp", "m1", &req)
+			assert.Equal(t, tc.wantSideAID, req.SideAID)
+			assert.Equal(t, tc.wantSideBID, req.SideBID)
+			if tc.wantStoreCall {
+				assert.Equal(t, 1, tc.store.sidesCalls)
+			} else {
+				assert.Equal(t, 0, tc.store.sidesCalls)
+			}
+		})
+	}
+}
+
+// TestScoreHandler_SPAShapedSameNamePairHanteiSucceeds pins the bc-dmsr
+// regression fix, consequence 1 (reviewer thread A): the SPA sends winnerId
+// but NEVER sideAId/sideBId (toBackendMatchResult computes them locally for
+// its own mark placement, then discards them). Before this fix, a same-name
+// pair recording a hantei through exactly this payload shape was REJECTED
+// with a 400 by validateHanteiMarkPlacement, which fell back to a name
+// comparison because sideAID/sideBID never arrived on the wire - the
+// operator could not record a same-name-pair hantei through the SPA at all,
+// which is the exact scenario the id-aware attribution (9b5e0ff0) was built
+// for. The fix backfills sideAID/sideBID from the stored pairing ahead of
+// validation, so the validator sees the same id triple the client used to
+// place the mark.
+func TestScoreHandler_SPAShapedSameNamePairHanteiSucceeds(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	store.SaveCompetition(&state.Competition{ID: "spa1"})
+	require.NoError(t, store.SavePoolMatches("spa1", []state.MatchResult{
+		{ID: "P1-1", SideA: "Alice", SideB: "Alice", SideAID: "dojo-x-alice", SideBID: "dojo-y-alice"},
+	}))
+
+	// SPA-shaped payload: sideA/sideB (names only), winnerId, and the mark
+	// already placed BY ID on the winner's (B's) side. No sideAId/sideBId.
+	payload, err := json.Marshal(state.MatchResult{
+		ID: "P1-1", SideA: "Alice", SideB: "Alice",
+		Winner: "Alice", WinnerID: "dojo-y-alice",
+		IpponsA: []string{}, IpponsB: []string{domain.HanteiMark},
+		Status: state.MatchStatusCompleted,
+	})
+	require.NoError(t, err)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/spa1/matches/P1-1/score", bytes.NewBuffer(payload))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+
+	stored, err := store.LoadPoolMatches("spa1")
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	assert.True(t, domain.ContainsHantei(stored[0].IpponsB), "the mark must survive on the id-correct (winning) side")
+	assert.False(t, domain.ContainsHantei(stored[0].IpponsA))
+}
+
+// TestScoreHandler_NameDriftedSameNamePairHanteiNow400s pins consequence 2
+// (reviewer thread B): a mark placed by NAME (a stale pre-fix client, or an
+// offline-queue replay serialized before this fix) sends a WinnerID that
+// correctly names side B, but the mark itself sits on IpponsA (sideA-first
+// name placement). Before this fix the server validated by name only
+// (sideAID/sideBID never arrived), so this payload was ACCEPTED (200) - and
+// the engine's stripInvalidHantei, which runs AFTER backfillMatchIdentity
+// has filled in the real stored ids, then attributed by id, disagreed, and
+// silently stripped the only mark: a 200 response with the operator's
+// verdict quietly gone. After the fix the validator sees the same id triple
+// the engine will use and rejects the contradiction outright with a 400,
+// and the stored match is left untouched.
+func TestScoreHandler_NameDriftedSameNamePairHanteiNow400s(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	store.SaveCompetition(&state.Competition{ID: "spa2"})
+	require.NoError(t, store.SavePoolMatches("spa2", []state.MatchResult{
+		{ID: "P1-1", SideA: "Alice", SideB: "Alice", SideAID: "dojo-x-alice", SideBID: "dojo-y-alice"},
+	}))
+
+	payload, err := json.Marshal(state.MatchResult{
+		ID: "P1-1", SideA: "Alice", SideB: "Alice",
+		Winner: "Alice", WinnerID: "dojo-y-alice",
+		IpponsA: []string{domain.HanteiMark}, IpponsB: []string{},
+		Status: state.MatchStatusCompleted,
+	})
+	require.NoError(t, err)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/spa2/matches/P1-1/score", bytes.NewBuffer(payload))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code, "body: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "hantei mark belongs in the winner's ippon list")
+
+	// The match must be untouched by the rejected write, not silently
+	// completed with the mark stripped.
+	stored, err := store.LoadPoolMatches("spa2")
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	assert.NotEqual(t, state.MatchStatusCompleted, stored[0].Status)
 }
 
 func TestQuickScoreHandler(t *testing.T) {
@@ -1722,8 +1965,8 @@ func (f failingCompetitionStore) MatchStatusByID(string, string) (state.MatchSta
 	return "", false, f.err
 }
 
-func (f failingCompetitionStore) MatchSidesByID(string, string) (string, string, bool, error) {
-	return "", "", false, f.err
+func (f failingCompetitionStore) MatchSidesByID(string, string) (string, string, string, string, bool, error) {
+	return "", "", "", "", false, f.err
 }
 
 // TestAnnotateQueuePositions_NonEmpty verifies that annotateQueuePositions

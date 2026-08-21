@@ -52,12 +52,15 @@ type CompetitionStore interface {
 	// bronze) without the deep copy the Load* methods make. Mirrors
 	// state.Store.MatchStatusByID.
 	MatchStatusByID(compID, matchID string) (state.MatchStatus, bool, error)
-	// MatchSidesByID returns the stored (sideA, sideB) pairing for one match
-	// (pool → bracket → bronze) without the deep copy the Load* methods make.
-	// Mirrors state.Store.MatchSidesByID. Used to backfill a score payload's
-	// sides ahead of the request-boundary legacy-hantei fold, which runs
-	// before the engine's own reconcileSides backfill.
-	MatchSidesByID(compID, matchID string) (sideA, sideB string, found bool, err error)
+	// MatchSidesByID returns the stored (sideA, sideB, sideAID, sideBID)
+	// pairing for one match (pool → bracket → bronze) without the deep copy
+	// the Load* methods make. Mirrors state.Store.MatchSidesByID. Used to
+	// backfill a score payload's sides/ids ahead of the request-boundary
+	// legacy-hantei fold and the hantei mark-placement validation, both of
+	// which run before the engine's own reconcileSides/backfillMatchIdentity
+	// backfill. sideAID/sideBID are always "" for a bracket match (it
+	// persists no ids).
+	MatchSidesByID(compID, matchID string) (sideA, sideB, sideAID, sideBID string, found bool, err error)
 }
 
 // ScoringEngine is the consumer-boundary view of engine.Engine used by

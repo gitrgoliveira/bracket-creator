@@ -242,6 +242,53 @@ describe('API Utils', () => {
       });
     });
 
+    // bc-dmsr review (belt and braces): toBackendMatchResult already computes
+    // sideAId/sideBId in scope to place the "Ht" mark itself (see the describe
+    // block above), but used to discard them - only winnerId reached the
+    // wire. The server's validateHanteiMarkPlacement only attributes by id
+    // when winnerId/sideAId/sideBId are ALL present, so a same-name pair's
+    // mark, placed correctly by id on the client, could be rejected by the
+    // server's name-only fallback (or worse, accepted by it and then
+    // silently stripped later by the engine, which DOES see the real stored
+    // ids). The server also backfills sideAId/sideBId from the stored match
+    // ahead of validation now, but this is the second, independent half of
+    // the fix: sending them directly means the two agree even before any
+    // server-side backfill runs.
+    describe('emits sideAId/sideBId on the wire (bc-dmsr review: belt and braces)', () => {
+      it('forwards both side ids when the match carries object-shaped sides', () => {
+        const match = { sideA: { id: 'id-kenshikan', name: 'Tanaka Kenji' }, sideB: { id: 'id-mumeishi', name: 'Tanaka Kenji' } };
+        const result = toBackendMatchResult({
+          winner: { id: 'id-mumeishi', name: 'Tanaka Kenji' },
+          status: 'complete',
+          ipponsA: ['M'], ipponsB: ['M'],
+          score: { type: 'ippon' },
+          decidedByHantei: true,
+        }, match);
+        expect(result.sideAId).toBe('id-kenshikan');
+        expect(result.sideBId).toBe('id-mumeishi');
+      });
+
+      it('omits sideAId/sideBId (never sends empty strings) when the match carries bare-string sides', () => {
+        const match = { sideA: 'Alice', sideB: 'Bob' };
+        const result = toBackendMatchResult({ winner: 'Alice', status: 'complete', ipponsA: ['M'], ipponsB: [] }, match);
+        expect('sideAId' in result).toBe(false);
+        expect('sideBId' in result).toBe(false);
+      });
+
+      it('omits sideAId/sideBId for an id-less same-name pair (the id branch never fires)', () => {
+        const match = { sideA: 'Tanaka Kenji', sideB: 'Tanaka Kenji' };
+        const result = toBackendMatchResult({
+          winner: 'Tanaka Kenji',
+          status: 'complete',
+          ipponsA: ['M'], ipponsB: ['M'],
+          score: { type: 'ippon' },
+          decidedByHantei: true,
+        }, match);
+        expect('sideAId' in result).toBe(false);
+        expect('sideBId' in result).toBe(false);
+      });
+    });
+
     // Unattributable winner: a rename-drifted (or same-name, no-id) stored
     // winner can leave wantHantei true while the winner name matches NEITHER
     // side. The mark then has no side to ride on and NO mark is emitted -

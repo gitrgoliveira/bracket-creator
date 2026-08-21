@@ -364,9 +364,12 @@ func validateSubBout(prefix string, sr *state.SubMatchResult, allowNumberedEncho
 			Message: "hantei is only valid for the daihyosen representative bout (position -1)",
 		}
 	}
-	// SubMatchResult carries no ids (team sub-bout sides are named, and team
-	// names are unique by rule), so this call always takes the name-fallback
-	// branch of validateHanteiMarkPlacement/domain.AttributeWinnerSide.
+	// SubMatchResult carries no ids at all - a numbered team bout names the
+	// two individual PLAYERS fielded, and player names are not unique (only
+	// (name, dojo) is) - so names are all there is here, resolved by the
+	// documented sideA-first convention. This call always takes the
+	// name-fallback branch of validateHanteiMarkPlacement/
+	// domain.AttributeWinnerSide.
 	if err := validateHanteiMarkPlacement(prefix, sr.IpponsA, sr.IpponsB, "", "", "", sr.SideA, sr.SideB, sr.Winner); err != nil {
 		return err
 	}

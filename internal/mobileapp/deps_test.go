@@ -30,8 +30,8 @@ func (stubCompetitionStore) MatchStatusByID(string, string) (state.MatchStatus, 
 	return "", false, nil
 }
 
-func (stubCompetitionStore) MatchSidesByID(string, string) (string, string, bool, error) {
-	return "", "", false, nil
+func (stubCompetitionStore) MatchSidesByID(string, string) (string, string, string, string, bool, error) {
+	return "", "", "", "", false, nil
 }
 
 // stubTournamentLoader is a no-op implementation of TournamentLoader. Same

@@ -1263,12 +1263,29 @@ func TestHansokuHanteiConflict_SubResults(t *testing.T) {
 // comparison alone couldn't tell the two sides apart.
 //
 // Reached only through the raw engine API (RecordMatchResult), like
-// TestHansokuHanteiConflict above: the normal PUT /score path is validated
-// first by mobileapp.validateHanteiMarkPlacement (converted by the same
-// fix), which would already reject a wrongly-placed mark with a 400 before
-// it ever reaches the engine. This pins the engine-side re-application of
-// the same attribution rule for writers that bypass ScoreRequest.Validate
-// (bulk score, quick-score, any direct engine caller).
+// TestHansokuHanteiConflict above: the normal PUT /score and bulk-score
+// paths are validated first by mobileapp.validateHanteiMarkPlacement
+// (converted by the same fix), which now DOES reject this exact payload
+// with a 400 before it ever reaches the engine
+// (mobileapp.TestScoreHandler_NameDriftedSameNamePairHanteiNow400s pins that
+// end-to-end).
+//
+// That was not always true, and this comment used to overclaim it: for a
+// while after 9b5e0ff0 shipped, validateHanteiMarkPlacement only takes the
+// id branch when winnerID/sideAID/sideBID are ALL non-empty, and neither
+// request-boundary path ever populated sideAID/sideBID (the SPA sends
+// winnerId but never sideAId/sideBId — see api_serializers.jsx), so this
+// exact payload fell back to the name comparison, was ACCEPTED with a 200,
+// and only THEN silently lost its mark here at the engine — a live
+// regression found by review, not a hypothetical. It was closed by
+// mobileapp.backfillMatchLevelIDsForHanteiAttribution, which now backfills
+// sideAID/sideBID from the stored match ahead of validation at both
+// request-boundary sites.
+//
+// This test still earns its keep: it pins the engine-side re-application of
+// the same attribution rule for a caller that bypasses mobileapp validation
+// entirely (quick-score, or any other direct engine caller), which the
+// request-boundary backfill above cannot reach.
 func TestStripInvalidHantei_IDsOverrideNames(t *testing.T) {
 	mark := domain.HanteiMark
 

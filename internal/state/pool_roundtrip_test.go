@@ -15,9 +15,11 @@ import (
 // This exists because the two match stores persist by different mechanisms and
 // only one of them fails loudly. bracket.json is json.Marshal over the struct,
 // so a new BracketMatch field is persisted the moment it is declared. A pool
-// match is a hand-written column list in three places (the header, the row, and
-// a rec[N] read per column), so a new MatchResult field is persisted only if
-// someone remembers, and NOTHING breaks when they do not.
+// match is written column by column from poolMatchColumns, so a new
+// MatchResult field is persisted only if someone appends an entry for it, and
+// NOTHING breaks when they do not. The table removed the drift BETWEEN the
+// header, the row and the read; it cannot notice a field that never got a
+// column at all, which is what this guard is for.
 //
 // That is not hypothetical: DecisionBy, DecisionReason, Encho and ModifiedAt
 // were all lost on restart for pool matches while the bracket kept them. The

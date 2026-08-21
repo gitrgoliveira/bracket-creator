@@ -312,7 +312,12 @@ function winnerSideLR(m) {
 // strips the suffix AND the separator space first.
 function ipponsFromScore(scoreStr) {
   if (!scoreStr) return [];
-  return scoreStr.replace(/\s*\(H\d+\)$/, "").split("");
+  // "Ht" is the codec's ONE two-rune token (the judges'-decision mark, a
+  // real ippon-slice entry since the mark became the record): match it
+  // before the per-character fallback, mirroring domain.ParseScore's
+  // lookahead — "t" is not a letter that stands alone in a score, so the
+  // tokenization cannot misread a real hansoku "H".
+  return scoreStr.replace(/\s*\(H\d+\)$/, "").match(/Ht|[^\s]/g) || [];
 }
 
 // Format ippons as a readable score string: ["M","K"] → "MK", [] → ""

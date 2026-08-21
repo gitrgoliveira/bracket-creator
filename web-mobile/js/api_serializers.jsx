@@ -32,6 +32,22 @@ function isKikenDecision(v) { return v === "kiken" || v === "kiken-voluntary" ||
 
 // Translate UI score patch into backend MatchResult shape.
 // UI sends: { winner: {id,name,...}, status, score: {type,winnerPts,loserPts,ippons,fouls,...} }
+// The judges'-decision verdict is recorded as the "Ht" entry in the WINNER's
+// ippon list (the mark IS the record; Go: domain.HanteiMark). These two are
+// the serializer-side halves of that contract: containsHt is the read
+// predicate, placeHt the write placement (fill a free placeholder slot
+// before growing, mirroring domain.AppendHantei so the mark lands in the
+// winner's next free slot).
+const containsHt = (arr) => (arr || []).includes("Ht");
+function placeHt(arr) {
+    const out = [...(arr || [])];
+    if (out.includes("Ht")) return out;
+    const free = out.findIndex((v) => !v || v === "\u2022");
+    if (free >= 0) { out[free] = "Ht"; return out; }
+    out.push("Ht");
+    return out;
+}
+
 // Backend expects: { winner: string, ipponsA: [], ipponsB: [], hansokuA: int, hansokuB: int, decision: "", status: "completed"|"running"|"scheduled" }
 function toBackendMatchResult(patch, match) {
     const sideAName = typeof match?.sideA === "object" ? match.sideA?.name : match?.sideA;
@@ -89,7 +105,22 @@ function toBackendMatchResult(patch, match) {
     // trail silently stayed empty on every correction, kendo and team alike.
     if (patch.correctionReason) result.correctionReason = patch.correctionReason;
     if (patch.subResults) {
-        result.subResults = patch.subResults;
+        // Same conversion per bout: a sub carrying the editor's boolean (the
+        // daihyosen editor states it unconditionally) has it folded into the
+        // mark on the sub winner's side; the field itself never reaches the
+        // wire. Subs echoed verbatim from the server already carry the mark
+        // inside their ippons and pass through untouched.
+        result.subResults = patch.subResults.map((sub) => {
+            if (typeof sub.decidedByHantei !== "boolean") return sub;
+            const { decidedByHantei, ...rest } = sub;
+            const strip = (arr) => (arr || []).filter((v) => v !== "Ht");
+            let a = strip(rest.ipponsA), b = strip(rest.ipponsB);
+            if (decidedByHantei && rest.winner) {
+                if (rest.winner === rest.sideA) a = placeHt(a);
+                else if (rest.winner === rest.sideB) b = placeHt(b);
+            }
+            return { ...rest, ipponsA: a, ipponsB: b };
+        });
     }
     // Kachinuki: transient request-only flag marking an explicit operator
     // "record bout" submit. The server advances the winner-stays sequence
@@ -108,14 +139,20 @@ function toBackendMatchResult(patch, match) {
     if (patch.encho && patch.encho.periodCount > 0) {
         result.encho = { periodCount: patch.encho.periodCount };
     }
-    // Include decidedByHantei when explicitly set in the patch, or when the
-    // current match already has it true (to preserve it across re-edits).
-    // Omit it otherwise so non-hantei payloads stay minimal.
-    const explicitHantei = typeof patch.decidedByHantei === "boolean";
-    if (explicitHantei) {
-        result.decidedByHantei = patch.decidedByHantei;
-    } else if (match?.decidedByHantei) {
-        result.decidedByHantei = true;
+    // The editors keep an armed decidedByHantei BOOLEAN locally (their UX is
+    // unchanged); the wire carries the verdict as the "Ht" mark in the
+    // winner's ippon list instead of a flag. realIppons above already
+    // stripped any echoed mark from the outgoing arrays, so placement here is
+    // never doubled: an armed verdict (or a re-edit of a match that holds
+    // one) re-places the mark on the winner's side; an explicit false simply
+    // leaves the arrays markless — under the mark model a markless scoreline
+    // IS the withdrawal, no separate signal exists or is needed.
+    const wantHantei = typeof patch.decidedByHantei === "boolean"
+        ? patch.decidedByHantei
+        : !!match?.decidedByHantei;
+    if (wantHantei && winnerName) {
+        if (winnerName === sideAName) result.ipponsA = placeHt(result.ipponsA);
+        else if (winnerName === sideBName) result.ipponsB = placeHt(result.ipponsB);
     }
     return result;
 }
@@ -216,26 +253,45 @@ function normalizeMatch(m, playerMap) {
         // Only fill when absent so server-provided arrays always win.
         if (!norm.ipponsA?.length && lettersA.length) norm.ipponsA = lettersA;
         if (!norm.ipponsB?.length && lettersB.length) norm.ipponsB = lettersB;
+        // Counts and the seeding array go through realIppons: the "Ht" mark
+        // (now a real ippon-slice entry) occupies a slot but is not a point,
+        // so a 1-1 hantei must read 1-1 here, not 2-1.
         norm.score = {
             type: "ippon",
-            winnerPts: aWin ? lettersA.length : lettersB.length,
-            loserPts: aWin ? lettersB.length : lettersA.length,
-            ippons: aWin ? lettersA : lettersB,
+            winnerPts: realIppons(aWin ? lettersA : lettersB).length,
+            loserPts: realIppons(aWin ? lettersB : lettersA).length,
+            ippons: realIppons(aWin ? lettersA : lettersB),
         };
     }
     // Build score from ipponsA/ipponsB for pool matches
     if (!norm.score && (norm.ipponsA?.length || norm.ipponsB?.length) && norm.status === "completed") {
         const aWin = sideAWon(norm.winner, norm.sideA);
+        // Same realIppons discipline as the bracket branch above: the mark
+        // occupies a slot, never a point.
         norm.score = {
             type: isHikiwake(norm.decision) ? "hikiwake" : "ippon",
-            winnerPts: aWin ? (norm.ipponsA?.length || 0) : (norm.ipponsB?.length || 0),
-            loserPts: aWin ? (norm.ipponsB?.length || 0) : (norm.ipponsA?.length || 0),
-            ippons: aWin ? norm.ipponsA : norm.ipponsB,
+            winnerPts: realIppons(aWin ? norm.ipponsA : norm.ipponsB).length,
+            loserPts: realIppons(aWin ? norm.ipponsB : norm.ipponsA).length,
+            ippons: realIppons(aWin ? norm.ipponsA : norm.ipponsB),
         };
     }
     // Carry engi flag counts through (additive, no kendo code reads these).
     if (m.flagsA != null) norm.flagsA = m.flagsA;
     if (m.flagsB != null) norm.flagsB = m.flagsB;
+    // decidedByHantei is a DERIVED view property now: the server records the
+    // verdict as the "Ht" entry in the winner's ippon list and sends no flag.
+    // Deriving it here keeps every display surface and editor reading the
+    // property they always read, off the one place the verdict actually
+    // lives. Per-sub likewise. (norm.ipponsA may have been recovered from a
+    // bracket scoreA string above; ipponsFromScore tokenizes "Ht", so the
+    // derivation sees it either way.)
+    norm.decidedByHantei = containsHt(norm.ipponsA) || containsHt(norm.ipponsB);
+    if (Array.isArray(norm.subResults)) {
+        norm.subResults = norm.subResults.map((sub) =>
+            sub && (containsHt(sub.ipponsA) || containsHt(sub.ipponsB))
+                ? { ...sub, decidedByHantei: true }
+                : sub);
+    }
     return norm;
 }
 

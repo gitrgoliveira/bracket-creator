@@ -38,9 +38,9 @@ describe('API Utils', () => {
       expect(result.decision).toBe('');
     });
 
-    it('forwards decidedByHantei on the wire payload', () => {
-      // mp-6di: judges' decision flag must round-trip so the Ht suffix
-      // persists in the viewer and bracket DecidedByHantei mirror.
+    it('converts the armed verdict into the Ht mark in the winner ippons', () => {
+      // The verdict is recorded as the "Ht" entry in the WINNER's ippon list
+      // (the mark IS the record); the wire carries no decidedByHantei field.
       const match = { sideA: 'A', sideB: 'B' };
       const result = toBackendMatchResult({
         winner: 'A',
@@ -49,7 +49,19 @@ describe('API Utils', () => {
         ipponsB: ['K'],
         decidedByHantei: true,
       }, match);
-      expect(result.decidedByHantei).toBe(true);
+      expect(result.decidedByHantei).toBeUndefined();
+      expect(result.ipponsA).toEqual(['M', 'Ht']);
+      expect(result.ipponsB).toEqual(['K']);
+    });
+
+    it('a 0-0 hantei places the mark in the empty slot', () => {
+      const match = { sideA: 'A', sideB: 'B' };
+      const result = toBackendMatchResult({
+        winner: 'B', status: 'complete', ipponsA: [], ipponsB: [],
+        decidedByHantei: true,
+      }, match);
+      expect(result.ipponsB).toEqual(['Ht']);
+      expect(result.ipponsA).toEqual([]);
     });
 
     it('forwards flagsA/flagsB for an engi submission (mp-gy6g regression)', () => {
@@ -97,43 +109,33 @@ describe('API Utils', () => {
       expect(result2.correctionReason).toBeUndefined();
     });
 
-    it('forwards decidedByHantei = false (so a re-edit can clear it)', () => {
-      const match = { sideA: 'A', sideB: 'B' };
+    it('an explicit false leaves the payload markless (the clear IS the absence)', () => {
+      const match = { sideA: 'A', sideB: 'B', decidedByHantei: true };
       const result = toBackendMatchResult({
         winner: 'A',
         status: 'complete',
-        ipponsA: ['M'],
+        ipponsA: ['M', 'Ht'],
         ipponsB: [],
         decidedByHantei: false,
       }, match);
-      expect(result.decidedByHantei).toBe(false);
+      expect(result.decidedByHantei).toBeUndefined();
+      expect(result.ipponsA).toEqual(['M'], 'realIppons strips the echoed mark; false does not re-place it');
     });
 
-    it('preserves decidedByHantei=true from the existing match when patch omits it', () => {
-      // The serialiser forwards `true` from the existing match whenever the
-      // patch doesn't override it, so non-hantei-touching edits (changing
-      // score, court, scheduledAt) keep the previously recorded hantei flag
-      // on the wire.
-      //
-      // The Go backend uses `*bool` for state.MatchResult.DecidedByHantei
-      // (see internal/state/models.go), so an OMITTED JSON field decodes as
-      // nil and the bracket-match engine preserves the stored value
-      // (recordBracketMatchResult / recordBracketMatchResultTx gate on
-      // `result.DecidedByHantei != nil`). The frontend still forwards true
-      // for two reasons: (a) defence-in-depth in case the backend
-      // preserve-on-nil contract regresses, (b) pool matches use `*r =
-      // *result` and WOULD clear on nil; although FIK doesn't permit
-      // hantei in pool play, the codepath exists so we keep the wire
-      // payload self-describing.
+    it('re-places the mark from the existing match when the patch omits the boolean', () => {
+      // A non-hantei-touching edit (court, scheduledAt, a re-save) must not
+      // lose a recorded verdict: realIppons strips any echoed mark from the
+      // outgoing arrays, so the serialiser re-places it on the winner's side
+      // whenever the normalized match says the verdict stands.
       const match = { sideA: 'A', sideB: 'B', decidedByHantei: true };
       const result = toBackendMatchResult({
         winner: 'A',
         status: 'complete',
         ipponsA: ['M'],
         ipponsB: ['K'],
-        // decidedByHantei intentionally omitted
       }, match);
-      expect(result.decidedByHantei).toBe(true);
+      expect(result.decidedByHantei).toBeUndefined();
+      expect(result.ipponsA).toEqual(['M', 'Ht']);
     });
 
     it('does not forward decidedByHantei when the existing match flag is false', () => {

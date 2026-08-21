@@ -671,13 +671,16 @@ func preserveLoserScore(result, prior *state.MatchResult, decisionBy string) {
 }
 
 // struckIppons returns the real struck ippon letters from a slice, dropping
-// empty entries, the "•" UI placeholder, and the domain.DefaultWinIppon maru
-// (an awarded default win, not a struck point). Distinct from
-// countScoringIppons, which counts the maru as a scoring ippon by design.
+// empty entries, the "•" UI placeholder, the domain.DefaultWinIppon maru
+// (an awarded default win, not a struck point) and the domain.HanteiMark
+// (a verdict, not a strike — and one that cannot survive onto a withdrawal
+// anyway; stripInvalidHantei would remove it downstream, this just keeps the
+// preserved slice honest at the source). Distinct from countScoringIppons,
+// which counts the maru as a scoring ippon by design.
 func struckIppons(ippons []string) []string {
 	var out []string
 	for _, v := range ippons {
-		if v != "" && v != domain.IpponPlaceholder && v != domain.DefaultWinIppon {
+		if v != "" && v != domain.IpponPlaceholder && v != domain.DefaultWinIppon && v != domain.HanteiMark {
 			out = append(out, v)
 		}
 	}

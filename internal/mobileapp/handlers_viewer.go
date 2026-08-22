@@ -225,11 +225,45 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 	stripMatchesAudit(poolMatches)
 	stripBracketAudit(bracket)
 
-	return gin.H{
+	payload := gin.H{
 		"config":      comp,
 		"poolMatches": poolMatches,
 		"bracket":     bracket,
 	}
+	// Both loads above already SWALLOW their error into a log and carry on with
+	// whatever they got, which is right -- one unreadable file must not blank a
+	// whole competition view. But it left the operator with a silently
+	// half-empty competition and no way to learn why. Carry the located reason
+	// so the console can say which file is broken and where, and so "the
+	// bracket is missing" and "the bracket file will not parse" stop looking
+	// identical. This is the aggregate the admin SPA renders AdminCompetition
+	// off (see the comment above the participant load), which is why it is the
+	// right place for it despite the endpoint being public: the audience gate
+	// is at render time, and the detail is parser syntax, never competitor data.
+	if issues := dataIssuesFrom(pmErr, brErr); len(issues) > 0 {
+		payload["dataIssues"] = issues
+	}
+	return payload
+}
+
+// dataIssuesFrom collects the located file failures among errs, dropping
+// everything else: a missing file, a permissions problem or a nil is not
+// something an operator repairs with a text editor, so it gets no banner.
+func dataIssuesFrom(errs ...error) []gin.H {
+	var issues []gin.H
+	for _, err := range errs {
+		cf, ok := state.AsCorruptFile(err)
+		if !ok {
+			continue
+		}
+		issues = append(issues, gin.H{
+			"file":   cf.File,
+			"line":   cf.Line,
+			"column": cf.Column,
+			"detail": cf.Detail,
+		})
+	}
+	return issues
 }
 
 func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine) {

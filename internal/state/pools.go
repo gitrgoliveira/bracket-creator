@@ -41,7 +41,9 @@ func parsePoolsFile(path string) (any, error) {
 
 	records, err := csv.NewReader(f).ReadAll()
 	if err != nil {
-		return nil, err
+		// Located for the same reason as the results file below: pools.csv is
+		// equally hand-editable and equally able to stop a competition.
+		return nil, corruptCSV("pools.csv", err)
 	}
 
 	// poolIdx maps pool name → index into pools so we can append players in-place
@@ -284,7 +286,12 @@ func parsePoolMatchesFile(path string) (any, error) {
 
 	records, err := csv.NewReader(f).ReadAll()
 	if err != nil {
-		return nil, err
+		// CSV-level damage is the LOUD class: the row structure itself is
+		// broken, so there is no row to degrade and the load fails. Located so
+		// the operator can find it. (A single malformed CELL inside an
+		// otherwise-valid row is the quiet class and never reaches here; see
+		// the SubResults column.)
+		return nil, corruptCSV("pool-matches.csv", err)
 	}
 	return parsePoolMatchesRecords(records), nil
 }
@@ -299,7 +306,9 @@ func parsePoolMatchesBytes(raw []byte) ([]MatchResult, error) {
 	}
 	records, err := csv.NewReader(bytes.NewReader(raw)).ReadAll()
 	if err != nil {
-		return nil, err
+		// Same located failure as parsePoolMatchesFile: this path reads
+		// WAL-staged bytes for the same file, so it must report it the same way.
+		return nil, corruptCSV("pool-matches.csv", err)
 	}
 	return parsePoolMatchesRecords(records), nil
 }

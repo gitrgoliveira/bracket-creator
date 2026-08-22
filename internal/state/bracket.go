@@ -42,7 +42,12 @@ func parseBracketBytes(raw []byte) (*Bracket, error) {
 	}
 	var b Bracket
 	if err := json.Unmarshal(raw, &b); err != nil {
-		return nil, err
+		// Located, so the operator is told which line and column to look at
+		// rather than being handed a generic failure. Nothing is written on
+		// this path: both bracket write paths abort before saving, so the file
+		// stays exactly as it was left, which is what makes a hand repair the
+		// right advice here.
+		return nil, corruptJSON("bracket.json", raw, err)
 	}
 	// Clamp negative engi flag counts to 0 on load, symmetric with the pool CSV
 	// parser (pools.go parsePoolMatchesRecords): flags are validated

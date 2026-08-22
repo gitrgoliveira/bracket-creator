@@ -456,7 +456,14 @@ var poolMatchColumns = []poolMatchColumn{
 	{name: "SubResults",
 		put: func(r *MatchResult) string {
 			if len(r.SubResults) == 0 {
-				return ""
+				// An encounter with nothing in it writes back whatever it was
+				// READ from, which is empty for every ordinary match and the
+				// unparsed bytes for one whose cell was corrupt. Without this
+				// the whole-file rewrite that every match write performs
+				// destroyed a malformed cell as soon as any OTHER match in the
+				// competition was scored, taking the only copy of that team
+				// encounter's bouts with it. See MatchResult.SubResultsRaw.
+				return r.SubResultsRaw
 			}
 			b, err := json.Marshal(r.SubResults)
 			if err != nil {
@@ -483,6 +490,25 @@ var poolMatchColumns = []poolMatchColumn{
 				// empty team encounter with no trace of the data loss.
 				slog.Error("state: pool match SubResults cell corrupt; loading as empty",
 					"matchID", m.ID, "error", err)
+				// Discard whatever decoded before the error. Unmarshal only
+				// leaves the destination untouched for a SYNTAX error, which
+				// it rejects before decoding anything; a TYPE error (valid
+				// JSON, wrong value type, e.g. "position":"2" from a hand
+				// edit) decodes as far as it got and returns the error at the
+				// end, leaving a partially built slice whose failed entries
+				// are silently zeroed. Without this reset that slice is
+				// non-empty, so the put below re-marshals the zeroed bouts and
+				// normalises the damage onto disk as a valid-looking cell,
+				// which is worse than the blanking this whole branch exists to
+				// stop. It is also what the documented contract already claims
+				// happens: "loads as an empty encounter".
+				m.SubResults = nil
+				// Retain the bytes so the next write cannot destroy them, and
+				// raise the operator-facing flag from the same branch, so the
+				// warning and the repair copy can never disagree about whether
+				// this cell parsed.
+				m.SubResultsRaw = cell
+				m.SubResultsUnreadable = true
 			}
 		}},
 	strCol("ScheduledAt", func(m *MatchResult) *string { return &m.ScheduledAt }),

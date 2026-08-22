@@ -600,6 +600,25 @@ func applyPoolWrite(stored, result *state.MatchResult, policy matchWritePolicy) 
 		// tie-break figures.
 		preserveDaihyosenOutcome(stored.SubResults, result)
 	}
+	// The unparsed sub-bout cell is FILE PROVENANCE, not client data: it exists
+	// so a malformed hand edit survives until someone repairs it, and the
+	// whole-struct overwrite below would drop it on any write to this match --
+	// including one that says nothing about sub-bouts at all, such as a court
+	// reassignment. Assigned unconditionally rather than set-if-empty, under
+	// BOTH policies, so a client that echoes the derived flag back cannot
+	// raise it on a match that reads perfectly well.
+	//
+	// A write that CARRIES sub-bouts clears both: the operator has re-entered
+	// the encounter, so the retained bytes are superseded and the warning has
+	// been answered. That is the repair path, and it is the only thing that
+	// takes the flag down.
+	if len(result.SubResults) == 0 {
+		result.SubResultsRaw = stored.SubResultsRaw
+		result.SubResultsUnreadable = stored.SubResultsUnreadable
+	} else {
+		result.SubResultsRaw = ""
+		result.SubResultsUnreadable = false
+	}
 	*stored = *result
 	return false
 }

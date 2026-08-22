@@ -2291,8 +2291,10 @@ a:hover {
 }
 
 /* C2: Sync-status pill, appears in the scoring-panel header while a match
-   is running. Three variants: synced (accent/navy), syncing (ink-3), offline
-   (amber, distinct from red which is reserved for Aka and SSE errors).
+   is running. Five variants: synced (accent/navy), syncing (ink-3), offline
+   (amber, expected/transient), auth-required and server-error (danger/red,
+   both mean a queued write is still unsaved, so they read louder than the
+   amber offline state on purpose).
    COPY RULE: the word "live" must never appear in .sync-pill__label text. */
 .sync-status-pill {
   display: inline-flex;
@@ -2344,6 +2346,22 @@ a:hover {
   color: var(--warn-ink);
   border-color: var(--warn-strong);
   background: var(--warn-soft);
+}
+/* auth-required, danger palette; a queued write was refused for lack of
+   auth and is parked, not lost, until the operator signs in again. Danger
+   (not amber) because the operator must act, not just wait it out. */
+.sync-pill--auth {
+  color: var(--danger-ink);
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+}
+/* server-error, danger palette; the write keeps failing but is still
+   queued and retrying automatically. Same loud danger palette as auth so
+   the operator notices, even though no action is required here. */
+.sync-pill--error {
+  color: var(--danger-ink);
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
 }
 
 .viewer__tabs {

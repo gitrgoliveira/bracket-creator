@@ -355,16 +355,24 @@ describe('_flushQueue: non-retryable 4xx discards, 5xx/429/network retries', () 
     });
 });
 
-// 3a. mp-q8c6: a DETERMINISTIC 5xx (server bug answering 500 to a write it
-//     will never accept) must not poison the queue forever. After
-//     MAX_QUEUE_SERVER_REJECTIONS the entry is dropped and surfaced through
-//     the write-failed channel. Network failures never count toward the cap.
+// 3a. bc-qttl: a DETERMINISTIC 5xx (server bug answering 500 to a write it
+//     will never accept) must NOT poison the queue and must NOT be discarded
+//     either: "ONLY A CONFIRMED WRITE EMPTIES THE QUEUE". The old
+//     MAX_QUEUE_SERVER_REJECTIONS drop-cap (mp-q8c6) is gone; the same
+//     constant is now SERVER_REJECTION_NOTICE_THRESHOLD, a NOTICE threshold.
+//     On the 10th consecutive rejection the entry is STILL QUEUED and keeps
+//     retrying forever (until the 12h TTL); the client instead logs a
+//     console.warn, raises exactly ONE 'server_error' queue alert (fired on
+//     the crossing, not on every later retry), and the sync status moves to
+//     'server-error'. Network failures never count toward the threshold.
 
-describe('_flushQueue: server-rejection cap (mp-q8c6)', () => {
-    it('drops a persistently-500ing write after the rejection cap and surfaces it', async () => {
+describe('_flushQueue: server-rejection NOTICE threshold (bc-qttl)', () => {
+    it('never drops a persistently-500ing write: it stays queued past the notice threshold, fires exactly one server_error alert, and flips sync status to server-error', async () => {
         const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        const failures = [];
-        const unsub = mod.subscribeTerminalWriteFailed((info) => failures.push(info));
+        const alerts = [];
+        const unsubAlert = mod.subscribeQueueAlert((a) => alerts.push(a));
+        let status = 'synced';
+        const unsubStatus = subscribeSyncStatus((s) => { status = s; });
 
         let attempt = 0;
         global.fetch = vi.fn().mockImplementation(() => {
@@ -381,33 +389,41 @@ describe('_flushQueue: server-rejection cap (mp-q8c6)', () => {
         enqueueRunningWrite('c1', 'm1', { status: 'running', rev: 1 }, 'pw');
         await flushMicrotasks(); // immediate flush: rejection 1
 
-        // Ride out every backoff step (500+1000+2000+4000+8000×6 ≈ 55s for
-        // 10 rejections); the cap must fire well within this window.
+        // Ride out every backoff step (500+1000+2000+4000+8000×5 ≈ 47.5s for
+        // 10 rejections, then further still) well past the notice threshold.
         await tick(120000);
+        expect(attempt).toBeGreaterThanOrEqual(15); // well past 10; still retrying, never dropped
 
-        // 10 rejections total, then the entry is gone: no further fetches.
-        expect(attempt).toBe(10);
-        const callsAtCap = global.fetch.mock.calls.length;
+        const callsSoFar = global.fetch.mock.calls.length;
+        // Keep riding the backoff: more rejections must keep happening forever,
+        // not stop at the old cap of 10.
         await tick(60000);
-        expect(global.fetch).toHaveBeenCalledTimes(callsAtCap);
+        expect(global.fetch.mock.calls.length).toBeGreaterThan(callsSoFar);
 
-        // Surfaced to the operator through the write-failed channel.
-        expect(failures.length).toBe(1);
-        expect(failures[0]).toMatchObject({ compID: 'c1', matchID: 'm1', kind: 'score', status: 500 });
-        expect(failures[0].reason).toBe('flag total 0+0=0 is invalid');
+        // Exactly one 'server_error' alert: fired ON the crossing (=== not >=),
+        // so a wedged write announces once, not on every retry for 12 hours.
+        const serverErrorAlerts = alerts.filter((a) => a.kind === 'server_error');
+        expect(serverErrorAlerts.length).toBe(1);
+        expect(serverErrorAlerts[0]).toMatchObject({ compID: 'c1', matchID: 'm1', count: 1, terminalCount: 0 });
 
-        unsub();
+        // Sync status reflects "still queued, still failing" distinctly from
+        // both "Syncing…" and "Offline" (the connection is up; the server keeps
+        // refusing the write).
+        expect(status).toBe('server-error');
+
+        unsubAlert();
+        unsubStatus();
         warnSpy.mockRestore();
     });
 
-    it('does NOT count network failures toward the cap (offline periods keep writes queued)', async () => {
+    it('does NOT count network failures toward the notice threshold (offline periods keep writes queued)', async () => {
         const failures = [];
         const unsub = mod.subscribeTerminalWriteFailed((info) => failures.push(info));
 
         let attempt = 0;
         global.fetch = vi.fn().mockImplementation(() => {
             attempt++;
-            // Far more network failures than the rejection cap, then recovery.
+            // Far more network failures than the notice threshold, then recovery.
             if (attempt <= 15) return Promise.reject(new TypeError('network error'));
             return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
         });
@@ -430,7 +446,7 @@ describe('_flushQueue: server-rejection cap (mp-q8c6)', () => {
         const sentRevs = [];
         global.fetch = vi.fn().mockImplementation((_url, opts) => {
             attempt++;
-            // First 9 attempts: one shy of the cap.
+            // First 9 attempts: one shy of the notice threshold.
             if (attempt <= 9) {
                 return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) });
             }
@@ -440,7 +456,7 @@ describe('_flushQueue: server-rejection cap (mp-q8c6)', () => {
 
         enqueueRunningWrite('c1', 'm1', { status: 'running', rev: 1 }, 'pw');
         await flushMicrotasks();
-        // 9 rejections: entry still queued (cap is 10).
+        // 9 rejections: entry still queued (threshold is 10).
         await tick(40000);
         expect(attempt).toBe(9);
 
@@ -865,6 +881,9 @@ describe('clearQueue: drops queued writes + persisted store (logout / password_r
 
 describe('rehydrate: tampered terminal url from localStorage is rejected (security)', () => {
     it('drops a terminal entry whose url is not a same-origin /api/ path', async () => {
+        // Rehydration console.warns on any drop; the strict test setup fails on
+        // an unexpected warn, so this test intentionally installs its own spy.
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const evil = [['c1:m1', {
             compID: 'c1', matchID: 'm1', payload: {}, password: 'pw',
             kind: 'decision', terminal: true, method: 'POST',
@@ -875,6 +894,9 @@ describe('rehydrate: tampered terminal url from localStorage is rejected (securi
         vi.resetModules();
         const m = await import('../api_client.jsx');
         expect(m.API.hasPendingTerminalWrite('c1', 'm1')).toBe(false);
+        // A silent discard was the bug being fixed: assert the operator was told.
+        expect(warnSpy).toHaveBeenCalledWith('[sync] discarded 1 unreadable queued write(s) on rehydration');
+        warnSpy.mockRestore();
     });
 
     it('keeps a terminal entry with a valid /api/ url', async () => {
@@ -891,6 +913,7 @@ describe('rehydrate: tampered terminal url from localStorage is rejected (securi
     });
 
     it('rejects an /api/ url OUTSIDE /api/competitions/ (allowlist is route-scoped)', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const bad = [['c1:m3', {
             compID: 'c1', matchID: 'm3', payload: {}, password: 'pw',
             kind: 'decision', terminal: true, method: 'POST',
@@ -901,9 +924,12 @@ describe('rehydrate: tampered terminal url from localStorage is rejected (securi
         vi.resetModules();
         const m = await import('../api_client.jsx');
         expect(m.API.hasPendingTerminalWrite('c1', 'm3')).toBe(false);
+        expect(warnSpy).toHaveBeenCalledWith('[sync] discarded 1 unreadable queued write(s) on rehydration');
+        warnSpy.mockRestore();
     });
 
     it('rejects a disallowed method (DELETE) even on an /api/competitions/ url', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const bad = [['c1:m4', {
             compID: 'c1', matchID: 'm4', payload: {}, password: 'pw',
             kind: 'decision', terminal: true, method: 'DELETE',
@@ -914,11 +940,14 @@ describe('rehydrate: tampered terminal url from localStorage is rejected (securi
         vi.resetModules();
         const m = await import('../api_client.jsx');
         expect(m.API.hasPendingTerminalWrite('c1', 'm4')).toBe(false);
+        expect(warnSpy).toHaveBeenCalledWith('[sync] discarded 1 unreadable queued write(s) on rehydration');
+        warnSpy.mockRestore();
     });
 
     it('rejects a dot-segment path-traversal url that normalizes outside /api/competitions/', async () => {
         // Passes a naive startsWith('/api/competitions/') but fetch would normalize
         // it to /api/admin/secrets on the wire; must be rejected.
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const bad = [['c1:m5', {
             compID: 'c1', matchID: 'm5', payload: {}, password: 'pw',
             kind: 'score', terminal: true, method: 'PUT',
@@ -929,9 +958,12 @@ describe('rehydrate: tampered terminal url from localStorage is rejected (securi
         vi.resetModules();
         const m = await import('../api_client.jsx');
         expect(m.API.hasPendingTerminalWrite('c1', 'm5')).toBe(false);
+        expect(warnSpy).toHaveBeenCalledWith('[sync] discarded 1 unreadable queued write(s) on rehydration');
+        warnSpy.mockRestore();
     });
 
     it('rejects a cross-origin / protocol-relative terminal url', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const bad = [['c1:m6', {
             compID: 'c1', matchID: 'm6', payload: {}, password: 'pw',
             kind: 'score', terminal: true, method: 'PUT',
@@ -942,6 +974,8 @@ describe('rehydrate: tampered terminal url from localStorage is rejected (securi
         vi.resetModules();
         const m = await import('../api_client.jsx');
         expect(m.API.hasPendingTerminalWrite('c1', 'm6')).toBe(false);
+        expect(warnSpy).toHaveBeenCalledWith('[sync] discarded 1 unreadable queued write(s) on rehydration');
+        warnSpy.mockRestore();
     });
 
     it('accepts a legitimate same-origin /api/competitions/ terminal url', async () => {
@@ -960,6 +994,7 @@ describe('rehydrate: tampered terminal url from localStorage is rejected (securi
     it('rejects an entry whose enqueuedAt is a non-numeric (tampered) value', async () => {
         // A string enqueuedAt would make (now - enqueuedAt) NaN, so a naive TTL
         // check (NaN > TTL === false) would let an arbitrarily old write through.
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const bad = [['c1:m8', {
             compID: 'c1', matchID: 'm8', payload: {}, password: 'pw',
             kind: 'score', terminal: true, method: 'PUT',
@@ -970,12 +1005,15 @@ describe('rehydrate: tampered terminal url from localStorage is rejected (securi
         vi.resetModules();
         const m = await import('../api_client.jsx');
         expect(m.API.hasPendingTerminalWrite('c1', 'm8')).toBe(false);
+        expect(warnSpy).toHaveBeenCalledWith('[sync] discarded 1 unreadable queued write(s) on rehydration');
+        warnSpy.mockRestore();
     });
 
     it('skips malformed persisted entries without dropping valid ones (durability)', async () => {
         // Corrupt/tampered queue: a number, null, a 1-element array, then a VALID
         // terminal entry. A non-array element would throw on destructure and (under
         // one try/catch) abort the entire rehydrate; the valid entry must survive.
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const mixed = [
             42,
             null,
@@ -991,6 +1029,10 @@ describe('rehydrate: tampered terminal url from localStorage is rejected (securi
         vi.resetModules();
         const m = await import('../api_client.jsx');
         expect(m.API.hasPendingTerminalWrite('c1', 'good')).toBe(true);
+        // 3 unreadable elements (42, null, the 1-tuple); the valid entry is not
+        // counted among them and the drop was announced, not silent.
+        expect(warnSpy).toHaveBeenCalledWith('[sync] discarded 3 unreadable queued write(s) on rehydration');
+        warnSpy.mockRestore();
     });
 });
 
@@ -1136,5 +1178,481 @@ describe('_flushQueue: LWW-dropped queued override triggers bracketResync (mp-y3
 
         // Resync listener must NOT be called (applied:true is success, no stale state).
         expect(resyncCalls.length).toBe(0);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// bc-qttl: "ONLY A CONFIRMED WRITE EMPTIES THE QUEUE"
+//
+// The rest of this file covers the reworked contract: a 12h TTL (was 6h), the
+// rehydrate-alerts-and-writes-back-so-it-never-re-fires fix, the buffered
+// queue-alert channel, 401 parking vs 403 retrying, resumeAfterAuth, the
+// still-drops-with-an-alert 4xx path, clearQueue's discarded alert, the
+// latched storage_full alert, and API.unsentWrites().
+// ---------------------------------------------------------------------------
+
+describe('bc-qttl: 12h queue TTL (up from 6h)', () => {
+    it('an entry enqueued 11 hours ago survives rehydration', async () => {
+        const elevenHoursAgo = Date.now() - 11 * 60 * 60 * 1000;
+        const entries = [['c1:m1', {
+            compID: 'c1', matchID: 'm1', payload: {}, password: 'pw',
+            kind: 'score', terminal: true, method: 'PUT',
+            url: '/api/competitions/c1/matches/m1/score', enqueuedAt: elevenHoursAgo,
+        }]];
+        localStorage.setItem('bc_write_queue', JSON.stringify(entries));
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('offline'));
+        vi.resetModules();
+        const m = await import('../api_client.jsx');
+        expect(m.API.hasPendingTerminalWrite('c1', 'm1')).toBe(true);
+    });
+
+    it('an entry enqueued 13 hours ago is dropped (past the 12h TTL)', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const thirteenHoursAgo = Date.now() - 13 * 60 * 60 * 1000;
+        const entries = [['c1:m2', {
+            compID: 'c1', matchID: 'm2', payload: {}, password: 'pw',
+            kind: 'score', terminal: true, method: 'PUT',
+            url: '/api/competitions/c1/matches/m2/score', enqueuedAt: thirteenHoursAgo,
+        }]];
+        localStorage.setItem('bc_write_queue', JSON.stringify(entries));
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('offline'));
+        vi.resetModules();
+        const m = await import('../api_client.jsx');
+        expect(m.API.hasPendingTerminalWrite('c1', 'm2')).toBe(false);
+        expect(warnSpy).toHaveBeenCalled();
+        warnSpy.mockRestore();
+    });
+});
+
+describe('bc-qttl: expired-drop alert reports count and terminalCount', () => {
+    it('raises one expired alert, counting the terminal entry separately from the running one', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const old = Date.now() - 13 * 60 * 60 * 1000;
+        const entries = [
+            ['c1:m1', {
+                compID: 'c1', matchID: 'm1', payload: {}, password: 'pw',
+                kind: 'score', terminal: true, method: 'PUT',
+                url: '/api/competitions/c1/matches/m1/score', enqueuedAt: old,
+            }],
+            ['c1:m2', {
+                compID: 'c1', matchID: 'm2', payload: {}, password: 'pw',
+                kind: 'score', terminal: false, enqueuedAt: old,
+            }],
+        ];
+        localStorage.setItem('bc_write_queue', JSON.stringify(entries));
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('offline'));
+        vi.resetModules();
+        const m = await import('../api_client.jsx');
+
+        // No subscriber existed at import time, so the alert was buffered; a
+        // subscriber added now still receives the replay (see the buffered-replay
+        // describe block below for the dedicated coverage of that mechanism).
+        const alerts = [];
+        m.subscribeQueueAlert((a) => alerts.push(a));
+
+        const expiredAlerts = alerts.filter((a) => a.kind === 'expired');
+        expect(expiredAlerts.length).toBe(1);
+        expect(expiredAlerts[0].count).toBe(2);
+        expect(expiredAlerts[0].terminalCount).toBe(1);
+
+        warnSpy.mockRestore();
+    });
+});
+
+describe('bc-qttl: the key regression - an expired drop is never re-announced on a later reload', () => {
+    it('rehydrate writes the pruned queue back so a second import of the same (now-empty) storage does not re-fire the expired alert', async () => {
+        // Before this fix, rehydrate never wrote back: a fully-expired queue
+        // stayed on disk untouched, so every reload re-read, re-dropped, and
+        // re-announced the SAME entries forever.
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const old = Date.now() - 13 * 60 * 60 * 1000;
+        const entries = [['c1:m1', {
+            compID: 'c1', matchID: 'm1', payload: {}, password: 'pw',
+            kind: 'score', terminal: true, method: 'PUT',
+            url: '/api/competitions/c1/matches/m1/score', enqueuedAt: old,
+        }]];
+        localStorage.setItem('bc_write_queue', JSON.stringify(entries));
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('offline'));
+
+        // First load: the expired entry is dropped and announced once.
+        vi.resetModules();
+        const m1 = await import('../api_client.jsx');
+        const firstLoadAlerts = [];
+        m1.subscribeQueueAlert((a) => firstLoadAlerts.push(a));
+        expect(firstLoadAlerts.filter((a) => a.kind === 'expired').length).toBe(1);
+
+        // The pruned (now-empty) queue must have been persisted, i.e. the key
+        // removed outright: this is what stops the next reload from seeing the
+        // same expired entries again.
+        expect(localStorage.getItem('bc_write_queue')).toBeNull();
+
+        // Second load ("reload"): nothing is left on disk, so nothing expires
+        // and nothing is re-announced.
+        vi.resetModules();
+        const m2 = await import('../api_client.jsx');
+        const secondLoadAlerts = [];
+        m2.subscribeQueueAlert((a) => secondLoadAlerts.push(a));
+        expect(secondLoadAlerts.filter((a) => a.kind === 'expired').length).toBe(0);
+
+        warnSpy.mockRestore();
+    });
+});
+
+describe('bc-qttl: queue alerts raised before any subscriber exists are buffered and replayed once', () => {
+    it('a subscriber added after rehydration still receives the buffered alert; a second subscriber gets nothing (buffer is drained, not a durable log)', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const old = Date.now() - 13 * 60 * 60 * 1000;
+        const entries = [['c1:m1', {
+            compID: 'c1', matchID: 'm1', payload: {}, password: 'pw',
+            kind: 'score', terminal: true, method: 'PUT',
+            url: '/api/competitions/c1/matches/m1/score', enqueuedAt: old,
+        }]];
+        localStorage.setItem('bc_write_queue', JSON.stringify(entries));
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('offline'));
+        vi.resetModules();
+        const m = await import('../api_client.jsx');
+
+        const first = [];
+        m.subscribeQueueAlert((a) => first.push(a));
+        expect(first.filter((a) => a.kind === 'expired').length).toBe(1);
+
+        // A second subscriber added afterwards must NOT see a duplicate: the
+        // buffer was drained into the first subscriber, it is not a durable log.
+        const second = [];
+        m.subscribeQueueAlert((a) => second.push(a));
+        expect(second.length).toBe(0);
+
+        warnSpy.mockRestore();
+    });
+});
+
+describe('bc-qttl: 401 parks the entry pending re-authentication', () => {
+    it('stays queued, stops consuming fetches, raises one auth_required alert, and flips sync status to auth-required', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const alerts = [];
+        const unsubAlert = mod.subscribeQueueAlert((a) => alerts.push(a));
+        let status = 'synced';
+        const unsubStatus = subscribeSyncStatus((s) => { status = s; });
+
+        global.fetch = vi.fn().mockResolvedValue({
+            ok: false, status: 401,
+            json: () => Promise.resolve({ error: 'invalid password' }),
+        });
+
+        enqueueRunningWrite('c1', 'm1', { status: 'running', rev: 1 }, 'pw');
+        await tick(0); // the immediate flush attempt parks it on the 401
+
+        expect(API.unsentWrites()).toMatchObject({ total: 1, terminal: 0, authBlocked: 1 });
+        // The flush completed a full pass with the parked entry as the ONLY
+        // queue member (nothing else failed that pass), which is exactly the
+        // case the sync-status republish fix targets: without it the pill
+        // would have stayed on "Syncing…" instead of showing 'auth-required'.
+        expect(status).toBe('auth-required');
+
+        const callsAfterPark = global.fetch.mock.calls.length;
+        // A parked entry is skipped by the flush loop entirely: no amount of
+        // waiting (backoff or otherwise) should burn another fetch against it.
+        await tick(60000);
+        expect(global.fetch.mock.calls.length).toBe(callsAfterPark);
+
+        const authAlerts = alerts.filter((a) => a.kind === 'auth_required');
+        expect(authAlerts.length).toBe(1);
+
+        unsubAlert();
+        unsubStatus();
+        warnSpy.mockRestore();
+    });
+});
+
+describe('bc-qttl: API.resumeAfterAuth un-parks 401-blocked writes with the fresh credential', () => {
+    it('un-parks the entry, retries with the NEW password in the request header, succeeds, and empties the queue', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        global.fetch = vi.fn().mockResolvedValue({
+            ok: false, status: 401,
+            json: () => Promise.resolve({ error: 'invalid password' }),
+        });
+        enqueueRunningWrite('c1', 'm1', { status: 'running', rev: 1 }, 'pw-old');
+        await tick(0);
+        expect(API.unsentWrites().authBlocked).toBe(1);
+
+        let sentOpts = null;
+        global.fetch = vi.fn().mockImplementation((_url, opts) => {
+            sentOpts = opts;
+            return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+        });
+
+        const resumed = API.resumeAfterAuth('pw-new');
+        expect(resumed).toBe(1);
+        await tick(0);
+
+        expect(sentOpts).toBeTruthy();
+        expect(sentOpts.headers['X-Tournament-Password']).toBe('pw-new');
+        expect(API.unsentWrites()).toMatchObject({ total: 0, terminal: 0, authBlocked: 0 });
+
+        warnSpy.mockRestore();
+    });
+
+    it('returns 0 and does nothing when nothing is parked', async () => {
+        global.fetch = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({}) });
+        const resumed = API.resumeAfterAuth('pw-new');
+        expect(resumed).toBe(0);
+        expect(global.fetch).not.toHaveBeenCalled();
+    });
+});
+
+describe('bc-qttl: 403 retries like 5xx/429 (never parks, never drops)', () => {
+    it('keeps retrying past the notice threshold; authBlocked stays 0; status becomes server-error, not auth-required', async () => {
+        // Correction to an earlier spec: on this server 401 is "invalid
+        // tournament password" (re-auth fixes it) but 403 means the tournament
+        // itself is unusable ("not configured yet" / "password not set"), a
+        // server-side state re-authenticating cannot repair. So 403 must NOT be
+        // parked behind a "sign in to save" prompt; it retries like a 5xx.
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        let status = 'synced';
+        const unsubStatus = subscribeSyncStatus((s) => { status = s; });
+
+        let attempt = 0;
+        global.fetch = vi.fn().mockImplementation(() => {
+            attempt++;
+            return Promise.resolve({
+                ok: false, status: 403,
+                json: () => Promise.resolve({ error: 'tournament not configured yet' }),
+            });
+        });
+
+        enqueueRunningWrite('c1', 'm1', { status: 'running', rev: 1 }, 'pw');
+        await flushMicrotasks(); // rejection 1
+
+        // Ride out the backoff well past the notice threshold (10).
+        await tick(120000);
+        expect(attempt).toBeGreaterThanOrEqual(10);
+        expect(API.unsentWrites().authBlocked).toBe(0);
+        expect(status).toBe('server-error');
+
+        // And it keeps being retried afterwards too (never dropped, never parked).
+        const callsSoFar = global.fetch.mock.calls.length;
+        await tick(30000);
+        expect(global.fetch.mock.calls.length).toBeGreaterThan(callsSoFar);
+
+        unsubStatus();
+        warnSpy.mockRestore();
+    });
+});
+
+describe('bc-qttl: a non-retryable 4xx (400) still drops the entry and raises a rejected alert', () => {
+    it('drops on 400 and raises exactly one rejected alert', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const alerts = [];
+        const unsub = mod.subscribeQueueAlert((a) => alerts.push(a));
+
+        global.fetch = vi.fn().mockResolvedValue({
+            ok: false, status: 400,
+            json: () => Promise.resolve({ error: 'bad request' }),
+        });
+
+        enqueueRunningWrite('c1', 'm1', { status: 'running', rev: 1 }, 'pw');
+        await tick(0);
+
+        const rejected = alerts.filter((a) => a.kind === 'rejected');
+        expect(rejected.length).toBe(1);
+        expect(rejected[0]).toMatchObject({ compID: 'c1', matchID: 'm1' });
+
+        // Dropped, not retried: no further fetches even after riding out the backoff.
+        await tick(20000);
+        expect(global.fetch).toHaveBeenCalledTimes(1);
+
+        unsub();
+        warnSpy.mockRestore();
+    });
+});
+
+describe('bc-qttl: clearQueue raises a discarded alert with the right counts', () => {
+    it('raises one discarded alert reporting total and terminal counts before clearing a non-empty queue', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('offline'));
+        await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A' }, 'pw', null); // terminal
+        enqueueRunningWrite('c2', 'm2', { status: 'running', rev: 1 }, 'pw'); // running
+        await flushMicrotasks();
+
+        const alerts = [];
+        const unsub = mod.subscribeQueueAlert((a) => alerts.push(a));
+        API.clearQueue();
+        unsub();
+
+        const discarded = alerts.filter((a) => a.kind === 'discarded');
+        expect(discarded.length).toBe(1);
+        expect(discarded[0]).toMatchObject({ count: 2, terminalCount: 1 });
+
+        warnSpy.mockRestore();
+    });
+});
+
+describe('bc-qttl: storage_full alert is latched (fires once per failure run)', () => {
+    it('raises one storage_full alert when localStorage.setItem throws, and does not repeat on a second failed persist', async () => {
+        const alerts = [];
+        const unsub = mod.subscribeQueueAlert((a) => alerts.push(a));
+
+        global.localStorage.setItem = () => { throw new DOMException('quota exceeded'); };
+
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('offline'));
+        enqueueRunningWrite('c1', 'm1', { status: 'running', rev: 1 }, 'pw');
+        await flushMicrotasks();
+
+        let storageAlerts = alerts.filter((a) => a.kind === 'storage_full');
+        expect(storageAlerts.length).toBe(1);
+
+        // A second write while persisting still fails must not re-announce.
+        enqueueRunningWrite('c1', 'm2', { status: 'running', rev: 1 }, 'pw');
+        await flushMicrotasks();
+
+        storageAlerts = alerts.filter((a) => a.kind === 'storage_full');
+        expect(storageAlerts.length).toBe(1);
+
+        unsub();
+    });
+});
+
+describe('bc-qttl: API.unsentWrites() reports total/terminal/authBlocked', () => {
+    it('counts a running write, a terminal write, and (once parked) both as authBlocked', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('offline'));
+        enqueueRunningWrite('c1', 'm1', { status: 'running', rev: 1 }, 'pw'); // running, not terminal
+        await API.recordScore('c1', 'm2', { status: 'completed', winner: 'A' }, 'pw', null); // terminal
+        await flushMicrotasks();
+
+        expect(API.unsentWrites()).toMatchObject({ total: 2, terminal: 1, authBlocked: 0 });
+
+        // Reconnect, but the server answers 401 to both: they get parked.
+        global.fetch = vi.fn().mockResolvedValue({
+            ok: false, status: 401,
+            json: () => Promise.resolve({ error: 'invalid password' }),
+        });
+        window.dispatchEvent(new Event('online'));
+        await tick(50);
+
+        expect(API.unsentWrites()).toMatchObject({ total: 2, terminal: 1, authBlocked: 2 });
+
+        warnSpy.mockRestore();
+    });
+});
+
+// bc-qttl (follow-up): a password_reset broadcast from another admin used to
+// call clearQueue(), which DESTROYED every queued write. That violated "only a
+// confirmed write empties the queue": nobody at this tablet chose to discard
+// anything, and the security intent (a stale plaintext password must not
+// linger in localStorage) never required throwing away the operator's match
+// results, only scrubbing the secret. parkQueueForReauth() does that instead:
+// every entry stays queued, its password is scrubbed and it is parked exactly
+// like a 401 would park it, and app.jsx's password_reset SSE handler now calls
+// this instead of clearQueue(). clearQueue() itself is unchanged and is used
+// only by the interactive logout path, where the operator confirms first.
+describe('bc-qttl: API.parkQueueForReauth (password_reset no longer destroys queued results)', () => {
+    it('keeps every entry queued, scrubs the password, sets authBlocked, and raises one auth_required alert', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('offline'));
+        enqueueRunningWrite('c1', 'm1', { status: 'running', rev: 1 }, 'pw-secret'); // running
+        await API.recordScore('c1', 'm2', { status: 'completed', winner: 'A' }, 'pw-secret', null); // terminal
+        await flushMicrotasks();
+        expect(API.unsentWrites()).toMatchObject({ total: 2, terminal: 1, authBlocked: 0 });
+
+        const alerts = [];
+        const unsub = mod.subscribeQueueAlert((a) => alerts.push(a));
+
+        const parked = API.parkQueueForReauth();
+        expect(parked).toBe(2);
+
+        // Every entry is STILL in the queue: parking is not discarding.
+        expect(API.unsentWrites()).toMatchObject({ total: 2, terminal: 1, authBlocked: 2 });
+
+        const authAlerts = alerts.filter((a) => a.kind === 'auth_required');
+        expect(authAlerts.length).toBe(1);
+        expect(authAlerts[0]).toMatchObject({ count: 2, terminalCount: 1 });
+
+        unsub();
+        warnSpy.mockRestore();
+    });
+
+    it('scrubs the revoked password out of the persisted queue too: no trace of it survives on disk', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('offline'));
+        enqueueRunningWrite('c1', 'm1', { status: 'running', rev: 1 }, 'super-secret-pw');
+        await flushMicrotasks();
+
+        API.parkQueueForReauth();
+
+        // This is the security property clearQueue() used to provide: the
+        // parked write is still on disk (it was NOT destroyed), but the dead
+        // credential it carried must not linger anywhere within it.
+        const raw = localStorage.getItem('bc_write_queue');
+        expect(raw).not.toBeNull();
+        expect(raw).not.toContain('super-secret-pw');
+        const persisted = JSON.parse(raw);
+        expect(persisted.length).toBe(1);
+        for (const [, descriptor] of persisted) {
+            expect(descriptor.password).toBe('');
+            expect(descriptor.authBlocked).toBe(true);
+        }
+
+        warnSpy.mockRestore();
+    });
+
+    it('stops consuming fetches once parked (skipped by the flush loop) and flips sync status to auth-required', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('offline'));
+        enqueueRunningWrite('c1', 'm1', { status: 'running', rev: 1 }, 'pw');
+        await flushMicrotasks(); // offline: entry queued, a backoff retry timer is pending
+
+        let status = 'synced';
+        const unsubStatus = subscribeSyncStatus((s) => { status = s; });
+
+        // Connectivity would now succeed, but parking must pre-empt that: no
+        // request should ever be sent with the revoked credential.
+        global.fetch = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({}) });
+        API.parkQueueForReauth();
+        await tick(0);
+
+        expect(status).toBe('auth-required');
+        expect(global.fetch).not.toHaveBeenCalled();
+
+        // Riding out what would have been the backoff window must not provoke
+        // a fetch either: the pending retry timer is cancelled by parking.
+        await tick(60000);
+        expect(global.fetch).not.toHaveBeenCalled();
+
+        unsubStatus();
+        warnSpy.mockRestore();
+    });
+
+    it('end-to-end: resumeAfterAuth after a park re-sends with the NEW password and drains the queue, so a password reset no longer costs the operator their result', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('offline'));
+        await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A' }, 'pw-old', null);
+        await flushMicrotasks();
+        expect(API.hasPendingTerminalWrite('c1', 'm1')).toBe(true);
+
+        // Another admin resets the tournament password mid-event: this
+        // tablet's queue is PARKED, not cleared.
+        const parked = API.parkQueueForReauth();
+        expect(parked).toBe(1);
+        expect(API.unsentWrites()).toMatchObject({ total: 1, authBlocked: 1 });
+
+        let sentOpts = null;
+        global.fetch = vi.fn().mockImplementation((_url, opts) => {
+            sentOpts = opts;
+            return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+        });
+
+        const resumed = API.resumeAfterAuth('pw-new');
+        expect(resumed).toBe(1);
+        await tick(0);
+
+        expect(sentOpts).toBeTruthy();
+        expect(sentOpts.headers['X-Tournament-Password']).toBe('pw-new');
+        // The operator's finished result reached the server: nothing was lost
+        // to the credential rotation.
+        expect(API.hasPendingTerminalWrite('c1', 'm1')).toBe(false);
+        expect(API.unsentWrites()).toMatchObject({ total: 0, authBlocked: 0 });
+
+        warnSpy.mockRestore();
     });
 });

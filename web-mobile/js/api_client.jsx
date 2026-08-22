@@ -161,7 +161,9 @@ const _revSession = (typeof crypto !== 'undefined' && crypto.randomUUID)
 //
 // F4: The queue is persisted to localStorage on every change so that a page
 // reload or crash during a wifi gap does not lose unsaved scores/decisions.
-// Entries older than QUEUE_TTL_MS (6 h) are dropped on rehydration.
+// Entries older than QUEUE_TTL_MS (12 h) are dropped on rehydration, and the
+// drop is REPORTED (bc-qttl) via the queue-alert channel: a queued result that
+// never reached the server must never vanish without telling the operator.
 //
 // F5: Terminal writes (completed score, decision, lineup) use the same queue
 // with additional descriptor fields: kind, terminal, method, url.
@@ -173,7 +175,7 @@ const _revSession = (typeof crypto !== 'undefined' && crypto.randomUUID)
 // ---------------------------------------------------------------------------
 
 /**
- * @typedef {'synced'|'syncing'|'offline'} SyncStatusValue
+ * @typedef {'synced'|'syncing'|'offline'|'auth-required'|'server-error'} SyncStatusValue
  */
 
 /**
@@ -190,9 +192,16 @@ const _revSession = (typeof crypto !== 'undefined' && crypto.randomUUID)
  *   method          : HTTP method string ('PUT' | 'POST')
  *   url             : same-origin request path, e.g. /api/competitions/… (for replay in _flushQueue)
  *   enqueuedAt      : Date.now() at enqueue time (for TTL eviction on reload)
- *   attempts        : count of server 5xx/429 rejections on flush retries (mp-q8c6
- *                     retry cap); absent until the first rejection. Network
- *                     failures never increment it.
+ *   attempts        : count of server rejections (5xx/429/403) on flush retries;
+ *                     absent until the first rejection. Network failures never
+ *                     increment it. At SERVER_REJECTION_NOTICE_THRESHOLD the
+ *                     operator is told; the entry is never dropped for it.
+ *   authBlocked     : true once the server answered 401. The entry stays QUEUED
+ *                     but is skipped by the flush loop, because it carries the
+ *                     password it was enqueued with and can only reproduce the
+ *                     same 401 until API.resumeAfterAuth() re-stamps it. Persisted
+ *                     with the entry, so a parked write survives a reload and is
+ *                     resumed when the operator next authenticates.
  *
  * Running score descriptors set terminal=false and do not use method/url
  * (they are always PUT to the score endpoint: _flushQueue hard-codes that
@@ -214,7 +223,7 @@ const _revSession = (typeof crypto !== 'undefined' && crypto.randomUUID)
  */
 
 const QUEUE_STORAGE_KEY = 'bc_write_queue';
-const QUEUE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
+const QUEUE_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
 
 // Defense-in-depth allowlist for terminal-write replay. The queue only ever
 // holds score/decision/lineup writes, which are ALWAYS PUT/POST to
@@ -245,6 +254,78 @@ function _isAllowedTerminalRequest(method, url) {
 // private-browsing / storage-quota safety: mirroring app.jsx pattern).
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// bc-qttl: queue-alert channel
+// ---------------------------------------------------------------------------
+// A queued write that will never reach the server must be ANNOUNCED, not
+// silently discarded. Deliberately SEPARATE from _terminalFailListeners, which
+// is addressed to one open editor (its subscribers filter on compID/matchID)
+// and is therefore useless for the two cases that matter here: a drop detected
+// during rehydration, when no editor has mounted yet, and a drop on a match the
+// operator is not currently looking at. Same reasoning that split
+// _notifyBracketResync out rather than overloading the terminal-fail channel.
+//
+// Alerts raised before any listener exists are BUFFERED and replayed to the
+// first subscriber. This is load-bearing, not a nicety: the rehydrate IIFE runs
+// at module load, long before App mounts, so without the buffer the rehydration
+// alert (the whole point of bc-qttl) would publish into an empty Set and vanish
+// exactly like the writes it is reporting.
+//
+// Alert shape: {kind, count, terminalCount, detail?, compID?, matchID?}
+//   'expired'       dropped on rehydration: older than QUEUE_TTL_MS
+//   'unreadable'    dropped: corrupt/tampered entry that can never be replayed
+//   'rejected'      the server permanently refused it (non-retryable 4xx)
+//   'server_error'  the server keeps failing it; STILL QUEUED, still retrying
+//   'auth_required' parked pending re-authentication; still queued
+//   'storage_full'  the queue could not be persisted; a reload would lose it
+//   'discarded'     dropped wholesale on credential revocation (password reset)
+// ---------------------------------------------------------------------------
+const _queueAlertListeners = new Set();
+const _pendingQueueAlerts = [];
+function subscribeQueueAlert(fn) {
+    _queueAlertListeners.add(fn);
+    // Replay anything raised before this subscriber existed, then clear: the
+    // buffer is a handoff to the first listener, not a durable log.
+    if (_pendingQueueAlerts.length > 0) {
+        const drained = _pendingQueueAlerts.splice(0, _pendingQueueAlerts.length);
+        for (const alert of drained) {
+            try { fn(alert); } catch (_e) { /* swallow */ }
+        }
+    }
+    return () => _queueAlertListeners.delete(fn);
+}
+function _notifyQueueAlert(alert) {
+    if (_queueAlertListeners.size === 0) { _pendingQueueAlerts.push(alert); return; }
+    for (const fn of _queueAlertListeners) {
+        try { fn(alert); } catch (_e) { /* swallow */ }
+    }
+}
+
+// Count of queued entries that represent a FINISHED result (completed score,
+// decision, lineup). Alerts report this separately from the raw queue size
+// because "3 results were lost" and "3 writes were lost" are different claims
+// to an operator, and only the terminal ones are finished work.
+function _countTerminalQueued() {
+    let n = 0;
+    for (const d of _writeQueue.values()) { if (d && d.terminal) n++; }
+    return n;
+}
+
+// Latched so a wedged quota announces once per failure run rather than on every
+// keystroke-driven autosave. Reset on the first successful persist.
+let _storageFullAnnounced = false;
+
+/**
+ * Persist the queue. Returns true when the queue's current state is safely on
+ * disk, false when it could not be written.
+ *
+ * bc-qttl: the failure is no longer swallowed. A queue that cannot persist is a
+ * queue that a reload will silently lose, which is precisely the durability
+ * promise the outbox exists to make: with no size cap, a long offline run can
+ * reach the localStorage quota, and every unsent result then died on the next
+ * refresh with nothing shown to the operator.
+ * @returns {boolean}
+ */
 function _persistQueue() {
     try {
         // Remove the key (rather than writing "[]") when the queue is empty: avoids
@@ -253,11 +334,25 @@ function _persistQueue() {
         // which would undermine the credential-revocation intent of removing it.
         if (_writeQueue.size === 0) {
             localStorage.removeItem(QUEUE_STORAGE_KEY);
-            return;
+            _storageFullAnnounced = false;
+            return true;
         }
         const entries = [..._writeQueue.entries()];
         localStorage.setItem(QUEUE_STORAGE_KEY, JSON.stringify(entries));
-    } catch (_e) { /* quota / private-browsing: silently skip */ }
+        _storageFullAnnounced = false;
+        return true;
+    } catch (_e) {
+        if (!_storageFullAnnounced) {
+            _storageFullAnnounced = true;
+            _notifyQueueAlert({
+                kind: 'storage_full',
+                count: _writeQueue.size,
+                terminalCount: _countTerminalQueued(),
+                detail: 'browser storage is full',
+            });
+        }
+        return false;
+    }
 }
 
 /** @type {Map<string, WriteDescriptor>} */
@@ -319,14 +414,43 @@ function _notifyBracketResync(info) {
     }
 }
 
+// Both derived from the queue itself rather than kept as separate flags: a
+// descriptor IS the record of its own state, so there is nothing to leave stale
+// when an entry is superseded, confirmed, or resumed.
+function _hasAuthBlockedQueued() {
+    for (const d of _writeQueue.values()) { if (d && d.authBlocked) return true; }
+    return false;
+}
+function _hasServerErroringQueued() {
+    for (const d of _writeQueue.values()) {
+        if (d && (Number(d.attempts) || 0) >= SERVER_REJECTION_NOTICE_THRESHOLD) return true;
+    }
+    return false;
+}
+
 /**
  * Recompute and publish the correct sync status from current state:
- *   offline  : _offlineFlag is set and the queue still has entries
- *   syncing  : any in-flight running write OR the queue is non-empty
- *   synced   : otherwise
+ *   offline       : _offlineFlag is set and the queue still has entries
+ *   auth-required : a queued write is parked awaiting re-authentication
+ *   server-error  : a queued write has passed the server-rejection notice
+ *                   threshold; it is STILL QUEUED and still being retried
+ *   syncing       : any in-flight running write OR the queue is non-empty
+ *   synced        : otherwise
+ *
+ * bc-qttl: the two middle states exist because writes are no longer discarded
+ * when they keep failing. Without them a permanently-failing write would sit
+ * under an ordinary "Syncing…" forever, which is the wedged-pill complaint that
+ * originally motivated dropping the write (mp-q8c6). Reporting the state is the
+ * fix; destroying the operator's result was not.
+ *
+ * Order is PRIORITY: the most actionable problem wins the pill. Offline outranks
+ * both because a dead connection is the root cause an operator can act on first,
+ * and neither re-auth nor a server retry can make progress until it is fixed.
  */
 function _recomputeSyncStatus() {
     if (_offlineFlag && _writeQueue.size > 0) { _setSyncStatus('offline'); return; }
+    if (_hasAuthBlockedQueued()) { _setSyncStatus('auth-required'); return; }
+    if (_hasServerErroringQueued()) { _setSyncStatus('server-error'); return; }
     _setSyncStatus((_inflightRunning > 0 || _writeQueue.size > 0) ? 'syncing' : 'synced');
 }
 
@@ -345,19 +469,28 @@ function subscribeSyncStatus(fn) {
 let _flushTimer = null;
 const FLUSH_BACKOFF_MS = [500, 1000, 2000, 4000, 8000];
 let _flushAttempt = 0;
-// mp-q8c6: per-entry cap on SERVER rejections (5xx/429). A deterministic 5xx
-// (e.g. a validation bug surfaced as HTTP 500, observed with an engi flag
-// check during mp-n19y UAT) would otherwise retry forever: the entry poisons
-// the queue for the rest of the session, the pill wedges on "Syncing…", and
-// the operator gets no signal short of clearing localStorage. After this many
-// consecutive server rejections the entry is dropped and surfaced through the
-// write-failed channel instead. Network failures (fetch rejected: connection
-// down / timeout) deliberately do NOT count: a real offline period must keep
-// writes queued for the full QUEUE_TTL_MS, not silently shed them. At the 8s
-// max backoff, 10 rejections ≈ 1 minute of a persistently-erroring server:
-// long enough to ride out a restart behind the TLS proxy (transient 502/503),
-// short enough that a poisoned write can't wedge the queue for hours.
-const MAX_QUEUE_SERVER_REJECTIONS = 10;
+// Per-entry SERVER-rejection (5xx/429) threshold. This used to be a DROP cap
+// (mp-q8c6): after 10 rejections the entry was discarded, because a
+// deterministic 5xx (a validation bug surfaced as HTTP 500, observed with an
+// engi flag check during mp-n19y UAT) would otherwise retry forever, wedging
+// the pill on "Syncing…" with no operator signal short of clearing
+// localStorage.
+//
+// bc-qttl inverts that trade. Discarding the write "solved" the wedged pill by
+// destroying the operator's result, which is the one outcome the outbox exists
+// to prevent, and a persistently-erroring backend is exactly the case where a
+// queued score matters most. So the entry now STAYS QUEUED and keeps retrying
+// for the full QUEUE_TTL_MS, and this constant became a NOTICE threshold: on
+// crossing it we tell the operator (queue-alert 'server_error') and move the
+// pill off "Syncing…" onto a distinct not-saving state. The wedged-pill
+// complaint was really a SIGNALLING failure, and it is fixed by signalling.
+//
+// Network failures (fetch rejected: connection down / timeout) deliberately do
+// NOT count: a real offline period is not the server refusing the write. At the
+// 8s max backoff, 10 rejections ≈ 1 minute of a persistently-erroring server:
+// long enough to ride out a restart behind the TLS proxy (transient 502/503)
+// before bothering the operator.
+const SERVER_REJECTION_NOTICE_THRESHOLD = 10;
 // Single-in-flight guard. _flushQueue's body awaits network I/O, so without a
 // lock a second trigger (a rapid enqueue, an `online` event, or a backoff timer
 // firing mid-flush) would start an OVERLAPPING loop iterating the same snapshot:
@@ -403,6 +536,12 @@ async function _flushQueue() {
                 if (gen !== _queueGen) break;
                 // Skip entries removed or superseded since the snapshot was taken.
                 if (_writeQueue.get(key) !== descriptor) continue;
+                // bc-qttl: a write parked on 401/403 carries the password captured at
+                // enqueue time, so retrying it can only reproduce the same auth failure
+                // until API.resumeAfterAuth() re-stamps it. Skip it here (it stays
+                // QUEUED, it is not dropped) so a parked entry costs no requests and
+                // cannot hold the flush loop in a retry cycle it can never win.
+                if (descriptor.authBlocked) continue;
                 const { compID, matchID, payload, password, terminal, kind, method, url } = descriptor;
                 // Running score writes (terminal=false) don't store method/url and
                 // always PUT to the score endpoint. Terminal entries carry their own
@@ -415,6 +554,12 @@ async function _flushQueue() {
                     if (!_isAllowedTerminalRequest(method, url)) {
                         console.warn(`[sync] dropping terminal ${kind || ''} write with disallowed method/url:`, method, url);
                         _notifyTerminalWriteFailed({ compID, matchID, kind, status: 0, reason: 'corrupted queue entry' });
+                        // Undeliverable by construction: there is no valid request to
+                        // replay, so this is the one drop class no amount of retrying
+                        // could rescue. Announce it globally anyway - the editor-scoped
+                        // channel above only reaches an operator who happens to have
+                        // this exact match open.
+                        _notifyQueueAlert({ kind: 'unreadable', count: 1, terminalCount: 1, compID, matchID });
                         if (_writeQueue.get(key) === descriptor) _writeQueue.delete(key);
                         continue;
                     }
@@ -452,25 +597,75 @@ async function _flushQueue() {
                             // tab's lifetime now that completed writes are queued.
                             if (terminal && kind === 'score') _matchRevCounters.delete(_revKey(compID, matchID));
                         }
-                    } else if (res.status >= 500 || res.status === 429) {
-                        // Transient server error: server is up but erroring; keep in
-                        // queue and retry with backoff, but this is NOT "offline".
-                        // Bounded (mp-q8c6): a DETERMINISTIC rejection (a server bug
-                        // answering 500 to a write it will never accept) must not
-                        // retry forever. Count server rejections on the descriptor
-                        // (persisted with it) and drop + surface once the cap is hit.
+                    } else if (res.status >= 500 || res.status === 429 || res.status === 403) {
+                        // Server is up but erroring: keep in queue and retry with
+                        // backoff. This is NOT "offline" (the connection is fine).
+                        //
+                        // 403 belongs HERE, not with 401. On this server 403 is never
+                        // a bad credential (that is 401, "invalid tournament
+                        // password"): it means the tournament record itself is not
+                        // usable yet, "tournament not configured yet" or "tournament
+                        // misconfigured: password is not set" from the auth middleware.
+                        // No amount of signing in fixes either, so parking it behind a
+                        // "sign in again" prompt would send the operator down a dead
+                        // end. It is a server-side state that an admin can repair at
+                        // any moment with no action at this tablet, and a plain retry
+                        // is exactly what discovers the repair.
+                        //
+                        // bc-qttl: the entry is NEVER dropped here. Only a confirmed
+                        // write leaves the queue, and "the backend is broken" is the
+                        // case where holding the operator's result matters most. On
+                        // crossing the notice threshold we announce once and let
+                        // _recomputeSyncStatus move the pill onto 'server-error', so a
+                        // persistently-failing write is visible instead of masquerading
+                        // as an ordinary "Syncing…".
+                        //
                         // The identity checks above compare object references, so
                         // mutating the live descriptor is safe: a superseding write
                         // installs a fresh object and naturally resets the count.
                         const rejections = (Number(descriptor.attempts) || 0) + 1;
-                        if (rejections >= MAX_QUEUE_SERVER_REJECTIONS) {
+                        descriptor.attempts = rejections;
+                        // Fire ON the crossing (=== not >=) so one wedged write
+                        // announces once, not on every retry for the next 12 hours.
+                        if (rejections === SERVER_REJECTION_NOTICE_THRESHOLD) {
                             const body = await res.json().catch(() => ({}));
-                            console.warn(`[sync] dropping queued ${kind || 'running'} write after ${rejections} server rejections (${res.status}):`, body);
-                            _notifyTerminalWriteFailed({ compID, matchID, kind, status: res.status, reason: body.reasonHuman || body.error || `HTTP ${res.status} (gave up after ${rejections} attempts)` });
-                            if (_writeQueue.get(key) === descriptor) _writeQueue.delete(key);
-                        } else {
-                            descriptor.attempts = rejections;
-                            anyFailed = true;
+                            console.warn(`[sync] queued ${kind || 'running'} write still failing after ${rejections} server rejections (${res.status}); keeping it queued:`, body);
+                            _notifyQueueAlert({
+                                kind: 'server_error',
+                                count: 1,
+                                terminalCount: terminal ? 1 : 0,
+                                compID, matchID,
+                                detail: body.reasonHuman || body.error || `HTTP ${res.status}`,
+                            });
+                        }
+                        anyFailed = true;
+                    } else if (res.status === 401) {
+                        // bc-qttl: an auth failure PARKS the write, it does not drop it.
+                        // 401 is precisely "invalid tournament password", the one 4xx
+                        // where a later retry can genuinely succeed: the tournament
+                        // password can be rotated mid-event, or the operator can simply
+                        // sign in again. Discarding here would throw away a finished
+                        // result over a recoverable credential problem.
+                        //
+                        // Parked entries are SKIPPED by the flush loop (see the
+                        // authBlocked guard above) rather than retried on backoff,
+                        // because the descriptor carries the password captured at
+                        // enqueue time: retrying it can only reproduce the same 401
+                        // until API.resumeAfterAuth() re-stamps it with the new
+                        // credential. So this branch deliberately does NOT set
+                        // anyFailed: with nothing else queued the flush goes quiet
+                        // instead of burning a retry every 8s for 12 hours.
+                        if (!descriptor.authBlocked) {
+                            const body = await res.json().catch(() => ({}));
+                            console.warn(`[sync] parking queued ${kind || 'running'} write pending re-auth (${res.status}):`, body);
+                            descriptor.authBlocked = true;
+                            _notifyQueueAlert({
+                                kind: 'auth_required',
+                                count: 1,
+                                terminalCount: terminal ? 1 : 0,
+                                compID, matchID,
+                                detail: body.reasonHuman || body.error || `HTTP ${res.status}`,
+                            });
                         }
                     } else if (terminal && kind === 'decision' && res.status === 409) {
                         // F5: decision-locked-as-success for queued terminal decision entries.
@@ -491,20 +686,39 @@ async function _flushQueue() {
                         if (body.error !== 'decision_locked' && body.error !== 'already_ineligible') {
                             console.warn(`[sync] queued decision write rejected (409):`, body);
                             _notifyTerminalWriteFailed({ compID, matchID, kind, status: 409, reason: body.reasonHuman || body.error || 'conflict (409)' });
+                            _notifyQueueAlert({
+                                kind: 'rejected', count: 1, terminalCount: 1, compID, matchID,
+                                detail: body.reasonHuman || body.error || 'conflict (409)',
+                            });
                         }
                         if (_writeQueue.get(key) === descriptor) _writeQueue.delete(key);
                     } else {
-                        // Non-retryable response (4xx other than decision-locked above):
-                        // 400 validation, 401/403 auth, 413, generic 409 conflict, etc.
-                        // This queued write can never succeed, so discard rather than
-                        // retry forever and wedge the pill on "Syncing…". For TERMINAL
-                        // writes, surface an explicit failure so the editor shows a
-                        // "not saved" state instead of silently clearing to "saved".
+                        // Non-retryable response: 400 validation, 413, generic 409
+                        // conflict, etc. NOTE neither auth-ish status reaches here any
+                        // more (bc-qttl): 401 parks for re-auth and 403 retries as a
+                        // server-config state, both above. What is left is a write the
+                        // server has refused on its merits and would refuse identically
+                        // forever.
+                        //
+                        // This is the one place a queued write is still discarded
+                        // without being confirmed, and it is a deliberate exception to
+                        // "only a confirmed write empties the queue": there is no
+                        // credential to fix and no outage to wait out, so holding it
+                        // would only wedge the queue behind a write that can never
+                        // land. The operator MUST be told, which is why the drop now
+                        // raises a global alert as well as the editor-scoped failure:
+                        // the latter reaches only an operator with this exact match
+                        // open, which is precisely not the case when a queued write
+                        // fails minutes later on a different court.
                         const body = await res.json().catch(() => ({}));
                         console.warn(`[sync] queued ${kind || 'running'} write rejected (${res.status}):`, body);
                         if (terminal) {
                             _notifyTerminalWriteFailed({ compID, matchID, kind, status: res.status, reason: body.reasonHuman || body.error || `HTTP ${res.status}` });
                         }
+                        _notifyQueueAlert({
+                            kind: 'rejected', count: 1, terminalCount: terminal ? 1 : 0, compID, matchID,
+                            detail: body.reasonHuman || body.error || `HTTP ${res.status}`,
+                        });
                         if (_writeQueue.get(key) === descriptor) _writeQueue.delete(key);
                     }
                 } catch (_) {
@@ -518,7 +732,16 @@ async function _flushQueue() {
                 _flushAttempt = 0;
                 _offlineFlag = false;
                 _recomputeSyncStatus();
-            } else if (anyFailed) {
+            } else if (!anyFailed) {
+                // bc-qttl: entries remain but nothing failed this pass, which is the
+                // all-parked case (a parked write is skipped, so it can neither
+                // succeed nor fail). Republish so the pill leaves "Syncing…" for the
+                // parked state, and schedule NO backoff timer: a parked write cannot
+                // progress until resumeAfterAuth(), so retrying it would only burn
+                // requests reproducing the same 401.
+                _offlineFlag = false;
+                _recomputeSyncStatus();
+            } else {
                 _offlineFlag = networkFailed;
                 _recomputeSyncStatus();
                 if (!_flushRequested) {
@@ -631,7 +854,7 @@ if (typeof window !== 'undefined') {
 // F4: Rehydrate write queue from localStorage on module load
 // ---------------------------------------------------------------------------
 // Parse any entries persisted by a previous page session. Drop stale entries
-// (older than QUEUE_TTL_MS = 6 h) so we never replay hours-old scores into
+// (older than QUEUE_TTL_MS = 12 h) so we never replay half-day-old scores into
 // a tournament that has moved on. Valid entries are added to _writeQueue and
 // an immediate flush is triggered so they are delivered as soon as the page
 // has network. All localStorage access is wrapped in try/catch for
@@ -650,32 +873,63 @@ if (typeof fetch === 'function') { _learnServerClockOffset(); }
         if (!Array.isArray(entries)) return;
         const now = Date.now();
         let anyLoaded = false;
+        // bc-qttl: every drop below is COUNTED and reported. These entries are
+        // finished operator work that never reached the server, and the previous
+        // code discarded them with a bare `continue` - no log, no signal, nothing
+        // the operator could ever notice. Counted by class, because "too old to
+        // replay" and "corrupt beyond replay" are different things to be told, and
+        // terminal separately from running, because "3 results were lost" and "3
+        // writes were lost" are different claims and only the terminal ones are a
+        // finished result.
+        let expired = 0, expiredTerminal = 0;
+        let unreadable = 0, unreadableTerminal = 0;
+        const dropUnreadable = (d) => { unreadable++; if (d && d.terminal) unreadableTerminal++; };
         for (const item of entries) {
             // Defensive: a single malformed element (corrupt/tampered storage) must
             // not throw and abort the whole rehydrate: destructuring a non-array in
             // the for-of header would do exactly that, dropping ALL valid queued
             // writes. Validate the tuple shape first and skip bad items individually.
-            if (!Array.isArray(item) || item.length < 2) continue;
+            if (!Array.isArray(item) || item.length < 2) { dropUnreadable(null); continue; }
             const [key, descriptor] = item;
-            if (!key || !descriptor || typeof descriptor !== 'object') continue;
-            // Drop entries without a valid timestamp or older than TTL. enqueuedAt
-            // must be a finite positive number: a tampered/corrupt entry could set
-            // it to a non-numeric truthy value (e.g. a string), making
+            if (!key || !descriptor || typeof descriptor !== 'object') { dropUnreadable(null); continue; }
+            // enqueuedAt must be a finite positive number: a tampered/corrupt entry
+            // could set it to a non-numeric truthy value (e.g. a string), making
             // (now - enqueuedAt) NaN so the TTL comparison is false and an
-            // arbitrarily old write slips through. Validate the type first.
+            // arbitrarily old write slips through. Validate the type FIRST, and
+            // separately from the age test below: an unparseable stamp is a corrupt
+            // entry, not an old one, and conflating them would report a tampered
+            // queue to the operator as ordinary expiry.
             if (typeof descriptor.enqueuedAt !== 'number'
                 || !Number.isFinite(descriptor.enqueuedAt)
-                || descriptor.enqueuedAt <= 0
-                || (now - descriptor.enqueuedAt) > QUEUE_TTL_MS) continue;
+                || descriptor.enqueuedAt <= 0) { dropUnreadable(descriptor); continue; }
+            if ((now - descriptor.enqueuedAt) > QUEUE_TTL_MS) {
+                expired++;
+                if (descriptor.terminal) expiredTerminal++;
+                continue;
+            }
             // Defense-in-depth: localStorage is tamperable. Reject terminal entries
             // whose method/url fall outside the queue allowlist (PUT/POST to
             // /api/competitions/…) before they can ever reach fetch on replay.
-            if (descriptor.terminal && !_isAllowedTerminalRequest(descriptor.method, descriptor.url)) continue;
+            if (descriptor.terminal && !_isAllowedTerminalRequest(descriptor.method, descriptor.url)) { dropUnreadable(descriptor); continue; }
             // Only restore if not already superseded by a same-session write.
             if (!_writeQueue.has(key)) {
                 _writeQueue.set(key, descriptor);
                 anyLoaded = true;
             }
+        }
+        // Persist the pruned queue whenever anything was dropped. This is what makes
+        // the alerts below fire ONCE rather than on every reload forever: rehydrate
+        // never used to write back, so a fully-expired queue stayed in localStorage
+        // untouched, and each refresh would re-read, re-drop and re-announce the same
+        // entries. With the queue now empty _persistQueue() removes the key outright.
+        if (expired > 0 || unreadable > 0) _persistQueue();
+        if (expired > 0) {
+            console.warn(`[sync] discarded ${expired} queued write(s) older than the ${QUEUE_TTL_MS / 3600000}h queue TTL`);
+            _notifyQueueAlert({ kind: 'expired', count: expired, terminalCount: expiredTerminal });
+        }
+        if (unreadable > 0) {
+            console.warn(`[sync] discarded ${unreadable} unreadable queued write(s) on rehydration`);
+            _notifyQueueAlert({ kind: 'unreadable', count: unreadable, terminalCount: unreadableTerminal });
         }
         if (anyLoaded) {
             _recomputeSyncStatus();
@@ -2284,7 +2538,110 @@ const API = {
     // linger in localStorage past credential revocation: bringing bc_write_queue
     // to the same lifecycle as bc_password. Pending offline writes are discarded:
     // on a password_reset they would 401 on retry anyway, and logout is explicit.
+    /**
+     * bc-qttl: how much unconfirmed operator work the queue is still holding.
+     * Read by the logout gate, which must not let a sign-out silently destroy
+     * results that never reached the server.
+     * @returns {{total: number, terminal: number, authBlocked: number}}
+     */
+    unsentWrites() {
+        let total = 0, terminal = 0, authBlocked = 0;
+        for (const d of _writeQueue.values()) {
+            if (!d) continue;
+            total++;
+            if (d.terminal) terminal++;
+            if (d.authBlocked) authBlocked++;
+        }
+        return { total, terminal, authBlocked };
+    },
+
+    /**
+     * bc-qttl: un-park writes held on a 401/403 and retry them with a freshly
+     * authenticated credential.
+     *
+     * Necessary because each descriptor captures the password it was enqueued
+     * with, so a parked entry retried as-is can only reproduce the same 401
+     * forever. Re-stamping is the whole point: it is what turns "parked" into a
+     * state the operator can actually clear, and therefore what makes parking a
+     * better answer than dropping the write.
+     *
+     * The rejection counter is reset too: those failures were against the old
+     * credential and say nothing about whether the new one will be refused.
+     * @param {string} password the newly authenticated password
+     * @returns {number} how many parked writes were resumed
+     */
+    resumeAfterAuth(password) {
+        let resumed = 0;
+        for (const d of _writeQueue.values()) {
+            if (!d || !d.authBlocked) continue;
+            d.authBlocked = false;
+            if (password) d.password = password;
+            d.attempts = 0;
+            resumed++;
+        }
+        if (resumed > 0) {
+            _persistQueue();
+            if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
+            _flushAttempt = 0;
+            _recomputeSyncStatus();
+            _flushQueue();
+        }
+        return resumed;
+    },
+
+    /**
+     * bc-qttl: the credential was revoked out from under this tablet (a
+     * password_reset broadcast by another admin). Scrub the dead password from
+     * every queued write and PARK them, instead of destroying results nobody
+     * here chose to discard.
+     *
+     * This keeps both properties that matter. The security intent of calling
+     * clearQueue() on this path was that a stale plaintext password must not
+     * linger in localStorage past revocation, and emptying the password field
+     * achieves exactly that: the password was the secret, the operator's match
+     * results never were. The writes stay queued and unsendable (authBlocked)
+     * until resumeAfterAuth() stamps the new credential, which is precisely the
+     * state a 401 would have put them in anyway.
+     *
+     * The interactive logout path still uses clearQueue(), because there the
+     * operator is asked first and explicitly chooses to discard.
+     * @returns {number} how many writes were parked
+     */
+    parkQueueForReauth() {
+        // Bump the generation FIRST so an in-flight _flushQueue loop cannot send
+        // the rest of its snapshot with the now-revoked password.
+        _queueGen++;
+        let parked = 0;
+        for (const d of _writeQueue.values()) {
+            if (!d) continue;
+            d.password = '';
+            d.authBlocked = true;
+            parked++;
+        }
+        if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
+        _flushAttempt = 0;
+        _offlineFlag = false;
+        if (parked > 0) {
+            _persistQueue();
+            _notifyQueueAlert({ kind: 'auth_required', count: parked, terminalCount: _countTerminalQueued() });
+        }
+        _recomputeSyncStatus();
+        return parked;
+    },
+
     clearQueue() {
+        // bc-qttl: announce what is being destroyed. This is a credential
+        // revocation, so these writes genuinely cannot be delivered (the password
+        // they carry is dead), but "cannot be delivered" is never a licence to
+        // discard an operator's results in silence. The interactive logout path
+        // asks BEFORE reaching here; this covers the involuntary route, a
+        // password_reset broadcast from another admin, where nobody at this
+        // tablet chose anything.
+        const discarding = _countTerminalQueued();
+        const discardingTotal = _writeQueue.size;
+        if (discardingTotal > 0) {
+            _notifyQueueAlert({ kind: 'discarded', count: discardingTotal, terminalCount: discarding });
+        }
         // Bump the generation FIRST so an in-flight _flushQueue loop (mid-await on
         // a network write) aborts instead of sending the rest of its snapshot with
         // the now-revoked password.
@@ -2298,7 +2655,7 @@ const API = {
     },
 };
 
-export { API, subscribeSyncStatus, subscribeTerminalWriteFailed, subscribeBracketResync, enqueueRunningWrite };
+export { API, subscribeSyncStatus, subscribeTerminalWriteFailed, subscribeBracketResync, subscribeQueueAlert, enqueueRunningWrite };
 
 if (typeof window !== 'undefined') {
     window.API = API;
@@ -2308,6 +2665,7 @@ if (typeof window !== 'undefined') {
     // mp-gpra: terminal-write failure pub/sub: lets the score editor show an
     // explicit "not saved" state when a queued terminal write is permanently dropped.
     window.subscribeTerminalWriteFailed = subscribeTerminalWriteFailed;
+    window.subscribeQueueAlert = subscribeQueueAlert;
     // mp-y3nk: bracket-resync pub/sub: signals AdminShiaijo to refetch when a
     // queued override the server LWW-dropped leaves stale optimistic bracket state.
     window.subscribeBracketResync = subscribeBracketResync;

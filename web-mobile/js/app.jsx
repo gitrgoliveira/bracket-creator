@@ -304,6 +304,47 @@ function parseCourtFromSearch() {
   return raw.toLowerCase() === 'all' ? 'ALL' : raw.toUpperCase();
 }
 
+// bc-qttl: turn a queue alert from api_client.jsx into operator-facing prose.
+//
+// The queue holds writes that have not reached the server. Every alert below is
+// bad news about finished work, so every one of these is rendered as an ERROR
+// toast (>=8s dwell, manual dismiss, protected from being clobbered by a later
+// success toast) rather than an informational one.
+//
+// Counts are reported as FINISHED RESULTS when the alert carries any, falling
+// back to raw writes otherwise: an operator counts results, and a queued running
+// autosave is not one. Exported for test.
+export function queueAlertMessage(alert) {
+  if (!alert) return null;
+  const total = Number(alert.count) || 0;
+  const term = Number(alert.terminalCount) || 0;
+  const n = term > 0 ? term : total;
+  if (n <= 0 && alert.kind !== "storage_full") return null;
+  const one = n === 1;
+  const noun = term > 0
+    ? (one ? "finished result" : "finished results")
+    : (one ? "score update" : "score updates");
+  const detail = alert.detail ? ` (${alert.detail})` : "";
+  switch (alert.kind) {
+    case "expired":
+      return `${n} ${noun} never reached the server and ${one ? "was" : "were"} discarded after 12 hours in the queue. Re-enter ${one ? "it" : "them"} if still needed.`;
+    case "unreadable":
+      return `${n} queued ${one ? "write" : "writes"} could not be read and ${one ? "was" : "were"} discarded. Check the affected ${one ? "match" : "matches"}.`;
+    case "rejected":
+      return `A result was refused by the server${detail} and cannot be saved. Re-enter it.`;
+    case "server_error":
+      return `The server keeps refusing a queued result${detail}. It is still queued and still retrying, so keep this tab open.`;
+    case "auth_required":
+      return `Sign in again to save ${n} pending ${one ? "result" : "results"}. ${one ? "It is" : "They are"} still queued.`;
+    case "storage_full":
+      return "Browser storage is full, so unsaved results can no longer be kept safely. Let them sync before reloading this tab.";
+    case "discarded":
+      return `${n} unsaved ${noun} ${one ? "was" : "were"} discarded because the tournament password changed.`;
+    default:
+      return null;
+  }
+}
+
 function App() {
   const [tournament, setTournament] = useS(undefined);
   const [loading, setLoading] = useS(true);
@@ -481,6 +522,25 @@ function App() {
     setToast({ message, type });
   };
 
+  // bc-qttl: the offline write queue has no other way to reach the operator.
+  // It is a plain module that runs at load time, so it cannot call showToast
+  // (a closure in this component) and there is no global toast bus. It
+  // publishes alerts instead, and this is the one subscriber that renders them.
+  //
+  // The channel BUFFERS alerts raised before any subscriber exists, which is
+  // load-bearing here: the queue rehydrates from localStorage at module load,
+  // long before App mounts, so the "results were discarded" alert is always
+  // raised before this effect can run. Subscribing replays it.
+  useE(() => {
+    if (typeof window.subscribeQueueAlert !== "function") return;
+    return window.subscribeQueueAlert((alert) => {
+      const message = queueAlertMessage(alert);
+      if (message) showToast(message, "error");
+    });
+    // Mount-only: showToast closes over setToast, which is stable.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Route state was hydrated synchronously by the useState initializers
   // above (see initialRoute). This effect now handles only the
   // side-effects of the initial route: surfacing the AuthModal when
@@ -565,6 +625,14 @@ function App() {
       localStorage.setItem("bc_authed", authed);
       localStorage.setItem("bc_password", password);
     } catch { /* storage unavailable: session only, no persistent credential */ }
+    // bc-qttl: a queued write refused with 401/403 is PARKED, not dropped, and
+    // holds the password it was enqueued with, so it can never succeed until it
+    // is re-stamped. Hand it the credential just authenticated. A no-op
+    // (returns 0, touches nothing) when no write is parked, which is the normal
+    // case, so this is safe to run on every auth/password change.
+    if (authed && password && window.API && window.API.resumeAfterAuth) {
+      window.API.resumeAfterAuth(password);
+    }
     // Keep the ref in lockstep so the long-lived SSE handler below
     // can read the current value without being recreated on every
     // sign-in/sign-out.
@@ -979,10 +1047,14 @@ function App() {
             if (authedRef.current) {
                 setAuthed(false);
                 setPassword("");
-                // Security: drop the offline write queue too, so the old
-                // plaintext password doesn't linger in localStorage past the
-                // reset (clearQueue self-guards its own storage access).
-                if (window.API && window.API.clearQueue) window.API.clearQueue();
+                // Security: the old plaintext password must not linger in
+                // localStorage past the reset. bc-qttl: scrub it from the queued
+                // writes and PARK them rather than destroying them. Nobody at this
+                // tablet chose to discard anything (another admin reset the
+                // password), and the operator's queued results were never the
+                // secret; the password was, and parking removes it. They resume
+                // automatically once this operator signs in again.
+                if (window.API && window.API.parkQueueForReauth) window.API.parkQueueForReauth();
                 try {
                     localStorage.removeItem("bc_authed");
                     localStorage.removeItem("bc_password");
@@ -1154,7 +1226,43 @@ function App() {
       setAuthPrompt(true);
     }
   };
-  const onLogout = () => {
+  const onLogout = async () => {
+    // bc-qttl: signing out clears the offline write queue, because the stored
+    // plaintext password must not outlive the session. That makes sign-out a
+    // DESTRUCTIVE action whenever writes are still queued: those are finished
+    // results that never reached the server, and nothing else would tell the
+    // operator they were about to be thrown away.
+    //
+    // So the queue is consulted, not assumed. With an empty queue (the normal
+    // case) this is silent and sign-out behaves exactly as before. The prompt
+    // is a confirmation rather than a hard block on purpose: at a venue with a
+    // dead backend the writes may never drain, and refusing to sign out would
+    // strand the operator on a tablet they need to hand over.
+    const unsent = (window.API && window.API.unsentWrites)
+      ? window.API.unsentWrites()
+      : { total: 0, terminal: 0 };
+    if (unsent.total > 0) {
+      const n = unsent.terminal > 0 ? unsent.terminal : unsent.total;
+      const one = n === 1;
+      const noun = unsent.terminal > 0
+        ? (one ? "finished result has" : "finished results have")
+        : (one ? "score update has" : "score updates have");
+      const message = `${n} ${noun} not reached the server yet. Signing out discards ${one ? "it" : "them"} permanently. Stay signed in until the sync indicator shows everything saved.`;
+      // DialogHost is mounted unconditionally beside App, so the themed dialog is
+      // there in the real app. Fall back to the native confirm rather than
+      // proceeding when it is missing: the whole point is that this discard is
+      // never silent, and an environment without the host is no reason to drop
+      // the operator's results without asking.
+      const ok = (typeof window.confirmDialog === "function")
+        ? await window.confirmDialog({
+            message,
+            confirmLabel: "Sign out and discard",
+            cancelLabel: "Stay signed in",
+            danger: true,
+          })
+        : window.confirm(message);
+      if (!ok) return;
+    }
     setAuthed(false);
     setMode("viewer");
     setPassword("");

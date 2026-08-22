@@ -420,8 +420,20 @@ func clampedIntCol(name string, field func(m *MatchResult) *int) poolMatchColumn
 		name: name,
 		put:  func(r *MatchResult) string { return strconv.Itoa(*field(r)) },
 		take: func(m *MatchResult, cell string) {
-			if v, err := strconv.Atoi(cell); err == nil && v > 0 {
+			v, err := strconv.Atoi(cell)
+			if err == nil && v > 0 {
 				*field(m) = v
+				return
+			}
+			// A NEGATIVE count is real data being discarded, unlike an empty or
+			// non-numeric cell, which is simply absent. It was clamped in total
+			// silence, which is the same failure mode the SubResults cell had:
+			// a hand edit quietly changing a recorded figure with no trace
+			// anywhere. Say so. (Still clamped rather than rejected: one bad
+			// number must not stop a tournament.)
+			if err == nil && v < 0 {
+				slog.Warn("state: pool match column clamped a negative value to 0",
+					"matchID", m.ID, "column", name, "value", v)
 			}
 		},
 	}

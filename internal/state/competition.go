@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 )
@@ -317,6 +318,66 @@ func (s *Store) DeleteCompetitionFile(id, filename string) error {
 	// state just as a write does, so move the version counter here too.
 	s.bumpFileVersion(id, filename)
 	return nil
+}
+
+// QuarantineCompetitionFile renames a competition artifact out of the way,
+// to "<name>.corrupt-<UTC timestamp>", and reports the name it was given.
+//
+// It exists so "reset this broken file" never means "delete the operator's
+// data". A file that will not parse is the only remaining record of whatever
+// it described, and because it will not parse NOTHING can say how much that
+// is: a delete would be asking an organiser mid tournament to discard an
+// unknown amount of their own tournament record, with no way to warn them how
+// much and no way back. Renaming keeps the bytes for a later repair, or for
+// someone who can read them by hand, and still unblocks the competition now.
+//
+// The quarantined copy is deliberately left in the competition directory
+// rather than a hidden folder: the organiser is already looking there, and a
+// file called bracket.json.corrupt-20260822-140301 explains itself.
+//
+// Returns the new base name. A missing source file is an error here, unlike
+// the idempotent delete above: quarantining nothing means the caller's
+// premise (this file is broken) was already false.
+func (s *Store) QuarantineCompetitionFile(id, filename string) (string, error) {
+	if err := ValidateCompetitionID(id); err != nil {
+		return "", fmt.Errorf("invalid competition ID: %w", err)
+	}
+	// Same two-layer guard as DeleteCompetitionFile: this takes a filename, so
+	// it must not become an arbitrary-rename primitive inside the data folder.
+	if filename == "" || filepath.Base(filename) != filename {
+		return "", fmt.Errorf("invalid filename: %q", filename)
+	}
+	if _, ok := allowedDrawFiles[filename]; !ok {
+		return "", fmt.Errorf("QuarantineCompetitionFile: filename %q is not an allowed draw artifact", filename)
+	}
+
+	mu := s.getCompLock(id)
+	mu.Lock()
+	defer mu.Unlock()
+
+	path := s.compPath(id, filename)
+	if _, err := os.Stat(path); err != nil {
+		return "", err
+	}
+	// Second granularity is enough to name a file an operator will read, but
+	// two quarantines inside one second must not collide and silently destroy
+	// the first -- the one thing this function exists to prevent. Probe for a
+	// free name rather than overwriting.
+	stamp := time.Now().UTC().Format("20060102-150405")
+	target := filename + ".corrupt-" + stamp
+	for i := 2; ; i++ {
+		if _, err := os.Stat(s.compPath(id, target)); os.IsNotExist(err) {
+			break
+		}
+		target = fmt.Sprintf("%s.corrupt-%s-%d", filename, stamp, i)
+	}
+	if err := os.Rename(path, s.compPath(id, target)); err != nil {
+		return "", err
+	}
+	// The artifact is gone from its name, which changes derived state exactly
+	// as a write or a delete does.
+	s.bumpFileVersion(id, filename)
+	return target, nil
 }
 
 func (s *Store) DeleteCompetition(id string) error {

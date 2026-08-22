@@ -2,6 +2,7 @@ package state
 
 import (
 	"encoding/json"
+	"log/slog"
 	"os"
 )
 
@@ -72,11 +73,21 @@ func parseBracketBytes(raw []byte) (*Bracket, error) {
 
 // clampBracketMatchFlags forces negative engi flag counts to 0 (see
 // parseBracketBytes). Non-negative values pass through unchanged.
+//
+// Logged, because a clamp DISCARDS a recorded figure and the next save writes
+// the 0 back, so the original is gone: the same silent-loss shape the sub-bout
+// cell had. The value clamped is nonsense (a negative count of referee flags)
+// so there is nothing recoverable to preserve, but an organiser who typed it
+// deserves to learn that the file no longer says what they wrote.
 func clampBracketMatchFlags(m *BracketMatch) {
 	if m.FlagsA < 0 {
+		slog.Warn("state: bracket match flag count clamped to 0",
+			"matchID", m.ID, "side", "A", "value", m.FlagsA)
 		m.FlagsA = 0
 	}
 	if m.FlagsB < 0 {
+		slog.Warn("state: bracket match flag count clamped to 0",
+			"matchID", m.ID, "side", "B", "value", m.FlagsB)
 		m.FlagsB = 0
 	}
 }

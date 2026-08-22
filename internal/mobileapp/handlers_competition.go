@@ -1794,6 +1794,41 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		c.Status(http.StatusNoContent)
 	})
 
+	// Elevated-gated for the same reason as DELETE /draw above: it discards
+	// recorded results. It does NOT delete the operator's file, but the
+	// knockout results inside it become unreachable through the app, so it is
+	// as consequential as a discard from the console's point of view.
+	r.POST("/competitions/:id/bracket/quarantine", RequireElevatedPassword(elevated), func(c *gin.Context) {
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
+		res, err := eng.QuarantineCorruptBracket(id)
+		if err != nil {
+			var notFound *engine.NotFoundError
+			var validation *engine.ValidationError
+			switch {
+			case errors.As(err, &notFound):
+				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			case errors.As(err, &validation):
+				// Covers both "there is nothing wrong with this bracket" and
+				// the playoffs refusal, whose message explains why rebuilding
+				// would invent a draw rather than restore one. Both are
+				// answerable by the operator, so both are a 400 with the reason.
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			default:
+				internalError(c, err)
+			}
+			return
+		}
+		hub.Broadcast(EventBracketQuarantined, gin.H{"competitionId": id})
+		c.JSON(http.StatusOK, gin.H{
+			"quarantinedAs": res.QuarantinedAs,
+			"rebuilt":       res.Rebuilt,
+			"resolvedPools": res.ResolvedPools,
+		})
+	})
+
 	// Elevated-gated: completing a competition is IRREVERSIBLE (invalidate
 	// rejects a completed comp), like DELETE /competitions/:id and
 	// /invalidate. In file mode without an admin password the gate is a no-op.

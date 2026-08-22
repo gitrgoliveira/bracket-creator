@@ -39,12 +39,16 @@ const (
 	// and re-show the AuthModal so a logged-in operator notices immediately
 	// instead of waiting for their next write to fail with 401. Viewers
 	// ignore the event, their flow doesn't depend on the admin password.
-	EventPasswordReset  EventType = "password_reset"
-	EventAnnouncement   EventType = "announcement"
-	EventDrawGenerated  EventType = "draw_generated"
-	EventDrawDiscarded  EventType = "draw_discarded"
-	EventLineupUpdated  EventType = "lineup_updated"
-	EventResyncRequired EventType = "resync_required"
+	EventPasswordReset EventType = "password_reset"
+	EventAnnouncement  EventType = "announcement"
+	EventDrawGenerated EventType = "draw_generated"
+	EventDrawDiscarded EventType = "draw_discarded"
+	// EventBracketQuarantined: a bracket.json that would not parse was renamed
+	// aside and the knockout stage rebuilt. Every device is showing a wedged
+	// competition when this happens, so they all need to reload.
+	EventBracketQuarantined EventType = "bracket_quarantined"
+	EventLineupUpdated      EventType = "lineup_updated"
+	EventResyncRequired     EventType = "resync_required"
 )
 
 // AutoCompleteErrorHeader is set on score/start responses when the

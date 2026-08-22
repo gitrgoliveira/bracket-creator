@@ -88,6 +88,11 @@ function normalizeViewerCompItem(item) {
         ...c,
         poolMatches: item.poolMatches,
         bracket: item.bracket,
+        // Located file failures for this competition, a SIBLING of config on
+        // the wire because they are about the files, not about the record
+        // inside one of them. Hoisted like poolMatches so the console can
+        // render the notice off the flattened competition it already has.
+        dataIssues: item.dataIssues,
         players: (c.players || []).map(normalizePlayer),
     });
 }
@@ -1171,6 +1176,27 @@ const API = {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || "Failed to discard draw");
         }
+    },
+    // quarantineBracket: POST /competitions/:id/bracket/quarantine. The way out
+    // of a bracket.json that will not parse, which otherwise blocks every score
+    // write for that competition. Renames the broken file aside (it is NEVER
+    // deleted: it is the only record of the knockout results it holds, and
+    // because it does not parse nothing can count them) and rebuilds the
+    // knockout stage from pools.csv. 400 when the bracket reads fine, and 400
+    // with a reason for a direct-elimination competition, where the file is the
+    // only record of the DRAW and rebuilding would invent different pairings
+    // rather than restore these. Elevated-gated like discardDraw: it discards
+    // recorded results.
+    async quarantineBracket(id, password, adminPassword) {
+        const res = await fetch(`/api/competitions/${id}/bracket/quarantine`, {
+            method: 'POST',
+            headers: { 'X-Tournament-Password': password, ...adminHdr(adminPassword) }
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            throw new Error(body.error || "Failed to quarantine the bracket file");
+        }
+        return body;
     },
     // completeCompetition: POST /competitions/:id/complete. The only trigger
     // for a bracket-based competition (playoffs, or mixed once its knockout is

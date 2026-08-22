@@ -1880,6 +1880,7 @@ function ShiaijoContext({ match, competitions, court, nextPoolName, tweaks, open
                                         tweaks={tweaks || { showDojo: true }}
                                         onMatchClick={null}
                                         highlightPlayers={[]}
+                                        showDataIssues
                                     />
                                 </div>
                             ) : standingsLoader
@@ -1900,6 +1901,7 @@ function ShiaijoContext({ match, competitions, court, nextPoolName, tweaks, open
                                             tweaks={tweaks || { showDojo: true }}
                                             onMatchClick={null}
                                             highlightPlayers={[]}
+                                            showDataIssues
                                         />
                                     </div>
                                 ) : (

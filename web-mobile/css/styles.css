@@ -6221,6 +6221,44 @@ button.pool-match-row {
   color: var(--warn-ink);
 }
 
+/* Data-integrity notices (data_integrity.jsx). They ride on the shared .alert
+   --warn family rather than inventing a colour: this is a caution an operator
+   must act on, which is exactly what that family already means, and amber stays
+   clear of red (Aka/danger) per DESIGN.md Principle 3.
+   The two additions are layout only: the leading glyph sits beside the text
+   rather than wrapping under it. */
+.data-issue {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  line-height: 1.4;
+}
+
+/* The per-match variant sits directly beneath the match row it describes, so it
+   is inset to read as belonging to that row and tightened so a pool with a
+   couple of unreadable encounters does not push the standings off screen. */
+.data-issue--inline {
+  margin: 2px 0 6px 20px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+/* The competition-level banner stacks several paragraphs and a button, so it
+   needs room the inline variant does not. */
+.data-issue--banner {
+  margin-bottom: 12px;
+}
+
+.data-issue__list {
+  margin: 6px 0;
+  padding-left: 18px;
+}
+
+.data-issue__list code {
+  font-size: 12px;
+  word-break: break-word;
+}
+
 .alert--success {
   background: var(--ok-soft);
   border-color: #86efac; /* green-300: alert border is stronger than the hairline ok-border token */

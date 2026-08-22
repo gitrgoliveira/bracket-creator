@@ -524,12 +524,17 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
           admin_shiaijo.jsx's ShiaijoContext. */}
       {isLeague ? (
         LeagueStandingsViewer ? (
+          // showDataIssues on both branches: this is an operator surface, and
+          // the same components render for spectators from viewer_competition
+          // WITHOUT it. That prop is the whole audience gate, because the flags
+          // it reveals travel on the public payload the admin console reads.
           <LeagueStandingsViewer
             competition={c}
             poolMatches={poolMatches}
             tweaks={tweaks}
             onMatchClick={(m) => setScoreOpenId(m.id)}
             highlightPlayers={[]}
+            showDataIssues
           />
         ) : null
       ) : (
@@ -542,6 +547,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
             tweaks={tweaks}
             onMatchClick={(m) => setScoreOpenId(m.id)}
             highlightPlayers={[]}
+            showDataIssues
           />
         ) : null
       )}

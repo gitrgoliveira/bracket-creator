@@ -10,6 +10,9 @@ import { EstimateHeadline } from './admin_schedule_utils.jsx';
 // settings preview so this stat, the checklist and the preview cannot
 // disagree about what counts as seeded.
 import { seededRanks } from './admin_helpers.jsx';
+// One owner for what the operator is told when a file on disk does not say what
+// the app expects; shared with the pool surfaces so the wording cannot drift.
+import { DataIssueBanner } from './data_integrity.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -224,7 +227,34 @@ function overviewResultsSection(format, hasBracket) {
 // ---------------------------------------------------------------------------
 // AdminCompOverview: status-aware overview component
 // ---------------------------------------------------------------------------
-function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSection, password }) {
+function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSection, password, showToast, onRefreshCompetition }) {
+  // Recovery from a competition file that will not parse. Held here rather than
+  // in the banner because the banner owns the WORDING (shared with the other
+  // data-integrity surfaces) and this page owns the network call and the
+  // refresh, exactly like discardDraw in admin_competition.jsx.
+  const [quarantining, setQuarantining] = useStateA(false);
+  const quarantineBracket = async () => {
+    const ok = await window.confirmDialog({
+      message: `Reset the knockout stage for "${c.name}"? The unreadable file is kept, renamed aside, `
+        + `but the knockout results inside it will no longer be used and must be re-entered.`,
+      confirmLabel: "Reset knockout stage",
+      danger: true,
+    });
+    if (!ok) return;
+    const admin = await window.promptAdminPassword();
+    if (admin === null) return;
+    setQuarantining(true);
+    try {
+      const res = await window.API.quarantineBracket(c.id, password, admin);
+      showToast?.(`Knockout stage reset. The unreadable file is kept as ${res.quarantinedAs}`);
+      onRefreshCompetition?.();
+    } catch (e) {
+      console.error("Quarantine bracket failed:", e);
+      showToast?.(e.message, "error");
+    } finally {
+      setQuarantining(false);
+    }
+  };
   // Prefer the props passed from the detail fetch, but fall back to whatever
   // is already on `c` when the detail hasn't loaded yet (or errored). Using ??
   // avoids overwriting non-null fields on `c` with undefined prop values.
@@ -695,6 +725,15 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
 
   return (
     <div>
+      {/* First, above everything: a file that will not parse blocks scoring,
+          and every other number on this page is describing whatever survived
+          the failed load. */}
+      <DataIssueBanner
+        issues={c.dataIssues}
+        competition={c}
+        onReset={quarantineBracket}
+        resetting={quarantining}
+      />
       {renderStatsStrip()}
       {renderPrimaryContent()}
       {renderEstimateFooter()}

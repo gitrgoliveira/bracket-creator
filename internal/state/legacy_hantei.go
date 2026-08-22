@@ -33,6 +33,20 @@ import "github.com/gitrgoliveira/bracket-creator/internal/domain"
 // attributable winner is DROPPED, the same degradation the old pool encoder
 // applied: validation requires a winner, so that shape is malformed data, and
 // guessing a side would be worse than losing the flag.
+//
+// ACCEPTED LIMITATION, the mirror of the compat gap in CLAUDE.md. An explicit
+// `false` on a DAIHYOSEN sub row that omits its ippon arrays ENTIRELY (nil, not
+// `[]`) and names no winner folds to total silence: the flag is cleared here
+// and StripHantei(nil) is still nil, so nothing distinguishes the row from a
+// writer with nothing to say, and engine.preserveSubHantei restores the stored
+// verdict the payload meant to withdraw. Deliberately not closed, on two
+// grounds. It has no producer: an explicit false always travelled WITH a
+// scoreline in every shipped client, and an array that is merely EMPTY does
+// speak (preserveSubHantei bails on it), so only a hand-built payload reaches
+// this shape. And the available fix is worse than the defect - materialising
+// `[]` here to make the row speak would assert a 0-0 scoreline, wiping the
+// stored 1-1 the verdict rested on, which is real data loss in exchange for
+// closing an unreachable one. Restoring preserves; materialising destroys.
 
 // foldLegacyHantei is the one fold this file exists for, extracted so the
 // slice-based normalizers below (SubMatchResult, MatchResult) state the rule

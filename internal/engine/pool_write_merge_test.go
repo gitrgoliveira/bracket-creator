@@ -553,3 +553,66 @@ func TestStripInvalidHantei_InheritedMarkIsStrippedNotRejected(t *testing.T) {
 	assert.Equal(t, []string{"M"}, stored.IpponsA, "the struck point stays")
 	assert.Equal(t, []string{"K"}, stored.IpponsB)
 }
+
+// TestPoolWriteRejectsARewrittenParticipantID pins the id half of the identity
+// guard. A score write has carried SideAID/SideBID since bc-dmsr, and the
+// whole-struct overwrite in applyPoolWrite persists whatever arrives, while
+// backfillMatchIdentity only fills an EMPTY id. So before reconcileSides took
+// the ids, a payload naming the right competitors under the WRONG ids was
+// written straight through: names guarded, ids not, on the same record - and
+// the id is the half domain.AttributeWinnerSide consults first, being the only
+// thing that can separate a same-name pair.
+//
+// Restore is exempt for the same reason it is exempt for names: the rollback
+// replays a snapshot captured from this very match, so a disagreement there is
+// not a client error.
+func TestPoolWriteRejectsARewrittenParticipantID(t *testing.T) {
+	stored := func() *state.MatchResult {
+		return &state.MatchResult{
+			ID: "P1-1", SideA: "Kyoto", SideB: "Osaka",
+			SideAID: "uuid-kyoto", SideBID: "uuid-osaka",
+		}
+	}
+	payload := func() *state.MatchResult {
+		return &state.MatchResult{ID: "P1-1", SideA: "Kyoto", SideB: "Osaka"}
+	}
+
+	t.Run("a disagreeing id is a mismatch on a forward write", func(t *testing.T) {
+		in := payload()
+		in.SideAID = "uuid-someone-else"
+		assert.True(t, applyPoolWrite(stored(), in, matchWriteForward))
+
+		in = payload()
+		in.SideBID = "uuid-someone-else"
+		assert.True(t, applyPoolWrite(stored(), in, matchWriteForward))
+	})
+
+	t.Run("a matching id, or none at all, is not a mismatch", func(t *testing.T) {
+		in := payload()
+		in.SideAID, in.SideBID = "uuid-kyoto", "uuid-osaka"
+		assert.False(t, applyPoolWrite(stored(), in, matchWriteForward))
+
+		// The overwhelmingly common shape: the client sends no ids and
+		// backfillMatchIdentity supplies the stored pair.
+		in = payload()
+		require.False(t, applyPoolWrite(stored(), in, matchWriteForward))
+		assert.Equal(t, "uuid-kyoto", in.SideAID)
+		assert.Equal(t, "uuid-osaka", in.SideBID)
+	})
+
+	t.Run("an empty stored id means unknown, never mismatch", func(t *testing.T) {
+		// A legacy pool row written before the id columns existed. The write
+		// must still land; refusing it would wedge every such match.
+		st := stored()
+		st.SideAID, st.SideBID = "", ""
+		in := payload()
+		in.SideAID, in.SideBID = "Kyoto", "Osaka"
+		assert.False(t, applyPoolWrite(st, in, matchWriteForward))
+	})
+
+	t.Run("restore replays its own snapshot without rejecting it", func(t *testing.T) {
+		in := payload()
+		in.SideAID = "uuid-someone-else"
+		assert.False(t, applyPoolWrite(stored(), in, matchWriteRestore))
+	})
+}

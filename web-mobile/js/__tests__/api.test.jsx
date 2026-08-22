@@ -255,8 +255,15 @@ describe('API Utils', () => {
     // the fix: sending them directly means the two agree even before any
     // server-side backfill runs.
     describe('emits sideAId/sideBId on the wire (bc-dmsr review: belt and braces)', () => {
-      it('forwards both side ids when the match carries object-shaped sides', () => {
-        const match = { sideA: { id: 'id-kenshikan', name: 'Tanaka Kenji' }, sideB: { id: 'id-mumeishi', name: 'Tanaka Kenji' } };
+      it('forwards both side ids when the server supplied them', () => {
+        // normalizeMatch keeps the server's flat sideAId/sideBId alongside the
+        // resolved side objects, and both are present here because this is what
+        // a real same-name pool match looks like: the ids are the only thing
+        // that separates the two competitors.
+        const match = {
+          sideAId: 'id-kenshikan', sideBId: 'id-mumeishi',
+          sideA: { id: 'id-kenshikan', name: 'Tanaka Kenji' }, sideB: { id: 'id-mumeishi', name: 'Tanaka Kenji' },
+        };
         const result = toBackendMatchResult({
           winner: { id: 'id-mumeishi', name: 'Tanaka Kenji' },
           status: 'complete',
@@ -271,6 +278,19 @@ describe('API Utils', () => {
       it('omits sideAId/sideBId (never sends empty strings) when the match carries bare-string sides', () => {
         const match = { sideA: 'Alice', sideB: 'Bob' };
         const result = toBackendMatchResult({ winner: 'Alice', status: 'complete', ipponsA: ['M'], ipponsB: [] }, match);
+        expect('sideAId' in result).toBe(false);
+        expect('sideBId' in result).toBe(false);
+      });
+
+      it('omits an id the SERVER never supplied, even when the side object carries one', () => {
+        // resolveSide falls back to `{ id: flatId || name }`, so a match with no
+        // flat ids - a bracket match, which persists none, or a legacy pool row
+        // written before the id columns existed - yields side objects whose id
+        // IS the display name. Sending that would have it stored as though it
+        // were a participant UUID, and for a same-name pair buildPlayerMap
+        // collapses BOTH sides onto the same invented value.
+        const match = { sideA: { id: 'Tanaka Kenji', name: 'Tanaka Kenji' }, sideB: { id: 'Tanaka Kenji', name: 'Tanaka Kenji' } };
+        const result = toBackendMatchResult({ winner: 'Tanaka Kenji', status: 'complete', ipponsA: ['M'], ipponsB: [] }, match);
         expect('sideAId' in result).toBe(false);
         expect('sideBId' in result).toBe(false);
       });

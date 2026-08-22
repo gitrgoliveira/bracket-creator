@@ -117,20 +117,26 @@ function toBackendMatchResult(patch, match) {
     // name-only fallback. Omitted (not sent as "") when a side carries no
     // id at all, matching every other optional field in this payload.
     //
-    // These are not always participant UUIDs. normalizeMatch's resolveSide
-    // falls back to `{ id: flatId || name }`, so a match the server sends
-    // WITHOUT flat side ids - a bracket match, which persists none - yields
-    // sides whose id IS the name, and that is what goes on the wire here.
-    // Harmless, because the fallback applies to all three values at once:
-    // domain.AttributeWinnerSide's id branch then compares name against
-    // name and returns exactly what its name branch would have, including
-    // the sideA-first resolution for a same-name pair. But it does mean the
-    // server's backfill is suppressed for those matches (it only fills an
-    // EMPTY id), which costs nothing today since the stored bracket ids are
-    // empty too. Do not read "sideAId is present" as "the server has a real
-    // participant id for this side.
-    if (sideAId) result.sideAId = sideAId;
-    if (sideBId) result.sideBId = sideBId;
+    // Send back ONLY an id the server itself supplied. The locals above are
+    // not always participant UUIDs: normalizeMatch's resolveSide falls back to
+    // `{ id: flatId || name }`, so a match the server sends WITHOUT flat side
+    // ids - a bracket match, which persists none, or a legacy pool row written
+    // before the id columns existed - yields sides whose id IS the display
+    // name. That is fine for this function's own placement (the fallback
+    // applies to all three values at once, so domain.AttributeWinnerSide's id
+    // branch compares name against name and answers exactly as its name branch
+    // would), but it must not go on the wire: a pool write persists the ids
+    // verbatim, so an invented one would be stored as though it were a real
+    // participant UUID, and buildPlayerMap collapses a same-name pair onto one
+    // entry, so BOTH sides would be stored under the SAME invented id.
+    //
+    // Gating on the flat id the server sent, rather than on the resolved side
+    // object, keeps the case this was added for (a real same-name pair, whose
+    // mark can only be attributed by id) and drops exactly the invented case.
+    // With nothing sent, the server backfills from the stored match and falls
+    // back to name attribution, which is what it did before these were added.
+    if (match?.sideAId && sideAId) result.sideAId = sideAId;
+    if (match?.sideBId && sideBId) result.sideBId = sideBId;
     // Engi (kata) matches score by referee flag count, not ippons: carry
     // flagsA/flagsB through when the patch sets them (EngiScoreEditorModal's
     // submit payload). Omitted otherwise so non-engi payloads stay minimal.

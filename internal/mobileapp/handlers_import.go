@@ -526,6 +526,10 @@ func csvLines(data []byte) []string {
 // column order ("rank,name" or "name,rank", with or without a header). The
 // Dojo column is optional in both cases; a row with only two fields carries
 // no dojo, exactly as this parser has always accepted.
+//
+// Names are Title-cased on the way out, matching what helper.CreatePlayers
+// does to the participants file in the same bundle; see the note at the
+// append below for why that has to happen here and not in the gate.
 func parseSeedsBytes(data []byte) ([]domain.SeedAssignment, error) {
 	var assignments []domain.SeedAssignment
 	for i, line := range csvLines(data) {
@@ -552,7 +556,23 @@ func parseSeedsBytes(data []byte) ([]domain.SeedAssignment, error) {
 		if len(parts) >= 3 {
 			dojo = strings.TrimSpace(parts[2])
 		}
-		assignments = append(assignments, domain.SeedAssignment{Name: name, SeedRank: rank, Dojo: dojo})
+		// Canonicalize the name the SAME way helper.CreatePlayers canonicalized
+		// the roster this seeding will be checked against, merged onto and drawn
+		// from. Both files in a manifest are hand-written, and CreatePlayers
+		// Title-cases every participant name it parses, so a seeds row typed
+		// "alice cooper" against a roster row typed "alice cooper" arrives here
+		// naming a competitor the roster now calls "Alice Cooper" -- and the
+		// three consumers then disagreed: seedsOffRoster below REJECTED the
+		// import outright ("is not on this competition's roster", naming someone
+		// who plainly is), state.loadParticipants' merge would never attach the
+		// rank, and only helper.ApplySeeds found the player, because it is the
+		// one matcher that Title-cases the assignment before looking it up.
+		//
+		// Canonicalizing at the PRODUCER rather than inside the gate is what
+		// makes all three agree: title-casing only the gate would have let a row
+		// through that the merge still cannot attach, which is precisely the
+		// split-views failure seedsOffRoster exists to catch at write time.
+		assignments = append(assignments, domain.SeedAssignment{Name: helper.TitleCaseName(name), SeedRank: rank, Dojo: dojo})
 	}
 	return assignments, nil
 }

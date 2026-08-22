@@ -42,6 +42,15 @@ var ErrMatchAlreadyCompleted = errors.New("match already completed: use the scor
 // the handler can respond 200 with applied=false without broadcasting (finding 7).
 var errLWWDropped = errors.New("lww_dropped")
 
+// storedSides is the identity half of a stored match: who the two competitors
+// are, by name and by participant id. Passed as a struct rather than as four
+// bare strings because all four are the same assignable type, so a transposed
+// pair would compile clean and silently reconcile a name against an id.
+type storedSides struct {
+	A, B     string
+	AID, BID string
+}
+
 // reconcileSides folds the stored pairing into a score payload's result.
 // An empty payload side is backfilled from the stored side (e.g. a payload
 // that omits sides, or a not-yet-resolved bracket slot). A non-empty payload
@@ -49,15 +58,35 @@ var errLWWDropped = errors.New("lww_dropped")
 // must reject rather than overwrite the stored competitor. Returns true on the
 // first such disagreement; result is left partially filled but is discarded by
 // the caller on mismatch.
-func reconcileSides(result *state.MatchResult, storedA, storedB string) (mismatch bool) {
+//
+// The participant IDS get the identical rule, and must: a score write carries
+// them since bc-dmsr (the client sends the same triple the server validates a
+// hantei mark against), and the whole-struct overwrite in applyPoolWrite /
+// applyBracketMatchResult persists whatever arrives. backfillMatchIdentity
+// only fills an EMPTY id, so without this an id disagreeing with the stored
+// one would be written straight through -- names guarded, ids not, on the same
+// record, where the id is the authoritative half (domain.AttributeWinnerSide
+// consults it FIRST, precisely because it is the only thing that separates a
+// same-name pair). "Match identity is fixed at generation" has to mean both
+// halves or it means neither.
+func reconcileSides(result *state.MatchResult, stored storedSides) (mismatch bool) {
 	if result.SideA == "" {
-		result.SideA = storedA
-	} else if storedA != "" && result.SideA != storedA {
+		result.SideA = stored.A
+	} else if stored.A != "" && result.SideA != stored.A {
 		mismatch = true
 	}
 	if result.SideB == "" {
-		result.SideB = storedB
-	} else if storedB != "" && result.SideB != storedB {
+		result.SideB = stored.B
+	} else if stored.B != "" && result.SideB != stored.B {
+		mismatch = true
+	}
+	// Backfilling the ids is backfillMatchIdentity's job (it runs after the LWW
+	// guard, so an id must not be filled in on a write that is about to be
+	// dropped); this only reports the disagreement.
+	if result.SideAID != "" && stored.AID != "" && result.SideAID != stored.AID {
+		mismatch = true
+	}
+	if result.SideBID != "" && stored.BID != "" && result.SideBID != stored.BID {
 		mismatch = true
 	}
 	return mismatch
@@ -521,7 +550,7 @@ func applyPoolWrite(stored, result *state.MatchResult, policy matchWritePolicy) 
 	// the mismatch, so it must run under both policies; hoisted out of the
 	// condition below because folding it into a short-circuit would let a later
 	// tidy (cheap comparison first) silently drop the backfill.
-	sidesDisagree := reconcileSides(result, stored.SideA, stored.SideB)
+	sidesDisagree := reconcileSides(result, storedSides{A: stored.SideA, B: stored.SideB, AID: stored.SideAID, BID: stored.SideBID})
 	// Match identity is fixed at generation; a score must not rewrite it. The
 	// restore policy replays sides captured from this same match, so a mismatch
 	// there is not a client error.
@@ -1597,7 +1626,10 @@ func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult, 
 	// reconcileSides BACKFILLS as a side effect and only reports the mismatch,
 	// so folding it into a short-circuit would let a later tidy (cheap
 	// comparison first) silently drop the backfill.
-	sidesDisagree := reconcileSides(result, bm.SideA, bm.SideB)
+	// No ids: a BracketMatch persists names only, so the id half of the guard
+	// has nothing to compare against here and correctly stays silent (an
+	// empty stored id means "unknown", never "mismatch").
+	sidesDisagree := reconcileSides(result, storedSides{A: bm.SideA, B: bm.SideB})
 	// FORWARD only, matching the pool twin and the contract stated on
 	// writeToPoolOrBracket: the restore replays sides captured from this same
 	// match, so a disagreement there is not a client error to reject. This used

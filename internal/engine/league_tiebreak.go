@@ -269,5 +269,5 @@ func (e *Engine) GenerateLeagueTiebreakMatches(compID string, tiedTeamNames []st
 	e.standingsCache.Delete(compID)
 	e.standingsFlight.Delete(compID)
 
-	return injected, e.GenerateSchedule(compID)
+	return injected, nil
 }

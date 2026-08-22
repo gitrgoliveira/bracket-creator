@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"encoding/csv"
 	"encoding/json"
+	"log/slog"
 	"os"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -304,8 +304,9 @@ func parsePoolMatchesBytes(raw []byte) ([]MatchResult, error) {
 	return parsePoolMatchesRecords(records), nil
 }
 
-// splitIppons parses a "|"-joined ippon field into a slice, mapping an
-// EMPTY field to an empty slice. strings.Split("", "|") returns [""] (a
+// splitIppons parses a domain.IpponFieldSeparator-joined ippon field into a
+// slice, mapping an EMPTY field to an empty slice. strings.Split("", sep)
+// returns [""] (a
 // one-element slice holding the empty string), which len() then counts as a
 // phantom ippon, inflating points-won/lost in standings and corrupting
 // individual pool tie detection (two players who actually tied read as
@@ -317,226 +318,288 @@ func splitIppons(s string) []string {
 	if s == "" {
 		return []string{}
 	}
-	return strings.Split(s, "|")
+	return strings.Split(s, domain.IpponFieldSeparator)
 }
 
-// encodeHanteiIntoIppons returns the two ippon slices as they should be
-// PERSISTED for r, with the judges'-decision mark appended to the winning
-// side's slice when the match was decided by hantei.
+// poolMatchColumn describes ONE column of pool-matches.csv: the header name,
+// how a match renders into the cell (put) and how a cell reads back (take).
 //
-// pool-matches.csv has no DecidedByHantei column, and it does not need one: a
-// hantei occupies a point SLOT (domain.HanteiMark), so the existing IpponsA /
-// IpponsB columns carry it. That is the same shape every scoreboard already
-// renders, where Ht fills the winner's next free slot. Hantei is only taken
-// from a TIED scoreline and sanbon-shobu ends at 2, so the winner always has a
-// slot free for it.
+// poolMatchColumns below is THE definition of the file format. The header, the
+// row writer (savePoolMatchesLocked) and the reader (parsePoolMatchesRecords)
+// all derive from this single ordered list, so the three can no longer
+// disagree; before this table each kept its own hand-maintained copy, and
+// nothing failed when a new MatchResult field missed one of them, which is
+// exactly how DecisionBy, DecisionReason, Encho and ModifiedAt were silently
+// lost on restart.
 //
-// The mark is a STORAGE encoding only: decodeHanteiFromIppons strips it on the
-// way back in and restores the flag, so nothing downstream of the load ever
-// sees an "Ht" among the ippons and no counter, standings figure, tie-break or
-// export changes shape. (CountScoringIppons drops it regardless, so a
-// hand-edited file that leaves one in cannot inflate a score either.)
+// Two rules, both learned the hard way:
 //
-// Returns the originals untouched when there is nothing to encode. A hantei
-// with no attributable winner cannot be encoded — validation requires a winner,
-// so that is malformed data, and it degrades to the pre-existing behaviour of
-// losing the flag rather than guessing a side.
-func encodeHanteiIntoIppons(r *MatchResult) (ipponsA, ipponsB []string) {
-	ipponsA, ipponsB = r.IpponsA, r.IpponsB
-	if r.DecidedByHantei == nil || !*r.DecidedByHantei || r.Winner == "" {
-		return ipponsA, ipponsB
-	}
-	withMark := func(s []string) []string {
-		for _, v := range s {
-			if v == domain.HanteiMark {
-				return s // already encoded; never double-append
-			}
-		}
-		out := make([]string, len(s), len(s)+1)
-		copy(out, s)
-		return append(out, domain.HanteiMark)
-	}
-	switch r.Winner {
-	case r.SideA:
-		return withMark(ipponsA), ipponsB
-	case r.SideB:
-		return ipponsA, withMark(ipponsB)
-	}
-	return ipponsA, ipponsB
+//   - TABLE ORDER IS THE ON-DISK CONTRACT, never Go struct order. Files
+//     written by older builds must keep loading and files written now must
+//     load in older builds up to their column count, so a new column is
+//     APPENDED here, never inserted, and TestPoolMatchesGoldenBytes pins the
+//     result. Reordering MatchResult's fields must never move a column.
+//   - "Should this field be persisted?" is a judgement, which is why this is
+//     an explicit list rather than reflection: a reflective codec would have
+//     happily persisted QueuePosition (derived from the schedule, a second
+//     source of truth that can disagree) and Rev/RevSession/WinnerSide.
+//     TestPoolMatchRoundTripIsComplete forces that judgement into the open
+//     for every new MatchResult field.
+//
+// put runs against the row as it should be PERSISTED, so every put is a pure
+// field projection against the MatchResult as stored — no codec wraps around
+// it. The judges'-decision mark is a real entry in the winner's IpponsA/
+// IpponsB slice (domain.HanteiMark), so the IpponsA/IpponsB columns persist
+// it exactly like any other ippon letter; nothing here needs to know it is
+// special. takes run in column order against a zero MatchResult seeded with
+// Round: -1 (the absent-column default), so MatchIdx's take may build on the
+// ID PoolName's take just set; a short row simply stops early, which is how
+// files written before a column existed load with that field at its
+// documented default. The one thing that DOES run outside the column loop is
+// legacy-flag folding: parsePoolMatchesRecords calls NormalizeLegacyHantei
+// after the loop to fold an old decidedByHantei boolean (nested in the
+// SubResults JSON cell) into the mark for pre-ruling files; that is a
+// read-side upgrade, not a codec the table's own columns need to know about.
+type poolMatchColumn struct {
+	name string
+	put  func(r *MatchResult) string
+	take func(m *MatchResult, cell string)
 }
 
-// decodeHanteiFromIppons is the inverse: it strips domain.HanteiMark out of a
-// loaded match's ippon slices and sets DecidedByHantei when one was present.
-// After this the in-memory shape is exactly what it was before the match was
-// written, so the encoding is invisible above the store.
+// poolMatchIDParts splits a pool match ID ("Pool A-3", "Pool B-DH-1") at the
+// FIRST dash into the PoolName and MatchIdx columns. An ID without a dash
+// stores an empty MatchIdx.
 //
-// It does NOT clear an already-set flag: a caller that knows better (a bracket
-// match, or a future column) keeps its value.
-func decodeHanteiFromIppons(m *MatchResult) {
-	// Detect before stripping. This runs for every match on every parse, and
-	// the overwhelmingly common case is no mark at all, so rebuilding both
-	// slices first and discarding them would allocate twice per match to
-	// discover there was nothing to do.
-	if !slices.Contains(m.IpponsA, domain.HanteiMark) &&
-		!slices.Contains(m.IpponsB, domain.HanteiMark) {
-		return
-	}
-	// splitIppons' contract: an empty field is an empty slice, never nil, so
-	// the JSON projection stays [] rather than null. A side that held only the
-	// mark must therefore come back empty, not nil.
-	strip := func(in []string) []string {
-		out := make([]string, 0, len(in))
-		for _, v := range in {
-			if v != domain.HanteiMark {
-				out = append(out, v)
-			}
-		}
-		return out
-	}
-	m.IpponsA, m.IpponsB = strip(m.IpponsA), strip(m.IpponsB)
-	m.DecidedByHantei = HanteiExplicit(true)
+// strings.Cut rather than SplitN: it returns substrings of the original string
+// instead of allocating a slice, and the PoolName and MatchIdx puts each call
+// this once per row.
+func poolMatchIDParts(id string) (pool, idx string) {
+	pool, idx, _ = strings.Cut(id, "-")
+	return pool, idx
 }
+
+// strCol builds the plain pass-through column: put reads the field, take
+// writes the cell back into it verbatim. Both directions go through ONE
+// accessor, so a put that reads SideAID next to a take that writes SideBID --
+// a two-character copy-paste slip that reads as correct -- cannot be written.
+func strCol(name string, field func(m *MatchResult) *string) poolMatchColumn {
+	return poolMatchColumn{
+		name: name,
+		put:  func(r *MatchResult) string { return *field(r) },
+		take: func(m *MatchResult, cell string) { *field(m) = cell },
+	}
+}
+
+// intCol is strCol for a plain numeric column: an unparseable cell leaves the
+// field at its seeded zero.
+func intCol(name string, field func(m *MatchResult) *int) poolMatchColumn {
+	return poolMatchColumn{
+		name: name,
+		put:  func(r *MatchResult) string { return strconv.Itoa(*field(r)) },
+		take: func(m *MatchResult, cell string) {
+			if v, err := strconv.Atoi(cell); err == nil {
+				*field(m) = v
+			}
+		},
+	}
+}
+
+// clampedIntCol is intCol restricted to positive values: non-numeric,
+// zero and negative cells all read as the seeded 0.
+func clampedIntCol(name string, field func(m *MatchResult) *int) poolMatchColumn {
+	return poolMatchColumn{
+		name: name,
+		put:  func(r *MatchResult) string { return strconv.Itoa(*field(r)) },
+		take: func(m *MatchResult, cell string) {
+			if v, err := strconv.Atoi(cell); err == nil && v > 0 {
+				*field(m) = v
+			}
+		},
+	}
+}
+
+var poolMatchColumns = []poolMatchColumn{
+	{name: "PoolName",
+		put:  func(r *MatchResult) string { p, _ := poolMatchIDParts(r.ID); return p },
+		take: func(m *MatchResult, cell string) { m.ID = cell }},
+	{name: "MatchIdx",
+		put:  func(r *MatchResult) string { _, idx := poolMatchIDParts(r.ID); return idx },
+		take: func(m *MatchResult, cell string) { m.ID += "-" + cell }},
+	strCol("SideA", func(m *MatchResult) *string { return &m.SideA }),
+	strCol("SideB", func(m *MatchResult) *string { return &m.SideB }),
+	strCol("Winner", func(m *MatchResult) *string { return &m.Winner }),
+	// The ippon cells hold the PERSISTED slices: waza letters joined with
+	// domain.IpponFieldSeparator,
+	// plus the judges'-decision mark in the winner's cell when the match was
+	// decided by hantei. The mark (domain.HanteiMark) is a real entry in that
+	// slice — the mark IS the record — so it round-trips through this column
+	// like any other letter, with no wrapping codec on either side.
+	{name: "IpponsA",
+		put:  func(r *MatchResult) string { return strings.Join(r.IpponsA, domain.IpponFieldSeparator) },
+		take: func(m *MatchResult, cell string) { m.IpponsA = splitIppons(cell) }},
+	{name: "IpponsB",
+		put:  func(r *MatchResult) string { return strings.Join(r.IpponsB, domain.IpponFieldSeparator) },
+		take: func(m *MatchResult, cell string) { m.IpponsB = splitIppons(cell) }},
+	intCol("HansokuA", func(m *MatchResult) *int { return &m.HansokuA }),
+	intCol("HansokuB", func(m *MatchResult) *int { return &m.HansokuB }),
+	strCol("Decision", func(m *MatchResult) *string { return &m.Decision }),
+	{name: "Status",
+		put:  func(r *MatchResult) string { return string(r.Status) },
+		take: func(m *MatchResult, cell string) { m.Status = MatchStatus(cell) }},
+	strCol("Court", func(m *MatchResult) *string { return &m.Court }),
+	// A team encounter's sub-bouts nest as a JSON document inside this one
+	// cell, keeping the file to one row per match. Marshalling the whole
+	// struct means every SubMatchResult field is persisted the moment it is
+	// declared (the property bracket.json has always had); the trade, recorded
+	// in docs/architecture/data-model.md, is that the richest data in a team
+	// competition is not readable as columns.
+	{name: "SubResults",
+		put: func(r *MatchResult) string {
+			if len(r.SubResults) == 0 {
+				return ""
+			}
+			b, err := json.Marshal(r.SubResults)
+			if err != nil {
+				// The column type is string, not (string, error): every other
+				// put in this table is infallible (strconv formatting never
+				// fails), so there is no error path to propagate this into.
+				// Log it so a marshal failure on live team-match data is at
+				// least visible instead of silently writing an empty cell.
+				slog.Error("state: pool match SubResults marshal failed; writing empty cell",
+					"matchID", r.ID, "error", err)
+				return ""
+			}
+			return string(b)
+		},
+		take: func(m *MatchResult, cell string) {
+			if cell == "" {
+				return
+			}
+			if err := json.Unmarshal([]byte(cell), &m.SubResults); err != nil {
+				// Same infallible-signature constraint as put above: a
+				// corrupt cell must not fail the whole row read (the rest of
+				// the match is still good), but it must not load in silence
+				// either, or a hand-edited/truncated cell reads back as an
+				// empty team encounter with no trace of the data loss.
+				slog.Error("state: pool match SubResults cell corrupt; loading as empty",
+					"matchID", m.ID, "error", err)
+			}
+		}},
+	strCol("ScheduledAt", func(m *MatchResult) *string { return &m.ScheduledAt }),
+	strCol("ResultSource", func(m *MatchResult) *string { return &m.ResultSource }),
+	// Round reads -1 for "unknown" in every failure shape -- an empty or
+	// unparseable cell, or a row too short to hold the column at all -- by
+	// leaving the reader's seed value (Round: -1) alone, like every other
+	// column with an absent-default.
+	intCol("Round", func(m *MatchResult) *int { return &m.Round }),
+	// Participant-id columns. Absent in files written before they existed;
+	// ids stay empty and consumers fall back to name matching.
+	strCol("SideAID", func(m *MatchResult) *string { return &m.SideAID }),
+	strCol("SideBID", func(m *MatchResult) *string { return &m.SideBID }),
+	strCol("WinnerID", func(m *MatchResult) *string { return &m.WinnerID }),
+	strCol("CorrectionReason", func(m *MatchResult) *string { return &m.CorrectionReason }),
+	// Rep-player columns (mp-62vr): the individual fighters each team fields
+	// for a pool/league daihyosen/tiebreaker rep bout.
+	strCol("RepPlayerA", func(m *MatchResult) *string { return &m.RepPlayerA }),
+	strCol("RepPlayerB", func(m *MatchResult) *string { return &m.RepPlayerB }),
+	// Engi referee flag counts. A non-numeric value is treated as 0 and a
+	// negative value is clamped to 0: flags are validated non-negative at the
+	// HTTP boundary, so a corrupted / hand-edited file must not load negative
+	// counts that would break engi standings/rendering.
+	clampedIntCol("FlagsA", func(m *MatchResult) *int { return &m.FlagsA }),
+	clampedIntCol("FlagsB", func(m *MatchResult) *int { return &m.FlagsB }),
+	// The "reopened without an audit reason yet" flag (mp-gmcg). A non-boolean
+	// value reads as false: a hand-edited CSV must not be able to wedge a
+	// match behind a justification it can never satisfy.
+	{name: "ReopenPending",
+		put: func(r *MatchResult) string { return strconv.FormatBool(r.ReopenPending) },
+		take: func(m *MatchResult, cell string) {
+			if v, err := strconv.ParseBool(cell); err == nil {
+				m.ReopenPending = v
+			}
+		}},
+	// Decision-audit columns: WHO recorded a kiken/fusenpai and WHY. These
+	// were held only in memory once, so the audit trail behind a withdrawal
+	// survived until the next restart and no further, while the bracket kept
+	// both all along (bracket.json marshals every exported field).
+	strCol("DecisionBy", func(m *MatchResult) *string { return &m.DecisionBy }),
+	strCol("DecisionReason", func(m *MatchResult) *string { return &m.DecisionReason }),
+	// Encho (overtime) collapses to its period count, gated on Encho.On() in
+	// BOTH directions: only a positive count is written and only a positive
+	// count rebuilds the block, which is lossless because On() requires
+	// non-nil AND positive, so a nil block and a degenerate {PeriodCount: 0}
+	// are already indistinguishable to every consumer. A negative value is
+	// rejected at the HTTP boundary and reads here as absent, so a hand-edited
+	// file cannot load one.
+	{name: "Encho",
+		put: func(r *MatchResult) string {
+			if r.Encho.On() {
+				return strconv.Itoa(r.Encho.PeriodCount)
+			}
+			return "0"
+		},
+		take: func(m *MatchResult, cell string) {
+			if v, err := strconv.Atoi(cell); err == nil && v > 0 {
+				m.Encho = &EnchoMetadata{PeriodCount: v}
+			}
+		}},
+	// The server-relative stamp the timestamp last-write-wins guard compares.
+	// It has to be PERSISTED for that guard to survive a restart. Unparseable
+	// or negative reads as 0, which domain.ApplyByTimestamp treats as
+	// unstamped and therefore always-applies: a corrupt cell degrades to
+	// arrival order, never to silently dropping an operator's write.
+	{name: "ModifiedAt",
+		put: func(r *MatchResult) string { return strconv.FormatInt(r.ModifiedAt, 10) },
+		take: func(m *MatchResult, cell string) {
+			if v, err := strconv.ParseInt(cell, 10, 64); err == nil && v > 0 {
+				m.ModifiedAt = v
+			}
+		}},
+}
+
+// poolMatchHeader derives the CSV header row from the table.
+func poolMatchHeader() []string {
+	names := make([]string, len(poolMatchColumns))
+	for i, c := range poolMatchColumns {
+		names[i] = c.name
+	}
+	return names
+}
+
+// poolMatchesLegacyCoreColumns is the width of the original pre-append layout;
+// a row narrower than this is malformed and skipped rather than half-read.
+const poolMatchesLegacyCoreColumns = 12
 
 // parsePoolMatchesRecords turns a CSV record matrix into MatchResults.
 // Extracted so the file-based and bytes-based parsers share the
-// rec-shape→struct mapping verbatim (no drift between the two).
+// rec-shape→struct mapping verbatim (no drift between the two). Each cell is
+// read by its poolMatchColumns take, so the reader cannot disagree with the
+// writer about what a column holds.
 func parsePoolMatchesRecords(records [][]string) []MatchResult {
 	results := []MatchResult{}
 	for i, rec := range records {
-		if i == 0 && len(rec) > 0 && rec[0] == "PoolName" {
+		if i == 0 && len(rec) > 0 && rec[0] == poolMatchColumns[0].name {
 			continue // skip header
 		}
-		if len(rec) < 12 {
+		if len(rec) < poolMatchesLegacyCoreColumns {
 			continue
 		}
 
-		hansokuA, _ := strconv.Atoi(rec[7])
-		hansokuB, _ := strconv.Atoi(rec[8])
-
-		m := MatchResult{
-			ID:       rec[0] + "-" + rec[1], // PoolName-MatchIdx
-			SideA:    rec[2],
-			SideB:    rec[3],
-			Winner:   rec[4],
-			IpponsA:  splitIppons(rec[5]),
-			IpponsB:  splitIppons(rec[6]),
-			HansokuA: hansokuA,
-			HansokuB: hansokuB,
-			Decision: rec[9],
-			Status:   MatchStatus(rec[10]),
-			Court:    rec[11],
+		// Round: -1 is the absent-column default (see poolMatchColumns).
+		m := MatchResult{Round: -1}
+		for c, col := range poolMatchColumns {
+			if c >= len(rec) {
+				break
+			}
+			col.take(&m, rec[c])
 		}
 
-		// Restore a hantei that was persisted as a mark in the winner's score
-		// cell, and take the mark back out so nothing above the store sees it.
-		decodeHanteiFromIppons(&m)
-
-		if len(rec) > 12 && rec[12] != "" {
-			_ = json.Unmarshal([]byte(rec[12]), &m.SubResults)
-		}
-		if len(rec) > 13 {
-			m.ScheduledAt = rec[13]
-		}
-		if len(rec) > 14 {
-			m.ResultSource = rec[14]
-		}
-		if len(rec) > 15 && rec[15] != "" {
-			if v, err := strconv.Atoi(rec[15]); err == nil {
-				m.Round = v
-			} else {
-				m.Round = -1
-			}
-		} else {
-			m.Round = -1
-		}
-		// Participant-id columns (appended after Round, after the legacy
-		// 15-column layout). Absent in files written before this was added
-		// → ids stay empty and consumers fall back to name matching.
-		if len(rec) > 16 {
-			m.SideAID = rec[16]
-		}
-		if len(rec) > 17 {
-			m.SideBID = rec[17]
-		}
-		if len(rec) > 18 {
-			m.WinnerID = rec[18]
-		}
-		if len(rec) > 19 {
-			m.CorrectionReason = rec[19]
-		}
-		// Rep-player columns (appended after CorrectionReason), the individual
-		// fighters each team fields for a pool/league daihyosen/tiebreaker rep
-		// bout. Absent in files written before mp-62vr → stay empty.
-		if len(rec) > 20 {
-			m.RepPlayerA = rec[20]
-		}
-		if len(rec) > 21 {
-			m.RepPlayerB = rec[21]
-		}
-		// Engi flag columns (appended after RepPlayerB), the referee flag counts
-		// per side for an engi (kata competition) bout. Absent in files written
-		// before engi support → stay 0. A non-numeric value is treated as 0, and
-		// a negative value is clamped to 0: flags are validated non-negative at
-		// the HTTP boundary, so a corrupted / hand-edited pool-matches.csv must
-		// not load negative counts that would break engi standings/rendering.
-		if len(rec) > 22 {
-			if v, err := strconv.Atoi(rec[22]); err == nil && v > 0 {
-				m.FlagsA = v
-			}
-		}
-		if len(rec) > 23 {
-			if v, err := strconv.Atoi(rec[23]); err == nil && v > 0 {
-				m.FlagsB = v
-			}
-		}
-		// Reopen-pending column (appended after FlagsB), the "this match was
-		// reopened and still owes an audit reason" flag (mp-gmcg). Absent in
-		// files written before it existed → false, i.e. nothing outstanding,
-		// which is exactly how those matches behaved. A non-boolean value is
-		// treated as false for the same reason: a hand-edited CSV must not be
-		// able to wedge a match behind a justification it can never satisfy.
-		if len(rec) > 24 {
-			if v, err := strconv.ParseBool(rec[24]); err == nil {
-				m.ReopenPending = v
-			}
-		}
-		// Decision-audit columns (appended after ReopenPending): WHO recorded a
-		// kiken/fusenpai and WHY. These were held only in memory, so the audit
-		// trail behind a withdrawal survived until the next restart and no
-		// further. The bracket kept both all along (bracket.json marshals every
-		// exported field), which is the asymmetry this closes.
-		if len(rec) > 25 {
-			m.DecisionBy = rec[25]
-		}
-		if len(rec) > 26 {
-			m.DecisionReason = rec[26]
-		}
-		// Encho (overtime) period count. Stored as a bare integer rather than a
-		// nested object because EnchoMetadata holds exactly that one field.
-		//
-		// Only a POSITIVE count rebuilds the block, which is lossless: Encho.On()
-		// is the single "did this happen in encho" predicate and it requires
-		// non-nil AND positive, so a nil block and a degenerate {PeriodCount: 0}
-		// are already indistinguishable to every consumer. A negative value is
-		// rejected at the HTTP boundary and is treated here as absent, so a
-		// hand-edited file cannot load one.
-		if len(rec) > 27 {
-			if v, err := strconv.Atoi(rec[27]); err == nil && v > 0 {
-				m.Encho = &EnchoMetadata{PeriodCount: v}
-			}
-		}
-		// ModifiedAt: the server-relative stamp the timestamp last-write-wins
-		// guard compares. It has to be PERSISTED for that guard to survive a
-		// restart, which is why the bracket has always written it and why the
-		// pool path could not reconcile without it. Unparseable or negative
-		// reads as 0, which ApplyByTimestamp treats as unstamped and therefore
-		// always-applies: a corrupt cell degrades to arrival order, never to
-		// silently dropping an operator's write.
-		if len(rec) > 28 {
-			if v, err := strconv.ParseInt(rec[28], 10, 64); err == nil && v > 0 {
-				m.ModifiedAt = v
-			}
-		}
+		// The judges'-decision mark loads as the plain ippon entry it is (the
+		// IpponsA/IpponsB take above already read it, verbatim, into the
+		// slice). NormalizeLegacyHantei's only remaining job here is folding
+		// LEGACY decidedByHantei flags nested in the SubResults JSON cell
+		// (pre-ruling files) into that same mark form; see legacy_hantei.go.
+		m.NormalizeLegacyHantei()
 
 		results = append(results, m)
 	}
@@ -573,68 +636,16 @@ func (s *Store) savePoolMatchesLocked(compID string, results []MatchResult, writ
 	// the previous os.Create + streaming pattern lacked.
 	var buf bytes.Buffer
 	writer := csv.NewWriter(&buf)
-	if err := writer.Write([]string{"PoolName", "MatchIdx", "SideA", "SideB", "Winner", "IpponsA", "IpponsB", "HansokuA", "HansokuB", "Decision", "Status", "Court", "SubResults", "ScheduledAt", "ResultSource", "Round", "SideAID", "SideBID", "WinnerID", "CorrectionReason", "RepPlayerA", "RepPlayerB", "FlagsA", "FlagsB", "ReopenPending", "DecisionBy", "DecisionReason", "Encho", "ModifiedAt"}); err != nil {
+	if err := writer.Write(poolMatchHeader()); err != nil {
 		return err
 	}
 
 	for _, r := range results {
-		parts := strings.SplitN(r.ID, "-", 2)
-		poolName := parts[0]
-		matchIdx := ""
-		if len(parts) > 1 {
-			matchIdx = parts[1]
+		row := make([]string, len(poolMatchColumns))
+		for c, col := range poolMatchColumns {
+			row[c] = col.put(&r)
 		}
-
-		subJSON := ""
-		if len(r.SubResults) > 0 {
-			b, _ := json.Marshal(r.SubResults)
-			subJSON = string(b)
-		}
-
-		// A hantei rides in the winner's score cell rather than in a column of
-		// its own; see encodeHanteiIntoIppons.
-		encIpponsA, encIpponsB := encodeHanteiIntoIppons(&r)
-
-		// Encho collapses to its period count, gated on Encho.On() — the same
-		// predicate the parser cites for why only a positive value is
-		// meaningful, so the two sides of the round trip cannot disagree about
-		// what counts as overtime.
-		enchoPeriods := 0
-		if r.Encho.On() {
-			enchoPeriods = r.Encho.PeriodCount
-		}
-
-		if err := writer.Write([]string{
-			poolName,
-			matchIdx,
-			r.SideA,
-			r.SideB,
-			r.Winner,
-			strings.Join(encIpponsA, "|"),
-			strings.Join(encIpponsB, "|"),
-			strconv.Itoa(r.HansokuA),
-			strconv.Itoa(r.HansokuB),
-			r.Decision,
-			string(r.Status),
-			r.Court,
-			subJSON,
-			r.ScheduledAt,
-			r.ResultSource,
-			strconv.Itoa(r.Round),
-			r.SideAID,
-			r.SideBID,
-			r.WinnerID,
-			r.CorrectionReason,
-			r.RepPlayerA,
-			r.RepPlayerB,
-			strconv.Itoa(r.FlagsA),
-			strconv.Itoa(r.FlagsB),
-			strconv.FormatBool(r.ReopenPending),
-			r.DecisionBy,
-			r.DecisionReason,
-			strconv.Itoa(enchoPeriods),
-			strconv.FormatInt(r.ModifiedAt, 10),
-		}); err != nil {
+		if err := writer.Write(row); err != nil {
 			return err
 		}
 	}

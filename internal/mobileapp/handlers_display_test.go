@@ -115,8 +115,8 @@ func TestCourtCurrentReturnsCurrentPayload(t *testing.T) {
 // TestCourtCurrentReturnsRunningBracketMatch, mp-9h1f follow-up. A running
 // KNOCKOUT (bracket) bout must surface as the court's current match; the prior
 // handler scanned only poolMatches, so an elimination bout read as idle. The
-// bracket persists its running score as the formatted ScoreA/ScoreB string, so
-// the handler parses it back into ippon/hansoku via parseScore.
+// bracket carries its running score as ippon arrays natively, so the handler
+// reads IpponsA/IpponsB/HansokuA/HansokuB straight through.
 func TestCourtCurrentReturnsRunningBracketMatch(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
@@ -134,13 +134,14 @@ func TestCourtCurrentReturnsRunningBracketMatch(t *testing.T) {
 	require.NoError(t, store.SaveBracket("ko", &state.Bracket{
 		Rounds: [][]state.BracketMatch{{
 			{
-				ID:     "m-r1-0",
-				SideA:  "Aoi Mori",
-				SideB:  "Ken Sato",
-				Status: state.MatchStatusRunning,
-				Court:  "A",
-				ScoreA: "MK (H1)", // two ippons + one hansoku
-				ScoreB: "D",       // one ippon
+				ID:       "m-r1-0",
+				SideA:    "Aoi Mori",
+				SideB:    "Ken Sato",
+				Status:   state.MatchStatusRunning,
+				Court:    "A",
+				IpponsA:  []string{"M", "K"}, // two ippons + one hansoku
+				HansokuA: 1,
+				IpponsB:  []string{"D"}, // one ippon
 			},
 		}},
 	}))
@@ -159,11 +160,17 @@ func TestCourtCurrentReturnsRunningBracketMatch(t *testing.T) {
 	require.NotNil(t, resp.SideB)
 	assert.Equal(t, "Aoi Mori", resp.SideA.Name)
 	assert.Equal(t, "Ken Sato", resp.SideB.Name)
-	// ScoreA/ScoreB parsed back to ippon arrays + hansoku counts.
+	// BracketMatch's ippon arrays + hansoku counts are read straight through.
 	assert.Equal(t, []string{"M", "K"}, resp.IpponsA)
 	assert.Equal(t, 1, resp.HansokuA)
 	assert.Equal(t, []string{"D"}, resp.IpponsB)
 	assert.Equal(t, 0, resp.HansokuB)
+	// Wire contract: the bracket payload carries ipponsA/ipponsB, never the
+	// legacy scoreA/scoreB rendered-string fields.
+	body := w.Body.String()
+	assert.Contains(t, body, `"ipponsA":["M","K"]`, "body=%q", body)
+	assert.NotContains(t, body, `"scoreA"`, "body=%q", body)
+	assert.NotContains(t, body, `"scoreB"`, "body=%q", body)
 }
 
 // TestCourtCurrentEmptyIpponsAreArraysNotNull, Copilot review. An unscored
@@ -186,8 +193,8 @@ func TestCourtCurrentEmptyIpponsAreArraysNotNull(t *testing.T) {
 			{
 				ID: "m-r1-0", SideA: "Aoi", SideB: "Ken",
 				Status: state.MatchStatusRunning, Court: "A",
-				ScoreA: "(H2)", // hansoku only, no ippons → parseScore returns nil
-				ScoreB: "",     // nothing scored yet → nil
+				HansokuA: 2,   // hansoku only, no ippons → IpponsA stays nil
+				IpponsB:  nil, // nothing scored yet
 			},
 		}},
 	}))
@@ -201,32 +208,6 @@ func TestCourtCurrentEmptyIpponsAreArraysNotNull(t *testing.T) {
 	assert.Contains(t, body, `"ipponsB":[]`, "nil ippons must encode as [] not null: %q", body)
 	assert.NotContains(t, body, `"ipponsA":null`)
 	assert.NotContains(t, body, `"ipponsB":null`)
-}
-
-// TestParseScore covers the decode used by the bracket branch of the
-// current-match handler. The codec itself (and its round-trip property against
-// domain.FormatScore) is pinned in internal/domain/score_test.go; these cases
-// stay because this handler is what the shape actually has to serve.
-func TestParseScore(t *testing.T) {
-	tests := []struct {
-		in      string
-		ippons  []string
-		hansoku int
-	}{
-		{"", nil, 0},
-		{"MK", []string{"M", "K"}, 0},
-		{"MK (H1)", []string{"M", "K"}, 1},
-		{"(H2)", nil, 2},
-		{"D (H1)", []string{"D"}, 1},
-		{"  M K  ", []string{"M", "K"}, 0},
-	}
-	for _, tc := range tests {
-		t.Run(tc.in, func(t *testing.T) {
-			ippons, hansoku := parseScore(tc.in)
-			assert.Equal(t, tc.ippons, ippons)
-			assert.Equal(t, tc.hansoku, hansoku)
-		})
-	}
 }
 
 // TestCourtCurrentSurfacesRepPlayersForDaihyosen, mp-62vr.
@@ -665,16 +646,15 @@ func TestCourtCurrent_ThirdPlaceMatchShownAsCurrent(t *testing.T) {
 	require.NoError(t, store.SaveBracket("nagi", &state.Bracket{
 		Rounds: [][]state.BracketMatch{
 			{{ID: "m-sf1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusCompleted, Court: "A", Winner: "Alice"}},
-			{{ID: "m-final", SideA: "Alice", SideB: "Charlie", Status: state.MatchStatusRunning, Court: "A", ScoreA: "M"}},
+			{{ID: "m-final", SideA: "Alice", SideB: "Charlie", Status: state.MatchStatusRunning, Court: "A", IpponsA: []string{"M"}}},
 		},
 		ThirdPlaceMatch: &state.BracketMatch{
-			ID:     "m-bronze",
-			SideA:  "Bob",
-			SideB:  "Dave",
-			Status: state.MatchStatusRunning,
-			Court:  "A",
-			ScoreA: "K",
-			ScoreB: "",
+			ID:      "m-bronze",
+			SideA:   "Bob",
+			SideB:   "Dave",
+			Status:  state.MatchStatusRunning,
+			Court:   "A",
+			IpponsA: []string{"K"},
 		},
 	}))
 

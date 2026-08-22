@@ -28,6 +28,11 @@ type Store struct {
 	// compMu maps competition ID -> *sync.RWMutex for fine-grained locking.
 	compMu sync.Map
 
+	// legacyUpgraded marks competitions whose on-disk legacy shapes have been
+	// checked (and converted) this process; see legacy_upgrade.go. Cleared on
+	// DeleteCompetition so a recreated same-ID competition is re-checked.
+	legacyUpgraded sync.Map
+
 	// compRenameMu serializes "uniqueness-check + save" sequences across
 	// all competitions. Required because per-comp locks alone can't fix
 	// the cross-comp AB-BA race: two concurrent renames of different

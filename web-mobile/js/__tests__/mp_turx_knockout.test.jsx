@@ -69,7 +69,7 @@ describe('ViewerCompetition: merged mixed comp shows no cross-link (mp-turx back
   const STUBBED = [
     'StatusBadge', 'formatDate', 'formatLabel', 'pluralize', 'Term',
     'BracketTree', 'buildBracket', 'roundLabel', 'bracketRoundLabel', 'formatIpponsScore',
-    'ipponsFromScore', 'isHikiwake', 'hasBothSides', 'compareDmy',
+    'isHikiwake', 'hasBothSides', 'compareDmy',
     'queueLabel', 'queueLabelCompact', 'teamIVScore', 'matchScoreStr',
   ];
 
@@ -120,7 +120,6 @@ describe('ViewerCompetition: merged mixed comp shows no cross-link (mp-turx back
     global.window.matchScoreStr = (m) =>
       (global.window.teamIVScore(m)) ||
       global.window.formatIpponsScore(m?.ipponsB || [], m?.ipponsA || [], m?.score, m?.decision, m?.encho, m?.decidedByHantei);
-    global.window.ipponsFromScore = () => [];
     global.window.isHikiwake = () => false;
     global.window.hasBothSides = (m) => !!(m && m.sideA && m.sideB && typeof m.sideA !== 'string' && m.sideA.id);
     global.window.compareDmy = (a, b) => String(a).localeCompare(String(b));

@@ -151,7 +151,9 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		return nil, nil
 	}
 
-	applyHansokuIppons(result)
+	if err := applyHansokuIppons(result); err != nil {
+		return nil, err
+	}
 	deriveDaihyosenWinner(result)
 
 	// Capture the prior result so we can roll back the score on

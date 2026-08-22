@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -56,6 +58,72 @@ func TestParseBracketBytes(t *testing.T) {
 		assert.Equal(t, 1, b.ThirdPlaceMatch.FlagsA, "non-negative bronze FlagsA preserved")
 		assert.Equal(t, 0, b.ThirdPlaceMatch.FlagsB, "negative bronze FlagsB clamped to 0")
 	})
+
+	// A pre-array bracket.json: two matches, one carrying only the legacy
+	// rendered score strings, the other ALSO carrying a legacy decidedByHantei
+	// flag on top of a legacy string. Both legacies must fold on load, in
+	// order (string -> arrays, then flag -> mark), and the legacy fields must
+	// come back empty/false so nothing downstream can observe the old shape.
+	t.Run("legacy score strings and hantei flag fold together on load", func(t *testing.T) {
+		raw := []byte(`{"rounds":[[
+			{"id":"m1","sideA":"Alice","sideB":"Bob","winner":"","scoreA":"MHt","scoreB":"K(H1)"},
+			{"id":"m2","sideA":"Alice","sideB":"Bob","winner":"Alice","scoreA":"K","scoreB":"","decidedByHantei":true}
+		]]}`)
+		b, err := parseBracketBytes(raw)
+		require.NoError(t, err)
+		require.Len(t, b.Rounds[0], 2)
+
+		m1 := b.Rounds[0][0]
+		assert.Equal(t, []string{"M", domain.HanteiMark}, m1.IpponsA)
+		assert.Equal(t, []string{"K"}, m1.IpponsB)
+		assert.Equal(t, 0, m1.HansokuA)
+		assert.Equal(t, 1, m1.HansokuB)
+		assert.Empty(t, m1.ScoreA, "legacy string cleared")
+		assert.Empty(t, m1.ScoreB, "legacy string cleared")
+
+		m2 := b.Rounds[0][1]
+		assert.Equal(t, []string{"K", domain.HanteiMark}, m2.IpponsA,
+			"the legacy string folds into an array BEFORE the hantei flag folds into the mark")
+		assert.Empty(t, m2.IpponsB)
+		assert.False(t, m2.DecidedByHantei, "legacy flag cleared")
+		assert.Empty(t, m2.ScoreA, "legacy string cleared")
+		assert.Empty(t, m2.ScoreB, "legacy string cleared")
+	})
+}
+
+// TestLegacyBracketRoundTripSave pins the wire contract end to end: loading a
+// legacy bracket.json (rendered score strings) and saving it back must
+// produce bytes with ipponsA/hansokuA/etc keys and NO scoreA/scoreB keys —
+// the legacy fields are read-only, never re-persisted once folded.
+func TestLegacyBracketRoundTripSave(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-bracket-legacy-test-*")
+	require.NoError(t, err)
+	defer func() { _ = os.RemoveAll(dir) }()
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	compID := "legacy-comp"
+	compDir := filepath.Join(dir, "competitions", compID)
+	require.NoError(t, os.MkdirAll(compDir, 0755))
+
+	raw := []byte(`{"rounds":[[{"id":"m1","sideA":"Alice","sideB":"Bob","winner":"Alice","scoreA":"MHt","scoreB":"K(H1)"}]]}`)
+	require.NoError(t, os.WriteFile(filepath.Join(compDir, "bracket.json"), raw, 0600))
+
+	b, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.Len(t, b.Rounds[0], 1)
+	assert.Equal(t, []string{"M", domain.HanteiMark}, b.Rounds[0][0].IpponsA)
+	assert.Empty(t, b.Rounds[0][0].ScoreA)
+
+	require.NoError(t, store.SaveBracket(compID, b))
+
+	saved, err := os.ReadFile(filepath.Join(compDir, "bracket.json"))
+	require.NoError(t, err)
+	assert.Contains(t, string(saved), `"ipponsA"`)
+	assert.Contains(t, string(saved), `"hansokuB"`)
+	assert.NotContains(t, string(saved), `"scoreA"`, "legacy field must never be re-persisted")
+	assert.NotContains(t, string(saved), `"scoreB"`, "legacy field must never be re-persisted")
 }
 
 func TestUpdateBracket_Basic(t *testing.T) {
@@ -354,6 +422,77 @@ func TestMatchStatusByID(t *testing.T) {
 	})
 }
 
+// TestMatchSidesByID_ReturnsIDs pins the bc-dmsr widened return signature
+// (mobileapp review): MatchSidesByID now returns sideAID/sideBID alongside
+// the existing sideA/sideB, sourced from the SAME pool-match/bracket lookup,
+// so a caller backfilling ids ahead of hantei-mark validation sees exactly
+// the ids the engine will later use. A pool match carries real ids; a
+// bracket match (BracketMatch persists no ids at all) must always report
+// empty ids while still resolving sideA/sideB by name, so the pre-existing
+// legacy-hantei name backfill caller's behaviour for bracket matches is
+// unchanged.
+func TestMatchSidesByID_ReturnsIDs(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-match-sides-*")
+	require.NoError(t, err)
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	compID := "test-comp"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Test"}))
+	require.NoError(t, store.SavePoolMatches(compID, []MatchResult{
+		{ID: "P1-0", SideA: "Alice", SideB: "Alice", SideAID: "dojo-x-alice", SideBID: "dojo-y-alice"},
+	}))
+	require.NoError(t, store.SaveBracket(compID, &Bracket{
+		Rounds:          [][]BracketMatch{{{ID: "B1", SideA: "Carol", SideB: "Dave"}}},
+		ThirdPlaceMatch: &BracketMatch{ID: "BRONZE", SideA: "Eve", SideB: "Frank"},
+	}))
+
+	t.Run("pool match: sideAID/sideBID resolve from the stored pairing", func(t *testing.T) {
+		sideA, sideB, sideAID, sideBID, found, err := store.MatchSidesByID(compID, "P1-0")
+		require.NoError(t, err)
+		require.True(t, found)
+		assert.Equal(t, "Alice", sideA)
+		assert.Equal(t, "Alice", sideB)
+		assert.Equal(t, "dojo-x-alice", sideAID)
+		assert.Equal(t, "dojo-y-alice", sideBID)
+	})
+
+	t.Run("bracket round match: names resolve, ids are always empty", func(t *testing.T) {
+		sideA, sideB, sideAID, sideBID, found, err := store.MatchSidesByID(compID, "B1")
+		require.NoError(t, err)
+		require.True(t, found)
+		assert.Equal(t, "Carol", sideA)
+		assert.Equal(t, "Dave", sideB)
+		assert.Empty(t, sideAID, "BracketMatch persists no ids")
+		assert.Empty(t, sideBID, "BracketMatch persists no ids")
+	})
+
+	t.Run("BRONZE sibling match: names resolve, ids are always empty", func(t *testing.T) {
+		sideA, sideB, sideAID, sideBID, found, err := store.MatchSidesByID(compID, "BRONZE")
+		require.NoError(t, err)
+		require.True(t, found)
+		assert.Equal(t, "Eve", sideA)
+		assert.Equal(t, "Frank", sideB)
+		assert.Empty(t, sideAID)
+		assert.Empty(t, sideBID)
+	})
+
+	t.Run("unknown match: found=false, everything empty", func(t *testing.T) {
+		sideA, sideB, sideAID, sideBID, found, err := store.MatchSidesByID(compID, "nope")
+		require.NoError(t, err)
+		assert.False(t, found)
+		assert.Empty(t, sideA)
+		assert.Empty(t, sideB)
+		assert.Empty(t, sideAID)
+		assert.Empty(t, sideBID)
+	})
+
+	t.Run("invalid compID errors", func(t *testing.T) {
+		_, _, _, _, _, err := store.MatchSidesByID("../traversal", "P1-0")
+		assert.Error(t, err)
+	})
+}
+
 func TestLoadBracketLocked_ViaTransaction(t *testing.T) {
 	dir, err := os.MkdirTemp("", "state-bracket-locked-*")
 	require.NoError(t, err)
@@ -454,12 +593,12 @@ func TestLoadBracket_DeepCopyIsolation(t *testing.T) {
 					Encho: &EnchoMetadata{PeriodCount: 1},
 					SubResults: []SubMatchResult{
 						{
-							SideA:           "A1",
-							SideB:           "B1",
-							IpponsA:         []string{"M"},
-							IpponsB:         []string{"K"},
-							Encho:           &EnchoMetadata{PeriodCount: 2},
-							DecidedByHantei: HanteiPtr(true),
+							SideA:   "A1",
+							SideB:   "B1",
+							Winner:  "A1",
+							IpponsA: []string{"M", domain.HanteiMark},
+							IpponsB: []string{"K"},
+							Encho:   &EnchoMetadata{PeriodCount: 2},
 						},
 					},
 				},
@@ -481,11 +620,10 @@ func TestLoadBracket_DeepCopyIsolation(t *testing.T) {
 	first.Rounds[0][0].SubResults[0].IpponsA[0] = "MUTATED"
 	first.Rounds[0][0].SubResults[0].IpponsB[0] = "MUTATED"
 	first.Rounds[0][0].SubResults[0].Encho.PeriodCount = 99
-	// The *bool hantei flag is the newest reference field on the sub, and it
-	// needs its own mutation: a shallow struct copy would carry the SAME
-	// pointer, so writing through it corrupts the cached bracket while every
-	// other assertion here still passes.
-	*first.Rounds[0][0].SubResults[0].DecidedByHantei = false
+	// The hantei verdict rides in the ippon slice, so the IpponsA mutation
+	// above already covers its isolation; overwrite the mark entry too so a
+	// shared backing array cannot hide behind an untouched second element.
+	first.Rounds[0][0].SubResults[0].IpponsA[1] = "MUTATED"
 
 	// A fresh load must reflect the saved state, not the in-place mutation.
 	second, err := store.LoadBracket(compID)
@@ -493,7 +631,7 @@ func TestLoadBracket_DeepCopyIsolation(t *testing.T) {
 	require.Len(t, second.Rounds[0][0].SubResults, 1)
 	assert.Equal(t, 1, second.Rounds[0][0].Encho.PeriodCount)
 	assert.Equal(t, "A1", second.Rounds[0][0].SubResults[0].SideA)
-	assert.Equal(t, []string{"M"}, second.Rounds[0][0].SubResults[0].IpponsA)
+	assert.Equal(t, []string{"M", domain.HanteiMark}, second.Rounds[0][0].SubResults[0].IpponsA)
 	assert.Equal(t, []string{"K"}, second.Rounds[0][0].SubResults[0].IpponsB)
 	assert.Equal(t, 2, second.Rounds[0][0].SubResults[0].Encho.PeriodCount)
 	assert.True(t, second.Rounds[0][0].SubResults[0].HanteiDecided())

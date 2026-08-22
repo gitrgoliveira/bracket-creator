@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"fmt"
 	"math"
 	"time"
 
@@ -566,75 +565,3 @@ func EstimateForCounts(poolCount, playoffCount int, comp *state.Competition, tou
 // EstimateForCounts's walk prices. Kachinuki passes three (best/avg/worst);
 // every other format passes one.
 type schedScenario struct{ poolPerMatch, playoffPerMatch int }
-
-func (e *Engine) GenerateSchedule(compID string) error {
-	comp, err := e.store.LoadCompetition(compID)
-	if err != nil {
-		return err
-	}
-	if comp == nil {
-		return notFoundErrorf("competition %s not found", compID)
-	}
-
-	var entries []state.ScheduleEntry
-
-	if comp.Format == state.CompFormatMixed || comp.Format == state.CompFormatLeague || comp.Format == state.CompFormatSwiss {
-		matches, err := e.store.LoadPoolMatches(compID)
-		if err != nil {
-			return err
-		}
-		for _, m := range matches {
-			entries = append(entries, state.ScheduleEntry{
-				MatchType:   "pool",
-				MatchRef:    m.ID,
-				Court:       m.Court,
-				ScheduledAt: m.ScheduledAt,
-				Status:      string(m.Status),
-			})
-		}
-	} else {
-		bracket, err := e.store.LoadBracket(compID)
-		if err != nil {
-			return err
-		}
-		if bracket != nil {
-			for rIdx, round := range bracket.Rounds {
-				for _, m := range round {
-					court := m.Court
-					if court == "" {
-						court = "A" // Default court
-					}
-					entries = append(entries, state.ScheduleEntry{
-						MatchType:   "bracket",
-						MatchRef:    fmt.Sprintf("R%d-M%s", rIdx+1, m.ID),
-						Court:       court,
-						ScheduledAt: m.ScheduledAt,
-						Status:      string(m.Status),
-					})
-				}
-			}
-			// Bronze (3rd-place) playoff is a sibling field, not a row in Rounds;
-			// count it as one extra bracket bout when present (naginata only).
-			if bracket.ThirdPlaceMatch != nil {
-				bm := bracket.ThirdPlaceMatch
-				court := bm.Court
-				if court == "" {
-					court = "A"
-				}
-				entries = append(entries, state.ScheduleEntry{
-					MatchType: "bracket",
-					// Bronze is not in a numbered round, so it can't use the
-					// "R{n}-M{id}" round-match ref. Use the bare match id so
-					// patchScheduleCourt's exact-match clause keeps the
-					// schedule court in sync when the bronze court changes.
-					MatchRef:    bm.ID,
-					Court:       court,
-					ScheduledAt: bm.ScheduledAt,
-					Status:      string(bm.Status),
-				})
-			}
-		}
-	}
-
-	return e.store.SaveSchedule(compID, entries)
-}

@@ -1,32 +1,27 @@
-// Regression: ScoreEditorModal must seed its ippon slots from the scoreA /
-// scoreB STRINGS when the ippon arrays are absent.
+// ScoreEditorModal ippon-slot seeding.
 //
-// THE BUG (found in browser UAT, HIGH, silent data loss). The editor seeded
-// only from m.ipponsA / m.ipponsB:
+// HISTORY: this file used to pin a fallback that parsed the bracket-only
+// ScoreA/ScoreB STRINGS (state.BracketMatch on the old wire) when the ippon
+// ARRAYS were absent — a knockout match re-read from the server used to carry
+// no ipponsA/ipponsB at all, so the editor opened EMPTY on a match that
+// already had points and the operator's next tap saved over them (a
+// recorded ippon lost mid-match, found in browser UAT, HIGH).
 //
-//   const seedAPts = m.ipponsA?.filter(...) || (m.score?.type === "ippon" && ...);
+// That gap is now closed at the WIRE level, not in this editor: pool and
+// bracket matches converge on one shape (ipponsA/ipponsB arrays; scoreA/
+// scoreB strings never appear in any response), so every match arrives with
+// its arrays already populated. The scoreA/scoreB-string parsing fallback
+// (window.ipponsFromScore) was deleted from admin_scoring_individual.jsx
+// along with the codec itself (bracket.jsx); this file keeps only the tests
+// that still describe real seeding behaviour.
 //
-// state.MatchResult (pool / league) carries ipponsA / ipponsB on the wire, but
-// state.BracketMatch (knockout) carries ONLY ScoreA / ScoreB strings
-// (internal/state/models.go — no ippon slices on the bracket type). So a
-// KNOCKOUT match re-read from the server arrived with no ippon arrays at all:
-// the editor opened EMPTY on a match that already had points, and the
-// operator's next tap saved over them — a recorded ippon lost mid-match.
-//
-// The fix parses the string as a fallback, which is what every DISPLAY surface
-// already did (admin_shiaijo.jsx, match_scoreboard.jsx, bracket.jsx); the
-// editor was the one surface that did not.
-//
-// Two things this file deliberately pins beyond the headline case:
+// Two things this file still pins:
+//   * ippon ARRAYS are the authoritative source and win over anything else
+//     on the match object.
 //   * the score.type === "ippon" branch must stay REACHABLE as the last
-//     resort. It is guarded by `cleanA.length ? ... : ...` and NOT by `||`,
-//     because an empty array is truthy and `||` would make it dead code.
-//     "seeds from score.ippons" below fails if anyone "simplifies" it back.
-//   * window.ipponsFromScore is the REAL implementation, published as a side
-//     effect of importing bracket.jsx (the idiom of vsched_bout_middle.test.jsx
-//     and how the browser reaches it). Stubbing it would make these assertions
-//     circular — in particular the "MK (H1)" case only passes because the real
-//     helper strips the backend's hansoku suffix before splitting.
+//     resort (quick-score paths that set only score.ippons, no arrays). It
+//     is guarded by `cleanA.length ? ... : ...` and NOT by `||`, because an
+//     empty array is truthy and `||` would make it dead code.
 //
 // Render project (real React 18 + jsdom): the seeding runs in the component
 // body and is only observable through the mounted slot buttons, so there is no
@@ -67,9 +62,6 @@ beforeAll(async () => {
     originals[k] = { had: k in window, value: window[k] };
     window[k] = v;
   }
-  // Side-effect import: publishes the REAL window.ipponsFromScore that the
-  // editor's fallback calls. Not stubbed on purpose (see header).
-  await import('../../bracket.jsx');
   await import('../../admin_scoring_modal.jsx');
   ScoreEditorModal = window.ScoreEditorModal;
 });
@@ -84,8 +76,9 @@ afterAll(() => {
 const SIDE_A = { id: 'p1', name: 'Yamada' }; // Aka  (right column)
 const SIDE_B = { id: 'p2', name: 'Tanaka' }; // Shiro (left column)
 
-// A knockout match exactly as state.BracketMatch reaches the client: scoreA /
-// scoreB strings, NO ipponsA / ipponsB, still running so there is no winner.
+// A knockout match exactly as state.BracketMatch reaches the client: ipponsA /
+// ipponsB arrays (the same shape a pool match carries), still running so
+// there is no winner.
 function knockoutMatch(overrides = {}) {
   return {
     id: 'bm1',
@@ -118,41 +111,16 @@ function renderEditor(match) {
 }
 
 describe('ScoreEditorModal ippon seeding', () => {
-  it('is a sanity check that the REAL ipponsFromScore is in play', () => {
-    expect(typeof window.ipponsFromScore).toBe('function');
-    expect(window.ipponsFromScore('MK')).toEqual(['M', 'K']);
-    expect(window.ipponsFromScore('MK (H1)')).toEqual(['M', 'K']);
+  it('seeds from ipponsA / ipponsB when the arrays are present (bracket match)', () => {
+    const { container } = renderEditor(knockoutMatch({
+      ipponsA: ['M', 'K'],
+      ipponsB: ['D'],
+    }));
+    expect(akaSlots(container)).toEqual(['M', 'K']);
+    expect(shiroSlots(container)).toEqual(['D', '·']);
   });
 
-  // ── THE bug case ──────────────────────────────────────────────────────────
-  it('seeds Aka from scoreA when a knockout match carries no ippon arrays', () => {
-    const { container } = renderEditor(knockoutMatch({ scoreA: 'M' }));
-    // Before the fix these read ['·', '·'] and the next tap overwrote the M.
-    expect(akaSlots(container)).toEqual(['M', '·']);
-    expect(shiroSlots(container)).toEqual(['·', '·']);
-  });
-
-  it('seeds Shiro from scoreB when a knockout match carries no ippon arrays', () => {
-    const { container } = renderEditor(knockoutMatch({ scoreB: 'K' }));
-    expect(shiroSlots(container)).toEqual(['K', '·']);
-    expect(akaSlots(container)).toEqual(['·', '·']);
-  });
-
-  it('seeds both sides from their score strings', () => {
-    const { container } = renderEditor(knockoutMatch({ scoreA: 'M', scoreB: 'K' }));
-    expect(akaSlots(container)).toEqual(['M', '·']);
-    expect(shiroSlots(container)).toEqual(['K', '·']);
-  });
-
-  it('strips the backend hansoku suffix rather than splitting it into slots', () => {
-    // engine/scoring.go formatScore appends " (H1)". A naive split would seed
-    // ["M", " ", "(", "H", "1", ")"]; the real ipponsFromScore strips it.
-    const { container } = renderEditor(knockoutMatch({ scoreA: 'M (H1)' }));
-    expect(akaSlots(container)).toEqual(['M', '·']);
-  });
-
-  // ── no regression on the pool / league shape ──────────────────────────────
-  it('still seeds from ipponsA / ipponsB when the arrays are present', () => {
+  it('no regression on the pool / league shape: same seeding from ipponsA / ipponsB', () => {
     const { container } = renderEditor({
       id: 'pm1',
       status: 'running',
@@ -168,21 +136,19 @@ describe('ScoreEditorModal ippon seeding', () => {
     expect(shiroSlots(container)).toEqual(['D', '·']);
   });
 
-  it('prefers the ippon arrays over a disagreeing score string', () => {
-    const { container } = renderEditor(knockoutMatch({
-      ipponsA: ['M', 'K'],
-      scoreA: 'D',
-      ipponsB: [],
-      scoreB: 'T',
-    }));
-    expect(akaSlots(container)).toEqual(['M', 'K']);
-    // An explicitly EMPTY ipponsB still wins over scoreB: the array is the
-    // authoritative source when the wire carries one.
+  // Regression guard for the removed codec: a scoreA/scoreB-only match (the
+  // pre-fix bracket wire shape) is no longer parsed at all. That shape never
+  // arrives from the real server any more, so the editor must not silently
+  // seed points from it — an unattributed "M" in scoreA with no ipponsA/B
+  // and no score.ippons must render EMPTY slots, not a resurrected letter.
+  it('does not seed from scoreA/scoreB (that shape never arrives on the wire)', () => {
+    const { container } = renderEditor(knockoutMatch({ scoreA: 'M', scoreB: 'K' }));
+    expect(akaSlots(container)).toEqual(['·', '·']);
     expect(shiroSlots(container)).toEqual(['·', '·']);
   });
 
   // ── the last-resort branch must stay reachable ────────────────────────────
-  it('seeds from score.ippons when there is neither an array nor a score string', () => {
+  it('seeds from score.ippons when there is no ippon array', () => {
     // GUARD against replacing `cleanA.length ? ... : ...` with `cleanA || ...`:
     // cleanA is [] here, which is TRUTHY, so `||` would return the empty array
     // and this branch would become dead code — slots would read ['·', '·'].
@@ -205,21 +171,13 @@ describe('ScoreEditorModal ippon seeding', () => {
     expect(akaSlots(container)).toEqual(['·', '·']);
   });
 
-  // ── the "•" placeholder filter applies to BOTH sources ────────────────────
+  // ── the "•" placeholder filter applies to the ippon arrays ───────────────
   it('filters the "•" placeholder out of the ippon arrays', () => {
     const { container } = renderEditor(knockoutMatch({
       ipponsA: ['•', 'M'],
       ipponsB: ['•', '•'],
     }));
     expect(akaSlots(container)).toEqual(['M', '·']);
-    expect(shiroSlots(container)).toEqual(['·', '·']);
-  });
-
-  it('filters the "•" placeholder out of a parsed score string', () => {
-    const { container } = renderEditor(knockoutMatch({ scoreA: '•M', scoreB: '•' }));
-    expect(akaSlots(container)).toEqual(['M', '·']);
-    // scoreB parses to ["•"], which filters to empty — and with no winner /
-    // score.ippons to fall back on, Shiro stays empty rather than showing "•".
     expect(shiroSlots(container)).toEqual(['·', '·']);
   });
 });

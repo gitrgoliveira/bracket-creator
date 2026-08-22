@@ -50,22 +50,15 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   const isTeam = m.compKind === "team" || m.teamSize > 0;
   const teamSize = m.teamSize || 5;
 
-  // Seed from ipponsA/ipponsB when present, else PARSE the scoreA/scoreB
-  // string. That fallback is load-bearing for knockout: state.MatchResult
-  // carries ipponsA/ipponsB on the wire, but state.BracketMatch carries only
-  // the scoreA/scoreB strings, so a bracket match re-read from the server
-  // (any reload, or opening the editor from the Scores page) arrived with no
-  // ippon arrays at all. The editor then opened EMPTY on a match that already
-  // had points, and the next tap saved over them — the operator silently lost
-  // a recorded ippon mid-match. Every display surface already parses the
-  // string this way (admin_shiaijo.jsx, match_scoreboard.jsx, bracket.jsx);
-  // this editor was the one that did not.
+  // Seed from ipponsA/ipponsB: pool and bracket matches share this one wire
+  // shape (scoreA/scoreB strings never appear), so every match arrives with
+  // its ippon arrays already populated when it has recorded points.
   // Keep the score.type === "ippon" branch as the LAST resort: it serves the
   // quick-score paths that set only score.ippons. It must stay reachable when
   // neither source yields a point, so test emptiness explicitly rather than
   // relying on ||: an empty array is truthy and would swallow it.
-  const cellsA = m.ipponsA || (window.ipponsFromScore ? window.ipponsFromScore(m.scoreA) : []);
-  const cellsB = m.ipponsB || (window.ipponsFromScore ? window.ipponsFromScore(m.scoreB) : []);
+  const cellsA = m.ipponsA || [];
+  const cellsB = m.ipponsB || [];
   // realIppons, not a local copy: this file imports the leaf that owns "what
   // counts as a recorded ippon", and its own comments require these totals to
   // read the same rule as the scoreboard's hanteiTied.
@@ -460,7 +453,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // The signature is the tuple the effect WRITES, not the `m` fields it reads.
   // Those two lists had already drifted apart: `m.status` fed no setter (so a
   // status-only broadcast triggered a no-op re-seed), while the bracket-match
-  // fallbacks `m.scoreA`/`m.scoreB` (via ipponsFromScore), `m.score.ippons`,
+  // fallbacks `m.ipponsA`/`m.ipponsB`, `m.score.ippons`,
   // `m.score.fouls` and `m.winner?.id` all feed one and were absent — so a
   // bracket match whose score moved elsewhere did not re-seed at all. Keying on
   // the seeds themselves cannot drift: whatever the derivation above starts

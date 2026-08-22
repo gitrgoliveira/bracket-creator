@@ -23,7 +23,6 @@ describe('T5: VSchedItem winner cue - completed team match', () => {
     runtime = makeReactive();
     global.React = runtime.React;
     global.window = global.window || {};
-    global.window.ipponsFromScore = vi.fn(() => []);
     global.window.matchScoreStr = vi.fn(() => '');
     global.window.queueLabelCompact = null;
     vi.resetModules();
@@ -35,7 +34,6 @@ describe('T5: VSchedItem winner cue - completed team match', () => {
   afterEach(() => {
     runtime.unmount();
     global.React = realReact;
-    delete global.window.ipponsFromScore;
     delete global.window.matchScoreStr;
     delete global.window.queueLabelCompact;
     vi.restoreAllMocks();

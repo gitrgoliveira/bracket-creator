@@ -224,19 +224,6 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		}
 	})
 
-	t.Run("Save Schedule", func(t *testing.T) {
-		comp := state.Competition{ID: "sched-comp"}
-		store.SaveCompetition(&comp)
-
-		entries := []state.ScheduleEntry{{MatchRef: "m1", Court: "A"}}
-		reqBody, _ := json.Marshal(entries)
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/competitions/sched-comp/schedule", bytes.NewBuffer(reqBody))
-		req.Header.Set("Content-Type", "application/json")
-		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusOK, w.Code)
-	})
-
 	t.Run("Reset Overrides", func(t *testing.T) {
 		comp := state.Competition{ID: "reset-comp"}
 		store.SaveCompetition(&comp)
@@ -3288,4 +3275,69 @@ func TestUpdateCompetition_CourtStillRunningMatches(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code,
 			"nothing is live before the draw, so the allocation is still the operator's to set: %s", w.Body.String())
 	})
+}
+
+// TestCompetitionPutWritesCanonicalSeedIdentity pins the canonical form
+// extractSeeds writes. seeds.csv is resolved against the roster by exact
+// (name, dojo) key and is NOT canonicalized on load, while participants.csv IS
+// (CreatePlayersFromRecords Title-cases the name and TrimSpaces every field on
+// every parse). Writing the raw request name therefore produced a seed row
+// that could not resolve against its own participant.
+//
+// This is the operator-visible half of the bulk-endpoint casing bug: the admin
+// roster box's "Apply changes" goes through PUT /competitions/:id (deriving
+// seeds.csv fresh from each player's Seed field), NOT the bulk participants
+// POST, so retyping a seeded competitor's name in different casing returned
+// 200 and silently dropped the seed - the panel just showed "0 seeded".
+// Confirmed in the browser before and after the fix.
+func TestCompetitionPutWritesCanonicalSeedIdentity(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	const compID = "comp-seed-canonical"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "Seed Canonical Test", Status: state.CompStatusSetup,
+	}))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "Van Der Berg", Dojo: "DojoA"},
+		{Name: "Bob Jones", Dojo: "Tora"},
+	}))
+	require.NoError(t, store.SaveSeeds(compID, []domain.SeedAssignment{
+		{Name: "Van Der Berg", Dojo: "DojoA", SeedRank: 1},
+	}))
+
+	// The roster box on "Apply changes": the whole competition, one seeded
+	// name retyped in lower case with a padded dojo, seed rank carried along.
+	body, _ := json.Marshal(map[string]any{
+		"id": compID, "name": "Seed Canonical Test", "status": "setup",
+		"players": []map[string]any{
+			{"name": "van der berg", "dojo": "  DojoA  ", "seed": 1},
+			{"name": "Bob Jones", "dojo": "Tora"},
+		},
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+compID, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Tournament-Password", "testpass")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+
+	raw, err := store.LoadSeedsRaw(compID)
+	require.NoError(t, err)
+	require.Len(t, raw, 1)
+	assert.Equal(t, "Van Der Berg", raw[0].Name, "seeds.csv must hold the canonical name the roster reads back as")
+	assert.Equal(t, "DojoA", raw[0].Dojo, "both halves of the seed key are canonicalized, not just the name")
+
+	// The point of the canonical form: the seed still resolves onto its own
+	// participant on the next load.
+	players, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	seeded := map[string]int{}
+	for _, p := range players {
+		if p.Seed > 0 {
+			seeded[p.Name] = p.Seed
+		}
+	}
+	assert.Equal(t, map[string]int{"Van Der Berg": 1}, seeded,
+		"a casing-only retype must not silently orphan the seed")
 }

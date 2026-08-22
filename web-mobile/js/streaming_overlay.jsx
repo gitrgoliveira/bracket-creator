@@ -182,25 +182,17 @@ function StreamingOverlay({ court, position, competitions }) {
     // Individual match data (non-team).
     const shiro = hasRunning && !isTeamMatch ? sideLabel(running.match.sideB, zekken) : '';
     const aka = hasRunning && !isTeamMatch ? sideLabel(running.match.sideA, zekken) : '';
-    // ipponsFromScore is the same fallback IndividualScore applies: a BRACKET
-    // match persists its running score as the formatted scoreA/scoreB string,
-    // not the ippon arrays a pool match carries, so reading the arrays alone
-    // left this lower-third showing "0 - 0" through a scored knockout bout
-    // while the board beside it read "K D vs M". (Go's own half of this is
-    // domain.ParseScore; the display handler already parses for its endpoint.)
+    // Pool and bracket matches share one wire shape (ipponsA/ipponsB arrays;
+    // scoreA/scoreB strings never appear), so the running score reads
+    // straight off the array with no per-kind fallback.
     //
     // "-" for an empty side, not "0": a kendo score never reads "M - 0", and
     // the middle/cell contract is explicit that a cell with no points shows a
     // dash and NEVER a digit. The bout line below has always done this; the
     // match line disagreed with it.
-    const ovlIppons = (arr, scoreStr) => {
-        const real = realIppons(arr);
-        if (real.length) return real.join('');
-        const parsed = window.ipponsFromScore ? realIppons(window.ipponsFromScore(scoreStr)) : [];
-        return parsed.join('') || '-';
-    };
-    const ipponsB = hasRunning && !isTeamMatch ? ovlIppons(running.match.ipponsB, running.match.scoreB) : '';
-    const ipponsA = hasRunning && !isTeamMatch ? ovlIppons(running.match.ipponsA, running.match.scoreA) : '';
+    const ovlIppons = (arr) => realIppons(arr).join('') || '-';
+    const ipponsB = hasRunning && !isTeamMatch ? ovlIppons(running.match.ipponsB) : '';
+    const ipponsA = hasRunning && !isTeamMatch ? ovlIppons(running.match.ipponsA) : '';
     // T097: the middle mark (X / (E) / (DH)) on the OBS lower-third. Computed
     // off the running match so it disappears the moment the overlay fades out.
     const decSfx = hasRunning && !isTeamMatch && window.matchMiddleMark ? window.matchMiddleMark(running.match) : '';

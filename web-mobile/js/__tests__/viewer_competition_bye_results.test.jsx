@@ -139,8 +139,8 @@ describe('ViewerCompetition Recent results excludes byes', () => {
           status: 'completed',
           court: 'A',
           scheduledAt: '09:00',
-          scoreA: 'MK',
-          scoreB: 'D',
+          ipponsA: ['M', 'K'],
+          ipponsB: ['D'],
         },
         {
           // The bye: no sideA was ever drawn.

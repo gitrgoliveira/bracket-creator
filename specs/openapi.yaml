@@ -29,6 +29,13 @@ info:
     draw, result overrides, roster mutations, import) and organiser-owned setup
     (tournament/competition config) stay gated. In the default `officiated` mode every
     `/api/` route keeps requiring `X-Tournament-Password` as described above.
+
+    **Request body size limits.** Every `/api/` route enforces a request-size cap and
+    returns `413` when the body exceeds it: admin JSON bodies are capped at 1 MB by
+    default; `POST /api/tournament/announce` and `POST /api/tournament/reset` are
+    capped tighter, at 4 KB, since their payloads are small fixed-shape JSON; and
+    `POST /api/tournament/import` is capped at 64 MB to admit a full-roster
+    multipart upload.
   version: 2.1.0
 
 servers:
@@ -237,7 +244,15 @@ paths:
         - `tournament_updated`: tournament-level config change (a competition
           was created/updated/deleted, participants updated, etc.).
           `data: null`; clients should refresh full state.
-        - `schedule_updated`: a competition's schedule was saved.
+        - `schedule_updated`: a match's scheduled time was moved; a pool-phase
+          tie-breaker was auto-injected, or the pool phase resolved into the
+          knockout (fully or partially), or the competition is blocked
+          awaiting an operator-run league tie-break; or a league tie-break
+          group was generated, deleted, or finalized. Note a court
+          reassignment emits `match_updated`, not this event, and so does
+          adding or removing a daihyosen bout (it can still indirectly
+          trigger one of the pool-phase outcomes above via the same
+          auto-complete check that runs after it).
         - `password_reset`: the admin password was changed. Emitted
           from three sources (file mode only; never emitted in locked mode):
           1. `POST /api/tournament/reset`; the public recovery endpoint.
@@ -635,6 +650,8 @@ paths:
                             `seeds file "...": Seeding is incomplete: ...`
                             and rolls the competition back off disk, so the
                             file can be fixed and the import retried.
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
 
   # ── Sponsors ───────────────────────────────────────────────────────────────
 
@@ -1335,26 +1352,6 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
-  /api/competitions/{id}/schedule:
-    put:
-      tags: [competitions]
-      summary: Save schedule
-      security:
-        - TournamentPassword: []
-      parameters:
-        - $ref: '#/components/parameters/CompetitionId'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: array
-              items:
-                $ref: '#/components/schemas/ScheduleEntry'
-      responses:
-        '200':
-          description: Schedule saved.
-
   /api/competitions/{id}/pools/{poolId}/override-rank:
     put:
       tags: [competitions]
@@ -1445,6 +1442,19 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: >
+            Conflict. The draw is pending or the competition has already
+            started; the request repeats a (name, dojo) pair; the write layer
+            found an existing participant with that pair; or the replacement
+            roster would orphan an already-seeded participant (their name or
+            dojo changed, and this endpoint carries no seed data to rewrite
+            `seeds.csv` alongside). The error message names the affected
+            competitors and how to proceed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -1672,6 +1682,8 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/SeedAssignment'
+        '500':
+          $ref: '#/components/responses/InternalError'
     put:
       tags: [participants]
       summary: Save seed assignments
@@ -1714,7 +1726,18 @@ paths:
                 items:
                   $ref: '#/components/schemas/SeedAssignment'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: >
+            Invalid input: malformed JSON, a rank set with gaps/duplicates/a
+            non-positive rank, or a seed row naming a competitor who is not on
+            the competition's roster or naming one under the wrong dojo (the
+            row is checked against the roster via the same (name, dojo)
+            matcher the roster merge uses).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '409':
           description: |
             A draw is pending. Discard it before changing the seeding.
@@ -1722,6 +1745,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   # ── Matches (Admin, requires auth) ─────────────────────────────────────────
 
@@ -1859,7 +1884,7 @@ paths:
         discarding any partial score and audit metadata, so an operator who
         started the wrong bout can start the correct one instead. Idempotent: an
         already-scheduled match is normalised to a clean scheduled match.
-        Broadcasts a `match_updated` event so viewers drop it from the live view.
+        Broadcasts a `match_updated` event so viewers drop it from the current-matches view.
         Intentionally accessible to court operators in self-run mode (operational
         play, the inverse of starting a match).
       security:
@@ -1967,8 +1992,8 @@ paths:
               or recorded a result.
             - `error: court_busy` (machine code, sentence in `message`):
               another match is already running on this match's court, in this
-              or another competition. Reopening would put a second live match
-              on that court, so the operator must finish or requeue the
+              or another competition. Reopening would put a second match in
+              progress on that court, so the operator must finish or requeue the
               running one first. Extra fields: `court`, `matchId`, `compId`,
               `message`. Same shape as the score endpoint's `court_busy`, so
               clients keep one branch for it.
@@ -3012,7 +3037,7 @@ paths:
     get:
       tags: [viewer]
       summary: Get full competition state
-      description: Returns config, pools, pool matches, standings, bracket, and schedule.
+      description: Returns config, pools, pool matches, standings, and bracket.
       parameters:
         - $ref: '#/components/parameters/CompetitionId'
       responses:
@@ -3024,22 +3049,6 @@ paths:
                 $ref: '#/components/schemas/CompetitionDetail'
         '404':
           $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalError'
-
-  /api/viewer/schedule:
-    get:
-      tags: [viewer]
-      summary: Get combined schedule for all competitions
-      responses:
-        '200':
-          description: Aggregated schedule entries.
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/ScheduleEntry'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -3090,9 +3099,11 @@ paths:
                   ipponsA:
                     type: array
                     items: { type: string }
+                    maxItems: 2
                   ipponsB:
                     type: array
                     items: { type: string }
+                    maxItems: 2
                   hansokuA: { type: integer }
                   hansokuB: { type: integer }
                   repPlayerA:
@@ -3305,6 +3316,12 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
+    PayloadTooLarge:
+      description: Request body exceeds the route's size cap. See info description for the caps.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
 
   schemas:
 
@@ -3406,12 +3423,12 @@ components:
             `Competition.courts` is per competition, never per venue, so a
             3-, 5- or 7-shiaijo tournament is legal and is expected.
 
-            **Removing a shiaijo a live competition still holds is refused
-            with 400** (on POST as well as PUT, since POST is re-POSTed
-            against an existing record). The message names every blocking
-            competition and the shiaijo it still runs on, and nothing is
-            written; reassign those competitions' shiaijo in competition
-            settings first. Only LIVE competitions block: `completed` and
+            **Removing a shiaijo a competition still in progress still holds
+            is refused with 400** (on POST as well as PUT, since POST is
+            re-POSTed against an existing record). The message names every
+            blocking competition and the shiaijo it still runs on, and nothing
+            is written; reassign those competitions' shiaijo in competition
+            settings first. Only competitions in progress block: `completed` and
             `invalid` ones are history and are ignored, so a multi-day event
             that ran the morning on 4 shiaijo can still shrink to 2 for the
             afternoon. The refusal stops an orphan being CREATED; records
@@ -3480,7 +3497,7 @@ components:
             - **self-run**: there is no dedicated table operator. Operational actions
               (scoring, check-in, start, complete, swiss round generation) are public; no
               password required. Organiser-setup mutations (tournament/competition config,
-              seeds, override edits (set/change result), announcements, schedule, court
+              seeds, override edits (set/change result), announcements, court
               assignment, export) remain behind the main password. Destructive actions
               (delete competition, discard draw, delete/discard overrides, import, participant
               roster mutations) require the separate `X-Admin-Password` elevated credential.
@@ -3859,6 +3876,15 @@ components:
         name:
           type: string
           maxLength: 100
+        dojo:
+          type: string
+          maxLength: 100
+          description: >
+            Dojo of the seeded competitor. A row is matched to a participant by
+            the (name, dojo) pair; a row with no dojo matches by name alone, and
+            only when that name is unique on the roster. Two participants may
+            share a name, so omitting the dojo for one of them cannot be
+            resolved and the seeding is rejected.
         seedRank:
           type: integer
           description: 1 = top seed.
@@ -3906,15 +3932,45 @@ components:
         winner:
           type: string
           maxLength: 100
+        sideAId:
+          type: string
+          description: >
+            Participant UUID for side A, when known. Sides are otherwise
+            stored by name, but a name is not unique within a competition
+            (two participants from different dojos may share one); this id
+            disambiguates side A precisely. Omitted for legacy data or
+            payloads that carry no ids.
+        sideBId:
+          type: string
+          description: The side B counterpart of `sideAId`.
+        winnerId:
+          type: string
+          description: >
+            Participant UUID of the winner, when known. When `winnerId`,
+            `sideAId`, and `sideBId` are all present, winner attribution
+            prefers the ids over comparing names, so a same-name pair's
+            winner (for example a hantei verdict) is attributed to the
+            correct side even though both share a name. Falls back to
+            comparing names when any of the three ids is absent.
         ipponsA:
           type: array
           items:
             type: string
-          description: "Ippon types scored by side A (M, K, D, T, H)."
+          maxItems: 2
+          description: >
+            Side A's ippon slots, one entry per slot. An entry is a single
+            character — a waza letter (M/K/D/T, and S in naginata; the set is
+            deliberately open, so do not validate against a fixed list), the
+            "H" ippon awarded by the opponent's second hansoku, the "○" (maru)
+            awarded per point on a default win, or "•" for an unfilled slot —
+            or the two-character non-scoring "Ht" judges'-decision mark, which
+            rides in the winner's list only. "|" is rejected. At most 2 entries
+            per side, and both sides may not hold 2 scoring entries.
         ipponsB:
           type: array
           items:
             type: string
+          maxItems: 2
         hansokuA:
           type: integer
         hansokuB:
@@ -3976,12 +4032,15 @@ components:
             $ref: '#/components/schemas/SubMatchResult'
         decidedByHantei:
           type: boolean
+          deprecated: true
           description: >
-            True when the winner was declared by referee hantei on a tied bout
-            (FIK Art. 7-5 / 29-6). Overtime is not required; a tied scoreline may be
-            taken straight to a judges' decision. On a bracket-match score request,
-            omitting the field preserves the stored value; sending an explicit
-            true/false applies it.
+            LEGACY input only. The judges'-decision verdict is recorded as the
+            "Ht" entry in the WINNER's ippon list (FIK Art. 7-5 / 29-6;
+            overtime is not required, a tied scoreline may be taken straight
+            to a judges' decision). The mark occupies a point slot but never
+            counts as a point. The server still accepts this flag from older
+            clients and folds it into the mark on receipt; responses never
+            carry it.
         kachinukiBoutFinal:
           type: boolean
           writeOnly: true
@@ -4005,7 +4064,7 @@ components:
       readOnly: true
       description: >
         Server-computed team-match summary attached to every team match on read
-        paths (pool matches, bracket matches, schedule, SSE match_updated):
+        paths (pool matches, bracket matches, SSE match_updated):
         individual victories (IV) and points won (PW) per side. Shiro is sideB
         (rendered left), Aka is sideA (rendered right). The daihyosen
         (position -1) sub-bout is excluded, so a representative-bout-decided
@@ -4037,10 +4096,23 @@ components:
           type: array
           items:
             type: string
+          maxItems: 2
+          description: >
+            Same entry vocabulary and per-side limits as `MatchResult.ipponsA`.
+            Omitting the key entirely means "this writer has no opinion about
+            this bout": the server preserves the stored scoreline and any
+            judges'-decision mark on it. Sending `[]` is an explicit zero and
+            clears them. Do not normalise an absent array to `[]`.
         ipponsB:
           type: array
           items:
             type: string
+          maxItems: 2
+          description: >
+            Same entry vocabulary and per-side limits as `MatchResult.ipponsA`.
+            As with `ipponsA`, omitting the key means no opinion (the stored
+            scoreline and verdict are preserved); `[]` is an explicit zero
+            that clears them.
         hansokuA:
           type: integer
         hansokuB:
@@ -4056,20 +4128,24 @@ components:
             (per-bout default win). The daihyosen representative bout
             (`position: -1`) always carries `"daihyosen"`; including when its
             winner is declared by hantei on a tied bout (the frontend emits
-            `decision: "daihyosen"` together with `decidedByHantei: true`). The
-            server also tolerates `""` or `"fought"` alongside hantei, but
-            `"daihyosen"` is the canonical persisted value for the rep bout.
+            `decision: "daihyosen"` with the "Ht" mark in the winner's ippon
+            list). The server also tolerates `""` or `"fought"` alongside
+            hantei, but `"daihyosen"` is the canonical persisted value for the
+            rep bout.
         decidedByHantei:
           type: boolean
+          deprecated: true
           description: >
-            True when this sub-bout's winner was declared by referee hantei on a
-            tied bout. Valid ONLY for the daihyosen representative bout (`position: -1`);
-            regular numbered bouts have fixed regulation time and are never decided by
-            hantei. Overtime is NOT required; a tied daihyosen may be decided by judges
-            directly (`encho` is optional). The accompanying `decision` is `"daihyosen"`
-            (the value the frontend persists for the rep bout); the server additionally
-            accepts `""` or `"fought"`. `winner` must be set and the scoreline must be
-            tied; the server rejects hantei with any other decision code.
+            LEGACY input only; folded into the "Ht" mark on receipt. The
+            verdict is recorded as the "Ht" entry in the winner's ippon list,
+            valid ONLY for the daihyosen representative bout (`position: -1`);
+            regular numbered bouts have fixed regulation time and are never
+            decided by hantei. Overtime is NOT required (`encho` is optional).
+            `winner` must be set, must carry the mark, and the scoreline must
+            be tied (the mark itself never counts); the accompanying
+            `decision` is `"daihyosen"` (the server additionally accepts `""`
+            or `"fought"` and rejects any other code). Responses never carry
+            this field.
         encho:
           allOf:
             - $ref: '#/components/schemas/EnchoMetadata'
@@ -4083,8 +4159,8 @@ components:
             to be defeated) is the operator's call, never derived from
             pool-vs-bracket. For all non-kachinuki competitions the server
             rejects a non-zero `periodCount` on any numbered bout (fixed
-            regulation time, no overtime). `decidedByHantei` is NOT relaxed
-            for kachinuki: hantei remains daihyosen-only.
+            regulation time, no overtime). Hantei is NOT relaxed for
+            kachinuki: it remains daihyosen-only.
 
     BracketMatch:
       type: object
@@ -4109,14 +4185,53 @@ components:
         scheduledAt:
           type: string
           maxLength: 32
+        ipponsA:
+          type: array
+          items:
+            type: string
+          maxItems: 2
+          description: >
+            Side A's struck ippons as waza letters (M/K/D/T/H, maru for a
+            default win), plus the non-scoring "Ht" judges'-decision mark on
+            the winner's side. The same shape as `MatchResult.ipponsA`.
+        ipponsB:
+          type: array
+          items:
+            type: string
+          maxItems: 2
+        hansokuA:
+          type: integer
+          description: Outstanding (undischarged) hansoku count for side A. Omitted when 0.
+        hansokuB:
+          type: integer
         scoreA:
           type: string
+          deprecated: true
+          description: >
+            Legacy `bracket.json` field. Older bracket files rendered each
+            side's scoreline as one string ("MK", "K(H1)"); on load,
+            `BracketMatch.NormalizeLegacy` folds it into `ipponsA`/`hansokuA`
+            and clears it. Never written, and appears in no request or
+            response body — documented only so an operator reading a stored
+            bracket file recognises it.
         scoreB:
           type: string
+          deprecated: true
+          description: >
+            Legacy `bracket.json` field, folded into `ipponsB`/`hansokuB` on
+            load. See `scoreA`.
         isOverridden:
           type: boolean
         queuePosition:
           type: integer
+        matchNumber:
+          type: integer
+          readOnly: true
+          description: >
+            Sequential bracket match number, matching the "Match N" label
+            printed on the Excel tree sheet. 0/absent means unset: a
+            hidden/bye placeholder match, or a legacy bracket saved before
+            numbering was assigned.
         decision:
           type: string
           description: Decision code persisted for an elimination-stage match. Same values as `MatchResult.decision`.
@@ -4126,11 +4241,38 @@ components:
         decisionReason:
           type: string
           maxLength: 200
+        resultSource:
+          type: string
+          readOnly: true
+          description: Mirrors `MatchResult.resultSource` for elimination-stage matches.
+        correctionReason:
+          type: string
+          maxLength: 200
+          description: >
+            Set when an operator overwrites a completed elimination-stage
+            result (a correction); omitted on first completion. Mirrors
+            `MatchResult.correctionReason`.
+        flagsA:
+          type: integer
+          description: >
+            Flag count for side A in an engi (kata demonstration) bracket
+            bout, persisted so the count survives a restart. Zero/absent for
+            non-engi matches.
+        flagsB:
+          type: integer
+          description: The side B counterpart of `flagsA`.
         encho:
           $ref: '#/components/schemas/EnchoMetadata'
         decidedByHantei:
           type: boolean
-          description: True when the match winner was declared by referee hantei on a tied bout (overtime not required).
+          deprecated: true
+          description: >
+            Legacy `bracket.json` field. The judges'-decision verdict is
+            recorded as the "Ht" entry in the winner's ippon list; on load,
+            `BracketMatch.NormalizeLegacy` folds this flag into the mark and
+            clears it. Never written, and appears in no request or response
+            body — documented only so an operator reading a stored bracket
+            file recognises it.
         reopenPending:
           type: boolean
           readOnly: true
@@ -4150,6 +4292,42 @@ components:
           readOnly: true
           allOf:
             - $ref: '#/components/schemas/TeamResultLine'
+        displayRound:
+          type: integer
+          readOnly: true
+          description: >
+            Effective round counted from the final (1 = Final, 2 = Semifinal,
+            ...), computed at generation time so a viewer can group matches by
+            depth-from-root the same way the printed Excel tree sheet does,
+            with structural byes skipping a column. This differs from the
+            `rounds` array index, which is a balanced power-of-two position.
+            0/absent means unset: a legacy bracket generated before this field
+            existed, or a hidden phantom match.
+        hidden:
+          type: boolean
+          readOnly: true
+          description: >
+            True for a structural-bye phantom match (an empty-vs-empty dead
+            slot, or a latent bye where one side never had an opponent). It is
+            not a real bout and must not be drawn as a match card.
+        feeders:
+          type: array
+          readOnly: true
+          items:
+            type: string
+          description: >
+            IDs of the two real feeder matches whose winners meet here, in
+            [A, B] order. An empty string for a side means that side is a
+            seeded entrant or bye (no connector line to draw).
+        modifiedAt:
+          type: integer
+          format: int64
+          readOnly: true
+          description: >
+            Server-relative unix-millis timestamp of the last change to this
+            bracket match's result, used to reconcile out-of-order writes.
+            0/absent means unstamped (legacy data); arrival order still
+            applies.
         placeholderA:
           type: string
           readOnly: true
@@ -4200,6 +4378,25 @@ components:
             type: array
             items:
               $ref: '#/components/schemas/BracketMatch'
+        preview:
+          type: boolean
+          readOnly: true
+          description: >
+            True for a read-only placeholder bracket generated at draw time for
+            a mixed (pools then knockout) competition, whose leaves are
+            pool-origin placeholders rather than resolved players. The actual
+            knockout is played in a separate playoffs competition created from
+            this source.
+        thirdPlaceMatch:
+          readOnly: true
+          allOf:
+            - $ref: '#/components/schemas/BracketMatch'
+          description: >
+            The optional 3rd-place (bronze) playoff match. A SIBLING of
+            `rounds`, not a row in it: `rounds` is power-of-two,
+            position-encoded for winner advancement, so splicing a bronze
+            match into that geometry would corrupt it. Absent unless a
+            bronze match was generated.
 
     PlayerStanding:
       type: object
@@ -4245,36 +4442,15 @@ components:
         pointsLost:
           type: integer
 
-    ScheduleEntry:
-      type: object
-      properties:
-        matchType:
-          type: string
-          enum: [pool, bracket, break]
-        matchRef:
-          type: string
-          description: >
-            Match identifier (empty for breaks). This value corresponds to the `{mid}` path
-            parameter used in match scoring and update endpoints (e.g. PUT /api/competitions/{id}/matches/{mid}/score).
-        court:
-          type: string
-        date:
-          type: string
-          description: DD-MM-YYYY
-        scheduledAt:
-          type: string
-          description: HH:MM
-        status:
-          type: string
-        isBreak:
-          type: boolean
-        label:
-          type: string
-          description: Display label for break entries.
-
     CompetitionDetail:
       type: object
-      description: Full competition state returned by the viewer endpoint.
+      description: >
+        Full competition state returned by the viewer endpoint. This is a
+        PUBLIC projection: `poolMatches` and `bracket` always have their audit
+        fields stripped before serialization, so `correctionReason` and
+        `decisionReason` are never present on any match here, and each pool
+        match's `rev`/`revSession` are likewise always absent (`bracket`
+        matches carry no `rev`/`revSession` field to begin with).
       properties:
         config:
           $ref: '#/components/schemas/Competition'
@@ -4295,10 +4471,6 @@ components:
           description: Map of pool name to ordered standings.
         bracket:
           $ref: '#/components/schemas/Bracket'
-        schedule:
-          type: array
-          items:
-            $ref: '#/components/schemas/ScheduleEntry'
 
     EnchoMetadata:
       type: object

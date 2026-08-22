@@ -52,10 +52,15 @@ func parseBracketBytes(raw []byte) (*Bracket, error) {
 	for i := range b.Rounds {
 		for j := range b.Rounds[i] {
 			clampBracketMatchFlags(&b.Rounds[i][j])
+			// Legacy score strings fold into ippon arrays, and legacy
+			// decidedByHantei flags fold into the mark inside them, on load
+			// (legacy_hantei.go).
+			b.Rounds[i][j].NormalizeLegacy()
 		}
 	}
 	if b.ThirdPlaceMatch != nil {
 		clampBracketMatchFlags(b.ThirdPlaceMatch)
+		b.ThirdPlaceMatch.NormalizeLegacy()
 	}
 	return &b, nil
 }
@@ -83,26 +88,40 @@ func (s *Store) copyBracket(b *Bracket) *Bracket {
 		res.Rounds[i] = make([]BracketMatch, len(round))
 		copy(res.Rounds[i], round)
 		// The shallow copy above aliases the Encho pointer, SubResults slice
-		// (and its nested IpponsA/B/Encho), and the Feeders slice with the
-		// cached bracket; so a caller mutating a returned match could corrupt
-		// cached state without going through SaveBracket/UpdateBracket.
-		// Deep-copy them to match the pool match copy path (copyMatchResults).
+		// (and its nested IpponsA/B/Encho), the Feeders slice, and the match's
+		// own IpponsA/IpponsB slices with the cached bracket; so a caller
+		// mutating a returned match could corrupt cached state without going
+		// through SaveBracket/UpdateBracket. Deep-copy them to match the pool
+		// match copy path (copyMatchResults).
 		for j := range res.Rounds[i] {
 			res.Rounds[i][j].Encho = round[j].Encho.Clone()
 			res.Rounds[i][j].SubResults = cloneSubResults(round[j].SubResults)
 			if round[j].Feeders != nil {
 				res.Rounds[i][j].Feeders = append([]string(nil), round[j].Feeders...)
 			}
+			if round[j].IpponsA != nil {
+				res.Rounds[i][j].IpponsA = append([]string(nil), round[j].IpponsA...)
+			}
+			if round[j].IpponsB != nil {
+				res.Rounds[i][j].IpponsB = append([]string(nil), round[j].IpponsB...)
+			}
 		}
 	}
 	// Deep-copy the optional bronze match so a returned bracket never aliases the
-	// cached ThirdPlaceMatch pointer (or its nested Encho/SubResults/Feeders).
+	// cached ThirdPlaceMatch pointer (or its nested Encho/SubResults/Feeders/
+	// IpponsA/B).
 	if b.ThirdPlaceMatch != nil {
 		tpm := *b.ThirdPlaceMatch
 		tpm.Encho = b.ThirdPlaceMatch.Encho.Clone()
 		tpm.SubResults = cloneSubResults(b.ThirdPlaceMatch.SubResults)
 		if b.ThirdPlaceMatch.Feeders != nil {
 			tpm.Feeders = append([]string(nil), b.ThirdPlaceMatch.Feeders...)
+		}
+		if b.ThirdPlaceMatch.IpponsA != nil {
+			tpm.IpponsA = append([]string(nil), b.ThirdPlaceMatch.IpponsA...)
+		}
+		if b.ThirdPlaceMatch.IpponsB != nil {
+			tpm.IpponsB = append([]string(nil), b.ThirdPlaceMatch.IpponsB...)
 		}
 		res.ThirdPlaceMatch = &tpm
 	}
@@ -314,6 +333,64 @@ func (s *Store) MatchStatusByID(compID, matchID string) (MatchStatus, bool, erro
 		}
 	}
 	return "", false, nil
+}
+
+// MatchSidesByID returns the STORED pairing (sideA, sideB, sideAID, sideBID)
+// for the match with the given ID, searching pool matches first then the
+// bracket (rounds, then the bronze sibling), or found=false. Same no-copy
+// cached-read shape as MatchStatusByID and for the same reason: a caller
+// that only wants the side identity should not pay for a deep
+// SubResults/bracket clone.
+//
+// Purpose: a score payload is allowed to omit sideA/sideB (the engine's
+// reconcileSides backfills them from the stored pairing before any write
+// lands), but the request-boundary legacy-hantei fold
+// (state.MatchResult.NormalizeLegacyHantei) runs BEFORE that backfill and
+// needs to know the real sides to attribute a flagged verdict to a
+// competitor. Handlers call this to backfill the payload's sides for
+// attribution purposes only, ahead of validation; the engine's own
+// reconcileSides still runs its normal (redundant, idempotent) backfill
+// and mismatch check afterwards, so this read cannot weaken that guard.
+//
+// sideAID/sideBID are the bc-dmsr follow-up (mobileapp review): the SPA
+// sends winnerId but never sideAId/sideBId (it computes them locally for its
+// own mark placement and discards them - api_serializers.jsx), so
+// validateHanteiMarkPlacement never saw all three ids and fell back to a
+// name comparison the engine's later id-aware stripInvalidHantei could
+// disagree with. Handlers backfill the omitted ids from here the same way
+// they already backfill the omitted names, so the validator and the engine
+// attribute by the SAME triple. Pool matches carry ids (SideAID/SideBID);
+// BracketMatch persists no ids at all, so sideAID/sideBID are always "" for
+// a bracket result and that path stays on the name fallback unchanged - this
+// widened return does not alter the existing sideA/sideB behaviour for the
+// legacy-hantei name backfill caller, which keeps ignoring the two new
+// values.
+func (s *Store) MatchSidesByID(compID, matchID string) (sideA, sideB, sideAID, sideBID string, found bool, err error) {
+	if err := ValidateCompetitionID(compID); err != nil {
+		return "", "", "", "", false, err
+	}
+	results, err := s.cachedPoolMatches(compID)
+	if err != nil {
+		return "", "", "", "", false, err
+	}
+	for i := range results {
+		if results[i].ID == matchID {
+			return results[i].SideA, results[i].SideB, results[i].SideAID, results[i].SideBID, true, nil
+		}
+	}
+	b, err := s.cachedBracket(compID)
+	if err != nil {
+		return "", "", "", "", false, err
+	}
+	if b != nil {
+		if bm := findBracketMatchByID(b, matchID); bm != nil {
+			// BracketMatch has no SideAID/SideBID fields: a bracket result
+			// always returns empty ids here, matching AttributeWinnerSide's
+			// existing name-only fallback for bracket matches.
+			return bm.SideA, bm.SideB, "", "", true, nil
+		}
+	}
+	return "", "", "", "", false, nil
 }
 
 // UpdateBracketMatchByID finds the bracket match with the given ID (via

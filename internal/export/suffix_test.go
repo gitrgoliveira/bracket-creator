@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -95,12 +96,13 @@ func TestSideMarks(t *testing.T) {
 func TestDefaultWinMaruAB(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name           string
-		scoreA, scoreB string
-		decision       string
-		encho          *state.EnchoMetadata
-		winner         string
-		wantA, wantB   string
+		name                       string
+		scoreA, scoreB             string
+		decision                   string
+		encho                      *state.EnchoMetadata
+		winnerID, sideAID, sideBID string
+		winner                     string
+		wantA, wantB               string
 	}{
 		{name: "regulation kiken fills the winner pair", decision: "kiken-voluntary", winner: "Alice", wantA: "○○"},
 		{name: "legacy bare kiken fills too", decision: "kiken", winner: "Bob", wantB: "○○"},
@@ -111,12 +113,42 @@ func TestDefaultWinMaruAB(t *testing.T) {
 		{name: "a recorded score stands", scoreA: "M", decision: "kiken-injury", winner: "Alice", wantA: "M"},
 		{name: "non-default decision untouched", decision: "fought", winner: "Alice"},
 		{name: "no winner untouched", decision: "kiken-voluntary"},
-		{name: "unmatched winner untouched", decision: "kiken-voluntary", winner: "Carol"},
+		{name: "unmatched winner untouched, no ids", decision: "kiken-voluntary", winner: "Carol"},
+		// bc-dmsr fix: ids win over names, even on a same-name pair (legal:
+		// two participants from different dojos may share a name). Both cells
+		// start EMPTY, so before this fix the name-only switch (sideA-first)
+		// always filled side A's cell here regardless of what WinnerID said,
+		// printing the maru fallback in the withdrawn side's cell right next
+		// to the id-attributed "Kiken" mark (from SideMarksLR) on the real
+		// winner's side. DefaultWinMaruAB must resolve through the SAME
+		// domain.AttributeWinnerSide owner SideMarksLR uses, so the maru
+		// lands on the id-attributed WINNER's cell (B), not name-first A.
+		{
+			name:     "same-name pair with ids: winner is B, maru lands on B not name-first A",
+			decision: "kiken-voluntary",
+			winnerID: "id-b", sideAID: "id-a", sideBID: "id-b",
+			winner: "Alice", wantB: "○○",
+		},
+		{
+			name:     "same-name pair with ids: winner is A",
+			decision: "kiken-voluntary",
+			winnerID: "id-a", sideAID: "id-a", sideBID: "id-b",
+			winner: "Alice", wantA: "○○",
+		},
+		{
+			name:     "ids present but winnerID matches neither side: unattributable, untouched",
+			decision: "kiken-voluntary",
+			winnerID: "id-x", sideAID: "id-a", sideBID: "id-b",
+			winner: "Alice",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			gotA, gotB := DefaultWinMaruAB(tt.scoreA, tt.scoreB, tt.decision, tt.encho, tt.winner, "Alice", "Bob")
+			gotA, gotB := DefaultWinMaruAB(tt.scoreA, tt.scoreB, tt.decision, tt.encho, domain.WinnerAttribution{
+				WinnerID: tt.winnerID, SideAID: tt.sideAID, SideBID: tt.sideBID,
+				Winner: tt.winner, SideA: "Alice", SideB: "Bob",
+			})
 			assert.Equal(t, tt.wantA, gotA)
 			assert.Equal(t, tt.wantB, gotB)
 		})
@@ -127,15 +159,15 @@ func TestSideMarksLR(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name      string
-		decision  string
-		hantei    bool
-		winner    string
-		mirror    bool
-		wantLeft  string
-		wantRight string
+		name                       string
+		decision                   string
+		hantei                     bool
+		winnerID, sideAID, sideBID string
+		winner                     string
+		mirror                     bool
+		wantLeft, wantRight        string
 	}{
-		// Default layout: SideA (Aka) left, SideB right.
+		// Default layout: SideA (Aka) left, SideB right. No ids: name fallback.
 		{name: "hantei, A wins", decision: "fought", hantei: true, winner: "A", wantLeft: "Ht", wantRight: ""},
 		{name: "hantei, B wins", decision: "fought", hantei: true, winner: "B", wantLeft: "", wantRight: "Ht"},
 		{name: "hantei, B wins, mirrored", decision: "fought", hantei: true, winner: "B", mirror: true, wantLeft: "Ht", wantRight: ""},
@@ -143,13 +175,39 @@ func TestSideMarksLR(t *testing.T) {
 		{name: "kiken, A wins, mirrored", decision: "kiken-voluntary", winner: "A", mirror: true, wantLeft: "Kiken", wantRight: ""},
 		{name: "no winner recorded: marks have no home", decision: "kiken-voluntary", winner: "", wantLeft: "", wantRight: ""},
 		{name: "drifted winner name: no marks rather than a guess", decision: "kiken-voluntary", winner: "C", wantLeft: "", wantRight: ""},
+		// Ids present: ids win over names, even on a same-name pair (legal:
+		// two participants from different dojos may share a name). This is
+		// the bc-dmsr fix: without ids threaded through, a same-name pair
+		// would always resolve to sideA regardless of who the WinnerID says
+		// actually won.
+		{
+			name:     "same-name pair: ids attribute the mark to B, not A",
+			decision: "fought", hantei: true,
+			winnerID: "id-b", sideAID: "id-a", sideBID: "id-b",
+			winner: "A", wantLeft: "", wantRight: "Ht",
+		},
+		{
+			name:     "same-name pair: ids attribute the mark to A",
+			decision: "fought", hantei: true,
+			winnerID: "id-a", sideAID: "id-a", sideBID: "id-b",
+			winner: "A", wantLeft: "Ht", wantRight: "",
+		},
+		{
+			name:     "ids present but winnerID matches neither side: unattributable",
+			decision: "fought", hantei: true,
+			winnerID: "id-x", sideAID: "id-a", sideBID: "id-b",
+			winner: "A", wantLeft: "", wantRight: "",
+		},
 	}
 
 	for _, tc := range tests {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			l, r := SideMarksLR(tc.decision, tc.hantei, tc.winner, "A", "B", tc.mirror)
+			l, r := SideMarksLR(tc.decision, tc.hantei, domain.WinnerAttribution{
+				WinnerID: tc.winnerID, SideAID: tc.sideAID, SideBID: tc.sideBID,
+				Winner: tc.winner, SideA: "A", SideB: "B",
+			}, tc.mirror)
 			assert.Equal(t, tc.wantLeft, l, "left mark")
 			assert.Equal(t, tc.wantRight, r, "right mark")
 		})

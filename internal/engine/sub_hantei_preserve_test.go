@@ -3,7 +3,9 @@ package engine
 import (
 	"testing"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -16,13 +18,19 @@ import (
 // unit truth table plus an end-to-end run through BOTH pool paths; the shared
 // merge makes that parity structural, but the end-to-end runs stay because they
 // pin the behaviour the operator sees, not the arrangement of the code.
+//
+// The verdict is the domain.HanteiMark entry in the WINNER's ippon slice (the
+// mark IS the record, operator ruling 2026-08-21). preserveSubHantei restores
+// it onto a SCORELINE-silent row (no winner, no scoring ippons, no mark, nil
+// legacy flag) by copying prior's ippons wholesale — the mark travels in the
+// copy, so there is no separate flag left to raise.
 func TestPreserveSubHantei(t *testing.T) {
 	dh := state.DaihyosenSubPosition
 	storedSubs := func() []state.SubMatchResult {
 		return []state.SubMatchResult{
 			{Position: 1, SideA: "K1", SideB: "O1", IpponsA: []string{"M"}, Winner: "K1", Decision: "fought"},
-			{Position: dh, SideA: "Kyoto", SideB: "Osaka", IpponsA: []string{}, IpponsB: []string{},
-				Winner: "Kyoto", Decision: "daihyosen", DecidedByHantei: state.HanteiPtr(true)},
+			{Position: dh, SideA: "Kyoto", SideB: "Osaka", IpponsA: []string{domain.HanteiMark}, IpponsB: []string{},
+				Winner: "Kyoto", Decision: "daihyosen"},
 		}
 	}
 
@@ -44,39 +52,95 @@ func TestPreserveSubHantei(t *testing.T) {
 		// persist as 0-0, which moves the Ht to the other slot and drops (E).
 		stored := []state.SubMatchResult{{
 			Position: dh, SideA: "Kyoto", SideB: "Osaka",
-			IpponsA: []string{"M"}, IpponsB: []string{"K"},
+			IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"K"},
 			Encho:  &state.EnchoMetadata{PeriodCount: 1},
-			Winner: "Kyoto", Decision: "daihyosen", DecidedByHantei: state.HanteiPtr(true),
+			Winner: "Kyoto", Decision: "daihyosen",
 		}}
 		incoming := []state.SubMatchResult{{Position: dh, SideA: "Kyoto", SideB: "Osaka"}}
 		preserveSubHantei(stored, incoming)
 		require.True(t, incoming[0].HanteiDecided())
-		assert.Equal(t, []string{"M"}, incoming[0].IpponsA)
+		assert.Equal(t, []string{"M", domain.HanteiMark}, incoming[0].IpponsA)
 		assert.Equal(t, []string{"K"}, incoming[0].IpponsB)
 		require.NotNil(t, incoming[0].Encho)
 		assert.Equal(t, 1, incoming[0].Encho.PeriodCount)
 		assert.Equal(t, "daihyosen", incoming[0].Decision)
 		// Deep copy: mutating the restored row must not reach back into store state.
 		incoming[0].IpponsA[0] = "K"
-		assert.Equal(t, []string{"M"}, stored[0].IpponsA)
+		assert.Equal(t, []string{"M", domain.HanteiMark}, stored[0].IpponsA)
 		incoming[0].Encho.PeriodCount = 9
 		assert.Equal(t, 1, stored[0].Encho.PeriodCount)
 	})
 
-	t.Run("a row that records its own ippons keeps them", func(t *testing.T) {
+	t.Run("a row that supplies its own markless ippons clears the verdict", func(t *testing.T) {
+		// Semantic flip (rule 4): this used to read "a row that records its own
+		// ippons keeps them" and asserted the verdict survived. The ippons ARE
+		// the verdict channel now: preserveSubHantei only restores onto a row
+		// that is scoreline-silent too (the copy branch above). A row that
+		// supplies its own scoreline — even one that happens to still be tied —
+		// has spoken for itself and gets no verdict it did not carry.
 		stored := []state.SubMatchResult{{
 			Position: dh, SideA: "Kyoto", SideB: "Osaka",
-			IpponsA: []string{"M"}, IpponsB: []string{"K"},
-			Winner: "Kyoto", Decision: "daihyosen", DecidedByHantei: state.HanteiPtr(true),
+			IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"K"},
+			Winner: "Kyoto", Decision: "daihyosen",
 		}}
 		incoming := []state.SubMatchResult{{
 			Position: dh, SideA: "Kyoto", SideB: "Osaka", Decision: "daihyosen",
 			IpponsA: []string{"D"}, IpponsB: []string{"T"},
 		}}
 		preserveSubHantei(stored, incoming)
-		require.True(t, incoming[0].HanteiDecided())
-		assert.Equal(t, []string{"D"}, incoming[0].IpponsA, "the writer addressed the scoreline")
+		assert.False(t, incoming[0].HanteiDecided(), "own markless ippons carry no verdict")
+		assert.Equal(t, []string{"D"}, incoming[0].IpponsA, "the writer's own scoreline is untouched")
 		assert.Equal(t, []string{"T"}, incoming[0].IpponsB)
+		// The verdict and its consequence move as ONE atomic unit: a row that
+		// supplied its own scoreline (even a tied one, as here — "D"/"T" is
+		// 1-1) gets no mark, so it must get no winner either. Before the fix
+		// this still fell through to `in.Winner = prior.Winner`, so a stale
+		// second-device replay would silently persist "Kyoto" as the winner
+		// on a row with no referee record backing it, and the mark could
+		// never be recovered by a later preserve once this write landed as
+		// the new stored row.
+		assert.Equal(t, "", incoming[0].Winner, "no mark means no winner stamp either")
+	})
+
+	t.Run("a stale replay of the pre-hantei tied scoreline inherits neither mark nor winner", func(t *testing.T) {
+		// The exact reachable shape the finding describes: a second device (or
+		// the offline write queue) queued its request BEFORE the hantei was
+		// recorded, while the bout still read a plain tied 1-1 with no mark and
+		// no winner. That request is replayed hours later, after `stored` above
+		// already carries the referees' verdict. The replayed row supplies its
+		// OWN scoreline (1-1, markless), so per the atomic-pairing rule it must
+		// come out exactly as it went in: no mark, no winner.
+		stored := []state.SubMatchResult{{
+			Position: dh, SideA: "Kyoto", SideB: "Osaka",
+			IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"K"},
+			Winner: "Kyoto", Decision: "daihyosen",
+		}}
+		incoming := []state.SubMatchResult{{
+			Position: dh, SideA: "Kyoto", SideB: "Osaka", Decision: "daihyosen",
+			IpponsA: []string{"M"}, IpponsB: []string{"K"}, // pre-hantei 1-1, no mark
+		}}
+		preserveSubHantei(stored, incoming)
+		assert.False(t, incoming[0].HanteiDecided(), "own tied markless scoreline carries no verdict")
+		assert.Equal(t, "", incoming[0].Winner, "and therefore no winner stamp")
+		assert.Equal(t, []string{"M"}, incoming[0].IpponsA, "the replay's own scoreline is untouched")
+		assert.Equal(t, []string{"K"}, incoming[0].IpponsB)
+	})
+
+	t.Run("a scoreline-silent row still restores mark and winner together", func(t *testing.T) {
+		// The mirror image of the two cases above, restated here so the
+		// atomic-pairing rule is pinned by a single test alongside them: a row
+		// that supplies NO ippons of its own (true scoreline silence, not just
+		// a winner omission) inherits the stored scoreline wholesale, mark
+		// included, and the winner it names travels with it in the same call.
+		stored := []state.SubMatchResult{{
+			Position: dh, SideA: "Kyoto", SideB: "Osaka",
+			IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"K"},
+			Winner: "Kyoto", Decision: "daihyosen",
+		}}
+		incoming := []state.SubMatchResult{{Position: dh, SideA: "Kyoto", SideB: "Osaka", Decision: "daihyosen"}}
+		preserveSubHantei(stored, incoming)
+		assert.True(t, incoming[0].HanteiDecided(), "the copied scoreline carries the mark")
+		assert.Equal(t, "Kyoto", incoming[0].Winner, "and the winner it names travels with it")
 	})
 
 	t.Run("a decision incompatible with hantei blocks the preserve", func(t *testing.T) {
@@ -89,7 +153,8 @@ func TestPreserveSubHantei(t *testing.T) {
 				{Position: dh, SideA: "Kyoto", SideB: "Osaka", Decision: dec},
 			}
 			preserveSubHantei(storedSubs(), incoming)
-			assert.Nil(t, incoming[0].DecidedByHantei, "decision %q must not inherit a verdict", dec)
+			assert.False(t, incoming[0].HanteiDecided(), "decision %q must not inherit a verdict", dec)
+			assert.Nil(t, incoming[0].DecidedByHantei, "decision %q: the legacy flag is never raised by a writer", dec)
 			assert.Equal(t, "", incoming[0].Winner, "decision %q must not inherit a winner", dec)
 		}
 	})
@@ -105,16 +170,21 @@ func TestPreserveSubHantei(t *testing.T) {
 	})
 
 	t.Run("explicit false (withdrawal) is left untouched", func(t *testing.T) {
-		// state.HanteiExplicit, not state.HanteiPtr: the latter is
-		// nil-for-false (built for the omitempty projection), so it cannot
-		// express the withdrawal this case is about.
+		// bctest.HanteiExplicit, because a plain nil pointer cannot
+		// express the withdrawal this case is about. DecidedByHantei is a
+		// LEGACY READ-ONLY channel on SubMatchResult, but preserveSubHantei
+		// still reads a non-nil value as "the writer addressed the verdict" —
+		// an explicit false is one of the ways a payload can say so (offline
+		// queue replay of a pre-ruling withdrawal), and it must short-circuit
+		// exactly like a mark or a named winner would.
 		incoming := []state.SubMatchResult{
 			{Position: dh, SideA: "Kyoto", SideB: "Osaka", Decision: "daihyosen",
-				DecidedByHantei: state.HanteiExplicit(false)},
+				DecidedByHantei: bctest.HanteiExplicit(false)},
 		}
 		preserveSubHantei(storedSubs(), incoming)
 		require.NotNil(t, incoming[0].DecidedByHantei)
 		assert.False(t, *incoming[0].DecidedByHantei)
+		assert.False(t, incoming[0].HanteiDecided())
 		// Non-mutation check: the withdrawal names no winner, and the stored
 		// "Kyoto" must NOT be pulled across to fill the gap.
 		assert.Equal(t, "", incoming[0].Winner)
@@ -125,7 +195,7 @@ func TestPreserveSubHantei(t *testing.T) {
 			{Position: dh, SideA: "Kyoto", SideB: "Osaka", Decision: "daihyosen", Winner: "Osaka"},
 		}
 		preserveSubHantei(storedSubs(), incoming)
-		assert.Nil(t, incoming[0].DecidedByHantei)
+		assert.False(t, incoming[0].HanteiDecided())
 		assert.Equal(t, "Osaka", incoming[0].Winner)
 	})
 
@@ -135,20 +205,65 @@ func TestPreserveSubHantei(t *testing.T) {
 				IpponsA: []string{"M"}, IpponsB: []string{}},
 		}
 		preserveSubHantei(storedSubs(), incoming)
-		assert.Nil(t, incoming[0].DecidedByHantei)
+		assert.False(t, incoming[0].HanteiDecided())
+	})
+
+	t.Run("a stored untied hantei prior does not stamp a winner on a silent row", func(t *testing.T) {
+		// PR review mutation-survival gap: the test above ("an untied incoming
+		// row cannot inherit the verdict") supplies its OWN non-nil ippons
+		// (IpponsB: []string{}), so it returns at the EARLIER "the writer
+		// addressed the verdict" guard (in.IpponsA != nil || in.IpponsB !=
+		// nil) and never reaches the post-copy HanteiTiedScoreline recheck
+		// near the bottom of the function at all. That recheck only fires
+		// for a STORED daihyosen prior whose own scoreline carries the mark
+		// on an UNTIED count -- drifted/hand-edited data no validated write
+		// can ever persist (validateSubBout/the tied-scoreline check refuse
+		// it on the way in) -- copied wholesale onto a row that supplies
+		// NOTHING of its own (nil IpponsA/IpponsB, not empty slices: the
+		// nil-vs-empty distinction is load-bearing throughout this file).
+		stored := []state.SubMatchResult{{
+			Position: dh, SideA: "Kyoto", SideB: "Osaka",
+			// Untied by construction: 2 scoring ippons (M, M) plus the
+			// non-scoring hantei mark on the A side, only 1 (K) on B.
+			IpponsA: []string{"M", "M", domain.HanteiMark}, IpponsB: []string{"K"},
+			Winner: "Kyoto", Decision: "daihyosen",
+		}}
+		incoming := []state.SubMatchResult{
+			{Position: dh, SideA: "Kyoto", SideB: "Osaka", Decision: "daihyosen"},
+			// IpponsA/IpponsB left as their zero value (nil), never assigned:
+			// a fully silent row, not an explicit `[]string{}`.
+		}
+		require.Nil(t, incoming[0].IpponsA, "the incoming row must be nil, not an empty slice, to reach the copy branch")
+		require.Nil(t, incoming[0].IpponsB)
+
+		preserveSubHantei(stored, incoming)
+
+		assert.Equal(t, "", incoming[0].Winner,
+			"the copied scoreline is untied, so the recheck must block the winner stamp even though prior named one")
 	})
 
 	t.Run("no stored verdict: nothing to preserve", func(t *testing.T) {
 		stored := []state.SubMatchResult{{Position: dh, SideA: "Kyoto", SideB: "Osaka", Decision: "daihyosen"}}
 		incoming := []state.SubMatchResult{{Position: dh, SideA: "Kyoto", SideB: "Osaka", Decision: "daihyosen"}}
 		preserveSubHantei(stored, incoming)
-		assert.Nil(t, incoming[0].DecidedByHantei)
+		assert.False(t, incoming[0].HanteiDecided())
 	})
 }
 
 // End-to-end through the pool write path: device B's stale snapshot (opened
-// before the verdict was recorded) saves a correction and the stored verdict
-// survives in storage.
+// before the verdict was recorded, its SSE adoption never landing) saves a
+// correction and the stored verdict survives in storage.
+//
+// The incoming patch below hand-builds the exact wire shape
+// web-mobile/js/admin_scoring_team.jsx buildPatch now sends for a daihyosen
+// row that is untouched THIS session and carries nothing known locally (its
+// `daihyosenSilent` gate): ipponsA/ipponsB simply absent from the JSON, which
+// decodes to nil. Before that gate existed, buildPatch stated the row's
+// ippons unconditionally (an explicit `[]`), so this exact shape was reached
+// only by a hand-built Go payload, never a real client — see the sibling
+// TestPreserveSubHantei_ZeroZeroWithdrawalIsNotSilence for the payload a real
+// (pre-gate) client DID send, and how that shape must still clear the
+// verdict rather than restore it.
 func TestPoolWrite_StaleSnapshotKeepsHantei(t *testing.T) {
 	// setupTestEngine (engine_test.go) already owns this preamble, with
 	// t.Cleanup rather than defer; 380+ tests in this package use it.
@@ -161,7 +276,8 @@ func TestPoolWrite_StaleSnapshotKeepsHantei(t *testing.T) {
 		SubResults: []state.SubMatchResult{
 			{Position: 1, SideA: "K1", SideB: "O1", IpponsA: []string{"M"}, Winner: "K1", Decision: "fought"},
 			{Position: state.DaihyosenSubPosition, SideA: "Kyoto", SideB: "Osaka",
-				Winner: "Kyoto", Decision: "daihyosen", DecidedByHantei: state.HanteiPtr(true)},
+				IpponsA: []string{domain.HanteiMark}, IpponsB: []string{},
+				Winner: "Kyoto", Decision: "daihyosen"},
 		},
 	}}))
 
@@ -200,8 +316,8 @@ func TestPreserveDaihyosenOutcome_DerivesMatchWinner(t *testing.T) {
 	dh := state.DaihyosenSubPosition
 	stored := []state.SubMatchResult{{
 		Position: dh, SideA: "Kyoto", SideB: "Osaka",
-		IpponsA: []string{"M"}, IpponsB: []string{"K"},
-		Winner: "Kyoto", Decision: "daihyosen", DecidedByHantei: state.HanteiPtr(true),
+		IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"K"},
+		Winner: "Kyoto", Decision: "daihyosen",
 	}}
 	result := &state.MatchResult{
 		SideA: "Kyoto", SideB: "Osaka", Winner: "",
@@ -231,8 +347,8 @@ func TestPreserveSubHantei_SideGuardsTheScoreline(t *testing.T) {
 	dh := state.DaihyosenSubPosition
 	stored := []state.SubMatchResult{{
 		Position: dh, SideA: "Kyoto", SideB: "Osaka",
-		IpponsA: []string{"M"}, IpponsB: []string{"K"},
-		Winner: "Kyoto", Decision: "daihyosen", DecidedByHantei: state.HanteiPtr(true),
+		IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"K"},
+		Winner: "Kyoto", Decision: "daihyosen",
 	}}
 
 	t.Run("swapped sides do not inherit a mirrored scoreline", func(t *testing.T) {
@@ -246,7 +362,7 @@ func TestPreserveSubHantei_SideGuardsTheScoreline(t *testing.T) {
 		incoming := []state.SubMatchResult{{Position: dh}}
 		preserveSubHantei(stored, incoming)
 		assert.Equal(t, "Kyoto", incoming[0].SideA)
-		assert.Equal(t, []string{"M"}, incoming[0].IpponsA)
+		assert.Equal(t, []string{"M", domain.HanteiMark}, incoming[0].IpponsA)
 		assert.Equal(t, []string{"K"}, incoming[0].IpponsB)
 	})
 }
@@ -268,8 +384,8 @@ func TestPoolWriteTx_StaleSnapshotKeepsHantei(t *testing.T) {
 		SubResults: []state.SubMatchResult{
 			{Position: 1, SideA: "K1", SideB: "O1", IpponsA: []string{"M"}, Winner: "K1", Decision: "fought"},
 			{Position: state.DaihyosenSubPosition, SideA: "Kyoto", SideB: "Osaka",
-				IpponsA: []string{"M"}, IpponsB: []string{"K"},
-				Winner: "Kyoto", Decision: "daihyosen", DecidedByHantei: state.HanteiPtr(true)},
+				IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"K"},
+				Winner: "Kyoto", Decision: "daihyosen"},
 		},
 	}}))
 
@@ -299,38 +415,44 @@ func TestPoolWriteTx_StaleSnapshotKeepsHantei(t *testing.T) {
 	assert.Equal(t, "Kyoto", dhRow.Winner)
 	// The scoreline the verdict rests on travels with it, so the bout does not
 	// silently become 0-0.
-	assert.Equal(t, []string{"M"}, dhRow.IpponsA)
+	assert.Equal(t, []string{"M", domain.HanteiMark}, dhRow.IpponsA)
 	assert.Equal(t, []string{"K"}, dhRow.IpponsB)
 	assert.Equal(t, []string{"M", "K"}, stored[0].SubResults[0].IpponsA)
 }
 
 // A bracket rollback must UNDO the write, not re-apply it. Every nil in a
-// captured snapshot (SubResults, and the hantei flag at match and sub-bout
-// level) is a PRESERVE trigger on the forward path, so replaying one forward
-// leaves the partial write standing. matchWriteRestore is what inverts that
-// reading; these cases pin each nil separately.
+// captured snapshot (SubResults, and the sub-bout hantei mark) is a PRESERVE
+// trigger on the forward path, so replaying one forward leaves the partial
+// write standing. matchWriteRestore is what inverts that reading; these cases
+// pin each nil separately.
 //
 // This replaces a unit test of normalizePriorForRollback, the caller-side shim
 // that used to pre-mangle the snapshot into "explicit clear" shape. Asserting
 // on the write's OUTCOME rather than on the shim's mechanics is what makes the
 // test survive the fields moving into the primitive.
+//
+// The match-level BracketMatch.DecidedByHantei *bool this test used to pin is
+// gone: it is a LEGACY READ-ONLY field production code never writes (the
+// verdict lives in bm.IpponsA/IpponsB via the mark). assert.False on it below
+// is kept only as a "never written" pin; the real assertions are on the
+// ippon array.
 func TestBracketRollbackDoesNotReapplyTheWrite(t *testing.T) {
 	// The staged forward write: a daihyosen won on hantei.
 	forward := func() *state.BracketMatch {
 		return &state.BracketMatch{
 			ID: "m-r1-0", SideA: "Kyoto", SideB: "Osaka",
 			Winner: "Kyoto", Status: state.MatchStatusCompleted,
-			DecidedByHantei: true,
+			IpponsA: []string{domain.HanteiMark},
 			SubResults: []state.SubMatchResult{{
 				Position: state.DaihyosenSubPosition, SideA: "Kyoto", SideB: "Osaka",
 				Winner: "Kyoto", Decision: "daihyosen",
-				DecidedByHantei: state.HanteiExplicit(true),
+				IpponsA: []string{domain.HanteiMark}, IpponsB: []string{},
 			}},
 		}
 	}
 
 	// The snapshot as lookupExistingResult hands it back: an unscored match,
-	// with all three fields collapsed to nil.
+	// with all fields collapsed to nil.
 	snapshot := func() *state.MatchResult {
 		return &state.MatchResult{
 			ID: "m-r1-0", SideA: "Kyoto", SideB: "Osaka",
@@ -350,7 +472,9 @@ func TestBracketRollbackDoesNotReapplyTheWrite(t *testing.T) {
 		bm := forward()
 		_, err := applyBracketMatchResult(bm, snapshot(), matchWriteRestore)
 		require.NoError(t, err)
-		assert.False(t, bm.DecidedByHantei, "the verdict being rolled back must not survive")
+		assert.False(t, bm.DecidedByHantei, "production code never writes this legacy field")
+		assert.Empty(t, bm.IpponsA, "the verdict being rolled back must not survive")
+		assert.NotContains(t, bm.IpponsA, domain.HanteiMark)
 	})
 
 	t.Run("restore does not re-derive a winner from the rolled-back bout", func(t *testing.T) {
@@ -368,22 +492,27 @@ func TestBracketRollbackDoesNotReapplyTheWrite(t *testing.T) {
 		_, err := applyBracketMatchResult(bm, snapshot(), matchWriteForward)
 		require.NoError(t, err)
 		assert.Len(t, bm.SubResults, 1, "forward reads nil as 'omitted, keep stored'")
-		// The match-level FLAG does not invert on this particular snapshot, and
-		// that is a second rule rather than a hole in the first: the snapshot
-		// reverts the match to scheduled with no winner, and hanteiStillHolds
-		// refuses to carry a verdict onto a state the wire validator would
-		// refuse. Forward used to keep it here, leaving `status: scheduled,
-		// winner: "", decidedByHantei: true` — a match decided by judges that
-		// nobody won and that has not been fought.
-		assert.False(t, bm.DecidedByHantei,
+		// The match-level MARK does not invert on this particular snapshot,
+		// and that is a second rule rather than a hole in the first: the
+		// snapshot reverts the match to scheduled with no winner and no
+		// ippons, and a nil array copies through as nil — there is nothing
+		// left to carry the mark even if there were a restore mechanism for
+		// it (there is not; see the file doc comment).
+		assert.Empty(t, bm.IpponsA,
 			"a reversion to scheduled cannot carry the verdict, under either policy")
 	})
 
-	t.Run("forward DOES inherit the flag when the write could still carry it", func(t *testing.T) {
-		// The nil-preserve on the flag, on a payload that keeps the conditions
-		// the verdict rests on: still completed, still won by Kyoto, still tied.
-		// This is the ordinary verdict-silent re-score (a second editor fixing
-		// an unrelated field), and it is what the policy is for.
+	t.Run("forward writes the payload's own scoreline; there is nothing left to inherit", func(t *testing.T) {
+		// Semantic flip (rule 4): this used to pin "forward inherits the
+		// stored flag when the write could still carry it" via
+		// BracketMatch.DecidedByHantei. That inheritance mechanism
+		// (preserveMatchHantei) was removed and replaced by
+		// stripInvalidHantei, which only VALIDATES/STRIPS a mark the
+		// incoming payload already carries — it never restores one the
+		// payload omitted. A forward write that supplies its own markless
+		// ippons therefore persists a markless score, whatever the stored
+		// sub-bout verdict was (mirrors TestPoolWrite_HanteiTravelsWithTheScoreline
+		// for the pool branch).
 		bm := forward()
 		silent := snapshot()
 		silent.Status = state.MatchStatusCompleted
@@ -391,7 +520,9 @@ func TestBracketRollbackDoesNotReapplyTheWrite(t *testing.T) {
 		silent.IpponsA, silent.IpponsB = []string{"M"}, []string{"K"}
 		_, err := applyBracketMatchResult(bm, silent, matchWriteForward)
 		require.NoError(t, err)
-		assert.True(t, bm.DecidedByHantei, "forward reads nil as 'omitted, keep stored'")
+		assert.False(t, bm.DecidedByHantei, "production code never writes this legacy field")
+		assert.NotContains(t, bm.IpponsA, domain.HanteiMark)
+		assert.NotContains(t, bm.IpponsB, domain.HanteiMark)
 	})
 
 	t.Run("restore applies an explicit verdict the snapshot really held", func(t *testing.T) {
@@ -399,15 +530,124 @@ func TestBracketRollbackDoesNotReapplyTheWrite(t *testing.T) {
 		prior := snapshot()
 		prior.Status = state.MatchStatusCompleted
 		prior.Winner = "Kyoto"
-		prior.DecidedByHantei = state.HanteiExplicit(true)
+		prior.IpponsA = []string{"M", domain.HanteiMark}
+		prior.IpponsB = []string{"K"}
 		prior.SubResults = []state.SubMatchResult{{
 			Position: state.DaihyosenSubPosition, SideA: "Kyoto", SideB: "Osaka",
-			Winner: "Kyoto", Decision: "daihyosen", DecidedByHantei: state.HanteiExplicit(true),
+			Winner: "Kyoto", Decision: "daihyosen",
+			IpponsA: []string{domain.HanteiMark}, IpponsB: []string{},
 		}}
 		_, err := applyBracketMatchResult(bm, prior, matchWriteRestore)
 		require.NoError(t, err)
-		assert.True(t, bm.DecidedByHantei, "restore replays what the snapshot captured")
+		assert.False(t, bm.DecidedByHantei, "production code never writes this legacy field")
+		assert.Contains(t, bm.IpponsA, domain.HanteiMark, "restore replays what the snapshot captured")
 		assert.Len(t, bm.SubResults, 1)
+	})
+}
+
+// A rollback must put the match BACK, not blank it.
+//
+// bracketMatchAsResult is what captures the "prior" snapshot the K3 rollback
+// replays. It used to omit the score entirely: a bracket match stored each
+// side as one formatted string, MatchResult carried ippon arrays, and nothing
+// decoded one into the other. So the snapshot arrived with nil ippons, and the
+// restore wrote a blank score over a real scoreline. Silent data loss on the
+// one path whose whole job is to preserve state. Both now carry ippon arrays
+// natively, so the projection is a direct (defensive-copy) field read; this
+// test still pins the OUTCOME, not the mechanism, so a future regression that
+// drops the ippons on the way through is still caught.
+func TestBracketRollbackRestoresTheScore(t *testing.T) {
+	// A match as it stands before the rejected write: 2-1 with an outstanding
+	// hansoku against Osaka.
+	scored := func() *state.BracketMatch {
+		return &state.BracketMatch{
+			ID: "m-r1-0", SideA: "Kyoto", SideB: "Osaka",
+			Winner: "Kyoto", Status: state.MatchStatusCompleted,
+			IpponsA: []string{"M", "K"}, IpponsB: []string{"D"}, HansokuB: 1,
+			ResultSource: "admin",
+		}
+	}
+
+	t.Run("the snapshot carries the scoreline", func(t *testing.T) {
+		snap := bracketMatchAsResult(scored())
+		assert.Equal(t, []string{"M", "K"}, snap.IpponsA)
+		assert.Equal(t, []string{"D"}, snap.IpponsB)
+		assert.Equal(t, 0, snap.HansokuA)
+		assert.Equal(t, 1, snap.HansokuB)
+	})
+
+	t.Run("replaying it restores the score rather than blanking it", func(t *testing.T) {
+		prior := bracketMatchAsResult(scored())
+		// The state after a rejected write: a different scoreline on disk.
+		bm := scored()
+		bm.IpponsA = []string{"M", "K", "D"}
+		bm.IpponsB = nil
+		bm.HansokuB = 0
+		applied, err := applyBracketMatchResult(bm, prior, matchWriteRestore)
+		require.NoError(t, err)
+		require.True(t, applied)
+		assert.Equal(t, []string{"M", "K"}, bm.IpponsA)
+		assert.Equal(t, []string{"D"}, bm.IpponsB)
+		assert.Equal(t, 1, bm.HansokuB)
+	})
+
+	t.Run("a genuinely unscored match still restores as unscored", func(t *testing.T) {
+		// The nil-means-empty half of matchWriteRestore: a snapshot with no
+		// score must CLEAR one the rejected write added, not preserve it.
+		unscored := &state.BracketMatch{ID: "m-r1-0", SideA: "Kyoto", SideB: "Osaka",
+			Status: state.MatchStatusScheduled}
+		prior := bracketMatchAsResult(unscored)
+		bm := scored()
+		_, err := applyBracketMatchResult(bm, prior, matchWriteRestore)
+		require.NoError(t, err)
+		assert.Empty(t, bm.IpponsA)
+		assert.Empty(t, bm.IpponsB)
+	})
+
+	// ModifiedAt is deliberately absent from the projection: carrying the
+	// snapshot's older stamp would make the rollback lose the timestamp LWW
+	// comparison against the stamp the rejected write just left, and be
+	// dropped. Pinned so nobody "completes" the projection with it.
+	t.Run("the rollback is not dropped by the LWW guard it passes through", func(t *testing.T) {
+		// The snapshot is taken from a match stamped EARLIER than the rejected
+		// write that followed it — the real ordering, and the one that makes
+		// projecting ModifiedAt fatal: the restore would compare 1000 >= 9000000
+		// and be discarded, leaving the rejected write on disk permanently.
+		before := scored()
+		before.ModifiedAt = 1_000
+		prior := bracketMatchAsResult(before)
+		require.Zero(t, prior.ModifiedAt, "the projection must leave the stamp off")
+
+		bm := scored()
+		bm.ModifiedAt = 9_000_000 // stamped by the write being rolled back
+		applied, err := applyBracketMatchResult(bm, prior, matchWriteRestore)
+		require.NoError(t, err)
+		assert.True(t, applied, "a rollback must never lose to the write it undoes")
+		assert.Equal(t, []string{"M", "K"}, bm.IpponsA, "and it actually landed")
+	})
+
+	// The audit pair: restore is authoritative, so it both restores a note the
+	// match held and clears one the rejected write added. applyPoolWrite has
+	// always done this through its whole-struct overwrite.
+	t.Run("the rejected write's correction note does not survive", func(t *testing.T) {
+		bm := scored()
+		bm.CorrectionReason = "typo in round 1"
+		bm.ResultSource = "self-run"
+		_, err := applyBracketMatchResult(bm, bracketMatchAsResult(scored()), matchWriteRestore)
+		require.NoError(t, err)
+		assert.Empty(t, bm.CorrectionReason, "the note belonged to the write being undone")
+		assert.Equal(t, "admin", bm.ResultSource)
+	})
+
+	t.Run("a forward write still inherits an omitted note", func(t *testing.T) {
+		bm := scored()
+		bm.CorrectionReason = "kept"
+		_, err := applyBracketMatchResult(bm, &state.MatchResult{
+			ID: "m-r1-0", SideA: "Kyoto", SideB: "Osaka",
+			Winner: "Kyoto", Status: state.MatchStatusCompleted,
+		}, matchWriteForward)
+		require.NoError(t, err)
+		assert.Equal(t, "kept", bm.CorrectionReason, "forward omission means inherit")
 	})
 }
 
@@ -428,7 +668,7 @@ func TestBracketForwardWrite_PreservedVerdictReachesTheWinner(t *testing.T) {
 			SubResults: []state.SubMatchResult{{
 				Position: state.DaihyosenSubPosition, SideA: "Kyoto", SideB: "Osaka",
 				Winner: "Kyoto", Decision: "daihyosen",
-				DecidedByHantei: state.HanteiExplicit(true),
+				IpponsA: []string{domain.HanteiMark}, IpponsB: []string{},
 			}},
 		}
 	}
@@ -458,8 +698,9 @@ func TestBracketForwardWrite_PreservedVerdictReachesTheWinner(t *testing.T) {
 		_, err := applyBracketMatchResult(bm, silent(), matchWriteForward)
 		require.NoError(t, err)
 		assert.Equal(t, "Kyoto", bm.Winner, "derived from the rep bout the merge restored")
-		// The rep bout keeps its verdict; the match-level flag is a separate
-		// field this payload says nothing about and the fixture never set.
+		// The rep bout keeps its verdict; the match-level score string is a
+		// separate rendering this payload says nothing about beyond the rep
+		// bout, and the fixture never set it.
 		require.Len(t, bm.SubResults, 1)
 		assert.True(t, bm.SubResults[0].HanteiDecided())
 		assert.Equal(t, "Kyoto", bm.SubResults[0].Winner)
@@ -479,107 +720,6 @@ func TestBracketForwardWrite_PreservedVerdictReachesTheWinner(t *testing.T) {
 	})
 }
 
-// A rollback must put the match BACK, not blank it.
-//
-// bracketMatchAsResult is what captures the "prior" snapshot the K3 rollback
-// replays. It used to omit the score entirely: a bracket match stores each
-// side as one formatted string, MatchResult carries ippon arrays, and nothing
-// decoded one into the other. So the snapshot arrived with nil ippons, and the
-// restore wrote formatScore(nil, 0) over a real scoreline. Silent data loss on
-// the one path whose whole job is to preserve state.
-func TestBracketRollbackRestoresTheScore(t *testing.T) {
-	// A match as it stands before the rejected write: 2-1 with an outstanding
-	// hansoku against Osaka.
-	scored := func() *state.BracketMatch {
-		return &state.BracketMatch{
-			ID: "m-r1-0", SideA: "Kyoto", SideB: "Osaka",
-			Winner: "Kyoto", Status: state.MatchStatusCompleted,
-			ScoreA: "MK", ScoreB: "D (H1)",
-			ResultSource: "admin",
-		}
-	}
-
-	t.Run("the snapshot carries the scoreline", func(t *testing.T) {
-		snap := bracketMatchAsResult(scored())
-		assert.Equal(t, []string{"M", "K"}, snap.IpponsA)
-		assert.Equal(t, []string{"D"}, snap.IpponsB)
-		assert.Equal(t, 0, snap.HansokuA)
-		assert.Equal(t, 1, snap.HansokuB)
-	})
-
-	t.Run("replaying it restores the score rather than blanking it", func(t *testing.T) {
-		prior := bracketMatchAsResult(scored())
-		// The state after a rejected write: a different scoreline on disk.
-		bm := scored()
-		bm.ScoreA = "MKD"
-		bm.ScoreB = ""
-		applied, err := applyBracketMatchResult(bm, prior, matchWriteRestore)
-		require.NoError(t, err)
-		require.True(t, applied)
-		assert.Equal(t, "MK", bm.ScoreA)
-		assert.Equal(t, "D (H1)", bm.ScoreB)
-	})
-
-	t.Run("a genuinely unscored match still restores as unscored", func(t *testing.T) {
-		// The nil-means-empty half of matchWriteRestore: a snapshot with no
-		// score must CLEAR one the rejected write added, not preserve it.
-		unscored := &state.BracketMatch{ID: "m-r1-0", SideA: "Kyoto", SideB: "Osaka",
-			Status: state.MatchStatusScheduled}
-		prior := bracketMatchAsResult(unscored)
-		bm := scored()
-		_, err := applyBracketMatchResult(bm, prior, matchWriteRestore)
-		require.NoError(t, err)
-		assert.Empty(t, bm.ScoreA)
-		assert.Empty(t, bm.ScoreB)
-	})
-
-	// ModifiedAt is deliberately absent from the projection: carrying the
-	// snapshot's older stamp would make the rollback lose the timestamp LWW
-	// comparison against the stamp the rejected write just left, and be
-	// dropped. Pinned so nobody "completes" the projection with it.
-	t.Run("the rollback is not dropped by the LWW guard it passes through", func(t *testing.T) {
-		// The snapshot is taken from a match stamped EARLIER than the rejected
-		// write that followed it — the real ordering, and the one that makes
-		// projecting ModifiedAt fatal: the restore would compare 1000 >= 9000000
-		// and be discarded, leaving the rejected write on disk permanently.
-		before := scored()
-		before.ModifiedAt = 1_000
-		prior := bracketMatchAsResult(before)
-		require.Zero(t, prior.ModifiedAt, "the projection must leave the stamp off")
-
-		bm := scored()
-		bm.ModifiedAt = 9_000_000 // stamped by the write being rolled back
-		applied, err := applyBracketMatchResult(bm, prior, matchWriteRestore)
-		require.NoError(t, err)
-		assert.True(t, applied, "a rollback must never lose to the write it undoes")
-		assert.Equal(t, "MK", bm.ScoreA, "and it actually landed")
-	})
-
-	// The audit pair: restore is authoritative, so it both restores a note the
-	// match held and clears one the rejected write added. applyPoolWrite has
-	// always done this through its whole-struct overwrite.
-	t.Run("the rejected write's correction note does not survive", func(t *testing.T) {
-		bm := scored()
-		bm.CorrectionReason = "typo in round 1"
-		bm.ResultSource = "self-run"
-		_, err := applyBracketMatchResult(bm, bracketMatchAsResult(scored()), matchWriteRestore)
-		require.NoError(t, err)
-		assert.Empty(t, bm.CorrectionReason, "the note belonged to the write being undone")
-		assert.Equal(t, "admin", bm.ResultSource)
-	})
-
-	t.Run("a forward write still inherits an omitted note", func(t *testing.T) {
-		bm := scored()
-		bm.CorrectionReason = "kept"
-		_, err := applyBracketMatchResult(bm, &state.MatchResult{
-			ID: "m-r1-0", SideA: "Kyoto", SideB: "Osaka",
-			Winner: "Kyoto", Status: state.MatchStatusCompleted,
-		}, matchWriteForward)
-		require.NoError(t, err)
-		assert.Equal(t, "kept", bm.CorrectionReason, "forward omission means inherit")
-	})
-}
-
 // The side guard abandons rather than mis-attributing. IpponsA/IpponsB are
 // POSITIONAL and Winner is a NAME, so a row naming a different pair can take
 // neither: the guard used to skip only the scoreline copy and fall through to
@@ -588,8 +728,8 @@ func TestBracketRollbackRestoresTheScore(t *testing.T) {
 func TestPreserveSubHanteiAbandonsOnASideMismatch(t *testing.T) {
 	dh := state.DaihyosenSubPosition
 	stored := []state.SubMatchResult{
-		{Position: dh, SideA: "Kyoto", SideB: "Osaka", IpponsA: []string{"M"}, IpponsB: []string{"K"},
-			Winner: "Kyoto", Decision: "daihyosen", DecidedByHantei: state.HanteiPtr(true)},
+		{Position: dh, SideA: "Kyoto", SideB: "Osaka", IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"K"},
+			Winner: "Kyoto", Decision: "daihyosen"},
 	}
 
 	t.Run("a row naming a different pair gets no verdict and no scoreline", func(t *testing.T) {
@@ -632,16 +772,98 @@ func TestPreserveSubHanteiRestoresOutstandingHansoku(t *testing.T) {
 	dh := state.DaihyosenSubPosition
 	stored := []state.SubMatchResult{
 		{Position: dh, SideA: "Kyoto", SideB: "Osaka",
-			IpponsA: []string{"M"}, IpponsB: []string{"K"}, HansokuA: 0, HansokuB: 1,
-			Winner: "Kyoto", Decision: "daihyosen", DecidedByHantei: state.HanteiPtr(true)},
+			IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"K"}, HansokuA: 0, HansokuB: 1,
+			Winner: "Kyoto", Decision: "daihyosen"},
 	}
 	incoming := []state.SubMatchResult{
 		{Position: dh, Decision: "daihyosen"}, // verdict-silent, scoreline-silent
 	}
 	preserveSubHantei(stored, incoming)
 	require.True(t, incoming[0].HanteiDecided())
-	assert.Equal(t, []string{"M"}, incoming[0].IpponsA)
+	assert.Equal(t, []string{"M", domain.HanteiMark}, incoming[0].IpponsA)
 	assert.Equal(t, 1, incoming[0].HansokuB,
 		"the outstanding foul is part of the restored scoreline")
 	assert.Equal(t, 0, incoming[0].HansokuA)
+}
+
+// A review finding on PR #389: withdrawing a 0-0 daihyosen hantei was
+// impossible because the verdict resurrected on save. The team editor's
+// withdrawal reaches the wire as an EXPLICIT empty ippon array on both
+// sides (web-mobile/js/admin_scoring_team.jsx buildPatch builds
+// ipponsA/ipponsB from the bout's own point totals whenever the operator has
+// touched the daihyosen row or its verdict/score is already known locally,
+// and api_serializers.jsx's toBackendMatchResult folds decidedByHantei into
+// the ippons rather than forwarding the flag), not as an omitted key.
+// preserveSubHantei used to judge scoreline-silence by scoring-ippon COUNT
+// (countScoringIppons == 0 for both an omitted key and an explicit `[]`), so
+// a 0-0 withdrawal was indistinguishable from a genuinely silent
+// stale-snapshot write and the stored verdict was copied straight back onto
+// the row the operator had just cleared. The fix judges silence on nil-ness
+// instead: a present `[]` decodes to a non-nil empty slice
+// (SubMatchResult.IpponsA/IpponsB carry no `omitempty`), so it is now
+// treated as the writer speaking for the scoreline, exactly like a 1-1
+// withdrawal already was. buildPatch's own genuine-silence gate
+// (daihyosenSilent) is the second review round's fix: it omits the arrays
+// entirely - the only shape this nil-ness check restores from - when the
+// row is untouched AND nothing is known about it locally.
+func TestPreserveSubHantei_ZeroZeroWithdrawalIsNotSilence(t *testing.T) {
+	dh := state.DaihyosenSubPosition
+	stored := func() []state.SubMatchResult {
+		return []state.SubMatchResult{
+			{Position: dh, SideA: "Taro", SideB: "Jiro",
+				IpponsA: []string{}, IpponsB: []string{domain.HanteiMark},
+				Winner: "Taro", Decision: "daihyosen"},
+		}
+	}
+
+	t.Run("explicit empty arrays + cleared winner is a withdrawal: verdict and winner gone", func(t *testing.T) {
+		// This is exactly the wire shape toBackendMatchResult produces for the
+		// team editor's 0-0 daihyosen "cancel": both sides present, both
+		// empty, no winner named.
+		incoming := []state.SubMatchResult{
+			{Position: dh, SideA: "Taro", SideB: "Jiro", Decision: "daihyosen",
+				Winner: "", IpponsA: []string{}, IpponsB: []string{}},
+		}
+		require.NotNil(t, incoming[0].IpponsA, "the wire sends an explicit [], never a nil, for this row")
+		require.NotNil(t, incoming[0].IpponsB)
+		preserveSubHantei(stored(), incoming)
+		assert.False(t, incoming[0].HanteiDecided(), "the withdrawal must not resurrect the mark")
+		assert.Equal(t, "", incoming[0].Winner, "the withdrawal must not resurrect the winner")
+	})
+
+	t.Run("omitted (nil) arrays + no winner still restores the mark and winner: the stale-snapshot case must not regress", func(t *testing.T) {
+		// A genuinely silent writer omits the ippons keys entirely, which
+		// decodes to nil, not []. This is now a REAL client shape, not just a
+		// hand-built one: web-mobile/js/admin_scoring_team.jsx buildPatch
+		// sends exactly this (daihyosenSilent gate) for a daihyosen row that
+		// is untouched THIS session and carries nothing known locally (no
+		// recorded verdict, no score, no fouls, no overtime) - the case of a
+		// stale second-device snapshot opened before the verdict existed,
+		// whose SSE adoption never landed.
+		incoming := []state.SubMatchResult{
+			{Position: dh, SideA: "Taro", SideB: "Jiro", Decision: "daihyosen"},
+		}
+		require.Nil(t, incoming[0].IpponsA)
+		require.Nil(t, incoming[0].IpponsB)
+		preserveSubHantei(stored(), incoming)
+		require.True(t, incoming[0].HanteiDecided(), "a genuinely silent write must not erase the recorded verdict")
+		assert.Equal(t, "Taro", incoming[0].Winner)
+	})
+
+	t.Run("the existing 1-1 withdrawal (own markless scoreline) still clears the verdict", func(t *testing.T) {
+		tiedStored := []state.SubMatchResult{{
+			Position: dh, SideA: "Taro", SideB: "Jiro",
+			IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"K"},
+			Winner: "Taro", Decision: "daihyosen",
+		}}
+		incoming := []state.SubMatchResult{{
+			Position: dh, SideA: "Taro", SideB: "Jiro", Decision: "daihyosen",
+			Winner: "", IpponsA: []string{"M"}, IpponsB: []string{"K"},
+		}}
+		preserveSubHantei(tiedStored, incoming)
+		assert.False(t, incoming[0].HanteiDecided(), "a row supplying its own (still-tied) scoreline spoke for itself")
+		assert.Equal(t, "", incoming[0].Winner)
+		assert.Equal(t, []string{"M"}, incoming[0].IpponsA, "the writer's own scoreline is untouched")
+		assert.Equal(t, []string{"K"}, incoming[0].IpponsB)
+	})
 }

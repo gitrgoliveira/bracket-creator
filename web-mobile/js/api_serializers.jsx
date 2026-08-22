@@ -16,12 +16,12 @@
 // integers. toBackendMatchResult() bridges those representations.
 //
 // normalizeMatch() goes the other way: take a match as the Go server
-// emits it (string sides, flat scoreA/scoreB or ipponsA/ipponsB arrays)
-// and produce the UI-friendly shape with object sides and a unified
-// `score` object the bracket card renderer can consume.
+// emits it (string sides, ipponsA/ipponsB arrays — pool and bracket
+// matches share this one shape; scoreA/scoreB strings never appear on
+// the wire) and produce the UI-friendly shape with object sides and a
+// unified `score` object the bracket card renderer can consume.
 
-import { realIppons } from './result_slot.jsx';
-import { ipponsFromScore } from './bracket.jsx';
+import { realIppons, hanteiDecided, placeHtForWinner, stripHt } from './result_slot.jsx';
 const STATUS_MAP = { "complete": "completed", "in_progress": "running" };
 
 function toBackendStatus(s) { return STATUS_MAP[s] || s; }
@@ -32,11 +32,41 @@ function isKikenDecision(v) { return v === "kiken" || v === "kiken-voluntary" ||
 
 // Translate UI score patch into backend MatchResult shape.
 // UI sends: { winner: {id,name,...}, status, score: {type,winnerPts,loserPts,ippons,fouls,...} }
+// The judges'-decision verdict is recorded as the "Ht" entry in the WINNER's
+// ippon list (the mark IS the record; Go: domain.HanteiMark). hanteiDecided
+// is the read predicate (does this match/sub carry the mark on either
+// side); placeHtForWinner is the write placement - given a winner (name, and
+// optionally id) and the two sides (names, and optionally ids), it attributes
+// the mark to whichever side matches (attributeWinnerSide: id-first when a
+// winnerId/sideAId/sideBId triple is available, mirroring domain.
+// AttributeWinnerSide - ids win over names when they disagree, since a
+// same-name/different-dojo pair is exactly the case ids exist to
+// disambiguate; name fallback, sideA-first, otherwise) and places it there
+// (mirroring domain.AppendHantei so the mark lands in the winner's next free
+// slot), or leaves both arrays untouched when the winner matches neither
+// side; stripHt drops a stored mark without touching any other letter. All
+// five now live in result_slot.jsx (the declared owner of the Ht slot rule)
+// alongside realIppons - this file was a fourth consumer with its own
+// copies, which is exactly the drift that primitive is meant to prevent.
+// The MATCH-level call site below threads winnerId/sideAId/sideBId (already
+// in scope); the SUB-BOUT call site does not - a numbered team bout names
+// the two individual PLAYERS fielded, and player names are not unique (only
+// (name, dojo) is), so sub rows carry no ids at all and that path stays on
+// the name fallback exactly as before.
+
 // Backend expects: { winner: string, ipponsA: [], ipponsB: [], hansokuA: int, hansokuB: int, decision: "", status: "completed"|"running"|"scheduled" }
 function toBackendMatchResult(patch, match) {
     const sideAName = typeof match?.sideA === "object" ? match.sideA?.name : match?.sideA;
     const sideBName = typeof match?.sideB === "object" ? match.sideB?.name : match?.sideB;
     const winnerName = patch.winner ? (typeof patch.winner === "object" ? patch.winner.name : patch.winner) : "";
+    // Side ids, when the match carries object-shaped sides (post-normalizeMatch
+    // the common case). Used both to derive winnerId below and, further down,
+    // to attribute the Ht mark's placement by id rather than name (bc-dmsr
+    // follow-up: a same-name/different-dojo pair previously placed the mark by
+    // NAME, sideA-first, even when the id-carrying winnerId named the other
+    // side).
+    const sideAId = (typeof match?.sideA === "object" ? match.sideA?.id : null) || "";
+    const sideBId = (typeof match?.sideB === "object" ? match.sideB?.id : null) || "";
 
     const score = patch.score || {};
     const ipponsA = realIppons(patch.ipponsA);
@@ -72,12 +102,35 @@ function toBackendMatchResult(patch, match) {
     if (patch.winner && typeof patch.winner === "object" && patch.winner.id) {
         winnerId = patch.winner.id;
     } else if (winnerName) {
-        const aId = (typeof match?.sideA === "object" ? match.sideA.id : null);
-        const bId = (typeof match?.sideB === "object" ? match.sideB.id : null);
-        if (winnerName === sideAName && winnerName !== sideBName) winnerId = aId || "";
-        else if (winnerName === sideBName && winnerName !== sideAName) winnerId = bId || "";
+        if (winnerName === sideAName && winnerName !== sideBName) winnerId = sideAId || "";
+        else if (winnerName === sideBName && winnerName !== sideAName) winnerId = sideBId || "";
     }
     if (winnerId) result.winnerId = winnerId;
+    // Belt and braces (bc-dmsr review): emit the side ids alongside
+    // winnerId so the server's validateHanteiMarkPlacement sees the SAME
+    // triple this function just used to place the mark above, rather than
+    // relying solely on the server backfilling them from the stored match.
+    // Without this the server never learned the ids on the wire at all -
+    // sideAId/sideBId are computed above purely for this function's own
+    // placement and were otherwise discarded - so a same-name pair's
+    // correctly id-attributed mark could be rejected by the server's
+    // name-only fallback. Omitted (not sent as "") when a side carries no
+    // id at all, matching every other optional field in this payload.
+    //
+    // These are not always participant UUIDs. normalizeMatch's resolveSide
+    // falls back to `{ id: flatId || name }`, so a match the server sends
+    // WITHOUT flat side ids - a bracket match, which persists none - yields
+    // sides whose id IS the name, and that is what goes on the wire here.
+    // Harmless, because the fallback applies to all three values at once:
+    // domain.AttributeWinnerSide's id branch then compares name against
+    // name and returns exactly what its name branch would have, including
+    // the sideA-first resolution for a same-name pair. But it does mean the
+    // server's backfill is suppressed for those matches (it only fills an
+    // EMPTY id), which costs nothing today since the stored bracket ids are
+    // empty too. Do not read "sideAId is present" as "the server has a real
+    // participant id for this side.
+    if (sideAId) result.sideAId = sideAId;
+    if (sideBId) result.sideBId = sideBId;
     // Engi (kata) matches score by referee flag count, not ippons: carry
     // flagsA/flagsB through when the patch sets them (EngiScoreEditorModal's
     // submit payload). Omitted otherwise so non-engi payloads stay minimal.
@@ -89,7 +142,28 @@ function toBackendMatchResult(patch, match) {
     // trail silently stayed empty on every correction, kendo and team alike.
     if (patch.correctionReason) result.correctionReason = patch.correctionReason;
     if (patch.subResults) {
-        result.subResults = patch.subResults;
+        // Same conversion per bout: a sub carrying the editor's boolean (the
+        // daihyosen editor states it unconditionally) has it folded into the
+        // mark on the sub winner's side; the field itself never reaches the
+        // wire. Subs echoed verbatim from the server already carry the mark
+        // inside their ippons and pass through untouched.
+        result.subResults = patch.subResults.map((sub) => {
+            if (typeof sub.decidedByHantei !== "boolean") return sub;
+            const { decidedByHantei, ...rest } = sub;
+            let a = stripHt(rest.ipponsA), b = stripHt(rest.ipponsB);
+            if (decidedByHantei) {
+                // If the winner names NEITHER side (no winner, or a
+                // rename-drifted name), placeHtForWinner leaves both arrays
+                // untouched: the mark has no side to ride on, so both stay
+                // markless. This is CLAUDE.md's accepted no-mark class (ii),
+                // and it is also the only shape the server accepts -
+                // validateHanteiMarkPlacement rejects a mark whose winner is
+                // not that side's name, so echoing one back would 400 every
+                // later save of the match.
+                [a, b] = placeHtForWinner(rest.winner, rest.sideA, rest.sideB, a, b);
+            }
+            return { ...rest, ipponsA: a, ipponsB: b };
+        });
     }
     // Kachinuki: transient request-only flag marking an explicit operator
     // "record bout" submit. The server advances the winner-stays sequence
@@ -108,14 +182,27 @@ function toBackendMatchResult(patch, match) {
     if (patch.encho && patch.encho.periodCount > 0) {
         result.encho = { periodCount: patch.encho.periodCount };
     }
-    // Include decidedByHantei when explicitly set in the patch, or when the
-    // current match already has it true (to preserve it across re-edits).
-    // Omit it otherwise so non-hantei payloads stay minimal.
-    const explicitHantei = typeof patch.decidedByHantei === "boolean";
-    if (explicitHantei) {
-        result.decidedByHantei = patch.decidedByHantei;
-    } else if (match?.decidedByHantei) {
-        result.decidedByHantei = true;
+    // The editors keep an armed decidedByHantei BOOLEAN locally (their UX is
+    // unchanged); the wire carries the verdict as the "Ht" mark in the
+    // winner's ippon list instead of a flag. realIppons above already
+    // stripped any echoed mark from the outgoing arrays, so placement here is
+    // never doubled: an armed verdict (or a re-edit of a match that holds
+    // one) re-places the mark on the winner's side; an explicit false simply
+    // leaves the arrays markless — under the mark model a markless scoreline
+    // IS the withdrawal, no separate signal exists or is needed.
+    const wantHantei = typeof patch.decidedByHantei === "boolean"
+        ? patch.decidedByHantei
+        : !!match?.decidedByHantei;
+    if (wantHantei) {
+        // Same placeHtForWinner rule as the sub-bout branch above, but this
+        // call site DOES have ids in scope (winnerId/sideAId/sideBId, derived
+        // above), so it threads them through: placeHtForWinner attributes by
+        // id whenever all three are present, falling back to the name
+        // comparison only when one is missing. A winner naming/matching
+        // neither side leaves both arrays untouched, so no mark is placed.
+        [result.ipponsA, result.ipponsB] = placeHtForWinner(
+            winnerName, sideAName, sideBName, result.ipponsA, result.ipponsB,
+            winnerId, sideAId, sideBId);
     }
     return result;
 }
@@ -189,53 +276,43 @@ function normalizeMatch(m, playerMap) {
         const an = typeof a === "object" ? a.name : a;
         return wn === an;
     };
-    // Build score object from flat scoreA/scoreB if needed (bracket matches)
-    if (!norm.score && (norm.scoreA || norm.scoreB) && norm.status === "completed") {
-        // Strip the trailing "(HN)" hansoku suffix (with optional separator
-        // space: see engine/scoring.go::formatScore) before measuring length
-        // or splitting into ippon chars. Without this, scoreA="MK (H1)" would
-        // count length 7 and split to ["M","K"," ","(","H","1",")"], polluting
-        // both the displayed score and the modal's ippon-slot seeding (which
-        // falls back to score.ippons when ipponsA/B are absent for bracket
-        // ipponsFromScore, the ONE decoder for this string (bracket.jsx), not a
-        // local copy of its regex. The previous comment justified the copy as
-        // avoiding "load-order coupling with bracket.js, which window-registers
-        // its helper LATER" — but this is a static ESM import, resolved before
-        // either module body runs, so that ordering was never relevant. This is
-        // the JS half of what domain.FormatScore/ParseScore fixed on the Go
-        // side: one wire format, one codec.
-        const lettersA = ipponsFromScore(norm.scoreA);
-        const lettersB = ipponsFromScore(norm.scoreB);
-        const aWin = sideAWon(norm.winner, norm.sideA);
-        // Recover BOTH sides' waza letters into the per-side ippon arrays (when
-        // the server didn't send them for bracket matches). scoreA/scoreB are
-        // each formatScore(IpponsA/B) on the server: i.e. both sides' letters: 
-        // so this is loss-free, unlike score.ippons which keeps only the
-        // winner's. Populating these means formatIpponsScore renders technique
-        // letters for BOTH competitors ("MK–D"), never the numeric fallback.
-        // Only fill when absent so server-provided arrays always win.
-        if (!norm.ipponsA?.length && lettersA.length) norm.ipponsA = lettersA;
-        if (!norm.ipponsB?.length && lettersB.length) norm.ipponsB = lettersB;
-        norm.score = {
-            type: "ippon",
-            winnerPts: aWin ? lettersA.length : lettersB.length,
-            loserPts: aWin ? lettersB.length : lettersA.length,
-            ippons: aWin ? lettersA : lettersB,
-        };
-    }
-    // Build score from ipponsA/ipponsB for pool matches
+    // Build score from ipponsA/ipponsB. Pool and bracket matches converge on
+    // this one shape (both carry ipponsA/ipponsB arrays; scoreA/scoreB
+    // strings never appear on the wire), so one branch covers both.
     if (!norm.score && (norm.ipponsA?.length || norm.ipponsB?.length) && norm.status === "completed") {
         const aWin = sideAWon(norm.winner, norm.sideA);
+        // realIppons discipline, hoisted once: the "Ht" mark occupies a slot
+        // but is never a point, so a 1-1 hantei must read 1-1 here, not 2-1.
+        // The winner's stripped array is otherwise filtered twice per match
+        // (once for winnerPts.length, once for the ippons array itself).
+        const winnerIppons = realIppons(aWin ? norm.ipponsA : norm.ipponsB);
         norm.score = {
             type: isHikiwake(norm.decision) ? "hikiwake" : "ippon",
-            winnerPts: aWin ? (norm.ipponsA?.length || 0) : (norm.ipponsB?.length || 0),
-            loserPts: aWin ? (norm.ipponsB?.length || 0) : (norm.ipponsA?.length || 0),
-            ippons: aWin ? norm.ipponsA : norm.ipponsB,
+            winnerPts: winnerIppons.length,
+            loserPts: realIppons(aWin ? norm.ipponsB : norm.ipponsA).length,
+            ippons: winnerIppons,
         };
     }
     // Carry engi flag counts through (additive, no kendo code reads these).
     if (m.flagsA != null) norm.flagsA = m.flagsA;
     if (m.flagsB != null) norm.flagsB = m.flagsB;
+    // decidedByHantei is a DERIVED view property now: the server records the
+    // verdict as the "Ht" entry in the winner's ippon list and sends no flag.
+    // Deriving it here keeps every display surface and editor reading the
+    // property they always read, off the one place the verdict actually
+    // lives. Per-sub likewise.
+    norm.decidedByHantei = hanteiDecided(norm);
+    // Pre-check with .some() before mapping: most matches carry no hantei
+    // sub at all (a daihyosen/hantei bout is the exception, not the rule),
+    // so allocating a fresh array on every normalizeMatch call would be a
+    // needless copy on the common path. When no sub carries the mark, the
+    // original array identity is preserved rather than an unmodified clone.
+    if (Array.isArray(norm.subResults) && norm.subResults.some((sub) => sub && hanteiDecided(sub))) {
+        norm.subResults = norm.subResults.map((sub) =>
+            sub && hanteiDecided(sub)
+                ? { ...sub, decidedByHantei: true }
+                : sub);
+    }
     return norm;
 }
 

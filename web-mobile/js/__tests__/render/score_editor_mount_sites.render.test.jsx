@@ -69,7 +69,6 @@ const STUBBED_GLOBALS = {
   CourtPicker: () => null,
   BracketTree: () => null, // per-test override drives bracket selection
   getScoreBtnClass: () => 'test-score-open',
-  ipponsFromScore: () => [],
   matchScoreStr: () => '',
   // LAZY / render-time
   filterMatchesByCourt: (matches) => matches,

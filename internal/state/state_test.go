@@ -966,48 +966,6 @@ func TestStore_ResetOverrides(t *testing.T) {
 	assert.Empty(t, loaded.PoolRanks)
 }
 
-// --- Schedule ---
-
-func TestStore_Schedule_RoundTrip(t *testing.T) {
-	dir, err := os.MkdirTemp("", "state-test-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-
-	store, err := NewStore(dir)
-	require.NoError(t, err)
-
-	compID := "sched"
-	require.NoError(t, store.SaveCompetition(&Competition{ID: compID}))
-
-	entries := []ScheduleEntry{
-		{MatchType: "pool", MatchRef: "Pool A-0", Court: "A", ScheduledAt: "09:00", Status: "scheduled"},
-		{MatchType: "pool", MatchRef: "Pool A-1", Court: "A", ScheduledAt: "09:15", Status: "scheduled"},
-		{MatchType: "bracket", MatchRef: "R1-M0", Court: "B", ScheduledAt: "10:00", Status: "scheduled"},
-	}
-	require.NoError(t, store.SaveSchedule(compID, entries))
-
-	loaded, err := store.LoadSchedule(compID)
-	require.NoError(t, err)
-	require.Len(t, loaded, 3)
-	assert.Equal(t, "pool", loaded[0].MatchType)
-	assert.Equal(t, "Pool A-0", loaded[0].MatchRef)
-	assert.Equal(t, "A", loaded[0].Court)
-	assert.Equal(t, "09:00", loaded[0].ScheduledAt)
-}
-
-func TestStore_Schedule_NotExists(t *testing.T) {
-	dir, err := os.MkdirTemp("", "state-test-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-
-	store, err := NewStore(dir)
-	require.NoError(t, err)
-
-	loaded, err := store.LoadSchedule("nonexistent")
-	require.NoError(t, err)
-	assert.Empty(t, loaded)
-}
-
 // --- Concurrent Access ---
 
 func TestStore_ConcurrentAccess(t *testing.T) {
@@ -1098,90 +1056,6 @@ func TestUpdateTournamentChanged_TransformError(t *testing.T) {
 		return sentinel
 	})
 	require.ErrorIs(t, err, sentinel)
-}
-
-// --- LoadSchedule ---
-
-func TestLoadSchedule_MissingFile(t *testing.T) {
-	dir, err := os.MkdirTemp("", "state-test-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-
-	store, err := NewStore(dir)
-	require.NoError(t, err)
-
-	compID := "sched-missing"
-	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Sched"}))
-
-	entries, err := store.LoadSchedule(compID)
-	require.NoError(t, err)
-	assert.Empty(t, entries)
-}
-
-func TestLoadSchedule_RoundTrip(t *testing.T) {
-	dir, err := os.MkdirTemp("", "state-test-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-
-	store, err := NewStore(dir)
-	require.NoError(t, err)
-
-	compID := "sched-rt"
-	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Sched RT"}))
-
-	entries := []ScheduleEntry{
-		{MatchType: "pool", MatchRef: "P1-0", Court: "A", ScheduledAt: "09:00", Status: "scheduled"},
-		{MatchType: "pool", MatchRef: "P1-1", Court: "A", ScheduledAt: "09:10", Status: "scheduled"},
-	}
-	require.NoError(t, store.SaveSchedule(compID, entries))
-
-	loaded, err := store.LoadSchedule(compID)
-	require.NoError(t, err)
-	require.Len(t, loaded, 2)
-	assert.Equal(t, "P1-0", loaded[0].MatchRef)
-	assert.Equal(t, "09:10", loaded[1].ScheduledAt)
-}
-
-func TestLoadSchedule_InvalidCompID(t *testing.T) {
-	dir, err := os.MkdirTemp("", "state-test-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-
-	store, err := NewStore(dir)
-	require.NoError(t, err)
-
-	_, err = store.LoadSchedule("../bad")
-	assert.Error(t, err)
-}
-
-func TestLoadSchedule_FreshStore(t *testing.T) {
-	// Use a fresh store to read so parseScheduleFile is called (not cache).
-	dir, err := os.MkdirTemp("", "state-test-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-
-	writeStore, err := NewStore(dir)
-	require.NoError(t, err)
-
-	compID := "sched-fresh"
-	require.NoError(t, writeStore.SaveCompetition(&Competition{ID: compID, Name: "SchedFresh"}))
-
-	entries := []ScheduleEntry{
-		{MatchType: "pool", MatchRef: "P1-0", Court: "A", ScheduledAt: "09:00", Status: "scheduled", Date: "01-01-2026", IsBreak: false, Label: ""},
-		{MatchType: "break", MatchRef: "", Court: "", ScheduledAt: "12:00", Status: "", IsBreak: true, Label: "Lunch"},
-	}
-	require.NoError(t, writeStore.SaveSchedule(compID, entries))
-
-	readStore, err := NewStore(dir)
-	require.NoError(t, err)
-
-	loaded, err := readStore.LoadSchedule(compID)
-	require.NoError(t, err)
-	require.Len(t, loaded, 2)
-	assert.Equal(t, "P1-0", loaded[0].MatchRef)
-	assert.Equal(t, "01-01-2026", loaded[0].Date)
-	assert.True(t, loaded[1].IsBreak)
-	assert.Equal(t, "Lunch", loaded[1].Label)
 }
 
 // --- UpdateCompetitionChanged ---

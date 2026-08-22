@@ -1,79 +1,66 @@
 package domain
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 	"unicode/utf8"
 )
 
-// FormatScore and ParseScore are the score-cell CODEC: an inverse pair turning
-// a side's ippons plus outstanding hansoku into the single string a bracket
-// match persists, and back.
+// ParseScore is the LEGACY-FOLD half of what used to be a FormatScore/
+// ParseScore codec pair. A pool match has always stored IpponsA/IpponsB +
+// HansokuA/HansokuB as fields; a bracket match used to render each side into
+// one rendered ScoreA/ScoreB string instead, before both shapes were unified
+// onto the same ippon-array + hansoku-int fields (state/models.go,
+// legacy_hantei.go). FormatScore, the encode half, is gone: nothing produces
+// a rendered score string any more, so nothing needs to decode one — except a
+// pre-unification bracket.json still on disk, which this function exists
+// solely to read once, on load, before its legacy string field is cleared
+// (state.BracketMatch.NormalizeLegacy).
 //
-// A pool match stores IpponsA/IpponsB + HansokuA/HansokuB as fields; a bracket
-// match stores one formatted ScoreA/ScoreB string per side. Anything moving a
-// result between those two shapes has to cross this boundary.
+// Format read by ParseScore: ippon letters joined with no separator, then the
+// outstanding-hansoku count in parentheses. "MK (H1)", "MK", "(H1)", "".
 //
-// They live in domain because both layers need them and neither may import the
-// other: the engine formats (writing a bracket match, and projecting one back
-// for the rollback snapshot) and the HTTP layer parses (filling the ippon
-// fields of a running bracket match for the display surfaces). The two used to
-// sit in separate packages — formatScore in engine, a hand-written parseScore
-// in mobileapp under a comment naming its inverse — so nothing made them
-// round-trip, and TestScoreCodecRoundTrip is that guarantee made executable.
-//
-// Format: ippon letters joined with no separator, then the outstanding-hansoku
-// count in parentheses. "MK (H1)", "MK", "(H1)", "".
+// IpponFieldSeparator is the byte internal/state's pool-matches CSV codec
+// joins/splits an ippon slice on (state/pools.go: splitIppons,
+// poolMatchColumns' IpponsA/IpponsB put funcs). It lives here, not in
+// internal/state, because domain is the dependency leaf (zero internal
+// deps) and may not import state; state already imports domain, so it is
+// state's job to point its codec literals at this constant rather than
+// domain's to reach up. Defined so IsValidIpponEntry can refuse it below —
+// without this, a wire-legal single-rune entry silently corrupts the
+// persisted slice: {"M", "|"} passes validation, joins to the CSV cell
+// "M||", and reloads as {"M", "", ""} (strings.Split of a string containing
+// the separator produces extra empty elements), disagreeing with what was
+// validated and broadcast before the restart.
+const IpponFieldSeparator = "|"
 
-// FormatScore renders a side's ippons and outstanding hansoku as the stored
-// score string. Ippon marks are the waza letters (M/K/D/T/H, plus S for
-// naginata) or the ○ default-win maru; each is a single rune, which is what
-// makes ParseScore able to recover the slice.
-func FormatScore(ippons []string, hansoku int) string {
-	score := strings.Join(ippons, "")
-	if hansoku > 0 {
-		if score != "" {
-			score += " "
-		}
-		score += fmt.Sprintf("(H%d)", hansoku)
+// IsValidIpponEntry reports whether v is a well-formed single ippon entry: one
+// rune (and not the pool-CSV IpponFieldSeparator, which would corrupt the
+// persisted slice on the next save/load round trip), the two-rune HanteiMark,
+// or empty (an unfilled slot, not a scoring ippon; CountScoringIppons drops
+// it). validation.go's wire gate on freshly-written ippon slices calls this to
+// reject anything else, in particular any other multi-rune string — a
+// client-forged two-rune entry alongside a genuine HanteiMark would be
+// ambiguous with it.
+func IsValidIpponEntry(v string) bool {
+	if v == IpponFieldSeparator {
+		return false
 	}
-	return score
+	return utf8.RuneCountInString(v) <= 1 || v == HanteiMark
 }
 
-// IpponFitsScoreCodec reports whether one ippon entry survives the round trip
-// above. FormatScore joins the entries with NO separator, so only a single-rune
-// entry can be recovered; an empty entry is allowed because it renders as
-// nothing and is not a scoring ippon (CountScoringIppons drops it) — the codec
-// normalises it away rather than corrupting anything.
+// ParseScore: "MK (H1)" → (["M","K"], 1), "MK" → (["M","K"], 0),
+// "(H1)" → (nil, 1), "" → (nil, 0).
 //
-// The round-trip comment states this as a precondition. This is that
-// precondition made enforceable, so a wire validator can hold the line the
-// codec assumes. Two things went wrong while nothing did:
+// An absent hansoku count comes back as 0 rather than a negative. A malformed
+// count parses as 0 rather than failing: this reads persisted data on a
+// live-tournament path, where dropping an unreadable hansoku is better than
+// refusing to show the match at all.
 //
-//   - "MHt" decoded back as ["M","H","t"]: three ippons, one of them the
-//     hansoku letter, on the display surfaces AND in the K3 rollback snapshot
-//     built from the same decode.
-//   - Worse on a POOL match, where HanteiMark is the persistence encoding for a
-//     verdict (encodeHanteiIntoIppons, state/pools.go). A client-supplied "Ht"
-//     was written to pool-matches.csv verbatim, and decodeHanteiFromIppons then
-//     read it back as a genuine recorded judges' decision — a forged verdict on
-//     reload, from a payload that never set the flag. Being two runes, it is
-//     rejected here by the same rule.
-func IpponFitsScoreCodec(v string) bool {
-	return utf8.RuneCountInString(v) <= 1
-}
-
-// ParseScore is the inverse of FormatScore: "MK (H1)" → (["M","K"], 1),
-// "MK" → (["M","K"], 0), "(H1)" → (nil, 1), "" → (nil, 0).
-//
-// The round trip is exact for any slice FormatScore can render distinctly,
-// i.e. one whose entries are single runes. Two deliberate normalisations:
-// an empty-string entry is dropped (it renders as nothing, and is not a
-// scoring ippon — see CountScoringIppons), and an absent hansoku count comes
-// back as 0 rather than a negative. A malformed count parses as 0 rather than
-// failing: this reads persisted data on a live-tournament path, where dropping
-// an unreadable hansoku is better than refusing to show the match at all.
+// HanteiMark is the ONE multi-rune entry the format ever admitted: "t" is not
+// a letter that can stand alone in a score, so ParseScore can consume the
+// "Ht" pair unambiguously (an "H" ippon is only read as bare hansoku-H when
+// NOT followed by "t").
 func ParseScore(s string) ([]string, int) {
 	s = strings.TrimSpace(s)
 	hansoku := 0
@@ -85,9 +72,26 @@ func ParseScore(s string) ([]string, int) {
 			s = strings.TrimSpace(s[:i])
 		}
 	}
+	// Byte lookahead, not []rune(s): 'H' and 't' are both ASCII (one byte
+	// each), so s[i+1] safely peeks the byte right after a rune-range 'H'
+	// without decoding the whole string up front. skipNext consumes the 't'
+	// that was already folded into the HanteiMark token, so the next
+	// range step (which lands exactly on that byte) does not re-tokenize it.
 	var ippons []string
-	for _, r := range s {
+	skipNext := false
+	for i, r := range s {
+		if skipNext {
+			skipNext = false
+			continue
+		}
 		if r == ' ' {
+			continue
+		}
+		// The hantei mark is the codec's one two-rune token; see
+		// IsValidIpponEntry for why the lookahead cannot misfire.
+		if r == 'H' && i+1 < len(s) && s[i+1] == 't' {
+			ippons = append(ippons, HanteiMark)
+			skipNext = true
 			continue
 		}
 		ippons = append(ippons, string(r))

@@ -1818,21 +1818,23 @@ func TestOverrideBracketWinner_ClearsReopenPending(t *testing.T) {
 //
 // Both homes are checked because they carry the verdict in different fields
 // (MatchResult keeps ippons + WinnerID + rep nominations; BracketMatch keeps
-// rendered ScoreA/ScoreB and IsOverridden) and drifted before.
+// its own IpponsA/IpponsB and IsOverridden) and drifted before.
 func TestReopenKachinukiMatch_DiscardsVerdictKeepsBoutLog(t *testing.T) {
+	// boutLog[0]'s hantei is recorded as domain.HanteiMark inside the
+	// WINNER's (R-1's) ippon slice — the mark IS the record (operator ruling
+	// 2026-08-21) — rather than the legacy DecidedByHantei *bool.
 	boutLog := []state.SubMatchResult{
 		{
 			Position: 1, SideA: "R-1", SideB: "W-1",
-			IpponsA: []string{"M"}, IpponsB: []string{"K"},
+			IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"K"},
 			HansokuB: 1, Winner: "R-1", Decision: "fought",
-			DecidedByHantei: state.HanteiPtr(true), Encho: &state.EnchoMetadata{PeriodCount: 2},
+			Encho: &state.EnchoMetadata{PeriodCount: 2},
 		},
 		{
 			Position: 2, SideA: "R-1", SideB: "W-2",
 			IpponsA: []string{}, IpponsB: []string{}, Decision: "hikiwake",
 		},
 	}
-	hantei := true
 
 	t.Run("pool", func(t *testing.T) {
 		compID := "reopen-verdict-pool"
@@ -1843,7 +1845,7 @@ func TestReopenKachinukiMatch_DiscardsVerdictKeepsBoutLog(t *testing.T) {
 			Winner: "RedTeam", WinnerID: "red-uuid",
 			IpponsA: []string{"○", "○"}, IpponsB: []string{"M"},
 			Decision: "kiken-voluntary", DecisionBy: "shiro", DecisionReason: "withdrew",
-			Encho: &state.EnchoMetadata{PeriodCount: 1}, DecidedByHantei: &hantei,
+			Encho:        &state.EnchoMetadata{PeriodCount: 1},
 			ResultSource: "admin", RepPlayerA: "R-2", RepPlayerB: "W-2",
 			SubResults: boutLog,
 		}}))
@@ -1870,7 +1872,7 @@ func TestReopenKachinukiMatch_DiscardsVerdictKeepsBoutLog(t *testing.T) {
 		assert.Empty(t, m.DecisionBy)
 		assert.Empty(t, m.DecisionReason)
 		assert.Nil(t, m.Encho, "match-level encho described the bout the operator ended on")
-		assert.Nil(t, m.DecidedByHantei)
+		assert.Nil(t, m.DecidedByHantei, "legacy read-only field: never raised by a loader")
 		assert.Empty(t, m.ResultSource, "provenance of a result that no longer exists")
 		assert.Empty(t, m.RepPlayerA)
 		assert.Empty(t, m.RepPlayerB)
@@ -1885,9 +1887,9 @@ func TestReopenKachinukiMatch_DiscardsVerdictKeepsBoutLog(t *testing.T) {
 				{{
 					ID: "F0", SideA: "RedTeam", SideB: "WhiteTeam",
 					Status: state.MatchStatusCompleted, Winner: "RedTeam",
-					ScoreA: "2", ScoreB: "1",
+					IpponsA: []string{"○", "○"}, IpponsB: []string{"○"},
 					Decision: "kiken-voluntary", DecisionBy: "shiro", DecisionReason: "withdrew",
-					Encho: &state.EnchoMetadata{PeriodCount: 1}, DecidedByHantei: true,
+					Encho:        &state.EnchoMetadata{PeriodCount: 1},
 					IsOverridden: true, ResultSource: "admin",
 					SubResults: boutLog,
 				}},
@@ -1905,13 +1907,13 @@ func TestReopenKachinukiMatch_DiscardsVerdictKeepsBoutLog(t *testing.T) {
 
 		assert.Equal(t, state.MatchStatusRunning, bm.Status)
 		assert.Empty(t, bm.Winner)
-		assert.Empty(t, bm.ScoreA, "the rendered scoreline described the discarded result")
-		assert.Empty(t, bm.ScoreB)
+		assert.Empty(t, bm.IpponsA, "the scoreline described the discarded result")
+		assert.Empty(t, bm.IpponsB)
 		assert.Empty(t, bm.Decision)
 		assert.Empty(t, bm.DecisionBy)
 		assert.Empty(t, bm.DecisionReason)
 		assert.Nil(t, bm.Encho)
-		assert.False(t, bm.DecidedByHantei)
+		assert.False(t, bm.DecidedByHantei, "legacy read-only field: production code never writes it")
 		assert.False(t, bm.IsOverridden, "a reopened match is not carrying a manual override any more")
 		assert.Empty(t, bm.ResultSource)
 		assert.Equal(t, "ended too early", bm.CorrectionReason)

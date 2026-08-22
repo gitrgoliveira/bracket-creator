@@ -5,17 +5,83 @@ package domain
 // as it drops an empty cell.
 const IpponPlaceholder = "•"
 
-// HanteiMark is the judges'-decision mark that rides in the WINNER's score
-// cell. It is not a waza letter and never a scored point (CountScoringIppons
-// drops it, as it drops the placeholder): it records that the referees settled
-// the match, not that anyone struck.
+// HanteiMark is the judges'-decision mark, recorded as an ENTRY in the
+// WINNER's ippon slice — the mark IS the record (operator ruling 2026-08-21:
+// "Ht should be recorded as just another ippon"), exactly as the FIK score
+// sheet writes it in the winner's column. It is not a waza letter and never a
+// scored point (CountScoringIppons drops it, as it drops the placeholder): it
+// records that the referees settled the match, not that anyone struck.
 //
-// It occupies a point SLOT, though, which is what lets a pool match persist a
-// hantei without a new column — see encodeHanteiIntoIppons in state/pools.go.
-// A hantei is only taken from a tied scoreline, and sanbon-shobu ends at 2, so
-// the winner always has a free slot for it (the same reasoning resultSlot uses
-// in web-mobile/js/result_slot.jsx).
+// It occupies a point SLOT: a hantei is only taken from a tied scoreline, and
+// sanbon-shobu ends at 2, so the winner always has a free slot for it (the
+// same reasoning resultSlot uses in web-mobile/js/result_slot.jsx). The
+// legacy decidedByHantei fields (MatchResult, SubMatchResult, BracketMatch)
+// are READ-ONLY compatibility channels: loaders and the request decoder
+// normalise a flagged verdict into the winner's ippons; writers never set
+// them.
 const HanteiMark = "Ht"
+
+// MaxIpponsPerSide is the kendo best-of-3 (sanbon-shobu) structural cap: each
+// fighter can score at most 2 ippons, because the 2nd wins the match.
+//
+// One owner, in the leaf package both enforcers already import, because the
+// cap is checked at two layers that must agree: mobileapp.validateIppons
+// judges the payload as the client sent it, and the engine re-checks a row
+// AFTER applyHansokuIppons has folded in an auto-awarded ippon (which the
+// wire validator could not have seen). Two spellings of one rule let the
+// engine accept a row the wire validator then 400s on every later save,
+// wedging the editor on a scoreline nothing rejected at write time.
+const MaxIpponsPerSide = 2
+
+// ContainsHantei reports whether an ippon slice carries the judges'-decision
+// mark. Validation guarantees at most one mark per match, on the winner's
+// side only, so "either side contains it" is the match-level verdict test.
+func ContainsHantei(ippons []string) bool {
+	for _, v := range ippons {
+		if v == HanteiMark {
+			return true
+		}
+	}
+	return false
+}
+
+// StripHantei returns ippons without the judges'-decision mark, the original
+// slice when no mark is present. Used where a verdict stops holding (a kiken
+// recorded over a stored hantei, a legacy explicit-false normalisation): the
+// points stay, the verdict goes.
+func StripHantei(ippons []string) []string {
+	if !ContainsHantei(ippons) {
+		return ippons
+	}
+	out := make([]string, 0, len(ippons)-1)
+	for _, v := range ippons {
+		if v != HanteiMark {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// AppendHantei returns ippons with the judges'-decision mark appended once:
+// filling the winner's next free slot is exactly "append", because slots
+// render in array order. A slice already carrying the mark is returned
+// unchanged, so normalising a legacy flag over an already-marked slice
+// cannot double it.
+func AppendHantei(ippons []string) []string {
+	if ContainsHantei(ippons) {
+		return ippons
+	}
+	// Fill an empty placeholder slot before growing the slice: the editors
+	// persist "•" for an unfilled slot, and the mark takes a free slot.
+	for i, v := range ippons {
+		if v == "" || v == IpponPlaceholder {
+			out := append([]string{}, ippons...)
+			out[i] = HanteiMark
+			return out
+		}
+	}
+	return append(append([]string{}, ippons...), HanteiMark)
+}
 
 // CountScoringIppons counts the real ippon marks in an ippons slice, ignoring
 // empty entries and IpponPlaceholder. The default-win maru (written by the
@@ -48,6 +114,94 @@ func CountScoringIppons(ippons []string) int {
 // again by SideMarks. Mirrors realIppons in web-mobile/js/result_slot.jsx.
 func IsScoringIppon(v string) bool {
 	return v != "" && v != IpponPlaceholder && v != HanteiMark
+}
+
+// MatchSide is the three-value result of attributing a match's winner to a
+// named side: MatchSideA, MatchSideB, or MatchSideNone when the winner
+// cannot be attributed to either (empty winner, or a name/id that matches
+// neither side). See AttributeWinnerSide, the one function that produces it.
+type MatchSide string
+
+const (
+	MatchSideNone MatchSide = ""
+	MatchSideA    MatchSide = "A"
+	MatchSideB    MatchSide = "B"
+)
+
+// AttributeWinnerSide is the ONE owner of "which side won", used everywhere a
+// hantei mark (or any other winner-attributed result) is placed, validated,
+// or exported at MATCH level. It exists because the mark's side used to be
+// decided by NAME alone, and a name is not unique within a competition: two
+// participants from different dojos may share a name
+// (CheckDuplicateEntriesByNameDojo only rejects same-name AND same-dojo), so
+// a same-name pair let the mark land on the wrong side whenever the actual
+// WinnerID named side B but names alone picked side A.
+//
+// Rule:
+//
+//   - If winnerID, sideAID and sideBID are ALL non-empty, attribute by id:
+//     winnerID==sideAID -> MatchSideA; winnerID==sideBID -> MatchSideB;
+//     matches neither -> MatchSideNone. Ids WIN over names when they
+//     disagree; that is the point of this function.
+//   - Otherwise (any of the three ids empty: legacy data, id-less payloads,
+//     bracket rows, or a sub-bout, which carries no ids at all), fall back
+//     to the name comparison: winner==sideA -> MatchSideA; else
+//     winner==sideB -> MatchSideB; matches neither -> MatchSideNone. sideA
+//     is checked first, so a winner name that matches BOTH sides (invalid
+//     data - see the same convention documented for team aggregation)
+//     resolves to MatchSideA, exactly as the equivalent name-only checks
+//     elsewhere in this codebase (e.g. the switch order in
+//     export.SideMarksLR) always have. This keeps id-less data byte-for-byte
+//     identical to pre-id-threading behaviour.
+//   - An empty winner is always MatchSideNone: it must never string-match an
+//     empty sideA/sideB (e.g. an unset field), so this is checked before any
+//     comparison.
+//
+// Mirrored in JS as attributeWinnerSide in web-mobile/js/result_slot.jsx (the
+// declared owner of the Ht rules, which names this function as its twin);
+// keep both in sync. Not bracket.jsx — that file holds only the name-based
+// display helpers (winnerSideLR, subWinnerSides).
+// WinnerAttribution carries everything AttributeWinnerSide needs to name a
+// side: the participant ids when the record has them, and the names it always
+// has. It is a struct rather than six positional strings because all six are
+// the same type and mutually assignable, so a transposed pair compiles clean
+// and silently marks the wrong competitor. That hazard was not theoretical -
+// two functions implementing this one rule had already drifted into two
+// different string orders (winner fourth in one, winner last in the other).
+//
+// The zero value means "this record has no ids", which SubMatchResult and
+// BracketMatch both are (they persist names only); a partially-filled id set
+// takes the name path too, per the rule below.
+//
+// Mirrored in JS as attributeWinnerSide's options object in
+// web-mobile/js/result_slot.jsx, which took an object from the start.
+type WinnerAttribution struct {
+	WinnerID, SideAID, SideBID string
+	Winner, SideA, SideB       string
+}
+
+func AttributeWinnerSide(a WinnerAttribution) MatchSide {
+	if a.WinnerID != "" && a.SideAID != "" && a.SideBID != "" {
+		switch a.WinnerID {
+		case a.SideAID:
+			return MatchSideA
+		case a.SideBID:
+			return MatchSideB
+		default:
+			return MatchSideNone
+		}
+	}
+	if a.Winner == "" {
+		return MatchSideNone
+	}
+	switch a.Winner {
+	case a.SideA:
+		return MatchSideA
+	case a.SideB:
+		return MatchSideB
+	default:
+		return MatchSideNone
+	}
 }
 
 // HanteiTiedScoreline reports whether two ippon arrays hold an equal number of

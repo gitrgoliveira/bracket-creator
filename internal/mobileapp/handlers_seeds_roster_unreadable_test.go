@@ -120,3 +120,59 @@ func TestPutSeeds_GhostNameStillRefused(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code, "a ghost name is the client's error")
 	assert.Contains(t, w.Body.String(), "not on this competition's roster")
 }
+
+// TestPutSeeds_DojoMismatchRefused is the regression guard for the bc-389
+// review finding: rejectSeedsOffRoster used to check Name alone, coarser than
+// the (name, dojo) key the merge (state.loadParticipants / domain.RosterIndex)
+// actually resolves seeds by. A row naming a roster name under the WRONG dojo
+// used to pass this gate -- seeds.csv saved with 200 -- yet the merge could
+// never attach it (the exact key misses, and the bare-name fallback is
+// disabled whenever the row carries a non-empty dojo), so the rank rode in
+// seeds.csv unattached and only surfaced, much later, as generate-draw's
+// "seeded participant not found in main list". The roster carries Alice from
+// "Wakaba"; the seed names Alice from "Cooper Dojo" instead.
+func TestPutSeeds_DojoMismatchRefused(t *testing.T) {
+	store, _, do := seedsRosterFixture(t)
+	require.NoError(t, store.SaveParticipants("c1", []domain.Player{
+		{Name: "Alice", Dojo: "Wakaba"}, {Name: "Bob", Dojo: "Wakaba"},
+	}))
+
+	body, err := json.Marshal([]domain.SeedAssignment{
+		{Name: "Alice", Dojo: "Cooper Dojo", SeedRank: 1},
+		{Name: "Bob", Dojo: "Wakaba", SeedRank: 2},
+	})
+	require.NoError(t, err)
+
+	w := do("PUT", "/api/competitions/c1/seeds", body)
+	assert.Equal(t, http.StatusBadRequest, w.Code,
+		"a seed row naming a roster name under the wrong dojo must be refused, not silently persisted unattached")
+	assert.Contains(t, w.Body.String(), "not on this competition's roster")
+
+	seeds, loadErr := store.LoadSeeds("c1")
+	require.NoError(t, loadErr)
+	assert.Empty(t, seeds, "nothing may be persisted when the dojo-mismatch row was refused")
+}
+
+// TestPutSeeds_LegacyEmptyDojoStillAccepted pins that the fallback the gate
+// now shares with the merge (domain.RosterIndex's unique-bare-name match) is
+// preserved: a legacy seed row with NO dojo naming a unique roster name must
+// still be accepted, exactly as the merge would still attach it.
+func TestPutSeeds_LegacyEmptyDojoStillAccepted(t *testing.T) {
+	store, _, do := seedsRosterFixture(t)
+	require.NoError(t, store.SaveParticipants("c1", []domain.Player{
+		{Name: "Alice", Dojo: "Wakaba"}, {Name: "Bob", Dojo: "Wakaba"},
+	}))
+
+	body, err := json.Marshal([]domain.SeedAssignment{
+		{Name: "Alice", SeedRank: 1}, // legacy row: no dojo, "Alice" is unique
+		{Name: "Bob", SeedRank: 2},
+	})
+	require.NoError(t, err)
+
+	w := do("PUT", "/api/competitions/c1/seeds", body)
+	assert.Equal(t, http.StatusOK, w.Code, "a legacy no-dojo row naming a unique roster name must still be accepted")
+
+	seeds, loadErr := store.LoadSeeds("c1")
+	require.NoError(t, loadErr)
+	assert.Len(t, seeds, 2)
+}

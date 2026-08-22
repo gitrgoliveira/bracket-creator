@@ -242,6 +242,65 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			})
 		}
 
+		// Refuse a replace that would orphan an already-seeded participant.
+		// This endpoint carries no seed data of its own (unlike
+		// PUT /competitions/:id, which derives seeds.csv fresh from each
+		// player's Seed field on every save), so it has no way to rewrite a
+		// seed row alongside an identity change the way the single-participant
+		// PUT /participants/:pid path does -- an edit here can only strand the
+		// EXISTING row, never legitimately update it (bc-389 review finding:
+		// correcting a seeded competitor's dojo through this endpoint orphaned
+		// their seeds.csv row, and only generate-draw discovered it later,
+		// minutes or hours after the edit looked like it had succeeded).
+		//
+		// Rather than guess which new row a changed identity corresponds to
+		// (this is a full replace with no stable per-request participant id
+		// to key a rename off), refuse the whole write: the operator keeps
+		// the (name, dojo) pair unchanged, or edits identity through
+		// PUT /competitions/:id/participants/:pid (which rewrites the seed
+		// alongside the rename) or the seeding panel directly.
+		seeds, serr := store.LoadSeedsRaw(id)
+		if serr != nil {
+			internalError(c, serr, "failed to load seeds")
+			return
+		}
+		// Canonicalize a COPY of the new roster's names before checking for
+		// orphaned seeds, to match what LoadParticipants will read back after
+		// this save. CreatePlayersFromRecords Title-cases Name on every parse,
+		// but saveParticipantsNoLock deliberately writes the raw request name
+		// (see its comment: "names arriving via the bulk SaveParticipants path
+		// may be raw"), so seeds.csv (which holds the canonical form written by
+		// the seeding panel / PUT /participants/:pid, both of which
+		// TitleCaseName before saving) and this raw newPlayers slice could
+		// disagree on casing alone -- e.g. a stored seed for "Van Der Berg"
+		// against a re-submitted "van der berg" -- even though the two names
+		// resolve to the very same participant on the next load. Without this,
+		// RosterIndex.Lookup's exact-key match missed on casing and refused a
+		// same-identity resubmission as a spurious 409 orphan.
+		//
+		// Only this orphan-check roster is canonicalized; the raw `players`
+		// slice saved below is untouched, so today's bulk-save behavior
+		// (skip TitleCase, let the next load canonicalize) is unchanged.
+		// Dojo is canonicalized too, and by TrimSpace alone: the loader
+		// Title-cases only the name (CreatePlayersFromRecords assigns
+		// player.Name = c.String(line[0])) but TrimSpaces EVERY field, so the
+		// canonical dojo is the trimmed one. Normalizing only the name would
+		// leave the other half of the (name, dojo) seed key raw and let a
+		// stray space around the dojo produce exactly the same spurious 409
+		// this guard is being fixed for.
+		canonicalPlayers := make([]domain.Player, len(players))
+		copy(canonicalPlayers, players)
+		for i := range canonicalPlayers {
+			canonicalPlayers[i].Name = helper.TitleCaseName(canonicalPlayers[i].Name)
+			canonicalPlayers[i].Dojo = strings.TrimSpace(canonicalPlayers[i].Dojo)
+		}
+		if orphaned := seedsOrphanedByRosterReplace(existing, canonicalPlayers, seeds); len(orphaned) > 0 {
+			c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf(
+				"this replace would orphan %d already-seeded participant(s): %s; keep their name and dojo unchanged, or update seeds via PUT /competitions/:id/participants/:pid or the seeding panel first",
+				len(orphaned), strings.Join(orphaned, ", "))})
+			return
+		}
+
 		if err := store.SaveParticipants(id, players); err != nil {
 			// Defense-in-depth: saveParticipantsNoLock also enforces the
 			// Tier-1 (name, dojo) guard, so map that to 409 rather than 500
@@ -533,13 +592,16 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// set above, but nothing tied them to the roster, so a name with no
 		// participant behind it saved cleanly and then split the two views of
 		// the same seeding: seeds.csv held 1..N and drew fine, while the admin
-		// console -- which reads seeds MERGED ONTO PLAYERS by name
-		// (state.loadParticipants) -- saw the survivors only, read the ghost's
+		// console -- which reads seeds MERGED ONTO PLAYERS (domain.SeedKey in
+		// state.loadParticipants) -- saw the survivors only, read the ghost's
 		// rank as a gap, and disabled Generate draw permanently with no row the
 		// operator could edit to close it.
 		//
-		// Matched on Name exactly, the key seeds.csv itself uses and the key
-		// that merge uses, so the check cannot disagree with the consumer. This
+		// Matched via domain.RosterIndex, the SAME (name, dojo)-with-fallback
+		// resolver the merge (state.loadParticipants) uses (see
+		// rejectSeedsOffRoster), so a ghost -- OR a row naming a roster name
+		// under the wrong dojo -- is refused here in lockstep with what the
+		// merge would actually attach; the two can never disagree. This
 		// endpoint takes a seeding as a FINISHED artefact (see above), so
 		// refusing here costs nothing: the console's own path is
 		// PUT /competitions/:id, which carries the roster and its seeds together

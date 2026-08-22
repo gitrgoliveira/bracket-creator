@@ -23,7 +23,6 @@ async function setupSuite() {
   global.React = runtime.React;
   global.window = global.window || {};
   global.window.isHikiwake = vi.fn((t) => t === 'hikiwake');
-  global.window.ipponsFromScore = vi.fn(() => []);
   vi.resetModules();
   const mod = await import('../match_scoreboard.jsx');
   return { runtime, mod };
@@ -33,7 +32,6 @@ function teardownSuite(runtime) {
   runtime.unmount();
   global.React = realReact;
   delete global.window.isHikiwake;
-  delete global.window.ipponsFromScore;
   vi.restoreAllMocks();
   vi.resetModules();
 }

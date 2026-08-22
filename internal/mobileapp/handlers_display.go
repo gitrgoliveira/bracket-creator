@@ -93,10 +93,9 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 				return
 			}
 
-			// Bracket/knockout: a running elimination bout persists its running
-			// score as the formatted ScoreA/ScoreB string (domain.FormatScore),
-			// not the ippon arrays a pool MatchResult carries. parseScore turns
-			// it back into the {ippons, hansoku} shape the contract returns.
+			// Bracket/knockout: a running elimination bout carries the ippon
+			// arrays natively (BracketMatch.IpponsA/B/HansokuA/B), the same
+			// shape a pool MatchResult carries, so no decode is needed.
 			// Elimination matches have no representative-bout fighters.
 			bracket, err := store.LoadBracket(compID)
 			if err != nil {
@@ -111,10 +110,8 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 						continue
 					}
 					players := currentMatchPlayers(store, comp)
-					ipponsA, hansokuA := parseScore(bm.ScoreA)
-					ipponsB, hansokuB := parseScore(bm.ScoreB)
 					c.JSON(http.StatusOK, currentMatchPayload(court, comp, players,
-						bm.SideA, bm.SideB, ipponsA, ipponsB, hansokuA, hansokuB,
+						bm.SideA, bm.SideB, bm.IpponsA, bm.IpponsB, bm.HansokuA, bm.HansokuB,
 						phaseFromMatchID(bm.ID), "", ""))
 					return
 				}
@@ -126,8 +123,8 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 				strings.EqualFold(bm.Court, court) &&
 				bm.Status == state.MatchStatusRunning {
 				players := currentMatchPlayers(store, comp)
-				ipponsA, hansokuA := parseScore(bm.ScoreA)
-				ipponsB, hansokuB := parseScore(bm.ScoreB)
+				ipponsA, hansokuA := bm.IpponsA, bm.HansokuA
+				ipponsB, hansokuB := bm.IpponsB, bm.HansokuB
 				// phaseFromMatchID(bm.ID) would return "m" for the bronze
 				// match's single-hyphen "m-bronze" ID: not meaningful. This
 				// branch already knows it's the bronze match, so pass a
@@ -327,9 +324,9 @@ func currentMatchPayload(court string, comp *state.Competition, players []domain
 		"sideB": buildSide(sideBName, players, comp.EffectiveWithZekkenName()),
 		// Normalize nil → [] so the JSON encodes empty arrays, not null: the
 		// contract models ipponsA/ipponsB as arrays and overlay clients assume
-		// []. A nil slice reaches here from an unscored pool match or a bracket
-		// score with no ippons ("(H2)" or "" via parseScore, which stays
-		// nil-returning so its unit tests hold).
+		// []. A nil slice reaches here from an unscored pool match or a
+		// bracket match with no ippons yet (BracketMatch.IpponsA/IpponsB stay
+		// nil until scored).
 		"ipponsA":    emptyIfNil(ipponsA),
 		"ipponsB":    emptyIfNil(ipponsB),
 		"hansokuA":   hansokuA,
@@ -340,25 +337,14 @@ func currentMatchPayload(court string, comp *state.Competition, players []domain
 }
 
 // emptyIfNil returns a non-nil slice so JSON encodes [] rather than null.
-// Applied at the response boundary (currentMatchPayload) so parseScore can keep
-// returning nil (its unit tests pin that) while the wire stays array-typed.
+// Applied at the response boundary (currentMatchPayload) so the pool/bracket
+// read paths can keep returning nil for "nothing scored yet" while the wire
+// stays array-typed.
 func emptyIfNil(s []string) []string {
 	if s == nil {
 		return []string{}
 	}
 	return s
-}
-
-// parseScore fills the ippon/hansoku fields for a RUNNING bracket match, which
-// persists its running score as the formatted ScoreA/ScoreB string rather than
-// the ippon arrays a pool MatchResult carries.
-//
-// The package-local spelling of domain.ParseScore. It used to be a second,
-// hand-written implementation here under a comment naming engine.formatScore as
-// its inverse — two packages holding one codec, with nothing making them agree.
-// Both halves now live in domain and are pinned by a round-trip test.
-func parseScore(s string) ([]string, int) {
-	return domain.ParseScore(s)
 }
 
 // buildSide turns a participant name (which is what MatchResult.SideA/SideB

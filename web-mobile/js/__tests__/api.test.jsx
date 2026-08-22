@@ -38,9 +38,9 @@ describe('API Utils', () => {
       expect(result.decision).toBe('');
     });
 
-    it('forwards decidedByHantei on the wire payload', () => {
-      // mp-6di: judges' decision flag must round-trip so the Ht suffix
-      // persists in the viewer and bracket DecidedByHantei mirror.
+    it('converts the armed verdict into the Ht mark in the winner ippons', () => {
+      // The verdict is recorded as the "Ht" entry in the WINNER's ippon list
+      // (the mark IS the record); the wire carries no decidedByHantei field.
       const match = { sideA: 'A', sideB: 'B' };
       const result = toBackendMatchResult({
         winner: 'A',
@@ -49,7 +49,19 @@ describe('API Utils', () => {
         ipponsB: ['K'],
         decidedByHantei: true,
       }, match);
-      expect(result.decidedByHantei).toBe(true);
+      expect(result.decidedByHantei).toBeUndefined();
+      expect(result.ipponsA).toEqual(['M', 'Ht']);
+      expect(result.ipponsB).toEqual(['K']);
+    });
+
+    it('a 0-0 hantei places the mark in the empty slot', () => {
+      const match = { sideA: 'A', sideB: 'B' };
+      const result = toBackendMatchResult({
+        winner: 'B', status: 'complete', ipponsA: [], ipponsB: [],
+        decidedByHantei: true,
+      }, match);
+      expect(result.ipponsB).toEqual(['Ht']);
+      expect(result.ipponsA).toEqual([]);
     });
 
     it('forwards flagsA/flagsB for an engi submission (mp-gy6g regression)', () => {
@@ -97,43 +109,33 @@ describe('API Utils', () => {
       expect(result2.correctionReason).toBeUndefined();
     });
 
-    it('forwards decidedByHantei = false (so a re-edit can clear it)', () => {
-      const match = { sideA: 'A', sideB: 'B' };
+    it('an explicit false leaves the payload markless (the clear IS the absence)', () => {
+      const match = { sideA: 'A', sideB: 'B', decidedByHantei: true };
       const result = toBackendMatchResult({
         winner: 'A',
         status: 'complete',
-        ipponsA: ['M'],
+        ipponsA: ['M', 'Ht'],
         ipponsB: [],
         decidedByHantei: false,
       }, match);
-      expect(result.decidedByHantei).toBe(false);
+      expect(result.decidedByHantei).toBeUndefined();
+      expect(result.ipponsA).toEqual(['M'], 'realIppons strips the echoed mark; false does not re-place it');
     });
 
-    it('preserves decidedByHantei=true from the existing match when patch omits it', () => {
-      // The serialiser forwards `true` from the existing match whenever the
-      // patch doesn't override it, so non-hantei-touching edits (changing
-      // score, court, scheduledAt) keep the previously recorded hantei flag
-      // on the wire.
-      //
-      // The Go backend uses `*bool` for state.MatchResult.DecidedByHantei
-      // (see internal/state/models.go), so an OMITTED JSON field decodes as
-      // nil and the bracket-match engine preserves the stored value
-      // (recordBracketMatchResult / recordBracketMatchResultTx gate on
-      // `result.DecidedByHantei != nil`). The frontend still forwards true
-      // for two reasons: (a) defence-in-depth in case the backend
-      // preserve-on-nil contract regresses, (b) pool matches use `*r =
-      // *result` and WOULD clear on nil; although FIK doesn't permit
-      // hantei in pool play, the codepath exists so we keep the wire
-      // payload self-describing.
+    it('re-places the mark from the existing match when the patch omits the boolean', () => {
+      // A non-hantei-touching edit (court, scheduledAt, a re-save) must not
+      // lose a recorded verdict: realIppons strips any echoed mark from the
+      // outgoing arrays, so the serialiser re-places it on the winner's side
+      // whenever the normalized match says the verdict stands.
       const match = { sideA: 'A', sideB: 'B', decidedByHantei: true };
       const result = toBackendMatchResult({
         winner: 'A',
         status: 'complete',
         ipponsA: ['M'],
         ipponsB: ['K'],
-        // decidedByHantei intentionally omitted
       }, match);
-      expect(result.decidedByHantei).toBe(true);
+      expect(result.decidedByHantei).toBeUndefined();
+      expect(result.ipponsA).toEqual(['M', 'Ht']);
     });
 
     it('does not forward decidedByHantei when the existing match flag is false', () => {
@@ -188,6 +190,264 @@ describe('API Utils', () => {
       const result = toBackendMatchResult({ winner: 'Player B', status: 'complete', ipponsA: [], ipponsB: ['K'] }, match);
       expect(result.winnerId).toBe('id-b');
     });
+
+    // bc-dmsr follow-up: the Ht mark's side ATTRIBUTION (which array the "Ht"
+    // token lands in) was previously done by NAME everywhere, sideA-first.
+    // Same-name/different-dojo sides are legal (the duplicate guard keys
+    // name+dojo), so when both sides of an individual match share a name, the
+    // mark was written to sideA even when the id-carrying winnerId named
+    // sideB. winnerId was already correctly derived (see the tests above)
+    // but was discarded for mark placement - this is the fix and its pin.
+    describe('Ht mark placement attributes by id, not name (bc-dmsr follow-up)', () => {
+      it('same-name pair: places the mark on sideB when the id says so (the bug, now fixed)', () => {
+        const match = { sideA: { id: 'id-kenshikan', name: 'Tanaka Kenji' }, sideB: { id: 'id-mumeishi', name: 'Tanaka Kenji' } };
+        const result = toBackendMatchResult({
+          winner: { id: 'id-mumeishi', name: 'Tanaka Kenji' },
+          status: 'complete',
+          ipponsA: ['M'], ipponsB: ['M'],
+          score: { type: 'ippon' },
+          decidedByHantei: true,
+        }, match);
+        expect(result.winnerId).toBe('id-mumeishi');
+        expect(result.ipponsA).toEqual(['M']);
+        expect(result.ipponsB).toEqual(['M', 'Ht']);
+      });
+
+      it('ids present but the winner id matches neither side: unattributable, no mark placed', () => {
+        const match = { sideA: { id: 'id-a', name: 'Player A' }, sideB: { id: 'id-b', name: 'Player B' } };
+        const result = toBackendMatchResult({
+          winner: { id: 'id-drifted', name: 'Player A' }, // id names neither side
+          status: 'complete',
+          ipponsA: ['M'], ipponsB: ['K'],
+          decidedByHantei: true,
+        }, match);
+        expect(result.ipponsA).toEqual(['M']);
+        expect(result.ipponsB).toEqual(['K']);
+      });
+
+      it('id-less same-name pair: falls back to the sideA-first name convention unchanged', () => {
+        // Neither side carries an id (bare-string sides): the id branch can
+        // never fire, so this must place the mark on sideA exactly as before
+        // this fix, per CLAUDE.md's documented defensive convention.
+        const match = { sideA: 'Tanaka Kenji', sideB: 'Tanaka Kenji' };
+        const result = toBackendMatchResult({
+          winner: 'Tanaka Kenji',
+          status: 'complete',
+          ipponsA: ['M'], ipponsB: ['M'],
+          score: { type: 'ippon' },
+          decidedByHantei: true,
+        }, match);
+        expect(result.ipponsA).toEqual(['M', 'Ht']);
+        expect(result.ipponsB).toEqual(['M']);
+      });
+    });
+
+    // bc-dmsr review (belt and braces): toBackendMatchResult already computes
+    // sideAId/sideBId in scope to place the "Ht" mark itself (see the describe
+    // block above), but used to discard them - only winnerId reached the
+    // wire. The server's validateHanteiMarkPlacement only attributes by id
+    // when winnerId/sideAId/sideBId are ALL present, so a same-name pair's
+    // mark, placed correctly by id on the client, could be rejected by the
+    // server's name-only fallback (or worse, accepted by it and then
+    // silently stripped later by the engine, which DOES see the real stored
+    // ids). The server also backfills sideAId/sideBId from the stored match
+    // ahead of validation now, but this is the second, independent half of
+    // the fix: sending them directly means the two agree even before any
+    // server-side backfill runs.
+    describe('emits sideAId/sideBId on the wire (bc-dmsr review: belt and braces)', () => {
+      it('forwards both side ids when the server supplied them', () => {
+        // normalizeMatch keeps the server's flat sideAId/sideBId alongside the
+        // resolved side objects, and both are present here because this is what
+        // a real same-name pool match looks like: the ids are the only thing
+        // that separates the two competitors.
+        const match = {
+          sideAId: 'id-kenshikan', sideBId: 'id-mumeishi',
+          sideA: { id: 'id-kenshikan', name: 'Tanaka Kenji' }, sideB: { id: 'id-mumeishi', name: 'Tanaka Kenji' },
+        };
+        const result = toBackendMatchResult({
+          winner: { id: 'id-mumeishi', name: 'Tanaka Kenji' },
+          status: 'complete',
+          ipponsA: ['M'], ipponsB: ['M'],
+          score: { type: 'ippon' },
+          decidedByHantei: true,
+        }, match);
+        expect(result.sideAId).toBe('id-kenshikan');
+        expect(result.sideBId).toBe('id-mumeishi');
+      });
+
+      it('omits sideAId/sideBId (never sends empty strings) when the match carries bare-string sides', () => {
+        const match = { sideA: 'Alice', sideB: 'Bob' };
+        const result = toBackendMatchResult({ winner: 'Alice', status: 'complete', ipponsA: ['M'], ipponsB: [] }, match);
+        expect('sideAId' in result).toBe(false);
+        expect('sideBId' in result).toBe(false);
+      });
+
+      it('omits an id the SERVER never supplied, even when the side object carries one', () => {
+        // resolveSide falls back to `{ id: flatId || name }`, so a match with no
+        // flat ids - a bracket match, which persists none, or a legacy pool row
+        // written before the id columns existed - yields side objects whose id
+        // IS the display name. Sending that would have it stored as though it
+        // were a participant UUID, and for a same-name pair buildPlayerMap
+        // collapses BOTH sides onto the same invented value.
+        const match = { sideA: { id: 'Tanaka Kenji', name: 'Tanaka Kenji' }, sideB: { id: 'Tanaka Kenji', name: 'Tanaka Kenji' } };
+        const result = toBackendMatchResult({ winner: 'Tanaka Kenji', status: 'complete', ipponsA: ['M'], ipponsB: [] }, match);
+        expect('sideAId' in result).toBe(false);
+        expect('sideBId' in result).toBe(false);
+      });
+
+      it('omits sideAId/sideBId for an id-less same-name pair (the id branch never fires)', () => {
+        const match = { sideA: 'Tanaka Kenji', sideB: 'Tanaka Kenji' };
+        const result = toBackendMatchResult({
+          winner: 'Tanaka Kenji',
+          status: 'complete',
+          ipponsA: ['M'], ipponsB: ['M'],
+          score: { type: 'ippon' },
+          decidedByHantei: true,
+        }, match);
+        expect('sideAId' in result).toBe(false);
+        expect('sideBId' in result).toBe(false);
+      });
+    });
+
+    // Unattributable winner: a rename-drifted (or same-name, no-id) stored
+    // winner can leave wantHantei true while the winner name matches NEITHER
+    // side. The mark then has no side to ride on and NO mark is emitted -
+    // CLAUDE.md's accepted no-mark class (ii), and the only shape the server
+    // takes: validateHanteiMarkPlacement (validation.go) 400s a mark whose
+    // winner is not that side's name, on both the single and bulk paths, so
+    // echoing the stored mark back would fail every later save of the match
+    // (a court reassignment included). An earlier revision of this PR did
+    // echo it back, via a preserveUnattributableHt helper; it was removed
+    // once the server-side placement validation landed. Do not reinstate it
+    // without relaxing that validator first.
+    describe('unattributable hantei winner (rename-drifted stored verdict)', () => {
+      it('strips an echoed mark on sideA rather than emitting a payload the server rejects', () => {
+        const match = { sideA: 'Alice', sideB: 'Bob' };
+        const result = toBackendMatchResult({
+          winner: 'Charlie', // matches neither sideA nor sideB
+          status: 'complete',
+          ipponsA: ['M', 'Ht'],
+          ipponsB: ['K'],
+          decidedByHantei: true,
+        }, match);
+        expect(result.ipponsA).toEqual(['M']);
+        expect(result.ipponsB).toEqual(['K']);
+      });
+
+      it('strips an echoed mark on sideB the same way', () => {
+        const match = { sideA: 'Alice', sideB: 'Bob' };
+        const result = toBackendMatchResult({
+          winner: 'Charlie',
+          status: 'complete',
+          ipponsA: ['M'],
+          ipponsB: ['K', 'Ht'],
+          decidedByHantei: true,
+        }, match);
+        expect(result.ipponsA).toEqual(['M']);
+        expect(result.ipponsB).toEqual(['K']);
+      });
+
+      it('emits no mark when neither incoming array carried one (drop-never-guess)', () => {
+        const match = { sideA: 'Alice', sideB: 'Bob' };
+        const result = toBackendMatchResult({
+          winner: 'Charlie',
+          status: 'complete',
+          ipponsA: ['M'],
+          ipponsB: ['K'],
+          decidedByHantei: true,
+        }, match);
+        expect(result.ipponsA).toEqual(['M']);
+        expect(result.ipponsB).toEqual(['K']);
+      });
+
+      it('strips it via the existing-match decidedByHantei fallback too (no explicit patch flag)', () => {
+        // Same unattributable-winner shape, but the boolean comes from the
+        // stored match (a re-save that doesn't touch the verdict) rather
+        // than an explicit patch field.
+        //
+        // At MATCH level this save 400s either way: toBackendMatchResult
+        // always sets result.sideA/sideB from the match, and
+        // validateWithOptions (internal/mobileapp/validation.go ~774)
+        // independently rejects any winner naming neither side whenever both
+        // sides are present, mark or no mark. Stripping the mark here only
+        // changes WHICH validator rejects the save (a bare "must equal sideA
+        // or sideB" instead of a hantei-placement error), not the outcome.
+        // The strip's real end-to-end value is on SUB rows (see the
+        // 'subResults hantei conversion' describe below): validateSubBout has
+        // no equivalent unconditional winner-names-a-side check, so a
+        // markless drifted sub row genuinely passes there.
+        const match = { sideA: 'Alice', sideB: 'Bob', decidedByHantei: true };
+        const result = toBackendMatchResult({
+          winner: 'Charlie',
+          status: 'complete',
+          ipponsA: ['M', 'Ht'],
+          ipponsB: ['K'],
+        }, match);
+        expect(result.ipponsA).toEqual(['M']);
+      });
+    });
+
+    // subResults: the daihyosen/per-bout editor twin of the top-level branch
+    // above, under the same unattributable-winner rule.
+    describe('subResults hantei conversion', () => {
+      it('places the mark on the sub winner side when attributable', () => {
+        const match = { sideA: 'A', sideB: 'B' };
+        const result = toBackendMatchResult({
+          status: 'complete',
+          subResults: [{ position: -1, sideA: 'Kenji', sideB: 'Taro', winner: 'Taro', ipponsA: ['M'], ipponsB: [], decidedByHantei: true }],
+        }, match);
+        expect(result.subResults[0].ipponsB).toEqual(['Ht']);
+        expect(result.subResults[0].ipponsA).toEqual(['M']);
+        expect('decidedByHantei' in result.subResults[0]).toBe(false);
+      });
+
+      it('leaves a false sub decidedByHantei markless (strips any echoed mark)', () => {
+        const match = { sideA: 'A', sideB: 'B' };
+        const result = toBackendMatchResult({
+          status: 'complete',
+          subResults: [{ position: -1, sideA: 'Kenji', sideB: 'Taro', winner: 'Taro', ipponsA: [], ipponsB: ['Ht'], decidedByHantei: false }],
+        }, match);
+        expect(result.subResults[0].ipponsB).toEqual([]);
+      });
+
+      it('strips an echoed mark when the sub winner is unattributable', () => {
+        const match = { sideA: 'A', sideB: 'B' };
+        const result = toBackendMatchResult({
+          status: 'complete',
+          subResults: [{ position: -1, sideA: 'Kenji', sideB: 'Taro', winner: 'Renamed', ipponsA: ['K', 'Ht'], ipponsB: [], decidedByHantei: true }],
+        }, match);
+        expect(result.subResults[0].ipponsA).toEqual(['K']);
+        expect(result.subResults[0].ipponsB).toEqual([]);
+      });
+
+      it('emits no mark for an unattributable sub winner when neither incoming array carried one', () => {
+        const match = { sideA: 'A', sideB: 'B' };
+        const result = toBackendMatchResult({
+          status: 'complete',
+          subResults: [{ position: -1, sideA: 'Kenji', sideB: 'Taro', winner: 'Renamed', ipponsA: ['K'], ipponsB: [], decidedByHantei: true }],
+        }, match);
+        expect(result.subResults[0].ipponsA).toEqual(['K']);
+        expect(result.subResults[0].ipponsB).toEqual([]);
+      });
+
+      it('strips an echoed mark when a sub has no winner at all', () => {
+        // A winner-less mark cannot name anyone, and the server rejects it
+        // outright ("hantei requires winner to be set").
+        const match = { sideA: 'A', sideB: 'B' };
+        const result = toBackendMatchResult({
+          status: 'complete',
+          subResults: [{ position: -1, sideA: 'Kenji', sideB: 'Taro', winner: '', ipponsA: [], ipponsB: ['Ht'], decidedByHantei: true }],
+        }, match);
+        expect(result.subResults[0].ipponsB).toEqual([]);
+      });
+
+      it('passes through a sub with no decidedByHantei boolean unchanged', () => {
+        const match = { sideA: 'A', sideB: 'B' };
+        const sub = { position: 1, sideA: 'Kenji', sideB: 'Taro', winner: 'Taro', ipponsA: ['M'], ipponsB: ['K'] };
+        const result = toBackendMatchResult({ status: 'complete', subResults: [sub] }, match);
+        expect(result.subResults[0]).toEqual(sub);
+      });
+    });
   });
 
   describe('isHikiwake', () => {
@@ -205,6 +465,100 @@ describe('API Utils', () => {
   });
 
   describe('normalizeMatch', () => {
+    it('derives decidedByHantei from the Ht mark (match, sub, and bracket-shaped payload)', () => {
+      // NEW server shape: the verdict is the mark inside the ippon list
+      // arrays; no flag arrives on the wire. The derivation keeps every
+      // consumer reading the property it always read. Pool and bracket
+      // matches share one wire shape (ipponsA/ipponsB arrays; scoreA/scoreB
+      // strings never appear), so both are exercised the same way here.
+      const pool = normalizeMatch({
+        sideA: 'A', sideB: 'B', winner: 'A', status: 'completed',
+        ipponsA: ['M', 'Ht'], ipponsB: ['K'],
+        subResults: [{ position: -1, sideA: 'A', sideB: 'B', winner: 'B', ipponsA: [], ipponsB: ['Ht'] }],
+      }, {});
+      expect(pool.decidedByHantei).toBe(true);
+      expect(pool.subResults[0].decidedByHantei).toBe(true);
+      expect(pool.score.winnerPts).toBe(1);
+      expect(pool.score.loserPts).toBe(1); // the mark occupies a slot, never a point
+
+      const bracket = normalizeMatch({
+        sideA: 'A', sideB: 'B', winner: 'B', status: 'completed',
+        ipponsA: ['M'], ipponsB: ['K', 'Ht'],
+      }, {});
+      expect(bracket.decidedByHantei).toBe(true);
+      expect(bracket.ipponsB).toEqual(['K', 'Ht']);
+      expect(bracket.score.winnerPts).toBe(1);
+
+      const plain = normalizeMatch({
+        sideA: 'A', sideB: 'B', winner: 'A', status: 'completed',
+        ipponsA: ['M'], ipponsB: [],
+      }, {});
+      expect(plain.decidedByHantei).toBe(false);
+    });
+
+    // The wire contract: bracket matches now carry ipponsA/ipponsB (and
+    // hansokuA/hansokuB, omitted when zero) exactly like pool matches;
+    // scoreA/scoreB strings never appear in any response. This pins
+    // normalizeMatch end to end on that shape, including the Ht mark and
+    // an outstanding hansoku together, with no scoreA/scoreB present at all.
+    it('normalizes a bracket-shaped payload from ipponsA/ipponsB alone, with hansoku and Ht, no scoreA/scoreB', () => {
+      const match = {
+        sideA: 'A', sideB: 'B', winner: 'A', status: 'completed',
+        ipponsA: ['M', 'Ht'], ipponsB: ['K'],
+        hansokuA: 0, hansokuB: 1,
+      };
+      expect(match.scoreA).toBeUndefined();
+      expect(match.scoreB).toBeUndefined();
+      const norm = normalizeMatch(match, {});
+      expect(norm.decidedByHantei).toBe(true);
+      expect(norm.ipponsA).toEqual(['M', 'Ht']);
+      expect(norm.ipponsB).toEqual(['K']);
+      expect(norm.hansokuA).toBe(0);
+      expect(norm.hansokuB).toBe(1);
+      expect(norm.scoreA).toBeUndefined();
+      expect(norm.scoreB).toBeUndefined();
+      expect(norm.score).toEqual({
+        type: 'ippon',
+        winnerPts: 1, // realIppons strips the Ht mark: it occupies a slot, never a point
+        loserPts: 1,
+        ippons: ['M'],
+      });
+    });
+
+    // Regression guard for the removed codec: a payload carrying ONLY
+    // scoreA/scoreB (the pre-fix bracket wire shape) derives NO score at
+    // all now — that shape never arrives from the real server any more, and
+    // normalizeMatch must not silently resurrect a parser for it.
+    it('does not derive a score from scoreA/scoreB alone (that shape never arrives on the wire)', () => {
+      const norm = normalizeMatch({ sideA: 'A', sideB: 'B', winner: 'A', status: 'completed', scoreA: 'MK', scoreB: 'D' }, {});
+      expect(norm.score).toBeUndefined();
+    });
+
+    it('preserves subResults array identity when no sub carries the Ht mark', () => {
+      // Efficiency finding: the derived-hantei step used to .map() every
+      // call even when nothing changed, allocating a fresh (behaviorally
+      // identical) array on the common no-hantei path. A .some() pre-check
+      // now skips the map entirely in that case.
+      const subs = [{ position: 1, sideA: 'A', sideB: 'B', winner: 'A', ipponsA: ['M'], ipponsB: [] }];
+      const norm = normalizeMatch({
+        sideA: 'A', sideB: 'B', winner: 'A', status: 'completed',
+        ipponsA: ['M'], ipponsB: [],
+        subResults: subs,
+      }, {});
+      expect(norm.subResults).toBe(subs); // same reference, not a copy
+    });
+
+    it('still replaces subResults with a new array when a sub carries the Ht mark', () => {
+      const subs = [{ position: -1, sideA: 'A', sideB: 'B', winner: 'B', ipponsA: [], ipponsB: ['Ht'] }];
+      const norm = normalizeMatch({
+        sideA: 'A', sideB: 'B', winner: 'A', status: 'completed',
+        ipponsA: ['M'], ipponsB: [],
+        subResults: subs,
+      }, {});
+      expect(norm.subResults).not.toBe(subs);
+      expect(norm.subResults[0].decidedByHantei).toBe(true);
+    });
+
     it('should normalize string sides to objects using playerMap', () => {
       const playerMap = { 'Alice': { id: 'Alice', name: 'Alice', dojo: 'Dojo A' } };
       const match = { sideA: 'Alice', sideB: 'Bob', status: 'scheduled' };
@@ -249,67 +603,6 @@ describe('API Utils', () => {
       });
     });
 
-    // Bracket matches carry scoreA/scoreB strings (no ipponsA/B arrays). The
-    // backend formatScore() emits "MK (H1)" when ippons coexist with an
-    // outstanding hansoku, so normalizeMatch must strip the suffix + leading
-    // space before splitting; otherwise score.ippons leaks " ", "(", "H",
-    // "1", ")" tokens. score.ippons seeds the admin scoring modal's slot
-    // editor when the modal opens on a bracket match.
-    it('strips hansoku "(HN)" suffix from bracket scoreA/scoreB when building score.ippons', () => {
-      const match = {
-        sideA: 'A', sideB: 'B', winner: 'A',
-        status: 'completed',
-        scoreA: 'MK (H1)', scoreB: 'M',
-      };
-      const norm = normalizeMatch(match, {});
-      expect(norm.score).toEqual({
-        type: 'ippon',
-        winnerPts: 2,
-        loserPts: 1,
-        ippons: ['M', 'K'],
-      });
-      // Both sides' waza letters recovered into per-side arrays (loss-free),
-      // so the schedule/bracket render technique letters for BOTH competitors
-      // ("MK–M") rather than the numeric fallback. Hansoku suffix stripped.
-      expect(norm.ipponsA).toEqual(['M', 'K']);
-      expect(norm.ipponsB).toEqual(['M']);
-    });
-
-    it('recovers BOTH sides waza letters into ipponsA/ipponsB from bracket scoreA/scoreB', () => {
-      const match = {
-        sideA: 'A', sideB: 'B', winner: 'A',
-        status: 'completed',
-        scoreA: 'MK', scoreB: 'D',
-      };
-      const norm = normalizeMatch(match, {});
-      expect(norm.ipponsA).toEqual(['M', 'K']);
-      expect(norm.ipponsB).toEqual(['D']);
-    });
-
-    it('does not overwrite server-provided ipponsA/ipponsB with scoreA/scoreB', () => {
-      const match = {
-        sideA: 'A', sideB: 'B', winner: 'A',
-        status: 'completed',
-        scoreA: 'MK', scoreB: 'D',
-        ipponsA: ['K', 'M'], ipponsB: ['T'], // server arrays must win
-      };
-      const norm = normalizeMatch(match, {});
-      expect(norm.ipponsA).toEqual(['K', 'M']);
-      expect(norm.ipponsB).toEqual(['T']);
-    });
-
-    it('strips no-space "(HN)" suffix from bracket scoreA/scoreB too', () => {
-      const match = {
-        sideA: 'A', sideB: 'B', winner: 'B',
-        status: 'completed',
-        scoreA: '(H1)', scoreB: 'MD(H2)',
-      };
-      const norm = normalizeMatch(match, {});
-      // B wins: ippons come from cleaned scoreB
-      expect(norm.score.ippons).toEqual(['M', 'D']);
-      expect(norm.score.winnerPts).toBe(2);
-      expect(norm.score.loserPts).toBe(0);
-    });
   });
 
   describe('buildPlayerMap', () => {

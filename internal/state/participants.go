@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strconv"
 	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -125,6 +124,9 @@ func (s *Store) LoadParticipantsOpt(compID string, withZekkenName bool, opts Loa
 }
 
 func (s *Store) loadParticipants(compID string, withZekkenName bool, opts LoadParticipantsOpts) ([]domain.Player, error) {
+	// Before the read lock: legacy shapes convert on first read, under the
+	// WRITE lock (legacy_upgrade.go). No-op after the first call per comp.
+	s.EnsureLegacyUpgraded(compID)
 	mu := s.getCompLock(compID)
 	mu.RLock()
 	defer mu.RUnlock()
@@ -335,13 +337,17 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 		// they are shown.
 		seeds, _ := helper.ReadSeedsFileRaw(s.compPath(compID, "seeds.csv"))
 		if len(seeds) > 0 {
-			seedMap := make(map[string]int)
+			// Merge via the ONE shared resolver every seed matcher in the
+			// codebase now uses (domain.RosterIndex): exact (name, dojo)
+			// match, else -- only for a legacy row with no dojo -- a
+			// bare-name match when that name is unique in the roster.
+			// Keying on the name alone attached a seed to EVERY same-named
+			// player, so the console displayed a seeding that
+			// domain.AssignSeeds would refuse to draw.
+			roster := domain.NewRosterIndex(players)
 			for _, sd := range seeds {
-				seedMap[sd.Name] = sd.SeedRank
-			}
-			for i := range players {
-				if seed, ok := seedMap[players[i].Name]; ok {
-					players[i].Seed = seed
+				if p, ok := roster.Lookup(sd.Name, sd.Dojo); ok {
+					p.Seed = sd.SeedRank
 				}
 			}
 		}
@@ -580,6 +586,16 @@ func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenNam
 	}
 
 	oldName := players[foundIdx].Name
+	oldDojo := players[foundIdx].Dojo
+	// Build the seed matcher over the PRE-EDIT roster and capture the target
+	// by pointer: RosterIndex aliases the slice, so the keys captured here
+	// still resolve to this element after transform mutates it in place, and
+	// "does this seed row name the participant being edited" becomes the
+	// index's own exact-key-then-unique-bare-name rule rather than a fourth
+	// hand-spelling of it. Must run BEFORE transform: rebuilding afterwards
+	// would key the index on the NEW identity and never match the old rows.
+	preEditRoster := domain.NewRosterIndex(players)
+	target := &players[foundIdx]
 
 	if err := transform(&players[foundIdx]); err != nil {
 		return nil, err
@@ -630,9 +646,16 @@ func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenNam
 	// Pre-validate and load seeds before touching participants.csv so
 	// that a corrupt seeds file is caught before any disk write. If seeds
 	// doesn't exist, seeds is nil and the rename step is skipped.
+	//
+	// Gated on name OR dojo changing: a dojo-only edit still identifies a
+	// different seed row (SeedKey composes both), so a dojo-only edit that
+	// skipped this would orphan the seed -- the merge fallback below is
+	// blocked because the row's dojo is non-empty, and generate-draw then
+	// fails "seeded participant not found in main list".
+	identityChanged := oldName != players[foundIdx].Name || oldDojo != players[foundIdx].Dojo
 	var seeds []domain.SeedAssignment
 	var seedsPath string
-	if oldName != players[foundIdx].Name {
+	if identityChanged {
 		seedsPath = s.compPath(compID, "seeds.csv")
 		var loadErr error
 		// Raw, not validated: correcting a competitor's spelling must work
@@ -653,38 +676,38 @@ func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenNam
 
 	// Write seeds.csv BEFORE participants.csv so that a failure on the
 	// participants write leaves a retryable state: seeds already carries the
-	// new name, so a retry will see changed=false (oldName no longer in seeds)
-	// and skip the rename, then successfully write participants. The reverse
-	// order (participants first) is not retryable; oldName is gone from
-	// participants so the seeds rename can never be applied again.
-	if oldName != players[foundIdx].Name && seeds != nil {
+	// new identity, so a retry will see changed=false (the old identity no
+	// longer matches any row) and skip the rewrite, then successfully write
+	// participants. The reverse order (participants first) is not
+	// retryable; the old identity is gone from participants so the seeds
+	// rewrite can never be applied again.
+	if identityChanged && seeds != nil {
+		// A row refers to THIS participant iff domain.RosterIndex.Lookup
+		// (built over the pre-edit roster above) resolves its (name, dojo) to
+		// this same participant. Matching on bare oldName alone, with no
+		// dojo filter, rewrote EVERY same-named row on a rename; this keys
+		// the match so two same-named players' seeds don't cross.
 		changed := false
 		for i := range seeds {
-			if seeds[i].Name == oldName {
-				seeds[i].Name = players[foundIdx].Name
-				changed = true
+			p, ok := preEditRoster.Lookup(seeds[i].Name, seeds[i].Dojo)
+			if !ok || p != target {
+				continue
 			}
+			// Both fields are written even when only one changed: this also
+			// upgrades a matched legacy empty-dojo row to carry the dojo.
+			seeds[i].Name = players[foundIdx].Name
+			seeds[i].Dojo = players[foundIdx].Dojo
+			changed = true
 		}
 		if changed {
-			// Use encoding/csv so names containing commas / quotes (e.g.
-			// "Smith, John") are properly escaped; fmt.Fprintf("%d,%s\n")
-			// would emit broken CSV that ParseSeedsFile then mis-splits,
-			// silently dropping seeds. Mirrors Store.SaveSeeds.
-			var sb strings.Builder
-			w := csv.NewWriter(&sb)
-			if werr := w.Write([]string{"Rank", "Name"}); werr != nil {
-				return nil, fmt.Errorf("rename seed for %q: writing header: %w", oldName, werr)
+			// marshalSeedsCSV (seeds.go) is the one seeds.csv writer; this
+			// rewrite deliberately keeps the loaded file order rather than
+			// re-sorting, so the only change on disk is the renamed identity.
+			data, merr := marshalSeedsCSV(seeds)
+			if merr != nil {
+				return nil, fmt.Errorf("rename seed for %q: %w", oldName, merr)
 			}
-			for _, a := range seeds {
-				if werr := w.Write([]string{strconv.Itoa(a.SeedRank), a.Name}); werr != nil {
-					return nil, fmt.Errorf("rename seed for %q: writing record: %w", oldName, werr)
-				}
-			}
-			w.Flush()
-			if werr := w.Error(); werr != nil {
-				return nil, fmt.Errorf("rename seed for %q: flushing: %w", oldName, werr)
-			}
-			if werr := s.atomicWrite(seedsPath, []byte(sb.String()), 0600); werr != nil {
+			if werr := s.atomicWrite(seedsPath, data, 0600); werr != nil {
 				return nil, fmt.Errorf("rename seed for %q: %w", oldName, werr)
 			}
 		}

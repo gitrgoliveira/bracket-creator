@@ -237,7 +237,6 @@ func isSelfRunMainGatedConfigRoute(method, fullPath string) bool {
 		http.MethodDelete + " /api/announcements/:id",                                      // Fix 3329416176: organiser config, not operational play
 		http.MethodDelete + " /api/announcements",                                          // Fix 3329416176: organiser config, not operational play
 		http.MethodPut + " /api/auth/admin-password",                                       // Fix 3330063192: relies on AuthMiddleware main-pw verification; not elevated-gated
-		http.MethodPut + " /api/competitions/:id/schedule",                                 // Fix 3330063192: organiser schedule setup, not operational play
 		http.MethodPut + " /api/competitions/:id/matches/:mid/override-winner",             // Fix 3330080949: result correction, organiser, not participant play
 		http.MethodPost + " /api/competitions/:id/matches/:mid/reopen",                     // mp-gmcg: reopen a finalized kachinuki result, organiser correction, same class as override-winner
 		http.MethodPost + " /api/competitions/:id/matches/:mid/requeue-blocker-and-reopen", // mp-gmcg A4: destructive (requeues a blocker) organiser correction; same class as reopen

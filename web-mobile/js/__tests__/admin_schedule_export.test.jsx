@@ -217,3 +217,37 @@ describe('buildXlsxBody roster field sanitizing', () => {
     expect(lines[1]).toBe(', Dojo2');
   });
 });
+
+// ── seeds: dojo must ride along so a same-name pair resolves (domain.SeedKey
+// matches (name, dojo) composite; without dojo, /create 400s "seeded
+// participant not found" for two competitors sharing a display name) ────────
+
+describe('buildXlsxBody seeded participant dojo', () => {
+  const cfg = { format: 'pools', poolSize: 3, poolWinners: 2, courts: ['A'] };
+
+  it('includes each seeded participant\'s dojo in the seeds JSON', () => {
+    const players = [
+      { name: 'Alice', dojo: 'DojoA', seed: 1 },
+      { name: 'Alice', dojo: 'DojoB', seed: 2 },
+    ];
+    const body = buildXlsxBody(cfg, 'Test', players);
+    const seeds = JSON.parse(body.get('seeds'));
+    expect(seeds).toEqual([
+      { name: 'Alice', dojo: 'DojoA', seedRank: 1 },
+      { name: 'Alice', dojo: 'DojoB', seedRank: 2 },
+    ]);
+  });
+
+  it('falls back to "NA" when a seeded participant has no dojo (matches rosterLine\'s fallback)', () => {
+    const players = [{ name: 'Solo', dojo: '', seed: 1 }];
+    const body = buildXlsxBody(cfg, 'Test', players);
+    const seeds = JSON.parse(body.get('seeds'));
+    expect(seeds).toEqual([{ name: 'Solo', dojo: 'NA', seedRank: 1 }]);
+  });
+
+  it('omits the seeds param entirely when no participant is seeded', () => {
+    const players = [{ name: 'Alice', dojo: 'DojoA' }];
+    const body = buildXlsxBody(cfg, 'Test', players);
+    expect(body.get('seeds')).toBeNull();
+  });
+});

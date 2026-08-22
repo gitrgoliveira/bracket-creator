@@ -544,13 +544,13 @@ func seedPoolRank(i, numPools, numCourts int) int {
 func ApplySeeds(players []Player, assignments []domain.SeedAssignment) error {
 	c := cases.Title(language.Und, cases.NoLower)
 
-	playerMap := make(map[string]*Player, len(players))
-	nameCount := make(map[string]int, len(players))
-	for i := range players {
-		key := players[i].Name + "|" + players[i].Dojo
-		playerMap[key] = &players[i]
-		nameCount[players[i].Name]++
-	}
+	// NewRosterIndex is the ONE shared implementation of the exact-key /
+	// unique-bare-name fallback (see domain.SeedKey and domain.RosterIndex);
+	// ApplySeeds title-cases the assignment's name before querying it so a
+	// hand-typed "alice cooper" still matches the roster's canonical
+	// "Alice Cooper", but the index itself is queried the same way every
+	// other matcher in the codebase does.
+	roster := domain.NewRosterIndex(players)
 
 	// Build a seed→player reverse index for O(1) collision detection.
 	// Only non-zero seeds are tracked.
@@ -571,17 +571,7 @@ func ApplySeeds(players []Player, assignments []domain.SeedAssignment) error {
 		}
 
 		titleName := c.String(a.Name)
-		key := titleName + "|" + a.Dojo
-		p, ok := playerMap[key]
-		if !ok && a.Dojo == "" && nameCount[titleName] == 1 {
-			for i := range players {
-				if players[i].Name == titleName {
-					p = &players[i]
-					ok = true
-					break
-				}
-			}
-		}
+		p, ok := roster.Lookup(titleName, a.Dojo)
 		if !ok {
 			return fmt.Errorf("seeded participant not found in main list: %s", a.Name)
 		}

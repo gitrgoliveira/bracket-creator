@@ -184,28 +184,6 @@ func TestBronze_ScoreResolvesBronze(t *testing.T) {
 	assert.Equal(t, state.MatchStatusCompleted, bracket.ThirdPlaceMatch.Status)
 }
 
-// TestBronze_ScheduleIncludesBronze verifies GenerateSchedule counts the bronze
-// match as an extra bracket bout.
-func TestBronze_ScheduleIncludesBronze(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "bronze-sched"
-
-	createBronzeTestCompetition(t, store, compID, true)
-	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
-	require.NoError(t, eng.StartCompetition(compID))
-
-	schedule, err := store.LoadSchedule(compID)
-	require.NoError(t, err)
-
-	found := false
-	for _, s := range schedule {
-		if s.MatchRef == "m-bronze" {
-			found = true
-		}
-	}
-	assert.True(t, found, "schedule should include the bronze match (MatchRef m-bronze)")
-}
-
 // TestBronze_RescoredSemifinalUpdatesBronzeSlot verifies that re-scoring a
 // semifinal AFTER both bronze slots are populated overwrites the correct slot
 // in place, rather than leaving the original loser stale. Regression for the
@@ -249,31 +227,6 @@ func TestBronze_RescoredSemifinalUpdatesBronzeSlot(t *testing.T) {
 		"re-scored SF0 must overwrite bronze SideA with the new loser, not leave the stale one")
 	assert.Equal(t, sf[1].SideA, bracket.ThirdPlaceMatch.SideB,
 		"SF1's bronze slot must be untouched by the SF0 re-score")
-}
-
-// TestBronze_CourtChangeSyncsSchedule verifies that changing the bronze match's
-// court via UpdateMatchCourt keeps the schedule CSV entry in sync. Regression
-// for patchScheduleCourt not matching the bronze MatchRef.
-func TestBronze_CourtChangeSyncsSchedule(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "bronze-court"
-
-	createBronzeTestCompetition(t, store, compID, true)
-	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
-	require.NoError(t, eng.StartCompetition(compID))
-
-	require.NoError(t, eng.UpdateMatchCourt(compID, "m-bronze", "B"))
-
-	schedule, err := store.LoadSchedule(compID)
-	require.NoError(t, err)
-	found := false
-	for _, s := range schedule {
-		if s.MatchRef == "m-bronze" {
-			found = true
-			assert.Equal(t, "B", s.Court, "bronze schedule entry court must follow the bracket court change")
-		}
-	}
-	assert.True(t, found, "schedule should include the bronze match entry")
 }
 
 // TestBronze_RoundTripPersistsThirdPlaceMatch verifies the bronze field survives

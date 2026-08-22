@@ -37,7 +37,9 @@ func seedStoreWithGappedFile(t *testing.T) (*state.Store, string) {
 	require.NoError(t, s.SaveParticipants("c1", []domain.Player{
 		{Name: "Alice"}, {Name: "Bob"}, {Name: "Carol"}, {Name: "Dave"},
 	}))
-	// Exactly what SaveSeeds writes when only rank 4 has been entered.
+	// A gapped file in the pre-Dojo header SaveSeeds used to write (readers
+	// locate columns by header name, so both layouts load alike): only rank 4
+	// has been entered.
 	require.NoError(t, os.WriteFile(
 		filepath.Join(dir, "competitions", "c1", "seeds.csv"),
 		[]byte("Rank,Name\n4,Dave\n"), 0o600))

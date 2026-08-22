@@ -85,6 +85,23 @@ function renderTeamBoutMiddle(s, t, isDaihyoRow) {
 // encho is deliberately NOT carried: the editor seeds its encho counter from
 // the stored row, so daihyosenEnchoFields already round-trips an untouched
 // value, and carrying it here would overwrite an operator's encho edit.
+//
+// The protection is ONE SAVE DEEP, not permanent, for an unattributable
+// verdict specifically: since the winner names neither side, the wire's
+// placeHtForWinner can never re-place the mark (there is no side to put it
+// on - see the "row goes out markless" note at the call site below), so the
+// save that runs THIS function still erases the stored Ht mark, even though
+// it preserves the winner NAME. The next mount then derives
+// existingDaihyosen.decidedByHantei as false (it is read from the mark, and
+// the mark is gone), so `armed` starts false, `preserveStoredDaihyosenVerdict`
+// returns null on its very first line, and an untouched correction save after
+// THAT one clears the winner too - the exact hikiwake flip this function
+// exists to prevent, deferred by exactly one save rather than avoided. This
+// is why rename-drift is deliberately not "fixed" further here: renames are
+// gated to setup/draw-ready, when no scored sub rows exist, so an
+// unattributable daihyosen winner is not reachable through real flows in the
+// first place - the decay above is a property of the (dead) scenario, not a
+// live bug.
 export function preserveStoredDaihyosenVerdict({ armed, pickedSide, tied, existingDaihyosen }) {
   if (!armed || pickedSide || !tied) return null;
   if (!existingDaihyosen?.decidedByHantei || !existingDaihyosen.winner) return null;
@@ -753,6 +770,30 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     setDaihyosenHanteiArmed(daihyosenHanteiRecorded);
     setDaihyosenHantei(recordedDaihyosenSide);
   }, [daihyosenHanteiRecorded, recordedDaihyosenSide]);
+  // Shared by daihyosenTouched (buildPatch) and isDirty: whether the operator
+  // has moved the daihyosen VERDICT (encho count, hantei pick, or hantei arm)
+  // away from what the SERVER currently holds. The verdict terms compare
+  // against the server's value, not a mount-time snapshot: adopting a
+  // verdict recorded on another device moves both sides together and so is
+  // not "dirty" here either, which is right - it is not an unsaved change of
+  // this operator's.
+  //
+  // These two callers must never drift: daihyosenTouched feeds
+  // daihyosenSilent, which decides whether buildPatch OMITS the daihyosen
+  // row's ippon arrays - and an omitted (nil) array tells the server's
+  // engine.preserveSubHantei to RESTORE the stored verdict over whatever the
+  // patch would otherwise write. If a future verdict-state control were added
+  // to isDirty but forgotten here, an operator's real edit to that control
+  // would read as untouched, the arrays would be omitted, and the server
+  // would silently restore the OLD verdict over the operator's change while
+  // returning 200 - the exact inversion daihyosenSilent exists to prevent,
+  // and invisible on the wire. Hoisting the shared terms into this one const
+  // makes that impossible: both callers see the same verdict-dirty answer by
+  // construction.
+  const daihyosenVerdictDirty =
+    enchoPeriodCount !== initialEnchoPeriods ||
+    daihyosenHantei !== recordedDaihyosenSide ||
+    daihyosenHanteiArmed !== daihyosenHanteiRecorded;
   // The ONE hantei undo, shared by the Ht chip and the panel Cancel so the
   // two paths cannot drift. Like the pick buttons, it is LOCAL state only:
   // hantei is an explicit-submit channel (autosave contract), so the verdict
@@ -1634,6 +1675,39 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // ONE preserve verdict for this save: the sub-row overlay and the
     // match-level winner below must agree by construction.
     const dhKeep = preserveStoredDaihyosenVerdict({ armed: daihyosenHanteiArmed, pickedSide: daihyosenHantei, tied: daihyosenTied, existingDaihyosen });
+    // daihyosenSilent: the genuine-silence discriminator preserveSubHantei
+    // (engine/scoring.go) relies on. That function tells a genuinely silent
+    // writer (nil ipponsA/B - restore the stored verdict) apart from a
+    // deliberate 0-0 withdrawal (explicit [] - let it withdraw) by nil-ness
+    // alone, but this editor used to send explicit [] unconditionally for
+    // EVERY daihyosen row, silent or not - so a stale editor that never
+    // adopted a verdict recorded elsewhere (an SSE gap, or an offline-queue
+    // replay saving an unrelated bout) erased that verdict on its next save,
+    // indistinguishable on the wire from an operator actually cancelling it.
+    // A row is genuinely silent only when BOTH halves hold: the operator
+    // never touched it THIS session (identical to its mount-time seed,
+    // including the hantei arm/pick and the daihyosen encho counter) AND
+    // nothing about it is known locally either (no recorded verdict, no
+    // scored points/fouls/draw, no overtime). An editor that mounted AFTER a
+    // verdict/score existed is not silent even if untouched - it is
+    // re-stating what it was shown, which is the existing, correct
+    // behaviour (daihyosenEnchoFields below re-derives and re-sends it).
+    // Scope: the restore this omission enables only protects a stored
+    // HANTEI verdict - preserveSubHantei bails when the stored row's
+    // `HanteiDecided()` is false, so a rep bout settled by a real strike is
+    // still blanked by a stale silent save. That is unchanged from the
+    // pre-gate explicit-[] behaviour (not a regression this change
+    // introduces), not a gap this gate closes.
+    const daihyosenTouched = hasDaihyosen && (
+      JSON.stringify(subs[daihyosenIdx]) !== JSON.stringify(initSubsRef.current[daihyosenIdx]) ||
+      daihyosenVerdictDirty
+    );
+    const daihyosenKnownLocally = hasDaihyosen && (
+      daihyosenHanteiRecorded ||
+      subBoutHasBeenPlayed(subs[daihyosenIdx]) ||
+      enchoPeriodCount > 0
+    );
+    const daihyosenSilent = hasDaihyosen && !daihyosenTouched && !daihyosenKnownLocally;
     let subResults = subs.map((s, idx) => {
       const t = subTotals[idx];
       const isDaihyo = idx === daihyosenIdx;
@@ -1679,7 +1753,18 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       // mp-4pc: encho + hantei are valid ONLY on the daihyosen
       // (validation.go validateSubBout). daihyosenEnchoFields emits the two
       // independently: encho is optional for a hantei decision.
-      if (isDaihyo) {
+      if (isDaihyo && daihyosenSilent) {
+        // Genuine silence (see daihyosenSilent above): omit the scoreline
+        // entirely rather than stating an explicit []. Must NOT set
+        // decidedByHantei at all, not even false: toBackendMatchResult
+        // (api_serializers.jsx) only forwards ipponsA/ipponsB UNTOUCHED when
+        // decidedByHantei is absent (its `typeof !== "boolean"` early
+        // return) - setting the flag to anything, including false, routes
+        // the row through stripHt(), which maps a missing array back to []
+        // and reintroduces the exact erasure this branch exists to avoid.
+        delete entry.ipponsA;
+        delete entry.ipponsB;
+      } else if (isDaihyo) {
         // The verdict is always stated, never omitted: the editor adopts what
         // the server holds, so it is never ruling on something it did not show.
         // (There used to be a hanteiKnown guard for exactly that blind spot —
@@ -1688,9 +1773,17 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
         // ORDER MATTERS below: daihyosenEnchoFields writes the field first and
         // dhKeep restores a preserved `true` over it. Swapping the two lines
         // re-opens the regression they exist to prevent (fixing an unrelated
-        // bout score silently flipping a hantei win into a hikiwake). That is
-        // still the path an UNATTRIBUTABLE stored verdict takes: the side
-        // resolves to "" so the field below says false, and dhKeep puts it back.
+        // bout score silently flipping a hantei win into a hikiwake). Note the
+        // limit of that restoration: dhKeep puts the BOOLEAN back, and the
+        // serializer turns a boolean into a mark only when the winner names a
+        // side. For an UNATTRIBUTABLE stored verdict (a winner matching
+        // neither side, i.e. rename-drifted or hand-edited data) there is no
+        // side to mark, so the row goes out markless - CLAUDE.md's accepted
+        // no-mark class (ii), and the only shape the server takes, since
+        // validateHanteiMarkPlacement rejects a mark it cannot attribute.
+        // That markless row is also why this protection is one save deep,
+        // not permanent, for the unattributable case: see
+        // preserveStoredDaihyosenVerdict's doc comment above for the decay.
         Object.assign(entry, daihyosenEnchoFields({ enchoPeriodCount, daihyosenTied, daihyosenHantei }));
         if (dhKeep) Object.assign(entry, dhKeep);
       } else if (isKachinuki && s.encho > 0) {
@@ -1813,14 +1906,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // discarding multi-sub-match edits. Team scoring typically has 3–9 sub
   // entries; the JSON serialize approach is fine for that size and keeps
   // the comparison robust against array identity drift from setSubs.
-  // Encho toggle is included so an operator-only encho change still
-  // triggers the discard confirm.
-  // The verdict terms compare against what the SERVER holds, not a mount-time
-  // snapshot: adopting a verdict recorded elsewhere moves both sides together
-  // and so is not dirty, which is right — it is not an unsaved change of the
-  // operator's, and a "discard unsaved changes?" prompt on an editor nobody
-  // touched trains them to dismiss the one prompt that protects real work.
-  const isDirty = JSON.stringify(subs) !== JSON.stringify(initSubsRef.current) || enchoPeriodCount !== initialEnchoPeriods || daihyosenHantei !== recordedDaihyosenSide || daihyosenHanteiArmed !== daihyosenHanteiRecorded;
+  // Encho toggle is included (via daihyosenVerdictDirty) so an operator-only
+  // encho change still triggers the discard confirm. A "discard unsaved
+  // changes?" prompt on an editor nobody touched would train operators to
+  // dismiss the one prompt that protects real work, which is why
+  // daihyosenVerdictDirty's server-compare (not mount-time-snapshot) behaviour
+  // matters here too.
+  const isDirty = JSON.stringify(subs) !== JSON.stringify(initSubsRef.current) || daihyosenVerdictDirty;
 
   // Match ScoreEditorModal's dismiss contract: never close mid-submit
   // (setState-after-unmount), AND confirm-then-discard when the user has

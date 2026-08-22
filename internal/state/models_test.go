@@ -7,7 +7,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
@@ -95,27 +98,22 @@ func TestApplyTournamentDefaults_Idempotent(t *testing.T) {
 	assert.Equal(t, 10, tour.SlowestCourtBufferPct)
 }
 
-func TestHanteiPtr(t *testing.T) {
-	assert.Nil(t, HanteiPtr(false), "false should map to nil so omitempty omits the field")
-	got := HanteiPtr(true)
-	require.NotNil(t, got)
-	assert.True(t, *got, "true should map to a non-nil pointer to true")
-}
-
-// TestMatchResult_HanteiOmitempty pins the wire contract: a MatchResult
-// projected from a non-hantei BracketMatch using HanteiPtr must NOT emit
-// the field. Regression for the bug where `&bm.DecidedByHantei` (always
-// non-nil) leaked `"decidedByHantei": false` into every SSE payload and
-// every HTTP response, defeating the omitempty contract.
+// TestMatchResult_HanteiOmitempty pins the wire contract for the legacy
+// DecidedByHantei channel: a MatchResult with the field left nil (the "writer
+// said nothing" case every current write path produces) must NOT emit it,
+// while a legacy fixture built with an explicit true does. Regression for the
+// bug where `&bm.DecidedByHantei` (always non-nil) leaked
+// `"decidedByHantei": false` into every SSE payload and every HTTP response,
+// defeating the omitempty contract.
 func TestMatchResult_HanteiOmitempty(t *testing.T) {
-	t.Run("non-hantei projection omits field", func(t *testing.T) {
-		mr := &MatchResult{ID: "m1", DecidedByHantei: HanteiPtr(false)}
+	t.Run("nil field omits it", func(t *testing.T) {
+		mr := &MatchResult{ID: "m1"}
 		b, err := json.Marshal(mr)
 		require.NoError(t, err)
-		assert.NotContains(t, string(b), "decidedByHantei", "wire payload must omit the field for non-hantei matches")
+		assert.NotContains(t, string(b), "decidedByHantei", "wire payload must omit the field when nothing set it")
 	})
-	t.Run("hantei projection emits true", func(t *testing.T) {
-		mr := &MatchResult{ID: "m1", DecidedByHantei: HanteiPtr(true)}
+	t.Run("legacy explicit true emits true", func(t *testing.T) {
+		mr := &MatchResult{ID: "m1", DecidedByHantei: bctest.HanteiExplicit(true)}
 		b, err := json.Marshal(mr)
 		require.NoError(t, err)
 		assert.Contains(t, string(b), `"decidedByHantei":true`)
@@ -128,34 +126,43 @@ func TestMatchResult_HanteiOmitempty(t *testing.T) {
 // the wire), and only nil - "this writer said nothing" - is omitted, which
 // is what lets the store preserve a recorded verdict against stale writes.
 func TestSubMatchResult_HanteiRoundTrip(t *testing.T) {
-	t.Run("true survives JSON round-trip", func(t *testing.T) {
-		sub := SubMatchResult{Position: -1, DecidedByHantei: HanteiPtr(true)}
+	t.Run("the mark round-trips as the ippon entry it is", func(t *testing.T) {
+		sub := SubMatchResult{Position: -1, SideA: "A", SideB: "B", Winner: "A",
+			IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"K"}}
 		b, err := json.Marshal(sub)
 		require.NoError(t, err)
-		assert.Contains(t, string(b), `"decidedByHantei":true`)
+		assert.NotContains(t, string(b), "decidedByHantei",
+			"writers never emit the legacy field")
 		var got SubMatchResult
 		require.NoError(t, json.Unmarshal(b, &got))
 		assert.True(t, got.HanteiDecided())
 	})
-	t.Run("nil (verdict-silent) is omitted from JSON", func(t *testing.T) {
-		b, err := json.Marshal(SubMatchResult{Position: 1})
-		require.NoError(t, err)
-		assert.NotContains(t, string(b), "decidedByHantei")
-	})
-	t.Run("explicit false SERIALIZES (a withdrawal must reach the wire)", func(t *testing.T) {
-		// HanteiExplicit, not &f: HanteiPtr is nil-for-false by design.
-		b, err := json.Marshal(SubMatchResult{Position: -1, DecidedByHantei: HanteiExplicit(false)})
-		require.NoError(t, err)
-		assert.Contains(t, string(b), `"decidedByHantei":false`)
-	})
-	t.Run("true survives YAML round-trip", func(t *testing.T) {
-		sub := SubMatchResult{Position: -1, DecidedByHantei: HanteiPtr(true)}
-		b, err := yaml.Marshal(sub)
-		require.NoError(t, err)
-		assert.Contains(t, string(b), "decided_by_hantei: true")
+	t.Run("a legacy JSON flag folds into the mark on normalize", func(t *testing.T) {
 		var got SubMatchResult
-		require.NoError(t, yaml.Unmarshal(b, &got))
+		require.NoError(t, json.Unmarshal(
+			[]byte(`{"position":-1,"sideA":"A","sideB":"B","winner":"B","ipponsA":[],"ipponsB":["M"],"decidedByHantei":true}`), &got))
+		got.normalizeLegacyHantei()
 		assert.True(t, got.HanteiDecided())
+		assert.Equal(t, []string{"M", domain.HanteiMark}, got.IpponsB)
+		assert.Nil(t, got.DecidedByHantei)
+	})
+	t.Run("a legacy explicit false strips a stale mark on normalize", func(t *testing.T) {
+		got := SubMatchResult{Position: -1, SideA: "A", SideB: "B", Winner: "A",
+			IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"K"},
+			DecidedByHantei: bctest.HanteiExplicit(false)}
+		got.normalizeLegacyHantei()
+		assert.False(t, got.HanteiDecided())
+		assert.Equal(t, []string{"M"}, got.IpponsA)
+	})
+	t.Run("a legacy YAML flag reads and folds", func(t *testing.T) {
+		var got SubMatchResult
+		require.NoError(t, yaml.Unmarshal(
+			[]byte("position: -1\nsidea: A\nsideb: B\nwinner: A\nipponsa: [M]\nipponsb: [K]\ndecided_by_hantei: true\n"), &got))
+		// Only decided_by_hantei carries an explicit yaml tag; the untagged
+		// fields read under yaml's default lowercased keys.
+		got.normalizeLegacyHantei()
+		assert.True(t, got.HanteiDecided())
+		assert.Equal(t, []string{"M", domain.HanteiMark}, got.IpponsA)
 	})
 }
 

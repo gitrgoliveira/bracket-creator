@@ -149,8 +149,9 @@ func TestRosterPutStillAcceptsAHalfTypedSeeding(t *testing.T) {
 
 	stored, err := store.LoadSeedsRaw("c1")
 	require.NoError(t, err)
-	assert.Equal(t, []domain.SeedAssignment{{Name: "Dave", SeedRank: 4}}, stored,
-		"the typed rank must persist, or the console shows 0 seeded and cannot warn")
+	assert.Equal(t, []domain.SeedAssignment{{Name: "Dave", Dojo: "E", SeedRank: 4}}, stored,
+		"the typed rank must persist WITH the dojo half of its identity "+
+			"(domain.SeedKey), or the console shows 0 seeded and cannot warn")
 }
 
 // A rank assigned to nobody is not a seeding.

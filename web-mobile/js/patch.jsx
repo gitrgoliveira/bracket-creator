@@ -14,11 +14,9 @@
 // a frontend release. results[] takes precedence over result if both
 // are present.
 //
-// Bracket matches store ippons as joined strings (scoreA / scoreB)
-// rather than arrays, because the bracket renderer reads the joined
-// form. We map ipponsA/B → scoreA/B before calling mergeMatchPatch
-// for bracket entries; pool matches don't need that translation
-// because their renderers read ipponsA/B directly.
+// Pool and bracket matches share one wire shape (ipponsA/ipponsB arrays;
+// scoreA/scoreB strings never appear), so both branches below hand the
+// patch straight to mergeMatchPatch with no per-kind translation.
 //
 // Returns the unchanged `prev` reference if no listed result IDs
 // matched any match in the competition. This avoids unnecessary
@@ -440,14 +438,7 @@ function applyPatch(prev, event) {
                 const update = resultMap.get(m.id);
                 if (update) {
                     bChanged = true; changed = true;
-                    // Map MatchResult to BracketMatch fields. Bracket
-                    // matches keep ippons as joined strings (scoreA/scoreB),
-                    // not arrays: without this the next render would see
-                    // scoreA undefined and the bracket cell would go blank.
-                    const patch = { ...update };
-                    if (patch.ipponsA) patch.scoreA = patch.ipponsA.join("");
-                    if (patch.ipponsB) patch.scoreB = patch.ipponsB.join("");
-                    const merged = normalizeMatch(_mergeMatchPatch(m, patch), getPlayerMap());
+                    const merged = normalizeMatch(_mergeMatchPatch(m, update), getPlayerMap());
                     if (isScheduleAffecting(m.status, merged.status, m, merged)) {
                         bracketNeedsQueueRecompute = true;
                     }
@@ -473,10 +464,7 @@ function applyPatch(prev, event) {
             const update = resultMap.get(bm.id);
             if (update) {
                 changed = true;
-                const patch = { ...update };
-                if (patch.ipponsA) patch.scoreA = patch.ipponsA.join("");
-                if (patch.ipponsB) patch.scoreB = patch.ipponsB.join("");
-                const merged = normalizeMatch(_mergeMatchPatch(bm, patch), getPlayerMap());
+                const merged = normalizeMatch(_mergeMatchPatch(bm, update), getPlayerMap());
                 next.bracket = { ...next.bracket, thirdPlaceMatch: merged };
                 if (isScheduleAffecting(bm.status, merged.status, bm, merged)) {
                     next.bracket = recomputeBracketQueuePositions(next.bracket);

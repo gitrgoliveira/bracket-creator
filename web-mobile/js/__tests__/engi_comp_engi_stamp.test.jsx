@@ -40,7 +40,7 @@ const matchClickHandlers = (tree, raw) =>
 const STUBBED = [
   'StatusBadge', 'formatDate', 'formatLabel', 'pluralize', 'Term',
   'BracketTree', 'MatchCard', 'buildBracket', 'roundLabel', 'bracketRoundLabel', 'formatIpponsScore',
-  'ipponsFromScore', 'isHikiwake', 'hasBothSides', 'compareDmy',
+  'isHikiwake', 'hasBothSides', 'compareDmy',
   'queueLabel', 'queueLabelCompact', 'teamIVScore', 'matchScoreStr',
   'matchStateCell', 'engiPairParts', 'bronzeUnderFinalStyle', 'API', 'LoadingSpinner',
 ];
@@ -67,7 +67,6 @@ function installStubs() {
   global.window.teamIVScore = () => null;
   global.window.matchScoreStr = () => '';
   global.window.matchStateCell = () => '-';
-  global.window.ipponsFromScore = () => [];
   global.window.isHikiwake = () => false;
   // Deliberately the naive check, and safe ONLY because this file asserts
   // compEngi stamping: ViewerCompetition does call this stub, but no fixture

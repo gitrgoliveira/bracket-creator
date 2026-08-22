@@ -108,21 +108,279 @@ func TestDropSeedAssignments_CaseSensitive(t *testing.T) {
 		{Name: "alice", CheckedIn: false},
 		{Name: "Bob", CheckedIn: true},
 	}
-	excluded := checkInExcludedNames(players)
-	require.Contains(t, excluded, "alice")
-	require.NotContains(t, excluded, "Alice", "checked-in Alice must not be in the excluded set")
+	excluded := checkInExcludedKeys(players)
+	require.Contains(t, excluded, domain.SeedKey("alice", ""))
+	require.NotContains(t, excluded, domain.SeedKey("Alice", ""), "checked-in Alice must not be in the excluded set")
 
 	seeds := []domain.SeedAssignment{
 		{Name: "Alice", SeedRank: 1},
 		{Name: "Bob", SeedRank: 2},
 	}
-	out := dropSeedAssignments(seeds, excluded)
+	out := dropSeedAssignments(players, seeds, excluded)
 	require.Len(t, out, 2, "checked-in Alice's seed must survive an excluded case-variant 'alice'")
 	got := map[string]bool{}
 	for _, a := range out {
 		got[a.Name] = true
 	}
 	assert.True(t, got["Alice"] && got["Bob"])
+}
+
+// TestDropSeedAssignments_NamesakeDojoDisambiguates is the regression guard
+// for the bc-389 review finding: a bare-name exclusion set used to drop BOTH
+// namesakes' seeds whenever only one of them failed to check in, silently
+// undoing a correctly seeded, checked-in competitor's seed. Two participants
+// share the name "John Smith" from different dojos; only the Tora one fails
+// to check in. The Wakaba seed (rank 1) must survive.
+func TestDropSeedAssignments_NamesakeDojoDisambiguates(t *testing.T) {
+	players := []domain.Player{
+		{Name: "John Smith", Dojo: "Wakaba", CheckedIn: true},
+		{Name: "John Smith", Dojo: "Tora", CheckedIn: false},
+	}
+	excluded := checkInExcludedKeys(players)
+	require.Contains(t, excluded, domain.SeedKey("John Smith", "Tora"))
+	require.NotContains(t, excluded, domain.SeedKey("John Smith", "Wakaba"))
+
+	seeds := []domain.SeedAssignment{
+		{Name: "John Smith", Dojo: "Wakaba", SeedRank: 1},
+	}
+	out := dropSeedAssignments(players, seeds, excluded)
+	require.Len(t, out, 1, "the checked-in namesake's seed must survive excluding the OTHER namesake")
+	assert.Equal(t, "Wakaba", out[0].Dojo)
+}
+
+// TestDropSeedAssignments_LegacyEmptyDojoStillDroppable pins the CAREFUL note
+// from the bc-389 review: a legacy seed row with no dojo must still be
+// droppable when its unique-name owner is excluded (the RosterIndex
+// unique-bare-name fallback), not just when the row carries a dojo.
+func TestDropSeedAssignments_LegacyEmptyDojoStillDroppable(t *testing.T) {
+	players := []domain.Player{
+		{Name: "Solo Smith", Dojo: "OnlyDojo", CheckedIn: false},
+		{Name: "Bob", Dojo: "BobDojo", CheckedIn: true},
+	}
+	excluded := checkInExcludedKeys(players)
+	seeds := []domain.SeedAssignment{
+		{Name: "Solo Smith", SeedRank: 1}, // legacy row: no dojo
+		{Name: "Bob", SeedRank: 2},
+	}
+	out := dropSeedAssignments(players, seeds, excluded)
+	require.Len(t, out, 1, "the legacy no-dojo row for the excluded unique-name owner must still be dropped")
+	assert.Equal(t, "Bob", out[0].Name)
+}
+
+// TestDropSeedAssignments_AmbiguousRosterMismatch is the regression suite for
+// the full-roster-vs-filtered-roster review finding: dropSeedAssignments
+// resolves a seed row against the FULL roster, but helper.ApplySeeds later
+// resolves the survivors against the check-in-FILTERED roster, and the
+// unique-bare-name fallback can disagree between the two whenever a
+// dojo-less row's bare name is shared by two or more players. Table-driven
+// so the fixed and unaffected cases stay pinned alongside the two broken
+// traces.
+func TestDropSeedAssignments_AmbiguousRosterMismatch(t *testing.T) {
+	tests := []struct {
+		name        string
+		players     []domain.Player
+		seeds       []domain.SeedAssignment
+		wantKept    []domain.SeedAssignment // exact surviving assignments, in order
+		wantDropAll bool
+		explain     string
+	}{
+		{
+			name: "wrong-person attach must not happen: ambiguous row, one namesake absent",
+			players: []domain.Player{
+				{Name: "John Smith", Dojo: "Wakaba", CheckedIn: true},
+				{Name: "John Smith", Dojo: "Tora", CheckedIn: false},
+			},
+			seeds: []domain.SeedAssignment{
+				{Name: "John Smith", SeedRank: 1}, // dojo-less: ambiguous on the full roster
+			},
+			wantDropAll: true,
+			explain: "full-roster Lookup is ambiguous (two John Smiths); Tora failed check-in, so " +
+				"this row must be DROPPED rather than kept-and-later-silently-attached to Wakaba " +
+				"once filtering makes the name unique again",
+		},
+		{
+			name: "both namesakes absent must not surface an error, must drop cleanly",
+			players: []domain.Player{
+				{Name: "John Smith", Dojo: "Wakaba", CheckedIn: false},
+				{Name: "John Smith", Dojo: "Tora", CheckedIn: false},
+				{Name: "Bob", Dojo: "BobDojo", CheckedIn: true}, // keeps anyCheckedIn true
+			},
+			seeds: []domain.SeedAssignment{
+				{Name: "John Smith", SeedRank: 1},
+				{Name: "Bob", SeedRank: 2},
+			},
+			wantKept: []domain.SeedAssignment{
+				{Name: "Bob", SeedRank: 2},
+			},
+			explain: "both John Smith namesakes failed to check in; the ambiguous row must drop " +
+				"(not stay kept and then fail ApplySeeds' Lookup with a plain \"not found\" error " +
+				"that maps to HTTP 500)",
+		},
+		{
+			name: "previously-fixed namesake case must not regress: exact dojo-qualified row survives",
+			players: []domain.Player{
+				{Name: "John Smith", Dojo: "Wakaba", CheckedIn: true},
+				{Name: "John Smith", Dojo: "Tora", CheckedIn: false},
+			},
+			seeds: []domain.SeedAssignment{
+				{Name: "John Smith", Dojo: "Wakaba", SeedRank: 1}, // dojo-qualified: unambiguous
+			},
+			wantKept: []domain.SeedAssignment{
+				{Name: "John Smith", Dojo: "Wakaba", SeedRank: 1},
+			},
+			explain: "a dojo-qualified row resolves to exactly one participant on the full roster " +
+				"regardless of the other namesake's check-in status, so it is untouched by the new " +
+				"ambiguity branch and must keep surviving",
+		},
+		{
+			name: "legacy no-dojo row with a unique owner still drops",
+			players: []domain.Player{
+				{Name: "Solo Smith", Dojo: "OnlyDojo", CheckedIn: false},
+				{Name: "Bob", Dojo: "BobDojo", CheckedIn: true},
+			},
+			seeds: []domain.SeedAssignment{
+				{Name: "Solo Smith", SeedRank: 1}, // legacy row, no dojo, but unique on the roster
+			},
+			wantDropAll: true,
+			explain: "\"Solo Smith\" is unique in the roster, so the unique-bare-name fallback " +
+				"resolves it on the full roster and the exclusion check drops it directly -- unaffected " +
+				"by the new ambiguity branch",
+		},
+		{
+			name: "genuine ghost row must keep flowing through unexcluded",
+			players: []domain.Player{
+				{Name: "Bob", Dojo: "BobDojo", CheckedIn: false},
+			},
+			seeds: []domain.SeedAssignment{
+				{Name: "Nobody At All", SeedRank: 1}, // matches zero participants
+			},
+			wantKept: []domain.SeedAssignment{
+				{Name: "Nobody At All", SeedRank: 1},
+			},
+			explain: "a name matching nobody on the full roster is a ghost, not an ambiguity; it " +
+				"must stay kept so ApplySeeds surfaces its usual \"seeded participant not found\" error",
+		},
+		{
+			name: "ambiguous row with nobody excluded stays kept (unrelated to check-in)",
+			players: []domain.Player{
+				{Name: "John Smith", Dojo: "Wakaba", CheckedIn: true},
+				{Name: "John Smith", Dojo: "Tora", CheckedIn: true},
+			},
+			seeds: []domain.SeedAssignment{
+				{Name: "John Smith", SeedRank: 1},
+			},
+			wantKept: []domain.SeedAssignment{
+				{Name: "John Smith", SeedRank: 1},
+			},
+			explain: "both namesakes checked in, so neither is excluded; the row's ambiguity is a " +
+				"pre-existing operator-data problem the check-in filter must not touch -- it stays kept " +
+				"and ApplySeeds will fail on it exactly as it would have before check-in was a factor",
+		},
+		{
+			// PR review mutation-survival gap: the previous case above has an
+			// EMPTY excluded set (both John Smiths checked in), so
+			// dropSeedAssignments takes its `len(excluded) == 0` early return
+			// before the ambiguity branch -- and anyCandidateExcluded -- ever
+			// run. Making that branch's drop unconditional still passed every
+			// suite because of that early return. Adding an unrelated
+			// NOT-checked-in player (Zoe) makes excluded non-empty, forcing
+			// execution into the per-name loop with nameMatches>=2 and
+			// anyCandidateExcluded==false, the one combination that actually
+			// exercises the `&&` and not just the outer guard.
+			name: "ambiguous row with an unrelated absentee stays kept (both namesakes present)",
+			players: []domain.Player{
+				{Name: "John Smith", Dojo: "Wakaba", CheckedIn: true},
+				{Name: "John Smith", Dojo: "Tora", CheckedIn: true},
+				{Name: "Zoe", Dojo: "ZoeDojo", CheckedIn: false}, // unrelated absentee: makes excluded non-empty
+			},
+			seeds: []domain.SeedAssignment{
+				{Name: "John Smith", SeedRank: 1},
+			},
+			wantKept: []domain.SeedAssignment{
+				{Name: "John Smith", SeedRank: 1},
+			},
+			explain: "excluded is non-empty (Zoe), so the early return is bypassed and the ambiguous " +
+				"John Smith row reaches the per-name loop; both namesakes checked in, so " +
+				"anyCandidateExcluded is false and the row must stay KEPT rather than dropped -- " +
+				"this is the case that actually exercises `nameMatches >= 2 && anyCandidateExcluded`",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			excluded := checkInExcludedKeys(tt.players)
+			out := dropSeedAssignments(tt.players, tt.seeds, excluded)
+			if tt.wantDropAll {
+				assert.Empty(t, out, tt.explain)
+				return
+			}
+			assert.Equal(t, tt.wantKept, out, tt.explain)
+		})
+	}
+}
+
+// TestStartCompetition_AmbiguousSeedRow_EndToEnd exercises the same two
+// broken traces through the real StartCompetition pipeline (not just the
+// dropSeedAssignments unit), since the reported bug is specifically about
+// helper.ApplySeeds resolving the FILTERED roster differently from
+// dropSeedAssignments' FULL-roster decision.
+func TestStartCompetition_AmbiguousSeedRow_EndToEnd(t *testing.T) {
+	t.Run("wrong-person attach: rank must not silently land on the surviving namesake", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		compID := "e2e-wrong-person"
+
+		createTestCompetition(t, store, compID, "league", 4)
+		enableCheckIn(t, store, compID)
+		require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+			{Name: "John Smith", Dojo: "Wakaba", CheckedIn: true},
+			{Name: "John Smith", Dojo: "Tora", CheckedIn: false},
+			{Name: "Filler A", Dojo: "DojoX", CheckedIn: true},
+			{Name: "Filler B", Dojo: "DojoY", CheckedIn: true},
+		}))
+		require.NoError(t, store.SaveSeeds(compID, []domain.SeedAssignment{
+			{Name: "John Smith", SeedRank: 1}, // dojo-less, ambiguous on the full roster
+		}))
+
+		require.NoError(t, eng.StartCompetition(compID), "the draw must still succeed")
+
+		pools, err := store.LoadPools(compID)
+		require.NoError(t, err)
+		for _, p := range pools {
+			for _, pl := range p.Players {
+				if pl.Name == "John Smith" {
+					assert.Zero(t, pl.Seed,
+						"an ambiguous rank must never be silently attached to whichever namesake happened to survive check-in")
+				}
+			}
+		}
+	})
+
+	t.Run("both namesakes absent: the draw must not 500", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		compID := "e2e-both-absent"
+
+		createTestCompetition(t, store, compID, "league", 4)
+		enableCheckIn(t, store, compID)
+		require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+			{Name: "John Smith", Dojo: "Wakaba", CheckedIn: false},
+			{Name: "John Smith", Dojo: "Tora", CheckedIn: false},
+			{Name: "Filler A", Dojo: "DojoX", CheckedIn: true},
+			{Name: "Filler B", Dojo: "DojoY", CheckedIn: true},
+		}))
+		require.NoError(t, store.SaveSeeds(compID, []domain.SeedAssignment{
+			{Name: "John Smith", SeedRank: 1},
+		}))
+
+		err := eng.StartCompetition(compID)
+		require.NoError(t, err, "an ambiguous row whose every candidate failed check-in must drop cleanly, not surface a plain (500-mapped) error")
+
+		pools, lerr := store.LoadPools(compID)
+		require.NoError(t, lerr)
+		names := poolPlayerNames(pools)
+		assert.NotContains(t, names, "John Smith", "neither absent namesake should be drawn")
+		assert.Contains(t, names, "Filler A")
+		assert.Contains(t, names, "Filler B")
+	})
 }
 
 // TestStartCompetition_MixedFormat_ExcludesNonCheckedIn verifies that when

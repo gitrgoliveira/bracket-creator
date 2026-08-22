@@ -435,7 +435,7 @@ describe('MatchDetailCard team sub-rows (mp-8sw)', () => {
   // `global.window.x = vi.fn()` assignments: without this the mocked globals
   // leak into later suites and make failures order-dependent.
   const savedGlobals = {};
-  const STUBBED = ['formatIpponsScore', 'ipponsFromScore', 'teamIVScore', 'matchScoreStr', 'isHikiwake'];
+  const STUBBED = ['formatIpponsScore', 'teamIVScore', 'matchScoreStr', 'isHikiwake'];
 
   const mkTeamMatch = (subs) => ({
     compKind: 'team',
@@ -445,7 +445,7 @@ describe('MatchDetailCard team sub-rows (mp-8sw)', () => {
     round: 'Final',
     sideA: { id: 'tA', name: 'Team A' },
     sideB: { id: 'tB', name: 'Team B' },
-    // Present (truthy) so the component skips window.ipponsFromScore.
+    // Empty ippon arrays: the scoreboard reads these directly, not a score string.
     ipponsA: [],
     ipponsB: [],
     subResults: subs,
@@ -464,7 +464,6 @@ describe('MatchDetailCard team sub-rows (mp-8sw)', () => {
     global.window.matchScoreStr = (m) =>
       (global.window.teamIVScore(m)) ||
       global.window.formatIpponsScore(m?.ipponsB || [], m?.ipponsA || [], m?.score, m?.decision, m?.encho, m?.decidedByHantei);
-    global.window.ipponsFromScore = vi.fn(() => []);
     global.window.isHikiwake = vi.fn(() => false);
     vi.resetModules();
     ({ MatchDetailCard } = await import('../viewer.jsx'));
@@ -620,7 +619,7 @@ describe('MatchViewerModal header + team rendering (mp-116)', () => {
   let runtime;
   let MatchViewerModal;
   let MatchDetailCard;
-  const STUBBED = ['useEscapeToClose', 'ipponsFromScore'];
+  const STUBBED = ['useEscapeToClose'];
   const savedGlobals = {};
 
   beforeEach(async () => {
@@ -629,7 +628,6 @@ describe('MatchViewerModal header + team rendering (mp-116)', () => {
     global.window = global.window || {};
     STUBBED.forEach(k => { savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k) ? { had: true, val: global.window[k] } : { had: false }; });
     global.window.useEscapeToClose = vi.fn();
-    global.window.ipponsFromScore = vi.fn(() => []);
     vi.resetModules();
     ({ MatchViewerModal, MatchDetailCard } = await import('../viewer.jsx'));
   });
@@ -1099,7 +1097,7 @@ describe('ViewerOverview self-run vs officiated match click (mp-7x4n)', () => {
   const realReact = global.React;
   let runtime;
   let ViewerOverview;
-  const STUBBED = ['ipponsFromScore', 'formatIpponsScore', 'queueLabel', 'isHikiwake', 'useEscapeToClose', 'hasBothSides', 'StatusBadge', 'formatLabel', 'roundLabel', 'bracketRoundLabel', 'queueLabelCompact', 'pluralize', 'teamIVScore', 'matchScoreStr'];
+  const STUBBED = ['formatIpponsScore', 'queueLabel', 'isHikiwake', 'useEscapeToClose', 'hasBothSides', 'StatusBadge', 'formatLabel', 'roundLabel', 'bracketRoundLabel', 'queueLabelCompact', 'pluralize', 'teamIVScore', 'matchScoreStr'];
   const savedGlobals = {};
 
   const mkMatch = (id) => ({
@@ -1127,7 +1125,6 @@ describe('ViewerOverview self-run vs officiated match click (mp-7x4n)', () => {
     global.React = runtime.React;
     global.window = global.window || {};
     STUBBED.forEach(k => { savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k) ? { had: true, val: global.window[k] } : { had: false }; });
-    global.window.ipponsFromScore = vi.fn(() => []);
     global.window.formatIpponsScore = vi.fn(() => '');
     global.window.teamIVScore = () => null;
     global.window.matchScoreStr = (m) =>
@@ -1387,7 +1384,7 @@ describe('VSchedItem live score rendering (mp-42rg)', () => {
   let runtime;
   let VSchedItemComp;
   const savedGlobals = {};
-  const STUBBED = ['ipponsFromScore', 'matchScoreStr', 'roundLabel', 'bracketRoundLabel', 'pluralize', 'queueLabelCompact'];
+  const STUBBED = ['matchScoreStr', 'roundLabel', 'bracketRoundLabel', 'pluralize', 'queueLabelCompact'];
 
   function findNode(node, pred) {
     if (!node || typeof node !== 'object') return null;
@@ -1418,7 +1415,6 @@ describe('VSchedItem live score rendering (mp-42rg)', () => {
       savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k)
         ? { had: true, val: global.window[k] } : { had: false };
     });
-    global.window.ipponsFromScore = vi.fn(() => []);
     global.window.matchScoreStr = vi.fn(() => '');
     global.window.roundLabel = vi.fn((i) => `Round ${i + 1}`);
     global.window.bracketRoundLabel = (_m, i, n) => global.window.roundLabel(i, n);
@@ -1484,7 +1480,7 @@ describe('ViewerHome empty-state discoverability (mp-og2g)', () => {
   const STUBBED = [
     'StatusBadge', 'formatDate', 'formatLabel', 'formatViewerHeaderEyebrow',
     'pluralize', 'hasBothSides', 'compareDmy', 'queueLabelCompact',
-    'roundLabel', 'bracketRoundLabel', 'matchScoreStr', 'ipponsFromScore', 'EmptyState',
+    'roundLabel', 'bracketRoundLabel', 'matchScoreStr', 'EmptyState',
   ];
   const savedGlobals = {};
 
@@ -1547,7 +1543,6 @@ describe('ViewerHome empty-state discoverability (mp-og2g)', () => {
     global.window.roundLabel = (i) => `Round ${i + 1}`;
     global.window.bracketRoundLabel = (_m, i, n) => global.window.roundLabel(i, n);
     global.window.matchScoreStr = () => '';
-    global.window.ipponsFromScore = () => [];
     vi.resetModules();
     ({ ViewerHome: ViewerHomeComp } = await import('../viewer.jsx'));
   });
@@ -1614,7 +1609,7 @@ describe('ViewerHome globalRunning de-dup (mp-42rg)', () => {
   const STUBBED = [
     'StatusBadge', 'formatDate', 'formatLabel', 'formatViewerHeaderEyebrow',
     'pluralize', 'hasBothSides', 'compareDmy', 'queueLabelCompact',
-    'roundLabel', 'bracketRoundLabel', 'matchScoreStr', 'ipponsFromScore', 'EmptyState',
+    'roundLabel', 'bracketRoundLabel', 'matchScoreStr', 'EmptyState',
   ];
   const savedGlobals = {};
 
@@ -1684,7 +1679,6 @@ describe('ViewerHome globalRunning de-dup (mp-42rg)', () => {
     global.window.roundLabel = (i) => `Round ${i + 1}`;
     global.window.bracketRoundLabel = (_m, i, n) => global.window.roundLabel(i, n);
     global.window.matchScoreStr = () => '';
-    global.window.ipponsFromScore = () => [];
     global.window.EmptyState = function EmptyState(props) { return { type: 'div', props: { className: 'empty', ...props }, children: [props.icon, props.title, props.message, props.cta].filter(Boolean) }; };
     vi.resetModules();
     ({ ViewerHome: ViewerHomeComp } = await import('../viewer.jsx'));

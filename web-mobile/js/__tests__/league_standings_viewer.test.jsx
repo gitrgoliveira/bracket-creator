@@ -24,7 +24,7 @@ describe('LeagueStandingsViewer (mp-dunx)', () => {
   let runtime;
   let LeagueStandingsViewer;
   const savedGlobals = {};
-  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'teamIVScore', 'matchScoreStr', 'matchStateCell', 'ipponsFromScore', 'queueLabel', 'queueLabelCompact', 'API', 'LoadingSpinner', 'EmptyState'];
+  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'teamIVScore', 'matchScoreStr', 'matchStateCell', 'queueLabel', 'queueLabelCompact', 'API', 'LoadingSpinner', 'EmptyState'];
 
   // Standings: fetched rank-ordered from the API. P3 rank 1, P1 rank 2, P4 rank 3, P2 rank 4.
   const mockStandings = [
@@ -55,7 +55,6 @@ describe('LeagueStandingsViewer (mp-dunx)', () => {
       global.window.formatIpponsScore(m?.ipponsB || [], m?.ipponsA || [], m?.score, m?.decision, m?.encho, m?.decidedByHantei);
     global.window.matchStateCell = (m) =>
       m?.status === 'completed' ? (global.window.matchScoreStr(m) || 'vs') : 'vs';
-    global.window.ipponsFromScore = () => [];
     global.window.queueLabel = () => '';
     global.window.queueLabelCompact = () => null;
     global.window.LoadingSpinner = function LoadingSpinner({ text }) { return { type: 'div', props: { className: 'loading' }, children: text }; };

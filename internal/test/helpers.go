@@ -154,6 +154,22 @@ func CreateTestTournament() domain.Tournament {
 	}
 }
 
+// HanteiExplicit returns a pointer to the given value, INCLUDING false.
+// Legacy test-fixture constructor: production code never sets the legacy
+// DecidedByHantei fields (see internal/state/legacy_hantei.go — "writers must
+// never set it"), so this exists only so tests across packages (state,
+// engine, mobileapp) can construct a legacy payload shape (explicit
+// true/false, as opposed to a nil "writer said nothing") without hand-rolling
+// `f := false; &f` at each call site. It lives here rather than in
+// internal/state itself because callers outside that package need it from
+// their own _test.go files, which cannot see symbols defined in another
+// package's _test.go files — putting it in the shared fixture package is the
+// only way to keep it out of state's production API while still reaching
+// every caller.
+func HanteiExplicit(v bool) *bool {
+	return &v
+}
+
 // LegalShiaijoCount states R9's shiaijo-count rule INDEPENDENTLY of the
 // production validator (helper.ValidateShiaijoCount), so the CLI, engine and
 // API sweeps that use it cannot agree with a broken implementation by

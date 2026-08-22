@@ -6,6 +6,7 @@ import (
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -231,6 +232,25 @@ func TestPoolMatches_ReopenPendingCorruptValueIsFalse(t *testing.T) {
 		require.Len(t, got, 1)
 		assert.Truef(t, got[0].ReopenPending, "ReopenPending %q must parse as true", v)
 	}
+}
+
+// TestPoolMatches_SubResultsCorruptCellLoadsEmpty pins the corrupt-JSON
+// fallback for the SubResults column: a hand-edited or truncated cell must
+// not fail the whole row (the rest of the match's data is still good), so it
+// degrades to an empty slice rather than aborting the parse. The column now
+// logs the failure (see poolMatchColumns' SubResults take) instead of
+// silently swallowing it; the log call itself is exercised here but not
+// asserted on, since pinning slog's exact output would couple this test to a
+// logging implementation detail rather than the on-disk contract.
+func TestPoolMatches_SubResultsCorruptCellLoadsEmpty(t *testing.T) {
+	rec := make([]string, len(poolMatchColumns))
+	rec[0], rec[1], rec[2], rec[3] = "Pool A", "0", "X", "Y"
+	rec[12] = "{not valid json" // SubResults column
+
+	got := parsePoolMatchesRecords([][]string{rec})
+	require.Len(t, got, 1)
+	assert.Empty(t, got[0].SubResults, "a corrupt cell must degrade to an empty slice, not panic or abort the row")
+	assert.Equal(t, "Pool A-0", got[0].ID, "the rest of the row must still load")
 }
 
 // TestPools_PlayerIDRoundTrip verifies the appended participant-id column in
@@ -766,12 +786,11 @@ func TestPoolMatchHanteiSurvivesARestart(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Cup"}))
 
 	// A 1-1 pool match taken to a judges' decision: the tied scoreline the
-	// rule requires, with Alice declared the winner.
+	// rule requires, the mark recorded in Alice's (the winner's) slice.
 	require.NoError(t, store.SavePoolMatches(compID, []MatchResult{{
 		ID: "Pool A-1", SideA: "Alice", SideB: "Bob", Winner: "Alice",
 		Status:  MatchStatusCompleted,
-		IpponsA: []string{"M"}, IpponsB: []string{"K"},
-		DecidedByHantei: HanteiExplicit(true),
+		IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"K"},
 	}}))
 
 	// A fresh Store over the same directory: nothing survives but the files.
@@ -781,12 +800,13 @@ func TestPoolMatchHanteiSurvivesARestart(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 
-	assert.True(t, got[0].DecidedByHantei != nil && *got[0].DecidedByHantei,
+	assert.True(t, got[0].HanteiDecided(),
 		"the judges' decision must survive the restart")
+	assert.Nil(t, got[0].DecidedByHantei, "the legacy flag is never raised on load")
 	assert.Equal(t, "Alice", got[0].Winner)
-	// The mark is a STORAGE encoding: above the store the ippons are exactly
-	// what was written, so no counter, standings figure or export sees an "Ht".
-	assert.Equal(t, []string{"M"}, got[0].IpponsA)
+	// The mark IS the record: it loads as the ippon entry it is, and every
+	// counter drops it via IsScoringIppon, so no standings figure inflates.
+	assert.Equal(t, []string{"M", domain.HanteiMark}, got[0].IpponsA)
 	assert.Equal(t, []string{"K"}, got[0].IpponsB)
 	assert.Equal(t, 1, domain.CountScoringIppons(got[0].IpponsA))
 	assert.Equal(t, 1, domain.CountScoringIppons(got[0].IpponsB))
@@ -794,72 +814,139 @@ func TestPoolMatchHanteiSurvivesARestart(t *testing.T) {
 	assert.True(t, domain.HanteiTiedScoreline(got[0].IpponsA, got[0].IpponsB))
 }
 
-func TestPoolMatchHanteiEncoding(t *testing.T) {
-	t.Run("the mark rides the winner's side", func(t *testing.T) {
-		r := &MatchResult{SideA: "Alice", SideB: "Bob", Winner: "Bob",
+func TestLegacyHanteiNormalize(t *testing.T) {
+	t.Run("a legacy flag folds into the winner's side", func(t *testing.T) {
+		m := &MatchResult{SideA: "Alice", SideB: "Bob", Winner: "Bob",
 			IpponsA: []string{"M"}, IpponsB: []string{"K"},
-			DecidedByHantei: HanteiExplicit(true)}
-		a, b := encodeHanteiIntoIppons(r)
-		assert.Equal(t, []string{"M"}, a)
-		assert.Equal(t, []string{"K", domain.HanteiMark}, b)
-		// The struct itself is untouched: the encoding is for the writer only.
-		assert.Equal(t, []string{"K"}, r.IpponsB)
+			DecidedByHantei: bctest.HanteiExplicit(true)}
+		m.NormalizeLegacyHantei()
+		assert.Equal(t, []string{"M"}, m.IpponsA)
+		assert.Equal(t, []string{"K", domain.HanteiMark}, m.IpponsB)
+		assert.Nil(t, m.DecidedByHantei)
+		assert.True(t, m.HanteiDecided())
 	})
 
 	t.Run("a 0-0 hantei still has a slot for it", func(t *testing.T) {
-		r := &MatchResult{SideA: "Alice", SideB: "Bob", Winner: "Alice",
+		m := &MatchResult{SideA: "Alice", SideB: "Bob", Winner: "Alice",
 			IpponsA: []string{}, IpponsB: []string{},
-			DecidedByHantei: HanteiExplicit(true)}
-		a, _ := encodeHanteiIntoIppons(r)
-		assert.Equal(t, []string{domain.HanteiMark}, a)
+			DecidedByHantei: bctest.HanteiExplicit(true)}
+		m.NormalizeLegacyHantei()
+		assert.Equal(t, []string{domain.HanteiMark}, m.IpponsA)
 	})
 
-	t.Run("no hantei, no mark", func(t *testing.T) {
-		r := &MatchResult{SideA: "Alice", SideB: "Bob", Winner: "Alice",
-			IpponsA: []string{"M", "K"}, DecidedByHantei: HanteiExplicit(false)}
-		a, b := encodeHanteiIntoIppons(r)
-		assert.Equal(t, []string{"M", "K"}, a)
-		assert.Empty(t, b)
+	t.Run("the mark takes a placeholder slot before growing the slice", func(t *testing.T) {
+		m := &MatchResult{SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			IpponsA: []string{"M", domain.IpponPlaceholder}, IpponsB: []string{"K", domain.IpponPlaceholder},
+			DecidedByHantei: bctest.HanteiExplicit(true)}
+		m.NormalizeLegacyHantei()
+		assert.Equal(t, []string{"M", domain.HanteiMark}, m.IpponsA)
+	})
+
+	t.Run("a legacy explicit false strips the mark", func(t *testing.T) {
+		m := &MatchResult{SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"K"},
+			DecidedByHantei: bctest.HanteiExplicit(false)}
+		m.NormalizeLegacyHantei()
+		assert.Equal(t, []string{"M"}, m.IpponsA)
+		assert.False(t, m.HanteiDecided())
 	})
 
 	t.Run("an unattributable winner is not guessed at", func(t *testing.T) {
-		r := &MatchResult{SideA: "Alice", SideB: "Bob", Winner: "Carol",
+		m := &MatchResult{SideA: "Alice", SideB: "Bob", Winner: "Carol",
 			IpponsA: []string{"M"}, IpponsB: []string{"K"},
-			DecidedByHantei: HanteiExplicit(true)}
-		a, b := encodeHanteiIntoIppons(r)
-		assert.Equal(t, []string{"M"}, a)
-		assert.Equal(t, []string{"K"}, b)
-	})
-
-	t.Run("re-saving a loaded match does not double the mark", func(t *testing.T) {
-		r := &MatchResult{SideA: "Alice", SideB: "Bob", Winner: "Alice",
-			IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"K"},
-			DecidedByHantei: HanteiExplicit(true)}
-		a, _ := encodeHanteiIntoIppons(r)
-		assert.Equal(t, []string{"M", domain.HanteiMark}, a)
-	})
-
-	t.Run("decode strips the mark and raises the flag", func(t *testing.T) {
-		m := &MatchResult{IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"K"}}
-		decodeHanteiFromIppons(m)
+			DecidedByHantei: bctest.HanteiExplicit(true)}
+		m.NormalizeLegacyHantei()
 		assert.Equal(t, []string{"M"}, m.IpponsA)
 		assert.Equal(t, []string{"K"}, m.IpponsB)
-		require.NotNil(t, m.DecidedByHantei)
-		assert.True(t, *m.DecidedByHantei)
+		assert.False(t, m.HanteiDecided(), "dropped, never guessed")
 	})
 
-	t.Run("decode leaves an unmarked match alone", func(t *testing.T) {
-		m := &MatchResult{IpponsA: []string{"M"}, IpponsB: []string{}}
-		decodeHanteiFromIppons(m)
-		assert.Nil(t, m.DecidedByHantei, "absence must stay absence, not an explicit false")
+	t.Run("normalising twice does not double the mark", func(t *testing.T) {
+		m := &MatchResult{SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"K"},
+			DecidedByHantei: bctest.HanteiExplicit(true)}
+		m.NormalizeLegacyHantei()
+		assert.Equal(t, []string{"M", domain.HanteiMark}, m.IpponsA)
+	})
+
+	// bc-qual: a sides-less payload cannot be attributed by the fold ALONE -
+	// this function has no store to consult, so an empty sideA/sideB looks
+	// exactly like "no side was named" and the drop-never-guess default
+	// (correctly) applies. This is not a bug in foldLegacyHantei itself: a
+	// score request is allowed to omit sideA/sideB (specs/openapi.yaml,
+	// backfilled by the engine's reconcileSides), so the CALLER at the
+	// request boundary must backfill the real sides from the stored match
+	// before invoking NormalizeLegacyHantei, or the verdict is lost with a
+	// 200 (mobileapp.backfillMatchIdentityForHantei does this ahead
+	// of ScoreRequest.validateWithOptions / validateBulkScoreLengths; see
+	// TestScoreHandler_SidesLessLegacyHanteiRecordsVerdict for the fixed
+	// end-to-end path).
+	t.Run("a sides-less payload cannot be attributed by the fold alone", func(t *testing.T) {
+		m := &MatchResult{Winner: "Alice",
+			IpponsA: []string{"M"}, IpponsB: []string{"K"},
+			DecidedByHantei: bctest.HanteiExplicit(true)}
+		m.NormalizeLegacyHantei()
 		assert.Equal(t, []string{"M"}, m.IpponsA)
+		assert.Equal(t, []string{"K"}, m.IpponsB)
+		assert.False(t, m.HanteiDecided(),
+			"the fold has no sides to compare Winner against; the caller must backfill them first")
 	})
 
-	t.Run("a mark-only side decodes to an empty slice, never nil", func(t *testing.T) {
-		// splitIppons' contract: the JSON projection must stay [] not null.
-		m := &MatchResult{IpponsA: []string{domain.HanteiMark}, IpponsB: []string{}}
-		decodeHanteiFromIppons(m)
-		require.NotNil(t, m.IpponsA)
-		assert.Empty(t, m.IpponsA)
+	t.Run("legacy sub-bout flags fold too", func(t *testing.T) {
+		m := &MatchResult{SubResults: []SubMatchResult{{
+			Position: -1, SideA: "T1", SideB: "T2", Winner: "T2",
+			IpponsA: []string{}, IpponsB: []string{"M"},
+			DecidedByHantei: bctest.HanteiExplicit(true),
+		}}}
+		m.NormalizeLegacyHantei()
+		assert.Equal(t, []string{"M", domain.HanteiMark}, m.SubResults[0].IpponsB)
+		assert.Nil(t, m.SubResults[0].DecidedByHantei)
+		assert.True(t, m.SubResults[0].HanteiDecided())
+	})
+
+	t.Run("a legacy bracket flag folds into the winner's ippon array", func(t *testing.T) {
+		bm := &BracketMatch{SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			ScoreA: "K", ScoreB: "M", DecidedByHantei: true}
+		bm.NormalizeLegacy()
+		assert.Equal(t, []string{"K", domain.HanteiMark}, bm.IpponsA)
+		assert.Equal(t, []string{"M"}, bm.IpponsB)
+		assert.False(t, bm.DecidedByHantei)
+		assert.Empty(t, bm.ScoreA, "legacy string is cleared once folded")
+		assert.Empty(t, bm.ScoreB, "legacy string is cleared once folded")
+	})
+
+	t.Run("a legacy bracket score string folds into arrays and hansoku", func(t *testing.T) {
+		bm := &BracketMatch{SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			ScoreA: "MHt", ScoreB: "K(H1)"}
+		bm.NormalizeLegacy()
+		assert.Equal(t, []string{"M", domain.HanteiMark}, bm.IpponsA)
+		assert.Equal(t, []string{"K"}, bm.IpponsB)
+		assert.Equal(t, 0, bm.HansokuA)
+		assert.Equal(t, 1, bm.HansokuB)
+		assert.Empty(t, bm.ScoreA)
+		assert.Empty(t, bm.ScoreB)
+	})
+
+	t.Run("arrays win when a hand-edited file carries both", func(t *testing.T) {
+		bm := &BracketMatch{SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			ScoreA:  "totally different legacy string",
+			ScoreB:  "also different",
+			IpponsA: []string{"M"}, IpponsB: []string{"K"},
+			HansokuA: 0, HansokuB: 0,
+		}
+		bm.NormalizeLegacy()
+		assert.Equal(t, []string{"M"}, bm.IpponsA, "arrays are authoritative, never overwritten by a stale string")
+		assert.Equal(t, []string{"K"}, bm.IpponsB)
+		assert.Empty(t, bm.ScoreA, "the stale string is cleared, not decoded")
+		assert.Empty(t, bm.ScoreB)
+	})
+
+	t.Run("normalising a bracket match twice does not double the mark or reintroduce the string", func(t *testing.T) {
+		bm := &BracketMatch{SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			ScoreA: "K", ScoreB: "M", DecidedByHantei: true}
+		bm.NormalizeLegacy()
+		bm.NormalizeLegacy()
+		assert.Equal(t, []string{"K", domain.HanteiMark}, bm.IpponsA)
+		assert.Empty(t, bm.ScoreA)
 	})
 }

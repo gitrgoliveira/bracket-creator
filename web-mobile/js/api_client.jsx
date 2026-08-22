@@ -20,7 +20,7 @@
 // reconnect replay the server dropped.
 //
 // Empty-body methods (overridePoolRank,
-// resetOverrides, updateMatchTime, moveMatchCourt, updateSchedule,
+// resetOverrides, updateMatchTime, moveMatchCourt,
 // deleteCompetition) deliberately return `true`
 // rather than `res.json()`: calling res.json() on a 200/204 with no
 // body throws SyntaxError per the Fetch spec, which used to surface as
@@ -1737,21 +1737,6 @@ const API = {
         }
         const body = await res.json().catch(() => ({}));
         return body.result ?? body;
-    },
-    async updateSchedule(compID, entries, password) {
-        const res = await fetch(`/api/competitions/${compID}/schedule`, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Tournament-Password': password
-            },
-            body: JSON.stringify(entries)
-        });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to update schedule");
-        }
-        return true;
     },
     async importCompetitions(formData, password, adminPassword) {
         const res = await fetch('/api/tournament/import', {

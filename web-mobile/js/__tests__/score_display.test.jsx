@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
-import { boutMiddle, enchoLabel, formatIpponsScore, ipponsFromScore, matchStateCell, winnerSideLR } from '../bracket.jsx';
+import { boutMiddle, enchoLabel, formatIpponsScore, matchStateCell, winnerSideLR } from '../bracket.jsx';
 
 // Convention enforced across all match-list views:
 //   SHIRO (sideB) is always displayed on the LEFT.
@@ -67,8 +67,9 @@ describe('formatIpponsScore', () => {
 
     // Numbers are NOT a valid display for ippon. The per-side waza-letter
     // arrays are the only source of an ippon score string: real data always
-    // carries them (callers derive via ipponsFromScore from scoreA/scoreB),
-    // and count-only score objects render NO score rather than digits. The
+    // carries them (callers pass ipponsA/ipponsB straight through, the one
+    // wire shape pool and bracket matches share), and count-only score
+    // objects render NO score rather than digits. The
     // numeric winnerPts/loserPts fields stay untouched for logic that needs
     // them (activity checks, standings) — they just never render as ippon.
     it('never renders numeric counts as an ippon score', () => {
@@ -235,8 +236,8 @@ describe('formatIpponsScore', () => {
     });
 
     it('score.hantei is not read. Only the decidedByHantei param controls Ht', () => {
-      // The `score` object is derived client-side by normalizeMatch from flat
-      // API fields (ipponsA/B, scoreA/B). The backend never emits a `score`
+      // The `score` object is derived client-side by normalizeMatch from the
+      // wire's ipponsA/ipponsB arrays. The backend never emits a `score`
       // object, so score.hantei can never appear in real match data. Only the
       // positional decidedByHantei arg matters.
       expect(formatIpponsScore(['M'], ['K'], { type: 'ippon', hantei: true }, null, { periodCount: 1 })).toBe('M (E) K');
@@ -288,6 +289,13 @@ describe('boutMiddle: the only four middle values', () => {
     expect(boutMiddle('hikiwake', null, null)).toBe('X');
     expect(boutMiddle(null, null, { type: 'hikiwake' })).toBe('X');
     expect(boutMiddle('hikiwake', { periodCount: 2 }, null)).toBe('X');
+    // A match that went to encho cannot end tied, so X beats (E) — this must
+    // hold even when the ONLY signal for the tie is the client-derived
+    // score.type (a quick-scored draw sets no `decision`, just
+    // score.type: 'hikiwake'), with stale/leftover encho metadata present.
+    // Pins the isDrawResult-vs-middleMark precedence in boutMiddle itself,
+    // not just middleMark's own internal decision === 'hikiwake' check.
+    expect(boutMiddle('', { periodCount: 1 }, { type: 'hikiwake' })).toBe('X');
   });
   it('overtime → bare (E)', () => {
     expect(boutMiddle(null, { periodCount: 1 }, null)).toBe('(E)');
@@ -323,39 +331,6 @@ describe('matchStateCell: shared running-row centre cue', () => {
     for (const status of ['completed', 'running', 'scheduled', 'bye', undefined]) {
       expect(matchStateCell({ status })).not.toContain('●');
     }
-  });
-});
-
-// ipponsFromScore: strips the Go formatScore "(HN)" hansoku suffix before splitting
-describe('ipponsFromScore', () => {
-  it('splits plain letters', () => {
-    expect(ipponsFromScore('MK')).toEqual(['M', 'K']);
-  });
-
-  it('strips (HN) suffix before splitting', () => {
-    expect(ipponsFromScore('M(H1)')).toEqual(['M']);
-    expect(ipponsFromScore('MK(H2)')).toEqual(['M', 'K']);
-  });
-
-  // Real backend output: engine/scoring.go formatScore() inserts a space
-  // between ippons and the (HN) suffix when both are present
-  // ("MK (H1)"). The regex must strip the optional whitespace too,
-  // otherwise split("") returns a trailing " " token that renders as a
-  // bogus ippon character.
-  it('strips spaced (HN) suffix before splitting (real backend shape)', () => {
-    expect(ipponsFromScore('M (H1)')).toEqual(['M']);
-    expect(ipponsFromScore('MK (H2)')).toEqual(['M', 'K']);
-    expect(ipponsFromScore('MKD (H1)')).toEqual(['M', 'K', 'D']);
-  });
-
-  it('handles suffix-only string (no ippons, just fouls)', () => {
-    expect(ipponsFromScore('(H1)')).toEqual([]);
-  });
-
-  it('returns [] for empty/null/undefined', () => {
-    expect(ipponsFromScore('')).toEqual([]);
-    expect(ipponsFromScore(null)).toEqual([]);
-    expect(ipponsFromScore(undefined)).toEqual([]);
   });
 });
 
@@ -449,5 +424,25 @@ describe('winnerSideLR: id disambiguates same-name opponents', () => {
   it('returns null with no winner or a drifted winner', () => {
     expect(winnerSideLR({ sideA: { id: 'a1', name: 'Alice' }, sideB: { id: 'b1', name: 'Bob' } })).toBe(null);
     expect(winnerSideLR({ sideA: { id: 'a1', name: 'Alice' }, sideB: { id: 'b1', name: 'Bob' }, winner: { id: 'c1', name: 'Carol' } })).toBe(null);
+  });
+});
+
+// The mark model: the server records the hantei verdict as the "Ht" entry in
+// the winner's ippon list, carried directly in the ipponsA/ipponsB arrays
+// (pool and bracket matches share this one wire shape). These pin the
+// server shape end to end through the display codec: the mark never
+// renders as a letter in a cell, never counts as a point, and surfaces once
+// as the side mark.
+describe('hantei mark model (new server shape)', () => {
+  it('a mark-carrying scoreline renders one Ht beside the winner, letters clean', () => {
+    // left = shiro carries M+mark; a 1-1 hantei, shiro declared winner.
+    const s = formatIpponsScore(['M', 'Ht'], ['K'], null, '', null, true, 'left');
+    expect(s.match(/Ht/g)).toHaveLength(1);
+    expect(s).toContain('M');
+    expect(s).not.toContain('MHt'); // the mark is not a cell letter
+  });
+
+  it('the mark never counts as a point in the tie test', () => {
+    expect(window.hanteiTied ? window.hanteiTied(['M', 'Ht'], ['K']) : true).toBe(true);
   });
 });

@@ -10,6 +10,7 @@ import (
 
 	excelize "github.com/xuri/excelize/v2"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/excel"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
@@ -391,7 +392,10 @@ func overlayPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[str
 					// touches engi flag counts.
 					scoreA, scoreB = DefaultWinMaruAB(
 						IpponsScore(mr.IpponsA), IpponsScore(mr.IpponsB),
-						mr.Decision, mr.Encho, mr.Winner, mr.SideA, mr.SideB)
+						mr.Decision, mr.Encho, domain.WinnerAttribution{
+							WinnerID: mr.WinnerID, SideAID: mr.SideAID, SideBID: mr.SideBID,
+							Winner: mr.Winner, SideA: mr.SideA, SideB: mr.SideB,
+						})
 				}
 				writeScoreRowCells(f, sheetName, courtStartCol, excelRow, scoreA, scoreB, mr, mirror)
 			}
@@ -508,7 +512,10 @@ func writeTeamSummaryCells(f *excelize.File, sheetName string, courtStartCol, ex
 	rPCol := colNum(courtStartCol + 4)
 	rVCol := colNum(courtStartCol + 5)
 
-	lMark, rMark := SideMarksLR(mr.Decision, hanteiOf(mr), mr.Winner, mr.SideA, mr.SideB, mirror)
+	lMark, rMark := SideMarksLR(mr.Decision, mr.HanteiDecided(), domain.WinnerAttribution{
+		WinnerID: mr.WinnerID, SideAID: mr.SideAID, SideBID: mr.SideBID,
+		Winner: mr.Winner, SideA: mr.SideA, SideB: mr.SideB,
+	}, mirror)
 
 	line := state.TeamResultFrom(mr.SubResults, mr.SideA, mr.SideB)
 	if line != nil {
@@ -547,7 +554,10 @@ func writeScoreRowCells(f *excelize.File, sheetName string, courtStartCol, excel
 	if mirror {
 		leftScore, rightScore = scoreB, scoreA
 	}
-	lMark, rMark := SideMarksLR(mr.Decision, hanteiOf(mr), mr.Winner, mr.SideA, mr.SideB, mirror)
+	lMark, rMark := SideMarksLR(mr.Decision, mr.HanteiDecided(), domain.WinnerAttribution{
+		WinnerID: mr.WinnerID, SideAID: mr.SideAID, SideBID: mr.SideBID,
+		Winner: mr.Winner, SideA: mr.SideA, SideB: mr.SideB,
+	}, mirror)
 	setCellStr(f, sheetName, colNum(courtStartCol+1), excelRow, joinSp(leftScore, lMark))
 	setCellStr(f, sheetName, colNum(courtStartCol+5), excelRow, joinSp(rightScore, rMark))
 	writeMiddleMarkCell(f, sheetName, courtStartCol, excelRow, mr.Decision, mr.Encho)
@@ -562,22 +572,23 @@ func writeMiddleMarkCell(f *excelize.File, sheetName string, courtStartCol, exce
 	}
 }
 
-// hanteiOf reads MatchResult's *bool hantei flag as a plain bool.
-func hanteiOf(mr state.MatchResult) bool {
-	return mr.DecidedByHantei != nil && *mr.DecidedByHantei
-}
-
 // bracketMatchResultView adapts a BracketMatch to the MatchResult shape the
 // shared row writers consume (they read only the result fields).
 func bracketMatchResultView(bm *state.BracketMatch) state.MatchResult {
 	return state.MatchResult{
-		SideA:           bm.SideA,
-		SideB:           bm.SideB,
-		Winner:          bm.Winner,
-		Decision:        bm.Decision,
-		Encho:           bm.Encho,
-		DecidedByHantei: state.HanteiPtr(bm.DecidedByHantei),
-		SubResults:      bm.SubResults,
+		SideA:      bm.SideA,
+		SideB:      bm.SideB,
+		Winner:     bm.Winner,
+		Decision:   bm.Decision,
+		Encho:      bm.Encho,
+		SubResults: bm.SubResults,
+		// The scoreline (and with it the judges'-decision mark, an ippon
+		// entry) is a direct field read: BracketMatch persists ippon arrays
+		// natively, the same shape as MatchResult.
+		IpponsA:  bm.IpponsA,
+		IpponsB:  bm.IpponsB,
+		HansokuA: bm.HansokuA,
+		HansokuB: bm.HansokuB,
 	}
 }
 
@@ -609,14 +620,26 @@ func writeTeamSubMatchScores(f *excelize.File, sheetName string, courtStartCol, 
 		// Sub-match row for Position P is the P-th sub row (1-based Position).
 		excelRow := subStartExcelRow + (sub.Position - 1)
 
+		// SubMatchResult persists no ids, so names are all there is and both
+		// calls below are always the name-fallback branch, resolved by the
+		// documented sideA-first convention. Note the limit of that: a
+		// numbered team bout names individual PLAYERS, whose names are not
+		// unique by rule (only name+dojo is), so a same-named pair on opposing
+		// lineups is separated by convention rather than by identity.
+		// Unchanged from before ids existed, and not fixable here without
+		// persisting ids per sub row.
 		scoreA, scoreB := DefaultWinMaruAB(
 			IpponsScore(sub.IpponsA), IpponsScore(sub.IpponsB),
-			sub.Decision, sub.Encho, sub.Winner, sub.SideA, sub.SideB)
+			sub.Decision, sub.Encho, domain.WinnerAttribution{
+				Winner: sub.Winner, SideA: sub.SideA, SideB: sub.SideB,
+			})
 		leftScore, rightScore := scoreA, scoreB
 		if mirror {
 			leftScore, rightScore = scoreB, scoreA
 		}
-		lMark, rMark := SideMarksLR(sub.Decision, sub.HanteiDecided(), sub.Winner, sub.SideA, sub.SideB, mirror)
+		lMark, rMark := SideMarksLR(sub.Decision, sub.HanteiDecided(), domain.WinnerAttribution{
+			Winner: sub.Winner, SideA: sub.SideA, SideB: sub.SideB,
+		}, mirror)
 		if lScore := joinSp(leftScore, lMark); lScore != "" {
 			setCellStr(f, sheetName, lVCol, excelRow, lScore)
 		}
@@ -928,16 +951,33 @@ func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMa
 			// ScoreA/ScoreB hold ippon letters that do not apply. Render the
 			// flag count via FlagsScorePair instead, matching
 			// overlayPoolScores.
+			mrView := bracketMatchResultView(&bm)
 			var scoreA, scoreB string
 			if engi {
 				scoreA, scoreB = FlagsScorePair(bm.FlagsA, bm.FlagsB)
 			} else {
-				// Maru fallback at score derivation, like overlayPoolScores.
-				scoreA, scoreB = DefaultWinMaruAB(bm.ScoreA, bm.ScoreB,
-					bm.Decision, bm.Encho, bm.Winner, bm.SideA, bm.SideB)
+				// bm.IpponsA/IpponsB (via mrView) carry the raw ippon entries,
+				// including the judges'-decision mark as a literal "Ht" entry
+				// (domain.HanteiMark). writeScoreRowCells below ALSO appends
+				// that mark via SideMarksLR (reading it off mrView), so
+				// rendering the array verbatim would double-print it:
+				// "MHt Ht". Render through IpponsScore instead, which filters
+				// non-scoring entries (the mark, the bye placeholder) exactly
+				// as the pool path (overlayPoolScores) already does — the
+				// mark then rides ONLY through the appended SideMarksLR
+				// suffix, matching the pool cell's "M Ht".
+				// BracketMatch carries no WinnerID/SideAID/SideBID (see
+				// bracketMatchResultView above), so this is always the
+				// name-fallback branch, matching the SideMarksLR call in
+				// writeScoreRowCells below.
+				scoreA, scoreB = DefaultWinMaruAB(
+					IpponsScore(mrView.IpponsA), IpponsScore(mrView.IpponsB),
+					bm.Decision, bm.Encho, domain.WinnerAttribution{
+						Winner: bm.Winner, SideA: bm.SideA, SideB: bm.SideB,
+					})
 			}
 
-			writeScoreRowCells(f, sheetName, courtStartCol, excelRow, scoreA, scoreB, bracketMatchResultView(&bm), mirror)
+			writeScoreRowCells(f, sheetName, courtStartCol, excelRow, scoreA, scoreB, mrView, mirror)
 
 			if bm.Winner != "" {
 				writeWinnerCell(f, sheetName, rows, scoreRowIdx, headerCol, bm.Winner)

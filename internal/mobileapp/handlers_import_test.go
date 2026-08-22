@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -907,6 +909,48 @@ func TestParseSeedsBytes(t *testing.T) {
 		assert.Equal(t, "Player B", seeds[1].Name)
 		assert.Equal(t, 2, seeds[1].SeedRank)
 	})
+
+	// The store's own writer (marshalSeedsCSV, internal/state/seeds.go)
+	// always emits a "Rank,Name,Dojo" header followed by rank,name,dojo
+	// rows. A round-trip through export -> manifest import must not drop
+	// the dojo the way a 2-column-only parser would.
+	t.Run("Canonical Three Column Carries Dojo", func(t *testing.T) {
+		data := []byte("Rank,Name,Dojo\n1,Player A,Seibukan\n2,Player B,Tobukan\n")
+		seeds, err := parseSeedsBytes(data)
+		require.NoError(t, err)
+		require.Len(t, seeds, 2)
+		assert.Equal(t, "Player A", seeds[0].Name)
+		assert.Equal(t, 1, seeds[0].SeedRank)
+		assert.Equal(t, "Seibukan", seeds[0].Dojo)
+		assert.Equal(t, "Player B", seeds[1].Name)
+		assert.Equal(t, 2, seeds[1].SeedRank)
+		assert.Equal(t, "Tobukan", seeds[1].Dojo)
+	})
+
+	// A hand-written 2-column file (no Dojo column at all) must still parse
+	// exactly as it always has: Dojo comes back empty, not an error.
+	t.Run("Two Column File Has No Dojo", func(t *testing.T) {
+		data := []byte("rank,name\n1,Player A\n")
+		seeds, err := parseSeedsBytes(data)
+		require.NoError(t, err)
+		require.Len(t, seeds, 1)
+		assert.Equal(t, "Player A", seeds[0].Name)
+		assert.Equal(t, "", seeds[0].Dojo)
+	})
+
+	// marshalSeedsCSV uses encoding/csv, which quotes a name containing a
+	// comma (e.g. "Smith, John"). A naive strings.Split(line, ",") parser
+	// would tear that one field into two and misread the row; this pins
+	// that the RFC 4180 quoting round-trips through parseSeedsBytes intact.
+	t.Run("Quoted Name With Embedded Comma", func(t *testing.T) {
+		data := []byte("Rank,Name,Dojo\n1,\"Smith, John\",Seibukan\n")
+		seeds, err := parseSeedsBytes(data)
+		require.NoError(t, err)
+		require.Len(t, seeds, 1)
+		assert.Equal(t, "Smith, John", seeds[0].Name)
+		assert.Equal(t, 1, seeds[0].SeedRank)
+		assert.Equal(t, "Seibukan", seeds[0].Dojo)
+	})
 }
 
 // TestImportCompetition_InheritsTournamentCourts locks in that the manifest
@@ -976,4 +1020,102 @@ func TestImportCompetition_RefusesCourtsTheVenueLacks(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, []string{"B"}, comp.Courts)
 	})
+}
+
+// The importer runs the SAME seeds-roster gate PUT /seeds runs
+// (rejectSeedsOffRoster, internal/mobileapp/validation.go), so a wrong-dojo
+// or ghost seed row cannot land through the manifest path just because the
+// endpoint validated seeds as a rank SET (domain.ValidateAssignments) and
+// never consulted the roster.
+//
+// Pre-fix this saved cleanly with SeedCount>0 and only failed later, at
+// generate-draw time, with "seeded participant not found in main list" --
+// exactly the split-views failure the PUT gate exists to catch at write
+// time instead.
+func TestImportCompetition_RejectsSeedsOffRoster(t *testing.T) {
+	store, err := state.NewStore(t.TempDir())
+	require.NoError(t, err)
+
+	files := map[string][]byte{
+		"participants.csv": []byte("Alice,DojoA\nBob,DojoB\n"),
+		"seeds.csv":        []byte("Rank,Name,Dojo\n1,Alice,WrongDojo\n2,Bob,DojoB\n"),
+	}
+
+	t.Run("a wrong-dojo seed row is refused, not silently imported", func(t *testing.T) {
+		entry := ImportManifestComp{
+			ID:           "imp-wrong-dojo",
+			Name:         "Wrong Dojo",
+			Date:         "11-06-2026",
+			Participants: "participants.csv",
+			Seeds:        "seeds.csv",
+		}
+		res := importCompetition(store, entry, files)
+		require.NotEmpty(t, res.Error, "a seed naming Alice under the wrong dojo must not import cleanly")
+		assert.Contains(t, res.Error, "not on this competition's roster")
+		assert.Contains(t, res.Error, `"Alice" (rank 1)`)
+		assert.Zero(t, res.SeedCount)
+		assert.Zero(t, res.ParticipantCount)
+
+		// Refused means NOT written at all -- parse-before-save means a
+		// rejected row leaves no half-imported competition behind.
+		comp, err := store.LoadCompetition("imp-wrong-dojo")
+		require.NoError(t, err)
+		assert.Nil(t, comp)
+	})
+
+	t.Run("the same roster with the correct dojo imports cleanly", func(t *testing.T) {
+		okFiles := map[string][]byte{
+			"participants.csv": files["participants.csv"],
+			"seeds.csv":        []byte("Rank,Name,Dojo\n1,Alice,DojoA\n2,Bob,DojoB\n"),
+		}
+		entry := ImportManifestComp{
+			ID:           "imp-right-dojo",
+			Name:         "Right Dojo",
+			Date:         "11-06-2026",
+			Participants: "participants.csv",
+			Seeds:        "seeds.csv",
+		}
+		res := importCompetition(store, entry, okFiles)
+		require.Emptyf(t, res.Error, "import should succeed: %s", res.Error)
+		assert.Equal(t, 2, res.SeedCount)
+		assert.Equal(t, 2, res.ParticipantCount)
+	})
+}
+
+// TestImportSeedNamesAreCanonicalizedLikeTheRoster pins the fix for a
+// regression the bc-dmsr roster gate introduced on the import path: both files
+// in a manifest are hand-written, helper.CreatePlayers Title-cases every
+// participant name it parses, and parseSeedsBytes did not, so a bundle whose
+// two files agree with each other character for character disagreed after
+// parsing. seedsOffRoster then refused the import naming a competitor who is
+// plainly on the roster.
+//
+// The assertion is deliberately three-way: it is not enough for the gate to
+// pass. state.loadParticipants' merge (RosterIndex.Lookup, no title-casing)
+// and helper.ApplySeeds (title-casing) must ALSO agree, because title-casing
+// only the gate would admit a row the merge can never attach - the split-views
+// failure the gate exists to catch at write time.
+func TestImportSeedNamesAreCanonicalizedLikeTheRoster(t *testing.T) {
+	players, err := helper.CreatePlayers([]string{"alice cooper, Wakaba", "bob jones, Kenshinkan"}, false)
+	require.NoError(t, err)
+
+	assignments, err := parseSeedsBytes([]byte("1,alice cooper\n"))
+	require.NoError(t, err)
+	require.Len(t, assignments, 1)
+	require.Equal(t, "Alice Cooper", assignments[0].Name,
+		"the seed name must be canonicalized the way CreatePlayers canonicalized the roster")
+
+	domainPlayers := make([]domain.Player, 0, len(players))
+	for _, p := range players {
+		domainPlayers = append(domainPlayers, domain.Player{Name: p.Name, Dojo: p.Dojo})
+	}
+
+	require.NoError(t, seedsOffRoster(domainPlayers, assignments, "REMEDY"),
+		"the roster gate must accept a seed the roster plainly contains")
+
+	_, ok := domain.NewRosterIndex(domainPlayers).Lookup(assignments[0].Name, assignments[0].Dojo)
+	require.True(t, ok, "the seeds.csv-onto-roster merge must attach the rank")
+
+	require.NoError(t, helper.ApplySeeds(players, assignments))
+	require.Equal(t, 1, players[0].Seed, "the draw must seed the same participant")
 }

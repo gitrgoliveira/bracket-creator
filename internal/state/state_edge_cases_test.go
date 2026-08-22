@@ -10,44 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestLoadSchedule_MalformedCSV covers the parseScheduleFile csv.ReadAll
-// error path by writing invalid CSV to schedule.csv.
-func TestLoadSchedule_MalformedCSV(t *testing.T) {
-	dir := t.TempDir()
-	compID := "sched-bad"
-	store, err := NewStore(dir)
-	require.NoError(t, err)
-	require.NoError(t, store.SaveCompetition(&Competition{ID: compID}))
-
-	path := filepath.Join(dir, "competitions", compID, "schedule.csv")
-	// Bare quote mid-field forces a csv.ErrBareQuote.
-	require.NoError(t, os.WriteFile(path, []byte("a,b\na,\"bad\nquote"), 0o600))
-
-	_, err = store.LoadSchedule(compID)
-	assert.Error(t, err)
-}
-
-// TestCopySchedule_Nil verifies that copySchedule(nil) returns nil.
-func TestCopySchedule_Nil(t *testing.T) {
-	store, err := NewStore(t.TempDir())
-	require.NoError(t, err)
-	assert.Nil(t, store.copySchedule(nil))
-}
-
-// TestSerializeSchedule_WithBreakAndLabel verifies that schedule entries
-// with IsBreak=true and a non-empty Label round-trip through
-// serializeSchedule correctly.
-func TestSerializeSchedule_WithBreakAndLabel(t *testing.T) {
-	entries := []ScheduleEntry{
-		{MatchType: "break", MatchRef: "", Court: "A", ScheduledAt: "12:00", Status: "scheduled", IsBreak: true, Label: "Lunch"},
-		{MatchType: "pool", MatchRef: "P1-0", Court: "B", ScheduledAt: "09:00", Status: "scheduled", IsBreak: false, Label: ""},
-	}
-	data, err := serializeSchedule(entries)
-	require.NoError(t, err)
-	assert.Contains(t, string(data), "true")
-	assert.Contains(t, string(data), "Lunch")
-}
-
 // TestSavePoolMatches_InvalidDir covers the error path in savePoolMatchesLocked
 // when the competition directory cannot be created.
 func TestSavePools_InvalidDir(t *testing.T) {
@@ -138,43 +100,6 @@ func TestUpdateTournamentChanged_NilCurrent(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, loaded)
 	assert.Equal(t, "First Save", loaded.Name)
-}
-
-// TestSaveScheduleChanged_NoChange verifies the bytes.Equal early-exit path in
-// SaveScheduleChanged: saving identical entries twice returns changed=false.
-func TestSaveScheduleChanged_NoChange(t *testing.T) {
-	store, err := NewStore(t.TempDir())
-	require.NoError(t, err)
-	compID := "sched-no-change"
-	require.NoError(t, store.SaveCompetition(&Competition{ID: compID}))
-
-	entries := []ScheduleEntry{
-		{MatchType: "pool", MatchRef: "P1-0", Court: "A", Status: "scheduled"},
-	}
-	changed1, err := store.SaveScheduleChanged(compID, entries)
-	require.NoError(t, err)
-	assert.True(t, changed1)
-
-	changed2, err := store.SaveScheduleChanged(compID, entries)
-	require.NoError(t, err)
-	assert.False(t, changed2, "identical second save must be a no-op")
-}
-
-// TestSaveScheduleChanged_NilEntries verifies that a nil entries slice is
-// stored as an empty slice (the nil-init guard).
-func TestSaveScheduleChanged_NilEntries(t *testing.T) {
-	store, err := NewStore(t.TempDir())
-	require.NoError(t, err)
-	compID := "sched-nil"
-	require.NoError(t, store.SaveCompetition(&Competition{ID: compID}))
-
-	changed, err := store.SaveScheduleChanged(compID, nil)
-	require.NoError(t, err)
-	assert.True(t, changed)
-
-	loaded, err := store.LoadSchedule(compID)
-	require.NoError(t, err)
-	assert.NotNil(t, loaded)
 }
 
 // TestLoadBracket_MalformedJSON covers the loadCached error path in LoadBracket

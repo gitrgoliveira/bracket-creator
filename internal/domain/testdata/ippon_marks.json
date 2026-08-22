@@ -1,0 +1,20 @@
+{
+  "_comment": [
+    "bc-dmsr review round: the single source of truth for the two literal",
+    "tokens an ippon slot can hold besides a struck point, shared by BOTH",
+    "language implementations: internal/domain/ippon.go (IpponPlaceholder /",
+    "HanteiMark) and web-mobile/js/result_slot.jsx (IPPON_PLACEHOLDER /",
+    "HANTEI_MARK). internal/domain/ippon_test.go asserts the Go constants",
+    "against these values; web-mobile/js/__tests__/result_slot_constants.test.jsx",
+    "reads this same file and asserts the JS exports against it.",
+    "",
+    "Why a shared file rather than each suite restating the strings: changing",
+    "one language AND its own tests together in the same PR is the realistic",
+    "drift, and two independent hardcoded literals both stay green through",
+    "it. Editing this file fails the OTHER language's suite immediately, so a",
+    "mark cannot move in one renderer without the other following. Pin",
+    "VALUES here, not source shape."
+  ],
+  "ipponPlaceholder": "•",
+  "hanteiMark": "Ht"
+}

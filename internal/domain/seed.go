@@ -12,10 +12,93 @@ type SeedAssignment struct {
 	SeedRank int    `json:"seedRank"`
 }
 
-// seedKey returns the composite lookup key for a seed assignment.
-func seedKey(name, dojo string) string {
+// SeedKey is the composite key that identifies a seeded competitor: names are
+// not unique within a competition (only same name AND same dojo is rejected),
+// so a seed is matched to its participant by the (name, dojo) pair. Exported
+// because every producer, matcher and merger of seed assignments must compose
+// the pair the same way -- AssignSeeds here, helper.ApplySeeds, and the
+// seeds.csv-onto-roster merge in state.loadParticipants all key on it.
+//
+// Matchers that consult it also share one fallback for legacy rows: an
+// assignment with NO dojo matches by bare name, but only when that name is
+// unique in the roster. RosterIndex below is the ONE implementation of that
+// fallback; every matcher builds one over its roster and calls Lookup rather
+// than re-deriving the rule.
+func SeedKey(name, dojo string) string {
 	return name + "|" + dojo
 }
+
+// RosterIndex resolves a seed row's (name, dojo) key against a roster of
+// players, implementing the ONE shared fallback described on SeedKey above:
+// an exact (name, dojo) match first, and -- ONLY when the row carries no
+// dojo -- a bare-name match, but only when that name is unique in the
+// roster. An ambiguous bare name (or an exact-key miss with a non-empty
+// dojo) resolves to false rather than guessing.
+//
+// This was previously reimplemented independently in four places (this
+// package's AssignSeeds, helper.ApplySeeds, the seeds.csv-onto-roster merge
+// in state.loadParticipants, and the legacy dojo-backfill in
+// state.upgradeSeedDojosLocked), which is exactly the kind of drift SeedKey's
+// doc comment warned about without anything actually shared. All four now
+// build one RosterIndex over their roster and call Lookup. A fifth case is a
+// failed Lookup itself: a caller that needs to tell a GHOST name (absent from
+// the roster entirely) from an AMBIGUOUS one (present, but under 2+ dojos)
+// reads that distinction off NameCount rather than re-deriving it with its
+// own roster scan.
+//
+// Build once per roster with NewRosterIndex; the returned pointers alias the
+// slice passed in, so mutating through them (as AssignSeeds and ApplySeeds
+// do) mutates the caller's slice directly.
+type RosterIndex struct {
+	byKey     map[string]*Player
+	byName    map[string]*Player // only names unique in the roster
+	nameCount map[string]int
+}
+
+// NewRosterIndex builds a RosterIndex over players. players must not be
+// reallocated (e.g. via append past its length) while the index is in use;
+// the index holds pointers into its backing array.
+func NewRosterIndex(players []Player) *RosterIndex {
+	nameCount := make(map[string]int, len(players))
+	for i := range players {
+		nameCount[players[i].Name]++
+	}
+	idx := &RosterIndex{
+		byKey:     make(map[string]*Player, len(players)),
+		byName:    make(map[string]*Player, len(players)),
+		nameCount: nameCount,
+	}
+	for i := range players {
+		idx.byKey[SeedKey(players[i].Name, players[i].Dojo)] = &players[i]
+		if nameCount[players[i].Name] == 1 {
+			idx.byName[players[i].Name] = &players[i]
+		}
+	}
+	return idx
+}
+
+// Lookup resolves (name, dojo) to a roster player using the shared fallback
+// documented on RosterIndex: exact key first, then -- only when dojo=="" --
+// the unique-bare-name fallback.
+func (idx *RosterIndex) Lookup(name, dojo string) (*Player, bool) {
+	if p, ok := idx.byKey[SeedKey(name, dojo)]; ok {
+		return p, true
+	}
+	if dojo == "" {
+		if p, ok := idx.byName[name]; ok {
+			return p, true
+		}
+	}
+	return nil, false
+}
+
+// NameCount reports how many roster players carry this exact name. It is the
+// raw input to the uniqueness rule Lookup applies (a name is usable as a
+// bare-name fallback only at count 1), exposed so callers that need to tell a
+// GHOST name (count 0) from an AMBIGUOUS one (count 2+) after a failed Lookup
+// read that distinction off the index instead of re-deriving it with their
+// own roster scan — which is exactly the drift this type was extracted to end.
+func (idx *RosterIndex) NameCount(name string) int { return idx.nameCount[name] }
 
 // ErrInvalidSeedAssignments marks every rejection below as a complaint about
 // the OPERATOR'S INPUT rather than a failure of the tool.
@@ -68,12 +151,7 @@ func ValidateAssignments(assignments []SeedAssignment) error {
 // AssignSeeds applies valid seed assignments to a list of players
 // It swaps seeds if a collision occurs. Returns error if a seeded participant is not found.
 func AssignSeeds(players []Player, assignments []SeedAssignment) error {
-	playerMap := make(map[string]*Player, len(players))
-	nameCount := make(map[string]int, len(players))
-	for i := range players {
-		playerMap[seedKey(players[i].Name, players[i].Dojo)] = &players[i]
-		nameCount[players[i].Name]++
-	}
+	roster := NewRosterIndex(players)
 
 	// Build a seed→player reverse index for O(1) collision detection.
 	// Only non-zero seeds are tracked.
@@ -85,16 +163,7 @@ func AssignSeeds(players []Player, assignments []SeedAssignment) error {
 	}
 
 	for _, a := range assignments {
-		p, ok := playerMap[seedKey(a.Name, a.Dojo)]
-		if !ok && a.Dojo == "" && nameCount[a.Name] == 1 {
-			for i := range players {
-				if players[i].Name == a.Name {
-					p = &players[i]
-					ok = true
-					break
-				}
-			}
-		}
+		p, ok := roster.Lookup(a.Name, a.Dojo)
 		if !ok {
 			return fmt.Errorf("seeded participant not found in main list: %s", a.Name)
 		}

@@ -416,20 +416,14 @@ func (e *Engine) StartCompetition(id string) error {
 	}
 	switch comp.Status {
 	case state.CompStatusDrawReady:
-		// Draw already exists; only flip status and generate schedule.
-		if err := e.transitionDrawToRunning(id); err != nil {
-			return err
-		}
-		return e.GenerateSchedule(id)
+		// Draw already exists; only flip status.
+		return e.transitionDrawToRunning(id)
 	case state.CompStatusSetup, "":
 		// One-click path: generate draw then transition.
 		if err := e.runDrawPipeline(id); err != nil {
 			return err
 		}
-		if err := e.transitionDrawToRunning(id); err != nil {
-			return err
-		}
-		return e.GenerateSchedule(id)
+		return e.transitionDrawToRunning(id)
 	default:
 		return validationErrorf("competition %s already started", id)
 	}
@@ -553,17 +547,24 @@ func filterCheckedIn(players []domain.Player) []domain.Player {
 	return eligible
 }
 
-// checkInExcludedNames returns the names of players that filterCheckedIn would
-// remove under opt-in semantics: the non-checked-in players when at least one
-// is checked in, else nil. Used to prune their seed assignments so ApplySeeds
-// doesn't fail on an absent player.
+// checkInExcludedKeys returns the domain.SeedKey(name, dojo) identities of
+// players that filterCheckedIn would remove under opt-in semantics: the
+// non-checked-in players when at least one is checked in, else nil. Used to
+// prune their seed assignments so ApplySeeds doesn't fail on an absent
+// player.
 //
-// The key is the raw, case-sensitive player Name, matching the roster identity
-// the draw uses (helper.CheckDuplicateEntries and ApplySeeds' playerMap both key
-// on the exact Name, so "Alice" and "alice" are distinct participants).
-// Normalizing case here would let an excluded "alice" drop the seed of a
-// checked-in "Alice" (PR #199 review round 3).
-func checkInExcludedNames(players []domain.Player) map[string]bool {
+// Keyed on (name, dojo), not the bare name: names are not unique within a
+// competition (helper.CheckDuplicateEntriesByNameDojo allows two same-named
+// competitors from different dojos), so a bare-name key excluded BOTH
+// namesakes' seeds whenever only one of them failed to check in -- dropping a
+// checked-in, correctly-seeded competitor's seed for no reason (reproduced:
+// "John Smith"/Wakaba checked in + seeded rank 1, "John Smith"/Tora not
+// checked in -> the Wakaba row was silently dropped). dropSeedAssignments
+// below resolves each seed assignment against the FULL roster via
+// domain.RosterIndex before testing membership here, so this set only ever
+// needs to name the ACTUAL excluded player, never a name shared with someone
+// else.
+func checkInExcludedKeys(players []domain.Player) map[string]bool {
 	anyCheckedIn := false
 	for _, p := range players {
 		if p.CheckedIn {
@@ -577,35 +578,97 @@ func checkInExcludedNames(players []domain.Player) map[string]bool {
 	excluded := make(map[string]bool)
 	for _, p := range players {
 		if !p.CheckedIn {
-			excluded[p.Name] = true
+			excluded[domain.SeedKey(p.Name, p.Dojo)] = true
 		}
 	}
 	return excluded
 }
 
-// dropSeedAssignments removes seed assignments whose participant name is in the
-// excluded set, matched case-sensitively on the exact Name (same key as
-// checkInExcludedNames / the roster identity). A nil/empty excluded set returns
-// the input unchanged, so a seed for a name that was never a participant still
-// flows through to ApplySeeds and surfaces the same error as before.
-func dropSeedAssignments(seeds []domain.SeedAssignment, excluded map[string]bool) []domain.SeedAssignment {
+// dropSeedAssignments removes seed assignments whose participant is in the
+// excluded set (checkInExcludedKeys, keyed on domain.SeedKey(name, dojo)).
+// players is the FULL roster (before filterCheckedIn), used to resolve each
+// seed assignment to the specific participant it names via
+// domain.RosterIndex -- the same exact-key-then-unique-bare-name-fallback
+// rule every other seed matcher in the codebase shares, so a legacy row with
+// an empty dojo is still droppable when its unique-name owner is excluded,
+// while a dojo-qualified row can never drop the WRONG same-named
+// participant's seed. A nil/empty excluded set returns the input unchanged.
+// A seed assignment that resolves to nobody on the full roster (a ghost
+// name) is left in place, unexcluded, so it still flows through to
+// ApplySeeds and surfaces the same error as before.
+//
+// AMBIGUOUS dojo-less rows (a legacy row whose bare name matches TWO OR MORE
+// players on the full roster -- RosterIndex.Lookup refuses to guess and
+// returns not-found) need a THIRD outcome beyond keep/drop, not just the two
+// above. This roster (the FULL one) is not the roster helper.ApplySeeds
+// resolves against: the caller applies this function's output against
+// filterCheckedIn's narrower roster (players.go / bracket.go), and filtering
+// can turn a name that was ambiguous HERE into a name that is unique THERE.
+// Keeping an ambiguous row unconditionally -- the plain Lookup-fails-so-keep
+// rule above -- would let ApplySeeds silently attach the rank to WHICHEVER
+// namesake happens to survive check-in, which may not be the one the
+// operator meant to seed at all (reachable in production: a dojo-less row is
+// written verbatim by the tournament-import seeds parser, and separately can
+// be stranded dojo-less forever by the legacy upgrade's once-per-process
+// gate, which never revisits a row once stamped, so a namesake registering
+// later leaves it ambiguous for the rest of the process). So: when a row is
+// ambiguous on the full roster AND at least one of the players sharing that
+// name is excluded, drop it -- we cannot safely resolve it to a single
+// participant, and keeping it either wrong-attaches the rank (if exactly one
+// namesake survives) or degrades ApplySeeds' plain "not found" into a 500 if
+// none do (both namesakes failed to check in). An ambiguous row where NO
+// candidate is excluded is untouched by check-in and stays kept: filtering
+// doesn't change the ambiguity, so ApplySeeds fails on it exactly as it
+// would have before check-in was a factor at all.
+func dropSeedAssignments(players []domain.Player, seeds []domain.SeedAssignment, excluded map[string]bool) []domain.SeedAssignment {
 	if len(excluded) == 0 {
 		return seeds
 	}
+	roster := domain.NewRosterIndex(players)
 	out := make([]domain.SeedAssignment, 0, len(seeds))
 	for _, a := range seeds {
-		if excluded[a.Name] {
+		if p, ok := roster.Lookup(a.Name, a.Dojo); ok {
+			if excluded[domain.SeedKey(p.Name, p.Dojo)] {
+				continue
+			}
+			out = append(out, a)
 			continue
 		}
-		out = append(out, a)
+		// Lookup failed. A dojo-qualified row that doesn't resolve is a ghost
+		// (the exact competitor it names doesn't exist) -- the fallback below
+		// only ever applies to dojo-less rows, so this can never be the
+		// ambiguous case, and it keeps flowing through unexcluded (unchanged
+		// behavior).
+		if a.Dojo != "" {
+			out = append(out, a)
+			continue
+		}
+		// Dojo-less and unresolved: distinguish a genuine ghost (nobody on
+		// the full roster shares this name) from an ambiguous row (2+ do).
+		// Ambiguity is the index's own rule, so read it off the index rather
+		// than recounting: a failed Lookup on a dojo-less row means the name
+		// was not unique, so count 0 is a genuine ghost and 2+ is ambiguous.
+		if roster.NameCount(a.Name) < 2 {
+			out = append(out, a) // genuine ghost
+			continue
+		}
+		anyCandidateExcluded := false
+		for i := range players {
+			if players[i].Name == a.Name && excluded[domain.SeedKey(players[i].Name, players[i].Dojo)] {
+				anyCandidateExcluded = true
+				break
+			}
+		}
+		if anyCandidateExcluded {
+			continue // ambiguous, and at least one namesake didn't check in: drop
+		}
+		out = append(out, a) // ambiguous with nobody excluded
 	}
 	return out
 }
 
 // runDrawPipeline runs the full draw-generation pipeline for a Setup
-// competition and commits CompStatusDrawReady. It does NOT generate the
-// schedule; callers must call GenerateSchedule after transitioning to a
-// running status.
+// competition and commits CompStatusDrawReady.
 //
 // Pipeline limitations (pre-existing):
 //   - Pool/bracket generation (writes pools.csv / bracket.json) runs
@@ -754,8 +817,14 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// the fresh roster. FileMtime returns 0 if the file does not exist,
 	// which is a valid "no participants yet" state, we snapshot the
 	// same 0 and the comparison still works.
-	loadedParticipantsMtime := e.store.FileMtime(id, "participants.csv")
-	loadedSeedsMtime := e.store.FileMtime(id, "seeds.csv")
+	// ParticipantsFingerprint runs the legacy seed-dojo upgrade (state/
+	// legacy_upgrade.go) BEFORE stat'ing, so these mtimes are the post-
+	// upgrade files rather than a snapshot the load below could still
+	// convert between here and the re-check, which would then read our own
+	// one-time rewrite as a concurrent operator write. The upgrade ordering
+	// is folded into the store method itself so this call site cannot get
+	// it wrong by omission.
+	loadedParticipantsMtime, loadedSeedsMtime := e.store.ParticipantsFingerprint(id)
 
 	if comp.Kind == "team" && comp.TeamSize == 0 {
 		comp.TeamSize = 5 // Default for Kendo
@@ -777,14 +846,20 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// semantics still apply (see filterCheckedIn): if nobody is checked in,
 	// everyone is included.
 	//
-	// excludedByCheckIn captures the names check-in removes so we can drop
-	// their seed assignments too: helper.ApplySeeds errors with "seeded
-	// participant not found in main list" for a seed whose player is absent,
-	// which would make a competition with a non-checked-in seeded player
-	// undrawable.
+	// excludedByCheckIn captures the (name, dojo) identities check-in removes
+	// so we can drop their seed assignments too: helper.ApplySeeds errors with
+	// "seeded participant not found in main list" for a seed whose player is
+	// absent, which would make a competition with a non-checked-in seeded
+	// player undrawable.
+	//
+	// fullRoster is snapshotted BEFORE filterCheckedIn narrows players, so
+	// dropSeedAssignments below can resolve a seed assignment against every
+	// candidate (checked-in and not), the only way to disambiguate two
+	// same-named participants by dojo.
 	var excludedByCheckIn map[string]bool
+	fullRoster := players
 	if comp.CheckInEnabled {
-		excludedByCheckIn = checkInExcludedNames(players)
+		excludedByCheckIn = checkInExcludedKeys(players)
 		players = filterCheckedIn(players)
 	}
 
@@ -808,7 +883,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// Drop seed assignments for participants removed by check-in (PR #199
 	// review) so ApplySeeds doesn't fail on an absent seeded player. Remaining
 	// seeds keep their ranks; sparse ranks are handled by the seeding pass.
-	seeds = dropSeedAssignments(seeds, excludedByCheckIn)
+	seeds = dropSeedAssignments(fullRoster, seeds, excludedByCheckIn)
 
 	// League format: enforce the single-pool invariant so that
 	// generatePools always produces exactly one pool containing all

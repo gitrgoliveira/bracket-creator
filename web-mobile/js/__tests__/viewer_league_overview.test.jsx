@@ -34,7 +34,7 @@ describe('ViewerOverview league standings (mp-ldnr)', () => {
   let ViewerOverview;
   let DHBadge;
   const savedGlobals = {};
-  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'ipponsFromScore', 'queueLabel', 'queueLabelCompact', 'teamIVScore', 'matchScoreStr'];
+  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'queueLabel', 'queueLabelCompact', 'teamIVScore', 'matchScoreStr'];
 
   beforeEach(async () => {
     runtime = makeReactive();
@@ -52,7 +52,6 @@ describe('ViewerOverview league standings (mp-ldnr)', () => {
     global.window.matchScoreStr = (m) =>
       (global.window.teamIVScore(m)) ||
       global.window.formatIpponsScore(m?.ipponsB || [], m?.ipponsA || [], m?.score, m?.decision, m?.encho, m?.decidedByHantei);
-    global.window.ipponsFromScore = () => [];
     global.window.queueLabel = () => '';
     global.window.queueLabelCompact = () => null;
     vi.resetModules();

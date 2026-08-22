@@ -12,6 +12,28 @@
 // pure functions, and leaving any future surface (the viewer card, the overlay)
 // the same bad choice. A shared rule belongs in the leaf, not in one consumer.
 //
+// `containsHt`, `hanteiDecided`, `placeHt`, `placeHtForWinner`, `stripHt`
+// and `attributeWinnerSide` are the wire-serializer's slice of the same rule:
+// api_serializers.jsx's toBackendMatchResult and normalizeMatch are the
+// consumers. `hanteiDecided` answers "does this match/sub carry the mark"
+// (mirrors Go's HanteiDecided()); `attributeWinnerSide` answers "which side
+// does a winner name" - id-first when a winnerId/sideAId/sideBId triple is
+// available, name fallback (sideA-first) otherwise - mirroring Go's
+// internal/domain.AttributeWinnerSide exactly; `placeHtForWinner` answers
+// "which side does an armed verdict's mark go on" by delegating to that
+// helper and then placing the mark in the free slot — this replaced literal
+// `containsHt(x.ipponsA) || containsHt(x.ipponsB)` / winner-name if-chains
+// duplicated across that file's two write paths. IPPON_PLACEHOLDER
+// ("•", U+2022 BULLET) and HANTEI_MARK ("Ht") are this file's two literal
+// tokens, spelled once each and mirrored byte-for-byte by Go's
+// internal/domain/ippon.go (IpponPlaceholder / HanteiMark). Both languages'
+// values are drawn from one shared fixture, internal/domain/testdata/
+// ippon_marks.json (the same pattern encho_labels.json uses for enchoLabel):
+// __tests__/result_slot_constants.test.jsx reads it for the JS side and
+// internal/domain/ippon_test.go's TestIpponMarks_GoldenFixture reads it for
+// the Go side, so a divergence between the two languages — not just a drift
+// within one of them — fails a test.
+//
 // WHY A SEPARATE LEAF, AND NOT bracket.jsx (the ONE statement of this — the
 // other sites point here; THREE earlier rationales have been wrong now, so
 // verify against the build before writing a fourth): Makefile `esbuild-jsx`
@@ -60,9 +82,34 @@
 // validation.go) caps each side at 2 AND rejects 2-2 outright on every sub-bout
 // and on the bulk path. The branch exists solely so a hand-edited file can
 // never overwrite a recorded point.
+
+// IPPON_PLACEHOLDER / HANTEI_MARK: the two literal tokens this file's rules
+// are built from, spelled ONCE each and used everywhere below instead of
+// raw string literals. Mirrors Go's internal/domain/ippon.go exactly —
+// IpponPlaceholder ("•", U+2022 BULLET) and HanteiMark ("Ht") — so a
+// divergence between the two languages fails a test
+// (result_slot_constants.test.jsx) rather than silently drifting apart.
+// Exported so that test can assert on the literal values directly, rather
+// than inferring them indirectly through behaviour.
+export const IPPON_PLACEHOLDER = "•";
+export const HANTEI_MARK = "Ht";
+
+// isFreeSlot: a slot is free when it holds no letter — an empty string OR
+// the IPPON_PLACEHOLDER no-strike placeholder. Mirrors Go's
+// domain.AppendHantei (both treat "" and the placeholder as free). Shared
+// by resultSlot (which slot a mark takes in a 2-cell pair) and placeHt
+// below (which slot a mark takes in a growable ippon array) so there is
+// exactly one definition of "free" in this file — previously resultSlot's
+// own inline predicate treated the placeholder as OCCUPIED, a paper
+// divergence from placeHt's that never fired in practice (every real input
+// reaching resultSlot is pre-stripped of the placeholder by realIppons
+// before display), but still left two answers to the same question in one
+// dependency chain.
+const isFreeSlot = (v) => !v || v === IPPON_PLACEHOLDER;
+
 export function resultSlot(cells) {
   const pair = cells || [];
-  const slot = [pair[0] || "", pair[1] || ""].findIndex(v => !v);
+  const slot = [pair[0] || "", pair[1] || ""].findIndex(isFreeSlot);
   return { slot, loose: slot === -1 };
 }
 
@@ -93,9 +140,10 @@ export function sideSlotOrder(side) {
   return side === "aka" ? [1, 0] : [0, 1];
 }
 
-// realIppons: what counts as a RECORDED ippon (drops empties, the "\u2022"
-// placeholder, and the "Ht" judges'-decision mark — a hantei records who the
-// referees chose, not that anyone struck). Mirrors domain.IsScoringIppon. Exported so the surfaces that gate on a COUNT all count the
+// realIppons: what counts as a RECORDED ippon (drops empties, the
+// IPPON_PLACEHOLDER, and the HANTEI_MARK judges'-decision mark — a hantei
+// records who the referees chose, not that anyone struck). Mirrors
+// domain.IsScoringIppon. Exported so the surfaces that gate on a COUNT all count the
 // same way; the display pair, the hantei tie gates and the editors' totals must
 // never read different totals from one array.
 //
@@ -115,7 +163,116 @@ export function sideSlotOrder(side) {
 // many ippons is this". An empty cell is not a scored ippon on any path.
 // (Go's equivalent is domain.CountScoringIppons, which both the engine and the
 // wire validator now call — that pair no longer needs a keep-in-sync comment.)
-export const realIppons = (arr) => (arr || []).filter(x => x && x !== "\u2022" && x !== "Ht");
+export const realIppons = (arr) => (arr || []).filter(x => x && x !== IPPON_PLACEHOLDER && x !== HANTEI_MARK);
+
+// containsHt / placeHt / stripHt: the wire-serializer's half of the same
+// Ht-as-a-real-ippon-slice-entry contract realIppons reads. Moved here from
+// api_serializers.jsx: that made the serializer a fourth consumer of this
+// file's Ht rule (alongside the read-only scoreboard and both editors listed
+// above), each with its own copy of "what counts as a free slot" or "what
+// counts as the mark". Consolidating means placeHt's free-slot search shares
+// isFreeSlot with resultSlot (defined above), and containsHt/stripHt share
+// HANTEI_MARK with realIppons, so there is exactly one definition of
+// each, not four. api_serializers.jsx already imports realIppons from here
+// via a static ES import, so importing these three follows the identical,
+// already-established route.
+//
+// containsHt: the read predicate - does this ippon array already carry the
+// mark. The wire never sends a separate flag, so this is the ONLY way to
+// detect a stored verdict on an array.
+export const containsHt = (arr) => Array.isArray(arr) && arr.includes(HANTEI_MARK);
+
+// hanteiDecided: whether a match/sub-shaped object (anything with an
+// ipponsA/ipponsB pair) carries the mark on either side. Mirrors Go's
+// HanteiDecided() on MatchResult and SubMatchResult (internal/state/models.go)
+// — one predicate, not `containsHt(x.ipponsA) || containsHt(x.ipponsB)`
+// spelled out at each call site (api_serializers.jsx's normalizeMatch used to
+// spell it three times: once for the match itself, once in a .some() gate,
+// once again inside the following .map()).
+export const hanteiDecided = (obj) => containsHt(obj?.ipponsA) || containsHt(obj?.ipponsB);
+
+// placeHt: the write placement - fill a free placeholder slot before
+// growing, mirroring domain.AppendHantei so the mark lands in the winner's
+// next free slot (0-0 -> outer, 1-1 -> inner), never overwriting a struck
+// point. A no-op if the array already carries the mark (never double-place):
+// checked BEFORE copying, so the common re-save-of-an-already-marked-match
+// path returns the input array unchanged instead of allocating a throwaway
+// copy just to discover there was nothing to place.
+export function placeHt(arr) {
+  if ((arr || []).includes(HANTEI_MARK)) return arr || [];
+  const out = [...(arr || [])];
+  const free = out.findIndex(isFreeSlot);
+  if (free >= 0) { out[free] = HANTEI_MARK; return out; }
+  out.push(HANTEI_MARK);
+  return out;
+}
+
+// stripHt: drop a stored HANTEI_MARK entry from an ippon array without
+// touching any other letter. Used where a caller must re-derive placement
+// (e.g. re-adding the mark to a different, still-attributable side) rather
+// than simply reading past it the way realIppons does for display/counting.
+export const stripHt = (arr) => (arr || []).filter((v) => v !== HANTEI_MARK);
+
+// attributeWinnerSide: the ONE statement of "which side does a winner name",
+// id-first. Mirrors Go's internal/domain.AttributeWinnerSide exactly (that
+// function is this one's twin - a divergence between the two is a bug, not a
+// style choice):
+//   - when winnerId, sideAId AND sideBId are ALL non-empty, ids are
+//     AUTHORITATIVE and win over names when they disagree: winnerId ===
+//     sideAId -> "a", winnerId === sideBId -> "b", matches neither -> null
+//     (unattributable - do NOT fall back to names in this branch: a
+//     same-name/different-dojo pair is exactly the case ids exist to
+//     disambiguate, so a name fallback here would silently reintroduce the
+//     bug this function fixes).
+//   - otherwise (any id missing - legacy data, id-less payloads, sub-bout
+//     rows that carry no ids at all) fall back to the name comparison this
+//     file has always used: an empty winner name is unattributable, then
+//     sideA-first when the winner name matches BOTH sides (CLAUDE.md's
+//     documented defensive AKA/sideA-first convention), so id-less data
+//     stays byte-identical to before this function existed.
+// The id branch is checked FIRST and unconditionally - it does not require a
+// non-empty winner NAME, only a non-empty winnerId matching all three ids'
+// presence. This mirrors Go's ordering exactly (AttributeWinnerSide checks
+// the id triple before its `winner == ""` guard, which belongs to the name
+// fallback only); do not hoist an empty-winner-name guard above the id
+// branch, which would silently disagree with the Go twin whenever a caller
+// has an id but no name.
+// Exported so a caller that only needs "which side", not "place the mark",
+// can use it directly (e.g. a future consumer that isn't ippon-shaped).
+export function attributeWinnerSide({ winnerId, sideAId, sideBId, winner, sideA, sideB } = {}) {
+  if (winnerId && sideAId && sideBId) {
+    if (winnerId === sideAId) return "a";
+    if (winnerId === sideBId) return "b";
+    return null;
+  }
+  if (!winner) return null;
+  if (winner === sideA) return "a";
+  if (winner === sideB) return "b";
+  return null;
+}
+
+// placeHtForWinner: the ONE statement of "place the mark on the side a winner
+// names" - delegates the WHICH SIDE question to attributeWinnerSide above and
+// only decides WHICH SLOT (via placeHt). api_serializers.jsx's
+// toBackendMatchResult had this same three-way switch written out twice (once
+// for the top-level match, once per sub-bout), which is exactly the kind of
+// copy this file exists to prevent for the rest of the Ht rules. It takes the
+// already-prepared ipponsA/ipponsB (callers decide separately whether to
+// stripHt first: the top-level caller's arrays already arrive pre-stripped
+// via realIppons, the sub-bout caller strips explicitly) and returns [newA,
+// newB], unchanged on whichever side it did not touch.
+//
+// winnerId/sideAId/sideBId are OPTIONAL trailing args: the sub-bout call site
+// (api_serializers.jsx, sub rows carry no ids at all) omits them, so
+// attributeWinnerSide's id branch never fires there and that path stays on
+// the name fallback exactly as before this function existed. The top-level
+// match call site threads the ids it already has in scope.
+export function placeHtForWinner(winner, sideA, sideB, ipponsA, ipponsB, winnerId, sideAId, sideBId) {
+  const side = attributeWinnerSide({ winnerId, sideAId, sideBId, winner, sideA, sideB });
+  if (side === "a") return [placeHt(ipponsA), ipponsB];
+  if (side === "b") return [ipponsA, placeHt(ipponsB)];
+  return [ipponsA, ipponsB];
+}
 
 // hanteiTied: the ONE JS statement of "hantei applies only to a tied
 // scoreline" (FIK 7-5 / 29-6, mirroring validation.go's equal-counts gate),

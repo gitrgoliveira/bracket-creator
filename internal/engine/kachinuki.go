@@ -1149,11 +1149,12 @@ func (e *Engine) checkPoolReopenDownstreamTx(tx state.StoreTx, compID string, co
 }
 
 // reopenPoolMatch is reopenBracketMatch's twin for a pool/league match. Same
-// rule, same field set, different struct: MatchResult carries the scoreline as
-// IpponsA/IpponsB (BracketMatch renders it into ScoreA/ScoreB strings), adds
-// WinnerID and the rep-bout nominations, and holds DecidedByHantei as a
-// *bool where the bracket has a plain bool. See reopenBracketMatch for why
-// each of these is verdict rather than bout record.
+// rule, same field set: MatchResult and BracketMatch both carry the
+// scoreline as IpponsA/IpponsB (+ HansokuA/B), the shape they share. This
+// twin adds WinnerID and the rep-bout nominations. The hantei verdict needs
+// no clear of its own: it is the domain.HanteiMark entry inside the
+// scoreline being cleared. See reopenBracketMatch for why each of these is
+// verdict rather than bout record.
 //
 // RepPlayerA/B name who fought a pool daihyosen. That bout's own record lives
 // in SubResults like any other; these two fields are the discarded verdict's
@@ -1168,7 +1169,6 @@ func reopenPoolMatch(m *state.MatchResult, reason string) {
 	m.DecisionBy = ""
 	m.DecisionReason = ""
 	m.Encho = nil
-	m.DecidedByHantei = nil
 	m.ResultSource = ""
 	m.RepPlayerA = ""
 	m.RepPlayerB = ""
@@ -1206,13 +1206,12 @@ func reopenPoolMatch(m *state.MatchResult, reason string) {
 func reopenBracketMatch(bm *state.BracketMatch, reason string) {
 	bm.Status = state.MatchStatusRunning
 	bm.Winner = ""
-	bm.ScoreA = ""
-	bm.ScoreB = ""
+	bm.IpponsA = nil
+	bm.IpponsB = nil
 	bm.Decision = ""
 	bm.DecisionBy = ""
 	bm.DecisionReason = ""
 	bm.Encho = nil
-	bm.DecidedByHantei = false
 	bm.IsOverridden = false
 	bm.ResultSource = ""
 	bm.CorrectionReason = reason
@@ -1310,8 +1309,8 @@ func bracketMatchStartedOrScored(bm *state.BracketMatch) bool {
 		bm.Status == state.MatchStatusCompleted ||
 		bm.Winner != "" ||
 		len(bm.SubResults) > 0 ||
-		bm.ScoreA != "" ||
-		bm.ScoreB != ""
+		len(bm.IpponsA) > 0 ||
+		len(bm.IpponsB) > 0
 }
 
 // applyKachinukiMerge merges an incoming kachinuki bout log into the stored

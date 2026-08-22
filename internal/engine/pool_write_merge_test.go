@@ -222,13 +222,18 @@ func TestPoolWrite_HanteiTravelsWithTheScoreline(t *testing.T) {
 }
 
 // A mark that reaches a merge must still be VALID for the write carrying it.
-// RecordDecision builds its MatchResult from scratch and inherits stored
-// ippons through preserveLoserScore, so a kiken recorded over a stored hantei
-// arrives with the old winner's marked slice on what is now the LOSER's side
-// — which export.SideMarks would print as "Ht" and "Kiken" on one encounter.
 // stripInvalidHantei (both branches, forward only) strips a mark whose
 // preconditions fail or that sits on a non-winner's side: points stay, the
 // verdict goes.
+//
+// The subtests below hand-build each invalid shape, because that is the unit
+// under test. Do NOT read them as evidence that a given PRODUCER emits these
+// shapes: this comment used to claim preserveLoserScore was the producer for
+// the kiken case, and that is false - struckIppons drops the mark, so a kiken
+// over a stored hantei never carries one. See
+// TestPreserveLoserScoreDropsTheHanteiMark, which pins the real behaviour, and
+// TestStripInvalidHantei_InheritedMarkIsStrippedNotRejected for the producer
+// that IS reachable and why the guard must not become a rejection.
 func TestStripInvalidHantei_GuardsTheNonValidatedPaths(t *testing.T) {
 	t.Run("kiken over a stored hantei drops the mark, keeps the points", func(t *testing.T) {
 		s := &state.MatchResult{
@@ -462,4 +467,89 @@ func TestTimestampGuardAppliesToBothBranches(t *testing.T) {
 		assert.Equal(t, state.MatchStatusScheduled, p.Status, "the rollback landed")
 		assert.Equal(t, "Kyoto", p.Winner)
 	})
+}
+
+// TestPreserveLoserScoreDropsTheHanteiMark pins the fact that a stale comment,
+// a stale test premise and a stale CLAUDE.md paragraph all got wrong: the
+// decision twins CANNOT carry a match-level hantei mark onto the new loser.
+// preserveLoserScore filters the inherited slice through struckIppons, which
+// keeps only domain.IsScoringIppon entries, and the mark is deliberately not
+// one (it records that the referees decided, not that anyone struck).
+//
+// Pinned because the false premise was load-bearing in an argument to turn
+// stripInvalidHantei into a 400. Mutating struckIppons to keep the mark must
+// fail this test.
+func TestPreserveLoserScoreDropsTheHanteiMark(t *testing.T) {
+	prior := &state.MatchResult{
+		ID: "Pool A-1", SideA: "Alice", SideB: "Bob", Winner: "Alice",
+		Status:  state.MatchStatusCompleted,
+		IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"K"},
+	}
+	for _, tc := range []struct {
+		name, decisionBy string
+		wantLoserIppons  []string
+	}{
+		// decisionBy names the SURVIVING side, so the other one inherits.
+		{"the hantei winner withdraws: their marked slice is inherited as the loser's", "shiro", []string{"K"}},
+		{"the hantei loser withdraws: the marked slice is inherited unmarked", "aka", []string{"M"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := &state.MatchResult{
+				ID: "Pool A-1", SideA: "Alice", SideB: "Bob",
+				Decision: "kiken-voluntary", DecisionBy: tc.decisionBy,
+				Status: state.MatchStatusCompleted,
+			}
+			if tc.decisionBy == "shiro" {
+				result.IpponsA = domain.DefaultWinIppons(false)
+				result.Winner = "Alice"
+			} else {
+				result.IpponsB = domain.DefaultWinIppons(false)
+				result.Winner = "Bob"
+			}
+			preserveLoserScore(result, prior, tc.decisionBy)
+
+			assert.False(t, result.HanteiDecided(),
+				"the decision path must not carry a match-level verdict onto a withdrawal")
+			loser := result.IpponsB
+			if tc.decisionBy == "aka" {
+				loser = result.IpponsA
+			}
+			assert.Equal(t, tc.wantLoserIppons, loser,
+				"struck points survive (FIK Art. 32); only the mark is dropped")
+		})
+	}
+	assert.False(t, domain.IsScoringIppon(domain.HanteiMark),
+		"the whole mechanism rests on the mark not being a scoring ippon")
+}
+
+// TestStripInvalidHantei_InheritedMarkIsStrippedNotRejected pins the REACHABLE
+// producer of an invalid match-level mark, and the reason the guard strips
+// instead of returning an error.
+//
+// handlers_daihyosen.go's add path copies the stored match wholesale
+// (`u := *match`) and then sets Status to running, so a stored, perfectly
+// valid verdict arrives on a result that fails hanteiStillHolds on status
+// alone. The operator's request carried no mark. Rejecting here would answer
+// their daihyosen with a 400 over state already on disk that no endpoint could
+// repair - the failure applyHansokuIppons' fold scoping exists to avoid.
+//
+// So: the write must SUCCEED, the mark must be gone, and the points must stay.
+// A change that makes stripInvalidHantei return an error must fail this test.
+func TestStripInvalidHantei_InheritedMarkIsStrippedNotRejected(t *testing.T) {
+	stored := &state.MatchResult{
+		ID: "Pool A-1", SideA: "Alice", SideB: "Bob", Winner: "Alice",
+		Status:  state.MatchStatusCompleted,
+		IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"K"},
+	}
+	// What the daihyosen add path builds: the stored match, verbatim, with the
+	// status moved on. Nothing here came from the operator's request.
+	incoming := *stored
+	incoming.Status = state.MatchStatusRunning
+
+	require.False(t, applyPoolWrite(stored, &incoming, matchWriteForward),
+		"an inherited mark must not fail the write that inherited it")
+	assert.False(t, stored.HanteiDecided(),
+		"a match back in progress is not one the referees have decided")
+	assert.Equal(t, []string{"M"}, stored.IpponsA, "the struck point stays")
+	assert.Equal(t, []string{"K"}, stored.IpponsB)
 }

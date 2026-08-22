@@ -220,16 +220,40 @@ func hanteiStillHolds(r *state.MatchResult) bool {
 // stripInvalidHantei enforces the mark's validity on a FORWARD write from the
 // paths that do not run ScoreRequest.Validate. The verdict rides in the
 // winner's ippon slice, so a re-score replaces it atomically with the
-// scoreline it rests on and there is no separate flag to carry — what remains
-// is the CONTRADICTION guard preserveMatchHantei used to provide:
-// RecordDecision/RecordDecisionTx merge stored ippons through
-// preserveLoserScore, so a kiken recorded over a stored hantei would keep the
-// mark beside the withdrawal and export.SideMarks (which marks Ht
-// unconditionally, by design) would print "Ht" and "Kiken" on the same
-// encounter — the contradiction validation.go refuses to persist. A mark that
+// scoreline it rests on and there is no separate flag to carry. What remains
+// is the CONTRADICTION guard preserveMatchHantei used to provide: a mark that
 // no longer satisfies its own preconditions (hanteiStillHolds), or that sits
-// on a side that is not the winner's, is stripped: the points stay, the
+// on a side that is not the winner's, is stripped. The points stay, the
 // verdict goes.
+//
+// WHERE AN INVALID MARK ACTUALLY COMES FROM. Not from the decision twins:
+// preserveLoserScore filters the inherited slice through struckIppons, and
+// domain.IsScoringIppon drops the mark, so a kiken over a stored hantei
+// arrives with the mark ALREADY gone (pinned by
+// TestPreserveLoserScoreDropsTheHanteiMark). This comment used to claim that
+// path as the reason this function exists; it was wrong, and the test that
+// pinned the guard hand-built a payload the decision path cannot produce.
+//
+// The reachable producer is a handler that copies the STORED match wholesale
+// and changes something the verdict depended on. handlers_daihyosen.go's add
+// path does exactly that - `u := *match`, then Status flips to running - so a
+// stored match-level verdict arrives on a result whose status alone now fails
+// hanteiStillHolds. (Its delete path strips the mark itself before writing;
+// the add path relies on this guard.)
+//
+// WHY THIS STRIPS RATHER THAN REJECTS, and must keep doing so: the mark it
+// removes is one the write INHERITED, not one the caller sent. Returning a
+// validation error here would answer an operator's daihyosen with a 400 for a
+// mark already on disk that their request never carried, and no endpoint could
+// repair it - the same failure applyHansokuIppons' fold scoping exists to
+// avoid, and the same rule: a write answers for what it introduces, not for
+// what it inherited. A mark the CLIENT sent is a different matter and is
+// rejected, at the boundary that can still tell whose fault it is, by
+// mobileapp.validateHanteiMarkPlacement.
+//
+// The strip is logged. It discards an operator-visible verdict on an otherwise
+// successful write, so a silent version leaves a 200 with the verdict gone and
+// nothing to investigate.
 //
 // Forward only. matchWriteRestore replays a trusted snapshot verbatim;
 // re-testing it there would let this rewrite the state being restored.
@@ -240,6 +264,7 @@ func stripInvalidHantei(result *state.MatchResult) {
 	if !hanteiStillHolds(result) {
 		result.IpponsA = domain.StripHantei(result.IpponsA)
 		result.IpponsB = domain.StripHantei(result.IpponsB)
+		logStrippedHantei(result, "its preconditions no longer hold")
 		return
 	}
 	// Winner-side pin: the mark names the competitor the referees chose.
@@ -254,10 +279,21 @@ func stripInvalidHantei(result *state.MatchResult) {
 	})
 	if domain.ContainsHantei(result.IpponsA) && side != domain.MatchSideA {
 		result.IpponsA = domain.StripHantei(result.IpponsA)
+		logStrippedHantei(result, "it sat on a side that is not the winner's")
 	}
 	if domain.ContainsHantei(result.IpponsB) && side != domain.MatchSideB {
 		result.IpponsB = domain.StripHantei(result.IpponsB)
+		logStrippedHantei(result, "it sat on a side that is not the winner's")
 	}
+}
+
+// logStrippedHantei records a discarded verdict. Every field a reader needs to
+// tell an inherited mark from a client-sent one is in the line: which match,
+// which precondition failed, and the winner/status/decision the mark was
+// judged against.
+func logStrippedHantei(result *state.MatchResult, why string) {
+	log.Printf("engine: dropped the hantei mark on match %q because %s (winner=%q status=%q decision=%q); the points were kept",
+		result.ID, why, result.Winner, result.Status, result.Decision)
 }
 
 func preserveSubHantei(stored, incoming []state.SubMatchResult) {

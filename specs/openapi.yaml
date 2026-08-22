@@ -29,6 +29,13 @@ info:
     draw, result overrides, roster mutations, import) and organiser-owned setup
     (tournament/competition config) stay gated. In the default `officiated` mode every
     `/api/` route keeps requiring `X-Tournament-Password` as described above.
+
+    **Request body size limits.** Every `/api/` route enforces a request-size cap and
+    returns `413` when the body exceeds it: admin JSON bodies are capped at 1 MB by
+    default; `POST /api/tournament/announce` and `POST /api/tournament/reset` are
+    capped tighter, at 4 KB, since their payloads are small fixed-shape JSON; and
+    `POST /api/tournament/import` is capped at 64 MB to admit a full-roster
+    multipart upload.
   version: 2.1.0
 
 servers:
@@ -643,6 +650,8 @@ paths:
                             `seeds file "...": Seeding is incomplete: ...`
                             and rolls the competition back off disk, so the
                             file can be fixed and the import retried.
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
 
   # ── Sponsors ───────────────────────────────────────────────────────────────
 
@@ -3307,6 +3316,12 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
+    PayloadTooLarge:
+      description: Request body exceeds the route's size cap. See info description for the caps.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
 
   schemas:
 
@@ -4209,6 +4224,14 @@ components:
           type: boolean
         queuePosition:
           type: integer
+        matchNumber:
+          type: integer
+          readOnly: true
+          description: >
+            Sequential bracket match number, matching the "Match N" label
+            printed on the Excel tree sheet. 0/absent means unset: a
+            hidden/bye placeholder match, or a legacy bracket saved before
+            numbering was assigned.
         decision:
           type: string
           description: Decision code persisted for an elimination-stage match. Same values as `MatchResult.decision`.
@@ -4218,6 +4241,26 @@ components:
         decisionReason:
           type: string
           maxLength: 200
+        resultSource:
+          type: string
+          readOnly: true
+          description: Mirrors `MatchResult.resultSource` for elimination-stage matches.
+        correctionReason:
+          type: string
+          maxLength: 200
+          description: >
+            Set when an operator overwrites a completed elimination-stage
+            result (a correction); omitted on first completion. Mirrors
+            `MatchResult.correctionReason`.
+        flagsA:
+          type: integer
+          description: >
+            Flag count for side A in an engi (kata demonstration) bracket
+            bout, persisted so the count survives a restart. Zero/absent for
+            non-engi matches.
+        flagsB:
+          type: integer
+          description: The side B counterpart of `flagsA`.
         encho:
           $ref: '#/components/schemas/EnchoMetadata'
         decidedByHantei:
@@ -4249,6 +4292,42 @@ components:
           readOnly: true
           allOf:
             - $ref: '#/components/schemas/TeamResultLine'
+        displayRound:
+          type: integer
+          readOnly: true
+          description: >
+            Effective round counted from the final (1 = Final, 2 = Semifinal,
+            ...), computed at generation time so a viewer can group matches by
+            depth-from-root the same way the printed Excel tree sheet does,
+            with structural byes skipping a column. This differs from the
+            `rounds` array index, which is a balanced power-of-two position.
+            0/absent means unset: a legacy bracket generated before this field
+            existed, or a hidden phantom match.
+        hidden:
+          type: boolean
+          readOnly: true
+          description: >
+            True for a structural-bye phantom match (an empty-vs-empty dead
+            slot, or a latent bye where one side never had an opponent). It is
+            not a real bout and must not be drawn as a match card.
+        feeders:
+          type: array
+          readOnly: true
+          items:
+            type: string
+          description: >
+            IDs of the two real feeder matches whose winners meet here, in
+            [A, B] order. An empty string for a side means that side is a
+            seeded entrant or bye (no connector line to draw).
+        modifiedAt:
+          type: integer
+          format: int64
+          readOnly: true
+          description: >
+            Server-relative unix-millis timestamp of the last change to this
+            bracket match's result, used to reconcile out-of-order writes.
+            0/absent means unstamped (legacy data); arrival order still
+            applies.
         placeholderA:
           type: string
           readOnly: true
@@ -4299,6 +4378,25 @@ components:
             type: array
             items:
               $ref: '#/components/schemas/BracketMatch'
+        preview:
+          type: boolean
+          readOnly: true
+          description: >
+            True for a read-only placeholder bracket generated at draw time for
+            a mixed (pools then knockout) competition, whose leaves are
+            pool-origin placeholders rather than resolved players. The actual
+            knockout is played in a separate playoffs competition created from
+            this source.
+        thirdPlaceMatch:
+          readOnly: true
+          allOf:
+            - $ref: '#/components/schemas/BracketMatch'
+          description: >
+            The optional 3rd-place (bronze) playoff match. A SIBLING of
+            `rounds`, not a row in it: `rounds` is power-of-two,
+            position-encoded for winner advancement, so splicing a bronze
+            match into that geometry would corrupt it. Absent unless a
+            bronze match was generated.
 
     PlayerStanding:
       type: object
@@ -4346,7 +4444,13 @@ components:
 
     CompetitionDetail:
       type: object
-      description: Full competition state returned by the viewer endpoint.
+      description: >
+        Full competition state returned by the viewer endpoint. This is a
+        PUBLIC projection: `poolMatches` and `bracket` always have their audit
+        fields stripped before serialization, so `correctionReason` and
+        `decisionReason` are never present on any match here, and each pool
+        match's `rev`/`revSession` are likewise always absent (`bracket`
+        matches carry no `rev`/`revSession` field to begin with).
       properties:
         config:
           $ref: '#/components/schemas/Competition'

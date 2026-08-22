@@ -12,7 +12,7 @@ The format is chosen for the room the software runs in, not for query power. A t
 runs for a day in a sports hall, often on a laptop behind a flaky network, and the person
 responsible for the results is a volunteer with a spreadsheet, not a database administrator.
 
-That leads to three properties worth more here than normalisation:
+Inspectability, repairability and diffability matter more here than normalisation:
 
 * **Inspectable.** An organiser can open the results in Excel or a text editor mid event.
 * **Repairable.** A wrong cell can be corrected by hand and the app picks it up on reload.
@@ -65,8 +65,10 @@ classDiagram
         +string Name
         +string DisplayName
         +string Dojo
+        +string[] Metadata
         +string Number
         +int Seed
+        +int PoolPosition
         +bool CheckedIn
         +string Source
     }
@@ -127,7 +129,7 @@ classDiagram
         +string Court
         +int Round
         +string ScheduledAt
-        +int QueuePosition
+        +int QueuePosition (derived, not persisted)
         +string Decision
         +string DecisionBy
         +string DecisionReason
@@ -174,6 +176,7 @@ classDiagram
     class Bracket {
         +bool Preview
         +BracketMatch[][] Rounds
+        +BracketMatch ThirdPlaceMatch
     }
 
     class BracketMatch {
@@ -193,6 +196,9 @@ classDiagram
         +string[] Feeders
         +bool IsOverridden
         +bool Hidden
+        +string Decision
+        +string DecisionBy
+        +string DecisionReason
         +bool DecidedByHantei (legacy, read-only)
         +long ModifiedAt
     }
@@ -207,7 +213,7 @@ classDiagram
     BracketMatch "1" *-- "0..1" EnchoMetadata
 ```
 
-Three points the diagram makes that the raw field list hides.
+The diagram makes three points that a raw field list would hide.
 
 **`CompetitorSide` is a value object that the storage flattens.** The name is this page's
 own, chosen for clarity: no such type exists in the code. Everything a competitor brings
@@ -295,8 +301,19 @@ classDiagram
         <<pending transactions>>
         replayed on startup
     }
+    class branding_dir["branding/"] {
+        <<uploaded images>>
+        tournament logo
+    }
+    class sponsors_dir["sponsors/"] {
+        <<uploaded images>>
+        sponsor logos
+    }
 
     tournament_md --> config_md : owns
+    tournament_md --> branding_dir : owns
+    tournament_md --> sponsors_dir : owns
+    tournament_md --> wal : stages transactions in
     config_md --> participants_csv
     config_md --> seeds_csv
     config_md --> pools_csv
@@ -307,7 +324,7 @@ classDiagram
     config_md --> overrides_json
 ```
 
-Three formats are in use, and the choice is deliberate in each case:
+Markdown, CSV, and JSON or YAML each earn their place:
 
 | Format | Used for | Why |
 | --- | --- | --- |
@@ -373,12 +390,28 @@ written before the timestamp existed, or by a client that does not send one, cou
 unstamped and always applies: the guard discriminates only when both sides carry a stamp,
 so it can never silently drop a legitimate change.
 
+### When a file is wrong
+
+Section 1 promises that a wrong cell is repairable by hand, but not what happens when a hand
+edit is itself wrong. The general rule: a malformed cell degrades to its documented default
+and logs the problem, and never fails the row it lives in or the load the row belongs to. A
+team match's sub-bout cell that will not parse as JSON loads as an empty encounter rather
+than aborting the read; a seed row missing its rank or name, or too short to hold them, is
+skipped rather than guessed; a number that will not parse is left at the column's documented
+default. Two cases go further and discard data outright, because there is nothing safe to
+default to: a legacy judges'-decision flag with no attributable winner is dropped rather than
+guessed onto a side, and a hand-edited bracket file carrying both a legacy score string and
+the current ippon arrays keeps the arrays and clears the string. Anyone repairing a file mid
+tournament should read this as: fix the cell, reload, and check the record, rather than
+trusting that a malformed edit would have been rejected.
+
 ## 6. How the model maps onto rows
 
 The results file is row oriented, and a match is not flat. The mapping between the two is
 mechanical: every persisted fact has exactly one representation, and the file holds the
-same facts as the structs, encoded for a spreadsheet rather than for a parser. Reading
-`pool-matches.csv` alone, three encodings are worth knowing.
+same facts as the structs, encoded for a spreadsheet rather than for a parser. Nesting,
+delimited lists, and a mark folded into the score: reading `pool-matches.csv` alone turns
+up three encodings worth knowing.
 
 **A team match nests.** The sub bouts are stored as a JSON document inside a single CSV
 cell. That keeps the file to one row per match, at the cost of the richest data in a team
@@ -393,14 +426,19 @@ it is drawn on a paper score sheet, and it stays there when the file is read: th
 part of the recorded score, and everything that counts points knows to skip it, so it can
 never inflate a result.
 
-Two consequences follow, and both are deliberate:
+Appending columns and leaving some fields unwritten are the two consequences that follow:
 
 * Column position is the contract. New fields are appended, and a file written by an older
   version stays readable because the reader leaves each missing trailing column at its
   documented default, empty for most and `-1` for the round number, which means unknown.
 * Some fields are useful only in flight and are not written at all. Client revision markers
-  used to discard out of order writes are the clearest example: they exist to order writes
-  within one session and carry no meaning once the result has landed.
+  used to discard out of order writes are one example: they exist to order writes within one
+  session and carry no meaning once the result has landed. A match's queue position is
+  another: it is derived from court, status and scheduled time each time a match list is
+  served, so the queue shrinks as matches finish, and persisting it would let a stale copy
+  disagree with the schedule it was drawn from, so it is
+  excluded from `pool-matches.csv` by name, on top of carrying a tag that already keeps it out
+  of the YAML-marshalled forms.
 
 If the storage were rebuilt around queries rather than around people reading it, the shape
 would differ: a match side table would replace the paired columns, and sub bouts would be
@@ -409,7 +447,8 @@ properties in [section 1](#1-why-files), so the storage stays shaped for people.
 
 ## 7. How the layout is enforced
 
-Two mechanisms hold the layout to its contract:
+A single defined column order and a round trip guard on every file hold the layout to its
+contract:
 
 * **The results file's layout is defined once.** The header, the row writer and the reader
   all derive from a single ordered column list, so the three cannot disagree. A golden test

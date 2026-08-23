@@ -189,6 +189,21 @@ func DefaultWinMaruAB(scoreA, scoreB, decision string, encho *state.EnchoMetadat
 	return scoreA, scoreB
 }
 
+// HansokuMark renders a side's outstanding (undischarged) hansoku count as
+// the FIK score-sheet triangle: one "▲" for an odd count (a single standing
+// foul), nothing for an even one (the second foul deletes the triangle and
+// becomes the opponent's "H" ippon, which already rides in the ippon slice).
+// Mirrors boutHansokuMark in web-mobile/js/match_scoreboard.jsx; keep the two
+// in sync. The stored ScoreA/ScoreB strings used to carry this as the codec's
+// "(H1)" suffix — bc-bmsc removed the strings, so the export now draws the
+// count as the rulebook writes it instead of echoing a wire format.
+func HansokuMark(fouls int) string {
+	if fouls%2 == 1 {
+		return "▲"
+	}
+	return ""
+}
+
 // IpponsScore formats an ippon slice as a readable score string: ["M","K"] ->
 // "MK", nil/empty -> "". Mirrors the character-join behaviour in
 // formatIpponsScore (bracket.jsx) without the full display logic (bye/hikiwake

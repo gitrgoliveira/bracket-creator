@@ -942,23 +942,32 @@ func TestApplyHansokuIppons(t *testing.T) {
 			wantIpponsA: []string{"H"},
 			wantIpponsB: []string{"H"},
 		},
+		// A surplus H — more entries than hansoku/2 implies — is NOT stripped.
+		// It used to be ("hansoku reduction" handling), on the premise that
+		// the count is cumulative and authoritative; but the editors keep the
+		// OUTSTANDING count (the strike resets it to 0 and lands the H in
+		// the opponent's slots, applyFoulIncrement), so every real editor
+		// payload carries a surplus, and the reduction branch silently
+		// deleted the operator's struck point on every save. An operator
+		// undoing a mistaken award edits the slots directly; the row they
+		// send is the row that persists.
 		{
-			name:        "hansoku reduced from 4 to 2 strips excess H",
+			name:        "surplus H over the count is the operator's strike: kept",
 			hansokuA:    2,
 			ipponsB:     []string{"M", "H", "H"},
+			wantIpponsB: []string{"M", "H", "H"},
+		},
+		{
+			name:        "editor-shaped payload (counter reset to 0, H struck): kept",
+			hansokuA:    0,
+			ipponsB:     []string{"M", "H"},
 			wantIpponsB: []string{"M", "H"},
 		},
 		{
-			name:        "hansoku reduced to 0 strips all H entries",
-			hansokuA:    0,
-			ipponsB:     []string{"M", "H", "H"},
-			wantIpponsB: []string{"M"},
-		},
-		{
-			name:        "hansoku reduced to 1 strips interleaved H entries",
-			hansokuA:    1,
-			ipponsB:     []string{"H", "M", "H"},
-			wantIpponsB: []string{"M"},
+			name:        "a free placeholder slot is filled, not grown past",
+			hansokuA:    2,
+			ipponsB:     []string{"M", "•"},
+			wantIpponsB: []string{"M", "H"},
 		},
 	}
 
@@ -2373,5 +2382,84 @@ func TestHansokuHanteiConflict_MatchLevelOverflow(t *testing.T) {
 			HansokuB: 2, // [M,H] vs [K]: at the cap, not over it
 			Status:   state.MatchStatusCompleted,
 		}))
+	})
+}
+
+// TestHansokuAwardFollowsTheSlotRule: the fold's derived "H" is a struck
+// point, and a struck point takes the next FREE slot before growing the slice
+// (domain.AppendIppon — the editors' rule, and AppendHantei's). The fold used
+// to strip-and-append instead, so a wire-legal two-slot row holding one point
+// and one "•" placeholder grew to three entries and 400'd at checkFoldedRow's
+// structural cap — while the identical points sent as ["M"] sailed through.
+// The placeholder is not a point (validateIppons' own words), so it must not
+// consume the row's capacity for one.
+func TestHansokuAwardFollowsTheSlotRule(t *testing.T) {
+	saveMatch := func(t *testing.T, store *state.Store, compID string) {
+		t.Helper()
+		require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "HH"}))
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "P1-1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled},
+		}))
+	}
+	loadIpponsA := func(t *testing.T, store *state.Store, compID string) []string {
+		t.Helper()
+		stored, err := store.LoadPoolMatches(compID)
+		require.NoError(t, err)
+		require.Len(t, stored, 1)
+		return stored[0].IpponsA
+	}
+
+	t.Run("the award fills a free placeholder slot instead of overflowing", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		const compID = "hh-slot-fill"
+		saveMatch(t, store, compID)
+		require.NoError(t, eng.RecordMatchResult(compID, "P1-1", &state.MatchResult{
+			SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			IpponsA:  []string{"M", domain.IpponPlaceholder},
+			HansokuB: 2,
+			Status:   state.MatchStatusCompleted,
+		}))
+		assert.Equal(t, []string{"M", "H"}, loadIpponsA(t, store, compID),
+			"the derived H must take the free slot, exactly as the editor would strike it")
+	})
+
+	t.Run("an already-reflected award keeps its slot", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		const compID = "hh-slot-stable"
+		saveMatch(t, store, compID)
+		// The client struck the H FIRST (chronology: the hansoku point came
+		// before the men). The fold must recognise the award as already
+		// reflected and leave the order alone, not re-canonicalise H to the
+		// end and falsify when the point was scored.
+		require.NoError(t, eng.RecordMatchResult(compID, "P1-1", &state.MatchResult{
+			SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			IpponsA:  []string{"H", "M"},
+			HansokuB: 2,
+			Status:   state.MatchStatusCompleted,
+		}))
+		assert.Equal(t, []string{"H", "M"}, loadIpponsA(t, store, compID),
+			"an H the payload already carries in the right count must not move")
+	})
+
+	t.Run("an editor-struck H with the counter reset survives the fold", func(t *testing.T) {
+		// The editors keep hansoku as the OUTSTANDING count: the second foul
+		// strikes the H into the opponent's slots and resets the counter to
+		// 0 (applyFoulIncrement), so every real editor payload carries more
+		// H entries than hansoku/2 implies. The fold's removal branch read
+		// that surplus as "count lowered" and silently deleted the struck
+		// point on every save — the scoring screen kept showing it while
+		// standings, viewers and the export lost it. The fold must award
+		// only a shortfall and never remove.
+		eng, store, _ := setupTestEngine(t)
+		const compID = "hh-slot-never-remove"
+		saveMatch(t, store, compID)
+		require.NoError(t, eng.RecordMatchResult(compID, "P1-1", &state.MatchResult{
+			SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			IpponsA:  []string{"M", "H"}, // H struck by the editor from Bob's 2 fouls
+			HansokuB: 0,                  // counter reset on the strike (outstanding convention)
+			Status:   state.MatchStatusCompleted,
+		}))
+		assert.Equal(t, []string{"M", "H"}, loadIpponsA(t, store, compID),
+			"an H the operator struck is theirs; the fold must never remove it")
 	})
 }

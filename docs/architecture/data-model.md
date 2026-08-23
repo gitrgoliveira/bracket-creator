@@ -393,17 +393,64 @@ so it can never silently drop a legitimate change.
 ### When a file is wrong
 
 Section 1 promises that a wrong cell is repairable by hand, but not what happens when a hand
-edit is itself wrong. The general rule: a malformed cell degrades to its documented default
-and logs the problem, and never fails the row it lives in or the load the row belongs to. A
-team match's sub-bout cell that will not parse as JSON loads as an empty encounter rather
-than aborting the read; a seed row missing its rank or name, or too short to hold them, is
-skipped rather than guessed; a number that will not parse is left at the column's documented
-default. Two cases go further and discard data outright, because there is nothing safe to
-default to: a legacy judges'-decision flag with no attributable winner is dropped rather than
-guessed onto a side, and a hand-edited bracket file carrying both a legacy score string and
-the current ippon arrays keeps the arrays and clears the string. Anyone repairing a file mid
-tournament should read this as: fix the cell, reload, and check the record, rather than
-trusting that a malformed edit would have been rejected.
+edit is itself wrong. Two things can be wrong, and they behave differently: a single cell that
+will not parse, and a whole file that will not parse.
+
+**A wrong cell degrades, and the file keeps loading.** A malformed cell falls back to its
+documented default and never fails the row it lives in or the load the row belongs to. A team
+match's sub-bout cell that will not parse as JSON loads as an empty encounter rather than
+aborting the read; a seed row missing its rank or name, or too short to hold them, is skipped
+rather than guessed; a number that will not parse is left at the column's documented default,
+and a negative count is clamped to zero. One bad cell cannot stop a tournament. Two cases go
+further and discard data outright, because there is nothing safe to default to: a legacy
+judges'-decision flag with no attributable winner is dropped rather than guessed onto a side,
+and a hand-edited bracket file carrying both a legacy score string and the current ippon
+arrays keeps the arrays and clears the string.
+
+**A degraded cell is kept, not overwritten.** The results file is rewritten in full every time
+any match in it is scored, so a cell that read as empty would otherwise be written back as
+empty, and the bytes needed to repair it would be gone within seconds of the next bout. A
+sub-bout cell that will not parse is therefore held exactly as it was read and written back
+unchanged for as long as the encounter stays empty. Re-entering the encounter in the app
+replaces it, which is the other way to repair it. While it is unrepaired the operator console
+marks the match and the pool standings it feeds, because an encounter that loads as empty
+contributes no individual victories and no points, and those are the figures a pool tied on
+wins is separated on.
+
+**A wrong file fails the load, and nothing is written to it.** When the damage is structural,
+a bracket file that is not valid JSON or a results file whose rows no longer parse as CSV,
+there is no row left to degrade. The load fails and every write to that file is refused, so
+the competition stops rather than continuing from a half-read record. The file is left exactly
+as it was: refusing the write is what makes a repair possible. The app reports which file
+failed, the line and column, and what the parser found there, so the fault can be found in the
+editor already open.
+
+Repairing the file and reloading is always the option that loses nothing. When that is not
+possible, what else can be done about an unreadable bracket file depends on where the draw it
+held was written down, which is decided by the competition's format. In every case the file
+itself is renamed aside rather than deleted, keeping the name it had with `.corrupt-` and a
+timestamp appended, so it stays in the competition's folder for a later repair by hand.
+
+**Pools then knockout.** The knockout can be reset. The draw survives in the pool file, so the
+tree is built again from it and every finished pool has its qualifiers seeded back in. That
+trade is real and the console states it: the knockout results are not recorded anywhere else
+and have to be re-entered from the score sheets, and the rebuilt pairings should be checked
+against the printed bracket, because the tree is laid out by the current draw algorithm and the
+one that produced the original died with the file.
+
+**League and Swiss.** Nothing is rebuilt, because neither format draws a knockout bracket at
+all. A bracket file in one of these competitions is left over and unused, so moving it aside is
+the whole repair and no result is affected.
+
+**Direct elimination.** There is no reset. The bracket file is the only record of who was drawn
+against whom, so rebuilding would produce a different set of pairings rather than restore the
+original, and it would then disagree with the bracket already printed. The app refuses it and
+says why. The same refusal covers a competition whose format is missing or unrecognised, which
+a hand edit to the config file can produce: those are drawn as direct elimination, so the file
+is the only record of their draw too.
+
+Anyone repairing a file mid tournament should read all of this as: fix the cell, reload, and
+check the record, rather than trusting that a malformed edit would have been rejected.
 
 ## 6. How the model maps onto rows
 

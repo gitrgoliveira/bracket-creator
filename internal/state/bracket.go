@@ -2,6 +2,7 @@ package state
 
 import (
 	"encoding/json"
+	"log/slog"
 	"os"
 )
 
@@ -42,7 +43,12 @@ func parseBracketBytes(raw []byte) (*Bracket, error) {
 	}
 	var b Bracket
 	if err := json.Unmarshal(raw, &b); err != nil {
-		return nil, err
+		// Located, so the operator is told which line and column to look at
+		// rather than being handed a generic failure. Nothing is written on
+		// this path: both bracket write paths abort before saving, so the file
+		// stays exactly as it was left, which is what makes a hand repair the
+		// right advice here.
+		return nil, corruptJSON("bracket.json", raw, err)
 	}
 	// Clamp negative engi flag counts to 0 on load, symmetric with the pool CSV
 	// parser (pools.go parsePoolMatchesRecords): flags are validated
@@ -67,11 +73,21 @@ func parseBracketBytes(raw []byte) (*Bracket, error) {
 
 // clampBracketMatchFlags forces negative engi flag counts to 0 (see
 // parseBracketBytes). Non-negative values pass through unchanged.
+//
+// Logged, because a clamp DISCARDS a recorded figure and the next save writes
+// the 0 back, so the original is gone: the same silent-loss shape the sub-bout
+// cell had. The value clamped is nonsense (a negative count of referee flags)
+// so there is nothing recoverable to preserve, but an organiser who typed it
+// deserves to learn that the file no longer says what they wrote.
 func clampBracketMatchFlags(m *BracketMatch) {
 	if m.FlagsA < 0 {
+		slog.Warn("state: bracket match flag count clamped to 0",
+			"matchID", m.ID, "side", "A", "value", m.FlagsA)
 		m.FlagsA = 0
 	}
 	if m.FlagsB < 0 {
+		slog.Warn("state: bracket match flag count clamped to 0",
+			"matchID", m.ID, "side", "B", "value", m.FlagsB)
 		m.FlagsB = 0
 	}
 }

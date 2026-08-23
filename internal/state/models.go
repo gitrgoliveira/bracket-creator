@@ -990,8 +990,37 @@ type MatchResult struct {
 	Round          int              `json:"round" yaml:"round"`
 	ScheduledAt    string           `json:"scheduledAt"`
 	SubResults     []SubMatchResult `json:"subResults,omitempty"`
-	Encho          *EnchoMetadata   `json:"encho,omitempty" yaml:"encho,omitempty"`
-	QueuePosition  int              `json:"queuePosition,omitempty" yaml:"-"`
+	// SubResultsRaw holds the sub-bout cell EXACTLY as it was read, and only
+	// when it failed to parse as JSON. It is the repair copy. The reader
+	// degrades a malformed cell to an empty encounter rather than failing the
+	// row (docs/architecture/data-model.md, "When a file is wrong") and the
+	// writer rewrites the WHOLE file on every match write, so without this the
+	// first score entered on any OTHER match in the competition overwrote the
+	// organiser's broken cell with an empty one and destroyed the bouts it
+	// described -- along with every IV/PW figure they fed. The SubResults
+	// column's put writes it back verbatim while the encounter is still empty,
+	// which is what makes the documented remedy (fix the cell, reload)
+	// reachable at all. It has no column of its own because it IS the
+	// SubResults column, unparsed.
+	SubResultsRaw string `json:"-" yaml:"-"`
+	// SubResultsUnreadable is the wire companion to SubResultsRaw, derived on
+	// read from the same parse failure. MatchResult marshals straight to the
+	// SPA, so the operator-facing warning needs a field rather than a method;
+	// QueuePosition below is the precedent for a derived field that is
+	// deliberately not a CSV column.
+	//
+	// It is deliberately NOT stripped in public_projection.go, unlike the audit
+	// free-text there. The admin console reads the same PUBLIC aggregate
+	// (handlers_viewer.go, whose comment records that AdminCompetition renders
+	// off it) and the same public SSE stream, so the server cannot tell the two
+	// audiences apart on this path: stripping would blank the flag for the
+	// operator too, and make it vanish again on the next broadcast. The
+	// audience gate is therefore at RENDER time -- the admin callers of
+	// PoolsViewer opt in, the viewer does not -- which is sound because the
+	// field carries no competitor detail, only "this cell would not parse".
+	SubResultsUnreadable bool           `json:"subResultsUnreadable,omitempty" yaml:"-"`
+	Encho                *EnchoMetadata `json:"encho,omitempty" yaml:"encho,omitempty"`
+	QueuePosition        int            `json:"queuePosition,omitempty" yaml:"-"`
 	// DecidedByHantei is a LEGACY READ-ONLY channel, exactly as on
 	// SubMatchResult (see there and legacy_hantei.go): the verdict is the
 	// domain.HanteiMark entry in the winner's IpponsA/IpponsB. A hantei on a

@@ -6,6 +6,12 @@ import {
   shiaijoCountErrorFor,
   shiaijoCountHintFor,
 } from '../admin_helpers.jsx';
+import {
+  bracketRecoveryKind,
+  BRACKET_RECOVERY_REBUILD,
+  BRACKET_RECOVERY_DISCARD,
+  BRACKET_RECOVERY_NONE,
+} from '../data_integrity.jsx';
 
 // JS half of the shared Go/JS golden table for "does this format draw a
 // bracket?": see the `_comment` in format_draws_bracket.json for why the table
@@ -31,6 +37,30 @@ describe('formatDrawsBracket Go/JS mirror', () => {
 
   it.each(table.cases)('$why', ({ format, drawsBracket }) => {
     expect(formatDrawsBracket(format)).toBe(drawsBracket);
+  });
+
+  // SECOND QUESTION, same table: which formats can have a lost bracket.json
+  // REBUILT rather than only moved aside. Go half:
+  // TestCompetitionRebuildableFromPools_GoldenTable and
+  // TestQuarantineCorruptBracket_OutcomeFollowsTheFormatTable.
+  //
+  // This exists because the console's first version of this predicate was a
+  // hand-written `mixed || league || swiss`, which offered a rebuild to every
+  // UNRECOGNISED format -- the half that a hand-written list gets wrong, and
+  // the exact failure this table was built to stop.
+  describe('bracketRecoveryKind reads the same table', () => {
+    it.each(table.cases)('$why (recovery kind)', ({ format, drawsBracket, rebuildableFromPools }) => {
+      const expected = rebuildableFromPools
+        ? BRACKET_RECOVERY_REBUILD
+        : (drawsBracket ? BRACKET_RECOVERY_NONE : BRACKET_RECOVERY_DISCARD);
+      expect(bracketRecoveryKind({ format })).toBe(expected);
+    });
+
+    // The table must not describe a state the draw pipeline cannot reach: a
+    // format whose draw builds no bracket has none to rebuild.
+    it.each(table.cases)('$why (rebuildable implies drawsBracket)', ({ drawsBracket, rebuildableFromPools }) => {
+      if (rebuildableFromPools) expect(drawsBracket).toBe(true);
+    });
   });
 
   // The scope is only worth pinning because of what it gates. These are the two

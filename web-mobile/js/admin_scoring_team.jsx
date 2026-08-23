@@ -115,6 +115,9 @@ export function preserveStoredDaihyosenVerdict({ armed, pickedSide, tied, existi
 // re-exports them onward) continue to work.
 import { resolveMatchLineup, resolveLineupTeamId, resolveBoutSideName, POS_KEYS_5, POS_LABELS_5 } from './lineup_resolver.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
+// The shared owner of what an operator is told about unreadable data; the
+// editor gets the repair-oriented wording, the pool surfaces get theirs.
+import { matchDataUnreadable, UnreadableEditorNote } from './data_integrity.jsx';
 
 // Position keys are generated inline in TeamScoreEditorModal (numbered "1".."N")
 // from teamSize and any persisted kachinuki bouts; the upper bound everywhere is
@@ -2014,6 +2017,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
         </div>
 
         <div className="editor-modal__body">
+          {/* Inside `inner`, so the wide overlay and the narrow shiaijo inline
+              panel get it from ONE placement and cannot diverge. */}
+          {matchDataUnreadable(m) ? <UnreadableEditorNote /> : null}
           {/* Team header */}
           <div className="sb-match" style={{ marginBottom: teamSize === 5 && (lineupIncompleteB || lineupIncompleteA) ? 4 : 16 }}>
             {teamSides.map((s, idx) => (

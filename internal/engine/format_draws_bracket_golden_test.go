@@ -24,9 +24,10 @@ import (
 // the console's Create and Start buttons for an allocation the server accepts.
 
 type formatDrawsBracketCase struct {
-	Why          string `json:"why"`
-	Format       string `json:"format"`
-	DrawsBracket bool   `json:"drawsBracket"`
+	Why                  string `json:"why"`
+	Format               string `json:"format"`
+	DrawsBracket         bool   `json:"drawsBracket"`
+	RebuildableFromPools bool   `json:"rebuildableFromPools"`
 }
 
 func loadFormatDrawsBracketTable(t *testing.T) []formatDrawsBracketCase {
@@ -57,6 +58,35 @@ func TestCompetitionDrawsBracket_GoldenTable(t *testing.T) {
 	}
 }
 
+func TestCompetitionRebuildableFromPools_GoldenTable(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range loadFormatDrawsBracketTable(t) {
+		t.Run(tc.Why, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tc.RebuildableFromPools, CompetitionRebuildableFromPools(tc.Format),
+				"CompetitionRebuildableFromPools(%q); the JS mirror bracketRecoveryKind reads the "+
+					"same table, so a change here has to be made there too", tc.Format)
+		})
+	}
+}
+
+// A format cannot rebuild a bracket its draw never builds, so the table must
+// never claim it can. Without this the two columns could drift into a
+// combination the pipeline has no way to reach, and both mirrors would
+// faithfully implement the impossible state.
+func TestFormatTable_RebuildableImpliesDrawsBracket(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range loadFormatDrawsBracketTable(t) {
+		if tc.RebuildableFromPools {
+			assert.True(t, tc.DrawsBracket,
+				"format %q is marked rebuildableFromPools but not drawsBracket: a format whose "+
+					"draw builds no bracket has none to rebuild", tc.Format)
+		}
+	}
+}
+
 // TestCompetitionDrawsBracket_TableCoversEveryFormat is what stops a new format
 // being added without anyone deciding this question. Without it the table would
 // keep passing while the new format silently took the default branch on the Go
@@ -77,7 +107,8 @@ func TestCompetitionDrawsBracket_TableCoversEveryFormat(t *testing.T) {
 	} {
 		assert.True(t, covered[format],
 			"format %q has no case in testdata/format_draws_bracket.json: add one saying whether "+
-				"its draw builds a bracket, so the operator console is told too", format)
+				"its draw builds a bracket AND whether a lost bracket can be rebuilt from its "+
+				"pools, so the operator console is told too", format)
 	}
 }
 

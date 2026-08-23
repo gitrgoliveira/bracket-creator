@@ -25,48 +25,79 @@
     "",
     "COVERAGE IS ENFORCED: the Go half asserts that every state.CompFormat*",
     "constant appears below, so adding a format without deciding this question",
-    "fails the build rather than defaulting quietly."
+    "fails the build rather than defaulting quietly.",
+    "",
+    "SECOND QUESTION, SAME SWITCH: `rebuildableFromPools` asks whether a corrupt",
+    "bracket.json can be REBUILT rather than only moved aside, which is what",
+    "engine.QuarantineCorruptBracket and the console's recovery banner both need.",
+    "It is a different question from drawsBracket and the two together decide all",
+    "three outcomes, so both live here rather than in a second table that could",
+    "disagree with this one:",
+    "",
+    "  drawsBracket && rebuildableFromPools   REBUILD. Only mixed. Its knockout is",
+    "    drawn from pools.csv, which survives, so the tree can be built again by",
+    "    the same builder and the finished pools re-seeded into it.",
+    "  drawsBracket && !rebuildableFromPools  REFUSE. bracket.json is the ONLY",
+    "    record of the draw, so rebuilding would invent a different set of",
+    "    pairings rather than restore this one. Covers playoffs AND every value",
+    "    that reaches the pipeline's default branch, which is the half a",
+    "    hand-written `format == playoffs || format == \"\"` check gets wrong.",
+    "  !drawsBracket                          DISCARD. League and Swiss never draw",
+    "    a bracket, so any bracket.json they have is vestigial and moving it",
+    "    aside is the whole repair. Nothing is rebuilt and nothing is lost.",
+    "",
+    "rebuildableFromPools implies drawsBracket: a format cannot rebuild a bracket",
+    "its draw never builds. The golden test asserts that, so the table cannot",
+    "describe a state the pipeline has no way to reach."
   ],
   "cases": [
     {
       "why": "playoffs is a bracket from the first bout",
       "format": "playoffs",
-      "drawsBracket": true
+      "drawsBracket": true,
+      "rebuildableFromPools": false
     },
     {
       "why": "mixed builds a knockout after its pools, so the rule binds",
       "format": "mixed",
-      "drawsBracket": true
+      "drawsBracket": true,
+      "rebuildableFromPools": true
     },
     {
       "why": "league is a full round-robin: its shiaijo run in parallel with no blocks to merge",
       "format": "league",
-      "drawsBracket": false
+      "drawsBracket": false,
+      "rebuildableFromPools": false
     },
     {
       "why": "swiss pairs each round afresh and never builds a bracket",
       "format": "swiss",
-      "drawsBracket": false
+      "drawsBracket": false,
+      "rebuildableFromPools": false
     },
     {
       "why": "a legacy record with no format at all takes the pipeline's default branch",
       "format": "",
-      "drawsBracket": true
+      "drawsBracket": true,
+      "rebuildableFromPools": false
     },
     {
       "why": "an unrecognised format takes that same default, so it is held to the rule",
       "format": "not-a-format",
-      "drawsBracket": true
+      "drawsBracket": true,
+      "rebuildableFromPools": false
     },
     {
       "why": "the match is exact: a format is not league merely by containing it",
       "format": "league-playoffs",
-      "drawsBracket": true
+      "drawsBracket": true,
+      "rebuildableFromPools": false
     },
     {
       "why": "and it is case-sensitive, matching the stored lowercase wire values",
       "format": "League",
-      "drawsBracket": true
+      "drawsBracket": true,
+      "rebuildableFromPools": false
     }
   ]
 }

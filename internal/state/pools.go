@@ -41,7 +41,9 @@ func parsePoolsFile(path string) (any, error) {
 
 	records, err := csv.NewReader(f).ReadAll()
 	if err != nil {
-		return nil, err
+		// Located for the same reason as the results file below: pools.csv is
+		// equally hand-editable and equally able to stop a competition.
+		return nil, corruptCSV("pools.csv", err)
 	}
 
 	// poolIdx maps pool name → index into pools so we can append players in-place
@@ -284,7 +286,12 @@ func parsePoolMatchesFile(path string) (any, error) {
 
 	records, err := csv.NewReader(f).ReadAll()
 	if err != nil {
-		return nil, err
+		// CSV-level damage is the LOUD class: the row structure itself is
+		// broken, so there is no row to degrade and the load fails. Located so
+		// the operator can find it. (A single malformed CELL inside an
+		// otherwise-valid row is the quiet class and never reaches here; see
+		// the SubResults column.)
+		return nil, corruptCSV("pool-matches.csv", err)
 	}
 	return parsePoolMatchesRecords(records), nil
 }
@@ -299,7 +306,9 @@ func parsePoolMatchesBytes(raw []byte) ([]MatchResult, error) {
 	}
 	records, err := csv.NewReader(bytes.NewReader(raw)).ReadAll()
 	if err != nil {
-		return nil, err
+		// Same located failure as parsePoolMatchesFile: this path reads
+		// WAL-staged bytes for the same file, so it must report it the same way.
+		return nil, corruptCSV("pool-matches.csv", err)
 	}
 	return parsePoolMatchesRecords(records), nil
 }
@@ -411,8 +420,20 @@ func clampedIntCol(name string, field func(m *MatchResult) *int) poolMatchColumn
 		name: name,
 		put:  func(r *MatchResult) string { return strconv.Itoa(*field(r)) },
 		take: func(m *MatchResult, cell string) {
-			if v, err := strconv.Atoi(cell); err == nil && v > 0 {
+			v, err := strconv.Atoi(cell)
+			if err == nil && v > 0 {
 				*field(m) = v
+				return
+			}
+			// A NEGATIVE count is real data being discarded, unlike an empty or
+			// non-numeric cell, which is simply absent. It was clamped in total
+			// silence, which is the same failure mode the SubResults cell had:
+			// a hand edit quietly changing a recorded figure with no trace
+			// anywhere. Say so. (Still clamped rather than rejected: one bad
+			// number must not stop a tournament.)
+			if err == nil && v < 0 {
+				slog.Warn("state: pool match column clamped a negative value to 0",
+					"matchID", m.ID, "column", name, "value", v)
 			}
 		},
 	}
@@ -456,7 +477,14 @@ var poolMatchColumns = []poolMatchColumn{
 	{name: "SubResults",
 		put: func(r *MatchResult) string {
 			if len(r.SubResults) == 0 {
-				return ""
+				// An encounter with nothing in it writes back whatever it was
+				// READ from, which is empty for every ordinary match and the
+				// unparsed bytes for one whose cell was corrupt. Without this
+				// the whole-file rewrite that every match write performs
+				// destroyed a malformed cell as soon as any OTHER match in the
+				// competition was scored, taking the only copy of that team
+				// encounter's bouts with it. See MatchResult.SubResultsRaw.
+				return r.SubResultsRaw
 			}
 			b, err := json.Marshal(r.SubResults)
 			if err != nil {
@@ -483,6 +511,25 @@ var poolMatchColumns = []poolMatchColumn{
 				// empty team encounter with no trace of the data loss.
 				slog.Error("state: pool match SubResults cell corrupt; loading as empty",
 					"matchID", m.ID, "error", err)
+				// Discard whatever decoded before the error. Unmarshal only
+				// leaves the destination untouched for a SYNTAX error, which
+				// it rejects before decoding anything; a TYPE error (valid
+				// JSON, wrong value type, e.g. "position":"2" from a hand
+				// edit) decodes as far as it got and returns the error at the
+				// end, leaving a partially built slice whose failed entries
+				// are silently zeroed. Without this reset that slice is
+				// non-empty, so the put below re-marshals the zeroed bouts and
+				// normalises the damage onto disk as a valid-looking cell,
+				// which is worse than the blanking this whole branch exists to
+				// stop. It is also what the documented contract already claims
+				// happens: "loads as an empty encounter".
+				m.SubResults = nil
+				// Retain the bytes so the next write cannot destroy them, and
+				// raise the operator-facing flag from the same branch, so the
+				// warning and the repair copy can never disagree about whether
+				// this cell parsed.
+				m.SubResultsRaw = cell
+				m.SubResultsUnreadable = true
 			}
 		}},
 	strCol("ScheduledAt", func(m *MatchResult) *string { return &m.ScheduledAt }),

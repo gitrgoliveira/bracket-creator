@@ -39,6 +39,16 @@ var notPersistedInPoolCSV = map[string]string{
 		"(DeriveQueuePositions), never authored, so persisting it would create a " +
 		"second source of truth that could disagree with the schedule.",
 	"WinnerSide": "derived: the winner name compared against SideA/SideB.",
+	"SubResultsRaw": "the SubResults cell's UNPARSED bytes, retained only when " +
+		"that cell failed to parse so the whole-file rewrite cannot destroy an " +
+		"organiser's malformed edit. It has no column of its own because it IS " +
+		"the SubResults column: the put writes it back into that cell while the " +
+		"encounter is empty. A round trip of a VALID fixture therefore never " +
+		"carries it, which is the point.",
+	"SubResultsUnreadable": "derived on read from the same parse failure that " +
+		"fills SubResultsRaw, and carried to the SPA so the operator sees which " +
+		"match lost its bouts. Derived state, not a column, exactly like " +
+		"QueuePosition and WinnerSide.",
 	"DecidedByHantei": "LEGACY READ-ONLY compatibility channel (models.go doc " +
 		"comment above the field): the verdict is the domain.HanteiMark entry " +
 		"in the winner's IpponsA/IpponsB, and writers must never set this flag. " +

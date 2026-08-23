@@ -16,6 +16,9 @@
 import { withNumber } from './match_scoreboard.jsx';
 import { matchParticipantIds, matchParticipantNames, isPlayerWatched } from './viewer_watchlist_core.jsx';
 import { poolNameOf, isSupplementaryBout, isPoolDaihyosenBout, teamMatchTypeFor } from './pool_ids.jsx';
+// Data-integrity notices: one owner for what the operator is told when a file
+// does not say what the app expects, and for the admin-only gate on showing it.
+import { matchDataUnreadable, unreadableMatches, UnreadableBoutsNote, UnreadablePoolNote } from './data_integrity.jsx';
 import { realIppons } from './result_slot.jsx';
 
 const { useState, useMemo } = React;
@@ -220,7 +223,10 @@ export function SwissStandingsViewer({ competition, poolMatches, tweaks }) {
   );
 }
 
-export function LeagueStandingsViewer({ competition, poolMatches, tweaks, onMatchClick, highlightPlayers }) {
+// showDataIssues: see PoolsViewer below. A league is a single round-robin pool
+// and its team encounters carry the same sub-bouts, so it needs the same
+// notices and the same admin-only gate.
+export function LeagueStandingsViewer({ competition, poolMatches, tweaks, onMatchClick, highlightPlayers, showDataIssues }) {
   const c = competition;
   const [standings, setStandings] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -293,6 +299,9 @@ export function LeagueStandingsViewer({ competition, poolMatches, tweaks, onMatc
           <div className="pool__name">{isCompleted ? "Final standings" : "Standings"}</div>
           <div className="pool__match-count">{completed}/{total} matches</div>
         </div>
+        {showDataIssues && unreadableMatches(poolMatches).length > 0 ? (
+          <UnreadablePoolNote count={unreadableMatches(poolMatches).length} />
+        ) : null}
         <table className={`pool__table${isTeam ? " pool__table--team" : ""}`}>
           <caption className="pool__table-caption">Ranked by standings</caption>
           <thead>
@@ -357,23 +366,27 @@ export function LeagueStandingsViewer({ competition, poolMatches, tweaks, onMatc
                   const isRepBout = isSupplementaryBout(m.id || "");
                   const enriched = { ...m, phase: "pool", poolName: m.poolName || "", phaseName: m.poolName || "", compFormat: competition.format, compId: competition.id, compName: competition.name, compKind: isRepBout ? "" : competition.kind, teamSize: isRepBout ? 0 : competition.teamSize, compEngi: isRepBout ? false : isEngi, teamMatchType: isRepBout ? "" : compTMT };
                   return (
-                    <PoolNumberedMatchRow
-                      key={m.id}
-                      m={m}
-                      num={idx + 1}
-                      onMatchClick={onMatchClick ? () => onMatchClick(enriched) : null}
-                    />
+                    <React.Fragment key={m.id}>
+                      <PoolNumberedMatchRow
+                        m={m}
+                        num={idx + 1}
+                        onMatchClick={onMatchClick ? () => onMatchClick(enriched) : null}
+                      />
+                      {showDataIssues && matchDataUnreadable(m) ? <UnreadableBoutsNote /> : null}
+                    </React.Fragment>
                   );
                 } else {
                   const enriched = { ...m, phase: "pool", poolName: m.poolName || "", phaseName: m.poolName || "", compFormat: competition.format, compId: competition.id, compName: competition.name, compKind: "", teamSize: 0, compEngi: isEngi };
                   return (
-                    <PoolNumberedMatchRow
-                      key={m.id}
-                      m={m}
-                      num={idx + 1}
-                      isEngi={isEngi}
-                      onMatchClick={onMatchClick ? () => onMatchClick(enriched) : null}
-                    />
+                    <React.Fragment key={m.id}>
+                      <PoolNumberedMatchRow
+                        m={m}
+                        num={idx + 1}
+                        isEngi={isEngi}
+                        onMatchClick={onMatchClick ? () => onMatchClick(enriched) : null}
+                      />
+                      {showDataIssues && matchDataUnreadable(m) ? <UnreadableBoutsNote /> : null}
+                    </React.Fragment>
                   );
                 }
               })}
@@ -720,7 +733,11 @@ export function qualifiersForPool(competition, pool) {
   return base;
 }
 
-export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMatchClick, highlightPlayers }) {
+// showDataIssues: opt-in for the operator-only data-integrity notices (see
+// data_integrity.jsx). The admin console and the viewer render this SAME
+// component off the SAME public payload, so the audience gate cannot live on
+// the server; it lives here, and only the admin callers pass it.
+export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMatchClick, highlightPlayers, showDataIssues }) {
   const isTeam = competition && (competition.kind === "team" || competition.teamSize > 0);
   // Engi-Kyogi (kata competition): flag-count scoring. Standings show
   // Victories (V) and total Flags columns only.
@@ -806,6 +823,13 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                 {matches.filter(m => m.status === "completed").length}/{matches.length} matches
               </div>
             </div>
+
+            {/* Above the table, not below it: these are the figures the
+                missing bouts distort, and an operator reading a tied pool has
+                to know the numbers are incomplete BEFORE they act on them. */}
+            {showDataIssues && unreadableMatches(matches).length > 0 ? (
+              <UnreadablePoolNote count={unreadableMatches(matches).length} />
+            ) : null}
 
             {/* Standings table. PoolsViewer is pool-only: rows always iterate
                 in draw order with rank surfaced via a badge. Leagues render
@@ -899,24 +923,32 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                       const isRepBout = isSupplementaryBout(m.id || "");
                       const enriched = { ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compFormat: competition.format, compId: competition.id, compName: competition.name, compKind: isRepBout ? "" : competition.kind, teamSize: isRepBout ? 0 : competition.teamSize, compEngi: isRepBout ? false : isEngi, teamMatchType: isRepBout ? "" : compTMT };
                       return (
-                        <PoolNumberedMatchRow
-                          key={m.id}
-                          m={m}
-                          num={idx + 1}
-                          onMatchClick={onMatchClick ? () => onMatchClick(enriched) : null}
-                        />
+                        <React.Fragment key={m.id}>
+                          <PoolNumberedMatchRow
+                            m={m}
+                            num={idx + 1}
+                            onMatchClick={onMatchClick ? () => onMatchClick(enriched) : null}
+                          />
+                          {/* Its own line rather than a glyph in the row: the row
+                              is a four-column grid whose centre cell is the
+                              match's middle mark, a closed set that must never
+                              gain a fifth value. */}
+                          {showDataIssues && matchDataUnreadable(m) ? <UnreadableBoutsNote /> : null}
+                        </React.Fragment>
                       );
                     } else {
                       // Individual or engi: delegates name/pair rendering to PoolNumberedMatchRow (isEngi passed through for name stacking)
                       const enriched = { ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compFormat: competition.format, compId: competition.id, compName: competition.name, compKind: "", teamSize: 0, compEngi: isEngi };
                       return (
-                        <PoolNumberedMatchRow
-                          key={m.id}
-                          m={m}
-                          num={idx + 1}
-                          isEngi={isEngi}
-                          onMatchClick={onMatchClick ? () => onMatchClick(enriched) : null}
-                        />
+                        <React.Fragment key={m.id}>
+                          <PoolNumberedMatchRow
+                            m={m}
+                            num={idx + 1}
+                            isEngi={isEngi}
+                            onMatchClick={onMatchClick ? () => onMatchClick(enriched) : null}
+                          />
+                          {showDataIssues && matchDataUnreadable(m) ? <UnreadableBoutsNote /> : null}
+                        </React.Fragment>
                       );
                     }
                   })}

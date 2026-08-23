@@ -616,3 +616,63 @@ func TestPoolWriteRejectsARewrittenParticipantID(t *testing.T) {
 		assert.False(t, applyPoolWrite(stored(), in, matchWriteRestore))
 	})
 }
+
+// The unparsed sub-bout cell is file provenance, not client data. applyPoolWrite
+// is the documented sole owner of what a stored pool match contributes to an
+// incoming one, and its whole-struct overwrite would otherwise drop the retained
+// bytes on ANY write to that match, including one that says nothing about
+// sub-bouts. Pinned against both policies for the same reason as the rest of
+// this file: a field that reaches only one of them is a silent divergence.
+func TestApplyPoolWrite_UnparsedSubResultsCell(t *testing.T) {
+	corruptStored := func() *state.MatchResult {
+		return &state.MatchResult{
+			ID: "P1-1", SideA: "Kyoto", SideB: "Osaka",
+			SubResultsRaw:        `[{"position":1,"sideA":"Tanaka"`,
+			SubResultsUnreadable: true,
+		}
+	}
+
+	t.Run("a write with no sub-bouts keeps the retained bytes under both policies", func(t *testing.T) {
+		// The reachable case is an ordinary match-level edit: a court
+		// reassignment or a correction that never mentions the encounter. Before
+		// this, such a write silently destroyed the organiser's only copy.
+		for _, policy := range []matchWritePolicy{matchWriteForward, matchWriteRestore} {
+			in := &state.MatchResult{ID: "P1-1", SideA: "Kyoto", SideB: "Osaka", Court: "B"}
+			st := corruptStored()
+			require.False(t, applyPoolWrite(st, in, policy), "policy %d", policy)
+			assert.Equal(t, `[{"position":1,"sideA":"Tanaka"`, st.SubResultsRaw, "policy %d", policy)
+			assert.True(t, st.SubResultsUnreadable, "policy %d", policy)
+		}
+	})
+
+	t.Run("a write that carries sub-bouts clears both under both policies", func(t *testing.T) {
+		// Re-entering the encounter IS the repair, and it is the only thing that
+		// supersedes the retained bytes and answers the warning.
+		for _, policy := range []matchWritePolicy{matchWriteForward, matchWriteRestore} {
+			in := &state.MatchResult{
+				ID: "P1-1", SideA: "Kyoto", SideB: "Osaka",
+				SubResults: []state.SubMatchResult{
+					{Position: 1, SideA: "Tanaka", SideB: "Suzuki", Winner: "Tanaka"},
+				},
+			}
+			st := corruptStored()
+			require.False(t, applyPoolWrite(st, in, policy), "policy %d", policy)
+			assert.Empty(t, st.SubResultsRaw, "policy %d", policy)
+			assert.False(t, st.SubResultsUnreadable, "policy %d", policy)
+		}
+	})
+
+	t.Run("a client cannot raise the warning on a match that reads fine", func(t *testing.T) {
+		// Assigned unconditionally from the stored match rather than
+		// set-if-empty, so an echoed or spoofed flag never survives.
+		in := &state.MatchResult{
+			ID: "P1-1", SideA: "Kyoto", SideB: "Osaka",
+			SubResultsUnreadable: true,
+			SubResultsRaw:        `{"not":"the client's business"}`,
+		}
+		st := &state.MatchResult{ID: "P1-1", SideA: "Kyoto", SideB: "Osaka"}
+		require.False(t, applyPoolWrite(st, in, matchWriteForward))
+		assert.False(t, st.SubResultsUnreadable)
+		assert.Empty(t, st.SubResultsRaw)
+	})
+}

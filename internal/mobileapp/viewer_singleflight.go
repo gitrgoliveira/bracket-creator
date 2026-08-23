@@ -130,7 +130,11 @@ func (g *viewerSingleFlight) Do(key string, fn func() ([]byte, error)) (v []byte
 // rest.
 func serveSingleFlightJSON(c *gin.Context, data []byte, err error) {
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		// Through the shared helper rather than a hand-rolled 500: this path
+		// used to swallow the cause entirely (no log line at all), and a
+		// corrupt competition file reaching it deserves the same located
+		// message every other handler now gives.
+		internalError(c, err)
 		return
 	}
 	c.Data(http.StatusOK, "application/json; charset=utf-8", data)

@@ -2294,7 +2294,10 @@ a:hover {
    is running. Five variants: synced (accent/navy), syncing (ink-3), offline
    (amber, expected/transient), auth-required and server-error (danger/red,
    both mean a queued write is still unsaved, so they read louder than the
-   amber offline state on purpose).
+   amber offline state on purpose). auth-required and server-error SHARE the
+   danger palette deliberately -- both are unsaved work, which is danger and
+   not caution -- so what separates them is that auth-required is a button
+   (underlined, tap-target-sized) and server-error is an inert chip.
    COPY RULE: the word "live" must never appear in .sync-pill__label text. */
 .sync-status-pill {
   display: inline-flex;
@@ -2330,9 +2333,36 @@ button.sync-status-pill {
   cursor: pointer;
   appearance: none;
   -webkit-appearance: none;
+  /* The read-only variants are 18px status chips, which is under the DESIGN.md
+     §6 floor (>=36px shared, >=44px coarse). That floor is about things you
+     TAP, so it does not bind a chip that only reports -- but this variant is
+     the operator's way back to saving their results, so it does. It is the
+     only variant that is ever a button, and only one status shows at a time,
+     so nothing renders beside it at 18px to look inconsistent with. */
+  min-height: 36px;
+  padding: 4px 12px;
 }
-button.sync-status-pill:hover {
-  filter: brightness(0.97);
+/* The label is underlined so the actionable variant reads as actionable
+   WITHOUT hover: .sync-pill--auth and .sync-pill--error carry the same danger
+   palette by design (both mean a write is unsaved), so hue cannot be what
+   separates them. On touch there is no hover at all, so an affordance that
+   only appears on hover would not exist for the operators this is for. */
+button.sync-status-pill .sync-pill__label {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+@media (pointer: coarse) {
+  button.sync-status-pill {
+    min-height: 44px;
+  }
+}
+/* Hover/active move a token-valued property rather than filter: brightness(),
+   which bypasses the ramp and lands on an un-named colour (DESIGN.md §3). */
+button.sync-pill--auth:hover {
+  background: var(--danger-border);
+}
+button.sync-status-pill:active {
+  transform: translateY(1px);
 }
 button.sync-status-pill:focus-visible {
   outline: 2px solid var(--accent);
@@ -2370,15 +2400,21 @@ button.sync-status-pill:focus-visible {
 }
 /* auth-required, danger palette; a queued write was refused for lack of
    auth and is parked, not lost, until the operator signs in again. Danger
-   (not amber) because the operator must act, not just wait it out. */
+   rather than amber because the operator's finished results are sitting
+   unsaved: that is a failure with data at risk, which is what --danger is
+   for, and it is bigger than the caution --warn carries. (The "expected next
+   action is amber" rule in Principle 3 is scoped to PULSES, not to static
+   styling -- a review round read it as general and was wrong.) */
 .sync-pill--auth {
   color: var(--danger-ink);
   border-color: var(--danger-border);
   background: var(--danger-soft);
 }
 /* server-error, danger palette; the write keeps failing but is still
-   queued and retrying automatically. Same loud danger palette as auth so
-   the operator notices, even though no action is required here. */
+   queued and retrying automatically. Same danger palette as auth-required
+   because it is the same fact -- work that has not been saved. No action is
+   required here, which is why this one stays an inert chip while
+   auth-required is a button; that difference, not hue, is the signal. */
 .sync-pill--error {
   color: var(--danger-ink);
   border-color: var(--danger-border);

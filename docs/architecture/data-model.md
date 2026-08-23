@@ -403,7 +403,7 @@ aborting the read; a seed row missing its rank or name, or too short to hold the
 rather than guessed; a number that will not parse is left at the column's documented default,
 and a negative count is clamped to zero. One bad cell cannot stop a tournament. Two cases go
 further and discard data outright, because there is nothing safe to default to: a legacy
-judges' decision flag with no attributable winner is dropped rather than guessed onto a side,
+judges'-decision flag with no attributable winner is dropped rather than guessed onto a side,
 and a hand-edited bracket file carrying both a legacy score string and the current ippon
 arrays keeps the arrays and clears the string.
 
@@ -426,14 +426,28 @@ failed, the line and column, and what the parser found there, so the fault can b
 editor already open.
 
 Repairing the file and reloading is always the option that loses nothing. When that is not
-possible, a competition with a pool stage can reset its knockout stage instead: the unreadable
-file is renamed aside rather than deleted, and the knockout is rebuilt from the pool draw,
-which is held in a different file. That trade is real and the console states it, because the
-knockout results are not recoverable from anywhere else and have to be re-entered from the
-score sheets, and because the rebuilt pairings should be checked against the printed bracket.
-A direct elimination competition cannot do this at all: its bracket file is the only record of
-its draw, so rebuilding would produce a different set of pairings rather than restore the
-original.
+possible, what else can be done about an unreadable bracket file depends on where the draw it
+held was written down, which is decided by the competition's format. In every case the file
+itself is renamed aside rather than deleted, keeping the name it had with `.corrupt-` and a
+timestamp appended, so it stays in the competition's folder for a later repair by hand.
+
+**Pools then knockout.** The knockout can be reset. The draw survives in the pool file, so the
+tree is built again from it and every finished pool has its qualifiers seeded back in. That
+trade is real and the console states it: the knockout results are not recorded anywhere else
+and have to be re-entered from the score sheets, and the rebuilt pairings should be checked
+against the printed bracket, because the tree is laid out by the current draw algorithm and the
+one that produced the original died with the file.
+
+**League and Swiss.** Nothing is rebuilt, because neither format draws a knockout bracket at
+all. A bracket file in one of these competitions is left over and unused, so moving it aside is
+the whole repair and no result is affected.
+
+**Direct elimination.** There is no reset. The bracket file is the only record of who was drawn
+against whom, so rebuilding would produce a different set of pairings rather than restore the
+original, and it would then disagree with the bracket already printed. The app refuses it and
+says why. The same refusal covers a competition whose format is missing or unrecognised, which
+a hand edit to the config file can produce: those are drawn as direct elimination, so the file
+is the only record of their draw too.
 
 Anyone repairing a file mid tournament should read all of this as: fix the cell, reload, and
 check the record, rather than trusting that a malformed edit would have been rejected.

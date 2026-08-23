@@ -1812,8 +1812,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 			case errors.As(err, &validation):
 				// Covers both "there is nothing wrong with this bracket" and
-				// the playoffs refusal, whose message explains why rebuilding
-				// would invent a draw rather than restore one. Both are
+				// the refusal for a competition that draws its bracket
+				// directly, whose message explains why rebuilding would invent
+				// a draw rather than restore one. Both are
 				// answerable by the operator, so both are a 400 with the reason.
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			default:

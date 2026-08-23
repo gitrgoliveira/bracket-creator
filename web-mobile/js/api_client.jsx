@@ -1181,10 +1181,13 @@ const API = {
     // of a bracket.json that will not parse, which otherwise blocks every score
     // write for that competition. Renames the broken file aside (it is NEVER
     // deleted: it is the only record of the knockout results it holds, and
-    // because it does not parse nothing can count them) and rebuilds the
-    // knockout stage from pools.csv. 400 when the bracket reads fine, and 400
-    // with a reason for a direct-elimination competition, where the file is the
-    // only record of the DRAW and rebuilding would invent different pairings
+    // because it does not parse nothing can count them). What happens next
+    // depends on the format, and the response says which: `rebuilt` is true when
+    // the knockout was rebuilt from pools.csv (mixed), false when there was no
+    // knockout stage to rebuild and moving the file aside was the whole repair
+    // (league, Swiss). 400 when the bracket reads fine, and 400 with a reason
+    // for any competition that draws its bracket DIRECTLY, where the file is the
+    // only record of the draw and rebuilding would invent different pairings
     // rather than restore these. Elevated-gated like discardDraw: it discards
     // recorded results.
     async quarantineBracket(id, password, adminPassword) {

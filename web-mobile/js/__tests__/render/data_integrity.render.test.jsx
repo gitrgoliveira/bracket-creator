@@ -36,6 +36,31 @@ describe('DataIssueBanner', () => {
     expect(onReset).toHaveBeenCalled();
   });
 
+  it('offers a plain move-aside for a league, and promises no rebuild', () => {
+    // A league has no knockout stage, so every word about resetting one, about
+    // bouts to re-enter and about pairings to check against a printed bracket
+    // would be false. The button is still offered: the file blocks the load and
+    // moving it aside costs nothing.
+    const onReset = vi.fn();
+    render(<DataIssueBanner issues={bracketBroken} competition={{ format: 'league' }} onReset={onReset} />);
+    const text = screen.getByRole('alert').textContent;
+    expect(text).toMatch(/no knockout stage/);
+    expect(text).toMatch(/Nothing is rebuilt/);
+    expect(text).not.toMatch(/re-entered from the score sheets/);
+    expect(text).not.toMatch(/printed bracket/);
+    expect(screen.queryByRole('button', { name: /Reset the knockout stage/ })).toBeNull();
+    screen.getByRole('button', { name: /Move the file aside/ }).click();
+    expect(onReset).toHaveBeenCalled();
+  });
+
+  it('offers nothing for an unrecognised format, which is drawn as direct elimination', () => {
+    // A typo in a hand-edited config.md. It takes the draw pipeline's default
+    // branch, so the file IS its draw and a rebuild would invent a new one.
+    render(<DataIssueBanner issues={bracketBroken} competition={{ format: 'not-a-format' }} onReset={vi.fn()} />);
+    expect(screen.queryByRole('button')).toBeNull();
+    expect(screen.getByRole('alert').textContent).toMatch(/only record of who was drawn against whom/);
+  });
+
   it('does NOT offer the reset for direct elimination, and explains why', () => {
     // An action that can only fail is worse than an explanation: the server
     // refuses this case, so the button must not be offered at all.
@@ -52,8 +77,15 @@ describe('DataIssueBanner', () => {
     expect(screen.getByRole('alert').textContent).toContain('pools.csv, line 2, column 1');
   });
 
-  it('disables the reset while it is running', () => {
+  it('disables the reset while it is running, and says what it is doing', () => {
     render(<DataIssueBanner issues={bracketBroken} competition={{ format: 'mixed' }} onReset={vi.fn()} resetting />);
     expect(screen.getByRole('button', { name: /Resetting/ }).disabled).toBe(true);
+  });
+
+  it('does not say "resetting" while moving a league file aside', () => {
+    // Nothing is being reset there, so the busy label follows the action too.
+    render(<DataIssueBanner issues={bracketBroken} competition={{ format: 'league' }} onReset={vi.fn()} resetting />);
+    expect(screen.queryByRole('button', { name: /Resetting/ })).toBeNull();
+    expect(screen.getByRole('button', { name: /Moving/ }).disabled).toBe(true);
   });
 });

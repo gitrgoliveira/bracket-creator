@@ -4,7 +4,12 @@ import {
   unreadableMatches,
   dataIssueText,
   bracketIssue,
-  canRebuildBracket,
+  bracketRecoveryKind,
+  bracketResetPrompt,
+  bracketResetToast,
+  BRACKET_RECOVERY_REBUILD,
+  BRACKET_RECOVERY_DISCARD,
+  BRACKET_RECOVERY_NONE,
 } from '../data_integrity.jsx';
 
 // data_integrity.jsx is the ONE owner of what the operator is told when a file
@@ -51,20 +56,57 @@ describe('dataIssueText: a line an operator can act on', () => {
   });
 });
 
-describe('canRebuildBracket: where a rebuild would invent a draw', () => {
-  // A pool-fed competition keeps its draw in pools.csv. A direct-elimination
-  // competition keeps it ONLY in bracket.json, so rebuilding from today's
-  // roster produces different pairings rather than restoring these.
-  it('allows the formats whose draw survives elsewhere', () => {
-    expect(canRebuildBracket({ format: 'mixed' })).toBe(true);
-    expect(canRebuildBracket({ format: 'league' })).toBe(true);
-    expect(canRebuildBracket({ format: 'swiss' })).toBe(true);
+describe('bracketRecoveryKind: what a lost bracket can be recovered with', () => {
+  // The three outcomes are pinned format-by-format against the shared Go/JS
+  // table in format_draws_bracket.test.jsx. These cover the shape of the
+  // answer and the inputs that table cannot carry.
+  it('rebuilds only where the draw survives in another file', () => {
+    expect(bracketRecoveryKind({ format: 'mixed' })).toBe(BRACKET_RECOVERY_REBUILD);
   });
 
-  it('refuses direct elimination, where the file IS the draw', () => {
-    expect(canRebuildBracket({ format: 'playoffs' })).toBe(false);
-    expect(canRebuildBracket({})).toBe(false);
-    expect(canRebuildBracket(null)).toBe(false);
+  it('discards a vestigial bracket for the formats that never draw one', () => {
+    expect(bracketRecoveryKind({ format: 'league' })).toBe(BRACKET_RECOVERY_DISCARD);
+    expect(bracketRecoveryKind({ format: 'swiss' })).toBe(BRACKET_RECOVERY_DISCARD);
+  });
+
+  it('offers nothing where the file IS the draw, including an unknown format', () => {
+    expect(bracketRecoveryKind({ format: 'playoffs' })).toBe(BRACKET_RECOVERY_NONE);
+    // A typo in a hand-edited config.md takes the draw pipeline's default
+    // branch and gets a standalone playoffs bracket, so it must be refused for
+    // the same reason playoffs is. The first version of this predicate offered
+    // it a rebuild.
+    expect(bracketRecoveryKind({ format: 'not-a-format' })).toBe(BRACKET_RECOVERY_NONE);
+    expect(bracketRecoveryKind({})).toBe(BRACKET_RECOVERY_NONE);
+    expect(bracketRecoveryKind(null)).toBe(BRACKET_RECOVERY_NONE);
+  });
+});
+
+describe('the words that go with each recovery kind', () => {
+  it('never asks a competition without a knockout stage to reset one', () => {
+    const p = bracketResetPrompt(BRACKET_RECOVERY_DISCARD, 'Kanto League');
+    expect(p.message).toContain('Kanto League');
+    expect(p.message).toContain('no knockout stage');
+    expect(p.message).not.toMatch(/reset the knockout/i);
+    expect(p.confirmLabel).not.toMatch(/knockout/i);
+  });
+
+  it('names the knockout stage where there is one', () => {
+    const p = bracketResetPrompt(BRACKET_RECOVERY_REBUILD, 'Open Cup');
+    expect(p.message).toMatch(/knockout stage/i);
+    expect(p.confirmLabel).toBe('Reset knockout stage');
+  });
+
+  // The toast reports what the SERVER did, not what the client predicted, so a
+  // false `rebuilt` can never be dressed up as a rebuild.
+  it('does not claim a rebuild the server did not do', () => {
+    const said = bracketResetToast('bracket.json.corrupt-20260823-101500', false);
+    expect(said).toContain('bracket.json.corrupt-20260823-101500');
+    expect(said).toContain('Nothing was rebuilt');
+    expect(said).not.toMatch(/knockout stage reset/i);
+  });
+
+  it('says so when the server did rebuild', () => {
+    expect(bracketResetToast('x', true)).toMatch(/knockout stage reset/i);
   });
 
   it('finds the bracket among several issues', () => {

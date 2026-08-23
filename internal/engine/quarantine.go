@@ -41,12 +41,32 @@ type QuarantineResult struct {
 // match the one that was drawn when the placement algorithm has not changed
 // since. The caller must say so; the surfaces do.
 //
-// Refused for a standalone playoffs competition, and that refusal is the
-// point: there, bracket.json is the ONLY record of the draw. Rebuilding it
-// from today's roster and seeds would not restore the tournament, it would
-// invent a different one, silently disagreeing with the bracket already
-// printed and posted on the wall. A competition with a pool stage keeps its
-// draw in pools.csv, which is why it can be rebuilt at all.
+// THREE OUTCOMES, decided by the shared format table (see
+// CompetitionRebuildableFromPools). Mixed is REBUILT, because its draw survives
+// in pools.csv. League and Swiss are moved aside and nothing more, because they
+// never drew a bracket and the file is vestigial; Rebuilt reports false so the
+// caller can say which of the two happened. Everything that draws its bracket
+// DIRECTLY is refused, and that refusal is the point: there, bracket.json is
+// the ONLY record of the draw. Rebuilding it from today's roster and seeds
+// would not restore the tournament, it would invent a different one, silently
+// disagreeing with the bracket already printed and posted on the wall.
+// CompetitionRebuildableFromPools reports whether a competition's knockout
+// bracket can be built again after bracket.json is lost, which is true only
+// when the draw that produced it survives in another file.
+//
+// Mixed is the one format where it does: its knockout is drawn from pools.csv,
+// so the same builder can lay the tree out again and the finished pools can be
+// re-seeded into it. Every other format either draws its bracket directly (so
+// the file IS the draw) or never draws one at all.
+//
+// Pinned with CompetitionDrawsBracket against the shared Go/JS table in
+// testdata/format_draws_bracket.json, whose `_comment` sets out how the two
+// answers combine into rebuild / refuse / discard. Mirrored client-side as
+// bracketRecoveryKind in web-mobile/js/data_integrity.jsx.
+func CompetitionRebuildableFromPools(format string) bool {
+	return format == state.CompFormatMixed
+}
+
 func (e *Engine) QuarantineCorruptBracket(id string) (*QuarantineResult, error) {
 	comp, err := e.store.LoadCompetition(id)
 	if err != nil {
@@ -69,9 +89,17 @@ func (e *Engine) QuarantineCorruptBracket(id string) (*QuarantineResult, error) 
 		return nil, loadErr
 	}
 
-	if comp.Format == state.CompFormatPlayoffs || comp.Format == "" {
+	// Refuse whenever the draw builds a bracket that nothing else records.
+	// Derived from the same pair of questions the draw pipeline answers, rather
+	// than from a hand-written list: this used to read `Format == playoffs ||
+	// Format == ""`, which let every UNRECOGNISED format through -- a typo in a
+	// hand-edited config.md, exactly the class of edit this whole area exists
+	// for. Such a competition takes the pipeline's DEFAULT branch and gets a
+	// standalone playoffs bracket, so bracket.json is the only record of its
+	// draw, and it was being quarantined with nothing rebuilt in its place.
+	if CompetitionDrawsBracket(comp.Format) && !CompetitionRebuildableFromPools(comp.Format) {
 		return nil, validationErrorf(
-			"competition %s is a direct-elimination competition, so bracket.json is the only "+
+			"competition %s draws its bracket directly, so bracket.json is the only "+
 				"record of its draw: rebuilding it would produce a different set of pairings "+
 				"rather than restoring this one. Repair the file and reload", id)
 	}
@@ -86,8 +114,8 @@ func (e *Engine) QuarantineCorruptBracket(id string) (*QuarantineResult, error) 
 	result := &QuarantineResult{QuarantinedAs: quarantined}
 
 	// League and Swiss have no knockout stage. Their bracket.json is vestigial,
-	// so moving it aside is the whole repair.
-	if comp.Format != state.CompFormatMixed {
+	// so moving it aside is the whole repair, and Rebuilt stays false to say so.
+	if !CompetitionRebuildableFromPools(comp.Format) {
 		return result, nil
 	}
 

@@ -12,7 +12,12 @@ import { EstimateHeadline } from './admin_schedule_utils.jsx';
 import { seededRanks } from './admin_helpers.jsx';
 // One owner for what the operator is told when a file on disk does not say what
 // the app expects; shared with the pool surfaces so the wording cannot drift.
-import { DataIssueBanner } from './data_integrity.jsx';
+import {
+  DataIssueBanner,
+  bracketRecoveryKind,
+  bracketResetPrompt,
+  bracketResetToast,
+} from './data_integrity.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -234,10 +239,13 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
   // refresh, exactly like discardDraw in admin_competition.jsx.
   const [quarantining, setQuarantining] = useStateA(false);
   const quarantineBracket = async () => {
+    // The words come from data_integrity.jsx, which owns every one the operator
+    // reads about unreadable data. A league has no knockout stage, so it must
+    // not be asked to confirm resetting one.
+    const prompt = bracketResetPrompt(bracketRecoveryKind(c), c.name);
     const ok = await window.confirmDialog({
-      message: `Reset the knockout stage for "${c.name}"? The unreadable file is kept, renamed aside, `
-        + `but the knockout results inside it will no longer be used and must be re-entered.`,
-      confirmLabel: "Reset knockout stage",
+      message: prompt.message,
+      confirmLabel: prompt.confirmLabel,
       danger: true,
     });
     if (!ok) return;
@@ -246,7 +254,10 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
     setQuarantining(true);
     try {
       const res = await window.API.quarantineBracket(c.id, password, admin);
-      showToast?.(`Knockout stage reset. The unreadable file is kept as ${res.quarantinedAs}`);
+      // res.rebuilt is the SERVER's answer, not the kind we predicted above: it
+      // is what actually happened, and a toast that guessed would one day tell
+      // an operator a stage was rebuilt when nothing was.
+      showToast?.(bracketResetToast(res.quarantinedAs, res.rebuilt));
       onRefreshCompetition?.();
     } catch (e) {
       console.error("Quarantine bracket failed:", e);

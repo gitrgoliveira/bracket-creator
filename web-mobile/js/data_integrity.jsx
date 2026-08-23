@@ -126,18 +126,80 @@ export function bracketIssue(issues) {
   return (issues || []).find((i) => i && i.file === "bracket.json") || null;
 }
 
-// canRebuildBracket: whether a corrupt bracket can be rebuilt at all.
+// bracketRecoveryKind: what a corrupt bracket.json can actually be recovered
+// with, which is not one question but two, and the answer decides every word
+// below as well as whether a button is offered.
 //
-// A pool-fed competition keeps its DRAW in pools.csv, so the knockout structure
-// can be derived again from a file that is still readable. A direct-elimination
-// competition does not: there, bracket.json IS the draw, and rebuilding it from
-// today's roster would not restore the tournament, it would invent a different
-// one that disagrees with the bracket already printed and posted on the wall.
-// The server refuses that case; this keeps the button from being offered at all,
-// because an action that can only fail is worse than an explanation.
-export function canRebuildBracket(competition) {
-  const format = competition && competition.format;
-  return format === "mixed" || format === "league" || format === "swiss";
+//   "rebuild"  MIXED only. Its knockout is drawn from pools.csv, which is still
+//              readable, so the tree can be laid out again by the same builder
+//              and the finished pools re-seeded into it.
+//   "discard"  LEAGUE and SWISS. They never draw a bracket, so any bracket.json
+//              they hold is left over and unused. Moving it aside unblocks the
+//              competition and costs nothing, because nothing was in it.
+//   "none"     Everything else, INCLUDING an unrecognised or missing format.
+//              Those take the draw pipeline's default branch and get a
+//              standalone playoffs bracket, so the file IS the draw. Rebuilding
+//              it from today's roster would not restore the tournament, it would
+//              invent a different one that disagrees with the bracket already
+//              printed and posted on the wall. The server refuses this; the
+//              console does not offer it, because an action that can only fail
+//              is worse than an explanation.
+//
+// Mirrors engine.CompetitionDrawsBracket + engine.CompetitionRebuildableFromPools
+// and is pinned against the same shared table they are,
+// internal/engine/testdata/format_draws_bracket.json, so a new format cannot be
+// added without answering this here too. Do NOT hand-extend the list: the
+// unrecognised-format case is exactly the half a hand-written check gets wrong,
+// and it cost this function its first version.
+export const BRACKET_RECOVERY_REBUILD = "rebuild";
+export const BRACKET_RECOVERY_DISCARD = "discard";
+export const BRACKET_RECOVERY_NONE = "none";
+
+export function bracketRecoveryKind(competition) {
+  const format = (competition && competition.format) || "";
+  if (format === "mixed") return BRACKET_RECOVERY_REBUILD;
+  if (format === "league" || format === "swiss") return BRACKET_RECOVERY_DISCARD;
+  return BRACKET_RECOVERY_NONE;
+}
+
+// The banner button, the confirm dialog and the success toast are the same voice
+// as the banner and answer to the same two questions, so they are written here
+// rather than at the call site.
+//
+// buttonLabel and confirmLabel are deliberately NOT the same string. The banner
+// CTA names the whole action because it stands alone on the page; the dialog's
+// label sits under a sentence that has just named it, where repeating the
+// article reads clumsily. Sharing one string collapsed the banner CTA to the
+// dialog's register.
+//
+// The toast takes the server's own `rebuilt`, not the kind we predicted: the
+// server decides, and a message that guessed would eventually tell an operator a
+// stage was rebuilt when it was not.
+export function bracketResetPrompt(kind, name) {
+  if (kind === BRACKET_RECOVERY_DISCARD) {
+    return {
+      message: `Move the unreadable bracket file for "${name}" aside? This competition has no `
+        + `knockout stage, so the file is left over and unused. It is kept, renamed aside, and `
+        + `no results are affected.`,
+      buttonLabel: "Move the file aside",
+      busyLabel: "Moving…",
+      confirmLabel: "Move the file aside",
+    };
+  }
+  return {
+    message: `Reset the knockout stage for "${name}"? The unreadable file is kept, renamed aside, `
+      + `but the knockout results inside it will no longer be used and must be re-entered.`,
+    buttonLabel: "Reset the knockout stage",
+    busyLabel: "Resetting…",
+    confirmLabel: "Reset knockout stage",
+  };
+}
+
+export function bracketResetToast(quarantinedAs, rebuilt) {
+  return rebuilt
+    ? `Knockout stage reset. The unreadable file is kept as ${quarantinedAs}`
+    : `The unreadable file is kept as ${quarantinedAs}. Nothing was rebuilt: this competition `
+      + `has no knockout stage.`;
 }
 
 // DataIssueBanner: the competition-level notice for the LOUD class, where a
@@ -150,7 +212,9 @@ export function DataIssueBanner({ issues, competition, onReset, resetting }) {
   const list = issues || [];
   if (list.length === 0) return null;
   const bracket = bracketIssue(list);
-  const rebuildable = bracket && canRebuildBracket(competition);
+  // Only ask the format question when the bracket is the broken file: a corrupt
+  // pool-matches.csv has no reset, whatever the format.
+  const kind = bracket ? bracketRecoveryKind(competition) : BRACKET_RECOVERY_NONE;
 
   return (
     <div className="alert alert--error data-issue data-issue--banner" role="alert">
@@ -170,16 +234,29 @@ export function DataIssueBanner({ issues, competition, onReset, resetting }) {
         <p><strong>Repair it, and this clears on its own.</strong> Open the file, fix the
           position above, and reload this page. Everything recorded in it comes back,
           results included. This is the option that loses nothing.</p>
-        {bracket && !rebuildable ? (
+        {bracket && kind === BRACKET_RECOVERY_NONE ? (
           <p>
-            There is no reset for this competition: it is a direct-elimination
-            draw, so this file is the only record of who was drawn against whom.
-            Rebuilding it would produce a different set of pairings rather than
-            restoring these, and it would then disagree with the bracket you have
-            printed. Repair the file.
+            There is no reset for this competition: its bracket was drawn
+            directly, so this file is the only record of who was drawn against
+            whom. Rebuilding it would produce a different set of pairings rather
+            than restoring these, and it would then disagree with the bracket you
+            have printed. Repair the file.
           </p>
         ) : null}
-        {rebuildable ? (
+        {kind === BRACKET_RECOVERY_DISCARD ? (
+          <>
+            <p>
+              <strong>Or move the file aside</strong>, if it cannot be repaired. This
+              competition has no knockout stage, so this file is left over and unused:
+            </p>
+            <ul className="data-issue__list">
+              <li>The unreadable file is kept, renamed aside. It is never deleted.</li>
+              <li>Nothing is rebuilt, because there is no knockout stage to rebuild.</li>
+              <li>Participants, standings and every result you have recorded are untouched.</li>
+            </ul>
+          </>
+        ) : null}
+        {kind === BRACKET_RECOVERY_REBUILD ? (
           <>
             <p><strong>Or reset the knockout stage</strong>, if the file cannot be repaired:</p>
             <ul className="data-issue__list">
@@ -192,15 +269,20 @@ export function DataIssueBanner({ issues, competition, onReset, resetting }) {
                 inside the file that will not parse.
               </li>
             </ul>
-            <button
-              type="button"
-              className="btn btn--danger"
-              onClick={onReset}
-              disabled={!!resetting}
-            >
-              {resetting ? "Resetting…" : "Reset the knockout stage"}
-            </button>
           </>
+        ) : null}
+        {/* One button for both recoverable kinds: they run the same endpoint and
+            differ only in what it will find to do, so the label follows the kind
+            rather than each branch growing its own copy of the control. */}
+        {kind !== BRACKET_RECOVERY_NONE ? (
+          <button
+            type="button"
+            className="btn btn--danger"
+            onClick={onReset}
+            disabled={!!resetting}
+          >
+            {resetting ? bracketResetPrompt(kind).busyLabel : bracketResetPrompt(kind).buttonLabel}
+          </button>
         ) : null}
       </div>
     </div>

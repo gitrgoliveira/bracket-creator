@@ -1,12 +1,12 @@
 package engine
 
 // Tests for unexported scoring_tx.go helpers that are 0% or very low coverage:
-// - recordBracketMatchResultTx (0%)
-// - recordMatchResultTx (0%)
-// - lookupExistingResultTx (bracket path + not-found)
+// - recordBracketMatchResult through a tx handle (0%)
+// - writeMatchResult(restore) through a tx handle (the old recordMatchResultTx)
+// - lookupExistingResult through a tx handle (bracket path + not-found)
 // - lookupMatchSidesTx (bracket path + not-found)
 // - checkConcurrentIneligibilityTx (already-ineligible path)
-// - withPoolMatchTx (not-found branch)
+// - withPoolMatch through a tx handle (not-found branch)
 // - restoreCompetitorEligibilityTx (empty priorLoser + happy path)
 
 import (
@@ -21,7 +21,7 @@ import (
 )
 
 // TestRecordBracketMatchResultTx_HappyPath confirms that
-// recordBracketMatchResultTx updates the target match in the bracket
+// recordBracketMatchResult (tx handle) updates the target match in the bracket
 // and propagates the winner to the next round when the match is
 // completed.
 func TestRecordBracketMatchResultTx_HappyPath(t *testing.T) {
@@ -44,7 +44,7 @@ func TestRecordBracketMatchResultTx_HappyPath(t *testing.T) {
 	}
 	var txErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		txErr = eng.recordBracketMatchResultTx(tx, compID, "M1", result, matchWriteForward)
+		txErr = eng.recordBracketMatchResult(tx, compID, "M1", result, matchWriteForward)
 		return nil
 	})
 	require.NoError(t, txErr)
@@ -71,7 +71,7 @@ func TestRecordBracketMatchResultTx_MatchNotFound(t *testing.T) {
 
 	var txErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		txErr = eng.recordBracketMatchResultTx(tx, compID, "GHOST", &state.MatchResult{Winner: "X"}, matchWriteForward)
+		txErr = eng.recordBracketMatchResult(tx, compID, "GHOST", &state.MatchResult{Winner: "X"}, matchWriteForward)
 		return nil
 	})
 	require.Error(t, txErr)
@@ -88,15 +88,16 @@ func TestRecordBracketMatchResultTx_NilBracket(t *testing.T) {
 
 	var txErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		txErr = eng.recordBracketMatchResultTx(tx, compID, "M1", &state.MatchResult{Winner: "X"}, matchWriteForward)
+		txErr = eng.recordBracketMatchResult(tx, compID, "M1", &state.MatchResult{Winner: "X"}, matchWriteForward)
 		return nil
 	})
 	require.Error(t, txErr)
 	assert.Contains(t, txErr.Error(), "not found")
 }
 
-// TestRecordMatchResultTx_PoolPath confirms recordMatchResultTx can
-// update a pool match (the common path).
+// TestRecordMatchResultTx_PoolPath confirms the restore write (the old
+// recordMatchResultTx) can update a pool match through a tx handle (the common
+// path).
 func TestRecordMatchResultTx_PoolPath(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "rmrt-pool"
@@ -111,7 +112,8 @@ func TestRecordMatchResultTx_PoolPath(t *testing.T) {
 	}
 	var txErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		txErr = eng.recordMatchResultTx(tx, compID, "Pool A-0", result)
+		result.ID = "Pool A-0" // recordMatchResultTx used to normalize; the shared body expects it done
+		txErr = eng.writeMatchResult(tx, compID, "Pool A-0", result, matchWriteRestore)
 		return nil
 	})
 	require.NoError(t, txErr)
@@ -123,8 +125,8 @@ func TestRecordMatchResultTx_PoolPath(t *testing.T) {
 	assert.Equal(t, state.MatchStatusCompleted, matches[0].Status)
 }
 
-// TestRecordMatchResultTx_BracketFallback confirms recordMatchResultTx
-// falls through to the bracket path when the match is not in the pool.
+// TestRecordMatchResultTx_BracketFallback confirms the restore write falls
+// through to the bracket path when the match is not in the pool.
 func TestRecordMatchResultTx_BracketFallback(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "rmrt-bracket"
@@ -141,7 +143,8 @@ func TestRecordMatchResultTx_BracketFallback(t *testing.T) {
 	result := &state.MatchResult{Winner: "Bob", Status: state.MatchStatusCompleted}
 	var txErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		txErr = eng.recordMatchResultTx(tx, compID, "B1", result)
+		result.ID = "B1"
+		txErr = eng.writeMatchResult(tx, compID, "B1", result, matchWriteRestore)
 		return nil
 	})
 	require.NoError(t, txErr)
@@ -151,7 +154,7 @@ func TestRecordMatchResultTx_BracketFallback(t *testing.T) {
 	assert.Equal(t, "Bob", b.Rounds[0][0].Winner)
 }
 
-// TestRecordMatchResultTx_NotFoundAnywhere confirms recordMatchResultTx
+// TestRecordMatchResultTx_NotFoundAnywhere confirms the restore write
 // returns an error when the match ID does not exist in pool or bracket.
 func TestRecordMatchResultTx_NotFoundAnywhere(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
@@ -164,7 +167,7 @@ func TestRecordMatchResultTx_NotFoundAnywhere(t *testing.T) {
 
 	var txErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		txErr = eng.recordMatchResultTx(tx, compID, "GHOST", &state.MatchResult{Winner: "X"})
+		txErr = eng.writeMatchResult(tx, compID, "GHOST", &state.MatchResult{ID: "GHOST", Winner: "X"}, matchWriteRestore)
 		return nil
 	})
 	require.Error(t, txErr)
@@ -187,7 +190,7 @@ func TestLookupExistingResultTx_BracketPath(t *testing.T) {
 	var got *state.MatchResult
 	var txErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		got, txErr = eng.lookupExistingResultTx(tx, compID, "B1")
+		got, txErr = eng.lookupExistingResult(tx, compID, "B1")
 		return nil
 	})
 	require.NoError(t, txErr)
@@ -206,7 +209,7 @@ func TestLookupExistingResultTx_NotFound(t *testing.T) {
 
 	var txErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		_, txErr = eng.lookupExistingResultTx(tx, compID, "GHOST")
+		_, txErr = eng.lookupExistingResult(tx, compID, "GHOST")
 		return nil
 	})
 	require.Error(t, txErr)
@@ -332,7 +335,7 @@ func TestWithPoolMatchTx_NotFound(t *testing.T) {
 
 	var txErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		txErr = eng.withPoolMatchTx(tx, compID, "GHOST", func(_ *state.MatchResult) {})
+		txErr = eng.withPoolMatch(tx, compID, "GHOST", func(_ *state.MatchResult) {})
 		return nil
 	})
 	require.Error(t, txErr)
@@ -531,7 +534,7 @@ func TestRecordIneligibilityFromDecisionTx_NilResult(t *testing.T) {
 	var txErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
 		var status *domain.CompetitorStatus
-		status, txErr = eng.recordIneligibilityFromDecisionTx(tx, compID, "M1", nil)
+		status, txErr = eng.recordIneligibilityFromDecision(tx, compID, "M1", nil)
 		assert.Nil(t, status)
 		return nil
 	})
@@ -548,7 +551,7 @@ func TestRecordIneligibilityFromDecisionTx_NonKiken(t *testing.T) {
 	result := &state.MatchResult{Decision: "fought", Winner: "Alice", SideA: "Alice", SideB: "Bob"}
 	var txErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		status, err := eng.recordIneligibilityFromDecisionTx(tx, compID, "M1", result)
+		status, err := eng.recordIneligibilityFromDecision(tx, compID, "M1", result)
 		txErr = err
 		assert.Nil(t, status)
 		return nil
@@ -587,7 +590,7 @@ func TestRecordIneligibilityFromDecisionTx_AlreadyIneligible(t *testing.T) {
 	}
 	var txErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		_, txErr = eng.recordIneligibilityFromDecisionTx(tx, compID, "Pool A-1", result)
+		_, txErr = eng.recordIneligibilityFromDecision(tx, compID, "Pool A-1", result)
 		return nil
 	})
 	require.Error(t, txErr)

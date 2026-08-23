@@ -1,25 +1,36 @@
-// Package engine, scoring_tx.go owns the tx-aware twins of
-// RecordMatchResult / RecordMatchResultWithIneligibility /
-// recordBracketMatchResult / recordIneligibilityFromDecision.
-// They accept a state.StoreTx instead of reaching at e.store directly,
+// Package engine, scoring_tx.go owns the tx-run flows of the scoring family:
+// RecordMatchResultWithIneligibilityTx, RecordDecisionTx, StartMatchTx, the K3
+// rollback, and the tx court/eligibility checks. They accept a state.StoreTx
 // so a caller (typically a HTTP handler) can run them inside a single
 // Store.WithTransaction acquire of the per-comp write lock.
 //
-// Why these exist. Pre-T156 the score and decision handlers called
+// Why the tx flows exist. Pre-T156 the score and decision handlers called
 // engine methods that each acquired their own per-comp lock via
 // UpdatePoolMatchByID / UpdateBracket / SetCompetitorStatus.
 // The handler's logical "score this match" operation translated to
 // 3-5 separate lock acquires, with concurrent writers free to land
-// mutations in the gaps. The tx-aware twins collapse all of those into
+// mutations in the gaps. Running under one tx collapses all of those into
 // ONE acquire so the entire match-write + ineligibility-write sequence
 // is indivisible.
 //
-// Constraint. Methods here MUST call only the tx parameter, NEVER
-// e.store directly. The per-comp lock is non-reentrant (sync.RWMutex
-// is not recursive on Lock by Lock); a direct e.store.Save* call from
-// inside the closure passed to WithTransaction would deadlock.
+// Why this file no longer holds twin BODIES (bc-twin). It used to carry a
+// hand-copied tx variant of each write primitive (withPoolMatchTx,
+// writeToPoolOrBracketTx, recordBracketMatchResultTx, lookupExistingResultTx,
+// recordIneligibilityFromDecisionTx, recordMatchResultTx), differing from the
+// non-tx bodies only in the store handle. Twin drift produced real bugs three
+// separate times, so the primitives now exist ONCE, taking an
+// `h state.StoreTx` handle — *state.Store satisfies state.StoreTx, so the
+// same body serves both doors, and the non-tx entry points are
+// WithTransaction shims (see RecordMatchResult /
+// RecordMatchResultWithIneligibility in scoring.go). What remains here is the
+// tx-shaped orchestration, not duplicated persistence.
 //
-// T156, NFR-010.
+// Constraint, unchanged. Flows running under a tx MUST call only the tx
+// handle, NEVER e.store directly. The per-comp lock is non-reentrant
+// (sync.RWMutex is not recursive on Lock by Lock); a direct e.store.Save*
+// call from inside the closure passed to WithTransaction would deadlock.
+//
+// T156, NFR-010, bc-twin.
 package engine
 
 import (
@@ -31,94 +42,6 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
-
-// withPoolMatchTx is the tx-aware twin of withPoolMatch. Same
-// "load + find + mutate + save" semantics; returns errMatchNotFound
-// when no pool match has the given ID so callers can fall through to
-// withBracketMatchTx.
-func (e *Engine) withPoolMatchTx(tx state.StoreTx, compID, matchID string, mutate func(*state.MatchResult)) error {
-	found, err := tx.UpdatePoolMatchByID(compID, matchID, mutate)
-	if err != nil {
-		return err
-	}
-	if !found {
-		return errMatchNotFound
-	}
-	return nil
-}
-
-// recordBracketMatchResultTx is the tx-aware twin of
-// recordBracketMatchResult. Identical body modulo the tx.UpdateBracket
-// dispatch.
-func (e *Engine) recordBracketMatchResultTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult, policy matchWritePolicy) error {
-	return tx.UpdateBracket(compID, func(bracket *state.Bracket) error {
-		return e.applyBracketResultIn(bracket, compID, matchID, result, policy)
-	})
-}
-
-// recordIneligibilityFromDecisionTx is the tx-aware twin of
-// recordIneligibilityFromDecision. The atomic check-and-set runs
-// directly on the supplied tx (no nested WithTransaction), the caller
-// already holds the per-comp lock, so the same check-after-write
-// guarantee holds without re-acquiring.
-func (e *Engine) recordIneligibilityFromDecisionTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult) (*domain.CompetitorStatus, error) {
-	if result == nil {
-		return nil, nil
-	}
-	if !domain.IsKikenDecisionStr(result.Decision) && result.Decision != string(domain.DecisionFusenpai) {
-		return nil, nil
-	}
-	loser := loserSideName(result)
-	if loser == "" {
-		return nil, nil
-	}
-	comp, err := tx.LoadCompetition(compID)
-	if err != nil {
-		return nil, err
-	}
-	if comp == nil {
-		return nil, nil
-	}
-	// Engi competitions force the zekken layout (two-column participant CSV)
-	// so participants must be parsed with WithZekkenName even when the comp
-	// flag is not set via user input; make the effective flag explicit (Finding 10).
-	participants, err := tx.LoadParticipants(compID, comp.EffectiveWithZekkenName())
-	if err != nil {
-		return nil, err
-	}
-	pool := combinedPlayerPool(comp.Players, participants)
-	playerID := lookupPlayerID(pool, loser)
-	if playerID == "" {
-		return nil, nil
-	}
-	status := domain.CompetitorStatus{
-		PlayerID:      playerID,
-		Eligible:      false,
-		Reinstateable: result.Decision == string(domain.DecisionKikenInjury),
-		Reason:        fmt.Sprintf("%s at %s", result.Decision, matchID),
-		MatchID:       matchID,
-		RecordedAt:    time.Now().UTC(),
-	}
-	// K2/CHK047: check-and-set under the existing lock. Pre-T156 this
-	// reached for a fresh WithTransaction; under T156 the surrounding
-	// tx already holds the per-comp lock, so we serialize correctly
-	// without nesting.
-	statuses, err := tx.LoadCompetitorStatus(compID)
-	if err != nil {
-		return nil, err
-	}
-	if st, ok := statuses[playerID]; ok && !st.Eligible && st.MatchID != matchID {
-		return nil, &AlreadyIneligibleError{
-			PlayerID: playerID,
-			MatchID:  st.MatchID,
-			Reason:   st.Reason,
-		}
-	}
-	if err := tx.SetCompetitorStatus(compID, status); err != nil {
-		return nil, err
-	}
-	return &status, nil
-}
 
 // RecordMatchResultWithIneligibilityTx is the tx-aware twin of
 // RecordMatchResultWithIneligibility. The K3/CHK047 partial-write
@@ -143,7 +66,7 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		return nil, fmt.Errorf("RecordMatchResultWithIneligibilityTx: load competition %s: %w", compID, loadErr)
 	}
 	if comp != nil && comp.Engi {
-		rec, recErr := e.recordEngiMatchResultTx(tx, compID, matchID, result.FlagsA, result.FlagsB, result.CorrectionReason)
+		rec, recErr := e.recordEngiMatchResult(tx, compID, matchID, result.FlagsA, result.FlagsB, result.CorrectionReason)
 		if recErr != nil {
 			return nil, recErr
 		}
@@ -157,10 +80,10 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	deriveDaihyosenWinner(result)
 
 	// Capture the prior result so we can roll back the score on
-	// AlreadyIneligibleError. lookupExistingResultTx reads directly from
+	// AlreadyIneligibleError. lookupExistingResult reads directly from
 	// the tx so it sees the state INSIDE the lock (the on-disk state
 	// hasn't moved under us, we hold the lock).
-	prior, _ := e.lookupExistingResultTx(tx, compID, matchID)
+	prior, _ := e.lookupExistingResult(tx, compID, matchID)
 
 	// Kachinuki bout logs merge BY POSITION rather than replace wholesale
 	// (ACID: a client whose local log is behind the server must never
@@ -215,7 +138,7 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		}
 	}
 
-	sideMismatch, err := e.writeToPoolOrBracketTx(tx, compID, matchID, result, matchWriteForward)
+	sideMismatch, err := e.writeToPoolOrBracket(tx, compID, matchID, result, matchWriteForward)
 	if err != nil {
 		return nil, err
 	}
@@ -275,7 +198,7 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		}
 	}
 
-	status, err := e.recordIneligibilityFromDecisionTx(tx, compID, matchID, result)
+	status, err := e.recordIneligibilityFromDecision(tx, compID, matchID, result)
 	if err != nil {
 		var alreadyErr *AlreadyIneligibleError
 		if errors.As(err, &alreadyErr) {
@@ -288,7 +211,7 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 			}
 			return nil, err
 		}
-		log.Printf("engine: recordIneligibilityFromDecisionTx compId=%s matchId=%s: %v", compID, matchID, err)
+		log.Printf("engine: recordIneligibilityFromDecision compId=%s matchId=%s: %v", compID, matchID, err)
 		return nil, nil
 	}
 	return status, nil
@@ -302,86 +225,21 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 // write before Commit applies the final state. prior must be non-nil.
 //
 // The nil-collision fields (SubResults, and the hantei flag at both match and
-// sub-bout level) need no pre-mangling here: recordMatchResultTx replays under
+// sub-bout level) need no pre-mangling here: the snapshot replays under
 // matchWriteRestore, which reads a nil as "there was nothing" rather than as
 // "the writer said nothing". See matchWriteRestore for why the distinction is
 // what keeps a rollback from re-applying the write it is undoing.
+//
+// The snapshot is restored byte-for-byte, so applyHansokuIppons is
+// intentionally NOT applied; writeMatchResult is the post-hansoku write. A
+// restore can never trip its ErrMatchSideMismatch return (the identity check
+// is forward-only), so the replay path this used to take through a dedicated
+// mismatch-discarding twin is now the shared body with nothing discarded.
 func (e *Engine) rollbackMatchResultTx(tx state.StoreTx, compID, matchID string, prior *state.MatchResult) {
-	if rerr := e.recordMatchResultTx(tx, compID, matchID, prior); rerr != nil {
+	prior.ID = matchID
+	if rerr := e.writeMatchResult(tx, compID, matchID, prior, matchWriteRestore); rerr != nil {
 		log.Printf("engine: RecordMatchResultWithIneligibilityTx rollback failed compId=%s matchId=%s: %v", compID, matchID, rerr)
 	}
-}
-
-// writeToPoolOrBracketTx is the tx-aware twin of writeToPoolOrBracket
-// (scoring.go), where the reasoning for the shared fall-through lives. The two
-// differ only in the store handle they take: the tx variants read and write
-// inside the caller's already-held per-competition lock, so they cannot call
-// the public Store methods the non-tx twin uses (the mutex is not reentrant).
-func (e *Engine) writeToPoolOrBracketTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult, policy matchWritePolicy) (mismatch bool, err error) {
-	var superseded bool
-	perr := e.withPoolMatchTx(tx, compID, matchID, func(r *state.MatchResult) {
-		// The POOL branch of the path POST /score and the bulk-score endpoint
-		// actually take - the site the hand-copied merge once missed.
-		mismatch, superseded = applyPoolWrite(r, result, policy)
-	})
-	if perr == nil {
-		if superseded {
-			return false, ErrMatchSuperseded
-		}
-		return mismatch, nil
-	}
-	if !errors.Is(perr, errMatchNotFound) {
-		return false, perr
-	}
-	return false, e.recordBracketMatchResultTx(tx, compID, matchID, result, policy)
-}
-
-// recordMatchResultTx is the tx-aware twin of RecordMatchResult. Used
-// exclusively by the K3 partial-write rollback inside
-// RecordMatchResultWithIneligibilityTx, the prior result is restored
-// byte-for-byte, so applyHansokuIppons is intentionally skipped here.
-func (e *Engine) recordMatchResultTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult) error {
-	result.ID = matchID
-	// K3 rollback: replay the snapshot verbatim - see matchWriteRestore. The
-	// side mismatch is deliberately DISCARDED here: a snapshot replays sides
-	// captured from this same match, so a disagreement is not a client error.
-	if _, err := e.writeToPoolOrBracketTx(tx, compID, matchID, result, matchWriteRestore); err != nil {
-		return err
-	}
-	if _, err := e.recordIneligibilityFromDecisionTx(tx, compID, matchID, result); err != nil {
-		log.Printf("engine: recordIneligibilityFromDecisionTx compId=%s matchId=%s: %v", compID, matchID, err)
-	}
-	return nil
-}
-
-// lookupExistingResultTx is the tx-aware twin of lookupExistingResult.
-// Reads pool matches first, falls through to bracket on
-// errMatchNotFound (NotFoundError), same shape the non-tx path
-// returns.
-func (e *Engine) lookupExistingResultTx(tx state.StoreTx, compID, matchID string) (*state.MatchResult, error) {
-	poolMatches, err := tx.LoadPoolMatches(compID)
-	if err == nil {
-		for i := range poolMatches {
-			if poolMatches[i].ID == matchID {
-				r := poolMatches[i]
-				return &r, nil
-			}
-		}
-	}
-	bracket, err := tx.LoadBracket(compID)
-	if err == nil && bracket != nil {
-		for _, round := range bracket.Rounds {
-			for i := range round {
-				if round[i].ID == matchID {
-					return bracketMatchAsResult(&round[i]), nil
-				}
-			}
-		}
-		if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchID {
-			return bracketMatchAsResult(bracket.ThirdPlaceMatch), nil
-		}
-	}
-	return nil, notFoundErrorf("match %q not found in competition %q", matchID, compID)
 }
 
 // lookupMatchSidesTx is the tx-aware twin of lookupMatchSides.
@@ -691,7 +549,7 @@ func resolvePlayerIDsTx(tx state.StoreTx, compID, sideA, sideB string) (string, 
 // checkConcurrentIneligibilityTx is the tx-aware twin of
 // checkConcurrentIneligibility. Same logic, same "log and skip on
 // lookup failure" behaviour, the T105 guard is best-effort, the
-// canonical check-and-set inside recordIneligibilityFromDecisionTx is
+// canonical check-and-set inside recordIneligibilityFromDecision is
 // the load-bearing serialisation point.
 func (e *Engine) checkConcurrentIneligibilityTx(tx state.StoreTx, compID, matchID, loserName string) error {
 	if loserName == "" {
@@ -909,7 +767,7 @@ func (e *Engine) RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 			return nil, nil, cerr
 		}
 	}
-	prior, err := e.lookupExistingResultTx(tx, compID, matchID)
+	prior, err := e.lookupExistingResult(tx, compID, matchID)
 	if err != nil {
 		return nil, nil, err
 	}

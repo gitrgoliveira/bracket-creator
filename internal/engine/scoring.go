@@ -128,8 +128,8 @@ func reconcileSides(result *state.MatchResult, stored storedSides) (mismatch boo
 // later save would overwrite the earlier save's mutation with stale
 // data for the OTHER match. One operator's score would be silently
 // lost during a live tournament.
-func (e *Engine) withPoolMatch(compId, matchId string, mutate func(*state.MatchResult)) error {
-	found, err := e.store.UpdatePoolMatchByID(compId, matchId, mutate)
+func (e *Engine) withPoolMatch(h state.StoreTx, compId, matchId string, mutate func(*state.MatchResult)) error {
+	found, err := h.UpdatePoolMatchByID(compId, matchId, mutate)
 	if err != nil {
 		return err
 	}
@@ -155,7 +155,7 @@ func (e *Engine) withPoolMatch(compId, matchId string, mutate func(*state.MatchR
 // (UpdateMatchCourt / UpdateMatchTime) and RevertMatchToQueue, which must work
 // on not-yet-resolved (placeholder) knockout matches so operators can pre-arrange
 // courts/times. The per-match playability gate lives only in the SCORING paths
-// (recordBracketMatchResult / recordBracketMatchResultTx / OverrideBracketWinner),
+// (recordBracketMatchResult / OverrideBracketWinner),
 // which mutate via UpdateBracket directly.
 func (e *Engine) withBracketMatch(compId, matchId string, mutate func(*state.BracketMatch)) error {
 	found, err := e.store.UpdateBracketMatchByID(compId, matchId, mutate)
@@ -527,15 +527,25 @@ const (
 // fall through — so leaving the branch SELECTION duplicated kept the shape of
 // the bug one level up: a fifth write path had to re-remember it.
 //
-// The tx twin is writeToPoolOrBracketTx (scoring_tx.go); they differ only in
-// which store handle they take, which is why they are two functions rather than
-// one with a nil check. Callers keep their own error policy: `mismatch` is
-// RETURNED rather than turned into an error here, because the forward writers
-// reject it while the K3 restore deliberately ignores it (a snapshot replays
-// sides captured from this same match).
-func (e *Engine) writeToPoolOrBracket(compId, matchId string, result *state.MatchResult, policy matchWritePolicy) (mismatch bool, err error) {
+// THE HANDLE CONVENTION (bc-twin). h is the store surface this write runs
+// against: a live StoreTx when the caller already holds the per-competition
+// lock (the HTTP handlers, via WithTransaction), or e.store itself when it
+// does not — *state.Store satisfies state.StoreTx by construction, each method
+// then taking the lock for its own call. This function used to exist twice, a
+// body per handle type, and that twinning is the pattern that produced three
+// real bugs (the rollback-policy mutation that survived the suite, the
+// preserveDaihyosenOutcome copy that missed the live /score path, and the
+// bc-lww1 supersede report that reached one pool twin and not the other), so
+// do not reintroduce a per-handle copy: pass the handle. Callers keep their
+// own error policy: `mismatch` is RETURNED rather than turned into an error
+// here, because the forward writers reject it while the K3 restore
+// deliberately ignores it (a snapshot replays sides captured from this same
+// match).
+func (e *Engine) writeToPoolOrBracket(h state.StoreTx, compId, matchId string, result *state.MatchResult, policy matchWritePolicy) (mismatch bool, err error) {
 	var superseded bool
-	perr := e.withPoolMatch(compId, matchId, func(r *state.MatchResult) {
+	perr := e.withPoolMatch(h, compId, matchId, func(r *state.MatchResult) {
+		// The POOL branch of the path POST /score and the bulk-score endpoint
+		// actually take — the site the hand-copied merge once missed.
 		mismatch, superseded = applyPoolWrite(r, result, policy)
 	})
 	if perr == nil {
@@ -548,7 +558,7 @@ func (e *Engine) writeToPoolOrBracket(compId, matchId string, result *state.Matc
 		return false, perr
 	}
 	// The SAME policy the pool branch would have used.
-	return false, e.recordBracketMatchResult(compId, matchId, result, policy)
+	return false, e.recordBracketMatchResult(h, compId, matchId, result, policy)
 }
 
 // applyPoolWrite folds the stored match into an incoming result and then
@@ -1009,116 +1019,85 @@ func countScoringIppons(ippons []string) int {
 	return domain.CountScoringIppons(ippons)
 }
 
+// RecordMatchResult is the plain score entry point (the quick-score
+// PUT /result handler). It wraps the write in ONE transaction, for the same
+// two reasons the main score handler wraps its own call in WithTransaction:
+// the match write and the kiken/fusenpai eligibility side-effect commit under
+// a single per-competition lock acquire, and recordIneligibilityFromDecision's
+// K2 check-and-set is only atomic when its handle is a live tx (see the K2
+// note on that function). Before bc-twin this entry wrote direct-to-store and
+// leaned on an inner WithTransaction inside the ineligibility helper for K2 —
+// same guarantee, now held once at the entry instead of re-acquired mid-write.
 func (e *Engine) RecordMatchResult(compId string, matchId string, result *state.MatchResult) error {
 	result.ID = matchId // normalize ID-less payloads before overwriting
 	if err := applyHansokuIppons(result); err != nil {
 		return err
 	}
-	return e.writeMatchResult(compId, matchId, result, matchWriteForward)
+	return e.store.WithTransaction(compId, func(tx state.StoreTx) error {
+		return e.writeMatchResult(tx, compId, matchId, result, matchWriteForward)
+	})
 }
 
 // writeMatchResult persists the result without applying hansoku auto-award.
 // RecordMatchResult calls it after applyHansokuIppons with matchWriteForward;
-// the K3 rollback calls it with matchWriteRestore. The policy reaches whichever
-// branch the match id resolves to — see matchWritePolicy for what each inherits.
-func (e *Engine) writeMatchResult(compId string, matchId string, result *state.MatchResult, policy matchWritePolicy) error {
-	sideMismatch, err := e.writeToPoolOrBracket(compId, matchId, result, policy)
+// the K3 rollback (rollbackMatchResultTx) replays a prior snapshot through it
+// with matchWriteRestore. The policy reaches whichever branch the match id
+// resolves to — see matchWritePolicy for what each inherits. h must be a live
+// tx: the ineligibility side-effect's K2 atomicity is the handle's.
+//
+// Restore note: matchWriteRestore can never produce sideMismatch (the identity
+// check in applyPoolWrite / applyBracketMatchResult is forward-only), so the
+// ErrMatchSideMismatch return below is unreachable on the rollback path — the
+// snapshot replays sides captured from this same match.
+func (e *Engine) writeMatchResult(h state.StoreTx, compId string, matchId string, result *state.MatchResult, policy matchWritePolicy) error {
+	sideMismatch, err := e.writeToPoolOrBracket(h, compId, matchId, result, policy)
 	if err != nil {
 		return err
 	}
 	if sideMismatch {
 		return ErrMatchSideMismatch
 	}
-	// Side-effect writes are non-fatal: the match score is already on disk,
+	// Side-effect writes are non-fatal: the match score is already staged,
 	// so propagating would cause a 500 retry that double-records the score.
-	if _, err := e.recordIneligibilityFromDecision(compId, matchId, result); err != nil {
+	if _, err := e.recordIneligibilityFromDecision(h, compId, matchId, result); err != nil {
 		log.Printf("engine: recordIneligibilityFromDecision compId=%s matchId=%s: %v", compId, matchId, err)
 	}
 	return nil
 }
 
-// RecordMatchResultWithIneligibility is the variant used by the score
-// and decision handlers that need to broadcast the
-// `competitor-status-updated` SSE event after a kiken/fusenpai is
-// recorded. It returns the new CompetitorStatus (or nil when none was
-// written) alongside any error.
+// RecordMatchResultWithIneligibility is the variant used by callers that need
+// the CompetitorStatus side-effect surfaced (for the
+// `competitor-status-updated` SSE broadcast) after a kiken/fusenpai is
+// recorded. It returns the new CompetitorStatus (or nil when none was written)
+// alongside any error.
 //
-// The match-score persistence semantics are identical to
-// RecordMatchResult; only the side-effect status is surfaced for the
-// caller's broadcast. Side-effect write failures are still non-fatal,
-// the function returns (nil, nil) and logs.
+// Since bc-twin it is a WithTransaction shim over
+// RecordMatchResultWithIneligibilityTx — ONE body, whichever door a caller
+// enters by. Two things changed for this entry when its hand-copied body was
+// deleted, both deliberate: the whole write now commits under a single
+// per-comp lock acquire (previously each store call locked separately), and
+// the mp-e2k1 displaced-finisher guard now applies here too — it had been
+// added to the Tx twin only, which is exactly the drift this collapse exists
+// to end. Side-effect write failures are still non-fatal: (nil, nil) + log.
 //
-// T085/T092.
+// T085/T092, bc-twin.
 func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId string, result *state.MatchResult) (*domain.CompetitorStatus, error) {
-	result.ID = matchId
-
-	// Engi dispatch seam: a flag-scored competition records via the engi slice
-	// (pool or bracket, decided internally) and skips the kendo ippon path
-	// entirely. Engi has no eligibility concept, so the status return is nil.
-	comp, loadErr := e.store.LoadCompetition(compId)
-	if loadErr != nil {
-		return nil, fmt.Errorf("RecordMatchResultWithIneligibility: load competition %s: %w", compId, loadErr)
+	var status *domain.CompetitorStatus
+	var engErr error
+	txErr := e.store.WithTransaction(compId, func(tx state.StoreTx) error {
+		status, engErr = e.RecordMatchResultWithIneligibilityTx(tx, compId, matchId, result)
+		// Return nil regardless: engErr is an application-level signal
+		// (AlreadyIneligible → 409, validation → 400) surfaced after the tx,
+		// and the K3 rollback has already replayed the prior state INSIDE the
+		// tx, so committing persists exactly what the engine settled on. This
+		// is the same commit contract the score handler uses around the Tx
+		// variant (handlers_match.go).
+		return nil
+	})
+	if txErr != nil {
+		return nil, txErr
 	}
-	if comp != nil && comp.Engi {
-		rec, recErr := e.recordEngiMatchResult(compId, matchId, result.FlagsA, result.FlagsB, result.CorrectionReason)
-		if recErr != nil {
-			return nil, recErr
-		}
-		backfillEngiResult(result, rec)
-		return nil, nil
-	}
-
-	if err := applyHansokuIppons(result); err != nil {
-		return nil, err
-	}
-	deriveDaihyosenWinner(result)
-
-	// T105/CHK047: capture the prior result so we can rollback if the atomic
-	// ineligibility write below fails with AlreadyIneligibleError.
-	prior, _ := e.lookupExistingResult(compId, matchId)
-
-	// Kachinuki bout logs merge BY POSITION rather than replace wholesale
-	// (ACID: a client whose local log is behind the server must never
-	// destroy server-appended bouts). Applied here at the entry point,
-	// BEFORE the pool/bracket write primitives, so the rollback path
-	// below (which replays `prior` through those primitives) still
-	// restores the pre-write state exactly. A merge-time rejection (e.g. a
-	// kachinuki-exhaustion write ending on a tied bout, mp-gmcg review R2)
-	// returns BEFORE any write primitive, so nothing is persisted.
-	if merr := applyKachinukiMerge(comp, prior, result); merr != nil {
-		return nil, merr
-	}
-
-	sideMismatch, err := e.writeToPoolOrBracket(compId, matchId, result, matchWriteForward)
-	if err != nil {
-		return nil, err
-	}
-	if sideMismatch {
-		return nil, ErrMatchSideMismatch
-	}
-	status, err := e.recordIneligibilityFromDecision(compId, matchId, result)
-	if err != nil {
-		// K2/CHK047: when the atomic check-and-set inside
-		// recordIneligibilityFromDecision detects a concurrent kiken
-		// (different operator already wrote ineligibility for this
-		// player from another match), propagate the error so the handler
-		// can return HTTP 409.
-		var alreadyErr *AlreadyIneligibleError
-		if errors.As(err, &alreadyErr) {
-			// K3/CHK047: rollback the partial write. The match score was
-			// already persisted, but the intended loser is already
-			// ineligible from a different match. Revert the match score
-			// to its prior state before returning 409 so the operator
-			// sees a clean rejection rather than a mutated match.
-			if prior != nil {
-				_ = e.writeMatchResult(compId, matchId, prior, matchWriteRestore)
-			}
-			return nil, err
-		}
-		log.Printf("engine: recordIneligibilityFromDecision compId=%s matchId=%s: %v", compId, matchId, err)
-		return nil, nil
-	}
-	return status, nil
+	return status, engErr
 }
 
 // standingsFlightRetries bounds how many times CalculatePoolStandings will
@@ -1605,8 +1584,8 @@ func markTiedStandingsLeague(comp *state.Competition, sorted []state.PlayerStand
 // step amplified the risk because it mutates ADJACENT bracket cells
 // (the next-round match), so a concurrent save with a stale view
 // could clobber another operator's propagation too.
-func (e *Engine) recordBracketMatchResult(compId string, matchId string, result *state.MatchResult, policy matchWritePolicy) error {
-	return e.store.UpdateBracket(compId, func(bracket *state.Bracket) error {
+func (e *Engine) recordBracketMatchResult(h state.StoreTx, compId string, matchId string, result *state.MatchResult, policy matchWritePolicy) error {
+	return h.UpdateBracket(compId, func(bracket *state.Bracket) error {
 		return e.applyBracketResultIn(bracket, compId, matchId, result, policy)
 	})
 }
@@ -1974,7 +1953,7 @@ func parseWinnerOf(s string, numRounds int) (int, int) {
 }
 
 func (e *Engine) UpdateMatchCourt(compId string, matchId string, newCourt string) error {
-	err := e.withPoolMatch(compId, matchId, func(r *state.MatchResult) {
+	err := e.withPoolMatch(e.store, compId, matchId, func(r *state.MatchResult) {
 		r.Court = newCourt
 	})
 	if err == nil {
@@ -2082,7 +2061,7 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 }
 
 func (e *Engine) UpdateMatchTime(compId string, matchId string, scheduledAt string) error {
-	err := e.withPoolMatch(compId, matchId, func(r *state.MatchResult) {
+	err := e.withPoolMatch(e.store, compId, matchId, func(r *state.MatchResult) {
 		r.ScheduledAt = scheduledAt
 	})
 	if err == nil {
@@ -2119,7 +2098,7 @@ func (e *Engine) UpdateMatchTime(compId string, matchId string, scheduledAt stri
 func (e *Engine) RevertMatchToQueue(compId, matchId string) error {
 	var alreadyCompleted bool
 
-	err := e.withPoolMatch(compId, matchId, func(r *state.MatchResult) {
+	err := e.withPoolMatch(e.store, compId, matchId, func(r *state.MatchResult) {
 		if r.Status == state.MatchStatusCompleted {
 			alreadyCompleted = true
 			return

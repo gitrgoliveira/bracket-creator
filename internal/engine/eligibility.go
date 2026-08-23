@@ -415,7 +415,7 @@ func (e *Engine) RecordDecision(compID, matchID, decision, decisionBy, decisionR
 	}
 	// T103: look up the prior result so we know whether this is an
 	// overwrite of a kiken/fusenpai (the "undo" path).
-	prior, err := e.lookupExistingResult(compID, matchID)
+	prior, err := e.lookupExistingResult(e.store, compID, matchID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -489,8 +489,8 @@ func (e *Engine) RecordDecision(compID, matchID, decision, decisionBy, decisionR
 // MatchResult so callers (loserSideName, etc.) see a uniform shape;
 // only the fields the kiken-undo path needs are populated. Returns a
 // *NotFoundError when the match is unknown.
-func (e *Engine) lookupExistingResult(compID, matchID string) (*state.MatchResult, error) {
-	poolMatches, err := e.store.LoadPoolMatches(compID)
+func (e *Engine) lookupExistingResult(h state.StoreTx, compID, matchID string) (*state.MatchResult, error) {
+	poolMatches, err := h.LoadPoolMatches(compID)
 	if err == nil {
 		for i := range poolMatches {
 			if poolMatches[i].ID == matchID {
@@ -499,7 +499,7 @@ func (e *Engine) lookupExistingResult(compID, matchID string) (*state.MatchResul
 			}
 		}
 	}
-	bracket, err := e.store.LoadBracket(compID)
+	bracket, err := h.LoadBracket(compID)
 	if err == nil && bracket != nil {
 		for _, round := range bracket.Rounds {
 			for i := range round {
@@ -706,7 +706,7 @@ func combinedPlayerPool(compPlayers []domain.Player, participants []domain.Playe
 // loser, or unknown player).
 //
 // FR-036, contracts/match-decisions.md §side-effects.
-func (e *Engine) recordIneligibilityFromDecision(compID, matchID string, result *state.MatchResult) (*domain.CompetitorStatus, error) {
+func (e *Engine) recordIneligibilityFromDecision(h state.StoreTx, compID, matchID string, result *state.MatchResult) (*domain.CompetitorStatus, error) {
 	if result == nil {
 		return nil, nil
 	}
@@ -717,7 +717,7 @@ func (e *Engine) recordIneligibilityFromDecision(compID, matchID string, result 
 	if loser == "" {
 		return nil, nil
 	}
-	comp, err := e.store.LoadCompetition(compID)
+	comp, err := h.LoadCompetition(compID)
 	if err != nil {
 		return nil, err
 	}
@@ -727,7 +727,7 @@ func (e *Engine) recordIneligibilityFromDecision(compID, matchID string, result 
 		return nil, nil
 	}
 	// Engi forces the zekken layout; make the effective flag explicit (Finding 10).
-	participants, err := e.store.LoadParticipants(compID, comp.EffectiveWithZekkenName())
+	participants, err := h.LoadParticipants(compID, comp.EffectiveWithZekkenName())
 	if err != nil {
 		return nil, err
 	}
@@ -744,27 +744,29 @@ func (e *Engine) recordIneligibilityFromDecision(compID, matchID string, result 
 		MatchID:       matchID,
 		RecordedAt:    time.Now().UTC(),
 	}
-	// K2/CHK047: atomic check-and-set under WithTransaction closes the
-	// TOCTOU window between the pre-RecordDecision check and this write.
-	// Two concurrent kiken writes on the same player from different
-	// matches will serialize on the per-comp lock; the second to acquire
-	// it sees the first's record and returns *AlreadyIneligibleError
-	// instead of silently overwriting.
-	if txErr := e.store.WithTransaction(compID, func(tx state.StoreTx) error {
-		statuses, err := tx.LoadCompetitorStatus(compID)
-		if err != nil {
-			return err
+	// K2/CHK047: check-and-set — the load, the check and the write MUST happen
+	// under one per-competition lock acquire, or two concurrent kiken writes on
+	// the same player from different matches can both pass the check (TOCTOU).
+	// That atomicity is the HANDLE's: every caller reaches this inside a
+	// WithTransaction (the HTTP handlers wrap their whole write; the non-tx
+	// engine entry points RecordMatchResult / RecordMatchResultWithIneligibility
+	// are now WithTransaction shims for exactly this reason), so h is a live tx
+	// and the sequence below serializes on the already-held lock. Do NOT call
+	// this with e.store as the handle: each call would take its own lock and
+	// the TOCTOU window this closes (K2) would reopen.
+	statuses, err := h.LoadCompetitorStatus(compID)
+	if err != nil {
+		return nil, err
+	}
+	if st, ok := statuses[playerID]; ok && !st.Eligible && st.MatchID != matchID {
+		return nil, &AlreadyIneligibleError{
+			PlayerID: playerID,
+			MatchID:  st.MatchID,
+			Reason:   st.Reason,
 		}
-		if st, ok := statuses[playerID]; ok && !st.Eligible && st.MatchID != matchID {
-			return &AlreadyIneligibleError{
-				PlayerID: playerID,
-				MatchID:  st.MatchID,
-				Reason:   st.Reason,
-			}
-		}
-		return tx.SetCompetitorStatus(compID, status)
-	}); txErr != nil {
-		return nil, txErr
+	}
+	if err := h.SetCompetitorStatus(compID, status); err != nil {
+		return nil, err
 	}
 	return &status, nil
 }

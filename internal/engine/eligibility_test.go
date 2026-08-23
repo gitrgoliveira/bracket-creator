@@ -1377,7 +1377,7 @@ func TestEligibilityHelpers_NilCompetitionNoPanic(t *testing.T) {
 
 	t.Run("recordIneligibilityFromDecision no-ops on missing config", func(t *testing.T) {
 		result := &state.MatchResult{SideA: "Alice", SideB: "Bob", Winner: "Alice", Decision: string(domain.DecisionKikenVoluntary)}
-		status, err := eng.recordIneligibilityFromDecision(missing, "m1", result)
+		status, err := eng.recordIneligibilityFromDecision(eng.store, missing, "m1", result)
 		assert.NoError(t, err)
 		assert.Nil(t, status)
 	})

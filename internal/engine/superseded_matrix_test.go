@@ -28,6 +28,17 @@ import (
 // Each cell asserts BOTH directions. Reporting a supersede is only half the
 // contract; a write that lands must never claim to be superseded, or the fix
 // "passes" by rejecting everything.
+//
+// KNOWN RESIDUAL (P6 in the bc-twin mutation audit): nothing here can pin that
+// the non-tx entry shims actually WRAP their write in WithTransaction rather
+// than passing e.store bare. The two are observationally identical in any
+// single-threaded test (each store call locks itself either way), and the
+// difference — recordIneligibilityFromDecision's K2 check-and-set being atomic
+// or not — only manifests under an interleaving no test can schedule
+// deterministically from outside the store. If you are about to "simplify"
+// RecordMatchResult or RecordMatchResultWithIneligibility into a bare handle
+// pass: that is the mutation this note exists for; read the K2 note on
+// recordIneligibilityFromDecision first.
 func TestSupersededIsReportedOnEveryWritePath(t *testing.T) {
 	const storedAt, olderAt, newerAt = 2_000_000, 1_000_000, 3_000_000
 

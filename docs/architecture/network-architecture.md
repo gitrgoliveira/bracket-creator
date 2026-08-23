@@ -105,15 +105,23 @@ sequenceDiagram
 
 The client treats the link as unreliable by default; the following flows show how.
 
+Only a confirmed write ever empties the queue. A write that cannot be confirmed is never
+dropped in silence: it is either kept and retried, parked until the operator can fix the
+cause, or discarded with a visible notice naming the reason.
+
 ```mermaid
 flowchart TD
     submit["Operator submits a score / decision / lineup"] --> try{"fetch (12s AbortController timeout)"}
-    try -->|2xx| done["Confirmed, UI advances"]
-    try -->|transient or offline| q["Enqueue in outbox<br/>(localStorage, 6h TTL)"]
-    q --> banner["Editor shows 'Not saved yet (will retry)'"]
-    q --> flush["Background flush<br/>(exp. backoff + jitter)"]
-    flush -->|2xx| cleared["Banner clears (saved)"]
-    flush -->|non-retryable 4xx| failed["Permanent fail:<br/>subscribeTerminalWriteFailed:<br/>red 'Not saved (re-enter)' banner"]
+    try -->|2xx| done["Confirmed<br/>queue entry cleared"]
+    try -->|transient or offline| q["Enqueue in outbox<br/>(localStorage, 12h TTL)"]
+    q --> flush["Background flush<br/>(backoff to 8s max)"]
+    flush -->|2xx| done
+    flush -->|5xx / 429 / 403<br/>server error or misconfigured| retrying["Stays queued, keeps retrying<br/>10 rejections: notice + 'Not saving' pill"]
+    retrying --> flush
+    flush -->|401<br/>invalid password| parked["Parked: stops retrying<br/>'Sign in to save' pill"]
+    parked -->|operator signs in| flush
+    flush -->|other 4xx: 400 / 413 / 409| refused["Discarded, permanently refused<br/>notice names the match + reason"]
+    q -.->|still queued after 12h TTL| expired["Discarded on next page load<br/>notice raised at load time"]
     online["browser 'online' event, tab visible again"] --> flush
 ```
 
@@ -133,11 +141,15 @@ Key client mechanisms (all in `web-mobile/js/api_client.jsx` + consumers):
 |---|---|
 | Half-open / stalled sockets | 12s write timeouts, 35s SSE silence watchdog (armed at connect, not only `onopen`) |
 | Reconnect storms | exponential backoff + jitter (vs. a fixed delay) |
-| Lost writes | durable outbox persisted to `localStorage` (6h TTL), retried; survives tab refresh |
+| Lost writes | durable outbox persisted to `localStorage` (12h TTL), retried; survives tab refresh |
+| Server errors (5xx / 429), and 403 | write stays queued and keeps retrying for as long as the tab stays open (the TTL is applied at page load, not during a session); after 10 consecutive rejections the operator gets a notice and the sync pill shows "Not saving". On this server 403 is never a bad credential (that is 401): it means the tournament is not configured yet, or is missing its password. Only an admin fixing the server state clears it, so signing in again cannot help and the write keeps retrying instead of parking |
+| Invalid credential (401) | the one 4xx a retry can fix: the write is parked, not discarded, stops retrying, and shows "Sign in to save"; signing in again re-sends it with the new credential |
+| Other non-retryable 4xx (400 validation, 413, generic 409) | write is discarded (it can never succeed on retry), and the operator always gets a visible notice naming the match and the server's reason |
 | Missed events | `Last-Event-ID` replay + `checkSeqGap` on every event → scoped refetch; `resync_required` |
 | Tab resume | `visibilitychange` → force reconnect + refetch |
-| False success | terminal writes show pending/failure state, never a false "saved" |
-| Credential change | queue cleared on logout / `password_reset` (no stale-password retries) |
+| False success | terminal writes show pending / parked / still-retrying / failure state, never a false "saved"; a write dropped for exceeding the TTL, or because the stored entry was corrupt, also raises a visible notice at page load, never a silent loss |
+| Storage full | if the browser can't persist the queue (storage quota exhausted), that is surfaced to the operator rather than swallowed |
+| Credential change | queue cleared on logout (the operator is asked to confirm first if writes are still unsent) or on `password_reset` (no stale-password retries) |
 
 ## 5. Authentication on the network
 

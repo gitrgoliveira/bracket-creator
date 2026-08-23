@@ -12,19 +12,32 @@ export const AUTOSAVE_DEBOUNCE_MS = 300;
 // Small indicator rendered in the scoring-panel header while a match is
 // running. Subscribes to the write-queue sync status from api_client.jsx
 // (via window.subscribeSyncStatus) and reflects:
-//   synced     : last write landed; no queue pending
-//   syncing    : write in flight / in queue
-//   offline    : network down; queue retrying with backoff
+//   synced        : last write landed; no queue pending
+//   syncing       : write in flight / in queue
+//   offline       : network down; queue retrying with backoff
+//   auth-required : write refused with 401; parked, still queued, needs the
+//                   operator to sign in again to save (403 is a different
+//                   case: server misconfiguration, not a bad credential, so
+//                   it retries with backoff instead of parking; see
+//                   api_client.jsx's 401 vs 403 handling)
+//   server-error  : server reachable but this write keeps failing (10+
+//                   consecutive 5xx/429); still queued and retrying
+//                   automatically, no operator action needed
 //
 // COPY RULE: NEVER use the word "live" in user-facing strings.
 // Colors use design tokens only (var(--...)): no hardcoded hex.
 // ---------------------------------------------------------------------------
 
 // Module-level const: hoisted so the object is not rebuilt on every render.
+// Every SyncStatusValue MUST have an entry here: SyncStatusPill falls back
+// to SYNC_PILL_CONFIG.synced for anything missing, so an unmapped status
+// would silently render the word "Synced" over unsaved work.
 const SYNC_PILL_CONFIG = {
   synced: { label: 'Synced',   cls: 'sync-pill--synced',  dot: '●' },
   syncing: { label: 'Syncing…', cls: 'sync-pill--syncing', dot: '◌' },
   offline: { label: 'Offline',  cls: 'sync-pill--offline', dot: '●' },
+  'auth-required': { label: 'Sign in to save', cls: 'sync-pill--auth',  dot: '●' },
+  'server-error': { label: 'Not saving',        cls: 'sync-pill--error', dot: '●' },
 };
 
 export function SyncStatusPill({ isRunning }) {
@@ -45,6 +58,27 @@ export function SyncStatusPill({ isRunning }) {
   if (!isRunning) return null; // render guard: no visible pill unless running
 
   const c = SYNC_PILL_CONFIG[status] || SYNC_PILL_CONFIG.synced;
+
+  // bc-qttl: this pill is the element that TELLS the operator "Sign in to
+  // save", so it should also be the thing they can act on. When the queue is
+  // parked on a 401 and the re-auth entry point is installed (App mounts it
+  // on window.requestReauth), render a real button instead of an inert span.
+  // Every other status keeps the plain, non-interactive span.
+  if (status === 'auth-required' && typeof window.requestReauth === 'function') {
+    return (
+      <button
+        type="button"
+        className={`sync-status-pill ${c.cls}`}
+        data-testid="sync-status-pill"
+        aria-label={`Score sync: ${c.label}`}
+        onClick={() => window.requestReauth()}
+      >
+        <span className="sync-pill__dot" aria-hidden="true">{c.dot}</span>
+        <span className="sync-pill__label">{c.label}</span>
+      </button>
+    );
+  }
+
   return (
     <span className={`sync-status-pill ${c.cls}`} data-testid="sync-status-pill" aria-label={`Score sync: ${c.label}`}>
       <span className="sync-pill__dot" aria-hidden="true">{c.dot}</span>

@@ -242,23 +242,36 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			})
 		}
 
-		// Refuse a replace that would orphan an already-seeded participant.
 		// This endpoint carries no seed data of its own (unlike
 		// PUT /competitions/:id, which derives seeds.csv fresh from each
-		// player's Seed field on every save), so it has no way to rewrite a
-		// seed row alongside an identity change the way the single-participant
-		// PUT /participants/:pid path does -- an edit here can only strand the
-		// EXISTING row, never legitimately update it (bc-389 review finding:
+		// player's Seed field on every save), so a seed row whose (name, dojo)
+		// no longer resolves against the new roster needs a rule for what
+		// happened to it. Two readings are indistinguishable from the request
+		// body alone: the participant was RENAMED (their identity moved to a
+		// different row in the same request), or the participant was REMOVED
+		// (their row is simply gone). This is a full replace with no stable
+		// per-request participant id to key a rename off, so the two cannot be
+		// told apart by matching rows -- only by whether the replace ALSO adds
+		// any identity the old roster didn't have: a rename looks structurally
+		// identical to remove-old-add-new, so it can only happen when the
+		// replace is adding something. A replace that adds no identities can
+		// only be removing rows, so any orphaned seed there is unambiguous.
+		//
+		// Ambiguous (orphans a seed AND adds an identity): refuse the whole
+		// write, same as before this rule existed (bc-389 review finding:
 		// correcting a seeded competitor's dojo through this endpoint orphaned
 		// their seeds.csv row, and only generate-draw discovered it later,
-		// minutes or hours after the edit looked like it had succeeded).
-		//
-		// Rather than guess which new row a changed identity corresponds to
-		// (this is a full replace with no stable per-request participant id
-		// to key a rename off), refuse the whole write: the operator keeps
-		// the (name, dojo) pair unchanged, or edits identity through
+		// minutes or hours after the edit looked like it had succeeded). The
+		// operator keeps the (name, dojo) pair unchanged, splits the removal
+		// into a request that adds nothing, or edits identity through
 		// PUT /competitions/:id/participants/:pid (which rewrites the seed
 		// alongside the rename) or the seeding panel directly.
+		//
+		// Unambiguous (orphans a seed, adds nothing): proceed as a removal --
+		// the write below drops the orphaned row(s) from seeds.csv after the
+		// roster save succeeds, matching what PUT /competitions/:id already
+		// does for a removed competitor's seed by deriving seeds.csv fresh on
+		// every save.
 		seeds, serr := store.LoadSeedsRaw(id)
 		if serr != nil {
 			internalError(c, serr, "failed to load seeds")
@@ -294,10 +307,12 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			canonicalPlayers[i].Name = helper.TitleCaseName(canonicalPlayers[i].Name)
 			canonicalPlayers[i].Dojo = strings.TrimSpace(canonicalPlayers[i].Dojo)
 		}
-		if orphaned := seedsOrphanedByRosterReplace(existing, canonicalPlayers, seeds); len(orphaned) > 0 {
+		orphaned, keptSeeds := seedsOrphanedByRosterReplace(existing, canonicalPlayers, seeds)
+		if len(orphaned) > 0 && rosterReplaceAddsIdentities(existing, canonicalPlayers) {
+			labels := formatOrphanedSeedLabels(orphaned)
 			c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf(
-				"this replace would orphan %d already-seeded participant(s): %s; keep their name and dojo unchanged, or update seeds via PUT /competitions/:id/participants/:pid or the seeding panel first",
-				len(orphaned), strings.Join(orphaned, ", "))})
+				"this replace removes or renames %d already-seeded participant(s) (%s), and also adds new participant(s), so a removal can't be told apart from a rename; keep their name and dojo unchanged, do the removal in a request that adds no new participants, or update/clear their seed first via PUT /competitions/:id/participants/:pid or the seeding panel",
+				len(orphaned), strings.Join(labels, ", "))})
 			return
 		}
 
@@ -315,6 +330,27 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			}
 			internalError(c, err, "failed to save participants")
 			return
+		}
+
+		// The guard above only refuses the AMBIGUOUS case; reaching here with
+		// orphaned rows means the replace added no new identities, so this is
+		// an unambiguous removal (see the guard comment above). Rewrite
+		// seeds.csv to drop exactly the orphaned rows, matching what
+		// PUT /competitions/:id already does for a removed competitor's seed
+		// by deriving seeds.csv fresh on every save.
+		//
+		// Best-effort, same historical contract as the other seeds.csv writer
+		// that follows a participants write it doesn't want to unwind
+		// (saveCompetitionWithPlayers, handlers_competition.go ~99-107): the
+		// roster save above is the one that matters and has already landed,
+		// and a leftover orphaned row here is exactly the pre-existing-ghost
+		// case seedsOrphanedByRosterReplace already tolerates elsewhere --
+		// not a new failure mode -- so there is nothing worth rolling the
+		// roster write back over.
+		if len(orphaned) > 0 {
+			if err := store.SaveSeeds(id, keptSeeds); err != nil {
+				fmt.Printf("Warning: failed to drop orphaned seed(s) after roster removal: %v\n", err)
+			}
 		}
 
 		// Reload from disk so the response reflects the persisted roster,

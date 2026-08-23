@@ -1165,6 +1165,8 @@ func reopenPoolMatch(m *state.MatchResult, reason string) {
 	m.WinnerID = ""
 	m.IpponsA = nil
 	m.IpponsB = nil
+	m.HansokuA = 0
+	m.HansokuB = 0
 	m.Decision = ""
 	m.DecisionBy = ""
 	m.DecisionReason = ""
@@ -1186,28 +1188,39 @@ func reopenPoolMatch(m *state.MatchResult, reason string) {
 // Everything cleared below is the discarded verdict ABOUT those bouts, not a
 // record OF them: the encounter winner, the match-level default-win scoreline
 // (the FIK Art. 32 maru fill a kiken/fusenpai writes at match level), the
-// decision, the match-level encho/hantei state describing the bout in progress
-// when the operator ended it, and the provenance stamps for a result that no
-// longer exists (IsOverridden, ResultSource). Leaving those behind produced a
-// match that was running yet still advertised a winner, a scoreline, and a
-// manual-override badge inherited from the result the reopen threw away.
+// match-level hansoku count, the decision, the encho/hantei state describing
+// the bout in progress when the operator ended it, and the provenance stamps
+// for a result that no longer exists (IsOverridden, ResultSource). Leaving
+// those behind produced a match that was running yet still advertised a
+// winner, a scoreline, and a manual-override badge inherited from the result
+// the reopen threw away.
 //
 // This clears the verdict fields RevertMatchToQueue clears (engine/scoring.go)
 // that a kachinuki result can actually carry, MINUS SubResults (which requeue
 // drops and reopen exists to preserve) and CorrectionReason/ReopenPending
-// (which the reopen is itself setting). Two RevertMatchToQueue fields are
-// deliberately NOT mirrored: match-level HansokuA/B and FlagsA/B are never
-// populated on a kachinuki team match (hansoku rides on the sub-bouts, flags
-// are engi-only, and reopen*Match run for kachinuki matches only), and
-// ModifiedAt is left at the completion stamp on purpose — it still fences any
-// stale pre-completion offline write via ApplyByTimestamp and never blocks the
-// re-End. If you add a match-level verdict field a kachinuki result CAN carry,
-// clear it here too.
+// (which the reopen is itself setting). Match-level HansokuA/B ARE mirrored
+// here, even though today's team-editor wire path never sets them on a
+// kachinuki match: NormalizeLegacy (state/legacy_hantei.go) folds a legacy
+// ScoreA/ScoreB string into IpponsA/HansokuA on every bracket read, and
+// MatchResult.HansokuA/B are first-class pool-matches.csv columns any client
+// payload can set (state/pools.go), so a pre-migration file or an
+// out-of-band write can leave a genuine count here. Before bc-bmsc, the old
+// ScoreA = "" clear wiped this count too, because it rode inside the
+// rendered string's "(HN)" suffix; leaving it behind now would let
+// applyHansokuIppons fold a stale count into the H ippons of a scoreline the
+// reopen just cleared. FlagsA/B remain unmirrored: they are engi-only, and
+// engi has no kachinuki, so neither reopen path ever sees them populated.
+// ModifiedAt is left at the completion stamp on purpose — it still
+// fences any stale pre-completion offline write via ApplyByTimestamp and
+// never blocks the re-End. If you add a match-level verdict field a
+// kachinuki result CAN carry, clear it here too.
 func reopenBracketMatch(bm *state.BracketMatch, reason string) {
 	bm.Status = state.MatchStatusRunning
 	bm.Winner = ""
 	bm.IpponsA = nil
 	bm.IpponsB = nil
+	bm.HansokuA = 0
+	bm.HansokuB = 0
 	bm.Decision = ""
 	bm.DecisionBy = ""
 	bm.DecisionReason = ""

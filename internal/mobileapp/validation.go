@@ -242,46 +242,89 @@ func seedsOffRoster(players []domain.Player, assignments []domain.SeedAssignment
 		strings.Join(unknown, ", "), verb, remedy)
 }
 
-// seedsOrphanedByRosterReplace reports which of the CURRENTLY resolvable
-// seed assignments would stop resolving if oldPlayers were replaced by
-// newPlayers -- the set POST /competitions/:id/participants (the bulk
-// roster-replace endpoint) would silently strand, since that endpoint
-// carries no seed data of its own and so has no way to rewrite seeds.csv
-// alongside an identity change (bc-389 review finding). Both rosters are
-// resolved via domain.RosterIndex, the same (name, dojo)-with-unique-
-// bare-name-fallback resolver every other seed matcher uses, so "would
-// this still resolve" here means exactly what it means to generate-draw.
+// seedsOrphanedByRosterReplace partitions seeds into KEPT (rows that still
+// resolve against newPlayers, plus pre-existing ghosts already unresolvable
+// against oldPlayers -- see below) and ORPHANED (rows that resolve against
+// oldPlayers but not newPlayers): the set POST /competitions/:id/participants
+// (the bulk roster-replace endpoint) would silently strand if it wrote the
+// new roster as-is, since that endpoint carries no seed data of its own and
+// so has no way to rewrite seeds.csv alongside an identity change (bc-389
+// review finding). Both rosters are resolved via domain.RosterIndex, the
+// same (name, dojo)-with-unique-bare-name-fallback resolver every other seed
+// matcher uses, so "would this still resolve" here means exactly what it
+// means to generate-draw.
+//
+// Whether an orphaned row is refused (an identity change looks structurally
+// identical to remove-old-add-new, so it cannot be told apart from a rename)
+// or treated as an unambiguous removal (dropped from seeds.csv) is the
+// caller's decision, in handlers_participants.go -- this function only
+// reports the partition.
 //
 // A seed row that is ALREADY unresolvable against oldPlayers (a
-// pre-existing ghost, e.g. seeds entered before the roster) is not
-// reported: this replace does not make that row any less broken than it
-// already was, and refusing on its account would block an unrelated
-// roster edit for a problem the operator did not just create.
+// pre-existing ghost, e.g. seeds entered before the roster) is reported as
+// KEPT, not orphaned: this replace does not make that row any less broken
+// than it already was, so it is neither grounds to refuse the write nor a
+// row this replace should drop.
 //
-// Returned as ready-to-display "name (dojo) rank N" labels rather than raw
-// domain.SeedAssignment values; callers needing the structured form should
-// re-derive it rather than parse this slice.
-func seedsOrphanedByRosterReplace(oldPlayers, newPlayers []domain.Player, seeds []domain.SeedAssignment) []string {
+// Returns the two partitions as domain.SeedAssignment slices (not
+// ready-to-display labels) so the caller has the exact structured set it
+// needs both to format an error message and to rewrite seeds.csv --
+// previously this returned display labels and told callers needing the
+// structured form to re-derive it, which is exactly the kind of drift this
+// function exists to prevent.
+func seedsOrphanedByRosterReplace(oldPlayers, newPlayers []domain.Player, seeds []domain.SeedAssignment) (orphaned, kept []domain.SeedAssignment) {
 	if len(seeds) == 0 {
-		return nil
+		return nil, nil
 	}
 	oldRoster := domain.NewRosterIndex(oldPlayers)
 	newRoster := domain.NewRosterIndex(newPlayers)
-	var orphaned []string
 	for _, a := range seeds {
 		if _, ok := oldRoster.Lookup(a.Name, a.Dojo); !ok {
-			continue // already unresolvable; this replace doesn't make it worse
+			kept = append(kept, a) // pre-existing ghost; this replace doesn't make it worse
+			continue
 		}
 		if _, ok := newRoster.Lookup(a.Name, a.Dojo); ok {
-			continue // still resolves after the replace
+			kept = append(kept, a) // still resolves after the replace
+			continue
 		}
+		orphaned = append(orphaned, a)
+	}
+	return orphaned, kept
+}
+
+// rosterReplaceAddsIdentities reports whether newPlayers contains any
+// (name, dojo) identity that does not resolve against oldPlayers. A rename
+// is only reachable through POST /competitions/:id/participants by removing
+// the old identity and adding a new one in the same request (this endpoint
+// has no stable per-request participant id to key a rename off), so when
+// this is true, an orphaned seed row (see seedsOrphanedByRosterReplace)
+// cannot be told apart from a rename and the caller must refuse the write.
+// When it is false, every identity in newPlayers was already present in
+// oldPlayers, so any orphaned row is an unambiguous removal.
+func rosterReplaceAddsIdentities(oldPlayers, newPlayers []domain.Player) bool {
+	oldRoster := domain.NewRosterIndex(oldPlayers)
+	for i := range newPlayers {
+		if _, ok := oldRoster.Lookup(newPlayers[i].Name, newPlayers[i].Dojo); !ok {
+			return true
+		}
+	}
+	return false
+}
+
+// formatOrphanedSeedLabels renders orphaned seed rows as ready-to-display
+// "name (dojo) rank N" strings for the 409 error message. Kept separate from
+// seedsOrphanedByRosterReplace so that function can return the structured
+// form every caller needs, with display formatting only where it's consumed.
+func formatOrphanedSeedLabels(orphaned []domain.SeedAssignment) []string {
+	labels := make([]string, 0, len(orphaned))
+	for _, a := range orphaned {
 		label := a.Name
 		if a.Dojo != "" {
 			label = fmt.Sprintf("%s (%s)", a.Name, a.Dojo)
 		}
-		orphaned = append(orphaned, fmt.Sprintf("%s rank %d", label, a.SeedRank))
+		labels = append(labels, fmt.Sprintf("%s rank %d", label, a.SeedRank))
 	}
-	return orphaned
+	return labels
 }
 
 // validateHTTPURL returns a ValidationError when val is non-empty and does not

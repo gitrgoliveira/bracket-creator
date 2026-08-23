@@ -6243,6 +6243,16 @@ button.pool-match-row {
   font-size: 12px;
 }
 
+/* The editor variant sits between the head and the scoring controls, in both
+   the wide overlay and the narrow shiaijo inline panel (one shared `inner`
+   renders both, so they cannot diverge). Tighter than the banner: it must not
+   push the bout rows off a landscape tablet. */
+.data-issue--editor {
+  margin: 0 0 10px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
 /* The competition-level banner stacks several paragraphs and a button, so it
    needs room the inline variant does not. */
 .data-issue--banner {

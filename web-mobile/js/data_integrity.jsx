@@ -67,6 +67,29 @@ export function UnreadableBoutsNote() {
   );
 }
 
+// UnreadableEditorNote: the same fact, said to the one person who can act on
+// it immediately.
+//
+// The other notices explain a consequence to someone reading standings. This
+// one is read by an operator who has just opened the encounter and is looking
+// at empty bout rows, so it answers their actual question ("did this never get
+// scored?") and names the repair they are already one step away from. Saving
+// from here writes real sub-bouts, which supersedes the retained cell and
+// clears the warning everywhere.
+export function UnreadableEditorNote() {
+  return (
+    <div className="alert alert--warn data-issue data-issue--editor" role="status">
+      <span aria-hidden="true">⚠</span>
+      <span>
+        The bouts recorded for this encounter could not be read from the results
+        file, so the rows below start empty. They are not lost: the unreadable
+        text is still in the file. Entering the bouts here replaces it and clears
+        this warning.
+      </span>
+    </div>
+  );
+}
+
 // UnreadablePoolNote: the per-pool line, shown above the standings the missing
 // bouts distort. Named for the consequence rather than the cause, because the
 // consequence is what an operator has to decide about: these are the figures a

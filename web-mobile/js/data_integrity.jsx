@@ -27,6 +27,16 @@
 // the server cannot tell the two apart on that path. The gate is here instead:
 // every consumer takes an explicit opt-in, and only the admin surfaces pass it.
 // A spectator has nothing to do with a parse error, so they are never shown one.
+//
+// NOTE ON ARIA. The three notices carry no live-region role. They describe a
+// condition that PERSISTS until someone repairs a file, and they sit in reading
+// order beside the rows they are about. Every other `role="status"` in this app
+// is on TRANSIENT state -- the pending-write banner, the reconnect pill, the
+// loading page -- which is what the role is for; and a row-level note announced
+// away from its row ("this encounter's bouts could not be read") names no
+// encounter, so it tells a screen-reader user less than silence does. The
+// competition banner below is the one exception and keeps `role="alert"`: it
+// appears to say scoring is blocked, which is worth interrupting for.
 
 // matchDataUnreadable: the ONE test for "this match lost its bouts to a cell
 // that would not parse". Everything else asks this rather than reading the
@@ -56,7 +66,7 @@ export function dataIssueText(issue) {
 // its own does not tell an operator that their standings have moved.
 export function UnreadableBoutsNote() {
   return (
-    <div className="alert alert--warn data-issue data-issue--inline" role="status">
+    <div className="alert alert--warn data-issue data-issue--inline">
       <span aria-hidden="true">⚠</span>
       <span>
         This encounter's individual bouts could not be read from the results file, so
@@ -78,7 +88,7 @@ export function UnreadableBoutsNote() {
 // clears the warning everywhere.
 export function UnreadableEditorNote() {
   return (
-    <div className="alert alert--warn data-issue data-issue--editor" role="status">
+    <div className="alert alert--warn data-issue data-issue--editor">
       <span aria-hidden="true">⚠</span>
       <span>
         The bouts recorded for this encounter could not be read from the results
@@ -96,7 +106,7 @@ export function UnreadableEditorNote() {
 // tied pool is separated on.
 export function UnreadablePoolNote({ count }) {
   return (
-    <div className="alert alert--warn data-issue" role="status">
+    <div className="alert alert--warn data-issue">
       <span aria-hidden="true">⚠</span>
       <span>
         {count === 1

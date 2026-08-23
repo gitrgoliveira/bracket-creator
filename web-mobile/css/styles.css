@@ -6238,7 +6238,7 @@ button.pool-match-row {
    is inset to read as belonging to that row and tightened so a pool with a
    couple of unreadable encounters does not push the standings off screen. */
 .data-issue--inline {
-  margin: 2px 0 6px 20px;
+  margin: 4px 0 6px 20px;
   padding: 6px 10px;
   font-size: 12px;
 }
@@ -6261,7 +6261,7 @@ button.pool-match-row {
 
 .data-issue__list {
   margin: 6px 0;
-  padding-left: 18px;
+  padding-left: 20px;
 }
 
 .data-issue__list code {

@@ -725,9 +725,18 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
 
   return (
     <div>
-      {/* First, above everything: a file that will not parse blocks scoring,
-          and every other number on this page is describing whatever survived
-          the failed load. */}
+      {/* First in the overview COLUMN: a file that will not parse blocks
+          scoring, and every other number on this page is describing whatever
+          survived the failed load.
+          Not first on the PAGE below 720px, though. There `.comp-rail` stops
+          being a left column and stacks above this one, so the banner lands
+          about 650px down, under the section nav and off a phone's first
+          screen (measured at 375x812). Putting it genuinely first would mean
+          hoisting it into the page shell above the rail, which is a change to
+          a surface this bead does not otherwise touch. Left here because the
+          admin console is a tablet-and-up surface in practice (DESIGN.md
+          Principle 4) and 768px still renders the rail beside this column,
+          with the banner above the fold. */}
       <DataIssueBanner
         issues={c.dataIssues}
         competition={c}

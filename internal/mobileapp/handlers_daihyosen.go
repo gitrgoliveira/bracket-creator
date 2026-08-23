@@ -160,6 +160,15 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			return nil
 		})
 		if txErr != nil {
+			if errors.Is(txErr, engine.ErrMatchSuperseded) {
+				// bc-lww1. Not reachable today — the add/remove paths copy the
+				// STORED match (u := *match), so the incoming stamp equals the
+				// stored one and ApplyByTimestamp's >= comparison applies it — but
+				// mapped so a future writer that re-stamps cannot turn a benign
+				// supersede into a 500 the client retries forever.
+				respondSuperseded(c)
+				return
+			}
 			internalError(c, txErr)
 			return
 		}
@@ -289,6 +298,15 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			return nil
 		})
 		if txErr != nil {
+			if errors.Is(txErr, engine.ErrMatchSuperseded) {
+				// bc-lww1. Not reachable today — the add/remove paths copy the
+				// STORED match (u := *match), so the incoming stamp equals the
+				// stored one and ApplyByTimestamp's >= comparison applies it — but
+				// mapped so a future writer that re-stamps cannot turn a benign
+				// supersede into a 500 the client retries forever.
+				respondSuperseded(c)
+				return
+			}
 			internalError(c, txErr)
 			return
 		}

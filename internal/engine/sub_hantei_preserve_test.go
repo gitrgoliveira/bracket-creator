@@ -714,7 +714,7 @@ func TestBracketForwardWrite_PreservedVerdictReachesTheWinner(t *testing.T) {
 			SubResults: stored().SubResults,
 		}
 		result := silent()
-		mismatch := applyPoolWrite(poolStored, result, matchWriteForward)
+		mismatch, _ := applyPoolWrite(poolStored, result, matchWriteForward)
 		require.False(t, mismatch)
 		assert.Equal(t, "Kyoto", poolStored.Winner)
 	})

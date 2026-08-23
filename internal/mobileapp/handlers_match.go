@@ -655,6 +655,15 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			SubResults: subResults,
 		}
 		if err := eng.RecordMatchResult(id, mid, &result); err != nil {
+			if errors.Is(err, engine.ErrMatchSuperseded) {
+				// bc-lww1. Unreachable from today's SPA (this endpoint's payload
+				// carries no modifiedAt, and an unstamped write never loses the
+				// timestamp guard), but mapped anyway: the alternative default is
+				// a 500, which the offline write queue treats as transient and
+				// retries forever against a write that can never win.
+				respondSuperseded(c)
+				return
+			}
 			if errors.Is(err, engine.ErrMatchSideMismatch) {
 				c.JSON(http.StatusConflict, gin.H{
 					"error":   "side_mismatch",
@@ -1360,6 +1369,29 @@ func matchSnapshotOrErr(s matchStores, compID, matchID, guardLabel string) (matc
 	return snap, found, nil
 }
 
+// respondSuperseded writes the shared body for a write the engine dropped under
+// the timestamp last-write-wins guard: a NEWER result for this match is already
+// stored, so nothing was persisted (engine.ErrMatchSuperseded, bc-lww1).
+//
+// 200 with applied:false, never a 4xx/5xx. A superseded write is not a fault and
+// can never win a retry, while the SPA's offline write queue retries 5xx forever
+// (the mp-q8c6 poisoned-queue pattern) — so an error status here would wedge the
+// queue behind a write that is by definition unwinnable. The shape mirrors the
+// override endpoint, which already answers this exact condition with
+// {"applied": false} and whose client already keys on that field.
+//
+// ONE place for the same reason respondCourtBusy is one place: the condition
+// fires on four handlers (score, quick-score, and both daihyosen paths), and a
+// body hand-copied per handler is how the client's single branch quietly stops
+// matching one of them.
+func respondSuperseded(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"applied": false,
+		"reason":  "superseded",
+		"message": "Not saved: a newer result for this match is already recorded.",
+	})
+}
+
 // respondCourtBusy writes the shared 409 court_busy body. The court-
 // exclusivity gate fires on three paths (score start, score reopen, and
 // kachinuki reopen); `action` names what the operator was attempting (e.g.
@@ -1985,6 +2017,29 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			return
 		}
 		if engErr != nil {
+			if errors.Is(engErr, engine.ErrMatchSuperseded) {
+				// bc-lww1: the timestamp guard dropped this write because a NEWER
+				// result is already stored. Nothing was persisted, so everything
+				// below is skipped — most importantly the broadcast, which used to
+				// push the DISCARDED payload to every viewer, board and OBS feed
+				// and made the losing operator's screen agree with itself.
+				//
+				// 200, never 4xx/5xx: a superseded write is not a fault and can
+				// never win a retry, and the SPA's offline queue retries 5xx
+				// forever (the mp-q8c6 poisoned-queue pattern). `applied:false` is
+				// the shape the override endpoint already uses for this exact
+				// condition, and the client keys on it.
+				//
+				// Mirrors the success path's rev-store rule rather than inventing
+				// one: a match that has left `running` has no live high-water mark
+				// to keep, while a running entry must stay so a later out-of-order
+				// delivery from this session is still fenced.
+				if result.Status != state.MatchStatusRunning {
+					runningRevStore.Delete(matchKey)
+				}
+				respondSuperseded(c)
+				return
+			}
 			if errors.Is(engErr, errResultFinalized) {
 				c.JSON(http.StatusConflict, gin.H{
 					"error":   "result_finalized",

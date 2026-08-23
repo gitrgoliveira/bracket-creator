@@ -318,12 +318,16 @@ func (e *Engine) rollbackMatchResultTx(tx state.StoreTx, compID, matchID string,
 // inside the caller's already-held per-competition lock, so they cannot call
 // the public Store methods the non-tx twin uses (the mutex is not reentrant).
 func (e *Engine) writeToPoolOrBracketTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult, policy matchWritePolicy) (mismatch bool, err error) {
+	var superseded bool
 	perr := e.withPoolMatchTx(tx, compID, matchID, func(r *state.MatchResult) {
 		// The POOL branch of the path POST /score and the bulk-score endpoint
 		// actually take - the site the hand-copied merge once missed.
-		mismatch = applyPoolWrite(r, result, policy)
+		mismatch, superseded = applyPoolWrite(r, result, policy)
 	})
 	if perr == nil {
+		if superseded {
+			return false, ErrMatchSuperseded
+		}
 		return mismatch, nil
 	}
 	if !errors.Is(perr, errMatchNotFound) {

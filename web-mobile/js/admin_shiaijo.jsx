@@ -1329,8 +1329,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                             // Optimistically advance the local bracket so an offline court
                                             // sees the next match resolve (reconciled by refetch online).
                                             maybeAdvanceLocal(selectedMatch, patch);
-                                            // F5: queued write: return signal so the editor shows the pending-save banner.
-                                            if (res && res.queued) return res;
+                                            // A write that did not land (queued, F5; or superseded by a
+                                            // newer stored result, bc-lww1) returns its signal so the
+                                            // editor shows the not-saved banner rather than looking saved.
+                                            if (window.writeDidNotLand(res)) return res;
                                         }
                                         catch (_e) { /* surfaced via toast */ }
                                     }}
@@ -1340,8 +1342,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                             const res = await onEditScore(selectedMatch.compId, selectedMatch.id, patch, selectedMatch);
                                             maybeAdvanceLocal(selectedMatch, patch);
                                             if (!mountedRef.current) return res;
-                                            // F5: queued write: do NOT advance. Return signal to editor.
-                                            if (res && res.queued) return res;
+                                            // A write that did not land must NOT advance: the match is
+                                            // still running and still holds the court, so starting the
+                                            // next one here just earns a court_busy on top of the
+                                            // editor's not-saved banner (F5 queued; bc-lww1 superseded).
+                                            if (window.writeDidNotLand(res)) return res;
                                             // Finish + start the next scheduled match, which then
                                             // becomes the running match the panel shows.
                                             if (next && next.status === "scheduled") {

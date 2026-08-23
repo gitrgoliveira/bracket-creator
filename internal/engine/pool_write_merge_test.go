@@ -10,6 +10,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// poolMismatch runs applyPoolWrite and keeps only the IDENTITY verdict, for the
+// many cases below that are about who the payload names and not about write
+// ordering. The second return (superseded, the timestamp guard's drop) has its
+// own assertions in TestTimestampGuardAppliesToBothBranches, which reads it directly
+// rather than through this helper — the whole point of bc-lww1 being that a
+// dropped write must not be indistinguishable from an applied one.
+func poolMismatch(stored, result *state.MatchResult, policy matchWritePolicy) bool {
+	mismatch, _ := applyPoolWrite(stored, result, policy)
+	return mismatch
+}
+
 // applyPoolWrite is the single merge-and-overwrite shared by every pool write
 // closure. These tests pin the two policies AGAINST each other rather than
 // testing one shape: a difference that is deliberate must be visible here, and
@@ -43,7 +54,7 @@ func TestApplyPoolWrite_Policies(t *testing.T) {
 	t.Run("both policies inherit the schedule context a payload omits", func(t *testing.T) {
 		for _, policy := range []matchWritePolicy{matchWriteForward, matchWriteRestore} {
 			in, st := silentPayload(), storedMatch()
-			require.False(t, applyPoolWrite(st, in, policy), "policy %d", policy)
+			require.False(t, poolMismatch(st, in, policy), "policy %d", policy)
 			assert.Equal(t, "A", in.Court, "policy %d", policy)
 			assert.Equal(t, "09:00", in.ScheduledAt, "policy %d", policy)
 			assert.Equal(t, 2, in.Round, "policy %d", policy)
@@ -59,7 +70,7 @@ func TestApplyPoolWrite_Policies(t *testing.T) {
 		for _, policy := range []matchWritePolicy{matchWriteForward, matchWriteRestore} {
 			in, st := silentPayload(), storedMatch()
 			in.SideA, in.SideB = "", ""
-			require.False(t, applyPoolWrite(st, in, policy), "policy %d", policy)
+			require.False(t, poolMismatch(st, in, policy), "policy %d", policy)
 			assert.Equal(t, "Kyoto", in.SideA, "policy %d", policy)
 			assert.Equal(t, "Osaka", in.SideB, "policy %d", policy)
 		}
@@ -70,26 +81,26 @@ func TestApplyPoolWrite_Policies(t *testing.T) {
 		// justification and the next plain score write carries none of its own,
 		// so the overwrite must not blank it.
 		fwd := silentPayload()
-		require.False(t, applyPoolWrite(storedMatch(), fwd, matchWriteForward))
+		require.False(t, poolMismatch(storedMatch(), fwd, matchWriteForward))
 		assert.Equal(t, "reopened after a mis-scored bout", fwd.CorrectionReason)
 
 		// Restore: an empty field in a trusted snapshot means "this was empty",
 		// so it must NOT pick up the rejected partial write's reason.
 		res := silentPayload()
-		require.False(t, applyPoolWrite(storedMatch(), res, matchWriteRestore))
+		require.False(t, poolMismatch(storedMatch(), res, matchWriteRestore))
 		assert.Empty(t, res.CorrectionReason)
 	})
 
 	t.Run("an explicit correction reason always wins", func(t *testing.T) {
 		in := silentPayload()
 		in.CorrectionReason = "this write's own reason"
-		require.False(t, applyPoolWrite(storedMatch(), in, matchWriteForward))
+		require.False(t, poolMismatch(storedMatch(), in, matchWriteForward))
 		assert.Equal(t, "this write's own reason", in.CorrectionReason)
 	})
 
 	t.Run("forward restores a verdict-silent daihyosen, restore replays as captured", func(t *testing.T) {
 		fwd := silentPayload()
-		require.False(t, applyPoolWrite(storedMatch(), fwd, matchWriteForward))
+		require.False(t, poolMismatch(storedMatch(), fwd, matchWriteForward))
 		require.True(t, fwd.SubResults[0].HanteiDecided())
 		assert.Equal(t, "Kyoto", fwd.SubResults[0].Winner)
 		// ...and the encounter records the winner the verdict names.
@@ -99,7 +110,7 @@ func TestApplyPoolWrite_Policies(t *testing.T) {
 		// onto a match whose captured state had none. Before the policy split
 		// this path ran the forward merge and could do exactly that.
 		res := silentPayload()
-		require.False(t, applyPoolWrite(storedMatch(), res, matchWriteRestore))
+		require.False(t, poolMismatch(storedMatch(), res, matchWriteRestore))
 		assert.False(t, res.SubResults[0].HanteiDecided())
 		assert.Empty(t, res.SubResults[0].Winner)
 		assert.Empty(t, res.Winner)
@@ -110,7 +121,7 @@ func TestApplyPoolWrite_Policies(t *testing.T) {
 		// the merge; a caller can no longer do one and forget the other.
 		in, st := silentPayload(), storedMatch()
 		in.Winner = "Kyoto"
-		require.False(t, applyPoolWrite(st, in, matchWriteForward))
+		require.False(t, poolMismatch(st, in, matchWriteForward))
 		assert.Equal(t, "Kyoto", st.Winner)
 		assert.Equal(t, "reopened after a mis-scored bout", st.CorrectionReason)
 		assert.True(t, st.SubResults[0].HanteiDecided())
@@ -120,7 +131,7 @@ func TestApplyPoolWrite_Policies(t *testing.T) {
 		in, st := silentPayload(), storedMatch()
 		in.SideB = "Nara" // stored says Osaka
 		in.Winner = "Nara"
-		assert.True(t, applyPoolWrite(st, in, matchWriteForward),
+		assert.True(t, poolMismatch(st, in, matchWriteForward),
 			"a client payload naming the wrong pairing must be rejected")
 		assert.Empty(t, st.Winner, "an abandoned write must not touch the stored match")
 		assert.Equal(t, "Osaka", st.SideB)
@@ -129,7 +140,7 @@ func TestApplyPoolWrite_Policies(t *testing.T) {
 		// client error; a rollback that silently did nothing would be worse.
 		in2, st2 := silentPayload(), storedMatch()
 		in2.SideB = "Nara"
-		assert.False(t, applyPoolWrite(st2, in2, matchWriteRestore))
+		assert.False(t, poolMismatch(st2, in2, matchWriteRestore))
 		assert.Equal(t, "Nara", st2.SideB, "restore replays the snapshot as captured")
 	})
 }
@@ -194,7 +205,7 @@ func TestPoolWrite_HanteiTravelsWithTheScoreline(t *testing.T) {
 			Status:  state.MatchStatusCompleted,
 			IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"K"},
 		}
-		require.False(t, applyPoolWrite(s, incoming, matchWriteForward))
+		require.False(t, poolMismatch(s, incoming, matchWriteForward))
 		assert.True(t, s.HanteiDecided())
 	})
 
@@ -205,7 +216,7 @@ func TestPoolWrite_HanteiTravelsWithTheScoreline(t *testing.T) {
 			Status:  state.MatchStatusCompleted,
 			IpponsA: []string{"M"}, IpponsB: []string{"K"},
 		}
-		require.False(t, applyPoolWrite(s, incoming, matchWriteForward))
+		require.False(t, poolMismatch(s, incoming, matchWriteForward))
 		assert.False(t, s.HanteiDecided(),
 			"the ippons are the verdict channel; a writer that replaces them has spoken")
 	})
@@ -216,7 +227,7 @@ func TestPoolWrite_HanteiTravelsWithTheScoreline(t *testing.T) {
 			ID: "Pool A-1", SideA: "Alice", SideB: "Bob",
 			Status: state.MatchStatusScheduled,
 		}
-		require.False(t, applyPoolWrite(s, snapshot, matchWriteRestore))
+		require.False(t, poolMismatch(s, snapshot, matchWriteRestore))
 		assert.False(t, s.HanteiDecided(), "the rolled-back verdict must not survive")
 	})
 }
@@ -250,7 +261,7 @@ func TestStripInvalidHantei_GuardsTheNonValidatedPaths(t *testing.T) {
 			DecisionBy: "shiro", DecisionReason: "injured shoulder",
 			IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"○", "○"},
 		}
-		require.False(t, applyPoolWrite(s, incoming, matchWriteForward))
+		require.False(t, poolMismatch(s, incoming, matchWriteForward))
 		assert.False(t, s.HanteiDecided(), "a withdrawal is not a judges' decision")
 		assert.Equal(t, []string{"M"}, s.IpponsA, "the withdrawer's point remains valid (FIK Art. 32)")
 	})
@@ -262,7 +273,7 @@ func TestStripInvalidHantei_GuardsTheNonValidatedPaths(t *testing.T) {
 			Status:  state.MatchStatusCompleted,
 			IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{},
 		}
-		require.False(t, applyPoolWrite(s, incoming, matchWriteForward))
+		require.False(t, poolMismatch(s, incoming, matchWriteForward))
 		assert.False(t, s.HanteiDecided(), "a verdict rests on a tied scoreline (FIK 7-5 / 29-6)")
 		assert.Equal(t, []string{"M"}, s.IpponsA)
 	})
@@ -274,7 +285,7 @@ func TestStripInvalidHantei_GuardsTheNonValidatedPaths(t *testing.T) {
 			Status:  state.MatchStatusCompleted,
 			IpponsA: []string{"M"}, IpponsB: []string{"K", domain.HanteiMark},
 		}
-		require.False(t, applyPoolWrite(s, incoming, matchWriteForward))
+		require.False(t, poolMismatch(s, incoming, matchWriteForward))
 		assert.False(t, s.HanteiDecided(), "the mark names the winner; it cannot sit on the loser")
 		assert.Equal(t, []string{"K"}, s.IpponsB)
 	})
@@ -286,7 +297,7 @@ func TestStripInvalidHantei_GuardsTheNonValidatedPaths(t *testing.T) {
 			Status:  state.MatchStatusRunning,
 			IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"K"},
 		}
-		require.False(t, applyPoolWrite(s, incoming, matchWriteForward))
+		require.False(t, poolMismatch(s, incoming, matchWriteForward))
 		assert.False(t, s.HanteiDecided(), "a hantei declares a winner; a running match has none")
 	})
 
@@ -297,7 +308,7 @@ func TestStripInvalidHantei_GuardsTheNonValidatedPaths(t *testing.T) {
 			Status:  state.MatchStatusCompleted,
 			IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"K"},
 		}
-		require.False(t, applyPoolWrite(s, incoming, matchWriteForward))
+		require.False(t, poolMismatch(s, incoming, matchWriteForward))
 		assert.True(t, s.HanteiDecided())
 	})
 
@@ -362,11 +373,11 @@ func TestSideMismatchIsAForwardOnlyErrorInBothBranches(t *testing.T) {
 				Winner: "Kyoto", Status: state.MatchStatusCompleted,
 			}
 		}
-		assert.True(t, applyPoolWrite(stored(), drifted(), matchWriteForward),
+		assert.True(t, poolMismatch(stored(), drifted(), matchWriteForward),
 			"forward: abandoned, and the caller maps that to 409")
 
 		target := stored()
-		require.False(t, applyPoolWrite(target, drifted(), matchWriteRestore))
+		require.False(t, poolMismatch(target, drifted(), matchWriteRestore))
 		assert.Equal(t, state.MatchStatusScheduled, target.Status, "the rollback actually landed")
 	})
 }
@@ -400,7 +411,13 @@ func TestTimestampGuardAppliesToBothBranches(t *testing.T) {
 
 	t.Run("a strictly older write is dropped, in the pool too", func(t *testing.T) {
 		p := poolStored()
-		require.False(t, applyPoolWrite(p, incoming(older), matchWriteForward))
+		mismatch, superseded := applyPoolWrite(p, incoming(older), matchWriteForward)
+		require.False(t, mismatch, "the payload names the right pairing; it is merely late")
+		// bc-lww1: the drop has to be REPORTED, not just performed. A `false,
+		// false` here is exactly the bug — indistinguishable from a clean write,
+		// which is how the handler came to answer 200 and broadcast the discarded
+		// result to every viewer.
+		require.True(t, superseded)
 		assert.Equal(t, "Kyoto", p.Winner, "the newer stored result stands")
 		assert.EqualValues(t, stored, p.ModifiedAt)
 
@@ -413,7 +430,9 @@ func TestTimestampGuardAppliesToBothBranches(t *testing.T) {
 
 	t.Run("a newer write applies on both", func(t *testing.T) {
 		p := poolStored()
-		require.False(t, applyPoolWrite(p, incoming(newer), matchWriteForward))
+		mismatch, superseded := applyPoolWrite(p, incoming(newer), matchWriteForward)
+		require.False(t, mismatch)
+		require.False(t, superseded, "a write that landed must never report itself superseded")
 		assert.Equal(t, "Osaka", p.Winner)
 
 		b := bracketStored()
@@ -425,7 +444,9 @@ func TestTimestampGuardAppliesToBothBranches(t *testing.T) {
 
 	t.Run("an unstamped write still applies, so legacy clients are unaffected", func(t *testing.T) {
 		p := poolStored()
-		require.False(t, applyPoolWrite(p, incoming(0), matchWriteForward))
+		mismatch, superseded := applyPoolWrite(p, incoming(0), matchWriteForward)
+		require.False(t, mismatch)
+		require.False(t, superseded)
 		assert.Equal(t, "Osaka", p.Winner, "0 means unstamped, which never loses")
 		assert.EqualValues(t, stored, p.ModifiedAt,
 			"and it must not reset the stored stamp, or the match reopens to stale writes")
@@ -434,7 +455,9 @@ func TestTimestampGuardAppliesToBothBranches(t *testing.T) {
 	t.Run("an unstamped STORED value accepts anything, so legacy files are unaffected", func(t *testing.T) {
 		p := poolStored()
 		p.ModifiedAt = 0 // a row written before the column existed
-		require.False(t, applyPoolWrite(p, incoming(older), matchWriteForward))
+		mismatch, superseded := applyPoolWrite(p, incoming(older), matchWriteForward)
+		require.False(t, mismatch)
+		require.False(t, superseded, "a legacy file must not start reporting supersedes")
 		assert.Equal(t, "Osaka", p.Winner)
 	})
 
@@ -442,7 +465,9 @@ func TestTimestampGuardAppliesToBothBranches(t *testing.T) {
 		p := poolStored()
 		corr := incoming(older)
 		corr.CorrectionReason = "scoreboard misread"
-		require.False(t, applyPoolWrite(p, corr, matchWriteForward))
+		mismatch, superseded := applyPoolWrite(p, corr, matchWriteForward)
+		require.False(t, mismatch)
+		require.False(t, superseded, "a correction is not superseded; it outranks the stamp")
 		assert.Equal(t, "Osaka", p.Winner,
 			"an explicit operator correction outranks the timestamp on both branches")
 	})
@@ -463,7 +488,9 @@ func TestTimestampGuardAppliesToBothBranches(t *testing.T) {
 		snap := incoming(older)
 		snap.Winner = "Kyoto"
 		snap.Status = state.MatchStatusScheduled
-		require.False(t, applyPoolWrite(p, snap, matchWriteRestore))
+		mismatch, superseded := applyPoolWrite(p, snap, matchWriteRestore)
+		require.False(t, mismatch)
+		require.False(t, superseded, "a restore is exempt, so it can never report a supersede")
 		assert.Equal(t, state.MatchStatusScheduled, p.Status, "the rollback landed")
 		assert.Equal(t, "Kyoto", p.Winner)
 	})
@@ -546,7 +573,7 @@ func TestStripInvalidHantei_InheritedMarkIsStrippedNotRejected(t *testing.T) {
 	incoming := *stored
 	incoming.Status = state.MatchStatusRunning
 
-	require.False(t, applyPoolWrite(stored, &incoming, matchWriteForward),
+	require.False(t, poolMismatch(stored, &incoming, matchWriteForward),
 		"an inherited mark must not fail the write that inherited it")
 	assert.False(t, stored.HanteiDecided(),
 		"a match back in progress is not one the referees have decided")
@@ -580,22 +607,22 @@ func TestPoolWriteRejectsARewrittenParticipantID(t *testing.T) {
 	t.Run("a disagreeing id is a mismatch on a forward write", func(t *testing.T) {
 		in := payload()
 		in.SideAID = "uuid-someone-else"
-		assert.True(t, applyPoolWrite(stored(), in, matchWriteForward))
+		assert.True(t, poolMismatch(stored(), in, matchWriteForward))
 
 		in = payload()
 		in.SideBID = "uuid-someone-else"
-		assert.True(t, applyPoolWrite(stored(), in, matchWriteForward))
+		assert.True(t, poolMismatch(stored(), in, matchWriteForward))
 	})
 
 	t.Run("a matching id, or none at all, is not a mismatch", func(t *testing.T) {
 		in := payload()
 		in.SideAID, in.SideBID = "uuid-kyoto", "uuid-osaka"
-		assert.False(t, applyPoolWrite(stored(), in, matchWriteForward))
+		assert.False(t, poolMismatch(stored(), in, matchWriteForward))
 
 		// The overwhelmingly common shape: the client sends no ids and
 		// backfillMatchIdentity supplies the stored pair.
 		in = payload()
-		require.False(t, applyPoolWrite(stored(), in, matchWriteForward))
+		require.False(t, poolMismatch(stored(), in, matchWriteForward))
 		assert.Equal(t, "uuid-kyoto", in.SideAID)
 		assert.Equal(t, "uuid-osaka", in.SideBID)
 	})
@@ -607,13 +634,13 @@ func TestPoolWriteRejectsARewrittenParticipantID(t *testing.T) {
 		st.SideAID, st.SideBID = "", ""
 		in := payload()
 		in.SideAID, in.SideBID = "Kyoto", "Osaka"
-		assert.False(t, applyPoolWrite(st, in, matchWriteForward))
+		assert.False(t, poolMismatch(st, in, matchWriteForward))
 	})
 
 	t.Run("restore replays its own snapshot without rejecting it", func(t *testing.T) {
 		in := payload()
 		in.SideAID = "uuid-someone-else"
-		assert.False(t, applyPoolWrite(stored(), in, matchWriteRestore))
+		assert.False(t, poolMismatch(stored(), in, matchWriteRestore))
 	})
 }
 
@@ -639,7 +666,7 @@ func TestApplyPoolWrite_UnparsedSubResultsCell(t *testing.T) {
 		for _, policy := range []matchWritePolicy{matchWriteForward, matchWriteRestore} {
 			in := &state.MatchResult{ID: "P1-1", SideA: "Kyoto", SideB: "Osaka", Court: "B"}
 			st := corruptStored()
-			require.False(t, applyPoolWrite(st, in, policy), "policy %d", policy)
+			require.False(t, poolMismatch(st, in, policy), "policy %d", policy)
 			assert.Equal(t, `[{"position":1,"sideA":"Tanaka"`, st.SubResultsRaw, "policy %d", policy)
 			assert.True(t, st.SubResultsUnreadable, "policy %d", policy)
 		}
@@ -656,7 +683,7 @@ func TestApplyPoolWrite_UnparsedSubResultsCell(t *testing.T) {
 				},
 			}
 			st := corruptStored()
-			require.False(t, applyPoolWrite(st, in, policy), "policy %d", policy)
+			require.False(t, poolMismatch(st, in, policy), "policy %d", policy)
 			assert.Empty(t, st.SubResultsRaw, "policy %d", policy)
 			assert.False(t, st.SubResultsUnreadable, "policy %d", policy)
 		}
@@ -671,7 +698,7 @@ func TestApplyPoolWrite_UnparsedSubResultsCell(t *testing.T) {
 			SubResultsRaw:        `{"not":"the client's business"}`,
 		}
 		st := &state.MatchResult{ID: "P1-1", SideA: "Kyoto", SideB: "Osaka"}
-		require.False(t, applyPoolWrite(st, in, matchWriteForward))
+		require.False(t, poolMismatch(st, in, matchWriteForward))
 		assert.False(t, st.SubResultsUnreadable)
 		assert.Empty(t, st.SubResultsRaw)
 	})

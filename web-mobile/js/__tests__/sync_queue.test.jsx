@@ -1656,3 +1656,158 @@ describe('bc-qttl: API.parkQueueForReauth (password_reset no longer destroys que
         warnSpy.mockRestore();
     });
 });
+
+// bc-lww1: the server drops a write the timestamp guard finds stale and answers
+// 200 {"applied": false}. For a FINISHED result that is the operator's own entry
+// being discarded, so it has to be announced; for a running autosave it is
+// routine noise and stays silent. Neither may be broadcast to the court display,
+// which already holds the newer state.
+describe('recordScore: a superseded write is announced, not reported as saved (bc-lww1)', () => {
+    const supersededResponse = () => ({
+        ok: true, status: 200,
+        json: () => Promise.resolve({ applied: false, reason: 'superseded', message: 'Not saved.' }),
+    });
+
+    it('tells the open editor and the operator when a COMPLETED write is superseded', async () => {
+        const failures = [];
+        const alerts = [];
+        const unsubFail = mod.subscribeTerminalWriteFailed((info) => failures.push(info));
+        const unsubAlert = mod.subscribeQueueAlert((a) => alerts.push(a));
+
+        global.fetch = vi.fn().mockResolvedValue(supersededResponse());
+        const res = await API.recordScore('c1', 'm1', { status: 'completed' }, 'pw', null);
+        await flushMicrotasks();
+        unsubFail();
+        unsubAlert();
+
+        // The caller still gets the body (this is not an exception path).
+        expect(res).toMatchObject({ applied: false });
+
+        // The editor open on this match must resolve its pending banner to an
+        // explicit "not saved" rather than clearing to look saved.
+        expect(failures.length).toBe(1);
+        expect(failures[0]).toMatchObject({ compID: 'c1', matchID: 'm1', kind: 'score' });
+        expect(failures[0].reason).toContain('newer result');
+        // The advice is the point: every OTHER write failure ends in "re-enter
+        // the result", which here would overwrite the newer result that won.
+        expect(failures[0].advice).toBeTruthy();
+        expect(failures[0].advice).not.toMatch(/re-enter the result and submit again/i);
+
+        // And an operator who has already moved to the next court still hears it.
+        const superseded = alerts.filter((a) => a.kind === 'superseded');
+        expect(superseded.length).toBe(1);
+        expect(superseded[0]).toMatchObject({ compID: 'c1', matchID: 'm1' });
+    });
+
+    it('stays silent when a RUNNING autosave is superseded', async () => {
+        const failures = [];
+        const alerts = [];
+        const unsubFail = mod.subscribeTerminalWriteFailed((info) => failures.push(info));
+        const unsubAlert = mod.subscribeQueueAlert((a) => alerts.push(a));
+
+        global.fetch = vi.fn().mockResolvedValue(supersededResponse());
+        await API.recordScore('c1', 'm1', { status: 'running' }, 'pw', null);
+        await flushMicrotasks();
+        unsubFail();
+        unsubAlert();
+
+        expect(failures.length).toBe(0);
+        expect(alerts.filter((a) => a.kind === 'superseded').length).toBe(0);
+    });
+
+    it('does not push the discarded result to the court display', async () => {
+        const published = [];
+        // The bridge publishes court-scoped patches to the display tab. A
+        // superseded payload must not go out: the display already shows the
+        // newer state, and overwriting it is the same harm as the SSE broadcast
+        // the server no longer emits.
+        const origBC = global.BroadcastChannel;
+        global.BroadcastChannel = class {
+            constructor() { this.onmessage = null; }
+            postMessage(msg) { published.push(msg); }
+            close() {}
+        };
+        vi.resetModules();
+        const m2 = await import('../api_client.jsx');
+
+        global.fetch = vi.fn().mockResolvedValue(supersededResponse());
+        await m2.API.recordScore('c1', 'm1', { status: 'completed' }, 'pw', { court: 'A' });
+        await flushMicrotasks();
+
+        global.BroadcastChannel = origBC;
+        expect(published.length).toBe(0);
+    });
+});
+
+// bc-lww1: the same drop, discovered when a QUEUED finished result finally
+// reaches the server after a reconnect. This is the case the bead is about: the
+// entry leaves the queue on success and the sync pill returns to "Synced", so
+// this is the last moment anything can tell the operator their result is gone.
+describe('_flushQueue: a superseded queued score is announced before the entry drains (bc-lww1)', () => {
+    it('notifies on applied:false for a terminal score and still drains the queue', async () => {
+        const failures = [];
+        const alerts = [];
+        const unsubFail = mod.subscribeTerminalWriteFailed((info) => failures.push(info));
+        const unsubAlert = mod.subscribeQueueAlert((a) => alerts.push(a));
+
+        // Score while offline: the completed write is queued as terminal.
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('network error'));
+        const queued = await API.recordScore('c1', 'mq', { status: 'completed' }, 'pw', null);
+        expect(queued).toMatchObject({ queued: true });
+        await flushMicrotasks();
+
+        // Reconnect: the server has a newer result and drops this one.
+        global.fetch = vi.fn().mockResolvedValue({
+            ok: true, status: 200,
+            json: () => Promise.resolve({ applied: false, reason: 'superseded' }),
+        });
+        window.dispatchEvent(new Event('online'));
+        await tick(50);
+        unsubFail();
+        unsubAlert();
+
+        expect(failures.length).toBeGreaterThanOrEqual(1);
+        expect(failures[0]).toMatchObject({ compID: 'c1', matchID: 'mq', kind: 'score' });
+        expect(alerts.filter((a) => a.kind === 'superseded').length).toBeGreaterThanOrEqual(1);
+
+        // Drained: retrying could never change the outcome, so the entry must go.
+        expect(API.hasPendingTerminalWrite('c1', 'mq')).toBe(false);
+        const callsBefore = global.fetch.mock.calls.length;
+        window.dispatchEvent(new Event('online'));
+        await tick(50);
+        expect(global.fetch.mock.calls.length).toBe(callsBefore);
+    });
+});
+
+// bc-lww1: writeDidNotLand is the ONE question every caller asks before acting
+// as if a result is stored (closing an editor, advancing to the next match). It
+// exists because that question used to be spelled `res.queued` at five separate
+// call sites, which is exactly how a second not-landed shape gets handled at one
+// of them and missed at the other four.
+describe('writeDidNotLand (bc-lww1)', () => {
+    it('reports both not-landed shapes and nothing else', () => {
+        const writeDidNotLand = mod.writeDidNotLand;
+        expect(typeof writeDidNotLand).toBe('function');
+
+        // Not landed: held for retry, or dropped by the server as superseded.
+        expect(writeDidNotLand({ queued: true })).toBe(true);
+        expect(writeDidNotLand({ applied: false })).toBe(true);
+        expect(writeDidNotLand({ applied: false, reason: 'superseded' })).toBe(true);
+
+        // Landed, or nothing to judge. A normal score response carries the
+        // stored result and no `applied` key at all, so an over-eager truthiness
+        // check here would treat every successful save as a failure.
+        expect(writeDidNotLand({ id: 'm1', winner: 'Alice', status: 'completed' })).toBe(false);
+        expect(writeDidNotLand({ applied: true })).toBe(false);
+        expect(writeDidNotLand({ queued: false })).toBe(false);
+        expect(writeDidNotLand({})).toBe(false);
+        expect(writeDidNotLand(null)).toBe(false);
+        expect(writeDidNotLand(undefined)).toBe(false);
+    });
+
+    it('is exposed on window for the non-module consumers', () => {
+        // The five call sites are components loaded as window.* globals rather
+        // than ES imports, so the window binding IS the contract for them.
+        expect(typeof window.writeDidNotLand).toBe('function');
+    });
+});

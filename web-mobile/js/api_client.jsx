@@ -393,7 +393,11 @@ function _setSyncStatus(s) {
 // see the 401/403 branches in _flushQueue below.
 // Sync status alone returns to 'synced', which would let the editor
 // clear its pending banner and look "saved". This channel lets surfaces show an
-// explicit "not saved" state instead. Payload: {compID, matchID, kind, status, reason}.
+// explicit "not saved" state instead.
+//
+// Payload: {compID, matchID, kind, status, reason, advice?}. `advice` overrides
+// the renderers' default "Re-enter the result and submit again." — see
+// _notifyScoreSuperseded, the one case where re-entering is the wrong move.
 const _terminalFailListeners = new Set();
 function subscribeTerminalWriteFailed(fn) {
     _terminalFailListeners.add(fn);
@@ -403,6 +407,52 @@ function _notifyTerminalWriteFailed(info) {
     for (const fn of _terminalFailListeners) {
         try { fn(info); } catch (_e) { /* swallow */ }
     }
+}
+
+// writeDidNotLand reports that a score write is NOT stored, from the value
+// recordScore handed back. Two shapes, one meaning: `queued` (the request never
+// reached the server and is being held for retry) and `applied:false` (it
+// reached the server, and the timestamp guard dropped it because a newer result
+// is already recorded — bc-lww1).
+//
+// Every caller that CLOSES an editor, advances to the next match, or otherwise
+// behaves as if the result is now stored must ask this first. It is one function
+// because the question was previously spelled `res.queued` at five separate call
+// sites — which is precisely how a second not-landed shape gets handled at the
+// one site someone happened to be editing and missed at the other four. Adding a
+// third shape must not require finding them again.
+function writeDidNotLand(res) {
+    return !!res && (res.queued === true || res.applied === false);
+}
+
+// bc-lww1: a COMPLETED score the server dropped under the timestamp
+// last-write-wins guard (200 {"applied": false}). The operator entered a
+// result, the server kept a NEWER one, and nothing they can see says so — the
+// response used to echo their own payload back and the SSE broadcast carried
+// the discarded values, so every surface agreed with the screen they were
+// looking at.
+//
+// Announced on BOTH channels for the same reason the queued-409 path below uses
+// both: _terminalFailListeners reaches the editor open on this match (so its
+// pending banner resolves to "not saved" instead of clearing to look saved),
+// while _notifyQueueAlert reaches an operator who has already moved to the next
+// court. NOT _notifyBracketResync, whose whole point is that an override
+// supersede is BENIGN: an override is an assertion about a feeder the server may
+// safely ignore, whereas this is the operator's own entered result being dropped.
+//
+// The `advice` is the load-bearing part and is why this is not just another
+// terminal failure. Every other write failure ends in "re-enter the result", and
+// here that is actively WRONG: re-entering re-stamps the write with the current
+// clock, so it would beat the newer stored result and undo it. The operator has
+// to look at what is recorded first.
+//
+// Running-status drops stay SILENT, as before: a superseded autosave is routine
+// noise and the newer state is already what every surface shows.
+function _notifyScoreSuperseded(compID, matchID) {
+    const reason = 'a newer result for this match is already recorded';
+    const advice = 'Check the recorded result before re-entering anything: re-submitting would overwrite the newer one.';
+    _notifyTerminalWriteFailed({ compID, matchID, kind: 'score', status: 200, reason, advice });
+    _notifyQueueAlert({ kind: 'superseded', count: 1, terminalCount: 1, compID, matchID });
 }
 
 // Bracket-resync channel. When a queued override-winner assertion the server
@@ -586,15 +636,26 @@ async function _flushQueue() {
                     if (res.ok) {
                         // Success (HTTP 200/201, including a stale {stale:true} no-op): remove
                         // from queue only if no newer write has replaced this descriptor.
-                        if (terminal && kind === 'override') {
-                            // A queued feeder-winner assertion the server LWW-dropped returns
-                            // 200 {"applied": false} and emits NO broadcast, so any optimistic
-                            // local advance from it is stale. Ask listeners to refetch. This is a
-                            // benign supersede, NOT a write failure, so do NOT use the terminal-fail
-                            // channel (which surfaces a "not saved" error).
+                        if (terminal && (kind === 'override' || kind === 'score')) {
+                            // Both endpoints answer a timestamp-guard drop the same way:
+                            // 200 {"applied": false}, with NO SSE broadcast. What that
+                            // means to the operator differs, so the two are announced
+                            // differently.
                             const body = await res.json().catch(() => ({}));
                             if (body && body.applied === false) {
-                                _notifyBracketResync({ compID, matchID, reason: 'lww_dropped' });
+                                if (kind === 'override') {
+                                    // A queued feeder-winner ASSERTION the server dropped. Any
+                                    // optimistic local advance from it is stale, so ask listeners to
+                                    // refetch. Benign, NOT a write failure: do not use the
+                                    // terminal-fail channel (which surfaces a "not saved" error).
+                                    _notifyBracketResync({ compID, matchID, reason: 'lww_dropped' });
+                                } else {
+                                    // bc-lww1: a queued FINISHED score, which is the operator's own
+                                    // entered result. It is gone, and this is the last moment
+                                    // anything can say so — the entry leaves the queue on the next
+                                    // line and the sync pill goes back to "Synced".
+                                    _notifyScoreSuperseded(compID, matchID);
+                                }
                             }
                         }
                         if (_writeQueue.get(key) === descriptor) {
@@ -1678,6 +1739,14 @@ const API = {
             // shape across the confirmed and offline paths. Skip a rejected
             // stale write above so a superseded score is never pushed.
             if (data && data.stale) return data;
+            // bc-lww1: 200 {applied:false} is the timestamp guard's drop — a
+            // NEWER result is already stored and nothing was written. Skip the
+            // broadcast for the same reason `stale` does: pushing this payload to
+            // the court display would overwrite the newer state already there.
+            if (data && data.applied === false) {
+                if (!isRunning) _notifyScoreSuperseded(compID, matchID);
+                return data;
+            }
             _broadcastPatch(payload);
             return data;
         }
@@ -2687,7 +2756,7 @@ const API = {
     },
 };
 
-export { API, subscribeSyncStatus, subscribeTerminalWriteFailed, subscribeBracketResync, subscribeQueueAlert, enqueueRunningWrite };
+export { API, subscribeSyncStatus, subscribeTerminalWriteFailed, subscribeBracketResync, subscribeQueueAlert, enqueueRunningWrite, writeDidNotLand };
 
 if (typeof window !== 'undefined') {
     window.API = API;
@@ -2698,6 +2767,7 @@ if (typeof window !== 'undefined') {
     // explicit "not saved" state when a queued terminal write is permanently dropped.
     window.subscribeTerminalWriteFailed = subscribeTerminalWriteFailed;
     window.subscribeQueueAlert = subscribeQueueAlert;
+    window.writeDidNotLand = writeDidNotLand;
     // mp-y3nk: bracket-resync pub/sub: signals AdminShiaijo to refetch when a
     // queued override the server LWW-dropped leaves stale optimistic bracket state.
     window.subscribeBracketResync = subscribeBracketResync;

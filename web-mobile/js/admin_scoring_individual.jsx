@@ -143,7 +143,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // F5: set when a queued terminal write is PERMANENTLY rejected (non-retryable
   // 4xx on retry): the write never landed, so we must show an explicit "not
   // saved" failure state rather than let the pending banner clear to "saved".
-  const [writeFailed, setWriteFailed] = useStateA(null); // { reason } | null
+  const [writeFailed, setWriteFailed] = useStateA(null); // { reason, advice? } | null
   // Naginata competitions add an extra "S" (Sune) ippon button.
   // Fetched from the competition config on open.
   const [isNaginata, setIsNaginata] = useStateA(false);
@@ -408,7 +408,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     const unsub = window.subscribeTerminalWriteFailed((info) => {
       if (!mountedRef.current) return;
       if (!info || info.compID !== m.compId || info.matchID !== m.id) return;
-      setWriteFailed({ reason: info.reason || `save rejected (${info.status || 'error'})` });
+      setWriteFailed({ reason: info.reason || `save rejected (${info.status || 'error'})`, advice: info.advice });
       setPendingWrite(false); // the queued write is gone: it failed, not pending
     });
     return unsub;
@@ -1014,7 +1014,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
               precedence over the (now-cleared) pending banner. */}
           {writeFailed && (
             <div className="pending-write-banner pending-write-banner--failed" role="alert" aria-live="assertive">
-              <span>Not saved: {writeFailed.reason}. Re-enter the result and submit again.</span>
+              <span>Not saved: {writeFailed.reason}. {writeFailed.advice || "Re-enter the result and submit again."}</span>
               {/* Only offer Retry when we still hold the submit closure. After a
                   reopen/hydration it can't be recovered from the serialized queue,
                   so a Retry button would be permanently disabled and misleading: 

@@ -310,10 +310,13 @@ export function MatchViewerModal({ match, onClose, tournament, compId: defaultCo
       onSubmit: async (patch) => {
         try {
           const res = await window.API.recordScore(scoringMatch.compId || defaultCompId, scoringMatch.id, patch, "", scoringMatch);
-          // A queued (offline/transient) write is NOT a confirmed save: keep the
-          // editor open and return the signal so its pending-write banner shows:
-          // closing here would be a false success on the public self-run surface.
-          if (res && res.queued) return res;
+          // A write that did not land is NOT a confirmed save: keep the editor
+          // open and return the signal so its not-saved banner shows. Closing
+          // here would be a false success on the public self-run surface, which
+          // matters more here than anywhere else: this surface has no toast, so
+          // the banner is the ONLY thing that can report it. Covers the queued
+          // case and the superseded one (bc-lww1).
+          if (window.writeDidNotLand(res)) return res;
           setScoringMatch(null);
           onClose();
           return res;

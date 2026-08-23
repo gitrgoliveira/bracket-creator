@@ -33,6 +33,30 @@ var ErrMatchSideMismatch = errors.New("match side mismatch: score payload compet
 // revert. Handlers map this to HTTP 409.
 var ErrMatchAlreadyCompleted = errors.New("match already completed: use the score editor to correct a completed bout")
 
+// ErrMatchSuperseded is returned by a match SCORE write that the timestamp
+// last-write-wins guard dropped: a newer result for this match is already
+// stored, so the incoming one is a stale reconnect replay and nothing was
+// written. It is an OUTCOME, not a fault — the same shape as
+// ErrMatchSideMismatch, which is likewise an engine verdict handlers map to a
+// specific status rather than a 500.
+//
+// It exists because the drop used to be reported as (no error, nothing
+// written), which every caller up to the HTTP boundary read as success: the
+// score handler answered 200 with the operator's own echoed payload AND
+// broadcast that discarded result over SSE, so the losing operator's board and
+// every viewer showed a result the disk never held until the next refetch
+// (bc-lww1). Carrying it as an error makes the drop impossible to swallow by
+// omission — an unmapped path fails loudly instead of silently.
+//
+// Handlers MUST map it to a 2xx carrying applied=false, never to a 4xx/5xx:
+// the SPA's offline write queue retries 5xx forever (the mp-q8c6 poisoned-queue
+// pattern) and a superseded write can never win a retry.
+//
+// The OverrideBracketWinner path reports the same condition through its own
+// (applied bool, error) return and the package-internal errLWWDropped below;
+// that one predates this and already reaches the client as {"applied": false}.
+var ErrMatchSuperseded = errors.New("match write superseded: a newer result is already recorded")
+
 // errLWWDropped is a package-internal sentinel returned by the mutate callback
 // inside OverrideBracketWinner when a timestamp last-write-wins check drops a
 // stale incoming write. Returning this error (rather than nil) causes
@@ -510,10 +534,14 @@ const (
 // reject it while the K3 restore deliberately ignores it (a snapshot replays
 // sides captured from this same match).
 func (e *Engine) writeToPoolOrBracket(compId, matchId string, result *state.MatchResult, policy matchWritePolicy) (mismatch bool, err error) {
+	var superseded bool
 	perr := e.withPoolMatch(compId, matchId, func(r *state.MatchResult) {
-		mismatch = applyPoolWrite(r, result, policy)
+		mismatch, superseded = applyPoolWrite(r, result, policy)
 	})
 	if perr == nil {
+		if superseded {
+			return false, ErrMatchSuperseded
+		}
 		return mismatch, nil
 	}
 	if !errors.Is(perr, errMatchNotFound) {
@@ -528,8 +556,10 @@ func (e *Engine) writeToPoolOrBracket(compId, matchId string, result *state.Matc
 // ABANDONED, in which case the stored match is left untouched. That happens two
 // ways, mirroring applyBracketMatchResult: the payload names a pairing that is
 // not this match's (a client error the caller maps to 409), or the timestamp
-// guard drops it as stale (not an error at all, the newer result simply
-// stands). Only the first is reported as a `mismatch`.
+// guard drops it as stale (a newer result simply stands, nobody is at fault).
+// They are reported on SEPARATE returns because they are different verdicts
+// about different actors, and both have to reach the operator: a drop reported
+// as plain success is what bc-lww1 was.
 //
 // It does the `*stored = *result` assignment itself rather than leaving it to
 // each caller, so that the overwrite is unreachable without the merge. This is
@@ -544,7 +574,7 @@ func (e *Engine) writeToPoolOrBracket(compId, matchId string, result *state.Matc
 // client must not be able to clear (ReopenPending) are re-stamped at the HTTP
 // boundary instead - see handlers_match.go - so a new field of that kind still
 // needs a decision about which layer preserves it.
-func applyPoolWrite(stored, result *state.MatchResult, policy matchWritePolicy) (mismatch bool) {
+func applyPoolWrite(stored, result *state.MatchResult, policy matchWritePolicy) (mismatch, superseded bool) {
 	// reconcileSides BACKFILLS omitted sides as a side effect and only reports
 	// the mismatch, so it must run under both policies; hoisted out of the
 	// condition below because folding it into a short-circuit would let a later
@@ -554,7 +584,7 @@ func applyPoolWrite(stored, result *state.MatchResult, policy matchWritePolicy) 
 	// restore policy replays sides captured from this same match, so a mismatch
 	// there is not a client error.
 	if sidesDisagree && policy == matchWriteForward {
-		return true
+		return true, false
 	}
 	// Timestamp last-write-wins, the SAME guard, the same primitive and now the
 	// same call shape the bracket branch uses: a reconnecting offline court's
@@ -562,7 +592,7 @@ func applyPoolWrite(stored, result *state.MatchResult, policy matchWritePolicy) 
 	// exemption lives inside applyMatchWrite, which is load-bearing here — unlike
 	// the bracket's, this branch's rollback snapshot carries a real stamp.
 	if !applyMatchWrite(result, stored.ModifiedAt, policy) {
-		return false
+		return false, true
 	}
 	// Preserve generation-time participant ids + resolve winner id across the
 	// overwrite: score requests carry side NAMES only. See backfillMatchIdentity.
@@ -619,7 +649,7 @@ func applyPoolWrite(stored, result *state.MatchResult, policy matchWritePolicy) 
 		result.SubResultsUnreadable = false
 	}
 	*stored = *result
-	return false
+	return false, false
 }
 
 // applyHansokuIppons auto-awards ippons from accumulated hansoku counts per
@@ -1809,11 +1839,19 @@ func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID st
 			if err != nil {
 				return err
 			}
+			// A nil error with applied=false is the timestamp guard's drop and
+			// nothing else (the other two false returns carry an error). Report
+			// it: the drop reaching the handler as success was bc-lww1. Returning
+			// an error here also makes UpdateBracket skip the disk save, which is
+			// right — nothing changed — and is the same reason OverrideBracketWinner
+			// returns errLWWDropped from its own mutate callback.
+			if !applied {
+				return ErrMatchSuperseded
+			}
 			// Propagate only a genuinely completed result. A "running" update is
 			// for live-status display, so the next round's SideA/SideB must stay
-			// empty until the match has a final result; and a write the LWW guard
-			// dropped changed nothing to propagate.
-			if applied && bracket.Rounds[rIdx][mIdx].Status == state.MatchStatusCompleted {
+			// empty until the match has a final result.
+			if bracket.Rounds[rIdx][mIdx].Status == state.MatchStatusCompleted {
 				e.propagateBracketWinner(bracket, rIdx, mIdx)
 			}
 			return nil
@@ -1823,8 +1861,15 @@ func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID st
 	// Rounds, so the scan above never finds it. There is no propagation out of
 	// bronze: it has no downstream match.
 	if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchID {
-		if _, err := applyBracketMatchResult(bracket.ThirdPlaceMatch, result, policy); err != nil {
+		applied, err := applyBracketMatchResult(bracket.ThirdPlaceMatch, result, policy)
+		if err != nil {
 			return err
+		}
+		// Same report as the round branch. Bronze used to DISCARD `applied`
+		// outright, so a superseded bronze write was doubly invisible: no signal
+		// to the operator and a pointless bracket re-save.
+		if !applied {
+			return ErrMatchSuperseded
 		}
 		return nil
 	}

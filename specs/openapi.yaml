@@ -1431,7 +1431,12 @@ paths:
                     $ref: '#/components/schemas/ParticipantInput'
       responses:
         '200':
-          description: Participants successfully updated.
+          description: >
+            Participants successfully updated. If the replacement roster
+            dropped an already-seeded participant without adding any new
+            participant, that removal is unambiguous (see the 409 case below)
+            and their now-orphaned row in `seeds.csv` is dropped as part of
+            this save.
           content:
             application/json:
               schema:
@@ -1447,10 +1452,15 @@ paths:
             Conflict. The draw is pending or the competition has already
             started; the request repeats a (name, dojo) pair; the write layer
             found an existing participant with that pair; or the replacement
-            roster would orphan an already-seeded participant (their name or
-            dojo changed, and this endpoint carries no seed data to rewrite
-            `seeds.csv` alongside). The error message names the affected
-            competitors and how to proceed.
+            roster orphans an already-seeded participant's row AND also adds
+            one or more new participants. This endpoint carries no seed data
+            of its own and has no stable per-request participant id, so in
+            that combination it cannot tell a rename (remove old identity, add
+            new identity) apart from an unrelated removal plus addition, and
+            refuses the write rather than guess. A replacement that only
+            removes seeded participants, adding nobody, is unambiguous and
+            succeeds instead (see the 200 response). The error message names
+            the affected competitors and how to proceed.
           content:
             application/json:
               schema:

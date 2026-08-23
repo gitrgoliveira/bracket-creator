@@ -471,7 +471,9 @@ func TestBatchPostOrphaningSeedRejected(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusConflict, w.Code,
-		"a bulk replace that would orphan an already-seeded participant must be refused, not silently persisted")
+		"a bulk replace that would orphan an already-seeded participant, while also adding a new identity, must be refused, not silently persisted")
+	assert.Contains(t, w.Body.String(), "adds new participant",
+		"the 409 must explain WHY it can't tell a removal from a rename: this replace also adds a new identity")
 
 	// Neither the roster nor the seed should have changed.
 	players := mustLoad(t, store, compID)
@@ -486,6 +488,63 @@ func TestBatchPostOrphaningSeedRejected(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, seeds, 1)
 	assert.Equal(t, "Wakaba", seeds[0].Dojo, "the existing seed must be untouched by a refused replace")
+}
+
+// TestBatchPostPureRemovalDropsOrphanedSeed is the removal-only companion to
+// TestBatchPostOrphaningSeedRejected: a bulk replace that drops a seeded
+// participant's row WITHOUT adding any new identity is unambiguous (it can
+// only be a removal, never a rename -- see rosterReplaceAddsIdentities), so it
+// must succeed, and the removed competitor's now-orphaned seeds.csv row must
+// be dropped rather than left to strand generate-draw later. A pre-existing
+// ghost row (never resolvable against the old roster either) must survive
+// untouched, since this replace doesn't make that row any more broken than it
+// already was.
+func TestBatchPostPureRemovalDropsOrphanedSeed(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "comp-batch-seed-pure-removal"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     compID,
+		Name:   "Batch Seed Pure Removal Test",
+		Status: state.CompStatusSetup,
+	}))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "Alice Smith", Dojo: "Wakaba"},
+		{Name: "Bob Jones", Dojo: "Tora"},
+	}))
+	require.NoError(t, store.SaveSeeds(compID, []domain.SeedAssignment{
+		{Name: "Alice Smith", Dojo: "Wakaba", SeedRank: 1},
+		{Name: "Bob Jones", Dojo: "Tora", SeedRank: 2},
+		{Name: "Ghost Competitor", Dojo: "Nowhere", SeedRank: 3}, // pre-existing ghost, never in the roster
+	}))
+
+	// Remove Alice entirely; add nobody. Bob is untouched.
+	body, _ := json.Marshal(map[string]any{"players": []map[string]string{
+		{"name": "Bob Jones", "dojo": "Tora"},
+	}})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code,
+		"a replace that only removes a seeded participant, adding nothing, is unambiguous and must succeed: %s", w.Body.String())
+
+	players := mustLoad(t, store, compID)
+	require.Len(t, players, 1)
+	assert.Equal(t, "Bob Jones", players[0].Name)
+
+	seeds, err := store.LoadSeedsRaw(compID)
+	require.NoError(t, err)
+	byName := make(map[string]domain.SeedAssignment, len(seeds))
+	for _, s := range seeds {
+		byName[s.Name] = s
+	}
+	assert.NotContains(t, byName, "Alice Smith", "the removed competitor's seed row must be dropped")
+	require.Contains(t, byName, "Bob Jones", "a still-resolving seed row must survive")
+	assert.Equal(t, 2, byName["Bob Jones"].SeedRank)
+	require.Contains(t, byName, "Ghost Competitor", "a pre-existing ghost row must survive untouched")
+	assert.Equal(t, 3, byName["Ghost Competitor"].SeedRank)
 }
 
 // TestBatchPostPreservingSeedIdentityAccepted is the companion case: a bulk

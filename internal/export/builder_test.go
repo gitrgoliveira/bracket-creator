@@ -2341,6 +2341,61 @@ func TestBuildResultsWorkbook_MultiPageTreePopulated(t *testing.T) {
 		"all 31 matches except the cross-page final must be numbered on the tree pages")
 }
 
+// TestScoreCellsCarryOutstandingHansokuTriangle: a completed match can end
+// with one UNDISCHARGED foul on a side (fouls %% 2 == 1), and the FIK sheet
+// keeps that ▲ on the record next to the offender. The stored ScoreA/ScoreB
+// strings used to smuggle it into the bracket cells as the codec's "(H1)"
+// suffix; when bc-bmsc removed the strings the export silently lost it. It is
+// now drawn as the rulebook's triangle, on the cell's outer edge, by BOTH the
+// individual writer (pool + bracket rows) and the team sub-row writer, and an
+// EVEN count draws nothing (that foul pair is already the opponent's "H").
+func TestScoreCellsCarryOutstandingHansokuTriangle(t *testing.T) {
+	t.Parallel()
+
+	t.Run("individual row, both orientations", func(t *testing.T) {
+		f := excelize.NewFile()
+		defer f.Close()
+		sheet := helper.SheetPoolMatches
+		f.NewSheet(sheet)
+
+		mr := state.MatchResult{
+			SideA: "Alice", SideB: "Bob", Winner: "Bob",
+			IpponsA: []string{"M"}, HansokuA: 1, // one standing foul on A
+			IpponsB: []string{"K", "H"}, HansokuB: 2, // discharged: already B's... A's H to B
+			Status: state.MatchStatusCompleted,
+		}
+		writeScoreRowCells(f, sheet, 1, 5, "M", "KH", mr, false)
+		left, _ := f.GetCellValue(sheet, "B5")
+		right, _ := f.GetCellValue(sheet, "F5")
+		assert.Equal(t, "▲ M", left, "A's standing foul rides the left cell's outer edge")
+		assert.Equal(t, "KH", right, "an even count is already discharged into the H ippon: no triangle")
+
+		// Mirrored band: the foul must follow its side across the swap.
+		writeScoreRowCells(f, sheet, 1, 6, "M", "KH", mr, true)
+		left, _ = f.GetCellValue(sheet, "B6")
+		right, _ = f.GetCellValue(sheet, "F6")
+		assert.Equal(t, "KH", left)
+		assert.Equal(t, "M ▲", right, "mirroring swaps sides; the outer edge is now the right")
+	})
+
+	t.Run("team sub-bout row", func(t *testing.T) {
+		f := excelize.NewFile()
+		defer f.Close()
+		sheet := helper.SheetPoolMatches
+		f.NewSheet(sheet)
+
+		subs := []state.SubMatchResult{
+			{Position: 1, SideA: "Ann", SideB: "Ben", Winner: "Ann",
+				IpponsA: []string{"M", "K"}, HansokuB: 1},
+		}
+		writeTeamSubMatchScores(f, sheet, 1, 5, subs, 3, false)
+		left, _ := f.GetCellValue(sheet, "B5")
+		right, _ := f.GetCellValue(sheet, "F5")
+		assert.Equal(t, "MK", left)
+		assert.Equal(t, "▲", right, "a bout the offender lost 0-2 still records the standing foul")
+	})
+}
+
 // TestWriteTeamSubMatchScores_OutOfRangePositionSkipped verifies the upper-bound
 // guard: a corrupted sub.Position beyond teamSize must be skipped rather than
 // writing ippon letters into the row of the NEXT encounter's block.

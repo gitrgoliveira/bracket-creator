@@ -551,15 +551,20 @@ func writeTeamSummaryCells(f *excelize.File, sheetName string, courtStartCol, ex
 // overlays so the cell contract lives in one place.
 func writeScoreRowCells(f *excelize.File, sheetName string, courtStartCol, excelRow int, scoreA, scoreB string, mr state.MatchResult, mirror bool) {
 	leftScore, rightScore := scoreA, scoreB
+	lFoul, rFoul := HansokuMark(mr.HansokuA), HansokuMark(mr.HansokuB)
 	if mirror {
 		leftScore, rightScore = scoreB, scoreA
+		lFoul, rFoul = rFoul, lFoul
 	}
 	lMark, rMark := SideMarksLR(mr.Decision, mr.HanteiDecided(), domain.WinnerAttribution{
 		WinnerID: mr.WinnerID, SideAID: mr.SideAID, SideBID: mr.SideBID,
 		Winner: mr.Winner, SideA: mr.SideA, SideB: mr.SideB,
 	}, mirror)
-	setCellStr(f, sheetName, colNum(courtStartCol+1), excelRow, joinSp(leftScore, lMark))
-	setCellStr(f, sheetName, colNum(courtStartCol+5), excelRow, joinSp(rightScore, rMark))
+	// The outstanding-hansoku ▲ rides the cell's OUTER edge — nearest that
+	// side's name column — per FIK Table 2 (White's ▲ far left, Red's far
+	// right) and matching the scoreboard's placement between name and slots.
+	setCellStr(f, sheetName, colNum(courtStartCol+1), excelRow, joinSp(lFoul, joinSp(leftScore, lMark)))
+	setCellStr(f, sheetName, colNum(courtStartCol+5), excelRow, joinSp(joinSp(rightScore, rMark), rFoul))
 	writeMiddleMarkCell(f, sheetName, courtStartCol, excelRow, mr.Decision, mr.Encho)
 }
 
@@ -634,16 +639,20 @@ func writeTeamSubMatchScores(f *excelize.File, sheetName string, courtStartCol, 
 				Winner: sub.Winner, SideA: sub.SideA, SideB: sub.SideB,
 			})
 		leftScore, rightScore := scoreA, scoreB
+		lFoul, rFoul := HansokuMark(sub.HansokuA), HansokuMark(sub.HansokuB)
 		if mirror {
 			leftScore, rightScore = scoreB, scoreA
+			lFoul, rFoul = rFoul, lFoul
 		}
 		lMark, rMark := SideMarksLR(sub.Decision, sub.HanteiDecided(), domain.WinnerAttribution{
 			Winner: sub.Winner, SideA: sub.SideA, SideB: sub.SideB,
 		}, mirror)
-		if lScore := joinSp(leftScore, lMark); lScore != "" {
+		// Outstanding-hansoku ▲ on the cell's outer edge, as in
+		// writeScoreRowCells (FIK Table 2; scoreboard parity).
+		if lScore := joinSp(lFoul, joinSp(leftScore, lMark)); lScore != "" {
 			setCellStr(f, sheetName, lVCol, excelRow, lScore)
 		}
-		if rScore := joinSp(rightScore, rMark); rScore != "" {
+		if rScore := joinSp(joinSp(rightScore, rMark), rFoul); rScore != "" {
 			setCellStr(f, sheetName, rVCol, excelRow, rScore)
 		}
 

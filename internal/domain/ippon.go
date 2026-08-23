@@ -71,16 +71,25 @@ func AppendHantei(ippons []string) []string {
 	if ContainsHantei(ippons) {
 		return ippons
 	}
-	// Fill an empty placeholder slot before growing the slice: the editors
-	// persist "•" for an unfilled slot, and the mark takes a free slot.
+	return AppendIppon(ippons, HanteiMark)
+}
+
+// AppendIppon places one new entry in an ippon slice following the slot rule:
+// the entry takes the first free slot (an empty cell or the "•" unfilled-slot
+// placeholder) before growing the slice, exactly as the editors persist a
+// struck point. AppendHantei rides it for the judges'-decision mark, and the
+// engine's hansoku fold (applyHansokuIppons) rides it for the derived "H"
+// ippon, so a legal two-slot row with a free slot stays a legal two-slot row
+// after either award. Always returns a copy; the input is never mutated.
+func AppendIppon(ippons []string, entry string) []string {
 	for i, v := range ippons {
 		if v == "" || v == IpponPlaceholder {
 			out := append([]string{}, ippons...)
-			out[i] = HanteiMark
+			out[i] = entry
 			return out
 		}
 	}
-	return append(append([]string{}, ippons...), HanteiMark)
+	return append(append([]string{}, ippons...), entry)
 }
 
 // CountScoringIppons counts the real ippon marks in an ippons slice, ignoring

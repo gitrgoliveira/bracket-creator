@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -625,10 +624,15 @@ func applyPoolWrite(stored, result *state.MatchResult, policy matchWritePolicy) 
 
 // applyHansokuIppons auto-awards ippons from accumulated hansoku counts per
 // FIK Article 20: every 2 hansoku on one side grants 1 ippon to the opponent.
-// Strips any prior 'H' entries and re-appends the correct count so that both
-// increases and decreases in hansoku are handled correctly on re-scores.
-// Idempotent by construction, which is why re-folding an already-folded row
-// reports no change.
+// Compares the count of 'H' entries a side already carries against what its
+// opponent's hansoku count implies and awards ONLY the shortfall, via
+// domain.AppendIppon (the derived H is a struck point, so it takes the next
+// free slot before growing the slice, and a wire-legal row holding a "•"
+// placeholder stays wire-legal after the award). A row carrying at least the
+// implied count is left entirely alone, positions included — which is also
+// why re-folding an already-folded row reports no change. See applyOneSide
+// for why a surplus H is the operator's own strike and must never be
+// removed.
 //
 // The fold and the post-fold guard used to be two steps - applyHansokuIppons
 // returning a hansokuFold recording which slices it actually REWROTE, and a
@@ -638,9 +642,8 @@ func applyPoolWrite(stored, result *state.MatchResult, policy matchWritePolicy) 
 // to forget to check.
 //
 // The check answers for what THIS fold rewrote, not for whatever was already
-// on disk: it is contents-compared, not identity-compared, so a row whose
-// award was already folded in on a previous write comes back with an
-// equal-but-new slice and counts as UNCHANGED. That scoping matters because
+// on disk: a row whose award was already folded in on a previous write is
+// not touched at all and counts as UNCHANGED. That scoping matters because
 // the decision twins inherit the encounter's stored sub-bouts wholesale
 // (preserveLoserScore) before the fold runs, so without it an operator's
 // kiken would be rejected for an over-cap row that a much earlier write
@@ -660,8 +663,9 @@ func applyPoolWrite(stored, result *state.MatchResult, policy matchWritePolicy) 
 //     that row to stripInvalidHantei, which discards the mark with no error
 //     reaching the caller, so the operator's hansoku award would quietly
 //     overrule a verdict the same payload also carried.
-//   - The award pushes a side past the best-of-3 cap. A row already at the
-//     cap plus a folded "H" exceeds it, and nothing downstream rejects it, so
+//   - The award pushes a side past the best-of-3 cap. A row with both slots
+//     already holding entries plus a folded "H" exceeds it (a free "•"
+//     placeholder is filled, not grown past), and nothing downstream rejects it, so
 //     the write lands on disk and every subsequent echo save of that match
 //     400s at mobileapp.validateIppons - wedging the editor on a row that was
 //     never rejected at write time.
@@ -687,22 +691,47 @@ func applyHansokuIppons(result *state.MatchResult) error {
 		return nil
 	}
 	applyOneSide := func(hansoku int, ippons *[]string) bool {
+		// hansoku/2 derives the ippons a CUMULATIVE foul count implies — the
+		// convention of clients that only count fouls upward and never strike
+		// the "H" themselves (reconcileFoulsAtOpen in the JS editors is this
+		// same derivation, run at editor-open over legacy stored counts).
+		// Today's editors keep the OUTSTANDING count instead — the strike
+		// resets the counter to 0 and puts the H in the opponent's slots
+		// (applyFoulIncrement) — so for their payloads expected is 0 and
+		// every H the row carries is the operator's own strike.
 		expected := hansoku / 2
-		if *ippons == nil && expected == 0 {
-			return false
-		}
-		filtered := make([]string, 0, len(*ippons))
+		existing := 0
 		for _, v := range *ippons {
-			if v != "H" {
-				filtered = append(filtered, v)
+			if v == "H" {
+				existing++
 			}
 		}
-		for range expected {
-			filtered = append(filtered, "H")
+		// Award only the SHORTFALL, and never remove a surplus H: under the
+		// outstanding convention every editor payload carries "more H than
+		// the count explains", so a removal branch (tried once, as a
+		// "hansoku reduction" feature) silently deleted the struck point on
+		// every save — the editor's screen kept showing it while standings,
+		// viewers and the export lost it. This restores the fold's original
+		// contract: never duplicate existing H entries, never remove them.
+		// An operator undoing a mistaken award edits the slots directly, and
+		// the row they send IS the row that persists.
+		if existing >= expected {
+			return false
 		}
-		changed := !slices.Equal(*ippons, filtered)
-		*ippons = filtered
-		return changed
+		out := append([]string{}, *ippons...)
+		for ; existing < expected; existing++ {
+			// A derived hansoku ippon is a struck point, so it takes the
+			// next free slot before growing the slice (domain.AppendIppon,
+			// the same rule the editors and AppendHantei follow). Filling
+			// rather than appending keeps a legal two-slot row with a "•"
+			// placeholder legal after the award; a blind append pushed it
+			// to three entries, past validateIppons' structural cap, so
+			// the row 400'd here (or, before checkFoldedRow existed,
+			// wedged on disk and 400'd every echo save).
+			out = domain.AppendIppon(out, "H")
+		}
+		*ippons = out
+		return true
 	}
 	// HansokuA awards the OPPONENT (side B) an ippon, and vice versa, so each
 	// count's "changed" bool belongs to the slice it rewrote.

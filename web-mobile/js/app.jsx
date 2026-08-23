@@ -394,6 +394,7 @@ function App() {
     try { return localStorage.getItem("bc_password") || ""; } catch { return ""; }
   });
   const [authPrompt, setAuthPrompt] = useS(false);
+  const [reauthPrompt, setReauthPrompt] = useS(false);
   const [viewerCompId, setViewerCompId] = useS(initialRoute.viewerCompId || null);
   // mp-tidg: tab is lifted here (not inside ViewerCompetition) so that
   // browser back/forward across tabs works: each tab push/pop is a
@@ -625,7 +626,7 @@ function App() {
       localStorage.setItem("bc_authed", authed);
       localStorage.setItem("bc_password", password);
     } catch { /* storage unavailable: session only, no persistent credential */ }
-    // bc-qttl: a queued write refused with 401/403 is PARKED, not dropped, and
+    // bc-qttl: a queued write refused with 401 is PARKED, not dropped, and
     // holds the password it was enqueued with, so it can never succeed until it
     // is re-stamped. Hand it the credential just authenticated. A no-op
     // (returns 0, touches nothing) when no write is parked, which is the normal
@@ -640,6 +641,17 @@ function App() {
   }, [authed, password]);
 
   useE(() => { document.documentElement.style.setProperty("--accent", THEME.accentColor); }, []);
+
+  // bc-qttl: the write queue can park on a 401 while `authed` is still true (the
+  // credential changed server-side without this tab seeing a password_reset
+  // broadcast). The pill then says "Sign in to save" but no sign-in control
+  // exists, because AuthModal is gated on !authed. This handle is what the admin
+  // chrome and the sync pill call to reach it, so re-authenticating never has to
+  // go through sign-out, which would discard the very writes being rescued.
+  useE(() => {
+    window.requestReauth = () => setReauthPrompt(true);
+    return () => { delete window.requestReauth; };
+  }, []);
 
   const load = async () => {
     try {
@@ -1240,14 +1252,17 @@ function App() {
     // strand the operator on a tablet they need to hand over.
     const unsent = (window.API && window.API.unsentWrites)
       ? window.API.unsentWrites()
-      : { total: 0, terminal: 0 };
+      : { total: 0, terminal: 0, authBlocked: 0 };
     if (unsent.total > 0) {
       const n = unsent.terminal > 0 ? unsent.terminal : unsent.total;
       const one = n === 1;
       const noun = unsent.terminal > 0
         ? (one ? "finished result has" : "finished results have")
         : (one ? "score update has" : "score updates have");
-      const message = `${n} ${noun} not reached the server yet. Signing out discards ${one ? "it" : "them"} permanently. Stay signed in until the sync indicator shows everything saved.`;
+      let message = `${n} ${noun} not reached the server yet. Signing out discards ${one ? "it" : "them"} permanently. Stay signed in until the sync indicator shows everything saved.`;
+      if (unsent.authBlocked > 0) {
+        message += ` Use "Sign in to save" instead to keep them and save them with the current password.`;
+      }
       // DialogHost is mounted unconditionally beside App, so the themed dialog is
       // there in the real app. Fall back to the native confirm rather than
       // proceeding when it is missing: the whole point is that this discard is
@@ -1358,6 +1373,27 @@ function App() {
           showToast={showToast}
           authConfig={authConfig}
         />
+        {reauthPrompt && (
+          <AuthModal
+            reauth
+            // No "Forgot password?" here on purpose: a reset revokes the
+            // credential and re-parks the queue, which is the state the
+            // operator is trying to escape. The sign-out -> sign-in path
+            // still offers it.
+            onClose={() => setReauthPrompt(false)}
+            onSuccess={(pw) => {
+              setReauthPrompt(false);
+              setPassword(pw);
+              // Call resumeAfterAuth directly as well as via the
+              // [authed, password] effect: if the operator re-enters the
+              // SAME password (a spurious or since-reverted 401) `password`
+              // does not change, the effect never fires, and the queue
+              // would stay parked. resumeAfterAuth is idempotent -- the
+              // second call finds nothing parked and returns 0.
+              if (window.API && window.API.resumeAfterAuth) window.API.resumeAfterAuth(pw);
+            }}
+          />
+        )}
         {toast && <window.Toast {...toast} onClose={() => setToast(null)} />}
       </>
     );
@@ -1504,7 +1540,7 @@ function App() {
   );
 }
 
-function AuthModal({ onClose, onSuccess, onForgotPassword, resetEnabled }) {
+function AuthModal({ onClose, onSuccess, onForgotPassword, resetEnabled, reauth }) {
   const [pw, setPw] = useS("");
   const [err, setErr] = useS("");
   const [checking, setChecking] = useS(false);
@@ -1550,8 +1586,12 @@ function AuthModal({ onClose, onSuccess, onForgotPassword, resetEnabled }) {
     <div className="modal-backdrop" onClick={onClose} style={{ zIndex: 1000 }}>
       <div className="modal auth" onClick={(e) => e.stopPropagation()}>
         <img src="/api/branding/logo" onError={(e) => { e.target.onerror = null; e.target.src = "/logo.jpeg"; }} alt="Tournament logo" className="auth__logo" decoding="async" />
-        <div className="auth__title">Admin sign in</div>
-        <div className="auth__sub">Enter the tournament password to manage brackets, schedules and results.</div>
+        <div className="auth__title">{reauth ? "Sign in to save" : "Admin sign in"}</div>
+        <div className="auth__sub">
+          {reauth
+            ? "Results saved on this device have not reached the server because the tournament password changed. Enter the current password to save them."
+            : "Enter the tournament password to manage brackets, schedules and results."}
+        </div>
         <form onSubmit={submit}>
           <div className="field">
             <label className="field__label">Password</label>

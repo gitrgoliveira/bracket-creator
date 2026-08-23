@@ -2317,6 +2317,27 @@ a:hover {
 .sync-status-pill .sync-pill__label {
   line-height: 1.2;
 }
+/* bc-qttl: the auth-required pill is a real <button> (it is the operator's
+   entry point to re-authenticate), reusing this same class so the clickable
+   and non-interactive states look identical. Reset the browser's default
+   button chrome so it still reads as a pill, not a form control. */
+button.sync-status-pill {
+  /* font-FAMILY only, never the `font` shorthand: this rule is more specific
+     than .sync-status-pill, so `font: inherit` would reset that class's own
+     font-size (10px) and font-weight (600) to the parent's and the clickable
+     pill would render visibly larger and lighter than every other state. */
+  font-family: inherit;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+button.sync-status-pill:hover {
+  filter: brightness(0.97);
+}
+button.sync-status-pill:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 /* synced, accent (navy), positive/confirmed state */
 .sync-pill--synced {
   color: var(--accent);

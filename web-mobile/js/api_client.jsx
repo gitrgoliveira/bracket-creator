@@ -381,8 +381,11 @@ function _setSyncStatus(s) {
 
 // Terminal-write FAILURE channel. When a queued terminal write (completed score /
 // decision / lineup) is permanently discarded: a non-retryable 4xx on retry
-// (409 conflict, 400 validation, 401/403 auth), a corrupt entry, or the mp-q8c6
+// (409 conflict, 400 validation), a corrupt entry, or the mp-q8c6
 // server-rejection cap (also applied to running writes): the write never landed.
+// Neither auth-ish status is a terminal drop any more (bc-qttl): 401 PARKS the
+// write pending re-auth and 403 RETRIES with backoff as a server-config state;
+// see the 401/403 branches in _flushQueue below.
 // Sync status alone returns to 'synced', which would let the editor
 // clear its pending banner and look "saved". This channel lets surfaces show an
 // explicit "not saved" state instead. Payload: {compID, matchID, kind, status, reason}.
@@ -536,7 +539,7 @@ async function _flushQueue() {
                 if (gen !== _queueGen) break;
                 // Skip entries removed or superseded since the snapshot was taken.
                 if (_writeQueue.get(key) !== descriptor) continue;
-                // bc-qttl: a write parked on 401/403 carries the password captured at
+                // bc-qttl: a write parked on 401 carries the password captured at
                 // enqueue time, so retrying it can only reproduce the same auth failure
                 // until API.resumeAfterAuth() re-stamps it. Skip it here (it stays
                 // QUEUED, it is not dropped) so a parked entry costs no requests and
@@ -2556,7 +2559,7 @@ const API = {
     },
 
     /**
-     * bc-qttl: un-park writes held on a 401/403 and retry them with a freshly
+     * bc-qttl: un-park writes held on a 401 and retry them with a freshly
      * authenticated credential.
      *
      * Necessary because each descriptor captures the password it was enqueued

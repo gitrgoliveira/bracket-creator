@@ -140,6 +140,20 @@ function AdminTopbar({ onLogout, onViewerMode, tournament, hideRunningStrip }) {
     }
   };
 
+  // bc-qttl: SyncStatusPill (admin_scoring_autosave.jsx) only renders while a
+  // match's score editor is open, so a parked write becomes invisible the
+  // moment the operator closes it. AdminTopbar is the chrome shared by every
+  // admin page, so it's the always-visible home for the "queue is parked on a
+  // 401" state. Subscribe the same way SyncStatusPill does: subscribeSyncStatus
+  // replays the current value immediately on subscribe.
+  const [syncStatus, setSyncStatus] = useStateA('synced');
+  useEffectA(() => {
+    const subscribe = typeof window !== 'undefined' && window.subscribeSyncStatus;
+    if (!subscribe) return;
+    const unsub = subscribe((s) => setSyncStatus(s));
+    return () => unsub();
+  }, []);
+
   return (
     // Wrap topbar + running-strip in a single sticky container so they scroll
     // together. This lets the topbar size naturally (min-height instead of a
@@ -172,6 +186,13 @@ function AdminTopbar({ onLogout, onViewerMode, tournament, hideRunningStrip }) {
           {connected ? "Connected" : "Reconnecting…"}
         </span>
         <button type="button" className="viewer-toggle" onClick={onViewerMode}><Icon name="eye" /> Public viewer</button>
+        {syncStatus === 'auth-required' && (
+          <button
+            type="button"
+            className="btn btn--danger btn--sm"
+            onClick={() => { if (window.requestReauth) window.requestReauth(); }}
+          >Sign in to save</button>
+        )}
         <button type="button" className="btn btn--ghost btn--sm" onClick={onLogout}>Sign out</button>
       </div>
       {!connected && sustainedDown && (

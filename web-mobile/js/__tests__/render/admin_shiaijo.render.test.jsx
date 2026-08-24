@@ -1,11 +1,18 @@
 import React from 'react';
 import { render, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest';
+// The REAL predicates, not stubs: this surface asks them to decide whether a
+// write landed, and the queued-vs-superseded split is exactly what the
+// offline-resolve test below depends on, so a stub would test the stub.
 
 // Window globals required by admin_shiaijo.jsx.
 // MODULE-EVAL-TIME entries (e.g. `const AdminTopbar = window.AdminTopbar;`)
 // must be set before the dynamic import, or the module captures undefined.
+import { writeDidNotLand, writeWasSuperseded } from '../../write_result.jsx';
+
 const STUBBED_GLOBALS = {
+  writeDidNotLand,
+  writeWasSuperseded,
   // MODULE-EVAL-TIME: captured at import; set before dynamic import below
   AdminTopbar: ({ children }) => <div data-testid="topbar">{children}</div>,
   Breadcrumbs: () => null,

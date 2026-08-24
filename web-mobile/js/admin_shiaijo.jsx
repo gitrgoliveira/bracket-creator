@@ -292,7 +292,7 @@ function ResolveFeedersModal({ match, comp, password, onClose, onResolved, onOpt
             for (const s of resolvable) {
                 const winner = picks[s.feeder.id];
                 const r = await window.API.overrideBracketWinner(comp.id, s.feeder.id, winner, password);
-                if (r && r.applied === false) {
+                if (window.writeWasSuperseded(r)) {
                     // The server dropped this assertion (a newer/equal result
                     // already exists for the feeder), so our pick is NOT the
                     // authoritative winner. Skip the optimistic advance and let

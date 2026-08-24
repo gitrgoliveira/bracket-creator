@@ -122,6 +122,10 @@ function _revKey(compID, matchID) { return `${compID}:${matchID}`; }
 // same-field edits, so the degradation is graceful.
 // ---------------------------------------------------------------------------
 let _serverClockOffsetMs = 0;
+// bc-cse: has ANY learn ever succeeded? The load-time retry chain below stops
+// scheduling once this flips, and it never flips back: a later failed refresh
+// keeps the last good offset rather than reopening the retry chain.
+let _clockOffsetLearned = false;
 async function _learnServerClockOffset() {
     try {
         const t0 = Date.now();
@@ -133,9 +137,48 @@ async function _learnServerClockOffset() {
         // Net out the round-trip: estimate the server clock at the response
         // arrival by adding half the RTT to the reported time.
         _serverClockOffsetMs = (body.nowMs + Math.round((t1 - t0) / 2)) - t1;
+        _clockOffsetLearned = true;
     } catch (_e) {
         // Offline / timeout: keep the last known offset (0 on first ever call).
     }
+}
+
+// bc-cse: relearn the offset when the server tells us a write was superseded.
+//
+// A 200 {"applied": false} is the ONE signal that this device's stamps may be
+// running behind the server's frame (see the mp-y3nk block above for what the
+// offset is and how it is normally learned). Without this, a device whose
+// load-time learn failed and which never opens SSE keeps an offset of 0 for the
+// whole session: the operator is told to check the recorded result and re-enter
+// it, and the re-entry loses to the same uncorrected skew. Relearning here makes
+// that advice ACTIONABLE — the next manual entry is stamped in the server's
+// frame, so it is judged on its real recency instead of being refused for a
+// skew the operator cannot see or fix. It is not a guarantee of winning: a
+// genuinely newer stored result should still beat the re-entry, and does.
+//
+// It deliberately does NOT touch replays: queued payloads are stamped at enqueue
+// time and replay verbatim (their staleness is real), so only writes stamped
+// AFTER the relearn benefit.
+//
+// Throttled so a reconnect flush that surfaces several superseded drops
+// back-to-back collapses them into a single GET. The bound is a RATE, not a
+// per-flush cap: the 5s window is measured from the previous learn's
+// COMPLETION, and a queued write may take up to fetchWithTimeout's 12s abort,
+// so a flush of slow drops can legally fire one GET per ~5s. That ceiling is
+// the intended one - a drop landing after the window really is fresh evidence
+// that this device's clock frame is still wrong, and one tiny GET per 5s costs
+// nothing next to re-losing the operator's result.
+const CLOCK_RELEARN_THROTTLE_MS = 5000;
+let _clockRelearnInFlight = false;
+let _clockRelearnLastAt = 0;
+function _relearnClockAfterSupersede() {
+    if (_clockRelearnInFlight) return;
+    if (_clockRelearnLastAt !== 0 && (Date.now() - _clockRelearnLastAt) < CLOCK_RELEARN_THROTTLE_MS) return;
+    _clockRelearnInFlight = true;
+    _learnServerClockOffset().finally(() => {
+        _clockRelearnInFlight = false;
+        _clockRelearnLastAt = Date.now();
+    });
 }
 // _serverNowMs returns the current time in the server's clock frame. Never
 // negative-guarded: callers only compare relative order, so a monotonic-ish
@@ -662,6 +705,9 @@ async function _flushQueue() {
                             // differently.
                             const body = await res.json().catch(() => ({}));
                             if (body && body.applied === false) {
+                                // bc-cse: covers both kinds - either way the server
+                                // says our stamp lost, so re-check our clock frame.
+                                _relearnClockAfterSupersede();
                                 if (kind === 'override') {
                                     // A queued feeder-winner ASSERTION the server dropped. Any
                                     // optimistic local advance from it is stale, so ask listeners to
@@ -979,7 +1025,34 @@ if (typeof window !== 'undefined') {
 
 // mp-y3nk: learn the server-clock offset at load so the first writes are already
 // stamped in the server's frame (refreshed again on each SSE (re)connect).
-if (typeof fetch === 'function') { _learnServerClockOffset(); }
+//
+// bc-cse: retry until the FIRST learn succeeds. A single fire-and-forget attempt
+// leaves the offset at 0 for the whole session when the load-time GET fails and
+// no SSE connection ever opens - and that precondition ("SSE never opens") is
+// exactly why there is no other trigger to lean on. Backoff 5s -> 10s -> 20s ->
+// 40s, capped at 60s, indefinitely: one tiny GET per minute is the steady state,
+// and it stops the moment anything (here or the SSE-connect relearn) succeeds.
+//
+// The `typeof fetch` guard wraps the WHOLE chain, not just the first attempt, so
+// a host without fetch schedules no timers at all. Note it does NOT keep the
+// chain out of the unit suite: jsdom + node give `fetch` here, so the poll runs
+// in any test that imports this module (see the clock-poll note in
+// __tests__/sync_queue.test.jsx, whose fetch counts are scoped because of it).
+const CLOCK_LEARN_RETRY_BASE_MS = 5000;
+const CLOCK_LEARN_RETRY_MAX_MS = 60000;
+if (typeof fetch === 'function') {
+    (function _learnClockUntilSuccess(delayMs) {
+        _learnServerClockOffset().finally(() => {
+            if (_clockOffsetLearned) return;
+            setTimeout(() => {
+                // Re-check on FIRE, not just on schedule: an SSE-connect learn or a
+                // supersede relearn can land while this timer is pending.
+                if (_clockOffsetLearned) return;
+                _learnClockUntilSuccess(Math.min(delayMs * 2, CLOCK_LEARN_RETRY_MAX_MS));
+            }, delayMs);
+        });
+    })(CLOCK_LEARN_RETRY_BASE_MS);
+}
 
 ;(function _rehydrateQueue() {
     try {
@@ -1791,6 +1864,14 @@ const API = {
             // broadcast for the same reason `stale` does: pushing this payload to
             // the court display would overwrite the newer state already there.
             if (data && data.applied === false) {
+                // bc-cse: the superseded banner tells the operator to re-enter
+                // the result. Kick off a relearn - fire-and-forget, so it does
+                // not gate this response and carries no promise that the
+                // re-entry wins (a genuinely newer stored result still should
+                // beat it). What it buys is narrower and sufficient: a re-entry
+                // moments from now carries a CORRECTED stamp instead of losing
+                // again to this device's own uncorrected skew.
+                _relearnClockAfterSupersede();
                 if (!isRunning) _notifyScoreSuperseded(compID, matchID);
                 return data;
             }
@@ -1961,7 +2042,11 @@ const API = {
         // absent body) yields {} here; default applied=true so back-compat callers
         // keep advancing exactly as before.
         const body = await res.json().catch(() => ({}));
-        return { applied: body.applied !== false };
+        const applied = body.applied !== false;
+        // bc-cse: a dropped assertion is the same clock-skew signal as a dropped
+        // score - relearn so the operator's next "Run now" carries a live stamp.
+        if (!applied) _relearnClockAfterSupersede();
+        return { applied };
     },
     async resetOverrides(compID, password, adminPassword) {
         const res = await fetch(`/api/competitions/${compID}/overrides`, {

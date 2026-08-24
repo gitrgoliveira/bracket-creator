@@ -1678,6 +1678,29 @@ func applyMatchWrite(result *state.MatchResult, storedModifiedAt int64, policy m
 	if policy == matchWriteRestore {
 		return true
 	}
+	// The unstamped bypass, made visible (bc-cse). An unstamped forward write
+	// over a STAMPED stored result is the one remaining path that overwrites a
+	// known-newer result without any comparison being possible: ApplyByTimestamp
+	// reads 0 as "no opinion" and applies. The bypass STAYS — legacy clients and
+	// files written before the ModifiedAt column existed depend on it, and
+	// removing it would refuse writes that have always been legitimate — but it
+	// must stop being invisible, because it is now the last silent-overwrite
+	// path left (a client stamp far enough in the future to reach it by accident
+	// is refused at the HTTP boundary instead, see modifiedAtRefuseSkewMs).
+	//
+	// Expected traffic, not an alarm: the server-built writes (quick-score,
+	// /decision, both daihyosen paths) carry no stamp BY DESIGN, so every
+	// correction made through them logs here. The line earns its keep when an
+	// operator asks where a result went: it names the match whose stamped result
+	// an unstamped write replaced.
+	//
+	// Competition and match ids are not in scope here (this primitive is handed
+	// only the result and the stored stamp), so it logs what the result carries:
+	// its own ID.
+	if result.ModifiedAt == 0 && storedModifiedAt > 0 {
+		log.Printf("engine: match %s: unstamped write overwrites a result stamped %d (unstamped bypass, no last-write-wins comparison possible)",
+			result.ID, storedModifiedAt)
+	}
 	return domain.ApplyByTimestamp(result.ModifiedAt, storedModifiedAt)
 }
 

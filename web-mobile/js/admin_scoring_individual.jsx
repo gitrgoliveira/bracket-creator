@@ -1080,7 +1080,14 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                   // button having saved nothing. Check the awaited result
                   // directly instead of relying on the broadcast.
                   const res = await doSubmit(() => onSubmit(buildPatch("running")));
-                  if (window.writeWasSuperseded && window.writeWasSuperseded(res)) {
+                  // bc-cse: ask the NARROW verdict first. Both answers are
+                  // "not stored", but the remedies are opposites: a clock
+                  // refusal stored nothing and re-entering is the fix, while
+                  // a supersede means a newer result is on disk and
+                  // re-entering would overwrite it.
+                  if (window.writeWasRefusedForClock && window.writeWasRefusedForClock(res)) {
+                    setWriteFailed({ reason: window.CLOCK_SKEW_REASON_TEXT, advice: window.CLOCK_SKEW_ADVICE });
+                  } else if (window.writeWasSuperseded && window.writeWasSuperseded(res)) {
                     setWriteFailed({ reason: window.SUPERSEDED_REASON, advice: window.SUPERSEDED_ADVICE });
                   }
                 }} disabled={submitting}>

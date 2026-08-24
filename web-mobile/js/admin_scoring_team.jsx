@@ -3015,7 +3015,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                   // silent for. Start match is an explicit operator tap, not
                   // an autosave, so check the awaited result directly.
                   const res = await doSubmit(() => onSubmit(buildPatch("running")));
-                  if (window.writeWasSuperseded && window.writeWasSuperseded(res)) {
+                  // bc-cse: ask the NARROW verdict first. Both answers are
+                  // "not stored", but the remedies are opposites: a clock
+                  // refusal stored nothing and re-entering is the fix, while
+                  // a supersede means a newer result is on disk and
+                  // re-entering would overwrite it.
+                  if (window.writeWasRefusedForClock && window.writeWasRefusedForClock(res)) {
+                    setWriteFailed({ reason: window.CLOCK_SKEW_REASON_TEXT, advice: window.CLOCK_SKEW_ADVICE });
+                  } else if (window.writeWasSuperseded && window.writeWasSuperseded(res)) {
                     setWriteFailed({ reason: window.SUPERSEDED_REASON, advice: window.SUPERSEDED_ADVICE });
                   }
                 }} disabled={submitting}>Start match</button>
@@ -3080,7 +3087,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                     // operator tap, not the debounced autosave
                     // _notifyScoreSuperseded stays silent for. Check directly
                     // rather than relying on the broadcast.
-                    if (mountedRef.current && window.writeWasSuperseded && window.writeWasSuperseded(res)) {
+                    // bc-cse: narrow verdict first, same reasoning as Start
+                    // match above - a clock refusal stored nothing, so the
+                    // remedy is the opposite of the superseded one.
+                    if (mountedRef.current && window.writeWasRefusedForClock && window.writeWasRefusedForClock(res)) {
+                      setWriteFailed({ reason: window.CLOCK_SKEW_REASON_TEXT, advice: window.CLOCK_SKEW_ADVICE });
+                    } else if (mountedRef.current && window.writeWasSuperseded && window.writeWasSuperseded(res)) {
                       setWriteFailed({ reason: window.SUPERSEDED_REASON, advice: window.SUPERSEDED_ADVICE });
                     }
                   });

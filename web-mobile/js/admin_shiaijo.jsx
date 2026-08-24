@@ -289,15 +289,26 @@ function ResolveFeedersModal({ match, comp, password, onClose, onResolved, onOpt
             // about (some feeders resolved, the operator retries the rest).
             let anyQueued = false;
             let anyDropped = false;
+            let anyClockRefused = false;
             for (const s of resolvable) {
                 const winner = picks[s.feeder.id];
                 const r = await window.API.overrideBracketWinner(comp.id, s.feeder.id, winner, password);
                 if (window.writeWasSuperseded(r)) {
-                    // The server dropped this assertion (a newer/equal result
-                    // already exists for the feeder), so our pick is NOT the
-                    // authoritative winner. Skip the optimistic advance and let
-                    // onResolved() (refreshCourt) pull the real server tree.
-                    anyDropped = true;
+                    // The server dropped this assertion, so our pick is NOT the
+                    // authoritative winner: skip the optimistic advance and let
+                    // onResolved() (refreshCourt) pull the real server tree. That
+                    // part is the same for both drop reasons; what the operator is
+                    // TOLD is not (bc-cse), so split them here.
+                    if (window.writeWasRefusedForClock && window.writeWasRefusedForClock(r)) {
+                        // Refused for clock skew: nothing newer exists, nothing was
+                        // recorded anywhere, and the client has just resynced. The
+                        // "already recorded elsewhere" wording would be a plain
+                        // falsehood and would stop the operator retrying the one
+                        // action that now works.
+                        anyClockRefused = true;
+                    } else {
+                        anyDropped = true;
+                    }
                     continue;
                 }
                 // Optimistically advance the LOCAL bracket so the final becomes
@@ -308,11 +319,18 @@ function ResolveFeedersModal({ match, comp, password, onClose, onResolved, onOpt
                 if (r && r.queued) anyQueued = true;
             }
             if (showToast) {
+                // anyDropped is checked BEFORE anyClockRefused on purpose: when one
+                // loop produces both, the supersede wording wins because it is the
+                // one that is destructive to ignore (a real result exists elsewhere
+                // and the operator must look at it), while a clock refusal costs
+                // only a retry. The refetch below happens either way.
                 showToast(anyQueued
                     ? "Recorded offline. This match is ready to run now and will sync when the court reconnects."
                     : anyDropped
                         ? "Some results were already recorded elsewhere. Refreshing this court to show the current state."
-                        : "Feeders resolved. The match is ready to start.");
+                        : anyClockRefused
+                            ? "This device's clock was out of step with the server and has been resynced. Try resolving again."
+                            : "Feeders resolved. The match is ready to start.");
             }
             if (onResolved) onResolved();
             onClose();
@@ -804,7 +822,21 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         try {
             // Starting makes the match running; the scoring panel shows
             // running[0], so it picks the match up on the next refetch.
-            await onEditScore(m.compId, m.id, startPatch(), m);
+            const res = await onEditScore(m.compId, m.id, startPatch(), m);
+            // A clock_skew refusal means the server stored NOTHING and, unlike
+            // a queued start, nothing will land later — so returning true here
+            // would pin the panel on a match that never started while the tap
+            // looked like it worked. Found in browser verification: this card
+            // button is a start path none of the review sweeps enumerated (it
+            // is not one of the editor call sites). The relearn the refusal
+            // triggers means a SECOND tap normally succeeds; the toast tells
+            // the operator that, instead of leaving a dead first tap.
+            if (window.writeWasRefusedForClock && window.writeWasRefusedForClock(res)) {
+                const msg = "Could not start: " + (window.CLOCK_SKEW_REASON_TEXT || "this device's clock was out of step with the server") + ". The clock has been resynced; try again.";
+                if (mountedRef.current) setStartError(msg);
+                if (showToast) showToast(msg, "error");
+                return false;
+            }
             return true;
         } catch (e) {
             if (mountedRef.current) setStartError((e && e.message) || "Could not start the match: check eligibility and try again.");

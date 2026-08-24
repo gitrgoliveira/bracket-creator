@@ -1787,12 +1787,16 @@ paths:
             completed, so a running write must not revert the final result.
             Different client sessions are concurrent operators; the server
             applies those last-write-wins, never stale — and when the
-            last-write-wins comparison drops the INCOMING write (its
-            `modifiedAt` is older than the stored result's, the reconnecting
-            offline court case), the body is the SupersededWrite shape
-            (`{"applied": false, "reason": "superseded", ...}`): nothing was
-            persisted, no SSE broadcast is emitted, and the client must surface
-            "not saved" rather than treat the echo as a save.
+            last-write-wins comparison drops the INCOMING write, the body is the
+            RefusedWrite shape (`{"applied": false, "reason": ..., ...}`):
+            nothing was persisted, no SSE broadcast is emitted, and the client
+            must surface "not saved" rather than treat the echo as a save. Two
+            causes: `superseded` (the `modifiedAt` is older than the stored
+            result's, the reconnecting offline court case) and `clock_skew`
+            (the `modifiedAt` is implausibly far in the future, so this device's
+            clock is wrong; the write is refused rather than trusted or zeroed,
+            and the client should resync from GET /api/time and re-submit the
+            same result). See the RefusedWrite schema.
           content:
             application/json:
               schema:
@@ -1805,7 +1809,7 @@ paths:
                 # branch.
                 anyOf:
                   - $ref: '#/components/schemas/MatchResult'
-                  - $ref: '#/components/schemas/SupersededWrite'
+                  - $ref: '#/components/schemas/RefusedWrite'
                   - type: object
                     additionalProperties: false
                     properties:
@@ -2251,25 +2255,42 @@ paths:
                 winnerName:
                   type: string
                   maxLength: 100
+                modifiedAt:
+                  type: integer
+                  format: int64
+                  description: >
+                    Client's server-relative timestamp for last-write-wins
+                    reconciliation, unix milliseconds; omit (or 0) when
+                    unstamped. A value implausibly far in the future is refused
+                    with the RefusedWrite shape, see the 200 response.
       responses:
         '200':
           description: >
             The body is `{"applied": <bool>}` (mp-y3nk). `applied: true` means
-            the winner was set; `applied: false` means the timestamp
-            last-write-wins guard dropped the assertion because a newer stored
-            result already decides this match — nothing changed and no SSE
-            broadcast is emitted, so a client that advanced its local bracket
-            optimistically should refetch. 200 either way: a superseded
-            assertion is not a fault and can never win a retry.
+            the winner was set; `applied: false` means the assertion was not
+            applied — nothing changed and no SSE broadcast is emitted, so a
+            client that advanced its local bracket optimistically should
+            refetch. 200 either way: neither case is a fault and neither can win
+            a retry as-is.
+
+            Two ways it can be false. The timestamp last-write-wins guard may
+            have dropped the assertion because a newer stored result already
+            decides this match (bare `{"applied": false}`). Or the request's
+            `modifiedAt` was implausibly far in the future, in which case the
+            body is the RefusedWrite shape with `reason: clock_skew` and a
+            `serverNowMs`, and the client should resync its clock offset from
+            GET /api/time before re-submitting.
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: false
-                required: [applied]
-                properties:
-                  applied:
-                    type: boolean
+                anyOf:
+                  - type: object
+                    additionalProperties: false
+                    required: [applied]
+                    properties:
+                      applied:
+                        type: boolean
+                  - $ref: '#/components/schemas/RefusedWrite'
 
   /api/competitions/{id}/matches/{mid}/time:
     put:
@@ -2340,7 +2361,23 @@ paths:
                           description: >
                             Human-readable failure reason. Not a stable machine-readable
                             code; callers needing to branch on error class should use the
-                            single-result PUT /score endpoint instead.
+                            single-result PUT /score endpoint instead, except for the
+                            classes `reason` names below.
+                        reason:
+                          type: string
+                          enum: [superseded, clock_skew]
+                          description: >
+                            Machine-readable discriminator, present only for the two
+                            timestamp-guard verdicts and omitted for every other failure,
+                            so its presence always means the same thing. `superseded`: a
+                            newer result for that match is already stored. `clock_skew`:
+                            that entry's `modifiedAt` is implausibly far in the future, so
+                            the sending device's clock is wrong; nothing was written for
+                            it and re-running the import will not help until the clock is
+                            resynced. Both carry the same meaning as in the RefusedWrite
+                            schema, and in both cases the entry is excluded from
+                            `succeeded` and never broadcast. Other entries in the batch
+                            are unaffected.
 
   /api/competitions/{id}/matches/{mid}/quick-score:
     put:
@@ -2385,7 +2422,7 @@ paths:
         '200':
           description: >
             Match result recorded (MatchResult body). May also be the
-            SupersededWrite shape (`applied: false`) when the timestamp
+            RefusedWrite shape (`applied: false`, `reason: superseded`) when the timestamp
             last-write-wins guard drops the write because a newer result is
             already stored; see the `/score` endpoint's 200 for the contract.
             Not producible by ANY client today, first-party or not: this
@@ -2399,7 +2436,7 @@ paths:
               schema:
                 anyOf:
                   - $ref: '#/components/schemas/MatchResult'
-                  - $ref: '#/components/schemas/SupersededWrite'
+                  - $ref: '#/components/schemas/RefusedWrite'
         '400':
           $ref: '#/components/responses/BadRequest'
 
@@ -3415,39 +3452,68 @@ components:
             $ref: '#/components/schemas/Error'
 
   schemas:
-    SupersededWrite:
+    RefusedWrite:
       type: object
       additionalProperties: false
       required: [applied, reason, message]
       description: >
-        A write the timestamp last-write-wins guard dropped: a NEWER result for
-        this match is already stored, so nothing was persisted. Returned with
-        HTTP 200, never an error status, because a superseded write is not a
-        fault and can never win a retry; an error status would make offline
-        write queues retry an unwinnable request forever. Clients must treat
-        this as "not saved" (show the message) and must NOT advise blind
-        re-entry: re-submitting re-stamps the payload with the current clock
-        and would overwrite the newer result that won.
+        A write the timestamp last-write-wins guard did not persist. Two causes,
+        told apart by `reason`, and they need different remedies:
 
-        Only PUT /score can currently return this shape, because it is the only
-        endpoint whose client-supplied payload carries a modifiedAt for the
-        guard to compare. The other match-write endpoints (/quick-score,
-        /decision and both /daihyosen paths) build their result server-side
-        without a stamp, so the guard takes its unstamped bypass and always
-        applies; they nonetheless map the condition to this same shape rather
-        than to a 500, so that adding a stamp to any of those payloads later
-        cannot silently turn a benign supersede into a request an offline queue
-        retries forever. The batch endpoint /bulk-score is the one exception: it
-        reports a superseded entry in its own per-entry errors[] array inside an
-        overall 200, so the drop is visible but not machine-distinguishable from
-        a genuine rejection there.
+        - `superseded`: a NEWER result for this match is already stored, so the
+          incoming write lost the comparison. Clients must treat this as "not
+          saved" (show the message) and must NOT advise blind re-entry:
+          re-submitting re-stamps the payload with the current clock and would
+          overwrite the newer result that won.
+
+        - `clock_skew`: the request's `modifiedAt` is implausibly far in the
+          future (more than a few seconds ahead of the server), so this device's
+          clock is wrong and the stamp cannot be used. It is refused rather than
+          honoured or discarded, because both of those lose data: honouring it
+          lets the write beat every legitimate later write until real time
+          reaches the stamp, and discarding it (treating it as unstamped) makes
+          the write apply unconditionally over a newer stored result. The client
+          should resync its clock offset from GET /api/time and submit the SAME
+          result again, which is safe here precisely because nothing was stored.
+
+        Both are returned with HTTP 200, never an error status: neither is a
+        fault, and neither can win a retry as-is, so an error status would make
+        an offline write queue retry an unwinnable request forever. Nothing is
+        persisted and no SSE broadcast is emitted in either case.
+
+        PUT /score is the endpoint that produces both, because it is the only
+        one whose client-supplied payload carries a modifiedAt for the guard to
+        compare; PUT /override-winner produces `clock_skew` from its own
+        modifiedAt. The other match-write endpoints (/quick-score, /decision and
+        both /daihyosen paths) build their result server-side without a stamp,
+        so the guard takes its unstamped bypass and always applies; they
+        nonetheless map the superseded condition to this same shape rather than
+        to a 500, so that adding a stamp to any of those payloads later cannot
+        silently turn a benign supersede into a request an offline queue retries
+        forever. The batch endpoint /bulk-score is the one exception: it reports
+        both conditions per-entry in its own errors[] array inside an overall
+        200, carrying the same `reason` value there.
       properties:
         applied:
           type: boolean
           description: Always false in this shape.
         reason:
           type: string
-          description: Always "superseded".
+          enum: [superseded, clock_skew]
+          description: >
+            Machine-readable cause. `superseded` means a newer stored result
+            won; `clock_skew` means this device's clock is ahead of the server
+            and the stamp was refused.
+        serverNowMs:
+          type: integer
+          format: int64
+          description: >
+            Server clock at the moment of the verdict, in unix milliseconds.
+            Present on `clock_skew`, omitted otherwise. DIAGNOSTIC ONLY: it must
+            not be applied directly as a clock offset, because a response
+            carries no round-trip measurement and adopting it would bake this
+            request's latency into the client's frame. Relearn the offset from
+            GET /api/time, which is RTT-corrected.
         message:
           type: string
           description: Operator-facing explanation.
@@ -4137,11 +4203,11 @@ components:
             last-write-wins guard. It used to: the exemption existed because a
             dropped write reported success, so exempting corrections was the
             only way to stop a deliberate edit being silently eaten. That is
-            fixed (see the SupersededWrite schema), and the exemption could not
+            fixed (see the RefusedWrite schema), and the exemption could not
             tell a live correction from one an offline client replayed hours
             later, which silently overwrote newer results. A correction stamped
             older than the stored result is therefore refused like any other
-            stale write, and answers with SupersededWrite.
+            stale write, and answers with RefusedWrite.
         reopenPending:
           type: boolean
           readOnly: true

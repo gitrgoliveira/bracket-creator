@@ -538,7 +538,17 @@ func (h *Hub) HandleEvents() gin.HandlerFunc {
 				// Omitting id: means the browser's Last-Event-ID is
 				// unchanged, the heartbeat neither consumes a seq nor
 				// creates a gap.
-				if _, err := w.Write([]byte("data: {\"type\":\"heartbeat\"}\n\n")); err != nil {
+				//
+				// nowMs is the server clock at emit time, carried so a client
+				// can NOTICE its own clock drifting without asking. It is a
+				// TRIPWIRE ONLY and must never be adopted as an offset: a
+				// one-way push carries no round trip to correct against, so a
+				// frame delayed by a slow network or a busy tab reads as a
+				// server clock in the past and would drag the client's frame
+				// BACKWARDS, manufacturing exactly the skew the guard fences.
+				// A client that sees a large divergence relearns the offset
+				// properly via GET /api/time, which is RTT-corrected.
+				if _, err := fmt.Fprintf(w, "data: {\"type\":\"heartbeat\",\"nowMs\":%d}\n\n", time.Now().UnixMilli()); err != nil {
 					return false
 				}
 				c.Writer.Flush() // Ensure heartbeat is sent immediately

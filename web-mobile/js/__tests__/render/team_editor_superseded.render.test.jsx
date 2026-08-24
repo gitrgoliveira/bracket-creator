@@ -18,7 +18,7 @@
 import React from 'react';
 import { render, act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
-import { writeWasSuperseded, SUPERSEDED_REASON, SUPERSEDED_ADVICE } from '../../write_result.jsx';
+import { writeWasSuperseded, writeWasRefusedForClock, SUPERSEDED_REASON, SUPERSEDED_ADVICE, CLOCK_SKEW_REASON_TEXT, CLOCK_SKEW_ADVICE } from '../../write_result.jsx';
 
 const STUBBED_GLOBALS = {
   isHikiwake: () => false,
@@ -36,6 +36,9 @@ const STUBBED_GLOBALS = {
   // The REAL predicate and the REAL copy: the point of the test is that the
   // call site consults them, so stubbing them would prove nothing.
   writeWasSuperseded,
+  writeWasRefusedForClock,
+  CLOCK_SKEW_REASON_TEXT,
+  CLOCK_SKEW_ADVICE,
   SUPERSEDED_REASON,
   SUPERSEDED_ADVICE,
 };
@@ -295,5 +298,42 @@ describe('team score editor: a queued completed write says so', () => {
     } finally {
       delete window.subscribeTerminalWriteFailed;
     }
+  });
+});
+
+// A clock_skew refusal and a superseded drop are BOTH applied:false, and until
+// this branch existed every surface showed the superseded copy for both. That
+// copy is actively harmful for a clock refusal: it says "check the recorded
+// result / do not re-submit" when nothing was recorded and re-submitting is
+// exactly the remedy (the client has already resynced its clock). These pin
+// the split at the editor, which no unit test reaches - the api_client tests
+// stop at the response, and this branch lives in the component.
+describe('team score editor: a clock refusal shows the clock copy, not the superseded copy', () => {
+  it('Start match refused for clock_skew names the clock and invites re-entry', async () => {
+    const onSubmit = vi.fn().mockResolvedValue({ applied: false, reason: 'clock_skew', serverNowMs: 1 });
+    await renderEditor(onSubmit);
+
+    await act(async () => { fireEvent.click(screen.getByText('Start match')); });
+
+    await waitFor(() => {
+      const alert = screen.getByRole('alert');
+      expect(alert.textContent).toContain(CLOCK_SKEW_REASON_TEXT);
+      expect(alert.textContent).toContain(CLOCK_SKEW_ADVICE);
+      // The load-bearing negative: the superseded advice warns AGAINST the
+      // very action the clock copy asks for, so leaking it here sends the
+      // operator hunting for a recorded result that does not exist.
+      expect(alert.textContent).not.toContain(SUPERSEDED_ADVICE);
+    });
+  });
+
+  it('a superseded refusal still shows the superseded copy (the branch is additive)', async () => {
+    const onSubmit = vi.fn().mockResolvedValue({ applied: false, reason: 'superseded' });
+    await renderEditor(onSubmit);
+    await act(async () => { fireEvent.click(screen.getByText('Start match')); });
+    await waitFor(() => {
+      const alert = screen.getByRole('alert');
+      expect(alert.textContent).toContain(SUPERSEDED_REASON);
+      expect(alert.textContent).not.toContain(CLOCK_SKEW_REASON_TEXT);
+    });
   });
 });

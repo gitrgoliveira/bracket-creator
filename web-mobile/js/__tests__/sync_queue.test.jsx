@@ -76,9 +76,14 @@ afterEach(() => {
 
 /** Resolve all pending microtasks without advancing fake timers. */
 async function flushMicrotasks() {
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    // Enough turns to carry the flush loop through every await on its longest
+    // path, which now includes reading the response body on the running arm
+    // (bc-cse: a running replay parses the body to spot a clock_skew refusal,
+    // the one 2xx that means the write did NOT land). A fixed three turns used
+    // to be exactly enough, so adding one await anywhere in the loop made
+    // unrelated tests report a drained queue as still offline. Matches the
+    // helper in clock_offset.test.jsx.
+    for (let i = 0; i < 12; i++) await Promise.resolve();
 }
 
 /** Advance timers by the given ms, then flush microtasks. */

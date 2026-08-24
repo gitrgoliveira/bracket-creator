@@ -680,7 +680,7 @@ func TestHandleEvents_HeartbeatFrame(t *testing.T) {
 	// Wait deterministically for the first heartbeat frame rather than a fixed
 	// sleep (which is flaky on slow/contended CI). BodyString() is concurrency-safe.
 	require.Eventually(t, func() bool {
-		return strings.Contains(w.BodyString(), "data: {\"type\":\"heartbeat\"}\n\n")
+		return strings.Contains(w.BodyString(), "data: {\"type\":\"heartbeat\"")
 	}, 2*time.Second, 5*time.Millisecond, "HandleEvents must emit a heartbeat data frame")
 	cancel()
 	close(closeChan)
@@ -691,19 +691,28 @@ func TestHandleEvents_HeartbeatFrame(t *testing.T) {
 	}
 
 	body := w.BodyString()
-	require.Contains(t, body, "data: {\"type\":\"heartbeat\"}\n\n", "HandleEvents must emit a heartbeat data frame")
+	require.Contains(t, body, "data: {\"type\":\"heartbeat\"", "HandleEvents must emit a heartbeat data frame")
 	// No events were broadcast, so the only frames are heartbeats, none may
 	// carry an id: line (which would perturb the browser's Last-Event-ID).
 	assert.NotContains(t, body, "id:", "heartbeat frames must not contain an id: line")
 
-	// The emitted payload parses to {"type":"heartbeat"}.
+	// The emitted payload parses to {"type":"heartbeat","nowMs":<unix ms>}.
 	dataLine := body[strings.Index(body, "data: ")+len("data: "):]
 	dataLine = dataLine[:strings.Index(dataLine, "\n")]
 	var payload struct {
-		Type string `json:"type"`
+		Type  string `json:"type"`
+		NowMs *int64 `json:"nowMs"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(dataLine), &payload), "heartbeat data must be valid JSON")
 	assert.Equal(t, "heartbeat", payload.Type)
+
+	// bc-cse: the frame carries the server clock so a client can notice its own
+	// clock drifting (a tripwire only, never adopted as an offset: a one-way
+	// push has no round trip to correct against). Pointer so an omitted field is
+	// distinguishable from a zero one.
+	require.NotNil(t, payload.NowMs, "the heartbeat must carry the server time")
+	assert.InDelta(t, time.Now().UnixMilli(), *payload.NowMs, float64(60*time.Second/time.Millisecond),
+		"nowMs must be a plausible unix-ms server clock reading, not seconds or a zero value")
 }
 
 // mp-gpra: when the server has broadcast nothing yet (head seq 0) and a client

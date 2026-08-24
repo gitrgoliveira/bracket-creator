@@ -401,6 +401,26 @@ written before the timestamp existed, or by a client that does not send one, cou
 unstamped and always applies: the guard discriminates only when both sides carry a stamp,
 so it can never silently drop a legitimate change.
 
+The comparison only holds if the two clocks agree, so a timestamp that is far enough in the
+future to be impossible is refused and reported rather than trusted or quietly discarded.
+Both of the alternatives lose work. Trusting it lets that one write beat every later result
+until real time catches up with the stamp, which freezes the match for the whole of that
+window. Discarding it makes the write count as unstamped, and an unstamped write always
+applies, so the device with the wrong clock overwrites a newer result recorded elsewhere and
+nobody is told. A few seconds ahead is ordinary and is accepted, since a device learns the
+server time over the network and a little drift is normal. Beyond that the device is told
+its clock is wrong, nothing is written, and the app resyncs its clock so the operator can
+enter the same result again. Entering it again is safe precisely because the refused write
+never landed.
+
+The check is applied when the write arrives, not when it was stamped, so a write held in
+the outbox escapes it in proportion to how long it waited: a device whose clock is ahead by
+less than the time its write spent queued delivers a stamp that has already fallen into the
+server's past, where it is honoured like any other and can still beat a result recorded
+moments later on another court. What the check catches is a clock wrong by more than the
+queue age plus the few seconds of tolerance, which is the case that would otherwise freeze
+the match or overwrite a newer result with nobody told.
+
 ### When a file is wrong
 
 Section 1 promises that a wrong cell is repairable by hand, but not what happens when a hand

@@ -62,3 +62,46 @@ export const SUPERSEDED_ADVICE = 'Check the recorded result before re-entering a
 export function writeWasSuperseded(res) {
     return !!res && res.applied === false;
 }
+
+// CLOCK_SKEW_REASON_TEXT / CLOCK_SKEW_ADVICE: the copy for the OTHER
+// not-landed verdict (bc-cse). The server refuses a write whose modifiedAt is
+// implausibly far in its own future with 200 {"applied": false, "reason":
+// "clock_skew"}, and the remedy is the exact OPPOSITE of the superseded one:
+//
+//   - superseded  -> a newer result IS stored. Re-entering re-stamps the write
+//                    with the current clock, so it would beat that newer result
+//                    and undo it. Look first, and only then decide.
+//   - clock_skew  -> NOTHING is stored. No other writer won, nothing about the
+//                    match changed, and this device's stamp was simply wrong.
+//                    Re-entering IS the remedy, and it is safe.
+//
+// So they must never share a banner. Telling a clock-refused operator to "check
+// the recorded result before re-entering" points them at a result that does not
+// exist, and tells them not to do the one thing that would save their work.
+//
+// Owned here, beside the superseded pair, for the same reason that pair is: the
+// consumers are api_client.jsx (which re-publishes both on `window`) and the
+// explicit-tap call sites in the scoring editors, which build this banner state
+// themselves from the awaited result.
+export const CLOCK_SKEW_REASON_TEXT = "this device's clock was out of step with the server";
+export const CLOCK_SKEW_ADVICE = 'The clock has been resynced. Nothing was recorded, so enter the result again.';
+
+// CLOCK_SKEW_UNHEALED_ADVICE: the same verdict AFTER the client has already
+// healed and retried once and been refused again. Everything above still holds
+// (nothing is stored, re-entering is safe), but the resync did not fix the
+// frame, so promising that it did would send the operator round the identical
+// refusal with no idea why. The device itself has to be corrected.
+export const CLOCK_SKEW_UNHEALED_ADVICE = 'Nothing was recorded. This device\'s clock needs fixing, or entering the result again will be refused the same way.';
+
+// writeWasRefusedForClock: the NARROW half of writeWasSuperseded. Both are
+// `applied === false`, so every advance-skip and banner gate that asks
+// writeWasSuperseded keeps treating a clock refusal as not-landed - which is
+// right, because a refused write must never advance a bracket whatever the
+// reason it was refused for.
+//
+// This is additive on top of that: ask it FIRST wherever the operator is told
+// WHY, so the two verdicts get their own copy (see the pair above). Anywhere the
+// question is only "did this land?", writeWasSuperseded remains the right ask.
+export function writeWasRefusedForClock(res) {
+    return !!res && res.applied === false && res.reason === 'clock_skew';
+}

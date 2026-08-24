@@ -1,7 +1,7 @@
 import React from 'react';
 import { render, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
-import { writeDidNotLand, writeWasSuperseded } from '../../write_result.jsx';
+import { writeDidNotLand, writeWasSuperseded, writeWasRefusedForClock, CLOCK_SKEW_REASON_TEXT } from '../../write_result.jsx';
 
 // bc-lww1 regression. The shiaijo console optimistically advances its LOCAL
 // bracket when a knockout bout is scored to completion, so a court running
@@ -51,6 +51,8 @@ const STUBBED_GLOBALS = {
   // them correctly, so stubbing them would test nothing.
   writeDidNotLand,
   writeWasSuperseded,
+  writeWasRefusedForClock,
+  CLOCK_SKEW_REASON_TEXT,
 };
 
 const originals = {};
@@ -204,5 +206,45 @@ describe('AdminShiaijo optimistic bracket advance vs a superseded write (bc-lww1
 
     expect(lastLocalSemi().status).toBe('completed');
     expect(lastLocalFinal().status).toBe('scheduled');
+  });
+});
+
+// bc-cse: the Up-Next card's Start button is a start path none of the earlier
+// call-site sweeps enumerated (it is pickMatch -> startMatch, not an editor
+// mount). Found in browser verification: a clock_skew refusal left a dead
+// first tap - the match stayed scheduled, nothing said why, and only the
+// refusal-triggered relearn made the SECOND tap work. The card must say so.
+describe('AdminShiaijo Up-Next start vs a clock_skew refusal (bc-cse)', () => {
+  const scheduledMatch = {
+    id: 'r1-m0', compId: 'c1', compName: 'Cup', status: 'scheduled',
+    phase: 'bracket', matchNumber: 1, court: 'A',
+    sideA: { id: 'p1', name: 'Yamada' },
+    sideB: { id: 'p2', name: 'Tanaka' },
+  };
+
+  it('a refused start shows the clock message and does not pretend to have started', async () => {
+    tournamentMatchesSpy.mockImplementation(() => [scheduledMatch]);
+    const onEditScore = vi.fn().mockResolvedValue({ applied: false, reason: 'clock_skew', serverNowMs: 1 });
+    renderPage(onEditScore);
+
+    const btn = [...document.querySelectorAll('button')].find(b => (b.textContent || '').trim() === 'Start match');
+    expect(btn).toBeTruthy();
+    await act(async () => { btn.click(); });
+
+    const err = [...document.querySelectorAll('[role=alert]')].map(a => a.textContent).join(' ');
+    expect(err).toContain('clock');
+    expect(err).toContain('try again');
+    // Exactly one start attempt: the fix must not retry on its own here (the
+    // relearn already ran; the RETRY is the operator's informed second tap).
+    expect(onEditScore).toHaveBeenCalledTimes(1);
+  });
+
+  it('a normal start stays silent (the branch is refusal-only)', async () => {
+    tournamentMatchesSpy.mockImplementation(() => [scheduledMatch]);
+    const onEditScore = vi.fn().mockResolvedValue({ id: 'r1-m0', status: 'running' });
+    renderPage(onEditScore);
+    const btn = [...document.querySelectorAll('button')].find(b => (b.textContent || '').trim() === 'Start match');
+    await act(async () => { btn.click(); });
+    expect([...document.querySelectorAll('[role=alert]')].length).toBe(0);
   });
 });

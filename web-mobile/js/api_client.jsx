@@ -36,7 +36,11 @@
 
 import { normalizeCompetitionDetail, normalizePlayer, toBackendMatchResult, buildPlayerMetadata } from './api_serializers.jsx';
 import { bridge as _bridge } from './court_bridge.jsx';
-import { writeDidNotLand, writeWasSuperseded, SUPERSEDED_REASON, SUPERSEDED_ADVICE } from './write_result.jsx';
+import {
+    writeDidNotLand, writeWasSuperseded, writeWasRefusedForClock,
+    SUPERSEDED_REASON, SUPERSEDED_ADVICE,
+    CLOCK_SKEW_REASON_TEXT, CLOCK_SKEW_ADVICE, CLOCK_SKEW_UNHEALED_ADVICE,
+} from './write_result.jsx';
 
 // ---------------------------------------------------------------------------
 // F1: fetch with per-request timeout via AbortController
@@ -126,7 +130,22 @@ let _serverClockOffsetMs = 0;
 // scheduling once this flips, and it never flips back: a later failed refresh
 // keeps the last good offset rather than reopening the retry chain.
 let _clockOffsetLearned = false;
-async function _learnServerClockOffset() {
+// bc-cse (clock-skew hardening): SINGLE-FLIGHT. Every learn goes through here,
+// so a caller that must have a fresh offset RIGHT NOW (the clock_skew recovery
+// paths below, which await this) can never race a background learn into two
+// concurrent GETs, and never has to invent its own dedupe. A joiner gets the
+// in-flight learn's promise: /api/time always answers with the CURRENT server
+// time, so an already-outstanding request is exactly as good as a new one.
+// Deliberately does NOT open the throttle window (_clockRelearnLastAt): that
+// window belongs to the throttled wrapper, and stamping it here would let the
+// load-time learn silence the very first supersede-driven relearn.
+let _clockLearnInFlight = null;
+function _learnServerClockOffset() {
+    if (_clockLearnInFlight) return _clockLearnInFlight;
+    _clockLearnInFlight = _learnServerClockOffsetOnce().finally(() => { _clockLearnInFlight = null; });
+    return _clockLearnInFlight;
+}
+async function _learnServerClockOffsetOnce() {
     try {
         const t0 = Date.now();
         const res = await fetchWithTimeout('/api/time', {}, 5000);
@@ -143,7 +162,10 @@ async function _learnServerClockOffset() {
     }
 }
 
-// bc-cse: relearn the offset when the server tells us a write was superseded.
+// bc-cse: relearn the offset when something says this device's clock frame may
+// be wrong. Four triggers today: a superseded write (the original), a heartbeat
+// whose nowMs diverges from our frame, the browser 'online' event, and a write
+// the server refused outright for clock skew.
 //
 // A 200 {"applied": false} is the ONE signal that this device's stamps may be
 // running behind the server's frame (see the mp-y3nk block above for what the
@@ -171,7 +193,7 @@ async function _learnServerClockOffset() {
 const CLOCK_RELEARN_THROTTLE_MS = 5000;
 let _clockRelearnInFlight = false;
 let _clockRelearnLastAt = 0;
-function _relearnClockAfterSupersede() {
+function _relearnClockThrottled() {
     if (_clockRelearnInFlight) return;
     if (_clockRelearnLastAt !== 0 && (Date.now() - _clockRelearnLastAt) < CLOCK_RELEARN_THROTTLE_MS) return;
     _clockRelearnInFlight = true;
@@ -184,6 +206,42 @@ function _relearnClockAfterSupersede() {
 // negative-guarded: callers only compare relative order, so a monotonic-ish
 // value is what matters.
 function _serverNowMs() { return Date.now() + _serverClockOffsetMs; }
+
+// ---------------------------------------------------------------------------
+// bc-cse: clock-skew REFUSAL (the server half of this change)
+// ---------------------------------------------------------------------------
+// A write whose modifiedAt lands more than the server's margin (5s) in ITS
+// future is not stored at all: the server answers 200
+// {"applied": false, "reason": "clock_skew", "serverNowMs": …}. That is a
+// different animal from a plain supersede. A supersede means "someone else's
+// newer result won" and the operator must go and LOOK at what is recorded; a
+// clock_skew refusal means "your stamp is nonsense" and nothing about the
+// tournament state has changed - the same write, re-stamped in the server's
+// frame, is exactly what should be stored. So this client heals and retries
+// rather than telling the operator to check anything.
+//
+// `reason` absent, or 'superseded', keeps the pre-existing behaviour verbatim.
+//
+// The TEST for that shape is writeWasRefusedForClock (write_result.jsx), asked
+// wherever a parsed body is on hand, for the same reason writeWasSuperseded is:
+// a response test re-derived per call site is a response test that drifts. This
+// constant remains for the two places that are not testing a body - the wire
+// label on a bracket-resync notification, and the override path, which has
+// already collapsed the body down to a boolean.
+const CLOCK_SKEW_REASON = 'clock_skew';
+// The operator-facing copy lives in write_result.jsx beside the SUPERSEDED
+// pair, not here: it is a VERDICT string, and the whole point of this response
+// is that its verdict is the opposite of the superseded one. A local copy of it
+// drifted almost immediately - it kept the superseded advice ("check what is
+// recorded") under a comment claiming it named the clock - which is exactly the
+// failure one owner prevents. This module keeps only the wire value it
+// compares, and the one reason string that has no consumer outside the queue.
+const CLOCK_SKEW_FAIL_REASON = 'the device clock could not be reconciled with the server';
+
+// Heartbeat tripwire threshold. Deliberately BELOW the server's 5s refusal
+// margin: the tripwire is meant to fire and heal while writes are still being
+// accepted, not after the first result has already been refused.
+const CLOCK_TRIPWIRE_MS = 3000;
 
 const _matchRevCounters = new Map(); // compID:matchID → int
 function _nextRev(compID, matchID) {
@@ -245,6 +303,19 @@ const _revSession = (typeof crypto !== 'undefined' && crypto.randomUUID)
  *                     absent until the first rejection. Network failures never
  *                     increment it. At SERVER_REJECTION_NOTICE_THRESHOLD the
  *                     operator is told; the entry is never dropped for it.
+ *   skewRetried     : true once this entry has been re-stamped and retried after
+ *                     a clock_skew refusal (bc-cse). ABSENT means not-yet-retried,
+ *                     which is the safe default for an entry persisted by an
+ *                     older build. A second clock_skew refusal on a marked entry
+ *                     drops it rather than retrying a third time: the stamp is
+ *                     reconstructed from enqueuedAt + the freshly learned offset,
+ *                     so if that is still refused the device's frame cannot be
+ *                     reconciled and further attempts would poison-loop.
+ *                     A reload landing between the re-stamp and the retry
+ *                     rehydrates the entry with the flag already set, so its
+ *                     first refusal in the new session drops it with no retry
+ *                     at all: conservative by design, since the persisted stamp
+ *                     was already built from a learned offset.
  *   authBlocked     : true once the server answered 401. The entry stays QUEUED
  *                     but is skipped by the flush loop, because it carries the
  *                     password it was enqueued with and can only reproduce the
@@ -267,6 +338,7 @@ const _revSession = (typeof crypto !== 'undefined' && crypto.randomUUID)
  *   url?: string,
  *   enqueuedAt: number,
  *   attempts?: number,
+ *   skewRetried?: boolean,
  * }} WriteDescriptor
  * `method`/`url` are present only on terminal entries; running entries omit them.
  */
@@ -617,6 +689,33 @@ let _flushRequested = false;
 // revocation can't keep sending queued writes with the now-revoked password.
 let _queueGen = 0;
 
+// bc-cse: the queue's half of the clock-skew heal, shared by BOTH flush arms
+// (terminal writes and running score writes) because the re-stamp rule is one
+// rule: heal the offset, then rebuild this entry's stamp in the SERVER's frame
+// from the moment the operator acted.
+//
+// AWAITED, not the throttled wrapper: the re-stamp is only correct once the new
+// offset is in hand, and the learn is single-flighted so a concurrent
+// background one is joined rather than duplicated.
+//
+// enqueuedAt is the LOCAL time of the operator's action, so enqueuedAt + offset
+// is that action's time in the server's frame. Deliberately not _serverNowMs():
+// the write must keep its real age and still LOSE to a genuinely newer result,
+// rather than being made fresh by the act of retrying it. (The fallback cannot
+// fire for an entry that came through enqueue or rehydrate - both guarantee a
+// finite positive stamp - and exists so a hand-edited store yields a number,
+// not NaN.)
+//
+// Marks the entry so a SECOND refusal is terminal, and persists, so the mark
+// survives a reload (see the skewRetried note on the descriptor shape).
+async function _restampQueuedEntryForSkew(descriptor) {
+    await _learnServerClockOffset();
+    const enqueuedAt = Number.isFinite(descriptor.enqueuedAt) ? descriptor.enqueuedAt : Date.now();
+    descriptor.payload.modifiedAt = enqueuedAt + _serverClockOffsetMs;
+    descriptor.skewRetried = true;
+    _persistQueue();
+}
+
 async function _flushQueue() {
     if (_flushInProgress) { _flushRequested = true; return; }
     _flushInProgress = true;
@@ -704,10 +803,50 @@ async function _flushQueue() {
                             // means to the operator differs, so the two are announced
                             // differently.
                             const body = await res.json().catch(() => ({}));
+                            if (writeWasRefusedForClock(body)) {
+                                // bc-cse: NOT a supersede. The server refused this
+                                // replay because the stamp it carries is in the
+                                // server's future, so nothing newer won and there is
+                                // nothing for the operator to go and check: the entry
+                                // is still the only record of their result. Heal the
+                                // offset and RECONSTRUCT the stamp, then retry once.
+                                if (descriptor.skewRetried) {
+                                    // Refused a second time, with a stamp built from a
+                                    // freshly learned offset. This device's frame cannot
+                                    // be reconciled, and a third attempt would just
+                                    // poison-loop the queue behind an entry that can
+                                    // never land. Drop it - loudly, on both channels:
+                                    // the editor-scoped one for an operator still on
+                                    // this match, the alert for one who has moved court.
+                                    console.warn(`[sync] dropping queued ${kind} write refused twice for clock skew (serverNowMs=${body.serverNowMs}); the device clock cannot be reconciled`);
+                                    _notifyTerminalWriteFailed({ compID, matchID, kind, status: 200, reason: CLOCK_SKEW_FAIL_REASON, advice: CLOCK_SKEW_UNHEALED_ADVICE });
+                                    _notifyQueueAlert({
+                                        kind: 'rejected', count: 1, terminalCount: 1, compID, matchID,
+                                        detail: CLOCK_SKEW_FAIL_REASON,
+                                    });
+                                    // An override assertion additionally leaves any
+                                    // optimistic local advance standing on a write that
+                                    // will now never land, so ask for a refetch as well.
+                                    // Unlike the supersede case this is BOTH channels:
+                                    // there the drop is benign (a newer result won and
+                                    // the server state is right), here it is a failure
+                                    // AND the local bracket is wrong.
+                                    if (kind === 'override') _notifyBracketResync({ compID, matchID, reason: CLOCK_SKEW_REASON });
+                                    if (_writeQueue.get(key) === descriptor) _writeQueue.delete(key);
+                                    continue;
+                                }
+                                await _restampQueuedEntryForSkew(descriptor);
+                                // Leave it QUEUED and ask for an immediate rerun of the
+                                // loop (the same mechanism a concurrent trigger uses), so
+                                // the corrected write goes out now rather than waiting on
+                                // a backoff timer.
+                                _flushRequested = true;
+                                continue;
+                            }
                             if (body && body.applied === false) {
                                 // bc-cse: covers both kinds - either way the server
                                 // says our stamp lost, so re-check our clock frame.
-                                _relearnClockAfterSupersede();
+                                _relearnClockThrottled();
                                 if (kind === 'override') {
                                     // A queued feeder-winner ASSERTION the server dropped. Any
                                     // optimistic local advance from it is stale, so ask listeners to
@@ -741,6 +880,43 @@ async function _flushQueue() {
                                         lastSupersededMatch = { compID, matchID };
                                     }
                                 }
+                            }
+                        } else if (!terminal && kind === 'score') {
+                            // bc-cse MEDIUM-2. A RUNNING score replay is normally
+                            // fire-and-forget: res.ok is taken as delivered and the
+                            // entry is deleted unread. That is right for every body
+                            // this endpoint can return EXCEPT the clock-skew refusal,
+                            // where res.ok means the exact opposite of delivered -
+                            // nothing was written, and deleting the entry throws the
+                            // snapshot away. Most of what it carried is level-triggered
+                            // state the next autosave will restate, but
+                            // kachinukiBoutFinal is an EDGE-TRIGGERED command (see the
+                            // carry-forward in enqueueRunningWrite): lose the entry that
+                            // holds it and the winner-stays sequence stalls until the
+                            // operator presses Record bout again.
+                            //
+                            // So this arm parses the body for that ONE case. Every other
+                            // body - a plain 200, {stale:true}, reason 'superseded', no
+                            // reason at all - falls straight through to the same
+                            // delete-as-delivered below, byte-identically to before.
+                            const body = await res.json().catch(() => ({}));
+                            const refusedForClock = writeWasRefusedForClock(body);
+                            if (refusedForClock && !descriptor.skewRetried) {
+                                await _restampQueuedEntryForSkew(descriptor);
+                                _flushRequested = true;
+                                continue;
+                            }
+                            if (refusedForClock) {
+                                // Refused again on a stamp built from a freshly learned
+                                // offset. Dropped exactly as the delivered path below
+                                // drops it, with NO banner: running state is
+                                // level-triggered and the next autosave supersedes it, so
+                                // an alert here would fire on a transient the operator
+                                // cannot act on. The warn is for devtools - and it names
+                                // the risk, because if this entry was the one carrying
+                                // kachinukiBoutFinal the advancement command dies with it
+                                // and the operator must press Record bout again.
+                                console.warn(`[sync] dropping queued running write for ${matchID} refused twice for clock skew (serverNowMs=${body.serverNowMs}); a pending kachinuki advancement may need re-pressing`);
                             }
                         }
                         if (_writeQueue.get(key) === descriptor) {
@@ -1002,6 +1178,15 @@ if (typeof window !== 'undefined') {
         window.removeEventListener('online', window.__bcOnlineFlushHandler);
     }
     const onlineHandler = () => {
+        // bc-cse: reconnect is also the moment an OS is most likely to have
+        // NTP-jumped this device's clock (a tablet that slept through a wifi gap
+        // resyncs on the way back). The SSE onopen relearn only helps if SSE
+        // actually opens, which on a court that has just come back is neither
+        // immediate nor guaranteed - so relearn here too, and do it BEFORE the
+        // flush and regardless of whether anything is queued: the writes at risk
+        // are the live ones the operator makes in the next few seconds.
+        // Throttled, so a flapping connection costs one GET per 5s at worst.
+        _relearnClockThrottled();
         if (_writeQueue.size > 0) {
             _flushAttempt = 0;
             if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
@@ -1260,6 +1445,30 @@ function _ensureConnected() {
         } catch (err) {
             console.error('Error parsing SSE event:', err);
             return;
+        }
+        // bc-cse: heartbeat clock TRIPWIRE. The 15s heartbeat carries the
+        // server's nowMs, which makes it a free, continuous check on whether this
+        // device is still in the server's frame - so a clock that jumps mid-event
+        // (an NTP correction, an operator "fixing" the tablet's time) is caught
+        // within one heartbeat instead of at the next refused result.
+        //
+        // It is a DETECTOR, NEVER A SOURCE. nowMs is never assigned into the
+        // offset, because a one-way push carries no round-trip to correct for:
+        // the frame arrives some unknown latency after it was stamped, and on the
+        // congested court wifi this exists for, that latency is exactly when it is
+        // largest. Applying it directly would push this device's frame BACKWARDS
+        // by that latency - manufacturing the behind-the-clock skew the whole
+        // mechanism is here to prevent. So the tripwire only ever asks for a real
+        // GET /api/time, whose RTT-halving math is the one thing entitled to move
+        // the offset. A spurious trip costs one throttled GET; a corrupted offset
+        // costs the operator's data.
+        //
+        // Threshold sits below the server's 5s refusal margin (see
+        // CLOCK_TRIPWIRE_MS) so the heal happens before writes start bouncing.
+        if (parsed && parsed.type === 'heartbeat' && typeof parsed.nowMs === 'number') {
+            if (Math.abs(parsed.nowMs - _serverNowMs()) > CLOCK_TRIPWIRE_MS) {
+                _relearnClockThrottled();
+            }
         }
         for (const sub of _subscribers) {
             try { sub.callback(parsed); } catch (err) { console.error('SSE callback failed:', err); }
@@ -1774,6 +1983,142 @@ const API = {
         };
 
         const scoreUrl = `/api/competitions/${compID}/matches/${matchID}/score`;
+
+        // Everything a 2xx can mean, in one place, because bc-cse gave this
+        // response TWO producers: the first attempt, and the clock-skew resend
+        // below. `allowSkewRetry` is what stops the two from ping-ponging - the
+        // resend passes false, so a second clock_skew refusal is terminal.
+        const _handleOkBody = async (body, allowSkewRetry) => {
+            if (!isRunning) {
+                // A completed/terminal write that REACHED the server supersedes any
+                // queued running autosave for this match: drain it now (and prune
+                // the per-match rev counter) so a stale flush can't later revert the
+                // finalized result. Deferred from pre-flight on purpose: if the
+                // completed PUT fails outright (e.g. Finish while offline) we KEEP
+                // the last queued running snapshot so it can still flush when the
+                // connection returns, instead of dropping the operator's scores.
+                //
+                // Note the drain is deliberately PRE-OUTCOME: it happens on any 2xx,
+                // before this function reads what the body actually decided, so a
+                // clock_skew refusal (a 200 that stored NOTHING) drains the snapshot
+                // too. That is not a loss - the queued snapshot was stamped by the
+                // same unreconciled clock as the write just refused, so it would be
+                // refused in its turn, and the completed write is retried here with a
+                // corrected stamp anyway.
+                if (_writeQueue.delete(_revKey(compID, matchID))) {
+                    _persistQueue();
+                    _recomputeSyncStatus();
+                }
+                _matchRevCounters.delete(_revKey(compID, matchID));
+            }
+            // A stale running write is signalled by HTTP 200 {stale:true}
+            // (the server's rev-guard no-ops it). Do not broadcast it: pushing
+            // a superseded running score to the display would overwrite the
+            // newer state already there. Return as-is; the fire-and-forget
+            // autosave caller ignores the value.
+            // mp-9ukk: echo the operator's patch to the court display
+            // peer-to-peer so the board keeps updating when the SSE link is
+            // slow or down. This is an OPTIMISTIC overlay, not the
+            // authoritative source: the request payload already carries the
+            // display-critical fields (id, side ids, winner, scores, status)
+            // in the same envelope every other broadcast path uses, and the
+            // fully server-normalized state arrives via SSE (or the reconnect
+            // full refetch), which replaces the overlay. Broadcasting the
+            // request payload (not the server `data`) keeps one consistent
+            // shape across the confirmed and offline paths. Skip a rejected
+            // stale write above so a superseded score is never pushed.
+            if (body && body.stale) return body;
+            // bc-cse: refused for clock skew. NOT a supersede - nothing newer is
+            // stored and there is nothing for the operator to go and check; the
+            // stamp we sent was simply in the server's future. Heal and resend
+            // instead of reporting anything.
+            if (writeWasRefusedForClock(body)) {
+                if (isRunning) {
+                    // Autosave. Deliberately SILENT: relearn (throttled) and let
+                    // the next edit's autosave carry the corrected stamp ~300ms
+                    // later. A banner here would fire on every keystroke of a
+                    // skewed device, and the running state it describes is
+                    // transient anyway.
+                    _relearnClockThrottled();
+                    return body;
+                }
+                if (allowSkewRetry) return await _resendAfterClockSkew();
+                // Refused twice, the second time with a stamp taken from a
+                // freshly learned offset. Do NOT enqueue: a queue entry carrying
+                // a stamp this device cannot get right would poison-loop the
+                // flush. Tell the operator instead, with advice that names the
+                // clock - "re-enter the result" alone would send them round the
+                // same refusal with no idea why.
+                console.warn(`[score] write refused twice for clock skew (serverNowMs=${body.serverNowMs}); the device clock cannot be reconciled`);
+                _notifyTerminalWriteFailed({ compID, matchID, kind: 'score', status: 200, reason: CLOCK_SKEW_FAIL_REASON, advice: CLOCK_SKEW_UNHEALED_ADVICE });
+                return body;
+            }
+            // bc-lww1: 200 {applied:false} is the timestamp guard's drop — a
+            // NEWER result is already stored and nothing was written. Skip the
+            // broadcast for the same reason `stale` does: pushing this payload to
+            // the court display would overwrite the newer state already there.
+            if (body && body.applied === false) {
+                // bc-cse: the superseded banner tells the operator to re-enter
+                // the result. Kick off a relearn - fire-and-forget, so it does
+                // not gate this response and carries no promise that the
+                // re-entry wins (a genuinely newer stored result still should
+                // beat it). What it buys is narrower and sufficient: a re-entry
+                // moments from now carries a CORRECTED stamp instead of losing
+                // again to this device's own uncorrected skew.
+                _relearnClockThrottled();
+                if (!isRunning) _notifyScoreSuperseded(compID, matchID);
+                return body;
+            }
+            _broadcastPatch(payload);
+            return body;
+        };
+
+        // bc-cse: the completed-write heal. AWAITS a real learn (not the
+        // throttled wrapper, which may legitimately decide to do nothing) because
+        // the re-stamp is only correct once the new offset is in hand; the learn
+        // is single-flighted, so a concurrent background one is joined rather
+        // than duplicated. _serverNowMs() and not enqueuedAt-arithmetic: this
+        // write is happening NOW, in front of the operator, so now is its real
+        // time - unlike a queue replay, whose age is genuine and must be kept.
+        //
+        // Non-clock_skew outcomes are handled exactly as they would have been on
+        // the first attempt (that is the point of routing through _handleOkBody),
+        // including the offline enqueue: by this point the payload carries a
+        // corrected stamp, so queuing it is safe.
+        const _resendAfterClockSkew = async () => {
+            await _learnServerClockOffset();
+            payload.modifiedAt = _serverNowMs();
+            let retryRes;
+            try {
+                retryRes = await fetchWithTimeout(scoreUrl, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
+                    body: JSON.stringify(payload),
+                });
+            } catch (_networkErr) {
+                _enqueueTerminalWrite(
+                    _revKey(compID, matchID), 'score', 'PUT', scoreUrl,
+                    payload, password, compID, matchID
+                );
+                _broadcastPatch(payload);
+                return { queued: true };
+            }
+            const retryBody = await retryRes.json().catch(() => ({}));
+            if (retryRes.ok) return await _handleOkBody(retryBody, false);
+            if (retryRes.status >= 500 || retryRes.status === 429) {
+                _enqueueTerminalWrite(
+                    _revKey(compID, matchID), 'score', 'PUT', scoreUrl,
+                    payload, password, compID, matchID
+                );
+                _broadcastPatch(payload);
+                return { queued: true };
+            }
+            if (retryBody.error === "ineligible_competitor" || retryBody.error === "already_ineligible") {
+                throw new Error(retryBody.reasonHuman || retryBody.reason || retryBody.error || "Failed to record score");
+            }
+            throw new Error(retryBody.error || "Failed to record score");
+        };
+
         let res;
         try {
             try {
@@ -1827,57 +2172,7 @@ const API = {
         }
 
         const data = await res.json().catch(() => ({}));
-        if (res.ok) {
-            if (!isRunning) {
-                // A completed/terminal write that the server CONFIRMED supersedes
-                // any queued running autosave for this match: drain it now (and
-                // prune the per-match rev counter) so a stale flush can't later
-                // revert the finalized result. Deferred from pre-flight on purpose:
-                // if the completed PUT fails (e.g. Finish while offline) we KEEP the
-                // last queued running snapshot so it can still flush when the
-                // connection returns, instead of dropping the operator's scores.
-                if (_writeQueue.delete(_revKey(compID, matchID))) {
-                    _persistQueue();
-                    _recomputeSyncStatus();
-                }
-                _matchRevCounters.delete(_revKey(compID, matchID));
-            }
-            // A stale running write is signalled by HTTP 200 {stale:true}
-            // (the server's rev-guard no-ops it). Do not broadcast it: pushing
-            // a superseded running score to the display would overwrite the
-            // newer state already there. Return as-is; the fire-and-forget
-            // autosave caller ignores the value.
-            // mp-9ukk: echo the operator's patch to the court display
-            // peer-to-peer so the board keeps updating when the SSE link is
-            // slow or down. This is an OPTIMISTIC overlay, not the
-            // authoritative source: the request payload already carries the
-            // display-critical fields (id, side ids, winner, scores, status)
-            // in the same envelope every other broadcast path uses, and the
-            // fully server-normalized state arrives via SSE (or the reconnect
-            // full refetch), which replaces the overlay. Broadcasting the
-            // request payload (not the server `data`) keeps one consistent
-            // shape across the confirmed and offline paths. Skip a rejected
-            // stale write above so a superseded score is never pushed.
-            if (data && data.stale) return data;
-            // bc-lww1: 200 {applied:false} is the timestamp guard's drop — a
-            // NEWER result is already stored and nothing was written. Skip the
-            // broadcast for the same reason `stale` does: pushing this payload to
-            // the court display would overwrite the newer state already there.
-            if (data && data.applied === false) {
-                // bc-cse: the superseded banner tells the operator to re-enter
-                // the result. Kick off a relearn - fire-and-forget, so it does
-                // not gate this response and carries no promise that the
-                // re-entry wins (a genuinely newer stored result still should
-                // beat it). What it buys is narrower and sufficient: a re-entry
-                // moments from now carries a CORRECTED stamp instead of losing
-                // again to this device's own uncorrected skew.
-                _relearnClockAfterSupersede();
-                if (!isRunning) _notifyScoreSuperseded(compID, matchID);
-                return data;
-            }
-            _broadcastPatch(payload);
-            return data;
-        }
+        if (res.ok) return await _handleOkBody(data, true);
         // A running write that failed with a RETRYABLE server error (5xx / 429)
         // is queued for offline-style retry. Without this the inflight counter
         // drops to 0 and the pill flips back to "Synced" even though the latest
@@ -2042,11 +2337,52 @@ const API = {
         // absent body) yields {} here; default applied=true so back-compat callers
         // keep advancing exactly as before.
         const body = await res.json().catch(() => ({}));
-        const applied = body.applied !== false;
-        // bc-cse: a dropped assertion is the same clock-skew signal as a dropped
-        // score - relearn so the operator's next "Run now" carries a live stamp.
-        if (!applied) _relearnClockAfterSupersede();
-        return { applied };
+        let applied = body.applied !== false;
+        // The body that produced the FINAL verdict, which the resend below may
+        // replace. bc-cse: the reason travels back out to the caller, because a
+        // refusal and a supersede need opposite things said about them and the
+        // caller cannot re-derive which it got from `applied` alone. Purely
+        // additive: absent fields are undefined and every existing caller reads
+        // only `.applied`.
+        let verdict = body;
+        if (!applied && body.reason === CLOCK_SKEW_REASON) {
+            // bc-cse: refused because our stamp is in the server's future, not
+            // because a newer result won. Nothing about the bracket has changed,
+            // so heal the offset (AWAITED - the re-stamp depends on it) and send
+            // the same assertion once more, now stamped in the server's frame.
+            // Re-stamped with _serverNowMs() rather than the original stamp: the
+            // operator is asserting this winner right now.
+            await _learnServerClockOffset();
+            payload.modifiedAt = _serverNowMs();
+            let retryRes;
+            try {
+                retryRes = await fetchWithTimeout(url, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
+                    body: JSON.stringify(payload),
+                });
+            } catch (_networkErr) {
+                // Same durability rule as the first attempt: queue it and say so.
+                _enqueueTerminalWrite(`override:${compID}:${matchID}`, 'override', 'PUT', url, payload, password, compID, matchID);
+                return { queued: true };
+            }
+            if (!retryRes.ok) {
+                const retryErr = await retryRes.json().catch(() => ({}));
+                throw new Error(retryErr.error || "Failed to override winner");
+            }
+            const retryBody = await retryRes.json().catch(() => ({}));
+            applied = retryBody.applied !== false;
+            verdict = retryBody;
+            // Refused twice: never a third attempt. The caller already treats
+            // applied:false as "do not trust the optimistic pick", which is the
+            // correct outcome either way, so this reports rather than escalates.
+            if (!applied) console.warn('[override] assertion refused twice for clock skew; the device clock cannot be reconciled');
+        } else if (!applied) {
+            // bc-cse: a dropped assertion is the same clock-skew signal as a dropped
+            // score - relearn so the operator's next "Run now" carries a live stamp.
+            _relearnClockThrottled();
+        }
+        return { applied, reason: verdict.reason, message: verdict.message };
     },
     async resetOverrides(compID, password, adminPassword) {
         const res = await fetch(`/api/competitions/${compID}/overrides`, {
@@ -2888,7 +3224,13 @@ const API = {
     },
 };
 
-export { API, subscribeSyncStatus, subscribeTerminalWriteFailed, subscribeBracketResync, subscribeQueueAlert, enqueueRunningWrite, writeDidNotLand, writeWasSuperseded, SUPERSEDED_REASON, SUPERSEDED_ADVICE };
+export {
+    API, subscribeSyncStatus, subscribeTerminalWriteFailed, subscribeBracketResync, subscribeQueueAlert,
+    enqueueRunningWrite,
+    writeDidNotLand, writeWasSuperseded, writeWasRefusedForClock,
+    SUPERSEDED_REASON, SUPERSEDED_ADVICE,
+    CLOCK_SKEW_REASON_TEXT, CLOCK_SKEW_ADVICE, CLOCK_SKEW_UNHEALED_ADVICE,
+};
 
 if (typeof window !== 'undefined') {
     window.API = API;
@@ -2907,6 +3249,12 @@ if (typeof window !== 'undefined') {
     // exact same wording as the broadcast path rather than a pasted copy.
     window.SUPERSEDED_REASON = SUPERSEDED_REASON;
     window.SUPERSEDED_ADVICE = SUPERSEDED_ADVICE;
+    // bc-cse: the same mirror for the clock-refusal verdict, whose remedy is the
+    // OPPOSITE of the superseded one, so the same explicit-tap call sites must be
+    // able to ask which of the two they got and say the right thing.
+    window.writeWasRefusedForClock = writeWasRefusedForClock;
+    window.CLOCK_SKEW_REASON_TEXT = CLOCK_SKEW_REASON_TEXT;
+    window.CLOCK_SKEW_ADVICE = CLOCK_SKEW_ADVICE;
     // mp-y3nk: bracket-resync pub/sub: signals AdminShiaijo to refetch when a
     // queued override the server LWW-dropped leaves stale optimistic bracket state.
     window.subscribeBracketResync = subscribeBracketResync;

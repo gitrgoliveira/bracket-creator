@@ -1811,3 +1811,46 @@ describe('writeDidNotLand (bc-lww1)', () => {
         expect(typeof window.writeDidNotLand).toBe('function');
     });
 });
+
+// writeWasSuperseded is the STRONGER half of the pair, and the split is
+// load-bearing: both shapes mean "not stored", but only one of them will still
+// come true. A queued write lands on reconnect, so an offline court MUST keep
+// applying it locally; a superseded write never lands, so anything derived from
+// it (a bracket advance, a promoted next match) would show the operator a
+// winner the server discarded.
+describe('writeWasSuperseded (bc-lww1)', () => {
+    it('separates a superseded write from a merely queued one', () => {
+        const writeWasSuperseded = mod.writeWasSuperseded;
+        expect(typeof writeWasSuperseded).toBe('function');
+
+        expect(writeWasSuperseded({ applied: false })).toBe(true);
+        expect(writeWasSuperseded({ applied: false, reason: 'superseded' })).toBe(true);
+
+        // The whole point of the second predicate: a queued write did NOT land
+        // either, but it is going to, so the optimistic advance stays.
+        expect(writeWasSuperseded({ queued: true })).toBe(false);
+
+        expect(writeWasSuperseded({ id: 'm1', status: 'completed' })).toBe(false);
+        expect(writeWasSuperseded({ applied: true })).toBe(false);
+        expect(writeWasSuperseded({ stale: true })).toBe(false);
+        expect(writeWasSuperseded({})).toBe(false);
+        expect(writeWasSuperseded(null)).toBe(false);
+        expect(writeWasSuperseded(undefined)).toBe(false);
+    });
+
+    it('is strictly narrower than writeDidNotLand', () => {
+        // Anything superseded also did-not-land, but not the reverse. If these
+        // ever coincide, the queued case has silently lost its optimistic
+        // advance and offline courts stop moving.
+        const shapes = [{ queued: true }, { applied: false }, { stale: true }, { id: 'm' }, null];
+        for (const s of shapes) {
+            if (mod.writeWasSuperseded(s)) expect(mod.writeDidNotLand(s)).toBe(true);
+        }
+        expect(mod.writeDidNotLand({ queued: true })).toBe(true);
+        expect(mod.writeWasSuperseded({ queued: true })).toBe(false);
+    });
+
+    it('is exposed on window for the non-module consumers', () => {
+        expect(typeof window.writeWasSuperseded).toBe('function');
+    });
+});

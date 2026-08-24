@@ -1328,7 +1328,12 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                             const res = await onEditScore(selectedMatch.compId, selectedMatch.id, patch, selectedMatch);
                                             // Optimistically advance the local bracket so an offline court
                                             // sees the next match resolve (reconciled by refetch online).
-                                            maybeAdvanceLocal(selectedMatch, patch);
+                                            // NOT on a supersede: that winner was discarded in favour of a
+                                            // newer stored one, so advancing would show the operator their
+                                            // own dropped winner on the very queue the banner below tells
+                                            // them to go and check. A queued write still advances (it
+                                            // reconciles on reconnect); see writeWasSuperseded.
+                                            if (!window.writeWasSuperseded(res)) maybeAdvanceLocal(selectedMatch, patch);
                                             // A write that did not land (queued, F5; or superseded by a
                                             // newer stored result, bc-lww1) returns its signal so the
                                             // editor shows the not-saved banner rather than looking saved.
@@ -1340,7 +1345,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                         const next = nextActiveAfter(selectedMatch);
                                         try {
                                             const res = await onEditScore(selectedMatch.compId, selectedMatch.id, patch, selectedMatch);
-                                            maybeAdvanceLocal(selectedMatch, patch);
+                                            // See the onSubmit handler above: a superseded write must not
+                                            // advance the local bracket on a winner the server discarded.
+                                            if (!window.writeWasSuperseded(res)) maybeAdvanceLocal(selectedMatch, patch);
                                             if (!mountedRef.current) return res;
                                             // A write that did not land must NOT advance: the match is
                                             // still running and still holds the court, so starting the

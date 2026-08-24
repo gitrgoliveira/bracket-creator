@@ -36,6 +36,7 @@
 
 import { normalizeCompetitionDetail, normalizePlayer, toBackendMatchResult, buildPlayerMetadata } from './api_serializers.jsx';
 import { bridge as _bridge } from './court_bridge.jsx';
+import { writeDidNotLand, writeWasSuperseded } from './write_result.jsx';
 
 // ---------------------------------------------------------------------------
 // F1: fetch with per-request timeout via AbortController
@@ -409,21 +410,12 @@ function _notifyTerminalWriteFailed(info) {
     }
 }
 
-// writeDidNotLand reports that a score write is NOT stored, from the value
-// recordScore handed back. Two shapes, one meaning: `queued` (the request never
-// reached the server and is being held for retry) and `applied:false` (it
-// reached the server, and the timestamp guard dropped it because a newer result
-// is already recorded — bc-lww1).
-//
-// Every caller that CLOSES an editor, advances to the next match, or otherwise
-// behaves as if the result is now stored must ask this first. It is one function
-// because the question was previously spelled `res.queued` at five separate call
-// sites — which is precisely how a second not-landed shape gets handled at the
-// one site someone happened to be editing and missed at the other four. Adding a
-// third shape must not require finding them again.
-function writeDidNotLand(res) {
-    return !!res && (res.queued === true || res.applied === false);
-}
+// The "did this write land?" predicates live in write_result.jsx, a leaf with
+// no imports, so that admin_scoring_shared.jsx can import the same rule without
+// importing THIS module (api_client is script-tagged; a module both
+// script-tagged and ES-imported loads twice and splits its singleton write
+// queue). They are re-published on `window` below for the script-tagged
+// surfaces. See that file for why the rule has a single owner.
 
 // bc-lww1: a COMPLETED score the server dropped under the timestamp
 // last-write-wins guard (200 {"applied": false}). The operator entered a
@@ -2756,7 +2748,7 @@ const API = {
     },
 };
 
-export { API, subscribeSyncStatus, subscribeTerminalWriteFailed, subscribeBracketResync, subscribeQueueAlert, enqueueRunningWrite, writeDidNotLand };
+export { API, subscribeSyncStatus, subscribeTerminalWriteFailed, subscribeBracketResync, subscribeQueueAlert, enqueueRunningWrite, writeDidNotLand, writeWasSuperseded };
 
 if (typeof window !== 'undefined') {
     window.API = API;
@@ -2768,6 +2760,7 @@ if (typeof window !== 'undefined') {
     window.subscribeTerminalWriteFailed = subscribeTerminalWriteFailed;
     window.subscribeQueueAlert = subscribeQueueAlert;
     window.writeDidNotLand = writeDidNotLand;
+    window.writeWasSuperseded = writeWasSuperseded;
     // mp-y3nk: bracket-resync pub/sub: signals AdminShiaijo to refetch when a
     // queued override the server LWW-dropped leaves stale optimistic bracket state.
     window.subscribeBracketResync = subscribeBracketResync;

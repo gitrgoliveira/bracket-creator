@@ -213,6 +213,19 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			var engValErr *engine.ValidationError
 			var engNotFoundErr *engine.NotFoundError
 			switch {
+			case errors.Is(engErr, engine.ErrMatchSuperseded):
+				// bc-lww1. Not reachable today: RecordDecisionTx builds its
+				// MatchResult without a ModifiedAt, so ApplyByTimestamp takes
+				// the unstamped bypass and the write always applies. Mapped
+				// anyway, for the same reason the two daihyosen paths are: this
+				// is the LAST arm a future writer would remember to add, and
+				// the default below is internalError -> 500. The SPA queues
+				// /decision as a terminal write (_enqueueTerminalWrite, kind
+				// 'decision') and retries 5xx indefinitely, so an unmapped
+				// supersede here would not merely mis-report a dropped write,
+				// it would poison the offline queue with one that can never
+				// succeed.
+				respondSuperseded(c)
 			case errors.As(engErr, &alreadyIneligErr):
 				// T105/CHK047: concurrent kiken, another operator already
 				// recorded ineligibility for this player on a different match.

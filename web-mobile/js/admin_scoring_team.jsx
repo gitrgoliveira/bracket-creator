@@ -659,6 +659,18 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const initialEnchoPeriods = initialEnchoPeriodsForMatch(m);
   const [enchoPeriodCount, setEnchoPeriodCount] = useStateA(initialEnchoPeriods);
   const [submitting, setSubmitting] = useStateA(false);
+  // F5 (mirrors ScoreEditorModal): explicit "not saved" state for THIS match.
+  // Set either by the subscribeTerminalWriteFailed broadcast (a queued write
+  // permanently rejected) or, at the three explicit-tap call sites that submit
+  // with status:"running" (Start match, kachinuki Record bout), directly from
+  // the awaited result when it comes back LWW-superseded -- recordScore
+  // deliberately stays silent on that broadcast for running writes (a 300ms
+  // debounced autosave being superseded is routine noise), so those taps have
+  // to check the result themselves rather than rely on the subscription. This
+  // component has no pending-write/retry-queue tracking of its own (unlike the
+  // individual editor): it exists only so the operator sees an explanation
+  // instead of a button that silently re-enables having saved nothing.
+  const [writeFailed, setWriteFailed] = useStateA(null); // { reason, advice? } | null
   // T093–T098: decision state: same shape as the individual editor. See the
   // ScoreEditorModal copy for the contract.
   const [decisionPromptKind, setDecisionPromptKind] = useStateA("");
@@ -849,6 +861,22 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     }
   };
   useEffectA(() => () => { mountedRef.current = false; }, []);
+
+  // F5: subscribe to the same terminal-write-failed channel the individual
+  // editor listens on, so a queued write for THIS match that is later
+  // permanently rejected (non-retryable 4xx) still surfaces here instead of
+  // going silent. Guarded like every other window-global read in this file:
+  // absent in unit/render tests and during boot ordering.
+  useEffectA(() => {
+    if (!m.compId || !m.id) return;
+    if (typeof window.subscribeTerminalWriteFailed !== 'function') return;
+    const unsub = window.subscribeTerminalWriteFailed((info) => {
+      if (!mountedRef.current) return;
+      if (!info || info.compID !== m.compId || info.matchID !== m.id) return;
+      setWriteFailed({ reason: info.reason || `save rejected (${info.status || 'error'})`, advice: info.advice });
+    });
+    return unsub;
+  }, [m.compId, m.id]);
 
   // Fetch lineup + competition data on mount. Both endpoints are
   // read-only and idempotent; failures degrade gracefully (the modal
@@ -1901,7 +1929,16 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const doSubmit = async (fn) => {
     cancelScoringDebounce(); // C1: cancel pending autosave before explicit submit
     setSubmitting(true);
-    try { await fn(); } finally { if (mountedRef.current) setSubmitting(false); }
+    // Clear any prior failure banner when the operator explicitly submits
+    // again: mirrors ScoreEditorModal.doSubmit.
+    if (mountedRef.current) setWriteFailed(null);
+    // Return the awaited result (rather than discarding it, as before) so
+    // call sites that submit with status:"running" -- the ones
+    // _notifyScoreSuperseded deliberately stays silent for -- can check
+    // writeWasSuperseded themselves. See writeFailed's declaration above.
+    let res;
+    try { res = await fn(); } finally { if (mountedRef.current) setSubmitting(false); }
+    return res;
   };
 
   // Mirrors ScoreEditorModal.isDirty: structural compare of current subs
@@ -2911,13 +2948,35 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               </div>
             </div>
           )}
+          {/* F5: "not saved" banner, shared class with ScoreEditorModal so both
+              editors read identically. Placed once, above score-nav, which
+              `inner` shares between the wide overlay and the narrow shiaijo
+              inline panel (see the two return branches at the bottom of this
+              component) -- so this single site covers both layouts rather than
+              needing a second copy for the inline variant. No Retry button:
+              unlike the individual editor this component holds no submit
+              closure to replay, so the operator re-enters and re-taps instead. */}
+          {writeFailed && (
+            <div className="pending-write-banner pending-write-banner--failed" role="alert" aria-live="assertive">
+              <span>Not saved: {writeFailed.reason}. {writeFailed.advice || "Re-enter the result and submit again."}</span>
+            </div>
+          )}
           <div className="score-nav">
             {prevMatch ? (
               <button className="btn btn--sm score-nav__prev" onClick={onPrev} disabled={submitting}>← Prev</button>
             ) : <span />}
             <div className="score-nav__actions">
               {m.status === "scheduled" && (
-                <button className="btn btn--sm" onClick={() => doSubmit(() => onSubmit(buildPatch("running")))} disabled={submitting}>Start match</button>
+                <button className="btn btn--sm" onClick={async () => {
+                  // F5: submits status:"running", the shape
+                  // _notifyScoreSuperseded (api_client.jsx) deliberately stays
+                  // silent for. Start match is an explicit operator tap, not
+                  // an autosave, so check the awaited result directly.
+                  const res = await doSubmit(() => onSubmit(buildPatch("running")));
+                  if (window.writeWasSuperseded && window.writeWasSuperseded(res)) {
+                    setWriteFailed({ reason: window.SUPERSEDED_REASON, advice: window.SUPERSEDED_ADVICE });
+                  }
+                }} disabled={submitting}>Start match</button>
               )}
               {/* mp-gmcg: mistake recovery on a completed kachinuki match:
                   status back to running, winner/decision cleared, bout log
@@ -2973,6 +3032,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                     // left untouched.
                     if (mountedRef.current && res && Array.isArray(res.subResults)) {
                       setMatchOverride(prev => prev ? { ...prev, subResults: res.subResults } : prev);
+                    }
+                    // F5: same reasoning as Start match above -- Record bout
+                    // also submits status:"running" and is also an explicit
+                    // operator tap, not the debounced autosave
+                    // _notifyScoreSuperseded stays silent for. Check directly
+                    // rather than relying on the broadcast.
+                    if (mountedRef.current && window.writeWasSuperseded && window.writeWasSuperseded(res)) {
+                      setWriteFailed({ reason: window.SUPERSEDED_REASON, advice: window.SUPERSEDED_ADVICE });
                     }
                   });
                 }} disabled={submitting || !kachinukiCurrentBoutPlayed}

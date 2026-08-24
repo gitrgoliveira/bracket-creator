@@ -1064,7 +1064,19 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
 
             <div className="score-nav__actions">
               {m.status === "scheduled" && (
-                <button className="btn btn--sm" onClick={() => doSubmit(() => onSubmit(buildPatch("running")))} disabled={submitting}>
+                <button className="btn btn--sm" onClick={async () => {
+                  // F5: this submits status:"running", the one shape
+                  // _notifyScoreSuperseded (api_client.jsx) deliberately stays
+                  // silent for -- a debounced autosave being superseded is
+                  // routine noise there, but Start match is an explicit
+                  // operator tap: silence here would just re-enable the
+                  // button having saved nothing. Check the awaited result
+                  // directly instead of relying on the broadcast.
+                  const res = await doSubmit(() => onSubmit(buildPatch("running")));
+                  if (window.writeWasSuperseded && window.writeWasSuperseded(res)) {
+                    setWriteFailed({ reason: window.SUPERSEDED_REASON, advice: window.SUPERSEDED_ADVICE });
+                  }
+                }} disabled={submitting}>
                   Start match
                 </button>
               )}

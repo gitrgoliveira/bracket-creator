@@ -33,6 +33,20 @@ export function writeDidNotLand(res) {
     return !!res && (res.queued === true || res.applied === false);
 }
 
+// SUPERSEDED_REASON / SUPERSEDED_ADVICE: the copy for the one case where
+// re-entering is the wrong move (bc-lww1). Every OTHER write failure ends in
+// "re-enter the result", and here that is actively wrong: re-entering
+// re-stamps the write with the current clock, so it would beat the newer
+// stored result and undo it. One owner for this string pair: api_client.jsx's
+// `_notifyScoreSuperseded` broadcast uses it, and so does every explicit-tap
+// call site that submits with status:"running" -- the shape that broadcast
+// deliberately stays silent for (a superseded autosave is routine noise; an
+// operator tapping "Start match" or "Record bout" and having it silently do
+// nothing is not) and so must build this banner state itself from the
+// awaited result instead of relying on the subscription.
+export const SUPERSEDED_REASON = 'a newer result for this match is already recorded';
+export const SUPERSEDED_ADVICE = 'Check the recorded result before re-entering anything: re-submitting would overwrite the newer one.';
+
 // writeWasSuperseded: the STRONGER half. Both shapes above mean "not stored",
 // but they differ on whether the local optimistic state will still come true.
 //

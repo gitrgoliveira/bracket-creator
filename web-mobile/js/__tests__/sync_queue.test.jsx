@@ -1777,6 +1777,44 @@ describe('_flushQueue: a superseded queued score is announced before the entry d
         await tick(50);
         expect(global.fetch.mock.calls.length).toBe(callsBefore);
     });
+
+    // The realistic reconnect: a court tablet that was offline while those same
+    // matches were re-scored elsewhere flushes SEVERAL dead results at once.
+    // One alert per drop would overwrite itself in the single toast slot, so the
+    // operator ended up with one singular-worded message naming no match and no
+    // count, unable to act on its own instruction to check what is recorded.
+    it('announces multiple drops in one pass as a single alert carrying the count', async () => {
+        const failures = [];
+        const alerts = [];
+        const unsubFail = mod.subscribeTerminalWriteFailed((info) => failures.push(info));
+        const unsubAlert = mod.subscribeQueueAlert((a) => alerts.push(a));
+
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('network error'));
+        for (const id of ['ma', 'mb', 'mc']) {
+            await API.recordScore('c1', id, { status: 'completed' }, 'pw', null);
+        }
+        await flushMicrotasks();
+
+        global.fetch = vi.fn().mockResolvedValue({
+            ok: true, status: 200,
+            json: () => Promise.resolve({ applied: false, reason: 'superseded' }),
+        });
+        window.dispatchEvent(new Event('online'));
+        await tick(80);
+        unsubFail();
+        unsubAlert();
+
+        // The EDITOR half stays per-match: each names a different match, so they
+        // cannot collapse into one another and each editor resolves correctly.
+        const failed = failures.filter((f) => f.kind === 'score').map((f) => f.matchID);
+        expect(new Set(failed)).toEqual(new Set(['ma', 'mb', 'mc']));
+
+        // The ALERT half is aggregated: exactly one, carrying a real count.
+        const superseded = alerts.filter((a) => a.kind === 'superseded');
+        expect(superseded.length).toBe(1);
+        expect(superseded[0].count).toBe(3);
+        expect(superseded[0].terminalCount).toBe(3);
+    });
 });
 
 // bc-lww1: writeDidNotLand is the ONE question every caller asks before acting

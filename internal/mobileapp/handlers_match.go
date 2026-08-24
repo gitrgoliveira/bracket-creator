@@ -1392,6 +1392,15 @@ func matchSnapshotOrErr(s matchStores, compID, matchID, guardLabel string) (matc
 // its own errors[] array inside an overall 200, so a superseded entry is already
 // excluded from `successful` and cannot poison a queue.
 func respondSuperseded(c *gin.Context) {
+	// LOGGED because this is the one successful-looking response that throws
+	// away work an operator typed in. When a court reports "my score vanished"
+	// there is otherwise no server-side record to correlate against: the write
+	// is not an error, not a 5xx, and leaves no trace in the match file by
+	// definition (nothing was written). Same reason stripInvalidHantei logs its
+	// drop — a discard that is invisible to the operator must at least be
+	// visible to whoever they ask about it afterwards.
+	log.Printf("mobileapp: %s %s: write superseded, a newer result is already recorded; nothing was written",
+		c.Request.Method, c.Request.URL.Path)
 	c.JSON(http.StatusOK, gin.H{
 		"applied": false,
 		"reason":  "superseded",

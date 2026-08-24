@@ -31,12 +31,12 @@
 //   F1: fetchWithTimeout: per-request AbortController, 12 s default.
 //   F2: SSE silence watchdog: reconnects if no message for 35 s (>2× heartbeat).
 //   F3: SSE reconnect exponential backoff + jitter (1–30 s, reset on open).
-//   F4: Write queue persisted to localStorage (6 h TTL, try/catch safe).
+//   F4: Write queue persisted to localStorage (12 h TTL, try/catch safe).
 //   F5: Terminal writes (decision, completed score, lineup) durable via queue.
 
 import { normalizeCompetitionDetail, normalizePlayer, toBackendMatchResult, buildPlayerMetadata } from './api_serializers.jsx';
 import { bridge as _bridge } from './court_bridge.jsx';
-import { writeDidNotLand, writeWasSuperseded } from './write_result.jsx';
+import { writeDidNotLand, writeWasSuperseded, SUPERSEDED_REASON, SUPERSEDED_ADVICE } from './write_result.jsx';
 
 // ---------------------------------------------------------------------------
 // F1: fetch with per-request timeout via AbortController
@@ -440,11 +440,31 @@ function _notifyTerminalWriteFailed(info) {
 //
 // Running-status drops stay SILENT, as before: a superseded autosave is routine
 // noise and the newer state is already what every surface shows.
+// The EDITOR-targeted half: resolves the pending banner on the editor open on
+// this match. One per match, never coalesced — each names a different match.
+function _notifyScoreSupersededEditor(compID, matchID) {
+    // Copy owned by write_result.jsx (SUPERSEDED_REASON / SUPERSEDED_ADVICE):
+    // the three explicit-tap call sites that submit status:"running" build
+    // this same banner state directly from the awaited result, since this
+    // broadcast is deliberately silent for that status. Same strings, one
+    // owner, so a future wording change can't paste the copy a third time.
+    _notifyTerminalWriteFailed({ compID, matchID, kind: 'score', status: 200, reason: SUPERSEDED_REASON, advice: SUPERSEDED_ADVICE });
+}
+
+// The ALERT half: reaches an operator who has already moved on to another
+// court. Split from the editor half so a flush pass can emit ONE alert carrying
+// a real count, the way the 'expired' and 'unreadable' alerts already do.
+// Publishing count:1 per drop made queueAlertMessage's plural branch dead code
+// and left a court that reconnected with several dropped results looking at a
+// single toast reading "A result was not saved".
+function _notifyScoreSupersededAlert(count, compID, matchID) {
+    if (count <= 0) return;
+    _notifyQueueAlert({ kind: 'superseded', count, terminalCount: count, compID, matchID });
+}
+
 function _notifyScoreSuperseded(compID, matchID) {
-    const reason = 'a newer result for this match is already recorded';
-    const advice = 'Check the recorded result before re-entering anything: re-submitting would overwrite the newer one.';
-    _notifyTerminalWriteFailed({ compID, matchID, kind: 'score', status: 200, reason, advice });
-    _notifyQueueAlert({ kind: 'superseded', count: 1, terminalCount: 1, compID, matchID });
+    _notifyScoreSupersededEditor(compID, matchID);
+    _notifyScoreSupersededAlert(1, compID, matchID);
 }
 
 // Bracket-resync channel. When a queued override-winner assertion the server
@@ -557,6 +577,13 @@ let _queueGen = 0;
 async function _flushQueue() {
     if (_flushInProgress) { _flushRequested = true; return; }
     _flushInProgress = true;
+    // Superseded FINISHED scores dropped during this flush. Counted across the
+    // whole call (including the do/while rerun) and announced once at the end,
+    // so a court reconnecting with several dead results gets one alert stating
+    // how many, not N toasts overwriting each other. lastSupersededMatch is
+    // carried only so a single-drop alert can still name its match.
+    let supersededThisPass = 0;
+    let lastSupersededMatch = null;
     try {
         do {
             _flushRequested = false;
@@ -646,7 +673,16 @@ async function _flushQueue() {
                                     // entered result. It is gone, and this is the last moment
                                     // anything can say so — the entry leaves the queue on the next
                                     // line and the sync pill goes back to "Synced".
-                                    _notifyScoreSuperseded(compID, matchID);
+                                    //
+                                    // The editor-targeted half fires per match (each one names a
+                                    // different match, so they do not collapse). The ALERT half is
+                                    // counted and emitted once for the whole pass: a court that has
+                                    // been offline can flush several of these at once, and one
+                                    // toast per drop would simply overwrite itself down to a single
+                                    // singular-worded message naming no match at all.
+                                    _notifyScoreSupersededEditor(compID, matchID);
+                                    supersededThisPass++;
+                                    lastSupersededMatch = { compID, matchID };
                                 }
                             }
                         }
@@ -816,6 +852,14 @@ async function _flushQueue() {
         } while (_flushRequested);
     } finally {
         _flushInProgress = false;
+        // In the finally so the alert still reaches the operator if the pass
+        // throws part-way: the drops it counts have already happened and their
+        // queue entries are already gone, so this is the last chance to say so.
+        _notifyScoreSupersededAlert(
+            supersededThisPass,
+            lastSupersededMatch ? lastSupersededMatch.compID : undefined,
+            lastSupersededMatch ? lastSupersededMatch.matchID : undefined,
+        );
     }
 }
 
@@ -2748,7 +2792,7 @@ const API = {
     },
 };
 
-export { API, subscribeSyncStatus, subscribeTerminalWriteFailed, subscribeBracketResync, subscribeQueueAlert, enqueueRunningWrite, writeDidNotLand, writeWasSuperseded };
+export { API, subscribeSyncStatus, subscribeTerminalWriteFailed, subscribeBracketResync, subscribeQueueAlert, enqueueRunningWrite, writeDidNotLand, writeWasSuperseded, SUPERSEDED_REASON, SUPERSEDED_ADVICE };
 
 if (typeof window !== 'undefined') {
     window.API = API;
@@ -2761,6 +2805,12 @@ if (typeof window !== 'undefined') {
     window.subscribeQueueAlert = subscribeQueueAlert;
     window.writeDidNotLand = writeDidNotLand;
     window.writeWasSuperseded = writeWasSuperseded;
+    // Shared copy for the "not saved: superseded" banner, so the explicit-tap
+    // call sites that build this state themselves (running-status writes,
+    // which _notifyScoreSuperseded deliberately stays silent for) use the
+    // exact same wording as the broadcast path rather than a pasted copy.
+    window.SUPERSEDED_REASON = SUPERSEDED_REASON;
+    window.SUPERSEDED_ADVICE = SUPERSEDED_ADVICE;
     // mp-y3nk: bracket-resync pub/sub: signals AdminShiaijo to refetch when a
     // queued override the server LWW-dropped leaves stale optimistic bracket state.
     window.subscribeBracketResync = subscribeBracketResync;

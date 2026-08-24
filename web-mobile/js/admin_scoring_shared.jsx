@@ -712,6 +712,12 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
     const isOnA = (wid && m.sideA?.id === wid) || (wname && m.sideA?.name === wname);
     const decisionBy = isOnA ? "aka" : "shiro";
     setBusyId(m.id);
+    // Clear any previous verdict before this attempt. Without it the panel's
+    // error is sticky: a refusal on match A stays on screen while the operator
+    // successfully awards match B, so the panel reports a failure that belongs
+    // to a match no longer in the list. The catch arm below had the same
+    // defect, so this covers both rather than only the new branch.
+    setErr("");
     try {
       const updated = await window.API.recordDecision(m.compId || compID, m.id, {
         decision: "fusenpai",

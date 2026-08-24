@@ -26,7 +26,6 @@
 import React from 'react';
 import { render, act, fireEvent, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
-import { writeDidNotLand } from '../../write_result.jsx';
 
 // ── the probe ────────────────────────────────────────────────────────────────
 
@@ -39,9 +38,14 @@ function ProbeScoreEditor(props) {
 // ── window stubs ───────────────────────────────────────────────────────────
 // Trimmed to what admin_schedule_score_editor.jsx and viewer_match.jsx
 // actually read (grep-verified: no PoolsViewer/BracketTree/LeagueStandings/
-// confirmDialog references in either file). writeDidNotLand is the REAL
-// implementation, not a stand-in -- this file is exactly testing that callers
-// obey it, so faking the predicate would test nothing.
+// confirmDialog references in either file).
+//
+// Deliberately NO write_result entry. Both surfaces now ES-import the
+// predicate from the leaf, so a window stub here would be dead weight that
+// reads as the contract -- and a wrong one would be worse than dead, since a
+// stub returning false would silently un-test every "must not close / must
+// not advance" assertion below. The predicate under test is the real one, by
+// construction rather than by stubbing.
 
 const STUBBED_GLOBALS = {
   // MODULE-EVAL capture: admin_schedule_score_editor.jsx reads
@@ -55,7 +59,6 @@ const STUBBED_GLOBALS = {
   matchScoreStr: () => '',
   compMatches: () => [],
   startPatch: () => ({ status: 'running', winner: null }),
-  writeDidNotLand,
   API: {
     recordScore: vi.fn(),
   },

@@ -536,7 +536,7 @@ func TestCheckConcurrentIneligibility_EmptyLoser(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "conc-empty-loser"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
-	err := eng.checkConcurrentIneligibility(compID, "M1", "")
+	err := eng.checkConcurrentIneligibility(eng.store, compID, "M1", "")
 	assert.NoError(t, err, "empty loserName should return nil")
 }
 
@@ -547,7 +547,7 @@ func TestCheckConcurrentIneligibility_PlayerNotInParticipants(t *testing.T) {
 	compID := "conc-unknown"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
 	// No participants saved → lookupPlayerID returns ""
-	err := eng.checkConcurrentIneligibility(compID, "M1", "Ghost Player")
+	err := eng.checkConcurrentIneligibility(eng.store, compID, "M1", "Ghost Player")
 	assert.NoError(t, err, "unknown player should return nil without error")
 }
 
@@ -557,7 +557,7 @@ func TestRestoreCompetitorEligibility_EmptyPriorLoser(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "restore-empty"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
-	status, err := eng.restoreCompetitorEligibility(compID, "", "M1")
+	status, err := eng.restoreCompetitorEligibility(eng.store, compID, "", "M1")
 	assert.NoError(t, err)
 	assert.Nil(t, status)
 }
@@ -569,7 +569,7 @@ func TestRestoreCompetitorEligibility_PlayerNotInParticipants(t *testing.T) {
 	compID := "restore-unknown"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
 	// No participants → lookupPlayerID returns ""
-	status, err := eng.restoreCompetitorEligibility(compID, "Ghost Player", "M1")
+	status, err := eng.restoreCompetitorEligibility(eng.store, compID, "Ghost Player", "M1")
 	assert.NoError(t, err)
 	assert.Nil(t, status)
 }
@@ -600,7 +600,7 @@ func TestHasDownstreamMatchStarted_BracketMatch(t *testing.T) {
 		},
 	}))
 
-	started, err := eng.hasDownstreamMatchStarted(compID, []string{"Alice"}, "other-match")
+	started, err := eng.hasDownstreamMatchStarted(eng.store, compID, []string{"Alice"}, "other-match")
 	require.NoError(t, err)
 	assert.True(t, started, "started bracket match involving Alice must be detected")
 }
@@ -611,7 +611,7 @@ func TestHasDownstreamMatchStarted_EmptyPlayerNames(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "downstream-empty"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
-	started, err := eng.hasDownstreamMatchStarted(compID, []string{"", ""}, "M1")
+	started, err := eng.hasDownstreamMatchStarted(eng.store, compID, []string{"", ""}, "M1")
 	require.NoError(t, err)
 	assert.False(t, started)
 }
@@ -635,7 +635,7 @@ func TestCheckConcurrentIneligibility_AlreadyIneligible(t *testing.T) {
 		MatchID:  "M-prev",
 	}))
 
-	err := eng.checkConcurrentIneligibility(compID, "M-new", "Alice")
+	err := eng.checkConcurrentIneligibility(eng.store, compID, "M-new", "Alice")
 	require.Error(t, err)
 	var alreadyErr *AlreadyIneligibleError
 	require.ErrorAs(t, err, &alreadyErr)
@@ -662,7 +662,7 @@ func TestCheckConcurrentIneligibility_SameMatchNotBlocked(t *testing.T) {
 		MatchID:  "M-current", // same as what we're re-scoring
 	}))
 
-	err := eng.checkConcurrentIneligibility(compID, "M-current", "Bob")
+	err := eng.checkConcurrentIneligibility(eng.store, compID, "M-current", "Bob")
 	assert.NoError(t, err, "same-match ineligibility should not block re-scoring")
 }
 
@@ -1371,7 +1371,7 @@ func TestEligibilityHelpers_NilCompetitionNoPanic(t *testing.T) {
 	const missing = "no-such-competition"
 
 	t.Run("restoreCompetitorEligibility no-ops on missing config", func(t *testing.T) {
-		status, err := eng.restoreCompetitorEligibility(missing, "Bob", "m1")
+		status, err := eng.restoreCompetitorEligibility(eng.store, missing, "Bob", "m1")
 		assert.NoError(t, err)
 		assert.Nil(t, status)
 	})

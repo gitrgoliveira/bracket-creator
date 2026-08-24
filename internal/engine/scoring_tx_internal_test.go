@@ -4,10 +4,10 @@ package engine
 // - recordBracketMatchResult through a tx handle (0%)
 // - writeMatchResult(restore) through a tx handle (the old recordMatchResultTx)
 // - lookupExistingResult through a tx handle (bracket path + not-found)
-// - lookupMatchSidesTx (bracket path + not-found)
-// - checkConcurrentIneligibilityTx (already-ineligible path)
+// - lookupMatchSides through a tx handle (bracket path + not-found)
+// - checkConcurrentIneligibility through a tx handle (already-ineligible path)
 // - withPoolMatch through a tx handle (not-found branch)
-// - restoreCompetitorEligibilityTx (empty priorLoser + happy path)
+// - restoreCompetitorEligibility through a tx handle (empty priorLoser + happy path)
 
 import (
 	"testing"
@@ -231,7 +231,7 @@ func TestLookupMatchSidesTx_BracketPath(t *testing.T) {
 	var sideA, sideB string
 	var txErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		sideA, sideB, txErr = eng.lookupMatchSidesTx(tx, compID, "B1")
+		sideA, sideB, txErr = eng.lookupMatchSides(tx, compID, "B1")
 		return nil
 	})
 	require.NoError(t, txErr)
@@ -248,7 +248,7 @@ func TestLookupMatchSidesTx_NotFound(t *testing.T) {
 
 	var txErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		_, _, txErr = eng.lookupMatchSidesTx(tx, compID, "GHOST")
+		_, _, txErr = eng.lookupMatchSides(tx, compID, "GHOST")
 		return nil
 	})
 	require.Error(t, txErr)
@@ -274,7 +274,7 @@ func TestCheckConcurrentIneligibilityTx_AlreadyIneligible(t *testing.T) {
 	var txErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
 		// "Alice" is the loser of a different match "Pool A-1".
-		txErr = eng.checkConcurrentIneligibilityTx(tx, compID, "Pool A-1", "Alice")
+		txErr = eng.checkConcurrentIneligibility(tx, compID, "Pool A-1", "Alice")
 		return nil
 	})
 	require.Error(t, txErr)
@@ -302,7 +302,7 @@ func TestCheckConcurrentIneligibilityTx_SameMatchAllowed(t *testing.T) {
 
 	var txErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		txErr = eng.checkConcurrentIneligibilityTx(tx, compID, "Pool A-0", "Alice")
+		txErr = eng.checkConcurrentIneligibility(tx, compID, "Pool A-0", "Alice")
 		return nil
 	})
 	require.NoError(t, txErr, "same-match ineligibility must be allowed (undo path)")
@@ -317,7 +317,7 @@ func TestCheckConcurrentIneligibilityTx_EmptyLoser(t *testing.T) {
 
 	var txErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		txErr = eng.checkConcurrentIneligibilityTx(tx, compID, "M1", "")
+		txErr = eng.checkConcurrentIneligibility(tx, compID, "M1", "")
 		return nil
 	})
 	require.NoError(t, txErr)
@@ -354,7 +354,7 @@ func TestRestoreCompetitorEligibilityTx_EmptyPriorLoser(t *testing.T) {
 		txErr error
 	)
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		got, txErr = eng.restoreCompetitorEligibilityTx(tx, compID, "", "M1")
+		got, txErr = eng.restoreCompetitorEligibility(tx, compID, "", "M1")
 		return nil
 	})
 	require.NoError(t, txErr)
@@ -382,7 +382,7 @@ func TestRestoreCompetitorEligibilityTx_HappyPath(t *testing.T) {
 		txErr error
 	)
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		got, txErr = eng.restoreCompetitorEligibilityTx(tx, compID, "Alice", "Pool A-0")
+		got, txErr = eng.restoreCompetitorEligibility(tx, compID, "Alice", "Pool A-0")
 		return nil
 	})
 	require.NoError(t, txErr)
@@ -434,7 +434,7 @@ func TestRecordMatchResultWithIneligibilityTx_BracketPath(t *testing.T) {
 }
 
 // TestHasDownstreamMatchStartedTx_PoolPath exercises the pool-match
-// branch in hasDownstreamMatchStartedTx. Two cases: the Running match
+// branch in hasDownstreamMatchStarted (through a tx handle). Two cases: the Running match
 // is excluded (returns false) and a Running match is NOT excluded
 // (returns true).
 func TestHasDownstreamMatchStartedTx_PoolPath(t *testing.T) {
@@ -455,7 +455,7 @@ func TestHasDownstreamMatchStartedTx_PoolPath(t *testing.T) {
 		)
 		_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
 			// Exclude "Pool A-0" (Alice Running) → only P A-1 (Scheduled) left → false.
-			started, txErr = eng.hasDownstreamMatchStartedTx(tx, compID, []string{"Alice"}, "Pool A-0")
+			started, txErr = eng.hasDownstreamMatchStarted(tx, compID, []string{"Alice"}, "Pool A-0")
 			return nil
 		})
 		require.NoError(t, txErr)
@@ -469,7 +469,7 @@ func TestHasDownstreamMatchStartedTx_PoolPath(t *testing.T) {
 		)
 		_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
 			// Exclude "Pool A-1" (Scheduled) → "Pool A-0" (Running+Alice) detected.
-			started, txErr = eng.hasDownstreamMatchStartedTx(tx, compID, []string{"Alice"}, "Pool A-1")
+			started, txErr = eng.hasDownstreamMatchStarted(tx, compID, []string{"Alice"}, "Pool A-1")
 			return nil
 		})
 		require.NoError(t, txErr)
@@ -500,7 +500,7 @@ func TestHasDownstreamMatchStartedTx_BracketPath(t *testing.T) {
 	)
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
 		// Check from a hypothetical other match; B1 (Alice+Bob) is running.
-		started, txErr = eng.hasDownstreamMatchStartedTx(tx, compID, []string{"Alice"}, "OTHER")
+		started, txErr = eng.hasDownstreamMatchStarted(tx, compID, []string{"Alice"}, "OTHER")
 		return nil
 	})
 	require.NoError(t, txErr)
@@ -517,7 +517,7 @@ func TestHasDownstreamMatchStartedTx_EmptyNames(t *testing.T) {
 	var started bool
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
 		var txErr error
-		started, txErr = eng.hasDownstreamMatchStartedTx(tx, compID, []string{}, "M1")
+		started, txErr = eng.hasDownstreamMatchStarted(tx, compID, []string{}, "M1")
 		require.NoError(t, txErr)
 		return nil
 	})
@@ -676,7 +676,7 @@ func TestCheckConcurrentIneligibilityTx_PlayerNotInPool(t *testing.T) {
 
 	var txErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		txErr = eng.checkConcurrentIneligibilityTx(tx, compID, "Pool A-0", "Unknown")
+		txErr = eng.checkConcurrentIneligibility(tx, compID, "Pool A-0", "Unknown")
 		return nil
 	})
 	require.NoError(t, txErr, "unknown player must not trigger an error (best-effort)")

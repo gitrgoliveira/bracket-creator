@@ -63,12 +63,31 @@ const FORBIDDEN = [
     re: /\.applied\s*(===|==|!==|!=)\s*(false|true)/,
     why: 'compares .applied by hand; ask writeDidNotLand(res) or writeWasSuperseded(res) instead',
   },
+  {
+    // The SECOND way the rule drifts, learned the hard way. These names were
+    // once mirrored on `window` for script-tagged surfaces; every consumer now
+    // ES-imports the leaf instead, and the mirrors are gone. Reading one off
+    // `window` therefore yields undefined -- which is not merely broken but
+    // SILENTLY broken at the two admin_shiaijo call sites that sit inside
+    // `catch (_e) {}`, where the TypeError is swallowed and the surface
+    // degrades to exactly the "looks saved but was refused" behaviour this
+    // whole rule exists to prevent. A copy constant read off `window` is worse
+    // still: it renders as the literal text "undefined" in an operator banner.
+    // Import from write_result.jsx; do not re-add a mirror.
+    re: /window\.(writeDidNotLand|writeWasSuperseded|writeWasRefusedForClock|notLandedBanner|SUPERSEDED_REASON|SUPERSEDED_ADVICE|CLOCK_SKEW_REASON_TEXT|CLOCK_SKEW_ADVICE)\b/,
+    why: 'reads an owned predicate/copy off window; those mirrors are deleted, import from write_result.jsx instead',
+  },
 ];
 
 // api_client.jsx is the collaborator that turns an HTTP response INTO the
 // discriminated result the predicates read, so it necessarily touches the raw
 // field. It is not a consumer deciding what a write meant.
+//
+// The exemption is per-RULE, not per-file: api_client may compare `.applied`
+// (it is the parser) but may NOT re-publish a window mirror, since restoring
+// one would re-open the drift the migration closed.
 const ALLOWED = new Set(['api_client.jsx']);
+const ALLOWED_RULE_INDEX = 0;
 
 function* walk(dir) {
   for (const entry of readdirSync(dir)) {
@@ -95,10 +114,12 @@ const violations = [];
 for (const file of walk(JS_DIR)) {
   const rel = relative(ROOT, file);
   if (file.endsWith(OWNER)) continue;
-  if ([...ALLOWED].some((a) => file.endsWith(a))) continue;
+  const exempt = [...ALLOWED].some((a) => file.endsWith(a));
   const lines = stripComments(readFileSync(file, 'utf8')).split('\n');
   lines.forEach((line, i) => {
-    for (const { re, why } of FORBIDDEN) {
+    for (let r = 0; r < FORBIDDEN.length; r++) {
+      if (exempt && r === ALLOWED_RULE_INDEX) continue;
+      const { re, why } = FORBIDDEN[r];
       if (re.test(line)) {
         violations.push({ rel, line: i + 1, text: line.trim(), why });
         break;

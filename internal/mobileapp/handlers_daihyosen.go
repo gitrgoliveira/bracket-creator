@@ -37,14 +37,21 @@ import (
 // daihyosen endpoints (add and remove) end their WithTransaction the same way,
 // and the branch below was the same nineteen lines twice.
 //
-// bc-lww1. Not reachable today, by EITHER branch's route to ApplyByTimestamp —
-// and the two differ, so neither alone is the reason. On the pool branch the
-// write copies the STORED match (u := *match), so the incoming stamp equals the
-// stored one and the >= comparison applies it. On the bracket branch — the only
-// branch the ADD path can take, since AddDaihyosen rejects a pool id with
-// ErrPoolMatch — daihyosenBracketResult never projects ModifiedAt at all, so the
-// incoming stamp is 0 and the write takes ApplyByTimestamp's unstamped bypass
-// instead.
+// bc-lww1. Not reachable from either endpoint today, and the two callers reach
+// that conclusion by DIFFERENT routes, so neither reason alone covers this
+// helper:
+//
+//   - REMOVE reaches the pool branch as well as the bracket one. There the
+//     write copies the STORED match (u := *match), so the incoming stamp equals
+//     the stored one and ApplyByTimestamp's >= comparison applies it.
+//   - ADD can only reach the bracket branch, since AddDaihyosen rejects a pool
+//     id with ErrPoolMatch. There daihyosenBracketResult never projects
+//     ModifiedAt at all, so the stamp is 0 and the write takes the unstamped
+//     bypass.
+//
+// Both routes end in "applies", which is why neither endpoint can produce a
+// supersede — but they are separate arguments, and a change to either
+// projection invalidates only its own.
 //
 // Mapped anyway so a future writer that re-stamps EITHER projection cannot turn
 // a benign supersede into a 500 the client retries forever.

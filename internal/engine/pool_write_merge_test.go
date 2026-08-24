@@ -461,15 +461,36 @@ func TestTimestampGuardAppliesToBothBranches(t *testing.T) {
 		assert.Equal(t, "Osaka", p.Winner)
 	})
 
-	t.Run("a deliberate correction is never dropped as stale", func(t *testing.T) {
+	// This invariant was DELIBERATELY REVERSED. It used to read "a deliberate
+	// correction is never dropped as stale", pinning a bypass that let any write
+	// carrying a CorrectionReason outrank the stamp. That exemption was written
+	// for a live correction and could not tell one from a replay, so an offline
+	// correction flushed from the write queue up to 12h later silently
+	// overwrote a newer result the operator had never seen. See applyMatchWrite
+	// for why LWW still protects every case the bypass was meant to protect.
+	t.Run("a stale correction is dropped like any other stale write", func(t *testing.T) {
 		p := poolStored()
 		corr := incoming(older)
 		corr.CorrectionReason = "scoreboard misread"
 		mismatch, superseded := applyPoolWrite(p, corr, matchWriteForward)
 		require.False(t, mismatch)
-		require.False(t, superseded, "a correction is not superseded; it outranks the stamp")
+		require.True(t, superseded,
+			"a correction older than the stored result is a replay, not an override")
+		assert.NotEqual(t, "Osaka", p.Winner,
+			"the stale correction must not overwrite the newer stored result")
+	})
+
+	// The other half, and the one that keeps the original intent intact: a
+	// correction is only refused for being STALE, never for being a correction.
+	t.Run("a fresh correction still applies over an older stored result", func(t *testing.T) {
+		p := poolStored()
+		corr := incoming(newer)
+		corr.CorrectionReason = "scoreboard misread"
+		mismatch, superseded := applyPoolWrite(p, corr, matchWriteForward)
+		require.False(t, mismatch)
+		require.False(t, superseded, "a fresh correction is not a replay")
 		assert.Equal(t, "Osaka", p.Winner,
-			"an explicit operator correction outranks the timestamp on both branches")
+			"an operator correcting the current result must still win")
 	})
 
 	t.Run("the K3 restore bypasses the guard even when the snapshot is stamped", func(t *testing.T) {

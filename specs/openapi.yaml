@@ -2509,6 +2509,52 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+    delete:
+      tags: [matches]
+      summary: Remove an unscored representative (daihyosen) bout
+      description: >
+        Removes the daihyosen placeholder from a team match and returns the
+        match to a clean running state, clearing the daihyosen-derived
+        winner/decision/encho metadata and the judges'-decision mark.
+        Refused once the bout carries anything the operator entered
+        (ippons, a winner, a hantei mark, recorded hansoku, or a sub-decision
+        other than the bare `daihyosen` placeholder), so this can only undo a
+        bout that was added by mistake and never fought.
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+        - $ref: '#/components/parameters/MatchId'
+      responses:
+        '200':
+          description: >
+            Daihyosen removed. The updated match is returned under a `result`
+            key (note this differs from the POST above, which returns the
+            MatchResult at the top level).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    $ref: '#/components/schemas/MatchResult'
+        '404':
+          description: >
+            Match not found, or it carries no daihyosen bout to remove
+            (`no_daihyosen`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: >
+            The daihyosen bout has already been scored (`daihyosen_scored`).
+            Removing it would discard a fought result, so it must be corrected
+            through the score editor instead.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /api/competitions/{id}/competitor-status:
     parameters:
@@ -4086,6 +4132,16 @@ components:
             otherwise it is dropped, so the field always means "this rewrote a
             finalized result". A stored reason is carried forward across
             subsequent writes.
+
+            A correction does NOT exempt the write from the timestamp
+            last-write-wins guard. It used to: the exemption existed because a
+            dropped write reported success, so exempting corrections was the
+            only way to stop a deliberate edit being silently eaten. That is
+            fixed (see the SupersededWrite schema), and the exemption could not
+            tell a live correction from one an offline client replayed hours
+            later, which silently overwrote newer results. A correction stamped
+            older than the stored result is therefore refused like any other
+            stale write, and answers with SupersededWrite.
         reopenPending:
           type: boolean
           readOnly: true

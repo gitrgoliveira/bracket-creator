@@ -386,6 +386,14 @@ the match has been completed is discarded rather than reverting the result. An o
 order write from the same client session is dropped. Anything beyond that is a genuine
 disagreement between two people and is left visible rather than resolved silently.
 
+A deliberate correction is subject to the same rule, which matters most when it was made
+without a connection. Correcting the result you are looking at works normally. Correcting
+a result that has since been changed by someone else does not overwrite them: the
+correction is refused and reported, exactly as any other out of date write would be. That
+is the point, because a correction saved during an outage can reach the server hours
+later, long after the match has moved on, and the operator who wrote it has no way of
+knowing what happened in between.
+
 The stale write guard needs the timestamp of the stored result to compare against, so it
 only works where that timestamp is saved. It is saved for every match, in both files, which
 is what makes the rule the same wherever a match happens to be in the competition. A result

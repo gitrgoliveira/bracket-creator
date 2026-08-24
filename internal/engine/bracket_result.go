@@ -20,29 +20,27 @@ import (
 // is not preserved on rollback — it is actively cleared. A partial projection
 // is therefore silent data loss, not a missing optimisation.
 func bracketMatchAsResult(bm *state.BracketMatch) *state.MatchResult {
-	// ModifiedAt is deliberately NOT projected. Note carefully what that does
-	// and does not do, because an earlier version of this comment had the
-	// mechanism backwards and the wrong version is the more reassuring one.
+	// ModifiedAt IS projected, and used not to be. The old omission was
+	// justified by a mechanism that does not exist: it claimed a projected
+	// stamp would lose the timestamp LWW comparison against the write being
+	// rolled back and be dropped. applyMatchWrite returns true for
+	// matchWriteRestore BEFORE reading any stamp, so a restore can never lose
+	// that comparison whatever it carries — the exemption is stated at the
+	// POLICY, not earned by leaving this field 0.
 	//
-	// It does NOT decide whether the rollback applies. applyMatchWrite returns
-	// true for matchWriteRestore before it looks at any stamp, so a restore can
-	// never lose the LWW comparison whatever it carries — the bypass is stated
-	// at the POLICY, not earned by leaving this field 0. The old claim that a
-	// projected stamp would "lose to the write it is undoing and be silently
-	// dropped" is not reachable.
+	// What the field actually decides is the stamp LEFT BEHIND, because the
+	// write is a whole-struct overwrite. Omitting it zeroed the stored stamp,
+	// so after a bracket rollback the NEXT write to that match took
+	// ApplyByTimestamp's unstamped bypass and applied unconditionally — the
+	// match silently lost its fencing precisely when a contested write had just
+	// been rejected on it, which is when fencing matters most.
 	//
-	// What it actually decides is the stamp LEFT on the match afterwards, since
-	// the write is a whole-struct overwrite: omitting it zeroes the stored
-	// stamp, so the next write to this match takes ApplyByTimestamp's unstamped
-	// bypass instead of being fenced against the restored result's real time.
-	// The pool snapshot behaves differently here — lookupExistingResult returns
-	// a copy of the stored MatchResult, so that branch restores the true prior
-	// stamp — which makes this an asymmetry between the two branches rather
-	// than a property of "restore".
-	//
-	// Left as-is because changing it changes fencing behaviour, not because it
-	// is provably right. If you are completing this projection, that is a
-	// behavioural change to reason about deliberately, not a tidy-up.
+	// The pool branch never had this hole: its snapshot comes from
+	// lookupExistingResult, a straight copy of the stored MatchResult, so it
+	// always restored the true prior stamp. This was a branch asymmetry, not a
+	// property of "restore", and projecting the field removes it — the same
+	// "a match is a match" argument applyMatchWrite already makes for refusing
+	// to let the pool and the bracket arbitrate differently.
 	return &state.MatchResult{
 		ID:             bm.ID,
 		SideA:          bm.SideA,
@@ -72,5 +70,9 @@ func bracketMatchAsResult(bm *state.BracketMatch) *state.MatchResult {
 		FlagsA:     bm.FlagsA,
 		FlagsB:     bm.FlagsB,
 		SubResults: bm.SubResults,
+		// See the note above: this restores the match's real prior stamp so a
+		// rolled-back bracket match stays fenced, instead of being left at 0
+		// and letting the next write through unconditionally.
+		ModifiedAt: bm.ModifiedAt,
 	}
 }

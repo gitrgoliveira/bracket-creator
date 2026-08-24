@@ -1033,6 +1033,16 @@ func countScoringIppons(ippons []string) int {
 // note on that function). Before bc-twin this entry wrote direct-to-store and
 // leaned on an inner WithTransaction inside the ineligibility helper for K2 —
 // same guarantee, now held once at the entry instead of re-acquired mid-write.
+//
+// NEVER call this from inside a transaction. It acquires the per-competition
+// lock itself and that lock is NOT reentrant, so calling it from within a
+// WithTransaction closure deadlocks the goroutine outright — no error, no
+// panic, just a stuck request holding the lock every other write on that
+// competition needs. Use the *Tx variant and pass the handle you already hold.
+// Both entry points are on the ScoringEngine interface (mobileapp/deps.go), so
+// a handler can reach them from inside its own transaction: registerScoreHandler
+// already has exactly that shape. Nothing catches this at compile time and a
+// test only shows it as a hang, so the rule lives here.
 func (e *Engine) RecordMatchResult(compId string, matchId string, result *state.MatchResult) error {
 	result.ID = matchId // normalize ID-less payloads before overwriting
 	if err := applyHansokuIppons(result); err != nil {
@@ -1084,6 +1094,10 @@ func (e *Engine) writeMatchResult(h state.StoreTx, compId string, matchId string
 // the mp-e2k1 displaced-finisher guard now applies here too — it had been
 // added to the Tx twin only, which is exactly the drift this collapse exists
 // to end. Side-effect write failures are still non-fatal: (nil, nil) + log.
+//
+// NEVER call this from inside a transaction: it takes the per-competition lock
+// itself and that lock is not reentrant, so it deadlocks rather than erroring.
+// See the note on RecordMatchResult, which carries the full reasoning.
 //
 // T085/T092, bc-twin.
 func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId string, result *state.MatchResult) (*domain.CompetitorStatus, error) {
@@ -1596,10 +1610,41 @@ func (e *Engine) recordBracketMatchResult(h state.StoreTx, compId string, matchI
 }
 
 // applyMatchWrite reports whether a match write should apply under the
-// timestamp last-write-wins guard (mp-y3nk). A deliberate operator CORRECTION
-// (CorrectionReason set) always applies: it is an explicit decision made under
-// the handler's correction-audit lock, not a reconnect replay, so it must never
-// be dropped as "stale". Otherwise it is pure timestamp LWW.
+// timestamp last-write-wins guard (mp-y3nk). It is pure timestamp LWW, for
+// every write including a deliberate operator CORRECTION.
+//
+// A correction used to bypass the guard outright, on the stated grounds that it
+// "is an explicit decision made under the handler's correction-audit lock, not a
+// reconnect replay". The first half is true and the second is not: the SPA
+// queues a completed score as a terminal write and replays it for up to the
+// 12h queue TTL, so a correction composed offline against what the operator saw
+// at T0 was replayed hours later and overwrote a result recorded at T0+3h that
+// they never saw — silently, with a normal 200, because a bypass reports
+// nothing. That is the mirror of the bug this guard exists to prevent: bc-lww1
+// stopped a dropped write from claiming success, and this stops a stale write
+// from succeeding.
+//
+// Removing the bypass preserves every case it was protecting, because LWW
+// already answers them:
+//
+//   - a live correction over an OLDER stored result still applies, which is the
+//     whole of the original intent;
+//   - a live correction over a NEWER stored result is now dropped, and that is
+//     correct rather than a regression: the operator is correcting a view that
+//     has already moved on, which is the one situation where their "correction"
+//     is the stale party;
+//   - a replayed offline correction loses on its own old stamp.
+//
+// What made this safe to change is bc-lww1 itself. Before it, a correction that
+// lost the guard vanished with a success response, so exempting corrections was
+// the only way to guarantee an operator's deliberate edit was not silently
+// eaten. Now a dropped correction comes back as applied:false with "check what
+// is recorded", and the operator re-enters it with a fresh stamp and wins. The
+// exemption was buying safety the reporting now provides properly.
+//
+// The residual risk is a client whose clock runs behind losing a legitimately
+// fresh correction. That is not specific to corrections — it is true of every
+// stamped write already — and it now fails loudly instead of silently.
 //
 // ONE primitive for both branches, because a match is a match: which store it
 // lands in is an implementation detail of the phase it is in, and an operator
@@ -1631,9 +1676,6 @@ func (e *Engine) recordBracketMatchResult(h state.StoreTx, compId string, matchI
 // the other, which is precisely the asymmetry this primitive exists to end.
 func applyMatchWrite(result *state.MatchResult, storedModifiedAt int64, policy matchWritePolicy) bool {
 	if policy == matchWriteRestore {
-		return true
-	}
-	if result.CorrectionReason != "" {
 		return true
 	}
 	return domain.ApplyByTimestamp(result.ModifiedAt, storedModifiedAt)

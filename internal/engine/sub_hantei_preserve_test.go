@@ -605,19 +605,24 @@ func TestBracketRollbackRestoresTheScore(t *testing.T) {
 		assert.Empty(t, bm.IpponsB)
 	})
 
-	// ModifiedAt is deliberately absent from the projection: carrying the
-	// snapshot's older stamp would make the rollback lose the timestamp LWW
-	// comparison against the stamp the rejected write just left, and be
-	// dropped. Pinned so nobody "completes" the projection with it.
-	t.Run("the rollback is not dropped by the LWW guard it passes through", func(t *testing.T) {
+	// ModifiedAt IS projected. This test used to assert the opposite, on the
+	// theory that a projected stamp would make the restore lose the LWW
+	// comparison (1000 >= 9000000) and be discarded. That never happens:
+	// applyMatchWrite exempts matchWriteRestore before it reads any stamp, so
+	// the guarantee below holds regardless of what the snapshot carries — which
+	// is exactly why the old assertion could pin the omission without the
+	// omission doing any work.
+	//
+	// Both properties are pinned here now: the rollback still applies, AND it
+	// leaves the match's real prior stamp behind so the match stays fenced.
+	t.Run("the rollback applies and restores the prior stamp", func(t *testing.T) {
 		// The snapshot is taken from a match stamped EARLIER than the rejected
-		// write that followed it — the real ordering, and the one that makes
-		// projecting ModifiedAt fatal: the restore would compare 1000 >= 9000000
-		// and be discarded, leaving the rejected write on disk permanently.
+		// write that followed it, which is the real ordering.
 		before := scored()
 		before.ModifiedAt = 1_000
 		prior := bracketMatchAsResult(before)
-		require.Zero(t, prior.ModifiedAt, "the projection must leave the stamp off")
+		require.Equal(t, int64(1_000), prior.ModifiedAt,
+			"the projection must carry the match's real stamp")
 
 		bm := scored()
 		bm.ModifiedAt = 9_000_000 // stamped by the write being rolled back
@@ -625,6 +630,31 @@ func TestBracketRollbackRestoresTheScore(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, applied, "a rollback must never lose to the write it undoes")
 		assert.Equal(t, []string{"M", "K"}, bm.IpponsA, "and it actually landed")
+		assert.Equal(t, int64(1_000), bm.ModifiedAt,
+			"the rejected write's stamp must not survive its own rollback")
+	})
+
+	// The point of restoring the stamp: without it the match was left at 0, and
+	// ApplyByTimestamp treats 0 on either side as unstamped and applies. So a
+	// rolled-back bracket match silently lost its fencing, and the next write
+	// landed unconditionally however stale it was.
+	t.Run("a rolled-back match is still fenced against a stale write", func(t *testing.T) {
+		before := scored()
+		before.ModifiedAt = 5_000
+		bm := scored()
+		bm.ModifiedAt = 9_000_000
+		_, err := applyBracketMatchResult(bm, bracketMatchAsResult(before), matchWriteRestore)
+		require.NoError(t, err)
+
+		stale := &state.MatchResult{
+			ID: "m-r1-0", SideA: "Kyoto", SideB: "Osaka",
+			Winner: "Osaka", Status: state.MatchStatusCompleted, ModifiedAt: 4_000,
+		}
+		applied, err := applyBracketMatchResult(bm, stale, matchWriteForward)
+		require.NoError(t, err)
+		assert.False(t, applied,
+			"a write older than the restored result must be dropped, not waved through")
+		assert.Equal(t, "Kyoto", bm.Winner, "the restored result stands")
 	})
 
 	// The audit pair: restore is authoritative, so it both restores a note the

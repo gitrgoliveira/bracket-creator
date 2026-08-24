@@ -35,13 +35,17 @@ func TestScoreHandler_SupersededWriteIsReportedNotSilentlyDropped(t *testing.T) 
 	const storedAt, staleAt = 2_000_000, 1_000_000
 
 	// The stored match carries a stamp NEWER than the incoming write while not
-	// being completed. That combination is what the guard actually fences in
-	// practice, and it is deliberate rather than convenient: a stored COMPLETED
-	// result cannot reach the guard at all, because overwriting one requires a
-	// correctionReason and a correction outranks the timestamp by design
-	// (applyMatchWrite). The shape below is what RevertMatchToQueue leaves
-	// behind — it stamps ModifiedAt = now() precisely so a queued pre-revert
-	// result loses — and equally what a restart on another device leaves.
+	// being completed. That is the shape RevertMatchToQueue leaves behind — it
+	// stamps ModifiedAt = now() precisely so a queued pre-revert result loses —
+	// and equally what a restart on another device leaves.
+	//
+	// It used to be the ONLY shape that could reach the guard: overwriting a
+	// stored COMPLETED result requires a correctionReason, and a correction
+	// bypassed the timestamp outright. That bypass is gone (see applyMatchWrite:
+	// it could not tell a live correction from one the offline queue replayed
+	// hours later, so a stale correction silently overwrote a newer result), so
+	// a stale correction over a completed result now reaches the guard too and
+	// is fenced like anything else.
 	require.NoError(t, store.SavePoolMatches("lww", []state.MatchResult{{
 		ID: "lww-m1", SideA: "Alice", SideB: "Bob",
 		Status: state.MatchStatusRunning, ModifiedAt: storedAt,
@@ -156,4 +160,69 @@ func TestScoreHandler_AppliedWriteStillSucceedsAndBroadcasts(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, stored, 1)
 	assert.Equal(t, "Bob", stored[0].Winner)
+}
+
+// The superseded branch's rev-store rule, whose BOTH halves were previously
+// unpinned: mutating the condition to `if true` or to `if false` left the whole
+// package green. It is a small rule but it decides whether a client session's
+// out-of-order-delivery fence survives a drop, so getting it backwards either
+// leaks an entry for the process lifetime or silently disarms the fence.
+//
+// The rule mirrors the success path: a match that has LEFT running has no live
+// high-water mark worth keeping, while a still-running match must keep its
+// entry so a later out-of-order delivery from the same session is still fenced.
+func TestScoreHandler_SupersededWriteFollowsTheRevStoreRule(t *testing.T) {
+	const storedAt, staleAt = 2_000_000, 1_000_000
+
+	// Both cases drive a write the guard will drop; they differ only in the
+	// status the write carries, which is exactly what the rule keys on.
+	newSupersededRequest := func(t *testing.T, status string) (*state.Store, string) {
+		t.Helper()
+		r, store, _, _, tempDir := setupTestRouter(t)
+		t.Cleanup(func() { _ = os.RemoveAll(tempDir) })
+
+		require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "", Courts: []string{"A"}}))
+		require.NoError(t, store.SaveCompetition(&state.Competition{ID: "rev", Courts: []string{"A"}}))
+		require.NoError(t, store.SavePoolMatches("rev", []state.MatchResult{{
+			ID: "rev-m1", SideA: "Alice", SideB: "Bob",
+			Status: state.MatchStatusRunning, ModifiedAt: storedAt,
+		}}))
+
+		key := "rev:rev-m1"
+		// Seed a high-water mark, as a prior running write from this session
+		// would have left.
+		runningRevStore.Store(key, runningRev{Session: "sess-1", Rev: 5})
+
+		payload, _ := json.Marshal(map[string]any{
+			"sideA": "Alice", "sideB": "Bob",
+			"status": status, "modifiedAt": staleAt,
+			"rev": 6, "revSession": "sess-1",
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/rev/matches/rev-m1/score", bytes.NewBuffer(payload))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+		var body map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+		require.Equal(t, "superseded", body["reason"],
+			"the fixture must actually reach the guard, or this pins nothing; body: %s", w.Body.String())
+		return store, key
+	}
+
+	t.Run("a superseded RUNNING write keeps the session fence", func(t *testing.T) {
+		_, key := newSupersededRequest(t, "running")
+		_, present := runningRevStore.Load(key)
+		assert.True(t, present,
+			"the match is still running, so a later out-of-order write from this session must still be fenced")
+		runningRevStore.Delete(key)
+	})
+
+	t.Run("a superseded write that leaves running drops the entry", func(t *testing.T) {
+		_, key := newSupersededRequest(t, "completed")
+		_, present := runningRevStore.Load(key)
+		assert.False(t, present,
+			"the match has left running, so keeping its high-water mark leaks for the process lifetime")
+	})
 }

@@ -554,6 +554,15 @@ func (e *Engine) writeToPoolOrBracket(h state.StoreTx, compId, matchId string, r
 	})
 	if perr == nil {
 		if superseded {
+			// The stored match was left untouched, but the SAVE still happened:
+			// UpdatePoolMatchByID writes the slice back whenever the id is
+			// found, so a dropped pool write rewrites the identical CSV row and
+			// bumps the standings-cache version with it. Accepted — an extra
+			// bump only costs a recompute, and the alternative (reporting
+			// "not found" to skip the save) would lose the supersede verdict.
+			// The bracket branch differs by construction: UpdateBracket skips
+			// the save when the mutate callback returns an error, so a dropped
+			// bracket write does not touch the file at all.
 			return false, ErrMatchSuperseded
 		}
 		return mismatch, nil
@@ -1808,10 +1817,21 @@ func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult, 
 	bm.Winner = result.Winner
 	bm.Status = status
 	// Stamp the applied write's server-relative time so the next write is
-	// compared against it (mp-y3nk). Preserve a prior stamp when this write is
-	// unstamped, so an un-stamped correction does not reset the field to 0 and
-	// reopen the match to stale writes.
-	if result.ModifiedAt != 0 {
+	// compared against it (mp-y3nk). On the FORWARD path, preserve a prior stamp
+	// when this write is unstamped, so an un-stamped correction does not reset
+	// the field to 0 and reopen the match to stale writes.
+	//
+	// Under RESTORE the snapshot is authoritative, stamp included, so an
+	// unstamped snapshot must put the match BACK to unstamped. The snapshot is
+	// taken BEFORE the forward write, so "unstamped" there means simply "this
+	// match had never been written before" — i.e. every match's first score.
+	// Skipping the assignment left a rolled-back first write carrying a stamp
+	// the match never earned, and a later write stamped earlier (a queued
+	// offline result) was then refused with "a newer result is already
+	// recorded" when nothing newer was ever recorded. The pool branch already
+	// behaves this way via applyPoolWrite's whole-struct overwrite; this closes
+	// the remaining half of that branch asymmetry.
+	if policy == matchWriteRestore || result.ModifiedAt != 0 {
 		bm.ModifiedAt = result.ModifiedAt
 	}
 	// The verdict rides in the ippons about to be rendered; forward writes

@@ -657,6 +657,58 @@ func TestBracketRollbackRestoresTheScore(t *testing.T) {
 		assert.Equal(t, "Kyoto", bm.Winner, "the restored result stands")
 	})
 
+	// The other half of "the snapshot is authoritative": an UNSTAMPED snapshot
+	// must put the match back to unstamped. The snapshot is taken BEFORE the
+	// forward write, so an unstamped one means "this match had never been
+	// written before" — every match's first score. The assignment used to be
+	// gated on `result.ModifiedAt != 0` under both policies, so a rolled-back
+	// first write left the match carrying a stamp it never earned, and a later
+	// write stamped earlier (a queued offline result) was refused as superseded
+	// when nothing newer was ever recorded.
+	t.Run("an unstamped snapshot restores the match to unstamped", func(t *testing.T) {
+		never := &state.BracketMatch{ID: "m-r1-0", SideA: "Kyoto", SideB: "Osaka",
+			Status: state.MatchStatusScheduled}
+		prior := bracketMatchAsResult(never)
+		require.Zero(t, prior.ModifiedAt, "a never-written match projects an unstamped snapshot")
+
+		bm := scored()
+		bm.ModifiedAt = 9_000_000 // stamped by the write being rolled back
+		applied, err := applyBracketMatchResult(bm, prior, matchWriteRestore)
+		require.NoError(t, err)
+		require.True(t, applied)
+		assert.Zero(t, bm.ModifiedAt,
+			"the rolled-back write's stamp must not be left behind on a match that never had one")
+
+		// And the point of it: an offline result stamped before the rejected
+		// write must still be accepted, because nothing newer is recorded.
+		queued := &state.MatchResult{
+			ID: "m-r1-0", SideA: "Kyoto", SideB: "Osaka",
+			Winner: "Osaka", Status: state.MatchStatusCompleted, ModifiedAt: 1_000,
+		}
+		applied, err = applyBracketMatchResult(bm, queued, matchWriteForward)
+		require.NoError(t, err)
+		assert.True(t, applied, "nothing newer was ever recorded, so this must land")
+		assert.Equal(t, "Osaka", bm.Winner)
+	})
+
+	// The counter-case the forward guard exists for, kept adjacent so the
+	// restore exemption above cannot be widened into it: an unstamped FORWARD
+	// write is a correction from a server-built path (quick-score, /decision,
+	// the daihyosen writers), not an instruction to clear the fence. Zeroing
+	// the stamp there would reopen the match to stale writes.
+	t.Run("an unstamped forward write preserves the stored stamp", func(t *testing.T) {
+		bm := scored()
+		bm.ModifiedAt = 7_000
+		applied, err := applyBracketMatchResult(bm, &state.MatchResult{
+			ID: "m-r1-0", SideA: "Kyoto", SideB: "Osaka",
+			Winner: "Osaka", Status: state.MatchStatusCompleted,
+		}, matchWriteForward)
+		require.NoError(t, err)
+		require.True(t, applied, "the unstamped bypass still lets the correction through")
+		assert.Equal(t, int64(7_000), bm.ModifiedAt,
+			"an unstamped correction must not reset the fence to 0")
+	})
+
 	// The audit pair: restore is authoritative, so it both restores a note the
 	// match held and clears one the rejected write added. applyPoolWrite has
 	// always done this through its whole-struct overwrite.

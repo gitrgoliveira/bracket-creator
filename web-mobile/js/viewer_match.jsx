@@ -12,6 +12,7 @@
 // here (plus window.* assignments) so the public surface of viewer.jsx is
 // unchanged.
 
+import { writeDidNotLand } from './write_result.jsx';
 import { useTeamLineups, TeamScoreboard, IndividualScore, withNumber } from './match_scoreboard.jsx';
 import { TermV, poolLabel } from './viewer_utils.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
@@ -316,7 +317,7 @@ export function MatchViewerModal({ match, onClose, tournament, compId: defaultCo
           // matters more here than anywhere else: this surface has no toast, so
           // the banner is the ONLY thing that can report it. Covers the queued
           // case and the superseded one (bc-lww1).
-          if (window.writeDidNotLand(res)) return res;
+          if (writeDidNotLand(res)) return res;
           setScoringMatch(null);
           onClose();
           return res;

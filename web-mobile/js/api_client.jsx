@@ -218,7 +218,9 @@ function _serverNowMs() { return Date.now() + _serverClockOffsetMs; }
 // clock_skew refusal means "your stamp is nonsense" and nothing about the
 // tournament state has changed - the same write, re-stamped in the server's
 // frame, is exactly what should be stored. So this client heals and retries
-// rather than telling the operator to check anything.
+// rather than telling the operator to check anything. (The heal-and-retry is
+// the SCORE path's: recordDecision deliberately only reports — see the note at
+// its own applied:false branch.)
 //
 // `reason` absent, or 'superseded', keeps the pre-existing behaviour verbatim.
 //
@@ -529,8 +531,9 @@ function _notifyTerminalWriteFailed(info) {
 // no imports, so that admin_scoring_shared.jsx can import the same rule without
 // importing THIS module (api_client is script-tagged; a module both
 // script-tagged and ES-imported loads twice and splits its singleton write
-// queue). They are re-published on `window` below for the script-tagged
-// surfaces. See that file for why the rule has a single owner.
+// queue). EVERY consumer imports that leaf directly — this module included —
+// so there is no `window` mirror of them to keep in step. See that file for why
+// the rule has a single owner.
 
 // bc-lww1: a COMPLETED score the server dropped under the timestamp
 // last-write-wins guard (200 {"applied": false}). The operator entered a
@@ -559,10 +562,11 @@ function _notifyTerminalWriteFailed(info) {
 // this match. One per match, never coalesced — each names a different match.
 function _notifyScoreSupersededEditor(compID, matchID) {
     // Copy owned by write_result.jsx (SUPERSEDED_REASON / SUPERSEDED_ADVICE):
-    // the three explicit-tap call sites that submit status:"running" build
-    // this same banner state directly from the awaited result, since this
-    // broadcast is deliberately silent for that status. Same strings, one
-    // owner, so a future wording change can't paste the copy a third time.
+    // the explicit-tap call sites that submit status:"running" build this same
+    // banner state directly from the awaited result (via notLandedBanner),
+    // since this broadcast is deliberately silent for that status. Same
+    // strings, one owner, so a future wording change cannot paste the copy
+    // anywhere a fourth time.
     _notifyTerminalWriteFailed({ compID, matchID, kind: 'score', status: 200, reason: SUPERSEDED_REASON, advice: SUPERSEDED_ADVICE });
 }
 
@@ -797,11 +801,21 @@ async function _flushQueue() {
                     if (res.ok) {
                         // Success (HTTP 200/201, including a stale {stale:true} no-op): remove
                         // from queue only if no newer write has replaced this descriptor.
-                        if (terminal && (kind === 'override' || kind === 'score')) {
-                            // Both endpoints answer a timestamp-guard drop the same way:
-                            // 200 {"applied": false}, with NO SSE broadcast. What that
-                            // means to the operator differs, so the two are announced
+                        if (terminal && (kind === 'override' || kind === 'score' || kind === 'decision')) {
+                            // All three endpoints answer a timestamp-guard drop the same
+                            // way: 200 {"applied": false}, with NO SSE broadcast. What
+                            // that means to the operator differs, so they are announced
                             // differently.
+                            //
+                            // 'decision' is DEFENCE IN DEPTH and is inert today, the same
+                            // reason the server maps the condition on that endpoint at
+                            // all: RecordDecisionTx builds its MatchResult with no
+                            // ModifiedAt, so the write takes ApplyByTimestamp's unstamped
+                            // bypass and this body can never be produced. Without the
+                            // kind here the arm would not parse, so a future writer that
+                            // stamps a decision would have the drop swallowed silently -
+                            // the entry deleted as delivered, nothing said - which is the
+                            // exact failure bc-lww1 was.
                             const body = await res.json().catch(() => ({}));
                             if (writeWasRefusedForClock(body)) {
                                 // bc-cse: NOT a supersede. The server refused this
@@ -2253,7 +2267,32 @@ const API = {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || "Failed to record decision");
         }
-        return res.json();
+        const data = await res.json();
+        // bc-cse defence in depth, and INERT today by construction: the
+        // /decision handler maps a superseded write to 200 {"applied": false},
+        // but RecordDecisionTx builds its MatchResult with no ModifiedAt, so the
+        // write takes ApplyByTimestamp's unstamped bypass and the server cannot
+        // currently emit this body. Asked anyway for the same reason the server
+        // maps it: a 200 the caller reads as success while nothing was stored is
+        // precisely bc-lww1, and a decision resolves a match, so swallowing it
+        // would leave the operator looking at a verdict the disk never held.
+        //
+        // ONE verdict for every applied:false here, and deliberately NOT the
+        // terminal SCORE path's split. That path earns its clock-specific copy
+        // by healing the offset and RETRYING once: only after the retry is
+        // refused again may it tell the operator their clock cannot be
+        // reconciled. This path does neither -- a decision carries no
+        // modifiedAt to re-stamp, so there is nothing to heal and retry -- and
+        // saying "the device clock could not be reconciled" without having
+        // tried would be a verdict on an attempt that never happened. So the
+        // decision path REPORTS rather than recovering, with the plain
+        // superseded copy. The offset is still relearned, since a skewed
+        // device is worth correcting for the next write that IS stamped.
+        if (writeWasSuperseded(data)) {
+            _relearnClockThrottled();
+            _notifyScoreSuperseded(compID, matchID);
+        }
+        return data;
     },
     // T098: competitor eligibility statuses produced by kiken/fusenpai
     // decisions. Endpoint is read-only and unauthenticated: same contract as
@@ -3241,20 +3280,11 @@ if (typeof window !== 'undefined') {
     // explicit "not saved" state when a queued terminal write is permanently dropped.
     window.subscribeTerminalWriteFailed = subscribeTerminalWriteFailed;
     window.subscribeQueueAlert = subscribeQueueAlert;
-    window.writeDidNotLand = writeDidNotLand;
-    window.writeWasSuperseded = writeWasSuperseded;
-    // Shared copy for the "not saved: superseded" banner, so the explicit-tap
-    // call sites that build this state themselves (running-status writes,
-    // which _notifyScoreSuperseded deliberately stays silent for) use the
-    // exact same wording as the broadcast path rather than a pasted copy.
-    window.SUPERSEDED_REASON = SUPERSEDED_REASON;
-    window.SUPERSEDED_ADVICE = SUPERSEDED_ADVICE;
-    // bc-cse: the same mirror for the clock-refusal verdict, whose remedy is the
-    // OPPOSITE of the superseded one, so the same explicit-tap call sites must be
-    // able to ask which of the two they got and say the right thing.
-    window.writeWasRefusedForClock = writeWasRefusedForClock;
-    window.CLOCK_SKEW_REASON_TEXT = CLOCK_SKEW_REASON_TEXT;
-    window.CLOCK_SKEW_ADVICE = CLOCK_SKEW_ADVICE;
+    // No `window` mirror for the not-landed predicates or their banner copy:
+    // every consumer imports write_result.jsx directly. That module is
+    // import-only (never script-tagged), so even a script-tagged surface can
+    // import it without the double-module-eval hazard the mirrors existed to
+    // dodge.
     // mp-y3nk: bracket-resync pub/sub: signals AdminShiaijo to refetch when a
     // queued override the server LWW-dropped leaves stale optimistic bracket state.
     window.subscribeBracketResync = subscribeBracketResync;

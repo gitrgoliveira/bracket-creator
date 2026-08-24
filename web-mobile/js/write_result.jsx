@@ -1,20 +1,26 @@
 // Owner of ONE question: did a score write actually land, and if not, is the
 // state the operator is looking at ever going to become true?
 //
-// This is a leaf on purpose (no imports, no window reads) so that BOTH kinds of
-// consumer can reach the same rule without either being forced into the other's
-// loading model:
+// EVERY consumer imports this module directly -- api_client.jsx, the two
+// scoring editors (admin_scoring_team, admin_scoring_individual),
+// admin_scoring_shared.jsx, admin_shiaijo.jsx, the schedule score editor and
+// viewer_match.jsx. Nothing reads these names off `window`: the mirrors
+// api_client used to publish are gone, so there is exactly one binding per
+// name and no second spelling to drift.
 //
-//   - api_client.jsx imports it and re-publishes both predicates on `window`,
-//     which is how the script-tagged surfaces (admin_shiaijo, the schedule score
-//     editor, viewer_match) ask the question.
-//   - admin_scoring_shared.jsx imports it DIRECTLY, because it is itself
-//     imported by the scoring modals and by unit tests that never load
-//     api_client at all. It cannot import api_client to get here: api_client is
-//     script-tagged, and a module that is both script-tagged and ES-imported
-//     loads twice under two URLs, splitting its module-level singleton state
-//     (the write queue, the listener sets). That is a known, previously-shipped
-//     failure in this codebase, so the dependency has to point this way.
+// This is a leaf on purpose (no imports, no window reads), and it is
+// import-only: it has no <script type="module"> tag of its own and must never
+// gain one. A module that is BOTH script-tagged and ES-imported loads twice
+// under two URLs and splits its module-level singleton state -- a known,
+// previously-shipped failure here (mp-zd1v), and the reason a script-tagged
+// surface like admin_shiaijo.jsx cannot import api_client.jsx to reach this
+// rule. Because THIS file is never tagged, importing it is safe from either
+// kind of module, which is what makes the direct import available everywhere
+// and the `window` mirrors unnecessary.
+//
+// Prefer the import over any re-derivation of the test: two of the shiaijo call
+// sites sit inside a swallowing catch, where a missing binding would degrade
+// into the silent not-saved failure these predicates exist to remove.
 //
 // Why the rule lives in one place at all: it was previously spelled
 // `res.queued` at each call site, and when the server gained a SECOND
@@ -38,12 +44,13 @@ export function writeDidNotLand(res) {
 // "re-enter the result", and here that is actively wrong: re-entering
 // re-stamps the write with the current clock, so it would beat the newer
 // stored result and undo it. One owner for this string pair: api_client.jsx's
-// `_notifyScoreSuperseded` broadcast uses it, and so does every explicit-tap
-// call site that submits with status:"running" -- the shape that broadcast
-// deliberately stays silent for (a superseded autosave is routine noise; an
-// operator tapping "Start match" or "Record bout" and having it silently do
-// nothing is not) and so must build this banner state itself from the
-// awaited result instead of relying on the subscription.
+// `_notifyScoreSuperseded` broadcast uses it, and so does notLandedBanner at
+// the foot of this file -- the answer for every explicit-tap call site that
+// submits with status:"running", the shape that broadcast deliberately stays
+// silent for (a superseded autosave is routine noise; an operator tapping
+// "Start match" or "Record bout" and having it silently do nothing is not) and
+// which therefore builds this banner state from the awaited result instead of
+// relying on the subscription.
 export const SUPERSEDED_REASON = 'a newer result for this match is already recorded';
 export const SUPERSEDED_ADVICE = 'Check the recorded result before re-entering anything: re-submitting would overwrite the newer one.';
 
@@ -80,9 +87,9 @@ export function writeWasSuperseded(res) {
 // exist, and tells them not to do the one thing that would save their work.
 //
 // Owned here, beside the superseded pair, for the same reason that pair is: the
-// consumers are api_client.jsx (which re-publishes both on `window`) and the
-// explicit-tap call sites in the scoring editors, which build this banner state
-// themselves from the awaited result.
+// consumers are api_client.jsx and notLandedBanner below, which is what the
+// explicit-tap call sites in the scoring editors ask to turn an awaited result
+// into this banner state.
 export const CLOCK_SKEW_REASON_TEXT = "this device's clock was out of step with the server";
 export const CLOCK_SKEW_ADVICE = 'The clock has been resynced. Nothing was recorded, so enter the result again.';
 
@@ -104,4 +111,33 @@ export const CLOCK_SKEW_UNHEALED_ADVICE = 'Nothing was recorded. This device\'s 
 // question is only "did this land?", writeWasSuperseded remains the right ask.
 export function writeWasRefusedForClock(res) {
     return !!res && res.applied === false && res.reason === 'clock_skew';
+}
+
+// notLandedBanner: the ONE owner of "which not-saved banner does this result
+// deserve?", answering with the { reason, advice } pair the scoring editors put
+// straight into their writeFailed state, or null when there is nothing to say.
+//
+// The three explicit-tap sites (Start match in both editors, Record bout in the
+// team one) each held the same if/else chain: ask writeWasRefusedForClock
+// first, fall back to writeWasSuperseded, say nothing otherwise. That ORDER is
+// the whole point and is easy to paste wrong -- both verdicts are
+// `applied === false`, so testing the broad one first swallows the narrow one
+// and tells a clock-refused operator to go and look at a newer result that does
+// not exist. A rule three call sites must remember to re-derive is the rule
+// that drifted before (see the note at the top of this file).
+//
+// null covers BOTH remaining cases, and they are different on purpose:
+//   - the write landed: nothing to report.
+//   - the write was QUEUED: not stored yet, but it will be. The editor's
+//     queued/offline surface already owns that state, so these taps say
+//     nothing about it -- exactly what the pasted chains did, since `queued`
+//     satisfies neither predicate.
+export function notLandedBanner(res) {
+    if (writeWasRefusedForClock(res)) {
+        return { reason: CLOCK_SKEW_REASON_TEXT, advice: CLOCK_SKEW_ADVICE };
+    }
+    if (writeWasSuperseded(res)) {
+        return { reason: SUPERSEDED_REASON, advice: SUPERSEDED_ADVICE };
+    }
+    return null;
 }

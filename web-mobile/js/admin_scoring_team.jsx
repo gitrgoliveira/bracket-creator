@@ -33,6 +33,11 @@ import {
 
 import { useDebouncedRunningWrite, SyncStatusPill } from './admin_scoring_autosave.jsx';
 
+// Imported from the leaf, not read off `window`, for the same reason
+// admin_scoring_shared.jsx does it: write_result.jsx is import-only, and this
+// editor is ES-imported by hosts and tests that never load api_client.
+import { notLandedBanner } from './write_result.jsx';
+
 // boutMiddle is THE single source for a bout's centre value (vs/X/(E)/(DH));
 // the editor derives its per-bout middle from it rather than restating the
 // chain (CLAUDE.md § Match Decision Types: the middle rule lives in ONE place).
@@ -3015,16 +3020,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                   // silent for. Start match is an explicit operator tap, not
                   // an autosave, so check the awaited result directly.
                   const res = await doSubmit(() => onSubmit(buildPatch("running")));
-                  // bc-cse: ask the NARROW verdict first. Both answers are
-                  // "not stored", but the remedies are opposites: a clock
-                  // refusal stored nothing and re-entering is the fix, while
-                  // a supersede means a newer result is on disk and
-                  // re-entering would overwrite it.
-                  if (window.writeWasRefusedForClock && window.writeWasRefusedForClock(res)) {
-                    setWriteFailed({ reason: window.CLOCK_SKEW_REASON_TEXT, advice: window.CLOCK_SKEW_ADVICE });
-                  } else if (window.writeWasSuperseded && window.writeWasSuperseded(res)) {
-                    setWriteFailed({ reason: window.SUPERSEDED_REASON, advice: window.SUPERSEDED_ADVICE });
-                  }
+                  // bc-cse: which not-saved banner, if any. The clock-vs-
+                  // supersede ordering (and the silence on a queued write)
+                  // lives in notLandedBanner; see write_result.jsx.
+                  const banner = notLandedBanner(res);
+                  if (banner) setWriteFailed(banner);
                 }} disabled={submitting}>Start match</button>
               )}
               {/* mp-gmcg: mistake recovery on a completed kachinuki match:
@@ -3087,13 +3087,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                     // operator tap, not the debounced autosave
                     // _notifyScoreSuperseded stays silent for. Check directly
                     // rather than relying on the broadcast.
-                    // bc-cse: narrow verdict first, same reasoning as Start
-                    // match above - a clock refusal stored nothing, so the
-                    // remedy is the opposite of the superseded one.
-                    if (mountedRef.current && window.writeWasRefusedForClock && window.writeWasRefusedForClock(res)) {
-                      setWriteFailed({ reason: window.CLOCK_SKEW_REASON_TEXT, advice: window.CLOCK_SKEW_ADVICE });
-                    } else if (mountedRef.current && window.writeWasSuperseded && window.writeWasSuperseded(res)) {
-                      setWriteFailed({ reason: window.SUPERSEDED_REASON, advice: window.SUPERSEDED_ADVICE });
+                    // bc-cse: which not-saved banner, if any. Same one owner
+                    // as Start match above; see write_result.jsx.
+                    if (mountedRef.current) {
+                      const banner = notLandedBanner(res);
+                      if (banner) setWriteFailed(banner);
                     }
                   });
                 }} disabled={submitting || !kachinukiCurrentBoutPlayed}

@@ -18,7 +18,7 @@
 import React from 'react';
 import { render, act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
-import { writeWasSuperseded, writeWasRefusedForClock, SUPERSEDED_REASON, SUPERSEDED_ADVICE, CLOCK_SKEW_REASON_TEXT, CLOCK_SKEW_ADVICE } from '../../write_result.jsx';
+import { SUPERSEDED_REASON, SUPERSEDED_ADVICE, CLOCK_SKEW_REASON_TEXT, CLOCK_SKEW_ADVICE } from '../../write_result.jsx';
 
 const STUBBED_GLOBALS = {
   isHikiwake: () => false,
@@ -33,14 +33,10 @@ const STUBBED_GLOBALS = {
   compMatches: () => [],
   Term: ({ children }) => <span>{children}</span>,
   GlossaryHint: ({ name }) => <span title={name} />,
-  // The REAL predicate and the REAL copy: the point of the test is that the
-  // call site consults them, so stubbing them would prove nothing.
-  writeWasSuperseded,
-  writeWasRefusedForClock,
-  CLOCK_SKEW_REASON_TEXT,
-  CLOCK_SKEW_ADVICE,
-  SUPERSEDED_REASON,
-  SUPERSEDED_ADVICE,
+  // No write_result entries here: the editor imports notLandedBanner from the
+  // leaf, so both the verdict and the copy come from the real module. The
+  // assertions below still compare against the REAL exported strings, which is
+  // the property that matters: the call site must show the owned copy.
 };
 
 const originals = {};

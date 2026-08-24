@@ -7,7 +7,7 @@ const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 const Icon = window.Icon;
 
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
-import { writeDidNotLand } from './write_result.jsx';
+import { writeDidNotLand, writeWasSuperseded, SUPERSEDED_REASON, SUPERSEDED_ADVICE } from './write_result.jsx';
 
 // Kendo best-of-3 cap. Mirrors the server-side `maxIpponsPerSide` in
 // internal/mobileapp/validation.go: the bout ends when one side reaches
@@ -351,10 +351,23 @@ function makeSubmitDecision({
         match.compId, match.id, kind, { decisionBy, decisionReason }, enchoPeriodCount, password, opts,
       );
       if (!mountedRef.current) return;
-      // F5: if the write was only queued (offline / transient), do NOT close or
-      // advance. Enter pending-write mode so the banner shows in the footer.
-      // Save the submit closure so "Retry now" can re-invoke it directly.
-      if (updated && updated.queued) {
+      // A decision that did not land must not advance ANYTHING below this
+      // line: not the kiken hand-off to RemainingMatchesPanel, not
+      // onAfterDecision (which the shiaijo page wires to a LOCAL bracket
+      // advance), not the close. This asks the owner predicate rather than
+      // `updated.queued` so BOTH not-landed shapes take the same exit --
+      // queued (F5: offline/transient, will land on reconnect) and
+      // `applied:false` (bc-lww1: the server refused it, so it never will).
+      // The score path already guards this way; a decision that advanced a
+      // bracket on a winner the server discarded is the same failure.
+      //
+      // Inert today: no server path answers /decision with applied:false (the
+      // request carries no modifiedAt, and respondClockSkew has no decision
+      // call site). It is the guard, not a live branch.
+      //
+      // F5: enter pending-write mode so the banner shows in the footer, and
+      // save the submit closure so "Retry now" can re-invoke it directly.
+      if (writeDidNotLand(updated)) {
         if (setPendingWrite) {
           setPendingWrite(true);
           if (pendingFnRef) pendingFnRef.current = () => submit(kind, { decisionBy, decisionReason }, opts);
@@ -706,6 +719,18 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
         decisionReason: `auto: ${wname} withdrawn`,
       }, password);
       if (!mountedRef.current) return;
+      // A default win the server REFUSED must not leave the list: dropping it
+      // here would hide the one match the operator still has to resolve, and
+      // nothing else on this panel would ever mention it again (bc-lww1).
+      // writeWasSuperseded, not writeDidNotLand, is the right ask: a QUEUED
+      // award lands on reconnect, so an offline court must keep walking the
+      // list exactly as it does today. Inert today for the same reason as the
+      // guard in makeSubmitDecision above: nothing answers /decision with
+      // applied:false yet.
+      if (writeWasSuperseded(updated)) {
+        setErr(`Not saved: ${SUPERSEDED_REASON}. ${SUPERSEDED_ADVICE}`);
+        return;
+      }
       // Drop the awarded match from the list so the operator can keep walking.
       setMatches(prev => (prev || []).filter(x => x.id !== m.id));
       if (typeof onAwarded === "function") onAwarded(updated);

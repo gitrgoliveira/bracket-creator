@@ -10,6 +10,10 @@ const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 // tiebreaker is also a rep bout, just not a daihyosen).
 import { isPoolDaihyosenBout } from './pool_ids.jsx';
 import { realIppons, hanteiTied, hanteiSlot, hanteiWinnerKey } from './result_slot.jsx';
+// Imported from the leaf, not read off `window`: this editor is ES-imported by
+// its host and by unit tests that never load api_client, and write_result.jsx
+// is import-only so it can be reached directly (see its header).
+import { notLandedBanner } from './write_result.jsx';
 
 import {
   MAX_IPPONS_PER_SIDE,
@@ -1080,16 +1084,11 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                   // button having saved nothing. Check the awaited result
                   // directly instead of relying on the broadcast.
                   const res = await doSubmit(() => onSubmit(buildPatch("running")));
-                  // bc-cse: ask the NARROW verdict first. Both answers are
-                  // "not stored", but the remedies are opposites: a clock
-                  // refusal stored nothing and re-entering is the fix, while
-                  // a supersede means a newer result is on disk and
-                  // re-entering would overwrite it.
-                  if (window.writeWasRefusedForClock && window.writeWasRefusedForClock(res)) {
-                    setWriteFailed({ reason: window.CLOCK_SKEW_REASON_TEXT, advice: window.CLOCK_SKEW_ADVICE });
-                  } else if (window.writeWasSuperseded && window.writeWasSuperseded(res)) {
-                    setWriteFailed({ reason: window.SUPERSEDED_REASON, advice: window.SUPERSEDED_ADVICE });
-                  }
+                  // bc-cse: which not-saved banner, if any. The clock-vs-
+                  // supersede ordering (and the silence on a queued write)
+                  // lives in notLandedBanner; see write_result.jsx.
+                  const banner = notLandedBanner(res);
+                  if (banner) setWriteFailed(banner);
                 }} disabled={submitting}>
                   Start match
                 </button>

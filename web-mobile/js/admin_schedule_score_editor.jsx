@@ -1,6 +1,7 @@
 // Score editor components extracted from admin_schedule.jsx (mp-d7tl).
 // startPatch, ScoreEditCourtBtn (local), AdminScoreEditor, AdminScoreEditorPage.
 
+import { writeDidNotLand } from './write_result.jsx';
 import { allMatchesCompleted } from './admin_schedule_utils.jsx';
 import { MatchLineupPanel } from './admin_schedule_lineup.jsx';
 import { boutHansokuMark } from './match_scoreboard.jsx';
@@ -306,7 +307,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                 // is a false success. Queued (F5) or superseded (bc-lww1) alike,
                 // the editor keeps the operator's entry on screen with its
                 // not-saved banner.
-                if (window.writeDidNotLand(res)) return res;
+                if (writeDidNotLand(res)) return res;
                 // ▶ Start Match: keep the operator IN the scoring surface rather
                 // than dumping them back to the list (which forced a re-find +
                 // reopen per match). A "start" patch is status:running with no
@@ -358,7 +359,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                 // shiaijo. Verified in the browser: without this, the resulting
                 // court_busy toast landed on top of the "not saved" banner and
                 // buried the message that actually explains what happened.
-                if (window.writeDidNotLand(res)) return res;
+                if (writeDidNotLand(res)) return res;
                 // "Finish + Start Next →": land on the next match on the SAME
                 // shiaijo AND actually start it (honest to the label). If the
                 // next match is already running/completed, just open it. Start

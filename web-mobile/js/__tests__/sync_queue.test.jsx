@@ -1895,10 +1895,14 @@ describe('writeDidNotLand (bc-lww1)', () => {
         expect(writeDidNotLand(undefined)).toBe(false);
     });
 
-    it('is exposed on window for the non-module consumers', () => {
-        // The five call sites are components loaded as window.* globals rather
-        // than ES imports, so the window binding IS the contract for them.
-        expect(typeof window.writeDidNotLand).toBe('function');
+    it('is the one owned by write_result.jsx, not a second copy', async () => {
+        // Every consumer imports the leaf directly, and api_client re-exports
+        // the very same binding. Identity is the contract: a second copy here
+        // is how the two spellings drift apart again. (Imported dynamically so
+        // it resolves in the same module registry as `mod`, which beforeEach
+        // re-imports after vi.resetModules.)
+        const owner = await import('../write_result.jsx');
+        expect(mod.writeDidNotLand).toBe(owner.writeDidNotLand);
     });
 });
 
@@ -1940,7 +1944,8 @@ describe('writeWasSuperseded (bc-lww1)', () => {
         expect(mod.writeWasSuperseded({ queued: true })).toBe(false);
     });
 
-    it('is exposed on window for the non-module consumers', () => {
-        expect(typeof window.writeWasSuperseded).toBe('function');
+    it('is the one owned by write_result.jsx, not a second copy', async () => {
+        const owner = await import('../write_result.jsx');
+        expect(mod.writeWasSuperseded).toBe(owner.writeWasSuperseded);
     });
 });

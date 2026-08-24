@@ -1,7 +1,6 @@
 import React from 'react';
 import { render, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
-import { writeDidNotLand, writeWasSuperseded, writeWasRefusedForClock, CLOCK_SKEW_REASON_TEXT } from '../../write_result.jsx';
 
 // bc-lww1 regression. The shiaijo console optimistically advances its LOCAL
 // bracket when a knockout bout is scored to completion, so a court running
@@ -47,12 +46,9 @@ const STUBBED_GLOBALS = {
   confirmDialog: vi.fn().mockResolvedValue(true),
   PoolsViewer: () => null,
   compMatches: () => [],
-  // The REAL predicates: the point of the test is that the call site consults
-  // them correctly, so stubbing them would test nothing.
-  writeDidNotLand,
-  writeWasSuperseded,
-  writeWasRefusedForClock,
-  CLOCK_SKEW_REASON_TEXT,
+  // No write_result entries here: admin_shiaijo.jsx imports the predicates and
+  // the clock copy DIRECTLY from write_result.jsx, so it never reads them off
+  // window and the component under test always gets the real implementations.
 };
 
 const originals = {};

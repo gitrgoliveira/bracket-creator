@@ -378,10 +378,13 @@ sequenceDiagram
 as last write wins, which is intentional: more than one person may legitimately be scoring
 one court. Three narrower guards do apply. A write stamped older than the stored result is
 dropped, so a court coming back from an outage cannot overwrite a newer result recorded
-elsewhere. A running write that arrives after the match has been completed is discarded
-rather than reverting the result. An out of order write from the same client session is
-dropped. Anything beyond that is a genuine disagreement between two people and is left
-visible rather than resolved silently.
+elsewhere; the drop is reported, not silent. For a finished result the response says the
+write was superseded and the operator sees an explicit "Not saved" notice, because a
+discarded final score is lost work the scorer must know about, while a superseded
+running-status autosave stays quiet as routine noise. A running write that arrives after
+the match has been completed is discarded rather than reverting the result. An out of
+order write from the same client session is dropped. Anything beyond that is a genuine
+disagreement between two people and is left visible rather than resolved silently.
 
 The stale write guard needs the timestamp of the stored result to compare against, so it
 only works where that timestamp is saved. It is saved for every match, in both files, which

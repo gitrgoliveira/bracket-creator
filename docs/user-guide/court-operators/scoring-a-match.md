@@ -62,7 +62,7 @@ At a large event, the bouts feeding a final can run on other courts, and their r
 
 The court console keeps working if it loses its connection to the server. You can finish scoring the bout in progress, and use **Run now** to resolve and start the next match, all while offline. Everything you enter is saved on the device and sent when the connection returns.
 
-If two courts recorded different results for the same match while one was offline, the more recent change wins when they reconcile.
+If two courts recorded different results for the same match while one was offline, the more recent change wins when they reconcile. The court whose result lost is told: a "Not saved" notice appears on the score editor and as an alert, explaining that a newer result is already recorded. When you see it, check what is recorded before re-entering anything. Do not simply re-enter your result, because a fresh entry counts as the newest change and would overwrite the result that won.
 
 ## Team matches and kachinuki
 

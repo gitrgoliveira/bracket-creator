@@ -245,3 +245,55 @@ describe('team score editor: a failed write disarms the finish confirmation', ()
     }
   });
 });
+
+// The team editor renders SyncStatusPill, but that pill deliberately shows
+// nothing once a match is finished - so a COMPLETED team result that could only
+// be queued (flaky connection) sat on screen looking saved, with nothing saying
+// it had not reached the server. That is the moment an operator is most likely
+// to walk away from the court believing the result is in.
+describe('team score editor: a queued completed write says so', () => {
+  it('shows the not-sent-yet banner when the write was only queued', async () => {
+    const onSubmit = vi.fn().mockResolvedValue({ queued: true });
+    await renderEditor(onSubmit);
+
+    await act(async () => { fireEvent.click(screen.getByText('Start match')); });
+
+    const banner = await screen.findByRole('status');
+    expect(banner.textContent).toContain('Not sent yet');
+    // Distinct from the refused case: this one WILL sync, so it must not tell
+    // the operator to go and check what is recorded.
+    expect(banner.textContent).not.toContain('Check the recorded result');
+  });
+
+  it('shows no pending banner when the write lands', async () => {
+    const onSubmit = vi.fn().mockResolvedValue({ id: 'm1', status: 'running' });
+    await renderEditor(onSubmit);
+    await act(async () => { fireEvent.click(screen.getByText('Start match')); });
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('a refusal replaces the pending banner rather than stacking with it', async () => {
+    // Both can be true in sequence for one write: queued first, refused later
+    // when it finally reaches the server. Two banners saying different things
+    // about the same result would be worse than either alone.
+    const subscribers = [];
+    window.subscribeTerminalWriteFailed = (fn) => { subscribers.push(fn); return () => {}; };
+    try {
+      const onSubmit = vi.fn().mockResolvedValue({ queued: true });
+      await renderEditor(onSubmit);
+      await act(async () => { fireEvent.click(screen.getByText('Start match')); });
+      expect(await screen.findByRole('status')).toBeTruthy();
+
+      await act(async () => {
+        for (const fn of subscribers) {
+          fn({ compID: 'comp1', matchID: 'm1', kind: 'score', status: 200, reason: SUPERSEDED_REASON, advice: SUPERSEDED_ADVICE });
+        }
+      });
+
+      expect(screen.getByRole('alert').textContent).toContain('Not saved');
+      expect(screen.queryByRole('status')).toBeNull();
+    } finally {
+      delete window.subscribeTerminalWriteFailed;
+    }
+  });
+});

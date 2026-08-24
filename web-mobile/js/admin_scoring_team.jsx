@@ -671,6 +671,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // individual editor): it exists only so the operator sees an explanation
   // instead of a button that silently re-enables having saved nothing.
   const [writeFailed, setWriteFailed] = useStateA(null); // { reason, advice? } | null
+  // A COMPLETED write for this match that is queued rather than confirmed.
+  // SyncStatusPill covers the running case and renders nothing once a match
+  // is finished, so without this a team result entered on a flaky connection
+  // sat on screen looking saved with no indication it had not reached the
+  // server -- the one moment the operator is most likely to walk away from
+  // the court. Mirrors ScoreEditorModal's pendingWrite, minus its Retry
+  // affordance: that replays a stored submit closure this editor does not keep.
+  const [pendingWrite, setPendingWrite] = useStateA(false);
   // T093–T098: decision state: same shape as the individual editor. See the
   // ScoreEditorModal copy for the contract.
   const [decisionPromptKind, setDecisionPromptKind] = useStateA("");
@@ -880,6 +888,24 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       // the operator not to re-send -- and a re-submit carries a fresh stamp,
       // so it would overwrite the newer result rather than lose to it.
       setFinishArmed(false);
+      setPendingWrite(false); // the queued write is gone: it failed, not pending
+    });
+    return unsub;
+  }, [m.compId, m.id]);
+
+  // Clears the pending banner when the queue actually drains. Guarded like the
+  // subscription above: window.subscribeSyncStatus and API are absent in unit
+  // and render tests. 'synced' alone is not enough -- the queue can be empty of
+  // OTHER writes while this match's is still held -- so ask per match.
+  useEffectA(() => {
+    if (!m.compId || !m.id) return;
+    if (typeof window.subscribeSyncStatus !== 'function') return;
+    const unsub = window.subscribeSyncStatus((status) => {
+      if (!mountedRef.current) return;
+      const stillPending = (window.API && typeof window.API.hasPendingTerminalWrite === 'function')
+        ? window.API.hasPendingTerminalWrite(m.compId, m.id)
+        : false;
+      if (status === 'synced' && !stillPending) setPendingWrite(false);
     });
     return unsub;
   }, [m.compId, m.id]);
@@ -1944,6 +1970,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // writeWasSuperseded themselves. See writeFailed's declaration above.
     let res;
     try { res = await fn(); } finally { if (mountedRef.current) setSubmitting(false); }
+    // A queued write has NOT reached the server. Flag it so the banner below
+    // says so; the sync subscription clears it once the queue drains, and the
+    // terminal-fail subscription replaces it with the not-saved banner if the
+    // write is ultimately refused.
+    if (mountedRef.current && res && res.queued === true) setPendingWrite(true);
     return res;
   };
 
@@ -2962,6 +2993,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               needing a second copy for the inline variant. No Retry button:
               unlike the individual editor this component holds no submit
               closure to replay, so the operator re-enters and re-taps instead. */}
+          {!writeFailed && pendingWrite && (
+            <div className="pending-write-banner" role="status" aria-live="polite">
+              <span>Not sent yet: this result is saved on this device and will sync when the connection returns.</span>
+            </div>
+          )}
           {writeFailed && (
             <div className="pending-write-banner pending-write-banner--failed" role="alert" aria-live="assertive">
               <span>Not saved: {writeFailed.reason}. {writeFailed.advice || "Re-enter the result and submit again."}</span>

@@ -428,6 +428,20 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		type scoreError struct {
 			MatchID string `json:"matchId"`
 			Error   string `json:"error"`
+			// Reason is a machine-readable discriminator, set only where the
+			// failure is a known engine verdict rather than an arbitrary error.
+			// Today that means "superseded": the timestamp guard refused the
+			// entry because a newer result is already stored.
+			//
+			// It matters because the single-match endpoints answer that
+			// condition with a distinct body ({"applied": false, "reason":
+			// "superseded"}), while this one folds every per-entry failure
+			// into a free-text string. An importer could therefore not tell a
+			// benign supersede from a genuine rejection, and re-running the
+			// import to "fix" it would re-stamp every entry and overwrite the
+			// newer results it was just told about. Omitted for every other
+			// failure, so its presence always means the same thing.
+			Reason string `json:"reason,omitempty"`
 		}
 		var errs []scoreError
 		// Only successfully-recorded results go into the SSE broadcast so
@@ -513,7 +527,11 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				}
 				return nil
 			}); err != nil {
-				errs = append(errs, scoreError{MatchID: results[i].ID, Error: err.Error()})
+				bulkErr := scoreError{MatchID: results[i].ID, Error: err.Error()}
+				if errors.Is(err, engine.ErrMatchSuperseded) {
+					bulkErr.Reason = "superseded"
+				}
+				errs = append(errs, bulkErr)
 				continue
 			}
 			successful = append(successful, results[i])

@@ -680,9 +680,20 @@ async function _flushQueue() {
                                     // been offline can flush several of these at once, and one
                                     // toast per drop would simply overwrite itself down to a single
                                     // singular-worded message naming no match at all.
-                                    _notifyScoreSupersededEditor(compID, matchID);
-                                    supersededThisPass++;
-                                    lastSupersededMatch = { compID, matchID };
+                                    // Only if THIS descriptor is still the queued write.
+                                    // A newer local write can replace it during the await
+                                    // above, and that newer entry is what will actually be
+                                    // delivered — so announcing "not saved" here would
+                                    // report the loss of a payload the operator has already
+                                    // superseded themselves, and send them to check a
+                                    // recorded result that is about to change again.
+                                    // Announcing nothing is right: if the replacement also
+                                    // loses, it announces on its own pass.
+                                    if (_writeQueue.get(key) === descriptor) {
+                                        _notifyScoreSupersededEditor(compID, matchID);
+                                        supersededThisPass++;
+                                        lastSupersededMatch = { compID, matchID };
+                                    }
                                 }
                             }
                         }

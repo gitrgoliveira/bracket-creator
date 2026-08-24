@@ -754,6 +754,22 @@ func (e *Engine) recordIneligibilityFromDecision(h state.StoreTx, compID, matchI
 	// and the sequence below serializes on the already-held lock. Do NOT call
 	// this with e.store as the handle: each call would take its own lock and
 	// the TOCTOU window this closes (K2) would reopen.
+	//
+	// That rule is now CHECKED, not just stated. It used to be unpinnable:
+	// unwrapping either entry shim to pass e.store bare left the whole suite
+	// green, including TestRecordDecision_ConcurrentKiken and its siblings,
+	// which exist for precisely this property — the damage only appears under
+	// an interleaving no test can schedule. Logging instead of erroring because
+	// the fault is in the CALLER's plumbing, not in this operator's write:
+	// failing the write would turn a latent atomicity regression into a broken
+	// score entry, while the write itself is still individually correct. The
+	// log is what a test can assert on, and what a maintainer sees.
+	if !state.IsTransactional(h) {
+		log.Printf("engine: K2 check-and-set for competitor %q in %q is running on a NON-transactional store handle; "+
+			"the load/check/set is no longer atomic and concurrent withdrawals can both pass the check. "+
+			"The caller must wrap this in Store.WithTransaction (see the engine's entry-point shims)",
+			playerID, compID)
+	}
 	statuses, err := h.LoadCompetitorStatus(compID)
 	if err != nil {
 		return nil, err

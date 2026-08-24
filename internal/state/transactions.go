@@ -356,6 +356,33 @@ type storeTx struct {
 	wal    *wal.WAL
 }
 
+// IsTransactional reports whether h is a LIVE transaction handle rather than
+// the bare *Store.
+//
+// It exists because StoreTx is satisfied by both, deliberately: that is what
+// lets one body serve the transactional and non-transactional doors. The cost
+// of that convenience is that a caller whose correctness DEPENDS on the handle
+// being a real transaction cannot tell, and the compiler cannot tell either.
+// The engine's K2 check-and-set is such a caller: its load/check/set is only
+// atomic while the per-competition lock is held across all three, which is true
+// of a tx handle and false of the bare store, where each call takes and
+// releases its own lock and the TOCTOU window reopens.
+//
+// Exported so that invariant can be ENFORCED rather than merely commented. It
+// was previously unpinnable: replacing the engine's WithTransaction shims with
+// a bare handle passed the entire test suite, including the tests written for
+// the property it broke, because the difference only shows under an
+// interleaving no test can schedule. Asking the handle what it is turns an
+// unobservable property into an observable one.
+//
+// Use it for guards, never for behaviour: no code should DO something different
+// based on this. A caller that needs a transaction and did not get one is a
+// bug, not a case to handle.
+func IsTransactional(h StoreTx) bool {
+	_, ok := h.(*storeTx)
+	return ok
+}
+
 // txWriteFn adapts the WAL package's WriteFn (which uses os.FileMode)
 // to the state package's writeFn (which uses fs.FileMode). The two
 // types are identical at the value level, fs.FileMode is an alias

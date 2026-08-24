@@ -37,42 +37,45 @@ import (
 // contract; a write that lands must never claim to be superseded, or the fix
 // "passes" by rejecting everything.
 //
-// KNOWN RESIDUAL (P6 in the bc-twin mutation audit): nothing here pins that the
-// non-tx entry shims actually WRAP their write in WithTransaction rather than
-// passing e.store bare. Replacing either shim's WithTransaction with a bare
-// fn(e.store) passes this package AND internal/mobileapp — including the three
-// tests written for the property it breaks (TestRecordDecision_ConcurrentKiken,
-// _ConcurrentKikenRace, TestRecordIneligibilityFromDecisionTx_AlreadyIneligible).
+// P6 (the bc-twin mutation audit's known residual) is now CLOSED, and how it
+// was closed is worth recording, because "unpinnable" was wrong in an
+// instructive way.
 //
-// What breaks is recordIneligibilityFromDecision's K2 check-and-set, which since
-// bc-twin has no WithTransaction of its own — its atomicity IS the handle's, so
-// a bare store handle silently makes the load/check/set three separately-locked
-// operations. That needs an interleaving no test can schedule deterministically
-// from outside the store, which is why it stays unpinned.
+// The residual: nothing detected an entry shim being simplified from
+// WithTransaction to a bare fn(e.store). That breaks
+// recordIneligibilityFromDecision's K2 check-and-set, whose atomicity IS the
+// handle's, and the damage only appears under an interleaving no test can
+// schedule from outside the store. Treating it as an OBSERVATION problem was a
+// dead end: both stage-then-fail paths roll back explicitly, so the
+// transactional and bare-handle runs reach the same end state.
 //
-// The two are NOT, however, "observationally identical single-threaded", as an
-// earlier version of this note claimed. WithTransaction stages saves in the WAL
-// and DISCARDS them when fn returns an error, whereas a bare handle lands each
-// save immediately — so on any error path that has already issued a save the two
-// differ in whether that save survives, visible through Store.FileVersion even
-// when the bytes are unchanged. A superseded pool write is exactly such a path
-// (UpdatePoolMatchByID saves once the match is found, then the guard errors).
-// That difference is real but incidental; the K2 argument above is the reason
-// the wrapper must stay.
+// It was closed by making the invariant CHECKABLE instead of observable.
+// state.IsTransactional asks the handle what it is, and the K2 site logs when
+// handed a bare one; TestK2ChecksItsHandleIsTransactional (eligibility_test.go)
+// asserts the production paths stay silent, with a deliberate bare-handle call
+// as the negative control. Both entry shims are covered — note the second took
+// an extra case, because RecordMatchResult only reaches K2 when the result
+// carries a kiken/fusenpai decision, so unwrapping it survived until a test
+// drove that combination.
 //
-// If you are about to "simplify" RecordMatchResult or
-// RecordMatchResultWithIneligibility into a bare handle pass: that is the
-// mutation this note exists for; read the K2 note on
+// If you are about to "simplify" either shim into a bare handle pass: that
+// mutation now fails, which is the point. Read the K2 note on
 // recordIneligibilityFromDecision first.
 func TestSupersededIsReportedOnEveryWritePath(t *testing.T) {
 	const storedAt, olderAt, newerAt = 2_000_000, 1_000_000, 3_000_000
 
-	// The stored match is stamped newer while NOT completed. That is the shape
-	// the guard actually fences in practice and it is deliberate: a stored
-	// COMPLETED result cannot reach the guard at all, because overwriting one
-	// requires a correctionReason and a correction outranks the timestamp by
-	// design (applyMatchWrite). RevertMatchToQueue leaves exactly this shape —
-	// it stamps ModifiedAt = now() so a queued pre-revert result loses.
+	// The stored match is stamped newer while NOT completed. RevertMatchToQueue
+	// leaves exactly this shape — it stamps ModifiedAt = now() so a queued
+	// pre-revert result loses.
+	//
+	// This used to be the ONLY shape that could reach the guard, because
+	// overwriting a stored COMPLETED result requires a correctionReason and a
+	// correction bypassed the timestamp outright. That exemption is gone
+	// (applyMatchWrite): it could not tell a live correction from one the
+	// offline queue replayed hours later, so a stale correction silently
+	// overwrote a newer result. A completed result is therefore reachable here
+	// too now; this fixture keeps the running shape because it is the one the
+	// reconnect scenario actually produces.
 	incoming := func(at int64) *state.MatchResult {
 		return &state.MatchResult{
 			SideA: "Alice", SideB: "Bob", Winner: "Bob",

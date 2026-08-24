@@ -369,9 +369,10 @@ func TestPreserveSubHantei_SideGuardsTheScoreline(t *testing.T) {
 
 // Same scenario through the TX pool path, which is the one POST
 // /competitions/:id/matches/:mid/score and the bulk-score endpoint actually
-// take. Its non-tx twin already had the guard, so this pins the twin parity:
-// pass poolWriteRestore instead of poolWriteForward at the withPoolMatchTx
-// closure in scoring_tx.go and this goes red while the unit table stays green.
+// take. This pins the policy the single shared closure passes: pass
+// matchWriteRestore instead of matchWriteForward at the writeToPoolOrBracket
+// call in internal/engine/scoring.go and this goes red while the unit table
+// stays green.
 func TestPoolWriteTx_StaleSnapshotKeepsHantei(t *testing.T) {
 	// setupTestEngine (engine_test.go) already owns this preamble, with
 	// t.Cleanup rather than defer; 380+ tests in this package use it.

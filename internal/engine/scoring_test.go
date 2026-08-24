@@ -2110,7 +2110,7 @@ func TestRecordMatchResult_BracketCompletedWithNoWinnerRejected(t *testing.T) {
 
 // TestRecordMatchResultTx_BracketCompletedWithNoWinnerRejected is the tx-aware
 // twin of the test above. The production score handler routes through
-// RecordMatchResultWithIneligibilityTx -> recordBracketMatchResultTx, so the
+// RecordMatchResultWithIneligibilityTx -> writeToPoolOrBracket -> recordBracketMatchResult, so the
 // AMENDMENT 2 guard must hold on this path too: pre-fix, only the non-tx twin
 // carried it and the operator-facing route could complete a bracket match with
 // no winner (validateBracketCompletion is the shared choke point).

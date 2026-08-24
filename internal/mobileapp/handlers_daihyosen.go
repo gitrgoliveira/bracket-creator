@@ -161,11 +161,19 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 		})
 		if txErr != nil {
 			if errors.Is(txErr, engine.ErrMatchSuperseded) {
-				// bc-lww1. Not reachable today — the add/remove paths copy the
-				// STORED match (u := *match), so the incoming stamp equals the
-				// stored one and ApplyByTimestamp's >= comparison applies it — but
-				// mapped so a future writer that re-stamps cannot turn a benign
-				// supersede into a 500 the client retries forever.
+				// bc-lww1. Not reachable today, by EITHER branch's route to
+				// ApplyByTimestamp — and the two differ, so neither alone is the
+				// reason. On the pool branch the write copies the STORED match
+				// (u := *match), so the incoming stamp equals the stored one and
+				// the >= comparison applies it. On the bracket branch — the only
+				// branch the ADD path can take, since AddDaihyosen rejects a pool
+				// id with ErrPoolMatch — daihyosenBracketResult never projects
+				// ModifiedAt at all, so the incoming stamp is 0 and the write
+				// takes ApplyByTimestamp's unstamped bypass instead.
+				//
+				// Mapped anyway so a future writer that re-stamps EITHER
+				// projection cannot turn a benign supersede into a 500 the client
+				// retries forever.
 				respondSuperseded(c)
 				return
 			}
@@ -299,11 +307,19 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 		})
 		if txErr != nil {
 			if errors.Is(txErr, engine.ErrMatchSuperseded) {
-				// bc-lww1. Not reachable today — the add/remove paths copy the
-				// STORED match (u := *match), so the incoming stamp equals the
-				// stored one and ApplyByTimestamp's >= comparison applies it — but
-				// mapped so a future writer that re-stamps cannot turn a benign
-				// supersede into a 500 the client retries forever.
+				// bc-lww1. Not reachable today, by EITHER branch's route to
+				// ApplyByTimestamp — and the two differ, so neither alone is the
+				// reason. On the pool branch the write copies the STORED match
+				// (u := *match), so the incoming stamp equals the stored one and
+				// the >= comparison applies it. On the bracket branch — the only
+				// branch the ADD path can take, since AddDaihyosen rejects a pool
+				// id with ErrPoolMatch — daihyosenBracketResult never projects
+				// ModifiedAt at all, so the incoming stamp is 0 and the write
+				// takes ApplyByTimestamp's unstamped bypass instead.
+				//
+				// Mapped anyway so a future writer that re-stamps EITHER
+				// projection cannot turn a benign supersede into a 500 the client
+				// retries forever.
 				respondSuperseded(c)
 				return
 			}

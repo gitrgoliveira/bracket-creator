@@ -12,9 +12,17 @@ import (
 // every path a write can take. That is a matrix, not a single case: a match id
 // resolves to a pool match or a knockout one only at run time, the knockout half
 // splits again into a round match and the bronze playoff (which lives outside
-// Rounds and is reached by a separate branch), and each of those runs through
-// either the plain writer or its tx twin depending on whether the caller wrapped
-// the write in Store.WithTransaction.
+// Rounds and is reached by a separate branch), and each of those is reached
+// through either of the two engine entry points a caller can pick.
+//
+// Note what that second axis is since bc-twin, because the cell names understate
+// it. It is NOT "one body through a tx and a non-tx door" any more — there is a
+// single shared body, so a mutation of the write itself fails both cells of a
+// pair together. What the axis still separates is the two ENTRY POINTS around
+// that body: RecordMatchResult (a WithTransaction shim) and
+// RecordMatchResultWithIneligibilityTx (called with a live tx by the handlers),
+// which differ in their engi dispatch, kachinuki merge and ineligibility work.
+// That is worth sweeping, but it is a weaker claim than "twin parity".
 //
 // Sweeping the matrix explicitly, rather than trusting the three unrelated tests
 // that happened to cover three of the cells, is the point. An audit of this
@@ -29,15 +37,32 @@ import (
 // contract; a write that lands must never claim to be superseded, or the fix
 // "passes" by rejecting everything.
 //
-// KNOWN RESIDUAL (P6 in the bc-twin mutation audit): nothing here can pin that
-// the non-tx entry shims actually WRAP their write in WithTransaction rather
-// than passing e.store bare. The two are observationally identical in any
-// single-threaded test (each store call locks itself either way), and the
-// difference — recordIneligibilityFromDecision's K2 check-and-set being atomic
-// or not — only manifests under an interleaving no test can schedule
-// deterministically from outside the store. If you are about to "simplify"
-// RecordMatchResult or RecordMatchResultWithIneligibility into a bare handle
-// pass: that is the mutation this note exists for; read the K2 note on
+// KNOWN RESIDUAL (P6 in the bc-twin mutation audit): nothing here pins that the
+// non-tx entry shims actually WRAP their write in WithTransaction rather than
+// passing e.store bare. Replacing either shim's WithTransaction with a bare
+// fn(e.store) passes this package AND internal/mobileapp — including the three
+// tests written for the property it breaks (TestRecordDecision_ConcurrentKiken,
+// _ConcurrentKikenRace, TestRecordIneligibilityFromDecisionTx_AlreadyIneligible).
+//
+// What breaks is recordIneligibilityFromDecision's K2 check-and-set, which since
+// bc-twin has no WithTransaction of its own — its atomicity IS the handle's, so
+// a bare store handle silently makes the load/check/set three separately-locked
+// operations. That needs an interleaving no test can schedule deterministically
+// from outside the store, which is why it stays unpinned.
+//
+// The two are NOT, however, "observationally identical single-threaded", as an
+// earlier version of this note claimed. WithTransaction stages saves in the WAL
+// and DISCARDS them when fn returns an error, whereas a bare handle lands each
+// save immediately — so on any error path that has already issued a save the two
+// differ in whether that save survives, visible through Store.FileVersion even
+// when the bytes are unchanged. A superseded pool write is exactly such a path
+// (UpdatePoolMatchByID saves once the match is found, then the guard errors).
+// That difference is real but incidental; the K2 argument above is the reason
+// the wrapper must stay.
+//
+// If you are about to "simplify" RecordMatchResult or
+// RecordMatchResultWithIneligibility into a bare handle pass: that is the
+// mutation this note exists for; read the K2 note on
 // recordIneligibilityFromDecision first.
 func TestSupersededIsReportedOnEveryWritePath(t *testing.T) {
 	const storedAt, olderAt, newerAt = 2_000_000, 1_000_000, 3_000_000

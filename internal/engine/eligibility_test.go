@@ -873,11 +873,10 @@ func TestRollback_BracketSubResults_Cleared(t *testing.T) {
 	// fell back to a pool-match rollback when Alice happened not to land in the
 	// second match, which silently stopped proving the bracket behaviour.)
 	//
-	// This is the NON-tx twin: RecordMatchResultWithIneligibility rolls back
-	// through writeMatchResult. The comment here used to name
-	// recordBracketMatchResultTx, which this test never reaches — a mutation of
-	// the tx twin's rollback policy survived the whole suite on the strength of
-	// that claim. TestRollback_BracketSubResults_ClearedTx covers the other one.
+	// This exercises the non-tx ENTRY POINT: RecordMatchResultWithIneligibility
+	// is a thin WithTransaction shim over RecordMatchResultWithIneligibilityTx, so
+	// both tests drive the same rollback body. The pair pins the two entry points
+	// rather than two distinct implementations.
 	targetName := secondMatch.SideA
 	targetID := idByName[targetName]
 	require.NotEmpty(t, targetID, "second bracket match SideA must map to a known participant")
@@ -891,7 +890,7 @@ func TestRollback_BracketSubResults_Cleared(t *testing.T) {
 
 	// Score the second bracket match with a kiken on the target (SideA →
 	// decisionBy "aka" makes SideA the loser) plus SubResults. The engine
-	// writes the partial bracket result, then recordIneligibilityFromDecisionTx
+	// writes the partial bracket result, then recordIneligibilityFromDecision
 	// detects the target is already ineligible from firstMatchID and returns
 	// *AlreadyIneligibleError, triggering the rollback.
 	_, err = eng.RecordMatchResultWithIneligibility(compID, secondMatchID, &state.MatchResult{

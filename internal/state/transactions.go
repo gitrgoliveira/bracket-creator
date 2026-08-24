@@ -170,17 +170,23 @@ type StoreTx interface {
 // and expect cross-file crash-atomicity, each write lands
 // independently.
 //
-// fn read-after-write within the same tx. Tx-internal reads
-// (tx.LoadCompetition, tx.LoadBracket, etc.) read from disk via the
-// *Locked helpers and DO NOT see the WAL-staged writes, the on-disk
-// file isn't updated until Apply runs after fn returns. The current
-// engine paths (RecordMatchResultWithIneligibilityTx,
-// RecordDecisionTx, K3 rollback) read BEFORE they write within a
-// single tx and never read-after-write the same file, so this
-// limitation is invisible to them. If a future tx body needs to
-// read its own pending write, the WAL exposes Intents(), but that's
-// a code-smell and probably indicates the load/save should be
-// re-ordered.
+// fn read-after-write within the same tx. This IS supported, and the
+// engine now depends on it: tx-internal reads (tx.LoadCompetition,
+// tx.LoadPoolMatches, tx.LoadBracket, ...) consult the WAL's pending
+// intents BEFORE falling through to the *Locked disk helpers, so a tx
+// sees its own staged writes even though the on-disk file is not
+// updated until Apply runs after fn returns. See pendingFor and its
+// call sites below, and the package header above, which has always
+// documented it this way.
+//
+// This is load-bearing, not incidental: the mp-e2k1 guard inside
+// RecordMatchResultWithIneligibilityTx re-reads pool-matches.csv via
+// computeStandingsFrom AFTER staging the forward write, to compare the
+// qualifying finishers before and after. If that read fell through to
+// disk it would compute post-write standings from pre-write bytes,
+// which is the stale-standings class the cache-invalidation notes
+// describe. The K3 rollback likewise re-enters UpdatePoolMatchByID
+// after the forward write.
 //
 // T155, NFR-010, T210/T211/T212 (A1 WAL).
 func (s *Store) WithTransaction(compID string, fn func(tx StoreTx) error) error {

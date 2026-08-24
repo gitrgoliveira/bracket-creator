@@ -48,9 +48,13 @@ var ErrMatchAlreadyCompleted = errors.New("match already completed: use the scor
 // (bc-lww1). Carrying it as an error makes the drop impossible to swallow by
 // omission — an unmapped path fails loudly instead of silently.
 //
-// Handlers MUST map it to a 2xx carrying applied=false, never to a 4xx/5xx:
-// the SPA's offline write queue retries 5xx forever (the mp-q8c6 poisoned-queue
-// pattern) and a superseded write can never win a retry.
+// Handlers MUST map it to a 2xx, never to a 4xx/5xx: the SPA's offline write
+// queue retries 5xx forever (the mp-q8c6 poisoned-queue pattern) and a
+// superseded write can never win a retry. Single-match handlers carry
+// applied=false through respondSuperseded; the one batch endpoint (bulk-score)
+// instead folds it into its per-entry errors[] inside an overall 200, which
+// satisfies the 2xx rule but means a supersede is not machine-distinguishable
+// from a genuine rejection there.
 //
 // The OverrideBracketWinner path reports the same condition through its own
 // (applied bool, error) return and the package-internal errLWWDropped below;
@@ -900,8 +904,9 @@ func deriveDaihyosenWinner(result *state.MatchResult) {
 }
 
 // backfillMatchIdentity preserves the participant ids stamped on a pool/league
-// match at generation, and resolves the winner id. It runs inside every
-// score-write closure right before the whole-struct `*r = *result` overwrite:
+// match at generation, and resolves the winner id. It runs inside the pool
+// score-write closure right before applyPoolWrite's whole-struct
+// `*stored = *result` overwrite:
 // score requests carry side NAMES only (no ids), so without this the overwrite
 // would wipe SideAID/SideBID on the first score and break league-matrix cell
 // mapping. WinnerID is resolved from an explicit WinnerSide hint when present
@@ -1640,8 +1645,8 @@ func applyMatchWrite(result *state.MatchResult, storedModifiedAt int64, policy m
 // resolves via encho on that same bout (daihyosen does not exist in
 // kachinuki, mp-gmcg). Applies to all bracket match types and is the single
 // AMENDMENT 2 choke point. It now has a single caller, applyBracketMatchResult,
-// which is itself the one per-match bracket write the twins and the bronze
-// fallback all share, so there are no longer twins here to drift.
+// which is itself the one per-match bracket write that both the round path and
+// the bronze fallback share, so there is nothing left here to drift.
 func validateBracketCompletion(matchID string, status state.MatchStatus, winner string) error {
 	if status == state.MatchStatusCompleted && winner == "" {
 		return validationErrorf("bracket match %s: cannot mark completed with no winner; resolve the tie first (daihyosen, or encho on the final kachinuki bout)", matchID)
@@ -1655,8 +1660,8 @@ func validateBracketCompletion(matchID string, status state.MatchStatus, winner 
 // means the timestamp guard dropped it as stale, and the caller must then skip
 // anything downstream (propagation).
 //
-// This is the whole per-match write, shared by recordBracketMatchResult, its Tx
-// twin, and the bronze fallback in both. It was three copies of ~45 lines; the
+// This is the whole per-match write, shared by recordBracketMatchResult and the
+// bronze fallback. It was three copies of ~45 lines; the
 // source recorded two hand-resyncs between them ("Twin parity with
 // recordBracketMatchResultTx… so the non-tx write path doesn't silently drop
 // it", and the AMENDMENT 2 guard), and the bronze copy had to be retrofitted
@@ -1800,11 +1805,12 @@ func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult, 
 	return true, nil
 }
 
-// applyBracketResultIn is the body BOTH bracket write twins run inside their
+// applyBracketResultIn is the body the bracket write runs inside its
 // UpdateBracket callback: locate the match, apply the write, propagate a
-// completed winner. The twins differ only in which UpdateBracket they call
-// (e.store vs tx), so that dispatch is all they contain now — before this they
-// were ~105 lines that differed in two.
+// completed winner. It has ONE caller, recordBracketMatchResult, which passes
+// its store handle straight through — before bc-twin this was two ~105-line
+// twins differing only in whether they called e.store or tx, and the handle
+// parameter is exactly what let them become one body.
 func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID string, result *state.MatchResult, policy matchWritePolicy) error {
 	if bracket == nil {
 		return notFoundErrorf("bracket not found for competition %s", compID)

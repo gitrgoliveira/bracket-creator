@@ -20,13 +20,29 @@ import (
 // is not preserved on rollback — it is actively cleared. A partial projection
 // is therefore silent data loss, not a missing optimisation.
 func bracketMatchAsResult(bm *state.BracketMatch) *state.MatchResult {
-	// ModifiedAt is deliberately NOT projected, and that is the one omission
-	// which is correct. The restore runs through applyMatchWrite, the
-	// timestamp LWW guard, against the stamp the REJECTED write just left on
-	// the match. Carrying the snapshot's older stamp would make the rollback
-	// lose to the write it is undoing and be silently dropped; leaving it 0
-	// takes ApplyByTimestamp's unstamped bypass, so the rollback always
-	// applies. Do not "complete" the projection with this field.
+	// ModifiedAt is deliberately NOT projected. Note carefully what that does
+	// and does not do, because an earlier version of this comment had the
+	// mechanism backwards and the wrong version is the more reassuring one.
+	//
+	// It does NOT decide whether the rollback applies. applyMatchWrite returns
+	// true for matchWriteRestore before it looks at any stamp, so a restore can
+	// never lose the LWW comparison whatever it carries — the bypass is stated
+	// at the POLICY, not earned by leaving this field 0. The old claim that a
+	// projected stamp would "lose to the write it is undoing and be silently
+	// dropped" is not reachable.
+	//
+	// What it actually decides is the stamp LEFT on the match afterwards, since
+	// the write is a whole-struct overwrite: omitting it zeroes the stored
+	// stamp, so the next write to this match takes ApplyByTimestamp's unstamped
+	// bypass instead of being fenced against the restored result's real time.
+	// The pool snapshot behaves differently here — lookupExistingResult returns
+	// a copy of the stored MatchResult, so that branch restores the true prior
+	// stamp — which makes this an asymmetry between the two branches rather
+	// than a property of "restore".
+	//
+	// Left as-is because changing it changes fencing behaviour, not because it
+	// is provably right. If you are completing this projection, that is a
+	// behavioural change to reason about deliberately, not a tidy-up.
 	return &state.MatchResult{
 		ID:             bm.ID,
 		SideA:          bm.SideA,

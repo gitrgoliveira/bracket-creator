@@ -1380,10 +1380,17 @@ func matchSnapshotOrErr(s matchStores, compID, matchID, guardLabel string) (matc
 // override endpoint, which already answers this exact condition with
 // {"applied": false} and whose client already keys on that field.
 //
-// ONE place for the same reason respondCourtBusy is one place: the condition
-// fires on four handlers (score, quick-score, and both daihyosen paths), and a
-// body hand-copied per handler is how the client's single branch quietly stops
-// matching one of them.
+// ONE place for the same reason respondCourtBusy is one place: the condition is
+// mapped on five handlers (score, quick-score, /decision and both daihyosen
+// paths), and a body hand-copied per handler is how the client's single branch
+// quietly stops matching one of them. Only /score reaches it today — the other
+// four build their MatchResult without a ModifiedAt, so the timestamp guard
+// takes its unstamped bypass — and they are mapped defensively because the
+// default arm in each is a 500 the SPA's write queue would retry forever.
+//
+// bulk-score is deliberately NOT in that list: it reports per-entry failures in
+// its own errors[] array inside an overall 200, so a superseded entry is already
+// excluded from `successful` and cannot poison a queue.
 func respondSuperseded(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"applied": false,
@@ -1520,8 +1527,9 @@ func applyCorrectionReasonUnderTx(stx state.StoreTx, compID, matchID string, r *
 	// Non-completing write: pin the reason to the STORED one. This is not just a
 	// carry-forward — it also refuses a client-supplied reason on a running
 	// write, so the audit note can only ever change through the completing
-	// correction branch above. The engine twin (recordMatchResultTx in
-	// scoring_tx.go: `if result.CorrectionReason == "" { ... = r.CorrectionReason }`)
+	// correction branch above. The engine side (applyPoolWrite in
+	// engine/scoring.go: `if result.CorrectionReason == "" { result.CorrectionReason
+	// = stored.CorrectionReason }`)
 	// independently carries the stored reason across its whole-struct overwrite
 	// for callers that DON'T pass through here; the two are deliberately kept
 	// separate (this one is stricter) — do not collapse one into the other

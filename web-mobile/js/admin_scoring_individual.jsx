@@ -410,6 +410,13 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
       if (!info || info.compID !== m.compId || info.matchID !== m.id) return;
       setWriteFailed({ reason: info.reason || `save rejected (${info.status || 'error'})`, advice: info.advice });
       setPendingWrite(false); // the queued write is gone: it failed, not pending
+      // DISARM the finish confirmation. The submit that just failed left the
+      // button in its "Tap again to finish" state, so the operator was one tap
+      // from re-sending -- which for a superseded write is the one thing the
+      // banner tells them not to do, and which would WIN, because a re-submit
+      // carries a fresh stamp and beats the newer result it overwrites.
+      // Re-arming has to be deliberate.
+      setFinishArmed(false);
     });
     return unsub;
   }, [m.compId, m.id]);

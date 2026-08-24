@@ -874,6 +874,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       if (!mountedRef.current) return;
       if (!info || info.compID !== m.compId || info.matchID !== m.id) return;
       setWriteFailed({ reason: info.reason || `save rejected (${info.status || 'error'})`, advice: info.advice });
+      // Disarm the finish confirmation for the same reason the individual
+      // editor does: the failed submit left the button on "Tap again to
+      // finish", one tap from re-sending the very write the banner is telling
+      // the operator not to re-send -- and a re-submit carries a fresh stamp,
+      // so it would overwrite the newer result rather than lose to it.
+      setFinishArmed(false);
     });
     return unsub;
   }, [m.compId, m.id]);

@@ -186,3 +186,62 @@ describe('team score editor: a superseded explicit tap reaches the screen (bc-lw
     }
   });
 });
+
+// The finish confirmation is a two-tap control: the first tap arms it ("Tap
+// again to finish"), the second submits. A submit that comes back superseded
+// used to leave it ARMED, so the operator was one tap from re-sending -- which
+// is the one thing the banner tells them not to do, and which would WIN,
+// because a re-submit carries a fresh stamp and beats the newer result it
+// overwrites. Found in browser verification, not by any test.
+describe('team score editor: a failed write disarms the finish confirmation', () => {
+  function runningTeamMatch() {
+    return {
+      id: 'm1', compId: 'comp1', status: 'running', phase: 'bracket',
+      round: 'Final', court: 'A', compKind: 'team', teamSize: 3,
+      compFormat: 'playoffs', teamMatchType: 'fixed',
+      sideA: { id: 'team-A', name: 'Team A' },
+      sideB: { id: 'team-B', name: 'Team B' },
+      subResults: [
+        { position: 1, sideA: 'Team A', sideB: 'Team B', ipponsA: ['M', 'M'], ipponsB: [], winner: 'Team A' },
+      ],
+    };
+  }
+
+  it('reverts an armed finish button when the write is reported not saved', async () => {
+    const subscribers = [];
+    window.subscribeTerminalWriteFailed = (fn) => { subscribers.push(fn); return () => {}; };
+    try {
+      await act(async () => {
+        render(
+          <ScoreEditorModal
+            match={runningTeamMatch()}
+            onClose={vi.fn()}
+            onSubmit={vi.fn().mockResolvedValue(undefined)}
+            password="secret"
+          />
+        );
+      });
+
+      const finish = () => [...document.querySelectorAll('button')]
+        .find((b) => /Finish|Tap again to finish/.test(b.textContent || ''));
+      expect(finish()).toBeTruthy();
+
+      // Arm it, exactly as the operator's first tap does.
+      await act(async () => { fireEvent.click(finish()); });
+      expect(finish().textContent).toMatch(/Tap again to finish/);
+
+      // The write comes back not saved.
+      await act(async () => {
+        for (const fn of subscribers) {
+          fn({ compID: 'comp1', matchID: 'm1', kind: 'score', status: 200, reason: SUPERSEDED_REASON, advice: SUPERSEDED_ADVICE });
+        }
+      });
+
+      // Disarmed: re-arming has to be a deliberate act again.
+      expect(finish().textContent).not.toMatch(/Tap again to finish/);
+      expect(screen.getByRole('alert').textContent).toContain('Not saved');
+    } finally {
+      delete window.subscribeTerminalWriteFailed;
+    }
+  });
+});

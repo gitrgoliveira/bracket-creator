@@ -421,17 +421,28 @@ moments later on another court. What the check catches is a clock wrong by more 
 queue age plus the few seconds of tolerance, which is the case that would otherwise freeze
 the match or overwrite a newer result with nobody told.
 
-One case is not recovered, and it is worth stating plainly. When a queued write is refused for
-a wrong clock, the app learns the server time again and rebuilds the stamp from the moment the
-result was entered plus the freshly learned offset. That reconstruction assumes the device
-clock has not moved in between. If the operating system steps the clock after the result was
-entered and before the outbox delivers it, the moment it was entered was recorded in the old
-frame, so adding the new offset does not recover the write's true age. The rebuilt stamp is
-wrong again, the result is refused a second time, and it is then dropped rather than retried
-forever. That is accepted, and it is loud: the operator is told that nothing was recorded and
-that this device's clock needs fixing, so the result can be entered again from a device whose
-clock is right. Dropping it is the lesser harm, because an entry that can never carry a
-correct stamp would otherwise hold up every write queued behind it.
+When a queued write is refused for a wrong clock, the app learns the server time again and
+rebuilds the stamp before retrying it once. It does this two ways and keeps whichever answer is
+older. The first way reads the moment the result was entered and adds the freshly learned
+offset, which is right so long as the device clock has not moved in between. The second way
+measures how long the result has been waiting on a steadily ticking timer that a clock
+correction cannot move, and subtracts that from the current server time, which is right even if
+the clock was corrected but can understate the wait if the device slept.
+
+Keeping the older answer is a deliberate safety choice rather than a coin toss. Too old, and
+this result can only lose a comparison it might have won, which costs the operator a re-entry
+they are already being told about. Too new, and a result entered before the outage could quietly
+beat one recorded during it, which is the silent overwrite the whole check exists to prevent.
+Where the two answers disagree, the recoverable mistake is the one to make.
+
+One case is still not recovered, and it is worth stating plainly. The steady timer is measured
+from the moment the page was opened, so it means nothing to a page that has since been reloaded
+or to a second tab. If the clock is corrected across a reload, the rebuilt stamp is wrong again,
+the result is refused a second time, and it is then dropped rather than retried forever. That is
+accepted, and it is loud: the operator is told that nothing was recorded and that this device's
+clock needs fixing, so the result can be entered again from a device whose clock is right.
+Dropping it is the lesser harm, because an entry that can never carry a correct stamp would
+otherwise hold up every write queued behind it.
 
 ### When a file is wrong
 

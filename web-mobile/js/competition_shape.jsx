@@ -345,9 +345,19 @@ export function normalizeConfigForFormat(cfg) {
 //                  competition; the checkbox is disabled for team, so the
 //                  operator cannot clear it themselves.
 //
-// withZekkenName is deliberately NOT reset. Nothing on the server rejects
-// it for a team competition, so clearing it would be silent loss of a
-// setting rather than the repair of an unsubmittable one.
+//   withZekkenName it survives no server rejection, which is why this was
+//                  first left alone -- but that reasoning was wrong twice
+//                  over. The create form already forces it false for a team
+//                  (admin_setup.jsx: `kind === "individual" ? withZekken :
+//                  false`), so preserving it here made the two surfaces
+//                  disagree about what a team competition IS, which is the
+//                  exact divergence this module exists to remove. And it is
+//                  not inert: EffectiveWithZekkenName (state/models.go) has
+//                  no kind term, so a team competition carrying it parses
+//                  participants.csv with the 4-column zekken layout
+//                  (state/participants.go) -- a roster shape create can
+//                  never produce. The roster lock means no existing rows are
+//                  re-read, but the next paste would use it.
 //
 // The create form encodes the same teamSize rule inline at data.jsx:215
 // (`teamSize || (kind === "team" ? 5 : 0)`) because it builds a payload from
@@ -363,6 +373,7 @@ export function normalizeConfigForKind(cfg) {
     }
     if (!next.teamMatchType) next.teamMatchType = "fixed";
     next.engi = false;
+    next.withZekkenName = false;
   } else {
     next.teamSize = 0;
     next.teamMatchType = "fixed";

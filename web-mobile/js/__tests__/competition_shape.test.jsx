@@ -382,8 +382,16 @@ describe('normalizeConfigForKind', () => {
     expect(normalizeConfigForKind({ kind: KIND_TEAM, teamSize: 3 }).teamSize).toBe(3);
   });
 
-  it('leaves withZekkenName alone: nothing rejects it, so clearing it would be silent loss', () => {
-    expect(normalizeConfigForKind({ kind: KIND_TEAM, withZekkenName: true }).withZekkenName).toBe(true);
+  it('clears withZekkenName going team, matching what the create form sends', () => {
+    // Not cosmetic: EffectiveWithZekkenName has no kind term, so a team
+    // competition carrying this parses participants.csv with the 4-column
+    // zekken layout -- a roster shape the create form can never produce,
+    // because it forces the flag false for a team.
+    expect(normalizeConfigForKind({ kind: KIND_TEAM, withZekkenName: true }).withZekkenName).toBe(false);
+  });
+
+  it('leaves withZekkenName alone going individual, where it is the operator\'s real choice', () => {
+    expect(normalizeConfigForKind({ kind: KIND_INDIVIDUAL, withZekkenName: true }).withZekkenName).toBe(true);
   });
 
   it('does not mutate its argument', () => {

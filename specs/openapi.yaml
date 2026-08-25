@@ -1048,10 +1048,21 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: |
-            Conflict. Output-affecting settings (format, courts, pool
-            size/winners/mode, pool format, round-robin, mirror, team size,
-            kind, number prefix, zekken display) were changed while the
-            competition is in `draw-ready` state; discard the draw first.
+            Conflict. Three distinct cases, all 409:
+
+            * Output-affecting settings (format, courts, pool
+              size/winners/mode, extra qualifiers, pool format, round-robin,
+              mirror, team size, kind, team match type, number prefix, zekken
+              display) were changed while the competition is in `draw-ready`
+              state; discard the draw first.
+            * `format` or `kind` was changed after the competition STARTED
+              (status past `setup`). Both repoint generation and scoring while
+              results already exist, so neither can change after the fact.
+            * `teamMatchType` was changed after the competition started.
+
+            A settings save that merely echoes an unchanged `format`, `kind` or
+            `teamMatchType` back is never refused: every one of these gates
+            compares against the stored value and fires only on a real change.
             Duplicate name/number-prefix violations are returned as 400.
           content:
             application/json:

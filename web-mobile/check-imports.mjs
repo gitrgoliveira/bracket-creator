@@ -29,11 +29,21 @@ function stripComments(s) {
 
 // Modules introduced by the mp-zac3 split, the ones whose imports we verify.
 // Add entries here if more sibling splits are made.
+//
+// admin_setup.jsx and admin_competition_settings.jsx were added by bc-symm:
+// both now import a shared set of LABEL_*/*_OPTIONS constants and coupling
+// functions from competition_shape.jsx (and qualifier_preview.jsx), and a
+// typo'd or renamed export in that shared module would otherwise pass both
+// esbuild transpile-only and vitest silently (see the file header above) --
+// exactly the drift class this checker exists to catch, and exactly the two
+// surfaces the bc-symm operator ruling requires to stay in lockstep.
 const CHECK_MODULES = [
   'admin_scoring_modal.jsx',
   'admin_scoring_individual.jsx',
   'admin_scoring_team.jsx',
   'admin_scoring_autosave.jsx',
+  'admin_setup.jsx',
+  'admin_competition_settings.jsx',
 ];
 
 // ---------------------------------------------------------------------------

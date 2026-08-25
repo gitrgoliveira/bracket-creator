@@ -207,7 +207,7 @@ function poolWinners(pools) {
 // format: "playoffs" | "mixed" | "league" | "swiss"
 function buildEmptyCompetition(args) {
   if (!args) { console.error("buildEmptyCompetition: args is undefined!"); return null; }
-  const { id, name, kind, format, sampleRoster = "medium", courts, seedCount, status, startTime, date, teamSize, poolMode, poolSize, winnersPerPool, withZekkenName, numberPrefix, checkInEnabled } = args;
+  const { id, name, kind, format, sampleRoster = "medium", courts, seedCount, status, startTime, date, teamSize, poolMode, poolSize, winnersPerPool, withZekkenName, numberPrefix, checkInEnabled, roundRobin } = args;
   const count = sampleRoster ? ({ small: 8, medium: 16, large: 32 }[sampleRoster] || 16) : 0;
   const players = count > 0 ? makeCompetitors(count, kind, id, seedCount) : [];
   return {
@@ -216,7 +216,13 @@ function buildEmptyCompetition(args) {
     poolSize: poolSize || 3,
     poolSizeMode: poolMode || "max",
     poolWinners: winnersPerPool || 2,
-    roundRobin: true,
+    // bc-symm: the create form now offers this as an operator choice
+    // (default true, matching every existing call site that omits the
+    // arg -- the sample-data generators below and any other caller that
+    // hasn't been taught about the field). `?? true` rather than `||
+    // true` so an explicit `false` from the form is not coerced back to
+    // the default.
+    roundRobin: roundRobin ?? true,
     mirror: true,
     withZekkenName: withZekkenName || false,
     numberPrefix: numberPrefix || "",

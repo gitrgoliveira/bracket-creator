@@ -3341,3 +3341,199 @@ func TestCompetitionPutWritesCanonicalSeedIdentity(t *testing.T) {
 	assert.Equal(t, map[string]int{"Van Der Berg": 1}, seeded,
 		"a casing-only retype must not silently orphan the seed")
 }
+
+// TestUpdateCompetition_FormatKindLockedWhenStarted verifies bc-symm's
+// post-start gate on Format and Kind (mirroring the existing
+// Naginata/Engi/TeamMatchType started-guards): once a competition has left
+// setup status, current.Format and current.Kind steer live scoring paths
+// (comp.Format is read in engine/scoring_tx.go's mixed-pool rescoring gate;
+// comp.Kind is read throughout internal/engine's scheduling/scoring/PDF
+// paths), so flipping either after results already exist must be refused.
+//
+// Pre-fix, ONLY the draw-ready 409 protected these two fields; a competition
+// that had progressed past draw-ready (pools/playoffs/completed) accepted a
+// format or kind change with a plain 200.
+//
+// The third subtest is the regression that matters most: the SPA has never
+// had editors for format/kind and echoes the stored values back unchanged on
+// every single settings save, so the gate must fire ONLY on an actual
+// change, never unconditionally.
+func TestUpdateCompetition_FormatKindLockedWhenStarted(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+
+	const cid = "format-kind-started-lock"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:          cid,
+		Name:        "Format Kind Started Lock",
+		Format:      state.CompFormatMixed,
+		Kind:        "individual",
+		Courts:      []string{"A"},
+		PoolSize:    4,
+		PoolWinners: 2,
+		Status:      state.CompStatusPlayoffs, // started
+	}))
+
+	basePayload := func(overrides map[string]any) map[string]any {
+		p := map[string]any{
+			"id":          cid,
+			"name":        "Format Kind Started Lock",
+			"format":      state.CompFormatMixed,
+			"kind":        "individual",
+			"courts":      []string{"A"},
+			"poolSize":    4,
+			"poolWinners": 2,
+		}
+		for k, v := range overrides {
+			p[k] = v
+		}
+		return p
+	}
+	put := func(payload map[string]any) *httptest.ResponseRecorder {
+		body, _ := json.Marshal(payload)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	t.Run("REJECT format change on a started comp", func(t *testing.T) {
+		w := put(basePayload(map[string]any{"format": state.CompFormatLeague}))
+		assert.Equal(t, http.StatusConflict, w.Code,
+			"changing format on a started comp must return 409: %s", w.Body.String())
+		stored, err := store.LoadCompetition(cid)
+		require.NoError(t, err)
+		assert.Equal(t, state.CompFormatMixed, stored.Format, "format must not change after 409 rejection")
+	})
+
+	t.Run("REJECT kind change on a started comp", func(t *testing.T) {
+		w := put(basePayload(map[string]any{"kind": "team", "teamSize": 5}))
+		assert.Equal(t, http.StatusConflict, w.Code,
+			"changing kind on a started comp must return 409: %s", w.Body.String())
+		stored, err := store.LoadCompetition(cid)
+		require.NoError(t, err)
+		assert.Equal(t, "individual", stored.Kind, "kind must not change after 409 rejection")
+	})
+
+	t.Run("ALLOW save that echoes unchanged format/kind on a started comp", func(t *testing.T) {
+		w := put(basePayload(nil))
+		assert.Equal(t, http.StatusOK, w.Code,
+			"a save that does not change format/kind must succeed on a started comp: %s", w.Body.String())
+	})
+}
+
+// TestUpdateCompetition_KachinukiZeroTeamSizeCannotPersist verifies bc-symm's
+// fix for a settings PUT that flips a team-kachinuki competition to
+// individual (teamSize 0) while omitting teamMatchType. Pre-fix,
+// state.ValidateTeamMatchType ran on the WIRE teamMatchType ("" passes
+// vacuously for any teamSize) BEFORE the "inherit stored teamMatchType when
+// omitted" step, so the write passed validation, then inherited the stored
+// "kachinuki" and persisted it alongside teamSize 0 -- exactly the pair
+// ValidateTeamMatchType exists to forbid (inert at runtime, since
+// IsKachinuki() requires teamSize >= 2, but every LATER settings PUT would
+// echo that same pair back on the wire and now fail the WIRE-value check,
+// locking the operator out of the settings screen entirely).
+func TestUpdateCompetition_KachinukiZeroTeamSizeCannotPersist(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+
+	const cid = "kachinuki-zero-lockout"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:            cid,
+		Name:          "Kachinuki Zero Lockout",
+		Format:        state.CompFormatMixed,
+		Kind:          "team",
+		TeamSize:      5,
+		TeamMatchType: state.TeamMatchTypeKachinuki,
+		Courts:        []string{"A"},
+		PoolSize:      4,
+		PoolWinners:   2,
+		Status:        state.CompStatusSetup,
+	}))
+
+	// Flip kind to individual and zero teamSize, omitting teamMatchType --
+	// exactly what a kind editor does once it stops presenting the
+	// team-only controls.
+	body, _ := json.Marshal(map[string]any{
+		"id":          cid,
+		"name":        "Kachinuki Zero Lockout",
+		"format":      state.CompFormatMixed,
+		"kind":        "individual",
+		"teamSize":    0,
+		"courts":      []string{"A"},
+		"poolSize":    4,
+		"poolWinners": 2,
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code,
+		"a write that would persist kachinuki alongside teamSize 0 must be rejected, not silently stored: %s", w.Body.String())
+
+	stored, err := store.LoadCompetition(cid)
+	require.NoError(t, err)
+	assert.Equal(t, state.TeamMatchTypeKachinuki, stored.TeamMatchType, "rejected write must not touch the stored record")
+	assert.Equal(t, 5, stored.TeamSize, "rejected write must not touch the stored record")
+}
+
+// TestUpdateCompetition_MixedFormatRequiresUsablePoolSize verifies bc-symm's
+// fix for a settings PUT that flips format to mixed without a usable pool
+// size. normalizePoolConfig zeroes PoolSize/PoolWinners on the way TO
+// league/playoffs, but pre-fix nothing required a pool size on the way BACK
+// to mixed, so a league/playoffs -> mixed switch with an omitted/zero
+// poolSize stored PoolSize 0 and the failure only surfaced much later at
+// draw time (engine/pools.go: "pool size must be at least 1").
+func TestUpdateCompetition_MixedFormatRequiresUsablePoolSize(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+
+	const cid = "league-to-mixed-no-poolsize"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     cid,
+		Name:   "League To Mixed",
+		Format: state.CompFormatLeague,
+		Courts: []string{"A"},
+		Status: state.CompStatusSetup,
+	}))
+
+	t.Run("REJECT flip to mixed with no usable pool size", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"id":     cid,
+			"name":   "League To Mixed",
+			"format": state.CompFormatMixed,
+			"courts": []string{"A"},
+			// poolSize intentionally omitted -> decodes to 0
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusBadRequest, w.Code,
+			"a flip to mixed with no usable pool size must be rejected at write time: %s", w.Body.String())
+
+		stored, err := store.LoadCompetition(cid)
+		require.NoError(t, err)
+		assert.Equal(t, state.CompFormatLeague, stored.Format, "rejected write must not touch the stored record")
+	})
+
+	t.Run("ALLOW flip to mixed WITH a usable pool size", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"id":       cid,
+			"name":     "League To Mixed",
+			"format":   state.CompFormatMixed,
+			"courts":   []string{"A"},
+			"poolSize": 4,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		stored, err := store.LoadCompetition(cid)
+		require.NoError(t, err)
+		assert.Equal(t, state.CompFormatMixed, stored.Format)
+		assert.Equal(t, 4, stored.PoolSize)
+	})
+}

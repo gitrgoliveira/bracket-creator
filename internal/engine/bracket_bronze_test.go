@@ -398,8 +398,10 @@ func TestBronze_RecordResultTimestampLWW(t *testing.T) {
 	assert.Equal(t, winnerA, reloaded.ThirdPlaceMatch.Winner)
 	assert.Equal(t, int64(200), reloaded.ThirdPlaceMatch.ModifiedAt, "bronze write must stamp ModifiedAt")
 
-	// A STALE write at t=100 must be dropped.
-	require.NoError(t, eng.RecordMatchResult(compID, "m-bronze", &state.MatchResult{ID: "m-bronze", Winner: winnerB, Status: state.MatchStatusCompleted, ModifiedAt: 100}))
+	// A STALE write at t=100 must be dropped AND say so (bc-lww1). The bronze
+	// branch used to discard applyBracketMatchResult's `applied` return outright,
+	// so a superseded bronze write was doubly invisible.
+	require.ErrorIs(t, eng.RecordMatchResult(compID, "m-bronze", &state.MatchResult{ID: "m-bronze", Winner: winnerB, Status: state.MatchStatusCompleted, ModifiedAt: 100}), ErrMatchSuperseded)
 	reloaded, err = store.LoadBracket(compID)
 	require.NoError(t, err)
 	assert.Equal(t, winnerA, reloaded.ThirdPlaceMatch.Winner, "stale bronze write must be dropped")

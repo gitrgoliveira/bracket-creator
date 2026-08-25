@@ -134,6 +134,8 @@ js/test: js/deps ## Run JavaScript unit tests
 js/check-imports: ## Check cross-module named imports resolve (mp-zac3 split modules)
 	@echo "Checking cross-module imports..."
 	@node web-mobile/check-imports.mjs
+	@echo "Checking the write-result rule is asked, not re-derived..."
+	@node web-mobile/check-write-result.mjs
 
 js/validate: js/lint js/security js/check-imports js/test ## Run all Javascript checks
 

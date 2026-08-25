@@ -10,6 +10,10 @@ const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 // tiebreaker is also a rep bout, just not a daihyosen).
 import { isPoolDaihyosenBout } from './pool_ids.jsx';
 import { realIppons, hanteiTied, hanteiSlot, hanteiWinnerKey } from './result_slot.jsx';
+// Imported from the leaf, not read off `window`: this editor is ES-imported by
+// its host and by unit tests that never load api_client, and write_result.jsx
+// is import-only so it can be reached directly (see its header).
+import { notLandedBanner } from './write_result.jsx';
 
 import {
   MAX_IPPONS_PER_SIDE,
@@ -143,7 +147,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // F5: set when a queued terminal write is PERMANENTLY rejected (non-retryable
   // 4xx on retry): the write never landed, so we must show an explicit "not
   // saved" failure state rather than let the pending banner clear to "saved".
-  const [writeFailed, setWriteFailed] = useStateA(null); // { reason } | null
+  const [writeFailed, setWriteFailed] = useStateA(null); // { reason, advice? } | null
   // Naginata competitions add an extra "S" (Sune) ippon button.
   // Fetched from the competition config on open.
   const [isNaginata, setIsNaginata] = useStateA(false);
@@ -408,8 +412,15 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     const unsub = window.subscribeTerminalWriteFailed((info) => {
       if (!mountedRef.current) return;
       if (!info || info.compID !== m.compId || info.matchID !== m.id) return;
-      setWriteFailed({ reason: info.reason || `save rejected (${info.status || 'error'})` });
+      setWriteFailed({ reason: info.reason || `save rejected (${info.status || 'error'})`, advice: info.advice });
       setPendingWrite(false); // the queued write is gone: it failed, not pending
+      // DISARM the finish confirmation. The submit that just failed left the
+      // button in its "Tap again to finish" state, so the operator was one tap
+      // from re-sending -- which for a superseded write is the one thing the
+      // banner tells them not to do, and which would WIN, because a re-submit
+      // carries a fresh stamp and beats the newer result it overwrites.
+      // Re-arming has to be deliberate.
+      setFinishArmed(false);
     });
     return unsub;
   }, [m.compId, m.id]);
@@ -1014,7 +1025,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
               precedence over the (now-cleared) pending banner. */}
           {writeFailed && (
             <div className="pending-write-banner pending-write-banner--failed" role="alert" aria-live="assertive">
-              <span>Not saved: {writeFailed.reason}. Re-enter the result and submit again.</span>
+              <span>Not saved: {writeFailed.reason}. {writeFailed.advice || "Re-enter the result and submit again."}</span>
               {/* Only offer Retry when we still hold the submit closure. After a
                   reopen/hydration it can't be recovered from the serialized queue,
                   so a Retry button would be permanently disabled and misleading: 
@@ -1064,7 +1075,21 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
 
             <div className="score-nav__actions">
               {m.status === "scheduled" && (
-                <button className="btn btn--sm" onClick={() => doSubmit(() => onSubmit(buildPatch("running")))} disabled={submitting}>
+                <button className="btn btn--sm" onClick={async () => {
+                  // F5: this submits status:"running", the one shape
+                  // _notifyScoreSuperseded (api_client.jsx) deliberately stays
+                  // silent for -- a debounced autosave being superseded is
+                  // routine noise there, but Start match is an explicit
+                  // operator tap: silence here would just re-enable the
+                  // button having saved nothing. Check the awaited result
+                  // directly instead of relying on the broadcast.
+                  const res = await doSubmit(() => onSubmit(buildPatch("running")));
+                  // bc-cse: which not-saved banner, if any. The clock-vs-
+                  // supersede ordering (and the silence on a queued write)
+                  // lives in notLandedBanner; see write_result.jsx.
+                  const banner = notLandedBanner(res);
+                  if (banner) setWriteFailed(banner);
+                }} disabled={submitting}>
                   Start match
                 </button>
               )}

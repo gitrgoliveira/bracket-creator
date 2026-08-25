@@ -1571,11 +1571,22 @@ func TestOverrideBracketWinner_TimestampLWW(t *testing.T) {
 	assert.Equal(t, int64(300), reloaded.Rounds[0][0].ModifiedAt)
 }
 
-// tri-review finding 6: a deliberate operator CORRECTION (CorrectionReason set)
-// must bypass the timestamp last-write-wins guard, even when it carries an older
-// timestamp than the stored result. Otherwise a legitimate correction would be
-// silently swallowed with a false HTTP 200.
-func TestRecordBracketResult_CorrectionBypassesTimestampGuard(t *testing.T) {
+// REVERSED by bc-lww1, and the original reason is why.
+//
+// This test was added by a tri-review whose stated justification was that
+// without the bypass "a legitimate correction would be silently swallowed with
+// a false HTTP 200". That was true, and it was a symptom of the bug bc-lww1
+// fixed: a write the timestamp guard dropped reported success. The bypass was a
+// workaround for the silent drop, not a statement about corrections — and it
+// outlived its cause while opening a data-loss hole of its own, because it
+// cannot distinguish a live correction from one the offline queue replayed
+// hours later (the SPA holds terminal writes for up to 12h).
+//
+// Now that a dropped write comes back as applied:false with "check what is
+// recorded", the swallowing this bypass existed to prevent cannot happen, and a
+// correction is subject to the same stamp guard as everything else. Both halves
+// are asserted below: the stale one loses AND says so, the fresh one still wins.
+func TestRecordBracketResult_StaleCorrectionIsDroppedAndReported(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "correction-ts"
 
@@ -1592,16 +1603,32 @@ func TestRecordBracketResult_CorrectionBypassesTimestampGuard(t *testing.T) {
 		ID: matchID, Winner: "Bob", Status: state.MatchStatusCompleted, ModifiedAt: 200,
 	}))
 
-	// A correction at an OLDER t=100 must still apply because it is a deliberate
-	// operator override, not a reconnect replay.
-	require.NoError(t, eng.RecordMatchResult(compID, matchID, &state.MatchResult{
+	// A correction at an OLDER t=100 is a replay: it was composed against a view
+	// of this match that has since moved on. It must NOT overwrite the newer
+	// stored result, and must report the drop rather than answering success.
+	err = eng.RecordMatchResult(compID, matchID, &state.MatchResult{
 		ID: matchID, Winner: "Alice", Status: state.MatchStatusCompleted, ModifiedAt: 100,
 		CorrectionReason: "scorer error",
-	}))
+	})
+	require.ErrorIs(t, err, ErrMatchSuperseded,
+		"a stale correction must be reported, not silently applied or silently dropped")
 
 	reloaded, err := store.LoadBracket(compID)
 	require.NoError(t, err)
-	assert.Equal(t, "Alice", reloaded.Rounds[0][0].Winner, "correction must bypass the timestamp guard")
+	assert.Equal(t, "Bob", reloaded.Rounds[0][0].Winner,
+		"the newer stored result must survive a replayed correction")
+
+	// The counter-case: correcting the CURRENT result still works. Without this
+	// the change above could "pass" by refusing corrections outright, which
+	// would break the operator's actual mistake-recovery path.
+	require.NoError(t, eng.RecordMatchResult(compID, matchID, &state.MatchResult{
+		ID: matchID, Winner: "Alice", Status: state.MatchStatusCompleted, ModifiedAt: 300,
+		CorrectionReason: "scorer error",
+	}))
+	reloaded, err = store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, "Alice", reloaded.Rounds[0][0].Winner,
+		"a correction made against the current result must still apply")
 }
 
 func TestOverrideBracketWinner_AutoPropagation(t *testing.T) {

@@ -14,6 +14,14 @@
 
 import { createTimerPool } from './timer_pool.jsx';
 import { realIppons } from './result_slot.jsx';
+// Imported DIRECTLY from the leaf rather than read off `window`. Two of the
+// call sites below sit inside a `try { } catch (_e) { }` that swallows, so a
+// missing global there would degrade into exactly the silent not-saved failure
+// these predicates exist to remove. write_result.jsx is import-only (never
+// script-tagged), so the double-module-eval trap that keeps this file off
+// api_client.jsx does not apply to it — the same move admin_scoring_shared.jsx
+// already makes.
+import { writeDidNotLand, writeWasSuperseded, writeWasRefusedForClock, CLOCK_SKEW_REASON_TEXT } from './write_result.jsx';
 
 const { useState: useStateSh, useMemo: useMemoSh, useEffect: useEffectSh, useRef: useRefSh, useCallback: useCallbackSh } = React;
 
@@ -289,15 +297,26 @@ function ResolveFeedersModal({ match, comp, password, onClose, onResolved, onOpt
             // about (some feeders resolved, the operator retries the rest).
             let anyQueued = false;
             let anyDropped = false;
+            let anyClockRefused = false;
             for (const s of resolvable) {
                 const winner = picks[s.feeder.id];
                 const r = await window.API.overrideBracketWinner(comp.id, s.feeder.id, winner, password);
-                if (r && r.applied === false) {
-                    // The server dropped this assertion (a newer/equal result
-                    // already exists for the feeder), so our pick is NOT the
-                    // authoritative winner. Skip the optimistic advance and let
-                    // onResolved() (refreshCourt) pull the real server tree.
-                    anyDropped = true;
+                if (writeWasSuperseded(r)) {
+                    // The server dropped this assertion, so our pick is NOT the
+                    // authoritative winner: skip the optimistic advance and let
+                    // onResolved() (refreshCourt) pull the real server tree. That
+                    // part is the same for both drop reasons; what the operator is
+                    // TOLD is not (bc-cse), so split them here.
+                    if (writeWasRefusedForClock(r)) {
+                        // Refused for clock skew: nothing newer exists, nothing was
+                        // recorded anywhere, and the client has just resynced. The
+                        // "already recorded elsewhere" wording would be a plain
+                        // falsehood and would stop the operator retrying the one
+                        // action that now works.
+                        anyClockRefused = true;
+                    } else {
+                        anyDropped = true;
+                    }
                     continue;
                 }
                 // Optimistically advance the LOCAL bracket so the final becomes
@@ -308,11 +327,18 @@ function ResolveFeedersModal({ match, comp, password, onClose, onResolved, onOpt
                 if (r && r.queued) anyQueued = true;
             }
             if (showToast) {
+                // anyDropped is checked BEFORE anyClockRefused on purpose: when one
+                // loop produces both, the supersede wording wins because it is the
+                // one that is destructive to ignore (a real result exists elsewhere
+                // and the operator must look at it), while a clock refusal costs
+                // only a retry. The refetch below happens either way.
                 showToast(anyQueued
                     ? "Recorded offline. This match is ready to run now and will sync when the court reconnects."
                     : anyDropped
                         ? "Some results were already recorded elsewhere. Refreshing this court to show the current state."
-                        : "Feeders resolved. The match is ready to start.");
+                        : anyClockRefused
+                            ? "This device's clock was out of step with the server and has been resynced. Try resolving again."
+                            : "Feeders resolved. The match is ready to start.");
             }
             if (onResolved) onResolved();
             onClose();
@@ -804,7 +830,21 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         try {
             // Starting makes the match running; the scoring panel shows
             // running[0], so it picks the match up on the next refetch.
-            await onEditScore(m.compId, m.id, startPatch(), m);
+            const res = await onEditScore(m.compId, m.id, startPatch(), m);
+            // A clock_skew refusal means the server stored NOTHING and, unlike
+            // a queued start, nothing will land later — so returning true here
+            // would pin the panel on a match that never started while the tap
+            // looked like it worked. Found in browser verification: this card
+            // button is a start path none of the review sweeps enumerated (it
+            // is not one of the editor call sites). The relearn the refusal
+            // triggers means a SECOND tap normally succeeds; the toast tells
+            // the operator that, instead of leaving a dead first tap.
+            if (writeWasRefusedForClock(res)) {
+                const msg = "Could not start: " + CLOCK_SKEW_REASON_TEXT + ". The clock has been resynced; try again.";
+                if (mountedRef.current) setStartError(msg);
+                if (showToast) showToast(msg, "error");
+                return false;
+            }
             return true;
         } catch (e) {
             if (mountedRef.current) setStartError((e && e.message) || "Could not start the match: check eligibility and try again.");
@@ -1328,9 +1368,16 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                             const res = await onEditScore(selectedMatch.compId, selectedMatch.id, patch, selectedMatch);
                                             // Optimistically advance the local bracket so an offline court
                                             // sees the next match resolve (reconciled by refetch online).
-                                            maybeAdvanceLocal(selectedMatch, patch);
-                                            // F5: queued write: return signal so the editor shows the pending-save banner.
-                                            if (res && res.queued) return res;
+                                            // NOT on a supersede: that winner was discarded in favour of a
+                                            // newer stored one, so advancing would show the operator their
+                                            // own dropped winner on the very queue the banner below tells
+                                            // them to go and check. A queued write still advances (it
+                                            // reconciles on reconnect); see writeWasSuperseded.
+                                            if (!writeWasSuperseded(res)) maybeAdvanceLocal(selectedMatch, patch);
+                                            // A write that did not land (queued, F5; or superseded by a
+                                            // newer stored result, bc-lww1) returns its signal so the
+                                            // editor shows the not-saved banner rather than looking saved.
+                                            if (writeDidNotLand(res)) return res;
                                         }
                                         catch (_e) { /* surfaced via toast */ }
                                     }}
@@ -1338,10 +1385,15 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                         const next = nextActiveAfter(selectedMatch);
                                         try {
                                             const res = await onEditScore(selectedMatch.compId, selectedMatch.id, patch, selectedMatch);
-                                            maybeAdvanceLocal(selectedMatch, patch);
+                                            // See the onSubmit handler above: a superseded write must not
+                                            // advance the local bracket on a winner the server discarded.
+                                            if (!writeWasSuperseded(res)) maybeAdvanceLocal(selectedMatch, patch);
                                             if (!mountedRef.current) return res;
-                                            // F5: queued write: do NOT advance. Return signal to editor.
-                                            if (res && res.queued) return res;
+                                            // A write that did not land must NOT advance: the match is
+                                            // still running and still holds the court, so starting the
+                                            // next one here just earns a court_busy on top of the
+                                            // editor's not-saved banner (F5 queued; bc-lww1 superseded).
+                                            if (writeDidNotLand(res)) return res;
                                             // Finish + start the next scheduled match, which then
                                             // becomes the running match the panel shows.
                                             if (next && next.status === "scheduled") {

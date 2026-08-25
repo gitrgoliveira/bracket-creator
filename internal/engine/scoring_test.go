@@ -2053,10 +2053,13 @@ func TestRevertBracketMatch_StaleWriteFenced(t *testing.T) {
 	// tStale > tStart: without the fix ApplyByTimestamp(tStale, tStart) = true
 	// and the match is incorrectly re-completed.
 	tStale := tStart + 5_000
-	require.NoError(t, eng.RecordMatchResult(compID, "BF-1", &state.MatchResult{
+	// bc-lww1: the fence must also ANSWER. This used to return a nil error, which
+	// every layer above read as "saved" — the operator whose queued result was
+	// fenced out got a 200 carrying their own echoed payload.
+	require.ErrorIs(t, eng.RecordMatchResult(compID, "BF-1", &state.MatchResult{
 		ID: "BF-1", SideA: "Alice", SideB: "Bob",
 		Winner: "Bob", Status: state.MatchStatusCompleted, ModifiedAt: tStale,
-	}))
+	}), ErrMatchSuperseded)
 
 	// With the fix the revert fence (m.ModifiedAt = now()) is higher than tStale,
 	// so the replay is dropped and the match stays scheduled.
@@ -2107,7 +2110,7 @@ func TestRecordMatchResult_BracketCompletedWithNoWinnerRejected(t *testing.T) {
 
 // TestRecordMatchResultTx_BracketCompletedWithNoWinnerRejected is the tx-aware
 // twin of the test above. The production score handler routes through
-// RecordMatchResultWithIneligibilityTx -> recordBracketMatchResultTx, so the
+// RecordMatchResultWithIneligibilityTx -> writeToPoolOrBracket -> recordBracketMatchResult, so the
 // AMENDMENT 2 guard must hold on this path too: pre-fix, only the non-tx twin
 // carried it and the operator-facing route could complete a bracket match with
 // no winner (validateBracketCompletion is the shared choke point).

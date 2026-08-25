@@ -33,6 +33,11 @@ import {
 
 import { useDebouncedRunningWrite, SyncStatusPill } from './admin_scoring_autosave.jsx';
 
+// Imported from the leaf, not read off `window`, for the same reason
+// admin_scoring_shared.jsx does it: write_result.jsx is import-only, and this
+// editor is ES-imported by hosts and tests that never load api_client.
+import { notLandedBanner } from './write_result.jsx';
+
 // boutMiddle is THE single source for a bout's centre value (vs/X/(E)/(DH));
 // the editor derives its per-bout middle from it rather than restating the
 // chain (CLAUDE.md § Match Decision Types: the middle rule lives in ONE place).
@@ -659,6 +664,26 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const initialEnchoPeriods = initialEnchoPeriodsForMatch(m);
   const [enchoPeriodCount, setEnchoPeriodCount] = useStateA(initialEnchoPeriods);
   const [submitting, setSubmitting] = useStateA(false);
+  // F5 (mirrors ScoreEditorModal): explicit "not saved" state for THIS match.
+  // Set either by the subscribeTerminalWriteFailed broadcast (a queued write
+  // permanently rejected) or, at the three explicit-tap call sites that submit
+  // with status:"running" (Start match, kachinuki Record bout), directly from
+  // the awaited result when it comes back LWW-superseded -- recordScore
+  // deliberately stays silent on that broadcast for running writes (a 300ms
+  // debounced autosave being superseded is routine noise), so those taps have
+  // to check the result themselves rather than rely on the subscription. This
+  // component has no pending-write/retry-queue tracking of its own (unlike the
+  // individual editor): it exists only so the operator sees an explanation
+  // instead of a button that silently re-enables having saved nothing.
+  const [writeFailed, setWriteFailed] = useStateA(null); // { reason, advice? } | null
+  // A COMPLETED write for this match that is queued rather than confirmed.
+  // SyncStatusPill covers the running case and renders nothing once a match
+  // is finished, so without this a team result entered on a flaky connection
+  // sat on screen looking saved with no indication it had not reached the
+  // server -- the one moment the operator is most likely to walk away from
+  // the court. Mirrors ScoreEditorModal's pendingWrite, minus its Retry
+  // affordance: that replays a stored submit closure this editor does not keep.
+  const [pendingWrite, setPendingWrite] = useStateA(false);
   // T093–T098: decision state: same shape as the individual editor. See the
   // ScoreEditorModal copy for the contract.
   const [decisionPromptKind, setDecisionPromptKind] = useStateA("");
@@ -849,6 +874,46 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     }
   };
   useEffectA(() => () => { mountedRef.current = false; }, []);
+
+  // F5: subscribe to the same terminal-write-failed channel the individual
+  // editor listens on, so a queued write for THIS match that is later
+  // permanently rejected (non-retryable 4xx) still surfaces here instead of
+  // going silent. Guarded like every other window-global read in this file:
+  // absent in unit/render tests and during boot ordering.
+  useEffectA(() => {
+    if (!m.compId || !m.id) return;
+    if (typeof window.subscribeTerminalWriteFailed !== 'function') return;
+    const unsub = window.subscribeTerminalWriteFailed((info) => {
+      if (!mountedRef.current) return;
+      if (!info || info.compID !== m.compId || info.matchID !== m.id) return;
+      setWriteFailed({ reason: info.reason || `save rejected (${info.status || 'error'})`, advice: info.advice });
+      // Disarm the finish confirmation for the same reason the individual
+      // editor does: the failed submit left the button on "Tap again to
+      // finish", one tap from re-sending the very write the banner is telling
+      // the operator not to re-send -- and a re-submit carries a fresh stamp,
+      // so it would overwrite the newer result rather than lose to it.
+      setFinishArmed(false);
+      setPendingWrite(false); // the queued write is gone: it failed, not pending
+    });
+    return unsub;
+  }, [m.compId, m.id]);
+
+  // Clears the pending banner when the queue actually drains. Guarded like the
+  // subscription above: window.subscribeSyncStatus and API are absent in unit
+  // and render tests. 'synced' alone is not enough -- the queue can be empty of
+  // OTHER writes while this match's is still held -- so ask per match.
+  useEffectA(() => {
+    if (!m.compId || !m.id) return;
+    if (typeof window.subscribeSyncStatus !== 'function') return;
+    const unsub = window.subscribeSyncStatus((status) => {
+      if (!mountedRef.current) return;
+      const stillPending = (window.API && typeof window.API.hasPendingTerminalWrite === 'function')
+        ? window.API.hasPendingTerminalWrite(m.compId, m.id)
+        : false;
+      if (status === 'synced' && !stillPending) setPendingWrite(false);
+    });
+    return unsub;
+  }, [m.compId, m.id]);
 
   // Fetch lineup + competition data on mount. Both endpoints are
   // read-only and idempotent; failures degrade gracefully (the modal
@@ -1901,7 +1966,21 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const doSubmit = async (fn) => {
     cancelScoringDebounce(); // C1: cancel pending autosave before explicit submit
     setSubmitting(true);
-    try { await fn(); } finally { if (mountedRef.current) setSubmitting(false); }
+    // Clear any prior failure banner when the operator explicitly submits
+    // again: mirrors ScoreEditorModal.doSubmit.
+    if (mountedRef.current) setWriteFailed(null);
+    // Return the awaited result (rather than discarding it, as before) so
+    // call sites that submit with status:"running" -- the ones
+    // _notifyScoreSuperseded deliberately stays silent for -- can check
+    // writeWasSuperseded themselves. See writeFailed's declaration above.
+    let res;
+    try { res = await fn(); } finally { if (mountedRef.current) setSubmitting(false); }
+    // A queued write has NOT reached the server. Flag it so the banner below
+    // says so; the sync subscription clears it once the queue drains, and the
+    // terminal-fail subscription replaces it with the not-saved banner if the
+    // write is ultimately refused.
+    if (mountedRef.current && res && res.queued === true) setPendingWrite(true);
+    return res;
   };
 
   // Mirrors ScoreEditorModal.isDirty: structural compare of current subs
@@ -2911,13 +2990,42 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               </div>
             </div>
           )}
+          {/* F5: "not saved" banner, shared class with ScoreEditorModal so both
+              editors read identically. Placed once, above score-nav, which
+              `inner` shares between the wide overlay and the narrow shiaijo
+              inline panel (see the two return branches at the bottom of this
+              component) -- so this single site covers both layouts rather than
+              needing a second copy for the inline variant. No Retry button:
+              unlike the individual editor this component holds no submit
+              closure to replay, so the operator re-enters and re-taps instead. */}
+          {!writeFailed && pendingWrite && (
+            <div className="pending-write-banner" role="status" aria-live="polite">
+              <span>Not sent yet: this result is saved on this device and will sync when the connection returns.</span>
+            </div>
+          )}
+          {writeFailed && (
+            <div className="pending-write-banner pending-write-banner--failed" role="alert" aria-live="assertive">
+              <span>Not saved: {writeFailed.reason}. {writeFailed.advice || "Re-enter the result and submit again."}</span>
+            </div>
+          )}
           <div className="score-nav">
             {prevMatch ? (
               <button className="btn btn--sm score-nav__prev" onClick={onPrev} disabled={submitting}>← Prev</button>
             ) : <span />}
             <div className="score-nav__actions">
               {m.status === "scheduled" && (
-                <button className="btn btn--sm" onClick={() => doSubmit(() => onSubmit(buildPatch("running")))} disabled={submitting}>Start match</button>
+                <button className="btn btn--sm" onClick={async () => {
+                  // F5: submits status:"running", the shape
+                  // _notifyScoreSuperseded (api_client.jsx) deliberately stays
+                  // silent for. Start match is an explicit operator tap, not
+                  // an autosave, so check the awaited result directly.
+                  const res = await doSubmit(() => onSubmit(buildPatch("running")));
+                  // bc-cse: which not-saved banner, if any. The clock-vs-
+                  // supersede ordering (and the silence on a queued write)
+                  // lives in notLandedBanner; see write_result.jsx.
+                  const banner = notLandedBanner(res);
+                  if (banner) setWriteFailed(banner);
+                }} disabled={submitting}>Start match</button>
               )}
               {/* mp-gmcg: mistake recovery on a completed kachinuki match:
                   status back to running, winner/decision cleared, bout log
@@ -2973,6 +3081,17 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                     // left untouched.
                     if (mountedRef.current && res && Array.isArray(res.subResults)) {
                       setMatchOverride(prev => prev ? { ...prev, subResults: res.subResults } : prev);
+                    }
+                    // F5: same reasoning as Start match above -- Record bout
+                    // also submits status:"running" and is also an explicit
+                    // operator tap, not the debounced autosave
+                    // _notifyScoreSuperseded stays silent for. Check directly
+                    // rather than relying on the broadcast.
+                    // bc-cse: which not-saved banner, if any. Same one owner
+                    // as Start match above; see write_result.jsx.
+                    if (mountedRef.current) {
+                      const banner = notLandedBanner(res);
+                      if (banner) setWriteFailed(banner);
                     }
                   });
                 }} disabled={submitting || !kachinukiCurrentBoutPlayed}

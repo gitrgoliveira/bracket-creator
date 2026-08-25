@@ -378,10 +378,21 @@ sequenceDiagram
 as last write wins, which is intentional: more than one person may legitimately be scoring
 one court. Three narrower guards do apply. A write stamped older than the stored result is
 dropped, so a court coming back from an outage cannot overwrite a newer result recorded
-elsewhere. A running write that arrives after the match has been completed is discarded
-rather than reverting the result. An out of order write from the same client session is
-dropped. Anything beyond that is a genuine disagreement between two people and is left
-visible rather than resolved silently.
+elsewhere; the drop is reported, not silent. For a finished result the response says the
+write was superseded and the operator sees an explicit "Not saved" notice, because a
+discarded final score is lost work the scorer must know about, while a superseded
+running-status autosave stays quiet as routine noise. A running write that arrives after
+the match has been completed is discarded rather than reverting the result. An out of
+order write from the same client session is dropped. Anything beyond that is a genuine
+disagreement between two people and is left visible rather than resolved silently.
+
+A deliberate correction is subject to the same rule, which matters most when it was made
+without a connection. Correcting the result you are looking at works normally. Correcting
+a result that has since been changed by someone else does not overwrite them: the
+correction is refused and reported, exactly as any other out of date write would be. That
+is the point, because a correction saved during an outage can reach the server hours
+later, long after the match has moved on, and the operator who wrote it has no way of
+knowing what happened in between.
 
 The stale write guard needs the timestamp of the stored result to compare against, so it
 only works where that timestamp is saved. It is saved for every match, in both files, which
@@ -389,6 +400,49 @@ is what makes the rule the same wherever a match happens to be in the competitio
 written before the timestamp existed, or by a client that does not send one, counts as
 unstamped and always applies: the guard discriminates only when both sides carry a stamp,
 so it can never silently drop a legitimate change.
+
+The comparison only holds if the two clocks agree, so a timestamp that is far enough in the
+future to be impossible is refused and reported rather than trusted or quietly discarded.
+Both of the alternatives lose work. Trusting it lets that one write beat every later result
+until real time catches up with the stamp, which freezes the match for the whole of that
+window. Discarding it makes the write count as unstamped, and an unstamped write always
+applies, so the device with the wrong clock overwrites a newer result recorded elsewhere and
+nobody is told. A few seconds ahead is ordinary and is accepted, since a device learns the
+server time over the network and a little drift is normal. Beyond that the device is told
+its clock is wrong, nothing is written, and the app resyncs its clock so the operator can
+enter the same result again. Entering it again is safe precisely because the refused write
+never landed.
+
+The check is applied when the write arrives, not when it was stamped, so a write held in
+the outbox escapes it in proportion to how long it waited: a device whose clock is ahead by
+less than the time its write spent queued delivers a stamp that has already fallen into the
+server's past, where it is honoured like any other and can still beat a result recorded
+moments later on another court. What the check catches is a clock wrong by more than the
+queue age plus the few seconds of tolerance, which is the case that would otherwise freeze
+the match or overwrite a newer result with nobody told.
+
+When a queued write is refused for a wrong clock, the app learns the server time again and
+rebuilds the stamp before retrying it once. It does this two ways and keeps whichever answer is
+older. The first way reads the moment the result was entered and adds the freshly learned
+offset, which is right so long as the device clock has not moved in between. The second way
+measures how long the result has been waiting on a steadily ticking timer that a clock
+correction cannot move, and subtracts that from the current server time, which is right even if
+the clock was corrected but can understate the wait if the device slept.
+
+Keeping the older answer is a deliberate safety choice rather than a coin toss. Too old, and
+this result can only lose a comparison it might have won, which costs the operator a re-entry
+they are already being told about. Too new, and a result entered before the outage could quietly
+beat one recorded during it, which is the silent overwrite the whole check exists to prevent.
+Where the two answers disagree, the recoverable mistake is the one to make.
+
+One case is still not recovered, and it is worth stating plainly. The steady timer is measured
+from the moment the page was opened, so it means nothing to a page that has since been reloaded
+or to a second tab. If the clock is corrected across a reload, the rebuilt stamp is wrong again,
+the result is refused a second time, and it is then dropped rather than retried forever. That is
+accepted, and it is loud: the operator is told that nothing was recorded and that this device's
+clock needs fixing, so the result can be entered again from a device whose clock is right.
+Dropping it is the lesser harm, because an entry that can never carry a correct stamp would
+otherwise hold up every write queued behind it.
 
 ### When a file is wrong
 

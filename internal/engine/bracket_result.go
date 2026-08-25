@@ -20,13 +20,27 @@ import (
 // is not preserved on rollback — it is actively cleared. A partial projection
 // is therefore silent data loss, not a missing optimisation.
 func bracketMatchAsResult(bm *state.BracketMatch) *state.MatchResult {
-	// ModifiedAt is deliberately NOT projected, and that is the one omission
-	// which is correct. The restore runs through applyMatchWrite, the
-	// timestamp LWW guard, against the stamp the REJECTED write just left on
-	// the match. Carrying the snapshot's older stamp would make the rollback
-	// lose to the write it is undoing and be silently dropped; leaving it 0
-	// takes ApplyByTimestamp's unstamped bypass, so the rollback always
-	// applies. Do not "complete" the projection with this field.
+	// ModifiedAt IS projected, and used not to be. The old omission was
+	// justified by a mechanism that does not exist: it claimed a projected
+	// stamp would lose the timestamp LWW comparison against the write being
+	// rolled back and be dropped. applyMatchWrite returns true for
+	// matchWriteRestore BEFORE reading any stamp, so a restore can never lose
+	// that comparison whatever it carries — the exemption is stated at the
+	// POLICY, not earned by leaving this field 0.
+	//
+	// What the field actually decides is the stamp LEFT BEHIND, because the
+	// write is a whole-struct overwrite. Omitting it zeroed the stored stamp,
+	// so after a bracket rollback the NEXT write to that match took
+	// ApplyByTimestamp's unstamped bypass and applied unconditionally — the
+	// match silently lost its fencing precisely when a contested write had just
+	// been rejected on it, which is when fencing matters most.
+	//
+	// The pool branch never had this hole: its snapshot comes from
+	// lookupExistingResult, a straight copy of the stored MatchResult, so it
+	// always restored the true prior stamp. This was a branch asymmetry, not a
+	// property of "restore", and projecting the field removes it — the same
+	// "a match is a match" argument applyMatchWrite already makes for refusing
+	// to let the pool and the bracket arbitrate differently.
 	return &state.MatchResult{
 		ID:             bm.ID,
 		SideA:          bm.SideA,
@@ -56,5 +70,9 @@ func bracketMatchAsResult(bm *state.BracketMatch) *state.MatchResult {
 		FlagsA:     bm.FlagsA,
 		FlagsB:     bm.FlagsB,
 		SubResults: bm.SubResults,
+		// See the note above: this restores the match's real prior stamp so a
+		// rolled-back bracket match stays fenced, instead of being left at 0
+		// and letting the next write through unconditionally.
+		ModifiedAt: bm.ModifiedAt,
 	}
 }

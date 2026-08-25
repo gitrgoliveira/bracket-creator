@@ -96,8 +96,12 @@ sequenceDiagram
 - **`resync_required`**: emitted when a gap-free replay is impossible (ring eviction or a
   server restart that reset `seq`). The client resets its `lastSeq` and full-refetches. Emitted
   **without** an `id:` line when head seq is 0 so it can't force `Last-Event-ID` to "0".
-- **Observable heartbeat**: a real `{"type":"heartbeat"}` frame (no `id:`) every 15s, so the
-  client can tell "quiet" from "dead".
+- **Observable heartbeat**: a real `{"type":"heartbeat","nowMs":<unix ms>}` frame (no `id:`)
+  every 15s, so the client can tell "quiet" from "dead". `nowMs` is the server clock at send
+  time and is a tripwire for a client whose own clock has drifted, never a source to set the
+  clock from: a one-way push carries no round trip to correct against, so a delayed frame
+  would drag the client's clock backwards. A client that sees a large divergence relearns the
+  offset from the time endpoint instead.
 - **Per-client buffered channel**; a stalled client that can't drain is dropped (non-blocking
   send). Subscriber cap `SSE_MAX_CLIENTS` (default 5000).
 

@@ -7,6 +7,7 @@ const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 const Icon = window.Icon;
 
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
+import { writeDidNotLand, writeWasSuperseded, SUPERSEDED_REASON, SUPERSEDED_ADVICE } from './write_result.jsx';
 
 // Kendo best-of-3 cap. Mirrors the server-side `maxIpponsPerSide` in
 // internal/mobileapp/validation.go: the bout ends when one side reaches
@@ -250,16 +251,33 @@ function resolveDecisionPassword(propPassword) {
 }
 
 // Guard for actions with a HARD prerequisite on server-side persistence
-// (e.g. the daihyosen pre-save). window.API.recordScore returns a
-// discriminated { queued: true } result when a running write could only be
-// enqueued (offline / retryable 5xx) instead of being confirmed by the
-// server. A confirmed write returns the MatchResult object; a same-session
-// out-of-order write returns { stale: true } (the server already holds an
-// equal-or-newer state, so dependent reads are safe and we do NOT abort).
-// Throws "score_not_synced" only on the queued case so the caller aborts
-// rather than running its dependent request against stale server state.
+// (e.g. the daihyosen pre-save). window.API.recordScore hands back one of four
+// shapes, and only two of them mean the dependent request may proceed:
+//
+//   MatchResult      confirmed by the server. Proceed.
+//   { stale: true }  a SAME-SESSION out-of-order write. The server already
+//                    holds this operator's own equal-or-newer state, so a
+//                    dependent read sees their own later intent. Proceed.
+//   { queued: true } never reached the server (offline / retryable 5xx). ABORT.
+//   { applied:false} reached the server and the timestamp guard DROPPED it
+//                    because a DIFFERENT writer's newer result won (bc-lww1).
+//                    ABORT.
+//
+// The last two are exactly what writeDidNotLand owns, so this asks it rather
+// than re-spelling the test — this was the SIXTH site of that question and the
+// one the original five-site conversion missed, which is also the reason the
+// rule now lives in a leaf module instead of at each caller.
+//
+// The stale/superseded split is the subtle part, and is why this cannot simply
+// abort on "not a MatchResult": `stale` is the operator's OWN newer state, so
+// a dependent read sees their later intent and is safe, whereas `applied:false`
+// is a different writer's state this operator has never seen, so a dependent
+// request built on it acts on a scoreline that was never on their screen.
+//
+// Throws "score_not_synced" so the caller aborts rather than running its
+// dependent request against server state it did not produce.
 function assertRunningWritePersisted(saveRes) {
-  if (saveRes && saveRes.queued) throw new Error("score_not_synced");
+  if (writeDidNotLand(saveRes)) throw new Error("score_not_synced");
 }
 
 // T093/T094: build the /decision POST body. Pure helper so we can pin the
@@ -333,10 +351,23 @@ function makeSubmitDecision({
         match.compId, match.id, kind, { decisionBy, decisionReason }, enchoPeriodCount, password, opts,
       );
       if (!mountedRef.current) return;
-      // F5: if the write was only queued (offline / transient), do NOT close or
-      // advance. Enter pending-write mode so the banner shows in the footer.
-      // Save the submit closure so "Retry now" can re-invoke it directly.
-      if (updated && updated.queued) {
+      // A decision that did not land must not advance ANYTHING below this
+      // line: not the kiken hand-off to RemainingMatchesPanel, not
+      // onAfterDecision (which the shiaijo page wires to a LOCAL bracket
+      // advance), not the close. This asks the owner predicate rather than
+      // `updated.queued` so BOTH not-landed shapes take the same exit --
+      // queued (F5: offline/transient, will land on reconnect) and
+      // `applied:false` (bc-lww1: the server refused it, so it never will).
+      // The score path already guards this way; a decision that advanced a
+      // bracket on a winner the server discarded is the same failure.
+      //
+      // Inert today: no server path answers /decision with applied:false (the
+      // request carries no modifiedAt, and respondClockSkew has no decision
+      // call site). It is the guard, not a live branch.
+      //
+      // F5: enter pending-write mode so the banner shows in the footer, and
+      // save the submit closure so "Retry now" can re-invoke it directly.
+      if (writeDidNotLand(updated)) {
         if (setPendingWrite) {
           setPendingWrite(true);
           if (pendingFnRef) pendingFnRef.current = () => submit(kind, { decisionBy, decisionReason }, opts);
@@ -681,6 +712,12 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
     const isOnA = (wid && m.sideA?.id === wid) || (wname && m.sideA?.name === wname);
     const decisionBy = isOnA ? "aka" : "shiro";
     setBusyId(m.id);
+    // Clear any previous verdict before this attempt. Without it the panel's
+    // error is sticky: a refusal on match A stays on screen while the operator
+    // successfully awards match B, so the panel reports a failure that belongs
+    // to a match no longer in the list. The catch arm below had the same
+    // defect, so this covers both rather than only the new branch.
+    setErr("");
     try {
       const updated = await window.API.recordDecision(m.compId || compID, m.id, {
         decision: "fusenpai",
@@ -688,6 +725,18 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
         decisionReason: `auto: ${wname} withdrawn`,
       }, password);
       if (!mountedRef.current) return;
+      // A default win the server REFUSED must not leave the list: dropping it
+      // here would hide the one match the operator still has to resolve, and
+      // nothing else on this panel would ever mention it again (bc-lww1).
+      // writeWasSuperseded, not writeDidNotLand, is the right ask: a QUEUED
+      // award lands on reconnect, so an offline court must keep walking the
+      // list exactly as it does today. Inert today for the same reason as the
+      // guard in makeSubmitDecision above: nothing answers /decision with
+      // applied:false yet.
+      if (writeWasSuperseded(updated)) {
+        setErr(`Not saved: ${SUPERSEDED_REASON}. ${SUPERSEDED_ADVICE}`);
+        return;
+      }
       // Drop the awarded match from the list so the operator can keep walking.
       setMatches(prev => (prev || []).filter(x => x.id !== m.id));
       if (typeof onAwarded === "function") onAwarded(updated);

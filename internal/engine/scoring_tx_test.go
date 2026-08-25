@@ -465,8 +465,9 @@ func TestStoreTxUpdatePoolMatchByIDLockFree(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-			found, err := tx.UpdatePoolMatchByID(compID, "Pool A-0", func(r *state.MatchResult) {
+			found, err := tx.UpdatePoolMatchByID(compID, "Pool A-0", func(r *state.MatchResult) error {
 				r.Status = state.MatchStatusRunning
+				return nil
 			})
 			require.NoError(t, err)
 			require.True(t, found)

@@ -109,7 +109,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   // advance path). Null after a re-open hydration (the queue still auto-retries,
   // but the closure can't be recovered from the serialized queue, so Retry hides).
   const pendingFnRef = useRefE(null);
-  const [writeFailed, setWriteFailed] = useStateE(null); // { reason } | null
+  const [writeFailed, setWriteFailed] = useStateE(null); // { reason, advice? } | null
 
   const total = flagsA + flagsB;
   const isValidTotal = VALID_TOTALS.has(total);
@@ -212,7 +212,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
     const unsub = window.subscribeTerminalWriteFailed((info) => {
       if (!mountedRef.current) return;
       if (!info || info.compID !== m.compId || info.matchID !== m.id) return;
-      setWriteFailed({ reason: info.reason || `save rejected (${info.status || "error"})` });
+      setWriteFailed({ reason: info.reason || `save rejected (${info.status || "error"})`, advice: info.advice });
       setPendingWrite(false);
     });
     return unsub;
@@ -435,7 +435,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
             over the pending banner. Mirrors ScoreEditorModal. */}
         {writeFailed && (
           <div className="pending-write-banner pending-write-banner--failed" role="alert" aria-live="assertive">
-            <span>Not saved: {writeFailed.reason}. Re-enter the result and submit again.</span>
+            <span>Not saved: {writeFailed.reason}. {writeFailed.advice || "Re-enter the result and submit again."}</span>
             {pendingFnRef.current && (
               <button type="button" className="btn btn--sm" disabled={submitting} onClick={() => doSubmit(pendingFnRef.current)}>Retry</button>
             )}

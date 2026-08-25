@@ -1,7 +1,9 @@
 package engine
 
 import (
+	"bytes"
 	"errors"
+	"log"
 	"testing"
 	"time"
 
@@ -534,7 +536,7 @@ func TestCheckConcurrentIneligibility_EmptyLoser(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "conc-empty-loser"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
-	err := eng.checkConcurrentIneligibility(compID, "M1", "")
+	err := eng.checkConcurrentIneligibility(eng.store, compID, "M1", "")
 	assert.NoError(t, err, "empty loserName should return nil")
 }
 
@@ -545,7 +547,7 @@ func TestCheckConcurrentIneligibility_PlayerNotInParticipants(t *testing.T) {
 	compID := "conc-unknown"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
 	// No participants saved → lookupPlayerID returns ""
-	err := eng.checkConcurrentIneligibility(compID, "M1", "Ghost Player")
+	err := eng.checkConcurrentIneligibility(eng.store, compID, "M1", "Ghost Player")
 	assert.NoError(t, err, "unknown player should return nil without error")
 }
 
@@ -555,7 +557,7 @@ func TestRestoreCompetitorEligibility_EmptyPriorLoser(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "restore-empty"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
-	status, err := eng.restoreCompetitorEligibility(compID, "", "M1")
+	status, err := eng.restoreCompetitorEligibility(eng.store, compID, "", "M1")
 	assert.NoError(t, err)
 	assert.Nil(t, status)
 }
@@ -567,7 +569,7 @@ func TestRestoreCompetitorEligibility_PlayerNotInParticipants(t *testing.T) {
 	compID := "restore-unknown"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
 	// No participants → lookupPlayerID returns ""
-	status, err := eng.restoreCompetitorEligibility(compID, "Ghost Player", "M1")
+	status, err := eng.restoreCompetitorEligibility(eng.store, compID, "Ghost Player", "M1")
 	assert.NoError(t, err)
 	assert.Nil(t, status)
 }
@@ -598,7 +600,7 @@ func TestHasDownstreamMatchStarted_BracketMatch(t *testing.T) {
 		},
 	}))
 
-	started, err := eng.hasDownstreamMatchStarted(compID, []string{"Alice"}, "other-match")
+	started, err := eng.hasDownstreamMatchStarted(eng.store, compID, []string{"Alice"}, "other-match")
 	require.NoError(t, err)
 	assert.True(t, started, "started bracket match involving Alice must be detected")
 }
@@ -609,7 +611,7 @@ func TestHasDownstreamMatchStarted_EmptyPlayerNames(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "downstream-empty"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
-	started, err := eng.hasDownstreamMatchStarted(compID, []string{"", ""}, "M1")
+	started, err := eng.hasDownstreamMatchStarted(eng.store, compID, []string{"", ""}, "M1")
 	require.NoError(t, err)
 	assert.False(t, started)
 }
@@ -633,7 +635,7 @@ func TestCheckConcurrentIneligibility_AlreadyIneligible(t *testing.T) {
 		MatchID:  "M-prev",
 	}))
 
-	err := eng.checkConcurrentIneligibility(compID, "M-new", "Alice")
+	err := eng.checkConcurrentIneligibility(eng.store, compID, "M-new", "Alice")
 	require.Error(t, err)
 	var alreadyErr *AlreadyIneligibleError
 	require.ErrorAs(t, err, &alreadyErr)
@@ -660,7 +662,7 @@ func TestCheckConcurrentIneligibility_SameMatchNotBlocked(t *testing.T) {
 		MatchID:  "M-current", // same as what we're re-scoring
 	}))
 
-	err := eng.checkConcurrentIneligibility(compID, "M-current", "Bob")
+	err := eng.checkConcurrentIneligibility(eng.store, compID, "M-current", "Bob")
 	assert.NoError(t, err, "same-match ineligibility should not block re-scoring")
 }
 
@@ -873,11 +875,10 @@ func TestRollback_BracketSubResults_Cleared(t *testing.T) {
 	// fell back to a pool-match rollback when Alice happened not to land in the
 	// second match, which silently stopped proving the bracket behaviour.)
 	//
-	// This is the NON-tx twin: RecordMatchResultWithIneligibility rolls back
-	// through writeMatchResult. The comment here used to name
-	// recordBracketMatchResultTx, which this test never reaches — a mutation of
-	// the tx twin's rollback policy survived the whole suite on the strength of
-	// that claim. TestRollback_BracketSubResults_ClearedTx covers the other one.
+	// This exercises the non-tx ENTRY POINT: RecordMatchResultWithIneligibility
+	// is a thin WithTransaction shim over RecordMatchResultWithIneligibilityTx, so
+	// both tests drive the same rollback body. The pair pins the two entry points
+	// rather than two distinct implementations.
 	targetName := secondMatch.SideA
 	targetID := idByName[targetName]
 	require.NotEmpty(t, targetID, "second bracket match SideA must map to a known participant")
@@ -891,7 +892,7 @@ func TestRollback_BracketSubResults_Cleared(t *testing.T) {
 
 	// Score the second bracket match with a kiken on the target (SideA →
 	// decisionBy "aka" makes SideA the loser) plus SubResults. The engine
-	// writes the partial bracket result, then recordIneligibilityFromDecisionTx
+	// writes the partial bracket result, then recordIneligibilityFromDecision
 	// detects the target is already ineligible from firstMatchID and returns
 	// *AlreadyIneligibleError, triggering the rollback.
 	_, err = eng.RecordMatchResultWithIneligibility(compID, secondMatchID, &state.MatchResult{
@@ -1370,14 +1371,14 @@ func TestEligibilityHelpers_NilCompetitionNoPanic(t *testing.T) {
 	const missing = "no-such-competition"
 
 	t.Run("restoreCompetitorEligibility no-ops on missing config", func(t *testing.T) {
-		status, err := eng.restoreCompetitorEligibility(missing, "Bob", "m1")
+		status, err := eng.restoreCompetitorEligibility(eng.store, missing, "Bob", "m1")
 		assert.NoError(t, err)
 		assert.Nil(t, status)
 	})
 
 	t.Run("recordIneligibilityFromDecision no-ops on missing config", func(t *testing.T) {
 		result := &state.MatchResult{SideA: "Alice", SideB: "Bob", Winner: "Alice", Decision: string(domain.DecisionKikenVoluntary)}
-		status, err := eng.recordIneligibilityFromDecision(missing, "m1", result)
+		status, err := eng.recordIneligibilityFromDecision(eng.store, missing, "m1", result)
 		assert.NoError(t, err)
 		assert.Nil(t, status)
 	})
@@ -1464,4 +1465,107 @@ func TestRecordDecision_ReDecisionFlipNoPhantomMaru(t *testing.T) {
 	assert.Equal(t, "Bob", result.Winner)
 	assert.Equal(t, []string{"○", "○"}, result.IpponsB, "new winner Bob gets the maru fill")
 	assert.Empty(t, result.IpponsA, "flipped loser Alice must not inherit the prior maru as phantom points")
+}
+
+// P6, previously the documented unpinnable residual.
+//
+// The engine's non-transactional entry points wrap their write in
+// Store.WithTransaction, and that wrap is REQUIRED, not stylistic:
+// recordIneligibilityFromDecision's K2 check-and-set is only atomic while one
+// per-competition lock is held across its load, its check and its set. A bare
+// *state.Store handle satisfies the same interface and takes a fresh lock per
+// call, so the TOCTOU window K2 exists to close reopens.
+//
+// Nothing could detect that. Replacing either shim's WithTransaction with a
+// bare fn(e.store) passed this entire package AND internal/mobileapp, including
+// TestRecordDecision_ConcurrentKiken above, which exists for this very
+// property: the damage only manifests under an interleaving a test cannot
+// schedule from outside the store.
+//
+// state.IsTransactional makes the handle answer for itself, so the invariant is
+// now checked at the point of use and asserted here. Mutating either shim to
+// pass e.store bare makes the first subtest fail.
+func TestK2ChecksItsHandleIsTransactional(t *testing.T) {
+	setup := func(t *testing.T) (*Engine, *state.Store, string, string) {
+		t.Helper()
+		eng, store, _ := setupTestEngine(t)
+		compID := "k2-handle"
+		createTestCompetition(t, store, compID, "league", 2)
+		aliceID := helper.NewUUID4()
+		require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+			{ID: aliceID, Name: "Alice", Dojo: "A"},
+			{ID: helper.NewUUID4(), Name: "Bob", Dojo: "B"},
+		}))
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled},
+		}))
+		return eng, store, compID, aliceID
+	}
+
+	// captureLog swaps the default logger's sink for the duration of fn.
+	captureLog := func(t *testing.T, fn func()) string {
+		t.Helper()
+		var buf bytes.Buffer
+		prevOut, prevFlags := log.Writer(), log.Flags()
+		log.SetOutput(&buf)
+		log.SetFlags(0)
+		t.Cleanup(func() { log.SetOutput(prevOut); log.SetFlags(prevFlags) })
+		fn()
+		return buf.String()
+	}
+
+	t.Run("the production path runs K2 on a transactional handle", func(t *testing.T) {
+		eng, _, compID, _ := setup(t)
+		out := captureLog(t, func() {
+			_, _, err := eng.RecordDecision(compID, "Pool A-0", "kiken", "aka", "injury", nil, false)
+			require.NoError(t, err)
+		})
+		assert.NotContains(t, out, "NON-transactional store handle",
+			"K2 must run under a live transaction; if this fires, an entry point stopped wrapping its write "+
+				"and concurrent withdrawals can both pass the check")
+	})
+
+	// The negative control. Without it the assertion above could pass because
+	// the guard never fires at all (a mis-spelled check, or a helper that always
+	// reports true), which would be a test that pins nothing.
+	t.Run("a bare store handle is detected and reported", func(t *testing.T) {
+		eng, store, compID, _ := setup(t)
+		out := captureLog(t, func() {
+			_, err := eng.recordIneligibilityFromDecision(store, compID, "Pool A-0", &state.MatchResult{
+				ID: "Pool A-0", SideA: "Alice", SideB: "Bob",
+				Winner: "Bob", Status: state.MatchStatusCompleted,
+				Decision: string(domain.DecisionKikenInjury),
+			})
+			require.NoError(t, err)
+		})
+		assert.Contains(t, out, "NON-transactional store handle")
+	})
+
+	// The OTHER entry shim. RecordMatchResult reaches K2 too, via
+	// writeMatchResult, but only when the result carries a kiken/fusenpai
+	// decision -- recordIneligibilityFromDecision returns early otherwise. No
+	// existing test drove that combination, so unwrapping THIS shim survived
+	// even after the check above existed. Both doors are now covered.
+	t.Run("the quick-score entry point also runs K2 under a transaction", func(t *testing.T) {
+		eng, _, compID, _ := setup(t)
+		out := captureLog(t, func() {
+			require.NoError(t, eng.RecordMatchResult(compID, "Pool A-0", &state.MatchResult{
+				ID: "Pool A-0", SideA: "Alice", SideB: "Bob",
+				Winner: "Bob", Status: state.MatchStatusCompleted,
+				Decision: string(domain.DecisionKikenInjury), DecisionBy: "aka",
+			}))
+		})
+		assert.NotContains(t, out, "NON-transactional store handle")
+	})
+
+	// And the helper itself, pinned directly: it must not answer "transactional"
+	// for the bare store, which is the whole basis of the check above.
+	t.Run("IsTransactional distinguishes the two handles", func(t *testing.T) {
+		_, store, compID, _ := setup(t)
+		assert.False(t, state.IsTransactional(store), "the bare store is not a transaction")
+		require.NoError(t, store.WithTransaction(compID, func(tx state.StoreTx) error {
+			assert.True(t, state.IsTransactional(tx), "a live tx handle must report as one")
+			return nil
+		}))
+	})
 }

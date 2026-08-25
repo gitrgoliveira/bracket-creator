@@ -1,10 +1,16 @@
 import React from 'react';
 import { render, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest';
-
 // Window globals required by admin_shiaijo.jsx.
 // MODULE-EVAL-TIME entries (e.g. `const AdminTopbar = window.AdminTopbar;`)
 // must be set before the dynamic import, or the module captures undefined.
+//
+// The write_result predicates are deliberately NOT here: admin_shiaijo.jsx
+// imports them directly from the leaf, so the component always gets the real
+// implementations and a window entry for them would be dead weight suggesting
+// otherwise. The queued-vs-superseded split the offline-resolve test below
+// depends on is therefore the real one either way.
+
 const STUBBED_GLOBALS = {
   // MODULE-EVAL-TIME: captured at import; set before dynamic import below
   AdminTopbar: ({ children }) => <div data-testid="topbar">{children}</div>,

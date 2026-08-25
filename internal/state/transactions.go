@@ -111,7 +111,7 @@ type StoreTx interface {
 	// (already held by WithTransaction). Score / decision handlers (T156)
 	// use this to keep their match-result write under the SAME lock
 	// acquire as the competitor-status side effects.
-	UpdatePoolMatchByID(compID, matchID string, mutate func(*MatchResult)) (bool, error)
+	UpdatePoolMatchByID(compID, matchID string, mutate func(*MatchResult) error) (bool, error)
 	// UpdateBracketMatchByID is the tx-aware twin of
 	// Store.UpdateBracketMatchByID: find one bracket match by id (rounds +
 	// bronze sibling), mutate, save; found=false and no write on a miss.
@@ -170,17 +170,23 @@ type StoreTx interface {
 // and expect cross-file crash-atomicity, each write lands
 // independently.
 //
-// fn read-after-write within the same tx. Tx-internal reads
-// (tx.LoadCompetition, tx.LoadBracket, etc.) read from disk via the
-// *Locked helpers and DO NOT see the WAL-staged writes, the on-disk
-// file isn't updated until Apply runs after fn returns. The current
-// engine paths (RecordMatchResultWithIneligibilityTx,
-// RecordDecisionTx, K3 rollback) read BEFORE they write within a
-// single tx and never read-after-write the same file, so this
-// limitation is invisible to them. If a future tx body needs to
-// read its own pending write, the WAL exposes Intents(), but that's
-// a code-smell and probably indicates the load/save should be
-// re-ordered.
+// fn read-after-write within the same tx. This IS supported, and the
+// engine now depends on it: tx-internal reads (tx.LoadCompetition,
+// tx.LoadPoolMatches, tx.LoadBracket, ...) consult the WAL's pending
+// intents BEFORE falling through to the *Locked disk helpers, so a tx
+// sees its own staged writes even though the on-disk file is not
+// updated until Apply runs after fn returns. See pendingFor and its
+// call sites below, and the package header above, which has always
+// documented it this way.
+//
+// This is load-bearing, not incidental: the mp-e2k1 guard inside
+// RecordMatchResultWithIneligibilityTx re-reads pool-matches.csv via
+// computeStandingsFrom AFTER staging the forward write, to compare the
+// qualifying finishers before and after. If that read fell through to
+// disk it would compute post-write standings from pre-write bytes,
+// which is the stale-standings class the cache-invalidation notes
+// describe. The K3 rollback likewise re-enters UpdatePoolMatchByID
+// after the forward write.
 //
 // T155, NFR-010, T210/T211/T212 (A1 WAL).
 func (s *Store) WithTransaction(compID string, fn func(tx StoreTx) error) error {
@@ -348,6 +354,33 @@ type storeTx struct {
 	store  *Store
 	compID string
 	wal    *wal.WAL
+}
+
+// IsTransactional reports whether h is a LIVE transaction handle rather than
+// the bare *Store.
+//
+// It exists because StoreTx is satisfied by both, deliberately: that is what
+// lets one body serve the transactional and non-transactional doors. The cost
+// of that convenience is that a caller whose correctness DEPENDS on the handle
+// being a real transaction cannot tell, and the compiler cannot tell either.
+// The engine's K2 check-and-set is such a caller: its load/check/set is only
+// atomic while the per-competition lock is held across all three, which is true
+// of a tx handle and false of the bare store, where each call takes and
+// releases its own lock and the TOCTOU window reopens.
+//
+// Exported so that invariant can be ENFORCED rather than merely commented. It
+// was previously unpinnable: replacing the engine's WithTransaction shims with
+// a bare handle passed the entire test suite, including the tests written for
+// the property it broke, because the difference only shows under an
+// interleaving no test can schedule. Asking the handle what it is turns an
+// unobservable property into an observable one.
+//
+// Use it for guards, never for behaviour: no code should DO something different
+// based on this. A caller that needs a transaction and did not get one is a
+// bug, not a case to handle.
+func IsTransactional(h StoreTx) bool {
+	_, ok := h.(*storeTx)
+	return ok
 }
 
 // txWriteFn adapts the WAL package's WriteFn (which uses os.FileMode)
@@ -562,7 +595,7 @@ func (t *storeTx) UpdateParticipant(compID, pid string, withZekkenName bool, tra
 // in this tx (e.g., the K3 rollback path that writes the new score,
 // fails eligibility, and rolls back), this load + mutate + save sees
 // the staged version, not the stale on-disk version.
-func (t *storeTx) UpdatePoolMatchByID(compID, matchID string, mutate func(*MatchResult)) (bool, error) {
+func (t *storeTx) UpdatePoolMatchByID(compID, matchID string, mutate func(*MatchResult) error) (bool, error) {
 	if err := t.checkCompID(compID); err != nil {
 		return false, err
 	}
@@ -576,7 +609,12 @@ func (t *storeTx) UpdatePoolMatchByID(compID, matchID string, mutate func(*Match
 		}
 		for i := range results {
 			if results[i].ID == matchID {
-				mutate(&results[i])
+				// Abort skips the save on the staged path too. Both branches of
+				// this method must honour it or a dropped write would leave no
+				// footprint outside a transaction and a WAL entry inside one.
+				if merr := mutate(&results[i]); merr != nil {
+					return true, merr
+				}
 				return true, t.store.savePoolMatchesLocked(compID, results, t.txWriteFn())
 			}
 		}

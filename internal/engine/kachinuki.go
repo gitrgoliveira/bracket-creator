@@ -481,7 +481,7 @@ func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, []state.Su
 		return true, postLog, nil
 	}
 
-	found, err := e.store.UpdatePoolMatchByID(compID, matchID, func(parent *state.MatchResult) {
+	found, err := e.store.UpdatePoolMatchByID(compID, matchID, func(parent *state.MatchResult) error {
 		// Append the next bout. Appending means the encounter continues: the
 		// parent match must stay running with no match-level winner/decision.
 		out.Next.Position = len(parent.SubResults) + 1
@@ -490,6 +490,7 @@ func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, []state.Su
 		parent.Winner = ""
 		parent.Decision = ""
 		postLog = append([]state.SubMatchResult(nil), parent.SubResults...)
+		return nil
 	})
 	if err != nil {
 		return false, nil, err

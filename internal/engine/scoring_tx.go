@@ -1,124 +1,54 @@
-// Package engine, scoring_tx.go owns the tx-aware twins of
-// RecordMatchResult / RecordMatchResultWithIneligibility /
-// recordBracketMatchResult / recordIneligibilityFromDecision.
-// They accept a state.StoreTx instead of reaching at e.store directly,
+// Package engine, scoring_tx.go owns the tx-run flows of the scoring family:
+// RecordMatchResultWithIneligibilityTx, RecordDecisionTx, StartMatchTx, the K3
+// rollback, and the tx court/eligibility checks. They accept a state.StoreTx
 // so a caller (typically a HTTP handler) can run them inside a single
 // Store.WithTransaction acquire of the per-comp write lock.
 //
-// Why these exist. Pre-T156 the score and decision handlers called
+// Why the tx flows exist. Pre-T156 the score and decision handlers called
 // engine methods that each acquired their own per-comp lock via
 // UpdatePoolMatchByID / UpdateBracket / SetCompetitorStatus.
 // The handler's logical "score this match" operation translated to
 // 3-5 separate lock acquires, with concurrent writers free to land
-// mutations in the gaps. The tx-aware twins collapse all of those into
+// mutations in the gaps. Running under one tx collapses all of those into
 // ONE acquire so the entire match-write + ineligibility-write sequence
 // is indivisible.
 //
-// Constraint. Methods here MUST call only the tx parameter, NEVER
-// e.store directly. The per-comp lock is non-reentrant (sync.RWMutex
-// is not recursive on Lock by Lock); a direct e.store.Save* call from
-// inside the closure passed to WithTransaction would deadlock.
+// Why this file no longer holds twin BODIES (bc-twin). It used to carry a
+// hand-copied tx variant of each write primitive (withPoolMatchTx,
+// writeToPoolOrBracketTx, recordBracketMatchResultTx, lookupExistingResultTx,
+// recordIneligibilityFromDecisionTx, recordMatchResultTx), differing from the
+// non-tx bodies only in the store handle. Twin drift produced real bugs three
+// separate times, so the primitives now exist ONCE, taking an
+// `h state.StoreTx` handle — *state.Store satisfies state.StoreTx, so the
+// same body serves both doors, and the non-tx entry points are
+// WithTransaction shims (see RecordMatchResult /
+// RecordMatchResultWithIneligibility in scoring.go). What remains here is the
+// tx-shaped orchestration, not duplicated persistence.
 //
-// T156, NFR-010.
+// A follow-up pass collapsed four more twins the same way: lookupMatchSides,
+// checkConcurrentIneligibility, hasDownstreamMatchStarted, and
+// restoreCompetitorEligibility (all live in eligibility.go now, taking `h`).
+// RecordDecisionTx below is the last of the original hand-copied pairs to be
+// resolved — unlike the others it keeps ITS name (mobileapp's ScoringEngine
+// interface calls it directly), and RecordDecision (eligibility.go) is now
+// the WithTransaction shim over it, the same direction as every other pair.
+//
+// Constraint, unchanged. Flows running under a tx MUST call only the tx
+// handle, NEVER e.store directly. The per-comp lock is non-reentrant
+// (sync.RWMutex is not recursive on Lock by Lock); a direct e.store.Save*
+// call from inside the closure passed to WithTransaction would deadlock.
+//
+// T156, NFR-010, bc-twin.
 package engine
 
 import (
 	"errors"
 	"fmt"
 	"log"
-	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
-
-// withPoolMatchTx is the tx-aware twin of withPoolMatch. Same
-// "load + find + mutate + save" semantics; returns errMatchNotFound
-// when no pool match has the given ID so callers can fall through to
-// withBracketMatchTx.
-func (e *Engine) withPoolMatchTx(tx state.StoreTx, compID, matchID string, mutate func(*state.MatchResult)) error {
-	found, err := tx.UpdatePoolMatchByID(compID, matchID, mutate)
-	if err != nil {
-		return err
-	}
-	if !found {
-		return errMatchNotFound
-	}
-	return nil
-}
-
-// recordBracketMatchResultTx is the tx-aware twin of
-// recordBracketMatchResult. Identical body modulo the tx.UpdateBracket
-// dispatch.
-func (e *Engine) recordBracketMatchResultTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult, policy matchWritePolicy) error {
-	return tx.UpdateBracket(compID, func(bracket *state.Bracket) error {
-		return e.applyBracketResultIn(bracket, compID, matchID, result, policy)
-	})
-}
-
-// recordIneligibilityFromDecisionTx is the tx-aware twin of
-// recordIneligibilityFromDecision. The atomic check-and-set runs
-// directly on the supplied tx (no nested WithTransaction), the caller
-// already holds the per-comp lock, so the same check-after-write
-// guarantee holds without re-acquiring.
-func (e *Engine) recordIneligibilityFromDecisionTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult) (*domain.CompetitorStatus, error) {
-	if result == nil {
-		return nil, nil
-	}
-	if !domain.IsKikenDecisionStr(result.Decision) && result.Decision != string(domain.DecisionFusenpai) {
-		return nil, nil
-	}
-	loser := loserSideName(result)
-	if loser == "" {
-		return nil, nil
-	}
-	comp, err := tx.LoadCompetition(compID)
-	if err != nil {
-		return nil, err
-	}
-	if comp == nil {
-		return nil, nil
-	}
-	// Engi competitions force the zekken layout (two-column participant CSV)
-	// so participants must be parsed with WithZekkenName even when the comp
-	// flag is not set via user input; make the effective flag explicit (Finding 10).
-	participants, err := tx.LoadParticipants(compID, comp.EffectiveWithZekkenName())
-	if err != nil {
-		return nil, err
-	}
-	pool := combinedPlayerPool(comp.Players, participants)
-	playerID := lookupPlayerID(pool, loser)
-	if playerID == "" {
-		return nil, nil
-	}
-	status := domain.CompetitorStatus{
-		PlayerID:      playerID,
-		Eligible:      false,
-		Reinstateable: result.Decision == string(domain.DecisionKikenInjury),
-		Reason:        fmt.Sprintf("%s at %s", result.Decision, matchID),
-		MatchID:       matchID,
-		RecordedAt:    time.Now().UTC(),
-	}
-	// K2/CHK047: check-and-set under the existing lock. Pre-T156 this
-	// reached for a fresh WithTransaction; under T156 the surrounding
-	// tx already holds the per-comp lock, so we serialize correctly
-	// without nesting.
-	statuses, err := tx.LoadCompetitorStatus(compID)
-	if err != nil {
-		return nil, err
-	}
-	if st, ok := statuses[playerID]; ok && !st.Eligible && st.MatchID != matchID {
-		return nil, &AlreadyIneligibleError{
-			PlayerID: playerID,
-			MatchID:  st.MatchID,
-			Reason:   st.Reason,
-		}
-	}
-	if err := tx.SetCompetitorStatus(compID, status); err != nil {
-		return nil, err
-	}
-	return &status, nil
-}
 
 // RecordMatchResultWithIneligibilityTx is the tx-aware twin of
 // RecordMatchResultWithIneligibility. The K3/CHK047 partial-write
@@ -143,7 +73,7 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		return nil, fmt.Errorf("RecordMatchResultWithIneligibilityTx: load competition %s: %w", compID, loadErr)
 	}
 	if comp != nil && comp.Engi {
-		rec, recErr := e.recordEngiMatchResultTx(tx, compID, matchID, result.FlagsA, result.FlagsB, result.CorrectionReason)
+		rec, recErr := e.recordEngiMatchResult(tx, compID, matchID, result.FlagsA, result.FlagsB, result.CorrectionReason)
 		if recErr != nil {
 			return nil, recErr
 		}
@@ -157,10 +87,10 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	deriveDaihyosenWinner(result)
 
 	// Capture the prior result so we can roll back the score on
-	// AlreadyIneligibleError. lookupExistingResultTx reads directly from
+	// AlreadyIneligibleError. lookupExistingResult reads directly from
 	// the tx so it sees the state INSIDE the lock (the on-disk state
 	// hasn't moved under us, we hold the lock).
-	prior, _ := e.lookupExistingResultTx(tx, compID, matchID)
+	prior, _ := e.lookupExistingResult(tx, compID, matchID)
 
 	// Kachinuki bout logs merge BY POSITION rather than replace wholesale
 	// (ACID: a client whose local log is behind the server must never
@@ -215,7 +145,7 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		}
 	}
 
-	sideMismatch, err := e.writeToPoolOrBracketTx(tx, compID, matchID, result, matchWriteForward)
+	sideMismatch, err := e.writeToPoolOrBracket(tx, compID, matchID, result, matchWriteForward)
 	if err != nil {
 		return nil, err
 	}
@@ -275,7 +205,7 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		}
 	}
 
-	status, err := e.recordIneligibilityFromDecisionTx(tx, compID, matchID, result)
+	status, err := e.recordIneligibilityFromDecision(tx, compID, matchID, result)
 	if err != nil {
 		var alreadyErr *AlreadyIneligibleError
 		if errors.As(err, &alreadyErr) {
@@ -288,7 +218,7 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 			}
 			return nil, err
 		}
-		log.Printf("engine: recordIneligibilityFromDecisionTx compId=%s matchId=%s: %v", compID, matchID, err)
+		log.Printf("engine: recordIneligibilityFromDecision compId=%s matchId=%s: %v", compID, matchID, err)
 		return nil, nil
 	}
 	return status, nil
@@ -302,108 +232,21 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 // write before Commit applies the final state. prior must be non-nil.
 //
 // The nil-collision fields (SubResults, and the hantei flag at both match and
-// sub-bout level) need no pre-mangling here: recordMatchResultTx replays under
+// sub-bout level) need no pre-mangling here: the snapshot replays under
 // matchWriteRestore, which reads a nil as "there was nothing" rather than as
 // "the writer said nothing". See matchWriteRestore for why the distinction is
 // what keeps a rollback from re-applying the write it is undoing.
+//
+// The snapshot is restored byte-for-byte, so applyHansokuIppons is
+// intentionally NOT applied; writeMatchResult is the post-hansoku write. A
+// restore can never trip its ErrMatchSideMismatch return (the identity check
+// is forward-only), so the replay path this used to take through a dedicated
+// mismatch-discarding twin is now the shared body with nothing discarded.
 func (e *Engine) rollbackMatchResultTx(tx state.StoreTx, compID, matchID string, prior *state.MatchResult) {
-	if rerr := e.recordMatchResultTx(tx, compID, matchID, prior); rerr != nil {
+	prior.ID = matchID
+	if rerr := e.writeMatchResult(tx, compID, matchID, prior, matchWriteRestore); rerr != nil {
 		log.Printf("engine: RecordMatchResultWithIneligibilityTx rollback failed compId=%s matchId=%s: %v", compID, matchID, rerr)
 	}
-}
-
-// writeToPoolOrBracketTx is the tx-aware twin of writeToPoolOrBracket
-// (scoring.go), where the reasoning for the shared fall-through lives. The two
-// differ only in the store handle they take: the tx variants read and write
-// inside the caller's already-held per-competition lock, so they cannot call
-// the public Store methods the non-tx twin uses (the mutex is not reentrant).
-func (e *Engine) writeToPoolOrBracketTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult, policy matchWritePolicy) (mismatch bool, err error) {
-	perr := e.withPoolMatchTx(tx, compID, matchID, func(r *state.MatchResult) {
-		// The POOL branch of the path POST /score and the bulk-score endpoint
-		// actually take - the site the hand-copied merge once missed.
-		mismatch = applyPoolWrite(r, result, policy)
-	})
-	if perr == nil {
-		return mismatch, nil
-	}
-	if !errors.Is(perr, errMatchNotFound) {
-		return false, perr
-	}
-	return false, e.recordBracketMatchResultTx(tx, compID, matchID, result, policy)
-}
-
-// recordMatchResultTx is the tx-aware twin of RecordMatchResult. Used
-// exclusively by the K3 partial-write rollback inside
-// RecordMatchResultWithIneligibilityTx, the prior result is restored
-// byte-for-byte, so applyHansokuIppons is intentionally skipped here.
-func (e *Engine) recordMatchResultTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult) error {
-	result.ID = matchID
-	// K3 rollback: replay the snapshot verbatim - see matchWriteRestore. The
-	// side mismatch is deliberately DISCARDED here: a snapshot replays sides
-	// captured from this same match, so a disagreement is not a client error.
-	if _, err := e.writeToPoolOrBracketTx(tx, compID, matchID, result, matchWriteRestore); err != nil {
-		return err
-	}
-	if _, err := e.recordIneligibilityFromDecisionTx(tx, compID, matchID, result); err != nil {
-		log.Printf("engine: recordIneligibilityFromDecisionTx compId=%s matchId=%s: %v", compID, matchID, err)
-	}
-	return nil
-}
-
-// lookupExistingResultTx is the tx-aware twin of lookupExistingResult.
-// Reads pool matches first, falls through to bracket on
-// errMatchNotFound (NotFoundError), same shape the non-tx path
-// returns.
-func (e *Engine) lookupExistingResultTx(tx state.StoreTx, compID, matchID string) (*state.MatchResult, error) {
-	poolMatches, err := tx.LoadPoolMatches(compID)
-	if err == nil {
-		for i := range poolMatches {
-			if poolMatches[i].ID == matchID {
-				r := poolMatches[i]
-				return &r, nil
-			}
-		}
-	}
-	bracket, err := tx.LoadBracket(compID)
-	if err == nil && bracket != nil {
-		for _, round := range bracket.Rounds {
-			for i := range round {
-				if round[i].ID == matchID {
-					return bracketMatchAsResult(&round[i]), nil
-				}
-			}
-		}
-		if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchID {
-			return bracketMatchAsResult(bracket.ThirdPlaceMatch), nil
-		}
-	}
-	return nil, notFoundErrorf("match %q not found in competition %q", matchID, compID)
-}
-
-// lookupMatchSidesTx is the tx-aware twin of lookupMatchSides.
-func (e *Engine) lookupMatchSidesTx(tx state.StoreTx, compID, matchID string) (string, string, error) {
-	poolMatches, err := tx.LoadPoolMatches(compID)
-	if err == nil {
-		for _, m := range poolMatches {
-			if m.ID == matchID {
-				return m.SideA, m.SideB, nil
-			}
-		}
-	}
-	bracket, err := tx.LoadBracket(compID)
-	if err == nil && bracket != nil {
-		for _, round := range bracket.Rounds {
-			for _, bm := range round {
-				if bm.ID == matchID {
-					return bm.SideA, bm.SideB, nil
-				}
-			}
-		}
-		if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchID {
-			return bracket.ThirdPlaceMatch.SideA, bracket.ThirdPlaceMatch.SideB, nil
-		}
-	}
-	return "", "", notFoundErrorf("match %q not found in competition %q", matchID, compID)
 }
 
 // StartMatchTx is the tx-aware FR-035 gate. Same contract as
@@ -425,7 +268,7 @@ func (e *Engine) StartMatchTx(tx state.StoreTx, compID, matchID string) error {
 	if err := e.checkSimultaneousMatchTx(tx, compID, matchID); err != nil {
 		return err
 	}
-	sideA, sideB, err := e.lookupMatchSidesTx(tx, compID, matchID)
+	sideA, sideB, err := e.lookupMatchSides(tx, compID, matchID)
 	if err != nil {
 		return err
 	}
@@ -462,7 +305,7 @@ func (e *Engine) StartMatchTx(tx state.StoreTx, compID, matchID string) error {
 //
 // Phase 2c simultaneity gate.
 func (e *Engine) checkSimultaneousMatchTx(tx state.StoreTx, compID, matchID string) error {
-	sideA, sideB, err := e.lookupMatchSidesTx(tx, compID, matchID)
+	sideA, sideB, err := e.lookupMatchSides(tx, compID, matchID)
 	if err != nil {
 		return nil
 	}
@@ -684,110 +527,12 @@ func resolvePlayerIDsTx(tx state.StoreTx, compID, sideA, sideB string) (string, 
 	return idA, idB
 }
 
-// checkConcurrentIneligibilityTx is the tx-aware twin of
-// checkConcurrentIneligibility. Same logic, same "log and skip on
-// lookup failure" behaviour, the T105 guard is best-effort, the
-// canonical check-and-set inside recordIneligibilityFromDecisionTx is
-// the load-bearing serialisation point.
-func (e *Engine) checkConcurrentIneligibilityTx(tx state.StoreTx, compID, matchID, loserName string) error {
-	if loserName == "" {
-		return nil
-	}
-	comp, err := tx.LoadCompetition(compID)
-	if err != nil || comp == nil {
-		if err != nil {
-			log.Printf("engine: checkConcurrentIneligibilityTx LoadCompetition compId=%s: %v (T105 guard skipped)", compID, err)
-		}
-		return nil
-	}
-	// Engi forces the zekken layout; make the effective flag explicit (Finding 10).
-	participants, err := tx.LoadParticipants(compID, comp.EffectiveWithZekkenName())
-	if err != nil {
-		log.Printf("engine: checkConcurrentIneligibilityTx LoadParticipants compId=%s: %v (T105 guard skipped)", compID, err)
-		return nil
-	}
-	pool := combinedPlayerPool(comp.Players, participants)
-	playerID := lookupPlayerID(pool, loserName)
-	if playerID == "" {
-		return nil
-	}
-	statuses, err := tx.LoadCompetitorStatus(compID)
-	if err != nil {
-		log.Printf("engine: checkConcurrentIneligibilityTx LoadCompetitorStatus compId=%s: %v (T105 guard skipped)", compID, err)
-		return nil
-	}
-	if st, ok := statuses[playerID]; ok && !st.Eligible && st.MatchID != matchID {
-		return &AlreadyIneligibleError{
-			PlayerID: playerID,
-			MatchID:  st.MatchID,
-			Reason:   st.Reason,
-		}
-	}
-	return nil
-}
-
-// hasDownstreamMatchStartedTx is the tx-aware twin of
-// hasDownstreamMatchStarted. Same logic; reads through the tx so the
-// state seen here is the state inside the lock the caller already
-// holds.
-func (e *Engine) hasDownstreamMatchStartedTx(tx state.StoreTx, compID string, playerNames []string, excludeMatchID string) (bool, error) {
-	wantSet := make(map[string]struct{}, len(playerNames))
-	for _, n := range playerNames {
-		if n != "" {
-			wantSet[n] = struct{}{}
-		}
-	}
-	if len(wantSet) == 0 {
-		return false, nil
-	}
-	involvesAny := func(a, b string) bool {
-		if _, ok := wantSet[a]; ok {
-			return true
-		}
-		_, ok := wantSet[b]
-		return ok
-	}
-	isStarted := func(s state.MatchStatus) bool {
-		return s == state.MatchStatusRunning || s == state.MatchStatusCompleted
-	}
-	poolMatches, err := tx.LoadPoolMatches(compID)
-	if err == nil {
-		for _, m := range poolMatches {
-			if m.ID == excludeMatchID {
-				continue
-			}
-			if isStarted(m.Status) && involvesAny(m.SideA, m.SideB) {
-				return true, nil
-			}
-		}
-	}
-	bracket, err := tx.LoadBracket(compID)
-	if err == nil && bracket != nil {
-		for _, round := range bracket.Rounds {
-			for _, bm := range round {
-				if bm.ID == excludeMatchID {
-					continue
-				}
-				if isStarted(bm.Status) && involvesAny(bm.SideA, bm.SideB) {
-					return true, nil
-				}
-			}
-		}
-		if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID != excludeMatchID {
-			if isStarted(bm.Status) && involvesAny(bm.SideA, bm.SideB) {
-				return true, nil
-			}
-		}
-	}
-	return false, nil
-}
-
 // hasStartedKnockoutMatchTx reports whether any BRACKET (knockout) match
 // with status running or completed currently lists one of playerNames as a
-// side. This is the bracket-only twin of hasDownstreamMatchStartedTx,
-// pool matches are intentionally NOT scanned because a pool finisher
-// legitimately appears in their own completed pool bouts, which must NOT
-// trip the guard.
+// side. This is the bracket-only counterpart of hasDownstreamMatchStarted
+// (eligibility.go, called here through tx), pool matches are intentionally
+// NOT scanned because a pool finisher legitimately appears in their own
+// completed pool bouts, which must NOT trip the guard.
 //
 // mp-e2k1.
 func (e *Engine) hasStartedKnockoutMatchTx(tx state.StoreTx, compID string, playerNames []string) (matchedName, matchID string, err error) {
@@ -847,65 +592,65 @@ func (e *Engine) hasStartedKnockoutMatchTx(tx state.StoreTx, compID string, play
 	return "", "", nil
 }
 
-// restoreCompetitorEligibilityTx is the tx-aware twin of
-// restoreCompetitorEligibility.
-func (e *Engine) restoreCompetitorEligibilityTx(tx state.StoreTx, compID, priorLoser, matchID string) (*domain.CompetitorStatus, error) {
-	if priorLoser == "" {
-		return nil, nil
-	}
-	comp, err := tx.LoadCompetition(compID)
-	if err != nil {
-		return nil, err
-	}
-	if comp == nil {
-		return nil, nil
-	}
-	// Engi forces the zekken layout; make the effective flag explicit (Finding 10).
-	participants, err := tx.LoadParticipants(compID, comp.EffectiveWithZekkenName())
-	if err != nil {
-		return nil, err
-	}
-	pool := combinedPlayerPool(comp.Players, participants)
-	playerID := lookupPlayerID(pool, priorLoser)
-	if playerID == "" {
-		return nil, nil
-	}
-	status := domain.CompetitorStatus{
-		PlayerID:   playerID,
-		Eligible:   true,
-		MatchID:    matchID,
-		RecordedAt: time.Now().UTC(),
-	}
-	if err := tx.SetCompetitorStatus(compID, status); err != nil {
-		return nil, err
-	}
-	return &status, nil
-}
-
-// RecordDecisionTx is the tx-aware twin of RecordDecision. Same
-// contract, auto-fills the scoreline, runs the T103 lock + T105
-// concurrent-kiken checks, persists the result, restores prior-loser
-// eligibility on undo, all inside ONE per-comp lock acquire.
+// RecordDecisionTx auto-fills the scoreline from decision/decisionBy/encho
+// and persists the result via RecordMatchResultWithIneligibilityTx. The
+// canonical SideA=Aka / SideB=Shiro mapping (CLAUDE.md) is used to
+// translate decisionBy → which side loses/forfeits: the winner gets the
+// maru default-win fill (○○ regulation, ○ encho); the loser keeps any
+// points it had already struck (FIK Art. 32, via preserveLoserScore).
 //
-// T156.
+// When the match already has a kiken/fusenpai decision recorded (the
+// "undo" path, T103/CHK024) the engine enforces the
+// contracts/match-decisions.md §Decision lock & undo rule: if any
+// subsequent match involving either prior participant has started
+// since the original decision was recorded, the engine returns
+// ErrDecisionLocked unless force is true. On a successful overwrite
+// where the prior loser is no longer the new loser, the prior loser's
+// CompetitorStatus is restored to Eligible: true and surfaced as the
+// returned status so the handler can broadcast the change.
+//
+// Runs the sides lookup, the T105 concurrent-kiken check, the T103
+// downstream-match lock check, the match write, and the prior-loser
+// eligibility restore on undo, ALL through the supplied tx, so the whole
+// sequence commits under ONE per-comp lock acquire (T156).
+//
+// This is the canonical body: RecordDecision (eligibility.go) is a thin
+// WithTransaction shim over this function — bc-twin, mirroring the
+// RecordMatchResultWithIneligibility / RecordMatchResultWithIneligibilityTx
+// pair in scoring.go / scoring_tx.go. Call this directly when already
+// inside a WithTransaction closure (e.g. the decision HTTP handler); call
+// RecordDecision otherwise.
+//
+// T090, T103, T156, contracts/match-decisions.md §POST /decision, bc-twin.
 func (e *Engine) RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata, force bool) (*state.MatchResult, *domain.CompetitorStatus, error) {
 	if decisionBy != "shiro" && decisionBy != "aka" {
 		return nil, nil, validationErrorf("decisionBy must be 'shiro' or 'aka', got %q", decisionBy)
 	}
-	sideA, sideB, err := e.lookupMatchSidesTx(tx, compID, matchID)
+	sideA, sideB, err := e.lookupMatchSides(tx, compID, matchID)
 	if err != nil {
 		return nil, nil, err
 	}
+	// T105/CHK047: reject concurrent kiken, if the intended loser is
+	// already ineligible from a *different* match, two operators are
+	// trying to kiken the same player simultaneously. Return 409 so the
+	// second operator sees the conflict before any write happens.
+	//
+	// Only kiken and fusenpai actually mark the loser ineligible; for
+	// fusensho/daihyosen this check would surface a misleading
+	// "already_ineligible" 409, the StartMatch eligibility gate is the
+	// right place to reject those cases.
 	loserName := sideB
 	if decisionBy == "aka" {
 		loserName = sideA
 	}
 	if domain.IsKikenDecisionStr(decision) || decision == string(domain.DecisionFusenpai) {
-		if cerr := e.checkConcurrentIneligibilityTx(tx, compID, matchID, loserName); cerr != nil {
+		if cerr := e.checkConcurrentIneligibility(tx, compID, matchID, loserName); cerr != nil {
 			return nil, nil, cerr
 		}
 	}
-	prior, err := e.lookupExistingResultTx(tx, compID, matchID)
+	// T103: look up the prior result so we know whether this is an
+	// overwrite of a kiken/fusenpai (the "undo" path).
+	prior, err := e.lookupExistingResult(tx, compID, matchID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -913,8 +658,12 @@ func (e *Engine) RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	if prior != nil && (domain.IsKikenDecisionStr(prior.Decision) || prior.Decision == string(domain.DecisionFusenpai)) {
 		priorLoser = loserSideName(prior)
 	}
+	// T103: downstream-match check. The contract scope is "either
+	// participant", if any subsequent match for either side has been
+	// started or completed since the kiken/fusenpai, refuse the undo
+	// unless force is set.
 	if priorLoser != "" && !force {
-		started, err := e.hasDownstreamMatchStartedTx(tx, compID, []string{sideA, sideB}, matchID)
+		started, err := e.hasDownstreamMatchStarted(tx, compID, []string{sideA, sideB}, matchID)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -924,7 +673,7 @@ func (e *Engine) RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	}
 	// The winner gets the maru default-win fill; the withdrawing side keeps
 	// whatever it had struck and the encounter keeps its prior sub-bouts
-	// (FIK Art. 32 — mirrors RecordDecision in eligibility.go).
+	// (FIK Art. 32 — see preserveLoserScore below).
 	winIppons := domain.DefaultWinIppons(encho.On())
 	result := &state.MatchResult{
 		ID:             matchID,
@@ -936,6 +685,8 @@ func (e *Engine) RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 		Encho:          encho,
 		Status:         state.MatchStatusCompleted,
 	}
+	// shiro=SideB (White, left), aka=SideA (Red, right). The surviving side
+	// gets the ○ default-win fill and becomes Winner.
 	if decisionBy == "shiro" {
 		result.IpponsA = winIppons
 		result.Winner = sideA
@@ -948,10 +699,17 @@ func (e *Engine) RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	if err != nil {
 		return nil, nil, err
 	}
+	// T103: when the prior loser is no longer the new loser (decision
+	// type changed away from kiken/fusenpai, or decisionBy flipped),
+	// restore the prior loser's eligibility and surface the resulting
+	// status so the handler can broadcast it. If the write above just
+	// wrote a *new* ineligibility for the same player, that wins (the
+	// player is still ineligible). Only restore when the prior loser is
+	// no longer the current loser.
 	if priorLoser != "" {
 		newLoser := loserSideName(result)
 		if priorLoser != newLoser {
-			restored, rerr := e.restoreCompetitorEligibilityTx(tx, compID, priorLoser, matchID)
+			restored, rerr := e.restoreCompetitorEligibility(tx, compID, priorLoser, matchID)
 			if rerr == nil && restored != nil {
 				status = restored
 			}

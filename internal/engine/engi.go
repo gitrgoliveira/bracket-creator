@@ -66,24 +66,8 @@ func engiWinnerSide(flagsA, flagsB int) string {
 // so the audit trail is preserved for engi competitions.
 //
 // Returns the persisted MatchResult so the handler can echo / broadcast it.
-func (e *Engine) recordEngiMatchResult(compID, matchID string, flagsA, flagsB int, correctionReason string) (*state.MatchResult, error) {
-	return e.recordEngiMatch(compID, matchID, flagsA, flagsB, correctionReason,
-		e.withPoolMatch,
-		e.store.UpdateBracket,
-	)
-}
-
-// recordEngiMatchResultTx is the transaction-aware twin. It writes through the
-// supplied StoreTx so the engi dispatch from RecordMatchResultWithIneligibilityTx
-// runs inside the caller's single per-comp lock acquire (calling e.store
-// directly from inside a held tx would deadlock the non-reentrant mutex).
-func (e *Engine) recordEngiMatchResultTx(tx state.StoreTx, compID, matchID string, flagsA, flagsB int, correctionReason string) (*state.MatchResult, error) {
-	return e.recordEngiMatch(compID, matchID, flagsA, flagsB, correctionReason,
-		func(cID, mID string, mutate func(*state.MatchResult)) error {
-			return e.withPoolMatchTx(tx, cID, mID, mutate)
-		},
-		tx.UpdateBracket,
-	)
+func (e *Engine) recordEngiMatchResult(h state.StoreTx, compID, matchID string, flagsA, flagsB int, correctionReason string) (*state.MatchResult, error) {
+	return e.recordEngiMatch(h, compID, matchID, flagsA, flagsB, correctionReason)
 }
 
 // backfillEngiResult copies the engine-derived identity from a recorded engi
@@ -105,15 +89,17 @@ func backfillEngiResult(result, rec *state.MatchResult) {
 	result.Status = rec.Status
 }
 
-// recordEngiMatch is the shared record core for both the tx and non-tx paths.
-// poolUpdate and bracketUpdate abstract the persistence layer so the same logic
-// runs against either e.store (non-tx) or a StoreTx (tx).
+// recordEngiMatch is the shared record core. The store handle h abstracts the
+// persistence layer: *state.Store satisfies state.StoreTx, so the same body
+// runs against either the store itself (each call locks) or a live transaction
+// (the caller's per-comp lock is already held) — see writeToPoolOrBracket for
+// the handle convention. This used to inject two closures per persistence op;
+// the handle carries both.
 func (e *Engine) recordEngiMatch(
+	h state.StoreTx,
 	compID, matchID string,
 	flagsA, flagsB int,
 	correctionReason string,
-	poolUpdate func(compID, matchID string, mutate func(*state.MatchResult)) error,
-	bracketUpdate func(compID string, mutate func(*state.Bracket) error) error,
 ) (*state.MatchResult, error) {
 	if !engiValidTotal(flagsA, flagsB) {
 		return nil, validationErrorf(
@@ -125,10 +111,11 @@ func (e *Engine) recordEngiMatch(
 
 	// Try the pool stage first.
 	var out *state.MatchResult
-	err := poolUpdate(compID, matchID, func(r *state.MatchResult) {
+	err := e.withPoolMatch(h, compID, matchID, func(r *state.MatchResult) error {
 		applyEngiToMatchResult(r, flagsA, flagsB, winnerSide, correctionReason)
 		cp := *r
 		out = &cp
+		return nil
 	})
 	if err == nil {
 		return out, nil
@@ -139,7 +126,7 @@ func (e *Engine) recordEngiMatch(
 
 	// Fall through to the bracket stage (rounds + bronze).
 	var result *state.MatchResult
-	updateErr := bracketUpdate(compID, func(b *state.Bracket) error {
+	updateErr := h.UpdateBracket(compID, func(b *state.Bracket) error {
 		for rIdx, round := range b.Rounds {
 			for mIdx := range round {
 				if b.Rounds[rIdx][mIdx].ID != matchID {

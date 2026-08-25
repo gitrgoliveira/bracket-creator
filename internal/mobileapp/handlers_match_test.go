@@ -2987,22 +2987,49 @@ func TestSelfRunPolicy_NoRevMetadata(t *testing.T) {
 	// (If not present at all, the guard skipped storage, also correct.)
 }
 
-// TestClampClientModifiedAt verifies that clampClientModifiedAt rejects
-// hostile/buggy client timestamps that would otherwise freeze a match against
-// later legitimate writes (mp-y3nk, tri-review finding 3). Negative and
-// far-future values fall back to 0 (unstamped -> arrival-order); a plausible
-// value passes through unchanged. The 2s skew window is narrow by design:
-// clients stamp in server-relative time, so only genuine jitter from
-// stamp-to-evaluate latency is allowed.
+// TestClampClientModifiedAt pins the CLAMP half of the pair (mp-y3nk,
+// tri-review finding 3; reshaped by bc-cse). Only negative values fall back to
+// 0 (unstamped -> arrival-order); everything else passes through unchanged,
+// INCLUDING a far-future value, because clamping that one to 0 was the bug: 0
+// is ApplyByTimestamp's unconditional-apply bypass, so the "safe" fallback was
+// a silent overwrite of a newer stored result. A far-future stamp is now
+// refused by the caller instead (see TestClientClockSkew).
 func TestClampClientModifiedAt(t *testing.T) {
 	now := time.Now().UnixMilli()
 	assert.Equal(t, int64(0), clampClientModifiedAt(-1), "negative must clamp to 0")
-	assert.Equal(t, int64(0), clampClientModifiedAt(now+modifiedAtMaxSkewMs+60_000), "far-future must clamp to 0")
 	assert.Equal(t, int64(0), clampClientModifiedAt(0), "zero (unstamped) passes through as 0")
 	assert.Equal(t, now-1000, clampClientModifiedAt(now-1000), "a recent past timestamp passes through")
-	// A value inside the 2s skew window is trusted (genuine stamp-to-evaluate jitter).
-	assert.Equal(t, now+1000, clampClientModifiedAt(now+1000), "a slightly-future value inside the skew window passes through")
-	// 60s into the future is far beyond the 2s jitter window: must clamp to 0.
-	// (Bug: old 5-minute window accepted this, allowing match-freeze attacks.)
-	assert.Equal(t, int64(0), clampClientModifiedAt(now+60_000), "60s future is outside 2s skew window: must clamp to 0")
+	// A future value inside the tolerance is trusted (genuine drift/jitter).
+	assert.Equal(t, now+1000, clampClientModifiedAt(now+1000), "a slightly-future value passes through")
+	// And a far-future one is NOT silently turned into the unstamped bypass
+	// here; the refusal is the caller's job and must not be pre-empted.
+	assert.Equal(t, now+60_000, clampClientModifiedAt(now+60_000),
+		"a far-future value must reach the caller as-is, never be clamped into the unconditional-apply bypass")
+}
+
+// TestClientClockSkew pins the VALIDATE half: which stamps are refused (bc-cse).
+func TestClientClockSkew(t *testing.T) {
+	now := time.Now().UnixMilli()
+
+	// Inside the margin: honoured, no refusal. 3s is deliberately past the old
+	// 2s clamp threshold, which is the widening the operator asked for.
+	for _, v := range []int64{now - 60_000, now, now + 1_000, now + 3_000} {
+		_, _, refuse := clientClockSkew(v)
+		assert.False(t, refuse, "stamp %d (%dms ahead) is inside the tolerance and must be honoured", v, v-now)
+	}
+
+	// Beyond it: refused.
+	for _, v := range []int64{now + modifiedAtRefuseSkewMs + 1_000, now + 60_000} {
+		serverNowMs, aheadMs, refuse := clientClockSkew(v)
+		assert.True(t, refuse, "stamp %d (%dms ahead) is beyond the margin and must be refused", v, v-now)
+		assert.InDelta(t, now, serverNowMs, 5_000, "the reported server now must be the clock it judged against")
+		assert.Greater(t, aheadMs, int64(modifiedAtRefuseSkewMs), "the reported skew must exceed the margin")
+	}
+
+	// Unstamped and garbage are never refusals: they keep the legacy
+	// zero-then-bypass through the clamp.
+	for _, v := range []int64{0, -1, -1_000_000} {
+		_, _, refuse := clientClockSkew(v)
+		assert.False(t, refuse, "%d is not skew and must not be refused", v)
+	}
 }

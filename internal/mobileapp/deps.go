@@ -101,15 +101,20 @@ type ScoringEngine interface {
 	// calling it while holding a write lock risks a circular wait).
 	CheckCrossCompCourtBusy(compID, matchID string) error
 	// RecordDecision auto-fills the scoreline + winner from the
-	// decision/decisionBy/encho triple and persists the result. Used by
-	// the dedicated POST /decision endpoint (T090). When the prior
-	// result on the match already carried a kiken/fusenpai decision the
-	// engine enforces the downstream-match lock (T103/CHK024); force=true
-	// bypasses the lock so an operator can confirm an override.
+	// decision/decisionBy/encho triple and persists the result. When the
+	// prior result on the match already carried a kiken/fusenpai decision
+	// the engine enforces the downstream-match lock (T103/CHK024);
+	// force=true bypasses the lock so an operator can confirm an override.
+	// Since bc-twin this is a thin WithTransaction shim over
+	// RecordDecisionTx (the canonical body); NEVER call it from inside an
+	// existing WithTransaction, the per-comp lock is not reentrant.
 	RecordDecision(compID, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata, force bool) (*state.MatchResult, *domain.CompetitorStatus, error)
-	// RecordDecisionTx is the tx-aware twin of RecordDecision used by
-	// the decision handler under WithTransaction (T156). Same contract
-	// as RecordDecision; calls flow through the supplied StoreTx.
+	// RecordDecisionTx is the canonical implementation RecordDecision
+	// delegates to. Used directly by the decision handler under
+	// WithTransaction (T156) so the sides lookup, T103/T105 checks, match
+	// write, and eligibility-restore-on-undo all commit under ONE per-comp
+	// lock acquire. Same contract as RecordDecision; calls flow through the
+	// supplied StoreTx.
 	RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata, force bool) (*state.MatchResult, *domain.CompetitorStatus, error)
 	// MaybeAutoCompletePools transitions the competition's status to
 	// "complete" when every pool match is done, or injects supplementary

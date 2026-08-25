@@ -63,8 +63,9 @@ func TestCorruptSubResultsSurvivesAWriteToAnotherMatch(t *testing.T) {
 	assert.True(t, loaded[0].SubResultsUnreadable, "and says so")
 
 	// Score a DIFFERENT match. This rewrites every row in the file.
-	found, err := fresh.UpdatePoolMatchByID("c", "Pool A-2", func(m *MatchResult) {
+	found, err := fresh.UpdatePoolMatchByID("c", "Pool A-2", func(m *MatchResult) error {
 		m.Status = MatchStatusCompleted
+		return nil
 	})
 	require.NoError(t, err)
 	require.True(t, found)
@@ -107,8 +108,9 @@ func TestCorruptSubResultsTypeErrorDoesNotNormaliseDamageOntoDisk(t *testing.T) 
 		"a type error must degrade to EMPTY, not to a half-decoded encounter")
 	assert.True(t, loaded[0].SubResultsUnreadable)
 
-	found, err := fresh.UpdatePoolMatchByID("c", "Pool A-2", func(m *MatchResult) {
+	found, err := fresh.UpdatePoolMatchByID("c", "Pool A-2", func(m *MatchResult) error {
 		m.Status = MatchStatusCompleted
+		return nil
 	})
 	require.NoError(t, err)
 	require.True(t, found)
@@ -131,13 +133,14 @@ func TestRepairingTheCellClearsTheWarning(t *testing.T) {
 
 	fresh, err := NewStore(dir)
 	require.NoError(t, err)
-	found, err := fresh.UpdatePoolMatchByID("c", "Pool A-1", func(m *MatchResult) {
+	found, err := fresh.UpdatePoolMatchByID("c", "Pool A-1", func(m *MatchResult) error {
 		require.True(t, m.SubResultsUnreadable, "the mutate sees the flagged match")
 		m.SubResults = []SubMatchResult{
 			{Position: 1, SideA: "Tanaka", SideB: "Suzuki", IpponsA: []string{"M"}, Winner: "Tanaka"},
 		}
 		m.SubResultsRaw = ""
 		m.SubResultsUnreadable = false
+		return nil
 	})
 	require.NoError(t, err)
 	require.True(t, found)

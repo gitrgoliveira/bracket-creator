@@ -332,6 +332,12 @@ export function queueAlertMessage(alert) {
       return `${n} queued ${one ? "write" : "writes"} could not be read and ${one ? "was" : "were"} discarded. Check the affected ${one ? "match" : "matches"}.`;
     case "rejected":
       return `A result was refused by the server${detail} and cannot be saved. Re-enter it.`;
+    // bc-lww1. Deliberately NOT folded into "rejected": that message ends in
+    // "Re-enter it", which here would tell the operator to overwrite the newer
+    // result that just won. A supersede is the one drop where re-entering is the
+    // wrong move, so it gets its own wording.
+    case "superseded":
+      return `${one ? "A result was" : `${n} results were`} not saved because a newer result is already recorded for the same ${one ? "match" : "matches"}. Check what is recorded before re-entering anything.`;
     case "server_error":
       return `The server keeps refusing a queued result${detail}. It is still queued and still retrying, so keep this tab open.`;
     case "auth_required":

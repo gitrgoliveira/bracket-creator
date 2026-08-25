@@ -59,6 +59,30 @@ func TestApplyMatchWrite_LogsTheUnstampedOverwrite(t *testing.T) {
 			"there is no stamped result being overwritten; this is a pre-column file or a legacy client, the ordinary case")
 	})
 
+	// bc-cse review round: the same bypass on a RUNNING write is deliberately
+	// silent. A legacy client autosaving on the 300ms debounce would otherwise
+	// log once per keystroke for the whole bout and bury the terminal line that
+	// answers "where did the result go". The pair below is the argument: the
+	// intermediate write is silent, and the completed write that follows it
+	// against the SAME surviving stored stamp still reports.
+	t.Run("a running autosave taking the same bypass is not logged", func(t *testing.T) {
+		out := captureLog(t, func() {
+			applyMatchWrite(&state.MatchResult{ID: "Pool A-5", Status: state.MatchStatusRunning}, 1_700_000_000_000, matchWriteForward)
+		})
+		assert.NotContains(t, out, marker,
+			"an intermediate autosave is not the overwrite an operator is asking about, and there is one per keystroke")
+	})
+
+	t.Run("the completed write that follows it is still logged", func(t *testing.T) {
+		var applied bool
+		out := captureLog(t, func() {
+			applied = applyMatchWrite(&state.MatchResult{ID: "Pool A-5", Status: state.MatchStatusCompleted}, 1_700_000_000_000, matchWriteForward)
+		})
+		require.True(t, applied)
+		assert.Contains(t, out, marker, "the terminal write is the one that displaced the operator's result")
+		assert.Contains(t, out, "Pool A-5")
+	})
+
 	t.Run("a restore is exempt before any stamp is read", func(t *testing.T) {
 		out := captureLog(t, func() {
 			applyMatchWrite(&state.MatchResult{ID: "Pool A-4"}, 1_700_000_000_000, matchWriteRestore)

@@ -1703,10 +1703,23 @@ func applyMatchWrite(result *state.MatchResult, storedModifiedAt int64, policy m
 	// operator asks where a result went: it names the match whose stamped result
 	// an unstamped write replaced.
 	//
+	// RUNNING writes are excluded, and that is a volume decision with a
+	// correctness argument behind it. A legacy SPA build (no modifiedAt)
+	// autosaving on the ~300ms debounce reaches this primitive once per keystroke
+	// for the whole bout, which would bury the terminal line that actually
+	// answers the question in hundreds of intermediate ones — precisely when
+	// someone is reading these logs. Nothing diagnostic is lost, because the
+	// stored stamp SURVIVES an unstamped write (applyPoolWrite copies it back
+	// onto the result before the overwrite, and the bracket twin does the same),
+	// so storedModifiedAt is still > 0 when that same client finally writes the
+	// completed result — and THAT write logs, naming the same match and the same
+	// stamp it displaced. The excluded lines are duplicates of the one kept, not
+	// coverage.
+	//
 	// Competition and match ids are not in scope here (this primitive is handed
 	// only the result and the stored stamp), so it logs what the result carries:
 	// its own ID.
-	if result.ModifiedAt == 0 && storedModifiedAt > 0 {
+	if result.ModifiedAt == 0 && storedModifiedAt > 0 && result.Status != state.MatchStatusRunning {
 		log.Printf("engine: match %s: unstamped write overwrites a result stamped %d (unstamped bypass, no last-write-wins comparison possible)",
 			result.ID, storedModifiedAt)
 	}

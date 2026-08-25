@@ -710,6 +710,23 @@ let _queueGen = 0;
 // finite positive stamp - and exists so a hand-edited store yields a number,
 // not NaN.)
 //
+// KNOWN LIMIT, and it is the reason the second refusal is terminal rather than
+// looping: this reconstruction assumes the LOCAL clock ticked monotonically and
+// only the learned OFFSET was wrong. If the OS STEPPED the wall clock between
+// enqueue and flush - the NTP-jump-on-reconnect case the 'online' relearn exists
+// for - then enqueuedAt was recorded in the old frame and adding the new offset
+// does not map it into the server's. A device that was 10 minutes fast when the
+// operator scored, and is corrected on reconnect, re-stamps 10 minutes into the
+// server's future again, is refused again, and the entry is DROPPED.
+//
+// That is accepted, and it is a loud loss, not a silent one: the drop raises the
+// not-landed banner and the queue alert, so the operator re-enters a result that
+// is then stamped correctly. No safe automatic repair exists here - clamping to
+// serverNow would let a genuinely stale replay beat results recorded during the
+// outage, which is the exact overwrite bc-lww1 set out to stop. A monotonic
+// anchor (performance.now() captured at enqueue) would survive a step WITHIN a
+// session but not a reload, so it would narrow this case without closing it.
+//
 // Marks the entry so a SECOND refusal is terminal, and persists, so the mark
 // survives a reload (see the skewRetried note on the descriptor shape).
 async function _restampQueuedEntryForSkew(descriptor) {

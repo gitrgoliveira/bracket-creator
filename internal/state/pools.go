@@ -726,6 +726,19 @@ func (s *Store) savePoolMatchesLocked(compID string, results []MatchResult, writ
 // has that ID, allowing callers to fall through (e.g. to the bracket
 // store for elimination-round matches).
 //
+// mutate may ABORT by returning an error, in which case the slice is NOT
+// written back — the exact contract UpdateBracket has always had, so a match
+// write behaves the same way whichever store it lands in. A caller uses this
+// when it has decided the write contributes nothing (a last-write-wins drop,
+// an identity mismatch): without it the untouched slice is still re-serialized
+// and the file version still bumped, so a rejected write leaves the same
+// footprint on disk as an accepted one.
+//
+// NOTE the abort is reported through the ERROR, never through found: found
+// stays true, because the match WAS there. Signalling an abort as (false, nil)
+// would make engine.writeToPoolOrBracket treat a rejected pool write as
+// "not a pool match" and go looking for it in the bracket.
+//
 // The entire load + find + mutate + save sequence runs under the
 // per-competition lock so concurrent calls, even for different
 // match IDs in the same competition, serialize correctly without
@@ -738,7 +751,7 @@ func (s *Store) savePoolMatchesLocked(compID string, results []MatchResult, writ
 // in sequence, the later save would overwrite the earlier save's
 // mutation with stale data for the OTHER match. One operator's score
 // would be silently lost during a live tournament.
-func (s *Store) UpdatePoolMatchByID(compID, matchID string, mutate func(*MatchResult)) (bool, error) {
+func (s *Store) UpdatePoolMatchByID(compID, matchID string, mutate func(*MatchResult) error) (bool, error) {
 	if err := ValidateCompetitionID(compID); err != nil {
 		return false, err
 	}
@@ -756,7 +769,7 @@ func (s *Store) UpdatePoolMatchByID(compID, matchID string, mutate func(*MatchRe
 // save sequence runs without re-acquiring the lock from inside a
 // WithTransaction closure (T156, NFR-010). The write parameter
 // selects direct-to-disk vs WAL-capturing semantics (T211/T212).
-func (s *Store) updatePoolMatchByIDLocked(compID, matchID string, mutate func(*MatchResult), write writeFn) (bool, error) {
+func (s *Store) updatePoolMatchByIDLocked(compID, matchID string, mutate func(*MatchResult) error, write writeFn) (bool, error) {
 	// Load directly from disk under the lock. We deliberately bypass
 	// the loadCached path here because the per-comp lock is what
 	// coordinates with the save below; using the cache would risk
@@ -771,7 +784,11 @@ func (s *Store) updatePoolMatchByIDLocked(compID, matchID string, mutate func(*M
 
 	for i := range results {
 		if results[i].ID == matchID {
-			mutate(&results[i])
+			// Found either way: an aborting mutate is a write that decided not
+			// to happen, not a missing match. See the contract note above.
+			if merr := mutate(&results[i]); merr != nil {
+				return true, merr
+			}
 			return true, s.savePoolMatchesLocked(compID, results, write)
 		}
 	}

@@ -1755,11 +1755,12 @@ func dischargeReopenPendingUnderTx(stx state.StoreTx, compID, matchID, reason st
 	if !inBracket {
 		// Pool first, mirroring lookupMatchSnapshot's order. UpdatePoolMatchByID
 		// reports found=false for a bracket match, which is the fall-through.
-		found, err := stx.UpdatePoolMatchByID(compID, matchID, func(r *state.MatchResult) {
+		found, err := stx.UpdatePoolMatchByID(compID, matchID, func(r *state.MatchResult) error {
 			r.ReopenPending = false
 			if reason != "" && r.CorrectionReason == "" {
 				r.CorrectionReason = reason
 			}
+			return nil
 		})
 		if err != nil {
 			return fmt.Errorf("discharge reopen flag: pool match: %w", err)

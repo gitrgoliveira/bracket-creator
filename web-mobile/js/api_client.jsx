@@ -207,6 +207,16 @@ function _relearnClockThrottled() {
 // value is what matters.
 function _serverNowMs() { return Date.now() + _serverClockOffsetMs; }
 
+// Monotonic reading, or null where performance.now() is unavailable (older
+// embedded webviews, and the non-browser imports the test harness does). Null
+// simply means "no monotonic anchor", which every caller already handles: the
+// wall-clock reconstruction is the fallback.
+function _perfNow() {
+    return (typeof performance !== 'undefined' && typeof performance.now === 'function')
+        ? performance.now()
+        : null;
+}
+
 // ---------------------------------------------------------------------------
 // bc-cse: clock-skew REFUSAL (the server half of this change)
 // ---------------------------------------------------------------------------
@@ -301,6 +311,11 @@ const _revSession = (typeof crypto !== 'undefined' && crypto.randomUUID)
  *   method          : HTTP method string ('PUT' | 'POST')
  *   url             : same-origin request path, e.g. /api/competitions/… (for replay in _flushQueue)
  *   enqueuedAt      : Date.now() at enqueue time (for TTL eviction on reload)
+ *   perfAtEnqueue   : performance.now() at enqueue time (bc-cse). SESSION-LOCAL
+ *                     and deliberately NOT persisted - it is measured from this
+ *                     document's time origin, so it is meaningless once
+ *                     rehydrated. Absent means the clock-skew re-stamp uses the
+ *                     wall-clock reconstruction alone; see _restampFor.
  *   attempts        : count of server rejections (5xx/429/403) on flush retries;
  *                     absent until the first rejection. Network failures never
  *                     increment it. At SERVER_REJECTION_NOTICE_THRESHOLD the
@@ -310,7 +325,8 @@ const _revSession = (typeof crypto !== 'undefined' && crypto.randomUUID)
  *                     which is the safe default for an entry persisted by an
  *                     older build. A second clock_skew refusal on a marked entry
  *                     drops it rather than retrying a third time: the stamp is
- *                     reconstructed from enqueuedAt + the freshly learned offset,
+ *                     reconstructed by _restampFor (the older of the wall-clock
+ *                     and monotonic estimates),
  *                     so if that is still refused the device's frame cannot be
  *                     reconciled and further attempts would poison-loop.
  *                     A reload landing between the re-stamp and the retry
@@ -460,7 +476,16 @@ function _persistQueue() {
             _storageFullAnnounced = false;
             return true;
         }
-        const entries = [..._writeQueue.entries()];
+        // perfAtEnqueue is SESSION-LOCAL and must not be serialized: it is
+        // measured from this document's time origin, so persisting it would let
+        // a reload (or a second tab reading the same key) subtract two readings
+        // taken from different zeros and derive a nonsense age. Stripped here
+        // rather than at the read side so there is one place to reason about,
+        // and so an entry written by an older build behaves identically to a
+        // rehydrated one: no anchor, wall-clock reconstruction only.
+        const entries = [..._writeQueue.entries()].map(
+            ([k, d]) => [k, { ...d, perfAtEnqueue: undefined }]
+        );
         localStorage.setItem(QUEUE_STORAGE_KEY, JSON.stringify(entries));
         _storageFullAnnounced = false;
         return true;
@@ -710,31 +735,66 @@ let _queueGen = 0;
 // finite positive stamp - and exists so a hand-edited store yields a number,
 // not NaN.)
 //
-// KNOWN LIMIT, and it is the reason the second refusal is terminal rather than
-// looping: this reconstruction assumes the LOCAL clock ticked monotonically and
-// only the learned OFFSET was wrong. If the OS STEPPED the wall clock between
-// enqueue and flush - the NTP-jump-on-reconnect case the 'online' relearn exists
-// for - then enqueuedAt was recorded in the old frame and adding the new offset
-// does not map it into the server's. A device that was 10 minutes fast when the
-// operator scored, and is corrected on reconnect, re-stamps 10 minutes into the
-// server's future again, is refused again, and the entry is DROPPED.
+// The wall-clock arithmetic above is only ONE of the two reconstructions, and on
+// its own it assumes the local clock ticked monotonically while only the learned
+// OFFSET was wrong. If the OS STEPPED the wall clock between enqueue and flush -
+// the NTP-jump-on-reconnect case the 'online' relearn exists for - enqueuedAt was
+// recorded in a frame the new offset does not describe, and a device that was 10
+// minutes fast when the operator scored, then corrected on reconnect, would
+// re-stamp 10 minutes into the server's future again and be dropped on the second
+// refusal. _restampFor closes that WITHIN a session by cross-checking against a
+// monotonic anchor and taking whichever reconstruction is older; see the safety
+// argument stated there.
 //
-// That is accepted, and it is a loud loss, not a silent one: the drop raises the
-// not-landed banner and the queue alert, so the operator re-enters a result that
-// is then stamped correctly. No safe automatic repair exists here - clamping to
-// serverNow would let a genuinely stale replay beat results recorded during the
-// outage, which is the exact overwrite bc-lww1 set out to stop. A monotonic
-// anchor (performance.now() captured at enqueue) would survive a step WITHIN a
-// session but not a reload, so it would narrow this case without closing it.
+// RESIDUAL, unchanged and accepted: across a reload (or between two tabs) there
+// is no comparable anchor - performance.now() is measured from a per-document
+// origin - so a rehydrated entry falls back to wall-clock only and a clock step
+// spanning the reload still ends in a drop. That loss is LOUD: the not-landed
+// banner and the queue alert both fire and the operator re-enters, which is why
+// the second refusal is terminal rather than looping. Clamping to serverNow
+// would make it silent instead of loud AND wrong in the dangerous direction -
+// a stale replay beating results recorded during the outage is the exact
+// overwrite bc-lww1 exists to stop.
 //
 // Marks the entry so a SECOND refusal is terminal, and persists, so the mark
 // survives a reload (see the skewRetried note on the descriptor shape).
 async function _restampQueuedEntryForSkew(descriptor) {
     await _learnServerClockOffset();
     const enqueuedAt = Number.isFinite(descriptor.enqueuedAt) ? descriptor.enqueuedAt : Date.now();
-    descriptor.payload.modifiedAt = enqueuedAt + _serverClockOffsetMs;
+    descriptor.payload.modifiedAt = _restampFor(enqueuedAt, descriptor.perfAtEnqueue);
     descriptor.skewRetried = true;
     _persistQueue();
+}
+
+// The re-stamp arithmetic, factored out so it can be tested without a queue and
+// so the safety rule below has one statement rather than one per branch.
+//
+// Two independent reconstructions of "when did the operator act, in the server's
+// frame", each with a failure mode the other does not share:
+//
+//   wall = enqueuedAt + offset     wrong if the OS STEPPED the clock between
+//                                  enqueue and flush (enqueuedAt is then in a
+//                                  frame the new offset does not describe)
+//   perf = serverNow - trueAge     wrong if performance.now() FROZE while the
+//                                  device was suspended (age understated, so
+//                                  the write looks fresher than it is)
+//
+// Take the OLDER. That is not a tie-break, it is the whole safety argument: an
+// over-old stamp can only make THIS write lose a comparison it might have won,
+// which costs at worst a re-entry the operator is already being told about. An
+// over-NEW stamp lets a stale replay beat a result recorded during the outage —
+// silently, and that overwrite is the entire reason bc-lww1 exists. So where the
+// two disagree we always prefer the direction whose failure is recoverable.
+function _restampFor(enqueuedAt, perfAtEnqueue) {
+    const wall = enqueuedAt + _serverClockOffsetMs;
+    const perfNow = _perfNow();
+    if (perfNow === null || !Number.isFinite(perfAtEnqueue)) return wall;
+    const ageMs = perfNow - perfAtEnqueue;
+    // A negative age is not a clock step, it is two readings from different time
+    // origins (a rehydrated entry that predates the strip, a hand-edited store).
+    // There is no true age to recover, so fall back rather than invent one.
+    if (!(ageMs >= 0)) return wall;
+    return Math.min(wall, _serverNowMs() - ageMs);
 }
 
 async function _flushQueue() {
@@ -1139,6 +1199,15 @@ async function _flushQueue() {
 // reset the backoff counter (a fresh user write must not inherit a stale
 // max-backoff delay from a prior failure run), and kick a flush.
 function _commitEnqueue(key, descriptor) {
+    // bc-cse: the monotonic half of the clock-skew re-stamp. performance.now()
+    // is immune to wall-clock steps, so the difference between this reading and
+    // one taken at flush time is the write's TRUE age even if the OS corrects
+    // the clock in between. Deliberately NOT persisted (see _persistQueue): the
+    // value is relative to THIS document's time origin, so a reading rehydrated
+    // from a previous session, or written by another tab, would be arithmetic on
+    // two different zeros. An entry without it simply falls back to the
+    // wall-clock reconstruction, which is what every entry did before.
+    descriptor.perfAtEnqueue = _perfNow();
     _writeQueue.set(key, descriptor);
     _persistQueue();
     _recomputeSyncStatus();
@@ -3286,6 +3355,10 @@ export {
     writeDidNotLand, writeWasSuperseded, writeWasRefusedForClock,
     SUPERSEDED_REASON, SUPERSEDED_ADVICE,
     CLOCK_SKEW_REASON_TEXT, CLOCK_SKEW_ADVICE, CLOCK_SKEW_UNHEALED_ADVICE,
+    // Exported for tests only: the take-the-older rule is a safety property, and
+    // reaching it through a full offline/refuse/reconnect fixture would test the
+    // queue rather than the arithmetic. No production consumer outside this file.
+    _restampFor,
 };
 
 if (typeof window !== 'undefined') {

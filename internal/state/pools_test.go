@@ -313,9 +313,10 @@ func TestUpdatePoolMatchByID_Basic(t *testing.T) {
 	}
 	require.NoError(t, store.SavePoolMatches(compID, matches))
 
-	found, err := store.UpdatePoolMatchByID(compID, "P1-0", func(m *MatchResult) {
+	found, err := store.UpdatePoolMatchByID(compID, "P1-0", func(m *MatchResult) error {
 		m.Winner = "Alice"
 		m.Status = MatchStatusCompleted
+		return nil
 	})
 	require.NoError(t, err)
 	assert.True(t, found)
@@ -344,8 +345,9 @@ func TestUpdatePoolMatchByID_NotFound(t *testing.T) {
 	}))
 
 	called := false
-	found, err := store.UpdatePoolMatchByID(compID, "nonexistent", func(m *MatchResult) {
+	found, err := store.UpdatePoolMatchByID(compID, "nonexistent", func(m *MatchResult) error {
 		called = true
+		return nil
 	})
 	require.NoError(t, err)
 	assert.False(t, found)
@@ -360,7 +362,7 @@ func TestUpdatePoolMatchByID_InvalidCompID(t *testing.T) {
 	store, err := NewStore(dir)
 	require.NoError(t, err)
 
-	_, err = store.UpdatePoolMatchByID("../bad", "M1", func(m *MatchResult) {})
+	_, err = store.UpdatePoolMatchByID("../bad", "M1", func(m *MatchResult) error { return nil })
 	assert.Error(t, err)
 }
 

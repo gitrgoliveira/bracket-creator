@@ -18,6 +18,18 @@ import (
 // match with the given ID exists in the respective data store.
 var errMatchNotFound = errors.New("match not found")
 
+// errPoolWriteDropped aborts withPoolMatch's mutate when applyPoolWrite has
+// decided the incoming write contributes nothing — a last-write-wins supersede
+// or an identity mismatch. It never escapes writeToPoolOrBracket, which
+// translates it back into that function's (mismatch, err) vocabulary; it exists
+// only to tell the store "do not persist this slice", which is the one thing a
+// mutate closure otherwise cannot say.
+//
+// Distinct from errMatchNotFound ON PURPOSE. Both mean "no write happened", but
+// not-found means look in the bracket, and routing a dropped POOL write into the
+// bracket branch would hunt for a match that is not there.
+var errPoolWriteDropped = errors.New("pool write dropped")
+
 // ErrMatchSideMismatch is returned when a score payload names competitors
 // (sideA/sideB) that differ from the match's stored pairing. Match identity
 // is fixed at generation; a score only carries the *result*, never a new
@@ -132,7 +144,13 @@ func reconcileSides(result *state.MatchResult, stored storedSides) (mismatch boo
 // later save would overwrite the earlier save's mutation with stale
 // data for the OTHER match. One operator's score would be silently
 // lost during a live tournament.
-func (e *Engine) withPoolMatch(h state.StoreTx, compId, matchId string, mutate func(*state.MatchResult)) error {
+//
+// mutate may ABORT by returning an error, which skips the save and propagates
+// the error here — the same contract withBracketMatch's store primitive has, so
+// a write that decides it contributes nothing leaves no footprint on either
+// branch. The error is returned VERBATIM (not wrapped in errMatchNotFound), so a
+// caller can pass its own sentinel through and recognise it on the way out.
+func (e *Engine) withPoolMatch(h state.StoreTx, compId, matchId string, mutate func(*state.MatchResult) error) error {
 	found, err := h.UpdatePoolMatchByID(compId, matchId, mutate)
 	if err != nil {
 		return err
@@ -547,22 +565,28 @@ const (
 // match).
 func (e *Engine) writeToPoolOrBracket(h state.StoreTx, compId, matchId string, result *state.MatchResult, policy matchWritePolicy) (mismatch bool, err error) {
 	var superseded bool
-	perr := e.withPoolMatch(h, compId, matchId, func(r *state.MatchResult) {
+	perr := e.withPoolMatch(h, compId, matchId, func(r *state.MatchResult) error {
 		// The POOL branch of the path POST /score and the bulk-score endpoint
 		// actually take — the site the hand-copied merge once missed.
 		mismatch, superseded = applyPoolWrite(r, result, policy)
+		if mismatch || superseded {
+			// applyPoolWrite left the stored match untouched, so there is
+			// nothing to persist. Aborting here is what makes a dropped POOL
+			// write behave like a dropped BRACKET write, which has always
+			// skipped its save (UpdateBracket returns early when its callback
+			// errors). Without it the identical CSV row was re-serialized and
+			// the standings-cache version bumped, so a rejected write left the
+			// same footprint on disk as an accepted one — the branch asymmetry
+			// this whole primitive exists to remove.
+			return errPoolWriteDropped
+		}
+		return nil
 	})
-	if perr == nil {
+	// A dropped write reached the match and chose not to persist; the verdict is
+	// in the flags the closure set, not in the error, so it rejoins the found
+	// path here rather than being reported as a store failure.
+	if perr == nil || errors.Is(perr, errPoolWriteDropped) {
 		if superseded {
-			// The stored match was left untouched, but the SAVE still happened:
-			// UpdatePoolMatchByID writes the slice back whenever the id is
-			// found, so a dropped pool write rewrites the identical CSV row and
-			// bumps the standings-cache version with it. Accepted — an extra
-			// bump only costs a recompute, and the alternative (reporting
-			// "not found" to skip the save) would lose the supersede verdict.
-			// The bracket branch differs by construction: UpdateBracket skips
-			// the save when the mutate callback returns an error, so a dropped
-			// bracket write does not touch the file at all.
 			return false, ErrMatchSuperseded
 		}
 		return mismatch, nil
@@ -2057,8 +2081,9 @@ func parseWinnerOf(s string, numRounds int) (int, int) {
 }
 
 func (e *Engine) UpdateMatchCourt(compId string, matchId string, newCourt string) error {
-	err := e.withPoolMatch(e.store, compId, matchId, func(r *state.MatchResult) {
+	err := e.withPoolMatch(e.store, compId, matchId, func(r *state.MatchResult) error {
 		r.Court = newCourt
+		return nil
 	})
 	if err == nil {
 		return nil
@@ -2165,8 +2190,9 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 }
 
 func (e *Engine) UpdateMatchTime(compId string, matchId string, scheduledAt string) error {
-	err := e.withPoolMatch(e.store, compId, matchId, func(r *state.MatchResult) {
+	err := e.withPoolMatch(e.store, compId, matchId, func(r *state.MatchResult) error {
 		r.ScheduledAt = scheduledAt
+		return nil
 	})
 	if err == nil {
 		return nil
@@ -2202,10 +2228,13 @@ func (e *Engine) UpdateMatchTime(compId string, matchId string, scheduledAt stri
 func (e *Engine) RevertMatchToQueue(compId, matchId string) error {
 	var alreadyCompleted bool
 
-	err := e.withPoolMatch(e.store, compId, matchId, func(r *state.MatchResult) {
+	err := e.withPoolMatch(e.store, compId, matchId, func(r *state.MatchResult) error {
 		if r.Status == state.MatchStatusCompleted {
+			// Reported through the captured flag, not an abort: the caller
+			// turns it into its own error AFTER the store call, and aborting
+			// here would change that error's identity.
 			alreadyCompleted = true
-			return
+			return nil
 		}
 		// Any non-completed match (running, or an already-scheduled match that
 		// still carries stale score/audit metadata from an earlier partial
@@ -2240,6 +2269,7 @@ func (e *Engine) RevertMatchToQueue(compId, matchId string) error {
 		// keep them (bracket matches have no rep fields).
 		r.RepPlayerA = ""
 		r.RepPlayerB = ""
+		return nil
 	})
 	if err == nil {
 		if alreadyCompleted {

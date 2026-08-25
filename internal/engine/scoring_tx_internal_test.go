@@ -335,7 +335,7 @@ func TestWithPoolMatchTx_NotFound(t *testing.T) {
 
 	var txErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		txErr = eng.withPoolMatch(tx, compID, "GHOST", func(_ *state.MatchResult) {})
+		txErr = eng.withPoolMatch(tx, compID, "GHOST", func(_ *state.MatchResult) error { return nil })
 		return nil
 	})
 	require.Error(t, txErr)

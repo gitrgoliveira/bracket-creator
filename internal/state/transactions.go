@@ -111,7 +111,7 @@ type StoreTx interface {
 	// (already held by WithTransaction). Score / decision handlers (T156)
 	// use this to keep their match-result write under the SAME lock
 	// acquire as the competitor-status side effects.
-	UpdatePoolMatchByID(compID, matchID string, mutate func(*MatchResult)) (bool, error)
+	UpdatePoolMatchByID(compID, matchID string, mutate func(*MatchResult) error) (bool, error)
 	// UpdateBracketMatchByID is the tx-aware twin of
 	// Store.UpdateBracketMatchByID: find one bracket match by id (rounds +
 	// bronze sibling), mutate, save; found=false and no write on a miss.
@@ -595,7 +595,7 @@ func (t *storeTx) UpdateParticipant(compID, pid string, withZekkenName bool, tra
 // in this tx (e.g., the K3 rollback path that writes the new score,
 // fails eligibility, and rolls back), this load + mutate + save sees
 // the staged version, not the stale on-disk version.
-func (t *storeTx) UpdatePoolMatchByID(compID, matchID string, mutate func(*MatchResult)) (bool, error) {
+func (t *storeTx) UpdatePoolMatchByID(compID, matchID string, mutate func(*MatchResult) error) (bool, error) {
 	if err := t.checkCompID(compID); err != nil {
 		return false, err
 	}
@@ -609,7 +609,12 @@ func (t *storeTx) UpdatePoolMatchByID(compID, matchID string, mutate func(*Match
 		}
 		for i := range results {
 			if results[i].ID == matchID {
-				mutate(&results[i])
+				// Abort skips the save on the staged path too. Both branches of
+				// this method must honour it or a dropped write would leave no
+				// footprint outside a transaction and a WAL entry inside one.
+				if merr := mutate(&results[i]); merr != nil {
+					return true, merr
+				}
 				return true, t.store.savePoolMatchesLocked(compID, results, t.txWriteFn())
 			}
 		}

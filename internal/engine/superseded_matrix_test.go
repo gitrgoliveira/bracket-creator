@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -92,9 +94,13 @@ func TestSupersededIsReportedOnEveryWritePath(t *testing.T) {
 		seed func(t *testing.T, eng *Engine, store *state.Store, compID string) string
 		// write performs one forward write and returns its error.
 		write func(t *testing.T, eng *Engine, store *state.Store, compID, matchID string, r *state.MatchResult) error
+		// file is the competition file this cell's match lives in, so the
+		// footprint assertion below can read it.
+		file string
 	}{
 		{
 			name: "pool match, plain writer",
+			file: "pool-matches.csv",
 			seed: seedPoolMatch(storedAt),
 			write: func(_ *testing.T, eng *Engine, _ *state.Store, compID, matchID string, r *state.MatchResult) error {
 				return eng.RecordMatchResult(compID, matchID, r)
@@ -102,6 +108,7 @@ func TestSupersededIsReportedOnEveryWritePath(t *testing.T) {
 		},
 		{
 			name: "pool match, tx twin",
+			file: "pool-matches.csv",
 			seed: seedPoolMatch(storedAt),
 			write: func(t *testing.T, eng *Engine, store *state.Store, compID, matchID string, r *state.MatchResult) error {
 				return inTx(t, store, compID, func(tx state.StoreTx) error {
@@ -112,6 +119,7 @@ func TestSupersededIsReportedOnEveryWritePath(t *testing.T) {
 		},
 		{
 			name: "knockout round match, plain writer",
+			file: "bracket.json",
 			seed: seedBracket(storedAt, false),
 			write: func(_ *testing.T, eng *Engine, _ *state.Store, compID, matchID string, r *state.MatchResult) error {
 				return eng.RecordMatchResult(compID, matchID, r)
@@ -119,6 +127,7 @@ func TestSupersededIsReportedOnEveryWritePath(t *testing.T) {
 		},
 		{
 			name: "knockout round match, tx twin",
+			file: "bracket.json",
 			seed: seedBracket(storedAt, false),
 			write: func(t *testing.T, eng *Engine, store *state.Store, compID, matchID string, r *state.MatchResult) error {
 				return inTx(t, store, compID, func(tx state.StoreTx) error {
@@ -132,6 +141,7 @@ func TestSupersededIsReportedOnEveryWritePath(t *testing.T) {
 			// round scan never finds it and it is written by its own branch —
 			// the branch that used to discard `applied` outright.
 			name: "bronze playoff, plain writer",
+			file: "bracket.json",
 			seed: seedBracket(storedAt, true),
 			write: func(_ *testing.T, eng *Engine, _ *state.Store, compID, matchID string, r *state.MatchResult) error {
 				return eng.RecordMatchResult(compID, matchID, r)
@@ -139,6 +149,7 @@ func TestSupersededIsReportedOnEveryWritePath(t *testing.T) {
 		},
 		{
 			name: "bronze playoff, tx twin",
+			file: "bracket.json",
 			seed: seedBracket(storedAt, true),
 			write: func(t *testing.T, eng *Engine, store *state.Store, compID, matchID string, r *state.MatchResult) error {
 				return inTx(t, store, compID, func(tx state.StoreTx) error {
@@ -158,6 +169,40 @@ func TestSupersededIsReportedOnEveryWritePath(t *testing.T) {
 			err := cell.write(t, eng, store, compID, matchID, incoming(olderAt))
 			require.ErrorIs(t, err, ErrMatchSuperseded,
 				"a dropped write that returns nil is indistinguishable from a saved one, which is the whole bug")
+		})
+
+		// bc-cse review round: reporting the drop is half the contract; the
+		// other half is that a dropped write leaves NO FOOTPRINT. A match is a
+		// match, so this must hold whichever store it lands in — and it did not.
+		// The bracket branch skipped its save (UpdateBracket returns early when
+		// its callback errors) while the pool branch had no way for the callback
+		// to say "do not persist", so the untouched slice was re-serialized and
+		// the standings-cache version bumped: a rejected write left the same
+		// trace on disk as an accepted one, and every stale replay in a
+		// reconnect flush invalidated the cache again.
+		//
+		// The version counter is asserted as well as the bytes because it is the
+		// half a same-bytes rewrite still moves, and it is what forces the
+		// standings recompute (see the cache-invalidation rules in state).
+		t.Run(cell.name+": a stale write leaves no footprint", func(t *testing.T) {
+			eng, store, dir := setupTestEngine(t)
+			compID := "sup-footprint"
+			matchID := cell.seed(t, eng, store, compID)
+
+			path := filepath.Join(dir, "competitions", compID, cell.file)
+			before, err := os.ReadFile(path)
+			require.NoError(t, err, "the seed must have written the file this cell reads")
+			verBefore := store.FileVersion(compID, cell.file)
+
+			require.ErrorIs(t,
+				cell.write(t, eng, store, compID, matchID, incoming(olderAt)),
+				ErrMatchSuperseded)
+
+			after, err := os.ReadFile(path)
+			require.NoError(t, err)
+			assert.Equal(t, string(before), string(after), "a dropped write must not rewrite the file")
+			assert.Equal(t, verBefore, store.FileVersion(compID, cell.file),
+				"a dropped write must not bump the file version: that invalidates the standings cache for nothing")
 		})
 
 		t.Run(cell.name+": a write that lands reports no error", func(t *testing.T) {

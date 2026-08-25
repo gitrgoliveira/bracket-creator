@@ -111,10 +111,11 @@ func (e *Engine) recordEngiMatch(
 
 	// Try the pool stage first.
 	var out *state.MatchResult
-	err := e.withPoolMatch(h, compID, matchID, func(r *state.MatchResult) {
+	err := e.withPoolMatch(h, compID, matchID, func(r *state.MatchResult) error {
 		applyEngiToMatchResult(r, flagsA, flagsB, winnerSide, correctionReason)
 		cp := *r
 		out = &cp
+		return nil
 	})
 	if err == nil {
 		return out, nil

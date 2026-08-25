@@ -224,9 +224,10 @@ func TestConcurrent_UpdatePoolMatchByID(t *testing.T) {
 			defer wg.Done()
 			id := fmt.Sprintf("P1-%d", i)
 			winner := fmt.Sprintf("A%d", i)
-			_, err := store.UpdatePoolMatchByID(compID, id, func(m *MatchResult) {
+			_, err := store.UpdatePoolMatchByID(compID, id, func(m *MatchResult) error {
 				m.Winner = winner
 				m.Status = MatchStatusCompleted
+				return nil
 			})
 			if err != nil {
 				errs <- err

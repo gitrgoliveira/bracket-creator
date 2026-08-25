@@ -773,9 +773,10 @@ func TestStoreTx_UpdatePoolMatchByID(t *testing.T) {
 	var found bool
 	txErr := store.WithTransaction(compID, func(tx StoreTx) error {
 		var err error
-		found, err = tx.UpdatePoolMatchByID(compID, "P1-0", func(m *MatchResult) {
+		found, err = tx.UpdatePoolMatchByID(compID, "P1-0", func(m *MatchResult) error {
 			m.Winner = "Alice"
 			m.Status = MatchStatusCompleted
+			return nil
 		})
 		return err
 	})
@@ -836,15 +837,17 @@ func TestStoreTx_UpdatePoolMatchByID_ReadYourOwnWrites(t *testing.T) {
 
 	txErr := store.WithTransaction(compID, func(tx StoreTx) error {
 		// First update: stages to WAL
-		_, err := tx.UpdatePoolMatchByID(compID, "P1-0", func(m *MatchResult) {
+		_, err := tx.UpdatePoolMatchByID(compID, "P1-0", func(m *MatchResult) error {
 			m.Winner = "Alice"
+			return nil
 		})
 		if err != nil {
 			return err
 		}
 		// Second update: should read from staged WAL (read-your-own-writes)
-		found, err := tx.UpdatePoolMatchByID(compID, "P1-0", func(m *MatchResult) {
+		found, err := tx.UpdatePoolMatchByID(compID, "P1-0", func(m *MatchResult) error {
 			m.Status = MatchStatusCompleted
+			return nil
 		})
 		if err != nil {
 			return err
@@ -1165,9 +1168,10 @@ func TestStoreTx_UpdatePoolMatchByID_PendingPath(t *testing.T) {
 		}
 		// UpdatePoolMatchByID must see the staged matches (pending path).
 		var err error
-		found, err = tx.UpdatePoolMatchByID(compID, "P1-0", func(m *MatchResult) {
+		found, err = tx.UpdatePoolMatchByID(compID, "P1-0", func(m *MatchResult) error {
 			m.Winner = "Alice"
 			m.Status = MatchStatusCompleted
+			return nil
 		})
 		return err
 	})
@@ -1241,7 +1245,7 @@ func TestStoreTx_CheckCompIDMismatch(t *testing.T) {
 		return err
 	})
 	runInTx("UpdatePoolMatchByID", func(tx StoreTx) error {
-		_, err := tx.UpdatePoolMatchByID(wrongID, "M1", func(*MatchResult) {})
+		_, err := tx.UpdatePoolMatchByID(wrongID, "M1", func(*MatchResult) error { return nil })
 		return err
 	})
 	runInTx("UpdateBracket", func(tx StoreTx) error {
@@ -1275,7 +1279,7 @@ func TestStoreTx_ValidateCompetitionID(t *testing.T) {
 	err = tx.SetTeamLineup(badID, domain.TeamLineup{TeamID: "t", Round: 0}, 5)
 	assert.Error(t, err, "SetTeamLineup: invalid compID must error")
 
-	_, err = tx.UpdatePoolMatchByID(badID, "M1", func(*MatchResult) {})
+	_, err = tx.UpdatePoolMatchByID(badID, "M1", func(*MatchResult) error { return nil })
 	assert.Error(t, err, "UpdatePoolMatchByID: invalid compID must error")
 
 	err = tx.UpdateBracket(badID, func(*Bracket) error { return nil })
@@ -1407,9 +1411,10 @@ func TestStoreTx_PendingPaths(t *testing.T) {
 			}); err != nil {
 				return err
 			}
-			found, err := tx.UpdatePoolMatchByID(cid, "P-update", func(m *MatchResult) {
+			found, err := tx.UpdatePoolMatchByID(cid, "P-update", func(m *MatchResult) error {
 				m.Winner = "X"
 				m.Status = MatchStatusCompleted
+				return nil
 			})
 			require.NoError(t, err)
 			assert.True(t, found)
@@ -1427,7 +1432,7 @@ func TestStoreTx_PendingPaths(t *testing.T) {
 			}); err != nil {
 				return err
 			}
-			found, err := tx.UpdatePoolMatchByID(cid, "P-nonexistent", func(m *MatchResult) {})
+			found, err := tx.UpdatePoolMatchByID(cid, "P-nonexistent", func(m *MatchResult) error { return nil })
 			require.NoError(t, err)
 			assert.False(t, found, "match not in staged bytes must return found=false")
 			return nil

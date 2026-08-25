@@ -91,6 +91,28 @@ A competition moves through three phases:
 
 ![Competition setup overview](../../screenshots/mobile-participants.png)
 
+### Changing a competition's settings
+
+The **Settings** tab offers the same controls as the form you used to create the
+competition, so anything you chose at creation you can revisit later. That
+includes **Competition type** (individual or team), **Format**, and
+**Round-robin shape**.
+
+Three rules govern when a setting stops being editable:
+
+- **Once the draw is generated**, the settings that shape the output lock.
+  Discard the draw to change them, then generate it again.
+- **Once the competition has started**, the format and the competition type are
+  fixed for good. Both decide how matches are generated and scored, and results
+  already exist by then, so neither can be changed after the fact.
+- **Once participants are loaded**, the competition type locks separately and
+  earlier than everything else. Individual and team rosters are not
+  interchangeable, so clear the participant list first if you need to switch.
+
+Changing the format rewrites the settings that only apply to the format you left
+behind. Switching a pools competition to a league, for example, clears the pool
+size and the number of qualifiers, because a league has no pool phase to size.
+
 ### Assigning shiai-jo
 
 The competition **Settings** page has an **Assigned shiai-jo (courts)** field listing every shiai-jo in the venue. Pick the ones this competition runs on; the number you pick is how many of its matches can run at the same time.

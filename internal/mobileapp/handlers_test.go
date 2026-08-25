@@ -1502,12 +1502,13 @@ func TestPOSTCompetition_RollbackOnSaveParticipantsFailure(t *testing.T) {
 	require.NoError(t, os.MkdirAll(participantsAsDir, 0700))
 
 	body := map[string]any{
-		"id":     cid,
-		"name":   "Rollback Test",
-		"kind":   "individual",
-		"format": "mixed",
-		"date":   "12-05-2026",
-		"courts": []string{"A"},
+		"id":       cid,
+		"name":     "Rollback Test",
+		"kind":     "individual",
+		"format":   "mixed",
+		"date":     "12-05-2026",
+		"courts":   []string{"A"},
+		"poolSize": 4, // bc-symm: mixed format now requires a usable pool size on create
 		// Populated Players triggers the saveCompetitionWithPlayers
 		// SaveParticipants step that the planted directory blocks.
 		"players": []map[string]any{

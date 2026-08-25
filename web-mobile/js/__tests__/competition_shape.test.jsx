@@ -7,7 +7,7 @@ import {
   LABEL_FORMAT, FORMAT_OPTIONS, formatHint,
   LABEL_POOL_FORMAT, POOL_FORMAT_OPTIONS, poolFormatVisible,
   LABEL_SWISS_ROUNDS, HINT_SWISS_ROUNDS, swissRoundsVisible,
-  LABEL_ROUND_ROBIN,
+  LABEL_ROUND_ROBIN, roundRobinVisible,
   LABEL_LEAGUE_TIEBREAK, HINT_LEAGUE_TIEBREAK, LEAGUE_TIEBREAK_OPTIONS, leagueTiebreakVisible,
   LABEL_POOL_DURATION, HINT_POOL_DURATION, poolDurationLabel, poolDurationHint,
   LABEL_PLAYOFF_DURATION, HINT_PLAYOFF_DURATION,
@@ -15,7 +15,7 @@ import {
   LABEL_TWO_THIRD_PLACES, HINT_TWO_THIRD_PLACES, twoThirdPlacesVisible,
   teamFieldsVisible, zekkenApplies, engiApplies,
   normalizeConfigForFormat,
-  normalizeConfigForKind, DEFAULT_TEAM_SIZE,
+  normalizeConfigForKind, DEFAULT_TEAM_SIZE, MIN_TEAM_SIZE,
   kindChangeBlockedReason,
 } from '../competition_shape.jsx';
 
@@ -79,13 +79,17 @@ describe('POOL_FORMAT_OPTIONS / poolFormatVisible', () => {
     ]);
   });
 
-  // Mirrors admin_setup.jsx's actual pill gate: league only. Deliberately
-  // NOT visible for "mixed", even though the field is submitted for mixed
-  // too (see the FINDING comment in competition_shape.jsx) -- this
-  // predicate reflects what is SHOWN today, not where the field applies.
+  // bc-symm Gap 1: visible for every format that builds a pool phase --
+  // "mixed" AND "league", per internal/engine/pools.go:149's
+  // `switch comp.PoolFormat`, which dispatches for both (see
+  // poolFormatVisible's own comment for the pools.go/competition.go
+  // evidence). Before the fix this returned false for "mixed", so a mixed
+  // competition's pool shape could only ever be set to "partial" by
+  // hand-editing config.md; the FORMAT_MIXED row below is the one that
+  // pins the fix.
   const table = [
     [FORMAT_PLAYOFFS, false],
-    [FORMAT_MIXED, false],
+    [FORMAT_MIXED, true],
     [FORMAT_LEAGUE, true],
     [FORMAT_SWISS, false],
     ['', false],
@@ -117,9 +121,51 @@ describe('Swiss rounds label/hint/visibility', () => {
   });
 });
 
-describe('LABEL_ROUND_ROBIN', () => {
+describe('LABEL_ROUND_ROBIN / roundRobinVisible', () => {
   it('is the settings-only checkbox copy verbatim', () => {
     expect(LABEL_ROUND_ROBIN).toBe('Round-robin in pools');
+  });
+
+  // bc-symm Gap 2: visible ONLY for "mixed" with poolFormat !== "partial" --
+  // the one combination internal/engine/pools.go:157 actually reads
+  // comp.RoundRobin for (see roundRobinVisible's own comment). Full sweep,
+  // every format x every poolFormat value, not just the interesting cells:
+  // before the fix this control had no visibility predicate at all (both
+  // surfaces rendered it unconditionally), so every row where `expected`
+  // is false below is a row the OLD behaviour got wrong.
+  const ALL_POOL_FORMATS = [POOL_FORMAT_FULL, POOL_FORMAT_PARTIAL, '', undefined];
+  const table = [];
+  for (const format of ALL_FORMATS) {
+    for (const poolFormat of ALL_POOL_FORMATS) {
+      const expected = format === FORMAT_MIXED && poolFormat !== POOL_FORMAT_PARTIAL;
+      table.push([format, poolFormat, expected]);
+    }
+  }
+  it.each(table)('roundRobinVisible(%j, %j) -> %j', (format, poolFormat, expected) => {
+    expect(roundRobinVisible(format, poolFormat)).toBe(expected);
+  });
+
+  // Named regression cases, restated outside the sweep so the two rules
+  // (format gate, poolFormat gate) each fail on their own if either one
+  // is dropped later.
+  it('is visible for mixed with an unset/full poolFormat', () => {
+    expect(roundRobinVisible(FORMAT_MIXED, POOL_FORMAT_FULL)).toBe(true);
+    expect(roundRobinVisible(FORMAT_MIXED, '')).toBe(true);
+    expect(roundRobinVisible(FORMAT_MIXED, undefined)).toBe(true);
+  });
+
+  it('disappears the moment a mixed competition switches to partial pools', () => {
+    expect(roundRobinVisible(FORMAT_MIXED, POOL_FORMAT_PARTIAL)).toBe(false);
+  });
+
+  it('is never visible for league, even though RoundRobin is stored there too: competition.go:896 forces it true regardless', () => {
+    expect(roundRobinVisible(FORMAT_LEAGUE, POOL_FORMAT_FULL)).toBe(false);
+    expect(roundRobinVisible(FORMAT_LEAGUE, POOL_FORMAT_PARTIAL)).toBe(false);
+  });
+
+  it('is never visible for playoffs or swiss: neither runs the PoolFormat switch\'s default branch', () => {
+    expect(roundRobinVisible(FORMAT_PLAYOFFS, POOL_FORMAT_FULL)).toBe(false);
+    expect(roundRobinVisible(FORMAT_SWISS, POOL_FORMAT_FULL)).toBe(false);
   });
 });
 
@@ -351,6 +397,18 @@ describe('kindChangeBlockedReason', () => {
   });
 });
 
+// bc-symm Gap 3: the ONE place the team-size floor is written down.
+// state.ValidateCompetitionTeamSize (internal/state/models.go) rejects
+// teamSize == 1 unconditionally, so 2 is the true legal floor for a team
+// competition, not 1. Both surfaces' Team size <input> used a literal
+// min="1" and floored a typed/stepped value at 1 before this constant
+// existed, letting the UI construct a request the server always 400s.
+describe('MIN_TEAM_SIZE', () => {
+  it('is 2: teamSize 1 is rejected by the server for every kind (neither the individual-only 0 nor a valid team value)', () => {
+    expect(MIN_TEAM_SIZE).toBe(2);
+  });
+});
+
 // Each case here is a dead end the settings screen could reach before
 // normalizeConfigForKind existed: the server rejects the pairing, and the
 // control that would fix it is hidden or disabled by the kind just chosen.
@@ -380,6 +438,17 @@ describe('normalizeConfigForKind', () => {
 
   it('keeps an already-valid team size rather than resetting it to the default', () => {
     expect(normalizeConfigForKind({ kind: KIND_TEAM, teamSize: 3 }).teamSize).toBe(3);
+  });
+
+  // bc-symm Gap 3: MIN_TEAM_SIZE is the boundary itself (2), not just a
+  // value below it -- kept as-is rather than bumped to DEFAULT_TEAM_SIZE,
+  // pinning that the floor check is `>= MIN_TEAM_SIZE` and not an
+  // off-by-one (`> MIN_TEAM_SIZE`). Behaviourally identical to the old
+  // hardcoded `>= 2` this replaced, so this alone is not a red/green
+  // regression pin -- see the MIN_TEAM_SIZE describe block below for the
+  // assertions that changed behaviour (the number input's min/floor).
+  it('keeps a team size exactly at MIN_TEAM_SIZE rather than treating it as invalid', () => {
+    expect(normalizeConfigForKind({ kind: KIND_TEAM, teamSize: MIN_TEAM_SIZE }).teamSize).toBe(MIN_TEAM_SIZE);
   });
 
   it('clears withZekkenName going team, matching what the create form sends', () => {

@@ -904,6 +904,29 @@ func ValidateCompetitionTeamSize(kind string, teamSize int) error {
 	return nil
 }
 
+// ValidateCompetitionKind rejects a Kind outside the set the server
+// recognises. Engine code identifies a team competition by Kind == "team"
+// in some paths and TeamSize > 0 in others (ValidateCompetitionTeamSize's
+// doc comment above names the same split); nothing checked Kind against a
+// set of legal values anywhere, so an unrecognised kind such as "banana"
+// silently fell through every one of those checks and ran as an
+// individual competition with no error at any layer.
+//
+// "" is a first-class member of the set, not merely tolerated: an
+// omitted `kind:` key in an import manifest (handlers_import.go,
+// ImportManifestComp.Kind has no required tag) decodes to "", and
+// state.Competition's Go zero value stores the same "", so both the
+// legacy import path and any hand-seeded record depend on "" meaning
+// individual.
+func ValidateCompetitionKind(kind string) error {
+	switch kind {
+	case "", "individual", "team":
+		return nil
+	default:
+		return fmt.Errorf("unknown kind %q (expected \"individual\" or \"team\")", kind)
+	}
+}
+
 // DecisionDraw is the canonical value for a tied (hikiwake) match.
 const DecisionDraw = "hikiwake"
 

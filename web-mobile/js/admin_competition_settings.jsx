@@ -29,7 +29,7 @@ import {
   LABEL_KIND, KIND_OPTIONS, LABEL_FORMAT, FORMAT_OPTIONS, formatHint,
   LABEL_POOL_FORMAT, POOL_FORMAT_OPTIONS, poolFormatVisible,
   LABEL_SWISS_ROUNDS, HINT_SWISS_ROUNDS, swissRoundsVisible,
-  LABEL_ROUND_ROBIN,
+  LABEL_ROUND_ROBIN, roundRobinVisible,
   LABEL_LEAGUE_TIEBREAK, HINT_LEAGUE_TIEBREAK, LEAGUE_TIEBREAK_OPTIONS, leagueTiebreakVisible,
   LABEL_PLAYOFF_DURATION, HINT_PLAYOFF_DURATION,
   poolDurationLabel, poolDurationHint, poolDurationVisible, playoffDurationVisible,
@@ -37,6 +37,7 @@ import {
   teamFieldsVisible, zekkenApplies, engiApplies,
   normalizeConfigForFormat, normalizeConfigForKind, kindChangeBlockedReason,
   FORMAT_LEAGUE, POOL_FORMAT_FULL,
+  MIN_TEAM_SIZE,
 } from './competition_shape.jsx';
 import { seededRanks } from './admin_helpers.jsx';
 
@@ -860,6 +861,11 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           {/* Cap is MAX_TEAM_SIZE (admin_helpers.jsx). TEAM_POSITIONS in */}
           {/* admin_scoring_modal.jsx is built from the same constant, so */}
           {/* this input can't allow a value the scoring UI doesn't render. */}
+          {/* Floor is MIN_TEAM_SIZE (competition_shape.jsx): teamSize == 1 */}
+          {/* is rejected unconditionally by ValidateCompetitionTeamSize */}
+          {/* (state/models.go), so this field's legal domain starts at 2, */}
+          {/* not 1, whenever it's visible at all (team-only, see */}
+          {/* teamFieldsVisible above). */}
           {/* Render NaN as "" so clearing the input stays empty instead of */}
           {/* collapsing to "0"; saveNow's safeInt guard means a */}
           {/* cleared/invalid value never lands on the backend as 0. */}
@@ -867,10 +873,10 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           <input
             className="input"
             type="number"
-            min="1"
+            min={MIN_TEAM_SIZE}
             max={MAX_TEAM_SIZE}
             value={Number.isFinite(local.teamSize) ? local.teamSize : ""}
-            onChange={(e) => updateNumber("teamSize", e.target.value, 1)}
+            onChange={(e) => updateNumber("teamSize", e.target.value, MIN_TEAM_SIZE)}
             disabled={isDrawReady}
           />
         </div>
@@ -943,9 +949,9 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             ))}
           </div>
           <div className="field__hint">
-            {/* Stored/legacy "" resolves to "full" for display, matching the
-                FINDING recorded in competition_shape.jsx: the server's own
-                unreachable default is "full", and this file already reads an
+            {/* Stored/legacy "" resolves to "full" for display: the server's
+                own unset default is "full" (see poolFormatVisible's comment
+                in competition_shape.jsx), and this file already reads an
                 empty poolFormat as non-partial at the courts-suggestion hint
                 below (was: `local.poolFormat === "partial"`). */}
             {POOL_FORMAT_OPTIONS.find((o) => o.value === (local.poolFormat || POOL_FORMAT_FULL))?.hint}
@@ -1213,8 +1219,16 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
         <div className="field__hint">Single letter prefix for participant numbers (A1, B1…). Keeps numbers unique across competitions.</div>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {/* draw-ready lock: roundRobin is output-affecting. */}
-        <label className="checkbox"><input type="checkbox" checked={local.roundRobin} onChange={(e) => update("roundRobin", e.target.checked)} disabled={isDrawReady} /> {LABEL_ROUND_ROBIN}</label>
+        {/* bc-symm Gap 2: gated on roundRobinVisible (competition_shape.jsx)
+            -- true only for "mixed" with poolFormat !== "partial", the one
+            combination internal/engine/pools.go actually reads
+            comp.RoundRobin for. Rendering it unconditionally (as this used
+            to) showed a live-looking control that a league or a
+            partial-pool mixed competition silently ignored.
+            draw-ready lock: roundRobin is output-affecting. */}
+        {roundRobinVisible(local.format, local.poolFormat) && (
+          <label className="checkbox"><input type="checkbox" checked={local.roundRobin} onChange={(e) => update("roundRobin", e.target.checked)} disabled={isDrawReady} /> {LABEL_ROUND_ROBIN}</label>
+        )}
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           {/* zekkenApplies/engiApplies express the RULE (competition_shape.jsx);
               this screen keeps its own PRESENTATION of it -- render both

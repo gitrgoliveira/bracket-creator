@@ -320,17 +320,22 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 	// endpoints, drop one TrimSpace and a downstream switch on the
 	// non-canonical value silently falls through.
 	t.Run("All String Fields Trimmed On Create", func(t *testing.T) {
+		// bc-symm: PoolSize is incidental to what this test checks (string
+		// trimming), but format "mixed" now requires a usable pool size on
+		// create (validateMixedPoolSize), so the fixture needs a real value
+		// or it 400s before the trim assertions below ever run.
 		comp := state.Competition{
 			ID: "trim-fields-create", Name: "Trim Fields Create",
 			Kind: "  individual  ", Format: "  mixed  ",
 			PoolSizeMode: "  min  ", StartTime: "  09:00  ", Date: "  12-05-2026  ",
+			PoolSize: 4,
 		}
 		body, _ := json.Marshal(comp)
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
-		require.Equal(t, http.StatusCreated, w.Code)
+		require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
 		stored, err := store.LoadCompetition("trim-fields-create")
 		require.NoError(t, err)
 		require.NotNil(t, stored)
@@ -3535,5 +3540,199 @@ func TestUpdateCompetition_MixedFormatRequiresUsablePoolSize(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, state.CompFormatMixed, stored.Format)
 		assert.Equal(t, 4, stored.PoolSize)
+	})
+}
+
+// TestCreateCompetition_MixedFormatRequiresUsablePoolSize is the POST twin of
+// TestUpdateCompetition_MixedFormatRequiresUsablePoolSize above. Unlike the
+// PUT guard (change-scoped to protect a stored value from a lockout), POST
+// authors a brand-new record with nothing to inherit, so the check is
+// unconditional: create must reject the combination outright, not merely
+// when some other field also happens to differ.
+func TestCreateCompetition_MixedFormatRequiresUsablePoolSize(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	t.Run("REJECT create with mixed format and no usable pool size", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"id":     "create-mixed-no-poolsize",
+			"name":   "Create Mixed No PoolSize",
+			"format": state.CompFormatMixed,
+			"courts": []string{"A"},
+			// poolSize intentionally omitted -> decodes to 0
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusBadRequest, w.Code,
+			"a create landing on mixed with no usable pool size must be rejected: %s", w.Body.String())
+		assert.Contains(t, w.Body.String(), "mixed format requires a pool size of at least 1")
+
+		stored, err := store.LoadCompetition("create-mixed-no-poolsize")
+		require.NoError(t, err)
+		assert.Nil(t, stored, "a rejected create must persist nothing")
+	})
+
+	t.Run("ALLOW create with mixed format and a usable pool size", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"id":       "create-mixed-with-poolsize",
+			"name":     "Create Mixed With PoolSize",
+			"format":   state.CompFormatMixed,
+			"courts":   []string{"A"},
+			"poolSize": 4,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+		stored, err := store.LoadCompetition("create-mixed-with-poolsize")
+		require.NoError(t, err)
+		require.NotNil(t, stored)
+		assert.Equal(t, 4, stored.PoolSize)
+	})
+}
+
+// TestCreateCompetition_RejectsIllegalKind pins the POST-side half of
+// state.ValidateCompetitionKind. POST authors a brand-new record, so unlike
+// the PUT guard (change-scoped, see TestUpdateCompetition_KindGuard below)
+// nothing here is inherited and the check runs unconditionally: a
+// hand-crafted "banana" kind must never reach disk, since Kind == "team" is
+// the marker engine code uses to route team-vs-individual scoring/generation
+// (ValidateCompetitionTeamSize's doc comment names the same split) and an
+// unrecognised value silently fell through every one of those checks and ran
+// as individual with no error anywhere.
+func TestCreateCompetition_RejectsIllegalKind(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	t.Run("REJECT an unrecognised kind", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"id":   "create-illegal-kind",
+			"name": "Create Illegal Kind",
+			"kind": "banana",
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusBadRequest, w.Code,
+			"an unrecognised kind must be rejected on create: %s", w.Body.String())
+		assert.Contains(t, w.Body.String(), "unknown kind")
+
+		stored, err := store.LoadCompetition("create-illegal-kind")
+		require.NoError(t, err)
+		assert.Nil(t, stored, "a rejected create must persist nothing")
+	})
+
+	t.Run("ALLOW empty kind (legacy/import default meaning individual)", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"id":   "create-empty-kind",
+			"name": "Create Empty Kind",
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+		stored, err := store.LoadCompetition("create-empty-kind")
+		require.NoError(t, err)
+		require.NotNil(t, stored)
+		assert.Equal(t, "", stored.Kind)
+	})
+}
+
+// TestUpdateCompetition_KindGuard is the CRITICAL SCOPING pair for
+// state.ValidateCompetitionKind on PUT: reject an illegal kind ONLY when the
+// value actually CHANGES, never when an already-illegal stored value is
+// merely echoed back.
+//
+// The lockout sub-test is the important one. The settings page always
+// round-trips the stored kind on every save (it has no reason to touch a
+// field it never renders an editor for, and even once it does, an unrelated
+// save still echoes the CURRENT value back). A competition whose config.md
+// was hand-edited (or written before this guard existed) to carry an
+// unrecognised kind must stay editable for every unrelated field, or an
+// unconditional check here would 400 every future save and permanently lock
+// the operator out of the settings screen -- the same lockout shape
+// CLAUDE.md's "a write answers for what it introduces, not for what it
+// inherited" rule exists to prevent, and one this codebase has already had
+// to fix twice.
+func TestUpdateCompetition_KindGuard(t *testing.T) {
+	t.Run("REJECT a change to an illegal kind", func(t *testing.T) {
+		r, store, _, _, tempDir := setupTestRouter(t)
+		defer os.RemoveAll(tempDir)
+
+		const cid = "kind-guard-change"
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID:     cid,
+			Name:   "Kind Guard Change",
+			Kind:   "individual",
+			Status: state.CompStatusSetup,
+		}))
+
+		body, _ := json.Marshal(map[string]any{
+			"id":   cid,
+			"name": "Kind Guard Change",
+			"kind": "banana",
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusBadRequest, w.Code,
+			"changing to an unrecognised kind must be rejected: %s", w.Body.String())
+		assert.Contains(t, w.Body.String(), "unknown kind")
+
+		stored, err := store.LoadCompetition(cid)
+		require.NoError(t, err)
+		assert.Equal(t, "individual", stored.Kind, "the rejected write must not land")
+	})
+
+	t.Run("ALLOW a save that echoes an ALREADY-illegal stored kind unchanged (lockout regression)", func(t *testing.T) {
+		r, store, _, _, tempDir := setupTestRouter(t)
+		defer os.RemoveAll(tempDir)
+
+		const cid = "kind-guard-lockout"
+		// Simulates a hand-edited config.md, or a record written before this
+		// guard existed: SaveCompetition writes straight to disk, bypassing
+		// the handler's own validation, exactly the way a pre-existing
+		// on-disk illegal value would arise in production.
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID:        cid,
+			Name:      "Kind Guard Lockout",
+			Kind:      "banana",
+			Date:      "12-05-2026",
+			StartTime: "09:00",
+			Status:    state.CompStatusSetup,
+		}))
+
+		// The settings page echoes the stored (illegal) kind back verbatim
+		// while editing an entirely unrelated field (StartTime here).
+		body, _ := json.Marshal(map[string]any{
+			"id":        cid,
+			"name":      "Kind Guard Lockout",
+			"kind":      "banana",
+			"date":      "12-05-2026",
+			"startTime": "10:30",
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code,
+			"a save that does not change an already-illegal kind must succeed: %s", w.Body.String())
+		stored, err := store.LoadCompetition(cid)
+		require.NoError(t, err)
+		require.NotNil(t, stored)
+		assert.Equal(t, "banana", stored.Kind, "the illegal kind is preserved, not silently corrected")
+		assert.Equal(t, "10:30", stored.StartTime, "the unrelated edit must land")
 	})
 }

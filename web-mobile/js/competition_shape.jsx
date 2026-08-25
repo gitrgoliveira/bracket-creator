@@ -95,29 +95,29 @@ export function formatHint(format) {
 
 // POOL_FORMAT_OPTIONS / LABEL_POOL_FORMAT: verbatim from admin_setup.jsx's
 // "Round-robin shape" pills (full round-robin vs partial/neighbour-only).
-//
-// FINDING (reported, not fixed here -- this module only extracts what
-// exists): the create form renders this control ONLY when format ===
-// "league" (poolFormatVisible below mirrors that exactly), yet create()
-// attaches `c.poolFormat` to the payload whenever format is "mixed" OR
-// "league". A "mixed" (pools + knockout) competition therefore always
-// submits poolFormat as "full" (the state's unreachable default) from
-// EITHER screen: the create form never shows the pills for mixed, and
-// admin_competition_settings.jsx never renders this control at all (it
-// only READS local.poolFormat, at admin_competition_settings.jsx:840, to
-// pick the courts-suggestion hint's wording). A mixed competition's pool
-// shape can never be set to "partial" through either UI today.
 export const LABEL_POOL_FORMAT = "Round-robin shape";
 export const POOL_FORMAT_OPTIONS = [
   { value: POOL_FORMAT_FULL, label: "Full round-robin", hint: "Every participant plays every other participant in their pool." },
   { value: POOL_FORMAT_PARTIAL, label: "Partial / neighbour-only", hint: "Each participant plays a neighbourhood subset: useful when a full round-robin would not fit in the day's schedule." },
 ];
 
-// poolFormatVisible: mirrors admin_setup.jsx's actual gate on the
-// "Round-robin shape" pills (format === "league") -- see the FINDING above
-// for why this is narrower than where the field is actually meaningful.
+// poolFormatVisible: true wherever a competition builds a pool phase at all
+// (bc-symm Gap 1). internal/engine/pools.go:149's `switch comp.PoolFormat`
+// dispatches on this field for ANY pool-bearing competition -- the switch
+// sits before and independent of any format check, and generatePools is
+// called for both state.CompFormatMixed and state.CompFormatLeague
+// (internal/engine/competition.go:904-907) -- so "mixed" and "league" are
+// exactly the two formats where PoolFormat is meaningful. Previously this
+// returned true for "league" only, mirroring the create form's historical
+// gate rather than where the engine actually reads the field: create()
+// already attached `c.poolFormat` to the payload for "mixed" too
+// (admin_setup.jsx), and the import manifest has no poolFormat field at
+// all, so a MIXED competition's pool shape could only ever be set to
+// "partial" by hand-editing config.md. Fixed by widening this predicate;
+// see also roundRobinVisible below, whose own gate depends on this one
+// having gone live for mixed first.
 export function poolFormatVisible(format) {
-  return format === FORMAT_LEAGUE;
+  return format === FORMAT_MIXED || format === FORMAT_LEAGUE;
 }
 
 // --- Swiss rounds -------------------------------------------------------
@@ -144,11 +144,34 @@ export function swissRoundsVisible(format) {
 
 // --- Round-robin-in-pools checkbox --------------------------------------
 //
-// Settings-only today (admin_competition_settings.jsx:1066); the create
-// form has no equivalent control. No visibility predicate is exported for
-// it because the settings page renders it unconditionally (not gated on
-// format), so there is nothing to derive.
+// Present on both surfaces (admin_setup.jsx, admin_competition_
+// settings.jsx). Both used to render this checkbox unconditionally, but it
+// is only ever READ in one place: internal/engine/pools.go:157 checks
+// `comp.RoundRobin` solely inside the PoolFormat switch's `default` branch
+// (PoolFormatFull, or an unset/unrecognized value) -- the
+// PoolFormatPartial case at pools.go:150-152 calls
+// helper.CreatePartialPoolMatches(pools) and never looks at RoundRobin at
+// all, so unchecking the box does nothing once poolFormat is "partial".
+// And internal/engine/competition.go:896 unconditionally overwrites
+// `comp.RoundRobin = true` for CompFormatLeague before generatePools runs,
+// regardless of what the operator stored, so the checkbox is equally inert
+// for a league. That leaves exactly one format where toggling it changes
+// anything: "mixed" with poolFormat !== "partial" (see roundRobinVisible).
+// Elsewhere the control was a lie -- unchecking it left the UI showing
+// "off" while the draw still built a full round-robin (league) or ran
+// CreatePartialPoolMatches regardless (partial).
 export const LABEL_ROUND_ROBIN = "Round-robin in pools";
+
+// roundRobinVisible: gates the checkbox on the one combination where it is
+// live -- see the field comment above for the pools.go/competition.go
+// evidence. `poolFormat` is read loosely (only an exact "partial" hides
+// the control), matching POOL_FORMAT_OPTIONS' own comment that a stored/
+// legacy "" or any other value resolves to "full" for display purposes:
+// the engine's switch reaches the same `default` branch for "", "full", or
+// an unrecognized value, so the checkbox should be visible for all three.
+export function roundRobinVisible(format, poolFormat) {
+  return format === FORMAT_MIXED && poolFormat !== POOL_FORMAT_PARTIAL;
+}
 
 // --- League tie-break band ("Break ties for top") -----------------------
 //
@@ -248,8 +271,8 @@ export function twoThirdPlacesVisible(format) {
 // --- Kind-gated fields (team size, team match format, zekken, engi) -----
 //
 // teamFieldsVisible: both surfaces gate "Team size" and "Team match
-// format" identically on kind === "team" (admin_setup.jsx:1221,1242;
-// admin_competition_settings.jsx:753,774).
+// format" identically on kind === "team" (admin_setup.jsx:1370,1391;
+// admin_competition_settings.jsx:858,884).
 export function teamFieldsVisible(kind) {
   return kind === KIND_TEAM;
 }
@@ -259,10 +282,10 @@ export function teamFieldsVisible(kind) {
 // Both surfaces agree on the rule and DELIBERATELY differ on how they show
 // it, so the rule is what lives here and the presentation stays local:
 //
-//   create   (admin_setup.jsx:1255,1267) HIDES both controls for a team
+//   create   (admin_setup.jsx:1417,1429) HIDES both controls for a team
 //            competition. Correct there: kind is freely switchable on an
 //            empty form, so a hidden control comes straight back.
-//   settings (admin_competition_settings.jsx:1068,1076) RENDERS both and
+//   settings (admin_competition_settings.jsx:1240,1248) RENDERS both and
 //            disables them, with the hint "(Only applicable for individual
 //            competitions)". Correct there for the opposite reason: once a
 //            roster exists the kind toggle is itself locked
@@ -365,10 +388,26 @@ export function normalizeConfigForFormat(cfg) {
 // second opinion.
 export const DEFAULT_TEAM_SIZE = 5;
 
+// MIN_TEAM_SIZE: the legal floor for a team competition's team size, and
+// the ONE place that number is written down. state.ValidateCompetitionTeamSize
+// (internal/state/models.go:891-903) rejects teamSize == 1 outright ("use 0
+// for individual competitions or >= 2 for teams") -- 1 is neither a valid
+// individual value (which must be exactly 0) nor a valid team value (which
+// must be >= 2), so it 400s unconditionally. Both surfaces' Team size
+// number input had `min="1"` and floored a typed/stepped value at 1 (bc-symm
+// Gap 3), so the UI could construct a request the server always refuses.
+// Both call sites (admin_setup.jsx's onChange, admin_competition_
+// settings.jsx's updateNumber("teamSize", ...)) and normalizeConfigForKind's
+// own floor check below read MIN_TEAM_SIZE rather than repeating the
+// literal, the same sharing pattern MAX_TEAM_SIZE already uses
+// (admin_helpers.jsx) -- see that constant's own comment for the
+// mirrored-cap rationale.
+export const MIN_TEAM_SIZE = 2;
+
 export function normalizeConfigForKind(cfg) {
   const next = { ...cfg };
   if (next.kind === KIND_TEAM) {
-    if (!(Number.isFinite(next.teamSize) && next.teamSize >= 2)) {
+    if (!(Number.isFinite(next.teamSize) && next.teamSize >= MIN_TEAM_SIZE)) {
       next.teamSize = DEFAULT_TEAM_SIZE;
     }
     if (!next.teamMatchType) next.teamMatchType = "fixed";

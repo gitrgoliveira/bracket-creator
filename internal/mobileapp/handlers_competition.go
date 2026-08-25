@@ -229,6 +229,28 @@ func normalizePoolConfig(comp *state.Competition) {
 	normalizeExtraQualifiers(comp)
 }
 
+// validateMixedPoolSize rejects a competition that lands on mixed format
+// with no usable pool size. normalizePoolConfig above only zeroes PoolSize
+// for league/playoffs; nothing on the way TO mixed requires one, so
+// without this a competition could persist a combination the draw can
+// never build, and the only failure would surface much later at draw
+// time (engine/pools.go: "pool size must be at least 1"), far from the
+// request that caused it.
+//
+// Shared by POST and PUT so both doors read the same message. The two
+// callers apply it under different scoping rules (see each call site):
+// POST runs it unconditionally, since a create authors a brand-new
+// record with nothing to inherit; PUT runs it only when format or
+// poolSize is actually CHANGING, so a competition already carrying this
+// combination (hand-edited config.md, or one saved before this guard
+// existed) stays editable for unrelated fields.
+func validateMixedPoolSize(comp *state.Competition) error {
+	if comp.Format == state.CompFormatMixed && comp.PoolSize <= 0 {
+		return fmt.Errorf("mixed format requires a pool size of at least 1")
+	}
+	return nil
+}
+
 // competitionUpdateRequest is the PUT /competitions/:id body.
 //
 // It exists for ONE field. Every other setting can be merged from the decoded
@@ -540,6 +562,17 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// the engine actually uses. See normalizePoolConfig for full rationale.
 		normalizePoolConfig(&comp)
 
+		// bc-symm: reject a create that lands on mixed format with no
+		// usable pool size outright. Unlike the PUT twin (change-scoped, see
+		// its call site) POST authors a brand-new record: nothing here is
+		// inherited, the caller wrote every field on the body, so there is
+		// no stored value to protect and no lockout risk in checking
+		// unconditionally.
+		if err := validateMixedPoolSize(&comp); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
 		// FR-050a: swiss-specific config validation.
 		if err := validateSwissConfig(&comp); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -556,6 +589,17 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// "kachinuki" requires TeamSize >= 2. FR-044.
 		if err := state.ValidateTeamMatchType(comp.TeamMatchType, comp.TeamSize); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Kind must be one of the values the server recognises ("",
+		// "individual" or "team"; see state.ValidateCompetitionKind for why
+		// "" belongs in that set). POST authors a brand-new record with
+		// nothing to inherit, so unlike the PUT guard below (change-scoped
+		// to avoid locking an operator out of an already-stored illegal
+		// value) this check runs unconditionally.
+		if err := state.ValidateCompetitionKind(comp.Kind); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "kind: " + err.Error()})
 			return
 		}
 
@@ -1366,22 +1410,18 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				}
 				// bc-symm: a flip into (or an edit that lands on) mixed format
 				// with no usable pool size persists a competition draw time can
-				// never build. normalizePoolConfig above only zeroes PoolSize
-				// for league/playoffs; nothing on the way BACK to mixed
-				// requires a pool size, so a league/playoffs -> mixed switch
-				// (or an in-place poolSize edit down to 0) wrote PoolSize <= 0
-				// alongside Format == mixed and the failure only surfaced much
-				// later at draw time (engine/pools.go: "pool size must be at
-				// least 1"), far from the edit that caused it. Scoped to an
-				// actual CHANGE (format or poolSize), same as every other guard
-				// in this handler: a competition already carrying this
+				// never build. See validateMixedPoolSize for the shared check
+				// (and its POST twin, which runs unconditionally). Scoped here
+				// to an actual CHANGE (format or poolSize), same as every other
+				// guard in this handler: a competition already carrying this
 				// combination (hand-edited config.md, or one saved before this
 				// guard existed) must stay editable for unrelated fields, or
 				// the operator is locked out of settings entirely.
-				if (comp.Format != current.Format || comp.PoolSize != current.PoolSize) &&
-					comp.Format == state.CompFormatMixed && comp.PoolSize <= 0 {
-					validationErr = fmt.Errorf("mixed format requires a pool size of at least 1")
-					return nil, nil
+				if comp.Format != current.Format || comp.PoolSize != current.PoolSize {
+					if err := validateMixedPoolSize(&comp); err != nil {
+						validationErr = err
+						return nil, nil
+					}
 				}
 				// Settings-only merge. Status, Players, and
 				// HasParticipantIDs are deliberately not copied from
@@ -1443,6 +1483,37 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					formatOrKindStartedFlag = true
 					return nil, nil
 				}
+				// bc-symm: reject an illegal Kind ("banana"), but ONLY when
+				// it is actually CHANGING. Kind selects team-vs-individual
+				// scoring and generation throughout internal/engine (see
+				// ValidateCompetitionTeamSize's doc comment above), and
+				// nothing checked it against the values the server
+				// recognises, so a hand-crafted request could persist an
+				// unrecognised kind that silently ran as individual with no
+				// error anywhere.
+				//
+				// The scoping is deliberate and NOT tied to `started`: a
+				// competition whose STORED kind is already illegal (a
+				// hand-edited config.md, or a record written before this
+				// guard existed) must stay editable for every unrelated
+				// field on every future save, because the settings page
+				// echoes the stored kind back verbatim on every save. An
+				// unconditional check here would 400 every subsequent save
+				// and lock the operator out of the settings screen
+				// entirely -- the same lockout shape CLAUDE.md's "a write
+				// answers for what it introduces, not for what it
+				// inherited" rule exists to prevent (and the same shape
+				// this codebase has already had to fix twice). A write
+				// that actually changes Kind to something illegal is the
+				// caller's own new input, so it is judged normally, ahead
+				// of the started-state 409 above having already ruled out
+				// the "started and changing" case.
+				if comp.Kind != current.Kind {
+					if err := state.ValidateCompetitionKind(comp.Kind); err != nil {
+						validationErr = fmt.Errorf("kind: %w", err)
+						return nil, nil
+					}
+				}
 				current.Format = comp.Format
 				current.PoolFormat = comp.PoolFormat
 				current.Kind = comp.Kind
@@ -1453,10 +1524,21 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// fields are already zero.
 				current.PoolMatchDurationSeconds = comp.PoolMatchDurationSeconds
 				current.PlayoffMatchDurationSeconds = comp.PlayoffMatchDurationSeconds
-				// FR-050a: swiss round budget is admin-editable from
-				// settings until the competition starts (the engine
-				// gates StartCompetition on Status=setup). After start,
-				// the field is read-only via the same Status gate.
+				// FR-050a: the swiss round budget is admin-editable at ANY
+				// status, deliberately and with no `started` guard. This
+				// comment used to claim the field went "read-only via the
+				// same Status gate" after start; that was never true (there
+				// is no such guard here, and the Status=setup gate it
+				// pointed at governs StartCompetition, not this write), and
+				// it contradicted both the settings screen
+				// (admin_competition_settings.jsx: "changing rounds after
+				// start is allowed too") and the published behaviour in
+				// docs/user-guide/organisers/formats.md ("You can change
+				// this number later, including after rounds have started").
+				// Editing mid-competition is the POINT: the next "Generate
+				// next round" call respects the new cap, which is how an
+				// operator shortens or extends a Swiss competition already
+				// in progress. Do not "restore" a guard here.
 				current.SwissRounds = comp.SwissRounds
 				// Naginata (3rd-place play-off) is only settable before the
 				// competition starts. Changing it after start would add or remove a

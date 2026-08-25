@@ -129,12 +129,13 @@ import {
   LABEL_KIND, KIND_OPTIONS, LABEL_FORMAT, FORMAT_OPTIONS, formatHint,
   LABEL_POOL_FORMAT, POOL_FORMAT_OPTIONS, poolFormatVisible,
   LABEL_SWISS_ROUNDS, HINT_SWISS_ROUNDS, swissRoundsVisible,
-  LABEL_ROUND_ROBIN,
+  LABEL_ROUND_ROBIN, roundRobinVisible,
   LABEL_LEAGUE_TIEBREAK, HINT_LEAGUE_TIEBREAK, LEAGUE_TIEBREAK_OPTIONS, leagueTiebreakVisible,
   LABEL_PLAYOFF_DURATION, HINT_PLAYOFF_DURATION,
   poolDurationLabel, poolDurationHint, poolDurationVisible, playoffDurationVisible,
   LABEL_TWO_THIRD_PLACES, HINT_TWO_THIRD_PLACES, twoThirdPlacesVisible,
   teamFieldsVisible, zekkenApplies, engiApplies,
+  MIN_TEAM_SIZE,
 } from './competition_shape.jsx';
 import { DurationInput } from './duration.jsx';
 
@@ -714,9 +715,11 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   // full round-robin would not fit in the day's schedule.
   const [poolFormat, setPoolFormat] = useStateA("full");
   // bc-symm: settings-only until now (admin_competition_settings.jsx
-  // renders this unconditionally, not gated by format, and locks it once
-  // a draw exists). The create form has no draw yet, so there is nothing
-  // to lock; default true matches the value data.jsx hardcoded before
+  // renders this checkbox, gated on roundRobinVisible -- see that
+  // predicate's comment in competition_shape.jsx for why "mixed" +
+  // non-partial is the only combination where it does anything). The
+  // create form has no draw yet, so there is no isDrawReady-style lock to
+  // add here; default true matches the value data.jsx hardcoded before
   // this control existed, so a create that never touches the checkbox
   // produces the same competition it always did.
   const [roundRobin, setRoundRobin] = useStateA(true);
@@ -902,8 +905,8 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
         setError('Team size must be a whole number.');
         return;
       }
-      if (teamSize < 2 || teamSize > MAX_TEAM_SIZE) {
-        setError(`A team needs at least 2 members (max ${MAX_TEAM_SIZE}).`);
+      if (teamSize < MIN_TEAM_SIZE || teamSize > MAX_TEAM_SIZE) {
+        setError(`A team needs at least ${MIN_TEAM_SIZE} members (max ${MAX_TEAM_SIZE}).`);
         return;
       }
     }
@@ -955,12 +958,17 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
       numberPrefix: numberPrefix.trim().substring(0, 3),
       withZekkenName: kind === "individual" ? withZekken : false,
       checkInEnabled: checkInEnabled,
-      // bc-symm: settings-only until now; rendered unconditionally there
-      // (not gated by format), so it goes in the main args object rather
-      // than the post-construction blocks below that exist to keep a
-      // format-irrelevant field off the wire. buildEmptyCompetition
-      // (data.jsx) defaults this to true when omitted, matching every
-      // other caller that hasn't been taught about the field.
+      // bc-symm: sent unconditionally, unlike poolFormat/extraQualifiers/etc
+      // below which are attached post-construction only for the formats
+      // where they matter. roundRobinVisible (competition_shape.jsx) now
+      // hides the CHECKBOX outside "mixed" + non-partial, but the stored
+      // state var still holds its default (true) on every other format,
+      // and sending it is harmless there: pools.go only reads RoundRobin
+      // inside PoolFormatFull's default branch, so an operator who never
+      // saw the control can't have set it to anything but that default.
+      // buildEmptyCompetition (data.jsx) defaults this to true when
+      // omitted anyway, matching every other caller that hasn't been
+      // taught about the field.
       roundRobin,
     });
     // FR-050 / T044: persist poolFormat alongside the rest of the
@@ -1371,10 +1379,10 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
               <input
                 className="input"
                 type="number"
-                min="1"
+                min={MIN_TEAM_SIZE}
                 max={MAX_TEAM_SIZE}
                 value={Number.isFinite(teamSize) ? teamSize : ""}
-                onChange={(e) => setTeamSize(decideNumericUpdate(e.target.value, 1).value)}
+                onChange={(e) => setTeamSize(decideNumericUpdate(e.target.value, MIN_TEAM_SIZE).value)}
               />
               <div className="field__hint">Standard kendo team is 5 (Senpou, Jihou, Chuken, Fukushou, Taishou).</div>
             </div>
@@ -1393,15 +1401,18 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
             </div>
           )}
 
-          {/* bc-symm: settings-only until now, and unconditional there
-              (admin_competition_settings.jsx:1066 gates it only on
-              isDrawReady, a lock this form has no equivalent of -- a
-              competition that doesn't exist yet has no draw to lock). No
-              format gate: matching settings exactly means matching its
-              absence of one too. */}
-          <div className="field">
-            <label className="checkbox"><input type="checkbox" checked={roundRobin} onChange={(e) => setRoundRobin(e.target.checked)} /> {LABEL_ROUND_ROBIN}</label>
-          </div>
+          {/* bc-symm Gap 2: gated on roundRobinVisible (competition_shape.jsx),
+              which is true only for "mixed" with poolFormat !== "partial" --
+              the one combination where internal/engine/pools.go actually
+              reads comp.RoundRobin. Elsewhere (league, playoffs, swiss,
+              partial-pool mixed) the field is stored but never consulted, so
+              showing the checkbox there would let the operator toggle
+              something with no effect. */}
+          {roundRobinVisible(format, poolFormat) && (
+            <div className="field">
+              <label className="checkbox"><input type="checkbox" checked={roundRobin} onChange={(e) => setRoundRobin(e.target.checked)} /> {LABEL_ROUND_ROBIN}</label>
+            </div>
+          )}
 
           {zekkenApplies(kind) && (
             <div className="field">

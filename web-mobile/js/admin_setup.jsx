@@ -1080,7 +1080,15 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
         {error && <div className="alert alert--error" style={{ marginBottom: 16 }}>{error}</div>}
 
         <div className="card card--pad-lg">
-          <div className="row">
+          {/* row-3, not row: the identity group is three fields (name, day,
+              start time). `.row` is a two-column grid, so before the bc-symm
+              reorder these sat as two clean pairs only because Player number
+              prefix was up here filling the fourth cell. Moving it down to the
+              options group left three fields in a two-column grid, which wraps
+              2 + 1 and orphans Start time beside an empty cell. `.row-3`
+              already exists and already collapses to one column on mobile
+              alongside `.row`, so this needs no new CSS. */}
+          <div className="row-3">
             <div className="field">
               <label className="field__label">Display name</label>
               {/* Placeholder shows the REAL default (deriveCompetitionName("", kind)), not

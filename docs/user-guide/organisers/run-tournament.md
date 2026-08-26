@@ -109,9 +109,15 @@ Three rules govern when a setting stops being editable:
   earlier than everything else. Individual and team rosters are not
   interchangeable, so clear the participant list first if you need to switch.
 
-Changing the format rewrites the settings that only apply to the format you left
-behind. Switching a pools competition to a league, for example, clears the pool
+Changing the format clears the settings that only apply to the format you left
+behind. Switching a pools competition to a league, for example, drops the pool
 size and the number of qualifiers, because a league has no pool phase to size.
+
+Nothing is cleared while you are still deciding. When you pick a different
+format, a note appears under the control listing each setting the save will
+clear, with its current value, so you can see the cost before you commit.
+Switching back to the original format keeps them. The settings are only dropped
+when you save.
 
 ### Assigning shiai-jo
 

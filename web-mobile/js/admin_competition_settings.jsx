@@ -901,7 +901,11 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           <button type="button" className="btn btn--sm" onClick={() => { setClashWarnings(null); if (onBack) onBack(); }}>Dismiss & return to dashboard</button>
         </div>
       )}
-      <div className="row">
+      {/* row-3 for the same reason as the create form's identity group: three
+          fields in `.row`'s two-column grid wrap 2 + 1 and orphan Start time
+          beside an empty cell. Kept identical to admin_setup.jsx so the two
+          screens lay the group out the same way, not just order it the same. */}
+      <div className="row-3">
         <div className="field"><label className="field__label">Display name</label><input className="input" value={local.name} onChange={(e) => update("name", e.target.value)} /></div>
         <div className="field">
           <label className="field__label">Day</label>

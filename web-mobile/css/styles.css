@@ -764,6 +764,36 @@ a:hover {
   color: var(--warn-ink);
 }
 
+/* The hint that hangs under a checkbox rather than a labeled input (Zekken /
+   Engi / Naginata / Check-in / joint-3rd-places sub-hints in
+   admin_competition_settings.jsx). The 22px indent approximates the
+   checkbox's own box (16px, see .checkbox input above) plus its 8px label
+   gap, so the hint text lines up close to the checkbox's LABEL rather than
+   starting flush under the box itself, which would read as detached from
+   the sentence it explains. Extracted from 5 identical inline
+   `style={{ fontSize: 11, paddingLeft: 22 }}` sites so the alignment rule has
+   one owner instead of five copies that could drift independently. */
+.field__hint--checkbox {
+  font-size: 11px;
+  padding-left: 22px;
+}
+
+/* Schedule-estimate panel (admin_competition_settings.jsx, mp-zoh Phase 4).
+   marginBottom: 14px matches .field's own 14px so the panel doesn't read as
+   a different rhythm from the fields around it; marginTop: 4px alone left it
+   flush against the next control's label (measured: 0px gap) until the
+   bc-symm reorder gave this panel a successor field to collide with -- see
+   the JSX comment at the call site for the fuller history. Values are
+   unchanged from the inline style this replaces. */
+.settings-estimate {
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  margin-top: 4px;
+  margin-bottom: 14px;
+}
+
 .input,
 .textarea,
 .select {
@@ -921,7 +951,17 @@ a:hover {
   flex-wrap: wrap;
 }
 
+/* DESIGN.md Principle 4: >=36px on shared surfaces, >=44px under coarse
+   pointers. Before this rule, padding: 6px 14px + font-size: 13px computed to
+   a 28px-tall pill - the primary control for Competition type, Format,
+   round-robin shape, pool-size mode and shiaijo selection (27 usages across 3
+   JSX files), with none of the file's coarse-pointer blocks covering it.
+   display/align-items keep the label vertically centred once min-height grows
+   past the line box: without them the text would sit top-aligned inside the
+   taller pill. */
 .radio-pill {
+  display: inline-flex;
+  align-items: center;
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 6px 14px;
@@ -929,12 +969,22 @@ a:hover {
   font-size: 13px;
   color: var(--ink-2);
   cursor: pointer;
+  min-height: 36px;
 }
 
 .radio-pill.is-active {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--accent-fg);
+}
+
+/* Coarse pointer (tablet/touch, where operators actually score): lift the
+   36px shared-surface floor to the 44px touch floor from DESIGN.md
+   Principle 4/§6 Accessibility. */
+@media (pointer: coarse) {
+  .radio-pill {
+    min-height: 44px;
+  }
 }
 
 /* Segmented control */

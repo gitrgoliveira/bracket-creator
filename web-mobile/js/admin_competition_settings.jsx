@@ -841,7 +841,11 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
         <div className="card__title">Competition settings</div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{
-            fontSize: 12.5,
+            // 12.5 was a stray off the documented scale (DESIGN.md Typography).
+            // This chip is a badge (padding + borderRadius + background, same
+            // shape as .badge--*), so it takes the "Buttons, inputs, badges"
+            // 13-13.5px role, not the 12px hint role.
+            fontSize: 13,
             padding: "4px 8px",
             borderRadius: 4,
             background: saveBlocked ? "var(--red-soft)" : isDirty ? "var(--warn-soft)" : lastSaved ? "var(--accent-soft)" : "transparent",
@@ -1319,7 +1323,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
               <input type="checkbox" checked={!!local.leagueTwoThirdPlaces} disabled={isDrawReady || isStarted} onChange={(e) => update("leagueTwoThirdPlaces", e.target.checked)} />
               {" "}{LABEL_TWO_THIRD_PLACES}
             </label>
-            <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>{HINT_TWO_THIRD_PLACES}{(isDrawReady || isStarted) ? " Locked after draw." : ""}</div>
+            <div className="field__hint field__hint--checkbox">{HINT_TWO_THIRD_PLACES}{(isDrawReady || isStarted) ? " Locked after draw." : ""}</div>
           </div>
         </div>
       )}
@@ -1407,13 +1411,17 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       {/* gave it a successor -- it used to be followed by a gap-bearing */}
       {/* container rather than by a field. */}
       {(compEstimate || compEstimateLoading || compEstimateErr) && (
-        <div style={{ padding: "10px 12px", borderRadius: 6, background: "var(--accent-soft, #f0f9ff)", border: "1px solid var(--accent, #3b82f6)", marginTop: 4, marginBottom: 14 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ink-2, #374151)", marginBottom: 4 }}>
+        <div className="settings-estimate">
+          {/* "Schedule estimate" is the title of this hint-style panel, not a
+              button/input/badge, so it takes the 12px "hints, secondary meta"
+              role (DESIGN.md Typography) -- matching every other text node in
+              this panel rather than the former 12.5 stray. */}
+          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--ink-2)", marginBottom: 4 }}>
             Schedule estimate
             {compEstimateLoading && <span className="spinner" style={{ marginLeft: 6, verticalAlign: "middle" }} />}
           </div>
           {compEstimateErr && (
-            <div style={{ fontSize: 12, color: "var(--red, #ef4444)" }}>{compEstimateErr}</div>
+            <div style={{ fontSize: 12, color: "var(--red)" }}>{compEstimateErr}</div>
           )}
           {compEstimate && !compEstimateErr && (() => {
             const total = formatCompMinutes(compEstimate.totalDurationMinutes);
@@ -1427,10 +1435,10 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             // EstimateHeadline (admin_schedule_utils.jsx) owns that decision
             // for both this panel and the Overview footer.
             if (!total) {
-              return <div style={{ fontSize: 12, color: "var(--ink-3, #6b7280)" }}>No estimate yet. Add participants and configure duration to see a projection.</div>;
+              return <div style={{ fontSize: 12, color: "var(--ink-3)" }}>No estimate yet. Add participants and configure duration to see a projection.</div>;
             }
             return (
-              <div style={{ fontSize: 12.5, color: "var(--ink-1, #111827)" }}>
+              <div style={{ fontSize: 12, color: "var(--ink-1)" }}>
                 <EstimateHeadline estimate={compEstimate} total={total} format={formatCompMinutes} testId="comp-est-range" />
                 {perCourt.length > 1 && (
                   <div style={{ marginTop: 2 }}>
@@ -1468,19 +1476,19 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
               operator unable to see, let alone recover, a setting they
               remember configuring. */}
           <label className="checkbox"><input type="checkbox" checked={local.withZekkenName} onChange={(e) => update("withZekkenName", e.target.checked)} disabled={isDrawReady || !zekkenApplies(local.kind)} /> {LABEL_ZEKKEN}</label>
-          <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>{!zekkenApplies(local.kind) ? "(Only applicable for individual competitions)" : "When enabled, participant CSV uses three columns: Name, Zekken, Dojo."}</div>
+          <div className="field__hint field__hint--checkbox">{!zekkenApplies(local.kind) ? "(Only applicable for individual competitions)" : "When enabled, participant CSV uses three columns: Name, Zekken, Dojo."}</div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <label className="checkbox"><input type="checkbox" checked={!!local.engi} onChange={(e) => update("engi", e.target.checked)} disabled={isDrawReady || isStarted || !engiApplies(local.kind)} /> {LABEL_ENGI}</label>
-          <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>{!engiApplies(local.kind) ? "(Only applicable for individual competitions)" : `Flag-count scoring for Engi-Kyogi pairs. Enter each pair as one participant: Name 1 - Name 2, Dojo.${(isDrawReady || isStarted) ? " Locked after draw." : ""}`}</div>
+          <div className="field__hint field__hint--checkbox">{!engiApplies(local.kind) ? "(Only applicable for individual competitions)" : `Flag-count scoring for Engi-Kyogi pairs. Enter each pair as one participant: Name 1 - Name 2, Dojo.${(isDrawReady || isStarted) ? " Locked after draw." : ""}`}</div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <label className="checkbox"><input type="checkbox" checked={!!local.naginata} onChange={(e) => update("naginata", e.target.checked)} disabled={isDrawReady || isStarted} /> Naginata competition</label>
-          <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>Adds the Sune (S) ippon button to the score editor. Use for Naginata divisions.{(isDrawReady || isStarted) ? " Locked after draw." : ""}</div>
+          <div className="field__hint field__hint--checkbox">Adds the Sune (S) ippon button to the score editor. Use for Naginata divisions.{(isDrawReady || isStarted) ? " Locked after draw." : ""}</div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <label className="checkbox"><input type="checkbox" checked={!!local.checkInEnabled} onChange={(e) => update("checkInEnabled", e.target.checked)} /> Check-in tracking</label>
-          <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>Show check-in column and counter. Disable for competitions that don't need attendance tracking.</div>
+          <div className="field__hint field__hint--checkbox">Show check-in column and counter. Disable for competitions that don't need attendance tracking.</div>
         </div>
       </div>
       {/* Repeat Save at the foot of the long settings form so the operator
@@ -1490,8 +1498,11 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           condition nor the blocking message is restated here. The transient
           "Saving…"/"✓ Saved at" states are the header's alone, by choice. */}
       <div style={{ marginTop: 20, display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10 }}>
-        {saveBlocked && <span style={{ fontSize: 12.5, color: "var(--red)", fontWeight: 600 }}>{saveBlockMessage}</span>}
-        {!saveBlocked && isDirty && !saving && <span style={{ fontSize: 12.5, color: "var(--warn)", fontWeight: 600 }}>● Unsaved changes</span>}
+        {/* Same badge-like status role as the header chip above (13px, "Buttons,
+            inputs, badges" per DESIGN.md Typography): both are a bold coloured
+            save-state indicator sitting beside the Save button, not a hint. */}
+        {saveBlocked && <span style={{ fontSize: 13, color: "var(--red)", fontWeight: 600 }}>{saveBlockMessage}</span>}
+        {!saveBlocked && isDirty && !saving && <span style={{ fontSize: 13, color: "var(--warn)", fontWeight: 600 }}>● Unsaved changes</span>}
         <button type="button" className="btn btn--primary" onClick={saveNow} disabled={saveDisabled}>
           {saving ? "Saving…" : "Save changes"}
         </button>

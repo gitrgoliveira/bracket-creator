@@ -1083,7 +1083,20 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
           <div className="row">
             <div className="field">
               <label className="field__label">Display name</label>
-              <input className="input" placeholder="e.g. Men's Individual" value={name} onChange={(e) => { setName(e.target.value); setError(""); }} />
+              {/* Placeholder shows the REAL default (deriveCompetitionName("", kind)), not
+                  an example, and tracks the live `kind` toggle so it flips
+                  Individual/Teams as the operator picks. A blank name is a
+                  supported choice (not an error - no required marker here), but
+                  leaving it blank silently names the competition "Individual" or
+                  "Teams". The old example-only placeholder ("e.g. Men's
+                  Individual") told the operator nothing about that: verified in
+                  the browser, creating one unnamed competition succeeds, and
+                  creating a second is refused with `A competition named
+                  "Individual" already exists...` - naming a value the operator
+                  never typed, with the field still visibly empty. The naming
+                  example moved to the hint below so this slot can tell the truth. */}
+              <input className="input" placeholder={deriveCompetitionName("", kind)} value={name} onChange={(e) => { setName(e.target.value); setError(""); }} />
+              <div className="field__hint">Example: Men's Individual</div>
             </div>
             <div className="field">
               <label className="field__label">Day</label>

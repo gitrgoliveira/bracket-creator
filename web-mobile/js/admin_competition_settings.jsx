@@ -1079,8 +1079,12 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           </div>
           <div className="row">
             {/* Same NaN-as-"" + gated-save pattern as Team size above. */}
-            {/* min=3 for poolSize matches the backend's pool-size lower */}
-            {/* bound (3 players minimum to run a round-robin). */}
+            {/* min=3 is a PRODUCT floor, not the backend's, which this */}
+            {/* comment used to assert: the engine rejects only poolSize <= 0 */}
+            {/* (engine/pools.go). 3 is the smallest pool a round-robin is */}
+            {/* worth running; the server stays looser on purpose so a */}
+            {/* hand-edited or imported config is not retroactively invalid. */}
+            {/* Shared with the create form via poolSettingsError. */}
             <div className="field"><label className="field__label">Players per pool</label><input
               className="input"
               type="number"

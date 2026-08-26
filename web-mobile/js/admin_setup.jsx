@@ -1289,10 +1289,18 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
               <div className="row">
                 {/* Same NaN-as-"" + decideNumericUpdate pattern as the courts */}
                 {/* field above and admin_competition.jsx AdminSettings. */}
-                {/* poolSize min=3 matches the backend's round-robin lower */}
-                {/* bound; winners min=1 matches the backend's playoff entry */}
-                {/* requirement. Submit-time guard at create() rejects */}
-                {/* NaN/<min before passing to buildCompetition. */}
+                {/* Both floors are PRODUCT choices, and this comment used to */}
+                {/* claim they mirrored backend bounds. They do not: the */}
+                {/* engine rejects only poolSize <= 0 (engine/pools.go, "pool */}
+                {/* size must be at least 1"), and poolWinners has no lower */}
+                {/* bound at all -- EffectivePoolWinners() reads <= 0 as */}
+                {/* "unset, use 2". So 3 and 1 are the UI declining to author */}
+                {/* a degenerate pool, not a server rule being mirrored, and */}
+                {/* the server stays deliberately looser for hand-edited and */}
+                {/* imported configs. poolSettingsError (competition_shape.jsx) */}
+                {/* owns both thresholds, shared with the Settings screen; the */}
+                {/* submit-time guard at create() rejects NaN/<min before */}
+                {/* passing to buildCompetition. */}
                 <div className="field"><label className="field__label">Players per pool</label><input
                   className="input"
                   type="number"

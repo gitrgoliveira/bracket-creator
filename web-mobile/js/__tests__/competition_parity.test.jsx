@@ -302,3 +302,211 @@ describe('competition CREATE vs SETTINGS: copy has a single home (bc-symm Phase 
     }
   }
 });
+
+// ── Task 3: control ORDER parity (bc-symm Phase 6) ──────────────────────
+//
+// The two describe blocks above guard the control SET (Task 1: every
+// LABEL_*/_OPTIONS name competition_shape.jsx exports is imported by both
+// screens) and the control COPY (Task 2: no screen re-spells a shared
+// label/hint inline). Neither can see ORDER: a screen that imports
+// LABEL_LEAGUE_TIEBREAK passes both checks whether the control it labels
+// renders first on the page or dead last. Order is a separate property,
+// and until this block nothing asserted it -- which is exactly how
+// admin_competition_settings.jsx ended up rendering League's own two
+// settings ("Break ties for top", "Award two joint 3rd places") fifteen
+// positions below Format: choosing League on the Settings screen showed
+// the operator nothing about what League needed until they had scrolled
+// past Team size, Team match type, Pool format, Round-robin, Pool size
+// mode, Pool size, Pool winners, Extra qualifiers, Swiss rounds, Assigned
+// shiaijo, both match durations, Player number prefix and all four
+// competition-option checkboxes -- fourteen unrelated controls between the
+// format pick and the settings it unlocked. bc-symm reordered both screens
+// to one dependency-first sequence (the two shape-gating controls first,
+// then each dependent group beside its gate) specifically to close that
+// gap. This block is what keeps a future edit from silently reopening it
+// on one screen while the other stays fixed.
+//
+// Deliberately does NOT hardcode the canonical group order as the
+// assertion below -- it asserts the two screens AGREE WITH EACH OTHER, by
+// comparing each one's own rendered sequence against the other's. A future
+// deliberate reorder only has to be applied to both screens; it never also
+// has to be transcribed into a third, hand-maintained list here that could
+// itself drift from what actually shipped (the exact failure class Task 1's
+// own header commentary warns about for shapeImportNames' over-match: a
+// guard that silently compares less than it claims).
+describe('competition CREATE vs SETTINGS: control ORDER parity (bc-symm Phase 6)', () => {
+  const setupSrc = stripComments(read('admin_setup.jsx'));
+  const settingsSrc = stripComments(read('admin_competition_settings.jsx'));
+
+  // Each marker names one control (in the canonical dependency-first order,
+  // for readability only -- see the header above for why that order is
+  // never itself asserted) and a pattern that locates its LABEL RENDER
+  // SITE, not just any mention of the control. Patterns are matched
+  // against a COMMENT-STRIPPED source specifically because this file's own
+  // doc comments quote LABEL_* tokens verbatim (e.g. CLEARED_FIELD_LABELS'
+  // header in admin_competition_settings.jsx) -- on the raw source, a
+  // marker built from the same token the reorder's own commentary
+  // discusses would silently count a sentence about the control as a
+  // second render site instead of the render site moving.
+  const MARKERS = [
+    { key: 'Display name', pattern: '>Display name<' },
+    { key: 'Day', pattern: '>Day<' },
+    { key: 'Start time', pattern: '>Start time<' },
+    { key: 'Competition type (Kind)', pattern: '{LABEL_KIND}' },
+    { key: 'Format', pattern: '{LABEL_FORMAT}' },
+    { key: 'Team size', pattern: '{LABEL_TEAM_SIZE}' },
+    { key: 'Team match type', pattern: '{LABEL_TEAM_MATCH_TYPE}' },
+    { key: 'Pool format (round-robin shape)', pattern: '{LABEL_POOL_FORMAT}' },
+    { key: 'Round-robin (round-robin in pools)', pattern: '{LABEL_ROUND_ROBIN}' },
+    { key: 'Pool size mode ("Pool size is a")', pattern: '>Pool size is a<' },
+    { key: 'Pool size', pattern: '{LABEL_POOL_SIZE}' },
+    { key: 'Pool winners', pattern: '{LABEL_POOL_WINNERS}' },
+    { key: 'Extra qualifiers', pattern: '{LABEL_EXTRA_QUALIFIERS}' },
+    { key: 'Swiss rounds', pattern: '{LABEL_SWISS_ROUNDS}' },
+    { key: 'League tiebreak', pattern: '{LABEL_LEAGUE_TIEBREAK}' },
+    { key: 'Two joint 3rd places', pattern: '{LABEL_TWO_THIRD_PLACES}' },
+    { key: 'Assigned shiaijo (courts)', pattern: '>Assigned shiaijo (courts)<' },
+    // Pool duration's <label> is built by a shared helper on each screen
+    // (admin_setup.jsx inlines the JSX; admin_competition_settings.jsx
+    // calls its own durationField()), so the one substring both render
+    // sites share verbatim is the poolDurationLabel(...) CALL -- only its
+    // argument differs (`format` vs `local.format`). The
+    // competition_shape.jsx import list also names the function, but only
+    // as a bare `poolDurationLabel,`, never followed by `(`, so the open
+    // paren is what keeps the import line from matching.
+    { key: 'Pool duration', pattern: 'poolDurationLabel(' },
+    // Playoff duration's two screens render through genuinely different
+    // shapes: admin_setup.jsx as an inline `{LABEL_PLAYOFF_DURATION}` JSX
+    // expression, admin_competition_settings.jsx as a bare argument to
+    // durationField(...). One literal string cannot name both render
+    // sites, so this is the file's one regex marker: it alternates between
+    // the two call shapes. Neither arm matches the competition_shape.jsx
+    // import line (`LABEL_PLAYOFF_DURATION, HINT_PLAYOFF_DURATION,`),
+    // which has no `{`/`}` around the bare name and is never itself a
+    // `durationField(...)` call.
+    { key: 'Playoff duration', pattern: /\{LABEL_PLAYOFF_DURATION\}|durationField\(LABEL_PLAYOFF_DURATION,/ },
+    { key: 'Player number prefix', pattern: '>Player number prefix ' },
+    { key: 'Zekken (participant CSV column)', pattern: '{LABEL_ZEKKEN}' },
+    { key: 'Engi (kata pairs)', pattern: '{LABEL_ENGI}' },
+    // Naginata and Check-in have no LABEL_* constant -- competition_shape
+    // .jsx doesn't own this copy, both screens spell it inline (and
+    // identically, which Task 2 above cannot check for exactly that
+    // reason: there is no shared constant to import) -- so the marker
+    // anchors to the label markup itself: the checkbox text immediately
+    // followed by the closing </label> it always has.
+    { key: 'Naginata competition', pattern: 'Naginata competition</label>' },
+    { key: 'Check-in tracking', pattern: 'Check-in tracking</label>' },
+  ];
+
+  it('the marker list is non-empty (not a vacuous pass)', () => {
+    expect(MARKERS.length).toBeGreaterThan(0);
+  });
+
+  // Every match START INDEX for `pattern` in `src`, string or regex alike.
+  // Returns an array (not a boolean or a count) so both "exactly once" and
+  // "the one position" can be read off the same call: a length !== 1 is the
+  // ambiguous/missing case the per-marker checks below reject, and
+  // idxs[0] is the position the order comparison sorts by.
+  function occurrences(src, pattern) {
+    const idxs = [];
+    if (typeof pattern === 'string') {
+      let from = 0;
+      for (;;) {
+        const i = src.indexOf(pattern, from);
+        if (i === -1) break;
+        idxs.push(i);
+        from = i + 1;
+      }
+      return idxs;
+    }
+    const flags = pattern.flags.includes('g') ? pattern.flags : pattern.flags + 'g';
+    const re = new RegExp(pattern.source, flags);
+    let m;
+    while ((m = re.exec(src))) {
+      idxs.push(m.index);
+      if (m[0].length === 0) re.lastIndex++; // guard a zero-width pattern from looping forever
+    }
+    return idxs;
+  }
+
+  const setupOcc = {};
+  const settingsOcc = {};
+  for (const { key, pattern } of MARKERS) {
+    setupOcc[key] = occurrences(setupSrc, pattern);
+    settingsOcc[key] = occurrences(settingsSrc, pattern);
+  }
+
+  // One assertion per marker per screen, exactly as Task 1's header
+  // commentary demands of this whole file's approach: a pattern that
+  // matches zero times (the control's label was renamed, or moved into a
+  // shared helper this marker doesn't know about) or more than once (the
+  // pattern was too loose and is now also matching a comment, an unrelated
+  // control, or its own import) must fail LOUDLY, naming the marker and
+  // the actual count -- never silently drop the control from the order
+  // comparison below, which is the same class of bug as shapeImportNames'
+  // original over-match: a guard that quietly compares less than it claims.
+  for (const { key } of MARKERS) {
+    it(`"${key}": render site appears exactly once in admin_setup.jsx`, () => {
+      const n = setupOcc[key].length;
+      expect(
+        n,
+        `admin_setup.jsx: marker "${key}" matched ${n} time(s) (expected exactly 1). ` +
+        (n === 0
+          ? 'The control\'s render site moved, was renamed, or the marker pattern is stale.'
+          : 'The pattern is ambiguous -- tighten it so it can only match this control\'s own label render site.')
+      ).toBe(1);
+    });
+    it(`"${key}": render site appears exactly once in admin_competition_settings.jsx`, () => {
+      const n = settingsOcc[key].length;
+      expect(
+        n,
+        `admin_competition_settings.jsx: marker "${key}" matched ${n} time(s) (expected exactly 1). ` +
+        (n === 0
+          ? 'The control\'s render site moved, was renamed, or the marker pattern is stale.'
+          : 'The pattern is ambiguous -- tighten it so it can only match this control\'s own label render site.')
+      ).toBe(1);
+    });
+  }
+
+  it('every marker was located on both screens (not a vacuous pass)', () => {
+    // Belt-and-braces summary of the per-marker checks above: if the loop
+    // that generated them ever stopped running (a refactor that hoists
+    // MARKERS out of scope, a typo that empties the loop body), THIS check
+    // still catches a marker silently missing from one screen instead of
+    // the suite quietly having fewer assertions than it claims.
+    const missingSetup = MARKERS.filter((m) => setupOcc[m.key].length !== 1).map((m) => m.key);
+    const missingSettings = MARKERS.filter((m) => settingsOcc[m.key].length !== 1).map((m) => m.key);
+    expect(missingSetup, `admin_setup.jsx: marker(s) not found exactly once: ${missingSetup.join(', ')}`).toEqual([]);
+    expect(missingSettings, `admin_competition_settings.jsx: marker(s) not found exactly once: ${missingSettings.join(', ')}`).toEqual([]);
+  });
+
+  it('both screens render the shared controls in the SAME RELATIVE ORDER', () => {
+    // Restricted to markers unambiguously found on BOTH screens: a marker
+    // that failed the "exactly once" checks above is already reported
+    // there by name; folding its missing/duplicate position into a sort
+    // here would either crash on an empty array or sort on a meaningless
+    // first-of-several index, producing a confusing order mismatch that
+    // hides the real (locate) failure instead of pointing at it.
+    const usable = MARKERS.filter((m) => setupOcc[m.key].length === 1 && settingsOcc[m.key].length === 1);
+
+    const bySetupPosition = (a, b) => setupOcc[a.key][0] - setupOcc[b.key][0];
+    const bySettingsPosition = (a, b) => settingsOcc[a.key][0] - settingsOcc[b.key][0];
+    const setupOrder = [...usable].sort(bySetupPosition).map((m) => m.key);
+    const settingsOrder = [...usable].sort(bySettingsPosition).map((m) => m.key);
+
+    // The two sequences are the WHOLE assertion -- no canonical list is
+    // compared against either one (see this describe block's header). A
+    // mismatch prints both orders in full so a maintainer can see exactly
+    // which control(s) moved on which screen, rather than a bare
+    // pass/fail that would send them back to diff the two files by hand.
+    expect(
+      settingsOrder,
+      'admin_setup.jsx and admin_competition_settings.jsx render the shared controls in a ' +
+      'DIFFERENT relative order.\n' +
+      `  admin_setup.jsx order:               ${JSON.stringify(setupOrder)}\n` +
+      `  admin_competition_settings.jsx order: ${JSON.stringify(settingsOrder)}\n` +
+      'Both screens must render every shared control in the same sequence. Move the control(s) ' +
+      'that differ to match the other screen -- do not special-case an exception here.'
+    ).toEqual(setupOrder);
+  });
+});

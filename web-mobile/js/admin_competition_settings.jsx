@@ -64,21 +64,24 @@ export function formatCompMinutes(m) {
   return `${h}h ${String(min).padStart(2, "0")}m`;
 }
 
-// Operator-facing label for each field pendingConfigClears
-// (competition_shape.jsx) can report. Lives HERE, not in competition_shape
-// .jsx: that module is a pure leaf that returns keys only (its own doc
-// comment explains why -- it owns the RULE, this screen owns the RENDER),
-// so the label copy belongs with the renderer.
-//
-// Every value below is one of competition_shape.jsx's own LABEL_* exports
-// (LABEL_POOL_SIZE, LABEL_POOL_WINNERS, LABEL_EXTRA_QUALIFIERS,
-// LABEL_TEAM_SIZE, LABEL_TEAM_MATCH_TYPE, LABEL_ENGI, LABEL_ZEKKEN), the
-// same constants this file's own field <label>s render below -- so the
-// string has exactly one home, and the bc-symm parity guard
+// This is an INDEX for the pending-clears notice below, NOT the render
+// sites' source of copy: it goes from a pendingConfigClears
+// (competition_shape.jsx) KEY (e.g. "poolSize") to the LABEL_* constant
+// naming that field, for the one place (the notice's bullet list) that has
+// to look a label up dynamically by a key it only knows at runtime. This
+// screen's own field <label>s do NOT read through this map -- they import
+// and render LABEL_POOL_SIZE / LABEL_POOL_WINNERS / LABEL_EXTRA_QUALIFIERS /
+// LABEL_TEAM_SIZE / LABEL_TEAM_MATCH_TYPE / LABEL_ENGI / LABEL_ZEKKEN
+// directly, the same access path admin_setup.jsx uses for the identical
+// controls (bc-symm: the LABEL_TEAM_SIZE constant directly, not a second
+// lookup through this map's own key). Lives HERE, not in competition_shape.jsx: that module is
+// a pure leaf that returns keys only (its own doc comment explains why --
+// it owns the RULE, this screen owns the RENDER), so the label copy
+// belongs with the renderer. Every value below is still one of
+// competition_shape.jsx's own LABEL_* exports, so the string has exactly
+// one home either way, and the bc-symm parity guard
 // (competition_parity.test.jsx) covers it the ordinary way, by asserting
-// admin_setup.jsx and this file both import the same LABEL_* names. This
-// map exists only to go from a pendingConfigClears KEY (e.g. "poolSize")
-// to the label constant naming that field; it carries no copy of its own.
+// admin_setup.jsx and this file both import the same LABEL_* names.
 const CLEARED_FIELD_LABELS = {
   poolSize: LABEL_POOL_SIZE,
   poolWinners: LABEL_POOL_WINNERS,
@@ -950,9 +953,13 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
         {/* Roster lock (kindLockReason above), NOT just isDrawReady/isStarted:
             a kind flip invalidates the roster itself, which exists long
             before any draw does, so this locks earlier than every other
-            output-affecting field below. Kind gates the Team size / Team
-            match format fields immediately following it, which is why it
-            sits here rather than beside Format further down. */}
+            output-affecting field below -- Format included, which is why
+            Kind sits directly above it: the two are the form's only
+            shape-gating controls (bc-symm Group 2). Team size and Team
+            match type, which Kind gates via teamFieldsVisible, are grouped
+            further down (after Format, Group 3): Kind still has to resolve
+            first for their own visibility to be decidable, whatever else
+            renders between here and there. */}
         <div className="radio-group">
           {KIND_OPTIONS.map((o) => (
             <button
@@ -968,64 +975,6 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           {kindLockReason}{(isDrawReady || isStarted) ? " Locked after draw." : ""}
         </div>
       </div>
-      {teamFieldsVisible(local.kind) && (
-        <div className="field">
-          <label className="field__label">{CLEARED_FIELD_LABELS.teamSize}</label>
-          {/* Cap is MAX_TEAM_SIZE (admin_helpers.jsx). TEAM_POSITIONS in */}
-          {/* admin_scoring_modal.jsx is built from the same constant, so */}
-          {/* this input can't allow a value the scoring UI doesn't render. */}
-          {/* Floor is MIN_TEAM_SIZE (competition_shape.jsx): teamSize == 1 */}
-          {/* is rejected unconditionally by ValidateCompetitionTeamSize */}
-          {/* (state/models.go), so this field's legal domain starts at 2, */}
-          {/* not 1, whenever it's visible at all (team-only, see */}
-          {/* teamFieldsVisible above). */}
-          {/* Render NaN as "" so clearing the input stays empty instead of */}
-          {/* collapsing to "0"; saveNow's safeNonNegInt guard means a */}
-          {/* cleared/invalid value falls back to the last-saved teamSize */}
-          {/* rather than landing on the backend as a clobbering 0. */}
-          {/* draw-ready lock: teamSize is output-affecting. */}
-          <input
-            className="input"
-            type="number"
-            min={MIN_TEAM_SIZE}
-            max={MAX_TEAM_SIZE}
-            value={Number.isFinite(local.teamSize) ? local.teamSize : ""}
-            onChange={(e) => updateNumber("teamSize", e.target.value, MIN_TEAM_SIZE)}
-            disabled={isDrawReady}
-          />
-        </div>
-      )}
-      {teamFieldsVisible(local.kind) && (
-        <div className="field">
-          <label className="field__label">{CLEARED_FIELD_LABELS.teamMatchType}</label>
-          {/* draw-ready + started lock: teamMatchType selects fixed vs kachinuki
-              bout sequencing; changing it after draw-ready would desync the match
-              structure from config, and flipping it on a STARTED comp would
-              desync recorded bouts from the scoring paradigm (server 409s). */}
-          <div className="radio-group">
-            {/* Active check is asymmetric ON PURPOSE, not a plain o.value ===
-                local.teamMatchType: local.teamMatchType can be a legacy/
-                stored value that is neither exactly "fixed" nor "kachinuki"
-                (see normalizeConfigForKind's own comment on the legacy ""
-                sentinel), and this field defaults to Regular in that case --
-                mirroring ValidateTeamMatchType's own "" == fixed reading.
-                Only the "kachinuki" option is checked for an exact match;
-                "fixed" is active whenever the stored value is anything else. */}
-            {TEAM_MATCH_TYPE_OPTIONS.map((o) => (
-              <button
-                key={o.value}
-                className={`radio-pill ${(o.value === "kachinuki" ? local.teamMatchType === "kachinuki" : local.teamMatchType !== "kachinuki") ? "is-active" : ""}`}
-                type="button"
-                onClick={() => update("teamMatchType", o.value)}
-                disabled={isDrawReady || isStarted}
-              >{o.label}</button>
-            ))}
-          </div>
-          <div className="field__hint">
-            {teamMatchTypeHint(local.teamMatchType === "kachinuki")}{(isDrawReady || isStarted) ? " Locked after draw." : ""}
-          </div>
-        </div>
-      )}
       <div className="field">
         <label className="field__label">{LABEL_FORMAT}</label>
         {/* draw-ready + started lock: format is output-affecting exactly like
@@ -1076,10 +1025,68 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           </div>
         </div>
       )}
+      {teamFieldsVisible(local.kind) && (
+        <div className="field">
+          <label className="field__label">{LABEL_TEAM_SIZE}</label>
+          {/* Cap is MAX_TEAM_SIZE (admin_helpers.jsx). TEAM_POSITIONS in */}
+          {/* admin_scoring_modal.jsx is built from the same constant, so */}
+          {/* this input can't allow a value the scoring UI doesn't render. */}
+          {/* Floor is MIN_TEAM_SIZE (competition_shape.jsx): teamSize == 1 */}
+          {/* is rejected unconditionally by ValidateCompetitionTeamSize */}
+          {/* (state/models.go), so this field's legal domain starts at 2, */}
+          {/* not 1, whenever it's visible at all (team-only, see */}
+          {/* teamFieldsVisible above). */}
+          {/* Render NaN as "" so clearing the input stays empty instead of */}
+          {/* collapsing to "0"; saveNow's safeNonNegInt guard means a */}
+          {/* cleared/invalid value falls back to the last-saved teamSize */}
+          {/* rather than landing on the backend as a clobbering 0. */}
+          {/* draw-ready lock: teamSize is output-affecting. */}
+          <input
+            className="input"
+            type="number"
+            min={MIN_TEAM_SIZE}
+            max={MAX_TEAM_SIZE}
+            value={Number.isFinite(local.teamSize) ? local.teamSize : ""}
+            onChange={(e) => updateNumber("teamSize", e.target.value, MIN_TEAM_SIZE)}
+            disabled={isDrawReady}
+          />
+        </div>
+      )}
+      {teamFieldsVisible(local.kind) && (
+        <div className="field">
+          <label className="field__label">{LABEL_TEAM_MATCH_TYPE}</label>
+          {/* draw-ready + started lock: teamMatchType selects fixed vs kachinuki
+              bout sequencing; changing it after draw-ready would desync the match
+              structure from config, and flipping it on a STARTED comp would
+              desync recorded bouts from the scoring paradigm (server 409s). */}
+          <div className="radio-group">
+            {/* Active check is asymmetric ON PURPOSE, not a plain o.value ===
+                local.teamMatchType: local.teamMatchType can be a legacy/
+                stored value that is neither exactly "fixed" nor "kachinuki"
+                (see normalizeConfigForKind's own comment on the legacy ""
+                sentinel), and this field defaults to Regular in that case --
+                mirroring ValidateTeamMatchType's own "" == fixed reading.
+                Only the "kachinuki" option is checked for an exact match;
+                "fixed" is active whenever the stored value is anything else. */}
+            {TEAM_MATCH_TYPE_OPTIONS.map((o) => (
+              <button
+                key={o.value}
+                className={`radio-pill ${(o.value === "kachinuki" ? local.teamMatchType === "kachinuki" : local.teamMatchType !== "kachinuki") ? "is-active" : ""}`}
+                type="button"
+                onClick={() => update("teamMatchType", o.value)}
+                disabled={isDrawReady || isStarted}
+              >{o.label}</button>
+            ))}
+          </div>
+          <div className="field__hint">
+            {teamMatchTypeHint(local.teamMatchType === "kachinuki")}{(isDrawReady || isStarted) ? " Locked after draw." : ""}
+          </div>
+        </div>
+      )}
       {poolFormatVisible(local.format) && (
         <div className="field">
           <label className="field__label">{LABEL_POOL_FORMAT}</label>
-          {/* Same output-affecting lock as Format immediately above: this is
+          {/* Same output-affecting lock as Format above: this is
               the shape of the round-robin the draw itself builds. */}
           <div className="radio-group">
             {POOL_FORMAT_OPTIONS.map((o) => (
@@ -1100,6 +1107,219 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
                 below (was: `local.poolFormat === "partial"`). */}
             {POOL_FORMAT_OPTIONS.find((o) => o.value === (local.poolFormat || POOL_FORMAT_FULL))?.hint}
             {(isDrawReady || isStarted) ? " Locked after draw." : ""}
+          </div>
+        </div>
+      )}
+      <div className="field">
+        {/* bc-symm Gap 2: gated on roundRobinVisible (competition_shape.jsx)
+            -- true only for "mixed" with poolFormat !== "partial", the one
+            combination internal/engine/pools.go actually reads
+            comp.RoundRobin for. Rendering it unconditionally (as this used
+            to) showed a live-looking control that a league or a
+            partial-pool mixed competition silently ignored.
+            draw-ready lock: roundRobin is output-affecting. */}
+        {roundRobinVisible(local.format, local.poolFormat) && (
+          <label className="checkbox"><input type="checkbox" checked={local.roundRobin} onChange={(e) => update("roundRobin", e.target.checked)} disabled={isDrawReady} /> {LABEL_ROUND_ROBIN}</label>
+        )}
+      </div>
+      {local.format === FORMAT_MIXED && (
+        <>
+          <div className="field">
+            <label className="field__label">Pool size is a</label>
+            {/* draw-ready lock: poolSizeMode, poolSize, poolWinners are output-affecting. */}
+            <div className="radio-group">
+              <button
+                className={`radio-pill ${local.poolSizeMode === "max" ? "is-active" : ""}`}
+                type="button"
+                onClick={() => {
+                  // bc-qual LP-5a: leaving minimum-players-per-pool sizing
+                  // hides the "Knockout qualifiers" radio below; reset its
+                  // value to standard so it can't persist as a stale
+                  // non-standard selection under a mode it's no longer
+                  // valid for (same reset admin_setup.jsx's create form
+                  // applies on the same transition).
+                  update("poolSizeMode", "max");
+                  update("extraQualifiers", resetExtraQualifiersOnPoolModeChange("max", local.extraQualifiers));
+                }}
+                disabled={isDrawReady}
+              >maximum</button>
+              <button className={`radio-pill ${local.poolSizeMode === "min" ? "is-active" : ""}`} type="button" onClick={() => update("poolSizeMode", "min")} disabled={isDrawReady}>minimum</button>
+            </div>
+          </div>
+          <div className="row">
+            {/* Same NaN-as-"" + gated-save pattern as Team size above. */}
+            {/* min=3 is a PRODUCT floor, not the backend's, which this */}
+            {/* comment used to assert: the engine rejects only poolSize <= 0 */}
+            {/* (engine/pools.go). 3 is the smallest pool a round-robin is */}
+            {/* worth running; the server stays looser on purpose so a */}
+            {/* hand-edited or imported config is not retroactively invalid. */}
+            {/* Shared with the create form via poolSettingsError. */}
+            <div className="field"><label className="field__label">{LABEL_POOL_SIZE}</label><input
+              className="input"
+              type="number"
+              min="3"
+              value={Number.isFinite(local.poolSize) ? local.poolSize : ""}
+              onChange={(e) => updateNumber("poolSize", e.target.value, 3)}
+              disabled={isDrawReady}
+            /></div>
+            <div className="field">
+              <label className="field__label">{LABEL_POOL_WINNERS}</label>
+              <input
+                className="input"
+                type="number"
+                min="1"
+                value={Number.isFinite(local.poolWinners) ? local.poolWinners : ""}
+                onChange={(e) => updateNumber("poolWinners", e.target.value, 1)}
+                disabled={isDrawReady || winnersInputDisabled(local.extraQualifiers)}
+              />
+              {/* bc-qual LP-5a: same coupling hint as the create form; */}
+              {/* draw-ready already has its own standing note on the */}
+              {/* Assigned shiaijo field below, so it isn't repeated per-field here. */}
+              {!isDrawReady && winnersInputDisabled(local.extraQualifiers) && (
+                <div className="field__hint">Set to 1 by the knockout qualifiers setting below.</div>
+              )}
+            </div>
+          </div>
+          {/* Rendered for ANY invalid poolSize/poolWinners, staged or already
+              saved, mirroring courtsErr's own rule (see the ShiaijoCountNotes
+              comment on the Assigned shiaijo field below): the field must never
+              look fine while a Save would 400, even before this session
+              touched it. Save itself is gated on the narrower
+              blockingPoolSettingsErr (a CHANGE to an invalid combination),
+              not on this.
+
+              Wrapped in a `.field` rather than dropped in bare. FieldError
+              carries no spacing of its own by design (see its comment in
+              ui.jsx: spacing is the container's job, and a style prop is the
+              crack per-site drift returns through), so as a bare sibling of
+              the .row above it rendered flush against the "Pool match
+              duration" label below and read as that field's error instead of
+              this row's. `.field`'s own margin-bottom is the sanctioned way
+              to separate it. Full width under BOTH inputs, not inside either
+              one: the message names whichever of the two is wrong, and the
+              .row is a two-column grid that would wrap it to half width. */}
+          {poolSettingsErr && (
+            <div className="field">
+              <window.FieldError>{poolSettingsErr}</window.FieldError>
+            </div>
+          )}
+
+          {/* Knockout qualifiers (bc-qual LP-5a): only meaningful under
+              minimum-players-per-pool sizing (poolSizeMode === "min"); see
+              extraQualifiersRadioVisible. Same three options, same copy,
+              and the same draw-ready lock as poolSizeMode/poolSize/
+              poolWinners immediately above (this field is in the
+              server-side outputAffectingChanged set alongside them).
+              Federation-neutral copy per operator ruling: no federation
+              names anywhere in this UI. */}
+          {extraQualifiersRadioVisible(local.format, local.poolSizeMode) && (() => {
+            const activeShape = local.extraQualifiers === EXTRA_QUALIFIERS_LARGER_POOLS
+              ? qualifierPreview.largerPools
+              : local.extraQualifiers === EXTRA_QUALIFIERS_FILL_BRACKET
+                ? qualifierPreview.fillBracket
+                : qualifierPreview.standard;
+            const previewLine = formatQualifierPreviewLine(activeShape);
+            return (
+              <div className="field">
+                <label className="field__label">{LABEL_EXTRA_QUALIFIERS}</label>
+                <div className="radio-group">
+                  <button
+                    className={`radio-pill ${!local.extraQualifiers ? "is-active" : ""}`}
+                    type="button"
+                    onClick={() => update("extraQualifiers", EXTRA_QUALIFIERS_STANDARD)}
+                    disabled={isDrawReady}
+                  >{extraQualifiersLabel(EXTRA_QUALIFIERS_STANDARD)}</button>
+                  <button
+                    className={`radio-pill ${local.extraQualifiers === EXTRA_QUALIFIERS_LARGER_POOLS ? "is-active" : ""}`}
+                    type="button"
+                    onClick={() => {
+                      update("extraQualifiers", EXTRA_QUALIFIERS_LARGER_POOLS);
+                      update("poolWinners", winnersForExtraQualifiersChange(EXTRA_QUALIFIERS_LARGER_POOLS, local.poolWinners));
+                    }}
+                    disabled={isDrawReady}
+                  >{extraQualifiersLabel(EXTRA_QUALIFIERS_LARGER_POOLS)}</button>
+                  <button
+                    className={`radio-pill ${local.extraQualifiers === EXTRA_QUALIFIERS_FILL_BRACKET ? "is-active" : ""}`}
+                    type="button"
+                    onClick={() => {
+                      update("extraQualifiers", EXTRA_QUALIFIERS_FILL_BRACKET);
+                      update("poolWinners", winnersForExtraQualifiersChange(EXTRA_QUALIFIERS_FILL_BRACKET, local.poolWinners));
+                    }}
+                    disabled={isDrawReady}
+                  >{extraQualifiersLabel(EXTRA_QUALIFIERS_FILL_BRACKET)}</button>
+                </div>
+                <div className="field__hint">
+                  {extraQualifiersHint(local.extraQualifiers, local.poolSize)}
+                </div>
+                <div className="field__hint" data-testid="qualifier-preview-line">
+                  {previewLine || "Preview appears once this competition has participants."}
+                </div>
+              </div>
+            );
+          })()}
+        </>
+      )}
+      {/* T190 (FR-050a): swissRounds settings editor. Only rendered */}
+      {/* when format=swiss. The backend allows editing pre-start; */}
+      {/* changing rounds after start is allowed too (the next */}
+      {/* "Generate next round" call will respect the new cap). */}
+      {swissRoundsVisible(local.format) && (
+        <div className="field">
+          <label className="field__label">{LABEL_SWISS_ROUNDS}</label>
+          <input
+            className="input"
+            type="number"
+            min="1"
+            step="1"
+            value={Number.isFinite(local.swissRounds) ? local.swissRounds : ""}
+            onChange={(e) => updateNumber("swissRounds", e.target.value, 1)}
+            style={{ maxWidth: 120 }}
+          />
+          <div className="field__hint">{HINT_SWISS_ROUNDS}</div>
+        </div>
+      )}
+      {/* League standings settings. The joint-3rd convention applies to ALL
+          leagues (team + individual); the "Break ties for top" band is a
+          team-league tie-breaker knob and stays team-only. */}
+      {local.format === FORMAT_LEAGUE && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 8, paddingTop: 12, borderTop: "1px solid var(--line)" }}>
+          {/* leagueTiebreakVisible folds format === "league" into its own
+              check, so this re-evaluates that half of the outer wrapper's
+              condition -- redundant (A && A) but not wrong, and it keeps
+              this call site identical to the create form's, which has no
+              format wrapper of its own to lean on. */}
+          {leagueTiebreakVisible(local.format, local.kind, local.teamSize) && (
+            <div className="field">
+              <label className="field__label">{LABEL_LEAGUE_TIEBREAK}</label>
+              <div className="radio-group">
+                {LEAGUE_TIEBREAK_OPTIONS.map((o) => (
+                  <button
+                    key={o.value}
+                    className={`radio-pill ${(o.value === 3 ? ((local.leagueTiebreakTopN || 0) === 0 || local.leagueTiebreakTopN === 3) : local.leagueTiebreakTopN === o.value) ? "is-active" : ""}`}
+                    type="button"
+                    disabled={isDrawReady || isStarted}
+                    onClick={() => update("leagueTiebreakTopN", o.value)}
+                  >{o.label}</button>
+                ))}
+              </div>
+              <div className="field__hint">{HINT_LEAGUE_TIEBREAK}{(isDrawReady || isStarted) ? " Locked after draw." : ""}</div>
+            </div>
+          )}
+          {/* `.field` for its margin-bottom, matching admin_setup.jsx's wrapper
+              around this same control. The inline flex/gap:4 stays and wins over
+              .field's gap:6, so the checkbox-to-hint spacing is unchanged; the
+              only thing the class adds is the 14px separation from whatever
+              follows. Bare, this rendered flush against the next control's label
+              (measured: 0px to "Assigned shiaijo (courts)", against 14px+ at
+              every other transition on the screen). It was invisible until the
+              bc-symm reorder, because this checkbox used to be the LAST control
+              on the form and so had nothing to collide with. */}
+          <div className="field" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <label className="checkbox">
+              <input type="checkbox" checked={!!local.leagueTwoThirdPlaces} disabled={isDrawReady || isStarted} onChange={(e) => update("leagueTwoThirdPlaces", e.target.checked)} />
+              {" "}{LABEL_TWO_THIRD_PLACES}
+            </label>
+            <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>{HINT_TWO_THIRD_PLACES}{(isDrawReady || isStarted) ? " Locked after draw." : ""}</div>
           </div>
         </div>
       )}
@@ -1163,143 +1383,6 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           <div className="field__hint">Concurrency = number of shiaijo assigned. Schedule prevents double-booking with other competitions.</div>
         )}
       </div>
-      {local.format === FORMAT_MIXED && (
-        <>
-          <div className="field">
-            <label className="field__label">Pool size is a</label>
-            {/* draw-ready lock: poolSizeMode, poolSize, poolWinners are output-affecting. */}
-            <div className="radio-group">
-              <button
-                className={`radio-pill ${local.poolSizeMode === "max" ? "is-active" : ""}`}
-                type="button"
-                onClick={() => {
-                  // bc-qual LP-5a: leaving minimum-players-per-pool sizing
-                  // hides the "Knockout qualifiers" radio below; reset its
-                  // value to standard so it can't persist as a stale
-                  // non-standard selection under a mode it's no longer
-                  // valid for (same reset admin_setup.jsx's create form
-                  // applies on the same transition).
-                  update("poolSizeMode", "max");
-                  update("extraQualifiers", resetExtraQualifiersOnPoolModeChange("max", local.extraQualifiers));
-                }}
-                disabled={isDrawReady}
-              >maximum</button>
-              <button className={`radio-pill ${local.poolSizeMode === "min" ? "is-active" : ""}`} type="button" onClick={() => update("poolSizeMode", "min")} disabled={isDrawReady}>minimum</button>
-            </div>
-          </div>
-          <div className="row">
-            {/* Same NaN-as-"" + gated-save pattern as Team size above. */}
-            {/* min=3 is a PRODUCT floor, not the backend's, which this */}
-            {/* comment used to assert: the engine rejects only poolSize <= 0 */}
-            {/* (engine/pools.go). 3 is the smallest pool a round-robin is */}
-            {/* worth running; the server stays looser on purpose so a */}
-            {/* hand-edited or imported config is not retroactively invalid. */}
-            {/* Shared with the create form via poolSettingsError. */}
-            <div className="field"><label className="field__label">{CLEARED_FIELD_LABELS.poolSize}</label><input
-              className="input"
-              type="number"
-              min="3"
-              value={Number.isFinite(local.poolSize) ? local.poolSize : ""}
-              onChange={(e) => updateNumber("poolSize", e.target.value, 3)}
-              disabled={isDrawReady}
-            /></div>
-            <div className="field">
-              <label className="field__label">{CLEARED_FIELD_LABELS.poolWinners}</label>
-              <input
-                className="input"
-                type="number"
-                min="1"
-                value={Number.isFinite(local.poolWinners) ? local.poolWinners : ""}
-                onChange={(e) => updateNumber("poolWinners", e.target.value, 1)}
-                disabled={isDrawReady || winnersInputDisabled(local.extraQualifiers)}
-              />
-              {/* bc-qual LP-5a: same coupling hint as the create form; */}
-              {/* draw-ready already has its own standing note above the */}
-              {/* "Pool size is a" pills, so it isn't repeated per-field here. */}
-              {!isDrawReady && winnersInputDisabled(local.extraQualifiers) && (
-                <div className="field__hint">Set to 1 by the knockout qualifiers setting below.</div>
-              )}
-            </div>
-          </div>
-          {/* Rendered for ANY invalid poolSize/poolWinners, staged or already
-              saved, mirroring courtsErr's own rule above (see the
-              ShiaijoCountNotes comment at ~line 990): the field must never
-              look fine while a Save would 400, even before this session
-              touched it. Save itself is gated on the narrower
-              blockingPoolSettingsErr (a CHANGE to an invalid combination),
-              not on this.
-
-              Wrapped in a `.field` rather than dropped in bare. FieldError
-              carries no spacing of its own by design (see its comment in
-              ui.jsx: spacing is the container's job, and a style prop is the
-              crack per-site drift returns through), so as a bare sibling of
-              the .row above it rendered flush against the "Pool match
-              duration" label below and read as that field's error instead of
-              this row's. `.field`'s own margin-bottom is the sanctioned way
-              to separate it. Full width under BOTH inputs, not inside either
-              one: the message names whichever of the two is wrong, and the
-              .row is a two-column grid that would wrap it to half width. */}
-          {poolSettingsErr && (
-            <div className="field">
-              <window.FieldError>{poolSettingsErr}</window.FieldError>
-            </div>
-          )}
-
-          {/* Knockout qualifiers (bc-qual LP-5a): only meaningful under
-              minimum-players-per-pool sizing (poolSizeMode === "min"); see
-              extraQualifiersRadioVisible. Same three options, same copy,
-              and the same draw-ready lock as poolSizeMode/poolSize/
-              poolWinners immediately above (this field is in the
-              server-side outputAffectingChanged set alongside them).
-              Federation-neutral copy per operator ruling: no federation
-              names anywhere in this UI. */}
-          {extraQualifiersRadioVisible(local.format, local.poolSizeMode) && (() => {
-            const activeShape = local.extraQualifiers === EXTRA_QUALIFIERS_LARGER_POOLS
-              ? qualifierPreview.largerPools
-              : local.extraQualifiers === EXTRA_QUALIFIERS_FILL_BRACKET
-                ? qualifierPreview.fillBracket
-                : qualifierPreview.standard;
-            const previewLine = formatQualifierPreviewLine(activeShape);
-            return (
-              <div className="field">
-                <label className="field__label">{CLEARED_FIELD_LABELS.extraQualifiers}</label>
-                <div className="radio-group">
-                  <button
-                    className={`radio-pill ${!local.extraQualifiers ? "is-active" : ""}`}
-                    type="button"
-                    onClick={() => update("extraQualifiers", EXTRA_QUALIFIERS_STANDARD)}
-                    disabled={isDrawReady}
-                  >{extraQualifiersLabel(EXTRA_QUALIFIERS_STANDARD)}</button>
-                  <button
-                    className={`radio-pill ${local.extraQualifiers === EXTRA_QUALIFIERS_LARGER_POOLS ? "is-active" : ""}`}
-                    type="button"
-                    onClick={() => {
-                      update("extraQualifiers", EXTRA_QUALIFIERS_LARGER_POOLS);
-                      update("poolWinners", winnersForExtraQualifiersChange(EXTRA_QUALIFIERS_LARGER_POOLS, local.poolWinners));
-                    }}
-                    disabled={isDrawReady}
-                  >{extraQualifiersLabel(EXTRA_QUALIFIERS_LARGER_POOLS)}</button>
-                  <button
-                    className={`radio-pill ${local.extraQualifiers === EXTRA_QUALIFIERS_FILL_BRACKET ? "is-active" : ""}`}
-                    type="button"
-                    onClick={() => {
-                      update("extraQualifiers", EXTRA_QUALIFIERS_FILL_BRACKET);
-                      update("poolWinners", winnersForExtraQualifiersChange(EXTRA_QUALIFIERS_FILL_BRACKET, local.poolWinners));
-                    }}
-                    disabled={isDrawReady}
-                  >{extraQualifiersLabel(EXTRA_QUALIFIERS_FILL_BRACKET)}</button>
-                </div>
-                <div className="field__hint">
-                  {extraQualifiersHint(local.extraQualifiers, local.poolSize)}
-                </div>
-                <div className="field__hint" data-testid="qualifier-preview-line">
-                  {previewLine || "Preview appears once this competition has participants."}
-                </div>
-              </div>
-            );
-          })()}
-        </>
-      )}
       {/* FR-052..FR-054 / T047: per-phase match-duration inputs. Visibility
           and label/hint text now come from competition_shape.jsx
           (poolDurationVisible/playoffDurationVisible, poolDurationLabel/
@@ -1313,32 +1396,18 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             durationField(LABEL_PLAYOFF_DURATION, "playoffMatchDurationSeconds", HINT_PLAYOFF_DURATION)}
         </div>
       )}
-
-      {/* T190 (FR-050a): swissRounds settings editor. Only rendered */}
-      {/* when format=swiss. The backend allows editing pre-start; */}
-      {/* changing rounds after start is allowed too (the next */}
-      {/* "Generate next round" call will respect the new cap). */}
-      {swissRoundsVisible(local.format) && (
-        <div className="field">
-          <label className="field__label">{LABEL_SWISS_ROUNDS}</label>
-          <input
-            className="input"
-            type="number"
-            min="1"
-            step="1"
-            value={Number.isFinite(local.swissRounds) ? local.swissRounds : ""}
-            onChange={(e) => updateNumber("swissRounds", e.target.value, 1)}
-            style={{ maxWidth: 120 }}
-          />
-          <div className="field__hint">{HINT_SWISS_ROUNDS}</div>
-        </div>
-      )}
       {/* mp-zoh Phase 4: inline schedule estimate. Shown below duration inputs */}
       {/* so the operator can immediately see the impact of duration changes */}
       {/* after the save lands. Re-fetches from the server on every */}
       {/* c-prop update (SSE schedule_updated / competition_updated). */}
+      {/* Its marginBottom matches .field's 14px. The panel is bordered and */}
+      {/* filled, so it reads as a box, and with only a marginTop it sat flush */}
+      {/* against the next control's label (measured: 0px). Like the joint-3rd */}
+      {/* places checkbox above, that was invisible until the bc-symm reorder */}
+      {/* gave it a successor -- it used to be followed by a gap-bearing */}
+      {/* container rather than by a field. */}
       {(compEstimate || compEstimateLoading || compEstimateErr) && (
-        <div style={{ padding: "10px 12px", borderRadius: 6, background: "var(--accent-soft, #f0f9ff)", border: "1px solid var(--accent, #3b82f6)", marginTop: 4 }}>
+        <div style={{ padding: "10px 12px", borderRadius: 6, background: "var(--accent-soft, #f0f9ff)", border: "1px solid var(--accent, #3b82f6)", marginTop: 4, marginBottom: 14 }}>
           <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ink-2, #374151)", marginBottom: 4 }}>
             Schedule estimate
             {compEstimateLoading && <span className="spinner" style={{ marginLeft: 6, verticalAlign: "middle" }} />}
@@ -1390,16 +1459,6 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
         <div className="field__hint">Single letter prefix for participant numbers (A1, B1…). Keeps numbers unique across competitions.</div>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {/* bc-symm Gap 2: gated on roundRobinVisible (competition_shape.jsx)
-            -- true only for "mixed" with poolFormat !== "partial", the one
-            combination internal/engine/pools.go actually reads
-            comp.RoundRobin for. Rendering it unconditionally (as this used
-            to) showed a live-looking control that a league or a
-            partial-pool mixed competition silently ignored.
-            draw-ready lock: roundRobin is output-affecting. */}
-        {roundRobinVisible(local.format, local.poolFormat) && (
-          <label className="checkbox"><input type="checkbox" checked={local.roundRobin} onChange={(e) => update("roundRobin", e.target.checked)} disabled={isDrawReady} /> {LABEL_ROUND_ROBIN}</label>
-        )}
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           {/* zekkenApplies/engiApplies express the RULE (competition_shape.jsx);
               this screen keeps its own PRESENTATION of it -- render both
@@ -1408,58 +1467,22 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
               roster exists (kindLockReason above), so hiding would leave the
               operator unable to see, let alone recover, a setting they
               remember configuring. */}
-          <label className="checkbox"><input type="checkbox" checked={local.withZekkenName} onChange={(e) => update("withZekkenName", e.target.checked)} disabled={isDrawReady || !zekkenApplies(local.kind)} /> {CLEARED_FIELD_LABELS.withZekkenName}</label>
+          <label className="checkbox"><input type="checkbox" checked={local.withZekkenName} onChange={(e) => update("withZekkenName", e.target.checked)} disabled={isDrawReady || !zekkenApplies(local.kind)} /> {LABEL_ZEKKEN}</label>
           <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>{!zekkenApplies(local.kind) ? "(Only applicable for individual competitions)" : "When enabled, participant CSV uses three columns: Name, Zekken, Dojo."}</div>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <label className="checkbox"><input type="checkbox" checked={!!local.engi} onChange={(e) => update("engi", e.target.checked)} disabled={isDrawReady || isStarted || !engiApplies(local.kind)} /> {LABEL_ENGI}</label>
+          <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>{!engiApplies(local.kind) ? "(Only applicable for individual competitions)" : `Flag-count scoring for Engi-Kyogi pairs. Enter each pair as one participant: Name 1 - Name 2, Dojo.${(isDrawReady || isStarted) ? " Locked after draw." : ""}`}</div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <label className="checkbox"><input type="checkbox" checked={!!local.naginata} onChange={(e) => update("naginata", e.target.checked)} disabled={isDrawReady || isStarted} /> Naginata competition</label>
           <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>Adds the Sune (S) ippon button to the score editor. Use for Naginata divisions.{(isDrawReady || isStarted) ? " Locked after draw." : ""}</div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <label className="checkbox"><input type="checkbox" checked={!!local.engi} onChange={(e) => update("engi", e.target.checked)} disabled={isDrawReady || isStarted || !engiApplies(local.kind)} /> {CLEARED_FIELD_LABELS.engi}</label>
-          <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>{!engiApplies(local.kind) ? "(Only applicable for individual competitions)" : `Flag-count scoring for Engi-Kyogi pairs. Enter each pair as one participant: Name 1 - Name 2, Dojo.${(isDrawReady || isStarted) ? " Locked after draw." : ""}`}</div>
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <label className="checkbox"><input type="checkbox" checked={!!local.checkInEnabled} onChange={(e) => update("checkInEnabled", e.target.checked)} /> Check-in tracking</label>
           <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>Show check-in column and counter. Disable for competitions that don't need attendance tracking.</div>
         </div>
       </div>
-      {/* League standings settings. The joint-3rd convention applies to ALL
-          leagues (team + individual); the "Break ties for top" band is a
-          team-league tie-breaker knob and stays team-only. */}
-      {local.format === FORMAT_LEAGUE && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 8, paddingTop: 12, borderTop: "1px solid var(--line)" }}>
-          {/* leagueTiebreakVisible folds format === "league" into its own
-              check, so this re-evaluates that half of the outer wrapper's
-              condition -- redundant (A && A) but not wrong, and it keeps
-              this call site identical to the create form's, which has no
-              format wrapper of its own to lean on. */}
-          {leagueTiebreakVisible(local.format, local.kind, local.teamSize) && (
-            <div className="field">
-              <label className="field__label">{LABEL_LEAGUE_TIEBREAK}</label>
-              <div className="radio-group">
-                {LEAGUE_TIEBREAK_OPTIONS.map((o) => (
-                  <button
-                    key={o.value}
-                    className={`radio-pill ${(o.value === 3 ? ((local.leagueTiebreakTopN || 0) === 0 || local.leagueTiebreakTopN === 3) : local.leagueTiebreakTopN === o.value) ? "is-active" : ""}`}
-                    type="button"
-                    disabled={isDrawReady || isStarted}
-                    onClick={() => update("leagueTiebreakTopN", o.value)}
-                  >{o.label}</button>
-                ))}
-              </div>
-              <div className="field__hint">{HINT_LEAGUE_TIEBREAK}{(isDrawReady || isStarted) ? " Locked after draw." : ""}</div>
-            </div>
-          )}
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <label className="checkbox">
-              <input type="checkbox" checked={!!local.leagueTwoThirdPlaces} disabled={isDrawReady || isStarted} onChange={(e) => update("leagueTwoThirdPlaces", e.target.checked)} />
-              {" "}{LABEL_TWO_THIRD_PLACES}
-            </label>
-            <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>{HINT_TWO_THIRD_PLACES}{(isDrawReady || isStarted) ? " Locked after draw." : ""}</div>
-          </div>
-        </div>
-      )}
       {/* Repeat Save at the foot of the long settings form so the operator
           doesn't have to scroll back to the header after editing. Same
           onClick, the SAME `saveDisabled` value and the SAME `saveBlockMessage`

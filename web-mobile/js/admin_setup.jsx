@@ -1080,27 +1080,11 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
         {error && <div className="alert alert--error" style={{ marginBottom: 16 }}>{error}</div>}
 
         <div className="card card--pad-lg">
-          <div className="field">
-            <label className="field__label">{LABEL_KIND}</label>
-            <div className="radio-group">
-              {KIND_OPTIONS.map((o) => (
-                <button key={o.value} className={`radio-pill ${kind === o.value ? "is-active" : ""}`} type="button" onClick={() => setKind(o.value)}>{o.label}</button>
-              ))}
-            </div>
-          </div>
-
           <div className="row">
             <div className="field">
               <label className="field__label">Display name</label>
               <input className="input" placeholder="e.g. Men's Individual" value={name} onChange={(e) => { setName(e.target.value); setError(""); }} />
             </div>
-            <div className="field">
-              <label className="field__label">Start time</label>
-              <input className="input" type="time" value={startTime} onChange={(e) => { startTimeEditedRef.current = true; setStartTime(e.target.value); }} />
-            </div>
-          </div>
-
-          <div className="row">
             <div className="field">
               <label className="field__label">Day</label>
               {/* When the tournament has a start date and durationDays, offer */}
@@ -1131,9 +1115,17 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
               <div className="field__hint">For multi-day tournaments, specify which day this competition takes place.</div>
             </div>
             <div className="field">
-              <label className="field__label">Player number prefix <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(optional)</span></label>
-              <input className="input" placeholder="e.g. A" maxLength="3" value={numberPrefix} onChange={(e) => setNumberPrefix(e.target.value)} style={{ maxWidth: 80 }} />
-              <div className="field__hint">Single letter prefix for participant numbers (A1, B1…). Keeps numbers unique across competitions.</div>
+              <label className="field__label">Start time</label>
+              <input className="input" type="time" value={startTime} onChange={(e) => { startTimeEditedRef.current = true; setStartTime(e.target.value); }} />
+            </div>
+          </div>
+
+          <div className="field">
+            <label className="field__label">{LABEL_KIND}</label>
+            <div className="radio-group">
+              {KIND_OPTIONS.map((o) => (
+                <button key={o.value} className={`radio-pill ${kind === o.value ? "is-active" : ""}`} type="button" onClick={() => setKind(o.value)}>{o.label}</button>
+              ))}
             </div>
           </div>
 
@@ -1147,6 +1139,52 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
             <div className="field__hint">{formatHint(format)}</div>
           </div>
 
+          {teamFieldsVisible(kind) && (
+            <div className="field">
+              <label className="field__label">{LABEL_TEAM_SIZE}</label>
+              {/* Non-debounced input: uses onChange directly, not StableInput. */}
+              {/* StableInput debounces 200ms; if the user clears the field and */}
+              {/* immediately clicks "Create", the parent teamSize would still */}
+              {/* hold the previous good value and the guard at create() would */}
+              {/* let the stale value through. Direct onChange + decideNumericUpdate */}
+              {/* keeps parent state synchronous with what the user sees. */}
+              <input
+                className="input"
+                type="number"
+                min={MIN_TEAM_SIZE}
+                max={MAX_TEAM_SIZE}
+                value={Number.isFinite(teamSize) ? teamSize : ""}
+                onChange={(e) => setTeamSize(decideNumericUpdate(e.target.value, MIN_TEAM_SIZE).value)}
+              />
+              <div className="field__hint">Standard kendo team is 5 (Senpou, Jihou, Chuken, Fukushou, Taishou).</div>
+            </div>
+          )}
+
+          {teamFieldsVisible(kind) && (
+            <div className="field">
+              <label className="field__label">{LABEL_TEAM_MATCH_TYPE}</label>
+              <div className="radio-group">
+                {/* Plain o.value === teamMatchType equality is safe here (unlike
+                    the settings screen's asymmetric check): teamMatchType is
+                    local component state initialised to "fixed" and only ever
+                    set to one of TEAM_MATCH_TYPE_OPTIONS' own values below, so
+                    it can never hold a third/legacy value the way a loaded
+                    competition record can. */}
+                {TEAM_MATCH_TYPE_OPTIONS.map((o) => (
+                  <button
+                    key={o.value}
+                    className={`radio-pill ${teamMatchType === o.value ? "is-active" : ""}`}
+                    type="button"
+                    onClick={() => setTeamMatchType(o.value)}
+                  >{o.label}</button>
+                ))}
+              </div>
+              <div className="field__hint">
+                {teamMatchTypeHint(teamMatchType === "kachinuki")}
+              </div>
+            </div>
+          )}
+
           {poolFormatVisible(format) && (
             <div className="field">
               <label className="field__label">{LABEL_POOL_FORMAT}</label>
@@ -1159,113 +1197,18 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
             </div>
           )}
 
-          {twoThirdPlacesVisible(format) && (
+          {/* bc-symm Gap 2: gated on roundRobinVisible (competition_shape.jsx),
+              which is true only for "mixed" with poolFormat !== "partial" --
+              the one combination where internal/engine/pools.go actually
+              reads comp.RoundRobin. Elsewhere (league, playoffs, swiss,
+              partial-pool mixed) the field is stored but never consulted, so
+              showing the checkbox there would let the operator toggle
+              something with no effect. */}
+          {roundRobinVisible(format, poolFormat) && (
             <div className="field">
-              <label className="checkbox"><input type="checkbox" checked={leagueTwoThirdPlaces} onChange={(e) => setLeagueTwoThirdPlaces(e.target.checked)} /> {LABEL_TWO_THIRD_PLACES}</label>
-              <div className="field__hint" style={{ marginTop: 4 }}>{HINT_TWO_THIRD_PLACES}</div>
+              <label className="checkbox"><input type="checkbox" checked={roundRobin} onChange={(e) => setRoundRobin(e.target.checked)} /> {LABEL_ROUND_ROBIN}</label>
             </div>
           )}
-
-          {/* bc-symm: league tie-break band, brought over from Settings
-              (previously settings-only). Same active-pill logic as that
-              screen: a stored/legacy 0 (unset) reads as "Top 3" active,
-              because that's what the server resolves it to at draw time
-              (LEAGUE_TIEBREAK_OPTIONS' own comment). */}
-          {leagueTiebreakVisible(format, kind, effectiveTeamSize) && (
-            <div className="field">
-              <label className="field__label">{LABEL_LEAGUE_TIEBREAK}</label>
-              <div className="radio-group">
-                {LEAGUE_TIEBREAK_OPTIONS.map((o) => (
-                  <button
-                    key={o.value}
-                    className={`radio-pill ${(o.value === 3 ? ((leagueTiebreakTopN || 0) === 0 || leagueTiebreakTopN === 3) : leagueTiebreakTopN === o.value) ? "is-active" : ""}`}
-                    type="button"
-                    onClick={() => setLeagueTiebreakTopN(o.value)}
-                  >{o.label}</button>
-                ))}
-              </div>
-              <div className="field__hint">{HINT_LEAGUE_TIEBREAK}</div>
-            </div>
-          )}
-
-          {/* T190 (FR-050a): Swiss rounds input. Only rendered for */}
-          {/* format=swiss: keeps the create form uncluttered for other */}
-          {/* formats. Same NaN-as-"" + decideNumericUpdate pattern as */}
-          {/* poolSize / winners above; validateSwissSettings at submit */}
-          {/* time rejects NaN / fractional / <1 before the field reaches */}
-          {/* the backend. */}
-          {swissRoundsVisible(format) && (
-            <div className="field">
-              <label className="field__label">{LABEL_SWISS_ROUNDS}</label>
-              <input
-                className="input"
-                type="number"
-                min="1"
-                step="1"
-                value={Number.isFinite(swissRounds) ? swissRounds : ""}
-                onChange={(e) => setSwissRounds(decideNumericUpdate(e.target.value, 1).value)}
-                style={{ maxWidth: 120 }}
-              />
-              <div className="field__hint">{HINT_SWISS_ROUNDS}</div>
-            </div>
-          )}
-
-          {/* bc-symm: per-phase match durations, brought over from Settings
-              (previously settings-only). Reuses the same DurationInput
-              leaf that screen uses, so the m:ss mask/validation behaviour
-              is identical. onChange's NaN-on-clear is normalized to 0
-              ("unset, use the scheduler default") the same way
-              updateDurationSeconds does in admin_competition_settings.jsx.
-              No onValidity/error-map wiring here, unlike that screen: by
-              DurationInput's own contract an invalid draft is never
-              forwarded to onChange (it shows its own inline
-              role="alert" error and simply withholds the update), so
-              the state this form submits can never itself be
-              out-of-band -- there is nothing for a submit-time guard to
-              catch that the leaf hasn't already refused to pass on. */}
-          {(poolDurationVisible(format) || playoffDurationVisible(format)) && (
-            <div className="row">
-              {poolDurationVisible(format) && (
-                <div className="field">
-                  <label className="field__label" htmlFor="create-pool-duration">{poolDurationLabel(format)}</label>
-                  <DurationInput
-                    id="create-pool-duration"
-                    describedBy="create-pool-duration-hint"
-                    seconds={poolMatchDurationSeconds}
-                    onChange={(sec) => setPoolMatchDurationSeconds(Number.isFinite(sec) ? sec : 0)}
-                  />
-                  <div className="field__hint" id="create-pool-duration-hint">{poolDurationHint(format)}</div>
-                </div>
-              )}
-              {playoffDurationVisible(format) && (
-                <div className="field">
-                  <label className="field__label" htmlFor="create-playoff-duration">{LABEL_PLAYOFF_DURATION}</label>
-                  <DurationInput
-                    id="create-playoff-duration"
-                    describedBy="create-playoff-duration-hint"
-                    seconds={playoffMatchDurationSeconds}
-                    onChange={(sec) => setPlayoffMatchDurationSeconds(Number.isFinite(sec) ? sec : 0)}
-                  />
-                  <div className="field__hint" id="create-playoff-duration-hint">{HINT_PLAYOFF_DURATION}</div>
-                </div>
-              )}
-            </div>
-          )}
-
-          <div className="field">
-            <label className="field__label">Assigned shiaijo (courts)</label>
-            <div className="radio-group">
-              {safeCourts.map((cc) => (
-                <button key={cc} className={`radio-pill ${selectedCourts.includes(cc) ? "is-active" : ""}`} type="button" onClick={() => toggleCourt(cc)}>Shiaijo (court) {cc}</button>
-              ))}
-            </div>
-            {/* Same component the competition Settings screen renders, so the
-                hints, their wording and their position relative to the pills
-                cannot drift apart: immediately under the pills, above the
-                concurrency hint. */}
-            <window.ShiaijoCountNotes error={courtsErr} hint={courtsHint} />
-            <div className="field__hint">Concurrency for this competition equals the number of shiaijo (courts) assigned. Different competitions can share shiaijo (courts); the schedule prevents conflicts.</div>
-          </div>
 
           {format === "mixed" && (
             <>
@@ -1291,7 +1234,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
               </div>
               <div className="row">
                 {/* Same NaN-as-"" + decideNumericUpdate pattern as the courts */}
-                {/* field above and admin_competition.jsx AdminSettings. */}
+                {/* field below and admin_competition.jsx AdminSettings. */}
                 {/* Both floors are PRODUCT choices, and this comment used to */}
                 {/* claim they mirrored backend bounds. They do not: the */}
                 {/* engine rejects only poolSize <= 0 (engine/pools.go, "pool */}
@@ -1373,64 +1316,119 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
             </>
           )}
 
-          {teamFieldsVisible(kind) && (
+          {/* T190 (FR-050a): Swiss rounds input. Only rendered for */}
+          {/* format=swiss: keeps the create form uncluttered for other */}
+          {/* formats. Same NaN-as-"" + decideNumericUpdate pattern as */}
+          {/* poolSize / winners above; validateSwissSettings at submit */}
+          {/* time rejects NaN / fractional / <1 before the field reaches */}
+          {/* the backend. */}
+          {swissRoundsVisible(format) && (
             <div className="field">
-              <label className="field__label">{LABEL_TEAM_SIZE}</label>
-              {/* Non-debounced input: uses onChange directly, not StableInput. */}
-              {/* StableInput debounces 200ms; if the user clears the field and */}
-              {/* immediately clicks "Create", the parent teamSize would still */}
-              {/* hold the previous good value and the guard at create() would */}
-              {/* let the stale value through. Direct onChange + decideNumericUpdate */}
-              {/* keeps parent state synchronous with what the user sees. */}
+              <label className="field__label">{LABEL_SWISS_ROUNDS}</label>
               <input
                 className="input"
                 type="number"
-                min={MIN_TEAM_SIZE}
-                max={MAX_TEAM_SIZE}
-                value={Number.isFinite(teamSize) ? teamSize : ""}
-                onChange={(e) => setTeamSize(decideNumericUpdate(e.target.value, MIN_TEAM_SIZE).value)}
+                min="1"
+                step="1"
+                value={Number.isFinite(swissRounds) ? swissRounds : ""}
+                onChange={(e) => setSwissRounds(decideNumericUpdate(e.target.value, 1).value)}
+                style={{ maxWidth: 120 }}
               />
-              <div className="field__hint">Standard kendo team is 5 (Senpou, Jihou, Chuken, Fukushou, Taishou).</div>
+              <div className="field__hint">{HINT_SWISS_ROUNDS}</div>
             </div>
           )}
 
-          {teamFieldsVisible(kind) && (
+          {/* bc-symm: league tie-break band, brought over from Settings
+              (previously settings-only). Same active-pill logic as that
+              screen: a stored/legacy 0 (unset) reads as "Top 3" active,
+              because that's what the server resolves it to at draw time
+              (LEAGUE_TIEBREAK_OPTIONS' own comment). */}
+          {leagueTiebreakVisible(format, kind, effectiveTeamSize) && (
             <div className="field">
-              <label className="field__label">{LABEL_TEAM_MATCH_TYPE}</label>
+              <label className="field__label">{LABEL_LEAGUE_TIEBREAK}</label>
               <div className="radio-group">
-                {/* Plain o.value === teamMatchType equality is safe here (unlike
-                    the settings screen's asymmetric check): teamMatchType is
-                    local component state initialised to "fixed" and only ever
-                    set to one of TEAM_MATCH_TYPE_OPTIONS' own values below, so
-                    it can never hold a third/legacy value the way a loaded
-                    competition record can. */}
-                {TEAM_MATCH_TYPE_OPTIONS.map((o) => (
+                {LEAGUE_TIEBREAK_OPTIONS.map((o) => (
                   <button
                     key={o.value}
-                    className={`radio-pill ${teamMatchType === o.value ? "is-active" : ""}`}
+                    className={`radio-pill ${(o.value === 3 ? ((leagueTiebreakTopN || 0) === 0 || leagueTiebreakTopN === 3) : leagueTiebreakTopN === o.value) ? "is-active" : ""}`}
                     type="button"
-                    onClick={() => setTeamMatchType(o.value)}
+                    onClick={() => setLeagueTiebreakTopN(o.value)}
                   >{o.label}</button>
                 ))}
               </div>
-              <div className="field__hint">
-                {teamMatchTypeHint(teamMatchType === "kachinuki")}
-              </div>
+              <div className="field__hint">{HINT_LEAGUE_TIEBREAK}</div>
             </div>
           )}
 
-          {/* bc-symm Gap 2: gated on roundRobinVisible (competition_shape.jsx),
-              which is true only for "mixed" with poolFormat !== "partial" --
-              the one combination where internal/engine/pools.go actually
-              reads comp.RoundRobin. Elsewhere (league, playoffs, swiss,
-              partial-pool mixed) the field is stored but never consulted, so
-              showing the checkbox there would let the operator toggle
-              something with no effect. */}
-          {roundRobinVisible(format, poolFormat) && (
+          {twoThirdPlacesVisible(format) && (
             <div className="field">
-              <label className="checkbox"><input type="checkbox" checked={roundRobin} onChange={(e) => setRoundRobin(e.target.checked)} /> {LABEL_ROUND_ROBIN}</label>
+              <label className="checkbox"><input type="checkbox" checked={leagueTwoThirdPlaces} onChange={(e) => setLeagueTwoThirdPlaces(e.target.checked)} /> {LABEL_TWO_THIRD_PLACES}</label>
+              <div className="field__hint" style={{ marginTop: 4 }}>{HINT_TWO_THIRD_PLACES}</div>
             </div>
           )}
+
+          <div className="field">
+            <label className="field__label">Assigned shiaijo (courts)</label>
+            <div className="radio-group">
+              {safeCourts.map((cc) => (
+                <button key={cc} className={`radio-pill ${selectedCourts.includes(cc) ? "is-active" : ""}`} type="button" onClick={() => toggleCourt(cc)}>Shiaijo (court) {cc}</button>
+              ))}
+            </div>
+            {/* Same component the competition Settings screen renders, so the
+                hints, their wording and their position relative to the pills
+                cannot drift apart: immediately under the pills, above the
+                concurrency hint. */}
+            <window.ShiaijoCountNotes error={courtsErr} hint={courtsHint} />
+            <div className="field__hint">Concurrency for this competition equals the number of shiaijo (courts) assigned. Different competitions can share shiaijo (courts); the schedule prevents conflicts.</div>
+          </div>
+
+          {/* bc-symm: per-phase match durations, brought over from Settings
+              (previously settings-only). Reuses the same DurationInput
+              leaf that screen uses, so the m:ss mask/validation behaviour
+              is identical. onChange's NaN-on-clear is normalized to 0
+              ("unset, use the scheduler default") the same way
+              updateDurationSeconds does in admin_competition_settings.jsx.
+              No onValidity/error-map wiring here, unlike that screen: by
+              DurationInput's own contract an invalid draft is never
+              forwarded to onChange (it shows its own inline
+              role="alert" error and simply withholds the update), so
+              the state this form submits can never itself be
+              out-of-band -- there is nothing for a submit-time guard to
+              catch that the leaf hasn't already refused to pass on. */}
+          {(poolDurationVisible(format) || playoffDurationVisible(format)) && (
+            <div className="row">
+              {poolDurationVisible(format) && (
+                <div className="field">
+                  <label className="field__label" htmlFor="create-pool-duration">{poolDurationLabel(format)}</label>
+                  <DurationInput
+                    id="create-pool-duration"
+                    describedBy="create-pool-duration-hint"
+                    seconds={poolMatchDurationSeconds}
+                    onChange={(sec) => setPoolMatchDurationSeconds(Number.isFinite(sec) ? sec : 0)}
+                  />
+                  <div className="field__hint" id="create-pool-duration-hint">{poolDurationHint(format)}</div>
+                </div>
+              )}
+              {playoffDurationVisible(format) && (
+                <div className="field">
+                  <label className="field__label" htmlFor="create-playoff-duration">{LABEL_PLAYOFF_DURATION}</label>
+                  <DurationInput
+                    id="create-playoff-duration"
+                    describedBy="create-playoff-duration-hint"
+                    seconds={playoffMatchDurationSeconds}
+                    onChange={(sec) => setPlayoffMatchDurationSeconds(Number.isFinite(sec) ? sec : 0)}
+                  />
+                  <div className="field__hint" id="create-playoff-duration-hint">{HINT_PLAYOFF_DURATION}</div>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="field">
+            <label className="field__label">Player number prefix <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(optional)</span></label>
+            <input className="input" placeholder="e.g. A" maxLength="3" value={numberPrefix} onChange={(e) => setNumberPrefix(e.target.value)} style={{ maxWidth: 80 }} />
+            <div className="field__hint">Single letter prefix for participant numbers (A1, B1…). Keeps numbers unique across competitions.</div>
+          </div>
 
           {zekkenApplies(kind) && (
             <div className="field">
@@ -1439,17 +1437,17 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
             </div>
           )}
 
-          <div className="field">
-            <label className="checkbox"><input type="checkbox" checked={naginata} onChange={(e) => { setNaginata(e.target.checked); setLeagueTwoThirdPlaces(!e.target.checked); }} /> Naginata competition</label>
-            <div className="field__hint" style={{ marginTop: 4 }}>Adds the Sune (S) ippon button to the score editor. Use for Naginata divisions.</div>
-          </div>
-
           {engiApplies(kind) && (
             <div className="field">
               <label className="checkbox"><input type="checkbox" checked={engi} onChange={(e) => setEngi(e.target.checked)} /> {LABEL_ENGI}</label>
               <div className="field__hint" style={{ marginTop: 4 }}>Flag-count scoring for Engi-Kyogi pairs. Enter each pair as one participant: Name 1 - Name 2, Dojo.</div>
             </div>
           )}
+
+          <div className="field">
+            <label className="checkbox"><input type="checkbox" checked={naginata} onChange={(e) => { setNaginata(e.target.checked); setLeagueTwoThirdPlaces(!e.target.checked); }} /> Naginata competition</label>
+            <div className="field__hint" style={{ marginTop: 4 }}>Adds the Sune (S) ippon button to the score editor. Use for Naginata divisions.</div>
+          </div>
 
           <div className="field">
             <label className="checkbox"><input type="checkbox" checked={checkInEnabled} onChange={(e) => setCheckInEnabled(e.target.checked)} /> Check-in tracking</label>

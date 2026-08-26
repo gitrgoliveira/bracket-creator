@@ -321,28 +321,31 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     // the disk value until the user types a valid replacement.
     const safeInt = (v, fallback) =>
       Number.isFinite(v) && Number.isInteger(v) && v >= 1 ? v : fallback;
-    // safeNonNegInt is the >=0 sibling for the per-phase duration fields AND
-    // for teamSize. T047: on a duration, 0 means "unset, use the scheduler
-    // default", so we DO want 0 to round-trip: that is how clearing a
-    // duration resets it. teamSize joined it for the same shape of reason
-    // (bc-symm): 0 is teamSize's legitimate value for an INDIVIDUAL
-    // competition -- ValidateCompetitionTeamSize positively requires
-    // teamSize == 0 for a non-team kind -- so safeInt's >=1 floor silently
-    // discarded the 0 that normalizeConfigForKind stages on a team ->
-    // individual flip and re-sent the stored team size, making the PUT fail
-    // the very rule the flip had just satisfied, with the Team size input
-    // already hidden. Same NaN/fractional/negative guards as safeInt; the
-    // only difference is the lower bound. The NaN fallback to latestC.<field>
-    // still protects a field the operator never touched from being zeroed by
-    // an unrelated save -- but note teamSize no longer READS that fallback
-    // here: it is resolved against the stored value BEFORE shaping instead
-    // (resolveTeamSize, below), because normalizeConfigForKind rewrites
-    // teamSize on both of its branches, so a guard applied to its OUTPUT is
-    // dead code. poolSize/poolWinners (below, read from `shaped`)
-    // joined it for the identical shape of reason: normalizeConfigForFormat's
-    // 0 going out of "mixed" is a DECISION (no pool phase to size), not a
-    // cleared input, and safeInt's >=1 floor would read that decision as
-    // invalid and silently re-send the stale value, defeating the clear.
+    // safeNonNegInt is the >=0 sibling, for the per-phase duration fields and
+    // for poolSize/poolWinners. Same NaN/fractional/negative guards as
+    // safeInt; the only difference is the lower bound, and the bound is the
+    // whole point: each of these fields has a legitimate 0 that safeInt's
+    // >=1 floor would read as invalid input and replace with the stale
+    // stored value.
+    //
+    // T047: on a duration, 0 means "unset, use the scheduler default", so
+    // clearing one has to round-trip as 0 or it cannot be reset.
+    // poolSize/poolWinners (below, read from `shaped`) joined it for the
+    // same shape of reason: normalizeConfigForFormat's 0 going out of
+    // "mixed" is a DECISION (no pool phase to size), not a cleared input,
+    // and re-sending the stale mixed-only value would silently defeat the
+    // clear.
+    //
+    // teamSize is NOT one of its callers, though it was until the review
+    // round, and the reason it left is worth keeping: 0 is teamSize's
+    // required value for an INDIVIDUAL kind, so it needed the >=0 bound for
+    // exactly the reason above -- but the guard was reading
+    // normalizeConfigForKind's OUTPUT, which is always a finite integer, so
+    // it never fired at all. It is resolved against the stored value BEFORE
+    // shaping instead (resolveTeamSize, below).
+    //
+    // The NaN fallback to latestC.<field> still protects a field the
+    // operator never touched from being zeroed by an unrelated save.
     const safeNonNegInt = (v, fallback) =>
       Number.isFinite(v) && Number.isInteger(v) && v >= 0 ? v : fallback;
 

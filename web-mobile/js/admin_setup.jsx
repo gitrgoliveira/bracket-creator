@@ -70,22 +70,17 @@ function pickStackPredecessor(competitions, date) {
 // thought they entered. Negative/zero/non-integer values are even
 // worse: `2.5 || 3` evaluates to `2.5` (truthy) and slips through.
 //
-// playoffs-only and league-only competitions don't use pool-size
-// settings (knockout has no pools; league runs a single round-robin
-// without user-configured size), so the guard short-circuits for those
-// formats. "mixed" (pools + knockout) requires valid pool size +
-// winners-per-pool.
+// The per-field thresholds themselves (mixed only, poolSize >= 3,
+// winners >= 1) now live in competition_shape.jsx's poolSettingsError --
+// shared with the Settings screen, which hit the identical 0/0 combination
+// via a different route (see that function's comment) -- so this is just
+// the `{ok, error}` adapter this file's submit path and
+// __tests__/admin_setup.test.jsx already depend on.
 //
 // Exported for vitest at __tests__/admin_setup.test.jsx.
 function validatePoolSettings(format, poolSize, winners) {
-  if (format !== "mixed") return { ok: true, error: null };
-  if (!Number.isInteger(poolSize) || poolSize < 3) {
-    return { ok: false, error: "Players per pool must be a whole number ≥ 3." };
-  }
-  if (!Number.isInteger(winners) || winners < 1) {
-    return { ok: false, error: "Winners per pool must be a whole number ≥ 1." };
-  }
-  return { ok: true, error: null };
+  const error = poolSettingsError(format, poolSize, winners);
+  return { ok: !error, error };
 }
 
 // T190 (US13: FR-050a): submit-time validation for the swissRounds
@@ -135,7 +130,7 @@ import {
   poolDurationLabel, poolDurationHint, poolDurationVisible, playoffDurationVisible,
   LABEL_TWO_THIRD_PLACES, HINT_TWO_THIRD_PLACES, twoThirdPlacesVisible,
   teamFieldsVisible, zekkenApplies, engiApplies,
-  MIN_TEAM_SIZE,
+  MIN_TEAM_SIZE, poolSettingsError,
 } from './competition_shape.jsx';
 import { DurationInput } from './duration.jsx';
 

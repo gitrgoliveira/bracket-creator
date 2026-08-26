@@ -17,6 +17,7 @@ import {
   normalizeConfigForFormat,
   normalizeConfigForKind, DEFAULT_TEAM_SIZE, MIN_TEAM_SIZE,
   kindChangeBlockedReason,
+  poolSettingsError,
 } from '../competition_shape.jsx';
 
 // The four format values a competition can hold. Used to sweep every
@@ -467,5 +468,52 @@ describe('normalizeConfigForKind', () => {
     const cfg = { kind: KIND_INDIVIDUAL, teamSize: 5, teamMatchType: 'kachinuki' };
     normalizeConfigForKind(cfg);
     expect(cfg).toEqual({ kind: KIND_INDIVIDUAL, teamSize: 5, teamMatchType: 'kachinuki' });
+  });
+});
+
+// bc-symm: poolSettingsError is the shared rule behind admin_setup.jsx's
+// validatePoolSettings (create form) AND admin_competition_settings.jsx's
+// blockingPoolSettingsErr (Settings screen). Taken verbatim from
+// validatePoolSettings so the thresholds cannot diverge; the exact strings
+// (including the "≥" character and trailing full stops) are asserted below,
+// not just truthiness, because the Settings screen renders this string
+// directly to the operator.
+describe('poolSettingsError', () => {
+  it.each([FORMAT_PLAYOFFS, FORMAT_LEAGUE, FORMAT_SWISS, '', undefined])(
+    'is always null for a non-mixed format (%j), even with a 0/NaN pool size',
+    (format) => {
+      expect(poolSettingsError(format, 0, 0)).toBeNull();
+      expect(poolSettingsError(format, NaN, NaN)).toBeNull();
+      expect(poolSettingsError(format, 3, 1)).toBeNull();
+    }
+  );
+
+  // The reproduced bug: normalizePoolConfig zeroes poolSize/poolWinners on
+  // every stored league/playoffs competition, and flipping such a
+  // competition to "mixed" on the Settings screen leaves that 0/0 staged
+  // with nothing else touched.
+  it('flags the stored-league/playoffs 0/0 combination once format is mixed', () => {
+    expect(poolSettingsError(FORMAT_MIXED, 0, 0)).toBe('Players per pool must be a whole number ≥ 3.');
+  });
+
+  it('flags a NaN poolSize (cleared input) as the players message', () => {
+    expect(poolSettingsError(FORMAT_MIXED, NaN, 2)).toBe('Players per pool must be a whole number ≥ 3.');
+  });
+
+  it('flags a fractional poolSize as the players message', () => {
+    expect(poolSettingsError(FORMAT_MIXED, 2.5, 1)).toBe('Players per pool must be a whole number ≥ 3.');
+  });
+
+  it('flags poolSize 2 (one below the floor) as the players message', () => {
+    expect(poolSettingsError(FORMAT_MIXED, 2, 1)).toBe('Players per pool must be a whole number ≥ 3.');
+  });
+
+  it('flags an invalid winners count (0 or NaN) once poolSize is valid', () => {
+    expect(poolSettingsError(FORMAT_MIXED, 3, 0)).toBe('Winners per pool must be a whole number ≥ 1.');
+    expect(poolSettingsError(FORMAT_MIXED, 3, NaN)).toBe('Winners per pool must be a whole number ≥ 1.');
+  });
+
+  it('is null for the smallest legal combination', () => {
+    expect(poolSettingsError(FORMAT_MIXED, 3, 1)).toBeNull();
   });
 });

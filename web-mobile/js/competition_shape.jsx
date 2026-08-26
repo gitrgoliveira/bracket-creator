@@ -305,6 +305,46 @@ export function engiApplies(kind) {
   return kind === KIND_INDIVIDUAL;
 }
 
+// --- poolSettingsError ----------------------------------------------------
+//
+// The ONE owner of the mixed-format pool-settings rule (poolSize >= 3,
+// poolWinners >= 1, both whole numbers), taken verbatim from the create
+// form's admin_setup.jsx `validatePoolSettings` so the two thresholds
+// cannot drift apart. Knockout ("playoffs") has no pools and league runs a
+// single round-robin without a user-configured size, so both are exempt;
+// non-"mixed" always returns null.
+//
+// Returns `string | null` -- the first problem found, or null when the
+// combination is fine -- matching this codebase's other error helpers
+// (e.g. shiaijoPickerError) rather than the `{ok, error}` shape the create
+// form's caller wants. admin_setup.jsx's validatePoolSettings is now a thin
+// adapter over this function that reshapes the return for its own callers
+// and __tests__/admin_setup.test.jsx, which depend on that shape.
+//
+// Why settings needs this too, and not just create: normalizePoolConfig
+// (internal/mobileapp/handlers_competition.go) zeroes poolSize/poolWinners
+// on every stored league/playoffs competition, so ANY such competition sits
+// on disk with poolSize: 0. normalizeConfigForFormat above only clears
+// those fields on the way OUT of "mixed" -- flipping back INTO "mixed" is a
+// no-op for them -- so an operator who switches a stored playoffs
+// competition to "mixed" on the Settings screen lands here with poolSize
+// still 0 and poolWinners still 0, staged nowhere else. Without this check
+// the "Players per pool" field renders "0", Save stays enabled, and the PUT
+// takes a 400 whose raw server string ("mixed format requires a pool size
+// of at least 1") reaches the operator verbatim -- while the create form
+// already blocks the identical combination client-side with the friendlier
+// copy below. This function closes that parity gap.
+export function poolSettingsError(format, poolSize, winners) {
+  if (format !== FORMAT_MIXED) return null;
+  if (!Number.isInteger(poolSize) || poolSize < 3) {
+    return "Players per pool must be a whole number ≥ 3.";
+  }
+  if (!Number.isInteger(winners) || winners < 1) {
+    return "Winners per pool must be a whole number ≥ 1.";
+  }
+  return null;
+}
+
 // --- normalizeConfigForFormat --------------------------------------------
 //
 // Client mirror of the server's normalizePoolConfig +

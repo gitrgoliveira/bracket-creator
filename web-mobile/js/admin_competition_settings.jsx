@@ -37,7 +37,7 @@ import {
   teamFieldsVisible, zekkenApplies, engiApplies,
   normalizeConfigForFormat, normalizeConfigForKind, kindChangeBlockedReason,
   FORMAT_LEAGUE, POOL_FORMAT_FULL,
-  MIN_TEAM_SIZE,
+  MIN_TEAM_SIZE, poolSettingsError,
 } from './competition_shape.jsx';
 import { seededRanks } from './admin_helpers.jsx';
 
@@ -677,6 +677,35 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   const courtsErr = window.shiaijoPickerError(local.format, local.courts, courtsChanged, (tournament.courts || []).length);
   const savedCourtsErr = window.resolvedShiaijoCountError(c.format, savedCourts, tournament.courts);
   const blockingCourtsErr = !!courtsErr && (courtsChanged || formatChanged);
+
+  // Same shape as the courts trio directly above, for the same reproduced
+  // failure: normalizePoolConfig (handlers_competition.go) zeroes poolSize/
+  // poolWinners on every stored league/playoffs competition, and
+  // normalizeConfigForFormat only clears those fields on the way OUT of
+  // "mixed" -- flipping a stored playoffs competition (poolSize: 0,
+  // poolWinners: 0) back INTO "mixed" here is a no-op for them. So
+  // poolSettingsErr is computed against local.format, not c.format: toggling
+  // the "Pools + Knockout" pill flips it non-null on its own, with no pool
+  // field touched, which is exactly that case.
+  //
+  // Save is gated on `(formatChanged || poolFieldsChanged)`, not on the bare
+  // error, following savedCourtsErr's rule immediately below: a competition
+  // that ALREADY stores an invalid combination (hand-edited config.md, or one
+  // saved before this guard existed) must stay editable for every unrelated
+  // field -- name, date, durations, check-in. Locking the operator out of the
+  // whole form because of a pool-size value they never touched this session
+  // is the one outcome this must not cause.
+  //
+  // The concrete failure this closes: before this guard, switching a stored
+  // playoffs competition to "mixed" left "Players per pool" showing 0, both
+  // Save buttons enabled, and a click took an HTTP 400 whose raw server
+  // string ("mixed format requires a pool size of at least 1") reached the
+  // operator verbatim -- while the create form already refused the identical
+  // combination client-side with the friendlier copy poolSettingsError
+  // returns.
+  const poolFieldsChanged = local.poolSize !== c.poolSize || local.poolWinners !== c.poolWinners;
+  const poolSettingsErr = poolSettingsError(local.format, local.poolSize, local.poolWinners);
+  const blockingPoolSettingsErr = !!poolSettingsErr && (formatChanged || poolFieldsChanged);
   // The mechanism sentence is dropped from the standing hint while the red
   // error is on screen: the error states it one line above, and printing it
   // twice buries the part that changes (which counts to pick).
@@ -700,7 +729,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // an invalid shiaijo count the header button greyed out while the footer
   // one stayed live, fired the PUT and took a 400. Anything that should block
   // saving belongs here, never at a call site.
-  const saveDisabled = !isDirty || saving || hasDurationError || blockingCourtsErr;
+  const saveDisabled = !isDirty || saving || hasDurationError || blockingCourtsErr || blockingPoolSettingsErr;
 
   // The blocking message and its precedence, shared by the header chip and the
   // footer for the same reason saveDisabled is: the footer used to restate the
@@ -716,7 +745,12 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     : hasDurationError ? "⚠ Fix match duration"
       // "allocation", not "count": courtsErr also covers a selection with
       // nothing in it, which is not a counting problem.
-      : blockingCourtsErr ? "⚠ Fix shiaijo allocation" : "";
+      : blockingCourtsErr ? "⚠ Fix shiaijo allocation"
+        // Unlike the courts arm above, poolSettingsErr already names the
+        // field and the exact rule (e.g. "Players per pool must be a whole
+        // number ≥ 3."), so it is printed directly rather than behind a
+        // fixed short label.
+        : blockingPoolSettingsErr ? `⚠ ${poolSettingsErr}` : "";
   const saveBlocked = !!saveBlockMessage;
 
   return (
@@ -1073,6 +1107,29 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
               )}
             </div>
           </div>
+          {/* Rendered for ANY invalid poolSize/poolWinners, staged or already
+              saved, mirroring courtsErr's own rule above (see the
+              ShiaijoCountNotes comment at ~line 990): the field must never
+              look fine while a Save would 400, even before this session
+              touched it. Save itself is gated on the narrower
+              blockingPoolSettingsErr (a CHANGE to an invalid combination),
+              not on this.
+
+              Wrapped in a `.field` rather than dropped in bare. FieldError
+              carries no spacing of its own by design (see its comment in
+              ui.jsx: spacing is the container's job, and a style prop is the
+              crack per-site drift returns through), so as a bare sibling of
+              the .row above it rendered flush against the "Pool match
+              duration" label below and read as that field's error instead of
+              this row's. `.field`'s own margin-bottom is the sanctioned way
+              to separate it. Full width under BOTH inputs, not inside either
+              one: the message names whichever of the two is wrong, and the
+              .row is a two-column grid that would wrap it to half width. */}
+          {poolSettingsErr && (
+            <div className="field">
+              <window.FieldError>{poolSettingsErr}</window.FieldError>
+            </div>
+          )}
 
           {/* Knockout qualifiers (bc-qual LP-5a): only meaningful under
               minimum-players-per-pool sizing (poolSizeMode === "min"); see

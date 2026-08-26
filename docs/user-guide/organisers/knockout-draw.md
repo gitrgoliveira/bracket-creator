@@ -4,13 +4,13 @@ In a competition with a pool phase, the knockout bracket is not redrawn once the
 
 This page explains how those slots are worked out, so you can check a draw before you publish it and answer questions about it at the desk.
 
-It describes the **Mixed** format, pools followed by a knockout. A knockout-only competition has no pool finishers to place, so it seeds competitors into the bracket directly; the shiai-jo pages and the [shiai-jo count rule](#how-many-shiai-jo-a-competition-can-use) below still apply to it.
+It describes the **Pools + Knockout** format, pools followed by a knockout. A **Knockout only** competition has no pool finishers to place, so it seeds competitors into the bracket directly; the shiai-jo pages and the [shiai-jo count rule](#how-many-shiai-jo-a-competition-can-use) below still apply to it.
 
 ## How many qualify from each pool
 
 Everything below this section assumes you already know how many competitors each pool sends up. This section is about where that number comes from.
 
-By default, every pool sends the same number of qualifiers, set by **Winners per pool** in competition setup. When pool size is set to a **minimum** number of players rather than a maximum, so pools can come out different sizes, two further options let some pools send an extra qualifier instead of leaving the difference as byes. Choose between the three under **Knockout qualifiers**, which only appears for **Mixed** competitions under that pool-size setting. See [Knockout qualifiers](run-tournament.md#knockout-qualifiers) for where this lives in the app.
+By default, every pool sends the same number of qualifiers, set by **Winners per pool** in competition setup. When pool size is set to a **minimum** number of players rather than a maximum, so pools can come out different sizes, two further options let some pools send an extra qualifier instead of leaving the difference as byes. Choose between the three under **Knockout qualifiers**, which only appears for **Pools + Knockout** competitions under that pool-size setting. See [Knockout qualifiers](run-tournament.md#knockout-qualifiers) for where this lives in the app.
 
 ### Standard
 

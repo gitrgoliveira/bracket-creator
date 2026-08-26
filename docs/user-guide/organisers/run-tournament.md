@@ -107,17 +107,19 @@ Three rules govern when a setting stops being editable:
   already exist by then, so neither can be changed after the fact.
 - **Once participants are loaded**, the competition type locks separately and
   earlier than everything else. Individual and team rosters are not
-  interchangeable, so clear the participant list first if you need to switch.
+  interchangeable. To switch, clear the paste box in the **Participant list**
+  panel and click **Apply changes**, as described in
+  [Adding participants](#adding-participants).
 
 Changing the format clears the settings that only apply to the format you left
-behind. Switching a pools competition to a league, for example, drops the pool
-size and the number of qualifiers, because a league has no pool phase to size.
+behind. Switching a **Pools + Knockout** competition to a **League**, for
+example, drops **Players per pool**, **Winners per pool**, and **Knockout
+qualifiers**, because a league has no pool phase to size.
 
 Nothing is cleared while you are still deciding. When you pick a different
 format, a note appears under the control listing each setting the save will
 clear, with its current value, so you can see the cost before you commit.
-Switching back to the original format keeps them. The settings are only dropped
-when you save.
+Switching back to the original format keeps them.
 
 ### Assigning shiai-jo
 
@@ -129,7 +131,7 @@ Assign **1, 2, 4, 8 or 16 shiai-jo**. The knockout draw gives each shiai-jo its 
 
 A competition also cannot end up with a count the rule does not allow by inheriting one. If you create a competition without choosing its shiai-jo, it starts from the venue's list, and that inherited list is checked in exactly the same way, so on a three shiai-jo venue you are asked to pick 1 or 2 rather than being handed all three.
 
-The rule applies only to the formats that produce a knockout bracket, which are playoffs and mixed. League and Swiss competitions have no bracket to merge, so they can use any number of shiai-jo the tournament has.
+The rule applies only to the formats that produce a knockout bracket, which are **Knockout only** and **Pools + Knockout**. League and Swiss competitions have no bracket to merge, so they can use any number of shiai-jo the tournament has.
 
 #### If you assign more shiai-jo than the competition has pools
 
@@ -149,7 +151,7 @@ What you cannot do is draw or start it. **Generate draw** and **Start competitio
 
 ### Knockout qualifiers
 
-For a **Mixed** competition with **Pool size is a** set to **minimum**, a **Knockout qualifiers** control appears alongside **Players per pool** and **Winners per pool**, on both the competition create form and its Settings page. It offers three options: **Standard** (every pool sends the same number of qualifiers), **Oversized send +1**, and **Fit the knockout**. See [How many qualify from each pool](knockout-draw.md#how-many-qualify-from-each-pool) for what each one does, with worked examples.
+For a **Pools + Knockout** competition with **Pool size is a** set to **minimum**, a **Knockout qualifiers** control appears alongside **Players per pool** and **Winners per pool**, on both the competition create form and its Settings page. It offers three options: **Standard** (every pool sends the same number of qualifiers), **Oversized send +1**, and **Fit the knockout**. See [How many qualify from each pool](knockout-draw.md#how-many-qualify-from-each-pool) for what each one does, with worked examples.
 
 Selecting either of the two non-standard options sets **Winners per pool** to 1 and disables the field, because both currently require it; switching back to Standard makes the field editable again. Below the options, a preview line updates as you adjust pool size and roster, reading something like "34 pools -> 36 qualifiers -> 64-slot knockout (28 byes)" for whichever option is selected. On the create form the preview is a placeholder until the competition has participants; on the Settings page it previews against the real roster, and is locked once the competition reaches `draw-ready`, alongside the rest of the pool configuration.
 
@@ -190,7 +192,7 @@ The check-in rule is opt-in: when you click **Generate draw**, if at least one p
 
 Click **Generate draw** to produce the bracket. The competition enters `draw-ready` status and shows an interactive preview:
 
-- Pools competitions show pool assignments.
+- **Pools + Knockout** competitions show pool assignments.
 - Knockout competitions show the bracket tree.
 - Swiss competitions show round 1.
 
@@ -232,7 +234,7 @@ The public viewer shows a competition's podium when it finishes, and a provision
 
 - **Kendo knockout** (default): 1st place, 2nd place, and two equal 3rd places. There is no bronze match; both semi-final losers share third.
 - **Naginata**: a single 3rd place is decided by a bronze match. See [Naginata](naginata.md) for naginata-specific configuration.
-- **Mixed format** (still in its pool phase): the viewer shows a provisional cross-pool ranking until the knockout decides the final places.
+- **Pools + Knockout** (still in its pool phase): the viewer shows a provisional cross-pool ranking until the knockout decides the final places.
 
 Operators see an all-competition winners view from the dashboard. You can also record optional **fighting-spirit** (敢闘賞) awards as free text; these appear on the viewer for all spectators. Saving awards requires the destructive-ops password in self-run mode; see [Operating modes](operating-modes.md#destructive-ops-password).
 

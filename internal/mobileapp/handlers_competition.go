@@ -244,6 +244,19 @@ func normalizePoolConfig(comp *state.Competition) {
 // poolSize is actually CHANGING, so a competition already carrying this
 // combination (hand-edited config.md, or one saved before this guard
 // existed) stays editable for unrelated fields.
+//
+// The <= 0 threshold here is DELIBERATELY looser than the client's: both
+// admin_setup.jsx and admin_competition_settings.jsx refuse a "Players per
+// pool" value below 3 (poolSettingsError, web-mobile/js/
+// competition_shape.jsx) before a save ever reaches this handler. The gap
+// is intentional, not a mismatch to close -- 3 is a UI-only PRODUCT floor
+// (the smallest pool a round-robin is worth running), while this function
+// stays at the engine's actual functional minimum ("pool size must be at
+// least 1", internal/engine/pools.go) so a hand-edited config.md or an
+// imported competition is not retroactively rejected by a rule the client
+// invented for its own form, not one the draw itself needs. A maintainer
+// tightening this bound to match the client's 3 should re-read
+// poolSettingsError's comment first: the two are meant to stay apart.
 func validateMixedPoolSize(comp *state.Competition) error {
 	if comp.Format == state.CompFormatMixed && comp.PoolSize <= 0 {
 		return fmt.Errorf("mixed format requires a pool size of at least 1")
@@ -1179,6 +1192,27 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					return current, nil
 				}
 
+				// formatChanged / kindChanged: the same "is this PUT actually
+				// changing Format / Kind?" question this closure used to spell
+				// out independently at every guard that cares (the draw-ready
+				// output-affecting set, the courts-format re-check, the
+				// mixed-pool-size re-check, the started-state 409, and the
+				// illegal-Kind check) -- mirrors this file's own
+				// formatChanged/courtsChanged hoisting in
+				// admin_competition_settings.jsx, which exists for the same
+				// reason: two independent spellings of the same question are
+				// how one of them ends up answering differently. Safe to
+				// compute here, ahead of every guard below: unlike TeamMatchType
+				// and ExtraQualifiers (inherited from `current` just below when
+				// the client omits them), neither Format nor Kind has an
+				// inherit-if-omitted step anywhere in this closure -- comp.Format
+				// and comp.Kind are compared against current.Format/current.Kind
+				// as-sent, all the way down to the current.Format = comp.Format /
+				// current.Kind = comp.Kind merge far below, so the answer cannot
+				// change between here and there.
+				formatChanged := comp.Format != current.Format
+				kindChanged := comp.Kind != current.Kind
+
 				// Settings-only PUT (Players field absent in body).
 				// Team match format (FR-044) wire contract, applied BEFORE the
 				// draw-ready guard below so both it and the started guard
@@ -1305,12 +1339,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 							// in the same output-affecting set.
 							comp.ExtraQualifiers != current.ExtraQualifiers ||
 							courtsChanged ||
-							comp.Format != current.Format ||
+							formatChanged ||
 							comp.PoolFormat != current.PoolFormat ||
 							comp.RoundRobin != current.RoundRobin ||
 							comp.Mirror != current.Mirror ||
 							comp.TeamSize != current.TeamSize ||
-							comp.Kind != current.Kind ||
+							kindChanged ||
 							// TeamMatchType selects fixed vs kachinuki bout sequencing; changing
 							// it after draw-ready desyncs the match structure from config.
 							// sameTeamMatchType is the normalized effective-value comparison
@@ -1402,7 +1436,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// a fourth one would reach POST and the importer but not this
 				// path. The label check inside it is redundant (line 823 ran it
 				// on this same list) and idempotent.
-				if courtsChanged || comp.Format != current.Format {
+				if courtsChanged || formatChanged {
 					if err := validateCompetitionCourts(comp.Courts, comp.Format, putTourn); err != nil {
 						validationErr = fmt.Errorf("courts: %w", err)
 						return nil, nil
@@ -1417,7 +1451,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// combination (hand-edited config.md, or one saved before this
 				// guard existed) must stay editable for unrelated fields, or
 				// the operator is locked out of settings entirely.
-				if comp.Format != current.Format || comp.PoolSize != current.PoolSize {
+				if formatChanged || comp.PoolSize != current.PoolSize {
 					if err := validateMixedPoolSize(&comp); err != nil {
 						validationErr = err
 						return nil, nil
@@ -1474,12 +1508,13 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// set above, so a started-state conflict on them is that same
 				// class of refusal.
 				//
-				// Gated on an actual CHANGE, like every guard in this handler:
-				// the SPA echoes the stored format/kind back unchanged on every
-				// single settings save (it has had no editors for either field
-				// until now), so an unconditional reject here would 409 every
-				// save on a started competition.
-				if started && (comp.Format != current.Format || comp.Kind != current.Kind) {
+				// Gated on an actual CHANGE, like every guard in this handler: a
+				// settings save that leaves format/kind untouched (the common
+				// case even now that both screens have Format/Kind editors --
+				// the SPA always PUTs the full config, including fields the
+				// operator did not touch this save) must not 409 just because
+				// the competition happens to be started.
+				if started && (formatChanged || kindChanged) {
 					formatOrKindStartedFlag = true
 					return nil, nil
 				}
@@ -1508,7 +1543,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// caller's own new input, so it is judged normally, ahead
 				// of the started-state 409 above having already ruled out
 				// the "started and changing" case.
-				if comp.Kind != current.Kind {
+				if kindChanged {
 					if err := state.ValidateCompetitionKind(comp.Kind); err != nil {
 						validationErr = fmt.Errorf("kind: %w", err)
 						return nil, nil

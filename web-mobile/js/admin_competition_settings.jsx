@@ -34,9 +34,12 @@ import {
   LABEL_PLAYOFF_DURATION, HINT_PLAYOFF_DURATION,
   poolDurationLabel, poolDurationHint, poolDurationVisible, playoffDurationVisible,
   LABEL_TWO_THIRD_PLACES, HINT_TWO_THIRD_PLACES,
+  LABEL_POOL_SIZE, LABEL_POOL_WINNERS, LABEL_EXTRA_QUALIFIERS,
+  LABEL_TEAM_SIZE, LABEL_TEAM_MATCH_TYPE, TEAM_MATCH_TYPE_OPTIONS,
+  LABEL_ZEKKEN, LABEL_ENGI,
   teamFieldsVisible, zekkenApplies, engiApplies,
   normalizeConfigForFormat, normalizeConfigForKind, kindChangeBlockedReason,
-  FORMAT_LEAGUE, POOL_FORMAT_FULL,
+  FORMAT_LEAGUE, FORMAT_MIXED, POOL_FORMAT_FULL, POOL_FORMAT_PARTIAL,
   MIN_TEAM_SIZE, poolSettingsError, pendingConfigClears,
 } from './competition_shape.jsx';
 import { seededRanks } from './admin_helpers.jsx';
@@ -67,35 +70,39 @@ export function formatCompMinutes(m) {
 // comment explains why -- it owns the RULE, this screen owns the RENDER),
 // so the label copy belongs with the renderer.
 //
-// These strings are duplicated from this file's own inline field labels
-// below (grep them: "Players per pool", "Winners per pool", "Team size",
-// "Team match format", "Knockout qualifiers", "Use Zekken display name",
-// "Engi (kata competition)") rather than sourced from a shared constant,
-// because most of those labels are literals inline in JSX, not exports --
-// the bc-symm parity guard (competition_shape.test.jsx) only asserts on
-// competition_shape.jsx's own exports, so a drift between this map and the
-// live label below it would not be caught there. Where a label below is a
-// literal, this map's constant is used at BOTH sites so the string has one
-// home in this file; check each entry against what the field actually
-// renders before changing either one.
+// Every value below is one of competition_shape.jsx's own LABEL_* exports
+// (LABEL_POOL_SIZE, LABEL_POOL_WINNERS, LABEL_EXTRA_QUALIFIERS,
+// LABEL_TEAM_SIZE, LABEL_TEAM_MATCH_TYPE, LABEL_ENGI, LABEL_ZEKKEN), the
+// same constants this file's own field <label>s render below -- so the
+// string has exactly one home, and the bc-symm parity guard
+// (competition_parity.test.jsx) covers it the ordinary way, by asserting
+// admin_setup.jsx and this file both import the same LABEL_* names. This
+// map exists only to go from a pendingConfigClears KEY (e.g. "poolSize")
+// to the label constant naming that field; it carries no copy of its own.
 const CLEARED_FIELD_LABELS = {
-  poolSize: "Players per pool",
-  poolWinners: "Winners per pool",
-  extraQualifiers: "Knockout qualifiers",
-  teamSize: "Team size",
-  teamMatchType: "Team match format",
-  engi: "Engi (kata competition)",
-  withZekkenName: "Use Zekken display name",
+  poolSize: LABEL_POOL_SIZE,
+  poolWinners: LABEL_POOL_WINNERS,
+  extraQualifiers: LABEL_EXTRA_QUALIFIERS,
+  teamSize: LABEL_TEAM_SIZE,
+  teamMatchType: LABEL_TEAM_MATCH_TYPE,
+  engi: LABEL_ENGI,
+  withZekkenName: LABEL_ZEKKEN,
 };
 
 // Human-readable rendering of a cleared field's CURRENT (about-to-be-lost)
 // value. Booleans read "on" (pendingConfigClears only ever reports a
 // truthy boolean -- see its "meaningful" filter -- so "off" is never
-// reached here). teamMatchType gets its pill copy rather than the raw wire
-// value ("kachinuki"/"fixed"); everything else prints as-is.
+// reached here). teamMatchType gets its pill copy (TEAM_MATCH_TYPE_OPTIONS,
+// competition_shape.jsx) rather than the raw wire value ("kachinuki"/
+// "fixed"); everything else prints as-is. The fallback to
+// TEAM_MATCH_TYPE_OPTIONS[0] (Regular/"fixed") mirrors the original
+// ternary's catch-all: any value other than exactly "kachinuki" -- "fixed",
+// legacy "", or an unrecognised string -- reads as Regular.
 function formatClearedValue(key, value) {
   if (typeof value === "boolean") return "on";
-  if (key === "teamMatchType") return value === "kachinuki" ? "Kachinuki (winner stays on)" : "Regular";
+  if (key === "teamMatchType") {
+    return (TEAM_MATCH_TYPE_OPTIONS.find((o) => o.value === value) || TEAM_MATCH_TYPE_OPTIONS[0]).label;
+  }
   return String(value);
 }
 
@@ -352,7 +359,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       Number.isFinite(v) && Number.isInteger(v) && v >= 0 ? v : fallback;
 
     // The ONE place normalization runs now. It used to run on the
-    // Format/Kind pill tap itself (updateFormat/updateKind staged
+    // Format/Kind pill's onClick itself (staging
     // normalizeConfigForFormat/normalizeConfigForKind's result straight
     // into `local`), which meant the operator's real values were
     // overwritten before Save was ever clicked: reproduced on a stored
@@ -590,41 +597,13 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     if (clashWarnings) setClashWarnings(null);
   };
 
-  // Stages ONLY the format itself. Normalization used to run here too --
-  // updateFormat called normalizeConfigForFormat and immediately staged its
-  // poolSize/poolWinners/extraQualifiers straight into `local` -- and that
-  // quietly destroyed operator data. Reproduced on a stored mixed
-  // competition (poolSize: 4, poolWinners: 2): tapping "Knockout only"
-  // staged poolSize/poolWinners: 0, and tapping "Pools + Knockout" to go
-  // straight back was a NO-OP for those fields (normalizeConfigForFormat
-  // only clears them on the way OUT of "mixed" -- see its own comment), so
-  // two taps that cancelled out on `format` left "Players per pool"
-  // showing 0, Save blocked by poolSettingsError, and the operator's real
-  // values gone with no control on screen able to bring them back.
-  //
-  // Operator ruling: a config change must never quietly overwrite or
-  // delete the operator's data -- it must SURFACE what will happen and let
-  // the operator decide. Normalization now runs exactly once, at the PUT
-  // payload boundary in saveNow (see that function's `shaped` comment);
-  // pendingConfigClears (competition_shape.jsx), rendered below the
-  // Format/Kind controls, tells the operator what THAT save would clear.
-  const updateFormat = (fmt) => {
-    update("format", fmt);
-  };
-
-  // Stages ONLY the kind itself, for the identical reason updateFormat
-  // does now -- see that comment for the reproduced round-trip failure and
-  // the operator ruling behind it. This used to re-stage teamSize/
-  // teamMatchType/engi/withZekkenName via normalizeConfigForKind on every
-  // tap (see normalizeConfigForKind's own comment for the field-by-field
-  // rationale for why each one mattered), which meant a team ->
-  // individual -> team round trip could destroy the operator's team size
-  // the same way the format flip destroyed pool sizing. Normalization now
-  // runs once, at the PUT payload boundary in saveNow; pendingConfigClears
-  // tells the operator what that save would clear.
-  const updateKind = (kind) => {
-    update("kind", kind);
-  };
+  // The Format and Kind pills below call `update("format", ...)` /
+  // `update("kind", ...)` directly -- staging ONLY the field itself, never
+  // re-normalizing on the tap. See normalizeConfigForFormat's and
+  // normalizeConfigForKind's own doc comments (competition_shape.jsx) for
+  // why that matters: this file used to run normalization straight from
+  // the pill's onClick and it quietly destroyed operator data on a
+  // round-trip flip. Do not reintroduce a normalizing wrapper here.
 
   // Duration handler for the m:ss DurationInput. Stages the canonical seconds
   // value, which is the only duration representation the API carries.
@@ -980,7 +959,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
               key={o.value}
               className={`radio-pill ${local.kind === o.value ? "is-active" : ""}`}
               type="button"
-              onClick={() => updateKind(o.value)}
+              onClick={() => update("kind", o.value)}
               disabled={isDrawReady || isStarted || !!kindLockReason}
             >{o.label}</button>
           ))}
@@ -1001,8 +980,9 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           {/* not 1, whenever it's visible at all (team-only, see */}
           {/* teamFieldsVisible above). */}
           {/* Render NaN as "" so clearing the input stays empty instead of */}
-          {/* collapsing to "0"; saveNow's safeInt guard means a */}
-          {/* cleared/invalid value never lands on the backend as 0. */}
+          {/* collapsing to "0"; saveNow's safeNonNegInt guard means a */}
+          {/* cleared/invalid value falls back to the last-saved teamSize */}
+          {/* rather than landing on the backend as a clobbering 0. */}
           {/* draw-ready lock: teamSize is output-affecting. */}
           <input
             className="input"
@@ -1023,18 +1003,23 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
               structure from config, and flipping it on a STARTED comp would
               desync recorded bouts from the scoring paradigm (server 409s). */}
           <div className="radio-group">
-            <button
-              className={`radio-pill ${local.teamMatchType !== "kachinuki" ? "is-active" : ""}`}
-              type="button"
-              onClick={() => update("teamMatchType", "fixed")}
-              disabled={isDrawReady || isStarted}
-            >Regular</button>
-            <button
-              className={`radio-pill ${local.teamMatchType === "kachinuki" ? "is-active" : ""}`}
-              type="button"
-              onClick={() => update("teamMatchType", "kachinuki")}
-              disabled={isDrawReady || isStarted}
-            >Kachinuki (winner stays on)</button>
+            {/* Active check is asymmetric ON PURPOSE, not a plain o.value ===
+                local.teamMatchType: local.teamMatchType can be a legacy/
+                stored value that is neither exactly "fixed" nor "kachinuki"
+                (see normalizeConfigForKind's own comment on the legacy ""
+                sentinel), and this field defaults to Regular in that case --
+                mirroring ValidateTeamMatchType's own "" == fixed reading.
+                Only the "kachinuki" option is checked for an exact match;
+                "fixed" is active whenever the stored value is anything else. */}
+            {TEAM_MATCH_TYPE_OPTIONS.map((o) => (
+              <button
+                key={o.value}
+                className={`radio-pill ${(o.value === "kachinuki" ? local.teamMatchType === "kachinuki" : local.teamMatchType !== "kachinuki") ? "is-active" : ""}`}
+                type="button"
+                onClick={() => update("teamMatchType", o.value)}
+                disabled={isDrawReady || isStarted}
+              >{o.label}</button>
+            ))}
           </div>
           <div className="field__hint">
             {teamMatchTypeHint(local.teamMatchType === "kachinuki")}{(isDrawReady || isStarted) ? " Locked after draw." : ""}
@@ -1057,7 +1042,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
               key={o.value}
               className={`radio-pill ${local.format === o.value ? "is-active" : ""}`}
               type="button"
-              onClick={() => updateFormat(o.value)}
+              onClick={() => update("format", o.value)}
               disabled={isDrawReady || isStarted}
             >{o.label}</button>
           ))}
@@ -1158,7 +1143,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             drop it. Same component as the create form, which has to render
             both notes identically. */}
         <window.ShiaijoCountNotes error={courtsErr} hint={courtsHint} />
-        {(local.format === "league" || local.poolFormat === "partial") ? (() => {
+        {(local.format === FORMAT_LEAGUE || local.poolFormat === POOL_FORMAT_PARTIAL) ? (() => {
           const playerCount = (c.players || []).length;
           const ct = (n) => n === 1 ? "1 court" : `${n} courts`;
           const pt = (n) => n === 1 ? "1 player" : `${n} players`;
@@ -1178,7 +1163,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           <div className="field__hint">Concurrency = number of shiaijo assigned. Schedule prevents double-booking with other competitions.</div>
         )}
       </div>
-      {local.format === "mixed" && (
+      {local.format === FORMAT_MIXED && (
         <>
           <div className="field">
             <label className="field__label">Pool size is a</label>

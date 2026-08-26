@@ -129,6 +129,9 @@ import {
   LABEL_PLAYOFF_DURATION, HINT_PLAYOFF_DURATION,
   poolDurationLabel, poolDurationHint, poolDurationVisible, playoffDurationVisible,
   LABEL_TWO_THIRD_PLACES, HINT_TWO_THIRD_PLACES, twoThirdPlacesVisible,
+  LABEL_POOL_SIZE, LABEL_POOL_WINNERS, LABEL_EXTRA_QUALIFIERS,
+  LABEL_TEAM_SIZE, LABEL_TEAM_MATCH_TYPE, TEAM_MATCH_TYPE_OPTIONS,
+  LABEL_ZEKKEN, LABEL_ENGI,
   teamFieldsVisible, zekkenApplies, engiApplies,
   MIN_TEAM_SIZE, poolSettingsError,
 } from './competition_shape.jsx';
@@ -1301,7 +1304,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
                 {/* owns both thresholds, shared with the Settings screen; the */}
                 {/* submit-time guard at create() rejects NaN/<min before */}
                 {/* passing to buildCompetition. */}
-                <div className="field"><label className="field__label">Players per pool</label><input
+                <div className="field"><label className="field__label">{LABEL_POOL_SIZE}</label><input
                   className="input"
                   type="number"
                   min="3"
@@ -1310,7 +1313,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
                   onChange={(e) => setPoolSize(decideNumericUpdate(e.target.value, 3).value)}
                 /></div>
                 <div className="field">
-                  <label className="field__label">Winners per pool</label>
+                  <label className="field__label">{LABEL_POOL_WINNERS}</label>
                   <input
                     className="input"
                     type="number"
@@ -1332,7 +1335,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
                   operator ruling: no federation names anywhere in this UI. */}
               {extraQualifiersRadioVisible(format, poolMode) && (
                 <div className="field">
-                  <label className="field__label">Knockout qualifiers</label>
+                  <label className="field__label">{LABEL_EXTRA_QUALIFIERS}</label>
                   <div className="radio-group">
                     <button
                       className={`radio-pill ${extraQualifiers === EXTRA_QUALIFIERS_STANDARD ? "is-active" : ""}`}
@@ -1372,7 +1375,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
 
           {teamFieldsVisible(kind) && (
             <div className="field">
-              <label className="field__label">Team size</label>
+              <label className="field__label">{LABEL_TEAM_SIZE}</label>
               {/* Non-debounced input: uses onChange directly, not StableInput. */}
               {/* StableInput debounces 200ms; if the user clears the field and */}
               {/* immediately clicks "Create", the parent teamSize would still */}
@@ -1393,10 +1396,22 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
 
           {teamFieldsVisible(kind) && (
             <div className="field">
-              <label className="field__label">Team match format</label>
+              <label className="field__label">{LABEL_TEAM_MATCH_TYPE}</label>
               <div className="radio-group">
-                <button className={`radio-pill ${teamMatchType === "fixed" ? "is-active" : ""}`} type="button" onClick={() => setTeamMatchType("fixed")}>Regular</button>
-                <button className={`radio-pill ${teamMatchType === "kachinuki" ? "is-active" : ""}`} type="button" onClick={() => setTeamMatchType("kachinuki")}>Kachinuki (winner stays on)</button>
+                {/* Plain o.value === teamMatchType equality is safe here (unlike
+                    the settings screen's asymmetric check): teamMatchType is
+                    local component state initialised to "fixed" and only ever
+                    set to one of TEAM_MATCH_TYPE_OPTIONS' own values below, so
+                    it can never hold a third/legacy value the way a loaded
+                    competition record can. */}
+                {TEAM_MATCH_TYPE_OPTIONS.map((o) => (
+                  <button
+                    key={o.value}
+                    className={`radio-pill ${teamMatchType === o.value ? "is-active" : ""}`}
+                    type="button"
+                    onClick={() => setTeamMatchType(o.value)}
+                  >{o.label}</button>
+                ))}
               </div>
               <div className="field__hint">
                 {teamMatchTypeHint(teamMatchType === "kachinuki")}
@@ -1419,7 +1434,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
 
           {zekkenApplies(kind) && (
             <div className="field">
-              <label className="checkbox"><input type="checkbox" checked={withZekken} onChange={(e) => setWithZekken(e.target.checked)} /> Use Zekken display name</label>
+              <label className="checkbox"><input type="checkbox" checked={withZekken} onChange={(e) => setWithZekken(e.target.checked)} /> {LABEL_ZEKKEN}</label>
               <div className="field__hint" style={{ marginTop: 4 }}>When enabled, participant CSV uses three columns: Name, Zekken, Dojo.</div>
             </div>
           )}
@@ -1431,7 +1446,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
 
           {engiApplies(kind) && (
             <div className="field">
-              <label className="checkbox"><input type="checkbox" checked={engi} onChange={(e) => setEngi(e.target.checked)} /> Engi (kata competition)</label>
+              <label className="checkbox"><input type="checkbox" checked={engi} onChange={(e) => setEngi(e.target.checked)} /> {LABEL_ENGI}</label>
               <div className="field__hint" style={{ marginTop: 4 }}>Flag-count scoring for Engi-Kyogi pairs. Enter each pair as one participant: Name 1 - Name 2, Dojo.</div>
             </div>
           )}

@@ -59,10 +59,12 @@ export const POOL_FORMAT_PARTIAL = "partial";
 // qualifier_preview.jsx).
 
 // KIND_OPTIONS / LABEL_KIND: verbatim from admin_setup.jsx's "Competition
-// type" pills (the only surface that renders a kind selector today --
-// admin_competition_settings.jsx reads local.kind to gate other fields but
-// never lets the operator change it; kindChangeBlockedReason below exists
-// for a later phase to add that control there).
+// type" pills. admin_competition_settings.jsx renders the identical pills
+// (disabled once isDrawReady || isStarted || kindChangeBlockedReason(...)
+// is truthy, since an existing roster can't be reshaped in place -- see
+// kindChangeBlockedReason below), which is exactly the parity this module
+// exists to hold: both screens import KIND_OPTIONS/LABEL_KIND from here
+// rather than each keeping a second transcription of the pills' copy.
 export const LABEL_KIND = "Competition type";
 export const KIND_OPTIONS = [
   { value: KIND_INDIVIDUAL, label: "Individual" },
@@ -70,13 +72,12 @@ export const KIND_OPTIONS = [
 ];
 
 // FORMAT_OPTIONS / LABEL_FORMAT / formatHint: verbatim from admin_setup.jsx's
-// "Format" pills + the per-format hint line under them. Settings has no
-// format selector at all -- local.format is read everywhere on that screen
-// and staged nowhere (see that file's courtsErr comment) -- so these are
-// exercised by the create form only today; they are still exported from
-// here rather than left as literals because a later phase adding
-// kindChangeBlockedReason-style format-change support to Settings needs the
-// identical copy, not a second transcription of it.
+// "Format" pills + the per-format hint line under them.
+// admin_competition_settings.jsx renders the same pills (disabled once
+// isDrawReady || isStarted, since format is output-affecting the moment a
+// draw exists), so both screens import FORMAT_OPTIONS/LABEL_FORMAT/
+// formatHint from here instead of each carrying a second transcription of
+// the four format names and their hints.
 export const LABEL_FORMAT = "Format";
 export const FORMAT_OPTIONS = [
   { value: FORMAT_PLAYOFFS, label: "Knockout only", hint: "Direct single-elimination knockout." },
@@ -270,12 +271,36 @@ export function twoThirdPlacesVisible(format) {
 
 // --- Kind-gated fields (team size, team match format, zekken, engi) -----
 //
+// LABEL_TEAM_SIZE / LABEL_TEAM_MATCH_TYPE / TEAM_MATCH_TYPE_OPTIONS:
+// verbatim from admin_setup.jsx's "Team size" input and "Team match format"
+// pills; admin_competition_settings.jsx renders the identical field and
+// pills under the identical teamFieldsVisible gate immediately below.
+// TEAM_MATCH_TYPE_OPTIONS' value strings mirror state.TeamMatchTypeFixed /
+// ...Kachinuki (internal/state/models.go) byte-for-byte, same as this
+// file's other wire-value option lists; "fixed" is listed first because
+// that is the order both screens' pills have always rendered in (Regular,
+// then Kachinuki).
+export const LABEL_TEAM_SIZE = "Team size";
+export const LABEL_TEAM_MATCH_TYPE = "Team match format";
+export const TEAM_MATCH_TYPE_OPTIONS = [
+  { value: "fixed", label: "Regular" },
+  { value: "kachinuki", label: "Kachinuki (winner stays on)" },
+];
+
 // teamFieldsVisible: both surfaces gate "Team size" and "Team match
 // format" identically on kind === "team" (admin_setup.jsx:1370,1391;
 // admin_competition_settings.jsx:858,884).
 export function teamFieldsVisible(kind) {
   return kind === KIND_TEAM;
 }
+
+// LABEL_ZEKKEN / LABEL_ENGI: verbatim from admin_setup.jsx's "Use Zekken
+// display name" and "Engi (kata competition)" checkbox copy. Both screens
+// render the same two checkboxes -- see zekkenApplies/engiApplies just
+// below for the show-vs-disable split they DELIBERATELY keep local rather
+// than folding into these constants.
+export const LABEL_ZEKKEN = "Use Zekken display name";
+export const LABEL_ENGI = "Engi (kata competition)";
 
 // zekkenApplies / engiApplies: the RULE (zekken display names and engi
 // pairs are individual-only concepts), NOT a presentation instruction.
@@ -304,6 +329,21 @@ export function zekkenApplies(kind) {
 export function engiApplies(kind) {
   return kind === KIND_INDIVIDUAL;
 }
+
+// --- Pool sizing field labels (mixed format only) -----------------------
+//
+// LABEL_POOL_SIZE / LABEL_POOL_WINNERS / LABEL_EXTRA_QUALIFIERS: verbatim
+// from admin_setup.jsx's "Players per pool" / "Winners per pool" /
+// "Knockout qualifiers" <label> text, rendered by both screens under the
+// identical FORMAT_MIXED gate. These are the FIELD's own label, not the
+// "Knockout qualifiers" radio's per-option copy ("Standard" / "Oversized
+// send +1" / "Fit the knockout") -- that already lives in
+// qualifier_preview.jsx's extraQualifiersLabel/extraQualifiersHint (see
+// this file's header for why the split), so LABEL_EXTRA_QUALIFIERS only
+// carries the <label> above the radio, not what is on the pills inside it.
+export const LABEL_POOL_SIZE = "Players per pool";
+export const LABEL_POOL_WINNERS = "Winners per pool";
+export const LABEL_EXTRA_QUALIFIERS = "Knockout qualifiers";
 
 // --- poolSettingsError ----------------------------------------------------
 //
@@ -334,6 +374,17 @@ export function engiApplies(kind) {
 // of at least 1") reaches the operator verbatim -- while the create form
 // already blocks the identical combination client-side with the friendlier
 // copy below. This function closes that parity gap.
+//
+// The poolSize >= 3 floor here is DELIBERATELY stricter than the server's:
+// validateMixedPoolSize (internal/mobileapp/handlers_competition.go)
+// rejects only poolSize <= 0, and the engine's own bound is looser still
+// (internal/engine/pools.go: "pool size must be at least 1"). The gap is
+// intentional, not a drift to close -- 3 is a PRODUCT floor (the smallest
+// pool a round-robin is worth running), while the server stays at its
+// actual functional minimum so a hand-edited or imported config.md is not
+// retroactively made invalid by a UI-only rule it never agreed to. A
+// maintainer tightening either bound should re-read the other side's
+// comment first: they are meant to stay apart, not converge.
 export function poolSettingsError(format, poolSize, winners) {
   if (format !== FORMAT_MIXED) return null;
   if (!Number.isInteger(poolSize) || poolSize < 3) {
@@ -362,6 +413,22 @@ export function poolSettingsError(format, poolSize, winners) {
 // `poolMode`/`winnersPerPool` state vars to poolSizeMode/poolWinners on
 // construction -- by the time either screen holds a competition-shaped
 // object, the field is `poolWinners`).
+//
+// CALL THIS ONLY AT THE PAYLOAD BOUNDARY (AdminSettings.saveNow's
+// `shaped`), NEVER from a Format pill's onClick. It used to run from the
+// pill tap itself (the old `updateFormat` handler staged its result
+// straight into `local`), which quietly destroyed operator data:
+// reproduced on a stored mixed competition (poolSize: 4, poolWinners: 2)
+// by tapping "Knockout only" (stages poolSize/poolWinners: 0) and then
+// tapping "Pools + Knockout" to go straight back -- a NO-OP for those
+// fields going back INTO mixed, per this function's own "league / playoffs"
+// bullet below, which only clears them on the way OUT -- so two taps that
+// cancelled out on `format` left poolSize/poolWinners at 0 with no control
+// on screen able to recover them, and Save blocked by poolSettingsError.
+// If a future change is tempted to re-normalize on the control's onChange
+// again, re-read this paragraph first: pendingConfigClears exists
+// specifically so normalization can stay at the boundary and still warn
+// the operator ahead of Save, without needing to run early.
 //
 // - league / playoffs: PoolSize and PoolWinners are zeroed (no pool phase
 //   to size; league's single implicit pool and playoffs' bare bracket both
@@ -393,6 +460,19 @@ export function normalizeConfigForFormat(cfg) {
 // the kind they belong to, so an operator who flips kind cannot reach them
 // to fix what the flip invalidated -- but the surfaces still SEND their
 // stale values, and the server rejects every one of those pairings:
+//
+// CALL THIS ONLY AT THE PAYLOAD BOUNDARY (AdminSettings.saveNow's
+// `shaped`), NEVER from a Kind pill's onClick -- same rule as
+// normalizeConfigForFormat above, for the identical failure shape. The old
+// `updateKind` handler used to re-stage teamSize/teamMatchType/engi/
+// withZekkenName via this function on every tap, which meant a team ->
+// individual -> team round trip could destroy the operator's real team
+// size the same way the format flip destroyed pool sizing (see
+// normalizeConfigForFormat's comment for the reproduced case).
+// Normalization now runs once, at the PUT payload boundary;
+// pendingConfigClears tells the operator what that save is about to clear
+// before they commit to it. Do not re-add a call from either screen's
+// Kind-pill onClick.
 //
 //   teamSize       ValidateCompetitionTeamSize (state/models.go:891) rejects
 //                  team+<2 AND non-team+>0. Flipping team->individual leaves
@@ -467,10 +547,10 @@ export function normalizeConfigForKind(cfg) {
 // team rosters do not translate -- a team competition's name-uniqueness is
 // enforced only on write (not by any client-side structure), and
 // lineups.yaml is never revalidated against a roster that changed shape
-// out from under it. Neither surface has a kind-change control wired to a
-// roster today (create has no roster to conflict with; settings never
-// exposes kind as editable at all), so this predicate exists ahead of that
-// control for a later phase, per the task's required export surface.
+// out from under it. admin_competition_settings.jsx wires this in as
+// `kindLockReason`, OR'd with isDrawReady/isStarted to disable the Kind
+// pills (create has no roster yet to conflict with, so it never calls
+// this at all -- kind is freely switchable up to the moment of creation).
 //
 // Returns "" (free to change) when playerCount <= 0, or an operator-facing
 // reason naming the way out (clear the roster) otherwise. Any non-finite/

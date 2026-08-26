@@ -4,10 +4,16 @@ import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 
 // bc-symm Phase 5: pins the WIRING behind a review-round defect, already
 // fixed in competition_shape.jsx's `normalizeConfigForKind` (its own doc
-// comment has the full field-by-field rationale) and `AdminSettings`'s
-// `updateKind` handler (admin_competition_settings.jsx). The defect: flipping
-// `kind` on the Settings page used to stage a config the server rejects, with
-// no control left on screen to repair it before the operator hits Save.
+// comment has the full field-by-field rationale) and in
+// admin_competition_settings.jsx: the Kind pills stage the raw value via
+// `update("kind", ...)`, and `AdminSettings.saveNow` runs
+// normalizeConfigForKind(normalizeConfigForFormat(effective)) once, at the
+// PUT payload boundary, into a `shaped` value that teamSize/teamMatchType/
+// engi/withZekkenName are all read from (see saveNow's own comment on why
+// normalization moved to that one spot instead of running from a pill's
+// onClick). The defect: flipping `kind` on the Settings page used to stage
+// a config the server rejects, with no control left on screen to repair it
+// before the operator hits Save.
 //
 //   team -> individual left `teamSize: 5`, which ValidateCompetitionTeamSize
 //   rejects, while teamFieldsVisible had just HIDDEN the Team size input --
@@ -19,44 +25,34 @@ import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 // `normalizeConfigForKind` itself is pinned by unit tests in
 // competition_shape.test.jsx; those prove the FUNCTION is correct in
 // isolation. They do NOT prove the kind pills on the Settings page actually
-// CALL it -- a regression that re-wired the pills to a raw
-// `update("kind", ...)` (bypassing normalization entirely) would leave every
-// one of those unit tests green. This file closes that gap by driving the
-// real component: mount AdminSettings with a team(kachinuki) competition,
-// click the "Individual" pill, click Save, and assert the PUT payload the
-// operator's click actually produced carries the repaired
-// `teamMatchType: "fixed"` -- proving the wiring end to end, not just the
-// function in isolation.
+// feed it -- a regression that re-wired the pills to skip normalization at
+// the saveNow boundary would leave every one of those unit tests green.
+// This file closes that gap by driving the real component: mount
+// AdminSettings with a team(kachinuki) competition, click the "Individual"
+// pill, click Save, and assert the PUT payload the operator's click
+// actually produced carries the repaired values -- proving the wiring end
+// to end, not just the function in isolation.
 //
-// KNOWN GAP, reported rather than fixed here (out of this file's permitted
-// scope -- admin_competition_settings.jsx -- per this bead's Phase 5
-// instructions): the round-trip cannot currently also assert
-// `teamSize: 0` the same way. `AdminSettings.saveNow` builds the PUT body's
-// teamSize via `safeInt(effective.teamSize, latestC.teamSize)`
-// (admin_competition_settings.jsx, ~line 313), and safeInt's guard is
-// `v >= 1`. That floor exists to protect a CLEARED number input (NaN) from
-// clobbering the last-saved value on an unrelated save (see safeInt's own
-// comment) -- it predates normalizeConfigForKind and was never taught that a
-// kind flip can deliberately stage a legitimate `0`. The result: even when
-// updateKind correctly stages `local.teamSize = 0`, safeInt rejects that 0 as
-// "not a usable positive integer" and silently substitutes the STALE
-// `latestC.teamSize` back into the PUT body -- reproducing the exact defect
-// this bead's fix was supposed to close, one layer downstream of where the
-// fix lives. Confirmed live: mounting this component, clicking "Individual",
-// and clicking Save currently sends `teamSize: 5` (the stale value) to
-// `onUpdate`, not `0`. Confirmed NOT a wiring bug: pointing the kind pills at
-// a raw `update("kind", ...)` (bypassing normalizeConfigForKind entirely)
-// produces the exact same `teamSize: 5` in the payload -- because with the
-// wiring broken, `effective.teamSize` is simply the untouched original `5`,
-// which safeInt correctly lets through unchanged. Both the correctly-wired
-// and the incorrectly-wired code paths currently produce an IDENTICAL
-// `teamSize: 5` PUT body, for two different reasons -- so a `teamSize`
-// assertion here cannot currently distinguish "the wiring is correct" from
-// "the wiring is broken", and would not be a guard for either. teamMatchType
-// has no such collision (its merge is `effective.X || latestC.X || ""`, not
-// safeInt), which is why the assertion below uses it instead. See the PR /
-// task report for the suggested fix (a safeInt variant that allows 0 through
-// the way the sibling safeNonNegInt already does for the duration fields).
+// Both `teamMatchType: "fixed"` AND `teamSize: 0` are asserted below. That
+// was NOT always true, and the history is worth keeping: `teamMatchType`'s
+// merge (`shaped.teamMatchType || latestC.teamMatchType || ""`) let a
+// correctly staged "fixed" survive to the PUT body from the start, but
+// teamSize's merge used to be `safeInt(effective.teamSize, latestC.teamSize)`
+// with `safeInt`'s `v >= 1` floor -- a guard that predates
+// normalizeConfigForKind and was never taught that a kind flip can
+// deliberately stage a legitimate `0`. That floor discarded the staged `0`
+// and silently substituted the stale `latestC.teamSize` (5) back into the
+// PUT body, so a CORRECTLY wired kind flip and an INCORRECTLY wired one
+// (one that skipped normalization entirely, leaving `effective.teamSize`
+// untouched at 5) produced the exact same `teamSize: 5` PUT body, for two
+// different reasons -- a `teamSize` assertion could not have distinguished
+// "the wiring is correct" from "the wiring is broken" and would have
+// guarded neither. `teamMatchType` had no such collision, which is why the
+// assertion originally relied on it alone. What made `teamSize` assertable:
+// the serializer's teamSize merge was changed to `safeNonNegInt` (the `>= 0`
+// sibling of `safeInt`, already used for the duration fields and for
+// poolSize/poolWinners), so the legitimate `0` now survives to the wire and
+// 0 vs 5 discriminates the two cases the way `teamMatchType` always could.
 //
 // Harness copied from qualifier_settings_save.render.test.jsx (same
 // mount-through-AdminCompetition shape, AdminSettings is module-internal so
